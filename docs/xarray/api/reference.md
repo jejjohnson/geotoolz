@@ -1,3 +1,3 @@
 # API Reference
 
-::: mypackage
+::: xr_toolz
