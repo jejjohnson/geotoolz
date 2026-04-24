@@ -31,6 +31,13 @@ class CDSCredentials:
     key: str
 
 
+@dataclass(frozen=True)
+class AEMETCredentials:
+    """API key for AEMET OpenData."""
+
+    api_key: str
+
+
 def load_cmems(
     username: str | None = None,
     password: str | None = None,
@@ -77,6 +84,53 @@ def load_cds(
         k = parsed.get("key")
         if u and k:
             return CDSCredentials(url=u, key=k)
+
+    return None
+
+
+def load_aemet(
+    api_key: str | None = None,
+    path: Path | None = None,
+) -> AEMETCredentials | None:
+    """Load AEMET credentials, or ``None`` if none could be found.
+
+    Resolution order:
+
+    1. Explicit ``api_key`` argument.
+    2. ``AEMET_API_KEY`` environment variable.
+    3. ``.env`` file in the current working directory (one
+       ``AEMET_API_KEY=...`` line).
+    4. ``path`` (or ``~/.aemet``) parsed as a ``key: value`` config.
+
+    The ``.env`` step matches the most common local-dev workflow
+    without introducing a ``python-dotenv`` dependency — we parse the
+    single key we need and leave the file alone.
+    """
+    if api_key:
+        return AEMETCredentials(api_key=api_key)
+
+    env_key = os.environ.get("AEMET_API_KEY")
+    if env_key:
+        return AEMETCredentials(api_key=env_key)
+
+    # Walk up from CWD looking for ``.env``; matches how
+    # ``python-dotenv`` behaves so a notebook opened in ``docs/``
+    # still picks up the project-root ``.env``.
+    for candidate in (Path.cwd(), *Path.cwd().parents):
+        dotenv = candidate / ".env"
+        if dotenv.is_file():
+            parsed = _parse_kv(dotenv.read_text())
+            k = parsed.get("aemet_api_key")
+            if k:
+                return AEMETCredentials(api_key=k)
+            break
+
+    cfg = path or Path.home() / ".aemet"
+    if cfg.is_file():
+        parsed = _parse_kv(cfg.read_text())
+        k = parsed.get("api_key") or parsed.get("aemet_api_key")
+        if k:
+            return AEMETCredentials(api_key=k)
 
     return None
 

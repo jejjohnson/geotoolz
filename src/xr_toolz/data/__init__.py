@@ -8,21 +8,34 @@ just speaks the language of each underlying service.
 
 Exports:
 
-- :class:`DataSource`, :class:`DatasetInfo`
-- :class:`CMEMSSource`, :class:`CDSSource`
+- :class:`DataSource`, :class:`DatasetInfo`, :class:`DatasetKind`
+- Adapters: :class:`CMEMSSource`, :class:`CDSSource`, :class:`AemetSource`
 - Credentials: :class:`CMEMSCredentials`, :class:`CDSCredentials`,
-  :func:`load_cmems`, :func:`load_cds`.
+  :class:`AEMETCredentials`, :func:`load_cmems`, :func:`load_cds`,
+  :func:`load_aemet`.
 - Catalog: :data:`CATALOG`, :class:`CatalogEntry`, :func:`all_entries`,
   :func:`describe`.
+- AEMET extras: :class:`AemetArchive`, :class:`AemetError`,
+  :class:`AemetAuthError`, :class:`AemetRateLimitError`.
 """
 
+from xr_toolz.data._src.aemet import (
+    AemetArchive,
+    AemetAuthError,
+    AemetError,
+    AemetRateLimitError,
+    AemetSource,
+    ArchiveCoverage,
+)
 from xr_toolz.data._src.base import DatasetInfo, DatasetKind, DataSource
 from xr_toolz.data._src.catalog import CATALOG, CatalogEntry, all_entries, describe
 from xr_toolz.data._src.cds import CDSSource
 from xr_toolz.data._src.cmems import CMEMSSource
 from xr_toolz.data._src.credentials import (
+    AEMETCredentials,
     CDSCredentials,
     CMEMSCredentials,
+    load_aemet,
     load_cds,
     load_cmems,
 )
@@ -30,6 +43,13 @@ from xr_toolz.data._src.credentials import (
 
 __all__ = [
     "CATALOG",
+    "AEMETCredentials",
+    "AemetArchive",
+    "AemetAuthError",
+    "AemetError",
+    "AemetRateLimitError",
+    "AemetSource",
+    "ArchiveCoverage",
     "CDSCredentials",
     "CDSSource",
     "CMEMSCredentials",
@@ -40,6 +60,7 @@ __all__ = [
     "DatasetKind",
     "all_entries",
     "describe",
+    "load_aemet",
     "load_cds",
     "load_cmems",
 ]

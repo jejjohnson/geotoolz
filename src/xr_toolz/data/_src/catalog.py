@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from xr_toolz.data._src.aemet.catalog import AEMET_DATASETS
 from xr_toolz.data._src.base import DatasetInfo
 from xr_toolz.data._src.cds.catalog import CDS_DATASETS
 from xr_toolz.data._src.cmems.catalog import CMEMS_DATASETS
@@ -126,6 +127,14 @@ CATALOG: dict[str, CatalogEntry] = {
         source="cds",
         dataset_id="reanalysis-era5-land",
     ),
+    # ---- AEMET — station observations ---------------------------------
+    "aemet.stations": CatalogEntry(source="aemet", dataset_id="aemet_stations"),
+    "aemet.daily": CatalogEntry(source="aemet", dataset_id="aemet_daily"),
+    "aemet.hourly": CatalogEntry(source="aemet", dataset_id="aemet_hourly"),
+    "aemet.monthly": CatalogEntry(source="aemet", dataset_id="aemet_monthly"),
+    "aemet.normals": CatalogEntry(source="aemet", dataset_id="aemet_normals"),
+    "aemet.extremes": CatalogEntry(source="aemet", dataset_id="aemet_extremes"),
+    "aemet.pollution": CatalogEntry(source="aemet", dataset_id="aemet_pollution"),
 }
 
 
@@ -141,4 +150,6 @@ def describe(name: str) -> DatasetInfo:
         return CMEMS_DATASETS[entry.dataset_id]
     if entry.source == "cds":
         return CDS_DATASETS[entry.dataset_id]
+    if entry.source == "aemet":
+        return AEMET_DATASETS[entry.dataset_id]
     raise KeyError(f"Unknown source {entry.source!r}")

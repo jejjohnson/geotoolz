@@ -28,6 +28,9 @@ class DatasetKind(StrEnum):
     - ``profiles`` — collection of vertical profiles at scattered
       locations (Argo floats, CTD casts, gliders).
     - ``trajectory`` — drifters / moving platforms.
+    - ``stations`` — fixed points, one time-series per station.
+      Maps to CF's ``featureType = "timeSeries"`` (CF 9.3) with dims
+      ``(station, time)`` and per-station coords.
 
     Downstream code (regridding, masking, plotting) branches on this;
     e.g. antimeridian BBox wrapping is meaningless for profiles.
@@ -37,6 +40,7 @@ class DatasetKind(StrEnum):
     ALONGTRACK = "alongtrack"
     PROFILES = "profiles"
     TRAJECTORY = "trajectory"
+    STATIONS = "stations"
 
 
 @dataclass(frozen=True)

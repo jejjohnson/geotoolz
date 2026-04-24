@@ -452,6 +452,249 @@ SPCO2 = Variable(
     valid_range=(0.0, 100.0),
 )
 
+# ---- Surface-station observations ---------------------------------------
+#
+# Canonical names chosen to be adapter-agnostic. AEMET aliases are the
+# raw JSON field names the OpenData API returns (``tmed``, ``prec``,
+# ``velmedia``, ...). Hourly and daily endpoints use overlapping but
+# distinct field names, hence variables suffixed ``_daily``/``_hourly``
+# where the AEMET schemas differ. ``_daily`` aliases cite the daily
+# climatological endpoint; unsuffixed names use the hourly endpoint.
+
+AIR_TEMPERATURE = Variable(
+    name="air_temperature",
+    standard_name="air_temperature",
+    long_name="Air temperature",
+    units="degC",
+    aliases={"aemet": "ta"},
+    valid_range=(-80.0, 60.0),
+)
+
+AIR_TEMPERATURE_MIN = Variable(
+    name="air_temperature_min",
+    standard_name="air_temperature",
+    long_name="Minimum air temperature within the observation interval",
+    units="degC",
+    aliases={"aemet": "tamin"},
+    valid_range=(-80.0, 60.0),
+)
+
+AIR_TEMPERATURE_MAX = Variable(
+    name="air_temperature_max",
+    standard_name="air_temperature",
+    long_name="Maximum air temperature within the observation interval",
+    units="degC",
+    aliases={"aemet": "tamax"},
+    valid_range=(-80.0, 60.0),
+)
+
+AIR_TEMPERATURE_DAILY_MEAN = Variable(
+    name="air_temperature_daily_mean",
+    standard_name="air_temperature",
+    long_name="Daily mean air temperature",
+    units="degC",
+    aliases={"aemet": "tmed"},
+    valid_range=(-80.0, 60.0),
+)
+
+AIR_TEMPERATURE_DAILY_MIN = Variable(
+    name="air_temperature_daily_min",
+    standard_name="air_temperature",
+    long_name="Daily minimum air temperature",
+    units="degC",
+    aliases={"aemet": "tmin"},
+    valid_range=(-80.0, 60.0),
+)
+
+AIR_TEMPERATURE_DAILY_MAX = Variable(
+    name="air_temperature_daily_max",
+    standard_name="air_temperature",
+    long_name="Daily maximum air temperature",
+    units="degC",
+    aliases={"aemet": "tmax"},
+    valid_range=(-80.0, 60.0),
+)
+
+DEW_POINT_TEMPERATURE = Variable(
+    name="dew_point_temperature",
+    standard_name="dew_point_temperature",
+    long_name="Dew-point temperature",
+    units="degC",
+    aliases={"aemet": "tpr"},
+    valid_range=(-80.0, 50.0),
+)
+
+RELATIVE_HUMIDITY = Variable(
+    name="relative_humidity",
+    standard_name="relative_humidity",
+    long_name="Relative humidity",
+    units="%",
+    aliases={"aemet": "hr"},
+    valid_range=(0.0, 100.0),
+)
+
+PRECIPITATION_AMOUNT = Variable(
+    name="precipitation_amount",
+    standard_name="precipitation_amount",
+    long_name="Precipitation accumulated over the observation interval",
+    units="mm",
+    aliases={"aemet": "prec"},
+    valid_range=(0.0, 2000.0),
+)
+
+SURFACE_PRESSURE_HPA = Variable(
+    name="surface_pressure_hpa",
+    standard_name="surface_air_pressure",
+    long_name="Surface air pressure at station level",
+    units="hPa",
+    aliases={"aemet": "pres"},
+    valid_range=(500.0, 1085.0),
+)
+
+MEAN_SEA_LEVEL_PRESSURE_HPA = Variable(
+    name="mean_sea_level_pressure_hpa",
+    standard_name="air_pressure_at_mean_sea_level",
+    long_name="Air pressure reduced to mean sea level",
+    units="hPa",
+    aliases={"aemet": "pres_nmar"},
+    valid_range=(870.0, 1085.0),
+)
+
+SURFACE_PRESSURE_MAX_HPA = Variable(
+    name="surface_pressure_max_hpa",
+    standard_name="surface_air_pressure",
+    long_name="Daily maximum surface pressure",
+    units="hPa",
+    aliases={"aemet": "presMax"},
+    valid_range=(500.0, 1085.0),
+)
+
+SURFACE_PRESSURE_MIN_HPA = Variable(
+    name="surface_pressure_min_hpa",
+    standard_name="surface_air_pressure",
+    long_name="Daily minimum surface pressure",
+    units="hPa",
+    aliases={"aemet": "presMin"},
+    valid_range=(500.0, 1085.0),
+)
+
+WIND_SPEED = Variable(
+    name="wind_speed",
+    standard_name="wind_speed",
+    long_name="Mean wind speed",
+    units="m s-1",
+    aliases={"aemet": "vv"},
+    valid_range=(0.0, 120.0),
+)
+
+WIND_SPEED_DAILY_MEAN = Variable(
+    name="wind_speed_daily_mean",
+    standard_name="wind_speed",
+    long_name="Daily mean wind speed",
+    units="m s-1",
+    aliases={"aemet": "velmedia"},
+    valid_range=(0.0, 120.0),
+)
+
+WIND_FROM_DIRECTION = Variable(
+    name="wind_from_direction",
+    standard_name="wind_from_direction",
+    long_name="Wind direction (meteorological)",
+    units="degree",
+    aliases={"aemet": "dv"},
+    valid_range=(0.0, 360.0),
+)
+
+WIND_FROM_DIRECTION_DAILY = Variable(
+    name="wind_from_direction_daily",
+    standard_name="wind_from_direction",
+    long_name="Dominant daily wind direction (10° sectors)",
+    units="degree",
+    aliases={"aemet": "dir"},
+    valid_range=(0.0, 360.0),
+)
+
+WIND_SPEED_OF_GUST = Variable(
+    name="wind_speed_of_gust",
+    standard_name="wind_speed_of_gust",
+    long_name="Maximum wind gust",
+    units="m s-1",
+    aliases={"aemet": "vmax"},
+    valid_range=(0.0, 150.0),
+)
+
+WIND_SPEED_OF_GUST_DAILY = Variable(
+    name="wind_speed_of_gust_daily",
+    standard_name="wind_speed_of_gust",
+    long_name="Daily maximum wind gust",
+    units="m s-1",
+    aliases={"aemet": "racha"},
+    valid_range=(0.0, 150.0),
+)
+
+WIND_FROM_DIRECTION_OF_GUST = Variable(
+    name="wind_from_direction_of_gust",
+    standard_name="wind_from_direction",
+    long_name="Direction of maximum wind gust",
+    units="degree",
+    aliases={"aemet": "dmax"},
+    valid_range=(0.0, 360.0),
+)
+
+SUNSHINE_DURATION = Variable(
+    name="sunshine_duration",
+    standard_name="duration_of_sunshine",
+    long_name="Sunshine duration within the observation interval",
+    units="min",
+    aliases={"aemet": "inso"},
+    valid_range=(0.0, 60.0),
+)
+
+SUNSHINE_DURATION_DAILY = Variable(
+    name="sunshine_duration_daily",
+    standard_name="duration_of_sunshine",
+    long_name="Daily sunshine duration",
+    units="h",
+    aliases={"aemet": "sol"},
+    valid_range=(0.0, 24.0),
+)
+
+VISIBILITY = Variable(
+    name="visibility",
+    standard_name="visibility_in_air",
+    long_name="Horizontal visibility",
+    units="km",
+    aliases={"aemet": "vis"},
+    valid_range=(0.0, 100.0),
+)
+
+SURFACE_SNOW_THICKNESS = Variable(
+    name="surface_snow_thickness",
+    standard_name="surface_snow_thickness",
+    long_name="Depth of snow on the ground",
+    units="cm",
+    aliases={"aemet": "nieve"},
+    valid_range=(0.0, 1000.0),
+)
+
+SOIL_TEMPERATURE_5CM = Variable(
+    name="soil_temperature_5cm",
+    standard_name="soil_temperature",
+    long_name="Soil temperature at 5 cm depth",
+    units="degC",
+    aliases={"aemet": "tss5cm"},
+    valid_range=(-60.0, 80.0),
+)
+
+SOIL_TEMPERATURE_20CM = Variable(
+    name="soil_temperature_20cm",
+    standard_name="soil_temperature",
+    long_name="Soil temperature at 20 cm depth",
+    units="degC",
+    aliases={"aemet": "tss20cm"},
+    valid_range=(-60.0, 80.0),
+)
+
 
 REGISTRY: dict[str, Variable] = {
     v.name: v
@@ -499,6 +742,33 @@ REGISTRY: dict[str, Variable] = {
         ZOOC,
         PH,
         SPCO2,
+        # Surface-station observations (AEMET and friends)
+        AIR_TEMPERATURE,
+        AIR_TEMPERATURE_MIN,
+        AIR_TEMPERATURE_MAX,
+        AIR_TEMPERATURE_DAILY_MEAN,
+        AIR_TEMPERATURE_DAILY_MIN,
+        AIR_TEMPERATURE_DAILY_MAX,
+        DEW_POINT_TEMPERATURE,
+        RELATIVE_HUMIDITY,
+        PRECIPITATION_AMOUNT,
+        SURFACE_PRESSURE_HPA,
+        MEAN_SEA_LEVEL_PRESSURE_HPA,
+        SURFACE_PRESSURE_MAX_HPA,
+        SURFACE_PRESSURE_MIN_HPA,
+        WIND_SPEED,
+        WIND_SPEED_DAILY_MEAN,
+        WIND_FROM_DIRECTION,
+        WIND_FROM_DIRECTION_DAILY,
+        WIND_SPEED_OF_GUST,
+        WIND_SPEED_OF_GUST_DAILY,
+        WIND_FROM_DIRECTION_OF_GUST,
+        SUNSHINE_DURATION,
+        SUNSHINE_DURATION_DAILY,
+        VISIBILITY,
+        SURFACE_SNOW_THICKNESS,
+        SOIL_TEMPERATURE_5CM,
+        SOIL_TEMPERATURE_20CM,
     )
 }
 
