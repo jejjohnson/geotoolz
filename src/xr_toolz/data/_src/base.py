@@ -62,6 +62,11 @@ class DatasetInfo:
     license: str | None = None
     notes: str | None = None
     extras: dict[str, Any] = field(default_factory=dict)
+    # Adapter-specific hook for form construction. Currently used only
+    # by the CDS adapter (see :mod:`xr_toolz.data._src.cds.profiles`);
+    # ignored by other sources. Kept as ``Any`` here so ``base.py``
+    # stays free of per-adapter imports.
+    form_profile: Any = None
 
 
 class DataSource(ABC):

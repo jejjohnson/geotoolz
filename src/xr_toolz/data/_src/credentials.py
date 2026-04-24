@@ -68,23 +68,53 @@ def load_cds(
     key: str | None = None,
     path: Path | None = None,
 ) -> CDSCredentials | None:
-    """Load CDS credentials, or ``None`` if none could be found."""
+    """Load CDS credentials, or ``None`` if none could be found.
+
+    Resolution order:
+
+    1. Explicit ``url`` + ``key`` arguments.
+    2. Explicit ``path`` argument (parsed as a ``key: value`` config).
+       When given, this bypasses env vars and ``.env`` lookup so the
+       caller has a deterministic override.
+    3. Environment variables ``CDSAPI_URL`` + ``CDSAPI_KEY``.
+    4. ``.env`` file walked up from CWD (``CDSAPI_URL`` and
+       ``CDSAPI_KEY`` keys), matching the ``python-dotenv`` lookup
+       behaviour. A notebook started under ``docs/`` still picks up
+       the project-root ``.env``.
+    5. ``~/.cdsapirc`` parsed as a ``key: value`` config.
+    """
     if url and key:
         return CDSCredentials(url=url, key=key)
+
+    if path is not None:
+        return _load_cds_from_file(path)
 
     env_url = os.environ.get("CDSAPI_URL")
     env_key = os.environ.get("CDSAPI_KEY")
     if env_url and env_key:
         return CDSCredentials(url=env_url, key=env_key)
 
-    cfg = path or Path.home() / ".cdsapirc"
-    if cfg.is_file():
-        parsed = _parse_kv(cfg.read_text())
-        u = parsed.get("url")
-        k = parsed.get("key")
-        if u and k:
-            return CDSCredentials(url=u, key=k)
+    for candidate in (Path.cwd(), *Path.cwd().parents):
+        dotenv = candidate / ".env"
+        if dotenv.is_file():
+            parsed = _parse_kv(dotenv.read_text())
+            u = parsed.get("cdsapi_url")
+            k = parsed.get("cdsapi_key")
+            if u and k:
+                return CDSCredentials(url=u, key=k)
+            break
 
+    return _load_cds_from_file(Path.home() / ".cdsapirc")
+
+
+def _load_cds_from_file(cfg: Path) -> CDSCredentials | None:
+    if not cfg.is_file():
+        return None
+    parsed = _parse_kv(cfg.read_text())
+    u = parsed.get("url") or parsed.get("cdsapi_url")
+    k = parsed.get("key") or parsed.get("cdsapi_key")
+    if u and k:
+        return CDSCredentials(url=u, key=k)
     return None
 
 
@@ -136,13 +166,19 @@ def load_aemet(
 
 
 def _parse_kv(text: str) -> dict[str, str]:
-    """Parse ``key: value`` / ``key=value`` / ``key value`` config files."""
+    """Parse ``key: value`` / ``key=value`` / ``key value`` config files.
+
+    Separators are tried in order ``=``, ``:``, ``<space>`` — ``=``
+    first so URL values like ``https://...`` don't get mis-split on
+    their embedded scheme colon. ``.cdsapirc`` (colon-separated) still
+    parses correctly because its lines never contain ``=``.
+    """
     out: dict[str, str] = {}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        for sep in (":", "=", " "):
+        for sep in ("=", ":", " "):
             if sep in line:
                 k, _, v = line.partition(sep)
                 out[k.strip().lower()] = v.strip()

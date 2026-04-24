@@ -1,0 +1,40 @@
+"""Smoke test for the CDS in-situ surface-marine adapter.
+
+Downloads one year of daily marine-surface observations and verifies
+the archive round-trips through GeoParquet.
+
+Run:
+
+    uv run python scripts/cds_insitu_marine_smoke.py
+"""
+
+from __future__ import annotations
+
+from _cds_insitu_common import build_archive, setup_logging
+from loguru import logger
+
+
+def main() -> None:
+    log_path = setup_logging("cds_insitu_marine_smoke")
+    logger.info(f"logging to {log_path}")
+
+    archive = build_archive(
+        preset="cds_insitu_marine",
+        subdir="smoke_marine_daily",
+        time_aggregation="daily",
+    )
+
+    logger.info("starting smoke sync: 2020 daily marine observations")
+    fresh = archive.sync("2020-01-01", "2020-12-31")
+    logger.info(f"fetched {len(fresh)} rows")
+
+    gdf = archive.load()
+    logger.info(
+        f"archive now holds {len(gdf)} rows across "
+        f"{gdf['station_id'].nunique()} platforms"
+    )
+    logger.info("smoke test OK")
+
+
+if __name__ == "__main__":
+    main()

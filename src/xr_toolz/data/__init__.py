@@ -17,6 +17,8 @@ Exports:
   :func:`describe`.
 - AEMET extras: :class:`AemetArchive`, :class:`AemetError`,
   :class:`AemetAuthError`, :class:`AemetRateLimitError`.
+- CDS extras: :class:`CDSInsituArchive`, :class:`CDSFormProfile`,
+  :data:`INSITU`, :data:`REANALYSIS`.
 """
 
 from xr_toolz.data._src.aemet import (
@@ -29,7 +31,13 @@ from xr_toolz.data._src.aemet import (
 )
 from xr_toolz.data._src.base import DatasetInfo, DatasetKind, DataSource
 from xr_toolz.data._src.catalog import CATALOG, CatalogEntry, all_entries, describe
-from xr_toolz.data._src.cds import CDSSource
+from xr_toolz.data._src.cds import (
+    INSITU,
+    REANALYSIS,
+    CDSFormProfile,
+    CDSInsituArchive,
+    CDSSource,
+)
 from xr_toolz.data._src.cmems import CMEMSSource
 from xr_toolz.data._src.credentials import (
     AEMETCredentials,
@@ -43,6 +51,8 @@ from xr_toolz.data._src.credentials import (
 
 __all__ = [
     "CATALOG",
+    "INSITU",
+    "REANALYSIS",
     "AEMETCredentials",
     "AemetArchive",
     "AemetAuthError",
@@ -51,6 +61,8 @@ __all__ = [
     "AemetSource",
     "ArchiveCoverage",
     "CDSCredentials",
+    "CDSFormProfile",
+    "CDSInsituArchive",
     "CDSSource",
     "CMEMSCredentials",
     "CMEMSSource",

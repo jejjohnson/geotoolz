@@ -466,7 +466,7 @@ AIR_TEMPERATURE = Variable(
     standard_name="air_temperature",
     long_name="Air temperature",
     units="degC",
-    aliases={"aemet": "ta"},
+    aliases={"aemet": "ta", "cds": "air_temperature"},
     valid_range=(-80.0, 60.0),
 )
 
@@ -520,7 +520,7 @@ DEW_POINT_TEMPERATURE = Variable(
     standard_name="dew_point_temperature",
     long_name="Dew-point temperature",
     units="degC",
-    aliases={"aemet": "tpr"},
+    aliases={"aemet": "tpr", "cds": "dew_point_temperature"},
     valid_range=(-80.0, 50.0),
 )
 
@@ -529,7 +529,7 @@ RELATIVE_HUMIDITY = Variable(
     standard_name="relative_humidity",
     long_name="Relative humidity",
     units="%",
-    aliases={"aemet": "hr"},
+    aliases={"aemet": "hr", "cds": "relative_humidity"},
     valid_range=(0.0, 100.0),
 )
 
@@ -538,7 +538,7 @@ PRECIPITATION_AMOUNT = Variable(
     standard_name="precipitation_amount",
     long_name="Precipitation accumulated over the observation interval",
     units="mm",
-    aliases={"aemet": "prec"},
+    aliases={"aemet": "prec", "cds": "accumulated_precipitation"},
     valid_range=(0.0, 2000.0),
 )
 
@@ -547,7 +547,7 @@ SURFACE_PRESSURE_HPA = Variable(
     standard_name="surface_air_pressure",
     long_name="Surface air pressure at station level",
     units="hPa",
-    aliases={"aemet": "pres"},
+    aliases={"aemet": "pres", "cds": "air_pressure"},
     valid_range=(500.0, 1085.0),
 )
 
@@ -556,7 +556,7 @@ MEAN_SEA_LEVEL_PRESSURE_HPA = Variable(
     standard_name="air_pressure_at_mean_sea_level",
     long_name="Air pressure reduced to mean sea level",
     units="hPa",
-    aliases={"aemet": "pres_nmar"},
+    aliases={"aemet": "pres_nmar", "cds": "air_pressure_at_sea_level"},
     valid_range=(870.0, 1085.0),
 )
 
@@ -583,7 +583,7 @@ WIND_SPEED = Variable(
     standard_name="wind_speed",
     long_name="Mean wind speed",
     units="m s-1",
-    aliases={"aemet": "vv"},
+    aliases={"aemet": "vv", "cds": "wind_speed"},
     valid_range=(0.0, 120.0),
 )
 
@@ -601,7 +601,7 @@ WIND_FROM_DIRECTION = Variable(
     standard_name="wind_from_direction",
     long_name="Wind direction (meteorological)",
     units="degree",
-    aliases={"aemet": "dv"},
+    aliases={"aemet": "dv", "cds": "wind_from_direction"},
     valid_range=(0.0, 360.0),
 )
 
@@ -646,7 +646,7 @@ SUNSHINE_DURATION = Variable(
     standard_name="duration_of_sunshine",
     long_name="Sunshine duration within the observation interval",
     units="min",
-    aliases={"aemet": "inso"},
+    aliases={"aemet": "inso", "cds": "sunshine_duration"},
     valid_range=(0.0, 60.0),
 )
 
@@ -673,7 +673,7 @@ SURFACE_SNOW_THICKNESS = Variable(
     standard_name="surface_snow_thickness",
     long_name="Depth of snow on the ground",
     units="cm",
-    aliases={"aemet": "nieve"},
+    aliases={"aemet": "nieve", "cds": "snow_depth"},
     valid_range=(0.0, 1000.0),
 )
 
@@ -693,6 +693,109 @@ SOIL_TEMPERATURE_20CM = Variable(
     units="degC",
     aliases={"aemet": "tss20cm"},
     valid_range=(-60.0, 80.0),
+)
+
+# ---- CDS in-situ additions ----------------------------------------------
+
+WATER_VAPOUR_PRESSURE = Variable(
+    name="water_vapour_pressure",
+    standard_name="water_vapor_partial_pressure_in_air",
+    long_name="Water vapour partial pressure in air",
+    units="hPa",
+    aliases={"cds": "water_vapour_pressure"},
+    valid_range=(0.0, 60.0),
+)
+
+TOTAL_CLOUD_COVER = Variable(
+    name="total_cloud_cover",
+    standard_name="cloud_area_fraction",
+    long_name="Total cloud cover",
+    units="1",
+    aliases={"cds": "total_cloud_cover"},
+    valid_range=(0.0, 1.0),
+)
+
+DOWNWARD_LONGWAVE_RADIATION = Variable(
+    name="downward_longwave_radiation",
+    standard_name="surface_downwelling_longwave_flux_in_air",
+    long_name="Downward longwave radiation at Earth surface",
+    units="W m-2",
+    aliases={"cds": "downward_longwave_radiation_at_earth_surface"},
+    valid_range=(0.0, 1000.0),
+)
+
+DOWNWARD_SHORTWAVE_RADIATION = Variable(
+    name="downward_shortwave_radiation",
+    standard_name="surface_downwelling_shortwave_flux_in_air",
+    long_name="Downward shortwave radiation at Earth surface",
+    units="W m-2",
+    aliases={"cds": "downward_shortwave_radiation_at_earth_surface"},
+    valid_range=(0.0, 1500.0),
+)
+
+# Marine surface observations
+
+SEA_LEVEL_PRESSURE = Variable(
+    name="sea_level_pressure",
+    standard_name="air_pressure_at_mean_sea_level",
+    long_name="Air pressure at mean sea level (marine platform)",
+    units="hPa",
+    aliases={"cds": "air_pressure_at_sea_level"},
+    valid_range=(870.0, 1085.0),
+)
+
+SEA_SURFACE_TEMPERATURE_INSITU = Variable(
+    name="sea_surface_temperature_insitu",
+    standard_name="sea_surface_temperature",
+    long_name="Sea surface temperature (in-situ platform)",
+    units="degC",
+    aliases={"cds": "water_temperature"},
+    valid_range=(-2.5, 40.0),
+)
+
+WAVE_SIGNIFICANT_HEIGHT = Variable(
+    name="wave_significant_height",
+    standard_name="sea_surface_wave_significant_height",
+    long_name="Significant wave height",
+    units="m",
+    aliases={"cds": "significant_wave_height"},
+    valid_range=(0.0, 25.0),
+)
+
+WAVE_PERIOD = Variable(
+    name="wave_period",
+    standard_name="sea_surface_wave_period",
+    long_name="Mean wave period",
+    units="s",
+    aliases={"cds": "wave_period"},
+    valid_range=(0.0, 30.0),
+)
+
+WAVE_FROM_DIRECTION = Variable(
+    name="wave_from_direction",
+    standard_name="sea_surface_wave_from_direction",
+    long_name="Mean wave direction (from)",
+    units="degree",
+    aliases={"cds": "wave_direction"},
+    valid_range=(0.0, 360.0),
+)
+
+FRESH_SNOW = Variable(
+    name="fresh_snow",
+    standard_name="thickness_of_snowfall_amount",
+    long_name="Fresh snow accumulation in the observation interval",
+    units="cm",
+    aliases={"cds": "fresh_snow"},
+    valid_range=(0.0, 500.0),
+)
+
+SNOW_WATER_EQUIVALENT = Variable(
+    name="snow_water_equivalent",
+    standard_name="lwe_thickness_of_surface_snow_amount",
+    long_name="Liquid-water equivalent of the snowpack",
+    units="mm",
+    aliases={"cds": "snow_water_equivalent"},
+    valid_range=(0.0, 5000.0),
 )
 
 
@@ -769,6 +872,18 @@ REGISTRY: dict[str, Variable] = {
         SURFACE_SNOW_THICKNESS,
         SOIL_TEMPERATURE_5CM,
         SOIL_TEMPERATURE_20CM,
+        # CDS in-situ additions
+        WATER_VAPOUR_PRESSURE,
+        TOTAL_CLOUD_COVER,
+        DOWNWARD_LONGWAVE_RADIATION,
+        DOWNWARD_SHORTWAVE_RADIATION,
+        SEA_LEVEL_PRESSURE,
+        SEA_SURFACE_TEMPERATURE_INSITU,
+        WAVE_SIGNIFICANT_HEIGHT,
+        WAVE_PERIOD,
+        WAVE_FROM_DIRECTION,
+        FRESH_SNOW,
+        SNOW_WATER_EQUIVALENT,
     )
 }
 
