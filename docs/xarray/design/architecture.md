@@ -3,14 +3,20 @@ status: draft
 version: 0.1.0
 ---
 
-!!! note "Imports in this page are from the original `geo_toolz` layout"
-    These design docs were adapted from the `geo_toolz` design study.
-    Code snippets use the original feature-based import paths
-    (`geo_toolz.<module>`). In `xr_toolz`, the domain-agnostic
-    operations live under `xr_toolz.geo.<module>`; physics-specific
-    operations live under `xr_toolz.ocn` / `xr_toolz.atm` /
-    `xr_toolz.rs`. See `xr_toolz/__init__.py` and
-    `xr_toolz/geo/__init__.py` for the current export surface.
+!!! note "These design docs cover the planned operator surface for `xr_toolz`"
+    Code snippets use class names directly. In the implementation, the
+    submodule layout is:
+
+    - **`xr_toolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
+      subset, masks, regrid, discretize, detrend)
+    - **`xr_toolz.transforms`** — signal transforms / decompositions /
+      encoders (D8)
+    - **`xr_toolz.metrics`** — skill scores (D7)
+    - **`xr_toolz.kinematics`** — domain-specific physical quantities,
+      sub-organized by domain (D9)
+    - **`xr_toolz.viz`** — plotting operators (D10)
+
+    See `xr_toolz/__init__.py` for the current export surface.
 
 # Architecture
 
@@ -87,7 +93,8 @@ class Operator:
     Every operator is a callable. Single-input operators map
     Dataset → Dataset. Multi-input operators accept multiple
     positional arguments. Reductions may return scalars or
-    lower-dimensional Datasets.
+    lower-dimensional Datasets. Terminal viz operators may return
+    matplotlib Figure / Axes (see decisions.md §D10).
 
     Subclasses must implement `__call__`.
     """
@@ -132,14 +139,26 @@ class Sequential(Operator):
     Sequential is itself an Operator, so pipelines nest:
         preprocess = Sequential([ValidateCoords(), Regrid(grid)])
         full = Sequential([preprocess, Detrend(clim), Subset(region)])
+
+    Non-Dataset returns (e.g., a terminal viz Operator that returns
+    matplotlib.Figure — see decisions.md §D10) are allowed only as the
+    LAST step. A non-Dataset return from any earlier step is a runtime
+    error, since the next operator would receive an unexpected type.
     """
 
     def __init__(self, operators: list[Operator]):
         self.operators = operators
 
     def __call__(self, ds):
-        for op in self.operators:
+        for i, op in enumerate(self.operators):
             ds = op(ds)
+            is_last = i == len(self.operators) - 1
+            if not is_last and not isinstance(ds, (xr.Dataset, xr.DataArray)):
+                raise TypeError(
+                    f"Step [{i}] {op!r} returned {type(ds).__name__}; "
+                    f"non-Dataset returns are only allowed at the final step "
+                    f"of a Sequential (see decisions.md §D10)."
+                )
         return ds
 
     def get_config(self) -> dict:
@@ -157,6 +176,8 @@ class Sequential(Operator):
             lines.append(f"  [{i}] {op!r}")
         return "\n".join(lines)
 ```
+
+**Type rule (D10).** Most operators are `Dataset → Dataset`. Terminal viz operators (`PlotMap`, `PlotSpectrum`, …) return `matplotlib.Figure` / `Axes`. `Sequential` validates that any non-`Dataset` return appears only at the last step; otherwise it raises a clear `TypeError`. `Graph` already supports heterogeneous output types and needs no change — viz nodes slot in as one of N outputs.
 
 ## Stateful Operations: The Split-Object Pattern
 
