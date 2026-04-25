@@ -18,7 +18,6 @@ from xr_toolz.geo._src import (
     interpolate as _interpolate,
     masks as _masks,
     metrics as _metrics,
-    spectral as _spectral,
     subset as _subset,
     validation as _validation,
 )
@@ -290,38 +289,6 @@ class ResampleTime(Operator):
         return {"freq": self.freq, "method": self.method, "time": self.time}
 
 
-# ---------- spectral -------------------------------------------------------
-
-
-class PSD(Operator):
-    """Power spectrum operator. Set ``isotropic=True`` for the radial variant."""
-
-    def __init__(
-        self,
-        variable: str,
-        dims: Sequence[str],
-        isotropic: bool = False,
-        **kwargs: Any,
-    ):
-        self.variable = variable
-        self.dims = list(dims)
-        self.isotropic = isotropic
-        self.kwargs = dict(kwargs)
-
-    def _apply(self, ds):
-        if self.isotropic:
-            return _spectral.psd_isotropic(ds, self.variable, self.dims, **self.kwargs)
-        return _spectral.psd_spacetime(ds, self.variable, self.dims, **self.kwargs)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "variable": self.variable,
-            "dims": list(self.dims),
-            "isotropic": self.isotropic,
-            **self.kwargs,
-        }
-
-
 # ---------- pixel metrics (multi-input) -----------------------------------
 
 
@@ -414,7 +381,6 @@ __all__ = [
     "MAE",
     "MSE",
     "NRMSE",
-    "PSD",
     "RMSE",
     "AddClimatology",
     "AddCountryMask",

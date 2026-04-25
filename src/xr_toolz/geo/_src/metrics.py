@@ -22,10 +22,9 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import interp1d
 
-from xr_toolz.geo._src.spectral import (
-    conditional_average,
-    psd_isotropic,
-    psd_spacetime,
+from xr_toolz.transforms._src.fourier import (
+    drop_negative_frequencies,
+    power_spectrum,
 )
 
 
@@ -141,12 +140,12 @@ def psd_error(
         Dataset with a single ``"error"`` variable containing the
         PSD of the error.
     """
-    diff = (ds_pred[variable] - ds_ref[variable]).to_dataset(name="error")
-    psd_fn = psd_isotropic if isotropic else psd_spacetime
-    err = psd_fn(diff, "error", psd_dims, **kwargs)
+    diff = (ds_pred[variable] - ds_ref[variable]).rename("error")
+    err = power_spectrum(diff, dim=list(psd_dims), isotropic=isotropic, **kwargs)
+    err_ds = err.rename("error").to_dataset()
     if avg_dims is not None:
-        err = conditional_average(err, dims=avg_dims, drop=True)
-    return err
+        err_ds = drop_negative_frequencies(err_ds, dims=avg_dims, drop=True)
+    return err_ds
 
 
 def psd_score(
@@ -178,11 +177,13 @@ def psd_score(
     err = psd_error(
         ds_pred, ds_ref, variable, psd_dims, avg_dims, isotropic=isotropic, **kwargs
     )
-    psd_fn = psd_isotropic if isotropic else psd_spacetime
-    ref = psd_fn(ds_ref, variable, psd_dims, **kwargs)
+    ref_psd = power_spectrum(
+        ds_ref[variable], dim=list(psd_dims), isotropic=isotropic, **kwargs
+    )
+    ref_ds = ref_psd.rename(variable).to_dataset()
     if avg_dims is not None:
-        ref = conditional_average(ref, dims=avg_dims, drop=True)
-    score = 1.0 - err["error"] / ref[variable]
+        ref_ds = drop_negative_frequencies(ref_ds, dims=avg_dims, drop=True)
+    score = 1.0 - err["error"] / ref_ds[variable]
     return score.to_dataset(name="score")
 
 

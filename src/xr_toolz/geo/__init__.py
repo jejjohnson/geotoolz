@@ -86,12 +86,6 @@ from xr_toolz.geo._src.metrics import (
     resolved_scale,
     rmse,
 )
-from xr_toolz.geo._src.spectral import (
-    conditional_average,
-    cross_spectrum,
-    psd_isotropic,
-    psd_spacetime,
-)
 from xr_toolz.geo._src.subset import (
     select_variables,
     subset_bbox,
@@ -126,9 +120,7 @@ __all__ = [
     "calculate_climatology_season",
     "calculate_climatology_smoothed",
     "coarsen",
-    "conditional_average",
     "correlation",
-    "cross_spectrum",
     "cyclical_encode",
     "encode_time_cyclical",
     "encode_time_ordinal",
@@ -154,9 +146,7 @@ __all__ = [
     "pp_counts",
     "pp_stats",
     "psd_error",
-    "psd_isotropic",
     "psd_score",
-    "psd_spacetime",
     "r2_score",
     "random_fourier_features",
     "refine",

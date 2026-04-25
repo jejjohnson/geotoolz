@@ -20,7 +20,6 @@ from xr_toolz.geo import (
     block_minima,
     calc_latlon,
     coarsen,
-    cross_spectrum,
     cyclical_encode,
     encode_time_cyclical,
     encode_time_ordinal,
@@ -37,9 +36,7 @@ from xr_toolz.geo import (
     pot_threshold,
     pp_counts,
     pp_stats,
-    psd_isotropic,
     psd_score,
-    psd_spacetime,
     random_fourier_features,
     refine,
     reproject,
@@ -68,30 +65,6 @@ def ds_grid_daily() -> xr.Dataset:
         {"ssh": (("time", "lat", "lon"), data)},
         coords={"time": time, "lat": lat, "lon": lon},
     )
-
-
-# ============== spectral ===================================================
-
-
-def test_psd_spacetime_returns_freq_axes(ds_grid_daily):
-    ds = ds_grid_daily.isel(time=slice(0, 64), lat=4)  # 1-D time/lon slice
-    out = psd_spacetime(ds, "ssh", dims=["time", "lon"])
-    assert "ssh" in out.data_vars
-    assert any(d.startswith("freq_") for d in out.dims)
-
-
-def test_psd_isotropic_returns_freq_r(ds_grid_daily):
-    ds = ds_grid_daily.isel(time=4)
-    out = psd_isotropic(ds, "ssh", dims=["lat", "lon"])
-    assert "freq_r" in out.dims
-
-
-def test_cross_spectrum_names_output_pair(ds_grid_daily):
-    ds = ds_grid_daily.assign(ssh2=lambda d: d["ssh"] * 2.0).isel(
-        time=slice(0, 64), lat=4
-    )
-    out = cross_spectrum(ds, "ssh", "ssh2", dims=["time", "lon"])
-    assert "ssh_ssh2_cross" in out.data_vars
 
 
 # ============== metrics with PSD ==========================================

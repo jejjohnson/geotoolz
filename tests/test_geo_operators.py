@@ -11,7 +11,6 @@ from xr_toolz.core import Graph, Input, Sequential
 from xr_toolz.geo.operators import (
     MAE,
     NRMSE,
-    PSD,
     RMSE,
     Bias,
     CalculateClimatology,
@@ -27,6 +26,7 @@ from xr_toolz.geo.operators import (
     ValidateLatitude,
     ValidateLongitude,
 )
+from xr_toolz.transforms.operators import PowerSpectrum
 
 
 @pytest.fixture
@@ -109,11 +109,12 @@ def test_pixel_metric_operators_two_inputs(ds_global):
     assert float(R2Score("ssh", "time")(pred, ref).min()) == pytest.approx(1.0)
 
 
-def test_psd_operator(ds_global):
+def test_power_spectrum_operator(ds_global):
     # 1-D PSD along time is well-defined and fast.
     ds1d = ds_global.isel(lat=3, lon=4)
-    out = PSD("ssh", dims=["time"])(ds1d)
-    assert "ssh" in out.data_vars
+    out = PowerSpectrum("ssh", dim="time")(ds1d)
+    # New API names the spectral output ``f"{name}_psd"``.
+    assert "ssh_psd" in out.data_vars
 
 
 def test_psd_score_operator_perfect_prediction(ds_global):
