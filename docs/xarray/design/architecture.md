@@ -8,7 +8,10 @@ version: 0.1.0
     submodule layout is:
 
     - **`xr_toolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
-      subset, masks, regrid, discretize, detrend)
+      subset, masks, detrend)
+    - **`xr_toolz.interpolate`** — value resampling: regrid, gap-fill,
+      bin, coord-axis remap, time resample, smooth, learned downscale
+      (D12)
     - **`xr_toolz.transforms`** — signal transforms / decompositions /
       encoders (D8)
     - **`xr_toolz.metrics`** — skill scores (D7)
@@ -83,6 +86,37 @@ results = pipeline(satellite_data=ds_raw, reference=ds_ref)
 ```
 
 The `Graph` is itself an `Operator` — it can be nested inside other Graphs or Sequentials. This is what makes multi-input operators (metrics, merging, concatenation) first-class citizens of the composition system rather than one-off manual wiring.
+
+## Type Contract — Three Tiers (Array, xarray, Operator)
+
+The composition layers above describe *how* operators stack. The type contract describes *what* each tier accepts and returns. See [decisions.md §D11](decisions.md) for the decision record.
+
+| Tier | Location | Input | Output | Coordinate semantics |
+|---|---|---|---|---|
+| **A — Array** | `xr_toolz.<module>.array` | array (numpy / JAX / numba-jitted / optionally CuPy) | array | `axis=` |
+| **B — Layer 0 xarray** | `xr_toolz.<module>` (private `_src/`) | `xr.DataArray` (single-variable) or `xr.Dataset` + variable selectors (multi-variable) | `xr.DataArray` or `xr.Dataset` | `dim=` |
+| **C — Layer 1 Operator** | `xr_toolz.<module>` | `xr.Dataset` (or two for multi-input) | `xr.Dataset` \| `xr.DataArray` \| scalar (terminal viz returns `matplotlib.Figure / Axes`, see D10) | constructor `variable=` / `dims=` |
+
+Rules:
+
+- Each tier delegates downward; logic is never duplicated. Tier B wraps Tier A; Tier C wraps Tier B.
+- Tier A is **pragmatic, not strictly Array API-compliant**: numpy is the default backend, with JAX / numba / CuPy variants added per-function as the math benefits. Some functions dispatch via `array_namespace(x)`; others are hand-authored backend-specific kernels. The library never imports JAX / CuPy at the top level — optional backends are imported lazily.
+- Tier B uses arity to disambiguate the input type: single-variable functions take `xr.DataArray`; multi-variable functions take `xr.Dataset` plus explicit variable selectors (`variable=`, `u_var=`, …).
+- Tier C input is always `xr.Dataset` (or two `xr.Dataset` for multi-input operators). Output is **usually** `xr.Dataset` for transformations that preserve the dataset shape, but reduction-style operators (e.g., metrics) may return an `xr.DataArray` or scalar, and terminal viz operators return `matplotlib.Figure / Axes` (D10). Composition (`Sequential`, `Graph`) only sees Tier C.
+- Modules whose math is inherently coord/attr-manipulation rather than arithmetic (`validation`, `crs`, `subset`, `masks`) skip Tier A; their Tier B takes `xr.Dataset` directly.
+
+Example — `metrics.rmse`:
+
+```python
+# Tier A — duck array (numpy, JAX, CuPy, Dask)
+xr_toolz.metrics.array.rmse(pred_arr, ref_arr, axis=-1)
+
+# Tier B — Layer 0 xarray (DataArray in, DataArray out)
+xr_toolz.metrics.rmse(pred_da, ref_da, dim="time")
+
+# Tier C — Layer 1 Operator (Dataset in, DataArray out)
+RMSE(variable="ssh", dims=["time"])(pred_ds, ref_ds)
+```
 
 ## The `Operator` Base Class
 

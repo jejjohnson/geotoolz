@@ -244,3 +244,90 @@ Rationale:
 - Documented operator-contract exception in [architecture.md §Operator](architecture.md): "Terminal viz operators may return `Figure` / `Axes`".
 - Plot operators carry their config (`figsize`, `cmap`, `projection`, …) so they're hydra-serializable like any other operator.
 
+---
+
+## D11: Three-tier type contract — array (duck array) → xarray → Operator
+
+**Status:** accepted (resolved 2026-04-27)
+
+**Context:** Layer 0 signatures across the package drift between `numpy`, `xr.DataArray`, and `xr.Dataset`. The architecture doc claims Layer 0 is "typically `(xr.Dataset, …) → xr.Dataset`", but most fourier / dct / wavelet / metrics / viz functions take a DataArray, and most kinematics functions take a Dataset. Users who want raw-array math (numpy, JAX, CuPy, Dask) have no first-class entry point — today they have to drop down to scipy / xrft internals themselves.
+
+**Options:**
+- (A) Force every Layer 0 function to take `xr.Dataset`. Forces selection-by-attr inside every function, awkward for genuinely single-variable ops, gives numpy users no entry point.
+- (B) Two tiers (xarray Layer 0, Operator Layer 1). Numpy users drop down to scipy / xrft directly. No internal numpy surface; `da` vs `ds` typing in Layer 0 stays ambiguous.
+- (C) Three tiers — duck-array (`.array`), xarray Layer 0, Operator Layer 1 — each with a strict input contract and a strict delegation rule.
+
+**Decision:** Option C.
+
+- **Tier A — `xr_toolz.<module>.array`**: array-level functions. Take and return arrays (numpy, JAX, numba-jitted, optionally CuPy), not xarray. Use `axis=` (not `dim=`). The default backend is numpy; JAX / numba / CuPy variants are added per-function as the math benefits, either by `array_namespace(x)` dispatch where it's clean or by hand-authored backend-specific implementations where it isn't. **Strict Array API compliance is not a hard requirement** — pragmatism wins. A function may be numpy-only, JAX-only, or multi-backend; each is documented per-function.
+- **Tier B — Layer 0 (xarray)**: per-module functions in `xr_toolz/<module>/_src/`. Single-variable functions take `xr.DataArray`, return `xr.DataArray`. Multi-variable functions take `xr.Dataset` plus explicit variable selectors (`variable="ssh"`, `u_var="u"`, …) and may return `xr.DataArray` or `xr.Dataset`. Delegate to Tier A; add coord/attr handling and `dim=` semantics.
+- **Tier C — Layer 1 (Operators)**: input is always `xr.Dataset` (or two `xr.Dataset` for multi-input operators). Output is **usually** `xr.Dataset` for transformations that preserve the dataset shape, but reduction-style operators (e.g., metrics) may return `xr.DataArray` or scalar, and terminal viz operators return `matplotlib.Figure` / `Axes` (D10). Operators select variables via constructor args, then delegate to Tier B. Multi-input operators (metrics) take multiple Datasets.
+
+Rationale:
+- Numpy / JAX / numba / CuPy users get a first-class entry point (`xr_toolz.metrics.array.rmse(pred, ref, axis=-1)`) without the library hard-depending on JAX / CuPy at install time. Optional backends are imported lazily per-function.
+- The xarray Layer 0 contract is now unambiguous: arity decides the type. Single-variable → DataArray. Multi-variable → Dataset with selectors.
+- The Operator contract has a uniform *input* shape (Dataset(s)); outputs may narrow (DataArray / scalar for reductions; Figure / Axes for terminal viz) without breaking composition because `Sequential` and `Graph` enforce that narrowed outputs only appear at terminal nodes.
+- Backend coverage is *opportunistic*, not enforced — a fourier transform that's numpy-only today can grow a JAX variant later without breaking the contract.
+
+**Modules where Tier A is not meaningful** (`validation`, `crs`, `subset`, `masks`, whose math is inherently coord/attr-manipulation rather than arithmetic): they skip Tier A. Tier B takes `xr.Dataset` directly. The per-module section in `api/components.md` documents this.
+
+**Consequences:**
+- One additional file per module (`array.py`) for modules with array-meaningful math: `metrics`, `transforms` (fourier / dct / wavelet / encoders.basis), `kinematics`, and the viz plotting helpers.
+- Tier A is intentionally permissive — backend choice is a per-function decision. The expected shape is "numpy by default, JAX where it pays off (jit-friendly metric loops, gradient-friendly losses), numba where Python overhead dominates, CuPy if/when GPU users show up." No global discipline beyond "don't import JAX / CuPy at module top level".
+- Tier-specific tests: `tests/<module>/test_array.py`, `tests/<module>/test_layer0.py`, `tests/<module>/test_operators.py`. The array tier is tested against whichever backends each function actually supports — not a forced matrix.
+- Documentation: a Type Contract section in `architecture.md` codifies the rule, and each module's `components.md` entry shows the three tiers explicitly.
+- `xskillscore`-style numpy paths inside metrics now have a clean home (Tier A) rather than being either inlined or dropped (D7 stays unchanged — owned implementation, just now exposed at the array tier as well).
+
+---
+
+## D12: `interpolate` — unified resampling, aggregation, and smoothing module
+
+**Status:** draft (structural decision accepted 2026-04-27; open questions on fringe pieces deferred — see below)
+
+**Context:** The v0.1 design split value resampling across three small modules: `regrid` (grid → grid), `interpolation` (gap fill + time resample), and `discretize` (binning). They were artificially separated; in practice users reach for "the interpolation module" as one concept. Adjacent operations — vertical coord remapping, temporal smoothing, learned super-resolution — have no clear home today (`detrend.LowpassFilter` is the canonical orphan).
+
+**Options:**
+
+- (A) Keep the three modules separate, add new modules per concern (`coord_remap`, `smooth`, `downscale`). Six top-level modules for one conceptual space.
+- (B) Collapse into a single `xr_toolz.interpolate` module organized by source/target structure (grid↔grid, grid↔points, points→grid, in-place gap fill) plus axis-specific submodules (`coord_remap`, `resample`, `smooth`, `downscale`).
+- (C) Two-module split: `interpolate` (deterministic) + `downscale` (learned). Cleaner separation of deterministic vs ML, but splits closely-related concepts and creates a parallel hierarchy.
+
+**Decision (structural):** Option B.
+
+```
+xr_toolz/interpolate/
+    array.py
+    _src/
+        grid_to_grid.py    # Regrid, Coarsen (deterministic aggregation), Refine (deterministic interpolation)
+        grid_to_points.py  # SampleAtPoints, AlongTrack
+        points_to_grid.py  # ScatterToGrid, Kriging
+        binning.py         # Bin2D, BinND, Bin2DTime
+        gap_fill.py        # FillNaN, FillNaNRBF, FillNaNKriging
+        coord_remap.py     # generic RemapAxis + vertical presets (ToSigma, ToIsopycnal, ToPressureLevels, …) and temporal preset (ToPhase)
+        resample.py        # Resample (down), Upsample
+        smooth.py          # MovingAverage, GaussianSmooth, LowpassFilter, KalmanSmoother
+        downscale.py       # Downscale, Upscale (both wrap a ModelOp)
+```
+
+Naming convention:
+
+- **Deterministic refinement** is `Refine`; **learned refinement** (super-resolution) is `Downscale`.
+- **Deterministic aggregation** is `Coarsen`; **learned aggregation** (subgrid-scale surrogates) is `Upscale`.
+
+`coord_remap` is generalized: vertical coord remapping (depth ↔ σ ↔ isopycnal ↔ pressure-level) is the canonical usage, but the same primitive `RemapAxis` handles temporal phase remapping, curvilinear-orthogonal coord transforms, and Lagrangian ↔ Eulerian rebinning. Named subclasses are presets over the generic operator.
+
+Modules outside `interpolate` that handle adjacent concerns: `crs.Reproject` (CRS-aware regridding — calls into `interpolate.Regrid` internally), `transforms.encoders.coord_{space,time}` (coord *relabeling*, not value resampling).
+
+**Open questions** — deferred; do not block the structural decision, will be resolved before / during implementation:
+
+1. **Super-resolution patch tiling.** Does `Downscale` carry `patch_size` / `overlap` constructor args, or delegate that to `xrpatcher` and stay a pure `ModelOp` wrapper?
+2. **Data fusion home.** `interpolate.fusion` (deterministic only: OI / weighted / kriged) vs `assimilate.fusion` (shares prior-cov / obs-error machinery) vs new top-level `xr_toolz.fusion`?
+3. **`KalmanSmoother` home.** Currently sketched under `interpolate.smooth`, but it requires a state-space model owned by `assimilate`. Migrate to `assimilate.smooth`, or keep in `interpolate.smooth` with an `assimilate.StateSpace` import?
+4. **`coord_remap` preset scope.** Confirmed: vertical (`ToSigma`, `FromSigma`, `ToIsopycnal`, `ToPressureLevels`, `ToHeight`) + temporal (`ToPhase`). Other canonical coord systems worth presetting (e.g., `ToTropopauseRelative`, `ToBoundaryLayerCoord`)?
+
+**Consequences:**
+- `xr_toolz.regrid`, `xr_toolz.interpolation`, `xr_toolz.discretize` are removed in favor of `xr_toolz.interpolate`. Pre-1.0 design doc — no compatibility shim planned.
+- `detrend.LowpassFilter` migrates to `interpolate.smooth.LowpassFilter`. `detrend` becomes climatology-only.
+- `Downscale` introduces a soft `ModelOp` dependency in `interpolate`. `ModelOp` itself has no framework dep (per D4), so the inference module is the only transitive surface added.
+- Three tiers per D11 throughout. Tier A is rich here — most algorithms are pure array math (linear / cubic / RBF / kriging / FFT-based filters) and benefit from JAX or numba variants.
+
