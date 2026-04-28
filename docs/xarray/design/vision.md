@@ -28,7 +28,7 @@ The library covers the full applied-ML lifecycle on geospatial data:
 
 1. **Preprocess** — turn messy, heterogeneous Earth observation data into structured, analysis-ready datasets.
 2. **Infer** — run any trained model (sklearn, JAX/Equinox, PyTorch, NumPyro, plain callable) over those datasets and get xarray output back.
-3. **Evaluate** — score predictions against references with pixel-level, spectral, and multiscale metrics.
+3. **Evaluate** — score predictions against references with pointwise, probabilistic, spectral, multiscale, structural, physical, process-based, Lagrangian, and phenomena-based diagnostics.
 
 Every stage uses the same operator abstraction, so they compose into a single pipeline.
 
@@ -43,6 +43,14 @@ Every stage uses the same operator abstraction, so they compose into a single pi
 **Climate scientist** — "I want to compute anomalies, regrid to a common grid, and run spectral analysis on model output vs observations. I don't want to install xesmf or deal with ESMF compilation."
 
 **Student / newcomer** — "I want `Sequential([ValidateCoords(), Regrid(grid), RemoveClimatology(clim)])(ds)` and have it just work. I shouldn't need to learn about CRS, irregular grids, or NaN handling up front."
+
+**Ocean ML validation researcher** — "I have an ML forecast of SSH, SST, velocity, and tracers. I want to evaluate it by lead time, spatial scale, spectral band, physical regime, and phenomenon type, not only by global RMSE."
+
+**Physical oceanographer** — "I want to know whether a prediction conserves heat, salt, mass, and kinetic energy budgets over a control volume, even if its short-range pixel error looks good."
+
+**Lagrangian transport researcher** — "I want to advect particles through predicted velocity fields and compare dispersion, residence time, and connectivity against reference simulations or drifter data."
+
+**Extreme-event analyst** — "I want to detect marine heatwaves, eddies, fronts, and other ocean events in both prediction and reference fields, then compare detection skill, geometry, duration, and intensity."
 
 ---
 
@@ -68,6 +76,7 @@ Every stage uses the same operator abstraction, so they compose into a single pi
 - A pipeline abstraction (Sequential for linear, Graph for DAGs)
 - An inference wrapper (ModelOp) that turns any model into an Operator
 - An evaluation toolkit (pixel-level, spectral, multiscale metrics)
+- A validation framework for geoscience ML models, including field-based, spectral, process-based, Lagrangian, and object/event-based diagnostics
 - The xarray bookkeeping layer for the broader ecosystem (ekalmX, pyrox_gp, somax)
 
 ### What geo_toolz is NOT
@@ -97,6 +106,8 @@ Every stage uses the same operator abstraction, so they compose into a single pi
 | torchvision transforms | Composable callable transforms with `__call__` |
 | xesmf | Regridding concepts (but pure scipy, no ESMF dependency) |
 | xskillscore | Verification metrics (consumed as dependency) |
+| object-based weather verification | Event detection, matching, and property-based verification |
+| Lagrangian ocean diagnostics | Particle, residence-time, connectivity, and transport-barrier evaluation |
 
 ---
 

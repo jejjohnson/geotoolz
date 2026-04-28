@@ -28,7 +28,11 @@ examples/
 ├── primitives.md          # Layer 0 — pure functions, pipe syntax, toolz composition
 ├── components.md          # Layer 1 — Sequential, operator composition, Hydra, stateful ops
 ├── models.md              # Layer 2 — Graph API, inference, model comparison
-└── integration.md         # Layer 3 — sklearn, xrpatcher, xarray_sklearn, ekalmX
+├── integration.md         # Layer 3 — sklearn, xrpatcher, xarray_sklearn, ekalmX
+├── validation.md          # Expanded validation graphs and skill diagnostics
+├── lagrangian.md          # Particle, trajectory, dispersion, and connectivity examples
+├── budgets.md             # Conservation and control-volume budget examples
+└── phenomena.md           # Event/object detection and verification examples
 ```
 
 ## Reading Order
@@ -37,3 +41,14 @@ examples/
 2. **[components.md](components.md)** — L1: Sequential pipelines and operator patterns
 3. **[models.md](models.md)** — L2: Graph API, ModelOp, model comparison
 4. **[integration.md](integration.md)** — L3: sklearn, xrpatcher, xarray_sklearn, ecosystem
+5. **[validation.md](validation.md)** — validation graphs and field/spectral/structural/process diagnostics
+6. **[lagrangian.md](lagrangian.md)** — material transport and trajectory diagnostics
+7. **[budgets.md](budgets.md)** — heat, salt, volume, and kinetic-energy budgets
+8. **[phenomena.md](phenomena.md)** — marine heatwave, eddy, and generic event verification
+
+## Validation Examples
+
+- **[validation.md](validation.md)** — end-to-end validation examples with pixel, spectral, lead-time, structural, probabilistic, regional, and process scores.
+- **[lagrangian.md](lagrangian.md)** — particle advection, endpoint error, pair dispersion, residence time, connectivity, and FTLE-style diagnostics.
+- **[budgets.md](budgets.md)** — control-volume heat, salt, volume, and kinetic-energy budget residual examples.
+- **[phenomena.md](phenomena.md)** — marine heatwave, eddy, generic event, and event-graph verification examples.
