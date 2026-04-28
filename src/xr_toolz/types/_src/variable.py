@@ -81,6 +81,28 @@ SST = Variable(
     valid_range=(270.0, 320.0),
 )
 
+# CMEMS observation products use the CF standard_name as the file variable
+# (sea_surface_temperature) instead of the model alias (thetao). Used by
+# the SST L3 single-sensor groups and the ODYSSEA L3S multi-sensor product.
+SST_OBS = Variable(
+    name="sst_obs",
+    standard_name="sea_surface_temperature",
+    long_name="Sea surface temperature (satellite L3)",
+    units="K",
+    aliases={"cmems": "sea_surface_temperature"},
+    valid_range=(270.0, 320.0),
+)
+
+# OSTIA L4 ships the analysis field as ``analysed_sst``.
+ANALYSED_SST = Variable(
+    name="analysed_sst",
+    standard_name="sea_surface_temperature",
+    long_name="Analysed sea surface temperature (OSTIA L4)",
+    units="K",
+    aliases={"cmems": "analysed_sst"},
+    valid_range=(270.0, 320.0),
+)
+
 SSH = Variable(
     name="ssh",
     standard_name="sea_surface_height_above_geoid",
@@ -242,6 +264,18 @@ SOS = Variable(
     long_name="Sea surface salinity",
     units="1e-3",
     aliases={"cmems": "sos"},
+    valid_range=(0.0, 45.0),
+)
+
+# SMOS L3 (asc/des) on CMEMS publishes the salinity field as
+# ``Sea_Surface_Salinity`` rather than the lowercase ``sos`` used by the
+# MULTIOBS L4 product family.
+SEA_SURFACE_SALINITY = Variable(
+    name="sea_surface_salinity",
+    standard_name="sea_surface_salinity",
+    long_name="Sea surface salinity (SMOS L3)",
+    units="1e-3",
+    aliases={"cmems": "Sea_Surface_Salinity"},
     valid_range=(0.0, 45.0),
 )
 
