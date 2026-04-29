@@ -88,12 +88,64 @@ def test_sequential_get_config_roundtrip():
     }
 
 
-def test_sequential_describe_lists_steps():
+def test_sequential_describe_renders_tree():
     pipeline = Sequential([AddConst(1), AddConst(2)])
-    lines = pipeline.describe().splitlines()
-    assert lines[0].startswith("Sequential (2 steps):")
-    assert "[0] AddConst(const=1)" in lines[1]
-    assert "[1] AddConst(const=2)" in lines[2]
+    text = pipeline.describe()
+    assert text == "Sequential (2 ops)\n├── AddConst(const=1)\n└── AddConst(const=2)"
+
+
+def test_sequential_describe_handles_nested_pipelines():
+    inner = Sequential([AddConst(1), AddConst(2)])
+    outer = Sequential([inner, AddConst(10)])
+    text = outer.describe()
+    assert (
+        text == "Sequential (2 ops)\n"
+        "├── Sequential (2 ops)\n"
+        "│   ├── AddConst(const=1)\n"
+        "│   └── AddConst(const=2)\n"
+        "└── AddConst(const=10)"
+    )
+
+
+def test_sequential_describe_wraps_long_configs():
+    class WideOp(AddConst):
+        def get_config(self):
+            return {f"k{i}": "x" * 8 for i in range(6)}
+
+    pipeline = Sequential([WideOp(0)])
+    lines = pipeline.describe(max_width=40).splitlines()
+    assert lines[0] == "Sequential (1 ops)"
+    assert lines[1].startswith("└── WideOp(")
+    assert all(ln.startswith("    ") for ln in lines[2:])
+
+
+def test_sequential_describe_closes_single_param_wrap():
+    """A wrapped one-field config must still emit the closing paren."""
+
+    class OneFieldOp(AddConst):
+        def get_config(self):
+            return {"only_field": "x" * 80}
+
+    pipeline = Sequential([OneFieldOp(0)])
+    text = pipeline.describe(max_width=40)
+    last = text.splitlines()[-1]
+    assert last.endswith(")"), f"missing close paren: {last!r}"
+
+
+def test_sequential_describe_passes_reduced_width_into_nested():
+    """Nested describe() must wrap against the remaining width, not the outer one."""
+
+    class WideOp(AddConst):
+        def get_config(self):
+            return {"a": "x" * 30, "b": "y" * 30}
+
+    inner = Sequential([WideOp(0)])
+    outer = Sequential([Sequential([Sequential([inner])])])
+    lines = outer.describe(max_width=80).splitlines()
+    # No produced line may exceed max_width (this includes branch prefixes).
+    assert all(len(ln) <= 80 for ln in lines), [
+        (len(ln), ln) for ln in lines if len(ln) > 80
+    ]
 
 
 # --- Symbolic dispatch -------------------------------------------------------
