@@ -198,7 +198,6 @@ def test_metrics_operators_submodule_imports():
 @pytest.mark.parametrize(
     "submodule",
     [
-        "physical",
         "lagrangian",
     ],
 )
@@ -210,12 +209,37 @@ def test_metrics_view_stub_submodules_are_importable(submodule):
 
     ``object`` is excluded: F1.3 pre-reserves the canonical long-form
     V5 class names there. See ``test_metrics_object_reserved_names``.
+    ``physical`` is excluded: V4.1 has landed its public surface.
     """
     mod = importlib.import_module(f"xr_toolz.metrics.{submodule}")
     public_names = [n for n in dir(mod) if not n.startswith("_")]
     assert public_names == [], (
         f"xr_toolz.metrics.{submodule} unexpectedly exports public names: "
         f"{public_names}"
+    )
+
+
+def test_metrics_physical_submodule_imports():
+    from xr_toolz.metrics.physical import (
+        DensityInversionFraction,
+        DivergenceError,
+        GeostrophicBalanceError,
+        PVConservationError,
+        density_inversion_fraction,
+        divergence_error,
+        geostrophic_balance_error,
+        pv_conservation_error,
+    )
+
+    assert callable(geostrophic_balance_error)
+    _ = (
+        DensityInversionFraction,
+        DivergenceError,
+        GeostrophicBalanceError,
+        PVConservationError,
+        density_inversion_fraction,
+        divergence_error,
+        pv_conservation_error,
     )
 
 

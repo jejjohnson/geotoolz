@@ -1,8 +1,27 @@
-"""Stub: lands with view V4 (Epic).
+"""V4.1 physical-consistency metrics — re-exports from ``_src.physical``.
 
-This module is intentionally empty. It will be populated by the V4
-view epic. Importing it succeeds today so downstream PRs can land
-additively without a package layout change.
+See :mod:`xr_toolz.metrics._src.physical` for full documentation.
 """
 
-from xr_toolz.metrics._src.physical import *  # noqa: F403
+from xr_toolz.metrics._src.physical import (
+    DensityInversionFraction,
+    DivergenceError,
+    GeostrophicBalanceError,
+    PVConservationError,
+    density_inversion_fraction,
+    divergence_error,
+    geostrophic_balance_error,
+    pv_conservation_error,
+)
+
+
+__all__ = [
+    "DensityInversionFraction",
+    "DivergenceError",
+    "GeostrophicBalanceError",
+    "PVConservationError",
+    "density_inversion_fraction",
+    "divergence_error",
+    "geostrophic_balance_error",
+    "pv_conservation_error",
+]

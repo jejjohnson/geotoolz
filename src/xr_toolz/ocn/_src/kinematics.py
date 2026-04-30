@@ -690,3 +690,77 @@ def potential_vorticity_barotropic(
         standard_name="barotropic_potential_vorticity",
     )
     return pv.rename(None).to_dataset(name="pv_barotropic")
+
+
+def density_from_ts(
+    ds: xr.Dataset,
+    *,
+    salinity: str = "so",
+    temperature: str = "thetao",
+    pressure: str | float | xr.DataArray = 0.0,
+    lon: str = "lon",
+    lat: str = "lat",
+    eos: str = "teos10",
+) -> xr.Dataset:
+    """In-situ seawater density via TEOS-10 (lazy ``gsw`` import).
+
+    Args:
+        ds: Dataset with practical salinity ``salinity`` (PSU) and
+            potential temperature ``temperature`` (°C).
+        salinity, temperature: Variable names.
+        pressure: Sea pressure in dbar — either a variable name in
+            ``ds``, a scalar (default ``0.0`` for surface density), or
+            an :class:`xr.DataArray` that broadcasts against the
+            salinity field.
+        lon, lat: Coordinate names used by ``gsw.SA_from_SP``. The
+            coords may be 1-D; they are broadcast to the salinity
+            shape before calling :mod:`gsw`.
+        eos: ``"teos10"`` (default, via :mod:`gsw`). Reserved for future
+            ``"linear"`` / ``"jmd"`` alternatives.
+
+    Returns:
+        Dataset with a single variable ``"rho"`` (kg/m³).
+
+    Raises:
+        ImportError: If :mod:`gsw` is not installed (it is an optional
+            extra; install via ``pip install xr_toolz[oceanography]``
+            or ``pip install gsw``).
+    """
+    if eos != "teos10":
+        raise NotImplementedError(
+            f"eos={eos!r} is not implemented; only 'teos10' is supported. "
+            f"Open an issue if you need a linear / JMD EOS."
+        )
+    import importlib
+
+    try:
+        gsw = importlib.import_module("gsw")
+    except ImportError as exc:
+        raise ImportError(
+            "density_from_ts requires the optional 'gsw' dependency. "
+            "Install with: pip install xr_toolz[oceanography] (or pip install gsw)."
+        ) from exc
+
+    sp = ds[salinity]
+    pt = ds[temperature]
+    if isinstance(pressure, str):
+        p_input: float | xr.DataArray = ds[pressure]
+    else:
+        p_input = pressure
+    lon_da = ds[lon]
+    lat_da = ds[lat]
+    sp_b, lon_b, lat_b = xr.broadcast(sp, lon_da, lat_da)
+    if isinstance(p_input, xr.DataArray):
+        sp_b, p_b = xr.broadcast(sp_b, p_input)
+    else:
+        p_b = p_input
+    sa = gsw.SA_from_SP(sp_b, p_b, lon_b, lat_b)
+    ct = gsw.CT_from_pt(sa, pt)
+    rho = gsw.rho(sa, ct, p_b)
+    rho_da = xr.DataArray(rho, coords=sp_b.coords, dims=sp_b.dims, name="rho")
+    rho_da.attrs.update(
+        long_name="In-situ Seawater Density (TEOS-10)",
+        standard_name="sea_water_density",
+        units="kg m-3",
+    )
+    return rho_da.to_dataset()

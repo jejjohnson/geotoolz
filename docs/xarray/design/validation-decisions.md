@@ -279,3 +279,62 @@ from xr_toolz.viz.validation import (
 ```python
 fig = SpectralSkillPanel(variable="ssh", dims=("lat", "lon"))(psd_scores)
 ```
+
+## D16: Budget operators take grid metrics as explicit inputs
+
+### Context
+
+Conservation-budget operators (V4.2 / V4.3) need cell areas, widths, and volumes to compute control-volume integrals and boundary fluxes. These metrics depend on the grid (regular sphere, tripolar, NEMO C-grid, etc.) and cannot reliably be guessed from coordinate values alone — for example, a Dataset with `lat`/`lon` in degrees does not tell you whether the model used `R · cos φ · Δλ` or a tripolar overlay.
+
+### Decision
+
+**Integral / volume-weighted budget operators** — `ControlVolumeIntegral`, `BoundaryFlux`, and any future per-region closure operator that consumes `cell_volume` / face areas — **must** accept `volume_metrics` and `face_metrics` as constructor arguments. They never auto-derive cell volumes / face areas from coordinates. A user who wants spherical metrics from lon/lat coords calls `xr_toolz.calc.grid_metrics_from_coords` first to produce the metric Datasets. Models that already ship explicit grid metrics (CMEMS NEMO output, MOM6 horizontal grids) bypass the helper and pass the model's own metric Dataset.
+
+**Per-cell residual operators** — `HeatBudgetResidual`, `SaltBudgetResidual`, `VolumeBudgetResidual`, `KineticEnergyBudgetResidual` — return the field ``∂φ/∂t + ∇·(u φ) − sources`` on the same grid as the input. These do not need cell volumes or face areas: the spherical-metric divergence ``∇·`` only requires the differential metric ``R cos φ``, which `xr_toolz.calc.divergence` derives from coordinates inside `_src.spherical`. Volume-integrated closure (residuals weighted by `cell_volume` and summed over a control volume) goes through `ControlVolumeIntegral`, which is where explicit metrics re-enter the pipeline.
+
+### Consequences
+
+- No silent failures from operators guessing the wrong metric.
+- One canonical helper (`grid_metrics_from_coords`) lives in `xr_toolz.calc`; budgets stay metric-agnostic.
+- Datasets without metrics get a clear `KeyError` at the budget call site rather than a wrong-by-percent answer.
+- The convention aligns with xgcm's separation of grid metrics from data fields.
+
+### Convention
+
+`volume_metrics: xr.Dataset` carries:
+- `dx` (m) — zonal cell width
+- `dy` (m) — meridional cell width
+- `dz` (m) — vertical cell thickness (optional, depth grids only)
+- `cell_area` (m²) — `dx · dy`
+- `cell_volume` (m³) — `cell_area · dz`, falling back to `cell_area` when `dz` is absent
+
+`face_metrics: xr.Dataset` carries:
+- `dx_e`, `dy_n` (m) — face widths between adjacent cell centres
+- `dz_top` (m) — vertical face thickness (optional)
+- `area_e`, `area_n`, `area_top` (m²) — corresponding face areas
+
+### Helper
+
+```python
+from xr_toolz import calc
+
+vol, face = calc.grid_metrics_from_coords(
+    ds, lat="lat", lon="lon", depth="depth", sphere=True
+)
+```
+
+Returns the two Datasets above. Edge cells extrapolate the nearest interior spacing — adequate for closure tests and demo notebooks; users who need exact boundary metrics should pass model-shipped metrics instead.
+
+### Audit table — V4.5 kinematics
+
+V4.1 / V4.3 reach into `xr_toolz.calc` and `xr_toolz.ocn` for derived quantities. Status of each, audited as part of the V4 epic:
+
+| Quantity | Status | Location |
+|----------|--------|----------|
+| Vorticity (relative + absolute) | implemented | `xr_toolz.ocn.relative_vorticity`, `absolute_vorticity` (and `xr_toolz.calc.curl`) |
+| Divergence (2-D + 3-D) | implemented | `xr_toolz.calc.divergence`, `xr_toolz.ocn.divergence` (3-D via `volume_budget_residual` with `w_var`) |
+| Density (TEOS-10) | implemented (lazy `gsw`) | `xr_toolz.ocn.density_from_ts` — raises `ImportError` pointing at `xr_toolz[oceanography]` if `gsw` is missing |
+| Mixed-layer depth | implemented | `xr_toolz.ocn.mixed_layer_depth` |
+| Brunt–Väisälä frequency (N²) | implemented | `xr_toolz.ocn.brunt_vaisala_frequency` |
+| Kinetic energy | implemented | `xr_toolz.ocn.kinetic_energy` |
+

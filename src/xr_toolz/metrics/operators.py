@@ -13,6 +13,12 @@ from xr_toolz.metrics._src.distributional import (
 from xr_toolz.metrics._src.forecast import SkillByLeadTime
 from xr_toolz.metrics._src.masked import MaskedMetric
 from xr_toolz.metrics._src.multiscale import EvaluateByRegion
+from xr_toolz.metrics._src.physical import (
+    DensityInversionFraction,
+    DivergenceError,
+    GeostrophicBalanceError,
+    PVConservationError,
+)
 from xr_toolz.metrics._src.pixel import (
     MAE,
     MSE,
@@ -47,12 +53,16 @@ __all__ = [
     "Bias",
     "CentroidDisplacement",
     "Correlation",
+    "DensityInversionFraction",
+    "DivergenceError",
     "EnergyDistance",
     "EnsembleCoverage",
     "EvaluateByRegion",
+    "GeostrophicBalanceError",
     "GradientDifference",
     "MaskedMetric",
     "PSDScore",
+    "PVConservationError",
     "PhaseShiftError",
     "R2Score",
     "RankHistogram",

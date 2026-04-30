@@ -14,6 +14,7 @@ the spherical metric and downstream physics live in
 """
 
 from xr_toolz.calc._src.constants import EARTH_RADIUS, GRAVITY, OMEGA
+from xr_toolz.calc._src.grid_metrics import grid_metrics_from_coords
 from xr_toolz.calc._src.operators import (
     curl,
     divergence,
@@ -30,6 +31,7 @@ __all__ = [
     "curl",
     "divergence",
     "gradient",
+    "grid_metrics_from_coords",
     "laplacian",
     "partial",
 ]
