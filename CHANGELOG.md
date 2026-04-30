@@ -20,6 +20,7 @@
 
 * `xr_toolz.interpolate` — value-resampling package, sub-organized by source/target structure (`gap_fill`, `grid_to_grid`, `resample`, `binning`, `points_to_grid`) with placeholder submodules (`coord_remap`, `smooth`, `downscale`, `grid_to_points`) for upcoming work.
 * `xr_toolz.interpolate.operators` — `Bin2D`, `Coarsen`, `FillNaNRBF`, `FillNaNSpatial`, `FillNaNTemporal`, `Histogram2D`, `PointsToGrid`, `Refine`, `ResampleTime`.
+* `xr_toolz.inference` — Layer-1 wrappers for trained ML models (D4, Epic F4): `ModelOp` (framework-agnostic, duck-typed dispatch on a configurable method, xarray↔array marshalling, leading non-feature dims supported by flattening into a single ``(N, F)`` model call), plus `SklearnModelOp` and `JaxModelOp` thin subclasses. `sklearn`, `jax`, `equinox`, and `torch` are never imported at top level — backend imports are lazy. Not auto-exported from `xr_toolz`; opt-in via `from xr_toolz.inference import ModelOp`.
 
 ### Deprecated
 
