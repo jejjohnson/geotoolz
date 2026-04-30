@@ -8,9 +8,6 @@ import pytest
 import xarray as xr
 
 from xr_toolz.geo import (
-    Grid,
-    Period,
-    SpaceTimeGrid,
     add_country_mask,
     add_land_mask,
     add_ocean_mask,
@@ -19,18 +16,13 @@ from xr_toolz.geo import (
     block_maxima,
     block_minima,
     calc_latlon,
-    coarsen,
     cyclical_encode,
     encode_time_cyclical,
     encode_time_ordinal,
-    fillnan_spatial,
-    fillnan_temporal,
     find_intercept_1D,
     fourier_features,
     get_crs,
-    histogram_2d,
     lonlat_to_xy,
-    points_to_grid,
     positional_encoding,
     pot_exceedances,
     pot_threshold,
@@ -38,13 +30,23 @@ from xr_toolz.geo import (
     pp_stats,
     psd_score,
     random_fourier_features,
-    refine,
     reproject,
-    resample_time,
     resolved_scale,
     time_rescale,
     time_unrescale,
     xy_to_lonlat,
+)
+from xr_toolz.interpolate import (
+    Grid,
+    Period,
+    SpaceTimeGrid,
+    coarsen,
+    fillnan_spatial,
+    fillnan_temporal,
+    histogram_2d,
+    points_to_grid,
+    refine,
+    resample_time,
 )
 
 
@@ -123,7 +125,7 @@ def test_fillnan_spatial_fills_interior_nans():
 def test_fillnan_rbf_preserves_finite_values():
     """Regression: the RBF filler must only patch NaNs, not overwrite
     valid observations."""
-    from xr_toolz.geo import fillnan_rbf
+    from xr_toolz.interpolate import fillnan_rbf
 
     lat = np.linspace(0.0, 1.0, 6)
     lon = np.linspace(0.0, 1.0, 6)

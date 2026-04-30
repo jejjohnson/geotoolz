@@ -145,34 +145,6 @@ def histogram_2d(
     return bin_2d(da, grid, statistic="count", lon=lon, lat=lat)
 
 
-def points_to_grid(
-    lons: np.ndarray,
-    lats: np.ndarray,
-    values: np.ndarray,
-    grid: Grid,
-    statistic: str = "mean",
-) -> xr.DataArray:
-    """Bin raw (lon, lat, value) tuples onto ``grid``.
-
-    Thin wrapper around :func:`bin_2d` that doesn't require constructing
-    a scattered DataArray first.
-    """
-    finite = np.isfinite(values)
-    lon_edges, lat_edges = grid.bin_edges()
-    stat, _, _, _ = binned_statistic_2d(
-        np.ravel(lons)[finite],
-        np.ravel(lats)[finite],
-        np.ravel(values)[finite],
-        statistic=statistic,
-        bins=[lon_edges, lat_edges],
-    )
-    return xr.DataArray(
-        data=stat.T,
-        dims=("lat", "lon"),
-        coords={"lon": grid.lon, "lat": grid.lat},
-    )
-
-
 def _cell_edges(centers: np.ndarray) -> np.ndarray:
     """Turn an array of cell-center coordinates into cell edges."""
     centers = np.asarray(centers, dtype=float)

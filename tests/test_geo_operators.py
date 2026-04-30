@@ -18,7 +18,6 @@ from xr_toolz.geo.operators import (
     PSDScore,
     R2Score,
     RemoveClimatology,
-    ResampleTime,
     SelectVariables,
     SubsetBBox,
     SubsetTime,
@@ -26,6 +25,7 @@ from xr_toolz.geo.operators import (
     ValidateLatitude,
     ValidateLongitude,
 )
+from xr_toolz.interpolate.operators import ResampleTime
 from xr_toolz.transforms.operators import PowerSpectrum
 
 

@@ -1,8 +1,10 @@
-"""Gap-filling and resampling primitives.
+"""Gap-filling primitives.
 
 Spatial NaN filling uses :func:`scipy.interpolate.griddata` (linear,
 nearest, or cubic). Temporal NaN filling delegates to xarray's native
-``interpolate_na``. Time resampling wraps ``ds.resample(...)``.
+``interpolate_na``. ``fillnan_rbf`` uses
+:class:`scipy.interpolate.RBFInterpolator` for smooth, globally-aware
+infilling.
 
 These deliberately avoid heavy C++ dependencies (``pyinterp``,
 ``xesmf``); for Gauss-Seidel or ESMF-conservative regridding, use those
@@ -11,7 +13,6 @@ libraries directly.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -135,64 +136,3 @@ def fillnan_rbf(
         output_core_dims=[[lat, lon]],
         vectorize=True,
     )
-
-
-def resample_time(
-    ds: xr.Dataset | xr.DataArray,
-    freq: str = "1D",
-    method: str = "mean",
-    time: str = "time",
-) -> xr.Dataset | xr.DataArray:
-    """Resample along the time axis via xarray's built-in resampler.
-
-    Args:
-        ds: Input.
-        freq: Pandas-style frequency string (e.g. ``"1D"``, ``"6H"``,
-            ``"1M"``).
-        method: Aggregation method; must be a string method on the
-            Resample object (``"mean"``, ``"sum"``, ``"max"``, ...).
-        time: Name of the time dimension.
-
-    Returns:
-        Resampled container.
-    """
-    resampler = ds.resample({time: freq})
-    if not hasattr(resampler, method):
-        raise ValueError(
-            f"Unknown resample method {method!r}; expected one of "
-            "'mean', 'sum', 'max', 'min', 'median', 'std', 'var', 'first', 'last'."
-        )
-    return getattr(resampler, method)()
-
-
-def coarsen(
-    ds: xr.Dataset | xr.DataArray,
-    factor: dict[str, int],
-    method: str = "mean",
-    boundary: str = "trim",
-) -> xr.Dataset | xr.DataArray:
-    """Coarsen ``ds`` along one or more dimensions by integer factors.
-
-    Thin wrapper around ``xr.Dataset.coarsen``.
-    """
-    coarsened = ds.coarsen(dim=factor, boundary=boundary)
-    return getattr(coarsened, method)()
-
-
-def refine(
-    ds: xr.Dataset | xr.DataArray,
-    factor: dict[str, int],
-    method: str = "linear",
-) -> xr.Dataset | xr.DataArray:
-    """Refine ``ds`` along one or more dimensions by integer factors.
-
-    Produces a ``factor[dim]``-times-denser grid along each dimension
-    via :meth:`xr.Dataset.interp`.
-    """
-    new_coords: dict[str, Sequence[float]] = {}
-    for dim, f in factor.items():
-        old = ds[dim].values
-        if f <= 0:
-            raise ValueError(f"refinement factor for {dim!r} must be positive.")
-        new_coords[dim] = np.linspace(old.min(), old.max(), (len(old) - 1) * f + 1)
-    return ds.interp(new_coords, method=method)

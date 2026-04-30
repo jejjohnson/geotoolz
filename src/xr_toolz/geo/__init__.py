@@ -37,14 +37,6 @@ from xr_toolz.geo._src.detrend import (
     calculate_climatology_smoothed,
     remove_climatology,
 )
-from xr_toolz.geo._src.discretize import (
-    Grid,
-    Period,
-    SpaceTimeGrid,
-    bin_2d,
-    histogram_2d,
-    points_to_grid,
-)
 from xr_toolz.geo._src.extremes import (
     block_maxima,
     block_minima,
@@ -52,14 +44,6 @@ from xr_toolz.geo._src.extremes import (
     pot_threshold,
     pp_counts,
     pp_stats,
-)
-from xr_toolz.geo._src.interpolate import (
-    coarsen,
-    fillnan_rbf,
-    fillnan_spatial,
-    fillnan_temporal,
-    refine,
-    resample_time,
 )
 from xr_toolz.geo._src.masks import (
     add_country_mask,
@@ -143,16 +127,12 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
-    "Grid",
-    "Period",
-    "SpaceTimeGrid",
     "add_climatology",
     "add_country_mask",
     "add_land_mask",
     "add_ocean_mask",
     "apply_mask",
     "assign_crs",
-    "bin_2d",
     "block_maxima",
     "block_minima",
     "calc_latlon",
@@ -161,23 +141,15 @@ __all__ = [
     "calculate_climatology",
     "calculate_climatology_season",
     "calculate_climatology_smoothed",
-    "coarsen",
-    "fillnan_rbf",
-    "fillnan_spatial",
-    "fillnan_temporal",
     "get_crs",
-    "histogram_2d",
     "lonlat_to_xy",
-    "points_to_grid",
     "pot_exceedances",
     "pot_threshold",
     "pp_counts",
     "pp_stats",
-    "refine",
     "remove_climatology",
     "rename_coords",
     "reproject",
-    "resample_time",
     "select_variables",
     "subset_bbox",
     "subset_time",

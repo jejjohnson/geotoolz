@@ -20,7 +20,6 @@ from typing import Any
 from xr_toolz.core import Operator
 from xr_toolz.geo._src import (
     detrend as _detrend,
-    interpolate as _interpolate,
     masks as _masks,
     subset as _subset,
     validation as _validation,
@@ -240,59 +239,6 @@ class ApplyMask(Operator):
         return {"mask": mask_repr, "drop": self.drop}
 
 
-# ---------- interpolate ----------------------------------------------------
-
-
-class FillNaNSpatial(Operator):
-    def __init__(self, method: str = "linear", lon: str = "lon", lat: str = "lat"):
-        self.method = method
-        self.lon = lon
-        self.lat = lat
-
-    def _apply(self, da):
-        return _interpolate.fillnan_spatial(
-            da, method=self.method, lon=self.lon, lat=self.lat
-        )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"method": self.method, "lon": self.lon, "lat": self.lat}
-
-
-class FillNaNTemporal(Operator):
-    def __init__(
-        self,
-        method: str = "linear",
-        time: str = "time",
-        max_gap: Any = None,
-    ):
-        self.method = method
-        self.time = time
-        self.max_gap = max_gap
-
-    def _apply(self, ds):
-        return _interpolate.fillnan_temporal(
-            ds, method=self.method, time=self.time, max_gap=self.max_gap
-        )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"method": self.method, "time": self.time, "max_gap": self.max_gap}
-
-
-class ResampleTime(Operator):
-    def __init__(self, freq: str = "1D", method: str = "mean", time: str = "time"):
-        self.freq = freq
-        self.method = method
-        self.time = time
-
-    def _apply(self, ds):
-        return _interpolate.resample_time(
-            ds, freq=self.freq, method=self.method, time=self.time
-        )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"freq": self.freq, "method": self.method, "time": self.time}
-
-
 # ---------- deprecated metric ops -----------------------------------------
 
 # Moved to xr_toolz.metrics.operators. Re-export lazily for one release
@@ -336,11 +282,8 @@ __all__ = [
     "ApplyMask",
     "CalculateClimatology",
     "CalculateClimatologySmoothed",
-    "FillNaNSpatial",
-    "FillNaNTemporal",
     "RemoveClimatology",
     "RenameCoords",
-    "ResampleTime",
     "SelectVariables",
     "SubsetBBox",
     "SubsetTime",
