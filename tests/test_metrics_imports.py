@@ -110,6 +110,75 @@ def test_metrics_spectral_submodule_imports():
     _ = (PSDScore, find_intercept_1D, psd_error, resolved_scale)
 
 
+def test_metrics_structural_submodule_imports():
+    from xr_toolz.metrics.structural import (
+        SSIM,
+        CentroidDisplacement,
+        GradientDifference,
+        PhaseShiftError,
+        centroid_displacement,
+        gradient_difference,
+        phase_shift_error,
+        ssim,
+    )
+
+    assert callable(ssim)
+    _ = (
+        SSIM,
+        CentroidDisplacement,
+        GradientDifference,
+        PhaseShiftError,
+        centroid_displacement,
+        gradient_difference,
+        phase_shift_error,
+    )
+
+
+def test_metrics_probabilistic_submodule_imports():
+    from xr_toolz.metrics.probabilistic import (
+        EnsembleCoverage,
+        RankHistogram,
+        ReliabilityCurve,
+        SpreadSkillRatio,
+        ensemble_coverage,
+        rank_histogram,
+        reliability_curve,
+        spread_skill_ratio,
+    )
+
+    assert callable(spread_skill_ratio)
+    _ = (
+        EnsembleCoverage,
+        RankHistogram,
+        ReliabilityCurve,
+        SpreadSkillRatio,
+        ensemble_coverage,
+        rank_histogram,
+        reliability_curve,
+    )
+
+
+def test_metrics_distributional_submodule_imports():
+    from xr_toolz.metrics.distributional import (
+        CRPS,
+        EnergyDistance,
+        Wasserstein1,
+        crps_ensemble,
+        energy_distance,
+        wasserstein_1,
+    )
+
+    assert callable(crps_ensemble)
+    _ = (CRPS, EnergyDistance, Wasserstein1, energy_distance, wasserstein_1)
+
+
+def test_metrics_masked_submodule_imports():
+    from xr_toolz.metrics.masked import MaskedMetric, masked_metric
+
+    assert callable(masked_metric)
+    _ = (MaskedMetric,)
+
+
 def test_metrics_operators_submodule_imports():
     from xr_toolz.metrics.operators import (
         MAE,
@@ -129,10 +198,6 @@ def test_metrics_operators_submodule_imports():
 @pytest.mark.parametrize(
     "submodule",
     [
-        "structural",
-        "probabilistic",
-        "distributional",
-        "masked",
         "physical",
         "lagrangian",
     ],

@@ -1,11 +1,17 @@
 """Layer-1 ``Operator`` wrappers for evaluation metrics.
 
 This module re-exports the operator classes from
-:mod:`xr_toolz.metrics._src.pixel` and :mod:`xr_toolz.metrics._src.spectral`
-for ergonomic ``from xr_toolz.metrics.operators import RMSE`` access.
+:mod:`xr_toolz.metrics._src.pixel` and friends for ergonomic
+``from xr_toolz.metrics.operators import RMSE`` access.
 """
 
+from xr_toolz.metrics._src.distributional import (
+    CRPS,
+    EnergyDistance,
+    Wasserstein1,
+)
 from xr_toolz.metrics._src.forecast import SkillByLeadTime
+from xr_toolz.metrics._src.masked import MaskedMetric
 from xr_toolz.metrics._src.multiscale import EvaluateByRegion
 from xr_toolz.metrics._src.pixel import (
     MAE,
@@ -16,18 +22,42 @@ from xr_toolz.metrics._src.pixel import (
     Correlation,
     R2Score,
 )
+from xr_toolz.metrics._src.probabilistic import (
+    EnsembleCoverage,
+    RankHistogram,
+    ReliabilityCurve,
+    SpreadSkillRatio,
+)
 from xr_toolz.metrics._src.spectral import PSDScore
+from xr_toolz.metrics._src.structural import (
+    SSIM,
+    CentroidDisplacement,
+    GradientDifference,
+    PhaseShiftError,
+)
 
 
 __all__ = [
+    "CRPS",
     "MAE",
     "MSE",
     "NRMSE",
     "RMSE",
+    "SSIM",
     "Bias",
+    "CentroidDisplacement",
     "Correlation",
+    "EnergyDistance",
+    "EnsembleCoverage",
     "EvaluateByRegion",
+    "GradientDifference",
+    "MaskedMetric",
     "PSDScore",
+    "PhaseShiftError",
     "R2Score",
+    "RankHistogram",
+    "ReliabilityCurve",
     "SkillByLeadTime",
+    "SpreadSkillRatio",
+    "Wasserstein1",
 ]
