@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+* `xr_toolz.transforms.operators` — Tier C wrappers for the encoder primitives: `CyclicalEncode`, `FourierFeatures`, `RandomFourierFeatures`, `PositionalEncoding`, `EncodeTimeCyclical`, `EncodeTimeOrdinal`, `TimeRescale`, `TimeUnrescale` (#95).
+
 ### Removed
 
 * Value-resampling primitives moved out of `xr_toolz.geo` into the new `xr_toolz.interpolate` package (D8/D12, Epic F3). No deprecation shim — the package is pre-1.0 and has no external users.

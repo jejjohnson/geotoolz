@@ -548,6 +548,41 @@ class PolynomialFeatures(Operator):
 
 All encoder Operators have the standard `Dataset → Dataset` shape — they add new variables / coords carrying the encoded features. Stateless (no `fit` step required), so they slot into `Sequential` directly.
 
+#### Shipped Tier C surface (xr_toolz.transforms.operators)
+
+The encoder Operators currently exported from `xr_toolz.transforms.operators` (#95):
+
+```python
+# basis encoders — wrap a single ds[variable]
+class CyclicalEncode(Operator):
+    def __init__(self, variable: str, period: float): ...
+class FourierFeatures(Operator):
+    def __init__(self, variable: str, num_freqs: int, scale: float = 1.0,
+                 *, output_name: str | None = None, feature_dim: str = "feature"): ...
+class RandomFourierFeatures(Operator):
+    def __init__(self, variable: str, num_features: int, sigma: float = 1.0,
+                 seed: int | None = None, *, output_name: str | None = None,
+                 feature_dim: str = "feature"): ...
+class PositionalEncoding(Operator):
+    def __init__(self, variable: str, num_freqs: int, include_input: bool = True,
+                 *, output_name: str | None = None, feature_dim: str = "feature"): ...
+
+# coord-time encoders — operate on the dataset's time coord
+class EncodeTimeCyclical(Operator):
+    def __init__(self, components: Sequence[str] = ("dayofyear", "hour"),
+                 time: str = "time"): ...
+class EncodeTimeOrdinal(Operator):
+    def __init__(self, reference_date: str | np.datetime64 | None = None,
+                 time: str = "time", unit: str = "D"): ...
+class TimeRescale(Operator):
+    def __init__(self, freq_dt: float = 1.0, freq_unit: str = "s",
+                 t0: str | np.datetime64 | None = None, time: str = "time"): ...
+class TimeUnrescale(Operator):
+    def __init__(self, time: str = "time"): ...
+```
+
+The basis encoders take a single `variable` (rather than the aspirational `coords: list[str]` form earlier in this section) and emit a new variable with a trailing `feature_dim`. `RandomFourierFeatures` is rank-aware: 1-D inputs gain a feature axis; ≥2-D vector inputs have their trailing axis replaced with the feature axis (the underlying `random_fourier_features` projects via a `(d, num_features/2)` matrix).
+
 ---
 
 ## `extremes` — *Deferred*
