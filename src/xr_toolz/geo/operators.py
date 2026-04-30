@@ -5,10 +5,15 @@ Each class is a thin adapter: store configuration, implement
 from :class:`xr_toolz.core.Operator`, so they compose with
 :class:`~xr_toolz.core.Sequential`, the ``|`` pipe, and the functional
 :class:`~xr_toolz.core.Graph` API.
+
+Metric operators (``MSE``, ``RMSE``, …, ``PSDScore``) moved to
+:mod:`xr_toolz.metrics.operators`. They remain importable from this
+module for one release with a :class:`DeprecationWarning`.
 """
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from typing import Any
 
@@ -17,7 +22,6 @@ from xr_toolz.geo._src import (
     detrend as _detrend,
     interpolate as _interpolate,
     masks as _masks,
-    metrics as _metrics,
     subset as _subset,
     validation as _validation,
 )
@@ -289,112 +293,51 @@ class ResampleTime(Operator):
         return {"freq": self.freq, "method": self.method, "time": self.time}
 
 
-# ---------- pixel metrics (multi-input) -----------------------------------
+# ---------- deprecated metric ops -----------------------------------------
+
+# Moved to xr_toolz.metrics.operators. Re-export lazily for one release
+# so existing user imports continue to work with a deprecation warning.
+_DEPRECATED_METRIC_OPS = {
+    "MSE",
+    "RMSE",
+    "NRMSE",
+    "MAE",
+    "Bias",
+    "Correlation",
+    "R2Score",
+    "PSDScore",
+}
 
 
-class _PixelMetricOp(Operator):
-    """Base class for two-input pixel metrics."""
+def __getattr__(name: str) -> Any:
+    if name in _DEPRECATED_METRIC_OPS:
+        from importlib import import_module
 
-    _fn: Any = None
-
-    def __init__(self, variable: str, dims: str | Sequence[str]):
-        self.variable = variable
-        self.dims = dims if isinstance(dims, str) else list(dims)
-
-    def _apply(self, ds_pred, ds_ref):
-        return self.__class__._fn(ds_pred, ds_ref, self.variable, self.dims)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "variable": self.variable,
-            "dims": self.dims if isinstance(self.dims, str) else list(self.dims),
-        }
-
-
-class MSE(_PixelMetricOp):
-    _fn = staticmethod(_metrics.mse)
-
-
-class RMSE(_PixelMetricOp):
-    _fn = staticmethod(_metrics.rmse)
-
-
-class NRMSE(_PixelMetricOp):
-    _fn = staticmethod(_metrics.nrmse)
-
-
-class MAE(_PixelMetricOp):
-    _fn = staticmethod(_metrics.mae)
-
-
-class Bias(_PixelMetricOp):
-    _fn = staticmethod(_metrics.bias)
-
-
-class Correlation(_PixelMetricOp):
-    _fn = staticmethod(_metrics.correlation)
-
-
-class R2Score(_PixelMetricOp):
-    _fn = staticmethod(_metrics.r2_score)
-
-
-class PSDScore(Operator):
-    """Two-input PSD score operator."""
-
-    def __init__(
-        self,
-        variable: str,
-        psd_dims: Sequence[str],
-        avg_dims: Sequence[str] | None = None,
-        isotropic: bool = False,
-        **kwargs: Any,
-    ):
-        self.variable = variable
-        self.psd_dims = list(psd_dims)
-        self.avg_dims = None if avg_dims is None else list(avg_dims)
-        self.isotropic = isotropic
-        self.kwargs = dict(kwargs)
-
-    def _apply(self, ds_pred, ds_ref):
-        return _metrics.psd_score(
-            ds_pred,
-            ds_ref,
-            self.variable,
-            self.psd_dims,
-            avg_dims=self.avg_dims,
-            isotropic=self.isotropic,
-            **self.kwargs,
+        warnings.warn(
+            f"xr_toolz.geo.operators.{name} is deprecated; "
+            f"import from xr_toolz.metrics.operators instead. "
+            f"This re-export will be removed in the next minor release.",
+            DeprecationWarning,
+            stacklevel=2,
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "variable": self.variable,
-            "psd_dims": list(self.psd_dims),
-            "avg_dims": None if self.avg_dims is None else list(self.avg_dims),
-            "isotropic": self.isotropic,
-            **self.kwargs,
-        }
+        if name == "PSDScore":
+            module = import_module("xr_toolz.metrics._src.spectral")
+        else:
+            module = import_module("xr_toolz.metrics._src.pixel")
+        return getattr(module, name)
+    raise AttributeError(f"module 'xr_toolz.geo.operators' has no attribute {name!r}")
 
 
 __all__ = [
-    "MAE",
-    "MSE",
-    "NRMSE",
-    "RMSE",
     "AddClimatology",
     "AddCountryMask",
     "AddLandMask",
     "AddOceanMask",
     "ApplyMask",
-    "Bias",
     "CalculateClimatology",
     "CalculateClimatologySmoothed",
-    "Correlation",
     "FillNaNSpatial",
     "FillNaNTemporal",
-    "PSDScore",
-    "R2Score",
     "RemoveClimatology",
     "RenameCoords",
     "ResampleTime",
