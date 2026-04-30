@@ -4,6 +4,10 @@
 
 ### Added
 
+* `xr_toolz.metrics.array` — Tier A array kernels (D11) for the canonical pixel metrics: `mse`, `rmse`, `mae`, `bias`, `nrmse`, `correlation`, `r2_score`. Tier B (`xr_toolz.metrics._src.pixel`) now delegates via `xr.apply_ufunc` rather than reimplementing the math.
+* `xr_toolz.transforms.array` — Tier A array kernels (D11) for the canonical Fourier entry points: `fft`, `ifft`, `power_spectrum`. Numpy-only computational core; Tier B (`xrft`-backed) is unchanged.
+* `xr_toolz.calc.array` — Tier A array kernels (D11) for the canonical finite-difference primitives: `partial`, `gradient` (2nd-order central, uniform spacing). Numpy-only core complementing the `finitediffx`-backed Tier B.
+* `tests/test_tier_contract.py` — three-tier contract harness (Tier A reachable, Tier B numerically agrees with Tier A, Tier C numerically agrees with Tier B) for the metrics/transforms/calc pilots.
 * `xr_toolz.transforms.operators` — Tier C wrappers for the encoder primitives: `CyclicalEncode`, `FourierFeatures`, `RandomFourierFeatures`, `PositionalEncoding`, `EncodeTimeCyclical`, `EncodeTimeOrdinal`, `TimeRescale`, `TimeUnrescale` (#95).
 
 ### Removed

@@ -50,6 +50,8 @@ class Lambda:          # Wrap an arbitrary Callable as an Operator
 
 Standardizes coordinate names, ranges, ordering, and metadata across heterogeneous data sources. This is almost always the first step in any pipeline.
 
+**Type contract (D11):** skips Tier A — the math is coord/attr manipulation, not arithmetic. Tier B takes `xr.Dataset` directly.
+
 ```python
 class ValidateCoords:
     """Validate and harmonize all spatial and temporal coordinates.
@@ -72,6 +74,8 @@ class SortCoords:
 
 Embedding and transforming CRS metadata. Wraps `rioxarray` and `pyproj`.
 
+**Type contract (D11):** skips Tier A — operations modify CRS metadata and reproject coords; the underlying numerical work is delegated to `rioxarray` / `pyproj`. Tier B takes `xr.Dataset` directly.
+
 ```python
 class AssignCRS:
     def __init__(self, crs="EPSG:4326"): ...
@@ -85,6 +89,8 @@ class Reproject:
 ## `subset` — Spatial and Temporal Selection
 
 Extract regions of interest by bounding box, geometry, or time period.
+
+**Type contract (D11):** skips Tier A — selection is coord-driven and does no array arithmetic. Tier B takes `xr.Dataset` directly.
 
 ```python
 class SubsetBBox:
@@ -106,6 +112,8 @@ class SelectVariables:
 ## `masks` — Spatial Masks
 
 Add land, ocean, country, or custom masks as coordinate variables. Wraps `regionmask`.
+
+**Type contract (D11):** skips Tier A — mask construction is geometry/coord-driven via `regionmask`, not array arithmetic. Tier B takes `xr.Dataset` directly.
 
 ```python
 class AddLandMask:
