@@ -143,8 +143,15 @@ def test_metrics_operators_submodule_imports():
 def test_metrics_view_stub_submodules_are_importable(submodule):
     """Importing any V1–V5 stub submodule must succeed even before its
     epic lands its bodies — this is what unblocks the additive merge order.
+    The stub must also expose no public names today; the V epic that
+    fills it in is responsible for the public surface.
     """
-    importlib.import_module(f"xr_toolz.metrics.{submodule}")
+    mod = importlib.import_module(f"xr_toolz.metrics.{submodule}")
+    public_names = [n for n in dir(mod) if not n.startswith("_")]
+    assert public_names == [], (
+        f"xr_toolz.metrics.{submodule} unexpectedly exports public names: "
+        f"{public_names}"
+    )
 
 
 # ---- Legacy deprecation surface ------------------------------------------

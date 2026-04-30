@@ -40,7 +40,8 @@ Each submodule provides Layer 0 pure functions and Layer 1 Operator wrappers. La
 | `masks` | Land/ocean/country masks | `create_land_mask`, `apply_mask`, ... | `AddOceanMask`, `AddLandMask`, `AddCountryMask` | v0.1 |
 | `regrid` | Grid transformations | `regrid_linear`, `regrid_nearest`, ... | `Regrid` | v0.1 |
 | `detrend` | Climatology and anomalies | `calculate_climatology`, `remove_climatology`, ... | `CalculateClimatology`, `RemoveClimatology` | v0.1 |
-| `metrics` | Evaluation metrics | `rmse`, `nrmse`, `mae`, `bias`, `correlation` | `RMSE`, `NRMSE`, `MAE`, `Bias`, `PSDScore` | v0.1 |
+| `metrics.pixel` | Pointwise evaluation metrics | `mse`, `rmse`, `nrmse`, `mae`, `bias`, `correlation`, `r2_score` | `MSE`, `RMSE`, `NRMSE`, `MAE`, `Bias`, `Correlation`, `R2Score` | v0.1 |
+| `metrics.spectral` | Power-spectrum scores and resolved-scale | `psd_error`, `psd_score`, `resolved_scale`, `find_intercept_1D` | `PSDScore` | v0.1 |
 | `interpolation` | Gap filling, resampling | `fillnan_spatial`, `fillnan_temporal`, ... | `FillNaN`, `Resample` | v0.2 |
 | `encoders` | Coordinate encodings | `cyclical_encode`, `fourier_features`, ... | `CyclicalEncoder`, `FourierFeatures` | v0.2 |
 | `discretize` | Binning, points-to-grid | `bin_spatial`, `points_to_grid`, ... | `Discretize`, `Coarsen` | v0.2 |

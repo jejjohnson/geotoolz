@@ -3,13 +3,27 @@ status: draft
 version: 0.2.0
 ---
 
-!!! note "Module paths shown are proposed design targets"
-    The submodules referenced on this page (`xr_toolz.metrics.*`,
-    `xr_toolz.budgets`, `xr_toolz.phenomena`, `xr_toolz.lagrangian`,
-    `xr_toolz.viz.validation`, …) are **proposed** layouts and **are not part of
-    the current export surface**. Today, most domain-agnostic functionality
-    still lives under `xr_toolz.geo.*`. Treat the imports below as design-target
-    aliases; once the proposed modules ship, the snippets become copy/paste-ready.
+!!! note "Module paths shown — partially shipped"
+    Only the following names are real and importable today:
+
+    - **`xr_toolz.metrics.pixel`** — `mse`, `rmse`, `nrmse`, `mae`, `bias`,
+      `correlation`, `r2_score`, plus `MSE`, `RMSE`, `NRMSE`, `MAE`,
+      `Bias`, `Correlation`, `R2Score`.
+    - **`xr_toolz.metrics.spectral`** — `psd_error`, `psd_score`,
+      `resolved_scale`, `find_intercept_1D`, plus `PSDScore`.
+
+    Every other class referenced on this page (`NashSutcliffe`,
+    `ResolvedScale`, `SkillByLeadTime`, `RMSEByLead`, `EvaluateByRegion`,
+    `FrequencyBandSkill`, `CRPS`, `SSIM`, `GeostrophicBalanceError`,
+    detectors, panels, …) is a **design target** that lands with its
+    respective view epic. The taxonomy submodules (`forecast`,
+    `multiscale`, `structural`, `probabilistic`, `distributional`,
+    `masked`, `lagrangian`, `physical`, `object`) are importable today
+    but empty — `from xr_toolz.metrics.forecast import RMSEByLead` will
+    succeed at the module import but fail on the symbol. Sibling
+    packages `xr_toolz.budgets`, `xr_toolz.phenomena`,
+    `xr_toolz.lagrangian`, and `xr_toolz.viz.validation` are still
+    proposed layouts and not yet on the export surface.
 
 # Validation API Map
 
