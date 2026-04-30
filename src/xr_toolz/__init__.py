@@ -3,7 +3,7 @@
 from xr_toolz.core import Graph, Input, Node, Operator, Sequential
 
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 __all__ = [
     "Graph",

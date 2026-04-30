@@ -26,6 +26,14 @@
 
 * `xr_toolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xr_toolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.2](https://github.com/jejjohnson/xr_toolz/compare/v0.0.1...v0.0.2) (2026-04-30)
+
+
+### Features
+
+* **inference:** modelop + Sklearn/Jax wrappers (Epic F4) ([#100](https://github.com/jejjohnson/xr_toolz/issues/100)) ([e00db49](https://github.com/jejjohnson/xr_toolz/commit/e00db49f9074918279fe92a1de167a15ddec8370))
+* **transforms:** tier c encoder operators ([#95](https://github.com/jejjohnson/xr_toolz/issues/95)) ([#99](https://github.com/jejjohnson/xr_toolz/issues/99)) ([a28f15f](https://github.com/jejjohnson/xr_toolz/commit/a28f15f889da00400da9f0e113089f211b29375d))
+
 ## 0.0.1 (2026-04-30)
 
 
