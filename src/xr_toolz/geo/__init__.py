@@ -45,20 +45,6 @@ from xr_toolz.geo._src.discretize import (
     histogram_2d,
     points_to_grid,
 )
-from xr_toolz.geo._src.encoders import (
-    cyclical_encode,
-    encode_time_cyclical,
-    encode_time_ordinal,
-    fourier_features,
-    lat_90_to_180,
-    lat_180_to_90,
-    lon_180_to_360,
-    lon_360_to_180,
-    positional_encoding,
-    random_fourier_features,
-    time_rescale,
-    time_unrescale,
-)
 from xr_toolz.geo._src.extremes import (
     block_maxima,
     block_minima,
@@ -110,6 +96,23 @@ _DEPRECATED_METRICS = {
     "resolved_scale": "xr_toolz.metrics._src.spectral",
 }
 
+# Encoders moved to xr_toolz.transforms.encoders (D8). Kept importable for
+# one release with a deprecation warning fired only on actual access.
+_DEPRECATED_ENCODERS = {
+    "cyclical_encode": "xr_toolz.transforms._src.encoders.basis",
+    "fourier_features": "xr_toolz.transforms._src.encoders.basis",
+    "positional_encoding": "xr_toolz.transforms._src.encoders.basis",
+    "random_fourier_features": "xr_toolz.transforms._src.encoders.basis",
+    "lat_90_to_180": "xr_toolz.transforms._src.encoders.coord_space",
+    "lat_180_to_90": "xr_toolz.transforms._src.encoders.coord_space",
+    "lon_180_to_360": "xr_toolz.transforms._src.encoders.coord_space",
+    "lon_360_to_180": "xr_toolz.transforms._src.encoders.coord_space",
+    "encode_time_cyclical": "xr_toolz.transforms._src.encoders.coord_time",
+    "encode_time_ordinal": "xr_toolz.transforms._src.encoders.coord_time",
+    "time_rescale": "xr_toolz.transforms._src.encoders.coord_time",
+    "time_unrescale": "xr_toolz.transforms._src.encoders.coord_time",
+}
+
 
 def __getattr__(name: str) -> Any:
     if name in _DEPRECATED_METRICS:
@@ -123,6 +126,18 @@ def __getattr__(name: str) -> Any:
             stacklevel=2,
         )
         module = import_module(_DEPRECATED_METRICS[name])
+        return getattr(module, name)
+    if name in _DEPRECATED_ENCODERS:
+        from importlib import import_module
+
+        warnings.warn(
+            f"xr_toolz.geo.{name} is deprecated; "
+            f"import from xr_toolz.transforms.encoders instead. "
+            f"This re-export will be removed in the next minor release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        module = import_module(_DEPRECATED_ENCODERS[name])
         return getattr(module, name)
     raise AttributeError(f"module 'xr_toolz.geo' has no attribute {name!r}")
 
@@ -147,27 +162,17 @@ __all__ = [
     "calculate_climatology_season",
     "calculate_climatology_smoothed",
     "coarsen",
-    "cyclical_encode",
-    "encode_time_cyclical",
-    "encode_time_ordinal",
     "fillnan_rbf",
     "fillnan_spatial",
     "fillnan_temporal",
-    "fourier_features",
     "get_crs",
     "histogram_2d",
-    "lat_90_to_180",
-    "lat_180_to_90",
-    "lon_180_to_360",
-    "lon_360_to_180",
     "lonlat_to_xy",
     "points_to_grid",
-    "positional_encoding",
     "pot_exceedances",
     "pot_threshold",
     "pp_counts",
     "pp_stats",
-    "random_fourier_features",
     "refine",
     "remove_climatology",
     "rename_coords",
@@ -177,8 +182,6 @@ __all__ = [
     "subset_bbox",
     "subset_time",
     "subset_where",
-    "time_rescale",
-    "time_unrescale",
     "validate_latitude",
     "validate_longitude",
     "xy_to_lonlat",

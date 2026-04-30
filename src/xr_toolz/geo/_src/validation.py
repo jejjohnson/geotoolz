@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import xarray as xr
 
-from xr_toolz.geo._src.encoders import lat_180_to_90, lon_360_to_180
+from xr_toolz.transforms._src.encoders.coord_space import (
+    lat_180_to_90,
+    lon_360_to_180,
+)
 
 
 _LONGITUDE_ALIASES = ("longitude",)
