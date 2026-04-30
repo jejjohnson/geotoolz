@@ -57,7 +57,7 @@ Each submodule provides Layer 0 pure functions and Layer 1 Operator wrappers. La
 | `lagrangian` | Particle and transport diagnostics | `advect_particles`, `pair_dispersion`, `residence_time`, `ftle` | `AdvectParticles`, `PairDispersion`, `FTLE` | v0.4 |
 | `budgets` | Control-volume and conservation diagnostics | `budget_residual`, `heat_budget_residual`, `salt_budget_residual` | `BudgetResidual`, `HeatBudgetResidual` | v0.4 |
 | `phenomena` | Object/event detection and matching | `detect_marine_heatwaves`, `detect_eddies`, `match_objects` | `DetectMarineHeatwaves`, `DetectEddies`, `MatchObjects` | v0.4 |
-| `metrics.object` | Event/object verification scores | `contingency_table`, `pod`, `far`, `csi`, `iou` | `ProbabilityOfDetection`, `FalseAlarmRatio`, `CriticalSuccessIndex`, `IntersectionOverUnion` | v0.4 |
+| `metrics.object` | Event/object verification scores | `contingency_table`, `pod`, `far`, `csi`, `iou` | `ProbabilityOfDetection`, `FalseAlarmRatio`, `CriticalSuccessIndex`, `IntersectionOverUnion`, `DurationError`, `IntensityBias`, `CentroidDistance` | v0.4 |
 
 **Status key:** `v0.1` = Foundation | `v0.2` = Analysis + Inference | `v0.3` = Domain Operators + expanded metrics | `v0.4+` = Validation expansion
 

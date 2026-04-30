@@ -1,8 +1,27 @@
-"""Stub: lands with view V5 (Epic).
+"""Object-verification metric class names — public re-export.
 
-This module is intentionally empty. It will be populated by the V5
-view epic. Importing it succeeds today so downstream PRs can land
-additively without a package layout change.
+The classes below are name reservations only (D14: spelled-out canonical
+names). Implementations land with V5 (Epic V5); calling any of them today
+raises ``NotImplementedError``.
 """
 
-from xr_toolz.metrics._src.object import *  # noqa: F403
+from xr_toolz.metrics._src.object import (
+    CentroidDistance,
+    CriticalSuccessIndex,
+    DurationError,
+    FalseAlarmRatio,
+    IntensityBias,
+    IntersectionOverUnion,
+    ProbabilityOfDetection,
+)
+
+
+__all__ = [
+    "CentroidDistance",
+    "CriticalSuccessIndex",
+    "DurationError",
+    "FalseAlarmRatio",
+    "IntensityBias",
+    "IntersectionOverUnion",
+    "ProbabilityOfDetection",
+]

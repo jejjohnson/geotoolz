@@ -135,7 +135,6 @@ def test_metrics_operators_submodule_imports():
         "probabilistic",
         "distributional",
         "masked",
-        "object",
         "physical",
         "lagrangian",
     ],
@@ -145,6 +144,9 @@ def test_metrics_view_stub_submodules_are_importable(submodule):
     epic lands its bodies — this is what unblocks the additive merge order.
     The stub must also expose no public names today; the V epic that
     fills it in is responsible for the public surface.
+
+    ``object`` is excluded: F1.3 pre-reserves the canonical long-form
+    V5 class names there. See ``test_metrics_object_reserved_names``.
     """
     mod = importlib.import_module(f"xr_toolz.metrics.{submodule}")
     public_names = [n for n in dir(mod) if not n.startswith("_")]
@@ -152,6 +154,39 @@ def test_metrics_view_stub_submodules_are_importable(submodule):
         f"xr_toolz.metrics.{submodule} unexpectedly exports public names: "
         f"{public_names}"
     )
+
+
+_RESERVED_OBJECT_CLASSES = (
+    "ProbabilityOfDetection",
+    "FalseAlarmRatio",
+    "CriticalSuccessIndex",
+    "IntersectionOverUnion",
+    "DurationError",
+    "IntensityBias",
+    "CentroidDistance",
+)
+
+
+def test_metrics_object_exposes_all_reserved_names():
+    """``metrics.object`` reserves the V5 long-form names per D14."""
+    import xr_toolz.metrics.object as obj
+
+    assert set(_RESERVED_OBJECT_CLASSES) <= set(dir(obj))
+
+
+@pytest.mark.parametrize("name", _RESERVED_OBJECT_CLASSES)
+def test_metrics_object_reserved_class_raises_notimplementederror(name):
+    """Each V5-reserved class must raise ``NotImplementedError`` on
+    instantiation, with a message that names the class and points at V5.
+    """
+    from xr_toolz.metrics import object as obj_module
+
+    cls = getattr(obj_module, name)
+    with pytest.raises(NotImplementedError) as exc_info:
+        cls()
+    msg = str(exc_info.value)
+    assert name in msg, f"error message for {name} does not name the class: {msg!r}"
+    assert "V5" in msg, f"error message for {name} does not point at V5: {msg!r}"
 
 
 # ---- Legacy deprecation surface ------------------------------------------
