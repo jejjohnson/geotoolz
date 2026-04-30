@@ -15,6 +15,12 @@ Layer-1 ``Operator`` wrappers are re-exported flat from this package
 and from :mod:`xr_toolz.metrics.operators`.
 """
 
+from xr_toolz.metrics._src.forecast import SkillByLeadTime, skill_by_lead_time
+from xr_toolz.metrics._src.multiscale import (
+    EvaluateByRegion,
+    evaluate_by_region,
+    normalize_regions,
+)
 from xr_toolz.metrics._src.pixel import (
     MAE,
     MSE,
@@ -47,17 +53,22 @@ __all__ = [
     "RMSE",
     "Bias",
     "Correlation",
+    "EvaluateByRegion",
     "PSDScore",
     "R2Score",
+    "SkillByLeadTime",
     "bias",
     "correlation",
+    "evaluate_by_region",
     "find_intercept_1D",
     "mae",
     "mse",
+    "normalize_regions",
     "nrmse",
     "psd_error",
     "psd_score",
     "r2_score",
     "resolved_scale",
     "rmse",
+    "skill_by_lead_time",
 ]

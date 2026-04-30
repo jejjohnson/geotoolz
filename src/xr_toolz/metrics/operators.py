@@ -5,6 +5,8 @@ This module re-exports the operator classes from
 for ergonomic ``from xr_toolz.metrics.operators import RMSE`` access.
 """
 
+from xr_toolz.metrics._src.forecast import SkillByLeadTime
+from xr_toolz.metrics._src.multiscale import EvaluateByRegion
 from xr_toolz.metrics._src.pixel import (
     MAE,
     MSE,
@@ -24,6 +26,8 @@ __all__ = [
     "RMSE",
     "Bias",
     "Correlation",
+    "EvaluateByRegion",
     "PSDScore",
     "R2Score",
+    "SkillByLeadTime",
 ]

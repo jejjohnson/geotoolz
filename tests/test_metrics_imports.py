@@ -129,8 +129,6 @@ def test_metrics_operators_submodule_imports():
 @pytest.mark.parametrize(
     "submodule",
     [
-        "forecast",
-        "multiscale",
         "structural",
         "probabilistic",
         "distributional",
