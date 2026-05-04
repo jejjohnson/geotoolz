@@ -9,9 +9,11 @@ source/target structure under :mod:`._src`:
 - :mod:`._src.binning` — ``Grid``, ``Period``, ``SpaceTimeGrid``, ``bin_2d``,
   ``histogram_2d``
 - :mod:`._src.points_to_grid` — ``points_to_grid``
-- :mod:`._src.grid_to_points`, :mod:`._src.coord_remap`, :mod:`._src.smooth`,
+- :mod:`._src.smooth` — ``moving_average``, ``gaussian_smooth``,
+  ``lowpass_filter``
+- :mod:`._src.grid_to_points`, :mod:`._src.coord_remap`,
   :mod:`._src.downscale` — placeholder submodules for upcoming work
-  (D12, issues #34/#35/#36)
+  (D12, issues #34/#36)
 
 Layer-1 ``Operator`` wrappers live in :mod:`xr_toolz.interpolate.operators`.
 """
@@ -33,6 +35,11 @@ from xr_toolz.interpolate._src.gap_fill import (
 from xr_toolz.interpolate._src.grid_to_grid import coarsen, refine
 from xr_toolz.interpolate._src.points_to_grid import points_to_grid
 from xr_toolz.interpolate._src.resample import resample_time
+from xr_toolz.interpolate._src.smooth import (
+    gaussian_smooth,
+    lowpass_filter,
+    moving_average,
+)
 
 
 __all__ = [
@@ -44,7 +51,10 @@ __all__ = [
     "fillnan_rbf",
     "fillnan_spatial",
     "fillnan_temporal",
+    "gaussian_smooth",
     "histogram_2d",
+    "lowpass_filter",
+    "moving_average",
     "points_to_grid",
     "refine",
     "resample_time",

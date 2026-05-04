@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from xr_toolz.core import Operator
 from xr_toolz.interpolate._src import (
     binning as _binning,
@@ -18,6 +20,7 @@ from xr_toolz.interpolate._src import (
     grid_to_grid as _grid_to_grid,
     points_to_grid as _points_to_grid,
     resample as _resample,
+    smooth as _smooth,
 )
 
 
@@ -233,13 +236,132 @@ class PointsToGrid(Operator):
         return {"grid": "<Grid>", "statistic": self.statistic}
 
 
+# ---------- smoothers ------------------------------------------------------
+
+
+class MovingAverage(Operator):
+    """Wrap :func:`xr_toolz.interpolate._src.smooth.moving_average`."""
+
+    def __init__(
+        self,
+        dim: str,
+        window: int,
+        *,
+        center: bool = True,
+        min_periods: int | None = None,
+    ):
+        if not isinstance(window, int) or isinstance(window, bool):
+            raise TypeError(f"window must be an int, got {type(window).__name__}")
+        if window < 1:
+            raise ValueError(f"window must be >= 1, got {window}")
+        if min_periods is not None and (
+            not isinstance(min_periods, int) or min_periods < 0
+        ):
+            raise ValueError(
+                f"min_periods must be a non-negative int or None, got {min_periods!r}"
+            )
+        self.dim = dim
+        self.window = window
+        self.center = bool(center)
+        self.min_periods = min_periods
+
+    def _apply(self, ds):
+        return _smooth.moving_average(
+            ds,
+            dim=self.dim,
+            window=self.window,
+            center=self.center,
+            min_periods=self.min_periods,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "dim": self.dim,
+            "window": self.window,
+            "center": self.center,
+            "min_periods": self.min_periods,
+        }
+
+
+class GaussianSmooth(Operator):
+    """Wrap :func:`xr_toolz.interpolate._src.smooth.gaussian_smooth`."""
+
+    def __init__(self, dim: str, sigma: float, *, truncate: float = 4.0):
+        if sigma <= 0:
+            raise ValueError(f"sigma must be > 0, got {sigma}")
+        self.dim = dim
+        self.sigma = float(sigma)
+        self.truncate = float(truncate)
+
+    def _apply(self, ds):
+        return _smooth.gaussian_smooth(
+            ds, dim=self.dim, sigma=self.sigma, truncate=self.truncate
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {"dim": self.dim, "sigma": self.sigma, "truncate": self.truncate}
+
+
+class LowpassFilter(Operator):
+    """Wrap :func:`xr_toolz.interpolate._src.smooth.lowpass_filter`.
+
+    For ``btype`` in ``{"low", "high", "lowpass", "highpass"}`` ``cutoff``
+    is a scalar in ``(0, 1)``. For ``btype`` in
+    ``{"bandpass", "bandstop"}`` it is a length-2 sequence. Validation
+    is delegated to the Tier A kernel.
+    """
+
+    def __init__(
+        self,
+        dim: str,
+        cutoff: Any,
+        *,
+        order: int = 4,
+        btype: str = "low",
+    ):
+        if not isinstance(order, int) or isinstance(order, bool):
+            raise TypeError(f"order must be an int, got {type(order).__name__}")
+        self.dim = dim
+        if np.isscalar(cutoff):
+            self.cutoff: Any = float(cutoff)
+        else:
+            pair = tuple(float(v) for v in cutoff)
+            if len(pair) != 2:
+                raise ValueError(f"cutoff sequence must have length 2, got {len(pair)}")
+            self.cutoff = pair
+        self.order = order
+        self.btype = btype
+
+    def _apply(self, ds):
+        return _smooth.lowpass_filter(
+            ds,
+            dim=self.dim,
+            cutoff=self.cutoff,
+            order=self.order,
+            btype=self.btype,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "dim": self.dim,
+            "cutoff": (
+                list(self.cutoff) if isinstance(self.cutoff, tuple) else self.cutoff
+            ),
+            "order": self.order,
+            "btype": self.btype,
+        }
+
+
 __all__ = [
     "Bin2D",
     "Coarsen",
     "FillNaNRBF",
     "FillNaNSpatial",
     "FillNaNTemporal",
+    "GaussianSmooth",
     "Histogram2D",
+    "LowpassFilter",
+    "MovingAverage",
     "PointsToGrid",
     "Refine",
     "ResampleTime",

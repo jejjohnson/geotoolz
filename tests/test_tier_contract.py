@@ -177,3 +177,69 @@ def test_calc_array_gradient_returns_per_axis() -> None:
     assert len(components) == 2
     for comp in components:
         assert comp.shape == x.shape
+
+
+# ---------------------------------------------------------------------------
+# interpolate (smoothers — F3.3)
+# ---------------------------------------------------------------------------
+
+
+_SMOOTH_NAMES: tuple[str, ...] = ("moving_average", "gaussian_smooth", "lowpass_filter")
+
+
+@pytest.mark.parametrize("name", _SMOOTH_NAMES)
+def test_interpolate_array_namespace_exports(name: str) -> None:
+    """Tier A is reachable via ``xr_toolz.interpolate.array``."""
+    from xr_toolz.interpolate import array as ia
+
+    assert hasattr(ia, name), f"xr_toolz.interpolate.array.{name} missing"
+    assert callable(getattr(ia, name))
+
+
+def test_interpolate_smooth_tier_b_matches_tier_a() -> None:
+    """Tier B (Dataset, ``dim=``) numerically matches Tier A (``axis=``)."""
+    from xr_toolz.interpolate import array as ia
+    from xr_toolz.interpolate._src import smooth as tier_b
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((3, 64))
+    ds = xr.Dataset({"x": (("a", "time"), x)})
+
+    b_ma = tier_b.moving_average(ds, dim="time", window=5)["x"].values
+    a_ma = ia.moving_average(x, axis=-1, window=5)
+    np.testing.assert_allclose(a_ma, b_ma)
+
+    b_g = tier_b.gaussian_smooth(ds, dim="time", sigma=2.0)["x"].values
+    a_g = ia.gaussian_smooth(x, axis=-1, sigma=2.0)
+    np.testing.assert_allclose(a_g, b_g)
+
+    b_lp = tier_b.lowpass_filter(ds, dim="time", cutoff=0.1)["x"].values
+    a_lp = ia.lowpass_filter(x, axis=-1, cutoff=0.1)
+    np.testing.assert_allclose(a_lp, b_lp)
+
+
+def test_interpolate_smooth_tier_c_matches_tier_b() -> None:
+    """Tier C ``Operator`` output equals Tier B function output."""
+    from xr_toolz.interpolate._src import smooth as tier_b
+    from xr_toolz.interpolate.operators import (
+        GaussianSmooth,
+        LowpassFilter,
+        MovingAverage,
+    )
+
+    rng = np.random.default_rng(1)
+    x = rng.standard_normal((3, 64))
+    ds = xr.Dataset({"x": (("a", "time"), x)})
+
+    np.testing.assert_allclose(
+        MovingAverage("time", window=5)(ds)["x"].values,
+        tier_b.moving_average(ds, dim="time", window=5)["x"].values,
+    )
+    np.testing.assert_allclose(
+        GaussianSmooth("time", sigma=2.0)(ds)["x"].values,
+        tier_b.gaussian_smooth(ds, dim="time", sigma=2.0)["x"].values,
+    )
+    np.testing.assert_allclose(
+        LowpassFilter("time", cutoff=0.1)(ds)["x"].values,
+        tier_b.lowpass_filter(ds, dim="time", cutoff=0.1)["x"].values,
+    )
