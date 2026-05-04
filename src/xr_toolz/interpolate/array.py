@@ -13,6 +13,7 @@ These are the kernels Tier B (xarray, ``dim=``) and Tier C
 
 from __future__ import annotations
 
+from xr_toolz.interpolate._src.array_coord_remap import remap_axis
 from xr_toolz.interpolate._src.array_smooth import (
     gaussian_smooth,
     lowpass_filter,
@@ -24,4 +25,5 @@ __all__ = [
     "gaussian_smooth",
     "lowpass_filter",
     "moving_average",
+    "remap_axis",
 ]

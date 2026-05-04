@@ -12,10 +12,13 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import xarray as xr
 
 from xr_toolz.core import Operator
 from xr_toolz.interpolate._src import (
     binning as _binning,
+    coord_remap as _coord_remap,
+    downscale as _downscale,
     gap_fill as _gap_fill,
     grid_to_grid as _grid_to_grid,
     points_to_grid as _points_to_grid,
@@ -352,17 +355,215 @@ class LowpassFilter(Operator):
         }
 
 
+# ---------- coord remap ----------------------------------------------------
+
+
+class RemapAxis(Operator):
+    """Generic axis remapping (D12).
+
+    Replaces the ``source_axis`` dimension in the input Dataset with a
+    new dimension whose coordinate values are ``target_axis``. Every
+    numeric variable that carries ``source_axis`` is interpolated onto
+    the target axis.
+
+    Parameters
+    ----------
+    source_axis
+        Name of the existing dimension to remap.
+    target_axis
+        Target coordinate values. If an :class:`xr.DataArray`, its
+        ``.name`` becomes the new dim name; otherwise the new dim name
+        defaults to ``target_name`` or ``source_axis``.
+    target_name
+        Optional explicit new dim name.
+    method
+        ``"linear"`` or ``"nearest"``.
+    """
+
+    def __init__(
+        self,
+        source_axis: str,
+        target_axis: xr.DataArray | np.ndarray | list,
+        *,
+        target_name: str | None = None,
+        method: str = "linear",
+    ):
+        self.source_axis = source_axis
+        if isinstance(target_axis, xr.DataArray):
+            self._target_da = target_axis
+            self._target_values: np.ndarray = np.asarray(
+                target_axis.values, dtype=float
+            )
+            self._inferred_name = target_axis.name
+        else:
+            self._target_da = None
+            self._target_values = np.asarray(target_axis, dtype=float)
+            self._inferred_name = None
+        self.target_name = target_name
+        self.method = method
+
+    def _apply(self, ds):
+        target = self._target_da if self._target_da is not None else self._target_values
+        return _coord_remap.remap_axis(
+            ds,
+            source_dim=self.source_axis,
+            target_coords=target,
+            target_name=self.target_name,
+            method=self.method,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "source_axis": self.source_axis,
+            "target_axis": self._target_values.tolist(),
+            "target_name": self.target_name or self._inferred_name,
+            "method": self.method,
+        }
+
+
+# Vertical presets — thin specializations that pin convention names. The
+# user supplies the target coordinate values; the preset names the new
+# dim and the source dim conventionally.
+
+
+class _VerticalPreset(RemapAxis):
+    """Common base for vertical-axis presets — pins ``target_name`` only."""
+
+    _DEFAULT_TARGET_NAME: str = ""
+    _DEFAULT_SOURCE: str = "depth"
+
+    def __init__(
+        self,
+        target_axis: xr.DataArray | np.ndarray | list,
+        *,
+        source_axis: str | None = None,
+        target_name: str | None = None,
+        method: str = "linear",
+    ):
+        super().__init__(
+            source_axis=source_axis or self._DEFAULT_SOURCE,
+            target_axis=target_axis,
+            target_name=target_name or self._DEFAULT_TARGET_NAME,
+            method=method,
+        )
+
+
+class ToSigma(_VerticalPreset):
+    """Remap a depth axis to terrain-following ``sigma`` values."""
+
+    _DEFAULT_TARGET_NAME = "sigma"
+    _DEFAULT_SOURCE = "depth"
+
+
+class FromSigma(_VerticalPreset):
+    """Remap a ``sigma`` axis back to a fixed depth grid."""
+
+    _DEFAULT_TARGET_NAME = "depth"
+    _DEFAULT_SOURCE = "sigma"
+
+
+class ToIsopycnal(_VerticalPreset):
+    """Remap a depth axis to potential-density (isopycnal) levels."""
+
+    _DEFAULT_TARGET_NAME = "sigma_theta"
+    _DEFAULT_SOURCE = "depth"
+
+
+class ToPressureLevels(_VerticalPreset):
+    """Remap a height/depth axis to standard pressure levels."""
+
+    _DEFAULT_TARGET_NAME = "pressure"
+    _DEFAULT_SOURCE = "level"
+
+
+class ToHeight(_VerticalPreset):
+    """Remap a pressure or hybrid axis to geometric height."""
+
+    _DEFAULT_TARGET_NAME = "height"
+    _DEFAULT_SOURCE = "level"
+
+
+class ToPhase(Operator):
+    """Fold a time axis onto a phase axis by binning + averaging.
+
+    Phase is computed as ``((t - epoch) / period) mod 1`` and binned
+    into ``n_bins`` evenly-spaced bins on ``[0, 1)``.
+
+    Parameters
+    ----------
+    time_dim
+        Name of the time dimension.
+    period
+        Length of one cycle, in the same units as the time coordinate.
+    n_bins
+        Number of phase bins.
+    epoch
+        Reference time at which phase = 0.
+    """
+
+    def __init__(
+        self,
+        time_dim: str,
+        period: float,
+        n_bins: int,
+        *,
+        epoch: float = 0.0,
+    ):
+        if period <= 0:
+            raise ValueError(f"period must be > 0, got {period}")
+        if n_bins < 1:
+            raise ValueError(f"n_bins must be >= 1, got {n_bins}")
+        self.time_dim = time_dim
+        self.period = float(period)
+        self.n_bins = int(n_bins)
+        self.epoch = float(epoch)
+
+    def _apply(self, ds):
+        return _coord_remap.to_phase(
+            ds,
+            time_dim=self.time_dim,
+            period=self.period,
+            n_bins=self.n_bins,
+            epoch=self.epoch,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "time_dim": self.time_dim,
+            "period": self.period,
+            "n_bins": self.n_bins,
+            "epoch": self.epoch,
+        }
+
+
+# ---------- learned resolution change --------------------------------------
+
+# Re-export Downscale / Upscale from _src.downscale so all Layer-1 Operators
+# are reachable from xr_toolz.interpolate.operators.
+Downscale = _downscale.Downscale
+Upscale = _downscale.Upscale
+
+
 __all__ = [
     "Bin2D",
     "Coarsen",
+    "Downscale",
     "FillNaNRBF",
     "FillNaNSpatial",
     "FillNaNTemporal",
+    "FromSigma",
     "GaussianSmooth",
     "Histogram2D",
     "LowpassFilter",
     "MovingAverage",
     "PointsToGrid",
     "Refine",
+    "RemapAxis",
     "ResampleTime",
+    "ToHeight",
+    "ToIsopycnal",
+    "ToPhase",
+    "ToPressureLevels",
+    "ToSigma",
+    "Upscale",
 ]

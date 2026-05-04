@@ -11,9 +11,9 @@ source/target structure under :mod:`._src`:
 - :mod:`._src.points_to_grid` — ``points_to_grid``
 - :mod:`._src.smooth` — ``moving_average``, ``gaussian_smooth``,
   ``lowpass_filter``
-- :mod:`._src.grid_to_points`, :mod:`._src.coord_remap`,
-  :mod:`._src.downscale` — placeholder submodules for upcoming work
-  (D12, issues #34/#36)
+- :mod:`._src.coord_remap` — ``remap_axis``, ``to_phase``
+- :mod:`._src.grid_to_points`, :mod:`._src.downscale` — placeholder
+  submodules for upcoming work (D12, issue #36)
 
 Layer-1 ``Operator`` wrappers live in :mod:`xr_toolz.interpolate.operators`.
 """
@@ -27,6 +27,7 @@ from xr_toolz.interpolate._src.binning import (
     bin_2d,
     histogram_2d,
 )
+from xr_toolz.interpolate._src.coord_remap import remap_axis, to_phase
 from xr_toolz.interpolate._src.gap_fill import (
     fillnan_rbf,
     fillnan_spatial,
@@ -57,5 +58,7 @@ __all__ = [
     "moving_average",
     "points_to_grid",
     "refine",
+    "remap_axis",
     "resample_time",
+    "to_phase",
 ]

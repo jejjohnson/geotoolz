@@ -180,14 +180,19 @@ def test_calc_array_gradient_returns_per_axis() -> None:
 
 
 # ---------------------------------------------------------------------------
-# interpolate (smoothers — F3.3)
+# interpolate (Tier A array kernels — F3.2 / F3.3)
 # ---------------------------------------------------------------------------
 
 
-_SMOOTH_NAMES: tuple[str, ...] = ("moving_average", "gaussian_smooth", "lowpass_filter")
+_INTERPOLATE_ARRAY_NAMES: tuple[str, ...] = (
+    "moving_average",
+    "gaussian_smooth",
+    "lowpass_filter",
+    "remap_axis",
+)
 
 
-@pytest.mark.parametrize("name", _SMOOTH_NAMES)
+@pytest.mark.parametrize("name", _INTERPOLATE_ARRAY_NAMES)
 def test_interpolate_array_namespace_exports(name: str) -> None:
     """Tier A is reachable via ``xr_toolz.interpolate.array``."""
     from xr_toolz.interpolate import array as ia
@@ -242,4 +247,41 @@ def test_interpolate_smooth_tier_c_matches_tier_b() -> None:
     np.testing.assert_allclose(
         LowpassFilter("time", cutoff=0.1)(ds)["x"].values,
         tier_b.lowpass_filter(ds, dim="time", cutoff=0.1)["x"].values,
+    )
+
+
+def test_interpolate_coord_remap_tier_b_matches_tier_a() -> None:
+    """Tier B ``remap_axis`` matches the Tier A kernel on the same data."""
+    from xr_toolz.interpolate import array as ia
+    from xr_toolz.interpolate._src import coord_remap as tier_b
+
+    src = np.linspace(0.0, 100.0, 21)
+    tgt = np.linspace(0.0, 100.0, 11)
+    rng = np.random.default_rng(0)
+    field = rng.standard_normal((src.size, 4))
+    ds = xr.Dataset(
+        {"f": (("depth", "x"), field)},
+        coords={"depth": src, "x": np.arange(4)},
+    )
+    b_out = tier_b.remap_axis(ds, source_dim="depth", target_coords=tgt)["f"].values
+    a_out = ia.remap_axis(field, axis=0, source_coords=src, target_coords=tgt)
+    np.testing.assert_allclose(a_out, b_out)
+
+
+def test_interpolate_coord_remap_tier_c_matches_tier_b() -> None:
+    """Tier C ``RemapAxis`` Operator output equals Tier B function output."""
+    from xr_toolz.interpolate._src import coord_remap as tier_b
+    from xr_toolz.interpolate.operators import RemapAxis
+
+    src = np.linspace(0.0, 100.0, 21)
+    tgt = np.linspace(0.0, 100.0, 11)
+    rng = np.random.default_rng(1)
+    field = rng.standard_normal((src.size, 4))
+    ds = xr.Dataset(
+        {"f": (("depth", "x"), field)},
+        coords={"depth": src, "x": np.arange(4)},
+    )
+    np.testing.assert_allclose(
+        RemapAxis("depth", tgt)(ds)["f"].values,
+        tier_b.remap_axis(ds, source_dim="depth", target_coords=tgt)["f"].values,
     )
