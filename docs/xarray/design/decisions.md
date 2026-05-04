@@ -282,7 +282,7 @@ Rationale:
 
 ## D12: `interpolate` — unified resampling, aggregation, and smoothing module
 
-**Status:** draft (structural decision accepted 2026-04-27; open questions on fringe pieces deferred — see below)
+**Status:** accepted (structural decision 2026-04-27; open questions resolved 2026-05-04)
 
 **Context:** The v0.1 design split value resampling across three small modules: `regrid` (grid → grid), `interpolation` (gap fill + time resample), and `discretize` (binning). They were artificially separated; in practice users reach for "the interpolation module" as one concept. Adjacent operations — vertical coord remapping, temporal smoothing, learned super-resolution — have no clear home today (`detrend.LowpassFilter` is the canonical orphan).
 
@@ -305,7 +305,7 @@ xr_toolz/interpolate/
         gap_fill.py        # FillNaN, FillNaNRBF, FillNaNKriging
         coord_remap.py     # generic RemapAxis + vertical presets (ToSigma, ToIsopycnal, ToPressureLevels, …) and temporal preset (ToPhase)
         resample.py        # Resample (down), Upsample
-        smooth.py          # MovingAverage, GaussianSmooth, LowpassFilter, KalmanSmoother
+        smooth.py          # MovingAverage, GaussianSmooth, LowpassFilter (KalmanSmoother → future assimilate.smooth, see resolution 3 below)
         downscale.py       # Downscale, Upscale (both wrap a ModelOp)
 ```
 
@@ -318,12 +318,12 @@ Naming convention:
 
 Modules outside `interpolate` that handle adjacent concerns: `crs.Reproject` (CRS-aware regridding — calls into `interpolate.Regrid` internally), `transforms.encoders.coord_{space,time}` (coord *relabeling*, not value resampling).
 
-**Open questions** — deferred; do not block the structural decision, will be resolved before / during implementation:
+**Open-question resolutions** (2026-05-04, F3.5):
 
-1. **Super-resolution patch tiling.** Does `Downscale` carry `patch_size` / `overlap` constructor args, or delegate that to `xrpatcher` and stay a pure `ModelOp` wrapper?
-2. **Data fusion home.** `interpolate.fusion` (deterministic only: OI / weighted / kriged) vs `assimilate.fusion` (shares prior-cov / obs-error machinery) vs new top-level `xr_toolz.fusion`?
-3. **`KalmanSmoother` home.** Currently sketched under `interpolate.smooth`, but it requires a state-space model owned by `assimilate`. Migrate to `assimilate.smooth`, or keep in `interpolate.smooth` with an `assimilate.StateSpace` import?
-4. **`coord_remap` preset scope.** Confirmed: vertical (`ToSigma`, `FromSigma`, `ToIsopycnal`, `ToPressureLevels`, `ToHeight`) + temporal (`ToPhase`). Other canonical coord systems worth presetting (e.g., `ToTropopauseRelative`, `ToBoundaryLayerCoord`)?
+1. **Super-resolution patch tiling — resolved.** `Downscale` is a pure `ModelOp` wrapper with no `patch_size` / `overlap` constructor args. Tiling is delegated to `xrpatcher` upstream of the operator. Rationale: keeps `Downscale` orthogonal to tiling strategy and avoids duplicating xrpatcher's API surface.
+2. **Data fusion home — deferred.** No fusion code lands in F3; revisit when the first fusion operator is proposed. `interpolate.fusion` remains the working assumption for deterministic-only fusion, but no commitment until `assimilate` exists.
+3. **`KalmanSmoother` home — resolved.** `KalmanSmoother` is **out of scope for `interpolate.smooth`**. It lives under future `assimilate.smooth` because it requires a state-space model. `interpolate.smooth` is restricted to deterministic, non–state-space smoothers (`MovingAverage`, `GaussianSmooth`, `LowpassFilter`); these still take parameters (window, sigma, cutoff), but none requires fitting a model from data.
+4. **`coord_remap` preset scope — resolved.** Ship vertical (`ToSigma`, `FromSigma`, `ToIsopycnal`, `ToPressureLevels`, `ToHeight`) + temporal (`ToPhase`) only. `ToTropopauseRelative`, `ToBoundaryLayerCoord`, and other domain-specific presets are deferred — add them on demand as new issues, each as a thin subclass over the generic `RemapAxis`.
 
 **Consequences:**
 - `xr_toolz.regrid`, `xr_toolz.interpolation`, `xr_toolz.discretize` are removed in favor of `xr_toolz.interpolate`. Pre-1.0 design doc — no compatibility shim planned.
