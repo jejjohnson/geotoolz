@@ -26,6 +26,18 @@
 
 * `xr_toolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xr_toolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.3](https://github.com/jejjohnson/xr_toolz/compare/v0.0.2...v0.0.3) (2026-05-04)
+
+
+### Features
+
+* **interpolate:** coord_remap submodule (F3.2) ([#110](https://github.com/jejjohnson/xr_toolz/issues/110)) ([9a5ab15](https://github.com/jejjohnson/xr_toolz/commit/9a5ab1572797145df326f0383df2ddbebb6b4aae))
+* **interpolate:** smooth submodule (F3.3) ([#109](https://github.com/jejjohnson/xr_toolz/issues/109)) ([d331b4c](https://github.com/jejjohnson/xr_toolz/commit/d331b4c812d98f53f3739f279499fc0f6f419146))
+* **metrics:** add v1.1 SkillByLeadTime + v1.2 EvaluateByRegion ([#103](https://github.com/jejjohnson/xr_toolz/issues/103)) ([19741d2](https://github.com/jejjohnson/xr_toolz/commit/19741d2d5b311a47b1cebf13905aba8f0321a02c))
+* **metrics:** add v4 process-evaluation (physical metrics + budgets) ([#106](https://github.com/jejjohnson/xr_toolz/issues/106)) ([b46582a](https://github.com/jejjohnson/xr_toolz/commit/b46582ab85ed7a1f715d0f2bb2ba4a4ce4b3a76e))
+* **metrics:** land V2 data-representation metrics (structural / probabilistic / distributional / masked) ([#104](https://github.com/jejjohnson/xr_toolz/issues/104)) ([b64ac6f](https://github.com/jejjohnson/xr_toolz/commit/b64ac6f024c8401de6a2a7e099b7ebc009d1e4da))
+* **viz:** add v6 validation panels (viz.validation) ([#107](https://github.com/jejjohnson/xr_toolz/issues/107)) ([263fbdf](https://github.com/jejjohnson/xr_toolz/commit/263fbdf9bab4ba7cb6f2571aa67c02475d631a89))
+
 ## [0.0.2](https://github.com/jejjohnson/xr_toolz/compare/v0.0.1...v0.0.2) (2026-04-30)
 
 
