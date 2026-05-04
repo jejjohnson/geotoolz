@@ -33,7 +33,7 @@ from xr_toolz.interpolate._src.gap_fill import (
     fillnan_spatial,
     fillnan_temporal,
 )
-from xr_toolz.interpolate._src.grid_to_grid import coarsen, refine
+from xr_toolz.interpolate._src.grid_to_grid import coarsen, refine, regrid_like
 from xr_toolz.interpolate._src.points_to_grid import points_to_grid
 from xr_toolz.interpolate._src.resample import resample_time
 from xr_toolz.interpolate._src.smooth import (
@@ -58,6 +58,7 @@ __all__ = [
     "moving_average",
     "points_to_grid",
     "refine",
+    "regrid_like",
     "remap_axis",
     "resample_time",
     "to_phase",

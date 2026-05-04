@@ -34,7 +34,11 @@ from xr_toolz.metrics._src.probabilistic import (
     ReliabilityCurve,
     SpreadSkillRatio,
 )
-from xr_toolz.metrics._src.spectral import PSDScore
+from xr_toolz.metrics._src.spectral import (
+    BandLimitedRMSE,
+    FrequencyBandSkill,
+    PSDScore,
+)
 from xr_toolz.metrics._src.structural import (
     SSIM,
     CentroidDisplacement,
@@ -50,6 +54,7 @@ __all__ = [
     "NRMSE",
     "RMSE",
     "SSIM",
+    "BandLimitedRMSE",
     "Bias",
     "CentroidDisplacement",
     "Correlation",
@@ -58,6 +63,7 @@ __all__ = [
     "EnergyDistance",
     "EnsembleCoverage",
     "EvaluateByRegion",
+    "FrequencyBandSkill",
     "GeostrophicBalanceError",
     "GradientDifference",
     "MaskedMetric",

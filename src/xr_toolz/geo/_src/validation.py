@@ -97,6 +97,20 @@ def rename_coords(ds: xr.Dataset, mapping: dict[str, str]) -> xr.Dataset:
     return ds.rename(present)
 
 
+def rename_variables(ds: xr.Dataset, mapping: dict[str, str]) -> xr.Dataset:
+    """Rename data variables that match ``mapping``.
+
+    Companion to :func:`rename_coords`: ``rename_variables`` only acts on
+    entries in ``ds.data_vars`` so a typo in ``mapping`` doesn't silently
+    rename a coordinate. Keys not present in ``ds.data_vars`` are
+    ignored.
+    """
+    present = {old: new for old, new in mapping.items() if old in ds.data_vars}
+    if not present:
+        return ds
+    return ds.rename(present)
+
+
 def _rename_first_match(
     ds: xr.Dataset,
     candidates: tuple[str, ...],

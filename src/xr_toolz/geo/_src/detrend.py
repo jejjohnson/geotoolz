@@ -170,6 +170,21 @@ def calculate_anomaly_smoothed(
     return remove_climatology(data, clim, time=time)
 
 
+def remove_mean(
+    data: xr.DataArray | xr.Dataset,
+    dims: str | tuple[str, ...],
+) -> xr.DataArray | xr.Dataset:
+    """Subtract the mean over ``dims`` (per-variable, NaN-aware).
+
+    Useful for cheap anomaly fields when no climatology is available
+    (e.g. spatial mean removal per timestep, or zonal-mean removal).
+    Distinct from :func:`calculate_anomaly`, which subtracts a
+    time-grouped climatology.
+    """
+    dim_list = [dims] if isinstance(dims, str) else list(dims)
+    return data - data.mean(dim=dim_list)
+
+
 def _climatology_dim(freq: str) -> str:
     if freq not in CLIMATOLOGY_DIMS:
         raise ValueError(

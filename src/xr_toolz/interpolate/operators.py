@@ -165,6 +165,38 @@ class Refine(Operator):
         return {"factor": dict(self.factor), "method": self.method}
 
 
+class RegridLike(Operator):
+    """Wrap :func:`xr_toolz.interpolate.regrid_like` — bilinear resample
+    of the input onto another Dataset's coordinate grid along ``dims``.
+    """
+
+    def __init__(
+        self,
+        target: xr.Dataset | xr.DataArray,
+        *,
+        dims: tuple[str, ...] = ("lat", "lon"),
+        method: str = "linear",
+    ):
+        self.target = target
+        self.dims = tuple(dims)
+        self.method = method
+
+    def _apply(self, ds):
+        return _grid_to_grid.regrid_like(
+            ds, self.target, dims=self.dims, method=self.method
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        target_shape = {
+            d: int(self.target.sizes[d]) for d in self.dims if d in self.target.sizes
+        }
+        return {
+            "target_shape": target_shape,
+            "dims": list(self.dims),
+            "method": self.method,
+        }
+
+
 # ---------- binning --------------------------------------------------------
 
 
@@ -558,6 +590,7 @@ __all__ = [
     "MovingAverage",
     "PointsToGrid",
     "Refine",
+    "RegridLike",
     "RemapAxis",
     "ResampleTime",
     "ToHeight",

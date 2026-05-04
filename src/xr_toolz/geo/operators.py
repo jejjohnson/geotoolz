@@ -64,6 +64,19 @@ class RenameCoords(Operator):
         return {"mapping": self.mapping}
 
 
+class RenameVariables(Operator):
+    """Wrap :func:`xr_toolz.geo.rename_variables` (data-var renames)."""
+
+    def __init__(self, mapping: dict[str, str]):
+        self.mapping = dict(mapping)
+
+    def _apply(self, ds):
+        return _validation.rename_variables(ds, self.mapping)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"mapping": self.mapping}
+
+
 # ---------- subset ---------------------------------------------------------
 
 
@@ -157,6 +170,19 @@ class CalculateClimatologySmoothed(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {"window": self.window, "time": self.time}
+
+
+class RemoveMean(Operator):
+    """Subtract the mean over ``dims`` (cheap anomaly without climatology)."""
+
+    def __init__(self, dims: str | tuple[str, ...]):
+        self.dims = (dims,) if isinstance(dims, str) else tuple(dims)
+
+    def _apply(self, ds):
+        return _detrend.remove_mean(ds, self.dims)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"dims": list(self.dims)}
 
 
 class RemoveClimatology(Operator):
@@ -283,7 +309,9 @@ __all__ = [
     "CalculateClimatology",
     "CalculateClimatologySmoothed",
     "RemoveClimatology",
+    "RemoveMean",
     "RenameCoords",
+    "RenameVariables",
     "SelectVariables",
     "SubsetBBox",
     "SubsetTime",

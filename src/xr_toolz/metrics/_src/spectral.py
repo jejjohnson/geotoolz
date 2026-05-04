@@ -3,12 +3,25 @@
 Spectral metrics (``psd_*``) compare the PSD of the prediction against
 the PSD of the reference and return a normalized score plus helpers to
 locate the resolved-scale crossover.
+
+Frequency-band scores (``evaluate_by_frequency_band`` /
+``band_limited_rmse`` and their :class:`Operator` wrappers
+:class:`FrequencyBandSkill` / :class:`BandLimitedRMSE`) implement the
+band-decomposition slice of validation.md §1. Bands are specified as
+``dict[str, tuple[float, float]]`` of ``{name: (low, high)}`` in the
+**physical units** of the dim's coordinate (e.g. cycles/day for time,
+cycles/km for spatial dims). Lat/lon coordinates whose ``units``
+attribute looks like ``degrees_north`` / ``degrees_east`` are converted
+to kilometres internally using a meridian-arc length of ``111.0`` km
+per degree latitude and an additional ``cos(mean_lat)`` factor for
+longitude — adequate for mid-latitude mesoscale demos but the user
+should provide ``coord_spacing=`` overrides for high-precision work.
 """
 
 from __future__ import annotations
 
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -20,6 +33,23 @@ from xr_toolz.transforms._src.fourier import (
     drop_negative_frequencies,
     power_spectrum,
 )
+
+
+_KM_PER_DEGREE = 111.0
+_LAT_UNITS = {
+    "degrees_north",
+    "degree_north",
+    "degrees_n",
+    "deg_n",
+    "degn",
+}
+_LON_UNITS = {
+    "degrees_east",
+    "degree_east",
+    "degrees_e",
+    "deg_e",
+    "dege",
+}
 
 
 # ---------- Layer-0 (xarray) ----------------------------------------------
@@ -215,8 +245,372 @@ class PSDScore(Operator):
         }
 
 
+# ---------- Frequency-band scores -----------------------------------------
+
+
+def _physical_spacing(
+    ds: xr.Dataset,
+    dims: Sequence[str],
+    *,
+    coord_spacing: Mapping[str, float] | None = None,
+) -> dict[str, float]:
+    """Spacing per dim in physical units expected by ``bands``.
+
+    Reads the dim coordinate's ``units`` attribute and converts
+    ``degrees_north`` / ``degrees_east`` into kilometres so that bands
+    can be expressed in cycles/km. Other units pass through (the user
+    is responsible for ensuring band frequencies match coord units).
+
+    A per-dim override may be supplied via ``coord_spacing``; when
+    given, the override wins and unit detection is skipped for that
+    dim.
+    """
+    out: dict[str, float] = {}
+    for d in dims:
+        if coord_spacing is not None and d in coord_spacing:
+            out[d] = float(coord_spacing[d])
+            continue
+        if d not in ds.coords:
+            raise ValueError(
+                f"dim {d!r} has no coordinate; FrequencyBandSkill needs the "
+                "coord values to compute spacing — attach one or pass "
+                "coord_spacing= explicitly."
+            )
+        coord = ds[d]
+        units = str(coord.attrs.get("units", "")).strip().lower()
+        if not units and (coord_spacing is None or d not in coord_spacing):
+            raise ValueError(
+                f"coord {d!r} is missing a `units` attribute; bands must be "
+                "in physical coord units, so attach one (e.g. with "
+                "`xr_toolz.geo.ValidateCoords()`) or pass `coord_spacing=` "
+                "per dim."
+            )
+        vals = np.asarray(coord.values, dtype=float)
+        if vals.size < 2:
+            raise ValueError(f"dim {d!r} has < 2 coord samples; cannot fft")
+        diffs = np.diff(vals)
+        # FFT assumes uniform sampling; raise instead of silently using the
+        # mean spacing on a stretched grid.
+        if not np.allclose(diffs, diffs[0], rtol=1e-6, atol=1e-9):
+            raise ValueError(
+                f"coord {d!r} is not uniformly spaced (FFT-based banding "
+                "requires regular sampling). Either resample onto a regular "
+                "grid first, or pass `coord_spacing=` to declare the "
+                "intended spacing."
+            )
+        raw = float(np.abs(np.mean(diffs)))
+        if units in _LAT_UNITS:
+            out[d] = raw * _KM_PER_DEGREE
+        elif units in _LON_UNITS:
+            cos_factor = 1.0
+            for lat_name in ("lat", "latitude"):
+                if lat_name in ds.coords:
+                    lat_vals = np.asarray(ds[lat_name].values, dtype=float)
+                    cos_factor = float(np.cos(np.deg2rad(lat_vals.mean())))
+                    break
+            out[d] = raw * _KM_PER_DEGREE * max(cos_factor, 1e-6)
+        else:
+            out[d] = raw
+    return out
+
+
+def _bandpass(
+    da: xr.DataArray,
+    dims: Sequence[str],
+    spacing: Mapping[str, float],
+    lo: float,
+    hi: float,
+) -> xr.DataArray:
+    """FFT ``da`` along ``dims``, zero coefficients outside ``[lo, hi]``,
+    inverse-FFT and return a real-valued DataArray with the same coords
+    and dims as ``da``.
+
+    NaN values (typical on masked oceanic grids) are filled with the
+    field's nan-mean before the FFT so they do not propagate through
+    the inverse transform; the original NaN mask is reapplied to the
+    output so downstream metrics still skip masked cells.
+
+    .. note::
+       This implementation eagerly materialises ``da.values`` and uses
+       ``numpy.fft``; it is **not lazy** under dask. For very large
+       gridded inputs, slice down to a manageable region before scoring
+       (a follow-up will route through ``xrft.fft`` for chunked arrays).
+    """
+    arr = np.asarray(da.values, dtype=float)
+    nan_mask = np.isnan(arr)
+    if nan_mask.any():
+        fill = float(np.nanmean(arr)) if not np.all(nan_mask) else 0.0
+        arr = np.where(nan_mask, fill, arr)
+    # Build the radial-frequency mask in *axis-position* order (not the
+    # caller-supplied `dims` order) so the broadcast against `arr` is
+    # always correct, even when `dims=("lat", "lon")` but the data is
+    # stored as `(time, lon, lat)`.
+    sorted_dims = sorted(dims, key=da.get_axis_num)
+    axes = tuple(da.get_axis_num(d) for d in sorted_dims)
+    freqs = [
+        np.fft.fftfreq(arr.shape[a], d=spacing[d])
+        for d, a in zip(sorted_dims, axes, strict=True)
+    ]
+    grid = np.meshgrid(*freqs, indexing="ij")
+    kmag = np.sqrt(sum(g**2 for g in grid))
+    mask = (kmag >= lo) & (kmag < hi)
+    shape = [1] * arr.ndim
+    for a in axes:
+        shape[a] = arr.shape[a]
+    mask_b = mask.reshape(shape)
+    fft_arr = np.fft.fftn(arr, axes=axes)
+    out = np.fft.ifftn(fft_arr * mask_b, axes=axes).real
+    if nan_mask.any():
+        out = np.where(nan_mask, np.nan, out)
+    return xr.DataArray(
+        out, dims=da.dims, coords=da.coords, name=da.name, attrs=dict(da.attrs)
+    )
+
+
+def _validate_bands(bands: Mapping[str, tuple[float, float]]) -> None:
+    if not bands:
+        raise ValueError("bands must be a non-empty mapping {name: (low, high)}")
+    for name, edge in bands.items():
+        if not (isinstance(edge, tuple | list) and len(edge) == 2):
+            raise ValueError(f"band {name!r}: expected (low, high) tuple, got {edge!r}")
+        lo, hi = float(edge[0]), float(edge[1])
+        if lo < 0 or hi <= lo:
+            raise ValueError(
+                f"band {name!r}: require 0 <= low < high; got ({lo}, {hi})"
+            )
+
+
+def evaluate_by_frequency_band(
+    prediction: xr.Dataset,
+    reference: xr.Dataset,
+    *,
+    variable: str,
+    bands: Mapping[str, tuple[float, float]],
+    dims: Sequence[str],
+    metric: Operator | None = None,
+    coord_spacing: Mapping[str, float] | None = None,
+) -> xr.Dataset:
+    """Filter ``prediction`` and ``reference`` to each band and apply ``metric``.
+
+    Args:
+        prediction: Prediction dataset.
+        reference: Reference dataset.
+        variable: Variable to score; must exist in both inputs.
+        bands: ``{name: (low, high)}`` in physical coord units of
+            ``dims``. ``low`` is included, ``high`` is excluded; both
+            must be ``>= 0``.
+        dims: Dimensions to FFT along. Coords must carry ``units``
+            metadata (or per-dim ``coord_spacing`` overrides must be
+            supplied).
+        metric: Inner :class:`Operator` evaluated on the band-passed
+            ``(pred, ref)`` pair. Defaults to ``RMSE(variable, dims=dims)``.
+        coord_spacing: Optional per-dim spacing overrides (in the same
+            physical units as ``bands``); bypasses unit auto-detection.
+
+    Returns:
+        Dataset stacked along a ``"band"`` dim with auxiliary
+        ``"band_low"`` / ``"band_high"`` coords. Bands whose ``low``
+        exceeds the Nyquist magnitude produce NaN entries plus a
+        :class:`UserWarning` (no exception).
+    """
+    if variable not in prediction.data_vars:
+        raise KeyError(f"prediction missing variable {variable!r}")
+    if variable not in reference.data_vars:
+        raise KeyError(f"reference missing variable {variable!r}")
+    dim_list = list(dims)
+    for d in dim_list:
+        if d not in prediction.dims:
+            raise ValueError(f"prediction is missing dim {d!r}")
+        if d not in reference.dims:
+            raise ValueError(f"reference is missing dim {d!r}")
+    # Bands are physical-frequency, so prediction and reference must
+    # share the dim coordinates — otherwise a single ``spacing`` derived
+    # from one of them would band-pass the other with the wrong cutoff.
+    for d in dim_list:
+        if d in prediction.coords and d in reference.coords:
+            p = np.asarray(prediction[d].values)
+            r = np.asarray(reference[d].values)
+            if p.shape != r.shape or not np.allclose(p, r):
+                raise ValueError(
+                    f"prediction and reference disagree on coord {d!r}; "
+                    "regrid one onto the other (e.g. with "
+                    "`xr_toolz.interpolate.RegridLike`) before scoring."
+                )
+    _validate_bands(bands)
+
+    if metric is None:
+        from xr_toolz.metrics._src.pixel import RMSE
+
+        metric = RMSE(variable, dims=tuple(dim_list))
+    elif not isinstance(metric, Operator):
+        raise TypeError(
+            "metric must be an Operator instance (e.g. RMSE(...)) so its "
+            "configuration is introspectable."
+        )
+
+    spacing = _physical_spacing(prediction, dim_list, coord_spacing=coord_spacing)
+    nyquist_mag = float(np.sqrt(sum((0.5 / spacing[d]) ** 2 for d in dim_list)))
+
+    pred_da = prediction[variable]
+    ref_da = reference[variable]
+
+    pieces: list[xr.DataArray | xr.Dataset] = []
+    band_names = list(bands.keys())
+    for name in band_names:
+        lo, hi = float(bands[name][0]), float(bands[name][1])
+        if lo > nyquist_mag:
+            warnings.warn(
+                f"band {name!r} low={lo} exceeds Nyquist magnitude "
+                f"{nyquist_mag:.4g} — emitting NaN.",
+                UserWarning,
+                stacklevel=2,
+            )
+            template = metric(prediction, reference)
+            pieces.append(xr.full_like(template, np.nan, dtype=float))
+            continue
+        pred_band = _bandpass(pred_da, dim_list, spacing, lo, hi)
+        ref_band = _bandpass(ref_da, dim_list, spacing, lo, hi)
+        pred_ds = prediction.assign({variable: pred_band})
+        ref_ds = reference.assign({variable: ref_band})
+        pieces.append(metric(pred_ds, ref_ds))
+
+    band_index = xr.DataArray(band_names, dims=("band",), name="band")
+    out = xr.concat(pieces, dim=band_index)
+    band_low = xr.DataArray(
+        [float(bands[k][0]) for k in band_names], dims=("band",), name="band_low"
+    )
+    band_high = xr.DataArray(
+        [float(bands[k][1]) for k in band_names], dims=("band",), name="band_high"
+    )
+    out = out.assign_coords(band_low=band_low, band_high=band_high)
+    if isinstance(out, xr.DataArray):
+        return out.to_dataset(name=out.name or "score")
+    return out
+
+
+def band_limited_rmse(
+    prediction: xr.Dataset,
+    reference: xr.Dataset,
+    *,
+    variable: str,
+    bands: Mapping[str, tuple[float, float]],
+    dims: Sequence[str],
+    coord_spacing: Mapping[str, float] | None = None,
+) -> xr.Dataset:
+    """RMSE of ``prediction - reference`` filtered to each band.
+
+    Convenience wrapper around :func:`evaluate_by_frequency_band` with
+    ``metric=RMSE(variable, dims=dims)``.
+    """
+    from xr_toolz.metrics._src.pixel import RMSE
+
+    return evaluate_by_frequency_band(
+        prediction,
+        reference,
+        variable=variable,
+        bands=bands,
+        dims=dims,
+        metric=RMSE(variable, dims=tuple(dims)),
+        coord_spacing=coord_spacing,
+    )
+
+
+class FrequencyBandSkill(Operator):
+    """Apply an inner metric to band-passed (pred, ref) pairs.
+
+    Args:
+        variable: Variable to score.
+        dims: Dimensions to FFT along (passed through to inner metric
+            as well when ``metric`` is omitted).
+        bands: ``{name: (low, high)}`` in physical coord units.
+        metric: Inner :class:`Operator` (default ``RMSE(variable, dims=dims)``).
+        coord_spacing: Optional per-dim spacing override (in the same
+            physical units as ``bands``).
+    """
+
+    def __init__(
+        self,
+        variable: str,
+        dims: Sequence[str],
+        bands: Mapping[str, tuple[float, float]],
+        *,
+        metric: Operator | None = None,
+        coord_spacing: Mapping[str, float] | None = None,
+    ) -> None:
+        if metric is None:
+            from xr_toolz.metrics._src.pixel import RMSE
+
+            metric = RMSE(variable, dims=tuple(dims))
+        elif not isinstance(metric, Operator):
+            raise TypeError(
+                "metric must be an Operator instance (e.g. RMSE(...)) so its "
+                "configuration is introspectable."
+            )
+        _validate_bands(bands)
+        self.variable = variable
+        self.dims = tuple(dims)
+        self.bands = {k: (float(v[0]), float(v[1])) for k, v in bands.items()}
+        self.metric = metric
+        self.coord_spacing = (
+            None
+            if coord_spacing is None
+            else {k: float(v) for k, v in coord_spacing.items()}
+        )
+
+    def _apply(self, ds_pred: xr.Dataset, ds_ref: xr.Dataset) -> xr.Dataset:
+        return evaluate_by_frequency_band(
+            ds_pred,
+            ds_ref,
+            variable=self.variable,
+            bands=self.bands,
+            dims=self.dims,
+            metric=self.metric,
+            coord_spacing=self.coord_spacing,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        cfg: dict[str, Any] = {
+            "variable": self.variable,
+            "dims": list(self.dims),
+            "bands": {k: list(v) for k, v in self.bands.items()},
+            "metric": {
+                "class": type(self.metric).__name__,
+                "config": self.metric.get_config(),
+            },
+        }
+        if self.coord_spacing is not None:
+            cfg["coord_spacing"] = dict(self.coord_spacing)
+        return cfg
+
+
+class BandLimitedRMSE(FrequencyBandSkill):
+    """Fixed-metric convenience subclass: ``FrequencyBandSkill`` with RMSE."""
+
+    def __init__(
+        self,
+        variable: str,
+        dims: Sequence[str],
+        bands: Mapping[str, tuple[float, float]],
+        *,
+        coord_spacing: Mapping[str, float] | None = None,
+    ) -> None:
+        from xr_toolz.metrics._src.pixel import RMSE
+
+        super().__init__(
+            variable,
+            dims,
+            bands,
+            metric=RMSE(variable, dims=tuple(dims)),
+            coord_spacing=coord_spacing,
+        )
+
+
 __all__ = [
+    "BandLimitedRMSE",
+    "FrequencyBandSkill",
     "PSDScore",
+    "band_limited_rmse",
+    "evaluate_by_frequency_band",
     "find_intercept_1D",
     "psd_error",
     "psd_score",

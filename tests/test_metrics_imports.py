@@ -99,7 +99,11 @@ def test_metrics_pixel_submodule_imports():
 
 def test_metrics_spectral_submodule_imports():
     from xr_toolz.metrics.spectral import (
+        BandLimitedRMSE,
+        FrequencyBandSkill,
         PSDScore,
+        band_limited_rmse,
+        evaluate_by_frequency_band,
         find_intercept_1D,
         psd_error,
         psd_score,
@@ -107,7 +111,16 @@ def test_metrics_spectral_submodule_imports():
     )
 
     assert callable(psd_score)
-    _ = (PSDScore, find_intercept_1D, psd_error, resolved_scale)
+    assert callable(evaluate_by_frequency_band)
+    assert callable(band_limited_rmse)
+    _ = (
+        PSDScore,
+        FrequencyBandSkill,
+        BandLimitedRMSE,
+        find_intercept_1D,
+        psd_error,
+        resolved_scale,
+    )
 
 
 def test_metrics_structural_submodule_imports():

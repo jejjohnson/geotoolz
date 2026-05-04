@@ -36,6 +36,7 @@ from xr_toolz.geo._src.detrend import (
     calculate_climatology_season,
     calculate_climatology_smoothed,
     remove_climatology,
+    remove_mean,
 )
 from xr_toolz.geo._src.extremes import (
     block_maxima,
@@ -59,6 +60,7 @@ from xr_toolz.geo._src.subset import (
 )
 from xr_toolz.geo._src.validation import (
     rename_coords,
+    rename_variables,
     validate_latitude,
     validate_longitude,
 )
@@ -148,7 +150,9 @@ __all__ = [
     "pp_counts",
     "pp_stats",
     "remove_climatology",
+    "remove_mean",
     "rename_coords",
+    "rename_variables",
     "reproject",
     "select_variables",
     "subset_bbox",

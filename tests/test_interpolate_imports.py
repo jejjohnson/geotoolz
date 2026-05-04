@@ -24,6 +24,7 @@ CANONICAL_FUNCS = (
     ("fillnan_rbf", "gap_fill"),
     ("coarsen", "grid_to_grid"),
     ("refine", "grid_to_grid"),
+    ("regrid_like", "grid_to_grid"),
     ("resample_time", "resample"),
     ("points_to_grid", "points_to_grid"),
 )
@@ -42,6 +43,7 @@ CANONICAL_OPS = (
     "MovingAverage",
     "PointsToGrid",
     "Refine",
+    "RegridLike",
     "RemapAxis",
     "ResampleTime",
     "ToHeight",

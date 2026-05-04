@@ -338,3 +338,38 @@ V4.1 / V4.3 reach into `xr_toolz.calc` and `xr_toolz.ocn` for derived quantities
 | Brunt–Väisälä frequency (N²) | implemented | `xr_toolz.ocn.brunt_vaisala_frequency` |
 | Kinetic energy | implemented | `xr_toolz.ocn.kinetic_energy` |
 
+
+---
+
+## D16: Frequency-band specification uses physical units of the dim coords
+
+**Status:** accepted (resolves validation.md §1 open question 2).
+
+### Context
+
+V1.3 introduces `FrequencyBandSkill` and `BandLimitedRMSE` for
+scale-decomposed validation. The open question was how a user should
+name a band: by physical frequency, by grid index, or by wavelength.
+
+### Decision
+
+Bands are a `dict[str, tuple[float, float]]` of `{name: (low, high)}`,
+with `low` and `high` expressed in the **physical frequency units** of
+the dim coord (cycles per coord-unit). The dim coordinate must carry
+a `units` attribute; lat/lon coords whose units look like
+`degrees_north` / `degrees_east` are converted to kilometres
+internally (using a meridian-arc-length of `111.0` km/° plus a
+`cos(mean_lat)` factor for longitude), so spatial bands can be
+expressed in cycles/km. A per-dim `coord_spacing=` override is
+available for high-precision work or non-CF coord units.
+
+### Consequences
+
+- Bands survive resolution changes — re-gridding the input does not
+  shift the band edges.
+- Bands above the per-dim Nyquist magnitude emit a `UserWarning` and
+  produce `NaN` rather than raising, so a `Sequential` pipeline
+  containing several bands is robust to one of them being too high.
+- Inputs whose dim coord has no `units` attribute raise with a clear
+  error message pointing at `xr_toolz.geo.validation` (or
+  `coord_spacing=`).
