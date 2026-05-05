@@ -9,6 +9,7 @@ the title / style hooks, and a uniform ``__call__`` contract.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import matplotlib.figure as mpl_figure
@@ -27,6 +28,18 @@ class _ValidationPanel(Operator):
             ``None`` keeps the active rcParams.
         title: Optional panel title; defaults to a class-specific
             string set in :meth:`_default_title`.
+        savefig: Optional local output path. When set, the figure is
+            saved via :meth:`matplotlib.figure.Figure.savefig` after
+            rendering and parent directories are created if missing.
+            Cloud / remote paths aren't handled directly — open a
+            file-like object yourself and pass it via ``savefig_kwargs``
+            if you need that. Default ``None``.
+        savefig_kwargs: Forwarded to ``Figure.savefig`` (e.g.
+            ``{"dpi": 200, "bbox_inches": "tight"}``). Default ``None``.
+        show: When ``True``, call :func:`matplotlib.pyplot.show` after
+            rendering — useful for scripts. Notebooks display the
+            returned Figure automatically and don't need this. Default
+            ``False``.
 
     Subclasses implement :meth:`_build(fig, axes, *args, **kwargs)`.
     The base ``__call__``:
@@ -34,8 +47,8 @@ class _ValidationPanel(Operator):
     - dispatches to graph construction if any positional arg is a
       :class:`~xr_toolz.core.graph.Node` (inherited from :class:`Operator`),
     - otherwise creates a Figure + Axes, applies ``style`` if set,
-      delegates to :meth:`_build`, applies the title, and returns the
-      Figure.
+      delegates to :meth:`_build`, applies the title, optionally
+      saves and/or shows the figure, and returns it.
     """
 
     _default_axes_layout: tuple[int, int] = (1, 1)
@@ -46,10 +59,16 @@ class _ValidationPanel(Operator):
         figsize: tuple[float, float] = (8, 5),
         style: str | None = None,
         title: str | None = None,
+        savefig: str | Path | None = None,
+        savefig_kwargs: dict[str, Any] | None = None,
+        show: bool = False,
     ) -> None:
         self.figsize = tuple(figsize)
         self.style = style
         self.title = title
+        self.savefig = savefig
+        self.savefig_kwargs = dict(savefig_kwargs) if savefig_kwargs else {}
+        self.show = bool(show)
 
     def _default_title(self) -> str:
         return self.__class__.__name__
@@ -77,13 +96,36 @@ class _ValidationPanel(Operator):
             fig.tight_layout()
             if title:
                 fig.suptitle(title)
+        self._maybe_save(fig)
+        self._maybe_show(fig)
         return fig
+
+    def _maybe_save(self, fig: mpl_figure.Figure) -> None:
+        if self.savefig is None:
+            return
+        # Create parent dirs for local paths so callers don't have to.
+        # Wrap in try/except so non-path-like savefig values (e.g. an
+        # open file handle) don't trip Path coercion.
+        try:
+            parent = Path(self.savefig).expanduser().parent
+            if str(parent) and not parent.exists():
+                parent.mkdir(parents=True, exist_ok=True)
+        except (TypeError, OSError):
+            pass
+        fig.savefig(self.savefig, **self.savefig_kwargs)
+
+    def _maybe_show(self, fig: mpl_figure.Figure) -> None:
+        if self.show:
+            plt.show()
 
     def get_config(self) -> dict[str, Any]:
         return {
             "figsize": list(self.figsize),
             "style": self.style,
             "title": self.title,
+            "savefig": str(self.savefig) if self.savefig is not None else None,
+            "savefig_kwargs": dict(self.savefig_kwargs),
+            "show": self.show,
         }
 
 

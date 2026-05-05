@@ -19,6 +19,10 @@ from xr_toolz.viz.validation import (
     EventVerificationPanel,
     LeadTimeSkillPanel,
     ProcessBudgetPanel,
+    PSDIsotropicPanel,
+    PSDIsotropicScorePanel,
+    PSDSpaceTimePanel,
+    PSDSpaceTimeScorePanel,
     ScaleSkillPanel,
     SpectralSkillPanel,
 )
@@ -294,5 +298,216 @@ def test_viz_validation_top_level_imports():
         "EulerianLagrangianPanel",
         "ProcessBudgetPanel",
         "EventVerificationPanel",
+        "PSDIsotropicPanel",
+        "PSDIsotropicScorePanel",
+        "PSDSpaceTimePanel",
+        "PSDSpaceTimeScorePanel",
     ):
         assert hasattr(vv, name)
+
+
+# ---- V1.5 PSD panels ----------------------------------------------------
+
+
+@pytest.fixture
+def _psd_fixtures():
+    """Build small synthetic PSD / score fixtures via real `power_spectrum`
+    + `psd_score` over a random Gaussian field — no cache dependency, so
+    the tests run on a fresh clone / in CI."""
+    import scipy.ndimage as ndi
+
+    from xr_toolz.metrics import psd_score
+    from xr_toolz.transforms import power_spectrum
+
+    rng = np.random.default_rng(0)
+    n_t, n_lat, n_lon = 16, 24, 32
+    lon = np.linspace(-70.0, -50.0, n_lon, dtype=np.float64)
+    lat = np.linspace(30.0, 45.0, n_lat, dtype=np.float64)
+    time = np.arange(n_t, dtype=np.float64)
+    truth = xr.DataArray(
+        ndi.gaussian_filter(
+            rng.standard_normal((n_t, n_lat, n_lon)), sigma=(0, 1.5, 1.5)
+        ),
+        coords={"time": time, "lat": lat, "lon": lon},
+        dims=("time", "lat", "lon"),
+        name="zos",
+    )
+    pred = xr.apply_ufunc(
+        lambda a: ndi.gaussian_filter(a, sigma=(0, 2.5, 2.5)), truth
+    ).rename("zos")
+
+    iso = power_spectrum(truth, dim=("lon", "lat"), isotropic=True).mean("time")
+    iso_score = psd_score(
+        pred.to_dataset(name="zos"),
+        truth.to_dataset(name="zos"),
+        "zos",
+        psd_dims=("lon", "lat"),
+        isotropic=True,
+    ).mean("time")
+    st = power_spectrum(truth, dim=("lon", "time")).mean("lat")
+    st_score = psd_score(
+        pred.to_dataset(name="zos"),
+        truth.to_dataset(name="zos"),
+        "zos",
+        psd_dims=("lon", "time"),
+        avg_dims=("lat",),
+        isotropic=False,
+    )
+    return {"iso": iso, "iso_score": iso_score, "st": st, "st_score": st_score}
+
+
+def test_psd_isotropic_panel_renders(_psd_fixtures):
+    fig = PSDIsotropicPanel(freq_dim="freq_r", space_scale=1.0 / 111.0)(
+        _psd_fixtures["iso"]
+    )
+    assert isinstance(fig, mpl_figure.Figure)
+
+
+def test_psd_isotropic_score_panel_resolves_scale(_psd_fixtures):
+    panel = PSDIsotropicScorePanel(freq_dim="freq_r", space_scale=1.0 / 111.0)
+    fig = panel(_psd_fixtures["iso_score"])
+    # The smoothed twin must produce a resolved-scale crossing — a
+    # legend entry containing "Resolved scale" is the panel's
+    # observable signal that find_intercept_1D succeeded.
+    legend = fig.axes[0].get_legend()
+    assert legend is not None
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert any("Resolved scale" in lab for lab in labels)
+
+
+def test_psd_isotropic_score_panel_clips_negative_scores(_psd_fixtures):
+    score = _psd_fixtures["iso_score"].copy()
+    score["score"] = score["score"] * 0 - 0.5  # all-negative
+    fig = PSDIsotropicScorePanel(freq_dim="freq_r", space_scale=1.0 / 111.0)(score)
+    ymin, ymax = fig.axes[0].get_ylim()
+    assert ymin == 0.0 and ymax == 1.0
+
+
+def test_psd_space_time_panel_renders(_psd_fixtures):
+    fig = PSDSpaceTimePanel(
+        freq_space_dim="freq_lon",
+        freq_time_dim="freq_time",
+        space_scale=1.0 / 111.0,
+        time_scale=1.0,
+    )(_psd_fixtures["st"])
+    assert isinstance(fig, mpl_figure.Figure)
+
+
+def test_psd_space_time_score_panel_renders(_psd_fixtures):
+    fig = PSDSpaceTimeScorePanel(
+        freq_space_dim="freq_lon",
+        freq_time_dim="freq_time",
+        space_scale=1.0 / 111.0,
+        time_scale=1.0,
+    )(_psd_fixtures["st_score"])
+    assert isinstance(fig, mpl_figure.Figure)
+
+
+def test_psd_panels_get_config_keys():
+    cfg = PSDIsotropicPanel(space_scale=2.0).get_config()
+    assert cfg["space_scale"] == 2.0
+    cfg = PSDIsotropicScorePanel(threshold=0.7, space_scale=1e-3).get_config()
+    assert cfg["threshold"] == 0.7
+    cfg = PSDSpaceTimePanel(time_scale=86400.0).get_config()
+    assert cfg["time_scale"] == 86400.0
+    cfg = PSDSpaceTimeScorePanel(threshold=0.4).get_config()
+    assert cfg["threshold"] == 0.4
+
+
+# ---- savefig / show args (panel-wide) -----------------------------------
+
+
+def test_panel_savefig_writes_file(tmp_path):
+    da = xr.DataArray(np.arange(4.0), dims=("lead_time",), name="rmse")
+    out = tmp_path / "skill.png"
+    fig = LeadTimeSkillPanel(savefig=out)(da)
+    assert isinstance(fig, mpl_figure.Figure)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_panel_savefig_kwargs_forwarded(tmp_path):
+    da = xr.DataArray(np.arange(4.0), dims=("lead_time",), name="rmse")
+    out_lo = tmp_path / "lo.png"
+    out_hi = tmp_path / "hi.png"
+    LeadTimeSkillPanel(savefig=out_lo, savefig_kwargs={"dpi": 50})(da)
+    LeadTimeSkillPanel(savefig=out_hi, savefig_kwargs={"dpi": 200})(da)
+    # Higher dpi → larger PNG.
+    assert out_hi.stat().st_size > out_lo.stat().st_size
+
+
+def test_panel_show_calls_pyplot_show(monkeypatch):
+    da = xr.DataArray(np.arange(4.0), dims=("lead_time",), name="rmse")
+    calls = {"n": 0}
+    monkeypatch.setattr(plt, "show", lambda *a, **kw: calls.update(n=calls["n"] + 1))
+    LeadTimeSkillPanel(show=True)(da)
+    assert calls["n"] == 1
+
+
+def test_panel_show_default_does_not_call_pyplot_show(monkeypatch):
+    da = xr.DataArray(np.arange(4.0), dims=("lead_time",), name="rmse")
+    calls = {"n": 0}
+    monkeypatch.setattr(plt, "show", lambda *a, **kw: calls.update(n=calls["n"] + 1))
+    LeadTimeSkillPanel()(da)
+    assert calls["n"] == 0
+
+
+def test_psd_iso_score_resolved_units_parsed_from_label(_psd_fixtures):
+    """Resolved-scale legend uses units parsed from wavelength_label."""
+    panel = PSDIsotropicScorePanel(
+        freq_dim="freq_r",
+        space_scale=1.0 / 111.0,
+        wavelength_label="Wavelength [km]",
+    )
+    fig = panel(_psd_fixtures["iso_score"])
+    legend = fig.axes[0].get_legend()
+    if legend is not None:  # only present when threshold is crossed
+        labels = [t.get_text() for t in legend.get_texts()]
+        assert any(lab.endswith(" km") for lab in labels)
+
+
+def test_psd_iso_score_resolved_units_explicit_override(_psd_fixtures):
+    panel = PSDIsotropicScorePanel(
+        freq_dim="freq_r",
+        space_scale=1.0,
+        wavelength_label="Wavelength [m]",
+        resolved_units="metres",
+    )
+    fig = panel(_psd_fixtures["iso_score"])
+    legend = fig.axes[0].get_legend()
+    if legend is not None:
+        labels = [t.get_text() for t in legend.get_texts()]
+        assert any("metres" in lab for lab in labels)
+
+
+def test_psd_space_time_panel_handles_zero_psd_cells(_psd_fixtures):
+    """LogNorm autoscale must not trip on zero or non-finite PSD cells."""
+    st = _psd_fixtures["st"].copy()
+    # Inject zeros + NaNs at a few cells to exercise the masking path.
+    arr = st.values.copy()
+    arr[0, 0] = 0.0
+    arr[0, 1] = np.nan
+    st.values[...] = arr
+    fig = PSDSpaceTimePanel(
+        freq_space_dim="freq_lon",
+        freq_time_dim="freq_time",
+        space_scale=1.0 / 111.0,
+        time_scale=1.0,
+    )(st)
+    assert isinstance(fig, mpl_figure.Figure)
+
+
+def test_panel_savefig_creates_parent_dirs(tmp_path):
+    """savefig= path with missing parent dirs auto-creates them."""
+    da = xr.DataArray(np.arange(4.0), dims=("lead_time",), name="rmse")
+    out = tmp_path / "deep" / "nested" / "skill.png"
+    fig = LeadTimeSkillPanel(savefig=out)(da)
+    assert isinstance(fig, mpl_figure.Figure)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_psd_panel_savefig_writes_file(tmp_path, _psd_fixtures):
+    out = tmp_path / "iso.png"
+    PSDIsotropicPanel(freq_dim="freq_r", space_scale=1.0 / 111.0, savefig=out)(
+        _psd_fixtures["iso"]
+    )
+    assert out.exists() and out.stat().st_size > 0
