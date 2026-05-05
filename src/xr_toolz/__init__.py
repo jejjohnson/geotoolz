@@ -1,15 +1,27 @@
 """xr_toolz — composable operators for Earth System Data Cubes."""
 
-from xr_toolz.core import Graph, Input, Node, Operator, Sequential
+from xr_toolz.core import (
+    ApplyToEach,
+    Augment,
+    Graph,
+    Input,
+    Node,
+    Operator,
+    Sequential,
+    Tap,
+)
 
 
 __version__ = "0.0.3"
 
 __all__ = [
+    "ApplyToEach",
+    "Augment",
     "Graph",
     "Input",
     "Node",
     "Operator",
     "Sequential",
+    "Tap",
     "__version__",
 ]

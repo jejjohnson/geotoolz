@@ -37,12 +37,36 @@ version: 0.1.0
 ```python
 class Operator:        # Base class (see architecture.md §Operator) with dual-mode __call__ (eager + symbolic)
 class Sequential:      # Linear pipeline (see architecture.md §Sequential)
-class Identity:        # No-op operator
-class Lambda:          # Wrap an arbitrary Callable as an Operator
+class Identity:        # No-op operator (planned)
+class Lambda:          # Wrap an arbitrary Callable as an Operator (planned)
     def __init__(self, fn: Callable, name: str = "lambda"): ...
+
+# Operator combinators — wrap an inner Operator and adapt its interface.
+class Augment:         # Run inner op, merge its output back into the input Dataset.
+    def __init__(self, inner: Operator): ...
+
+class Tap:             # Call a side-effect on the input, return input unchanged.
+    def __init__(self, side_effect: Callable[[xr.Dataset], Any], *, name: str | None = None): ...
+
+class ApplyToEach:     # Re-instantiate a prototype op once per value of a chosen kwarg.
+    def __init__(self, prototype: Operator, *, kwarg: str, values: Sequence[Any]): ...
 ```
 
 `Lambda` is the escape hatch: any Layer 0 function (or any user function) becomes an operator via `Lambda(partial(my_fn, param=value))`.
+
+The three combinators (`Augment`, `Tap`, `ApplyToEach`) bridge the structural mismatch between the Layer 1 contract — single-input op returns a Dataset, *replacing* the input — and common pipeline use cases that want to *grow* a Dataset by appending derived columns (`Augment`), inject observability without altering data (`Tap`), or fan out a single prototype across multiple variables (`ApplyToEach`). Each combinator is itself an `Operator`, so they compose inside `Sequential` and `Graph`. **Serialization caveat**: `Augment` and `ApplyToEach` carry nested `Operator` state, so their `get_config` outputs are JSON-safe for *introspection* (printing, logging, diffing pipeline structure) but are **not** constructor-replayable — a literal `Augment(**cfg)` round-trip fails because the constructor expects live `Operator` instances rather than serialized `{"class", "config"}` records. A future deserializer with a class registry would close that gap. `Tap` likewise advertises a `"<callable>"` placeholder rather than the side-effect callable itself. Canonical idiom for a diagnostics pipeline:
+
+```python
+from xr_toolz import Augment, Sequential
+from xr_toolz.ocn.operators import RelativeVorticity, KineticEnergy, OkuboWeiss
+
+diagnostics = Sequential([
+    Augment(RelativeVorticity()),
+    Augment(KineticEnergy()),
+    Augment(OkuboWeiss()),
+])
+enriched = diagnostics(velocity_dataset)
+```
 
 ---
 
