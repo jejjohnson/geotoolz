@@ -26,6 +26,14 @@
 
 * `xr_toolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xr_toolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.4](https://github.com/jejjohnson/xr_toolz/compare/v0.0.3...v0.0.4) (2026-05-05)
+
+
+### Features
+
+* **core:** operator combinators + ocean tutorial notebooks ([#115](https://github.com/jejjohnson/xr_toolz/issues/115)) ([b1e4cb3](https://github.com/jejjohnson/xr_toolz/commit/b1e4cb3eb9945f089a3a5635977a7c86a33a9656))
+* **metrics:** add V1.3 FrequencyBandSkill + V1.4 demo + pipeline ops ([#112](https://github.com/jejjohnson/xr_toolz/issues/112)) ([0d6f3f3](https://github.com/jejjohnson/xr_toolz/commit/0d6f3f32f4721bd6875b0fa3843301b5b0db2ff8))
+
 ## [0.0.3](https://github.com/jejjohnson/xr_toolz/compare/v0.0.2...v0.0.3) (2026-05-04)
 
 
