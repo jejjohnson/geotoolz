@@ -26,6 +26,32 @@ Power-spectrum visualisations consuming
 
 ::: xr_toolz.viz.validation.PSDSpaceTimeScorePanel
 
+## Spatial snapshots
+
+::: xr_toolz.viz.validation.SpatialMapPanel
+
+### Cartopy presets
+
+The `projection` kwarg of `SpatialMapPanel` accepts preset names from
+[`xr_toolz.viz.PRESETS`][xr_toolz.viz.PRESETS] (`"global"`,
+`"north_atlantic"`, `"gulf_stream"`, `"kuroshio"`,
+`"mediterranean"`), a cartopy class name, or an instantiated cartopy
+CRS. With a preset, the right `set_extent` is applied automatically.
+
+::: xr_toolz.viz.make_axes
+
+### Variable → colormap registry
+
+Default colormaps for spatial panels are looked up from the curated
+[`xr_toolz.types.REGISTRY`][xr_toolz.types.REGISTRY]: every entry
+carries a `cmap` field (e.g. SSH → `RdBu_r`, SST → `RdYlBu_r`,
+salinity → `viridis`, ice → `Blues`).
+[`xr_toolz.viz.cmap_for`][xr_toolz.viz.cmap_for] performs the
+lookup; `SpatialMapPanel(var=...)` calls it automatically when
+`cmap` is unset.
+
+::: xr_toolz.viz.cmap_for
+
 ## V3 — Lagrangian / Eulerian
 
 ::: xr_toolz.viz.validation.EulerianLagrangianPanel

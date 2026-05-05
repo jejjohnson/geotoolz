@@ -185,6 +185,77 @@ class RemoveMean(Operator):
         return {"dims": list(self.dims)}
 
 
+# ---------- generic transforms --------------------------------------------
+
+
+class FillNaN(Operator):
+    """Replace NaN values with a constant.
+
+    Promotes the inline op used in the V1.5 PSD demo to a library
+    primitive. ``xr_toolz.geo._src.interpolation`` provides
+    *interpolating* NaN fillers (``FillNaNSpatial`` / ``FillNaNTemporal``);
+    this op is the constant-fill counterpart — useful for zeroing land
+    cells before PSD scoring so they contribute no spectral energy.
+
+    Args:
+        value: Constant to substitute for NaN. Default ``0.0``.
+    """
+
+    def __init__(self, value: float = 0.0) -> None:
+        self.value = float(value)
+
+    def _apply(self, ds):
+        return ds.fillna(self.value)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"value": self.value}
+
+
+_REDUCE_OPS = ("mean", "sum", "median", "min", "max", "std", "var")
+
+
+class Reduce(Operator):
+    """Reduce a Dataset over one or more dims with a named aggregation.
+
+    Wraps the corresponding ``xr.Dataset`` reducer (``mean`` / ``sum`` /
+    …). Promotes the inline ``MeanOverDim`` from the V1.5 PSD demo so
+    notebooks no longer redefine a one-method subclass per reduction.
+
+    Args:
+        op: Aggregation name. One of ``"mean"``, ``"sum"``, ``"median"``,
+            ``"min"``, ``"max"``, ``"std"``, ``"var"``.
+        dim: Dim or tuple of dims to reduce over.
+        keepdims: Whether to keep reduced dims as length-1 (forwarded to
+            the underlying xarray reducer's ``keepdims`` kwarg).
+    """
+
+    def __init__(
+        self,
+        op: str = "mean",
+        dim: str | tuple[str, ...] = ("time",),
+        *,
+        keepdims: bool = False,
+    ) -> None:
+        if op not in _REDUCE_OPS:
+            raise ValueError(
+                f"Unknown reduce op {op!r}; expected one of {_REDUCE_OPS}."
+            )
+        self.op = op
+        self.dim = (dim,) if isinstance(dim, str) else tuple(dim)
+        self.keepdims = bool(keepdims)
+
+    def _apply(self, ds):
+        reducer = getattr(ds, self.op)
+        return reducer(dim=self.dim, keepdims=self.keepdims)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "op": self.op,
+            "dim": list(self.dim),
+            "keepdims": self.keepdims,
+        }
+
+
 class RemoveClimatology(Operator):
     """Subtract a precomputed climatology from the input dataset."""
 
@@ -308,6 +379,8 @@ __all__ = [
     "ApplyMask",
     "CalculateClimatology",
     "CalculateClimatologySmoothed",
+    "FillNaN",
+    "Reduce",
     "RemoveClimatology",
     "RemoveMean",
     "RenameCoords",

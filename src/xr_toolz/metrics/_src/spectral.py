@@ -204,6 +204,71 @@ def find_intercept_1D(
         return float(np.asarray(f(edge)).item())
 
 
+def find_intercept_2D(
+    score: xr.DataArray,
+    level: float = 0.5,
+    space_dim: str = "freq_lon",
+    time_dim: str = "freq_time",
+) -> list[xr.DataArray]:
+    """Extract the threshold contour of a 2-D ``(space, time)`` score field.
+
+    Counterpart to :func:`find_intercept_1D` for the 2-D space-time
+    score: returns the boundary where ``score == level`` as data so it
+    can be quoted in a paper or compared across methods quantitatively
+    rather than only overlaid on a figure.
+    Wraps :func:`skimage.measure.find_contours`. Disconnected boundary
+    pieces are returned as separate segments. Coordinate values along
+    each segment are interpolated linearly from the input grid.
+    Args:
+        score: 2-D :class:`xr.DataArray` indexed by ``space_dim`` and
+            ``time_dim``.
+        level: Score threshold to extract. Default ``0.5``.
+        space_dim: Name of the spatial-frequency dim. Default
+            ``"freq_lon"``.
+        time_dim: Name of the temporal-frequency dim. Default
+            ``"freq_time"``.
+    Returns:
+        List of :class:`xr.DataArray`, one per contour segment, each
+        with dims ``("point", "axis")`` where ``axis`` has coordinates
+        ``(space_dim, time_dim)`` and contains the segment's coordinate
+        polyline.
+    """
+    from skimage.measure import find_contours
+
+    if score.ndim != 2:
+        raise ValueError(
+            f"find_intercept_2D expects a 2-D DataArray; got dims {score.dims}."
+        )
+    if space_dim not in score.dims or time_dim not in score.dims:
+        raise ValueError(
+            f"score must have dims {space_dim!r} and {time_dim!r}; got {score.dims}."
+        )
+
+    # find_contours operates in (row, col) index space; transpose so
+    # rows == time_dim (y-axis) and cols == space_dim (x-axis), which
+    # matches the conventional space-time score plot orientation.
+    s = score.transpose(time_dim, space_dim)
+    arr = np.asarray(s.values, dtype=float)
+    space_coord = np.asarray(s[space_dim].values, dtype=float)
+    time_coord = np.asarray(s[time_dim].values, dtype=float)
+
+    contours = find_contours(arr, level=level)
+    segments: list[xr.DataArray] = []
+    for c in contours:
+        # c[:, 0] is fractional row (time), c[:, 1] is fractional col (space)
+        rows = c[:, 0]
+        cols = c[:, 1]
+        sx = np.interp(cols, np.arange(space_coord.size), space_coord)
+        ty = np.interp(rows, np.arange(time_coord.size), time_coord)
+        seg = xr.DataArray(
+            np.stack([sx, ty], axis=-1),
+            dims=("point", "axis"),
+            coords={"axis": [space_dim, time_dim]},
+        )
+        segments.append(seg)
+    return segments
+
+
 # ---------- Layer-1 (Operator wrappers) -----------------------------------
 
 

@@ -10,6 +10,8 @@ A ``Variable`` carries everything a well-behaved data request needs:
   "cds": "sea_surface_temperature"}`` so each adapter can translate.
 - ``valid_range`` — optional ``(min, max)`` tuple used by validators.
 - ``dtype`` — optional expected dtype, used by validators.
+- ``cmap`` — optional matplotlib colormap name used by spatial viz
+  panels (e.g. ``"RdBu_r"`` for SSH, ``"RdYlBu_r"`` for SST).
 
 The registry (``REGISTRY``) holds curated variables. Users are free to
 construct their own ``Variable`` instances; the registry is a
@@ -41,6 +43,7 @@ class Variable:
     aliases: Mapping[str, str] = field(default_factory=dict, hash=False)
     valid_range: tuple[float, float] | None = None
     dtype: str | None = None
+    cmap: str | None = None
 
     def __post_init__(self) -> None:
         # Wrap any Mapping input in a read-only view so callers can't
@@ -79,6 +82,7 @@ SST = Variable(
     units="K",
     aliases={"cmems": "thetao", "cds": "sea_surface_temperature"},
     valid_range=(270.0, 320.0),
+    cmap="RdYlBu_r",
 )
 
 # CMEMS observation products use the CF standard_name as the file variable
@@ -91,6 +95,7 @@ SST_OBS = Variable(
     units="K",
     aliases={"cmems": "sea_surface_temperature"},
     valid_range=(270.0, 320.0),
+    cmap="RdYlBu_r",
 )
 
 # OSTIA L4 ships the analysis field as ``analysed_sst``.
@@ -101,6 +106,7 @@ ANALYSED_SST = Variable(
     units="K",
     aliases={"cmems": "analysed_sst"},
     valid_range=(270.0, 320.0),
+    cmap="RdYlBu_r",
 )
 
 SSH = Variable(
@@ -110,6 +116,7 @@ SSH = Variable(
     units="m",
     aliases={"cmems": "zos"},
     valid_range=(-5.0, 5.0),
+    cmap="RdBu_r",
 )
 
 SLA = Variable(
@@ -119,6 +126,7 @@ SLA = Variable(
     units="m",
     aliases={"cmems": "sla"},
     valid_range=(-2.0, 2.0),
+    cmap="RdBu_r",
 )
 
 MDT = Variable(
@@ -127,6 +135,7 @@ MDT = Variable(
     long_name="Mean dynamic topography",
     units="m",
     aliases={"cmems": "mdt"},
+    cmap="RdBu_r",
 )
 
 UO = Variable(
@@ -136,6 +145,7 @@ UO = Variable(
     units="m s-1",
     aliases={"cmems": "uo"},
     valid_range=(-5.0, 5.0),
+    cmap="RdBu_r",
 )
 
 VO = Variable(
@@ -145,6 +155,7 @@ VO = Variable(
     units="m s-1",
     aliases={"cmems": "vo"},
     valid_range=(-5.0, 5.0),
+    cmap="RdBu_r",
 )
 
 SO = Variable(
@@ -154,6 +165,7 @@ SO = Variable(
     units="1e-3",
     aliases={"cmems": "so"},
     valid_range=(0.0, 45.0),
+    cmap="viridis",
 )
 
 T2M = Variable(
@@ -163,6 +175,7 @@ T2M = Variable(
     units="K",
     aliases={"cds": "2m_temperature"},
     valid_range=(150.0, 350.0),
+    cmap="RdYlBu_r",
 )
 
 D2M = Variable(
@@ -172,6 +185,7 @@ D2M = Variable(
     units="K",
     aliases={"cds": "2m_dewpoint_temperature"},
     valid_range=(150.0, 350.0),
+    cmap="RdYlBu_r",
 )
 
 U10 = Variable(
@@ -181,6 +195,7 @@ U10 = Variable(
     units="m s-1",
     aliases={"cds": "10m_u_component_of_wind"},
     valid_range=(-100.0, 100.0),
+    cmap="RdBu_r",
 )
 
 V10 = Variable(
@@ -190,6 +205,7 @@ V10 = Variable(
     units="m s-1",
     aliases={"cds": "10m_v_component_of_wind"},
     valid_range=(-100.0, 100.0),
+    cmap="RdBu_r",
 )
 
 MSL = Variable(
@@ -199,6 +215,7 @@ MSL = Variable(
     units="Pa",
     aliases={"cds": "mean_sea_level_pressure"},
     valid_range=(87000.0, 108500.0),
+    cmap="viridis",
 )
 
 TP = Variable(
@@ -208,6 +225,7 @@ TP = Variable(
     units="m",
     aliases={"cds": "total_precipitation"},
     valid_range=(0.0, 1.0),
+    cmap="Blues",
 )
 
 SP = Variable(
@@ -217,6 +235,7 @@ SP = Variable(
     units="Pa",
     aliases={"cds": "surface_pressure"},
     valid_range=(50000.0, 110000.0),
+    cmap="viridis",
 )
 
 SSRD = Variable(
@@ -225,6 +244,7 @@ SSRD = Variable(
     long_name="Surface solar radiation downwards",
     units="J m-2",
     aliases={"cds": "surface_solar_radiation_downwards"},
+    cmap="inferno",
 )
 
 # ---- Ocean — altimetry-derived (DUACS) ----------------------------------
@@ -236,6 +256,7 @@ ADT = Variable(
     units="m",
     aliases={"cmems": "adt"},
     valid_range=(-3.0, 3.0),
+    cmap="RdBu_r",
 )
 
 UGOS = Variable(
@@ -245,6 +266,7 @@ UGOS = Variable(
     units="m s-1",
     aliases={"cmems": "ugos"},
     valid_range=(-5.0, 5.0),
+    cmap="RdBu_r",
 )
 
 VGOS = Variable(
@@ -254,6 +276,7 @@ VGOS = Variable(
     units="m s-1",
     aliases={"cmems": "vgos"},
     valid_range=(-5.0, 5.0),
+    cmap="RdBu_r",
 )
 
 # ---- Ocean — salinity companion -----------------------------------------
@@ -265,6 +288,7 @@ SOS = Variable(
     units="1e-3",
     aliases={"cmems": "sos"},
     valid_range=(0.0, 45.0),
+    cmap="viridis",
 )
 
 # SMOS L3 (asc/des) on CMEMS publishes the salinity field as
@@ -277,6 +301,7 @@ SEA_SURFACE_SALINITY = Variable(
     units="1e-3",
     aliases={"cmems": "Sea_Surface_Salinity"},
     valid_range=(0.0, 45.0),
+    cmap="viridis",
 )
 
 DENS = Variable(
@@ -286,6 +311,7 @@ DENS = Variable(
     units="kg m-3",
     aliases={"cmems": "dos"},
     valid_range=(1000.0, 1050.0),
+    cmap="viridis",
 )
 
 # ---- Ocean — sea-ice ----------------------------------------------------
@@ -297,6 +323,7 @@ ICE_CONC = Variable(
     units="1",
     aliases={"cmems": "sea_ice_fraction"},
     valid_range=(0.0, 1.0),
+    cmap="Blues",
 )
 
 # ---- Ocean colour -------------------------------------------------------
@@ -308,6 +335,7 @@ CHL = Variable(
     units="mg m-3",
     aliases={"cmems": "CHL"},
     valid_range=(0.0, 100.0),
+    cmap="viridis",
 )
 
 KD490 = Variable(
@@ -317,6 +345,7 @@ KD490 = Variable(
     units="m-1",
     aliases={"cmems": "KD490"},
     valid_range=(0.0, 10.0),
+    cmap="viridis",
 )
 
 ZSD = Variable(
@@ -326,6 +355,7 @@ ZSD = Variable(
     units="m",
     aliases={"cmems": "ZSD"},
     valid_range=(0.0, 100.0),
+    cmap="viridis",
 )
 
 SPM = Variable(
@@ -335,6 +365,7 @@ SPM = Variable(
     units="g m-3",
     aliases={"cmems": "SPM"},
     valid_range=(0.0, 1000.0),
+    cmap="viridis",
 )
 
 BBP443 = Variable(
@@ -344,6 +375,7 @@ BBP443 = Variable(
     units="m-1",
     aliases={"cmems": "BBP443"},
     valid_range=(0.0, 1.0),
+    cmap="viridis",
 )
 
 PP = Variable(
@@ -353,6 +385,7 @@ PP = Variable(
     units="mg m-2 day-1",
     aliases={"cmems": "PP"},
     valid_range=(0.0, 10000.0),
+    cmap="viridis",
 )
 
 # Remote-sensing reflectance — one Variable per wavelength so CF metadata
@@ -365,6 +398,7 @@ RRS412 = Variable(
     units="sr-1",
     aliases={"cmems": "RRS412"},
     valid_range=(0.0, 0.1),
+    cmap="viridis",
 )
 
 RRS443 = Variable(
@@ -374,6 +408,7 @@ RRS443 = Variable(
     units="sr-1",
     aliases={"cmems": "RRS443"},
     valid_range=(0.0, 0.1),
+    cmap="viridis",
 )
 
 RRS490 = Variable(
@@ -383,6 +418,7 @@ RRS490 = Variable(
     units="sr-1",
     aliases={"cmems": "RRS490"},
     valid_range=(0.0, 0.1),
+    cmap="viridis",
 )
 
 RRS510 = Variable(
@@ -392,6 +428,7 @@ RRS510 = Variable(
     units="sr-1",
     aliases={"cmems": "RRS510"},
     valid_range=(0.0, 0.1),
+    cmap="viridis",
 )
 
 RRS555 = Variable(
@@ -401,6 +438,7 @@ RRS555 = Variable(
     units="sr-1",
     aliases={"cmems": "RRS555"},
     valid_range=(0.0, 0.1),
+    cmap="viridis",
 )
 
 RRS670 = Variable(
@@ -410,6 +448,7 @@ RRS670 = Variable(
     units="sr-1",
     aliases={"cmems": "RRS670"},
     valid_range=(0.0, 0.1),
+    cmap="viridis",
 )
 
 # ---- Ocean biogeochemistry ----------------------------------------------
@@ -421,6 +460,7 @@ NO3 = Variable(
     units="mmol m-3",
     aliases={"cmems": "no3"},
     valid_range=(0.0, 100.0),
+    cmap="viridis",
 )
 
 PO4 = Variable(
@@ -430,6 +470,7 @@ PO4 = Variable(
     units="mmol m-3",
     aliases={"cmems": "po4"},
     valid_range=(0.0, 10.0),
+    cmap="viridis",
 )
 
 SI = Variable(
@@ -439,6 +480,7 @@ SI = Variable(
     units="mmol m-3",
     aliases={"cmems": "si"},
     valid_range=(0.0, 200.0),
+    cmap="viridis",
 )
 
 O2 = Variable(
@@ -448,6 +490,7 @@ O2 = Variable(
     units="mmol m-3",
     aliases={"cmems": "o2"},
     valid_range=(0.0, 500.0),
+    cmap="viridis",
 )
 
 PHYC = Variable(
@@ -457,6 +500,7 @@ PHYC = Variable(
     units="mmol m-3",
     aliases={"cmems": "phyc"},
     valid_range=(0.0, 50.0),
+    cmap="viridis",
 )
 
 ZOOC = Variable(
@@ -466,6 +510,7 @@ ZOOC = Variable(
     units="mmol m-3",
     aliases={"cmems": "zooc"},
     valid_range=(0.0, 50.0),
+    cmap="viridis",
 )
 
 PH = Variable(
@@ -475,6 +520,7 @@ PH = Variable(
     units="1",
     aliases={"cmems": "ph"},
     valid_range=(7.0, 9.0),
+    cmap="viridis",
 )
 
 SPCO2 = Variable(
@@ -484,6 +530,7 @@ SPCO2 = Variable(
     units="Pa",
     aliases={"cmems": "spco2"},
     valid_range=(0.0, 100.0),
+    cmap="viridis",
 )
 
 # ---- Surface-station observations ---------------------------------------
@@ -502,6 +549,7 @@ AIR_TEMPERATURE = Variable(
     units="degC",
     aliases={"aemet": "ta", "cds": "air_temperature"},
     valid_range=(-80.0, 60.0),
+    cmap="RdYlBu_r",
 )
 
 AIR_TEMPERATURE_MIN = Variable(
@@ -511,6 +559,7 @@ AIR_TEMPERATURE_MIN = Variable(
     units="degC",
     aliases={"aemet": "tamin"},
     valid_range=(-80.0, 60.0),
+    cmap="RdYlBu_r",
 )
 
 AIR_TEMPERATURE_MAX = Variable(
@@ -520,6 +569,7 @@ AIR_TEMPERATURE_MAX = Variable(
     units="degC",
     aliases={"aemet": "tamax"},
     valid_range=(-80.0, 60.0),
+    cmap="RdYlBu_r",
 )
 
 AIR_TEMPERATURE_DAILY_MEAN = Variable(
@@ -529,6 +579,7 @@ AIR_TEMPERATURE_DAILY_MEAN = Variable(
     units="degC",
     aliases={"aemet": "tmed"},
     valid_range=(-80.0, 60.0),
+    cmap="RdYlBu_r",
 )
 
 AIR_TEMPERATURE_DAILY_MIN = Variable(
@@ -538,6 +589,7 @@ AIR_TEMPERATURE_DAILY_MIN = Variable(
     units="degC",
     aliases={"aemet": "tmin"},
     valid_range=(-80.0, 60.0),
+    cmap="RdYlBu_r",
 )
 
 AIR_TEMPERATURE_DAILY_MAX = Variable(
@@ -547,6 +599,7 @@ AIR_TEMPERATURE_DAILY_MAX = Variable(
     units="degC",
     aliases={"aemet": "tmax"},
     valid_range=(-80.0, 60.0),
+    cmap="RdYlBu_r",
 )
 
 DEW_POINT_TEMPERATURE = Variable(
@@ -556,6 +609,7 @@ DEW_POINT_TEMPERATURE = Variable(
     units="degC",
     aliases={"aemet": "tpr", "cds": "dew_point_temperature"},
     valid_range=(-80.0, 50.0),
+    cmap="RdYlBu_r",
 )
 
 RELATIVE_HUMIDITY = Variable(
@@ -565,6 +619,7 @@ RELATIVE_HUMIDITY = Variable(
     units="%",
     aliases={"aemet": "hr", "cds": "relative_humidity"},
     valid_range=(0.0, 100.0),
+    cmap="BuPu",
 )
 
 PRECIPITATION_AMOUNT = Variable(
@@ -574,6 +629,7 @@ PRECIPITATION_AMOUNT = Variable(
     units="mm",
     aliases={"aemet": "prec", "cds": "accumulated_precipitation"},
     valid_range=(0.0, 2000.0),
+    cmap="Blues",
 )
 
 SURFACE_PRESSURE_HPA = Variable(
@@ -583,6 +639,7 @@ SURFACE_PRESSURE_HPA = Variable(
     units="hPa",
     aliases={"aemet": "pres", "cds": "air_pressure"},
     valid_range=(500.0, 1085.0),
+    cmap="viridis",
 )
 
 MEAN_SEA_LEVEL_PRESSURE_HPA = Variable(
@@ -592,6 +649,7 @@ MEAN_SEA_LEVEL_PRESSURE_HPA = Variable(
     units="hPa",
     aliases={"aemet": "pres_nmar", "cds": "air_pressure_at_sea_level"},
     valid_range=(870.0, 1085.0),
+    cmap="viridis",
 )
 
 SURFACE_PRESSURE_MAX_HPA = Variable(
@@ -601,6 +659,7 @@ SURFACE_PRESSURE_MAX_HPA = Variable(
     units="hPa",
     aliases={"aemet": "presMax"},
     valid_range=(500.0, 1085.0),
+    cmap="viridis",
 )
 
 SURFACE_PRESSURE_MIN_HPA = Variable(
@@ -610,6 +669,7 @@ SURFACE_PRESSURE_MIN_HPA = Variable(
     units="hPa",
     aliases={"aemet": "presMin"},
     valid_range=(500.0, 1085.0),
+    cmap="viridis",
 )
 
 WIND_SPEED = Variable(
@@ -619,6 +679,7 @@ WIND_SPEED = Variable(
     units="m s-1",
     aliases={"aemet": "vv", "cds": "wind_speed"},
     valid_range=(0.0, 120.0),
+    cmap="magma",
 )
 
 WIND_SPEED_DAILY_MEAN = Variable(
@@ -628,6 +689,7 @@ WIND_SPEED_DAILY_MEAN = Variable(
     units="m s-1",
     aliases={"aemet": "velmedia"},
     valid_range=(0.0, 120.0),
+    cmap="magma",
 )
 
 WIND_FROM_DIRECTION = Variable(
@@ -637,6 +699,7 @@ WIND_FROM_DIRECTION = Variable(
     units="degree",
     aliases={"aemet": "dv", "cds": "wind_from_direction"},
     valid_range=(0.0, 360.0),
+    cmap="twilight",
 )
 
 WIND_FROM_DIRECTION_DAILY = Variable(
@@ -646,6 +709,7 @@ WIND_FROM_DIRECTION_DAILY = Variable(
     units="degree",
     aliases={"aemet": "dir"},
     valid_range=(0.0, 360.0),
+    cmap="twilight",
 )
 
 WIND_SPEED_OF_GUST = Variable(
@@ -655,6 +719,7 @@ WIND_SPEED_OF_GUST = Variable(
     units="m s-1",
     aliases={"aemet": "vmax"},
     valid_range=(0.0, 150.0),
+    cmap="magma",
 )
 
 WIND_SPEED_OF_GUST_DAILY = Variable(
@@ -664,6 +729,7 @@ WIND_SPEED_OF_GUST_DAILY = Variable(
     units="m s-1",
     aliases={"aemet": "racha"},
     valid_range=(0.0, 150.0),
+    cmap="magma",
 )
 
 WIND_FROM_DIRECTION_OF_GUST = Variable(
@@ -673,6 +739,7 @@ WIND_FROM_DIRECTION_OF_GUST = Variable(
     units="degree",
     aliases={"aemet": "dmax"},
     valid_range=(0.0, 360.0),
+    cmap="twilight",
 )
 
 SUNSHINE_DURATION = Variable(
@@ -682,6 +749,7 @@ SUNSHINE_DURATION = Variable(
     units="min",
     aliases={"aemet": "inso", "cds": "sunshine_duration"},
     valid_range=(0.0, 60.0),
+    cmap="inferno",
 )
 
 SUNSHINE_DURATION_DAILY = Variable(
@@ -691,6 +759,7 @@ SUNSHINE_DURATION_DAILY = Variable(
     units="h",
     aliases={"aemet": "sol"},
     valid_range=(0.0, 24.0),
+    cmap="inferno",
 )
 
 VISIBILITY = Variable(
@@ -700,6 +769,7 @@ VISIBILITY = Variable(
     units="km",
     aliases={"aemet": "vis"},
     valid_range=(0.0, 100.0),
+    cmap="cividis",
 )
 
 SURFACE_SNOW_THICKNESS = Variable(
@@ -709,6 +779,7 @@ SURFACE_SNOW_THICKNESS = Variable(
     units="cm",
     aliases={"aemet": "nieve", "cds": "snow_depth"},
     valid_range=(0.0, 1000.0),
+    cmap="Blues",
 )
 
 SOIL_TEMPERATURE_5CM = Variable(
@@ -718,6 +789,7 @@ SOIL_TEMPERATURE_5CM = Variable(
     units="degC",
     aliases={"aemet": "tss5cm"},
     valid_range=(-60.0, 80.0),
+    cmap="RdYlBu_r",
 )
 
 SOIL_TEMPERATURE_20CM = Variable(
@@ -727,6 +799,7 @@ SOIL_TEMPERATURE_20CM = Variable(
     units="degC",
     aliases={"aemet": "tss20cm"},
     valid_range=(-60.0, 80.0),
+    cmap="RdYlBu_r",
 )
 
 # ---- CDS in-situ additions ----------------------------------------------
@@ -738,6 +811,7 @@ WATER_VAPOUR_PRESSURE = Variable(
     units="hPa",
     aliases={"cds": "water_vapour_pressure"},
     valid_range=(0.0, 60.0),
+    cmap="BuPu",
 )
 
 TOTAL_CLOUD_COVER = Variable(
@@ -747,6 +821,7 @@ TOTAL_CLOUD_COVER = Variable(
     units="1",
     aliases={"cds": "total_cloud_cover"},
     valid_range=(0.0, 1.0),
+    cmap="gray_r",
 )
 
 DOWNWARD_LONGWAVE_RADIATION = Variable(
@@ -756,6 +831,7 @@ DOWNWARD_LONGWAVE_RADIATION = Variable(
     units="W m-2",
     aliases={"cds": "downward_longwave_radiation_at_earth_surface"},
     valid_range=(0.0, 1000.0),
+    cmap="inferno",
 )
 
 DOWNWARD_SHORTWAVE_RADIATION = Variable(
@@ -765,6 +841,7 @@ DOWNWARD_SHORTWAVE_RADIATION = Variable(
     units="W m-2",
     aliases={"cds": "downward_shortwave_radiation_at_earth_surface"},
     valid_range=(0.0, 1500.0),
+    cmap="inferno",
 )
 
 # Marine surface observations
@@ -776,6 +853,7 @@ SEA_LEVEL_PRESSURE = Variable(
     units="hPa",
     aliases={"cds": "air_pressure_at_sea_level"},
     valid_range=(870.0, 1085.0),
+    cmap="viridis",
 )
 
 SEA_SURFACE_TEMPERATURE_INSITU = Variable(
@@ -785,6 +863,7 @@ SEA_SURFACE_TEMPERATURE_INSITU = Variable(
     units="degC",
     aliases={"cds": "water_temperature"},
     valid_range=(-2.5, 40.0),
+    cmap="RdYlBu_r",
 )
 
 WAVE_SIGNIFICANT_HEIGHT = Variable(
@@ -794,6 +873,7 @@ WAVE_SIGNIFICANT_HEIGHT = Variable(
     units="m",
     aliases={"cds": "significant_wave_height"},
     valid_range=(0.0, 25.0),
+    cmap="viridis",
 )
 
 WAVE_PERIOD = Variable(
@@ -803,6 +883,7 @@ WAVE_PERIOD = Variable(
     units="s",
     aliases={"cds": "wave_period"},
     valid_range=(0.0, 30.0),
+    cmap="viridis",
 )
 
 WAVE_FROM_DIRECTION = Variable(
@@ -812,6 +893,7 @@ WAVE_FROM_DIRECTION = Variable(
     units="degree",
     aliases={"cds": "wave_direction"},
     valid_range=(0.0, 360.0),
+    cmap="twilight",
 )
 
 FRESH_SNOW = Variable(
@@ -821,6 +903,7 @@ FRESH_SNOW = Variable(
     units="cm",
     aliases={"cds": "fresh_snow"},
     valid_range=(0.0, 500.0),
+    cmap="Blues",
 )
 
 SNOW_WATER_EQUIVALENT = Variable(
@@ -830,6 +913,178 @@ SNOW_WATER_EQUIVALENT = Variable(
     units="mm",
     aliases={"cds": "snow_water_equivalent"},
     valid_range=(0.0, 5000.0),
+    cmap="Blues",
+)
+
+# ---- Ocean kinematic diagnostics ----------------------------------------
+#
+# Output names produced by ``xr_toolz.ocn.operators`` (RelativeVorticity,
+# KineticEnergy, Streamfunction, etc.). These are derived diagnostics
+# rather than CF physical variables, so ``standard_name`` mirrors the
+# Layer-0 op's ``standard_name`` attribute (see ``ocn/_src/kinematics.py``)
+# and ``aliases`` is empty — they aren't sourced from external adapters.
+# The ``cmap`` choices follow the diagnostic family: signed quantities
+# (vorticity, divergence, streamfunction, Okubo-Weiss) get ``RdBu_r``;
+# magnitudes (KE, EKE, speed, enstrophy, strain) get ``magma``.
+
+PSI = Variable(
+    name="psi",
+    standard_name="stream_function",
+    long_name="Geostrophic streamfunction",
+    units="m2 s-1",
+    cmap="RdBu_r",
+)
+
+KE = Variable(
+    name="ke",
+    standard_name="kinetic_energy",
+    long_name="Specific kinetic energy",
+    units="m2 s-2",
+    cmap="magma",
+)
+
+EKE = Variable(
+    name="eke",
+    standard_name="eddy_kinetic_energy",
+    long_name="Specific eddy kinetic energy",
+    units="m2 s-2",
+    cmap="magma",
+)
+
+SPEED = Variable(
+    name="speed",
+    standard_name="velocity_magnitude",
+    long_name="Velocity magnitude",
+    units="m s-1",
+    cmap="magma",
+)
+
+ENS = Variable(
+    name="ens",
+    standard_name="enstrophy",
+    long_name="Enstrophy ½ζ²",
+    units="s-2",
+    cmap="magma",
+)
+
+VORT_R = Variable(
+    name="vort_r",
+    standard_name="relative_vorticity",
+    long_name="Relative vorticity ζ",
+    units="s-1",
+    cmap="RdBu_r",
+)
+
+VORT_A = Variable(
+    name="vort_a",
+    standard_name="absolute_vorticity",
+    long_name="Absolute vorticity ζ + f",
+    units="s-1",
+    cmap="RdBu_r",
+)
+
+VORT_SHEAR = Variable(
+    name="vort_shear",
+    standard_name="shear_vorticity",
+    long_name="Shear vorticity",
+    units="s-1",
+    cmap="RdBu_r",
+)
+
+VORT_CURV = Variable(
+    name="vort_curv",
+    standard_name="curvature_vorticity",
+    long_name="Curvature vorticity",
+    units="s-1",
+    cmap="RdBu_r",
+)
+
+DIV = Variable(
+    name="div",
+    standard_name="divergence",
+    long_name="Horizontal divergence",
+    units="s-1",
+    cmap="RdBu_r",
+)
+
+SHEAR_STRAIN = Variable(
+    name="shear_strain",
+    standard_name="shear_strain",
+    long_name="Shear strain",
+    units="s-1",
+    cmap="RdBu_r",
+)
+
+TENSOR_STRAIN = Variable(
+    name="tensor_strain",
+    standard_name="tensor_strain",
+    long_name="Tensor (normal) strain",
+    units="s-1",
+    cmap="RdBu_r",
+)
+
+STRAIN = Variable(
+    name="strain",
+    standard_name="strain",
+    long_name="Strain magnitude",
+    units="s-1",
+    cmap="magma",
+)
+
+OW = Variable(
+    name="ow",
+    standard_name="okubo_weiss",
+    long_name="Okubo-Weiss parameter",
+    units="s-2",
+    cmap="RdBu_r",
+)
+
+U_AGEO = Variable(
+    name="u_a",
+    standard_name="ageostrophic_zonal_velocity",
+    long_name="Ageostrophic zonal velocity",
+    units="m s-1",
+    cmap="RdBu_r",
+)
+
+V_AGEO = Variable(
+    name="v_a",
+    standard_name="ageostrophic_meridional_velocity",
+    long_name="Ageostrophic meridional velocity",
+    units="m s-1",
+    cmap="RdBu_r",
+)
+
+N_SQUARED = Variable(
+    name="n_squared",
+    standard_name="square_of_brunt_vaisala_frequency_in_sea_water",
+    long_name="Brunt-Vaisala frequency squared N^2",
+    units="s-2",
+    cmap="RdBu_r",
+)
+
+LAPSE_RATE = Variable(
+    name="lapse_rate",
+    standard_name="air_temperature_lapse_rate",
+    long_name="Lapse rate",
+    units="K m-1",
+    cmap="RdBu_r",
+)
+
+MLD = Variable(
+    name="mld",
+    standard_name="ocean_mixed_layer_thickness",
+    long_name="Mixed-layer depth",
+    units="m",
+    cmap="viridis_r",
+)
+
+PV_BAROTROPIC = Variable(
+    name="pv_barotropic",
+    standard_name="barotropic_potential_vorticity",
+    long_name="Barotropic potential vorticity",
+    units="s-1 m-1",
+    cmap="RdBu_r",
 )
 
 
@@ -918,6 +1173,27 @@ REGISTRY: dict[str, Variable] = {
         WAVE_FROM_DIRECTION,
         FRESH_SNOW,
         SNOW_WATER_EQUIVALENT,
+        # Ocean kinematic diagnostics (xr_toolz.ocn outputs)
+        PSI,
+        KE,
+        EKE,
+        SPEED,
+        ENS,
+        VORT_R,
+        VORT_A,
+        VORT_SHEAR,
+        VORT_CURV,
+        DIV,
+        SHEAR_STRAIN,
+        TENSOR_STRAIN,
+        STRAIN,
+        OW,
+        U_AGEO,
+        V_AGEO,
+        N_SQUARED,
+        LAPSE_RATE,
+        MLD,
+        PV_BAROTROPIC,
     )
 }
 

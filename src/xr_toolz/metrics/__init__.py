@@ -24,6 +24,7 @@ from xr_toolz.metrics._src.distributional import (
     wasserstein_1,
 )
 from xr_toolz.metrics._src.forecast import SkillByLeadTime, skill_by_lead_time
+from xr_toolz.metrics._src.leaderboard import rank_methods
 from xr_toolz.metrics._src.masked import MaskedMetric, masked_metric
 from xr_toolz.metrics._src.multiscale import (
     EvaluateByRegion,
@@ -73,6 +74,7 @@ from xr_toolz.metrics._src.spectral import (
     band_limited_rmse,
     evaluate_by_frequency_band,
     find_intercept_1D,
+    find_intercept_2D,
     psd_error,
     psd_score,
     resolved_scale,
@@ -130,6 +132,7 @@ __all__ = [
     "evaluate_by_frequency_band",
     "evaluate_by_region",
     "find_intercept_1D",
+    "find_intercept_2D",
     "geostrophic_balance_error",
     "gradient_difference",
     "mae",
@@ -143,6 +146,7 @@ __all__ = [
     "pv_conservation_error",
     "r2_score",
     "rank_histogram",
+    "rank_methods",
     "reliability_curve",
     "resolved_scale",
     "rmse",

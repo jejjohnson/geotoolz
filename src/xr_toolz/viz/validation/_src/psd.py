@@ -244,6 +244,16 @@ class PSDIsotropicScorePanel(_PSDPanelBase):
             ``[unit]`` of ``wavelength_label`` (e.g.
             ``"Wavelength [km]"`` → ``"km"``); empty string suppresses
             the unit.
+        clip: When ``True`` (default), display the score clipped to
+            ``[0, 1]`` and pin the y-axis to that range — matches the
+            oceanbench / Ballarotta 2019 convention where negative
+            values just mean "worse than zero predictor". Set to
+            ``False`` for diagnostic mode that exposes the signed
+            score, with the y-limits chosen from the data unless
+            ``ylim`` is given.
+        ylim: Optional ``(ymin, ymax)`` override for the y-axis. When
+            unset and ``clip=True`` the panel uses ``(0, 1)``; when
+            unset and ``clip=False`` matplotlib auto-scales.
     """
 
     def __init__(
@@ -258,6 +268,8 @@ class PSDIsotropicScorePanel(_PSDPanelBase):
         score_var: str = "score",
         show_wavelength: bool = True,
         resolved_units: str | None = None,
+        clip: bool = True,
+        ylim: tuple[float, float] | None = None,
         **kw: Any,
     ) -> None:
         super().__init__(**kw)
@@ -273,6 +285,18 @@ class PSDIsotropicScorePanel(_PSDPanelBase):
         # from the trailing ``[unit]`` of ``wavelength_label`` (so
         # ``"Wavelength [km]"`` → ``"km"``); falls back to empty.
         self.resolved_units = resolved_units
+        self.clip = bool(clip)
+        if ylim is not None:
+            ylim_t = tuple(ylim)
+            if len(ylim_t) != 2:
+                raise ValueError(
+                    f"ylim must be a (ymin, ymax) 2-tuple; got length {len(ylim_t)}."
+                )
+            if ylim_t[0] > ylim_t[1]:
+                raise ValueError(f"ylim must satisfy ymin <= ymax; got {ylim_t!r}.")
+            self.ylim = ylim_t
+        else:
+            self.ylim = None
 
     def _default_title(self) -> str:
         return "Isotropic PSD Score"
@@ -297,12 +321,17 @@ class PSDIsotropicScorePanel(_PSDPanelBase):
         ax = axes
         da = _coerce_da(score, self.score_var)
         f = np.asarray(da[self.freq_dim].values)
-        # Clip to [0, 1] for display — score < 0 just means the
-        # prediction is worse than zero at that scale and the precise
-        # value isn't informative (matches oceanbench convention).
-        vals = np.clip(np.asarray(da.values), 0.0, 1.0)
+        raw = np.asarray(da.values)
+        # Clip to [0, 1] for display by default — score < 0 just means
+        # the prediction is worse than zero at that scale and the
+        # precise value isn't informative (matches oceanbench /
+        # Ballarotta 2019 convention). ``clip=False`` exposes the
+        # signed score for diagnostic deep-dives.
+        vals = np.clip(raw, 0.0, 1.0) if self.clip else raw
         ax.plot(f, vals, color="C0")
         ax.axhline(self.threshold, color="k", linestyle="--", alpha=0.6)
+        if not self.clip:
+            ax.axhline(0.0, color="k", linestyle="-", alpha=0.3, linewidth=0.6)
         # Resolved scale: wavelength where score crosses threshold.
         nonzero = f > 0
         if nonzero.any():
@@ -332,7 +361,11 @@ class PSDIsotropicScorePanel(_PSDPanelBase):
         ax.set_xscale("log")
         ax.set_xlabel(self.wavenumber_label)
         ax.set_ylabel(self.ylabel)
-        ax.set_ylim(0.0, 1.0)
+        if self.ylim is not None:
+            ax.set_ylim(*self.ylim)
+        elif self.clip:
+            ax.set_ylim(0.0, 1.0)
+        # else: matplotlib autoscale on raw values
         ax.grid(True, which="both", alpha=0.3)
         _format_log_plain(ax.xaxis)
         if self.show_wavelength:
@@ -354,6 +387,8 @@ class PSDIsotropicScorePanel(_PSDPanelBase):
             "score_var": self.score_var,
             "show_wavelength": self.show_wavelength,
             "resolved_units": self.resolved_units,
+            "clip": self.clip,
+            "ylim": list(self.ylim) if self.ylim is not None else None,
         }
 
 
@@ -491,8 +526,15 @@ class PSDSpaceTimeScorePanel(PSDSpaceTimePanel):
         threshold: Score threshold contour. Default ``0.5``.
         score_var: Variable name when input is a Dataset. Default
             ``"score"``.
-        levels: Filled-contour levels (default ``np.linspace(0, 1, 11)``).
+        levels: Filled-contour levels. Default ``np.linspace(0, 1, 11)``
+            when ``clip=True``; ignored (matplotlib auto-picks) when
+            ``clip=False`` and ``levels`` is unset.
         cmap: Colormap. Default ``"RdYlGn"``.
+        clip: When ``True`` (default), display the score clipped to
+            ``[0, 1]`` — matches the oceanbench / Ballarotta 2019
+            convention. ``False`` exposes signed values for diagnostic
+            mode; the colour scale and contour levels then auto-stretch
+            to the data range unless ``levels`` is given.
     """
 
     def __init__(
@@ -502,14 +544,21 @@ class PSDSpaceTimeScorePanel(PSDSpaceTimePanel):
         score_var: str = "score",
         levels: np.ndarray | None = None,
         cmap: str = "RdYlGn",
+        clip: bool = True,
         **kw: Any,
     ) -> None:
         # Replace cmap default and forward.
         super().__init__(cmap=cmap, **kw)
         self.threshold = float(threshold)
         self.score_var = score_var
+        self.clip = bool(clip)
+        # Only pin levels when clipping. With clip=False we let
+        # contourf pick a sensible range from the data.
+        self._levels_user = None if levels is None else np.asarray(levels)
         self.levels = (
-            np.asarray(levels) if levels is not None else np.linspace(0, 1, 11)
+            self._levels_user
+            if self._levels_user is not None
+            else (np.linspace(0, 1, 11) if self.clip else None)
         )
 
     def _default_title(self) -> str:
@@ -527,9 +576,13 @@ class PSDSpaceTimeScorePanel(PSDSpaceTimePanel):
         da = self._positive_slice(da)
         fs = np.asarray(da[self.freq_space_dim].values)
         ft = np.asarray(da[self.freq_time_dim].values)
-        # Clip to [0, 1] for display (see PSDIsotropicScorePanel).
-        vals = np.clip(np.asarray(da.values), 0.0, 1.0)
-        cf = ax.contourf(fs, ft, vals, levels=self.levels, cmap=self.cmap)
+        # Clip to [0, 1] for display by default (see PSDIsotropicScorePanel).
+        raw = np.asarray(da.values)
+        vals = np.clip(raw, 0.0, 1.0) if self.clip else raw
+        contour_kw: dict[str, Any] = {"cmap": self.cmap}
+        if self.levels is not None:
+            contour_kw["levels"] = self.levels
+        cf = ax.contourf(fs, ft, vals, **contour_kw)
         ax.contour(fs, ft, vals, levels=[self.threshold], colors="k", linewidths=1.5)
         ax.set_xscale("log")
         ax.set_yscale("log")
@@ -549,7 +602,12 @@ class PSDSpaceTimeScorePanel(PSDSpaceTimePanel):
             **super().get_config(),
             "threshold": self.threshold,
             "score_var": self.score_var,
-            "levels": list(map(float, self.levels)),
+            "levels": (
+                None
+                if self._levels_user is None
+                else list(map(float, self._levels_user))
+            ),
+            "clip": self.clip,
         }
 
 

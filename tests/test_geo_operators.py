@@ -15,8 +15,10 @@ from xr_toolz.geo.operators import (
     Bias,
     CalculateClimatology,
     Correlation,
+    FillNaN,
     PSDScore,
     R2Score,
+    Reduce,
     RemoveClimatology,
     SelectVariables,
     SubsetBBox,
@@ -139,3 +141,52 @@ def test_graph_with_rmse_and_bias(ds_global):
     )
     out = graph(pred=ds_global, ref=ds_global)
     assert "rmse" in out and "bias" in out
+
+
+def test_fill_nan_default_zero():
+    ds = xr.Dataset(
+        {"a": (("x",), np.array([1.0, np.nan, 3.0]))},
+        coords={"x": [0, 1, 2]},
+    )
+    out = FillNaN()(ds)
+    np.testing.assert_array_equal(out["a"].values, [1.0, 0.0, 3.0])
+    assert FillNaN().get_config() == {"value": 0.0}
+
+
+def test_fill_nan_custom_value():
+    ds = xr.Dataset({"a": (("x",), np.array([np.nan, 2.0]))}, coords={"x": [0, 1]})
+    op = FillNaN(value=-9.0)
+    out = op(ds)
+    np.testing.assert_array_equal(out["a"].values, [-9.0, 2.0])
+    assert op.get_config() == {"value": -9.0}
+
+
+def test_reduce_mean_matches_xarray(ds_global):
+    op = Reduce("mean", dim="time")
+    np.testing.assert_allclose(
+        op(ds_global)["ssh"].values, ds_global["ssh"].mean("time").values
+    )
+
+
+def test_reduce_supported_ops_match_xarray(ds_global):
+    for name in ("sum", "median", "min", "max", "std", "var"):
+        np.testing.assert_allclose(
+            Reduce(name, dim="time")(ds_global)["ssh"].values,
+            getattr(ds_global["ssh"], name)("time").values,
+        )
+
+
+def test_reduce_multi_dim_and_keepdims(ds_global):
+    op = Reduce("mean", dim=("lat", "lon"), keepdims=True)
+    out = op(ds_global)
+    assert out["ssh"].sizes == {"time": ds_global.sizes["time"], "lat": 1, "lon": 1}
+    assert op.get_config() == {
+        "op": "mean",
+        "dim": ["lat", "lon"],
+        "keepdims": True,
+    }
+
+
+def test_reduce_rejects_unknown_op():
+    with pytest.raises(ValueError, match="Unknown reduce op"):
+        Reduce("argmax", dim="time")
