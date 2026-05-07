@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from xr_toolz.core import Operator
+from xr_toolz.core import Operator, Signature
 from xr_toolz.metrics._src import array_pixel
 
 
@@ -168,6 +168,21 @@ class _PixelMetricOp(Operator):
             "dims": self.dims if isinstance(self.dims, str) else list(self.dims),
         }
 
+    def compute_output_signature(
+        self,
+        input_signature: Signature | tuple[Signature, ...],
+    ) -> Signature:
+        if isinstance(input_signature, tuple):
+            signature = input_signature[0]
+            for other in input_signature[1:]:
+                _validate_compatible_signatures(signature, other)
+        else:
+            signature = input_signature
+        dims = (self.dims,) if isinstance(self.dims, str) else tuple(self.dims)
+        # Pixel metric kernels promote int inputs to float64 (see
+        # _apply_pixel_kernel above), so the inferred output dtype follows.
+        return Signature(signature.drop_dims(dims).dims, dtype=np.float64)
+
 
 class MSE(_PixelMetricOp):
     _fn = staticmethod(mse)
@@ -195,6 +210,23 @@ class Correlation(_PixelMetricOp):
 
 class R2Score(_PixelMetricOp):
     _fn = staticmethod(r2_score)
+
+
+def _validate_compatible_signatures(left: Signature, right: Signature) -> None:
+    if set(left.dims) != set(right.dims):
+        raise ValueError(
+            "Metric inputs must have matching dimension names; "
+            f"got {tuple(left.dims)} and {tuple(right.dims)}."
+        )
+    mismatched = {
+        name: (left.dims[name], right.dims[name])
+        for name in left.dims
+        if left.dims[name] is not None
+        and right.dims[name] is not None
+        and left.dims[name] != right.dims[name]
+    }
+    if mismatched:
+        raise ValueError(f"Metric input signature sizes do not match: {mismatched}.")
 
 
 __all__ = [

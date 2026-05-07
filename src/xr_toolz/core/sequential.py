@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from xr_toolz.core.operator import Operator
+from xr_toolz.core.signature import Signature
 
 
 class Sequential(Operator):
@@ -31,6 +33,30 @@ class Sequential(Operator):
                 for op in self.operators
             ]
         }
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        """Thread ``input_signature`` through each operator."""
+        signature = input_signature
+        for op in self.operators:
+            signature = op.compute_output_signature(signature)
+        return signature
+
+    def summary(self, input_signature: Signature) -> str:
+        """Render input/output signatures for each step in the pipeline."""
+        rows: list[tuple[str, str, str, str]] = []
+        signature = input_signature
+        for i, op in enumerate(self.operators):
+            output_signature = op.compute_output_signature(signature)
+            rows.append(
+                (
+                    str(i),
+                    repr(op),
+                    signature.format(),
+                    output_signature.format(),
+                )
+            )
+            signature = output_signature
+        return _format_summary_table(f"Sequential ({len(self.operators)} ops)", rows)
 
     def describe(self, *, max_width: int = 88) -> str:
         """Pretty-print the pipeline as an indented tree.
@@ -93,3 +119,19 @@ def _format_op(op: Operator, *, max_width: int) -> list[str]:
         suffix = ")" if j == last else ","
         body.append(prefix + part + suffix)
     return body
+
+
+def _format_summary_table(
+    title: str,
+    rows: list[Sequence[str]],
+) -> str:
+    headers = ("Step", "Operator", "Input Signature", "Output Signature")
+    all_rows = [headers, *rows]
+    widths = [max(len(row[i]) for row in all_rows) for i in range(len(headers))]
+    lines = [title]
+    lines.append("  ".join(header.ljust(widths[i]) for i, header in enumerate(headers)))
+    lines.append("  ".join("-" * width for width in widths))
+    lines.extend(
+        "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)) for row in rows
+    )
+    return "\n".join(lines)

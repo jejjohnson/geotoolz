@@ -17,7 +17,7 @@ import warnings
 from collections.abc import Sequence
 from typing import Any
 
-from xr_toolz.core import Operator
+from xr_toolz.core import Operator, Signature
 from xr_toolz.geo._src import (
     detrend as _detrend,
     masks as _masks,
@@ -29,11 +29,30 @@ from xr_toolz.geo._src import (
 # ---------- validation -----------------------------------------------------
 
 
+def _validate_signature(
+    input_signature: Signature, *, aliases: tuple[str, ...], canonical: str
+) -> Signature:
+    """Mirror the runtime rename done by ``validate_longitude`` /
+    ``validate_latitude``: if any alias is present in the input dims,
+    rename it to ``canonical``. Shape-preserving otherwise."""
+    for alias in aliases:
+        if alias in input_signature.dims:
+            return input_signature.rename_dims({alias: canonical})
+    return input_signature
+
+
 class ValidateLongitude(Operator):
     """Wrap :func:`xr_toolz.geo.validate_longitude`."""
 
     def _apply(self, ds):
         return _validation.validate_longitude(ds)
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        return _validate_signature(
+            input_signature,
+            aliases=_validation._LONGITUDE_ALIASES,
+            canonical="lon",
+        )
 
 
 class ValidateLatitude(Operator):
@@ -42,6 +61,13 @@ class ValidateLatitude(Operator):
     def _apply(self, ds):
         return _validation.validate_latitude(ds)
 
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        return _validate_signature(
+            input_signature,
+            aliases=_validation._LATITUDE_ALIASES,
+            canonical="lat",
+        )
+
 
 class ValidateCoords(Operator):
     """Apply longitude and latitude validation in one pass."""
@@ -49,6 +75,18 @@ class ValidateCoords(Operator):
     def _apply(self, ds):
         ds = _validation.validate_longitude(ds)
         return _validation.validate_latitude(ds)
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        signature = _validate_signature(
+            input_signature,
+            aliases=_validation._LONGITUDE_ALIASES,
+            canonical="lon",
+        )
+        return _validate_signature(
+            signature,
+            aliases=_validation._LATITUDE_ALIASES,
+            canonical="lat",
+        )
 
 
 class RenameCoords(Operator):
@@ -63,6 +101,9 @@ class RenameCoords(Operator):
     def get_config(self) -> dict[str, Any]:
         return {"mapping": self.mapping}
 
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        return input_signature.rename_dims(self.mapping)
+
 
 class RenameVariables(Operator):
     """Wrap :func:`xr_toolz.geo.rename_variables` (data-var renames)."""
@@ -75,6 +116,9 @@ class RenameVariables(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {"mapping": self.mapping}
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        return input_signature
 
 
 # ---------- subset ---------------------------------------------------------
@@ -110,6 +154,9 @@ class SubsetBBox(Operator):
             "lat": self.lat,
         }
 
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        return input_signature.replace_dims({self.lon: None, self.lat: None})
+
 
 class SubsetTime(Operator):
     def __init__(self, time_min: str, time_max: str, time: str = "time"):
@@ -129,6 +176,9 @@ class SubsetTime(Operator):
             "time": self.time,
         }
 
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        return input_signature.replace_dims({self.time: None})
+
 
 class SelectVariables(Operator):
     def __init__(self, variables: str | Sequence[str]):
@@ -140,6 +190,9 @@ class SelectVariables(Operator):
     def get_config(self) -> dict[str, Any]:
         return {"variables": list(self.variables)}
 
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        return input_signature
+
 
 # ---------- detrend --------------------------------------------------------
 
@@ -148,6 +201,11 @@ class CalculateClimatology(Operator):
     """Return a climatology at ``freq`` from the input dataset."""
 
     def __init__(self, freq: str = "day", time: str = "time"):
+        if freq not in _detrend.CLIMATOLOGY_DIMS:
+            raise ValueError(
+                f"Unsupported climatology frequency {freq!r}; expected one of "
+                f"{sorted(_detrend.CLIMATOLOGY_DIMS)}."
+            )
         self.freq = freq
         self.time = time
 
@@ -156,6 +214,10 @@ class CalculateClimatology(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {"freq": self.freq, "time": self.time}
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        dim = _detrend.CLIMATOLOGY_DIMS[self.freq]
+        return _replace_dim(input_signature, old=self.time, new=dim, size=None)
 
 
 class CalculateClimatologySmoothed(Operator):
@@ -170,6 +232,13 @@ class CalculateClimatologySmoothed(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {"window": self.window, "time": self.time}
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        # Smoothed climatology always groups by day-of-year; pull the
+        # canonical dim name from the same source the runtime uses
+        # rather than hard-coding the literal here.
+        new_dim = _detrend.CLIMATOLOGY_DIMS["day"]
+        return _replace_dim(input_signature, old=self.time, new=new_dim, size=None)
 
 
 class RemoveMean(Operator):
@@ -255,6 +324,11 @@ class Reduce(Operator):
             "keepdims": self.keepdims,
         }
 
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        if self.keepdims:
+            return input_signature.replace_dims({dim: 1 for dim in self.dim})
+        return input_signature.drop_dims(self.dim)
+
 
 class RemoveClimatology(Operator):
     """Subtract a precomputed climatology from the input dataset."""
@@ -335,6 +409,14 @@ class ApplyMask(Operator):
         mask_repr = self.mask if isinstance(self.mask, str) else "<DataArray>"
         return {"mask": mask_repr, "drop": self.drop}
 
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        if not self.drop:
+            return input_signature
+        return Signature(
+            {name: None for name in input_signature.dims},
+            dtype=input_signature.dtype,
+        )
+
 
 # ---------- deprecated metric ops -----------------------------------------
 
@@ -392,3 +474,19 @@ __all__ = [
     "ValidateLatitude",
     "ValidateLongitude",
 ]
+
+
+def _replace_dim(
+    input_signature: Signature,
+    *,
+    old: str,
+    new: str,
+    size: int | None,
+) -> Signature:
+    dims = {}
+    for name, dim_size in input_signature.dims.items():
+        if name == old:
+            dims[new] = size
+        else:
+            dims[name] = dim_size
+    return Signature(dims, dtype=input_signature.dtype)

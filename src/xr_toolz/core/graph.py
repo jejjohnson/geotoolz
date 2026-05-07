@@ -12,6 +12,7 @@ from collections import deque
 from typing import Any
 
 from xr_toolz.core.operator import Operator
+from xr_toolz.core.signature import Signature
 
 
 class Node:
@@ -120,6 +121,81 @@ class Graph(Operator):
             "steps": steps,
         }
 
+    def compute_output_signature(
+        self,
+        input_signature: Signature | dict[str, Signature],
+    ) -> Signature | dict[str, Signature]:
+        """Propagate signatures through the graph without executing data.
+
+        Mirrors :meth:`__call__`'s positional-shortcut behaviour: a bare
+        :class:`Signature` is allowed when the graph has exactly one
+        :class:`Input`, and the return type matches the output count
+        (single ``Signature`` for a 1-output graph, ``dict`` for a
+        multi-output graph). This keeps nested-graph composition working
+        — an outer operator wrapping an inner multi-output graph passes
+        a single parent signature here and gets back a dict.
+        """
+        if isinstance(input_signature, Signature):
+            if len(self.inputs) != 1:
+                raise ValueError(
+                    "Single Signature input requires exactly one graph input; "
+                    f"got {len(self.inputs)} inputs. Pass a "
+                    "{name: Signature} dict for multi-input graphs."
+                )
+            input_signatures = {next(iter(self.inputs)): input_signature}
+            outputs = self._compute_signatures(input_signatures)
+            if len(self.outputs) == 1:
+                return outputs[next(iter(self.outputs))]
+            return outputs
+        return self._compute_signatures(input_signature)
+
+    def summary(self, input_signatures: Signature | dict[str, Signature]) -> str:
+        """Render input/output signatures for each graph node."""
+        from xr_toolz.core.sequential import _format_summary_table
+
+        if isinstance(input_signatures, Signature):
+            if len(self.inputs) != 1:
+                raise ValueError(
+                    "Single Signature summary requires exactly one graph input; "
+                    f"got {len(self.inputs)} inputs."
+                )
+            input_signatures = {next(iter(self.inputs)): input_signatures}
+        missing = set(self.inputs) - set(input_signatures)
+        extra = set(input_signatures) - set(self.inputs)
+        if missing or extra:
+            raise ValueError(
+                f"Graph input signatures mismatch. missing={sorted(missing)}, "
+                f"unexpected={sorted(extra)}"
+            )
+        cache: dict[int, Signature] = {
+            id(node): input_signatures[name] for name, node in self.inputs.items()
+        }
+        rows: list[tuple[str, str, str, str]] = []
+        for i, node in enumerate(self._execution_order):
+            if node.operator is None:
+                continue
+            parent_signatures = tuple(cache[id(parent)] for parent in node.parents)
+            input_signature = (
+                parent_signatures[0]
+                if len(parent_signatures) == 1
+                else parent_signatures
+            )
+            output_signature = node.operator.compute_output_signature(input_signature)
+            cache[id(node)] = output_signature
+            rows.append(
+                (
+                    str(i),
+                    repr(node.operator),
+                    _format_graph_signature(input_signature),
+                    output_signature.format(),
+                )
+            )
+        return _format_summary_table(
+            f"Graph ({_format_count(len(self.inputs), 'input')}, "
+            f"{_format_count(len(self.outputs), 'output')})",
+            rows,
+        )
+
     def _bind(
         self,
         args: tuple[Any, ...],
@@ -154,6 +230,48 @@ class Graph(Operator):
             parent_values = tuple(cache[id(p)] for p in node.parents)
             cache[id(node)] = node.operator._apply(*parent_values)
         return cache
+
+    def _compute_signatures(
+        self,
+        input_signatures: dict[str, Signature],
+    ) -> dict[str, Signature]:
+        missing = set(self.inputs) - set(input_signatures)
+        extra = set(input_signatures) - set(self.inputs)
+        if missing or extra:
+            raise ValueError(
+                f"Graph input signatures mismatch. missing={sorted(missing)}, "
+                f"unexpected={sorted(extra)}"
+            )
+        cache: dict[int, Signature] = {
+            id(node): input_signatures[name] for name, node in self.inputs.items()
+        }
+        for node in self._execution_order:
+            if id(node) in cache:
+                continue
+            if node.operator is None:
+                # We're propagating signatures here, not executing data —
+                # pin the wording so failures during compute_output_signature
+                # / summary point at the right thing.
+                raise ValueError(
+                    f"Graph input {node.name!r} has no signature; pass it "
+                    "via the input_signatures mapping."
+                )
+            parent_signatures = tuple(cache[id(parent)] for parent in node.parents)
+            input_signature = (
+                parent_signatures[0]
+                if len(parent_signatures) == 1
+                else parent_signatures
+            )
+            cache[id(node)] = node.operator.compute_output_signature(input_signature)
+        return {name: cache[id(node)] for name, node in self.outputs.items()}
+
+    def __repr__(self) -> str:
+        # Operator base __repr__ would dump the full topology via
+        # get_config(), which produces a multi-hundred-char string and
+        # blows up Sequential.summary tables when a Graph is nested
+        # inside another Graph or a Sequential. Keep it terse — describe()
+        # / get_config() expose the full topology when needed.
+        return f"Graph(inputs={list(self.inputs)!r}, outputs={list(self.outputs)!r})"
 
     def describe(self) -> str:
         """Pretty-print the graph structure."""
@@ -215,3 +333,14 @@ def _topological_sort(
     if len(ordered) != len(reachable):
         raise ValueError("Graph contains a cycle.")
     return ordered
+
+
+def _format_graph_signature(signature: Signature | tuple[Signature, ...]) -> str:
+    if isinstance(signature, tuple):
+        return ", ".join(sig.format() for sig in signature)
+    return signature.format()
+
+
+def _format_count(count: int, noun: str) -> str:
+    suffix = "" if count == 1 else "s"
+    return f"{count} {noun}{suffix}"

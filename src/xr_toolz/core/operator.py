@@ -53,6 +53,22 @@ class Operator:
         """
         return {}
 
+    def compute_output_signature(self, input_signature: Any) -> Any:
+        """Infer the output signature without executing the operator.
+
+        Shape-preserving operators inherit this default. Operators that
+        rename, remove, or resize dimensions override it.
+        """
+        if isinstance(input_signature, tuple):
+            if len(input_signature) != 1:
+                raise ValueError(
+                    f"{self.__class__.__name__} received {len(input_signature)} "
+                    "input signatures but expected 1; override "
+                    "compute_output_signature to handle multiple inputs."
+                )
+            return input_signature[0]
+        return input_signature
+
     def __repr__(self) -> str:
         config = self.get_config()
         params = ", ".join(f"{k}={v!r}" for k, v in config.items())

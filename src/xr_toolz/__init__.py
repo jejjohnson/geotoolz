@@ -8,6 +8,7 @@ from xr_toolz.core import (
     Node,
     Operator,
     Sequential,
+    Signature,
     Tap,
 )
 
@@ -22,6 +23,7 @@ __all__ = [
     "Node",
     "Operator",
     "Sequential",
+    "Signature",
     "Tap",
     "__version__",
 ]
