@@ -9,7 +9,8 @@ inputs for pipeline composition.
 Stateful estimators (PCA, EOF, ICA, NMF, KMeans) are returned as
 :class:`xr_toolz.utils.XarrayEstimator` instances — they expose
 ``fit / transform / fit_transform / inverse_transform`` directly,
-matching the sklearn API on N-D xarray inputs.
+matching the sklearn API on N-D xarray inputs. ``SklearnOp`` wraps any
+sklearn-style estimator as a Layer-1 operator for ``Sequential`` chains.
 """
 
 from xr_toolz.transforms._src.dct import dct, dst, idct, idst
@@ -22,10 +23,12 @@ from xr_toolz.transforms._src.fourier import (
     power_spectrum,
     stft,
 )
+from xr_toolz.transforms._src.sklearn_op import SklearnOp
 from xr_toolz.transforms._src.wavelet import cwt, dwt
 
 
 __all__ = [
+    "SklearnOp",
     "coherence",
     "cross_spectrum",
     "cwt",

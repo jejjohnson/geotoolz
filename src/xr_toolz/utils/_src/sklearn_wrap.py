@@ -20,7 +20,7 @@ expose PCA / EOF / ICA / NMF / KMeans as thin presets.
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 import numpy as np
@@ -29,7 +29,7 @@ import xarray as xr
 from sklearn.base import BaseEstimator, clone
 
 
-NanPolicy = Literal["propagate", "raise"]
+NanPolicy = Literal["propagate", "raise", "mask"]
 
 
 @dataclass
@@ -43,6 +43,7 @@ class _Meta:
     attrs: dict[str, Any]
     name: Hashable | None
     n_features: int
+    valid_sample_mask: np.ndarray | None = None
 
 
 def _to_2d(da: xr.DataArray, sample_dim: Hashable) -> tuple[np.ndarray, _Meta]:
@@ -114,6 +115,7 @@ def _from_2d(
        grid. Return a 2-D DataArray ``(sample_dim, new_feature_dim)``
        with an integer index along the new feature axis.
     """
+    arr = _restore_masked_samples(arr, meta.valid_sample_mask)
     sample_dim = meta.sample_dim
     sample_coord = meta.sample_coord
     sample_coords = {sample_dim: sample_coord} if sample_coord is not None else {}
@@ -201,6 +203,25 @@ def _check_no_nan(arr: np.ndarray, *, label: str) -> None:
         )
 
 
+def _restore_masked_samples(
+    arr: np.ndarray,
+    valid_sample_mask: np.ndarray | None,
+) -> np.ndarray:
+    """Re-insert NaN rows removed by ``nan_policy="mask"``."""
+    if valid_sample_mask is None:
+        return arr
+    n_valid = int(valid_sample_mask.sum())
+    if arr.shape[0] != n_valid:
+        raise ValueError(
+            "Cannot restore masked sklearn output: output sample count "
+            f"{arr.shape[0]} does not match valid input sample count {n_valid}."
+        )
+    full_shape = (valid_sample_mask.size, *arr.shape[1:])
+    full = np.full(full_shape, np.nan, dtype=np.result_type(arr.dtype, float))
+    full[valid_sample_mask] = arr
+    return full
+
+
 def _dataset_to_2d(
     ds: xr.Dataset, sample_dim: Hashable
 ) -> tuple[np.ndarray, list[_Meta], list[Hashable], list[int]]:
@@ -251,15 +272,48 @@ class XarrayEstimator(BaseEstimator):
             estimator changes the number of features (e.g. PCA reducing
             150 features to 5 components).
         nan_policy: ``"propagate"`` (default) hands NaN to the estimator
-            unchanged; ``"raise"`` errors out before delegating.
+            unchanged; ``"raise"`` errors out before delegating; ``"mask"``
+            drops sample rows containing any NaN before delegating, then
+            re-inserts NaN rows in xarray outputs so the input's sample
+            coords and masked locations are preserved.
+
+            For Dataset input, the mask is computed across the
+            column-concatenation of all data variables — a NaN in *any*
+            variable drops the whole sample row across *all* variables.
+            Targets ``y`` are aligned to the kept rows automatically.
+
+            ``"mask"`` raises ``ValueError`` if every sample row contains
+            a NaN (no finite rows to fit).
 
     Example:
-        >>> from sklearn.decomposition import PCA
-        >>> wrap = XarrayEstimator(PCA(n_components=3), sample_dim="time")
-        >>> scores = wrap.fit_transform(da)            # (time, component)
-        >>> recon  = wrap.inverse_transform(scores)    # (time, lat, lon)
-        >>> wrap.components_.shape                      # passthrough attr
-        (3, lat*lon)
+        Decompose an SSH cube with PCA, recover the original grid, and
+        reach into the fitted estimator's attributes::
+
+            >>> from sklearn.decomposition import PCA
+            >>> wrap = XarrayEstimator(PCA(n_components=3), sample_dim="time")
+            >>> scores = wrap.fit_transform(da)            # (time, component)
+            >>> recon = wrap.inverse_transform(scores)     # (time, lat, lon)
+            >>> wrap.components_.shape                     # passthrough attr
+            (3, lat*lon)
+
+        Cluster a multi-variable Dataset (column-concatenated)::
+
+            >>> from sklearn.cluster import KMeans
+            >>> wrap = XarrayEstimator(
+            ...     KMeans(n_clusters=4, n_init="auto"),
+            ...     sample_dim="time",
+            ... )
+            >>> labels = wrap.fit(ds).predict(ds)          # (time,)
+            >>> wrap.cluster_centers_.shape                # (4, n_concat_features)
+
+        NaN-tolerant fit on a land-masked grid::
+
+            >>> wrap = XarrayEstimator(
+            ...     PCA(n_components=5),
+            ...     sample_dim="time",
+            ...     nan_policy="mask",       # drop NaN rows pre-fit, re-insert post
+            ... )
+            >>> scores = wrap.fit_transform(ssh)           # land cells stay NaN
     """
 
     def __init__(
@@ -300,17 +354,50 @@ class XarrayEstimator(BaseEstimator):
         sample_dim = self._resolve_sample_dim(x)
         if isinstance(x, xr.DataArray):
             arr, meta = _to_2d(x, sample_dim)
-            if self.nan_policy == "raise":
-                _check_no_nan(arr, label="X")
+            arr, meta = self._apply_nan_policy(arr, meta)
             return arr, meta, sample_dim
         if isinstance(x, xr.Dataset):
             arr, metas, _, _ = _dataset_to_2d(x, sample_dim)
-            if self.nan_policy == "raise":
-                _check_no_nan(arr, label="X")
+            arr, metas = self._apply_nan_policy(arr, metas)
             return arr, metas, sample_dim
         raise TypeError(
             f"X must be xr.DataArray, xr.Dataset, or np.ndarray; got {type(x)}."
         )
+
+    def _apply_nan_policy(
+        self,
+        arr: np.ndarray,
+        meta: _Meta | list[_Meta],
+    ) -> tuple[np.ndarray, _Meta | list[_Meta]]:
+        if self.nan_policy == "raise":
+            _check_no_nan(arr, label="X")
+            return arr, meta
+        if self.nan_policy != "mask":
+            return arr, meta
+
+        # Integer / bool / object dtypes can't carry NaN at all (np.isnan would
+        # raise TypeError), so masking is a no-op for them. pandas.isna handles
+        # mixed object dtypes (e.g. NaT, None) where the user has marked
+        # missingness via something other than IEEE NaN.
+        if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(
+            arr.dtype, np.complexfloating
+        ):
+            valid = ~np.isnan(arr).any(axis=1)
+        elif arr.dtype == object:
+            valid = ~pd.isna(arr).any(axis=1)
+        else:
+            return arr, meta
+        if valid.all():
+            return arr, meta
+        if not valid.any():
+            raise ValueError(
+                "nan_policy='mask' removed all sample rows; at least one "
+                "finite sample row is required before delegating to sklearn."
+            )
+        masked = arr[valid]
+        if isinstance(meta, list):
+            return masked, [replace(m, valid_sample_mask=valid) for m in meta]
+        return masked, replace(meta, valid_sample_mask=valid)
 
     def _prepare_y(
         self,
@@ -327,6 +414,19 @@ class XarrayEstimator(BaseEstimator):
         if sample_dim is None:
             return _prepare_y(y, "")
         return _prepare_y(y, sample_dim)
+
+    def _mask_y(
+        self,
+        y: np.ndarray | None,
+        meta: _Meta | list[_Meta] | None,
+    ) -> np.ndarray | None:
+        if y is None or meta is None:
+            return y
+        primary = meta[0] if isinstance(meta, list) else meta
+        valid = primary.valid_sample_mask
+        if valid is None:
+            return y
+        return y[valid]
 
     def _unstack(
         self,
@@ -356,6 +456,7 @@ class XarrayEstimator(BaseEstimator):
         """Fit the wrapped estimator to ``x`` (and optional ``y``)."""
         arr, meta, sample_dim = self._stack(x)
         y_np = self._prepare_y(y, sample_dim)
+        y_np = self._mask_y(y_np, meta)
         self.estimator_ = clone(self.estimator)
         self.estimator_.fit(arr, y_np, **kwargs)
         self._fitted_sample_dim_ = sample_dim
@@ -380,6 +481,7 @@ class XarrayEstimator(BaseEstimator):
         """Fit then transform ``x``."""
         arr, meta, sample_dim = self._stack(x)
         y_np = self._prepare_y(y, sample_dim)
+        y_np = self._mask_y(y_np, meta)
         self.estimator_ = clone(self.estimator)
         if hasattr(self.estimator_, "fit_transform"):
             out = self.estimator_.fit_transform(arr, y_np, **kwargs)
@@ -427,6 +529,7 @@ class XarrayEstimator(BaseEstimator):
                 attrs=train_meta.attrs,
                 name=train_meta.name,
                 n_features=train_meta.n_features,
+                valid_sample_mask=meta.valid_sample_mask,
             )
             return _from_2d(out, hybrid, new_feature_dim=self.new_feature_dim)
         return self._unstack(out, meta)
@@ -462,8 +565,9 @@ class XarrayEstimator(BaseEstimator):
         """Scalar score from the wrapped estimator. Not re-wrapped — sklearn
         ``.score`` returns a Python float."""
         self._require_fitted()
-        arr, _, sample_dim = self._stack(x)
+        arr, meta, sample_dim = self._stack(x)
         y_np = self._prepare_y(y, sample_dim)
+        y_np = self._mask_y(y_np, meta)
         return float(self.estimator_.score(arr, y_np))
 
     # ---------- proxy + dunder --------------------------------------------
