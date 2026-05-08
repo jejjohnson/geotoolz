@@ -22,6 +22,12 @@ from xr_toolz.metrics._src.array_pixel import (
     r2_score,
     rmse,
 )
+from xr_toolz.metrics._src.array_segmented_psd import (
+    segment_signal,
+    segmented_coherence,
+    segmented_csd,
+    segmented_psd,
+)
 
 
 __all__ = [
@@ -32,4 +38,8 @@ __all__ = [
     "nrmse",
     "r2_score",
     "rmse",
+    "segment_signal",
+    "segmented_coherence",
+    "segmented_csd",
+    "segmented_psd",
 ]

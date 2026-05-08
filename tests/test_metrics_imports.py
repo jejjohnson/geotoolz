@@ -23,6 +23,8 @@ def test_metrics_package_root_exposes_layer0_and_operators():
         Correlation,
         PSDScore,
         R2Score,
+        SegmentedPSDScore,
+        along_track_psd_score,
         bias,
         correlation,
         find_intercept_1D,
@@ -31,9 +33,14 @@ def test_metrics_package_root_exposes_layer0_and_operators():
         nrmse,
         psd_error,
         psd_score,
+        psd_score_by_region,
         r2_score,
         resolved_scale,
         rmse,
+        segment_signal,
+        segmented_coherence,
+        segmented_csd,
+        segmented_psd,
     )
 
     # Sanity-check at least one is callable.
@@ -48,6 +55,8 @@ def test_metrics_package_root_exposes_layer0_and_operators():
         Bias,
         Correlation,
         R2Score,
+        SegmentedPSDScore,
+        along_track_psd_score,
         bias,
         correlation,
         find_intercept_1D,
@@ -56,8 +65,13 @@ def test_metrics_package_root_exposes_layer0_and_operators():
         nrmse,
         psd_error,
         psd_score,
+        psd_score_by_region,
         r2_score,
         resolved_scale,
+        segment_signal,
+        segmented_coherence,
+        segmented_csd,
+        segmented_psd,
     )
 
 
@@ -102,11 +116,14 @@ def test_metrics_spectral_submodule_imports():
         BandLimitedRMSE,
         FrequencyBandSkill,
         PSDScore,
+        SegmentedPSDScore,
+        along_track_psd_score,
         band_limited_rmse,
         evaluate_by_frequency_band,
         find_intercept_1D,
         psd_error,
         psd_score,
+        psd_score_by_region,
         resolved_scale,
     )
 
@@ -115,10 +132,13 @@ def test_metrics_spectral_submodule_imports():
     assert callable(band_limited_rmse)
     _ = (
         PSDScore,
+        SegmentedPSDScore,
         FrequencyBandSkill,
         BandLimitedRMSE,
+        along_track_psd_score,
         find_intercept_1D,
         psd_error,
+        psd_score_by_region,
         resolved_scale,
     )
 
