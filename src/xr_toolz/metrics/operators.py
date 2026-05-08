@@ -34,6 +34,7 @@ from xr_toolz.metrics._src.probabilistic import (
     ReliabilityCurve,
     SpreadSkillRatio,
 )
+from xr_toolz.metrics._src.residuals import BinnedResiduals2D, RegionScores
 from xr_toolz.metrics._src.spectral import (
     BandLimitedRMSE,
     FrequencyBandSkill,
@@ -56,6 +57,7 @@ __all__ = [
     "SSIM",
     "BandLimitedRMSE",
     "Bias",
+    "BinnedResiduals2D",
     "CentroidDisplacement",
     "Correlation",
     "DensityInversionFraction",
@@ -72,6 +74,7 @@ __all__ = [
     "PhaseShiftError",
     "R2Score",
     "RankHistogram",
+    "RegionScores",
     "ReliabilityCurve",
     "SkillByLeadTime",
     "SpreadSkillRatio",
