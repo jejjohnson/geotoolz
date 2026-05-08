@@ -14,7 +14,9 @@ from xr_toolz.geo import (
     calculate_climatology,
     calculate_climatology_season,
     calculate_climatology_smoothed,
+    check_dataset_coords,
     correlation,
+    decode_cf_time,
     lat_90_to_180,
     lat_180_to_90,
     lon_180_to_360,
@@ -31,6 +33,7 @@ from xr_toolz.geo import (
     subset_where,
     validate_latitude,
     validate_longitude,
+    validate_time,
 )
 
 
@@ -128,6 +131,105 @@ def test_rename_coords_ignores_missing_keys():
     ds = xr.Dataset(coords={"lon": [1.0]})
     out = rename_coords(ds, {"longitude": "lon", "time": "t"})
     assert list(out.coords) == ["lon"]
+
+
+# ---------- decode_cf_time / validate_time / check_dataset_coords ------------
+
+
+def test_decode_cf_time_with_units():
+    ds = xr.Dataset({"ssh": ("time", [1.0, 2.0])}, coords={"time": [0, 1]})
+    out = decode_cf_time(ds, units="days since 2000-01-01")
+    assert np.issubdtype(out["time"].dtype, np.datetime64)
+
+
+def test_decode_cf_time_noop_when_already_datetime():
+    time = pd.date_range("2000-01-01", periods=3)
+    ds = xr.Dataset({"ssh": ("time", [1.0, 2.0, 3.0])}, coords={"time": time})
+    out = decode_cf_time(ds)
+    xr.testing.assert_identical(ds, out)
+
+
+def test_decode_cf_time_no_units_no_op_for_integers():
+    ds = xr.Dataset({"ssh": ("time", [1.0])}, coords={"time": [42]})
+    out = decode_cf_time(ds)
+    assert out["time"].values[0] == 42
+
+
+def test_validate_time_coerces_string():
+    ds = xr.Dataset({"ssh": ("time", [1.0])}, coords={"time": ["2000-01-01"]})
+    out = validate_time(ds)
+    assert np.issubdtype(out["time"].dtype, np.datetime64)
+
+
+def test_validate_time_noop_already_datetime():
+    time = pd.date_range("2000-01-01", periods=3)
+    ds = xr.Dataset({"ssh": ("time", [1.0, 2.0, 3.0])}, coords={"time": time})
+    out = validate_time(ds)
+    assert np.issubdtype(out["time"].dtype, np.datetime64)
+
+
+def test_validate_time_does_not_mutate_input():
+    time = pd.date_range("2000-01-01", periods=2)
+    ds = xr.Dataset({"ssh": ("time", [1.0, 2.0])}, coords={"time": time})
+    _ = validate_time(ds)
+    xr.testing.assert_identical(
+        ds["time"], xr.DataArray(time, dims="time", name="time")
+    )
+
+
+def test_check_dataset_coords_passes_valid(ds_global):
+    from xr_toolz.geo import validate_latitude, validate_longitude
+
+    ds = validate_longitude(validate_latitude(ds_global))
+    check_dataset_coords(ds, require=("time", "lat", "lon"))
+
+
+def test_check_dataset_coords_raises_on_missing():
+    ds = xr.Dataset(coords={"lat": [0.0], "lon": [0.0]})
+    with pytest.raises(AssertionError, match="time"):
+        check_dataset_coords(ds)
+
+
+def test_check_dataset_coords_custom_require(ds_global):
+    check_dataset_coords(ds_global, require=("time",))
+
+
+def test_check_dataset_coords_validate_false_skips_roundtrip(ds_global):
+    check_dataset_coords(ds_global, require=("time", "lat", "lon"), validate=False)
+
+
+def test_check_dataset_coords_sorted_missing_in_message():
+    ds = xr.Dataset()
+    with pytest.raises(AssertionError, match="lat") as exc_info:
+        check_dataset_coords(ds, require=("time", "lat", "lon"))
+    assert "lon" in str(exc_info.value)
+    assert "time" in str(exc_info.value)
+
+
+def test_check_dataset_coords_rejects_data_var_with_required_name():
+    """A data variable named ``time`` does not satisfy the schema —
+    ``.sel(time=...)`` and other coord-based ops still need the name to
+    be a coordinate."""
+    ds = xr.Dataset({"time": ("row", [0, 1, 2])})
+    with pytest.raises(AssertionError, match="time"):
+        check_dataset_coords(ds, require=("time",))
+
+
+def test_validate_time_unit_seconds_since_epoch():
+    """Numeric times need an explicit ``unit`` — without it,
+    pandas would interpret 1.0 as one nanosecond past the epoch."""
+    ds = xr.Dataset({"ssh": ("time", [1.0])}, coords={"time": [1.0]})
+    out = validate_time(ds, unit="s")
+    assert out["time"].values[0] == np.datetime64("1970-01-01T00:00:01")
+
+
+def test_validate_time_preserves_attrs():
+    time = pd.date_range("2000-01-01", periods=2)
+    ds = xr.Dataset({"ssh": ("time", [1.0, 2.0])}, coords={"time": time})
+    ds["time"].attrs["standard_name"] = "time"
+    ds["time"].attrs["axis"] = "T"
+    out = validate_time(ds)
+    assert out["time"].attrs == {"standard_name": "time", "axis": "T"}
 
 
 # ---------- subset -----------------------------------------------------------

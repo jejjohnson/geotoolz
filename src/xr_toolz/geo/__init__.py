@@ -59,10 +59,13 @@ from xr_toolz.geo._src.subset import (
     subset_where,
 )
 from xr_toolz.geo._src.validation import (
+    check_dataset_coords,
+    decode_cf_time,
     rename_coords,
     rename_variables,
     validate_latitude,
     validate_longitude,
+    validate_time,
 )
 
 
@@ -143,6 +146,8 @@ __all__ = [
     "calculate_climatology",
     "calculate_climatology_season",
     "calculate_climatology_smoothed",
+    "check_dataset_coords",
+    "decode_cf_time",
     "get_crs",
     "lonlat_to_xy",
     "pot_exceedances",
@@ -160,5 +165,6 @@ __all__ = [
     "subset_where",
     "validate_latitude",
     "validate_longitude",
+    "validate_time",
     "xy_to_lonlat",
 ]

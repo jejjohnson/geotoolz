@@ -15,6 +15,7 @@ from xr_toolz.geo.operators import (
     Bias,
     CalculateClimatology,
     Correlation,
+    DecodeCFTime,
     FillNaN,
     PSDScore,
     R2Score,
@@ -26,6 +27,7 @@ from xr_toolz.geo.operators import (
     ValidateCoords,
     ValidateLatitude,
     ValidateLongitude,
+    ValidateTime,
 )
 from xr_toolz.interpolate.operators import ResampleTime
 from xr_toolz.transforms.operators import PowerSpectrum
@@ -190,3 +192,44 @@ def test_reduce_multi_dim_and_keepdims(ds_global):
 def test_reduce_rejects_unknown_op():
     with pytest.raises(ValueError, match="Unknown reduce op"):
         Reduce("argmax", dim="time")
+
+
+# ---------- DecodeCFTime / ValidateTime operators ----------------------------
+
+
+def test_decode_cf_time_operator_with_units():
+    ds = xr.Dataset({"ssh": ("time", [1.0, 2.0])}, coords={"time": [0, 1]})
+    out = DecodeCFTime(units="days since 2000-01-01")(ds)
+    assert np.issubdtype(out["time"].dtype, np.datetime64)
+
+
+def test_decode_cf_time_operator_noop_already_datetime():
+    time = pd.date_range("2000-01-01", periods=3)
+    ds = xr.Dataset({"ssh": ("time", [1.0, 2.0, 3.0])}, coords={"time": time})
+    out = DecodeCFTime()(ds)
+    xr.testing.assert_identical(ds, out)
+
+
+def test_decode_cf_time_operator_get_config():
+    op = DecodeCFTime(time="t", units="hours since 1970-01-01")
+    assert op.get_config() == {"time": "t", "units": "hours since 1970-01-01"}
+
+
+def test_decode_cf_time_operator_get_config_none_units():
+    op = DecodeCFTime()
+    assert op.get_config() == {"time": "time", "units": None}
+
+
+def test_validate_time_operator_coerces_string():
+    ds = xr.Dataset({"ssh": ("time", [1.0])}, coords={"time": ["2000-01-01"]})
+    out = ValidateTime()(ds)
+    assert np.issubdtype(out["time"].dtype, np.datetime64)
+
+
+def test_validate_time_operator_get_config():
+    op = ValidateTime(time="t")
+    assert op.get_config() == {"time": "t", "unit": None, "origin": "unix"}
+
+
+def test_validate_time_operator_repr():
+    assert "ValidateTime" in repr(ValidateTime())
