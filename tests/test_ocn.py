@@ -528,6 +528,33 @@ def test_calculate_ssh_alongtrack_linear_combination():
     assert out["ssh"].attrs["units"] == "m"
 
 
+def test_calculate_ssh_alongtrack_no_lwe():
+    """lwe=None reproduces the simple altimetry convention ssh = sla + mdt."""
+    ds = xr.Dataset(
+        {
+            "sla": ("track", np.array([1.0, 2.0, 3.0])),
+            "mdt": ("track", np.array([0.5, 0.5, 0.5])),
+        }
+    )
+    out = calculate_ssh_alongtrack(ds, sla="sla", lwe=None)
+    np.testing.assert_allclose(out["ssh"].values, np.array([1.5, 2.5, 3.5]))
+    assert out["ssh"].attrs["units"] == "m"
+
+
+def test_calculate_ssh_alongtrack_lwe_none_matches_direct_addition():
+    """lwe=None gives exactly sla + mdt, matching upstream sla_to_ssh numerics."""
+    sla = np.array([0.12, -0.05, 0.30])
+    mdt = np.array([0.80, 0.75, 0.90])
+    ds = xr.Dataset(
+        {
+            "sla": ("track", sla),
+            "mdt": ("track", mdt),
+        }
+    )
+    out = calculate_ssh_alongtrack(ds, sla="sla", mdt="mdt", lwe=None)
+    np.testing.assert_allclose(out["ssh"].values, sla + mdt, rtol=1e-12)
+
+
 # ---------- validation -----------------------------------------------------
 
 
@@ -601,6 +628,24 @@ def test_calculate_ssh_alongtrack_operator():
     )
     out = CalculateSSHAlongtrack()(ds)
     assert float(out["ssh"].values[0]) == pytest.approx(1.4)
+
+
+def test_calculate_ssh_alongtrack_operator_no_lwe():
+    ds = xr.Dataset(
+        {
+            "sla_filtered": ("track", [1.0]),
+            "mdt": ("track", [0.5]),
+        }
+    )
+    op = CalculateSSHAlongtrack(lwe=None)
+    out = op(ds)
+    assert float(out["ssh"].values[0]) == pytest.approx(1.5)
+    assert op.get_config() == {
+        "variable": "ssh",
+        "sla": "sla_filtered",
+        "mdt": "mdt",
+        "lwe": None,
+    }
 
 
 def test_advection_operator(ds_uv_grid):

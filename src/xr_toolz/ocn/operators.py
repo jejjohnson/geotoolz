@@ -47,7 +47,7 @@ class CalculateSSHAlongtrack(Operator):
         variable: str = "ssh",
         sla: str = "sla_filtered",
         mdt: str = "mdt",
-        lwe: str = "lwe",
+        lwe: str | None = "lwe",
     ):
         self.variable = variable
         self.sla = sla
