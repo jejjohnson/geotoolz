@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from xr_toolz.interpolate._src.array_coord_remap import remap_axis
 from xr_toolz.interpolate._src.array_smooth import (
+    fir_filter,
     gaussian_smooth,
     lowpass_filter,
     moving_average,
@@ -22,6 +23,7 @@ from xr_toolz.interpolate._src.array_smooth import (
 
 
 __all__ = [
+    "fir_filter",
     "gaussian_smooth",
     "lowpass_filter",
     "moving_average",

@@ -8,10 +8,12 @@ import xarray as xr
 
 from xr_toolz.interpolate import (
     array as ia,
+    fir_filter,
     gaussian_smooth,
     lowpass_filter,
     moving_average,
 )
+from xr_toolz.interpolate._src.array_smooth import _fir_taps
 from xr_toolz.interpolate.operators import (
     GaussianSmooth,
     LowpassFilter,
@@ -106,6 +108,48 @@ def test_array_lowpass_attenuates_above_cutoff():
 
 
 # ---------------------------------------------------------------------------
+# Tier A — fir_filter
+# ---------------------------------------------------------------------------
+
+
+def test_array_fir_lanczos_attenuates_above_cutoff():
+    n = 2048
+    t = np.arange(n)
+    pass_band = np.sin(2 * np.pi * t / 64)
+    stop_band = np.sin(2 * np.pi * t / 4)
+
+    pass_out = ia.fir_filter(pass_band, axis=-1, cutoff=0.08, method="lanczos")
+    stop_out = ia.fir_filter(stop_band, axis=-1, cutoff=0.08, method="lanczos")
+
+    assert pass_out[300:-300].std() > 0.9 * pass_band.std()
+    assert stop_out[300:-300].std() < 0.01 * pass_band.std()
+
+
+def test_array_fir_kaiser_auto_taps_are_odd_and_meet_stopband():
+    taps = _fir_taps(
+        cutoff=0.2,
+        method="kaiser",
+        btype="low",
+        attenuation_db=60.0,
+    )
+    assert taps.size % 2 == 1
+
+    response = np.fft.rfft(taps, 32768)
+    freq_norm = np.fft.rfftfreq(32768, d=1.0) * 2.0
+    stop_peak = np.abs(response[freq_norm >= 0.35]).max()
+    assert 20.0 * np.log10(stop_peak) <= -60.0
+
+
+def test_array_fir_taps_are_zero_phase():
+    taps = _fir_taps(cutoff=(0.1, 0.3), method="lanczos", btype="bandpass")
+    center = (taps.size - 1) // 2
+    response = np.fft.rfft(taps, 4096)
+    freq_cycles = np.fft.rfftfreq(4096, d=1.0)
+    centered = response * np.exp(1j * 2.0 * np.pi * freq_cycles * center)
+    np.testing.assert_allclose(centered.imag, 0.0, atol=1e-12)
+
+
+# ---------------------------------------------------------------------------
 # Tier B — Dataset wrappers
 # ---------------------------------------------------------------------------
 
@@ -136,6 +180,12 @@ def test_tier_b_lowpass_filter_matches_tier_a(ds_signal):
     np.testing.assert_allclose(out["x"].values, expected)
 
 
+def test_tier_b_fir_filter_matches_tier_a(ds_signal):
+    out = fir_filter(ds_signal, dim="time", cutoff=0.2, num_taps=15)
+    expected = ia.fir_filter(ds_signal["x"].values, axis=-1, cutoff=0.2, num_taps=15)
+    np.testing.assert_allclose(out["x"].values, expected)
+
+
 def test_tier_b_passes_through_non_dim_variables():
     ds = xr.Dataset(
         {
@@ -145,6 +195,21 @@ def test_tier_b_passes_through_non_dim_variables():
         coords={"time": np.arange(10)},
     )
     out = moving_average(ds, dim="time", window=3)
+    assert float(out["static"]) == 7.0
+
+
+def test_tier_b_fir_passes_through_non_numeric_and_no_dim_variables():
+    ds = xr.Dataset(
+        {
+            "x": (("time",), np.arange(64, dtype=float)),
+            "label": (("time",), np.array(["a"] * 64)),
+            "static": ((), 7.0),
+        },
+        coords={"time": np.arange(64)},
+    )
+    out = fir_filter(ds, dim="time", cutoff=0.2, num_taps=15)
+    assert not np.array_equal(out["x"].values, ds["x"].values)
+    np.testing.assert_array_equal(out["label"].values, ds["label"].values)
     assert float(out["static"]) == 7.0
 
 

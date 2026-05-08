@@ -20,6 +20,7 @@ from __future__ import annotations
 import warnings
 from typing import Any
 
+from xr_toolz.geo._src.along_track import bandpass_wavelength, median_dx_km
 from xr_toolz.geo._src.crs import (
     assign_crs,
     calc_latlon,
@@ -67,6 +68,7 @@ from xr_toolz.geo._src.validation import (
     validate_longitude,
     validate_time,
 )
+from xr_toolz.geo.operators import BandpassWavelength
 
 
 # Names moved to xr_toolz.metrics — kept importable for one release with
@@ -132,12 +134,14 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "BandpassWavelength",
     "add_climatology",
     "add_country_mask",
     "add_land_mask",
     "add_ocean_mask",
     "apply_mask",
     "assign_crs",
+    "bandpass_wavelength",
     "block_maxima",
     "block_minima",
     "calc_latlon",
@@ -150,6 +154,7 @@ __all__ = [
     "decode_cf_time",
     "get_crs",
     "lonlat_to_xy",
+    "median_dx_km",
     "pot_exceedances",
     "pot_threshold",
     "pp_counts",

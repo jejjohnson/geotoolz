@@ -19,6 +19,7 @@ from typing import Any
 
 from xr_toolz.core import Operator, Signature
 from xr_toolz.geo._src import (
+    along_track as _along_track,
     detrend as _detrend,
     masks as _masks,
     subset as _subset,
@@ -367,6 +368,60 @@ class Reduce(Operator):
         return input_signature.drop_dims(self.dim)
 
 
+class BandpassWavelength(Operator):
+    """Wrap :func:`xr_toolz.geo.bandpass_wavelength`."""
+
+    def __init__(
+        self,
+        *,
+        dim: str,
+        lambda_min_km: float | None = None,
+        lambda_max_km: float | None = None,
+        spacing_km: float | None = None,
+        method: str = "lanczos",
+        num_taps: int | None = None,
+        attenuation_db: float | None = None,
+        lon: str = "lon",
+        lat: str = "lat",
+    ) -> None:
+        self.dim = dim
+        self.lambda_min_km = lambda_min_km
+        self.lambda_max_km = lambda_max_km
+        self.spacing_km = spacing_km
+        self.method = method
+        self.num_taps = num_taps
+        self.attenuation_db = attenuation_db
+        self.lon = lon
+        self.lat = lat
+
+    def _apply(self, ds):
+        return _along_track.bandpass_wavelength(
+            ds,
+            dim=self.dim,
+            lambda_min_km=self.lambda_min_km,
+            lambda_max_km=self.lambda_max_km,
+            spacing_km=self.spacing_km,
+            method=self.method,
+            num_taps=self.num_taps,
+            attenuation_db=self.attenuation_db,
+            lon=self.lon,
+            lat=self.lat,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "dim": self.dim,
+            "lambda_min_km": self.lambda_min_km,
+            "lambda_max_km": self.lambda_max_km,
+            "spacing_km": self.spacing_km,
+            "method": self.method,
+            "num_taps": self.num_taps,
+            "attenuation_db": self.attenuation_db,
+            "lon": self.lon,
+            "lat": self.lat,
+        }
+
+
 class RemoveClimatology(Operator):
     """Subtract a precomputed climatology from the input dataset."""
 
@@ -496,6 +551,7 @@ __all__ = [
     "AddLandMask",
     "AddOceanMask",
     "ApplyMask",
+    "BandpassWavelength",
     "CalculateClimatology",
     "CalculateClimatologySmoothed",
     "FillNaN",

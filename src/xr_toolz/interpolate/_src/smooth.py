@@ -114,7 +114,38 @@ def lowpass_filter(
     return _apply_along_dim(ds, dim, _fn)
 
 
+def fir_filter(
+    ds: xr.Dataset,
+    *,
+    dim: str,
+    cutoff: float | tuple[float, float] | list[float] | np.ndarray,
+    method: str = "lanczos",
+    btype: str = "low",
+    num_taps: int | None = None,
+    attenuation_db: float | None = None,
+) -> xr.Dataset:
+    """Zero-phase FIR filter along ``dim``.
+
+    See :func:`xr_toolz.interpolate.array.fir_filter` for cutoff, window,
+    and tap-count semantics.
+    """
+
+    def _fn(arr: np.ndarray, *, axis: int) -> np.ndarray:
+        return _array.fir_filter(
+            arr,
+            axis=axis,
+            cutoff=cutoff,
+            method=method,
+            btype=btype,
+            num_taps=num_taps,
+            attenuation_db=attenuation_db,
+        )
+
+    return _apply_along_dim(ds, dim, _fn)
+
+
 __all__ = [
+    "fir_filter",
     "gaussian_smooth",
     "lowpass_filter",
     "moving_average",

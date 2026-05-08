@@ -16,12 +16,23 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import butter, sosfiltfilt
+from scipy.signal import (
+    butter,
+    filtfilt,
+    kaiser_beta,
+    kaiserord,
+    sosfiltfilt,
+    windows as signal_windows,
+)
 
 
 _BUTTER_BTYPES: frozenset[str] = frozenset(
     {"low", "high", "lowpass", "highpass", "bandpass", "bandstop"}
 )
+_FIR_BTYPES: frozenset[str] = frozenset(
+    {"low", "high", "lowpass", "highpass", "bandpass", "bandstop"}
+)
+_FIR_METHODS: frozenset[str] = frozenset({"lanczos", "kaiser"})
 
 
 def _as_floating(arr: ArrayLike) -> np.ndarray:
@@ -32,6 +43,145 @@ def _as_floating(arr: ArrayLike) -> np.ndarray:
     if np.issubdtype(a.dtype, np.floating):
         return a
     return a.astype(np.float64)
+
+
+def _validate_num_taps(num_taps: int) -> int:
+    if not isinstance(num_taps, (int, np.integer)) or isinstance(num_taps, bool):
+        raise TypeError(f"num_taps must be an integer, got {type(num_taps).__name__}")
+    if num_taps < 3:
+        raise ValueError(f"num_taps must be >= 3, got {num_taps}")
+    if num_taps % 2 == 0:
+        raise ValueError(f"num_taps must be odd, got {num_taps}")
+    return int(num_taps)
+
+
+def _normalize_fir_cutoff(
+    cutoff: float | Sequence[float],
+    btype: str,
+) -> float | tuple[float, float]:
+    is_band = btype in {"bandpass", "bandstop"}
+    if is_band:
+        if np.isscalar(cutoff):
+            raise ValueError(
+                f"btype={btype!r} requires a length-2 cutoff (low, high); "
+                f"got scalar {cutoff}"
+            )
+        cutoff_arr = np.asarray(cutoff, dtype=float)
+        if cutoff_arr.shape != (2,):
+            raise ValueError(
+                f"btype={btype!r} requires a length-2 cutoff; "
+                f"got shape {cutoff_arr.shape}"
+            )
+        if not np.all((cutoff_arr > 0.0) & (cutoff_arr < 1.0)):
+            raise ValueError(
+                f"cutoff entries must lie in (0, 1); got {cutoff_arr.tolist()}"
+            )
+        if cutoff_arr[0] >= cutoff_arr[1]:
+            raise ValueError(
+                f"cutoff[0] must be < cutoff[1]; got {cutoff_arr.tolist()}"
+            )
+        return (float(cutoff_arr[0]), float(cutoff_arr[1]))
+
+    if not np.isscalar(cutoff):
+        raise ValueError(f"btype={btype!r} requires a scalar cutoff; got {cutoff!r}")
+    c = float(np.asarray(cutoff, dtype=float).item())
+    if not (0.0 < c < 1.0):
+        raise ValueError(f"cutoff must lie in (0, 1); got {c}")
+    return c
+
+
+def _default_lanczos_taps(cutoff: float | tuple[float, float]) -> int:
+    smallest_cutoff = min(cutoff) if isinstance(cutoff, tuple) else cutoff
+    return int(2 * np.ceil(2.0 / smallest_cutoff) + 1)
+
+
+def _default_kaiser_taps(
+    cutoff: float | tuple[float, float],
+    attenuation_db: float,
+) -> int:
+    smallest_cutoff = min(cutoff) if isinstance(cutoff, tuple) else cutoff
+    transition_width = max(smallest_cutoff / 2.0, np.finfo(float).eps)
+    num_taps, _ = kaiserord(attenuation_db, transition_width)
+    if num_taps % 2 == 0:
+        num_taps += 1
+    return _validate_num_taps(num_taps)
+
+
+def _lowpass_fir_taps(
+    cutoff: float,
+    *,
+    method: str,
+    num_taps: int,
+    attenuation_db: float | None,
+) -> NDArray[np.floating]:
+    m = (num_taps - 1) // 2
+    n = np.arange(-m, m + 1, dtype=float)
+    taps = cutoff * np.sinc(cutoff * n)
+    if method == "lanczos":
+        window = np.sinc(n / m)
+    else:
+        if attenuation_db is None:
+            raise ValueError("attenuation_db is required for Kaiser FIR taps")
+        beta = kaiser_beta(attenuation_db)
+        window = signal_windows.kaiser(num_taps, beta, sym=True)
+    taps *= window
+    taps /= taps.sum()
+    return taps
+
+
+def _fir_taps(
+    *,
+    cutoff: float | Sequence[float],
+    method: str,
+    btype: str,
+    num_taps: int | None = None,
+    attenuation_db: float | None = None,
+) -> NDArray[np.floating]:
+    """Design odd-length FIR taps with normalized Nyquist cutoffs."""
+    if method not in _FIR_METHODS:
+        raise ValueError(
+            f"method must be one of {sorted(_FIR_METHODS)}, got {method!r}"
+        )
+    if btype not in _FIR_BTYPES:
+        raise ValueError(f"btype must be one of {sorted(_FIR_BTYPES)}, got {btype!r}")
+    btype = {"lowpass": "low", "highpass": "high"}.get(btype, btype)
+    normalized_cutoff = _normalize_fir_cutoff(cutoff, btype)
+
+    if method == "kaiser":
+        if attenuation_db is None:
+            attenuation_db = 60.0
+        if attenuation_db <= 0:
+            raise ValueError(f"attenuation_db must be > 0, got {attenuation_db}")
+    if num_taps is None:
+        if method == "lanczos":
+            num_taps = _default_lanczos_taps(normalized_cutoff)
+        else:
+            num_taps = _default_kaiser_taps(normalized_cutoff, attenuation_db)
+    else:
+        num_taps = _validate_num_taps(num_taps)
+
+    if isinstance(normalized_cutoff, tuple):
+        low, high = normalized_cutoff
+        taps = _lowpass_fir_taps(
+            high, method=method, num_taps=num_taps, attenuation_db=attenuation_db
+        ) - _lowpass_fir_taps(
+            low, method=method, num_taps=num_taps, attenuation_db=attenuation_db
+        )
+        if btype == "bandstop":
+            taps = -taps
+            taps[(num_taps - 1) // 2] += 1.0
+        return taps
+
+    taps = _lowpass_fir_taps(
+        normalized_cutoff,
+        method=method,
+        num_taps=num_taps,
+        attenuation_db=attenuation_db,
+    )
+    if btype == "high":
+        taps = -taps
+        taps[(num_taps - 1) // 2] += 1.0
+    return taps
 
 
 def moving_average(
@@ -192,7 +342,47 @@ def lowpass_filter(
     return sosfiltfilt(sos, a, axis=axis)
 
 
+def fir_filter(
+    arr: ArrayLike,
+    *,
+    axis: int = -1,
+    cutoff: float | Sequence[float],
+    method: str = "lanczos",
+    btype: str = "low",
+    num_taps: int | None = None,
+    attenuation_db: float | None = None,
+) -> NDArray[np.floating]:
+    """Zero-phase FIR filter along ``axis``.
+
+    Args:
+        arr: Input array. Complex inputs are filtered component-wise.
+        axis: Axis to filter along.
+        cutoff: Normalized cutoff frequency (fraction of Nyquist). For
+            ``btype`` in ``{"bandpass", "bandstop"}``, pass a length-2
+            ``(low, high)`` sequence.
+        method: Window family: ``"lanczos"`` or ``"kaiser"``.
+        btype: Filter type: ``"low"``, ``"high"``, ``"bandpass"``, or
+            ``"bandstop"`` (plus ``"lowpass"``/``"highpass"`` aliases).
+        num_taps: Odd FIR tap count. Defaults to a conservative value for
+            Lanczos, or is estimated from ``attenuation_db`` for Kaiser.
+        attenuation_db: Kaiser stop-band attenuation target in decibels.
+
+    Returns:
+        Filtered array with the same shape as ``arr``.
+    """
+    taps = _fir_taps(
+        cutoff=cutoff,
+        method=method,
+        btype=btype,
+        num_taps=num_taps,
+        attenuation_db=attenuation_db,
+    )
+    a = _as_floating(arr)
+    return filtfilt(taps, [1.0], a, axis=axis)
+
+
 __all__ = [
+    "fir_filter",
     "gaussian_smooth",
     "lowpass_filter",
     "moving_average",
