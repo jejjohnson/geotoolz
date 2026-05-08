@@ -21,6 +21,7 @@ CANONICAL_FUNCS = (
     ("histogram_2d", "binning"),
     ("fillnan_spatial", "gap_fill"),
     ("fillnan_temporal", "gap_fill"),
+    ("fillnan_laplacian", "gap_fill"),
     ("fillnan_rbf", "gap_fill"),
     ("coarsen", "grid_to_grid"),
     ("refine", "grid_to_grid"),
@@ -33,6 +34,7 @@ CANONICAL_OPS = (
     "Bin2D",
     "Coarsen",
     "Downscale",
+    "FillNaNLaplacian",
     "FillNaNRBF",
     "FillNaNSpatial",
     "FillNaNTemporal",
@@ -65,6 +67,7 @@ REMOVED_FROM_GEO = (
     "refine",
     "fillnan_spatial",
     "fillnan_temporal",
+    "fillnan_laplacian",
     "fillnan_rbf",
     "resample_time",
 )

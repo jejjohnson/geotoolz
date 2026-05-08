@@ -100,6 +100,41 @@ def test_regrid_like_resamples_onto_target_grid(latlon_ds: xr.Dataset) -> None:
     assert np.array_equal(out["lat"].values, target["lat"].values)
 
 
+def test_regrid_like_3d_datetime_coords() -> None:
+    time = np.array(
+        ["2000-01-01", "2000-01-03", "2000-01-05", "2000-01-07"],
+        dtype="datetime64[D]",
+    )
+    lat = np.linspace(-1.0, 1.0, 5)
+    lon = np.linspace(10.0, 14.0, 6)
+    time_days = (time - time[0]) / np.timedelta64(1, "D")
+    vals = time_days[:, None, None] + 2.0 * lat[None, :, None] - lon[None, None, :]
+    src = xr.Dataset(
+        {"x": (("time", "lat", "lon"), vals)},
+        coords={"time": time, "lat": lat, "lon": lon},
+    )
+
+    target_time = np.array(["2000-01-02", "2000-01-06"], dtype="datetime64[D]")
+    target = xr.Dataset(
+        coords={
+            "time": target_time,
+            "lat": np.linspace(-0.5, 0.5, 3),
+            "lon": np.linspace(11.0, 13.0, 4),
+        }
+    )
+
+    out = regrid_like(src, target, dims=("lat", "lon", "time"))
+    target_days = (target_time - time[0]) / np.timedelta64(1, "D")
+    expected = (
+        target_days[:, None, None]
+        + 2.0 * target["lat"].values[None, :, None]
+        - target["lon"].values[None, None, :]
+    )
+
+    np.testing.assert_allclose(out["x"].values, expected, atol=1e-12)
+    assert np.issubdtype(out["time"].dtype, np.datetime64)
+
+
 def test_regrid_like_op_in_pipeline(latlon_ds: xr.Dataset) -> None:
     target = xr.Dataset(
         coords={"lat": np.linspace(30.0, 45.0, 5), "lon": np.linspace(-70.0, -50.0, 6)}

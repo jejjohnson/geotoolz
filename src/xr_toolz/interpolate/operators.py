@@ -69,6 +69,58 @@ class FillNaNTemporal(Operator):
         return {"method": self.method, "time": self.time, "max_gap": self.max_gap}
 
 
+class FillNaNLaplacian(Operator):
+    """Wrap :func:`xr_toolz.interpolate.fillnan_laplacian`."""
+
+    def __init__(
+        self,
+        *,
+        max_iter: int = 1000,
+        tol: float = 1e-4,
+        relaxation: float = 1.0,
+        boundary: str = "reflect",
+        lon: str = "lon",
+        lat: str = "lat",
+    ):
+        # Validate eagerly so misconfigured operators fail at construction
+        # time rather than deep inside _apply (mirrors Coarsen).
+        _gap_fill._validate_laplacian_args(max_iter, tol, relaxation, boundary)
+        self.max_iter = max_iter
+        self.tol = tol
+        self.relaxation = relaxation
+        self.boundary = boundary
+        self.lon = lon
+        self.lat = lat
+
+    def _apply(self, ds):
+        def _fill(da):
+            if {self.lat, self.lon} <= set(da.dims):
+                return _gap_fill.fillnan_laplacian(
+                    da,
+                    max_iter=self.max_iter,
+                    tol=self.tol,
+                    relaxation=self.relaxation,
+                    boundary=self.boundary,
+                    lon=self.lon,
+                    lat=self.lat,
+                )
+            return da
+
+        if isinstance(ds, xr.Dataset):
+            return ds.map(_fill)
+        return _fill(ds)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "max_iter": self.max_iter,
+            "tol": self.tol,
+            "relaxation": self.relaxation,
+            "boundary": self.boundary,
+            "lon": self.lon,
+            "lat": self.lat,
+        }
+
+
 class FillNaNRBF(Operator):
     """Wrap :func:`xr_toolz.interpolate.fillnan_rbf`."""
 
@@ -666,6 +718,7 @@ __all__ = [
     "Bin2D",
     "Coarsen",
     "Downscale",
+    "FillNaNLaplacian",
     "FillNaNRBF",
     "FillNaNSpatial",
     "FillNaNTemporal",
