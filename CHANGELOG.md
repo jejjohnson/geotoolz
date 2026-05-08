@@ -26,6 +26,20 @@
 
 * `xr_toolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xr_toolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.6](https://github.com/jejjohnson/xr_toolz/compare/v0.0.5...v0.0.6) (2026-05-08)
+
+
+### Features
+
+* **core:** signature protocol + sequential.summary / graph.summary ([#140](https://github.com/jejjohnson/xr_toolz/issues/140)) ([b6d1996](https://github.com/jejjohnson/xr_toolz/commit/b6d19967ffd880cdb4afaee89aab4309e60d604c))
+* **geo:** add decode_cf_time, validate_time, check_dataset_coords + operators ([#169](https://github.com/jejjohnson/xr_toolz/issues/169)) ([8307ee8](https://github.com/jejjohnson/xr_toolz/commit/8307ee821380a531a7d6803c9b408d045609a28b))
+* **interpolate:** add FIR filters and along-track wavelength bandpass ([#166](https://github.com/jejjohnson/xr_toolz/issues/166)) ([507355e](https://github.com/jejjohnson/xr_toolz/commit/507355e8476c2fe160b1f53f23b109aadb0c6611))
+* **interpolate:** add Laplacian NaN gap fill primitive ([#170](https://github.com/jejjohnson/xr_toolz/issues/170)) ([7e298ae](https://github.com/jejjohnson/xr_toolz/commit/7e298ae0f50bd9fbc3550117c8906bbd50606518))
+* **metrics:** add gap-tolerant segmented along-track PSD score ([#165](https://github.com/jejjohnson/xr_toolz/issues/165)) ([e6e82ba](https://github.com/jejjohnson/xr_toolz/commit/e6e82bad56321c4bffdada68d5a1d7bdfd50fe83))
+* **metrics:** add ODC-1.4 residual binning, regional scoring, and DM test ([#168](https://github.com/jejjohnson/xr_toolz/issues/168)) ([db8e6c0](https://github.com/jejjohnson/xr_toolz/commit/db8e6c02c73b6a47f7142ef972caf8cd5b2d6427))
+* **ocn:** make `lwe` optional in `calculate_ssh_alongtrack` + document MDT-regrid pattern ([#167](https://github.com/jejjohnson/xr_toolz/issues/167)) ([852e1b7](https://github.com/jejjohnson/xr_toolz/commit/852e1b7f4a89889efe10910ea5c0df0ca99dbcee))
+* **transforms:** sklearn integration (SklearnOp, accessor, nan-mask) ([#139](https://github.com/jejjohnson/xr_toolz/issues/139)) ([690363f](https://github.com/jejjohnson/xr_toolz/commit/690363ff774955dd77ed4dbde161e0c0430ddd4c))
+
 ## [0.0.5](https://github.com/jejjohnson/xr_toolz/compare/v0.0.4...v0.0.5) (2026-05-05)
 
 
