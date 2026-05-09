@@ -34,12 +34,13 @@ from xr_toolz.metrics._src.probabilistic import (
     ReliabilityCurve,
     SpreadSkillRatio,
 )
-from xr_toolz.metrics._src.segmented_psd import SegmentedPSDScore
 from xr_toolz.metrics._src.residuals import BinnedResiduals2D, RegionScores
+from xr_toolz.metrics._src.segmented_psd import SegmentedPSDScore
 from xr_toolz.metrics._src.spectral import (
     BandLimitedRMSE,
     FrequencyBandSkill,
     PSDScore,
+    WaveletPSDScore,
 )
 from xr_toolz.metrics._src.structural import (
     SSIM,
@@ -81,4 +82,5 @@ __all__ = [
     "SkillByLeadTime",
     "SpreadSkillRatio",
     "Wasserstein1",
+    "WaveletPSDScore",
 ]

@@ -29,6 +29,8 @@ import xarray as xr
 from scipy.interpolate import interp1d
 
 from xr_toolz.core import Operator
+from xr_toolz.geo._src.wavelet import wvlt_power_spectrum
+from xr_toolz.geo._src.wavelet_utils import scale_to_wavenumber
 from xr_toolz.transforms._src.fourier import (
     drop_negative_frequencies,
     power_spectrum,
@@ -155,6 +157,136 @@ def resolved_scale(
     return find_intercept_1D(x=wavelengths, y=vals, level=level)
 
 
+def wavelet_psd_score(
+    ds_pred: xr.Dataset,
+    ds_ref: xr.Dataset,
+    variable: str,
+    scales: xr.DataArray,
+    *,
+    dim: tuple[str, str] = ("y", "x"),
+    x0: float = 50e3,
+    ntheta: int = 16,
+    k0: float = 1.0,
+    isotropic: bool = True,
+) -> xr.Dataset:
+    """Localized wavelet PSD score ``1 - WPSD(err) / WPSD(ref)``.
+
+    Args:
+        ds_pred: Prediction dataset containing ``variable``.
+        ds_ref: Reference dataset containing ``variable`` on the same grid.
+        variable: Data variable to score.
+        scales: Positive Morlet scales. The first dimension is used as the
+            scale axis.
+        dim: Spatial dimensions as ``(y, x)`` on a locally Cartesian grid.
+        x0: Reference length scale in the same units as the spatial coords.
+        ntheta: Number of evenly spaced Morlet angles.
+        k0: Dimensionless central Morlet wavenumber.
+        isotropic: If ``True``, average directional power over angle.
+
+    Returns:
+        Dataset containing ``score`` with untrusted COI samples masked to NaN.
+    """
+    if variable not in ds_pred.data_vars:
+        raise KeyError(f"prediction missing variable {variable!r}")
+    if variable not in ds_ref.data_vars:
+        raise KeyError(f"reference missing variable {variable!r}")
+    err = (ds_pred[variable] - ds_ref[variable]).rename("error")
+    err_psd = wvlt_power_spectrum(
+        err,
+        scales,
+        dim=dim,
+        x0=x0,
+        ntheta=ntheta,
+        k0=k0,
+        isotropic=isotropic,
+    )
+    ref_psd = wvlt_power_spectrum(
+        ds_ref[variable],
+        scales,
+        dim=dim,
+        x0=x0,
+        ntheta=ntheta,
+        k0=k0,
+        isotropic=isotropic,
+    )
+    trust = err_psd["coi_mask"] & ref_psd["coi_mask"]
+    score = (1.0 - err_psd / ref_psd).where(trust)
+    return score.rename("score").to_dataset()
+
+
+def wavelet_resolved_scale_map(
+    truth: xr.DataArray,
+    pred: xr.DataArray,
+    scales: xr.DataArray,
+    *,
+    dim: tuple[str, str] = ("y", "x"),
+    x0: float = 50e3,
+    ntheta: int = 16,
+    k0: float = 1.0,
+    threshold: float = 0.5,
+    wavelength_scale: float = 1e-3,
+    wavelength_units: str = "km",
+) -> xr.DataArray:
+    """Return the wavelength where local wavelet PSD skill crosses a threshold.
+
+    Args:
+        truth: Reference field on a locally Cartesian grid.
+        pred: Prediction field on the same grid.
+        scales: Positive Morlet scales used to compute the local spectra.
+        dim: Spatial dimensions as ``(y, x)``.
+        x0: Reference length scale in the same units as the spatial coords.
+        ntheta: Number of evenly spaced Morlet angles.
+        k0: Dimensionless central Morlet wavenumber.
+        threshold: Score level defining the resolved scale.
+        wavelength_scale: Multiplier applied to ``1 / wavenumber`` to
+            convert into ``wavelength_units``. Defaults to ``1e-3`` for
+            metres → km (matches the historical behaviour); pass
+            ``1.0`` if your coords are already in km.
+        wavelength_units: Unit string written to the output attrs.
+
+    Returns:
+        Two-dimensional resolved wavelength in ``wavelength_units``.
+        Locations with fewer than two trusted scale samples, or where
+        the threshold isn't bracketed by the score column, are NaN.
+    """
+    ds_pred = pred.rename("field").to_dataset()
+    ds_ref = truth.rename("field").to_dataset()
+    score = wavelet_psd_score(
+        ds_pred,
+        ds_ref,
+        "field",
+        scales,
+        dim=dim,
+        x0=x0,
+        ntheta=ntheta,
+        k0=k0,
+        isotropic=True,
+    )["score"]
+    scale_dim = scales.dims[0]
+    wavelengths = (
+        1.0
+        / np.asarray(
+            scale_to_wavenumber(scales, x0=x0, k0=k0).values,
+            dtype=float,
+        )
+        * wavelength_scale
+    )
+    out = xr.apply_ufunc(
+        _resolved_scale_column,
+        score,
+        input_core_dims=[[scale_dim]],
+        output_core_dims=[[]],
+        kwargs={"wavelengths_km": wavelengths, "threshold": threshold},
+        vectorize=True,
+        dask="forbidden",
+        output_dtypes=[float],
+    )
+    out.name = "wavelet_resolved_scale"
+    out.attrs["units"] = wavelength_units
+    out.attrs["threshold"] = threshold
+    return out
+
+
 def find_intercept_1D(
     x: np.ndarray,
     y: np.ndarray,
@@ -202,6 +334,29 @@ def find_intercept_1D(
         y_min, y_max = float(y_unique.min()), float(y_unique.max())
         edge = y_min if level < y_min else y_max
         return float(np.asarray(f(edge)).item())
+
+
+def _resolved_scale_column(
+    score: np.ndarray,
+    *,
+    wavelengths_km: np.ndarray,
+    threshold: float,
+) -> float:
+    """Find the threshold wavelength for one spatial score column.
+
+    Returns NaN when the column lacks two valid samples *or* when the
+    threshold isn't bracketed by the column — without this guard
+    ``find_intercept_1D`` extrapolates and reports an arbitrary edge
+    wavelength for perfect-skill (all > threshold) or hopeless-skill
+    (all < threshold) columns.
+    """
+    valid = np.isfinite(score)
+    if valid.sum() < 2:
+        return float("nan")
+    valid_scores = score[valid]
+    if threshold < valid_scores.min() or threshold > valid_scores.max():
+        return float("nan")
+    return find_intercept_1D(wavelengths_km[valid], valid_scores, level=threshold)
 
 
 def find_intercept_2D(
@@ -307,6 +462,53 @@ class PSDScore(Operator):
             "avg_dims": None if self.avg_dims is None else list(self.avg_dims),
             "isotropic": self.isotropic,
             **self.kwargs,
+        }
+
+
+class WaveletPSDScore(Operator):
+    """Two-input localized wavelet PSD score operator."""
+
+    def __init__(
+        self,
+        variable: str,
+        scales: Sequence[float] | xr.DataArray,
+        *,
+        dim: tuple[str, str] = ("y", "x"),
+        x0: float = 50e3,
+        ntheta: int = 16,
+        k0: float = 1.0,
+        isotropic: bool = True,
+    ) -> None:
+        self.variable = variable
+        self.scales = scales
+        self.dim = tuple(dim)
+        self.x0 = float(x0)
+        self.ntheta = int(ntheta)
+        self.k0 = float(k0)
+        self.isotropic = bool(isotropic)
+
+    def _apply(self, ds_pred: xr.Dataset, ds_ref: xr.Dataset) -> xr.Dataset:
+        return wavelet_psd_score(
+            ds_pred,
+            ds_ref,
+            self.variable,
+            self.scales,
+            dim=self.dim,
+            x0=self.x0,
+            ntheta=self.ntheta,
+            k0=self.k0,
+            isotropic=self.isotropic,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "variable": self.variable,
+            "scales": "<xr object>",
+            "dim": list(self.dim),
+            "x0": self.x0,
+            "ntheta": self.ntheta,
+            "k0": self.k0,
+            "isotropic": self.isotropic,
         }
 
 

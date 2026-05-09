@@ -74,20 +74,22 @@ from xr_toolz.metrics._src.probabilistic import (
     reliability_curve,
     spread_skill_ratio,
 )
-from xr_toolz.metrics._src.segmented_psd import (
-    SegmentedPSDScore,
-    along_track_psd_score,
-    psd_score_by_region,
 from xr_toolz.metrics._src.residuals import (
     BinnedResiduals2D,
     RegionScores,
     bin_residuals_2d,
     scores_by_region,
 )
+from xr_toolz.metrics._src.segmented_psd import (
+    SegmentedPSDScore,
+    along_track_psd_score,
+    psd_score_by_region,
+)
 from xr_toolz.metrics._src.spectral import (
     BandLimitedRMSE,
     FrequencyBandSkill,
     PSDScore,
+    WaveletPSDScore,
     band_limited_rmse,
     evaluate_by_frequency_band,
     find_intercept_1D,
@@ -95,6 +97,8 @@ from xr_toolz.metrics._src.spectral import (
     psd_error,
     psd_score,
     resolved_scale,
+    wavelet_psd_score,
+    wavelet_resolved_scale_map,
 )
 from xr_toolz.metrics._src.structural import (
     SSIM,
@@ -140,6 +144,7 @@ __all__ = [
     "SkillByLeadTime",
     "SpreadSkillRatio",
     "Wasserstein1",
+    "WaveletPSDScore",
     "along_track_psd_score",
     "band_limited_rmse",
     "bias",
@@ -174,13 +179,15 @@ __all__ = [
     "reliability_curve",
     "resolved_scale",
     "rmse",
+    "scores_by_region",
     "segment_signal",
     "segmented_coherence",
     "segmented_csd",
     "segmented_psd",
-    "scores_by_region",
     "skill_by_lead_time",
     "spread_skill_ratio",
     "ssim",
     "wasserstein_1",
+    "wavelet_psd_score",
+    "wavelet_resolved_scale_map",
 ]

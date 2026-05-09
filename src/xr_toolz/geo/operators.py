@@ -17,6 +17,8 @@ import warnings
 from collections.abc import Sequence
 from typing import Any
 
+import xarray as xr
+
 from xr_toolz.core import Operator, Signature
 from xr_toolz.geo._src import (
     along_track as _along_track,
@@ -24,6 +26,7 @@ from xr_toolz.geo._src import (
     masks as _masks,
     subset as _subset,
     validation as _validation,
+    wavelet as _wavelet,
 )
 
 
@@ -422,6 +425,58 @@ class BandpassWavelength(Operator):
         }
 
 
+class WaveletPowerSpectrum(Operator):
+    """Compute a 2-D Morlet wavelet power spectrum for one variable."""
+
+    def __init__(
+        self,
+        var: str,
+        scales: Sequence[float] | xr.DataArray,
+        *,
+        dim: tuple[str, str] = ("y", "x"),
+        x0: float = 50e3,
+        ntheta: int = 16,
+        k0: float = 1.0,
+        isotropic: bool = True,
+        output_var: str | None = None,
+    ) -> None:
+        self.var = var
+        self.scales = scales
+        self.dim = tuple(dim)
+        self.x0 = float(x0)
+        self.ntheta = int(ntheta)
+        self.k0 = float(k0)
+        self.isotropic = bool(isotropic)
+        self.output_var = output_var
+
+    def _apply(self, ds: xr.Dataset) -> xr.Dataset:
+        if self.var not in ds.data_vars:
+            raise KeyError(f"Dataset missing variable {self.var!r}")
+        out_name = self.output_var or f"{self.var}_wpsd"
+        spectrum = _wavelet.wvlt_power_spectrum(
+            ds[self.var],
+            self.scales,
+            dim=self.dim,
+            x0=self.x0,
+            ntheta=self.ntheta,
+            k0=self.k0,
+            isotropic=self.isotropic,
+        ).rename(out_name)
+        return ds.assign({out_name: spectrum})
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "var": self.var,
+            "scales": "<xr object>",
+            "dim": list(self.dim),
+            "x0": self.x0,
+            "ntheta": self.ntheta,
+            "k0": self.k0,
+            "isotropic": self.isotropic,
+            "output_var": self.output_var,
+        }
+
+
 class RemoveClimatology(Operator):
     """Subtract a precomputed climatology from the input dataset."""
 
@@ -566,6 +621,7 @@ __all__ = [
     "ValidateCoords",
     "ValidateLatitude",
     "ValidateLongitude",
+    "WaveletPowerSpectrum",
 ]
 
 
