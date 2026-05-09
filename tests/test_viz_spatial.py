@@ -109,6 +109,7 @@ def test_presets_keys_match_acceptance():
         "global",
         "north_atlantic",
         "gulf_stream",
+        "ibi",
         "kuroshio",
         "mediterranean",
     }

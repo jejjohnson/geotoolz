@@ -17,6 +17,7 @@ import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
 
+import regionmask
 import xarray as xr
 
 from xr_toolz.core import Operator, Signature
@@ -24,6 +25,7 @@ from xr_toolz.geo._src import (
     along_track as _along_track,
     detrend as _detrend,
     masks as _masks,
+    regions as _regions,
     subset as _subset,
     validation as _validation,
     wavelet as _wavelet,
@@ -254,6 +256,51 @@ class SubsetBBox(Operator):
             "lat_bnds": list(self.lat_bnds),
             "lon": self.lon,
             "lat": self.lat,
+        }
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        return input_signature.replace_dims({self.lon: None, self.lat: None})
+
+
+class SubsetToRegion(Operator):
+    def __init__(
+        self,
+        region: str | _regions.RegionSpec | regionmask.Regions | dict[str, Any],
+        *,
+        lon: str = "lon",
+        lat: str = "lat",
+        validate: bool = True,
+    ):
+        # Accept the dict form emitted by ``get_config`` so the standard
+        # ``cls(**op.get_config())`` round-trip used by ApplyToEach works
+        # for custom regions, not just registry strings.
+        if isinstance(region, dict):
+            region = _regions.region_from_dict(region)
+        self.region = region
+        self.lon = lon
+        self.lat = lat
+        self.validate = validate
+
+    def _apply(self, ds):
+        return _subset.subset_to_region(
+            ds,
+            self.region,
+            lon=self.lon,
+            lat=self.lat,
+            validate=self.validate,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        region: str | dict[str, Any]
+        if isinstance(self.region, str):
+            region = self.region
+        else:
+            region = _regions.region_to_dict(self.region)
+        return {
+            "region": region,
+            "lon": self.lon,
+            "lat": self.lat,
+            "validate": self.validate,
         }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
@@ -682,6 +729,7 @@ __all__ = [
     "SelectVariables",
     "SubsetBBox",
     "SubsetTime",
+    "SubsetToRegion",
     "ValidateCoords",
     "ValidateLatitude",
     "ValidateLongitude",

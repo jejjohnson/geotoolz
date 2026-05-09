@@ -18,28 +18,25 @@ import cartopy.crs as ccrs
 import matplotlib.figure as mpl_figure
 import matplotlib.pyplot as plt
 
+from xr_toolz.geo.regions import REGIONS
+
 
 # Each preset: cartopy CRS class name + optional (lon_min, lon_max,
 # lat_min, lat_max) extent. Extent is interpreted in PlateCarree.
-PRESETS: dict[str, dict[str, Any]] = {
-    "global": {"projection": "Robinson", "extent": None},
-    "north_atlantic": {
-        "projection": "PlateCarree",
-        "extent": (-80, 0, 10, 65),
-    },
-    "gulf_stream": {
-        "projection": "PlateCarree",
-        "extent": (-80, -50, 30, 45),
-    },
-    "kuroshio": {
-        "projection": "PlateCarree",
-        "extent": (130, 180, 25, 45),
-    },
-    "mediterranean": {
-        "projection": "PlateCarree",
-        "extent": (-6, 36, 30, 46),
-    },
-}
+def _build_presets() -> dict[str, dict[str, Any]]:
+    presets: dict[str, dict[str, Any]] = {}
+    for region_id, spec in REGIONS.items():
+        lon_min, lat_min, lon_max, lat_max = spec.regions.bounds_global
+        presets[region_id] = {
+            "projection": spec.projection,
+            "extent": None
+            if region_id == "global"
+            else (float(lon_min), float(lon_max), float(lat_min), float(lat_max)),
+        }
+    return presets
+
+
+PRESETS: dict[str, dict[str, Any]] = _build_presets()
 
 
 def _resolve_projection(spec: str | ccrs.Projection | None) -> ccrs.Projection | None:

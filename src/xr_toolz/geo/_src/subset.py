@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import regionmask
 import xarray as xr
+
+from xr_toolz.geo._src.regions import RegionSpec, resolve_region
 
 
 def subset_bbox(
@@ -38,6 +41,36 @@ def subset_bbox(
         & (ds[lat] >= lat_min)
         & (ds[lat] <= lat_max)
     )
+    return ds.where(mask, drop=True)
+
+
+def subset_to_region(
+    ds: xr.Dataset,
+    region: str | RegionSpec | regionmask.Regions,
+    *,
+    lon: str = "lon",
+    lat: str = "lat",
+    validate: bool = True,
+) -> xr.Dataset:
+    """Subset a Dataset to a named, custom, or polygon region."""
+    import warnings
+
+    if isinstance(region, str):
+        region = resolve_region(region)
+    if isinstance(region, RegionSpec):
+        region = region.regions
+
+    # regionmask emits a FutureWarning about the default mask method;
+    # pin it explicitly so the choice is stable across regionmask
+    # versions and the warning doesn't leak to callers.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        mask = region.mask(ds[lon], ds[lat], method="shapely").notnull()
+    if validate and not bool(mask.any().item()):
+        raise ValueError(
+            "Region does not overlap dataset coordinates. "
+            "Pass validate=False to allow empty results."
+        )
     return ds.where(mask, drop=True)
 
 
