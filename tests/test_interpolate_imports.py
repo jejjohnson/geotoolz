@@ -31,14 +31,15 @@ CANONICAL_FUNCS = (
     ("regrid_like", "grid_to_grid"),
     ("resample_time", "resample"),
     ("points_to_grid", "points_to_grid"),
+    ("kde_to_grid", "points_to_grid"),
 )
 
 CANONICAL_OPS = (
     "Bin2D",
     "Coarsen",
     "Downscale",
-    "FillNaNLaplacian",
     "FillNaNIDW",
+    "FillNaNLaplacian",
     "FillNaNRBF",
     "FillNaNSpatial",
     "FillNaNTemporal",
@@ -47,6 +48,7 @@ CANONICAL_OPS = (
     "Histogram2D",
     "IDWToGrid",
     "IDWToPoints",
+    "KDEToGrid",
     "LowpassFilter",
     "MovingAverage",
     "PointsToGrid",

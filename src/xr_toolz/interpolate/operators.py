@@ -415,7 +415,7 @@ class PointsToGrid(Operator):
         self.grid = grid
         self.statistic = statistic
 
-    def _apply(self, payload):
+    def _apply(self, payload) -> xr.DataArray:
         lons, lats, values = payload
         return _points_to_grid.points_to_grid(
             lons, lats, values, grid=self.grid, statistic=self.statistic
@@ -423,6 +423,77 @@ class PointsToGrid(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {"grid": "<Grid>", "statistic": self.statistic}
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        return Signature(
+            {"lat": len(self.grid.lat), "lon": len(self.grid.lon)},
+            dtype=input_signature.dtype,
+        )
+
+
+class KDEToGrid(Operator):
+    """Wrap :func:`xr_toolz.interpolate.kde_to_grid`.
+
+    Expects ``(lons, lats)`` or ``(lons, lats, weights)`` as input.
+    """
+
+    def __init__(
+        self,
+        grid: _binning.Grid,
+        *,
+        bandwidth: float | str = "scott",
+        kernel: str = "gaussian",
+        metric: str = "euclidean",
+        algorithm: str = "auto",
+        output: str = "density",
+        rtol: float = 1e-4,
+    ):
+        self.grid = grid
+        self.bandwidth = bandwidth
+        self.kernel = kernel
+        self.metric = metric
+        self.algorithm = algorithm
+        self.output = output
+        self.rtol = float(rtol)
+
+    def _apply(self, payload) -> xr.DataArray:
+        if len(payload) == 2:
+            lons, lats = payload
+            weights = None
+        elif len(payload) == 3:
+            lons, lats, weights = payload
+        else:
+            raise ValueError(
+                "KDEToGrid expects (lons, lats) or (lons, lats, weights); "
+                f"got payload of length {len(payload)}"
+            )
+        return _points_to_grid.kde_to_grid(
+            lons,
+            lats,
+            self.grid,
+            weights=weights,
+            bandwidth=self.bandwidth,
+            kernel=self.kernel,
+            metric=self.metric,
+            algorithm=self.algorithm,
+            output=self.output,
+            rtol=self.rtol,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        # Coerce numpy scalar bandwidths so json.dumps(get_config()) works.
+        bw = (
+            self.bandwidth if isinstance(self.bandwidth, str) else float(self.bandwidth)
+        )
+        return {
+            "grid": "<Grid>",
+            "bandwidth": bw,
+            "kernel": self.kernel,
+            "metric": self.metric,
+            "algorithm": self.algorithm,
+            "output": self.output,
+            "rtol": self.rtol,
+        }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         return Signature(
@@ -898,6 +969,7 @@ __all__ = [
     "Histogram2D",
     "IDWToGrid",
     "IDWToPoints",
+    "KDEToGrid",
     "LowpassFilter",
     "MovingAverage",
     "PointsToGrid",

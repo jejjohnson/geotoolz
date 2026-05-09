@@ -39,6 +39,7 @@ from xr_toolz.interpolate.operators import (
     Histogram2D,
     IDWToGrid,
     IDWToPoints,
+    KDEToGrid,
     PointsToGrid,
     Refine,
     ResampleTime,
@@ -186,6 +187,7 @@ def test_idw_to_points_matches_function() -> None:
         PointsToGrid(grid=Grid.from_bounds((0, 1), (0, 1), 0.5)),
         IDWToGrid(grid=Grid.from_bounds((0, 1), (0, 1), 0.5)),
         IDWToPoints(np.array([0.0]), np.array([0.0])),
+        KDEToGrid(grid=Grid.from_bounds((0, 1), (0, 1), 0.5)),
     ],
     ids=lambda op: type(op).__name__,
 )
