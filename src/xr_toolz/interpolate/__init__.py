@@ -6,7 +6,8 @@ source/target structure under :mod:`._src`:
 - :mod:`._src.gap_fill` — ``fillnan_spatial``, ``fillnan_temporal``,
   ``fillnan_climatology``, ``fillnan_laplacian``, ``fillnan_rbf``,
   ``fillnan_idw``
-- :mod:`._src.grid_to_grid` — ``coarsen``, ``coarsen_conservative``, ``refine``
+- :mod:`._src.grid_to_grid` — ``coarsen``, ``coarsen_conservative``,
+  ``refine``, ``refine_2d``
 - :mod:`._src.resample` — ``resample_time``
 - :mod:`._src.binning` — ``Grid``, ``Period``, ``SpaceTimeGrid``, ``bin_2d``,
   ``histogram_2d``
@@ -42,6 +43,7 @@ from xr_toolz.interpolate._src.grid_to_grid import (
     coarsen,
     coarsen_conservative,
     refine,
+    refine_2d,
     regrid_like,
 )
 from xr_toolz.interpolate._src.knn import idw_to_grid, idw_to_points
@@ -80,6 +82,7 @@ __all__ = [
     "moving_average",
     "points_to_grid",
     "refine",
+    "refine_2d",
     "regrid_like",
     "remap_axis",
     "resample_time",

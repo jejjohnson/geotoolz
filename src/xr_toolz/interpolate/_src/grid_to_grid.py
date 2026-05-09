@@ -8,11 +8,14 @@ along one or more dimensions. Learned counterparts
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Literal
 
 import numpy as np
 import xarray as xr
+
+
+_RESIZE_MODES = frozenset({"reflect", "constant", "edge", "symmetric", "wrap"})
 
 
 def coarsen(
@@ -158,6 +161,128 @@ def refine(
             raise ValueError(f"refinement factor for {dim!r} must be positive.")
         new_coords[dim] = np.linspace(old.min(), old.max(), (len(old) - 1) * f + 1)
     return ds.interp(new_coords, method=method)
+
+
+def refine_2d(
+    da: xr.DataArray,
+    *,
+    factor: Mapping[str, int | float],
+    lat: str = "lat",
+    lon: str = "lon",
+    order: int = 3,
+    anti_aliasing: bool | None = None,
+    mode: Literal["reflect", "constant", "edge", "symmetric", "wrap"] = "reflect",
+    cval: float = 0.0,
+) -> xr.DataArray:
+    """Resize a 2-D ``(lat, lon)`` plate via ``skimage.transform.resize``.
+
+    Order follows scikit-image's spline convention: ``0`` nearest, ``1``
+    bilinear, ``2`` biquadratic, ``3`` bicubic, ``4`` biquartic, and ``5``
+    biquintic. Leading dimensions are broadcast independently with
+    :func:`xarray.apply_ufunc`.
+
+    Args:
+        da: Input data with ``lat`` and ``lon`` dimensions.
+        factor: Per-axis resize factors. Must include both ``lat`` and ``lon``.
+        lat: Name of the latitude-like dimension.
+        lon: Name of the longitude-like dimension.
+        order: Spline interpolation order from 0 to 5.
+        anti_aliasing: Whether to apply scikit-image's anti-aliasing filter.
+            ``None`` uses scikit-image's default.
+        mode: Boundary extension mode passed to scikit-image.
+        cval: Fill value used when ``mode="constant"``.
+
+    Returns:
+        Resized data with updated ``lat`` and ``lon`` coordinates.
+
+    Raises:
+        ImportError: If scikit-image is not installed.
+        ValueError: If required dims or factors are missing, ``order`` is
+            outside 0..5, or either resize factor is non-positive.
+
+    Examples:
+        >>> refined = refine_2d(da, factor={"lat": 2, "lon": 2}, order=3)
+    """
+    resize = _get_skimage_resize()
+    if lat not in da.dims or lon not in da.dims:
+        raise ValueError(f"da must have dims {lat!r} and {lon!r}.")
+    if lat not in factor or lon not in factor:
+        raise ValueError(f"factor must include both {lat!r} and {lon!r}.")
+    # bool is an int subclass, but True/False are not meaningful spline orders.
+    if isinstance(order, bool) or not isinstance(order, int):
+        raise ValueError(f"order must be an integer in 0..5, got {order!r}.")
+    if order not in range(6):
+        raise ValueError(f"order must be in 0..5, got {order!r}.")
+    if mode not in _RESIZE_MODES:
+        valid_modes = sorted(_RESIZE_MODES)
+        raise ValueError(f"mode must be one of {valid_modes!r}, got {mode!r}.")
+
+    f_lat = factor[lat]
+    f_lon = factor[lon]
+    for d, f in ((lat, f_lat), (lon, f_lon)):
+        if isinstance(f, bool):
+            raise ValueError(f"refinement factor for {d!r} must not be a boolean.")
+        if f <= 0:
+            raise ValueError(f"refinement factor for {d!r} must be positive.")
+
+    # Match :func:`refine` semantics for integer factors: (n-1)*f + 1 preserves
+    # the original endpoints on the refined grid. Non-integer factors fall back
+    # to round(size * factor) for backwards-compat with skimage's resize.
+    def _new_size(size: int, factor_value: int | float) -> int:
+        if isinstance(factor_value, int) or float(factor_value).is_integer():
+            return (size - 1) * int(factor_value) + 1
+        return max(1, round(size * factor_value))
+
+    n_lat = _new_size(da.sizes[lat], f_lat)
+    n_lon = _new_size(da.sizes[lon], f_lon)
+    new_lat = _interp_coord(da[lat].values, n_lat)
+    new_lon = _interp_coord(da[lon].values, n_lon)
+
+    def _resize_slice(arr2d: np.ndarray) -> np.ndarray:
+        arr2d = np.asarray(arr2d, dtype=np.float64)
+        return resize(
+            arr2d,
+            (n_lat, n_lon),
+            order=order,
+            anti_aliasing=anti_aliasing,
+            mode=mode,
+            cval=cval,
+            preserve_range=True,
+        )
+
+    out = xr.apply_ufunc(
+        _resize_slice,
+        da,
+        input_core_dims=[[lat, lon]],
+        output_core_dims=[[lat, lon]],
+        exclude_dims={lat, lon},
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[float],
+        dask_gufunc_kwargs={
+            "output_sizes": {lat: n_lat, lon: n_lon},
+            "allow_rechunk": False,
+        },
+    )
+    return out.assign_coords({lat: new_lat, lon: new_lon})
+
+
+def _get_skimage_resize() -> Callable[..., np.ndarray]:
+    try:
+        from skimage.transform import resize
+    except ImportError as exc:  # pragma: no cover - depends on optional install
+        raise ImportError(
+            "refine_2d requires scikit-image. "
+            "Install with: pip install 'xr_toolz[image]'"
+        ) from exc
+    return resize
+
+
+def _interp_coord(coord: np.ndarray, size: int) -> np.ndarray:
+    old = np.asarray(coord)
+    old_idx = np.arange(len(old))
+    new_idx = np.linspace(0, len(old) - 1, size)
+    return np.interp(new_idx, old_idx, old)
 
 
 def regrid_like(

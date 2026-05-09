@@ -28,6 +28,18 @@ from xr_toolz.interpolate._src import (
 )
 
 
+ResizeMode = Literal["reflect", "constant", "edge", "symmetric", "wrap"]
+
+
+def _as_integer_factor(dim: str, factor: int | float) -> int:
+    if isinstance(factor, bool) or int(factor) != factor:
+        raise ValueError(
+            f"refinement factor for {dim!r} must be an integer for the default "
+            "interpolation method."
+        )
+    return int(factor)
+
+
 # ---------- gap fill -------------------------------------------------------
 
 
@@ -345,23 +357,120 @@ class Coarsen(Operator):
 
 
 class Refine(Operator):
-    """Wrap :func:`xr_toolz.interpolate.refine`."""
+    """Wrap :func:`xr_toolz.interpolate.refine`.
 
-    def __init__(self, factor: dict[str, int], method: str = "linear"):
+    If ``order`` is set, dispatches to the scikit-image-backed 2-D resize
+    path and requires ``factor`` to include both ``lat`` and ``lon``.
+
+    Args:
+        factor: Per-dimension refinement factors.
+        method: Interpolation method for the default ``xr.interp`` path.
+        order: Optional scikit-image spline order (0..5). When set, uses the
+            2-D resize path.
+        lat: Latitude-like dimension name for the 2-D resize path.
+        lon: Longitude-like dimension name for the 2-D resize path.
+        anti_aliasing: Anti-aliasing setting passed to scikit-image.
+        mode: Boundary mode for scikit-image (``"reflect"``, ``"constant"``,
+            ``"edge"``, ``"symmetric"``, or ``"wrap"``).
+        cval: Fill value used when ``mode="constant"``.
+    """
+
+    def __init__(
+        self,
+        factor: dict[str, int | float],
+        method: str = "linear",
+        *,
+        order: int | None = None,
+        lat: str = "lat",
+        lon: str = "lon",
+        anti_aliasing: bool | None = None,
+        mode: ResizeMode = "reflect",
+        cval: float = 0.0,
+    ):
+        if order is not None:
+            extra = set(factor) - {lat, lon}
+            if extra:
+                raise ValueError(
+                    "Refine(order=...) only resizes the (lat, lon) plane; "
+                    f"got extra factor dims {sorted(extra)!r}. Drop them or "
+                    "use order=None."
+                )
         self.factor = dict(factor)
         self.method = method
+        self.order = order
+        self.lat = lat
+        self.lon = lon
+        self.anti_aliasing = anti_aliasing
+        self.mode = mode
+        self.cval = cval
 
     def _apply(self, ds):
-        return _grid_to_grid.refine(ds, factor=self.factor, method=self.method)
+        if self.order is not None:
+            if isinstance(ds, xr.Dataset):
+                # refine_2d is DataArray-only; map over variables that have
+                # both core dims and pass others through unchanged so we keep
+                # the same Dataset/DataArray contract as the default path.
+                def _resize_var(da: xr.DataArray) -> xr.DataArray:
+                    if {self.lat, self.lon} <= set(da.dims):
+                        return _grid_to_grid.refine_2d(
+                            da,
+                            factor=self.factor,
+                            lat=self.lat,
+                            lon=self.lon,
+                            order=self.order,
+                            anti_aliasing=self.anti_aliasing,
+                            mode=self.mode,
+                            cval=self.cval,
+                        )
+                    return da
+
+                return ds.map(_resize_var)
+            return _grid_to_grid.refine_2d(
+                ds,
+                factor=self.factor,
+                lat=self.lat,
+                lon=self.lon,
+                order=self.order,
+                anti_aliasing=self.anti_aliasing,
+                mode=self.mode,
+                cval=self.cval,
+            )
+        factor = {
+            dim: _as_integer_factor(dim, value) for dim, value in self.factor.items()
+        }
+        return _grid_to_grid.refine(ds, factor=factor, method=self.method)
 
     def get_config(self) -> dict[str, Any]:
-        return {"factor": dict(self.factor), "method": self.method}
+        return {
+            "factor": dict(self.factor),
+            "method": self.method,
+            "order": self.order,
+            "lat": self.lat,
+            "lon": self.lon,
+            "anti_aliasing": self.anti_aliasing,
+            "mode": self.mode,
+            "cval": self.cval,
+        }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
+        # When order is set, only lat / lon dims are resized; pass other dims
+        # through unchanged even if the user passed them in `factor` (we
+        # rejected that case in __init__, so this is just a safety net).
+        active_dims = (
+            {self.lat, self.lon} if self.order is not None else set(self.factor)
+        )
         updates: dict[str, int | None] = {}
         for dim, factor in self.factor.items():
+            if dim not in active_dims:
+                continue
             size = input_signature.dims.get(dim)
-            updates[dim] = None if size is None else (size - 1) * factor + 1
+            if size is None:
+                updates[dim] = None
+            elif self.order is None or float(factor).is_integer():
+                # Integer factors use refine()'s endpoint-preserving formula.
+                updates[dim] = (size - 1) * _as_integer_factor(dim, factor) + 1
+            else:
+                updates[dim] = max(1, round(size * factor))
         return input_signature.replace_dims(updates)
 
 
