@@ -21,6 +21,7 @@ from xr_toolz.interpolate import (
     Grid,
     bin_2d,
     coarsen,
+    fillnan_climatology,
     fillnan_idw,
     fillnan_rbf,
     histogram_2d,
@@ -32,6 +33,7 @@ from xr_toolz.interpolate import (
 from xr_toolz.interpolate.operators import (
     Bin2D,
     Coarsen,
+    FillNaNClimatology,
     FillNaNIDW,
     FillNaNRBF,
     FillNaNSpatial,
@@ -119,6 +121,35 @@ def test_fillnan_rbf_matches_function(da_with_nans: xr.DataArray) -> None:
     xr.testing.assert_allclose(op(da_with_nans), expected)
 
 
+def test_fillnan_climatology_operator_matches_function() -> None:
+    time = pd.date_range("2000-01-01", periods=24, freq="MS")
+    da = xr.DataArray(
+        np.tile(np.arange(12.0), 2),
+        dims="time",
+        coords={"time": time},
+    )
+    missing = da.copy()
+    missing.loc[{"time": "2001-03-01"}] = np.nan
+    op = FillNaNClimatology(group="month", residual="zero", min_count=1)
+
+    expected = fillnan_climatology(missing, group="month", residual="zero", min_count=1)
+
+    xr.testing.assert_allclose(op(missing), expected)
+
+
+def test_resample_time_operator_passes_interp_method() -> None:
+    time = pd.date_range("2020-01-01", periods=3, freq="1D")
+    ds = xr.Dataset({"x": ("time", [0.0, 24.0, 48.0])}, coords={"time": time})
+
+    linear = ResampleTime(freq="12h", method="interpolate", interp_method="linear")(ds)
+    nearest = ResampleTime(freq="12h", method="interpolate", interp_method="nearest")(
+        ds
+    )
+
+    assert float(linear["x"].sel(time="2020-01-01T12:00")) == pytest.approx(12.0)
+    assert float(nearest["x"].sel(time="2020-01-01T12:00")) == pytest.approx(0.0)
+
+
 def test_fillnan_idw_matches_function(da_with_nans: xr.DataArray) -> None:
     op = FillNaNIDW(k=6, power=1.5)
     expected = fillnan_idw(da_with_nans, k=6, power=1.5)
@@ -177,9 +208,10 @@ def test_idw_to_points_matches_function() -> None:
     [
         FillNaNSpatial(method="linear"),
         FillNaNTemporal(method="linear", max_gap=None),
+        FillNaNClimatology(group="month", residual="linear", min_count=2),
         FillNaNRBF(kernel="thin_plate_spline", neighbors=8),
         FillNaNIDW(k=4),
-        ResampleTime(freq="1D", method="mean"),
+        ResampleTime(freq="1D", method="interpolate", interp_method="nearest"),
         Coarsen(factor={"lon": 2}, method="mean"),
         Refine(factor={"lon": 3}, method="linear"),
         Bin2D(grid=Grid.from_bounds((0, 1), (0, 1), 0.5)),

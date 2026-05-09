@@ -41,6 +41,7 @@ from xr_toolz.interpolate import (
     Period,
     SpaceTimeGrid,
     coarsen,
+    fillnan_climatology,
     fillnan_spatial,
     fillnan_temporal,
     histogram_2d,
@@ -157,9 +158,119 @@ def test_resample_time_daily_to_monthly(ds_grid_daily):
     assert monthly.sizes["time"] == 24
 
 
+def test_resample_time_interpolate_preserves_existing_stamps():
+    time = pd.date_range("2020-01-01", periods=5, freq="1D")
+    values = np.sin(np.arange(time.size, dtype=float))
+    ds = xr.Dataset({"x": ("time", values)}, coords={"time": time})
+
+    out = resample_time(ds, freq="12h", method="interpolate")
+
+    xr.testing.assert_allclose(out.sel(time=time), ds)
+
+
+def test_resample_time_interpolate_linear_upsamples_daily_to_hourly():
+    time = pd.date_range("2020-01-01", periods=3, freq="1D")
+    ds = xr.Dataset({"x": ("time", [0.0, 24.0, 48.0])}, coords={"time": time})
+
+    out = resample_time(ds, freq="1h", method="interpolate")
+
+    assert out.sizes["time"] == 49
+    assert float(out["x"].sel(time="2020-01-01T12:00")) == pytest.approx(12.0)
+    assert float(out["x"].sel(time="2020-01-02T12:00")) == pytest.approx(36.0)
+
+
+def test_resample_time_interpolate_accepts_cubic():
+    time = pd.date_range("2020-01-01", periods=6, freq="1D")
+    values = np.sin(np.linspace(0.0, np.pi, time.size))
+    ds = xr.Dataset({"x": ("time", values)}, coords={"time": time})
+
+    out = resample_time(ds, freq="12h", method="interpolate", interp_method="cubic")
+
+    assert out.sizes["time"] == 11
+    assert np.isfinite(out["x"].values).all()
+
+
+def test_resample_time_interpolate_rejects_downsampling(ds_grid_daily):
+    with pytest.raises(ValueError, match="only supports upsampling"):
+        resample_time(ds_grid_daily, freq="2D", method="interpolate")
+
+
 def test_resample_time_rejects_unknown_method(ds_grid_daily):
     with pytest.raises(ValueError, match="Unknown resample method"):
         resample_time(ds_grid_daily, freq="1D", method="unicorn")
+
+
+def _monthly_climatology_series() -> xr.DataArray:
+    """Create monthly data with seasonal cycle and linear trend."""
+    time = pd.date_range("2000-01-01", periods=36, freq="MS")
+    months = time.month.to_numpy()
+    trend = np.arange(time.size, dtype=float)
+    values = 100.0 + months + trend
+    return xr.DataArray(values, dims="time", coords={"time": time}, name="sst")
+
+
+def test_fillnan_climatology_recovers_monthly_climatology():
+    da = _monthly_climatology_series()
+    missing = da.copy()
+    missing.loc[{"time": "2001-06-01"}] = np.nan
+
+    filled = fillnan_climatology(missing, group="month", residual="zero", min_count=2)
+
+    expected = da.sel(time=["2000-06-01", "2002-06-01"]).mean()
+    assert float(filled.sel(time="2001-06-01")) == pytest.approx(float(expected))
+
+
+def test_fillnan_climatology_linear_residual_recovers_trend():
+    da = _monthly_climatology_series()
+    missing = da.copy()
+    missing.loc[{"time": "2001-06-01"}] = np.nan
+
+    filled = fillnan_climatology(missing, group="month", residual="linear")
+
+    assert float(filled.sel(time="2001-06-01")) == pytest.approx(
+        float(da.sel(time="2001-06-01"))
+    )
+
+
+def test_fillnan_climatology_honors_min_count():
+    da = _monthly_climatology_series().isel(time=slice(0, 24))
+    missing = da.copy()
+    missing.loc[{"time": "2001-01-01"}] = np.nan
+
+    filled = fillnan_climatology(missing, group="month", residual="zero", min_count=2)
+
+    assert np.isnan(float(filled.sel(time="2001-01-01")))
+    relaxed = fillnan_climatology(missing, group="month", residual="zero", min_count=1)
+    assert np.isfinite(float(relaxed.sel(time="2001-01-01")))
+
+
+@pytest.mark.parametrize("group", ["month", "dayofyear", "season"])
+def test_fillnan_climatology_group_dispatch(group: str):
+    time = pd.date_range("2020-01-01", periods=370, freq="1D")
+    da = xr.DataArray(
+        np.sin(np.arange(time.size, dtype=float)),
+        dims="time",
+        coords={"time": time},
+    )
+    missing = da.copy()
+    missing[10] = np.nan
+
+    filled = fillnan_climatology(missing, group=group)
+
+    assert filled.sizes == missing.sizes
+
+
+def test_fillnan_climatology_dask_compat():
+    dask_array = pytest.importorskip("dask.array")
+    time = pd.date_range("2020-01-01", periods=24, freq="MS")
+    values = dask_array.from_array(np.tile(np.arange(12.0), 2), chunks=(6,))
+    da = xr.DataArray(values, dims="time", coords={"time": time})
+    missing = da.where(da.time != np.datetime64("2021-06-01"))
+
+    filled = fillnan_climatology(missing, group="month", residual="zero")
+
+    assert filled.chunks is not None
+    assert np.isfinite(float(filled.sel(time="2021-06-01").compute()))
 
 
 def test_coarsen_halves_resolution(ds_grid_daily):

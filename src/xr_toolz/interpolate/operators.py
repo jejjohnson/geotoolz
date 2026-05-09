@@ -9,7 +9,7 @@ from :class:`xr_toolz.core.Operator`, so they compose with
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
@@ -68,6 +68,40 @@ class FillNaNTemporal(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {"method": self.method, "time": self.time, "max_gap": self.max_gap}
+
+
+class FillNaNClimatology(Operator):
+    """Wrap :func:`xr_toolz.interpolate.fillnan_climatology`."""
+
+    def __init__(
+        self,
+        *,
+        time: str = "time",
+        group: Literal["month", "dayofyear", "season"] = "month",
+        residual: Literal["zero", "linear"] = "linear",
+        min_count: int = 1,
+    ):
+        self.time = time
+        self.group = group
+        self.residual = residual
+        self.min_count = min_count
+
+    def _apply(self, da):
+        return _gap_fill.fillnan_climatology(
+            da,
+            time=self.time,
+            group=self.group,
+            residual=self.residual,
+            min_count=self.min_count,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "time": self.time,
+            "group": self.group,
+            "residual": self.residual,
+            "min_count": self.min_count,
+        }
 
 
 class FillNaNLaplacian(Operator):
@@ -208,18 +242,34 @@ class FillNaNIDW(Operator):
 class ResampleTime(Operator):
     """Wrap :func:`xr_toolz.interpolate.resample_time`."""
 
-    def __init__(self, freq: str = "1D", method: str = "mean", time: str = "time"):
+    def __init__(
+        self,
+        freq: str = "1D",
+        method: str = "mean",
+        time: str = "time",
+        interp_method: Literal["linear", "nearest", "cubic"] = "linear",
+    ):
         self.freq = freq
         self.method = method
         self.time = time
+        self.interp_method = interp_method
 
     def _apply(self, ds):
         return _resample.resample_time(
-            ds, freq=self.freq, method=self.method, time=self.time
+            ds,
+            freq=self.freq,
+            method=self.method,
+            time=self.time,
+            interp_method=self.interp_method,
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"freq": self.freq, "method": self.method, "time": self.time}
+        return {
+            "freq": self.freq,
+            "method": self.method,
+            "time": self.time,
+            "interp_method": self.interp_method,
+        }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         return input_signature.replace_dims({self.time: None})
@@ -959,6 +1009,7 @@ __all__ = [
     "Bin2D",
     "Coarsen",
     "Downscale",
+    "FillNaNClimatology",
     "FillNaNIDW",
     "FillNaNLaplacian",
     "FillNaNRBF",

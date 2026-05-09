@@ -14,7 +14,7 @@ directly.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
@@ -106,6 +106,65 @@ def fillnan_temporal(
         Same-shaped container with temporal NaNs interpolated.
     """
     return ds.interpolate_na(dim=time, method=method, max_gap=max_gap)
+
+
+def fillnan_climatology(
+    da: xr.DataArray,
+    *,
+    time: str = "time",
+    group: Literal["month", "dayofyear", "season"] = "month",
+    residual: Literal["zero", "linear"] = "linear",
+    min_count: int = 1,
+) -> xr.DataArray:
+    """Fill temporal NaNs from a climatological mean.
+
+    Args:
+        da: Input DataArray with a datetime-like time dimension.
+        time: Name of the time dimension.
+        group: Calendar grouping used to compute the climatology.
+        residual: ``"zero"`` fills missing values with climatology only;
+            ``"linear"`` linearly interpolates the anomaly and adds it back.
+        min_count: Minimum finite observations required for each climatology
+            group.
+
+    Returns:
+        Same-shaped DataArray with fillable temporal NaNs replaced.
+    """
+    if time not in da.dims:
+        raise ValueError(f"da must have dim {time!r}.")
+    if group not in {"month", "dayofyear", "season"}:
+        raise ValueError(
+            f"group must be one of {{'month', 'dayofyear', 'season'}}, got {group!r}."
+        )
+    if residual not in {"zero", "linear"}:
+        raise ValueError(f"residual must be 'zero' or 'linear', got {residual!r}.")
+    if min_count < 1:
+        raise ValueError(f"min_count must be >= 1, got {min_count}.")
+
+    try:
+        grouper = getattr(da[time].dt, group)
+    except AttributeError as exc:
+        raise ValueError(
+            f"{time!r} coordinate must be datetime-like for climatology grouping."
+        ) from exc
+    # Name of the synthetic group coordinate created by xarray (e.g. "month").
+    group_name = grouper.name
+    grouped = da.groupby(grouper)
+    climatology = grouped.mean(time, skipna=True)
+    counts = grouped.count(time)
+    climatology = climatology.where(counts >= min_count)
+    climatology_broadcast = climatology.sel({group_name: grouper})
+
+    if residual == "zero":
+        out = da.fillna(climatology_broadcast)
+    else:
+        anomaly = (da - climatology_broadcast).interpolate_na(dim=time, method="linear")
+        out = da.fillna(anomaly + climatology_broadcast)
+
+    # Drop the synthetic groupby coordinate if it was not present on input.
+    if group_name not in da.coords and group_name in out.coords:
+        out = out.drop_vars(group_name)
+    return out
 
 
 def _validate_laplacian_args(
