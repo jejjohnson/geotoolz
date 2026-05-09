@@ -20,6 +20,17 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import RBFInterpolator, griddata
 
+from xr_toolz.interpolate._src.knn import fillnan_idw
+
+
+__all__ = [
+    "fillnan_idw",
+    "fillnan_laplacian",
+    "fillnan_rbf",
+    "fillnan_spatial",
+    "fillnan_temporal",
+]
+
 
 def fillnan_spatial(
     da: xr.DataArray,

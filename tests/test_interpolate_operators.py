@@ -21,18 +21,24 @@ from xr_toolz.interpolate import (
     Grid,
     bin_2d,
     coarsen,
+    fillnan_idw,
     fillnan_rbf,
     histogram_2d,
+    idw_to_grid,
+    idw_to_points,
     points_to_grid,
     refine,
 )
 from xr_toolz.interpolate.operators import (
     Bin2D,
     Coarsen,
+    FillNaNIDW,
     FillNaNRBF,
     FillNaNSpatial,
     FillNaNTemporal,
     Histogram2D,
+    IDWToGrid,
+    IDWToPoints,
     PointsToGrid,
     Refine,
     ResampleTime,
@@ -112,6 +118,12 @@ def test_fillnan_rbf_matches_function(da_with_nans: xr.DataArray) -> None:
     xr.testing.assert_allclose(op(da_with_nans), expected)
 
 
+def test_fillnan_idw_matches_function(da_with_nans: xr.DataArray) -> None:
+    op = FillNaNIDW(k=6, power=1.5)
+    expected = fillnan_idw(da_with_nans, k=6, power=1.5)
+    xr.testing.assert_allclose(op(da_with_nans), expected)
+
+
 def test_bin_2d_matches_function(scattered_da: xr.DataArray, grid: Grid) -> None:
     op = Bin2D(grid=grid, statistic="mean")
     expected = bin_2d(scattered_da, grid=grid, statistic="mean")
@@ -134,6 +146,28 @@ def test_points_to_grid_matches_function(grid: Grid) -> None:
     xr.testing.assert_allclose(op((lons, lats, vals)), expected)
 
 
+def test_idw_to_grid_matches_function(grid: Grid) -> None:
+    rng = np.random.default_rng(4)
+    lons = rng.uniform(-10, 10, size=150)
+    lats = rng.uniform(-5, 5, size=150)
+    vals = rng.standard_normal(150)
+    op = IDWToGrid(grid=grid, k=5, power=1.0)
+    expected = idw_to_grid(lons, lats, vals, grid=grid, k=5, power=1.0)
+    xr.testing.assert_allclose(op((lons, lats, vals)), expected)
+
+
+def test_idw_to_points_matches_function() -> None:
+    rng = np.random.default_rng(5)
+    lons = rng.uniform(-10, 10, size=150)
+    lats = rng.uniform(-5, 5, size=150)
+    vals = rng.standard_normal(150)
+    dst_lons = np.array([-1.0, 0.0, 1.0])
+    dst_lats = np.array([0.0, 1.0, 2.0])
+    op = IDWToPoints(dst_lons, dst_lats, k=5, power=1.0)
+    expected = idw_to_points(lons, lats, vals, dst_lons, dst_lats, k=5, power=1.0)
+    np.testing.assert_allclose(op((lons, lats, vals)), expected)
+
+
 # ---------- get_config JSON-serializable ----------------------------------
 
 
@@ -143,12 +177,15 @@ def test_points_to_grid_matches_function(grid: Grid) -> None:
         FillNaNSpatial(method="linear"),
         FillNaNTemporal(method="linear", max_gap=None),
         FillNaNRBF(kernel="thin_plate_spline", neighbors=8),
+        FillNaNIDW(k=4),
         ResampleTime(freq="1D", method="mean"),
         Coarsen(factor={"lon": 2}, method="mean"),
         Refine(factor={"lon": 3}, method="linear"),
         Bin2D(grid=Grid.from_bounds((0, 1), (0, 1), 0.5)),
         Histogram2D(grid=Grid.from_bounds((0, 1), (0, 1), 0.5)),
         PointsToGrid(grid=Grid.from_bounds((0, 1), (0, 1), 0.5)),
+        IDWToGrid(grid=Grid.from_bounds((0, 1), (0, 1), 0.5)),
+        IDWToPoints(np.array([0.0]), np.array([0.0])),
     ],
     ids=lambda op: type(op).__name__,
 )

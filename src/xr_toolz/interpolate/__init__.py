@@ -4,7 +4,7 @@ Single conceptual home for *value resampling* (D12). Sub-organized by
 source/target structure under :mod:`._src`:
 
 - :mod:`._src.gap_fill` — ``fillnan_spatial``, ``fillnan_temporal``,
-  ``fillnan_laplacian``, ``fillnan_rbf``
+  ``fillnan_laplacian``, ``fillnan_rbf``, ``fillnan_idw``
 - :mod:`._src.grid_to_grid` — ``coarsen``, ``refine``
 - :mod:`._src.resample` — ``resample_time``
 - :mod:`._src.binning` — ``Grid``, ``Period``, ``SpaceTimeGrid``, ``bin_2d``,
@@ -30,12 +30,14 @@ from xr_toolz.interpolate._src.binning import (
 )
 from xr_toolz.interpolate._src.coord_remap import remap_axis, to_phase
 from xr_toolz.interpolate._src.gap_fill import (
+    fillnan_idw,
     fillnan_laplacian,
     fillnan_rbf,
     fillnan_spatial,
     fillnan_temporal,
 )
 from xr_toolz.interpolate._src.grid_to_grid import coarsen, refine, regrid_like
+from xr_toolz.interpolate._src.knn import idw_to_grid, idw_to_points
 from xr_toolz.interpolate._src.points_to_grid import points_to_grid
 from xr_toolz.interpolate._src.resample import resample_time
 from xr_toolz.interpolate._src.smooth import (
@@ -52,6 +54,7 @@ __all__ = [
     "SpaceTimeGrid",
     "bin_2d",
     "coarsen",
+    "fillnan_idw",
     "fillnan_laplacian",
     "fillnan_rbf",
     "fillnan_spatial",
@@ -59,6 +62,8 @@ __all__ = [
     "fir_filter",
     "gaussian_smooth",
     "histogram_2d",
+    "idw_to_grid",
+    "idw_to_points",
     "lowpass_filter",
     "moving_average",
     "points_to_grid",
