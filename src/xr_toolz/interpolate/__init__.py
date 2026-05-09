@@ -13,11 +13,12 @@ source/target structure under :mod:`._src`:
 - :mod:`._src.binning` — ``Grid``, ``Period``, ``SpaceTimeGrid``, ``bin_2d``,
   ``histogram_2d``
 - :mod:`._src.points_to_grid` — ``points_to_grid``, ``kde_to_grid``
+- :mod:`._src.grid_to_points` — ``sample_at_points``, ``along_track``
 - :mod:`._src.smooth` — ``moving_average``, ``gaussian_smooth``,
   ``gaussian_smooth_masked``, ``lowpass_filter``, ``fir_filter``
 - :mod:`._src.coord_remap` — ``remap_axis``, ``to_phase``
-- :mod:`._src.grid_to_points`, :mod:`._src.downscale` — placeholder
-  submodules for upcoming work (D12, issue #36)
+- :mod:`._src.downscale` — placeholder submodule for upcoming work
+  (D12, issue #36)
 
 Layer-1 ``Operator`` wrappers live in :mod:`xr_toolz.interpolate.operators`.
 """
@@ -47,6 +48,7 @@ from xr_toolz.interpolate._src.grid_to_grid import (
     refine_2d,
     regrid_like,
 )
+from xr_toolz.interpolate._src.grid_to_points import along_track, sample_at_points
 from xr_toolz.interpolate._src.knn import idw_to_grid, idw_to_points
 from xr_toolz.interpolate._src.mask_ops import (
     binary_closing_2d,
@@ -65,6 +67,7 @@ from xr_toolz.interpolate._src.smooth import (
     moving_average,
 )
 from xr_toolz.interpolate.operators import (
+    AlongTrack,
     CleanMask,
     GaussianSmoothMasked,
     KDEToGrid,
@@ -72,10 +75,12 @@ from xr_toolz.interpolate.operators import (
     MaskBinaryOpening,
     MaskRemoveSmallHoles,
     MaskRemoveSmallObjects,
+    SampleAtPoints,
 )
 
 
 __all__ = [
+    "AlongTrack",
     "CleanMask",
     "GaussianSmoothMasked",
     "Grid",
@@ -85,7 +90,9 @@ __all__ = [
     "MaskRemoveSmallHoles",
     "MaskRemoveSmallObjects",
     "Period",
+    "SampleAtPoints",
     "SpaceTimeGrid",
+    "along_track",
     "bin_2d",
     "binary_closing_2d",
     "binary_opening_2d",
@@ -115,5 +122,6 @@ __all__ = [
     "remove_small_holes_2d",
     "remove_small_objects_2d",
     "resample_time",
+    "sample_at_points",
     "to_phase",
 ]

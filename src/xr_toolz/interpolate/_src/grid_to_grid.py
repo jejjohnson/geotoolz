@@ -268,14 +268,18 @@ def refine_2d(
 
 
 def _get_skimage_resize() -> Callable[..., np.ndarray]:
+    # importlib keeps ty (typecheck) from resolving the optional [image] extra
+    # at static-analysis time.
+    import importlib
+
     try:
-        from skimage.transform import resize
+        transform = importlib.import_module("skimage.transform")
     except ImportError as exc:  # pragma: no cover - depends on optional install
         raise ImportError(
             "refine_2d requires scikit-image. "
             "Install with: pip install 'xr_toolz[image]'"
         ) from exc
-    return resize
+    return transform.resize
 
 
 def _interp_coord(coord: np.ndarray, size: int) -> np.ndarray:
