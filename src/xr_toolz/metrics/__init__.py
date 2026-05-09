@@ -21,6 +21,7 @@ from xr_toolz.metrics._src.array_segmented_psd import (
     segmented_csd,
     segmented_psd,
 )
+from xr_toolz.metrics._src.composite import psd_score_spacetime, rmse_skill_scores
 from xr_toolz.metrics._src.distributional import (
     CRPS,
     EnergyDistance,
@@ -97,6 +98,7 @@ from xr_toolz.metrics._src.spectral import (
     psd_error,
     psd_score,
     resolved_scale,
+    resolved_scale_2d,
     wavelet_psd_score,
     wavelet_resolved_scale_map,
 )
@@ -172,13 +174,16 @@ __all__ = [
     "psd_error",
     "psd_score",
     "psd_score_by_region",
+    "psd_score_spacetime",
     "pv_conservation_error",
     "r2_score",
     "rank_histogram",
     "rank_methods",
     "reliability_curve",
     "resolved_scale",
+    "resolved_scale_2d",
     "rmse",
+    "rmse_skill_scores",
     "scores_by_region",
     "segment_signal",
     "segmented_coherence",

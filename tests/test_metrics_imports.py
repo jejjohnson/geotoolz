@@ -34,9 +34,12 @@ def test_metrics_package_root_exposes_layer0_and_operators():
         psd_error,
         psd_score,
         psd_score_by_region,
+        psd_score_spacetime,
         r2_score,
         resolved_scale,
+        resolved_scale_2d,
         rmse,
+        rmse_skill_scores,
         segment_signal,
         segmented_coherence,
         segmented_csd,
@@ -65,9 +68,12 @@ def test_metrics_package_root_exposes_layer0_and_operators():
         nrmse,
         psd_error,
         psd_score,
+        psd_score_spacetime,
         psd_score_by_region,
         r2_score,
         resolved_scale,
+        resolved_scale_2d,
+        rmse_skill_scores,
         segment_signal,
         segmented_coherence,
         segmented_csd,
@@ -124,7 +130,9 @@ def test_metrics_spectral_submodule_imports():
         psd_error,
         psd_score,
         psd_score_by_region,
+        psd_score_spacetime,
         resolved_scale,
+        resolved_scale_2d,
     )
 
     assert callable(psd_score)
@@ -138,8 +146,10 @@ def test_metrics_spectral_submodule_imports():
         along_track_psd_score,
         find_intercept_1D,
         psd_error,
+        psd_score_spacetime,
         psd_score_by_region,
         resolved_scale,
+        resolved_scale_2d,
     )
 
 
