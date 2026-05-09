@@ -138,6 +138,144 @@ class Coherence(Operator):
         }
 
 
+class KESpectralFlux(Operator):
+    """Kinetic-energy spectral flux from ``ds[u]`` and ``ds[v]``.
+
+    Args:
+        u: Name of the zonal velocity variable in the input Dataset.
+        v: Name of the meridional velocity variable in the input Dataset.
+        dim: Two spatial dimensions to Fourier transform.
+        window: Optional Fourier window.
+        detrend: Optional Fourier detrending mode.
+        avg_dims: Optional non-spectral dimensions to average.
+        return_2d: If ``True``, include ``transfer_2d`` in the output Dataset.
+
+    Returns:
+        Dataset with ``transfer`` and ``flux`` variables, plus ``transfer_2d``
+        when requested.
+
+    Examples:
+        >>> op = KESpectralFlux("u", "v", ("x", "y"), avg_dims="time")
+        >>> flux_ds = op(ds)
+    """
+
+    def __init__(
+        self,
+        u: str,
+        v: str,
+        dim: Sequence[str],
+        *,
+        window: str | None = "tukey",
+        detrend: str | None = "linear",
+        avg_dims: str | Sequence[str] | None = None,
+        return_2d: bool = False,
+    ) -> None:
+        self.u = u
+        self.v = v
+        self.dim = dim
+        self.window = window
+        self.detrend = detrend
+        self.avg_dims = avg_dims
+        self.return_2d = return_2d
+
+    def _apply(self, ds: xr.Dataset) -> xr.Dataset:
+        return _fourier.ke_spectral_flux(
+            ds[self.u],
+            ds[self.v],
+            dim=self.dim,
+            window=self.window,
+            detrend=self.detrend,
+            avg_dims=self.avg_dims,
+            return_2d=self.return_2d,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        dim = list(self.dim)
+        avg_dims = (
+            list(self.avg_dims)
+            if self.avg_dims is not None and not isinstance(self.avg_dims, str)
+            else self.avg_dims
+        )
+        return {
+            "u": self.u,
+            "v": self.v,
+            "dim": dim,
+            "window": self.window,
+            "detrend": self.detrend,
+            "avg_dims": avg_dims,
+            "return_2d": self.return_2d,
+        }
+
+
+class EnstrophySpectralFlux(Operator):
+    """Enstrophy spectral flux from ``ds[u]`` and ``ds[v]``.
+
+    Args:
+        u: Name of the zonal velocity variable in the input Dataset.
+        v: Name of the meridional velocity variable in the input Dataset.
+        dim: Two spatial dimensions to Fourier transform.
+        window: Optional Fourier window.
+        detrend: Optional Fourier detrending mode.
+        avg_dims: Optional non-spectral dimensions to average.
+        return_2d: If ``True``, include ``transfer_2d`` in the output Dataset.
+
+    Returns:
+        Dataset with vorticity-based enstrophy ``transfer`` and ``flux``
+        variables, plus ``transfer_2d`` when requested.
+
+    Examples:
+        >>> op = EnstrophySpectralFlux("u", "v", ("x", "y"))
+        >>> flux_ds = op(ds)
+    """
+
+    def __init__(
+        self,
+        u: str,
+        v: str,
+        dim: Sequence[str],
+        *,
+        window: str | None = "tukey",
+        detrend: str | None = "linear",
+        avg_dims: str | Sequence[str] | None = None,
+        return_2d: bool = False,
+    ) -> None:
+        self.u = u
+        self.v = v
+        self.dim = dim
+        self.window = window
+        self.detrend = detrend
+        self.avg_dims = avg_dims
+        self.return_2d = return_2d
+
+    def _apply(self, ds: xr.Dataset) -> xr.Dataset:
+        return _fourier.enstrophy_spectral_flux(
+            ds[self.u],
+            ds[self.v],
+            dim=self.dim,
+            window=self.window,
+            detrend=self.detrend,
+            avg_dims=self.avg_dims,
+            return_2d=self.return_2d,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        dim = list(self.dim)
+        avg_dims = (
+            list(self.avg_dims)
+            if self.avg_dims is not None and not isinstance(self.avg_dims, str)
+            else self.avg_dims
+        )
+        return {
+            "u": self.u,
+            "v": self.v,
+            "dim": dim,
+            "window": self.window,
+            "detrend": self.detrend,
+            "avg_dims": avg_dims,
+            "return_2d": self.return_2d,
+        }
+
+
 class STFT(Operator):
     """Short-time Fourier transform of ``ds[variable]`` along ``dim``."""
 
@@ -546,7 +684,9 @@ __all__ = [
     "CyclicalEncode",
     "EncodeTimeCyclical",
     "EncodeTimeOrdinal",
+    "EnstrophySpectralFlux",
     "FourierFeatures",
+    "KESpectralFlux",
     "PositionalEncoding",
     "PowerSpectrum",
     "RandomFourierFeatures",

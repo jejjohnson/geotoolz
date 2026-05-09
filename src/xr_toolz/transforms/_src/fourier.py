@@ -1,5 +1,5 @@
 """Fourier-domain transforms — power spectrum, cross-spectrum, STFT,
-coherence.
+coherence, and spectral flux diagnostics.
 
 All entry points are ``DataArray``-first: the input is a single
 :class:`xr.DataArray` and the output is also a ``DataArray`` with the
@@ -33,11 +33,132 @@ _DEFAULT_PSD_KWARGS: dict[str, Any] = {
     "true_amplitude": True,
     "truncate": True,
 }
+# Keep shells with mathematically identical radii together despite roundoff.
+_RADIAL_BINNING_PRECISION = 12
 
 
 def _output_name(da: xr.DataArray, suffix: str, fallback: str = "field") -> str:
     base = da.name if da.name is not None else fallback
     return f"{base}_{suffix}"
+
+
+def _as_list(value: str | Sequence[str] | None) -> list[str]:
+    if value is None:
+        return []
+    return [value] if isinstance(value, str) else list(value)
+
+
+def _validate_spatial_dims(dim: Sequence[str]) -> list[str]:
+    dims = list(dim)
+    if len(dims) != 2:
+        raise ValueError(
+            f"spectral flux diagnostics require exactly 2 dims; got {dims}."
+        )
+    return dims
+
+
+def _fft2(
+    da: xr.DataArray,
+    dims: Sequence[str],
+    *,
+    window: str | None,
+    detrend: str | None,
+) -> xr.DataArray:
+    return xrft.fft(
+        da,
+        dim=list(dims),
+        shift=False,
+        window=window,
+        detrend=detrend,
+        true_phase=False,
+        true_amplitude=False,
+    )
+
+
+def _ifft2(
+    da: xr.DataArray, freq_dims: Sequence[str], template: xr.DataArray | None = None
+) -> xr.DataArray:
+    out = xrft.ifft(
+        da,
+        dim=list(freq_dims),
+        shift=False,
+        true_phase=False,
+        true_amplitude=False,
+    ).real
+    if template is None:
+        return out
+    coords = {dim: template[dim] for dim in template.dims if dim in out.dims}
+    return out.assign_coords(coords)
+
+
+def _gradient_from_hat(
+    field_hat: xr.DataArray,
+    freq_dim: str,
+    freq_dims: Sequence[str],
+    template: xr.DataArray | None = None,
+) -> xr.DataArray:
+    return _ifft2(2.0j * np.pi * field_hat[freq_dim] * field_hat, freq_dims, template)
+
+
+def _radial_sum(field: xr.DataArray, freq_dims: Sequence[str]) -> xr.DataArray:
+    freq_x, freq_y = freq_dims
+    kx, ky = xr.broadcast(field[freq_x], field[freq_y])
+    freq_r = np.round(np.hypot(kx.values, ky.values).ravel(), _RADIAL_BINNING_PRECISION)
+    stacked = field.stack(_freq_shell=list(freq_dims))
+    stacked = stacked.assign_coords(freq_r=("_freq_shell", freq_r))
+    out = stacked.groupby("freq_r").sum("_freq_shell").sortby("freq_r")
+    return out
+
+
+def _flux_from_transfer(transfer: xr.DataArray) -> xr.DataArray:
+    flux = (
+        transfer.isel(freq_r=slice(None, None, -1))
+        .cumsum("freq_r")
+        .isel(freq_r=slice(None, None, -1))
+    )
+    return flux.assign_coords(freq_r=transfer["freq_r"])
+
+
+def _fourier_uv_gradients(
+    u: xr.DataArray,
+    v: xr.DataArray,
+    dims: Sequence[str],
+    *,
+    window: str | None,
+    detrend: str | None,
+) -> tuple[
+    xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray
+]:
+    dims = list(dims)
+    freq_dims = [f"freq_{dim}" for dim in dims]
+    u_hat = _fft2(u, dims, window=window, detrend=detrend)
+    v_hat = _fft2(v, dims, window=window, detrend=detrend)
+    du_dx = _gradient_from_hat(u_hat, freq_dims[0], freq_dims, u)
+    du_dy = _gradient_from_hat(u_hat, freq_dims[1], freq_dims, u)
+    dv_dx = _gradient_from_hat(v_hat, freq_dims[0], freq_dims, v)
+    dv_dy = _gradient_from_hat(v_hat, freq_dims[1], freq_dims, v)
+    return u_hat, v_hat, du_dx, du_dy, dv_dx, dv_dy
+
+
+def _spectral_flux_dataset(
+    transfer_2d: xr.DataArray,
+    freq_dims: Sequence[str],
+    *,
+    avg_dims: Sequence[str] | None,
+    return_2d: bool,
+) -> xr.Dataset:
+    avg = _as_list(avg_dims)
+    if avg:
+        transfer_2d = transfer_2d.mean(dim=avg)
+    transfer = _radial_sum(transfer_2d, freq_dims)
+    transfer.name = "transfer"
+    flux = _flux_from_transfer(transfer)
+    flux.name = "flux"
+    data_vars: dict[str, xr.DataArray] = {"transfer": transfer, "flux": flux}
+    if return_2d:
+        # transfer_2d is already named upstream; just attach it.
+        data_vars["transfer_2d"] = transfer_2d
+    return xr.Dataset(data_vars)
 
 
 def power_spectrum(
@@ -89,6 +210,223 @@ def isotropic_power_spectrum(
     """Radially-averaged 2-D power spectrum. Convenience alias of
     :func:`power_spectrum` with ``isotropic=True``."""
     return power_spectrum(da, dim=dim, isotropic=True, **kwargs)
+
+
+def ke_spectral_flux(
+    u: xr.DataArray,
+    v: xr.DataArray,
+    *,
+    dim: Sequence[str],
+    window: str | None = "tukey",
+    detrend: str | None = "linear",
+    avg_dims: str | Sequence[str] | None = None,
+    return_2d: bool = False,
+) -> xr.Dataset:
+    """Kinetic-energy spectral flux ``Π(k)``.
+
+    Args:
+        u: Zonal velocity component with both spatial dimensions in ``dim``.
+        v: Meridional velocity component on the same grid as ``u``.
+        dim: Two spatial dimensions to Fourier transform, for example
+            ``("x", "y")``.
+        window: Optional window forwarded to :func:`xrft.fft`.
+        detrend: Optional detrending forwarded to :func:`xrft.fft`.
+        avg_dims: Optional non-spectral dimensions to average before radial
+            integration, for example ``"time"``.
+        return_2d: If ``True``, include the unbinned two-dimensional transfer
+            field as ``transfer_2d``.
+
+    Returns:
+        Dataset with ``transfer`` as radially summed KE transfer ``T(k)`` and
+        ``flux`` as ``Π(k) = Σ_{k' >= k} T(k')``. ``transfer_2d`` is included
+        when requested.
+
+    Notes:
+        Positive ``flux`` denotes downscale kinetic-energy transfer. The
+        nonlinear advection terms are formed in physical space from
+        Fourier-space gradients, transformed back to spectral space, radially
+        binned by ``freq_r``, and accumulated from high to low wavenumber.
+    """
+    dims = _validate_spatial_dims(dim)
+    freq_dims = [f"freq_{name}" for name in dims]
+    u_hat, v_hat, du_dx, du_dy, dv_dx, dv_dy = _fourier_uv_gradients(
+        u, v, dims, window=window, detrend=detrend
+    )
+    # Reconstruct physical-space velocities from the (possibly windowed and
+    # detrended) spectra so the advection product mixes fields with matching
+    # preprocessing — using raw u/v here would bias the transfer when
+    # window/detrend are non-None (which they are by default).
+    u_proc = _ifft2(u_hat, freq_dims, u)
+    v_proc = _ifft2(v_hat, freq_dims, v)
+    phi_u = u_proc * du_dx + v_proc * du_dy
+    phi_v = u_proc * dv_dx + v_proc * dv_dy
+    phi_u_hat = _fft2(phi_u, dims, window=None, detrend=None)
+    phi_v_hat = _fft2(phi_v, dims, window=None, detrend=None)
+    norm = float(np.prod([u.sizes[name] for name in dims]) ** 2)
+    transfer_2d = (
+        -np.real(np.conj(u_hat) * phi_u_hat + np.conj(v_hat) * phi_v_hat) / norm
+    )
+    transfer_2d.name = "transfer_2d"
+    return _spectral_flux_dataset(
+        transfer_2d, freq_dims, avg_dims=_as_list(avg_dims), return_2d=return_2d
+    )
+
+
+def enstrophy_spectral_flux(
+    u: xr.DataArray,
+    v: xr.DataArray,
+    *,
+    dim: Sequence[str],
+    window: str | None = "tukey",
+    detrend: str | None = "linear",
+    avg_dims: str | Sequence[str] | None = None,
+    return_2d: bool = False,
+) -> xr.Dataset:
+    """Enstrophy spectral flux ``Π_Z(k)``.
+
+    Args:
+        u: Zonal velocity component with both spatial dimensions in ``dim``.
+        v: Meridional velocity component on the same grid as ``u``.
+        dim: Two spatial dimensions to Fourier transform.
+        window: Optional window forwarded to :func:`xrft.fft`.
+        detrend: Optional detrending forwarded to :func:`xrft.fft`.
+        avg_dims: Optional non-spectral dimensions to average before radial
+            integration.
+        return_2d: If ``True``, include the unbinned two-dimensional transfer
+            field as ``transfer_2d``.
+
+    Returns:
+        Dataset with radially summed enstrophy ``transfer`` and cumulative
+        ``flux``. ``transfer_2d`` is included when requested.
+
+    Notes:
+        Vorticity is computed spectrally as ``ζ̂ = 2πi(k_x v̂ - k_y û)``.
+        Positive ``flux`` denotes downscale enstrophy transfer, accumulated
+        from high to low radial wavenumber with the same convention as
+        :func:`ke_spectral_flux`.
+    """
+    dims = _validate_spatial_dims(dim)
+    freq_dims = [f"freq_{name}" for name in dims]
+    u_hat, v_hat, _du_dx, _du_dy, _dv_dx, _dv_dy = _fourier_uv_gradients(
+        u, v, dims, window=window, detrend=detrend
+    )
+    kx = v_hat[freq_dims[0]]
+    ky = u_hat[freq_dims[1]]
+    zeta_hat = 2.0j * np.pi * (kx * v_hat - ky * u_hat)
+    dzeta_dx = _gradient_from_hat(zeta_hat, freq_dims[0], freq_dims, u)
+    dzeta_dy = _gradient_from_hat(zeta_hat, freq_dims[1], freq_dims, u)
+    # Match the windowed/detrended preprocessing of zeta_hat in the
+    # advection product — see ke_spectral_flux for the same fix.
+    u_proc = _ifft2(u_hat, freq_dims, u)
+    v_proc = _ifft2(v_hat, freq_dims, v)
+    adv_zeta = u_proc * dzeta_dx + v_proc * dzeta_dy
+    adv_zeta_hat = _fft2(adv_zeta, dims, window=None, detrend=None)
+    norm = float(np.prod([u.sizes[name] for name in dims]) ** 2)
+    transfer_2d = -np.real(np.conj(zeta_hat) * adv_zeta_hat) / norm
+    transfer_2d.name = "transfer_2d"
+    return _spectral_flux_dataset(
+        transfer_2d, freq_dims, avg_dims=_as_list(avg_dims), return_2d=return_2d
+    )
+
+
+def integral_scale(
+    psd: xr.DataArray,
+    *,
+    wavenumber_dim: str = "freq_r",
+    moment: int = 1,
+) -> xr.DataArray:
+    """Energy-weighted integral scale or Taylor microscale.
+
+    Args:
+        psd: One-dimensional spectrum with a wavenumber coordinate.
+        wavenumber_dim: Name of the wavenumber dimension.
+        moment: ``1`` for the integral scale, ``2`` for the Taylor microscale.
+
+    Returns:
+        DataArray with ``wavenumber_dim`` removed.
+
+    Notes:
+        ``moment=1`` returns ``∫ψ dk / ∫kψ dk``. ``moment=2`` returns the
+        Taylor microscale ``λ = sqrt(∫ψ dk / ∫k²ψ dk)``. Integrals use
+        xarray's coordinate-aware trapezoidal rule, so non-uniform
+        wavenumber grids (e.g. radially binned spectra) are handled
+        correctly.
+    """
+    if moment not in (1, 2):
+        raise ValueError(
+            f"moment must be 1 (integral scale) or 2 (Taylor microscale); got {moment}."
+        )
+    k = psd[wavenumber_dim]
+    numerator = psd.integrate(coord=wavenumber_dim)
+    denominator = (psd * k**moment).integrate(coord=wavenumber_dim)
+    out = numerator / denominator
+    if moment == 2:
+        out = out**0.5
+    out.name = _output_name(psd, f"moment{moment}_scale", fallback="spectrum")
+    return out
+
+
+def fit_spectral_slope(
+    psd: xr.DataArray,
+    *,
+    wavenumber_dim: str = "freq_r",
+    k_min: float,
+    k_max: float,
+) -> tuple[float, float]:
+    """Fit ``log(psd) = slope * log(k) + intercept`` over ``[k_min, k_max]``.
+
+    Args:
+        psd: One-dimensional positive spectrum.
+        wavenumber_dim: Name of the wavenumber dimension.
+        k_min: Lower inclusive wavenumber bound.
+        k_max: Upper inclusive wavenumber bound.
+
+    Returns:
+        ``(slope, intercept)`` from ``numpy.polyfit`` in log-log space.
+
+    Raises:
+        ValueError: If fewer than two positive finite samples remain in the
+            requested fit window.
+
+    Notes:
+        Use the fitted slope to identify inertial-range power laws such as
+        ``-5/3`` inverse-cascade or ``-3`` enstrophy-cascade scaling.
+    """
+    k = psd[wavenumber_dim]
+    subset = psd.where((k >= k_min) & (k <= k_max) & (k > 0) & (psd > 0), drop=True)
+    x = np.log(subset[wavenumber_dim].values)
+    y = np.log(subset.values)
+    finite = np.isfinite(x) & np.isfinite(y)
+    if finite.sum() < 2:
+        raise ValueError(
+            f"At least two positive finite spectral samples required in "
+            f"[{k_min}, {k_max}]; found {finite.sum()}."
+        )
+    slope, intercept = np.polyfit(x[finite], y[finite], 1)
+    return float(slope), float(intercept)
+
+
+def compensated_spectrum(
+    psd: xr.DataArray,
+    *,
+    wavenumber_dim: str = "freq_r",
+    exponent: float,
+) -> xr.DataArray:
+    """Return ``psd * k**exponent`` for inertial-range compensation.
+
+    Args:
+        psd: Spectrum to compensate.
+        wavenumber_dim: Name of the wavenumber dimension.
+        exponent: Power-law exponent, for example ``5 / 3`` for Kolmogorov
+            scaling.
+
+    Returns:
+        DataArray named ``f"{psd.name}_compensated"`` that is flat where
+        ``psd ∝ k^{-exponent}``.
+    """
+    out = psd * psd[wavenumber_dim] ** exponent
+    out.name = _output_name(psd, "compensated", fallback="spectrum")
+    return out
 
 
 def cross_spectrum(

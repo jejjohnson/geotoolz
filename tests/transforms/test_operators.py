@@ -13,6 +13,8 @@ from xr_toolz.transforms.operators import (
     STFT,
     Coherence,
     CrossSpectrum,
+    EnstrophySpectralFlux,
+    KESpectralFlux,
     PowerSpectrum,
 )
 
@@ -26,6 +28,21 @@ def ds() -> xr.Dataset:
     return xr.Dataset(
         {"a": ("time", a), "b": ("time", b)},
         coords={"time": time},
+    )
+
+
+@pytest.fixture
+def taylor_green_ds() -> xr.Dataset:
+    n = 16
+    x = np.arange(n)
+    y = np.arange(n)
+    xx, yy = np.meshgrid(x, y, indexing="ij")
+    phase = 2.0 * np.pi * 2 / n
+    u = np.sin(phase * xx) * np.cos(phase * yy)
+    v = -np.cos(phase * xx) * np.sin(phase * yy)
+    return xr.Dataset(
+        {"u": (("x", "y"), u), "v": (("x", "y"), v)},
+        coords={"x": x, "y": y},
     )
 
 
@@ -51,6 +68,20 @@ def test_stft_operator(ds):
     assert "segment" in out["a_stft"].dims
 
 
+def test_ke_spectral_flux_operator(taylor_green_ds):
+    out = KESpectralFlux(
+        "u", "v", ("x", "y"), window=None, detrend=None, return_2d=True
+    )(taylor_green_ds)
+    assert {"transfer", "flux", "transfer_2d"} <= set(out.data_vars)
+
+
+def test_enstrophy_spectral_flux_operator(taylor_green_ds):
+    out = EnstrophySpectralFlux(
+        "u", "v", ("x", "y"), window=None, detrend=None, return_2d=True
+    )(taylor_green_ds)
+    assert {"transfer", "flux", "transfer_2d"} <= set(out.data_vars)
+
+
 def test_dct_operator(ds):
     out = DCT("a", "time")(ds)
     assert "a_dct" in out.data_vars
@@ -70,3 +101,10 @@ def test_get_config_round_trips_operator():
     assert cfg["variable"] == "u"
     assert cfg["dim"] == ["lat", "lon"]
     assert cfg["isotropic"] is True
+
+    flux_op = KESpectralFlux(
+        "u", "v", ("x", "y"), window=None, detrend=None, avg_dims=("time",)
+    )
+    flux_cfg = flux_op.get_config()
+    assert flux_cfg["dim"] == ["x", "y"]
+    assert flux_cfg["avg_dims"] == ["time"]

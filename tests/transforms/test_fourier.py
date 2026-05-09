@@ -9,9 +9,14 @@ import xarray as xr
 
 from xr_toolz.transforms import (
     coherence,
+    compensated_spectrum,
     cross_spectrum,
     drop_negative_frequencies,
+    enstrophy_spectral_flux,
+    fit_spectral_slope,
+    integral_scale,
     isotropic_power_spectrum,
+    ke_spectral_flux,
     power_spectrum,
     stft,
 )
@@ -31,6 +36,23 @@ def da_grid_daily() -> xr.DataArray:
         dims=("time", "lat", "lon"),
         coords={"time": time, "lat": lat, "lon": lon},
         name="ssh",
+    )
+
+
+@pytest.fixture
+def taylor_green_vortex_uv() -> tuple[xr.DataArray, xr.DataArray]:
+    n = 32
+    mode = 2
+    x = np.arange(n)
+    y = np.arange(n)
+    xx, yy = np.meshgrid(x, y, indexing="ij")
+    phase = 2.0 * np.pi * mode / n
+    u = np.sin(phase * xx) * np.cos(phase * yy)
+    v = -np.cos(phase * xx) * np.sin(phase * yy)
+    coords = {"x": x, "y": y}
+    return (
+        xr.DataArray(u, dims=("x", "y"), coords=coords, name="u"),
+        xr.DataArray(v, dims=("x", "y"), coords=coords, name="v"),
     )
 
 
@@ -100,3 +122,123 @@ def test_drop_negative_frequencies_renames_old_conditional_average(da_grid_daily
     # Output should drop freq_time and retain only freq_lon > 0.
     assert "freq_time" not in reduced.dims
     assert (reduced["freq_lon"] > 0).all()
+
+
+def test_ke_spectral_flux_conserves_transfer(taylor_green_vortex_uv):
+    u, v = taylor_green_vortex_uv
+    out = ke_spectral_flux(
+        u, v, dim=("x", "y"), window=None, detrend=None, return_2d=True
+    )
+    assert abs(float(out["transfer"].sum())) < 1e-16
+    assert abs(float(out["flux"].isel(freq_r=0))) < 1e-16
+    assert abs(float(out["flux"].isel(freq_r=-1))) < 1e-16
+
+
+def test_ke_spectral_flux_returns_2d(taylor_green_vortex_uv):
+    u, v = taylor_green_vortex_uv
+    out = ke_spectral_flux(
+        u, v, dim=("x", "y"), window=None, detrend=None, return_2d=True
+    )
+    assert set(out.data_vars) == {"transfer", "flux", "transfer_2d"}
+    assert out["transfer_2d"].sizes["freq_x"] == u.sizes["x"]
+    assert out["transfer_2d"].sizes["freq_y"] == u.sizes["y"]
+
+
+def test_ke_spectral_flux_avg_dims_matches_manual_average(taylor_green_vortex_uv):
+    u, v = taylor_green_vortex_uv
+    u_time = xr.concat([u, 2.0 * u], dim="time").assign_coords(time=[0, 1])
+    v_time = xr.concat([v, 2.0 * v], dim="time").assign_coords(time=[0, 1])
+    full = ke_spectral_flux(u_time, v_time, dim=("x", "y"), window=None, detrend=None)
+    averaged = ke_spectral_flux(
+        u_time,
+        v_time,
+        dim=("x", "y"),
+        window=None,
+        detrend=None,
+        avg_dims=("time",),
+    )
+    xr.testing.assert_allclose(averaged["transfer"], full["transfer"].mean("time"))
+
+
+def test_enstrophy_spectral_flux_budget_closes(taylor_green_vortex_uv):
+    u, v = taylor_green_vortex_uv
+    out = enstrophy_spectral_flux(u, v, dim=("x", "y"), window=None, detrend=None)
+    assert set(out.data_vars) == {"transfer", "flux"}
+    assert abs(float(out["transfer"].sum())) < 1e-16
+    assert abs(float(out["flux"].isel(freq_r=0))) < 1e-16
+
+
+def test_ke_spectral_flux_default_preprocessing_runs_and_closes_budget(
+    taylor_green_vortex_uv,
+):
+    """The defaults are window='tukey' / detrend='linear'. With the
+    advection product now consistently using the windowed/detrended
+    fields (not raw u/v), the transfer must still integrate to zero
+    even when preprocessing is enabled."""
+    u, v = taylor_green_vortex_uv
+    out = ke_spectral_flux(u, v, dim=("x", "y"))
+    assert np.isfinite(out["transfer"].values).all()
+    assert np.isfinite(out["flux"].values).all()
+    assert abs(float(out["transfer"].sum())) < 1e-10
+    # Flux endpoints bracket the cumulative integral; with a closed
+    # budget, both ends must be (numerically) zero.
+    assert abs(float(out["flux"].isel(freq_r=0))) < 1e-10
+    assert abs(float(out["flux"].isel(freq_r=-1))) < 1e-10
+
+
+def test_enstrophy_spectral_flux_default_preprocessing_runs_and_closes_budget(
+    taylor_green_vortex_uv,
+):
+    u, v = taylor_green_vortex_uv
+    out = enstrophy_spectral_flux(u, v, dim=("x", "y"))
+    assert np.isfinite(out["transfer"].values).all()
+    assert abs(float(out["transfer"].sum())) < 1e-10
+    assert abs(float(out["flux"].isel(freq_r=0))) < 1e-10
+
+
+def test_integral_scale_matches_gaussian_and_spike():
+    width = 2.0
+    k = np.linspace(0.0, 20.0, 20_001)
+    psd = xr.DataArray(np.exp(-((k / width) ** 2)), dims="freq_r", coords={"freq_r": k})
+    np.testing.assert_allclose(
+        integral_scale(psd, moment=1), np.sqrt(np.pi) / width, rtol=5e-3
+    )
+    np.testing.assert_allclose(
+        integral_scale(psd, moment=2), np.sqrt(2.0) / width, rtol=5e-3
+    )
+
+    spike_k = np.array([1.0, 2.0, 4.0])
+    spike = xr.DataArray([0.0, 5.0, 0.0], dims="freq_r", coords={"freq_r": spike_k})
+    np.testing.assert_allclose(integral_scale(spike, moment=1), 1.0 / 2.0)
+
+
+def test_fit_spectral_slope_honours_window():
+    k = np.linspace(1.0, 100.0, 200)
+    psd = xr.DataArray(k ** (-5.0 / 3.0), dims="freq_r", coords={"freq_r": k})
+    slope, intercept = fit_spectral_slope(psd, k_min=10.0, k_max=50.0)
+    np.testing.assert_allclose(slope, -5.0 / 3.0, rtol=1e-2)
+    np.testing.assert_allclose(intercept, 0.0, atol=1e-12)
+
+
+def test_compensated_spectrum_is_flat_for_power_law():
+    k = np.linspace(1.0, 10.0, 20)
+    psd = xr.DataArray(k**-3.0, dims="freq_r", coords={"freq_r": k}, name="energy")
+    compensated = compensated_spectrum(psd, exponent=3.0)
+    assert compensated.name == "energy_compensated"
+    np.testing.assert_allclose(compensated, 1.0)
+
+
+def test_fit_spectral_slope_raises_when_window_has_too_few_samples():
+    k = np.linspace(1.0, 100.0, 200)
+    psd = xr.DataArray(k ** (-5.0 / 3.0), dims="freq_r", coords={"freq_r": k})
+    # An empty/sparse window leaves <2 samples, so the linear fit is
+    # underdetermined and the function must surface that explicitly.
+    with pytest.raises(ValueError, match="At least two"):
+        fit_spectral_slope(psd, k_min=200.0, k_max=300.0)
+
+
+def test_integral_scale_rejects_unsupported_moment():
+    k = np.linspace(0.0, 10.0, 11)
+    psd = xr.DataArray(np.ones_like(k), dims="freq_r", coords={"freq_r": k})
+    with pytest.raises(ValueError, match="moment must be 1"):
+        integral_scale(psd, moment=3)
