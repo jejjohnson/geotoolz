@@ -18,6 +18,7 @@ from xr_toolz.transforms import (
     isotropic_power_spectrum,
     ke_spectral_flux,
     power_spectrum,
+    rotary_spectrum,
     stft,
 )
 
@@ -122,6 +123,93 @@ def test_drop_negative_frequencies_renames_old_conditional_average(da_grid_daily
     # Output should drop freq_time and retain only freq_lon > 0.
     assert "freq_time" not in reduced.dims
     assert (reduced["freq_lon"] > 0).all()
+
+
+def _rotary_fixture(*, rotation_direction: float = 1.0) -> xr.Dataset:
+    """Build one Fourier mode; ``1`` is CCW and ``-1`` is CW."""
+    n = 64
+    k = 3
+    x = np.arange(n, dtype=float)
+    phase = 2.0 * np.pi * k * x / n
+    return xr.Dataset(
+        {
+            "u": ("x", np.cos(phase)),
+            "v": ("x", rotation_direction * np.sin(phase)),
+        },
+        coords={"x": x},
+    )
+
+
+def test_rotary_spectrum_ccw_signal_peaks_positive_wavenumber():
+    out = rotary_spectrum(
+        _rotary_fixture(rotation_direction=1.0), u_var="u", v_var="v", dim="x"
+    )
+    k = 3.0 / 64.0
+    assert float(out["psd_ccw"].idxmax("wavenumber")) == pytest.approx(k)
+    assert float(out["psd_cw"].sel(wavenumber=k)) == pytest.approx(0.0, abs=1e-12)
+    assert float(out["polarization"].sel(wavenumber=k)) == pytest.approx(-1.0)
+
+
+def test_rotary_spectrum_cw_signal_has_positive_polarization():
+    out = rotary_spectrum(
+        _rotary_fixture(rotation_direction=-1.0), u_var="u", v_var="v", dim="x"
+    )
+    k = 3.0 / 64.0
+    assert float(out["psd_cw"].idxmax("wavenumber")) == pytest.approx(k)
+    assert float(out["polarization"].sel(wavenumber=k)) == pytest.approx(1.0)
+
+
+def test_rotary_spectrum_real_only_signal_is_unpolarized():
+    ds = _rotary_fixture(rotation_direction=1.0)
+    ds["v"] = xr.zeros_like(ds["v"])
+    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x")
+    k = 3.0 / 64.0
+    assert float(out["polarization"].sel(wavenumber=k)) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_rotary_spectrum_parseval_matches_velocity_variance():
+    ds = _rotary_fixture(rotation_direction=1.0)
+    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x")
+    dk = float(out["wavenumber"].diff("wavenumber").median())
+    spectral_variance = float((out["psd_cw"] + out["psd_ccw"]).sum() * dk)
+    component_variance = float(ds["u"].var("x") + ds["v"].var("x"))
+    assert spectral_variance == pytest.approx(component_variance)
+
+
+def test_rotary_spectrum_avg_dims_reduce_outputs():
+    ds = _rotary_fixture(rotation_direction=1.0).expand_dims(lat=[0.0, 1.0])
+    ds["u"] = ds["u"] * xr.DataArray([1.0, 2.0], dims="lat", coords={"lat": ds["lat"]})
+    ds["v"] = ds["v"] * xr.DataArray([1.0, 2.0], dims="lat", coords={"lat": ds["lat"]})
+    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x", avg_dims=("lat",))
+    assert out["psd_ccw"].dims == ("wavenumber",)
+    assert out["psd_cw"].dims == ("wavenumber",)
+    assert out["polarization"].dims == ("wavenumber",)
+
+
+def test_rotary_spectrum_handles_dim_without_explicit_coord():
+    """xarray allows dims with no coordinate variable; rotary_spectrum
+    should fall back to unit spacing rather than KeyError on ds[dim]."""
+    n = 32
+    rng = np.random.default_rng(0)
+    ds = xr.Dataset(
+        {
+            "u": ("x", rng.standard_normal(n)),
+            "v": ("x", rng.standard_normal(n)),
+        },
+    )
+    assert "x" not in ds.coords
+    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x")
+    assert out["psd_ccw"].dims == ("wavenumber",)
+
+
+def test_rotary_spectrum_preserves_nyquist_bin_for_even_length_inputs():
+    """Even-length FFTs put Nyquist on the negative-frequency side
+    only; the outer-join on wavenumber must keep that bin so total
+    rotary power is variance-consistent."""
+    ds = _rotary_fixture(rotation_direction=1.0)
+    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x")
+    nyquist = 0.5 / 1.0  # spacing = 1
+    assert nyquist in out["wavenumber"].values
 
 
 def test_ke_spectral_flux_conserves_transfer(taylor_green_vortex_uv):

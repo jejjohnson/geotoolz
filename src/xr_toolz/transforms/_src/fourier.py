@@ -1,5 +1,5 @@
 """Fourier-domain transforms — power spectrum, cross-spectrum, STFT,
-coherence, and spectral flux diagnostics.
+coherence, rotary spectra, and spectral flux diagnostics.
 
 All entry points are ``DataArray``-first: the input is a single
 :class:`xr.DataArray` and the output is also a ``DataArray`` with the
@@ -11,6 +11,7 @@ scheme so callers can identify spectral results downstream:
     f"{name}_iso_psd"  — radially-averaged (isotropic) power spectrum
     f"{a}_{b}_csd"     — cross-spectrum
     f"{a}_{b}_coh"     — magnitude-squared coherence
+    "psd_cw" / "psd_ccw" — rotary power-spectrum components
     f"{name}_stft"     — short-time Fourier transform
 """
 
@@ -475,6 +476,100 @@ def coherence(
     b_name = da_b.name if da_b.name is not None else "b"
     coh.name = f"{a_name}_{b_name}_coh"
     return coh
+
+
+def rotary_spectrum(
+    ds: xr.Dataset,
+    *,
+    u_var: str,
+    v_var: str,
+    dim: str,
+    avg_dims: str | Sequence[str] | None = None,
+) -> xr.Dataset:
+    """Rotary power spectrum from horizontal velocity components.
+
+    Computes the two-sided FFT of the complex velocity ``u + i v``, splits
+    positive and negative wavenumbers into counter-clockwise and clockwise
+    components, then folds both onto a shared positive ``wavenumber`` axis.
+    The unnormalized FFT is converted to a density with ``dx / n`` scaling so
+    integrating ``psd_cw + psd_ccw`` over wavenumber recovers velocity variance.
+    Polarization is NaN where total rotary power is negligible.
+
+    Args:
+        ds: Dataset containing horizontal velocity components.
+        u_var: Zonal/eastward velocity variable.
+        v_var: Meridional/northward velocity variable.
+        dim: Dimension to Fourier transform.
+        avg_dims: Optional dimension or dimensions to average in each output.
+
+    Returns:
+        Dataset with ``psd_ccw``, ``psd_cw``, and ``polarization`` where
+        ``polarization = (psd_cw - psd_ccw) / (psd_cw + psd_ccw)``.
+    """
+    if dim not in ds[u_var].dims or dim not in ds[v_var].dims:
+        raise ValueError(
+            f"dim={dim!r} must be present on both {u_var!r} and {v_var!r}."
+        )
+
+    w = ds[u_var] + 1j * ds[v_var]
+    # Rectangular window + mean-only detrending keeps the dx / n density scaling
+    # Parseval-consistent for variance.
+    spec = xrft.fft(w, dim=[dim], window=None, detrend="constant", true_amplitude=False)
+    freq_dim = f"freq_{dim}"
+    # Datasets can legally have dims without explicit coord variables;
+    # fall back to unit spacing in that case rather than KeyError-ing.
+    coord = ds[dim] if dim in ds.coords else None
+    density_scale = (_coord_spacing(coord) if coord is not None else 1.0) / ds.sizes[
+        dim
+    ]
+    psd = (np.abs(spec) ** 2) * density_scale
+
+    psd_ccw = psd.where(psd[freq_dim] > 0.0, drop=True).rename({freq_dim: "wavenumber"})
+    neg = psd.where(psd[freq_dim] < 0.0, drop=True)
+    psd_cw = (
+        neg.assign_coords({freq_dim: np.abs(neg[freq_dim])})
+        .sortby(freq_dim)
+        .rename({freq_dim: "wavenumber"})
+    )
+    # Union the two folds and fill missing bins with 0 so an even-length
+    # FFT's lone -Nyquist bin survives, keeping psd_cw + psd_ccw
+    # Parseval-consistent with the input variance.
+    psd_ccw, psd_cw = xr.align(psd_ccw, psd_cw, join="outer", fill_value=0.0)
+    psd_ccw.name = "psd_ccw"
+    psd_cw.name = "psd_cw"
+
+    denom = psd_cw + psd_ccw
+    polarization = ((psd_cw - psd_ccw) / denom).where(
+        denom > _polarization_epsilon(denom)
+    )
+    polarization.name = "polarization"
+    out = xr.Dataset(
+        {"psd_ccw": psd_ccw, "psd_cw": psd_cw, "polarization": polarization}
+    )
+    if avg_dims is not None:
+        dims = [avg_dims] if isinstance(avg_dims, str) else list(avg_dims)
+        out = out.mean(dim=dims)
+    return out
+
+
+def _coord_spacing(coord: xr.DataArray) -> float:
+    if coord.size < 2:
+        # A singleton axis has no resolvable sample spacing; use unit spacing so
+        # callers still get deterministic density scaling.
+        return 1.0
+    values = np.asarray(coord.values)
+    if np.issubdtype(values.dtype, np.datetime64):
+        diffs = np.diff(values).astype("timedelta64[ns]").astype(float) / 1e9
+    else:
+        diffs = np.diff(values.astype(float))
+    return float(np.median(np.abs(diffs)))
+
+
+def _polarization_epsilon(da: xr.DataArray) -> float:
+    dtype = da.dtype
+    if np.issubdtype(dtype, np.floating):
+        return float(np.finfo(dtype).eps)
+    return float(np.finfo(float).eps)
 
 
 def stft(

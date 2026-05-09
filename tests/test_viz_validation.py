@@ -23,6 +23,8 @@ from xr_toolz.viz.validation import (
     PSDIsotropicScorePanel,
     PSDSpaceTimePanel,
     PSDSpaceTimeScorePanel,
+    RegionScoreBarPanel,
+    RotaryPolarizationPanel,
     ScaleSkillPanel,
     SpectralSkillPanel,
 )
@@ -302,6 +304,8 @@ def test_viz_validation_top_level_imports():
         "PSDIsotropicScorePanel",
         "PSDSpaceTimePanel",
         "PSDSpaceTimeScorePanel",
+        "RegionScoreBarPanel",
+        "RotaryPolarizationPanel",
     ):
         assert hasattr(vv, name)
 
@@ -511,3 +515,72 @@ def test_psd_panel_savefig_writes_file(tmp_path, _psd_fixtures):
         _psd_fixtures["iso"]
     )
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_region_score_bar_panel_renders_grouped_methods():
+    ds = xr.Dataset(
+        {
+            "rmse": (("region", "method"), [[0.5, 0.4], [0.7, 0.6]]),
+        },
+        coords={"region": ["A", "B"], "method": ["baseline", "model"]},
+    )
+    fig = RegionScoreBarPanel(metrics=["rmse"])(ds)
+    ax = fig.axes[0]
+    labels = [tick.get_text() for tick in ax.get_xticklabels()]
+    assert labels == ["A", "B"]
+    assert len(ax.patches) == 4
+
+
+def test_region_score_bar_panel_renders_horizontal_single_metric():
+    ds = xr.Dataset(
+        {"rmse": ("region", [0.5, 0.7])},
+        coords={"region": ["A", "B"]},
+    )
+    fig = RegionScoreBarPanel(metrics=["rmse"], method_dim=None, horizontal=True)(ds)
+    ax = fig.axes[0]
+    labels = [tick.get_text() for tick in ax.get_yticklabels()]
+    assert labels == ["A", "B"]
+    assert len(ax.patches) == 2
+
+
+def test_rotary_polarization_panel_renders_clipped_heatmap_with_wavelength_axis():
+    da = xr.DataArray(
+        np.linspace(-1.0, 1.0, 12).reshape(3, 4),
+        dims=("lat", "wavenumber"),
+        coords={"lat": [30.0, 35.0, 40.0], "wavenumber": [0.1, 0.2, 0.3, 0.4]},
+        name="polarization",
+    )
+    fig = RotaryPolarizationPanel()(da.to_dataset())
+    ax = fig.axes[0]
+    assert ax.collections[0].get_clim() == (-1.0, 1.0)
+    assert ax.child_axes[0].get_xlabel() == "Wavelength [km]"
+
+
+def test_rotary_and_region_panels_get_config_keys():
+    cfg = RegionScoreBarPanel(metrics=["rmse"], horizontal=True).get_config()
+    assert cfg["metrics"] == ["rmse"]
+    assert cfg["horizontal"] is True
+    assert RegionScoreBarPanel(**cfg).get_config() == cfg
+    cfg = RotaryPolarizationPanel(vmin=-0.5, vmax=0.5).get_config()
+    assert cfg["vmin"] == -0.5
+    assert cfg["vmax"] == 0.5
+    assert cfg["space_scale"] == 1.0
+    assert cfg["wavelength_label"] == "Wavelength [km]"
+    assert RotaryPolarizationPanel(**cfg).get_config() == cfg
+
+
+def test_rotary_polarization_panel_custom_wavelength_units():
+    """A coordinate already in km uses ``space_scale=1.0``; a metres
+    coord needs 1e-3 to get km on the secondary axis."""
+    da = xr.DataArray(
+        np.linspace(-1.0, 1.0, 12).reshape(3, 4),
+        dims=("lat", "wavenumber"),
+        coords={"lat": [30.0, 35.0, 40.0], "wavenumber": [0.1, 0.2, 0.3, 0.4]},
+        name="polarization",
+    )
+    panel = RotaryPolarizationPanel(
+        space_scale=1e-3, wavelength_label="Wavelength [km from cycles/m]"
+    )
+    fig = panel(da.to_dataset())
+    secax = fig.axes[0].child_axes[0]
+    assert secax.get_xlabel() == "Wavelength [km from cycles/m]"

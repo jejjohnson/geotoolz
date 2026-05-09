@@ -26,6 +26,7 @@ from xr_toolz.transforms._src.fourier import (
     isotropic_power_spectrum,
     ke_spectral_flux,
     power_spectrum,
+    rotary_spectrum,
     stft,
 )
 from xr_toolz.transforms._src.sklearn_op import SklearnOp
@@ -55,5 +56,6 @@ __all__ = [
     "nmf",
     "pca",
     "power_spectrum",
+    "rotary_spectrum",
     "stft",
 ]

@@ -26,6 +26,17 @@ Power-spectrum visualisations consuming
 
 ::: xr_toolz.viz.validation.PSDSpaceTimeScorePanel
 
+## Region & Rotary diagnostics
+
+`RegionScoreBarPanel` consumes region-stratified metric outputs (e.g.
+[`xr_toolz.metrics.scores_by_region`](metrics.md)) and
+`RotaryPolarizationPanel` consumes rotary-spectrum polarization fields
+from [`xr_toolz.transforms.rotary_spectrum`](metrics.md).
+
+::: xr_toolz.viz.validation.RegionScoreBarPanel
+
+::: xr_toolz.viz.validation.RotaryPolarizationPanel
+
 ## Spatial snapshots
 
 ::: xr_toolz.viz.validation.SpatialMapPanel

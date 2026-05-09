@@ -25,6 +25,8 @@ from xr_toolz.viz.validation._src.psd import (
     PSDSpaceTimePanel,
     PSDSpaceTimeScorePanel,
 )
+from xr_toolz.viz.validation._src.regime_bars import RegionScoreBarPanel
+from xr_toolz.viz.validation._src.rotary import RotaryPolarizationPanel
 from xr_toolz.viz.validation._src.scales import (
     LeadTimeSkillPanel,
     ScaleSkillPanel,
@@ -42,6 +44,8 @@ __all__ = [
     "PSDSpaceTimePanel",
     "PSDSpaceTimeScorePanel",
     "ProcessBudgetPanel",
+    "RegionScoreBarPanel",
+    "RotaryPolarizationPanel",
     "ScaleSkillPanel",
     "SpatialMapPanel",
     "SpectralSkillPanel",
