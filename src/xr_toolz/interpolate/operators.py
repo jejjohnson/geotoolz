@@ -288,17 +288,31 @@ class Coarsen(Operator):
         factor: dict[str, int],
         method: str = "mean",
         boundary: str = "trim",
+        conservative: bool = False,
+        lat: str = "lat",
     ):
         if boundary not in self._VALID_BOUNDARY:
             raise ValueError(
                 f"Coarsen boundary must be one of {self._VALID_BOUNDARY!r}, "
                 f"got {boundary!r}."
             )
-        self.factor = dict(factor)
+        if conservative and method != "mean":
+            raise ValueError(
+                f"conservative coarsen only supports method='mean', got {method!r}."
+            )
+        # Reuse the layer-0 validator so int-likes (np.int64) are accepted and
+        # negative / zero / non-integer factors fail at construction time.
+        self.factor = _grid_to_grid._validate_coarsen_factor(factor)
         self.method = method
         self.boundary = boundary
+        self.conservative = conservative
+        self.lat = lat
 
     def _apply(self, ds):
+        if self.conservative:
+            return _grid_to_grid.coarsen_conservative(
+                ds, factor=self.factor, lat=self.lat, boundary=self.boundary
+            )
         return _grid_to_grid.coarsen(
             ds, factor=self.factor, method=self.method, boundary=self.boundary
         )
@@ -308,6 +322,8 @@ class Coarsen(Operator):
             "factor": dict(self.factor),
             "method": self.method,
             "boundary": self.boundary,
+            "conservative": self.conservative,
+            "lat": self.lat,
         }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
