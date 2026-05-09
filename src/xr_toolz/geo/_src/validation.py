@@ -8,7 +8,9 @@ ranges, and attach CF-style ``units``, ``standard_name``, and
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -235,3 +237,160 @@ def _rename_first_match(
         if name in ds.variables:
             return ds.rename({name: target})
     return ds
+
+
+def rename_to_cf_standard_names(
+    ds: xr.Dataset,
+    *,
+    include_coords: bool = True,
+) -> xr.Dataset:
+    """Rename variables to their declared CF ``standard_name`` attribute.
+
+    For every variable / coord with a non-empty ``standard_name`` attr,
+    rename to that value. Variables without the attr are left unchanged.
+
+    Args:
+        ds: Input dataset.
+        include_coords: If ``True`` (default), rename coords too. Set
+            ``False`` to limit renaming to data variables only.
+
+    Returns:
+        Dataset with matching variables renamed to their CF
+        ``standard_name``.
+
+    Raises:
+        ValueError: If two source variables resolve to the same CF
+            ``standard_name`` (rename collision).
+    """
+    candidates: list[str] = (
+        [str(k) for k in ds.variables]
+        if include_coords
+        else [str(k) for k in ds.data_vars]
+    )
+    mapping: dict[str, str] = {}
+    for name in candidates:
+        sn = ds[name].attrs.get("standard_name")
+        if sn and sn != name:
+            mapping[name] = str(sn)
+    # Detect collisions: two source vars mapping to the same target name.
+    inverse: dict[str, str] = {}
+    for src, tgt in mapping.items():
+        if tgt in inverse:
+            raise ValueError(
+                f"rename_to_cf_standard_names: two source variables "
+                f"({inverse[tgt]!r} and {src!r}) both map to "
+                f"standard_name={tgt!r}; cannot rename both."
+            )
+        inverse[tgt] = src
+    # Detect collisions with names that already exist in the dataset
+    # but aren't being renamed; xarray.rename would error on these,
+    # but with a less helpful message.
+    existing = set(ds.variables) - set(mapping)
+    for src, tgt in mapping.items():
+        if tgt in existing:
+            raise ValueError(
+                f"rename_to_cf_standard_names: source {src!r} maps to "
+                f"standard_name={tgt!r}, which already exists in the "
+                "dataset; rename or drop the existing variable first."
+            )
+    return ds.rename(mapping) if mapping else ds
+
+
+def rename_from_cf_standard_names(
+    ds: xr.Dataset,
+    *,
+    fallback: Literal["passthrough", "raise"] = "passthrough",
+    include_coords: bool = True,
+) -> xr.Dataset:
+    """Rename CF ``standard_name``-shaped variables to xr_toolz canonical names.
+
+    Uses the :mod:`xr_toolz.types.Variable` registry as the authoritative
+    ``standard_name → canonical_name`` mapping. Variables / coords whose
+    name is not a registered CF ``standard_name`` pass through unchanged
+    (``fallback="passthrough"``, default) or raise ``KeyError``
+    (``fallback="raise"``).
+
+    Single-word names (e.g. ``"ssh"``) are never flagged as unknown — they
+    are already canonical and pass through silently regardless of
+    ``fallback``.
+
+    Args:
+        ds: Input dataset.
+        fallback: ``"passthrough"`` (default) leaves unrecognized
+            CF-shaped names unchanged. ``"raise"`` raises ``KeyError``
+            listing all unrecognized names.
+        include_coords: If ``True`` (default), rename coords too.
+
+    Returns:
+        Dataset with CF-named variables renamed to their canonical
+        xr_toolz names.
+
+    Raises:
+        ValueError: If ``fallback`` is not ``"passthrough"`` or
+            ``"raise"``.
+        KeyError: If ``fallback="raise"`` and any variable name looks
+            like a CF ``standard_name`` (contains ``"_"``) but is not
+            in the registry — and is also not itself a registered
+            canonical name (e.g. ``"sst_obs"``, ``"analysed_sst"``).
+    """
+    if fallback not in ("passthrough", "raise"):
+        raise ValueError(
+            f"fallback must be 'passthrough' or 'raise'; got {fallback!r}."
+        )
+    cf_to_canonical = _build_cf_index()
+    canonical_names = _canonical_name_set()
+    candidates: list[str] = (
+        [str(k) for k in ds.variables]
+        if include_coords
+        else [str(k) for k in ds.data_vars]
+    )
+    mapping: dict[str, str] = {}
+    unknown: list[str] = []
+    for name in candidates:
+        if name in cf_to_canonical:
+            canon = cf_to_canonical[name]
+            if canon != name:
+                mapping[name] = canon
+        elif "_" in name and name not in canonical_names:
+            # Only flag as unknown if the name looks like a CF standard_name
+            # (snake_case multi-word) AND isn't a registered canonical name.
+            # Single-word names ("ssh") and underscored canonicals
+            # ("sst_obs", "analysed_sst") pass through silently.
+            unknown.append(name)
+    if unknown and fallback == "raise":
+        raise KeyError(
+            f"rename_from_cf_standard_names: unknown CF standard_name(s) "
+            f"{unknown!r}. Pass fallback='passthrough' to ignore, or "
+            "extend the Variable registry."
+        )
+    return ds.rename(mapping) if mapping else ds
+
+
+@functools.cache
+def _build_cf_index() -> dict[str, str]:
+    """Build a ``standard_name → canonical_name`` index from the Variable registry.
+
+    Cached on first call; subsequent calls reuse the dict.
+    Only the first registry entry per ``standard_name`` is kept (collision
+    deduplication happens naturally when iterating insertion order).
+    """
+    from xr_toolz.types._src.variable import REGISTRY
+
+    index: dict[str, str] = {}
+    for var in REGISTRY.values():
+        if var.standard_name and var.standard_name not in index:
+            index[var.standard_name] = var.name
+    return index
+
+
+@functools.cache
+def _canonical_name_set() -> frozenset[str]:
+    """Set of canonical short names from the Variable registry.
+
+    Used to recognize underscored canonicals like ``sst_obs`` so they
+    aren't mistakenly flagged as unknown CF standard_names by
+    ``rename_from_cf_standard_names(..., fallback="raise")``.
+    """
+    from xr_toolz.types._src.variable import REGISTRY
+
+    return frozenset(var.name for var in REGISTRY.values())
