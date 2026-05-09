@@ -12,10 +12,11 @@ F3.3 pilot.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.signal import (
     butter,
     filtfilt,
@@ -266,6 +267,69 @@ def gaussian_smooth(
     )
 
 
+def gaussian_smooth_nd(
+    arr: ArrayLike,
+    *,
+    sigma: float | Sequence[float],
+    truncate: float = 4.0,
+    mode: Literal["reflect", "constant", "nearest", "mirror", "wrap"] = "reflect",
+    cval: float = 0.0,
+    nan_aware: bool = True,
+    min_weight: float = 1e-6,
+    mask: ArrayLike | None = None,
+) -> NDArray[np.floating]:
+    """N-D Gaussian convolution with optional NaN-aware normalization.
+
+    With ``nan_aware=True`` (default), implements normalized convolution:
+    NaN or masked pixels are excluded from the weighted sum, and pixels whose
+    Gaussian-weighted support falls below ``min_weight`` are returned as NaN.
+    Original invalid or masked pixels remain NaN in the output.
+    """
+    if truncate <= 0:
+        raise ValueError(f"truncate must be > 0, got {truncate}")
+    if min_weight < 0:
+        raise ValueError(f"min_weight must be >= 0, got {min_weight}")
+
+    arr_ndim = np.asarray(arr).ndim
+    sigma_arr = np.asarray(sigma, dtype=float)
+    if sigma_arr.ndim == 0:
+        if float(sigma_arr) <= 0:
+            raise ValueError(f"sigma must be > 0, got {float(sigma_arr)}")
+    elif sigma_arr.shape != (arr_ndim,):
+        raise ValueError(
+            f"sigma must be scalar or length arr.ndim={arr_ndim}; got shape "
+            f"{sigma_arr.shape}"
+        )
+    elif np.any(sigma_arr <= 0):
+        raise ValueError(f"all sigma entries must be > 0, got {sigma_arr.tolist()}")
+
+    a = _as_floating(arr)
+    if not nan_aware:
+        return gaussian_filter(a, sigma=sigma, truncate=truncate, mode=mode, cval=cval)
+
+    if mask is None:
+        valid_mask = np.isfinite(a)
+    else:
+        valid_mask = np.asarray(mask, dtype=bool)
+        if valid_mask.shape != a.shape:
+            raise ValueError(f"mask shape {valid_mask.shape} != arr shape {a.shape}")
+        valid_mask &= np.isfinite(a)
+
+    filled = np.where(valid_mask, a, 0.0)
+    numerator = gaussian_filter(
+        filled, sigma=sigma, truncate=truncate, mode=mode, cval=cval
+    )
+    denominator = gaussian_filter(
+        valid_mask.astype(float), sigma=sigma, truncate=truncate, mode=mode, cval=cval
+    )
+
+    out = np.full_like(numerator, np.nan)
+    supported = denominator > min_weight
+    np.divide(numerator, denominator, out=out, where=supported)
+    out[~valid_mask] = np.nan
+    return out
+
+
 def lowpass_filter(
     arr: ArrayLike,
     *,
@@ -384,6 +448,7 @@ def fir_filter(
 __all__ = [
     "fir_filter",
     "gaussian_smooth",
+    "gaussian_smooth_nd",
     "lowpass_filter",
     "moving_average",
 ]

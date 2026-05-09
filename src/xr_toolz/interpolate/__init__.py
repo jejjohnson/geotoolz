@@ -14,7 +14,7 @@ source/target structure under :mod:`._src`:
   ``histogram_2d``
 - :mod:`._src.points_to_grid` — ``points_to_grid``, ``kde_to_grid``
 - :mod:`._src.smooth` — ``moving_average``, ``gaussian_smooth``,
-  ``lowpass_filter``, ``fir_filter``
+  ``gaussian_smooth_masked``, ``lowpass_filter``, ``fir_filter``
 - :mod:`._src.coord_remap` — ``remap_axis``, ``to_phase``
 - :mod:`._src.grid_to_points`, :mod:`._src.downscale` — placeholder
   submodules for upcoming work (D12, issue #36)
@@ -60,11 +60,13 @@ from xr_toolz.interpolate._src.resample import resample_time
 from xr_toolz.interpolate._src.smooth import (
     fir_filter,
     gaussian_smooth,
+    gaussian_smooth_masked,
     lowpass_filter,
     moving_average,
 )
 from xr_toolz.interpolate.operators import (
     CleanMask,
+    GaussianSmoothMasked,
     KDEToGrid,
     MaskBinaryClosing,
     MaskBinaryOpening,
@@ -75,6 +77,7 @@ from xr_toolz.interpolate.operators import (
 
 __all__ = [
     "CleanMask",
+    "GaussianSmoothMasked",
     "Grid",
     "KDEToGrid",
     "MaskBinaryClosing",
@@ -97,6 +100,7 @@ __all__ = [
     "fillnan_temporal",
     "fir_filter",
     "gaussian_smooth",
+    "gaussian_smooth_masked",
     "histogram_2d",
     "idw_to_grid",
     "idw_to_points",

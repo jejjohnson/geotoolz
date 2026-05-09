@@ -14,7 +14,7 @@ Tier A array kernels live at :mod:`xr_toolz.interpolate._src.array_smooth`.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -90,6 +90,136 @@ def gaussian_smooth(
     return _apply_along_dim(ds, dim, _fn)
 
 
+def _normalize_dims(dim: str | Sequence[str]) -> tuple[str, ...]:
+    dims = (dim,) if isinstance(dim, str) else tuple(dim)
+    if not dims:
+        raise ValueError("dim must contain at least one dimension")
+    if len(set(dims)) != len(dims):
+        raise ValueError(f"dim entries must be unique, got {dims}")
+    return dims
+
+
+def _normalize_sigmas(
+    sigma: float | Mapping[str, float],
+    dims: tuple[str, ...],
+) -> tuple[float, ...]:
+    if isinstance(sigma, Mapping):
+        missing = tuple(d for d in dims if d not in sigma)
+        if missing:
+            raise ValueError(f"sigma mapping missing dimensions {missing}")
+        sigmas = tuple(float(sigma[d]) for d in dims)
+    else:
+        sigmas = (float(sigma),) * len(dims)
+    if any(s <= 0 for s in sigmas):
+        raise ValueError(f"all sigma values must be > 0, got {sigmas}")
+    return sigmas
+
+
+def _has_split_core_chunks(da: xr.DataArray, dims: tuple[str, ...]) -> bool:
+    if da.chunks is None:
+        return False
+    chunks_by_dim = dict(zip(da.dims, da.chunks, strict=True))
+    return any(dim in chunks_by_dim and len(chunks_by_dim[dim]) > 1 for dim in dims)
+
+
+def _gaussian_smooth_masked_dataarray(
+    da: xr.DataArray,
+    *,
+    dims: tuple[str, ...],
+    sigmas: tuple[float, ...],
+    truncate: float,
+    mode: str,
+    nan_aware: bool,
+    min_weight: float,
+) -> xr.DataArray:
+    if not set(dims) <= set(da.dims) or not np.issubdtype(da.dtype, np.number):
+        return da
+    if _has_split_core_chunks(da, dims):
+        raise ValueError(
+            "gaussian_smooth_masked requires each smoothing dimension to be a "
+            "single chunk. Rechunk smoothing dims to one chunk, and chunk along "
+            "non-smoothing dims."
+        )
+
+    def _kernel(arr: np.ndarray) -> np.ndarray:
+        # `vectorize=True` ensures apply_ufunc only ever hands us a core-shaped
+        # block, so we don't need a manual reshape / stack loop. That also
+        # avoids the empty-leading-dim crash that the manual np.stack hit.
+        return _array.gaussian_smooth_nd(
+            arr,
+            sigma=sigmas,
+            truncate=truncate,
+            mode=mode,
+            nan_aware=nan_aware,
+            min_weight=min_weight,
+        )
+
+    out = xr.apply_ufunc(
+        _kernel,
+        da,
+        input_core_dims=[list(dims)],
+        output_core_dims=[list(dims)],
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[np.result_type(da.dtype, np.float64)],
+        dask_gufunc_kwargs={"allow_rechunk": False},
+        keep_attrs=True,
+    )
+    return out.transpose(*da.dims)
+
+
+def gaussian_smooth_masked(
+    ds: xr.Dataset | xr.DataArray,
+    *,
+    dim: str | Sequence[str],
+    sigma: float | Mapping[str, float],
+    truncate: float = 4.0,
+    mode: str = "reflect",
+    nan_aware: bool = True,
+    min_weight: float = 1e-6,
+) -> xr.Dataset | xr.DataArray:
+    """NaN-aware N-D Gaussian smoothing along one or more dimensions."""
+    if truncate <= 0:
+        raise ValueError(f"truncate must be > 0, got {truncate}")
+    if min_weight < 0:
+        raise ValueError(f"min_weight must be >= 0, got {min_weight}")
+
+    dims = _normalize_dims(dim)
+    sigmas = _normalize_sigmas(sigma, dims)
+
+    if isinstance(ds, xr.DataArray):
+        missing = tuple(d for d in dims if d not in ds.dims)
+        if missing:
+            raise ValueError(f"dim entries {missing} not in DataArray dims {ds.dims}")
+        return _gaussian_smooth_masked_dataarray(
+            ds,
+            dims=dims,
+            sigmas=sigmas,
+            truncate=truncate,
+            mode=mode,
+            nan_aware=nan_aware,
+            min_weight=min_weight,
+        )
+
+    missing = tuple(d for d in dims if d not in ds.dims)
+    if missing:
+        raise ValueError(f"dim entries {missing} not in Dataset dims {tuple(ds.dims)}")
+
+    out_vars = {
+        str(name): _gaussian_smooth_masked_dataarray(
+            da,
+            dims=dims,
+            sigmas=sigmas,
+            truncate=truncate,
+            mode=mode,
+            nan_aware=nan_aware,
+            min_weight=min_weight,
+        )
+        for name, da in ds.data_vars.items()
+    }
+    return xr.Dataset(out_vars, coords=ds.coords, attrs=dict(ds.attrs))
+
+
 def lowpass_filter(
     ds: xr.Dataset,
     *,
@@ -147,6 +277,7 @@ def fir_filter(
 __all__ = [
     "fir_filter",
     "gaussian_smooth",
+    "gaussian_smooth_masked",
     "lowpass_filter",
     "moving_average",
 ]

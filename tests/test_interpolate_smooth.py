@@ -5,17 +5,20 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import xarray as xr
+from scipy.ndimage import gaussian_filter
 
 from xr_toolz.interpolate import (
     array as ia,
     fir_filter,
     gaussian_smooth,
+    gaussian_smooth_masked,
     lowpass_filter,
     moving_average,
 )
 from xr_toolz.interpolate._src.array_smooth import _fir_taps
 from xr_toolz.interpolate.operators import (
     GaussianSmooth,
+    GaussianSmoothMasked,
     LowpassFilter,
     MovingAverage,
 )
@@ -84,6 +87,54 @@ def test_array_gaussian_attenuates_high_freq():
 def test_array_gaussian_invalid_sigma_raises():
     with pytest.raises(ValueError):
         ia.gaussian_smooth(np.zeros(5), axis=-1, sigma=0.0)
+
+
+def test_array_gaussian_smooth_nd_matches_scipy_on_finite_input():
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((8, 9))
+    out = ia.gaussian_smooth_nd(x, sigma=(1.0, 2.0))
+    expected = gaussian_filter(x, sigma=(1.0, 2.0))
+    np.testing.assert_allclose(out, expected)
+
+
+def test_array_gaussian_smooth_nd_does_not_propagate_single_nan():
+    x = np.ones((9, 9), dtype=float)
+    x[4, 4] = np.nan
+    out = ia.gaussian_smooth_nd(x, sigma=1.0)
+    assert np.isnan(out[4, 4])
+    center_idx = 4 * 9 + 4
+    assert not np.isnan(np.delete(out.ravel(), center_idx)).any()
+
+
+def test_array_gaussian_smooth_nd_keeps_masked_land_nan():
+    x = np.ones((20, 20), dtype=float)
+    x[5:15, 5:15] = np.nan
+    out = ia.gaussian_smooth_nd(x, sigma=1.0)
+    assert np.isnan(out[5:15, 5:15]).all()
+
+
+def test_array_gaussian_smooth_nd_nan_aware_false_matches_scipy_with_nans():
+    x = np.ones((9, 9), dtype=float)
+    x[4, 4] = np.nan
+    out = ia.gaussian_smooth_nd(x, sigma=1.0, nan_aware=False)
+    expected = gaussian_filter(x, sigma=1.0)
+    np.testing.assert_allclose(out, expected)
+
+
+def test_array_gaussian_smooth_nd_explicit_mask_excludes_valid_value():
+    x = np.ones((9, 9), dtype=float)
+    mask = np.ones_like(x, dtype=bool)
+    mask[4, 4] = False
+    out = ia.gaussian_smooth_nd(x, sigma=1.0, mask=mask)
+    assert np.isnan(out[4, 4])
+    np.testing.assert_allclose(out[mask], 1.0)
+
+
+def test_array_gaussian_smooth_nd_min_weight_threshold():
+    x = np.full((9, 9), np.nan)
+    x[4, 4] = 1.0
+    out = ia.gaussian_smooth_nd(x, sigma=1.0, min_weight=0.5)
+    assert np.isnan(out).all()
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +225,58 @@ def test_tier_b_gaussian_smooth_matches_tier_a(ds_signal):
     np.testing.assert_allclose(out["x"].values, expected)
 
 
+def test_tier_b_gaussian_smooth_masked_matches_tier_a():
+    rng = np.random.default_rng(1)
+    x = rng.standard_normal((3, 8, 9))
+    x[:, 3, 4] = np.nan
+    ds = xr.Dataset(
+        {
+            "x": (("time", "lat", "lon"), x),
+            "lat_only": (("lat",), np.arange(8, dtype=float)),
+            "label": (("lat",), np.array(["a"] * 8)),
+        },
+        coords={"time": np.arange(3), "lat": np.arange(8), "lon": np.arange(9)},
+    )
+
+    out = gaussian_smooth_masked(ds, dim=("lat", "lon"), sigma={"lat": 1.0, "lon": 2.0})
+    expected = np.stack(
+        [ia.gaussian_smooth_nd(block, sigma=(1.0, 2.0)) for block in x],
+        axis=0,
+    )
+    np.testing.assert_allclose(out["x"].values, expected)
+    np.testing.assert_array_equal(out["lat_only"].values, ds["lat_only"].values)
+    np.testing.assert_array_equal(out["label"].values, ds["label"].values)
+
+
+def test_tier_b_gaussian_smooth_masked_dataarray():
+    da = xr.DataArray(
+        np.arange(25, dtype=float).reshape(5, 5),
+        dims=("lat", "lon"),
+    )
+    out = gaussian_smooth_masked(da, dim=("lat", "lon"), sigma=1.0)
+    expected = ia.gaussian_smooth_nd(da.values, sigma=(1.0, 1.0))
+    np.testing.assert_allclose(out.values, expected)
+    assert out.dims == da.dims
+
+
+def test_tier_b_gaussian_smooth_masked_dask_contract():
+    pytest.importorskip("dask.array")
+
+    x = np.arange(3 * 8 * 9, dtype=float).reshape(3, 8, 9)
+    da = xr.DataArray(x, dims=("time", "lat", "lon")).chunk({"time": 1})
+    out = gaussian_smooth_masked(da, dim=("lat", "lon"), sigma=1.0)
+    assert out.chunks[0] == (1, 1, 1)
+    expected = np.stack(
+        [ia.gaussian_smooth_nd(block, sigma=(1.0, 1.0)) for block in x],
+        axis=0,
+    )
+    np.testing.assert_allclose(out.compute().values, expected)
+
+    split_lat = da.chunk({"lat": 4})
+    with pytest.raises(ValueError, match="single chunk"):
+        gaussian_smooth_masked(split_lat, dim=("lat", "lon"), sigma=1.0)
+
+
 def test_tier_b_lowpass_filter_matches_tier_a(ds_signal):
     out = lowpass_filter(ds_signal, dim="time", cutoff=0.1, order=4)
     expected = ia.lowpass_filter(ds_signal["x"].values, axis=-1, cutoff=0.1, order=4)
@@ -237,6 +340,18 @@ def test_tier_c_gaussian_smooth_matches_tier_b(ds_signal):
         op(ds_signal)["x"].values,
         gaussian_smooth(ds_signal, dim="time", sigma=2.5)["x"].values,
     )
+
+
+def test_tier_c_gaussian_smooth_masked_round_trips_config():
+    op = GaussianSmoothMasked(
+        dim=("lat", "lon"),
+        sigma={"lat": 1.0, "lon": 2.0},
+        truncate=3.0,
+        min_weight=0.25,
+    )
+    cfg = op.get_config()
+    rebuilt = GaussianSmoothMasked(**cfg)
+    assert rebuilt.get_config() == cfg
 
 
 def test_tier_c_lowpass_filter_matches_tier_b(ds_signal):

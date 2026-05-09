@@ -187,6 +187,7 @@ def test_calc_array_gradient_returns_per_axis() -> None:
 _INTERPOLATE_ARRAY_NAMES: tuple[str, ...] = (
     "moving_average",
     "gaussian_smooth",
+    "gaussian_smooth_nd",
     "lowpass_filter",
     "remap_axis",
 )

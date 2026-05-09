@@ -9,6 +9,7 @@ from :class:`xr_toolz.core.Operator`, so they compose with
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 import numpy as np
@@ -1050,6 +1051,59 @@ class GaussianSmooth(Operator):
         return {"dim": self.dim, "sigma": self.sigma, "truncate": self.truncate}
 
 
+class GaussianSmoothMasked(Operator):
+    """Wrap :func:`xr_toolz.interpolate._src.smooth.gaussian_smooth_masked`."""
+
+    def __init__(
+        self,
+        *,
+        dim: str | Sequence[str],
+        sigma: float | Mapping[str, float],
+        truncate: float = 4.0,
+        mode: str = "reflect",
+        nan_aware: bool = True,
+        min_weight: float = 1e-6,
+    ):
+        dims = _smooth._normalize_dims(dim)
+        sigmas = _smooth._normalize_sigmas(sigma, dims)
+        if truncate <= 0:
+            raise ValueError(f"truncate must be > 0, got {truncate}")
+        if min_weight < 0:
+            raise ValueError(f"min_weight must be >= 0, got {min_weight}")
+
+        self.dim: str | tuple[str, ...] = dim if isinstance(dim, str) else dims
+        self.sigma: float | dict[str, float]
+        if isinstance(sigma, Mapping):
+            self.sigma = {d: sigmas[i] for i, d in enumerate(dims)}
+        else:
+            self.sigma = sigmas[0]
+        self.truncate = float(truncate)
+        self.mode = mode
+        self.nan_aware = bool(nan_aware)
+        self.min_weight = float(min_weight)
+
+    def _apply(self, ds):
+        return _smooth.gaussian_smooth_masked(
+            ds,
+            dim=self.dim,
+            sigma=self.sigma,
+            truncate=self.truncate,
+            mode=self.mode,
+            nan_aware=self.nan_aware,
+            min_weight=self.min_weight,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "dim": self.dim,
+            "sigma": self.sigma,
+            "truncate": self.truncate,
+            "mode": self.mode,
+            "nan_aware": self.nan_aware,
+            "min_weight": self.min_weight,
+        }
+
+
 class LowpassFilter(Operator):
     """Wrap :func:`xr_toolz.interpolate._src.smooth.lowpass_filter`.
 
@@ -1328,6 +1382,7 @@ __all__ = [
     "FillNaNTemporal",
     "FromSigma",
     "GaussianSmooth",
+    "GaussianSmoothMasked",
     "Histogram2D",
     "IDWToGrid",
     "IDWToPoints",
