@@ -23,9 +23,22 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
-from skimage.metrics import structural_similarity
 
 from xr_toolz.core import Operator
+
+
+def _require_structural_similarity():
+    # importlib keeps ty (typecheck) from resolving the optional [image] extra
+    # at static-analysis time.
+    import importlib
+
+    try:
+        metrics_mod = importlib.import_module("skimage.metrics")
+    except ImportError as exc:  # pragma: no cover - exercised without extra
+        raise ImportError(
+            "ssim requires scikit-image. Install with: pip install 'xr_toolz[image]'"
+        ) from exc
+    return metrics_mod.structural_similarity
 
 
 def _normalize_dims(dims: str | Sequence[str]) -> list[str]:
@@ -68,6 +81,7 @@ def ssim(
     img_shape = p.shape[len(rest) :]
     p_flat = p.reshape(-1, *img_shape)
     r_flat = r.reshape(-1, *img_shape)
+    structural_similarity = _require_structural_similarity()
 
     base_kw: dict[str, Any] = {}
     if window is not None:

@@ -4,8 +4,8 @@ Single conceptual home for *value resampling* (D12). Sub-organized by
 source/target structure under :mod:`._src`:
 
 - :mod:`._src.gap_fill` — ``fillnan_spatial``, ``fillnan_temporal``,
-  ``fillnan_climatology``, ``fillnan_laplacian``, ``fillnan_rbf``,
-  ``fillnan_idw``
+  ``fillnan_climatology``, ``fillnan_laplacian``, ``fillnan_biharmonic``,
+  ``fillnan_rbf``, ``fillnan_idw``
 - :mod:`._src.mask_ops` — ``clean_mask`` and binary mask cleanup helpers
 - :mod:`._src.grid_to_grid` — ``coarsen``, ``coarsen_conservative``,
   ``refine``, ``refine_2d``
@@ -34,6 +34,7 @@ from xr_toolz.interpolate._src.binning import (
 )
 from xr_toolz.interpolate._src.coord_remap import remap_axis, to_phase
 from xr_toolz.interpolate._src.gap_fill import (
+    fillnan_biharmonic,
     fillnan_climatology,
     fillnan_idw,
     fillnan_laplacian,
@@ -69,6 +70,7 @@ from xr_toolz.interpolate._src.smooth import (
 from xr_toolz.interpolate.operators import (
     AlongTrack,
     CleanMask,
+    FillNaNBiharmonic,
     GaussianSmoothMasked,
     KDEToGrid,
     MaskBinaryClosing,
@@ -82,6 +84,7 @@ from xr_toolz.interpolate.operators import (
 __all__ = [
     "AlongTrack",
     "CleanMask",
+    "FillNaNBiharmonic",
     "GaussianSmoothMasked",
     "Grid",
     "KDEToGrid",
@@ -99,6 +102,7 @@ __all__ = [
     "clean_mask",
     "coarsen",
     "coarsen_conservative",
+    "fillnan_biharmonic",
     "fillnan_climatology",
     "fillnan_idw",
     "fillnan_laplacian",
