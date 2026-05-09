@@ -22,6 +22,7 @@ from xr_toolz.interpolate._src import (
     gap_fill as _gap_fill,
     grid_to_grid as _grid_to_grid,
     knn as _knn,
+    mask_ops as _mask_ops,
     points_to_grid as _points_to_grid,
     resample as _resample,
     smooth as _smooth,
@@ -245,6 +246,190 @@ class FillNaNIDW(Operator):
             "metric": self.metric,
             "max_distance": self.max_distance,
             "eps": self.eps,
+        }
+
+
+# ---------- mask cleanup ----------------------------------------------------
+
+
+def _footprint_config(footprint: _mask_ops.Footprint | None) -> Any:
+    # ndarray footprints are encoded as a JSON-safe dict so cls(**get_config())
+    # round-trips without losing the exact mask. The helpers in mask_ops
+    # accept the dict form via ``_decode_footprint_config``.
+    if isinstance(footprint, np.ndarray):
+        return {"kind": "ndarray", "data": footprint.astype(bool).tolist()}
+    return footprint
+
+
+def _decode_footprint_config(footprint: Any) -> _mask_ops.Footprint | None:
+    if isinstance(footprint, dict) and footprint.get("kind") == "ndarray":
+        return np.asarray(footprint["data"], dtype=bool)
+    return footprint
+
+
+class MaskRemoveSmallHoles(Operator):
+    """Operator wrapper for filling small unmasked holes in mask pipelines.
+
+    Args:
+        area: False regions smaller than this pixel count are filled.
+        lon: Longitude dimension name.
+        lat: Latitude dimension name.
+    """
+
+    def __init__(self, *, area: int = 4, lon: str = "lon", lat: str = "lat"):
+        self.area = area
+        self.lon = lon
+        self.lat = lat
+
+    def _apply(self, mask):
+        return _mask_ops.remove_small_holes_2d(
+            mask, area=self.area, lon=self.lon, lat=self.lat
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {"area": self.area, "lon": self.lon, "lat": self.lat}
+
+
+class MaskRemoveSmallObjects(Operator):
+    """Operator wrapper for dropping small masked specks in mask pipelines.
+
+    Args:
+        area: True regions smaller than this pixel count are dropped.
+        lon: Longitude dimension name.
+        lat: Latitude dimension name.
+    """
+
+    def __init__(self, *, area: int = 4, lon: str = "lon", lat: str = "lat"):
+        self.area = area
+        self.lon = lon
+        self.lat = lat
+
+    def _apply(self, mask):
+        return _mask_ops.remove_small_objects_2d(
+            mask, area=self.area, lon=self.lon, lat=self.lat
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {"area": self.area, "lon": self.lon, "lat": self.lat}
+
+
+class MaskBinaryOpening(Operator):
+    """Operator wrapper for binary opening inside ``Sequential`` pipelines.
+
+    Args:
+        footprint: Structuring element specification.
+        lon: Longitude dimension name.
+        lat: Latitude dimension name.
+    """
+
+    def __init__(
+        self,
+        *,
+        footprint: _mask_ops.Footprint = 1,
+        lon: str = "lon",
+        lat: str = "lat",
+    ):
+        self.footprint = _decode_footprint_config(footprint)
+        self.lon = lon
+        self.lat = lat
+
+    def _apply(self, mask):
+        return _mask_ops.binary_opening_2d(
+            mask, footprint=self.footprint, lon=self.lon, lat=self.lat
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "footprint": _footprint_config(self.footprint),
+            "lon": self.lon,
+            "lat": self.lat,
+        }
+
+
+class MaskBinaryClosing(Operator):
+    """Operator wrapper for binary closing inside ``Sequential`` pipelines.
+
+    Args:
+        footprint: Structuring element specification.
+        lon: Longitude dimension name.
+        lat: Latitude dimension name.
+    """
+
+    def __init__(
+        self,
+        *,
+        footprint: _mask_ops.Footprint = 1,
+        lon: str = "lon",
+        lat: str = "lat",
+    ):
+        self.footprint = _decode_footprint_config(footprint)
+        self.lon = lon
+        self.lat = lat
+
+    def _apply(self, mask):
+        return _mask_ops.binary_closing_2d(
+            mask, footprint=self.footprint, lon=self.lon, lat=self.lat
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "footprint": _footprint_config(self.footprint),
+            "lon": self.lon,
+            "lat": self.lat,
+        }
+
+
+class CleanMask(Operator):
+    """Convenience operator for the common mask-cleanup pipeline.
+
+    The fixed order is remove small holes, remove small objects, binary
+    closing, then binary opening; each step is opt-in through its keyword.
+
+    Args:
+        fill_holes_area: Optional hole area threshold.
+        drop_objects_area: Optional object area threshold.
+        closing_footprint: Optional binary-closing footprint.
+        opening_footprint: Optional binary-opening footprint.
+        lon: Longitude dimension name.
+        lat: Latitude dimension name.
+    """
+
+    def __init__(
+        self,
+        *,
+        fill_holes_area: int | None = 4,
+        drop_objects_area: int | None = None,
+        closing_footprint: _mask_ops.Footprint | None = None,
+        opening_footprint: _mask_ops.Footprint | None = None,
+        lon: str = "lon",
+        lat: str = "lat",
+    ):
+        self.fill_holes_area = fill_holes_area
+        self.drop_objects_area = drop_objects_area
+        self.closing_footprint = _decode_footprint_config(closing_footprint)
+        self.opening_footprint = _decode_footprint_config(opening_footprint)
+        self.lon = lon
+        self.lat = lat
+
+    def _apply(self, mask):
+        return _mask_ops.clean_mask(
+            mask,
+            fill_holes_area=self.fill_holes_area,
+            drop_objects_area=self.drop_objects_area,
+            closing_footprint=self.closing_footprint,
+            opening_footprint=self.opening_footprint,
+            lon=self.lon,
+            lat=self.lat,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "fill_holes_area": self.fill_holes_area,
+            "drop_objects_area": self.drop_objects_area,
+            "closing_footprint": _footprint_config(self.closing_footprint),
+            "opening_footprint": _footprint_config(self.opening_footprint),
+            "lon": self.lon,
+            "lat": self.lat,
         }
 
 
@@ -1132,6 +1317,7 @@ Upscale = _downscale.Upscale
 
 __all__ = [
     "Bin2D",
+    "CleanMask",
     "Coarsen",
     "Downscale",
     "FillNaNClimatology",
@@ -1147,6 +1333,10 @@ __all__ = [
     "IDWToPoints",
     "KDEToGrid",
     "LowpassFilter",
+    "MaskBinaryClosing",
+    "MaskBinaryOpening",
+    "MaskRemoveSmallHoles",
+    "MaskRemoveSmallObjects",
     "MovingAverage",
     "PointsToGrid",
     "Refine",
