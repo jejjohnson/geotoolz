@@ -28,6 +28,27 @@
 
 * `xr_toolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xr_toolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.7](https://github.com/jejjohnson/xr_toolz/compare/v0.0.6...v0.0.7) (2026-05-09)
+
+
+### Features
+
+* **geo:** add 2-D Morlet wavelet wavenumber spectra ([#176](https://github.com/jejjohnson/xr_toolz/issues/176)) ([834ecfc](https://github.com/jejjohnson/xr_toolz/commit/834ecfc06ffc58f692bb27326c68be7217972497))
+* **geo:** add RegionSpec registry and regionmask-backed regional subsetting ([#173](https://github.com/jejjohnson/xr_toolz/issues/173)) ([8aab417](https://github.com/jejjohnson/xr_toolz/commit/8aab417afa6e4fb1b1aba80be89de28531aa27b4))
+* **geo:** add rename_to_cf_standard_names / rename_from_cf_standard_names + operators ([#172](https://github.com/jejjohnson/xr_toolz/issues/172)) ([49f03e9](https://github.com/jejjohnson/xr_toolz/commit/49f03e978ad2f1cbe092b071555d90011e7b6603))
+* **interpolate:** add biharmonic NaN inpainting ([#189](https://github.com/jejjohnson/xr_toolz/issues/189)) ([4f10dbb](https://github.com/jejjohnson/xr_toolz/commit/4f10dbbd27c332577064f644e1a7592730c76e68))
+* **interpolate:** add cosine-latitude conservative coarsen ([#186](https://github.com/jejjohnson/xr_toolz/issues/186)) ([cf01cfc](https://github.com/jejjohnson/xr_toolz/commit/cf01cfcffcb3e2ea487f11fe183c0d4cf19311b6))
+* **interpolate:** add grid-to-points sampling ([#191](https://github.com/jejjohnson/xr_toolz/issues/191)) ([cafeea5](https://github.com/jejjohnson/xr_toolz/commit/cafeea5fbe005e4062cbb7a75cd44c372ab7e83d))
+* **interpolate:** add kNN IDW interpolation ([#183](https://github.com/jejjohnson/xr_toolz/issues/183)) ([6752c97](https://github.com/jejjohnson/xr_toolz/commit/6752c97ce4e52b06594927ed7151aafaa5eb5a7c))
+* **interpolate:** add mask morphology cleanup operations ([#188](https://github.com/jejjohnson/xr_toolz/issues/188)) ([b6e4674](https://github.com/jejjohnson/xr_toolz/commit/b6e46746b5b6d3388caec725e3486684f318632c))
+* **interpolate:** add NaN-aware Gaussian smoothing ([#190](https://github.com/jejjohnson/xr_toolz/issues/190)) ([0d0c596](https://github.com/jejjohnson/xr_toolz/commit/0d0c59640e7e1f1f610cc2c92b7c6317b32bdf05))
+* **interpolate:** add skimage-backed 2D refine ([#187](https://github.com/jejjohnson/xr_toolz/issues/187)) ([09b00cb](https://github.com/jejjohnson/xr_toolz/commit/09b00cb7a0f5c748f02581f34266ad3edc8226c2))
+* **interpolate:** add sklearn-backed KDE points-to-grid ([#184](https://github.com/jejjohnson/xr_toolz/issues/184)) ([62961b6](https://github.com/jejjohnson/xr_toolz/commit/62961b6072ea29fb31ac59ce13f07a264323b8c0))
+* **interpolate:** add temporal interpolation and climatology gap fill ([#185](https://github.com/jejjohnson/xr_toolz/issues/185)) ([8c6fcdf](https://github.com/jejjohnson/xr_toolz/commit/8c6fcdf2b8453d225a42eb9498da36f4f37d4074))
+* **metrics:** add composite RMSE/PSD helpers and 2-D resolved-scale summary ([#175](https://github.com/jejjohnson/xr_toolz/issues/175)) ([95ddab0](https://github.com/jejjohnson/xr_toolz/commit/95ddab0bd4f48b45d821249ec81d441850fa6881))
+* **transforms, viz:** add rotary spectrum + RegionScoreBarPanel + RotaryPolarizationPanel ([#174](https://github.com/jejjohnson/xr_toolz/issues/174)) ([aa3bd75](https://github.com/jejjohnson/xr_toolz/commit/aa3bd75d7f40a63fca7a164b52bf15fc6c27da21))
+* **transforms:** add KE/enstrophy spectral flux + integral scale, slope fit, compensated spectrum ([#171](https://github.com/jejjohnson/xr_toolz/issues/171)) ([e8135f8](https://github.com/jejjohnson/xr_toolz/commit/e8135f817477fcbddc10aef654ea747c70353ff6))
+
 ## [0.0.6](https://github.com/jejjohnson/xr_toolz/compare/v0.0.5...v0.0.6) (2026-05-08)
 
 
