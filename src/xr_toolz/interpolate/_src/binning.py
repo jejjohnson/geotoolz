@@ -15,6 +15,8 @@ import pandas as pd
 import xarray as xr
 from scipy.stats import binned_statistic_2d
 
+from xr_toolz.utils._src.finite import _finite_mask
+
 
 @dataclass
 class Grid:
@@ -116,7 +118,7 @@ def bin_2d(
     values = np.ravel(da.values)
     lons = np.ravel(np.asarray(da[lon].values))
     lats = np.ravel(np.asarray(da[lat].values))
-    finite = np.isfinite(values)
+    finite = _finite_mask(values)
 
     lon_edges, lat_edges = grid.bin_edges()
     stat, _, _, _ = binned_statistic_2d(

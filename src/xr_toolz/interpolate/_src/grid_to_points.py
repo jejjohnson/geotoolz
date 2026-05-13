@@ -9,6 +9,9 @@ import numpy as np
 import xarray as xr
 from scipy.interpolate import RegularGridInterpolator
 
+from xr_toolz.utils._src.finite import _as_numeric_with_mask
+from xr_toolz.utils._src.validation import _require_coords, _require_dims
+
 
 Method = Literal["linear", "nearest", "slinear", "cubic", "quintic"]
 
@@ -24,7 +27,7 @@ def _as_numeric_axis(values: np.ndarray, *, name: str) -> np.ndarray:
         numeric = arr.astype(np.float64)
     except (TypeError, ValueError) as err:
         raise ValueError(f"coord {name!r} must be numeric or datetime-like") from err
-    if np.any(~np.isfinite(numeric)):
+    if np.any(~_as_numeric_with_mask(numeric)[1]):
         raise ValueError(f"coord {name!r} contains non-finite values")
     return numeric
 
@@ -46,15 +49,13 @@ def _as_numeric_points(
         raise ValueError(
             f"points variable {name!r} must be numeric or datetime-like"
         ) from err
-    return numeric, np.isfinite(numeric)
+    return _as_numeric_with_mask(numeric)
 
 
 def _normalize_axis(da: xr.DataArray, name: str) -> tuple[xr.DataArray, np.ndarray]:
     """Validate a 1-D coordinate axis and return it in ascending order."""
-    if name not in da.dims:
-        raise ValueError(f"da is missing required coord dim {name!r}")
-    if name not in da.coords:
-        raise ValueError(f"da is missing required coord {name!r}")
+    _require_dims(da, name, name="da")
+    _require_coords(da, name, name="da")
     if da[name].dims != (name,):
         raise ValueError(f"coord {name!r} must be 1-D on its matching dimension")
 

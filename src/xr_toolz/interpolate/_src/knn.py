@@ -7,46 +7,14 @@ from typing import Any, Literal
 import numpy as np
 import xarray as xr
 from numpy.typing import ArrayLike
-from sklearn.neighbors import BallTree, KDTree
 
 from xr_toolz.interpolate._src.binning import Grid
+from xr_toolz.interpolate._src.spatial import _build_tree, _to_metric_xy
+from xr_toolz.utils._src.finite import _finite_filter, _finite_mask
+from xr_toolz.utils._src.validation import _validate_idw_args
 
 
 Metric = Literal["euclidean", "haversine"]
-
-
-def _validate_idw_args(
-    k: int,
-    power: float,
-    metric: Metric,
-    max_distance: float | None,
-    eps: float,
-) -> None:
-    """Validate common IDW hyperparameters."""
-    if not isinstance(k, int) or isinstance(k, bool) or k < 1:
-        raise ValueError(f"k must be a positive integer, got {k!r}")
-    if power < 0:
-        raise ValueError(f"power must be non-negative, got {power}")
-    if metric not in {"euclidean", "haversine"}:
-        raise ValueError(f"metric must be 'euclidean' or 'haversine', got {metric!r}")
-    if max_distance is not None and max_distance < 0:
-        raise ValueError(f"max_distance must be non-negative, got {max_distance}")
-    if eps < 0:
-        raise ValueError(f"eps must be non-negative, got {eps}")
-
-
-def _build_tree(src_xy: np.ndarray, metric: Metric) -> Any:
-    """Build the sklearn neighbour tree appropriate for ``metric``."""
-    if metric == "haversine":
-        return BallTree(src_xy, metric="haversine")
-    return KDTree(src_xy, metric="euclidean")
-
-
-def _to_metric_xy(lons: np.ndarray, lats: np.ndarray, metric: Metric) -> np.ndarray:
-    """Convert lon/lat arrays to the coordinate order expected by the tree."""
-    if metric == "haversine":
-        return np.deg2rad(np.column_stack([lats, lons]))
-    return np.column_stack([lons, lats])
 
 
 def _idw_kernel(
@@ -103,11 +71,11 @@ def _prepare_sources(
     if not (lon_arr.size == lat_arr.size == value_arr.size):
         raise ValueError("lons, lats, and values must have the same size")
 
-    finite = np.isfinite(lon_arr) & np.isfinite(lat_arr) & np.isfinite(value_arr)
-    if not finite.any():
+    lon_arr, lat_arr, value_arr = _finite_filter(lon_arr, lat_arr, value_arr)
+    if lon_arr.size == 0:
         raise ValueError("IDW interpolation requires at least one finite source")
 
-    return lon_arr[finite], lat_arr[finite], value_arr[finite]
+    return lon_arr, lat_arr, value_arr
 
 
 def idw_to_points(
@@ -151,7 +119,7 @@ def idw_to_points(
     )
 
     out = np.full(dst_lon.shape, np.nan, dtype=float)
-    finite_queries = np.isfinite(dst_lon) & np.isfinite(dst_lat)
+    finite_queries = _finite_mask(dst_lon, dst_lat)
     if not finite_queries.any():
         return out
 
@@ -271,7 +239,7 @@ def fillnan_idw(
         rows, cols = np.indices((lat_coord.size, lon_coord.size))
 
     def _fill_slice(arr: np.ndarray) -> np.ndarray:
-        finite = np.isfinite(arr)
+        finite = _finite_mask(arr)
         if finite.all() or not finite.any():
             return arr
 

@@ -26,6 +26,7 @@ from xr_toolz.interpolate import (
     remove_small_objects_2d,
 )
 from xr_toolz.interpolate._src.mask_ops import _resolve_footprint
+from xr_toolz.transforms import clean_mask as transforms_clean_mask
 
 
 def _mask(values: np.ndarray) -> xr.DataArray:
@@ -35,6 +36,10 @@ def _mask(values: np.ndarray) -> xr.DataArray:
         coords={"lat": np.arange(values.shape[0]), "lon": np.arange(values.shape[1])},
         name="mask",
     )
+
+
+def test_mask_ops_reexport_from_transforms() -> None:
+    assert clean_mask is transforms_clean_mask
 
 
 def test_remove_small_holes_fills_small_unmasked_island() -> None:

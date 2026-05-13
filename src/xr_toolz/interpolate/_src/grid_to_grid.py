@@ -14,6 +14,10 @@ from typing import Literal
 import numpy as np
 import xarray as xr
 
+from xr_toolz.utils._src.finite import _finite_mask_da
+from xr_toolz.utils._src.optional_imports import _require_optional
+from xr_toolz.utils._src.validation import _validate_coarsen_factor
+
 
 _RESIZE_MODES = frozenset({"reflect", "constant", "edge", "symmetric", "wrap"})
 
@@ -98,37 +102,17 @@ def _coarsen_conservative_dataarray(
     _validate_lat_chunks(da, factor[lat], lat=lat)
 
     cos_lat = np.cos(np.deg2rad(da[lat]))
-    mask = xr.apply_ufunc(np.isfinite, da, dask="allowed")
+    mask = _finite_mask_da(da)
     # Single mask multiplication: zero-out NaN cells in da, then weight.
-    weights = cos_lat * mask
+    # mask on the left keeps ty's inference DataArray-shaped (cos_lat is ndarray).
+    weights = mask * cos_lat
     numerator = (
         (da.where(mask, 0.0) * cos_lat).coarsen(dim=factor, boundary=boundary).sum()
     )
-    denominator = weights.coarsen(dim=factor, boundary=boundary).sum()
+    denominator = weights.coarsen(dim=factor, boundary=boundary).sum()  # ty: ignore[unresolved-attribute]
     # Mask zero denominators before dividing so we never trigger 0/0 warnings.
     safe_den = denominator.where(denominator > 0)
     return numerator / safe_den
-
-
-def _validate_coarsen_factor(factor: Mapping[str, int]) -> dict[str, int]:
-    factor_dict: dict[str, int] = {}
-    for dim, value in factor.items():
-        # Accept numpy integer types (np.int64 etc.) by reducing through __index__.
-        try:
-            int_value = (
-                int(value.__index__()) if hasattr(value, "__index__") else int(value)
-            )
-            int_match = hasattr(value, "__index__")
-        except (TypeError, ValueError):
-            int_match = False
-            int_value = 0
-        if not int_match or int_value < 1 or isinstance(value, bool):
-            raise ValueError(
-                f"coarsen factor for {dim!r} must be a positive integer "
-                f"(>= 1), got {value!r}."
-            )
-        factor_dict[dim] = int_value
-    return factor_dict
 
 
 def _validate_lat_chunks(da: xr.DataArray, factor: int, *, lat: str) -> None:
@@ -268,17 +252,12 @@ def refine_2d(
 
 
 def _get_skimage_resize() -> Callable[..., np.ndarray]:
-    # importlib keeps ty (typecheck) from resolving the optional [image] extra
-    # at static-analysis time.
-    import importlib
-
-    try:
-        transform = importlib.import_module("skimage.transform")
-    except ImportError as exc:  # pragma: no cover - depends on optional install
-        raise ImportError(
-            "refine_2d requires scikit-image. "
-            "Install with: pip install 'xr_toolz[image]'"
-        ) from exc
+    transform = _require_optional(
+        "skimage.transform",
+        extra="image",
+        feature="refine_2d",
+        package="scikit-image",
+    )
     return transform.resize
 
 

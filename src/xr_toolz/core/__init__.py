@@ -8,7 +8,7 @@ the functional :class:`Graph` API (:class:`Input`, :class:`Node`,
 
 from xr_toolz.core.combinators import ApplyToEach, Augment, Tap
 from xr_toolz.core.graph import Graph, Input, Node
-from xr_toolz.core.operator import Operator
+from xr_toolz.core.operator import ConfigMixin, Operator
 from xr_toolz.core.sequential import Sequential
 from xr_toolz.core.signature import Signature
 
@@ -16,6 +16,7 @@ from xr_toolz.core.signature import Signature
 __all__ = [
     "ApplyToEach",
     "Augment",
+    "ConfigMixin",
     "Graph",
     "Input",
     "Node",

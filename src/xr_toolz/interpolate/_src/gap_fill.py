@@ -22,6 +22,9 @@ import xarray as xr
 from scipy.interpolate import RBFInterpolator, griddata
 
 from xr_toolz.interpolate._src.knn import fillnan_idw
+from xr_toolz.utils._src.finite import _finite_mask
+from xr_toolz.utils._src.optional_imports import _require_optional
+from xr_toolz.utils._src.validation import _require_dims
 
 
 __all__ = [
@@ -34,18 +37,12 @@ __all__ = [
 
 
 def _require_inpaint_biharmonic():
-    # importlib keeps ty (typecheck) from trying to resolve the optional
-    # ``skimage`` dependency at static-analysis time; the [image] extra is
-    # only required at call time.
-    import importlib
-
-    try:
-        restoration = importlib.import_module("skimage.restoration")
-    except ImportError as exc:  # pragma: no cover - exercised without extra
-        raise ImportError(
-            "fillnan_biharmonic requires scikit-image. "
-            "Install with: pip install 'xr_toolz[image]'"
-        ) from exc
+    restoration = _require_optional(
+        "skimage.restoration",
+        extra="image",
+        feature="fillnan_biharmonic",
+        package="scikit-image",
+    )
     return restoration.inpaint_biharmonic
 
 
@@ -77,7 +74,7 @@ def fillnan_spatial(
     targets = np.column_stack([lon_grid.ravel(), lat_grid.ravel()])
 
     def _fill_slice(arr: np.ndarray) -> np.ndarray:
-        finite = np.isfinite(arr)
+        finite = _finite_mask(arr)
         if finite.all() or not finite.any():
             return arr
         samples = np.column_stack([lon_grid[finite].ravel(), lat_grid[finite].ravel()])
@@ -343,14 +340,12 @@ def fillnan_biharmonic(
         ImportError: If scikit-image is not installed.
         ValueError: If ``da`` or ``mask`` is missing the spatial dimensions.
     """
-    if lon not in da.dims or lat not in da.dims:
-        raise ValueError(f"da must have dims {lon!r} and {lat!r}")
+    _require_dims(da, lon, lat, name="da")
 
     if mask is None:
         mask_da = da.isnull()
     else:
-        if lon not in mask.dims or lat not in mask.dims:
-            raise ValueError(f"mask must have dims {lon!r} and {lat!r}")
+        _require_dims(mask, lon, lat, name="mask")
         mask_da = mask.astype(bool)
 
     output_dtype = da.dtype if np.issubdtype(da.dtype, np.floating) else np.float64
@@ -369,7 +364,7 @@ def fillnan_biharmonic(
         # bias the solve. After the solve we restore those positions back to
         # their original (NaN) value so the caller's mask remains the only
         # set of cells whose values we modify.
-        nonfinite_outside_mask = ~np.isfinite(arr) & ~mask_bool
+        nonfinite_outside_mask = ~_finite_mask(arr) & ~mask_bool
         solver_mask = mask_bool | nonfinite_outside_mask
         arr_filled = arr.astype(np.float64, copy=True)
         # Inside the solver mask the value is unused but must be finite.
@@ -417,7 +412,7 @@ def fillnan_rbf(
     lon_grid, lat_grid = np.meshgrid(lon_vals, lat_vals, indexing="xy")
 
     def _fill_slice(arr: np.ndarray) -> np.ndarray:
-        finite = np.isfinite(arr)
+        finite = _finite_mask(arr)
         if finite.all() or not finite.any():
             return arr
         samples = np.column_stack([lon_grid[finite].ravel(), lat_grid[finite].ravel()])

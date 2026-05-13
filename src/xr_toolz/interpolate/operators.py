@@ -15,19 +15,21 @@ from typing import Any, Literal
 import numpy as np
 import xarray as xr
 
-from xr_toolz.core import Operator, Signature
+from xr_toolz.core import ConfigMixin, Operator, Signature
 from xr_toolz.interpolate._src import (
     binning as _binning,
-    coord_remap as _coord_remap,
     downscale as _downscale,
     gap_fill as _gap_fill,
     grid_to_grid as _grid_to_grid,
     grid_to_points as _grid_to_points,
     knn as _knn,
-    mask_ops as _mask_ops,
     points_to_grid as _points_to_grid,
     resample as _resample,
     smooth as _smooth,
+)
+from xr_toolz.transforms._src import (
+    coord_remap as _coord_remap,
+    morphology as _mask_ops,
 )
 
 
@@ -55,7 +57,7 @@ def _json_fill_value(value: float | None) -> float | str | None:
 # ---------- gap fill -------------------------------------------------------
 
 
-class FillNaNSpatial(Operator):
+class FillNaNSpatial(ConfigMixin, Operator):
     """Wrap :func:`xr_toolz.interpolate.fillnan_spatial`."""
 
     def __init__(self, method: str = "linear", lon: str = "lon", lat: str = "lat"):
@@ -68,11 +70,8 @@ class FillNaNSpatial(Operator):
             da, method=self.method, lon=self.lon, lat=self.lat
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"method": self.method, "lon": self.lon, "lat": self.lat}
 
-
-class FillNaNTemporal(Operator):
+class FillNaNTemporal(ConfigMixin, Operator):
     """Wrap :func:`xr_toolz.interpolate.fillnan_temporal`."""
 
     def __init__(
@@ -90,11 +89,8 @@ class FillNaNTemporal(Operator):
             ds, method=self.method, time=self.time, max_gap=self.max_gap
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"method": self.method, "time": self.time, "max_gap": self.max_gap}
 
-
-class FillNaNClimatology(Operator):
+class FillNaNClimatology(ConfigMixin, Operator):
     """Wrap :func:`xr_toolz.interpolate.fillnan_climatology`."""
 
     def __init__(
@@ -119,16 +115,8 @@ class FillNaNClimatology(Operator):
             min_count=self.min_count,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "time": self.time,
-            "group": self.group,
-            "residual": self.residual,
-            "min_count": self.min_count,
-        }
 
-
-class FillNaNLaplacian(Operator):
+class FillNaNLaplacian(ConfigMixin, Operator):
     """Wrap :func:`xr_toolz.interpolate.fillnan_laplacian`."""
 
     def __init__(
@@ -169,18 +157,8 @@ class FillNaNLaplacian(Operator):
             return ds.map(_fill)
         return _fill(ds)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "max_iter": self.max_iter,
-            "tol": self.tol,
-            "relaxation": self.relaxation,
-            "boundary": self.boundary,
-            "lon": self.lon,
-            "lat": self.lat,
-        }
 
-
-class FillNaNBiharmonic(Operator):
+class FillNaNBiharmonic(ConfigMixin, Operator):
     """Wrap :func:`xr_toolz.interpolate.fillnan_biharmonic`."""
 
     def __init__(
@@ -202,15 +180,8 @@ class FillNaNBiharmonic(Operator):
             split_into_regions=self.split_into_regions,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "lon": self.lon,
-            "lat": self.lat,
-            "split_into_regions": self.split_into_regions,
-        }
 
-
-class FillNaNRBF(Operator):
+class FillNaNRBF(ConfigMixin, Operator):
     """Wrap :func:`xr_toolz.interpolate.fillnan_rbf`."""
 
     def __init__(
@@ -234,16 +205,8 @@ class FillNaNRBF(Operator):
             lat=self.lat,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "kernel": self.kernel,
-            "neighbors": self.neighbors,
-            "lon": self.lon,
-            "lat": self.lat,
-        }
 
-
-class FillNaNIDW(Operator):
+class FillNaNIDW(ConfigMixin, Operator):
     """Wrap :func:`xr_toolz.interpolate.fillnan_idw`."""
 
     def __init__(
@@ -277,17 +240,6 @@ class FillNaNIDW(Operator):
             max_distance=self.max_distance,
             eps=self.eps,
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "lon": self.lon,
-            "lat": self.lat,
-            "k": self.k,
-            "power": self.power,
-            "metric": self.metric,
-            "max_distance": self.max_distance,
-            "eps": self.eps,
-        }
 
 
 # ---------- mask cleanup ----------------------------------------------------
@@ -477,7 +429,7 @@ class CleanMask(Operator):
 # ---------- resample -------------------------------------------------------
 
 
-class ResampleTime(Operator):
+class ResampleTime(ConfigMixin, Operator):
     """Wrap :func:`xr_toolz.interpolate.resample_time`."""
 
     def __init__(
@@ -500,14 +452,6 @@ class ResampleTime(Operator):
             time=self.time,
             interp_method=self.interp_method,
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "freq": self.freq,
-            "method": self.method,
-            "time": self.time,
-            "interp_method": self.interp_method,
-        }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         return input_signature.replace_dims({self.time: None})
@@ -1450,7 +1394,7 @@ class ToHeight(_VerticalPreset):
     _DEFAULT_SOURCE = "level"
 
 
-class ToPhase(Operator):
+class ToPhase(ConfigMixin, Operator):
     """Fold a time axis onto a phase axis by binning + averaging.
 
     Phase is computed as ``((t - epoch) / period) mod 1`` and binned
@@ -1493,14 +1437,6 @@ class ToPhase(Operator):
             n_bins=self.n_bins,
             epoch=self.epoch,
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "time_dim": self.time_dim,
-            "period": self.period,
-            "n_bins": self.n_bins,
-            "epoch": self.epoch,
-        }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         dims = {}

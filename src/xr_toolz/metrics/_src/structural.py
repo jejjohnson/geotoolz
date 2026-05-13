@@ -25,19 +25,16 @@ import numpy as np
 import xarray as xr
 
 from xr_toolz.core import Operator
+from xr_toolz.utils._src.optional_imports import _require_optional
 
 
 def _require_structural_similarity():
-    # importlib keeps ty (typecheck) from resolving the optional [image] extra
-    # at static-analysis time.
-    import importlib
-
-    try:
-        metrics_mod = importlib.import_module("skimage.metrics")
-    except ImportError as exc:  # pragma: no cover - exercised without extra
-        raise ImportError(
-            "ssim requires scikit-image. Install with: pip install 'xr_toolz[image]'"
-        ) from exc
+    metrics_mod = _require_optional(
+        "skimage.metrics",
+        extra="image",
+        feature="ssim",
+        package="scikit-image",
+    )
     return metrics_mod.structural_similarity
 
 

@@ -11,6 +11,8 @@ from scipy.stats import binned_statistic_2d
 from sklearn.neighbors import KernelDensity
 
 from xr_toolz.interpolate._src.binning import Grid
+from xr_toolz.interpolate._src.spatial import _bandwidth_rule, _to_metric_xy
+from xr_toolz.utils._src.finite import _finite_mask
 
 
 BandwidthRule = Literal["scott", "silverman"]
@@ -48,22 +50,6 @@ def points_to_grid(
         dims=("lat", "lon"),
         coords={"lon": grid.lon, "lat": grid.lat},
     )
-
-
-def _bandwidth_rule(pts: np.ndarray, rule: BandwidthRule) -> float:
-    """Return Scott or Silverman bandwidth from mean coordinate variance."""
-    n, d = pts.shape
-    coordinate_variance = np.var(pts, axis=0, ddof=1)
-    sigma = float(np.sqrt(np.mean(coordinate_variance)))
-    if rule == "scott":
-        bandwidth = n ** (-1.0 / (d + 4)) * sigma
-    elif rule == "silverman":
-        bandwidth = (n * (d + 2) / 4.0) ** (-1.0 / (d + 4)) * sigma
-    else:
-        raise ValueError(f"unknown bandwidth rule {rule!r}")
-    if bandwidth <= 0 or not np.isfinite(bandwidth):
-        raise ValueError(f"bandwidth rule {rule!r} produced {bandwidth!r}")
-    return float(bandwidth)
 
 
 def kde_to_grid(
@@ -132,14 +118,14 @@ def kde_to_grid(
     if lon_values.shape != lat_values.shape:
         raise ValueError("lons and lats must have the same shape")
 
-    finite = np.isfinite(lon_values) & np.isfinite(lat_values)
+    finite = _finite_mask(lon_values, lat_values)
     if weights is None:
         sample_weight = None
     else:
         weight_values = np.ravel(np.asarray(weights, dtype=float))
         if weight_values.shape != lon_values.shape:
             raise ValueError("weights must have the same shape as lons and lats")
-        finite &= np.isfinite(weight_values)
+        finite &= _finite_mask(weight_values)
         sample_weight = weight_values[finite]
 
     pts = np.column_stack([lon_values[finite], lat_values[finite]])
@@ -147,7 +133,7 @@ def kde_to_grid(
         raise ValueError("KDE requires at least 2 finite points")
 
     if metric == "haversine":
-        fit_pts = np.deg2rad(pts[:, [1, 0]])
+        fit_pts = _to_metric_xy(pts[:, 0], pts[:, 1], "haversine")
         algorithm = "ball_tree"
     else:
         fit_pts = pts
@@ -169,7 +155,7 @@ def kde_to_grid(
 
     lon_grid, lat_grid = np.meshgrid(grid.lon, grid.lat, indexing="xy")
     if metric == "haversine":
-        queries = np.deg2rad(np.column_stack([lat_grid.ravel(), lon_grid.ravel()]))
+        queries = _to_metric_xy(lon_grid.ravel(), lat_grid.ravel(), "haversine")
     else:
         queries = np.column_stack([lon_grid.ravel(), lat_grid.ravel()])
 

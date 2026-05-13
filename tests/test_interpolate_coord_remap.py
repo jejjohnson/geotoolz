@@ -16,11 +16,20 @@ from xr_toolz.interpolate.operators import (
     ToPressureLevels,
     ToSigma,
 )
+from xr_toolz.transforms import (
+    remap_axis as transforms_remap_axis,
+    to_phase as transforms_to_phase,
+)
 
 
 # ---------------------------------------------------------------------------
 # Tier A — remap_axis
 # ---------------------------------------------------------------------------
+
+
+def test_coord_remap_reexport_from_transforms() -> None:
+    assert remap_axis is transforms_remap_axis
+    assert to_phase is transforms_to_phase
 
 
 def test_array_remap_identity_when_target_equals_source():

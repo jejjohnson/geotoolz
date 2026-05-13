@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from xr_toolz.core import Graph, Input, Node, Operator, Sequential
+from xr_toolz.core import ConfigMixin, Graph, Input, Node, Operator, Sequential
 
 
 class AddConst(Operator):
@@ -39,6 +39,41 @@ def test_operator_get_config_and_repr():
     op = AddConst(const=2.5)
     assert op.get_config() == {"const": 2.5}
     assert repr(op) == "AddConst(const=2.5)"
+
+
+class _Scale(ConfigMixin, Operator):
+    def __init__(self, factor: float, *, offset: float = 0.0):
+        self.factor = float(factor)
+        self.offset = float(offset)
+
+    def _apply(self, x):
+        return x * self.factor + self.offset
+
+
+def test_config_mixin_round_trips_explicit_arguments():
+    op = _Scale(2.0, offset=1.0)
+    assert op.get_config() == {"factor": 2.0, "offset": 1.0}
+    assert _Scale(**op.get_config())(3.0) == 7.0
+
+
+def test_config_mixin_captures_constructor_defaults():
+    op = _Scale(2.0)
+    cfg = op.get_config()
+    assert cfg == {"factor": 2.0, "offset": 0.0}
+    assert _Scale(**cfg)(3.0) == 6.0
+
+
+def test_config_mixin_captures_normalized_values_not_raw_arguments():
+    """__init__ coercions (e.g. ``float(...)``) should be reflected in
+    ``get_config`` so callers can rely on JSON-friendly types even when
+    they pass numpy scalars."""
+    import numpy as np
+
+    op = _Scale(np.float64(2.0), offset=np.float64(1.5))
+    cfg = op.get_config()
+    for value in cfg.values():
+        assert isinstance(value, float)
+        assert not isinstance(value, np.floating)
 
 
 def test_base_apply_raises():
