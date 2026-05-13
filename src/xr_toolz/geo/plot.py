@@ -133,12 +133,176 @@ def plot_wavelet_anisotropy(
     return ax
 
 
+def plot_scalogram(
+    power: xr.DataArray,
+    *,
+    coi: xr.DataArray | None = None,
+    signif_mask: xr.DataArray | None = None,
+    ax: Axes | None = None,
+    log_period: bool = True,
+    cmap: str = "viridis",
+) -> Axes:
+    """Plot a time-period wavelet scalogram.
+
+    Args:
+        power: Two-dimensional wavelet power with one scale dimension and one
+            time dimension. If present, the ``period`` coordinate is used for
+            the y-axis.
+        coi: Optional cone-of-influence period series to overlay.
+        signif_mask: Optional boolean mask to contour significant regions.
+            The plot draws a contour at ``0.5``, i.e. the boundary between
+            insignificant (``False``) and significant (``True``) samples.
+        ax: Existing axes to draw on. A new axes is created when omitted.
+        log_period: If ``True``, draw the period axis on a logarithmic scale.
+        cmap: Matplotlib colormap name for the power heatmap.
+
+    Returns:
+        The axes object for further customization.
+    """
+    import matplotlib.pyplot as plt
+
+    if power.ndim != 2:
+        raise ValueError(f"plot_scalogram expects a 2-D array; got dims {power.dims}.")
+    if ax is None:
+        _, ax = plt.subplots()
+    scale_dim = _infer_scale_dim(power)
+    time_dim = str(next(dim for dim in power.dims if dim != scale_dim))
+    ycoord = "period" if "period" in power.coords else scale_dim
+    values = np.asarray(power.transpose(scale_dim, time_dim).values, dtype=float)
+    x = np.asarray(power[time_dim].values)
+    y = np.asarray(power[ycoord].values, dtype=float)
+    mesh = ax.pcolormesh(x, y, values, shading="auto", cmap=cmap)
+    ax.figure.colorbar(mesh, ax=ax)
+    if coi is not None:
+        # Plot COI against the scalogram's own time axis. Taking x from
+        # coi[coi.dims[0]] silently misaligns when coi was produced on a
+        # different grid.
+        if coi.ndim != 1:
+            raise ValueError(
+                f"coi must be 1-D over the time axis; got dims {coi.dims}."
+            )
+        if coi.size != x.size:
+            raise ValueError(
+                f"coi length ({coi.size}) does not match scalogram time axis "
+                f"({x.size}); reindex coi onto power[{time_dim!r}] first."
+            )
+        ax.plot(x, np.asarray(coi.values), color="white")
+    if signif_mask is not None:
+        mask = signif_mask.transpose(scale_dim, time_dim)
+        ax.contour(
+            x,
+            y,
+            np.asarray(mask.values, dtype=float),
+            levels=[0.5],
+            colors="black",
+            linewidths=0.8,
+        )
+    if log_period:
+        ax.set_yscale("log")
+    ax.set_xlabel(time_dim)
+    ax.set_ylabel(ycoord)
+    ax.set_title(str(power.name) if power.name is not None else "Wavelet scalogram")
+    return ax
+
+
+def plot_global_wavelet_spectrum(
+    power: xr.DataArray,
+    *,
+    signif: xr.DataArray | None = None,
+    ax: Axes | None = None,
+    time_dim: str = "time",
+) -> Axes:
+    """Plot global wavelet spectrum as time-averaged power vs. period.
+
+    Args:
+        power: Wavelet power with a scale dimension and exactly one
+            additional time-like dimension to average over (named
+            ``time_dim``). For pixelwise inputs with extra outer dims,
+            reduce the spatial/ensemble axes first (e.g.
+            ``power.mean(["lat", "lon"])``).
+        signif: Optional threshold or reference spectrum with the same
+            scale/period coordinate as ``power``. If it includes the
+            ``time_dim`` axis it is time-averaged before being drawn as a
+            dashed line.
+        ax: Existing axes to draw on. A new axes is created when omitted.
+        time_dim: Name of the time-like dimension to reduce.
+
+    Returns:
+        The axes object for further customization.
+    """
+    import matplotlib.pyplot as plt
+
+    if ax is None:
+        _, ax = plt.subplots()
+    scale_dim = _infer_scale_dim(power)
+    extra = tuple(d for d in power.dims if d not in {scale_dim, time_dim})
+    if extra:
+        raise ValueError(
+            f"plot_global_wavelet_spectrum expects only "
+            f"({scale_dim!r}, {time_dim!r}) (or just {scale_dim!r}); got extra "
+            f"dims {extra!r}. Reduce them first, e.g. .mean({list(extra)!r})."
+        )
+    spectrum = power.mean(time_dim, skipna=True) if time_dim in power.dims else power
+    if spectrum.ndim != 1:
+        raise ValueError("plot_global_wavelet_spectrum expects one scale dimension.")
+    xcoord = "period" if "period" in spectrum.coords else scale_dim
+    ax.plot(
+        np.asarray(spectrum[xcoord].values, dtype=float), np.asarray(spectrum.values)
+    )
+    if signif is not None:
+        sig = signif.mean(time_dim, skipna=True) if time_dim in signif.dims else signif
+        ax.plot(
+            np.asarray(sig[xcoord].values, dtype=float), np.asarray(sig.values), "--"
+        )
+    ax.set_xscale("log")
+    ax.set_xlabel(xcoord)
+    ax.set_ylabel("power")
+    return ax
+
+
+def plot_dominant_period_map(
+    pmap: xr.DataArray,
+    *,
+    ax: Axes | None = None,
+    cmap: str = "cividis",
+    levels: Sequence[float] | int | None = None,
+) -> Axes:
+    """Plot a 2-D map of dominant Fourier period.
+
+    Args:
+        pmap: Two-dimensional dominant-period field, typically produced by
+            :func:`xr_toolz.geo.dominant_period_map` after averaging rectified
+            wavelet power over time and selecting the peak period.
+        ax: Existing axes to draw on. A new axes is created when omitted.
+        cmap: Matplotlib colormap name.
+        levels: Optional contour levels. When omitted, an ``imshow`` raster is
+            drawn; otherwise filled contours are drawn.
+
+    Returns:
+        The axes object for further customization.
+    """
+    if pmap.ndim != 2:
+        raise ValueError(
+            f"plot_dominant_period_map expects a 2-D field; got dims {pmap.dims}."
+        )
+    out = plot_resolved_scale_map(pmap, ax=ax, cmap=cmap, levels=levels)
+    out.set_title(str(pmap.name) if pmap.name is not None else "Dominant period")
+    out.set_ylabel(str(pmap.dims[0]))
+    out.set_xlabel(str(pmap.dims[1]))
+    return out
+
+
 def _parse_slope(slope: str | float) -> float:
     """Convert slope labels such as ``"-5/3"`` to float exponents."""
     if isinstance(slope, str) and "/" in slope:
         num, den = slope.split("/", maxsplit=1)
         return float(num) / float(den)
     return float(slope)
+
+
+def _infer_scale_dim(da: xr.DataArray) -> str:
+    """Return the scale dimension, preferring the canonical ``scale`` name."""
+    return "scale" if "scale" in da.dims else str(da.dims[0])
 
 
 def _extent(da: xr.DataArray) -> tuple[float, float, float, float] | None:

@@ -29,6 +29,7 @@ from xr_toolz.geo._src import (
     subset as _subset,
     validation as _validation,
     wavelet as _wavelet,
+    wavelet1d as _wavelet1d,
 )
 
 
@@ -585,6 +586,135 @@ class WaveletPowerSpectrum(Operator):
         }
 
 
+class WaveletScalogram(Operator):
+    """Compute a 1-D wavelet scalogram for one variable.
+
+    Adds six derived variables under a common prefix:
+    ``<prefix>_wave``, ``<prefix>_power``, ``<prefix>_power_rect``,
+    ``<prefix>_scalogram``, ``<prefix>_coi``, ``<prefix>_coi_mask``.
+    The prefix defaults to ``var`` and is overridable via ``output_prefix``.
+    """
+
+    def __init__(
+        self,
+        var: str,
+        *,
+        dim: str = "time",
+        mother: str = "morlet",
+        param: float | None = None,
+        s0: float | None = None,
+        dj: float = 0.25,
+        j_max: int | None = None,
+        rectify: bool = True,
+        output_prefix: str | None = None,
+    ) -> None:
+        self.var = var
+        self.dim = dim
+        self.mother = mother
+        self.param = param
+        self.s0 = s0
+        self.dj = float(dj)
+        self.j_max = j_max
+        self.rectify = bool(rectify)
+        self.output_prefix = output_prefix
+
+    def _apply(self, ds: xr.Dataset) -> xr.Dataset:
+        if self.var not in ds.data_vars:
+            raise KeyError(f"Dataset missing variable {self.var!r}")
+        prefix = self.output_prefix or self.var
+        out = _wavelet1d.cwt1d(
+            ds[self.var],
+            dim=self.dim,
+            mother=self.mother,
+            param=self.param,
+            s0=self.s0,
+            dj=self.dj,
+            j_max=self.j_max,
+        )
+        power_name = "power_rect" if self.rectify else "power"
+        return ds.assign(
+            {
+                f"{prefix}_wave": out["wave"].rename(f"{prefix}_wave"),
+                f"{prefix}_power": out["power"].rename(f"{prefix}_power"),
+                f"{prefix}_power_rect": out["power_rect"].rename(
+                    f"{prefix}_power_rect"
+                ),
+                f"{prefix}_scalogram": out[power_name].rename(f"{prefix}_scalogram"),
+                f"{prefix}_coi": out["coi"].rename(f"{prefix}_coi"),
+                f"{prefix}_coi_mask": out["coi_mask"].rename(f"{prefix}_coi_mask"),
+            }
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "var": self.var,
+            "dim": self.dim,
+            "mother": self.mother,
+            "param": self.param,
+            "s0": self.s0,
+            "dj": self.dj,
+            "j_max": self.j_max,
+            "rectify": self.rectify,
+            "output_prefix": self.output_prefix,
+        }
+
+
+class WaveletSignificance(Operator):
+    """Apply a Torrence-Compo wavelet significance test to one power variable."""
+
+    def __init__(
+        self,
+        var: str,
+        *,
+        dim_time: str = "time",
+        dim_scale: str = "scale",
+        null: Literal["red", "white"] = "red",
+        alpha: float | None = None,
+        confidence: float = 0.95,
+        mother: str = "morlet",
+        param: float | None = None,
+        output_var: str | None = None,
+    ) -> None:
+        self.var = var
+        self.dim_time = dim_time
+        self.dim_scale = dim_scale
+        self.null = null
+        self.alpha = alpha
+        self.confidence = float(confidence)
+        self.mother = mother
+        self.param = param
+        self.output_var = output_var
+
+    def _apply(self, ds: xr.Dataset) -> xr.Dataset:
+        if self.var not in ds.data_vars:
+            raise KeyError(f"Dataset missing variable {self.var!r}")
+        out_name = self.output_var or f"{self.var}_signif_mask"
+        mask = _wavelet1d.wavelet_significance(
+            ds[self.var],
+            dim_time=self.dim_time,
+            dim_scale=self.dim_scale,
+            null=self.null,
+            alpha=self.alpha,
+            confidence=self.confidence,
+            mother=self.mother,
+            param=self.param,
+        ).rename(out_name)
+        return ds.assign({out_name: mask})
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "var": self.var,
+            "dim_time": self.dim_time,
+            "dim_scale": self.dim_scale,
+            "null": self.null,
+            "alpha": self.alpha,
+            "confidence": self.confidence,
+            "mother": self.mother,
+            "param": self.param,
+            "output_var": self.output_var,
+        }
+
+
 class RemoveClimatology(Operator):
     """Subtract a precomputed climatology from the input dataset."""
 
@@ -735,6 +865,8 @@ __all__ = [
     "ValidateLongitude",
     "ValidateTime",
     "WaveletPowerSpectrum",
+    "WaveletScalogram",
+    "WaveletSignificance",
 ]
 
 

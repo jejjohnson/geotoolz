@@ -88,6 +88,12 @@ from xr_toolz.geo._src.wavelet import (
     wvlt_cross_spectrum,
     wvlt_power_spectrum,
 )
+from xr_toolz.geo._src.wavelet1d import (
+    cwt1d,
+    dominant_period_map,
+    icwt1d,
+    wavelet_significance,
+)
 from xr_toolz.geo._src.wavelet_utils import (
     build_coi_mask,
     geometric_scales,
@@ -99,6 +105,8 @@ from xr_toolz.geo.operators import (
     RenameFromCFStandardNames,
     RenameToCFStandardNames,
     WaveletPowerSpectrum,
+    WaveletScalogram,
+    WaveletSignificance,
 )
 
 
@@ -171,6 +179,8 @@ __all__ = [
     "RenameFromCFStandardNames",
     "RenameToCFStandardNames",
     "WaveletPowerSpectrum",
+    "WaveletScalogram",
+    "WaveletSignificance",
     "add_climatology",
     "add_country_mask",
     "add_land_mask",
@@ -190,10 +200,13 @@ __all__ = [
     "calculate_climatology_smoothed",
     "check_dataset_coords",
     "custom_region",
+    "cwt1d",
     "cwt2",
     "decode_cf_time",
+    "dominant_period_map",
     "geometric_scales",
     "get_crs",
+    "icwt1d",
     "load_region_file",
     "lonlat_to_xy",
     "median_dx_km",
@@ -222,6 +235,7 @@ __all__ = [
     "validate_latitude",
     "validate_longitude",
     "validate_time",
+    "wavelet_significance",
     "wavenumber_to_scale",
     "wvlt_cross_spectrum",
     "wvlt_power_spectrum",
