@@ -85,12 +85,12 @@ import numpy as np
 
 ## First Markdown Cell — Title + Colab Badge
 
-Every notebook opens with a `#`-level title and a Colab badge pointing at its `main`-branch URL. Replace `OWNER/REPO` below with the actual GitHub owner and repository name (e.g. from `repo_url` in `mkdocs.yml`):
+Every notebook opens with a `#`-level title and a Colab badge pointing at its `main`-branch URL:
 
 ```markdown
 # Demo — Feature Overview
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/OWNER/REPO/blob/main/docs/notebooks/demo_foo.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jejjohnson/geotoolz/blob/main/docs/notebooks/demo_foo.ipynb)
 
 <one-paragraph summary>
 
@@ -103,7 +103,7 @@ Every notebook opens with a `#`-level title and a Colab badge pointing at its `m
 
 ## First Code Cell — Colab Detection + Install
 
-Detect Colab, install the package only when needed (substitute `OWNER/REPO` with the actual GitHub owner and repository name):
+Detect Colab, install the package only when needed:
 
 ```python
 import subprocess
@@ -124,7 +124,7 @@ if IN_COLAB:
             "pip",
             "install",
             "-q",
-            "mypackage @ git+https://github.com/OWNER/REPO@main",
+            "geotoolz @ git+https://github.com/jejjohnson/geotoolz@main",
         ],
         check=True,
     )
@@ -164,7 +164,7 @@ if ipython is not None and importlib.util.find_spec("watermark") is not None:
     ipython.run_line_magic("load_ext", "watermark")
     ipython.run_line_magic(
         "watermark",
-        "-v -m -p numpy,matplotlib,mypackage",
+        "-v -m -p numpy,matplotlib,geotoolz",
     )
 else:
     print("watermark extension not installed; skipping reproducibility readout.")

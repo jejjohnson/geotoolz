@@ -4,8 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-<!-- TODO: Replace with your project description -->
-A Python package. Built with Python 3.12+, uv, pytest, and MkDocs.
+`geotoolz` is a composable Operator library for remote sensing, sitting on top of `georeader.GeoTensor`. It re-implements the Operator / Sequential / Graph composition core borrowed in pattern from `xr_toolz`, specialised for RS workflows (radiometry, spectral indices, cloud masking, sampling, tiled inference, sensor presets). Two-tier model: jaxtyped numpy primitives in `_src/array.py` per module, carrier-aware `Operator` wrappers in `_src/operators.py`. Built with Python 3.12+, uv, pytest, and MkDocs. See the design report in `research_journal_v2/notes/geotoolz/plans/geotoolz/geotoolz.md`.
 
 ## Common Commands
 
@@ -14,7 +13,7 @@ make install              # Install all deps (uv sync --all-groups) + pre-commit
 make test                 # Run tests: uv run pytest -v
 make format               # Auto-fix: ruff format . && ruff check --fix .
 make lint                 # Lint code: ruff check .
-make typecheck            # Type check: ty check src/mypackage
+make typecheck            # Type check: ty check src/geotoolz
 make precommit            # Run pre-commit on all files
 make docs-serve           # Local docs server
 ```
@@ -29,24 +28,24 @@ uv run pytest tests/test_example.py::TestClass::test_method -v
 
 ```bash
 uv run pytest -v                              # Tests
-uv run --group lint ruff check .              # Lint — ENTIRE repo, not just src/mypackage/
+uv run --group lint ruff check .              # Lint — ENTIRE repo, not just src/geotoolz/
 uv run --group lint ruff format --check .     # Format — ENTIRE repo
-uv run --group typecheck ty check src/mypackage  # Typecheck — package only
+uv run --group typecheck ty check src/geotoolz  # Typecheck — package only
 ```
 
-**Critical**: Always lint/format with `.` (repo root), not `src/mypackage/`. CI runs `ruff check .` which includes `tests/` and `scripts/`.
+**Critical**: Always lint/format with `.` (repo root), not `src/geotoolz/`. CI runs `ruff check .` which includes `tests/` and `scripts/`.
 
 ## Architecture
 
 ### Package structure
 
-All implementation lives in `src/mypackage/`. The public API is re-exported through `src/mypackage/__init__.py`.
+All implementation lives in `src/geotoolz/`. The public API is re-exported through `src/geotoolz/__init__.py`.
 
 ### Key directories
 
 | Path | Purpose |
 |------|---------|
-| `src/mypackage/` | Main package source code |
+| `src/geotoolz/` | Main package source code |
 | `tests/` | Test suite |
 | `docs/` | Documentation (MkDocs) |
 | `notebooks/` | Jupyter notebooks |
