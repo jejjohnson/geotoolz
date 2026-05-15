@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3](https://github.com/jejjohnson/geotoolz/compare/v0.0.2...v0.0.3) (2026-05-15)
+
+
+### Features
+
+* **patch:** four-axis Patcher framework (geopatcher) ([#10](https://github.com/jejjohnson/geotoolz/issues/10)) ([c38e19d](https://github.com/jejjohnson/geotoolz/commit/c38e19d59ee8e0091fdf7af5b7f1de8a5432a1fa))
+
 ## [0.0.2](https://github.com/jejjohnson/geotoolz/compare/v0.0.1...v0.0.2) (2026-05-15)
 
 
