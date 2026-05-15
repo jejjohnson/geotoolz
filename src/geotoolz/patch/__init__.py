@@ -1,54 +1,54 @@
-"""geotoolz — composable Operator library for remote sensing.
+"""`geotoolz.patch` — the four-axis Patcher framework (geopatcher).
 
-Top-level re-exports of the composition core and the four-axis Patcher
-framework. Domain modules (`radiometry`, `indices`, `cloud`, ...) will
-sit alongside ``core`` and ``patch`` once they land — each is imported
-from its own submodule.
+Public surface re-exports:
 
-    import geotoolz as gz
-    pipe = gz.Sequential([gz.Tap(print), gz.Identity()])
-
-    patcher = gz.SpatialPatcher(
-        geometry    = gz.SpatialRectangular(size=(256, 256)),
-        sampler     = gz.SpatialRegularStride(step=(192, 192)),
-        window      = gz.SpatialHann(),
-        aggregation = gz.SpatialOverlapAdd(),
-    )
+- Carriers: `Patch`, `TemporalPatch`, `SpatioTemporalPatch`.
+- Protocols: `Field`, `AsyncField`, `Domain`.
+- Concrete domains: `RasterDomain`, `GridDomain`, `VectorDomain`, `PointDomain`.
+- Field adapters: `RasterField`, `AsyncRasterField`. Non-raster adapters
+  (`XarrayField`, `GeoPandasField`, `XvecField`, `RioXarrayField`) live
+  under `geotoolz.patch.fields` and lazy-import their optional extras.
+- Top-level patchers: `SpatialPatcher`, `AsyncSpatialPatcher`,
+  `TemporalPatcher`, `SpatioTemporalPatcher`.
+- Spatial axes: re-exported from `geotoolz.patch.spatial`.
+- Temporal axes: re-exported from `geotoolz.patch.time`.
+- Operator wrappers (`GridSampler`, `ApplyToChips`, `Stitch`).
 """
 
 from __future__ import annotations
 
-from geotoolz import core, patch
-from geotoolz.core import (
-    Branch,
-    Carrier,
-    Const,
-    Fanout,
-    Graph,
-    Identity,
-    Input,
-    Lambda,
-    ModelOp,
-    Node,
-    Operator,
-    Sequential,
-    ShapeTrace,
-    Sink,
-    Snapshot,
-    Switch,
-    Tap,
-)
-from geotoolz.patch import (
-    ApplyToChips,
-    AsyncRasterField,
-    AsyncSpatialPatcher,
+from geotoolz.patch._src import spatial, time
+from geotoolz.patch._src.domains import (
     GridDomain,
-    GridSampler,
-    Patch,
     PointDomain,
     RasterDomain,
+    VectorDomain,
+)
+from geotoolz.patch._src.fields import (
+    AsyncRasterField,
     RasterField,
+)
+from geotoolz.patch._src.ops import (
+    ApplyToChips,
+    GridSampler,
+    Stitch,
+)
+from geotoolz.patch._src.patch import (
+    Patch,
+    SpatioTemporalPatch,
+    TemporalPatch,
+)
+from geotoolz.patch._src.protocols import (
+    AsyncField,
+    Domain,
+    Field,
+)
+from geotoolz.patch._src.spatial import (  # re-export of all spatial concretes + bases
+    AsyncSpatialPatcher,
     SpatialAggregation,
+    SpatialApproxCardinality,
+    SpatialApproxMode,
+    SpatialApproxQuantile,
     SpatialBoxcar,
     SpatialByIndex,
     SpatialCustom,
@@ -74,17 +74,19 @@ from geotoolz.patch import (
     SpatialRandom,
     SpatialRectangular,
     SpatialRegularStride,
+    SpatialReservoir,
     SpatialSampler,
     SpatialSoftVote,
     SpatialSphericalCap,
+    SpatialStreamingHistogram,
     SpatialSum,
     SpatialTukey,
     SpatialVariance,
     SpatialWeightedSum,
     SpatialWindow,
-    SpatioTemporalPatch,
-    SpatioTemporalPatcher,
-    Stitch,
+)
+from geotoolz.patch._src.spatial_time import SpatioTemporalPatcher
+from geotoolz.patch._src.time import (  # re-export of all temporal concretes + bases
     TemporalAggregation,
     TemporalCausalBoxcar,
     TemporalCausalRolling,
@@ -99,7 +101,6 @@ from geotoolz.patch import (
     TemporalLookbackHorizon,
     TemporalMean,
     TemporalMultiScale,
-    TemporalPatch,
     TemporalPatcher,
     TemporalPeriodic,
     TemporalPhaseWindow,
@@ -108,38 +109,26 @@ from geotoolz.patch import (
     TemporalSampler,
     TemporalTaperedTukey,
     TemporalWindow,
-    VectorDomain,
 )
 
 
-__version__ = "0.0.2"
-
 __all__ = [
     "ApplyToChips",
+    "AsyncField",
     "AsyncRasterField",
     "AsyncSpatialPatcher",
-    "Branch",
-    "Carrier",
-    "Const",
-    "Fanout",
-    "Graph",
+    "Domain",
+    "Field",
     "GridDomain",
     "GridSampler",
-    "Identity",
-    "Input",
-    "Lambda",
-    "ModelOp",
-    "Node",
-    "Operator",
     "Patch",
     "PointDomain",
     "RasterDomain",
     "RasterField",
-    "Sequential",
-    "ShapeTrace",
-    "Sink",
-    "Snapshot",
     "SpatialAggregation",
+    "SpatialApproxCardinality",
+    "SpatialApproxMode",
+    "SpatialApproxQuantile",
     "SpatialBoxcar",
     "SpatialByIndex",
     "SpatialCustom",
@@ -165,9 +154,11 @@ __all__ = [
     "SpatialRandom",
     "SpatialRectangular",
     "SpatialRegularStride",
+    "SpatialReservoir",
     "SpatialSampler",
     "SpatialSoftVote",
     "SpatialSphericalCap",
+    "SpatialStreamingHistogram",
     "SpatialSum",
     "SpatialTukey",
     "SpatialVariance",
@@ -176,8 +167,6 @@ __all__ = [
     "SpatioTemporalPatch",
     "SpatioTemporalPatcher",
     "Stitch",
-    "Switch",
-    "Tap",
     "TemporalAggregation",
     "TemporalCausalBoxcar",
     "TemporalCausalRolling",
@@ -202,7 +191,16 @@ __all__ = [
     "TemporalTaperedTukey",
     "TemporalWindow",
     "VectorDomain",
-    "__version__",
-    "core",
-    "patch",
+    "spatial",
+    "time",
 ]
+
+
+# Lazy field adapters keyed off optional extras.
+def __getattr__(name: str):
+    """Lazy-load optional Field adapters from `geotoolz.patch.fields`."""
+    if name in {"XarrayField", "GeoPandasField", "XvecField", "RioXarrayField"}:
+        from geotoolz.patch._src import fields as _f
+
+        return getattr(_f, name)
+    raise AttributeError(name)

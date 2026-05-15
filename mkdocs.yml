@@ -42,13 +42,22 @@ plugins:
 
 nav:
   - Home: index.md
-  - Concepts: concepts.md
+  - Concepts:
+      - Composition core: concepts.md
+      - Patching: patching.md
   - Tutorials:
       - Composition core: notebooks/composition_core.ipynb
       - Pipeline idioms: notebooks/pipeline_idioms.ipynb
       - Deployment shapes: notebooks/deployment_shapes.ipynb
+      - Patching intro: notebooks/patching_intro.ipynb
+      - Patching samplers: notebooks/patching_sampling.ipynb
+      - Patching geometries: notebooks/patching_geometries.ipynb
+      - Patching backends: notebooks/patching_backends.ipynb
+      - Patching time: notebooks/patching_time.ipynb
+      - Patching streaming: notebooks/patching_streaming.ipynb
   - API Reference:
       - Core: api/core.md
+      - Patch: api/patch.md
   - Contributing: contributing.md
 
 markdown_extensions:
