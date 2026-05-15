@@ -158,7 +158,7 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module 'geotoolz' has no attribute {name!r}")
 
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 __all__ = [
     "ApplyToChips",
