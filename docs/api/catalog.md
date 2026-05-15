@@ -12,10 +12,19 @@ Curated mkdocstrings reference. For the conceptual walkthrough see
 ## Protocol
 
 ::: geotoolz.catalog._src.base.GeoCatalog
+::: geotoolz.catalog._src.base.CatalogRow
 
 ## Backends
 
 ::: geotoolz.catalog._src.memory.InMemoryGeoCatalog
+
+### DuckDB *(extras: `[duckdb]`)*
+
+::: geotoolz.catalog._src.duckdb_backend.DuckDBGeoCatalog
+
+## Factory
+
+::: geotoolz.catalog.open_catalog
 
 ## Raster
 

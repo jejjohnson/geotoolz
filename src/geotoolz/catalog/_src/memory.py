@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 
+from geotoolz.catalog._src.base import CatalogRow
 from geotoolz.types import GeoSlice
 
 
@@ -221,6 +222,40 @@ class InMemoryGeoCatalog:
             pd.concat([self.gdf, right_gdf], axis=0), crs=self.gdf.crs
         )
         return InMemoryGeoCatalog(merged, backend=self.backend)
+
+    def iter_rows(self, *, batch_size: int = 1024) -> Iterator[CatalogRow]:
+        """Yield each row as a backend-neutral `CatalogRow`.
+
+        Streaming-friendly: rows are constructed lazily so a caller can
+        short-circuit a large catalog. ``batch_size`` is accepted for
+        Protocol parity with `DuckDBGeoCatalog` and is ignored here —
+        in-memory iteration is row-at-a-time regardless.
+
+        Args:
+            batch_size: Accepted for Protocol parity, ignored.
+
+        Yields:
+            `CatalogRow` in catalog row order. ``filepath`` comes from
+            the ``filepath`` column (or the row index as a fallback);
+            ``extras`` carries every other non-geometry column.
+        """
+        del batch_size
+        crs = pyproj.CRS.from_user_input(self.gdf.crs)
+        reserved = {"geometry", "filepath", "start_time", "end_time"}
+        extra_cols = [c for c in self.gdf.columns if c not in reserved]
+        for interval, row in zip(self.gdf.index, self.gdf.itertuples(), strict=True):
+            row_dict = row._asdict()
+            filepath = row_dict.get("filepath")
+            if filepath is None:
+                filepath = str(row_dict.get("Index", ""))
+            extras = {c: row_dict[c] for c in extra_cols if c in row_dict}
+            yield CatalogRow(
+                filepath=str(filepath),
+                geometry=row_dict["geometry"],
+                interval=interval,
+                crs=crs,
+                extras=extras,
+            )
 
     def iter_slices(self, *, resolution: tuple[float, float]) -> Iterator[GeoSlice]:
         """Yield one `GeoSlice` per row, at the given target resolution.

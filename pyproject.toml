@@ -74,12 +74,17 @@ patch-full = [
 ]
 # Catalog extras. The base install already provides geopandas + shapely
 # + pandas + pyproj (raster catalog works out of the box); these extras
-# unlock the xarray and vector backends.
+# unlock the xarray and vector backends and the DuckDB-backed catalog.
 catalog = ["xarray>=2024.1", "rioxarray>=0.15"]
+# DuckDB backend (Phase 2 of the geodatabase). Pinned to >=1.1 because
+# GeoParquet 1.1 bbox-column predicate pushdown landed there; older
+# versions silently regress to slow ST_Intersects-per-row scans.
+duckdb = ["duckdb>=1.1"]
 catalog-full = [
     "xarray>=2024.1",
     "rioxarray>=0.15",
     "zarr>=3.0",
+    "duckdb>=1.1",
 ]
 
 [project.urls]

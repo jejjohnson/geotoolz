@@ -6,31 +6,36 @@ and path. Given a query like *"files overlapping AOI X between dates Y
 and Z,"* the catalog returns the matching rows fast without opening any
 file.
 
-The submodule is the Phase 1 of the geodatabase design — see
-`research_journal_v2/notes/geotoolz/plans/geodatabase/geocatalog.md`.
-Phase 2 (`DuckDBGeoCatalog`) ships in a follow-up release; both
-backends honour the same `GeoCatalog` Protocol.
+Two backends honour the same `GeoCatalog` Protocol: `InMemoryGeoCatalog`
+(Phase 1 — a `GeoDataFrame` with an R-tree + `IntervalIndex`, good up
+to ~10⁵ rows) and `DuckDBGeoCatalog` (Phase 2 — a lazy SQL relation
+over a GeoParquet file, good to 10⁶+ rows and queryable from a remote
+URI). See the design plans in
+`research_journal_v2/notes/geotoolz/plans/geodatabase/`.
 
 ## Mental model
 
 ```
-┌──────────────────────────┐
-│  GeoCatalog (Protocol)   │
-│  query / intersect /     │
-│  union / iter_slices /   │
-│  to_geoparquet           │
-└──────────────────────────┘
-              ▲
-              │  v0.1
-              │
-┌──────────────────────────┐
-│   InMemoryGeoCatalog     │
-│                          │
-│   gpd.GeoDataFrame       │
-│   + IntervalIndex (time) │
-│   + R-tree (space)       │
-│   ~10⁵ rows in RAM       │
-└──────────────────────────┘
+                ┌──────────────────────────┐
+                │  GeoCatalog (Protocol)   │
+                │  query / intersect /     │
+                │  union / iter_rows /     │
+                │  iter_slices /           │
+                │  to_geoparquet           │
+                └──────────────────────────┘
+                       ▲          ▲
+                       │          │
+       ┌───────────────┘          └───────────────┐
+       │                                          │
+┌──────────────────────┐         ┌────────────────────────────┐
+│ InMemoryGeoCatalog   │         │   DuckDBGeoCatalog         │
+│ (v0.1, base install) │         │   (v0.2, [duckdb] extra)   │
+│                      │         │                            │
+│ gpd.GeoDataFrame     │         │ DuckDB + GeoParquet 1.1    │
+│ + IntervalIndex      │         │ + spatial extension        │
+│ + R-tree             │         │ + bbox-column pushdown     │
+│ ~10⁵ rows in RAM     │         │ 10⁶+ rows, lazy on disk    │
+└──────────────────────┘         └────────────────────────────┘
 ```
 
 The shared row schema is the same across all three backends:
@@ -176,5 +181,51 @@ for slice_ in domain.slices():
 | Scale | Backend | Why |
 | --- | --- | --- |
 | Hundreds–thousands of files | `InMemoryGeoCatalog` | GeoDataFrame fits in RAM, sub-millisecond queries |
-| 10⁶+ files | `DuckDBGeoCatalog` *(v0.2)* | SQL pushdown, on-disk artifact |
+| 10⁶+ files | `DuckDBGeoCatalog` | SQL pushdown via GeoParquet 1.1 bbox column, on-disk / remote artifact |
 | Anywhere | Both | They share the `GeoCatalog` Protocol |
+
+## The DuckDB backend
+
+`DuckDBGeoCatalog` (v0.2; `pip install 'geotoolz[duckdb]'`) wraps a
+GeoParquet file as a lazy SQL relation. The Protocol surface is
+unchanged — `query`, `intersect`, `union`, `iter_slices` all work — but
+the implementation routes through DuckDB's `spatial` extension. The
+two wins:
+
+- **Predicate pushdown.** GeoParquet 1.1 carries a per-row `bbox`
+  covering struct that DuckDB uses to skip row-groups without touching
+  any WKB. A small-AOI query against a 10⁶-row catalog reads ~10⁵ rows
+  of bbox metadata, not 10⁶ geometries.
+- **Portable artifact.** The catalog *is* the GeoParquet file. Share
+  it via S3 / GCS / HuggingFace (DuckDB's `httpfs` extension reads
+  remote Parquet lazily, only fetching the row groups your query
+  touches).
+
+`open_catalog(path)` is the factory:
+
+```python
+import geotoolz as gz
+
+# Prefers DuckDB when the [duckdb] extra is installed,
+# falls back to the in-memory backend otherwise.
+catalog = gz.open_catalog("cat.parquet")
+print(catalog)
+# DuckDBGeoCatalog(backend='raster', crs='EPSG:32629')
+
+# All Protocol ops work — and return new lazy relations:
+clean = catalog.query(bounds=(-3.8, 40.3, -3.6, 40.5), crs="EPSG:4326")
+joint = clean.intersect(label_catalog)
+joint.to_geoparquet("paired.parquet")
+
+# `iter_rows` is the streaming surface — useful for large catalogs.
+for row in catalog.iter_rows():
+    print(row.filepath, row.geometry.bounds)
+
+# `materialize()` pulls the relation into an InMemoryGeoCatalog when
+# the rest of your pipeline expects a GeoDataFrame.
+mem = catalog.materialize()
+```
+
+`CatalogRow` is the backend-neutral row view yielded by `iter_rows`;
+loaders consume it without caring whether the underlying store was a
+gdf or a SQL relation.

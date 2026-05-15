@@ -60,6 +60,7 @@ nav:
       - Catalog set algebra: notebooks/catalog_set_algebra.ipynb
       - Catalog backends: notebooks/catalog_backends.ipynb
       - Catalog ↔ patching: notebooks/catalog_patching.ipynb
+      - Catalog (DuckDB): notebooks/catalog_duckdb.ipynb
   - API Reference:
       - Core: api/core.md
       - Patch: api/patch.md
