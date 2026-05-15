@@ -42,7 +42,15 @@ def _vector_row(
     date_format: str,
     target_crs: Any | None,
     layer: str | int | None,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, Any]:
+    """Build one catalog row from a vector file.
+
+    Opens the file once, reprojects to ``target_crs`` if supplied, and
+    returns ``(row_dict, observed_crs)``. The observed CRS is the
+    file's *native* CRS — `build_vector_catalog` uses the first
+    observed CRS to anchor the catalog when no ``target_crs`` was
+    provided, then reprojects every subsequent file to that anchor.
+    """
     filepath = Path(filepath)
     gdf = (
         gpd.read_file(filepath, layer=layer)
@@ -51,7 +59,8 @@ def _vector_row(
     )
     if gdf.empty:
         log.warning("Skipping empty vector file %s", filepath)
-        return None
+        return None, None
+    observed_crs = gdf.crs
     if target_crs is not None and gdf.crs != target_crs:
         gdf = gdf.to_crs(target_crs)
     xmin, ymin, xmax, ymax = gdf.total_bounds
@@ -64,7 +73,7 @@ def _vector_row(
         match = filename_regex.search(filepath.name)
         if match is None:
             log.warning("Skipping %s: filename does not match regex", filepath)
-            return None
+            return None, observed_crs
         groups = match.groupdict()
         if "date" in groups:
             ts = pd.to_datetime(groups["date"], format=date_format)
@@ -81,13 +90,16 @@ def _vector_row(
                 f"'start'+'stop'; got {list(groups.keys())}"
             )
 
-    return {
-        "filepath": str(filepath),
-        "geometry": polygon,
-        "start_time": start,
-        "end_time": end,
-        "layer": layer,
-    }
+    return (
+        {
+            "filepath": str(filepath),
+            "geometry": polygon,
+            "start_time": start,
+            "end_time": end,
+            "layer": layer,
+        },
+        observed_crs,
+    )
 
 
 def build_vector_catalog(
@@ -116,9 +128,10 @@ def build_vector_catalog(
             every file as time-invariant (sentinel interval).
         date_format: ``strptime`` format for the named date groups.
             Default ``"%Y%m%d"``.
-        target_crs: CRS for footprint + storage. ``None`` keeps the
-            first observed file's CRS (mismatched files get
-            reprojected).
+        target_crs: CRS for footprint + storage. When ``None``, the
+            first non-empty file's native CRS becomes the catalog CRS
+            and every subsequent file is reprojected to match — so
+            mixed-CRS inputs always produce coherent footprints.
         layer: Layer name or index for multi-layer files (GeoPackage,
             GDB). ``None`` opens the file's default layer.
 
@@ -133,28 +146,28 @@ def build_vector_catalog(
     """
     pattern = re.compile(filename_regex) if filename_regex is not None else None
     rows: list[dict[str, Any]] = []
-    crs_value = target_crs
+    # `effective_crs` starts as the user-supplied `target_crs` (possibly
+    # None). On the first non-empty file we latch onto its native CRS,
+    # then pass that down to subsequent calls so every later file's
+    # footprint is reprojected into the catalog's uniform CRS. This is
+    # what keeps mixed-CRS archives honest.
+    effective_crs = target_crs
     for fp in filepaths:
-        row = _vector_row(
+        row, observed_crs = _vector_row(
             fp,
             filename_regex=pattern,
             date_format=date_format,
-            target_crs=target_crs,
+            target_crs=effective_crs,
             layer=layer,
         )
-        if row is not None:
-            rows.append(row)
-            if crs_value is None:
-                # Persist the first observed CRS so the gdf has a uniform one.
-                opened = (
-                    gpd.read_file(fp, layer=layer)
-                    if layer is not None
-                    else (gpd.read_file(fp))
-                )
-                crs_value = opened.crs
+        if row is None:
+            continue
+        rows.append(row)
+        if effective_crs is None and observed_crs is not None:
+            effective_crs = observed_crs
     if not rows:
         raise ValueError("build_vector_catalog: no files yielded a row")
-    gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs_value)
+    gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=effective_crs)
     return InMemoryGeoCatalog(gdf, backend="vector")
 
 
@@ -225,9 +238,15 @@ def load_vector(
     transform = slice_.transform
     features = []
     instance_id = 1
-    for fp, layer in zip(
-        filtered.gdf["filepath"], filtered.gdf.get("layer"), strict=False
-    ):
+    # `layer` is always set by `_vector_row` for catalogs built here, but
+    # externally constructed catalogs (or `from_geoparquet` of foreign
+    # files) may not carry the column. Fall back to a same-length sequence
+    # of `None`s so the zip below never crashes on a missing column.
+    if "layer" in filtered.gdf.columns:
+        layers: Sequence[Any] = filtered.gdf["layer"].tolist()
+    else:
+        layers = [None] * len(filtered.gdf)
+    for fp, layer in zip(filtered.gdf["filepath"], layers, strict=True):
         sub = gpd.read_file(fp, layer=layer) if layer is not None else gpd.read_file(fp)
         if sub.crs != slice_.crs:
             sub = sub.to_crs(slice_.crs)

@@ -204,9 +204,14 @@ class InMemoryGeoCatalog:
     def union(self, other: InMemoryGeoCatalog) -> InMemoryGeoCatalog:
         """Cross-catalog OR — concatenate rows.
 
-        Requires the two catalogs share a backend tag and a CRS; if not,
-        ``other`` is reprojected into ``self.crs`` and the backend tag
-        is taken from ``self``.
+        ``self``'s CRS and backend tag win. If ``other`` is in a
+        different CRS it's reprojected into ``self.crs`` first. The
+        backend tags are *not* required to match: the caller is
+        responsible for ensuring it makes sense to treat the merged
+        rows uniformly (e.g. unioning two raster catalogs is fine;
+        unioning raster + vector would lie about what the result
+        indexes, but no exception is raised — the downstream loader
+        will catch it via its own backend-tag check).
         """
         if other.gdf.crs != self.gdf.crs:
             right_gdf = other.gdf.to_crs(self.gdf.crs)

@@ -65,3 +65,44 @@ class TestLoadXarray:
         ds = load_xarray(catalog, sl, data_vars=["ndvi"])
         assert isinstance(ds, xr.Dataset)
         assert "ndvi" in ds.data_vars
+
+    def test_clips_by_time_interval(self, netcdf_file: Path) -> None:
+        """Regression for the bug where a short-interval query against a
+        multi-day file returned every timestep instead of just the
+        requested window.
+        """
+        catalog = build_xarray_catalog(
+            [netcdf_file], target_crs="EPSG:4326", data_vars=["ndvi"]
+        )
+        # File covers 2024-01-01 through 2024-01-05 (5 timesteps);
+        # ask for the middle 2 days only.
+        sl = GeoSlice(
+            bounds=(-3.4, 40.1, -3.1, 40.4),
+            interval=pd.Interval(
+                pd.Timestamp("2024-01-02"),
+                pd.Timestamp("2024-01-03"),
+                closed="both",
+            ),
+            resolution=(0.05, 0.05),
+            crs="EPSG:4326",
+        )
+        ds = load_xarray(catalog, sl, data_vars=["ndvi"])
+        # Two timesteps in the window, not the file's full five.
+        assert ds.sizes["time"] == 2
+
+    def test_no_crs_raises_clear_error(self, tmp_path: Path) -> None:
+        """Regression for the bug where build_xarray_catalog produced
+        crs_value=None and the downstream gdf-construction error was
+        cryptic. Now raised in the builder with a clear message.
+        """
+        ds = xr.Dataset(
+            {"ndvi": (("y", "x"), np.zeros((4, 4), dtype=np.float32))},
+            coords={
+                "y": np.linspace(40.0, 40.4, 4),
+                "x": np.linspace(-3.5, -3.1, 4),
+            },
+        )
+        path = tmp_path / "no_crs.nc"
+        ds.to_netcdf(path)
+        with pytest.raises(ValueError, match="target_crs"):
+            build_xarray_catalog([path], target_crs=None)

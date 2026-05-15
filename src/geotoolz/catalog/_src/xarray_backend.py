@@ -56,6 +56,18 @@ def _xy_dims(ds: xr.Dataset) -> tuple[str, str]:
     )
 
 
+def _xarray_engine(filepath: Path) -> str | None:
+    """Pick the xarray engine for ``filepath``.
+
+    Directories and ``.zarr`` paths use the zarr engine; everything else
+    falls through to xarray's default (netcdf4 / h5netcdf). Centralised
+    so the build + load paths can't disagree.
+    """
+    if filepath.suffix == ".zarr" or filepath.is_dir():
+        return "zarr"
+    return None
+
+
 def _xarray_row(
     filepath: str | Path,
     *,
@@ -69,7 +81,7 @@ def _xarray_row(
             "`pip install 'geotoolz[xarray-raster]'`."
         )
     filepath = Path(filepath)
-    engine = "zarr" if filepath.suffix == ".zarr" or filepath.is_dir() else None
+    engine = _xarray_engine(filepath)
     with xr.open_dataset(filepath, engine=engine) as ds:
         x_name, y_name = _xy_dims(ds)
         xmin, xmax = float(ds[x_name].min()), float(ds[x_name].max())
@@ -163,6 +175,12 @@ def build_xarray_catalog(
     if not rows:
         raise ValueError("build_xarray_catalog: no files yielded a row")
     crs_value = target_crs if target_crs is not None else rows[0]["crs"]
+    if crs_value is None:
+        raise ValueError(
+            "build_xarray_catalog: cannot determine catalog CRS — pass "
+            "`target_crs=...` explicitly, or load `rioxarray` so the "
+            "dataset's `.rio.crs` accessor reports a CRS."
+        )
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs_value)
     return InMemoryGeoCatalog(gdf, backend="xarray")
 
@@ -175,11 +193,16 @@ def load_xarray(
 ) -> xr.Dataset:
     """Load + concat the catalog rows matching ``slice_`` into an ``xr.Dataset``.
 
-    For each matching file, opens it, clips to ``slice_.bounds`` via
-    xarray's coordinate-indexed ``.sel(...)`` (with a ``.where(...,
-    drop=True)`` fallback for non-monotonic coords), and concatenates
-    the result along the file's ``time_var`` coordinate. Single-file
+    For each matching file, opens it inside a context manager, clips to
+    ``slice_.bounds`` along the spatial coords *and* to
+    ``slice_.interval`` along the time coord, ``.load()``s the clipped
+    piece so the data persists after the file handle closes, and
+    concatenates the pieces along the time coordinate. Single-file
     results skip the concat.
+
+    The time-clip is what makes this loader honest for files that span
+    many years — without it, a query for one month against a multi-year
+    NetCDF would return every timestep in the file.
 
     Args:
         catalog: An xarray-backend catalog.
@@ -215,25 +238,40 @@ def load_xarray(
         raise ValueError("load_xarray: no catalog rows match the slice")
 
     xmin, ymin, xmax, ymax = slice_.bounds
+    t_start, t_end = slice_.interval.left, slice_.interval.right
     pieces: list[xr.Dataset] = []
-    for fp in filtered.gdf["filepath"]:
-        engine = "zarr" if str(fp).endswith(".zarr") else None
-        ds = xr.open_dataset(fp, engine=engine)
-        x_name, y_name = _xy_dims(ds)
-        # `.sel(slice)` requires monotonic coords; fall back to `.where` otherwise.
-        try:
-            piece = ds.sel({x_name: slice(xmin, xmax), y_name: slice(ymin, ymax)})
-        except KeyError:
-            mask = (
-                (ds[x_name] >= xmin)
-                & (ds[x_name] <= xmax)
-                & (ds[y_name] >= ymin)
-                & (ds[y_name] <= ymax)
-            )
-            piece = ds.where(mask, drop=True)
-        if data_vars is not None:
-            piece = piece[list(data_vars)]
-        pieces.append(piece)
+    for fp, row_time_var in zip(
+        filtered.gdf["filepath"], filtered.gdf["time_var"], strict=False
+    ):
+        engine = _xarray_engine(Path(fp))
+        with xr.open_dataset(fp, engine=engine) as ds:
+            x_name, y_name = _xy_dims(ds)
+            # `.sel(slice)` requires monotonic coords; fall back to `.where`.
+            try:
+                piece = ds.sel({x_name: slice(xmin, xmax), y_name: slice(ymin, ymax)})
+            except KeyError:
+                mask = (
+                    (ds[x_name] >= xmin)
+                    & (ds[x_name] <= xmax)
+                    & (ds[y_name] >= ymin)
+                    & (ds[y_name] <= ymax)
+                )
+                piece = ds.where(mask, drop=True)
+            # Time-clip to the slice interval so multi-year files don't
+            # smuggle in out-of-range timesteps. Files without the time
+            # coord (n_timesteps == 0) pass through.
+            if row_time_var in piece.coords:
+                try:
+                    piece = piece.sel({row_time_var: slice(t_start, t_end)})
+                except KeyError:
+                    t_mask = (piece[row_time_var] >= t_start) & (
+                        piece[row_time_var] <= t_end
+                    )
+                    piece = piece.where(t_mask, drop=True)
+            if data_vars is not None:
+                piece = piece[list(data_vars)]
+            # Materialise so the array survives the `with` block close.
+            pieces.append(piece.load())
     if len(pieces) == 1:
         return pieces[0]
     time_var = filtered.gdf["time_var"].iloc[0]

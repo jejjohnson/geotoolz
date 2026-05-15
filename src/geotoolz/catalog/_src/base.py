@@ -117,6 +117,9 @@ class GeoCatalog(Protocol):
         (Landsat 7 + Landsat 8 for a long time series; S2A + S2B for
         better revisit). ``other`` is reprojected into ``self.crs`` if
         the CRSs differ; the result's backend tag is ``self``'s.
+        Backend tags are *not* checked — unioning a raster catalog with
+        a vector one will not raise, but the downstream loader you
+        eventually call will reject the mismatch.
 
         Args:
             other: Catalog to concatenate. CRS is auto-reprojected.
