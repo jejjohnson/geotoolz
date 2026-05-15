@@ -8,11 +8,12 @@ target CRS; loaders rasterise the matching features into a label
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -23,6 +24,10 @@ from rasterio.features import rasterize
 
 from geotoolz.catalog._src.memory import InMemoryGeoCatalog
 from geotoolz.types import GeoSlice
+
+
+if TYPE_CHECKING:
+    from geotoolz.catalog._src.duckdb_backend import DuckDBGeoCatalog
 
 
 log = logging.getLogger(__name__)
@@ -102,6 +107,32 @@ def _vector_row(
     )
 
 
+def _vector_row_for_stream(
+    filepath: str | Path,
+    *,
+    filename_regex: re.Pattern[str] | None,
+    date_format: str,
+    target_crs: Any,
+    layer: str | int | None,
+) -> dict[str, Any] | None:
+    """Picklable streaming extractor for the duckdb branch.
+
+    Wraps `_vector_row` and discards the observed-CRS second return — the
+    streaming branch always carries a fixed catalog CRS (EPSG:4326 by
+    default), so first-file-wins CRS latching does not apply. Lives at
+    module scope so `functools.partial` over it pickles cleanly across
+    a ``ProcessPoolExecutor`` (spawn).
+    """
+    row, _ = _vector_row(
+        filepath,
+        filename_regex=filename_regex,
+        date_format=date_format,
+        target_crs=target_crs,
+        layer=layer,
+    )
+    return row
+
+
 def build_vector_catalog(
     filepaths: Sequence[str | Path],
     *,
@@ -109,8 +140,14 @@ def build_vector_catalog(
     date_format: str = "%Y%m%d",
     target_crs: Any | None = None,
     layer: str | int | None = None,
-) -> InMemoryGeoCatalog:
-    """Build an in-memory catalog from vector files (Shapefile / GeoPackage / GeoJSON).
+    backend: Literal["memory", "duckdb"] = "memory",
+    out_path: str | Path | None = None,
+    write_bbox: bool = True,
+    sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),
+    batch_size: int = 10_000,
+    n_workers: int = 1,
+) -> InMemoryGeoCatalog | DuckDBGeoCatalog:
+    """Build a vector catalog — in-memory (default) or streamed to GeoParquet.
 
     For each input file, opens it with `geopandas.read_file`, optionally
     reprojects to ``target_crs``, and records the file's
@@ -118,6 +155,16 @@ def build_vector_catalog(
     from the filename via ``filename_regex``, mirroring
     `build_raster_catalog`. Empty files and non-matching filenames are
     skipped with a warning.
+
+    Backends mirror `build_raster_catalog`:
+
+    - ``backend="memory"`` (default): collects rows into a gdf and
+      returns an `InMemoryGeoCatalog`. First-non-empty file's native CRS
+      latches the catalog CRS when ``target_crs=None``.
+    - ``backend="duckdb"``: streams rows to a GeoParquet at ``out_path``
+      and returns a `DuckDBGeoCatalog`. CRS-latching is disabled — every
+      file is reprojected to ``target_crs`` (EPSG:4326 by default).
+      Requires the ``[duckdb]`` extra.
 
     Args:
         filepaths: Files to index. Anything `geopandas.read_file`
@@ -128,22 +175,50 @@ def build_vector_catalog(
             every file as time-invariant (sentinel interval).
         date_format: ``strptime`` format for the named date groups.
             Default ``"%Y%m%d"``.
-        target_crs: CRS for footprint + storage. When ``None``, the
-            first non-empty file's native CRS becomes the catalog CRS
-            and every subsequent file is reprojected to match — so
-            mixed-CRS inputs always produce coherent footprints.
+        target_crs: CRS for footprint + storage. For ``backend="memory"``,
+            ``None`` latches onto the first non-empty file's native CRS
+            and reprojects every subsequent file to match. For
+            ``backend="duckdb"``, ``None`` is upgraded to ``"EPSG:4326"``.
         layer: Layer name or index for multi-layer files (GeoPackage,
             GDB). ``None`` opens the file's default layer.
+        backend: ``"memory"`` for the existing in-RAM path,
+            ``"duckdb"`` for the streamed GeoParquet path.
+        out_path: Destination GeoParquet path. Required when
+            ``backend="duckdb"``.
+        write_bbox: Emit the GeoParquet 1.1 covering ``bbox`` struct.
+            Only consulted when ``backend="duckdb"``.
+        sort_by: Sort keys for the post-write DuckDB rewrite; literal
+            ``"geometry_hilbert"`` expands to
+            ``ST_Hilbert(ST_Centroid(geometry))``. ``None`` skips the
+            rewrite. Only consulted when ``backend="duckdb"``.
+        batch_size: Rows per Arrow record batch. Default 10 000.
+        n_workers: Process-pool size for per-file extraction. ``1``
+            runs sequentially.
 
     Returns:
-        An `InMemoryGeoCatalog` with backend ``"vector"`` and one row
-        per matching file. Columns: ``filepath``, ``geometry``,
-        ``start_time``, ``end_time``, ``layer``.
+        `InMemoryGeoCatalog` for ``backend="memory"``, otherwise a
+        `DuckDBGeoCatalog`.
 
     Raises:
-        ValueError: If no files yielded a row (every file empty or
-            unmatched).
+        ValueError: If no files yielded a row, or ``out_path`` missing
+            in the duckdb branch.
     """
+    if backend == "duckdb":
+        if out_path is None:
+            raise ValueError("build_vector_catalog(backend='duckdb') requires out_path")
+        return _build_vector_catalog_duckdb(
+            filepaths,
+            filename_regex=filename_regex,
+            date_format=date_format,
+            target_crs=target_crs,
+            layer=layer,
+            out_path=out_path,
+            write_bbox=write_bbox,
+            sort_by=sort_by,
+            batch_size=batch_size,
+            n_workers=n_workers,
+        )
+
     pattern = re.compile(filename_regex) if filename_regex is not None else None
     rows: list[dict[str, Any]] = []
     # `effective_crs` starts as the user-supplied `target_crs` (possibly
@@ -169,6 +244,54 @@ def build_vector_catalog(
         raise ValueError("build_vector_catalog: no files yielded a row")
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=effective_crs)
     return InMemoryGeoCatalog(gdf, backend="vector")
+
+
+def _build_vector_catalog_duckdb(
+    filepaths: Sequence[str | Path],
+    *,
+    filename_regex: str | None,
+    date_format: str,
+    target_crs: Any | None,
+    layer: str | int | None,
+    out_path: str | Path,
+    write_bbox: bool,
+    sort_by: tuple[str, ...] | None,
+    batch_size: int,
+    n_workers: int,
+) -> DuckDBGeoCatalog:
+    """Streaming-write branch for `build_vector_catalog`.
+
+    Forces EPSG:4326 when `target_crs=None` (no first-file CRS latching
+    in the streaming branch — the writer needs a single fixed CRS up
+    front).
+    """
+    from geotoolz.catalog._src.streaming import stream_build_duckdb
+
+    if target_crs is None:
+        target_crs = "EPSG:4326"
+        log.info(
+            "build_vector_catalog(backend='duckdb'): target_crs=None → "
+            "canonicalising footprints to EPSG:4326 (design §sharp-edges)."
+        )
+    pattern = re.compile(filename_regex) if filename_regex is not None else None
+    extract_fn = functools.partial(
+        _vector_row_for_stream,
+        filename_regex=pattern,
+        date_format=date_format,
+        target_crs=target_crs,
+        layer=layer,
+    )
+    return stream_build_duckdb(
+        filepaths,
+        extract_fn,
+        out_path=out_path,
+        crs=target_crs,
+        backend="vector",
+        write_bbox=write_bbox,
+        sort_by=sort_by,
+        batch_size=batch_size,
+        n_workers=n_workers,
+    )
 
 
 def load_vector(

@@ -229,3 +229,45 @@ mem = catalog.materialize()
 `CatalogRow` is the backend-neutral row view yielded by `iter_rows`;
 loaders consume it without caring whether the underlying store was a
 gdf or a SQL relation.
+
+### Streaming build (`backend="duckdb"`)
+
+The default builders (`build_raster_catalog` / `build_vector_catalog` /
+`build_xarray_catalog`) collect every row in RAM before returning an
+`InMemoryGeoCatalog`. That's fine up to ~10⁵ files — beyond that, the
+build step itself becomes the bottleneck.
+
+Pass `backend="duckdb"` to stream rows directly into a GeoParquet artifact
+in bounded memory (peak ≈ `batch_size × row_size`, not `O(n_rows)`):
+
+```python
+catalog = build_raster_catalog(
+    filepaths,                       # 10⁶ Sentinel-2 scenes
+    filename_regex=r"S2_T\w+_(?P<date>\d{8}).*\.tif",
+    backend="duckdb",
+    out_path="s2_archive.parquet",   # required for backend="duckdb"
+    n_workers=8,                     # parallel rasterio.open across files
+    sort_by=("start_time", "geometry_hilbert"),  # row-group pruning
+)
+# DuckDBGeoCatalog opened on s2_archive.parquet
+```
+
+What this turns on:
+
+- **Streaming Arrow batches** to `pyarrow.parquet.ParquetWriter` — peak
+  RAM is `batch_size × row_size` (default ~10 MB at `batch_size=10_000`).
+- **Process-pool extraction** when `n_workers > 1` — rasterio / fiona /
+  xarray release the GIL during I/O, so a spawn-based pool feeds the
+  single writer thread with no contention.
+- **EPSG:4326 canonicalization** when `target_crs=None` — the design's
+  prescribed wire format for shared GeoParquet artifacts.
+- **Hilbert-sorted output** via a DuckDB post-write rewrite —
+  `(start_time, ST_Hilbert(ST_Centroid(geometry)))` ordering enables
+  row-group pruning at query time. Pass `sort_by=None` to skip.
+- **GeoParquet 1.1 covering bbox** — per-row `bbox` struct column
+  (`xmin`/`ymin`/`xmax`/`ymax`), used by DuckDB and geopandas readers
+  for predicate pushdown.
+
+The result is a `DuckDBGeoCatalog` opened on `out_path`. The artifact
+also round-trips through `geopandas.read_parquet` and any other
+GeoParquet-aware tool.
