@@ -110,19 +110,30 @@ class SpatialJitteredStride(SpatialSampler):
         base = SpatialRegularStride(step=self.step)
         if _is_raster_domain(domain):
             sh, sw = base._broadcast(2)
+            h, w = int(domain.shape[-2]), int(domain.shape[-1])
+            size = getattr(geometry, "size", (1, 1))
+            ph, pw = int(size[-2]), int(size[-1])
+            # Maximum valid anchor so the patch still fits in the field.
+            rmax = max(h - ph, 0)
+            cmax = max(w - pw, 0)
             for r, c in base.anchors(domain, geometry):
                 dr = int(rng.uniform(-self.jitter, self.jitter) * sh)
                 dc = int(rng.uniform(-self.jitter, self.jitter) * sw)
-                yield (max(0, r + dr), max(0, c + dc))
+                yield (min(rmax, max(0, r + dr)), min(cmax, max(0, c + dc)))
             return
         if isinstance(domain, GridDomain):
             dims = list(domain.coords)
             steps = base._broadcast(len(dims))
+            size = getattr(geometry, "size", tuple([1] * len(dims)))
+            lens = [len(domain.coords[d]) for d in dims]
+            maxes = {
+                d: max(L - int(p), 0) for d, L, p in zip(dims, lens, size, strict=True)
+            }
             for anchor in base.anchors(domain, geometry):
                 out: dict[str, int] = {}
                 for d, s in zip(dims, steps, strict=True):
                     dj = rng.uniform(-self.jitter, self.jitter) * s
-                    out[d] = max(0, int(anchor[d] + dj))
+                    out[d] = min(maxes[d], max(0, int(anchor[d] + dj)))
                 yield out
             return
         raise NotImplementedError(

@@ -75,6 +75,24 @@ class TestSpatialOverlapAdd:
         assert out[0, 0] == 1.0
         assert out[3, 3] == 5.0
 
+    def test_multiband_raster_trailing_axis(self) -> None:
+        """The (row, col) slicer must target the trailing two axes when the
+        domain has a leading band/time dim. Regression for the bug where
+        ``acc[(row_slice, col_slice)]`` indexed the first two axes instead.
+        """
+        domain = GeoTensor(
+            values=np.zeros((3, 4, 4), dtype=np.float32),  # (band, H, W)
+            transform=rasterio.Affine.identity(),
+            crs="EPSG:32630",
+        )
+        # Two non-overlapping (3-band, 2x2) patches at (0,0) and (2,2).
+        p1 = _patch(np.full((3, 2, 2), 1.0), 0, 0, weights=np.ones((2, 2)))
+        p2 = _patch(np.full((3, 2, 2), 5.0), 2, 2, weights=np.ones((2, 2)))
+        out = SpatialOverlapAdd().merge([p1, p2], domain)
+        assert out.shape == (3, 4, 4)
+        np.testing.assert_array_equal(out[:, :2, :2], 1.0)
+        np.testing.assert_array_equal(out[:, 2:, 2:], 5.0)
+
     def test_normalisation_with_overlap(self, empty_field: GeoTensor) -> None:
         # Two identical patches with non-uniform weights at the same location.
         # OverlapAdd normalises (sum w*x / sum w) → the per-cell average, which

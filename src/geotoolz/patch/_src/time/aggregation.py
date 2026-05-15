@@ -75,18 +75,42 @@ class TemporalMean(TemporalAggregation):
 class TemporalHierarchicalCombine(TemporalAggregation):
     """Stitch multi-scale outputs — pairs with `TemporalMultiScale` geometry.
 
+    `TemporalMultiScale.window` emits one patch per (anchor, scale), so the
+    aggregation must key on the *(anchor, scale-slice)* pair rather than on
+    the anchor alone — otherwise later scales overwrite earlier ones.
+
+    Returns ``{anchor: {(slice.start, slice.stop): data}}``: outer dict keyed
+    by anchor, inner dict keyed by the patch's slice interval (the natural
+    identifier for "which scale produced this"). When ``scales`` is supplied
+    and matches `TemporalMultiScale.scales`, the inner key is the matching
+    scale length instead; otherwise it's the slice tuple.
+
     Args:
         scales: List of lookback lengths matching `TemporalMultiScale.scales`.
+            When supplied, the inner-dict keys become the scale lengths.
     """
 
     scales: list[int] = field(default_factory=list)
 
     streaming_safe: ClassVar[bool] = True
 
-    def merge(self, patches: Iterable[Any]) -> dict[int, Any]:
-        out: dict[int, Any] = {}
+    def merge(self, patches: Iterable[Any]) -> dict[int, dict[Any, Any]]:
+        out: dict[int, dict[Any, Any]] = {}
         for p in patches:
-            out[int(p.anchor)] = p.data
+            anchor = int(p.anchor)
+            indices = p.indices
+            scale_key: Any
+            if (
+                isinstance(indices, slice)
+                and self.scales
+                and (indices.stop - indices.start) in self.scales
+            ):
+                scale_key = int(indices.stop - indices.start)
+            elif isinstance(indices, slice):
+                scale_key = (int(indices.start), int(indices.stop))
+            else:
+                scale_key = repr(indices)
+            out.setdefault(anchor, {})[scale_key] = p.data
         return out
 
     def get_config(self) -> dict[str, Any]:
@@ -103,9 +127,12 @@ class TemporalForecast(TemporalAggregation):
 
     Args:
         horizon: Length of the horizon block at the *end* of each patch.
+        time_axis: Which axis of ``patch.data`` is the time axis. Must
+            match the patcher's ``time_axis``. Default 0.
     """
 
     horizon: int = 1
+    time_axis: int = 0
 
     streaming_safe: ClassVar[bool] = True
 
@@ -113,10 +140,15 @@ class TemporalForecast(TemporalAggregation):
         import numpy as np
 
         out: dict[int, Any] = {}
+        ax = int(self.time_axis)
+        h = int(self.horizon)
         for p in patches:
             arr = np.asarray(p.data)
-            out[int(p.anchor)] = arr[-int(self.horizon) :]
+            # Slice the trailing `horizon` elements along `time_axis` only.
+            idx: list[Any] = [slice(None)] * arr.ndim
+            idx[ax] = slice(arr.shape[ax] - h, arr.shape[ax])
+            out[int(p.anchor)] = arr[tuple(idx)]
         return out
 
     def get_config(self) -> dict[str, Any]:
-        return {"horizon": self.horizon}
+        return {"horizon": self.horizon, "time_axis": self.time_axis}

@@ -72,18 +72,27 @@ class TemporalEventTriggered(TemporalSampler):
     Useful for storm tracks, plume detections, and other event-aligned
     patching (the natural partner of `coupled` coupling in
     `SpatioTemporalPatcher`).
+
+    Args:
+        event_times: Iterable of integer time indices. Coerced to a list at
+            construction so `get_config()` doesn't accidentally exhaust a
+            user-supplied generator.
     """
 
-    event_times: Iterable[int] = field(default_factory=list)
+    event_times: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Materialise eagerly — guards against passing in a one-shot iterator
+        # whose contents would otherwise be consumed by `get_config()`.
+        self.event_times = [int(t) for t in self.event_times]
 
     def anchors(self, time_len: int) -> Iterator[int]:
         for t in self.event_times:
-            ti = int(t)
-            if 0 <= ti < int(time_len):
-                yield ti
+            if 0 <= t < int(time_len):
+                yield t
 
     def get_config(self) -> dict[str, Any]:
-        return {"n_events": len(list(self.event_times))}
+        return {"n_events": len(self.event_times)}
 
 
 @dataclass(eq=False)
@@ -110,15 +119,23 @@ class TemporalRandom(TemporalSampler):
 
 @dataclass(eq=False)
 class TemporalExplicit(TemporalSampler):
-    """Caller-supplied anchor indices — the universal escape hatch."""
+    """Caller-supplied anchor indices — the universal escape hatch.
 
-    times: Iterable[int] = field(default_factory=list)
+    Args:
+        times: Iterable of integer time indices. Coerced to a list at
+            construction so `get_config()` doesn't accidentally exhaust a
+            user-supplied generator.
+    """
+
+    times: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.times = [int(t) for t in self.times]
 
     def anchors(self, time_len: int) -> Iterator[int]:
         for t in self.times:
-            ti = int(t)
-            if 0 <= ti < int(time_len):
-                yield ti
+            if 0 <= t < int(time_len):
+                yield t
 
     def get_config(self) -> dict[str, Any]:
-        return {"n_times": len(list(self.times))}
+        return {"n_times": len(self.times)}

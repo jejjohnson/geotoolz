@@ -35,7 +35,7 @@ class TemporalPatcher:
 
             tp = TemporalPatcher(
                 geometry    = TemporalLookbackHorizon(lookback=12, horizon=6),
-                sampler     = RegularTimeStride(step=1),
+                sampler     = TemporalRegularStride(step=1),
                 window      = TemporalCausalBoxcar(),
                 aggregation = TemporalForecast(horizon=6),
             )

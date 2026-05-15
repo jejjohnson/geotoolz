@@ -63,11 +63,16 @@ def _domain_array_shape(domain: Any) -> tuple[int, ...]:
     raise TypeError(f"can't infer dense shape from {type(domain).__name__}")
 
 
-def _resolve_indices(indices: Any) -> tuple[slice, ...] | None:
+def _resolve_indices(indices: Any) -> tuple[Any, ...] | None:
     """Map a patch's indices object to a numpy slicer.
 
-    - rasterio.windows.Window: ``(row_slice, col_slice)``
-    - ``dict[str, slice]``: ``tuple(values)`` in dict order
+    Returns a tuple that targets the **trailing** axes of the accumulator —
+    leading band/time dims pass through via ``Ellipsis``. So
+    ``acc[_resolve_indices(idx)]`` selects ``(..., row_slice, col_slice)``
+    on a 3-D `(band, H, W)` array, not just `(row, col, :)`.
+
+    - rasterio.windows.Window: ``(..., row_slice, col_slice)``
+    - ``dict[str, slice]``: ``tuple(values)`` in dict order (no ellipsis)
     - ``_MaskedWindow``: resolve the underlying rasterio Window
     - ``None``: return ``None`` (caller falls back to anchor dispatch)
     """
@@ -78,7 +83,7 @@ def _resolve_indices(indices: Any) -> tuple[slice, ...] | None:
         c0 = int(indices.col_off)
         h = int(indices.height)
         w = int(indices.width)
-        return (slice(r0, r0 + h), slice(c0, c0 + w))
+        return (Ellipsis, slice(r0, r0 + h), slice(c0, c0 + w))
     if isinstance(indices, _MaskedWindow):
         return _resolve_indices(indices.window)
     if isinstance(indices, dict):
@@ -237,8 +242,11 @@ class SpatialOverlapAdd(SpatialAggregation):
         streaming: If ``True`` and ``target_path`` is set, accumulate
             into a chunked on-disk zarr store rather than in RAM.
         target_path: Filesystem path for the disk-backed accumulators.
-        chunks: Zarr chunk shape; defaults to the patch size when first
-            encountered.
+        chunks: Zarr chunk shape for the streaming accumulators. When
+            ``None`` (the default), the chunk shape is derived from the
+            first patch's data shape, right-aligned against the domain
+            shape so any leading band/time dims pick up their full extent
+            as a chunk. Provide an explicit value to override.
         normalize_by_window: Divide by the accumulated weight at the end
             (default ``True``). Set to ``False`` for the raw weighted
             sum.
@@ -278,10 +286,34 @@ class SpatialOverlapAdd(SpatialAggregation):
             return np.where(wsum > 0, acc / wsum, 0.0)
 
     def _merge_streaming(self, patches: Iterable[Any], domain: Any) -> Any:
+        import itertools
+
         import zarr
 
         shape = _domain_array_shape(domain)
-        chunks = self.chunks or shape
+        # Peek the first patch so the default chunk shape matches its data
+        # shape, rather than degenerating to the whole-array chunk that
+        # would defeat the whole point of streaming.
+        patches_iter = iter(patches)
+        try:
+            first = next(patches_iter)
+        except StopIteration:
+            # No patches → return an empty zero-filled zarr array.
+            return zarr.open(
+                f"{self.target_path}/rec.zarr",
+                mode="w",
+                shape=shape,
+                chunks=shape,
+                dtype="float32",
+                fill_value=0.0,
+            )
+        first_data = np.asarray(first.data)
+        # Right-align the data shape against the domain shape so leading
+        # band/time dims pick up their full extent as a chunk.
+        if self.chunks is not None:
+            chunks: tuple[int, ...] = tuple(self.chunks)
+        else:
+            chunks = tuple(shape[: -len(first_data.shape)]) + tuple(first_data.shape)
         # `zarr.open` returns `Array | Group`; with mode="w" and a `shape`/`dtype`
         # it always returns an Array — but ty can't narrow that, so we cast.
         rec: Any = zarr.open(
@@ -300,6 +332,8 @@ class SpatialOverlapAdd(SpatialAggregation):
             dtype="float32",
             fill_value=0.0,
         )
+        # Push the peeked patch back to the front of the iterator.
+        patches = itertools.chain([first], patches_iter)
         for p in patches:
             sl = _resolve_indices(p.indices)
             if sl is None:

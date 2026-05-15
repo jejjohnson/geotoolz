@@ -116,23 +116,28 @@ class SpatioTemporalPatcher:
                     weights=base_weights,
                 )
 
-    def merge(self, patches: Iterable[Any], field: Any) -> Any:
-        """Default merge — spatial-then-temporal.
+    def merge(self, patches: Iterable[Any], field: Any) -> dict[Any, Any]:
+        """Group patches by spatial anchor and apply the temporal aggregation.
 
-        Temporal merge first (one bucket per ``(space_anchor)``), then
-        spatial merge across the per-space-anchor temporal results. The
-        implementation is intentionally simple; richer compositions (e.g.
-        space-then-time) belong on user code.
+        Returns ``{spatial_anchor: temporal_aggregation_result}``. The
+        per-anchor temporal merge runs through `self.temporal.aggregation`,
+        but the spatial aggregation is intentionally **not** applied — the
+        returned dict is the by-anchor view callers typically want for
+        spatiotemporal workflows (e.g. event-triggered patching, where the
+        anchor *is* the unit of interest). Users who need a full spatial
+        merge across the temporal results can pass the dict's values through
+        ``self.spatial.aggregation.merge`` themselves.
+
+        Args:
+            patches: Iterable of `SpatioTemporalPatch` instances.
+            field: The original field — currently unused, kept for the
+                symmetry with `SpatialPatcher.merge(patches, domain)` so
+                callers can wire the two interchangeably.
         """
-        # Group by spatial anchor first.
         by_space: dict[Any, list[Any]] = {}
         for p in patches:
             by_space.setdefault(p.space, []).append(p)
-        # Temporal merge per space-anchor.
-        space_results = {
-            k: self.temporal.aggregation.merge(v) for k, v in by_space.items()
-        }
-        return space_results
+        return {k: self.temporal.aggregation.merge(v) for k, v in by_space.items()}
 
     def get_config(self) -> dict[str, Any]:
         return {
