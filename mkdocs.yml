@@ -45,6 +45,7 @@ nav:
   - Concepts:
       - Composition core: concepts.md
       - Patching: patching.md
+      - Catalogs: catalogs.md
   - Tutorials:
       - Composition core: notebooks/composition_core.ipynb
       - Pipeline idioms: notebooks/pipeline_idioms.ipynb
@@ -55,9 +56,14 @@ nav:
       - Patching backends: notebooks/patching_backends.ipynb
       - Patching time: notebooks/patching_time.ipynb
       - Patching streaming: notebooks/patching_streaming.ipynb
+      - Catalog intro: notebooks/catalog_intro.ipynb
+      - Catalog set algebra: notebooks/catalog_set_algebra.ipynb
+      - Catalog backends: notebooks/catalog_backends.ipynb
+      - Catalog ↔ patching: notebooks/catalog_patching.ipynb
   - API Reference:
       - Core: api/core.md
       - Patch: api/patch.md
+      - Catalog: api/catalog.md
   - Contributing: contributing.md
 
 markdown_extensions:

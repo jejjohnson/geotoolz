@@ -34,6 +34,20 @@ dependencies = [
     # so a slim install of geotoolz (without the optional patch extras
     # that would otherwise drag it in transitively) still works.
     "typing-extensions>=4.0",
+    # pandas IntervalIndex + pyproj.CRS underpin the GeoSlice / catalog
+    # primitives, both of which are part of the base surface (catalog set
+    # algebra works without the vector/xarray extras as long as we have
+    # geopandas + shapely + pyproj). Promote them out of the [vector]
+    # extra so `geotoolz.catalog.build_raster_catalog` works on a slim
+    # install.
+    "pandas>=2.1",
+    "pyproj>=3.6",
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    # GeoParquet I/O for the catalog roundtrip. geopandas pulls pyarrow
+    # only in its [io] extra, so depend on it explicitly here — without
+    # it, `to_geoparquet` / `from_geoparquet` raise ImportError.
+    "pyarrow>=14.0",
 ]
 
 [project.optional-dependencies]
@@ -48,13 +62,22 @@ hydra = ["hydra-zen>=0.14"]
 grid = ["xarray>=2024.1"]
 vector = ["geopandas>=0.14", "shapely>=2.0"]
 point = ["xvec>=0.4"]
-xarray-raster = ["rioxarray>=0.15"]
+xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1"]
 streaming = ["zarr>=3.0"]
 patch-full = [
     "xarray>=2024.1",
     "geopandas>=0.14",
     "shapely>=2.0",
     "xvec>=0.4",
+    "rioxarray>=0.15",
+    "zarr>=3.0",
+]
+# Catalog extras. The base install already provides geopandas + shapely
+# + pandas + pyproj (raster catalog works out of the box); these extras
+# unlock the xarray and vector backends.
+catalog = ["xarray>=2024.1", "rioxarray>=0.15"]
+catalog-full = [
+    "xarray>=2024.1",
     "rioxarray>=0.15",
     "zarr>=3.0",
 ]
@@ -111,8 +134,9 @@ ignore = ["E402", "E721", "E731", "E741"]
 [tool.ruff.lint.per-file-ignores]
 # Notebooks render to docs and use Greek/math glyphs (α, σ, ×, →) in
 # axis labels and prose. RUF001/002/003 flag them as ambiguous, which is
-# noise here.
-"*.ipynb" = ["RUF001", "RUF002", "RUF003"]
+# noise here. Line-length (E501) is also relaxed because long dict /
+# tuple literals in tutorials are clearer on one line than split.
+"*.ipynb" = ["RUF001", "RUF002", "RUF003", "E501"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
@@ -132,6 +156,15 @@ invalid-assignment = "ignore"
 # rasterio.windows.Window doesn't carry parameter names in its stub, so
 # `Window(col_off=..., row_off=...)` looks like unknown kwargs to ty.
 unknown-argument = "ignore"
+# `pandas-stubs`'s narrow Timestamp <-> NaTType union typing leaks into
+# `Timestamp.floor()` results, into `pd.Interval(pd.NaT, ...)` (used as a
+# sentinel for empty catalogs), and into `xarray.Dataset.where()` which
+# is declared as `Dataset | DataArray`. None of these are real bugs.
+invalid-argument-type = "ignore"
+invalid-return-type = "ignore"
+# `gdf.index.left/right/overlaps` are real attrs on `IntervalIndex` but
+# the base `Index` stub doesn't declare them, so ty flags them.
+unresolved-attribute = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
