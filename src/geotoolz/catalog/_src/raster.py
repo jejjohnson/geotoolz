@@ -12,11 +12,12 @@ shape.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import logging
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -30,6 +31,10 @@ from rasterio.vrt import WarpedVRT
 
 from geotoolz.catalog._src.memory import InMemoryGeoCatalog
 from geotoolz.types import GeoSlice
+
+
+if TYPE_CHECKING:
+    from geotoolz.catalog._src.duckdb_backend import DuckDBGeoCatalog
 
 
 log = logging.getLogger(__name__)
@@ -115,8 +120,14 @@ def build_raster_catalog(
     filename_regex: str | None = None,
     date_format: str = "%Y%m%d",
     target_crs: Any | None = None,
-) -> InMemoryGeoCatalog:
-    """Build an in-memory catalog from a collection of raster files.
+    backend: Literal["memory", "duckdb"] = "memory",
+    out_path: str | Path | None = None,
+    write_bbox: bool = True,
+    sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),
+    batch_size: int = 10_000,
+    n_workers: int = 1,
+) -> InMemoryGeoCatalog | DuckDBGeoCatalog:
+    """Build a raster catalog — in-memory (default) or streamed to GeoParquet.
 
     For each input file, opens it with `rasterio`, extracts its bounds
     (optionally projected through a lazy `WarpedVRT` if ``target_crs``
@@ -128,6 +139,18 @@ def build_raster_catalog(
     Files whose filenames don't match the regex are *skipped with a
     warning*, not raised — so a heterogeneous directory partially
     populated by one product still produces a usable catalog.
+
+    Two backends:
+
+    - ``backend="memory"`` (default): collects rows into a
+      `gpd.GeoDataFrame` and returns an `InMemoryGeoCatalog`. Peak RAM is
+      ``O(n_rows)``. Good up to ~10⁵ files.
+    - ``backend="duckdb"``: streams rows through a `pyarrow.parquet.ParquetWriter`
+      directly to ``out_path``, then sorts via DuckDB ``(start_time,
+      ST_Hilbert(ST_Centroid(geometry)))`` for row-group pruning. Peak RAM
+      is ``O(batch_size)``. Scales to 10⁶+ files. Returns a
+      `DuckDBGeoCatalog` opened on the freshly written artifact. Requires
+      the ``[duckdb]`` extra.
 
     Args:
         filepaths: Files to index. Anything `rasterio.open` accepts —
@@ -142,22 +165,59 @@ def build_raster_catalog(
         date_format: ``strptime`` format for the named date groups.
             Default ``"%Y%m%d"``.
         target_crs: CRS to project each file's bounds into. ``None``
-            keeps each file's native CRS, which is fine for a uniform
-            archive but a footgun for multi-CRS ones: the catalog
-            gdf-level CRS must be a single value, and set algebra will
-            reproject but bounds extraction won't. For multi-CRS
-            archives, set this explicitly.
+            keeps each file's native CRS in the memory backend; for the
+            duckdb backend ``None`` is upgraded to ``"EPSG:4326"`` —
+            the canonical wire format the design prescribes for shared
+            GeoParquet artifacts (§sharp-edges of the design plan).
+        backend: ``"memory"`` for the existing in-RAM path,
+            ``"duckdb"`` for the streamed GeoParquet path.
+        out_path: Destination GeoParquet path. Required when
+            ``backend="duckdb"``. Ignored when ``backend="memory"``.
+        write_bbox: Emit the GeoParquet 1.1 per-row ``bbox`` covering
+            struct (used for predicate pushdown). Default True. Only
+            consulted when ``backend="duckdb"``.
+        sort_by: Sort keys for the post-write DuckDB rewrite. Each
+            plain column name passes through; the literal token
+            ``"geometry_hilbert"`` expands to
+            ``ST_Hilbert(ST_Centroid(geometry))``. ``None`` skips the
+            rewrite and leaves rows in extraction order. Only consulted
+            when ``backend="duckdb"``.
+        batch_size: Rows per Arrow record batch in the streaming
+            writer. Default 10 000. Only consulted when
+            ``backend="duckdb"``.
+        n_workers: Process-pool size for per-file metadata extraction.
+            ``1`` runs sequentially in-process. ``>1`` spawns a
+            ``ProcessPoolExecutor`` (``spawn`` start method) feeding
+            the single in-process writer.
 
     Returns:
-        An `InMemoryGeoCatalog` with backend ``"raster"`` and one row
-        per matching file. Columns: ``filepath``, ``geometry``,
-        ``start_time``, ``end_time``, ``crs``.
+        ``InMemoryGeoCatalog`` for ``backend="memory"``, otherwise a
+        ``DuckDBGeoCatalog`` opened on ``out_path``.
 
     Raises:
-        ValueError: If no files matched the regex (the catalog would
-            be empty — usually a sign of a wrong regex or wrong
-            ``filepaths`` list).
+        ValueError: No files matched (or `out_path` missing in the
+            duckdb branch).
     """
+    if backend not in ("memory", "duckdb"):
+        raise ValueError(
+            f"build_raster_catalog: backend must be 'memory' or 'duckdb'; "
+            f"got {backend!r}"
+        )
+    if backend == "duckdb":
+        if out_path is None:
+            raise ValueError("build_raster_catalog(backend='duckdb') requires out_path")
+        return _build_raster_catalog_duckdb(
+            filepaths,
+            filename_regex=filename_regex,
+            date_format=date_format,
+            target_crs=target_crs,
+            out_path=out_path,
+            write_bbox=write_bbox,
+            sort_by=sort_by,
+            batch_size=batch_size,
+            n_workers=n_workers,
+        )
+
     pattern = re.compile(filename_regex) if filename_regex is not None else None
     rows: list[dict[str, Any]] = []
     for fp in filepaths:
@@ -175,6 +235,52 @@ def build_raster_catalog(
     crs_value = target_crs if target_crs is not None else rows[0]["crs"]
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs_value)
     return InMemoryGeoCatalog(gdf, backend="raster")
+
+
+def _build_raster_catalog_duckdb(
+    filepaths: Sequence[str | Path],
+    *,
+    filename_regex: str | None,
+    date_format: str,
+    target_crs: Any | None,
+    out_path: str | Path,
+    write_bbox: bool,
+    sort_by: tuple[str, ...] | None,
+    batch_size: int,
+    n_workers: int,
+) -> DuckDBGeoCatalog:
+    """Streaming-write branch for `build_raster_catalog`.
+
+    Canonicalises CRS to EPSG:4326 by default (design §sharp-edges line
+    588), assembles a picklable extractor via `functools.partial`, and
+    delegates to `stream_build_duckdb`.
+    """
+    from geotoolz.catalog._src.streaming import stream_build_duckdb
+
+    if target_crs is None:
+        target_crs = "EPSG:4326"
+        log.info(
+            "build_raster_catalog(backend='duckdb'): target_crs=None → "
+            "canonicalising footprints to EPSG:4326 (design §sharp-edges)."
+        )
+    pattern = re.compile(filename_regex) if filename_regex is not None else None
+    extract_fn = functools.partial(
+        _filepath_to_row,
+        filename_regex=pattern,
+        date_format=date_format,
+        target_crs=target_crs,
+    )
+    return stream_build_duckdb(
+        filepaths,
+        extract_fn,
+        out_path=out_path,
+        crs=target_crs,
+        backend="raster",
+        write_bbox=write_bbox,
+        sort_by=sort_by,
+        batch_size=batch_size,
+        n_workers=n_workers,
+    )
 
 
 def load_raster(

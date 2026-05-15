@@ -8,10 +8,11 @@ axis is parsed from a ``time`` coordinate (configurable).
 
 from __future__ import annotations
 
+import functools
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import pandas as pd
@@ -21,6 +22,7 @@ import shapely.geometry
 if TYPE_CHECKING:
     import xarray as xr
 
+    from geotoolz.catalog._src.duckdb_backend import DuckDBGeoCatalog
     from geotoolz.types import GeoSlice
 
 from geotoolz.catalog._src.memory import InMemoryGeoCatalog
@@ -126,8 +128,14 @@ def build_xarray_catalog(
     target_crs: Any | None = None,
     data_vars: Sequence[str] | None = None,
     time_var: str = "time",
-) -> InMemoryGeoCatalog:
-    """Build an in-memory catalog from xarray-shaped files (NetCDF / Zarr / HDF).
+    backend: Literal["memory", "duckdb"] = "memory",
+    out_path: str | Path | None = None,
+    write_bbox: bool = True,
+    sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),
+    batch_size: int = 10_000,
+    n_workers: int = 1,
+) -> InMemoryGeoCatalog | DuckDBGeoCatalog:
+    """Build an xarray-shaped catalog — in-memory (default) or streamed.
 
     For each input file, opens it with ``xr.open_dataset``, derives the
     spatial footprint from the min/max of its (x, y) / (lon, lat) /
@@ -135,6 +143,13 @@ def build_xarray_catalog(
     the ``time_var`` coordinate. If `rioxarray` is loaded and the
     dataset carries a CRS through its ``rio`` accessor, that wins;
     otherwise the catalog falls back to ``target_crs``.
+
+    Backends mirror `build_raster_catalog`. The streaming branch
+    (`backend="duckdb"`) requires the ``[duckdb]`` extra and an
+    *explicit* ``target_crs`` — unlike the raster builder, xarray
+    coordinate bounds are *not* reprojected, so the CRS metadata must
+    match the dataset's native coords. Passing ``target_crs=None`` in
+    the duckdb branch raises `ValueError`.
 
     Args:
         filepaths: Files to index. ``.zarr`` paths (and directories)
@@ -151,17 +166,48 @@ def build_xarray_catalog(
         time_var: Coordinate name for the time axis. Default ``"time"``.
             Files where this coordinate is missing get the sentinel
             interval ``[1900-01-01, 2100-01-01]``.
+        backend: ``"memory"`` for the existing in-RAM path,
+            ``"duckdb"`` for the streamed GeoParquet path.
+        out_path: Destination GeoParquet path. Required when
+            ``backend="duckdb"``.
+        write_bbox: Emit the GeoParquet 1.1 covering ``bbox`` struct.
+            Only consulted when ``backend="duckdb"``.
+        sort_by: Sort keys for the post-write DuckDB rewrite; literal
+            ``"geometry_hilbert"`` expands to
+            ``ST_Hilbert(ST_Centroid(geometry))``. ``None`` skips the
+            rewrite. Only consulted when ``backend="duckdb"``.
+        batch_size: Rows per Arrow record batch. Default 10 000.
+        n_workers: Process-pool size for per-file extraction.
 
     Returns:
-        An `InMemoryGeoCatalog` with backend ``"xarray"`` and one row
-        per indexed file. Columns: ``filepath``, ``geometry``,
-        ``start_time``, ``end_time``, ``n_timesteps``, ``time_var``,
-        ``data_vars``, ``crs``.
+        `InMemoryGeoCatalog` for ``backend="memory"``, otherwise a
+        `DuckDBGeoCatalog`.
 
     Raises:
         ImportError: If the ``[xarray-raster]`` extra is not installed.
-        ValueError: If no files yielded a row.
+        ValueError: If no files yielded a row or ``out_path`` missing
+            in the duckdb branch.
     """
+    if backend not in ("memory", "duckdb"):
+        raise ValueError(
+            f"build_xarray_catalog: backend must be 'memory' or 'duckdb'; "
+            f"got {backend!r}"
+        )
+    if backend == "duckdb":
+        if out_path is None:
+            raise ValueError("build_xarray_catalog(backend='duckdb') requires out_path")
+        return _build_xarray_catalog_duckdb(
+            filepaths,
+            target_crs=target_crs,
+            data_vars=data_vars,
+            time_var=time_var,
+            out_path=out_path,
+            write_bbox=write_bbox,
+            sort_by=sort_by,
+            batch_size=batch_size,
+            n_workers=n_workers,
+        )
+
     rows: list[dict[str, Any]] = []
     for fp in filepaths:
         row = _xarray_row(
@@ -183,6 +229,57 @@ def build_xarray_catalog(
         )
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs_value)
     return InMemoryGeoCatalog(gdf, backend="xarray")
+
+
+def _build_xarray_catalog_duckdb(
+    filepaths: Sequence[str | Path],
+    *,
+    target_crs: Any | None,
+    data_vars: Sequence[str] | None,
+    time_var: str,
+    out_path: str | Path,
+    write_bbox: bool,
+    sort_by: tuple[str, ...] | None,
+    batch_size: int,
+    n_workers: int,
+) -> DuckDBGeoCatalog:
+    """Streaming-write branch for `build_xarray_catalog`.
+
+    Unlike the raster branch (which has `WarpedVRT` and can canonicalise
+    to EPSG:4326), xarray's `_xarray_row` reads raw coordinate min/max
+    and does *not* reproject. Silently defaulting to EPSG:4326 here
+    would mislabel artifacts whose source coords are in UTM/Web-Mercator/
+    etc., so the duckdb branch instead requires an explicit
+    ``target_crs`` matching the data's native CRS.
+    """
+    from geotoolz.catalog._src.streaming import stream_build_duckdb
+
+    if target_crs is None:
+        raise ValueError(
+            "build_xarray_catalog(backend='duckdb') requires target_crs. "
+            "Unlike the raster builder, the xarray branch does not "
+            "reproject coordinate bounds, so the CRS metadata must match "
+            "the dataset's native coordinate system. Pass target_crs "
+            "explicitly (e.g. 'EPSG:4326' for lon/lat, or your data's "
+            "actual projected CRS for UTM/Web-Mercator/etc.)."
+        )
+    extract_fn = functools.partial(
+        _xarray_row,
+        data_vars=tuple(data_vars) if data_vars is not None else None,
+        time_var=time_var,
+        target_crs=target_crs,
+    )
+    return stream_build_duckdb(
+        filepaths,
+        extract_fn,
+        out_path=out_path,
+        crs=target_crs,
+        backend="xarray",
+        write_bbox=write_bbox,
+        sort_by=sort_by,
+        batch_size=batch_size,
+        n_workers=n_workers,
+    )
 
 
 def load_xarray(
