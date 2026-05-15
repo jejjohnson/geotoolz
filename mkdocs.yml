@@ -61,6 +61,7 @@ nav:
       - Catalog backends: notebooks/catalog_backends.ipynb
       - Catalog ↔ patching: notebooks/catalog_patching.ipynb
       - Catalog (DuckDB): notebooks/catalog_duckdb.ipynb
+      - Image processing (radiometry + cloud + indices): notebooks/image_processing.ipynb
   - API Reference:
       - Core: api/core.md
       - Patch: api/patch.md

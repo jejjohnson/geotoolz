@@ -142,6 +142,12 @@ ignore = ["E402", "E721", "E731", "E741"]
 # noise here. Line-length (E501) is also relaxed because long dict /
 # tuple literals in tutorials are clearer on one line than split.
 "*.ipynb" = ["RUF001", "RUF002", "RUF003", "E501"]
+# The RS operator modules carry LaTeX + Greek-letter math (ρ, ε, ×,
+# em-dashes) in their docstrings — the formulas are the documentation.
+# Same relaxation as notebooks: RUF ambiguity and E501 are noise here.
+"src/geotoolz/indices/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
+"src/geotoolz/radiometry/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
+"src/geotoolz/cloud/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
