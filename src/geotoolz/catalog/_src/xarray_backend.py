@@ -145,10 +145,11 @@ def build_xarray_catalog(
     otherwise the catalog falls back to ``target_crs``.
 
     Backends mirror `build_raster_catalog`. The streaming branch
-    (`backend="duckdb"`) requires the ``[duckdb]`` extra and forces an
-    explicit ``target_crs`` (defaulting to ``"EPSG:4326"`` when ``None``)
-    because the streaming writer needs a single fixed CRS — coordinate
-    bounds are *not* reprojected for xarray.
+    (`backend="duckdb"`) requires the ``[duckdb]`` extra and an
+    *explicit* ``target_crs`` — unlike the raster builder, xarray
+    coordinate bounds are *not* reprojected, so the CRS metadata must
+    match the dataset's native coords. Passing ``target_crs=None`` in
+    the duckdb branch raises `ValueError`.
 
     Args:
         filepaths: Files to index. ``.zarr`` paths (and directories)
@@ -187,6 +188,11 @@ def build_xarray_catalog(
         ValueError: If no files yielded a row or ``out_path`` missing
             in the duckdb branch.
     """
+    if backend not in ("memory", "duckdb"):
+        raise ValueError(
+            f"build_xarray_catalog: backend must be 'memory' or 'duckdb'; "
+            f"got {backend!r}"
+        )
     if backend == "duckdb":
         if out_path is None:
             raise ValueError("build_xarray_catalog(backend='duckdb') requires out_path")
@@ -239,19 +245,23 @@ def _build_xarray_catalog_duckdb(
 ) -> DuckDBGeoCatalog:
     """Streaming-write branch for `build_xarray_catalog`.
 
-    Defaults `target_crs` to EPSG:4326 — xarray has no `WarpedVRT`
-    analogue, so this is just a tagging convention; callers with
-    non-4326 coordinates must pass `target_crs` explicitly so the
-    on-disk CRS metadata matches the geometries.
+    Unlike the raster branch (which has `WarpedVRT` and can canonicalise
+    to EPSG:4326), xarray's `_xarray_row` reads raw coordinate min/max
+    and does *not* reproject. Silently defaulting to EPSG:4326 here
+    would mislabel artifacts whose source coords are in UTM/Web-Mercator/
+    etc., so the duckdb branch instead requires an explicit
+    ``target_crs`` matching the data's native CRS.
     """
     from geotoolz.catalog._src.streaming import stream_build_duckdb
 
     if target_crs is None:
-        target_crs = "EPSG:4326"
-        log.info(
-            "build_xarray_catalog(backend='duckdb'): target_crs=None → "
-            "tagging artifact as EPSG:4326. Pass target_crs explicitly if "
-            "your coordinates are in a different CRS."
+        raise ValueError(
+            "build_xarray_catalog(backend='duckdb') requires target_crs. "
+            "Unlike the raster builder, the xarray branch does not "
+            "reproject coordinate bounds, so the CRS metadata must match "
+            "the dataset's native coordinate system. Pass target_crs "
+            "explicitly (e.g. 'EPSG:4326' for lon/lat, or your data's "
+            "actual projected CRS for UTM/Web-Mercator/etc.)."
         )
     extract_fn = functools.partial(
         _xarray_row,

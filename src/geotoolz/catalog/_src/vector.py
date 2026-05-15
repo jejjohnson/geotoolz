@@ -203,6 +203,11 @@ def build_vector_catalog(
         ValueError: If no files yielded a row, or ``out_path`` missing
             in the duckdb branch.
     """
+    if backend not in ("memory", "duckdb"):
+        raise ValueError(
+            f"build_vector_catalog: backend must be 'memory' or 'duckdb'; "
+            f"got {backend!r}"
+        )
     if backend == "duckdb":
         if out_path is None:
             raise ValueError("build_vector_catalog(backend='duckdb') requires out_path")

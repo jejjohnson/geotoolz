@@ -195,6 +195,8 @@ class TestSort:
     def test_sort_by_hilbert(self, utm29_tile_factory, tmp_path: Path) -> None:
         # Same date, four tiles in a 2x2 grid; Hilbert sort should produce
         # a spatially coherent ordering distinct from raw input order.
+        # Input order is deliberately scrambled so a no-op sort would be
+        # caught by the inequality check below.
         paths = [
             utm29_tile_factory((500_000, 4_000_000, 500_160, 4_000_160), "20240115"),
             utm29_tile_factory((500_160, 4_000_160, 500_320, 4_000_320), "20240115"),
@@ -210,10 +212,33 @@ class TestSort:
             sort_by=("start_time", "geometry_hilbert"),
         )
         gdf = gpd.read_parquet(out)
-        # All on the same day, so order is purely Hilbert.
         assert len(gdf) == 4
-        # Sanity: the rewrite ran and produced a real polygon column.
         assert all(isinstance(g, shapely.geometry.Polygon) for g in gdf.geometry)
+
+        # Strong assertion: the physical row order must match DuckDB's
+        # ST_Hilbert ranking of the same geometries. Compute the Hilbert
+        # value per row and verify the sequence is monotonically
+        # non-decreasing — i.e. the sort_by rewrite actually applied the
+        # Hilbert ordering, not just a no-op or a fallback sort.
+        con = duckdb.connect()
+        con.execute("INSTALL spatial; LOAD spatial")
+        hilbert_vals = [
+            r[0]
+            for r in con.sql(
+                "SELECT ST_Hilbert(ST_Centroid(geometry)) AS h "
+                f"FROM read_parquet('{out}')"
+            ).fetchall()
+        ]
+        con.close()
+        assert hilbert_vals == sorted(hilbert_vals), (
+            f"rows are not in Hilbert order: {hilbert_vals}"
+        )
+        # And the rewrite must have changed the order from raw input.
+        actual_paths = [Path(p).name for p in gdf["filepath"]]
+        input_paths = [p.name for p in paths]
+        assert actual_paths != input_paths, (
+            "Hilbert rewrite produced input order — possible no-op."
+        )
 
     def test_no_sort_leaves_extraction_order(
         self, utm29_tile_factory, tmp_path: Path
@@ -414,6 +439,96 @@ class TestValidation:
         out = tmp_path / "empty.parquet"
         with pytest.raises(ValueError, match="no files yielded"):
             build_raster_catalog([], backend="duckdb", out_path=out)
+
+    def test_invalid_backend_rejected_raster(
+        self, utm29_tile_factory, tmp_path: Path
+    ) -> None:
+        path = utm29_tile_factory((500_000, 4_000_000, 500_160, 4_000_160), "20240115")
+        with pytest.raises(ValueError, match="must be 'memory' or 'duckdb'"):
+            build_raster_catalog(
+                [path],
+                filename_regex=RASTER_REGEX,
+                backend="duckbd",  # typo
+                out_path=tmp_path / "x.parquet",
+            )
+
+    def test_invalid_backend_rejected_vector(self, tmp_path: Path) -> None:
+        gdf = gpd.GeoDataFrame(
+            {"geometry": [shapely.geometry.box(0, 0, 1, 1)]}, crs="EPSG:32629"
+        )
+        gdf.to_file(tmp_path / "labels_20240115.gpkg", driver="GPKG")
+        with pytest.raises(ValueError, match="must be 'memory' or 'duckdb'"):
+            build_vector_catalog(
+                [tmp_path / "labels_20240115.gpkg"],
+                filename_regex=VECTOR_REGEX,
+                backend="duckbd",  # typo
+                out_path=tmp_path / "x.parquet",
+            )
+
+    def test_invalid_backend_rejected_xarray(self, tmp_path: Path) -> None:
+        xr = pytest.importorskip("xarray")
+        ds = xr.Dataset(
+            {"ndvi": (("y", "x"), np.zeros((4, 4), dtype=np.float32))},
+            coords={
+                "y": np.linspace(40.5, 40.0, 4),
+                "x": np.linspace(-3.5, -3.0, 4),
+            },
+        )
+        ds.to_netcdf(tmp_path / "x.nc")
+        from geotoolz.catalog import build_xarray_catalog
+
+        with pytest.raises(ValueError, match="must be 'memory' or 'duckdb'"):
+            build_xarray_catalog(
+                [tmp_path / "x.nc"],
+                target_crs="EPSG:4326",
+                backend="duckbd",  # typo
+                out_path=tmp_path / "y.parquet",
+            )
+
+    def test_xarray_duckdb_requires_target_crs(self, tmp_path: Path) -> None:
+        """The xarray duckdb branch doesn't reproject coordinate bounds —
+        a silent EPSG:4326 default would mislabel projected NetCDFs."""
+        xr = pytest.importorskip("xarray")
+        ds = xr.Dataset(
+            {"ndvi": (("y", "x"), np.zeros((4, 4), dtype=np.float32))},
+            coords={
+                "y": np.linspace(40.5, 40.0, 4),
+                "x": np.linspace(-3.5, -3.0, 4),
+            },
+        )
+        ds.to_netcdf(tmp_path / "x.nc")
+        from geotoolz.catalog import build_xarray_catalog
+
+        with pytest.raises(ValueError, match="requires target_crs"):
+            build_xarray_catalog(
+                [tmp_path / "x.nc"],
+                backend="duckdb",
+                out_path=tmp_path / "y.parquet",
+                # target_crs omitted → ValueError
+            )
+
+    def test_empty_input_leaves_existing_artifact_intact(
+        self, utm29_tile_factory, tmp_path: Path
+    ) -> None:
+        """Regression for the staged-write contract: a failed build (no
+        matching rows) must not clobber a pre-existing out_path."""
+        out = tmp_path / "preexisting.parquet"
+        good = utm29_tile_factory((500_000, 4_000_000, 500_160, 4_000_160), "20240115")
+        build_raster_catalog(
+            [good], filename_regex=RASTER_REGEX, backend="duckdb", out_path=out
+        )
+        before = out.read_bytes()
+
+        # Second build: regex doesn't match the renamed copy → 0 rows.
+        bad = tmp_path / "no_match_name.tif"
+        bad.write_bytes(good.read_bytes())
+        with pytest.raises(ValueError, match="no files yielded"):
+            build_raster_catalog(
+                [bad], filename_regex=RASTER_REGEX, backend="duckdb", out_path=out
+            )
+
+        # The pre-existing artifact survived intact.
+        assert out.read_bytes() == before
 
 
 # ---------------------------------------------------------------------------

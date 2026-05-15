@@ -261,6 +261,13 @@ What this turns on:
   single writer thread with no contention.
 - **EPSG:4326 canonicalization** when `target_crs=None` — the design's
   prescribed wire format for shared GeoParquet artifacts.
+
+    *Exception: `build_xarray_catalog`*. The xarray branch does **not**
+    reproject coordinate bounds (there's no `WarpedVRT` analogue), so
+    silently tagging a UTM/Web-Mercator NetCDF as EPSG:4326 would
+    mislabel the artifact. Passing `target_crs=None` to
+    `build_xarray_catalog(backend="duckdb")` raises `ValueError` — pass
+    your data's actual native CRS explicitly.
 - **Hilbert-sorted output** via a DuckDB post-write rewrite —
   `(start_time, ST_Hilbert(ST_Centroid(geometry)))` ordering enables
   row-group pruning at query time. Pass `sort_by=None` to skip.

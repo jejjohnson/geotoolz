@@ -26,9 +26,11 @@ CRS metadata + per-row ``bbox`` covering struct), so it round-trips through
 from __future__ import annotations
 
 import concurrent.futures
+import itertools
 import json
 import logging
 import multiprocessing
+import os
 import tempfile
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
@@ -59,7 +61,7 @@ _SCHEMA_VERSION = 0
 
 
 def _iter_rows_parallel(
-    filepaths: Sequence[str | Path],
+    filepaths: Sequence[str | Path] | Iterator[str | Path],
     extract_fn: Callable[[str | Path], dict[str, Any] | None],
     *,
     n_workers: int = 1,
@@ -67,7 +69,10 @@ def _iter_rows_parallel(
     """Yield per-file row dicts, optionally extracted across a process pool.
 
     Args:
-        filepaths: Files to extract from.
+        filepaths: Files to extract from. May be a sequence or any
+            iterable — the parallel path streams the input rather than
+            materialising it, so 10⁶-file iterables don't blow up the
+            coordinator process.
         extract_fn: Module-level (picklable) callable that takes a single
             path and returns a row dict, or ``None`` to skip the file.
         n_workers: Pool size. ``1`` runs everything in the calling process
@@ -76,9 +81,11 @@ def _iter_rows_parallel(
             deadlocks on macOS — spawn is the portable default).
 
     Yields:
-        Row dicts in submission order. ``None`` returns from
-        ``extract_fn`` are filtered out (filenames that didn't match the
-        regex etc.).
+        Row dicts. ``None`` returns from ``extract_fn`` are filtered out
+        (filenames that didn't match the regex etc.). With ``n_workers=1``
+        the order is the input order; with ``n_workers>1`` the order is
+        completion order — callers needing deterministic output should
+        apply a ``sort_by`` rewrite downstream.
     """
     if n_workers < 1:
         raise ValueError(f"n_workers must be >= 1; got {n_workers}")
@@ -90,13 +97,35 @@ def _iter_rows_parallel(
         return
 
     ctx = multiprocessing.get_context("spawn")
+    # Keep at most `window` futures pending at once. Bounded submission
+    # avoids the O(n_files) coordinator-memory blowup of
+    # `ProcessPoolExecutor.map(fn, list(filepaths))`, which materialises
+    # the full input list and queues every future up front.
+    window = max(n_workers * 4, 8)
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=n_workers,
         mp_context=ctx,
     ) as pool:
-        for row in pool.map(extract_fn, list(filepaths)):
-            if row is not None:
-                yield row
+        iterator = iter(filepaths)
+        pending: set[concurrent.futures.Future[dict[str, Any] | None]] = set()
+        # Prime the window.
+        for fp in itertools.islice(iterator, window):
+            pending.add(pool.submit(extract_fn, fp))
+        while pending:
+            done, pending = concurrent.futures.wait(
+                pending,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for fut in done:
+                row = fut.result()
+                if row is not None:
+                    yield row
+                # Refill the window one-for-one.
+                try:
+                    nxt = next(iterator)
+                except StopIteration:
+                    continue
+                pending.add(pool.submit(extract_fn, nxt))
 
 
 # ---------------------------------------------------------------------------
@@ -500,9 +529,21 @@ def stream_build_duckdb(
         A `DuckDBGeoCatalog` opened on ``out_path``.
 
     Raises:
-        ValueError: No files yielded a row.
+        ImportError: ``[duckdb]`` extra missing — surfaced before any
+            writes so a missing extra leaves the filesystem untouched.
+        ValueError: No files yielded a row. ``out_path`` is left
+            untouched (any pre-existing artifact is preserved).
     """
-    from geotoolz.catalog._src.duckdb_backend import DuckDBGeoCatalog
+    # Fail fast before touching the filesystem: the final
+    # `DuckDBGeoCatalog.open` (and the optional sort-rewrite) both need
+    # the extra, so dying here saves us from writing a temp file we
+    # can't open anyway.
+    from geotoolz.catalog._src.duckdb_backend import (
+        DuckDBGeoCatalog,
+        _require_duckdb,
+    )
+
+    _require_duckdb()
 
     out_path = Path(out_path)
     if out_path.parent != Path() and not out_path.parent.exists():
@@ -510,30 +551,26 @@ def stream_build_duckdb(
             f"stream_build_duckdb: parent dir does not exist: {out_path.parent}"
         )
 
-    # Stream into a temp neighbour file so we can atomically replace `out_path`
-    # only after the sort-rewrite succeeds.
+    # Always stream into a sibling temp file, regardless of `sort_by`.
+    # Only move/rename to `out_path` after we've confirmed at least one
+    # row was written and (when sorting) the rewrite succeeded. This is
+    # what keeps a failed build (no matching files, sort-rewrite error,
+    # interrupted process) from clobbering a pre-existing artifact at
+    # `out_path`.
     target_dir = out_path.parent if str(out_path.parent) else Path()
-    if sort_by is None:
-        # Direct write to the final path.
-        write_target = out_path
-        sort_tmp: Path | None = None
-    else:
-        fd, tmp_str = tempfile.mkstemp(
-            prefix=out_path.stem + ".unsorted.",
-            suffix=".parquet",
-            dir=str(target_dir) if str(target_dir) else None,
-        )
-        # We only need the path; close the fd immediately so pyarrow can open it.
-        import os
+    fd, tmp_str = tempfile.mkstemp(
+        prefix=out_path.stem + ".staging.",
+        suffix=".parquet",
+        dir=str(target_dir) if str(target_dir) else None,
+    )
+    os.close(fd)
+    staged = Path(tmp_str)
 
-        os.close(fd)
-        write_target = Path(tmp_str)
-        sort_tmp = write_target
-
+    sort_tmp: Path | None = None
     rows_written = 0
     try:
         with StreamingParquetWriter(
-            write_target,
+            staged,
             crs=crs,
             backend=backend,
             write_bbox=write_bbox,
@@ -544,26 +581,46 @@ def stream_build_duckdb(
                 rows_written += 1
 
         if rows_written == 0:
+            # Nothing was written that's worth keeping. Don't touch out_path.
+            staged.unlink(missing_ok=True)
             raise ValueError(
                 "stream_build_duckdb: no files yielded a row (every file "
-                "skipped or unmatched)"
+                "skipped or unmatched). Existing artifact at out_path "
+                "(if any) was not modified."
             )
 
-        if sort_tmp is not None:
+        if sort_by is None:
+            # Atomic replace — `os.replace` is rename(2) on POSIX, which
+            # is atomic within a single filesystem.
+            os.replace(staged, out_path)
+        else:
+            # Sort-rewrite reads `staged` and writes to a second temp,
+            # which is then atomically moved into place.
+            fd2, sort_tmp_str = tempfile.mkstemp(
+                prefix=out_path.stem + ".sorted.",
+                suffix=".parquet",
+                dir=str(target_dir) if str(target_dir) else None,
+            )
+            os.close(fd2)
+            sort_tmp = Path(sort_tmp_str)
             sort_geoparquet(
+                staged,
                 sort_tmp,
-                out_path,
-                sort_by=sort_by,  # type: ignore[arg-type]
+                sort_by=sort_by,
                 crs=crs,
                 backend=backend,
                 write_bbox=write_bbox,
                 batch_size=batch_size,
             )
-            sort_tmp.unlink()
+            os.replace(sort_tmp, out_path)
+            sort_tmp = None  # ownership transferred to out_path
+            staged.unlink(missing_ok=True)
     except BaseException:
-        # On any failure, surface the original exception. Leave the tmp file
-        # in place if the streaming write succeeded but the sort failed — it's
-        # easier to debug than a silent half-write.
+        # Surface the original exception; clean up only the temp files we
+        # own, never `out_path` (the user's existing artifact, if any).
+        staged.unlink(missing_ok=True)
+        if sort_tmp is not None:
+            sort_tmp.unlink(missing_ok=True)
         raise
 
     return DuckDBGeoCatalog.open(out_path, backend=backend, crs=crs)
