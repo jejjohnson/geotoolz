@@ -312,3 +312,126 @@ class TestSqlEscape:
         out = duck.sql("filepath = 'A.tif'")
         assert len(out) == 1
         assert out.materialize().gdf["filepath"].iloc[0] == "A.tif"
+
+
+class TestRegression:
+    def test_open_catalog_honours_stored_backend_tag(self, tmp_path: Path) -> None:
+        """Regression for the P1 bug where `open_catalog`'s default
+        `backend='raster'` always overrode the `_backend` column DuckDB
+        was about to read from the file — silently miscategorising
+        xarray / vector catalogs and breaking loader dispatch.
+        """
+        # Write a vector-tagged catalog…
+        mem = _mem_two_tiles()
+        mem.backend = "vector"
+        path = tmp_path / "labels.parquet"
+        to_geoparquet(mem, path)
+        # …and re-open it. The backend tag should round-trip.
+        reopened = open_catalog(path, engine="duckdb")
+        assert reopened.backend == "vector"
+
+    def test_intersect_across_independent_connections(self, tmp_path: Path) -> None:
+        """Regression for the P1 bug where `_coerce_to_duckdb`
+        returned a same-CRS DuckDBGeoCatalog unchanged even when it
+        lived on a different DuckDB connection — making the subsequent
+        view-on-self.con join fail because views are connection-scoped.
+        """
+        a_path = tmp_path / "a.parquet"
+        b_path = tmp_path / "b.parquet"
+        to_geoparquet(_mem_two_tiles(), a_path)
+        # B covers tile A in space and time but on a fresh connection.
+        b_mem = InMemoryGeoCatalog(
+            gpd.GeoDataFrame(
+                {
+                    "geometry": [shapely.geometry.box(50, 50, 250, 150)],
+                    "start_time": [pd.Timestamp("2024-01-01")],
+                    "end_time": [pd.Timestamp("2024-01-04")],
+                    "filepath": ["labels.gpkg"],
+                },
+                geometry="geometry",
+                crs="EPSG:32629",
+            ),
+            backend="vector",
+        )
+        to_geoparquet(b_mem, b_path)
+
+        a = open_catalog(a_path, engine="duckdb")
+        b = open_catalog(b_path, engine="duckdb")
+        # Independent connections — without the fix this raised.
+        assert a.con is not b.con
+        joint = a.intersect(b)
+        assert len(joint) == 2
+
+    def test_union_preserves_backend_specific_columns(self, tmp_path: Path) -> None:
+        """Regression for the P1 bug where the DuckDB `union` projected
+        only `filepath/geometry/start_time/end_time`, dropping per-row
+        backend metadata like `layer` or `data_vars` that downstream
+        loaders need.
+        """
+        # Two vector catalogs, each with a `layer` column.
+        a = InMemoryGeoCatalog(
+            gpd.GeoDataFrame(
+                {
+                    "geometry": [shapely.geometry.box(0, 0, 100, 100)],
+                    "start_time": [pd.Timestamp("2024-01-01")],
+                    "end_time": [pd.Timestamp("2024-01-02")],
+                    "filepath": ["A.gpkg"],
+                    "layer": ["roads"],
+                },
+                geometry="geometry",
+                crs="EPSG:32629",
+            ),
+            backend="vector",
+        )
+        b = InMemoryGeoCatalog(
+            gpd.GeoDataFrame(
+                {
+                    "geometry": [shapely.geometry.box(200, 0, 300, 100)],
+                    "start_time": [pd.Timestamp("2024-01-02")],
+                    "end_time": [pd.Timestamp("2024-01-03")],
+                    "filepath": ["B.gpkg"],
+                    "layer": ["buildings"],
+                },
+                geometry="geometry",
+                crs="EPSG:32629",
+            ),
+            backend="vector",
+        )
+        a_path = tmp_path / "a.parquet"
+        b_path = tmp_path / "b.parquet"
+        to_geoparquet(a, a_path)
+        to_geoparquet(b, b_path)
+        a_duck = open_catalog(a_path, engine="duckdb")
+        b_duck = open_catalog(b_path, engine="duckdb")
+        merged = a_duck.union(b_duck)
+        gdf = merged.materialize().gdf
+        # The `layer` column survives the union — without the fix it
+        # was projected away.
+        assert "layer" in gdf.columns
+        assert set(gdf["layer"]) == {"roads", "buildings"}
+
+    def test_iter_rows_does_not_leak_schema_metadata_into_extras(
+        self, parquet_two_tiles: Path
+    ) -> None:
+        """Regression for the P2 bug where `_backend` /
+        `_schema_version` (and any other underscore-prefixed
+        on-disk schema column) leaked into `CatalogRow.extras`.
+        """
+        duck = open_catalog(parquet_two_tiles, engine="duckdb")
+        for row in duck.iter_rows():
+            assert "_backend" not in row.extras
+            assert "_schema_version" not in row.extras
+            assert not any(k.startswith("_") for k in row.extras)
+
+    def test_open_handles_paths_with_apostrophe(self, tmp_path: Path) -> None:
+        """Regression for the P2 SQL-injection / quote-in-path bug
+        where `open()` interpolated the path directly into the SQL,
+        breaking on paths containing a single quote and opening a
+        SQL-injection surface.
+        """
+        weird_dir = tmp_path / "o'malley"
+        weird_dir.mkdir()
+        path = weird_dir / "cat.parquet"
+        to_geoparquet(_mem_two_tiles(), path)
+        duck = open_catalog(path, engine="duckdb")
+        assert len(duck) == 2

@@ -173,7 +173,14 @@ class DuckDBGeoCatalog:
             crs = _read_geoparquet_crs(source, default="EPSG:4326")
         if backend is None:
             backend = _read_backend_tag(con, source_str, default="raster")
-        relation = con.sql(f"SELECT * FROM read_parquet('{source_str}')")
+        # Parameter binding (rather than f-string interpolation) keeps
+        # paths containing apostrophes — `s3://bucket/o'malley/cat.parquet`
+        # or tmpdirs under a username with one — from breaking the
+        # query, and avoids opening a SQL-injection surface if `source`
+        # ever flows from untrusted input.
+        relation = con.sql(
+            "SELECT * FROM read_parquet($src)", params={"src": source_str}
+        )
         return cls(relation, con=con, crs=crs, backend=backend)
 
     @classmethod
@@ -394,13 +401,16 @@ class DuckDBGeoCatalog:
         right_name = f"_geotoolz_unionR_{id(other_duck):x}"
         self.relation.create_view(left_name, replace=True)
         other_duck.relation.create_view(right_name, replace=True)
-        # Project to the shared column subset (filepath / geometry /
-        # start_time / end_time) — the rest of the schema is per-backend
-        # and merging it generically would just propagate NULLs.
+        # `UNION ALL BY NAME` matches columns by name and fills missing
+        # ones with NULL on the other side — that's what preserves
+        # backend-specific columns (`time_var`, `data_vars`, `layer`)
+        # rather than dropping them like a positional `UNION ALL`
+        # would. Without this, downstream xarray/vector loaders break
+        # after a union because the metadata columns vanish.
         sql = f"""
-            SELECT filepath, geometry, start_time, end_time FROM {left_name}
-            UNION ALL
-            SELECT filepath, geometry, start_time, end_time FROM {right_name}
+            SELECT * FROM {left_name}
+            UNION ALL BY NAME
+            SELECT * FROM {right_name}
         """
         unioned = self.con.sql(sql)
         return DuckDBGeoCatalog(
@@ -429,7 +439,13 @@ class DuckDBGeoCatalog:
         starts = pd.to_datetime(df["start_time"])
         ends = pd.to_datetime(df["end_time"])
         reserved = {"geometry", "filepath", "start_time", "end_time", "bbox"}
-        extra_cols = [c for c in df.columns if c not in reserved]
+        # `_backend`, `_schema_version` and any other underscore-prefixed
+        # column belong to the on-disk schema, not the user-visible row
+        # metadata. Filtering them keeps `extras` clean for downstream
+        # loaders that introspect it.
+        extra_cols = [
+            c for c in df.columns if c not in reserved and not c.startswith("_")
+        ]
         for i in range(len(df)):
             extras = {c: df[c].iloc[i] for c in extra_cols}
             yield CatalogRow(
@@ -593,15 +609,23 @@ def _coerce_to_duckdb(
     con: duckdb_mod.DuckDBPyConnection,
     target_crs: pyproj.CRS,
 ) -> DuckDBGeoCatalog:
-    """Pull ``other`` into a DuckDB relation in ``target_crs``."""
+    """Pull ``other`` into a DuckDB relation on ``con`` in ``target_crs``.
+
+    DuckDB views are connection-scoped — a relation on one connection
+    can't be referenced from another. Always re-register onto ``con``
+    when ``other`` carries a different connection (independently
+    `open()`-ed catalogs hit this) by materialising and re-importing
+    through `from_memory`.
+    """
     if isinstance(other, DuckDBGeoCatalog):
-        if other.crs == target_crs:
+        if other.con is con and other.crs == target_crs:
             return other
-        # Reprojecting an existing DuckDB relation in-SQL would need
-        # `ST_Transform` (PROJ-bound, slow). Materialise + reproject
-        # via geopandas, then re-register.
+        # Either different connection or different CRS — materialise and
+        # re-register onto our connection. Reprojection happens via
+        # geopandas (PROJ-bound `ST_Transform` is slow per row).
         mem = other.materialize()
-        mem = InMemoryGeoCatalog(mem.gdf.to_crs(target_crs), backend=mem.backend)
+        if mem.gdf.crs != target_crs:
+            mem = InMemoryGeoCatalog(mem.gdf.to_crs(target_crs), backend=mem.backend)
         return DuckDBGeoCatalog.from_memory(mem, con=con)
     if other.gdf.crs != target_crs:
         other = InMemoryGeoCatalog(other.gdf.to_crs(target_crs), backend=other.backend)
@@ -670,10 +694,23 @@ def _read_backend_tag(
     Returns the default for ad-hoc parquet files lacking the column;
     that's the case when an externally produced GeoParquet (e.g. one
     built by DuckDB or GDAL directly) is opened with this factory.
+
+    Uses parameter binding for ``source`` so paths with apostrophes
+    don't break the lookup, and narrowed exception handling so genuine
+    SQL parse errors aren't silently swallowed as a missing column.
     """
+    dd = _require_duckdb()
     try:
-        df = con.sql(f"SELECT _backend FROM read_parquet('{source}') LIMIT 1").df()
-    except Exception:
+        df = con.sql(
+            "SELECT _backend FROM read_parquet($src) LIMIT 1",
+            params={"src": source},
+        ).df()
+    except dd.BinderException:
+        # Missing `_backend` column — externally produced parquet.
+        return default
+    except dd.IOException:
+        # Unreadable parquet path; caller will hit a clearer error
+        # on the next read.
         return default
     if len(df) == 0 or pd.isna(df["_backend"].iloc[0]):
         return default

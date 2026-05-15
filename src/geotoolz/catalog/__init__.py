@@ -76,7 +76,7 @@ _BACKEND_T = Literal["raster", "xarray", "vector"]
 def open_catalog(
     source: str | Path,
     *,
-    backend: _BACKEND_T = "raster",
+    backend: _BACKEND_T | None = None,
     engine: Literal["auto", "memory", "duckdb"] = "auto",
     crs: Any | None = None,
 ) -> GeoCatalog:
@@ -87,15 +87,20 @@ def open_catalog(
     falls back to the in-memory backend via `from_geoparquet`. Pass
     ``engine="memory"`` to force the eager path even with DuckDB present.
 
+    The artifact's stored backend tag (the ``_backend`` column written
+    by `to_geoparquet`) is honoured by default — pass ``backend=...``
+    only to override a wrong tag or to tag an externally produced
+    artifact that lacks the column. Forcing a default would silently
+    miscategorise xarray / vector catalogs and break loader dispatch.
+
     Args:
         source: Path or URI to a GeoParquet file. A directory of shards
             (``shards/``) or a glob (``shards/*.parquet``) is read as one
             virtual table by the DuckDB engine; the in-memory engine
             requires a single file.
         backend: Loader dispatch tag (``"raster"`` / ``"xarray"`` /
-            ``"vector"``). The artifact carries this in the ``_backend``
-            column when written by `to_geoparquet`; this argument is the
-            override for sources missing the tag.
+            ``"vector"``). ``None`` reads the ``_backend`` column from
+            the artifact (default ``"raster"`` if missing).
         engine: ``"auto"`` (DuckDB if available, else memory),
             ``"memory"`` (force `from_geoparquet`), or ``"duckdb"``
             (force `DuckDBGeoCatalog.open`; raises if the extra is not
@@ -112,7 +117,10 @@ def open_catalog(
         ImportError: ``engine="duckdb"`` with the extra missing.
     """
     if engine == "memory":
-        return from_geoparquet(source)
+        cat = from_geoparquet(source)
+        if backend is not None:
+            cat.backend = backend
+        return cat
     if engine == "duckdb":
         from geotoolz.catalog._src.duckdb_backend import DuckDBGeoCatalog
 
@@ -121,7 +129,10 @@ def open_catalog(
     try:
         from geotoolz.catalog._src.duckdb_backend import DuckDBGeoCatalog
     except ImportError:
-        return from_geoparquet(source)
+        cat = from_geoparquet(source)
+        if backend is not None:
+            cat.backend = backend
+        return cat
     return DuckDBGeoCatalog.open(source, backend=backend, crs=crs)
 
 
