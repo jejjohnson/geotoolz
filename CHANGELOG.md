@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.2](https://github.com/jejjohnson/geotoolz/compare/v0.0.1...v0.0.2) (2026-05-15)
+
+
+### Features
+
+* composition core — Operator, Sequential, Graph, ModelOp + v0.1 idiom library ([#8](https://github.com/jejjohnson/geotoolz/issues/8)) ([9c669ee](https://github.com/jejjohnson/geotoolz/commit/9c669eeaaab1fbd0fc3868f0a8230fe6e33bb689))
+
 ## 0.0.1 (2026-05-14)
 
 
