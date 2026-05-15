@@ -18,7 +18,22 @@ from its own submodule.
 
 from __future__ import annotations
 
-from geotoolz import core, patch
+from typing import TYPE_CHECKING, Any
+
+from geotoolz import catalog, core, patch, types
+from geotoolz.catalog import (
+    CatalogDomain,
+    GeoCatalog,
+    InMemoryGeoCatalog,
+    build_raster_catalog,
+    from_geoparquet,
+    intersect,
+    load_raster,
+    load_raster_timeseries,
+    query,
+    to_geoparquet,
+    union,
+)
 from geotoolz.core import (
     Branch,
     Carrier,
@@ -110,6 +125,33 @@ from geotoolz.patch import (
     TemporalWindow,
     VectorDomain,
 )
+from geotoolz.types import GeoSlice
+
+
+if TYPE_CHECKING:
+    from geotoolz.catalog import (
+        build_vector_catalog,
+        build_xarray_catalog,
+        load_vector,
+        load_xarray,
+    )
+
+
+_LAZY_TOP_ATTRS = (
+    "build_xarray_catalog",
+    "load_xarray",
+    "build_vector_catalog",
+    "load_vector",
+)
+
+
+def __getattr__(name: str) -> Any:
+    """Lazy proxy for the extras-gated catalog backends at the top level."""
+    if name in _LAZY_TOP_ATTRS:
+        attr = getattr(catalog, name)
+        globals()[name] = attr
+        return attr
+    raise AttributeError(f"module 'geotoolz' has no attribute {name!r}")
 
 
 __version__ = "0.0.3"
@@ -120,12 +162,16 @@ __all__ = [
     "AsyncSpatialPatcher",
     "Branch",
     "Carrier",
+    "CatalogDomain",
     "Const",
     "Fanout",
+    "GeoCatalog",
+    "GeoSlice",
     "Graph",
     "GridDomain",
     "GridSampler",
     "Identity",
+    "InMemoryGeoCatalog",
     "Input",
     "Lambda",
     "ModelOp",
@@ -203,6 +249,20 @@ __all__ = [
     "TemporalWindow",
     "VectorDomain",
     "__version__",
+    "build_raster_catalog",
+    "build_vector_catalog",
+    "build_xarray_catalog",
+    "catalog",
     "core",
+    "from_geoparquet",
+    "intersect",
+    "load_raster",
+    "load_raster_timeseries",
+    "load_vector",
+    "load_xarray",
     "patch",
+    "query",
+    "to_geoparquet",
+    "types",
+    "union",
 ]
