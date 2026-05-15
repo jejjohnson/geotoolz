@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.5](https://github.com/jejjohnson/geotoolz/compare/v0.0.4...v0.0.5) (2026-05-15)
+
+
+### Features
+
+* **catalog:** streaming backend="duckdb" builders ([#15](https://github.com/jejjohnson/geotoolz/issues/15)) ([75fdb70](https://github.com/jejjohnson/geotoolz/commit/75fdb701423d132e8703fbc7ff1f3238c3c1d118))
+* indices + radiometry + cloud operator stdlib (v0.1) ([#17](https://github.com/jejjohnson/geotoolz/issues/17)) ([48a8bed](https://github.com/jejjohnson/geotoolz/commit/48a8bed005c2eb80bc55ae94ed02fe27f8d7d5e3))
+
 ## [0.0.4](https://github.com/jejjohnson/geotoolz/compare/v0.0.3...v0.0.4) (2026-05-15)
 
 
