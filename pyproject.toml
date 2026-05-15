@@ -29,6 +29,11 @@ dependencies = [
     "numpy>=1.26",
     # KDTree (geopatcher PointDomain) + signal windows (Tukey/Gaussian).
     "scipy>=1.11",
+    # `georeader.geotensor` imports `Self` from typing_extensions without
+    # declaring it as a dep (upstream packaging bug in >=2.1). Pin it here
+    # so a slim install of geotoolz (without the optional patch extras
+    # that would otherwise drag it in transitively) still works.
+    "typing-extensions>=4.0",
 ]
 
 [project.optional-dependencies]

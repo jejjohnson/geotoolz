@@ -619,6 +619,7 @@ dependencies = [
     { name = "georeader-spaceml" },
     { name = "numpy" },
     { name = "scipy" },
+    { name = "typing-extensions" },
 ]
 
 [package.optional-dependencies]
@@ -686,6 +687,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.11" },
     { name = "shapely", marker = "extra == 'patch-full'", specifier = ">=2.0" },
     { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.0" },
+    { name = "typing-extensions", specifier = ">=4.0" },
     { name = "xarray", marker = "extra == 'grid'", specifier = ">=2024.1" },
     { name = "xarray", marker = "extra == 'patch-full'", specifier = ">=2024.1" },
     { name = "xvec", marker = "extra == 'patch-full'", specifier = ">=0.4" },
