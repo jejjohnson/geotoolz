@@ -21,7 +21,20 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Development Status :: 2 - Pre-Alpha",
 ]
-dependencies = []
+dependencies = [
+    # GeoTensor and the GeoData / AsyncGeoData protocols. Pinning to >=2.1
+    # so the v2.0 numpy-subclass GeoTensor (with __array_ufunc__) is
+    # available — that's the substrate the two-tier model depends on.
+    "georeader-spaceml>=2.1",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Optional `hydra-zen` integration for declarative pipeline construction
+# (see geotoolz §6.6). The core composition layer round-trips its own
+# get_config() / __repr__ without hydra — this extra is only needed if
+# you want `builds()` / `instantiate()` from YAML.
+hydra = ["hydra-zen>=0.14"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
