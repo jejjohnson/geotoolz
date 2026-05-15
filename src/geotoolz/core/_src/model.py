@@ -89,9 +89,16 @@ class ModelOp(Operator):
 
         Plain ``np.concatenate`` along axis 0 — works when the model's
         output preserves the batch dimension (the common case).
+
+        Empty inputs (``arr.shape[0] == 0``) are passed straight to the
+        model in one call: ``np.concatenate`` cannot accept an empty list
+        of chunks, and the model is free to return a meaningful
+        zero-length result.
         """
-        chunks: list[Any] = []
         n = arr.shape[0]
+        if n == 0:
+            return fn(arr)
+        chunks: list[Any] = []
         bs = int(self.batch_size or n)
         for start in range(0, n, bs):
             chunks.append(fn(arr[start : start + bs]))

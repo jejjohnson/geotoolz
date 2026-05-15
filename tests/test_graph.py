@@ -98,6 +98,77 @@ class TestGetConfig:
         assert cfg["outputs"]["y"]["class"] == "Inc"
 
 
+class TestPositionalApply:
+    """Graph._apply must accept positional args bound to declared inputs.
+
+    Without this, a Graph cannot compose inside a Sequential (which calls
+    ``op(value)`` positionally) or nest as a node operator inside another
+    Graph (which evaluates nodes positionally from their parents).
+    """
+
+    def test_positional_single_input(self) -> None:
+        x = Input("x")
+        g = Graph(inputs={"x": x}, outputs={"y": Inc()(x)})
+        # Positional, like a Sequential step would call it
+        assert g(10) == {"y": 11}
+
+    def test_positional_multi_input_in_declaration_order(self) -> None:
+        a, b = Input("a"), Input("b")
+        g = Graph(inputs={"a": a, "b": b}, outputs={"s": Sum2()(a, b)})
+        assert g(3, 4) == {"s": 7}
+
+    def test_positional_arity_mismatch_raises(self) -> None:
+        x = Input("x")
+        g = Graph(inputs={"x": x}, outputs={"y": Inc()(x)})
+        with pytest.raises(TypeError, match="expected 1 positional"):
+            g(1, 2)
+
+    def test_positional_and_keyword_mutually_exclusive(self) -> None:
+        x = Input("x")
+        g = Graph(inputs={"x": x}, outputs={"y": Inc()(x)})
+        with pytest.raises(TypeError, match="not both"):
+            g(1, x=2)
+
+    def test_graph_in_sequential(self) -> None:
+        """A Sequential calling op(value) positionally must work for Graph ops."""
+        from geotoolz.core import Sequential
+
+        x = Input("x")
+        inner = Graph(inputs={"x": x}, outputs={"y": Inc()(x)})
+        # Sequential threads positional values through; a single-output Graph
+        # returns a dict, which the next step in the chain must accept. Here
+        # we wrap the dict-extract with a Lambda.
+        from geotoolz.core import Lambda
+
+        pipe = Sequential(
+            [
+                inner,
+                Lambda(lambda d: d["y"], name="extract"),
+                Inc(),
+            ]
+        )
+        assert pipe(0) == 2  # 0 → {"y": 1} → 1 → 2
+
+    def test_nested_graph(self) -> None:
+        """A Graph node whose operator is itself a Graph must evaluate cleanly."""
+        # Inner: single-input, single-output Graph
+        xi = Input("xi")
+        inner = Graph(inputs={"xi": xi}, outputs={"yi": Inc()(xi)})
+
+        # Outer: wraps `inner` as a node, then adds one more step
+        xo = Input("xo")
+        # The wrapper extracts inner's dict output, since downstream Inc()
+        # expects a scalar.
+        from geotoolz.core import Lambda
+
+        unwrap = Lambda(lambda d: d["yi"], name="unwrap")
+        wrapped = unwrap(inner(xo))  # call chain: xo → inner → unwrap → ...
+        outer_y = Inc()(wrapped)
+        outer = Graph(inputs={"xo": xo}, outputs={"y": outer_y})
+
+        assert outer(xo=10) == {"y": 12}  # 10 → inner → {yi:11} → 11 → 12
+
+
 class TestNodeIdentity:
     def test_distinct_nodes_for_same_op_on_same_input(self) -> None:
         # Each call to op(input) produces a new Node — graph topology

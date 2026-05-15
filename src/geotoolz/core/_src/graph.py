@@ -148,15 +148,36 @@ class Graph(Operator):
             visit(output)
         return order
 
-    def _apply(self, **inputs: Carrier) -> dict[str, Any]:
+    def _apply(self, *args: Carrier, **inputs: Carrier) -> dict[str, Any]:
         """Evaluate the graph with the supplied inputs.
 
+        Accepts inputs either positionally (bound to declared `Input`s in
+        construction order) or by keyword. The positional form makes
+        single-input graphs compose with `Sequential` and lets `Graph`s
+        nest inside other `Graph`s — both shapes route values through
+        `Operator.__call__`, which only knows how to splat positionally.
+
         Args:
+            *args: One value per declared `Input`, in declaration order.
+                Mutually exclusive with ``**inputs``.
             **inputs: One value per declared `Input`, keyed by name.
 
         Returns:
             ``{output-name: result}`` for each declared output.
         """
+        if args and inputs:
+            raise TypeError(
+                "Graph._apply accepts either positional args (bound to inputs "
+                "in declaration order) or keyword inputs, not both."
+            )
+        if args:
+            if len(args) != len(self.inputs):
+                raise TypeError(
+                    f"Graph expected {len(self.inputs)} positional argument(s) "
+                    f"to bind to inputs {list(self.inputs)}, got {len(args)}."
+                )
+            inputs = dict(zip(self.inputs, args, strict=True))
+
         missing = set(self.inputs) - set(inputs)
         if missing:
             raise ValueError(f"Graph missing required input(s): {sorted(missing)}")
@@ -165,8 +186,10 @@ class Graph(Operator):
             id(self.inputs[name]): inputs[name] for name in self.inputs
         }
         for node in self._order:
-            args = tuple(cache[id(p)] for p in node.parents)
-            cache[id(node)] = node.operator._apply(*args)
+            node_args = tuple(cache[id(p)] for p in node.parents)
+            # Route through __call__ so nested operators (Graph, Sequential)
+            # get their own dispatch, not just bare _apply.
+            cache[id(node)] = node.operator(*node_args)
 
         return {name: cache[id(node)] for name, node in self.outputs.items()}
 

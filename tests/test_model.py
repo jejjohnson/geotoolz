@@ -48,6 +48,13 @@ class TestBatching:
         result = ModelOp(_Doubler(), batch_size=5)(arr)
         np.testing.assert_array_equal(result, arr * 2)
 
+    def test_batched_empty_input(self) -> None:
+        # Empty input with batch_size set: must not raise on np.concatenate.
+        # Pass the empty array straight to the model in one call.
+        arr = np.zeros((0, 3), dtype=np.float32)
+        result = ModelOp(_Doubler(), batch_size=8)(arr)
+        assert result.shape == (0, 3)
+
 
 class TestGetConfig:
     def test_config_records_model_type_and_method(self) -> None:
