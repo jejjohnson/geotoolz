@@ -89,18 +89,27 @@ def dn_to_reflectance(
     scale: float | np.ndarray,
     offset: float | np.ndarray = 0.0,
 ) -> np.ndarray:
-    r"""Convert DN to TOA reflectance via a sensor-supplied scale factor.
+    r"""Convert DN to TOA / surface reflectance via a linear affine decode.
 
     .. math::
 
-        \rho \;=\; \text{scale} \cdot (DN + \text{offset})
+        \rho \;=\; \text{scale} \cdot DN + \text{offset}
 
-    This is the *Sentinel-2 L1C* (and similar pre-scaled-reflectance
-    products) shortcut: ESA's L1C processor already absorbs solar
-    geometry and quantises reflectance into uint16 DN with a fixed
-    quantification value (10000 — so ``scale = 1e-4``). From 2022-01-25
-    onwards L1C also carries a per-band ``RADIO_ADD_OFFSET = -1000``
-    that should be added before scaling.
+    The canonical pre-scaled-reflectance decode: ``scale`` is the slope
+    (reflectance per DN unit) and ``offset`` is the *reflectance-units*
+    intercept. This convention matches Landsat Collection-2 surface
+    reflectance verbatim and absorbs the Sentinel-2 L1C ``RADIO_ADD_OFFSET``
+    after multiplying it out (see notes below).
+
+    Sensor-specific coefficients (illustrative — always consult the
+    product MTL / metadata):
+
+    - **Sentinel-2 L1C** (pre-2022-01-25): ``scale=1e-4, offset=0``.
+    - **Sentinel-2 L1C** (post-2022-01-25): the per-band
+      ``RADIO_ADD_OFFSET=-1000`` is in DN units; multiplied through the
+      scale it becomes ``offset = -1000 * 1e-4 = -0.1``, so use
+      ``scale=1e-4, offset=-0.1``.
+    - **Landsat-8/9 Collection-2 SR**: ``scale=2.75e-5, offset=-0.2``.
 
     For sensors where the metadata gives gain/offset to radiance but
     *not* a direct DN→ρ shortcut, do the two-step decode via
@@ -110,17 +119,16 @@ def dn_to_reflectance(
 
     Args:
         dn: Raw DN array.
-        scale: Quantification scale (per-scene or per-band). Sentinel-2
-            L1C: ``1e-4``. Landsat-9 Collection-2 SR: ``2.75e-5`` with
-            offset ``-0.2``.
-        offset: Pre-scale offset. Sentinel-2 L1C post-2022-01-25:
-            ``-1000`` per band.
+        scale: Quantification slope (reflectance per DN unit). Scalar
+            or per-band 1-D array.
+        offset: Reflectance-units intercept. Scalar or per-band 1-D
+            array. Default ``0.0``.
 
     Returns:
         Reflectance array; values should fall in :math:`[0, 1]` for
         well-calibrated inputs.
     """
-    return scale * (dn + offset)
+    return scale * dn + offset
 
 
 def min_max_normalize(

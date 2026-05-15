@@ -248,3 +248,29 @@ def test_indices_hydra_zen_roundtrip(op: object) -> None:
     restored = hydra_zen.instantiate(cfg)
     assert type(restored) is type(op)
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+def test_append_index_get_config_is_jsonable() -> None:
+    """`AppendIndex.get_config()` should emit nested {class, config} for
+    its inner Operator, not the raw instance."""
+    import json
+
+    op = AppendIndex(index_op=NDVI(nir_idx=7, red_idx=3), axis=0)
+    cfg = op.get_config()
+    # Round-trips through JSON without choking on raw Operator instances.
+    encoded = json.dumps(cfg)
+    decoded = json.loads(encoded)
+    assert decoded == {
+        "index_op": {
+            "class": "NDVI",
+            "config": {"nir_idx": 7, "red_idx": 3, "axis": 0, "eps": 1e-10},
+        },
+        "axis": 0,
+    }
+    # Manual reconstruction from the nested config works.
+    inner_cls_name = decoded["index_op"]["class"]
+    assert inner_cls_name == "NDVI"
+    restored = AppendIndex(
+        index_op=NDVI(**decoded["index_op"]["config"]), axis=decoded["axis"]
+    )
+    assert restored.get_config() == cfg

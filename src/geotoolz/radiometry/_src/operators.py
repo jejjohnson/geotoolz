@@ -25,6 +25,20 @@ from geotoolz.radiometry._src.array import (
 )
 
 
+def _coef_as_jsonable(coef: Any) -> float | list[float]:
+    """Coerce a gain / offset coefficient into a JSON-safe scalar or list.
+
+    Keeps scalars as Python ``float``; converts numpy scalars, ndarrays
+    and any sequence (list / tuple) of numerics into ``list[float]``.
+    Used by `DNToRadiance` / `DNToReflectance`'s ``get_config()`` so
+    Hydra / YAML round-trips don't choke on ndarray leaves.
+    """
+    arr = np.asarray(coef)
+    if arr.ndim == 0:
+        return float(arr)
+    return [float(v) for v in arr.ravel()]
+
+
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
@@ -113,20 +127,25 @@ class DNToRadiance(Operator):
         return gt.array_as_geotensor(out)
 
     def get_config(self) -> dict[str, Any]:
-        return {"gain": self.gain, "offset": self.offset, "axis": self.axis}
+        return {
+            "gain": _coef_as_jsonable(self.gain),
+            "offset": _coef_as_jsonable(self.offset),
+            "axis": self.axis,
+        }
 
 
 class DNToReflectance(Operator):
-    r"""Convert DN to TOA reflectance via a quantification scale.
+    r"""Convert DN to TOA / surface reflectance via a linear affine decode.
 
     .. math::
 
-        \rho \;=\; \text{scale} \cdot (DN + \text{offset})
+        \rho \;=\; \text{scale} \cdot DN + \text{offset}
 
-    The Sentinel-2 L1C shortcut: ESA's processor has already absorbed
-    solar geometry into the DN, so a single scale recovers reflectance.
-    For L1C scenes after 2022-01-25 the per-band ``RADIO_ADD_OFFSET``
-    (``-1000``) must be applied before scaling.
+    ``scale`` is the slope (reflectance per DN unit) and ``offset`` is
+    the *reflectance-units* intercept — the canonical
+    ``y = m * x + b`` form. Matches Landsat Collection-2 SR verbatim
+    and absorbs the Sentinel-2 L1C ``RADIO_ADD_OFFSET`` after
+    multiplying it through the scale.
 
     For sensors without a pre-scaled-reflectance product (raw radiance
     only), use `DNToRadiance` then call
@@ -134,21 +153,25 @@ class DNToReflectance(Operator):
     solar geometry properly).
 
     Args:
-        scale: Quantification scale. S2 L1C: ``1e-4``. Landsat-9 C2 SR:
-            ``2.75e-5``. Scalar or per-band 1-D sequence.
-        offset: Pre-scale offset. S2 L1C post-2022-01-25: ``-1000``.
-            Default ``0.0``.
+        scale: Quantification slope (reflectance per DN unit). Scalar
+            or per-band 1-D sequence.
+        offset: Reflectance-units intercept. Default ``0.0``.
         axis: Band axis when ``scale`` / ``offset`` are per-band.
 
     Examples:
         >>> from geotoolz.radiometry import DNToReflectance
-        >>> # Sentinel-2 L1C: a single global scale.
+        >>> # Sentinel-2 L1C pre-2022: a single global scale, no offset.
         >>> op = DNToReflectance(scale=1e-4)
         >>> reflectance = op(s2_l1c_dn_geotensor)
         >>>
-        >>> # Post-2022 S2 L1C with the radiometric offset baked in:
-        >>> op_v2 = DNToReflectance(scale=1e-4, offset=-1000.0)
+        >>> # Post-2022 S2 L1C: RADIO_ADD_OFFSET=-1000 in DN units
+        >>> # collapses to -0.1 in reflectance units (-1000 * 1e-4).
+        >>> op_v2 = DNToReflectance(scale=1e-4, offset=-0.1)
         >>> reflectance = op_v2(s2_l1c_modern_dn_geotensor)
+        >>>
+        >>> # Landsat-8/9 Collection-2 surface reflectance.
+        >>> op_l8 = DNToReflectance(scale=2.75e-5, offset=-0.2)
+        >>> reflectance = op_l8(landsat_c2_sr_geotensor)
     """
 
     def __init__(
@@ -171,7 +194,11 @@ class DNToReflectance(Operator):
         return gt.array_as_geotensor(out)
 
     def get_config(self) -> dict[str, Any]:
-        return {"scale": self.scale, "offset": self.offset, "axis": self.axis}
+        return {
+            "scale": _coef_as_jsonable(self.scale),
+            "offset": _coef_as_jsonable(self.offset),
+            "axis": self.axis,
+        }
 
 
 class MinMax(Operator):

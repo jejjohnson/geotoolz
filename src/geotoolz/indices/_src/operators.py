@@ -117,8 +117,8 @@ class NDVI(Operator):
 
     Examples:
         >>> from geotoolz.indices import NDVI
-        >>> ndvi_op = NDVI(nir_idx=7, red_idx=3)        # Sentinel-2 band order
-        >>> green = ndvi_op(reflectance_geotensor)      # GeoTensor (H, W)
+        >>> ndvi_op = NDVI(nir_idx=7, red_idx=3)         # Sentinel-2 band order
+        >>> ndvi_map = ndvi_op(reflectance_geotensor)    # GeoTensor (H, W)
         >>>
         >>> # Chain with reflectance conversion:
         >>> import geotoolz as gz
@@ -126,7 +126,7 @@ class NDVI(Operator):
         ...     gz.radiometry.DNToReflectance(scale=1e-4)
         ...     | NDVI(nir_idx=7, red_idx=3)
         ... )
-        >>> green = pipe(dn_geotensor)
+        >>> ndvi_map = pipe(dn_geotensor)
     """
 
     def __init__(
@@ -510,4 +510,13 @@ class AppendIndex(Operator):
         return gt.array_as_geotensor(stacked)
 
     def get_config(self) -> dict[str, Any]:
-        return {"index_op": self.index_op, "axis": self.axis}
+        # `index_op` is a nested Operator — emit the JSON-safe nested form
+        # (matches `Sequential` / `Branch`'s pattern) instead of leaking
+        # the raw instance into config.
+        return {
+            "index_op": {
+                "class": type(self.index_op).__name__,
+                "config": self.index_op.get_config(),
+            },
+            "axis": self.axis,
+        }

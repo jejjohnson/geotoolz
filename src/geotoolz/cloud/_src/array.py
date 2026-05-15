@@ -147,6 +147,14 @@ def apply_mask(
     bool_mask = np.asarray(mask, dtype=bool)
     if invert:
         bool_mask = ~bool_mask
-    # `where(condition, x, y)` returns x where condition is True; we want
-    # `fill` where the mask says "drop", so condition is `~mask`.
+    # `np.where` upcasts to the wider dtype of (fill_value, arr). For
+    # floating arrays we want to preserve `arr.dtype` — otherwise
+    # `fill_value=np.nan` (float64) silently doubles memory on float32
+    # inputs and undoes any upstream `ToFloat32()` stage. Cast the fill
+    # to arr's dtype when arr is floating; integer arrays keep numpy's
+    # native promotion (so `fill_value=np.nan` on int input still
+    # upcasts, which is the only sensible behaviour).
+    if np.issubdtype(arr.dtype, np.floating):
+        fill_typed = np.asarray(fill_value, dtype=arr.dtype)
+        return np.where(bool_mask, fill_typed, arr)
     return np.where(bool_mask, fill_value, arr)

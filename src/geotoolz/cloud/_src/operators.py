@@ -15,7 +15,7 @@ without writing the condition by hand.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
@@ -258,9 +258,28 @@ class ApplyMask(Operator):
         )
         return gt.array_as_geotensor(out)
 
+    # Operator-valued masks round-trip cleanly (nested {class, config}),
+    # but raw-array masks only emit a shape/dtype summary in `get_config`.
+    # Mark the class non-YAML-safe so callers know to handle the
+    # array-mask case explicitly (set to True under either codepath for
+    # simplicity, per the design contract for closure-carrying ops).
+    forbid_in_yaml: ClassVar[bool] = True
+
     def get_config(self) -> dict[str, Any]:
+        if isinstance(self.mask, Operator):
+            mask_config: Any = {
+                "class": type(self.mask).__name__,
+                "config": self.mask.get_config(),
+            }
+        else:
+            arr = np.asarray(self.mask)
+            mask_config = {
+                "type": "ndarray",
+                "shape": list(arr.shape),
+                "dtype": str(arr.dtype),
+            }
         return {
-            "mask": self.mask,
+            "mask": mask_config,
             "fill_value": self.fill_value,
             "invert": self.invert,
         }

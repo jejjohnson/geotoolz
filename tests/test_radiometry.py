@@ -61,11 +61,39 @@ def test_dn_to_radiance_linear() -> None:
 
 
 def test_dn_to_reflectance_s2_l1c() -> None:
-    """S2 L1C convention: rho = 1e-4 * DN. Round-trip a known reflectance."""
+    """S2 L1C pre-2022 convention: rho = 1e-4 * DN. Round-trip a known reflectance."""
     rho = np.array([[0.05, 0.30], [0.55, 0.80]])
     dn = (rho / 1e-4).astype(np.uint16)
     out = dn_to_reflectance(dn.astype(np.float64), scale=1e-4, offset=0.0)
     np.testing.assert_allclose(out, rho, atol=1e-4)  # uint16 quantisation
+
+
+def test_dn_to_reflectance_landsat_c2_sr_with_additive_offset() -> None:
+    """Landsat-8/9 C2 SR convention: rho = scale * DN + offset (reflectance units).
+
+    The offset is in reflectance units, not DN units — so the formula
+    is the canonical y = m*x + b. A scaled-reflectance DN of 6000 with
+    scale=2.75e-5 and offset=-0.2 must give rho = 0.165 - 0.2 = -0.035
+    (negative is physically reasonable here, signalling water in NIR
+    after atmospheric over-correction).
+    """
+    dn = np.array([0.0, 6000.0, 30_000.0])
+    out = dn_to_reflectance(dn, scale=2.75e-5, offset=-0.2)
+    expected = 2.75e-5 * dn - 0.2
+    np.testing.assert_allclose(out, expected, rtol=1e-9)
+
+
+def test_dn_to_reflectance_s2_l1c_post_2022_offset() -> None:
+    """S2 L1C post-2022: RADIO_ADD_OFFSET=-1000 (DN) collapses to offset=-0.1.
+
+    Pre-2022 DN=11000 -> rho = 1.1. Post-2022 the published RADIO_ADD_OFFSET
+    is -1000 DN; multiplied through scale=1e-4 it becomes -0.1 reflectance,
+    so DN=11000 -> rho = 1.1 - 0.1 = 1.0 — the conversion handles the
+    bias correctly under the affine-decode convention.
+    """
+    dn = np.array([11_000.0])
+    out = dn_to_reflectance(dn, scale=1e-4, offset=-0.1)
+    np.testing.assert_allclose(out, [1.0], rtol=1e-9)
 
 
 def test_min_max_normalize() -> None:
@@ -243,8 +271,10 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
     "op",
     [
         ToFloat32(),
+        DNToRadiance(gain=0.012, offset=-60.0),
         DNToReflectance(scale=1e-4),
-        DNToReflectance(scale=1e-4, offset=-1000.0),
+        DNToReflectance(scale=1e-4, offset=-0.1),  # S2 L1C post-2022
+        DNToReflectance(scale=2.75e-5, offset=-0.2),  # Landsat-8/9 C2 SR
         MinMax(vmin=0.0, vmax=0.3),
         PercentileClip(p_min=2.0, p_max=98.0),
         Gamma(g=1.4),
@@ -255,3 +285,16 @@ def test_radiometry_hydra_zen_roundtrip(op: object) -> None:
     restored = hydra_zen.instantiate(cfg)
     assert type(restored) is type(op)
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+@pytest.mark.skipif(hydra_zen is None, reason="requires hydra-zen extra")
+def test_dn_to_radiance_per_band_coef_jsonable() -> None:
+    """Per-band ndarray coefficients should round-trip as plain lists."""
+    op = DNToRadiance(gain=np.array([0.012, 0.013]), offset=[-60.0, -61.0])
+    cfg = op.get_config()
+    assert cfg["gain"] == [0.012, 0.013]
+    assert cfg["offset"] == [-60.0, -61.0]
+    # And builds()/instantiate() reconstruct an equivalent op.
+    cfg_builds = hydra_zen.builds(DNToRadiance, **cfg)  # type: ignore[union-attr]
+    restored = hydra_zen.instantiate(cfg_builds)
+    assert restored.get_config() == cfg

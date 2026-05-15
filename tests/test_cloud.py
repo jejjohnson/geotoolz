@@ -304,3 +304,48 @@ def test_cloud_hydra_zen_roundtrip(op: object) -> None:
     restored = hydra_zen.instantiate(cfg)
     assert type(restored) is type(op)
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+def test_apply_mask_get_config_with_operator_mask_is_jsonable() -> None:
+    """ApplyMask should nest the Operator-valued mask as {class, config}."""
+    import json
+
+    op = ApplyMask(
+        mask=MaskFromSCL(band_idx=-1, classes=[8, 9, 10]),
+        fill_value=float("nan"),
+        invert=False,
+    )
+    cfg = op.get_config()
+    # nan is float — json.dumps with allow_nan=True (the default) handles it.
+    encoded = json.dumps(cfg)
+    decoded = json.loads(encoded)
+    assert decoded["mask"]["class"] == "MaskFromSCL"
+    assert decoded["mask"]["config"]["band_idx"] == -1
+    assert decoded["mask"]["config"]["classes"] == [8, 9, 10]
+    assert decoded["invert"] is False
+    assert ApplyMask.forbid_in_yaml is True  # carries an Operator/closure
+
+
+def test_apply_mask_get_config_with_array_mask_emits_summary() -> None:
+    """ApplyMask with a raw boolean array should serialize only the
+    array's shape/dtype, not the bytes."""
+    import json
+
+    mask = np.array([[True, False], [False, True]])
+    op = ApplyMask(mask=mask, fill_value=0.0)
+    cfg = op.get_config()
+    encoded = json.dumps(cfg)
+    decoded = json.loads(encoded)
+    assert decoded["mask"] == {"type": "ndarray", "shape": [2, 2], "dtype": "bool"}
+
+
+def test_apply_mask_preserves_float32_dtype(s2_l2a_stack: GeoTensor) -> None:
+    """Regression: fill_value=np.nan used to upcast float32 -> float64."""
+    arr_f32 = np.asarray(s2_l2a_stack).astype(np.float32)
+    gt_f32 = _toy_geotensor(arr_f32)
+    op = ApplyMask(
+        mask=MaskFromSCL(band_idx=-1, classes=SCL_CLOUDS),
+        fill_value=np.nan,
+    )
+    out = op(gt_f32)
+    assert out.dtype == np.float32  # no upcast despite NaN fill
