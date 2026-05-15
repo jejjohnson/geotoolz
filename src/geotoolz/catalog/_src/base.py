@@ -15,6 +15,7 @@ for the design report.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
@@ -23,8 +24,38 @@ import pandas as pd
 
 if TYPE_CHECKING:
     import geopandas as gpd
+    import pyproj
+    import shapely.geometry.base
 
     from geotoolz.types import GeoSlice
+
+
+@dataclasses.dataclass(frozen=True)
+class CatalogRow:
+    """Backend-neutral view of a single catalog row.
+
+    Yielded by `GeoCatalog.iter_rows`; consumed by loaders and the
+    `geotoolz.patch` bridge. The dataclass exists so streaming code
+    (DuckDB cursors, on-disk shards) can hand rows downstream without
+    callers caring whether the row came from a `gpd.GeoDataFrame` or a
+    SQL relation.
+
+    Attributes:
+        filepath: Path or URI of the indexed file. The loader resolves
+            this with the configured reader class.
+        geometry: Footprint polygon (or multipolygon) in ``crs`` units.
+            Already decoded from WKB for DuckDB-backed catalogs.
+        interval: Time window for the row, ``closed='both'``.
+        crs: Coordinate reference of ``geometry``.
+        extras: Backend-specific metadata (``layer``, ``data_vars``,
+            ``time_var``, …). Empty dict for rows that carry no extras.
+    """
+
+    filepath: str
+    geometry: shapely.geometry.base.BaseGeometry
+    interval: pd.Interval
+    crs: pyproj.CRS
+    extras: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @runtime_checkable
@@ -128,6 +159,25 @@ class GeoCatalog(Protocol):
             A new catalog containing every row of ``self`` followed by
             every (possibly reprojected) row of ``other``. No dedup is
             performed — call `query` afterwards if you want to filter.
+        """
+        ...
+
+    def iter_rows(self, *, batch_size: int = 1024) -> Iterator[CatalogRow]:
+        """Yield rows as backend-neutral `CatalogRow` instances.
+
+        Consumed by loaders, the sampler, and the `geotoolz.patch`
+        bridge. Backends should stream — for the DuckDB backend this
+        fetches in batches of ``batch_size``; the in-memory backend
+        ignores ``batch_size`` and iterates the underlying gdf.
+
+        Args:
+            batch_size: Rows per fetch for streaming backends. Default
+                1024. In-memory backends ignore this.
+
+        Yields:
+            `CatalogRow` instances in catalog order. Order is stable for
+            in-memory backends; out-of-core backends should document
+            their ordering explicitly.
         """
         ...
 

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from geotoolz import catalog, core, patch, types
 from geotoolz.catalog import (
     CatalogDomain,
+    CatalogRow,
     GeoCatalog,
     InMemoryGeoCatalog,
     build_raster_catalog,
@@ -30,6 +31,7 @@ from geotoolz.catalog import (
     intersect,
     load_raster,
     load_raster_timeseries,
+    open_catalog,
     query,
     to_geoparquet,
     union,
@@ -130,6 +132,7 @@ from geotoolz.types import GeoSlice
 
 if TYPE_CHECKING:
     from geotoolz.catalog import (
+        DuckDBGeoCatalog,
         build_vector_catalog,
         build_xarray_catalog,
         load_vector,
@@ -142,6 +145,7 @@ _LAZY_TOP_ATTRS = (
     "load_xarray",
     "build_vector_catalog",
     "load_vector",
+    "DuckDBGeoCatalog",
 )
 
 
@@ -163,7 +167,9 @@ __all__ = [
     "Branch",
     "Carrier",
     "CatalogDomain",
+    "CatalogRow",
     "Const",
+    "DuckDBGeoCatalog",
     "Fanout",
     "GeoCatalog",
     "GeoSlice",
@@ -260,6 +266,7 @@ __all__ = [
     "load_raster_timeseries",
     "load_vector",
     "load_xarray",
+    "open_catalog",
     "patch",
     "query",
     "to_geoparquet",
