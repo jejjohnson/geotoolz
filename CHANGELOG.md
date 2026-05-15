@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.4](https://github.com/jejjohnson/geotoolz/compare/v0.0.3...v0.0.4) (2026-05-15)
+
+
+### Features
+
+* **catalog:** duckdb-backed GeoCatalog (Phase 2 of geodatabase) ([#14](https://github.com/jejjohnson/geotoolz/issues/14)) ([1a4a31e](https://github.com/jejjohnson/geotoolz/commit/1a4a31e6ccd7df44c93eed02eb5ab18efef74dc1))
+* **catalog:** in-memory GeoCatalog + GeoSlice (Phase 1 of geodatabase) ([#12](https://github.com/jejjohnson/geotoolz/issues/12)) ([7b8a7a0](https://github.com/jejjohnson/geotoolz/commit/7b8a7a0d5a19da912b957cfa8dfcff66f165cc84))
+
 ## [0.0.3](https://github.com/jejjohnson/geotoolz/compare/v0.0.2...v0.0.3) (2026-05-15)
 
 
