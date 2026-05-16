@@ -35,6 +35,14 @@ class TestBasicChain:
     def test_empty_sequential_is_identity(self) -> None:
         assert Sequential([])(42) == 42
 
+    def test_empty_sequential_requires_input(self) -> None:
+        with pytest.raises(TypeError, match="cannot be called without an input"):
+            Sequential([])()
+
+    def test_non_source_first_operator_requires_input(self) -> None:
+        with pytest.raises(TypeError):
+            Sequential([Identity()])()
+
     def test_single_op(self) -> None:
         assert Sequential([Add(5)])(0) == 5
 

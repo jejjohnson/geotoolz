@@ -262,6 +262,7 @@ def savi(
     *,
     L: float = 0.5,
     axis: int = 0,
+    eps: float = 1e-10,
 ) -> np.ndarray:
     r"""Soil-Adjusted Vegetation Index (Huete 1988).
 
@@ -303,7 +304,7 @@ def savi(
     """
     nir = np.take(arr, nir_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
-    return (nir - red) / (nir + red + L) * (1.0 + L)
+    return (nir - red) / (nir + red + L + eps) * (1.0 + L)
 
 
 def evi(
@@ -317,6 +318,7 @@ def evi(
     C2: float = 7.5,
     L: float = 1.0,
     axis: int = 0,
+    eps: float = 1e-10,
 ) -> np.ndarray:
     r"""Enhanced Vegetation Index (Huete et al. 2002).
 
@@ -360,4 +362,326 @@ def evi(
     nir = np.take(arr, nir_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
     blue = np.take(arr, blue_idx, axis=axis)
-    return G * (nir - red) / (nir + C1 * red - C2 * blue + L)
+    return G * (nir - red) / (nir + C1 * red - C2 * blue + L + eps)
+
+
+def evi2(
+    arr: np.ndarray,
+    nir_idx: int,
+    red_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Two-band Enhanced Vegetation Index (Jiang et al. 2008).
+
+    .. math::
+
+        \mathrm{EVI2} \;=\; 2.5 \cdot
+            \frac{\rho_{\mathrm{NIR}} - \rho_{\mathrm{Red}}}
+                 {\rho_{\mathrm{NIR}} + 2.4\,\rho_{\mathrm{Red}} + 1 + \varepsilon}
+
+    A blue-band-free approximation to EVI tuned to track it within a
+    few percent over most cover types.
+
+    References:
+        Jiang, Z., Huete, A. R., Didan, K., & Miura, T. (2008).
+        *Remote Sensing of Environment*, 112(10), 3833–3845.
+    """
+    nir = np.take(arr, nir_idx, axis=axis)
+    red = np.take(arr, red_idx, axis=axis)
+    return 2.5 * (nir - red) / (nir + 2.4 * red + 1.0 + eps)
+
+
+def arvi(
+    arr: np.ndarray,
+    nir_idx: int,
+    red_idx: int,
+    blue_idx: int,
+    *,
+    gamma: float = 1.0,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Atmospherically Resistant Vegetation Index (Kaufman & Tanre 1992).
+
+    .. math::
+
+        \rho_{rb} = \rho_{\mathrm{Red}}
+                  - \gamma\,(\rho_{\mathrm{Blue}} - \rho_{\mathrm{Red}}),
+        \quad
+        \mathrm{ARVI} \;=\; \frac{\rho_{\mathrm{NIR}} - \rho_{rb}}
+                                 {\rho_{\mathrm{NIR}} + \rho_{rb} + \varepsilon}
+
+    The Blue-band correction cancels aerosol-driven red inflation.
+    Pass ``gamma=1`` for the original MODIS-derived value.
+    """
+    nir = np.take(arr, nir_idx, axis=axis)
+    red = np.take(arr, red_idx, axis=axis)
+    blue = np.take(arr, blue_idx, axis=axis)
+    rb = red - gamma * (blue - red)
+    return (nir - rb) / (nir + rb + eps)
+
+
+def gci(
+    arr: np.ndarray,
+    nir_idx: int,
+    green_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Green Chlorophyll Index (Gitelson et al. 2003).
+
+    .. math::
+
+        \mathrm{GCI} \;=\; \frac{\rho_{\mathrm{NIR}}}
+                                {\rho_{\mathrm{Green}} + \varepsilon} - 1
+
+    Roughly linear in canopy chlorophyll content; saturates much
+    later than NDVI.
+    """
+    nir = np.take(arr, nir_idx, axis=axis)
+    green = np.take(arr, green_idx, axis=axis)
+    return nir / (green + eps) - 1.0
+
+
+def kndvi(
+    arr: np.ndarray,
+    nir_idx: int,
+    red_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Kernel NDVI (Camps-Valls et al. 2021).
+
+    .. math::
+
+        \mathrm{kNDVI} \;=\; \tanh\!\bigl(\mathrm{NDVI}^2\bigr)
+
+    Non-linear transform of NDVI with reduced saturation and a
+    closer-to-linear relationship to GPP.
+    """
+    return np.tanh(ndvi(arr, nir_idx, red_idx, axis=axis, eps=eps) ** 2)
+
+
+def mndwi(
+    arr: np.ndarray,
+    green_idx: int,
+    swir_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Modified Normalized Difference Water Index (Xu 2006).
+
+    .. math::
+
+        \mathrm{MNDWI} \;=\; \frac{\rho_{\mathrm{Green}} - \rho_{\mathrm{SWIR1}}}
+                                  {\rho_{\mathrm{Green}} + \rho_{\mathrm{SWIR1}}
+                                   + \varepsilon}
+
+    Sharper water/non-water separation than McFeeters NDWI; reduces
+    urban-surface confusion.
+    """
+    return normalized_difference(arr, green_idx, swir_idx, axis=axis, eps=eps)
+
+
+def ndmi(
+    arr: np.ndarray,
+    nir_idx: int,
+    swir1_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Normalized Difference Moisture Index (Gao 1996).
+
+    .. math::
+
+        \mathrm{NDMI} \;=\; \frac{\rho_{\mathrm{NIR}} - \rho_{\mathrm{SWIR1}}}
+                                 {\rho_{\mathrm{NIR}} + \rho_{\mathrm{SWIR1}}
+                                  + \varepsilon}
+
+    Tracks vegetation *liquid-water content* (not surface water).
+    """
+    return normalized_difference(arr, nir_idx, swir1_idx, axis=axis, eps=eps)
+
+
+def ndsi(
+    arr: np.ndarray,
+    green_idx: int,
+    swir_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Normalized Difference Snow Index (Hall et al. 1995).
+
+    .. math::
+
+        \mathrm{NDSI} \;=\; \frac{\rho_{\mathrm{Green}} - \rho_{\mathrm{SWIR1}}}
+                                 {\rho_{\mathrm{Green}} + \rho_{\mathrm{SWIR1}}
+                                  + \varepsilon}
+
+    Snow / ice mapping (NDSI > 0.4 is the standard MODIS threshold).
+    Shares its arithmetic form with MNDWI; the two indices are
+    interpreted differently.
+    """
+    return normalized_difference(arr, green_idx, swir_idx, axis=axis, eps=eps)
+
+
+def nbr2(
+    arr: np.ndarray,
+    swir1_idx: int,
+    swir2_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Normalized Burn Ratio 2 (USGS Landsat product).
+
+    .. math::
+
+        \mathrm{NBR2} \;=\; \frac{\rho_{\mathrm{SWIR1}} - \rho_{\mathrm{SWIR2}}}
+                                 {\rho_{\mathrm{SWIR1}} + \rho_{\mathrm{SWIR2}}
+                                  + \varepsilon}
+    """
+    return normalized_difference(arr, swir1_idx, swir2_idx, axis=axis, eps=eps)
+
+
+def bais2(
+    arr: np.ndarray,
+    red_idx: int,
+    red_edge1_idx: int,
+    red_edge2_idx: int,
+    nir_idx: int,
+    swir2_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Burned Area Index for Sentinel-2 (Filipponi 2018).
+
+    .. math::
+
+        \mathrm{BAIS2} \;=\;
+        \Bigl(1 - \sqrt{\tfrac{\rho_{6}\,\rho_{7}\,\rho_{8\mathrm{A}}}
+                              {\rho_{4} + \varepsilon}}\Bigr)
+        \cdot
+        \Bigl(\tfrac{\rho_{12} - \rho_{8\mathrm{A}}}
+                    {\sqrt{\rho_{12} + \rho_{8\mathrm{A}} + \varepsilon}} + 1\Bigr)
+
+    Args:
+        arr: Reflectance ndarray; non-negative everywhere or the
+            square roots will produce NaN.
+        red_idx: Red (B04) index.
+        red_edge1_idx: First red-edge (B06) index.
+        red_edge2_idx: Second red-edge (B07) index.
+        nir_idx: Narrow-NIR (B8A) index.
+        swir2_idx: SWIR-2 (B12) index.
+
+    References:
+        Filipponi, F. (2018). *Proceedings*, 2(7), 364.
+    """
+    red = np.take(arr, red_idx, axis=axis)
+    red_edge1 = np.take(arr, red_edge1_idx, axis=axis)
+    red_edge2 = np.take(arr, red_edge2_idx, axis=axis)
+    nir = np.take(arr, nir_idx, axis=axis)
+    swir2 = np.take(arr, swir2_idx, axis=axis)
+    return (1.0 - np.sqrt((red_edge1 * red_edge2 * nir) / (red + eps))) * (
+        (swir2 - nir) / np.sqrt(swir2 + nir + eps) + 1.0
+    )
+
+
+def bsi(
+    arr: np.ndarray,
+    blue_idx: int,
+    red_idx: int,
+    nir_idx: int,
+    swir_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Bare Soil Index (Rikimaru et al. 2002).
+
+    .. math::
+
+        \mathrm{BSI} \;=\;
+        \frac{(\rho_{\mathrm{SWIR1}} + \rho_{\mathrm{Red}}) -
+              (\rho_{\mathrm{NIR}}  + \rho_{\mathrm{Blue}})}
+             {(\rho_{\mathrm{SWIR1}} + \rho_{\mathrm{Red}}) +
+              (\rho_{\mathrm{NIR}}  + \rho_{\mathrm{Blue}}) + \varepsilon}
+    """
+    blue = np.take(arr, blue_idx, axis=axis)
+    red = np.take(arr, red_idx, axis=axis)
+    nir = np.take(arr, nir_idx, axis=axis)
+    swir = np.take(arr, swir_idx, axis=axis)
+    return ((swir + red) - (nir + blue)) / ((swir + red) + (nir + blue) + eps)
+
+
+def iron_oxide(
+    arr: np.ndarray,
+    red_idx: int,
+    blue_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Iron Oxide ratio (Sabins 1999).
+
+    .. math::
+
+        \mathrm{IronOxide} \;=\; \frac{\rho_{\mathrm{Red}}}
+                                       {\rho_{\mathrm{Blue}} + \varepsilon}
+
+    Hematite/goethite and related Fe(III) oxides absorb blue and
+    reflect red.
+    """
+    red = np.take(arr, red_idx, axis=axis)
+    blue = np.take(arr, blue_idx, axis=axis)
+    return red / (blue + eps)
+
+
+def clay_minerals(
+    arr: np.ndarray,
+    swir1_idx: int,
+    swir2_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    r"""Clay Minerals ratio (Sabins 1999; Crowley et al. 1989).
+
+    .. math::
+
+        \mathrm{ClayMinerals} \;=\; \frac{\rho_{\mathrm{SWIR1}}}
+                                          {\rho_{\mathrm{SWIR2}} + \varepsilon}
+
+    OH-bearing minerals (kaolinite, illite, montmorillonite, alunite)
+    have a diagnostic 2.2 µm absorption inside SWIR-2.
+    """
+    swir1 = np.take(arr, swir1_idx, axis=axis)
+    swir2 = np.take(arr, swir2_idx, axis=axis)
+    return swir1 / (swir2 + eps)
+
+
+def ciri(
+    arr: np.ndarray,
+    cirrus_idx: int,
+    *,
+    axis: int = 0,
+) -> np.ndarray:
+    r"""Cirrus Reflectance Index (Sentinel-2 B10 passthrough).
+
+    .. math::
+
+        \mathrm{CIRI} \;=\; \rho_{\mathrm{cirrus}}
+
+    The 1.36–1.39 µm cirrus channel is opaque to surface signal due
+    to water-vapour absorption; any non-trivial reflectance comes
+    from high-altitude cloud.
+    """
+    return np.take(arr, cirrus_idx, axis=axis)

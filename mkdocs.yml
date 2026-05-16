@@ -66,6 +66,8 @@ nav:
       - Core: api/core.md
       - Patch: api/patch.md
       - Catalog: api/catalog.md
+      - Geometry: api/geom.md
+      - QA: api/qa.md
   - Contributing: contributing.md
 
 markdown_extensions:
