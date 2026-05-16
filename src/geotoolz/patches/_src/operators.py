@@ -19,6 +19,8 @@ from geotoolz.core import Operator
 from geotoolz.geom import Stitch as GeomStitch
 
 
+# Accepted point carriers: an ``np.ndarray`` with shape ``(N, 2)`` in
+# ``x, y`` order, or a GeoDataFrame-like object with point geometries.
 PointInput = Any
 
 
@@ -77,6 +79,11 @@ def _pad_mode(mode: str, source: np.ndarray) -> str:
     if mode not in {"constant", "reflect", "edge"}:
         raise ValueError("pad_mode must be 'constant', 'reflect', or 'edge'.")
     if mode == "reflect" and min(source.shape[-2:]) < 2:
+        warnings.warn(
+            "pad_mode='reflect' requires at least two source pixels per "
+            "spatial axis; falling back to pad_mode='edge'.",
+            stacklevel=2,
+        )
         return "edge"
     return mode
 
@@ -219,12 +226,15 @@ def _reproject_points(
 
 def _sample_nearest(arr: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
     height, width = arr.shape[-2:]
-    out = np.full((*arr.shape[:-2], len(rows)), np.nan, dtype=np.float32)
     row_index = np.floor(rows).astype(int)
     col_index = np.floor(cols).astype(int)
     valid = (
         (row_index >= 0) & (row_index < height) & (col_index >= 0) & (col_index < width)
     )
+    all_valid = bool(np.all(valid))
+    out_dtype = arr.dtype if all_valid else np.float32
+    fill = 0 if all_valid else np.nan
+    out = np.full((*arr.shape[:-2], len(rows)), fill, dtype=out_dtype)
     out[..., valid] = arr[..., row_index[valid], col_index[valid]]
     return np.moveaxis(out, -1, 0)
 
@@ -290,6 +300,9 @@ class ExtractPatches(Operator):
 
     Uses :func:`georeader.slices.create_windows` for window generation and
     preserves per-patch CRS/transform metadata for later stitching.
+    When both ``stride`` and ``overlap`` are supplied, the explicit
+    ``stride`` takes precedence and ``overlap`` is retained only in the
+    serialized config.
     """
 
     def __init__(
@@ -419,10 +432,12 @@ class SamplePoints(Operator):
         coords, source_crs = _points_array(self.points, self.crs)
         coords = _reproject_points(coords, source_crs, gt.crs)
         cols, rows = (~gt.transform) * (coords[:, 0], coords[:, 1])
-        arr = np.asarray(gt).astype(np.float32, copy=False)
+        arr = np.asarray(gt)
         if self.interp == "nearest":
             return _sample_nearest(arr, np.asarray(rows), np.asarray(cols))
-        return _sample_bilinear(arr, np.asarray(rows), np.asarray(cols))
+        return _sample_bilinear(
+            arr.astype(np.float32, copy=False), np.asarray(rows), np.asarray(cols)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"crs": self.crs, "interp": self.interp}
@@ -528,6 +543,8 @@ class StratifiedSample(Operator):
         )
         proportions = proportions / proportions.sum()
         raw = proportions * self.n_samples
+        # Largest-remainder allocation: floor all fractional class counts, then
+        # give leftover samples to the classes with the largest fractional parts.
         counts = np.floor(raw).astype(int)
         remainder = self.n_samples - int(counts.sum())
         if remainder:

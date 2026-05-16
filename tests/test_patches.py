@@ -118,6 +118,8 @@ def test_sample_points_nearest_matches_hand_indexed_reference() -> None:
 
     samples = gz.patches.SamplePoints(points=points, crs="EPSG:4326")(gt)
 
+    # Affine inverse maps the pixel centers to (col, row) = (0.5, 0.5)
+    # and (2.5, 2.5); nearest indexing floors those to arr[0, 0] and arr[2, 2].
     expected = np.array([[0.0], [10.0]], dtype=np.float32)
     np.testing.assert_array_equal(samples, expected)
 
