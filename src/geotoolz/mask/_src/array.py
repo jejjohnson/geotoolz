@@ -9,7 +9,7 @@ import scipy.ndimage as ndi
 
 
 def combine_masks(masks: Sequence[np.ndarray], op: str = "or") -> np.ndarray:
-    """Combine boolean masks with a small algebra."""
+    """Combine boolean masks using 'or', 'and', 'xor', or unary 'not'."""
     if len(masks) == 0:
         raise ValueError("combine_masks: `masks` must not be empty")
 
@@ -232,10 +232,11 @@ def _remove_small_holes_2d(mask: np.ndarray, *, area_threshold: int) -> np.ndarr
     if num == 0 or area_threshold == 0:
         return mask.copy()
 
-    border_labels = set(np.unique(labels[0, :]))
-    border_labels.update(np.unique(labels[-1, :]))
-    border_labels.update(np.unique(labels[:, 0]))
-    border_labels.update(np.unique(labels[:, -1]))
+    border_labels = set(
+        np.unique(
+            np.concatenate([labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]])
+        )
+    )
 
     sizes = np.bincount(labels.ravel())
     fill = np.zeros(num + 1, dtype=bool)

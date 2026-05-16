@@ -97,6 +97,8 @@ class BBoxMask(PolygonMask):
         crs: str | None = None,
         inside: bool = True,
     ) -> None:
+        if len(bounds) != 4:
+            raise ValueError("BBoxMask: `bounds` must contain exactly four values")
         self.bounds = tuple(bounds)
         super().__init__(
             geometry=shapely.geometry.box(*self.bounds), crs=crs, inside=inside
@@ -478,6 +480,15 @@ def _rasterize_geometry_like(
 
 @cache
 def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
+    """Load and cache Natural Earth vectors.
+
+    Supports ``kind`` values ``"land"``, ``"ocean"``, and ``"countries"``.
+    The special ``source="natural_earth_10m"`` downloads the corresponding
+    Natural Earth 1:10m zip once into the geotoolz cache directory and reuses
+    the extracted shapefile. Any other source is passed to
+    ``geopandas.read_file``. The in-process ``@cache`` avoids repeated reads
+    across multiple operator instances.
+    """
     if source != "natural_earth_10m":
         return gpd.read_file(source)
 
@@ -506,6 +517,13 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
 
 
 def _natural_earth_cache_dir() -> Path:
+    """Return the on-disk Natural Earth cache directory.
+
+    The location follows ``$XDG_CACHE_HOME/geotoolz/natural_earth`` when
+    ``XDG_CACHE_HOME`` is set, otherwise ``~/.cache/geotoolz/natural_earth``.
+    In restricted environments where the home directory cannot be resolved,
+    it falls back to the system temporary directory.
+    """
     cache_root = os.environ.get("XDG_CACHE_HOME")
     if cache_root is not None:
         return Path(cache_root) / "geotoolz" / "natural_earth"

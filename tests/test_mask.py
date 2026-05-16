@@ -85,7 +85,9 @@ def test_polygon_mask_accepts_geodataframe() -> None:
 
     mask = PolygonMask(geometry=gdf)(gt)
 
+    assert mask.shape == gt.shape
     assert bool(np.asarray(mask)[1, 1])
+    assert not bool(np.asarray(mask)[0, 0])
     assert PolygonMask(geometry=gdf).get_config()["geometry"]["type"] == "GeoDataFrame"
 
 
@@ -251,6 +253,7 @@ def test_slope_mask_matches_flat_reference() -> None:
 def test_natural_earth_mask_constructors_use_cached_loader(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    mask_operators._load_natural_earth.cache_clear()
     calls = []
     countries = gpd.GeoDataFrame(
         {"ISO_A3": ["GRL"], "geometry": [box(0.0, 0.0, 1.0, 1.0)]},
