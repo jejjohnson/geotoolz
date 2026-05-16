@@ -402,7 +402,6 @@ __all__ = [
     "WindAdvectionCone",
     "__version__",
     "augment",
-    "catalog",
     "cloud",
     "core",
     "dNBR",
@@ -418,6 +417,5 @@ __all__ = [
     "radiometry",
     "restore",
     "spectral",
-    "types",
     "viz",
 ]
