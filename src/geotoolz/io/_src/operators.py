@@ -849,14 +849,15 @@ class WriteZarr(SinkOperator):
         root = zarr.open_group(self.store, mode="w")
         group = root if self.group is None else root.require_group(self.group)
         values = np.asarray(gt.values)
-        chunk_shape: tuple[int, ...] | None = None
         if self.chunks is not None:
             axis_names = ("band", "y", "x")[-values.ndim :]
-            chunk_shape = tuple(
+            chunk_shape: tuple[int, ...] = tuple(
                 self.chunks.get(name, size)
                 for name, size in zip(axis_names, values.shape, strict=True)
             )
-        group.create_array("values", data=values, chunks=chunk_shape)
+            group.create_array("values", data=values, chunks=chunk_shape)
+        else:
+            group.create_array("values", data=values)
         group.attrs["crs"] = str(gt.crs)
         group.attrs["transform"] = tuple(gt.transform)
         group.attrs["fill_value_default"] = gt.fill_value_default

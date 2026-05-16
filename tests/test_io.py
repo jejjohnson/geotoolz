@@ -291,8 +291,28 @@ def test_operator_configs_are_serializable_for_common_values() -> None:
         assert cfg
 
 
-def test_write_zarr_reports_missing_optional_dependency() -> None:
+def test_write_zarr_reports_missing_optional_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     gt = _sample_geotensor()
+
+    import builtins
+    from typing import Any
+
+    real_import = builtins.__import__
+
+    def _raise_for_zarr(
+        name: str,
+        globals: Any = None,
+        locals: Any = None,
+        fromlist: Any = (),
+        level: int = 0,
+    ) -> Any:
+        if name == "zarr" or name.startswith("zarr."):
+            raise ImportError("simulated missing zarr")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _raise_for_zarr)
 
     with pytest.raises(io.GeoToolzIOError, match="optional zarr dependency"):
         io.WriteZarr(store="memory://out.zarr")(gt)
