@@ -256,3 +256,165 @@ def test_sbmp_clips_non_positive_swir_values_before_log() -> None:
     )
     assert np.isfinite(np.asarray(out)).all()
     assert np.allclose(np.asarray(out), expected)
+
+
+def test_ime_recovers_injected_mass_on_synthetic_plume() -> None:
+    """Synthetic plume on a flat background: IME equals injected mass."""
+    enhancement = np.zeros((20, 20), dtype=float)
+    # Linear plume: 1 px tall, 10 px long, uniform 0.5 kg/m^2 column.
+    enhancement[10, 5:15] = 0.5
+    mask_arr = enhancement > 0
+    # 10 m pixels -> pixel area 100 m^2 -> per-pixel mass 50 kg ->
+    # total injected mass over 10 pixels = 500 kg.
+    expected_ime = 10 * 100.0 * 0.5
+    # Length: 10 pixels at 10 m spacing => 9 * 10 m between centroids.
+    expected_length = 9 * 10.0
+    wind = 4.0
+
+    result = gz.plume.IMEEstimate(
+        plume_mask=_gt(mask_arr),
+        wind_speed=wind,
+        return_uncertainty=False,
+    )(_gt(enhancement))
+
+    assert result["ime_kg"] == pytest.approx(expected_ime)
+    assert result["length_m"] == pytest.approx(expected_length)
+    assert result["emission_rate_kg_s"] == pytest.approx(
+        wind * expected_ime / expected_length
+    )
+
+
+def test_ime_empty_mask_yields_zero_emission() -> None:
+    mask = _gt(np.zeros((4, 4), dtype=bool))
+    enhancement = _gt(np.ones((4, 4), dtype=float))
+
+    result = gz.plume.IMEEstimate(
+        plume_mask=mask,
+        wind_speed=5.0,
+        return_uncertainty=False,
+    )(enhancement)
+
+    assert result["ime_kg"] == 0.0
+    assert result["length_m"] == 0.0
+    assert result["emission_rate_kg_s"] == 0.0
+
+
+def test_cross_sectional_flux_matches_uniform_plume_analytical() -> None:
+    """Uniform Omega along a 1-pixel-tall plume gives Q = U * Omega * W * N.
+
+    For a 1-pixel-tall row at the source y, the across-wind integral of
+    Omega = const is Omega * (n_active_pixels) * dx. Each transect picks
+    up exactly one pixel along the row, so flux = U * Omega * dx.
+    """
+    enhancement = np.zeros((11, 21), dtype=float)
+    enhancement[5, :] = 1.0  # kg/m^2, full row
+    mask_arr = enhancement > 0
+
+    # Place source at the row centre.
+    source_x = 5.5 * 10.0  # column 5 centre
+    source_y = 100.0 - 5.5 * 10.0  # row 5 centre (transform.f=100, e=-10)
+    wind_u = 1.0
+    wind_v = 0.0
+
+    gdf = gz.plume.CrossSectionalFlux(
+        plume_mask=_gt(mask_arr),
+        source=(source_x, source_y),
+        wind_u=wind_u,
+        wind_v=wind_v,
+        n_transects=3,
+        transect_spacing_m=10.0,
+    )(_gt(enhancement))
+
+    # Each transect crosses exactly one pixel (1 kg/m^2) of along-wind
+    # half-width 5 m. Flux = Omega * |U| * dx_across = 1 * 1 * 10 = 10.
+    for flux in gdf["flux_kg_s"]:
+        assert flux == pytest.approx(10.0)
+    assert (gdf["n_pixels"] == 1).all()
+
+
+def test_cross_sectional_flux_rejects_zero_wind() -> None:
+    mask = _gt(np.ones((3, 3), dtype=bool))
+    enhancement = _gt(np.ones((3, 3), dtype=float))
+    op = gz.plume.CrossSectionalFlux(
+        plume_mask=mask,
+        source=(0.0, 0.0),
+        wind_u=0.0,
+        wind_v=0.0,
+    )
+    with pytest.raises(ValueError, match="wind vector"):
+        op(enhancement)
+
+
+def test_column_unit_round_trip_through_mol_m2() -> None:
+    """ppm_m -> mol_m2 -> kg_m2 -> ppm_m round-trips to within float eps."""
+    values = np.array([[10.0, 100.0, 1000.0]])
+    mol = convert_column_units(values, gas="CH4", units_in="ppm_m", units_out="mol_m2")
+    kg = convert_column_units(mol, gas="CH4", units_in="mol_m2", units_out="kg_m2")
+    back = convert_column_units(kg, gas="CH4", units_in="kg_m2", units_out="ppm_m")
+    assert np.allclose(back, values)
+
+
+def test_plume_operators_get_config_is_json_safe() -> None:
+    """get_config dicts must be JSON-serialisable (no GeoTensors)."""
+    import json
+
+    mask_gt = _gt(np.ones((2, 2), dtype=bool))
+
+    ops = [
+        gz.plume.PlumeMask(threshold="otsu", min_area=10),
+        gz.plume.PlumeContours(min_area=5),
+        gz.plume.PlumeFootprint(min_area_m2=100.0),
+        gz.plume.WindAdvectionCone(
+            source=(0.0, 0.0),
+            wind_u=1.0,
+            wind_v=0.0,
+        ),
+        gz.plume.ColumnToMass(gas="CO2", units_in="ppm_m"),
+        gz.plume.IMEEstimate(plume_mask=mask_gt, wind_speed=3.0),
+        gz.plume.CrossSectionalFlux(
+            plume_mask=mask_gt,
+            source=(0.0, 0.0),
+            wind_u=1.0,
+            wind_v=0.0,
+        ),
+        gz.plume.SBMP(reference_scene=_gt(np.ones((12, 2, 2)))),
+    ]
+    for op in ops:
+        # Must round-trip through JSON without raising.
+        config = op.get_config()
+        json.dumps(config)
+
+
+def test_label_components_drops_small_and_renumbers_contiguously() -> None:
+    """label_components must yield contiguous 1..K labels after dropping."""
+    from geotoolz.plume._src.array import label_components
+
+    mask = np.zeros((7, 7), dtype=bool)
+    # Three isolated components separated by >=2 pixels on every side so
+    # 8-connectivity does not merge them.
+    mask[0:2, 0:2] = True  # 4 px component
+    mask[6, 6] = True  # 1 px component (dropped at min_area=2)
+    mask[5:7, 0:3] = True  # 6 px component (top-right diagonal of [6,6]
+    # is (5,5)=False, so [6,6] stays isolated)
+    mask[5, 5] = False
+
+    labels = label_components(mask, min_area=2, connectivity=4)
+    unique = sorted(set(np.unique(labels).tolist()))
+    assert unique == [0, 1, 2]
+    assert int((labels == 1).sum()) + int((labels == 2).sum()) == 4 + 6
+
+
+def test_ime_convex_hull_handles_collinear_points() -> None:
+    """Degenerate convex hull (1-pixel row) must not crash."""
+    mask = _gt(np.array([[True, True, True, True]]))
+    enhancement = _gt(np.ones((1, 4), dtype=float))
+
+    result = gz.plume.IMEEstimate(
+        plume_mask=mask,
+        wind_speed=1.0,
+        length_method="convex_hull",
+        return_uncertainty=False,
+    )(enhancement)
+
+    # Four pixels at 10 m spacing -> length = 3 * 10 = 30 m.
+    assert result["length_m"] == pytest.approx(30.0)

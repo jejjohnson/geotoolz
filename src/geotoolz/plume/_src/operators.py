@@ -1,4 +1,19 @@
-"""Carrier-aware plume operators for retrieval post-processing."""
+"""Carrier-aware plume operators for retrieval post-processing.
+
+These Tier-B operators wrap the Tier-A primitives in ``array.py`` so they
+accept and return ``georeader.GeoTensor`` carriers (or, for vector
+outputs, ``geopandas.GeoDataFrame``). Algorithms follow the literature
+cited in :mod:`geotoolz.plume._src.array`:
+
+- ``SBMP`` — Varon et al. (2021) Sentinel-2 SWIR ratio retrieval.
+- ``PlumeMask`` / ``PlumeContours`` / ``PlumeFootprint`` — Frankenberg
+  et al. (2016) detection / segmentation conventions.
+- ``IMEEstimate`` — Varon et al. (2018) integrated mass enhancement.
+- ``CrossSectionalFlux`` — Krings et al. (2011) / Varon (2018) appendix.
+
+The IME and cross-section operators expect the enhancement carrier to be
+in kg/m^2. Use :class:`ColumnToMass` to convert from ppm m or mol/m^2.
+"""
 
 from __future__ import annotations
 
@@ -61,20 +76,53 @@ def _extract_and_clip_band(arr: np.ndarray, band: int | str, axis: int) -> np.nd
 
 
 class SBMP(Operator):
-    """Single-band multi-pass Sentinel-2 SWIR ratio retrieval.
+    r"""Single-band multi-pass Sentinel-2 SWIR ratio retrieval.
 
-    The operator emits a single-band enhancement score. With a
-    ``reference_scene`` it returns the change in log(SWIR1 / SWIR2)
-    between the input and reference scenes. Without a reference scene it
-    falls back to the same-scene normalized SWIR contrast
-    ``(SWIR1 - SWIR2) / (SWIR1 + SWIR2 + eps)``.
+    Emits a unitless methane "enhancement score" that highlights pixels
+    where SWIR-2 (B12, ~2200 nm — a strong CH4 absorption window) is
+    depressed relative to SWIR-1 (B11, ~1600 nm — weakly absorbing).
 
-    The reference-scene formulation is
-    ``log((SWIR1 + eps) / (SWIR2 + eps)) -
-    log((ref_SWIR1 + eps) / (ref_SWIR2 + eps))``. Inputs are expected to
-    be non-negative radiance or reflectance values; negative values are
-    clipped to zero, then ``eps`` is added to prevent division by zero in
-    the log-ratio.
+    With a ``reference_scene`` (a clean-air acquisition over the same
+    geography) the operator computes the log-ratio change
+
+    .. math::
+
+        \Delta \;=\; \log\!\Bigl(\tfrac{\rho_{B11} + \varepsilon}
+                                       {\rho_{B12} + \varepsilon}\Bigr)
+                   - \log\!\Bigl(\tfrac{\rho^{ref}_{B11} + \varepsilon}
+                                       {\rho^{ref}_{B12} + \varepsilon}\Bigr)
+
+    following Varon et al. (2021) — *Satellite discovery of anomalously
+    large methane point sources from oil/gas production* (RSE, 251). The
+    reference-scene formulation cancels static surface signatures so
+    plume pixels dominate :math:`\Delta`.
+
+    Without a reference scene the operator falls back to the same-scene
+    normalized SWIR contrast
+    ``(SWIR1 - SWIR2) / (SWIR1 + SWIR2 + eps)``, which is a cheap
+    detection prefilter (Ehret et al., 2022, TGRS) but is *not* a
+    quantitative column retrieval — pair it with ``ColumnToMass`` only
+    when calibrated against a per-scene ppm m mapping.
+
+    Inputs are radiance or reflectance arrays with band axis ``axis``;
+    negative values are clipped to zero before the log to keep the
+    operator finite over noisy radiances. The output is single-band.
+
+    Args:
+        swir1: Index or Sentinel-2 band name of the SWIR-1 channel.
+        swir2: Index or Sentinel-2 band name of the SWIR-2 channel.
+        reference_scene: Optional clean-air ``GeoTensor`` with the same
+            band layout. When supplied, returns log-ratio change.
+        axis: Band axis of the input. Default ``0``.
+        eps: Numerical guard against division by zero. Default ``1e-10``.
+
+    Examples:
+        Reference-scene retrieval over a single source::
+
+            import geotoolz as gz
+
+            score = gz.plume.SBMP(reference_scene=pre_event_s2)(post_event_s2)
+            mask = gz.plume.PlumeMask(threshold="percentile:99.5")(score)
     """
 
     def __init__(
@@ -124,7 +172,24 @@ class SBMP(Operator):
 
 
 class PlumeMask(Operator):
-    """Binary mask from a single-band score or enhancement map."""
+    """Binary plume mask from a single-band score or enhancement map.
+
+    Thresholds the input (absolute number, Otsu, or percentile) and
+    drops connected components smaller than ``min_area`` pixels — the
+    Frankenberg et al. (2016) detection convention, also used by Varon
+    et al. (2018, 2021) for S2/AVIRIS plume identification.
+
+    Args:
+        threshold: ``float`` (absolute), ``"otsu"``, or
+            ``"percentile:<p>"`` with ``p`` in [0, 100].
+        min_area: Minimum component size in pixels.
+        connectivity: 4 or 8 connectivity for component labelling.
+
+    Examples:
+        >>> mask = gz.plume.PlumeMask(
+        ...     threshold="percentile:99.5", min_area=50,
+        ... )(enhancement)
+    """
 
     def __init__(
         self,
@@ -155,7 +220,15 @@ class PlumeMask(Operator):
 
 
 class PlumeContours(Operator):
-    """Connected-component labelling of a plume mask."""
+    """Connected-component labelling of a plume mask.
+
+    Returns either an int32 label image (default) or a boolean mask of
+    the retained components. Component size threshold and connectivity
+    follow :func:`label_components`.
+
+    Examples:
+        >>> labels = gz.plume.PlumeContours(min_area=50)(mask)
+    """
 
     def __init__(
         self,
@@ -186,7 +259,27 @@ class PlumeContours(Operator):
 
 
 class PlumeFootprint(Operator):
-    """Vectorize a plume mask into polygons with per-plume metadata."""
+    """Vectorize a plume mask into polygons with per-plume metadata.
+
+    Returns a ``GeoDataFrame`` with one row per surviving plume:
+    ``geometry`` (polygon), ``area_m2``, ``centroid``,
+    ``mean_enhancement`` / ``max_enhancement`` (if ``enhancement`` is
+    supplied), ``n_pixels``, ``label_id``.
+
+    Args:
+        min_area_m2: Drop polygons smaller than this area.
+        simplify_tolerance: Douglas-Peucker tolerance (in CRS units) for
+            polygon simplification; ``None`` to skip.
+        enhancement: Optional enhancement ``GeoTensor`` aligned with the
+            mask; enables ``mean_enhancement`` / ``max_enhancement``
+            statistics per polygon.
+
+    Examples:
+        >>> gdf = gz.plume.PlumeFootprint(
+        ...     min_area_m2=500.0,
+        ...     enhancement=kg_m2,
+        ... )(mask)
+    """
 
     def __init__(
         self,
@@ -212,15 +305,17 @@ class PlumeFootprint(Operator):
         )
 
         rows: list[dict[str, Any]] = []
+        labels_i32 = labels.astype(np.int32, copy=False)
         for label_id in sorted(int(v) for v in np.unique(labels) if v != 0):
             component = labels == label_id
             n_pixels = int(component.sum())
+            # ``mask=component`` already restricts the output to this
+            # connected component, so no value-based filter is needed.
             geometries = [
                 shape(geom)
-                for geom, value in features.shapes(
-                    labels.astype(np.int32), mask=component, transform=gt.transform
+                for geom, _ in features.shapes(
+                    labels_i32, mask=component, transform=gt.transform
                 )
-                if int(value) == label_id
             ]
             if not geometries:
                 continue
@@ -264,7 +359,31 @@ class PlumeFootprint(Operator):
 
 
 class WindAdvectionCone(Operator):
-    """Mask likely downwind plume extent from a source point and wind vector."""
+    """Mask likely downwind plume extent from a source and wind vector.
+
+    Rasterizes a circular sector centered at ``source``, oriented along
+    ``(wind_u, wind_v)``, with half-angle ``half_angle_deg`` and radius
+    ``max_distance``. The mask is useful as a prior for plume
+    segmentation when the source location and wind are known (e.g. from
+    a reanalysis product), following the practice of Varon et al. (2018,
+    2021).
+
+    Args:
+        source: ``(x, y)`` source coordinates. If ``crs`` is supplied,
+            ``source`` is interpreted in that CRS and reprojected to the
+            carrier CRS.
+        wind_u: Eastward wind component (m/s).
+        wind_v: Northward wind component (m/s).
+        half_angle_deg: Half-angle of the cone (degrees).
+        max_distance: Radius of the cone (m, in carrier CRS units).
+        crs: Optional CRS of ``source``.
+
+    Examples:
+        >>> cone = gz.plume.WindAdvectionCone(
+        ...     source=(x0, y0), wind_u=3.0, wind_v=1.0,
+        ...     half_angle_deg=30.0, max_distance=5000.0,
+        ... )(enhancement)
+    """
 
     def __init__(
         self,
@@ -315,10 +434,59 @@ class WindAdvectionCone(Operator):
 
 
 class IMEEstimate(Operator):
-    """Estimate emission rate with Q = IME * U_eff / L.
+    r"""Integrated Mass Enhancement (IME) flux estimator.
 
-    When uncertainty output is requested, ``uncertainty_fraction`` is
-    applied as a simple fractional uncertainty on the emission rate.
+    Implements the IME method of Varon et al. (2018), AMT
+    *Quantifying methane point sources from fine-scale satellite
+    observations of atmospheric methane plumes*:
+
+    .. math::
+
+        \mathrm{IME} \;=\; \sum_{i \in \mathrm{plume}}
+                            \Omega_i \,\Delta A_i, \qquad
+        Q \;=\; \frac{U_{\mathrm{eff}}\,\mathrm{IME}}{L}
+
+    where :math:`\Omega_i` is the column enhancement (kg/m^2) of pixel
+    :math:`i`, :math:`\Delta A_i` is its area (m^2), :math:`L` is the
+    effective plume length (m) — see :func:`plume_length` — and
+    :math:`U_{\mathrm{eff}}` is the effective wind speed (m/s). Varon
+    et al. (2018) calibrate :math:`U_{\mathrm{eff}}` against LES
+    simulations; this operator takes the calibrated value as
+    ``wind_speed``.
+
+    The ``enhancement`` carrier MUST be in kg/m^2. Use
+    :class:`ColumnToMass` upstream to convert from ppm m or mol/m^2:
+    passing other units silently produces nonsense.
+
+    Args:
+        plume_mask: Boolean ``GeoTensor`` selecting plume pixels.
+        wind_speed: Effective wind speed :math:`U_{\mathrm{eff}}` in m/s.
+        length_method: Length estimator: ``"max_axis"``, ``"convex_hull"``,
+            or ``"skeleton"``. See :func:`plume_length`.
+        pixel_area_m2: Override the pixel area; default is taken from the
+            input transform determinant (correct for an equal-area CRS).
+        return_uncertainty: Append ``emission_rate_uncertainty_kg_s``.
+        uncertainty_fraction: Fractional 1-sigma uncertainty on Q. The
+            default 0.5 follows Varon et al. (2018) Table 3.
+
+    Returns:
+        Dict with keys ``ime_kg``, ``length_m``, ``wind_speed_m_s``,
+        ``emission_rate_kg_s``, and optionally
+        ``emission_rate_uncertainty_kg_s``.
+
+    Examples:
+        Estimate Q in kg/s from a ppm m enhancement map::
+
+            import geotoolz as gz
+
+            kg_m2 = gz.plume.ColumnToMass(units_in="ppm_m")(enhancement)
+            mask = gz.plume.PlumeMask(threshold="percentile:99")(kg_m2)
+            result = gz.plume.IMEEstimate(
+                plume_mask=mask,
+                wind_speed=3.5,
+                length_method="convex_hull",
+            )(kg_m2)
+            print(result["emission_rate_kg_s"])
     """
 
     def __init__(
@@ -378,7 +546,51 @@ class IMEEstimate(Operator):
 
 
 class CrossSectionalFlux(Operator):
-    """Estimate cross-sectional flux at downwind transects."""
+    r"""Estimate cross-sectional flux at downwind transects.
+
+    For each transect at downwind distance :math:`d_k`, the operator
+    integrates column mass across the plume:
+
+    .. math::
+
+        Q_k \;=\; U \int_{-\infty}^{\infty}
+                       \Omega(d_k, y) \, dy
+            \;\approx\; U \sum_{i \in \mathrm{strip}_k}
+                       \Omega_i \,\Delta y_i
+
+    where :math:`\mathrm{strip}_k` is the set of plume pixels whose
+    along-wind distance to the source falls within half a pixel of
+    :math:`d_k`. This is the cross-section method of Krings et al. (2011)
+    and Varon et al. (2018, appendix); a flat downwind profile of
+    :math:`Q_k` versus :math:`d_k` confirms a steady-state estimate.
+
+    The enhancement carrier MUST be in kg/m^2 (see :class:`ColumnToMass`).
+    The implementation assumes (approximately) square pixels: it uses
+    :math:`\Delta y = \sqrt{\mathrm{pixel\_area}}` as the across-wind
+    pixel size. For strongly anisotropic pixel grids, reproject first.
+
+    Args:
+        plume_mask: Boolean plume ``GeoTensor``.
+        source: ``(x, y)`` source coordinates in the carrier CRS.
+        wind_u: Eastward wind component (m/s).
+        wind_v: Northward wind component (m/s).
+        n_transects: Number of downwind transects to evaluate.
+        transect_spacing_m: Along-wind distance between transects (m).
+
+    Returns:
+        ``GeoDataFrame`` with one row per transect: ``geometry``
+        (across-wind ``LineString``), ``transect_id``, ``distance_m``,
+        ``flux_kg_s``, ``n_pixels``.
+
+    Examples:
+        Evaluate fluxes at 100 m, 200 m, 300 m downwind::
+
+            gdf = gz.plume.CrossSectionalFlux(
+                plume_mask=mask, source=(x0, y0),
+                wind_u=3.0, wind_v=1.0,
+                n_transects=3, transect_spacing_m=100.0,
+            )(kg_m2)
+    """
 
     def __init__(
         self,
@@ -455,7 +667,22 @@ class CrossSectionalFlux(Operator):
 
 
 class ColumnToMass(Operator):
-    """Convert column enhancement units to mass density or related units."""
+    """Convert column enhancement units (ppm m / mol m^-2 / kg m^-2).
+
+    Thin wrapper over :func:`convert_column_units`. The ppm m conversion
+    assumes a standard molar volume (298.15 K, 1 atm); see that
+    function's docstring for the exact relation and caveats.
+
+    Args:
+        gas: ``"CH4"`` (default) or ``"CO2"``.
+        units_in: Units of the input carrier.
+        units_out: Desired output units.
+
+    Examples:
+        >>> kg_m2 = gz.plume.ColumnToMass(
+        ...     gas="CH4", units_in="ppm_m", units_out="kg_m2",
+        ... )(enhancement)
+    """
 
     def __init__(
         self,

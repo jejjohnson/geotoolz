@@ -1,4 +1,17 @@
-"""Pure-numpy plume detection and quantification primitives."""
+"""Pure-numpy plume detection and quantification primitives.
+
+This module hosts the Tier-A primitives (Google-style docstrings, no
+``GeoTensor``) that the Tier-B operators in ``operators.py`` wrap.
+Algorithms and unit conventions follow the trace-gas plume literature
+referenced per-function:
+
+- Varon et al. (2018), AMT — Integrated Mass Enhancement (IME) method.
+- Varon et al. (2021), RSE — Sentinel-2 SWIR single-band methane retrieval.
+- Frankenberg et al. (2016), PNAS — airborne CH4 plume detection.
+- Thompson et al. (2015), AMT — matched-filter CH4 retrieval.
+- Foote et al. (2020), TGRS — fast matched-filter for CH4.
+- Ehret et al. (2022), TGRS — S2 multi-band methane retrieval.
+"""
 
 from __future__ import annotations
 
@@ -14,10 +27,14 @@ ThresholdMode = float | int | str
 Connectivity = Literal[4, 8]
 ColumnUnit = Literal["ppm_m", "mol_m2", "kg_m2"]
 
+# Molar masses (kg/mol) for supported trace gases.
 MOLAR_MASS_KG_PER_MOL = {
     "CH4": 0.01604,
     "CO2": 0.04401,
 }
+# Standard molar volume of an ideal gas at 298.15 K, 1 atm (m^3/mol).
+# Used only by ``convert_column_units`` to translate ppm m (mixing ratio
+# integrated along path) into mol/m^2 for typical near-surface conditions.
 STANDARD_MOLAR_VOLUME_M3_PER_MOL = 0.024465
 
 
@@ -95,7 +112,13 @@ def label_components(
     min_area: int = 1,
     connectivity: Connectivity = 8,
 ) -> np.ndarray:
-    """Label connected True regions and remove components below min_area."""
+    """Label connected True regions and drop components below ``min_area``.
+
+    Uses :func:`scipy.ndimage.label` for the connectivity, then renumbers
+    the surviving components contiguously (1..K) without a second
+    labelling pass — dropping pixels from a labelled image cannot merge
+    distinct components.
+    """
     if min_area < 1:
         raise ValueError("min_area must be >= 1")
     labels, n_labels = ndimage.label(
@@ -107,11 +130,11 @@ def label_components(
     counts = np.bincount(labels.ravel())
     keep = counts >= min_area
     keep[0] = False
-    filtered = np.where(keep[labels], labels, 0)
-    relabelled, _ = ndimage.label(
-        filtered > 0, structure=connectivity_structure(connectivity)
-    )
-    return relabelled.astype(np.int32, copy=False)
+    # Build a 0..K renumbering LUT so labels remain contiguous after
+    # dropping small components.
+    lut = np.zeros_like(counts, dtype=np.int32)
+    lut[keep] = np.arange(1, int(keep.sum()) + 1, dtype=np.int32)
+    return lut[labels]
 
 
 def plume_mask(
@@ -184,12 +207,25 @@ def convert_column_units(
     units_in: ColumnUnit = "ppm_m",
     units_out: ColumnUnit = "kg_m2",
 ) -> np.ndarray:
-    """Convert column enhancement among ppm m, mol/m2, and kg/m2.
+    r"""Convert column enhancement among ppm m, mol/m^2, and kg/m^2.
 
-    The ppm m conversion assumes the standard molar volume constant
-    0.024465 m3/mol, approximately 25 degrees C and 1 atm. Use ``mol_m2`` or
-    ``kg_m2`` inputs when retrieval-specific pressure and temperature
-    corrections have already been applied upstream.
+    The conversions are
+
+    .. math::
+
+        \Omega_{\mathrm{mol/m^2}} \;=\; \frac{X \cdot 10^{-6}}{V_m}, \qquad
+        \Omega_{\mathrm{kg/m^2}}  \;=\; M_{\mathrm{gas}}
+                                        \cdot \Omega_{\mathrm{mol/m^2}}
+
+    where ``X`` is the column-integrated volume mixing ratio in ppm m,
+    :math:`V_m = 0.024465` m^3/mol is the standard molar volume of an
+    ideal gas at 298.15 K and 1 atm, and :math:`M_{\mathrm{gas}}` is the
+    molar mass (CH4: 0.01604 kg/mol; CO2: 0.04401 kg/mol).
+
+    The ppm m branch therefore assumes near-surface conditions. Pass
+    ``mol_m2`` or ``kg_m2`` inputs when retrieval-specific pressure and
+    temperature corrections have already been applied upstream (e.g. by
+    a matched-filter retrieval per Thompson 2015 / Foote 2020).
     """
     gas_key = gas.upper()
     if gas_key not in MOLAR_MASS_KG_PER_MOL:
@@ -223,7 +259,21 @@ def plume_length(
     *,
     method: Literal["max_axis", "convex_hull", "skeleton"] = "max_axis",
 ) -> float:
-    """Estimate plume length from active pixel centers."""
+    """Estimate plume length ``L`` from active pixel centers.
+
+    ``L`` is the effective length used by Varon et al. (2018) in the IME
+    method ``Q = U_eff * IME / L``. Three estimators are supported:
+
+    - ``"max_axis"``: maximum pairwise distance between active pixels.
+      Fast and robust; matches the original Varon 2018 definition for
+      reasonably linear plumes.
+    - ``"convex_hull"``: max diameter of the convex hull of the active
+      pixels. For degenerate hulls (single point, collinear points) we
+      fall back to the point-set diameter so the result is always well
+      defined.
+    - ``"skeleton"``: longest 4-connected pixel path through the plume,
+      better for curved plumes where the chord underestimates ``L``.
+    """
     active = np.asarray(mask, dtype=bool)
     if not active.any():
         return 0.0
@@ -237,9 +287,15 @@ def plume_length(
         return float(np.sqrt(np.max(np.sum(diff**2, axis=-1))))
     if method == "convex_hull":
         hull = MultiPoint(points).convex_hull
-        coords = np.asarray(
-            hull.exterior.coords if hasattr(hull, "exterior") else points
-        )
+        # For polygonal hulls use the exterior ring; for degenerate
+        # hulls (Point, LineString) shapely exposes ``.coords`` instead.
+        exterior = getattr(hull, "exterior", None)
+        if exterior is not None:
+            coords = np.asarray(exterior.coords)
+        elif hasattr(hull, "coords"):
+            coords = np.asarray(hull.coords)
+        else:
+            coords = points
         diff = coords[:, None, :] - coords[None, :, :]
         return float(np.sqrt(np.max(np.sum(diff**2, axis=-1))))
     if method == "skeleton":
