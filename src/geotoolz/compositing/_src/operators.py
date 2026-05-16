@@ -109,7 +109,7 @@ def _score_array(value: Any, spatial_shape: tuple[int, int]) -> np.ndarray:
     )
 
 
-def _normalise_positive(stack: np.ndarray) -> np.ndarray:
+def _normalize_positive(stack: np.ndarray) -> np.ndarray:
     """Normalize by the maximum finite positive value, or return zeros."""
     max_value = np.nanmax(stack)
     if not np.isfinite(max_value) or max_value <= 0:
@@ -340,7 +340,7 @@ class BAPComposite(Operator):
 
         cloud_distance_stack = np.stack(cloud_distance_scores, axis=0)
         if all(raw_cloud_distance):
-            cloud_distance_stack = _normalise_positive(cloud_distance_stack)
+            cloud_distance_stack = _normalize_positive(cloud_distance_stack)
         score_stack = (
             self.w_view_angle * np.stack(view_scores, axis=0)
             + self.w_recency * np.stack(recency_scores, axis=0)

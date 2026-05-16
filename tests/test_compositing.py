@@ -30,8 +30,16 @@ def _gt(values: np.ndarray, *, transform: rasterio.Affine | None = None) -> GeoT
 
 
 def test_compositing_namespace_is_available() -> None:
+    assert gz.compositing.BAPComposite is BAPComposite
+    assert gz.compositing.CloudFreeComposite is CloudFreeComposite
+    assert gz.compositing.MaxNDVIComposite is MaxNDVIComposite
     assert gz.compositing.MedianComposite is MedianComposite
+    assert gz.compositing.MinCloudComposite is MinCloudComposite
+    assert gz.BAPComposite is BAPComposite
+    assert gz.CloudFreeComposite is CloudFreeComposite
+    assert gz.MaxNDVIComposite is MaxNDVIComposite
     assert gz.MedianComposite is MedianComposite
+    assert gz.MinCloudComposite is MinCloudComposite
 
 
 def test_median_composite_ignores_nan_and_returns_count() -> None:
