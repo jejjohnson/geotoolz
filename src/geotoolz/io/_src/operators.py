@@ -579,7 +579,7 @@ class LoadFromEE(SourceOperator):
                 "LoadFromEE requires georeader's Earth Engine dependencies."
             ) from exc
 
-        xmin, _ymin, _xmax, ymax = self.bounds
+        xmin, ymax = self.bounds[0], self.bounds[3]
         transform: Affine = Affine(self.scale, 0.0, xmin, 0.0, -self.scale, ymax)
         try:
             return export_image(

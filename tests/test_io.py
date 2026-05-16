@@ -25,7 +25,7 @@ def _sample_geotensor() -> GeoTensor:
     )
 
 
-def _large_geotensor() -> GeoTensor:
+def _cog_test_geotensor() -> GeoTensor:
     values = np.arange(64 * 64, dtype=np.int16).reshape(1, 64, 64)
     transform = from_origin(100.0, 740.0, 10.0, 10.0)
     return GeoTensor(
@@ -159,7 +159,7 @@ def test_reprojecting_readers_match_reference_grid(tmp_path) -> None:
 
 
 def test_write_cog_writes_readable_cog(tmp_path) -> None:
-    gt = _large_geotensor()
+    gt = _cog_test_geotensor()
     path = tmp_path / "sample_cog.tif"
 
     assert io.WriteCOG(path=path, compress="deflate")(gt) is None
