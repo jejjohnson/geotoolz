@@ -323,6 +323,81 @@ def test_band_name_resolution_missing_name_raises() -> None:
         NDVI(red="B04", nir="B03")(gt)
 
 
+def test_band_name_resolution_falls_back_to_band_names() -> None:
+    """``descriptions`` may be present but missing the desired band — the
+    resolver should fall through to ``band_names`` rather than raise."""
+    rng = np.random.default_rng(5)
+    arr = rng.uniform(0.05, 0.6, size=(4, 4, 4)).astype(np.float32)
+    gt = _toy_geotensor(arr)
+    # ``descriptions`` has a different vocabulary than the caller is using;
+    # ``band_names`` carries the names the caller expects.
+    gt.attrs["descriptions"] = ("B02", "B03", "B04", "B08")
+    gt.attrs["band_names"] = ("blue", "green", "red", "nir")
+
+    via_names = NDVI(red="red", nir="nir", eps=0.0)(gt)
+    via_indices = NDVI(red_idx=2, nir_idx=3, eps=0.0)(gt)
+    np.testing.assert_allclose(np.asarray(via_names), np.asarray(via_indices))
+
+
+def test_band_name_resolution_descriptions_takes_precedence() -> None:
+    """When the name resolves in both ``descriptions`` and ``band_names``
+    at different positions, ``descriptions`` wins (it's first in the
+    lookup order)."""
+    rng = np.random.default_rng(6)
+    arr = rng.uniform(0.05, 0.6, size=(4, 4, 4)).astype(np.float32)
+    gt = _toy_geotensor(arr)
+    # Same name "X" sits at index 0 in `descriptions` and index 3 in
+    # `band_names`. The resolver should pick descriptions -> 0.
+    gt.attrs["descriptions"] = ("X", "_", "_", "_")
+    gt.attrs["band_names"] = ("_", "_", "_", "X")
+
+    out = NDVI(red="X", nir_idx=3)(gt)
+    expected = NDVI(red_idx=0, nir_idx=3)(gt)
+    np.testing.assert_allclose(np.asarray(out), np.asarray(expected))
+
+
+def test_band_name_resolution_skips_none_and_non_iterable_keys() -> None:
+    """Missing / ``None`` / non-iterable attribute values should be
+    skipped silently and fall through to the next key."""
+    arr = np.ones((4, 2, 2), dtype=np.float32)
+    gt = _toy_geotensor(arr)
+    gt.attrs["descriptions"] = None  # explicitly null
+    gt.attrs["band_names"] = ("B02", "B03", "B04", "B08")
+
+    out = NDVI(red="B04", nir="B08", eps=0.0)(gt)
+    assert isinstance(out, GeoTensor)
+
+
+def test_bais2_default_uses_sentinel2_named_bands() -> None:
+    """BAIS2 with named-band resolution recovers the same result as
+    explicit-index BAIS2 on a stack with descriptions tagged."""
+    rng = np.random.default_rng(8)
+    arr = rng.uniform(0.05, 0.6, size=(10, 4, 4)).astype(np.float32)
+    gt = _toy_geotensor(arr)
+    gt.attrs["descriptions"] = (
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B8A",
+        "B11",
+        "B12",
+    )
+
+    via_names = BAIS2(
+        red="B04",
+        red_edge1="B06",
+        red_edge2="B07",
+        nir="B8A",
+        swir2="B12",
+    )(gt)
+    via_indices = BAIS2()(gt)  # default S2-stack indices
+    np.testing.assert_allclose(np.asarray(via_names), np.asarray(via_indices))
+
+
 def test_ciri_default_uses_sentinel2_b10_position() -> None:
     arr = np.arange(10, dtype=np.float32).reshape(10, 1, 1)
     gt = _toy_geotensor(arr)
@@ -383,6 +458,20 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
         SAVI(nir_idx=7, red_idx=3, L=0.3),
         EVI(nir_idx=7, red_idx=3, blue_idx=1, G=2.5, C1=6.0, C2=7.5, L=1.0),
         NormalizedDifference(a_idx=4, b_idx=2, axis=0, eps=1e-9),
+        EVI2(nir_idx=7, red_idx=3),
+        ARVI(blue_idx=1, red_idx=3, nir_idx=7, gamma=1.0),
+        GCI(green_idx=2, nir_idx=7),
+        kNDVI(nir_idx=7, red_idx=3),
+        MNDWI(green_idx=2, swir_idx=10),
+        NDMI(nir_idx=7, swir1_idx=10),
+        NDSI(green_idx=2, swir_idx=10),
+        NBR2(swir1_idx=10, swir2_idx=11),
+        BAIS2(),
+        BSI(blue_idx=1, red_idx=3, nir_idx=7, swir_idx=10),
+        IronOxide(red_idx=3, blue_idx=1),
+        ClayMinerals(swir1_idx=10, swir2_idx=11),
+        CIRI(cirrus_idx=9),
+        dNBR(),
     ],
 )
 def test_indices_hydra_zen_roundtrip(op: object) -> None:
@@ -390,6 +479,16 @@ def test_indices_hydra_zen_roundtrip(op: object) -> None:
     restored = hydra_zen.instantiate(cfg)
     assert type(restored) is type(op)
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+def test_dnbr_get_config_is_empty_and_jsonable() -> None:
+    """dNBR has no constructor parameters but should still emit a
+    JSON-safe (empty) config so hydra-zen round-trips work."""
+    import json
+
+    cfg = dNBR().get_config()
+    assert cfg == {}
+    assert json.dumps(cfg) == "{}"
 
 
 def test_append_index_get_config_is_jsonable() -> None:
