@@ -20,17 +20,44 @@ import rasterio
 from georeader.geotensor import GeoTensor
 
 from geotoolz.indices import (
+    ARVI,
+    BAIS2,
+    BSI,
+    CIRI,
     EVI,
+    EVI2,
+    GCI,
+    MNDWI,
     NBR,
+    NBR2,
     NDBI,
+    NDMI,
+    NDSI,
     NDVI,
     NDWI,
     SAVI,
     AppendIndex,
+    ClayMinerals,
+    IronOxide,
     NormalizedDifference,
+    arvi,
+    bais2,
+    bsi,
+    ciri,
+    clay_minerals,
+    dNBR,
     evi,
+    evi2,
+    gci,
+    iron_oxide,
+    kNDVI,
+    kndvi,
+    mndwi,
     nbr,
+    nbr2,
     ndbi,
+    ndmi,
+    ndsi,
     ndvi,
     ndwi_mcfeeters,
     normalized_difference,
@@ -157,6 +184,54 @@ def test_ndwi_ndbi_nbr_match_normalized_difference() -> None:
     )
 
 
+def test_additional_indices_match_hand_computed() -> None:
+    arr = np.array(
+        [
+            [[0.05]],  # B
+            [[0.10]],  # G
+            [[0.20]],  # R
+            [[0.60]],  # NIR
+            [[0.30]],  # RE1
+            [[0.40]],  # RE2 / SWIR1
+            [[0.35]],  # SWIR2
+        ],
+        dtype=np.float32,
+    )
+    np.testing.assert_allclose(
+        evi2(arr, 3, 2, eps=0.0), [[2.5 * 0.4 / 2.08]], rtol=1e-6
+    )
+    np.testing.assert_allclose(arvi(arr, 3, 2, 0, eps=0.0), [[0.25 / 0.95]])
+    np.testing.assert_allclose(gci(arr, 3, 1, eps=0.0), [[5.0]])
+    np.testing.assert_allclose(
+        kndvi(arr, 3, 2, eps=0.0), np.tanh([[0.5**2]]), rtol=1e-6
+    )
+    np.testing.assert_allclose(
+        mndwi(arr, 1, 5, eps=0.0),
+        normalized_difference(arr, 1, 5, eps=0.0),
+    )
+    np.testing.assert_allclose(
+        ndmi(arr, 3, 5, eps=0.0),
+        normalized_difference(arr, 3, 5, eps=0.0),
+    )
+    np.testing.assert_allclose(
+        ndsi(arr, 1, 5, eps=0.0),
+        normalized_difference(arr, 1, 5, eps=0.0),
+    )
+    np.testing.assert_allclose(
+        nbr2(arr, 5, 6, eps=0.0),
+        normalized_difference(arr, 5, 6, eps=0.0),
+    )
+    np.testing.assert_allclose(
+        bsi(arr, 0, 2, 3, 5, eps=0.0),
+        [[((0.4 + 0.2) - (0.6 + 0.05)) / ((0.4 + 0.2) + (0.6 + 0.05))]],
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(iron_oxide(arr, 2, 0, eps=0.0), [[4.0]])
+    np.testing.assert_allclose(clay_minerals(arr, 5, 6, eps=0.0), [[0.4 / 0.35]])
+    np.testing.assert_allclose(ciri(arr, 6), [[0.35]])
+    assert np.isfinite(bais2(arr, 2, 4, 5, 3, 6)).all()
+
+
 def test_savi_l0_equals_ndvi() -> None:
     rng = np.random.default_rng(7)
     arr = rng.uniform(0.05, 0.6, size=(4, 5, 5)).astype(np.float32)
@@ -195,18 +270,70 @@ def test_normalized_difference_op_matches_named_subclass(
 def test_all_indices_run_without_crashing(reflectance_7band: GeoTensor) -> None:
     """Smoke test every Operator's _apply path."""
     for op in [
+        ARVI(),
+        BAIS2(red_idx=2, red_edge1_idx=4, red_edge2_idx=5, nir_idx=3, swir2_idx=6),
+        BSI(),
+        ClayMinerals(),
+        EVI2(),
         NDVI(),
         NDWI(),
+        GCI(),
+        IronOxide(),
+        kNDVI(),
+        MNDWI(),
         NDBI(),
+        NDMI(),
+        NDSI(),
         NBR(),
+        NBR2(),
         SAVI(),
         EVI(),
+        CIRI(cirrus_idx=6),
         NormalizedDifference(a_idx=3, b_idx=2),
     ]:
         out = op(reflectance_7band)
         assert isinstance(out, GeoTensor)
         assert out.shape == (8, 8)
         assert out.transform == reflectance_7band.transform
+
+
+def test_band_name_resolution_uses_geotensor_descriptions() -> None:
+    rng = np.random.default_rng(2)
+    arr = rng.uniform(0.05, 0.6, size=(4, 5, 5)).astype(np.float32)
+    gt = _toy_geotensor(arr)
+    gt.attrs["descriptions"] = ("B02", "B03", "B04", "B08")
+
+    via_names = NDVI(red="B04", nir="B08", eps=0.0)(gt)
+    via_indices = NDVI(red_idx=2, nir_idx=3, eps=0.0)(gt)
+
+    np.testing.assert_allclose(np.asarray(via_names), np.asarray(via_indices))
+
+
+def test_band_name_resolution_missing_name_raises() -> None:
+    gt = _toy_geotensor(np.ones((2, 2, 2), dtype=np.float32))
+    gt.attrs["descriptions"] = ("B02", "B03")
+
+    with pytest.raises(ValueError, match="Band 'B04' was not found"):
+        NDVI(red="B04", nir="B03")(gt)
+
+
+def test_dnbr_subtracts_matching_geotensors() -> None:
+    pre = _toy_geotensor(np.full((3, 3), 0.7, dtype=np.float32))
+    post = _toy_geotensor(np.full((3, 3), 0.2, dtype=np.float32))
+
+    out = dNBR()(pre, post)
+
+    np.testing.assert_allclose(np.asarray(out), 0.5)
+    assert out.transform == pre.transform
+    assert out.crs == pre.crs
+
+
+def test_dnbr_raises_on_grid_mismatch() -> None:
+    pre = _toy_geotensor(np.ones((3, 3), dtype=np.float32))
+    post = _toy_geotensor(np.ones((4, 4), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="share shape, transform, and CRS"):
+        dNBR()(pre, post)
 
 
 def test_append_index_concatenates_back(reflectance_4band: GeoTensor) -> None:

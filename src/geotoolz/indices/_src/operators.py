@@ -29,9 +29,22 @@ import numpy as np
 
 from geotoolz.core import Operator
 from geotoolz.indices._src.array import (
+    arvi,
+    bais2,
+    bsi,
+    ciri,
+    clay_minerals,
     evi,
+    evi2,
+    gci,
+    iron_oxide,
+    kndvi,
+    mndwi,
     nbr,
+    nbr2,
     ndbi,
+    ndmi,
+    ndsi,
     ndvi,
     ndwi_mcfeeters,
     normalized_difference,
@@ -41,6 +54,41 @@ from geotoolz.indices._src.array import (
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
+
+
+BandRef = int | str
+
+
+def _resolve_band(gt: GeoTensor, ref: BandRef) -> int:
+    if isinstance(ref, int):
+        return ref
+
+    for key in ("descriptions", "band_names", "bands"):
+        names = gt.attrs.get(key)
+        if names is not None:
+            try:
+                return list(names).index(ref)
+            except ValueError:
+                continue
+
+    raise ValueError(
+        f"Band {ref!r} was not found in GeoTensor attrs['descriptions'], "
+        "attrs['band_names'], or attrs['bands']."
+    )
+
+
+def _configured_ref(value: BandRef | None, fallback: BandRef | None) -> BandRef:
+    if value is not None:
+        return value
+    if fallback is None:
+        raise ValueError("A band reference is required.")
+    return fallback
+
+
+def _geotensor_grid_matches(a: GeoTensor, b: GeoTensor) -> bool:
+    return (
+        a.shape[-2:] == b.shape[-2:] and a.transform == b.transform and a.crs == b.crs
+    )
 
 
 class NormalizedDifference(Operator):
@@ -66,19 +114,25 @@ class NormalizedDifference(Operator):
     def __init__(
         self,
         *,
-        a_idx: int,
-        b_idx: int,
+        a: BandRef | None = None,
+        b: BandRef | None = None,
+        a_idx: int | None = None,
+        b_idx: int | None = None,
         axis: int = 0,
         eps: float = 1e-10,
     ) -> None:
-        self.a_idx = a_idx
-        self.b_idx = b_idx
+        self.a_idx = _configured_ref(a, a_idx)
+        self.b_idx = _configured_ref(b, b_idx)
         self.axis = axis
         self.eps = eps
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         out = normalized_difference(
-            np.asarray(gt), self.a_idx, self.b_idx, axis=self.axis, eps=self.eps
+            np.asarray(gt),
+            _resolve_band(gt, self.a_idx),
+            _resolve_band(gt, self.b_idx),
+            axis=self.axis,
+            eps=self.eps,
         )
         return gt.array_as_geotensor(out)
 
@@ -132,19 +186,25 @@ class NDVI(Operator):
     def __init__(
         self,
         *,
-        nir_idx: int = 3,
-        red_idx: int = 2,
+        red: BandRef | None = None,
+        nir: BandRef | None = None,
+        nir_idx: int | None = 3,
+        red_idx: int | None = 2,
         axis: int = 0,
         eps: float = 1e-10,
     ) -> None:
-        self.nir_idx = nir_idx
-        self.red_idx = red_idx
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.red_idx = _configured_ref(red, red_idx)
         self.axis = axis
         self.eps = eps
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         out = ndvi(
-            np.asarray(gt), self.nir_idx, self.red_idx, axis=self.axis, eps=self.eps
+            np.asarray(gt),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.red_idx),
+            axis=self.axis,
+            eps=self.eps,
         )
         return gt.array_as_geotensor(out)
 
@@ -186,19 +246,25 @@ class NDWI(Operator):
     def __init__(
         self,
         *,
-        green_idx: int = 1,
-        nir_idx: int = 3,
+        green: BandRef | None = None,
+        nir: BandRef | None = None,
+        green_idx: int | None = 1,
+        nir_idx: int | None = 3,
         axis: int = 0,
         eps: float = 1e-10,
     ) -> None:
-        self.green_idx = green_idx
-        self.nir_idx = nir_idx
+        self.green_idx = _configured_ref(green, green_idx)
+        self.nir_idx = _configured_ref(nir, nir_idx)
         self.axis = axis
         self.eps = eps
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         out = ndwi_mcfeeters(
-            np.asarray(gt), self.green_idx, self.nir_idx, axis=self.axis, eps=self.eps
+            np.asarray(gt),
+            _resolve_band(gt, self.green_idx),
+            _resolve_band(gt, self.nir_idx),
+            axis=self.axis,
+            eps=self.eps,
         )
         return gt.array_as_geotensor(out)
 
@@ -245,19 +311,25 @@ class NDBI(Operator):
     def __init__(
         self,
         *,
-        swir_idx: int = 5,
-        nir_idx: int = 3,
+        swir: BandRef | None = None,
+        nir: BandRef | None = None,
+        swir_idx: int | None = 5,
+        nir_idx: int | None = 3,
         axis: int = 0,
         eps: float = 1e-10,
     ) -> None:
-        self.swir_idx = swir_idx
-        self.nir_idx = nir_idx
+        self.swir_idx = _configured_ref(swir, swir_idx)
+        self.nir_idx = _configured_ref(nir, nir_idx)
         self.axis = axis
         self.eps = eps
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         out = ndbi(
-            np.asarray(gt), self.swir_idx, self.nir_idx, axis=self.axis, eps=self.eps
+            np.asarray(gt),
+            _resolve_band(gt, self.swir_idx),
+            _resolve_band(gt, self.nir_idx),
+            axis=self.axis,
+            eps=self.eps,
         )
         return gt.array_as_geotensor(out)
 
@@ -304,19 +376,25 @@ class NBR(Operator):
     def __init__(
         self,
         *,
-        nir_idx: int = 3,
-        swir2_idx: int = 6,
+        nir: BandRef | None = None,
+        swir2: BandRef | None = None,
+        nir_idx: int | None = 3,
+        swir2_idx: int | None = 6,
         axis: int = 0,
         eps: float = 1e-10,
     ) -> None:
-        self.nir_idx = nir_idx
-        self.swir2_idx = swir2_idx
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.swir2_idx = _configured_ref(swir2, swir2_idx)
         self.axis = axis
         self.eps = eps
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         out = nbr(
-            np.asarray(gt), self.nir_idx, self.swir2_idx, axis=self.axis, eps=self.eps
+            np.asarray(gt),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.swir2_idx),
+            axis=self.axis,
+            eps=self.eps,
         )
         return gt.array_as_geotensor(out)
 
@@ -364,18 +442,29 @@ class SAVI(Operator):
     def __init__(
         self,
         *,
-        nir_idx: int = 3,
-        red_idx: int = 2,
+        red: BandRef | None = None,
+        nir: BandRef | None = None,
+        nir_idx: int | None = 3,
+        red_idx: int | None = 2,
         L: float = 0.5,
         axis: int = 0,
+        eps: float = 1e-10,
     ) -> None:
-        self.nir_idx = nir_idx
-        self.red_idx = red_idx
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.red_idx = _configured_ref(red, red_idx)
         self.L = L
         self.axis = axis
+        self.eps = eps
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        out = savi(np.asarray(gt), self.nir_idx, self.red_idx, L=self.L, axis=self.axis)
+        out = savi(
+            np.asarray(gt),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.red_idx),
+            L=self.L,
+            axis=self.axis,
+            eps=self.eps,
+        )
         return gt.array_as_geotensor(out)
 
     def get_config(self) -> dict[str, Any]:
@@ -384,6 +473,7 @@ class SAVI(Operator):
             "red_idx": self.red_idx,
             "L": self.L,
             "axis": self.axis,
+            "eps": self.eps,
         }
 
 
@@ -426,35 +516,41 @@ class EVI(Operator):
     def __init__(
         self,
         *,
-        nir_idx: int = 3,
-        red_idx: int = 2,
-        blue_idx: int = 0,
+        blue: BandRef | None = None,
+        red: BandRef | None = None,
+        nir: BandRef | None = None,
+        nir_idx: int | None = 3,
+        red_idx: int | None = 2,
+        blue_idx: int | None = 0,
         G: float = 2.5,
         C1: float = 6.0,
         C2: float = 7.5,
         L: float = 1.0,
         axis: int = 0,
+        eps: float = 1e-10,
     ) -> None:
-        self.nir_idx = nir_idx
-        self.red_idx = red_idx
-        self.blue_idx = blue_idx
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.red_idx = _configured_ref(red, red_idx)
+        self.blue_idx = _configured_ref(blue, blue_idx)
         self.G = G
         self.C1 = C1
         self.C2 = C2
         self.L = L
         self.axis = axis
+        self.eps = eps
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         out = evi(
             np.asarray(gt),
-            self.nir_idx,
-            self.red_idx,
-            self.blue_idx,
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.red_idx),
+            _resolve_band(gt, self.blue_idx),
             G=self.G,
             C1=self.C1,
             C2=self.C2,
             L=self.L,
             axis=self.axis,
+            eps=self.eps,
         )
         return gt.array_as_geotensor(out)
 
@@ -468,7 +564,516 @@ class EVI(Operator):
             "C2": self.C2,
             "L": self.L,
             "axis": self.axis,
+            "eps": self.eps,
         }
+
+
+class EVI2(Operator):
+    """Two-band Enhanced Vegetation Index."""
+
+    def __init__(
+        self,
+        *,
+        red: BandRef | None = None,
+        nir: BandRef | None = None,
+        red_idx: int | None = 2,
+        nir_idx: int | None = 3,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.red_idx = _configured_ref(red, red_idx)
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = evi2(
+            np.asarray(gt),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.red_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "red_idx": self.red_idx,
+            "nir_idx": self.nir_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class ARVI(Operator):
+    """Atmospherically Resistant Vegetation Index."""
+
+    def __init__(
+        self,
+        *,
+        blue: BandRef | None = None,
+        red: BandRef | None = None,
+        nir: BandRef | None = None,
+        blue_idx: int | None = 0,
+        red_idx: int | None = 2,
+        nir_idx: int | None = 3,
+        gamma: float = 1.0,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.blue_idx = _configured_ref(blue, blue_idx)
+        self.red_idx = _configured_ref(red, red_idx)
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.gamma = gamma
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = arvi(
+            np.asarray(gt),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.red_idx),
+            _resolve_band(gt, self.blue_idx),
+            gamma=self.gamma,
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "blue_idx": self.blue_idx,
+            "red_idx": self.red_idx,
+            "nir_idx": self.nir_idx,
+            "gamma": self.gamma,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class GCI(Operator):
+    """Green Chlorophyll Index."""
+
+    def __init__(
+        self,
+        *,
+        green: BandRef | None = None,
+        nir: BandRef | None = None,
+        green_idx: int | None = 1,
+        nir_idx: int | None = 3,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.green_idx = _configured_ref(green, green_idx)
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = gci(
+            np.asarray(gt),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.green_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "green_idx": self.green_idx,
+            "nir_idx": self.nir_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class kNDVI(Operator):
+    """Kernel NDVI (Camps-Valls et al. 2021)."""
+
+    def __init__(
+        self,
+        *,
+        red: BandRef | None = None,
+        nir: BandRef | None = None,
+        red_idx: int | None = 2,
+        nir_idx: int | None = 3,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.red_idx = _configured_ref(red, red_idx)
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = kndvi(
+            np.asarray(gt),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.red_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "red_idx": self.red_idx,
+            "nir_idx": self.nir_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class MNDWI(Operator):
+    """Modified Normalized Difference Water Index."""
+
+    def __init__(
+        self,
+        *,
+        green: BandRef | None = None,
+        swir: BandRef | None = None,
+        green_idx: int | None = 1,
+        swir_idx: int | None = 5,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.green_idx = _configured_ref(green, green_idx)
+        self.swir_idx = _configured_ref(swir, swir_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = mndwi(
+            np.asarray(gt),
+            _resolve_band(gt, self.green_idx),
+            _resolve_band(gt, self.swir_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "green_idx": self.green_idx,
+            "swir_idx": self.swir_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class NDMI(Operator):
+    """Normalized Difference Moisture Index."""
+
+    def __init__(
+        self,
+        *,
+        nir: BandRef | None = None,
+        swir1: BandRef | None = None,
+        nir_idx: int | None = 3,
+        swir1_idx: int | None = 5,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.swir1_idx = _configured_ref(swir1, swir1_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = ndmi(
+            np.asarray(gt),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.swir1_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "nir_idx": self.nir_idx,
+            "swir1_idx": self.swir1_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class NDSI(Operator):
+    """Normalized Difference Snow Index."""
+
+    def __init__(
+        self,
+        *,
+        green: BandRef | None = None,
+        swir: BandRef | None = None,
+        green_idx: int | None = 1,
+        swir_idx: int | None = 5,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.green_idx = _configured_ref(green, green_idx)
+        self.swir_idx = _configured_ref(swir, swir_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = ndsi(
+            np.asarray(gt),
+            _resolve_band(gt, self.green_idx),
+            _resolve_band(gt, self.swir_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "green_idx": self.green_idx,
+            "swir_idx": self.swir_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class NBR2(Operator):
+    """Normalized Burn Ratio 2."""
+
+    def __init__(
+        self,
+        *,
+        swir1: BandRef | None = None,
+        swir2: BandRef | None = None,
+        swir1_idx: int | None = 5,
+        swir2_idx: int | None = 6,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.swir1_idx = _configured_ref(swir1, swir1_idx)
+        self.swir2_idx = _configured_ref(swir2, swir2_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = nbr2(
+            np.asarray(gt),
+            _resolve_band(gt, self.swir1_idx),
+            _resolve_band(gt, self.swir2_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "swir1_idx": self.swir1_idx,
+            "swir2_idx": self.swir2_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class BAIS2(Operator):
+    """Burned Area Index for Sentinel-2."""
+
+    def __init__(
+        self,
+        *,
+        red: BandRef | None = None,
+        red_edge1: BandRef | None = None,
+        red_edge2: BandRef | None = None,
+        nir: BandRef | None = None,
+        swir2: BandRef | None = None,
+        red_idx: int | None = 2,
+        red_edge1_idx: int | None = 4,
+        red_edge2_idx: int | None = 5,
+        nir_idx: int | None = 6,
+        swir2_idx: int | None = 9,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.red_idx = _configured_ref(red, red_idx)
+        self.red_edge1_idx = _configured_ref(red_edge1, red_edge1_idx)
+        self.red_edge2_idx = _configured_ref(red_edge2, red_edge2_idx)
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.swir2_idx = _configured_ref(swir2, swir2_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = bais2(
+            np.asarray(gt),
+            _resolve_band(gt, self.red_idx),
+            _resolve_band(gt, self.red_edge1_idx),
+            _resolve_band(gt, self.red_edge2_idx),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.swir2_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "red_idx": self.red_idx,
+            "red_edge1_idx": self.red_edge1_idx,
+            "red_edge2_idx": self.red_edge2_idx,
+            "nir_idx": self.nir_idx,
+            "swir2_idx": self.swir2_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class dNBR(Operator):
+    """Difference of two NBR rasters: ``pre - post``."""
+
+    def _apply(self, pre: GeoTensor, post: GeoTensor) -> GeoTensor:
+        if not _geotensor_grid_matches(pre, post):
+            raise ValueError("dNBR inputs must share shape, transform, and CRS.")
+        return pre.array_as_geotensor(np.asarray(pre) - np.asarray(post))
+
+
+class BSI(Operator):
+    """Bare Soil Index."""
+
+    def __init__(
+        self,
+        *,
+        blue: BandRef | None = None,
+        red: BandRef | None = None,
+        nir: BandRef | None = None,
+        swir: BandRef | None = None,
+        blue_idx: int | None = 0,
+        red_idx: int | None = 2,
+        nir_idx: int | None = 3,
+        swir_idx: int | None = 5,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.blue_idx = _configured_ref(blue, blue_idx)
+        self.red_idx = _configured_ref(red, red_idx)
+        self.nir_idx = _configured_ref(nir, nir_idx)
+        self.swir_idx = _configured_ref(swir, swir_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = bsi(
+            np.asarray(gt),
+            _resolve_band(gt, self.blue_idx),
+            _resolve_band(gt, self.red_idx),
+            _resolve_band(gt, self.nir_idx),
+            _resolve_band(gt, self.swir_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "blue_idx": self.blue_idx,
+            "red_idx": self.red_idx,
+            "nir_idx": self.nir_idx,
+            "swir_idx": self.swir_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class IronOxide(Operator):
+    """Iron oxide ratio."""
+
+    def __init__(
+        self,
+        *,
+        red: BandRef | None = None,
+        blue: BandRef | None = None,
+        red_idx: int | None = 2,
+        blue_idx: int | None = 0,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.red_idx = _configured_ref(red, red_idx)
+        self.blue_idx = _configured_ref(blue, blue_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = iron_oxide(
+            np.asarray(gt),
+            _resolve_band(gt, self.red_idx),
+            _resolve_band(gt, self.blue_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "red_idx": self.red_idx,
+            "blue_idx": self.blue_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class ClayMinerals(Operator):
+    """Clay minerals ratio."""
+
+    def __init__(
+        self,
+        *,
+        swir1: BandRef | None = None,
+        swir2: BandRef | None = None,
+        swir1_idx: int | None = 5,
+        swir2_idx: int | None = 6,
+        axis: int = 0,
+        eps: float = 1e-10,
+    ) -> None:
+        self.swir1_idx = _configured_ref(swir1, swir1_idx)
+        self.swir2_idx = _configured_ref(swir2, swir2_idx)
+        self.axis = axis
+        self.eps = eps
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = clay_minerals(
+            np.asarray(gt),
+            _resolve_band(gt, self.swir1_idx),
+            _resolve_band(gt, self.swir2_idx),
+            axis=self.axis,
+            eps=self.eps,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "swir1_idx": self.swir1_idx,
+            "swir2_idx": self.swir2_idx,
+            "axis": self.axis,
+            "eps": self.eps,
+        }
+
+
+class CIRI(Operator):
+    """Cirrus Reflectance Index."""
+
+    def __init__(
+        self,
+        *,
+        cirrus: BandRef | None = None,
+        cirrus_idx: int | None = 0,
+        axis: int = 0,
+    ) -> None:
+        self.cirrus_idx = _configured_ref(cirrus, cirrus_idx)
+        self.axis = axis
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = ciri(np.asarray(gt), _resolve_band(gt, self.cirrus_idx), axis=self.axis)
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"cirrus_idx": self.cirrus_idx, "axis": self.axis}
 
 
 class AppendIndex(Operator):

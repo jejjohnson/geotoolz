@@ -262,6 +262,7 @@ def savi(
     *,
     L: float = 0.5,
     axis: int = 0,
+    eps: float = 1e-10,
 ) -> np.ndarray:
     r"""Soil-Adjusted Vegetation Index (Huete 1988).
 
@@ -303,7 +304,7 @@ def savi(
     """
     nir = np.take(arr, nir_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
-    return (nir - red) / (nir + red + L) * (1.0 + L)
+    return (nir - red) / (nir + red + L + eps) * (1.0 + L)
 
 
 def evi(
@@ -317,6 +318,7 @@ def evi(
     C2: float = 7.5,
     L: float = 1.0,
     axis: int = 0,
+    eps: float = 1e-10,
 ) -> np.ndarray:
     r"""Enhanced Vegetation Index (Huete et al. 2002).
 
@@ -360,4 +362,188 @@ def evi(
     nir = np.take(arr, nir_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
     blue = np.take(arr, blue_idx, axis=axis)
-    return G * (nir - red) / (nir + C1 * red - C2 * blue + L)
+    return G * (nir - red) / (nir + C1 * red - C2 * blue + L + eps)
+
+
+def evi2(
+    arr: np.ndarray,
+    nir_idx: int,
+    red_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Two-band Enhanced Vegetation Index."""
+    nir = np.take(arr, nir_idx, axis=axis)
+    red = np.take(arr, red_idx, axis=axis)
+    return 2.5 * (nir - red) / (nir + 2.4 * red + 1.0 + eps)
+
+
+def arvi(
+    arr: np.ndarray,
+    nir_idx: int,
+    red_idx: int,
+    blue_idx: int,
+    *,
+    gamma: float = 1.0,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Atmospherically Resistant Vegetation Index."""
+    nir = np.take(arr, nir_idx, axis=axis)
+    red = np.take(arr, red_idx, axis=axis)
+    blue = np.take(arr, blue_idx, axis=axis)
+    rb = red - gamma * (blue - red)
+    return (nir - rb) / (nir + rb + eps)
+
+
+def gci(
+    arr: np.ndarray,
+    nir_idx: int,
+    green_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Green Chlorophyll Index."""
+    nir = np.take(arr, nir_idx, axis=axis)
+    green = np.take(arr, green_idx, axis=axis)
+    return nir / (green + eps) - 1.0
+
+
+def kndvi(
+    arr: np.ndarray,
+    nir_idx: int,
+    red_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Kernel NDVI (Camps-Valls et al. 2021)."""
+    return np.tanh(ndvi(arr, nir_idx, red_idx, axis=axis, eps=eps) ** 2)
+
+
+def mndwi(
+    arr: np.ndarray,
+    green_idx: int,
+    swir_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Modified Normalized Difference Water Index (Xu 2006)."""
+    return normalized_difference(arr, green_idx, swir_idx, axis=axis, eps=eps)
+
+
+def ndmi(
+    arr: np.ndarray,
+    nir_idx: int,
+    swir1_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Normalized Difference Moisture Index."""
+    return normalized_difference(arr, nir_idx, swir1_idx, axis=axis, eps=eps)
+
+
+def ndsi(
+    arr: np.ndarray,
+    green_idx: int,
+    swir_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Normalized Difference Snow Index."""
+    return normalized_difference(arr, green_idx, swir_idx, axis=axis, eps=eps)
+
+
+def nbr2(
+    arr: np.ndarray,
+    swir1_idx: int,
+    swir2_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Normalized Burn Ratio 2."""
+    return normalized_difference(arr, swir1_idx, swir2_idx, axis=axis, eps=eps)
+
+
+def bais2(
+    arr: np.ndarray,
+    red_idx: int,
+    red_edge1_idx: int,
+    red_edge2_idx: int,
+    nir_idx: int,
+    swir2_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Burned Area Index for Sentinel-2."""
+    red = np.take(arr, red_idx, axis=axis)
+    red_edge1 = np.take(arr, red_edge1_idx, axis=axis)
+    red_edge2 = np.take(arr, red_edge2_idx, axis=axis)
+    nir = np.take(arr, nir_idx, axis=axis)
+    swir2 = np.take(arr, swir2_idx, axis=axis)
+    return (1.0 - np.sqrt((red_edge1 * red_edge2 * nir) / (red + eps))) * (
+        (swir2 - nir) / np.sqrt(swir2 + nir + eps) + 1.0
+    )
+
+
+def bsi(
+    arr: np.ndarray,
+    blue_idx: int,
+    red_idx: int,
+    nir_idx: int,
+    swir_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Bare Soil Index."""
+    blue = np.take(arr, blue_idx, axis=axis)
+    red = np.take(arr, red_idx, axis=axis)
+    nir = np.take(arr, nir_idx, axis=axis)
+    swir = np.take(arr, swir_idx, axis=axis)
+    return ((swir + red) - (nir + blue)) / ((swir + red) + (nir + blue) + eps)
+
+
+def iron_oxide(
+    arr: np.ndarray,
+    red_idx: int,
+    blue_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Iron oxide ratio."""
+    red = np.take(arr, red_idx, axis=axis)
+    blue = np.take(arr, blue_idx, axis=axis)
+    return red / (blue + eps)
+
+
+def clay_minerals(
+    arr: np.ndarray,
+    swir1_idx: int,
+    swir2_idx: int,
+    *,
+    axis: int = 0,
+    eps: float = 1e-10,
+) -> np.ndarray:
+    """Clay minerals ratio."""
+    swir1 = np.take(arr, swir1_idx, axis=axis)
+    swir2 = np.take(arr, swir2_idx, axis=axis)
+    return swir1 / (swir2 + eps)
+
+
+def ciri(
+    arr: np.ndarray,
+    cirrus_idx: int,
+    *,
+    axis: int = 0,
+) -> np.ndarray:
+    """Cirrus Reflectance Index."""
+    return np.take(arr, cirrus_idx, axis=axis)
