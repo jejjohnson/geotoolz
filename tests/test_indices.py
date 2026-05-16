@@ -197,9 +197,8 @@ def test_new_spectral_indices_match_expected_formulas() -> None:
         ],
         dtype=np.float32,
     )
-    np.testing.assert_allclose(
-        evi2(arr, 3, 2, eps=0.0), [[2.5 * 0.4 / 2.08]], rtol=1e-6
-    )
+    expected_evi2 = 2.5 * (0.60 - 0.20) / (0.60 + 2.4 * 0.20 + 1.0)
+    np.testing.assert_allclose(evi2(arr, 3, 2, eps=0.0), [[expected_evi2]], rtol=1e-6)
     np.testing.assert_allclose(arvi(arr, 3, 2, 0, eps=0.0), [[0.25 / 0.95]])
     np.testing.assert_allclose(gci(arr, 3, 1, eps=0.0), [[5.0]])
     np.testing.assert_allclose(
@@ -229,6 +228,8 @@ def test_new_spectral_indices_match_expected_formulas() -> None:
     np.testing.assert_allclose(iron_oxide(arr, 2, 0, eps=0.0), [[4.0]])
     np.testing.assert_allclose(clay_minerals(arr, 5, 6, eps=0.0), [[0.4 / 0.35]])
     np.testing.assert_allclose(ciri(arr, 6), [[0.35]])
+    # red_edge1=0.30 (idx 4), red_edge2=0.40 (idx 5), nir=0.60 (idx 3),
+    # red=0.20 (idx 2), swir2=0.35 (idx 6)
     expected_bais2 = (1.0 - np.sqrt((0.30 * 0.40 * 0.60) / 0.20)) * (
         (0.35 - 0.60) / np.sqrt(0.35 + 0.60) + 1.0
     )

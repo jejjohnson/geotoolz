@@ -82,7 +82,10 @@ def _configured_ref(value: BandRef | None, fallback: BandRef | None) -> BandRef:
     if value is not None:
         return value
     if fallback is None:
-        raise ValueError("A band reference is required.")
+        raise ValueError(
+            "A band reference must be provided through the named parameter "
+            "or its *_idx fallback."
+        )
     return fallback
 
 
@@ -1065,8 +1068,9 @@ class ClayMinerals(Operator):
 class CIRI(Operator):
     """Cirrus Reflectance Index.
 
-    The default ``cirrus_idx=9`` matches Sentinel-2 B10 in a full
-    band-number-ordered stack.
+    The default ``cirrus_idx=9`` matches Sentinel-2 B10 in a stack ordered
+    by band number as ``B01, B02, B03, B04, B05, B06, B07, B08, B8A, B10,
+    B11, B12``.
     """
 
     def __init__(
