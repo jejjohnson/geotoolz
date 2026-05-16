@@ -193,9 +193,10 @@ class PhaseAlign(Operator):
         self.apply = apply
 
     def _apply(self, gt: GeoTensor) -> GeoTensor | tuple[float, float, float]:
+        arr = np.asarray(gt)
         shift, error, _phase = phase_cross_correlation(
             _registration_band(np.asarray(self.reference), self.band),
-            _registration_band(np.asarray(gt), self.band),
+            _registration_band(arr, self.band),
             upsample_factor=self.upsample_factor,
         )
         shift_y = float(shift[0])
@@ -203,10 +204,8 @@ class PhaseAlign(Operator):
         if not self.apply:
             return shift_y, shift_x, float(error)
         shifted = ndi_shift(
-            np.asarray(gt),
-            shift=(0.0, shift_y, shift_x)
-            if np.asarray(gt).ndim == 3
-            else (shift_y, shift_x),
+            arr,
+            shift=(0.0, shift_y, shift_x) if arr.ndim == 3 else (shift_y, shift_x),
             order=1,
             mode="nearest",
         )
