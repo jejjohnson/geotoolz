@@ -743,7 +743,7 @@ class BowtieCorrection(Operator):
         method: str = "nearest",
     ) -> None:
         if not 0.0 <= scan_angle_max_deg < 70.0:
-            raise ValueError("scan_angle_max_deg must be in the range [0.0, 70.0).")
+            raise ValueError("scan_angle_max_deg must be >= 0.0 and < 70.0.")
         self.scan_angle_max_deg = scan_angle_max_deg
         self.pixels_per_scan = pixels_per_scan
         self.scans_per_granule = scans_per_granule
@@ -1385,7 +1385,7 @@ def _apply_invalid_fill(
     return out
 
 
-def _longitude_grid(gt: GeoTensor, crs: str | CRS) -> np.ndarray | None:
+def _longitude_grid(gt: GeoTensor, target_crs: str | CRS) -> np.ndarray | None:
     attrs = gt.attrs or {}
     for key in ("lons", "lon", "longitude"):
         if key in attrs:
@@ -1393,7 +1393,7 @@ def _longitude_grid(gt: GeoTensor, crs: str | CRS) -> np.ndarray | None:
             if lons.ndim == 1:
                 return np.broadcast_to(lons[None, :], gt.shape[-2:])
             return lons
-    if CRS.from_user_input(gt.crs) != CRS.from_user_input(crs):
+    if CRS.from_user_input(gt.crs) != CRS.from_user_input(target_crs):
         return None
     centres = _lonlat_centres(gt)
     if centres is None:
@@ -1475,8 +1475,14 @@ def _apparent_lonlat(
     b = 2.0 * np.sum(satellite * direction, axis=0)
     c = np.sum(satellite * satellite, axis=0) - earth_radius_m**2
     discriminant = b * b - 4.0 * a * c
-    if np.any(discriminant < -_RAY_DISCRIMINANT_TOLERANCE):
-        raise ValueError("Parallax ray does not intersect the Earth surface.")
+    misses = discriminant < -_RAY_DISCRIMINANT_TOLERANCE
+    if np.any(misses):
+        miss_count = int(np.count_nonzero(misses))
+        miss_pct = miss_count / misses.size * 100.0
+        raise ValueError(
+            "Parallax ray does not intersect the Earth surface for "
+            f"{miss_count} pixels ({miss_pct:.2f}%)."
+        )
     near = (-b - np.sqrt(np.maximum(discriminant, 0.0))) / (2.0 * a)
     apparent = satellite + direction * near[None, ...]
     apparent_lon = np.rad2deg(np.arctan2(apparent[1], apparent[0]))
