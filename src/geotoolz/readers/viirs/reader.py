@@ -18,7 +18,7 @@ class Reader:
         >>> Reader("scene.h5")  # doctest: +SKIP
     """
 
-    def __init__(self, path: str | Path, **kwargs: object) -> None:
+    def __init__(self, path: str | Path) -> None:
         require_optional_dependency("h5py", extra="viirs")
         raise NotImplementedError(
             "VIIRS reader parsing is sensor-specific future work."

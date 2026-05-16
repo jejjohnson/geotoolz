@@ -47,7 +47,11 @@ class SensorReader(GeoData, ABC):
 
     @abstractmethod
     def _read_window(self, window: Window) -> np.ndarray:
-        """Read a sensor-native pixel window into a numpy array."""
+        """Read a sensor-native pixel window into a numpy array.
+
+        Implementations receive clipped windows when ``boundless=False`` and
+        may receive out-of-bounds windows when ``boundless=True``.
+        """
 
     @property
     @abstractmethod
@@ -106,7 +110,10 @@ class SensorReader(GeoData, ABC):
 
     @property
     def dims(self) -> list[str]:
-        """Dimension names compatible with georeader ``GeoData``."""
+        """Dimension names compatible with georeader ``GeoData``.
+
+        The framework expects 2D single-band or 3D band-first image arrays.
+        """
         return ["band", "y", "x"] if len(self.shape) == 3 else ["y", "x"]
 
     @property

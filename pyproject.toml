@@ -76,8 +76,8 @@ modis = ["pyhdf>=0.10"]
 viirs = ["h5py>=3.0"]
 goes = ["netcdf4>=1.6"]
 mtg = ["netcdf4>=1.6"]
-seviri = [] # No-op until a stable xRIT parser dependency is published.
-himawari = [] # No-op because the HSD parser is expected to stay in-tree.
+seviri = [] # Reserved for a future stable xRIT dependency.
+himawari = [] # In-tree HSD parser planned; no external dependency.
 tropomi = ["netcdf4>=1.6"]
 s3 = ["netcdf4>=1.6"]
 all-sensors = [
