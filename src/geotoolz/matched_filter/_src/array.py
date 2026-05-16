@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Literal
 
 import numpy as np
-from scipy import stats
+from scipy import ndimage, stats
 
 
 MeanMethod = Literal["mean", "median", "trimmed", "huber"]
 CovShrinkageMethod = Literal["ledoit_wolf", "oas"]
+CovMethod = Literal["empirical", "ledoit_wolf", "oas", "lowrank"]
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,14 @@ class AdaptiveBackground:
 
     mean: np.ndarray
     variance: np.ndarray
+
+
+@dataclass(frozen=True)
+class StreamingBackgroundResult:
+    """Mean and covariance operator estimated from streamed cubes."""
+
+    mean: np.ndarray
+    cov_op: NumpyLinearOperator
 
 
 @dataclass
@@ -182,13 +191,26 @@ def estimate_cov_shrunk(
 ) -> NumpyLinearOperator:
     """Estimate a diagonal-target shrinkage covariance operator."""
     empirical = estimate_cov_empirical(cube, mean=mean, axis=axis).matrix
-    n_features = empirical.shape[0]
-    target = np.trace(empirical) / n_features * np.eye(n_features, dtype=float)
+    n_samples = cube_to_samples(cube, axis=axis)[0].shape[0]
+    return NumpyLinearOperator(
+        shrink_covariance(empirical, method=method, n_samples=n_samples)
+    )
+
+
+def shrink_covariance(
+    empirical: np.ndarray,
+    *,
+    method: CovShrinkageMethod,
+    n_samples: int,
+) -> np.ndarray:
+    """Shrink an empirical covariance toward a scaled-identity target."""
+    cov = np.asarray(empirical, dtype=float)
+    n_features = cov.shape[0]
+    target = np.trace(cov) / n_features * np.eye(n_features, dtype=float)
     if method == "oas":
-        n_samples = cube_to_samples(cube, axis=axis)[0].shape[0]
-        trace = np.trace(empirical)
+        trace = np.trace(cov)
         trace_sq = trace * trace
-        fro_sq = float(np.sum(empirical * empirical))
+        fro_sq = float(np.sum(cov * cov))
         denom = (n_samples + 1) * (fro_sq - trace_sq / n_features)
         shrinkage = (
             1.0
@@ -199,12 +221,12 @@ def estimate_cov_shrunk(
             )
         )
     elif method == "ledoit_wolf":
-        diag_energy = float(np.sum(np.diag(empirical) ** 2))
-        total_energy = float(np.sum(empirical * empirical))
+        diag_energy = float(np.sum(np.diag(cov) ** 2))
+        total_energy = float(np.sum(cov * cov))
         shrinkage = 0.0 if total_energy == 0 else min(1.0, diag_energy / total_energy)
     else:
         raise ValueError(f"unknown covariance shrinkage method {method!r}")
-    return NumpyLinearOperator((1.0 - shrinkage) * empirical + shrinkage * target)
+    return (1.0 - shrinkage) * cov + shrinkage * target
 
 
 def estimate_cov_lowrank(
@@ -377,20 +399,13 @@ def adaptive_window_background(
     if window_size < 1 or window_size % 2 == 0:
         raise ValueError("window_size must be a positive odd integer")
     arr = np.moveaxis(np.asarray(cube, dtype=float), axis, -1)
-    half = window_size // 2
-    padded = np.pad(
-        arr,
-        [(half, half), (half, half), (0, 0)],
-        mode=cast(Any, pad_mode),
-    )
-    mean = np.empty_like(arr, dtype=float)
-    variance = np.empty_like(arr, dtype=float)
-    for row in range(arr.shape[0]):
-        for col in range(arr.shape[1]):
-            window = padded[row : row + window_size, col : col + window_size, :]
-            flat = window.reshape(-1, arr.shape[-1])
-            mean[row, col] = np.mean(flat, axis=0)
-            variance[row, col] = np.var(flat, axis=0, ddof=1)
+    if arr.ndim != 3:
+        raise ValueError("adaptive windows require a 3-D cube")
+    size = (window_size, window_size, 1)
+    mean = ndimage.uniform_filter(arr, size=size, mode=pad_mode)
+    mean_sq = ndimage.uniform_filter(arr * arr, size=size, mode=pad_mode)
+    n_window = window_size * window_size
+    variance = np.maximum(mean_sq - mean * mean, 0.0) * n_window / (n_window - 1)
     return AdaptiveBackground(
         mean=np.moveaxis(mean, -1, axis), variance=np.moveaxis(variance, -1, axis)
     )
@@ -450,9 +465,7 @@ def _shrunk_cov_from_samples(
     method: Literal["ledoit_wolf", "oas"],
 ) -> np.ndarray:
     cov = _cov_from_samples(values, mean, ridge=1e-8)
-    target = np.trace(cov) / cov.shape[0] * np.eye(cov.shape[0], dtype=float)
-    shrinkage = 0.2 if method == "ledoit_wolf" else 0.5
-    return (1.0 - shrinkage) * cov + shrinkage * target
+    return shrink_covariance(cov, method=method, n_samples=values.shape[0])
 
 
 def _kmeans_labels(
