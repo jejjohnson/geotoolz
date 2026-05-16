@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -104,7 +105,7 @@ def test_custom_axes_fit_predict_returns_sample_shape() -> None:
     assert set(np.asarray(out).tolist()) == {0, 1}
 
 
-def test_state_roundtrip_saves_joblib_and_metadata(tmp_path) -> None:
+def test_state_roundtrip_saves_joblib_and_metadata(tmp_path: Path) -> None:
     scene = _gt(np.arange(3 * 4 * 5, dtype=float).reshape(3, 4, 5))
     op = gz.learn.PCA(PCA(n_components=2))
     expected = op(scene)

@@ -310,8 +310,10 @@ def _resolve_axes(
 
     axis_order = _canonical_axis_order(ndim)
     if mode == "custom":
-        assert sample_axes is not None
-        assert feature_axes is not None
+        if sample_axes is None or feature_axes is None:
+            raise ValueError(
+                "sample_axes and feature_axes are required when mode='custom'"
+            )
         samples = _axis_indices(sample_axes, axis_order, ndim)
         features = _axis_indices(feature_axes, axis_order, ndim)
     elif mode == "pixel":
@@ -420,6 +422,8 @@ def _make_imputer(
 
         return KNNImputer(n_neighbors=knn_n_neighbors)
     if strategy == "impute_iterative":
+        # Importing this module intentionally enables sklearn's experimental
+        # IterativeImputer before importing the estimator class.
         from sklearn.experimental import enable_iterative_imputer  # noqa: F401
         from sklearn.impute import IterativeImputer
 

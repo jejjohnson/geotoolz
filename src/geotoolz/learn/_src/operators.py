@@ -99,8 +99,6 @@ class SklearnOp(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         if self._task == "fit_predict":
-            if self.fit_mode == "pre_fit":
-                raise ValueError('fit_mode="pre_fit" is not valid with fit_predict')
             return self._geo_estimator.fit_predict(gt)
 
         should_fit = (
