@@ -98,7 +98,9 @@ def test_read_window_accepts_reader_source_and_rejects_indexed_objects(
         io.ReadWindow(src=object(), window=Window(0, 0, 1, 1), indexes=[1])()
 
 
-def test_read_window_delegates_custom_sources_without_indexes(monkeypatch) -> None:
+def test_read_window_delegates_custom_sources_without_indexes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     gt = _sample_geotensor()
     source = object()
     window = Window(0, 0, 1, 1)
