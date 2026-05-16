@@ -647,6 +647,7 @@ source = { editable = "." }
 dependencies = [
     { name = "geopandas" },
     { name = "georeader-spaceml" },
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -733,6 +734,7 @@ requires-dist = [
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "hydra-zen", marker = "extra == 'hydra'", specifier = ">=0.14" },
+    { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.1" },
     { name = "pyarrow", specifier = ">=14.0" },
