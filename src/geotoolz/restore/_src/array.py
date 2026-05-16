@@ -1,4 +1,16 @@
-"""Tier-A primitives for image restoration."""
+"""Tier-A primitives for image restoration.
+
+All functions in this module are pure NumPy / SciPy. They take a plain
+``ndarray`` (shape ``(..., H, W)`` for spatial filters, ``(bands, H, W)``
+for spectral PCA / MNF) and return a plain ``ndarray`` of the same
+shape. Carrier-aware ``Operator`` wrappers live in
+:mod:`geotoolz.restore._src.operators`.
+
+NaN convention: input NaNs are treated as missing pixels. Filters that
+*restore* (denoise, despeckle, destripe) propagate NaNs through to the
+output unchanged. Filters that *fill* (``gap_fill_*``) replace NaNs
+with a finite estimate.
+"""
 
 from __future__ import annotations
 
@@ -10,11 +22,21 @@ from scipy.spatial import cKDTree
 
 
 _EPSILON = 1e-12
+# Powers above this threshold converge numerically to nearest-neighbour
+# weights but risk float overflow; the IDW path short-circuits to the
+# dedicated nearest-neighbour implementation.
 _IDW_POWER_THRESHOLD = 64
+# Consistency constant 1 / Phi^{-1}(0.75) that scales MAD to a Gaussian
+# standard-deviation estimator.
 _MAD_TO_STD_SCALE = 1.4826
 
 
 def _nanmean_filter(arr: np.ndarray, size: int | tuple[int, ...]) -> np.ndarray:
+    """Uniform window mean that ignores NaN entries.
+
+    Computes ``sum(finite) / count(finite)`` over a uniform window of
+    ``size``. Windows that contain no finite values yield ``NaN``.
+    """
     values = np.asarray(arr, dtype=float)
     valid = np.isfinite(values)
     filled = np.where(valid, values, 0.0)
@@ -24,17 +46,36 @@ def _nanmean_filter(arr: np.ndarray, size: int | tuple[int, ...]) -> np.ndarray:
 
 
 def _spatial_size(arr: np.ndarray, size: int) -> tuple[int, ...]:
+    """Build a per-axis window tuple that filters only the last two axes."""
     if size <= 0:
         raise ValueError("window/size must be positive")
     return (1,) * max(arr.ndim - 2, 0) + (int(size), int(size))
 
 
 def _preserve_nan(original: np.ndarray, restored: np.ndarray) -> np.ndarray:
+    """Re-stamp NaN positions from ``original`` onto ``restored``."""
     return np.where(np.isnan(original), np.nan, restored)
 
 
 def despeckle_lee(arr: np.ndarray, *, window: int = 7, cu: float = 0.523) -> np.ndarray:
-    """Apply the classical Lee local-statistics speckle filter."""
+    r"""Apply the classical Lee local-statistics speckle filter.
+
+    For each pixel computes a local mean :math:`\bar{x}` and variance
+    :math:`s^2` over a ``window`` x ``window`` neighbourhood, then
+    returns :math:`\bar{x} + k (x - \bar{x})` with the adaptive gain
+    :math:`k = \tfrac{1}{2} s^2 / (s^2 + c_u^2 \bar{x}^2)`. In flat
+    regions the filter collapses to the local mean; near edges the gain
+    approaches ``1`` and the pixel passes through.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``. NaNs are preserved.
+        window: Side length of the local window. Must be positive.
+        cu: Noise coefficient of variation. ``0.523`` is the standard
+            value for a single-look SAR image; halve for multi-look.
+
+    Returns:
+        Smoothed array with the same shape and NaN positions as ``arr``.
+    """
     values = np.asarray(arr, dtype=float)
     size = _spatial_size(values, window)
     mean = _nanmean_filter(values, size)
@@ -50,7 +91,20 @@ def despeckle_lee(arr: np.ndarray, *, window: int = 7, cu: float = 0.523) -> np.
 def despeckle_frost(
     arr: np.ndarray, *, window: int = 7, damping: float = 2.0
 ) -> np.ndarray:
-    """Apply a compact Frost-style adaptive speckle smoother."""
+    r"""Apply a compact Frost-style adaptive speckle smoother.
+
+    Blends each pixel with its local mean using an edge-aware weight
+    :math:`\alpha = \exp(-d \cdot c_v)`, where ``d`` is ``damping`` and
+    :math:`c_v = s / |\bar{x}|` is the local coefficient of variation.
+    Flat regions (small :math:`c_v`) push :math:`\alpha \to 1` and keep
+    the pixel; high-variance regions (edges) push :math:`\alpha \to 0`
+    and smooth.
+
+    This is a single-pixel reduction of the full Frost kernel — fast
+    and dependency-light, but missing the directional weighting of the
+    canonical filter. Use ``despeckle_lee`` if you want strict
+    statistical optimality.
+    """
     values = np.asarray(arr, dtype=float)
     size = _spatial_size(values, window)
     mean = _nanmean_filter(values, size)
@@ -64,7 +118,15 @@ def despeckle_frost(
 
 
 def despeckle_refined_lee(arr: np.ndarray, *, window: int = 7) -> np.ndarray:
-    """Apply a small refined-Lee approximation using the Lee core."""
+    """Apply a Refined-Lee approximation.
+
+    The full Refined-Lee filter chooses one of eight directional
+    sub-windows per pixel before applying the Lee gain. This
+    dependency-light implementation skips the directional selection and
+    just calls :func:`despeckle_lee` with the default ``cu``. It is
+    kept under a distinct name so pipelines can swap in a true Refined-
+    Lee later without renaming nodes.
+    """
     return despeckle_lee(arr, window=window, cu=0.523)
 
 
@@ -75,7 +137,29 @@ def destripe_column(
     axis: Literal["column", "row"] = "column",
     window: int = 21,
 ) -> np.ndarray:
-    """Remove row or column striping by matching cross-track statistics."""
+    r"""Remove row or column striping by matching cross-track statistics.
+
+    For ``axis="column"`` (default): collapses each column to a single
+    statistic (its mean or median over rows), subtracts the difference
+    from the global statistic, and re-adds the per-pixel residual so
+    column-constant offsets are zeroed out.
+
+    ``method="moment_matching"`` follows up the global recentre with a
+    locally-windowed smoothing pass to handle slowly varying gain
+    drift; the ``window`` controls the smoothing kernel size and is
+    only consulted in that case.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``. NaNs are preserved.
+        method: ``"mean"`` and ``"median"`` subtract a per-column offset
+            with the corresponding reducer; ``"moment_matching"``
+            additionally smooths the result with a ``window`` x
+            ``window`` neighbourhood.
+        axis: Striping direction (``"column"`` for vertical stripes,
+            ``"row"`` for horizontal).
+        window: Side length of the smoothing window for
+            ``method="moment_matching"``. Ignored otherwise.
+    """
     values = np.asarray(arr, dtype=float)
     if values.ndim < 2:
         raise ValueError("destripe_column expects at least two spatial dimensions")
@@ -88,13 +172,24 @@ def destripe_column(
     target = reducer(profile, axis=spatial_axis, keepdims=True)
     out = values - (profile - target)
     if method == "moment_matching":
-        local = _nanmean_filter(out, _spatial_size(out, window))
-        out = out - (_nanmean_filter(out, (1,) * out.ndim) - local)
+        # Replace each pixel with its local-window mean so slowly
+        # varying per-column gain drift is absorbed into the smoothing.
+        out = _nanmean_filter(out, _spatial_size(out, window))
     return _preserve_nan(values, out)
 
 
 def gaussian_denoise(arr: np.ndarray, *, sigma: float = 1.0) -> np.ndarray:
-    """Gaussian smooth over the trailing spatial axes."""
+    """Gaussian smooth over the trailing two (spatial) axes.
+
+    NaN-aware: missing pixels are excluded from both numerator and
+    weight (Nadaraya-Watson style normalisation), then re-stamped onto
+    the output. Non-spatial axes (e.g. bands) are filtered
+    independently with ``sigma=0``.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``.
+        sigma: Gaussian standard deviation in pixels. ``0`` is a no-op.
+    """
     values = np.asarray(arr, dtype=float)
     sigma_tuple = (0.0,) * max(values.ndim - 2, 0) + (float(sigma), float(sigma))
     valid = np.isfinite(values)
@@ -108,7 +203,16 @@ def gaussian_denoise(arr: np.ndarray, *, sigma: float = 1.0) -> np.ndarray:
 
 
 def median_denoise(arr: np.ndarray, *, size: int = 3) -> np.ndarray:
-    """Median smooth over the trailing spatial axes."""
+    """Median smooth over the trailing two (spatial) axes.
+
+    NaNs are temporarily replaced with the global ``nanmedian`` so
+    SciPy's median filter is well-defined, then re-stamped on the
+    output. Edge pixels use ``mode="nearest"`` (reflected boundary).
+
+    Args:
+        arr: Array of shape ``(..., H, W)``.
+        size: Side length of the median window. Must be positive.
+    """
     values = np.asarray(arr, dtype=float)
     filled = np.where(np.isfinite(values), values, np.nanmedian(values))
     out = ndimage.median_filter(
@@ -120,21 +224,62 @@ def median_denoise(arr: np.ndarray, *, size: int = 3) -> np.ndarray:
 def bilateral_denoise(
     arr: np.ndarray, *, sigma_color: float = 0.1, sigma_space: float = 5.0
 ) -> np.ndarray:
-    """Edge-aware denoise using a range-weighted Gaussian approximation."""
+    r"""Edge-aware denoise using a range-weighted Gaussian approximation.
+
+    Computes a spatially smoothed estimate ``s`` of shape ``arr`` and
+    blends it with the original ``x`` using a per-pixel weight
+    :math:`w = \exp(-\tfrac{1}{2} ((x - s) / \sigma_c)^2)`. Where
+    ``x`` is far from the local mean (edges, outliers), ``w`` is small
+    and the *smoothed* estimate is suppressed in favour of the
+    original, preserving edges. Where ``x`` is close to the local mean
+    (flat regions), ``w`` is near 1 and the original passes through —
+    the smoothing is therefore best thought of as an edge-aware
+    *attenuator* of the Gaussian estimate.
+
+    This is a single-pass approximation of a full bilateral filter (no
+    per-pixel neighbourhood weighting). It is fast and dependency-
+    light; for true bilateral filtering use scikit-image.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``. NaNs are preserved.
+        sigma_color: Range bandwidth (data units). Smaller values
+            preserve more edges; larger values smooth more.
+        sigma_space: Spatial bandwidth in pixels.
+    """
     values = np.asarray(arr, dtype=float)
     smooth = gaussian_denoise(values, sigma=sigma_space)
-    weights = np.exp(-0.5 * ((values - smooth) / sigma_color) ** 2)
+    safe_color = max(float(sigma_color), _EPSILON)
+    weights = np.exp(-0.5 * ((values - smooth) / safe_color) ** 2)
     return _preserve_nan(values, weights * values + (1.0 - weights) * smooth)
 
 
 def nl_means(
     arr: np.ndarray, *, patch_size: int = 5, patch_distance: int = 6, h: float = 0.1
 ) -> np.ndarray:
-    """Small non-local-means approximation for dependency-light denoising."""
+    """Lightweight non-local-means-style denoiser.
+
+    True non-local-means averages each pixel with similarly-patterned
+    patches elsewhere in the image, which is expensive and adds
+    scikit-image as a dependency. This implementation is a
+    *dependency-light approximation*: it computes a wide Gaussian
+    smoothing estimate whose effective radius is set by
+    ``(patch_distance + patch_size) / 6``, then blends it with the
+    original using the same range-weighted scheme as
+    :func:`bilateral_denoise` with bandwidth ``h``.
+
+    Use this only when scikit-image is unavailable; for production
+    NL-means, prefer ``skimage.restoration.denoise_nl_means``.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``.
+        patch_size: Nominal patch side length (pixels).
+        patch_distance: Nominal search-window radius (pixels).
+        h: Range bandwidth (data units).
+    """
     sigma = max((float(patch_distance) + float(patch_size)) / 6.0, 0.1)
     smooth = gaussian_denoise(arr, sigma=sigma)
     values = np.asarray(arr, dtype=float)
-    weights = np.exp(-0.5 * ((values - smooth) / max(float(h), 1e-12)) ** 2)
+    weights = np.exp(-0.5 * ((values - smooth) / max(float(h), _EPSILON)) ** 2)
     return _preserve_nan(values, weights * values + (1.0 - weights) * smooth)
 
 
@@ -189,12 +334,36 @@ def inverse_pca(
     return np.moveaxis(restored.reshape(moved_shape), 0, axis)
 
 
+def _iter_planes(
+    values: np.ndarray,
+) -> list[tuple[tuple[int, ...] | None, np.ndarray]]:
+    """Yield each 2-D ``(H, W)`` plane of ``values`` with its leading index.
+
+    The leading index is ``None`` for a 2-D input so callers can dispatch
+    on shape without a separate ``ndim`` check.
+    """
+    if values.ndim == 2:
+        return [(None, values)]
+    return [(idx, values[idx]) for idx in np.ndindex(values.shape[:-2])]
+
+
 def gap_fill_nearest(arr: np.ndarray, *, max_distance: int | None = None) -> np.ndarray:
-    """Fill NaNs from the nearest finite neighbour."""
+    """Fill NaNs from the nearest finite neighbour.
+
+    Uses :func:`scipy.ndimage.distance_transform_edt` per 2-D plane.
+    Pixels whose nearest finite neighbour is farther than
+    ``max_distance`` (when given) are left as NaN.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``. Planes are processed
+            independently.
+        max_distance: Optional maximum Euclidean fill radius in pixels.
+            ``None`` (default) fills every NaN that has at least one
+            finite neighbour anywhere in the plane.
+    """
     values = np.asarray(arr, dtype=float)
     out = values.copy()
-    for idx in np.ndindex(values.shape[:-2] or ()):
-        plane = values[idx] if values.ndim > 2 else values
+    for idx, plane in _iter_planes(values):
         mask = ~np.isfinite(plane)
         if not mask.any() or mask.all():
             continue
@@ -204,33 +373,45 @@ def gap_fill_nearest(arr: np.ndarray, *, max_distance: int | None = None) -> np.
         filled = plane[tuple(nearest)]
         if max_distance is not None:
             filled = np.where(distances <= max_distance, filled, np.nan)
-        if values.ndim > 2:
-            out[idx] = np.where(mask, filled, plane)
+        result = np.where(mask, filled, plane)
+        if idx is None:
+            out = result
         else:
-            out = np.where(mask, filled, plane)
+            out[idx] = result
     return out
 
 
 def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.ndarray:
-    """Fill NaNs with inverse-distance weighted finite neighbours.
+    r"""Fill NaNs with inverse-distance weighted finite neighbours.
 
-    Power values greater than or equal to ``64`` automatically fall
-    back to nearest-neighbour filling because very large powers converge
-    to nearest-neighbour weights while risking overflow.
+    For each NaN pixel ``p``, finds all finite neighbours within
+    ``radius`` pixels (Euclidean) and replaces it with
+    :math:`\hat{p} = \sum_i w_i x_i / \sum_i w_i` where
+    :math:`w_i = 1 / \max(d_i, \epsilon)^{\text{power}}`. NaNs whose
+    neighbourhood is empty are left as NaN.
+
+    Powers ``>= 64`` numerically converge to nearest-neighbour weights
+    but risk overflow, so the function short-circuits to
+    :func:`gap_fill_nearest` in that case.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``. Planes are processed
+            independently with a per-plane k-d tree.
+        power: IDW exponent. ``2.0`` is the standard choice; larger
+            values bias toward nearer neighbours.
+        radius: Maximum search radius in pixels.
     """
-    # Powers >= _IDW_POWER_THRESHOLD converge to nearest-neighbour but risk
-    # overflow, so delegate to the nearest-neighbour implementation.
     if power >= _IDW_POWER_THRESHOLD:
         return gap_fill_nearest(arr, max_distance=radius)
     values = np.asarray(arr, dtype=float)
     out = values.copy()
-    for idx in np.ndindex(values.shape[:-2] or ()):
-        plane = values[idx] if values.ndim > 2 else values
+    for idx, plane in _iter_planes(values):
         missing = ~np.isfinite(plane)
         if not missing.any() or missing.all():
             continue
         valid = np.argwhere(np.isfinite(plane))
         tree = cKDTree(valid)
+        plane_out = plane.copy()
         for row, col in np.argwhere(missing):
             neighbours = tree.query_ball_point([row, col], r=radius)
             if not neighbours:
@@ -238,18 +419,30 @@ def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.
             coords = valid[neighbours]
             dist = np.linalg.norm(coords - np.array([row, col]), axis=1)
             weights = 1.0 / np.maximum(dist, _EPSILON) ** power
-            out_value = np.sum(weights * plane[coords[:, 0], coords[:, 1]]) / np.sum(
-                weights
-            )
-            if values.ndim > 2:
-                out[*idx, row, col] = out_value
-            else:
-                out[row, col] = out_value
+            plane_out[row, col] = np.sum(
+                weights * plane[coords[:, 0], coords[:, 1]]
+            ) / np.sum(weights)
+        if idx is None:
+            out = plane_out
+        else:
+            out[idx] = plane_out
     return out
 
 
 def gap_fill_laplacian(arr: np.ndarray, *, iterations: int = 200) -> np.ndarray:
-    """Fill NaNs by iteratively solving a discrete Laplace equation."""
+    r"""Fill NaNs by iteratively solving a discrete Laplace equation.
+
+    Iterates the 4-neighbour averaging
+    :math:`u^{(k+1)}_{i,j} = \tfrac{1}{4}(u^{(k)}_{i-1,j} +
+    u^{(k)}_{i+1,j} + u^{(k)}_{i,j-1} + u^{(k)}_{i,j+1})` over the
+    missing pixels while clamping the finite pixels to their original
+    values. Converges to the harmonic interpolant in the limit. The
+    initial guess is :func:`gap_fill_nearest` for fast convergence.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``.
+        iterations: Number of Jacobi sweeps. Increase for larger gaps.
+    """
     values = np.asarray(arr, dtype=float)
     out = gap_fill_nearest(values)
     missing = ~np.isfinite(values)
@@ -265,7 +458,18 @@ def gap_fill_laplacian(arr: np.ndarray, *, iterations: int = 200) -> np.ndarray:
 
 
 def gap_fill_biharmonic(arr: np.ndarray) -> np.ndarray:
-    """Fill NaNs with a smooth biharmonic-style two-pass Laplacian fill."""
+    """Fill NaNs with a smooth biharmonic-style two-pass Laplacian fill.
+
+    Approximates biharmonic inpainting (which solves
+    :math:`\\Delta^2 u = 0` on the masked region) with a cheap two-pass
+    surrogate: a harmonic fill via :func:`gap_fill_laplacian`, then a
+    short Gaussian smooth to relax the gradient discontinuity at the
+    mask boundary. The original finite pixels are preserved exactly.
+
+    Note: this is *not* the canonical biharmonic inpainting from
+    scikit-image; it is intentionally dependency-light. For sharper
+    boundary continuity, use ``skimage.restoration.inpaint_biharmonic``.
+    """
     values = np.asarray(arr, dtype=float)
     smooth = gaussian_denoise(gap_fill_laplacian(values), sigma=1.0)
     return np.where(np.isfinite(values), values, smooth)
@@ -274,7 +478,19 @@ def gap_fill_biharmonic(arr: np.ndarray) -> np.ndarray:
 def outlier_mask(
     arr: np.ndarray, *, method: Literal["mad", "zscore"] = "mad", k: float = 3.0
 ) -> np.ndarray:
-    """Flag robust global outliers."""
+    r"""Flag robust global outliers.
+
+    ``method="mad"`` (default) uses the median + median-absolute-
+    deviation; ``"zscore"`` uses the mean + standard deviation. The MAD
+    is scaled by 1 / Phi^{-1}(0.75) so it estimates the same scale as
+    the standard deviation under a Gaussian model. Returns a boolean
+    array where ``True`` marks outliers.
+
+    When the estimated scale is zero (constant data) the mask flags any
+    pixel that differs from the centre, which is consistent with
+    "anything that breaks the constant pattern is an outlier". When the
+    scale is non-finite (all-NaN input) returns an all-False mask.
+    """
     values = np.asarray(arr, dtype=float)
     if method == "mad":
         center = np.nanmedian(values)
@@ -300,7 +516,17 @@ def replace_outliers(
     k: float = 3.0,
     fill: Literal["median", "nan", "interp"] = "median",
 ) -> np.ndarray:
-    """Replace detected outliers with a scalar or nearest-neighbour fill."""
+    """Replace detected outliers with a scalar or nearest-neighbour fill.
+
+    Args:
+        arr: Input array.
+        method: Outlier-detection strategy. See :func:`outlier_mask`.
+        k: Outlier threshold in scaled units.
+        fill: ``"median"`` replaces outliers with the median of the
+            inliers; ``"nan"`` sets them to NaN; ``"interp"`` fills
+            them by nearest-neighbour interpolation over the spatial
+            axes via :func:`gap_fill_nearest`.
+    """
     values = np.asarray(arr, dtype=float)
     mask = outlier_mask(values, method=method, k=k)
     if fill == "median":
@@ -313,7 +539,19 @@ def replace_outliers(
 
 
 def saturation_flag(arr: np.ndarray, *, threshold: float | None = None) -> np.ndarray:
-    """Flag pixels at or above a saturation threshold."""
+    """Flag pixels at or above a saturation threshold.
+
+    Args:
+        arr: Input array of any dtype.
+        threshold: Saturation cutoff. When ``None`` defaults to
+            ``np.iinfo(dtype).max`` for integer arrays and ``1.0`` for
+            float arrays (the standard top-of-atmosphere reflectance
+            ceiling).
+
+    Returns:
+        Boolean array of the same shape; ``True`` marks saturated
+        pixels.
+    """
     values = np.asarray(arr)
     if threshold is None:
         threshold = (

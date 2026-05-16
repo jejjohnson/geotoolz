@@ -210,3 +210,120 @@ def test_saturation_flag_uses_dtype_max() -> None:
         _toy_geotensor(np.array([[0.25, 0.75]]))
     )
     np.testing.assert_array_equal(np.asarray(thresholded), [[False, True]])
+
+
+# ----------------------------------------------------------------------------
+# Known-answer tests for gap-fill primitives.
+# A single NaN surrounded by 1s should be filled with ~1 by every method
+# regardless of the underlying algorithm — a sanity check on the inpainting
+# contract documented in the module-level docstring.
+# ----------------------------------------------------------------------------
+def test_gap_fill_methods_recover_isolated_nan() -> None:
+    arr = np.ones((5, 5), dtype=float)
+    arr[2, 2] = np.nan
+    gt = _toy_geotensor(arr)
+    for op in [
+        GapFillNearest(),
+        GapFillIDW(power=2.0, radius=2),
+        GapFillLaplacian(),
+        GapFillInpaintBiharmonic(),
+    ]:
+        out = np.asarray(op(gt))
+        assert np.isfinite(out[2, 2]), f"{op!r} left the NaN unfilled"
+        np.testing.assert_allclose(out[2, 2], 1.0, atol=1e-6)
+
+
+def test_gap_fill_biharmonic_does_not_double_apply() -> None:
+    """The operator must not modify finite pixels — the primitive already
+    preserves originals, so a second ``np.where(isfinite, ...)`` was
+    redundant and is no longer applied."""
+    arr = np.linspace(0.0, 1.0, 25, dtype=float).reshape(5, 5)
+    arr_with_nan = arr.copy()
+    arr_with_nan[2, 2] = np.nan
+    gt = _toy_geotensor(arr_with_nan)
+    out = np.asarray(GapFillInpaintBiharmonic()(gt))
+    finite_mask = np.isfinite(arr_with_nan)
+    np.testing.assert_array_equal(out[finite_mask], arr_with_nan[finite_mask])
+
+
+def test_bilateral_preserves_strong_edge() -> None:
+    """A bilateral filter should retain a sharp edge better than a Gaussian.
+
+    Build a step image with two flat regions; the bilateral output should
+    have a smaller maximum deviation from the original at the edge than
+    a comparable Gaussian smoother.
+    """
+    rng = np.random.default_rng(7)
+    image = np.where(np.arange(32)[None, :] < 16, 0.0, 1.0) * np.ones((32, 32))
+    noisy = image + 0.02 * rng.standard_normal(image.shape)
+    gt = _toy_geotensor(noisy)
+    gauss = np.asarray(GaussianDenoise(sigma=2.0)(gt))
+    bilateral = np.asarray(BilateralDenoise(sigma_color=0.05, sigma_space=2.0)(gt))
+    edge_col = 15
+    gauss_edge_error = np.abs(gauss[:, edge_col] - image[:, edge_col]).max()
+    bilat_edge_error = np.abs(bilateral[:, edge_col] - image[:, edge_col]).max()
+    assert bilat_edge_error < gauss_edge_error
+
+
+def test_destripe_column_propagates_window_to_moment_matching() -> None:
+    """``DestripeColumn`` must round-trip its ``window`` parameter into the
+    underlying primitive so ``method="moment_matching"`` actually uses it."""
+    rng = np.random.default_rng(11)
+    arr = rng.standard_normal((24, 24))
+    op_default = DestripeColumn(method="moment_matching")
+    op_wide = DestripeColumn(method="moment_matching", window=11)
+    out_default = np.asarray(op_default(_toy_geotensor(arr.copy())))
+    out_wide = np.asarray(op_wide(_toy_geotensor(arr.copy())))
+    # Different smoothing windows must produce different outputs.
+    assert not np.allclose(out_default, out_wide)
+
+
+def test_outlier_mask_operator_returns_bool_dtype() -> None:
+    arr = np.ones((4, 4), dtype=float)
+    arr[0, 0] = 100.0
+    out = OutlierMask(method="mad", k=3.0)(_toy_geotensor(arr))
+    assert np.asarray(out).dtype == np.dtype(bool)
+
+
+# ----------------------------------------------------------------------------
+# Tier-B contract: every Operator subclass should report a JSON-safe
+# ``get_config`` and round-trip through that config (except for
+# :class:`InverseMNF`, which holds a runtime reference and is flagged
+# ``forbid_in_yaml=True``).
+# ----------------------------------------------------------------------------
+def test_operator_configs_are_json_safe() -> None:
+    import json
+
+    operators = [
+        DespeckleLee(window=5, cu=0.523),
+        DespeckleFrost(window=5, damping=2.0),
+        DespeckleRefinedLee(window=5),
+        DestripeColumn(method="median", axis="row", window=15),
+        MomentMatching(window=11),
+        DenoisePCA(n_components=2, axis=0),
+        MNF(n_components=2, axis=0),
+        GaussianDenoise(sigma=1.0),
+        MedianDenoise(size=3),
+        BilateralDenoise(sigma_color=0.1, sigma_space=2.0),
+        NLMeans(patch_size=3, patch_distance=3, h=0.1),
+        GapFillIDW(power=2.0, radius=4),
+        GapFillNearest(max_distance=5),
+        OutlierMask(method="zscore", k=3.0),
+        ReplaceOutliers(method="mad", k=3.0, fill="interp"),
+        SaturationFlag(threshold=0.5),
+    ]
+    for op in operators:
+        config = op.get_config()
+        # Round-trip through JSON; will raise if any value is not JSON-safe.
+        rehydrated = json.loads(json.dumps(config))
+        clone = type(op)(**rehydrated)
+        assert clone.get_config() == config
+
+
+def test_inverse_mnf_is_forbidden_in_yaml() -> None:
+    """``InverseMNF`` holds a runtime reference to a fitted MNF, so it must
+    flag itself as non-serialisable and report an empty config."""
+    forward = MNF(n_components=2)
+    inverse = InverseMNF(forward=forward)
+    assert inverse.forbid_in_yaml is True
+    assert inverse.get_config() == {}
