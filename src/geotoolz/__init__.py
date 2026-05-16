@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from geotoolz import catalog, cloud, core, indices, patch, radiometry, types
+from geotoolz import catalog, cloud, core, indices, mask, patch, radiometry, types
 from geotoolz.catalog import (
     CatalogDomain,
     CatalogRow,
@@ -316,6 +316,7 @@ __all__ = [
     "load_raster_timeseries",
     "load_vector",
     "load_xarray",
+    "mask",
     "open_catalog",
     "patch",
     "query",
