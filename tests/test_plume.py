@@ -82,6 +82,46 @@ def test_plume_footprint_area_and_enhancement_stats() -> None:
     assert no_stats.iloc[0].max_enhancement is None
 
 
+def test_plume_footprint_empty_mask_returns_empty_geodataframe() -> None:
+    """Empty masks (or all-filtered components) must yield a valid empty GDF.
+
+    Regression test: previously ``gpd.GeoDataFrame(rows, geometry="geometry")``
+    raised ``ValueError`` when ``rows`` was empty because the ``geometry``
+    column did not exist.
+    """
+    empty_mask = _gt(np.zeros((4, 4), dtype=bool))
+
+    gdf = gz.plume.PlumeFootprint(
+        min_area_m2=1.0,
+        simplify_tolerance=None,
+    )(empty_mask)
+
+    assert len(gdf) == 0
+    assert gdf.crs == "EPSG:32629"
+    expected_cols = {
+        "geometry",
+        "area_m2",
+        "centroid",
+        "mean_enhancement",
+        "max_enhancement",
+        "n_pixels",
+        "label_id",
+    }
+    assert expected_cols.issubset(set(gdf.columns))
+    assert gdf.geometry.name == "geometry"
+
+    # Also covers the "all components filtered by min_area_m2" path: a
+    # single-pixel mask filtered out by a huge ``min_area_m2``.
+    one_pixel = np.zeros((4, 4), dtype=bool)
+    one_pixel[0, 0] = True
+    filtered = gz.plume.PlumeFootprint(
+        min_area_m2=1.0e9,
+        simplify_tolerance=None,
+    )(_gt(one_pixel))
+    assert len(filtered) == 0
+    assert filtered.crs == "EPSG:32629"
+
+
 def test_wind_advection_cone_follows_wind_orientation() -> None:
     transform = rasterio.Affine.translation(-5.5, 5.5) * rasterio.Affine.scale(
         1.0, -1.0
@@ -146,6 +186,40 @@ def test_ime_skeleton_length_and_uncertainty_fraction() -> None:
     assert estimate["length_m"] != pytest.approx(max_axis["length_m"])
     assert estimate["emission_rate_kg_s"] == pytest.approx(30.0)
     assert estimate["emission_rate_uncertainty_kg_s"] == pytest.approx(6.0)
+
+
+def test_skeleton_plume_length_is_deterministic_for_multi_component_mask() -> None:
+    """Skeleton length must not depend on set iteration order.
+
+    Regression test: previously ``_longest_active_pixel_path`` seeded the
+    double-BFS from ``next(iter(nodes))`` where ``nodes`` was a Python
+    set. Across two disconnected components, the arbitrary starting node
+    made the result depend on insertion order (effectively the hash of
+    the tuple coordinates).
+    """
+    from geotoolz.plume._src.array import _longest_active_pixel_path, plume_length
+
+    # Two disconnected components: a long horizontal arm (10 px) and a
+    # short isolated blob (1 px). The longest path should come from the
+    # long arm, regardless of which component the algorithm visits first.
+    mask = np.zeros((6, 12), dtype=bool)
+    mask[1, 1:11] = True  # 10-pixel horizontal arm
+    mask[4, 10] = True  # isolated single pixel
+    transform = rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 100.0)
+
+    length_a = _longest_active_pixel_path(mask, transform)
+    length_b = _longest_active_pixel_path(mask, transform)
+    length_via_api = plume_length(mask, transform, method="skeleton")
+
+    # 10 pixels at 10 m spacing => 9 * 10 m between endpoint centroids.
+    assert length_a == pytest.approx(90.0)
+    assert length_b == pytest.approx(90.0)
+    assert length_via_api == pytest.approx(90.0)
+
+    # Permuting the mask via row/col reflection still picks the same
+    # connected component as the dominant one.
+    reflected = mask[::-1, ::-1].copy()
+    assert _longest_active_pixel_path(reflected, transform) == pytest.approx(90.0)
 
 
 def test_ime_rejects_negative_uncertainty_fraction() -> None:

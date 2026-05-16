@@ -343,6 +343,24 @@ class PlumeFootprint(Operator):
                     "label_id": label_id,
                 }
             )
+        if not rows:
+            # No surviving components (empty mask, or all polygons filtered
+            # out by ``min_area_m2``). Construct an empty GeoDataFrame with
+            # the expected schema so downstream consumers see a stable
+            # column layout instead of a constructor error.
+            return gpd.GeoDataFrame(
+                {
+                    "geometry": [],
+                    "area_m2": [],
+                    "centroid": [],
+                    "mean_enhancement": [],
+                    "max_enhancement": [],
+                    "n_pixels": [],
+                    "label_id": [],
+                },
+                geometry="geometry",
+                crs=gt.crs,
+            )
         return gpd.GeoDataFrame(rows, geometry="geometry", crs=gt.crs)
 
     def get_config(self) -> dict[str, Any]:

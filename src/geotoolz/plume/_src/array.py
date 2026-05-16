@@ -309,13 +309,46 @@ def _longest_active_pixel_path(mask: np.ndarray, transform: Any) -> float:
     The 4-neighbor graph avoids diagonal corner-cutting through plume
     pixels, so bent plumes are measured along their active-pixel path
     rather than by a straight endpoint chord.
+
+    The starting node for the double-BFS is chosen deterministically as
+    the lexicographically smallest ``(row, col)`` so the resulting length
+    does not depend on set iteration order. For masks with multiple
+    disconnected components, each component is processed independently
+    and the maximum path length across components is returned.
     """
     rows, cols = np.nonzero(mask)
     nodes = {(int(r), int(c)) for r, c in zip(rows, cols, strict=True)}
-    start = next(iter(nodes))
-    farthest, _ = _farthest_active_pixel(start, nodes, transform)
-    _, distance = _farthest_active_pixel(farthest, nodes, transform)
-    return float(distance)
+    if not nodes:
+        return 0.0
+    longest = 0.0
+    remaining = nodes
+    while remaining:
+        # Deterministic start: lexicographically smallest (topmost, then
+        # leftmost) pixel in the remaining component pool.
+        seed = min(remaining)
+        component = _connected_component(seed, remaining)
+        farthest, _ = _farthest_active_pixel(seed, component, transform)
+        _, distance = _farthest_active_pixel(farthest, component, transform)
+        if distance > longest:
+            longest = distance
+        remaining = remaining - component
+    return float(longest)
+
+
+def _connected_component(
+    seed: tuple[int, int], nodes: set[tuple[int, int]]
+) -> set[tuple[int, int]]:
+    """Return the 4-connected component of ``seed`` within ``nodes``."""
+    component: set[tuple[int, int]] = {seed}
+    stack: list[tuple[int, int]] = [seed]
+    while stack:
+        row, col = stack.pop()
+        for drow, dcol in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            neighbor = (row + drow, col + dcol)
+            if neighbor in nodes and neighbor not in component:
+                component.add(neighbor)
+                stack.append(neighbor)
+    return component
 
 
 def _farthest_active_pixel(
