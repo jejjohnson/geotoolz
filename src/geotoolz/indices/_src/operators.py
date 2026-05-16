@@ -874,7 +874,11 @@ class NBR2(Operator):
 
 
 class BAIS2(Operator):
-    """Burned Area Index for Sentinel-2."""
+    """Burned Area Index for Sentinel-2.
+
+    Defaults assume a Sentinel-2 stack ordered as
+    ``B02, B03, B04, B05, B06, B07, B08, B8A, B11, B12``.
+    """
 
     def __init__(
         self,
@@ -1056,13 +1060,17 @@ class ClayMinerals(Operator):
 
 
 class CIRI(Operator):
-    """Cirrus Reflectance Index."""
+    """Cirrus Reflectance Index.
+
+    The default ``cirrus_idx=9`` matches Sentinel-2 B10 in a full
+    band-number-ordered stack.
+    """
 
     def __init__(
         self,
         *,
         cirrus: BandRef | None = None,
-        cirrus_idx: int | None = None,
+        cirrus_idx: int | None = 9,
         axis: int = 0,
     ) -> None:
         self.cirrus_idx = _configured_ref(cirrus, cirrus_idx)

@@ -322,6 +322,15 @@ def test_band_name_resolution_missing_name_raises() -> None:
         NDVI(red="B04", nir="B03")(gt)
 
 
+def test_ciri_default_uses_sentinel2_b10_position() -> None:
+    arr = np.arange(10, dtype=np.float32).reshape(10, 1, 1)
+    gt = _toy_geotensor(arr)
+
+    out = CIRI()(gt)
+
+    np.testing.assert_allclose(np.asarray(out), [[9.0]])
+
+
 def test_dnbr_subtracts_matching_geotensors() -> None:
     pre = _toy_geotensor(np.full((3, 3), 0.7, dtype=np.float32))
     post = _toy_geotensor(np.full((3, 3), 0.2, dtype=np.float32))
