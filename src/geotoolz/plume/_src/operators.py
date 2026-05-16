@@ -66,7 +66,8 @@ class SBMP(Operator):
     The operator emits a single-band enhancement score. With a
     ``reference_scene`` it returns the change in log(SWIR1 / SWIR2)
     between the input and reference scenes. Without a reference scene it
-    falls back to a same-scene normalized SWIR contrast.
+    falls back to the same-scene normalized SWIR contrast
+    ``(SWIR1 - SWIR2) / (SWIR1 + SWIR2 + eps)``.
 
     The reference-scene formulation is
     ``log((SWIR1 + eps) / (SWIR2 + eps)) -

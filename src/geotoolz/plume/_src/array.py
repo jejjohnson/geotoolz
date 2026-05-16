@@ -230,6 +230,7 @@ def plume_length(
     xs, ys = pixel_centers(active.shape, transform)
     points = np.column_stack([xs[active], ys[active]])
     if points.shape[0] == 1:
+        # Single pixel: use one linear pixel size as the length proxy.
         return float(np.sqrt(pixel_area(transform)))
     if method == "max_axis":
         diff = points[:, None, :] - points[None, :, :]
@@ -277,7 +278,7 @@ def _farthest_active_pixel(
         row, col = node
         for drow in (-1, 0, 1):
             for dcol in (-1, 0, 1):
-                # Enforce 4-neighbor connectivity: no center or corner steps.
+                # 4-neighbor connectivity: exclude the center and diagonals.
                 if abs(drow) + abs(dcol) != 1:
                     continue
                 neighbor = (row + drow, col + dcol)

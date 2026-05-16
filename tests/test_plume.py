@@ -239,6 +239,7 @@ def test_sbmp_default_sentinel2_swir_band_names() -> None:
 
 
 def test_sbmp_clips_non_positive_swir_values_before_log() -> None:
+    op = gz.plume.SBMP(swir1=0, swir2=1)
     scene = np.array(
         [
             [[0.0, -1.0], [2.0, 3.0]],
@@ -246,10 +247,12 @@ def test_sbmp_clips_non_positive_swir_values_before_log() -> None:
         ]
     )
 
-    out = gz.plume.SBMP(swir1=0, swir2=1)(_gt(scene))
+    out = op(_gt(scene))
 
     clipped_swir1 = np.maximum(scene[0], 0.0)
     clipped_swir2 = np.maximum(scene[1], 0.0)
-    expected = (clipped_swir1 - clipped_swir2) / (clipped_swir1 + clipped_swir2 + 1e-10)
+    expected = (clipped_swir1 - clipped_swir2) / (
+        clipped_swir1 + clipped_swir2 + op.eps
+    )
     assert np.isfinite(np.asarray(out)).all()
     assert np.allclose(np.asarray(out), expected)
