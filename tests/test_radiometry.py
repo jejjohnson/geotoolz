@@ -6,23 +6,43 @@ round-trip, Hydra-zen `builds()` round-trip.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import numpy as np
+import pandas as pd
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
 
 from geotoolz.radiometry import (
+    DOS1,
+    ApplySRF,
+    BTFromRadiance,
+    ComputeSZA,
     DNToRadiance,
     DNToReflectance,
+    EarthSunDistanceCorrection,
     Gamma,
+    IntegratedIrradiance,
     MinMax,
     PercentileClip,
+    RadianceToDN,
+    RadianceToReflectance,
+    ReflectanceToRadiance,
+    SimpleAtmosphericCorrection,
     ToFloat32,
+    bt_from_radiance,
     dn_to_radiance,
     dn_to_reflectance,
+    dos1,
     gamma_correct,
     min_max_normalize,
     percentile_clip,
+    radiance_to_dn,
+)
+from geotoolz.radiometry._src.solar import (
+    earth_sun_distance_correction_factor,
+    observation_date_correction_factor,
 )
 
 
@@ -58,6 +78,13 @@ def test_dn_to_radiance_linear() -> None:
     out = dn_to_radiance(dn, gain=0.01, offset=-1.0)
     expected = 0.01 * dn - 1.0
     np.testing.assert_allclose(out, expected, rtol=1e-9)
+
+
+def test_radiance_to_dn_inverts_dn_to_radiance_with_scale() -> None:
+    dn = np.array([0.0, 1000.0, 2000.0])
+    radiance = dn_to_radiance(dn, gain=2.0, offset=1.0, scale=10.0)
+    out = radiance_to_dn(radiance, gain=2.0, offset=1.0, scale=10.0)
+    np.testing.assert_allclose(out, dn, rtol=1e-12)
 
 
 def test_dn_to_reflectance_s2_l1c() -> None:
@@ -156,6 +183,61 @@ def test_gamma_correct_handles_negatives() -> None:
     assert np.isfinite(out).all()
 
 
+def test_bt_from_radiance_planck_inversion() -> None:
+    radiance = np.array([10.0])
+    out = bt_from_radiance(radiance, k1=774.8853, k2=1321.0789)
+    expected = 1321.0789 / np.log((774.8853 / radiance) + 1.0)
+    np.testing.assert_allclose(out, expected)
+
+
+def test_bt_from_radiance_round_trip_against_planck() -> None:
+    """The inversion ``T = K2 / ln(K1/L + 1)`` must invert ``L = K1 / (exp(K2/T) - 1)``.
+
+    Construct radiance synthetically from a target temperature using
+    the forward Planck form, push it through ``bt_from_radiance``, and
+    verify the recovered temperature matches the input to float
+    precision.
+    """
+    k1, k2 = 774.8853, 1321.0789  # Landsat-8 TIRS Band 10
+    targets = np.array([260.0, 290.0, 310.0])  # cold / temperate / warm
+    radiance = k1 / (np.exp(k2 / targets) - 1.0)
+    recovered = bt_from_radiance(radiance, k1=k1, k2=k2)
+    np.testing.assert_allclose(recovered, targets, rtol=1e-12)
+
+
+def test_earth_sun_distance_perihelion_aphelion() -> None:
+    """Perihelion (~Jan 3) gives d ≈ 0.983; aphelion (~Jul 4) gives d ≈ 1.017."""
+    d_perihelion = earth_sun_distance_correction_factor(datetime(2024, 1, 3))
+    d_aphelion = earth_sun_distance_correction_factor(datetime(2024, 7, 4))
+    np.testing.assert_allclose(d_perihelion, 0.9833, atol=1e-3)
+    np.testing.assert_allclose(d_aphelion, 1.0167, atol=1e-3)
+    # Inverse-square irradiance ratio matches the well-known ~6.5%.
+    ratio = (d_aphelion / d_perihelion) ** 2
+    np.testing.assert_allclose(ratio, 1.069, atol=2e-3)
+
+
+def test_observation_date_correction_factor_from_sza() -> None:
+    """``π·d²/cos(θ_z)`` factor must match the algebraic formula."""
+    date = datetime(2024, 6, 21)
+    sza_deg = 30.0
+    out = observation_date_correction_factor(date, sza_deg=sza_deg)
+    d = earth_sun_distance_correction_factor(date)
+    expected = np.pi * (d**2) / np.cos(np.deg2rad(sza_deg))
+    np.testing.assert_allclose(out, expected, rtol=1e-12)
+
+
+def test_observation_date_correction_factor_returns_none_without_inputs() -> None:
+    """No sza_deg and no center_coords -> defer to georeader (return None)."""
+    out = observation_date_correction_factor(datetime(2024, 6, 21))
+    assert out is None
+
+
+def test_dos1_subtracts_dark_percentile() -> None:
+    reflectance = np.array([[[0.02, 0.10], [0.20, 0.30]]])
+    out = dos1(reflectance, dark_percentile=0.0)
+    np.testing.assert_allclose(out, [[[0.0, 0.08], [0.18, 0.28]]])
+
+
 # ---------------------------------------------------------------------------
 # Tier-B — Operator + GeoTensor round-trip
 # ---------------------------------------------------------------------------
@@ -188,6 +270,14 @@ def test_dn_to_radiance_per_band(dn_4band: GeoTensor) -> None:
     dn = np.asarray(dn_4band)
     for b in range(4):
         np.testing.assert_allclose(arr[b], gains[b] * dn[b] + offsets[b])
+
+
+def test_radiance_to_dn_operator_inverts_dn_to_radiance(dn_4band: GeoTensor) -> None:
+    gains = np.array([0.01, 0.02, 0.015, 0.012])
+    offsets = np.array([-1.0, -2.0, -1.5, -1.2])
+    radiance = DNToRadiance(gain=gains, offset=offsets, scale=2.0)(dn_4band)
+    out = RadianceToDN(gain=gains, offset=offsets, scale=2.0)(radiance)
+    np.testing.assert_allclose(np.asarray(out), np.asarray(dn_4band))
 
 
 def test_dn_to_radiance_rejects_wrong_band_count(dn_4band: GeoTensor) -> None:
@@ -236,9 +326,226 @@ def test_radiometry_pipeline_composes(dn_4band: GeoTensor) -> None:
     assert np.all(np.asarray(out) <= 1.0)
 
 
+def test_radiance_reflectance_roundtrip_preserves_metadata() -> None:
+    radiance = _toy_geotensor(
+        np.array(
+            [
+                [[10.0, 12.0], [14.0, 16.0]],
+                [[20.0, 22.0], [24.0, 26.0]],
+            ]
+        )
+    )
+    date = datetime(2024, 7, 14, 11, 32)
+    solar_irradiance = np.array([1.95, 1.85])
+    to_reflectance = RadianceToReflectance(
+        solar_irradiance=solar_irradiance,
+        acquisition_date=date,
+        sza_deg=30.0,
+        units="W/m2/sr/nm",
+    )
+    to_radiance = ReflectanceToRadiance(
+        solar_irradiance=solar_irradiance,
+        acquisition_date=date,
+        sza_deg=30.0,
+    )
+    out = to_radiance(to_reflectance(radiance))
+    np.testing.assert_allclose(np.asarray(out), np.asarray(radiance), rtol=1e-12)
+    assert out.transform == radiance.transform
+
+
+def test_earth_sun_distance_correction_operator() -> None:
+    date = datetime(2024, 1, 3)
+    out = EarthSunDistanceCorrection(acquisition_date=date)()
+    expected = earth_sun_distance_correction_factor(date)
+    np.testing.assert_allclose(out, expected)
+
+
+def test_bt_from_radiance_operator_preserves_fill() -> None:
+    radiance = _toy_geotensor(np.array([[[10.0, 0.0], [12.0, 14.0]]]))
+    op = BTFromRadiance(K1=774.8853, K2=1321.0789)
+    out = op(radiance)
+    assert np.asarray(out)[0, 0, 1] == radiance.fill_value_default
+    expected = 1321.0789 / np.log((774.8853 / 10.0) + 1.0)
+    np.testing.assert_allclose(np.asarray(out)[0, 0, 0], expected)
+
+
+def test_dos1_operator_preserves_fill() -> None:
+    reflectance = _toy_geotensor(np.array([[[0.02, 0.0], [0.10, 0.20]]]))
+    out = DOS1(dark_percentile=0.0)(reflectance)
+    np.testing.assert_allclose(np.asarray(out), [[[0.0, 0.0], [0.08, 0.18]]])
+
+
+def test_simple_atmospheric_correction_dos1() -> None:
+    reflectance = _toy_geotensor(np.array([[[0.02, 0.10], [0.20, 0.30]]]))
+    out = SimpleAtmosphericCorrection(method="dos1", dark_percentile=0.0)(reflectance)
+    np.testing.assert_allclose(np.asarray(out), [[[0.0, 0.08], [0.18, 0.28]]])
+
+
+def test_apply_srf_flat_spectrum_preserves_flat_signal() -> None:
+    hyperspectral = _toy_geotensor(np.ones((5, 2, 2), dtype=np.float32) * 7.0)
+    out = ApplySRF(
+        target_center_wavelengths=[500.0, 520.0],
+        target_fwhm=[20.0, 20.0],
+        source_wavelengths=[480.0, 490.0, 500.0, 510.0, 520.0],
+    )(hyperspectral)
+    assert out.shape == (2, 2, 2)
+    np.testing.assert_allclose(np.asarray(out), 7.0)
+
+
+def test_apply_srf_preserves_per_band_validity_under_partial_fill() -> None:
+    """A target band whose SRF has *no* weight on a fill source band
+    must remain finite (non-fill) at pixels where that unrelated source
+    band is fill. The previous global "any source fill -> fill all
+    targets" mask was too aggressive (Codex P1 review on PR #37).
+    """
+    # Source bands far apart in wavelength: 450, 550, 650, 750 nm.
+    # Targets centred at 450 and 750 with narrow FWHM=10 → each target's
+    # SRF support is entirely one source band (no overlap).
+    source_wavelengths = [450.0, 550.0, 650.0, 750.0]
+    values = np.full((4, 2, 2), 5.0, dtype=np.float32)
+    # Pixel (0, 0) is fill in source band 1 (550 nm) only. This band
+    # has zero SRF weight on both target bands (450 and 750), so both
+    # target outputs at (0, 0) must remain non-fill.
+    values[1, 0, 0] = 0.0  # fill_value_default for this fixture is 0
+    hyperspectral = _toy_geotensor(values)
+    out = ApplySRF(
+        target_center_wavelengths=[450.0, 750.0],
+        target_fwhm=[10.0, 10.0],
+        source_wavelengths=source_wavelengths,
+    )(hyperspectral)
+    out_arr = np.asarray(out)
+    # Both target bands should have finite, non-zero output at (0, 0)
+    # because the fill pixel in source band 1 does not contribute to
+    # either target's SRF.
+    assert out_arr[0, 0, 0] != 0.0, (
+        "target band 0 should not be fill at (0,0): "
+        "source band 1 (fill) has no SRF weight on it"
+    )
+    assert out_arr[1, 0, 0] != 0.0, (
+        "target band 1 should not be fill at (0,0): "
+        "source band 1 (fill) has no SRF weight on it"
+    )
+    # And the actual aggregated value should reflect the valid source
+    # bands (which are all 5.0), so the SRF integral should yield 5.0.
+    np.testing.assert_allclose(out_arr[0, 0, 0], 5.0, rtol=1e-5)
+    np.testing.assert_allclose(out_arr[1, 0, 0], 5.0, rtol=1e-5)
+
+
+def test_apply_srf_propagates_fill_on_contributing_source_band() -> None:
+    """Conversely, if a *contributing* source band is fill at a pixel,
+    the corresponding target band must become fill at that pixel.
+    """
+    source_wavelengths = [450.0, 550.0, 650.0, 750.0]
+    values = np.full((4, 2, 2), 5.0, dtype=np.float32)
+    # Pixel (1, 1) is fill in source band 0 (450 nm). This is the only
+    # band contributing to target 0 (centred at 450, FWHM 10), so
+    # target 0 at (1, 1) must become fill. Target 1 (750 nm) is
+    # unaffected and must stay finite.
+    values[0, 1, 1] = 0.0
+    hyperspectral = _toy_geotensor(values)
+    out = ApplySRF(
+        target_center_wavelengths=[450.0, 750.0],
+        target_fwhm=[10.0, 10.0],
+        source_wavelengths=source_wavelengths,
+    )(hyperspectral)
+    out_arr = np.asarray(out)
+    assert out_arr[0, 1, 1] == 0.0, "fill should propagate to contributing target"
+    assert out_arr[1, 1, 1] != 0.0, "non-contributing target must remain valid"
+
+
+def test_integrated_irradiance_operator_with_flat_solar_spectrum() -> None:
+    srf_df = pd.DataFrame({"B1": [1.0, 1.0, 1.0]}, index=[499.0, 500.0, 501.0])
+    solar = pd.DataFrame(
+        {
+            "Nanometer": [499.0, 500.0, 501.0],
+            "Radiance(mW/m2/nm)": [2.0, 2.0, 2.0],
+        }
+    )
+    out = IntegratedIrradiance(srf=srf_df, solar_irradiance=solar)()
+    np.testing.assert_allclose(out, [2.0])
+
+
 # ---------------------------------------------------------------------------
 # Parity with georeader.reflectance (smoke check on a synthetic radiance)
 # ---------------------------------------------------------------------------
+
+
+def test_radiance_to_reflectance_parity_with_georeader() -> None:
+    """`RadianceToReflectance` must produce exactly the values that come
+    out of `georeader.reflectance.radiance_to_reflectance` when given
+    the same inputs — the operator is a thin wrapper, so any drift
+    would mean the wrapper is double-applying a correction (a class of
+    bug we explicitly want to rule out).
+    """
+    from georeader.reflectance import radiance_to_reflectance as g_r2r
+
+    radiance = _toy_geotensor(
+        np.array(
+            [
+                [[10.0, 12.0], [14.0, 16.0]],
+                [[20.0, 22.0], [24.0, 26.0]],
+            ]
+        )
+    )
+    date = datetime(2024, 7, 14, 11, 32)
+    solar = np.array([1.95, 1.85])
+    sza_deg = 30.0
+    # Same observation-date factor on both sides — bypasses pysolar so
+    # the comparison is hermetic.
+    obs_factor = observation_date_correction_factor(date, sza_deg=sza_deg)
+    expected = g_r2r(
+        radiance,
+        solar_irradiance=solar,
+        observation_date_corr_factor=obs_factor,
+        units="W/m2/sr/nm",
+    )
+    op = RadianceToReflectance(
+        solar_irradiance=solar,
+        acquisition_date=date,
+        sza_deg=sza_deg,
+        units="W/m2/sr/nm",
+    )
+    out = op(radiance)
+    np.testing.assert_allclose(np.asarray(out), np.asarray(expected), rtol=1e-12)
+    assert out.transform == radiance.transform
+    assert str(out.crs) == str(radiance.crs)
+
+
+def test_radiance_to_reflectance_accepts_iso_string_for_yaml_roundtrip() -> None:
+    """`acquisition_date` must accept either a datetime or an ISO string
+    so that hydra-zen / YAML configs can round-trip without datetime
+    serialisers.
+    """
+    date = datetime(2024, 7, 14, 11, 32)
+    radiance = _toy_geotensor(np.ones((2, 2, 2)) * 5.0)
+    solar = np.array([1.95, 1.85])
+    out_dt = RadianceToReflectance(
+        solar_irradiance=solar,
+        acquisition_date=date,
+        sza_deg=30.0,
+    )(radiance)
+    out_iso = RadianceToReflectance(
+        solar_irradiance=solar,
+        acquisition_date=date.isoformat(),
+        sza_deg=30.0,
+    )(radiance)
+    np.testing.assert_allclose(np.asarray(out_iso), np.asarray(out_dt))
+
+
+def test_compute_sza_operator_summer_solstice_noon() -> None:
+    """Solar noon at the equator on the summer solstice gives SZA ≈ 23.4°
+    (the Earth's axial tilt). Loose tolerance because pysolar applies
+    higher-order corrections (equation of time, atmospheric refraction).
+    """
+    pytest.importorskip("pysolar")
+    # June 21 ~12:00 UTC at 0°N, 0°E -- close to local solar noon.
+    # pysolar requires a tz-aware datetime.
+    op = ComputeSZA(
+        center_coords=(0.0, 0.0),
+        acquisition_date=datetime(2024, 6, 21, 12, 0, tzinfo=UTC),
+    )
+    sza = op()
+    assert 22.0 < sza < 25.0
 
 
 def test_dn_to_reflectance_parity_with_georeader_scalar_path() -> None:
@@ -272,12 +579,36 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
     [
         ToFloat32(),
         DNToRadiance(gain=0.012, offset=-60.0),
+        RadianceToDN(gain=0.012, offset=-60.0),
         DNToReflectance(scale=1e-4),
         DNToReflectance(scale=1e-4, offset=-0.1),  # S2 L1C post-2022
         DNToReflectance(scale=2.75e-5, offset=-0.2),  # Landsat-8/9 C2 SR
         MinMax(vmin=0.0, vmax=0.3),
         PercentileClip(p_min=2.0, p_max=98.0),
+        BTFromRadiance(K1=774.8853, K2=1321.0789),
+        DOS1(dark_percentile=1.0),
+        SimpleAtmosphericCorrection(method="dos1", dark_percentile=1.0),
         Gamma(g=1.4),
+        EarthSunDistanceCorrection(acquisition_date=datetime(2024, 6, 21)),
+        ComputeSZA(
+            center_coords=(0.0, 0.0),
+            acquisition_date=datetime(2024, 6, 21, 12, 0),
+        ),
+        RadianceToReflectance(
+            solar_irradiance=[1.95, 1.85],
+            acquisition_date=datetime(2024, 6, 21),
+            sza_deg=30.0,
+        ),
+        ReflectanceToRadiance(
+            solar_irradiance=[1.95, 1.85],
+            acquisition_date=datetime(2024, 6, 21),
+            sza_deg=30.0,
+        ),
+        ApplySRF(
+            target_center_wavelengths=[500.0, 520.0],
+            target_fwhm=[20.0, 20.0],
+            source_wavelengths=[480.0, 490.0, 500.0, 510.0, 520.0],
+        ),
     ],
 )
 def test_radiometry_hydra_zen_roundtrip(op: object) -> None:
@@ -285,6 +616,13 @@ def test_radiometry_hydra_zen_roundtrip(op: object) -> None:
     restored = hydra_zen.instantiate(cfg)
     assert type(restored) is type(op)
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+def test_integrated_irradiance_forbid_in_yaml() -> None:
+    """`IntegratedIrradiance` holds a pandas DataFrame and is correctly
+    flagged as not YAML-serialisable.
+    """
+    assert IntegratedIrradiance.forbid_in_yaml is True
 
 
 @pytest.mark.skipif(hydra_zen is None, reason="requires hydra-zen extra")
