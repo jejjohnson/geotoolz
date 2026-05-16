@@ -371,7 +371,12 @@ class BAPComposite(Operator):
 
 
 class MinCloudComposite(Operator):
-    """Pick pixels from the least-cloudy clear frame available."""
+    """Pick pixels from the least-cloudy clear frame available.
+
+    Pixels that are cloudy in every frame fall back to the globally
+    least-cloudy frame, preserving a complete composite when no clear
+    observation exists for that pixel.
+    """
 
     def __init__(self, *, return_count: bool = False) -> None:
         self.return_count = return_count

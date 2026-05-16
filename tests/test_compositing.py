@@ -78,6 +78,15 @@ def test_max_ndvi_composite_returns_frame_with_peak_ndvi() -> None:
     np.testing.assert_array_equal(np.asarray(index), np.ones((2, 2), dtype=np.int64))
 
 
+def test_max_ndvi_composite_outputs_nan_when_all_ndvi_is_invalid() -> None:
+    scene1 = _gt(np.full((2, 2, 2), np.nan, dtype=np.float32))
+    scene2 = _gt(np.full((2, 2, 2), np.nan, dtype=np.float32))
+
+    out = MaxNDVIComposite(red=0, nir=1)([scene1, scene2])
+
+    assert np.isnan(np.asarray(out)).all()
+
+
 def test_cloud_free_composite_respects_masks_and_min_valid() -> None:
     scene1 = _gt(np.array([[[1.0, 2.0], [3.0, 4.0]]], dtype=np.float32))
     scene2 = _gt(np.array([[[10.0, 20.0], [30.0, 40.0]]], dtype=np.float32))
@@ -142,15 +151,33 @@ def test_min_cloud_composite_prefers_clear_pixels_from_least_cloudy_frame() -> N
     np.testing.assert_array_equal(np.asarray(count), [[[2, 1], [1, 1]]])
 
 
-def test_composites_raise_on_mismatched_grid() -> None:
+@pytest.mark.parametrize(
+    ("operator", "payload"),
+    [
+        (MedianComposite(), "frames"),
+        (MaxNDVIComposite(red=0, nir=0), "frames"),
+        (CloudFreeComposite(), "masks"),
+        (BAPComposite(target_doy=196), "metadata"),
+        (MinCloudComposite(), "masks"),
+    ],
+)
+def test_composites_raise_on_mismatched_grid(operator: object, payload: str) -> None:
     base = _gt(np.ones((1, 2, 2), dtype=np.float32))
     shifted = _gt(
         np.ones((1, 2, 2), dtype=np.float32),
         transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 0.0),
     )
+    inputs = {
+        "frames": [base, shifted],
+        "masks": [
+            (base, np.zeros((2, 2), dtype=bool)),
+            (shifted, np.zeros((2, 2), dtype=bool)),
+        ],
+        "metadata": [(base, {}), (shifted, {})],
+    }[payload]
 
     with pytest.raises(ValueError, match="shape, transform, and CRS"):
-        MedianComposite()([base, shifted])
+        operator(inputs)  # type: ignore[operator]
 
 
 def test_partial_composite_matches_single_shot_median() -> None:
