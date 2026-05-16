@@ -392,6 +392,67 @@ def test_apply_srf_flat_spectrum_preserves_flat_signal() -> None:
     np.testing.assert_allclose(np.asarray(out), 7.0)
 
 
+def test_apply_srf_preserves_per_band_validity_under_partial_fill() -> None:
+    """A target band whose SRF has *no* weight on a fill source band
+    must remain finite (non-fill) at pixels where that unrelated source
+    band is fill. The previous global "any source fill -> fill all
+    targets" mask was too aggressive (Codex P1 review on PR #37).
+    """
+    # Source bands far apart in wavelength: 450, 550, 650, 750 nm.
+    # Targets centred at 450 and 750 with narrow FWHM=10 → each target's
+    # SRF support is entirely one source band (no overlap).
+    source_wavelengths = [450.0, 550.0, 650.0, 750.0]
+    values = np.full((4, 2, 2), 5.0, dtype=np.float32)
+    # Pixel (0, 0) is fill in source band 1 (550 nm) only. This band
+    # has zero SRF weight on both target bands (450 and 750), so both
+    # target outputs at (0, 0) must remain non-fill.
+    values[1, 0, 0] = 0.0  # fill_value_default for this fixture is 0
+    hyperspectral = _toy_geotensor(values)
+    out = ApplySRF(
+        target_center_wavelengths=[450.0, 750.0],
+        target_fwhm=[10.0, 10.0],
+        source_wavelengths=source_wavelengths,
+    )(hyperspectral)
+    out_arr = np.asarray(out)
+    # Both target bands should have finite, non-zero output at (0, 0)
+    # because the fill pixel in source band 1 does not contribute to
+    # either target's SRF.
+    assert out_arr[0, 0, 0] != 0.0, (
+        "target band 0 should not be fill at (0,0): "
+        "source band 1 (fill) has no SRF weight on it"
+    )
+    assert out_arr[1, 0, 0] != 0.0, (
+        "target band 1 should not be fill at (0,0): "
+        "source band 1 (fill) has no SRF weight on it"
+    )
+    # And the actual aggregated value should reflect the valid source
+    # bands (which are all 5.0), so the SRF integral should yield 5.0.
+    np.testing.assert_allclose(out_arr[0, 0, 0], 5.0, rtol=1e-5)
+    np.testing.assert_allclose(out_arr[1, 0, 0], 5.0, rtol=1e-5)
+
+
+def test_apply_srf_propagates_fill_on_contributing_source_band() -> None:
+    """Conversely, if a *contributing* source band is fill at a pixel,
+    the corresponding target band must become fill at that pixel.
+    """
+    source_wavelengths = [450.0, 550.0, 650.0, 750.0]
+    values = np.full((4, 2, 2), 5.0, dtype=np.float32)
+    # Pixel (1, 1) is fill in source band 0 (450 nm). This is the only
+    # band contributing to target 0 (centred at 450, FWHM 10), so
+    # target 0 at (1, 1) must become fill. Target 1 (750 nm) is
+    # unaffected and must stay finite.
+    values[0, 1, 1] = 0.0
+    hyperspectral = _toy_geotensor(values)
+    out = ApplySRF(
+        target_center_wavelengths=[450.0, 750.0],
+        target_fwhm=[10.0, 10.0],
+        source_wavelengths=source_wavelengths,
+    )(hyperspectral)
+    out_arr = np.asarray(out)
+    assert out_arr[0, 1, 1] == 0.0, "fill should propagate to contributing target"
+    assert out_arr[1, 1, 1] != 0.0, "non-contributing target must remain valid"
+
+
 def test_integrated_irradiance_operator_with_flat_solar_spectrum() -> None:
     srf_df = pd.DataFrame({"B1": [1.0, 1.0, 1.0]}, index=[499.0, 500.0, 501.0])
     solar = pd.DataFrame(

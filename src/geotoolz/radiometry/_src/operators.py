@@ -733,13 +733,56 @@ class ApplySRF(Operator):
             epsilon_srf=self.epsilon_srf,
             extrapolate=self.extrapolate,
         )
-        # Propagate fill-value masks: any pixel that was fill in any
-        # source band becomes fill in every target band.
+        # Propagate fill-value masks per target band. Each target band's
+        # SRF only depends on a subset of source bands (those covered by
+        # wavelengths with non-negligible SRF weight); a target band
+        # must become fill only when one of its *contributing* source
+        # bands is fill at that pixel — not when any unrelated source
+        # band happens to be fill.
         fill_value = gt.fill_value_default
         if fill_value is not None:
-            missing = np.any(np.asarray(gt) == fill_value, axis=0)
-            out[:, missing] = fill_value
+            src = np.asarray(gt)
+            src_invalid = src == fill_value  # (n_src, H, W)
+            support = self._source_band_support(srf_df, source_wavelengths)
+            # invalid[j, h, w] = any contributing source band is fill
+            invalid = (
+                np.einsum(
+                    "ji,ihw->jhw",
+                    support.astype(np.int64),
+                    src_invalid.astype(np.int64),
+                )
+                > 0
+            )
+            out[invalid] = fill_value
         return gt.array_as_geotensor(out)
+
+    def _source_band_support(
+        self,
+        srf_df: pd.DataFrame,
+        source_wavelengths: np.ndarray,
+    ) -> np.ndarray:
+        """Boolean (n_target, n_source) matrix of SRF support.
+
+        ``support[j, i]`` is ``True`` iff source band ``i`` is the
+        nearest source band for at least one SRF wavelength where the
+        target band ``j`` has weight above ``epsilon_srf``. This
+        mirrors the per-target source-band selection inside
+        ``transform_to_srf``.
+        """
+        n_target = srf_df.shape[1]
+        n_source = source_wavelengths.shape[0]
+        # Nearest source-band index per SRF wavelength.
+        nearest = np.abs(
+            srf_df.index.to_numpy()[:, None] - source_wavelengths[None, :]
+        ).argmin(axis=1)
+        weights = srf_df.to_numpy()  # (n_wavelength, n_target)
+        support = np.zeros((n_target, n_source), dtype=bool)
+        for j in range(n_target):
+            active = weights[:, j] > self.epsilon_srf
+            if not np.any(active):
+                continue
+            support[j, np.unique(nearest[active])] = True
+        return support
 
     def get_config(self) -> dict[str, Any]:
         return {
