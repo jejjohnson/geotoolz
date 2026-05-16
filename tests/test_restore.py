@@ -180,7 +180,9 @@ def test_gap_fill_idw_high_power_matches_nearest_operator() -> None:
     gt = _toy_geotensor(arr)
     nearest = GapFillNearest(max_distance=2)(gt)
     idw = GapFillIDW(power=128.0, radius=2)(gt)
+    boundary = GapFillIDW(power=64.0, radius=2)(gt)
     np.testing.assert_array_equal(np.asarray(idw), np.asarray(nearest))
+    np.testing.assert_array_equal(np.asarray(boundary), np.asarray(nearest))
     np.testing.assert_array_equal(
         gap_fill_idw(arr, power=64.0, radius=2),
         gap_fill_nearest(arr, max_distance=2),

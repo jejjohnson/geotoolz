@@ -79,6 +79,8 @@ def destripe_column(
     values = np.asarray(arr, dtype=float)
     if values.ndim < 2:
         raise ValueError("destripe_column expects at least two spatial dimensions")
+    if method not in {"mean", "median", "moment_matching"}:
+        raise ValueError("method must be 'mean', 'median', or 'moment_matching'")
     spatial_axis = -1 if axis == "column" else -2
     reduce_axis = -2 if axis == "column" else -1
     reducer = np.nanmedian if method == "median" else np.nanmean
@@ -216,8 +218,8 @@ def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.
     back to nearest-neighbour filling because very large powers converge
     to nearest-neighbour weights while risking overflow.
     """
-    # Very large IDW powers converge to nearest-neighbour but risk overflow,
-    # so delegate to the nearest-neighbour implementation.
+    # Powers >= _IDW_POWER_THRESHOLD converge to nearest-neighbour but risk
+    # overflow, so delegate to the nearest-neighbour implementation.
     if power >= _IDW_POWER_THRESHOLD:
         return gap_fill_nearest(arr, max_distance=radius)
     values = np.asarray(arr, dtype=float)
