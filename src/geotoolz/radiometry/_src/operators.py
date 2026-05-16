@@ -254,7 +254,7 @@ class DNToReflectance(Operator):
         }
 
 
-def _observation_date_corr_factor(
+def _solar_geometry_correction_factor(
     acquisition_date: datetime,
     sza_deg: float | None,
 ) -> float | None:
@@ -291,7 +291,7 @@ class RadianceToReflectance(Operator):
             date_of_acquisition=self.acquisition_date,
             center_coords=self.center_coords,
             crs_coords=self.crs_coords,
-            observation_date_corr_factor=_observation_date_corr_factor(
+            observation_date_corr_factor=_solar_geometry_correction_factor(
                 self.acquisition_date, self.sza_deg
             ),
             units=self.units,
@@ -334,7 +334,7 @@ class ReflectanceToRadiance(Operator):
             date_of_acquisition=self.acquisition_date,
             center_coords=self.center_coords,
             crs_coords=self.crs_coords,
-            observation_date_corr_factor=_observation_date_corr_factor(
+            observation_date_corr_factor=_solar_geometry_correction_factor(
                 self.acquisition_date, self.sza_deg
             ),
         )
@@ -356,7 +356,7 @@ class EarthSunDistanceCorrection(Operator):
     def __init__(self, *, acquisition_date: datetime) -> None:
         self.acquisition_date = acquisition_date
 
-    def _apply(self, _gt: Any | None = None) -> float:
+    def _apply(self, _input: Any | None = None) -> float:
         return float(earth_sun_distance_correction_factor(self.acquisition_date))
 
     def get_config(self) -> dict[str, Any]:
@@ -377,7 +377,7 @@ class ComputeSZA(Operator):
         self.acquisition_date = acquisition_date
         self.crs_coords = crs_coords
 
-    def _apply(self, _gt: Any | None = None) -> float:
+    def _apply(self, _input: Any | None = None) -> float:
         return float(
             compute_sza(
                 self.center_coords,
@@ -408,7 +408,7 @@ class IntegratedIrradiance(Operator):
         self.solar_irradiance = solar_irradiance
         self.epsilon_srf = epsilon_srf
 
-    def _apply(self, _gt: Any | None = None) -> np.ndarray:
+    def _apply(self, _input: Any | None = None) -> np.ndarray:
         solar_irradiance = (
             load_thuillier_irradiance()
             if self.solar_irradiance is None
@@ -557,7 +557,8 @@ class SimpleAtmosphericCorrection(Operator):
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         if self.method.lower() != "dos1":
             raise NotImplementedError(
-                "SimpleAtmosphericCorrection currently supports only method='dos1'"
+                "SimpleAtmosphericCorrection currently supports only "
+                f"method='dos1'; got {self.method!r}"
             )
         return DOS1(dark_percentile=self.dark_percentile)(gt)
 

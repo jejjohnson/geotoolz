@@ -23,6 +23,7 @@ from geotoolz.radiometry import (
     DNToReflectance,
     EarthSunDistanceCorrection,
     Gamma,
+    IntegratedIrradiance,
     MinMax,
     PercentileClip,
     RadianceToDN,
@@ -346,8 +347,6 @@ def test_apply_srf_flat_spectrum_preserves_flat_signal() -> None:
 
 
 def test_integrated_irradiance_operator_with_flat_solar_spectrum() -> None:
-    from geotoolz.radiometry import IntegratedIrradiance
-
     srf_df = pd.DataFrame({"B1": [1.0, 1.0, 1.0]}, index=[499.0, 500.0, 501.0])
     solar = pd.DataFrame(
         {
