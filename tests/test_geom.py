@@ -113,6 +113,31 @@ def test_array_target_slices_clips_tile_outside_target() -> None:
     assert tile_slc == (slice(0, 4), slice(0, 4))
 
 
+def test_array_target_slices_empty_when_tile_fully_past_target() -> None:
+    """Tiles fully off the target grid must return empty (non-negative) slices.
+
+    Reproduces the bug where ``target_slices`` could return slices with
+    negative starts/stops when a tile lies entirely outside the target
+    window (e.g. when ``Stitch`` is given a custom ``target_shape``
+    smaller than the union of tile bounds). Downstream blending would
+    then write into wrapped-around indices.
+    """
+    target = Affine(1, 0, 0, 0, -1, 0)
+    # Tile fully past the bottom-right of an 8x8 target.
+    past_br = Affine(1, 0, 10, 0, -1, -10)
+    out_slc, tile_slc = geom_array.target_slices(past_br, (4, 4), target, (8, 8))
+    assert out_slc == (slice(0, 0), slice(0, 0))
+    assert tile_slc == (slice(0, 0), slice(0, 0))
+    # Tile fully past the top-left (negative row/col offset).
+    past_tl = Affine(1, 0, -10, 0, -1, 10)
+    out_slc, tile_slc = geom_array.target_slices(past_tl, (4, 4), target, (8, 8))
+    assert out_slc == (slice(0, 0), slice(0, 0))
+    assert tile_slc == (slice(0, 0), slice(0, 0))
+    # All four slice bounds must be non-negative.
+    for slc in (*out_slc, *tile_slc):
+        assert slc.start >= 0 and slc.stop >= 0
+
+
 # ----------------------------------------------------------------------------
 # Tier-B: Operator round-trips
 # ----------------------------------------------------------------------------
@@ -292,6 +317,78 @@ def test_stitch_blend_modes_and_errors() -> None:
     )
     with pytest.raises(ValueError, match="north-up"):
         gz.geom.Stitch()([rotated])
+
+
+def test_stitch_validates_north_up_on_every_tile() -> None:
+    """A rotated/sheared tile in any position must raise, not just the first.
+
+    Regression: the north-up check previously only validated
+    ``tiles[0]``. A rotated later tile would silently misalign because
+    ``target_slices`` assumes axis-aligned transforms for every tile.
+    """
+    north_up = GeoTensor(
+        np.ones((1, 2, 2), dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -1, 2),
+        crs="EPSG:4326",
+    )
+    rotated = GeoTensor(
+        np.ones((1, 2, 2), dtype=np.float32),
+        transform=Affine(1, 0.1, 2, 0, -1, 2),
+        crs="EPSG:4326",
+    )
+    with pytest.raises(ValueError, match="tile 1"):
+        gz.geom.Stitch()([north_up, rotated])
+
+
+def test_stitch_handles_target_shape_smaller_than_tile_union() -> None:
+    """A custom ``target_shape`` smaller than the tile union must not error.
+
+    Regression: ``target_slices`` produced negative-bound slices for
+    tiles fully past the target window, causing the blender to wrap
+    around and write into wrong pixels. The fix clamps slices and
+    skips empty intersections.
+    """
+    crs = "EPSG:4326"
+    fill = -9999.0
+    transform = Affine(1, 0, 0, 0, -1, 4)
+    # Four 2x2 tiles tiling a 4x4 grid; we then ask for a 2x2 target.
+    tiles = [
+        GeoTensor(
+            np.full((1, 2, 2), 1.0, dtype=np.float32),
+            transform=Affine(1, 0, 0, 0, -1, 4),
+            crs=crs,
+            fill_value_default=fill,
+        ),
+        GeoTensor(
+            np.full((1, 2, 2), 2.0, dtype=np.float32),
+            transform=Affine(1, 0, 2, 0, -1, 4),
+            crs=crs,
+            fill_value_default=fill,
+        ),
+        GeoTensor(
+            np.full((1, 2, 2), 3.0, dtype=np.float32),
+            transform=Affine(1, 0, 0, 0, -1, 2),
+            crs=crs,
+            fill_value_default=fill,
+        ),
+        GeoTensor(
+            np.full((1, 2, 2), 4.0, dtype=np.float32),
+            transform=Affine(1, 0, 2, 0, -1, 2),
+            crs=crs,
+            fill_value_default=fill,
+        ),
+    ]
+    stitched = gz.geom.Stitch(
+        blend="first",
+        target_shape=(2, 2),
+        target_transform=transform,
+    )(tiles)
+    # Only the top-left tile (value 1) should contribute to a 2x2 window
+    # anchored at (0, 0); the other three are fully outside and must be
+    # silently dropped, not wrapped.
+    out = np.asarray(stitched)
+    assert out.shape == (1, 2, 2)
+    np.testing.assert_array_equal(out, np.full((1, 2, 2), 1.0, dtype=np.float32))
 
 
 def test_mosaic_methods_cover_adjacent_tiles() -> None:

@@ -153,18 +153,36 @@ def target_slices(
 
     Returns:
         ``((row_slice, col_slice), (tile_row_slice, tile_col_slice))``.
+        When the tile is fully outside the target grid (e.g. when
+        ``target_shape``/``target_transform`` describe a region smaller
+        than the union of tile bounds), all four slices are empty
+        ``slice(0, 0)`` so downstream blending becomes a no-op.
     """
     row = round((tile_transform.f - target_transform.f) / target_transform.e)
     col = round((tile_transform.c - target_transform.c) / target_transform.a)
     height, width = tile_shape
-    row0 = max(row, 0)
-    col0 = max(col, 0)
-    row1 = min(row + height, target_shape[0])
-    col1 = min(col + width, target_shape[1])
+    target_h, target_w = target_shape
+    # Clamp the output window to ``[0, target_*]`` so we never produce
+    # negative starts/stops (which numpy would silently interpret as
+    # "count from the end" and wrap around to invalid memory).
+    row0 = min(max(row, 0), target_h)
+    col0 = min(max(col, 0), target_w)
+    row1 = min(max(row + height, 0), target_h)
+    col1 = min(max(col + width, 0), target_w)
+    # Empty intersection: return empty slices for both output and tile.
+    if row1 <= row0 or col1 <= col0:
+        empty = slice(0, 0)
+        return ((empty, empty), (empty, empty))
     tile_row0 = row0 - row
     tile_col0 = col0 - col
     tile_row1 = tile_row0 + (row1 - row0)
     tile_col1 = tile_col0 + (col1 - col0)
+    # Clamp the tile window too, defensively, so a bad caller cannot
+    # index past the tile's own array bounds.
+    tile_row0 = min(max(tile_row0, 0), height)
+    tile_col0 = min(max(tile_col0, 0), width)
+    tile_row1 = min(max(tile_row1, 0), height)
+    tile_col1 = min(max(tile_col1, 0), width)
     return (
         (slice(row0, row1), slice(col0, col1)),
         (slice(tile_row0, tile_row1), slice(tile_col0, tile_col1)),

@@ -564,8 +564,12 @@ class Stitch(Operator):
         if self.blend not in {"average", "feather", "max", "first"}:
             raise ValueError("blend must be 'average', 'feather', 'max', or 'first'.")
         first = tiles[0]
-        if not is_north_up(first.transform):
-            raise ValueError("Stitch only supports north-up, non-rotated GeoTensors.")
+        for index, tile in enumerate(tiles):
+            if not is_north_up(tile.transform):
+                raise ValueError(
+                    f"Stitch only supports north-up, non-rotated GeoTensors; "
+                    f"tile {index} has a rotated/sheared transform."
+                )
         transform, shape = self._target_grid(tiles)
         fill = first.fill_value_default if self.fill is None else self.fill
         dtype = first.dtype if self.blend in {"first", "max"} else np.float32
