@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from geotoolz.normalize._src.array import (
     asinh_scale,
+    clahe,
     histogram_match,
     log_scale,
     minmax_scale,
@@ -14,6 +15,7 @@ from geotoolz.normalize._src.array import (
     standard_scale,
 )
 from geotoolz.normalize._src.operators import (
+    CLAHE,
     AsinhScale,
     HistogramMatch,
     HistogramStretch,
@@ -29,6 +31,7 @@ from geotoolz.normalize._src.operators import (
 
 
 __all__ = [
+    "CLAHE",
     "AsinhScale",
     "HistogramMatch",
     "HistogramStretch",
@@ -41,6 +44,7 @@ __all__ = [
     "StandardScaler",
     "ZeroOne",
     "asinh_scale",
+    "clahe",
     "histogram_match",
     "log_scale",
     "minmax_scale",

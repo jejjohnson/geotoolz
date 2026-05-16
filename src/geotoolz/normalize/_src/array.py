@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from skimage.exposure import equalize_adapthist
 
 
 def stat_axes(arr: np.ndarray, *, per_band: bool = True) -> tuple[int, ...] | None:
@@ -126,6 +127,57 @@ def histogram_match(source: np.ndarray, reference: np.ndarray) -> np.ndarray:
             out[band] = _match_slice(source[band], reference)
         return out
     return _match_slice(source, reference)
+
+
+def clahe(
+    arr: np.ndarray,
+    *,
+    kernel_size: int | tuple[int, int] | None = None,
+    clip_limit: float = 0.01,
+    nbins: int = 256,
+) -> np.ndarray:
+    """Apply contrast-limited adaptive histogram equalization per image band."""
+    values = np.asarray(arr, dtype=float)
+    if values.ndim >= 3:
+        return np.stack(
+            [
+                _clahe_slice(
+                    band,
+                    kernel_size=kernel_size,
+                    clip_limit=clip_limit,
+                    nbins=nbins,
+                )
+                for band in values
+            ]
+        )
+    return _clahe_slice(
+        values,
+        kernel_size=kernel_size,
+        clip_limit=clip_limit,
+        nbins=nbins,
+    )
+
+
+def _clahe_slice(
+    values: np.ndarray,
+    *,
+    kernel_size: int | tuple[int, int] | None,
+    clip_limit: float,
+    nbins: int,
+) -> np.ndarray:
+    out = np.array(values, dtype=float, copy=True)
+    valid = np.isfinite(values)
+    if not np.any(valid):
+        return out
+    fill = float(np.nanmedian(values))
+    equalized = equalize_adapthist(
+        np.where(valid, values, fill),
+        kernel_size=kernel_size,
+        clip_limit=clip_limit,
+        nbins=nbins,
+    )
+    out[valid] = equalized[valid]
+    return out
 
 
 def _match_slice(source: np.ndarray, reference: np.ndarray) -> np.ndarray:

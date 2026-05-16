@@ -72,6 +72,9 @@ def test_plume_footprint_area_and_enhancement_stats() -> None:
     assert row.n_pixels == 6
     assert row.mean_enhancement == pytest.approx(float(enhancement[mask].mean()))
     assert row.max_enhancement == pytest.approx(float(enhancement[mask].max()))
+    assert row.area == pytest.approx(6.0)
+    assert row.major_axis_length > 0.0
+    assert "bbox-0" in gdf.columns
     assert gdf.crs == "EPSG:32629"
 
     no_stats = gz.plume.PlumeFootprint(
