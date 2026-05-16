@@ -103,6 +103,8 @@ def hillshade(
     dy, dx = np.gradient(band * z_factor, abs(y_resolution), abs(x_resolution))
     slope = np.pi / 2.0 - np.arctan(np.hypot(dx, dy))
     aspect = np.arctan2(-dx, dy)
+    # Convert geographic azimuth (clockwise from north) to the mathematical
+    # angle expected by the aspect term (counter-clockwise from east).
     azimuth = np.deg2rad(360.0 - azimuth_deg + 90.0)
     altitude = np.deg2rad(altitude_deg)
     shaded = np.sin(altitude) * np.sin(slope) + np.cos(altitude) * np.cos(
@@ -150,7 +152,12 @@ def blend_rgba(
 
 
 def ensure_rgba(arr: np.ndarray) -> np.ndarray:
-    """Return ``arr`` as a four-band uint8 RGBA image."""
+    """Return ``arr`` as a four-band uint8 RGBA image.
+
+    Float inputs with all finite values in ``[0, 1]`` are scaled to byte
+    range; other numeric inputs are treated as already display-scaled and
+    clipped into ``[0, 255]``.
+    """
     values = np.asarray(arr)
     if values.ndim == 2:
         values = np.repeat(values[None, ...], 3, axis=0)

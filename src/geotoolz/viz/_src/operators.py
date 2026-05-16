@@ -315,10 +315,10 @@ class AnnotatePolygons(Operator):
 
         rgba = ensure_rgba(np.asarray(gt))
         geometries = _iter_geometries(self.geometries, dst_crs=gt.crs)
-        if not geometries:
+        if not geometries or self.width <= 0:
             return gt.array_as_geotensor(rgba, fill_value_default=0)
         pixel_size = max(abs(float(gt.transform.a)), abs(float(gt.transform.e)))
-        half_width = max(self.width, 1) * pixel_size / 2.0
+        half_width = self.width * pixel_size / 2.0
         shapes = [(geom.boundary.buffer(half_width), 1) for geom in geometries]
         mask = rasterize(
             shapes,

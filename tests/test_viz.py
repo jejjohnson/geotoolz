@@ -160,6 +160,13 @@ def test_annotate_polygons_rasterizes_polygon_outline() -> None:
     assert np.all(arr[3, arr[0] == 255] == 255)
 
 
+def test_annotate_polygons_width_zero_is_noop() -> None:
+    image = _toy_geotensor(np.zeros((3, 4, 4), dtype=np.uint8))
+    polygon = Polygon([(1, 1), (3, 1), (3, 3), (1, 3)])
+    out = AnnotatePolygons(geometries=[polygon], width=0)(image)
+    np.testing.assert_array_equal(np.asarray(out), gz.viz.ensure_rgba(image))
+
+
 def test_annotate_points_draws_marker() -> None:
     image = _toy_geotensor(np.zeros((3, 4, 4), dtype=np.uint8))
     out = AnnotatePoints(points=np.array([[1.5, 2.5]]), radius=0)(image)
