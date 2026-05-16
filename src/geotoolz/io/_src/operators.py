@@ -12,6 +12,7 @@ from georeader import read
 from georeader.geotensor import GeoTensor
 from georeader.rasterio_reader import RasterioReader
 from rasterio.errors import RasterioIOError
+from rasterio.io import DatasetReaderBase
 from rasterio.windows import Window
 from shapely.geometry import MultiPolygon, Polygon, box
 
@@ -62,7 +63,7 @@ def _coerce_source(src: Source, indexes: list[int] | None = None) -> Any:
             reader.set_indexes(indexes, relative=False)
         return reader
 
-    if indexes is not None and hasattr(src, "name"):
+    if indexes is not None and isinstance(src, DatasetReaderBase):
         return RasterioReader(src.name, indexes=indexes)
 
     if indexes is not None:
@@ -439,7 +440,7 @@ class WriteGeoTIFF(SinkOperator):
                 f"GeoTIFF output expects 2D or 3D data, found shape {arr.shape!r}."
             )
 
-        profile: dict[str, Any] = {
+        write_profile: dict[str, Any] = {
             "driver": "GTiff",
             "height": arr.shape[1],
             "width": arr.shape[2],
@@ -449,12 +450,12 @@ class WriteGeoTIFF(SinkOperator):
             "transform": gt.transform,
         }
         if gt.fill_value_default is not None:
-            profile["nodata"] = gt.fill_value_default
+            write_profile["nodata"] = gt.fill_value_default
         if self.profile is not None:
-            profile.update(self.profile)
+            write_profile.update(self.profile)
 
         try:
-            with rasterio.open(self.path, "w", **profile) as dst:
+            with rasterio.open(self.path, "w", **write_profile) as dst:
                 dst.write(arr)
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise GeoToolzIOError(

@@ -88,11 +88,13 @@ class Sequential(Operator):
         # Return type stays ``Any`` rather than ``Carrier``: a Sequential
         # may legitimately reduce (e.g. end in a ``Mean`` that returns a
         # scalar) so we can't promise the carrier shape survives.
-        if gt is _MISSING and self.operators:
+        if gt is _MISSING and not self.operators:
+            raise TypeError("Sequential([]) requires an input value.")
+        if gt is _MISSING:
             out = self.operators[0]()
             operators = self.operators[1:]
         else:
-            out = None if gt is _MISSING else gt
+            out = gt
             operators = self.operators
         for op in operators:
             out = op(out)
