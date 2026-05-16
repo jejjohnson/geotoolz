@@ -20,6 +20,10 @@ if TYPE_CHECKING:
 
 Range = tuple[float, float]
 ScalarOrRange = float | Range
+DEFAULT_MIN_WAVELENGTH_NM = 450.0
+DEFAULT_MAX_WAVELENGTH_NM = 850.0
+BRIGHT_CLOUD_PERCENTILE = 98.0
+CLOUD_ALPHA_EPSILON = 1e-12
 
 
 def _rng(seed: int | None) -> np.random.Generator:
@@ -67,6 +71,7 @@ def _band_shape(arr: np.ndarray) -> tuple[int, ...]:
 def _cast_like(out: np.ndarray, dtype: np.dtype[Any]) -> np.ndarray:
     dtype = np.dtype(dtype)
     if np.issubdtype(dtype, np.bool_):
+        # Treat boolean arrays as masks: positive augmented values remain True.
         return (out > 0).astype(dtype, copy=False)
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype.name)
@@ -505,7 +510,9 @@ class AtmosphericHaze(Operator):
 def _spectral_weights(gt: GeoTensor, n_bands: int) -> np.ndarray:
     wavelengths = gt.attrs.get("wavelengths_nm", gt.attrs.get("wavelengths"))
     if wavelengths is None:
-        wavelengths = np.linspace(450.0, 850.0, n_bands)
+        wavelengths = np.linspace(
+            DEFAULT_MIN_WAVELENGTH_NM, DEFAULT_MAX_WAVELENGTH_NM, n_bands
+        )
     wavelengths = np.asarray(wavelengths, dtype=np.float64)
     if wavelengths.size != n_bands:
         raise ValueError("wavelength metadata must have one value per band.")
@@ -544,10 +551,18 @@ class SimulatedClouds(Operator):
             field = gaussian_filter(field, sigma=self.feather, mode="reflect")
         field = (field - field.min()) / (np.ptp(field) + np.finfo(np.float64).eps)
         threshold = np.quantile(field, 1.0 - coverage)
-        alpha = np.clip((field - threshold) / (field.max() - threshold + 1e-12), 0, 1)
+        alpha = np.clip(
+            (field - threshold) / (field.max() - threshold + CLOUD_ALPHA_EPSILON),
+            0,
+            1,
+        )
         alpha = alpha.reshape((1,) * (arr.ndim - 2) + alpha.shape)
         # Assume [0, 1] reflectance if max <= 1; otherwise approximate bright clouds.
-        cloud_value = 1.0 if np.nanmax(arr) <= 1.0 else np.nanpercentile(arr, 98)
+        cloud_value = (
+            1.0
+            if np.nanmax(arr) <= 1.0
+            else np.nanpercentile(arr, BRIGHT_CLOUD_PERCENTILE)
+        )
         out = arr.astype(np.float64, copy=False) * (1.0 - alpha) + cloud_value * alpha
         return _wrap_like(gt, out)
 
