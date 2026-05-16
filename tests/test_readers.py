@@ -92,10 +92,12 @@ def test_shared_csv_loader_caches_package_data() -> None:
 def test_viirs_missing_optional_extra_error(monkeypatch: pytest.MonkeyPatch) -> None:
     real_find_spec = importlib.util.find_spec
 
-    def fake_find_spec(name: str, *args: object, **kwargs: object) -> ModuleSpec | None:
+    def fake_find_spec(
+        name: str, *find_args: object, **find_kwargs: object
+    ) -> ModuleSpec | None:
         if name == "h5py":
             return None
-        return real_find_spec(name, *args, **kwargs)
+        return real_find_spec(name, *find_args, **find_kwargs)
 
     monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
 

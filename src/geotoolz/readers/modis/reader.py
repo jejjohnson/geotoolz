@@ -13,6 +13,9 @@ from geotoolz.readers._base import SensorReader, Track, as_path
 from geotoolz.readers.modis import constants
 
 
+_DEFAULT_NUM_BANDS = 4
+
+
 class Reader(SensorReader):
     """Synthetic MODIS reader implementing the sensor-reader contract.
 
@@ -42,7 +45,9 @@ class Reader(SensorReader):
     ) -> None:
         self.path = as_path(path)
         self._data = (
-            np.zeros((4, 1, 1), dtype=np.float32) if data is None else np.asarray(data)
+            np.zeros((_DEFAULT_NUM_BANDS, 1, 1), dtype=np.float32)
+            if data is None
+            else np.asarray(data)
         )
         self._reader_transform = Affine.identity() if transform is None else transform
         self._reader_crs = crs
