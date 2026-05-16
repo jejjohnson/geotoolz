@@ -59,16 +59,15 @@ SENSOR_QA_REGISTRY: dict[str, dict[str, dict[str, tuple[int, ...]]]] = {
 }
 
 
-def _normalize_int_sequence(values: Sequence[int] | None) -> tuple[int, ...] | None:
+def _normalize_int_sequence(
+    values: Sequence[int] | None, name: str
+) -> tuple[int, ...] | None:
     if values is None:
         return None
-    return tuple(int(v) for v in values)
-
-
-def _require_non_empty(values: tuple[int, ...] | None, name: str) -> tuple[int, ...]:
-    if not values:
+    normalized = tuple(int(v) for v in values)
+    if not normalized:
         raise ValueError(f"{name} must not be empty")
-    return values
+    return normalized
 
 
 def _band_names(attrs: Mapping[str, Any]) -> Sequence[str] | Mapping[str, int] | None:
@@ -118,7 +117,7 @@ def _select_qa(gt: GeoTensor, qa_band: BandSelector, axis: int) -> np.ndarray:
 
 
 def _decode_bits(qa: np.ndarray, bits: Sequence[int], mode: str) -> np.ndarray:
-    bits_tuple = _require_non_empty(tuple(int(bit) for bit in bits), "bits")
+    bits_tuple = tuple(int(bit) for bit in bits)
     qa_arr = np.asarray(qa)
     qa_int = (
         qa_arr
@@ -135,7 +134,7 @@ def _decode_bits(qa: np.ndarray, bits: Sequence[int], mode: str) -> np.ndarray:
 
 
 def _decode_values(qa: np.ndarray, values: Sequence[int]) -> np.ndarray:
-    values_tuple = _require_non_empty(tuple(int(value) for value in values), "values")
+    values_tuple = tuple(int(value) for value in values)
     return np.isin(qa, np.asarray(values_tuple))
 
 
@@ -185,7 +184,7 @@ class DecodeBitmask(Operator):
         qa_band: BandSelector = None,
         axis: int = 0,
     ) -> None:
-        if len(bits) == 0:
+        if not bits:
             raise ValueError("DecodeBitmask: `bits` must not be empty")
         if mode not in {"any", "all"}:
             raise ValueError("mode must be 'any' or 'all'")
@@ -193,7 +192,8 @@ class DecodeBitmask(Operator):
             name: tuple(int(bit) for bit in bit_list) for name, bit_list in bits.items()
         }
         for name, bit_list in self.bits.items():
-            _require_non_empty(bit_list, f"bits[{name!r}]")
+            if not bit_list:
+                raise ValueError(f"bits[{name!r}] must not be empty")
         self.mode = mode
         self.qa_band = qa_band
         self.axis = axis
@@ -236,8 +236,8 @@ class _QAMask(Operator):
         invert: bool = False,
     ) -> None:
         self.qa_band = qa_band
-        self.bits = _normalize_int_sequence(bits)
-        self.values = _normalize_int_sequence(values)
+        self.bits = _normalize_int_sequence(bits, "bits")
+        self.values = _normalize_int_sequence(values, "values")
         if mode not in {"any", "all"}:
             raise ValueError("mode must be 'any' or 'all'")
         self.mode = mode
@@ -298,8 +298,8 @@ class MaskNoData(Operator):
         axis: int = 0,
     ) -> None:
         self.qa_band = qa_band
-        self.bits = _normalize_int_sequence(bits)
-        self.values = _normalize_int_sequence(values)
+        self.bits = _normalize_int_sequence(bits, "bits")
+        self.values = _normalize_int_sequence(values, "values")
         self.axis = axis
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
@@ -367,7 +367,7 @@ class MaskSaturated(Operator):
 
 
 def _registry_bits(sensor: str, targets: Sequence[str]) -> dict[str, tuple[int, ...]]:
-    if len(targets) == 0:
+    if not targets:
         raise ValueError(f"{sensor} QA targets must not be empty")
     sensor_def = SENSOR_QA_REGISTRY[sensor]
     out = {}

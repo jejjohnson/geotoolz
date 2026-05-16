@@ -214,10 +214,11 @@ def test_mask_nodata_requires_fill_when_not_decoding_qa() -> None:
 
 
 def test_mask_saturated_infers_integer_max() -> None:
+    max_uint16 = np.iinfo(np.uint16).max
     arr = np.array(
         [
-            [[0, np.iinfo(np.uint16).max], [2, 3]],
-            [[4, 5], [np.iinfo(np.uint16).max, 7]],
+            [[0, max_uint16], [2, 3]],
+            [[4, 5], [max_uint16, 7]],
         ],
         dtype=np.uint16,
     )
