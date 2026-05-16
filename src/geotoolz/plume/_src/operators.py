@@ -351,10 +351,7 @@ class PlumeFootprint(Operator):
         props_by_label = (
             {}
             if props.empty or "label" not in props
-            else {
-                int(row["label"]): row.drop(labels=["label"]).to_dict()
-                for _, row in props.iterrows()
-            }
+            else props.set_index("label").to_dict("index")
         )
 
         rows: list[dict[str, Any]] = []

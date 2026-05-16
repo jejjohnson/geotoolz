@@ -70,6 +70,7 @@ def test_plume_footprint_area_and_enhancement_stats() -> None:
     row = gdf.iloc[0]
     assert row.area_m2 == pytest.approx(6 * 100.0)
     assert row.n_pixels == 6
+    assert row.area_m2 == pytest.approx(row.area * 100.0)
     assert row.mean_enhancement == pytest.approx(float(enhancement[mask].mean()))
     assert row.max_enhancement == pytest.approx(float(enhancement[mask].max()))
     assert row.area == pytest.approx(6.0)

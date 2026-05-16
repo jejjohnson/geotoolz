@@ -30,6 +30,7 @@ def test_slic_returns_int_labels_and_masks_nan_pixels() -> None:
     assert labels.transform == gt.transform
     assert np.asarray(labels).dtype == np.int32
     assert np.asarray(labels)[0, 0] == 0
+    assert np.asarray(labels)[0, 1] > 0
     assert np.asarray(labels).max() > 0
 
 
