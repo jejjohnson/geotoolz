@@ -197,7 +197,22 @@ class CountryMask(PolygonMask):
 
 
 class AltitudeMask(Operator):
-    """Build a boolean mask from DEM elevation bounds."""
+    """Build a boolean mask from DEM elevation bounds.
+
+    Marks True where the carrier DEM falls inside the requested elevation
+    interval. Either bound may be ``None`` for an open-ended interval.
+
+    Args:
+        dem: Single-band ``GeoTensor`` whose spatial shape matches the
+            input scene.
+        min_elev: Inclusive lower bound (units of the DEM).
+        max_elev: Inclusive upper bound.
+
+    Examples:
+        >>> AltitudeMask(dem=dem, min_elev=500.0)(scene)  # doctest: +SKIP
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -217,8 +232,6 @@ class AltitudeMask(Operator):
         _check_spatial_match(mask, gt, "AltitudeMask")
         return gt.array_as_geotensor(mask, fill_value_default=False)
 
-    forbid_in_yaml: ClassVar[bool] = True
-
     def get_config(self) -> dict[str, Any]:
         return {
             "dem": {"shape": list(self.dem.shape), "dtype": str(self.dem.dtype)},
@@ -227,8 +240,25 @@ class AltitudeMask(Operator):
         }
 
 
-class SlopeMask(AltitudeMask):
-    """Build a boolean mask from DEM slope bounds in degrees."""
+class SlopeMask(Operator):
+    """Build a boolean mask from DEM slope bounds in degrees.
+
+    Slope is computed from the DEM with central differences scaled by
+    the DEM pixel size; True where the slope (degrees) falls inside
+    the requested interval.
+
+    Args:
+        dem: Single-band ``GeoTensor`` whose spatial shape matches the
+            input scene and whose pixel size is in the same units as
+            the elevation values.
+        min_slope_deg: Inclusive lower bound, degrees.
+        max_slope_deg: Inclusive upper bound, degrees.
+
+    Examples:
+        >>> SlopeMask(dem=dem, max_slope_deg=10.0)(scene)  # doctest: +SKIP
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -260,7 +290,15 @@ class SlopeMask(AltitudeMask):
 
 
 class DilateMask(Operator):
-    """Dilate a boolean mask over its trailing spatial axes."""
+    """Dilate a boolean mask over its trailing spatial axes.
+
+    Wraps :func:`scipy.ndimage.binary_dilation`. The structuring element
+    defaults to a 3x3 box (8-connectivity). Stacks of masks of shape
+    ``(C, H, W)`` are processed per channel.
+
+    Examples:
+        >>> DilateMask(iterations=2)(mask)  # doctest: +SKIP
+    """
 
     def __init__(
         self, *, iterations: int = 1, structure: np.ndarray | None = None
@@ -276,16 +314,39 @@ class DilateMask(Operator):
         return _morph_config(self.iterations, self.structure)
 
 
-class ErodeMask(DilateMask):
-    """Erode a boolean mask over its trailing spatial axes."""
+class ErodeMask(Operator):
+    """Erode a boolean mask over its trailing spatial axes.
+
+    Wraps :func:`scipy.ndimage.binary_erosion`; see :class:`DilateMask`
+    for the structuring-element convention.
+
+    Examples:
+        >>> ErodeMask(iterations=1)(mask)  # doctest: +SKIP
+    """
+
+    def __init__(
+        self, *, iterations: int = 1, structure: np.ndarray | None = None
+    ) -> None:
+        self.iterations = iterations
+        self.structure = structure
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = erode_mask(np.asarray(mask), self.iterations, self.structure)
         return _wrap_like(mask, out)
 
+    def get_config(self) -> dict[str, Any]:
+        return _morph_config(self.iterations, self.structure)
+
 
 class OpenMask(Operator):
-    """Open a boolean mask over its trailing spatial axes."""
+    """Open (erode then dilate) a boolean mask.
+
+    Wraps :func:`scipy.ndimage.binary_opening`. Useful for removing
+    isolated True pixels (salt) while preserving large True components.
+
+    Examples:
+        >>> OpenMask(iterations=1)(mask)  # doctest: +SKIP
+    """
 
     def __init__(self, *, iterations: int = 1) -> None:
         self.iterations = iterations
@@ -298,12 +359,25 @@ class OpenMask(Operator):
         return {"iterations": self.iterations}
 
 
-class CloseMask(OpenMask):
-    """Close a boolean mask over its trailing spatial axes."""
+class CloseMask(Operator):
+    """Close (dilate then erode) a boolean mask.
+
+    Wraps :func:`scipy.ndimage.binary_closing`. Useful for filling
+    pin-holes (pepper) inside otherwise solid True regions.
+
+    Examples:
+        >>> CloseMask(iterations=1)(mask)  # doctest: +SKIP
+    """
+
+    def __init__(self, *, iterations: int = 1) -> None:
+        self.iterations = iterations
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = close_mask(np.asarray(mask), self.iterations)
         return _wrap_like(mask, out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"iterations": self.iterations}
 
 
 class BufferMask(Operator):
@@ -408,7 +482,32 @@ class InvertMask(Operator):
 
 
 class ApplyMask(Operator):
-    """Apply a boolean mask to a GeoTensor, filling True pixels."""
+    """Apply a boolean mask to a GeoTensor, filling True pixels.
+
+    Mirrors :class:`geotoolz.cloud.ApplyMask` but lives in the ``mask``
+    namespace so geometry / morphology / algebra pipelines can compose
+    without importing the cloud submodule. Delegates the actual masking
+    to :func:`geotoolz.cloud._src.array.apply_mask` so the broadcasting
+    + dtype-preservation rules stay in one place.
+
+    Convention: the mask is True where pixels should be *masked out*.
+    Geometry masks built with ``inside=True`` return True *inside* the
+    polygon, so use ``invert=True`` to keep only the polygon interior
+    (or build the geometry mask with ``inside=False``).
+
+    Args:
+        mask: Boolean array, ``GeoTensor``, or ``Operator`` producing
+            one when called on the input.
+        fill_value: Value substituted where the mask says "drop".
+            Default ``np.nan``.
+        invert: Flip the mask before applying it.
+
+    Examples:
+        >>> import geotoolz as gz, numpy as np
+        >>> aoi = gz.mask.BBoxMask(bounds=(1.0, 1.0, 3.0, 3.0))
+        >>> keep_aoi = gz.mask.ApplyMask(mask=aoi, invert=True)
+        >>> out = keep_aoi(scene)  # doctest: +SKIP
+    """
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -416,11 +515,11 @@ class ApplyMask(Operator):
         self,
         *,
         mask: Operator | np.ndarray | Any,
-        fill: float = float("nan"),
+        fill_value: float = float("nan"),
         invert: bool = False,
     ) -> None:
         self.mask = mask
-        self.fill = fill
+        self.fill_value = fill_value
         self.invert = invert
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
@@ -428,7 +527,7 @@ class ApplyMask(Operator):
             self.mask(gt) if isinstance(self.mask, Operator) else self.mask
         )
         out = apply_mask(
-            np.asarray(gt), mask_arr, fill_value=self.fill, invert=self.invert
+            np.asarray(gt), mask_arr, fill_value=self.fill_value, invert=self.invert
         )
         return gt.array_as_geotensor(out)
 
@@ -445,7 +544,11 @@ class ApplyMask(Operator):
                 "shape": list(arr.shape),
                 "dtype": str(arr.dtype),
             }
-        return {"mask": mask_config, "fill": self.fill, "invert": self.invert}
+        return {
+            "mask": mask_config,
+            "fill_value": self.fill_value,
+            "invert": self.invert,
+        }
 
 
 def _rasterize_geometry_like(
@@ -589,10 +692,27 @@ def _morph_config(iterations: int, structure: np.ndarray | None) -> dict[str, An
 def _geometry_config(
     geometry: shapely.geometry.base.BaseGeometry | gpd.GeoDataFrame,
 ) -> dict[str, Any]:
+    """Return a JSON-safe summary of a geometry / GeoDataFrame.
+
+    Shapely geometries are emitted as GeoJSON-ish ``__geo_interface__``
+    dicts (with tuples cast to lists for strict JSON safety). GeoDataFrames
+    are summarised by length + CRS to avoid embedding many features.
+    """
     if isinstance(geometry, gpd.GeoDataFrame):
         return {
             "type": "GeoDataFrame",
             "length": len(geometry),
             "crs": None if geometry.crs is None else str(geometry.crs),
         }
-    return {"type": type(geometry).__name__, "bounds": tuple(geometry.bounds)}
+    # `shapely.geometry.mapping` returns the GeoJSON-style dict for any
+    # base geometry (including MultiPolygon / GeometryCollection). We
+    # coerce nested tuples to lists for strict JSON serialisability.
+    return _to_jsonable(shapely.geometry.mapping(geometry))
+
+
+def _to_jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(v) for v in value]
+    return value

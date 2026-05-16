@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
-from shapely.geometry import box
+from shapely.geometry import MultiPolygon, box
 
 from geotoolz.mask import (
     AltitudeMask,
@@ -215,7 +215,7 @@ def test_apply_mask_preserves_metadata_and_changes_only_masked_pixels() -> None:
     gt = _toy_geotensor(np.arange(8, dtype=np.float32).reshape(2, 2, 2))
     mask = np.array([[True, False], [False, True]])
 
-    out = ApplyMask(mask=mask, fill=-1.0)(gt)
+    out = ApplyMask(mask=mask, fill_value=-1.0)(gt)
 
     assert out.transform == gt.transform
     assert out.crs == gt.crs
@@ -227,11 +227,60 @@ def test_apply_mask_preserves_metadata_and_changes_only_masked_pixels() -> None:
 
 
 def test_apply_mask_get_config_for_array_and_operator_masks() -> None:
-    array_op = ApplyMask(mask=np.array([[True]]), fill=0.0)
-    operator_op = ApplyMask(mask=BBoxMask(bounds=(0.0, 0.0, 1.0, 1.0)), fill=0.0)
+    array_op = ApplyMask(mask=np.array([[True]]), fill_value=0.0)
+    operator_op = ApplyMask(mask=BBoxMask(bounds=(0.0, 0.0, 1.0, 1.0)), fill_value=0.0)
 
-    assert array_op.get_config()["mask"]["dtype"] == "bool"
-    assert operator_op.get_config()["mask"]["class"] == "BBoxMask"
+    array_cfg = array_op.get_config()
+    operator_cfg = operator_op.get_config()
+    assert array_cfg["mask"]["dtype"] == "bool"
+    assert array_cfg["fill_value"] == 0.0
+    assert operator_cfg["mask"]["class"] == "BBoxMask"
+
+
+def test_apply_mask_broadcasts_2d_mask_against_3d_carrier() -> None:
+    gt = _toy_geotensor(np.ones((3, 4, 4), dtype=np.float32))
+    mask = np.zeros((4, 4), dtype=bool)
+    mask[0, 0] = True
+
+    out = ApplyMask(mask=mask, fill_value=0.0)(gt)
+    arr = np.asarray(out)
+
+    assert arr.shape == (3, 4, 4)
+    assert np.all(arr[:, 0, 0] == 0.0)
+    assert np.all(arr[:, 1:, 1:] == 1.0)
+
+
+def test_polygon_mask_handles_multipolygon() -> None:
+    gt = _toy_geotensor(np.zeros((5, 5), dtype=np.float32))
+    multi = MultiPolygon([box(0.0, 0.0, 1.0, 1.0), box(3.0, 3.0, 4.0, 4.0)])
+
+    mask = np.asarray(PolygonMask(geometry=multi)(gt))
+
+    # Two disjoint True components, one per polygon in the MultiPolygon.
+    assert bool(mask[3, 0])  # bottom-left polygon (row 3 = y in [0,1])
+    assert bool(mask[0, 3])  # top-right polygon (row 0 = y in [3,4])
+    assert not bool(mask[2, 2])  # gap in the middle
+
+
+def test_polygon_mask_get_config_emits_geojson_dict() -> None:
+    polygon = box(1.0, 1.0, 3.0, 3.0)
+
+    cfg = PolygonMask(geometry=polygon, inside=True).get_config()
+
+    assert cfg["geometry"]["type"] == "Polygon"
+    assert "coordinates" in cfg["geometry"]
+    # JSON-safe: nested tuples coerced to lists.
+    assert isinstance(cfg["geometry"]["coordinates"], list)
+
+
+def test_morphology_operators_do_not_share_state_via_inheritance() -> None:
+    # ErodeMask / CloseMask should subclass Operator directly, not their
+    # dilate / open siblings — otherwise isinstance checks would lie.
+    assert not isinstance(ErodeMask(), DilateMask)
+    assert not isinstance(CloseMask(), OpenMask)
+    assert not isinstance(
+        SlopeMask(dem=_toy_geotensor(np.zeros((2, 2))), max_slope_deg=1.0), AltitudeMask
+    )
 
 
 def test_altitude_mask_bounds() -> None:
