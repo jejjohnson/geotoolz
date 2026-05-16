@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.0](https://github.com/jejjohnson/geotoolz/compare/v0.0.6...v0.1.0) (2026-05-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* `from geotoolz import GeoSlice` and any `from geotoolz.catalog import ...` now fail. Install `geocatalog` (https://github.com/jejjohnson/geocatalog) and import from there.
+
+### Code Refactoring
+
+* extract catalog and GeoSlice into the geocatalog package ([#70](https://github.com/jejjohnson/geotoolz/issues/70)) ([830e842](https://github.com/jejjohnson/geotoolz/commit/830e842c48c0eb3de7672475c9fba41980d01eee))
+
 ## [0.0.6](https://github.com/jejjohnson/geotoolz/compare/v0.0.5...v0.0.6) (2026-05-16)
 
 
