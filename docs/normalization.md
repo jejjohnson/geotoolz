@@ -30,10 +30,7 @@ normalized = scaler(scene)
 For per-scene display, percentile stretching is usually more robust than raw min/max scaling:
 
 ```python
-rgb = (
-    gz.normalize.PercentileClip(lower=2, upper=98)
-    | gz.normalize.MinMaxScaler(vmin=0.0, vmax=1.0, out_range=(0, 255))
-)(scene)
+rgb = gz.normalize.HistogramStretch(lower=2, upper=98, out_range=(0, 255))(scene)
 ```
 
 All statistics are NaN-aware by default, and GeoTensor shape, transform, and CRS are preserved by the operators.

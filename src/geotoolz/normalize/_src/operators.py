@@ -231,6 +231,7 @@ class HistogramStretch(Operator):
 class HistogramMatch(Operator):
     """Match a GeoTensor histogram to a reference GeoTensor."""
 
+    # Holds a live GeoTensor reference, which is not JSON/YAML serialisable.
     forbid_in_yaml = True
 
     def __init__(self, *, reference: GeoTensor) -> None:
