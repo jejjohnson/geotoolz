@@ -54,6 +54,7 @@ nav:
   - API Reference:
       - Core: api/core.md
       - Augment: api/augment.md
+      - Compositing: api/compositing.md
       - Geometry: api/geom.md
       - Normalize: api/normalize.md
       - QA: api/qa.md
