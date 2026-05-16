@@ -71,7 +71,7 @@ def evaluate_band_math(
 
 def _eval_node(node: ast.AST, variables: Mapping[str, np.ndarray]) -> Any:
     if isinstance(node, ast.Constant):
-        if isinstance(node.value, int | float):
+        if isinstance(node.value, (int, float)):
             return node.value
         raise ValueError("BandMath constants must be numeric")
     if isinstance(node, ast.Name):
@@ -240,7 +240,7 @@ def spectral_smoothing(
     """Smooth spectra along the band axis."""
     if method == "savgol":
         if window % 2 == 0:
-            raise ValueError("savgol window must be odd")
+            raise ValueError(f"savgol window must be odd, got {window}")
         return signal.savgol_filter(
             arr, window_length=window, polyorder=polyorder, axis=axis
         )

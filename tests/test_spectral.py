@@ -93,7 +93,7 @@ def test_apply_srf_preserves_values_when_source_equals_target() -> None:
     gt = GeoTensor(
         values=values,
         transform=rasterio.Affine.identity(),
-        crs="EPSG:4326",
+        crs="EPSG:32629",
         fill_value_default=-9999,
     )
 
@@ -138,7 +138,7 @@ def test_continuum_removal_flat_and_absorption() -> None:
     flat = GeoTensor(
         values=np.ones((3, 1, 1), dtype=np.float32),
         transform=rasterio.Affine.identity(),
-        crs="EPSG:4326",
+        crs="EPSG:32629",
         attrs={"wavelengths": wavelengths.tolist()},
     )
     np.testing.assert_allclose(
@@ -160,7 +160,7 @@ def test_continuum_removal_linear_method() -> None:
     gt = GeoTensor(
         values=np.array([[[1.0]], [[0.75]], [[0.5]]], dtype=np.float32),
         transform=rasterio.Affine.identity(),
-        crs="EPSG:4326",
+        crs="EPSG:32629",
         attrs={"wavelengths": [1.0, 2.0, 3.0]},
     )
 
@@ -244,7 +244,7 @@ def test_spectral_get_config_smoke() -> None:
             source_wavelengths=[1.0],
         ),
         spectral.GaussianSRF(target_center_wavelengths=[1.0], target_fwhm=[1.0]),
-        spectral.ContinuumRemoval(wavelengths=[1.0, 2.0]),
+        spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
         spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
         spectral.SpectralSmoothing(),
     ]

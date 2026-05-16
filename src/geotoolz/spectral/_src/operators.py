@@ -71,7 +71,7 @@ def _resolve_bands(keys: list[BandKey], names: list[str] | None) -> list[int]:
 
 
 def _jsonable_array(values: np.ndarray | list[float]) -> list[float]:
-    return [float(v) for v in np.asarray(values, dtype=float).ravel()]
+    return np.asarray(values, dtype=float).ravel().tolist()
 
 
 def _wrap_like(
@@ -171,11 +171,12 @@ class StackBands(Operator):
         wavelengths: list[float] = []
         have_names = True
         have_wavelengths = True
-        for gt in tensors:
+        for idx, gt in enumerate(tensors):
             if gt.shape[-2:] != first.shape[-2:]:
                 raise ValueError(
                     "All GeoTensors must share spatial shape; "
-                    f"got {first.shape[-2:]} and {gt.shape[-2:]}"
+                    f"GeoTensor at index {idx} has shape {gt.shape[-2:]}, "
+                    f"expected {first.shape[-2:]}"
                 )
             if gt.transform != first.transform or gt.crs != first.crs:
                 raise ValueError("All GeoTensors must share transform and CRS")
