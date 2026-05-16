@@ -206,7 +206,8 @@ def gap_fill_nearest(arr: np.ndarray, *, max_distance: int | None = None) -> np.
 
 def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.ndarray:
     """Fill NaNs with inverse-distance weighted finite neighbours."""
-    # Very large IDW powers converge to nearest-neighbour while risking overflow.
+    # Very large IDW powers converge to nearest-neighbour but risk overflow,
+    # so delegate to the nearest-neighbour implementation.
     if power >= 64:
         return gap_fill_nearest(arr, max_distance=radius)
     values = np.asarray(arr, dtype=float)
@@ -265,7 +266,7 @@ def outlier_mask(
     values = np.asarray(arr, dtype=float)
     if method == "mad":
         center = np.nanmedian(values)
-        # 1 / Phi^-1(3/4) ~= 1.4826 converts MAD to std under Gaussian residuals.
+        # 1 / inverse_normal_cdf(0.75) ~= 1.4826 converts MAD to std.
         scale = 1.4826 * np.nanmedian(np.abs(values - center))
     elif method == "zscore":
         center = np.nanmean(values)

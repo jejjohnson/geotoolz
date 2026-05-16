@@ -60,6 +60,8 @@ def test_despeckle_lee_reduces_multiplicative_speckle_variance() -> None:
     out = despeckle_lee(noisy, window=9)
     assert np.nanvar(out) <= 0.5 * np.nanvar(noisy)
     np.testing.assert_allclose(np.nanmean(out), np.nanmean(noisy), rtol=0.05)
+    assert np.isfinite(out[[0, -1], :]).all()
+    assert np.isfinite(out[:, [0, -1]]).all()
 
 
 def test_despeckle_operator_preserves_metadata() -> None:
@@ -101,6 +103,10 @@ def test_mnf_inverse_with_all_components_is_identity() -> None:
     restored = InverseMNF(forward=forward)(scores)
     np.testing.assert_allclose(np.asarray(restored), arr, atol=1e-5)
     assert np.all(np.diff(forward.snr_) <= 0)
+    reduced_forward = MNF(n_components=2)
+    reduced_scores = reduced_forward(gt)
+    reduced = InverseMNF(forward=reduced_forward)(reduced_scores)
+    assert reduced.shape == gt.shape
 
 
 def test_denoise_pca_reconstructs_original_shape() -> None:
