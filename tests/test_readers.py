@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -14,6 +15,7 @@ from rasterio.windows import Window
 
 import geotoolz as gz
 from geotoolz.readers import SensorReader, modis
+from geotoolz.readers._base import require_optional_dependency
 from geotoolz.readers.modis import constants as modis_constants
 
 
@@ -39,7 +41,7 @@ def test_modis_reader_passes_geodata_conformance() -> None:
         data=data,
         transform=Affine.translation(100, 200) * Affine.scale(10, -10),
         crs="EPSG:32631",
-        fill_value=-9999.0,
+        fill_value_default=-9999.0,
     )
 
     assert isinstance(reader, SensorReader)
@@ -85,7 +87,7 @@ def test_shared_csv_loader_caches_package_data() -> None:
 def test_viirs_missing_optional_extra_error(monkeypatch: pytest.MonkeyPatch) -> None:
     real_find_spec = importlib.util.find_spec
 
-    def fake_find_spec(name: str, *args: object, **kwargs: object) -> object:
+    def fake_find_spec(name: str, *args: object, **kwargs: object) -> ModuleSpec | None:
         if name == "h5py":
             return None
         return real_find_spec(name, *args, **kwargs)
@@ -96,6 +98,10 @@ def test_viirs_missing_optional_extra_error(monkeypatch: pytest.MonkeyPatch) -> 
 
     with pytest.raises(ImportError, match=r"h5py.*geotoolz\[viirs\]"):
         viirs.Reader("scene.h5")
+
+
+def test_optional_extra_guard_accepts_available_package() -> None:
+    require_optional_dependency("json", extra="toy")
 
 
 def test_modis_ndvi_preset_matches_generic_operator() -> None:
