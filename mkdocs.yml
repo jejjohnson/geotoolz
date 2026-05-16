@@ -45,6 +45,7 @@ nav:
   - Concepts:
       - Composition core: concepts.md
       - Patching: patching.md
+      - Patches workflow: patches.md
       - Catalogs: catalogs.md
       - Normalization: normalization.md
   - Tutorials:
@@ -66,6 +67,7 @@ nav:
   - API Reference:
       - Core: api/core.md
       - Patch: api/patch.md
+      - Patches: api/patches.md
       - Catalog: api/catalog.md
       - Augment: api/augment.md
       - Geometry: api/geom.md
