@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from geotoolz import catalog, cloud, core, indices, patch, radiometry, types
+from geotoolz import catalog, cloud, core, indices, patch, radiometry, restore, types
 from geotoolz.catalog import (
     CatalogDomain,
     CatalogRow,
@@ -154,6 +154,27 @@ from geotoolz.radiometry import (
     PercentileClip,
     ToFloat32,
 )
+from geotoolz.restore import (
+    MNF,
+    BilateralDenoise,
+    DenoisePCA,
+    DespeckleFrost,
+    DespeckleLee,
+    DespeckleRefinedLee,
+    DestripeColumn,
+    GapFillIDW,
+    GapFillInpaintBiharmonic,
+    GapFillLaplacian,
+    GapFillNearest,
+    GaussianDenoise,
+    InverseMNF,
+    MedianDenoise,
+    MomentMatching,
+    NLMeans,
+    OutlierMask,
+    ReplaceOutliers,
+    SaturationFlag,
+)
 from geotoolz.types import GeoSlice
 
 
@@ -189,6 +210,7 @@ __version__ = "0.0.5"
 
 __all__ = [
     "EVI",
+    "MNF",
     "NBR",
     "NDBI",
     "NDVI",
@@ -202,6 +224,7 @@ __all__ = [
     "ApplyToChips",
     "AsyncRasterField",
     "AsyncSpatialPatcher",
+    "BilateralDenoise",
     "Branch",
     "Carrier",
     "CatalogDomain",
@@ -209,9 +232,19 @@ __all__ = [
     "Const",
     "DNToRadiance",
     "DNToReflectance",
+    "DenoisePCA",
+    "DespeckleFrost",
+    "DespeckleLee",
+    "DespeckleRefinedLee",
+    "DestripeColumn",
     "DuckDBGeoCatalog",
     "Fanout",
     "Gamma",
+    "GapFillIDW",
+    "GapFillInpaintBiharmonic",
+    "GapFillLaplacian",
+    "GapFillNearest",
+    "GaussianDenoise",
     "GeoCatalog",
     "GeoSlice",
     "Graph",
@@ -220,20 +253,27 @@ __all__ = [
     "Identity",
     "InMemoryGeoCatalog",
     "Input",
+    "InverseMNF",
     "Lambda",
     "MaskFromQABits",
     "MaskFromSCL",
     "MaskValid",
+    "MedianDenoise",
     "MinMax",
     "ModelOp",
+    "MomentMatching",
+    "NLMeans",
     "Node",
     "NormalizedDifference",
     "Operator",
+    "OutlierMask",
     "Patch",
     "PercentileClip",
     "PointDomain",
     "RasterDomain",
     "RasterField",
+    "ReplaceOutliers",
+    "SaturationFlag",
     "Sequential",
     "ShapeTrace",
     "Sink",
@@ -320,6 +360,7 @@ __all__ = [
     "patch",
     "query",
     "radiometry",
+    "restore",
     "to_geoparquet",
     "types",
     "union",
