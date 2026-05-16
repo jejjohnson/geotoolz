@@ -126,6 +126,8 @@ def continuum_removal(
     arr_axis0 = np.moveaxis(np.asarray(arr, dtype=float), axis, 0)
     if arr_axis0.shape[0] != wavelengths.size:
         raise ValueError("wavelengths length must match the band axis")
+    if np.any(np.diff(wavelengths) <= 0):
+        raise ValueError("wavelengths must be strictly increasing")
 
     if method == "linear":
         continuum = _linear_continuum(arr_axis0, wavelengths)
@@ -198,7 +200,10 @@ def spectral_binning(
         half_width = bin_width / 2.0
         mask = np.abs(source_wavelengths - center) <= half_width
         if not np.any(mask):
-            raise ValueError(f"No source wavelengths found for target bin {center}")
+            raise ValueError(
+                f"No source wavelengths found within +/-{half_width} "
+                f"of target bin center {center}"
+            )
         values = arr_axis0[mask]
         if method == "mean":
             out[idx] = np.mean(values, axis=0)

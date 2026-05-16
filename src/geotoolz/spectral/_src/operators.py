@@ -57,7 +57,8 @@ def _resolve_band(key: BandKey, names: list[str] | None) -> int:
         return key
     if names is None:
         raise ValueError(
-            f"Band name {key!r} requires band_names or gt.attrs['band_names']"
+            f"Cannot resolve band name {key!r}: band_names must be provided "
+            "or present in gt.attrs['band_names']"
         )
     try:
         return names.index(key)
@@ -171,7 +172,10 @@ class StackBands(Operator):
         have_wavelengths = True
         for gt in tensors:
             if gt.shape[-2:] != first.shape[-2:]:
-                raise ValueError("All GeoTensors must share spatial shape")
+                raise ValueError(
+                    "All GeoTensors must share spatial shape; "
+                    f"got {first.shape[-2:]} and {gt.shape[-2:]}"
+                )
             if gt.transform != first.transform or gt.crs != first.crs:
                 raise ValueError("All GeoTensors must share transform and CRS")
             arr = np.asarray(gt)
