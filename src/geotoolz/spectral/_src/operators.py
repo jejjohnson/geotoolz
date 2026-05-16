@@ -1,10 +1,18 @@
-"""Tier-B Operators for band-space spectral operations.
+"""Tier-B Operators — band-space spectral operations.
 
-Band names are resolved from an explicit ``band_names=`` constructor argument
-when present; otherwise operators look for ``gt.attrs["band_names"]``. Wavelength
-dependent operators follow the same convention with explicit
-``source_wavelengths=`` / ``wavelengths=`` arguments first, then
-``gt.attrs["wavelengths"]``.
+Each Operator wraps a Tier-A primitive in `array.py` and re-attaches
+geospatial metadata via ``gt.array_as_geotensor`` (which propagates
+``transform``, ``crs``, ``fill_value_default``, and ``attrs``). When the
+band axis is *altered* (selected, reordered, binned, stacked, etc.) the
+``band_names`` and ``wavelengths`` entries in ``attrs`` are rewritten in
+lockstep via :func:`_with_band_attrs` so downstream operators see the
+correct labels.
+
+Band names are resolved from an explicit ``band_names=`` constructor
+argument when present; otherwise operators look for
+``gt.attrs["band_names"]``. Wavelength-dependent operators follow the
+same convention with explicit ``source_wavelengths=`` / ``wavelengths=``
+arguments first, then ``gt.attrs["wavelengths"]``.
 """
 
 from __future__ import annotations
@@ -21,7 +29,6 @@ from geotoolz.spectral._src.array import (
     continuum_removal,
     evaluate_band_math,
     normalized_difference,
-    reorder_bands,
     select_bands,
     spectral_binning,
     spectral_smoothing,
@@ -36,11 +43,13 @@ BandKey = int | str
 
 
 def _attrs(gt: GeoTensor) -> dict[str, Any]:
+    """Return a shallow copy of ``gt.attrs`` (or ``{}`` if missing)."""
     attrs = getattr(gt, "attrs", None)
     return {} if attrs is None else dict(attrs)
 
 
 def _band_names(gt: GeoTensor, band_names: list[str] | None) -> list[str] | None:
+    """Resolve band names from an explicit override or carrier attrs."""
     if band_names is not None:
         return list(band_names)
     names = _attrs(gt).get("band_names")
@@ -77,21 +86,46 @@ def _resolve_bands(keys: list[BandKey], names: list[str] | None) -> list[int]:
     return indexes
 
 
-def _jsonable_array(values: np.ndarray | list[float]) -> list[float]:
+def _jsonable_keys(keys: list[BandKey]) -> list[BandKey]:
+    """Coerce a list of band keys to JSON-safe Python scalars."""
+    out: list[BandKey] = []
+    for key in keys:
+        if isinstance(key, str):
+            out.append(key)
+        else:
+            out.append(int(key))
+    return out
+
+
+def _jsonable_array(values: np.ndarray | list[float] | float) -> list[float]:
     return np.asarray(values, dtype=float).ravel().tolist()
 
 
-def _wrap_like(
+def _with_band_attrs(
     gt: GeoTensor,
     values: np.ndarray,
     *,
     band_names: list[str] | None = None,
     wavelengths: np.ndarray | None = None,
+    drop_band_attrs: bool = False,
 ) -> GeoTensor:
+    """Wrap ``values`` as a GeoTensor like ``gt`` and update band metadata.
+
+    Uses ``gt.array_as_geotensor`` to propagate ``transform``, ``crs``,
+    ``fill_value_default``, and ``attrs``. When the band axis is altered,
+    pass ``band_names`` / ``wavelengths`` to rewrite the corresponding
+    attrs in lockstep; pass ``drop_band_attrs=True`` for operators that
+    collapse the band axis entirely.
+    """
     out = gt.array_as_geotensor(values)
+    if not (band_names is not None or wavelengths is not None or drop_band_attrs):
+        return out
     new_attrs = _attrs(gt)
+    if drop_band_attrs:
+        new_attrs.pop("band_names", None)
+        new_attrs.pop("wavelengths", None)
     if band_names is not None:
-        new_attrs["band_names"] = band_names
+        new_attrs["band_names"] = list(band_names)
     if wavelengths is not None:
         new_attrs["wavelengths"] = _jsonable_array(wavelengths)
     out.attrs = new_attrs
@@ -111,7 +145,24 @@ def _wavelengths(
 
 
 class SelectBands(Operator):
-    """Select bands by integer index or band name."""
+    """Select bands by integer index or band name along the band axis.
+
+    Resolves string keys against ``gt.attrs["band_names"]`` (or an
+    explicit ``band_names=`` override at the call site). Selected
+    ``band_names`` and ``wavelengths`` attrs travel with the output.
+
+    Args:
+        indexes: Bands to keep, in output order. Items are either
+            integer positions along ``axis`` or string names looked up
+            in ``gt.attrs["band_names"]``.
+        axis: Position of the band axis. Default ``0``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> # Sentinel-2 RGB stacked as (B2, B3, B4, B8) -> keep (B4, B3, B2).
+        >>> rgb = spectral.SelectBands(indexes=["B4", "B3", "B2"])
+        >>> out = rgb(reflectance_geotensor)
+    """
 
     def __init__(self, *, indexes: list[BandKey], axis: int = 0) -> None:
         self.indexes = indexes
@@ -128,46 +179,59 @@ class SelectBands(Operator):
             else None
         )
         out = select_bands(np.asarray(gt), indexes, axis=self.axis)
-        return _wrap_like(
+        return _with_band_attrs(
             gt, out, band_names=selected_names, wavelengths=selected_wavelengths
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"indexes": self.indexes, "axis": self.axis}
+        return {"indexes": _jsonable_keys(self.indexes), "axis": self.axis}
 
 
 class ReorderBands(SelectBands):
-    """Reorder bands by integer index or band name."""
+    """Reorder bands by integer index or band name.
+
+    Same semantics as :class:`SelectBands` but emphasises that the
+    output keeps every input band — just in a new order. Length of
+    ``order`` should equal the number of bands on the input.
+
+    Args:
+        order: New band ordering. Items are integer positions or names.
+        axis: Position of the band axis. Default ``0``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> # Reorder a BGRN stack to RGBN.
+        >>> reorder = spectral.ReorderBands(order=[2, 1, 0, 3])
+        >>> rgbn = reorder(bgrn_geotensor)
+    """
 
     def __init__(self, *, order: list[BandKey], axis: int = 0) -> None:
         super().__init__(indexes=order, axis=axis)
         self.order = order
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        names = _band_names(gt, None)
-        order = _resolve_bands(self.order, names)
-        ordered_names = [names[idx] for idx in order] if names is not None else None
-        wavelengths = _attrs(gt).get("wavelengths")
-        ordered_wavelengths = (
-            np.asarray(wavelengths, dtype=float)[order]
-            if wavelengths is not None
-            else None
-        )
-        out = reorder_bands(np.asarray(gt), order, axis=self.axis)
-        return _wrap_like(
-            gt, out, band_names=ordered_names, wavelengths=ordered_wavelengths
-        )
-
     def get_config(self) -> dict[str, Any]:
-        return {"order": self.order, "axis": self.axis}
+        return {"order": _jsonable_keys(self.order), "axis": self.axis}
 
 
 class StackBands(Operator):
-    """Concatenate GeoTensors along the band axis."""
+    """Concatenate GeoTensors along the band axis.
 
-    def __init__(self, *, axis: int = 0, along: str = "band") -> None:
+    All inputs must share spatial shape, transform, and CRS. When every
+    input carries ``band_names`` / ``wavelengths`` they are concatenated
+    in input order; otherwise those attrs are dropped on the output.
+
+    Args:
+        axis: Position of the band axis. Default ``0``. 2-D inputs are
+            promoted to 3-D by inserting a unit dimension at ``axis``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> stack = spectral.StackBands()
+        >>> stacked = stack([gt_b4, gt_b8])  # (2, H, W)
+    """
+
+    def __init__(self, *, axis: int = 0) -> None:
         self.axis = axis
-        self.along = along
 
     def _apply(self, tensors: list[GeoTensor]) -> GeoTensor:
         if not tensors:
@@ -199,19 +263,31 @@ class StackBands(Operator):
             if gt_wavelengths is not None:
                 wavelengths.extend(float(wavelength) for wavelength in gt_wavelengths)
         out = np.concatenate(arrays, axis=self.axis)
-        return _wrap_like(
+        return _with_band_attrs(
             first,
             out,
             band_names=names if have_names else None,
             wavelengths=np.asarray(wavelengths) if have_wavelengths else None,
+            drop_band_attrs=not have_names or not have_wavelengths,
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"axis": self.axis, "along": self.along}
+        return {"axis": self.axis}
 
 
 class SplitBands(Operator):
-    """Return a list of single-band GeoTensors."""
+    """Split a multiband GeoTensor into one single-band GeoTensor per band.
+
+    Args:
+        names: Optional override for band names. If omitted, names are
+            taken from ``gt.attrs["band_names"]``.
+        axis: Position of the band axis. Default ``0``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> bands = spectral.SplitBands()(rgb_geotensor)  # list of (1, H, W)
+        >>> red, green, blue = bands
+    """
 
     def __init__(self, *, names: list[str] | None = None, axis: int = 0) -> None:
         self.names = names
@@ -235,7 +311,9 @@ class SplitBands(Operator):
                 else None
             )
             outputs.append(
-                _wrap_like(gt, out, band_names=band_name, wavelengths=band_wavelength)
+                _with_band_attrs(
+                    gt, out, band_names=band_name, wavelengths=band_wavelength
+                )
             )
         return outputs
 
@@ -244,7 +322,28 @@ class SplitBands(Operator):
 
 
 class BandMath(Operator):
-    """Evaluate a restricted arithmetic expression over named bands."""
+    """Evaluate a restricted arithmetic expression over named bands.
+
+    The expression is parsed with Python's ``ast`` module and only
+    permits constants, unary +/-, binary ``+ - * / **``, and the
+    whitelisted functions ``abs, sqrt, log, log10, exp, where, minimum,
+    maximum, clip``. Band variables resolve to slices along the band
+    axis named by ``band_names`` (default: ``gt.attrs["band_names"]``
+    or synthetic ``B0, B1, ...`` labels).
+
+    Args:
+        expression: Arithmetic expression over band names, e.g.
+            ``"(B8 - B4) / (B8 + B4 + 1e-6)"``.
+        band_names: Override for the names used in ``expression``.
+            Default ``None`` (read from ``gt.attrs["band_names"]``).
+        axis: Position of the band axis. Default ``0``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> # NDVI by name (assumes gt.attrs["band_names"] contains B4/B8).
+        >>> ndvi = spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)")
+        >>> ndvi_map = ndvi(reflectance_geotensor)
+    """
 
     def __init__(
         self,
@@ -266,7 +365,7 @@ class BandMath(Operator):
             name: np.take(arr, idx, axis=self.axis) for idx, name in enumerate(names)
         }
         out = evaluate_band_math(self.expression, variables)
-        return _wrap_like(gt, out)
+        return _with_band_attrs(gt, out, drop_band_attrs=True)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -277,7 +376,27 @@ class BandMath(Operator):
 
 
 class NormalizedDifference(Operator):
-    """Compute ``(a - b) / (a + b + eps)`` by band index or name."""
+    r"""Generic normalized-difference index by band index or name.
+
+    .. math::
+
+        \mathrm{ND}(a, b) = \frac{a - b}{a + b + \varepsilon}
+
+    Unlike :class:`geotoolz.indices.NormalizedDifference` (integer
+    indices only), this variant also accepts band-name strings resolved
+    against ``gt.attrs["band_names"]``.
+
+    Args:
+        a: Index or name of the "high" band (numerator-positive term).
+        b: Index or name of the "low" band.
+        eps: Denominator stabiliser. Default ``1e-6``.
+        axis: Position of the band axis. Default ``0``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> ndvi = spectral.NormalizedDifference(a="B8", b="B4")
+        >>> ndvi_map = ndvi(reflectance_geotensor)
+    """
 
     def __init__(
         self, *, a: BandKey, b: BandKey, eps: float = 1e-6, axis: int = 0
@@ -296,14 +415,29 @@ class NormalizedDifference(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return _wrap_like(gt, out)
+        return _with_band_attrs(gt, out, drop_band_attrs=True)
 
     def get_config(self) -> dict[str, Any]:
-        return {"a": self.a, "b": self.b, "eps": self.eps, "axis": self.axis}
+        a = self.a if isinstance(self.a, str) else int(self.a)
+        b = self.b if isinstance(self.b, str) else int(self.b)
+        return {"a": a, "b": b, "eps": self.eps, "axis": self.axis}
 
 
 class BandRatio(Operator):
-    """Compute ``numerator / (denominator + eps)`` by band index or name."""
+    r"""Simple two-band ratio ``numerator / (denominator + eps)``.
+
+    Args:
+        numerator: Index or name of the numerator band.
+        denominator: Index or name of the denominator band.
+        eps: Denominator stabiliser. Default ``1e-6``.
+        axis: Position of the band axis. Default ``0``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> # Simple Ratio Vegetation Index (NIR / Red).
+        >>> srvi = spectral.BandRatio(numerator="B8", denominator="B4")
+        >>> ratio = srvi(reflectance_geotensor)
+    """
 
     def __init__(
         self,
@@ -327,19 +461,53 @@ class BandRatio(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return _wrap_like(gt, out)
+        return _with_band_attrs(gt, out, drop_band_attrs=True)
 
     def get_config(self) -> dict[str, Any]:
+        num = self.numerator if isinstance(self.numerator, str) else int(self.numerator)
+        den = (
+            self.denominator
+            if isinstance(self.denominator, str)
+            else int(self.denominator)
+        )
         return {
-            "numerator": self.numerator,
-            "denominator": self.denominator,
+            "numerator": num,
+            "denominator": den,
             "eps": self.eps,
             "axis": self.axis,
         }
 
 
 class ApplySRF(Operator):
-    """Convolve band-first hyperspectral data to target Gaussian SRFs."""
+    """Convolve band-first hyperspectral data through Gaussian SRFs.
+
+    Constructs Gaussian spectral response functions from
+    ``target_center_wavelengths`` and ``target_fwhm`` (via
+    :func:`georeader.reflectance.srf`) and integrates the hyperspectral
+    cube to the target multispectral bands via
+    :func:`georeader.reflectance.transform_to_srf`.
+
+    Args:
+        target_center_wavelengths: Center wavelengths of the synthetic
+            target bands, in nanometres. Shape ``(K,)``.
+        target_fwhm: Full-width-half-maximum of each target band.
+            Same units and shape as ``target_center_wavelengths``.
+        source_wavelengths: Wavelengths of the hyperspectral source
+            bands. Shape ``(B,)``.
+        band_names: Optional names for the target bands. Default
+            ``["B0", "B1", ...]``.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> # Convolve EMIT hyperspectral to Sentinel-2 bands.
+        >>> srf = gz.spectral.ApplySRF(
+        ...     target_center_wavelengths=S2_CENTERS,
+        ...     target_fwhm=S2_FWHM,
+        ...     source_wavelengths=emit_wavelengths,
+        ...     band_names=["B2", "B3", "B4", "B8"],
+        ... )
+        >>> s2_like = srf(emit_geotensor)
+    """
 
     def __init__(
         self,
@@ -360,9 +528,7 @@ class ApplySRF(Operator):
             self.target_center_wavelengths, dtype=float
         )
         responses = srf(target_center_wavelengths, self.target_fwhm, source_wavelengths)
-        names = self.band_names or [
-            f"B{idx}" for idx in range(target_center_wavelengths.size)
-        ]
+        names = self.band_names or _default_band_names(target_center_wavelengths.size)
         srf_df = pd.DataFrame(responses, index=source_wavelengths, columns=names)
         out = transform_to_srf(
             gt,
@@ -370,9 +536,10 @@ class ApplySRF(Operator):
             source_wavelengths.tolist(),
             fill_value_default=gt.fill_value_default,
         )
-        out.attrs = _attrs(gt)
-        out.attrs["band_names"] = names
-        out.attrs["wavelengths"] = _jsonable_array(target_center_wavelengths)
+        new_attrs = _attrs(gt)
+        new_attrs["band_names"] = list(names)
+        new_attrs["wavelengths"] = _jsonable_array(target_center_wavelengths)
+        out.attrs = new_attrs
         return out
 
     def get_config(self) -> dict[str, Any]:
@@ -387,7 +554,30 @@ class ApplySRF(Operator):
 
 
 class GaussianSRF(Operator):
-    """Convolve to synthetic Gaussian SRFs using source wavelengths from attrs."""
+    """Convolve to synthetic Gaussian SRFs using source wavelengths from attrs.
+
+    Thin wrapper around :class:`ApplySRF` that reads the source
+    hyperspectral wavelengths from ``gt.attrs["wavelengths"]`` when
+    ``source_wavelengths`` is omitted.
+
+    Args:
+        target_center_wavelengths: Center wavelengths of the target
+            bands, in nanometres.
+        target_fwhm: FWHM of each target band.
+        source_wavelengths: Source hyperspectral wavelengths. Default
+            ``None`` (read from ``gt.attrs["wavelengths"]``).
+        band_names: Optional names for the target bands.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> # Source wavelengths come from gt.attrs["wavelengths"].
+        >>> conv = gz.spectral.GaussianSRF(
+        ...     target_center_wavelengths=[490.0, 665.0, 842.0],
+        ...     target_fwhm=[65.0, 30.0, 115.0],
+        ...     band_names=["blue", "red", "nir"],
+        ... )
+        >>> out = conv(hyperspectral_geotensor)
+    """
 
     def __init__(
         self,
@@ -426,7 +616,31 @@ class GaussianSRF(Operator):
 
 
 class ContinuumRemoval(Operator):
-    """Hull-quotient continuum removal along the band axis."""
+    """Hull-quotient continuum removal along the band axis.
+
+    For each spectrum (each spatial pixel along the band axis), divides
+    by an envelope:
+
+    * ``method="convex_hull"`` — the upper convex hull of the spectrum
+      vs wavelength. Output is the spectrum / hull, in ``(0, 1]``, with
+      absorption features pulled to <1 and the hull itself at 1.
+    * ``method="linear"`` — a straight line between the first and last
+      band. Cheaper but only valid when no spectral curvature lives
+      outside the absorption band of interest.
+
+    Args:
+        method: ``"convex_hull"`` or ``"linear"``. Default
+            ``"convex_hull"``.
+        wavelengths: Source wavelengths in strictly increasing order.
+            Default ``None`` (read from ``gt.attrs["wavelengths"]``).
+        axis: Position of the band axis. Default ``0``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> # Continuum-remove a SWIR-2 mineral absorption window.
+        >>> cr = spectral.ContinuumRemoval(method="convex_hull")
+        >>> band_depth = cr(swir2_geotensor)  # (B, H, W), values in (0, 1]
+    """
 
     def __init__(
         self,
@@ -446,7 +660,7 @@ class ContinuumRemoval(Operator):
             axis=self.axis,
             method=self.method,
         )
-        return _wrap_like(gt, out)
+        return gt.array_as_geotensor(out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -459,7 +673,36 @@ class ContinuumRemoval(Operator):
 
 
 class SpectralBinning(Operator):
-    """Aggregate source bands into wavelength-centered bins."""
+    """Aggregate source bands into wavelength-centered bins.
+
+    For each ``target_wavelength`` :math:`\\lambda_c` with bin width
+    :math:`w`, aggregates source bands with
+    :math:`|\\lambda_s - \\lambda_c| \\le w/2`. Aggregation modes:
+
+    * ``"mean"`` — uniform average.
+    * ``"median"`` — robust to outliers in narrow bins.
+    * ``"weighted_mean"`` — Gaussian weights with
+      :math:`\\sigma = w / (2 \\sqrt{2 \\ln 2})` (FWHM equals ``width``).
+
+    Args:
+        target_wavelengths: Center wavelengths of the output bins.
+        width: Scalar or per-bin widths (same units as wavelengths).
+        method: ``"mean"``, ``"median"``, or ``"weighted_mean"``.
+            Default ``"mean"``.
+        source_wavelengths: Source band wavelengths. Default ``None``
+            (read from ``gt.attrs["wavelengths"]``).
+        axis: Position of the band axis. Default ``0``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> # Coarsen hyperspectral cube to broad-band averages.
+        >>> binner = spectral.SpectralBinning(
+        ...     target_wavelengths=[490.0, 560.0, 665.0],
+        ...     width=30.0,
+        ...     method="weighted_mean",
+        ... )
+        >>> coarse = binner(hyperspectral_geotensor)
+    """
 
     def __init__(
         self,
@@ -486,12 +729,16 @@ class SpectralBinning(Operator):
             axis=self.axis,
             method=self.method,
         )
-        return _wrap_like(gt, out, wavelengths=target_wavelengths)
+        # Band axis is reshaped; band_names from the source no longer
+        # apply, but new wavelengths do.
+        return _with_band_attrs(
+            gt, out, wavelengths=target_wavelengths, drop_band_attrs=True
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
             "target_wavelengths": _jsonable_array(self.target_wavelengths),
-            "width": _jsonable_array(np.asarray(self.width, dtype=float)),
+            "width": _jsonable_array(self.width),
             "method": self.method,
             "source_wavelengths": (
                 None
@@ -503,7 +750,25 @@ class SpectralBinning(Operator):
 
 
 class SpectralSmoothing(Operator):
-    """Smooth spectra along the band axis."""
+    """Smooth spectra along the band axis.
+
+    Args:
+        method: ``"savgol"`` (Savitzky-Golay), ``"gaussian"``, or
+            ``"moving_average"``. Default ``"savgol"``.
+        window: Filter window length in bands. Must be odd for
+            ``"savgol"``. Default ``7``.
+        polyorder: Polynomial order for Savitzky-Golay (ignored by the
+            other methods). Default ``2``.
+        axis: Position of the band axis. Default ``0``.
+
+    Examples:
+        >>> from geotoolz import spectral
+        >>> # De-noise hyperspectral spectra before continuum removal.
+        >>> smooth = spectral.SpectralSmoothing(
+        ...     method="savgol", window=9, polyorder=2
+        ... )
+        >>> denoised = smooth(hyperspectral_geotensor)
+    """
 
     def __init__(
         self,
@@ -526,7 +791,7 @@ class SpectralSmoothing(Operator):
             window=self.window,
             polyorder=self.polyorder,
         )
-        return _wrap_like(gt, out)
+        return gt.array_as_geotensor(out)
 
     def get_config(self) -> dict[str, Any]:
         return {

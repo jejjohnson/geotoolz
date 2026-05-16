@@ -228,7 +228,7 @@ def test_spectral_get_config_serialization() -> None:
     ops_and_configs = [
         (spectral.SelectBands(indexes=[0]), {"indexes": [0], "axis": 0}),
         (spectral.ReorderBands(order=[0]), {"order": [0], "axis": 0}),
-        (spectral.StackBands(), {"axis": 0, "along": "band"}),
+        (spectral.StackBands(), {"axis": 0}),
         (spectral.SplitBands(), {"names": None, "axis": 0}),
         (
             spectral.BandMath(expression="B0"),
@@ -286,3 +286,105 @@ def test_spectral_get_config_serialization() -> None:
 
     for op, expected in ops_and_configs:
         assert op.get_config() == expected
+
+
+def test_spectral_get_config_is_json_safe() -> None:
+    """Every Operator's get_config() must round-trip through JSON."""
+    import json
+
+    ops = [
+        spectral.SelectBands(indexes=["B4", 1]),
+        spectral.ReorderBands(order=[0, "B8"]),
+        spectral.StackBands(),
+        spectral.SplitBands(names=["a", "b"]),
+        spectral.BandMath(expression="B0 + B1", band_names=["B0", "B1"]),
+        spectral.NormalizedDifference(a="B8", b=1),
+        spectral.BandRatio(numerator=1, denominator="B4"),
+        spectral.ApplySRF(
+            target_center_wavelengths=np.array([1.0, 2.0]),
+            target_fwhm=np.array([0.5, 0.5]),
+            source_wavelengths=np.array([1.0, 2.0]),
+        ),
+        spectral.GaussianSRF(target_center_wavelengths=[1.0], target_fwhm=[1.0]),
+        spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
+        spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
+        spectral.SpectralSmoothing(),
+    ]
+    for op in ops:
+        json.dumps(op.get_config())
+
+
+# ---------------------------------------------------------------------------
+# Hydra-zen round-trip
+# ---------------------------------------------------------------------------
+
+
+try:
+    import hydra_zen
+except ImportError:  # pragma: no cover - exercised via the [hydra] extra
+    hydra_zen = None  # type: ignore[assignment]
+
+
+@pytest.mark.skipif(hydra_zen is None, reason="requires hydra-zen extra")
+@pytest.mark.parametrize(
+    "op",
+    [
+        spectral.SelectBands(indexes=[0, 1]),
+        spectral.ReorderBands(order=[1, 0]),
+        spectral.StackBands(),
+        spectral.SplitBands(),
+        spectral.BandMath(expression="B0 + B1"),
+        spectral.NormalizedDifference(a=0, b=1),
+        spectral.BandRatio(numerator=0, denominator=1),
+        spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
+        spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
+        spectral.SpectralSmoothing(),
+        spectral.ApplySRF(
+            target_center_wavelengths=[1.0],
+            target_fwhm=[1.0],
+            source_wavelengths=[1.0],
+        ),
+        spectral.GaussianSRF(target_center_wavelengths=[1.0], target_fwhm=[1.0]),
+    ],
+)
+def test_spectral_hydra_zen_roundtrip(op: object) -> None:
+    cfg = hydra_zen.builds(type(op), **op.get_config())  # type: ignore[attr-defined]
+    restored = hydra_zen.instantiate(cfg)
+    assert type(restored) is type(op)
+    assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+def test_geotensor_metadata_propagates_through_spectral_ops() -> None:
+    """Spatial transform/CRS must survive every spectral Operator (Tier-B)."""
+    gt = _toy_geotensor(np.arange(4 * 3 * 3, dtype=np.float32).reshape(4, 3, 3))
+
+    ops = [
+        spectral.SelectBands(indexes=["B2", "B8"]),
+        spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)"),
+        spectral.NormalizedDifference(a="B8", b="B4"),
+        spectral.BandRatio(numerator="B8", denominator="B4"),
+        spectral.ContinuumRemoval(method="linear"),
+        spectral.SpectralBinning(target_wavelengths=[577.5], width=200.0),
+        spectral.SpectralSmoothing(method="moving_average", window=3),
+    ]
+    for op in ops:
+        out = op(gt)
+        assert out.transform == gt.transform
+        assert str(out.crs) == str(gt.crs)
+        assert out.fill_value_default == gt.fill_value_default
+
+
+def test_collapsing_ops_drop_stale_band_attrs() -> None:
+    """Ops that collapse / reshape the band axis must drop stale band_names."""
+    gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))
+
+    for op in [
+        spectral.NormalizedDifference(a="B8", b="B4"),
+        spectral.BandRatio(numerator="B8", denominator="B4"),
+        spectral.BandMath(expression="B8 + B4"),
+    ]:
+        out = op(gt)
+        # Old four-element band_names must not leak through onto a
+        # collapsed / single-channel output.
+        assert "band_names" not in out.attrs
+        assert "wavelengths" not in out.attrs

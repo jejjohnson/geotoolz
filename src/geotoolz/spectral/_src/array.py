@@ -9,6 +9,10 @@ from typing import Any
 import numpy as np
 from scipy import ndimage, signal
 
+# Re-use the canonical normalized-difference primitive instead of
+# duplicating the maths here. Same algebra as NDVI / NDWI / NDBI / NBR.
+from geotoolz.indices._src.array import normalized_difference as normalized_difference
+
 
 def select_bands(arr: np.ndarray, indexes: list[int], *, axis: int = 0) -> np.ndarray:
     """Select bands by integer index along the configured band axis."""
@@ -18,20 +22,6 @@ def select_bands(arr: np.ndarray, indexes: list[int], *, axis: int = 0) -> np.nd
 def reorder_bands(arr: np.ndarray, order: list[int], *, axis: int = 0) -> np.ndarray:
     """Reorder bands by integer index along the configured band axis."""
     return select_bands(arr, order, axis=axis)
-
-
-def normalized_difference(
-    arr: np.ndarray,
-    a_idx: int,
-    b_idx: int,
-    *,
-    axis: int = 0,
-    eps: float = 1e-6,
-) -> np.ndarray:
-    """Compute ``(a - b) / (a + b + eps)`` with the band axis collapsed."""
-    a = np.take(arr, a_idx, axis=axis)
-    b = np.take(arr, b_idx, axis=axis)
-    return (a - b) / (a + b + eps)
 
 
 def band_ratio(
