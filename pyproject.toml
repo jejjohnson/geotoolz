@@ -60,6 +60,12 @@ dependencies = [
 # get_config() / __repr__ without hydra — this extra is only needed if
 # you want `builds()` / `instantiate()` from YAML.
 hydra = ["hydra-zen>=0.14"]
+# Multi-format reader backends. Each reader guards imports so the base install
+# stays slim and reports the exact extra needed at runtime.
+hdf5 = ["h5py>=3.10.0"]
+hdf4 = ["pyhdf>=0.11.4"]
+netcdf = ["netCDF4>=1.6.5"]
+xrit = []
 # geopatcher backend extras. Each `Field` adapter under `geotoolz.patch`
 # guards its import so the base install stays slim and the user only
 # pays for the substrates they actually use.

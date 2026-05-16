@@ -47,6 +47,7 @@ nav:
       - Patching: patching.md
       - Catalogs: catalogs.md
       - Normalization: normalization.md
+      - Multi-format readers: io.md
   - Tutorials:
       - Composition core: notebooks/composition_core.ipynb
       - Pipeline idioms: notebooks/pipeline_idioms.ipynb

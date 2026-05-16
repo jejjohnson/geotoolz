@@ -25,11 +25,13 @@ discipline).
 
 from __future__ import annotations
 
+import importlib
 from os import PathLike
 from pathlib import Path
 from typing import Any, ClassVar
 
 import numpy as np
+from affine import Affine
 from georeader import read, save
 from georeader.geotensor import GeoTensor
 from georeader.rasterio_reader import RasterioReader
@@ -44,6 +46,8 @@ from geotoolz.core import Operator
 Source = str | PathLike[str] | Any
 Bounds = tuple[float, float, float, float]
 Resolution = float | tuple[float, float]
+HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
+HDF4_SIGNATURE = b"\x0e\x03\x13\x01"
 
 
 class GeoToolzIOError(RuntimeError):
@@ -121,6 +125,103 @@ def _src_config(src: Source) -> str | Source:
 
 def _read_error(src: Source, exc: Exception) -> GeoToolzIOError:
     return GeoToolzIOError(f"Unable to read raster source {src!r}: {exc}")
+
+
+def _import_optional(module: str, extra: str) -> Any:
+    try:
+        return importlib.import_module(module)
+    except ImportError as exc:
+        raise ImportError(
+            f"{module!r} is required for this reader. Install geotoolz[{extra}]."
+        ) from exc
+
+
+def _json_attrs(attrs: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in dict(attrs).items():
+        if isinstance(value, np.ndarray):
+            out[str(key)] = value.tolist()
+        elif isinstance(value, np.generic):
+            out[str(key)] = value.item()
+        elif isinstance(value, bytes):
+            out[str(key)] = value.decode("utf-8", errors="replace")
+        else:
+            out[str(key)] = value
+    return out
+
+
+def _select_indexes(values: Any, indexes: list[int] | None) -> np.ndarray:
+    array = np.asarray(values)
+    if indexes is None:
+        return array
+    if array.ndim < 3:
+        raise GeoToolzIOError("indexes require a dataset with a leading band axis.")
+    zero_based = [index - 1 for index in indexes]
+    if any(index < 0 for index in zero_based):
+        raise GeoToolzIOError("indexes are 1-based and must be positive.")
+    return np.take(array, zero_based, axis=0)
+
+
+def _fill_value_from_attrs(attrs: dict[str, Any]) -> Any:
+    for name in ("_FillValue", "missing_value", "fill_value", "nodata"):
+        if name in attrs:
+            return attrs[name]
+    return 0
+
+
+def _geotensor(
+    values: Any,
+    *,
+    crs: Any = None,
+    fill_value: Any = 0,
+    attrs: dict[str, Any] | None = None,
+    transform: Affine | None = None,
+) -> GeoTensor:
+    return GeoTensor(
+        np.asarray(values),
+        transform=Affine.identity() if transform is None else transform,
+        crs=crs,
+        fill_value_default=fill_value,
+        attrs=attrs,
+    )
+
+
+def _netcdf_group(root: Any, group: str | None) -> Any:
+    current = root
+    if group is None:
+        return current
+    for part in group.strip("/").split("/"):
+        if not part:
+            continue
+        current = current.groups[part]
+    return current
+
+
+def _netcdf_crs(group: Any, variable: Any, use_cf_grid_mapping: bool) -> Any:
+    if not use_cf_grid_mapping:
+        return None
+    grid_mapping = getattr(variable, "grid_mapping", None)
+    if not isinstance(grid_mapping, str):
+        return None
+    mapping = group.variables.get(grid_mapping)
+    if mapping is None:
+        return None
+    try:
+        from pyproj import CRS
+
+        return CRS.from_cf(_json_attrs(mapping.__dict__))
+    except (KeyError, RuntimeError, ValueError):
+        return None
+
+
+def _netcdf_transform(variable: Any) -> Affine:
+    grid_mapping = getattr(variable, "GeoTransform", None)
+    if grid_mapping is None:
+        return Affine.identity()
+    parts = [float(part) for part in str(grid_mapping).split()]
+    if len(parts) != 6:
+        return Affine.identity()
+    return Affine.from_gdal(*parts)
 
 
 class ReadWindow(SourceOperator):
@@ -647,6 +748,245 @@ class ReadToCRS(SourceOperator):
         }
 
 
+class ReadHDF(SourceOperator):
+    """Read a dataset from an HDF4/HDF-EOS or HDF5 file.
+
+    HDF5 is handled through the optional ``h5py`` backend. HDF4/HDF-EOS is
+    dispatched by file signature and requires the optional ``pyhdf`` backend.
+    Both backends return the requested dataset as a :class:`GeoTensor` with an
+    identity transform unless sensor-specific georeferencing is applied later.
+
+    Args:
+        path: HDF file path.
+        dataset: Dataset path inside the file.
+        indexes: Optional 1-based band indexes along the leading dataset axis.
+        geolocation: Optional ``(latitude_dataset, longitude_dataset)`` names
+            to load into ``attrs["geolocation"]``.
+        metadata_groups: Optional HDF5 group paths whose attributes are copied
+            into ``attrs["metadata"]``.
+    """
+
+    def __init__(
+        self,
+        *,
+        path: str | PathLike[str],
+        dataset: str,
+        indexes: list[int] | None = None,
+        geolocation: tuple[str, str] | None = None,
+        metadata_groups: list[str] | None = None,
+    ) -> None:
+        self.path = Path(path)
+        self.dataset = dataset
+        self.indexes = indexes
+        self.geolocation = geolocation
+        self.metadata_groups = metadata_groups
+
+    def _apply(self) -> GeoTensor:
+        try:
+            with self.path.open("rb") as file:
+                signature = file.read(8)
+        except OSError as exc:
+            raise _read_error(self.path, exc) from exc
+        if signature.startswith(HDF5_SIGNATURE):
+            return self._read_hdf5()
+        if signature.startswith(HDF4_SIGNATURE):
+            return self._read_hdf4()
+        raise GeoToolzIOError(
+            f"Unable to determine HDF backend for {self.path!s}: "
+            "unrecognised file signature."
+        )
+
+    def _read_hdf5(self) -> GeoTensor:
+        h5py = _import_optional("h5py", "hdf5")
+        try:
+            with h5py.File(self.path, "r") as file:
+                source = file[self.dataset]
+                attrs = _json_attrs(source.attrs)
+                values = _select_indexes(source[...], self.indexes)
+                out_attrs: dict[str, Any] = {"attrs": attrs}
+                if self.geolocation is not None:
+                    lat_name, lon_name = self.geolocation
+                    out_attrs["geolocation"] = {
+                        "latitude": np.asarray(file[lat_name][...]),
+                        "longitude": np.asarray(file[lon_name][...]),
+                    }
+                if self.metadata_groups is not None:
+                    out_attrs["metadata"] = {
+                        group: _json_attrs(file[group].attrs)
+                        for group in self.metadata_groups
+                    }
+        except (KeyError, OSError, ValueError) as exc:
+            raise _read_error(self.path, exc) from exc
+        return _geotensor(
+            values,
+            fill_value=_fill_value_from_attrs(attrs),
+            attrs=out_attrs,
+        )
+
+    def _read_hdf4(self) -> GeoTensor:
+        pyhdf_sd = _import_optional("pyhdf.SD", "hdf4")
+        try:
+            hdf = pyhdf_sd.SD(str(self.path), pyhdf_sd.SDC.READ)
+            try:
+                source = hdf.select(self.dataset)
+                attrs = _json_attrs(source.attributes())
+                values = _select_indexes(source.get(), self.indexes)
+                out_attrs: dict[str, Any] = {"attrs": attrs}
+                if self.geolocation is not None:
+                    lat_name, lon_name = self.geolocation
+                    out_attrs["geolocation"] = {
+                        "latitude": np.asarray(hdf.select(lat_name).get()),
+                        "longitude": np.asarray(hdf.select(lon_name).get()),
+                    }
+            finally:
+                hdf.end()
+        except (AttributeError, KeyError, OSError, ValueError) as exc:
+            raise _read_error(self.path, exc) from exc
+        return _geotensor(
+            values,
+            fill_value=_fill_value_from_attrs(attrs),
+            attrs=out_attrs,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "path": str(self.path),
+            "dataset": self.dataset,
+            "indexes": self.indexes,
+            "geolocation": self.geolocation,
+            "metadata_groups": self.metadata_groups,
+        }
+
+
+class ReadNetCDF(SourceOperator):
+    """Read a variable from a NetCDF-CF file using the ``netCDF4`` backend.
+
+    Args:
+        path: NetCDF file path.
+        variable: Variable name within ``group``.
+        group: Optional slash-separated NetCDF group path.
+        indexes: Optional 1-based band indexes along the leading variable axis.
+        decode_cf: If ``True``, apply the backend's mask/scale handling.
+        use_cf_grid_mapping: If ``True``, recover CRS from the variable's
+            ``grid_mapping`` attribute when present.
+    """
+
+    def __init__(
+        self,
+        *,
+        path: str | PathLike[str],
+        variable: str,
+        group: str | None = None,
+        indexes: list[int] | None = None,
+        decode_cf: bool = True,
+        use_cf_grid_mapping: bool = True,
+    ) -> None:
+        self.path = Path(path)
+        self.variable = variable
+        self.group = group
+        self.indexes = indexes
+        self.decode_cf = decode_cf
+        self.use_cf_grid_mapping = use_cf_grid_mapping
+
+    def _apply(self) -> GeoTensor:
+        netcdf4 = _import_optional("netCDF4", "netcdf")
+        try:
+            with netcdf4.Dataset(self.path, "r") as root:
+                group = _netcdf_group(root, self.group)
+                variable = group.variables[self.variable]
+                variable.set_auto_maskandscale(self.decode_cf)
+                attrs = _json_attrs(variable.__dict__)
+                values = _select_indexes(variable[:], self.indexes)
+                if np.ma.isMaskedArray(values):
+                    fill_value = _fill_value_from_attrs(attrs)
+                    values = values.filled(
+                        np.nan if values.dtype.kind == "f" else fill_value
+                    )
+                return _geotensor(
+                    values,
+                    crs=_netcdf_crs(group, variable, self.use_cf_grid_mapping),
+                    fill_value=_fill_value_from_attrs(attrs),
+                    attrs={"attrs": attrs},
+                    transform=_netcdf_transform(variable),
+                )
+        except (KeyError, OSError, RuntimeError, ValueError) as exc:
+            raise _read_error(self.path, exc) from exc
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "path": str(self.path),
+            "variable": self.variable,
+            "group": self.group,
+            "indexes": self.indexes,
+            "decode_cf": self.decode_cf,
+            "use_cf_grid_mapping": self.use_cf_grid_mapping,
+        }
+
+
+class ReadXRIT(SourceOperator):
+    """Read and assemble LRIT/HRIT segment payloads.
+
+    This reader provides the sensor-agnostic segment assembly needed by
+    downstream SEVIRI readers. Uncompressed ``.npy`` fixtures are loaded with
+    :func:`numpy.load`; other segment files are exposed as raw ``uint8`` rows.
+    Segment arrays are concatenated along the scan-direction axis.
+
+    Args:
+        paths: Segment file paths in scan order.
+        channel: Channel name stored in output metadata.
+        decompress: Reserved for compressed HRIT payloads. Compressed wavelet
+            payload support depends on a future codec backend.
+    """
+
+    def __init__(
+        self,
+        *,
+        paths: list[str | PathLike[str]],
+        channel: str,
+        decompress: bool = True,
+    ) -> None:
+        self.paths = [Path(path) for path in paths]
+        self.channel = channel
+        self.decompress = decompress
+
+    def _apply(self) -> GeoTensor:
+        if not self.paths:
+            raise GeoToolzIOError("ReadXRIT requires at least one segment path.")
+        segments: list[np.ndarray] = []
+        for path in self.paths:
+            try:
+                if path.suffix == ".npy":
+                    segment = np.load(path)
+                else:
+                    segment = np.frombuffer(path.read_bytes(), dtype=np.uint8)
+            except OSError as exc:
+                raise _read_error(path, exc) from exc
+            segments.append(np.asarray(segment))
+        ndim = {segment.ndim for segment in segments}
+        if len(ndim) != 1:
+            raise GeoToolzIOError("All xRIT segments must have the same rank.")
+        axis = 0 if segments[0].ndim < 2 else -2
+        try:
+            values = np.concatenate(segments, axis=axis)
+        except ValueError as exc:
+            raise GeoToolzIOError(f"Unable to assemble xRIT segments: {exc}") from exc
+        return _geotensor(
+            values,
+            attrs={
+                "channel": self.channel,
+                "paths": [str(path) for path in self.paths],
+                "decompress": self.decompress,
+            },
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "paths": [str(path) for path in self.paths],
+            "channel": self.channel,
+            "decompress": self.decompress,
+        }
+
+
 class WriteCOG(SinkOperator):
     """Write a :class:`GeoTensor` as a Cloud Optimized GeoTIFF.
 
@@ -1038,11 +1378,14 @@ __all__ = [
     "LoadFromSTAC",
     "ReadBounds",
     "ReadCenterCoords",
+    "ReadHDF",
+    "ReadNetCDF",
     "ReadPolygon",
     "ReadReprojectLike",
     "ReadTile",
     "ReadToCRS",
     "ReadWindow",
+    "ReadXRIT",
     "SinkOperator",
     "SourceOperator",
     "WriteCOG",
