@@ -240,7 +240,12 @@ def plume_length(
 
 
 def _longest_active_pixel_path(mask: np.ndarray, transform: Any) -> float:
-    """Approximate centerline length as the longest path through active pixels."""
+    """Approximate centerline length as the longest 4-neighbor pixel path.
+
+    The 4-neighbor graph avoids diagonal corner-cutting through plume
+    pixels, so bent plumes are measured along their active-pixel path
+    rather than by a straight endpoint chord.
+    """
     rows, cols = np.nonzero(mask)
     nodes = {(int(r), int(c)) for r, c in zip(rows, cols, strict=True)}
     start = next(iter(nodes))

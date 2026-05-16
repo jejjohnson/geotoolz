@@ -218,18 +218,18 @@ class PlumeFootprint(Operator):
             area_m2 = float(geometry.area)
             if area_m2 < self.min_area_m2:
                 continue
-            component_values = (
-                np.asarray(labels, dtype=float)[component]
-                if enh is None
-                else enh[component]
-            )
+            component_values = None if enh is None else enh[component]
             rows.append(
                 {
                     "geometry": geometry,
                     "area_m2": area_m2,
                     "centroid": geometry.centroid,
-                    "mean_enhancement": float(np.nanmean(component_values)),
-                    "max_enhancement": float(np.nanmax(component_values)),
+                    "mean_enhancement": None
+                    if component_values is None
+                    else float(np.nanmean(component_values)),
+                    "max_enhancement": None
+                    if component_values is None
+                    else float(np.nanmax(component_values)),
                     "n_pixels": n_pixels,
                     "label_id": label_id,
                 }

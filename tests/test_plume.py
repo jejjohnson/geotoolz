@@ -74,6 +74,13 @@ def test_plume_footprint_area_and_enhancement_stats() -> None:
     assert row.max_enhancement == pytest.approx(float(enhancement[mask].max()))
     assert gdf.crs == "EPSG:32629"
 
+    no_stats = gz.plume.PlumeFootprint(
+        min_area_m2=1.0,
+        simplify_tolerance=None,
+    )(_gt(mask))
+    assert no_stats.iloc[0].mean_enhancement is None
+    assert no_stats.iloc[0].max_enhancement is None
+
 
 def test_wind_advection_cone_follows_wind_orientation() -> None:
     transform = rasterio.Affine.translation(-5.5, 5.5) * rasterio.Affine.scale(
@@ -128,9 +135,15 @@ def test_ime_skeleton_length_and_uncertainty_fraction() -> None:
         length_method="skeleton",
         uncertainty_fraction=0.2,
     )(enhancement)
+    max_axis = gz.plume.IMEEstimate(
+        plume_mask=mask,
+        wind_speed=2.0,
+        length_method="max_axis",
+    )(enhancement)
 
     assert estimate["ime_kg"] == pytest.approx(300.0)
     assert estimate["length_m"] == pytest.approx(20.0)
+    assert estimate["length_m"] != pytest.approx(max_axis["length_m"])
     assert estimate["emission_rate_kg_s"] == pytest.approx(30.0)
     assert estimate["emission_rate_uncertainty_kg_s"] == pytest.approx(6.0)
 
