@@ -527,13 +527,13 @@ def test_segment_stitch_roundtrips_sample_segments() -> None:
         values[..., :3],
         transform=Affine(1, 0, 0, 0, -1, 3),
         crs="EPSG:4326",
-        attrs={"__geotoolz_segment_meta__": {"segment_index": 1, "n_segments": 2}},
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 2}},
     )
     right = GeoTensor(
         values[..., 3:],
         transform=Affine(1, 0, 3, 0, -1, 3),
         crs="EPSG:4326",
-        attrs={"__geotoolz_segment_meta__": {"segment_index": 2, "n_segments": 2}},
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 1, "n_segments": 2}},
     )
 
     out = gz.geom.SegmentStitch(axis="sample")([right, left])

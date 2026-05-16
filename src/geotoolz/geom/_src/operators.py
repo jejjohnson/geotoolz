@@ -738,6 +738,8 @@ class BowtieCorrection(Operator):
         scans_per_granule: int,
         method: str = "nearest",
     ) -> None:
+        if not 0.0 <= scan_angle_max_deg < 70.0:
+            raise ValueError("scan_angle_max_deg must be in the range [0, 70).")
         self.scan_angle_max_deg = scan_angle_max_deg
         self.pixels_per_scan = pixels_per_scan
         self.scans_per_granule = scans_per_granule
@@ -765,7 +767,7 @@ class BowtieCorrection(Operator):
         angles = np.deg2rad(
             np.linspace(-self.scan_angle_max_deg, self.scan_angle_max_deg, width)
         )
-        expansion = 1.0 / np.clip(np.cos(angles), 1.0e-6, None)
+        expansion = 1.0 / np.clip(np.cos(angles), 0.1, None)
         src_cols = centre + (cols - centre) / expansion
         sampled = _sample_array(
             np.asarray(gt),
@@ -800,10 +802,11 @@ class AntimeridianSplit(Operator):
 
     def __init__(self, *, crs: str = "EPSG:4326", tolerance_deg: float = 90.0) -> None:
         self.crs = crs
+        self._parsed_crs = CRS.from_user_input(crs)
         self.tolerance_deg = tolerance_deg
 
     def _apply(self, gt: GeoTensor) -> list[GeoTensor]:
-        lons = _longitude_grid(gt, self.crs)
+        lons = _longitude_grid(gt, self._parsed_crs)
         if lons is None:
             raise ValueError(
                 "AntimeridianSplit requires geographic longitudes in attrs['lons'] "
@@ -1371,7 +1374,7 @@ def _apply_invalid_fill(
     return out
 
 
-def _longitude_grid(gt: GeoTensor, crs: str) -> np.ndarray | None:
+def _longitude_grid(gt: GeoTensor, crs: str | CRS) -> np.ndarray | None:
     attrs = gt.attrs or {}
     for key in ("lons", "lon", "longitude"):
         if key in attrs:
@@ -1460,8 +1463,10 @@ def _apparent_lonlat(
     a = np.sum(direction * direction, axis=0)
     b = 2.0 * np.sum(satellite * direction, axis=0)
     c = np.sum(satellite * satellite, axis=0) - earth_radius_m**2
-    discriminant = np.maximum(b * b - 4.0 * a * c, 0.0)
-    near = (-b - np.sqrt(discriminant)) / (2.0 * a)
+    discriminant = b * b - 4.0 * a * c
+    if np.any(discriminant < -1.0e-6):
+        raise ValueError("Parallax ray does not intersect the Earth surface.")
+    near = (-b - np.sqrt(np.maximum(discriminant, 0.0))) / (2.0 * a)
     apparent = satellite + direction * near[None, ...]
     apparent_lon = np.rad2deg(np.arctan2(apparent[1], apparent[0]))
     apparent_lat = np.rad2deg(
