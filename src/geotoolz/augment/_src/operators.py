@@ -116,7 +116,7 @@ class Compose(Operator):
             return gt
 
         out = gt
-        child_seeds = rng.integers(0, 2**63, len(self.augmentations))
+        child_seeds = rng.integers(0, 2**63 - 1, len(self.augmentations))
         for op, child_seed in zip(self.augmentations, child_seeds, strict=True):
             out = op(out, seed=int(child_seed))
         return out
@@ -538,7 +538,7 @@ class SimulatedClouds(Operator):
         field = rng.normal(size=arr.shape[-2:])
         if self.feather:
             field = gaussian_filter(field, sigma=self.feather, mode="reflect")
-        field = (field - field.min()) / (np.ptp(field) + np.finfo(float).eps)
+        field = (field - field.min()) / (np.ptp(field) + np.finfo(np.float64).eps)
         threshold = np.quantile(field, 1.0 - coverage)
         alpha = np.clip((field - threshold) / (field.max() - threshold + 1e-12), 0, 1)
         alpha = alpha.reshape((1,) * (arr.ndim - 2) + alpha.shape)

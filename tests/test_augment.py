@@ -55,7 +55,7 @@ def test_random_flip_noop_and_forced_transform(patch: GeoTensor) -> None:
 def test_random_rotate90_matches_numpy_and_updates_transform(patch: GeoTensor) -> None:
     seed = 3
     rng = np.random.default_rng(seed)
-    assert rng.random() < 1.0
+    rng.random()
     k = int(rng.integers(1, 4))
 
     out = augment.RandomRotate90(p=1.0, seed=seed)(patch)
