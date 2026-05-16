@@ -147,7 +147,7 @@ class Felzenszwalb(Operator):
             min_size=self.min_size,
             channel_axis=self.channel_axis,
         )
-        return _labels(gt, labels + 1, valid)
+        return _labels(gt, labels, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -192,7 +192,7 @@ class Quickshift(Operator):
             sigma=self.sigma,
             channel_axis=self.channel_axis,
         )
-        return _labels(gt, labels + 1, valid)
+        return _labels(gt, labels, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {

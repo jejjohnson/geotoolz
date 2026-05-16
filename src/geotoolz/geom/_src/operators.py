@@ -175,7 +175,11 @@ class ResampleLike(ReprojectLike):
 
 
 class PhaseAlign(Operator):
-    """Sub-pixel image registration via phase cross-correlation."""
+    """Sub-pixel image registration via phase cross-correlation.
+
+    Arrays are interpreted as ``(H, W)`` or channel-first ``(C, H, W)``
+    GeoTensors; the selected registration band is taken from axis 0.
+    """
 
     forbid_in_yaml: ClassVar[bool] = True
 
