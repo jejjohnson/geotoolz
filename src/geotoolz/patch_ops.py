@@ -8,7 +8,7 @@ sliding-window inference pipeline composes inside a `Sequential` /
     pipe = Sequential([
         GridSampler(patcher),
         ApplyToChips(model_op),
-        Stitch(SpatialOverlapAdd()),
+        Stitch(SpatialOverlapAdd(), domain=field.domain),
     ])
 
 Optional extra: ``pip install 'geotoolz[patch]'`` to pull in geopatcher.
