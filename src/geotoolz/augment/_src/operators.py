@@ -116,7 +116,7 @@ class Compose(Operator):
             return gt
 
         out = gt
-        child_seeds = rng.integers(0, np.iinfo(np.int32).max, len(self.augmentations))
+        child_seeds = rng.integers(0, 2**63, len(self.augmentations))
         for op, child_seed in zip(self.augmentations, child_seeds, strict=True):
             out = op(out, seed=int(child_seed))
         return out
@@ -465,7 +465,9 @@ class SunAngleJitter(Operator):
         )
         denom = np.cos(np.deg2rad(base_sza))
         if np.isclose(denom, 0.0):
-            raise ValueError("solar zenith angle is too close to 90 degrees.")
+            raise ValueError(
+                f"solar zenith angle ({base_sza:.2f} deg) is too close to 90 degrees."
+            )
         scale = np.cos(np.deg2rad(base_sza + delta)) / denom
         return _wrap_like(gt, np.asarray(gt).astype(np.float64, copy=False) * scale)
 
@@ -504,6 +506,7 @@ def _spectral_weights(gt: GeoTensor, n_bands: int) -> np.ndarray:
     if wavelengths.size != n_bands:
         raise ValueError("wavelength metadata must have one value per band.")
     if np.nanmax(wavelengths) < 10.0:
+        # Treat small wavelength values as micrometers and convert to nanometers.
         wavelengths = wavelengths * 1000.0
     weights = 1.0 / np.power(wavelengths, 4)
     return weights / np.nanmax(weights)
@@ -539,6 +542,7 @@ class SimulatedClouds(Operator):
         threshold = np.quantile(field, 1.0 - coverage)
         alpha = np.clip((field - threshold) / (field.max() - threshold + 1e-12), 0, 1)
         alpha = alpha.reshape((1,) * (arr.ndim - 2) + alpha.shape)
+        # Use a high percentile to approximate bright cloud reflectance.
         cloud_value = 1.0 if np.nanmax(arr) <= 1.0 else np.nanpercentile(arr, 98)
         out = arr.astype(np.float64, copy=False) * (1.0 - alpha) + cloud_value * alpha
         return _wrap_like(gt, out)

@@ -123,7 +123,7 @@ def test_brightness_jitter_statistical_midpoint(patch: GeoTensor) -> None:
             patch
         )
         factors.append(float(np.asarray(out)[0, 1, 1]) / pixel)
-    assert np.mean(factors) == pytest.approx(1.0, abs=0.02)
+    assert np.mean(factors) == pytest.approx(1.0, abs=0.01)
 
 
 def test_contrast_jitter_noise_and_speckle_preserve_shape_dtype(
