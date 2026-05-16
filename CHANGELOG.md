@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.0.6](https://github.com/jejjohnson/geotoolz/compare/v0.0.5...v0.0.6) (2026-05-16)
+
+
+### Features
+
+* **augment:** rs-safe spatial and spectral augmentations ([#43](https://github.com/jejjohnson/geotoolz/issues/43)) ([b9f1fba](https://github.com/jejjohnson/geotoolz/commit/b9f1fbaa3b9386d6a155c3e062637cc9b2a7289d))
+* **geom:** geotoolz.geom operator surface ([#35](https://github.com/jejjohnson/geotoolz/issues/35)) ([fdc860a](https://github.com/jejjohnson/geotoolz/commit/fdc860ab15d002f4974af2ee49425e8bdc79b07c))
+* **indices:** vegetation/water/snow/burn/mineral indices + named-band resolution ([#38](https://github.com/jejjohnson/geotoolz/issues/38)) ([1f6594b](https://github.com/jejjohnson/geotoolz/commit/1f6594b94a7198705a30a8b874fbcb06124f95f5))
+* **io:** reader/writer operators for georeader IO ([#34](https://github.com/jejjohnson/geotoolz/issues/34)) ([530145f](https://github.com/jejjohnson/geotoolz/commit/530145f1e5955f3d414b1019942ab1999a125a06))
+* **mask:** geometry rasterization, morphology, and boolean algebra ops ([#40](https://github.com/jejjohnson/geotoolz/issues/40)) ([bb507ef](https://github.com/jejjohnson/geotoolz/commit/bb507ef9804f6ee5ccab7f15c13d63a396fb7643))
+* **normalize:** per-band min-max, z-score, robust, and fixed-stats ops ([#41](https://github.com/jejjohnson/geotoolz/issues/41)) ([4e6efad](https://github.com/jejjohnson/geotoolz/commit/4e6efad60accb8b34e2f3805e679e7b3f34dcdc4))
+* **plume:** ch4/co2 retrieval, segmentation, and flux operators ([#45](https://github.com/jejjohnson/geotoolz/issues/45)) ([757e26d](https://github.com/jejjohnson/geotoolz/commit/757e26d220b0a8920189a4b37efd953007cadf72))
+* **qa:** sensor-specific QA-bit decoders (Landsat, MODIS, S2) ([#39](https://github.com/jejjohnson/geotoolz/issues/39)) ([04eff6f](https://github.com/jejjohnson/geotoolz/commit/04eff6f811c066de2159b531ec4883757917b46d))
+* **radiometry:** toa/boa pipeline operators (planck, dos1, srf, sza) ([#37](https://github.com/jejjohnson/geotoolz/issues/37)) ([0d57cff](https://github.com/jejjohnson/geotoolz/commit/0d57cffab9a1061b62d2ff5748e52d502d03a18f))
+* **restore:** inpainting, gap-fill, despiking, and smoothing ops ([#42](https://github.com/jejjohnson/geotoolz/issues/42)) ([18524ae](https://github.com/jejjohnson/geotoolz/commit/18524aeece47c31c9bcfeab54731267299173586))
+* **spectral:** band-space operators (SelectBands, BandMath, SRF, continuum removal) ([#36](https://github.com/jejjohnson/geotoolz/issues/36)) ([79504ac](https://github.com/jejjohnson/geotoolz/commit/79504acfe503b73e4a95aaa7bf51c922279357df))
+* **viz:** rgb/false-color composites, stretches, and colormaps ([#44](https://github.com/jejjohnson/geotoolz/issues/44)) ([293acb5](https://github.com/jejjohnson/geotoolz/commit/293acb5cf5f7fcb733748f3de2d8b93d3b32419e))
+
 ## [0.0.5](https://github.com/jejjohnson/geotoolz/compare/v0.0.4...v0.0.5) (2026-05-15)
 
 

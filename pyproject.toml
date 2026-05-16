@@ -1,6 +1,6 @@
 [project]
 name = "geotoolz"
-version = "0.0.5"
+version = "0.0.6"
 description = "Composable Operator library for remote sensing on top of georeader.GeoTensor."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
