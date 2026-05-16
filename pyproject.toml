@@ -53,6 +53,8 @@ dependencies = [
     # `pipekit.Operator`; the dependency is now load-bearing rather than
     # optional. See [tool.uv.sources] below for the dev-time source.
     "pipekit>=0.0.1",
+    "scikit-learn>=1.4",
+    "joblib>=1.3",
 ]
 
 [project.optional-dependencies]
