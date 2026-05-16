@@ -118,6 +118,14 @@ def test_buffer_mask_pixels_matches_euclidean_radius() -> None:
     np.testing.assert_array_equal(out, expected)
 
 
+def test_buffer_mask_meters_requires_geotensor_carrier() -> None:
+    mask = np.zeros((5, 5), dtype=bool)
+    mask[2, 2] = True
+
+    with pytest.raises(ValueError, match="requires a GeoTensor"):
+        BufferMask(radius=1.0, unit="meters")(mask)
+
+
 def test_array_helpers_validate_inputs() -> None:
     with pytest.raises(ValueError, match="must not be empty"):
         combine_masks_array([], "or")
@@ -299,6 +307,31 @@ def test_slope_mask_matches_flat_reference() -> None:
     out = SlopeMask(dem=dem, max_slope_deg=0.5)(scene)
 
     assert np.all(np.asarray(out))
+
+
+def test_dem_masks_reject_mismatched_grid() -> None:
+    dem_values = np.array([[0.0, 10.0], [20.0, 30.0]], dtype=np.float32)
+    dem = GeoTensor(
+        values=dem_values,
+        transform=rasterio.Affine(2.0, 0.0, 100.0, 0.0, -2.0, 200.0),
+        crs="EPSG:3857",
+        fill_value_default=-9999,
+    )
+    scene = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="DEM grid"):
+        AltitudeMask(dem=dem, min_elev=5.0, max_elev=20.0)(scene)
+
+    flat_dem = GeoTensor(
+        values=np.ones((4, 4), dtype=np.float32) * 100.0,
+        transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
+        crs="EPSG:4326",
+        fill_value_default=-9999,
+    )
+    flat_scene = _toy_geotensor(np.zeros((4, 4), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="DEM grid"):
+        SlopeMask(dem=flat_dem, max_slope_deg=0.5)(flat_scene)
 
 
 def test_natural_earth_mask_constructors_use_cached_loader(

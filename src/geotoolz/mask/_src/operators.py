@@ -230,6 +230,7 @@ class AltitudeMask(Operator):
             np.asarray(self.dem), min_elev=self.min_elev, max_elev=self.max_elev
         )
         _check_spatial_match(mask, gt, "AltitudeMask")
+        _check_dem_grid_alignment(self.dem, gt, "AltitudeMask")
         return gt.array_as_geotensor(mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
@@ -279,6 +280,7 @@ class SlopeMask(Operator):
             max_slope_deg=self.max_slope_deg,
         )
         _check_spatial_match(mask, gt, "SlopeMask")
+        _check_dem_grid_alignment(self.dem, gt, "SlopeMask")
         return gt.array_as_geotensor(mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
@@ -388,9 +390,15 @@ class BufferMask(Operator):
         self.unit = unit
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        pixel_size = (
-            _pixel_size(mask) if self.unit in {"meter", "meters"} else (1.0, 1.0)
-        )
+        if self.unit in {"meter", "meters"}:
+            if not hasattr(mask, "transform"):
+                raise ValueError(
+                    "BufferMask(unit='meters') requires a GeoTensor with a "
+                    f"transform; got {type(mask).__name__}."
+                )
+            pixel_size = _pixel_size(mask)
+        else:
+            pixel_size = (1.0, 1.0)
         out = buffer_mask(
             np.asarray(mask), self.radius, unit=self.unit, pixel_size=pixel_size
         )
@@ -680,6 +688,22 @@ def _pixel_size(gt: Any) -> tuple[float, float]:
 def _check_spatial_match(mask: np.ndarray, gt: GeoTensor, name: str) -> None:
     if mask.shape[-2:] != gt.shape[-2:]:
         raise ValueError(f"{name}: DEM spatial shape must match the input GeoTensor")
+
+
+def _check_dem_grid_alignment(dem: Any, gt: Any, name: str) -> None:
+    """Reject DEMs whose georeferencing disagrees with the carrier.
+
+    A DEM with the same raster shape but a different ``transform`` or
+    ``crs`` would be silently misapplied to the carrier. When both
+    inputs expose ``transform`` / ``crs`` (i.e. are GeoTensor-like), we
+    require them to match.
+    """
+    if not (hasattr(dem, "transform") and hasattr(gt, "transform")):
+        return
+    if not (hasattr(dem, "crs") and hasattr(gt, "crs")):
+        return
+    if dem.transform != gt.transform or str(dem.crs) != str(gt.crs):
+        raise ValueError(f"{name}: DEM grid (transform/crs) doesn't match carrier")
 
 
 def _morph_config(iterations: int, structure: np.ndarray | None) -> dict[str, Any]:
