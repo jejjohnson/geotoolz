@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from geotoolz import catalog, cloud, core, indices, patch, radiometry, types
+from geotoolz import augment, catalog, cloud, core, indices, patch, radiometry, types
 from geotoolz.catalog import (
     CatalogDomain,
     CatalogRow,
@@ -303,6 +303,7 @@ __all__ = [
     "ToFloat32",
     "VectorDomain",
     "__version__",
+    "augment",
     "build_raster_catalog",
     "build_vector_catalog",
     "build_xarray_catalog",
