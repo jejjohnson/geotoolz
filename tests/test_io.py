@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -39,7 +40,7 @@ def test_io_module_is_exported() -> None:
 
 
 def test_write_geotiff_then_read_bounds_roundtrips(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
@@ -55,7 +56,7 @@ def test_write_geotiff_then_read_bounds_roundtrips(
     assert out.fill_value_default == -9999
 
 
-def test_source_operator_can_start_sequential_without_input(tmp_path) -> None:
+def test_source_operator_can_start_sequential_without_input(tmp_path: Path) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
     io.WriteGeoTIFF(path=path)(gt)
@@ -71,7 +72,7 @@ def test_source_operator_can_start_sequential_without_input(tmp_path) -> None:
 
 
 def test_read_window_accepts_reader_source_and_rejects_indexed_objects(
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
@@ -85,7 +86,7 @@ def test_read_window_accepts_reader_source_and_rejects_indexed_objects(
         io.ReadWindow(src=object(), window=Window(0, 0, 1, 1), indexes=[1])()
 
 
-def test_read_window_outside_source_raises_clear_error(tmp_path) -> None:
+def test_read_window_outside_source_raises_clear_error(tmp_path: Path) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
     io.WriteGeoTIFF(path=path)(gt)
@@ -98,7 +99,7 @@ def test_read_window_outside_source_raises_clear_error(tmp_path) -> None:
         )()
 
 
-def test_read_window_accepts_tuple_config(tmp_path) -> None:
+def test_read_window_accepts_tuple_config(tmp_path: Path) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
     io.WriteGeoTIFF(path=path)(gt)
@@ -110,7 +111,7 @@ def test_read_window_accepts_tuple_config(tmp_path) -> None:
     assert op.get_config()["window"] == (1, 1, 2, 2)
 
 
-def test_read_center_coords_and_polygon(tmp_path) -> None:
+def test_read_center_coords_and_polygon(tmp_path: Path) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
     io.WriteGeoTIFF(path=path)(gt)
@@ -133,7 +134,7 @@ def test_read_center_coords_and_polygon(tmp_path) -> None:
     np.testing.assert_array_equal(polygon.values, gt.values[:1, 1:3, 1:3])
 
 
-def test_reprojecting_readers_match_reference_grid(tmp_path) -> None:
+def test_reprojecting_readers_match_reference_grid(tmp_path: Path) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
     io.WriteGeoTIFF(path=path)(gt)
@@ -158,7 +159,7 @@ def test_reprojecting_readers_match_reference_grid(tmp_path) -> None:
     assert whole.shape[-2:] == gt.shape[-2:]
 
 
-def test_write_cog_writes_readable_cog(tmp_path) -> None:
+def test_write_cog_writes_readable_cog(tmp_path: Path) -> None:
     gt = _cog_test_geotensor()
     path = tmp_path / "sample_cog.tif"
 
@@ -172,7 +173,9 @@ def test_write_cog_writes_readable_cog(tmp_path) -> None:
     np.testing.assert_array_equal(out.values, gt.values)
 
 
-def test_write_geotiff_handles_2d_data_profile_and_invalid_shapes(tmp_path) -> None:
+def test_write_geotiff_handles_2d_data_profile_and_invalid_shapes(
+    tmp_path: Path,
+) -> None:
     gt = _sample_geotensor()
     two_dim = GeoTensor(
         gt.values[0],
@@ -206,14 +209,14 @@ def test_sink_operator_is_only_valid_at_end_of_sequential() -> None:
         Sequential([io.WriteGeoTIFF(path="out.tif"), Identity()])
 
 
-def test_missing_source_raises_geotoolz_io_error(tmp_path) -> None:
+def test_missing_source_raises_geotoolz_io_error(tmp_path: Path) -> None:
     missing = tmp_path / "missing.tif"
 
     with pytest.raises(io.GeoToolzIOError, match="Unable to read raster source"):
         io.ReadBounds(src=missing, bounds=(0.0, 0.0, 1.0, 1.0))()
 
 
-def test_load_from_stac_reads_asset_href(tmp_path) -> None:
+def test_load_from_stac_reads_asset_href(tmp_path: Path) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "asset.tif"
     io.WriteGeoTIFF(path=path)(gt)

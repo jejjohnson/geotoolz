@@ -93,7 +93,10 @@ class Sequential(Operator):
         # may legitimately reduce (e.g. end in a ``Mean`` that returns a
         # scalar) so we can't promise the carrier shape survives.
         if gt is _MISSING and not self.operators:
-            raise TypeError("Sequential([]) requires an input value.")
+            raise TypeError(
+                "Sequential([]) cannot be called without an input: "
+                "empty pipeline has no operations to perform."
+            )
         if gt is _MISSING:
             out = self.operators[0]()
             operators = self.operators[1:]
