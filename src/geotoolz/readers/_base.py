@@ -161,9 +161,9 @@ class SensorReader(GeoData, ABC):
         boundless: bool = True,
     ) -> GeoTensor:
         """Read a window centered on map coordinates."""
-        col_float, row_float = ~self.transform * (x, y)
-        row = int(np.floor(row_float))
-        col = int(np.floor(col_float))
+        col_px_float, row_px_float = ~self.transform * (x, y)
+        row = int(np.floor(row_px_float))
+        col = int(np.floor(col_px_float))
         window = Window(
             col_off=col - width // 2,
             row_off=row - height // 2,
