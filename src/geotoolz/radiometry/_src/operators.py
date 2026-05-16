@@ -10,18 +10,33 @@ non-ufunc cases (``PercentileClip``) explicitly wrap via
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import pandas as pd
+from georeader.reflectance import (
+    compute_sza,
+    earth_sun_distance_correction_factor,
+    integrated_irradiance,
+    load_thuillier_irradiance,
+    radiance_to_reflectance,
+    reflectance_to_radiance,
+    srf,
+    transform_to_srf,
+)
 
 from geotoolz.core import Operator
 from geotoolz.radiometry._src.array import (
     _broadcast_to_band_axis,
+    bt_from_radiance,
     dn_to_radiance,
     dn_to_reflectance,
+    dos1,
     gamma_correct,
     min_max_normalize,
     percentile_clip,
+    radiance_to_dn,
 )
 
 
@@ -112,10 +127,12 @@ class DNToRadiance(Operator):
         *,
         gain: float | np.ndarray | list,
         offset: float | np.ndarray | list = 0.0,
+        scale: float | np.ndarray | list = 1.0,
         axis: int = 0,
     ) -> None:
         self.gain = gain
         self.offset = offset
+        self.scale = scale
         self.axis = axis
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
@@ -123,13 +140,49 @@ class DNToRadiance(Operator):
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         gain = _broadcast_to_band_axis(self.gain, n_bands, self.axis, arr.ndim)
         offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
-        out = dn_to_radiance(arr, gain, offset)
+        scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
+        out = dn_to_radiance(arr, gain, offset, scale)
         return gt.array_as_geotensor(out)
 
     def get_config(self) -> dict[str, Any]:
         return {
             "gain": _coef_as_jsonable(self.gain),
             "offset": _coef_as_jsonable(self.offset),
+            "scale": _coef_as_jsonable(self.scale),
+            "axis": self.axis,
+        }
+
+
+class RadianceToDN(Operator):
+    """Convert at-sensor radiance back to DN with `DNToRadiance`'s inverse."""
+
+    def __init__(
+        self,
+        *,
+        gain: float | np.ndarray | list,
+        offset: float | np.ndarray | list = 0.0,
+        scale: float | np.ndarray | list = 1.0,
+        axis: int = 0,
+    ) -> None:
+        self.gain = gain
+        self.offset = offset
+        self.scale = scale
+        self.axis = axis
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        arr = np.asarray(gt)
+        n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
+        gain = _broadcast_to_band_axis(self.gain, n_bands, self.axis, arr.ndim)
+        offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
+        scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
+        out = radiance_to_dn(arr, gain, offset, scale)
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "gain": _coef_as_jsonable(self.gain),
+            "offset": _coef_as_jsonable(self.offset),
+            "scale": _coef_as_jsonable(self.scale),
             "axis": self.axis,
         }
 
@@ -198,6 +251,321 @@ class DNToReflectance(Operator):
             "scale": _coef_as_jsonable(self.scale),
             "offset": _coef_as_jsonable(self.offset),
             "axis": self.axis,
+        }
+
+
+def _observation_date_corr_factor(
+    acquisition_date: datetime,
+    sza_deg: float | None,
+) -> float | None:
+    if sza_deg is None:
+        return None
+    d = earth_sun_distance_correction_factor(acquisition_date)
+    return float(np.pi * (d**2) / np.cos(np.deg2rad(sza_deg)))
+
+
+class RadianceToReflectance(Operator):
+    """Convert at-sensor radiance to TOA reflectance with solar geometry."""
+
+    def __init__(
+        self,
+        *,
+        solar_irradiance: np.ndarray | list,
+        acquisition_date: datetime,
+        center_coords: tuple[float, float] | None = None,
+        sza_deg: float | None = None,
+        crs_coords: str | None = None,
+        units: str = "W/m2/sr/nm",
+    ) -> None:
+        self.solar_irradiance = solar_irradiance
+        self.acquisition_date = acquisition_date
+        self.center_coords = center_coords
+        self.sza_deg = sza_deg
+        self.crs_coords = crs_coords
+        self.units = units
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = radiance_to_reflectance(
+            gt,
+            solar_irradiance=self.solar_irradiance,
+            date_of_acquisition=self.acquisition_date,
+            center_coords=self.center_coords,
+            crs_coords=self.crs_coords,
+            observation_date_corr_factor=_observation_date_corr_factor(
+                self.acquisition_date, self.sza_deg
+            ),
+            units=self.units,
+        )
+        return out
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "solar_irradiance": _coef_as_jsonable(self.solar_irradiance),
+            "acquisition_date": self.acquisition_date,
+            "center_coords": self.center_coords,
+            "sza_deg": self.sza_deg,
+            "crs_coords": self.crs_coords,
+            "units": self.units,
+        }
+
+
+class ReflectanceToRadiance(Operator):
+    """Convert TOA reflectance back to at-sensor radiance."""
+
+    def __init__(
+        self,
+        *,
+        solar_irradiance: np.ndarray | list,
+        acquisition_date: datetime,
+        center_coords: tuple[float, float] | None = None,
+        sza_deg: float | None = None,
+        crs_coords: str | None = None,
+    ) -> None:
+        self.solar_irradiance = solar_irradiance
+        self.acquisition_date = acquisition_date
+        self.center_coords = center_coords
+        self.sza_deg = sza_deg
+        self.crs_coords = crs_coords
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = reflectance_to_radiance(
+            gt,
+            solar_irradiance=self.solar_irradiance,
+            date_of_acquisition=self.acquisition_date,
+            center_coords=self.center_coords,
+            crs_coords=self.crs_coords,
+            observation_date_corr_factor=_observation_date_corr_factor(
+                self.acquisition_date, self.sza_deg
+            ),
+        )
+        return out
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "solar_irradiance": _coef_as_jsonable(self.solar_irradiance),
+            "acquisition_date": self.acquisition_date,
+            "center_coords": self.center_coords,
+            "sza_deg": self.sza_deg,
+            "crs_coords": self.crs_coords,
+        }
+
+
+class EarthSunDistanceCorrection(Operator):
+    """Compute the Earth-Sun distance correction factor for an acquisition date."""
+
+    def __init__(self, *, acquisition_date: datetime) -> None:
+        self.acquisition_date = acquisition_date
+
+    def _apply(self, _gt: Any | None = None) -> float:
+        return float(earth_sun_distance_correction_factor(self.acquisition_date))
+
+    def get_config(self) -> dict[str, Any]:
+        return {"acquisition_date": self.acquisition_date}
+
+
+class ComputeSZA(Operator):
+    """Compute solar zenith angle in degrees for a location and acquisition date."""
+
+    def __init__(
+        self,
+        *,
+        center_coords: tuple[float, float],
+        acquisition_date: datetime,
+        crs_coords: str | None = None,
+    ) -> None:
+        self.center_coords = center_coords
+        self.acquisition_date = acquisition_date
+        self.crs_coords = crs_coords
+
+    def _apply(self, _gt: Any | None = None) -> float:
+        return float(
+            compute_sza(
+                self.center_coords,
+                self.acquisition_date,
+                crs_coords=self.crs_coords,
+            )
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "center_coords": self.center_coords,
+            "acquisition_date": self.acquisition_date,
+            "crs_coords": self.crs_coords,
+        }
+
+
+class IntegratedIrradiance(Operator):
+    """Compute band-integrated solar irradiance from an SRF table."""
+
+    def __init__(
+        self,
+        *,
+        srf: pd.DataFrame,
+        solar_irradiance: pd.DataFrame | None = None,
+        epsilon_srf: float = 1e-4,
+    ) -> None:
+        self.srf = srf
+        self.solar_irradiance = solar_irradiance
+        self.epsilon_srf = epsilon_srf
+
+    def _apply(self, _gt: Any | None = None) -> np.ndarray:
+        solar_irradiance = (
+            load_thuillier_irradiance()
+            if self.solar_irradiance is None
+            else self.solar_irradiance
+        )
+        return integrated_irradiance(
+            self.srf,
+            solar_irradiance=solar_irradiance,
+            epsilon_srf=self.epsilon_srf,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "srf": self.srf,
+            "solar_irradiance": self.solar_irradiance,
+            "epsilon_srf": self.epsilon_srf,
+        }
+
+
+class ApplySRF(Operator):
+    """Convolve hyperspectral data to target Gaussian spectral response bands."""
+
+    def __init__(
+        self,
+        *,
+        target_center_wavelengths: np.ndarray | list,
+        target_fwhm: np.ndarray | list,
+        source_wavelengths: np.ndarray | list,
+        epsilon_srf: float = 1e-4,
+        extrapolate: bool = False,
+    ) -> None:
+        self.target_center_wavelengths = target_center_wavelengths
+        self.target_fwhm = target_fwhm
+        self.source_wavelengths = source_wavelengths
+        self.epsilon_srf = epsilon_srf
+        self.extrapolate = extrapolate
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        source_wavelengths = np.asarray(self.source_wavelengths, dtype=float)
+        wavelengths = np.arange(
+            np.floor(source_wavelengths.min()),
+            np.ceil(source_wavelengths.max()) + 1,
+        )
+        srf_values = srf(
+            self.target_center_wavelengths,
+            self.target_fwhm,
+            wavelengths,
+        )
+        srf_df = pd.DataFrame(srf_values, index=wavelengths)
+        out = transform_to_srf(
+            np.asarray(gt),
+            srf_df,
+            source_wavelengths.tolist(),
+            fill_value_default=gt.fill_value_default,
+            epsilon_srf=self.epsilon_srf,
+            extrapolate=self.extrapolate,
+        )
+        fill_value = gt.fill_value_default
+        if fill_value is not None:
+            missing = np.any(np.asarray(gt) == fill_value, axis=0)
+            out[:, missing] = fill_value
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "target_center_wavelengths": _coef_as_jsonable(
+                self.target_center_wavelengths
+            ),
+            "target_fwhm": _coef_as_jsonable(self.target_fwhm),
+            "source_wavelengths": _coef_as_jsonable(self.source_wavelengths),
+            "epsilon_srf": self.epsilon_srf,
+            "extrapolate": self.extrapolate,
+        }
+
+
+class BTFromRadiance(Operator):
+    """Convert thermal radiance to brightness temperature in Kelvin."""
+
+    def __init__(
+        self,
+        *,
+        K1: float | np.ndarray | list,
+        K2: float | np.ndarray | list,
+        axis: int = 0,
+    ) -> None:
+        self.K1 = K1
+        self.K2 = K2
+        self.axis = axis
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        arr = np.asarray(gt)
+        n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
+        k1 = _broadcast_to_band_axis(self.K1, n_bands, self.axis, arr.ndim)
+        k2 = _broadcast_to_band_axis(self.K2, n_bands, self.axis, arr.ndim)
+        fill_value = gt.fill_value_default
+        work = arr
+        if fill_value is not None:
+            work = np.where(arr == fill_value, np.nan, arr)
+        out = bt_from_radiance(work, k1, k2)
+        if fill_value is not None:
+            out[arr == fill_value] = fill_value
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "K1": _coef_as_jsonable(self.K1),
+            "K2": _coef_as_jsonable(self.K2),
+            "axis": self.axis,
+        }
+
+
+class DOS1(Operator):
+    """Apply a Chavez-style DOS1 dark-object subtraction approximation."""
+
+    def __init__(self, *, dark_percentile: float = 1.0) -> None:
+        self.dark_percentile = dark_percentile
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        arr = np.asarray(gt, dtype=float)
+        fill_value = gt.fill_value_default
+        valid = None if fill_value is None else arr != fill_value
+        work = arr if valid is None else np.where(valid, arr, np.nan)
+        out = dos1(work, dark_percentile=self.dark_percentile, axis=(-2, -1))
+        if valid is not None:
+            out[~valid] = fill_value
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"dark_percentile": self.dark_percentile}
+
+
+class SimpleAtmosphericCorrection(Operator):
+    """Dispatch simple BOA approximations; currently supports ``method='dos1'``."""
+
+    def __init__(
+        self,
+        *,
+        method: str = "dos1",
+        dark_percentile: float = 1.0,
+        aod: float | None = None,
+    ) -> None:
+        self.method = method
+        self.dark_percentile = dark_percentile
+        self.aod = aod
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        if self.method.lower() != "dos1":
+            raise NotImplementedError(
+                "SimpleAtmosphericCorrection currently supports only method='dos1'"
+            )
+        return DOS1(dark_percentile=self.dark_percentile)(gt)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "method": self.method,
+            "dark_percentile": self.dark_percentile,
+            "aod": self.aod,
         }
 
 

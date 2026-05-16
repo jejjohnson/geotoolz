@@ -6,23 +6,38 @@ round-trip, Hydra-zen `builds()` round-trip.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import numpy as np
+import pandas as pd
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
+from georeader.reflectance import earth_sun_distance_correction_factor
 
 from geotoolz.radiometry import (
+    DOS1,
+    ApplySRF,
+    BTFromRadiance,
     DNToRadiance,
     DNToReflectance,
+    EarthSunDistanceCorrection,
     Gamma,
     MinMax,
     PercentileClip,
+    RadianceToDN,
+    RadianceToReflectance,
+    ReflectanceToRadiance,
+    SimpleAtmosphericCorrection,
     ToFloat32,
+    bt_from_radiance,
     dn_to_radiance,
     dn_to_reflectance,
+    dos1,
     gamma_correct,
     min_max_normalize,
     percentile_clip,
+    radiance_to_dn,
 )
 
 
@@ -58,6 +73,13 @@ def test_dn_to_radiance_linear() -> None:
     out = dn_to_radiance(dn, gain=0.01, offset=-1.0)
     expected = 0.01 * dn - 1.0
     np.testing.assert_allclose(out, expected, rtol=1e-9)
+
+
+def test_radiance_to_dn_inverts_dn_to_radiance_with_scale() -> None:
+    dn = np.array([0.0, 1000.0, 2000.0])
+    radiance = dn_to_radiance(dn, gain=2.0, offset=1.0, scale=10.0)
+    out = radiance_to_dn(radiance, gain=2.0, offset=1.0, scale=10.0)
+    np.testing.assert_allclose(out, dn, rtol=1e-12)
 
 
 def test_dn_to_reflectance_s2_l1c() -> None:
@@ -156,6 +178,19 @@ def test_gamma_correct_handles_negatives() -> None:
     assert np.isfinite(out).all()
 
 
+def test_bt_from_radiance_planck_inversion() -> None:
+    radiance = np.array([10.0])
+    out = bt_from_radiance(radiance, k1=774.8853, k2=1321.0789)
+    expected = 1321.0789 / np.log((774.8853 / radiance) + 1.0)
+    np.testing.assert_allclose(out, expected)
+
+
+def test_dos1_subtracts_dark_percentile() -> None:
+    reflectance = np.array([[[0.02, 0.10], [0.20, 0.30]]])
+    out = dos1(reflectance, dark_percentile=0.0)
+    np.testing.assert_allclose(out, [[[0.0, 0.08], [0.18, 0.28]]])
+
+
 # ---------------------------------------------------------------------------
 # Tier-B — Operator + GeoTensor round-trip
 # ---------------------------------------------------------------------------
@@ -188,6 +223,14 @@ def test_dn_to_radiance_per_band(dn_4band: GeoTensor) -> None:
     dn = np.asarray(dn_4band)
     for b in range(4):
         np.testing.assert_allclose(arr[b], gains[b] * dn[b] + offsets[b])
+
+
+def test_radiance_to_dn_operator_inverts_dn_to_radiance(dn_4band: GeoTensor) -> None:
+    gains = np.array([0.01, 0.02, 0.015, 0.012])
+    offsets = np.array([-1.0, -2.0, -1.5, -1.2])
+    radiance = DNToRadiance(gain=gains, offset=offsets, scale=2.0)(dn_4band)
+    out = RadianceToDN(gain=gains, offset=offsets, scale=2.0)(radiance)
+    np.testing.assert_allclose(np.asarray(out), np.asarray(dn_4band))
 
 
 def test_dn_to_radiance_rejects_wrong_band_count(dn_4band: GeoTensor) -> None:
@@ -236,6 +279,86 @@ def test_radiometry_pipeline_composes(dn_4band: GeoTensor) -> None:
     assert np.all(np.asarray(out) <= 1.0)
 
 
+def test_radiance_reflectance_roundtrip_preserves_metadata() -> None:
+    radiance = _toy_geotensor(
+        np.array(
+            [
+                [[10.0, 12.0], [14.0, 16.0]],
+                [[20.0, 22.0], [24.0, 26.0]],
+            ]
+        )
+    )
+    date = datetime(2024, 7, 14, 11, 32)
+    solar_irradiance = np.array([1.95, 1.85])
+    to_reflectance = RadianceToReflectance(
+        solar_irradiance=solar_irradiance,
+        acquisition_date=date,
+        sza_deg=30.0,
+        units="W/m2/sr/nm",
+    )
+    to_radiance = ReflectanceToRadiance(
+        solar_irradiance=solar_irradiance,
+        acquisition_date=date,
+        sza_deg=30.0,
+    )
+    out = to_radiance(to_reflectance(radiance))
+    np.testing.assert_allclose(np.asarray(out), np.asarray(radiance), rtol=1e-12)
+    assert out.transform == radiance.transform
+
+
+def test_earth_sun_distance_correction_operator() -> None:
+    date = datetime(2024, 1, 3)
+    out = EarthSunDistanceCorrection(acquisition_date=date)()
+    expected = earth_sun_distance_correction_factor(date)
+    np.testing.assert_allclose(out, expected)
+
+
+def test_bt_from_radiance_operator_preserves_fill() -> None:
+    radiance = _toy_geotensor(np.array([[[10.0, 0.0], [12.0, 14.0]]]))
+    op = BTFromRadiance(K1=774.8853, K2=1321.0789)
+    out = op(radiance)
+    assert np.asarray(out)[0, 0, 1] == radiance.fill_value_default
+    expected = 1321.0789 / np.log((774.8853 / 10.0) + 1.0)
+    np.testing.assert_allclose(np.asarray(out)[0, 0, 0], expected)
+
+
+def test_dos1_operator_preserves_fill() -> None:
+    reflectance = _toy_geotensor(np.array([[[0.02, 0.0], [0.10, 0.20]]]))
+    out = DOS1(dark_percentile=0.0)(reflectance)
+    np.testing.assert_allclose(np.asarray(out), [[[0.0, 0.0], [0.08, 0.18]]])
+
+
+def test_simple_atmospheric_correction_dos1() -> None:
+    reflectance = _toy_geotensor(np.array([[[0.02, 0.10], [0.20, 0.30]]]))
+    out = SimpleAtmosphericCorrection(method="dos1", dark_percentile=0.0)(reflectance)
+    np.testing.assert_allclose(np.asarray(out), [[[0.0, 0.08], [0.18, 0.28]]])
+
+
+def test_apply_srf_flat_spectrum_preserves_flat_signal() -> None:
+    hyperspectral = _toy_geotensor(np.ones((5, 2, 2), dtype=np.float32) * 7.0)
+    out = ApplySRF(
+        target_center_wavelengths=[500.0, 520.0],
+        target_fwhm=[20.0, 20.0],
+        source_wavelengths=[480.0, 490.0, 500.0, 510.0, 520.0],
+    )(hyperspectral)
+    assert out.shape == (2, 2, 2)
+    np.testing.assert_allclose(np.asarray(out), 7.0)
+
+
+def test_integrated_irradiance_operator_with_flat_solar_spectrum() -> None:
+    from geotoolz.radiometry import IntegratedIrradiance
+
+    srf_df = pd.DataFrame({"B1": [1.0, 1.0, 1.0]}, index=[499.0, 500.0, 501.0])
+    solar = pd.DataFrame(
+        {
+            "Nanometer": [499.0, 500.0, 501.0],
+            "Radiance(mW/m2/nm)": [2.0, 2.0, 2.0],
+        }
+    )
+    out = IntegratedIrradiance(srf=srf_df, solar_irradiance=solar)()
+    np.testing.assert_allclose(out, [2.0])
+
+
 # ---------------------------------------------------------------------------
 # Parity with georeader.reflectance (smoke check on a synthetic radiance)
 # ---------------------------------------------------------------------------
@@ -272,11 +395,15 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
     [
         ToFloat32(),
         DNToRadiance(gain=0.012, offset=-60.0),
+        RadianceToDN(gain=0.012, offset=-60.0),
         DNToReflectance(scale=1e-4),
         DNToReflectance(scale=1e-4, offset=-0.1),  # S2 L1C post-2022
         DNToReflectance(scale=2.75e-5, offset=-0.2),  # Landsat-8/9 C2 SR
         MinMax(vmin=0.0, vmax=0.3),
         PercentileClip(p_min=2.0, p_max=98.0),
+        BTFromRadiance(K1=774.8853, K2=1321.0789),
+        DOS1(dark_percentile=1.0),
+        SimpleAtmosphericCorrection(method="dos1", dark_percentile=1.0),
         Gamma(g=1.4),
     ],
 )
