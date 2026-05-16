@@ -248,12 +248,18 @@ class GammaCorrect(Operator):
     Power-law correction for display-range arrays — brightens midtones
     when ``gamma > 1``. Distinct from
     :class:`geotoolz.radiometry.Gamma` in that it operates on already
-    display-prepped (``[0, 1]``-ish or byte) arrays and clamps negatives
-    to zero. For the radiometry-stage gamma correction, use
+    display-prepped (``[0, 1]`` float or byte-range integer) arrays.
+    Integer carriers are normalised to ``[0, 1]`` before the exponent
+    and scaled back to their dtype maximum so the transform is display-
+    correct rather than a raw ``256 ** (1 / gamma) = 16`` on uint8. For
+    the radiometry-stage gamma correction, use
     ``geotoolz.radiometry.Gamma``.
 
     Args:
         gamma: Gamma factor (must be strictly positive). Default ``1.0``.
+        inplace_norm: Normalise integer inputs to ``[0, 1]`` before the
+            exponent (default ``True``). Set ``False`` only when the
+            carrier has been pre-normalised upstream.
 
     Examples:
         >>> import geotoolz as gz
@@ -265,16 +271,19 @@ class GammaCorrect(Operator):
         ... )
     """
 
-    def __init__(self, *, gamma: float = 1.0) -> None:
+    def __init__(self, *, gamma: float = 1.0, inplace_norm: bool = True) -> None:
         self.gamma = gamma
+        self.inplace_norm = inplace_norm
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         return gt.array_as_geotensor(
-            gamma_correct_display(np.asarray(gt), gamma=self.gamma)
+            gamma_correct_display(
+                np.asarray(gt), gamma=self.gamma, inplace_norm=self.inplace_norm
+            )
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"gamma": self.gamma}
+        return {"gamma": self.gamma, "inplace_norm": self.inplace_norm}
 
 
 class ToDisplayRange(StretchToUint8):

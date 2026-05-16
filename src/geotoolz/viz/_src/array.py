@@ -65,11 +65,46 @@ def stretch_to_uint8(
     return np.nan_to_num(scaled * 255.0, nan=0.0).astype(np.uint8)
 
 
-def gamma_correct_display(arr: np.ndarray, *, gamma: float = 1.0) -> np.ndarray:
-    """Apply power-law gamma correction to display-range arrays."""
+def gamma_correct_display(
+    arr: np.ndarray, *, gamma: float = 1.0, inplace_norm: bool = True
+) -> np.ndarray:
+    """Apply power-law gamma correction to display-range arrays.
+
+    Gamma is a unit-interval operation: the math
+    ``out = clip(arr, 0, 1) ** (1 / gamma)`` is only meaningful when the
+    input is normalised to ``[0, 1]``. Display arrays, however, arrive
+    in two flavours — float in ``[0, 1]`` *or* integer in ``[0, 255]``
+    (uint8) / ``[0, 65535]`` (uint16). Without normalisation, an integer
+    input is raised to ``1 / gamma`` directly, giving e.g.
+    ``256 ** 0.5 = 16`` — not a display-correct gamma transform.
+
+    With ``inplace_norm=True`` (the default), integer inputs are scaled
+    by their dtype maximum into ``[0, 1]``, the gamma exponent is
+    applied, and the result is scaled back to the original integer
+    dtype's full range. Floating-point inputs are assumed to already be
+    in ``[0, 1]`` and are left unscaled.
+
+    Args:
+        arr: Display array. Integer (``uint8`` / ``uint16``) or float.
+        gamma: Strictly positive gamma factor. ``> 1`` brightens
+            midtones; ``< 1`` darkens them.
+        inplace_norm: When ``True`` (default), normalise integer inputs
+            to ``[0, 1]`` before the exponent and scale back. When
+            ``False``, apply ``arr ** (1 / gamma)`` directly — only set
+            this if you've already normalised upstream.
+
+    Returns:
+        Gamma-corrected array of the same shape and dtype as ``arr``.
+    """
     if gamma <= 0:
         raise ValueError(f"gamma_correct_display requires gamma > 0; got {gamma}")
-    return np.maximum(arr, 0.0) ** (1.0 / gamma)
+    exponent = 1.0 / gamma
+    if not inplace_norm or not np.issubdtype(arr.dtype, np.integer):
+        return np.maximum(arr, 0.0) ** exponent
+    dtype_max = float(np.iinfo(arr.dtype).max)
+    normed = np.clip(arr.astype(np.float64) / dtype_max, 0.0, 1.0)
+    corrected = normed**exponent
+    return np.clip(corrected * dtype_max, 0.0, dtype_max).astype(arr.dtype)
 
 
 def rgba_from_scalar(
@@ -170,7 +205,11 @@ def blend_rgba(
     else:
         expected = "'alpha', 'multiply', or 'screen'"
         raise ValueError(f"unsupported overlay mode {mode!r}; expected {expected}")
-    out_alpha = np.maximum(bg_f[3:4], fg_alpha)
+    # Source-over alpha composition (foreground on top of background):
+    # out_alpha = fg_alpha + bg_alpha * (1 - fg_alpha). Equivalent to
+    # max(fg_alpha, bg_alpha) only when one of them is 0 or 1; mixing
+    # two partially transparent layers must accumulate opacity.
+    out_alpha = fg_alpha + bg_f[3:4] * (1.0 - fg_alpha)
     return np.clip(np.concatenate([rgb, out_alpha], axis=0) * 255.0, 0.0, 255.0).astype(
         np.uint8
     )

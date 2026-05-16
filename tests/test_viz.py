@@ -26,6 +26,7 @@ from geotoolz.viz import (
     SWIRComposite,
     ToDisplayRange,
     TrueColor,
+    blend_rgba,
     composite,
     gamma_correct_display,
     hillshade,
@@ -288,3 +289,51 @@ def test_annotate_operators_are_forbid_in_yaml() -> None:
     """Annotate ops hold runtime geometries — flag them as not YAML-safe."""
     assert AnnotatePolygons.forbid_in_yaml is True
     assert AnnotatePoints.forbid_in_yaml is True
+
+
+def test_gamma_correct_display_normalises_uint8_inputs() -> None:
+    """Integer inputs are normalised to [0, 1] before the gamma exponent.
+
+    Without normalisation, ``128 ** 0.5 = ~11.3`` (uint8 round-trip 11);
+    with normalisation, ``(128 / 255) ** 0.5 * 255 = ~180``.
+    """
+    arr = np.array([0, 128, 255], dtype=np.uint8)
+    out = gamma_correct_display(arr, gamma=2.0)
+    assert out.dtype == np.uint8
+    assert out[0] == 0
+    assert out[-1] == 255
+    expected_mid = round(np.sqrt(128.0 / 255.0) * 255.0)
+    assert abs(int(out[1]) - expected_mid) <= 1
+    assert int(out[1]) > 150  # would be ~11 without normalisation
+
+
+def test_gamma_correct_display_inplace_norm_opt_out() -> None:
+    """``inplace_norm=False`` skips the normalisation step."""
+    arr = np.array([0, 128, 255], dtype=np.uint8)
+    out = gamma_correct_display(arr, gamma=2.0, inplace_norm=False)
+    # Without normalisation: 128 ** 0.5 = 11.31, cast back through float.
+    np.testing.assert_allclose(out, np.sqrt(np.maximum(arr.astype(float), 0.0)))
+
+
+def test_gamma_correct_display_passes_through_floats() -> None:
+    """Float inputs are assumed to already be in [0, 1]."""
+    arr = np.array([0.0, 0.5, 1.0], dtype=np.float32)
+    out = gamma_correct_display(arr, gamma=2.0)
+    np.testing.assert_allclose(out, np.sqrt(arr), rtol=1e-6)
+
+
+def test_blend_rgba_uses_source_over_alpha_composition() -> None:
+    """Output alpha must accumulate via source-over, not ``max``.
+
+    bg alpha = 0.5, fg alpha = 0.5 -> source-over gives
+    0.5 + 0.5 * (1 - 0.5) = 0.75, whereas the old ``max`` formula
+    would yield 0.5.
+    """
+    bg = np.full((4, 2, 2), 128, dtype=np.uint8)  # alpha ~ 0.502
+    fg = np.full((4, 2, 2), 128, dtype=np.uint8)  # alpha ~ 0.502
+    out = blend_rgba(bg, fg, alpha=1.0, mode="alpha")
+    # alpha ~ 0.502; source-over -> 0.502 + 0.502 * (1 - 0.502) = 0.752
+    # -> uint8 ~ 191. The old `max` formula would have yielded ~128.
+    out_alpha = int(out[3, 0, 0])
+    assert 188 <= out_alpha <= 194
+    assert out_alpha > 150  # rules out the old `max(bg, fg)` result.
