@@ -304,6 +304,31 @@ def test_landsat_qa_pixel_rejects_unknown_sensor() -> None:
         qa.LandsatQA_PIXEL(sensor="l11")
 
 
+def test_landsat_qa_pixel_l7_default_targets_exclude_cirrus() -> None:
+    """L7 default targets must omit ``cirrus`` (no cirrus bit on TM/ETM+)."""
+    # Constructing with sensor="l7" and no explicit targets must not pick
+    # up the global "cirrus" default — TM/ETM+ have no cirrus channel and
+    # the L7 registry has no "cirrus" entry.
+    op = qa.LandsatQA_PIXEL(sensor="l7")
+    assert "cirrus" not in op.targets
+    assert op.targets == ("cloud", "cloud_shadow")
+
+    # And running the operator must not raise.
+    qa_pixel = np.array([[1 << 3, 1 << 4, 0]], dtype=np.uint16)
+    gt = _toy_geotensor(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
+    out = op(gt)
+    np.testing.assert_array_equal(np.asarray(out), [[True, True, False]])
+
+    # Explicitly requesting cirrus on L7 still raises a clear ValueError
+    # naming the unsupported target.
+    gt_one = _toy_geotensor(
+        np.array([[1 << 2]], dtype=np.uint16)[None],
+        attrs={"band_names": ["QA_PIXEL"]},
+    )
+    with pytest.raises(ValueError, match=r"unknown landsat_qa_pixel_l7.*cirrus"):
+        qa.LandsatQA_PIXEL(sensor="l7", targets=("cirrus",))(gt_one)
+
+
 def test_modis_state_qa_decodes_cloud_field_not_individual_bits() -> None:
     """MOD09 user guide Table 12: bits [0,1] are a 2-bit cloud-state
     field (0=clear, 1=cloudy, 2=mixed, 3=not-set). OR-ing the bits

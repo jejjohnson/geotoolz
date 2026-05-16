@@ -745,18 +745,30 @@ class LandsatQA_PIXEL(Operator):
         "l89": "landsat_qa_pixel",
         "l7": "landsat_qa_pixel_l7",
     }
+    _DEFAULT_TARGETS_L89: ClassVar[tuple[str, ...]] = (
+        "cloud",
+        "cloud_shadow",
+        "cirrus",
+    )
+    _DEFAULT_TARGETS_L7: ClassVar[tuple[str, ...]] = ("cloud", "cloud_shadow")
 
     def __init__(
         self,
         *,
         qa_band: int | str = "QA_PIXEL",
-        targets: Sequence[str] = ("cloud", "cloud_shadow", "cirrus"),
+        targets: Sequence[str] | None = None,
         sensor: str = "l89",
         axis: int = 0,
     ) -> None:
         if sensor not in self._SENSOR_KEYS:
             raise ValueError(
                 f"sensor must be one of {sorted(self._SENSOR_KEYS)}; got {sensor!r}"
+            )
+        if targets is None:
+            targets = (
+                self._DEFAULT_TARGETS_L7
+                if sensor == "l7"
+                else self._DEFAULT_TARGETS_L89
             )
         self.qa_band = qa_band
         self.targets = tuple(str(target) for target in targets)
