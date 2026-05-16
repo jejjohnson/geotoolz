@@ -87,7 +87,7 @@ def test_band_ratio_by_name() -> None:
     np.testing.assert_allclose(np.asarray(out), 2.0)
 
 
-def test_apply_srf_near_identity_and_flat_conservation() -> None:
+def test_apply_srf_preserves_values_when_source_equals_target() -> None:
     wavelengths = np.array([490.0, 560.0, 665.0], dtype=float)
     values = np.arange(3 * 2 * 2, dtype=np.float32).reshape(3, 2, 2)
     gt = GeoTensor(

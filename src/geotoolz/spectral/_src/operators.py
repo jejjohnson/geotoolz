@@ -82,11 +82,12 @@ def _wrap_like(
     wavelengths: np.ndarray | None = None,
 ) -> GeoTensor:
     out = gt.array_as_geotensor(values)
-    out.attrs = _attrs(gt)
+    new_attrs = _attrs(gt)
     if band_names is not None:
-        out.attrs["band_names"] = band_names
+        new_attrs["band_names"] = band_names
     if wavelengths is not None:
-        out.attrs["wavelengths"] = _jsonable_array(wavelengths)
+        new_attrs["wavelengths"] = _jsonable_array(wavelengths)
+    out.attrs = new_attrs
     return out
 
 
@@ -179,7 +180,8 @@ class StackBands(Operator):
             if gt.transform != first.transform or gt.crs != first.crs:
                 raise ValueError("All GeoTensors must share transform and CRS")
             arr = np.asarray(gt)
-            arrays.append(np.expand_dims(arr, axis=self.axis) if arr.ndim == 2 else arr)
+            expanded = np.expand_dims(arr, axis=self.axis) if arr.ndim == 2 else arr
+            arrays.append(expanded)
             gt_names = _attrs(gt).get("band_names")
             gt_wavelengths = _attrs(gt).get("wavelengths")
             have_names = have_names and gt_names is not None
