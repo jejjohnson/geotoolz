@@ -77,7 +77,9 @@ def _cast_like(out: np.ndarray, dtype: np.dtype[Any]) -> np.ndarray:
 
 def _pad_mode(mode: str, source: np.ndarray) -> str:
     if mode not in {"constant", "reflect", "edge"}:
-        raise ValueError("pad_mode must be 'constant', 'reflect', or 'edge'.")
+        raise ValueError(
+            f"pad_mode must be one of: constant, reflect, edge; got {mode!r}."
+        )
     if mode == "reflect" and min(source.shape[-2:]) < 2:
         warnings.warn(
             "pad_mode='reflect' requires at least two source pixels per "
@@ -165,7 +167,9 @@ def _candidate_origins(
     height, width = label_arr.shape
     patch_h, patch_w = size
     if patch_h > height or patch_w > width:
-        raise ValueError("size must fit within labels.")
+        raise ValueError(
+            f"Patch size {size} exceeds label dimensions {(height, width)}."
+        )
     half_h = patch_h // 2
     half_w = patch_w // 2
     max_row = height - patch_h
@@ -208,7 +212,7 @@ def _points_array(points: PointInput, crs: str | None) -> tuple[np.ndarray, str 
         return coords.astype(float), point_crs or crs
     coords = np.asarray(points, dtype=float)
     if coords.ndim != 2 or coords.shape[1] != 2:
-        raise ValueError("points must have shape (N, 2).")
+        raise ValueError(f"points must have shape (N, 2), got {coords.shape}.")
     return coords, crs
 
 
@@ -272,7 +276,7 @@ def _sample_bilinear(arr: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.
 def _track_points(track: PointInput, crs: str | None) -> tuple[np.ndarray, str | None]:
     coords, track_crs = _points_array(track, crs)
     if len(coords) < 2:
-        raise ValueError("track must contain at least two points.")
+        raise ValueError(f"track must contain at least 2 points, got {len(coords)}.")
     return coords, track_crs
 
 
@@ -423,7 +427,7 @@ class SamplePoints(Operator):
         self, *, points: PointInput, crs: str | None = None, interp: str = "nearest"
     ) -> None:
         if interp not in {"nearest", "bilinear"}:
-            raise ValueError("interp must be 'nearest' or 'bilinear'.")
+            raise ValueError(f"interp must be nearest or bilinear, got {interp!r}.")
         self.points = points
         self.crs = crs
         self.interp = interp
@@ -490,7 +494,10 @@ class RandomCrop(Operator):
     def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> list[GeoTensor]:
         patch_h, patch_w = self.size
         if patch_h > gt.height or patch_w > gt.width:
-            raise ValueError("size must fit within the input GeoTensor.")
+            raise ValueError(
+                f"Patch size {self.size} exceeds GeoTensor dimensions "
+                f"{(gt.height, gt.width)}."
+            )
         rng = _rng(_seed(self.seed, seed))
         rows = rng.integers(0, gt.height - patch_h + 1, size=self.n_samples)
         cols = rng.integers(0, gt.width - patch_w + 1, size=self.n_samples)

@@ -114,6 +114,8 @@ def test_balanced_sampler_returns_n_per_class() -> None:
 
 def test_sample_points_nearest_matches_hand_indexed_reference() -> None:
     gt = _gt()
+    # These coordinates are pixel centers selected to map to predictable
+    # row/column indices under the test affine transform.
     points = np.array([[10.5, 19.5], [12.5, 17.5]])
 
     samples = gz.patches.SamplePoints(points=points, crs="EPSG:4326")(gt)
