@@ -59,6 +59,7 @@ def test_despeckle_lee_reduces_multiplicative_speckle_variance() -> None:
     noisy = clean * rng.gamma(shape=1.0, scale=1.0, size=clean.shape)
     out = despeckle_lee(noisy, window=9)
     assert np.nanvar(out) <= 0.5 * np.nanvar(noisy)
+    np.testing.assert_allclose(np.nanmean(out), np.nanmean(noisy), rtol=0.05)
 
 
 def test_despeckle_operator_preserves_metadata() -> None:
@@ -170,6 +171,10 @@ def test_gap_fill_idw_high_power_matches_nearest_operator() -> None:
     nearest = GapFillNearest(max_distance=2)(gt)
     idw = GapFillIDW(power=128.0, radius=2)(gt)
     np.testing.assert_array_equal(np.asarray(idw), np.asarray(nearest))
+    np.testing.assert_array_equal(
+        gap_fill_idw(arr, power=64.0, radius=2),
+        gap_fill_nearest(arr, max_distance=2),
+    )
 
 
 def test_outlier_mask_and_replacement() -> None:

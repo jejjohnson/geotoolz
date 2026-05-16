@@ -265,7 +265,7 @@ def outlier_mask(
     values = np.asarray(arr, dtype=float)
     if method == "mad":
         center = np.nanmedian(values)
-        # Scale MAD to approximate standard deviation under normal residuals.
+        # 1 / Phi^-1(3/4) ~= 1.4826 converts MAD to std under Gaussian residuals.
         scale = 1.4826 * np.nanmedian(np.abs(values - center))
     elif method == "zscore":
         center = np.nanmean(values)
