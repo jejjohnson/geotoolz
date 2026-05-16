@@ -159,5 +159,8 @@ def test_cluster_background_and_dispatch_are_reproducible() -> None:
     out = gz.matched_filter.ApplyClusterMF(cluster=bg1, target=target)(gt)
 
     assert np.array_equal(bg1.labels, bg2.labels)
+    assert np.allclose(bg1.means, bg2.means)
+    for cov1, cov2 in zip(bg1.cov_ops, bg2.cov_ops, strict=True):
+        assert np.allclose(cov1.matrix, cov2.matrix)
     assert np.asarray(out).shape == (2, 2)
     assert out.transform == gt.transform
