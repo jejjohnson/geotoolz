@@ -161,6 +161,7 @@ class MNF(Operator):
 class InverseMNF(Operator):
     """Reconstruct a raster from a prior :class:`MNF` transform."""
 
+    # Holds a stateful forward reference that cannot be serialized faithfully.
     forbid_in_yaml = True
 
     def __init__(self, *, forward: MNF) -> None:

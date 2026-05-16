@@ -39,6 +39,10 @@ from geotoolz.restore import (
 )
 
 
+LEE_VARIANCE_REDUCTION_THRESHOLD = 0.5
+DESTRIPE_RMSE_TOLERANCE = 0.01
+
+
 def _toy_geotensor(values: np.ndarray) -> GeoTensor:
     return GeoTensor(
         values=values,
@@ -58,7 +62,7 @@ def test_despeckle_lee_reduces_multiplicative_speckle_variance() -> None:
     clean = np.ones((64, 64), dtype=float)
     noisy = clean * rng.gamma(shape=1.0, scale=1.0, size=clean.shape)
     out = despeckle_lee(noisy, window=9)
-    assert np.nanvar(out) <= 0.5 * np.nanvar(noisy)
+    assert np.nanvar(out) <= LEE_VARIANCE_REDUCTION_THRESHOLD * np.nanvar(noisy)
     np.testing.assert_allclose(np.nanmean(out), np.nanmean(noisy), rtol=0.05)
     assert np.isfinite(out[[0, -1], :]).all()
     assert np.isfinite(out[:, [0, -1]]).all()
@@ -82,7 +86,7 @@ def test_destripe_column_recovers_flat_image() -> None:
     striped = base + stripe[None, :]
     out = destripe_column(striped, method="mean", axis="column")
     rmse = np.sqrt(np.nanmean((out - base) ** 2))
-    assert rmse < 0.01
+    assert rmse < DESTRIPE_RMSE_TOLERANCE
 
 
 def test_destripe_operator_preserves_metadata() -> None:
