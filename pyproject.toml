@@ -70,6 +70,19 @@ hydra = ["hydra-zen>=0.14"]
 # install e.g. `pip install 'geopatcher[patch-full]'` for the full
 # substrate matrix.
 patch = ["geopatcher[pipekit]"]
+# Sensor reader format extras. Reader modules guard these imports so a base
+# install stays slim and raises actionable installation instructions.
+modis = ["pyhdf>=0.10"]
+viirs = ["h5py>=3.0"]
+goes = ["netcdf4>=1.6"]
+mtg = ["netcdf4>=1.6"]
+seviri = []
+himawari = []
+tropomi = ["netcdf4>=1.6"]
+s3 = ["netcdf4>=1.6"]
+all-sensors = [
+    "geotoolz[modis,viirs,goes,mtg,seviri,himawari,tropomi,s3]",
+]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
@@ -123,6 +136,7 @@ pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packa
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/geotoolz"]
+artifacts = ["src/geotoolz/readers/*/data/**"]
 
 [tool.ruff]
 target-version = "py312"

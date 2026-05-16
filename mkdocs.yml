@@ -45,6 +45,7 @@ nav:
   - Concepts:
       - Composition core: concepts.md
       - Normalization: normalization.md
+      - Readers: readers.md
   - Tutorials:
       - Composition core: notebooks/composition_core.ipynb
       - Pipeline idioms: notebooks/pipeline_idioms.ipynb
