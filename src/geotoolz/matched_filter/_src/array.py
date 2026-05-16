@@ -377,14 +377,18 @@ def apply_cluster_mf(
     labels = np.asarray(cluster.labels).reshape(-1)
     if labels.shape[0] != x.shape[0]:
         raise ValueError("cluster labels must match cube spatial shape")
+    target_vec = _as_vector(target, x.shape[1], "target")
     scores = np.empty(x.shape[0], dtype=float)
     for k, cov_op in enumerate(cluster.cov_ops):
         mask = labels == k
         if np.any(mask):
-            scores[mask] = [
-                apply_pixel(pixel, mean=cluster.means[k], cov_op=cov_op, target=target)
-                for pixel in x[mask]
-            ]
+            solved_target = solve(cov_op, target_vec)
+            denom = float(target_vec @ solved_target)
+            if not np.isfinite(denom) or denom <= 0:
+                raise ValueError(
+                    "target/covariance produce a non-positive MF denominator"
+                )
+            scores[mask] = (x[mask] - cluster.means[k]) @ solved_target / denom
     return scores.reshape(spatial_shape)
 
 
@@ -432,6 +436,12 @@ def _as_2d_samples(values: np.ndarray) -> np.ndarray:
 def _huber_mean(
     values: np.ndarray, *, c: float, max_iter: int = 50, tol: float = 1e-6
 ) -> np.ndarray:
+    """Return a per-band robust Huber mean.
+
+    ``c`` is the Huber tuning constant in robust z-score units. Smaller
+    values down-weight outliers more aggressively. If convergence is not
+    reached within ``max_iter`` iterations, the last iterate is returned.
+    """
     if c <= 0:
         raise ValueError("huber_c must be positive")
     mu = np.median(values, axis=0)

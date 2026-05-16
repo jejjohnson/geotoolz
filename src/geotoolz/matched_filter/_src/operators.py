@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-FINITE_DIFFERENCE_STEP = 1e-4
+TARGET_FD_EPSILON = 1e-4
 
 
 class MatchedFilter(Operator):
@@ -481,9 +481,9 @@ class LinearTargetFromObs(Operator):
                 vmr_background=self.vmr_background,
                 pattern=self.pattern,
                 pixel=self.pixel,
-                amplitude=FINITE_DIFFERENCE_STEP,
+                amplitude=TARGET_FD_EPSILON,
             )
-            / FINITE_DIFFERENCE_STEP
+            / TARGET_FD_EPSILON
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -653,7 +653,8 @@ def _target_pattern(
         out[...] = 1.0
     elif pattern == "impulse":
         if pixel is None:
-            out.reshape(-1)[0] = 1.0
+            flat = out.reshape(-1)
+            flat[0] = 1.0
         else:
             out[(slice(None), *pixel)] = 1.0
     else:

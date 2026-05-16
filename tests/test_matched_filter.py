@@ -19,8 +19,8 @@ def _gt(values: np.ndarray) -> GeoTensor:
 
 
 def test_matched_filter_module_exports() -> None:
-    assert gz.matched_filter.MatchedFilter is not None
-    assert gz.matched_filter.EstimateMean is not None
+    for name in gz.matched_filter.__all__:
+        assert getattr(gz.matched_filter, name) is not None, name
 
 
 def test_matched_filter_recovers_known_amplitude_and_preserves_metadata() -> None:
