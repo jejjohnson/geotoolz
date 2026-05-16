@@ -56,9 +56,7 @@ def _band_index(band: int | str) -> int:
     return int(band)
 
 
-def _extract_nonnegative_band(
-    arr: np.ndarray, band: int | str, axis: int
-) -> np.ndarray:
+def _extract_and_clip_band(arr: np.ndarray, band: int | str, axis: int) -> np.ndarray:
     return np.maximum(np.take(arr, _band_index(band), axis=axis), 0.0)
 
 
@@ -74,7 +72,8 @@ class SBMP(Operator):
     ``log((SWIR1 + eps) / (SWIR2 + eps)) -
     log((ref_SWIR1 + eps) / (ref_SWIR2 + eps))``. Inputs are expected to
     be non-negative radiance or reflectance values; negative values are
-    clipped to zero before ``eps`` is added to keep the log-ratio finite.
+    clipped to zero, then ``eps`` is added to prevent division by zero in
+    the log-ratio.
     """
 
     def __init__(
@@ -94,13 +93,13 @@ class SBMP(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         arr = np.asarray(gt, dtype=float)
-        swir1 = _extract_nonnegative_band(arr, self.swir1, self.axis)
-        swir2 = _extract_nonnegative_band(arr, self.swir2, self.axis)
+        swir1 = _extract_and_clip_band(arr, self.swir1, self.axis)
+        swir2 = _extract_and_clip_band(arr, self.swir2, self.axis)
         ratio = np.log((swir1 + self.eps) / (swir2 + self.eps))
         if self.reference_scene is not None:
             ref = np.asarray(self.reference_scene, dtype=float)
-            ref_swir1 = _extract_nonnegative_band(ref, self.swir1, self.axis)
-            ref_swir2 = _extract_nonnegative_band(ref, self.swir2, self.axis)
+            ref_swir1 = _extract_and_clip_band(ref, self.swir1, self.axis)
+            ref_swir2 = _extract_and_clip_band(ref, self.swir2, self.axis)
             ref_ratio = np.log((ref_swir1 + self.eps) / (ref_swir2 + self.eps))
             out = ratio - ref_ratio
         else:

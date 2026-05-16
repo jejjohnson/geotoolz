@@ -187,7 +187,7 @@ def convert_column_units(
     """Convert column enhancement among ppm m, mol/m2, and kg/m2.
 
     The ppm m conversion assumes the standard molar volume constant
-    0.024465 m3/mol, approximately 25 C and 1 atm. Use ``mol_m2`` or
+    0.024465 m3/mol, approximately 25 degrees C and 1 atm. Use ``mol_m2`` or
     ``kg_m2`` inputs when retrieval-specific pressure and temperature
     corrections have already been applied upstream.
     """

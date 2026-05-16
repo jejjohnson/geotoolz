@@ -148,6 +148,15 @@ def test_ime_skeleton_length_and_uncertainty_fraction() -> None:
     assert estimate["emission_rate_uncertainty_kg_s"] == pytest.approx(6.0)
 
 
+def test_ime_rejects_negative_uncertainty_fraction() -> None:
+    with pytest.raises(ValueError, match="uncertainty_fraction"):
+        gz.plume.IMEEstimate(
+            plume_mask=_gt(np.ones((1, 1), dtype=bool)),
+            wind_speed=1.0,
+            uncertainty_fraction=-0.1,
+        )
+
+
 def test_ime_convex_hull_length_agrees_with_max_axis_on_convex_plume() -> None:
     mask = _gt(np.ones((2, 2), dtype=bool))
     enhancement = _gt(np.ones((2, 2), dtype=float))
@@ -239,4 +248,8 @@ def test_sbmp_clips_non_positive_swir_values_before_log() -> None:
 
     out = gz.plume.SBMP(swir1=0, swir2=1)(_gt(scene))
 
+    clipped_swir1 = np.maximum(scene[0], 0.0)
+    clipped_swir2 = np.maximum(scene[1], 0.0)
+    expected = (clipped_swir1 - clipped_swir2) / (clipped_swir1 + clipped_swir2 + 1e-10)
     assert np.isfinite(np.asarray(out)).all()
+    assert np.allclose(np.asarray(out), expected)
