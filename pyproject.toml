@@ -27,12 +27,13 @@ dependencies = [
     # available — that's the substrate the two-tier model depends on.
     "georeader-spaceml>=2.1",
     "numpy>=1.26",
-    # KDTree (geopatcher PointDomain) + signal windows (Tukey/Gaussian).
+    # Signal windows + numerical primitives used across the radiometry,
+    # restore, augment, mask, spectral, and plume operator families.
     "scipy>=1.11",
     # `georeader.geotensor` imports `Self` from typing_extensions without
-    # declaring it as a dep (upstream packaging bug in >=2.1). Pin it here
-    # so a slim install of geotoolz (without the optional patch extras
-    # that would otherwise drag it in transitively) still works.
+    # declaring it as a dep (upstream packaging bug in >=2.1). Pin it
+    # here so a slim install (without optional extras that would
+    # otherwise drag it in transitively) still works.
     "typing-extensions>=4.0",
     # pandas is used by `spectral` (band-name resolution) and `radiometry`
     # (per-band fitted stats); pyproj is used by `plume` (CRS-aware
@@ -55,22 +56,13 @@ dependencies = [
 # get_config() / __repr__ without hydra — this extra is only needed if
 # you want `builds()` / `instantiate()` from YAML.
 hydra = ["hydra-zen>=0.14"]
-# geopatcher backend extras. Each `Field` adapter under `geotoolz.patch`
-# guards its import so the base install stays slim and the user only
-# pays for the substrates they actually use.
-grid = ["xarray>=2024.1"]
-vector = ["geopandas>=0.14", "shapely>=2.0"]
-point = ["xvec>=0.4"]
-xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1"]
-streaming = ["zarr>=3.0"]
-patch-full = [
-    "xarray>=2024.1",
-    "geopandas>=0.14",
-    "shapely>=2.0",
-    "xvec>=0.4",
-    "rioxarray>=0.15",
-    "zarr>=3.0",
-]
+# The four-axis Patcher framework lives in its own package now; pull it
+# in plus the `geotoolz.patch_ops` operator-graph bridge wrappers
+# (`GridSampler`, `ApplyToChips`, `Stitch`). The substrate extras (grid,
+# vector, point, xarray-raster, streaming) are exposed through
+# `geopatcher` directly — install e.g.
+# `pip install 'geopatcher[patch-full]'` for the full substrate matrix.
+patch = ["geopatcher"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
@@ -109,6 +101,14 @@ docs = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+# Dev-time source for the `[patch]` extra: pull `geopatcher` from the
+# extraction branch until the first PyPI release lands. This stanza
+# affects `uv lock` / `uv sync` only — published wheel metadata still
+# carries the PyPI-flavoured `geopatcher` requirement from
+# `[project.optional-dependencies] patch = ["geopatcher"]` above.
+geopatcher = { git = "https://github.com/jejjohnson/geopatcher", branch = "claude/geopatcher-extraction-plan-bxDGs" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/geotoolz"]
@@ -172,9 +172,7 @@ omit = ["tests/*"]
 
 [tool.coverage.report]
 show_missing = true
-# Lowered from 80 -> 65 with the v0.1 geopatcher landing: many code paths
-# (Approx* stubs that defer to v0.2, streaming zarr path, Grid/Vector/Point
-# domain dispatches that require optional extras) aren't covered in the
-# baseline test run. CI re-runs the extras-gated tests with the deps
-# installed and would hit higher than this floor.
+# Optional-extra paths (e.g. the `hydra` integration, the geopatcher
+# bridge tests) aren't always installed in the baseline coverage run.
+# CI re-runs with extras enabled and would hit higher than this floor.
 fail_under = 65

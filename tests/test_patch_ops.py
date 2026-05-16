@@ -1,17 +1,23 @@
-"""Tests for the operator wrappers (`GridSampler`, `ApplyToChips`, `Stitch`)."""
+"""Tests for the operator wrappers (`GridSampler`, `ApplyToChips`, `Stitch`).
+
+The wrappers re-export `geopatcher` primitives at runtime; skip cleanly
+when the optional ``[patch]`` extra (which pulls in geopatcher) isn't
+installed.
+"""
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
-import rasterio
-from georeader.geotensor import GeoTensor
 
-from geotoolz import Sequential
-from geotoolz.core import Lambda
-from geotoolz.patch import (
-    ApplyToChips,
-    GridSampler,
+
+pytest.importorskip(
+    "geopatcher",
+    reason="geotoolz.patch_ops bridge requires the [patch] extra (geopatcher)",
+)
+
+import numpy as np
+import rasterio
+from geopatcher import (
     Patch,
     RasterField,
     SpatialBoxcar,
@@ -19,6 +25,14 @@ from geotoolz.patch import (
     SpatialPatcher,
     SpatialRectangular,
     SpatialRegularStride,
+)
+from georeader.geotensor import GeoTensor
+
+from geotoolz import Sequential
+from geotoolz.core import Lambda
+from geotoolz.patch_ops import (
+    ApplyToChips,
+    GridSampler,
     Stitch,
 )
 

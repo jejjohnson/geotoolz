@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `geotoolz` is a composable Operator library for remote sensing, sitting on top of `georeader.GeoTensor`. It re-implements the Operator / Sequential / Graph composition core borrowed in pattern from `xr_toolz`, specialised for RS workflows (radiometry, spectral indices, cloud masking, sampling, tiled inference, sensor presets). Two-tier model: jaxtyped numpy primitives in `_src/array.py` per module, carrier-aware `Operator` wrappers in `_src/operators.py`. Built with Python 3.12+, uv, pytest, and MkDocs. See the design report in `research_journal_v2/notes/geotoolz/plans/geotoolz/geotoolz.md`.
 
+The four-axis Patcher framework that used to live at `geotoolz.patch` now ships as its own package: [`geopatcher`](https://github.com/jejjohnson/geopatcher). Install with the `[patch]` extra (`pip install 'geotoolz[patch]'`); the Operator-graph bridge (`GridSampler`, `ApplyToChips`, `Stitch`) lives in `geotoolz.patch_ops` and re-exports `geopatcher` primitives at runtime.
+
 ## Common Commands
 
 ```bash
