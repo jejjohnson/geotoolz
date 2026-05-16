@@ -5,7 +5,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol
 
 import numpy as np
 import rasterio
@@ -19,9 +19,14 @@ from geotoolz.core import Operator
 from geotoolz.geom import Stitch as GeomStitch
 
 
-# Accepted point carriers: an ``np.ndarray`` with shape ``(N, 2)`` in
-# ``x, y`` order, or a GeoDataFrame-like object with point geometries.
-PointInput = Any
+class _GeoDataFrameLike(Protocol):
+    """Minimal point GeoDataFrame protocol used by sampling operators."""
+
+    geometry: Any
+    crs: Any
+
+
+PointInput = np.ndarray | _GeoDataFrameLike
 
 
 def _rng(seed: int | None) -> np.random.Generator:
@@ -67,7 +72,7 @@ def _windows(
     )
 
 
-def _cast_like(out: np.ndarray, dtype: np.dtype[Any]) -> np.ndarray:
+def _safe_cast_to_dtype(out: np.ndarray, dtype: np.dtype[Any]) -> np.ndarray:
     dtype = np.dtype(dtype)
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype.type)
@@ -122,7 +127,7 @@ def _read_window(
             source = np.pad(source, pad_width, mode="reflect")
     transform = gt.transform * Affine.translation(col0, row0)
     return GeoTensor(
-        _cast_like(source, arr.dtype),
+        _safe_cast_to_dtype(source, arr.dtype),
         transform=transform,
         crs=gt.crs,
         fill_value_default=fill if pad_mode == "constant" else gt.fill_value_default,
@@ -245,6 +250,8 @@ def _sample_nearest(arr: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.n
 
 def _sample_bilinear(arr: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
     height, width = arr.shape[-2:]
+    # Affine inversion yields pixel-corner coordinates; bilinear weights use
+    # distances between neighbouring pixel centers.
     rows = rows - 0.5
     cols = cols - 0.5
     row0 = np.floor(rows).astype(int)
@@ -299,6 +306,19 @@ def _resample_track(
     return np.column_stack([x, y]), samples
 
 
+def _allocate_largest_remainder(
+    proportions: np.ndarray,
+    n_samples: int,
+) -> np.ndarray:
+    raw = proportions * n_samples
+    counts = np.floor(raw).astype(int)
+    remainder = n_samples - int(counts.sum())
+    if remainder:
+        order = np.argsort(raw - counts)[::-1]
+        counts[order[:remainder]] += 1
+    return counts
+
+
 class ExtractPatches(Operator):
     """Extract fixed-size spatial patches from a `GeoTensor`.
 
@@ -306,7 +326,7 @@ class ExtractPatches(Operator):
     preserves per-patch CRS/transform metadata for later stitching.
     When both ``stride`` and ``overlap`` are supplied, the explicit
     ``stride`` takes precedence and ``overlap`` is retained only in the
-    serialized config.
+    serialized config
     """
 
     def __init__(
@@ -549,14 +569,9 @@ class StratifiedSample(Operator):
             [self.target_proportions[label] for label in labels], dtype=float
         )
         proportions = proportions / proportions.sum()
-        raw = proportions * self.n_samples
         # Largest-remainder allocation: floor all fractional class counts, then
         # give leftover samples to the classes with the largest fractional parts.
-        counts = np.floor(raw).astype(int)
-        remainder = self.n_samples - int(counts.sum())
-        if remainder:
-            order = np.argsort(raw - counts)[::-1]
-            counts[order[:remainder]] += 1
+        counts = _allocate_largest_remainder(proportions, self.n_samples)
         return {
             int(label): int(count) for label, count in zip(labels, counts, strict=True)
         }
@@ -666,6 +681,8 @@ class TileGrid(Operator):
 
     def _write_tile(self, tile: GeoTensor, path: Path) -> None:
         arr = np.asarray(tile)
+        # GeoTIFF is band-oriented, so every leading non-spatial dimension is
+        # flattened into the raster band axis.
         count = 1 if arr.ndim == 2 else int(np.prod(arr.shape[:-2]))
         data = arr.reshape(count, *arr.shape[-2:])
         with rasterio.open(

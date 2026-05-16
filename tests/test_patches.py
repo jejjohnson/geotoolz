@@ -126,6 +126,22 @@ def test_sample_points_nearest_matches_hand_indexed_reference() -> None:
     np.testing.assert_array_equal(samples, expected)
 
 
+def test_sample_points_bilinear_averages_neighboring_centers() -> None:
+    gt = GeoTensor(
+        np.array([[[0.0, 2.0], [4.0, 6.0]]], dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -1, 2),
+        crs="EPSG:4326",
+    )
+
+    samples = gz.patches.SamplePoints(
+        points=np.array([[1.0, 1.0]]),
+        crs="EPSG:4326",
+        interp="bilinear",
+    )(gt)
+
+    np.testing.assert_allclose(samples, np.array([[3.0]], dtype=np.float32))
+
+
 def test_sample_along_track_spacing_has_monotonic_distance() -> None:
     gt = _gt()
     track = np.array([[10.5, 19.5], [13.5, 19.5], [13.5, 16.5]])
