@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 import rasterio
@@ -249,3 +251,111 @@ def test_compose_applies_in_order_and_respects_probability(patch: GeoTensor) -> 
         patch, seed=0
     )
     assert skipped is patch
+
+
+def test_random_flip_is_an_involution(patch: GeoTensor) -> None:
+    """Two horizontal flips must reproduce the original pixels and transform."""
+    op = augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)
+    once = op(patch)
+    twice = op(once)
+    np.testing.assert_array_equal(np.asarray(twice), np.asarray(patch))
+    assert twice.transform == patch.transform
+    assert twice.crs == patch.crs
+
+
+def test_random_rotate90_known_transform_on_unit_raster() -> None:
+    """For each k in {1, 2, 3}, output (0,0) maps to the expected corner."""
+    arr = np.arange(2 * 2, dtype=np.float32).reshape(1, 2, 2)
+    gt = GeoTensor(
+        values=arr,
+        transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 2.0),
+        crs="EPSG:32629",
+        fill_value_default=0,
+    )
+
+    # Exercise public API across many seeds so we cover all three k values
+    # without depending on RNG internals.
+    seen_corners = set()
+    for seed in range(50):
+        rng = np.random.default_rng(seed)
+        rng.random()  # mirror the p-check draw inside _apply
+        k = int(rng.integers(1, 4))
+
+        out = augment.RandomRotate90(p=1.0, seed=seed)(gt)
+        np.testing.assert_array_equal(
+            np.asarray(out)[0], np.rot90(np.asarray(gt)[0], k=k)
+        )
+
+        expected = {
+            1: gt.transform * (gt.width - 1, 0),
+            2: gt.transform * (gt.width - 1, gt.height - 1),
+            3: gt.transform * (0, gt.height - 1),
+        }[k]
+        assert out.transform * (0, 0) == expected
+        seen_corners.add(k)
+    assert seen_corners == {1, 2, 3}
+
+
+def test_random_crop_translation_matches_origin(patch: GeoTensor) -> None:
+    """Cropping shifts the transform translation to the new origin pixel."""
+    seed = 0
+    rng = np.random.default_rng(seed)
+    top = int(rng.integers(0, patch.height - 3 + 1))
+    left = int(rng.integers(0, patch.width - 4 + 1))
+
+    out = augment.RandomCrop(size=(3, 4), seed=seed)(patch)
+
+    expected = patch.transform * (left, top)
+    assert out.transform * (0, 0) == expected
+    assert out.shape == (4, 3, 4)
+
+
+def test_cutmix_rejects_mismatched_crs_and_resolution(patch: GeoTensor) -> None:
+    arr = np.full(patch.shape, 9.0, dtype=np.float32)
+    different_crs = GeoTensor(
+        values=arr,
+        transform=patch.transform,
+        crs="EPSG:4326",
+        fill_value_default=0,
+    )
+    different_res = GeoTensor(
+        values=arr,
+        transform=rasterio.Affine(20.0, 0.0, 500_000.0, 0.0, -20.0, 4_000_000.0),
+        crs=patch.crs,
+        fill_value_default=0,
+    )
+
+    with pytest.raises(ValueError, match="CRS"):
+        augment.CutMix(pool=[different_crs], p=1.0, seed=0)(patch)
+    with pytest.raises(ValueError, match="resolution"):
+        augment.CutMix(pool=[different_res], p=1.0, seed=0)(patch)
+
+
+def test_get_config_is_json_safe(patch: GeoTensor) -> None:
+    """Every public augmentation's config should serialise to JSON."""
+    donor = _toy_geotensor(np.full(patch.shape, 9.0, dtype=np.float32))
+    ops: list[Operator] = [
+        augment.RandomFlip(seed=0),
+        augment.RandomRotate90(seed=0),
+        augment.RandomCrop(size=(2, 2), seed=0),
+        augment.RandomShift(max_shift=(1, 1), seed=0),
+        augment.BrightnessJitter(seed=0),
+        augment.ContrastJitter(seed=0),
+        augment.GaussianNoise(sigma=(0.0, 0.1), seed=0),
+        augment.SpeckleNoise(sigma=(0.0, 0.1), seed=0),
+        augment.BandDropout(seed=0),
+        augment.BandJitter(seed=0),
+        augment.SunAngleJitter(seed=0),
+        augment.AtmosphericHaze(seed=0),
+        augment.SimulatedClouds(seed=0),
+        augment.CutMix(pool=[donor], seed=0),
+        augment.Compose([augment.RandomFlip(seed=0)], seed=0),
+    ]
+    for op in ops:
+        # Should not raise — tuples become lists, no live objects leak through.
+        json.dumps(op.get_config())
+
+
+def test_compose_and_cutmix_are_forbid_in_yaml() -> None:
+    assert augment.Compose([]).forbid_in_yaml is True
+    assert augment.CutMix(pool=[]).forbid_in_yaml is True

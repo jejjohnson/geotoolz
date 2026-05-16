@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from numbers import Real
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from affine import Affine
@@ -108,15 +108,43 @@ def _jsonable(value: Any) -> Any:
 
 
 class Compose(Operator):
-    """Apply augmentations sequentially with an optional pipeline probability."""
+    """Apply augmentations sequentially with an optional pipeline probability.
 
-    def __init__(self, augmentations: list[Operator], p: float = 1.0) -> None:
+    Per-call ``seed`` deterministically derives a fresh child seed for each
+    augmentation so the same top-level seed always produces the same chain
+    of inner draws. When ``seed`` is omitted, ``Compose`` uses ``self.seed``
+    (set at construction) before falling back to non-deterministic entropy.
+
+    ``get_config`` emits a JSON-safe nested description of each child via
+    its ``get_config()``; ``forbid_in_yaml`` is set because the constructor
+    accepts arbitrary ``Operator`` instances which a YAML loader cannot
+    re-instantiate without an explicit registry.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> pipe = gz.augment.Compose(
+        ...     [gz.augment.RandomFlip(), gz.augment.GaussianNoise(sigma=0.01)],
+        ...     p=1.0,
+        ...     seed=0,
+        ... )
+        >>> out = pipe(patch)  # doctest: +SKIP
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        augmentations: list[Operator],
+        p: float = 1.0,
+        seed: int | None = None,
+    ) -> None:
         _check_probability(p, "p")
         self.augmentations = list(augmentations)
         self.p = p
+        self.seed = seed
 
     def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
-        rng = _rng(seed)
+        rng = _rng(_seed(self.seed, seed))
         if rng.random() >= self.p:
             return gt
 
@@ -127,11 +155,28 @@ class Compose(Operator):
         return out
 
     def get_config(self) -> dict[str, Any]:
-        return {"augmentations": self.augmentations, "p": self.p}
+        return {
+            "augmentations": [
+                {"class": type(op).__name__, "config": op.get_config()}
+                for op in self.augmentations
+            ],
+            "p": self.p,
+            "seed": self.seed,
+        }
 
 
 class RandomFlip(Operator):
-    """Randomly flip a GeoTensor horizontally and/or vertically."""
+    """Randomly flip a GeoTensor horizontally and/or vertically.
+
+    Preserves the CRS and updates the affine ``transform`` so the output
+    pixel grid still maps to the same physical extent. Each axis flips
+    independently with probability ``p_horizontal`` / ``p_vertical``.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> op = gz.augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)
+        >>> out = op(patch)  # doctest: +SKIP
+    """
 
     def __init__(
         self,
@@ -176,7 +221,17 @@ class RandomFlip(Operator):
 
 
 class RandomRotate90(Operator):
-    """Randomly rotate by 90, 180, or 270 degrees."""
+    """Randomly rotate by 90, 180, or 270 degrees.
+
+    Uses ``np.rot90`` over the trailing two axes and composes the input
+    ``transform`` with the matching rigid rotation so the upper-left output
+    pixel still maps to the correct world coordinate.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> op = gz.augment.RandomRotate90(p=1.0, seed=0)
+        >>> out = op(patch)  # doctest: +SKIP
+    """
 
     def __init__(self, p: float = 0.75, seed: int | None = None) -> None:
         _check_probability(p, "p")
@@ -212,7 +267,18 @@ def _rot90_transform(transform: Affine, height: int, width: int, k: int) -> Affi
 
 
 class RandomCrop(Operator):
-    """Randomly crop a spatial window and update the transform."""
+    """Randomly crop a spatial window and update the transform.
+
+    Delegates to ``gt.isel`` so the output transform's translation reflects
+    the crop origin (i.e. ``transform * (left, top)`` equals the new
+    upper-left world coordinate). CRS, dtype and band metadata are
+    preserved.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> op = gz.augment.RandomCrop(size=(3, 4), seed=0)
+        >>> out = op(patch)  # doctest: +SKIP
+    """
 
     def __init__(self, size: tuple[int, int], seed: int | None = None) -> None:
         if size[0] <= 0 or size[1] <= 0:
@@ -231,7 +297,7 @@ class RandomCrop(Operator):
         return gt.isel({"y": slice(top, top + crop_h), "x": slice(left, left + crop_w)})
 
     def get_config(self) -> dict[str, Any]:
-        return {"size": self.size, "seed": self.seed}
+        return {"size": _jsonable(self.size), "seed": self.seed}
 
 
 class RandomShift(Operator):
@@ -254,7 +320,7 @@ class RandomShift(Operator):
         return gt.read_from_window(window, boundless=True)
 
     def get_config(self) -> dict[str, Any]:
-        return {"max_shift": self.max_shift, "seed": self.seed}
+        return {"max_shift": _jsonable(self.max_shift), "seed": self.seed}
 
 
 class BrightnessJitter(Operator):
@@ -282,7 +348,7 @@ class BrightnessJitter(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "factor": self.factor,
+            "factor": _jsonable(self.factor),
             "per_band": self.per_band,
             "seed": self.seed,
         }
@@ -315,7 +381,7 @@ class ContrastJitter(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "factor": self.factor,
+            "factor": _jsonable(self.factor),
             "per_band": self.per_band,
             "seed": self.seed,
         }
@@ -575,7 +641,25 @@ class SimulatedClouds(Operator):
 
 
 class CutMix(Operator):
-    """Paste a random rectangle from a same-shaped GeoTensor pool member."""
+    """Paste a random rectangle from a pool donor that shares geo metadata.
+
+    Donors must match the input ``shape``, ``crs`` and pixel resolution
+    (i.e. the absolute components of ``transform.a``/``transform.e``). This
+    guards against blending samples drawn at different scales or in
+    different reference frames — which would produce a geographically
+    incoherent result even though the pixel grids align.
+
+    ``forbid_in_yaml`` is set because ``pool`` holds live ``GeoTensor``
+    objects that cannot be round-tripped through YAML. ``get_config`` emits
+    only the pool length for debug visibility.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> op = gz.augment.CutMix(pool=[donor], p=1.0, seed=0)
+        >>> out = op(patch)  # doctest: +SKIP
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self, pool: list[GeoTensor], p: float = 0.5, seed: int | None = None
@@ -595,6 +679,15 @@ class CutMix(Operator):
         donor_arr = np.asarray(donor)
         if donor_arr.shape != arr.shape:
             raise ValueError("CutMix pool GeoTensors must match the input shape.")
+        if donor.crs != gt.crs:
+            raise ValueError("CutMix donor CRS must match the input CRS.")
+        if not np.allclose(
+            (abs(donor.transform.a), abs(donor.transform.e)),
+            (abs(gt.transform.a), abs(gt.transform.e)),
+        ):
+            raise ValueError(
+                "CutMix donor pixel resolution must match the input resolution."
+            )
 
         cut_h = int(rng.integers(1, gt.height + 1))
         cut_w = int(rng.integers(1, gt.width + 1))
@@ -608,4 +701,4 @@ class CutMix(Operator):
         return _wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
-        return {"pool": self.pool, "p": self.p, "seed": self.seed}
+        return {"pool_size": len(self.pool), "p": self.p, "seed": self.seed}
