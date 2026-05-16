@@ -35,7 +35,11 @@ from typing import Any
 from geotoolz.core._src.operator import Carrier, Operator
 
 
-_MISSING = object()
+class _Missing:
+    pass
+
+
+_MISSING = _Missing()
 
 
 class Sequential(Operator):

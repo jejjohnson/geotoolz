@@ -39,6 +39,10 @@ class TestBasicChain:
         with pytest.raises(TypeError, match="requires an input"):
             Sequential([])()
 
+    def test_non_source_first_operator_requires_input(self) -> None:
+        with pytest.raises(TypeError):
+            Sequential([Identity()])()
+
     def test_single_op(self) -> None:
         assert Sequential([Add(5)])(0) == 5
 

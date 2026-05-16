@@ -38,7 +38,7 @@ def test_io_module_is_exported() -> None:
     assert io.ReadBounds is not None
 
 
-def test_write_geotiff_then_read_bounds_roundtrips_data_metadata_and_indexes(
+def test_write_geotiff_then_read_bounds_roundtrips(
     tmp_path,
 ) -> None:
     gt = _sample_geotensor()

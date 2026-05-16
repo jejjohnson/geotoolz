@@ -568,7 +568,7 @@ class LoadFromEE(SourceOperator):
         self.bounds = bounds
         self.crs = crs
         self.scale = scale
-        self.bands = [] if bands is None else bands
+        self.bands = bands
 
     def _apply(self) -> GeoTensor:
         try:
@@ -581,16 +581,18 @@ class LoadFromEE(SourceOperator):
 
         xmin, ymax = self.bounds[0], self.bounds[3]
         transform: Affine = Affine(self.scale, 0.0, xmin, 0.0, -self.scale, ymax)
+        ee_module = export_image.__globals__.get("ee")
+        ee_exception = getattr(ee_module, "EEException", RuntimeError)
         try:
             return export_image(
                 self.image_id,
                 geometry=box(*self.bounds),
                 transform=transform,
                 crs=self.crs,
-                bands_gee=self.bands,
+                bands_gee=[] if self.bands is None else self.bands,
                 resolution_dst=self.scale,
             )
-        except Exception as exc:
+        except (ee_exception, RuntimeError, ValueError, OSError) as exc:
             raise GeoToolzIOError(
                 f"Unable to load Earth Engine image {self.image_id!r}: {exc}"
             ) from exc
