@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import geopandas as gpd
 import numpy as np
 import pytest
@@ -252,6 +254,7 @@ def test_slope_mask_matches_flat_reference() -> None:
 
 def test_natural_earth_mask_constructors_use_cached_loader(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     calls = []
     countries = gpd.GeoDataFrame(
@@ -265,21 +268,23 @@ def test_natural_earth_mask_constructors_use_cached_loader(
 
     mask_operators._load_natural_earth.cache_clear()
     monkeypatch.setattr(mask_operators.gpd, "read_file", fake_read_file)
-    source = "/tmp/natural-earth.gpkg"
+    source = str(tmp_path / "natural-earth.gpkg")
 
-    assert LandMask(source=source).get_config() == {"source": source}
-    assert OceanMask(source=source).get_config() == {"source": source}
-    country = CountryMask(iso_a3="GRL", source=source)
-    assert country.get_config() == {
-        "iso_a3": "GRL",
-        "source": source,
-    }
-    scene = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
-    country_mask = country(scene)
-    assert country_mask.shape == scene.shape
-    assert bool(np.asarray(country_mask)[1, 0])
-    assert calls == [source, source, source]
-    mask_operators._load_natural_earth.cache_clear()
+    try:
+        assert LandMask(source=source).get_config() == {"source": source}
+        assert OceanMask(source=source).get_config() == {"source": source}
+        country = CountryMask(iso_a3="GRL", source=source)
+        assert country.get_config() == {
+            "iso_a3": "GRL",
+            "source": source,
+        }
+        scene = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
+        country_mask = country(scene)
+        assert country_mask.shape == scene.shape
+        assert bool(np.asarray(country_mask)[1, 0])
+        assert calls == [source, source, source]
+    finally:
+        mask_operators._load_natural_earth.cache_clear()
 
 
 def test_country_mask_rejects_unknown_iso(monkeypatch: pytest.MonkeyPatch) -> None:

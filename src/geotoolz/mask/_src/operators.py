@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
-from urllib.request import urlretrieve
+from urllib.request import urlopen
 from zipfile import ZipFile
 
 import geopandas as gpd
@@ -503,7 +504,7 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
     if not extract_dir.exists():
         if not zip_path.exists():
             try:
-                urlretrieve(_NATURAL_EARTH_URLS[kind], zip_path)
+                _download_url(_NATURAL_EARTH_URLS[kind], zip_path)
             except OSError as exc:
                 raise RuntimeError(
                     f"failed to download Natural Earth {kind!r} data from "
@@ -527,6 +528,11 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
         )
     shp = shapefiles[0]
     return gpd.read_file(shp)
+
+
+def _download_url(url: str, destination: Path, *, timeout: float = 60.0) -> None:
+    with urlopen(url, timeout=timeout) as response, destination.open("wb") as dst:
+        shutil.copyfileobj(response, dst)
 
 
 def _natural_earth_cache_dir() -> Path:
