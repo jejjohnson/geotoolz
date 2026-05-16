@@ -177,6 +177,11 @@ class DecodeBitmask(Operator):
         qa_band: Optional integer or named band selector. When omitted, the
             input carrier itself is treated as the QA band.
         axis: Position of the band axis when ``qa_band`` selects from a stack.
+
+    Returns:
+        A multi-band boolean ``GeoTensor`` with shape
+        ``(n_layers, height, width)``. The output ``band_names`` attr is set
+        from the keys in ``bits``.
     """
 
     def __init__(
@@ -290,7 +295,19 @@ class MaskWater(_QAMask):
 
 
 class MaskNoData(Operator):
-    """Return True where pixels are no-data by QA value or carrier fill value."""
+    """Return True where pixels are no-data by QA value or carrier fill value.
+
+    Args:
+        qa_band: Optional QA band selector. When provided alongside ``bits`` or
+            ``values``, no-data is decoded from that QA band.
+        bits: Bit positions that mark no-data.
+        values: Categorical values that mark no-data.
+        axis: Position of the band axis.
+
+    Returns:
+        A boolean ``GeoTensor`` mask. If no QA definition is provided, pixels
+        equal to the carrier ``fill_value_default`` in any band are marked.
+    """
 
     def __init__(
         self,
@@ -334,7 +351,17 @@ class MaskNoData(Operator):
 
 
 class MaskSaturated(Operator):
-    """Return True where pixels equal a saturation value."""
+    """Return True where pixels equal a saturation value.
+
+    Args:
+        qa_band: Optional band selector. When omitted, all bands are checked.
+        saturation_value: Explicit saturation value. If omitted for integer
+            arrays, the dtype maximum is used; float arrays require a value.
+        axis: Position of the band axis.
+
+    Returns:
+        A boolean ``GeoTensor`` mask with saturated pixels marked True.
+    """
 
     def __init__(
         self,
@@ -404,7 +431,10 @@ def _registry_values(sensor: str, targets: Sequence[str]) -> tuple[int, ...]:
 
 
 class S2QA60(Operator):
-    """Sentinel-2 L1C QA60 cloud and cirrus mask preset."""
+    """Sentinel-2 L1C QA60 cloud and cirrus mask preset.
+
+    Returns True where QA60 bit 10 (cloud) or bit 11 (cirrus) is set.
+    """
 
     def __init__(self, *, qa_band: int | str = "QA60", axis: int = 0) -> None:
         self.qa_band = qa_band
@@ -422,7 +452,11 @@ class S2QA60(Operator):
 
 
 class S2SCL(Operator):
-    """Sentinel-2 L2A SCL preset that masks pixels outside kept classes."""
+    """Sentinel-2 L2A SCL preset that masks pixels outside kept classes.
+
+    Returns True for pixels to mask: every SCL class except those named in
+    ``keep``. By default, vegetation, soil, and water are kept.
+    """
 
     def __init__(
         self,
@@ -449,7 +483,11 @@ class S2SCL(Operator):
 
 
 class LandsatQA_PIXEL(Operator):
-    """Landsat Collection-2 QA_PIXEL mask preset."""
+    """Landsat Collection-2 QA_PIXEL mask preset.
+
+    Returns True where any requested target is set in ``QA_PIXEL``. Defaults
+    to cloud, cloud shadow, and cirrus targets.
+    """
 
     def __init__(
         self,
@@ -477,7 +515,11 @@ class LandsatQA_PIXEL(Operator):
 
 
 class MODISStateQA(Operator):
-    """MODIS State QA mask preset."""
+    """MODIS State QA mask preset.
+
+    Returns True where any requested target is set in the MODIS State QA band.
+    Defaults to cloud and cloud-shadow targets.
+    """
 
     def __init__(
         self,
