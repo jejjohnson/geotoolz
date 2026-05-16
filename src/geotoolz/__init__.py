@@ -34,6 +34,7 @@ from geotoolz import (
     plume,
     qa,
     radiometry,
+    readers,
     restore,
     spectral,
     types,
@@ -206,6 +207,7 @@ from geotoolz.radiometry import (
     SimpleAtmosphericCorrection,
     ToFloat32,
 )
+from geotoolz.readers import SensorReader
 from geotoolz.restore import (
     MNF,
     BilateralDenoise,
@@ -380,6 +382,7 @@ __all__ = [
     "ReplaceOutliers",
     "SWIRComposite",
     "SaturationFlag",
+    "SensorReader",
     "Sequential",
     "ShadedRelief",
     "ShapeTrace",
@@ -481,6 +484,7 @@ __all__ = [
     "qa",
     "query",
     "radiometry",
+    "readers",
     "restore",
     "spectral",
     "to_geoparquet",

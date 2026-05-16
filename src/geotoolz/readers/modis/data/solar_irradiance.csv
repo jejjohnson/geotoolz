@@ -1,0 +1,6 @@
+# Source: synthetic MODIS framework fixture for geotoolz reader tests. License: MIT.
+band,esun
+blue,1997.0
+green,1812.0
+red,1533.0
+nir,955.0
