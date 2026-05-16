@@ -124,6 +124,26 @@ def test_streaming_background_matches_empirical_covariance() -> None:
     )
 
 
+def test_streaming_background_shrunk_covariance_matches_batch_estimator() -> None:
+    cube_a = _gt(np.arange(8, dtype=float).reshape(2, 2, 2))
+    cube_b = _gt(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
+
+    bg = gz.matched_filter.StreamingBackground(cubes=[cube_a, cube_b])()
+    stacked = np.concatenate(
+        [np.asarray(cube_a).reshape(2, -1), np.asarray(cube_b).reshape(2, -1)],
+        axis=1,
+    ).T
+    empirical = np.cov(stacked, rowvar=False) + 1e-8 * np.eye(2)
+    expected = gz.matched_filter.estimate_cov_shrunk(
+        stacked.T.reshape(2, 2, 4), axis=0
+    ).matrix
+
+    assert isinstance(bg, gz.matched_filter.StreamingBackgroundResult)
+    assert np.allclose(bg.mean, stacked.mean(axis=0))
+    assert np.allclose(bg.cov_op.matrix, expected)
+    assert not np.allclose(bg.cov_op.matrix, empirical)
+
+
 def test_cluster_background_and_dispatch_are_reproducible() -> None:
     target = np.array([1.0, 0.0])
     cube = np.array(

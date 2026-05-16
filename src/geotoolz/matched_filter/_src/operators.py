@@ -11,9 +11,11 @@ from geotoolz.core import Operator
 from geotoolz.matched_filter._src.array import (
     AdaptiveBackground,
     ClusterBackground,
+    CovMethod,
     CovShrinkageMethod,
     MeanMethod,
     NumpyLinearOperator,
+    StreamingBackgroundResult,
     WelfordAccumulator,
     adaptive_window_background,
     apply_cluster_mf,
@@ -26,12 +28,16 @@ from geotoolz.matched_filter._src.array import (
     estimate_mean,
     gmm_cluster_background,
     matched_filter_snr,
+    shrink_covariance,
     validate_mf_inputs,
 )
 
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
+
+
+FINITE_DIFFERENCE_STEP = 1e-4
 
 
 class MatchedFilter(Operator):
@@ -49,8 +55,7 @@ class MatchedFilter(Operator):
         target: np.ndarray | None = None,
         fit_on_call: bool = False,
         mean_method: MeanMethod = "median",
-        cov_method: CovShrinkageMethod
-        | Literal["empirical", "lowrank"] = "ledoit_wolf",
+        cov_method: CovMethod = "ledoit_wolf",
         axis: int = 0,
     ) -> None:
         self.mean = mean
@@ -430,7 +435,7 @@ class StreamingBackground(Operator):
         self.cov_kind = cov_kind
         self.axis = axis
 
-    def _apply(self) -> Any:
+    def _apply(self) -> StreamingBackgroundResult:
         acc: WelfordAccumulator | None = None
         for cube in self.cubes:
             samples, _ = _cube_to_samples(np.asarray(cube), axis=self.axis)
@@ -441,15 +446,10 @@ class StreamingBackground(Operator):
             raise ValueError("cubes must contain at least one cube")
         cov = acc.covariance(ridge=1e-8)
         if self.cov_kind == "shrunk":
-            target = np.trace(cov) / cov.shape[0] * np.eye(cov.shape[0], dtype=float)
-            cov = 0.8 * cov + 0.2 * target
+            cov = shrink_covariance(cov, method="ledoit_wolf", n_samples=acc.count)
         elif self.cov_kind != "empirical":
             raise ValueError(f"unknown cov_kind {self.cov_kind!r}")
-        return type(
-            "StreamingBackgroundResult",
-            (),
-            {"mean": acc.mean, "cov_op": NumpyLinearOperator(cov)},
-        )()
+        return StreamingBackgroundResult(mean=acc.mean, cov_op=NumpyLinearOperator(cov))
 
     def get_config(self) -> dict[str, Any]:
         return {"cov_kind": self.cov_kind, "axis": self.axis}
@@ -481,9 +481,9 @@ class LinearTargetFromObs(Operator):
                 vmr_background=self.vmr_background,
                 pattern=self.pattern,
                 pixel=self.pixel,
-                amplitude=1e-4,
+                amplitude=FINITE_DIFFERENCE_STEP,
             )
-            / 1e-4
+            / FINITE_DIFFERENCE_STEP
         )
 
     def get_config(self) -> dict[str, Any]:
