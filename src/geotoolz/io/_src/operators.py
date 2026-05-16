@@ -572,6 +572,7 @@ class LoadFromEE(SourceOperator):
 
     def _apply(self) -> GeoTensor:
         try:
+            import ee
             from affine import Affine
             from georeader.readers.ee_image import export_image
         except ImportError as exc:
@@ -581,8 +582,6 @@ class LoadFromEE(SourceOperator):
 
         xmin, ymax = self.bounds[0], self.bounds[3]
         transform: Affine = Affine(self.scale, 0.0, xmin, 0.0, -self.scale, ymax)
-        ee_module = export_image.__globals__.get("ee")
-        ee_exception = getattr(ee_module, "EEException", RuntimeError)
         try:
             return export_image(
                 self.image_id,
@@ -592,7 +591,7 @@ class LoadFromEE(SourceOperator):
                 bands_gee=[] if self.bands is None else self.bands,
                 resolution_dst=self.scale,
             )
-        except (ee_exception, RuntimeError, ValueError, OSError) as exc:
+        except (ee.EEException, RuntimeError, ValueError, OSError) as exc:
             raise GeoToolzIOError(
                 f"Unable to load Earth Engine image {self.image_id!r}: {exc}"
             ) from exc

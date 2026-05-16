@@ -16,6 +16,7 @@ from shapely.geometry import box
 import geotoolz as gz
 from geotoolz import io
 from geotoolz.core import Identity, Sequential
+from geotoolz.io._src import operators as io_operators
 
 
 def _sample_geotensor() -> GeoTensor:
@@ -56,6 +57,17 @@ def test_write_geotiff_then_read_bounds_roundtrips(
     assert out.fill_value_default == -9999
 
 
+def test_read_bounds_without_indexes_reads_all_bands_in_order(tmp_path: Path) -> None:
+    gt = _sample_geotensor()
+    path = tmp_path / "sample.tif"
+    io.WriteGeoTIFF(path=path)(gt)
+
+    bounds = array_bounds(gt.shape[-2], gt.shape[-1], gt.transform)
+    out = io.ReadBounds(src=path, bounds=bounds, crs="EPSG:32631")()
+
+    np.testing.assert_array_equal(out.values, gt.values)
+
+
 def test_source_operator_can_start_sequential_without_input(tmp_path: Path) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
@@ -84,6 +96,22 @@ def test_read_window_accepts_reader_source_and_rejects_indexed_objects(
 
     with pytest.raises(io.GeoToolzIOError, match="indexes are only supported"):
         io.ReadWindow(src=object(), window=Window(0, 0, 1, 1), indexes=[1])()
+
+
+def test_read_window_delegates_custom_sources_without_indexes(monkeypatch) -> None:
+    gt = _sample_geotensor()
+    source = object()
+    window = Window(0, 0, 1, 1)
+
+    def fake_read_from_window(src, window_arg, boundless=True):
+        assert src is source
+        assert window_arg == window
+        assert boundless is True
+        return gt
+
+    monkeypatch.setattr(io_operators.read, "read_from_window", fake_read_from_window)
+
+    assert io.ReadWindow(src=source, window=window)() is gt
 
 
 def test_read_window_outside_source_raises_clear_error(tmp_path: Path) -> None:
