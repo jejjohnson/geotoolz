@@ -128,7 +128,16 @@ class Operator:
 
     @classmethod
     def from_state(cls, state: dict[str, Any]) -> Operator:
-        """Reconstruct an operator from a ``state`` record."""
+        """Reconstruct an operator from a ``state`` record.
+
+        Walks ``cls`` plus all transitive subclasses so calling
+        ``Subclass.from_state(state)`` resolves ``Subclass`` itself. Only
+        operators whose ``config`` is composed of JSON primitives are
+        reconstructible — operators that nest other operators in their
+        config (e.g. ``AppendIndex``) emit debug/provenance payloads and
+        raise a clear ``RuntimeError`` here instead of letting the
+        constructor blow up with ``TypeError``.
+        """
         module_name = state.get("module")
         class_name = state.get("class")
         config = state.get("config", {})
@@ -139,8 +148,17 @@ class Operator:
         if not isinstance(config, dict):
             raise ValueError("Operator state config must be a dictionary")
 
-        for op_type in _operator_subclasses(cls):
+        for op_type in (cls, *_operator_subclasses(cls)):
             if op_type.__module__ == module_name and op_type.__name__ == class_name:
+                non_primitive_keys = [
+                    k for k, v in config.items() if not _is_json_primitive(v)
+                ]
+                if non_primitive_keys:
+                    raise RuntimeError(
+                        f"from_state cannot reconstruct {op_type.__name__}: "
+                        f"config contains non-primitive values "
+                        f"{non_primitive_keys}. Use the regular constructor."
+                    )
                 return op_type(**config)
         raise TypeError(f"{module_name}.{class_name} is not a loaded Operator")
 
@@ -169,3 +187,21 @@ def _operator_subclasses(cls: type[Operator]) -> tuple[type[Operator], ...]:
         subclasses.append(subclass)
         subclasses.extend(_operator_subclasses(subclass))
     return tuple(subclasses)
+
+
+def _is_json_primitive(value: Any) -> bool:
+    """Return ``True`` if ``value`` is a safe constructor kwarg payload.
+
+    Accepts JSON primitives (``None``/``bool``/``int``/``float``/``str``)
+    and ``list``/``tuple`` of the same, recursively. ``dict`` values are
+    rejected: operators that nest other operators in their config emit
+    ``{"class", "config"}`` debug payloads (see ``AppendIndex``) that
+    cannot be passed back to the constructor unchanged, so we refuse
+    the entire ``dict`` shape rather than try to distinguish "plain
+    config dict" from "nested operator record" heuristically.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_is_json_primitive(v) for v in value)
+    return False
