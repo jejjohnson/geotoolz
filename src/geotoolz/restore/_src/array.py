@@ -212,7 +212,7 @@ def gap_fill_nearest(arr: np.ndarray, *, max_distance: int | None = None) -> np.
 def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.ndarray:
     """Fill NaNs with inverse-distance weighted finite neighbours.
 
-    Power values at or above ``_IDW_POWER_THRESHOLD`` automatically fall
+    Power values greater than or equal to ``64`` automatically fall
     back to nearest-neighbour filling because very large powers converge
     to nearest-neighbour weights while risking overflow.
     """
@@ -276,7 +276,8 @@ def outlier_mask(
     values = np.asarray(arr, dtype=float)
     if method == "mad":
         center = np.nanmedian(values)
-        # _MAD_TO_STD_SCALE converts MAD to std: 1 / inverse_normal_cdf(0.75).
+        # _MAD_TO_STD_SCALE converts MAD to a std estimate; it is the
+        # consistency constant 1 / inverse_standard_normal_cdf(0.75).
         scale = _MAD_TO_STD_SCALE * np.nanmedian(np.abs(values - center))
     elif method == "zscore":
         center = np.nanmean(values)
