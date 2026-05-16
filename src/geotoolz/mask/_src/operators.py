@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
@@ -479,17 +481,38 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
     if source != "natural_earth_10m":
         return gpd.read_file(source)
 
-    cache_dir = Path.home() / ".cache" / "geotoolz" / "natural_earth"
+    cache_dir = _natural_earth_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     zip_path = cache_dir / Path(_NATURAL_EARTH_URLS[kind]).name
     extract_dir = cache_dir / zip_path.stem
     if not extract_dir.exists():
         if not zip_path.exists():
-            urlretrieve(_NATURAL_EARTH_URLS[kind], zip_path)
+            try:
+                urlretrieve(_NATURAL_EARTH_URLS[kind], zip_path)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"failed to download Natural Earth {kind!r} data from "
+                    f"{_NATURAL_EARTH_URLS[kind]}"
+                ) from exc
         with ZipFile(zip_path) as zf:
             zf.extractall(extract_dir)
-    shp = next(extract_dir.glob("*.shp"))
+    shapefiles = list(extract_dir.glob("*.shp"))
+    if not shapefiles:
+        raise FileNotFoundError(
+            f"Natural Earth {kind!r} archive did not contain a shapefile"
+        )
+    shp = shapefiles[0]
     return gpd.read_file(shp)
+
+
+def _natural_earth_cache_dir() -> Path:
+    cache_root = os.environ.get("XDG_CACHE_HOME")
+    if cache_root is not None:
+        return Path(cache_root) / "geotoolz" / "natural_earth"
+    try:
+        return Path.home() / ".cache" / "geotoolz" / "natural_earth"
+    except RuntimeError:
+        return Path(tempfile.gettempdir()) / "geotoolz" / "natural_earth"
 
 
 def _wrap_like(mask: Any, out: np.ndarray) -> Any:

@@ -265,10 +265,13 @@ def test_natural_earth_mask_constructors_use_cached_loader(
 
     assert LandMask().get_config() == {"source": "natural_earth_10m"}
     assert OceanMask().get_config() == {"source": "natural_earth_10m"}
-    assert CountryMask(iso_a3="GRL").get_config() == {
+    country = CountryMask(iso_a3="GRL")
+    assert country.get_config() == {
         "iso_a3": "GRL",
         "source": "natural_earth_10m",
     }
+    country_mask = country(_toy_geotensor(np.zeros((1, 2, 2), dtype=np.float32)))
+    assert bool(np.asarray(country_mask)[1, 0])
     assert calls == [
         ("land", "natural_earth_10m"),
         ("ocean", "natural_earth_10m"),
