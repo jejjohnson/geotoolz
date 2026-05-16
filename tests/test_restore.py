@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
 
@@ -36,6 +37,7 @@ from geotoolz.restore import (
     median_denoise,
     nl_means,
     outlier_mask,
+    pca_denoise,
 )
 
 
@@ -120,6 +122,28 @@ def test_denoise_pca_reconstructs_original_shape() -> None:
     out = DenoisePCA(n_components=2)(gt)
     assert out.shape == gt.shape
     assert out.transform == gt.transform
+
+
+def test_pca_denoise_raises_on_all_nan_band() -> None:
+    rng = np.random.default_rng(7)
+    arr = rng.normal(size=(3, 5, 5))
+    arr[1] = np.nan
+    with pytest.raises(ValueError, match=r"entirely NaN.*1"):
+        pca_denoise(arr, n_components=2)
+
+
+def test_gap_fill_laplacian_uses_local_not_periodic_neighbours() -> None:
+    # Construct an array where opposite edges differ strongly. If the
+    # Laplacian solver used periodic wrap-around (np.roll), the corner
+    # fill would pull from the far-edge interior pixels; with edge
+    # boundaries it should stay close to the local corner neighbours.
+    arr = np.zeros((5, 5), dtype=float)
+    arr[:, -1] = 100.0  # right column has high values
+    arr[0, 0] = np.nan  # NaN at the top-left corner
+    filled = gap_fill_laplacian(arr, iterations=500)
+    # Local neighbours of (0, 0) are arr[0, 1] = 0 and arr[1, 0] = 0;
+    # wrap-around neighbours would include arr[0, -1] = 100.
+    assert filled[0, 0] < 1.0
 
 
 def test_gaussian_denoise_preserves_nan_mask_and_metadata() -> None:

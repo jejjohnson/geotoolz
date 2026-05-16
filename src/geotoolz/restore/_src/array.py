@@ -301,6 +301,10 @@ def fit_pca(
         raise ValueError("n_components must be between 1 and the number of bands")
     flat = moved.reshape(bands, -1)
     nan_mask = ~np.isfinite(flat)
+    all_nan_bands = nan_mask.all(axis=1)
+    if all_nan_bands.any():
+        bad = tuple(int(i) for i in np.where(all_nan_bands)[0])
+        raise ValueError(f"PCA cannot fit on bands that are entirely NaN: bands {bad}")
     means = np.nanmean(flat, axis=1, keepdims=True)
     filled = np.where(nan_mask, means, flat)
     centered = filled - means
@@ -446,12 +450,17 @@ def gap_fill_laplacian(arr: np.ndarray, *, iterations: int = 200) -> np.ndarray:
     values = np.asarray(arr, dtype=float)
     out = gap_fill_nearest(values)
     missing = ~np.isfinite(values)
+    # Pad with edge-repeat so the 4-neighbour stencil at the raster
+    # boundary uses the nearest interior pixel rather than wrapping to
+    # the opposite edge (np.roll would impose periodic boundaries).
+    pad_width = [(0, 0)] * (out.ndim - 2) + [(1, 1), (1, 1)]
     for _ in range(iterations):
+        padded = np.pad(out, pad_width, mode="edge")
         avg = (
-            np.roll(out, 1, axis=-2)
-            + np.roll(out, -1, axis=-2)
-            + np.roll(out, 1, axis=-1)
-            + np.roll(out, -1, axis=-1)
+            padded[..., :-2, 1:-1]
+            + padded[..., 2:, 1:-1]
+            + padded[..., 1:-1, :-2]
+            + padded[..., 1:-1, 2:]
         ) / 4.0
         out = np.where(missing, avg, values)
     return out
