@@ -1,6 +1,6 @@
 """`CatalogDomain` — adapter that lets a `GeoCatalog` act as a Patcher domain.
 
-The `SpatialPatcher` in `geotoolz.patch` operates on a `Domain` — an
+The `SpatialPatcher` in `geopatcher` operates on a `Domain` — an
 object with ``bounds``, an iterable tiling, and (downstream) a `Field`
 that knows how to read bytes for a given sub-region. The single-file
 case is `RasterDomain` + `RasterField`. The *multi-file* case is this
@@ -8,7 +8,7 @@ shim: wrap a catalog, get one sub-domain per row, and the same operator
 pipeline that handled a single raster now handles an archive.
 
 This is the only piece of code that ties `geotoolz.catalog` to
-`geotoolz.patch`. Either layer can evolve independently as long as the
+`geopatcher`. Either layer can evolve independently as long as the
 `GeoSlice` shape stays put.
 """
 
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class CatalogDomain:
-    """A `geotoolz.patch.Domain` view of a `GeoCatalog`.
+    """A `geopatcher.Domain` view of a `GeoCatalog`.
 
     Use this when you want to run a `SpatialPatcher` (or any consumer
     that takes a `Domain`) across a multi-file archive instead of a

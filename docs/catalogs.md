@@ -160,11 +160,12 @@ The artifact is GeoParquet 1.1 compatible — readable by DuckDB,
 geopandas, GDAL, pandas. The Phase 2 DuckDB backend reads the *same*
 file.
 
-## Bridging to `geotoolz.patch`
+## Bridging to `geopatcher`
 
-`CatalogDomain` adapts a catalog into a `geotoolz.patch.Domain` so the
-`SpatialPatcher` can tile across a multi-file archive. Each catalog
-row contributes one sub-domain; the patcher iterates them.
+`CatalogDomain` adapts a catalog into a `geopatcher.Domain` so the
+`geopatcher.SpatialPatcher` can tile across a multi-file archive (install
+with the `[patch]` extra). Each catalog row contributes one sub-domain;
+the patcher iterates them.
 
 ```python
 import geotoolz as gz

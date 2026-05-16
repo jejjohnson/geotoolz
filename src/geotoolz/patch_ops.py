@@ -1,6 +1,7 @@
-"""Operator wrappers around `SpatialPatcher` — `GridSampler`, `ApplyToChips`, `Stitch`.
+"""Operator wrappers — `GridSampler`, `ApplyToChips`, `Stitch` — around `geopatcher`.
 
-Thin glue between the four-axis Patcher and `geotoolz.core.Operator`, so a
+Thin glue between the four-axis Patcher framework (which lives in the
+standalone ``geopatcher`` package) and `geotoolz.core.Operator`, so a
 sliding-window inference pipeline composes inside a `Sequential` /
 `Graph`::
 
@@ -10,14 +11,9 @@ sliding-window inference pipeline composes inside a `Sequential` /
         Stitch(SpatialOverlapAdd()),
     ])
 
-The wrappers map onto the legacy free-function API named in `design.md`
-§1 ("Ownership: who lives where"):
-
-| Legacy                         | Operator wrapper             |
-|--------------------------------|------------------------------|
-| ``grid_geo_sampler``           | ``GridSampler``              |
-| ``ApplyToChips`` (inference)   | ``ApplyToChips``             |
-| ``stitch_predictions``         | ``Stitch``                   |
+Optional extra: ``pip install 'geotoolz[patch]'`` to pull in geopatcher.
+Importing this module without geopatcher installed raises a friendly
+``ImportError`` pointing at the right extra.
 """
 
 from __future__ import annotations
@@ -25,9 +21,15 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from geotoolz.core._src.operator import Operator
-from geotoolz.patch._src.patch import Patch
-from geotoolz.patch._src.spatial.aggregation import SpatialAggregation
-from geotoolz.patch._src.spatial.patcher import SpatialPatcher
+
+
+try:
+    from geopatcher import Patch, SpatialAggregation, SpatialPatcher
+except ImportError as _e:  # pragma: no cover - exercised when [patch] is missing
+    raise ImportError(
+        "geotoolz.patch_ops requires the `geopatcher` package. "
+        "Install with `pip install 'geotoolz[patch]'` (or `pip install geopatcher`)."
+    ) from _e
 
 
 class GridSampler(Operator):

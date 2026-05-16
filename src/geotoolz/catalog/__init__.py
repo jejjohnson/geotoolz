@@ -18,7 +18,7 @@ Surface:
   (raster, vector) or `xr.Dataset` (xarray).
 - `query` / `intersect` / `union`: set algebra over catalogs.
 - `to_geoparquet` / `from_geoparquet`: portable artifact round-trip.
-- `CatalogDomain`: adapter so a `geotoolz.patch.SpatialPatcher` can
+- `CatalogDomain`: adapter so a `geopatcher.SpatialPatcher` can
   iterate a catalog's rows.
 """
 

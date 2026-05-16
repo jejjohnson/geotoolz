@@ -53,6 +53,6 @@ Curated mkdocstrings reference. For the conceptual walkthrough see
 ::: geotoolz.catalog._src.parquet.to_geoparquet
 ::: geotoolz.catalog._src.parquet.from_geoparquet
 
-## Bridge to `geotoolz.patch`
+## Bridge to `geopatcher`
 
 ::: geotoolz.catalog._src.domain.CatalogDomain

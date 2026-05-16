@@ -2,7 +2,7 @@
 
 A `GeoSlice` is a **bounded request for data**: a bbox, a time interval,
 a target resolution, and a CRS. Catalogs produce them; loaders consume
-them; `geotoolz.patch` composes them. It is the cross-cutting wire
+them; `geopatcher` composes them. It is the cross-cutting wire
 format that decouples the catalog layer from the patcher layer from the
 reader layer.
 

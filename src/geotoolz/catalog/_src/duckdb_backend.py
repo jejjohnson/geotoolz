@@ -4,7 +4,7 @@ The DuckDB backend swaps Phase 1's in-RAM `GeoDataFrame` for a lazy SQL
 relation on top of a GeoParquet artifact (a single file, a directory of
 shards, or an `httpfs`-readable URI). The Phase 1 Protocol surface
 (``query`` / ``intersect`` / ``union`` / ``iter_slices``) is preserved —
-loaders, samplers, and the `geotoolz.patch` bridge work against either
+loaders, samplers, and the `geopatcher` bridge work against either
 backend without branching.
 
 Why DuckDB:

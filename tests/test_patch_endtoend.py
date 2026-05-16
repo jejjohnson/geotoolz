@@ -4,13 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
-
-from geotoolz import Sequential
-from geotoolz.core import Lambda
-from geotoolz.patch import (
-    ApplyToChips,
-    GridSampler,
+from geopatcher import (
     RasterField,
     SpatialBoxcar,
     SpatialHann,
@@ -18,6 +12,14 @@ from geotoolz.patch import (
     SpatialPatcher,
     SpatialRectangular,
     SpatialRegularStride,
+)
+from georeader.geotensor import GeoTensor
+
+from geotoolz import Sequential
+from geotoolz.core import Lambda
+from geotoolz.patch_ops import (
+    ApplyToChips,
+    GridSampler,
     Stitch,
 )
 

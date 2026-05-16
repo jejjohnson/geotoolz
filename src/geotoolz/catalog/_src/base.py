@@ -35,7 +35,7 @@ class CatalogRow:
     """Backend-neutral view of a single catalog row.
 
     Yielded by `GeoCatalog.iter_rows`; consumed by loaders and the
-    `geotoolz.patch` bridge. The dataclass exists so streaming code
+    `geopatcher` bridge. The dataclass exists so streaming code
     (DuckDB cursors, on-disk shards) can hand rows downstream without
     callers caring whether the row came from a `gpd.GeoDataFrame` or a
     SQL relation.
@@ -165,7 +165,7 @@ class GeoCatalog(Protocol):
     def iter_rows(self, *, batch_size: int = 1024) -> Iterator[CatalogRow]:
         """Yield rows as backend-neutral `CatalogRow` instances.
 
-        Consumed by loaders, the sampler, and the `geotoolz.patch`
+        Consumed by loaders, the sampler, and the `geopatcher`
         bridge. Backends should stream — for the DuckDB backend this
         fetches in batches of ``batch_size``; the in-memory backend
         ignores ``batch_size`` and iterates the underlying gdf.
