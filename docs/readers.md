@@ -27,7 +27,9 @@ accesses reuse the parsed table.
 Format-specific dependencies belong in the sensor optional extra in
 `pyproject.toml`. Guard imports with `require_optional_dependency()` so missing
 extras raise messages like `pip install 'geotoolz[viirs]'` instead of
-library-internal errors.
+library-internal errors. Extras with empty dependency lists are reserved no-op
+extras for sensors whose parser is planned to be in-tree or whose dependency is
+not yet published as a stable package.
 
 Start new operators in `geotoolz.readers.<sensor>.ops`. Promote an operator to a
 generic module only after at least two sensors need the same clean abstraction.

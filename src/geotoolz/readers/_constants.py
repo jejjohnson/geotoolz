@@ -14,7 +14,11 @@ CsvRows = tuple[dict[str, str], ...]
 
 @cache
 def load_csv(package: str, resource: str) -> CsvRows:
-    """Load a packaged CSV resource and cache the parsed rows."""
+    """Load a packaged CSV resource and cache the parsed rows.
+
+    Lines starting with ``#`` are treated as citation/license headers and
+    ignored by the CSV parser.
+    """
     with files(package).joinpath(resource).open(encoding="utf-8") as f:
         return tuple(csv.DictReader(row for row in f if not row.startswith("#")))
 
