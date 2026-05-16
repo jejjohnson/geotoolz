@@ -9,6 +9,11 @@ from scipy import ndimage
 from scipy.spatial import cKDTree
 
 
+_EPSILON = 1e-12
+_IDW_POWER_THRESHOLD = 64
+_MAD_TO_STD_SCALE = 1.4826
+
+
 def _nanmean_filter(arr: np.ndarray, size: int | tuple[int, ...]) -> np.ndarray:
     values = np.asarray(arr, dtype=float)
     valid = np.isfinite(values)
@@ -208,7 +213,7 @@ def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.
     """Fill NaNs with inverse-distance weighted finite neighbours."""
     # Very large IDW powers converge to nearest-neighbour but risk overflow,
     # so delegate to the nearest-neighbour implementation.
-    if power >= 64:
+    if power >= _IDW_POWER_THRESHOLD:
         return gap_fill_nearest(arr, max_distance=radius)
     values = np.asarray(arr, dtype=float)
     out = values.copy()
@@ -225,7 +230,7 @@ def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.
                 continue
             coords = valid[neighbours]
             dist = np.linalg.norm(coords - np.array([row, col]), axis=1)
-            weights = 1.0 / np.maximum(dist, 1e-12) ** power
+            weights = 1.0 / np.maximum(dist, _EPSILON) ** power
             out_value = np.sum(weights * plane[coords[:, 0], coords[:, 1]]) / np.sum(
                 weights
             )
@@ -266,8 +271,8 @@ def outlier_mask(
     values = np.asarray(arr, dtype=float)
     if method == "mad":
         center = np.nanmedian(values)
-        # 1 / inverse_normal_cdf(0.75) ~= 1.4826 converts MAD to std.
-        scale = 1.4826 * np.nanmedian(np.abs(values - center))
+        # 1 / inverse_normal_cdf(0.75) converts MAD to std.
+        scale = _MAD_TO_STD_SCALE * np.nanmedian(np.abs(values - center))
     elif method == "zscore":
         center = np.nanmean(values)
         scale = np.nanstd(values)
