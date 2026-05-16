@@ -22,7 +22,6 @@ discipline" for the full rationale.
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING, Any, ClassVar
 
 
@@ -140,11 +139,10 @@ class Operator:
         if not isinstance(config, dict):
             raise ValueError("Operator state config must be a dictionary")
 
-        module = importlib.import_module(module_name)
-        op_type = getattr(module, class_name)
-        if not isinstance(op_type, type) or not issubclass(op_type, Operator):
-            raise TypeError(f"{module_name}.{class_name} is not an Operator")
-        return op_type(**config)
+        for op_type in _operator_subclasses(cls):
+            if op_type.__module__ == module_name and op_type.__name__ == class_name:
+                return op_type(**config)
+        raise TypeError(f"{module_name}.{class_name} is not a loaded Operator")
 
     def __repr__(self) -> str:
         params = ", ".join(f"{k}={v!r}" for k, v in self.get_config().items())
@@ -163,3 +161,11 @@ class Operator:
         if isinstance(other, Sequential):
             return Sequential([self, *other.operators])
         return Sequential([self, other])
+
+
+def _operator_subclasses(cls: type[Operator]) -> tuple[type[Operator], ...]:
+    subclasses: list[type[Operator]] = []
+    for subclass in cls.__subclasses__():
+        subclasses.append(subclass)
+        subclasses.extend(_operator_subclasses(subclass))
+    return tuple(subclasses)

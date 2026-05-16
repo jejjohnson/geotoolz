@@ -18,6 +18,7 @@ from geotoolz.normalize._src.array import (
     robust_scale,
     standard_scale,
     stat_axes,
+    validate_out_range,
 )
 
 
@@ -152,7 +153,7 @@ class MinMaxScaler(Operator):
     ) -> None:
         self.vmin = _array_or_none(vmin)
         self.vmax = _array_or_none(vmax)
-        self.out_range = tuple(out_range)
+        self.out_range = validate_out_range(tuple(out_range))
         self.fit_on_call = fit_on_call
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
@@ -211,7 +212,7 @@ class HistogramStretch(Operator):
         lower: float = 2.0,
         upper: float = 98.0,
     ) -> None:
-        self.out_range = tuple(out_range)
+        self.out_range = validate_out_range(tuple(out_range))
         self.lower = lower
         self.upper = upper
 
@@ -221,8 +222,6 @@ class HistogramStretch(Operator):
             arr, lower=self.lower, upper=self.upper, axis=stat_axes(arr)
         )
         out_min, out_max = self.out_range
-        if out_max <= out_min:
-            raise ValueError(f"out_range must be increasing; got {self.out_range}")
         return gt.array_as_geotensor(clipped * (out_max - out_min) + out_min)
 
     def get_config(self) -> dict[str, Any]:

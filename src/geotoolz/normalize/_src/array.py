@@ -85,9 +85,7 @@ def minmax_scale(
     axis: tuple[int, ...] | None = (-2, -1),
 ) -> np.ndarray:
     """Linearly map ``[vmin, vmax]`` into ``out_range``."""
-    out_min, out_max = out_range
-    if out_max <= out_min:
-        raise ValueError(f"out_range must be increasing; got {out_range}")
+    out_min, out_max = validate_out_range(out_range)
     vmin_b = reshape_stat(vmin, arr, axis)
     vmax_b = reshape_stat(vmax, arr, axis)
     denom = np.where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
@@ -103,7 +101,9 @@ def percentile_clip(
 ) -> np.ndarray:
     """Clip to percentile bounds and stretch the result into ``[0, 1]``."""
     if upper <= lower:
-        raise ValueError(f"upper must be greater than lower; got {lower=}, {upper=}")
+        raise ValueError(
+            f"upper must be greater than lower; got lower={lower}, upper={upper}"
+        )
     lo = np.nanpercentile(arr, lower, axis=axis, keepdims=True)
     hi = np.nanpercentile(arr, upper, axis=axis, keepdims=True)
     denom = np.where(hi > lo, hi - lo, 1.0)
@@ -168,3 +168,13 @@ def power_scale(arr: np.ndarray, *, gamma: float = 0.5) -> np.ndarray:
     if gamma <= 0:
         raise ValueError(f"gamma must be positive; got {gamma}")
     return np.maximum(arr, 0.0) ** gamma
+
+
+def validate_out_range(out_range: tuple[float, ...]) -> tuple[float, float]:
+    """Validate and return a two-element increasing output range."""
+    if len(out_range) != 2:
+        raise ValueError(f"out_range must contain exactly two values; got {out_range}")
+    out_min, out_max = out_range
+    if out_max <= out_min:
+        raise ValueError(f"out_range must be increasing; got {out_range}")
+    return out_min, out_max

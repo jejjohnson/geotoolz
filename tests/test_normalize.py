@@ -117,6 +117,9 @@ def test_percentile_clip_counts_boundary_pixels() -> None:
 
     assert np.count_nonzero(arr == 0.0) == 2
     assert np.count_nonzero(arr == 1.0) == 2
+    assert np.nanmin(arr) == pytest.approx(0.0)
+    assert np.nanmax(arr) == pytest.approx(1.0)
+    assert 0.0 < arr[0, 5, 0] < 1.0
 
 
 def test_histogram_stretch_maps_to_output_range(scene: GeoTensor) -> None:
