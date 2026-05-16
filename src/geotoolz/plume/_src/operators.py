@@ -17,14 +17,17 @@ in kg/m^2. Use :class:`ColumnToMass` to convert from ppm m or mol/m^2.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 from pyproj import CRS, Transformer
 from rasterio import features
 from shapely.geometry import LineString, shape
 from shapely.ops import unary_union
+from skimage.measure import regionprops_table
 
 from geotoolz.core import Operator
 from geotoolz.plume._src.array import (
@@ -60,6 +63,22 @@ S2_BAND_TO_INDEX = {
     "B11": 10,
     "B12": 11,
 }
+
+PLUME_REGIONPROPS: tuple[str, ...] = (
+    "label",
+    "area",
+    "area_convex",
+    "area_filled",
+    "centroid",
+    "major_axis_length",
+    "minor_axis_length",
+    "orientation",
+    "eccentricity",
+    "solidity",
+    "perimeter",
+    "bbox",
+    "inertia_tensor_eigvals",
+)
 
 
 def _band_index(band: int | str) -> int:
@@ -261,10 +280,13 @@ class PlumeContours(Operator):
 class PlumeFootprint(Operator):
     """Vectorize a plume mask into polygons with per-plume metadata.
 
-    Returns a ``GeoDataFrame`` with one row per surviving plume:
-    ``geometry`` (polygon), ``area_m2``, ``centroid``,
+    Implemented over :func:`skimage.measure.regionprops_table`. Returns a
+    ``GeoDataFrame`` with one row per surviving plume: ``geometry``, ``area_m2``,
+    ``centroid``,
     ``mean_enhancement`` / ``max_enhancement`` (if ``enhancement`` is
-    supplied), ``n_pixels``, ``label_id``.
+    supplied), ``n_pixels``, ``label_id``, and skimage region properties such as
+    ``major_axis_length``, ``orientation``, ``eccentricity``, ``solidity``,
+    ``perimeter``, ``bbox-*``, and ``inertia_tensor_eigvals-*``.
 
     Args:
         min_area_m2: Drop polygons smaller than this area.
@@ -273,6 +295,8 @@ class PlumeFootprint(Operator):
         enhancement: Optional enhancement ``GeoTensor`` aligned with the
             mask; enables ``mean_enhancement`` / ``max_enhancement``
             statistics per polygon.
+        properties: Region properties forwarded to ``regionprops_table``.
+        extra_properties: User-defined ``regionprops_table`` callables.
 
     Examples:
         >>> gdf = gz.plume.PlumeFootprint(
@@ -287,10 +311,16 @@ class PlumeFootprint(Operator):
         min_area_m2: float = 500.0,
         simplify_tolerance: float | None = 15.0,
         enhancement: GeoTensor | None = None,
+        properties: Sequence[str] | None = None,
+        extra_properties: Sequence[Callable[..., Any]] | None = None,
     ) -> None:
         self.min_area_m2 = min_area_m2
         self.simplify_tolerance = simplify_tolerance
         self.enhancement = enhancement
+        self.properties = tuple(PLUME_REGIONPROPS if properties is None else properties)
+        self.extra_properties = (
+            None if extra_properties is None else tuple(extra_properties)
+        )
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
         mask_arr = squeeze_single_band(np.asarray(gt))
@@ -302,6 +332,29 @@ class PlumeFootprint(Operator):
             None
             if self.enhancement is None
             else squeeze_single_band(np.asarray(self.enhancement))
+        )
+        properties = list(self.properties)
+        if enh is not None:
+            properties.extend(
+                prop
+                for prop in ("centroid_weighted", "mean_intensity", "max_intensity")
+                if prop not in properties
+            )
+        props = pd.DataFrame(
+            regionprops_table(
+                labels,
+                intensity_image=enh,
+                properties=properties,
+                extra_properties=self.extra_properties,
+            )
+        )
+        props_by_label = (
+            {}
+            if props.empty or "label" not in props
+            else {
+                int(row["label"]): row.drop(labels=["label"]).to_dict()
+                for _, row in props.iterrows()
+            }
         )
 
         rows: list[dict[str, Any]] = []
@@ -328,17 +381,29 @@ class PlumeFootprint(Operator):
             if area_m2 < self.min_area_m2:
                 continue
             component_values = None if enh is None else enh[component]
+            region_props = props_by_label.get(label_id, {})
+            mean_enhancement = (
+                None
+                if component_values is None
+                else float(
+                    region_props.get("mean_intensity", np.nanmean(component_values))
+                )
+            )
+            max_enhancement = (
+                None
+                if component_values is None
+                else float(
+                    region_props.get("max_intensity", np.nanmax(component_values))
+                )
+            )
             rows.append(
                 {
+                    **region_props,
                     "geometry": geometry,
                     "area_m2": area_m2,
                     "centroid": geometry.centroid,
-                    "mean_enhancement": None
-                    if component_values is None
-                    else float(np.nanmean(component_values)),
-                    "max_enhancement": None
-                    if component_values is None
-                    else float(np.nanmax(component_values)),
+                    "mean_enhancement": mean_enhancement,
+                    "max_enhancement": max_enhancement,
                     "n_pixels": n_pixels,
                     "label_id": label_id,
                 }
@@ -373,6 +438,12 @@ class PlumeFootprint(Operator):
                 "shape": list(np.asarray(self.enhancement).shape),
                 "dtype": str(np.asarray(self.enhancement).dtype),
             },
+            "properties": list(self.properties),
+            "extra_properties": None
+            if self.extra_properties is None
+            else [
+                getattr(func, "__name__", repr(func)) for func in self.extra_properties
+            ],
         }
 
 

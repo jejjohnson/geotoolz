@@ -11,6 +11,7 @@ from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
 from geotoolz.normalize import (
+    CLAHE,
     AsinhScale,
     HistogramMatch,
     HistogramStretch,
@@ -205,6 +206,18 @@ def test_histogram_match_approximates_reference_cdf() -> None:
 def test_histogram_match_forbidden_in_yaml() -> None:
     """HistogramMatch holds a live reference; must opt out of YAML."""
     assert HistogramMatch.forbid_in_yaml is True
+
+
+def test_clahe_preserves_nan_mask_and_metadata() -> None:
+    gt = _toy_geotensor(np.linspace(0.0, 1.0, 100).reshape(1, 10, 10))
+    np.asarray(gt)[0, 0, 0] = np.nan
+
+    out = CLAHE(kernel_size=(4, 4), clip_limit=0.03)(gt)
+
+    assert_metadata_preserved(out, gt)
+    assert np.isnan(np.asarray(out)[0, 0, 0])
+    assert np.nanmin(np.asarray(out)) >= 0.0
+    assert np.nanmax(np.asarray(out)) <= 1.0
 
 
 def test_nonlinear_scales_handle_zero_without_infinity(

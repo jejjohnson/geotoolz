@@ -26,7 +26,13 @@ from georeader import griddata, mosaic, rasterize, read, slices, vectorize
 from georeader.geotensor import GeoTensor
 from pyproj import CRS
 from rasterio.warp import transform_bounds
+from scipy.ndimage import shift as ndi_shift
 from shapely.ops import unary_union
+from skimage.registration import (
+    optical_flow_ilk,
+    optical_flow_tvl1,
+    phase_cross_correlation,
+)
 
 from geotoolz.core import Operator
 from geotoolz.geom._src.array import (
@@ -43,6 +49,17 @@ from geotoolz.geom._src.array import (
 if TYPE_CHECKING:
     import geopandas as gpd
     from shapely.geometry.base import BaseGeometry
+
+
+def _registration_band(values: np.ndarray, band: int | str) -> np.ndarray:
+    arr = np.asarray(values)
+    if arr.ndim == 2:
+        return arr
+    if isinstance(band, str):
+        raise ValueError(
+            "string band selection is not available for raw GeoTensor arrays"
+        )
+    return np.take(arr, int(band), axis=0)
 
 
 class Reproject(Operator):
@@ -155,6 +172,103 @@ class ResampleLike(ReprojectLike):
         >>> rs = gz.geom.ResampleLike(like=s2_20m, resampling="average")
         >>> b04_20m = rs(b04_10m)
     """
+
+
+class PhaseAlign(Operator):
+    """Sub-pixel image registration via phase cross-correlation."""
+
+    forbid_in_yaml: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        *,
+        reference: GeoTensor,
+        upsample_factor: int = 10,
+        band: int | str = 0,
+        apply: bool = True,
+    ) -> None:
+        self.reference = reference
+        self.upsample_factor = upsample_factor
+        self.band = band
+        self.apply = apply
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor | tuple[float, float, float]:
+        shift, error, _phase = phase_cross_correlation(
+            _registration_band(np.asarray(self.reference), self.band),
+            _registration_band(np.asarray(gt), self.band),
+            upsample_factor=self.upsample_factor,
+        )
+        shift_y = float(shift[0])
+        shift_x = float(shift[1])
+        if not self.apply:
+            return shift_y, shift_x, float(error)
+        shifted = ndi_shift(
+            np.asarray(gt),
+            shift=(0.0, shift_y, shift_x)
+            if np.asarray(gt).ndim == 3
+            else (shift_y, shift_x),
+            order=1,
+            mode="nearest",
+        )
+        return GeoTensor(
+            shifted,
+            transform=gt.transform * Affine.translation(-shift_x, -shift_y),
+            crs=gt.crs,
+            fill_value_default=gt.fill_value_default,
+            attrs=gt.attrs,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "reference": {
+                "shape": list(np.asarray(self.reference).shape),
+                "dtype": str(np.asarray(self.reference).dtype),
+            },
+            "upsample_factor": self.upsample_factor,
+            "band": self.band,
+            "apply": self.apply,
+        }
+
+
+class OpticalFlowTVL1(Operator):
+    """Dense per-pixel displacement via TV-L1 optical flow."""
+
+    forbid_in_yaml: ClassVar[bool] = True
+
+    def __init__(self, *, reference: GeoTensor, band: int | str = 0) -> None:
+        self.reference = reference
+        self.band = band
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        flow = np.asarray(
+            optical_flow_tvl1(
+                _registration_band(np.asarray(self.reference), self.band),
+                _registration_band(np.asarray(gt), self.band),
+            )
+        )
+        return gt.array_as_geotensor(flow)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "reference": {
+                "shape": list(np.asarray(self.reference).shape),
+                "dtype": str(np.asarray(self.reference).dtype),
+            },
+            "band": self.band,
+        }
+
+
+class OpticalFlowILK(OpticalFlowTVL1):
+    """Dense per-pixel displacement via iterative Lucas-Kanade optical flow."""
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        flow = np.asarray(
+            optical_flow_ilk(
+                _registration_band(np.asarray(self.reference), self.band),
+                _registration_band(np.asarray(gt), self.band),
+            )
+        )
+        return gt.array_as_geotensor(flow)
 
 
 class Resize(Operator):
