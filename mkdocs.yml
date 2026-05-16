@@ -68,6 +68,7 @@ nav:
       - Patch: api/patch.md
       - Catalog: api/catalog.md
       - Augment: api/augment.md
+      - Compositing: api/compositing.md
       - Geometry: api/geom.md
       - Normalize: api/normalize.md
       - QA: api/qa.md

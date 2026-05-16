@@ -1,0 +1,181 @@
+"""Tests for explicit compositing operators."""
+
+from __future__ import annotations
+
+import json
+
+import numpy as np
+import pytest
+import rasterio
+from georeader.geotensor import GeoTensor
+
+import geotoolz as gz
+from geotoolz.compositing import (
+    BAPComposite,
+    CloudFreeComposite,
+    MaxNDVIComposite,
+    MedianComposite,
+    MinCloudComposite,
+)
+
+
+def _gt(values: np.ndarray, *, transform: rasterio.Affine | None = None) -> GeoTensor:
+    return GeoTensor(
+        values=values,
+        transform=transform
+        or rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
+        crs="EPSG:32629",
+        fill_value_default=np.nan,
+    )
+
+
+def test_compositing_namespace_is_available() -> None:
+    assert gz.compositing.MedianComposite is MedianComposite
+    assert gz.MedianComposite is MedianComposite
+
+
+def test_median_composite_ignores_nan_and_returns_count() -> None:
+    scenes = [
+        _gt(np.array([[[1.0, np.nan], [3.0, 4.0]]], dtype=np.float32)),
+        _gt(np.array([[[3.0, 2.0], [np.nan, 8.0]]], dtype=np.float32)),
+        _gt(np.array([[[5.0, 4.0], [7.0, np.nan]]], dtype=np.float32)),
+    ]
+
+    median, count = MedianComposite(return_count=True)(scenes)
+
+    np.testing.assert_allclose(np.asarray(median), [[[3.0, 3.0], [5.0, 6.0]]])
+    np.testing.assert_array_equal(np.asarray(count), [[[3, 2], [2, 2]]])
+    assert np.asarray(count).dtype == np.int64
+    assert median.transform == scenes[0].transform
+    assert str(median.crs) == "EPSG:32629"
+
+
+def test_max_ndvi_composite_returns_frame_with_peak_ndvi() -> None:
+    low = _gt(
+        np.array(
+            [
+                [[0.2, 0.2], [0.2, 0.2]],
+                [[0.4, 0.4], [0.4, 0.4]],
+            ],
+            dtype=np.float32,
+        )
+    )
+    high = _gt(
+        np.array(
+            [
+                [[0.1, 0.1], [0.1, 0.1]],
+                [[0.9, 0.9], [0.9, 0.9]],
+            ],
+            dtype=np.float32,
+        )
+    )
+    low.attrs["descriptions"] = ("red", "nir")
+    high.attrs["descriptions"] = ("red", "nir")
+
+    out, index = MaxNDVIComposite(red="red", nir="nir", return_index=True)([low, high])
+
+    np.testing.assert_allclose(np.asarray(out), np.asarray(high))
+    np.testing.assert_array_equal(np.asarray(index), np.ones((2, 2), dtype=np.int64))
+
+
+def test_cloud_free_composite_respects_masks_and_min_valid() -> None:
+    scene1 = _gt(np.array([[[1.0, 2.0], [3.0, 4.0]]], dtype=np.float32))
+    scene2 = _gt(np.array([[[10.0, 20.0], [30.0, 40.0]]], dtype=np.float32))
+    mask1 = np.array([[False, True], [False, False]])
+    mask2 = np.array([[False, False], [True, True]])
+
+    out, count = CloudFreeComposite(min_valid=2, return_count=True)(
+        [(scene1, mask1), (scene2, mask2)]
+    )
+
+    expected = np.array([[[5.5, np.nan], [np.nan, np.nan]]], dtype=np.float32)
+    np.testing.assert_allclose(np.asarray(out), expected)
+    np.testing.assert_array_equal(np.asarray(count), [[[2, 1], [1, 1]]])
+
+
+def test_bap_composite_uses_weighted_scores() -> None:
+    scene1 = _gt(np.full((1, 2, 2), 1.0, dtype=np.float32))
+    scene2 = _gt(np.full((1, 2, 2), 2.0, dtype=np.float32))
+    scene3 = _gt(np.full((1, 2, 2), 3.0, dtype=np.float32))
+    metadata = [
+        {
+            "view_angle_score": 0.2,
+            "recency_score": 0.1,
+            "cloud_distance_score": 0.1,
+            "opacity_score": 0.1,
+        },
+        {
+            "view_angle_score": 0.1,
+            "recency_score": 0.9,
+            "cloud_distance_score": 0.1,
+            "opacity_score": 0.1,
+        },
+        {
+            "view_angle_score": 0.1,
+            "recency_score": 0.1,
+            "cloud_distance_score": 0.1,
+            "opacity_score": 0.1,
+        },
+    ]
+
+    out, score = BAPComposite(target_doy=196, return_score=True)(
+        list(zip([scene1, scene2, scene3], metadata, strict=True))
+    )
+
+    np.testing.assert_allclose(np.asarray(out), np.asarray(scene2))
+    np.testing.assert_allclose(
+        np.asarray(score), np.full((2, 2), 0.42, dtype=np.float32)
+    )
+
+
+def test_min_cloud_composite_prefers_clear_pixels_from_least_cloudy_frame() -> None:
+    scene1 = _gt(np.full((1, 2, 2), 1.0, dtype=np.float32))
+    scene2 = _gt(np.full((1, 2, 2), 2.0, dtype=np.float32))
+    mask1 = np.array([[False, True], [False, True]])
+    mask2 = np.array([[False, False], [True, False]])
+
+    out, count = MinCloudComposite(return_count=True)(
+        [(scene1, mask1), (scene2, mask2)]
+    )
+
+    np.testing.assert_allclose(np.asarray(out), [[[2.0, 2.0], [1.0, 2.0]]])
+    np.testing.assert_array_equal(np.asarray(count), [[[2, 1], [1, 1]]])
+
+
+def test_composites_raise_on_mismatched_grid() -> None:
+    base = _gt(np.ones((1, 2, 2), dtype=np.float32))
+    shifted = _gt(
+        np.ones((1, 2, 2), dtype=np.float32),
+        transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 0.0),
+    )
+
+    with pytest.raises(ValueError, match="shape, transform, and CRS"):
+        MedianComposite()([base, shifted])
+
+
+def test_partial_composite_matches_single_shot_median() -> None:
+    scenes = [
+        _gt(np.full((1, 2, 2), value, dtype=np.float32)) for value in (1.0, 5.0, 3.0)
+    ]
+    op = MedianComposite()
+    state = None
+    for scene in scenes:
+        state = op.partial_composite(state, scene)
+
+    assert state is not None
+    np.testing.assert_allclose(
+        np.asarray(state["composite"]),
+        np.asarray(op(scenes)),
+    )
+
+
+def test_compositing_get_config_is_json_safe() -> None:
+    ops = [
+        MedianComposite(return_count=True),
+        MaxNDVIComposite(red="red", nir="nir", return_index=True),
+        CloudFreeComposite(min_valid=2, return_count=True),
+        BAPComposite(target_doy=196, return_score=True),
+        MinCloudComposite(return_count=True),
+    ]
+    for op in ops:
+        json.dumps(op.get_config())
