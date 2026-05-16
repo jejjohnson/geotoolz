@@ -234,7 +234,9 @@ def _remove_small_holes_2d(mask: np.ndarray, *, area_threshold: int) -> np.ndarr
 
     border_labels = set(
         np.unique(
-            np.concatenate([labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]])
+            np.concatenate(
+                [labels[0, :], labels[-1, :], labels[1:-1, 0], labels[1:-1, -1]]
+            )
         )
     )
 

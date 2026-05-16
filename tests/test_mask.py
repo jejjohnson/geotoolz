@@ -253,37 +253,33 @@ def test_slope_mask_matches_flat_reference() -> None:
 def test_natural_earth_mask_constructors_use_cached_loader(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cached_loader = mask_operators._load_natural_earth
-    cached_loader.cache_clear()
     calls = []
     countries = gpd.GeoDataFrame(
         {"ISO_A3": ["GRL"], "geometry": [box(0.0, 0.0, 1.0, 1.0)]},
         crs="EPSG:4326",
     )
 
-    def fake_loader(kind: str, source: str) -> gpd.GeoDataFrame:
-        calls.append((kind, source))
+    def fake_read_file(source: str) -> gpd.GeoDataFrame:
+        calls.append(source)
         return countries
 
-    monkeypatch.setattr(mask_operators, "_load_natural_earth", fake_loader)
+    mask_operators._load_natural_earth.cache_clear()
+    monkeypatch.setattr(mask_operators.gpd, "read_file", fake_read_file)
+    source = "/tmp/natural-earth.gpkg"
 
-    assert LandMask().get_config() == {"source": "natural_earth_10m"}
-    assert OceanMask().get_config() == {"source": "natural_earth_10m"}
-    country = CountryMask(iso_a3="GRL")
+    assert LandMask(source=source).get_config() == {"source": source}
+    assert OceanMask(source=source).get_config() == {"source": source}
+    country = CountryMask(iso_a3="GRL", source=source)
     assert country.get_config() == {
         "iso_a3": "GRL",
-        "source": "natural_earth_10m",
+        "source": source,
     }
     scene = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
     country_mask = country(scene)
     assert country_mask.shape == scene.shape
     assert bool(np.asarray(country_mask)[1, 0])
-    assert calls == [
-        ("land", "natural_earth_10m"),
-        ("ocean", "natural_earth_10m"),
-        ("countries", "natural_earth_10m"),
-    ]
-    cached_loader.cache_clear()
+    assert calls == [source, source, source]
+    mask_operators._load_natural_earth.cache_clear()
 
 
 def test_country_mask_rejects_unknown_iso(monkeypatch: pytest.MonkeyPatch) -> None:

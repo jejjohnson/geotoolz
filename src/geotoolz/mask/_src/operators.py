@@ -511,7 +511,13 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
                     "access or pass a local vector file path as `source`"
                 ) from exc
         with ZipFile(zip_path) as zf:
-            zf.extractall(extract_dir)
+            bad_member = zf.testzip()
+            if bad_member is not None:
+                raise RuntimeError(
+                    f"Natural Earth {kind!r} archive failed CRC validation at "
+                    f"{bad_member!r}; remove the cached archive to re-download it"
+                )
+            _safe_extract_zip(zf, extract_dir)
     shapefiles = list(extract_dir.glob("*.shp"))
     if not shapefiles:
         raise FileNotFoundError(
@@ -538,6 +544,17 @@ def _natural_earth_cache_dir() -> Path:
         return Path.home() / ".cache" / "geotoolz" / "natural_earth"
     except RuntimeError:
         return Path(tempfile.gettempdir()) / "geotoolz" / "natural_earth"
+
+
+def _safe_extract_zip(zf: ZipFile, extract_dir: Path) -> None:
+    extract_root = extract_dir.resolve()
+    for member in zf.infolist():
+        target = (extract_root / member.filename).resolve()
+        if not target.is_relative_to(extract_root):
+            raise RuntimeError(
+                f"refusing to extract unsafe zip member {member.filename!r}"
+            )
+    zf.extractall(extract_root)
 
 
 def _wrap_like(mask: Any, out: np.ndarray) -> Any:
