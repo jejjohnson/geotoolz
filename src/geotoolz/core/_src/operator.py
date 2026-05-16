@@ -22,6 +22,7 @@ discipline" for the full rationale.
 
 from __future__ import annotations
 
+import importlib
 from typing import TYPE_CHECKING, Any, ClassVar
 
 
@@ -116,6 +117,34 @@ class Operator:
         set ``forbid_in_yaml = True``.
         """
         return {}
+
+    @property
+    def state(self) -> dict[str, Any]:
+        """Return a JSON-serialisable state record for this operator."""
+        return {
+            "module": type(self).__module__,
+            "class": type(self).__name__,
+            "config": self.get_config(),
+        }
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> Operator:
+        """Reconstruct an operator from a ``state`` record."""
+        module_name = state.get("module")
+        class_name = state.get("class")
+        config = state.get("config", {})
+        if not isinstance(module_name, str) or not module_name.startswith("geotoolz."):
+            raise ValueError("Operator state must include a geotoolz module")
+        if not isinstance(class_name, str):
+            raise ValueError("Operator state must include a class name")
+        if not isinstance(config, dict):
+            raise ValueError("Operator state config must be a dictionary")
+
+        module = importlib.import_module(module_name)
+        op_type = getattr(module, class_name)
+        if not isinstance(op_type, type) or not issubclass(op_type, Operator):
+            raise TypeError(f"{module_name}.{class_name} is not an Operator")
+        return op_type(**config)
 
     def __repr__(self) -> str:
         params = ", ".join(f"{k}={v!r}" for k, v in self.get_config().items())

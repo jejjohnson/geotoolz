@@ -46,6 +46,7 @@ nav:
       - Composition core: concepts.md
       - Patching: patching.md
       - Catalogs: catalogs.md
+      - Normalization: normalization.md
   - Tutorials:
       - Composition core: notebooks/composition_core.ipynb
       - Pipeline idioms: notebooks/pipeline_idioms.ipynb
@@ -66,6 +67,7 @@ nav:
       - Core: api/core.md
       - Patch: api/patch.md
       - Catalog: api/catalog.md
+      - Normalize: api/normalize.md
   - Contributing: contributing.md
 
 markdown_extensions:
