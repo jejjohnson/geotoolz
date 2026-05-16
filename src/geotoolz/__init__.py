@@ -20,7 +20,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from geotoolz import catalog, cloud, core, indices, patch, radiometry, spectral, types
+from geotoolz import (
+    catalog,
+    cloud,
+    core,
+    geom,
+    indices,
+    io,
+    patch,
+    radiometry,
+    spectral,
+    types,
+)
 from geotoolz.catalog import (
     CatalogDomain,
     CatalogRow,
@@ -147,11 +158,21 @@ from geotoolz.patch import (
     VectorDomain,
 )
 from geotoolz.radiometry import (
+    DOS1,
+    ApplySRF,
+    BTFromRadiance,
+    ComputeSZA,
     DNToRadiance,
     DNToReflectance,
+    EarthSunDistanceCorrection,
     Gamma,
+    IntegratedIrradiance,
     MinMax,
     PercentileClip,
+    RadianceToDN,
+    RadianceToReflectance,
+    ReflectanceToRadiance,
+    SimpleAtmosphericCorrection,
     ToFloat32,
 )
 from geotoolz.types import GeoSlice
@@ -188,6 +209,7 @@ def __getattr__(name: str) -> Any:
 __version__ = "0.0.5"
 
 __all__ = [
+    "DOS1",
     "EVI",
     "NBR",
     "NDBI",
@@ -199,17 +221,21 @@ __all__ = [
     "SCL_INVALID",
     "AppendIndex",
     "ApplyMask",
+    "ApplySRF",
     "ApplyToChips",
     "AsyncRasterField",
     "AsyncSpatialPatcher",
+    "BTFromRadiance",
     "Branch",
     "Carrier",
     "CatalogDomain",
     "CatalogRow",
+    "ComputeSZA",
     "Const",
     "DNToRadiance",
     "DNToReflectance",
     "DuckDBGeoCatalog",
+    "EarthSunDistanceCorrection",
     "Fanout",
     "Gamma",
     "GeoCatalog",
@@ -220,6 +246,7 @@ __all__ = [
     "Identity",
     "InMemoryGeoCatalog",
     "Input",
+    "IntegratedIrradiance",
     "Lambda",
     "MaskFromQABits",
     "MaskFromSCL",
@@ -232,10 +259,14 @@ __all__ = [
     "Patch",
     "PercentileClip",
     "PointDomain",
+    "RadianceToDN",
+    "RadianceToReflectance",
     "RasterDomain",
     "RasterField",
+    "ReflectanceToRadiance",
     "Sequential",
     "ShapeTrace",
+    "SimpleAtmosphericCorrection",
     "Sink",
     "Snapshot",
     "SpatialAggregation",
@@ -310,8 +341,10 @@ __all__ = [
     "cloud",
     "core",
     "from_geoparquet",
+    "geom",
     "indices",
     "intersect",
+    "io",
     "load_raster",
     "load_raster_timeseries",
     "load_vector",
