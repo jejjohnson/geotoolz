@@ -184,7 +184,13 @@ def convert_column_units(
     units_in: ColumnUnit = "ppm_m",
     units_out: ColumnUnit = "kg_m2",
 ) -> np.ndarray:
-    """Convert column enhancement among ppm m, mol/m2, and kg/m2."""
+    """Convert column enhancement among ppm m, mol/m2, and kg/m2.
+
+    The ppm m conversion assumes the standard molar volume constant
+    0.024465 m3/mol, approximately 25 C and 1 atm. Use ``mol_m2`` or
+    ``kg_m2`` inputs when retrieval-specific pressure and temperature
+    corrections have already been applied upstream.
+    """
     gas_key = gas.upper()
     if gas_key not in MOLAR_MASS_KG_PER_MOL:
         supported = ", ".join(sorted(MOLAR_MASS_KG_PER_MOL))
@@ -270,6 +276,7 @@ def _farthest_active_pixel(
         row, col = node
         for drow in (-1, 0, 1):
             for dcol in (-1, 0, 1):
+                # Enforce 4-neighbor connectivity: no center or corner steps.
                 if abs(drow) + abs(dcol) != 1:
                     continue
                 neighbor = (row + drow, col + dcol)

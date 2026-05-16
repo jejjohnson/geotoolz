@@ -207,3 +207,16 @@ def test_sbmp_default_sentinel2_swir_band_names() -> None:
     out = gz.plume.SBMP(reference_scene=_gt(reference))(_gt(scene))
 
     assert np.allclose(np.asarray(out), truth)
+
+
+def test_sbmp_clips_non_positive_swir_values_before_log() -> None:
+    scene = np.array(
+        [
+            [[0.0, -1.0], [2.0, 3.0]],
+            [[0.0, 1.0], [-2.0, 3.0]],
+        ]
+    )
+
+    out = gz.plume.SBMP(swir1=0, swir2=1)(_gt(scene))
+
+    assert np.isfinite(np.asarray(out)).all()

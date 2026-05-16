@@ -63,6 +63,12 @@ class SBMP(Operator):
     ``reference_scene`` it returns the change in log(SWIR1 / SWIR2)
     between the input and reference scenes. Without a reference scene it
     falls back to a same-scene normalized SWIR contrast.
+
+    The reference-scene formulation is
+    ``log((SWIR1 + eps) / (SWIR2 + eps)) -
+    log((ref_SWIR1 + eps) / (ref_SWIR2 + eps))``. Inputs are expected to
+    be non-negative radiance or reflectance values; negative values are
+    clipped to zero before ``eps`` is added to keep the log-ratio finite.
     """
 
     def __init__(
@@ -82,13 +88,17 @@ class SBMP(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         arr = np.asarray(gt, dtype=float)
-        swir1 = np.take(arr, _band_index(self.swir1), axis=self.axis)
-        swir2 = np.take(arr, _band_index(self.swir2), axis=self.axis)
+        swir1 = np.maximum(np.take(arr, _band_index(self.swir1), axis=self.axis), 0.0)
+        swir2 = np.maximum(np.take(arr, _band_index(self.swir2), axis=self.axis), 0.0)
         ratio = np.log((swir1 + self.eps) / (swir2 + self.eps))
         if self.reference_scene is not None:
             ref = np.asarray(self.reference_scene, dtype=float)
-            ref_swir1 = np.take(ref, _band_index(self.swir1), axis=self.axis)
-            ref_swir2 = np.take(ref, _band_index(self.swir2), axis=self.axis)
+            ref_swir1 = np.maximum(
+                np.take(ref, _band_index(self.swir1), axis=self.axis), 0.0
+            )
+            ref_swir2 = np.maximum(
+                np.take(ref, _band_index(self.swir2), axis=self.axis), 0.0
+            )
             ref_ratio = np.log((ref_swir1 + self.eps) / (ref_swir2 + self.eps))
             out = ratio - ref_ratio
         else:
@@ -194,7 +204,9 @@ class PlumeFootprint(Operator):
         else:
             labels = mask_arr.astype(np.int32, copy=False)
         enh = (
-            None if self.enhancement is None else squeeze_single_band(self.enhancement)
+            None
+            if self.enhancement is None
+            else squeeze_single_band(np.asarray(self.enhancement))
         )
 
         rows: list[dict[str, Any]] = []
