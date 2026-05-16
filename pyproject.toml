@@ -34,20 +34,15 @@ dependencies = [
     # so a slim install of geotoolz (without the optional patch extras
     # that would otherwise drag it in transitively) still works.
     "typing-extensions>=4.0",
-    # pandas IntervalIndex + pyproj.CRS underpin the GeoSlice / catalog
-    # primitives, both of which are part of the base surface (catalog set
-    # algebra works without the vector/xarray extras as long as we have
-    # geopandas + shapely + pyproj). Promote them out of the [vector]
-    # extra so `geotoolz.catalog.build_raster_catalog` works on a slim
-    # install.
+    # pandas is used by `spectral` (band-name resolution) and `radiometry`
+    # (per-band fitted stats); pyproj is used by `plume` (CRS-aware
+    # advection geometry) and `geom` (reprojection ops). geopandas +
+    # shapely are required by `plume`, `mask`, `io`, and `geom` for
+    # vector-shape rasterisation and footprint algebra.
     "pandas>=2.1",
     "pyproj>=3.6",
     "geopandas>=0.14",
     "shapely>=2.0",
-    # GeoParquet I/O for the catalog roundtrip. geopandas pulls pyarrow
-    # only in its [io] extra, so depend on it explicitly here — without
-    # it, `to_geoparquet` / `from_geoparquet` raise ImportError.
-    "pyarrow>=14.0",
     "matplotlib>=3.10.8",
     # `georeader.GeoTensor.resize` imports skimage.transform.resize at runtime;
     # the geom Resize / Resample operators expose that path in the base API.
@@ -75,20 +70,6 @@ patch-full = [
     "xvec>=0.4",
     "rioxarray>=0.15",
     "zarr>=3.0",
-]
-# Catalog extras. The base install already provides geopandas + shapely
-# + pandas + pyproj (raster catalog works out of the box); these extras
-# unlock the xarray and vector backends and the DuckDB-backed catalog.
-catalog = ["xarray>=2024.1", "rioxarray>=0.15"]
-# DuckDB backend (Phase 2 of the geodatabase). Pinned to >=1.1 because
-# GeoParquet 1.1 bbox-column predicate pushdown landed there; older
-# versions silently regress to slow ST_Intersects-per-row scans.
-duckdb = ["duckdb>=1.1"]
-catalog-full = [
-    "xarray>=2024.1",
-    "rioxarray>=0.15",
-    "zarr>=3.0",
-    "duckdb>=1.1",
 ]
 
 [project.urls]
@@ -163,24 +144,22 @@ lines-after-imports = 2
 python-version = "3.12"
 
 [tool.ty.rules]
-# Optional-extra backends (xarray, geopandas, xvec, rioxarray, zarr) are
-# guarded with try/except ImportError. Without the extras installed in the
+# Optional-extra backends (xarray, xvec, rioxarray, zarr) are guarded
+# with try/except ImportError. Without the extras installed in the
 # typecheck env, ty can't resolve them — that's expected and fine.
 unresolved-import = "ignore"
-# `geopandas = None` after a failed import is intentional; ty doesn't
+# `xarray = None` after a failed import is intentional; ty doesn't
 # track the typing-redefinition pattern.
 invalid-assignment = "ignore"
 # rasterio.windows.Window doesn't carry parameter names in its stub, so
-# `Window(col_off=..., row_off=...)` looks like unknown kwargs to ty.
+# `Window(col_off=..., row_off=..., width=..., height=...)` looks like
+# unknown kwargs to ty.
 unknown-argument = "ignore"
-# `pandas-stubs`'s narrow Timestamp <-> NaTType union typing leaks into
-# `Timestamp.floor()` results, into `pd.Interval(pd.NaT, ...)` (used as a
-# sentinel for empty catalogs), and into `xarray.Dataset.where()` which
-# is declared as `Dataset | DataArray`. None of these are real bugs.
+# Some call sites unify narrow typing-stub unions (xarray Dataset|DataArray,
+# GeoData|ndarray, geopandas list|GeoDataFrame) in ways the stubs flag
+# spuriously. None of these are real bugs.
 invalid-argument-type = "ignore"
 invalid-return-type = "ignore"
-# `gdf.index.left/right/overlaps` are real attrs on `IntervalIndex` but
-# the base `Index` stub doesn't declare them, so ty flags them.
 unresolved-attribute = "ignore"
 
 [tool.pytest.ini_options]

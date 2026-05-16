@@ -18,11 +18,8 @@ from its own submodule.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
 from geotoolz import (
     augment,
-    catalog,
     cloud,
     core,
     geom,
@@ -36,23 +33,7 @@ from geotoolz import (
     radiometry,
     restore,
     spectral,
-    types,
     viz,
-)
-from geotoolz.catalog import (
-    CatalogDomain,
-    CatalogRow,
-    GeoCatalog,
-    InMemoryGeoCatalog,
-    build_raster_catalog,
-    from_geoparquet,
-    intersect,
-    load_raster,
-    load_raster_timeseries,
-    open_catalog,
-    query,
-    to_geoparquet,
-    union,
 )
 from geotoolz.cloud import (
     SCL,
@@ -227,7 +208,6 @@ from geotoolz.restore import (
     ReplaceOutliers,
     SaturationFlag,
 )
-from geotoolz.types import GeoSlice
 from geotoolz.viz import (
     AnnotatePoints,
     AnnotatePolygons,
@@ -244,34 +224,6 @@ from geotoolz.viz import (
     ToDisplayRange,
     TrueColor,
 )
-
-
-if TYPE_CHECKING:
-    from geotoolz.catalog import (
-        DuckDBGeoCatalog,
-        build_vector_catalog,
-        build_xarray_catalog,
-        load_vector,
-        load_xarray,
-    )
-
-
-_LAZY_TOP_ATTRS = (
-    "build_xarray_catalog",
-    "load_xarray",
-    "build_vector_catalog",
-    "load_vector",
-    "DuckDBGeoCatalog",
-)
-
-
-def __getattr__(name: str) -> Any:
-    """Lazy proxy for the extras-gated catalog backends at the top level."""
-    if name in _LAZY_TOP_ATTRS:
-        attr = getattr(catalog, name)
-        globals()[name] = attr
-        return attr
-    raise AttributeError(f"module 'geotoolz' has no attribute {name!r}")
 
 
 __version__ = "0.0.6"
@@ -313,8 +265,6 @@ __all__ = [
     "BilateralDenoise",
     "Branch",
     "Carrier",
-    "CatalogDomain",
-    "CatalogRow",
     "ClayMinerals",
     "ColumnToMass",
     "Composite",
@@ -328,7 +278,6 @@ __all__ = [
     "DespeckleLee",
     "DespeckleRefinedLee",
     "DestripeColumn",
-    "DuckDBGeoCatalog",
     "EarthSunDistanceCorrection",
     "FalseColor",
     "Fanout",
@@ -339,15 +288,12 @@ __all__ = [
     "GapFillLaplacian",
     "GapFillNearest",
     "GaussianDenoise",
-    "GeoCatalog",
-    "GeoSlice",
     "Graph",
     "GridDomain",
     "GridSampler",
     "Hillshade",
     "IMEEstimate",
     "Identity",
-    "InMemoryGeoCatalog",
     "Input",
     "IntegratedIrradiance",
     "InverseMNF",
@@ -456,35 +402,20 @@ __all__ = [
     "WindAdvectionCone",
     "__version__",
     "augment",
-    "build_raster_catalog",
-    "build_vector_catalog",
-    "build_xarray_catalog",
-    "catalog",
     "cloud",
     "core",
     "dNBR",
-    "from_geoparquet",
     "geom",
     "indices",
-    "intersect",
     "io",
     "kNDVI",
-    "load_raster",
-    "load_raster_timeseries",
-    "load_vector",
-    "load_xarray",
     "mask",
     "normalize",
-    "open_catalog",
     "patch",
     "plume",
     "qa",
-    "query",
     "radiometry",
     "restore",
     "spectral",
-    "to_geoparquet",
-    "types",
-    "union",
     "viz",
 ]
