@@ -199,6 +199,7 @@ def convert_column_units(
 
     arr = np.asarray(values, dtype=float)
     if units_in == "ppm_m":
+        # 1e-6 converts ppm to a fraction; molar volume assumes standard air.
         mol_m2 = arr * 1e-6 / STANDARD_MOLAR_VOLUME_M3_PER_MOL
     elif units_in == "mol_m2":
         mol_m2 = arr

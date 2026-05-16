@@ -148,6 +148,26 @@ def test_ime_skeleton_length_and_uncertainty_fraction() -> None:
     assert estimate["emission_rate_uncertainty_kg_s"] == pytest.approx(6.0)
 
 
+def test_ime_convex_hull_length_agrees_with_max_axis_on_convex_plume() -> None:
+    mask = _gt(np.ones((2, 2), dtype=bool))
+    enhancement = _gt(np.ones((2, 2), dtype=float))
+
+    convex_hull = gz.plume.IMEEstimate(
+        plume_mask=mask,
+        wind_speed=1.0,
+        length_method="convex_hull",
+        return_uncertainty=False,
+    )(enhancement)
+    max_axis = gz.plume.IMEEstimate(
+        plume_mask=mask,
+        wind_speed=1.0,
+        length_method="max_axis",
+        return_uncertainty=False,
+    )(enhancement)
+
+    assert convex_hull["length_m"] == pytest.approx(max_axis["length_m"])
+
+
 def test_cross_sectional_flux_returns_transect_geodataframe() -> None:
     mask = _gt(np.ones((3, 3), dtype=bool))
     enhancement = _gt(np.ones((3, 3), dtype=float))

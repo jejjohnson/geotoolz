@@ -56,6 +56,12 @@ def _band_index(band: int | str) -> int:
     return int(band)
 
 
+def _extract_nonnegative_band(
+    arr: np.ndarray, band: int | str, axis: int
+) -> np.ndarray:
+    return np.maximum(np.take(arr, _band_index(band), axis=axis), 0.0)
+
+
 class SBMP(Operator):
     """Single-band multi-pass Sentinel-2 SWIR ratio retrieval.
 
@@ -88,17 +94,13 @@ class SBMP(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         arr = np.asarray(gt, dtype=float)
-        swir1 = np.maximum(np.take(arr, _band_index(self.swir1), axis=self.axis), 0.0)
-        swir2 = np.maximum(np.take(arr, _band_index(self.swir2), axis=self.axis), 0.0)
+        swir1 = _extract_nonnegative_band(arr, self.swir1, self.axis)
+        swir2 = _extract_nonnegative_band(arr, self.swir2, self.axis)
         ratio = np.log((swir1 + self.eps) / (swir2 + self.eps))
         if self.reference_scene is not None:
             ref = np.asarray(self.reference_scene, dtype=float)
-            ref_swir1 = np.maximum(
-                np.take(ref, _band_index(self.swir1), axis=self.axis), 0.0
-            )
-            ref_swir2 = np.maximum(
-                np.take(ref, _band_index(self.swir2), axis=self.axis), 0.0
-            )
+            ref_swir1 = _extract_nonnegative_band(ref, self.swir1, self.axis)
+            ref_swir2 = _extract_nonnegative_band(ref, self.swir2, self.axis)
             ref_ratio = np.log((ref_swir1 + self.eps) / (ref_swir2 + self.eps))
             out = ratio - ref_ratio
         else:
