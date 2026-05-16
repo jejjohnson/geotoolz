@@ -88,7 +88,7 @@ class Reader(SensorReader):
         height = int(window.height)
         out = np.full(
             (*self._data.shape[:-2], height, width),
-            self.fill_value_default,
+            self._fill_value_default,
             dtype=self._data.dtype,
         )
 
