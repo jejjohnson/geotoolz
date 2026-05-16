@@ -184,7 +184,7 @@ def test_ndwi_ndbi_nbr_match_normalized_difference() -> None:
     )
 
 
-def test_additional_indices_match_hand_computed() -> None:
+def test_new_spectral_indices_match_expected_formulas() -> None:
     arr = np.array(
         [
             [[0.05]],  # B

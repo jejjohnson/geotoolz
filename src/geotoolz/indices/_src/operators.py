@@ -66,8 +66,9 @@ def _resolve_band(gt: GeoTensor, ref: BandRef) -> int:
     for key in ("descriptions", "band_names", "bands"):
         names = gt.attrs.get(key)
         if names is not None:
+            band_names = tuple(names)
             try:
-                return list(names).index(ref)
+                return band_names.index(ref)
             except ValueError:
                 continue
 
@@ -87,7 +88,9 @@ def _configured_ref(value: BandRef | None, fallback: BandRef | None) -> BandRef:
 
 def _geotensor_grid_matches(a: GeoTensor, b: GeoTensor) -> bool:
     return (
-        a.shape[-2:] == b.shape[-2:] and a.transform == b.transform and a.crs == b.crs
+        a.shape[-2:] == b.shape[-2:]
+        and np.allclose(tuple(a.transform), tuple(b.transform))
+        and a.crs == b.crs
     )
 
 
