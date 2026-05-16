@@ -458,7 +458,10 @@ def _rasterize_geometry_like(
         gdf = geometry.copy()
         if gdf.crs is None:
             if crs is None:
-                raise ValueError("PolygonMask: GeoDataFrame CRS is missing")
+                raise ValueError(
+                    "PolygonMask: GeoDataFrame CRS is missing; pass `crs=...` "
+                    "or set `geometry.crs` before creating the operator"
+                )
             gdf = gdf.set_crs(crs)
         gdf["__mask__"] = 1
         burned = rasterize.rasterize_geopandas_like(
@@ -504,14 +507,17 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
             except OSError as exc:
                 raise RuntimeError(
                     f"failed to download Natural Earth {kind!r} data from "
-                    f"{_NATURAL_EARTH_URLS[kind]}"
+                    f"{_NATURAL_EARTH_URLS[kind]}; check network/firewall "
+                    "access or pass a local vector file path as `source`"
                 ) from exc
         with ZipFile(zip_path) as zf:
             zf.extractall(extract_dir)
     shapefiles = list(extract_dir.glob("*.shp"))
     if not shapefiles:
         raise FileNotFoundError(
-            f"Natural Earth {kind!r} archive did not contain a shapefile"
+            f"Natural Earth {kind!r} archive did not contain a top-level .shp "
+            "file; remove the cached archive to re-download it or pass a "
+            "valid local vector file path as `source`"
         )
     shp = shapefiles[0]
     return gpd.read_file(shp)

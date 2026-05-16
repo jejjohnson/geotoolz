@@ -76,7 +76,7 @@ def buffer_mask(
     if radius < 0:
         raise ValueError("buffer_mask: `radius` must be non-negative")
     if unit not in {"pixels", "meters", "meter"}:
-        raise ValueError("buffer_mask: `unit` must be 'pixels' or 'meters'")
+        raise ValueError("buffer_mask: `unit` must be 'pixels', 'meter', or 'meters'")
     if radius == 0:
         return np.asarray(mask, dtype=bool).copy()
 
