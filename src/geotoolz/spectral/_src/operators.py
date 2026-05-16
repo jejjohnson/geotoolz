@@ -67,7 +67,13 @@ def _resolve_band(key: BandKey, names: list[str] | None) -> int:
 
 
 def _resolve_bands(keys: list[BandKey], names: list[str] | None) -> list[int]:
-    return [_resolve_band(key, names) for key in keys]
+    indexes = []
+    for idx, key in enumerate(keys):
+        try:
+            indexes.append(_resolve_band(key, names))
+        except ValueError as exc:
+            raise ValueError(f"Failed to resolve band at index {idx}: {key!r}") from exc
+    return indexes
 
 
 def _jsonable_array(values: np.ndarray | list[float]) -> list[float]:

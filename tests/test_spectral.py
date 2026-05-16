@@ -24,11 +24,8 @@ def _toy_geotensor(values: np.ndarray) -> GeoTensor:
     )
 
 
-def test_spectral_module_is_public() -> None:
-    assert gz.spectral is spectral
-
-
 def test_select_bands_by_name_and_index_match() -> None:
+    assert gz.spectral is spectral
     gt = _toy_geotensor(np.arange(4 * 2 * 3, dtype=np.float32).reshape(4, 2, 3))
     by_name = spectral.SelectBands(indexes=["B8", "B4"])(gt)
     by_index = spectral.SelectBands(indexes=[2, 1])(gt)
@@ -230,24 +227,64 @@ def test_stack_and_split_bands() -> None:
 
 
 def test_spectral_get_config_smoke() -> None:
-    ops = [
-        spectral.SelectBands(indexes=[0]),
-        spectral.ReorderBands(order=[0]),
-        spectral.StackBands(),
-        spectral.SplitBands(),
-        spectral.BandMath(expression="B0"),
-        spectral.NormalizedDifference(a=0, b=1),
-        spectral.BandRatio(numerator=0, denominator=1),
-        spectral.ApplySRF(
-            target_center_wavelengths=[1.0],
-            target_fwhm=[1.0],
-            source_wavelengths=[1.0],
+    ops_and_configs = [
+        (spectral.SelectBands(indexes=[0]), {"indexes": [0], "axis": 0}),
+        (spectral.ReorderBands(order=[0]), {"order": [0], "axis": 0}),
+        (spectral.StackBands(), {"axis": 0, "along": "band"}),
+        (spectral.SplitBands(), {"names": None, "axis": 0}),
+        (
+            spectral.BandMath(expression="B0"),
+            {"expression": "B0", "band_names": None, "axis": 0},
         ),
-        spectral.GaussianSRF(target_center_wavelengths=[1.0], target_fwhm=[1.0]),
-        spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
-        spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
-        spectral.SpectralSmoothing(),
+        (
+            spectral.NormalizedDifference(a=0, b=1),
+            {"a": 0, "b": 1, "eps": 1e-6, "axis": 0},
+        ),
+        (
+            spectral.BandRatio(numerator=0, denominator=1),
+            {"numerator": 0, "denominator": 1, "eps": 1e-6, "axis": 0},
+        ),
+        (
+            spectral.ApplySRF(
+                target_center_wavelengths=[1.0],
+                target_fwhm=[1.0],
+                source_wavelengths=[1.0],
+            ),
+            {
+                "target_center_wavelengths": [1.0],
+                "target_fwhm": [1.0],
+                "source_wavelengths": [1.0],
+                "band_names": None,
+            },
+        ),
+        (
+            spectral.GaussianSRF(target_center_wavelengths=[1.0], target_fwhm=[1.0]),
+            {
+                "target_center_wavelengths": [1.0],
+                "target_fwhm": [1.0],
+                "source_wavelengths": None,
+                "band_names": None,
+            },
+        ),
+        (
+            spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
+            {"method": "convex_hull", "wavelengths": [1.0, 2.0, 3.0], "axis": 0},
+        ),
+        (
+            spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
+            {
+                "target_wavelengths": [1.0],
+                "width": [1.0],
+                "method": "mean",
+                "source_wavelengths": None,
+                "axis": 0,
+            },
+        ),
+        (
+            spectral.SpectralSmoothing(),
+            {"method": "savgol", "window": 7, "polyorder": 2, "axis": 0},
+        ),
     ]
 
-    for op in ops:
-        assert isinstance(op.get_config(), dict)
+    for op, expected in ops_and_configs:
+        assert op.get_config() == expected

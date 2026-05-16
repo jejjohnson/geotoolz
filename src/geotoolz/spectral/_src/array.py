@@ -131,7 +131,8 @@ def continuum_removal(
         idx = int(non_increasing[0])
         raise ValueError(
             "wavelengths must be strictly increasing; "
-            f"found non-increasing pair at indices {idx} and {idx + 1}"
+            f"found non-increasing pair at indices {idx} and {idx + 1}: "
+            f"{wavelengths[idx]} >= {wavelengths[idx + 1]}"
         )
 
     if method == "linear":
