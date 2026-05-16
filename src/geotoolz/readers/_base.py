@@ -178,7 +178,12 @@ class SensorReader(GeoData, ABC):
 
 
 def require_optional_dependency(package: str, *, extra: str) -> None:
-    """Raise an actionable error when a sensor optional dependency is missing."""
+    """Raise an actionable error when a sensor optional dependency is missing.
+
+    Args:
+        package: Import package name to check.
+        extra: Sensor optional-extra name to include in the install command.
+    """
     if importlib.util.find_spec(package) is not None:
         return
     raise ImportError(
@@ -189,5 +194,12 @@ def require_optional_dependency(package: str, *, extra: str) -> None:
 
 
 def as_path(path: str | Path) -> Path:
-    """Normalize a reader path argument."""
+    """Normalize a reader path argument.
+
+    Args:
+        path: String or ``Path`` reader input.
+
+    Returns:
+        The input converted to a ``Path`` object.
+    """
     return Path(path)

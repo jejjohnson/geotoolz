@@ -46,7 +46,7 @@ class Reader(SensorReader):
         )
         self._reader_transform = Affine.identity() if transform is None else transform
         self._reader_crs = crs
-        self._reader_fill_value = fill_value_default
+        self._fill_value_default = fill_value_default
 
     @property
     def _crs(self) -> Any:
@@ -75,7 +75,7 @@ class Reader(SensorReader):
 
     @property
     def _fill_value(self) -> float:
-        return self._reader_fill_value
+        return self._fill_value_default
 
     @property
     def _track(self) -> Track:
