@@ -26,6 +26,7 @@ per-call `seed=` overrides the constructor seed for reproducible experiments.
 
 ```python
 tiles = gz.patches.ExtractPatches(size=(256, 256), stride=(192, 192))(scene)
+# Each prediction must be a GeoTensor on the same spatial tile extent.
 preds = [model(tile) for tile in tiles]
 
 result = gz.patches.StitchPatches(

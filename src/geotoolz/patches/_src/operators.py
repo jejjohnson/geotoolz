@@ -68,7 +68,7 @@ def _windows(
 def _cast_like(out: np.ndarray, dtype: np.dtype[Any]) -> np.ndarray:
     dtype = np.dtype(dtype)
     if np.issubdtype(dtype, np.integer):
-        info = np.iinfo(dtype.name)
+        info = np.iinfo(dtype.type)
         out = np.clip(out, info.min, info.max)
     return out.astype(dtype, copy=False)
 
@@ -241,14 +241,21 @@ def _sample_bilinear(arr: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.
     out = np.full((*arr.shape[:-2], len(rows)), np.nan, dtype=np.float32)
     wy = rows - row0
     wx = cols - col0
-    for index in np.nonzero(valid)[0]:
-        top = (1.0 - wx[index]) * arr[..., row0[index], col0[index]] + wx[index] * arr[
-            ..., row0[index], col1[index]
+    valid_index = np.nonzero(valid)[0]
+    if valid_index.size:
+        wx_valid = wx[valid_index]
+        wy_valid = wy[valid_index]
+        row0_valid = row0[valid_index]
+        row1_valid = row1[valid_index]
+        col0_valid = col0[valid_index]
+        col1_valid = col1[valid_index]
+        top = (1.0 - wx_valid) * arr[..., row0_valid, col0_valid] + wx_valid * arr[
+            ..., row0_valid, col1_valid
         ]
-        bottom = (1.0 - wx[index]) * arr[..., row1[index], col0[index]] + wx[
-            index
-        ] * arr[..., row1[index], col1[index]]
-        out[..., index] = (1.0 - wy[index]) * top + wy[index] * bottom
+        bottom = (1.0 - wx_valid) * arr[..., row1_valid, col0_valid] + wx_valid * arr[
+            ..., row1_valid, col1_valid
+        ]
+        out[..., valid_index] = (1.0 - wy_valid) * top + wy_valid * bottom
     return np.moveaxis(out, -1, 0)
 
 
@@ -389,7 +396,7 @@ class StitchPatches(Operator):
     def get_config(self) -> dict[str, Any]:
         return {
             "target_shape": list(self.target_shape),
-            "target_transform": list(self.target_transform)[:6],
+            "target_transform": list(self.target_transform[:6]),
             "target_crs": self.target_crs,
             "blend": self.blend,
             "feather_width": self.feather_width,
@@ -449,7 +456,11 @@ class SampleAlongTrack(Operator):
 
 
 class RandomCrop(Operator):
-    """Draw reproducible random fixed-size crops from a `GeoTensor`."""
+    """Draw reproducible random fixed-size crops from a `GeoTensor`.
+
+    A per-call ``seed=`` overrides the constructor seed, matching the
+    reproducibility semantics used by the augmentation operators.
+    """
 
     def __init__(
         self, *, size: tuple[int, int], n_samples: int = 1, seed: int | None = None
@@ -483,7 +494,11 @@ class RandomCrop(Operator):
 
 
 class StratifiedSample(Operator):
-    """Sample patches by class proportions defined on a label GeoTensor."""
+    """Sample patches by class proportions defined on a label GeoTensor.
+
+    A per-call ``seed=`` overrides the constructor seed for reproducible
+    resampling without rebuilding the operator.
+    """
 
     def __init__(
         self,
@@ -548,7 +563,11 @@ class StratifiedSample(Operator):
 
 
 class BalancedSampler(Operator):
-    """Sample up to ``n_per_class`` patches for every label class."""
+    """Sample up to ``n_per_class`` patches for every label class.
+
+    A per-call ``seed=`` overrides the constructor seed for reproducible
+    resampling without rebuilding the operator.
+    """
 
     def __init__(
         self,

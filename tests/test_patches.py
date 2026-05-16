@@ -104,6 +104,12 @@ def test_balanced_sampler_returns_n_per_class() -> None:
 
     assert len(patches) == 4
     assert sorted(patch.attrs["class_label"] for patch in patches) == [0, 1, 2, 3]
+    label_arr = np.asarray(labels)
+    for patch in patches:
+        row = round((patch.transform.f - gt.transform.f) / gt.transform.e)
+        col = round((patch.transform.c - gt.transform.c) / gt.transform.a)
+        center = label_arr[row + patch.height // 2, col + patch.width // 2]
+        assert int(center) == patch.attrs["class_label"]
 
 
 def test_sample_points_nearest_matches_hand_indexed_reference() -> None:
