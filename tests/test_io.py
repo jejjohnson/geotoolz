@@ -309,3 +309,143 @@ def test_load_from_ee_reports_missing_optional_dependencies() -> None:
 
     with pytest.raises(io.GeoToolzIOError, match="Earth Engine dependencies"):
         op()
+
+
+# ---------------------------------------------------------------------------
+# Round-trip discipline: forbid_in_yaml flags + hydra-zen builds round-trip
+# ---------------------------------------------------------------------------
+
+
+_IO_OPERATOR_CLASSES = (
+    io.ReadWindow,
+    io.ReadBounds,
+    io.ReadCenterCoords,
+    io.ReadTile,
+    io.ReadPolygon,
+    io.ReadReprojectLike,
+    io.ReadToCRS,
+    io.WriteCOG,
+    io.WriteGeoTIFF,
+    io.WriteZarr,
+    io.LoadFromSTAC,
+    io.LoadFromEE,
+)
+
+
+@pytest.mark.parametrize("op_cls", _IO_OPERATOR_CLASSES)
+def test_io_operators_are_marked_forbid_in_yaml(op_cls: type) -> None:
+    """All public IO operators carry runtime references (paths, items,
+    EE asset IDs, reference grids) and so should refuse YAML serialisation."""
+    assert op_cls.forbid_in_yaml is True
+
+
+def test_write_operators_are_terminal() -> None:
+    assert io.WriteCOG._terminal is True
+    assert io.WriteGeoTIFF._terminal is True
+    assert io.WriteZarr._terminal is True
+
+
+def test_write_cog_passes_descriptions_and_tags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`WriteCOG.descriptions` and `tags` should reach `save.save_cog`."""
+    captured: dict[str, object] = {}
+
+    def fake_save_cog(data, path, *, profile, descriptions, tags):  # type: ignore[no-untyped-def]
+        captured["descriptions"] = descriptions
+        captured["tags"] = tags
+        captured["profile"] = profile
+        captured["path"] = path
+
+    monkeypatch.setattr(io_operators.save, "save_cog", fake_save_cog)
+
+    gt = _sample_geotensor()
+    io.WriteCOG(
+        path=tmp_path / "out.tif",
+        compress="zstd",
+        descriptions=["b1", "b2"],
+        tags={"source": "test"},
+    )(gt)
+
+    assert captured["descriptions"] == ["b1", "b2"]
+    assert captured["tags"] == {"source": "test"}
+    assert captured["profile"] == {"compress": "zstd"}
+
+
+def test_write_geotiff_passes_blocksize_and_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`WriteGeoTIFF` should forward blocksize / descriptions / tags to
+    `save.save_tiled_geotiff` rather than re-implement IO via rasterio."""
+    captured: dict[str, object] = {}
+
+    def fake_save_tiled(
+        data,  # type: ignore[no-untyped-def]
+        path,
+        *,
+        profile_arg,
+        descriptions,
+        tags,
+        blocksize,
+    ):
+        captured["blocksize"] = blocksize
+        captured["descriptions"] = descriptions
+        captured["tags"] = tags
+        captured["profile_arg"] = profile_arg
+
+    monkeypatch.setattr(io_operators.save, "save_tiled_geotiff", fake_save_tiled)
+
+    gt = _sample_geotensor()
+    io.WriteGeoTIFF(
+        path=tmp_path / "out.tif",
+        blocksize=512,
+        descriptions=["b1", "b2"],
+        tags={"k": "v"},
+        profile={"compress": "zstd"},
+    )(gt)
+
+    assert captured["blocksize"] == 512
+    assert captured["descriptions"] == ["b1", "b2"]
+    assert captured["tags"] == {"k": "v"}
+    assert captured["profile_arg"] == {"compress": "zstd"}
+
+
+try:
+    import hydra_zen
+except ImportError:  # pragma: no cover - exercised via the [hydra] extra
+    hydra_zen = None  # type: ignore[assignment]
+
+
+_HYDRA_ZEN_OPERATORS: list[gz.Operator] = [
+    io.ReadWindow(src="x.tif", window=(0, 0, 4, 4)),
+    io.ReadBounds(src="x.tif", bounds=(0.0, 0.0, 1.0, 1.0)),
+    io.ReadCenterCoords(src="x.tif", center=(0.5, 0.5), shape=(2, 2)),
+    io.ReadTile(src="x.tif", tile=(1, 0, 0)),
+    io.ReadToCRS(src="x.tif", dst_crs="EPSG:4326"),
+    io.WriteCOG(path="x.tif"),
+    io.WriteGeoTIFF(path="x.tif"),
+    io.WriteZarr(store="x.zarr", group="data", chunks={"y": 16, "x": 16}),
+    io.LoadFromEE(
+        image_id="LANDSAT/LC08/C02/T1_L2/LC08_001001_20200101",
+        bounds=(0.0, 0.0, 1.0, 1.0),
+        crs="EPSG:4326",
+        scale=30.0,
+        bands=["B4"],
+    ),
+]
+
+
+@pytest.mark.skipif(hydra_zen is None, reason="requires hydra-zen extra")
+@pytest.mark.parametrize("op", _HYDRA_ZEN_OPERATORS)
+def test_io_hydra_zen_builds_roundtrip(op: gz.Operator) -> None:
+    """Operator config dicts must accept ``hydra_zen.builds`` /
+    ``instantiate``. Operators whose config includes runtime objects
+    (STAC items, shapely geometries, GeoTensor references) are excluded
+    because their config is intentionally debug-only —
+    ``forbid_in_yaml`` documents that contract."""
+    cfg = hydra_zen.builds(type(op), **op.get_config())  # type: ignore[attr-defined]
+    restored = hydra_zen.instantiate(cfg)
+    assert type(restored) is type(op)
+    assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
