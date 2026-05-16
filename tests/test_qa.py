@@ -58,6 +58,20 @@ def test_decode_bitmask_returns_named_boolean_layers() -> None:
     )
 
 
+def test_decode_bitmask_selects_named_qa_band_with_default_any_mode() -> None:
+    stack = np.stack(
+        [
+            np.ones((2, 2), dtype=np.uint16),
+            np.array([[0, 1 << 10], [1 << 11, 0]], dtype=np.uint16),
+        ]
+    )
+    gt = _toy_geotensor(stack, attrs={"band_names": ["B04", "QA60"]})
+
+    out = qa.DecodeBitmask(bits={"bad": [10, 11]}, qa_band="QA60")(gt)
+
+    np.testing.assert_array_equal(np.asarray(out)[0], [[False, True], [True, False]])
+
+
 def test_decode_bitmask_all_mode_requires_every_bit() -> None:
     gt = _toy_geotensor(np.array([[0, 1, 2, 3]], dtype=np.uint16))
     out = qa.DecodeBitmask(bits={"both": [0, 1]}, mode="all")(gt)

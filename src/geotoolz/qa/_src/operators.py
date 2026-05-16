@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 BandSelector = int | str | None
 
 
+# Declarative sensor -> target -> {"bits": (...)} or {"values": (...)} table
+# used by the preset operators below. Bit entries decode integer QA bitmasks;
+# value entries decode categorical QA layers such as Sentinel-2 SCL.
 SENSOR_QA_REGISTRY: dict[str, dict[str, dict[str, tuple[int, ...]]]] = {
     "s2_qa60": {
         "cloud": {"bits": (10,)},
@@ -508,7 +511,10 @@ class S2Cloudless(Operator):
         self.threshold = threshold
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        raise ImportError("S2Cloudless requires the optional ML mask extra.")
+        raise ImportError(
+            "S2Cloudless requires the optional ML mask extra, which is not "
+            "packaged in this release."
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"threshold": self.threshold}
@@ -521,7 +527,10 @@ class OmniCloudMask(Operator):
         self.checkpoint = checkpoint
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        raise ImportError("OmniCloudMask requires the optional ML mask extra.")
+        raise ImportError(
+            "OmniCloudMask requires the optional ML mask extra, which is not "
+            "packaged in this release."
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"checkpoint": self.checkpoint}
@@ -534,7 +543,10 @@ class CloudSEN12(Operator):
         self.checkpoint = checkpoint
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        raise ImportError("CloudSEN12 requires the optional ML mask extra.")
+        raise ImportError(
+            "CloudSEN12 requires the optional ML mask extra, which is not "
+            "packaged in this release."
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"checkpoint": self.checkpoint}
