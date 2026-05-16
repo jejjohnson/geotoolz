@@ -95,3 +95,33 @@ class TestPostApplyHookIsNoOp:
         # The reserved hook-dispatch must not interfere with eager dispatch.
         op = Double()
         assert op(7) == 14
+
+
+class TestFromState:
+    def test_from_state_resolves_receiver_class(self) -> None:
+        """``Subclass.from_state(state)`` must include ``Subclass`` itself
+        in the lookup, not only its strict subclasses. ``Identity`` is a
+        leaf operator with no subclasses, so the receiver-class lookup
+        is the only way to find it."""
+        op = Identity()
+        state = op.state
+        # Sanity: Identity has no subclasses, so the lookup must include
+        # cls itself.
+        assert Identity.__subclasses__() == []
+        restored = Identity.from_state(state)
+        assert isinstance(restored, Identity)
+
+    def test_from_state_rejects_non_primitive_config(self) -> None:
+        """Configs containing nested ``{class, config}`` operator payloads
+        cannot be passed back to the constructor as kwargs; ``from_state``
+        must raise a clear ``RuntimeError`` instead of letting the
+        constructor blow up with ``TypeError``."""
+        from geotoolz.indices import NDVI, AppendIndex
+
+        op = AppendIndex(index_op=NDVI(nir_idx=3, red_idx=2))
+        state = op.state
+        # Sanity: AppendIndex.get_config emits a nested {class, config}
+        # payload for the inner operator.
+        assert isinstance(state["config"]["index_op"], dict)
+        with pytest.raises(RuntimeError, match="non-primitive"):
+            Operator.from_state(state)
