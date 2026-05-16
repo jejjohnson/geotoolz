@@ -59,7 +59,7 @@ SENSOR_QA_REGISTRY: dict[str, dict[str, dict[str, tuple[int, ...]]]] = {
 }
 
 
-def _as_tuple(values: Sequence[int] | None) -> tuple[int, ...] | None:
+def _normalize_int_sequence(values: Sequence[int] | None) -> tuple[int, ...] | None:
     if values is None:
         return None
     return tuple(int(v) for v in values)
@@ -79,7 +79,7 @@ def _band_names(attrs: Mapping[str, Any]) -> Sequence[str] | Mapping[str, int] |
     return None
 
 
-def _resolve_band_index(gt: GeoTensor, qa_band: BandSelector, axis: int) -> int | None:
+def _resolve_band_index(gt: GeoTensor, qa_band: BandSelector) -> int | None:
     if qa_band is None:
         return None
     if isinstance(qa_band, int):
@@ -111,7 +111,7 @@ def _resolve_band_index(gt: GeoTensor, qa_band: BandSelector, axis: int) -> int 
 
 def _select_qa(gt: GeoTensor, qa_band: BandSelector, axis: int) -> np.ndarray:
     arr = np.asarray(gt)
-    band_idx = _resolve_band_index(gt, qa_band, axis)
+    band_idx = _resolve_band_index(gt, qa_band)
     if band_idx is None:
         return arr
     return np.take(arr, band_idx, axis=axis)
@@ -121,7 +121,12 @@ def _decode_bits(qa: np.ndarray, bits: Sequence[int], mode: str) -> np.ndarray:
     bits_tuple = _require_non_empty(tuple(int(bit) for bit in bits), "bits")
     if mode not in {"any", "all"}:
         raise ValueError("mode must be 'any' or 'all'")
-    qa_int = qa.astype(np.int64, copy=False)
+    qa_arr = np.asarray(qa)
+    qa_int = (
+        qa_arr
+        if np.issubdtype(qa_arr.dtype, np.integer)
+        else qa_arr.astype(np.int64, copy=False)
+    )
     masks = []
     for bit in bits_tuple:
         if bit < 0:
@@ -233,8 +238,8 @@ class _QAMask(Operator):
         invert: bool = False,
     ) -> None:
         self.qa_band = qa_band
-        self.bits = _as_tuple(bits)
-        self.values = _as_tuple(values)
+        self.bits = _normalize_int_sequence(bits)
+        self.values = _normalize_int_sequence(values)
         self.mode = mode
         self.axis = axis
         self.invert = invert
@@ -293,8 +298,8 @@ class MaskNoData(Operator):
         axis: int = 0,
     ) -> None:
         self.qa_band = qa_band
-        self.bits = _as_tuple(bits)
-        self.values = _as_tuple(values)
+        self.bits = _normalize_int_sequence(bits)
+        self.values = _normalize_int_sequence(values)
         self.axis = axis
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:

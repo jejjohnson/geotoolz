@@ -241,3 +241,7 @@ def test_ml_placeholders_are_configurable_and_explicit() -> None:
     assert qa.CloudSEN12(checkpoint="y").get_config() == {"checkpoint": "y"}
     with pytest.raises(ImportError, match="optional ML mask extra"):
         qa.S2Cloudless()(gt)
+    with pytest.raises(ImportError, match="optional ML mask extra"):
+        qa.OmniCloudMask()(gt)
+    with pytest.raises(ImportError, match="optional ML mask extra"):
+        qa.CloudSEN12()(gt)
