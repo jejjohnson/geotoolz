@@ -887,7 +887,7 @@ class BAIS2(Operator):
         red_idx: int | None = 2,
         red_edge1_idx: int | None = 4,
         red_edge2_idx: int | None = 5,
-        nir_idx: int | None = 6,
+        nir_idx: int | None = 7,
         swir2_idx: int | None = 9,
         axis: int = 0,
         eps: float = 1e-10,
@@ -1062,7 +1062,7 @@ class CIRI(Operator):
         self,
         *,
         cirrus: BandRef | None = None,
-        cirrus_idx: int | None = 0,
+        cirrus_idx: int | None = None,
         axis: int = 0,
     ) -> None:
         self.cirrus_idx = _configured_ref(cirrus, cirrus_idx)

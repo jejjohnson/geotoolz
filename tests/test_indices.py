@@ -229,7 +229,12 @@ def test_additional_indices_match_hand_computed() -> None:
     np.testing.assert_allclose(iron_oxide(arr, 2, 0, eps=0.0), [[4.0]])
     np.testing.assert_allclose(clay_minerals(arr, 5, 6, eps=0.0), [[0.4 / 0.35]])
     np.testing.assert_allclose(ciri(arr, 6), [[0.35]])
-    assert np.isfinite(bais2(arr, 2, 4, 5, 3, 6)).all()
+    expected_bais2 = (1.0 - np.sqrt((0.30 * 0.40 * 0.60) / 0.20)) * (
+        (0.35 - 0.60) / np.sqrt(0.35 + 0.60) + 1.0
+    )
+    np.testing.assert_allclose(
+        bais2(arr, 2, 4, 5, 3, 6, eps=0.0), [[expected_bais2]], rtol=1e-6
+    )
 
 
 def test_savi_l0_equals_ndvi() -> None:
