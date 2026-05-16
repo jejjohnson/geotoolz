@@ -123,6 +123,8 @@ def test_sample_points_nearest_matches_hand_indexed_reference() -> None:
     # Affine inverse maps the pixel centers to (col, row) = (0.5, 0.5)
     # and (2.5, 2.5); nearest indexing floors those to arr[0, 0] and arr[2, 2].
     expected = np.array([[0.0], [10.0]], dtype=np.float32)
+    assert samples.shape == expected.shape
+    assert samples.dtype == np.float32
     np.testing.assert_array_equal(samples, expected)
 
 
@@ -156,7 +158,7 @@ def test_sample_along_track_spacing_has_monotonic_distance() -> None:
     assert result["samples"].shape[0] == result["distance"].shape[0]
 
 
-def test_stitch_feather_preserves_gradient_shape() -> None:
+def test_stitch_feather_preserves_shape_and_values() -> None:
     gt = _gt(np.arange(1 * 6 * 6, dtype=np.float32).reshape(1, 6, 6))
     patches = gz.patches.ExtractPatches(
         size=(3, 3), stride=(2, 2), drop_incomplete=False

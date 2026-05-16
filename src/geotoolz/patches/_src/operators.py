@@ -251,7 +251,7 @@ def _sample_nearest(arr: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.n
 def _sample_bilinear(arr: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
     height, width = arr.shape[-2:]
     # Affine inversion yields pixel-corner coordinates; bilinear weights use
-    # distances between neighbouring pixel centers.
+    # distances between neighboring pixel centers.
     rows = rows - 0.5
     cols = cols - 0.5
     row0 = np.floor(rows).astype(int)
@@ -290,13 +290,13 @@ def _track_points(track: PointInput, crs: str | None) -> tuple[np.ndarray, str |
 def _resample_track(
     coords: np.ndarray, spacing: float | None
 ) -> tuple[np.ndarray, np.ndarray]:
+    if spacing is not None and spacing <= 0:
+        raise ValueError("spacing must be positive.")
     deltas = np.diff(coords, axis=0)
     segment_lengths = np.linalg.norm(deltas, axis=1)
     distance = np.concatenate([[0.0], np.cumsum(segment_lengths)])
     if spacing is None:
         return coords, distance
-    if spacing <= 0:
-        raise ValueError("spacing must be positive.")
     total = distance[-1]
     samples = np.arange(0.0, total, spacing)
     if len(samples) == 0 or samples[-1] < total:
@@ -326,7 +326,7 @@ class ExtractPatches(Operator):
     preserves per-patch CRS/transform metadata for later stitching.
     When both ``stride`` and ``overlap`` are supplied, the explicit
     ``stride`` takes precedence and ``overlap`` is retained only in the
-    serialized config
+    serialized config.
     """
 
     def __init__(
