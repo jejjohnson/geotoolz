@@ -37,7 +37,8 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-# Perturbation for finite-difference target linearization.
+# Small relative perturbation for finite-difference target linearization; callers
+# needing scale-specific control can use NonlinearTargetFromObs(amplitude=...).
 TARGET_FINITE_DIFFERENCE_EPSILON = 1e-4
 
 
