@@ -235,13 +235,23 @@ def estimate_cov_lowrank(
     mean: np.ndarray | None = None,
     rank: int = 10,
     tikhonov: float = 1e-3,
+    random_state: int | None = 0,
+    n_oversamples: int = 10,
     axis: int = 0,
 ) -> NumpyLinearOperator:
     """Estimate a low-rank-plus-Tikhonov dense covariance operator."""
     empirical = estimate_cov_empirical(cube, mean=mean, axis=axis).matrix
     if rank < 1:
         raise ValueError("rank must be positive")
-    u, s, _ = np.linalg.svd(empirical, full_matrices=False)
+    if n_oversamples < 0:
+        raise ValueError("n_oversamples must be non-negative")
+    n_features = empirical.shape[0]
+    sample_rank = min(rank + n_oversamples, n_features)
+    rng = np.random.default_rng(random_state)
+    omega = rng.normal(size=(n_features, sample_rank))
+    basis, _ = np.linalg.qr(empirical @ omega, mode="reduced")
+    u_hat, s, _ = np.linalg.svd(basis.T @ empirical, full_matrices=False)
+    u = basis @ u_hat
     k = min(rank, s.shape[0])
     cov = (u[:, :k] * s[:k]) @ u[:, :k].T
     cov = cov + float(tikhonov) * np.eye(cov.shape[0], dtype=float)
@@ -339,19 +349,23 @@ def gmm_cluster_background(
     n_clusters: int,
     cov_estimator: Literal["empirical", "ledoit_wolf", "oas"] = "ledoit_wolf",
     random_state: int | None = 0,
+    bayesian: bool = False,
     axis: int = 0,
 ) -> ClusterBackground:
-    """Estimate a deterministic NumPy k-means cluster background."""
+    """Estimate a deterministic diagonal-GMM background."""
     if n_clusters < 1:
         raise ValueError("n_clusters must be positive")
     x, spatial_shape = cube_to_samples(cube, axis=axis)
-    labels = _kmeans_labels(x, n_clusters=n_clusters, random_state=random_state)
-    means = np.empty((n_clusters, x.shape[1]), dtype=float)
+    labels = _gmm_labels(
+        x, n_clusters=n_clusters, random_state=random_state, bayesian=bayesian
+    )
+    n_active = int(labels.max()) + 1
+    means = np.empty((n_active, x.shape[1]), dtype=float)
     cov_ops: list[NumpyLinearOperator] = []
-    for k in range(n_clusters):
+    for k in range(n_active):
         group = x[labels == k]
         if group.shape[0] == 0:
-            group = x
+            raise ValueError("GMM produced an empty cluster")
         means[k] = np.mean(group, axis=0)
         if cov_estimator == "empirical":
             cov = _cov_from_samples(group, means[k], ridge=1e-8)
@@ -500,3 +514,81 @@ def _kmeans_labels(
             if np.any(labels == k):
                 centers[k] = np.mean(values[labels == k], axis=0)
     return labels
+
+
+def _gmm_labels(
+    values: np.ndarray,
+    *,
+    n_clusters: int,
+    random_state: int | None,
+    bayesian: bool,
+    max_iter: int = 50,
+    tol: float = 1e-5,
+) -> np.ndarray:
+    rng = np.random.default_rng(random_state)
+    if values.shape[0] < n_clusters:
+        raise ValueError("n_clusters cannot exceed number of pixels")
+    labels = _kmeans_labels(
+        values, n_clusters=n_clusters, random_state=random_state, max_iter=10
+    )
+    means = np.empty((n_clusters, values.shape[1]), dtype=float)
+    variances = np.empty_like(means)
+    global_variance = values.var(axis=0) + 1e-6
+    for k in range(n_clusters):
+        group = values[labels == k]
+        if group.shape[0] == 0:
+            means[k] = values[rng.integers(values.shape[0])]
+            variances[k] = global_variance
+        else:
+            means[k] = group.mean(axis=0)
+            variances[k] = group.var(axis=0) + 1e-6
+    weights = np.bincount(labels, minlength=n_clusters).astype(float) / values.shape[0]
+    previous_ll = -np.inf
+    for _ in range(max_iter):
+        log_prob = _diag_gmm_log_prob(values, means, variances, weights)
+        log_norm = np.logaddexp.reduce(log_prob, axis=1)
+        responsibilities = np.exp(log_prob - log_norm[:, None])
+        counts = responsibilities.sum(axis=0)
+        empty = counts <= np.finfo(float).eps
+        if np.any(empty):
+            repl = rng.choice(values.shape[0], size=int(empty.sum()), replace=False)
+            means[empty] = values[repl]
+            variances[empty] = values.var(axis=0) + 1e-6
+            counts[empty] = 1.0
+        weights = counts / counts.sum()
+        means = responsibilities.T @ values / counts[:, None]
+        centered = values[:, None, :] - means[None, :, :]
+        variances = (responsibilities[:, :, None] * centered * centered).sum(
+            axis=0
+        ) / counts[:, None]
+        variances = np.maximum(variances, 1e-6)
+        ll = float(np.sum(log_norm))
+        if abs(ll - previous_ll) < tol:
+            break
+        previous_ll = ll
+    active = (
+        weights > (1.0 / values.shape[0])
+        if bayesian
+        else np.ones_like(weights, dtype=bool)
+    )
+    if not np.any(active):
+        active[np.argmax(weights)] = True
+    log_prob = _diag_gmm_log_prob(
+        values, means[active], variances[active], weights[active]
+    )
+    return np.argmax(log_prob, axis=1)
+
+
+def _diag_gmm_log_prob(
+    values: np.ndarray,
+    means: np.ndarray,
+    variances: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    centered = values[:, None, :] - means[None, :, :]
+    mahal = np.sum(centered * centered / variances[None, :, :], axis=2)
+    log_det = np.sum(np.log(variances), axis=1)
+    log_weights = np.log(np.maximum(weights, np.finfo(float).tiny))
+    return log_weights[None, :] - 0.5 * (
+        values.shape[1] * np.log(2.0 * np.pi) + log_det[None, :] + mahal
+    )

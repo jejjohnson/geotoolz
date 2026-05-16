@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-TARGET_FD_EPSILON = 1e-4
+TARGET_FINITE_DIFFERENCE_EPSILON = 1e-4
 
 
 class MatchedFilter(Operator):
@@ -320,6 +320,8 @@ class EstimateCovLowRank(Operator):
             mean=self.mean,
             rank=self.rank,
             tikhonov=self.tikhonov,
+            random_state=self.random_state,
+            n_oversamples=self.n_oversamples,
             axis=self.axis,
         )
 
@@ -358,6 +360,7 @@ class GMMClusterBackground(Operator):
             n_clusters=self.n_clusters,
             cov_estimator=self.cov_estimator,
             random_state=self.random_state,
+            bayesian=self.bayesian,
             axis=self.axis,
         )
 
@@ -481,9 +484,9 @@ class LinearTargetFromObs(Operator):
                 vmr_background=self.vmr_background,
                 pattern=self.pattern,
                 pixel=self.pixel,
-                amplitude=TARGET_FD_EPSILON,
+                amplitude=TARGET_FINITE_DIFFERENCE_EPSILON,
             )
-            / TARGET_FD_EPSILON
+            / TARGET_FINITE_DIFFERENCE_EPSILON
         )
 
     def get_config(self) -> dict[str, Any]:
