@@ -12,6 +12,8 @@ from scipy import ndimage, stats
 MeanMethod = Literal["mean", "median", "trimmed", "huber"]
 CovShrinkageMethod = Literal["ledoit_wolf", "oas"]
 CovMethod = Literal["empirical", "ledoit_wolf", "oas", "lowrank"]
+MAD_NORMAL_SCALE = 1.4826
+GMM_VARIANCE_RIDGE = 1e-6
 
 
 @dataclass(frozen=True)
@@ -463,8 +465,7 @@ def _huber_mean(
     if c <= 0:
         raise ValueError("huber_c must be positive")
     mu = np.median(values, axis=0)
-    # 1.4826 converts median absolute deviation to Gaussian sigma.
-    scale = 1.4826 * np.median(np.abs(values - mu), axis=0)
+    scale = MAD_NORMAL_SCALE * np.median(np.abs(values - mu), axis=0)
     scale = np.where(scale <= np.finfo(float).eps, 1.0, scale)
     for _ in range(max_iter):
         z = (values - mu) / scale
@@ -538,7 +539,7 @@ def _gmm_labels(
     )
     means = np.empty((n_clusters, values.shape[1]), dtype=float)
     variances = np.empty_like(means)
-    global_variance = values.var(axis=0) + 1e-6
+    global_variance = values.var(axis=0) + GMM_VARIANCE_RIDGE
     for k in range(n_clusters):
         group = values[labels == k]
         if group.shape[0] == 0:
@@ -546,7 +547,7 @@ def _gmm_labels(
             variances[k] = global_variance
         else:
             means[k] = group.mean(axis=0)
-            variances[k] = group.var(axis=0) + 1e-6
+            variances[k] = group.var(axis=0) + GMM_VARIANCE_RIDGE
     weights = np.bincount(labels, minlength=n_clusters).astype(float) / values.shape[0]
     previous_ll = -np.inf
     for _ in range(max_iter):
@@ -558,7 +559,7 @@ def _gmm_labels(
         if np.any(empty):
             repl = rng.choice(values.shape[0], size=int(empty.sum()), replace=False)
             means[empty] = values[repl]
-            variances[empty] = values.var(axis=0) + 1e-6
+            variances[empty] = values.var(axis=0) + GMM_VARIANCE_RIDGE
             counts[empty] = 1.0
         weights = counts / counts.sum()
         means = responsibilities.T @ values / counts[:, None]
@@ -566,13 +567,14 @@ def _gmm_labels(
         variances = (responsibilities[:, :, None] * centered * centered).sum(
             axis=0
         ) / counts[:, None]
-        variances = np.maximum(variances, 1e-6)
+        variances = np.maximum(variances, GMM_VARIANCE_RIDGE)
         ll = float(np.sum(log_norm))
         if abs(ll - previous_ll) / max(abs(ll), 1.0) < tol:
             break
         previous_ll = ll
+    minimum_component_weight = 1.0 / values.shape[0]
     active = (
-        weights > (1.0 / values.shape[0])
+        weights > minimum_component_weight
         if bayesian
         else np.ones_like(weights, dtype=bool)
     )

@@ -10,7 +10,7 @@ from georeader.geotensor import GeoTensor
 import geotoolz as gz
 
 
-def _gt(values: np.ndarray) -> GeoTensor:
+def _make_geotensor(values: np.ndarray) -> GeoTensor:
     return GeoTensor(
         values=values,
         transform=rasterio.Affine(30.0, 0.0, 100.0, 0.0, -30.0, 200.0),
@@ -28,7 +28,7 @@ def test_matched_filter_recovers_known_amplitude_and_preserves_metadata() -> Non
     target = np.array([1.0, 2.0, -1.0])
     amplitudes = np.array([[0.0, 1.0], [2.0, -0.5]])
     cube = mean[:, None, None] + target[:, None, None] * amplitudes[None, :, :]
-    gt = _gt(cube)
+    gt = _make_geotensor(cube)
 
     out = gz.matched_filter.MatchedFilter(
         mean=mean,
@@ -61,7 +61,7 @@ def test_estimators_return_expected_numpy_backgrounds() -> None:
             [[10.0, 20.0], [30.0, 1000.0]],
         ]
     )
-    gt = _gt(cube)
+    gt = _make_geotensor(cube)
 
     assert np.allclose(gz.matched_filter.EstimateMean(method="median")(gt), [2.5, 25.0])
     cov = gz.matched_filter.EstimateCovEmpirical(mean=np.array([0.0, 0.0]), ridge=1e-6)(
@@ -99,7 +99,7 @@ def test_fit_on_call_populates_reusable_state() -> None:
         target=target, fit_on_call=True, cov_method="empirical"
     )
 
-    out = op(_gt(cube))
+    out = op(_make_geotensor(cube))
 
     assert np.asarray(out).shape == (2, 2)
     assert op.mean is not None
@@ -107,8 +107,8 @@ def test_fit_on_call_populates_reusable_state() -> None:
 
 
 def test_streaming_background_matches_empirical_covariance() -> None:
-    cube_a = _gt(np.arange(8, dtype=float).reshape(2, 2, 2))
-    cube_b = _gt(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
+    cube_a = _make_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
+    cube_b = _make_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
 
     bg = gz.matched_filter.StreamingBackground(
         cubes=[cube_a, cube_b], cov_kind="empirical"
@@ -125,8 +125,8 @@ def test_streaming_background_matches_empirical_covariance() -> None:
 
 
 def test_streaming_background_shrunk_covariance_matches_batch_estimator() -> None:
-    cube_a = _gt(np.arange(8, dtype=float).reshape(2, 2, 2))
-    cube_b = _gt(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
+    cube_a = _make_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
+    cube_b = _make_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
 
     bg = gz.matched_filter.StreamingBackground(cubes=[cube_a, cube_b])()
     stacked = np.concatenate(
@@ -152,7 +152,7 @@ def test_cluster_background_and_dispatch_are_reproducible() -> None:
             [[0.0, 0.1], [10.0, 10.1]],
         ]
     )
-    gt = _gt(cube)
+    gt = _make_geotensor(cube)
 
     bg1 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
     bg2 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
