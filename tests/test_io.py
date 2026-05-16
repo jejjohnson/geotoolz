@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ import pytest
 from georeader.geotensor import GeoTensor
 from georeader.rasterio_reader import RasterioReader
 from pipekit import Identity, Sequential
+from pyproj import CRS
 from rasterio.transform import array_bounds, from_origin
 from rasterio.windows import Window
 from shapely.geometry import box
@@ -38,6 +40,8 @@ def _cog_test_geotensor() -> GeoTensor:
 def test_io_module_is_exported() -> None:
     assert gz.io is io
     assert io.ReadBounds is not None
+    assert io.ReadHDF is not None
+    assert io.ReadNetCDF is not None
 
 
 def test_write_geotiff_then_read_bounds_roundtrips(
@@ -66,6 +70,106 @@ def test_read_bounds_without_indexes_reads_all_bands_in_order(tmp_path: Path) ->
     out = io.ReadBounds(src=path, bounds=bounds, crs="EPSG:32631")()
 
     np.testing.assert_array_equal(out.values, gt.values)
+
+
+def test_read_hdf5_reads_dataset_indexes_and_metadata(tmp_path: Path) -> None:
+    h5py = pytest.importorskip("h5py")
+    path = tmp_path / "sample.h5"
+    values = np.arange(2 * 3 * 4, dtype=np.int16).reshape(2, 3, 4)
+    with h5py.File(path, "w") as file:
+        dataset = file.create_dataset("EV_1KM_RefSB", data=values)
+        dataset.attrs["_FillValue"] = -9999
+        file.create_dataset("Latitude", data=np.ones((3, 4), dtype=np.float32))
+        file.create_dataset("Longitude", data=np.zeros((3, 4), dtype=np.float32))
+        metadata = file.create_group("metadata")
+        metadata.attrs["sensor"] = "MODIS"
+
+    out = io.ReadHDF(
+        path=path,
+        dataset="EV_1KM_RefSB",
+        indexes=[2],
+        geolocation=("Latitude", "Longitude"),
+        metadata_groups=["metadata"],
+    )()
+
+    np.testing.assert_array_equal(out.values, values[1:2])
+    assert out.fill_value_default == -9999
+    assert out.attrs["metadata"]["metadata"]["sensor"] == "MODIS"
+    np.testing.assert_array_equal(
+        out.attrs["geolocation"]["latitude"], np.ones((3, 4), dtype=np.float32)
+    )
+
+
+def test_read_hdf5_missing_dependency_has_clear_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sample.h5"
+    path.write_bytes(b"\x89HDF\r\n\x1a\n")
+    real_import_module = importlib.import_module
+
+    def fake_import_module(name: str, package: str | None = None):
+        if name == "h5py":
+            raise ImportError("missing h5py")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(io_operators.importlib, "import_module", fake_import_module)
+
+    with pytest.raises(ImportError, match=r"Install geotoolz\[hdf5\]"):
+        io.ReadHDF(path=path, dataset="data")()
+
+
+def test_read_netcdf_decodes_cf_and_recovers_grid_mapping(tmp_path: Path) -> None:
+    netcdf4 = pytest.importorskip("netCDF4")
+    path = tmp_path / "sample.nc"
+    with netcdf4.Dataset(path, "w") as root:
+        group = root.createGroup("PRODUCT")
+        group.createDimension("band", 2)
+        group.createDimension("y", 2)
+        group.createDimension("x", 3)
+        crs_var = group.createVariable("crs", "i4")
+        crs_var.crs_wkt = CRS.from_epsg(4326).to_wkt()
+        variable = group.createVariable(
+            "methane_mixing_ratio_bias_corrected",
+            "i2",
+            ("band", "y", "x"),
+            fill_value=-9999,
+        )
+        variable.scale_factor = 0.5
+        variable.add_offset = 10.0
+        variable.grid_mapping = "crs"
+        variable.GeoTransform = "10 1 0 20 0 -1"
+        variable.set_auto_maskandscale(False)
+        variable[:] = np.arange(12, dtype=np.int16).reshape(2, 2, 3)
+
+    out = io.ReadNetCDF(
+        path=path,
+        group="PRODUCT",
+        variable="methane_mixing_ratio_bias_corrected",
+        indexes=[2],
+    )()
+
+    np.testing.assert_allclose(out.values, np.arange(6, 12).reshape(1, 2, 3) * 0.5 + 10)
+    assert out.crs == CRS.from_epsg(4326)
+    assert tuple(out.transform)[:6] == (1.0, 0.0, 10.0, 0.0, -1.0, 20.0)
+    assert out.fill_value_default == -9999
+
+
+def test_read_netcdf_missing_dependency_has_clear_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sample.nc"
+    path.write_bytes(b"not a real netcdf")
+    real_import_module = importlib.import_module
+
+    def fake_import_module(name: str, package: str | None = None):
+        if name == "netCDF4":
+            raise ImportError("missing netCDF4")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(io_operators.importlib, "import_module", fake_import_module)
+
+    with pytest.raises(ImportError, match=r"Install geotoolz\[netcdf\]"):
+        io.ReadNetCDF(path=path, variable="data")()
 
 
 def test_source_operator_can_start_sequential_without_input(tmp_path: Path) -> None:
@@ -444,6 +548,8 @@ _HYDRA_ZEN_OPERATORS: list[gz.Operator] = [
     io.ReadCenterCoords(src="x.tif", center=(0.5, 0.5), shape=(2, 2)),
     io.ReadTile(src="x.tif", tile=(1, 0, 0)),
     io.ReadToCRS(src="x.tif", dst_crs="EPSG:4326"),
+    io.ReadHDF(path="x.h5", dataset="data", indexes=[1]),
+    io.ReadNetCDF(path="x.nc", variable="data", group="PRODUCT"),
     io.WriteCOG(path="x.tif"),
     io.WriteGeoTIFF(path="x.tif"),
     io.WriteZarr(store="x.zarr", group="data", chunks={"y": 16, "x": 16}),
