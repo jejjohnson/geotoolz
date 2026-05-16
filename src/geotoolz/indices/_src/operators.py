@@ -60,7 +60,8 @@ BandRef = int | str
 
 
 def _resolve_band(gt: GeoTensor, ref: BandRef) -> int:
-    if isinstance(ref, int):
+    """Resolve an integer index or named band against GeoTensor metadata."""
+    if not isinstance(ref, str):
         return ref
 
     for key in ("descriptions", "band_names", "bands"):
@@ -79,6 +80,7 @@ def _resolve_band(gt: GeoTensor, ref: BandRef) -> int:
 
 
 def _configured_ref(value: BandRef | None, fallback: BandRef | None) -> BandRef:
+    """Apply the ``band=`` / ``band_idx=`` dual-parameter constructor pattern."""
     if value is not None:
         return value
     if fallback is None:
@@ -90,6 +92,7 @@ def _configured_ref(value: BandRef | None, fallback: BandRef | None) -> BandRef:
 
 
 def _geotensor_grid_matches(a: GeoTensor, b: GeoTensor) -> bool:
+    """Return whether two rasters share spatial shape, transform, and CRS."""
     return (
         a.shape[-2:] == b.shape[-2:]
         and np.allclose(tuple(a.transform), tuple(b.transform))
