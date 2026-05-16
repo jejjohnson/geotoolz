@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from geotoolz import catalog, cloud, core, indices, patch, radiometry, types
+from geotoolz import catalog, cloud, core, indices, patch, radiometry, types, viz
 from geotoolz.catalog import (
     CatalogDomain,
     CatalogRow,
@@ -155,6 +155,21 @@ from geotoolz.radiometry import (
     ToFloat32,
 )
 from geotoolz.types import GeoSlice
+from geotoolz.viz import (
+    AnnotatePoints,
+    AnnotatePolygons,
+    ApplyColormap,
+    ApplyDiscreteColormap,
+    FalseColor,
+    GammaCorrect,
+    Hillshade,
+    Overlay,
+    ShadedRelief,
+    StretchToUint8,
+    SWIRComposite,
+    ToDisplayRange,
+    TrueColor,
+)
 
 
 if TYPE_CHECKING:
@@ -197,7 +212,11 @@ __all__ = [
     "SCL",
     "SCL_CLOUDS",
     "SCL_INVALID",
+    "AnnotatePoints",
+    "AnnotatePolygons",
     "AppendIndex",
+    "ApplyColormap",
+    "ApplyDiscreteColormap",
     "ApplyMask",
     "ApplyToChips",
     "AsyncRasterField",
@@ -210,13 +229,16 @@ __all__ = [
     "DNToRadiance",
     "DNToReflectance",
     "DuckDBGeoCatalog",
+    "FalseColor",
     "Fanout",
     "Gamma",
+    "GammaCorrect",
     "GeoCatalog",
     "GeoSlice",
     "Graph",
     "GridDomain",
     "GridSampler",
+    "Hillshade",
     "Identity",
     "InMemoryGeoCatalog",
     "Input",
@@ -229,12 +251,15 @@ __all__ = [
     "Node",
     "NormalizedDifference",
     "Operator",
+    "Overlay",
     "Patch",
     "PercentileClip",
     "PointDomain",
     "RasterDomain",
     "RasterField",
+    "SWIRComposite",
     "Sequential",
+    "ShadedRelief",
     "ShapeTrace",
     "Sink",
     "Snapshot",
@@ -275,6 +300,7 @@ __all__ = [
     "SpatioTemporalPatch",
     "SpatioTemporalPatcher",
     "Stitch",
+    "StretchToUint8",
     "Switch",
     "Tap",
     "TemporalAggregation",
@@ -300,7 +326,9 @@ __all__ = [
     "TemporalSampler",
     "TemporalTaperedTukey",
     "TemporalWindow",
+    "ToDisplayRange",
     "ToFloat32",
+    "TrueColor",
     "VectorDomain",
     "__version__",
     "build_raster_catalog",
@@ -323,4 +351,5 @@ __all__ = [
     "to_geoparquet",
     "types",
     "union",
+    "viz",
 ]
