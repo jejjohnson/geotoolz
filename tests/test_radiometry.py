@@ -6,19 +6,19 @@ round-trip, Hydra-zen `builds()` round-trip.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
-from georeader.reflectance import earth_sun_distance_correction_factor
 
 from geotoolz.radiometry import (
     DOS1,
     ApplySRF,
     BTFromRadiance,
+    ComputeSZA,
     DNToRadiance,
     DNToReflectance,
     EarthSunDistanceCorrection,
@@ -39,6 +39,10 @@ from geotoolz.radiometry import (
     min_max_normalize,
     percentile_clip,
     radiance_to_dn,
+)
+from geotoolz.radiometry._src.solar import (
+    earth_sun_distance_correction_factor,
+    observation_date_correction_factor,
 )
 
 
@@ -184,6 +188,48 @@ def test_bt_from_radiance_planck_inversion() -> None:
     out = bt_from_radiance(radiance, k1=774.8853, k2=1321.0789)
     expected = 1321.0789 / np.log((774.8853 / radiance) + 1.0)
     np.testing.assert_allclose(out, expected)
+
+
+def test_bt_from_radiance_round_trip_against_planck() -> None:
+    """The inversion ``T = K2 / ln(K1/L + 1)`` must invert ``L = K1 / (exp(K2/T) - 1)``.
+
+    Construct radiance synthetically from a target temperature using
+    the forward Planck form, push it through ``bt_from_radiance``, and
+    verify the recovered temperature matches the input to float
+    precision.
+    """
+    k1, k2 = 774.8853, 1321.0789  # Landsat-8 TIRS Band 10
+    targets = np.array([260.0, 290.0, 310.0])  # cold / temperate / warm
+    radiance = k1 / (np.exp(k2 / targets) - 1.0)
+    recovered = bt_from_radiance(radiance, k1=k1, k2=k2)
+    np.testing.assert_allclose(recovered, targets, rtol=1e-12)
+
+
+def test_earth_sun_distance_perihelion_aphelion() -> None:
+    """Perihelion (~Jan 3) gives d ≈ 0.983; aphelion (~Jul 4) gives d ≈ 1.017."""
+    d_perihelion = earth_sun_distance_correction_factor(datetime(2024, 1, 3))
+    d_aphelion = earth_sun_distance_correction_factor(datetime(2024, 7, 4))
+    np.testing.assert_allclose(d_perihelion, 0.9833, atol=1e-3)
+    np.testing.assert_allclose(d_aphelion, 1.0167, atol=1e-3)
+    # Inverse-square irradiance ratio matches the well-known ~6.5%.
+    ratio = (d_aphelion / d_perihelion) ** 2
+    np.testing.assert_allclose(ratio, 1.069, atol=2e-3)
+
+
+def test_observation_date_correction_factor_from_sza() -> None:
+    """``π·d²/cos(θ_z)`` factor must match the algebraic formula."""
+    date = datetime(2024, 6, 21)
+    sza_deg = 30.0
+    out = observation_date_correction_factor(date, sza_deg=sza_deg)
+    d = earth_sun_distance_correction_factor(date)
+    expected = np.pi * (d**2) / np.cos(np.deg2rad(sza_deg))
+    np.testing.assert_allclose(out, expected, rtol=1e-12)
+
+
+def test_observation_date_correction_factor_returns_none_without_inputs() -> None:
+    """No sza_deg and no center_coords -> defer to georeader (return None)."""
+    out = observation_date_correction_factor(datetime(2024, 6, 21))
+    assert out is None
 
 
 def test_dos1_subtracts_dark_percentile() -> None:
@@ -363,6 +409,84 @@ def test_integrated_irradiance_operator_with_flat_solar_spectrum() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_radiance_to_reflectance_parity_with_georeader() -> None:
+    """`RadianceToReflectance` must produce exactly the values that come
+    out of `georeader.reflectance.radiance_to_reflectance` when given
+    the same inputs — the operator is a thin wrapper, so any drift
+    would mean the wrapper is double-applying a correction (a class of
+    bug we explicitly want to rule out).
+    """
+    from georeader.reflectance import radiance_to_reflectance as g_r2r
+
+    radiance = _toy_geotensor(
+        np.array(
+            [
+                [[10.0, 12.0], [14.0, 16.0]],
+                [[20.0, 22.0], [24.0, 26.0]],
+            ]
+        )
+    )
+    date = datetime(2024, 7, 14, 11, 32)
+    solar = np.array([1.95, 1.85])
+    sza_deg = 30.0
+    # Same observation-date factor on both sides — bypasses pysolar so
+    # the comparison is hermetic.
+    obs_factor = observation_date_correction_factor(date, sza_deg=sza_deg)
+    expected = g_r2r(
+        radiance,
+        solar_irradiance=solar,
+        observation_date_corr_factor=obs_factor,
+        units="W/m2/sr/nm",
+    )
+    op = RadianceToReflectance(
+        solar_irradiance=solar,
+        acquisition_date=date,
+        sza_deg=sza_deg,
+        units="W/m2/sr/nm",
+    )
+    out = op(radiance)
+    np.testing.assert_allclose(np.asarray(out), np.asarray(expected), rtol=1e-12)
+    assert out.transform == radiance.transform
+    assert str(out.crs) == str(radiance.crs)
+
+
+def test_radiance_to_reflectance_accepts_iso_string_for_yaml_roundtrip() -> None:
+    """`acquisition_date` must accept either a datetime or an ISO string
+    so that hydra-zen / YAML configs can round-trip without datetime
+    serialisers.
+    """
+    date = datetime(2024, 7, 14, 11, 32)
+    radiance = _toy_geotensor(np.ones((2, 2, 2)) * 5.0)
+    solar = np.array([1.95, 1.85])
+    out_dt = RadianceToReflectance(
+        solar_irradiance=solar,
+        acquisition_date=date,
+        sza_deg=30.0,
+    )(radiance)
+    out_iso = RadianceToReflectance(
+        solar_irradiance=solar,
+        acquisition_date=date.isoformat(),
+        sza_deg=30.0,
+    )(radiance)
+    np.testing.assert_allclose(np.asarray(out_iso), np.asarray(out_dt))
+
+
+def test_compute_sza_operator_summer_solstice_noon() -> None:
+    """Solar noon at the equator on the summer solstice gives SZA ≈ 23.4°
+    (the Earth's axial tilt). Loose tolerance because pysolar applies
+    higher-order corrections (equation of time, atmospheric refraction).
+    """
+    pytest.importorskip("pysolar")
+    # June 21 ~12:00 UTC at 0°N, 0°E -- close to local solar noon.
+    # pysolar requires a tz-aware datetime.
+    op = ComputeSZA(
+        center_coords=(0.0, 0.0),
+        acquisition_date=datetime(2024, 6, 21, 12, 0, tzinfo=UTC),
+    )
+    sza = op()
+    assert 22.0 < sza < 25.0
+
+
 def test_dn_to_reflectance_parity_with_georeader_scalar_path() -> None:
     """For pre-scaled-reflectance products (S2 L1C), DNToReflectance is exact.
 
@@ -404,6 +528,26 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
         DOS1(dark_percentile=1.0),
         SimpleAtmosphericCorrection(method="dos1", dark_percentile=1.0),
         Gamma(g=1.4),
+        EarthSunDistanceCorrection(acquisition_date=datetime(2024, 6, 21)),
+        ComputeSZA(
+            center_coords=(0.0, 0.0),
+            acquisition_date=datetime(2024, 6, 21, 12, 0),
+        ),
+        RadianceToReflectance(
+            solar_irradiance=[1.95, 1.85],
+            acquisition_date=datetime(2024, 6, 21),
+            sza_deg=30.0,
+        ),
+        ReflectanceToRadiance(
+            solar_irradiance=[1.95, 1.85],
+            acquisition_date=datetime(2024, 6, 21),
+            sza_deg=30.0,
+        ),
+        ApplySRF(
+            target_center_wavelengths=[500.0, 520.0],
+            target_fwhm=[20.0, 20.0],
+            source_wavelengths=[480.0, 490.0, 500.0, 510.0, 520.0],
+        ),
     ],
 )
 def test_radiometry_hydra_zen_roundtrip(op: object) -> None:
@@ -411,6 +555,13 @@ def test_radiometry_hydra_zen_roundtrip(op: object) -> None:
     restored = hydra_zen.instantiate(cfg)
     assert type(restored) is type(op)
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+def test_integrated_irradiance_forbid_in_yaml() -> None:
+    """`IntegratedIrradiance` holds a pandas DataFrame and is correctly
+    flagged as not YAML-serialisable.
+    """
+    assert IntegratedIrradiance.forbid_in_yaml is True
 
 
 @pytest.mark.skipif(hydra_zen is None, reason="requires hydra-zen extra")
