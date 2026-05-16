@@ -124,8 +124,8 @@ def nl_means(
     arr: np.ndarray, *, patch_size: int = 5, patch_distance: int = 6, h: float = 0.1
 ) -> np.ndarray:
     """Small non-local-means approximation for dependency-light denoising."""
-    del patch_size
-    smooth = gaussian_denoise(arr, sigma=max(float(patch_distance) / 3.0, 0.1))
+    sigma = max((float(patch_distance) + float(patch_size)) / 6.0, 0.1)
+    smooth = gaussian_denoise(arr, sigma=sigma)
     values = np.asarray(arr, dtype=float)
     weights = np.exp(-0.5 * ((values - smooth) / max(float(h), 1e-12)) ** 2)
     return _preserve_nan(values, weights * values + (1.0 - weights) * smooth)
@@ -206,6 +206,7 @@ def gap_fill_nearest(arr: np.ndarray, *, max_distance: int | None = None) -> np.
 
 def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.ndarray:
     """Fill NaNs with inverse-distance weighted finite neighbours."""
+    # Very large IDW powers converge to nearest-neighbour while risking overflow.
     if power >= 64:
         return gap_fill_nearest(arr, max_distance=radius)
     values = np.asarray(arr, dtype=float)
@@ -264,6 +265,7 @@ def outlier_mask(
     values = np.asarray(arr, dtype=float)
     if method == "mad":
         center = np.nanmedian(values)
+        # Scale MAD to approximate standard deviation under normal residuals.
         scale = 1.4826 * np.nanmedian(np.abs(values - center))
     elif method == "zscore":
         center = np.nanmean(values)
