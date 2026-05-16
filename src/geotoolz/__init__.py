@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from geotoolz import catalog, cloud, core, indices, patch, radiometry, types
+from geotoolz import catalog, cloud, core, indices, patch, plume, radiometry, types
 from geotoolz.catalog import (
     CatalogDomain,
     CatalogRow,
@@ -146,6 +146,16 @@ from geotoolz.patch import (
     TemporalWindow,
     VectorDomain,
 )
+from geotoolz.plume import (
+    SBMP,
+    ColumnToMass,
+    CrossSectionalFlux,
+    IMEEstimate,
+    PlumeContours,
+    PlumeFootprint,
+    PlumeMask,
+    WindAdvectionCone,
+)
 from geotoolz.radiometry import (
     DNToRadiance,
     DNToReflectance,
@@ -194,6 +204,7 @@ __all__ = [
     "NDVI",
     "NDWI",
     "SAVI",
+    "SBMP",
     "SCL",
     "SCL_CLOUDS",
     "SCL_INVALID",
@@ -206,7 +217,9 @@ __all__ = [
     "Carrier",
     "CatalogDomain",
     "CatalogRow",
+    "ColumnToMass",
     "Const",
+    "CrossSectionalFlux",
     "DNToRadiance",
     "DNToReflectance",
     "DuckDBGeoCatalog",
@@ -217,6 +230,7 @@ __all__ = [
     "Graph",
     "GridDomain",
     "GridSampler",
+    "IMEEstimate",
     "Identity",
     "InMemoryGeoCatalog",
     "Input",
@@ -231,6 +245,9 @@ __all__ = [
     "Operator",
     "Patch",
     "PercentileClip",
+    "PlumeContours",
+    "PlumeFootprint",
+    "PlumeMask",
     "PointDomain",
     "RasterDomain",
     "RasterField",
@@ -302,6 +319,7 @@ __all__ = [
     "TemporalWindow",
     "ToFloat32",
     "VectorDomain",
+    "WindAdvectionCone",
     "__version__",
     "build_raster_catalog",
     "build_vector_catalog",
@@ -318,6 +336,7 @@ __all__ = [
     "load_xarray",
     "open_catalog",
     "patch",
+    "plume",
     "query",
     "radiometry",
     "to_geoparquet",
