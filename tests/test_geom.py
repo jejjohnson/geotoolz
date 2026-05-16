@@ -1,4 +1,15 @@
-"""Geometry operator tests."""
+"""Geometry operator tests.
+
+Three tiers:
+
+- **Tier-A**: pure-numpy primitives in
+  :mod:`geotoolz.geom._src.array` (feather kernel, slicing math,
+  validity mask, resampling resolution).
+- **Tier-B**: ``GeoTensor`` round-trip checks for every Operator,
+  with transform + CRS propagation asserted explicitly.
+- **Tier-C**: hydra-zen ``builds()`` round-trip for the YAML-safe
+  Operators.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +18,11 @@ import numpy as np
 import pytest
 from affine import Affine
 from georeader.geotensor import GeoTensor
+from rasterio.enums import Resampling
 from shapely.geometry import box
 
 import geotoolz as gz
+from geotoolz.geom._src import array as geom_array
 
 
 def _gt(values: np.ndarray | None = None) -> GeoTensor:
@@ -21,6 +34,88 @@ def _gt(values: np.ndarray | None = None) -> GeoTensor:
         crs="EPSG:4326",
         fill_value_default=-9999,
     )
+
+
+# ----------------------------------------------------------------------------
+# Tier-A: pure-numpy primitives
+# ----------------------------------------------------------------------------
+
+
+def test_array_feather_weights_ramps_from_centre_to_edge() -> None:
+    weights = geom_array.feather_weights((5, 5), width=2)
+    assert weights.dtype == np.float32
+    # Centre pixel hits the saturated plateau (>= 1).
+    assert weights[2, 2] == pytest.approx(1.0)
+    # Corner pixel is ramped down.
+    assert weights[0, 0] < weights[2, 2]
+    # Symmetry along both axes.
+    np.testing.assert_array_equal(weights, weights.T)
+
+
+def test_array_feather_weights_zero_width_returns_ones() -> None:
+    weights = geom_array.feather_weights((3, 4), width=0)
+    np.testing.assert_array_equal(weights, np.ones((3, 4), dtype=np.float32))
+
+
+def test_array_resolve_resampling_handles_aliases_and_enum() -> None:
+    assert geom_array.resolve_resampling("linear") == Resampling.bilinear
+    assert geom_array.resolve_resampling("bicubic") == Resampling.cubic
+    assert geom_array.resolve_resampling("nearest") == Resampling.nearest
+    # Passthrough for enum members.
+    assert geom_array.resolve_resampling(Resampling.mode) == Resampling.mode
+
+
+def test_array_resolve_interpolation_maps_cubic_alias() -> None:
+    assert geom_array.resolve_interpolation("cubic") == "bicubic"
+    assert geom_array.resolve_interpolation("cubic_spline") == "bicubic"
+    assert geom_array.resolve_interpolation("average") == "bilinear"
+    # Passthrough for names that map identity.
+    assert geom_array.resolve_interpolation("nearest") == "nearest"
+
+
+def test_array_center_offsets_and_north_up() -> None:
+    assert geom_array.center_offsets((10, 10), (4, 4)) == (3, 3)
+    assert geom_array.center_offsets((5, 5), (5, 5)) == (0, 0)
+    assert geom_array.is_north_up(Affine(1, 0, 0, 0, -1, 0)) is True
+    assert geom_array.is_north_up(Affine(1, 0.1, 0, 0, -1, 0)) is False
+
+
+def test_array_valid_pixel_mask_handles_dtypes_and_collapse() -> None:
+    arr = np.array([[1.0, -9999.0], [3.0, 4.0]], dtype=np.float32)
+    np.testing.assert_array_equal(
+        geom_array.valid_pixel_mask(arr, -9999),
+        np.array([[True, False], [True, True]]),
+    )
+    # NaN sentinel path.
+    nan_arr = np.array([[np.nan, 1.0]], dtype=np.float32)
+    np.testing.assert_array_equal(
+        geom_array.valid_pixel_mask(nan_arr, float("nan")),
+        np.array([[False, True]]),
+    )
+    # None short-circuits to all-True.
+    np.testing.assert_array_equal(
+        geom_array.valid_pixel_mask(arr, None),
+        np.ones_like(arr, dtype=bool),
+    )
+    # Multi-band collapse along the leading axis.
+    multi = np.stack([arr, arr.copy()], axis=0)
+    np.testing.assert_array_equal(
+        geom_array.valid_pixel_mask(multi, -9999),
+        np.array([[True, False], [True, True]]),
+    )
+
+
+def test_array_target_slices_clips_tile_outside_target() -> None:
+    target = Affine(1, 0, 0, 0, -1, 0)
+    tile = Affine(1, 0, 4, 0, -1, -4)  # tile lower-right corner
+    out_slc, tile_slc = geom_array.target_slices(tile, (4, 4), target, (8, 8))
+    assert out_slc == (slice(4, 8), slice(4, 8))
+    assert tile_slc == (slice(0, 4), slice(0, 4))
+
+
+# ----------------------------------------------------------------------------
+# Tier-B: Operator round-trips
+# ----------------------------------------------------------------------------
 
 
 def test_geom_module_is_public() -> None:
@@ -38,7 +133,7 @@ def test_pad_to_then_crop_to_recovers_original_values() -> None:
     assert cropped.same_extent(gt)
 
 
-def test_tile_then_stitch_reconstructs_original_without_overlap() -> None:
+def test_tile_then_stitch_reconstructs_original_with_crs_preserved() -> None:
     gt = _gt()
 
     tiles = gz.geom.Tile(size=(3, 4))(gt)
@@ -47,9 +142,48 @@ def test_tile_then_stitch_reconstructs_original_without_overlap() -> None:
     assert stitched.shape == gt.shape
     np.testing.assert_allclose(np.asarray(stitched), np.asarray(gt))
     assert stitched.same_extent(gt)
+    # CRS propagation through the round-trip.
+    assert str(stitched.crs) == str(gt.crs)
+    # Affine origin matches.
+    assert stitched.transform == gt.transform
 
 
-def test_reproject_like_matches_reference_grid() -> None:
+def test_stitch_masks_fill_sentinels_from_padded_tiles() -> None:
+    """Stitch must ignore the fill sentinel that boundless reads produce.
+
+    Hand-build two tiles where the right tile has its rightmost column
+    padded with the fill value; the blended output must reproduce the
+    real values, not average in the sentinel.
+    """
+    crs = "EPSG:4326"
+    fill = -9999.0
+    real = np.ones((1, 3, 3), dtype=np.float32)
+    left = GeoTensor(
+        real,
+        transform=Affine(1, 0, 0, 0, -1, 3),
+        crs=crs,
+        fill_value_default=fill,
+    )
+    padded = np.array(
+        [[[1.0, 1.0, fill], [1.0, 1.0, fill], [1.0, 1.0, fill]]],
+        dtype=np.float32,
+    )
+    right = GeoTensor(
+        padded,
+        transform=Affine(1, 0, 3, 0, -1, 3),
+        crs=crs,
+        fill_value_default=fill,
+    )
+    stitched = gz.geom.Stitch(blend="average")([left, right])
+    out = np.asarray(stitched)
+    # Sentinel pixels did not bleed: the right column of the right tile
+    # gets the fill, every other pixel is the genuine value 1.
+    assert out.shape == (1, 3, 6)
+    np.testing.assert_array_equal(out[..., :5], np.ones((1, 3, 5)))
+    np.testing.assert_array_equal(out[..., 5], np.full((1, 3), fill))
+
+
+def test_reproject_like_matches_reference_grid_and_propagates_crs() -> None:
     gt = _gt()
     like = GeoTensor(
         np.zeros((1, 3, 4), dtype=np.float32),
@@ -61,6 +195,8 @@ def test_reproject_like_matches_reference_grid() -> None:
     out = gz.geom.ReprojectLike(like=like, resampling="nearest")(gt)
 
     assert out.same_extent(like)
+    assert str(out.crs) == str(like.crs)
+    assert out.transform == like.transform
 
 
 def test_resize_resample_and_crop_to_bounds() -> None:
@@ -73,7 +209,11 @@ def test_resize_resample_and_crop_to_bounds() -> None:
     assert resized.shape == (1, 10, 14)
     assert resampled.shape == (1, 2, 4)
     assert cropped.shape == (1, 3, 3)
-    assert gz.geom.Resize(shape=(1, 1)).get_config()["shape"] == (1, 1)
+    assert gz.geom.Resize(shape=(1, 1)).get_config()["shape"] == [1, 1]
+    # CRS preserved through every resize / crop path.
+    assert str(resized.crs) == str(gt.crs)
+    assert str(resampled.crs) == str(gt.crs)
+    assert str(cropped.crs) == str(gt.crs)
 
 
 def test_crop_to_validates_target_and_anchor() -> None:
@@ -95,7 +235,7 @@ def test_sliding_window_and_tile_validate_stride() -> None:
 
     assert tiles
     assert gz.geom.SlidingWindow(size=(3, 3), overlap=1).get_config() == {
-        "size": (3, 3),
+        "size": [3, 3],
         "overlap": 1,
     }
     with pytest.raises(ValueError, match="stride"):
@@ -114,7 +254,7 @@ def test_rasterize_and_vectorize_round_trip_geometry() -> None:
     assert sum(polygon.area for polygon in polygons) == pytest.approx(geometry.area)
 
 
-def test_rasterize_like_accepts_geodataframe() -> None:
+def test_rasterize_like_accepts_geodataframe_and_default_column() -> None:
     like = _gt(np.zeros((5, 7), dtype=np.uint8))
     dataframe = gpd.GeoDataFrame(
         {"value": [3]},
@@ -176,3 +316,66 @@ def test_mosaic_methods_cover_adjacent_tiles() -> None:
 
     with pytest.raises(ValueError, match="method"):
         gz.geom.Mosaic(method="unknown")([left, right])
+
+
+def test_carrier_referencing_operators_flagged_forbid_in_yaml() -> None:
+    """Operators that hold concrete GeoTensor / GeoDataFrame references
+    must declare ``forbid_in_yaml = True`` so future YAML dumpers refuse
+    to round-trip them silently."""
+    like = _gt()
+    poly_gdf = gpd.GeoDataFrame({"v": [1]}, geometry=[box(0, 0, 1, 1)], crs="EPSG:4326")
+    assert gz.geom.ReprojectLike(like=like).forbid_in_yaml is True
+    assert gz.geom.ResampleLike(like=like).forbid_in_yaml is True
+    assert gz.geom.RasterizeLike(like=like, geometries=poly_gdf).forbid_in_yaml is True
+    assert gz.geom.Rasterize(geometries=[box(0, 0, 1, 1)]).forbid_in_yaml is True
+    assert (
+        gz.geom.Georeference(
+            glt=GeoTensor(
+                np.zeros((2, 3, 3), dtype=np.int32),
+                transform=Affine(1, 0, 0, 0, -1, 0),
+                crs="EPSG:4326",
+            )
+        ).forbid_in_yaml
+        is True
+    )
+    # YAML-safe ops stay False.
+    assert gz.geom.Reproject(dst_crs="EPSG:4326").forbid_in_yaml is False
+    assert gz.geom.Tile(size=(2, 2)).forbid_in_yaml is False
+
+
+# ----------------------------------------------------------------------------
+# Tier-C: hydra-zen builds() round-trip for YAML-safe operators
+# ----------------------------------------------------------------------------
+
+
+try:
+    import hydra_zen as _hydra_zen  # type: ignore[import-not-found]
+
+    _HAS_HYDRA_ZEN = True
+except ImportError:
+    _hydra_zen = None  # type: ignore[assignment]
+    _HAS_HYDRA_ZEN = False
+
+
+@pytest.mark.skipif(not _HAS_HYDRA_ZEN, reason="hydra-zen extra not installed")
+@pytest.mark.parametrize(
+    "operator",
+    [
+        gz.geom.Reproject(dst_crs="EPSG:4326", resolution=(10.0, 10.0)),
+        gz.geom.Resize(shape=(256, 256)),
+        gz.geom.Resample(resolution=(20.0, 20.0)),
+        gz.geom.PadTo(shape=(512, 512), fill=0.0),
+        gz.geom.CropTo(shape=(256, 256), anchor="upper_left"),
+        gz.geom.CropToBounds(bounds=(0.0, 0.0, 1.0, 1.0), crs="EPSG:4326"),
+        gz.geom.Tile(size=(128, 128), stride=(64, 64)),
+        gz.geom.SlidingWindow(size=(128, 128), overlap=16),
+        gz.geom.Stitch(blend="feather", feather_width=8),
+        gz.geom.Mosaic(method="median", resampling="bilinear"),
+        gz.geom.Vectorize(min_area=10.0, simplify_tolerance=0.5),
+    ],
+)
+def test_yaml_safe_operators_roundtrip_through_hydra_zen(operator) -> None:
+    cfg = _hydra_zen.builds(type(operator), **operator.get_config())
+    restored = _hydra_zen.instantiate(cfg)
+    assert type(restored) is type(operator)
+    assert restored.get_config() == operator.get_config()
