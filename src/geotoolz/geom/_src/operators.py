@@ -743,7 +743,10 @@ class BowtieCorrection(Operator):
         method: str = "nearest",
     ) -> None:
         if not 0.0 <= scan_angle_max_deg < 70.0:
-            raise ValueError("scan_angle_max_deg must be >= 0.0 and < 70.0.")
+            raise ValueError(
+                "scan_angle_max_deg must be >= 0.0 and < 70.0 for stable "
+                "cosine-based IFOV correction."
+            )
         self.scan_angle_max_deg = scan_angle_max_deg
         self.pixels_per_scan = pixels_per_scan
         self.scans_per_granule = scans_per_granule
@@ -819,6 +822,7 @@ class AntimeridianSplit(Operator):
         diffs = np.abs(np.diff(lons, axis=1))
         if diffs.size == 0 or np.nanmax(diffs) <= self.tolerance_deg:
             return [gt]
+        # The diff at column i is the jump between i and i + 1.
         split_col = int(np.nanargmax(np.nanmax(diffs, axis=0))) + 1
         left = gt.isel({"x": slice(0, split_col)})
         right = gt.isel({"x": slice(split_col, gt.shape[-1])})
@@ -920,7 +924,9 @@ class SegmentStitch(Operator):
     ``attrs["__geotoolz_segment_meta__"]`` dictionary with
     ``segment_index`` and ``n_segments`` keys. Both zero-based
     (``0..n_segments-1``) and one-based (``1..n_segments``) indexing are
-    accepted. Missing segments are filled with ``fill``.
+    accepted. One-based indexing is selected only when an index equal to
+    ``n_segments`` is present; ambiguous missing-edge cases default to
+    zero-based. Missing segments are filled with ``fill``.
 
     Args:
         axis: ``"scan"`` / ``"y"`` for along-track, or ``"sample"`` /
@@ -940,7 +946,7 @@ class SegmentStitch(Operator):
         n_segments = metas[0][1]
         if any(n != n_segments for _, n in metas):
             raise ValueError("All segments must declare the same n_segments.")
-        index_offset = 1 if min(index for index, _ in metas) >= 1 else 0
+        index_offset = 1 if max(index for index, _ in metas) == n_segments else 0
         by_index = {
             index - index_offset: segment
             for (index, _), segment in zip(metas, segments, strict=True)
@@ -1385,7 +1391,7 @@ def _apply_invalid_fill(
     return out
 
 
-def _longitude_grid(gt: GeoTensor, target_crs: str | CRS) -> np.ndarray | None:
+def _longitude_grid(gt: GeoTensor, expected_crs: str | CRS) -> np.ndarray | None:
     attrs = gt.attrs or {}
     for key in ("lons", "lon", "longitude"):
         if key in attrs:
@@ -1393,7 +1399,12 @@ def _longitude_grid(gt: GeoTensor, target_crs: str | CRS) -> np.ndarray | None:
             if lons.ndim == 1:
                 return np.broadcast_to(lons[None, :], gt.shape[-2:])
             return lons
-    if CRS.from_user_input(gt.crs) != CRS.from_user_input(target_crs):
+    parsed_expected = (
+        expected_crs
+        if isinstance(expected_crs, CRS)
+        else CRS.from_user_input(expected_crs)
+    )
+    if CRS.from_user_input(gt.crs) != parsed_expected:
         return None
     centres = _lonlat_centres(gt)
     if centres is None:
@@ -1461,6 +1472,7 @@ def _apparent_lonlat(
     lat_rad = np.deg2rad(lats)
     sat_lon = np.deg2rad(satellite_lon_deg)
     surface = _spherical_xyz(lon_rad, lat_rad, earth_radius_m)
+    # Scale each surface radial vector outward by the target height.
     elevated = surface * ((earth_radius_m + heights)[None, ...] / earth_radius_m)
     satellite = np.array(
         [
@@ -1481,7 +1493,8 @@ def _apparent_lonlat(
         miss_pct = miss_count / misses.size * 100.0
         raise ValueError(
             "Parallax ray does not intersect the Earth surface for "
-            f"{miss_count} pixels ({miss_pct:.2f}%)."
+            f"{miss_count} pixels ({miss_pct:.2f}%). Check target heights, "
+            "off-nadir extent, and satellite parameters."
         )
     near = (-b - np.sqrt(np.maximum(discriminant, 0.0))) / (2.0 * a)
     apparent = satellite + direction * near[None, ...]
