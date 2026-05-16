@@ -21,7 +21,7 @@ class Reader(SensorReader):
         data: Optional in-memory array in ``(band, y, x)`` order.
         transform: Affine transform for the synthetic grid.
         crs: Coordinate reference system.
-        fill_value: Fill value used for boundless reads.
+        fill_value_default: Fill value used for boundless reads.
 
     Examples:
         >>> import numpy as np
@@ -38,7 +38,7 @@ class Reader(SensorReader):
         data: np.ndarray | None = None,
         transform: Affine | None = None,
         crs: Any = "EPSG:4326",
-        fill_value: float = np.nan,
+        fill_value_default: float = np.nan,
     ) -> None:
         self.path = as_path(path)
         self._data = (
@@ -46,7 +46,7 @@ class Reader(SensorReader):
         )
         self._reader_transform = Affine.identity() if transform is None else transform
         self._reader_crs = crs
-        self._reader_fill_value = fill_value
+        self._reader_fill_value = fill_value_default
 
     @property
     def _crs(self) -> Any:

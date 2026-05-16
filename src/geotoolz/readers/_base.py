@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-import rasterio
 from affine import Affine
 from georeader.abstract_reader import GeoData
 from georeader.geotensor import GeoTensor
+from rasterio.transform import rowcol
 from rasterio.windows import (
     Window,
     from_bounds as window_from_bounds,
@@ -162,7 +162,9 @@ class SensorReader(GeoData, ABC):
         boundless: bool = True,
     ) -> GeoTensor:
         """Read a window centered on map coordinates."""
-        row, col = rasterio.transform.rowcol(self.transform, x, y)
+        rows, cols = rowcol(self.transform, [x], [y])
+        row = rows[0]
+        col = cols[0]
         window = Window(
             col_off=col - width // 2,
             row_off=row - height // 2,
