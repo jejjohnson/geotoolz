@@ -35,6 +35,9 @@ from typing import Any
 from geotoolz.core._src.operator import Carrier, Operator
 
 
+_MISSING = object()
+
+
 class Sequential(Operator):
     """Apply a list of operators in order, threading the output of each
     into the next.
@@ -81,12 +84,17 @@ class Sequential(Operator):
                 )
         self.operators = list(operators)
 
-    def _apply(self, gt: Carrier) -> Any:
+    def _apply(self, gt: Carrier = _MISSING) -> Any:
         # Return type stays ``Any`` rather than ``Carrier``: a Sequential
         # may legitimately reduce (e.g. end in a ``Mean`` that returns a
         # scalar) so we can't promise the carrier shape survives.
-        out = gt
-        for op in self.operators:
+        if gt is _MISSING and self.operators:
+            out = self.operators[0]()
+            operators = self.operators[1:]
+        else:
+            out = None if gt is _MISSING else gt
+            operators = self.operators
+        for op in operators:
             out = op(out)
         return out
 
