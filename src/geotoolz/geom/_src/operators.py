@@ -40,6 +40,10 @@ from geotoolz.geom._src.array import (
 )
 
 
+_MIN_BOWTIE_COS = 0.1
+_RAY_DISCRIMINANT_TOLERANCE = 1.0e-6
+
+
 if TYPE_CHECKING:
     import geopandas as gpd
     from shapely.geometry.base import BaseGeometry
@@ -739,7 +743,7 @@ class BowtieCorrection(Operator):
         method: str = "nearest",
     ) -> None:
         if not 0.0 <= scan_angle_max_deg < 70.0:
-            raise ValueError("scan_angle_max_deg must be in the range [0, 70).")
+            raise ValueError("scan_angle_max_deg must be in the range [0.0, 70.0).")
         self.scan_angle_max_deg = scan_angle_max_deg
         self.pixels_per_scan = pixels_per_scan
         self.scans_per_granule = scans_per_granule
@@ -767,7 +771,7 @@ class BowtieCorrection(Operator):
         angles = np.deg2rad(
             np.linspace(-self.scan_angle_max_deg, self.scan_angle_max_deg, width)
         )
-        expansion = 1.0 / np.clip(np.cos(angles), 0.1, None)
+        expansion = 1.0 / np.clip(np.cos(angles), _MIN_BOWTIE_COS, None)
         src_cols = centre + (cols - centre) / expansion
         sampled = _sample_array(
             np.asarray(gt),
@@ -914,8 +918,9 @@ class SegmentStitch(Operator):
 
     Segment order is read from each input's
     ``attrs["__geotoolz_segment_meta__"]`` dictionary with
-    ``segment_index`` and ``n_segments`` keys. Missing segments are filled
-    with ``fill``.
+    ``segment_index`` and ``n_segments`` keys. Both zero-based
+    (``0..n_segments-1``) and one-based (``1..n_segments``) indexing are
+    accepted. Missing segments are filled with ``fill``.
 
     Args:
         axis: ``"scan"`` / ``"y"`` for along-track, or ``"sample"`` /
@@ -1366,6 +1371,12 @@ def _apply_invalid_fill(
     valid: np.ndarray,
     fill: float | int | None,
 ) -> np.ndarray:
+    """Fill samples that fall outside the input grid.
+
+    ``GeoTensor.fill_value_default`` can be ``None``; in that case this
+    internal resampler uses ``0`` for invalid samples, matching georeader's
+    constructor default.
+    """
     if valid.all():
         return sampled.astype(sampled.dtype, copy=False)
     out = sampled.copy()
@@ -1464,7 +1475,7 @@ def _apparent_lonlat(
     b = 2.0 * np.sum(satellite * direction, axis=0)
     c = np.sum(satellite * satellite, axis=0) - earth_radius_m**2
     discriminant = b * b - 4.0 * a * c
-    if np.any(discriminant < -1.0e-6):
+    if np.any(discriminant < -_RAY_DISCRIMINANT_TOLERANCE):
         raise ValueError("Parallax ray does not intersect the Earth surface.")
     near = (-b - np.sqrt(np.maximum(discriminant, 0.0))) / (2.0 * a)
     apparent = satellite + direction * near[None, ...]
