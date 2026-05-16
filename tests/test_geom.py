@@ -423,6 +423,7 @@ def test_bowtie_correction_resamples_edges_and_preserves_fill() -> None:
     assert str(out.crs) == str(gt.crs)
     assert np.asarray(out)[0, 2, 0] == -9999.0
     assert np.asarray(out)[0, 2, 1] == -9999.0
+    assert np.asarray(out)[0, 0, 3] == np.asarray(gt)[0, 0, 3]
     assert np.asarray(out)[0, 0, 0] > np.asarray(gt)[0, 0, 0]
 
 
