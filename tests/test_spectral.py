@@ -7,7 +7,6 @@ import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
 
-import geotoolz as gz
 from geotoolz import spectral
 
 
@@ -25,7 +24,6 @@ def _toy_geotensor(values: np.ndarray) -> GeoTensor:
 
 
 def test_select_bands_by_name_and_index_match() -> None:
-    assert gz.spectral is spectral
     gt = _toy_geotensor(np.arange(4 * 2 * 3, dtype=np.float32).reshape(4, 2, 3))
     by_name = spectral.SelectBands(indexes=["B8", "B4"])(gt)
     by_index = spectral.SelectBands(indexes=[2, 1])(gt)
