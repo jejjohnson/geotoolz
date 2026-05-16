@@ -55,6 +55,7 @@ def _as_geotensor_like(base: GeoTensor, values: np.ndarray) -> GeoTensor:
 
 
 def _take_by_spatial_index(stack: np.ndarray, index: np.ndarray) -> np.ndarray:
+    """Select one frame per pixel from ``(T, ..., H, W)`` stack data."""
     indexer = np.broadcast_to(index, stack.shape[1:]).reshape((1, *stack.shape[1:]))
     return np.take_along_axis(stack, indexer, axis=0)[0]
 
@@ -109,10 +110,15 @@ def _score_array(value: Any, spatial_shape: tuple[int, int]) -> np.ndarray:
 
 
 def _normalise_positive(stack: np.ndarray) -> np.ndarray:
+    """Normalize by the maximum finite positive value, or return zeros."""
     max_value = np.nanmax(stack)
     if not np.isfinite(max_value) or max_value <= 0:
         return np.zeros_like(stack, dtype=np.float32)
     return np.asarray(stack / max_value, dtype=np.float32)
+
+
+def _as_float_for_nan(values: np.ndarray) -> np.ndarray:
+    return values.astype(np.result_type(values.dtype, np.float32), copy=False)
 
 
 class MedianComposite(Operator):
@@ -185,7 +191,7 @@ class MaxNDVIComposite(Operator):
         scores = np.where(np.isnan(ndvi), -np.inf, ndvi)
         index = np.argmax(scores, axis=0)
         values = _take_by_spatial_index(stack, index)
-        values = values.astype(np.result_type(values.dtype, np.float32), copy=False)
+        values = _as_float_for_nan(values)
         values[..., np.all(~np.isfinite(scores), axis=0)] = np.nan
         out = _as_geotensor_like(base, values)
         if not self.return_index:
@@ -235,9 +241,7 @@ class CloudFreeComposite(Operator):
         with np.errstate(invalid="ignore", divide="ignore"):
             values = total / count
         values = np.where(count >= self.min_valid, values, np.nan)
-        out = _as_geotensor_like(
-            base, values.astype(np.result_type(stack.dtype, np.float32), copy=False)
-        )
+        out = _as_geotensor_like(base, _as_float_for_nan(values))
         if not self.return_count:
             return out
         return out, _as_geotensor_like(base, count.astype(np.int64))
@@ -387,11 +391,13 @@ class MinCloudComposite(Operator):
         base, stack, cloudy = _require_pairs(pairs)
         clear = ~cloudy
         spatial_clear = clear.reshape((clear.shape[0], -1))
-        coverage = 1.0 - spatial_clear.mean(axis=1)
+        cloud_coverage = 1.0 - spatial_clear.mean(axis=1)
         costs = np.where(
-            clear, coverage.reshape((-1, *([1] * (clear.ndim - 1)))), np.inf
+            clear,
+            cloud_coverage.reshape((-1, *([1] * (clear.ndim - 1)))),
+            np.inf,
         )
-        fallback = int(np.argmin(coverage))
+        fallback = int(np.argmin(cloud_coverage))
         index = np.argmin(costs, axis=0)
         all_cloudy = ~np.any(clear, axis=0)
         index = np.where(all_cloudy, fallback, index)
