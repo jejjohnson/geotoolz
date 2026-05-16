@@ -117,6 +117,24 @@ def test_ime_estimate_uses_integrated_mass_and_max_axis_length() -> None:
     assert estimate["emission_rate_kg_s"] == pytest.approx(60.0)
 
 
+def test_ime_skeleton_length_and_uncertainty_fraction() -> None:
+    mask_arr = np.array([[True, True], [False, True]])
+    mask = _gt(mask_arr)
+    enhancement = _gt(np.ones((2, 2), dtype=float))
+
+    estimate = gz.plume.IMEEstimate(
+        plume_mask=mask,
+        wind_speed=2.0,
+        length_method="skeleton",
+        uncertainty_fraction=0.2,
+    )(enhancement)
+
+    assert estimate["ime_kg"] == pytest.approx(300.0)
+    assert estimate["length_m"] == pytest.approx(20.0)
+    assert estimate["emission_rate_kg_s"] == pytest.approx(30.0)
+    assert estimate["emission_rate_uncertainty_kg_s"] == pytest.approx(6.0)
+
+
 def test_cross_sectional_flux_returns_transect_geodataframe() -> None:
     mask = _gt(np.ones((3, 3), dtype=bool))
     enhancement = _gt(np.ones((3, 3), dtype=float))
@@ -162,6 +180,7 @@ def test_sbmp_reference_scene_correlates_with_injected_signal() -> None:
 
     out = gz.plume.SBMP(swir1=0, swir2=1, reference_scene=_gt(reference))(_gt(scene))
 
+    assert np.allclose(np.asarray(out), truth)
     corr = np.corrcoef(np.asarray(out).ravel(), truth.ravel())[0, 1]
     assert corr > 0.99
 

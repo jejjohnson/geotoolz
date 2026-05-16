@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from heapq import heappop, heappush
 from typing import Any, Literal
 
 import numpy as np
@@ -223,7 +224,7 @@ def plume_length(
     points = np.column_stack([xs[active], ys[active]])
     if points.shape[0] == 1:
         return float(np.sqrt(pixel_area(transform)))
-    if method in {"max_axis", "skeleton"}:
+    if method == "max_axis":
         diff = points[:, None, :] - points[None, :, :]
         return float(np.sqrt(np.max(np.sum(diff**2, axis=-1))))
     if method == "convex_hull":
@@ -233,4 +234,46 @@ def plume_length(
         )
         diff = coords[:, None, :] - coords[None, :, :]
         return float(np.sqrt(np.max(np.sum(diff**2, axis=-1))))
+    if method == "skeleton":
+        return _longest_active_pixel_path(active, transform)
     raise ValueError("length_method must be 'max_axis', 'convex_hull', or 'skeleton'")
+
+
+def _longest_active_pixel_path(mask: np.ndarray, transform: Any) -> float:
+    """Approximate centerline length as the longest path through active pixels."""
+    rows, cols = np.nonzero(mask)
+    nodes = {(int(r), int(c)) for r, c in zip(rows, cols, strict=True)}
+    start = next(iter(nodes))
+    farthest, _ = _farthest_active_pixel(start, nodes, transform)
+    _, distance = _farthest_active_pixel(farthest, nodes, transform)
+    return float(distance)
+
+
+def _farthest_active_pixel(
+    start: tuple[int, int],
+    nodes: set[tuple[int, int]],
+    transform: Any,
+) -> tuple[tuple[int, int], float]:
+    distances = {start: 0.0}
+    heap = [(0.0, start)]
+    farthest = start
+    while heap:
+        distance, node = heappop(heap)
+        if distance != distances[node]:
+            continue
+        farthest = node
+        row, col = node
+        for drow in (-1, 0, 1):
+            for dcol in (-1, 0, 1):
+                if abs(drow) + abs(dcol) != 1:
+                    continue
+                neighbor = (row + drow, col + dcol)
+                if neighbor not in nodes:
+                    continue
+                step_x = transform.a * dcol + transform.b * drow
+                step_y = transform.d * dcol + transform.e * drow
+                new_distance = distance + float(np.hypot(step_x, step_y))
+                if new_distance < distances.get(neighbor, np.inf):
+                    distances[neighbor] = new_distance
+                    heappush(heap, (new_distance, neighbor))
+    return farthest, distances[farthest]

@@ -218,7 +218,7 @@ class PlumeFootprint(Operator):
             area_m2 = float(geometry.area)
             if area_m2 < self.min_area_m2:
                 continue
-            values = (
+            component_values = (
                 np.asarray(labels, dtype=float)[component]
                 if enh is None
                 else enh[component]
@@ -228,8 +228,8 @@ class PlumeFootprint(Operator):
                     "geometry": geometry,
                     "area_m2": area_m2,
                     "centroid": geometry.centroid,
-                    "mean_enhancement": float(np.nanmean(values)),
-                    "max_enhancement": float(np.nanmax(values)),
+                    "mean_enhancement": float(np.nanmean(component_values)),
+                    "max_enhancement": float(np.nanmax(component_values)),
                     "n_pixels": n_pixels,
                     "label_id": label_id,
                 }
@@ -301,7 +301,11 @@ class WindAdvectionCone(Operator):
 
 
 class IMEEstimate(Operator):
-    """Estimate emission rate with Q = IME * U_eff / L."""
+    """Estimate emission rate with Q = IME * U_eff / L.
+
+    When uncertainty output is requested, ``uncertainty_fraction`` is
+    applied as a simple fractional uncertainty on the emission rate.
+    """
 
     def __init__(
         self,
@@ -311,12 +315,16 @@ class IMEEstimate(Operator):
         length_method: Literal["max_axis", "convex_hull", "skeleton"] = "max_axis",
         pixel_area_m2: float | None = None,
         return_uncertainty: bool = True,
+        uncertainty_fraction: float = 0.5,
     ) -> None:
         self.plume_mask = plume_mask
         self.wind_speed = wind_speed
         self.length_method = length_method
         self.pixel_area_m2 = pixel_area_m2
         self.return_uncertainty = return_uncertainty
+        if uncertainty_fraction < 0.0:
+            raise ValueError("uncertainty_fraction must be non-negative")
+        self.uncertainty_fraction = uncertainty_fraction
 
     def _apply(self, gt: GeoTensor) -> dict[str, float]:
         mask = squeeze_single_band(np.asarray(self.plume_mask)).astype(bool)
@@ -336,7 +344,9 @@ class IMEEstimate(Operator):
             "emission_rate_kg_s": float(rate),
         }
         if self.return_uncertainty:
-            out["emission_rate_uncertainty_kg_s"] = float(abs(rate) * 0.5)
+            out["emission_rate_uncertainty_kg_s"] = float(
+                abs(rate) * self.uncertainty_fraction
+            )
         return out
 
     def get_config(self) -> dict[str, Any]:
@@ -349,6 +359,7 @@ class IMEEstimate(Operator):
             "length_method": self.length_method,
             "pixel_area_m2": self.pixel_area_m2,
             "return_uncertainty": self.return_uncertainty,
+            "uncertainty_fraction": self.uncertainty_fraction,
         }
 
 
