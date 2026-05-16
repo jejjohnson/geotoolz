@@ -119,8 +119,6 @@ def _select_qa(gt: GeoTensor, qa_band: BandSelector, axis: int) -> np.ndarray:
 
 def _decode_bits(qa: np.ndarray, bits: Sequence[int], mode: str) -> np.ndarray:
     bits_tuple = _require_non_empty(tuple(int(bit) for bit in bits), "bits")
-    if mode not in {"any", "all"}:
-        raise ValueError("mode must be 'any' or 'all'")
     qa_arr = np.asarray(qa)
     qa_int = (
         qa_arr
@@ -240,6 +238,8 @@ class _QAMask(Operator):
         self.qa_band = qa_band
         self.bits = _normalize_int_sequence(bits)
         self.values = _normalize_int_sequence(values)
+        if mode not in {"any", "all"}:
+            raise ValueError("mode must be 'any' or 'all'")
         self.mode = mode
         self.axis = axis
         self.invert = invert
@@ -367,6 +367,8 @@ class MaskSaturated(Operator):
 
 
 def _registry_bits(sensor: str, targets: Sequence[str]) -> dict[str, tuple[int, ...]]:
+    if len(targets) == 0:
+        raise ValueError(f"{sensor} QA targets must not be empty")
     sensor_def = SENSOR_QA_REGISTRY[sensor]
     out = {}
     for target in targets:
@@ -375,6 +377,16 @@ def _registry_bits(sensor: str, targets: Sequence[str]) -> dict[str, tuple[int, 
         except KeyError as exc:
             raise ValueError(f"unknown {sensor} QA target: {target!r}") from exc
     return out
+
+
+def _or_bit_masks(qa: np.ndarray, bits: Mapping[str, Sequence[int]]) -> np.ndarray:
+    mask: np.ndarray | None = None
+    for bit_list in bits.values():
+        decoded = _decode_bits(qa, bit_list, "any")
+        mask = decoded if mask is None else np.logical_or(mask, decoded)
+    if mask is None:
+        raise ValueError("QA targets must not be empty")
+    return mask
 
 
 def _registry_values(sensor: str, targets: Sequence[str]) -> tuple[int, ...]:
@@ -450,8 +462,7 @@ class LandsatQA_PIXEL(Operator):
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         bits = _registry_bits("landsat_qa_pixel", self.targets)
         qa = _select_qa(gt, self.qa_band, self.axis)
-        masks = [_decode_bits(qa, bit_list, "any") for bit_list in bits.values()]
-        mask = np.logical_or.reduce(masks)
+        mask = _or_bit_masks(qa, bits)
         return gt.array_as_geotensor(mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
@@ -479,8 +490,7 @@ class MODISStateQA(Operator):
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         bits = _registry_bits("modis_state_qa", self.targets)
         qa = _select_qa(gt, self.qa_band, self.axis)
-        masks = [_decode_bits(qa, bit_list, "any") for bit_list in bits.values()]
-        mask = np.logical_or.reduce(masks)
+        mask = _or_bit_masks(qa, bits)
         return gt.array_as_geotensor(mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:

@@ -235,13 +235,9 @@ def test_mask_saturated_requires_value_for_float_inputs() -> None:
 
 
 def test_ml_placeholders_are_configurable_and_explicit() -> None:
-    gt = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
     assert qa.S2Cloudless(threshold=0.5).get_config() == {"threshold": 0.5}
     assert qa.OmniCloudMask(checkpoint="x").get_config() == {"checkpoint": "x"}
     assert qa.CloudSEN12(checkpoint="y").get_config() == {"checkpoint": "y"}
-    with pytest.raises(ImportError, match="optional ML mask extra"):
-        qa.S2Cloudless()(gt)
-    with pytest.raises(ImportError, match="optional ML mask extra"):
-        qa.OmniCloudMask()(gt)
-    with pytest.raises(ImportError, match="optional ML mask extra"):
-        qa.CloudSEN12()(gt)
+    for op in (qa.S2Cloudless(), qa.OmniCloudMask(), qa.CloudSEN12()):
+        with pytest.raises(ImportError, match="optional ML mask extra"):
+            op(_toy_geotensor(np.zeros((2, 2), dtype=np.float32)))
