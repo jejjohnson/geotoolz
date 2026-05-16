@@ -161,7 +161,14 @@ def test_min_cloud_composite_prefers_clear_pixels_from_least_cloudy_frame() -> N
         (MinCloudComposite(), "masks"),
     ],
 )
-def test_composites_raise_on_mismatched_grid(operator: object, payload: str) -> None:
+def test_composites_raise_on_mismatched_grid(
+    operator: MedianComposite
+    | MaxNDVIComposite
+    | CloudFreeComposite
+    | BAPComposite
+    | MinCloudComposite,
+    payload: str,
+) -> None:
     base = _gt(np.ones((1, 2, 2), dtype=np.float32))
     shifted = _gt(
         np.ones((1, 2, 2), dtype=np.float32),
@@ -177,7 +184,7 @@ def test_composites_raise_on_mismatched_grid(operator: object, payload: str) -> 
     }[payload]
 
     with pytest.raises(ValueError, match="shape, transform, and CRS"):
-        operator(inputs)  # type: ignore[operator]
+        operator(inputs)  # type: ignore[arg-type]
 
 
 def test_partial_composite_matches_single_shot_median() -> None:
