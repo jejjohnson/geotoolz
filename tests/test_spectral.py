@@ -224,7 +224,7 @@ def test_stack_and_split_bands() -> None:
     assert stacked.transform == gt.transform
 
 
-def test_spectral_get_config_smoke() -> None:
+def test_spectral_get_config_serialization() -> None:
     ops_and_configs = [
         (spectral.SelectBands(indexes=[0]), {"indexes": [0], "axis": 0}),
         (spectral.ReorderBands(order=[0]), {"order": [0], "axis": 0}),

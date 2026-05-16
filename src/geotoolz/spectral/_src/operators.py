@@ -36,7 +36,8 @@ BandKey = int | str
 
 
 def _attrs(gt: GeoTensor) -> dict[str, Any]:
-    return dict(getattr(gt, "attrs", None) or {})
+    attrs = getattr(gt, "attrs", None)
+    return {} if attrs is None else dict(attrs)
 
 
 def _band_names(gt: GeoTensor, band_names: list[str] | None) -> list[str] | None:

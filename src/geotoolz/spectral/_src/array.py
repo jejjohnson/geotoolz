@@ -115,12 +115,12 @@ def _eval_node(node: ast.AST, variables: Mapping[str, np.ndarray]) -> Any:
     raise ValueError(f"Unsupported BandMath expression element: {type(node).__name__}")
 
 
-def _validate_strictly_increasing(wavelengths: np.ndarray) -> None:
+def _validate_strictly_increasing(wavelengths: np.ndarray, *, context: str) -> None:
     non_increasing = np.flatnonzero(np.diff(wavelengths) <= 0)
     if non_increasing.size:
         idx = int(non_increasing[0])
         raise ValueError(
-            "wavelengths must be strictly increasing; "
+            f"{context} wavelengths must be strictly increasing; "
             f"found non-increasing pair at indices {idx} and {idx + 1}: "
             f"{wavelengths[idx]} >= {wavelengths[idx + 1]}"
         )
@@ -137,7 +137,7 @@ def continuum_removal(
     arr_axis0 = np.moveaxis(np.asarray(arr, dtype=float), axis, 0)
     if arr_axis0.shape[0] != wavelengths.size:
         raise ValueError("wavelengths length must match the band axis")
-    _validate_strictly_increasing(wavelengths)
+    _validate_strictly_increasing(wavelengths, context="continuum_removal")
 
     if method == "linear":
         continuum = _linear_continuum(arr_axis0, wavelengths)
@@ -201,7 +201,7 @@ def spectral_binning(
 ) -> np.ndarray:
     """Aggregate source bands into wavelength-centered bins."""
     arr_axis0 = np.moveaxis(np.asarray(arr), axis, 0)
-    _validate_strictly_increasing(source_wavelengths)
+    _validate_strictly_increasing(source_wavelengths, context="spectral_binning")
     widths = np.broadcast_to(np.asarray(width, dtype=float), target_wavelengths.shape)
     out = np.empty((target_wavelengths.size, *arr_axis0.shape[1:]), dtype=float)
 
