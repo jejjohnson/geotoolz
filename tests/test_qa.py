@@ -256,3 +256,178 @@ def test_ml_placeholders_are_configurable_and_explicit() -> None:
     for op in (qa.S2Cloudless(), qa.OmniCloudMask(), qa.CloudSEN12()):
         with pytest.raises(ImportError, match="optional ML mask extra"):
             op(_toy_geotensor(np.zeros((2, 2), dtype=np.float32)))
+
+
+# ---------------------------------------------------------------------------
+# Sensor-spec correctness: known QA values → known masks
+# ---------------------------------------------------------------------------
+
+
+def test_landsat8_qa_pixel_cloud_bit_3_per_lsds_1619() -> None:
+    """LSDS-1619 Table 6-3: bit 3 = cloud on Landsat 8/9 QA_PIXEL."""
+    # Synthetic: pixels with bits 3 (cloud), 4 (shadow), 2 (cirrus),
+    # 1 (dilated), and 0 (fill) — plus a "clear" pixel.
+    qa_pixel = np.array(
+        [
+            [1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6, 0],
+        ],
+        dtype=np.uint16,
+    )
+    gt = _toy_geotensor(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
+    out = qa.LandsatQA_PIXEL(targets=("cloud", "cloud_shadow", "cirrus"))(gt)
+    # cirrus(bit 2), cloud(bit 3), cloud_shadow(bit 4) → True; rest False
+    np.testing.assert_array_equal(
+        np.asarray(out),
+        [[False, False, True, True, True, False, False, False]],
+    )
+
+
+def test_landsat7_qa_pixel_lacks_cirrus_per_lsds_1618() -> None:
+    """LSDS-1618: bit 2 is unused on Landsat 4-7 (no cirrus channel)."""
+    # Bit 2 set on L7 should NOT trigger the cirrus target —
+    # "cirrus" isn't in the L7 registry at all.
+    gt = _toy_geotensor(
+        np.array([[1 << 2]], dtype=np.uint16)[None],
+        attrs={"band_names": ["QA_PIXEL"]},
+    )
+    with pytest.raises(ValueError, match="unknown landsat_qa_pixel_l7"):
+        qa.LandsatQA_PIXEL(sensor="l7", targets=("cirrus",))(gt)
+    # But cloud/shadow/etc work normally for L7.
+    qa_pixel = np.array([[1 << 3, 1 << 4, 0]], dtype=np.uint16)
+    gt = _toy_geotensor(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
+    out = qa.LandsatQA_PIXEL(sensor="l7", targets=("cloud", "cloud_shadow"))(gt)
+    np.testing.assert_array_equal(np.asarray(out), [[True, True, False]])
+
+
+def test_landsat_qa_pixel_rejects_unknown_sensor() -> None:
+    with pytest.raises(ValueError, match="sensor must be one of"):
+        qa.LandsatQA_PIXEL(sensor="l11")
+
+
+def test_modis_state_qa_decodes_cloud_field_not_individual_bits() -> None:
+    """MOD09 user guide Table 12: bits [0,1] are a 2-bit cloud-state
+    field (0=clear, 1=cloudy, 2=mixed, 3=not-set). OR-ing the bits
+    independently — the wrong thing — would flag value 3 as cloudy. We
+    flag only 1 ("cloudy") and 2 ("mixed").
+    """
+    # Field values: 0=clear, 1=cloudy, 2=mixed, 3=not-set.
+    state_qa = np.array([[0b00, 0b01, 0b10, 0b11]], dtype=np.uint16)
+    gt = _toy_geotensor(state_qa[None], attrs={"band_names": ["state_1km"]})
+    out = qa.MODISStateQA(targets=("cloud",))(gt)
+    # 0=clear→F, 1=cloudy→T, 2=mixed→T, 3=not-set→F
+    np.testing.assert_array_equal(np.asarray(out), [[False, True, True, False]])
+
+
+def test_modis_state_qa_cirrus_field_decoding() -> None:
+    """Bits [8,9]: 0=none, 1=small, 2=average, 3=high. We flag 1/2/3."""
+    state_qa = np.array([[0 << 8, 1 << 8, 2 << 8, 3 << 8]], dtype=np.uint16)
+    gt = _toy_geotensor(state_qa[None], attrs={"band_names": ["state_1km"]})
+    out = qa.MODISStateQA(targets=("cirrus",))(gt)
+    np.testing.assert_array_equal(np.asarray(out), [[False, True, True, True]])
+
+
+def test_s2_scl_default_keep_classes_per_sen2cor_spec() -> None:
+    """Default S2SCL keeps vegetation(4), soil(5), water(6) only."""
+    # One pixel per SCL class 0-11.
+    scl = np.arange(12, dtype=np.uint8).reshape(1, 12)
+    gt = _toy_geotensor(scl[None], attrs={"band_names": ["SCL"]})
+    out = qa.S2SCL()(gt)
+    # Classes 4, 5, 6 are kept → False; everything else masked → True.
+    expected = np.array(
+        [[True, True, True, True, False, False, False, True, True, True, True, True]],
+    )
+    np.testing.assert_array_equal(np.asarray(out), expected)
+
+
+# ---------------------------------------------------------------------------
+# Tier-A primitives — direct unit coverage
+# ---------------------------------------------------------------------------
+
+
+def test_mask_from_bit_field_requires_contiguous_ascending_bits() -> None:
+    from geotoolz.qa._src.array import mask_from_bit_field
+
+    arr = np.zeros((1, 1), dtype=np.uint16)
+    with pytest.raises(ValueError, match="contiguous and ascending"):
+        mask_from_bit_field(arr, bits=(0, 2), values=(1,))
+    with pytest.raises(ValueError, match="contiguous and ascending"):
+        mask_from_bit_field(arr, bits=(2, 1), values=(1,))
+    with pytest.raises(ValueError, match="must not be empty"):
+        mask_from_bit_field(arr, bits=(), values=(1,))
+    with pytest.raises(ValueError, match="values"):
+        mask_from_bit_field(arr, bits=(0,), values=())
+    with pytest.raises(ValueError, match="non-negative"):
+        mask_from_bit_field(arr, bits=(-1,), values=(1,))
+
+
+def test_mask_from_bit_field_invert_flips_result() -> None:
+    from geotoolz.qa._src.array import mask_from_bit_field
+
+    arr = np.array([[0b00, 0b01, 0b10, 0b11]], dtype=np.uint16)
+    out = mask_from_bit_field(arr, bits=(0, 1), values=(1,), invert=True)
+    # value==1 → False; everything else → True.
+    np.testing.assert_array_equal(np.asarray(out), [[True, False, True, True]])
+
+
+def test_reduce_bit_masks_ors_named_groups() -> None:
+    from geotoolz.qa._src.array import reduce_bit_masks
+
+    qa_arr = np.array([[0, 1 << 3, 1 << 4, (1 << 3) | (1 << 4)]], dtype=np.uint16)
+    out = reduce_bit_masks(qa_arr, {"cloud": (3,), "shadow": (4,)})
+    np.testing.assert_array_equal(np.asarray(out), [[False, True, True, True]])
+    with pytest.raises(ValueError, match="must not be empty"):
+        reduce_bit_masks(qa_arr, {})
+
+
+# ---------------------------------------------------------------------------
+# Tier-B operator round-trip (get_config preserves behaviour)
+# ---------------------------------------------------------------------------
+
+
+def _qa_test_ops() -> list[object]:
+    return [
+        qa.DecodeBitmask(bits={"cloud": [3], "cirrus": [2]}, qa_band=0),
+        qa.MaskClouds(qa_band=0, bits=[10, 11]),
+        qa.MaskCloudShadow(qa_band=0, values=[3]),
+        qa.MaskCirrus(qa_band=0, bits=[11]),
+        qa.MaskSnow(qa_band=0, bits=[5]),
+        qa.MaskWater(qa_band=0, bits=[7]),
+        qa.MaskNoData(qa_band=0, values=[0]),
+        qa.MaskSaturated(saturation_value=65535),
+        qa.S2QA60(qa_band="QA60"),
+        qa.S2SCL(qa_band="SCL", keep=["vegetation", "water"]),
+        qa.LandsatQA_PIXEL(targets=["cloud", "cloud_shadow"], sensor="l89"),
+        qa.LandsatQA_PIXEL(targets=["cloud"], sensor="l7"),
+        qa.MODISStateQA(targets=["cloud", "cloud_shadow", "cirrus"]),
+        qa.S2Cloudless(threshold=0.42),
+        qa.OmniCloudMask(checkpoint="ckpt"),
+        qa.CloudSEN12(checkpoint="ckpt"),
+    ]
+
+
+@pytest.mark.parametrize("op", _qa_test_ops())
+def test_qa_operator_get_config_roundtrip(op: object) -> None:
+    """Reconstructing from get_config() preserves behaviour."""
+    cfg = op.get_config()  # type: ignore[attr-defined]
+    clone = type(op)(**cfg)
+    assert clone.get_config() == cfg  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Hydra-zen round-trip
+# ---------------------------------------------------------------------------
+
+
+try:
+    import hydra_zen
+except ImportError:  # pragma: no cover - exercised via the [hydra] extra
+    hydra_zen = None  # type: ignore[assignment]
+
+
+@pytest.mark.skipif(hydra_zen is None, reason="requires hydra-zen extra")
+@pytest.mark.parametrize("op", _qa_test_ops())
+def test_qa_hydra_zen_roundtrip(op: object) -> None:
+    cfg = hydra_zen.builds(type(op), **op.get_config())  # type: ignore[attr-defined]
+    restored = hydra_zen.instantiate(cfg)
+    assert type(restored) is type(op)
+    assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
