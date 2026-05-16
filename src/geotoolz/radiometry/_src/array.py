@@ -53,12 +53,13 @@ def dn_to_radiance(
     dn: np.ndarray,
     gain: float | np.ndarray,
     offset: float | np.ndarray = 0.0,
+    scale: float | np.ndarray = 1.0,
 ) -> np.ndarray:
     r"""Convert raw DN to at-sensor radiance via per-band gain/offset.
 
     .. math::
 
-        L \;=\; \text{gain} \cdot DN + \text{offset}
+        L \;=\; \text{gain} \cdot DN / \text{scale} + \text{offset}
 
     The gain and offset come from the sensor metadata file (Landsat MTL,
     Sentinel-2 MTD, EMIT L1B, etc.). Pass scalars for single-band /
@@ -76,12 +77,38 @@ def dn_to_radiance(
             coefficients ``shape == (C, 1, 1)``.
         gain: Slope of the linear decode. Scalar or array.
         offset: Intercept. Scalar or array. Default ``0``.
+        scale: Optional DN scale divisor. Default ``1``.
 
     Returns:
         Radiance array of the same shape as ``dn``, in float64 by
         default (cast outside if you want float32 to save memory).
     """
-    return gain * dn + offset
+    return gain * dn / scale + offset
+
+
+def radiance_to_dn(
+    radiance: np.ndarray,
+    gain: float | np.ndarray,
+    offset: float | np.ndarray = 0.0,
+    scale: float | np.ndarray = 1.0,
+) -> np.ndarray:
+    r"""Convert at-sensor radiance back to DN via the affine inverse.
+
+    .. math::
+
+        DN \;=\; (L - \text{offset}) \cdot \text{scale} / \text{gain}
+
+    Args:
+        radiance: At-sensor radiance array.
+        gain: Slope used by `dn_to_radiance`.
+        offset: Intercept used by `dn_to_radiance`. Default ``0``.
+        scale: DN scale divisor used by `dn_to_radiance`. Default ``1``.
+
+    Returns:
+        DN array in floating point. Cast or round outside if integer DN are
+        required.
+    """
+    return (radiance - offset) * scale / gain
 
 
 def dn_to_reflectance(
@@ -241,6 +268,53 @@ def gamma_correct(arr: np.ndarray, g: float = 1.2) -> np.ndarray:
     if g <= 0:
         raise ValueError(f"gamma_correct requires g > 0; got {g}")
     return np.maximum(arr, 0.0) ** (1.0 / g)
+
+
+def bt_from_radiance(
+    radiance: np.ndarray,
+    k1: float | np.ndarray,
+    k2: float | np.ndarray,
+) -> np.ndarray:
+    r"""Convert thermal radiance to brightness temperature.
+
+    .. math::
+
+        T = K_2 / \ln(K_1 / L + 1)
+
+    Args:
+        radiance: Thermal at-sensor radiance ``L``.
+        k1: Planck ``K1`` constant. Scalar or per-band array.
+        k2: Planck ``K2`` constant. Scalar or per-band array.
+
+    Returns:
+        Brightness temperature in Kelvin.
+    """
+    return k2 / np.log((k1 / radiance) + 1.0)
+
+
+def dos1(
+    reflectance: np.ndarray,
+    dark_percentile: float = 1.0,
+    *,
+    axis: int | tuple[int, ...] | None = (-2, -1),
+) -> np.ndarray:
+    """Apply a simple DOS1 dark-object subtraction to reflectance.
+
+    Args:
+        reflectance: TOA reflectance array.
+        dark_percentile: Percentile used as the dark-object estimate.
+        axis: Axes over which to estimate the dark-object value.
+
+    Returns:
+        Reflectance with per-band dark-object values subtracted and clipped
+        to zero.
+    """
+    if not 0.0 <= dark_percentile <= 100.0:
+        raise ValueError(
+            f"dos1 requires dark_percentile in [0, 100]; got {dark_percentile}"
+        )
+    dark = np.nanpercentile(reflectance, dark_percentile, axis=axis, keepdims=True)
+    return np.maximum(reflectance - dark, 0.0)
 
 
 def _broadcast_to_band_axis(
