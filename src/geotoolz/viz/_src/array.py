@@ -1,4 +1,12 @@
-"""Tier-A primitives for display-ready remote-sensing visualizations."""
+"""Tier-A primitives for display-ready remote-sensing visualizations.
+
+These pure-numpy helpers cover the steps that ``radiometry`` doesn't:
+casting to ``uint8`` for display, mapping a single-band array through
+a matplotlib colormap, hillshading, and alpha blending. The float-only
+contrast stretches (`MinMax`, `PercentileClip`) live in
+:mod:`geotoolz.radiometry`; this module composes them with a byte
+cast rather than re-implementing the percentile math.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +24,11 @@ def composite(
     *,
     axis: int = 0,
 ) -> np.ndarray:
-    """Select display bands from ``arr`` while preserving spatial axes."""
+    """Select display bands from ``arr`` while preserving spatial axes.
+
+    Thin wrapper around :func:`numpy.take` that accepts any integer
+    iterable so band tuples and lists round-trip through hydra-zen.
+    """
     return np.take(arr, list(bands), axis=axis)
 
 
@@ -27,7 +39,20 @@ def stretch_to_uint8(
     upper: float = 98.0,
     per_band: bool = True,
 ) -> np.ndarray:
-    """Percentile stretch an array into display-ready ``uint8`` values."""
+    """Percentile stretch an array into display-ready ``uint8`` values.
+
+    A NaN-safe variant of :func:`geotoolz.radiometry.percentile_clip`
+    that additionally rescales the unit-interval output to byte range.
+    Distinct from radiometry's primitive in two ways:
+
+    1. Uses ``np.nanpercentile`` so cloud / nodata pixels don't pull
+       the bounds toward the extremes.
+    2. Returns ``uint8`` rather than ``float`` for direct use with
+       PIL / matplotlib display sinks.
+
+    Use radiometry's ``PercentileClip`` + ``MinMax`` if you need the
+    intermediate floats for further math.
+    """
     if upper <= lower:
         raise ValueError(
             f"stretch_to_uint8 requires upper > lower; got {lower=}, {upper=}"

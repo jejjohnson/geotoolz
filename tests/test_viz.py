@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
+import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
 from shapely.geometry import Point, Polygon
@@ -13,6 +16,7 @@ from geotoolz.viz import (
     AnnotatePolygons,
     ApplyColormap,
     ApplyDiscreteColormap,
+    Composite,
     FalseColor,
     GammaCorrect,
     Hillshade,
@@ -133,11 +137,13 @@ def test_shaded_relief_outputs_rgba() -> None:
     assert out.dtype == np.uint8
 
 
-def test_overlay_alpha_zero_returns_background_unchanged() -> None:
+def test_overlay_alpha_zero_preserves_background_rgb() -> None:
+    """alpha=0 keeps background RGB intact while promoting to RGBA."""
     bg = _toy_geotensor(np.full((3, 2, 2), 10, dtype=np.uint8))
     fg = _toy_geotensor(np.full((4, 2, 2), 255, dtype=np.uint8))
     out = Overlay(alpha=0.0)(bg, fg)
-    np.testing.assert_array_equal(np.asarray(out), np.asarray(bg))
+    assert out.shape == (4, 2, 2)
+    np.testing.assert_array_equal(np.asarray(out)[:3], np.asarray(bg))
 
 
 def test_overlay_alpha_blends_to_rgba() -> None:
@@ -186,3 +192,99 @@ def test_annotate_points_accepts_geodataframe() -> None:
 def test_viz_module_exported_from_top_level() -> None:
     assert gz.viz.TrueColor is TrueColor
     assert gz.TrueColor is TrueColor
+
+
+def test_composite_operator_arbitrary_band_selection_by_index() -> None:
+    """`Composite` is the generic band-selection op the named composites wrap."""
+    gt = _toy_geotensor(np.arange(5 * 2 * 2).reshape(5, 2, 2))
+    arr = np.asarray(gt)
+    out = Composite(bands=[4, 0, 2])(gt)
+    assert isinstance(out, GeoTensor)
+    assert out.transform == gt.transform
+    np.testing.assert_array_equal(np.asarray(out), arr[[4, 0, 2]])
+
+
+def test_composite_operator_resolves_band_names() -> None:
+    gt = _toy_geotensor(
+        np.stack([np.full((2, 2), v) for v in [10, 20, 30, 40]], axis=0),
+        attrs={"bands": ["B02", "B03", "B04", "B08"]},
+    )
+    out = Composite(bands=["B08", "B04", "B03"])(gt)
+    np.testing.assert_array_equal(np.asarray(out)[:, 0, 0], [40, 30, 20])
+
+
+def test_named_composites_subclass_generic_composite() -> None:
+    """The named composites are thin shims so they share Composite's apply path."""
+    assert issubclass(TrueColor, Composite)
+    assert issubclass(FalseColor, Composite)
+    assert issubclass(SWIRComposite, Composite)
+
+
+def test_stretch_preserves_geometadata_no_mutation() -> None:
+    """Stretching must not mutate the carrier's transform or CRS."""
+    arr = np.linspace(0.0, 1.0, 4).reshape(1, 2, 2).astype(np.float32)
+    gt = _toy_geotensor(arr)
+    out = StretchToUint8()(gt)
+    assert out.transform == gt.transform
+    assert str(out.crs) == str(gt.crs)
+    assert out.shape == gt.shape
+
+
+def test_apply_discrete_colormap_get_config_is_json_safe() -> None:
+    """`get_config()` must JSON-serialise (str keys, list colours)."""
+    op = ApplyDiscreteColormap(
+        mapping={1: (1.0, 0.0, 0.0, 1.0), 2: (0.0, 1.0, 0.0, 1.0)}
+    )
+    cfg = op.get_config()
+    # Round-trip through json — fails if int keys or tuples leak through.
+    restored = json.loads(json.dumps(cfg))
+    assert restored == {
+        "mapping": {"1": [1.0, 0.0, 0.0, 1.0], "2": [0.0, 1.0, 0.0, 1.0]}
+    }
+
+
+def test_apply_colormap_get_config_references_cmap_by_name() -> None:
+    """The colormap is held by string name, not by a live Colormap object."""
+    cfg = ApplyColormap(name="viridis", vmin=0.0, vmax=1.0).get_config()
+    # JSON-safe round-trip — would fail on a live matplotlib Colormap.
+    restored = json.loads(json.dumps(cfg))
+    assert restored["name"] == "viridis"
+    assert restored["nan_color"] == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_overlay_alpha_zero_returns_rgba_consistently() -> None:
+    """alpha=0 must still produce 4-band RGBA so downstream shape is consistent."""
+    bg = _toy_geotensor(np.full((3, 2, 2), 10, dtype=np.uint8))
+    fg = _toy_geotensor(np.full((4, 2, 2), 255, dtype=np.uint8))
+    out = Overlay(alpha=0.0)(bg, fg)
+    assert out.shape == (4, 2, 2)
+    # RGB channels untouched, alpha promoted to opaque.
+    np.testing.assert_array_equal(np.asarray(out)[:3], 10)
+
+
+def test_hydra_zen_roundtrip_viz_operators() -> None:
+    """YAML-safe viz operators must round-trip through hydra-zen.builds."""
+    hydra_zen = pytest.importorskip("hydra_zen")
+
+    cases = [
+        (TrueColor, {"red": 2, "green": 1, "blue": 0}),
+        (FalseColor, {"nir": 3, "red": 2, "green": 1}),
+        (SWIRComposite, {"swir2": 4, "nir": 3, "red": 2}),
+        (Composite, {"bands": [2, 1, 0]}),
+        (StretchToUint8, {"lower": 1.0, "upper": 99.0, "per_band": True}),
+        (GammaCorrect, {"gamma": 1.4}),
+        (ApplyColormap, {"name": "viridis", "vmin": 0.0, "vmax": 1.0}),
+        (Hillshade, {"azimuth_deg": 315.0, "altitude_deg": 45.0}),
+        (Overlay, {"alpha": 0.5, "mode": "alpha"}),
+    ]
+    for cls, kwargs in cases:
+        op = cls(**kwargs)
+        cfg = hydra_zen.builds(cls, **op.get_config())
+        restored = hydra_zen.instantiate(cfg)
+        assert isinstance(restored, cls)
+
+
+def test_annotate_operators_are_forbid_in_yaml() -> None:
+    """Annotate ops hold runtime geometries — flag them as not YAML-safe."""
+    assert AnnotatePolygons.forbid_in_yaml is True
+    assert AnnotatePoints.forbid_in_yaml is True
