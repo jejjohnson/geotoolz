@@ -163,9 +163,11 @@ file.
 ## Bridging to `geopatcher`
 
 `CatalogDomain` adapts a catalog into a `geopatcher.Domain` so the
-`geopatcher.SpatialPatcher` can tile across a multi-file archive (install
-with the `[patch]` extra). Each catalog row contributes one sub-domain;
-the patcher iterates them.
+`geopatcher.SpatialPatcher` can tile across a multi-file archive. Install
+with `pip install 'geotoolz[patch]'` (which pulls in `geopatcher` and
+enables the `geotoolz.patch_ops` bridge wrappers) — or `pip install
+geopatcher` directly if you only need the framework. Each catalog row
+contributes one sub-domain; the patcher iterates them.
 
 ```python
 import geotoolz as gz

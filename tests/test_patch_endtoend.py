@@ -1,6 +1,18 @@
-"""End-to-end test of the chip → predict → stitch pipeline through `Sequential`."""
+"""End-to-end test of the chip → predict → stitch pipeline through `Sequential`.
+
+Exercises the `geotoolz.patch_ops` bridge end-to-end; skip cleanly when
+the optional ``[patch]`` extra (which pulls in geopatcher) isn't installed.
+"""
 
 from __future__ import annotations
+
+import pytest
+
+
+pytest.importorskip(
+    "geopatcher",
+    reason="geotoolz.patch_ops bridge requires the [patch] extra (geopatcher)",
+)
 
 import numpy as np
 import rasterio
