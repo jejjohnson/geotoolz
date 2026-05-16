@@ -374,6 +374,85 @@ def test_geotensor_metadata_propagates_through_spectral_ops() -> None:
         assert out.fill_value_default == gt.fill_value_default
 
 
+def test_split_bands_rejects_out_of_range_axis() -> None:
+    """SplitBands must validate axis bounds rather than silently wrapping."""
+    gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="out of range"):
+        spectral.SplitBands(axis=-4)(gt)
+
+    with pytest.raises(ValueError, match="out of range"):
+        spectral.SplitBands(axis=3)(gt)
+
+
+def test_spectral_binning_weighted_mean_rejects_nonpositive_width() -> None:
+    """weighted_mean uses width as FWHM — zero/negative widths must error early."""
+    from geotoolz.spectral._src.array import spectral_binning
+
+    arr = np.arange(4 * 2 * 2, dtype=float).reshape(4, 2, 2)
+    source = np.array([490.0, 665.0, 842.0, 1610.0])
+    target = np.array([577.5])
+
+    with pytest.raises(ValueError, match="strictly positive"):
+        spectral_binning(arr, source, target, 0.0, method="weighted_mean")
+
+    with pytest.raises(ValueError, match="strictly positive"):
+        spectral_binning(arr, source, target, -10.0, method="weighted_mean")
+
+
+def test_stack_bands_drops_band_attrs_when_only_names_present() -> None:
+    """If one input has band_names but no wavelengths, drop BOTH on output."""
+    base_transform = rasterio.Affine.identity()
+    crs = "EPSG:32629"
+    gt_a = GeoTensor(
+        values=np.ones((1, 2, 2), dtype=np.float32),
+        transform=base_transform,
+        crs=crs,
+        fill_value_default=-9999,
+        attrs={"band_names": ["A"], "wavelengths": [490.0]},
+    )
+    gt_b = GeoTensor(
+        values=np.ones((1, 2, 2), dtype=np.float32),
+        transform=base_transform,
+        crs=crs,
+        fill_value_default=-9999,
+        attrs={"band_names": ["B"]},  # no wavelengths
+    )
+
+    stacked = spectral.StackBands()([gt_a, gt_b])
+    assert "band_names" not in stacked.attrs
+    assert "wavelengths" not in stacked.attrs
+
+
+def test_band_math_rejects_unsupported_unary_operator() -> None:
+    """Bitwise-not and logical-not are not supported unary operators."""
+    gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="Unsupported unary operator"):
+        spectral.BandMath(expression="~B8")(gt)
+
+    with pytest.raises(ValueError, match="Unsupported unary operator"):
+        spectral.BandMath(expression="not B8")(gt)
+
+
+def test_select_bands_rejects_mismatched_wavelengths_length() -> None:
+    """SelectBands must validate gt.attrs['wavelengths'] length matches band axis."""
+    arr = np.ones((4, 2, 2), dtype=np.float32)
+    gt = GeoTensor(
+        values=arr,
+        transform=rasterio.Affine.identity(),
+        crs="EPSG:32629",
+        fill_value_default=-9999,
+        attrs={
+            "band_names": ["B2", "B4", "B8", "B11"],
+            "wavelengths": [490.0, 665.0],  # length mismatch
+        },
+    )
+
+    with pytest.raises(ValueError, match="does not match the band axis"):
+        spectral.SelectBands(indexes=[0])(gt)
+
+
 def test_collapsing_ops_drop_stale_band_attrs() -> None:
     """Ops that collapse / reshape the band axis must drop stale band_names."""
     gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))

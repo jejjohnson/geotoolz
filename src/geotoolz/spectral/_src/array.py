@@ -75,6 +75,9 @@ def _eval_node(node: ast.AST, variables: Mapping[str, np.ndarray]) -> Any:
             return -value
         if isinstance(node.op, ast.UAdd):
             return value
+        raise ValueError(
+            f"Unsupported unary operator in BandMath: {type(node.op).__name__}"
+        )
     if isinstance(node, ast.BinOp):
         left = _eval_node(node.left, variables)
         right = _eval_node(node.right, variables)
@@ -193,6 +196,12 @@ def spectral_binning(
     arr_axis0 = np.moveaxis(np.asarray(arr), axis, 0)
     _validate_strictly_increasing(source_wavelengths, context="spectral_binning")
     widths = np.broadcast_to(np.asarray(width, dtype=float), target_wavelengths.shape)
+    if np.any(widths <= 0):
+        bad = int(np.flatnonzero(widths <= 0)[0])
+        raise ValueError(
+            "spectral_binning widths must be strictly positive; "
+            f"got width={float(widths[bad])} at index {bad}"
+        )
     out = np.empty((target_wavelengths.size, *arr_axis0.shape[1:]), dtype=float)
 
     for idx, (center, bin_width) in enumerate(

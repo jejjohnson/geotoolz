@@ -169,16 +169,24 @@ class SelectBands(Operator):
         self.axis = axis
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
+        arr = np.asarray(gt)
         names = _band_names(gt, None)
         indexes = _resolve_bands(self.indexes, names)
         selected_names = [names[idx] for idx in indexes] if names is not None else None
         wavelengths = _attrs(gt).get("wavelengths")
-        selected_wavelengths = (
-            np.asarray(wavelengths, dtype=float)[indexes]
-            if wavelengths is not None
-            else None
-        )
-        out = select_bands(np.asarray(gt), indexes, axis=self.axis)
+        if wavelengths is not None:
+            wavelengths_arr = np.asarray(wavelengths, dtype=float)
+            band_axis_len = arr.shape[self.axis]
+            if wavelengths_arr.size != band_axis_len:
+                raise ValueError(
+                    "gt.attrs['wavelengths'] length "
+                    f"({wavelengths_arr.size}) does not match the band axis "
+                    f"length ({band_axis_len}) at axis {self.axis}"
+                )
+            selected_wavelengths = wavelengths_arr[indexes]
+        else:
+            selected_wavelengths = None
+        out = select_bands(arr, indexes, axis=self.axis)
         return _with_band_attrs(
             gt, out, band_names=selected_names, wavelengths=selected_wavelengths
         )
@@ -263,12 +271,13 @@ class StackBands(Operator):
             if gt_wavelengths is not None:
                 wavelengths.extend(float(wavelength) for wavelength in gt_wavelengths)
         out = np.concatenate(arrays, axis=self.axis)
+        keep_both = have_names and have_wavelengths
         return _with_band_attrs(
             first,
             out,
-            band_names=names if have_names else None,
-            wavelengths=np.asarray(wavelengths) if have_wavelengths else None,
-            drop_band_attrs=not have_names or not have_wavelengths,
+            band_names=names if keep_both else None,
+            wavelengths=np.asarray(wavelengths) if keep_both else None,
+            drop_band_attrs=not keep_both,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -296,6 +305,12 @@ class SplitBands(Operator):
     def _apply(self, gt: GeoTensor) -> list[GeoTensor]:
         arr = np.asarray(gt)
         axis = self.axis + arr.ndim if self.axis < 0 else self.axis
+        if not 0 <= axis < arr.ndim:
+            raise ValueError(
+                f"SplitBands axis {self.axis} is out of range for a "
+                f"{arr.ndim}-D tensor (valid axes: "
+                f"{-arr.ndim} to {arr.ndim - 1})"
+            )
         n_bands = arr.shape[axis]
         source_names = _band_names(gt, self.names)
         if source_names is not None and len(source_names) != n_bands:
