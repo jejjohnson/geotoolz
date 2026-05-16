@@ -48,6 +48,9 @@ dependencies = [
     # only in its [io] extra, so depend on it explicitly here — without
     # it, `to_geoparquet` / `from_geoparquet` raise ImportError.
     "pyarrow>=14.0",
+    # `georeader.GeoTensor.resize` imports skimage.transform.resize at runtime;
+    # the geom Resize / Resample operators expose that path in the base API.
+    "scikit-image>=0.25",
 ]
 
 [project.optional-dependencies]
