@@ -117,6 +117,51 @@ class Operator:
         """
         return {}
 
+    @property
+    def state(self) -> dict[str, Any]:
+        """Return a JSON-serialisable state record for this operator."""
+        return {
+            "module": type(self).__module__,
+            "class": type(self).__name__,
+            "config": self.get_config(),
+        }
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> Operator:
+        """Reconstruct an operator from a ``state`` record.
+
+        Walks ``cls`` plus all transitive subclasses so calling
+        ``Subclass.from_state(state)`` resolves ``Subclass`` itself. Only
+        operators whose ``config`` is composed of JSON primitives are
+        reconstructible — operators that nest other operators in their
+        config (e.g. ``AppendIndex``) emit debug/provenance payloads and
+        raise a clear ``RuntimeError`` here instead of letting the
+        constructor blow up with ``TypeError``.
+        """
+        module_name = state.get("module")
+        class_name = state.get("class")
+        config = state.get("config", {})
+        if not isinstance(module_name, str) or not module_name.startswith("geotoolz."):
+            raise ValueError("Operator state must include a geotoolz module")
+        if not isinstance(class_name, str):
+            raise ValueError("Operator state must include a class name")
+        if not isinstance(config, dict):
+            raise ValueError("Operator state config must be a dictionary")
+
+        for op_type in (cls, *_operator_subclasses(cls)):
+            if op_type.__module__ == module_name and op_type.__name__ == class_name:
+                non_primitive_keys = [
+                    k for k, v in config.items() if not _is_json_primitive(v)
+                ]
+                if non_primitive_keys:
+                    raise RuntimeError(
+                        f"from_state cannot reconstruct {op_type.__name__}: "
+                        f"config contains non-primitive values "
+                        f"{non_primitive_keys}. Use the regular constructor."
+                    )
+                return op_type(**config)
+        raise TypeError(f"{module_name}.{class_name} is not a loaded Operator")
+
     def __repr__(self) -> str:
         params = ", ".join(f"{k}={v!r}" for k, v in self.get_config().items())
         return f"{type(self).__name__}({params})"
@@ -134,3 +179,29 @@ class Operator:
         if isinstance(other, Sequential):
             return Sequential([self, *other.operators])
         return Sequential([self, other])
+
+
+def _operator_subclasses(cls: type[Operator]) -> tuple[type[Operator], ...]:
+    subclasses: list[type[Operator]] = []
+    for subclass in cls.__subclasses__():
+        subclasses.append(subclass)
+        subclasses.extend(_operator_subclasses(subclass))
+    return tuple(subclasses)
+
+
+def _is_json_primitive(value: Any) -> bool:
+    """Return ``True`` if ``value`` is a safe constructor kwarg payload.
+
+    Accepts JSON primitives (``None``/``bool``/``int``/``float``/``str``)
+    and ``list``/``tuple`` of the same, recursively. ``dict`` values are
+    rejected: operators that nest other operators in their config emit
+    ``{"class", "config"}`` debug payloads (see ``AppendIndex``) that
+    cannot be passed back to the constructor unchanged, so we refuse
+    the entire ``dict`` shape rather than try to distinguish "plain
+    config dict" from "nested operator record" heuristically.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_is_json_primitive(v) for v in value)
+    return False
