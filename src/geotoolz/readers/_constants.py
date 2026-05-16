@@ -20,7 +20,8 @@ def load_csv(package: str, resource: str) -> CsvRows:
     ignored by the CSV parser.
     """
     with files(package).joinpath(resource).open(encoding="utf-8") as f:
-        return tuple(csv.DictReader(row for row in f if not row.startswith("#")))
+        filtered = [row for row in f if not row.startswith("#")]
+        return tuple(csv.DictReader(filtered))
 
 
 @cache

@@ -72,7 +72,12 @@ def test_modis_constants_are_lazy_and_cached(monkeypatch: pytest.MonkeyPatch) ->
     assert calls == []
     assert modis_constants.BANDS == ({"name": "red"},)
     assert modis_constants.BANDS == ({"name": "red"},)
-    assert calls == ["geotoolz.readers.modis:data/bands.csv"]
+    assert modis_constants.CONSTANTS == {"solar_irradiance": ({"name": "red"},)}
+    assert modis_constants.CONSTANTS == {"solar_irradiance": ({"name": "red"},)}
+    assert calls == [
+        "geotoolz.readers.modis:data/bands.csv",
+        "geotoolz.readers.modis:data/solar_irradiance.csv",
+    ]
 
 
 def test_shared_csv_loader_caches_package_data() -> None:
@@ -109,6 +114,21 @@ def test_modis_ndvi_preset_matches_generic_operator() -> None:
     expected = gz.indices.NDVI(red="red", nir="nir")
 
     assert op.get_config() == expected.get_config()
+
+    gt = GeoTensor(
+        np.stack(
+            [
+                np.zeros((2, 2), dtype=np.float32),
+                np.zeros((2, 2), dtype=np.float32),
+                np.ones((2, 2), dtype=np.float32),
+                np.full((2, 2), 3.0, dtype=np.float32),
+            ]
+        ),
+        transform=Affine.identity(),
+        crs="EPSG:4326",
+        attrs={"band_names": ("blue", "green", "red", "nir")},
+    )
+    np.testing.assert_allclose(op(gt).values, 0.5)
 
 
 def test_modis_package_data_is_in_wheel() -> None:
