@@ -116,7 +116,7 @@ class Compose(Operator):
             return gt
 
         out = gt
-        child_seeds = rng.integers(0, 2**63 - 1, len(self.augmentations))
+        child_seeds = rng.integers(0, np.iinfo(np.int64).max, len(self.augmentations))
         for op, child_seed in zip(self.augmentations, child_seeds, strict=True):
             out = op(out, seed=int(child_seed))
         return out
@@ -476,7 +476,11 @@ class SunAngleJitter(Operator):
 
 
 class AtmosphericHaze(Operator):
-    """Add a sampled haze term following an inverse fourth-power spectrum."""
+    """Add a sampled haze term following an inverse fourth-power spectrum.
+
+    Wavelength metadata is interpreted as nanometers, except values below
+    ``10`` are treated as micrometers and converted to nanometers.
+    """
 
     def __init__(
         self, intensity: ScalarOrRange = (0.0, 0.05), seed: int | None = None

@@ -118,6 +118,7 @@ def test_brightness_jitter_per_band_and_shared_factor(patch: GeoTensor) -> None:
 def test_brightness_jitter_statistical_midpoint(patch: GeoTensor) -> None:
     factors = []
     pixel = float(np.asarray(patch)[0, 1, 1])
+    # The feature request asks for a 1000-sample statistical check.
     for seed in range(1000):
         out = augment.BrightnessJitter(factor=(0.8, 1.2), per_band=False, seed=seed)(
             patch
