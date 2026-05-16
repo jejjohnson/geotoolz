@@ -359,3 +359,62 @@ def test_get_config_is_json_safe(patch: GeoTensor) -> None:
 def test_compose_and_cutmix_are_forbid_in_yaml() -> None:
     assert augment.Compose([]).forbid_in_yaml is True
     assert augment.CutMix(pool=[]).forbid_in_yaml is True
+
+
+def test_simulated_clouds_rejects_invalid_coverage_at_construction() -> None:
+    """Coverage outside [0, 1] must fail at construction, not at apply time."""
+    with pytest.raises(ValueError, match="coverage"):
+        augment.SimulatedClouds(coverage=(0.5, 1.5))
+    with pytest.raises(ValueError, match="coverage"):
+        augment.SimulatedClouds(coverage=(-0.1, 0.5))
+    with pytest.raises(ValueError, match="coverage"):
+        augment.SimulatedClouds(coverage=1.5)
+    with pytest.raises(ValueError, match="coverage"):
+        augment.SimulatedClouds(coverage=(0.5, 0.2))
+
+
+def test_range_ops_reject_reversed_range_at_construction() -> None:
+    """Tuples with hi < lo must raise at construction, not silently swap."""
+    with pytest.raises(ValueError, match="lo <= hi"):
+        augment.BrightnessJitter(factor=(1.1, 0.9))
+    with pytest.raises(ValueError, match="lo <= hi"):
+        augment.ContrastJitter(factor=(1.1, 0.9))
+    with pytest.raises(ValueError, match="lo <= hi"):
+        augment.GaussianNoise(sigma=(0.2, 0.1))
+    with pytest.raises(ValueError, match="lo <= hi"):
+        augment.SpeckleNoise(sigma=(0.2, 0.1))
+
+
+def test_sun_angle_jitter_requires_sza_in_attrs(patch: GeoTensor) -> None:
+    """SunAngleJitter must not silently fall back to a hard-coded 30 degrees."""
+    no_sza = GeoTensor(
+        np.asarray(patch),
+        patch.transform,
+        patch.crs,
+        patch.fill_value_default,
+        attrs={"band_names": ["B02", "B03", "B04", "B08"]},
+    )
+    with pytest.raises(ValueError, match="solar_zenith_angle"):
+        augment.SunAngleJitter(delta_sza_deg=1.0, seed=0)(no_sza)
+
+
+class _NonStochasticOp(Operator):
+    """Plain Operator whose ``__init__`` does not accept ``seed``."""
+
+    def __init__(self, scale: float) -> None:
+        self.scale = scale
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        return gt.array_as_geotensor(np.asarray(gt) * self.scale)
+
+
+def test_compose_forwards_seed_only_to_stochastic_children(patch: GeoTensor) -> None:
+    """Mixing a non-stochastic child into Compose must not raise TypeError."""
+    composed = augment.Compose(
+        [_NonStochasticOp(scale=2.0), augment.GaussianNoise(sigma=0.0, seed=0)],
+        seed=0,
+    )
+    # Should not raise even though `_NonStochasticOp._apply` rejects `seed`.
+    out = composed(patch, seed=7)
+    assert out.shape == patch.shape
+    assert out.dtype == patch.dtype

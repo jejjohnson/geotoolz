@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Sequence
 from numbers import Real
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -37,6 +38,43 @@ def _seed(default: int | None, override: int | None) -> int | None:
 def _check_probability(value: float, name: str) -> None:
     if not 0.0 <= value <= 1.0:
         raise ValueError(f"{name} must be in [0, 1].")
+
+
+def _validate_range(value: ScalarOrRange, name: str) -> None:
+    """Validate a scalar-or-range parameter at construction time.
+
+    For tuples, requires ``lo <= hi``. For scalars, no ordering check.
+    """
+    if isinstance(value, tuple):
+        lo, hi = value
+        if hi < lo:
+            raise ValueError(f"{name} range must satisfy lo <= hi; got ({lo}, {hi})")
+
+
+def _validate_probability_range(value: ScalarOrRange, name: str) -> None:
+    """Validate a scalar-or-range that must lie inside ``[0, 1]``.
+
+    Tuples must satisfy ``0 <= lo <= hi <= 1``; scalars must satisfy
+    ``0 <= value <= 1``.
+    """
+    if isinstance(value, tuple):
+        lo, hi = value
+        if not (0.0 <= lo <= hi <= 1.0):
+            raise ValueError(
+                f"{name} range must satisfy 0 <= lo <= hi <= 1; got ({lo}, {hi})"
+            )
+    else:
+        if not 0.0 <= float(value) <= 1.0:
+            raise ValueError(f"{name} must be in [0, 1]; got {value}")
+
+
+def _accepts_seed_kwarg(op: Operator) -> bool:
+    """Return True if ``type(op).__init__`` accepts a ``seed`` parameter."""
+    try:
+        sig = inspect.signature(type(op).__init__)
+    except (TypeError, ValueError):
+        return False
+    return "seed" in sig.parameters
 
 
 def _sample_uniform(rng: np.random.Generator, value: ScalarOrRange, name: str) -> float:
@@ -151,7 +189,7 @@ class Compose(Operator):
         out = gt
         child_seeds = rng.integers(0, np.iinfo(np.int64).max, len(self.augmentations))
         for op, child_seed in zip(self.augmentations, child_seeds, strict=True):
-            out = op(out, seed=int(child_seed))
+            out = op(out, seed=int(child_seed)) if _accepts_seed_kwarg(op) else op(out)
         return out
 
     def get_config(self) -> dict[str, Any]:
@@ -332,6 +370,7 @@ class BrightnessJitter(Operator):
         per_band: bool = True,
         seed: int | None = None,
     ) -> None:
+        _validate_range(factor, "factor")
         self.factor = factor
         self.per_band = per_band
         self.seed = seed
@@ -363,6 +402,7 @@ class ContrastJitter(Operator):
         per_band: bool = True,
         seed: int | None = None,
     ) -> None:
+        _validate_range(factor, "factor")
         self.factor = factor
         self.per_band = per_band
         self.seed = seed
@@ -396,6 +436,7 @@ class GaussianNoise(Operator):
         per_band: bool = True,
         seed: int | None = None,
     ) -> None:
+        _validate_range(sigma, "sigma")
         self.sigma = sigma
         self.per_band = per_band
         self.seed = seed
@@ -427,6 +468,7 @@ class SpeckleNoise(Operator):
     """Apply multiplicative Gaussian speckle noise, useful for SAR."""
 
     def __init__(self, sigma: ScalarOrRange = 0.05, seed: int | None = None) -> None:
+        _validate_range(sigma, "sigma")
         self.sigma = sigma
         self.seed = seed
 
@@ -531,9 +573,13 @@ class SunAngleJitter(Operator):
     def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
         rng = _rng(_seed(self.seed, seed))
         delta = _sample_uniform(rng, self.delta_sza_deg, "delta_sza_deg")
-        base_sza = float(
-            gt.attrs.get("solar_zenith_angle", gt.attrs.get("sza_deg", 30.0))
-        )
+        sza_value = gt.attrs.get("solar_zenith_angle", gt.attrs.get("sza_deg"))
+        if sza_value is None:
+            raise ValueError(
+                "SunAngleJitter requires `solar_zenith_angle` or `sza_deg` in "
+                "gt.attrs; got neither."
+            )
+        base_sza = float(sza_value)
         denom = np.cos(np.deg2rad(base_sza))
         if np.isclose(denom, 0.0):
             raise ValueError(
@@ -600,6 +646,7 @@ class SimulatedClouds(Operator):
     ) -> None:
         if feather < 0:
             raise ValueError("feather must be non-negative.")
+        _validate_probability_range(coverage, "coverage")
         self.coverage = coverage
         self.feather = feather
         self.seed = seed
@@ -607,7 +654,6 @@ class SimulatedClouds(Operator):
     def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
         rng = _rng(_seed(self.seed, seed))
         coverage = _sample_uniform(rng, self.coverage, "coverage")
-        _check_probability(coverage, "coverage")
         if coverage == 0.0:
             return gt
 
