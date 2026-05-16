@@ -273,7 +273,9 @@ def test_natural_earth_mask_constructors_use_cached_loader(
         "iso_a3": "GRL",
         "source": "natural_earth_10m",
     }
-    country_mask = country(_toy_geotensor(np.zeros((1, 2, 2), dtype=np.float32)))
+    scene = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
+    country_mask = country(scene)
+    assert country_mask.shape == scene.shape
     assert bool(np.asarray(country_mask)[1, 0])
     assert calls == [
         ("land", "natural_earth_10m"),

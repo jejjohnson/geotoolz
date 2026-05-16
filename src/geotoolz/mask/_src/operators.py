@@ -97,9 +97,9 @@ class BBoxMask(PolygonMask):
         crs: str | None = None,
         inside: bool = True,
     ) -> None:
-        if len(bounds) != 4:
-            raise ValueError("BBoxMask: `bounds` must contain exactly four values")
         self.bounds = tuple(bounds)
+        if len(self.bounds) != 4:
+            raise ValueError("BBoxMask: `bounds` must contain exactly four values")
         super().__init__(
             geometry=shapely.geometry.box(*self.bounds), crs=crs, inside=inside
         )
@@ -487,7 +487,8 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
     Natural Earth 1:10m zip once into the geotoolz cache directory and reuses
     the extracted shapefile. Any other source is passed to
     ``geopandas.read_file``. The in-process ``@cache`` avoids repeated reads
-    across multiple operator instances.
+    across multiple operator instances in one Python session; the downloaded
+    zip and extracted shapefile are cached separately on disk across sessions.
     """
     if source != "natural_earth_10m":
         return gpd.read_file(source)
