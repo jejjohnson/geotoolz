@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from geotoolz import catalog, cloud, core, indices, patch, radiometry, types
+from geotoolz import catalog, cloud, core, indices, patch, radiometry, spectral, types
 from geotoolz.catalog import (
     CatalogDomain,
     CatalogRow,
@@ -320,6 +320,7 @@ __all__ = [
     "patch",
     "query",
     "radiometry",
+    "spectral",
     "to_geoparquet",
     "types",
     "union",
