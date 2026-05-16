@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
+# Perturbation for finite-difference target linearization.
 TARGET_FINITE_DIFFERENCE_EPSILON = 1e-4
 
 
@@ -544,7 +545,7 @@ class NonlinearTargetFromObs(Operator):
 
 
 class ColumnEnhancement(Operator):
-    """Convenience mean/covariance/target/matched-filter composite."""
+    """Convenience trace-gas column-enhancement matched-filter composite."""
 
     def __init__(
         self,

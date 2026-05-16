@@ -221,9 +221,13 @@ def shrink_covariance(
             )
         )
     elif method == "ledoit_wolf":
-        diag_energy = float(np.sum(np.diag(cov) ** 2))
-        total_energy = float(np.sum(cov * cov))
-        shrinkage = 0.0 if total_energy == 0 else min(1.0, diag_energy / total_energy)
+        diag_frobenius_sq = float(np.sum(np.diag(cov) ** 2))
+        total_frobenius_sq = float(np.sum(cov * cov))
+        shrinkage = (
+            0.0
+            if total_frobenius_sq == 0
+            else min(1.0, diag_frobenius_sq / total_frobenius_sq)
+        )
     else:
         raise ValueError(f"unknown covariance shrinkage method {method!r}")
     return (1.0 - shrinkage) * cov + shrinkage * target
@@ -423,7 +427,7 @@ def adaptive_window_background(
     mean = ndimage.uniform_filter(arr, size=size, mode=pad_mode)
     mean_sq = ndimage.uniform_filter(arr * arr, size=size, mode=pad_mode)
     n_window = window_size * window_size
-    variance = np.maximum(mean_sq - mean * mean, 0.0) * n_window / (n_window - 1)
+    variance = np.maximum(mean_sq - mean * mean, 0.0) * n_window / max(n_window - 1, 1)
     return AdaptiveBackground(
         mean=np.moveaxis(mean, -1, axis), variance=np.moveaxis(variance, -1, axis)
     )
@@ -459,6 +463,7 @@ def _huber_mean(
     if c <= 0:
         raise ValueError("huber_c must be positive")
     mu = np.median(values, axis=0)
+    # 1.4826 converts median absolute deviation to Gaussian sigma.
     scale = 1.4826 * np.median(np.abs(values - mu), axis=0)
     scale = np.where(scale <= np.finfo(float).eps, 1.0, scale)
     for _ in range(max_iter):
@@ -501,7 +506,7 @@ def _kmeans_labels(
 ) -> np.ndarray:
     rng = np.random.default_rng(random_state)
     if values.shape[0] < n_clusters:
-        raise ValueError("n_clusters cannot exceed number of pixels")
+        raise ValueError("n_clusters must be <= number of pixels")
     centers = values[rng.choice(values.shape[0], size=n_clusters, replace=False)].copy()
     labels = np.zeros(values.shape[0], dtype=np.intp)
     for _ in range(max_iter):
@@ -527,7 +532,7 @@ def _gmm_labels(
 ) -> np.ndarray:
     rng = np.random.default_rng(random_state)
     if values.shape[0] < n_clusters:
-        raise ValueError("n_clusters cannot exceed number of pixels")
+        raise ValueError("n_clusters must be <= number of pixels")
     labels = _kmeans_labels(
         values, n_clusters=n_clusters, random_state=random_state, max_iter=10
     )
@@ -563,7 +568,7 @@ def _gmm_labels(
         ) / counts[:, None]
         variances = np.maximum(variances, 1e-6)
         ll = float(np.sum(log_norm))
-        if abs(ll - previous_ll) < tol:
+        if abs(ll - previous_ll) / max(abs(ll), 1.0) < tol:
             break
         previous_ll = ll
     active = (

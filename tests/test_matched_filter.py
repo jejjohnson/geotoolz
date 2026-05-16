@@ -157,10 +157,24 @@ def test_cluster_background_and_dispatch_are_reproducible() -> None:
     bg1 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
     bg2 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
     out = gz.matched_filter.ApplyClusterMF(cluster=bg1, target=target)(gt)
+    samples = np.asarray(gt).reshape(2, -1).T
+    labels = bg1.labels.reshape(-1)
+    expected = np.array(
+        [
+            gz.matched_filter.apply_pixel(
+                sample,
+                mean=bg1.means[label],
+                cov_op=bg1.cov_ops[label],
+                target=target,
+            )
+            for sample, label in zip(samples, labels, strict=True)
+        ]
+    ).reshape(bg1.labels.shape)
 
     assert np.array_equal(bg1.labels, bg2.labels)
     assert np.allclose(bg1.means, bg2.means)
     for cov1, cov2 in zip(bg1.cov_ops, bg2.cov_ops, strict=True):
         assert np.allclose(cov1.matrix, cov2.matrix)
+    assert np.allclose(np.asarray(out), expected)
     assert np.asarray(out).shape == (2, 2)
     assert out.transform == gt.transform
