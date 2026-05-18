@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from geotoolz.geom._src.operators import (
+    AntimeridianSplit,
+    BowtieCorrection,
     CropTo,
     CropToBounds,
     Georeference,
+    GeostationaryParallaxCorrect,
     Mosaic,
     PadTo,
     Rasterize,
@@ -15,6 +18,7 @@ from geotoolz.geom._src.operators import (
     Resample,
     ResampleLike,
     Resize,
+    SegmentStitch,
     SlidingWindow,
     Stitch,
     Tile,
@@ -23,9 +27,12 @@ from geotoolz.geom._src.operators import (
 
 
 __all__ = [
+    "AntimeridianSplit",
+    "BowtieCorrection",
     "CropTo",
     "CropToBounds",
     "Georeference",
+    "GeostationaryParallaxCorrect",
     "Mosaic",
     "PadTo",
     "Rasterize",
@@ -35,6 +42,7 @@ __all__ = [
     "Resample",
     "ResampleLike",
     "Resize",
+    "SegmentStitch",
     "SlidingWindow",
     "Stitch",
     "Tile",

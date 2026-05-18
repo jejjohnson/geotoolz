@@ -391,6 +391,159 @@ def test_stitch_handles_target_shape_smaller_than_tile_union() -> None:
     np.testing.assert_array_equal(out, np.full((1, 2, 2), 1.0, dtype=np.float32))
 
 
+def test_bowtie_correction_is_identity_for_zero_scan_angle() -> None:
+    gt = _gt()
+
+    out = gz.geom.BowtieCorrection(
+        scan_angle_max_deg=0.0,
+        pixels_per_scan=gt.shape[-1],
+        scans_per_granule=gt.shape[-2],
+    )(gt)
+
+    assert out is gt
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt))
+    assert out.transform == gt.transform
+    assert str(out.crs) == str(gt.crs)
+
+
+def test_bowtie_correction_resamples_edges_and_preserves_fill() -> None:
+    values = np.tile(np.arange(7, dtype=np.float32), (5, 1))[None, ...]
+    values[..., 2, 1] = -9999.0
+    gt = _gt(values)
+
+    out = gz.geom.BowtieCorrection(
+        scan_angle_max_deg=60.0,
+        pixels_per_scan=7,
+        scans_per_granule=5,
+        method="nearest",
+    )(gt)
+
+    assert out.shape == gt.shape
+    assert out.transform == gt.transform
+    assert str(out.crs) == str(gt.crs)
+    assert np.asarray(out)[0, 2, 0] == -9999.0
+    assert np.asarray(out)[0, 2, 1] == -9999.0
+    assert np.asarray(out)[0, 0, 3] == np.asarray(gt)[0, 0, 3]
+    assert np.asarray(out)[0, 0, 0] > np.asarray(gt)[0, 0, 0]
+
+
+def test_antimeridian_split_uses_lon_attrs_and_returns_west_east() -> None:
+    values = np.arange(1 * 2 * 4, dtype=np.float32).reshape(1, 2, 4)
+    lons = np.array([[170.0, 175.0, -179.0, -170.0]] * 2)
+    gt = GeoTensor(
+        values,
+        transform=Affine(1, 0, 170, 0, -1, 10),
+        crs="EPSG:4326",
+        fill_value_default=-9999,
+        attrs={"lons": lons},
+    )
+
+    west, east = gz.geom.AntimeridianSplit()(gt)
+
+    np.testing.assert_array_equal(np.asarray(west), values[..., 2:])
+    np.testing.assert_array_equal(np.asarray(east), values[..., :2])
+    assert np.nanmax(west.attrs["lons"]) < 0
+    assert np.nanmin(east.attrs["lons"]) > 0
+    assert west.transform == gt.isel({"x": slice(2, 4)}).transform
+    assert str(west.crs) == str(gt.crs)
+
+
+def test_antimeridian_split_identity_when_no_crossing() -> None:
+    gt = _gt()
+
+    out = gz.geom.AntimeridianSplit()(gt)
+
+    assert out == [gt]
+
+
+def test_geostationary_parallax_zero_height_is_identity() -> None:
+    gt = _gt()
+
+    out = gz.geom.GeostationaryParallaxCorrect(
+        satellite_lon_deg=gt.transform.c,
+        target_height_m=0.0,
+    )(gt)
+
+    assert out is gt
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt))
+    assert out.transform == gt.transform
+
+
+def test_geostationary_parallax_moves_elevated_point_toward_nadir() -> None:
+    values = np.zeros((1, 9, 9), dtype=np.float32)
+    values[0, 5, 5] = 1.0
+    gt = GeoTensor(
+        values,
+        transform=Affine(0.25, 0, -76.0, 0, -0.25, 1.0),
+        crs="EPSG:4326",
+        fill_value_default=0.0,
+    )
+
+    out = gz.geom.GeostationaryParallaxCorrect(
+        satellite_lon_deg=-75.0,
+        target_height_m=400_000.0,
+        method="nearest",
+    )(gt)
+
+    assert np.asarray(out)[0, 4, 4] == 1.0
+    assert np.asarray(out)[0, 5, 5] == 0.0
+    assert out.transform == gt.transform
+    assert str(out.crs) == str(gt.crs)
+
+
+def test_segment_stitch_orders_segments_and_fills_missing_scan() -> None:
+    fill = -1.0
+    seg0 = GeoTensor(
+        np.full((1, 2, 3), 1.0, dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -1, 6),
+        crs="EPSG:4326",
+        fill_value_default=fill,
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 3}},
+    )
+    seg2 = GeoTensor(
+        np.full((1, 2, 3), 3.0, dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -1, 2),
+        crs="EPSG:4326",
+        fill_value_default=fill,
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 2, "n_segments": 3}},
+    )
+
+    out = gz.geom.SegmentStitch(axis="scan", fill=fill)([seg2, seg0])
+
+    expected = np.concatenate(
+        [
+            np.full((1, 2, 3), 1.0, dtype=np.float32),
+            np.full((1, 2, 3), fill, dtype=np.float32),
+            np.full((1, 2, 3), 3.0, dtype=np.float32),
+        ],
+        axis=-2,
+    )
+    np.testing.assert_array_equal(np.asarray(out), expected)
+    assert out.transform == seg0.transform
+    assert str(out.crs) == str(seg0.crs)
+
+
+def test_segment_stitch_roundtrips_sample_segments() -> None:
+    values = np.arange(1 * 3 * 6, dtype=np.float32).reshape(1, 3, 6)
+    left = GeoTensor(
+        values[..., :3],
+        transform=Affine(1, 0, 0, 0, -1, 3),
+        crs="EPSG:4326",
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 2}},
+    )
+    right = GeoTensor(
+        values[..., 3:],
+        transform=Affine(1, 0, 3, 0, -1, 3),
+        crs="EPSG:4326",
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 1, "n_segments": 2}},
+    )
+
+    out = gz.geom.SegmentStitch(axis="sample")([right, left])
+
+    np.testing.assert_array_equal(np.asarray(out), values)
+    assert out.transform == left.transform
+
+
 def test_mosaic_methods_cover_adjacent_tiles() -> None:
     left = GeoTensor(
         np.ones((1, 3, 4), dtype=np.float32),
