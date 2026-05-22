@@ -584,6 +584,96 @@ def test_segment_stitch_roundtrips_sample_segments() -> None:
     assert out.transform == left.transform
 
 
+def test_segment_stitch_integer_dtype_uses_existing_fill() -> None:
+    # Integer sensor counts cannot hold NaN; stitching with the default
+    # fill=np.nan must fall back to the segment's existing fill (or 0)
+    # rather than raising.
+    seg0 = GeoTensor(
+        np.full((1, 2, 3), 1, dtype=np.int16),
+        transform=Affine(1, 0, 0, 0, -1, 6),
+        crs="EPSG:4326",
+        fill_value_default=-1,
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 3}},
+    )
+    seg2 = GeoTensor(
+        np.full((1, 2, 3), 3, dtype=np.int16),
+        transform=Affine(1, 0, 0, 0, -1, 2),
+        crs="EPSG:4326",
+        fill_value_default=-1,
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 2, "n_segments": 3}},
+    )
+
+    out = gz.geom.SegmentStitch(axis="scan")([seg2, seg0])
+
+    arr = np.asarray(out)
+    assert arr.dtype == np.int16
+    # Missing middle segment is filled with the segments' existing fill (-1).
+    assert (arr[..., 2:4, :] == -1).all()
+    assert out.fill_value_default == -1
+
+
+def test_segment_stitch_rejects_duplicate_segment_index() -> None:
+    seg0 = GeoTensor(
+        np.zeros((1, 2, 3), dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -1, 4),
+        crs="EPSG:4326",
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 2}},
+    )
+    dup = GeoTensor(
+        np.zeros((1, 2, 3), dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -1, 4),
+        crs="EPSG:4326",
+        attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 2}},
+    )
+
+    with pytest.raises(ValueError, match="Duplicate segment_index"):
+        gz.geom.SegmentStitch()([seg0, dup])
+
+
+def test_segment_stitch_handles_attrs_none_with_clear_error() -> None:
+    bad = GeoTensor(
+        np.zeros((1, 2, 3), dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -1, 4),
+        crs="EPSG:4326",
+        attrs=None,
+    )
+    with pytest.raises(ValueError, match="__geotoolz_segment_meta__"):
+        gz.geom.SegmentStitch()([bad])
+
+
+def test_bowtie_correction_preserves_float32_dtype_and_edge_pixels() -> None:
+    values = np.tile(np.arange(7, dtype=np.float32), (5, 1))[None, ...]
+    gt = _gt(values)
+
+    out = gz.geom.BowtieCorrection(
+        scan_angle_max_deg=60.0,
+        pixels_per_scan=7,
+        scans_per_granule=5,
+        method="bilinear",
+    )(gt)
+
+    arr = np.asarray(out)
+    # Bilinear resampling must not silently promote float32 -> float64.
+    assert arr.dtype == np.float32
+    # The trailing row/column lies inside the raster footprint and must not
+    # be replaced with the fill value.
+    assert arr[0, -1, 0] != gt.fill_value_default
+    assert arr[0, 0, -1] != gt.fill_value_default
+
+
+def test_antimeridian_split_rejects_mismatched_lon_shape() -> None:
+    values = np.arange(1 * 2 * 4, dtype=np.float32).reshape(1, 2, 4)
+    gt = GeoTensor(
+        values,
+        transform=Affine(1, 0, 170, 0, -1, 10),
+        crs="EPSG:4326",
+        fill_value_default=-9999,
+        attrs={"lons": np.array([170.0, 175.0, -179.0])},  # wrong length
+    )
+    with pytest.raises(ValueError, match="lons"):
+        gz.geom.AntimeridianSplit()(gt)
+
+
 def test_mosaic_methods_cover_adjacent_tiles() -> None:
     left = GeoTensor(
         np.ones((1, 3, 4), dtype=np.float32),

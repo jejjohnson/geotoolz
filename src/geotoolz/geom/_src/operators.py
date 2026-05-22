@@ -957,23 +957,32 @@ class SegmentStitch(Operator):
         if any(n != n_segments for _, n in metas):
             raise ValueError("All segments must declare the same n_segments.")
         index_offset = 1 if max(index for index, _ in metas) == n_segments else 0
-        by_index = {
-            index - index_offset: segment
-            for (index, _), segment in zip(metas, segments, strict=True)
-        }
+        by_index: dict[int, GeoTensor] = {}
+        for (index, _), segment in zip(metas, segments, strict=True):
+            normalised = index - index_offset
+            if normalised in by_index:
+                raise ValueError(
+                    f"Duplicate segment_index {index} after index_offset "
+                    f"normalisation; each segment must declare a unique index."
+                )
+            by_index[normalised] = segment
         if any(index < 0 or index >= n_segments for index in by_index):
             raise ValueError("segment_index is outside the declared n_segments range.")
         first_index = min(by_index)
         first = by_index[first_index]
         for segment in segments:
             _validate_segment_compatible(first, segment, axis_num)
+        # Choose a fill that is representable in the segment dtype: integer
+        # tensors cannot hold NaN, so fall back to the first segment's own
+        # fill (or zero) when the requested fill is non-finite.
+        segment_fill = _coerce_segment_fill(self.fill, first)
         pieces: list[np.ndarray] = []
         segment_shape = first.shape
         for index in range(n_segments):
             if index in by_index:
                 pieces.append(np.asarray(by_index[index]))
             else:
-                pieces.append(np.full(segment_shape, self.fill, dtype=first.dtype))
+                pieces.append(np.full(segment_shape, segment_fill, dtype=first.dtype))
         values = np.concatenate(pieces, axis=axis_num)
         row_before = first_index * segment_shape[-2] if axis_num == -2 else 0
         col_before = first_index * segment_shape[-1] if axis_num == -1 else 0
@@ -988,7 +997,7 @@ class SegmentStitch(Operator):
             values,
             transform,
             first.crs,
-            fill_value_default=self.fill,
+            fill_value_default=segment_fill,
             attrs=attrs,
         )
 
@@ -1362,23 +1371,34 @@ def _sample_bilinear(
     col0 = np.floor(cols).astype(int)
     row1 = row0 + 1
     col1 = col0 + 1
-    valid = (row0 >= 0) & (col0 >= 0) & (row1 < height) & (col1 < width)
+    # A sample is valid whenever the source coordinate lies inside the raster
+    # footprint, including the trailing row/column. Clamping the upper
+    # neighbour below keeps the bilinear formula well defined at the edge —
+    # its weight is zero there, so the edge value is returned exactly.
+    valid = (rows >= 0) & (rows <= height - 1) & (cols >= 0) & (cols <= width - 1)
     safe_row0 = np.clip(row0, 0, height - 1)
     safe_row1 = np.clip(row1, 0, height - 1)
     safe_col0 = np.clip(col0, 0, width - 1)
     safe_col1 = np.clip(col1, 0, width - 1)
-    row_weight = rows - row0
-    col_weight = cols - col0
+    row_weight = (rows - row0).astype(arr.dtype, copy=False) if np.issubdtype(
+        arr.dtype, np.floating
+    ) else rows - row0
+    col_weight = (cols - col0).astype(arr.dtype, copy=False) if np.issubdtype(
+        arr.dtype, np.floating
+    ) else cols - col0
+    one = arr.dtype.type(1) if np.issubdtype(arr.dtype, np.floating) else 1.0
     top_left = arr[..., safe_row0, safe_col0]
     top_right = arr[..., safe_row0, safe_col1]
     bottom_left = arr[..., safe_row1, safe_col0]
     bottom_right = arr[..., safe_row1, safe_col1]
     sampled = (
-        top_left * (1.0 - row_weight) * (1.0 - col_weight)
-        + top_right * (1.0 - row_weight) * col_weight
-        + bottom_left * row_weight * (1.0 - col_weight)
+        top_left * (one - row_weight) * (one - col_weight)
+        + top_right * (one - row_weight) * col_weight
+        + bottom_left * row_weight * (one - col_weight)
         + bottom_right * row_weight * col_weight
     )
+    if np.issubdtype(arr.dtype, np.floating) and sampled.dtype != arr.dtype:
+        sampled = sampled.astype(arr.dtype, copy=False)
     return _apply_invalid_fill(sampled, valid, fill)
 
 
@@ -1394,20 +1414,32 @@ def _apply_invalid_fill(
     constructor default.
     """
     if valid.all():
-        return sampled.astype(sampled.dtype, copy=False)
-    out = sampled.copy()
+        return sampled
     fill_value = 0 if fill is None else fill
-    out[..., ~valid] = fill_value
-    return out
+    # ``valid`` is a 2D (H, W) mask; ``sampled`` may have leading band
+    # dimensions. ``np.where`` broadcasts the mask across them, while
+    # boolean indexing with a 2D mask collapses those trailing axes.
+    return np.where(valid, sampled, np.asarray(fill_value, dtype=sampled.dtype))
 
 
 def _longitude_grid(gt: GeoTensor, expected_crs: str | CRS) -> np.ndarray | None:
     attrs = gt.attrs or {}
+    spatial_shape = gt.shape[-2:]
     for key in ("lons", "lon", "longitude"):
         if key in attrs:
             lons = np.asarray(attrs[key], dtype=np.float64)
             if lons.ndim == 1:
-                return np.broadcast_to(lons[None, :], gt.shape[-2:])
+                if lons.shape[0] != spatial_shape[1]:
+                    raise ValueError(
+                        f"attrs['{key}'] has length {lons.shape[0]} but the "
+                        f"GeoTensor has width {spatial_shape[1]}."
+                    )
+                return np.broadcast_to(lons[None, :], spatial_shape)
+            if lons.shape != spatial_shape:
+                raise ValueError(
+                    f"attrs['{key}'] has shape {lons.shape} but the GeoTensor "
+                    f"spatial shape is {spatial_shape}."
+                )
             return lons
     parsed_expected = (
         expected_crs
@@ -1531,8 +1563,34 @@ def _segment_axis(axis: str) -> int:
     raise ValueError("axis must be 'scan'/'y' or 'sample'/'x'.")
 
 
+def _coerce_segment_fill(fill: float | int, first: GeoTensor) -> float | int:
+    """Return a fill value that is representable in ``first.dtype``.
+
+    Integer-typed sensor segments cannot hold ``NaN``; in that case fall back
+    to the segment's own ``fill_value_default`` (when finite) or ``0``.
+    """
+    dtype = np.asarray(first).dtype
+    if np.issubdtype(dtype, np.floating):
+        return fill
+    try:
+        is_nan = bool(np.isnan(fill))
+    except TypeError:
+        is_nan = False
+    if not is_nan:
+        return fill
+    existing = first.fill_value_default
+    if existing is not None:
+        try:
+            if not bool(np.isnan(existing)):
+                return existing
+        except TypeError:
+            return existing
+    return 0
+
+
 def _segment_meta(segment: GeoTensor) -> tuple[int, int]:
-    meta = segment.attrs.get("__geotoolz_segment_meta__")
+    attrs = segment.attrs or {}
+    meta = attrs.get("__geotoolz_segment_meta__")
     if not isinstance(meta, dict):
         raise ValueError("Each segment must define attrs['__geotoolz_segment_meta__'].")
     try:
