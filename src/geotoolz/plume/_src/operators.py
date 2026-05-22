@@ -352,14 +352,24 @@ class PlumeFootprint(Operator):
         # pandas to_dict("index") propagates that dtype. Python int hashes
         # equal in CPython but the explicit cast makes the lookup contract
         # obvious and survives dtype changes upstream.
-        props_by_label = (
-            {}
-            if props.empty or "label" not in props
-            else {
-                int(k): v
-                for k, v in props.set_index("label").to_dict("index").items()
+        #
+        # When the caller's ``properties`` omits ``"label"`` we still need a
+        # per-component lookup, so synthesise it from ``regionprops_table``'s
+        # row order (which mirrors ``sorted(unique(labels) - {0})``).
+        if props.empty:
+            props_by_label = {}
+        else:
+            if "label" in props.columns:
+                indexed = props.set_index("label", drop=False)
+            else:
+                synthetic_labels = sorted(
+                    int(v) for v in np.unique(labels) if v != 0
+                )
+                indexed = props.copy()
+                indexed.index = pd.Index(synthetic_labels[: len(indexed)])
+            props_by_label = {
+                int(k): v for k, v in indexed.to_dict("index").items()
             }
-        )
 
         rows: list[dict[str, Any]] = []
         labels_i32 = labels.astype(np.int32, copy=False)
@@ -386,19 +396,26 @@ class PlumeFootprint(Operator):
                 continue
             component_values = None if enh is None else enh[component]
             region_props = props_by_label.get(label_id, {})
+
+            def _nan_safe(reducer: Callable[[np.ndarray], float], key: str) -> float:
+                # Prefer the regionprops_table value, but fall back to the
+                # NaN-aware reducer when skimage propagates NaN through
+                # ``mean_intensity`` / ``max_intensity`` (it does not ignore
+                # NaNs internally). ``component_values`` is non-None here.
+                rp_val = region_props.get(key)
+                if rp_val is None or not np.isfinite(float(rp_val)):
+                    return float(reducer(component_values))
+                return float(rp_val)
+
             mean_enhancement = (
                 None
                 if component_values is None
-                else float(
-                    region_props.get("mean_intensity", np.nanmean(component_values))
-                )
+                else _nan_safe(np.nanmean, "mean_intensity")
             )
             max_enhancement = (
                 None
                 if component_values is None
-                else float(
-                    region_props.get("max_intensity", np.nanmax(component_values))
-                )
+                else _nan_safe(np.nanmax, "max_intensity")
             )
             rows.append(
                 {

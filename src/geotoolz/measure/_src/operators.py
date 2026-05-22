@@ -122,7 +122,10 @@ class RegionProps(Operator):
                 )
             ]
             return gpd.GeoDataFrame(frame, geometry=geometry, crs=gt.crs)
-        return gpd.GeoDataFrame(frame, crs=gt.crs)
+        # Caller omitted centroid: still return a valid GeoDataFrame with an
+        # empty (None-valued) geometry column rather than raising in the
+        # ``GeoDataFrame`` constructor for missing geometry.
+        return gpd.GeoDataFrame(frame, geometry=[None] * len(frame), crs=gt.crs)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -164,6 +167,16 @@ class FindContours(Operator):
             xy = [_xy(gt.transform, float(row), float(col)) for row, col in coords]
             if len(xy) >= 2:
                 rows.append({"contour_id": contour_id, "geometry": LineString(xy)})
+        if not rows:
+            # No contours (constant raster, out-of-range level, or all
+            # segments degenerate to <2 points). Return an empty
+            # GeoDataFrame with the expected schema instead of letting the
+            # constructor raise on a missing ``geometry`` column.
+            return gpd.GeoDataFrame(
+                {"contour_id": [], "geometry": []},
+                geometry="geometry",
+                crs=gt.crs,
+            )
         return gpd.GeoDataFrame(rows, geometry="geometry", crs=gt.crs)
 
     def get_config(self) -> dict[str, Any]:
