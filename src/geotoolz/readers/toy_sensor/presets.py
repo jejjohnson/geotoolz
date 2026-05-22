@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pipekit import Operator
+
 from geotoolz.indices import NDVI as _NDVI
 from geotoolz.readers.toy_sensor import constants
 
