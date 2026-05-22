@@ -55,6 +55,8 @@ class SpatialTriangular(SpatialWindow):
         ``SpatialRectangular(size=(height, width))``. The returned array
         linearly ramps from each edge toward a plateau of 1.0 over
         ``width`` pixels, matching ``geom.Stitch(blend="feather")``.
+        Size entries are coerced to integers, matching geopatcher's
+        fixed-geometry window helpers.
 
         Examples:
             >>> from geopatcher import SpatialRectangular

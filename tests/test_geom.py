@@ -357,6 +357,8 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
     patches = list(patcher.split(field))
     patch_stitched = SpatialOverlapAdd().merge(patches, field.reader)
 
+    assert patch_stitched.shape == gt.shape
+    np.testing.assert_allclose(patch_stitched, np.asarray(gt), rtol=1e-6)
     np.testing.assert_allclose(patch_stitched, np.asarray(stitched), rtol=1e-6)
 
 
