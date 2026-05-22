@@ -910,7 +910,9 @@ class GeostationaryParallaxCorrect(Operator):
         )
         if np.any(off_limb):
             sampled = np.where(
-                off_limb, np.asarray(gt.fill_value_default, dtype=sampled.dtype), sampled
+                off_limb,
+                np.asarray(gt.fill_value_default, dtype=sampled.dtype),
+                sampled,
             )
         return gt.array_as_geotensor(sampled)
 
