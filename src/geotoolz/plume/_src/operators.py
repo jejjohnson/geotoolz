@@ -21,12 +21,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import numpy as np
+from pipekit import Operator
 from pyproj import CRS, Transformer
 from rasterio import features
 from shapely.geometry import LineString, shape
 from shapely.ops import unary_union
 
-from geotoolz.core import Operator
 from geotoolz.plume._src.array import (
     ColumnUnit,
     Connectivity,

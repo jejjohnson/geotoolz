@@ -8,10 +8,10 @@ file/cloud IO primitives in :mod:`georeader.read` and
   raster source (path / :class:`RasterioReader` / STAC asset / EE image)
   and produce an in-memory :class:`georeader.geotensor.GeoTensor`. They
   override ``_apply`` with no positional input and are valid as the
-  first step of a :class:`~geotoolz.core.Sequential`.
+  first step of a :class:`~pipekit.Sequential`.
 * **Sink operators** (subclasses of :class:`SinkOperator`) consume a
   ``GeoTensor`` and write it to disk / object storage. They are marked
-  ``_terminal = True`` so :class:`~geotoolz.core.Sequential` only
+  ``_terminal = True`` so :class:`~pipekit.Sequential` only
   accepts them as the last step.
 
 All public IO operators set ``forbid_in_yaml = True`` — their
@@ -33,12 +33,11 @@ import numpy as np
 from georeader import read, save
 from georeader.geotensor import GeoTensor
 from georeader.rasterio_reader import RasterioReader
+from pipekit import Operator
 from rasterio.errors import RasterioIOError
 from rasterio.io import DatasetReaderBase
 from rasterio.windows import Window
 from shapely.geometry import MultiPolygon, Polygon, box
-
-from geotoolz.core import Operator
 
 
 Source = str | PathLike[str] | Any
@@ -54,8 +53,8 @@ class SourceOperator(Operator):
     """Operator that produces a :class:`GeoTensor` without an input carrier.
 
     Source operators are valid as the *first* step of a
-    :class:`~geotoolz.core.Sequential` because
-    :class:`~geotoolz.core.Sequential` calls ``op()`` (no input) when the
+    :class:`~pipekit.Sequential` because
+    :class:`~pipekit.Sequential` calls ``op()`` (no input) when the
     pipeline is invoked without a carrier.
     """
 
@@ -66,7 +65,7 @@ class SinkOperator(Operator):
     """Terminal operator that consumes a :class:`GeoTensor` and writes it.
 
     Sink operators are marked ``_terminal = True`` so
-    :class:`~geotoolz.core.Sequential` only accepts them as the *last*
+    :class:`~pipekit.Sequential` only accepts them as the *last*
     step (anywhere else they would break the GeoTensor → next op
     contract by returning ``None``).
     """

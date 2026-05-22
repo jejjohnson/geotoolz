@@ -36,10 +36,10 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
+from pipekit import Operator
 
 from geotoolz.cloud import SCL
 from geotoolz.cloud._src.array import mask_from_qa_bits, mask_from_scl
-from geotoolz.core import Operator
 from geotoolz.qa._src.array import mask_from_bit_field
 
 

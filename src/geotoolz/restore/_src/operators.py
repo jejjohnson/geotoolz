@@ -14,8 +14,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from pipekit import Operator
 
-from geotoolz.core import Operator
 from geotoolz.restore._src.array import (
     bilateral_denoise,
     despeckle_frost,

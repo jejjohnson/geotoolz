@@ -1,8 +1,10 @@
 """geotoolz — composable Operator library for remote sensing.
 
-Top-level re-exports of the composition core and the per-domain
-operator families (`radiometry`, `indices`, `cloud`, ...) — each
-imported from its own submodule.
+The composition core (`Operator`, `Sequential`, `Graph`, …) lives in
+the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit)
+framework — `geotoolz` re-exports the common names at the top level and
+adds the per-domain operator families (`radiometry`, `indices`, `cloud`,
+…) on top.
 
     import geotoolz as gz
     pipe = gz.Sequential([gz.Tap(print), gz.Identity()])
@@ -19,10 +21,28 @@ it in and use ``geotoolz.patch_ops`` for the Operator-graph bridge:
 
 from __future__ import annotations
 
+from pipekit import (
+    Branch,
+    Carrier,
+    Const,
+    Fanout,
+    Graph,
+    Identity,
+    Input,
+    Lambda,
+    Node,
+    Operator,
+    Sequential,
+    ShapeTrace,
+    Sink,
+    Snapshot,
+    Switch,
+    Tap,
+)
+
 from geotoolz import (
     augment,
     cloud,
-    core,
     geom,
     indices,
     io,
@@ -43,25 +63,6 @@ from geotoolz.cloud import (
     MaskFromQABits,
     MaskFromSCL,
     MaskValid,
-)
-from geotoolz.core import (
-    Branch,
-    Carrier,
-    Const,
-    Fanout,
-    Graph,
-    Identity,
-    Input,
-    Lambda,
-    ModelOp,
-    Node,
-    Operator,
-    Sequential,
-    ShapeTrace,
-    Sink,
-    Snapshot,
-    Switch,
-    Tap,
 )
 from geotoolz.indices import (
     ARVI,
@@ -87,6 +88,7 @@ from geotoolz.indices import (
     dNBR,
     kNDVI,
 )
+from geotoolz.model import ModelOp
 from geotoolz.plume import (
     SBMP,
     ColumnToMass,
@@ -261,7 +263,6 @@ __all__ = [
     "__version__",
     "augment",
     "cloud",
-    "core",
     "dNBR",
     "geom",
     "indices",

@@ -588,14 +588,19 @@ wheels = [
 
 [[package]]
 name = "geopatcher"
-version = "0.0.1"
-source = { git = "https://github.com/jejjohnson/geopatcher?branch=claude%2Fgeopatcher-extraction-plan-bxDGs#edacbd3b773b4995dffb35dec03fe5d4e46836b7" }
+version = "0.0.2"
+source = { git = "https://github.com/jejjohnson/geopatcher?branch=feat%2Fpipekit-integration#65fcec278f3f1d6971e7202e5636a52448ec52bf" }
 dependencies = [
     { name = "georeader-spaceml" },
     { name = "numpy" },
     { name = "pyproj" },
     { name = "scipy" },
     { name = "typing-extensions" },
+]
+
+[package.optional-dependencies]
+pipekit = [
+    { name = "pipekit" },
 ]
 
 [[package]]
@@ -624,6 +629,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "pipekit" },
     { name = "pyproj" },
     { name = "scikit-image" },
     { name = "scipy" },
@@ -636,7 +642,7 @@ hydra = [
     { name = "hydra-zen" },
 ]
 patch = [
-    { name = "geopatcher" },
+    { name = "geopatcher", extra = ["pipekit"] },
 ]
 
 [package.dev-dependencies]
@@ -666,12 +672,13 @@ typecheck = [
 [package.metadata]
 requires-dist = [
     { name = "geopandas", specifier = ">=0.14" },
-    { name = "geopatcher", marker = "extra == 'patch'", git = "https://github.com/jejjohnson/geopatcher?branch=claude%2Fgeopatcher-extraction-plan-bxDGs" },
+    { name = "geopatcher", extras = ["pipekit"], marker = "extra == 'patch'", git = "https://github.com/jejjohnson/geopatcher?branch=feat%2Fpipekit-integration" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "hydra-zen", marker = "extra == 'hydra'", specifier = ">=0.14" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.1" },
+    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "scikit-image", specifier = ">=0.25" },
     { name = "scipy", specifier = ">=1.11" },
@@ -1732,6 +1739,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/13/306d275efd3a3453f72114b7431c877d10b1154014c1ebbedd067770d629/pillow-12.2.0-cp314-cp314t-win_amd64.whl", hash = "sha256:6562ace0d3fb5f20ed7290f1f929cae41b25ae29528f2af1722966a0a02e2aa1", size = 7225152, upload-time = "2026-04-01T14:45:50.032Z" },
     { url = "https://files.pythonhosted.org/packages/ff/6e/cf826fae916b8658848d7b9f38d88da6396895c676e8086fc0988073aaf8/pillow-12.2.0-cp314-cp314t-win_arm64.whl", hash = "sha256:aa88ccfe4e32d362816319ed727a004423aab09c5cea43c01a4b435643fa34eb", size = 2556579, upload-time = "2026-04-01T14:45:52.529Z" },
 ]
+
+[[package]]
+name = "pipekit"
+version = "0.0.1"
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit#6340234241589ffdef1f3ffdf99c61b56c624ef5" }
 
 [[package]]
 name = "platformdirs"

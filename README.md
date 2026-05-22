@@ -12,7 +12,7 @@
 
 > **Status:** pre-alpha (`0.0.0`). API is in flux; the public surface is not yet stable.
 
-A composable Operator library for remote sensing, built on top of `georeader.GeoTensor`. Pipelines are written as a `Sequential` of operators or a `Graph` of named ops — declared in code or YAML, executed eagerly on `GeoTensor`s. The sibling library to `xr_toolz` for climate workflows: same architectural patterns, different substrate (`numpy`-subclass `GeoTensor` with `__array_ufunc__` vs `xarray.Dataset`), different audience.
+A composable Operator library for remote sensing, built on top of `georeader.GeoTensor`. Pipelines are written as a `Sequential` of operators or a `Graph` of named ops — declared in code or YAML, executed eagerly on `GeoTensor`s. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework; `geotoolz` is a direct consumer that adds the remote-sensing operator families on top. The sibling library to `xr_toolz` for climate workflows: same architectural patterns, different substrate (`numpy`-subclass `GeoTensor` with `__array_ufunc__` vs `xarray.Dataset`), different audience.
 
 ```python
 import geotoolz as gz
@@ -30,13 +30,25 @@ The full design proposal lives in
 
 ## Installation
 
-This repo is pre-release and not yet on PyPI. Install from source:
+This repo is pre-release and not yet on PyPI. `geotoolz` depends on
+[`pipekit`](https://github.com/jejjohnson/pipekit) (also pre-PyPI), so
+use `uv` — it reads the GitHub git source declared in `pyproject.toml`
+and resolves `pipekit` transitively:
 
 ```bash
 git clone https://github.com/jejjohnson/geotoolz.git
 cd geotoolz
-make install
+make install        # uv sync --all-groups + pre-commit hooks
 ```
+
+Or install in one shot from GitHub:
+
+```bash
+uv pip install "git+https://github.com/jejjohnson/geotoolz@main"
+```
+
+Plain `pip install git+https://...` will fail until `pipekit` reaches
+PyPI, because pip doesn't read `[tool.uv.sources]`.
 
 ## Development
 

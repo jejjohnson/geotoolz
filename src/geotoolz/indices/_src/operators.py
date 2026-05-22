@@ -26,8 +26,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from pipekit import Operator
 
-from geotoolz.core import Operator
 from geotoolz.indices._src.array import (
     arvi,
     bais2,

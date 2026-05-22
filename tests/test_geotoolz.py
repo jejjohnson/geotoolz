@@ -15,14 +15,15 @@ def test_version_attribute() -> None:
 
 
 def test_core_re_exports_at_top_level() -> None:
-    """Public symbols should be reachable as ``gz.X`` and ``gz.core.X``."""
-    for name in (
+    """Public symbols should be reachable as ``gz.X`` (re-exported from pipekit)."""
+    import pipekit
+
+    pipekit_names = (
         "Operator",
         "Sequential",
         "Graph",
         "Input",
         "Node",
-        "ModelOp",
         "Tap",
         "Snapshot",
         "ShapeTrace",
@@ -33,5 +34,10 @@ def test_core_re_exports_at_top_level() -> None:
         "Const",
         "Lambda",
         "Sink",
-    ):
-        assert getattr(geotoolz, name) is getattr(geotoolz.core, name), name
+    )
+    for name in pipekit_names:
+        assert getattr(geotoolz, name) is getattr(pipekit, name), name
+    # ModelOp is geotoolz-specific (built on top of pipekit.Operator).
+    from geotoolz.model import ModelOp
+
+    assert geotoolz.ModelOp is ModelOp
