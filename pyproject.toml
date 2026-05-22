@@ -76,6 +76,11 @@ patch = ["geopatcher[pipekit]"]
 # `toy_sensor` reference reader has no third-party dependencies. Per-sensor
 # extras (modis, viirs, goes, mtg, seviri, himawari, tropomi, s3) are tracked
 # under their respective design issues and added as the real readers land.
+# Multi-format reader backends. Each reader guards imports so the base install
+# stays slim and reports the exact extra needed at runtime.
+hdf5 = ["h5py>=3.10.0"]
+hdf4 = ["pyhdf>=0.11.4"]
+netcdf = ["netCDF4>=1.6.5"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
