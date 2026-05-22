@@ -456,6 +456,22 @@ def test_antimeridian_split_identity_when_no_crossing() -> None:
     assert out == [gt]
 
 
+def test_antimeridian_split_rejects_multiple_jumps() -> None:
+    # Polar-pass-like swath that wraps the antimeridian twice in a row.
+    values = np.arange(1 * 2 * 6, dtype=np.float32).reshape(1, 2, 6)
+    lons = np.array([[170.0, -170.0, 170.0, -170.0, 170.0, -170.0]] * 2)
+    gt = GeoTensor(
+        values,
+        transform=Affine(1, 0, 170, 0, -1, 10),
+        crs="EPSG:4326",
+        fill_value_default=-9999,
+        attrs={"lons": lons},
+    )
+
+    with pytest.raises(ValueError, match="longitude jumps"):
+        gz.geom.AntimeridianSplit()(gt)
+
+
 def test_geostationary_parallax_zero_height_is_identity() -> None:
     gt = _gt()
 
@@ -489,6 +505,30 @@ def test_geostationary_parallax_moves_elevated_point_toward_nadir() -> None:
     assert np.asarray(out)[0, 5, 5] == 0.0
     assert out.transform == gt.transform
     assert str(out.crs) == str(gt.crs)
+
+
+def test_geostationary_parallax_fills_off_limb_pixels() -> None:
+    # Grid that straddles the GOES-East sub-satellite point with pixels near
+    # the limb; at a high target height some rays will miss the Earth.
+    fill = -1.0
+    values = np.ones((1, 5, 5), dtype=np.float32)
+    gt = GeoTensor(
+        values,
+        transform=Affine(20.0, 0, -150.0, 0, -20.0, 50.0),
+        crs="EPSG:4326",
+        fill_value_default=fill,
+    )
+
+    out = gz.geom.GeostationaryParallaxCorrect(
+        satellite_lon_deg=-75.0,
+        target_height_m=200_000.0,
+        method="nearest",
+    )(gt)
+
+    arr = np.asarray(out)
+    # The corner pixels are far off-limb relative to the sub-satellite point.
+    assert (arr == fill).any()
+    assert out.transform == gt.transform
 
 
 def test_segment_stitch_orders_segments_and_fills_missing_scan() -> None:

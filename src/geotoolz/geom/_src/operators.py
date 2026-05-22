@@ -822,8 +822,19 @@ class AntimeridianSplit(Operator):
         diffs = np.abs(np.diff(lons, axis=1))
         if diffs.size == 0 or np.nanmax(diffs) <= self.tolerance_deg:
             return [gt]
+        # Reject swaths with more than one longitude discontinuity (e.g. polar
+        # passes that wrap twice). The single-split heuristic below cannot
+        # represent multi-jump cases correctly.
+        per_col_max = np.nanmax(diffs, axis=0)
+        n_jumps = int(np.sum(per_col_max > self.tolerance_deg))
+        if n_jumps > 1:
+            raise ValueError(
+                f"AntimeridianSplit found {n_jumps} longitude jumps above "
+                f"tolerance_deg={self.tolerance_deg}; only single-discontinuity "
+                "swaths are supported."
+            )
         # The diff at column i is the jump between i and i + 1.
-        split_col = int(np.nanargmax(np.nanmax(diffs, axis=0))) + 1
+        split_col = int(np.nanargmax(per_col_max)) + 1
         left = gt.isel({"x": slice(0, split_col)})
         right = gt.isel({"x": slice(split_col, gt.shape[-1])})
         left = _with_sliced_longitudes(left, lons[:, :split_col])
@@ -842,14 +853,14 @@ class GeostationaryParallaxCorrect(Operator):
     A spherical Earth ray-intersection model is used: for each output ground
     pixel, the operator finds where an elevated target would appear to a
     geostationary satellite and samples the input there. ``target_height_m=0``
-    is an exact identity.
+    is an exact identity. Off-limb pixels (whose viewing ray misses the Earth
+    sphere) are filled with ``gt.fill_value_default``.
 
     Args:
         satellite_lon_deg: Sub-satellite longitude.
         satellite_height_m: Satellite height above the equator.
         target_height_m: Scalar height, same-grid array, or same-grid GeoTensor.
-        earth_eq_radius_m: Earth equatorial radius.
-        earth_pol_radius_m: Earth polar radius, retained for configuration.
+        earth_radius_m: Earth radius (spherical model).
         method: ``"nearest"`` or ``"bilinear"``.
     """
 
@@ -861,15 +872,13 @@ class GeostationaryParallaxCorrect(Operator):
         satellite_lon_deg: float,
         satellite_height_m: float = 35_786_023.0,
         target_height_m: float | np.ndarray | GeoTensor = 0.0,
-        earth_eq_radius_m: float = 6_378_137.0,
-        earth_pol_radius_m: float = 6_356_752.31414,
+        earth_radius_m: float = 6_378_137.0,
         method: str = "bilinear",
     ) -> None:
         self.satellite_lon_deg = satellite_lon_deg
         self.satellite_height_m = satellite_height_m
         self.target_height_m = target_height_m
-        self.earth_eq_radius_m = earth_eq_radius_m
-        self.earth_pol_radius_m = earth_pol_radius_m
+        self.earth_radius_m = earth_radius_m
         self.method = method
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
@@ -882,13 +891,13 @@ class GeostationaryParallaxCorrect(Operator):
         if lons_lats is None:
             raise ValueError("GeostationaryParallaxCorrect requires EPSG:4326 grids.")
         lons, lats = lons_lats
-        apparent_lon, apparent_lat = _apparent_lonlat(
+        apparent_lon, apparent_lat, off_limb = _apparent_lonlat(
             lons,
             lats,
             heights,
             satellite_lon_deg=self.satellite_lon_deg,
             satellite_height_m=self.satellite_height_m,
-            earth_radius_m=self.earth_eq_radius_m,
+            earth_radius_m=self.earth_radius_m,
         )
         inv = ~gt.transform
         src_cols, src_rows = inv * (apparent_lon, apparent_lat)
@@ -899,6 +908,8 @@ class GeostationaryParallaxCorrect(Operator):
             method=self.method,
             fill=gt.fill_value_default,
         )
+        if np.any(off_limb):
+            sampled = np.where(off_limb, gt.fill_value_default, sampled)
         return gt.array_as_geotensor(sampled)
 
     def get_config(self) -> dict[str, Any]:
@@ -911,8 +922,7 @@ class GeostationaryParallaxCorrect(Operator):
             "satellite_lon_deg": self.satellite_lon_deg,
             "satellite_height_m": self.satellite_height_m,
             "target_height_m": target,
-            "earth_eq_radius_m": self.earth_eq_radius_m,
-            "earth_pol_radius_m": self.earth_pol_radius_m,
+            "earth_radius_m": self.earth_radius_m,
             "method": self.method,
         }
 
@@ -1467,7 +1477,7 @@ def _apparent_lonlat(
     satellite_lon_deg: float,
     satellite_height_m: float,
     earth_radius_m: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     lon_rad = np.deg2rad(lons)
     lat_rad = np.deg2rad(lats)
     sat_lon = np.deg2rad(satellite_lon_deg)
@@ -1487,22 +1497,14 @@ def _apparent_lonlat(
     b = 2.0 * np.sum(satellite * direction, axis=0)
     c = np.sum(satellite * satellite, axis=0) - earth_radius_m**2
     discriminant = b * b - 4.0 * a * c
-    misses = discriminant < -_RAY_DISCRIMINANT_TOLERANCE
-    if np.any(misses):
-        miss_count = int(np.count_nonzero(misses))
-        miss_pct = miss_count / misses.size * 100.0
-        raise ValueError(
-            "Parallax ray does not intersect the Earth surface for "
-            f"{miss_count} pixels ({miss_pct:.2f}%). Check target heights, "
-            "off-nadir extent, and satellite parameters."
-        )
+    off_limb = discriminant < -_RAY_DISCRIMINANT_TOLERANCE
     near = (-b - np.sqrt(np.maximum(discriminant, 0.0))) / (2.0 * a)
     apparent = satellite + direction * near[None, ...]
     apparent_lon = np.rad2deg(np.arctan2(apparent[1], apparent[0]))
     apparent_lat = np.rad2deg(
         np.arctan2(apparent[2], np.hypot(apparent[0], apparent[1]))
     )
-    return _normalise_longitudes(apparent_lon), apparent_lat
+    return _normalise_longitudes(apparent_lon), apparent_lat, off_limb
 
 
 def _spherical_xyz(
