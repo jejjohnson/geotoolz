@@ -6,8 +6,8 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-
 from pipekit import Operator
+
 from geotoolz.indices._src.bands import BandRef, resolve_band
 
 

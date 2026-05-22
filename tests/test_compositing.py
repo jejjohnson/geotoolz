@@ -217,9 +217,7 @@ def test_cloud_free_composite_accepts_one_channel_mask_for_two_d_input() -> None
 
     out = CloudFreeComposite()([(scene1, mask1), (scene2, mask2)])
 
-    np.testing.assert_allclose(
-        np.asarray(out), [[5.5, 11.0], [3.0, 4.0]]
-    )
+    np.testing.assert_allclose(np.asarray(out), [[5.5, 11.0], [3.0, 4.0]])
 
 
 def test_bap_composite_rejects_mixed_cloud_distance_inputs() -> None:
