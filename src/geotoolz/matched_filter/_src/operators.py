@@ -21,6 +21,7 @@ from geotoolz.matched_filter._src.array import (
     apply_cluster_mf,
     apply_image,
     apply_pixel,
+    cube_to_samples,
     detection_threshold,
     estimate_cov_empirical,
     estimate_cov_lowrank,
@@ -71,22 +72,25 @@ class MatchedFilter(Operator):
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         mean = self.mean
         cov_op = self.cov_op
-        if self.fit_on_call or mean is None or cov_op is None:
-            mean = estimate_mean(
-                np.asarray(gt), method=self.mean_method, axis=self.axis
-            )
+        cube = np.asarray(gt)
+        # Only refit the components that are missing (or all of them when
+        # fit_on_call=True). Preserving an explicitly provided mean while
+        # fitting cov on the incoming cube is a supported workflow.
+        if self.fit_on_call or mean is None:
+            mean = estimate_mean(cube, method=self.mean_method, axis=self.axis)
+        if self.fit_on_call or cov_op is None:
             if self.cov_method == "empirical":
                 cov_op = estimate_cov_empirical(
-                    np.asarray(gt), mean=mean, ridge=1e-8, axis=self.axis
+                    cube, mean=mean, ridge=1e-8, axis=self.axis
                 )
             elif self.cov_method == "lowrank":
-                cov_op = estimate_cov_lowrank(np.asarray(gt), mean=mean, axis=self.axis)
+                cov_op = estimate_cov_lowrank(cube, mean=mean, axis=self.axis)
             else:
                 cov_op = estimate_cov_shrunk(
-                    np.asarray(gt), mean=mean, method=self.cov_method, axis=self.axis
+                    cube, mean=mean, method=self.cov_method, axis=self.axis
                 )
-            self.mean = mean
-            self.cov_op = cov_op
+        self.mean = mean
+        self.cov_op = cov_op
         if self.target is None:
             raise ValueError("target must be supplied before applying MatchedFilter")
         out = apply_image(
@@ -403,22 +407,27 @@ class AdaptiveWindowBackground(Operator):
 
 
 class ApplyClusterMF(Operator):
-    """Apply a matched filter dispatched by per-pixel cluster label."""
+    """Apply a matched filter dispatched by per-pixel cluster label.
+
+    The ``cluster`` background is supplied at apply time as a runtime input
+    so the operator config (``target``, ``axis``) is hydra-/YAML-safe and
+    fully describes the operator's init-time state. Pair this operator
+    with :class:`GMMClusterBackground` in a pipeline to wire the cluster
+    state through dataflow.
+    """
 
     def __init__(
         self,
         *,
-        cluster: ClusterBackground,
         target: np.ndarray,
         axis: int = 0,
     ) -> None:
-        self.cluster = cluster
         self.target = target
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor, cluster: ClusterBackground) -> GeoTensor:
         out = apply_cluster_mf(
-            np.asarray(gt), cluster=self.cluster, target=self.target, axis=self.axis
+            np.asarray(gt), cluster=cluster, target=self.target, axis=self.axis
         )
         return gt.array_as_geotensor(out)
 
@@ -427,23 +436,26 @@ class ApplyClusterMF(Operator):
 
 
 class StreamingBackground(Operator):
-    """Aggregate mean/covariance across an iterable of cubes."""
+    """Aggregate mean/covariance across an iterable of cubes.
+
+    The cubes iterable is supplied at apply time (runtime dataflow) so the
+    operator config remains hydra-/YAML-serialisable: ``cov_kind`` and
+    ``axis`` fully describe the operator's init-time state.
+    """
 
     def __init__(
         self,
         *,
-        cubes: Iterable[GeoTensor],
         cov_kind: Literal["empirical", "shrunk"] = "shrunk",
         axis: int = 0,
     ) -> None:
-        self.cubes = cubes
         self.cov_kind = cov_kind
         self.axis = axis
 
-    def _apply(self) -> StreamingBackgroundResult:
+    def _apply(self, cubes: Iterable[GeoTensor]) -> StreamingBackgroundResult:
         acc: WelfordAccumulator | None = None
-        for cube in self.cubes:
-            samples, _ = _cube_to_samples(np.asarray(cube), axis=self.axis)
+        for cube in cubes:
+            samples, _ = cube_to_samples(np.asarray(cube), axis=self.axis)
             if acc is None:
                 acc = WelfordAccumulator.empty(samples.shape[1])
             acc.update(samples)
@@ -470,11 +482,13 @@ class LinearTargetFromObs(Operator):
         vmr_background: np.ndarray | None = None,
         pattern: str | np.ndarray = "uniform",
         pixel: tuple[int, int] | None = None,
+        axis: int = 0,
     ) -> None:
         self.obs_model = obs_model
         self.vmr_background = vmr_background
         self.pattern = pattern
         self.pixel = pixel
+        self.axis = axis
 
     def _apply(self, gt: GeoTensor) -> np.ndarray:
         return (
@@ -485,6 +499,7 @@ class LinearTargetFromObs(Operator):
                 pattern=self.pattern,
                 pixel=self.pixel,
                 amplitude=TARGET_FINITE_DIFFERENCE_EPSILON,
+                axis=self.axis,
             )
             / TARGET_FINITE_DIFFERENCE_EPSILON
         )
@@ -498,6 +513,7 @@ class LinearTargetFromObs(Operator):
             if isinstance(self.pattern, str)
             else np.asarray(self.pattern).tolist(),
             "pixel": self.pixel,
+            "axis": self.axis,
         }
 
 
@@ -512,12 +528,14 @@ class NonlinearTargetFromObs(Operator):
         amplitude: float = 1.0,
         pattern: str | np.ndarray = "uniform",
         pixel: tuple[int, int] | None = None,
+        axis: int = 0,
     ) -> None:
         self.obs_model = obs_model
         self.vmr_background = vmr_background
         self.amplitude = amplitude
         self.pattern = pattern
         self.pixel = pixel
+        self.axis = axis
 
     def _apply(self, gt: GeoTensor) -> np.ndarray:
         return _target_from_obs(
@@ -527,6 +545,7 @@ class NonlinearTargetFromObs(Operator):
             pattern=self.pattern,
             pixel=self.pixel,
             amplitude=self.amplitude,
+            axis=self.axis,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -539,6 +558,7 @@ class NonlinearTargetFromObs(Operator):
             if isinstance(self.pattern, str)
             else np.asarray(self.pattern).tolist(),
             "pixel": self.pixel,
+            "axis": self.axis,
         }
 
 
@@ -585,7 +605,9 @@ class ColumnEnhancement(Operator):
             target = np.ones_like(mean)
         else:
             target = LinearTargetFromObs(
-                obs_model=self.obs_model, pattern=self.target_pattern
+                obs_model=self.obs_model,
+                pattern=self.target_pattern,
+                axis=self.axis,
             )(gt)
         return MatchedFilter(mean=mean, cov_op=cov_op, target=target, axis=self.axis)(
             gt
@@ -612,14 +634,6 @@ def _cov_config(cov_op: NumpyLinearOperator | np.ndarray | None) -> Any:
     return np.asarray(cov_op).tolist()
 
 
-def _cube_to_samples(
-    cube: np.ndarray, *, axis: int
-) -> tuple[np.ndarray, tuple[int, ...]]:
-    arr = np.asarray(cube, dtype=float)
-    moved = np.moveaxis(arr, axis, -1)
-    return moved.reshape(-1, moved.shape[-1]), moved.shape[:-1]
-
-
 def _target_from_obs(
     obs_model: Any,
     gt: GeoTensor,
@@ -628,16 +642,17 @@ def _target_from_obs(
     pattern: str | np.ndarray,
     pixel: tuple[int, int] | None,
     amplitude: float,
+    axis: int = 0,
 ) -> np.ndarray:
     if not callable(obs_model):
         raise TypeError("obs_model must be callable for the NumPy target wrappers")
     base = np.asarray(gt if vmr_background is None else vmr_background, dtype=float)
-    perturb = _target_pattern(base, pattern=pattern, pixel=pixel) * amplitude
+    perturb = _target_pattern(base, pattern=pattern, pixel=pixel, axis=axis) * amplitude
     y0 = np.asarray(obs_model(base), dtype=float)
     y1 = np.asarray(obs_model(base + perturb), dtype=float)
     target = y1 - y0
     if target.ndim > 1:
-        samples, _ = _cube_to_samples(target, axis=0)
+        samples, _ = cube_to_samples(target, axis=axis)
         return np.mean(samples, axis=0)
     return target.reshape(-1)
 
@@ -647,6 +662,7 @@ def _target_pattern(
     *,
     pattern: str | np.ndarray,
     pixel: tuple[int, int] | None,
+    axis: int = 0,
 ) -> np.ndarray:
     if not isinstance(pattern, str):
         return np.asarray(pattern, dtype=float)
@@ -658,7 +674,11 @@ def _target_pattern(
             flat = out.reshape(-1)
             flat[0] = 1.0
         else:
-            out[(slice(None), *pixel)] = 1.0
+            # Insert the spectral axis as a full slice at position ``axis`` and
+            # use ``pixel`` to index the remaining spatial axes in order.
+            index: list[Any] = list(pixel)
+            index.insert(axis % out.ndim, slice(None))
+            out[tuple(index)] = 1.0
     else:
         raise ValueError(f"unknown target pattern {pattern!r}")
     return out

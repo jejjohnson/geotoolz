@@ -110,9 +110,9 @@ def test_streaming_background_matches_empirical_covariance() -> None:
     cube_a = _make_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
     cube_b = _make_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
 
-    bg = gz.matched_filter.StreamingBackground(
-        cubes=[cube_a, cube_b], cov_kind="empirical"
-    )()
+    bg = gz.matched_filter.StreamingBackground(cov_kind="empirical")(
+        [cube_a, cube_b]
+    )
     stacked = np.concatenate(
         [np.asarray(cube_a).reshape(2, -1), np.asarray(cube_b).reshape(2, -1)],
         axis=1,
@@ -167,7 +167,7 @@ def test_streaming_background_uses_streaming_mean_and_shrunk_covariance() -> Non
     cube_a = _make_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
     cube_b = _make_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
 
-    bg = gz.matched_filter.StreamingBackground(cubes=[cube_a, cube_b])()
+    bg = gz.matched_filter.StreamingBackground()([cube_a, cube_b])
 
     # Mean equals the concatenated per-pixel mean.
     stacked_pixels = np.concatenate(
@@ -202,7 +202,7 @@ def test_cluster_background_and_dispatch_are_reproducible() -> None:
 
     bg1 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
     bg2 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
-    out = gz.matched_filter.ApplyClusterMF(cluster=bg1, target=target)(gt)
+    out = gz.matched_filter.ApplyClusterMF(target=target)(gt, bg1)
     samples = np.asarray(gt).reshape(2, -1).T
     labels = bg1.labels.reshape(-1)
     expected = np.array(
@@ -224,3 +224,139 @@ def test_cluster_background_and_dispatch_are_reproducible() -> None:
     assert np.allclose(np.asarray(out), expected)
     assert np.asarray(out).shape == (2, 2)
     assert out.transform == gt.transform
+
+
+def test_fit_on_call_false_preserves_explicit_mean() -> None:
+    # When fit_on_call is False and the user supplies an explicit mean but
+    # leaves cov_op=None, the mean must NOT be silently overwritten on
+    # first apply: only the missing covariance is fit on the cube.
+    fixed_mean = np.array([100.0, 200.0])
+    target = np.array([1.0, 0.0])
+    cube = np.ones((2, 4, 4)) * fixed_mean[:, None, None]
+
+    op = gz.matched_filter.MatchedFilter(
+        mean=fixed_mean,
+        target=target,
+        fit_on_call=False,
+        cov_method="empirical",
+    )
+    op(_make_geotensor(cube))
+
+    np.testing.assert_allclose(op.mean, fixed_mean)
+    assert op.cov_op is not None  # cov was fit on the cube
+
+
+def test_linear_target_from_obs_matches_finite_difference() -> None:
+    a = np.array([0.5, -1.0, 2.0])
+
+    def obs_model(x: np.ndarray) -> np.ndarray:
+        # Linear model: maps a (bands, h, w) cube to bands by summing
+        # over space; tangent-linear derivative wrt a uniform perturbation
+        # is a scaled by the spatial size.
+        return (x * a[:, None, None]).sum(axis=(1, 2))
+
+    cube = np.zeros((3, 2, 3))
+    gt = _make_geotensor(cube)
+
+    target = gz.matched_filter.LinearTargetFromObs(
+        obs_model=obs_model, pattern="uniform"
+    )(gt)
+
+    expected = a * 2 * 3
+    np.testing.assert_allclose(target, expected, rtol=1e-6, atol=1e-8)
+
+
+def test_nonlinear_target_from_obs_amplitude_difference() -> None:
+    def obs_model(x: np.ndarray) -> np.ndarray:
+        # Nonlinear (quadratic) per-band response, reduced spatially.
+        return (x**2).mean(axis=(1, 2))
+
+    base = np.full((2, 3, 3), 1.0)
+    gt = _make_geotensor(base)
+
+    target = gz.matched_filter.NonlinearTargetFromObs(
+        obs_model=obs_model, amplitude=0.5, pattern="uniform"
+    )(gt)
+
+    # y(base) = 1, y(base + 0.5) = 2.25, difference per band = 1.25
+    np.testing.assert_allclose(target, np.full(2, 1.25), rtol=1e-6)
+
+
+def test_column_enhancement_end_to_end_wires_components() -> None:
+    rng = np.random.default_rng(0)
+    bands, h, w = 4, 5, 6
+    bg_mean = np.array([10.0, 11.0, 12.0, 13.0])
+    cube = bg_mean[:, None, None] + rng.normal(size=(bands, h, w)) * 0.01
+    gt = _make_geotensor(cube)
+
+    out = gz.matched_filter.ColumnEnhancement(
+        gas="CH4", sensor="EMIT", obs_model=None, cov_method="ledoit_wolf"
+    )(gt)
+
+    arr = np.asarray(out)
+    assert arr.shape == (h, w)
+    # With no obs_model, target is uniform-1 and outputs should be small
+    # mean-zero residuals around the background mean.
+    assert abs(arr.mean()) < 0.1
+    assert out.transform == gt.transform
+
+
+def test_matched_filter_null_distribution_at_known_false_alarm_rate() -> None:
+    # Sanity check on the analytical FAR threshold: under a Gaussian null,
+    # the fraction of MF scores above DetectionThreshold(false_alarm_rate=p)
+    # should be approximately p.
+    rng = np.random.default_rng(123)
+    bands = 6
+    cov_matrix = np.eye(bands)
+    target = np.array([1.0, -0.5, 0.3, 0.0, 0.2, -0.1])
+    mean = np.zeros(bands)
+
+    n_pixels = 20000
+    samples = rng.multivariate_normal(mean=mean, cov=cov_matrix, size=n_pixels)
+    cube = samples.T.reshape(bands, n_pixels, 1)
+    gt = _make_geotensor(cube)
+
+    scores = np.asarray(
+        gz.matched_filter.MatchedFilter(
+            mean=mean, cov_op=cov_matrix, target=target
+        )(gt)
+    ).reshape(-1)
+
+    for far in (0.05, 0.01):
+        threshold = gz.matched_filter.DetectionThreshold(
+            false_alarm_rate=far, cov_op=cov_matrix, target=target
+        )()
+        empirical_far = float((scores > threshold).mean())
+        # Three-sigma binomial tolerance for n=20000.
+        tol = 3.0 * np.sqrt(far * (1 - far) / n_pixels)
+        assert abs(empirical_far - far) < tol, (far, empirical_far, tol)
+
+
+def test_operator_get_configs_are_json_safe_and_round_trippable() -> None:
+    import json
+
+    target = np.array([1.0, 2.0])
+    cov = np.eye(2)
+    mean = np.array([0.0, 0.0])
+
+    mf = gz.matched_filter
+    ops_with_args: list[tuple[type, dict]] = [
+        (mf.MatchedFilter, {"target": target, "cov_op": cov, "mean": mean}),
+        (mf.MatchedFilterSNR,
+         {"amplitude": 1.0, "cov_op": cov, "target": target}),
+        (mf.DetectionThreshold,
+         {"false_alarm_rate": 0.05, "cov_op": cov, "target": target}),
+        (mf.ValidateMFInputs, {"cov_op": cov, "target": target}),
+        (mf.StreamingBackground, {}),
+        (mf.ApplyClusterMF, {"target": target}),
+        (mf.EstimateMean, {}),
+        (mf.EstimateCovEmpirical, {}),
+        (mf.EstimateCovShrunk, {}),
+    ]
+    for cls, kwargs in ops_with_args:
+        op = cls(**kwargs)
+        cfg = op.get_config()
+        # Config must round-trip through JSON (i.e. be free of numpy arrays).
+        json.dumps(cfg)
+        # And must be sufficient to reconstruct the operator without errors.
+        cls(**{**kwargs, **{k: cfg[k] for k in cfg if k in kwargs}})

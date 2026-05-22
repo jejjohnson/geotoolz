@@ -192,10 +192,15 @@ def estimate_cov_shrunk(
     axis: int = 0,
 ) -> NumpyLinearOperator:
     """Estimate a diagonal-target shrinkage covariance operator."""
-    empirical = estimate_cov_empirical(cube, mean=mean, axis=axis).matrix
-    n_samples = cube_to_samples(cube, axis=axis)[0].shape[0]
+    # Vectorise the cube once and reuse the sample matrix for both the
+    # empirical covariance and the sample count that shrink_covariance needs.
+    x, _ = cube_to_samples(cube, axis=axis)
+    mu = np.mean(x, axis=0) if mean is None else _as_vector(mean, x.shape[1], "mean")
+    centered = x - mu
+    denom = max(x.shape[0] - 1, 1)
+    empirical = centered.T @ centered / denom
     return NumpyLinearOperator(
-        shrink_covariance(empirical, method=method, n_samples=n_samples)
+        shrink_covariance(empirical, method=method, n_samples=x.shape[0])
     )
 
 
