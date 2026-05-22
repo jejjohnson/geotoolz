@@ -113,7 +113,7 @@ def test_cloud_free_composite_respects_masks_and_min_valid() -> None:
     )
 
     expected = np.array([[[5.5, np.nan], [np.nan, np.nan]]], dtype=np.float32)
-    np.testing.assert_allclose(np.asarray(out), expected)
+    np.testing.assert_allclose(np.asarray(out), expected, equal_nan=True)
     np.testing.assert_array_equal(np.asarray(count), [[[2, 1], [1, 1]]])
 
 
@@ -170,7 +170,7 @@ def test_min_cloud_composite_prefers_clear_pixels_from_least_cloudy_frame() -> N
     ("operator", "payload"),
     [
         (MedianComposite(), "frames"),
-        (MaxNDVIComposite(red=0, nir=0), "frames"),
+        (MaxNDVIComposite(red=0, nir=1), "frames"),
         (CloudFreeComposite(), "masks"),
         (BAPComposite(target_doy=196), "metadata"),
         (MinCloudComposite(), "masks"),
@@ -200,6 +200,38 @@ def test_composites_raise_on_mismatched_grid(
 
     with pytest.raises(ValueError, match="shape, transform, and CRS"):
         operator(inputs)  # type: ignore[arg-type]
+
+
+def test_max_ndvi_composite_rejects_identical_red_and_nir_bands() -> None:
+    scene = _gt(np.ones((2, 2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="distinct red and NIR bands"):
+        MaxNDVIComposite(red=0, nir=0)([scene, scene])
+
+
+def test_cloud_free_composite_accepts_one_channel_mask_for_two_d_input() -> None:
+    scene1 = _gt(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32))
+    scene2 = _gt(np.array([[10.0, 20.0], [30.0, 40.0]], dtype=np.float32))
+    mask1 = np.zeros((1, 2, 2), dtype=bool)
+    mask2 = np.array([[[False, False], [True, True]]])
+
+    out = CloudFreeComposite()([(scene1, mask1), (scene2, mask2)])
+
+    np.testing.assert_allclose(
+        np.asarray(out), [[5.5, 11.0], [3.0, 4.0]]
+    )
+
+
+def test_bap_composite_rejects_mixed_cloud_distance_inputs() -> None:
+    scene1 = _gt(np.full((1, 2, 2), 1.0, dtype=np.float32))
+    scene2 = _gt(np.full((1, 2, 2), 2.0, dtype=np.float32))
+    pairs = [
+        (scene1, {"cloud_distance": 50.0}),
+        (scene2, {"cloud_distance_score": 0.5}),
+    ]
+
+    with pytest.raises(ValueError, match="mix of raw 'cloud_distance'"):
+        BAPComposite(target_doy=196)(pairs)
 
 
 def test_compositing_get_config_is_json_safe() -> None:

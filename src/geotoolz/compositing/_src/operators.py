@@ -25,8 +25,10 @@ def _validate_nan_policy(nan_policy: str) -> NanPolicy:
 
 def _grid_matches(a: GeoTensor, b: GeoTensor) -> bool:
     # Affine equality is exact, not tolerant: sub-pixel grid drift is a real
-    # bug source and should fail loudly. Same convention as the rest of the
-    # codebase.
+    # bug source and should fail loudly. Some other geotoolz modules use
+    # ``np.allclose`` on transforms; compositing intentionally tightens that
+    # because a per-pixel reduction over misaligned grids silently produces
+    # garbage.
     return a.shape == b.shape and a.transform == b.transform and a.crs == b.crs
 
 
@@ -64,7 +66,11 @@ def _mask_array(mask: Any, target_shape: tuple[int, ...]) -> np.ndarray:
     if mask_arr.shape == spatial_shape:
         return np.broadcast_to(mask_arr, target_shape)
     if mask_arr.shape == (1, *spatial_shape):
-        return np.broadcast_to(mask_arr, target_shape)
+        # For 2-D targets, a (1, H, W) mask is spatially equivalent to (H, W);
+        # squeeze before broadcasting so we don't try to add a leading axis to
+        # a 2-D target.
+        squeezed = mask_arr[0]
+        return np.broadcast_to(squeezed, target_shape)
     if mask_arr.shape == target_shape:
         return mask_arr
     raise ValueError(
@@ -191,6 +197,12 @@ class MaxNDVIComposite(Operator):
             )
         red_idx = resolve_band(base, self.red)
         nir_idx = resolve_band(base, self.nir)
+        if red_idx == nir_idx:
+            raise ValueError(
+                "MaxNDVIComposite requires distinct red and NIR bands; both "
+                f"resolved to band index {red_idx} (red={self.red!r}, "
+                f"nir={self.nir!r})."
+            )
         red = stack[:, red_idx, ...].astype(np.float32, copy=False)
         nir = stack[:, nir_idx, ...].astype(np.float32, copy=False)
         ndvi = (nir - red) / (nir + red + self.eps)
@@ -336,6 +348,18 @@ class BAPComposite(Operator):
                 opacity = 1.0 - np.clip(opacity_value, 0.0, 1.0)
             opacity_scores.append(_score_array(opacity, spatial_shape))
 
+        if any(raw_cloud_distance) and not all(raw_cloud_distance):
+            # Raw ``cloud_distance`` values (typically pixel/meter scale) and
+            # precomputed ``cloud_distance_score`` values (0-1) live on
+            # incompatible scales. Silently mixing them would let raw
+            # distances dominate the weighted sum, so refuse rather than
+            # produce metadata-dependent rankings.
+            raise ValueError(
+                "BAPComposite received a mix of raw 'cloud_distance' and "
+                "precomputed 'cloud_distance_score' metadata across frames. "
+                "Provide the same representation for every frame so the "
+                "values share a common scale."
+            )
         cloud_distance_stack = np.stack(cloud_distance_scores, axis=0)
         if all(raw_cloud_distance):
             cloud_distance_stack = _normalize_positive(cloud_distance_stack)
