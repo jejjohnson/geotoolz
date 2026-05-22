@@ -17,9 +17,9 @@ import numpy as np
 import shapely.geometry
 import shapely.geometry.base
 from georeader import rasterize
+from pipekit import Operator
 
 from geotoolz.cloud._src.array import apply_mask
-from pipekit import Operator
 from geotoolz.mask._src.array import (
     altitude_mask,
     buffer_mask,

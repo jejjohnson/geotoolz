@@ -9,13 +9,13 @@ import numpy as np
 import pytest
 from georeader.geotensor import GeoTensor
 from georeader.rasterio_reader import RasterioReader
+from pipekit import Identity, Sequential
 from rasterio.transform import array_bounds, from_origin
 from rasterio.windows import Window
 from shapely.geometry import box
 
 import geotoolz as gz
 from geotoolz import io
-from pipekit import Identity, Sequential
 from geotoolz.io._src import operators as io_operators
 
 

@@ -62,12 +62,14 @@ dependencies = [
 # you want `builds()` / `instantiate()` from YAML.
 hydra = ["hydra-zen>=0.14"]
 # The four-axis Patcher framework lives in its own package now; pull it
-# in plus the `geotoolz.patch_ops` operator-graph bridge wrappers
-# (`GridSampler`, `ApplyToChips`, `Stitch`). The substrate extras (grid,
-# vector, point, xarray-raster, streaming) are exposed through
-# `geopatcher` directly — install e.g.
-# `pip install 'geopatcher[patch-full]'` for the full substrate matrix.
-patch = ["geopatcher"]
+# in (with its `[pipekit]` extra so `geopatcher.integrations.pipekit` is
+# importable — the same wrappers ship from both locations) and use
+# either `geotoolz.patch_ops` or `geopatcher.integrations.pipekit` for
+# the Operator-graph bridge. The substrate extras (grid, vector, point,
+# xarray-raster, streaming) are exposed through `geopatcher` directly —
+# install e.g. `pip install 'geopatcher[patch-full]'` for the full
+# substrate matrix.
+patch = ["geopatcher[pipekit]"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
@@ -113,7 +115,7 @@ build-backend = "hatchling.build"
 # affects `uv lock` / `uv sync` only — published wheel metadata still
 # carries the PyPI-flavoured `geopatcher` requirement from
 # `[project.optional-dependencies] patch = ["geopatcher"]` above.
-geopatcher = { git = "https://github.com/jejjohnson/geopatcher", branch = "claude/geopatcher-extraction-plan-bxDGs" }
+geopatcher = { git = "https://github.com/jejjohnson/geopatcher", branch = "feat/pipekit-integration" }
 # Dev-time source for the core `pipekit` dependency: pull from the
 # monorepo on GitHub until the first PyPI release lands. Same caveat as
 # above — published wheel metadata uses the PyPI-flavoured pin.

@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
+from pipekit import Operator
 
 import geotoolz as gz
 from geotoolz import augment
-from pipekit import Operator
 
 
 def _toy_geotensor(values: np.ndarray) -> GeoTensor:

@@ -21,6 +21,25 @@ it in and use ``geotoolz.patch_ops`` for the Operator-graph bridge:
 
 from __future__ import annotations
 
+from pipekit import (
+    Branch,
+    Carrier,
+    Const,
+    Fanout,
+    Graph,
+    Identity,
+    Input,
+    Lambda,
+    Node,
+    Operator,
+    Sequential,
+    ShapeTrace,
+    Sink,
+    Snapshot,
+    Switch,
+    Tap,
+)
+
 from geotoolz import (
     augment,
     cloud,
@@ -45,25 +64,6 @@ from geotoolz.cloud import (
     MaskFromSCL,
     MaskValid,
 )
-from pipekit import (
-    Branch,
-    Carrier,
-    Const,
-    Fanout,
-    Graph,
-    Identity,
-    Input,
-    Lambda,
-    Node,
-    Operator,
-    Sequential,
-    ShapeTrace,
-    Sink,
-    Snapshot,
-    Switch,
-    Tap,
-)
-from geotoolz.model import ModelOp
 from geotoolz.indices import (
     ARVI,
     BAIS2,
@@ -88,6 +88,7 @@ from geotoolz.indices import (
     dNBR,
     kNDVI,
 )
+from geotoolz.model import ModelOp
 from geotoolz.plume import (
     SBMP,
     ColumnToMass,

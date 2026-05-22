@@ -24,11 +24,11 @@ import rasterio.windows
 from affine import Affine
 from georeader import griddata, mosaic, rasterize, read, slices, vectorize
 from georeader.geotensor import GeoTensor
+from pipekit import Operator
 from pyproj import CRS
 from rasterio.warp import transform_bounds
 from shapely.ops import unary_union
 
-from pipekit import Operator
 from geotoolz.geom._src.array import (
     center_offsets,
     feather_weights,

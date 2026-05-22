@@ -1,102 +1,105 @@
-# API Reference — Core
+# API Reference — Composition Core
 
-The composition algebra. Importable as `geotoolz.core.*` and re-exported at
-`geotoolz.*` for convenience.
+The Operator / Sequential / Graph composition algebra lives in the
+carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit)
+framework and is re-exported at `geotoolz.*` (and `pipekit.*`) for
+convenience. The only geotoolz-specific addition on this page is
+`ModelOp`, which lives at `geotoolz.model`.
 
 For the model behind these primitives, read the [Concepts](../concepts.md)
 page first.
 
 ## Base
 
-::: geotoolz.core._src.operator.Operator
+::: pipekit.Operator
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.core._src.operator.Carrier
+::: pipekit.ConfigMixin
     options:
       show_root_heading: true
 
 ## Linear composition
 
-::: geotoolz.core._src.sequential.Sequential
+::: pipekit.Sequential
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Graphs
 
-::: geotoolz.core._src.graph.Input
+::: pipekit.Input
     options:
       show_root_heading: true
 
-::: geotoolz.core._src.graph.Node
+::: pipekit.Node
     options:
       show_root_heading: true
 
-::: geotoolz.core._src.graph.Graph
+::: pipekit.Graph
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.core._src.composition.Fanout
+::: pipekit.Fanout
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Inference
 
-::: geotoolz.core._src.model.ModelOp
+::: geotoolz.model.ModelOp
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Observers — identity with side effects
 
-::: geotoolz.core._src.observers.Tap
+::: pipekit.Tap
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.core._src.observers.Snapshot
+::: pipekit.Snapshot
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.core._src.observers.ShapeTrace
+::: pipekit.ShapeTrace
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Control flow
 
-::: geotoolz.core._src.control.Branch
+::: pipekit.Branch
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.core._src.control.Switch
+::: pipekit.Switch
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Building blocks
 
-::: geotoolz.core._src.building_blocks.Identity
+::: pipekit.Identity
     options:
       show_root_heading: true
 
-::: geotoolz.core._src.building_blocks.Const
-    options:
-      show_root_heading: true
-      show_signature_annotations: true
-
-::: geotoolz.core._src.building_blocks.Lambda
+::: pipekit.Const
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.core._src.building_blocks.Sink
+::: pipekit.Lambda
+    options:
+      show_root_heading: true
+      show_signature_annotations: true
+
+::: pipekit.Sink
     options:
       show_root_heading: true
       show_signature_annotations: true

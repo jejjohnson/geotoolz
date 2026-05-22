@@ -11,13 +11,15 @@ sliding-window inference pipeline composes inside a `Sequential` /
         Stitch(SpatialOverlapAdd(), domain=field.domain),
     ])
 
-Optional extra: ``pip install 'geotoolz[patch]'`` to pull in geopatcher.
+Optional extra: ``pip install 'geotoolz[patch]'`` to pull in
+``geopatcher[pipekit]`` (which transitively installs `pipekit`).
 Importing this module without geopatcher installed raises a friendly
 ``ImportError`` pointing at the right extra.
 
-The same wrappers now also ship from ``geopatcher.integrations.pipekit``
-behind the ``geopatcher[pipekit]`` extra; prefer that location in new
-code — this module is kept as a backwards-compatible alias.
+The same wrappers are also reachable as ``geopatcher.integrations.pipekit``
+once the ``[patch]`` extra is installed — both module paths re-import
+the same classes. Use whichever location reads better in your code; we
+keep both available rather than picking a winner.
 """
 
 from __future__ import annotations

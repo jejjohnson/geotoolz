@@ -9,10 +9,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from affine import Affine
+from pipekit import Operator
 from rasterio.windows import Window
 from scipy.ndimage import gaussian_filter
-
-from pipekit import Operator
 
 
 if TYPE_CHECKING:

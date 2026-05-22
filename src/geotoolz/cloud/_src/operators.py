@@ -18,9 +18,9 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
+from pipekit import Operator
 
 from geotoolz.cloud._src.array import apply_mask, mask_from_qa_bits, mask_from_scl
-from pipekit import Operator
 
 
 if TYPE_CHECKING:

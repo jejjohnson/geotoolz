@@ -588,14 +588,19 @@ wheels = [
 
 [[package]]
 name = "geopatcher"
-version = "0.0.1"
-source = { git = "https://github.com/jejjohnson/geopatcher?branch=claude%2Fgeopatcher-extraction-plan-bxDGs#edacbd3b773b4995dffb35dec03fe5d4e46836b7" }
+version = "0.0.2"
+source = { git = "https://github.com/jejjohnson/geopatcher?branch=feat%2Fpipekit-integration#65fcec278f3f1d6971e7202e5636a52448ec52bf" }
 dependencies = [
     { name = "georeader-spaceml" },
     { name = "numpy" },
     { name = "pyproj" },
     { name = "scipy" },
     { name = "typing-extensions" },
+]
+
+[package.optional-dependencies]
+pipekit = [
+    { name = "pipekit" },
 ]
 
 [[package]]
@@ -637,7 +642,7 @@ hydra = [
     { name = "hydra-zen" },
 ]
 patch = [
-    { name = "geopatcher" },
+    { name = "geopatcher", extra = ["pipekit"] },
 ]
 
 [package.dev-dependencies]
@@ -667,7 +672,7 @@ typecheck = [
 [package.metadata]
 requires-dist = [
     { name = "geopandas", specifier = ">=0.14" },
-    { name = "geopatcher", marker = "extra == 'patch'", git = "https://github.com/jejjohnson/geopatcher?branch=claude%2Fgeopatcher-extraction-plan-bxDGs" },
+    { name = "geopatcher", extras = ["pipekit"], marker = "extra == 'patch'", git = "https://github.com/jejjohnson/geopatcher?branch=feat%2Fpipekit-integration" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "hydra-zen", marker = "extra == 'hydra'", specifier = ">=0.14" },
     { name = "matplotlib", specifier = ">=3.10.8" },

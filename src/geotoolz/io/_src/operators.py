@@ -33,12 +33,11 @@ import numpy as np
 from georeader import read, save
 from georeader.geotensor import GeoTensor
 from georeader.rasterio_reader import RasterioReader
+from pipekit import Operator
 from rasterio.errors import RasterioIOError
 from rasterio.io import DatasetReaderBase
 from rasterio.windows import Window
 from shapely.geometry import MultiPolygon, Polygon, box
-
-from pipekit import Operator
 
 
 Source = str | PathLike[str] | Any

@@ -26,9 +26,9 @@ from geopatcher import (
     SpatialRegularStride,
 )
 from georeader.geotensor import GeoTensor
+from pipekit import Lambda
 
 from geotoolz import Sequential
-from pipekit import Lambda
 from geotoolz.patch_ops import (
     ApplyToChips,
     GridSampler,
