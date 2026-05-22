@@ -10,7 +10,9 @@ import pytest
 from affine import Affine
 from georeader.geotensor import GeoTensor
 from sklearn.cluster import KMeans as SKKMeans
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, IncrementalPCA
+from sklearn.ensemble import IsolationForest as SKIsolationForest
+from sklearn.impute import KNNImputer as SKKNNImputer
 from sklearn.preprocessing import StandardScaler
 
 import geotoolz as gz
@@ -133,3 +135,107 @@ def test_fit_streaming_requires_partial_fit_estimator() -> None:
 def test_top_level_exports_learn_symbols() -> None:
     assert gz.SklearnOp is gz.learn.SklearnOp
     assert gz.GeoTensorEstimator is gz.learn.GeoTensorEstimator
+
+
+def test_drop_vs_propagate_produce_different_shapes() -> None:
+    arr = np.arange(2 * 3 * 4, dtype=float).reshape(2, 3, 4)
+    arr[:, 0, 0] = np.nan
+    scene = _gt(arr)
+
+    propagated = gz.learn.SklearnOp(
+        StandardScaler(),
+        nan_fit="drop",
+        nan_transform="propagate",
+        task="transform",
+    )(scene)
+    dropped = gz.learn.SklearnOp(
+        StandardScaler(),
+        nan_fit="drop",
+        nan_transform="drop",
+        task="transform",
+    )(scene)
+
+    # ``propagate`` preserves the spatial layout (and refills NaN positions),
+    # so the GeoTensor contract holds and the original shape is kept.
+    assert propagated.shape == scene.shape
+    assert np.isnan(np.asarray(propagated)[:, 0, 0]).all()
+    # ``drop`` collapses the sample axis to the valid rows only, which
+    # cannot be reshaped back into (H, W); a bare ndarray is returned.
+    assert isinstance(dropped, np.ndarray)
+    assert dropped.shape[0] == int((~np.isnan(arr).any(axis=0)).sum())
+
+
+def test_propagate_raw_passes_nan_rows_to_estimator() -> None:
+    arr = np.arange(2 * 3 * 4, dtype=float).reshape(2, 3, 4)
+    arr[:, 0, 0] = np.nan
+    scene = _gt(arr)
+
+    # KNNImputer is NaN-tolerant; ``propagate_raw`` should hand it the NaN
+    # rows directly instead of stripping them.
+    out = gz.learn.SklearnOp(
+        SKKNNImputer(n_neighbors=2),
+        nan_fit="propagate_raw",
+        nan_transform="propagate_raw",
+        task="transform",
+    )(scene)
+
+    assert out.shape == scene.shape
+    assert np.isfinite(np.asarray(out)).all()
+
+
+def test_impute_transform_refuses_to_refit_on_inference_batch() -> None:
+    """Reject ``nan_transform=impute_*`` when no imputer has been fitted."""
+    arr = np.arange(2 * 3 * 4, dtype=float).reshape(2, 3, 4)
+    arr[0, 0, 0] = np.nan
+    scene = _gt(arr)
+
+    est = gz.GeoTensorEstimator(
+        StandardScaler(),
+        nan_fit="drop",  # no imputer fitted
+        nan_transform="impute_simple",
+    )
+    est.fit(scene)
+    with pytest.raises(RuntimeError, match="fitted imputer"):
+        est.transform(scene)
+
+
+def test_pre_fit_without_state_path_raises() -> None:
+    with pytest.raises(ValueError, match="state_path"):
+        gz.learn.SklearnOp(PCA(n_components=2), fit_mode="pre_fit")
+
+
+def test_get_config_records_resolved_task() -> None:
+    op = gz.learn.SklearnOp(PCA(n_components=2), mode="pixel")  # task=None
+    cfg = op.get_config()
+    assert cfg["task"] is None
+    assert cfg["resolved_task"] == "transform"
+
+
+def test_ipca_streaming_fits_via_partial_fit() -> None:
+    scene = _gt(np.arange(3 * 4 * 5, dtype=float).reshape(3, 4, 5))
+    op = gz.learn.IPCA(IncrementalPCA(n_components=2))
+    out = op(scene)
+    assert out.shape == (2, 4, 5)
+    assert op._geo_estimator.is_fitted
+
+
+def test_kmeans_predict_labels_pixels() -> None:
+    rng = np.random.default_rng(0)
+    arr = rng.normal(size=(2, 4, 5))
+    arr[:, :, 2:] += 10  # two clusters in feature space
+    scene = _gt(arr)
+    op = gz.learn.KMeans(SKKMeans(n_clusters=2, n_init=1, random_state=0))
+    out = op(scene)
+    assert out.shape == (4, 5)
+    assert set(np.unique(np.asarray(out)).tolist()) == {0, 1}
+
+
+def test_isolation_forest_decision_function_returns_scores() -> None:
+    rng = np.random.default_rng(0)
+    scene = _gt(rng.normal(size=(2, 4, 5)))
+    op = gz.learn.IsolationForest(
+        SKIsolationForest(n_estimators=10, random_state=0),
+    )
+    out = op(scene)
+    assert out.shape == (4, 5)
+    assert np.asarray(out).dtype.kind == "f"

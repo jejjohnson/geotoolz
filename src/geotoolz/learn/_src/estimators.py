@@ -21,6 +21,7 @@ ReshapeMode = Literal["pixel", "pixel_time", "spectral", "temporal", "patch", "c
 NanStrategy = Literal[
     "drop",
     "propagate",
+    "propagate_raw",
     "error",
     "impute_simple",
     "impute_knn",
@@ -118,28 +119,49 @@ class GeoTensorEstimator:
         self.fit_n_samples = int(x_fit.shape[0])
         return self
 
-    def transform(self, gt: GeoTensor) -> GeoTensor:
-        """Apply ``estimator.transform`` and unflatten the result."""
+    def transform(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+        """Apply ``estimator.transform`` and unflatten the result.
+
+        Returns a :class:`GeoTensor` when the output's trailing axes match
+        the input's spatial ``(H, W)`` shape; otherwise returns a bare
+        :class:`numpy.ndarray` (e.g. for sample-only outputs from
+        ``mode="custom"``).
+        """
         return self._apply_task(gt, "transform")
 
-    def predict(self, gt: GeoTensor) -> GeoTensor:
-        """Apply ``estimator.predict`` and unflatten the result."""
+    def predict(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+        """Apply ``estimator.predict`` and unflatten the result.
+
+        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        """
         return self._apply_task(gt, "predict")
 
-    def predict_proba(self, gt: GeoTensor) -> GeoTensor:
-        """Apply ``estimator.predict_proba`` and unflatten the result."""
+    def predict_proba(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+        """Apply ``estimator.predict_proba`` and unflatten the result.
+
+        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        """
         return self._apply_task(gt, "predict_proba")
 
-    def decision_function(self, gt: GeoTensor) -> GeoTensor:
-        """Apply ``estimator.decision_function`` and unflatten the result."""
+    def decision_function(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+        """Apply ``estimator.decision_function`` and unflatten the result.
+
+        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        """
         return self._apply_task(gt, "decision_function")
 
-    def inverse_transform(self, gt: GeoTensor) -> GeoTensor:
-        """Apply ``estimator.inverse_transform`` and unflatten the result."""
+    def inverse_transform(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+        """Apply ``estimator.inverse_transform`` and unflatten the result.
+
+        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        """
         return self._apply_task(gt, "inverse_transform")
 
-    def fit_predict(self, gt: GeoTensor) -> GeoTensor:
-        """Apply ``estimator.fit_predict`` and unflatten the result."""
+    def fit_predict(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+        """Apply ``estimator.fit_predict`` and unflatten the result.
+
+        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        """
         if not hasattr(self.estimator, "fit_predict"):
             raise TypeError(
                 f"{type(self.estimator).__name__} does not support fit_predict"
@@ -210,7 +232,9 @@ class GeoTensorEstimator:
             return x, valid
         if strategy == "drop":
             return x[valid], valid
-        if strategy == "propagate":
+        if strategy in {"propagate", "propagate_raw"}:
+            # At fit time both pass the array through unchanged; the
+            # apply-time behavior diverges (see ``_prepare_transform``).
             return x, np.ones(x.shape[0], dtype=bool)
         self.imputer = _make_imputer(
             strategy,
@@ -221,30 +245,56 @@ class GeoTensorEstimator:
         return self.imputer.fit_transform(x), np.ones(x.shape[0], dtype=bool)
 
     def _prepare_transform(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Apply ``nan_transform`` strategy to apply-time input.
+
+        ``"drop"`` strips NaN rows and the unflatten step truncates the
+        sample axis to the valid rows only (output has fewer samples).
+        ``"propagate"`` also strips NaN rows from the estimator input but
+        the unflatten step restores NaN at those positions so the spatial
+        layout is preserved -- callers using raster carriers want this.
+        ``"propagate_raw"`` passes rows through unchanged so NaN-tolerant
+        estimators (e.g. imputers) can see the missing values.
+        Imputer strategies require a previously fitted imputer to avoid
+        leaking inference-batch statistics into preprocessing.
+        """
         strategy = self.nan_transform
         valid = _valid_rows(x)
         if strategy == "error" and not valid.all():
             raise ValueError("GeoTensorEstimator.transform received NaN values")
         if strategy == "error":
             return x, valid
-        if strategy in {"drop", "propagate"}:
+        if strategy == "drop":
             return x[valid], valid
+        if strategy == "propagate":
+            # Strip NaN rows from the estimator input; unflatten will refill
+            # those positions with NaN so the spatial layout is preserved.
+            return x[valid], valid
+        if strategy == "propagate_raw":
+            # Pass rows through unchanged so NaN-tolerant estimators receive
+            # the NaNs directly.
+            return x, np.ones(x.shape[0], dtype=bool)
         if self.imputer is None:
-            self.imputer = _make_imputer(
-                strategy,
-                simple_strategy=self.impute_simple_strategy,
-                knn_n_neighbors=self.impute_knn_n_neighbors,
-                iterative_max_iter=self.impute_iterative_max_iter,
+            raise RuntimeError(
+                f"nan_transform={strategy!r} requires a fitted imputer. Fit "
+                f"the estimator first with a matching nan_fit strategy, or "
+                f"load a saved state via load_state(). Fitting a fresh "
+                f"imputer at transform time would leak inference-batch "
+                f"statistics into preprocessing."
             )
-            self.imputer.fit(x)
         return self.imputer.transform(x), np.ones(x.shape[0], dtype=bool)
 
-    def _apply_task(self, gt: GeoTensor, task: Task) -> GeoTensor:
+    def _apply_task(self, gt: GeoTensor, task: Task) -> GeoTensor | np.ndarray:
         if not hasattr(self.estimator, task):
             raise TypeError(f"{type(self.estimator).__name__} does not support {task}")
         flat = self._flatten(gt)
         x_apply, valid = self._prepare_transform(flat.x)
         y_apply = getattr(self.estimator, task)(x_apply)
+        if self.nan_transform == "drop" and not valid.all():
+            # ``drop`` returns only the rows the estimator actually saw,
+            # collapsing the sample axis -- the result can no longer be
+            # reshaped into the original spatial layout, so we return a
+            # bare ndarray. Use ``propagate`` to preserve the layout.
+            return np.asarray(y_apply)
         return self._unflatten_apply_result(gt, flat, y_apply, valid)
 
     def _unflatten_apply_result(
@@ -253,7 +303,7 @@ class GeoTensorEstimator:
         flat: _FlatGeoTensor,
         y_apply: np.ndarray,
         valid: np.ndarray,
-    ) -> GeoTensor:
+    ) -> GeoTensor | np.ndarray:
         y = np.asarray(y_apply)
         if valid.all():
             dense = y
@@ -262,6 +312,11 @@ class GeoTensorEstimator:
             dense = np.full(out_shape, np.nan, dtype=np.result_type(y.dtype, float))
             dense[valid] = y
         out = _restore_shape(dense, flat)
+        # When the trailing axes do not match the input spatial (H, W),
+        # ``GeoTensor.array_as_geotensor`` cannot attach CRS/transform
+        # meaningfully (e.g. sample-only outputs from ``mode="custom"`` or
+        # ``mode="spectral"``). Return a bare ndarray in that case; callers
+        # / wrappers are responsible for re-attaching geo metadata.
         if out.ndim < 2 or out.shape[-2:] != np.asarray(gt).shape[-2:]:
             return out
         return gt.array_as_geotensor(out)
@@ -401,7 +456,7 @@ def _valid_rows(x: np.ndarray) -> np.ndarray:
 
 
 def _validate_nan_strategy(strategy: NanStrategy) -> None:
-    valid = {"drop", "propagate", "error", *_IMPUTE_STRATEGIES}
+    valid = {"drop", "propagate", "propagate_raw", "error", *_IMPUTE_STRATEGIES}
     if strategy not in valid:
         raise ValueError(f"Unknown NaN strategy: {strategy!r}")
 

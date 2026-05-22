@@ -4,7 +4,7 @@
 
     **Phase-1 API — subject to change.** This module ships a universal
     ``SklearnOp`` adapter plus named-algorithm convenience wrappers as a
-    first cut. The full design (see ``plans/geotoolz/sklearn/``) calls for
+    first cut. The full design (tracked in geotoolz issue #32) calls for
     a ``PixelTable`` carrier, first-class shape adapters (``ToPixelMajor``,
     ``ToTemporalPixelMajor``, ``ToChipMajor``), and type-named estimator
     wrappers (``PixelwiseClassifier`` / ``Regressor`` / ``Transformer`` /

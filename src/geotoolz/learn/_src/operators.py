@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+import numpy as np
 from pipekit import Operator
 from geotoolz.learn._src.estimators import (
     GeoTensorEstimator,
@@ -68,6 +69,11 @@ class SklearnOp(Operator):
             )
         if fit_mode == "pre_fit" and resolved_task == "fit_predict":
             raise ValueError('fit_mode="pre_fit" is not valid with task="fit_predict"')
+        if fit_mode == "pre_fit" and state_path is None:
+            raise ValueError(
+                'fit_mode="pre_fit" requires state_path to point at a '
+                "previously fitted estimator state"
+            )
 
         self.estimator = estimator
         self.mode = mode
@@ -97,7 +103,7 @@ class SklearnOp(Operator):
         if state_path is not None:
             self.load_state(state_path)
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
         if self._task == "fit_predict":
             return self._geo_estimator.fit_predict(gt)
 
@@ -143,6 +149,7 @@ class SklearnOp(Operator):
             "feature_axes": self.feature_axes,
             "fit_mode": self.fit_mode,
             "task": self.task,
+            "resolved_task": self._task,
             "nan_fit": self.nan_fit,
             "nan_transform": self.nan_transform,
             "impute_simple_strategy": self.impute_simple_strategy,
