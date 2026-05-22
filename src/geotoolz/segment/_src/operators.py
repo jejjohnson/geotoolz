@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
-from georeader.geotensor import GeoTensor
+from pipekit import Operator
 from skimage.segmentation import (
     chan_vese,
     expand_labels,
@@ -16,8 +16,6 @@ from skimage.segmentation import (
     slic,
     watershed,
 )
-
-from pipekit import Operator
 
 
 if TYPE_CHECKING:
@@ -94,7 +92,9 @@ class SLIC(Operator):
         # SLIC's `mask` is a non-JSON-safe carrier; forbid yaml round-trip
         # for this instance whenever the user provided one.
         if mask is not None:
-            self.forbid_in_yaml = True
+            # The parent's `forbid_in_yaml` is a ClassVar; the per-instance
+            # override here is intentional. ty rejects it, hence the ignore.
+            self.forbid_in_yaml = True  # ty: ignore[invalid-attribute-access]
 
     def _apply(self, gt: GeoTensorType) -> GeoTensorType:
         image = _fill_nan(np.asarray(gt))
@@ -142,7 +142,9 @@ class Felzenszwalb(Operator):
         self.channel_axis = channel_axis
         self.mask = mask
         if mask is not None:
-            self.forbid_in_yaml = True
+            # The parent's `forbid_in_yaml` is a ClassVar; the per-instance
+            # override here is intentional. ty rejects it, hence the ignore.
+            self.forbid_in_yaml = True  # ty: ignore[invalid-attribute-access]
 
     def _apply(self, gt: GeoTensorType) -> GeoTensorType:
         valid = _finite_mask(np.asarray(gt))
@@ -193,7 +195,9 @@ class Quickshift(Operator):
         self.convert2lab = convert2lab
         self.mask = mask
         if mask is not None:
-            self.forbid_in_yaml = True
+            # The parent's `forbid_in_yaml` is a ClassVar; the per-instance
+            # override here is intentional. ty rejects it, hence the ignore.
+            self.forbid_in_yaml = True  # ty: ignore[invalid-attribute-access]
 
     def _apply(self, gt: GeoTensorType) -> GeoTensorType:
         valid = _finite_mask(np.asarray(gt))
