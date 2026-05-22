@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 NanPolicy = Literal["ignore", "propagate"]
-CompositeState = dict[str, list[Any] | Any]
 
 
 def _validate_nan_policy(nan_policy: str) -> NanPolicy:
@@ -25,11 +24,10 @@ def _validate_nan_policy(nan_policy: str) -> NanPolicy:
 
 
 def _grid_matches(a: GeoTensor, b: GeoTensor) -> bool:
-    return (
-        a.shape == b.shape
-        and np.allclose(tuple(a.transform), tuple(b.transform))
-        and a.crs == b.crs
-    )
+    # Affine equality is exact, not tolerant: sub-pixel grid drift is a real
+    # bug source and should fail loudly. Same convention as the rest of the
+    # codebase.
+    return a.shape == b.shape and a.transform == b.transform and a.crs == b.crs
 
 
 def _require_frames(frames: Sequence[GeoTensor]) -> GeoTensor:
@@ -152,19 +150,19 @@ class MedianComposite(Operator):
         count = np.sum(~np.isnan(stack), axis=0).astype(np.int64)
         return out, _as_geotensor_like(base, count)
 
-    def partial_composite(
-        self, state: CompositeState | None, new_frame: GeoTensor
-    ) -> CompositeState:
-        frames = [] if state is None else list(state["frames"])
-        frames.append(new_frame)
-        return {"frames": frames, "composite": self(frames)}
-
     def get_config(self) -> dict[str, Any]:
         return {"nan_policy": self.nan_policy, "return_count": self.return_count}
 
 
 class MaxNDVIComposite(Operator):
-    """Pick the frame with maximum NDVI per pixel and return its band values."""
+    """Pick the frame with maximum NDVI per pixel and return its band values.
+
+    Inputs must be multi-band (``(C, H, W)``); 2-D GeoTensors raise because
+    NDVI needs distinct red and NIR bands. The output dtype is the input
+    dtype when all-invalid pixels can be represented in it (e.g. integer
+    masks via ``fill_value_default``); for float inputs invalid pixels are
+    set to NaN.
+    """
 
     def __init__(
         self,
@@ -183,6 +181,14 @@ class MaxNDVIComposite(Operator):
         self, frames: Sequence[GeoTensor]
     ) -> GeoTensor | tuple[GeoTensor, GeoTensor]:
         base, stack = _stack_frames(frames)
+        # NDVI needs distinct red/nir bands; 2-D GeoTensors don't have a
+        # band axis and would silently broadcast `:, red_idx, ...` into
+        # nonsense. Fail loudly.
+        if base.ndim < 3:
+            raise ValueError(
+                "MaxNDVIComposite requires multi-band GeoTensors (C, H, W); "
+                f"got shape {base.shape}."
+            )
         red_idx = resolve_band(base, self.red)
         nir_idx = resolve_band(base, self.nir)
         red = stack[:, red_idx, ...].astype(np.float32, copy=False)
@@ -191,19 +197,18 @@ class MaxNDVIComposite(Operator):
         scores = np.where(np.isnan(ndvi), -np.inf, ndvi)
         index = np.argmax(scores, axis=0)
         values = _take_by_spatial_index(stack, index)
-        values = _as_float_for_nan(values)
-        values[..., np.all(~np.isfinite(scores), axis=0)] = np.nan
+        all_invalid = np.all(~np.isfinite(scores), axis=0)
+        if np.any(all_invalid):
+            if np.issubdtype(values.dtype, np.floating):
+                values[..., all_invalid] = np.nan
+            else:
+                # Integer / unsigned inputs can't carry NaN. Fall back to the
+                # input's fill_value_default so the dtype is preserved.
+                values[..., all_invalid] = base.fill_value_default
         out = _as_geotensor_like(base, values)
         if not self.return_index:
             return out
         return out, _as_geotensor_like(base, index.astype(np.int64))
-
-    def partial_composite(
-        self, state: CompositeState | None, new_frame: GeoTensor
-    ) -> CompositeState:
-        frames = [] if state is None else list(state["frames"])
-        frames.append(new_frame)
-        return {"frames": frames, "composite": self(frames)}
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -245,13 +250,6 @@ class CloudFreeComposite(Operator):
         if not self.return_count:
             return out
         return out, _as_geotensor_like(base, count.astype(np.int64))
-
-    def partial_composite(
-        self, state: CompositeState | None, new_pair: tuple[GeoTensor, Any]
-    ) -> CompositeState:
-        pairs = [] if state is None else list(state["frames"])
-        pairs.append(new_pair)
-        return {"frames": pairs, "composite": self(pairs)}
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -354,15 +352,6 @@ class BAPComposite(Operator):
         best_score = np.take_along_axis(score_stack, index[None, ...], axis=0)[0]
         return out, _as_geotensor_like(base, best_score)
 
-    def partial_composite(
-        self,
-        state: CompositeState | None,
-        new_pair: tuple[GeoTensor, Mapping[str, Any]],
-    ) -> CompositeState:
-        pairs = [] if state is None else list(state["frames"])
-        pairs.append(new_pair)
-        return {"frames": pairs, "composite": self(pairs)}
-
     def get_config(self) -> dict[str, Any]:
         return {
             "target_doy": self.target_doy,
@@ -375,11 +364,18 @@ class BAPComposite(Operator):
 
 
 class MinCloudComposite(Operator):
-    """Pick pixels from the least-cloudy clear frame available.
+    """Pick each pixel from the scene with the lowest *global* cloud coverage.
 
-    Pixels that are cloudy in every frame fall back to the globally
-    least-cloudy frame, preserving a complete composite when no clear
-    observation exists for that pixel.
+    For every pixel, the selected frame is the one with the smallest
+    scene-wide cloud fraction among those where the pixel is clear. Pixels
+    cloudy in every frame fall back to the globally least-cloudy frame so
+    the output is a complete composite.
+
+    This is a coarse cloud-aware composite, not a per-pixel
+    cloud-distance composite — frames are ranked by their overall cloud
+    coverage rather than by distance-to-nearest-cloud at each pixel. Use
+    :class:`BAPComposite` with per-pixel ``cloud_distance`` metadata when
+    that finer granularity is needed.
     """
 
     def __init__(self, *, return_count: bool = False) -> None:
@@ -406,13 +402,6 @@ class MinCloudComposite(Operator):
             return out
         count = np.sum(clear, axis=0).astype(np.int64)
         return out, _as_geotensor_like(base, count)
-
-    def partial_composite(
-        self, state: CompositeState | None, new_pair: tuple[GeoTensor, Any]
-    ) -> CompositeState:
-        pairs = [] if state is None else list(state["frames"])
-        pairs.append(new_pair)
-        return {"frames": pairs, "composite": self(pairs)}
 
     def get_config(self) -> dict[str, Any]:
         return {"return_count": self.return_count}

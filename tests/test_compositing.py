@@ -95,6 +95,13 @@ def test_max_ndvi_composite_outputs_nan_when_all_ndvi_is_invalid() -> None:
     assert np.isnan(np.asarray(out)).all()
 
 
+def test_max_ndvi_composite_rejects_two_dimensional_geotensors() -> None:
+    flat = _gt(np.ones((2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="requires multi-band"):
+        MaxNDVIComposite(red=0, nir=1)([flat, flat])
+
+
 def test_cloud_free_composite_respects_masks_and_min_valid() -> None:
     scene1 = _gt(np.array([[[1.0, 2.0], [3.0, 4.0]]], dtype=np.float32))
     scene2 = _gt(np.array([[[10.0, 20.0], [30.0, 40.0]]], dtype=np.float32))
@@ -193,22 +200,6 @@ def test_composites_raise_on_mismatched_grid(
 
     with pytest.raises(ValueError, match="shape, transform, and CRS"):
         operator(inputs)  # type: ignore[arg-type]
-
-
-def test_partial_composite_matches_single_shot_median() -> None:
-    scenes = [
-        _gt(np.full((1, 2, 2), value, dtype=np.float32)) for value in (1.0, 5.0, 3.0)
-    ]
-    op = MedianComposite()
-    state = None
-    for scene in scenes:
-        state = op.partial_composite(state, scene)
-
-    assert state is not None
-    np.testing.assert_allclose(
-        np.asarray(state["composite"]),
-        np.asarray(op(scenes)),
-    )
 
 
 def test_compositing_get_config_is_json_safe() -> None:
