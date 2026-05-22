@@ -3,9 +3,10 @@
 Per design decision D11, every arithmetic submodule grows a duck-array
 ``axis=`` entry point under ``<module>/array.py``. This module re-exports
 the pilot pixel metrics (``mse``, ``rmse``, ``mae``, ``bias``, ``nrmse``,
-``correlation``, ``r2_score``) that take :class:`numpy.ndarray` (or any
-duck array convertible via :func:`numpy.asarray`) and an ``axis``
-argument, returning a numpy array.
+``nrmse_score``, ``correlation``, ``r2_score``) that take
+:class:`numpy.ndarray` (or any duck array convertible via
+:func:`numpy.asarray`) and an ``axis`` argument, returning a numpy
+array.
 
 These are the kernels Tier B (xarray, ``dim=``) and Tier C (``Operator``)
 delegate to.
@@ -19,6 +20,7 @@ from xrtoolz.metrics._src.array_pixel import (
     mae,
     mse,
     nrmse,
+    nrmse_score,
     r2_score,
     rmse,
 )
@@ -36,6 +38,7 @@ __all__ = [
     "mae",
     "mse",
     "nrmse",
+    "nrmse_score",
     "r2_score",
     "rmse",
     "segment_signal",

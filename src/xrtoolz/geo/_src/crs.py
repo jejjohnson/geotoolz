@@ -7,11 +7,15 @@ reprojection / raster I/O, delegate to ``rioxarray`` directly.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 import rioxarray  # noqa: F401  — needed so ds.rio is populated
 import xarray as xr
 from pyproj import CRS, Transformer
+
+
+GridResolution = Literal["one_degree", "quarter_degree", "twelfth_degree", "other"]
 
 
 def assign_crs(ds: xr.Dataset, crs: str = "EPSG:4326") -> xr.Dataset:
@@ -115,3 +119,71 @@ def calc_latlon(ds: xr.Dataset) -> xr.Dataset:
     ds["longitude"].attrs["units"] = "degrees_east"
     ds["latitude"].attrs["units"] = "degrees_north"
     return ds
+
+
+def get_dataset_resolution(
+    ds: xr.Dataset,
+    *,
+    lon: str = "lon",
+    lat: str = "lat",
+    rtol: float = 0.05,
+) -> GridResolution:
+    """Classify a regular lat/lon grid against canonical OceanBench resolutions.
+
+    Returns one of ``"one_degree"``, ``"quarter_degree"``,
+    ``"twelfth_degree"``, or ``"other"`` (no canonical resolution
+    matches within ``rtol`` of *both* axes). Useful for dispatch — e.g.
+    picking the right MDT URL or the right reference dataset for a
+    given grid.
+
+    The classifier checks the median absolute spacing of the ``lon``
+    and ``lat`` coordinates **independently** — an anisotropic grid
+    (e.g. ``dlon=1.1`` but ``dlat=0.9``) is rejected even though its
+    averaged spacing would round to 1°. Curvilinear (2-D) lon/lat
+    coordinates are rejected with a ``ValueError``: ``np.diff`` on a
+    multi-dim array would silently mix endpoints across rows and
+    misclassify the grid.
+
+    Args:
+        ds: Dataset carrying 1-D ``lon`` / ``lat`` coordinates.
+        lon: Longitude coordinate name.
+        lat: Latitude coordinate name.
+        rtol: Relative tolerance for the canonical-resolution match,
+            applied per-axis.
+
+    Returns:
+        Resolution label as a ``Literal[...]`` string.
+
+    Raises:
+        ValueError: If ``ds[lon]`` or ``ds[lat]`` is not 1-D — the
+            classifier only operates on rectilinear grids; curvilinear
+            datasets should be regridded first.
+    """
+    lon_da = ds[lon]
+    lat_da = ds[lat]
+    if lon_da.ndim != 1:
+        raise ValueError(
+            f"get_dataset_resolution expects a 1-D {lon!r} coord, got "
+            f"shape {tuple(lon_da.shape)}. Curvilinear / 2-D grids are not "
+            "supported — regrid onto a rectilinear axis first."
+        )
+    if lat_da.ndim != 1:
+        raise ValueError(
+            f"get_dataset_resolution expects a 1-D {lat!r} coord, got "
+            f"shape {tuple(lat_da.shape)}. Curvilinear / 2-D grids are not "
+            "supported — regrid onto a rectilinear axis first."
+        )
+    dlon = float(np.median(np.abs(np.diff(np.asarray(lon_da.values, dtype=float)))))
+    dlat = float(np.median(np.abs(np.diff(np.asarray(lat_da.values, dtype=float)))))
+    candidates: list[tuple[GridResolution, float]] = [
+        ("one_degree", 1.0),
+        ("quarter_degree", 0.25),
+        ("twelfth_degree", 1.0 / 12.0),
+    ]
+    for label, target in candidates:
+        # Require BOTH axes to match the canonical target — averaging
+        # would let an anisotropic grid (dlon=1.1, dlat=0.9 → mean=1.0)
+        # masquerade as canonical even though neither axis is.
+        if abs(dlon - target) < rtol * target and abs(dlat - target) < rtol * target:
+            return label
+    return "other"

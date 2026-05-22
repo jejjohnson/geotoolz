@@ -96,6 +96,17 @@ def nrmse(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
     return _apply_pixel_kernel(array_pixel.nrmse, pred, ref, dim)
 
 
+def nrmse_score(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
+    """Mercator/OceanBench-flavour NRMSE skill: ``1 - RMSE / std(ref)``.
+
+    Differs from :func:`nrmse` in the denominator: this uses the
+    anomaly magnitude ``std(ref)`` while :func:`nrmse` uses the raw
+    signal magnitude ``sqrt(<ref^2>)``. For zero-mean references the
+    two agree.
+    """
+    return _apply_pixel_kernel(array_pixel.nrmse_score, pred, ref, dim)
+
+
 def mae(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
     """Mean absolute error reduced over ``dim``."""
     return _apply_pixel_kernel(array_pixel.mae, pred, ref, dim)
@@ -175,6 +186,10 @@ class NRMSE(_PixelMetricOp):
     _fn = staticmethod(nrmse)
 
 
+class NRMSEScore(_PixelMetricOp):
+    _fn = staticmethod(nrmse_score)
+
+
 class MAE(_PixelMetricOp):
     _fn = staticmethod(mae)
 
@@ -215,12 +230,14 @@ __all__ = [
     "RMSE",
     "Bias",
     "Correlation",
+    "NRMSEScore",
     "R2Score",
     "bias",
     "correlation",
     "mae",
     "mse",
     "nrmse",
+    "nrmse_score",
     "r2_score",
     "rmse",
 ]

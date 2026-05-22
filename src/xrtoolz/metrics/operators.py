@@ -26,6 +26,7 @@ from xrtoolz.metrics._src.pixel import (
     RMSE,
     Bias,
     Correlation,
+    NRMSEScore,
     R2Score,
 )
 from xrtoolz.metrics._src.probabilistic import (
@@ -71,6 +72,7 @@ __all__ = [
     "GeostrophicBalanceError",
     "GradientDifference",
     "MaskedMetric",
+    "NRMSEScore",
     "PSDScore",
     "PVConservationError",
     "PhaseShiftError",

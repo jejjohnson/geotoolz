@@ -80,6 +80,41 @@ def nrmse(
     return 1.0 - err / scale
 
 
+def nrmse_score(
+    prediction: ArrayLike,
+    reference: ArrayLike,
+    *,
+    axis: Axis = -1,
+) -> NDArray[np.floating]:
+    """Mercator-flavour normalized RMSE skill score: ``1 - RMSE / std(ref)``.
+
+    Distinct from :func:`nrmse` — both are 1 when prediction matches the
+    reference exactly, but the normalisation differs:
+
+    - :func:`nrmse` uses ``sqrt(<ref^2>)`` (raw signal magnitude).
+    - :func:`nrmse_score` uses ``std(ref)`` (anomaly magnitude).
+
+    For zero-mean references (SLA, SSH-anomaly) the two are equivalent;
+    for non-zero-mean references (SST, salinity) they diverge. Adding
+    :func:`nrmse_score` lets users reproduce upstream OceanBench
+    leaderboard numerics (DC20a / DC21a Gulf Stream eval).
+
+    Edge case — constant reference (``std(ref) == 0``): a perfect
+    prediction (``RMSE == 0``) returns ``1`` rather than ``0/0 → NaN``;
+    any non-zero error against a constant reference returns ``-inf``
+    (infinitely bad skill, since there is no variability against which
+    to normalise).
+    """
+    err = rmse(prediction, reference, axis=axis)
+    ref = np.asarray(reference)
+    std = np.nanstd(ref, axis=axis)
+    # Avoid 0/0 on constant references: branch explicitly on std==0 so
+    # the perfect-prediction case yields 1.0 instead of NaN.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = np.where(std == 0, np.where(err == 0, 0.0, np.inf), err / std)
+    return 1.0 - ratio
+
+
 def correlation(
     prediction: ArrayLike,
     reference: ArrayLike,
@@ -121,6 +156,7 @@ __all__ = [
     "mae",
     "mse",
     "nrmse",
+    "nrmse_score",
     "r2_score",
     "rmse",
 ]
