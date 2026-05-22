@@ -362,14 +362,10 @@ class PlumeFootprint(Operator):
             if "label" in props.columns:
                 indexed = props.set_index("label", drop=False)
             else:
-                synthetic_labels = sorted(
-                    int(v) for v in np.unique(labels) if v != 0
-                )
+                synthetic_labels = sorted(int(v) for v in np.unique(labels) if v != 0)
                 indexed = props.copy()
                 indexed.index = pd.Index(synthetic_labels[: len(indexed)])
-            props_by_label = {
-                int(k): v for k, v in indexed.to_dict("index").items()
-            }
+            props_by_label = {int(k): v for k, v in indexed.to_dict("index").items()}
 
         rows: list[dict[str, Any]] = []
         labels_i32 = labels.astype(np.int32, copy=False)
@@ -397,14 +393,21 @@ class PlumeFootprint(Operator):
             component_values = None if enh is None else enh[component]
             region_props = props_by_label.get(label_id, {})
 
-            def _nan_safe(reducer: Callable[[np.ndarray], float], key: str) -> float:
+            # Bind region_props / component_values via default args to avoid
+            # the late-binding closure trap that ruff B023 flags.
+            def _nan_safe(
+                reducer: Callable[[np.ndarray], float],
+                key: str,
+                rp: dict[str, Any] = region_props,
+                vals: np.ndarray | None = component_values,
+            ) -> float:
                 # Prefer the regionprops_table value, but fall back to the
                 # NaN-aware reducer when skimage propagates NaN through
                 # ``mean_intensity`` / ``max_intensity`` (it does not ignore
-                # NaNs internally). ``component_values`` is non-None here.
-                rp_val = region_props.get(key)
+                # NaNs internally). ``vals`` is non-None here.
+                rp_val = rp.get(key)
                 if rp_val is None or not np.isfinite(float(rp_val)):
-                    return float(reducer(component_values))
+                    return float(reducer(vals))
                 return float(rp_val)
 
             mean_enhancement = (

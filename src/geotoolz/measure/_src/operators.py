@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from pipekit import Operator
 from shapely.geometry import LineString, Point
 from skimage.measure import (
     find_contours,
@@ -17,8 +18,6 @@ from skimage.measure import (
     regionprops_table,
     shannon_entropy,
 )
-
-from pipekit import Operator
 
 
 if TYPE_CHECKING:

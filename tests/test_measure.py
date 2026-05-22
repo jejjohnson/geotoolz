@@ -83,9 +83,9 @@ def test_find_contours_empty_input_returns_empty_geodataframe() -> None:
 def test_profile_line_samples_pixel_intensities_between_endpoints() -> None:
     arr = np.tile(np.arange(10, dtype=float), (5, 1))
 
-    profile = gz.measure.ProfileLine(
-        src=(2, 0), dst=(2, 9), linewidth=1, order=0
-    )(_gt(arr))
+    profile = gz.measure.ProfileLine(src=(2, 0), dst=(2, 9), linewidth=1, order=0)(
+        _gt(arr)
+    )
 
     assert profile.shape[0] >= 9
     assert profile[0] == pytest.approx(0.0)
