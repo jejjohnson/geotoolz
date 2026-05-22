@@ -14,6 +14,8 @@ import numpy as np
 from affine import Affine
 from rasterio.enums import Resampling
 
+from geotoolz._src.blending import triangular_weights
+
 
 # Aliases between the user-friendly resampling names and the
 # rasterio / skimage naming conventions used downstream.
@@ -122,14 +124,7 @@ def feather_weights(shape: tuple[int, int], width: int) -> np.ndarray:
     Returns:
         ``float32`` array of shape ``(H, W)`` with values in ``[0, 1]``.
     """
-    height, width_px = shape
-    if width <= 0:
-        return np.ones(shape, dtype=np.float32)
-    y = np.minimum(np.arange(height) + 1, np.arange(height, 0, -1))
-    x = np.minimum(np.arange(width_px) + 1, np.arange(width_px, 0, -1))
-    y = np.clip(y / width, 0.0, 1.0)
-    x = np.clip(x / width, 0.0, 1.0)
-    return np.outer(y, x).astype(np.float32)
+    return triangular_weights(shape, width)
 
 
 def target_slices(

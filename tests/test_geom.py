@@ -22,6 +22,7 @@ from rasterio.enums import Resampling
 from shapely.geometry import box
 
 import geotoolz as gz
+from geotoolz._src.blending import triangular_weights
 from geotoolz.geom._src import array as geom_array
 
 
@@ -55,6 +56,13 @@ def test_array_feather_weights_ramps_from_centre_to_edge() -> None:
 def test_array_feather_weights_zero_width_returns_ones() -> None:
     weights = geom_array.feather_weights((3, 4), width=0)
     np.testing.assert_array_equal(weights, np.ones((3, 4), dtype=np.float32))
+
+
+def test_array_feather_weights_wrap_shared_triangular_kernel() -> None:
+    np.testing.assert_array_equal(
+        geom_array.feather_weights((5, 7), width=2),
+        triangular_weights((5, 7), width=2),
+    )
 
 
 def test_array_resolve_resampling_handles_aliases_and_enum() -> None:
@@ -317,6 +325,39 @@ def test_stitch_blend_modes_and_errors() -> None:
     )
     with pytest.raises(ValueError, match="north-up"):
         gz.geom.Stitch()([rotated])
+
+
+def test_stitch_feather_matches_spatial_overlap_add() -> None:
+    pytest.importorskip(
+        "geopatcher",
+        reason="geotoolz.patch_ops bridge requires the [patch] extra (geopatcher)",
+    )
+    from geopatcher import (
+        RasterField,
+        SpatialOverlapAdd,
+        SpatialPatcher,
+        SpatialRectangular,
+        SpatialRegularStride,
+    )
+
+    from geotoolz.patch_ops import SpatialTriangular
+
+    gt = _gt()
+    tiles = gz.geom.Tile(size=(3, 4), stride=(2, 3))(gt)
+
+    stitched = gz.geom.Stitch(blend="feather", feather_width=2)(tiles)
+    field = RasterField(gt)
+    patcher = SpatialPatcher(
+        geometry=SpatialRectangular(size=(3, 4)),
+        sampler=SpatialRegularStride(step=(2, 3)),
+        window=SpatialTriangular(width=2),
+        aggregation=SpatialOverlapAdd(),
+    )
+
+    patches = list(patcher.split(field))
+    patch_stitched = SpatialOverlapAdd().merge(patches, field.reader)
+
+    np.testing.assert_allclose(patch_stitched, np.asarray(stitched), rtol=1e-6)
 
 
 def test_stitch_validates_north_up_on_every_tile() -> None:
