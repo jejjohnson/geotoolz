@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from pipekit import Operator
+
 from geotoolz.learn._src.estimators import (
     GeoTensorEstimator,
     NanStrategy,
