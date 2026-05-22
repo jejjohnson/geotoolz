@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
-from geotoolz.core import Operator
+from pipekit import Operator
 from geotoolz.matched_filter._src.array import (
     AdaptiveBackground,
     ClusterBackground,
