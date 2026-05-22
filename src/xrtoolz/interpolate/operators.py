@@ -1372,13 +1372,50 @@ class RemapAxis(Operator):
 
     def _apply(self, ds):
         target = self._target_da if self._target_da is not None else self._target_values
-        return _coord_remap.remap_axis(
-            ds,
-            source_dim=self.source_axis,
-            target_coords=target,
-            target_name=self.target_name,
-            method=self.method,
+
+        def _fn(da: xr.DataArray) -> xr.DataArray:
+            return _coord_remap.remap_axis(
+                da,
+                source_dim=self.source_axis,
+                target_coords=target,
+                target_name=self.target_name,
+                method=self.method,
+            )
+
+        if isinstance(ds, xr.DataArray):
+            return _fn(ds)
+
+        if self.source_axis not in ds.dims:
+            raise ValueError(
+                f"source_dim {self.source_axis!r} not in Dataset dims {tuple(ds.dims)}"
+            )
+        new_name = self._resolve_target_name()
+        tgt_values = self._target_values
+        out_vars: dict[str, xr.DataArray] = {}
+        for name, da in ds.data_vars.items():
+            if self.source_axis not in da.dims:
+                # Variable doesn't depend on the source axis — pass through.
+                out_vars[str(name)] = da
+                continue
+            if not np.issubdtype(da.dtype, np.number):
+                # A non-numeric variable that depends on source_axis cannot be
+                # interpolated; passing it through would leave the output with a
+                # phantom source_axis (and possibly incompatible sizes).
+                raise TypeError(
+                    f"variable {name!r} carries source_dim {self.source_axis!r} "
+                    f"but has non-numeric dtype {da.dtype}; drop or convert it "
+                    "before calling remap_axis"
+                )
+            out_vars[str(name)] = _fn(da)
+        base_coords = {
+            cname: c
+            for cname, c in ds.coords.items()
+            if self.source_axis not in c.dims and cname != self.source_axis
+        }
+        base_coords[new_name] = xr.DataArray(
+            tgt_values, dims=(new_name,), name=new_name
         )
+        return xr.Dataset(out_vars, coords=base_coords, attrs=dict(ds.attrs))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1504,13 +1541,48 @@ class ToPhase(Operator):
         self.epoch = float(epoch)
 
     def _apply(self, ds):
-        return _coord_remap.to_phase(
-            ds,
-            time_dim=self.time_dim,
-            period=self.period,
-            n_bins=self.n_bins,
-            epoch=self.epoch,
-        )
+        def _fn(da: xr.DataArray) -> xr.DataArray:
+            return _coord_remap.to_phase(
+                da,
+                time_dim=self.time_dim,
+                period=self.period,
+                n_bins=self.n_bins,
+                epoch=self.epoch,
+            )
+
+        if isinstance(ds, xr.DataArray):
+            return _fn(ds)
+
+        if self.time_dim not in ds.dims:
+            raise ValueError(
+                f"time_dim {self.time_dim!r} not in Dataset dims {tuple(ds.dims)}"
+            )
+        if self.time_dim not in ds.coords:
+            raise ValueError(
+                f"Dataset must carry a coordinate named {self.time_dim!r} "
+                "to compute phase"
+            )
+        edges = np.linspace(0.0, 1.0, self.n_bins + 1)
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        out_vars: dict[str, xr.DataArray] = {}
+        for name, da in ds.data_vars.items():
+            if self.time_dim not in da.dims:
+                out_vars[str(name)] = da
+                continue
+            if not np.issubdtype(da.dtype, np.number):
+                raise TypeError(
+                    f"variable {name!r} carries time_dim {self.time_dim!r} but "
+                    f"has non-numeric dtype {da.dtype}; drop or convert it "
+                    "before calling to_phase"
+                )
+            out_vars[str(name)] = _fn(da)
+        base_coords = {
+            cname: c
+            for cname, c in ds.coords.items()
+            if self.time_dim not in c.dims and cname != self.time_dim
+        }
+        base_coords["phase"] = xr.DataArray(centers, dims=("phase",), name="phase")
+        return xr.Dataset(out_vars, coords=base_coords, attrs=dict(ds.attrs))
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         dims = {}

@@ -141,9 +141,8 @@ def _rotary_fixture(*, rotation_direction: float = 1.0) -> xr.Dataset:
 
 
 def test_rotary_spectrum_ccw_signal_peaks_positive_wavenumber():
-    out = rotary_spectrum(
-        _rotary_fixture(rotation_direction=1.0), u_var="u", v_var="v", dim="x"
-    )
+    ds = _rotary_fixture(rotation_direction=1.0)
+    out = rotary_spectrum(ds["u"], ds["v"], dim="x")
     k = 3.0 / 64.0
     assert float(out["psd_ccw"].idxmax("wavenumber")) == pytest.approx(k)
     assert float(out["psd_cw"].sel(wavenumber=k)) == pytest.approx(0.0, abs=1e-12)
@@ -151,9 +150,8 @@ def test_rotary_spectrum_ccw_signal_peaks_positive_wavenumber():
 
 
 def test_rotary_spectrum_cw_signal_has_positive_polarization():
-    out = rotary_spectrum(
-        _rotary_fixture(rotation_direction=-1.0), u_var="u", v_var="v", dim="x"
-    )
+    ds = _rotary_fixture(rotation_direction=-1.0)
+    out = rotary_spectrum(ds["u"], ds["v"], dim="x")
     k = 3.0 / 64.0
     assert float(out["psd_cw"].idxmax("wavenumber")) == pytest.approx(k)
     assert float(out["polarization"].sel(wavenumber=k)) == pytest.approx(1.0)
@@ -162,14 +160,14 @@ def test_rotary_spectrum_cw_signal_has_positive_polarization():
 def test_rotary_spectrum_real_only_signal_is_unpolarized():
     ds = _rotary_fixture(rotation_direction=1.0)
     ds["v"] = xr.zeros_like(ds["v"])
-    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x")
+    out = rotary_spectrum(ds["u"], ds["v"], dim="x")
     k = 3.0 / 64.0
     assert float(out["polarization"].sel(wavenumber=k)) == pytest.approx(0.0, abs=1e-12)
 
 
 def test_rotary_spectrum_parseval_matches_velocity_variance():
     ds = _rotary_fixture(rotation_direction=1.0)
-    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x")
+    out = rotary_spectrum(ds["u"], ds["v"], dim="x")
     dk = float(out["wavenumber"].diff("wavenumber").median())
     spectral_variance = float((out["psd_cw"] + out["psd_ccw"]).sum() * dk)
     component_variance = float(ds["u"].var("x") + ds["v"].var("x"))
@@ -180,7 +178,7 @@ def test_rotary_spectrum_avg_dims_reduce_outputs():
     ds = _rotary_fixture(rotation_direction=1.0).expand_dims(lat=[0.0, 1.0])
     ds["u"] = ds["u"] * xr.DataArray([1.0, 2.0], dims="lat", coords={"lat": ds["lat"]})
     ds["v"] = ds["v"] * xr.DataArray([1.0, 2.0], dims="lat", coords={"lat": ds["lat"]})
-    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x", avg_dims=("lat",))
+    out = rotary_spectrum(ds["u"], ds["v"], dim="x", avg_dims=("lat",))
     assert out["psd_ccw"].dims == ("wavenumber",)
     assert out["psd_cw"].dims == ("wavenumber",)
     assert out["polarization"].dims == ("wavenumber",)
@@ -198,7 +196,7 @@ def test_rotary_spectrum_handles_dim_without_explicit_coord():
         },
     )
     assert "x" not in ds.coords
-    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x")
+    out = rotary_spectrum(ds["u"], ds["v"], dim="x")
     assert out["psd_ccw"].dims == ("wavenumber",)
 
 
@@ -207,9 +205,21 @@ def test_rotary_spectrum_preserves_nyquist_bin_for_even_length_inputs():
     only; the outer-join on wavenumber must keep that bin so total
     rotary power is variance-consistent."""
     ds = _rotary_fixture(rotation_direction=1.0)
-    out = rotary_spectrum(ds, u_var="u", v_var="v", dim="x")
+    out = rotary_spectrum(ds["u"], ds["v"], dim="x")
     nyquist = 0.5 / 1.0  # spacing = 1
     assert nyquist in out["wavenumber"].values
+
+
+def test_rotary_spectrum_operator_matches_primitive():
+    """The new ``RotarySpectrum`` operator must match the primitive on
+    the same data, with the operator doing the Dataset selection."""
+    from xrtoolz.transforms.operators import RotarySpectrum
+
+    ds = _rotary_fixture(rotation_direction=1.0)
+    op_out = RotarySpectrum("u", "v", "x")(ds)
+    fn_out = rotary_spectrum(ds["u"], ds["v"], dim="x")
+    np.testing.assert_allclose(op_out["psd_ccw"].values, fn_out["psd_ccw"].values)
+    np.testing.assert_allclose(op_out["psd_cw"].values, fn_out["psd_cw"].values)
 
 
 def test_ke_spectral_flux_conserves_transfer(taylor_green_vortex_uv):

@@ -487,20 +487,20 @@ def test_positional_encoding_includes_input_by_default():
 
 
 def test_time_rescale_round_trip(ds_grid_daily):
-    rescaled = time_rescale(ds_grid_daily, freq_dt=1, freq_unit="D")
-    assert np.issubdtype(rescaled.time.dtype, np.floating)
+    rescaled = time_rescale(ds_grid_daily["time"], freq_dt=1, freq_unit="D")
+    assert np.issubdtype(rescaled.dtype, np.floating)
     restored = time_unrescale(rescaled)
     # Daily cadence with the min as t0 -> restored times equal the originals.
     np.testing.assert_array_equal(
-        restored.time.values.astype("datetime64[ns]"),
+        restored.values.astype("datetime64[ns]"),
         ds_grid_daily.time.values.astype("datetime64[ns]"),
     )
 
 
 def test_encode_time_cyclical_adds_paired_coords(ds_grid_daily):
-    out = encode_time_cyclical(ds_grid_daily, components=["dayofyear"])
-    assert "dayofyear_sin" in out.coords
-    assert "dayofyear_cos" in out.coords
+    out = encode_time_cyclical(ds_grid_daily["time"], components=["dayofyear"])
+    assert "dayofyear_sin" in out.data_vars
+    assert "dayofyear_cos" in out.data_vars
     np.testing.assert_allclose(
         out["dayofyear_sin"].values ** 2 + out["dayofyear_cos"].values ** 2,
         np.ones(ds_grid_daily.sizes["time"]),
@@ -509,8 +509,8 @@ def test_encode_time_cyclical_adds_paired_coords(ds_grid_daily):
 
 
 def test_encode_time_ordinal_is_monotone(ds_grid_daily):
-    out = encode_time_ordinal(ds_grid_daily)
-    values = out["time_ordinal"].values
+    out = encode_time_ordinal(ds_grid_daily["time"])
+    values = out.values
     assert (np.diff(values) > 0).all()
 
 

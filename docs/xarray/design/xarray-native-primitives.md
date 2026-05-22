@@ -1,6 +1,6 @@
 ---
-status: in-progress
-version: 0.1.1
+status: complete
+version: 0.2.0
 ---
 
 # Xarray-Native Primitives — Two-Layer Public Contract
@@ -24,7 +24,61 @@ version: 0.1.1
 > intentionally stays Dataset-flavoured (it composes an inner
 > Operator), and `metrics/_src/dm.dm_test` stays array-positional
 > (no Dataset to flip). Operator constructor signatures are
-> unchanged. PR γ remains to be done.
+> unchanged.
+>
+> **PR γ is now complete.** The remaining Dataset-flavoured Layer-0
+> primitives are flipped to DataArray-positional with keyword-only
+> configuration:
+>
+> - `transforms/_src/coord_remap.py`: `remap_axis(da, *, source_dim,
+>   target_coords, ...)` and `to_phase(da, *, time_dim, period, n_bins)`
+>   are now DataArray-in / DataArray-out; the per-variable Dataset loop
+>   and non-numeric guard moved into `RemapAxis._apply` and
+>   `ToPhase._apply` in `interpolate/operators.py`. The vertical presets
+>   (`ToSigma`, `FromSigma`, `ToIsopycnal`, `ToPressureLevels`,
+>   `ToHeight`) inherit `RemapAxis._apply` and pick up the loop for
+>   free.
+> - `transforms/_src/encoders/coord_time.py`: `time_rescale`,
+>   `time_unrescale`, `encode_time_ordinal` are DataArray-in /
+>   DataArray-out; `encode_time_cyclical` is DataArray-in /
+>   Dataset-out (multi-output primitive shape per the design doc
+>   "structured multi-output" pattern). The operators
+>   (`TimeRescale`, `TimeUnrescale`, `EncodeTimeCyclical`,
+>   `EncodeTimeOrdinal`) select `ds[self.time]` before calling the
+>   primitive and merge the result back into the Dataset.
+> - `transforms/_src/fourier.py`: `rotary_spectrum(u, v, *, dim,
+>   avg_dims)` takes the two velocity DataArrays positionally; a new
+>   Layer-1 `RotarySpectrum(u, v, dim)` operator wraps it.
+> - `geo/_src/along_track.py`: `bandpass_wavelength(da, *, dim, ..., lon,
+>   lat, ...)` is DataArray-positional, with `lon` and `lat` now passed
+>   as `DataArray | None` (used for spacing inference) rather than as
+>   variable-name strings. The `BandpassWavelength` operator keeps the
+>   `lon: str` / `lat: str` constructor and does the Dataset selection
+>   (including per-variable loop, non-numeric pass-through, and the
+>   misspelled-`dim` guard) in `_apply`.
+>
+> Deliberate non-flips in PR γ:
+>
+> - The other Fourier primitives in `transforms/_src/fourier.py`
+>   (`power_spectrum`, `cross_spectrum`, `coherence`, `stft`,
+>   `ke_spectral_flux`, `enstrophy_spectral_flux`, `integral_scale`,
+>   `fit_spectral_slope`, `compensated_spectrum`,
+>   `drop_negative_frequencies`) were already DataArray-positional and
+>   needed no change.
+> - The DCT / DST and wavelet primitives in
+>   `transforms/_src/{dct,wavelet}.py` were already DataArray-first
+>   and are unchanged.
+> - The basis encoders in `transforms/_src/encoders/basis.py`
+>   (`cyclical_encode`, `fourier_features`, `random_fourier_features`,
+>   `positional_encoding`) consume raw `ndarray` for backward
+>   compatibility with their Operator wrappers and are out of scope —
+>   the Operator layer already does the DataArray plumbing.
+> - The transforms `morphology` / `decompose` / `sklearn_op` modules
+>   are stateful-estimator or coord/attr utilities (not pure Layer-0
+>   primitives) and don't fit the flip contract.
+>
+> Operator constructor signatures across all three PRs are
+> unchanged.
 
 A follow-on refactor to D11 (revised). Flips every primitive in the
 package to an xarray-only public signature, keeping user-authored

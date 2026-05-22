@@ -127,18 +127,18 @@ def ds_profile():
 def test_tier_b_remap_axis_replaces_dim(ds_profile):
     new_z = np.linspace(0.0, 100.0, 11)
     out = remap_axis(
-        ds_profile,
+        ds_profile["T"],
         source_dim="depth",
         target_coords=new_z,
     )
     assert "depth" in out.dims
     assert out.sizes["depth"] == 11
-    np.testing.assert_allclose(out["T"].values[:, 0], 20.0 - 0.1 * new_z)
+    np.testing.assert_allclose(out.values[:, 0], 20.0 - 0.1 * new_z)
 
 
 def test_tier_b_remap_axis_renames_via_target_name(ds_profile):
     out = remap_axis(
-        ds_profile,
+        ds_profile["T"],
         source_dim="depth",
         target_coords=np.linspace(0.0, 100.0, 11),
         target_name="z_new",
@@ -149,13 +149,17 @@ def test_tier_b_remap_axis_renames_via_target_name(ds_profile):
 
 def test_tier_b_remap_axis_uses_dataarray_name(ds_profile):
     target = xr.DataArray(np.linspace(0.0, 100.0, 11), dims=("z2",), name="z2")
-    out = remap_axis(ds_profile, source_dim="depth", target_coords=target)
+    out = remap_axis(ds_profile["T"], source_dim="depth", target_coords=target)
     assert "z2" in out.dims
 
 
 def test_tier_b_unknown_source_dim_raises(ds_profile):
     with pytest.raises(ValueError):
-        remap_axis(ds_profile, source_dim="bogus", target_coords=np.array([0.0, 1.0]))
+        remap_axis(
+            ds_profile["T"],
+            source_dim="bogus",
+            target_coords=np.array([0.0, 1.0]),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -170,23 +174,25 @@ def test_to_phase_recovers_diurnal_sinusoid():
     n_per_day = 48  # half-hourly
     t = np.arange(n_days * n_per_day) * (period / n_per_day)
     signal = np.sin(2 * np.pi * t / period)
-    ds = xr.Dataset({"x": (("time",), signal)}, coords={"time": t})
-    out = to_phase(ds, time_dim="time", period=period, n_bins=24)
+    da = xr.DataArray(signal, dims=("time",), coords={"time": t}, name="x")
+    out = to_phase(da, time_dim="time", period=period, n_bins=24)
 
     assert out.sizes["phase"] == 24
     phases = out["phase"].values
     expected = np.sin(2 * np.pi * phases)
-    np.testing.assert_allclose(out["x"].values, expected, atol=0.05)
+    np.testing.assert_allclose(out.values, expected, atol=0.05)
 
 
 def test_to_phase_invalid_args_raise():
-    ds = xr.Dataset({"x": (("time",), np.zeros(10))}, coords={"time": np.arange(10)})
+    da = xr.DataArray(
+        np.zeros(10), dims=("time",), coords={"time": np.arange(10)}, name="x"
+    )
     with pytest.raises(ValueError):
-        to_phase(ds, time_dim="time", period=0.0, n_bins=8)
+        to_phase(da, time_dim="time", period=0.0, n_bins=8)
     with pytest.raises(ValueError):
-        to_phase(ds, time_dim="time", period=1.0, n_bins=0)
+        to_phase(da, time_dim="time", period=1.0, n_bins=0)
     with pytest.raises(ValueError):
-        to_phase(ds, time_dim="bogus", period=1.0, n_bins=8)
+        to_phase(da, time_dim="bogus", period=1.0, n_bins=8)
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +246,7 @@ def test_remap_axis_operator_matches_function(ds_profile):
     op = RemapAxis("depth", new_z)
     np.testing.assert_allclose(
         op(ds_profile)["T"].values,
-        remap_axis(ds_profile, source_dim="depth", target_coords=new_z)["T"].values,
+        remap_axis(ds_profile["T"], source_dim="depth", target_coords=new_z).values,
     )
 
 
@@ -252,7 +258,7 @@ def test_to_phase_operator_matches_function():
     op = ToPhase("time", period=period, n_bins=12)
     np.testing.assert_allclose(
         op(ds)["x"].values,
-        to_phase(ds, time_dim="time", period=period, n_bins=12)["x"].values,
+        to_phase(ds["x"], time_dim="time", period=period, n_bins=12).values,
     )
 
 
@@ -276,8 +282,12 @@ def test_vertical_presets_default_dim_names():
     assert "height" in out_h.dims
 
 
-def test_remap_axis_rejects_non_numeric_var_with_source_dim():
-    """A non-numeric variable carrying source_dim must raise (review feedback)."""
+def test_remap_axis_operator_rejects_non_numeric_var_with_source_dim():
+    """A non-numeric variable carrying source_dim must raise at the operator boundary.
+
+    After the PR γ primitive flip, the Dataset loop / non-numeric guard
+    lives on ``RemapAxis._apply``; the primitive itself is DataArray-only.
+    """
     z = np.linspace(0.0, 100.0, 5)
     ds = xr.Dataset(
         {
@@ -286,15 +296,12 @@ def test_remap_axis_rejects_non_numeric_var_with_source_dim():
         },
         coords={"depth": z},
     )
+    op = RemapAxis("depth", np.linspace(0.0, 100.0, 11))
     with pytest.raises(TypeError, match="non-numeric"):
-        remap_axis(
-            ds,
-            source_dim="depth",
-            target_coords=np.linspace(0.0, 100.0, 11),
-        )
+        op(ds)
 
 
-def test_remap_axis_passes_through_non_dim_non_numeric_var():
+def test_remap_axis_operator_passes_through_non_dim_non_numeric_var():
     z = np.linspace(0.0, 100.0, 5)
     ds = xr.Dataset(
         {
@@ -303,18 +310,20 @@ def test_remap_axis_passes_through_non_dim_non_numeric_var():
         },
         coords={"depth": z},
     )
-    out = remap_axis(ds, source_dim="depth", target_coords=np.linspace(0.0, 100.0, 11))
+    op = RemapAxis("depth", np.linspace(0.0, 100.0, 11))
+    out = op(ds)
     assert str(out["label"].values) == "site_42"
 
 
-def test_to_phase_requires_time_coord():
-    """Dataset must carry a coordinate named time_dim, not just a dimension."""
-    ds = xr.Dataset({"x": (("time",), np.zeros(10))})  # time has no coord
+def test_to_phase_primitive_requires_time_coord():
+    """DataArray must carry a coordinate named time_dim, not just a dimension."""
+    da = xr.DataArray(np.zeros(10), dims=("time",), name="x")  # no time coord
     with pytest.raises(ValueError, match="coordinate named"):
-        to_phase(ds, time_dim="time", period=1.0, n_bins=8)
+        to_phase(da, time_dim="time", period=1.0, n_bins=8)
 
 
-def test_to_phase_rejects_non_numeric_var_with_time_dim():
+def test_to_phase_operator_rejects_non_numeric_var_with_time_dim():
+    """Operator boundary handles non-numeric Dataset variables after the flip."""
     t = np.arange(10, dtype=float)
     ds = xr.Dataset(
         {
@@ -323,8 +332,9 @@ def test_to_phase_rejects_non_numeric_var_with_time_dim():
         },
         coords={"time": t},
     )
+    op = ToPhase("time", period=1.0, n_bins=8)
     with pytest.raises(TypeError, match="non-numeric"):
-        to_phase(ds, time_dim="time", period=1.0, n_bins=8)
+        op(ds)
 
 
 def test_array_remap_preserves_complex_dtype():
@@ -375,12 +385,12 @@ def test_to_phase_preserves_complex_signal():
     n = n_per_period * 30
     t = np.arange(n, dtype=float) * (period / n_per_period)
     z = np.exp(1j * 2 * np.pi * t / period)
-    ds = xr.Dataset({"z": (("time",), z)}, coords={"time": t})
-    out = to_phase(ds, time_dim="time", period=period, n_bins=24)
-    assert np.iscomplexobj(out["z"].values)
+    da = xr.DataArray(z, dims=("time",), coords={"time": t}, name="z")
+    out = to_phase(da, time_dim="time", period=period, n_bins=24)
+    assert np.iscomplexobj(out.values)
     phases = out["phase"].values
     expected = np.exp(1j * 2 * np.pi * phases)
-    np.testing.assert_allclose(out["z"].values, expected, atol=0.05)
+    np.testing.assert_allclose(out.values, expected, atol=0.05)
 
 
 def test_to_phase_drops_nan_time_samples():
@@ -390,9 +400,21 @@ def test_to_phase_drops_nan_time_samples():
     # Bin 0 should average (10, 20); bin 1 (60, 70). The NaN-time sample
     # has value 1000 — if it leaked into a bin, the mean would explode.
     values = np.array([10.0, 20.0, 1000.0, 60.0, 70.0])
-    ds = xr.Dataset({"x": (("time",), values)}, coords={"time": t})
-    out = to_phase(ds, time_dim="time", period=period, n_bins=2)
-    np.testing.assert_allclose(out["x"].values, [15.0, 65.0])
+    da = xr.DataArray(values, dims=("time",), coords={"time": t}, name="x")
+    out = to_phase(da, time_dim="time", period=period, n_bins=2)
+    np.testing.assert_allclose(out.values, [15.0, 65.0])
+
+
+def test_to_phase_accepts_integer_dtype_input():
+    """Regression: ``to_phase`` used ``np.isnan`` for the finite check,
+    which raises ``TypeError`` on integer arrays. ``np.isfinite`` treats
+    integer dtypes as all-finite and is the documented contract."""
+    period = 1.0
+    t = np.array([0.1, 0.2, 0.6, 0.7])
+    values = np.array([10, 20, 60, 70], dtype=np.int64)
+    da = xr.DataArray(values, dims=("time",), coords={"time": t}, name="x")
+    out = to_phase(da, time_dim="time", period=period, n_bins=2)
+    np.testing.assert_allclose(out.values, [15.0, 65.0])
 
 
 def test_remap_axis_get_config_is_serializable():

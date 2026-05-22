@@ -264,7 +264,7 @@ def test_interpolate_coord_remap_tier_b_matches_tier_a() -> None:
         {"f": (("depth", "x"), field)},
         coords={"depth": src, "x": np.arange(4)},
     )
-    b_out = tier_b.remap_axis(ds, source_dim="depth", target_coords=tgt)["f"].values
+    b_out = tier_b.remap_axis(ds["f"], source_dim="depth", target_coords=tgt).values
     a_out = ia.remap_axis(field, axis=0, source_coords=src, target_coords=tgt)
     np.testing.assert_allclose(a_out, b_out)
 
@@ -284,5 +284,5 @@ def test_interpolate_coord_remap_tier_c_matches_tier_b() -> None:
     )
     np.testing.assert_allclose(
         RemapAxis("depth", tgt)(ds)["f"].values,
-        tier_b.remap_axis(ds, source_dim="depth", target_coords=tgt)["f"].values,
+        tier_b.remap_axis(ds["f"], source_dim="depth", target_coords=tgt).values,
     )

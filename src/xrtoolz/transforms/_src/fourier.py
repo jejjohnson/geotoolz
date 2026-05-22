@@ -479,10 +479,9 @@ def coherence(
 
 
 def rotary_spectrum(
-    ds: xr.Dataset,
+    u: xr.DataArray,
+    v: xr.DataArray,
     *,
-    u_var: str,
-    v_var: str,
     dim: str,
     avg_dims: str | Sequence[str] | None = None,
 ) -> xr.Dataset:
@@ -496,9 +495,8 @@ def rotary_spectrum(
     Polarization is NaN where total rotary power is negligible.
 
     Args:
-        ds: Dataset containing horizontal velocity components.
-        u_var: Zonal/eastward velocity variable.
-        v_var: Meridional/northward velocity variable.
+        u: Zonal/eastward velocity DataArray.
+        v: Meridional/northward velocity DataArray on the same grid as ``u``.
         dim: Dimension to Fourier transform.
         avg_dims: Optional dimension or dimensions to average in each output.
 
@@ -506,22 +504,21 @@ def rotary_spectrum(
         Dataset with ``psd_ccw``, ``psd_cw``, and ``polarization`` where
         ``polarization = (psd_cw - psd_ccw) / (psd_cw + psd_ccw)``.
     """
-    if dim not in ds[u_var].dims or dim not in ds[v_var].dims:
+    if dim not in u.dims or dim not in v.dims:
         raise ValueError(
-            f"dim={dim!r} must be present on both {u_var!r} and {v_var!r}."
+            f"dim={dim!r} must be present on both u (dims={u.dims}) and "
+            f"v (dims={v.dims})."
         )
 
-    w = ds[u_var] + 1j * ds[v_var]
+    w = u + 1j * v
     # Rectangular window + mean-only detrending keeps the dx / n density scaling
     # Parseval-consistent for variance.
     spec = xrft.fft(w, dim=[dim], window=None, detrend="constant", true_amplitude=False)
     freq_dim = f"freq_{dim}"
-    # Datasets can legally have dims without explicit coord variables;
+    # DataArrays can legally have dims without explicit coord variables;
     # fall back to unit spacing in that case rather than KeyError-ing.
-    coord = ds[dim] if dim in ds.coords else None
-    density_scale = (_coord_spacing(coord) if coord is not None else 1.0) / ds.sizes[
-        dim
-    ]
+    coord = u[dim] if dim in u.coords else None
+    density_scale = (_coord_spacing(coord) if coord is not None else 1.0) / u.sizes[dim]
     psd = (np.abs(spec) ** 2) * density_scale
 
     psd_ccw = psd.where(psd[freq_dim] > 0.0, drop=True).rename({freq_dim: "wavenumber"})

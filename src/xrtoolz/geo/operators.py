@@ -17,6 +17,7 @@ import warnings
 from collections.abc import Sequence
 from typing import Any, Literal
 
+import numpy as np
 import regionmask
 import xarray as xr
 
@@ -508,18 +509,53 @@ class BandpassWavelength(Operator):
         self.lat = lat
 
     def _apply(self, ds):
-        return _along_track.bandpass_wavelength(
-            ds,
-            dim=self.dim,
-            lambda_min_km=self.lambda_min_km,
-            lambda_max_km=self.lambda_max_km,
-            spacing_km=self.spacing_km,
-            method=self.method,
-            num_taps=self.num_taps,
-            attenuation_db=self.attenuation_db,
-            lon=self.lon,
-            lat=self.lat,
-        )
+        # Resolve the lon/lat ride-along DataArrays once. They are only
+        # needed when ``spacing_km`` is omitted, but doing the lookup
+        # here keeps the loop body small.
+        lon_da: xr.DataArray | None = None
+        lat_da: xr.DataArray | None = None
+        if self.spacing_km is None and isinstance(ds, xr.Dataset):
+            lon_da = ds[self.lon]
+            lat_da = ds[self.lat]
+        elif self.spacing_km is None and isinstance(ds, xr.DataArray):
+            # DataArray inputs only carry coords, not arbitrary
+            # variables; pull lon/lat from there.
+            if self.lon in ds.coords:
+                lon_da = ds.coords[self.lon]
+            if self.lat in ds.coords:
+                lat_da = ds.coords[self.lat]
+
+        def _fn(da: xr.DataArray) -> xr.DataArray:
+            return _along_track.bandpass_wavelength(
+                da,
+                dim=self.dim,
+                lambda_min_km=self.lambda_min_km,
+                lambda_max_km=self.lambda_max_km,
+                spacing_km=self.spacing_km,
+                method=self.method,
+                num_taps=self.num_taps,
+                attenuation_db=self.attenuation_db,
+                lon=lon_da,
+                lat=lat_da,
+            )
+
+        if isinstance(ds, xr.DataArray):
+            return _fn(ds)
+
+        if self.dim not in ds.dims:
+            # The pre-flip Dataset-flavoured primitive raised on a missing
+            # dim; preserve that behaviour at the Operator boundary so a
+            # misspelled ``dim`` doesn't silently pass every variable
+            # through unchanged.
+            raise ValueError(f"dim {self.dim!r} not in Dataset dims {tuple(ds.dims)}")
+
+        out_vars: dict[str, xr.DataArray] = {}
+        for name, da in ds.data_vars.items():
+            if self.dim not in da.dims or not np.issubdtype(da.dtype, np.number):
+                out_vars[str(name)] = da
+                continue
+            out_vars[str(name)] = _fn(da)
+        return xr.Dataset(out_vars, coords=ds.coords, attrs=dict(ds.attrs))
 
     def get_config(self) -> dict[str, Any]:
         return {

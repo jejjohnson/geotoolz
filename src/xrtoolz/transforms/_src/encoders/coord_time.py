@@ -1,4 +1,14 @@
-"""Coordinate-time encoders — rescaling and periodic time-component encodings."""
+"""Coordinate-time encoders — rescaling and periodic time-component encodings.
+
+Per the PR γ primitive-flip (``docs/design/xarray-native-primitives.md``),
+the Layer-0 primitives in this module take a single positional
+``DataArray`` (the time coordinate / variable) and return either a
+``DataArray`` (``time_rescale``, ``time_unrescale``,
+``encode_time_ordinal``) or a ``Dataset`` of derived variables
+(``encode_time_cyclical``). The Dataset assignment / merge lives in the
+Layer-1 ``TimeRescale``, ``TimeUnrescale``, ``EncodeTimeCyclical``,
+``EncodeTimeOrdinal`` operators in :mod:`xrtoolz.transforms.operators`.
+"""
 
 from __future__ import annotations
 
@@ -12,12 +22,12 @@ from xrtoolz.transforms._src.encoders.basis import cyclical_encode
 
 
 def time_rescale(
-    ds: xr.Dataset,
+    time: xr.DataArray,
+    *,
     freq_dt: float = 1.0,
     freq_unit: str = "s",
     t0: str | np.datetime64 | None = None,
-    time: str = "time",
-) -> xr.Dataset:
+) -> xr.DataArray:
     """Rescale a ``datetime64`` time axis to a float offset.
 
     ``t' = (t - t_0) / freq_dt``, where ``freq_dt`` is expressed in
@@ -25,44 +35,48 @@ def time_rescale(
     that :func:`time_unrescale` can round-trip back to ``datetime64``.
 
     Args:
-        ds: Input dataset with a ``time`` coordinate.
+        time: Time coordinate / variable to rescale.
         freq_dt: Size of the time step in ``freq_unit`` units.
         freq_unit: Pandas timedelta unit (``"s"``, ``"m"``, ``"h"``,
             ``"D"``, ...).
-        t0: Reference time. Defaults to ``ds[time].min()``.
-        time: Name of the time coordinate.
+        t0: Reference time. Defaults to ``time.min()``.
 
     Returns:
-        Copy of ``ds`` with ``time`` replaced by a ``float32`` offset.
+        DataArray of ``float32`` offsets, with ``units`` / ``freq`` /
+        ``t0`` attrs attached for :func:`time_unrescale`.
     """
-    ds = ds.copy()
     delta = pd.Timedelta(freq_dt, unit=freq_unit)
     delta_ns = np.int64(delta.asm8.astype("timedelta64[ns]").astype(np.int64))
 
     if t0 is None:
-        t0_val = np.datetime64(ds[time].min().values, "ns")
+        t0_val = np.datetime64(time.min().values, "ns")
     else:
         t0_val = np.datetime64(t0, "ns")
 
     td_ns = (
-        (ds[time].values.astype("datetime64[ns]") - t0_val)
+        (time.values.astype("datetime64[ns]") - t0_val)
         .astype("timedelta64[ns]")
         .astype(np.int64)
     )
     rescaled = (td_ns.astype(np.float64) / float(delta_ns)).astype(np.float32)
-    ds = ds.assign_coords({time: rescaled})
-    ds[time].attrs.update(
-        units=freq_unit,
-        freq=float(freq_dt),
-        t0=str(t0_val),
+    out = xr.DataArray(
+        rescaled,
+        dims=time.dims,
+        coords={cname: c for cname, c in time.coords.items() if cname != time.name},
+        name=time.name,
+        attrs={
+            **dict(time.attrs),
+            "units": freq_unit,
+            "freq": float(freq_dt),
+            "t0": str(t0_val),
+        },
     )
-    return ds
+    return out
 
 
-def time_unrescale(ds: xr.Dataset, time: str = "time") -> xr.Dataset:
+def time_unrescale(time: xr.DataArray) -> xr.DataArray:
     """Inverse of :func:`time_rescale` using its stored attrs."""
-    ds = ds.copy()
-    attrs = ds[time].attrs
+    attrs = time.attrs
     if "t0" not in attrs or "freq" not in attrs or "units" not in attrs:
         raise ValueError(
             "time coord is missing t0/freq/units attrs — rescale with "
@@ -71,30 +85,37 @@ def time_unrescale(ds: xr.Dataset, time: str = "time") -> xr.Dataset:
     delta = pd.Timedelta(attrs["freq"], unit=attrs["units"])
     t0 = np.datetime64(attrs["t0"], "ns")
     delta_ns = np.int64(delta.asm8.astype("timedelta64[ns]").astype(np.int64))
-    offsets = (ds[time].values.astype(np.float64) * delta_ns).astype("timedelta64[ns]")
-    ds = ds.assign_coords({time: t0 + offsets})
-    ds[time].attrs = {}
-    return ds
+    offsets = (time.values.astype(np.float64) * delta_ns).astype("timedelta64[ns]")
+    restored = t0 + offsets
+    return xr.DataArray(
+        restored,
+        dims=time.dims,
+        coords={cname: c for cname, c in time.coords.items() if cname != time.name},
+        name=time.name,
+        attrs={},
+    )
 
 
 def encode_time_cyclical(
-    ds: xr.Dataset,
+    time: xr.DataArray,
+    *,
     components: Sequence[str] = ("dayofyear", "hour"),
-    time: str = "time",
 ) -> xr.Dataset:
-    """Attach sin/cos encodings of datetime components as new variables.
+    """Sin/cos encodings of datetime components as a Dataset of new variables.
 
     For each ``component`` in ``components`` (any name accepted by
-    xarray's ``.dt`` accessor), two coordinates are added:
-    ``{component}_sin`` and ``{component}_cos``.
+    xarray's ``.dt`` accessor), two variables are produced:
+    ``{component}_sin`` and ``{component}_cos``. The Layer-1
+    ``EncodeTimeCyclical`` operator merges these into the input Dataset
+    as new coordinates.
 
     Args:
-        ds: Input dataset with a ``time`` coordinate.
+        time: Time coordinate / variable.
         components: Iterable of datetime attributes to encode.
-        time: Name of the time coordinate.
 
     Returns:
-        Dataset with the requested encodings attached.
+        Dataset whose data variables are the requested sin/cos pairs,
+        each carrying the same dims as ``time``.
     """
     periods = {
         "dayofyear": 366.0,
@@ -105,36 +126,54 @@ def encode_time_cyclical(
         "second": 60.0,
         "weekday": 7.0,
     }
-    ds = ds.copy()
+    out_vars: dict[str, xr.DataArray] = {}
     for name in components:
         if name not in periods:
             raise ValueError(
                 f"Unknown time component {name!r}; known: {sorted(periods)}."
             )
-        values = getattr(ds[time].dt, name).values.astype(float)
+        values = getattr(time.dt, name).values.astype(float)
         sin, cos = cyclical_encode(values, period=periods[name])
-        ds = ds.assign_coords({f"{name}_sin": (time, sin), f"{name}_cos": (time, cos)})
-    return ds
+        out_vars[f"{name}_sin"] = xr.DataArray(sin, dims=time.dims, coords=time.coords)
+        out_vars[f"{name}_cos"] = xr.DataArray(cos, dims=time.dims, coords=time.coords)
+    # Carry the source time coords on the output Dataset so direct
+    # callers can still do label-based selection / alignment.
+    return xr.Dataset(out_vars, coords=time.coords)
 
 
 def encode_time_ordinal(
-    ds: xr.Dataset,
+    time: xr.DataArray,
+    *,
     reference_date: str | np.datetime64 | None = None,
-    time: str = "time",
     unit: str = "D",
-) -> xr.Dataset:
-    """Attach an ordinal float-day encoding of the time coordinate.
+) -> xr.DataArray:
+    """Ordinal float encoding of a time coordinate.
 
-    Adds a ``{time}_ordinal`` coord to ``ds``.
+    Args:
+        time: Time coordinate / variable.
+        reference_date: Reference time. Defaults to ``time.min()``.
+        unit: Pandas timedelta unit used to scale the offset.
+
+    Returns:
+        DataArray of ordinal floats with the same dims as ``time``.
+        The Layer-1 ``EncodeTimeOrdinal`` operator attaches this as a
+        ``{time.name}_ordinal`` coordinate on the input Dataset.
     """
     ref = (
-        np.datetime64(ds[time].min().values)
+        np.datetime64(time.min().values)
         if reference_date is None
         else np.datetime64(reference_date)
     )
     delta = pd.Timedelta(1, unit=unit)
-    ordinal = ((ds[time].values - ref) / delta).astype(np.float64)
-    return ds.assign_coords({f"{time}_ordinal": (time, ordinal)})
+    ordinal = ((time.values - ref) / delta).astype(np.float64)
+    # Keep every input coord (including the source timestamp coord at
+    # ``time.name``) so direct callers can still ``out.sel(time=...)``.
+    return xr.DataArray(
+        ordinal,
+        dims=time.dims,
+        coords=time.coords,
+        name=f"{time.name}_ordinal" if time.name is not None else "time_ordinal",
+    )
 
 
 __all__ = [
