@@ -69,9 +69,7 @@ class SpatialTriangular(SpatialWindow):
                 f"SpatialTriangular weights aren't defined for "
                 f"{type(geometry).__name__}; expected a fixed-size geometry."
             )
-        return triangular_weights(tuple(int(s) for s in size), self.width).astype(
-            np.float64
-        )
+        return triangular_weights(tuple(int(s) for s in size), self.width)
 
     def get_config(self) -> dict[str, Any]:
         return {"width": self.width}

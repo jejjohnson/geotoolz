@@ -23,7 +23,8 @@ def triangular_weights(shape: tuple[int, ...], width: int) -> np.ndarray:
         return np.ones(shape, dtype=np.float32)
     axes = []
     for size in shape:
-        distances = np.minimum(np.arange(size) + 1, np.arange(size, 0, -1))
+        positions = np.arange(size)
+        distances = np.minimum(positions + 1, size - positions)
         axes.append(np.clip(distances / width, 0.0, 1.0))
     weights = axes[0]
     for axis in axes[1:]:

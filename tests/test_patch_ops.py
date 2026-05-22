@@ -75,6 +75,10 @@ class TestGridSampler:
 def test_spatial_triangular_matches_geom_feather_kernel() -> None:
     weights = SpatialTriangular(width=2).weights(SpatialRectangular(size=(5, 7)))
     np.testing.assert_array_equal(weights, geom_array.feather_weights((5, 7), width=2))
+    assert weights[0, 0] == pytest.approx(0.25)
+    assert weights[2, 3] == pytest.approx(1.0)
+    np.testing.assert_array_equal(weights, np.flip(weights, axis=0))
+    np.testing.assert_array_equal(weights, np.flip(weights, axis=1))
 
 
 class TestApplyToChips:
