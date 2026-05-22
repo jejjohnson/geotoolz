@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from skimage.exposure import equalize_adapthist
 
 
 def stat_axes(arr: np.ndarray, *, per_band: bool = True) -> tuple[int, ...] | None:
@@ -126,6 +127,71 @@ def histogram_match(source: np.ndarray, reference: np.ndarray) -> np.ndarray:
             out[band] = _match_slice(source[band], reference)
         return out
     return _match_slice(source, reference)
+
+
+def clahe(
+    arr: np.ndarray,
+    *,
+    kernel_size: int | tuple[int, int] | None = None,
+    clip_limit: float = 0.01,
+    nbins: int = 256,
+) -> np.ndarray:
+    """Apply contrast-limited adaptive histogram equalization per image band."""
+    values = np.asarray(arr, dtype=float)
+    if values.ndim >= 3:
+        return np.stack(
+            [
+                _clahe_slice(
+                    band,
+                    kernel_size=kernel_size,
+                    clip_limit=clip_limit,
+                    nbins=nbins,
+                )
+                for band in values
+            ]
+        )
+    return _clahe_slice(
+        values,
+        kernel_size=kernel_size,
+        clip_limit=clip_limit,
+        nbins=nbins,
+    )
+
+
+def _clahe_slice(
+    values: np.ndarray,
+    *,
+    kernel_size: int | tuple[int, int] | None,
+    clip_limit: float,
+    nbins: int,
+) -> np.ndarray:
+    out = np.array(values, dtype=float, copy=True)
+    valid = np.isfinite(values)
+    if not np.any(valid):
+        return out
+    # skimage.exposure.equalize_adapthist requires inputs in [0, 1] (or unsigned
+    # int); arbitrary-range floats are silently rescaled by max, which mis-scales
+    # the output back into the wrong native units. Rescale per-slice to [0, 1]
+    # using the valid-finite range, apply CLAHE, and undo the scaling on the
+    # valid pixels. NaN pixels are left untouched.
+    finite_values = values[valid]
+    v_min = float(finite_values.min())
+    v_max = float(finite_values.max())
+    if v_max <= v_min:
+        # Degenerate slice (constant or near-constant); CLAHE is a no-op.
+        return out
+    span = v_max - v_min
+    fill = (float(np.median(finite_values)) - v_min) / span
+    normalised = np.where(valid, (values - v_min) / span, fill)
+    np.clip(normalised, 0.0, 1.0, out=normalised)
+    equalized = equalize_adapthist(
+        normalised,
+        kernel_size=kernel_size,
+        clip_limit=clip_limit,
+        nbins=nbins,
+    )
+    out[valid] = (equalized[valid] * span) + v_min
+    return out
 
 
 def _match_slice(source: np.ndarray, reference: np.ndarray) -> np.ndarray:
