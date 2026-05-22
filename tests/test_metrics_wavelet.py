@@ -25,7 +25,7 @@ def _dataset(nx: int = 48, ny: int = 48) -> xr.Dataset:
 def test_wavelet_psd_score_perfect_prediction_is_one_on_trusted_pixels() -> None:
     ds = _dataset()
     scales = xr.DataArray([2.0, 4.0, 8.0], dims="scale")
-    out = wavelet_psd_score(ds, ds, "ssh", scales, x0=1.0, ntheta=4)
+    out = wavelet_psd_score(ds["ssh"], ds["ssh"], scales, x0=1.0, ntheta=4)
     trusted = out["score"].where(out["score"]["coi_mask"])
     values = trusted.values[np.isfinite(trusted.values)]
     np.testing.assert_allclose(values, 1.0, rtol=1e-12, atol=1e-12)

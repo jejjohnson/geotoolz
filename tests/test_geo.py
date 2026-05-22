@@ -344,34 +344,34 @@ def _pair(values_pred, values_ref):
 
 def test_mse_and_rmse_known_values():
     p, r = _pair([1.0, 2.0, 3.0], [0.0, 0.0, 0.0])
-    assert float(mse(p, r, "x", "i")) == pytest.approx(14.0 / 3.0)
-    assert float(rmse(p, r, "x", "i")) == pytest.approx((14.0 / 3.0) ** 0.5)
+    assert float(mse(p["x"], r["x"], dim="i")) == pytest.approx(14.0 / 3.0)
+    assert float(rmse(p["x"], r["x"], dim="i")) == pytest.approx((14.0 / 3.0) ** 0.5)
 
 
 def test_mae_known_value():
     p, r = _pair([1.0, -2.0, 3.0], [0.0, 0.0, 0.0])
-    assert float(mae(p, r, "x", "i")) == pytest.approx(2.0)
+    assert float(mae(p["x"], r["x"], dim="i")) == pytest.approx(2.0)
 
 
 def test_bias_signed():
     p, r = _pair([1.0, 2.0, 3.0], [0.0, 0.0, 0.0])
-    assert float(bias(p, r, "x", "i")) == pytest.approx(2.0)
-    assert float(bias(r, p, "x", "i")) == pytest.approx(-2.0)
+    assert float(bias(p["x"], r["x"], dim="i")) == pytest.approx(2.0)
+    assert float(bias(r["x"], p["x"], dim="i")) == pytest.approx(-2.0)
 
 
 def test_correlation_perfect_for_identical_series():
     p, r = _pair([1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0])
-    assert float(correlation(p, r, "x", "i")) == pytest.approx(1.0)
+    assert float(correlation(p["x"], r["x"], dim="i")) == pytest.approx(1.0)
 
 
 def test_correlation_negative_one_for_inverted_series():
     p, r = _pair([1.0, 2.0, 3.0, 4.0], [4.0, 3.0, 2.0, 1.0])
-    assert float(correlation(p, r, "x", "i")) == pytest.approx(-1.0)
+    assert float(correlation(p["x"], r["x"], dim="i")) == pytest.approx(-1.0)
 
 
 def test_nrmse_is_one_for_perfect_prediction():
     p, r = _pair([1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0])
-    assert float(nrmse(p, r, "x", "i")) == pytest.approx(1.0)
+    assert float(nrmse(p["x"], r["x"], dim="i")) == pytest.approx(1.0)
 
 
 def test_metrics_preserve_non_reduced_dims():
@@ -383,6 +383,6 @@ def test_metrics_preserve_non_reduced_dims():
         {"x": (("t", "i"), np.zeros((3, 4)))},
         coords={"t": [10, 20, 30], "i": [0, 1, 2, 3]},
     )
-    out = rmse(pred, ref, "x", dims="i")
+    out = rmse(pred["x"], ref["x"], dim="i")
     assert out.dims == ("t",)
     np.testing.assert_allclose(out.values, np.array([1.0, 1.0, 1.0]))

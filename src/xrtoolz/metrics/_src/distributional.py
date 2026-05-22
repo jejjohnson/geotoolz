@@ -43,10 +43,9 @@ def _check_member_dim(da: xr.DataArray, dim: str) -> None:
 
 
 def crps_ensemble(
-    ds_ensemble: xr.Dataset,
-    ds_ref: xr.Dataset,
+    ensemble: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    variable: str,
     ensemble_dim: str = "member",
     dims: Sequence[str] | None = None,
 ) -> xr.DataArray:
@@ -55,22 +54,18 @@ def crps_ensemble(
     Delegates to :func:`xskillscore.crps_ensemble`.
 
     Args:
-        ds_ensemble: Dataset containing the ensemble forecast variable
-            with an ``ensemble_dim`` axis.
-        ds_ref: Dataset containing the deterministic reference.
-        variable: Variable name (must be present in both datasets).
+        ensemble: Ensemble forecast DataArray with an ``ensemble_dim`` axis.
+        ref: Deterministic reference DataArray.
         ensemble_dim: Name of the ensemble member dimension. Default
             ``"member"``.
         dims: Optional dims to average over after the per-pixel CRPS
             (e.g. ``("time", "lat", "lon")``); ``None`` keeps full
             shape.
     """
-    da_ens = ds_ensemble[variable]
-    da_ref = ds_ref[variable]
-    _check_member_dim(da_ens, ensemble_dim)
+    _check_member_dim(ensemble, ensemble_dim)
     crps = cast(
         xr.DataArray,
-        xs.crps_ensemble(da_ref, da_ens, member_dim=ensemble_dim, dim=[]),
+        xs.crps_ensemble(ref, ensemble, member_dim=ensemble_dim, dim=[]),
     )
     if dims:
         crps = crps.mean(dim=list(dims))
@@ -81,10 +76,9 @@ def crps_ensemble(
 
 
 def energy_distance(
-    ds_a: xr.Dataset,
-    ds_b: xr.Dataset,
+    a: xr.DataArray,
+    b: xr.DataArray,
     *,
-    variable: str,
     sample_dim_a: str = "member",
     sample_dim_b: str = "member",
     dims: Sequence[str] | None = None,
@@ -100,26 +94,25 @@ def energy_distance(
     sample dimensions and is **not** vectorised over additional dims.
 
     Args:
-        ds_a: Dataset with sample variable along ``sample_dim_a``.
-        ds_b: Dataset with sample variable along ``sample_dim_b``.
-        variable: Variable name in both datasets.
-        sample_dim_a: Sample dim in ``ds_a``.
-        sample_dim_b: Sample dim in ``ds_b``.
+        a: Sample DataArray with samples along ``sample_dim_a``.
+        b: Sample DataArray with samples along ``sample_dim_b``.
+        sample_dim_a: Sample dim in ``a``.
+        sample_dim_b: Sample dim in ``b``.
         dims: Optional non-sample dims to average over. ``None`` keeps
             the result un-reduced (per-pixel energy distance).
     """
-    da_a = ds_a[variable]
-    da_b = ds_b[variable]
+    da_a = a
+    da_b = b
     _check_member_dim(da_a, sample_dim_a)
     _check_member_dim(da_b, sample_dim_b)
 
     # Move sample dims to the leading axis for clarity.
-    a = da_a.transpose(sample_dim_a, ...).values  # (n, *rest)
-    b = da_b.transpose(sample_dim_b, ...).values  # (m, *rest)
-    rest_shape = a.shape[1:]
+    arr_a = da_a.transpose(sample_dim_a, ...).values  # (n, *rest)
+    arr_b = da_b.transpose(sample_dim_b, ...).values  # (m, *rest)
+    rest_shape = arr_a.shape[1:]
 
-    a_flat = a.reshape(a.shape[0], -1)  # (n, K)
-    b_flat = b.reshape(b.shape[0], -1)  # (m, K)
+    a_flat = arr_a.reshape(arr_a.shape[0], -1)  # (n, K)
+    b_flat = arr_b.reshape(arr_b.shape[0], -1)  # (m, K)
 
     # Per-pixel energy distance via scipy: O(n+m) per pixel rather than
     # O((n+m)^2), and uses the unbiased self-distance estimator (excludes
@@ -148,10 +141,9 @@ def energy_distance(
 
 
 def wasserstein_1(
-    ds_a: xr.Dataset,
-    ds_b: xr.Dataset,
+    a: xr.DataArray,
+    b: xr.DataArray,
     *,
-    variable: str,
     sample_dim_a: str = "member",
     sample_dim_b: str = "member",
     dims: Sequence[str] | None = None,
@@ -162,23 +154,21 @@ def wasserstein_1(
     dims; supports broadcasting over the remaining dims.
 
     Args:
-        ds_a: Dataset whose ``variable`` carries samples along
-            ``sample_dim_a``.
-        ds_b: Same shape (modulo sample dim) as ``ds_a``.
-        variable: Variable name.
+        a: Sample DataArray with samples along ``sample_dim_a``.
+        b: Sample DataArray with samples along ``sample_dim_b``.
         sample_dim_a, sample_dim_b: Names of the sample dims.
         dims: Optional non-sample dims to average over.
     """
-    da_a = ds_a[variable]
-    da_b = ds_b[variable]
+    da_a = a
+    da_b = b
     _check_member_dim(da_a, sample_dim_a)
     _check_member_dim(da_b, sample_dim_b)
 
-    a = da_a.transpose(sample_dim_a, ...).values
-    b = da_b.transpose(sample_dim_b, ...).values
-    rest_shape = a.shape[1:]
-    a_flat = a.reshape(a.shape[0], -1)
-    b_flat = b.reshape(b.shape[0], -1)
+    arr_a = da_a.transpose(sample_dim_a, ...).values
+    arr_b = da_b.transpose(sample_dim_b, ...).values
+    rest_shape = arr_a.shape[1:]
+    a_flat = arr_a.reshape(arr_a.shape[0], -1)
+    b_flat = arr_b.reshape(arr_b.shape[0], -1)
 
     out_flat = np.array(
         [
@@ -234,9 +224,8 @@ class CRPS(_DistributionalOp):
 
     def _apply(self, ds_ensemble: xr.Dataset, ds_ref: xr.Dataset) -> xr.DataArray:
         return crps_ensemble(
-            ds_ensemble,
-            ds_ref,
-            variable=self.variable,
+            ds_ensemble[self.variable],
+            ds_ref[self.variable],
             ensemble_dim=self.ensemble_dim,
             dims=self.dims,
         )
@@ -272,9 +261,8 @@ class EnergyDistance(_TwoSampleOp):
 
     def _apply(self, ds_a: xr.Dataset, ds_b: xr.Dataset) -> xr.DataArray:
         return energy_distance(
-            ds_a,
-            ds_b,
-            variable=self.variable,
+            ds_a[self.variable],
+            ds_b[self.variable],
             sample_dim_a=self.sample_dim_a,
             sample_dim_b=self.sample_dim_b,
             dims=self.dims,
@@ -286,9 +274,8 @@ class Wasserstein1(_TwoSampleOp):
 
     def _apply(self, ds_a: xr.Dataset, ds_b: xr.Dataset) -> xr.DataArray:
         return wasserstein_1(
-            ds_a,
-            ds_b,
-            variable=self.variable,
+            ds_a[self.variable],
+            ds_b[self.variable],
             sample_dim_a=self.sample_dim_a,
             sample_dim_b=self.sample_dim_b,
             dims=self.dims,

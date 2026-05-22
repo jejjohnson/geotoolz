@@ -75,7 +75,7 @@ def ds_grid_daily() -> xr.Dataset:
 
 def test_psd_score_perfect_prediction_is_one(ds_grid_daily):
     ds_small = ds_grid_daily.isel(time=slice(0, 64), lat=4)
-    score = psd_score(ds_small, ds_small, "ssh", psd_dims=["time", "lon"])
+    score = psd_score(ds_small["ssh"], ds_small["ssh"], psd_dims=["time", "lon"])
     # error is zero everywhere -> score is 1 everywhere
     np.testing.assert_allclose(
         score["score"].values, np.ones_like(score["score"].values), atol=1e-10
@@ -153,7 +153,7 @@ def test_fillnan_temporal_uses_xarray_native():
 
 
 def test_resample_time_daily_to_monthly(ds_grid_daily):
-    monthly = resample_time(ds_grid_daily, freq="1ME", method="mean")
+    monthly = resample_time(ds_grid_daily["ssh"], freq="1ME", method="mean")
     # 2 years -> 24 months
     assert monthly.sizes["time"] == 24
 
@@ -161,43 +161,45 @@ def test_resample_time_daily_to_monthly(ds_grid_daily):
 def test_resample_time_interpolate_preserves_existing_stamps():
     time = pd.date_range("2020-01-01", periods=5, freq="1D")
     values = np.sin(np.arange(time.size, dtype=float))
-    ds = xr.Dataset({"x": ("time", values)}, coords={"time": time})
+    da = xr.DataArray(values, dims=("time",), coords={"time": time}, name="x")
 
-    out = resample_time(ds, freq="12h", method="interpolate")
+    out = resample_time(da, freq="12h", method="interpolate")
 
-    xr.testing.assert_allclose(out.sel(time=time), ds)
+    xr.testing.assert_allclose(out.sel(time=time), da)
 
 
 def test_resample_time_interpolate_linear_upsamples_daily_to_hourly():
     time = pd.date_range("2020-01-01", periods=3, freq="1D")
-    ds = xr.Dataset({"x": ("time", [0.0, 24.0, 48.0])}, coords={"time": time})
+    da = xr.DataArray(
+        [0.0, 24.0, 48.0], dims=("time",), coords={"time": time}, name="x"
+    )
 
-    out = resample_time(ds, freq="1h", method="interpolate")
+    out = resample_time(da, freq="1h", method="interpolate")
 
     assert out.sizes["time"] == 49
-    assert float(out["x"].sel(time="2020-01-01T12:00")) == pytest.approx(12.0)
-    assert float(out["x"].sel(time="2020-01-02T12:00")) == pytest.approx(36.0)
+    assert float(out.sel(time="2020-01-01T12:00")) == pytest.approx(12.0)
+    assert float(out.sel(time="2020-01-02T12:00")) == pytest.approx(36.0)
 
 
 def test_resample_time_interpolate_accepts_cubic():
     time = pd.date_range("2020-01-01", periods=6, freq="1D")
     values = np.sin(np.linspace(0.0, np.pi, time.size))
-    ds = xr.Dataset({"x": ("time", values)}, coords={"time": time})
+    da = xr.DataArray(values, dims=("time",), coords={"time": time}, name="x")
 
-    out = resample_time(ds, freq="12h", method="interpolate", interp_method="cubic")
+    out = resample_time(da, freq="12h", method="interpolate", interp_method="cubic")
 
     assert out.sizes["time"] == 11
-    assert np.isfinite(out["x"].values).all()
+    assert np.isfinite(out.values).all()
 
 
 def test_resample_time_interpolate_rejects_downsampling(ds_grid_daily):
     with pytest.raises(ValueError, match="only supports upsampling"):
-        resample_time(ds_grid_daily, freq="2D", method="interpolate")
+        resample_time(ds_grid_daily["ssh"], freq="2D", method="interpolate")
 
 
 def test_resample_time_rejects_unknown_method(ds_grid_daily):
     with pytest.raises(ValueError, match="Unknown resample method"):
-        resample_time(ds_grid_daily, freq="1D", method="unicorn")
+        resample_time(ds_grid_daily["ssh"], freq="1D", method="unicorn")
 
 
 def _monthly_climatology_series() -> xr.DataArray:

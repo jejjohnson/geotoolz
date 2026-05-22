@@ -36,7 +36,7 @@ def ds_with_nans() -> tuple[xr.Dataset, xr.Dataset]:
 def test_metrics_skip_nans(ds_with_nans: tuple[xr.Dataset, xr.Dataset], fn) -> None:
     """A NaN sample shouldn't poison the entire reduction."""
     ds_p, ds_r = ds_with_nans
-    out = fn(ds_p, ds_r, "x", "time")
+    out = fn(ds_p["x"], ds_r["x"], dim="time")
     assert np.isfinite(out.values).all(), (
         f"{fn.__name__} returned NaN despite skipna semantics: {out.values}"
     )
@@ -49,7 +49,7 @@ def test_metrics_promote_int_input_to_float() -> None:
     ds_r = xr.Dataset(
         {"x": (("time",), np.arange(8, dtype=np.int64) + 1)}, coords=coords
     )
-    out = pixel.mse(ds_p, ds_r, "x", "time")
+    out = pixel.mse(ds_p["x"], ds_r["x"], dim="time")
     assert np.issubdtype(out.dtype, np.floating)
     np.testing.assert_allclose(out.values, 1.0)
 
@@ -68,8 +68,8 @@ def test_metrics_handle_chunked_core_dim() -> None:
         {"time": 4}
     )
     # Should not raise; values should match the eager computation.
-    chunked = pixel.mse(ds_p, ds_r, "x", "time").compute()
+    chunked = pixel.mse(ds_p["x"], ds_r["x"], dim="time").compute()
     eager_p = xr.Dataset({"x": (("sample", "time"), pred)}, coords=coords)
     eager_r = xr.Dataset({"x": (("sample", "time"), ref)}, coords=coords)
-    eager = pixel.mse(eager_p, eager_r, "x", "time")
+    eager = pixel.mse(eager_p["x"], eager_r["x"], dim="time")
     np.testing.assert_allclose(chunked.values, eager.values)

@@ -214,38 +214,33 @@ def ds_signal():
 
 
 def test_tier_b_moving_average_preserves_shape(ds_signal):
-    out = moving_average(ds_signal, dim="time", window=5)
-    assert out["x"].shape == ds_signal["x"].shape
-    assert out["x"].dims == ("time",)
+    out = moving_average(ds_signal["x"], dim="time", window=5)
+    assert out.shape == ds_signal["x"].shape
+    assert out.dims == ("time",)
 
 
 def test_tier_b_gaussian_smooth_matches_tier_a(ds_signal):
-    out = gaussian_smooth(ds_signal, dim="time", sigma=3.0)
+    out = gaussian_smooth(ds_signal["x"], dim="time", sigma=3.0)
     expected = ia.gaussian_smooth(ds_signal["x"].values, axis=-1, sigma=3.0)
-    np.testing.assert_allclose(out["x"].values, expected)
+    np.testing.assert_allclose(out.values, expected)
 
 
 def test_tier_b_gaussian_smooth_masked_matches_tier_a():
     rng = np.random.default_rng(1)
     x = rng.standard_normal((3, 8, 9))
     x[:, 3, 4] = np.nan
-    ds = xr.Dataset(
-        {
-            "x": (("time", "lat", "lon"), x),
-            "lat_only": (("lat",), np.arange(8, dtype=float)),
-            "label": (("lat",), np.array(["a"] * 8)),
-        },
+    da = xr.DataArray(
+        x,
+        dims=("time", "lat", "lon"),
         coords={"time": np.arange(3), "lat": np.arange(8), "lon": np.arange(9)},
     )
 
-    out = gaussian_smooth_masked(ds, dim=("lat", "lon"), sigma={"lat": 1.0, "lon": 2.0})
+    out = gaussian_smooth_masked(da, dim=("lat", "lon"), sigma={"lat": 1.0, "lon": 2.0})
     expected = np.stack(
         [ia.gaussian_smooth_nd(block, sigma=(1.0, 2.0)) for block in x],
         axis=0,
     )
-    np.testing.assert_allclose(out["x"].values, expected)
-    np.testing.assert_array_equal(out["lat_only"].values, ds["lat_only"].values)
-    np.testing.assert_array_equal(out["label"].values, ds["label"].values)
+    np.testing.assert_allclose(out.values, expected)
 
 
 def test_tier_b_gaussian_smooth_masked_dataarray():
@@ -278,18 +273,20 @@ def test_tier_b_gaussian_smooth_masked_dask_contract():
 
 
 def test_tier_b_lowpass_filter_matches_tier_a(ds_signal):
-    out = lowpass_filter(ds_signal, dim="time", cutoff=0.1, order=4)
+    out = lowpass_filter(ds_signal["x"], dim="time", cutoff=0.1, order=4)
     expected = ia.lowpass_filter(ds_signal["x"].values, axis=-1, cutoff=0.1, order=4)
-    np.testing.assert_allclose(out["x"].values, expected)
+    np.testing.assert_allclose(out.values, expected)
 
 
 def test_tier_b_fir_filter_matches_tier_a(ds_signal):
-    out = fir_filter(ds_signal, dim="time", cutoff=0.2, num_taps=15)
+    out = fir_filter(ds_signal["x"], dim="time", cutoff=0.2, num_taps=15)
     expected = ia.fir_filter(ds_signal["x"].values, axis=-1, cutoff=0.2, num_taps=15)
-    np.testing.assert_allclose(out["x"].values, expected)
+    np.testing.assert_allclose(out.values, expected)
 
 
-def test_tier_b_passes_through_non_dim_variables():
+def test_operator_moving_average_passes_through_non_dim_variables():
+    from xrtoolz.interpolate.operators import MovingAverage
+
     ds = xr.Dataset(
         {
             "x": (("time",), np.arange(10, dtype=float)),
@@ -297,11 +294,13 @@ def test_tier_b_passes_through_non_dim_variables():
         },
         coords={"time": np.arange(10)},
     )
-    out = moving_average(ds, dim="time", window=3)
+    out = MovingAverage(dim="time", window=3)(ds)
     assert float(out["static"]) == 7.0
 
 
-def test_tier_b_fir_passes_through_non_numeric_and_no_dim_variables():
+def test_operator_lowpass_passes_through_non_numeric_and_no_dim_variables():
+    from xrtoolz.interpolate.operators import LowpassFilter
+
     ds = xr.Dataset(
         {
             "x": (("time",), np.arange(64, dtype=float)),
@@ -310,7 +309,7 @@ def test_tier_b_fir_passes_through_non_numeric_and_no_dim_variables():
         },
         coords={"time": np.arange(64)},
     )
-    out = fir_filter(ds, dim="time", cutoff=0.2, num_taps=15)
+    out = LowpassFilter(dim="time", cutoff=0.2)(ds)
     assert not np.array_equal(out["x"].values, ds["x"].values)
     np.testing.assert_array_equal(out["label"].values, ds["label"].values)
     assert float(out["static"]) == 7.0
@@ -318,7 +317,7 @@ def test_tier_b_fir_passes_through_non_numeric_and_no_dim_variables():
 
 def test_tier_b_unknown_dim_raises(ds_signal):
     with pytest.raises(ValueError):
-        moving_average(ds_signal, dim="bogus", window=3)
+        moving_average(ds_signal["x"], dim="bogus", window=3)
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +329,7 @@ def test_tier_c_moving_average_matches_tier_b(ds_signal):
     op = MovingAverage("time", window=5)
     np.testing.assert_allclose(
         op(ds_signal)["x"].values,
-        moving_average(ds_signal, dim="time", window=5)["x"].values,
+        moving_average(ds_signal["x"], dim="time", window=5).values,
     )
 
 
@@ -338,7 +337,7 @@ def test_tier_c_gaussian_smooth_matches_tier_b(ds_signal):
     op = GaussianSmooth("time", sigma=2.5)
     np.testing.assert_allclose(
         op(ds_signal)["x"].values,
-        gaussian_smooth(ds_signal, dim="time", sigma=2.5)["x"].values,
+        gaussian_smooth(ds_signal["x"], dim="time", sigma=2.5).values,
     )
 
 
@@ -358,7 +357,7 @@ def test_tier_c_lowpass_filter_matches_tier_b(ds_signal):
     op = LowpassFilter("time", cutoff=0.1)
     np.testing.assert_allclose(
         op(ds_signal)["x"].values,
-        lowpass_filter(ds_signal, dim="time", cutoff=0.1)["x"].values,
+        lowpass_filter(ds_signal["x"], dim="time", cutoff=0.1).values,
     )
 
 

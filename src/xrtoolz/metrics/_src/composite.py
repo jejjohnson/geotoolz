@@ -12,19 +12,17 @@ from xrtoolz.metrics._src.spectral import psd_score, resolved_scale_2d
 
 
 def rmse_skill_scores(
-    ds_pred: xr.Dataset,
-    ds_ref: xr.Dataset,
+    pred: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    variable: str,
     space_dims: Sequence[str] = ("lat", "lon"),
     time_dim: str = "time",
 ) -> xr.Dataset:
     """Bundle the canonical RMSE-based skill diagnostics.
 
     Args:
-        ds_pred: Prediction dataset.
-        ds_ref: Reference dataset.
-        variable: Variable to score.
+        pred: Prediction DataArray.
+        ref: Reference DataArray (same shape and coords as ``pred``).
         space_dims: Spatial dimensions reduced for the per-time skill.
         time_dim: Temporal dimension reduced for the per-cell RMSE map.
 
@@ -34,7 +32,7 @@ def rmse_skill_scores(
         ``error_stability``.
 
     Examples:
-        >>> rmse_skill_scores(pred, ref, variable="ssh")
+        >>> rmse_skill_scores(pred_da, ref_da)
 
     ``error_stability`` uses xarray's default ``std(..., ddof=0)`` to
     match the upstream OSSE report.
@@ -45,13 +43,12 @@ def rmse_skill_scores(
             f"time_dim={time_dim!r} must not appear in space_dims={space_dims_t!r};"
             " duplicate core dims are rejected by xr.apply_ufunc."
         )
-    rmse_t = nrmse(ds_pred, ds_ref, variable, dims=space_dims_t).rename("rmse_t")
-    rmse_xy = rmse(ds_pred, ds_ref, variable, dims=time_dim).rename("rmse_xy")
+    rmse_t = nrmse(pred, ref, dim=space_dims_t).rename("rmse_t")
+    rmse_xy = rmse(pred, ref, dim=time_dim).rename("rmse_xy")
     leaderboard_rmse = nrmse(
-        ds_pred,
-        ds_ref,
-        variable,
-        dims=(time_dim, *space_dims_t),
+        pred,
+        ref,
+        dim=(time_dim, *space_dims_t),
     ).rename("leaderboard_rmse")
     # Pin ddof=0 explicitly to match the OSSE-report convention; relying
     # on xarray's default could shift quietly if it ever changes.
@@ -67,10 +64,9 @@ def rmse_skill_scores(
 
 
 def psd_score_spacetime(
-    ds_pred: xr.Dataset,
-    ds_ref: xr.Dataset,
+    pred: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    variable: str,
     space_dim: str = "lon",
     time_dim: str = "time",
     avg_dims: Sequence[str] | None = ("lat",),
@@ -80,9 +76,8 @@ def psd_score_spacetime(
     """Compute a 2-D space-time PSD score and resolved-scale summary.
 
     Args:
-        ds_pred: Prediction dataset.
-        ds_ref: Reference dataset.
-        variable: Variable to score.
+        pred: Prediction DataArray.
+        ref: Reference DataArray (same shape and coords as ``pred``).
         space_dim: Spatial dimension used in the PSD.
         time_dim: Temporal dimension used in the PSD.
         avg_dims: Optional dimensions averaged out after the PSD.
@@ -96,7 +91,7 @@ def psd_score_spacetime(
         and ``summary`` contains the min/max resolved wavelengths.
 
     Examples:
-        >>> score, summary = psd_score_spacetime(pred, ref, variable="ssh")
+        >>> score, summary = psd_score_spacetime(pred_da, ref_da)
     """
     if xrft_kwargs.get("isotropic"):
         # Isotropic mode collapses the two spatial axes into a single
@@ -110,9 +105,8 @@ def psd_score_spacetime(
     freq_space_dim = f"freq_{space_dim}"
     freq_time_dim = f"freq_{time_dim}"
     score = psd_score(
-        ds_pred,
-        ds_ref,
-        variable,
+        pred,
+        ref,
         psd_dims=(space_dim, time_dim),
         avg_dims=avg_dims,
         **xrft_kwargs,

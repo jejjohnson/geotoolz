@@ -322,17 +322,15 @@ def _psd_fixtures():
 
     iso = power_spectrum(truth, dim=("lon", "lat"), isotropic=True).mean("time")
     iso_score = psd_score(
-        pred.to_dataset(name="zos"),
-        truth.to_dataset(name="zos"),
-        "zos",
+        pred,
+        truth,
         psd_dims=("lon", "lat"),
         isotropic=True,
     ).mean("time")
     st = power_spectrum(truth, dim=("lon", "time")).mean("lat")
     st_score = psd_score(
-        pred.to_dataset(name="zos"),
-        truth.to_dataset(name="zos"),
-        "zos",
+        pred,
+        truth,
         psd_dims=("lon", "time"),
         avg_dims=("lat",),
         isotropic=False,

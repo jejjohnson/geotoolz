@@ -97,6 +97,12 @@ def bandpass_wavelength(
         Dataset filtered along ``dim``. Variables without ``dim`` or with
         non-numeric dtype pass through unchanged.
     """
+    if dim not in ds.dims:
+        # The previous Dataset-flavoured ``fir_filter(ds, ...)`` raised on a
+        # missing dim; the new per-variable loop would otherwise pass every
+        # variable through unchanged when ``dim`` is misspelled — a quiet
+        # no-op that's worse than a clear failure for downstream metrics.
+        raise ValueError(f"dim {dim!r} not in Dataset dims {tuple(ds.dims)}")
     if lambda_min_km is None and lambda_max_km is None:
         raise ValueError("at least one of lambda_min_km or lambda_max_km is required")
     if (
@@ -143,15 +149,24 @@ def bandpass_wavelength(
             _cutoff_from_wavelength(lambda_min_km, spacing_km),
         )
 
-    return fir_filter(
-        ds,
-        dim=dim,
-        cutoff=cutoff,
-        method=method,
-        btype=btype,
-        num_taps=num_taps,
-        attenuation_db=attenuation_db,
-    )
+    # ``fir_filter`` is DataArray-only after the PR β primitive flip. Loop
+    # over numeric data variables that carry the filter dim and pass other
+    # variables through unchanged.
+    out_vars: dict[str, xr.DataArray] = {}
+    for name, da in ds.data_vars.items():
+        if dim not in da.dims or not np.issubdtype(da.dtype, np.number):
+            out_vars[str(name)] = da
+            continue
+        out_vars[str(name)] = fir_filter(
+            da,
+            dim=dim,
+            cutoff=cutoff,
+            method=method,
+            btype=btype,
+            num_taps=num_taps,
+            attenuation_db=attenuation_db,
+        )
+    return xr.Dataset(out_vars, coords=ds.coords, attrs=dict(ds.attrs))
 
 
 __all__ = ["bandpass_wavelength", "median_dx_km"]

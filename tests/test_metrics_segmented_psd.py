@@ -95,17 +95,21 @@ def _is_near_zero_meridian(lon: float) -> bool:
 def test_along_track_psd_score_detects_time_gaps() -> None:
     ds = _track_dataset()
     out = along_track_psd_score(
-        ds,
-        var_ref="ssh_ref",
-        var_pred="ssh_pred",
+        ds["ssh_pred"],
+        ds["ssh_ref"],
+        lon=ds["lon"],
+        lat=ds["lat"],
+        time=ds["time"],
         npt=64,
         overlap=0.5,
         spacing_km=7.0,
     )
     no_gap = along_track_psd_score(
-        ds,
-        var_ref="ssh_ref",
-        var_pred="ssh_pred",
+        ds["ssh_pred"],
+        ds["ssh_ref"],
+        lon=ds["lon"],
+        lat=ds["lat"],
+        time=ds["time"],
         npt=64,
         overlap=0.5,
         max_gap=np.timedelta64(1, "D"),
@@ -119,9 +123,11 @@ def test_along_track_psd_score_detects_time_gaps() -> None:
 def test_along_track_psd_score_bounds() -> None:
     ds = _track_dataset()
     out = along_track_psd_score(
-        ds,
-        var_ref="ssh_ref",
-        var_pred="ssh_pred",
+        ds["ssh_pred"],
+        ds["ssh_ref"],
+        lon=ds["lon"],
+        lat=ds["lat"],
+        time=ds["time"],
         npt=64,
         overlap=0.5,
         spacing_km=7.0,
@@ -151,9 +157,11 @@ def test_along_track_segment_longitude_uses_circular_mean() -> None:
     )
 
     out = along_track_psd_score(
-        ds,
-        var_ref="ssh_ref",
-        var_pred="ssh_pred",
+        ds["ssh_pred"],
+        ds["ssh_ref"],
+        lon=ds["lon"],
+        lat=ds["lat"],
+        time=ds["time"],
         npt=npt,
         spacing_km=7.0,
     )

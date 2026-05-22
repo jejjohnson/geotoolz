@@ -40,10 +40,9 @@ def _check_ensemble_dim(da: xr.DataArray, dim: str) -> None:
 
 
 def spread_skill_ratio(
-    ds_ensemble: xr.Dataset,
-    ds_ref: xr.Dataset,
+    ensemble: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    variable: str,
     ensemble_dim: str = "member",
     dims: Sequence[str] | None = None,
 ) -> xr.DataArray:
@@ -54,34 +53,30 @@ def spread_skill_ratio(
     < 1 indicate under-dispersion, > 1 over-dispersion.
 
     Args:
-        ds_ensemble: Dataset with the ensemble variable.
-        ds_ref: Deterministic reference.
-        variable: Variable name.
+        ensemble: Ensemble DataArray with an ``ensemble_dim`` axis.
+        ref: Deterministic reference DataArray.
         ensemble_dim: Member dim.
         dims: Dims to reduce over (e.g. ``("time", "lat", "lon")``).
             ``None`` reduces over every non-ensemble dim.
     """
-    da_ens = ds_ensemble[variable]
-    da_ref = ds_ref[variable]
-    _check_ensemble_dim(da_ens, ensemble_dim)
+    _check_ensemble_dim(ensemble, ensemble_dim)
 
     if dims is None:
-        reduce = [d for d in da_ens.dims if d != ensemble_dim]
+        reduce = [d for d in ensemble.dims if d != ensemble_dim]
     else:
         reduce = list(dims)
 
-    ens_mean = da_ens.mean(dim=ensemble_dim)
-    ens_std = da_ens.std(dim=ensemble_dim, ddof=1)
+    ens_mean = ensemble.mean(dim=ensemble_dim)
+    ens_std = ensemble.std(dim=ensemble_dim, ddof=1)
     spread = (ens_std**2).mean(dim=reduce) ** 0.5
-    skill = ((ens_mean - da_ref) ** 2).mean(dim=reduce) ** 0.5
+    skill = ((ens_mean - ref) ** 2).mean(dim=reduce) ** 0.5
     return spread / skill
 
 
 def rank_histogram(
-    ds_ensemble: xr.Dataset,
-    ds_ref: xr.Dataset,
+    ensemble: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    variable: str,
     ensemble_dim: str = "member",
 ) -> xr.Dataset:
     """Talagrand rank histogram.
@@ -92,22 +87,19 @@ def rank_histogram(
     ensemble produces a flat histogram.
 
     Args:
-        ds_ensemble: Ensemble forecast.
-        ds_ref: Reference.
-        variable: Variable name.
+        ensemble: Ensemble forecast DataArray with an ``ensemble_dim`` axis.
+        ref: Reference DataArray.
         ensemble_dim: Member dim.
 
     Returns:
         Dataset with a ``"rank_count"`` variable indexed by ``"rank"``
         (size ``n_members + 1``).
     """
-    da_ens = ds_ensemble[variable]
-    da_ref = ds_ref[variable]
-    _check_ensemble_dim(da_ens, ensemble_dim)
+    _check_ensemble_dim(ensemble, ensemble_dim)
 
-    n = da_ens.sizes[ensemble_dim]
-    ens_arr = da_ens.transpose(ensemble_dim, ...).values
-    ref_arr = da_ref.broadcast_like(da_ens.isel({ensemble_dim: 0})).values
+    n = ensemble.sizes[ensemble_dim]
+    ens_arr = ensemble.transpose(ensemble_dim, ...).values
+    ref_arr = ref.broadcast_like(ensemble.isel({ensemble_dim: 0})).values
     ranks = np.sum(ens_arr < ref_arr[None, ...], axis=0)
     counts = np.bincount(ranks.ravel(), minlength=n + 1)
     return xr.Dataset(
@@ -117,10 +109,9 @@ def rank_histogram(
 
 
 def ensemble_coverage(
-    ds_ensemble: xr.Dataset,
-    ds_ref: xr.Dataset,
+    ensemble: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    variable: str,
     q: tuple[float, float] = (0.05, 0.95),
     ensemble_dim: str = "member",
 ) -> xr.DataArray:
@@ -129,9 +120,8 @@ def ensemble_coverage(
     For ``q=(0.05, 0.95)`` a calibrated ensemble produces ≈ 0.9.
 
     Args:
-        ds_ensemble: Ensemble forecast.
-        ds_ref: Reference.
-        variable: Variable name.
+        ensemble: Ensemble forecast DataArray with an ``ensemble_dim`` axis.
+        ref: Reference DataArray.
         q: ``(low, high)`` quantiles in ``[0, 1]``.
         ensemble_dim: Member dim.
 
@@ -141,20 +131,17 @@ def ensemble_coverage(
     if not 0.0 <= q[0] < q[1] <= 1.0:
         raise ValueError(f"q must be (low, high) with 0 <= low < high <= 1, got {q}.")
 
-    da_ens = ds_ensemble[variable]
-    da_ref = ds_ref[variable]
-    _check_ensemble_dim(da_ens, ensemble_dim)
-    lo = da_ens.quantile(q[0], dim=ensemble_dim).drop_vars("quantile")
-    hi = da_ens.quantile(q[1], dim=ensemble_dim).drop_vars("quantile")
-    inside = (da_ref >= lo) & (da_ref <= hi)
+    _check_ensemble_dim(ensemble, ensemble_dim)
+    lo = ensemble.quantile(q[0], dim=ensemble_dim).drop_vars("quantile")
+    hi = ensemble.quantile(q[1], dim=ensemble_dim).drop_vars("quantile")
+    inside = (ref >= lo) & (ref <= hi)
     return inside.mean()
 
 
 def reliability_curve(
-    ds_probability: xr.Dataset,
-    ds_event: xr.Dataset,
+    probability: xr.DataArray,
+    event: xr.DataArray,
     *,
-    variable: str,
     probability_bins: np.ndarray | None = None,
 ) -> xr.Dataset:
     """Reliability diagram coordinates.
@@ -164,11 +151,8 @@ def reliability_curve(
     calibrated forecast lies on the identity line.
 
     Args:
-        ds_probability: Dataset whose ``variable`` holds forecast
-            probabilities in ``[0, 1]``.
-        ds_event: Dataset whose ``variable`` is a 0/1 event indicator
-            on the same grid.
-        variable: Variable name (same in both).
+        probability: DataArray of forecast probabilities in ``[0, 1]``.
+        event: DataArray of 0/1 event indicators on the same grid.
         probability_bins: Bin edges in ``[0, 1]``. Defaults to
             ``np.linspace(0, 1, 11)`` (10 bins).
 
@@ -181,8 +165,8 @@ def reliability_curve(
         if probability_bins is None
         else np.asarray(probability_bins)
     )
-    p = ds_probability[variable].values.ravel()
-    o = ds_event[variable].values.ravel()
+    p = probability.values.ravel()
+    o = event.values.ravel()
     valid = np.isfinite(p) & np.isfinite(o)
     p = p[valid]
     o = o[valid]
@@ -240,9 +224,8 @@ class SpreadSkillRatio(_ProbabilisticOp):
 
     def _apply(self, ds_ensemble: xr.Dataset, ds_ref: xr.Dataset) -> xr.DataArray:
         return spread_skill_ratio(
-            ds_ensemble,
-            ds_ref,
-            variable=self.variable,
+            ds_ensemble[self.variable],
+            ds_ref[self.variable],
             ensemble_dim=self.ensemble_dim,
             dims=self.dims,
         )
@@ -258,9 +241,8 @@ class RankHistogram(_ProbabilisticOp):
 
     def _apply(self, ds_ensemble: xr.Dataset, ds_ref: xr.Dataset) -> xr.Dataset:
         return rank_histogram(
-            ds_ensemble,
-            ds_ref,
-            variable=self.variable,
+            ds_ensemble[self.variable],
+            ds_ref[self.variable],
             ensemble_dim=self.ensemble_dim,
         )
 
@@ -280,9 +262,8 @@ class EnsembleCoverage(_ProbabilisticOp):
 
     def _apply(self, ds_ensemble: xr.Dataset, ds_ref: xr.Dataset) -> xr.DataArray:
         return ensemble_coverage(
-            ds_ensemble,
-            ds_ref,
-            variable=self.variable,
+            ds_ensemble[self.variable],
+            ds_ref[self.variable],
             q=self.q,
             ensemble_dim=self.ensemble_dim,
         )
@@ -306,9 +287,8 @@ class ReliabilityCurve(Operator):
 
     def _apply(self, ds_probability: xr.Dataset, ds_event: xr.Dataset) -> xr.Dataset:
         return reliability_curve(
-            ds_probability,
-            ds_event,
-            variable=self.variable,
+            ds_probability[self.variable],
+            ds_event[self.variable],
             probability_bins=self.probability_bins,
         )
 

@@ -137,6 +137,28 @@ def test_fillnan_climatology_operator_matches_function() -> None:
     xr.testing.assert_allclose(op(missing), expected)
 
 
+def test_resample_time_operator_preserves_non_time_coords() -> None:
+    """Regression: the per-variable Dataset loop must not drop standalone
+    coords (e.g. ``lat`` / ``lon`` ride-along axes) when none of the
+    surviving data variables carry them."""
+    time = pd.date_range("2020-01-01", periods=4, freq="1D")
+    ds = xr.Dataset(
+        {"sst": (("time",), np.arange(4.0))},
+        coords={
+            "time": time,
+            "lat": 0.5,  # scalar standalone coord — not on any data_var
+            "lon": ("lon", [10.0, 20.0]),
+        },
+    )
+
+    out = ResampleTime(freq="2D", method="mean")(ds)
+
+    assert "lat" in out.coords
+    assert "lon" in out.coords
+    assert float(out["lat"]) == 0.5
+    np.testing.assert_array_equal(out["lon"].values, np.array([10.0, 20.0]))
+
+
 def test_resample_time_operator_passes_interp_method() -> None:
     time = pd.date_range("2020-01-01", periods=3, freq="1D")
     ds = xr.Dataset({"x": ("time", [0.0, 24.0, 48.0])}, coords={"time": time})

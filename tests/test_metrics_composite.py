@@ -67,11 +67,11 @@ def test_nrmse_and_rmse_skill_scores_match_manual_formula() -> None:
     expected_leaderboard = 1.0 - 1.0 / np.sqrt(np.mean(ref["ssh"].values ** 2))
 
     np.testing.assert_allclose(
-        nrmse(pred, ref, "ssh", ("lat", "lon")).values,
+        nrmse(pred["ssh"], ref["ssh"], dim=("lat", "lon")).values,
         expected_rmse_t,
     )
 
-    scores = rmse_skill_scores(pred, ref, variable="ssh")
+    scores = rmse_skill_scores(pred["ssh"], ref["ssh"])
     np.testing.assert_allclose(scores["rmse_t"].values, expected_rmse_t)
     np.testing.assert_allclose(scores["rmse_xy"].values, expected_rmse_xy)
     assert float(scores["leaderboard_rmse"]) == pytest.approx(expected_leaderboard)
@@ -84,7 +84,7 @@ def test_rmse_skill_scores_identical_fields_have_perfect_skill() -> None:
     ref = xr.Dataset(
         {"ssh": (("time", "lat", "lon"), np.arange(12.0).reshape(3, 2, 2))}
     )
-    scores = rmse_skill_scores(ref, ref, variable="ssh")
+    scores = rmse_skill_scores(ref["ssh"], ref["ssh"])
 
     np.testing.assert_allclose(scores["rmse_t"].values, np.ones(3))
     np.testing.assert_allclose(scores["rmse_xy"].values, np.zeros((2, 2)))
@@ -182,7 +182,7 @@ def test_psd_score_spacetime_returns_positive_frequency_score_and_summary() -> N
         coords={"time": time, "lat": lat, "lon": lon},
     )
 
-    score, summary = psd_score_spacetime(pred, ref, variable="ssh")
+    score, summary = psd_score_spacetime(pred["ssh"], ref["ssh"])
 
     assert score["score"].dims == ("freq_lon", "freq_time")
     assert np.all(score["freq_lon"].values > 0.0)
@@ -204,7 +204,7 @@ def test_rmse_skill_scores_rejects_time_dim_in_space_dims() -> None:
         coords={"time": [0, 1], "lat": [0, 1], "lon": [0, 1]},
     )
     with pytest.raises(ValueError, match="time_dim"):
-        rmse_skill_scores(ds, ds, variable="ssh", space_dims=("time", "lat"))
+        rmse_skill_scores(ds["ssh"], ds["ssh"], space_dims=("time", "lat"))
 
 
 def test_psd_score_spacetime_rejects_isotropic_kwarg() -> None:
@@ -214,4 +214,4 @@ def test_psd_score_spacetime_rejects_isotropic_kwarg() -> None:
         coords={"time": np.arange(16.0), "lon": np.arange(16.0)},
     )
     with pytest.raises(ValueError, match="isotropic"):
-        psd_score_spacetime(ds, ds, variable="ssh", isotropic=True)
+        psd_score_spacetime(ds["ssh"], ds["ssh"], isotropic=True)

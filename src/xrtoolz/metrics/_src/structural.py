@@ -46,19 +46,17 @@ def _normalize_dims(dims: str | Sequence[str]) -> list[str]:
 
 
 def ssim(
-    ds_pred: xr.Dataset,
-    ds_ref: xr.Dataset,
+    pred: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    variable: str,
     dims: str | Sequence[str],
     window: int | None = None,
 ) -> xr.DataArray:
     """Structural similarity index over ``dims`` per leading-dim slice.
 
     Args:
-        ds_pred: Prediction dataset.
-        ds_ref: Reference dataset.
-        variable: Variable name.
+        pred: Prediction DataArray.
+        ref: Reference DataArray.
         dims: One or two image dims (e.g. ``("lat", "lon")``).
         window: Optional :func:`skimage.metrics.structural_similarity`
             ``win_size`` override.
@@ -68,12 +66,10 @@ def ssim(
         over ``dims``.
     """
     core = _normalize_dims(dims)
-    da_p = ds_pred[variable]
-    da_r = ds_ref[variable]
-    rest = [d for d in da_p.dims if d not in core]
+    rest = [d for d in pred.dims if d not in core]
 
-    p = da_p.transpose(*rest, *core).values
-    r = da_r.transpose(*rest, *core).values
+    p = pred.transpose(*rest, *core).values
+    r = ref.transpose(*rest, *core).values
     rest_shape = p.shape[: len(rest)]
     img_shape = p.shape[len(rest) :]
     p_flat = p.reshape(-1, *img_shape)
@@ -100,7 +96,7 @@ def ssim(
     out = out.reshape(rest_shape) if rest_shape else float(out.item())
     coords = {
         name: coord
-        for name, coord in da_p.coords.items()
+        for name, coord in pred.coords.items()
         if set(coord.dims).issubset(set(rest))
     }
     return xr.DataArray(np.asarray(out), dims=tuple(rest), coords=coords)
@@ -110,10 +106,9 @@ def ssim(
 
 
 def gradient_difference(
-    ds_pred: xr.Dataset,
-    ds_ref: xr.Dataset,
+    pred: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    variable: str,
     dims: str | Sequence[str],
 ) -> xr.DataArray:
     """RMS of the finite-difference gradient discrepancy.
@@ -123,13 +118,11 @@ def gradient_difference(
     only at the boundary of the field of view.
     """
     core = _normalize_dims(dims)
-    da_p = ds_pred[variable]
-    da_r = ds_ref[variable]
 
-    sq = xr.zeros_like(da_p, dtype=np.float64)
+    sq = xr.zeros_like(pred, dtype=np.float64)
     for d in core:
-        gp = da_p.differentiate(d)
-        gr = da_r.differentiate(d)
+        gp = pred.differentiate(d)
+        gr = ref.differentiate(d)
         sq = sq + (gp - gr) ** 2
     return sq.mean(dim=core) ** 0.5
 
@@ -138,10 +131,9 @@ def gradient_difference(
 
 
 def phase_shift_error(
-    ds_pred: xr.Dataset,
-    ds_ref: xr.Dataset,
+    pred: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    variable: str,
     dims: str | Sequence[str],
     periodic: bool = False,
 ) -> xr.Dataset:
@@ -151,9 +143,8 @@ def phase_shift_error(
     image dim plus the residual RMSE after applying that shift.
 
     Args:
-        ds_pred: Prediction dataset.
-        ds_ref: Reference dataset.
-        variable: Variable name.
+        pred: Prediction DataArray.
+        ref: Reference DataArray.
         dims: Image dims (1-D or 2-D supported).
         periodic: When True, treat ``dims`` as periodic (longitude
             wrap). When False the search is still circular but the
@@ -167,11 +158,9 @@ def phase_shift_error(
     core = _normalize_dims(dims)
     if len(core) not in (1, 2):
         raise ValueError("phase_shift_error supports 1-D or 2-D image dims only.")
-    da_p = ds_pred[variable]
-    da_r = ds_ref[variable]
-    rest = [d for d in da_p.dims if d not in core]
-    p = da_p.transpose(*rest, *core).values
-    r = da_r.transpose(*rest, *core).values
+    rest = [d for d in pred.dims if d not in core]
+    p = pred.transpose(*rest, *core).values
+    r = ref.transpose(*rest, *core).values
     rest_shape = p.shape[: len(rest)]
     img_shape = p.shape[len(rest) :]
     p_flat = p.reshape(-1, *img_shape)
@@ -209,7 +198,7 @@ def phase_shift_error(
     rest_dims = tuple(rest)
     coords = {
         name: coord
-        for name, coord in da_p.coords.items()
+        for name, coord in pred.coords.items()
         if set(coord.dims).issubset(set(rest_dims))
     }
     out = xr.Dataset(coords=coords)
@@ -334,9 +323,8 @@ class SSIM(Operator):
 
     def _apply(self, ds_pred: xr.Dataset, ds_ref: xr.Dataset) -> xr.DataArray:
         return ssim(
-            ds_pred,
-            ds_ref,
-            variable=self.variable,
+            ds_pred[self.variable],
+            ds_ref[self.variable],
             dims=self.dims,
             window=self.window,
         )
@@ -358,7 +346,7 @@ class GradientDifference(Operator):
 
     def _apply(self, ds_pred: xr.Dataset, ds_ref: xr.Dataset) -> xr.DataArray:
         return gradient_difference(
-            ds_pred, ds_ref, variable=self.variable, dims=self.dims
+            ds_pred[self.variable], ds_ref[self.variable], dims=self.dims
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -381,9 +369,8 @@ class PhaseShiftError(Operator):
 
     def _apply(self, ds_pred: xr.Dataset, ds_ref: xr.Dataset) -> xr.Dataset:
         return phase_shift_error(
-            ds_pred,
-            ds_ref,
-            variable=self.variable,
+            ds_pred[self.variable],
+            ds_ref[self.variable],
             dims=self.dims,
             periodic=self.periodic,
         )

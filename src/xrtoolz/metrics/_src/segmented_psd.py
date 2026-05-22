@@ -20,23 +20,21 @@ _DEFAULT_LAT_CENTERS = np.arange(-80, 91, 1)
 _DEFAULT_LON_CENTERS = np.arange(0, 360, 1)
 
 
-def _coord_values(ds: xr.Dataset, name: str, dim: str) -> NDArray[np.floating]:
-    if name not in ds:
-        raise ValueError(f"{name!r} is not present in the track Dataset.")
-    values = np.asarray(ds[name].transpose(dim).values, dtype=float)
+def _coord_values_from_da(
+    da: xr.DataArray, *, name: str, dim: str
+) -> NDArray[np.floating]:
+    values = np.asarray(da.transpose(dim).values, dtype=float)
     if values.ndim != 1:
         raise ValueError(f"{name!r} must be 1-D along {dim!r}.")
     return values
 
 
-def _gap_indices(
-    ds: xr.Dataset, *, time: str, dim: str, max_gap: Any
+def _gap_indices_from_da(
+    time_da: xr.DataArray, *, dim: str, max_gap: Any
 ) -> NDArray[np.integer]:
     if max_gap is None:
         return np.empty(0, dtype=int)
-    if time not in ds:
-        raise ValueError(f"{time!r} is not present in the track Dataset.")
-    values = np.asarray(ds[time].transpose(dim).values)
+    values = np.asarray(time_da.transpose(dim).values)
     return np.flatnonzero(np.diff(values) > max_gap)
 
 
@@ -114,47 +112,72 @@ def _empty_spectra(
 
 
 def along_track_psd_score(
-    ds_track: xr.Dataset,
+    pred: xr.DataArray,
+    ref: xr.DataArray,
     *,
-    var_ref: str,
-    var_pred: str,
+    lon: xr.DataArray,
+    lat: xr.DataArray,
+    time: xr.DataArray | None = None,
     dim: str = "num_lines",
     npt: int,
     overlap: float = 0.5,
     max_gap: np.timedelta64 | None = _DEFAULT_MAX_GAP,
     spacing_km: float | None = None,
-    lon: str = "lon",
-    lat: str = "lat",
-    time: str = "time",
     window: str | tuple[str, float] | ArrayLike = "hann",
     scaling: str = "density",
 ) -> xr.Dataset:
-    """Compute per-window along-track PSD score for a colocated track Dataset."""
-    if dim not in ds_track.dims:
-        raise ValueError(f"{dim!r} is not a dimension in the track Dataset.")
-    if var_ref not in ds_track or var_pred not in ds_track:
-        raise ValueError(f"{var_ref!r} and {var_pred!r} must both be present.")
+    """Compute per-window along-track PSD score from prediction/reference tracks.
 
-    ref = np.asarray(ds_track[var_ref].transpose(dim).values, dtype=float)
-    pred = np.asarray(ds_track[var_pred].transpose(dim).values, dtype=float)
-    if ref.ndim != 1 or pred.ndim != 1:
-        raise ValueError("var_ref and var_pred must be 1-D along the track dimension.")
-    if ref.shape != pred.shape:
-        raise ValueError("var_ref and var_pred must have the same shape.")
+    Args:
+        pred: Prediction DataArray (1-D along ``dim``).
+        ref: Reference DataArray (1-D along ``dim``).
+        lon: Longitude DataArray aligned with ``pred``/``ref`` on ``dim``.
+        lat: Latitude DataArray aligned with ``pred``/``ref`` on ``dim``.
+        time: Time DataArray; required when ``max_gap`` is not ``None``.
+        dim: Track dimension name (default ``"num_lines"``).
+        npt: Window length in samples.
+        overlap: Welch overlap fraction.
+        max_gap: Maximum allowed time gap before splitting a segment; pass
+            ``None`` to disable gap detection.
+        spacing_km: Override along-track spacing; otherwise inferred from
+            ``lon``/``lat`` via haversine.
+        window: Welch window spec.
+        scaling: Welch ``scaling`` (``"density"`` or ``"spectrum"``).
 
-    lon_values = _coord_values(ds_track, lon, dim)
-    lat_values = _coord_values(ds_track, lat, dim)
+    Returns:
+        Per-segment Dataset with ``psd_ref``, ``psd_pred``, ``psd_err``,
+        ``psd_score`` and ``coherence`` variables.
+    """
+    if dim not in pred.dims or dim not in ref.dims:
+        raise ValueError(f"{dim!r} is not a dimension of pred/ref.")
+
+    ref_values = np.asarray(ref.transpose(dim).values, dtype=float)
+    pred_values = np.asarray(pred.transpose(dim).values, dtype=float)
+    if ref_values.ndim != 1 or pred_values.ndim != 1:
+        raise ValueError("pred and ref must be 1-D along the track dimension.")
+    if ref_values.shape != pred_values.shape:
+        raise ValueError("pred and ref must have the same shape.")
+
+    lon_values = _coord_values_from_da(lon, name="lon", dim=dim)
+    lat_values = _coord_values_from_da(lat, name="lat", dim=dim)
     spacing = (
         _median_dx_km(lon_values, lat_values)
         if spacing_km is None
         else float(spacing_km)
     )
     fs = 1.0 / spacing
-    gaps = _gap_indices(ds_track, time=time, dim=dim, max_gap=max_gap)
-    bounds = _segment_bounds(ref.size, npt=npt, overlap=overlap, gap_indices=gaps)
+    if max_gap is not None:
+        if time is None:
+            raise ValueError("time DataArray is required when max_gap is not None.")
+        gaps = _gap_indices_from_da(time, dim=dim, max_gap=max_gap)
+    else:
+        gaps = np.empty(0, dtype=int)
+    bounds = _segment_bounds(
+        ref_values.size, npt=npt, overlap=overlap, gap_indices=gaps
+    )
 
-    ref_segments = _segment_stack(ref, bounds)
-    pred_segments = _segment_stack(pred, bounds)
+    ref_segments = _segment_stack(ref_values, bounds)
+    pred_segments = _segment_stack(pred_values, bounds)
     lon_segments = _segment_stack(lon_values, bounds)
     lat_segments = _segment_stack(lat_values, bounds)
     if ref_segments.size == 0:
@@ -362,18 +385,25 @@ class SegmentedPSDScore(Operator):
         self.scaling = scaling
 
     def _apply(self, ds_track: xr.Dataset) -> xr.Dataset:
+        if self.dim not in ds_track.dims:
+            raise ValueError(f"{self.dim!r} is not a dimension in the track Dataset.")
+        for name in (self.var_ref, self.var_pred, self.lon, self.lat):
+            if name not in ds_track:
+                raise ValueError(f"{name!r} is not present in the track Dataset.")
+        time_da = ds_track.get(self.time, None)
+        if self.max_gap is not None and time_da is None:
+            raise ValueError(f"{self.time!r} is required when max_gap is not None.")
         return along_track_psd_score(
-            ds_track,
-            var_ref=self.var_ref,
-            var_pred=self.var_pred,
+            ds_track[self.var_pred],
+            ds_track[self.var_ref],
+            lon=ds_track[self.lon],
+            lat=ds_track[self.lat],
+            time=time_da,
             dim=self.dim,
             npt=self.npt,
             overlap=self.overlap,
             max_gap=self.max_gap,
             spacing_km=self.spacing_km,
-            lon=self.lon,
-            lat=self.lat,
-            time=self.time,
             window=self.window,
             scaling=self.scaling,
         )

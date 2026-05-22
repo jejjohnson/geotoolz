@@ -15,17 +15,21 @@ _ALLOWED_RESAMPLE_METHODS = frozenset(
 
 
 def resample_time(
-    ds: xr.Dataset | xr.DataArray,
+    da: xr.DataArray,
     freq: str = "1D",
     method: str = "mean",
     time: str = "time",
     *,
     interp_method: Literal["linear", "nearest", "cubic"] = "linear",
-) -> xr.Dataset | xr.DataArray:
-    """Resample along the time axis via xarray's built-in resampler.
+) -> xr.DataArray:
+    """Resample a DataArray along the time axis via xarray's built-in resampler.
+
+    Per the PR β primitive-flip, this primitive is DataArray-only.
+    The Layer-1 ``ResampleTime`` operator handles ``ds.map``-style
+    dispatch when a Dataset is supplied.
 
     Args:
-        ds: Input.
+        da: Input DataArray.
         freq: Pandas-style frequency string (e.g. ``"1D"``, ``"6H"``,
             ``"1M"``).
         method: Zero-argument aggregation method; one of ``"mean"``,
@@ -39,7 +43,7 @@ def resample_time(
             ``method="interpolate"``.
 
     Returns:
-        Resampled container.
+        Resampled DataArray.
     """
     if method not in _ALLOWED_RESAMPLE_METHODS | {"interpolate"}:
         raise ValueError(
@@ -48,21 +52,21 @@ def resample_time(
         )
 
     if method == "interpolate":
-        _ensure_datetime_like_time(ds, time=time)
-        if _target_is_coarser_than_source(ds, freq=freq, time=time):
+        _ensure_datetime_like_time(da, time=time)
+        if _target_is_coarser_than_source(da, freq=freq, time=time):
             raise ValueError(
                 "resample_time(method='interpolate') only supports upsampling; "
                 f"got target frequency {freq!r} coarser than the input."
             )
-        return ds.resample({time: freq}).interpolate(interp_method)
+        return da.resample({time: freq}).interpolate(interp_method)
 
-    resampler = ds.resample({time: freq})
+    resampler = da.resample({time: freq})
     return getattr(resampler, method)()
 
 
-def _ensure_datetime_like_time(ds: xr.Dataset | xr.DataArray, *, time: str) -> None:
+def _ensure_datetime_like_time(da: xr.DataArray, *, time: str) -> None:
     try:
-        _ = ds[time].dt.year
+        _ = da[time].dt.year
     except AttributeError as exc:
         raise ValueError(
             f"{time!r} coordinate must be datetime-like for "
@@ -70,10 +74,8 @@ def _ensure_datetime_like_time(ds: xr.Dataset | xr.DataArray, *, time: str) -> N
         ) from exc
 
 
-def _target_is_coarser_than_source(
-    ds: xr.Dataset | xr.DataArray, *, freq: str, time: str
-) -> bool:
-    coord = ds[time]
+def _target_is_coarser_than_source(da: xr.DataArray, *, freq: str, time: str) -> bool:
+    coord = da[time]
     if coord.size < 2:
         return False
 

@@ -299,9 +299,7 @@ def test_phase_shift_error_2d_periodic() -> None:
     coords = {"lat": np.arange(n), "lon": np.arange(n)}
     ds_p = xr.Dataset({"x": (("lat", "lon"), shifted)}, coords=coords)
     ds_r = xr.Dataset({"x": (("lat", "lon"), blob)}, coords=coords)
-    out = phase_shift_error(
-        ds_p, ds_r, variable="x", dims=("lat", "lon"), periodic=False
-    )
+    out = phase_shift_error(ds_p["x"], ds_r["x"], dims=("lat", "lon"), periodic=False)
     assert int(out["shift_lat"].values) == 3
     assert int(out["shift_lon"].values) == -4
 

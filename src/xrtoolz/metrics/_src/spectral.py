@@ -59,9 +59,9 @@ _LON_UNITS = {
 
 
 def psd_error(
-    ds_pred: xr.Dataset,
-    ds_ref: xr.Dataset,
-    variable: str,
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
     psd_dims: Sequence[str],
     avg_dims: Sequence[str] | None = None,
     isotropic: bool = False,
@@ -70,9 +70,8 @@ def psd_error(
     """PSD of the prediction error ``pred - ref``.
 
     Args:
-        ds_pred: Prediction dataset.
-        ds_ref: Reference dataset.
-        variable: Variable to score.
+        pred: Prediction DataArray.
+        ref: Reference DataArray.
         psd_dims: Dimensions over which to take the PSD.
         avg_dims: Optional dims to conditionally average out after the
             PSD (e.g. average over ``lat`` after computing the lon/time
@@ -84,7 +83,7 @@ def psd_error(
         Dataset with a single ``"error"`` variable containing the
         PSD of the error.
     """
-    diff = (ds_pred[variable] - ds_ref[variable]).rename("error")
+    diff = (pred - ref).rename("error")
     err = power_spectrum(diff, dim=list(psd_dims), isotropic=isotropic, **kwargs)
     err_ds = err.rename("error").to_dataset()
     if avg_dims is not None:
@@ -93,9 +92,9 @@ def psd_error(
 
 
 def psd_score(
-    ds_pred: xr.Dataset,
-    ds_ref: xr.Dataset,
-    variable: str,
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
     psd_dims: Sequence[str],
     avg_dims: Sequence[str] | None = None,
     isotropic: bool = False,
@@ -107,9 +106,8 @@ def psd_score(
     means the error has as much power as the reference signal.
 
     Args:
-        ds_pred: Prediction dataset.
-        ds_ref: Reference dataset.
-        variable: Variable to score.
+        pred: Prediction DataArray.
+        ref: Reference DataArray.
         psd_dims: Dimensions over which to take the PSD.
         avg_dims: Optional conditional-average dims applied after PSD.
         isotropic: If ``True``, use the isotropic power spectrum.
@@ -119,15 +117,19 @@ def psd_score(
         Dataset with a single ``"score"`` variable.
     """
     err = psd_error(
-        ds_pred, ds_ref, variable, psd_dims, avg_dims, isotropic=isotropic, **kwargs
+        pred,
+        ref,
+        psd_dims=psd_dims,
+        avg_dims=avg_dims,
+        isotropic=isotropic,
+        **kwargs,
     )
-    ref_psd = power_spectrum(
-        ds_ref[variable], dim=list(psd_dims), isotropic=isotropic, **kwargs
-    )
-    ref_ds = ref_psd.rename(variable).to_dataset()
+    ref_psd = power_spectrum(ref, dim=list(psd_dims), isotropic=isotropic, **kwargs)
+    ref_name = ref.name if ref.name is not None else "ref"
+    ref_ds = ref_psd.rename(ref_name).to_dataset()
     if avg_dims is not None:
         ref_ds = drop_negative_frequencies(ref_ds, dims=avg_dims, drop=True)
-    score = 1.0 - err["error"] / ref_ds[variable]
+    score = 1.0 - err["error"] / ref_ds[ref_name]
     return score.to_dataset(name="score")
 
 
@@ -227,9 +229,8 @@ def resolved_scale_2d(
 
 
 def wavelet_psd_score(
-    ds_pred: xr.Dataset,
-    ds_ref: xr.Dataset,
-    variable: str,
+    pred: xr.DataArray,
+    ref: xr.DataArray,
     scales: xr.DataArray,
     *,
     dim: tuple[str, str] = ("y", "x"),
@@ -241,9 +242,8 @@ def wavelet_psd_score(
     """Localized wavelet PSD score ``1 - WPSD(err) / WPSD(ref)``.
 
     Args:
-        ds_pred: Prediction dataset containing ``variable``.
-        ds_ref: Reference dataset containing ``variable`` on the same grid.
-        variable: Data variable to score.
+        pred: Prediction DataArray on a locally Cartesian grid.
+        ref: Reference DataArray on the same grid.
         scales: Positive Morlet scales. The first dimension is used as the
             scale axis.
         dim: Spatial dimensions as ``(y, x)`` on a locally Cartesian grid.
@@ -255,11 +255,7 @@ def wavelet_psd_score(
     Returns:
         Dataset containing ``score`` with untrusted COI samples masked to NaN.
     """
-    if variable not in ds_pred.data_vars:
-        raise KeyError(f"prediction missing variable {variable!r}")
-    if variable not in ds_ref.data_vars:
-        raise KeyError(f"reference missing variable {variable!r}")
-    err = (ds_pred[variable] - ds_ref[variable]).rename("error")
+    err = (pred - ref).rename("error")
     err_psd = wvlt_power_spectrum(
         err,
         scales,
@@ -270,7 +266,7 @@ def wavelet_psd_score(
         isotropic=isotropic,
     )
     ref_psd = wvlt_power_spectrum(
-        ds_ref[variable],
+        ref,
         scales,
         dim=dim,
         x0=x0,
@@ -318,12 +314,9 @@ def wavelet_resolved_scale_map(
         Locations with fewer than two trusted scale samples, or where
         the threshold isn't bracketed by the score column, are NaN.
     """
-    ds_pred = pred.rename("field").to_dataset()
-    ds_ref = truth.rename("field").to_dataset()
     score = wavelet_psd_score(
-        ds_pred,
-        ds_ref,
-        "field",
+        pred,
+        truth,
         scales,
         dim=dim,
         x0=x0,
@@ -519,12 +512,11 @@ class PSDScore(Operator):
         self.isotropic = isotropic
         self.kwargs = dict(kwargs)
 
-    def _apply(self, ds_pred, ds_ref):
+    def _apply(self, ds_pred: xr.Dataset, ds_ref: xr.Dataset) -> xr.Dataset:
         return psd_score(
-            ds_pred,
-            ds_ref,
-            self.variable,
-            self.psd_dims,
+            ds_pred[self.variable],
+            ds_ref[self.variable],
+            psd_dims=self.psd_dims,
             avg_dims=self.avg_dims,
             isotropic=self.isotropic,
             **self.kwargs,
@@ -564,9 +556,8 @@ class WaveletPSDScore(Operator):
 
     def _apply(self, ds_pred: xr.Dataset, ds_ref: xr.Dataset) -> xr.Dataset:
         return wavelet_psd_score(
-            ds_pred,
-            ds_ref,
-            self.variable,
+            ds_pred[self.variable],
+            ds_ref[self.variable],
             self.scales,
             dim=self.dim,
             x0=self.x0,

@@ -13,7 +13,18 @@ version: 0.1.1
 > `xrtoolz.Operator` subclass rather than on `pipekit.Operator`
 > itself. `pipekit.Sequential` and `pipekit.Graph` thread the
 > resulting `DataTree`s through without changes — they are
-> carrier-agnostic. PRs β and γ remain to be done.
+> carrier-agnostic.
+>
+> **PR β is now complete.** Every Layer-0 primitive in
+> `metrics/_src/{pixel,spectral,composite,structural,segmented_psd,distributional,probabilistic}.py`
+> and `interpolate/_src/{smooth,resample}.py` takes positional
+> `DataArray` inputs and keyword-only configuration; the Dataset
+> selection / per-variable loop moved into the matching Layer-1
+> `Operator._apply`. `metrics/_src/spectral.evaluate_by_frequency_band`
+> intentionally stays Dataset-flavoured (it composes an inner
+> Operator), and `metrics/_src/dm.dm_test` stays array-positional
+> (no Dataset to flip). Operator constructor signatures are
+> unchanged. PR γ remains to be done.
 
 A follow-on refactor to D11 (revised). Flips every primitive in the
 package to an xarray-only public signature, keeping user-authored
