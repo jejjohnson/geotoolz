@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pipekit import Operator
+from xrtoolz._operator import Operator
 
 
 class _ObjectMetricStub(Operator):

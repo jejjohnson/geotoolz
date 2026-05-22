@@ -26,9 +26,9 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
-from pipekit import Operator
 from scipy.interpolate import interp1d
 
+from xrtoolz._operator import Operator
 from xrtoolz.geo._src.wavelet import wvlt_power_spectrum
 from xrtoolz.geo._src.wavelet_utils import scale_to_wavenumber
 from xrtoolz.transforms._src.fourier import (

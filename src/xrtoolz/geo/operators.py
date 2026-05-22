@@ -19,8 +19,8 @@ from typing import Any, Literal
 
 import regionmask
 import xarray as xr
-from pipekit import Operator
 
+from xrtoolz._operator import Operator
 from xrtoolz.geo._src import (
     along_track as _along_track,
     detrend as _detrend,

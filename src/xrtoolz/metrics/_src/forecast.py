@@ -16,7 +16,8 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
-from pipekit import Operator
+
+from xrtoolz._operator import Operator
 
 
 # ---------- Layer-0 (xarray) ----------------------------------------------

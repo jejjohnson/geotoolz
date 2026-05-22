@@ -23,7 +23,8 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
-from pipekit import Operator
+
+from xrtoolz._operator import Operator
 
 
 def _import_regionmask() -> Any:

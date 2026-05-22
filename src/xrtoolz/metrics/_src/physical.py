@@ -32,9 +32,9 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
-from pipekit import Operator
 
 from xrtoolz import calc
+from xrtoolz._operator import Operator
 from xrtoolz.ocn._src.kinematics import coriolis_parameter
 
 

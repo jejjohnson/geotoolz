@@ -20,7 +20,8 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
-from pipekit import Operator
+
+from xrtoolz._operator import Operator
 
 
 _XR_TYPES = (xr.DataArray, xr.Dataset)

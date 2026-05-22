@@ -23,8 +23,8 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
-from pipekit import Operator
 
+from xrtoolz._operator import Operator
 from xrtoolz.utils._src.optional_imports import _require_optional
 
 

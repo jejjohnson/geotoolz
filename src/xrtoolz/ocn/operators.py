@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pipekit import Operator
-
+from xrtoolz._operator import Operator
 from xrtoolz.ocn._src import (
     kinematics as _kinematics,
     ssh as _ssh,

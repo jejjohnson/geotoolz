@@ -15,7 +15,8 @@ from __future__ import annotations
 from typing import Any
 
 import xarray as xr
-from pipekit import Operator
+
+from xrtoolz._operator import Operator
 
 
 # ---------- Layer-0 -------------------------------------------------------

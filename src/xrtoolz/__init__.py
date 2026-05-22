@@ -1,7 +1,8 @@
 """xrtoolz — composable operators for Earth System Data Cubes."""
 
-from pipekit import Graph, Input, Node, Operator, Sequential, Tap
+from pipekit import Graph, Input, Node, Sequential, Tap
 
+from xrtoolz._operator import Operator
 from xrtoolz.combinators import ApplyToEach, Augment
 from xrtoolz.signature import Signature
 

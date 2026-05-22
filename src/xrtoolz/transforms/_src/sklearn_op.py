@@ -7,8 +7,8 @@ from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
-from pipekit import Operator
 
+from xrtoolz._operator import Operator
 from xrtoolz.utils import XarrayEstimator
 from xrtoolz.utils._src.sklearn_wrap import NanPolicy
 

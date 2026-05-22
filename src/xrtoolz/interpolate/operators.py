@@ -14,8 +14,8 @@ from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
-from pipekit import Operator
 
+from xrtoolz._operator import Operator
 from xrtoolz.interpolate._src import (
     binning as _binning,
     downscale as _downscale,

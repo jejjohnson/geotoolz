@@ -9,8 +9,9 @@ import numpy as np
 import pandas as pd
 import regionmask
 import xarray as xr
-from pipekit import Operator
 from scipy.stats import binned_statistic_2d
+
+from xrtoolz._operator import Operator
 
 
 def bin_residuals_2d(

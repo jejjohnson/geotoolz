@@ -6,8 +6,8 @@ from collections.abc import Sequence
 from typing import Any
 
 import xarray as xr
-from pipekit import Operator
 
+from xrtoolz._operator import Operator
 from xrtoolz.budgets._src.flux import boundary_flux
 from xrtoolz.budgets._src.heat import heat_budget_residual
 from xrtoolz.budgets._src.ke import kinetic_energy_budget_residual

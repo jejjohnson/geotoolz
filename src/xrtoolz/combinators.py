@@ -37,7 +37,9 @@ from collections.abc import Sequence
 from typing import Any
 
 import xarray as xr
-from pipekit import Operator
+from pipekit import Operator as _PipekitOperator
+
+from xrtoolz._operator import Operator
 
 
 class Augment(Operator):
@@ -109,8 +111,11 @@ class Augment(Operator):
             variables.
     """
 
-    def __init__(self, inner: Operator) -> None:
-        if not isinstance(inner, Operator):
+    def __init__(self, inner: _PipekitOperator) -> None:
+        # Accept any pipekit Operator (xrtoolz.Operator is a subclass), so
+        # users can wrap composites like ``Sequential`` that still live on
+        # pipekit's carrier-agnostic base.
+        if not isinstance(inner, _PipekitOperator):
             raise TypeError(
                 f"Augment expects an Operator instance, got {type(inner).__name__}."
             )
@@ -231,12 +236,12 @@ class ApplyToEach(Operator):
 
     def __init__(
         self,
-        prototype: Operator,
+        prototype: _PipekitOperator,
         *,
         kwarg: str,
         values: Sequence[Any],
     ) -> None:
-        if not isinstance(prototype, Operator):
+        if not isinstance(prototype, _PipekitOperator):
             raise TypeError(
                 f"ApplyToEach expects an Operator prototype, "
                 f"got {type(prototype).__name__}."

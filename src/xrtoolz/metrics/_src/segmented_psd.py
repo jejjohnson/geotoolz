@@ -7,10 +7,10 @@ from typing import Any
 import numpy as np
 import xarray as xr
 from numpy.typing import ArrayLike, NDArray
-from pipekit import Operator
 from scipy import signal
 from scipy.stats import circmean
 
+from xrtoolz._operator import Operator
 from xrtoolz.metrics._src.array_segmented_psd import _segment_bounds
 
 
