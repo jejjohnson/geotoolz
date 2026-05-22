@@ -80,6 +80,19 @@ def test_spatial_triangular_matches_geom_feather_kernel() -> None:
     np.testing.assert_array_equal(weights, np.flip(weights, axis=0))
     np.testing.assert_array_equal(weights, np.flip(weights, axis=1))
 
+    small = SpatialTriangular(width=2).weights(SpatialRectangular(size=(3, 3)))
+    np.testing.assert_array_equal(
+        small,
+        np.array(
+            [
+                [0.25, 0.5, 0.25],
+                [0.5, 1.0, 0.5],
+                [0.25, 0.5, 0.25],
+            ],
+            dtype=np.float32,
+        ),
+    )
+
 
 class TestApplyToChips:
     def test_each_chip_runs_through_operator(
