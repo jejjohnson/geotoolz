@@ -49,6 +49,20 @@ class SpatialTriangular(SpatialWindow):
     width: int = 16
 
     def weights(self, geometry: Any) -> np.ndarray:
+        """Return triangular weights for a fixed-size spatial geometry.
+
+        The geometry must expose a ``size`` attribute, such as
+        ``SpatialRectangular(size=(height, width))``. The returned array
+        linearly ramps from each edge toward a plateau of 1.0 over
+        ``width`` pixels, matching ``geom.Stitch(blend="feather")``.
+
+        Examples:
+            >>> from geopatcher import SpatialRectangular
+            >>> SpatialTriangular(width=2).weights(
+            ...     SpatialRectangular(size=(5, 7))
+            ... ).shape
+            (5, 7)
+        """
         size = getattr(geometry, "size", None)
         if size is None:
             raise TypeError(
