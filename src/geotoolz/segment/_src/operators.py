@@ -43,9 +43,12 @@ def _finite_mask(image: np.ndarray) -> np.ndarray:
 
 def _fill_nan(image: np.ndarray) -> np.ndarray:
     arr = np.asarray(image, dtype=float)
-    if np.all(np.isfinite(arr)):
+    finite = np.isfinite(arr)
+    if finite.all():
         return arr
-    fill = 0.0 if np.all(~np.isfinite(arr)) else float(np.nanmedian(arr))
+    # Compute fill statistic from finite values only so +/-inf cannot leak
+    # into the result via ``np.nanmedian`` (which ignores NaN but not inf).
+    fill = float(np.median(arr[finite])) if finite.any() else 0.0
     return np.nan_to_num(arr, nan=fill, posinf=fill, neginf=fill)
 
 
@@ -176,6 +179,7 @@ class Quickshift(Operator):
         ratio: float = 1.0,
         sigma: float = 0.0,
         channel_axis: int | None = 0,
+        convert2lab: bool = False,
         mask: Any = None,
     ) -> None:
         self.kernel_size = kernel_size
@@ -183,6 +187,10 @@ class Quickshift(Operator):
         self.ratio = ratio
         self.sigma = sigma
         self.channel_axis = channel_axis
+        # Default to False so non-RGB / multispectral / single-band inputs
+        # work out of the box. skimage's quickshift defaults convert2lab=True,
+        # which raises on any input that is not exactly 3-channel RGB.
+        self.convert2lab = convert2lab
         self.mask = mask
         if mask is not None:
             self.forbid_in_yaml = True
@@ -199,6 +207,7 @@ class Quickshift(Operator):
             ratio=self.ratio,
             sigma=self.sigma,
             channel_axis=self.channel_axis,
+            convert2lab=self.convert2lab,
         )
         return _labels(gt, labels, valid)
 
@@ -209,6 +218,7 @@ class Quickshift(Operator):
             "ratio": self.ratio,
             "sigma": self.sigma,
             "channel_axis": self.channel_axis,
+            "convert2lab": self.convert2lab,
             "mask": None if self.mask is None else "provided",
         }
 
@@ -281,6 +291,8 @@ class ChanVese(Operator):
         self.max_num_iter = max_num_iter
 
     def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+        band = _single_band(np.asarray(gt))
+        valid = np.isfinite(band)
         labels = chan_vese(
             _single_band(_fill_nan(np.asarray(gt))),
             mu=self.mu,
@@ -289,7 +301,7 @@ class ChanVese(Operator):
             tol=self.tol,
             max_num_iter=self.max_num_iter,
         )
-        return _labels(gt, labels.astype(np.int32))
+        return _labels(gt, labels.astype(np.int32), mask=valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -383,13 +395,7 @@ class MarkBoundaries(Operator):
         )
         if marked.ndim == 3:
             marked = np.moveaxis(marked, -1, 0)
-        return GeoTensor(
-            marked,
-            transform=gt.transform,
-            crs=gt.crs,
-            fill_value_default=gt.fill_value_default,
-            attrs=gt.attrs,
-        )
+        return gt.array_as_geotensor(marked)
 
     def get_config(self) -> dict[str, Any]:
         return {
