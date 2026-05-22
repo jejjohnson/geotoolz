@@ -827,7 +827,7 @@ def test_optical_flow_tvl1_returns_displacement_field() -> None:
     reference, moving, _dy, _dx = _registration_pair()
     flow = gz.geom.OpticalFlowTVL1(reference=reference)(moving)
     arr = np.asarray(flow)
-    assert arr.shape == (2,) + reference.shape[-2:]
+    assert arr.shape == (2, *reference.shape[-2:])
     assert str(flow.crs) == str(moving.crs)
 
 
@@ -835,5 +835,5 @@ def test_optical_flow_ilk_returns_displacement_field() -> None:
     reference, moving, _dy, _dx = _registration_pair()
     flow = gz.geom.OpticalFlowILK(reference=reference)(moving)
     arr = np.asarray(flow)
-    assert arr.shape == (2,) + reference.shape[-2:]
+    assert arr.shape == (2, *reference.shape[-2:])
     assert str(flow.crs) == str(moving.crs)

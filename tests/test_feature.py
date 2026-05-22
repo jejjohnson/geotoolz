@@ -80,7 +80,9 @@ def test_blob_doh_radius_is_sigma_not_sqrt_two_scaled() -> None:
         min_sigma=1.0, max_sigma=8.0, num_sigma=4, threshold=0.001
     )(gt)
     if len(points) > 0:
-        np.testing.assert_allclose(points["radius"].to_numpy(), points["sigma"].to_numpy())
+        np.testing.assert_allclose(
+            points["radius"].to_numpy(), points["sigma"].to_numpy()
+        )
 
 
 def test_corner_harris_returns_points() -> None:

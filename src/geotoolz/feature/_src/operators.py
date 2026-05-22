@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from pipekit import Operator
 from shapely.geometry import Point
 from skimage.feature import (
     blob_dog,
@@ -27,8 +28,6 @@ from skimage.transform import (
     hough_line,
     hough_line_peaks,
 )
-
-from pipekit import Operator
 
 
 if TYPE_CHECKING:
@@ -173,9 +172,7 @@ class BlobLoG(_BlobBase):
         num_sigma: int = 10,
         threshold: float = 0.2,
     ) -> None:
-        super().__init__(
-            min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold
-        )
+        super().__init__(min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold)
         self.num_sigma = num_sigma
 
     def _extra_kwargs(self) -> dict[str, Any]:
@@ -198,9 +195,7 @@ class BlobDOG(_BlobBase):
         sigma_ratio: float = 1.6,
         threshold: float = 0.2,
     ) -> None:
-        super().__init__(
-            min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold
-        )
+        super().__init__(min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold)
         self.sigma_ratio = sigma_ratio
 
     def _extra_kwargs(self) -> dict[str, Any]:
@@ -228,9 +223,7 @@ class BlobDoH(_BlobBase):
         num_sigma: int = 10,
         threshold: float = 0.01,
     ) -> None:
-        super().__init__(
-            min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold
-        )
+        super().__init__(min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold)
         self.num_sigma = num_sigma
 
     def _extra_kwargs(self) -> dict[str, Any]:
