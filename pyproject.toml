@@ -70,19 +70,10 @@ hydra = ["hydra-zen>=0.14"]
 # install e.g. `pip install 'geopatcher[patch-full]'` for the full
 # substrate matrix.
 patch = ["geopatcher[pipekit]"]
-# Sensor reader format extras. Reader modules guard these imports so a base
-# install stays slim and raises actionable installation instructions.
-modis = ["pyhdf>=0.10"]
-viirs = ["h5py>=3.0"]
-goes = ["netcdf4>=1.6"]
-mtg = ["netcdf4>=1.6"]
-seviri = [] # Reserved for a future stable xRIT dependency.
-himawari = [] # In-tree HSD parser planned; no external dependency.
-tropomi = ["netcdf4>=1.6"]
-s3 = ["netcdf4>=1.6"]
-all-sensors = [
-    "geotoolz[modis,viirs,goes,mtg,seviri,himawari,tropomi,s3]",
-]
+# Sensor reader format extras land alongside each real sensor reader. The
+# `toy_sensor` reference reader has no third-party dependencies. Per-sensor
+# extras (modis, viirs, goes, mtg, seviri, himawari, tropomi, s3) are tracked
+# under their respective design issues and added as the real readers land.
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"

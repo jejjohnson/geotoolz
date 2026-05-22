@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
-from importlib.machinery import ModuleSpec
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -14,9 +12,9 @@ from georeader.geotensor import GeoTensor
 from rasterio.windows import Window
 
 import geotoolz as gz
-from geotoolz.readers import SensorReader, modis
+from geotoolz.readers import SensorReader, toy_sensor
 from geotoolz.readers._base import require_optional_dependency
-from geotoolz.readers.modis import constants as modis_constants
+from geotoolz.readers.toy_sensor import constants as toy_constants
 
 
 class MissingReader(SensorReader):
@@ -26,7 +24,7 @@ class MissingReader(SensorReader):
 def test_readers_module_is_exported() -> None:
     assert gz.readers is not None
     assert gz.SensorReader is SensorReader
-    assert modis.Reader is not None
+    assert toy_sensor.Reader is not None
 
 
 def test_sensor_reader_abc_enforces_required_surface() -> None:
@@ -34,10 +32,10 @@ def test_sensor_reader_abc_enforces_required_surface() -> None:
         MissingReader()  # type: ignore[abstract]
 
 
-def test_modis_reader_passes_geodata_conformance() -> None:
+def test_toy_sensor_reader_passes_geodata_conformance() -> None:
     data = np.arange(4 * 5 * 6, dtype=np.float32).reshape(4, 5, 6)
-    reader = modis.Reader(
-        "synthetic-modis",
+    reader = toy_sensor.Reader(
+        "synthetic-toy",
         data=data,
         transform=Affine.translation(100, 200) * Affine.scale(10, -10),
         crs="EPSG:32631",
@@ -59,24 +57,26 @@ def test_modis_reader_passes_geodata_conformance() -> None:
     assert np.all(boundless.values[:, 0, 0] == -9999.0)
 
 
-def test_modis_constants_are_lazy_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_toy_sensor_constants_are_lazy_and_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[str] = []
 
     def fake_load_csv(package: str, resource: str) -> tuple[dict[str, str], ...]:
         calls.append(f"{package}:{resource}")
         return ({"name": "red"},)
 
-    monkeypatch.setattr(modis_constants, "_CACHE", {})
-    monkeypatch.setattr(modis_constants, "load_csv", fake_load_csv)
+    monkeypatch.setattr(toy_constants, "_CACHE", {})
+    monkeypatch.setattr(toy_constants, "load_csv", fake_load_csv)
 
     assert calls == []
-    assert modis_constants.BANDS == ({"name": "red"},)
-    assert modis_constants.BANDS == ({"name": "red"},)
-    assert modis_constants.CONSTANTS == {"solar_irradiance": ({"name": "red"},)}
-    assert modis_constants.CONSTANTS == {"solar_irradiance": ({"name": "red"},)}
+    assert toy_constants.BANDS == ({"name": "red"},)
+    assert toy_constants.BANDS == ({"name": "red"},)
+    assert toy_constants.CONSTANTS == {"solar_irradiance": ({"name": "red"},)}
+    assert toy_constants.CONSTANTS == {"solar_irradiance": ({"name": "red"},)}
     assert calls == [
-        "geotoolz.readers.modis:data/bands.csv",
-        "geotoolz.readers.modis:data/solar_irradiance.csv",
+        "geotoolz.readers.toy_sensor:data/bands.csv",
+        "geotoolz.readers.toy_sensor:data/solar_irradiance.csv",
     ]
 
 
@@ -84,35 +84,17 @@ def test_shared_csv_loader_caches_package_data() -> None:
     from geotoolz.readers._constants import load_csv
 
     load_csv.cache_clear()
-    bands = load_csv("geotoolz.readers.modis", "data/bands.csv")
+    bands = load_csv("geotoolz.readers.toy_sensor", "data/bands.csv")
     assert bands[2]["name"] == "red"
-    assert bands is load_csv("geotoolz.readers.modis", "data/bands.csv")
-
-
-def test_viirs_missing_optional_extra_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    real_find_spec = importlib.util.find_spec
-
-    def fake_find_spec(
-        name: str, *find_args: object, **find_kwargs: object
-    ) -> ModuleSpec | None:
-        if name == "h5py":
-            return None
-        return real_find_spec(name, *find_args, **find_kwargs)
-
-    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
-
-    from geotoolz.readers import viirs
-
-    with pytest.raises(ImportError, match=r"h5py.*geotoolz\[viirs\]"):
-        viirs.Reader("scene.h5")
+    assert bands is load_csv("geotoolz.readers.toy_sensor", "data/bands.csv")
 
 
 def test_optional_extra_guard_accepts_available_package() -> None:
     require_optional_dependency("json", extra="toy")
 
 
-def test_modis_ndvi_preset_matches_generic_operator() -> None:
-    op = modis.NDVI()
+def test_toy_sensor_ndvi_preset_matches_generic_operator() -> None:
+    op = toy_sensor.NDVI()
     expected = gz.indices.NDVI(red="red", nir="nir")
 
     assert op.get_config() == expected.get_config()
@@ -133,7 +115,7 @@ def test_modis_ndvi_preset_matches_generic_operator() -> None:
     np.testing.assert_allclose(op(gt).values, 0.5)
 
 
-def test_modis_package_data_is_in_wheel() -> None:
+def test_toy_sensor_package_data_is_in_wheel() -> None:
     wheelhouse = Path("dist")
     wheels = sorted(wheelhouse.glob("geotoolz-*.whl"))
     if not wheels:
@@ -142,5 +124,5 @@ def test_modis_package_data_is_in_wheel() -> None:
     with ZipFile(wheels[-1]) as zf:
         names = set(zf.namelist())
 
-    assert "geotoolz/readers/modis/data/bands.csv" in names
-    assert "geotoolz/readers/modis/data/solar_irradiance.csv" in names
+    assert "geotoolz/readers/toy_sensor/data/bands.csv" in names
+    assert "geotoolz/readers/toy_sensor/data/solar_irradiance.csv" in names

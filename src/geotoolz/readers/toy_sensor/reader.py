@@ -1,4 +1,4 @@
-"""Minimal MODIS reader skeleton used by the readers framework tests."""
+"""Minimal toy reference reader skeleton used by the readers framework tests."""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from affine import Affine
 from rasterio.windows import Window
 
 from geotoolz.readers._base import SensorReader, Track, as_path
-from geotoolz.readers.modis import constants
+from geotoolz.readers.toy_sensor import constants
 
 
 _DEFAULT_NUM_BANDS = 4
 
 
 class Reader(SensorReader):
-    """Synthetic MODIS reader implementing the sensor-reader contract.
+    """Toy reference reader implementing the sensor-reader contract.
 
     Args:
         path: Scene path recorded for auditability.
@@ -28,7 +28,7 @@ class Reader(SensorReader):
 
     Examples:
         >>> import numpy as np
-        >>> from geotoolz.readers.modis import Reader
+        >>> from geotoolz.readers.toy_sensor import Reader
         >>> reader = Reader("scene", data=np.zeros((4, 8, 8), dtype="float32"))
         >>> reader.load().shape
         (4, 8, 8)

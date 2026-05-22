@@ -1,12 +1,12 @@
-"""MODIS reader namespace."""
+"""toy reference reader namespace."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from geotoolz.readers.modis import constants, ops, presets
-from geotoolz.readers.modis.presets import NDVI
-from geotoolz.readers.modis.reader import Reader
+from geotoolz.readers.toy_sensor import constants, ops, presets
+from geotoolz.readers.toy_sensor.presets import NDVI
+from geotoolz.readers.toy_sensor.reader import Reader
 
 
 def __getattr__(name: str) -> Any:

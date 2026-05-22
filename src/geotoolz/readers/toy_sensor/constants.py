@@ -1,4 +1,4 @@
-"""MODIS calibration constants and lazy table accessors."""
+"""Toy-sensor calibration constants and lazy table accessors."""
 
 from __future__ import annotations
 
