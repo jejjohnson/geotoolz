@@ -40,6 +40,10 @@ from geotoolz.geom._src.array import (
 )
 
 
+_MIN_BOWTIE_COS = 0.1
+_RAY_DISCRIMINANT_TOLERANCE = 1.0e-6
+
+
 if TYPE_CHECKING:
     import geopandas as gpd
     from shapely.geometry.base import BaseGeometry
@@ -707,6 +711,304 @@ class Stitch(Operator):
         }
 
 
+class BowtieCorrection(Operator):
+    """Resample scan-edge pixels to reduce bowtie overlap.
+
+    The correction uses the sensor cross-track scan angle to estimate the
+    scan-angle IFOV expansion (``1 / cos(θ)``), then samples each scan row
+    from a compressed cross-track coordinate. ``scan_angle_max_deg=0`` is an
+    exact identity.
+
+    Args:
+        scan_angle_max_deg: Maximum off-nadir scan angle in degrees.
+        pixels_per_scan: Cross-track sample count.
+        scans_per_granule: Along-track scan count.
+        method: ``"nearest"`` or ``"bilinear"``.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> debowtie = gz.geom.BowtieCorrection(
+        ...     scan_angle_max_deg=55.0,
+        ...     pixels_per_scan=1354,
+        ...     scans_per_granule=203,
+        ... )
+    """
+
+    def __init__(
+        self,
+        *,
+        scan_angle_max_deg: float,
+        pixels_per_scan: int,
+        scans_per_granule: int,
+        method: str = "nearest",
+    ) -> None:
+        if not 0.0 <= scan_angle_max_deg < 70.0:
+            raise ValueError(
+                "scan_angle_max_deg must be >= 0.0 and < 70.0 for stable "
+                "cosine-based IFOV correction."
+            )
+        self.scan_angle_max_deg = scan_angle_max_deg
+        self.pixels_per_scan = pixels_per_scan
+        self.scans_per_granule = scans_per_granule
+        self.method = method
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        if self.method not in {"nearest", "bilinear"}:
+            raise ValueError("method must be 'nearest' or 'bilinear'.")
+        height, width = gt.shape[-2:]
+        if width != self.pixels_per_scan:
+            raise ValueError(
+                f"Expected {self.pixels_per_scan} cross-track pixels, got {width}."
+            )
+        if height != self.scans_per_granule:
+            raise ValueError(
+                f"Expected {self.scans_per_granule} along-track scans, got {height}."
+            )
+        if self.scan_angle_max_deg == 0:
+            return gt
+        rows = np.broadcast_to(
+            np.arange(height, dtype=np.float64)[:, None], (height, width)
+        )
+        centre = (width - 1) / 2.0
+        cols = np.arange(width, dtype=np.float64)
+        angles = np.deg2rad(
+            np.linspace(-self.scan_angle_max_deg, self.scan_angle_max_deg, width)
+        )
+        expansion = 1.0 / np.clip(np.cos(angles), _MIN_BOWTIE_COS, None)
+        src_cols = centre + (cols - centre) / expansion
+        sampled = _sample_array(
+            np.asarray(gt),
+            rows,
+            np.broadcast_to(src_cols[None, :], (height, width)),
+            method=self.method,
+            fill=gt.fill_value_default,
+        )
+        return gt.array_as_geotensor(sampled)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "scan_angle_max_deg": self.scan_angle_max_deg,
+            "pixels_per_scan": self.pixels_per_scan,
+            "scans_per_granule": self.scans_per_granule,
+            "method": self.method,
+        }
+
+
+class AntimeridianSplit(Operator):
+    """Split a geographic swath at a longitude wrap.
+
+    Longitudes are read from ``gt.attrs["lons"]`` / ``gt.attrs["lon"]`` when
+    present; otherwise they are derived from the affine grid for geographic
+    CRSs. If no jump larger than ``tolerance_deg`` is found, the output is a
+    single-item list containing the input unchanged.
+
+    Args:
+        crs: Geographic CRS used to interpret longitudes.
+        tolerance_deg: Absolute longitude jump threshold in degrees.
+    """
+
+    def __init__(self, *, crs: str = "EPSG:4326", tolerance_deg: float = 90.0) -> None:
+        self.crs = crs
+        self._parsed_crs = CRS.from_user_input(crs)
+        self.tolerance_deg = tolerance_deg
+
+    def _apply(self, gt: GeoTensor) -> list[GeoTensor]:
+        lons = _longitude_grid(gt, self._parsed_crs)
+        if lons is None:
+            raise ValueError(
+                "AntimeridianSplit requires geographic longitudes in attrs['lons'] "
+                "or an affine geographic grid."
+            )
+        diffs = np.abs(np.diff(lons, axis=1))
+        if diffs.size == 0 or np.nanmax(diffs) <= self.tolerance_deg:
+            return [gt]
+        # Reject swaths with more than one longitude discontinuity (e.g. polar
+        # passes that wrap twice). The single-split heuristic below cannot
+        # represent multi-jump cases correctly.
+        per_col_max = np.nanmax(diffs, axis=0)
+        n_jumps = int(np.sum(per_col_max > self.tolerance_deg))
+        if n_jumps > 1:
+            raise ValueError(
+                f"AntimeridianSplit found {n_jumps} longitude jumps above "
+                f"tolerance_deg={self.tolerance_deg}; only single-discontinuity "
+                "swaths are supported."
+            )
+        # The diff at column i is the jump between i and i + 1.
+        split_col = int(np.nanargmax(per_col_max)) + 1
+        left = gt.isel({"x": slice(0, split_col)})
+        right = gt.isel({"x": slice(split_col, gt.shape[-1])})
+        left = _with_sliced_longitudes(left, lons[:, :split_col])
+        right = _with_sliced_longitudes(right, lons[:, split_col:])
+        left_mean = float(np.nanmean(_normalise_longitudes(lons[:, :split_col])))
+        right_mean = float(np.nanmean(_normalise_longitudes(lons[:, split_col:])))
+        return [left, right] if left_mean < right_mean else [right, left]
+
+    def get_config(self) -> dict[str, Any]:
+        return {"crs": self.crs, "tolerance_deg": self.tolerance_deg}
+
+
+class GeostationaryParallaxCorrect(Operator):
+    """Shift pixels from apparent geostationary view position to nadir.
+
+    A spherical Earth ray-intersection model is used: for each output ground
+    pixel, the operator finds where an elevated target would appear to a
+    geostationary satellite and samples the input there. ``target_height_m=0``
+    is an exact identity. Off-limb pixels (whose viewing ray misses the Earth
+    sphere) are filled with ``gt.fill_value_default``.
+
+    Args:
+        satellite_lon_deg: Sub-satellite longitude.
+        satellite_height_m: Satellite height above the equator.
+        target_height_m: Scalar height, same-grid array, or same-grid GeoTensor.
+        earth_radius_m: Earth radius (spherical model).
+        method: ``"nearest"`` or ``"bilinear"``.
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        *,
+        satellite_lon_deg: float,
+        satellite_height_m: float = 35_786_023.0,
+        target_height_m: float | np.ndarray | GeoTensor = 0.0,
+        earth_radius_m: float = 6_378_137.0,
+        method: str = "bilinear",
+    ) -> None:
+        self.satellite_lon_deg = satellite_lon_deg
+        self.satellite_height_m = satellite_height_m
+        self.target_height_m = target_height_m
+        self.earth_radius_m = earth_radius_m
+        self.method = method
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        if self.method not in {"nearest", "bilinear"}:
+            raise ValueError("method must be 'nearest' or 'bilinear'.")
+        heights = _height_array(self.target_height_m, gt.shape[-2:])
+        if np.all(heights == 0):
+            return gt
+        lons_lats = _lonlat_centres(gt)
+        if lons_lats is None:
+            raise ValueError("GeostationaryParallaxCorrect requires EPSG:4326 grids.")
+        lons, lats = lons_lats
+        apparent_lon, apparent_lat, off_limb = _apparent_lonlat(
+            lons,
+            lats,
+            heights,
+            satellite_lon_deg=self.satellite_lon_deg,
+            satellite_height_m=self.satellite_height_m,
+            earth_radius_m=self.earth_radius_m,
+        )
+        inv = ~gt.transform
+        src_cols, src_rows = inv * (apparent_lon, apparent_lat)
+        sampled = _sample_array(
+            np.asarray(gt),
+            src_rows,
+            src_cols,
+            method=self.method,
+            fill=gt.fill_value_default,
+        )
+        if np.any(off_limb):
+            sampled = np.where(
+                off_limb,
+                np.asarray(gt.fill_value_default, dtype=sampled.dtype),
+                sampled,
+            )
+        return gt.array_as_geotensor(sampled)
+
+    def get_config(self) -> dict[str, Any]:
+        target: float | str
+        if np.isscalar(self.target_height_m):
+            target = float(self.target_height_m)
+        else:
+            target = f"<{type(self.target_height_m).__name__}>"
+        return {
+            "satellite_lon_deg": self.satellite_lon_deg,
+            "satellite_height_m": self.satellite_height_m,
+            "target_height_m": target,
+            "earth_radius_m": self.earth_radius_m,
+            "method": self.method,
+        }
+
+
+class SegmentStitch(Operator):
+    """Assemble indexed sensor segments into one contiguous ``GeoTensor``.
+
+    Segment order is read from each input's
+    ``attrs["__geotoolz_segment_meta__"]`` dictionary with
+    ``segment_index`` and ``n_segments`` keys. Both zero-based
+    (``0..n_segments-1``) and one-based (``1..n_segments``) indexing are
+    accepted. One-based indexing is selected only when an index equal to
+    ``n_segments`` is present; ambiguous missing-edge cases default to
+    zero-based. Missing segments are filled with ``fill``.
+
+    Args:
+        axis: ``"scan"`` / ``"y"`` for along-track, or ``"sample"`` /
+            ``"x"`` for cross-track.
+        fill: Value used for missing segments.
+    """
+
+    def __init__(self, *, axis: str = "scan", fill: float = np.nan) -> None:
+        self.axis = axis
+        self.fill = fill
+
+    def _apply(self, segments: list[GeoTensor]) -> GeoTensor:
+        if not segments:
+            raise ValueError("SegmentStitch requires at least one segment.")
+        axis_num = _segment_axis(self.axis)
+        metas = [_segment_meta(segment) for segment in segments]
+        n_segments = metas[0][1]
+        if any(n != n_segments for _, n in metas):
+            raise ValueError("All segments must declare the same n_segments.")
+        index_offset = 1 if max(index for index, _ in metas) == n_segments else 0
+        by_index: dict[int, GeoTensor] = {}
+        for (index, _), segment in zip(metas, segments, strict=True):
+            normalised = index - index_offset
+            if normalised in by_index:
+                raise ValueError(
+                    f"Duplicate segment_index {index} after index_offset "
+                    f"normalisation; each segment must declare a unique index."
+                )
+            by_index[normalised] = segment
+        if any(index < 0 or index >= n_segments for index in by_index):
+            raise ValueError("segment_index is outside the declared n_segments range.")
+        first_index = min(by_index)
+        first = by_index[first_index]
+        for segment in segments:
+            _validate_segment_compatible(first, segment, axis_num)
+        # Choose a fill that is representable in the segment dtype: integer
+        # tensors cannot hold NaN, so fall back to the first segment's own
+        # fill (or zero) when the requested fill is non-finite.
+        segment_fill = _coerce_segment_fill(self.fill, first)
+        pieces: list[np.ndarray] = []
+        segment_shape = first.shape
+        for index in range(n_segments):
+            if index in by_index:
+                pieces.append(np.asarray(by_index[index]))
+            else:
+                pieces.append(np.full(segment_shape, segment_fill, dtype=first.dtype))
+        values = np.concatenate(pieces, axis=axis_num)
+        row_before = first_index * segment_shape[-2] if axis_num == -2 else 0
+        col_before = first_index * segment_shape[-1] if axis_num == -1 else 0
+        transform = first.transform * Affine.translation(-col_before, -row_before)
+        attrs = dict(first.attrs or {})
+        attrs["__geotoolz_segment_meta__"] = {
+            "segment_index": 0,
+            "n_segments": 1,
+            "source_n_segments": n_segments,
+        }
+        return GeoTensor(
+            values,
+            transform,
+            first.crs,
+            fill_value_default=segment_fill,
+            attrs=attrs,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {"axis": self.axis, "fill": self.fill}
+
+
 class Mosaic(Operator):
     r"""Mosaic multiple `GeoTensor`s onto a single grid.
 
@@ -1031,3 +1333,299 @@ def _rasterize_like(
         fill=fill,
         all_touched=all_touched,
     )
+
+
+def _sample_array(
+    arr: np.ndarray,
+    rows: np.ndarray,
+    cols: np.ndarray,
+    *,
+    method: str,
+    fill: float | int | None,
+) -> np.ndarray:
+    if method == "nearest":
+        return _sample_nearest(arr, rows, cols, fill)
+    return _sample_bilinear(arr, rows, cols, fill)
+
+
+def _sample_nearest(
+    arr: np.ndarray,
+    rows: np.ndarray,
+    cols: np.ndarray,
+    fill: float | int | None,
+) -> np.ndarray:
+    height, width = arr.shape[-2:]
+    row_idx = np.rint(rows).astype(int)
+    col_idx = np.rint(cols).astype(int)
+    valid = (row_idx >= 0) & (row_idx < height) & (col_idx >= 0) & (col_idx < width)
+    safe_rows = np.clip(row_idx, 0, height - 1)
+    safe_cols = np.clip(col_idx, 0, width - 1)
+    sampled = arr[..., safe_rows, safe_cols]
+    return _apply_invalid_fill(sampled, valid, fill)
+
+
+def _sample_bilinear(
+    arr: np.ndarray,
+    rows: np.ndarray,
+    cols: np.ndarray,
+    fill: float | int | None,
+) -> np.ndarray:
+    height, width = arr.shape[-2:]
+    row0 = np.floor(rows).astype(int)
+    col0 = np.floor(cols).astype(int)
+    row1 = row0 + 1
+    col1 = col0 + 1
+    # A sample is valid whenever the source coordinate lies inside the raster
+    # footprint, including the trailing row/column. Clamping the upper
+    # neighbour below keeps the bilinear formula well defined at the edge —
+    # its weight is zero there, so the edge value is returned exactly.
+    valid = (rows >= 0) & (rows <= height - 1) & (cols >= 0) & (cols <= width - 1)
+    safe_row0 = np.clip(row0, 0, height - 1)
+    safe_row1 = np.clip(row1, 0, height - 1)
+    safe_col0 = np.clip(col0, 0, width - 1)
+    safe_col1 = np.clip(col1, 0, width - 1)
+    row_weight = (
+        (rows - row0).astype(arr.dtype, copy=False)
+        if np.issubdtype(arr.dtype, np.floating)
+        else rows - row0
+    )
+    col_weight = (
+        (cols - col0).astype(arr.dtype, copy=False)
+        if np.issubdtype(arr.dtype, np.floating)
+        else cols - col0
+    )
+    one = arr.dtype.type(1) if np.issubdtype(arr.dtype, np.floating) else 1.0
+    top_left = arr[..., safe_row0, safe_col0]
+    top_right = arr[..., safe_row0, safe_col1]
+    bottom_left = arr[..., safe_row1, safe_col0]
+    bottom_right = arr[..., safe_row1, safe_col1]
+    sampled = (
+        top_left * (one - row_weight) * (one - col_weight)
+        + top_right * (one - row_weight) * col_weight
+        + bottom_left * row_weight * (one - col_weight)
+        + bottom_right * row_weight * col_weight
+    )
+    if np.issubdtype(arr.dtype, np.floating) and sampled.dtype != arr.dtype:
+        sampled = sampled.astype(arr.dtype, copy=False)
+    return _apply_invalid_fill(sampled, valid, fill)
+
+
+def _apply_invalid_fill(
+    sampled: np.ndarray,
+    valid: np.ndarray,
+    fill: float | int | None,
+) -> np.ndarray:
+    """Fill samples that fall outside the input grid.
+
+    ``GeoTensor.fill_value_default`` can be ``None``; in that case this
+    internal resampler uses ``0`` for invalid samples, matching georeader's
+    constructor default.
+    """
+    if valid.all():
+        return sampled
+    fill_value = 0 if fill is None else fill
+    # ``valid`` is a 2D (H, W) mask; ``sampled`` may have leading band
+    # dimensions. ``np.where`` broadcasts the mask across them, while
+    # boolean indexing with a 2D mask collapses those trailing axes.
+    return np.where(valid, sampled, np.asarray(fill_value, dtype=sampled.dtype))
+
+
+def _longitude_grid(gt: GeoTensor, expected_crs: str | CRS) -> np.ndarray | None:
+    attrs = gt.attrs or {}
+    spatial_shape = gt.shape[-2:]
+    for key in ("lons", "lon", "longitude"):
+        if key in attrs:
+            lons = np.asarray(attrs[key], dtype=np.float64)
+            if lons.ndim == 1:
+                if lons.shape[0] != spatial_shape[1]:
+                    raise ValueError(
+                        f"attrs['{key}'] has length {lons.shape[0]} but the "
+                        f"GeoTensor has width {spatial_shape[1]}."
+                    )
+                return np.broadcast_to(lons[None, :], spatial_shape)
+            if lons.shape != spatial_shape:
+                raise ValueError(
+                    f"attrs['{key}'] has shape {lons.shape} but the GeoTensor "
+                    f"spatial shape is {spatial_shape}."
+                )
+            return lons
+    parsed_expected = (
+        expected_crs
+        if isinstance(expected_crs, CRS)
+        else CRS.from_user_input(expected_crs)
+    )
+    if CRS.from_user_input(gt.crs) != parsed_expected:
+        return None
+    centres = _lonlat_centres(gt)
+    if centres is None:
+        return None
+    return centres[0]
+
+
+def _lonlat_centres(gt: GeoTensor) -> tuple[np.ndarray, np.ndarray] | None:
+    if CRS.from_user_input(gt.crs) != CRS.from_epsg(4326):
+        return None
+    height, width = gt.shape[-2:]
+    rows, cols = np.meshgrid(
+        np.arange(height, dtype=np.float64) + 0.5,
+        np.arange(width, dtype=np.float64) + 0.5,
+        indexing="ij",
+    )
+    xs, ys = gt.transform * (cols, rows)
+    return np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
+
+
+def _normalise_longitudes(lons: np.ndarray) -> np.ndarray:
+    return ((lons + 180.0) % 360.0) - 180.0
+
+
+def _with_sliced_longitudes(gt: GeoTensor, lons: np.ndarray) -> GeoTensor:
+    attrs = dict(gt.attrs or {})
+    attrs["lons"] = _normalise_longitudes(lons)
+    return GeoTensor(
+        np.asarray(gt),
+        gt.transform,
+        gt.crs,
+        fill_value_default=gt.fill_value_default,
+        attrs=attrs,
+    )
+
+
+def _height_array(
+    target_height_m: float | np.ndarray | GeoTensor, shape: tuple[int, int]
+) -> np.ndarray:
+    if isinstance(target_height_m, GeoTensor):
+        heights = np.asarray(target_height_m, dtype=np.float64)
+    elif np.isscalar(target_height_m):
+        return np.full(shape, float(target_height_m), dtype=np.float64)
+    else:
+        heights = np.asarray(target_height_m, dtype=np.float64)
+    if heights.shape[-2:] != shape:
+        raise ValueError(
+            f"target_height_m shape {heights.shape[-2:]} does not match {shape}."
+        )
+    if heights.ndim > 2:
+        heights = heights.reshape(-1, *shape)[0]
+    return heights
+
+
+def _apparent_lonlat(
+    lons: np.ndarray,
+    lats: np.ndarray,
+    heights: np.ndarray,
+    *,
+    satellite_lon_deg: float,
+    satellite_height_m: float,
+    earth_radius_m: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    lon_rad = np.deg2rad(lons)
+    lat_rad = np.deg2rad(lats)
+    sat_lon = np.deg2rad(satellite_lon_deg)
+    surface = _spherical_xyz(lon_rad, lat_rad, earth_radius_m)
+    # Scale each surface radial vector outward by the target height.
+    elevated = surface * ((earth_radius_m + heights)[None, ...] / earth_radius_m)
+    satellite = np.array(
+        [
+            (earth_radius_m + satellite_height_m) * np.cos(sat_lon),
+            (earth_radius_m + satellite_height_m) * np.sin(sat_lon),
+            0.0,
+        ],
+        dtype=np.float64,
+    )[:, None, None]
+    direction = elevated - satellite
+    a = np.sum(direction * direction, axis=0)
+    b = 2.0 * np.sum(satellite * direction, axis=0)
+    c = np.sum(satellite * satellite, axis=0) - earth_radius_m**2
+    discriminant = b * b - 4.0 * a * c
+    off_limb = discriminant < -_RAY_DISCRIMINANT_TOLERANCE
+    near = (-b - np.sqrt(np.maximum(discriminant, 0.0))) / (2.0 * a)
+    apparent = satellite + direction * near[None, ...]
+    apparent_lon = np.rad2deg(np.arctan2(apparent[1], apparent[0]))
+    apparent_lat = np.rad2deg(
+        np.arctan2(apparent[2], np.hypot(apparent[0], apparent[1]))
+    )
+    return _normalise_longitudes(apparent_lon), apparent_lat, off_limb
+
+
+def _spherical_xyz(
+    lon_rad: np.ndarray,
+    lat_rad: np.ndarray,
+    radius: float,
+) -> np.ndarray:
+    cos_lat = np.cos(lat_rad)
+    return np.stack(
+        [
+            radius * cos_lat * np.cos(lon_rad),
+            radius * cos_lat * np.sin(lon_rad),
+            radius * np.sin(lat_rad),
+        ],
+        axis=0,
+    )
+
+
+def _segment_axis(axis: str) -> int:
+    if axis in {"scan", "y"}:
+        return -2
+    if axis in {"sample", "x"}:
+        return -1
+    raise ValueError("axis must be 'scan'/'y' or 'sample'/'x'.")
+
+
+def _coerce_segment_fill(fill: float | int, first: GeoTensor) -> float | int:
+    """Return a fill value that is representable in ``first.dtype``.
+
+    Integer-typed sensor segments cannot hold ``NaN``; in that case fall back
+    to the segment's own ``fill_value_default`` (when finite) or ``0``.
+    """
+    dtype = np.asarray(first).dtype
+    if np.issubdtype(dtype, np.floating):
+        return fill
+    try:
+        is_nan = bool(np.isnan(fill))
+    except TypeError:
+        is_nan = False
+    if not is_nan:
+        return fill
+    existing = first.fill_value_default
+    if existing is not None:
+        try:
+            if not bool(np.isnan(existing)):
+                return existing
+        except TypeError:
+            return existing
+    return 0
+
+
+def _segment_meta(segment: GeoTensor) -> tuple[int, int]:
+    attrs = segment.attrs or {}
+    meta = attrs.get("__geotoolz_segment_meta__")
+    if not isinstance(meta, dict):
+        raise ValueError("Each segment must define attrs['__geotoolz_segment_meta__'].")
+    try:
+        return int(meta["segment_index"]), int(meta["n_segments"])
+    except KeyError as exc:
+        raise ValueError(
+            "Segment metadata requires segment_index and n_segments."
+        ) from exc
+
+
+def _validate_segment_compatible(
+    first: GeoTensor,
+    segment: GeoTensor,
+    axis_num: int,
+) -> None:
+    if CRS.from_user_input(segment.crs) != CRS.from_user_input(first.crs):
+        raise ValueError("All segments must share a CRS.")
+    if axis_num == -2 and (
+        segment.shape[:-2] != first.shape[:-2] or segment.shape[-1] != first.shape[-1]
+    ):
+        raise ValueError("All scan segments must share band and sample dimensions.")
+    if axis_num == -1 and (
+        segment.shape[:-2] != first.shape[:-2] or segment.shape[-2] != first.shape[-2]
+    ):
+        raise ValueError("All sample segments must share band and scan dimensions.")
+    if not np.isclose(segment.transform.a, first.transform.a) or not np.isclose(
+        segment.transform.e,
+        first.transform.e,
+    ):
+        raise ValueError("All segments must share pixel size.")
