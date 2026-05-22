@@ -191,7 +191,9 @@ def test_read_netcdf_allows_indexes_on_two_dim_variable(tmp_path: Path) -> None:
         variable[:] = np.arange(6, dtype=np.float32).reshape(2, 3)
 
     out = io.ReadNetCDF(path=path, variable="values", indexes=[1])()
-    np.testing.assert_array_equal(out.values, np.arange(6, dtype=np.float32).reshape(2, 3))
+    np.testing.assert_array_equal(
+        out.values, np.arange(6, dtype=np.float32).reshape(2, 3)
+    )
 
 
 def test_read_netcdf_missing_dependency_has_clear_message(

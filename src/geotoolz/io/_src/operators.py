@@ -160,9 +160,7 @@ def _select_indexes(values: Any, indexes: list[int] | None) -> np.ndarray:
         # Treat a non-band dataset as a single-layer raster: indexes=[1]
         # selects the only layer and is a no-op; anything else is invalid.
         if zero_based != [0]:
-            raise GeoToolzIOError(
-                "indexes require a dataset with a leading band axis."
-            )
+            raise GeoToolzIOError("indexes require a dataset with a leading band axis.")
         return array
     return np.take(array, zero_based, axis=0)
 
@@ -183,9 +181,7 @@ def _read_hdf5_dataset(source: Any, indexes: list[int] | None) -> np.ndarray:
         ndim = np.asarray(source.shape).size
     if ndim < 3:
         if zero_based != [0]:
-            raise GeoToolzIOError(
-                "indexes require a dataset with a leading band axis."
-            )
+            raise GeoToolzIOError("indexes require a dataset with a leading band axis.")
         return np.asanyarray(source[...])
     # h5py supports fancy indexing on the leading axis only when indices are
     # in increasing order; sort, hyperslab-read, then reorder if needed.
