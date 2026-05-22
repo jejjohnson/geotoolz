@@ -28,6 +28,23 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.8](https://github.com/jejjohnson/xrtoolz/compare/v0.0.7...v0.0.8) (2026-05-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename xr_toolz → xrtoolz, depend on pipekit for composition core ([#203](https://github.com/jejjohnson/xrtoolz/issues/203))
+
+### Features
+
+* **geo:** add 1-D wavelet analysis (Torrence-Compo + Liu rectified power) ([#197](https://github.com/jejjohnson/xrtoolz/issues/197)) ([4aeabfe](https://github.com/jejjohnson/xrtoolz/commit/4aeabfebe8003492a3fa56b406c75c9f1bb340a8))
+* rename xr_toolz → xrtoolz, depend on pipekit for composition core ([#203](https://github.com/jejjohnson/xrtoolz/issues/203)) ([3e3d8a4](https://github.com/jejjohnson/xrtoolz/commit/3e3d8a437c7739f6ff07ea718420f481db25add4))
+
+
+### Bug Fixes
+
+* **docs:** repair api/core.md autodoc + migrate notebook imports ([#205](https://github.com/jejjohnson/xrtoolz/issues/205)) ([14792ab](https://github.com/jejjohnson/xrtoolz/commit/14792ab8aef8f3b5c7e394987665861c2e9cf6d0))
+
 ## [0.0.7](https://github.com/jejjohnson/xrtoolz/compare/v0.0.6...v0.0.7) (2026-05-09)
 
 
