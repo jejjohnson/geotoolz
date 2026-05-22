@@ -154,6 +154,46 @@ def test_read_netcdf_decodes_cf_and_recovers_grid_mapping(tmp_path: Path) -> Non
     assert out.fill_value_default == -9999
 
 
+def test_read_netcdf_decodes_fill_value_to_nan(tmp_path: Path) -> None:
+    netcdf4 = pytest.importorskip("netCDF4")
+    path = tmp_path / "fill.nc"
+    with netcdf4.Dataset(path, "w") as root:
+        root.createDimension("band", 1)
+        root.createDimension("y", 2)
+        root.createDimension("x", 2)
+        variable = root.createVariable(
+            "values",
+            "i2",
+            ("band", "y", "x"),
+            fill_value=-9999,
+        )
+        variable.scale_factor = 0.5
+        variable.add_offset = 1.0
+        variable.set_auto_maskandscale(False)
+        variable[:] = np.array([[[1, -9999], [3, 4]]], dtype=np.int16)
+
+    out = io.ReadNetCDF(path=path, variable="values", indexes=[1])()
+
+    assert out.values.dtype.kind == "f"
+    assert np.isnan(out.values[0, 0, 1])
+    assert out.values[0, 0, 0] == 1 * 0.5 + 1.0
+    assert out.values[0, 1, 0] == 3 * 0.5 + 1.0
+    assert out.values[0, 1, 1] == 4 * 0.5 + 1.0
+
+
+def test_read_netcdf_allows_indexes_on_two_dim_variable(tmp_path: Path) -> None:
+    netcdf4 = pytest.importorskip("netCDF4")
+    path = tmp_path / "twod.nc"
+    with netcdf4.Dataset(path, "w") as root:
+        root.createDimension("y", 2)
+        root.createDimension("x", 3)
+        variable = root.createVariable("values", "f4", ("y", "x"))
+        variable[:] = np.arange(6, dtype=np.float32).reshape(2, 3)
+
+    out = io.ReadNetCDF(path=path, variable="values", indexes=[1])()
+    np.testing.assert_array_equal(out.values, np.arange(6, dtype=np.float32).reshape(2, 3))
+
+
 def test_read_netcdf_missing_dependency_has_clear_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

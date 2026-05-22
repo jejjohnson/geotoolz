@@ -150,15 +150,52 @@ def _json_attrs(attrs: Any) -> dict[str, Any]:
 
 
 def _select_indexes(values: Any, indexes: list[int] | None) -> np.ndarray:
-    array = np.asarray(values)
+    array = np.asanyarray(values)
     if indexes is None:
         return array
-    if array.ndim < 3:
-        raise GeoToolzIOError("indexes require a dataset with a leading band axis.")
     zero_based = [index - 1 for index in indexes]
     if any(index < 0 for index in zero_based):
         raise GeoToolzIOError("indexes are 1-based and must be positive.")
+    if array.ndim < 3:
+        # Treat a non-band dataset as a single-layer raster: indexes=[1]
+        # selects the only layer and is a no-op; anything else is invalid.
+        if zero_based != [0]:
+            raise GeoToolzIOError(
+                "indexes require a dataset with a leading band axis."
+            )
+        return array
     return np.take(array, zero_based, axis=0)
+
+
+def _read_hdf5_dataset(source: Any, indexes: list[int] | None) -> np.ndarray:
+    """Read an h5py dataset, applying a band hyperslab when ``indexes`` is set.
+
+    Avoids materializing the full dataset before band selection so that
+    requesting a single band only reads that band off disk.
+    """
+    if indexes is None:
+        return np.asanyarray(source[...])
+    zero_based = [index - 1 for index in indexes]
+    if any(index < 0 for index in zero_based):
+        raise GeoToolzIOError("indexes are 1-based and must be positive.")
+    ndim = getattr(source, "ndim", None)
+    if ndim is None:
+        ndim = np.asarray(source.shape).size
+    if ndim < 3:
+        if zero_based != [0]:
+            raise GeoToolzIOError(
+                "indexes require a dataset with a leading band axis."
+            )
+        return np.asanyarray(source[...])
+    # h5py supports fancy indexing on the leading axis only when indices are
+    # in increasing order; sort, hyperslab-read, then reorder if needed.
+    order = np.argsort(zero_based)
+    sorted_indexes = [zero_based[i] for i in order]
+    sliced = np.asanyarray(source[sorted_indexes])
+    if list(order) == list(range(len(order))):
+        return sliced
+    inverse = np.argsort(order)
+    return sliced[inverse]
 
 
 def _fill_value_from_attrs(attrs: dict[str, Any]) -> Any:
@@ -801,7 +838,7 @@ class ReadHDF(SourceOperator):
             with h5py.File(self.path, "r") as file:
                 source = file[self.dataset]
                 attrs = _json_attrs(source.attrs)
-                values = _select_indexes(source[...], self.indexes)
+                values = _read_hdf5_dataset(source, self.indexes)
                 out_attrs: dict[str, Any] = {"attrs": attrs}
                 if self.geolocation is not None:
                     lat_name, lon_name = self.geolocation
