@@ -22,7 +22,7 @@ asks are:
    test on the paired loss differential between two competing
    reconstructions.
 
-xr_toolz already exposes the basic pixel metrics (RMSE, bias, MAE,
+xrtoolz already exposes the basic pixel metrics (RMSE, bias, MAE,
 correlation, R²) but lacks the spatial-binning, region-stratification,
 and significance-testing primitives that turn those into the standard
 SSH-mapping evaluation outputs. This issue adds them.
@@ -43,7 +43,7 @@ convenience constructors on top.
 ```python
 import numpy as np
 import xarray as xr
-from xr_toolz.metrics import bin_residuals_2d
+from xrtoolz.metrics import bin_residuals_2d
 
 ds_map = bin_residuals_2d(
     ds_track,
@@ -62,7 +62,7 @@ ds_map = bin_residuals_2d(
 
 ```python
 import regionmask
-from xr_toolz.metrics import scores_by_region
+from xrtoolz.metrics import scores_by_region
 
 basins = regionmask.defined_regions.natural_earth_v5_0_0.ocean_basins_50
 
@@ -81,7 +81,7 @@ ds_scores = scores_by_region(
 > open-ocean low-eddy" partition.*
 
 ```python
-from xr_toolz.geo.regimes import coastal_regions, equatorial_regions, eddy_regions
+from xrtoolz.geo.regimes import coastal_regions, equatorial_regions, eddy_regions
 
 coastal  = coastal_regions(distance_km=200)         # Regions
 equator  = equatorial_regions(lat_threshold=5.0)    # Regions
@@ -98,7 +98,7 @@ ds_scores = scores_by_region(ds_track,
 > along-track points. Is one significantly better?*
 
 ```python
-from xr_toolz.metrics import dm_test
+from xrtoolz.metrics import dm_test
 
 loss_a = (ds_a["ssh_interp"] - ds_a["ssha"]) ** 2
 loss_b = (ds_b["ssh_interp"] - ds_b["ssha"]) ** 2
@@ -109,7 +109,7 @@ dm_stat, pvalue = dm_test(loss_a, loss_b, h=1, alternative="two-sided")
 ### 2.5 As Layer-1 Operators inside a Sequential
 
 ```python
-from xr_toolz.metrics import BinnedResiduals2D, RegionScores
+from xrtoolz.metrics import BinnedResiduals2D, RegionScores
 
 pipeline = Sequential([
     SampleAtPoints(...),                            # ODC-1.2
@@ -122,7 +122,7 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Pixel metrics (RMSE/bias/MAE/correlation/R²) | [`metrics/_src/pixel.py`](../../src/xr_toolz/metrics/_src/pixel.py) | reuse |
+| Pixel metrics (RMSE/bias/MAE/correlation/R²) | [`metrics/_src/pixel.py`](../../src/xrtoolz/metrics/_src/pixel.py) | reuse |
 | Region polygons + mask machinery | `regionmask` (already a dep) | leverage |
 | `geo/_src/masks.py` | exists | reuse / extend |
 | 2D binning of point residuals | — | **add** `bin_residuals_2d` |
@@ -136,7 +136,7 @@ pipeline = Sequential([
 ### 4.1 Tier B — 2D residual binning
 
 ```python
-# src/xr_toolz/metrics/_src/binned.py
+# src/xrtoolz/metrics/_src/binned.py
 def bin_residuals_2d(
     ds_track: xr.Dataset, *,
     var_ref: str, var_pred: str,
@@ -181,13 +181,13 @@ Internals:
 
 This single function replaces the four hard-coded regime branches in
 the upstream. The existing pixel-metric kernels in
-[`metrics/_src/pixel.py`](../../src/xr_toolz/metrics/_src/pixel.py) are
+[`metrics/_src/pixel.py`](../../src/xrtoolz/metrics/_src/pixel.py) are
 reused inside the groupby.
 
 ### 4.3 Canonical regime constructors
 
 ```python
-# src/xr_toolz/geo/_src/regimes.py
+# src/xrtoolz/geo/_src/regimes.py
 def coastal_regions(
     *, distance_km: float = 200.0,
     resolution: str = "110",       # land_110, land_50, land_10
@@ -233,7 +233,7 @@ Three constructors, three different return shapes intentional:
 ### 4.4 Diebold–Mariano test
 
 ```python
-# src/xr_toolz/metrics/_src/dm_test.py
+# src/xrtoolz/metrics/_src/dm_test.py
 def dm_test(
     loss_a: ArrayLike, loss_b: ArrayLike, *,
     h: int = 1,                            # forecast horizon → HAC lag
@@ -256,7 +256,7 @@ unavailable).
 ### 4.5 Layer-1 Operators
 
 ```python
-# src/xr_toolz/metrics/operators.py
+# src/xrtoolz/metrics/operators.py
 class BinnedResiduals2D(Operator):
     def __init__(self, *, var_ref, var_pred, lon_bins, lat_bins,
                  lon="longitude", lat="latitude",
@@ -283,7 +283,7 @@ fit the `Dataset → Dataset` pipeline shape.
 | Distance-to-land | `scipy.ndimage.distance_transform_edt` (on rasterised landmask) |
 | Per-region groupby | `xarray.Dataset.groupby` |
 | HAC variance / Newey-West | hand-implemented (~15 LOC) — no `statsmodels` |
-| Existing pixel metrics | [`metrics/_src/pixel.py`](../../src/xr_toolz/metrics/_src/pixel.py) |
+| Existing pixel metrics | [`metrics/_src/pixel.py`](../../src/xrtoolz/metrics/_src/pixel.py) |
 
 No new top-level dependencies.
 
@@ -291,20 +291,20 @@ No new top-level dependencies.
 
 ```python
 # Tier B primitives
-xr_toolz.metrics.bin_residuals_2d(ds_track, *, var_ref, var_pred,
+xrtoolz.metrics.bin_residuals_2d(ds_track, *, var_ref, var_pred,
                                   lon, lat, lon_bins, lat_bins, statistics)
-xr_toolz.metrics.scores_by_region(ds_track, *, var_ref, var_pred,
+xrtoolz.metrics.scores_by_region(ds_track, *, var_ref, var_pred,
                                   regions, lon, lat, metrics, region_dim)
-xr_toolz.metrics.dm_test(loss_a, loss_b, *, h, alternative, power, hln_correction)
+xrtoolz.metrics.dm_test(loss_a, loss_b, *, h, alternative, power, hln_correction)
 
 # Regime constructors
-xr_toolz.geo.regimes.coastal_regions(*, distance_km, resolution)
-xr_toolz.geo.regimes.equatorial_regions(*, lat_threshold)
-xr_toolz.geo.regimes.eddy_regions(ds, *, var, threshold, window, lon, lat)
+xrtoolz.geo.regimes.coastal_regions(*, distance_km, resolution)
+xrtoolz.geo.regimes.equatorial_regions(*, lat_threshold)
+xrtoolz.geo.regimes.eddy_regions(ds, *, var, threshold, window, lon, lat)
 
 # Operators
-xr_toolz.metrics.BinnedResiduals2D(...)
-xr_toolz.metrics.RegionScores(...)
+xrtoolz.metrics.BinnedResiduals2D(...)
+xrtoolz.metrics.RegionScores(...)
 ```
 
 ## 7. Tests

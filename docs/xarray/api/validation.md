@@ -6,71 +6,71 @@ panels slot into `Sequential` and `Graph` pipelines as the last step.
 
 ## V1 — Scale & Spectral Skill
 
-::: xr_toolz.viz.validation.LeadTimeSkillPanel
+::: xrtoolz.viz.validation.LeadTimeSkillPanel
 
-::: xr_toolz.viz.validation.ScaleSkillPanel
+::: xrtoolz.viz.validation.ScaleSkillPanel
 
-::: xr_toolz.viz.validation.SpectralSkillPanel
+::: xrtoolz.viz.validation.SpectralSkillPanel
 
 ## V1.5 — PSD Plots
 
 Power-spectrum visualisations consuming
-[`xr_toolz.transforms.power_spectrum`](metrics.md#spectral) and
-[`xr_toolz.metrics.psd_score`](metrics.md#spectral) outputs.
+[`xrtoolz.transforms.power_spectrum`](metrics.md#spectral) and
+[`xrtoolz.metrics.psd_score`](metrics.md#spectral) outputs.
 
-::: xr_toolz.viz.validation.PSDIsotropicPanel
+::: xrtoolz.viz.validation.PSDIsotropicPanel
 
-::: xr_toolz.viz.validation.PSDIsotropicScorePanel
+::: xrtoolz.viz.validation.PSDIsotropicScorePanel
 
-::: xr_toolz.viz.validation.PSDSpaceTimePanel
+::: xrtoolz.viz.validation.PSDSpaceTimePanel
 
-::: xr_toolz.viz.validation.PSDSpaceTimeScorePanel
+::: xrtoolz.viz.validation.PSDSpaceTimeScorePanel
 
 ## Region & Rotary diagnostics
 
 `RegionScoreBarPanel` consumes region-stratified metric outputs (e.g.
-[`xr_toolz.metrics.scores_by_region`](metrics.md)) and
+[`xrtoolz.metrics.scores_by_region`](metrics.md)) and
 `RotaryPolarizationPanel` consumes rotary-spectrum polarization fields
-from [`xr_toolz.transforms.rotary_spectrum`](metrics.md).
+from [`xrtoolz.transforms.rotary_spectrum`](metrics.md).
 
-::: xr_toolz.viz.validation.RegionScoreBarPanel
+::: xrtoolz.viz.validation.RegionScoreBarPanel
 
-::: xr_toolz.viz.validation.RotaryPolarizationPanel
+::: xrtoolz.viz.validation.RotaryPolarizationPanel
 
 ## Spatial snapshots
 
-::: xr_toolz.viz.validation.SpatialMapPanel
+::: xrtoolz.viz.validation.SpatialMapPanel
 
 ### Cartopy presets
 
 The `projection` kwarg of `SpatialMapPanel` accepts preset names from
-[`xr_toolz.viz.PRESETS`][xr_toolz.viz.PRESETS] (`"global"`,
+[`xrtoolz.viz.PRESETS`][xrtoolz.viz.PRESETS] (`"global"`,
 `"north_atlantic"`, `"gulf_stream"`, `"kuroshio"`,
 `"mediterranean"`), a cartopy class name, or an instantiated cartopy
 CRS. With a preset, the right `set_extent` is applied automatically.
 
-::: xr_toolz.viz.make_axes
+::: xrtoolz.viz.make_axes
 
 ### Variable → colormap registry
 
 Default colormaps for spatial panels are looked up from the curated
-[`xr_toolz.types.REGISTRY`][xr_toolz.types.REGISTRY]: every entry
+[`xrtoolz.types.REGISTRY`][xrtoolz.types.REGISTRY]: every entry
 carries a `cmap` field (e.g. SSH → `RdBu_r`, SST → `RdYlBu_r`,
 salinity → `viridis`, ice → `Blues`).
-[`xr_toolz.viz.cmap_for`][xr_toolz.viz.cmap_for] performs the
+[`xrtoolz.viz.cmap_for`][xrtoolz.viz.cmap_for] performs the
 lookup; `SpatialMapPanel(var=...)` calls it automatically when
 `cmap` is unset.
 
-::: xr_toolz.viz.cmap_for
+::: xrtoolz.viz.cmap_for
 
 ## V3 — Lagrangian / Eulerian
 
-::: xr_toolz.viz.validation.EulerianLagrangianPanel
+::: xrtoolz.viz.validation.EulerianLagrangianPanel
 
 ## V4 — Process Budgets
 
-::: xr_toolz.viz.validation.ProcessBudgetPanel
+::: xrtoolz.viz.validation.ProcessBudgetPanel
 
 ## V5 — Event Verification
 
-::: xr_toolz.viz.validation.EventVerificationPanel
+::: xrtoolz.viz.validation.EventVerificationPanel

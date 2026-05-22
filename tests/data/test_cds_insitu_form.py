@@ -17,15 +17,15 @@ from typing import Any
 
 import pytest
 
-from xr_toolz.data import (
+from xrtoolz.data import (
     INSITU,
     REANALYSIS,
     CDSCredentials,
     CDSFormProfile,
     CDSSource,
 )
-from xr_toolz.data._src.cds.profiles import resolve_profile
-from xr_toolz.types import BBox, TimeRange
+from xrtoolz.data._src.cds.profiles import resolve_profile
+from xrtoolz.types import BBox, TimeRange
 
 
 class FakeCdsClient:

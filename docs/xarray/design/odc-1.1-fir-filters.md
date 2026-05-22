@@ -31,7 +31,7 @@ The community reaches for **Lanczos** (windowed-sinc) FIR filters because:
   spacing.
 
 We currently expose only Butterworth IIR
-([`xr_toolz.interpolate.lowpass_filter`](../../src/xr_toolz/interpolate/_src/smooth.py)).
+([`xrtoolz.interpolate.lowpass_filter`](../../src/xrtoolz/interpolate/_src/smooth.py)).
 That covers gridded data well but is the wrong default for along-track
 SLA: gentle roll-off, opaque cutoff units, and IIR phase compensation
 relies on `sosfiltfilt`'s reverse-pass which is sensitive to short
@@ -54,7 +54,7 @@ normalized Nyquist.
 
 ```python
 import xarray as xr
-from xr_toolz.geo import bandpass_wavelength
+from xrtoolz.geo import bandpass_wavelength
 
 ds_track = xr.open_dataset("swot_along_track.nc")
 ds_band  = bandpass_wavelength(
@@ -77,7 +77,7 @@ more accurate than haversine).
 > I don't want to hand-pick FIR coefficients.*
 
 ```python
-from xr_toolz.interpolate import fir_filter
+from xrtoolz.interpolate import fir_filter
 
 ds_smooth = fir_filter(
     ds, dim="time",
@@ -109,8 +109,8 @@ ds_lp = bandpass_wavelength(
 > into a `Sequential`.*
 
 ```python
-from xr_toolz.geo import BandpassWavelength
-from xr_toolz.core import Sequential
+from xrtoolz.geo import BandpassWavelength
+from xrtoolz.core import Sequential
 
 pipeline = Sequential([
     BandpassWavelength(
@@ -127,7 +127,7 @@ pipeline = Sequential([
 
 | Capability | Current state | This proposal |
 |---|---|---|
-| Butterworth IIR low/high/band/stop | [`array_smooth.lowpass_filter`](../../src/xr_toolz/interpolate/_src/array_smooth.py) | Unchanged |
+| Butterworth IIR low/high/band/stop | [`array_smooth.lowpass_filter`](../../src/xrtoolz/interpolate/_src/array_smooth.py) | Unchanged |
 | Generic IIR family (Cheby, Ellip, Bessel) | — | Out of scope |
 | FIR Lanczos | — | **Add** |
 | FIR Kaiser (tunable atten ↔ taps) | — | **Add** |
@@ -142,7 +142,7 @@ pipeline = Sequential([
 ### 4.1 Tap design (single helper, two windows)
 
 ```python
-# src/xr_toolz/interpolate/_src/array_smooth.py
+# src/xrtoolz/interpolate/_src/array_smooth.py
 def _fir_taps(
     *,
     cutoff: float | tuple[float, float],
@@ -174,7 +174,7 @@ Band-pass = low-pass(f<sub>hi</sub>) − low-pass(f<sub>lo</sub>); high-pass
 ### 4.2 Tier A — array kernel
 
 ```python
-# src/xr_toolz/interpolate/_src/array_smooth.py
+# src/xrtoolz/interpolate/_src/array_smooth.py
 def fir_filter(
     arr: ArrayLike, *,
     axis: int = -1,
@@ -195,7 +195,7 @@ component-wise (existing `_as_floating` helper).
 ### 4.3 Tier B — xarray wrapper
 
 ```python
-# src/xr_toolz/interpolate/_src/smooth.py
+# src/xrtoolz/interpolate/_src/smooth.py
 def fir_filter(
     ds: xr.Dataset, *,
     dim: str,
@@ -214,7 +214,7 @@ variables.
 ### 4.4 Domain-aware bandpass
 
 ```python
-# src/xr_toolz/geo/_src/along_track.py — new module
+# src/xrtoolz/geo/_src/along_track.py — new module
 def median_dx_km(lon: ArrayLike, lat: ArrayLike) -> float:
     """Median geodesic spacing between consecutive points (km, WGS-84).
 
@@ -255,7 +255,7 @@ Internals:
 ### 4.5 Layer-1 Operator
 
 ```python
-# src/xr_toolz/geo/operators.py
+# src/xrtoolz/geo/operators.py
 class BandpassWavelength(Operator):
     """Apply a wavelength-domain bandpass to a single variable."""
 
@@ -289,21 +289,21 @@ No new top-level dependencies.
 
 ```python
 # Tier A — array kernels
-xr_toolz.interpolate.array.fir_filter(arr, *, axis, cutoff, method, btype,
+xrtoolz.interpolate.array.fir_filter(arr, *, axis, cutoff, method, btype,
                                       num_taps, attenuation_db)
 
 # Tier B — xarray
-xr_toolz.interpolate.fir_filter(ds, *, dim, cutoff, method, btype,
+xrtoolz.interpolate.fir_filter(ds, *, dim, cutoff, method, btype,
                                 num_taps, attenuation_db)
 
 # Domain-aware (geo)
-xr_toolz.geo.median_dx_km(lon, lat)
-xr_toolz.geo.bandpass_wavelength(ds, *, dim, lambda_min_km, lambda_max_km,
+xrtoolz.geo.median_dx_km(lon, lat)
+xrtoolz.geo.bandpass_wavelength(ds, *, dim, lambda_min_km, lambda_max_km,
                                  spacing_km, method, num_taps,
                                  attenuation_db, lon, lat)
 
 # Operator
-xr_toolz.geo.BandpassWavelength(...)
+xrtoolz.geo.BandpassWavelength(...)
 ```
 
 Existing `lowpass_filter` (Butterworth) is unchanged. `fir_filter` is the
@@ -371,7 +371,7 @@ Target: ~12 new test cases.
    across the whole convolution kernel. The upstream notebooks
    pre-segment along-track data into NaN-free chunks before filtering.
    We document this limitation; an `interpolate_nans=True` convenience
-   flag (using `xr_toolz.interpolate.gap_fill`) is a future enhancement,
+   flag (using `xrtoolz.interpolate.gap_fill`) is a future enhancement,
    not blocking.
 5. **Operator placement.** `BandpassWavelength` could equally live in
    `interpolate.operators` (mirrors the smoother) or `geo.operators`

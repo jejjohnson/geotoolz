@@ -40,18 +40,18 @@ _PIXEL_NAMES: tuple[str, ...] = (
 
 @pytest.mark.parametrize("name", _PIXEL_NAMES)
 def test_metrics_array_namespace_exports(name: str) -> None:
-    """Tier A is reachable via ``xr_toolz.metrics.array``."""
-    from xr_toolz.metrics import array as ma
+    """Tier A is reachable via ``xrtoolz.metrics.array``."""
+    from xrtoolz.metrics import array as ma
 
-    assert hasattr(ma, name), f"xr_toolz.metrics.array.{name} missing"
+    assert hasattr(ma, name), f"xrtoolz.metrics.array.{name} missing"
     assert callable(getattr(ma, name))
 
 
 @pytest.mark.parametrize("name", _PIXEL_NAMES)
 def test_metrics_tier_b_matches_tier_a(name: str) -> None:
     """Tier B (Dataset, ``dim=``) numerically matches Tier A (axis=)."""
-    from xr_toolz.metrics import array as ma
-    from xr_toolz.metrics._src import pixel as tier_b
+    from xrtoolz.metrics import array as ma
+    from xrtoolz.metrics._src import pixel as tier_b
 
     rng = np.random.default_rng(42)
     pred = rng.standard_normal((5, 8))
@@ -79,8 +79,8 @@ def test_metrics_tier_b_matches_tier_a(name: str) -> None:
 )
 def test_metrics_tier_c_matches_tier_b(op_name: str, fn_name: str) -> None:
     """Tier C Operator output equals Tier B function output."""
-    from xr_toolz.metrics import operators as ops
-    from xr_toolz.metrics._src import pixel as tier_b
+    from xrtoolz.metrics import operators as ops
+    from xrtoolz.metrics._src import pixel as tier_b
 
     rng = np.random.default_rng(7)
     pred = rng.standard_normal((3, 6))
@@ -101,8 +101,8 @@ def test_metrics_tier_c_matches_tier_b(op_name: str, fn_name: str) -> None:
 
 
 def test_transforms_array_namespace_exports() -> None:
-    """Tier A is reachable via ``xr_toolz.transforms.array``."""
-    from xr_toolz.transforms import array as ta
+    """Tier A is reachable via ``xrtoolz.transforms.array``."""
+    from xrtoolz.transforms import array as ta
 
     for name in ("fft", "ifft", "power_spectrum"):
         assert hasattr(ta, name)
@@ -111,7 +111,7 @@ def test_transforms_array_namespace_exports() -> None:
 
 def test_transforms_array_fft_roundtrip() -> None:
     """``ifft(fft(x)) == x`` exercises the Tier A kernel on its own."""
-    from xr_toolz.transforms import array as ta
+    from xrtoolz.transforms import array as ta
 
     rng = np.random.default_rng(0)
     x = rng.standard_normal((4, 16))
@@ -120,7 +120,7 @@ def test_transforms_array_fft_roundtrip() -> None:
 
 def test_transforms_array_power_spectrum_matches_manual_fft() -> None:
     """Tier A ``power_spectrum`` matches a hand-rolled ``|fft|**2``."""
-    from xr_toolz.transforms import array as ta
+    from xrtoolz.transforms import array as ta
 
     rng = np.random.default_rng(1)
     x = rng.standard_normal((8,))
@@ -136,8 +136,8 @@ def test_transforms_array_power_spectrum_matches_manual_fft() -> None:
 
 
 def test_calc_array_namespace_exports() -> None:
-    """Tier A is reachable via ``xr_toolz.calc.array``."""
-    from xr_toolz.calc import array as ca
+    """Tier A is reachable via ``xrtoolz.calc.array``."""
+    from xrtoolz.calc import array as ca
 
     for name in ("partial", "gradient"):
         assert hasattr(ca, name)
@@ -152,7 +152,7 @@ def test_calc_array_partial_matches_tier_b_cartesian() -> None:
     checks the two numerical engines agree on a smooth field at default
     accuracy, which is the contract D11 cares about for the array tier.
     """
-    from xr_toolz.calc import array as ca, partial as tier_b_partial
+    from xrtoolz.calc import array as ca, partial as tier_b_partial
 
     x_coord = np.linspace(0.0, 2.0 * np.pi, 64)
     y_coord = np.linspace(0.0, 2.0 * np.pi, 32)
@@ -169,7 +169,7 @@ def test_calc_array_partial_matches_tier_b_cartesian() -> None:
 
 def test_calc_array_gradient_returns_per_axis() -> None:
     """Tier A ``gradient`` returns one component per requested axis."""
-    from xr_toolz.calc import array as ca
+    from xrtoolz.calc import array as ca
 
     rng = np.random.default_rng(0)
     x = rng.standard_normal((4, 5, 6))
@@ -195,17 +195,17 @@ _INTERPOLATE_ARRAY_NAMES: tuple[str, ...] = (
 
 @pytest.mark.parametrize("name", _INTERPOLATE_ARRAY_NAMES)
 def test_interpolate_array_namespace_exports(name: str) -> None:
-    """Tier A is reachable via ``xr_toolz.interpolate.array``."""
-    from xr_toolz.interpolate import array as ia
+    """Tier A is reachable via ``xrtoolz.interpolate.array``."""
+    from xrtoolz.interpolate import array as ia
 
-    assert hasattr(ia, name), f"xr_toolz.interpolate.array.{name} missing"
+    assert hasattr(ia, name), f"xrtoolz.interpolate.array.{name} missing"
     assert callable(getattr(ia, name))
 
 
 def test_interpolate_smooth_tier_b_matches_tier_a() -> None:
     """Tier B (Dataset, ``dim=``) numerically matches Tier A (``axis=``)."""
-    from xr_toolz.interpolate import array as ia
-    from xr_toolz.interpolate._src import smooth as tier_b
+    from xrtoolz.interpolate import array as ia
+    from xrtoolz.interpolate._src import smooth as tier_b
 
     rng = np.random.default_rng(0)
     x = rng.standard_normal((3, 64))
@@ -226,8 +226,8 @@ def test_interpolate_smooth_tier_b_matches_tier_a() -> None:
 
 def test_interpolate_smooth_tier_c_matches_tier_b() -> None:
     """Tier C ``Operator`` output equals Tier B function output."""
-    from xr_toolz.interpolate._src import smooth as tier_b
-    from xr_toolz.interpolate.operators import (
+    from xrtoolz.interpolate._src import smooth as tier_b
+    from xrtoolz.interpolate.operators import (
         GaussianSmooth,
         LowpassFilter,
         MovingAverage,
@@ -253,8 +253,8 @@ def test_interpolate_smooth_tier_c_matches_tier_b() -> None:
 
 def test_interpolate_coord_remap_tier_b_matches_tier_a() -> None:
     """Tier B ``remap_axis`` matches the Tier A kernel on the same data."""
-    from xr_toolz.interpolate import array as ia
-    from xr_toolz.interpolate._src import coord_remap as tier_b
+    from xrtoolz.interpolate import array as ia
+    from xrtoolz.interpolate._src import coord_remap as tier_b
 
     src = np.linspace(0.0, 100.0, 21)
     tgt = np.linspace(0.0, 100.0, 11)
@@ -271,8 +271,8 @@ def test_interpolate_coord_remap_tier_b_matches_tier_a() -> None:
 
 def test_interpolate_coord_remap_tier_c_matches_tier_b() -> None:
     """Tier C ``RemapAxis`` Operator output equals Tier B function output."""
-    from xr_toolz.interpolate._src import coord_remap as tier_b
-    from xr_toolz.interpolate.operators import RemapAxis
+    from xrtoolz.interpolate._src import coord_remap as tier_b
+    from xrtoolz.interpolate.operators import RemapAxis
 
     src = np.linspace(0.0, 100.0, 21)
     tgt = np.linspace(0.0, 100.0, 11)

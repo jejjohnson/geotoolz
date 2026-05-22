@@ -12,16 +12,16 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz import Sequential
-from xr_toolz.geo import remove_mean, rename_variables
-from xr_toolz.geo.operators import (
+from xrtoolz import Sequential
+from xrtoolz.geo import remove_mean, rename_variables
+from xrtoolz.geo.operators import (
     RemoveMean,
     RenameVariables,
     SelectVariables,
     ValidateCoords,
 )
-from xr_toolz.interpolate import regrid_like
-from xr_toolz.interpolate.operators import RegridLike
+from xrtoolz.interpolate import regrid_like
+from xrtoolz.interpolate.operators import RegridLike
 
 
 @pytest.fixture

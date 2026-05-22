@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from xr_toolz.types import BBox, Station, StationCollection
+from xrtoolz.types import BBox, Station, StationCollection
 
 
 def _s(

@@ -1,15 +1,15 @@
-"""Tests for CF standard_name rename helpers in :mod:`xr_toolz.geo`."""
+"""Tests for CF standard_name rename helpers in :mod:`xrtoolz.geo`."""
 
 from __future__ import annotations
 
 import pytest
 import xarray as xr
 
-from xr_toolz.geo import (
+from xrtoolz.geo import (
     rename_from_cf_standard_names,
     rename_to_cf_standard_names,
 )
-from xr_toolz.geo.operators import RenameFromCFStandardNames, RenameToCFStandardNames
+from xrtoolz.geo.operators import RenameFromCFStandardNames, RenameToCFStandardNames
 
 
 # ---------- helpers -----------------------------------------------------------

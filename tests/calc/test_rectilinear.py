@@ -1,4 +1,4 @@
-"""Tests for :mod:`xr_toolz.calc` on rectilinear (non-uniform) grids."""
+"""Tests for :mod:`xrtoolz.calc` on rectilinear (non-uniform) grids."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.calc import gradient, partial
+from xrtoolz.calc import gradient, partial
 
 
 def _stretched_grid(nx: int = 80) -> np.ndarray:

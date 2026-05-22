@@ -4,12 +4,12 @@ version: 0.2.0
 ---
 
 !!! note "Module paths shown are proposed design targets"
-    The snippets below import from `xr_toolz.metrics.*`, `xr_toolz.budgets`,
-    `xr_toolz.phenomena`, and `xr_toolz.lagrangian` — submodules that **do not
+    The snippets below import from `xrtoolz.metrics.*`, `xrtoolz.budgets`,
+    `xrtoolz.phenomena`, and `xrtoolz.lagrangian` — submodules that **do not
     exist in the current export surface**. Today, validators such as
-    `ValidateCoords` live under `xr_toolz.geo.operators` (not
-    `xr_toolz.geo.validation`), and metric primitives live under
-    `xr_toolz.geo.metrics`. Treat the imports below as design-target aliases;
+    `ValidateCoords` live under `xrtoolz.geo.operators` (not
+    `xrtoolz.geo.validation`), and metric primitives live under
+    `xrtoolz.geo.metrics`. Treat the imports below as design-target aliases;
     once the modules ship, the snippets will be copy/paste-ready against the
     proposed layout.
 
@@ -32,10 +32,10 @@ A model can perform well in global RMSE while losing small-scale variance or deg
 ### Demo API
 
 ```python
-from xr_toolz.core import Graph, Input
-from xr_toolz.geo.operators import ValidateCoords  # current export path
-from xr_toolz.metrics import RMSE, PSDScore
-from xr_toolz.metrics.forecast import RMSEByLead
+from xrtoolz.core import Graph, Input
+from xrtoolz.geo.operators import ValidateCoords  # current export path
+from xrtoolz.metrics import RMSE, PSDScore
+from xrtoolz.metrics.forecast import RMSEByLead
 ```
 
 ### Demo Example Usage
@@ -74,8 +74,8 @@ Pointwise scores penalize a displaced feature twice: once where the observed obj
 ### Demo API
 
 ```python
-from xr_toolz.metrics import RMSE
-from xr_toolz.metrics.structural import SSIM, PhaseShiftError, GradientDifference
+from xrtoolz.metrics import RMSE
+from xrtoolz.metrics.structural import SSIM, PhaseShiftError, GradientDifference
 ```
 
 ### Demo Example Usage
@@ -109,9 +109,9 @@ Geophysical skill is often regime-dependent. Coastal regions, boundary currents,
 ### Demo API
 
 ```python
-from xr_toolz.geo.masks import AddRegionMask
-from xr_toolz.metrics import RMSE
-from xr_toolz.metrics.scale import EvaluateByRegion
+from xrtoolz.geo.masks import AddRegionMask
+from xrtoolz.metrics import RMSE
+from xrtoolz.metrics.scale import EvaluateByRegion
 ```
 
 ### Demo Example Usage
@@ -144,7 +144,7 @@ For chaotic geophysical systems, a useful ensemble should be both calibrated and
 ### Demo API
 
 ```python
-from xr_toolz.metrics.probabilistic import CRPS, SpreadSkillRatio, RankHistogram, EnsembleCoverage
+from xrtoolz.metrics.probabilistic import CRPS, SpreadSkillRatio, RankHistogram, EnsembleCoverage
 ```
 
 ### Demo Example Usage
@@ -171,10 +171,10 @@ Conventional error scores do not guarantee dynamical consistency. Balance residu
 ### Demo API
 
 ```python
-from xr_toolz.core import Graph, Input
-from xr_toolz.metrics import RMSE
-from xr_toolz.metrics.physical import GeostrophicBalanceError, DivergenceError
-from xr_toolz.budgets import HeatBudgetResidual
+from xrtoolz.core import Graph, Input
+from xrtoolz.metrics import RMSE
+from xrtoolz.metrics.physical import GeostrophicBalanceError, DivergenceError
+from xrtoolz.budgets import HeatBudgetResidual
 ```
 
 ### Demo Example Usage

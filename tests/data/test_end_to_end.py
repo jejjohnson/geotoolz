@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 import xarray as xr
 
-from xr_toolz.data import (
+from xrtoolz.data import (
     CATALOG,
     CDSCredentials,
     CDSSource,
@@ -17,7 +17,7 @@ from xr_toolz.data import (
     DataSource,
     describe,
 )
-from xr_toolz.types import BBox, TimeRange
+from xrtoolz.types import BBox, TimeRange
 
 
 # ---- Fakes shared across the end-to-end suite ---------------------------

@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from xr_toolz.transforms.encoders import (
+from xrtoolz.transforms.encoders import (
     cyclical_encode,
     encode_time_cyclical,
     encode_time_ordinal,
@@ -19,7 +19,7 @@ from xr_toolz.transforms.encoders import (
     time_rescale,
     time_unrescale,
 )
-from xr_toolz.transforms.operators import (
+from xrtoolz.transforms.operators import (
     CyclicalEncode,
     EncodeTimeCyclical,
     EncodeTimeOrdinal,

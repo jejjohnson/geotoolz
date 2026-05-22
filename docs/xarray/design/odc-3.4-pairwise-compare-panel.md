@@ -15,9 +15,9 @@ ships two paired-comparison plot recipes —
 each producing the same 6-panel layout (two scales × three methods:
 ref, study, relative-diff). Plus two utility functions
 (`regional_zoom`, `convert_longitude`) that are already covered by
-[`geo/_src/subset.py`](../../src/xr_toolz/geo/_src/subset.py).
+[`geo/_src/subset.py`](../../src/xrtoolz/geo/_src/subset.py).
 
-The new pattern that's *not* covered by existing xr_toolz viz primitives
+The new pattern that's *not* covered by existing xrtoolz viz primitives
 is the **paired study-vs-ref-with-diff column**:
 
 ```
@@ -51,7 +51,7 @@ So the actual gap is one new `_ValidationPanel`, not a new pipeline.
 
 ```python
 import xarray as xr
-from xr_toolz.viz.validation import SpatialMapPanel, PairwiseComparePanel
+from xrtoolz.viz.validation import SpatialMapPanel, PairwiseComparePanel
 
 ds = xr.open_dataset("error_variance_by_method.nc")  # dims: (method, lat, lon)
 
@@ -67,7 +67,7 @@ fig = panel(ds)
 ### 2.2 Compare two PSD-score panels (absolute diff)
 
 ```python
-from xr_toolz.viz.validation import PSDSpaceTimeScorePanel, PairwiseComparePanel
+from xrtoolz.viz.validation import PSDSpaceTimeScorePanel, PairwiseComparePanel
 
 panel = PairwiseComparePanel(
     PSDSpaceTimeScorePanel(threshold=0.5),
@@ -82,7 +82,7 @@ fig = panel(ds_psd_by_method)
 > *I want the upstream "two scales × (ref, study, diff)" layout.*
 
 ```python
-from xr_toolz.viz.validation import FacetPanel, PairwiseComparePanel, SpatialMapPanel
+from xrtoolz.viz.validation import FacetPanel, PairwiseComparePanel, SpatialMapPanel
 
 panel = FacetPanel(
     PairwiseComparePanel(
@@ -99,7 +99,7 @@ fig = panel(ds)            # dims (scale, method, lat, lon)  — returns Figure
 ### 2.4 As an Operator inside a Sequential
 
 ```python
-from xr_toolz.core import Sequential
+from xrtoolz.core import Sequential
 
 pipeline = Sequential([
     BinnedResiduals2D(...),         # ODC-1.4
@@ -112,10 +112,10 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](../../src/xr_toolz/viz/validation/_src/base.py) | reuse |
-| `SpatialMapPanel`, `PSDSpaceTimeScorePanel`, etc. | [`viz/validation/_src/`](../../src/xr_toolz/viz/validation/_src/) | reuse as inner panels |
+| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](../../src/xrtoolz/viz/validation/_src/base.py) | reuse |
+| `SpatialMapPanel`, `PSDSpaceTimeScorePanel`, etc. | [`viz/validation/_src/`](../../src/xrtoolz/viz/validation/_src/) | reuse as inner panels |
 | `FacetPanel` (N-way over a categorical dim) | proposed in ODC-2.3 | sibling concept |
-| `regional_zoom`, `convert_longitude` | [`geo/_src/subset.py`](../../src/xr_toolz/geo/_src/subset.py) | already present |
+| `regional_zoom`, `convert_longitude` | [`geo/_src/subset.py`](../../src/xrtoolz/geo/_src/subset.py) | already present |
 | Pairwise A-vs-B-with-diff comparison | — | **add** `PairwiseComparePanel` |
 
 ## 4. Design
@@ -139,7 +139,7 @@ always win.
 ### 4.2 Class
 
 ```python
-# src/xr_toolz/viz/validation/_src/compare.py
+# src/xrtoolz/viz/validation/_src/compare.py
 class PairwiseComparePanel(_ValidationPanel):
     """Side-by-side study vs. reference comparison with optional diff cell.
 
@@ -243,7 +243,7 @@ No new dependencies.
 ## 6. Public API surface
 
 ```python
-xr_toolz.viz.validation.PairwiseComparePanel(
+xrtoolz.viz.validation.PairwiseComparePanel(
     panel,                   # _ValidationPanel | Callable[(ds, ax), Any]
     *,
     method_dim="method",
@@ -257,7 +257,7 @@ xr_toolz.viz.validation.PairwiseComparePanel(
 )
 ```
 
-Re-exported from `xr_toolz.viz.validation.__init__`.
+Re-exported from `xrtoolz.viz.validation.__init__`.
 
 ## 7. Tests
 
@@ -285,7 +285,7 @@ Target: ~13 cases.
   raw N-way side-by-side without diff. Diff over multiple methods needs
   a different UX (matrix? row of pairwise diffs?) — separate proposal.
 - **`regional_zoom`, `convert_longitude`** — already in
-  [`geo/_src/subset.py`](../../src/xr_toolz/geo/_src/subset.py).
+  [`geo/_src/subset.py`](../../src/xrtoolz/geo/_src/subset.py).
 - **NetCDF group loading** (`xr.open_dataset(..., group="all_scale")`) —
   pipeline I/O detail, not library concern.
 - **`hvplot` rendering** — matplotlib only.

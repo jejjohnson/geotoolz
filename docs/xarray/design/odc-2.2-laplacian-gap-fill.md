@@ -20,7 +20,7 @@ things:
 Of those two:
 
 - **(1) is already done** by our existing
-  [`regrid_like(ds, target, dims=("lat","lon","time"), method="linear")`](../../src/xr_toolz/interpolate/_src/grid_to_grid.py).
+  [`regrid_like(ds, target, dims=("lat","lon","time"), method="linear")`](../../src/xrtoolz/interpolate/_src/grid_to_grid.py).
   `xr.Dataset.interp` natively handles a `time` coord including
   `datetime64`. No new function needed — just a docstring nudge and a
   3-D regrid integration test for confidence.
@@ -49,7 +49,7 @@ existing 3-D regrid path is verified by test rather than re-implemented.
 
 ```python
 import xarray as xr
-from xr_toolz.interpolate import regrid_like, fillnan_laplacian
+from xrtoolz.interpolate import regrid_like, fillnan_laplacian
 
 ds_target = regrid_like(
     ds_source, ds_target,
@@ -75,8 +75,8 @@ ds_filled = fillnan_laplacian(
 ### 2.3 As a Layer-1 Operator inside a Sequential
 
 ```python
-from xr_toolz.interpolate import RegridLike, FillNaNLaplacian
-from xr_toolz.core import Sequential
+from xrtoolz.interpolate import RegridLike, FillNaNLaplacian
+from xrtoolz.core import Sequential
 
 regrid_and_fill = Sequential([
     RegridLike(target=ds_target, dims=("lat", "lon", "time")),
@@ -88,10 +88,10 @@ regrid_and_fill = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| 3-D `(lon, lat, time)` regrid | [`regrid_like`](../../src/xr_toolz/interpolate/_src/grid_to_grid.py) — `xr.Dataset.interp` handles datetime64 | verify via test, document |
-| Convex-hull `griddata` infill | [`fillnan_spatial`](../../src/xr_toolz/interpolate/_src/gap_fill.py) | unchanged |
-| RBF infill | [`fillnan_rbf`](../../src/xr_toolz/interpolate/_src/gap_fill.py) | unchanged |
-| Temporal `interpolate_na` | [`fillnan_temporal`](../../src/xr_toolz/interpolate/_src/gap_fill.py) | unchanged |
+| 3-D `(lon, lat, time)` regrid | [`regrid_like`](../../src/xrtoolz/interpolate/_src/grid_to_grid.py) — `xr.Dataset.interp` handles datetime64 | verify via test, document |
+| Convex-hull `griddata` infill | [`fillnan_spatial`](../../src/xrtoolz/interpolate/_src/gap_fill.py) | unchanged |
+| RBF infill | [`fillnan_rbf`](../../src/xrtoolz/interpolate/_src/gap_fill.py) | unchanged |
+| Temporal `interpolate_na` | [`fillnan_temporal`](../../src/xrtoolz/interpolate/_src/gap_fill.py) | unchanged |
 | Iterative Laplacian relaxation | — | **add** `fillnan_laplacian` |
 | Operator wrapper | — | **add** `FillNaNLaplacian` |
 
@@ -134,7 +134,7 @@ smooth fields. For maximum-fidelity Gauss–Seidel users can pass
 ### 4.2 Tier B — xarray primitive
 
 ```python
-# src/xr_toolz/interpolate/_src/gap_fill.py — new function alongside fillnan_*
+# src/xrtoolz/interpolate/_src/gap_fill.py — new function alongside fillnan_*
 def fillnan_laplacian(
     da: xr.DataArray, *,
     max_iter: int = 1000,
@@ -182,7 +182,7 @@ def fillnan_laplacian(
 ### 4.3 Layer-1 Operator
 
 ```python
-# src/xr_toolz/interpolate/operators.py
+# src/xrtoolz/interpolate/operators.py
 class FillNaNLaplacian(Operator):
     """Iterative Laplacian gap-fill operator."""
 
@@ -224,7 +224,7 @@ pattern explicitly.
 
 ### 4.5 Module docstring nudge
 
-Soften the [`gap_fill.py`](../../src/xr_toolz/interpolate/_src/gap_fill.py)
+Soften the [`gap_fill.py`](../../src/xrtoolz/interpolate/_src/gap_fill.py)
 header — replace:
 
 > *"for Gauss-Seidel or ESMF-conservative regridding, use those
@@ -248,12 +248,12 @@ No new dependencies. The implementation is pure numpy.
 ## 6. Public API surface
 
 ```python
-xr_toolz.interpolate.fillnan_laplacian(da, *, max_iter, tol, relaxation,
+xrtoolz.interpolate.fillnan_laplacian(da, *, max_iter, tol, relaxation,
                                        boundary, lon, lat)
-xr_toolz.interpolate.FillNaNLaplacian(...)
+xrtoolz.interpolate.FillNaNLaplacian(...)
 ```
 
-Re-exported from `xr_toolz.interpolate.__init__`.
+Re-exported from `xrtoolz.interpolate.__init__`.
 
 ## 7. Tests
 

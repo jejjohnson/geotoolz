@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.metrics import (
+from xrtoolz.metrics import (
     MAE,
     RMSE,
     Bias,
@@ -344,7 +344,7 @@ def test_evaluate_by_region_get_config_json_safe(
 
 
 def test_works_inside_graph(lead_time_pair: tuple[xr.Dataset, xr.Dataset]) -> None:
-    from xr_toolz.core import Graph, Input
+    from pipekit import Graph, Input
 
     ds_p, ds_r = lead_time_pair
     p = Input("p")

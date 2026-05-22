@@ -20,7 +20,7 @@ self-contained version of the canonical SSH-mapping skill report:
    `(freq_lon, freq_time)`, plus `(λx_min, λt_min)` extracted from the
    level=0.5 contour.
 
-xr_toolz already exposes virtually every primitive these need. What's
+xrtoolz already exposes virtually every primitive these need. What's
 missing is:
 
 - A 2-D analog of our 1-D `resolved_scale` that reduces the existing
@@ -44,7 +44,7 @@ of composition.
 
 ```python
 import xarray as xr
-from xr_toolz.metrics import rmse_skill_scores
+from xrtoolz.metrics import rmse_skill_scores
 
 ds = rmse_skill_scores(ds_rec, ds_ref, variable="ssh")
 # ds has data_vars:
@@ -61,7 +61,7 @@ ds = rmse_skill_scores(ds_rec, ds_ref, variable="ssh")
 > jointly resolved at score = 0.5.*
 
 ```python
-from xr_toolz.metrics import psd_score_spacetime
+from xrtoolz.metrics import psd_score_spacetime
 
 score, summary = psd_score_spacetime(
     ds_rec, ds_ref,
@@ -78,7 +78,7 @@ score, summary = psd_score_spacetime(
 ### 2.3 Plug score map into the existing `PSDSpaceTimeScorePanel`
 
 ```python
-from xr_toolz.viz.validation import PSDSpaceTimeScorePanel
+from xrtoolz.viz.validation import PSDSpaceTimeScorePanel
 
 panel = PSDSpaceTimeScorePanel(...)
 fig, axes = panel(score)
@@ -88,12 +88,12 @@ fig, axes = panel(score)
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `1 − RMSE / RMS_ref` primitive | [`array_pixel.nrmse`](../../src/xr_toolz/metrics/_src/array_pixel.py) — exactly the upstream formula | reuse |
-| `rmse`, `mse`, `bias`, `correlation`, `r2_score` | [`array_pixel`](../../src/xr_toolz/metrics/_src/array_pixel.py) | reuse |
-| 2-D `psd_score(ds_pred, ds_ref, variable, psd_dims, avg_dims)` | [`spectral.py:92`](../../src/xr_toolz/metrics/_src/spectral.py) | reuse |
-| 1-D `resolved_scale` | [`spectral.py:131`](../../src/xr_toolz/metrics/_src/spectral.py) | reuse |
-| 2-D `find_intercept_2D` (skimage `find_contours`) | [`spectral.py:207`](../../src/xr_toolz/metrics/_src/spectral.py) | reuse |
-| Space-time score viz | [`viz/validation/_src/psd.py` `PSDSpaceTimeScorePanel`](../../src/xr_toolz/viz/validation/_src/psd.py) | reuse |
+| `1 − RMSE / RMS_ref` primitive | [`array_pixel.nrmse`](../../src/xrtoolz/metrics/_src/array_pixel.py) — exactly the upstream formula | reuse |
+| `rmse`, `mse`, `bias`, `correlation`, `r2_score` | [`array_pixel`](../../src/xrtoolz/metrics/_src/array_pixel.py) | reuse |
+| 2-D `psd_score(ds_pred, ds_ref, variable, psd_dims, avg_dims)` | [`spectral.py:92`](../../src/xrtoolz/metrics/_src/spectral.py) | reuse |
+| 1-D `resolved_scale` | [`spectral.py:131`](../../src/xrtoolz/metrics/_src/spectral.py) | reuse |
+| 2-D `find_intercept_2D` (skimage `find_contours`) | [`spectral.py:207`](../../src/xrtoolz/metrics/_src/spectral.py) | reuse |
+| Space-time score viz | [`viz/validation/_src/psd.py` `PSDSpaceTimeScorePanel`](../../src/xrtoolz/viz/validation/_src/psd.py) | reuse |
 | 2-D `resolved_scale_2d` summary | — | **add** |
 | RMSE-skill bundle | — | **add** `rmse_skill_scores` |
 | Space-time PSD-score driver | — | **add** `psd_score_spacetime` |
@@ -103,7 +103,7 @@ fig, axes = panel(score)
 ### 4.1 `resolved_scale_2d` — summary along the level contour
 
 ```python
-# src/xr_toolz/metrics/_src/spectral.py  (alongside resolved_scale)
+# src/xrtoolz/metrics/_src/spectral.py  (alongside resolved_scale)
 def resolved_scale_2d(
     score: xr.DataArray | xr.Dataset, *,
     level: float = 0.5,
@@ -139,7 +139,7 @@ def resolved_scale_2d(
 ### 4.2 `rmse_skill_scores` — RMSE-skill bundle
 
 ```python
-# src/xr_toolz/metrics/_src/composite.py — new module
+# src/xrtoolz/metrics/_src/composite.py — new module
 def rmse_skill_scores(
     ds_pred: xr.Dataset, ds_ref: xr.Dataset, *,
     variable: str,
@@ -220,13 +220,13 @@ No new dependencies.
 ## 6. Public API surface
 
 ```python
-xr_toolz.metrics.rmse_skill_scores(ds_pred, ds_ref, *, variable, space_dims, time_dim)
-xr_toolz.metrics.resolved_scale_2d(score, *, level, space_dim, time_dim)
-xr_toolz.metrics.psd_score_spacetime(ds_pred, ds_ref, *, variable, space_dim,
+xrtoolz.metrics.rmse_skill_scores(ds_pred, ds_ref, *, variable, space_dims, time_dim)
+xrtoolz.metrics.resolved_scale_2d(score, *, level, space_dim, time_dim)
+xrtoolz.metrics.psd_score_spacetime(ds_pred, ds_ref, *, variable, space_dim,
                                      time_dim, avg_dims, level, **xrft_kwargs)
 ```
 
-All re-exported from `xr_toolz.metrics.__init__`.
+All re-exported from `xrtoolz.metrics.__init__`.
 
 ## 7. Tests
 
@@ -267,7 +267,7 @@ Target: ~9 cases.
 ## 10. Risks / open questions
 
 1. **Where the new code lives.**
-   - `resolved_scale_2d` → [`spectral.py`](../../src/xr_toolz/metrics/_src/spectral.py)
+   - `resolved_scale_2d` → [`spectral.py`](../../src/xrtoolz/metrics/_src/spectral.py)
      alongside `resolved_scale` / `find_intercept_2D`.
    - Bundles → new `metrics/_src/composite.py` (cross-cuts RMSE + PSD).
 2. **Return type of `psd_score_spacetime`.** Tuple `(score, summary)`

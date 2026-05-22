@@ -12,7 +12,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from xr_toolz.data import CDSInsituArchive, CDSSource
+from xrtoolz.data import CDSInsituArchive, CDSSource
 
 
 def _default_scratch_root() -> Path:

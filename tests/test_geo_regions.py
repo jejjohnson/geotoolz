@@ -10,7 +10,7 @@ import regionmask
 import xarray as xr
 from shapely.geometry import MultiPolygon, Polygon
 
-from xr_toolz.geo import (
+from xrtoolz.geo import (
     bbox_region,
     custom_region,
     load_region_file,
@@ -20,8 +20,8 @@ from xr_toolz.geo import (
     resolve_region,
     subset_to_region,
 )
-from xr_toolz.geo.operators import SubsetToRegion
-from xr_toolz.viz._src.projections import PRESETS, _resolve_projection
+from xrtoolz.geo.operators import SubsetToRegion
+from xrtoolz.viz._src.projections import PRESETS, _resolve_projection
 
 
 def _rectilinear_ds() -> xr.Dataset:

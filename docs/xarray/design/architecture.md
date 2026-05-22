@@ -3,23 +3,23 @@ status: draft
 version: 0.1.0
 ---
 
-!!! note "These design docs cover the planned operator surface for `xr_toolz`"
+!!! note "These design docs cover the planned operator surface for `xrtoolz`"
     Code snippets use class names directly. In the implementation, the
     submodule layout is:
 
-    - **`xr_toolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
+    - **`xrtoolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
       subset, masks, detrend)
-    - **`xr_toolz.interpolate`** — value resampling: regrid, gap-fill,
+    - **`xrtoolz.interpolate`** — value resampling: regrid, gap-fill,
       bin, coord-axis remap, time resample, smooth, learned downscale
       (D12)
-    - **`xr_toolz.transforms`** — signal transforms / decompositions /
+    - **`xrtoolz.transforms`** — signal transforms / decompositions /
       encoders (D8)
-    - **`xr_toolz.metrics`** — skill scores (D7)
-    - **`xr_toolz.kinematics`** — domain-specific physical quantities,
+    - **`xrtoolz.metrics`** — skill scores (D7)
+    - **`xrtoolz.kinematics`** — domain-specific physical quantities,
       sub-organized by domain (D9)
-    - **`xr_toolz.viz`** — plotting operators (D10)
+    - **`xrtoolz.viz`** — plotting operators (D10)
 
-    See `xr_toolz/__init__.py` for the current export surface.
+    See `xrtoolz/__init__.py` for the current export surface.
 
 # Architecture
 
@@ -93,9 +93,9 @@ The composition layers above describe *how* operators stack. The type contract d
 
 | Tier | Location | Input | Output | Coordinate semantics |
 |---|---|---|---|---|
-| **A — Array** | `xr_toolz.<module>.array` | array (numpy / JAX / numba-jitted / optionally CuPy) | array | `axis=` |
-| **B — Layer 0 xarray** | `xr_toolz.<module>` (private `_src/`) | `xr.DataArray` (single-variable) or `xr.Dataset` + variable selectors (multi-variable) | `xr.DataArray` or `xr.Dataset` | `dim=` |
-| **C — Layer 1 Operator** | `xr_toolz.<module>` | `xr.Dataset` (or two for multi-input) | `xr.Dataset` \| `xr.DataArray` \| scalar (terminal viz returns `matplotlib.Figure / Axes`, see D10) | constructor `variable=` / `dims=` |
+| **A — Array** | `xrtoolz.<module>.array` | array (numpy / JAX / numba-jitted / optionally CuPy) | array | `axis=` |
+| **B — Layer 0 xarray** | `xrtoolz.<module>` (private `_src/`) | `xr.DataArray` (single-variable) or `xr.Dataset` + variable selectors (multi-variable) | `xr.DataArray` or `xr.Dataset` | `dim=` |
+| **C — Layer 1 Operator** | `xrtoolz.<module>` | `xr.Dataset` (or two for multi-input) | `xr.Dataset` \| `xr.DataArray` \| scalar (terminal viz returns `matplotlib.Figure / Axes`, see D10) | constructor `variable=` / `dims=` |
 
 Rules:
 
@@ -109,10 +109,10 @@ Example — `metrics.rmse`:
 
 ```python
 # Tier A — duck array (numpy, JAX, CuPy, Dask)
-xr_toolz.metrics.array.rmse(pred_arr, ref_arr, axis=-1)
+xrtoolz.metrics.array.rmse(pred_arr, ref_arr, axis=-1)
 
 # Tier B — Layer 0 xarray (DataArray in, DataArray out)
-xr_toolz.metrics.rmse(pred_da, ref_da, dim="time")
+xrtoolz.metrics.rmse(pred_da, ref_da, dim="time")
 
 # Tier C — Layer 1 Operator (Dataset in, DataArray out)
 RMSE(variable="ssh", dims=["time"])(pred_ds, ref_ds)

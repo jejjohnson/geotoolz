@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from xr_toolz.data import load_aemet
+from xrtoolz.data import load_aemet
 
 
 def test_load_aemet_prefers_explicit_arg(monkeypatch, tmp_path):

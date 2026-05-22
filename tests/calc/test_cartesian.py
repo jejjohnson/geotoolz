@@ -1,4 +1,4 @@
-"""Tests for :mod:`xr_toolz.calc` on uniform Cartesian grids."""
+"""Tests for :mod:`xrtoolz.calc` on uniform Cartesian grids."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.calc import gradient, partial
+from xrtoolz.calc import gradient, partial
 
 
 def _polynomial(nx: int = 64, ny: int = 32) -> xr.DataArray:

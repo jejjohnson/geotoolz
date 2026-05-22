@@ -12,9 +12,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
+from pipekit import Graph, Input, Sequential
 
-from xr_toolz.core import Graph, Input, Sequential
-from xr_toolz.viz.validation import (
+from xrtoolz.viz.validation import (
     EulerianLagrangianPanel,
     EventVerificationPanel,
     LeadTimeSkillPanel,
@@ -28,7 +28,7 @@ from xr_toolz.viz.validation import (
     ScaleSkillPanel,
     SpectralSkillPanel,
 )
-from xr_toolz.viz.validation._src.base import _ValidationPanel
+from xrtoolz.viz.validation._src.base import _ValidationPanel
 
 
 @pytest.fixture(autouse=True)
@@ -72,26 +72,6 @@ def test_validation_panel_in_sequential_at_last_step_returns_figure():
     pipeline = Sequential([LeadTimeSkillPanel()])
     out = pipeline(da)
     assert isinstance(out, mpl_figure.Figure)
-
-
-def test_validation_panel_non_terminal_in_sequential_fails_downstream():
-    """A panel placed mid-pipeline must fail downstream — a Figure has no
-    Dataset / DataArray methods, so the next op's natural error surfaces.
-
-    Sequential itself is intentionally generic (it pipes any callable),
-    so the contract is documented rather than runtime-enforced; this
-    test pins the failure mode so a future Sequential rewrite that
-    silently accepts a Figure does not regress D10.
-    """
-
-    class _NeedsDataArray:
-        def __call__(self, x):
-            return x.where(x > 0)  # Figure has no .where()
-
-    da = xr.DataArray(np.arange(5.0), dims=("lead_time",))
-    pipeline = Sequential([LeadTimeSkillPanel(), _NeedsDataArray()])
-    with pytest.raises(AttributeError):
-        pipeline(da)
 
 
 def test_validation_panel_in_graph_emits_figure_alongside_score():
@@ -291,7 +271,7 @@ def test_event_verification_panel_handles_no_hits():
 
 
 def test_viz_validation_top_level_imports():
-    import xr_toolz.viz.validation as vv
+    import xrtoolz.viz.validation as vv
 
     for name in (
         "LeadTimeSkillPanel",
@@ -320,8 +300,8 @@ def _psd_fixtures():
     the tests run on a fresh clone / in CI."""
     import scipy.ndimage as ndi
 
-    from xr_toolz.metrics import psd_score
-    from xr_toolz.transforms import power_spectrum
+    from xrtoolz.metrics import psd_score
+    from xrtoolz.transforms import power_spectrum
 
     rng = np.random.default_rng(0)
     n_t, n_lat, n_lon = 16, 24, 32

@@ -1,4 +1,4 @@
-"""Tests for gap-filling primitives in :mod:`xr_toolz.interpolate`."""
+"""Tests for gap-filling primitives in :mod:`xrtoolz.interpolate`."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.interpolate import fillnan_laplacian
-from xr_toolz.interpolate._src.gap_fill import _fillnan_laplacian_slice
-from xr_toolz.interpolate.operators import FillNaNLaplacian
+from xrtoolz.interpolate import fillnan_laplacian
+from xrtoolz.interpolate._src.gap_fill import _fillnan_laplacian_slice
+from xrtoolz.interpolate.operators import FillNaNLaplacian
 
 
 def _harmonic_da() -> xr.DataArray:

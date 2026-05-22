@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz import calc, metrics, ocn
-from xr_toolz.budgets import (
+from xrtoolz import calc, metrics, ocn
+from xrtoolz.budgets import (
     BoundaryFlux,
     BudgetResidual,
     ControlVolumeIntegral,
@@ -28,7 +28,7 @@ from xr_toolz.budgets import (
     salt_budget_residual,
     volume_budget_residual,
 )
-from xr_toolz.metrics import (
+from xrtoolz.metrics import (
     DensityInversionFraction,
     DivergenceError,
     GeostrophicBalanceError,
@@ -523,7 +523,7 @@ def test_kinematics_inventory_present():
 
 
 def test_metrics_physical_submodule_imports():
-    from xr_toolz.metrics.physical import (
+    from xrtoolz.metrics.physical import (
         DensityInversionFraction,
         DivergenceError,
         GeostrophicBalanceError,
@@ -547,7 +547,7 @@ def test_metrics_physical_submodule_imports():
 
 
 def test_metrics_top_level_exposes_v4():
-    from xr_toolz.metrics import (
+    from xrtoolz.metrics import (
         DensityInversionFraction,
         DivergenceError,
         GeostrophicBalanceError,
@@ -559,7 +559,7 @@ def test_metrics_top_level_exposes_v4():
 
 
 def test_budgets_top_level_exposes_v4():
-    import xr_toolz.budgets as bdg
+    import xrtoolz.budgets as bdg
 
     for name in (
         "control_volume_integral",
@@ -577,4 +577,4 @@ def test_budgets_top_level_exposes_v4():
         "VolumeBudgetResidual",
         "KineticEnergyBudgetResidual",
     ):
-        assert hasattr(bdg, name), f"xr_toolz.budgets is missing {name!r}"
+        assert hasattr(bdg, name), f"xrtoolz.budgets is missing {name!r}"

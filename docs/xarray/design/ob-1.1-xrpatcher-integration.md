@@ -23,7 +23,7 @@ fixed receptive fields. The standard pattern is:
 3. Stitch the outputs back into a global grid, blending overlaps.
 ```
 
-xr_toolz currently ships `ModelOp` for **per-pixel** sklearn-style
+xrtoolz currently ships `ModelOp` for **per-pixel** sklearn-style
 models (`(N, F)` flatten → `model.predict(x)` → reshape) but has no
 tile-wise inference path. The
 [`jejjohnson/xrpatcher`](https://github.com/jejjohnson/xrpatcher)
@@ -42,7 +42,7 @@ solves the patch-and-reconstruct problem cleanly:
 This issue takes `xrpatcher` as a hard dependency and adds two thin
 Layer-1 Operators (`PatchDataset`, `PatchedInference`) plus a
 re-export of `XRDAPatcher`, so patcher-driven tile inference composes
-with `Sequential` and the rest of xr_toolz.
+with `Sequential` and the rest of xrtoolz.
 
 ## 2. User stories
 
@@ -54,8 +54,8 @@ with `Sequential` and the rest of xr_toolz.
 
 ```python
 import xarray as xr
-from xr_toolz.core import Sequential
-from xr_toolz.patcher import PatchDataset, PatchedInference
+from xrtoolz.core import Sequential
+from xrtoolz.patcher import PatchDataset, PatchedInference
 
 ds = xr.open_dataset("ssh_lowres.nc")             # (time, lat, lon)
 
@@ -83,7 +83,7 @@ ssh_hires = pipeline(ds)
 > inference, and reuse it for two different model variants.*
 
 ```python
-from xr_toolz.patcher import PatchDataset, PatchedInference
+from xrtoolz.patcher import PatchDataset, PatchedInference
 
 patcher = PatchDataset(
     patches={"lat": 64, "lon": 64},
@@ -140,8 +140,8 @@ inference = PatchedInference(
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Per-pixel sklearn-style ModelOp | [`inference/modelop.py:30`](../../src/xr_toolz/inference/modelop.py) — `(N,F)` flatten/reshape | unchanged (different paradigm) |
-| `Operator` / `Sequential` plumbing | [`core/`](../../src/xr_toolz/core/) | reuse |
+| Per-pixel sklearn-style ModelOp | [`inference/modelop.py:30`](../../src/xrtoolz/inference/modelop.py) — `(N,F)` flatten/reshape | unchanged (different paradigm) |
+| `Operator` / `Sequential` plumbing | [`core/`](../../src/xrtoolz/core/) | reuse |
 | `XRDAPatcher` (patch + reconstruct) | — | re-export from `xrpatcher` (hard dep) |
 | Layer-1 Operator: build patcher | — | **add** `PatchDataset` |
 | Layer-1 Operator: run model per patch + reconstruct | — | **add** `PatchedInference` |
@@ -164,7 +164,7 @@ dependency in `pyproject.toml`.
 ### 4.2 Why two Operators, not a `ModelOp.patcher=` retrofit
 
 The existing
-[`ModelOp`](../../src/xr_toolz/inference/modelop.py#L30) is designed
+[`ModelOp`](../../src/xrtoolz/inference/modelop.py#L30) is designed
 around the per-pixel paradigm:
 
 ```text
@@ -178,14 +178,14 @@ to `ModelOp` would warp the existing reshape semantics and confuse the
 SklearnModelOp / JaxModelOp subclasses that depend on them.
 
 Cleaner: leave `ModelOp` untouched (no breaking change), add a sibling
-abstraction in a new `xr_toolz.patcher` submodule. Users who want
+abstraction in a new `xrtoolz.patcher` submodule. Users who want
 per-pixel models on tiles can still compose:
 `PatchedInference(model=ModelOp(rf_model))`.
 
 ### 4.3 `PatchDataset` Operator
 
 ```python
-# src/xr_toolz/patcher/_src/operators.py
+# src/xrtoolz/patcher/_src/operators.py
 class PatchDataset(Operator):
     """Operator that constructs an XRDAPatcher from a Dataset/DataArray."""
 
@@ -270,18 +270,18 @@ def __call__(self, patcher: XRDAPatcher) -> xr.DataArray:
 ### 4.5 Re-export wiring
 
 ```python
-# src/xr_toolz/patcher/__init__.py
+# src/xrtoolz/patcher/__init__.py
 from xrpatcher import XRDAPatcher
-from xr_toolz.patcher._src.operators import PatchDataset, PatchedInference
+from xrtoolz.patcher._src.operators import PatchDataset, PatchedInference
 
 __all__ = ["XRDAPatcher", "PatchDataset", "PatchedInference"]
 ```
 
-`XRDAPatcher` is re-exported from xr_toolz so users have a canonical
+`XRDAPatcher` is re-exported from xrtoolz so users have a canonical
 import path:
 
 ```python
-from xr_toolz.patcher import XRDAPatcher       # canonical
+from xrtoolz.patcher import XRDAPatcher       # canonical
 from xrpatcher import XRDAPatcher              # also works (direct)
 ```
 
@@ -315,7 +315,7 @@ Sequential([
 | Need | Library |
 |---|---|
 | Patch generation + `__getitem__` + `reconstruct` | `xrpatcher.XRDAPatcher` (hard dep) |
-| Operator / Sequential plumbing | `xr_toolz.core` (reuse) |
+| Operator / Sequential plumbing | `xrtoolz.core` (reuse) |
 | Progress bar | `tqdm` (already a transitive dep) |
 
 **One new top-level dependency**: `xrpatcher`. Pinned to a stable
@@ -326,14 +326,14 @@ upstream API drift. xrpatcher's own dep is just `tqdm`.
 
 ```python
 # Underlying class — re-export
-xr_toolz.patcher.XRDAPatcher              # = xrpatcher.XRDAPatcher
+xrtoolz.patcher.XRDAPatcher              # = xrpatcher.XRDAPatcher
 
 # Layer-1 Operators
-xr_toolz.patcher.PatchDataset(
+xrtoolz.patcher.PatchDataset(
     *, patches, strides=None, domain_limits=None,
     check_full_scan=False, cache=False, preload=False, var=None,
 )
-xr_toolz.patcher.PatchedInference(
+xrtoolz.patcher.PatchedInference(
     *, model, reconstruct_kwargs=None, progress=True,
 )
 ```
@@ -356,7 +356,7 @@ xr_toolz.patcher.PatchedInference(
 | `PatchedInference` `progress=False` | no tqdm bar |
 | Sequential composition (`PatchDataset` → `PatchedInference`) | end-to-end identity round-trip |
 | `PatchDataset.get_config()` round-trip | reconstructed Operator produces identical `XRDAPatcher` |
-| `xrpatcher` import | `from xr_toolz.patcher import XRDAPatcher` works |
+| `xrpatcher` import | `from xrtoolz.patcher import XRDAPatcher` works |
 
 Target: ~15 cases.
 
@@ -364,7 +364,7 @@ Target: ~15 cases.
 
 - **`RandomPatchSampler`** for ML training data loaders — deferred.
   xrpatcher iterates deterministically; shuffled sampling is a
-  separate concern. Revisit when ML training pipelines land in xr_toolz.
+  separate concern. Revisit when ML training pipelines land in xrtoolz.
 - **`ModelOp.patcher=` retrofit** — declined; per-pixel and tile
   paradigms shouldn't share an API. `PatchedInference(model=ModelOp(...))`
   composition is available if anyone needs it.
@@ -405,8 +405,8 @@ Target: ~15 cases.
    `{"model": "<callable>"}` flag; non-roundtrippable. When `model` is
    an `Operator`, recurse — fully roundtrippable.
 4. **Where the new code lives.** New top-level submodule
-   `xr_toolz.patcher` (chosen for visibility). Alternative under
-   `xr_toolz.geo.inference` rejected — patcher is a generic concept,
+   `xrtoolz.patcher` (chosen for visibility). Alternative under
+   `xrtoolz.geo.inference` rejected — patcher is a generic concept,
    not inference-specific.
 5. **Tile-edge artifacts.** Default `weight=None` (uniform) gives
    simple averaging in overlap regions. Users who care about edge

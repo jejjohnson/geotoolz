@@ -9,9 +9,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from xr_toolz.data import AemetAuthError, AEMETCredentials, AemetSource
-from xr_toolz.data._src.aemet.source import AemetRateLimitError
-from xr_toolz.types import TimeRange
+from xrtoolz.data import AemetAuthError, AEMETCredentials, AemetSource
+from xrtoolz.data._src.aemet.source import AemetRateLimitError
+from xrtoolz.types import TimeRange
 
 
 # ---- fake HTTP ----------------------------------------------------------
@@ -117,7 +117,7 @@ def test_429_retries_then_raises(source_and_fake, monkeypatch):
     # ``time.sleep`` so the per-attempt backoff doesn't burn wall time.
     src.max_retries = 2
     src.rate_limit_pause_scale = 0.0
-    monkeypatch.setattr("xr_toolz.data._src.aemet.source.time.sleep", lambda _s: None)
+    monkeypatch.setattr("xrtoolz.data._src.aemet.source.time.sleep", lambda _s: None)
     with pytest.raises(AemetRateLimitError):
         src.list_stations()
 
@@ -360,7 +360,7 @@ def test_normals_preserves_zero_values():
     """
     import numpy as np
 
-    from xr_toolz.data._src.aemet.source import _normals_to_dataset
+    from xrtoolz.data._src.aemet.source import _normals_to_dataset
 
     rows_per: dict[str, list[dict[str, Any]]] = {
         "s1": [
@@ -391,7 +391,7 @@ def test_chunk_days_range_includes_single_day():
     """Single-day windows must emit one chunk, not zero."""
     from datetime import UTC, datetime
 
-    from xr_toolz.data._src.aemet.source import _chunk_days_range
+    from xrtoolz.data._src.aemet.source import _chunk_days_range
 
     day = datetime(2024, 1, 1, tzinfo=UTC)
     chunks = _chunk_days_range("sid", day, day, chunk_days=180)
@@ -466,7 +466,7 @@ def test_variable_subset_drops_others(source_and_fake):
     # call the subset helper directly.
     import xarray as xr
 
-    from xr_toolz.data._src.aemet.source import _subset_variables
+    from xrtoolz.data._src.aemet.source import _subset_variables
 
     ds = xr.Dataset(
         {

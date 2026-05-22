@@ -1,4 +1,4 @@
-"""Tests for the post-Phase-2 Layer-0 primitives in :mod:`xr_toolz.geo`."""
+"""Tests for the post-Phase-2 Layer-0 primitives in :mod:`xrtoolz.geo`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from xr_toolz.geo import (
+from xrtoolz.geo import (
     add_country_mask,
     add_land_mask,
     add_ocean_mask,
@@ -36,7 +36,7 @@ from xr_toolz.geo import (
     time_unrescale,
     xy_to_lonlat,
 )
-from xr_toolz.interpolate import (
+from xrtoolz.interpolate import (
     Grid,
     Period,
     SpaceTimeGrid,
@@ -126,7 +126,7 @@ def test_fillnan_spatial_fills_interior_nans():
 def test_fillnan_rbf_preserves_finite_values():
     """Regression: the RBF filler must only patch NaNs, not overwrite
     valid observations."""
-    from xr_toolz.interpolate import fillnan_rbf
+    from xrtoolz.interpolate import fillnan_rbf
 
     lat = np.linspace(0.0, 1.0, 6)
     lon = np.linspace(0.0, 1.0, 6)

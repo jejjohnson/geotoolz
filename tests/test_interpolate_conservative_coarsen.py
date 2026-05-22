@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.interpolate import coarsen, coarsen_conservative
-from xr_toolz.interpolate.operators import Coarsen
+from xrtoolz.interpolate import coarsen, coarsen_conservative
+from xrtoolz.interpolate.operators import Coarsen
 
 
 def _area_weights(da: xr.DataArray) -> xr.DataArray:

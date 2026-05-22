@@ -17,7 +17,7 @@ sustained load — not just a one-shot validation. If this runs clean
 you're safe to launch the long monthly / daily scrapers.
 
 Everything writes to ``scratch/aemet/smoke/`` and logs to
-``xr_toolz/.logs/aemet_smoke.log``. Safe to interrupt and re-run.
+``xrtoolz/.logs/aemet_smoke.log``. Safe to interrupt and re-run.
 
 Run:
     uv run python scripts/aemet_smoke.py
@@ -31,7 +31,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from xr_toolz.types import StationCollection
+from xrtoolz.types import StationCollection
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))

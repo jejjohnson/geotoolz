@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from xr_toolz.data import CATALOG, DatasetKind, describe
-from xr_toolz.data._src.cmems.catalog import CMEMS_DATASETS
-from xr_toolz.data._src.cmems.presets.bgc import BGC_DATASETS
-from xr_toolz.data._src.cmems.presets.insitu import INSITU_DATASETS
-from xr_toolz.data._src.cmems.presets.oc import OC_DATASETS
-from xr_toolz.data._src.cmems.presets.phy import PHY_DATASETS
-from xr_toolz.data._src.cmems.presets.ssh import SSH_DATASETS
-from xr_toolz.data._src.cmems.presets.sss import SSS_DATASETS
-from xr_toolz.data._src.cmems.presets.sst import SST_DATASETS
+from xrtoolz.data import CATALOG, DatasetKind, describe
+from xrtoolz.data._src.cmems.catalog import CMEMS_DATASETS
+from xrtoolz.data._src.cmems.presets.bgc import BGC_DATASETS
+from xrtoolz.data._src.cmems.presets.insitu import INSITU_DATASETS
+from xrtoolz.data._src.cmems.presets.oc import OC_DATASETS
+from xrtoolz.data._src.cmems.presets.phy import PHY_DATASETS
+from xrtoolz.data._src.cmems.presets.ssh import SSH_DATASETS
+from xrtoolz.data._src.cmems.presets.sss import SSS_DATASETS
+from xrtoolz.data._src.cmems.presets.sst import SST_DATASETS
 
 
 # ---- Preset shapes --------------------------------------------------------

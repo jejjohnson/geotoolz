@@ -13,7 +13,7 @@ pytest.importorskip("skimage")
 
 from skimage import morphology
 
-from xr_toolz.interpolate import (
+from xrtoolz.interpolate import (
     CleanMask,
     MaskBinaryClosing,
     MaskBinaryOpening,
@@ -25,8 +25,8 @@ from xr_toolz.interpolate import (
     remove_small_holes_2d,
     remove_small_objects_2d,
 )
-from xr_toolz.interpolate._src.mask_ops import _resolve_footprint
-from xr_toolz.transforms import clean_mask as transforms_clean_mask
+from xrtoolz.interpolate._src.mask_ops import _resolve_footprint
+from xrtoolz.transforms import clean_mask as transforms_clean_mask
 
 
 def _mask(values: np.ndarray) -> xr.DataArray:

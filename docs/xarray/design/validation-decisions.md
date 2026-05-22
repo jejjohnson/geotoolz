@@ -48,12 +48,12 @@ A validation framework should reveal whether a model reproduces scales, uncertai
 ### Demo API
 
 ```python
-from xr_toolz.metrics import RMSE, PSDScore
-from xr_toolz.metrics.structural import SSIM
-from xr_toolz.metrics.forecast import RMSEByLead
-from xr_toolz.budgets import HeatBudgetResidual
-from xr_toolz.lagrangian import AdvectParticles
-from xr_toolz.phenomena import DetectMarineHeatwaves
+from xrtoolz.metrics import RMSE, PSDScore
+from xrtoolz.metrics.structural import SSIM
+from xrtoolz.metrics.forecast import RMSEByLead
+from xrtoolz.budgets import HeatBudgetResidual
+from xrtoolz.lagrangian import AdvectParticles
+from xrtoolz.phenomena import DetectMarineHeatwaves
 ```
 
 ### Demo Example Usage
@@ -80,7 +80,7 @@ Particle advection, trajectories, FTLE-like diagnostics, residence time, and con
 
 ### Decision
 
-Create `xr_toolz.lagrangian` as a first-class module. Scalar comparisons of trajectory outputs can live in `xr_toolz.metrics.lagrangian`, but trajectory generation and transport diagnostics live in `xr_toolz.lagrangian`.
+Create `xrtoolz.lagrangian` as a first-class module. Scalar comparisons of trajectory outputs can live in `xrtoolz.metrics.lagrangian`, but trajectory generation and transport diagnostics live in `xrtoolz.lagrangian`.
 
 ### Consequences
 
@@ -99,8 +99,8 @@ Eulerian field agreement does not guarantee correct material transport. Trajecto
 ### Demo API
 
 ```python
-from xr_toolz.lagrangian import SeedParticles, AdvectParticles, PairDispersion, ResidenceTime, ConnectivityMatrix, FTLE
-from xr_toolz.metrics.lagrangian import EndpointError, TrajectoryRMSE, ConnectivityError
+from xrtoolz.lagrangian import SeedParticles, AdvectParticles, PairDispersion, ResidenceTime, ConnectivityMatrix, FTLE
+from xrtoolz.metrics.lagrangian import EndpointError, TrajectoryRMSE, ConnectivityError
 ```
 
 ### Demo Example Usage
@@ -124,7 +124,7 @@ Budget residuals require tendencies, fluxes, control-volume integration, grid me
 
 ### Decision
 
-Create `xr_toolz.budgets` for generic and domain-specific budget residuals.
+Create `xrtoolz.budgets` for generic and domain-specific budget residuals.
 
 ### Consequences
 
@@ -143,7 +143,7 @@ A model can have good short-term RMSE while violating heat, salt, volume, tracer
 ### Demo API
 
 ```python
-from xr_toolz.budgets import (
+from xrtoolz.budgets import (
     ControlVolumeIntegral,
     BoundaryFlux,
     BudgetResidual,
@@ -183,7 +183,7 @@ Detecting an event and scoring an event forecast are different tasks. Marine hea
 
 ### Decision
 
-Put event definitions, detection, labeling, matching, and properties in `xr_toolz.phenomena`. Put scores such as `ProbabilityOfDetection` (POD), `FalseAlarmRatio` (FAR), `CriticalSuccessIndex` (CSI), `IntersectionOverUnion` (IoU), duration error, and intensity bias in `xr_toolz.metrics.object`.
+Put event definitions, detection, labeling, matching, and properties in `xrtoolz.phenomena`. Put scores such as `ProbabilityOfDetection` (POD), `FalseAlarmRatio` (FAR), `CriticalSuccessIndex` (CSI), `IntersectionOverUnion` (IoU), duration error, and intensity bias in `xrtoolz.metrics.object`.
 
 ### Consequences
 
@@ -202,8 +202,8 @@ Field-level scores can be good while important finite-amplitude events are misse
 ### Demo API
 
 ```python
-from xr_toolz.phenomena import EventDefinition, DetectMarineHeatwaves, DetectEddies, MatchObjects, ObjectProperties
-from xr_toolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex, IntersectionOverUnion
+from xrtoolz.phenomena import EventDefinition, DetectMarineHeatwaves, DetectEddies, MatchObjects, ObjectProperties
+from xrtoolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex, IntersectionOverUnion
 ```
 
 ### Demo Example Usage
@@ -245,7 +245,7 @@ Validation reports often require diagnostic panels rather than raw score arrays 
 
 ### Decision
 
-Add validation-specific plot operators under `xr_toolz.viz.validation`.
+Add validation-specific plot operators under `xrtoolz.viz.validation`.
 
 ### Consequences
 
@@ -264,7 +264,7 @@ Scale skill, spectral skill, process budgets, Lagrangian trajectories, and event
 ### Demo API
 
 ```python
-from xr_toolz.viz.validation import (
+from xrtoolz.viz.validation import (
     ScaleSkillPanel,
     SpectralSkillPanel,
     LeadTimeSkillPanel,
@@ -288,14 +288,14 @@ Conservation-budget operators (V4.2 / V4.3) need cell areas, widths, and volumes
 
 ### Decision
 
-**Integral / volume-weighted budget operators** — `ControlVolumeIntegral`, `BoundaryFlux`, and any future per-region closure operator that consumes `cell_volume` / face areas — **must** accept `volume_metrics` and `face_metrics` as constructor arguments. They never auto-derive cell volumes / face areas from coordinates. A user who wants spherical metrics from lon/lat coords calls `xr_toolz.calc.grid_metrics_from_coords` first to produce the metric Datasets. Models that already ship explicit grid metrics (CMEMS NEMO output, MOM6 horizontal grids) bypass the helper and pass the model's own metric Dataset.
+**Integral / volume-weighted budget operators** — `ControlVolumeIntegral`, `BoundaryFlux`, and any future per-region closure operator that consumes `cell_volume` / face areas — **must** accept `volume_metrics` and `face_metrics` as constructor arguments. They never auto-derive cell volumes / face areas from coordinates. A user who wants spherical metrics from lon/lat coords calls `xrtoolz.calc.grid_metrics_from_coords` first to produce the metric Datasets. Models that already ship explicit grid metrics (CMEMS NEMO output, MOM6 horizontal grids) bypass the helper and pass the model's own metric Dataset.
 
-**Per-cell residual operators** — `HeatBudgetResidual`, `SaltBudgetResidual`, `VolumeBudgetResidual`, `KineticEnergyBudgetResidual` — return the field ``∂φ/∂t + ∇·(u φ) − sources`` on the same grid as the input. These do not need cell volumes or face areas: the spherical-metric divergence ``∇·`` only requires the differential metric ``R cos φ``, which `xr_toolz.calc.divergence` derives from coordinates inside `_src.spherical`. Volume-integrated closure (residuals weighted by `cell_volume` and summed over a control volume) goes through `ControlVolumeIntegral`, which is where explicit metrics re-enter the pipeline.
+**Per-cell residual operators** — `HeatBudgetResidual`, `SaltBudgetResidual`, `VolumeBudgetResidual`, `KineticEnergyBudgetResidual` — return the field ``∂φ/∂t + ∇·(u φ) − sources`` on the same grid as the input. These do not need cell volumes or face areas: the spherical-metric divergence ``∇·`` only requires the differential metric ``R cos φ``, which `xrtoolz.calc.divergence` derives from coordinates inside `_src.spherical`. Volume-integrated closure (residuals weighted by `cell_volume` and summed over a control volume) goes through `ControlVolumeIntegral`, which is where explicit metrics re-enter the pipeline.
 
 ### Consequences
 
 - No silent failures from operators guessing the wrong metric.
-- One canonical helper (`grid_metrics_from_coords`) lives in `xr_toolz.calc`; budgets stay metric-agnostic.
+- One canonical helper (`grid_metrics_from_coords`) lives in `xrtoolz.calc`; budgets stay metric-agnostic.
 - Datasets without metrics get a clear `KeyError` at the budget call site rather than a wrong-by-percent answer.
 - The convention aligns with xgcm's separation of grid metrics from data fields.
 
@@ -316,7 +316,7 @@ Conservation-budget operators (V4.2 / V4.3) need cell areas, widths, and volumes
 ### Helper
 
 ```python
-from xr_toolz import calc
+from xrtoolz import calc
 
 vol, face = calc.grid_metrics_from_coords(
     ds, lat="lat", lon="lon", depth="depth", sphere=True
@@ -327,16 +327,16 @@ Returns the two Datasets above. Edge cells extrapolate the nearest interior spac
 
 ### Audit table — V4.5 kinematics
 
-V4.1 / V4.3 reach into `xr_toolz.calc` and `xr_toolz.ocn` for derived quantities. Status of each, audited as part of the V4 epic:
+V4.1 / V4.3 reach into `xrtoolz.calc` and `xrtoolz.ocn` for derived quantities. Status of each, audited as part of the V4 epic:
 
 | Quantity | Status | Location |
 |----------|--------|----------|
-| Vorticity (relative + absolute) | implemented | `xr_toolz.ocn.relative_vorticity`, `absolute_vorticity` (and `xr_toolz.calc.curl`) |
-| Divergence (2-D + 3-D) | implemented | `xr_toolz.calc.divergence`, `xr_toolz.ocn.divergence` (3-D via `volume_budget_residual` with `w_var`) |
-| Density (TEOS-10) | implemented (lazy `gsw`) | `xr_toolz.ocn.density_from_ts` — raises `ImportError` pointing at `xr_toolz[oceanography]` if `gsw` is missing |
-| Mixed-layer depth | implemented | `xr_toolz.ocn.mixed_layer_depth` |
-| Brunt–Väisälä frequency (N²) | implemented | `xr_toolz.ocn.brunt_vaisala_frequency` |
-| Kinetic energy | implemented | `xr_toolz.ocn.kinetic_energy` |
+| Vorticity (relative + absolute) | implemented | `xrtoolz.ocn.relative_vorticity`, `absolute_vorticity` (and `xrtoolz.calc.curl`) |
+| Divergence (2-D + 3-D) | implemented | `xrtoolz.calc.divergence`, `xrtoolz.ocn.divergence` (3-D via `volume_budget_residual` with `w_var`) |
+| Density (TEOS-10) | implemented (lazy `gsw`) | `xrtoolz.ocn.density_from_ts` — raises `ImportError` pointing at `xrtoolz[oceanography]` if `gsw` is missing |
+| Mixed-layer depth | implemented | `xrtoolz.ocn.mixed_layer_depth` |
+| Brunt–Väisälä frequency (N²) | implemented | `xrtoolz.ocn.brunt_vaisala_frequency` |
+| Kinetic energy | implemented | `xrtoolz.ocn.kinetic_energy` |
 
 
 ---
@@ -371,5 +371,5 @@ available for high-precision work or non-CF coord units.
   produce `NaN` rather than raising, so a `Sequential` pipeline
   containing several bands is robust to one of them being too high.
 - Inputs whose dim coord has no `units` attribute raise with a clear
-  error message pointing at `xr_toolz.geo.validation` (or
+  error message pointing at `xrtoolz.geo.validation` (or
   `coord_spacing=`).

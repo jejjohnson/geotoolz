@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.geo.regimes import coastal_regions, eddy_regions, equatorial_regions
-from xr_toolz.metrics import (
+from xrtoolz.geo.regimes import coastal_regions, eddy_regions, equatorial_regions
+from xrtoolz.metrics import (
     BinnedResiduals2D,
     RegionScores,
     bin_residuals_2d,

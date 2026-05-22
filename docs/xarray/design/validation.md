@@ -4,16 +4,16 @@ version: 0.2.0
 ---
 
 !!! note "Module paths shown are proposed design targets"
-    Throughout this page, paths such as `xr_toolz.metrics.*`, `xr_toolz.budgets`,
-    and `xr_toolz.phenomena` refer to **proposed** subpackages and **are not part
+    Throughout this page, paths such as `xrtoolz.metrics.*`, `xrtoolz.budgets`,
+    and `xrtoolz.phenomena` refer to **proposed** subpackages and **are not part
     of the current export surface**. Most domain-agnostic functionality today
-    still lives under `xr_toolz.geo` (for example `xr_toolz.geo.operators`,
-    `xr_toolz.geo.metrics`). Treat the snippets below as architectural direction;
+    still lives under `xrtoolz.geo` (for example `xrtoolz.geo.operators`,
+    `xrtoolz.geo.metrics`). Treat the snippets below as architectural direction;
     once the proposed modules ship, the imports become copy/paste-ready.
 
 # Validation Framework
 
-`xr_toolz` validation should be broader than a list of scalar metrics. The design goal is to make evaluation workflows diagnose whether geoscience ML models reproduce values, scales, uncertainty, geometry, transport, physical processes, budgets, and identifiable events.
+`xrtoolz` validation should be broader than a list of scalar metrics. The design goal is to make evaluation workflows diagnose whether geoscience ML models reproduce values, scales, uncertainty, geometry, transport, physical processes, budgets, and identifiable events.
 
 This page extends the existing `preprocess -> infer -> evaluate` vision with five complementary validation views:
 
@@ -43,7 +43,7 @@ Oceanic and atmospheric variability are intrinsically multiscale. A global scala
 
 ### Design
 
-Scale-aware validation should live primarily in `xr_toolz.metrics.forecast`, `xr_toolz.metrics.multiscale`, and `xr_toolz.metrics.spectral`, with masking and region utilities supplied by `xr_toolz.geo.masks` and `xr_toolz.geo.subset`.
+Scale-aware validation should live primarily in `xrtoolz.metrics.forecast`, `xrtoolz.metrics.multiscale`, and `xrtoolz.metrics.spectral`, with masking and region utilities supplied by `xrtoolz.geo.masks` and `xrtoolz.geo.subset`.
 
 Common partitions include:
 
@@ -73,11 +73,11 @@ class BandLimitedRMSE(Operator): ...
 ### Demo Example Usage
 
 ```python
-from xr_toolz.core import Graph, Input
-from xr_toolz.metrics import RMSE
-from xr_toolz.metrics.forecast import SkillByLeadTime
-from xr_toolz.metrics.multiscale import EvaluateByRegion
-from xr_toolz.metrics.spectral import FrequencyBandSkill
+from xrtoolz.core import Graph, Input
+from xrtoolz.metrics import RMSE
+from xrtoolz.metrics.forecast import SkillByLeadTime
+from xrtoolz.metrics.multiscale import EvaluateByRegion
+from xrtoolz.metrics.spectral import FrequencyBandSkill
 
 pred = Input("prediction")
 ref = Input("reference")
@@ -119,13 +119,13 @@ The representation used for validation determines which errors are penalized. Po
 Data-representation metrics should be organized by metric family:
 
 ```text
-xr_toolz.metrics.pixel
-xr_toolz.metrics.probabilistic
-xr_toolz.metrics.spectral
-xr_toolz.metrics.multiscale
-xr_toolz.metrics.structural
-xr_toolz.metrics.distributional
-xr_toolz.metrics.masked
+xrtoolz.metrics.pixel
+xrtoolz.metrics.probabilistic
+xrtoolz.metrics.spectral
+xrtoolz.metrics.multiscale
+xrtoolz.metrics.structural
+xrtoolz.metrics.distributional
+xrtoolz.metrics.masked
 ```
 
 Pointwise metrics remain first-class but should be documented as baseline diagnostics rather than sufficient validation.
@@ -158,8 +158,8 @@ class ReliabilityCurve(Operator): ...
 ### Demo Example Usage
 
 ```python
-from xr_toolz.metrics.structural import SSIM, PhaseShiftError
-from xr_toolz.metrics.probabilistic import SpreadSkillRatio, RankHistogram
+from xrtoolz.metrics.structural import SSIM, PhaseShiftError
+from xrtoolz.metrics.probabilistic import SpreadSkillRatio, RankHistogram
 
 structure = SSIM(variable="ssh", dims=("lat", "lon"))(ds_pred, ds_ref)
 phase = PhaseShiftError(variable="ssh", dims=("lat", "lon"))(ds_pred, ds_ref)
@@ -187,11 +187,11 @@ Most gridded model validation is Eulerian: predicted and reference fields are co
 
 ### Design
 
-Eulerian diagnostics should remain in `xr_toolz.metrics` and `xr_toolz.kinematics`. Lagrangian diagnostics should be a first-class module because particle advection creates reusable trajectory datasets, not only scalar scores.
+Eulerian diagnostics should remain in `xrtoolz.metrics` and `xrtoolz.kinematics`. Lagrangian diagnostics should be a first-class module because particle advection creates reusable trajectory datasets, not only scalar scores.
 
 ```text
-xr_toolz.lagrangian          # trajectory generation and transport diagnostics
-xr_toolz.metrics.lagrangian  # scalar comparisons of trajectories/statistics
+xrtoolz.lagrangian          # trajectory generation and transport diagnostics
+xrtoolz.metrics.lagrangian  # scalar comparisons of trajectories/statistics
 ```
 
 ### Demo API
@@ -225,8 +225,8 @@ class ConnectivityError(Operator): ...
 ### Demo Example Usage
 
 ```python
-from xr_toolz.lagrangian import SeedParticles, AdvectParticles, PairDispersion
-from xr_toolz.metrics.lagrangian import EndpointError
+from xrtoolz.lagrangian import SeedParticles, AdvectParticles, PairDispersion
+from xrtoolz.metrics.lagrangian import EndpointError
 
 particles = SeedParticles(strategy="grid", spacing=0.25, region=med_mask)(ds_ref)
 
@@ -260,10 +260,10 @@ A model can achieve favorable short-range error scores while violating conservat
 Process evaluation spans multiple modules:
 
 ```text
-xr_toolz.kinematics        # derived quantities: vorticity, divergence, density, MLD, N2, KE
-xr_toolz.metrics.physical  # balance and physical-consistency scores
-xr_toolz.budgets           # control-volume budgets and residuals
-xr_toolz.lagrangian        # material-frame diagnostics
+xrtoolz.kinematics        # derived quantities: vorticity, divergence, density, MLD, N2, KE
+xrtoolz.metrics.physical  # balance and physical-consistency scores
+xrtoolz.budgets           # control-volume budgets and residuals
+xrtoolz.lagrangian        # material-frame diagnostics
 ```
 
 ### Demo API
@@ -298,8 +298,8 @@ class KineticEnergyBudgetResidual(Operator): ...
 ### Demo Example Usage
 
 ```python
-from xr_toolz.metrics.physical import GeostrophicBalanceError, DivergenceError
-from xr_toolz.budgets import HeatBudgetResidual, ControlVolumeIntegral
+from xrtoolz.metrics.physical import GeostrophicBalanceError, DivergenceError
+from xrtoolz.budgets import HeatBudgetResidual, ControlVolumeIntegral
 
 geo_residual = GeostrophicBalanceError(ssh_var="ssh", u_var="u", v_var="v")(ds_pred)
 div_residual = DivergenceError(u_var="u", v_var="v", dims=("lat", "lon"))(ds_pred)
@@ -341,9 +341,9 @@ Many geoscience applications depend on identifiable finite-amplitude phenomena r
 Separate event detection from event scoring:
 
 ```text
-xr_toolz.phenomena       # event definitions, detection, labeling, matching, properties
-xr_toolz.metrics.object  # contingency scores and object-property errors
-xr_toolz.viz.validation  # event verification panels
+xrtoolz.phenomena       # event definitions, detection, labeling, matching, properties
+xrtoolz.metrics.object  # contingency scores and object-property errors
+xrtoolz.viz.validation  # event verification panels
 ```
 
 ### Demo API
@@ -382,8 +382,8 @@ def centroid_distance(matches, *, dims=("lat", "lon")) -> xr.DataArray: ...
 ### Demo Example Usage
 
 ```python
-from xr_toolz.phenomena import DetectMarineHeatwaves, MatchObjects
-from xr_toolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex, IntersectionOverUnion
+from xrtoolz.phenomena import DetectMarineHeatwaves, MatchObjects
+from xrtoolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex, IntersectionOverUnion
 
 events_pred = DetectMarineHeatwaves(
     sst_var="sst",
@@ -411,7 +411,7 @@ scores = {
 
 ### Notes / Open Questions
 
-- `xr_toolz.extremes` remains deferred to `xtremax`; `phenomena` is broader because it covers object/event definitions, detection, matching, and verification.
+- `xrtoolz.extremes` remains deferred to `xtremax`; `phenomena` is broader because it covers object/event definitions, detection, matching, and verification.
 - Event definitions should be explicit and reusable so that prediction and reference fields are thresholded consistently.
 - Object outputs should remain xarray-native and preserve event IDs, time bounds, geometry summaries, and matched-pair metadata.
 
@@ -430,11 +430,11 @@ Validation usually requires more than one score. A model run may need RMSE, spec
 ### Demo API
 
 ```python
-from xr_toolz.core import Graph, Input
-from xr_toolz.metrics import RMSE, PSDScore
-from xr_toolz.metrics.forecast import RMSEByLead
-from xr_toolz.metrics.structural import SSIM
-from xr_toolz.viz.validation import SpectralSkillPanel
+from xrtoolz.core import Graph, Input
+from xrtoolz.metrics import RMSE, PSDScore
+from xrtoolz.metrics.forecast import RMSEByLead
+from xrtoolz.metrics.structural import SSIM
+from xrtoolz.viz.validation import SpectralSkillPanel
 
 pred = Input("prediction")
 ref = Input("reference")
@@ -474,16 +474,16 @@ results["spectral_panel"]
 ## Recommended Module Additions
 
 ```text
-xr_toolz.metrics.structural
-xr_toolz.metrics.forecast
-xr_toolz.metrics.probabilistic
-xr_toolz.metrics.physical
-xr_toolz.metrics.lagrangian
-xr_toolz.metrics.object
-xr_toolz.lagrangian
-xr_toolz.budgets
-xr_toolz.phenomena
-xr_toolz.viz.validation
+xrtoolz.metrics.structural
+xrtoolz.metrics.forecast
+xrtoolz.metrics.probabilistic
+xrtoolz.metrics.physical
+xrtoolz.metrics.lagrangian
+xrtoolz.metrics.object
+xrtoolz.lagrangian
+xrtoolz.budgets
+xrtoolz.phenomena
+xrtoolz.viz.validation
 ```
 
 These additions should extend the existing API surface without removing the current examples or decisions.

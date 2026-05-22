@@ -11,7 +11,7 @@ pytest.importorskip("skimage")
 
 from skimage.restoration import inpaint_biharmonic
 
-from xr_toolz.interpolate import FillNaNBiharmonic, fillnan_biharmonic
+from xrtoolz.interpolate import FillNaNBiharmonic, fillnan_biharmonic
 
 
 def _analytic_field(n: int = 64) -> tuple[xr.DataArray, np.ndarray]:

@@ -6,10 +6,10 @@ version: 0.2.0
 !!! note "Module paths shown — partially shipped"
     Only the following names are real and importable today:
 
-    - **`xr_toolz.metrics.pixel`** — `mse`, `rmse`, `nrmse`, `mae`, `bias`,
+    - **`xrtoolz.metrics.pixel`** — `mse`, `rmse`, `nrmse`, `mae`, `bias`,
       `correlation`, `r2_score`, plus `MSE`, `RMSE`, `NRMSE`, `MAE`,
       `Bias`, `Correlation`, `R2Score`.
-    - **`xr_toolz.metrics.spectral`** — `psd_error`, `psd_score`,
+    - **`xrtoolz.metrics.spectral`** — `psd_error`, `psd_score`,
       `resolved_scale`, `find_intercept_1D`, plus `PSDScore`.
 
     Every other class referenced on this page (`NashSutcliffe`,
@@ -19,15 +19,15 @@ version: 0.2.0
     respective view epic. The taxonomy submodules (`forecast`,
     `multiscale`, `structural`, `probabilistic`, `distributional`,
     `masked`, `lagrangian`, `physical`, `object`) are importable today
-    but empty — `from xr_toolz.metrics.forecast import RMSEByLead` will
+    but empty — `from xrtoolz.metrics.forecast import RMSEByLead` will
     succeed at the module import but fail on the symbol. Sibling
-    packages `xr_toolz.budgets`, `xr_toolz.phenomena`,
-    `xr_toolz.lagrangian`, and `xr_toolz.viz.validation` are still
+    packages `xrtoolz.budgets`, `xrtoolz.phenomena`,
+    `xrtoolz.lagrangian`, and `xrtoolz.viz.validation` are still
     proposed layouts and not yet on the export surface.
 
 # Validation API Map
 
-This page maps scientific validation questions to the proposed `xr_toolz` API surface. It complements [`primitives.md`](primitives.md), [`components.md`](components.md), and the top-level [`validation.md`](../validation.md) design note.
+This page maps scientific validation questions to the proposed `xrtoolz` API surface. It complements [`primitives.md`](primitives.md), [`components.md`](components.md), and the top-level [`validation.md`](../validation.md) design note.
 
 ---
 
@@ -45,17 +45,17 @@ Validation is broader than scalar metrics. A complete geoscience ML evaluation m
 
 | Scientific question | Module | Operators / functions |
 |---|---|---|
-| Are grid values accurate? | `xr_toolz.metrics.pixel` | `RMSE`, `MAE`, `Bias`, `Correlation`, `NashSutcliffe` |
-| Are scales resolved? | `xr_toolz.metrics.spectral`, `xr_toolz.metrics.multiscale` | `PSDScore`, `ResolvedScale`, `CoherenceSkill`, `PerScaleRMSE`, `WaveletRMSE` |
-| Does skill depend on forecast horizon? | `xr_toolz.metrics.forecast` | `SkillByLeadTime`, `RMSEByLead`, `AnomalyCorrelationByLead`, `SpectralSkillByLead` |
-| Does skill vary by region or regime? | `xr_toolz.metrics.multiscale`, `xr_toolz.metrics.spectral`, `xr_toolz.geo.masks` | `EvaluateByRegion`, `FrequencyBandSkill`, `BandLimitedRMSE`, `AddRegionMask` |
-| Is an ensemble calibrated? | `xr_toolz.metrics.probabilistic` | `CRPS`, `SpreadSkillRatio`, `RankHistogram`, `EnsembleCoverage`, `ReliabilityCurve` |
-| Are structures displaced or blurred? | `xr_toolz.metrics.structural` | `SSIM`, `GradientDifference`, `PhaseShiftError`, `CentroidDisplacement` |
-| Are physical balances respected? | `xr_toolz.metrics.physical`, `xr_toolz.kinematics` | `GeostrophicBalanceError`, `DivergenceError`, `VorticityError`, `KineticEnergyError` |
-| Are budgets closed? | `xr_toolz.budgets` | `ControlVolumeIntegral`, `BoundaryFlux`, `HeatBudgetResidual`, `SaltBudgetResidual`, `VolumeBudgetResidual`, `KineticEnergyBudgetResidual` |
-| Is material transport realistic? | `xr_toolz.lagrangian`, `xr_toolz.metrics.lagrangian` | `AdvectParticles`, `PairDispersion`, `ResidenceTime`, `ConnectivityMatrix`, `FTLE`, `EndpointError` |
-| Are events captured? | `xr_toolz.phenomena`, `xr_toolz.metrics.object` | `DetectMarineHeatwaves`, `DetectEddies`, `DetectFronts`, `MatchObjects`, `ProbabilityOfDetection`, `FalseAlarmRatio`, `CriticalSuccessIndex`, `IntersectionOverUnion` |
-| Do diagnostics need plots? | `xr_toolz.viz.validation` | `ScaleSkillPanel`, `SpectralSkillPanel`, `LeadTimeSkillPanel`, `ProcessBudgetPanel`, `EventVerificationPanel` |
+| Are grid values accurate? | `xrtoolz.metrics.pixel` | `RMSE`, `MAE`, `Bias`, `Correlation`, `NashSutcliffe` |
+| Are scales resolved? | `xrtoolz.metrics.spectral`, `xrtoolz.metrics.multiscale` | `PSDScore`, `ResolvedScale`, `CoherenceSkill`, `PerScaleRMSE`, `WaveletRMSE` |
+| Does skill depend on forecast horizon? | `xrtoolz.metrics.forecast` | `SkillByLeadTime`, `RMSEByLead`, `AnomalyCorrelationByLead`, `SpectralSkillByLead` |
+| Does skill vary by region or regime? | `xrtoolz.metrics.multiscale`, `xrtoolz.metrics.spectral`, `xrtoolz.geo.masks` | `EvaluateByRegion`, `FrequencyBandSkill`, `BandLimitedRMSE`, `AddRegionMask` |
+| Is an ensemble calibrated? | `xrtoolz.metrics.probabilistic` | `CRPS`, `SpreadSkillRatio`, `RankHistogram`, `EnsembleCoverage`, `ReliabilityCurve` |
+| Are structures displaced or blurred? | `xrtoolz.metrics.structural` | `SSIM`, `GradientDifference`, `PhaseShiftError`, `CentroidDisplacement` |
+| Are physical balances respected? | `xrtoolz.metrics.physical`, `xrtoolz.kinematics` | `GeostrophicBalanceError`, `DivergenceError`, `VorticityError`, `KineticEnergyError` |
+| Are budgets closed? | `xrtoolz.budgets` | `ControlVolumeIntegral`, `BoundaryFlux`, `HeatBudgetResidual`, `SaltBudgetResidual`, `VolumeBudgetResidual`, `KineticEnergyBudgetResidual` |
+| Is material transport realistic? | `xrtoolz.lagrangian`, `xrtoolz.metrics.lagrangian` | `AdvectParticles`, `PairDispersion`, `ResidenceTime`, `ConnectivityMatrix`, `FTLE`, `EndpointError` |
+| Are events captured? | `xrtoolz.phenomena`, `xrtoolz.metrics.object` | `DetectMarineHeatwaves`, `DetectEddies`, `DetectFronts`, `MatchObjects`, `ProbabilityOfDetection`, `FalseAlarmRatio`, `CriticalSuccessIndex`, `IntersectionOverUnion` |
+| Do diagnostics need plots? | `xrtoolz.viz.validation` | `ScaleSkillPanel`, `SpectralSkillPanel`, `LeadTimeSkillPanel`, `ProcessBudgetPanel`, `EventVerificationPanel` |
 
 ---
 
@@ -74,7 +74,7 @@ RMSE, MAE, bias, correlation, and NSE remain useful, but they should be treated 
 #### Demo API
 
 ```python
-from xr_toolz.metrics import RMSE, MAE, Bias, Correlation, NashSutcliffe
+from xrtoolz.metrics import RMSE, MAE, Bias, Correlation, NashSutcliffe
 ```
 
 #### Demo Example Usage
@@ -99,10 +99,10 @@ A model may have good global RMSE while underrepresenting high-wavenumber varian
 #### Demo API
 
 ```python
-from xr_toolz.metrics.forecast import SkillByLeadTime, RMSEByLead, AnomalyCorrelationByLead
-from xr_toolz.metrics.multiscale import EvaluateByRegion
-from xr_toolz.metrics.spectral import FrequencyBandSkill
-from xr_toolz.metrics.spectral import PSDScore, ResolvedScale
+from xrtoolz.metrics.forecast import SkillByLeadTime, RMSEByLead, AnomalyCorrelationByLead
+from xrtoolz.metrics.multiscale import EvaluateByRegion
+from xrtoolz.metrics.spectral import FrequencyBandSkill
+from xrtoolz.metrics.spectral import PSDScore, ResolvedScale
 ```
 
 #### Demo Example Usage
@@ -127,7 +127,7 @@ Chaotic geophysical systems require uncertainty-aware evaluation. CRPS, rank his
 #### Demo API
 
 ```python
-from xr_toolz.metrics.probabilistic import CRPS, SpreadSkillRatio, RankHistogram, EnsembleCoverage, ReliabilityCurve
+from xrtoolz.metrics.probabilistic import CRPS, SpreadSkillRatio, RankHistogram, EnsembleCoverage, ReliabilityCurve
 ```
 
 #### Demo Example Usage
@@ -152,7 +152,7 @@ Pointwise metrics have a double-penalty problem for displaced coherent structure
 #### Demo API
 
 ```python
-from xr_toolz.metrics.structural import SSIM, GradientDifference, PhaseShiftError, CentroidDisplacement
+from xrtoolz.metrics.structural import SSIM, GradientDifference, PhaseShiftError, CentroidDisplacement
 ```
 
 #### Demo Example Usage
@@ -177,8 +177,8 @@ Good short-range errors do not guarantee physically plausible dynamics. Balance 
 #### Demo API
 
 ```python
-from xr_toolz.metrics.physical import GeostrophicBalanceError, DivergenceError, DensityInversionFraction
-from xr_toolz.budgets import HeatBudgetResidual, SaltBudgetResidual, VolumeBudgetResidual, ControlVolumeIntegral
+from xrtoolz.metrics.physical import GeostrophicBalanceError, DivergenceError, DensityInversionFraction
+from xrtoolz.budgets import HeatBudgetResidual, SaltBudgetResidual, VolumeBudgetResidual, ControlVolumeIntegral
 ```
 
 #### Demo Example Usage
@@ -203,8 +203,8 @@ Eulerian field agreement does not guarantee material transport fidelity. Lagrang
 #### Demo API
 
 ```python
-from xr_toolz.lagrangian import SeedParticles, AdvectParticles, PairDispersion, ResidenceTime, ConnectivityMatrix, FTLE
-from xr_toolz.metrics.lagrangian import EndpointError, TrajectoryRMSE, DispersionError
+from xrtoolz.lagrangian import SeedParticles, AdvectParticles, PairDispersion, ResidenceTime, ConnectivityMatrix, FTLE
+from xrtoolz.metrics.lagrangian import EndpointError, TrajectoryRMSE, DispersionError
 ```
 
 #### Demo Example Usage
@@ -231,8 +231,8 @@ Event verification checks whether the model represents discrete structures in sp
 #### Demo API
 
 ```python
-from xr_toolz.phenomena import EventDefinition, DetectMarineHeatwaves, DetectEddies, DetectFronts, MatchObjects
-from xr_toolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex, IntersectionOverUnion
+from xrtoolz.phenomena import EventDefinition, DetectMarineHeatwaves, DetectEddies, DetectFronts, MatchObjects
+from xrtoolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex, IntersectionOverUnion
 ```
 
 #### Demo Example Usage
@@ -251,11 +251,11 @@ iou = IntersectionOverUnion()(matches)
 ## End-to-End Validation Graph
 
 ```python
-from xr_toolz.core import Graph, Input
-from xr_toolz.metrics import RMSE, PSDScore
-from xr_toolz.metrics.forecast import RMSEByLead
-from xr_toolz.metrics.structural import SSIM
-from xr_toolz.budgets import HeatBudgetResidual
+from xrtoolz.core import Graph, Input
+from xrtoolz.metrics import RMSE, PSDScore
+from xrtoolz.metrics.forecast import RMSEByLead
+from xrtoolz.metrics.structural import SSIM
+from xrtoolz.budgets import HeatBudgetResidual
 
 pred = Input("prediction")
 ref = Input("reference")

@@ -7,13 +7,13 @@ from typing import Any
 
 import pytest
 
-from xr_toolz.data import (
+from xrtoolz.data import (
     CDSCredentials,
     CDSSource,
     CMEMSCredentials,
     CMEMSSource,
 )
-from xr_toolz.types import BBox, PressureLevels, TimeRange
+from xrtoolz.types import BBox, PressureLevels, TimeRange
 
 
 class FakeCmemsClient:

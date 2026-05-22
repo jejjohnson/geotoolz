@@ -7,8 +7,8 @@ import pytest
 import xarray as xr
 from pyproj import Geod
 
-from xr_toolz.geo import BandpassWavelength, bandpass_wavelength, median_dx_km
-from xr_toolz.geo._src import along_track
+from xrtoolz.geo import BandpassWavelength, bandpass_wavelength, median_dx_km
+from xrtoolz.geo._src import along_track
 
 
 def _track_dataset(n: int = 256) -> xr.Dataset:

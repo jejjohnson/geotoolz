@@ -1,8 +1,8 @@
-"""Import-surface tests for :mod:`xr_toolz.interpolate` (Epic F3 / D12).
+"""Import-surface tests for :mod:`xrtoolz.interpolate` (Epic F3 / D12).
 
 Pins the canonical re-export surface, the deep-import paths into
 ``_src.<sub>``, identity equivalence between the two, and verifies that
-the legacy ``xr_toolz.geo`` re-exports for these names are gone (no
+the legacy ``xrtoolz.geo`` re-exports for these names are gone (no
 deprecation shim — the package is pre-1.0 and has no external users).
 """
 
@@ -94,8 +94,8 @@ REMOVED_FROM_GEO = (
 
 @pytest.mark.parametrize("name,submod", CANONICAL_FUNCS)
 def test_canonical_function_surface(name: str, submod: str) -> None:
-    package = importlib.import_module("xr_toolz.interpolate")
-    deep = importlib.import_module(f"xr_toolz.interpolate._src.{submod}")
+    package = importlib.import_module("xrtoolz.interpolate")
+    deep = importlib.import_module(f"xrtoolz.interpolate._src.{submod}")
     assert hasattr(package, name)
     assert hasattr(deep, name)
     assert getattr(package, name) is getattr(deep, name)
@@ -104,20 +104,20 @@ def test_canonical_function_surface(name: str, submod: str) -> None:
 
 @pytest.mark.parametrize("name", CANONICAL_OPS)
 def test_canonical_operator_surface(name: str) -> None:
-    ops = importlib.import_module("xr_toolz.interpolate.operators")
+    ops = importlib.import_module("xrtoolz.interpolate.operators")
     assert hasattr(ops, name)
     assert name in ops.__all__
 
 
 @pytest.mark.parametrize("name", REMOVED_FROM_GEO)
 def test_legacy_geo_names_are_gone(name: str) -> None:
-    geo = importlib.import_module("xr_toolz.geo")
+    geo = importlib.import_module("xrtoolz.geo")
     with pytest.raises(AttributeError):
         getattr(geo, name)
 
 
 def test_legacy_geo_operator_names_are_gone() -> None:
-    ops = importlib.import_module("xr_toolz.geo.operators")
+    ops = importlib.import_module("xrtoolz.geo.operators")
     for name in ("FillNaNSpatial", "FillNaNTemporal", "ResampleTime"):
         with pytest.raises(AttributeError):
             getattr(ops, name)

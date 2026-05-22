@@ -12,7 +12,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from xr_toolz.data import AemetArchive, AemetSource
+from xrtoolz.data import AemetArchive, AemetSource
 
 
 def _default_scratch_root() -> Path:

@@ -1,9 +1,9 @@
-import xr_toolz
+import xrtoolz
 
 
 def test_import():
-    assert xr_toolz is not None
+    assert xrtoolz is not None
 
 
 def test_version():
-    assert isinstance(xr_toolz.__version__, str)
+    assert isinstance(xrtoolz.__version__, str)

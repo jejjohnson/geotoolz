@@ -1,4 +1,4 @@
-"""Tests for :class:`xr_toolz.utils.XarrayEstimator`."""
+"""Tests for :class:`xrtoolz.utils.XarrayEstimator`."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 
-from xr_toolz.utils import XarrayEstimator
+from xrtoolz.utils import XarrayEstimator
 
 
 # ---------- fixtures -------------------------------------------------------

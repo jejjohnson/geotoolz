@@ -19,7 +19,7 @@ exchange between scales:
 > which."*
 
 Spectral KE flux is the standard mesoscale-turbulence diagnostic and
-absent from xr_toolz. While we're in the neighborhood, four
+absent from xrtoolz. While we're in the neighborhood, four
 companion primitives that are universally used alongside KE flux —
 **all sharing the same Fourier machinery** — fold in for ~30 LOC each:
 
@@ -37,7 +37,7 @@ companion primitives that are universally used alongside KE flux —
   inertial-range slopes legible (true `k^{-n}` regime appears flat).
 
 This issue ships all five in one PR, all in
-[`transforms/_src/fourier.py`](../../src/xr_toolz/transforms/_src/fourier.py)
+[`transforms/_src/fourier.py`](../../src/xrtoolz/transforms/_src/fourier.py)
 alongside the existing `power_spectrum` / `cross_spectrum`.
 
 ## 2. User stories
@@ -49,7 +49,7 @@ alongside the existing `power_spectrum` / `cross_spectrum`.
 
 ```python
 import xarray as xr
-from xr_toolz.transforms import ke_spectral_flux, enstrophy_spectral_flux
+from xrtoolz.transforms import ke_spectral_flux, enstrophy_spectral_flux
 
 ds_uv = xr.open_dataset("velocity_snapshot.nc")  # has u, v on (x, y)
 
@@ -75,7 +75,7 @@ ds_ke = ke_spectral_flux(
 > *I want the slope of `E(k)` between 50 km and 200 km wavelengths.*
 
 ```python
-from xr_toolz.transforms import power_spectrum, fit_spectral_slope
+from xrtoolz.transforms import power_spectrum, fit_spectral_slope
 
 psd = power_spectrum(ds["ssh"], dim=("x", "y"), isotropic=True)
 
@@ -91,7 +91,7 @@ print(f"slope = {slope:.2f}")   # e.g. -2.0 → SQG
 ### 2.4 Compensated spectrum for a clean visual
 
 ```python
-from xr_toolz.transforms import compensated_spectrum
+from xrtoolz.transforms import compensated_spectrum
 
 psd_compensated = compensated_spectrum(psd, wavenumber_dim="freq_r", exponent=2.0)
 psd_compensated.plot()    # flat plateau wherever true k^{-2} regime holds
@@ -100,7 +100,7 @@ psd_compensated.plot()    # flat plateau wherever true k^{-2} regime holds
 ### 2.5 Single-number length scales
 
 ```python
-from xr_toolz.transforms import integral_scale
+from xrtoolz.transforms import integral_scale
 
 ell    = integral_scale(psd, wavenumber_dim="freq_r", moment=1)   # integral scale
 lambda_T = integral_scale(psd, wavenumber_dim="freq_r", moment=2) # Taylor microscale
@@ -109,8 +109,8 @@ lambda_T = integral_scale(psd, wavenumber_dim="freq_r", moment=2) # Taylor micro
 ### 2.6 Operators inside a Sequential
 
 ```python
-from xr_toolz.transforms import KESpectralFlux
-from xr_toolz.core import Sequential
+from xrtoolz.transforms import KESpectralFlux
+from xrtoolz.core import Sequential
 
 pipeline = Sequential([
     KESpectralFlux(u_var="u", v_var="v", dim=("x", "y"), avg_dims=("time",)),
@@ -122,8 +122,8 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `power_spectrum` (1-D and 2-D isotropic) | [`fourier.py:43`](../../src/xr_toolz/transforms/_src/fourier.py) | unchanged |
-| `cross_spectrum`, `coherence`, `stft` | [`fourier.py`](../../src/xr_toolz/transforms/_src/fourier.py) | unchanged |
+| `power_spectrum` (1-D and 2-D isotropic) | [`fourier.py:43`](../../src/xrtoolz/transforms/_src/fourier.py) | unchanged |
+| `cross_spectrum`, `coherence`, `stft` | [`fourier.py`](../../src/xrtoolz/transforms/_src/fourier.py) | unchanged |
 | Window / detrend kwargs | via `xrft` | reuse |
 | Radial binning (2-D → 1-D iso) | via `xrft.isotropic_power_spectrum` | reuse |
 | KE spectral flux | — | **add** `ke_spectral_flux` |
@@ -172,7 +172,7 @@ additional FFT cost beyond what KE flux already pays.
 ### 4.3 Tier B — primitives
 
 ```python
-# src/xr_toolz/transforms/_src/fourier.py
+# src/xrtoolz/transforms/_src/fourier.py
 
 def ke_spectral_flux(
     u: xr.DataArray, v: xr.DataArray, *,
@@ -251,7 +251,7 @@ duplication.
 ### 4.5 Layer-1 Operators
 
 ```python
-# src/xr_toolz/transforms/operators.py
+# src/xrtoolz/transforms/operators.py
 class KESpectralFlux(Operator):
     """Single-Dataset KE spectral flux operator.
 
@@ -291,20 +291,20 @@ No new dependencies. Pure xrft + numpy + xarray.
 
 ```python
 # Tier B primitives
-xr_toolz.transforms.ke_spectral_flux(u, v, *, dim, window, detrend,
+xrtoolz.transforms.ke_spectral_flux(u, v, *, dim, window, detrend,
                                      avg_dims, return_2d)
-xr_toolz.transforms.enstrophy_spectral_flux(u, v, *, dim, window, detrend,
+xrtoolz.transforms.enstrophy_spectral_flux(u, v, *, dim, window, detrend,
                                             avg_dims, return_2d)
-xr_toolz.transforms.integral_scale(psd, *, wavenumber_dim, moment)
-xr_toolz.transforms.fit_spectral_slope(psd, *, wavenumber_dim, k_min, k_max)
-xr_toolz.transforms.compensated_spectrum(psd, *, wavenumber_dim, exponent)
+xrtoolz.transforms.integral_scale(psd, *, wavenumber_dim, moment)
+xrtoolz.transforms.fit_spectral_slope(psd, *, wavenumber_dim, k_min, k_max)
+xrtoolz.transforms.compensated_spectrum(psd, *, wavenumber_dim, exponent)
 
 # Operators
-xr_toolz.transforms.KESpectralFlux(...)
-xr_toolz.transforms.EnstrophySpectralFlux(...)
+xrtoolz.transforms.KESpectralFlux(...)
+xrtoolz.transforms.EnstrophySpectralFlux(...)
 ```
 
-All re-exported from `xr_toolz.transforms.__init__`.
+All re-exported from `xrtoolz.transforms.__init__`.
 
 ## 7. Tests
 
@@ -366,7 +366,7 @@ Target: ~16 cases.
 ## 10. Risks / open questions
 
 1. **Where it lives.** Two options: (a)
-   [`transforms/_src/fourier.py`](../../src/xr_toolz/transforms/_src/fourier.py)
+   [`transforms/_src/fourier.py`](../../src/xrtoolz/transforms/_src/fourier.py)
    alongside `power_spectrum` (recommended — math is generic Fourier
    transfer), (b) new `ocn/_src/spectral_flux.py` (since the formula
    assumes incompressible momentum advection). **Recommend (a)**.

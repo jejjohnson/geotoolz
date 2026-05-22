@@ -1,4 +1,4 @@
-"""Tests for Layer-0 primitives in :mod:`xr_toolz.geo`."""
+"""Tests for Layer-0 primitives in :mod:`xrtoolz.geo`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from xr_toolz.geo import (
+from xrtoolz.geo import (
     add_climatology,
     bias,
     calculate_anomaly,
@@ -178,7 +178,7 @@ def test_validate_time_does_not_mutate_input():
 
 
 def test_check_dataset_coords_passes_valid(ds_global):
-    from xr_toolz.geo import validate_latitude, validate_longitude
+    from xrtoolz.geo import validate_latitude, validate_longitude
 
     ds = validate_longitude(validate_latitude(ds_global))
     check_dataset_coords(ds, require=("time", "lat", "lon"))

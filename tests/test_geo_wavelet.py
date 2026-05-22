@@ -7,9 +7,9 @@ import json
 import numpy as np
 import pytest
 import xarray as xr
+from pipekit import Sequential
 
-from xr_toolz.core import Sequential
-from xr_toolz.geo import (
+from xrtoolz.geo import (
     WaveletPowerSpectrum,
     WaveletScalogram,
     WaveletSignificance,
@@ -233,7 +233,7 @@ def test_wavelet_plot_helpers_return_axes() -> None:
     import matplotlib
 
     matplotlib.use("Agg")
-    from xr_toolz.geo.plot import (
+    from xrtoolz.geo.plot import (
         plot_dominant_period_map,
         plot_global_wavelet_spectrum,
         plot_resolved_scale_map,
@@ -266,7 +266,7 @@ def test_morlet2_ft_peaks_at_expected_wavenumber() -> None:
     """The Morlet kernel peaks at the central wavenumber kc = k0/(s*x0)
     along its rotation axis. Catches sign/normalization regressions in
     the analytic Fourier transform."""
-    from xr_toolz.geo._src.wavelet import morlet2_ft
+    from xrtoolz.geo._src.wavelet import morlet2_ft
 
     x0 = 1.0
     k0 = 3.0
@@ -291,7 +291,7 @@ def test_wvlt_cross_spectrum_self_matches_power_spectrum_up_to_constant() -> Non
     ``wvlt_power_spectrum`` by a single overall scalar — verifying the
     ratio is spatially constant locks in the cross-spectrum's
     normalization convention."""
-    from xr_toolz.geo._src.wavelet import wvlt_cross_spectrum
+    from xrtoolz.geo._src.wavelet import wvlt_cross_spectrum
 
     da = _plane_wave(nx=32, ny=32, wavelength=4.0)
     scales = xr.DataArray([2.0, 4.0], dims="scale")
@@ -309,7 +309,7 @@ def test_plot_wavelet_spectrum_1d_rejects_higher_dimensional_input() -> None:
     import matplotlib
 
     matplotlib.use("Agg")
-    from xr_toolz.geo.plot import plot_wavelet_spectrum_1d
+    from xrtoolz.geo.plot import plot_wavelet_spectrum_1d
 
     da = _plane_wave()
     scales = xr.DataArray([2.0, 4.0], dims="scale")

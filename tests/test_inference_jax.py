@@ -1,4 +1,4 @@
-"""Integration tests for :class:`xr_toolz.inference.JaxModelOp`.
+"""Integration tests for :class:`xrtoolz.inference.JaxModelOp`.
 
 Skipped if ``jax`` is not installed.
 """
@@ -14,7 +14,7 @@ jax = pytest.importorskip("jax")
 jnp = jax.numpy
 
 
-from xr_toolz.inference import JaxModelOp
+from xrtoolz.inference import JaxModelOp
 
 
 def _linear_model(w: np.ndarray, b: float):

@@ -1,4 +1,4 @@
-"""Behavioral tests for :class:`xr_toolz.inference.ModelOp`.
+"""Behavioral tests for :class:`xrtoolz.inference.ModelOp`.
 
 Covers the framework-agnostic core: xarray <-> array marshalling,
 ``method=`` dispatch, batched non-feature dims, raw-array inputs, and
@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.inference import ModelOp
+from xrtoolz.inference import ModelOp
 
 
 class _DummyModel:
@@ -217,7 +217,7 @@ def test_output_dim_collision_with_sample_dim_rejected() -> None:
 
 
 def test_works_inside_graph(da_2d: xr.DataArray) -> None:
-    from xr_toolz.core import Graph, Input
+    from pipekit import Graph, Input
 
     inp = Input("x")
     out = ModelOp(_DummyModel())(inp)

@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.metrics._src import pixel
+from xrtoolz.metrics._src import pixel
 
 
 @pytest.fixture

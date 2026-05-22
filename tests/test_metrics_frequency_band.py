@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.metrics import (
+from xrtoolz.metrics import (
     RMSE,
     BandLimitedRMSE,
     FrequencyBandSkill,

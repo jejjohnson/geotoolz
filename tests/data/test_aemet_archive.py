@@ -10,9 +10,9 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from xr_toolz.data import AemetArchive, AEMETCredentials, AemetSource
-from xr_toolz.data._src.aemet.archive import _merge_long
-from xr_toolz.types import Station, StationCollection
+from xrtoolz.data import AemetArchive, AEMETCredentials, AemetSource
+from xrtoolz.data._src.aemet.archive import _merge_long
+from xrtoolz.types import Station, StationCollection
 
 
 def _make_monthly_ds(

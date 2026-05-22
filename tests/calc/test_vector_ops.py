@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.calc import EARTH_RADIUS, curl, divergence, laplacian
+from xrtoolz.calc import EARTH_RADIUS, curl, divergence, laplacian
 
 
 # ---- helpers -------------------------------------------------------------
@@ -103,7 +103,7 @@ def test_spherical_divergence_includes_curvature_term():
     )
     # Reproduce the un-corrected ``∂u/∂x + ∂v/∂y`` by dropping v's
     # curvature contribution.
-    from xr_toolz.calc import partial
+    from xrtoolz.calc import partial
 
     du_dx = partial(ds["u"], "lon", geometry="spherical", accuracy=3)
     dv_dy = partial(ds["v"], "lat", geometry="spherical", accuracy=3)
@@ -118,7 +118,7 @@ def test_spherical_divergence_includes_curvature_term():
 def test_spherical_curl_includes_curvature_term():
     ds = _spherical_uv()
     z = curl(ds, ("u", "v"), dims=("lon", "lat"), geometry="spherical", accuracy=3)
-    from xr_toolz.calc import partial
+    from xrtoolz.calc import partial
 
     dvdx = partial(ds["v"], "lon", geometry="spherical", accuracy=3)
     dudy = partial(ds["u"], "lat", geometry="spherical", accuracy=3)

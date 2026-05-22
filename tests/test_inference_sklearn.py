@@ -1,4 +1,4 @@
-"""Integration tests for :class:`xr_toolz.inference.SklearnModelOp`.
+"""Integration tests for :class:`xrtoolz.inference.SklearnModelOp`.
 
 Skipped if ``scikit-learn`` is not installed.
 """
@@ -15,7 +15,7 @@ pytest.importorskip("sklearn")
 
 from sklearn.linear_model import LinearRegression, LogisticRegression
 
-from xr_toolz.inference import SklearnModelOp
+from xrtoolz.inference import SklearnModelOp
 
 
 def test_predict_round_trip() -> None:

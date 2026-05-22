@@ -7,7 +7,7 @@ import json
 import numpy as np
 import xarray as xr
 
-from xr_toolz.metrics import (
+from xrtoolz.metrics import (
     WaveletPSDScore,
     wavelet_psd_score,
     wavelet_resolved_scale_map,

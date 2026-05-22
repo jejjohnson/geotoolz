@@ -1,3 +1,3 @@
 # API Reference
 
-::: xr_toolz
+::: xrtoolz

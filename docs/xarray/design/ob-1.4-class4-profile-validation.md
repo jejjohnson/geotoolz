@@ -23,7 +23,7 @@ forecast cube (first_day, lead_day, depth, lat, lon)
    ┛ → pivot to (variable × depth_bin) × lead_day, formatted scoreboard
 ```
 
-xr_toolz today has the **2-D surface** version of grid→points
+xrtoolz today has the **2-D surface** version of grid→points
 (ODC-1.2 `sample_at_points`) and **2-D spatial** RMSD bins (ODC-1.4
 `bin_residuals_2d`). Neither handles depth-stratified profiles.
 
@@ -50,8 +50,8 @@ the forecast-cube convention.
 ```python
 import pandas as pd
 import xarray as xr
-from xr_toolz.interpolate import interp_grid_to_profiles, assign_depth_bins
-from xr_toolz.metrics import rmsd_scoreboard
+from xrtoolz.interpolate import interp_grid_to_profiles, assign_depth_bins
+from xrtoolz.metrics import rmsd_scoreboard
 
 ds_model = xr.open_dataset("glorys_thetao.nc")        # (time, depth, lat, lon)
 df_obs   = pd.read_parquet("argo_profiles.parquet")   # rows: time, lat, lon, depth, observation_value
@@ -102,9 +102,9 @@ df["depth_bin"] = assign_depth_bins(df["depth"], bins=my_bins)
 ### 2.4 Operators in a Sequential
 
 ```python
-from xr_toolz.core import Sequential
-from xr_toolz.interpolate import InterpGridToProfiles
-from xr_toolz.metrics import RMSDScoreboard
+from xrtoolz.core import Sequential
+from xrtoolz.interpolate import InterpGridToProfiles
+from xrtoolz.metrics import RMSDScoreboard
 
 pipeline = Sequential([
     InterpGridToProfiles(observations=df_obs, vertical_method="spline"),
@@ -127,7 +127,7 @@ df_obs["model_value"] = interp_grid_to_profiles(ds_2d["ssh"], df_obs)
 |---|---|---|
 | 2-D `sample_at_points` (horizontal) | proposed in ODC-1.2 | reuse / extend |
 | 2-D `bin_residuals_2d` (lat/lon RMSD) | proposed in ODC-1.4 | unchanged |
-| `Variable` registry (display name / units / standard_name) | [`types/_src/variable.py`](../../src/xr_toolz/types/_src/variable.py) | reuse for label formatter |
+| `Variable` registry (display name / units / standard_name) | [`types/_src/variable.py`](../../src/xrtoolz/types/_src/variable.py) | reuse for label formatter |
 | Vertical bracket-linear interp | — | **add** (~30 LOC) |
 | Vertical NaN-aware cubic spline interp | — | **add** (~50 LOC) |
 | Depth-aware grid→profile interp (3-D) | — | **add** `interp_grid_to_profiles` |
@@ -149,7 +149,7 @@ variable-specific dispatch are operational-Mercator-specific.
 ### 4.2 Tier A — vertical interp kernels
 
 ```python
-# src/xr_toolz/interpolate/_src/array_vertical.py — new module
+# src/xrtoolz/interpolate/_src/array_vertical.py — new module
 def interp_vertical_bracket(
     profiles: ArrayLike,            # shape (n_depths, n_obs)
     depths: ArrayLike,              # shape (n_depths,)
@@ -193,7 +193,7 @@ where `np.isnan(profiles[:, i])` patterns cluster by dataset gaps.
 ### 4.3 Tier B — grid→profile interp
 
 ```python
-# src/xr_toolz/interpolate/_src/grid_to_profile.py — new module
+# src/xrtoolz/interpolate/_src/grid_to_profile.py — new module
 def interp_grid_to_profiles(
     model_data: xr.Dataset | xr.DataArray,
     observations: xr.Dataset | pd.DataFrame,
@@ -248,7 +248,7 @@ def interp_grid_to_profiles(model_data, observations, *,
 ### 4.4 Depth-bin assignment
 
 ```python
-# src/xr_toolz/interpolate/_src/binning.py — extend existing module
+# src/xrtoolz/interpolate/_src/binning.py — extend existing module
 DEPTH_BINS_DEFAULT: dict[str, tuple[float, float]] = {
     "0-5m":     (0, 5),
     "5-100m":   (5, 100),
@@ -272,7 +272,7 @@ def assign_depth_bins(
 ### 4.5 RMSD scoreboard pivot
 
 ```python
-# src/xr_toolz/metrics/_src/scoreboard.py — new module
+# src/xrtoolz/metrics/_src/scoreboard.py — new module
 def rmsd_scoreboard(
     df: pd.DataFrame, *,
     model_col: str = "model_value",
@@ -280,7 +280,7 @@ def rmsd_scoreboard(
     index_cols: Sequence[str] = ("variable", "depth_bin"),
     columns_col: str = "lead_day",
     label_format: str = "{display_name} ({units}) [{standard_name}]{{{depth_bin}}}",
-    registry: dict | None = None,         # defaults to xr_toolz Variable registry
+    registry: dict | None = None,         # defaults to xrtoolz Variable registry
 ) -> pd.DataFrame:
     """Generic RMSD pivot scoreboard.
 
@@ -290,7 +290,7 @@ def rmsd_scoreboard(
     values.
 
     Variable display_name / units / standard_name resolved via the
-    ``xr_toolz.types.Variable`` registry; falls back to raw column
+    ``xrtoolz.types.Variable`` registry; falls back to raw column
     values if a variable isn't registered.
     """
 ```
@@ -317,7 +317,7 @@ the `Variable` registry; uses the raw column value as a fallback.
 ### 4.6 Layer-1 Operators
 
 ```python
-# src/xr_toolz/interpolate/operators.py
+# src/xrtoolz/interpolate/operators.py
 class InterpGridToProfiles(Operator):
     """Operator wrapping interp_grid_to_profiles.
 
@@ -331,7 +331,7 @@ class InterpGridToProfiles(Operator):
                  depth: str = "depth",
                  observation_dim: str = "observation"): ...
 
-# src/xr_toolz/metrics/operators.py
+# src/xrtoolz/metrics/operators.py
 class RMSDScoreboard(Operator):
     """Operator wrapping rmsd_scoreboard."""
     def __init__(self, *,
@@ -392,7 +392,7 @@ forecast-cube assumptions.
 | NaN-pattern grouping | numpy bitmask via `int64` powers of 2 |
 | Depth-bin categorical | `pandas.cut` (or `numpy.digitize`) |
 | RMSD pivot table | `pandas.DataFrame.groupby` + `pivot_table` |
-| Variable / depth labels | `xr_toolz.types.Variable` registry |
+| Variable / depth labels | `xrtoolz.types.Variable` registry |
 
 No new top-level deps. scipy + pandas + numpy already in.
 
@@ -400,27 +400,27 @@ No new top-level deps. scipy + pandas + numpy already in.
 
 ```python
 # Tier A — array kernels
-xr_toolz.interpolate.array.interp_vertical_bracket(profiles, depths, targets)
-xr_toolz.interpolate.array.interp_vertical_spline(profiles, depths, targets,
+xrtoolz.interpolate.array.interp_vertical_bracket(profiles, depths, targets)
+xrtoolz.interpolate.array.interp_vertical_spline(profiles, depths, targets,
                                                    *, bc_type="natural")
 
 # Tier B — depth-aware grid→profile
-xr_toolz.interpolate.interp_grid_to_profiles(
+xrtoolz.interpolate.interp_grid_to_profiles(
     model_data, observations, *,
     vertical_method="linear", horizontal_method="linear",
     lon, lat, depth, observation_dim,
 )
 
 # Depth-bin assignment
-xr_toolz.interpolate.assign_depth_bins(depth_values, bins=DEPTH_BINS_DEFAULT)
-xr_toolz.interpolate.DEPTH_BINS_DEFAULT
+xrtoolz.interpolate.assign_depth_bins(depth_values, bins=DEPTH_BINS_DEFAULT)
+xrtoolz.interpolate.DEPTH_BINS_DEFAULT
 
 # Scoreboard
-xr_toolz.metrics.rmsd_scoreboard(df, *, ...)
+xrtoolz.metrics.rmsd_scoreboard(df, *, ...)
 
 # Operators
-xr_toolz.interpolate.InterpGridToProfiles(...)
-xr_toolz.metrics.RMSDScoreboard(...)
+xrtoolz.interpolate.InterpGridToProfiles(...)
+xrtoolz.metrics.RMSDScoreboard(...)
 ```
 
 ## 7. Tests
@@ -511,7 +511,7 @@ Largest oceanbench item so far. Single PR.
    are configurable, defaulting to Mercator's `(var × depth_bin) ×
    lead_day`. Single function, multiple use cases.
 7. **Pandas inputs to Operators.** `RMSDScoreboard` takes pandas
-   long-form. Unusual for xr_toolz Operators (normally Dataset →
+   long-form. Unusual for xrtoolz Operators (normally Dataset →
    Dataset). Acceptable here because validation tables are inherently
    tabular; document the deviation.
 8. **`Variable` registry coverage for label formatter.** Already

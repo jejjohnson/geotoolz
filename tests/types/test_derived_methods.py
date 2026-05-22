@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from xr_toolz.types import BBox, DepthRange, PressureLevels, Request, TimeRange
+from xrtoolz.types import BBox, DepthRange, PressureLevels, Request, TimeRange
 
 
 # ---- BBox derived methods -----------------------------------------------

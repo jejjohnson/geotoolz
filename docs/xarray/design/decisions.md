@@ -122,7 +122,7 @@ version: 0.1.0
 
 **Status:** accepted (resolved 2026-04-25)
 
-**Context:** Should `xr_toolz.metrics` wrap `xskillscore`, depend on it optionally, or own the implementation?
+**Context:** Should `xrtoolz.metrics` wrap `xskillscore`, depend on it optionally, or own the implementation?
 
 **Options:**
 - (A) Wrap xskillscore — small surface, inherits their tests, but no spectral / multiscale / masked-coverage variants and the API is function-style (no Operator)
@@ -131,8 +131,8 @@ version: 0.1.0
 
 **Decision:** Option C.
 
-- **Layer 0** — pure functions in `xr_toolz/metrics/_src/<family>.py` returning `xr.DataArray | xr.Dataset | float`. One file per family: `pixel.py` (RMSE, NRMSE, MAE, Bias, Correlation, Murphy, NSE, CRPS), `spectral.py` (PSDScore, ResolvedScale, Coherence-as-skill), `multiscale.py` (per-scale RMSE, wavelet-RMSE), `distributional.py` (KS, Wasserstein, energy distance), `masked.py` (mask-aware variants of the above).
-- **Layer 1** — Operator wrappers in `xr_toolz/metrics/operators.py` (`RMSE`, `PSDScore`, `ResolvedScale`, …). Each is a thin call into the Layer 0 function with config carried on the operator. Multi-input: `__call__(prediction, reference) → DataArray | Dataset | float`.
+- **Layer 0** — pure functions in `xrtoolz/metrics/_src/<family>.py` returning `xr.DataArray | xr.Dataset | float`. One file per family: `pixel.py` (RMSE, NRMSE, MAE, Bias, Correlation, Murphy, NSE, CRPS), `spectral.py` (PSDScore, ResolvedScale, Coherence-as-skill), `multiscale.py` (per-scale RMSE, wavelet-RMSE), `distributional.py` (KS, Wasserstein, energy distance), `masked.py` (mask-aware variants of the above).
+- **Layer 1** — Operator wrappers in `xrtoolz/metrics/operators.py` (`RMSE`, `PSDScore`, `ResolvedScale`, …). Each is a thin call into the Layer 0 function with config carried on the operator. Multi-input: `__call__(prediction, reference) → DataArray | Dataset | float`.
 - Custom user metrics: write a Layer 0 function with the standard signature, wrap once with `MetricOp(fn, **config)` (or a hand-authored Operator subclass).
 - **No xskillscore dependency.** Implementations are short and well-known; tests pin them against analytic ground truth and (offline) against xskillscore for the overlapping subset.
 
@@ -156,10 +156,10 @@ version: 0.1.0
 - (B) Everything in `geo.encoders` — keeps `transforms` purely about signal transforms
 - (C) Everything in `transforms.encoders` — single home, sub-organized by category
 
-**Decision:** Option C. All encoders move under `xr_toolz.transforms.encoders`, sub-organized by category:
+**Decision:** Option C. All encoders move under `xrtoolz.transforms.encoders`, sub-organized by category:
 
 ```
-xr_toolz/transforms/encoders/
+xrtoolz/transforms/encoders/
     coord_space.py    # LonLatToCartesian, GeocentricToENU, …
     coord_time.py     # CyclicalTimeEncoding, JulianDate, …
     basis.py          # FourierFeatures, RandomFourierFeatures, PolynomialFeatures
@@ -171,9 +171,9 @@ Rationale:
 - Sub-files (`coord_space`, `coord_time`, `basis`) preserve the conceptual split without forcing two parallel `encoders/` namespaces.
 
 **Consequences:**
-- `xr_toolz.geo._src/encoders.py` is removed; all encoder classes re-export from `transforms.encoders`.
-- `xr_toolz.transforms` becomes the single home for: fourier / dct / wavelet / decompose / encoders.
-- Existing imports from `xr_toolz.geo` need a one-time migration when this lands in code; design docs already reflect the new home.
+- `xrtoolz.geo._src/encoders.py` is removed; all encoder classes re-export from `transforms.encoders`.
+- `xrtoolz.transforms` becomes the single home for: fourier / dct / wavelet / decompose / encoders.
+- Existing imports from `xrtoolz.geo` need a one-time migration when this lands in code; design docs already reflect the new home.
 - Future encoder families (e.g., spherical harmonic basis, learned positional encodings) get a natural home — likely a new sub-file under `transforms.encoders/`.
 
 ---
@@ -182,16 +182,16 @@ Rationale:
 
 **Status:** accepted (resolved 2026-04-25)
 
-**Context:** `xr_toolz` currently has empty stubs at `xr_toolz/atm/`, `xr_toolz/ocn/`, `xr_toolz/ice/`, `xr_toolz/rs/`. Each was intended to host derived physical-quantity operators (`GeostrophicVelocities`, `WindSpeed`, `NormalizedDifference`, etc.). Should they fill out as four parallel domain-named submodules, or collapse into one home?
+**Context:** `xrtoolz` currently has empty stubs at `xrtoolz/atm/`, `xrtoolz/ocn/`, `xrtoolz/ice/`, `xrtoolz/rs/`. Each was intended to host derived physical-quantity operators (`GeostrophicVelocities`, `WindSpeed`, `NormalizedDifference`, etc.). Should they fill out as four parallel domain-named submodules, or collapse into one home?
 
 **Options:**
 - (A) Fill them — keep `atm/`, `ocn/`, `ice/`, `rs/` as top-level submodules, each with its own `kinematics`, `derived_variables`, etc. inside
-- (B) Collapse into a single `xr_toolz.kinematics` submodule with one file per domain (`ocean.py`, `atmosphere.py`, `ice.py`, `remote.py`)
+- (B) Collapse into a single `xrtoolz.kinematics` submodule with one file per domain (`ocean.py`, `atmosphere.py`, `ice.py`, `remote.py`)
 
 **Decision:** Option B.
 
 ```
-xr_toolz/kinematics/_src/
+xrtoolz/kinematics/_src/
     ocean.py
     atmosphere.py
     ice.py
@@ -204,11 +204,11 @@ Rationale:
 - Removes nine "where does X go?" questions (`WindSpeed`-over-ocean, methane retrieval, sea-ice forcing on the atmosphere, etc.) by collapsing them into one cross-domain home with a clear disambiguation rule (the variable being *operated on* decides the file, not the variable being *produced*).
 - Today's `atm/`, `ocn/`, `ice/`, `rs/` are empty namespaces — premature partitioning.
 - One module surface to document; one place to look.
-- A researcher who wants ocean physics imports `xr_toolz.kinematics.ocean.GeostrophicVelocities` — barely longer than `xr_toolz.ocn.GeostrophicVelocities` and the home is unambiguous.
+- A researcher who wants ocean physics imports `xrtoolz.kinematics.ocean.GeostrophicVelocities` — barely longer than `xrtoolz.ocn.GeostrophicVelocities` and the home is unambiguous.
 
 **Consequences:**
-- The `xr_toolz/atm/`, `xr_toolz/ocn/`, `xr_toolz/ice/`, `xr_toolz/rs/` packages are removed. Existing (currently minimal) code in `ocn/` migrates into `kinematics/_src/ocean.py`.
-- A new `xr_toolz.kinematics` top-level module is reserved.
+- The `xrtoolz/atm/`, `xrtoolz/ocn/`, `xrtoolz/ice/`, `xrtoolz/rs/` packages are removed. Existing (currently minimal) code in `ocn/` migrates into `kinematics/_src/ocean.py`.
+- A new `xrtoolz.kinematics` top-level module is reserved.
 - Cross-domain operators that genuinely don't fit one file (rare) get a `kinematics/_src/shared.py`.
 - Future domain growth (e.g., a `methane.py` if methane-retrieval operators get plentiful) is a new file in the same module, not a new top-level submodule.
 
@@ -227,7 +227,7 @@ Rationale:
 
 **Decision:** Option A.
 
-- `xr_toolz.viz` operators are `Operator` subclasses with `__call__(ds) → matplotlib.Figure | matplotlib.Axes`.
+- `xrtoolz.viz` operators are `Operator` subclasses with `__call__(ds) → matplotlib.Figure | matplotlib.Axes`.
 - The `Operator` contract (architecture.md) is amended: terminal viz operators are an explicit exception to `Dataset → Dataset`.
 - They compose inside `Graph` as terminal output nodes — the motivating use case is end-to-end evaluation graphs that emit both scalar scores and figures from one symbolic computation: `Graph(inputs={"pred": …, "ref": …}, outputs={"rmse": rmse_node, "psd_score": psd_node, "psd_fig": plot_psd_node})`.
 - They compose inside `Sequential` only as the **last** step. A `Sequential` that emits a non-`Dataset` from a non-final step is a runtime error.
@@ -238,7 +238,7 @@ Rationale:
 - Option A's downside (the contract gets one exception) is small and well-localized to one module.
 
 **Consequences:**
-- `xr_toolz/viz/` is a new top-level submodule.
+- `xrtoolz/viz/` is a new top-level submodule.
 - `Sequential` validates that any non-`Dataset` return appears only at the final step; otherwise raises a clear error.
 - `Graph` already supports heterogeneous output types — no change needed.
 - Documented operator-contract exception in [architecture.md §Operator](architecture.md): "Terminal viz operators may return `Figure` / `Axes`".
@@ -259,12 +259,12 @@ Rationale:
 
 **Decision:** Option C.
 
-- **Tier A — `xr_toolz.<module>.array`**: array-level functions. Take and return arrays (numpy, JAX, numba-jitted, optionally CuPy), not xarray. Use `axis=` (not `dim=`). The default backend is numpy; JAX / numba / CuPy variants are added per-function as the math benefits, either by `array_namespace(x)` dispatch where it's clean or by hand-authored backend-specific implementations where it isn't. **Strict Array API compliance is not a hard requirement** — pragmatism wins. A function may be numpy-only, JAX-only, or multi-backend; each is documented per-function.
-- **Tier B — Layer 0 (xarray)**: per-module functions in `xr_toolz/<module>/_src/`. Single-variable functions take `xr.DataArray`, return `xr.DataArray`. Multi-variable functions take `xr.Dataset` plus explicit variable selectors (`variable="ssh"`, `u_var="u"`, …) and may return `xr.DataArray` or `xr.Dataset`. Delegate to Tier A; add coord/attr handling and `dim=` semantics.
+- **Tier A — `xrtoolz.<module>.array`**: array-level functions. Take and return arrays (numpy, JAX, numba-jitted, optionally CuPy), not xarray. Use `axis=` (not `dim=`). The default backend is numpy; JAX / numba / CuPy variants are added per-function as the math benefits, either by `array_namespace(x)` dispatch where it's clean or by hand-authored backend-specific implementations where it isn't. **Strict Array API compliance is not a hard requirement** — pragmatism wins. A function may be numpy-only, JAX-only, or multi-backend; each is documented per-function.
+- **Tier B — Layer 0 (xarray)**: per-module functions in `xrtoolz/<module>/_src/`. Single-variable functions take `xr.DataArray`, return `xr.DataArray`. Multi-variable functions take `xr.Dataset` plus explicit variable selectors (`variable="ssh"`, `u_var="u"`, …) and may return `xr.DataArray` or `xr.Dataset`. Delegate to Tier A; add coord/attr handling and `dim=` semantics.
 - **Tier C — Layer 1 (Operators)**: input is always `xr.Dataset` (or two `xr.Dataset` for multi-input operators). Output is **usually** `xr.Dataset` for transformations that preserve the dataset shape, but reduction-style operators (e.g., metrics) may return `xr.DataArray` or scalar, and terminal viz operators return `matplotlib.Figure` / `Axes` (D10). Operators select variables via constructor args, then delegate to Tier B. Multi-input operators (metrics) take multiple Datasets.
 
 Rationale:
-- Numpy / JAX / numba / CuPy users get a first-class entry point (`xr_toolz.metrics.array.rmse(pred, ref, axis=-1)`) without the library hard-depending on JAX / CuPy at install time. Optional backends are imported lazily per-function.
+- Numpy / JAX / numba / CuPy users get a first-class entry point (`xrtoolz.metrics.array.rmse(pred, ref, axis=-1)`) without the library hard-depending on JAX / CuPy at install time. Optional backends are imported lazily per-function.
 - The xarray Layer 0 contract is now unambiguous: arity decides the type. Single-variable → DataArray. Multi-variable → Dataset with selectors.
 - The Operator contract has a uniform *input* shape (Dataset(s)); outputs may narrow (DataArray / scalar for reductions; Figure / Axes for terminal viz) without breaking composition because `Sequential` and `Graph` enforce that narrowed outputs only appear at terminal nodes.
 - Backend coverage is *opportunistic*, not enforced — a fourier transform that's numpy-only today can grow a JAX variant later without breaking the contract.
@@ -289,13 +289,13 @@ Rationale:
 **Options:**
 
 - (A) Keep the three modules separate, add new modules per concern (`coord_remap`, `smooth`, `downscale`). Six top-level modules for one conceptual space.
-- (B) Collapse into a single `xr_toolz.interpolate` module organized by source/target structure (grid↔grid, grid↔points, points→grid, in-place gap fill) plus axis-specific submodules (`coord_remap`, `resample`, `smooth`, `downscale`).
+- (B) Collapse into a single `xrtoolz.interpolate` module organized by source/target structure (grid↔grid, grid↔points, points→grid, in-place gap fill) plus axis-specific submodules (`coord_remap`, `resample`, `smooth`, `downscale`).
 - (C) Two-module split: `interpolate` (deterministic) + `downscale` (learned). Cleaner separation of deterministic vs ML, but splits closely-related concepts and creates a parallel hierarchy.
 
 **Decision (structural):** Option B.
 
 ```
-xr_toolz/interpolate/
+xrtoolz/interpolate/
     array.py
     _src/
         grid_to_grid.py    # Regrid, Coarsen (deterministic aggregation), Refine (deterministic interpolation)
@@ -326,7 +326,7 @@ Modules outside `interpolate` that handle adjacent concerns: `crs.Reproject` (CR
 4. **`coord_remap` preset scope — resolved.** Ship vertical (`ToSigma`, `FromSigma`, `ToIsopycnal`, `ToPressureLevels`, `ToHeight`) + temporal (`ToPhase`) only. `ToTropopauseRelative`, `ToBoundaryLayerCoord`, and other domain-specific presets are deferred — add them on demand as new issues, each as a thin subclass over the generic `RemapAxis`.
 
 **Consequences:**
-- `xr_toolz.regrid`, `xr_toolz.interpolation`, `xr_toolz.discretize` are removed in favor of `xr_toolz.interpolate`. Pre-1.0 design doc — no compatibility shim planned.
+- `xrtoolz.regrid`, `xrtoolz.interpolation`, `xrtoolz.discretize` are removed in favor of `xrtoolz.interpolate`. Pre-1.0 design doc — no compatibility shim planned.
 - `detrend.LowpassFilter` migrates to `interpolate.smooth.LowpassFilter`. `detrend` becomes climatology-only.
 - `Downscale` introduces a soft `ModelOp` dependency in `interpolate`. `ModelOp` itself has no framework dep (per D4), so the inference module is the only transitive surface added.
 - Three tiers per D11 throughout. Tier A is rich here — most algorithms are pure array math (linear / cubic / RBF / kriging / FFT-based filters) and benefit from JAX or numba variants.

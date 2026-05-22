@@ -9,10 +9,10 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.data import CDSCredentials, CDSSource, describe
-from xr_toolz.data._src.cache import _json_default
-from xr_toolz.data._src.cds.source import _engine_for_format, _suffix_for_format
-from xr_toolz.types import BBox, TimeRange, Variable, apply_cf_attrs
+from xrtoolz.data import CDSCredentials, CDSSource, describe
+from xrtoolz.data._src.cache import _json_default
+from xrtoolz.data._src.cds.source import _engine_for_format, _suffix_for_format
+from xrtoolz.types import BBox, TimeRange, Variable, apply_cf_attrs
 
 
 # ---- 1. apply_cf_attrs uses shallow copy --------------------------------
@@ -90,7 +90,7 @@ def test_bbox_as_xarray_sel_works_after_to_360():
 
 
 def test_describe_returns_dataset_info_not_any():
-    from xr_toolz.data import DatasetInfo
+    from xrtoolz.data import DatasetInfo
 
     info = describe("glorys12.daily")
     assert isinstance(info, DatasetInfo)
@@ -167,7 +167,7 @@ def test_validation_range_check_handles_empty_data_without_raising():
     """Construct an all-NaN DataArray so ``count() == 0``. The check
     must return cleanly — previously it could trip the "truth value of
     a DataArray is ambiguous" path on some xarray versions."""
-    from xr_toolz.types import validate_variable
+    from xrtoolz.types import validate_variable
 
     da = xr.DataArray(
         np.full((3,), np.nan),
@@ -180,7 +180,7 @@ def test_validation_range_check_handles_empty_data_without_raising():
 
 
 def test_validation_range_check_still_flags_when_data_present():
-    from xr_toolz.types import validate_variable
+    from xrtoolz.types import validate_variable
 
     da = xr.DataArray(
         np.array([50.0, 100.0]),  # way below SST's valid range [270, 320]

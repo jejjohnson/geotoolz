@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.metrics import (
+from xrtoolz.metrics import (
     nrmse,
     psd_score_spacetime,
     resolved_scale_2d,

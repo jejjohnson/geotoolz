@@ -25,8 +25,8 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from xr_toolz.data import CDSCredentials, CDSInsituArchive, CDSSource
-from xr_toolz.types import BBox
+from xrtoolz.data import CDSCredentials, CDSInsituArchive, CDSSource
+from xrtoolz.types import BBox
 
 
 # ---- zip builder helpers ------------------------------------------------

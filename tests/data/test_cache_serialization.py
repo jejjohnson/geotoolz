@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from xr_toolz.data._src.cache import _json_default, cache_path
+from xrtoolz.data._src.cache import _json_default, cache_path
 
 
 @dataclass

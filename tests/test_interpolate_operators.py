@@ -1,4 +1,4 @@
-"""Behavioral tests for :mod:`xr_toolz.interpolate.operators`.
+"""Behavioral tests for :mod:`xrtoolz.interpolate.operators`.
 
 Each new Layer-1 wrapper (``Bin2D``, ``Coarsen``, ``FillNaNRBF``,
 ``Histogram2D``, ``PointsToGrid``, ``Refine``) must:
@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from xr_toolz.interpolate import (
+from xrtoolz.interpolate import (
     Grid,
     bin_2d,
     coarsen,
@@ -30,7 +30,7 @@ from xr_toolz.interpolate import (
     points_to_grid,
     refine,
 )
-from xr_toolz.interpolate.operators import (
+from xrtoolz.interpolate.operators import (
     Bin2D,
     Coarsen,
     FillNaNClimatology,

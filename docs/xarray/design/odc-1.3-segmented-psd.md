@@ -26,7 +26,7 @@ gridded reconstruction. Along-track time series have:
 
 The upstream pipeline is: gap-split → fixed-length sliding windows
 within each chunk → per-window scipy Welch PSD → average → λx.
-xr_toolz already exposes a gridded `psd_score` (xrft-backed) and a
+xrtoolz already exposes a gridded `psd_score` (xrft-backed) and a
 `resolved_scale` λ-extraction helper, but lacks the **gap-tolerant
 1-D segmented Welch PSD** that bridges them.
 
@@ -45,7 +45,7 @@ This issue adds that bridge. After ODC-1.1 (bandpass) and ODC-1.2
 
 ```python
 import xarray as xr
-from xr_toolz.metrics import along_track_psd_score, resolved_scale
+from xrtoolz.metrics import along_track_psd_score, resolved_scale
 
 ds_track = xr.open_dataset("swot_colocated.nc")        # has ssha + ssh_interp
 ds_psd = along_track_psd_score(
@@ -67,7 +67,7 @@ lambda_x = resolved_scale(score_avg, frequency="wavenumber", level=0.5)
 > fall in a 10°×10° box around it.*
 
 ```python
-from xr_toolz.metrics import psd_score_by_region
+from xrtoolz.metrics import psd_score_by_region
 
 ds_regional = psd_score_by_region(
     ds_psd,
@@ -82,8 +82,8 @@ ds_regional = psd_score_by_region(
 ### 2.3 As a Layer-1 Operator inside a Sequential
 
 ```python
-from xr_toolz.metrics import SegmentedPSDScore
-from xr_toolz.core import Sequential
+from xrtoolz.metrics import SegmentedPSDScore
+from xrtoolz.core import Sequential
 
 pipeline = Sequential([
     BandpassWavelength(...),                      # ODC-1.1
@@ -99,9 +99,9 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Gridded `psd_score`, `psd_error` | [`metrics/_src/spectral.py:58-128`](../../src/xr_toolz/metrics/_src/spectral.py) | unchanged |
-| `resolved_scale` (λx-at-level) | [`spectral.py:131-204`](../../src/xr_toolz/metrics/_src/spectral.py) | **reuse as-is** |
-| Gridded `PSDScore` Operator | [`spectral.py:210`](../../src/xr_toolz/metrics/_src/spectral.py) | unchanged |
+| Gridded `psd_score`, `psd_error` | [`metrics/_src/spectral.py:58-128`](../../src/xrtoolz/metrics/_src/spectral.py) | unchanged |
+| `resolved_scale` (λx-at-level) | [`spectral.py:131-204`](../../src/xrtoolz/metrics/_src/spectral.py) | **reuse as-is** |
+| Gridded `PSDScore` Operator | [`spectral.py:210`](../../src/xrtoolz/metrics/_src/spectral.py) | unchanged |
 | Gap-tolerant 1-D segmenter | — | **add** `segment_signal` |
 | Per-segment Welch / CSD / coherence | — | **add** thin scipy wrappers |
 | Along-track PSD score driver | — | **add** `along_track_psd_score` |
@@ -139,7 +139,7 @@ Implementation: ~25 LOC using `numpy.lib.stride_tricks.sliding_window_view`.
 ### 4.2 Tier A — array kernels
 
 ```python
-# src/xr_toolz/metrics/_src/array_segmented_psd.py
+# src/xrtoolz/metrics/_src/array_segmented_psd.py
 def segmented_psd(
     x: ArrayLike, *,
     fs: float, npt: int, overlap: float = 0.5,
@@ -165,7 +165,7 @@ Each kernel:
 ### 4.3 Tier B — xarray driver
 
 ```python
-# src/xr_toolz/metrics/_src/segmented_psd.py
+# src/xrtoolz/metrics/_src/segmented_psd.py
 def along_track_psd_score(
     ds_track: xr.Dataset, *,
     var_ref: str,
@@ -226,7 +226,7 @@ Returns `(lat, lon, wavenumber)`-shaped Dataset of `psd_ref`, `psd_pred`,
 ### 4.5 Layer-1 Operator
 
 ```python
-# src/xr_toolz/metrics/operators.py
+# src/xrtoolz/metrics/operators.py
 class SegmentedPSDScore(Operator):
     """Single-input segmented along-track PSD-score operator.
 
@@ -252,7 +252,7 @@ class SegmentedPSDScore(Operator):
 No new helper. Users compose:
 
 ```python
-from xr_toolz.metrics import resolved_scale
+from xrtoolz.metrics import resolved_scale
 lambda_x = resolved_scale(ds_psd["psd_score"].mean("segment"),
                           frequency="wavenumber", level=0.5)
 ```
@@ -267,7 +267,7 @@ lambda_x = resolved_scale(ds_psd["psd_score"].mean("segment"),
 | Sliding-window view | `numpy.lib.stride_tricks.sliding_window_view` |
 | Circular mean (per-segment lon) | `scipy.stats.circmean` |
 | Median Δx (km) | ODC-1.1 `median_dx_km` |
-| λx extraction | existing `xr_toolz.metrics.resolved_scale` |
+| λx extraction | existing `xrtoolz.metrics.resolved_scale` |
 | Geographic binning | `xarray.Dataset.groupby_bins` |
 
 No new dependencies. The segmenter is the only ~25 LOC primitive that
@@ -277,23 +277,23 @@ isn't already in scipy/numpy/xarray.
 
 ```python
 # Tier A — array kernels
-xr_toolz.metrics.array.segment_signal(x, *, npt, overlap, gap_indices, min_segment_length)
-xr_toolz.metrics.array.segmented_psd(x, *, fs, npt, overlap, gap_indices, window, scaling)
-xr_toolz.metrics.array.segmented_csd(x, y, *, fs, npt, overlap, gap_indices, window, scaling)
-xr_toolz.metrics.array.segmented_coherence(x, y, *, fs, npt, overlap, gap_indices, window)
+xrtoolz.metrics.array.segment_signal(x, *, npt, overlap, gap_indices, min_segment_length)
+xrtoolz.metrics.array.segmented_psd(x, *, fs, npt, overlap, gap_indices, window, scaling)
+xrtoolz.metrics.array.segmented_csd(x, y, *, fs, npt, overlap, gap_indices, window, scaling)
+xrtoolz.metrics.array.segmented_coherence(x, y, *, fs, npt, overlap, gap_indices, window)
 
 # Tier B — xarray
-xr_toolz.metrics.along_track_psd_score(ds_track, *, var_ref, var_pred, dim,
+xrtoolz.metrics.along_track_psd_score(ds_track, *, var_ref, var_pred, dim,
                                        npt, overlap, max_gap, spacing_km,
                                        lon, lat, time)
-xr_toolz.metrics.psd_score_by_region(ds_segments, *, lat_centers, lon_centers,
+xrtoolz.metrics.psd_score_by_region(ds_segments, *, lat_centers, lon_centers,
                                      delta_lat, delta_lon, min_segments)
 
 # Operator
-xr_toolz.metrics.SegmentedPSDScore(...)
+xrtoolz.metrics.SegmentedPSDScore(...)
 
 # Reused (already public)
-xr_toolz.metrics.resolved_scale(score, frequency, level=0.5)
+xrtoolz.metrics.resolved_scale(score, frequency, level=0.5)
 ```
 
 ## 7. Tests
@@ -346,7 +346,7 @@ Target: ~12 cases.
 ## 10. Risks / open questions
 
 1. **Where the new code lives.** Three options:
-   (a) [`metrics/_src/spectral.py`](../../src/xr_toolz/metrics/_src/spectral.py)
+   (a) [`metrics/_src/spectral.py`](../../src/xrtoolz/metrics/_src/spectral.py)
    alongside `psd_score`, (b) new `metrics/_src/segmented_psd.py`,
    (c) `geo/_src/along_track.py` alongside ODC-1.1/1.2 helpers.
    **Recommend (b)** — sibling metric, deserves its own module given

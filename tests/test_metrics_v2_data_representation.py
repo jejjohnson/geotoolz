@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.metrics import (
+from xrtoolz.metrics import (
     CRPS,
     RMSE,
     SSIM,
@@ -373,7 +373,7 @@ def test_structural_get_config_json_safe() -> None:
 
 
 def test_masked_metric_inside_graph() -> None:
-    from xr_toolz.core import Graph, Input
+    from pipekit import Graph, Input
 
     rng = np.random.default_rng(14)
     ds_p = xr.Dataset({"x": (("t",), rng.standard_normal(8))})

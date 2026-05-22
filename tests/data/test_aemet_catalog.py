@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from xr_toolz.data import CATALOG, describe
-from xr_toolz.data._src.aemet.catalog import AEMET_DATASETS
-from xr_toolz.data._src.base import DatasetKind
+from xrtoolz.data import CATALOG, describe
+from xrtoolz.data._src.aemet.catalog import AEMET_DATASETS
+from xrtoolz.data._src.base import DatasetKind
 
 
 def test_all_presets_present():

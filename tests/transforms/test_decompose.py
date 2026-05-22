@@ -1,4 +1,4 @@
-"""Tests for :mod:`xr_toolz.transforms._src.decompose`."""
+"""Tests for :mod:`xrtoolz.transforms._src.decompose`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from xr_toolz.transforms import eof, ica, kmeans, nmf, pca
+from xrtoolz.transforms import eof, ica, kmeans, nmf, pca
 
 
 @pytest.fixture

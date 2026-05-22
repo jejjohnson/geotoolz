@@ -1,4 +1,4 @@
-"""Tests for :mod:`xr_toolz.transforms._src.wavelet`.
+"""Tests for :mod:`xrtoolz.transforms._src.wavelet`.
 
 Skipped wholesale when ``pywt`` is not importable — the wavelet
 backend is an optional dependency advertised via the ``wavelets`` extra.
@@ -13,7 +13,7 @@ import xarray as xr
 
 pytest.importorskip("pywt")
 
-from xr_toolz.transforms import cwt, dwt
+from xrtoolz.transforms import cwt, dwt
 
 
 @pytest.fixture

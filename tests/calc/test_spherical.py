@@ -1,4 +1,4 @@
-"""Tests for :mod:`xr_toolz.calc` on spherical (lon/lat) geometries."""
+"""Tests for :mod:`xrtoolz.calc` on spherical (lon/lat) geometries."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.calc import EARTH_RADIUS, gradient, partial
+from xrtoolz.calc import EARTH_RADIUS, gradient, partial
 
 
 def _ssh_grid(nlon: int = 73, nlat: int = 37) -> xr.DataArray:

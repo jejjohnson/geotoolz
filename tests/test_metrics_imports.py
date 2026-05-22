@@ -1,4 +1,4 @@
-"""Import-surface tests for :mod:`xr_toolz.metrics` — guards against
+"""Import-surface tests for :mod:`xrtoolz.metrics` — guards against
 regressions in the public API as the validation framework lands.
 """
 
@@ -14,7 +14,7 @@ import pytest
 
 
 def test_metrics_package_root_exposes_layer0_and_operators():
-    from xr_toolz.metrics import (
+    from xrtoolz.metrics import (
         MAE,
         MSE,
         NRMSE,
@@ -82,7 +82,7 @@ def test_metrics_package_root_exposes_layer0_and_operators():
 
 
 def test_metrics_pixel_submodule_imports():
-    from xr_toolz.metrics.pixel import (
+    from xrtoolz.metrics.pixel import (
         MAE,
         MSE,
         NRMSE,
@@ -118,7 +118,7 @@ def test_metrics_pixel_submodule_imports():
 
 
 def test_metrics_spectral_submodule_imports():
-    from xr_toolz.metrics.spectral import (
+    from xrtoolz.metrics.spectral import (
         BandLimitedRMSE,
         FrequencyBandSkill,
         PSDScore,
@@ -154,7 +154,7 @@ def test_metrics_spectral_submodule_imports():
 
 
 def test_metrics_structural_submodule_imports():
-    from xr_toolz.metrics.structural import (
+    from xrtoolz.metrics.structural import (
         SSIM,
         CentroidDisplacement,
         GradientDifference,
@@ -178,7 +178,7 @@ def test_metrics_structural_submodule_imports():
 
 
 def test_metrics_probabilistic_submodule_imports():
-    from xr_toolz.metrics.probabilistic import (
+    from xrtoolz.metrics.probabilistic import (
         EnsembleCoverage,
         RankHistogram,
         ReliabilityCurve,
@@ -202,7 +202,7 @@ def test_metrics_probabilistic_submodule_imports():
 
 
 def test_metrics_distributional_submodule_imports():
-    from xr_toolz.metrics.distributional import (
+    from xrtoolz.metrics.distributional import (
         CRPS,
         EnergyDistance,
         Wasserstein1,
@@ -216,14 +216,14 @@ def test_metrics_distributional_submodule_imports():
 
 
 def test_metrics_masked_submodule_imports():
-    from xr_toolz.metrics.masked import MaskedMetric, masked_metric
+    from xrtoolz.metrics.masked import MaskedMetric, masked_metric
 
     assert callable(masked_metric)
     _ = (MaskedMetric,)
 
 
 def test_metrics_operators_submodule_imports():
-    from xr_toolz.metrics.operators import (
+    from xrtoolz.metrics.operators import (
         MAE,
         MSE,
         NRMSE,
@@ -254,16 +254,15 @@ def test_metrics_view_stub_submodules_are_importable(submodule):
     V5 class names there. See ``test_metrics_object_reserved_names``.
     ``physical`` is excluded: V4.1 has landed its public surface.
     """
-    mod = importlib.import_module(f"xr_toolz.metrics.{submodule}")
+    mod = importlib.import_module(f"xrtoolz.metrics.{submodule}")
     public_names = [n for n in dir(mod) if not n.startswith("_")]
     assert public_names == [], (
-        f"xr_toolz.metrics.{submodule} unexpectedly exports public names: "
-        f"{public_names}"
+        f"xrtoolz.metrics.{submodule} unexpectedly exports public names: {public_names}"
     )
 
 
 def test_metrics_physical_submodule_imports():
-    from xr_toolz.metrics.physical import (
+    from xrtoolz.metrics.physical import (
         DensityInversionFraction,
         DivergenceError,
         GeostrophicBalanceError,
@@ -299,7 +298,7 @@ _RESERVED_OBJECT_CLASSES = (
 
 def test_metrics_object_exposes_all_reserved_names():
     """``metrics.object`` reserves the V5 long-form names per D14."""
-    import xr_toolz.metrics.object as obj
+    import xrtoolz.metrics.object as obj
 
     assert set(_RESERVED_OBJECT_CLASSES) <= set(dir(obj))
 
@@ -309,7 +308,7 @@ def test_metrics_object_reserved_class_raises_notimplementederror(name):
     """Each V5-reserved class must raise ``NotImplementedError`` on
     instantiation, with a message that names the class and points at V5.
     """
-    from xr_toolz.metrics import object as obj_module
+    from xrtoolz.metrics import object as obj_module
 
     cls = getattr(obj_module, name)
     with pytest.raises(NotImplementedError) as exc_info:
@@ -323,46 +322,46 @@ def test_metrics_object_reserved_class_raises_notimplementederror(name):
 
 
 def test_legacy_geo_metric_imports_warn_but_resolve():
-    """``from xr_toolz.geo import rmse`` must keep working for one
+    """``from xrtoolz.geo import rmse`` must keep working for one
     release with a :class:`DeprecationWarning`.
     """
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        from xr_toolz.geo import rmse  # noqa: F401
+        from xrtoolz.geo import rmse  # noqa: F401
 
     deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
-    assert deprecations, "expected DeprecationWarning on legacy xr_toolz.geo.rmse"
-    assert "xr_toolz.metrics" in str(deprecations[0].message)
+    assert deprecations, "expected DeprecationWarning on legacy xrtoolz.geo.rmse"
+    assert "xrtoolz.metrics" in str(deprecations[0].message)
 
 
 def test_legacy_geo_operators_metric_imports_warn_but_resolve():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        from xr_toolz.geo.operators import RMSE  # noqa: F401
+        from xrtoolz.geo.operators import RMSE  # noqa: F401
 
     deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
     assert deprecations, "expected DeprecationWarning on geo.operators.RMSE"
-    assert "xr_toolz.metrics.operators" in str(deprecations[0].message)
+    assert "xrtoolz.metrics.operators" in str(deprecations[0].message)
 
 
-def test_plain_import_xr_toolz_geo_is_silent():
+def test_plain_import_xrtoolz_geo_is_silent():
     """Importing the package itself (without naming a moved metric) must
     not emit a :class:`DeprecationWarning` — the warning is per-name.
     """
-    import xr_toolz.geo
+    import xrtoolz.geo
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        importlib.reload(xr_toolz.geo)
+        importlib.reload(xrtoolz.geo)
 
     metric_deprecations = [
         w
         for w in caught
         if issubclass(w.category, DeprecationWarning)
-        and "xr_toolz.geo." in str(w.message)
+        and "xrtoolz.geo." in str(w.message)
         and "is deprecated" in str(w.message)
     ]
     assert not metric_deprecations, (
-        f"plain import of xr_toolz.geo emitted unexpected deprecation warnings: "
+        f"plain import of xrtoolz.geo emitted unexpected deprecation warnings: "
         f"{[str(w.message) for w in metric_deprecations]}"
     )

@@ -1,4 +1,4 @@
-"""Tests for :mod:`xr_toolz.transforms.operators`."""
+"""Tests for :mod:`xrtoolz.transforms.operators`."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from pipekit import Sequential
 
-from xr_toolz.core import Sequential
-from xr_toolz.transforms.operators import (
+from xrtoolz.transforms.operators import (
     DCT,
     STFT,
     Coherence,

@@ -12,14 +12,14 @@ import xarray as xr
 pytest.importorskip("sklearn")
 
 
+from pipekit import Sequential
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-from xr_toolz.core import Sequential
-from xr_toolz.geo.operators import ValidateCoords
-from xr_toolz.transforms import SklearnOp
-from xr_toolz.utils import XarrayEstimator
+from xrtoolz.geo.operators import ValidateCoords
+from xrtoolz.transforms import SklearnOp
+from xrtoolz.utils import XarrayEstimator
 
 
 def _sample_da() -> xr.DataArray:
@@ -268,7 +268,7 @@ def test_sklearn_op_get_config_for_fitted_xarray_estimator_is_json_safe() -> Non
 
 
 def test_json_safe_handles_numpy_scalars() -> None:
-    from xr_toolz.transforms._src.sklearn_op import _json_safe
+    from xrtoolz.transforms._src.sklearn_op import _json_safe
 
     assert _json_safe(np.int64(7)) == 7
     assert _json_safe(np.float64(1.5)) == 1.5

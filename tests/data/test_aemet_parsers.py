@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from xr_toolz.data._src.aemet.parsers import (
+from xrtoolz.data._src.aemet.parsers import (
     format_aemet_datetime,
     parse_aemet_datetime,
     parse_dms,

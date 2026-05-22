@@ -1,4 +1,4 @@
-"""Tests for :mod:`xr_toolz.transforms._src.fourier`."""
+"""Tests for :mod:`xrtoolz.transforms._src.fourier`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from xr_toolz.transforms import (
+from xrtoolz.transforms import (
     coherence,
     compensated_spectrum,
     cross_spectrum,

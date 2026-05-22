@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from xr_toolz.data import CATALOG, all_entries, describe
+from xrtoolz.data import CATALOG, all_entries, describe
 
 
 def test_catalog_contains_expected_short_names():

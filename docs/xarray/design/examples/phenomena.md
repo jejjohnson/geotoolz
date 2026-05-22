@@ -4,11 +4,11 @@ version: 0.2.0
 ---
 
 !!! note "Module paths shown are proposed design targets"
-    The snippets below import from `xr_toolz.phenomena`, `xr_toolz.metrics.object`,
+    The snippets below import from `xrtoolz.phenomena`, `xrtoolz.metrics.object`,
     and other submodules that **do not exist in the current export surface** — the
-    current domain-agnostic functionality still lives under `xr_toolz.geo.*`.
+    current domain-agnostic functionality still lives under `xrtoolz.geo.*`.
     Treat these imports as design-target aliases; until the modules ship, map each
-    `xr_toolz.<topic>` path to its equivalent under today's `xr_toolz.geo.<topic>`.
+    `xrtoolz.<topic>` path to its equivalent under today's `xrtoolz.geo.<topic>`.
 
 # Phenomena-Based Validation Examples
 
@@ -29,8 +29,8 @@ A model can produce low SST RMSE while missing the timing, persistence, or spati
 ### Demo API
 
 ```python
-from xr_toolz.phenomena import DetectMarineHeatwaves, MatchObjects
-from xr_toolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex, IntersectionOverUnion, DurationError, IntensityBias
+from xrtoolz.phenomena import DetectMarineHeatwaves, MatchObjects
+from xrtoolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex, IntersectionOverUnion, DurationError, IntensityBias
 ```
 
 ### Demo Example Usage
@@ -75,8 +75,8 @@ Eddies are coherent, finite-amplitude structures. A model can achieve favorable 
 ### Demo API
 
 ```python
-from xr_toolz.phenomena import DetectEddies, MatchObjects, ObjectProperties
-from xr_toolz.metrics.object import CriticalSuccessIndex, IntersectionOverUnion, CentroidDistance, IntensityBias
+from xrtoolz.phenomena import DetectEddies, MatchObjects, ObjectProperties
+from xrtoolz.metrics.object import CriticalSuccessIndex, IntersectionOverUnion, CentroidDistance, IntensityBias
 ```
 
 ### Demo Example Usage
@@ -122,8 +122,8 @@ Before scoring events, the phenomenon must be defined objectively: threshold, ba
 ### Demo API
 
 ```python
-from xr_toolz.phenomena import EventDefinition, DetectAnomalyObjects, MatchObjects
-from xr_toolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex
+from xrtoolz.phenomena import EventDefinition, DetectAnomalyObjects, MatchObjects
+from xrtoolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex
 ```
 
 ### Demo Example Usage
@@ -166,10 +166,10 @@ Event verification has multiple dependent steps. The Graph API keeps detection, 
 ### Demo API
 
 ```python
-from xr_toolz.core import Graph, Input
-from xr_toolz.phenomena import DetectMarineHeatwaves, MatchObjects
-from xr_toolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex
-from xr_toolz.viz.validation import EventVerificationPanel
+from xrtoolz.core import Graph, Input
+from xrtoolz.phenomena import DetectMarineHeatwaves, MatchObjects
+from xrtoolz.metrics.object import ProbabilityOfDetection, FalseAlarmRatio, CriticalSuccessIndex
+from xrtoolz.viz.validation import EventVerificationPanel
 ```
 
 ### Demo Example Usage

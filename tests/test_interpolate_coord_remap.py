@@ -1,4 +1,4 @@
-"""Tests for ``xr_toolz.interpolate`` coord_remap (F3.2, D12)."""
+"""Tests for ``xrtoolz.interpolate`` coord_remap (F3.2, D12)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.interpolate import array as ia, remap_axis, to_phase
-from xr_toolz.interpolate.operators import (
+from xrtoolz.interpolate import array as ia, remap_axis, to_phase
+from xrtoolz.interpolate.operators import (
     FromSigma,
     RemapAxis,
     ToHeight,
@@ -16,7 +16,7 @@ from xr_toolz.interpolate.operators import (
     ToPressureLevels,
     ToSigma,
 )
-from xr_toolz.transforms import (
+from xrtoolz.transforms import (
     remap_axis as transforms_remap_axis,
     to_phase as transforms_to_phase,
 )

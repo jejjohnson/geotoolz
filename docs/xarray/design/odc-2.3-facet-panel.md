@@ -15,8 +15,8 @@ remapping `experiment` → `(row, col)`. The "seasons" labelling in the
 function name is accidental; each subplot is just
 `ds_psd.isel(experiment=i)` with the coord value as the title.
 
-xr_toolz already exposes the single-panel renderer
-([`PSDSpaceTimeScorePanel`](../../src/xr_toolz/viz/validation/_src/psd.py)).
+xrtoolz already exposes the single-panel renderer
+([`PSDSpaceTimeScorePanel`](../../src/xrtoolz/viz/validation/_src/psd.py)).
 What's missing is a thin wrapper that turns **any** existing single-axes
 panel into a faceted grid.
 
@@ -36,7 +36,7 @@ This issue ships **one generic `FacetPanel`** plus an optional
 > wavelength axes.*
 
 ```python
-from xr_toolz.viz.validation import (
+from xrtoolz.viz.validation import (
     PSDSpaceTimeScorePanel, FacetPanel, seasonal_groupby,
 )
 
@@ -57,7 +57,7 @@ fig = panel(ds_seasonal)
 > want one cartopy panel per experiment.*
 
 ```python
-from xr_toolz.viz.validation import SpatialMapPanel, FacetPanel
+from xrtoolz.viz.validation import SpatialMapPanel, FacetPanel
 
 panel = FacetPanel(
     SpatialMapPanel(var="ssh_err", projection="north_atlantic",
@@ -84,8 +84,8 @@ fig = panel(ds_runs)
 ### 2.4 As an Operator inside a Sequential
 
 ```python
-from xr_toolz.core import Sequential
-from xr_toolz.metrics import PSDSpaceTimeScore   # if/when promoted
+from xrtoolz.core import Sequential
+from xrtoolz.metrics import PSDSpaceTimeScore   # if/when promoted
 
 pipeline = Sequential([
     PSDSpaceTimeScore(...),
@@ -97,10 +97,10 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](../../src/xr_toolz/viz/validation/_src/base.py) | reuse |
-| `PSDSpaceTimeScorePanel` (single panel) | [`viz/validation/_src/psd.py:518`](../../src/xr_toolz/viz/validation/_src/psd.py) | reuse |
-| `SpatialMapPanel` with cartopy | [`viz/validation/_src/spatial.py`](../../src/xr_toolz/viz/validation/_src/spatial.py) | reuse |
-| Other single-axes panels (PSD/skill/Lagrangian/events/budgets) | [`viz/validation/_src/`](../../src/xr_toolz/viz/validation/_src/) | reuse |
+| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](../../src/xrtoolz/viz/validation/_src/base.py) | reuse |
+| `PSDSpaceTimeScorePanel` (single panel) | [`viz/validation/_src/psd.py:518`](../../src/xrtoolz/viz/validation/_src/psd.py) | reuse |
+| `SpatialMapPanel` with cartopy | [`viz/validation/_src/spatial.py`](../../src/xrtoolz/viz/validation/_src/spatial.py) | reuse |
+| Other single-axes panels (PSD/skill/Lagrangian/events/budgets) | [`viz/validation/_src/`](../../src/xrtoolz/viz/validation/_src/) | reuse |
 | Generic facet wrapper | — | **add** `FacetPanel` |
 | Seasonal-mean helper | — | **add** optional `seasonal_groupby` |
 | `season` / `experiment` mosaic | — | falls out of `FacetPanel` |
@@ -147,7 +147,7 @@ def _resolve_subplot_kw(self, panel) -> dict:
 ### 4.3 `FacetPanel`
 
 ```python
-# src/xr_toolz/viz/validation/_src/facet.py
+# src/xrtoolz/viz/validation/_src/facet.py
 class FacetPanel(_ValidationPanel):
     """Render any single-axes panel faceted across a categorical dim.
 
@@ -248,7 +248,7 @@ No new dependencies.
 
 ```python
 # Generic faceting wrapper
-xr_toolz.viz.validation.FacetPanel(
+xrtoolz.viz.validation.FacetPanel(
     panel,                     # _ValidationPanel | Callable[(ds, ax), Any]
     *,
     facet_dim,
@@ -261,10 +261,10 @@ xr_toolz.viz.validation.FacetPanel(
 )
 
 # Optional helper (skip if you'd rather defer)
-xr_toolz.viz.validation.seasonal_groupby(ds, *, time="time", reduction="mean")
+xrtoolz.viz.validation.seasonal_groupby(ds, *, time="time", reduction="mean")
 ```
 
-Re-exported from `xr_toolz.viz.validation.__init__`.
+Re-exported from `xrtoolz.viz.validation.__init__`.
 
 ## 7. Tests
 

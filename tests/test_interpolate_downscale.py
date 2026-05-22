@@ -1,4 +1,4 @@
-"""Tests for ``xr_toolz.interpolate.downscale`` (F3.4, D12).
+"""Tests for ``xrtoolz.interpolate.downscale`` (F3.4, D12).
 
 Per F3.5 resolution of D12 Q1, ``Downscale`` and ``Upscale`` are pure
 callable wrappers — patch tiling is delegated to ``xrpatcher`` upstream.
@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.interpolate.operators import Downscale, Upscale
+from xrtoolz.interpolate.operators import Downscale, Upscale
 
 
 def _bilinear_to(target_lon: np.ndarray, target_lat: np.ndarray):
@@ -120,7 +120,7 @@ def test_no_top_level_jax_or_torch_import():
             "-c",
             (
                 "import sys\n"
-                "import xr_toolz.interpolate._src.downscale  # noqa: F401\n"
+                "import xrtoolz.interpolate._src.downscale  # noqa: F401\n"
                 "for name in ('jax', 'jaxlib', 'torch'):\n"
                 "    if name in sys.modules:\n"
                 "        print(name)\n"
@@ -140,7 +140,7 @@ def test_works_with_arbitrary_operator(coarse_ds):
     The wrapped object doesn't have to be a ``ModelOp`` — any Operator
     or plain callable works.
     """
-    from xr_toolz.core import Operator
+    from pipekit import Operator
 
     class TinyResize(Operator):
         def __init__(self, lon, lat):

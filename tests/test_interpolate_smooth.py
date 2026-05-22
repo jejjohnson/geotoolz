@@ -1,4 +1,4 @@
-"""Tests for ``xr_toolz.interpolate`` smoothers (F3.3, D12)."""
+"""Tests for ``xrtoolz.interpolate`` smoothers (F3.3, D12)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pytest
 import xarray as xr
 from scipy.ndimage import gaussian_filter
 
-from xr_toolz.interpolate import (
+from xrtoolz.interpolate import (
     array as ia,
     fir_filter,
     gaussian_smooth,
@@ -15,8 +15,8 @@ from xr_toolz.interpolate import (
     lowpass_filter,
     moving_average,
 )
-from xr_toolz.interpolate._src.array_smooth import _fir_taps
-from xr_toolz.interpolate.operators import (
+from xrtoolz.interpolate._src.array_smooth import _fir_taps
+from xrtoolz.interpolate.operators import (
     GaussianSmooth,
     GaussianSmoothMasked,
     LowpassFilter,

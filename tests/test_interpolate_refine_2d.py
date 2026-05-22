@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.interpolate import refine, refine_2d
-from xr_toolz.interpolate.operators import Refine
+from xrtoolz.interpolate import refine, refine_2d
+from xrtoolz.interpolate.operators import Refine
 
 
 pytestmark = pytest.mark.skipif(

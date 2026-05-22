@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.types._src.variable import (
+from xrtoolz.types._src.variable import (
     ADT,
     CHL,
     ICE_CONC,
@@ -31,8 +31,8 @@ from xr_toolz.types._src.variable import (
     WIND_SPEED,
     Variable,
 )
-from xr_toolz.viz import PRESETS, cmap_for, make_axes
-from xr_toolz.viz.validation import SpatialMapPanel
+from xrtoolz.viz import PRESETS, cmap_for, make_axes
+from xrtoolz.viz.validation import SpatialMapPanel
 
 
 # ---------- Variable.cmap registry -----------------------------------------

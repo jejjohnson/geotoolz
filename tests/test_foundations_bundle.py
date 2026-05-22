@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.metrics import find_intercept_2D, rank_methods
-from xr_toolz.viz import shared_norm
-from xr_toolz.viz.validation import (
+from xrtoolz.metrics import find_intercept_2D, rank_methods
+from xrtoolz.viz import shared_norm
+from xrtoolz.viz.validation import (
     PSDIsotropicScorePanel,
     PSDSpaceTimeScorePanel,
     method_palette,

@@ -21,8 +21,8 @@ different variable naming conventions:
 | 4DVarNet | `ssh` |
 | Mercator's CF normalizer | `sea_surface_height_above_geoid` |
 
-xr_toolz already maintains a comprehensive
-[`Variable`](../../src/xr_toolz/types/_src/variable.py) registry —
+xrtoolz already maintains a comprehensive
+[`Variable`](../../src/xrtoolz/types/_src/variable.py) registry —
 78+ entries each carrying a canonical short name (`ssh`, `u`, `v`,
 `mld`, …) plus a CF `standard_name` (e.g.
 `sea_surface_height_above_geoid`). The registry is the natural
@@ -36,9 +36,9 @@ normalize a Dataset:
    Useful when *exporting* a Dataset to a downstream tool that expects
    CF-named variables.
 2. **`rename_from_cf_standard_names(ds)`** — the inverse, registry-
-   driven: rename variables from CF `standard_name` to xr_toolz
+   driven: rename variables from CF `standard_name` to xrtoolz
    canonical names. Useful when *ingesting* a CF-compliant Dataset
-   (DUACS, GLORYS, GLO12, etc.) and normalizing into xr_toolz idiom.
+   (DUACS, GLORYS, GLO12, etc.) and normalizing into xrtoolz idiom.
 
 Both are 1-line operations conceptually — but they're recurring,
 worth a stable named API, and the `from_cf` direction is the high-
@@ -51,12 +51,12 @@ normalize").
 
 > *I have a GLORYS reanalysis NetCDF with variables named
 > `sea_surface_height_above_geoid`, `sea_water_potential_temperature`,
-> etc. I want them renamed to xr_toolz canonical names so the rest of
+> etc. I want them renamed to xrtoolz canonical names so the rest of
 > my pipeline composes cleanly.*
 
 ```python
 import xarray as xr
-from xr_toolz.geo import rename_from_cf_standard_names
+from xrtoolz.geo import rename_from_cf_standard_names
 
 ds = xr.open_dataset("glorys_reanalysis.nc")
 ds = rename_from_cf_standard_names(ds)
@@ -65,11 +65,11 @@ ds = rename_from_cf_standard_names(ds)
 
 ### 2.2 Export to a CF-strict downstream tool
 
-> *I have an xr_toolz-canonical Dataset (`ssh`, `u`, `v`, `mld`) and
+> *I have an xrtoolz-canonical Dataset (`ssh`, `u`, `v`, `mld`) and
 > need to hand it to a CF-strict reader.*
 
 ```python
-from xr_toolz.geo import rename_to_cf_standard_names
+from xrtoolz.geo import rename_to_cf_standard_names
 
 ds_cf = rename_to_cf_standard_names(ds)
 # Variables with standard_name attrs are renamed to those attrs.
@@ -88,8 +88,8 @@ ds = rename_from_cf_standard_names(ds, fallback="raise")
 ### 2.4 As Layer-1 Operators inside a Sequential
 
 ```python
-from xr_toolz.core import Sequential
-from xr_toolz.geo import RenameFromCFStandardNames, BandpassWavelength
+from xrtoolz.core import Sequential
+from xrtoolz.geo import RenameFromCFStandardNames, BandpassWavelength
 
 pipeline = Sequential([
     RenameFromCFStandardNames(),               # ingest normalization
@@ -102,8 +102,8 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `Variable` registry with `standard_name` field | [`types/_src/variable.py`](../../src/xr_toolz/types/_src/variable.py) — 78+ entries | reuse |
-| `validate_longitude` / `validate_latitude` | [`geo/_src/validation.py`](../../src/xr_toolz/geo/_src/validation.py) | unchanged |
+| `Variable` registry with `standard_name` field | [`types/_src/variable.py`](../../src/xrtoolz/types/_src/variable.py) — 78+ entries | reuse |
+| `validate_longitude` / `validate_latitude` | [`geo/_src/validation.py`](../../src/xrtoolz/geo/_src/validation.py) | unchanged |
 | Generic `rename_coords` / `rename_variables` (dict-driven) | same file | unchanged |
 | Data-var CF normalization driven by `standard_name` attr | — | **add** `rename_to_cf_standard_names` |
 | Inverse normalization (CF → registry canonical) | — | **add** `rename_from_cf_standard_names` |
@@ -114,7 +114,7 @@ pipeline = Sequential([
 ### 4.1 Layer-0 functions
 
 ```python
-# src/xr_toolz/geo/_src/validation.py — alongside existing rename helpers
+# src/xrtoolz/geo/_src/validation.py — alongside existing rename helpers
 def rename_to_cf_standard_names(
     ds: xr.Dataset, *,
     include_coords: bool = True,
@@ -175,9 +175,9 @@ def rename_from_cf_standard_names(
     fallback: Literal["passthrough", "raise"] = "passthrough",
     include_coords: bool = True,
 ) -> xr.Dataset:
-    """Rename CF ``standard_name``-shaped variables to xr_toolz canonical names.
+    """Rename CF ``standard_name``-shaped variables to xrtoolz canonical names.
 
-    Uses the :mod:`xr_toolz.types.Variable` registry as the authoritative
+    Uses the :mod:`xrtoolz.types.Variable` registry as the authoritative
     ``standard_name → canonical_name`` mapping (78+ entries spanning
     ocean kinematics, atmospheric, cryospheric, and remote-sensing
     fields).
@@ -230,7 +230,7 @@ def rename_from_cf_standard_names(ds, *, fallback="passthrough",
 @functools.cache
 def _build_cf_index() -> dict[str, str]:
     """Build standard_name → canonical_name index from the Variable registry."""
-    from xr_toolz.types.variable import REGISTRY
+    from xrtoolz.types.variable import REGISTRY
     index = {}
     for var in REGISTRY:
         if var.standard_name and var.standard_name not in index:
@@ -244,7 +244,7 @@ once; subsequent calls reuse the dict.
 ### 4.2 Layer-1 Operators
 
 ```python
-# src/xr_toolz/geo/operators.py
+# src/xrtoolz/geo/operators.py
 class RenameToCFStandardNames(Operator):
     def __init__(self, *, include_coords: bool = True): ...
     def __call__(self, ds): return rename_to_cf_standard_names(ds, include_coords=self.include_coords)
@@ -264,13 +264,13 @@ Standard pattern; round-trips through `get_config`.
 ### 4.3 Re-exports
 
 ```python
-# src/xr_toolz/geo/__init__.py
-from xr_toolz.geo._src.validation import (
+# src/xrtoolz/geo/__init__.py
+from xrtoolz.geo._src.validation import (
     rename_to_cf_standard_names,
     rename_from_cf_standard_names,
     # ... existing exports
 )
-from xr_toolz.geo.operators import (
+from xrtoolz.geo.operators import (
     RenameToCFStandardNames,
     RenameFromCFStandardNames,
     # ...
@@ -282,7 +282,7 @@ from xr_toolz.geo.operators import (
 | Need | Library |
 |---|---|
 | Variable rename | `xarray.Dataset.rename` (built-in) |
-| Registry lookup | `xr_toolz.types.Variable` (existing) |
+| Registry lookup | `xrtoolz.types.Variable` (existing) |
 | Cached index | `functools.cache` (stdlib) |
 
 No new dependencies.
@@ -291,13 +291,13 @@ No new dependencies.
 
 ```python
 # Layer-0 functions
-xr_toolz.geo.rename_to_cf_standard_names(ds, *, include_coords=True)
-xr_toolz.geo.rename_from_cf_standard_names(ds, *, fallback="passthrough",
+xrtoolz.geo.rename_to_cf_standard_names(ds, *, include_coords=True)
+xrtoolz.geo.rename_from_cf_standard_names(ds, *, fallback="passthrough",
                                             include_coords=True)
 
 # Layer-1 Operators
-xr_toolz.geo.RenameToCFStandardNames(*, include_coords=True)
-xr_toolz.geo.RenameFromCFStandardNames(*, fallback="passthrough",
+xrtoolz.geo.RenameToCFStandardNames(*, include_coords=True)
+xrtoolz.geo.RenameFromCFStandardNames(*, fallback="passthrough",
                                         include_coords=True)
 ```
 
@@ -349,7 +349,7 @@ so far.
 
 ## 10. Risks / open questions
 
-1. **Where it lives.** [`geo/_src/validation.py`](../../src/xr_toolz/geo/_src/validation.py)
+1. **Where it lives.** [`geo/_src/validation.py`](../../src/xrtoolz/geo/_src/validation.py)
    alongside `rename_coords` / `rename_variables` /
    `validate_longitude` / `validate_latitude`. Co-located naturally.
 2. **`fallback` heuristic in `rename_from_cf`.** We only flag a name

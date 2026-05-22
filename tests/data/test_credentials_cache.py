@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from xr_toolz.data._src.cache import cache_path
-from xr_toolz.data._src.credentials import load_cds, load_cmems
+from xrtoolz.data._src.cache import cache_path
+from xrtoolz.data._src.credentials import load_cds, load_cmems
 
 
 def test_load_cmems_prefers_explicit_args(monkeypatch):

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.types import (
+from xrtoolz.types import (
     Severity,
     Variable,
     apply_cf_attrs,

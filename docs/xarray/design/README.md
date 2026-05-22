@@ -3,23 +3,23 @@ status: draft
 version: 0.1.0
 ---
 
-# xr_toolz Design Doc
+# xrtoolz Design Doc
 
 **A composable operator library for geoprocessing Earth System Data Cubes.**
 
 !!! note "Adaptation note"
     These documents are the original `geo_toolz` design docs, imported
-    verbatim as the architectural source of truth for `xr_toolz`. The
+    verbatim as the architectural source of truth for `xrtoolz`. The
     vision, three-layer stack (L0 primitives → L1 operators → L2 graph),
     operator contract, decisions, and roadmap all carry over. The one
-    concrete difference is package layout: `xr_toolz` organises
+    concrete difference is package layout: `xrtoolz` organises
     submodules by Earth-science domain — `geo` (generic), `ocn`, `atm`
     (with `atm.gas.ch4`), `rs`, `ice` — rather than by feature. Anything
     domain-agnostic (validation, regrid, detrend, metrics, spectral,
-    inference, …) lives under `xr_toolz.geo`; only true physics lives in
+    inference, …) lives under `xrtoolz.geo`; only true physics lives in
     the other domain submodules. Read occurrences of `geo_toolz.<topic>`
-    in these docs as `xr_toolz.geo.<topic>` for domain-agnostic topics,
-    and as `xr_toolz.<domain>.<topic>` for the physics chapters in
+    in these docs as `xrtoolz.geo.<topic>` for domain-agnostic topics,
+    and as `xrtoolz.<domain>.<topic>` for the physics chapters in
     `kinematics`.
 
 !!! note "Validation expansion"

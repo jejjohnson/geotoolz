@@ -1,13 +1,13 @@
-"""Tests for :mod:`xr_toolz.ocn` — Layer-0 and Layer-1."""
+"""Tests for :mod:`xrtoolz.ocn` — Layer-0 and Layer-1."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 import xarray as xr
+from pipekit import Sequential
 
-from xr_toolz.core import Sequential
-from xr_toolz.ocn import (
+from xrtoolz.ocn import (
     absolute_vorticity,
     advection,
     ageostrophic_velocities,
@@ -36,7 +36,7 @@ from xr_toolz.ocn import (
     validate_velocity,
     velocity_magnitude,
 )
-from xr_toolz.ocn.operators import (
+from xrtoolz.ocn.operators import (
     Advection,
     AgeostrophicVelocities,
     BruntVaisalaFrequency,
@@ -273,7 +273,7 @@ def test_shear_plus_curvature_vorticity_sums_to_relative_vorticity(ds_uv_grid):
     # acts only on the curl operator). Exclude that term from the sum
     # comparison by reconstructing the plain ``∂v/∂x − ∂u/∂y`` field
     # — the same pieces shear+curvature reassemble.
-    from xr_toolz.calc import partial as _partial
+    from xrtoolz.calc import partial as _partial
 
     plain_zeta = _partial(ds_uv_grid["v"], "lon", geometry="spherical") - _partial(
         ds_uv_grid["u"], "lat", geometry="spherical"

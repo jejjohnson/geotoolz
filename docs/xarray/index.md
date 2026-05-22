@@ -1,13 +1,13 @@
-# xr_toolz
+# xrtoolz
 
 > Composable operator library for geoprocessing Earth System Data Cubes.
 
-`xr_toolz` provides a uniform `Operator` abstraction for preprocessing, inference, and evaluation of xarray datasets, organised around Earth-science domains.
+`xrtoolz` provides a uniform `Operator` abstraction for preprocessing, inference, and evaluation of xarray datasets, organised around Earth-science domains.
 
 ## Layout
 
 ```
-xr_toolz/
+xrtoolz/
 ├── core   # Operator, Sequential, Input, Node, Graph
 ├── geo    # Generic xarray geoprocessing (validation, subset, regrid,
 │          # detrend, masks, metrics, spectral, ...)
@@ -24,23 +24,23 @@ roadmap.
 ## Installation
 
 ```bash
-pip install xr_toolz
+pip install xrtoolz
 ```
 
 Or with `uv`:
 
 ```bash
-uv add xr_toolz
+uv add xrtoolz
 ```
 
 ## Quickstart
 
 ```python
-import xr_toolz
+import xrtoolz
 ```
 
 ## Links
 
 - [API Reference](api/reference.md)
 - [Changelog](CHANGELOG.md)
-- [GitHub](https://github.com/jejjohnson/xr_toolz)
+- [GitHub](https://github.com/jejjohnson/xrtoolz)

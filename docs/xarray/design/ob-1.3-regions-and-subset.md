@@ -9,13 +9,13 @@
 
 ## 1. Motivation
 
-xr_toolz today has two parallel, incomplete region stories:
+xrtoolz today has two parallel, incomplete region stories:
 
-1. [`subset_bbox(lon_bnds, lat_bnds)`](../../src/xr_toolz/geo/_src/subset.py#L11)
+1. [`subset_bbox(lon_bnds, lat_bnds)`](../../src/xrtoolz/geo/_src/subset.py#L11)
    — boolean mask + `where(drop=True)`. Works for simple bounding
    boxes on rectilinear grids. **No antimeridian wrap-around, no
    0–360 vs −180–180 auto-detect, no support for polygon regions.**
-2. [`viz/_src/projections.py:PRESETS`](../../src/xr_toolz/viz/_src/projections.py#L24)
+2. [`viz/_src/projections.py:PRESETS`](../../src/xrtoolz/viz/_src/projections.py#L24)
    — a hard-coded dict mapping region names (`"gulf_stream"`,
    `"north_atlantic"`, `"mediterranean"`, ...) to cartopy projection
    class names + `(lon_min, lon_max, lat_min, lat_max)` extents.
@@ -27,7 +27,7 @@ named registry, JSON serialization, antimeridian-aware
 `subset_dataset_to_region`).
 
 The natural unification: **a single `RegionSpec` registry in
-`xr_toolz.geo.regions` consumed by both subset and viz**. Each entry
+`xrtoolz.geo.regions` consumed by both subset and viz**. Each entry
 carries its bounds (for subsetting) and projection (for plotting).
 The cartopy `PRESETS` becomes a derived view of the same registry.
 
@@ -54,7 +54,7 @@ projection.
 
 ```python
 import xarray as xr
-from xr_toolz.geo import subset_to_region
+from xrtoolz.geo import subset_to_region
 
 ds_gs = subset_to_region(ds, "gulf_stream")
 ```
@@ -62,7 +62,7 @@ ds_gs = subset_to_region(ds, "gulf_stream")
 ### 2.2 Subset with a custom rectangle (antimeridian-aware)
 
 ```python
-from xr_toolz.geo import subset_to_region, custom_region
+from xrtoolz.geo import subset_to_region, custom_region
 
 # A region spanning the dateline (170°E → -170°E)
 date_line_region = custom_region(
@@ -78,7 +78,7 @@ ds_dl = subset_to_region(ds, date_line_region)
 
 ```python
 import regionmask
-from xr_toolz.geo import subset_to_region
+from xrtoolz.geo import subset_to_region
 
 ocean_basins = regionmask.defined_regions.natural_earth_v5_0_0.ocean_basins_50
 ds_atl = subset_to_region(ds, ocean_basins["North Atlantic Ocean"])
@@ -87,7 +87,7 @@ ds_atl = subset_to_region(ds, ocean_basins["North Atlantic Ocean"])
 ### 2.4 Polygon from GeoJSON (no geopandas needed)
 
 ```python
-from xr_toolz.geo import polygon_from_geojson, subset_to_region
+from xrtoolz.geo import polygon_from_geojson, subset_to_region
 
 custom_polygon = polygon_from_geojson("path/to/region.geojson", name="study_area")
 ds_subset = subset_to_region(ds, custom_polygon)
@@ -96,7 +96,7 @@ ds_subset = subset_to_region(ds, custom_polygon)
 ### 2.5 Plot the same named region
 
 ```python
-from xr_toolz.viz.validation import SpatialMapPanel
+from xrtoolz.viz.validation import SpatialMapPanel
 
 panel = SpatialMapPanel(var="ssh", projection="gulf_stream")  # unchanged API
 panel(ds_gs)
@@ -108,8 +108,8 @@ no duplicate definition.
 ### 2.6 As Layer-1 Operators inside a Sequential
 
 ```python
-from xr_toolz.core import Sequential
-from xr_toolz.geo import SubsetToRegion, RenameFromCFStandardNames
+from xrtoolz.core import Sequential
+from xrtoolz.geo import SubsetToRegion, RenameFromCFStandardNames
 
 pipeline = Sequential([
     RenameFromCFStandardNames(),         # OB-1.2
@@ -121,7 +121,7 @@ pipeline = Sequential([
 ### 2.7 JSON round-trip
 
 ```python
-from xr_toolz.geo import region_to_dict, region_from_dict, load_region_file
+from xrtoolz.geo import region_to_dict, region_from_dict, load_region_file
 
 d = region_to_dict(my_region)
 recovered = region_from_dict(d)
@@ -132,12 +132,12 @@ from_disk = load_region_file("regions/gulf_stream.json")
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Simple bbox subset | [`geo/_src/subset.py:subset_bbox`](../../src/xr_toolz/geo/_src/subset.py#L11) | unchanged (kept for compat) |
+| Simple bbox subset | [`geo/_src/subset.py:subset_bbox`](../../src/xrtoolz/geo/_src/subset.py#L11) | unchanged (kept for compat) |
 | Antimeridian wrap-around | — | **add** (via regionmask MultiPolygon) |
 | 0–360 vs −180–180 auto-detect | — | **add** (via `regionmask.Regions.mask(wrap_lon=True)`) |
 | Gridded vs scattered point handling | partial (`where(drop=True)`) | **add** (uniform via regionmask) |
 | Polygon-region subset | — | **add** (regionmask passthrough) |
-| Named region registry | viz `PRESETS` only | **add** `xr_toolz.geo.REGIONS` (consumed by both subset + viz) |
+| Named region registry | viz `PRESETS` only | **add** `xrtoolz.geo.REGIONS` (consumed by both subset + viz) |
 | `RegionSpec` / `BoundingBox` dataclasses | — | **add** `RegionSpec` (thin viz-metadata wrapper around `regionmask.Regions`) |
 | `bbox_region` builder (rect → Regions) | — | **add** |
 | `polygon_from_geojson` (shapely-backed) | — | **add** (~10 LOC) |
@@ -178,7 +178,7 @@ No hand-rolled antimeridian / 0-360 / point-vs-grid branching.
 ### 4.2 `RegionSpec` — viz-metadata wrapper
 
 ```python
-# src/xr_toolz/geo/_src/regions.py — new module
+# src/xrtoolz/geo/_src/regions.py — new module
 @dataclass(frozen=True)
 class RegionSpec:
     """Named region pairing geometry with viz metadata.
@@ -324,7 +324,7 @@ def resolve_region(region: str | RegionSpec) -> RegionSpec:
 ### 4.5 The subset op
 
 ```python
-# src/xr_toolz/geo/_src/subset.py — alongside existing subset_bbox
+# src/xrtoolz/geo/_src/subset.py — alongside existing subset_bbox
 def subset_to_region(
     ds: xr.Dataset,
     region: str | RegionSpec | regionmask.Regions,
@@ -398,7 +398,7 @@ shorthand stays ergonomic.
 
 ### 4.8 Viz `PRESETS` bridge
 
-[`viz/_src/projections.py`](../../src/xr_toolz/viz/_src/projections.py)
+[`viz/_src/projections.py`](../../src/xrtoolz/viz/_src/projections.py)
 already has:
 
 ```python
@@ -412,7 +412,7 @@ Replace with a derived view:
 
 ```python
 def _build_presets() -> dict[str, dict[str, Any]]:
-    from xr_toolz.geo.regions import REGIONS
+    from xrtoolz.geo.regions import REGIONS
     out = {}
     for region_id, spec in REGIONS.items():
         # Derive (lon_min, lon_max, lat_min, lat_max) from regions.bounds
@@ -432,7 +432,7 @@ projection objects.
 ### 4.9 Layer-1 Operator
 
 ```python
-# src/xr_toolz/geo/operators.py
+# src/xrtoolz/geo/operators.py
 class SubsetToRegion(Operator):
     def __init__(
         self, *,
@@ -469,8 +469,8 @@ the dep tree (regionmask was added in ODC-1.4).
 ## 6. Public API surface
 
 ```python
-# xr_toolz.geo (re-exports from xr_toolz.geo._src.regions and .subset)
-from xr_toolz.geo import (
+# xrtoolz.geo (re-exports from xrtoolz.geo._src.regions and .subset)
+from xrtoolz.geo import (
     # Dataclasses
     RegionSpec,
     # Built-in registry
@@ -541,7 +541,7 @@ Target: ~18 cases.
 
 | Slice | LOC |
 |---|---|
-| `xr_toolz.geo.regions` (`RegionSpec`, `REGIONS`, builders, JSON helpers) | 70 |
+| `xrtoolz.geo.regions` (`RegionSpec`, `REGIONS`, builders, JSON helpers) | 70 |
 | `subset_to_region` (single dispatch) | 25 |
 | Viz `PRESETS` bridge | 10 |
 | `SubsetToRegion` Operator | 20 |
@@ -576,8 +576,8 @@ Target: ~18 cases.
    "any region matches". Document; users wanting per-region subsets
    loop over `regions[name]` and call once per region, or use
    ODC-1.4 `scores_by_region` which groups instead of subsetting.
-6. **Where it lives.** `xr_toolz.geo.regions` (chosen). Alternative
-   `xr_toolz.regions` top-level — rejected (regions are a geo
+6. **Where it lives.** `xrtoolz.geo.regions` (chosen). Alternative
+   `xrtoolz.regions` top-level — rejected (regions are a geo
    concern; `xrpatcher` is generic and gets top-level placement,
    regions don't).
 7. **`subset_bbox` retention.** Existing `subset_bbox(lon_bnds,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from xr_toolz.data._src.credentials import load_cds
+from xrtoolz.data._src.credentials import load_cds
 
 
 @pytest.fixture(autouse=True)

@@ -4,11 +4,11 @@ version: 0.2.0
 ---
 
 !!! note "Module paths shown are proposed design targets"
-    The snippets below import from `xr_toolz.lagrangian`, `xr_toolz.metrics.*`, and
+    The snippets below import from `xrtoolz.lagrangian`, `xrtoolz.metrics.*`, and
     other submodules that **do not exist in the current export surface** — the
-    current domain-agnostic functionality still lives under `xr_toolz.geo.*`.
+    current domain-agnostic functionality still lives under `xrtoolz.geo.*`.
     Treat these imports as design-target aliases; until the modules ship, map each
-    `xr_toolz.<topic>` path to its equivalent under today's `xr_toolz.geo.<topic>`.
+    `xrtoolz.<topic>` path to its equivalent under today's `xrtoolz.geo.<topic>`.
 
 # Lagrangian Validation Examples
 
@@ -29,8 +29,8 @@ Small Eulerian velocity errors can integrate into large Lagrangian trajectory er
 ### Demo API
 
 ```python
-from xr_toolz.lagrangian import SeedParticles, AdvectParticles
-from xr_toolz.metrics.lagrangian import EndpointError, TrajectoryRMSE
+from xrtoolz.lagrangian import SeedParticles, AdvectParticles
+from xrtoolz.metrics.lagrangian import EndpointError, TrajectoryRMSE
 ```
 
 ### Demo Example Usage
@@ -60,8 +60,8 @@ Pair dispersion measures how particle separations grow through time. It is sensi
 ### Demo API
 
 ```python
-from xr_toolz.lagrangian import PairDispersion
-from xr_toolz.metrics.lagrangian import DispersionError
+from xrtoolz.lagrangian import PairDispersion
+from xrtoolz.metrics.lagrangian import DispersionError
 ```
 
 ### Demo Example Usage
@@ -88,8 +88,8 @@ Transport applications often care about where water parcels go and how long they
 ### Demo API
 
 ```python
-from xr_toolz.lagrangian import ResidenceTime, ConnectivityMatrix
-from xr_toolz.metrics.lagrangian import ResidenceTimeError, ConnectivityError
+from xrtoolz.lagrangian import ResidenceTime, ConnectivityMatrix
+from xrtoolz.metrics.lagrangian import ResidenceTimeError, ConnectivityError
 ```
 
 ### Demo Example Usage
@@ -119,8 +119,8 @@ Finite-time stretching diagnostics reveal coherent transport geometry. They can 
 ### Demo API
 
 ```python
-from xr_toolz.lagrangian import SeedParticles, FTLE
-from xr_toolz.metrics import RMSE
+from xrtoolz.lagrangian import SeedParticles, FTLE
+from xrtoolz.metrics import RMSE
 ```
 
 ### Demo Example Usage

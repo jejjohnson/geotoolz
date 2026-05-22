@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`xr_toolz`: composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction.
+`xrtoolz`: composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework; `xrtoolz` is a direct consumer that adds the xarray-specific operator families (geo, ocn, atm, rs, …) on top.
 
 ## Architecture
 
@@ -13,34 +13,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Layer | Name | Contents |
 |-------|------|----------|
 | 0 | Primitives | Pure functions: `(xr.Dataset, ...) → xr.Dataset` |
-| 1 | Operators | `Operator` subclasses with uniform `__call__` interface, `Sequential` chains |
-| 2 | Graph | Functional `Graph` DAG API (`Input`, `Node`, `Graph`), `ModelOp` inference wrappers |
+| 1 | Operators | `pipekit.Operator` subclasses with uniform `__call__` interface, `pipekit.Sequential` chains |
+| 2 | Graph | `pipekit.Graph` DAG API (`Input`, `Node`, `Graph`), `ModelOp` inference wrappers |
 
 ### Package structure
 
-All implementation lives in `src/xr_toolz/`. The public API is re-exported through `src/xr_toolz/__init__.py`.
+All implementation lives in `src/xrtoolz/`. The public API is re-exported through `src/xrtoolz/__init__.py`. The composition primitives (`Operator`, `Sequential`, `Graph`, `Input`, `Node`, `ConfigMixin`, `Tap`) are re-exported from `pipekit`.
 
 ### Submodule layout — organised by Earth-science domain
 
 | Path | Scope |
 |------|-------|
-| `xr_toolz.core` | `Operator`, `Sequential`, `Input`, `Node`, `Graph` — composition primitives (domain-agnostic) |
-| `xr_toolz.geo` | Generic xarray geoprocessing — validation, subset, masks, regrid, detrend, interpolation, metrics, spectral, encoders, crs, sklearn, inference |
-| `xr_toolz.ocn` | Oceanography physics — coriolis, streamfunction, geostrophic velocities, vorticity, MLD, Brunt–Väisälä, KE, Okubo–Weiss |
-| `xr_toolz.atm` | Atmospheric physics — potential temperature, wind speed/direction |
-| `xr_toolz.atm.gas.ch4` | Trace-gas (methane) physics — column averaging kernel, dry air column, mixing ratio |
-| `xr_toolz.rs` | Remote sensing — radiance/reflectance, brightness temperature, NDVI |
-| `xr_toolz.ice` | Cryosphere — reserved namespace, no content yet |
+| `xrtoolz.combinators` | `Augment`, `ApplyToEach` — xarray-Dataset-specific combinators built on `pipekit.Operator` |
+| `xrtoolz.signature` | `Signature` — dict-keyed shape descriptor used by `compute_output_signature` |
+| `xrtoolz.geo` | Generic xarray geoprocessing — validation, subset, masks, regrid, detrend, interpolation, metrics, spectral, encoders, crs, sklearn, inference |
+| `xrtoolz.ocn` | Oceanography physics — coriolis, streamfunction, geostrophic velocities, vorticity, MLD, Brunt–Väisälä, KE, Okubo–Weiss |
+| `xrtoolz.atm` | Atmospheric physics — potential temperature, wind speed/direction |
+| `xrtoolz.atm.gas.ch4` | Trace-gas (methane) physics — column averaging kernel, dry air column, mixing ratio |
+| `xrtoolz.rs` | Remote sensing — radiance/reflectance, brightness temperature, NDVI |
+| `xrtoolz.ice` | Cryosphere — reserved namespace, no content yet |
 
-Design rule: anything domain-agnostic lives in `geo`; only true physics lives in the other domain submodules.
+Design rule: anything domain-agnostic lives in `geo`; only true physics lives in the other domain submodules. The composition primitives themselves live in `pipekit`, not here.
 
 ### Key directories
 
 | Path | Purpose |
 |------|---------|
-| `src/xr_toolz/` | Main package source code |
-| `src/xr_toolz/core/` | Layer 1 + 2 composition primitives |
-| `src/xr_toolz/<domain>/` | Domain submodules |
+| `src/xrtoolz/` | Main package source code |
+| `src/xrtoolz/combinators.py` | `Augment`, `ApplyToEach` — xarray-Dataset combinators on top of `pipekit.Operator` |
+| `src/xrtoolz/signature.py` | `Signature` — dict-keyed shape descriptor |
+| `src/xrtoolz/<domain>/` | Domain submodules |
 | `tests/` | Test suite |
 | `docs/` | Documentation (MkDocs), including `docs/design/` with the full design doc |
 | `notebooks/` | Jupyter notebooks |
@@ -66,7 +68,7 @@ make install              # Install all deps (uv sync --all-groups) + pre-commit
 make test                 # Run tests: uv run pytest -v
 make format               # Auto-fix: ruff format . && ruff check --fix .
 make lint                 # Lint code: ruff check .
-make typecheck            # Type check: ty check src/xr_toolz
+make typecheck            # Type check: ty check src/xrtoolz
 make precommit            # Run pre-commit on all files
 make docs-serve           # Local docs server
 ```
@@ -81,12 +83,12 @@ uv run pytest tests/test_example.py::TestClass::test_method -v
 
 ```bash
 uv run pytest -v                              # Tests
-uv run --group lint ruff check .              # Lint — ENTIRE repo, not just src/xr_toolz/
+uv run --group lint ruff check .              # Lint — ENTIRE repo, not just src/xrtoolz/
 uv run --group lint ruff format --check .     # Format — ENTIRE repo
-uv run --group typecheck ty check src/xr_toolz  # Typecheck — package only
+uv run --group typecheck ty check src/xrtoolz  # Typecheck — package only
 ```
 
-**Critical**: Always lint/format with `.` (repo root), not `src/xr_toolz/`. CI runs `ruff check .` which includes `tests/` and `scripts/`.
+**Critical**: Always lint/format with `.` (repo root), not `src/xrtoolz/`. CI runs `ruff check .` which includes `tests/` and `scripts/`.
 
 ## Coding Conventions
 

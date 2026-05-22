@@ -3,23 +3,23 @@ status: draft
 version: 0.1.0
 ---
 
-!!! note "These design docs cover the planned operator surface for `xr_toolz`"
+!!! note "These design docs cover the planned operator surface for `xrtoolz`"
     Code snippets use class names directly. In the implementation, the
     submodule layout is:
 
-    - **`xr_toolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
+    - **`xrtoolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
       subset, masks, detrend)
-    - **`xr_toolz.interpolate`** — value resampling: regrid, gap-fill,
+    - **`xrtoolz.interpolate`** — value resampling: regrid, gap-fill,
       bin, coord-axis remap, time resample, smooth, learned downscale
       (D12)
-    - **`xr_toolz.transforms`** — signal transforms / decompositions /
+    - **`xrtoolz.transforms`** — signal transforms / decompositions /
       encoders (D8)
-    - **`xr_toolz.metrics`** — skill scores (D7)
-    - **`xr_toolz.kinematics`** — domain-specific physical quantities,
+    - **`xrtoolz.metrics`** — skill scores (D7)
+    - **`xrtoolz.kinematics`** — domain-specific physical quantities,
       sub-organized by domain (D9)
-    - **`xr_toolz.viz`** — plotting operators (D10)
+    - **`xrtoolz.viz`** — plotting operators (D10)
 
-    See `xr_toolz/__init__.py` for the current export surface.
+    See `xrtoolz/__init__.py` for the current export surface.
 
 !!! note "Type contract — three tiers (D11)"
     Every module with array-meaningful math exposes three tiers:
@@ -28,7 +28,7 @@ version: 0.1.0
     - **Tier B — Layer 0 xarray** — `xr.DataArray` for single-variable, `xr.Dataset` + variable selectors for multi-variable. Use `dim=`.
     - **Tier C — Layer 1 Operator** — input is `xr.Dataset` (or two for multi-input). Output is usually `xr.Dataset`, may narrow to `xr.DataArray` or scalar for reductions (e.g., metrics), or `matplotlib.Figure / Axes` for terminal viz (D10). The only tier `Sequential` and `Graph` see.
 
-    Modules whose math is inherently coord/attr-manipulation (`validation`, `crs`, `subset`, `masks`) skip Tier A — Tier B takes `xr.Dataset` directly. Value-resampling functionality lives under `xr_toolz.interpolate` (D12), not separate `regrid` / `interpolation` / `discretize` modules. See [architecture.md §Type Contract](../architecture.md) and [decisions.md §D11](../decisions.md).
+    Modules whose math is inherently coord/attr-manipulation (`validation`, `crs`, `subset`, `masks`) skip Tier A — Tier B takes `xr.Dataset` directly. Value-resampling functionality lives under `xrtoolz.interpolate` (D12), not separate `regrid` / `interpolation` / `discretize` modules. See [architecture.md §Type Contract](../architecture.md) and [decisions.md §D11](../decisions.md).
 
 # Components — Layer 1 Operators
 
@@ -57,8 +57,8 @@ class ApplyToEach:     # Re-instantiate a prototype op once per value of a chose
 The three combinators (`Augment`, `Tap`, `ApplyToEach`) bridge the structural mismatch between the Layer 1 contract — single-input op returns a Dataset, *replacing* the input — and common pipeline use cases that want to *grow* a Dataset by appending derived columns (`Augment`), inject observability without altering data (`Tap`), or fan out a single prototype across multiple variables (`ApplyToEach`). Each combinator is itself an `Operator`, so they compose inside `Sequential` and `Graph`. **Serialization caveat**: `Augment` and `ApplyToEach` carry nested `Operator` state, so their `get_config` outputs are JSON-safe for *introspection* (printing, logging, diffing pipeline structure) but are **not** constructor-replayable — a literal `Augment(**cfg)` round-trip fails because the constructor expects live `Operator` instances rather than serialized `{"class", "config"}` records. A future deserializer with a class registry would close that gap. `Tap` likewise advertises a `"<callable>"` placeholder rather than the side-effect callable itself. Canonical idiom for a diagnostics pipeline:
 
 ```python
-from xr_toolz import Augment, Sequential
-from xr_toolz.ocn.operators import RelativeVorticity, KineticEnergy, OkuboWeiss
+from xrtoolz import Augment, Sequential
+from xrtoolz.ocn.operators import RelativeVorticity, KineticEnergy, OkuboWeiss
 
 diagnostics = Sequential([
     Augment(RelativeVorticity()),
@@ -159,7 +159,7 @@ Unified home for **value resampling onto new coordinate locations**: regridding,
 Sub-organized by source/target structure:
 
 ```
-xr_toolz/interpolate/
+xrtoolz/interpolate/
     array.py
     _src/
         grid_to_grid.py    # gridded → gridded (same domain, different grid)
@@ -580,9 +580,9 @@ class PolynomialFeatures(Operator):
 
 All encoder Operators have the standard `Dataset → Dataset` shape — they add new variables / coords carrying the encoded features. Stateless (no `fit` step required), so they slot into `Sequential` directly.
 
-#### Shipped Tier C surface (xr_toolz.transforms.operators)
+#### Shipped Tier C surface (xrtoolz.transforms.operators)
 
-The encoder Operators currently exported from `xr_toolz.transforms.operators` (#95):
+The encoder Operators currently exported from `xrtoolz.transforms.operators` (#95):
 
 ```python
 # basis encoders — wrap a single ds[variable]
@@ -619,9 +619,9 @@ The basis encoders take a single `variable` (rather than the aspirational `coord
 
 ## `extremes` — *Deferred*
 
-Extreme-value statistics (block maxima/minima, peaks over threshold, point process counts/stats) live in the standalone **xtremax** package (master_plan Layer 3). `xr_toolz` does not own the implementation.
+Extreme-value statistics (block maxima/minima, peaks over threshold, point process counts/stats) live in the standalone **xtremax** package (master_plan Layer 3). `xrtoolz` does not own the implementation.
 
-If a thin xarray wrapper / Operator surface is needed later, it would be added as `xr_toolz.extremes` (parallel to how `xr_toolz.assimilate` wraps filterX), but no work is planned in v0.x.
+If a thin xarray wrapper / Operator surface is needed later, it would be added as `xrtoolz.extremes` (parallel to how `xrtoolz.assimilate` wraps filterX), but no work is planned in v0.x.
 
 Until then: use `xtremax` directly, or hand-author a `Lambda(...)` operator over an xtremax function for a one-off pipeline.
 
@@ -633,16 +633,16 @@ Pixel-level, spectral, multiscale, and distributional skill scores. **Owned impl
 
 Three-tier per D11:
 
-- **Tier A — `xr_toolz.metrics.array`** — array kernels in `metrics/array.py` and `metrics/_src/array_<family>.py`. Standard signature: `(prediction: ArrayLike, reference: ArrayLike, *, axis: int | tuple[int, ...], **kwargs) → Array | float`. Numpy default; JAX-friendly variants where the metric is used inside training loops or differentiable losses.
-- **Tier B — Layer 0 xarray** — pure functions in `xr_toolz/metrics/_src/<family>.py`. Signature: `(prediction: xr.DataArray, reference: xr.DataArray, *, dim, **kwargs) → xr.DataArray | xr.Dataset | float`. Delegate to Tier A.
-- **Tier C — Operator wrappers** in `xr_toolz/metrics/operators.py`. Multi-input: `__call__(prediction: xr.Dataset, reference: xr.Dataset) → xr.DataArray | xr.Dataset | float`. Selects a variable via constructor arg, then delegates to Tier B.
+- **Tier A — `xrtoolz.metrics.array`** — array kernels in `metrics/array.py` and `metrics/_src/array_<family>.py`. Standard signature: `(prediction: ArrayLike, reference: ArrayLike, *, axis: int | tuple[int, ...], **kwargs) → Array | float`. Numpy default; JAX-friendly variants where the metric is used inside training loops or differentiable losses.
+- **Tier B — Layer 0 xarray** — pure functions in `xrtoolz/metrics/_src/<family>.py`. Signature: `(prediction: xr.DataArray, reference: xr.DataArray, *, dim, **kwargs) → xr.DataArray | xr.Dataset | float`. Delegate to Tier A.
+- **Tier C — Operator wrappers** in `xrtoolz/metrics/operators.py`. Multi-input: `__call__(prediction: xr.Dataset, reference: xr.Dataset) → xr.DataArray | xr.Dataset | float`. Selects a variable via constructor arg, then delegates to Tier B.
 
 Custom skill score: write a Tier A array kernel (numpy is enough), wrap it in a Tier B function for label preservation, optionally wrap once more with the generic `MetricOp(fn, **config)` Tier C wrapper.
 
 ### Tier A — array kernels
 
 ```python
-# xr_toolz/metrics/_src/array_pixel.py (re-exported via xr_toolz.metrics.array)
+# xrtoolz/metrics/_src/array_pixel.py (re-exported via xrtoolz.metrics.array)
 def rmse(prediction: ArrayLike, reference: ArrayLike, *, axis: int | tuple[int, ...] = -1) -> Array: ...
 def nrmse(prediction: ArrayLike, reference: ArrayLike, *, axis=-1, normalize: str = "std") -> Array: ...
 def mae(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
@@ -652,16 +652,16 @@ def murphy_score(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Arr
 def nash_sutcliffe(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
 def crps(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
 
-# xr_toolz/metrics/_src/array_spectral.py
+# xrtoolz/metrics/_src/array_spectral.py
 def psd_score(prediction: ArrayLike, reference: ArrayLike, *, axis, **kwargs) -> Array: ...
 def resolved_scale(prediction: ArrayLike, reference: ArrayLike, *, axis, threshold: float = 0.5, **kwargs) -> Array: ...
 def coherence_skill(prediction: ArrayLike, reference: ArrayLike, *, axis, **kwargs) -> Array: ...
 
-# xr_toolz/metrics/_src/array_multiscale.py
+# xrtoolz/metrics/_src/array_multiscale.py
 def per_scale_rmse(prediction: ArrayLike, reference: ArrayLike, *, axis, scales) -> Array: ...
 def wavelet_rmse(prediction: ArrayLike, reference: ArrayLike, *, axis, wavelet: str = "db4", level: int = 4) -> Array: ...
 
-# xr_toolz/metrics/_src/array_distributional.py
+# xrtoolz/metrics/_src/array_distributional.py
 def ks_statistic(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
 def wasserstein_1d(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
 def energy_distance(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
@@ -670,7 +670,7 @@ def energy_distance(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> 
 ### Tier B — Layer 0 xarray (DataArray in)
 
 ```python
-# xr_toolz/metrics/_src/pixel.py
+# xrtoolz/metrics/_src/pixel.py
 def rmse(prediction: xr.DataArray, reference: xr.DataArray, *, dim) -> xr.DataArray: ...
 def nrmse(prediction: xr.DataArray, reference: xr.DataArray, *, dim, normalize: str = "std") -> xr.DataArray: ...
 def mae(prediction: xr.DataArray, reference: xr.DataArray, *, dim) -> xr.DataArray: ...
@@ -680,21 +680,21 @@ def murphy_score(prediction: xr.DataArray, reference: xr.DataArray, *, dim) -> x
 def nash_sutcliffe(prediction: xr.DataArray, reference: xr.DataArray, *, dim) -> xr.DataArray: ...
 def crps(prediction: xr.DataArray, reference: xr.DataArray, *, dim) -> xr.DataArray: ...
 
-# xr_toolz/metrics/_src/spectral.py
+# xrtoolz/metrics/_src/spectral.py
 def psd_score(prediction: xr.DataArray, reference: xr.DataArray, *, dim, **kwargs) -> xr.Dataset: ...
 def resolved_scale(prediction: xr.DataArray, reference: xr.DataArray, *, dim, threshold: float = 0.5, **kwargs) -> xr.DataArray: ...
 def coherence_skill(prediction: xr.DataArray, reference: xr.DataArray, *, dim, **kwargs) -> xr.DataArray: ...
 
-# xr_toolz/metrics/_src/multiscale.py
+# xrtoolz/metrics/_src/multiscale.py
 def per_scale_rmse(prediction: xr.DataArray, reference: xr.DataArray, *, dim, scales) -> xr.DataArray: ...
 def wavelet_rmse(prediction: xr.DataArray, reference: xr.DataArray, *, dim, wavelet: str = "db4", level: int = 4) -> xr.DataArray: ...
 
-# xr_toolz/metrics/_src/distributional.py
+# xrtoolz/metrics/_src/distributional.py
 def ks_statistic(prediction: xr.DataArray, reference: xr.DataArray, *, dim) -> xr.DataArray: ...
 def wasserstein_1d(prediction: xr.DataArray, reference: xr.DataArray, *, dim) -> xr.DataArray: ...
 def energy_distance(prediction: xr.DataArray, reference: xr.DataArray, *, dim) -> xr.DataArray: ...
 
-# xr_toolz/metrics/_src/masked.py
+# xrtoolz/metrics/_src/masked.py
 def masked_rmse(prediction: xr.DataArray, reference: xr.DataArray, *, dim, mask: xr.DataArray) -> xr.DataArray: ...
 # ... mask-aware variants of the others
 ```
@@ -768,7 +768,7 @@ First-class `Operator` subclasses that return `matplotlib.Figure` / `Axes`. **Do
 Sub-organized by what they plot:
 
 ```
-xr_toolz/viz/_src/
+xrtoolz/viz/_src/
     maps.py         # PlotMap, PlotMapDiff, PlotMapPanel
     series.py       # PlotTimeseries, PlotHovmoller, PlotProfile
     spectral.py     # PlotSpectrum, PlotResolvedScale, PlotCoherence
@@ -829,12 +829,12 @@ results = evaluate(pred=preprocess(raw_pred), ref=preprocess(raw_ref))
 
 ## `kinematics` — Domain-Specific Physical Quantities
 
-**Single home for derived physical-quantity operators across all geophysical domains** (atmosphere, ocean, ice, remote sensing). Replaces the earlier-considered split into `xr_toolz.atm/`, `xr_toolz.ocn/`, `xr_toolz.ice/`, `xr_toolz.rs/`. See [decisions.md §D9](../decisions.md).
+**Single home for derived physical-quantity operators across all geophysical domains** (atmosphere, ocean, ice, remote sensing). Replaces the earlier-considered split into `xrtoolz.atm/`, `xrtoolz.ocn/`, `xrtoolz.ice/`, `xrtoolz.rs/`. See [decisions.md §D9](../decisions.md).
 
 Sub-organized by domain in one-file-per-domain layout:
 
 ```
-xr_toolz/kinematics/
+xrtoolz/kinematics/
     array.py                  # Tier A re-exports across all domains
     _src/
         ocean.py
@@ -864,18 +864,18 @@ def normalized_difference_array(a: ArrayLike, b: ArrayLike) -> Array: ...
 def radiance_to_reflectance_array(radiance: ArrayLike, solar_zenith: ArrayLike, solar_irradiance: float) -> Array: ...
 
 # Tier B — Layer 0 xarray (multi-variable → Dataset in, DataArray/Dataset out)
-# xr_toolz/kinematics/_src/ocean.py
+# xrtoolz/kinematics/_src/ocean.py
 def streamfunction(ds: xr.Dataset, *, variable: str = "ssh", f0: float | None = None, g: float | None = None) -> xr.DataArray: ...
 def geostrophic_velocities(ds: xr.Dataset, *, variable: str = "ssh") -> xr.Dataset: ...
 def relative_vorticity(ds: xr.Dataset, *, u_var: str = "u", v_var: str = "v") -> xr.DataArray: ...
 def kinetic_energy(ds: xr.Dataset, *, u_var: str = "u", v_var: str = "v") -> xr.DataArray: ...
 def okubo_weiss(ds: xr.Dataset, *, u_var: str = "u", v_var: str = "v") -> xr.DataArray: ...
 
-# xr_toolz/kinematics/_src/atmosphere.py
+# xrtoolz/kinematics/_src/atmosphere.py
 def wind_speed(ds: xr.Dataset, *, u_var: str = "u10", v_var: str = "v10") -> xr.DataArray: ...
 def potential_temperature(ds: xr.Dataset, *, temp_var: str, pressure_var: str) -> xr.DataArray: ...
 
-# xr_toolz/kinematics/_src/remote.py
+# xrtoolz/kinematics/_src/remote.py
 def normalized_difference(ds: xr.Dataset, *, var_a: str, var_b: str, name: str = "ndvi") -> xr.DataArray: ...
 def radiance_to_reflectance(ds: xr.Dataset, *, solar_zenith_var: str, solar_irradiance: float) -> xr.DataArray: ...
 

@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from xr_toolz.types import REGISTRY, SST, T2M, Variable, register, resolve
+from xrtoolz.types import REGISTRY, SST, T2M, Variable, register, resolve
 
 
 def test_variable_is_frozen_and_hashable():

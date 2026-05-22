@@ -1,4 +1,4 @@
-"""Tests for :mod:`xr_toolz.transforms._src.dct`."""
+"""Tests for :mod:`xrtoolz.transforms._src.dct`."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.transforms import dct, dst
-from xr_toolz.transforms._src.dct import idct, idst
+from xrtoolz.transforms import dct, dst
+from xrtoolz.transforms._src.dct import idct, idst
 
 
 @pytest.fixture

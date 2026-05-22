@@ -19,7 +19,7 @@ This is the single most-reused function across the three repos and is
 the natural input for ODC-1.3 (segmented PSD scores) and ODC-1.5 (drifter
 deviation skill). It is also the canonical "grid → points" primitive
 listed as a placeholder in
-[`xr_toolz.interpolate._src.grid_to_points`](../../src/xr_toolz/interpolate/_src/grid_to_points.py)
+[`xrtoolz.interpolate._src.grid_to_points`](../../src/xrtoolz/interpolate/_src/grid_to_points.py)
 ("Future home for `SampleAtPoints` / `AlongTrack` primitives.").
 
 The upstream implementation depends on `pyinterp` for the interpolation
@@ -40,7 +40,7 @@ handles chunking automatically.
 
 ```python
 import xarray as xr
-from xr_toolz.geo import grid_to_along_track
+from xrtoolz.geo import grid_to_along_track
 
 ds_maps  = xr.open_dataset("duacs_l4.nc")            # (time, lat, lon)
 ds_track = xr.open_dataset("swot_along_track.nc")    # (num_lines,)
@@ -60,7 +60,7 @@ ds_colocated = grid_to_along_track(
 > my reconstruction sampled at every drifter fix.*
 
 ```python
-from xr_toolz.geo import grid_to_drifters
+from xrtoolz.geo import grid_to_drifters
 
 ds_drifters_uv = grid_to_drifters(
     ds_maps, ds_drifters,    # ds_drifters: (time,) with longitude/latitude vars
@@ -75,7 +75,7 @@ ds_drifters_uv = grid_to_drifters(
 > (lon, lat, depth, time). I want every variable sampled at every point.*
 
 ```python
-from xr_toolz.interpolate import sample_at_points
+from xrtoolz.interpolate import sample_at_points
 
 points = xr.Dataset(
     coords={
@@ -94,8 +94,8 @@ ds_pointwise = sample_at_points(ds_maps, points, method="linear")
 > drop into a `Sequential`.*
 
 ```python
-from xr_toolz.interpolate import SampleAtPoints
-from xr_toolz.core import Sequential
+from xrtoolz.interpolate import SampleAtPoints
+from xrtoolz.core import Sequential
 
 pipeline = Sequential([
     BandpassWavelength(...),         # ODC-1.1
@@ -108,9 +108,9 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Placeholder module | [`interpolate/_src/grid_to_points.py`](../../src/xr_toolz/interpolate/_src/grid_to_points.py) | Implement |
-| Points → grid (sklearn-NN bin) | [`points_to_grid.py`](../../src/xr_toolz/interpolate/_src/points_to_grid.py) | Untouched |
-| Grid → grid (`regrid_like`) | [`grid_to_grid.py`](../../src/xr_toolz/interpolate/_src/grid_to_grid.py) | Untouched |
+| Placeholder module | [`interpolate/_src/grid_to_points.py`](../../src/xrtoolz/interpolate/_src/grid_to_points.py) | Implement |
+| Points → grid (sklearn-NN bin) | [`points_to_grid.py`](../../src/xrtoolz/interpolate/_src/points_to_grid.py) | Untouched |
+| Grid → grid (`regrid_like`) | [`grid_to_grid.py`](../../src/xrtoolz/interpolate/_src/grid_to_grid.py) | Untouched |
 | Pointwise interp engine | — | Use `xr.Dataset.interp` w/ advanced indexing |
 | Convenience: along-track | — | **Add** `grid_to_along_track` |
 | Convenience: drifters | — | **Add** `grid_to_drifters` |
@@ -143,7 +143,7 @@ pyinterp-aware path without making it a hard dependency.
 ### 4.2 Tier B — generic primitive
 
 ```python
-# src/xr_toolz/interpolate/_src/grid_to_points.py
+# src/xrtoolz/interpolate/_src/grid_to_points.py
 def sample_at_points(
     ds: xr.Dataset,
     points: xr.Dataset | xr.DataArray | pd.DataFrame | Mapping[str, ArrayLike],
@@ -206,7 +206,7 @@ That's the entire engine. The work is in the input-coercion helper.
 ### 4.3 Domain wrappers
 
 ```python
-# src/xr_toolz/geo/_src/along_track.py — same module as ODC-1.1 utilities
+# src/xrtoolz/geo/_src/along_track.py — same module as ODC-1.1 utilities
 def grid_to_along_track(
     ds_maps: xr.Dataset,
     ds_track: xr.Dataset,
@@ -249,7 +249,7 @@ along-track-specific conveniences in one place.
 ### 4.4 Layer-1 Operator
 
 ```python
-# src/xr_toolz/interpolate/operators.py
+# src/xrtoolz/interpolate/operators.py
 class SampleAtPoints(Operator):
     """Sample gridded variables at a fixed set of point locations."""
 
@@ -290,16 +290,16 @@ No new dependencies. No `pyinterp`.
 
 ```python
 # Generic primitive
-xr_toolz.interpolate.sample_at_points(ds, points, *, coords, method,
+xrtoolz.interpolate.sample_at_points(ds, points, *, coords, method,
                                       point_dim, suffix, keep_coords)
 
 # Domain wrappers
-xr_toolz.geo.grid_to_along_track(ds_maps, ds_track, *, method, lon, lat, time, suffix)
-xr_toolz.geo.grid_to_drifters(ds_maps, ds_drifters, *, method, lon, lat, time,
+xrtoolz.geo.grid_to_along_track(ds_maps, ds_track, *, method, lon, lat, time, suffix)
+xrtoolz.geo.grid_to_drifters(ds_maps, ds_drifters, *, method, lon, lat, time,
                               suffix, drifter_dim)
 
 # Operator
-xr_toolz.interpolate.SampleAtPoints(...)
+xrtoolz.interpolate.SampleAtPoints(...)
 ```
 
 ## 7. Tests
@@ -329,7 +329,7 @@ Target: ~12 new test cases.
   hand-rolled `periods`/`TimeSeries` machinery.
 - **Vendor-specific drifter reformatting** (`reformat_drifter_dataset`)
   — that's a Copernicus-specific I/O concern, not a library primitive.
-  Lives in user code or `xr_toolz.data`.
+  Lives in user code or `xrtoolz.data`.
 - **Vector-field colocation helper** — `interpolate_current` (u, v
   together) is just `sample_at_points` over a 2-var Dataset; no special
   API needed.
@@ -360,7 +360,7 @@ Target: ~12 new test cases.
    `get_config()` is awkward — Datasets aren't JSON-serializable. We'll
    emit a NetCDF representation by default and accept a `points_path`
    alternative for from-disk reconstruction. Mirrors how
-   `xr_toolz.data` operators serialize.
+   `xrtoolz.data` operators serialize.
 4. **Naming overlap with existing `ds_maps` variables.** If
    `ds_track` already has a `ssh` variable and `ds_maps` does too, a
    merge collides. Default `suffix="_interp"` avoids this; document the

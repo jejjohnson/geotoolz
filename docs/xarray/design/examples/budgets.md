@@ -4,12 +4,12 @@ version: 0.2.0
 ---
 
 !!! note "Module paths shown are proposed design targets"
-    The snippets below import from `xr_toolz.budgets`, `xr_toolz.metrics.*`, and other
+    The snippets below import from `xrtoolz.budgets`, `xrtoolz.metrics.*`, and other
     submodules that **do not exist in the current export surface** — the current
-    domain-agnostic functionality still lives under `xr_toolz.geo.*`. Treat these
+    domain-agnostic functionality still lives under `xrtoolz.geo.*`. Treat these
     imports as design-target aliases; once the modules ship the snippets become
-    copy/paste-ready, but until then map each `xr_toolz.<topic>` path to its
-    equivalent under today's `xr_toolz.geo.<topic>`.
+    copy/paste-ready, but until then map each `xrtoolz.<topic>` path to its
+    equivalent under today's `xrtoolz.geo.<topic>`.
 
 # Budget Validation Examples
 
@@ -30,7 +30,7 @@ A model can have good pointwise temperature skill while violating heat conservat
 ### Demo API
 
 ```python
-from xr_toolz.budgets import HeatBudgetResidual, ControlVolumeIntegral
+from xrtoolz.budgets import HeatBudgetResidual, ControlVolumeIntegral
 ```
 
 ### Demo Example Usage
@@ -65,7 +65,7 @@ Salt budgets diagnose water-mass consistency and can reveal unphysical mixing or
 ### Demo API
 
 ```python
-from xr_toolz.budgets import SaltBudgetResidual, ControlVolumeIntegral
+from xrtoolz.budgets import SaltBudgetResidual, ControlVolumeIntegral
 ```
 
 ### Demo Example Usage
@@ -100,7 +100,7 @@ Continuity residuals diagnose mass/volume conservation and are a useful compleme
 ### Demo API
 
 ```python
-from xr_toolz.budgets import VolumeBudgetResidual
+from xrtoolz.budgets import VolumeBudgetResidual
 ```
 
 ### Demo Example Usage
@@ -128,8 +128,8 @@ Energy diagnostics help determine whether the model reproduces realistic energy 
 ### Demo API
 
 ```python
-from xr_toolz.budgets import KineticEnergyBudgetResidual
-from xr_toolz.viz.validation import ProcessBudgetPanel
+from xrtoolz.budgets import KineticEnergyBudgetResidual
+from xrtoolz.viz.validation import ProcessBudgetPanel
 ```
 
 ### Demo Example Usage

@@ -9,7 +9,7 @@
 ## TL;DR
 
 The pre-existing **Epic V3 (#49)** already designs the entire Lagrangian
-sub-domain in xr_toolz, with six well-decomposed sub-issues. The
+sub-domain in xrtoolz, with six well-decomposed sub-issues. The
 ocean-data-challenges `mod_traj.py` upstream maps almost exactly onto
 that epic. Rather than open a parallel ODC-3.2 issue, we amend the V3
 sub-issues with three small additions drawn from the upstream:
@@ -25,13 +25,13 @@ This document records the mapping for future reference.
 
 | Issue | Title | Status |
 |---|---|---|
-| [#49](https://github.com/jejjohnson/xr_toolz/issues/49) | Epic V3: Lagrangian — particle advection, transport diagnostics, trajectory metrics | OPEN |
-| [#50](https://github.com/jejjohnson/xr_toolz/issues/50) | V3.1: Trajectory schema + `SeedParticles` operator | OPEN |
-| [#51](https://github.com/jejjohnson/xr_toolz/issues/51) | V3.2: `AdvectParticles` operator (scipy backend) | OPEN — amended |
-| [#52](https://github.com/jejjohnson/xr_toolz/issues/52) | V3.3: Transport diagnostics — `PairDispersion`, `ResidenceTime`, `ConnectivityMatrix`, `FTLE` | OPEN |
-| [#53](https://github.com/jejjohnson/xr_toolz/issues/53) | V3.4: Trajectory metrics — `TrajectoryRMSE`, `EndpointError`, `EndpointErrorMap`, `DispersionError`, `ResidenceTimeError`, `ConnectivityError` | OPEN — amended |
-| [#54](https://github.com/jejjohnson/xr_toolz/issues/54) | V3.5: Drifter ingestion adapter | OPEN — amended |
-| [#55](https://github.com/jejjohnson/xr_toolz/issues/55) | V3.6: Demo notebook — twin advection on Gulf Stream | OPEN |
+| [#49](https://github.com/jejjohnson/xrtoolz/issues/49) | Epic V3: Lagrangian — particle advection, transport diagnostics, trajectory metrics | OPEN |
+| [#50](https://github.com/jejjohnson/xrtoolz/issues/50) | V3.1: Trajectory schema + `SeedParticles` operator | OPEN |
+| [#51](https://github.com/jejjohnson/xrtoolz/issues/51) | V3.2: `AdvectParticles` operator (scipy backend) | OPEN — amended |
+| [#52](https://github.com/jejjohnson/xrtoolz/issues/52) | V3.3: Transport diagnostics — `PairDispersion`, `ResidenceTime`, `ConnectivityMatrix`, `FTLE` | OPEN |
+| [#53](https://github.com/jejjohnson/xrtoolz/issues/53) | V3.4: Trajectory metrics — `TrajectoryRMSE`, `EndpointError`, `EndpointErrorMap`, `DispersionError`, `ResidenceTimeError`, `ConnectivityError` | OPEN — amended |
+| [#54](https://github.com/jejjohnson/xrtoolz/issues/54) | V3.5: Drifter ingestion adapter | OPEN — amended |
+| [#55](https://github.com/jejjohnson/xrtoolz/issues/55) | V3.6: Demo notebook — twin advection on Gulf Stream | OPEN |
 
 ## Upstream → V3 mapping
 
@@ -49,14 +49,14 @@ This document records the mapping for future reference.
 
 The following were settled in #49–#55 and should not be relitigated:
 
-- **Module placement**: `xr_toolz.lagrangian` (top-level), not under `geo` or `ocn`.
+- **Module placement**: `xrtoolz.lagrangian` (top-level), not under `geo` or `ocn`.
 - **Schema** (V3.1, #50): dims `(particle, time)`; vars `lon(particle, time)`, `lat(particle, time)`; coord `particle_id(particle)` int64; attrs `featureType="trajectory"` (CF).
-- **Validator helper**: `validate_trajectory(ds)` in `xr_toolz.lagrangian`.
+- **Validator helper**: `validate_trajectory(ds)` in `xrtoolz.lagrangian`.
 - **No `parcels` dep**: own implementation per the epic's acceptance criteria.
 - **2-D surface only** for v1; 3-D advection deferred.
-- **Operator pattern**: every Layer-0 function gets a Layer-1 Operator wrapper, same as everywhere else in xr_toolz.
-- **Metrics live in `xr_toolz.metrics.lagrangian`** (per D12), not in the physics module.
-- **Drifter ingest in `xr_toolz.lagrangian.io`**: `from_gdp`, `from_cmems_drifter`.
+- **Operator pattern**: every Layer-0 function gets a Layer-1 Operator wrapper, same as everywhere else in xrtoolz.
+- **Metrics live in `xrtoolz.metrics.lagrangian`** (per D12), not in the physics module.
+- **Drifter ingest in `xrtoolz.lagrangian.io`**: `from_gdp`, `from_cmems_drifter`.
 
 ## Amendments applied (this iteration)
 

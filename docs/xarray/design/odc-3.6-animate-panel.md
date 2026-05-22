@@ -15,7 +15,7 @@ renders one frame per time step, saves PNGs to disk, and shells out to
 intercomparison flows do the same side-by-side for two methods.
 
 Both flows are easy enough that they're hand-rolled in every
-ocean-data-challenges notebook that wants an animated diagnostic. xr_toolz
+ocean-data-challenges notebook that wants an animated diagnostic. xrtoolz
 has no animation infrastructure today.
 
 This issue adds **one generic panel** —
@@ -41,7 +41,7 @@ sizing, progress + overwrite-guard on save) without taking it as a dep.
 
 ```python
 import xarray as xr
-from xr_toolz.viz.validation import (
+from xrtoolz.viz.validation import (
     SpatialMapPanel, AnimatePanel, save_animation,
 )
 
@@ -73,7 +73,7 @@ fig.savefig("preview.png")
 > looping animation.*
 
 ```python
-from xr_toolz.viz.validation import PairwiseComparePanel
+from xrtoolz.viz.validation import PairwiseComparePanel
 
 inner = PairwiseComparePanel(
     SpatialMapPanel(var="speed", cmap="viridis", vmin=0, vmax=2.0),
@@ -87,7 +87,7 @@ save_animation(ani, "method_comparison.mp4")
 ### 2.4 N-up faceted animation
 
 ```python
-from xr_toolz.viz.validation import FacetPanel
+from xrtoolz.viz.validation import FacetPanel
 
 inner = FacetPanel(
     SpatialMapPanel(var="ssh", projection="gulf_stream", vmin=-0.5, vmax=0.5),
@@ -108,8 +108,8 @@ HTML(panel(ds).to_jshtml())                                 # interactive in-not
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](../../src/xr_toolz/viz/validation/_src/base.py) | reuse |
-| Single-axes panels (SpatialMap, PSD, RegionScoreBar, …) | [`viz/validation/_src/`](../../src/xr_toolz/viz/validation/_src/) | reuse as inner panels |
+| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](../../src/xrtoolz/viz/validation/_src/base.py) | reuse |
+| Single-axes panels (SpatialMap, PSD, RegionScoreBar, …) | [`viz/validation/_src/`](../../src/xrtoolz/viz/validation/_src/) | reuse as inner panels |
 | `FacetPanel` (N-way over a categorical dim) | proposed in ODC-2.3 | sibling — composable |
 | `PairwiseComparePanel` (A-vs-B + diff) | proposed in ODC-3.4 | sibling — composable |
 | Time-axis animation wrapper | — | **add** `AnimatePanel` |
@@ -149,7 +149,7 @@ overrides always win.
 ### 4.3 `AnimatePanel`
 
 ```python
-# src/xr_toolz/viz/validation/_src/animate.py
+# src/xrtoolz/viz/validation/_src/animate.py
 class AnimatePanel:
     """Generic time-axis animation wrapper around any single-axes panel.
 
@@ -232,7 +232,7 @@ indicating non-roundtrippable.
 ### 4.4 `save_animation` helper
 
 ```python
-# src/xr_toolz/viz/validation/_src/animate.py
+# src/xrtoolz/viz/validation/_src/animate.py
 def save_animation(
     ani: matplotlib.animation.FuncAnimation,
     path: str | Path,
@@ -306,7 +306,7 @@ documented in install docs and surfaced via informative error.
 ## 6. Public API surface
 
 ```python
-xr_toolz.viz.validation.AnimatePanel(
+xrtoolz.viz.validation.AnimatePanel(
     panel,                     # _ValidationPanel | Callable[(ds, ax), Any]
     *,
     frame_dim="time",
@@ -319,10 +319,10 @@ xr_toolz.viz.validation.AnimatePanel(
     blit=False,
 )
 
-xr_toolz.viz.validation.AnimatePanel.preview(ds, *, frame_index=0)
+xrtoolz.viz.validation.AnimatePanel.preview(ds, *, frame_index=0)
                        -> tuple[Figure, Axes]
 
-xr_toolz.viz.validation.save_animation(
+xrtoolz.viz.validation.save_animation(
     ani, path, *,
     fps=24,
     progress=False,
@@ -331,7 +331,7 @@ xr_toolz.viz.validation.save_animation(
 )
 ```
 
-Re-exported from `xr_toolz.viz.validation.__init__`.
+Re-exported from `xrtoolz.viz.validation.__init__`.
 
 ## 7. Tests
 

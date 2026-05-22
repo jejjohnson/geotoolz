@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xr_toolz.interpolate import Grid, KDEToGrid, kde_to_grid
+from xrtoolz.interpolate import Grid, KDEToGrid, kde_to_grid
 
 
 def _cell_area(grid: Grid) -> float:

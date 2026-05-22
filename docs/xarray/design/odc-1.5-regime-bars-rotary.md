@@ -9,7 +9,7 @@
 ## 1. Motivation
 
 The 1500-line upstream `mod_plot.py` is mostly redundant with the
-existing xr_toolz validation viz (`SpatialMapPanel`,
+existing xrtoolz validation viz (`SpatialMapPanel`,
 `PSDIsotropicScorePanel`, leaderboard). After cross-referencing, only
 two visualisations are genuinely net-new:
 
@@ -25,9 +25,9 @@ two visualisations are genuinely net-new:
    spectral diagnostic.
 
 Item 2 is the more substantive add: it requires a **rotary spectrum
-primitive** that doesn't yet exist in xr_toolz, sitting alongside
+primitive** that doesn't yet exist in xrtoolz, sitting alongside
 `power_spectrum` / `cross_spectrum` / `coherence` in
-[`transforms.fourier`](../../src/xr_toolz/transforms/_src/fourier.py).
+[`transforms.fourier`](../../src/xrtoolz/transforms/_src/fourier.py).
 
 This issue therefore ships:
 - A new `rotary_spectrum` data primitive.
@@ -45,7 +45,7 @@ This issue therefore ships:
 
 ```python
 import xarray as xr
-from xr_toolz.viz.validation import RegionScoreBarPanel
+from xrtoolz.viz.validation import RegionScoreBarPanel
 
 ds_scores = xr.open_dataset("scores_by_region.nc")  # dims: (region, method)
 
@@ -64,8 +64,8 @@ fig, axes = panel(ds_scores)
 > CCW vs CW power in `(wavenumber, lat)`.*
 
 ```python
-from xr_toolz.transforms import rotary_spectrum
-from xr_toolz.viz.validation import RotaryPolarizationPanel
+from xrtoolz.transforms import rotary_spectrum
+from xrtoolz.viz.validation import RotaryPolarizationPanel
 
 ds_rot = rotary_spectrum(
     ds, u_var="u", v_var="v",
@@ -83,8 +83,8 @@ fig, axes = panel(ds_rot)
 ### 2.3 Operator-in-Sequential
 
 ```python
-from xr_toolz.transforms import RotarySpectrum  # if/when promoted to Operator
-from xr_toolz.viz.validation import RotaryPolarizationPanel
+from xrtoolz.transforms import RotarySpectrum  # if/when promoted to Operator
+from xrtoolz.viz.validation import RotaryPolarizationPanel
 
 pipeline = Sequential([
     RotarySpectrum(u_var="u", v_var="v", dim="lon", avg_dims=["time"]),
@@ -99,9 +99,9 @@ v1.)
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `_ValidationPanel` base | [`viz/validation/_src/base.py`](../../src/xr_toolz/viz/validation/_src/base.py) | reuse |
-| Existing panels (SpatialMap, PSDIsotropic, …) | [`viz/validation/_src/`](../../src/xr_toolz/viz/validation/_src/) | cover other upstream plots |
-| `power_spectrum`, `cross_spectrum`, `coherence` | [`transforms/_src/fourier.py`](../../src/xr_toolz/transforms/_src/fourier.py) | sibling of new primitive |
+| `_ValidationPanel` base | [`viz/validation/_src/base.py`](../../src/xrtoolz/viz/validation/_src/base.py) | reuse |
+| Existing panels (SpatialMap, PSDIsotropic, …) | [`viz/validation/_src/`](../../src/xrtoolz/viz/validation/_src/) | cover other upstream plots |
+| `power_spectrum`, `cross_spectrum`, `coherence` | [`transforms/_src/fourier.py`](../../src/xrtoolz/transforms/_src/fourier.py) | sibling of new primitive |
 | `scores_by_region` consumer | proposed in ODC-1.4 | feeds `RegionScoreBarPanel` |
 | Rotary spectrum | — | **add** `rotary_spectrum` |
 | Regime bar panel | — | **add** `RegionScoreBarPanel` |
@@ -112,7 +112,7 @@ v1.)
 ### 4.1 Rotary spectrum primitive
 
 ```python
-# src/xr_toolz/transforms/_src/fourier.py
+# src/xrtoolz/transforms/_src/fourier.py
 def rotary_spectrum(
     ds: xr.Dataset, *,
     u_var: str, v_var: str,
@@ -152,7 +152,7 @@ Returns Dataset with `psd_ccw`, `psd_cw`, `polarization` over
 ### 4.2 `RegionScoreBarPanel`
 
 ```python
-# src/xr_toolz/viz/validation/_src/regime_bars.py
+# src/xrtoolz/viz/validation/_src/regime_bars.py
 class RegionScoreBarPanel(_ValidationPanel):
     """Grouped bar chart of per-region pixel metrics.
 
@@ -183,7 +183,7 @@ Operator pattern).
 ### 4.3 `RotaryPolarizationPanel`
 
 ```python
-# src/xr_toolz/viz/validation/_src/rotary.py
+# src/xrtoolz/viz/validation/_src/rotary.py
 class RotaryPolarizationPanel(_ValidationPanel):
     """Heatmap of rotary polarization r ∈ [-1, 1].
 
@@ -222,15 +222,15 @@ No new dependencies.
 
 ```python
 # Primitive
-xr_toolz.transforms.rotary_spectrum(ds, *, u_var, v_var, dim, avg_dims)
+xrtoolz.transforms.rotary_spectrum(ds, *, u_var, v_var, dim, avg_dims)
 
 # Panels
-xr_toolz.viz.validation.RegionScoreBarPanel(...)
-xr_toolz.viz.validation.RotaryPolarizationPanel(...)
+xrtoolz.viz.validation.RegionScoreBarPanel(...)
+xrtoolz.viz.validation.RotaryPolarizationPanel(...)
 ```
 
-`rotary_spectrum` re-exported from `xr_toolz.transforms.__init__`.
-Panels re-exported from `xr_toolz.viz.validation.__init__`.
+`rotary_spectrum` re-exported from `xrtoolz.transforms.__init__`.
+Panels re-exported from `xrtoolz.viz.validation.__init__`.
 
 ## 7. Tests
 

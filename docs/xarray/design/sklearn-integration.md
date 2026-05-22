@@ -1,24 +1,24 @@
 # sklearn integration — `SklearnOp`, NaN masking, accessor, patch-wise composition
 
 **Status:** proposed
-**Scope:** consolidate the sklearn surface across `xr_toolz.utils`,
-`xr_toolz.transforms`, and `xr_toolz.inference` and close the remaining
+**Scope:** consolidate the sklearn surface across `xrtoolz.utils`,
+`xrtoolz.transforms`, and `xrtoolz.inference` and close the remaining
 gaps so the bridge becomes a first-class composable layer.
 
 ---
 
 ## 1. Motivation
 
-`xr_toolz` already ships a working xarray ↔ sklearn bridge:
+`xrtoolz` already ships a working xarray ↔ sklearn bridge:
 
 | Layer | What ships today | Path |
 |-------|------------------|------|
-| 0 | `XarrayEstimator` — stack → delegate → unstack, attribute proxy, NaN `"propagate"`/`"raise"` | [src/xr_toolz/utils/_src/sklearn_wrap.py](../../src/xr_toolz/utils/_src/sklearn_wrap.py) |
-| 1 (presets) | `pca_op`, `eof_op`, `ica_op`, `nmf_op`, `kmeans_op` returning fitted-able `XarrayEstimator`s | [src/xr_toolz/transforms/_src/decompose.py](../../src/xr_toolz/transforms/_src/decompose.py) |
-| 2 (inference) | `SklearnModelOp` — duck-typed wrapper for a *fitted* model, used in `Graph` DAGs | [src/xr_toolz/inference/modelop.py](../../src/xr_toolz/inference/modelop.py) |
+| 0 | `XarrayEstimator` — stack → delegate → unstack, attribute proxy, NaN `"propagate"`/`"raise"` | [src/xrtoolz/utils/_src/sklearn_wrap.py](../../src/xrtoolz/utils/_src/sklearn_wrap.py) |
+| 1 (presets) | `pca_op`, `eof_op`, `ica_op`, `nmf_op`, `kmeans_op` returning fitted-able `XarrayEstimator`s | [src/xrtoolz/transforms/_src/decompose.py](../../src/xrtoolz/transforms/_src/decompose.py) |
+| 2 (inference) | `SklearnModelOp` — duck-typed wrapper for a *fitted* model, used in `Graph` DAGs | [src/xrtoolz/inference/modelop.py](../../src/xrtoolz/inference/modelop.py) |
 
 The gap is on the **composition** side. `XarrayEstimator` is an sklearn
-`BaseEstimator`, not an `xr_toolz.Operator` — so a fitted PCA cannot be
+`BaseEstimator`, not an `xrtoolz.Operator` — so a fitted PCA cannot be
 dropped into a `Sequential([validate, regrid, pca, classify])` chain
 without a thin shim each time. Three other pieces are missing: a
 `"mask"` NaN policy for land-masked grids, a `da.sklearn` accessor for
@@ -32,7 +32,7 @@ disturbing the bridge that already exists.
 
 ## 2. Gap inventory
 
-| Capability | `xr_toolz` today | gap |
+| Capability | `xrtoolz` today | gap |
 |---|---|---|
 | Stack → delegate → unstack | ✓ | — |
 | Attribute proxy (`coef_`, `components_`, …) | ✓ | — |
@@ -73,7 +73,7 @@ estimator beyond what already exists, which keeps thread-safety
 identical to today.
 
 **Where:** extend `NanPolicy` literal + `_check_no_nan` site in
-[sklearn_wrap.py](../../src/xr_toolz/utils/_src/sklearn_wrap.py); add a
+[sklearn_wrap.py](../../src/xrtoolz/utils/_src/sklearn_wrap.py); add a
 test matrix in `tests/test_sklearn_wrap.py` covering propagate / raise /
 mask × DataArray / Dataset × transform / predict / inverse_transform.
 
@@ -91,8 +91,8 @@ internally and delegates. Registered via
 `register_dataset_accessor("sklearn")`. Single code path: there is no
 parallel implementation.
 
-**Where:** new `src/xr_toolz/utils/_src/sklearn_accessor.py`, exported
-from `xr_toolz.utils`. Opt-in import — registering accessors at package
+**Where:** new `src/xrtoolz/utils/_src/sklearn_accessor.py`, exported
+from `xrtoolz.utils`. Opt-in import — registering accessors at package
 import time is acceptable since the cost is negligible and idempotent.
 
 ### G3 — xrpatcher composition pattern (no new code)
@@ -119,7 +119,7 @@ recon   = patcher.reconstruct(
 
 **Where:** a section in the bridge's user-facing notebook
 ([docs/notebooks/](../notebooks/)) and a recipe block in
-`xr_toolz.utils.__init__` docstring. No new operators required.
+`xrtoolz.utils.__init__` docstring. No new operators required.
 
 ### G4 — `SklearnOp(Operator)`
 
@@ -175,8 +175,8 @@ Decisions baked in (matching `D4` in [decisions.md](decisions.md)):
 - For multi-variable estimators (Dataset-in), `variable=None` passes
   the whole Dataset; `output_variable` then names the new variable.
 
-**Where:** `src/xr_toolz/transforms/_src/sklearn_op.py`, exported from
-`xr_toolz.transforms`.
+**Where:** `src/xrtoolz/transforms/_src/sklearn_op.py`, exported from
+`xrtoolz.transforms`.
 
 ---
 
@@ -188,7 +188,7 @@ Decisions baked in (matching `D4` in [decisions.md](decisions.md)):
   semantics that don't belong in an Operator. Revisit if a concrete
   user need appears.
 - **Cross-validation splitters that respect spatial autocorrelation.**
-  Belongs in a downstream `xr_toolz.experiments` module if at all.
+  Belongs in a downstream `xrtoolz.experiments` module if at all.
 - **Per-variable Dataset mode** (one estimator per variable).
   Implementable as `Sequential([SklearnOp(..., variable=v) for v in vars])`
   — no new primitive needed.
