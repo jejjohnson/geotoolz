@@ -56,10 +56,25 @@ nav:
   - API Reference:
       - Core: api/core.md
       - Augment: api/augment.md
+      - Cloud: api/cloud.md
       - Compositing: api/compositing.md
+      - Feature: api/feature.md
       - Geometry: api/geom.md
+      - Indices: api/indices.md
+      - IO: api/io.md
+      - Learn (scikit-learn): api/learn.md
+      - Mask: api/mask.md
+      - Matched filter: api/matched_filter.md
+      - Measure: api/measure.md
       - Normalize: api/normalize.md
+      - Plume: api/plume.md
       - QA: api/qa.md
+      - Radiometry: api/radiometry.md
+      - Readers: api/readers.md
+      - Restore: api/restore.md
+      - Segment: api/segment.md
+      - Spectral: api/spectral.md
+      - Viz: api/viz.md
   - Contributing: contributing.md
 
 markdown_extensions:
