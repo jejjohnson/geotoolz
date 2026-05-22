@@ -28,6 +28,7 @@ from pipekit import Operator
 
 from geotoolz.normalize._src.array import (
     asinh_scale,
+    clahe,
     histogram_match,
     log_scale,
     minmax_scale,
@@ -106,6 +107,51 @@ class PerBandStats(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {"percentiles": self.percentiles}
+
+
+class CLAHE(Operator):
+    """Contrast-Limited Adaptive Histogram Equalization.
+
+    Wraps :func:`skimage.exposure.equalize_adapthist` and applies it
+    independently per band for ``(C, H, W)`` carriers while preserving
+    NaN positions and GeoTensor metadata.
+    """
+
+    def __init__(
+        self,
+        *,
+        kernel_size: int | tuple[int, int] | list[int] | None = None,
+        clip_limit: float = 0.01,
+        nbins: int = 256,
+    ) -> None:
+        # Accept list inputs (e.g. round-trips through Hydra/OmegaConf,
+        # which materialise sequences as lists) and normalise to tuple
+        # so :func:`equalize_adapthist` receives its expected type.
+        if isinstance(kernel_size, list):
+            kernel_size = tuple(kernel_size)
+        self.kernel_size = kernel_size
+        self.clip_limit = clip_limit
+        self.nbins = nbins
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        out = clahe(
+            np.asarray(gt),
+            kernel_size=self.kernel_size,
+            clip_limit=self.clip_limit,
+            nbins=self.nbins,
+        )
+        return gt.array_as_geotensor(out)
+
+    def get_config(self) -> dict[str, Any]:
+        if isinstance(self.kernel_size, tuple):
+            kernel_size: int | list[int] | None = list(self.kernel_size)
+        else:
+            kernel_size = self.kernel_size
+        return {
+            "kernel_size": kernel_size,
+            "clip_limit": self.clip_limit,
+            "nbins": self.nbins,
+        }
 
 
 class StandardScaler(Operator):

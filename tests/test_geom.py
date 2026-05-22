@@ -759,3 +759,81 @@ def test_yaml_safe_operators_roundtrip_through_hydra_zen(operator) -> None:
     restored = _hydra_zen.instantiate(cfg)
     assert type(restored) is type(operator)
     assert restored.get_config() == operator.get_config()
+
+
+# ----------------------------------------------------------------------------
+# Registration operators (PhaseAlign / OpticalFlow*)
+# ----------------------------------------------------------------------------
+
+
+def _registration_pair() -> tuple[GeoTensor, GeoTensor, int, int]:
+    """Build a reference scene and an integer-pixel-shifted moving scene."""
+    rng = np.random.default_rng(0)
+    base = rng.uniform(0.0, 1.0, size=(48, 48)).astype(np.float32)
+    yy, xx = np.ogrid[:48, :48]
+    base += np.exp(-((yy - 24) ** 2 + (xx - 24) ** 2) / 32.0).astype(np.float32)
+    reference = GeoTensor(
+        base[None, ...],
+        transform=Affine(1.0, 0.0, 100.0, 0.0, -1.0, 200.0),
+        crs="EPSG:32629",
+        fill_value_default=0.0,
+    )
+    dy, dx = 3, -2
+    moving_arr = np.roll(base, shift=(dy, dx), axis=(0, 1))
+    moving = GeoTensor(
+        moving_arr[None, ...],
+        transform=Affine(1.0, 0.0, 100.0, 0.0, -1.0, 200.0),
+        crs="EPSG:32629",
+        fill_value_default=0.0,
+    )
+    return reference, moving, dy, dx
+
+
+def test_phase_align_returns_shift_when_apply_false() -> None:
+    reference, moving, dy, dx = _registration_pair()
+    result = gz.geom.PhaseAlign(reference=reference, apply=False)(moving)
+    assert isinstance(result, tuple)
+    shift_y, shift_x, error = result
+    # phase_cross_correlation returns the shift needed to align the moving
+    # image back onto the reference, i.e. the negative of the applied roll.
+    assert shift_y == pytest.approx(-dy, abs=0.5)
+    assert shift_x == pytest.approx(-dx, abs=0.5)
+    assert error >= 0.0
+
+
+def test_phase_align_apply_updates_transform_and_preserves_metadata() -> None:
+    reference, moving, _dy, _dx = _registration_pair()
+    aligned = gz.geom.PhaseAlign(reference=reference, apply=True)(moving)
+    assert isinstance(aligned, GeoTensor)
+    assert aligned.shape == moving.shape
+    assert str(aligned.crs) == str(moving.crs)
+    # Transform must shift to compensate for the detected displacement.
+    assert aligned.transform != moving.transform
+
+
+def test_phase_align_rejects_mismatched_shapes() -> None:
+    reference, moving, _dy, _dx = _registration_pair()
+    bigger = GeoTensor(
+        np.zeros((1, 64, 64), dtype=np.float32),
+        transform=moving.transform,
+        crs=moving.crs,
+        fill_value_default=0.0,
+    )
+    with pytest.raises(ValueError, match="identical spatial shape"):
+        gz.geom.PhaseAlign(reference=reference)(bigger)
+
+
+def test_optical_flow_tvl1_returns_displacement_field() -> None:
+    reference, moving, _dy, _dx = _registration_pair()
+    flow = gz.geom.OpticalFlowTVL1(reference=reference)(moving)
+    arr = np.asarray(flow)
+    assert arr.shape == (2, *reference.shape[-2:])
+    assert str(flow.crs) == str(moving.crs)
+
+
+def test_optical_flow_ilk_returns_displacement_field() -> None:
+    reference, moving, _dy, _dx = _registration_pair()
+    flow = gz.geom.OpticalFlowILK(reference=reference)(moving)
+    arr = np.asarray(flow)
+    assert arr.shape == (2, *reference.shape[-2:])
+    assert str(flow.crs) == str(moving.crs)

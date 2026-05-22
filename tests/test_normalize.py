@@ -11,6 +11,7 @@ from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
 from geotoolz.normalize import (
+    CLAHE,
     AsinhScale,
     HistogramMatch,
     HistogramStretch,
@@ -207,6 +208,18 @@ def test_histogram_match_forbidden_in_yaml() -> None:
     assert HistogramMatch.forbid_in_yaml is True
 
 
+def test_clahe_preserves_nan_mask_and_metadata() -> None:
+    gt = _toy_geotensor(np.linspace(0.0, 1.0, 100).reshape(1, 10, 10))
+    np.asarray(gt)[0, 0, 0] = np.nan
+
+    out = CLAHE(kernel_size=(4, 4), clip_limit=0.03)(gt)
+
+    assert_metadata_preserved(out, gt)
+    assert np.isnan(np.asarray(out)[0, 0, 0])
+    assert np.nanmin(np.asarray(out)) >= 0.0
+    assert np.nanmax(np.asarray(out)) <= 1.0
+
+
 def test_nonlinear_scales_handle_zero_without_infinity(
     scene: GeoTensor,
 ) -> None:
@@ -245,9 +258,22 @@ def test_get_config_is_json_safe() -> None:
         AsinhScale(),
         PowerScale(),
         ZeroOne(),
+        CLAHE(kernel_size=(4, 4), clip_limit=0.03),
+        CLAHE(kernel_size=None),
     ]
     for op in ops:
         json.dumps(op.get_config())  # must not raise
+
+
+def test_clahe_config_normalises_tuple_kernel_to_list() -> None:
+    """Tuple ``kernel_size`` must serialise as a list for config round-trips."""
+    op = CLAHE(kernel_size=(8, 8))
+    cfg = op.get_config()
+    assert cfg["kernel_size"] == [8, 8]
+    # Round-trip via list input rebuilds the operator equivalently.
+    rebuilt = CLAHE(**cfg)
+    assert rebuilt.kernel_size == (8, 8)
+    assert rebuilt.get_config() == cfg
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +300,7 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
         AsinhScale(a=0.5),
         PowerScale(gamma=0.4),
         ZeroOne(per_band=True),
+        CLAHE(kernel_size=(4, 4), clip_limit=0.03),
     ],
 )
 def test_normalize_hydra_zen_roundtrip(op: object) -> None:
