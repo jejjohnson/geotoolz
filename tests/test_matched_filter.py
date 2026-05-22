@@ -124,24 +124,70 @@ def test_streaming_background_matches_empirical_covariance() -> None:
     )
 
 
-def test_streaming_background_shrunk_covariance_matches_batch_estimator() -> None:
+def test_shrink_covariance_ledoit_wolf_properties() -> None:
+    n_features = 5
+    base = np.diag([4.0, 3.0, 2.0, 1.5, 1.0])
+    off = 0.4
+    cov = base.copy()
+    for i in range(n_features):
+        for j in range(n_features):
+            if i != j:
+                cov[i, j] = off * np.sqrt(cov[i, i] * cov[j, j])
+
+    # Scaled-identity input is already at the target, so shrinkage = 0.
+    scaled_identity = 2.0 * np.eye(n_features)
+    shrunk_id = gz.matched_filter.shrink_covariance(
+        scaled_identity, method="ledoit_wolf", n_samples=100
+    )
+    np.testing.assert_allclose(shrunk_id, scaled_identity)
+
+    # Larger n_samples => less shrinkage => closer to empirical.
+    shrunk_small = gz.matched_filter.shrink_covariance(
+        cov, method="ledoit_wolf", n_samples=10
+    )
+    shrunk_large = gz.matched_filter.shrink_covariance(
+        cov, method="ledoit_wolf", n_samples=10_000
+    )
+    err_small = float(np.linalg.norm(shrunk_small - cov))
+    err_large = float(np.linalg.norm(shrunk_large - cov))
+    assert err_small > err_large
+
+    # Result is a convex combination of cov and the scaled-identity target.
+    mu = float(np.trace(cov) / n_features)
+    target = mu * np.eye(n_features)
+    for shrunk in (shrunk_small, shrunk_large):
+        np.testing.assert_allclose(np.trace(shrunk), np.trace(cov), atol=1e-10)
+        lower = np.minimum(cov, target)
+        upper = np.maximum(cov, target)
+        assert np.all(shrunk >= lower - 1e-10)
+        assert np.all(shrunk <= upper + 1e-10)
+
+
+def test_streaming_background_uses_streaming_mean_and_shrunk_covariance() -> None:
     cube_a = _make_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
     cube_b = _make_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
 
     bg = gz.matched_filter.StreamingBackground(cubes=[cube_a, cube_b])()
-    stacked = np.concatenate(
+
+    # Mean equals the concatenated per-pixel mean.
+    stacked_pixels = np.concatenate(
         [np.asarray(cube_a).reshape(2, -1), np.asarray(cube_b).reshape(2, -1)],
         axis=1,
-    ).T
-    empirical = np.cov(stacked, rowvar=False) + 1e-8 * np.eye(2)
-    expected = gz.matched_filter.estimate_cov_shrunk(
-        stacked.T.reshape(2, 2, 4), axis=0
-    ).matrix
-
+    ).T  # shape (n_pixels, n_features)
     assert isinstance(bg, gz.matched_filter.StreamingBackgroundResult)
-    assert np.allclose(bg.mean, stacked.mean(axis=0))
-    assert np.allclose(bg.cov_op.matrix, expected)
-    assert not np.allclose(bg.cov_op.matrix, empirical)
+    np.testing.assert_allclose(bg.mean, stacked_pixels.mean(axis=0))
+
+    # Shrunk covariance lies on the segment between the empirical cov
+    # and the scaled-identity target (convex combination).
+    empirical = np.cov(stacked_pixels, rowvar=False)
+    mu = float(np.trace(empirical) / empirical.shape[0])
+    target = mu * np.eye(empirical.shape[0])
+    shrunk = bg.cov_op.matrix
+    np.testing.assert_allclose(np.trace(shrunk), np.trace(empirical), atol=1e-6)
+    lower = np.minimum(empirical, target)
+    upper = np.maximum(empirical, target)
+    assert np.all(shrunk >= lower - 1e-6)
+    assert np.all(shrunk <= upper + 1e-6)
 
 
 def test_cluster_background_and_dispatch_are_reproducible() -> None:

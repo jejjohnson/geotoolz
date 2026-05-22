@@ -16,6 +16,7 @@ from geotoolz.matched_filter._src.array import (
     estimate_cov_shrunk,
     estimate_mean,
     matched_filter_snr,
+    shrink_covariance,
     validate_mf_inputs,
 )
 from geotoolz.matched_filter._src.operators import (
@@ -68,5 +69,6 @@ __all__ = [
     "estimate_cov_shrunk",
     "estimate_mean",
     "matched_filter_snr",
+    "shrink_covariance",
     "validate_mf_inputs",
 ]

@@ -223,13 +223,23 @@ def shrink_covariance(
             )
         )
     elif method == "ledoit_wolf":
-        diag_frobenius_sq = float(np.sum(np.diag(cov) ** 2))
-        total_frobenius_sq = float(np.sum(cov * cov))
-        shrinkage = (
-            0.0
-            if total_frobenius_sq == 0
-            else min(1.0, diag_frobenius_sq / total_frobenius_sq)
-        )
+        # Analytical Ledoit-Wolf approximation. The proper LW estimator
+        # (Ledoit & Wolf 2004) requires the sample matrix X to estimate
+        # b^2 = variance of the empirical-covariance entries; with only
+        # the empirical covariance and the sample count available we use
+        # the asymptotic estimate b^2 ~= (1/n) * (tr(S^2) + tr(S)^2 / p)
+        # under iid samples, with d^2 = ||S - mu*I||_F^2 as the distance
+        # to the scaled-identity target. Behaves correctly: no shrinkage
+        # when S is already scaled-identity (d^2 = 0 -> shrinkage = 0),
+        # vanishing shrinkage as n_samples grows, and full shrinkage when
+        # n_samples is tiny.
+        mu = float(np.trace(cov)) / n_features
+        diff = cov - mu * np.eye(n_features, dtype=float)
+        d_sq = float(np.sum(diff * diff))
+        trace_cov_sq = float(np.sum(cov * cov))
+        trace_sq = float(np.trace(cov)) ** 2
+        b_sq = (trace_cov_sq + trace_sq / n_features) / max(n_samples, 1)
+        shrinkage = 0.0 if d_sq == 0 else min(1.0, b_sq / d_sq)
     else:
         raise ValueError(f"unknown covariance shrinkage method {method!r}")
     return (1.0 - shrinkage) * cov + shrinkage * target

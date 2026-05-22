@@ -470,13 +470,11 @@ class LinearTargetFromObs(Operator):
         vmr_background: np.ndarray | None = None,
         pattern: str | np.ndarray = "uniform",
         pixel: tuple[int, int] | None = None,
-        linear_forward: bool = False,
     ) -> None:
         self.obs_model = obs_model
         self.vmr_background = vmr_background
         self.pattern = pattern
         self.pixel = pixel
-        self.linear_forward = linear_forward
 
     def _apply(self, gt: GeoTensor) -> np.ndarray:
         return (
@@ -500,7 +498,6 @@ class LinearTargetFromObs(Operator):
             if isinstance(self.pattern, str)
             else np.asarray(self.pattern).tolist(),
             "pixel": self.pixel,
-            "linear_forward": self.linear_forward,
         }
 
 
