@@ -909,7 +909,9 @@ class GeostationaryParallaxCorrect(Operator):
             fill=gt.fill_value_default,
         )
         if np.any(off_limb):
-            sampled = np.where(off_limb, gt.fill_value_default, sampled)
+            sampled = np.where(
+                off_limb, np.asarray(gt.fill_value_default, dtype=sampled.dtype), sampled
+            )
         return gt.array_as_geotensor(sampled)
 
     def get_config(self) -> dict[str, Any]:
@@ -1380,12 +1382,16 @@ def _sample_bilinear(
     safe_row1 = np.clip(row1, 0, height - 1)
     safe_col0 = np.clip(col0, 0, width - 1)
     safe_col1 = np.clip(col1, 0, width - 1)
-    row_weight = (rows - row0).astype(arr.dtype, copy=False) if np.issubdtype(
-        arr.dtype, np.floating
-    ) else rows - row0
-    col_weight = (cols - col0).astype(arr.dtype, copy=False) if np.issubdtype(
-        arr.dtype, np.floating
-    ) else cols - col0
+    row_weight = (
+        (rows - row0).astype(arr.dtype, copy=False)
+        if np.issubdtype(arr.dtype, np.floating)
+        else rows - row0
+    )
+    col_weight = (
+        (cols - col0).astype(arr.dtype, copy=False)
+        if np.issubdtype(arr.dtype, np.floating)
+        else cols - col0
+    )
     one = arr.dtype.type(1) if np.issubdtype(arr.dtype, np.floating) else 1.0
     top_left = arr[..., safe_row0, safe_col0]
     top_right = arr[..., safe_row0, safe_col1]
