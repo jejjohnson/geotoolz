@@ -360,6 +360,28 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
     np.testing.assert_allclose(patch_stitched, np.asarray(stitched), rtol=1e-6)
 
 
+def test_stitch_feather_clips_valid_mask_for_custom_target_grid() -> None:
+    fill = -9999.0
+    tile = GeoTensor(
+        np.array([[[1.0, fill], [fill, 4.0]]], dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -1, 2),
+        crs="EPSG:4326",
+        fill_value_default=fill,
+    )
+
+    stitched = gz.geom.Stitch(
+        blend="feather",
+        feather_width=1,
+        target_shape=(1, 1),
+        target_transform=Affine(1, 0, 1, 0, -1, 1),
+    )([tile])
+
+    np.testing.assert_array_equal(
+        np.asarray(stitched),
+        np.array([[[4.0]]], dtype=np.float32),
+    )
+
+
 def test_stitch_validates_north_up_on_every_tile() -> None:
     """A rotated/sheared tile in any position must raise, not just the first.
 
