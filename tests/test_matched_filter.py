@@ -110,9 +110,7 @@ def test_streaming_background_matches_empirical_covariance() -> None:
     cube_a = _make_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
     cube_b = _make_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
 
-    bg = gz.matched_filter.StreamingBackground(cov_kind="empirical")(
-        [cube_a, cube_b]
-    )
+    bg = gz.matched_filter.StreamingBackground(cov_kind="empirical")([cube_a, cube_b])
     stacked = np.concatenate(
         [np.asarray(cube_a).reshape(2, -1), np.asarray(cube_b).reshape(2, -1)],
         axis=1,
@@ -317,9 +315,7 @@ def test_matched_filter_null_distribution_at_known_false_alarm_rate() -> None:
     gt = _make_geotensor(cube)
 
     scores = np.asarray(
-        gz.matched_filter.MatchedFilter(
-            mean=mean, cov_op=cov_matrix, target=target
-        )(gt)
+        gz.matched_filter.MatchedFilter(mean=mean, cov_op=cov_matrix, target=target)(gt)
     ).reshape(-1)
 
     for far in (0.05, 0.01):
@@ -342,10 +338,11 @@ def test_operator_get_configs_are_json_safe_and_round_trippable() -> None:
     mf = gz.matched_filter
     ops_with_args: list[tuple[type, dict]] = [
         (mf.MatchedFilter, {"target": target, "cov_op": cov, "mean": mean}),
-        (mf.MatchedFilterSNR,
-         {"amplitude": 1.0, "cov_op": cov, "target": target}),
-        (mf.DetectionThreshold,
-         {"false_alarm_rate": 0.05, "cov_op": cov, "target": target}),
+        (mf.MatchedFilterSNR, {"amplitude": 1.0, "cov_op": cov, "target": target}),
+        (
+            mf.DetectionThreshold,
+            {"false_alarm_rate": 0.05, "cov_op": cov, "target": target},
+        ),
         (mf.ValidateMFInputs, {"cov_op": cov, "target": target}),
         (mf.StreamingBackground, {}),
         (mf.ApplyClusterMF, {"target": target}),
