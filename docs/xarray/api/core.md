@@ -1,29 +1,34 @@
 # Core — Composition Primitives
 
-Domain-agnostic primitives for building and running operator pipelines.
-Every public symbol lives at the top level of `xrtoolz` (e.g.
-`from xrtoolz import Sequential, Augment`).
+The composition primitives (`Operator`, `Sequential`, `Graph`, `Input`,
+`Node`, `Tap`) live in the carrier-agnostic
+[`pipekit`](https://github.com/jejjohnson/pipekit) framework and are
+re-exported at the top level of `xrtoolz` for convenience (e.g.
+`from xrtoolz import Sequential, Augment`). The xarray-Dataset-specific
+combinators (`Augment`, `ApplyToEach`) live in `xrtoolz.combinators`.
 
 ## Operator base class
 
-::: xrtoolz.core.operator.Operator
+::: pipekit.Operator
 
 ## Sequential pipelines
 
-::: xrtoolz.core.sequential.Sequential
+::: pipekit.Sequential
 
 ## Functional Graph API
 
-::: xrtoolz.core.graph.Input
+::: pipekit.Input
 
-::: xrtoolz.core.graph.Node
+::: pipekit.Node
 
-::: xrtoolz.core.graph.Graph
+::: pipekit.Graph
 
-## Operator combinators
+## Generic observation combinator (from pipekit)
 
-::: xrtoolz.core.combinators.Augment
+::: pipekit.Tap
 
-::: xrtoolz.core.combinators.Tap
+## xarray-specific combinators
 
-::: xrtoolz.core.combinators.ApplyToEach
+::: xrtoolz.combinators.Augment
+
+::: xrtoolz.combinators.ApplyToEach
