@@ -1,9 +1,9 @@
 """ModelOp — framework-agnostic inference operator.
 
 Wraps any callable (a torch model, a sklearn estimator, a JAX function,
-a plain function) as an `Operator`. Duck-types the call — either invokes
-``model(arr)`` directly or ``getattr(model, method)(arr)`` for sklearn-
-style ``predict``.
+a plain function) as a `pipekit.Operator`. Duck-types the call — either
+invokes ``model(arr)`` directly or ``getattr(model, method)(arr)`` for
+sklearn-style ``predict``.
 
 The wrapper never imports a framework — it only calls what the user
 hands it. This keeps `geotoolz` framework-optional and lets users wire
@@ -18,8 +18,7 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 import numpy as np
-
-from geotoolz.core._src.operator import Carrier, Operator
+from pipekit import Carrier, Operator
 
 
 class ModelOp(Operator):
@@ -60,6 +59,9 @@ class ModelOp(Operator):
     """
 
     forbid_in_yaml: ClassVar[bool] = True
+    # ConfigMixin would auto-derive `model` from `__init__` as a non-JSON
+    # opaque object; override with a curated debug repr below.
+    __config_mixin_auto__: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -110,3 +112,6 @@ class ModelOp(Operator):
             "method": self.method,
             "batch_size": self.batch_size,
         }
+
+
+__all__ = ["ModelOp"]

@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from georeader.reflectance import srf, transform_to_srf
 
-from geotoolz.core import Operator
+from pipekit import Operator
 from geotoolz.spectral._src.array import (
     band_ratio,
     continuum_removal,

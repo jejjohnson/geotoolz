@@ -11,7 +11,7 @@ from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
 from geotoolz import augment
-from geotoolz.core import Operator
+from pipekit import Operator
 
 
 def _toy_geotensor(values: np.ndarray) -> GeoTensor:

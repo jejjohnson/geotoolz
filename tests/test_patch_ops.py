@@ -29,7 +29,7 @@ from geopatcher import (
 from georeader.geotensor import GeoTensor
 
 from geotoolz import Sequential
-from geotoolz.core import Lambda
+from pipekit import Lambda
 from geotoolz.patch_ops import (
     ApplyToChips,
     GridSampler,

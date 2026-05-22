@@ -1,8 +1,10 @@
 """geotoolz — composable Operator library for remote sensing.
 
-Top-level re-exports of the composition core and the per-domain
-operator families (`radiometry`, `indices`, `cloud`, ...) — each
-imported from its own submodule.
+The composition core (`Operator`, `Sequential`, `Graph`, …) lives in
+the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit)
+framework — `geotoolz` re-exports the common names at the top level and
+adds the per-domain operator families (`radiometry`, `indices`, `cloud`,
+…) on top.
 
     import geotoolz as gz
     pipe = gz.Sequential([gz.Tap(print), gz.Identity()])
@@ -22,7 +24,6 @@ from __future__ import annotations
 from geotoolz import (
     augment,
     cloud,
-    core,
     geom,
     indices,
     io,
@@ -44,7 +45,7 @@ from geotoolz.cloud import (
     MaskFromSCL,
     MaskValid,
 )
-from geotoolz.core import (
+from pipekit import (
     Branch,
     Carrier,
     Const,
@@ -53,7 +54,6 @@ from geotoolz.core import (
     Identity,
     Input,
     Lambda,
-    ModelOp,
     Node,
     Operator,
     Sequential,
@@ -63,6 +63,7 @@ from geotoolz.core import (
     Switch,
     Tap,
 )
+from geotoolz.model import ModelOp
 from geotoolz.indices import (
     ARVI,
     BAIS2,
@@ -261,7 +262,6 @@ __all__ = [
     "__version__",
     "augment",
     "cloud",
-    "core",
     "dNBR",
     "geom",
     "indices",

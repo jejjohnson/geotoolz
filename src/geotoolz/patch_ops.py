@@ -1,7 +1,7 @@
 """Operator wrappers — `GridSampler`, `ApplyToChips`, `Stitch` — around `geopatcher`.
 
 Thin glue between the four-axis Patcher framework (which lives in the
-standalone ``geopatcher`` package) and `geotoolz.core.Operator`, so a
+standalone ``geopatcher`` package) and `pipekit.Operator`, so a
 sliding-window inference pipeline composes inside a `Sequential` /
 `Graph`::
 
@@ -14,13 +14,17 @@ sliding-window inference pipeline composes inside a `Sequential` /
 Optional extra: ``pip install 'geotoolz[patch]'`` to pull in geopatcher.
 Importing this module without geopatcher installed raises a friendly
 ``ImportError`` pointing at the right extra.
+
+The same wrappers now also ship from ``geopatcher.integrations.pipekit``
+behind the ``geopatcher[pipekit]`` extra; prefer that location in new
+code — this module is kept as a backwards-compatible alias.
 """
 
 from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from geotoolz.core._src.operator import Operator
+from pipekit import Operator
 
 
 try:

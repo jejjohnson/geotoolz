@@ -39,7 +39,7 @@ import numpy as np
 
 from geotoolz.cloud import SCL
 from geotoolz.cloud._src.array import mask_from_qa_bits, mask_from_scl
-from geotoolz.core import Operator
+from pipekit import Operator
 from geotoolz.qa._src.array import mask_from_bit_field
 
 

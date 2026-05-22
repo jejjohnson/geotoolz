@@ -28,7 +28,7 @@ from pyproj import CRS
 from rasterio.warp import transform_bounds
 from shapely.ops import unary_union
 
-from geotoolz.core import Operator
+from pipekit import Operator
 from geotoolz.geom._src.array import (
     center_offsets,
     feather_weights,

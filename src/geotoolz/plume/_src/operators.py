@@ -26,7 +26,7 @@ from rasterio import features
 from shapely.geometry import LineString, shape
 from shapely.ops import unary_union
 
-from geotoolz.core import Operator
+from pipekit import Operator
 from geotoolz.plume._src.array import (
     ColumnUnit,
     Connectivity,

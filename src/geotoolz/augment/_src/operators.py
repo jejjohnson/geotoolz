@@ -12,7 +12,7 @@ from affine import Affine
 from rasterio.windows import Window
 from scipy.ndimage import gaussian_filter
 
-from geotoolz.core import Operator
+from pipekit import Operator
 
 
 if TYPE_CHECKING:

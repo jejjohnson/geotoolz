@@ -24,7 +24,7 @@ from georeader.reflectance import (
     transform_to_srf,
 )
 
-from geotoolz.core import Operator
+from pipekit import Operator
 from geotoolz.radiometry._src.array import (
     _broadcast_to_band_axis,
     bt_from_radiance,

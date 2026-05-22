@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 
 from geotoolz.cloud._src.array import apply_mask, mask_from_qa_bits, mask_from_scl
-from geotoolz.core import Operator
+from pipekit import Operator
 
 
 if TYPE_CHECKING:

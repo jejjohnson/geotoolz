@@ -15,7 +15,7 @@ from shapely.geometry import box
 
 import geotoolz as gz
 from geotoolz import io
-from geotoolz.core import Identity, Sequential
+from pipekit import Identity, Sequential
 from geotoolz.io._src import operators as io_operators
 
 

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from geotoolz.core import Operator
+from pipekit import Operator
 from geotoolz.viz._src.array import (
     Color,
     blend_rgba,

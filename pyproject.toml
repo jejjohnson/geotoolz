@@ -48,6 +48,11 @@ dependencies = [
     # `georeader.GeoTensor.resize` imports skimage.transform.resize at runtime;
     # the geom Resize / Resample operators expose that path in the base API.
     "scikit-image>=0.25",
+    # The Operator / Sequential / Graph composition layer lives in pipekit
+    # (formerly geotoolz.core). Every per-domain operator subclasses
+    # `pipekit.Operator`; the dependency is now load-bearing rather than
+    # optional. See [tool.uv.sources] below for the dev-time source.
+    "pipekit>=0.0.1",
 ]
 
 [project.optional-dependencies]
@@ -109,6 +114,10 @@ build-backend = "hatchling.build"
 # carries the PyPI-flavoured `geopatcher` requirement from
 # `[project.optional-dependencies] patch = ["geopatcher"]` above.
 geopatcher = { git = "https://github.com/jejjohnson/geopatcher", branch = "claude/geopatcher-extraction-plan-bxDGs" }
+# Dev-time source for the core `pipekit` dependency: pull from the
+# monorepo on GitHub until the first PyPI release lands. Same caveat as
+# above — published wheel metadata uses the PyPI-flavoured pin.
+pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/geotoolz"]
