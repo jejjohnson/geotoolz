@@ -1,4 +1,9 @@
-"""Pure-numpy normalization primitives."""
+"""Normalization primitives.
+
+Mostly pure-numpy; :func:`clahe` additionally delegates to
+:func:`skimage.exposure.equalize_adapthist` for the contrast-limited
+adaptive histogram equalization step.
+"""
 
 from __future__ import annotations
 

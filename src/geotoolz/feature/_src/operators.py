@@ -105,6 +105,13 @@ class PeakLocalMax(Operator):
 
 
 class _BlobBase(Operator):
+    """Common base for ``skimage.feature.blob_*`` wrappers.
+
+    Subclasses set ``_func`` to the underlying skimage callable and
+    override :meth:`_extra_kwargs` / :meth:`_radius_from_sigma` to track
+    each detector's actual signature and radius convention.
+    """
+
     _func: Any
 
     def __init__(
@@ -112,21 +119,27 @@ class _BlobBase(Operator):
         *,
         min_sigma: float = 1.0,
         max_sigma: float = 50.0,
-        num_sigma: int = 10,
         threshold: float = 0.2,
     ) -> None:
         self.min_sigma = min_sigma
         self.max_sigma = max_sigma
-        self.num_sigma = num_sigma
         self.threshold = threshold
+
+    def _extra_kwargs(self) -> dict[str, Any]:
+        """Detector-specific keyword arguments for the underlying call."""
+        return {}
+
+    def _radius_from_sigma(self, sigma: np.ndarray) -> np.ndarray:
+        """Convert returned sigma values to approximate blob radii."""
+        return sigma * np.sqrt(2.0)
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
         blobs = self._func(
             _single_band(np.asarray(gt, dtype=float)),
             min_sigma=self.min_sigma,
             max_sigma=self.max_sigma,
-            num_sigma=self.num_sigma,
             threshold=self.threshold,
+            **self._extra_kwargs(),
         )
         if blobs.size == 0:
             return gpd.GeoDataFrame(
@@ -136,14 +149,13 @@ class _BlobBase(Operator):
             gt,
             blobs[:, 0],
             blobs[:, 1],
-            {"sigma": blobs[:, 2], "radius": blobs[:, 2] * np.sqrt(2.0)},
+            {"sigma": blobs[:, 2], "radius": self._radius_from_sigma(blobs[:, 2])},
         )
 
     def get_config(self) -> dict[str, Any]:
         return {
             "min_sigma": self.min_sigma,
             "max_sigma": self.max_sigma,
-            "num_sigma": self.num_sigma,
             "threshold": self.threshold,
         }
 
@@ -153,17 +165,82 @@ class BlobLoG(_BlobBase):
 
     _func = staticmethod(blob_log)
 
+    def __init__(
+        self,
+        *,
+        min_sigma: float = 1.0,
+        max_sigma: float = 50.0,
+        num_sigma: int = 10,
+        threshold: float = 0.2,
+    ) -> None:
+        super().__init__(
+            min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold
+        )
+        self.num_sigma = num_sigma
+
+    def _extra_kwargs(self) -> dict[str, Any]:
+        return {"num_sigma": self.num_sigma}
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "num_sigma": self.num_sigma}
+
 
 class BlobDOG(_BlobBase):
     """Blob detection via Difference of Gaussian."""
 
     _func = staticmethod(blob_dog)
 
+    def __init__(
+        self,
+        *,
+        min_sigma: float = 1.0,
+        max_sigma: float = 50.0,
+        sigma_ratio: float = 1.6,
+        threshold: float = 0.2,
+    ) -> None:
+        super().__init__(
+            min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold
+        )
+        self.sigma_ratio = sigma_ratio
+
+    def _extra_kwargs(self) -> dict[str, Any]:
+        return {"sigma_ratio": self.sigma_ratio}
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "sigma_ratio": self.sigma_ratio}
+
 
 class BlobDoH(_BlobBase):
-    """Blob detection via Determinant of Hessian."""
+    """Blob detection via Determinant of Hessian.
+
+    Unlike LoG/DoG, ``blob_doh`` already returns ``sigma`` values that
+    approximate blob radii directly, so no ``sqrt(2)`` scaling is
+    applied when populating the ``radius`` column.
+    """
 
     _func = staticmethod(blob_doh)
+
+    def __init__(
+        self,
+        *,
+        min_sigma: float = 1.0,
+        max_sigma: float = 30.0,
+        num_sigma: int = 10,
+        threshold: float = 0.01,
+    ) -> None:
+        super().__init__(
+            min_sigma=min_sigma, max_sigma=max_sigma, threshold=threshold
+        )
+        self.num_sigma = num_sigma
+
+    def _extra_kwargs(self) -> dict[str, Any]:
+        return {"num_sigma": self.num_sigma}
+
+    def _radius_from_sigma(self, sigma: np.ndarray) -> np.ndarray:
+        return np.asarray(sigma, dtype=float)
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "num_sigma": self.num_sigma}
 
 
 class Canny(Operator):

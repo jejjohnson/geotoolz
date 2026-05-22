@@ -55,14 +55,10 @@ if TYPE_CHECKING:
     from shapely.geometry.base import BaseGeometry
 
 
-def _registration_band(values: np.ndarray, band: int | str) -> np.ndarray:
+def _registration_band(values: np.ndarray, band: int) -> np.ndarray:
     arr = np.asarray(values)
     if arr.ndim == 2:
         return arr
-    if isinstance(band, str):
-        raise ValueError(
-            "string band selection is not available for raw GeoTensor arrays"
-        )
     return np.take(arr, int(band), axis=0)
 
 
@@ -192,7 +188,7 @@ class PhaseAlign(Operator):
         *,
         reference: GeoTensor,
         upsample_factor: int = 10,
-        band: int | str = 0,
+        band: int = 0,
         apply: bool = True,
     ) -> None:
         self.reference = reference
@@ -202,9 +198,17 @@ class PhaseAlign(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor | tuple[float, float, float]:
         arr = np.asarray(gt)
+        ref_band = _registration_band(np.asarray(self.reference), self.band)
+        mov_band = _registration_band(arr, self.band)
+        if ref_band.shape != mov_band.shape:
+            raise ValueError(
+                "PhaseAlign requires reference and moving bands of identical "
+                f"spatial shape; got reference={ref_band.shape}, "
+                f"moving={mov_band.shape}."
+            )
         shift, error, _phase = phase_cross_correlation(
-            _registration_band(np.asarray(self.reference), self.band),
-            _registration_band(arr, self.band),
+            ref_band,
+            mov_band,
             upsample_factor=self.upsample_factor,
         )
         shift_y = float(shift[0])
@@ -242,7 +246,7 @@ class OpticalFlowTVL1(Operator):
 
     forbid_in_yaml: ClassVar[bool] = True
 
-    def __init__(self, *, reference: GeoTensor, band: int | str = 0) -> None:
+    def __init__(self, *, reference: GeoTensor, band: int = 0) -> None:
         self.reference = reference
         self.band = band
 

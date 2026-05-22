@@ -258,9 +258,22 @@ def test_get_config_is_json_safe() -> None:
         AsinhScale(),
         PowerScale(),
         ZeroOne(),
+        CLAHE(kernel_size=(4, 4), clip_limit=0.03),
+        CLAHE(kernel_size=None),
     ]
     for op in ops:
         json.dumps(op.get_config())  # must not raise
+
+
+def test_clahe_config_normalises_tuple_kernel_to_list() -> None:
+    """Tuple ``kernel_size`` must serialise as a list for config round-trips."""
+    op = CLAHE(kernel_size=(8, 8))
+    cfg = op.get_config()
+    assert cfg["kernel_size"] == [8, 8]
+    # Round-trip via list input rebuilds the operator equivalently.
+    rebuilt = CLAHE(**cfg)
+    assert rebuilt.kernel_size == (8, 8)
+    assert rebuilt.get_config() == cfg
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +300,7 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
         AsinhScale(a=0.5),
         PowerScale(gamma=0.4),
         ZeroOne(per_band=True),
+        CLAHE(kernel_size=(4, 4), clip_limit=0.03),
     ],
 )
 def test_normalize_hydra_zen_roundtrip(op: object) -> None:

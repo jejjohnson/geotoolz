@@ -120,10 +120,15 @@ class CLAHE(Operator):
     def __init__(
         self,
         *,
-        kernel_size: int | tuple[int, int] | None = None,
+        kernel_size: int | tuple[int, int] | list[int] | None = None,
         clip_limit: float = 0.01,
         nbins: int = 256,
     ) -> None:
+        # Accept list inputs (e.g. round-trips through Hydra/OmegaConf,
+        # which materialise sequences as lists) and normalise to tuple
+        # so :func:`equalize_adapthist` receives its expected type.
+        if isinstance(kernel_size, list):
+            kernel_size = tuple(kernel_size)
         self.kernel_size = kernel_size
         self.clip_limit = clip_limit
         self.nbins = nbins
@@ -138,8 +143,12 @@ class CLAHE(Operator):
         return gt.array_as_geotensor(out)
 
     def get_config(self) -> dict[str, Any]:
+        if isinstance(self.kernel_size, tuple):
+            kernel_size: int | list[int] | None = list(self.kernel_size)
+        else:
+            kernel_size = self.kernel_size
         return {
-            "kernel_size": self.kernel_size,
+            "kernel_size": kernel_size,
             "clip_limit": self.clip_limit,
             "nbins": self.nbins,
         }
