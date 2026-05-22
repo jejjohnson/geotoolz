@@ -90,7 +90,7 @@ def test_shared_csv_loader_caches_package_data() -> None:
 
 
 def test_optional_extra_guard_accepts_available_package() -> None:
-    require_optional_dependency("json", extra="toy")
+    require_optional_dependency("json", extra="toy_sensor")
 
 
 def test_toy_sensor_ndvi_preset_matches_generic_operator() -> None:

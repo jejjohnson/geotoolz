@@ -49,6 +49,17 @@ class Reader(SensorReader):
             if data is None
             else np.asarray(data)
         )
+        if self._data.ndim != 3:
+            raise ValueError(
+                "toy_sensor.Reader expects ``data`` with shape (bands, y, x); "
+                f"got ndim={self._data.ndim} (shape={self._data.shape})."
+            )
+        if self._data.shape[0] != _DEFAULT_NUM_BANDS:
+            raise ValueError(
+                "toy_sensor.Reader has a fixed 4-band layout "
+                "(blue, green, red, nir); "
+                f"got {self._data.shape[0]} bands (shape={self._data.shape})."
+            )
         self._reader_transform = Affine.identity() if transform is None else transform
         self._reader_crs = crs
         self._fill_value_default = fill_value_default
