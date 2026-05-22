@@ -1,0 +1,6 @@
+# Source: synthetic MODIS framework fixture for geotoolz reader tests. License: MIT.
+name,index,wavelength_nm,description
+blue,0,469,Blue reflectance
+green,1,555,Green reflectance
+red,2,645,Red reflectance
+nir,3,858,Near infrared reflectance

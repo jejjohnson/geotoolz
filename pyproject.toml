@@ -70,6 +70,10 @@ hydra = ["hydra-zen>=0.14"]
 # install e.g. `pip install 'geopatcher[patch-full]'` for the full
 # substrate matrix.
 patch = ["geopatcher[pipekit]"]
+# Sensor reader format extras land alongside each real sensor reader. The
+# `toy_sensor` reference reader has no third-party dependencies. Per-sensor
+# extras (modis, viirs, goes, mtg, seviri, himawari, tropomi, s3) are tracked
+# under their respective design issues and added as the real readers land.
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
@@ -123,6 +127,7 @@ pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packa
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/geotoolz"]
+artifacts = ["src/geotoolz/readers/*/data/**"]
 
 [tool.ruff]
 target-version = "py312"
