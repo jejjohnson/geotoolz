@@ -79,7 +79,7 @@ class TestOperatorContract:
             ),
             (GridToSwath(dt_max="45min"), {"dt_max": "45min"}),
             (PointsToRaster(stat="sum"), {"stat": "sum"}),
-            (RasterToPointCloud(k=5), {"k": 5}),
+            (RasterToPointCloud(k=5, method="idw"), {"k": 5}),
             (VectorToRasterAgg(agg="count"), {"agg": "count"}),
             (StackMatched(order=["a", "b"]), {"order": ["a", "b"]}),
             (BlendMatched(method="ivw"), {"method": "ivw"}),
