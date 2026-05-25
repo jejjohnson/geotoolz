@@ -130,6 +130,33 @@ class TestRasterToPoints:
         with pytest.raises(ValueError, match=r"2-D .* or 3-D"):
             RasterToPoints()(raster, [Point(PX_X(0), PX_Y(0))])
 
+    def test_non_axis_aligned_affine_rejected(self) -> None:
+        # Rotated affine (b/d nonzero) silently misinterprets x/y
+        # if we use only a/c and e/f. Reject upfront.
+        rotated = rasterio.Affine(8.66, 5.0, 0, -5.0, 8.66, 0)
+        raster = GeoTensor(
+            values=np.zeros((4, 4), dtype=np.float32),
+            transform=rotated,
+            crs="EPSG:32629",
+            fill_value_default=np.nan,
+        )
+        with pytest.raises(ValueError, match="axis-aligned"):
+            RasterToPoints()(raster, [Point(0.0, 0.0)])
+
+    def test_empty_geometry_list_returns_empty(self) -> None:
+        # Filtering may leave zero points; should be a no-op extraction
+        # (empty result) rather than a TypeError.
+        raster = _gt(np.zeros((4, 4), dtype=np.float32))
+        result = RasterToPoints()(raster, [])
+        assert result.sizes["geometry"] == 0
+
+    def test_non_point_geometry_rejected(self) -> None:
+        from shapely.geometry import LineString
+
+        raster = _gt(np.zeros((4, 4), dtype=np.float32))
+        with pytest.raises(ValueError, match="Point geometries"):
+            RasterToPoints()(raster, [LineString([(0, 0), (1, 1)])])
+
 
 # ---------------------------------------------------------------------------
 # PointsToRaster
@@ -213,6 +240,57 @@ class TestPointsToRaster:
         like = _gt(np.zeros((4, 4), dtype=np.float32))
         with pytest.raises(TypeError, match=r"Unsupported|expects"):
             PointsToRaster()(["not points"], like)  # type: ignore[arg-type]
+
+    def test_non_axis_aligned_like_rejected(self) -> None:
+        gpd = pytest.importorskip("geopandas")
+        rotated = rasterio.Affine(8.66, 5.0, 0, -5.0, 8.66, 0)
+        like = GeoTensor(
+            values=np.zeros((4, 4), dtype=np.float32),
+            transform=rotated,
+            crs="EPSG:32629",
+            fill_value_default=np.nan,
+        )
+        df = gpd.GeoDataFrame({"v": [1.0]}, geometry=[Point(0, 0)], crs="EPSG:32629")
+        with pytest.raises(ValueError, match="axis-aligned"):
+            PointsToRaster(attribute="v")(df, like)
+
+    def test_crs_mismatch_rejected(self) -> None:
+        # GeoDataFrame in EPSG:4326 against an EPSG:32629 raster —
+        # silently wrong without a CRS guard.
+        gpd = pytest.importorskip("geopandas")
+        like = _gt(np.zeros((10, 10), dtype=np.float32))  # EPSG:32629
+        df = gpd.GeoDataFrame(
+            {"v": [1.0]}, geometry=[Point(-9.0, 38.5)], crs="EPSG:4326"
+        )
+        with pytest.raises(ValueError, match="CRS"):
+            PointsToRaster(attribute="v")(df, like)
+
+    def test_west_up_x_affine_handled(self) -> None:
+        # Some non-standard rasters have negative `a` (column 0 at
+        # the east edge). The bin-edge logic must sort and flip the
+        # x axis just like it does for negative `e`.
+        gpd = pytest.importorskip("geopandas")
+        # 10m pixels, but origin shifted east + a negative so cols
+        # decrease: c=500_100, a=-10 → first column edge 500_100,
+        # last 500_000.
+        west_up = rasterio.Affine(-10.0, 0.0, 500_100.0, 0.0, -10.0, 4_000_000.0)
+        like = GeoTensor(
+            values=np.zeros((10, 10), dtype=np.float32),
+            transform=west_up,
+            crs="EPSG:32629",
+            fill_value_default=np.nan,
+        )
+        # A point at col index 0 (east edge) under this affine:
+        # x_center[0] = 500_100 + (-10) * 0.5 = 500_095
+        df = gpd.GeoDataFrame(
+            {"v": [42.0]},
+            geometry=[Point(500_095.0, 3_999_995.0)],
+            crs="EPSG:32629",
+        )
+        result = PointsToRaster(attribute="v")(df, like)
+        arr = np.asarray(result)
+        # row=0 (top), col=0 (east edge after flip-back).
+        assert arr[0, 0] == pytest.approx(42.0)
 
 
 # ---------------------------------------------------------------------------
