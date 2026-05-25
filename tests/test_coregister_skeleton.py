@@ -100,20 +100,15 @@ class TestValidation:
 
 
 class TestCallNotImplemented:
-    """All operator bodies raise NotImplementedError in the scaffolding
-    PR — the Phase 3 PR fills them in."""
+    """Operators still scaffolded — bodies land in later PRs.
 
-    def test_raster_to_raster_like(self) -> None:
-        with pytest.raises(NotImplementedError):
-            RasterToRasterLike()(object(), object())  # type: ignore[arg-type]
+    `RasterToRasterLike` and `StackMatched` are implemented; their
+    behaviour lives in ``tests/test_coregister_rtrl_stack.py``.
+    """
 
     def test_swath_to_grid(self) -> None:
         with pytest.raises(NotImplementedError):
             SwathToGrid(target_crs="EPSG:32629", target_res=(500.0, 500.0))(object())  # type: ignore[arg-type]
-
-    def test_stack_matched(self) -> None:
-        with pytest.raises(NotImplementedError):
-            StackMatched()([object()])  # type: ignore[list-item]
 
     def test_blend_matched(self) -> None:
         with pytest.raises(NotImplementedError):
