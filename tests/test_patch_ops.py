@@ -30,9 +30,11 @@ from georeader.geotensor import GeoTensor
 from pipekit import Lambda
 
 from geotoolz import Sequential
+from geotoolz.geom._src import array as geom_array
 from geotoolz.patch_ops import (
     ApplyToChips,
     GridSampler,
+    SpatialTriangular,
     Stitch,
 )
 
@@ -68,6 +70,28 @@ class TestGridSampler:
         assert isinstance(patches, list)
         assert all(isinstance(p, Patch) for p in patches)
         assert len(patches) == 4  # 2x2 tiles
+
+
+def test_spatial_triangular_matches_geom_feather_kernel() -> None:
+    weights = SpatialTriangular(width=2).weights(SpatialRectangular(size=(5, 7)))
+    np.testing.assert_array_equal(weights, geom_array.feather_weights((5, 7), width=2))
+    assert weights[0, 0] == pytest.approx(0.25)
+    assert weights[2, 3] == pytest.approx(1.0)
+    np.testing.assert_array_equal(weights, np.flip(weights, axis=0))
+    np.testing.assert_array_equal(weights, np.flip(weights, axis=1))
+
+    small = SpatialTriangular(width=2).weights(SpatialRectangular(size=(3, 3)))
+    np.testing.assert_array_equal(
+        small,
+        np.array(
+            [
+                [0.25, 0.5, 0.25],
+                [0.5, 1.0, 0.5],
+                [0.25, 0.5, 0.25],
+            ],
+            dtype=np.float32,
+        ),
+    )
 
 
 class TestApplyToChips:

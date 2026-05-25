@@ -35,6 +35,7 @@ from skimage.registration import (
     phase_cross_correlation,
 )
 
+from geotoolz._src.blending import normalize_overlap_add, overlap_add
 from geotoolz.geom._src.array import (
     center_offsets,
     feather_weights,
@@ -622,7 +623,7 @@ class Stitch(Operator):
     Supported blend modes:
 
     - ``"average"`` — unweighted mean of overlapping pixels.
-    - ``"feather"`` — overlap-add with cosine-edge weights, kernel from
+    - ``"feather"`` — overlap-add with triangular edge weights, kernel from
       :func:`geotoolz.geom._src.array.feather_weights`.
     - ``"first"`` — first tile wins on overlap.
     - ``"max"`` — element-wise maximum across overlapping tiles.
@@ -711,9 +712,7 @@ class Stitch(Operator):
             values = np.zeros(out_shape, dtype=dtype)
             weights = np.zeros(shape, dtype=np.float32)
             self._stitch_average(tiles, transform, values, weights, fill)
-            valid = weights > 0
-            values[..., valid] /= weights[valid]
-            values[..., ~valid] = fill
+            normalize_overlap_add(values, weights, fill)
         return GeoTensor(
             values,
             transform,
@@ -758,17 +757,15 @@ class Stitch(Operator):
             out_slices, tile_slices = target_slices(
                 tile.transform, tile.shape[-2:], transform, weights.shape
             )
-            mask_tile = valid_pixel_mask(arr, fill)[tile_slices]
+            mask_tile = valid_pixel_mask(arr, fill)
             kernel = (
                 feather_weights(tile.shape[-2:], self.feather_width)
                 if self.blend == "feather"
                 else np.ones(tile.shape[-2:], dtype=np.float32)
-            )[tile_slices]
-            weight = kernel * mask_tile.astype(np.float32)
-            values[..., out_slices[0], out_slices[1]] += (
-                arr[..., tile_slices[0], tile_slices[1]] * weight
             )
-            weights[out_slices] += weight
+            overlap_add(
+                values, weights, arr, out_slices, tile_slices, kernel, mask_tile
+            )
 
     def _stitch_first(
         self,
