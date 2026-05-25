@@ -452,33 +452,39 @@ Public re-export at `geopatcher.matched`.
 ```python
 # geopatcher/_src/matched/field.py
 
-@dataclass
+@dataclass(eq=False)
 class MatchedField:
     """N co-registered Fields presented as one Field.
 
     Satisfies the `Field` Protocol via the primary (anchor space, CRS, domain).
-    On select(), delegates to each secondary and pipes through its coreg operator.
+    On select(), delegates to each secondary and pipes through its coreg callable.
     """
     primary: Field
     secondaries: Mapping[str, Field]
-    coreg: Mapping[str, Operator]   # any pipekit.Operator; typically from geotoolz.geom.coregister
+    coreg: Mapping[str, Callable]   # any Callable; pipekit.Operator (e.g. from
+                                    # geotoolz.geom.coregister) is the recommended choice
+                                    # — see ADR-003 for why the type is the broader Callable.
     valid_mask: bool = True         # emit per-source nodata masks
 
     @property
     def domain(self) -> Domain:
         return self.primary.domain
 
-    def select(self, anchor: Anchor, geometry: Geometry) -> MatchedPatch:
-        primary_patch = self.primary.select(anchor, geometry)
+    def select(self, indexer: Any) -> MatchedPatch:
+        # `Field.select` takes a single `indexer` (the shape is decided by
+        # the primary's Domain — Window for raster, dict[str, slice] for
+        # grid, etc.). MatchedField forwards the same indexer to every
+        # member.
+        primary_patch = self.primary.select(indexer)
         members: dict[str, Patch] = {"primary": primary_patch}
         masks: dict[str, np.ndarray] = {}
         for name, sec in self.secondaries.items():
-            raw = sec.select(anchor, geometry)
+            raw = sec.select(indexer)
             aligned = self.coreg[name](raw, primary_patch)  # any geotoolz op
             members[name] = aligned
             if self.valid_mask:
                 masks[name] = _compute_mask(aligned)
-        return MatchedPatch(anchor=anchor, members=members, valid_mask=masks)
+        return MatchedPatch(anchor=primary_patch.anchor, members=members, valid_mask=masks)
 ```
 
 Three properties this design preserves:
@@ -652,7 +658,7 @@ A suggested four-phase rollout. Each phase ships independently and is useful on 
 | 3 | STAC adapter: one generic + named factory helpers, or distinct subclasses per provider? | **Generic `STACSource(endpoint=...)` with class-method factories** |
 | 4 | Auth surface: defer to libraries, or add `geocatalog auth status` aggregator? | **Defer**; add aggregator if users ask |
 | 5 | `MatchedPatch` subclasses `Patch` or sibling carrier? | **Sibling** (avoid LSP issues) |
-| 6 | `MatchedField.coreg` typed as `dict[str, Operator]` (pipekit) or untyped `Callable`? | **`Operator`**; preserves YAML round-trip |
+| 6 | `MatchedField.coreg` typed as `dict[str, Operator]` (pipekit) or untyped `Callable`? | **Resolved (ADR-003):** typed as `Mapping[str, Callable]`; `pipekit.Operator` is the recommended value but not required, so geopatcher's core stays framework-free. |
 | 7 | Should the matchup engine emit a *new catalog* or in-place new rows in `items.parquet`? | **New rows in `matchups.parquet`**; `items` stays atoms |
 | 8 | Cache scope for staging: per-catalog, per-user, or per-host? | **Per-user** (`~/.cache/geocatalog/`), overridable by env var |
 | 9 | Do we want `BlendMatched(method="ivw")` in Phase 3 or defer (uncertainty maps not always present)? | **Defer**; ship `StackMatched` first |
