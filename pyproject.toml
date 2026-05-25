@@ -72,6 +72,11 @@ hydra = ["hydra-zen>=0.14"]
 # install e.g. `pip install 'geopatcher[patch-full]'` for the full
 # substrate matrix.
 patch = ["geopatcher[pipekit]"]
+# Vector-cube backend (`xvec`) needed by the
+# `geom.coregister.RasterToPoints` / `PointsToRaster` operators that
+# extract raster values onto point geometries (AERONET stations, buoys,
+# in-situ matchups). See `docs/design/query-matchup.md` §5.2.
+vector-cube = ["xvec>=0.4"]
 # Sensor reader format extras land alongside each real sensor reader. The
 # `toy_sensor` reference reader has no third-party dependencies. Per-sensor
 # extras (modis, viirs, goes, mtg, seviri, himawari, tropomi, s3) are tracked

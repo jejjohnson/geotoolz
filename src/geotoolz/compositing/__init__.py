@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from geotoolz.compositing._src.matched import BlendMatched, StackMatched
 from geotoolz.compositing._src.operators import (
     BAPComposite,
     CloudFreeComposite,
@@ -13,8 +14,10 @@ from geotoolz.compositing._src.operators import (
 
 __all__ = [
     "BAPComposite",
+    "BlendMatched",
     "CloudFreeComposite",
     "MaxNDVIComposite",
     "MedianComposite",
     "MinCloudComposite",
+    "StackMatched",
 ]
