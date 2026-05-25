@@ -581,7 +581,7 @@ class RasterToPointCloud(Operator):
 
     def __call__(self, raster: GeoTensor, cloud: Any) -> Any:
         _require_axis_aligned(raster.transform, "RasterToPointCloud")
-        xy = _cloud_to_xy_array(cloud)
+        xy = _cloud_to_xy_array(cloud, src_crs=raster.crs)
         if xy.size == 0:
             # Empty cloud → empty result with the right last-axis shape.
             arr = np.asarray(raster)
@@ -602,12 +602,13 @@ class RasterToPointCloud(Operator):
         )
 
 
-def _cloud_to_xy_array(cloud: Any) -> np.ndarray:
+def _cloud_to_xy_array(cloud: Any, *, src_crs: Any = None) -> np.ndarray:
     """Normalize the cloud input to an ``(N, 2)`` XY float array.
 
     Accepts:
     * numpy array of shape ``(N, 2)`` or ``(N, 3)`` (Z ignored)
-    * geopandas GeoDataFrame / GeoSeries of Points
+    * geopandas GeoDataFrame / GeoSeries of Points (CRS-checked
+      against ``src_crs`` when both are set)
     * any iterable of shapely Points
     """
     if isinstance(cloud, np.ndarray):
@@ -618,9 +619,42 @@ def _cloud_to_xy_array(cloud: Any) -> np.ndarray:
             )
         return cloud[:, :2].astype(np.float64, copy=False)
     if hasattr(cloud, "geometry"):
+        # GeoSeries / GeoDataFrame. Validate CRS against the raster
+        # if both sides carry one — silent mismatch would sample
+        # the wrong locations.
+        cloud_crs = getattr(cloud, "crs", None)
+        if cloud_crs is not None and src_crs is not None:
+            import pyproj as _pp
+
+            src = _pp.CRS.from_user_input(cloud_crs)
+            dst = _pp.CRS.from_user_input(src_crs)
+            if src != dst:
+                raise ValueError(
+                    "RasterToPointCloud: cloud CRS "
+                    f"{src.to_string()!r} differs from raster CRS "
+                    f"{dst.to_string()!r}. Reproject the cloud first "
+                    "(e.g. `gdf.to_crs(raster.crs)`)."
+                )
         geoms = list(cloud.geometry)
     elif hasattr(cloud, "__iter__"):
-        geoms = list(cloud)
+        # Generic iterable. We're tolerant of empty lists but must
+        # reject non-geometry iterables (e.g. someone tried to pass
+        # `(xy, values)` here — that's PointCloudToRaster's input
+        # shape, not RasterToPointCloud's).
+        try:
+            geoms = list(cloud)
+        except TypeError as exc:
+            raise TypeError(
+                f"Unsupported cloud input: {type(cloud).__name__}. "
+                "Pass an (N, 2) ndarray, a GeoSeries / GeoDataFrame of Points, "
+                "or a sequence of shapely Points."
+            ) from exc
+        if geoms and not hasattr(geoms[0], "geom_type"):
+            raise TypeError(
+                f"Iterable cloud input must contain shapely geometries; got "
+                f"{type(geoms[0]).__name__}. (If you meant to pass a "
+                "(xy, values) tuple, that's the PointCloudToRaster API.)"
+            )
     else:
         raise TypeError(
             f"Unsupported cloud input: {type(cloud).__name__}. "
@@ -677,10 +711,15 @@ def _raster_to_cloud_kdtree(
     pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])
     tree = KDTree(pixel_xy)
 
-    distances, indices = tree.query(xy, k=k)
+    # Clamp k to the number of available pixels — querying KDTree
+    # with k > N returns placeholder out-of-bounds indices that
+    # would crash the subsequent `flat[indices]` lookup. Mirrors
+    # the same guard `_point_cloud_idw` uses on the other side.
+    eff_k = min(k, pixel_xy.shape[0])
+    distances, indices = tree.query(xy, k=eff_k)
     # `KDTree.query` returns scalars / 1D arrays for k=1; promote
     # to (N, 1) so the downstream IDW code path is uniform.
-    if k == 1:
+    if eff_k == 1:
         distances = distances[:, None]
         indices = indices[:, None]
 
@@ -694,7 +733,7 @@ def _raster_to_cloud_kdtree(
         flat = arr.reshape(c, -1)
         gathered = flat[:, indices]  # (C, N, k)
 
-    if method in {"nearest"} or (method == "idw" and k == 1):
+    if method in {"nearest"} or (method == "idw" and eff_k == 1):
         if arr.ndim == 2:
             result = gathered[:, 0].astype(np.float64)
         else:
@@ -885,6 +924,10 @@ def _point_cloud_idw(
     from scipy.spatial import KDTree
 
     h, w = like.shape[-2], like.shape[-1]
+    # Empty cloud → all-NaN raster on the `like` grid (well-defined
+    # rather than KDTree crash on zero-row input).
+    if xy.shape[0] == 0:
+        return like.array_as_geotensor(np.full((h, w), np.nan, dtype=np.float64))
     x_centers, y_centers = _pixel_center_coords(like.transform, like.shape)
     yy, xx = np.meshgrid(y_centers, x_centers, indexing="ij")
     pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])  # (H*W, 2)
@@ -930,9 +973,9 @@ class VectorToRasterAgg(Operator):
             ``mean / sum / max / min / first / last``; ignored for
             ``count``.
         all_touched: If ``True``, every pixel whose envelope is
-            touched by the geometry counts (rasterio default). If
-            ``False`` (default), only pixels whose centre falls
-            inside.
+            touched by the geometry counts. If ``False`` (the
+            rasterio default — and ours), only pixels whose centre
+            falls inside the geometry contribute.
     """
 
     def __init__(

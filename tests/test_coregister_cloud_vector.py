@@ -67,8 +67,11 @@ class TestRasterToPointCloudConstruction:
             RasterToPointCloud(k=3, method="nearest")
         with pytest.raises(ValueError, match=r"only supports k=1"):
             RasterToPointCloud(k=3, method="bilinear")
-        # IDW with k=1 is allowed (degenerate IDW; equals nearest).
+        # IDW with k>1 is the documented use case (the whole point of
+        # supporting k>1 at all); also accept k=1 (degenerate IDW that
+        # equals nearest).
         RasterToPointCloud(k=3, method="idw")
+        RasterToPointCloud(k=1, method="idw")
 
 
 class TestRasterToPointCloudNearest:
@@ -159,6 +162,33 @@ class TestRasterToPointCloudInputForms:
         with pytest.raises(TypeError, match="Unsupported cloud"):
             RasterToPointCloud()(raster, 42)  # type: ignore[arg-type]
 
+    def test_tuple_input_clear_error_message(self) -> None:
+        # (xy, values) is PointCloudToRaster's input form, not ours.
+        # Surface a clear error instead of "requires Point geometries"
+        # which is what the generic iterable branch would emit.
+        raster = _gt(np.zeros((4, 4), dtype=np.float32))
+        with pytest.raises(TypeError, match="PointCloudToRaster"):
+            RasterToPointCloud()(raster, (np.array([[0, 0]]), np.array([1.0])))
+
+    def test_geoseries_crs_mismatch_rejected(self) -> None:
+        # Silent CRS mismatch would sample the wrong pixels;
+        # validate when both sides have a CRS set.
+        gpd = pytest.importorskip("geopandas")
+        raster = _gt(np.zeros((4, 4), dtype=np.float32))  # EPSG:32629
+        gs = gpd.GeoSeries([Point(-9, 38)], crs="EPSG:4326")
+        with pytest.raises(ValueError, match="CRS"):
+            RasterToPointCloud()(raster, gs)
+
+    def test_idw_k_clamped_to_pixel_count(self) -> None:
+        # 2x2 raster has only 4 pixels; ask for k=10. Without the
+        # clamp this crashes inside KDTree's fancy-index lookup.
+        raster = _gt(np.full((2, 2), 5.0, dtype=np.float32))
+        cloud = np.array([[PX_X(0), PX_Y(0)]])
+        out = RasterToPointCloud(k=10, method="idw")(raster, cloud)
+        # IDW on a constant raster returns the constant regardless
+        # of how many neighbours we ask for.
+        np.testing.assert_allclose(out, [5.0], rtol=1e-9)
+
 
 # ---------------------------------------------------------------------------
 # PointCloudToRaster
@@ -236,6 +266,17 @@ class TestPointCloudToRasterIDW:
         result = PointCloudToRaster(method="idw", k=1)((xy, values), like)
         arr = np.asarray(result)
         np.testing.assert_allclose(arr, 42.0, rtol=1e-9)
+
+    def test_idw_empty_cloud_returns_all_nan(self) -> None:
+        # Empty cloud → all-NaN raster on the `like` grid.
+        # Without the guard, KDTree(empty) / query(k=0) would crash.
+        like = _gt(np.zeros((4, 4), dtype=np.float32))
+        xy = np.zeros((0, 2))
+        values = np.zeros((0,))
+        result = PointCloudToRaster(method="idw", k=4)((xy, values), like)
+        arr = np.asarray(result)
+        assert arr.shape == (4, 4)
+        assert np.all(np.isnan(arr))
 
     def test_idw_with_max_radius_masks_distant_pixels(self) -> None:
         like = _gt(np.zeros((10, 10), dtype=np.float32))
