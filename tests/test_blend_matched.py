@@ -214,6 +214,42 @@ class TestInverseVarianceWeighting:
         with pytest.raises(ValueError, match=r"variance arrays"):
             BlendMatched(method="ivw")([a, b], variances=[np.ones((4, 4))])
 
+    def test_variance_shape_mismatch_rejected(self) -> None:
+        a = _gt(np.zeros((4, 4), dtype=np.float32))
+        b = _gt(np.zeros((4, 4), dtype=np.float32))
+        with pytest.raises(ValueError, match=r"variance 1 has shape"):
+            BlendMatched(method="ivw")(
+                [a, b], variances=[np.ones((4, 4)), np.ones((3, 3))]
+            )
+
+    def test_non_positive_variance_rejected(self) -> None:
+        a = _gt(np.zeros((4, 4), dtype=np.float32))
+        b = _gt(np.zeros((4, 4), dtype=np.float32))
+        bad = np.ones((4, 4))
+        bad[0, 0] = 0.0
+        with pytest.raises(ValueError, match=r"non-positive"):
+            BlendMatched(method="ivw")([a, b], variances=[np.ones((4, 4)), bad])
+
+    def test_non_finite_variance_rejected(self) -> None:
+        a = _gt(np.zeros((4, 4), dtype=np.float32))
+        b = _gt(np.zeros((4, 4), dtype=np.float32))
+        bad = np.ones((4, 4))
+        bad[0, 0] = np.nan
+        with pytest.raises(ValueError, match=r"non-finite"):
+            BlendMatched(method="ivw")([a, b], variances=[np.ones((4, 4)), bad])
+
+    def test_variances_rejected_for_non_ivw_method(self) -> None:
+        a = _gt(np.zeros((4, 4), dtype=np.float32))
+        b = _gt(np.zeros((4, 4), dtype=np.float32))
+        with pytest.raises(ValueError, match=r"only accepted when method='ivw'"):
+            BlendMatched(method="mean")(
+                [a, b], variances=[np.ones((4, 4)), np.ones((4, 4))]
+            )
+        with pytest.raises(ValueError, match=r"only accepted when method='ivw'"):
+            BlendMatched(method="weighted_mean", weights=[1.0, 1.0])(
+                [a, b], variances=[np.ones((4, 4)), np.ones((4, 4))]
+            )
+
 
 # ---------------------------------------------------------------------------
 # NaN policy

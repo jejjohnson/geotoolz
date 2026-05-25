@@ -181,11 +181,18 @@ class BlendMatched(Operator):
     cross-source band concatenation; `BlendMatched` is the per-pixel
     averaging counterpart).
 
+    When ``tensors`` is a ``Mapping``, the per-source order used by
+    ``weighted_mean`` / ``ivw`` follows the mapping's iteration order
+    (insertion order on dicts). Likewise, ``weights`` and ``variances``
+    are zipped positionally against ``tensors`` — pass an ``OrderedDict``
+    or a plain ``list``/``tuple`` if you need a stable, explicit pairing.
+
     Args:
         method: One of ``"mean"`` / ``"weighted_mean"`` / ``"ivw"``.
-        weights: Per-source scalar weights for ``"weighted_mean"``;
-            ignored otherwise. Length must equal the number of input
-            tensors at call time.
+        weights: Per-source scalar weights. Required when
+            ``method="weighted_mean"``; must be ``None`` for the other
+            methods (passing weights with another method raises).
+            Length must equal the number of input tensors at call time.
         nan_policy: ``"ignore"`` (default) or ``"propagate"``.
     """
 
@@ -230,6 +237,11 @@ class BlendMatched(Operator):
         tensors: Sequence[GeoTensor] | Mapping[str, GeoTensor],
         variances: Sequence[np.ndarray] | None = None,
     ) -> GeoTensor:
+        if variances is not None and self.method != "ivw":
+            raise ValueError(
+                "BlendMatched: `variances` is only accepted when "
+                f"method='ivw'; got method={self.method!r}."
+            )
         seq, _names = _normalize_to_sequence(tensors, None)
         if not seq:
             raise ValueError("BlendMatched requires at least one input tensor.")
@@ -272,14 +284,35 @@ class BlendMatched(Operator):
                     f"BlendMatched(method='ivw'): got {len(var_list)} "
                     f"variance arrays for {len(seq)} input tensors."
                 )
-            # Each variance can be either a full-shape array or a
-            # spatial-only array (H, W) that broadcasts to (C, H, W).
-            # Clamp to a small epsilon to avoid /0.
-            var_stack = np.stack(
-                [np.broadcast_to(np.asarray(v), base.shape) for v in var_list],
-                axis=0,
-            ).astype(np.float64)
-            w = 1.0 / np.maximum(var_stack, 1e-12)
+            # Each variance must be either a full-shape array matching
+            # the data or a spatial-only (H, W) array that broadcasts
+            # against the band axis. Validate shape explicitly so a
+            # silent broadcast can't hide a mis-shaped variance.
+            var_arrays: list[np.ndarray] = []
+            spatial_shape = base.shape[-2:]
+            for i, v in enumerate(var_list):
+                arr = np.asarray(v, dtype=np.float64)
+                if arr.shape != base.shape and arr.shape != spatial_shape:
+                    raise ValueError(
+                        f"BlendMatched(method='ivw'): variance {i} has "
+                        f"shape {arr.shape}; expected {base.shape} "
+                        f"(full) or {spatial_shape} (spatial-only)."
+                    )
+                if not np.all(np.isfinite(arr)):
+                    raise ValueError(
+                        f"BlendMatched(method='ivw'): variance {i} "
+                        "contains non-finite values (NaN/Inf); "
+                        "IVW weights are undefined."
+                    )
+                if np.any(arr <= 0):
+                    raise ValueError(
+                        f"BlendMatched(method='ivw'): variance {i} "
+                        "contains non-positive values; variances must "
+                        "be strictly positive."
+                    )
+                var_arrays.append(np.broadcast_to(arr, base.shape))
+            var_stack = np.stack(var_arrays, axis=0)
+            w = 1.0 / var_stack
         elif self.method == "weighted_mean":
             assert self.weights is not None  # guarded in __init__
             if len(self.weights) != len(seq):
@@ -288,16 +321,12 @@ class BlendMatched(Operator):
                     f"weights for {len(seq)} input tensors."
                 )
             w_arr = np.asarray(self.weights, dtype=np.float64)
-            # Broadcast (N,) → (N, 1, ..., 1) so the per-source scalar
-            # weight multiplies through every spatial / band pixel.
+            # Keep weights as (N, 1, ..., 1) so they broadcast against
+            # `stack` without materialising a full (N, *spatial) array.
             w_shape = (len(seq),) + (1,) * (stack.ndim - 1)
-            w = (
-                np.broadcast_to(w_arr.reshape(w_shape), stack.shape)
-                .astype(np.float64)
-                .copy()
-            )
+            w = w_arr.reshape(w_shape)
         else:  # "mean"
-            w = np.ones_like(stack, dtype=np.float64)
+            w = np.ones((len(seq),) + (1,) * (stack.ndim - 1), dtype=np.float64)
 
         if self.nan_policy == "propagate":
             # Any NaN in any source ↦ NaN output at that pixel.
