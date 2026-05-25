@@ -54,8 +54,8 @@ class TestRasterToRasterLike:
 
     def test_same_grid_passes_through_unchanged(self) -> None:
         # When src and like share grid + CRS, ReprojectLike (which
-        # this op delegates to) should leave the values numerically
-        # equivalent up to numerical noise.
+        # this op delegates to) is a no-op warp — the pixel values
+        # come through bit-equal because no resampling is applied.
         src = _gt(np.arange(64, dtype=np.float32).reshape(8, 8))
         like = _gt(np.zeros((8, 8), dtype=np.float32))
         out = RasterToRasterLike()(src, like)
@@ -106,10 +106,10 @@ class TestRasterToRasterLike:
 
 class TestStackMatchedBasics:
     def test_is_operator_with_config(self) -> None:
-        op = StackMatched(order=["modis", "s2"], fill=-9999.0)
+        op = StackMatched(order=["modis", "s2"])
         assert isinstance(op, Operator)
         cfg = op.get_config()
-        assert cfg == {"order": ["modis", "s2"], "fill": -9999.0}
+        assert cfg == {"order": ["modis", "s2"]}
 
     def test_namespace_export(self) -> None:
         assert gz.compositing.StackMatched is StackMatched
@@ -191,17 +191,30 @@ class TestStackMatchedMapping:
     def test_order_with_missing_key_raises(self) -> None:
         a = _gt(np.zeros((4, 4), dtype=np.float32))
         # `order` references "landsat" but the dict only has "modis".
-        with pytest.raises(KeyError, match="not in the input"):
+        with pytest.raises(KeyError, match="missing from input"):
             StackMatched(order=["modis", "landsat"])({"modis": a})
 
-    def test_order_subset_of_keys_drops_extras(self) -> None:
-        # If `order` is a subset of the dict's keys, only the named
-        # sources land in the stack — useful for "pick these two of
-        # five matched sources" workflows.
+    def test_order_subset_of_keys_raises(self) -> None:
+        # Strict by design: `order` must cover every input key. A
+        # silent drop would let a new source added to
+        # `MatchedPatch.members` disappear from the fused stack
+        # without any error. Slice the dict beforehand if you really
+        # want a subset.
         a = _gt(np.full((4, 4), 1.0, dtype=np.float32))
         b = _gt(np.full((4, 4), 2.0, dtype=np.float32))
         c = _gt(np.full((4, 4), 3.0, dtype=np.float32))
-        out = StackMatched(order=["a", "c"])({"a": a, "b": b, "c": c})
+        with pytest.raises(KeyError, match="extra in input but not in order"):
+            StackMatched(order=["a", "c"])({"a": a, "b": b, "c": c})
+
+    def test_pre_sliced_dict_works(self) -> None:
+        # The documented workaround: slice the dict yourself if you
+        # want only a subset of matched sources in the stack.
+        a = _gt(np.full((4, 4), 1.0, dtype=np.float32))
+        b = _gt(np.full((4, 4), 2.0, dtype=np.float32))
+        c = _gt(np.full((4, 4), 3.0, dtype=np.float32))
+        members = {"a": a, "b": b, "c": c}
+        subset = {k: members[k] for k in ("a", "c")}
+        out = StackMatched(order=["a", "c"])(subset)
         assert out.shape == (2, 4, 4)
         np.testing.assert_array_equal(np.asarray(out)[0], 1.0)
         np.testing.assert_array_equal(np.asarray(out)[1], 3.0)

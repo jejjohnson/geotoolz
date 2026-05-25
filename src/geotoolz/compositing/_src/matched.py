@@ -39,16 +39,32 @@ def _normalize_to_sequence(
 ) -> tuple[list[GeoTensor], list[str] | None]:
     """Accept either a Sequence or a Mapping; return a parallel sequence + names.
 
-    When the input is a Mapping, ``order`` (if given) decides the
-    output band order; otherwise we use the dict's insertion order.
+    When the input is a Mapping, ``order`` (if given) **must cover
+    every key** — missing names raise, extra names raise. This is
+    strict by design: silently dropping a key that's present in the
+    input would mask configuration drift (e.g. a new source added to
+    `MatchedPatch.members` without updating the stack config). Users
+    who genuinely want a subset should slice the input dict before
+    passing it in.
+
     A sequence input ignores ``order`` (no key→pos mapping to apply).
     """
     if isinstance(tensors, Mapping):
         if order is not None:
-            missing = [k for k in order if k not in tensors]
-            if missing:
+            order_set = set(order)
+            input_set = set(tensors)
+            missing = sorted(order_set - input_set)
+            extra = sorted(input_set - order_set)
+            if missing or extra:
+                msgs = []
+                if missing:
+                    msgs.append(f"missing from input: {missing!r}")
+                if extra:
+                    msgs.append(f"extra in input but not in order: {extra!r}")
                 raise KeyError(
-                    f"StackMatched.order names sources not in the input: {missing!r}"
+                    "StackMatched.order must cover every input key exactly; "
+                    + "; ".join(msgs)
+                    + ". Slice the input dict first if you want a subset."
                 )
             ordered = [tensors[k] for k in order]
             return ordered, list(order)
@@ -78,16 +94,11 @@ class StackMatched(Operator):
 
     Args:
         order: When the input is a Mapping, this list fixes the
-            stacking order (and the names land in `band_names`). Must
-            cover every key of the input mapping. Ignored for
-            Sequence inputs.
-        fill: Reserved for v2 (NaN-padding on grid mismatch). The
-            current implementation requires inputs to already share
-            a grid and raises if not.
-        band_names: When set, attached to the output GeoTensor's
-            metadata so downstream operators can find specific bands
-            by name. If ``order`` is supplied, the default is
-            ``["{name}_{i}" for name in order for i in band_count]``.
+            stacking order. Must cover every key of the input
+            mapping **exactly** — extra or missing names raise. (If
+            you want a subset, slice the input dict before passing
+            it in; this avoids silently dropping a key the user
+            forgot to update.) Ignored for Sequence inputs.
 
     Examples:
         >>> import geotoolz as gz
@@ -95,19 +106,25 @@ class StackMatched(Operator):
         >>> fused = stack({"modis": modis_chip, "s2": s2_chip_aligned})
         >>> fused.shape  # (modis_bands + s2_bands, H, W)
         (5, 256, 256)
+
+    Notes:
+        Band-name metadata propagation and NaN-fill padding on grid
+        mismatch are tracked for a future revision; today the
+        operator requires strict grid equality and emits an unnamed
+        band stack. Pre-coregister with
+        ``geotoolz.geom.coregister.RasterToRasterLike`` if the
+        inputs aren't already on the same grid.
     """
 
     def __init__(
         self,
         *,
         order: list[str] | None = None,
-        fill: float = float("nan"),
     ) -> None:
         self.order = list(order) if order is not None else None
-        self.fill = fill
 
     def get_config(self) -> dict[str, Any]:
-        return {"order": self.order, "fill": self.fill}
+        return {"order": self.order}
 
     def __call__(
         self,

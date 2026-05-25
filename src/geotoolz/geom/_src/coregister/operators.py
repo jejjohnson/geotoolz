@@ -28,19 +28,19 @@ if TYPE_CHECKING:
 
 
 class RasterToRasterLike(Operator):
-    """Reproject + resample one raster onto another's grid.
+    """Align one raster onto another's CRS + grid in a single op.
 
-    Convenience that bundles ``Reproject + ResampleLike`` into a
-    single matchup-shaped op: two inputs at call time, one aligned
-    output out. Useful as a default in ``MatchedField.coreg`` for
-    raster↔raster pairs where the secondary needs to be coregistered
-    to the primary's grid before stacking.
+    Thin binary wrapper around `geom.ReprojectLike` — the underlying
+    rasterio warp handles both CRS reprojection and target-grid
+    resampling in one pass. The wrapper exists because
+    `ReprojectLike` pins ``like`` at construction (unary call),
+    whereas matchup coregistration needs both inputs at call time
+    to match the ``(secondary_raw, primary_patch) -> aligned_secondary``
+    shape of `MatchedField.coreg`.
 
-    Distinct from `geom.ReprojectLike`, which pins ``like`` at
-    construction (unary call). `RasterToRasterLike` takes both
-    inputs at call time, matching the
-    ``(secondary_raw, primary_patch) -> aligned_secondary`` shape
-    of `MatchedField.coreg`.
+    Useful as a default in ``MatchedField.coreg`` for raster↔raster
+    pairs where the secondary needs to be coregistered to the
+    primary's grid before stacking.
 
     Args:
         resampling: One of ``"nearest"``, ``"bilinear"``, ``"cubic"``,
@@ -62,9 +62,9 @@ class RasterToRasterLike(Operator):
 
     def __call__(self, src: GeoTensor, like: GeoTensor) -> GeoTensor:
         # Delegate to the existing single-input `ReprojectLike` so
-        # we share the warp / resample code path. The price is one
+        # we share the rasterio warp code path. The price is one
         # extra Python-level Operator construction per call; the
-        # underlying rasterio warp dominates, so it's negligible.
+        # warp itself dominates, so it's negligible.
         return ReprojectLike(like=like, resampling=self.resampling)(src)
 
 

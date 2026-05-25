@@ -62,7 +62,7 @@ class TestOperatorContract:
             RasterToPointCloud(k=3, max_radius=50.0, method="idw"),
             PointCloudToRaster(method="idw", power=1.5),
             VectorToRasterAgg(agg="majority", attribute="class_id"),
-            StackMatched(order=["modis", "s2"], fill=-9999.0),
+            StackMatched(order=["modis", "s2"]),
             BlendMatched(method="weighted_mean", weights=[1.0, 2.0]),
         ],
     )
@@ -81,7 +81,7 @@ class TestOperatorContract:
             (PointsToRaster(stat="sum"), {"stat": "sum"}),
             (RasterToPointCloud(k=5), {"k": 5}),
             (VectorToRasterAgg(agg="count"), {"agg": "count"}),
-            (StackMatched(fill=-1.0), {"fill": -1.0}),
+            (StackMatched(order=["a", "b"]), {"order": ["a", "b"]}),
             (BlendMatched(method="ivw"), {"method": "ivw"}),
         ],
     )
