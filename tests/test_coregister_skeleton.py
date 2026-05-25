@@ -62,7 +62,7 @@ class TestOperatorContract:
             RasterToPointCloud(k=3, max_radius=50.0, method="idw"),
             PointCloudToRaster(method="idw", power=1.5),
             VectorToRasterAgg(agg="majority", attribute="class_id"),
-            StackMatched(order=["modis", "s2"], fill=-9999.0),
+            StackMatched(order=["modis", "s2"]),
             BlendMatched(method="weighted_mean", weights=[1.0, 2.0]),
         ],
     )
@@ -81,7 +81,7 @@ class TestOperatorContract:
             (PointsToRaster(stat="sum"), {"stat": "sum"}),
             (RasterToPointCloud(k=5), {"k": 5}),
             (VectorToRasterAgg(agg="count"), {"agg": "count"}),
-            (StackMatched(fill=-1.0), {"fill": -1.0}),
+            (StackMatched(order=["a", "b"]), {"order": ["a", "b"]}),
             (BlendMatched(method="ivw"), {"method": "ivw"}),
         ],
     )
@@ -100,20 +100,15 @@ class TestValidation:
 
 
 class TestCallNotImplemented:
-    """All operator bodies raise NotImplementedError in the scaffolding
-    PR — the Phase 3 PR fills them in."""
+    """Operators still scaffolded — bodies land in later PRs.
 
-    def test_raster_to_raster_like(self) -> None:
-        with pytest.raises(NotImplementedError):
-            RasterToRasterLike()(object(), object())  # type: ignore[arg-type]
+    `RasterToRasterLike` and `StackMatched` are implemented; their
+    behaviour lives in ``tests/test_coregister_rtrl_stack.py``.
+    """
 
     def test_swath_to_grid(self) -> None:
         with pytest.raises(NotImplementedError):
             SwathToGrid(target_crs="EPSG:32629", target_res=(500.0, 500.0))(object())  # type: ignore[arg-type]
-
-    def test_stack_matched(self) -> None:
-        with pytest.raises(NotImplementedError):
-            StackMatched()([object()])  # type: ignore[list-item]
 
     def test_blend_matched(self) -> None:
         with pytest.raises(NotImplementedError):

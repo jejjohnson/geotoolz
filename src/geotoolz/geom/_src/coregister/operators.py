@@ -11,9 +11,7 @@ taking a sample point cloud) set ``forbid_in_yaml = True`` so
 hydra-zen `builds()` does not try to serialize the reference — same
 discipline as the existing ``ReprojectLike`` / ``RasterizeLike``.
 
-Scaffolding — every ``__call__`` raises ``NotImplementedError``; the
-constructors and ``get_config()`` are real so YAML round-trip tests
-work today. See ``docs/design/query-matchup.md`` §5.
+See ``docs/design/query-matchup.md`` §5.
 """
 
 from __future__ import annotations
@@ -22,22 +20,38 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pipekit import Operator
 
+from geotoolz.geom._src.operators import ReprojectLike
+
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
 class RasterToRasterLike(Operator):
-    """Reproject + resample one raster onto another's grid.
+    """Align one raster onto another's CRS + grid in a single op.
 
-    Convenience that bundles what ``Reproject + ResampleLike`` already
-    do back-to-back into a single matchup-shaped op (two inputs in,
-    one aligned output out). Useful as a default in
-    ``MatchedField.coreg`` for raster↔raster pairs.
+    Thin binary wrapper around `geom.ReprojectLike` — the underlying
+    rasterio warp handles both CRS reprojection and target-grid
+    resampling in one pass. The wrapper exists because
+    `ReprojectLike` pins ``like`` at construction (unary call),
+    whereas matchup coregistration needs both inputs at call time
+    to match the ``(secondary_raw, primary_patch) -> aligned_secondary``
+    shape of `MatchedField.coreg`.
+
+    Useful as a default in ``MatchedField.coreg`` for raster↔raster
+    pairs where the secondary needs to be coregistered to the
+    primary's grid before stacking.
 
     Args:
         resampling: One of ``"nearest"``, ``"bilinear"``, ``"cubic"``,
-            ``"cubic_spline"``, ``"lanczos"``, ``"average"``.
+            ``"cubic_spline"``, ``"lanczos"``, ``"average"``,
+            ``"mode"``.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> coreg = gz.geom.coregister.RasterToRasterLike(resampling="bilinear")
+        >>> aligned_s2 = coreg(s2_chip, modis_chip)
+        >>> # `aligned_s2` has MODIS's CRS, transform, and spatial shape.
     """
 
     def __init__(self, *, resampling: str = "bilinear") -> None:
@@ -47,7 +61,11 @@ class RasterToRasterLike(Operator):
         return {"resampling": self.resampling}
 
     def __call__(self, src: GeoTensor, like: GeoTensor) -> GeoTensor:
-        raise NotImplementedError("Phase 3 PR — see design §5.")
+        # Delegate to the existing single-input `ReprojectLike` so
+        # we share the rasterio warp code path. The price is one
+        # extra Python-level Operator construction per call; the
+        # warp itself dominates, so it's negligible.
+        return ReprojectLike(like=like, resampling=self.resampling)(src)
 
 
 class SwathToGrid(Operator):
