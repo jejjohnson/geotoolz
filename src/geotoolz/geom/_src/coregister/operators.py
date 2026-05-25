@@ -533,16 +533,22 @@ def _points_with_values(
 class RasterToPointCloud(Operator):
     """Sample raster values onto each node of a point cloud.
 
-    A point cloud here is an ``(N, 2)`` or ``(N, 3)`` array of XY(Z)
-    coordinates in the raster's CRS, with an optional attribute table.
+    A point cloud here is an ``(N, 2)`` numpy array of XY coordinates
+    in the raster's CRS (Z columns, if present, are ignored —
+    sampling is 2-D). For shapely-Point inputs use `RasterToPoints`;
+    the distinction is the input form, not the underlying op.
 
     Args:
-        k: Number of nearest pixels to consider (``k=1`` is plain
-            nearest-neighbour).
-        max_radius: Optional distance ceiling. Points beyond this
-            radius receive NaN.
-        method: ``"nearest"``, ``"bilinear"``, or ``"idw"`` (when
-            ``k > 1``).
+        k: Number of nearest pixels per point. ``k=1`` is plain
+            nearest-neighbour (matches `RasterToPoints` with
+            ``extract='nearest'``). ``k>1`` requires ``method="idw"``
+            since "nearest" / "bilinear" are k=1 concepts.
+        max_radius: Optional distance ceiling in CRS units. Points
+            farther than this from any pixel center get ``NaN``.
+            ``None`` disables the radius gate.
+        method: ``"nearest"`` (k=1; KDTree single-NN), ``"bilinear"``
+            (k=1; bilinear interp via xarray.interp), or ``"idw"``
+            (k>=1; inverse-distance weighted mean of the k nearest).
     """
 
     def __init__(
@@ -551,33 +557,243 @@ class RasterToPointCloud(Operator):
         k: int = 1,
         max_radius: float | None = None,
         method: Literal["nearest", "bilinear", "idw"] = "nearest",
+        power: float = 2.0,
     ) -> None:
         if k < 1:
             raise ValueError(f"k must be >= 1; got {k}")
+        if method in {"nearest", "bilinear"} and k != 1:
+            raise ValueError(
+                f"method={method!r} only supports k=1; got k={k}. "
+                "Use method='idw' for k>1."
+            )
         self.k = k
         self.max_radius = max_radius
         self.method = method
+        self.power = power
 
     def get_config(self) -> dict[str, Any]:
         return {
             "k": self.k,
             "max_radius": self.max_radius,
             "method": self.method,
+            "power": self.power,
         }
 
     def __call__(self, raster: GeoTensor, cloud: Any) -> Any:
-        raise NotImplementedError("Phase 3 PR — see design §5.")
+        _require_axis_aligned(raster.transform, "RasterToPointCloud")
+        xy = _cloud_to_xy_array(cloud, src_crs=raster.crs)
+        if xy.size == 0:
+            # Empty cloud → empty result with the right last-axis shape.
+            arr = np.asarray(raster)
+            if arr.ndim == 2:
+                return np.zeros((0,), dtype=arr.dtype)
+            return np.zeros((arr.shape[0], 0), dtype=arr.dtype)
+
+        if self.method == "bilinear":
+            return _raster_to_cloud_bilinear(raster, xy, self.max_radius)
+        # Nearest + IDW both rely on a KDTree built on pixel centers.
+        return _raster_to_cloud_kdtree(
+            raster,
+            xy,
+            k=self.k,
+            max_radius=self.max_radius,
+            method=self.method,
+            power=self.power,
+        )
+
+
+def _cloud_to_xy_array(cloud: Any, *, src_crs: Any = None) -> np.ndarray:
+    """Normalize the cloud input to an ``(N, 2)`` XY float array.
+
+    Accepts:
+    * numpy array of shape ``(N, 2)`` or ``(N, 3)`` (Z ignored)
+    * geopandas GeoDataFrame / GeoSeries of Points (CRS-checked
+      against ``src_crs`` when both are set)
+    * any iterable of shapely Points
+    """
+    if isinstance(cloud, np.ndarray):
+        if cloud.ndim != 2 or cloud.shape[1] < 2:
+            raise ValueError(
+                "RasterToPointCloud expects cloud as an (N, 2) or (N, 3) "
+                f"ndarray; got shape {cloud.shape}."
+            )
+        return cloud[:, :2].astype(np.float64, copy=False)
+    if hasattr(cloud, "geometry"):
+        # GeoSeries / GeoDataFrame. Validate CRS against the raster
+        # if both sides carry one — silent mismatch would sample
+        # the wrong locations.
+        cloud_crs = getattr(cloud, "crs", None)
+        if cloud_crs is not None and src_crs is not None:
+            import pyproj as _pp
+
+            src = _pp.CRS.from_user_input(cloud_crs)
+            dst = _pp.CRS.from_user_input(src_crs)
+            if src != dst:
+                raise ValueError(
+                    "RasterToPointCloud: cloud CRS "
+                    f"{src.to_string()!r} differs from raster CRS "
+                    f"{dst.to_string()!r}. Reproject the cloud first "
+                    "(e.g. `gdf.to_crs(raster.crs)`)."
+                )
+        geoms = list(cloud.geometry)
+    elif hasattr(cloud, "__iter__"):
+        # Generic iterable. We're tolerant of empty lists but must
+        # reject non-geometry iterables (e.g. someone tried to pass
+        # `(xy, values)` here — that's PointCloudToRaster's input
+        # shape, not RasterToPointCloud's).
+        try:
+            geoms = list(cloud)
+        except TypeError as exc:
+            raise TypeError(
+                f"Unsupported cloud input: {type(cloud).__name__}. "
+                "Pass an (N, 2) ndarray, a GeoSeries / GeoDataFrame of Points, "
+                "or a sequence of shapely Points."
+            ) from exc
+        if geoms and not hasattr(geoms[0], "geom_type"):
+            raise TypeError(
+                f"Iterable cloud input must contain shapely geometries; got "
+                f"{type(geoms[0]).__name__}. (If you meant to pass a "
+                "(xy, values) tuple, that's the PointCloudToRaster API.)"
+            )
+    else:
+        raise TypeError(
+            f"Unsupported cloud input: {type(cloud).__name__}. "
+            "Pass an (N, 2) ndarray, a GeoSeries / GeoDataFrame of Points, "
+            "or a sequence of shapely Points."
+        )
+    for g in geoms:
+        if getattr(g, "geom_type", None) != "Point":
+            raise ValueError(
+                "RasterToPointCloud requires Point geometries; "
+                f"got {getattr(g, 'geom_type', type(g).__name__)!r}."
+            )
+    return np.asarray([[g.x, g.y] for g in geoms], dtype=np.float64).reshape(-1, 2)
+
+
+def _raster_to_cloud_bilinear(
+    raster: GeoTensor, xy: np.ndarray, max_radius: float | None
+) -> np.ndarray:
+    """Bilinear sample of `raster` at every point in `xy`."""
+    da = _geotensor_to_dataarray(raster)
+    point_xs = xy[:, 0]
+    point_ys = xy[:, 1]
+    interp = da.interp(x=("point", point_xs), y=("point", point_ys))
+    values = np.asarray(interp.values)
+    if max_radius is not None:
+        # Use KDTree to compute nearest-pixel distance; mask out
+        # points whose nearest pixel sits outside the radius.
+        _, distances = _nearest_pixel_distances(raster, xy)
+        mask = distances > max_radius
+        if values.ndim == 1:
+            values = values.astype(np.float64, copy=True)
+            values[mask] = np.nan
+        else:
+            values = values.astype(np.float64, copy=True)
+            values[:, mask] = np.nan
+    return values
+
+
+def _raster_to_cloud_kdtree(
+    raster: GeoTensor,
+    xy: np.ndarray,
+    *,
+    k: int,
+    max_radius: float | None,
+    method: Literal["nearest", "bilinear", "idw"],
+    power: float,
+) -> np.ndarray:
+    """KDTree-based sampling: nearest (k=1) or IDW (k>=1)."""
+    from scipy.spatial import KDTree
+
+    arr = np.asarray(raster)
+    x_centers, y_centers = _pixel_center_coords(raster.transform, raster.shape)
+    yy, xx = np.meshgrid(y_centers, x_centers, indexing="ij")
+    pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])
+    tree = KDTree(pixel_xy)
+
+    # Clamp k to the number of available pixels — querying KDTree
+    # with k > N returns placeholder out-of-bounds indices that
+    # would crash the subsequent `flat[indices]` lookup. Mirrors
+    # the same guard `_point_cloud_idw` uses on the other side.
+    eff_k = min(k, pixel_xy.shape[0])
+    distances, indices = tree.query(xy, k=eff_k)
+    # `KDTree.query` returns scalars / 1D arrays for k=1; promote
+    # to (N, 1) so the downstream IDW code path is uniform.
+    if eff_k == 1:
+        distances = distances[:, None]
+        indices = indices[:, None]
+
+    # Flatten the raster's spatial dims for fancy-index lookup.
+    if arr.ndim == 2:
+        flat = arr.reshape(-1)
+        gathered = flat[indices]  # (N, k)
+    else:
+        # 3-D (C, H, W) → (C, H*W); gather along last axis.
+        c = arr.shape[0]
+        flat = arr.reshape(c, -1)
+        gathered = flat[:, indices]  # (C, N, k)
+
+    if method in {"nearest"} or (method == "idw" and eff_k == 1):
+        if arr.ndim == 2:
+            result = gathered[:, 0].astype(np.float64)
+        else:
+            result = gathered[:, :, 0].astype(np.float64)
+    else:
+        # IDW with k >= 2.
+        weights = 1.0 / np.maximum(distances**power, 1e-12)
+        if arr.ndim == 2:
+            num = (gathered * weights).sum(axis=1)
+            den = weights.sum(axis=1)
+            result = (num / den).astype(np.float64)
+        else:
+            num = (gathered * weights[None, :, :]).sum(axis=2)
+            den = weights.sum(axis=1)[None, :]
+            result = (num / den).astype(np.float64)
+
+    # Out-of-radius gate: use the *closest* pixel's distance.
+    if max_radius is not None:
+        nearest_dist = distances[:, 0]
+        out = nearest_dist > max_radius
+        if arr.ndim == 2:
+            result[out] = np.nan
+        else:
+            result[:, out] = np.nan
+    return result
+
+
+def _nearest_pixel_distances(
+    raster: GeoTensor, xy: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Helper: (indices, distances) of the single nearest pixel per point."""
+    from scipy.spatial import KDTree
+
+    x_centers, y_centers = _pixel_center_coords(raster.transform, raster.shape)
+    yy, xx = np.meshgrid(y_centers, x_centers, indexing="ij")
+    pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])
+    tree = KDTree(pixel_xy)
+    distances, indices = tree.query(xy, k=1)
+    return indices, distances
 
 
 class PointCloudToRaster(Operator):
     """Rasterize a point cloud onto a target grid.
 
+    Numpy-first counterpart to `PointsToRaster`. The cloud input is
+    a tuple ``(xy_array, values_array)`` so callers don't need to
+    wrap their raw arrays in a GeoDataFrame.
+
     Args:
-        method: ``"binned_stat"`` (fast, no smoothing) or ``"idw"``
-            (smooth, KDTree-backed).
-        stat: For ``"binned_stat"``: ``"mean"``, ``"median"``,
+        method: ``"binned_stat"`` (scipy ``binned_statistic_2d`` —
+            fast, no smoothing) or ``"idw"`` (KDTree-backed inverse-
+            distance weighting, smoother but slower).
+        stat: For ``"binned_stat"``: one of ``"mean"``, ``"median"``,
             ``"sum"``, ``"count"``, ``"max"``, ``"min"``.
         power: For ``"idw"``: inverse-distance exponent.
+        k: For ``"idw"``: how many nearest points contribute to each
+            pixel. Defaults to 8 (a reasonable balance between
+            smoothness and locality).
+        max_radius: For ``"idw"``: distance ceiling in CRS units.
+            Pixels with no points within this radius receive NaN.
     """
 
     def __init__(
@@ -586,31 +802,180 @@ class PointCloudToRaster(Operator):
         method: Literal["binned_stat", "idw"] = "binned_stat",
         stat: Literal["mean", "median", "sum", "count", "max", "min"] = "mean",
         power: float = 2.0,
+        k: int = 8,
+        max_radius: float | None = None,
     ) -> None:
+        if method not in {"binned_stat", "idw"}:
+            raise ValueError(
+                f"PointCloudToRaster.method must be 'binned_stat' or 'idw'; "
+                f"got {method!r}"
+            )
+        if k < 1:
+            raise ValueError(f"k must be >= 1; got {k}")
         self.method = method
         self.stat = stat
         self.power = power
+        self.k = k
+        self.max_radius = max_radius
 
     def get_config(self) -> dict[str, Any]:
-        return {"method": self.method, "stat": self.stat, "power": self.power}
+        return {
+            "method": self.method,
+            "stat": self.stat,
+            "power": self.power,
+            "k": self.k,
+            "max_radius": self.max_radius,
+        }
 
     def __call__(self, cloud: Any, like: GeoTensor) -> GeoTensor:
-        raise NotImplementedError("Phase 3 PR — see design §5.")
+        _require_axis_aligned(like.transform, "PointCloudToRaster")
+        xy, values = _cloud_to_xy_values(cloud)
+        if self.method == "binned_stat":
+            return _point_cloud_binned_stat(xy, values, like, stat=self.stat)
+        return _point_cloud_idw(
+            xy,
+            values,
+            like,
+            power=self.power,
+            k=self.k,
+            max_radius=self.max_radius,
+        )
+
+
+def _cloud_to_xy_values(cloud: Any) -> tuple[np.ndarray, np.ndarray]:
+    """Normalise the cloud input to ``(xy, values)`` parallel arrays.
+
+    Accepts:
+    * a tuple ``(xy_ndarray, values_ndarray)`` — the canonical form
+    * a structured numpy array with fields ``x``, ``y``, ``value``
+    """
+    if isinstance(cloud, tuple) and len(cloud) == 2:
+        xy, values = cloud
+        xy_arr = np.asarray(xy, dtype=np.float64)
+        if xy_arr.ndim != 2 or xy_arr.shape[1] < 2:
+            raise ValueError(
+                "PointCloudToRaster expects xy as an (N, 2) ndarray; "
+                f"got shape {xy_arr.shape}."
+            )
+        values_arr = np.asarray(values, dtype=np.float64)
+        if values_arr.ndim != 1 or values_arr.shape[0] != xy_arr.shape[0]:
+            raise ValueError(
+                "PointCloudToRaster values must be 1-D with the same N as "
+                f"xy; got xy.shape={xy_arr.shape}, values.shape={values_arr.shape}."
+            )
+        return xy_arr[:, :2], values_arr
+    if isinstance(cloud, np.ndarray) and cloud.dtype.names is not None:
+        # Structured array: pull `x`, `y`, `value` fields.
+        missing = [n for n in ("x", "y", "value") if n not in cloud.dtype.names]
+        if missing:
+            raise ValueError(
+                "PointCloudToRaster structured-array input must have "
+                f"fields x, y, value; missing {missing!r}."
+            )
+        xy = np.column_stack([cloud["x"], cloud["y"]]).astype(np.float64)
+        values = np.asarray(cloud["value"], dtype=np.float64)
+        return xy, values
+    raise TypeError(
+        "PointCloudToRaster expects cloud as `(xy_ndarray, values_ndarray)` "
+        "or a structured ndarray with fields {x, y, value}; got "
+        f"{type(cloud).__name__}."
+    )
+
+
+def _point_cloud_binned_stat(
+    xy: np.ndarray, values: np.ndarray, like: GeoTensor, *, stat: str
+) -> GeoTensor:
+    """Bin via scipy.stats.binned_statistic_2d (shares logic with PointsToRaster)."""
+    from scipy.stats import binned_statistic_2d
+
+    h, w = like.shape[-2], like.shape[-1]
+    x_edges = like.transform.c + like.transform.a * np.arange(w + 1)
+    y_edges = like.transform.f + like.transform.e * np.arange(h + 1)
+    flip_y = y_edges[0] > y_edges[-1]
+    flip_x = x_edges[0] > x_edges[-1]
+    y_edges_sorted = y_edges[::-1] if flip_y else y_edges
+    x_edges_sorted = x_edges[::-1] if flip_x else x_edges
+
+    stat_out, _, _, _ = binned_statistic_2d(
+        xy[:, 0],
+        xy[:, 1],
+        values,
+        statistic=stat,
+        bins=[x_edges_sorted, y_edges_sorted],
+    )
+    result = stat_out.T
+    if flip_y:
+        result = result[::-1, :]
+    if flip_x:
+        result = result[:, ::-1]
+    return like.array_as_geotensor(result.astype(np.float64))
+
+
+def _point_cloud_idw(
+    xy: np.ndarray,
+    values: np.ndarray,
+    like: GeoTensor,
+    *,
+    power: float,
+    k: int,
+    max_radius: float | None,
+) -> GeoTensor:
+    """KDTree-based inverse-distance weighting onto the `like` grid."""
+    from scipy.spatial import KDTree
+
+    h, w = like.shape[-2], like.shape[-1]
+    # Empty cloud → all-NaN raster on the `like` grid (well-defined
+    # rather than KDTree crash on zero-row input).
+    if xy.shape[0] == 0:
+        return like.array_as_geotensor(np.full((h, w), np.nan, dtype=np.float64))
+    x_centers, y_centers = _pixel_center_coords(like.transform, like.shape)
+    yy, xx = np.meshgrid(y_centers, x_centers, indexing="ij")
+    pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])  # (H*W, 2)
+
+    tree = KDTree(xy)
+    eff_k = min(k, xy.shape[0])
+    distances, indices = tree.query(pixel_xy, k=eff_k)
+    if eff_k == 1:
+        distances = distances[:, None]
+        indices = indices[:, None]
+
+    sampled = values[indices]  # (H*W, eff_k)
+    weights = 1.0 / np.maximum(distances**power, 1e-12)
+    num = (sampled * weights).sum(axis=1)
+    den = weights.sum(axis=1)
+    result = (num / den).reshape(h, w).astype(np.float64)
+
+    if max_radius is not None:
+        # Mask pixels whose nearest point exceeds the radius.
+        nearest_dist = distances[:, 0].reshape(h, w)
+        result = np.where(nearest_dist > max_radius, np.nan, result)
+    return like.array_as_geotensor(result)
 
 
 class VectorToRasterAgg(Operator):
     """Rasterize a vector layer with an aggregation policy for overlaps.
 
-    Extends the existing ``Rasterize`` (which burns vector geometries
-    onto a grid) with a per-pixel aggregation when multiple features
-    overlap a pixel — mean of attribute, majority class, count, etc.
+    Extends `geom.Rasterize` (which burns features in order and lets
+    later ones overwrite earlier ones) with a per-pixel aggregation
+    when multiple features overlap a pixel — useful for mean of an
+    attribute, count of features per pixel, etc.
+
+    Implementation strategy: rasterize each feature separately to a
+    boolean mask (O(H*W) per feature, single accumulator pass) and
+    update a running aggregator. This is more memory-friendly than
+    stacking N feature rasters and reducing.
 
     Args:
-        agg: ``"mean"``, ``"majority"``, ``"count"``, ``"sum"``,
-            ``"max"``, ``"min"``, ``"first"``, ``"last"``.
-        attribute: Column name to aggregate (None for boolean burn).
-        all_touched: If ``True``, every pixel touched by the geometry
-            counts; otherwise only pixels whose centre falls inside.
+        agg: One of ``"mean"``, ``"count"``, ``"sum"``, ``"max"``,
+            ``"min"``, ``"first"``, ``"last"``. ``"majority"`` is
+            deferred (raises at call time so YAML round-trip works).
+        attribute: Column name to aggregate. Required for
+            ``mean / sum / max / min / first / last``; ignored for
+            ``count``.
+        all_touched: If ``True``, every pixel whose envelope is
+            touched by the geometry counts. If ``False`` (the
+            rasterio default — and ours), only pixels whose centre
+            falls inside the geometry contribute.
     """
 
     def __init__(
@@ -622,6 +987,16 @@ class VectorToRasterAgg(Operator):
         attribute: str | None = None,
         all_touched: bool = False,
     ) -> None:
+        valid = {"mean", "majority", "count", "sum", "max", "min", "first", "last"}
+        if agg not in valid:
+            raise ValueError(
+                f"VectorToRasterAgg.agg must be one of {sorted(valid)!r}; got {agg!r}"
+            )
+        if agg != "count" and agg != "majority" and attribute is None:
+            raise ValueError(
+                f"VectorToRasterAgg(agg={agg!r}) requires `attribute` naming "
+                "the column to aggregate."
+            )
         self.agg = agg
         self.attribute = attribute
         self.all_touched = all_touched
@@ -634,4 +1009,121 @@ class VectorToRasterAgg(Operator):
         }
 
     def __call__(self, vector: Any, like: GeoTensor) -> GeoTensor:
-        raise NotImplementedError("Phase 3 PR — see design §5.")
+        if self.agg == "majority":
+            raise NotImplementedError(
+                "VectorToRasterAgg(agg='majority') not yet implemented; "
+                "the others (mean / count / sum / max / min / first / last) "
+                "are wired up."
+            )
+        _require_axis_aligned(like.transform, "VectorToRasterAgg")
+        import geopandas as gpd
+        from rasterio.features import rasterize as rio_rasterize
+
+        if not isinstance(vector, gpd.GeoDataFrame):
+            raise TypeError(
+                "VectorToRasterAgg expects a geopandas.GeoDataFrame; got "
+                f"{type(vector).__name__}."
+            )
+        if vector.crs is not None and like.crs is not None:
+            import pyproj as _pp
+
+            src = _pp.CRS.from_user_input(vector.crs)
+            dst = _pp.CRS.from_user_input(like.crs)
+            if src != dst:
+                raise ValueError(
+                    f"VectorToRasterAgg: vector CRS {src.to_string()!r} differs "
+                    f"from raster CRS {dst.to_string()!r}. Reproject the input "
+                    "first (e.g. `gdf.to_crs(like.crs)`)."
+                )
+
+        h, w = like.shape[-2], like.shape[-1]
+        # Per-feature mask burned at value=1 using the like raster's affine.
+        # For pixel-centre semantics use all_touched=False; for envelope-
+        # overlap use all_touched=True.
+
+        # Pull attribute values once (None for count / majority).
+        attr_values = (
+            vector[self.attribute].to_numpy() if self.attribute is not None else None
+        )
+
+        # Initialise the accumulator(s).
+        sum_arr = (
+            np.zeros((h, w), dtype=np.float64) if self.agg in {"mean", "sum"} else None
+        )
+        count_arr = np.zeros((h, w), dtype=np.int64)
+        max_arr = (
+            np.full((h, w), -np.inf, dtype=np.float64) if self.agg == "max" else None
+        )
+        min_arr = (
+            np.full((h, w), np.inf, dtype=np.float64) if self.agg == "min" else None
+        )
+        # For "first" / "last": keep an array of attribute values written
+        # in order. "first" walks the GDF in reverse so the *first* feature
+        # writes last and wins; "last" walks forwards so the *last* feature
+        # writes last and wins.
+        ordinal_arr = (
+            np.full((h, w), np.nan, dtype=np.float64)
+            if self.agg in {"first", "last"}
+            else None
+        )
+
+        iterator = (
+            zip(
+                reversed(range(len(vector))),
+                reversed(list(vector.geometry)),
+                strict=True,
+            )
+            if self.agg == "first"
+            else zip(range(len(vector)), vector.geometry, strict=True)
+        )
+
+        for idx, geom in iterator:
+            mask = rio_rasterize(
+                [(geom, 1)],
+                out_shape=(h, w),
+                transform=like.transform,
+                all_touched=self.all_touched,
+                dtype=np.uint8,
+            ).astype(bool)
+            if not mask.any():
+                continue
+            count_arr += mask.astype(np.int64)
+            if self.agg == "count":
+                continue
+            v = float(attr_values[idx]) if attr_values is not None else 1.0
+            if self.agg in {"sum", "mean"}:
+                assert sum_arr is not None
+                sum_arr[mask] += v
+            elif self.agg == "max":
+                assert max_arr is not None
+                np.maximum(max_arr, np.where(mask, v, -np.inf), out=max_arr)
+            elif self.agg == "min":
+                assert min_arr is not None
+                np.minimum(min_arr, np.where(mask, v, np.inf), out=min_arr)
+            elif self.agg in {"first", "last"}:
+                assert ordinal_arr is not None
+                ordinal_arr[mask] = v
+
+        # Build the result per agg policy.
+        if self.agg == "count":
+            result = count_arr.astype(np.float64)
+        elif self.agg == "sum":
+            assert sum_arr is not None
+            result = sum_arr
+            # Pixels with no features: NaN (sum of nothing is undefined
+            # in the aggregate-attribute sense).
+            result = np.where(count_arr > 0, result, np.nan)
+        elif self.agg == "mean":
+            assert sum_arr is not None
+            result = np.where(count_arr > 0, sum_arr / np.maximum(count_arr, 1), np.nan)
+        elif self.agg == "max":
+            assert max_arr is not None
+            result = np.where(count_arr > 0, max_arr, np.nan)
+        elif self.agg == "min":
+            assert min_arr is not None
+            result = np.where(count_arr > 0, min_arr, np.nan)
+        else:  # first / last
+            assert ordinal_arr is not None
+            result = ordinal_arr
+
+        return like.array_as_geotensor(result)
