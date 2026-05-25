@@ -122,7 +122,7 @@ src/geocatalog/_src/
   domain.py, _cli.py                                 [existing]
 
   sources/                     # NEW
-    __init__.py                # Source Protocol, CatalogRow dataclass, registry
+    __init__.py                # Source Protocol, SourceRow dataclass, registry
     earthaccess.py             # EarthAccessSource
     stac.py                    # STACSource (+ planetary_computer() / earth_search() helpers)
     gee.py                     # GEESource (asset enumeration only in v1)
@@ -147,7 +147,7 @@ Top-level re-exports follow the existing pattern:
 ```python
 # src/geocatalog/sources/__init__.py
 from geocatalog._src.sources import (
-    Source, CatalogRow, EarthAccessSource, STACSource, GEESource, CMRSource,
+    Source, SourceRow, EarthAccessSource, STACSource, GEESource, CMRSource,
 )
 # src/geocatalog/matchup/__init__.py
 from geocatalog._src.matchup import matchup, MatchupRow
@@ -173,7 +173,7 @@ class Source(Protocol):
         collection: str | None = None,
         filters: Mapping[str, Any] | None = None,
         limit: int | None = None,
-    ) -> Iterator[CatalogRow]: ...
+    ) -> Iterator[SourceRow]: ...
 
     def auth_status(self) -> AuthStatus: ...
 ```
@@ -185,12 +185,31 @@ Adapters live in `_src/sources/<name>.py`. None are required at install time —
 earthaccess = ["earthaccess>=0.10"]
 stac        = ["pystac-client>=0.7", "planetary-computer>=1.0"]
 gee         = ["earthengine-api>=0.1.380"]
-sources-all = ["geocatalog[earthaccess,stac,gee]"]
+# Aggregate extra: expanded explicitly because self-referencing
+# project extras don't resolve reliably in all build backends.
+sources-all = [
+    "earthaccess>=0.10",
+    "pystac-client>=0.7",
+    "planetary-computer>=1.0",
+    "earthengine-api>=0.1.380",
+]
 ```
 
-### 4.3 `CatalogRow` — normalized output schema
+### 4.3 `SourceRow` — normalized output of every adapter
 
-A single schema that every adapter must produce. This is also the in-memory row shape for ingested entries and a strict superset of today's row schema (so existing in-memory + DuckDB backends continue to work without migration).
+> **Naming note.** The scaffolding PR landed this carrier as
+> `SourceRow` (output of `Source.query`) to keep it distinct from the
+> existing in-catalog `CatalogRow` (the row shape persisted in
+> `items.parquet`). Ingestion (`catalog.ingest(...)`) maps the
+> richer `SourceRow` shape into a `CatalogRow` — promoting the
+> primary asset to `filepath`, folding extras into `extras`. The
+> schema below describes `SourceRow`; `CatalogRow` is the existing
+> dataclass in `geocatalog._src.base` and is unchanged.
+
+A single schema that every adapter must produce. This is the on-wire
+shape returned by `Source.query` and the same shape passed to the
+`v0 → v1` schema migration that lifts an existing local catalog into
+the new bundle layout.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -255,7 +274,7 @@ Both new sibling tables are first-class — they have `query_id` / `matchup_id` 
 
 A deliberate split between "I want to see what's out there" and "I want to persist what's out there":
 
-- `Source.query()` returns an `Iterator[CatalogRow]` — for ad-hoc exploration; never writes.
+- `Source.query()` returns an `Iterator[SourceRow]` — for ad-hoc exploration; never writes.
 - `catalog.ingest(source, query) → query_id` materializes results into `items.parquet`, writes a `queries.parquet` row, and stamps each item's `_provenance.query_id`.
 
 CLI form:
@@ -608,7 +627,7 @@ A suggested four-phase rollout. Each phase ships independently and is useful on 
 
 ### Phase 1 — `geocatalog` source adapters (no breaking changes)
 
-- `_src/sources/__init__.py` with `Source` Protocol, `CatalogRow`
+- `_src/sources/__init__.py` with `Source` Protocol, `SourceRow`
 - `EarthAccessSource`, `STACSource`, `CMRSource`
 - `catalog.ingest()` + `geocatalog ingest` CLI
 - `queries.parquet` schema + migration v0 → v1
@@ -703,7 +722,7 @@ A suggested four-phase rollout. Each phase ships independently and is useful on 
 geocatalog
   .sources
     .Source                         # Protocol
-    .CatalogRow                     # normalized output schema
+    .SourceRow                      # normalized output of every Source.query
     .EarthAccessSource              # adapter
     .STACSource                     # adapter (+ .planetary_computer(), .earth_search())
     .GEESource                      # adapter (Phase 3)
