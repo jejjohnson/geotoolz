@@ -18,13 +18,105 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
+import numpy as np
 from pipekit import Operator
 
 from geotoolz.geom._src.operators import ReprojectLike
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import shapely.geometry.base
     from georeader.geotensor import GeoTensor
+
+
+def _pixel_center_coords(
+    transform: Any, shape: tuple[int, ...]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute ``(x_centers, y_centers)`` for a raster from its affine.
+
+    Returns 1-D arrays of length ``W`` and ``H`` respectively — the
+    pixel-center coordinates suitable for an xarray-backed extraction.
+    """
+    h, w = shape[-2], shape[-1]
+    x = transform.c + transform.a * (np.arange(w) + 0.5)
+    y = transform.f + transform.e * (np.arange(h) + 0.5)
+    return x, y
+
+
+def _geotensor_to_dataarray(tensor: GeoTensor) -> Any:
+    """Convert a `GeoTensor` to an `xarray.DataArray` with proper coords.
+
+    The result has ``x`` / ``y`` 1-D coords at pixel centers and a
+    ``band`` dim if the input is 3-D ``(C, H, W)``. The CRS isn't
+    attached here — callers pass it as a kwarg to `extract_points`
+    so we don't need a full xvec geometry index on the raster side.
+    """
+    import xarray as xr
+
+    arr = np.asarray(tensor)
+    x, y = _pixel_center_coords(tensor.transform, tensor.shape)
+    if arr.ndim == 2:
+        return xr.DataArray(arr, dims=("y", "x"), coords={"x": x, "y": y})
+    if arr.ndim == 3:
+        bands = np.arange(arr.shape[0])
+        return xr.DataArray(
+            arr,
+            dims=("band", "y", "x"),
+            coords={"band": bands, "x": x, "y": y},
+        )
+    raise ValueError(
+        "RasterToPoints expects 2-D (H, W) or 3-D (C, H, W) GeoTensor input; "
+        f"got ndim={arr.ndim}."
+    )
+
+
+def _resolve_geometries(points: Any) -> Sequence[shapely.geometry.base.BaseGeometry]:
+    """Pull the geometry array out of common point inputs.
+
+    Accepts:
+    * `list[shapely.Point]` / any iterable of geometries
+    * `geopandas.GeoSeries` / `GeoDataFrame` (uses `.geometry`)
+    * `xarray.DataArray` with an xvec geometry index (uses
+      ``.xvec.geom_coords``)
+    """
+    # Fast path: already a sequence of shapely geometries.
+    if hasattr(points, "__iter__") and not hasattr(points, "geometry"):
+        try:
+            seq = list(points)
+        except TypeError:
+            seq = None
+        if seq is not None and seq and hasattr(seq[0], "geom_type"):
+            return seq
+
+    # geopandas.GeoSeries / GeoDataFrame.
+    if hasattr(points, "geometry") and not hasattr(points, "xvec"):
+        return list(points.geometry)
+
+    # xarray with xvec geometry index.
+    import xarray as xr
+
+    if isinstance(points, xr.DataArray):
+        # `geom_coords` is a Mapping[name, IndexVariable]; one entry
+        # in the typical single-axis case.
+        coords = points.xvec.geom_coords
+        if not coords:
+            raise ValueError(
+                "RasterToPoints needs `points` to be either a sequence "
+                "of shapely geometries, a geopandas GeoSeries/GeoDataFrame, "
+                "or an xarray.DataArray with an xvec geometry index. The "
+                "DataArray you passed has no xvec geometry index."
+            )
+        # Return the geometry array from the first geometry-indexed coord.
+        name = next(iter(coords))
+        return list(points[name].values)
+
+    raise TypeError(
+        f"Unsupported `points` input: {type(points).__name__}. "
+        "Pass a list of shapely Points, a GeoSeries/GeoDataFrame, "
+        "or an xvec-indexed xarray DataArray."
+    )
 
 
 class RasterToRasterLike(Operator):
@@ -138,15 +230,27 @@ class GridToSwath(Operator):
 class RasterToPoints(Operator):
     """Extract raster values at a vector cube of points.
 
-    Requires the ``[vector-cube]`` extra (``xvec``). Input ``points``
-    is an ``xvec.DataArray`` of point geometries (e.g. AERONET
-    stations, buoy positions); output is the same vector cube with
-    a new variable holding the sampled raster values.
+    Requires the ``[vector-cube]`` extra (``xvec``).
+
+    The ``points`` input accepts three forms:
+
+    * a sequence of `shapely.Point` (or any iterable of shapely
+      geometries),
+    * a `geopandas.GeoSeries` / `GeoDataFrame` (uses ``.geometry``),
+    * an `xarray.DataArray` with an xvec geometry index (uses
+      ``.xvec.geom_coords``).
+
+    The return value is an `xarray.DataArray` indexed by a
+    ``geometry`` dim, with the raster's values sampled at each
+    point. For 3-D ``(C, H, W)`` rasters the result carries an
+    additional ``band`` dim.
 
     Args:
-        extract: Interpolation mode — ``"nearest"`` (default) or
-            ``"bilinear"``.
-        out_var: Name of the new variable on the vector cube.
+        extract: Interpolation mode — ``"nearest"`` (default; uses
+            xvec's per-pixel nearest sampling) or ``"bilinear"``
+            (uses xarray's linear interpolation on the raster
+            DataArray before extraction).
+        out_var: Name attached to the output DataArray.
     """
 
     def __init__(
@@ -155,6 +259,10 @@ class RasterToPoints(Operator):
         extract: Literal["nearest", "bilinear"] = "nearest",
         out_var: str = "value",
     ) -> None:
+        if extract not in {"nearest", "bilinear"}:
+            raise ValueError(
+                f"RasterToPoints.extract must be 'nearest' or 'bilinear'; got {extract!r}"
+            )
         self.extract = extract
         self.out_var = out_var
 
@@ -162,23 +270,63 @@ class RasterToPoints(Operator):
         return {"extract": self.extract, "out_var": self.out_var}
 
     def __call__(self, raster: GeoTensor, points: Any) -> Any:
-        raise NotImplementedError("Phase 3 PR — see design §5.")
+        try:
+            import xvec  # noqa: F401 — registers the .xvec accessor
+        except ImportError as exc:
+            raise ImportError(
+                "RasterToPoints requires the `[vector-cube]` extra (xvec). "
+                "Install with `pip install 'geotoolz[vector-cube]'`."
+            ) from exc
+
+        da = _geotensor_to_dataarray(raster)
+        geoms = _resolve_geometries(points)
+        crs = str(raster.crs)
+
+        if self.extract == "bilinear":
+            # xarray's `interp` does linear interpolation in 1-D per
+            # axis; combining x + y gives bilinear. Apply before
+            # extract_points so the points sample the interpolated
+            # raster.
+            point_xs = np.asarray([g.x for g in geoms])
+            point_ys = np.asarray([g.y for g in geoms])
+            interp = da.interp(x=("geometry", point_xs), y=("geometry", point_ys))
+            result = interp.rename(self.out_var)
+            # Attach the geometry array as a coord so the output
+            # matches the nearest-mode shape (geometry-indexed).
+
+            result = result.assign_coords(geometry=("geometry", list(geoms)))
+            return result
+
+        # Nearest: defer to xvec.extract_points.
+        result = da.xvec.extract_points(geoms, x_coords="x", y_coords="y", crs=crs)
+        return result.rename(self.out_var)
 
 
 class PointsToRaster(Operator):
     """Bin a vector cube of point measurements onto a target raster grid.
 
-    Requires the ``[vector-cube]`` extra (``xvec``).
+    Implementation uses ``scipy.stats.binned_statistic_2d`` with the
+    ``like`` raster's pixel-edge grid as bins. The ``"idw"`` method
+    (inverse-distance weighting via KDTree) is reserved for a
+    follow-up; today only ``"binned_stat"`` is implemented and
+    construction with ``method="idw"`` raises NotImplementedError
+    at call time so YAML round-trip still works.
+
+    The ``points`` input accepts the same forms as `RasterToPoints`:
+
+    * a sequence of `shapely.Point` paired with a values array,
+    * a `geopandas.GeoSeries` / `GeoDataFrame` (uses ``.geometry``
+      + an attribute column),
+    * an `xarray.DataArray` with an xvec geometry index.
 
     Args:
-        method: Reduction strategy — ``"binned_stat"`` (scipy) or
-            ``"idw"`` (inverse-distance weighting via KDTree).
-        stat: For ``"binned_stat"``: ``"mean"``, ``"median"``, ``"sum"``,
-            ``"count"``, ``"max"``, ``"min"``.
-        like_required: Whether ``like`` (target grid) is required at
-            call time; if ``False``, ``__call__`` accepts a CRS +
-            resolution instead. Default ``True`` for the typical
-            matchup case.
+        method: Reduction strategy — ``"binned_stat"`` (scipy
+            ``binned_statistic_2d``, default) or ``"idw"`` (deferred).
+        stat: For ``"binned_stat"``: one of ``"mean"``, ``"median"``,
+            ``"sum"``, ``"count"``, ``"max"``, ``"min"``.
+        attribute: For non-DataArray inputs, the column / attribute
+            name to bin. Ignored when ``points`` is already a 1-D
+            xarray DataArray of values indexed by geometry.
     """
 
     forbid_in_yaml: ClassVar[bool] = False
@@ -188,21 +336,101 @@ class PointsToRaster(Operator):
         *,
         method: Literal["binned_stat", "idw"] = "binned_stat",
         stat: Literal["mean", "median", "sum", "count", "max", "min"] = "mean",
-        like_required: bool = True,
+        attribute: str | None = None,
     ) -> None:
+        if method not in {"binned_stat", "idw"}:
+            raise ValueError(
+                f"PointsToRaster.method must be 'binned_stat' or 'idw'; got {method!r}"
+            )
         self.method = method
         self.stat = stat
-        self.like_required = like_required
+        self.attribute = attribute
 
     def get_config(self) -> dict[str, Any]:
         return {
             "method": self.method,
             "stat": self.stat,
-            "like_required": self.like_required,
+            "attribute": self.attribute,
         }
 
     def __call__(self, points: Any, like: GeoTensor) -> GeoTensor:
-        raise NotImplementedError("Phase 3 PR — see design §5.")
+        if self.method == "idw":
+            raise NotImplementedError(
+                "PointsToRaster(method='idw') is not yet implemented; "
+                "use method='binned_stat' for now."
+            )
+        from scipy.stats import binned_statistic_2d
+
+        # 1) Resolve geometries + parallel values array.
+        xs, ys, values = _points_with_values(points, attribute=self.attribute)
+
+        # 2) Build bin edges from the `like` raster's affine. The
+        # affine maps pixel (col, row) corners → CRS coords; for an
+        # H x W grid we need W+1 x edges and H+1 y edges.
+        h, w = like.shape[-2], like.shape[-1]
+        x_edges = like.transform.c + like.transform.a * np.arange(w + 1)
+        y_edges = like.transform.f + like.transform.e * np.arange(h + 1)
+        # binned_statistic_2d requires monotonically-increasing edges;
+        # rasterio's "north-up" affine has negative e, so y_edges
+        # decrease. Flip both edges and the resulting statistic
+        # so the output's row 0 stays the top of the image.
+        flip_y = y_edges[0] > y_edges[-1]
+        y_edges_sorted = y_edges[::-1] if flip_y else y_edges
+
+        # 3) Run the bin.
+        stat_out, _, _, _ = binned_statistic_2d(
+            xs, ys, values, statistic=self.stat, bins=[x_edges, y_edges_sorted]
+        )
+        # `binned_statistic_2d` returns shape (n_x_bins, n_y_bins);
+        # transpose to (H, W) raster convention, with rows = y.
+        result = stat_out.T
+        if flip_y:
+            result = result[::-1, :]
+
+        # 4) Wrap back into a GeoTensor on the `like` grid.
+        return like.array_as_geotensor(result.astype(np.float64))
+
+
+def _points_with_values(
+    points: Any, *, attribute: str | None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return parallel ``(xs, ys, values)`` from common point inputs.
+
+    Helper for `PointsToRaster`. Resolves geometries to coordinate
+    arrays and pulls the values either from the input's value array
+    (xarray) or from a named attribute (GeoDataFrame).
+    """
+    import xarray as xr
+
+    if isinstance(points, xr.DataArray):
+        coords = points.xvec.geom_coords
+        if not coords:
+            raise ValueError(
+                "PointsToRaster needs the xarray DataArray to have an "
+                "xvec geometry index. Set one with "
+                "`.xvec.set_geom_indexes(...)` before calling."
+            )
+        name = next(iter(coords))
+        geoms = list(points[name].values)
+        values = np.asarray(points.values, dtype=np.float64)
+    elif hasattr(points, "geometry") and not hasattr(points, "xvec"):
+        geoms = list(points.geometry)
+        if attribute is None:
+            raise ValueError(
+                "PointsToRaster on a GeoDataFrame input requires "
+                "`attribute=...` naming the column to bin."
+            )
+        values = np.asarray(points[attribute].values, dtype=np.float64)
+    else:
+        raise TypeError(
+            "PointsToRaster expects either an xvec-indexed xarray DataArray "
+            "or a geopandas GeoDataFrame with an `attribute` column. Got "
+            f"{type(points).__name__}."
+        )
+
+    xs = np.asarray([g.x for g in geoms], dtype=np.float64)
+    ys = np.asarray([g.y for g in geoms], dtype=np.float64)
+    return xs, ys, values
 
 
 class RasterToPointCloud(Operator):
