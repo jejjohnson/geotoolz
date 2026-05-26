@@ -1,327 +1,347 @@
 # Concepts
 
-This page explains the model behind the composition core — what an `Operator`
-is, how `Sequential` and `Graph` differ, when to reach for which primitive,
-and the small discipline that keeps everything composable.
-
-If you'd rather see code, skip to the [Composition core notebook][notebook]
-which walks through every primitive end-to-end. This page is the *why*.
+This page is the *why* — the composition algebra behind `geotoolz`,
+why each primitive looks the way it does, and when to reach for which
+one. For a hands-on tour, jump to the [Composition core notebook][notebook];
+for a real-data walk-through, see the [Quickstart](quickstart.md).
 
 [notebook]: notebooks/composition_core.ipynb
 
-## The composition algebra at a glance
+## The model in one diagram
 
-```text
-                ┌───────────────────────────────────────┐
-                │           Your pipeline               │
-                │  Sequential([op_a, op_b, op_c])       │
-                │       or                              │
-                │   op_a | op_b | op_c                  │
-                │       or                              │
-                │  Graph(inputs=..., outputs=...)       │
-                └─────────────────┬─────────────────────┘
-                                  │
-                                  ▼
-                ┌───────────────────────────────────────┐
-                │           Operator (base)             │
-                │   __call__: dual-mode dispatch        │
-                │   _apply : subclass implements        │
-                │   get_config: round-trip dict         │
-                │   __or__ : compose with `|`           │
-                └─────────────────┬─────────────────────┘
-                                  │
-                                  ▼
-                ┌───────────────────────────────────────┐
-                │            Carrier                    │
-                │  (Any in core; GeoTensor in domain)   │
-                └───────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph user["Your pipeline"]
+        L["Sequential([a, b, c])"]
+        P["a | b | c"]
+        G["Graph(inputs=..., outputs=...)"]
+    end
+    subgraph base["Operator (base class)"]
+        D["__call__ — dual-mode dispatch (eager vs graph)"]
+        A["_apply — subclass implements"]
+        C["get_config — JSON round-trip"]
+        O["__or__ — pipe with |"]
+    end
+    user --> base
+    base --> Carrier(["Carrier — Any in core, GeoTensor in domain ops"])
 ```
 
-The composition core is **carrier-agnostic** — the algebra works for
-`GeoTensor`s (production), numpy arrays (lightweight tests), scalars, or
-anything else. Domain operators (`NDVI`, `MaskClouds`, …) narrow to
-`GeoTensor` at their own signatures; the core stays generic.
+The composition core is **carrier-agnostic**. The same algebra runs on
+`GeoTensor`s in production and on scalars or ndarrays in tests. Domain
+operators (`NDVI`, `MaskFromSCL`, …) narrow to `GeoTensor` at their own
+signatures; the core stays generic.
 
-## What's an `Operator`?
+![Pipeline shapes — linear, branching, DAG](assets/composition-shapes.png){ loading=lazy }
 
-An `Operator` is a thing you call. Subclasses implement `_apply`; the base
-class handles two responsibilities you inherit for free:
+## What an `Operator` is
 
-1. **Dual-mode `__call__`** — running on a value invokes `_apply` (eager
-   mode); running on an `Input` or `Node` records a `Node` in a `Graph`
-   (graph mode). One method, two behaviours, dispatched on argument type.
-2. **Config round-trip** — `get_config()` returns a JSON-serialisable dict
-   of constructor args. Used for `__repr__`, pickling sanity, and the
-   optional Hydra-zen integration.
+An `Operator` is a thing you call. Subclasses implement `_apply`; the
+base class handles two responsibilities for free:
 
-The smallest possible operator:
+1. **Dual-mode `__call__`** — passing a value runs `_apply` eagerly;
+   passing an `Input` / `Node` records a `Node` in a `Graph`. One
+   method, two behaviours, dispatched on argument type.
+2. **Config round-trip** — `get_config()` returns a JSON-serialisable
+   dict of constructor args. Powers `__repr__`, pickling sanity, and
+   the optional Hydra-zen integration.
+
+### Lifecycle
+
+```mermaid
+flowchart LR
+    In["Carrier<br/>(GeoTensor in)"] --> Call["op.__call__(x)"]
+    Call -->|"value"| Apply["op._apply(x)"]
+    Call -->|"Input or Node"| Node["new Node in Graph"]
+    Apply --> Out["Carrier<br/>(GeoTensor out)"]
+    Config["op.get_config()"] -.->|"round-trips"| YAML[(YAML / Hydra-zen)]
+```
+
+![Operator lifecycle](assets/operator-lifecycle.png){ loading=lazy }
+
+### Typed I/O contract
+
+Operators don't *require* Pydantic models, but they pair well with one
+when you want the input/output contract spelled out — especially when an
+operator takes multi-input dicts. The pattern:
 
 ```python
-from geotoolz import Operator
+from pydantic import BaseModel
+from pipekit import Operator
 
-class Add(Operator):
-    def __init__(self, n: int) -> None:
-        self.n = n
 
-    def _apply(self, x: int) -> int:
-        return x + self.n
+class ScaleConfig(BaseModel):
+    scale: float = 1e-4
+    clip: tuple[float, float] | None = None
+
+
+class Scale(Operator):
+    """Multiply DN by a scale factor, optionally clipping the output."""
+
+    def __init__(self, **cfg) -> None:
+        self.cfg = ScaleConfig(**cfg)
+
+    def _apply(self, gt):
+        out = gt.values * self.cfg.scale
+        if self.cfg.clip is not None:
+            lo, hi = self.cfg.clip
+            out = out.clip(lo, hi)
+        return gt.array_as_geotensor(out)
 
     def get_config(self) -> dict:
-        return {"n": self.n}
-
-op = Add(5)
-op(10)              # 15 — eager
-repr(op)            # "Add(n=5)" — uses get_config()
+        return self.cfg.model_dump()
 ```
 
-That's the whole contract. Implement `_apply`, implement `get_config()`,
-inherit everything else.
+`ScaleConfig` validates the constructor args (one-shot, at `__init__`
+time); `get_config()` round-trips them losslessly. Inputs and outputs
+remain `GeoTensor`s — the typed model lives at the *config* boundary,
+not at the carrier boundary.
 
 ## `Sequential` — linear composition
+
+```mermaid
+flowchart LR
+    In([x]) --> A[op_a] --> B[op_b] --> C[op_c] --> Out([y])
+```
 
 `Sequential` threads the output of each operator into the next:
 
 ```python
-from geotoolz import Sequential
+from pipekit import Sequential
 
 pipe = Sequential([Add(1), Add(10), Add(100)])
 pipe(0)             # 111
 ```
 
-The same thing via the `|` operator (inherited from `Operator`):
+Equivalent with the `|` pipe operator:
 
 ```python
-pipe = Add(1) | Add(10) | Add(100)    # Sequential([Add(1), Add(10), Add(100)])
+pipe = Add(1) | Add(10) | Add(100)
 ```
 
-The `|` operator **flattens nested `Sequential`s** — `a | (b | c)` and
-`(a | b) | c` both produce a single three-element `Sequential`. No
-nested wrappers, no surprises.
+`|` **flattens** nested `Sequential`s — `a | (b | c)` and `(a | b) | c`
+both yield a single three-element `Sequential`. No nested wrappers, no
+surprises.
 
-## Dual-mode `__call__` — eager vs graph
+**Reach for `Sequential` when** the pipeline is a single chain: load →
+clean → transform → write. Most RS pipelines are this shape.
 
-The same operator works in two modes:
+## `Graph` — symbolic multi-input / multi-output
 
-```python
-import geotoolz as gz
-
-# Eager: pass a value, get a value back
-Add(5)(10)                    # 15
-
-# Graph mode: pass an Input/Node, get a Node back
-x = gz.Input("x")
-node = Add(5)(x)              # Node(operator=Add(5), parents=(x,))
+```mermaid
+flowchart LR
+    Img([image]) --> Scale --> Mask[ApplyMask]
+    Img --> Cloud[CloudMask] --> Mask
+    Scale --> NDVI
+    Mask --> NDVI --> Out([ndvi])
 ```
 
-The decision is automatic — `__call__` checks the argument type and routes
-appropriately. Subclasses only ever implement `_apply`; the dispatch
-happens once, in the base class.
-
-## `Graph` — symbolic multi-input / multi-output composition
-
-When your pipeline has branches, fan-out, or multiple inputs, `Sequential`
-isn't enough. `Graph` builds a DAG by *calling operators on placeholders*:
+When your pipeline has branches, fan-out, or multiple inputs,
+`Sequential` isn't enough. `Graph` builds a DAG by *calling operators on
+placeholders*:
 
 ```python
 import geotoolz as gz
 
 img = gz.Input("image")
-ref = gz.Input("reference")
 
-ndvi = NDVI(red_idx=2, nir_idx=3)(img)               # Node
-rmse = RMSE(axis=(-2, -1))(ndvi, ref)                # multi-input Node
+scaled = Scale(scale=1e-4)(img)
+mask = CloudMask()(img)
+clean = ApplyMask()(scaled, mask)
+ndvi = NDVI(nir_idx=7, red_idx=3)(clean)
 
-g = gz.Graph(
-    inputs={"image": img, "reference": ref},
-    outputs={"ndvi": ndvi, "rmse": rmse},
-)
-
-result = g(image=img_gt, reference=ref_gt)
-# {"ndvi": GeoTensor, "rmse": scalar}
+g = gz.Graph(inputs={"image": img}, outputs={"ndvi": ndvi})
+result = g(image=img_gt)                   # {"ndvi": GeoTensor}
 ```
 
 `Graph` topologically sorts the nodes, evaluates each exactly once, and
-returns a dict keyed by output name. Cycle detection and unreachable-input
-detection happen at construction time, not at `_apply` time.
+returns a dict keyed by output name. Cycle detection and
+unreachable-input detection happen at construction time, not at `_apply`
+time.
 
-`Graph` is itself an `Operator`, so it composes — you can put a `Graph`
-inside a `Sequential`, or wrap one in `Fanout`.
+A `Graph` is itself an `Operator`, so it composes — drop one inside a
+`Sequential`, or wrap one in `Fanout`.
+
+**Reach for `Graph` when** you need named intermediates, multiple
+inputs, multiple outputs, or fan-in (RMSE between a prediction and a
+reference, multi-temporal fusion, …).
+
+## `Branch` — runtime conditional
+
+```mermaid
+flowchart LR
+    In([x]) --> Pred{predicate?}
+    Pred -->|true| T[if_true] --> Out([y])
+    Pred -->|false| F[if_false] --> Out
+```
+
+```python
+gz.Branch(
+    predicate=lambda gt: gt.crs.is_geographic,
+    if_true=ReprojectToUTM(),
+    if_false=gz.Identity(),
+)
+```
+
+**Reach for `Branch` when** the *whole pipeline* needs a two-way fork
+based on a runtime predicate. For per-pixel masking, use `ApplyMask` /
+`Where` instead — branches dispatch on the carrier, not on each pixel.
+
+## `Switch` — multi-way dispatch
+
+```mermaid
+flowchart LR
+    In([x]) --> K[key fn]
+    K -->|"\"S2\""| S2[s2_pipe]
+    K -->|"\"L8\""| L8[l8_pipe]
+    K -->|other| D[default]
+    S2 --> Out([y])
+    L8 --> Out
+    D --> Out
+```
+
+```python
+gz.Switch(
+    key=lambda gt: gt.attrs["platform"],
+    cases={"S2": s2_pipeline, "L8": l8_pipeline},
+    default=gz.Identity(),
+)
+```
+
+**Reach for `Switch` when** you have a finite, named set of pipelines
+keyed off a scene attribute (sensor, product level, season).
+
+## Sequential vs Graph vs Branch/Switch — at a glance
+
+| You want… | Reach for | Notes |
+|---|---|---|
+| 2–6 steps, single chain | `Sequential` or `op_a \| op_b` | Most pipelines. |
+| Named intermediates, branches, fan-in | `Graph` | Use `Input` placeholders. |
+| Two-way runtime fork on the carrier | `Branch` | Predicate operates on the whole carrier. |
+| N-way dispatch keyed off an attribute | `Switch` | Cases are operators, key is a callable. |
+| One-input → many named outputs | `Fanout` | Sugar over a single-input `Graph`. |
+| Side-effect that keeps the carrier flowing | `Sink` | Composes; unlike a terminal write. |
+
+## Lazy vs eager execution
+
+`geotoolz`'s composition core is **eager by default**. Every `__call__`
+on a value runs `_apply` immediately and returns the next carrier. There
+is no deferred graph being built up behind the scenes when you call an
+operator on a `GeoTensor`.
+
+The one exception: passing an `Input` or `Node` instead of a value puts
+the operator in **graph mode**, where it records a `Node` instead of
+executing. That's how `Graph` is built. Once you call the constructed
+`Graph` on real inputs, the whole graph evaluates eagerly.
+
+Lazy execution over chunked arrays (Dask-style) isn't in the algebra —
+if you need it, wrap a `dask.array` inside the carrier and let the
+underlying compute layer handle laziness. The Operator boundary stays
+eager.
+
+## Where geotoolz slots into the ecosystem
+
+![Pipeline ecosystem — geocatalog → geotoolz → geopatcher](assets/pipeline-ecosystem.png){ loading=lazy }
+
+```mermaid
+flowchart LR
+    subgraph cat["geocatalog"]
+        STAC[(STAC)] --> Loader[CatalogLoader]
+    end
+    subgraph tools["geotoolz"]
+        Op1[Scale] --> Op2[CloudMask] --> Op3[NDVI]
+    end
+    subgraph patch["geopatcher (via geotoolz.patch_ops)"]
+        GS[GridSampler] --> AC[ApplyToChips] --> St[Stitch]
+    end
+    Loader --> Op1
+    Op3 --> GS
+```
+
+- **[`geocatalog`](https://github.com/jejjohnson/geocatalog)** sits
+  upstream — it discovers and loads scenes from STAC into `GeoTensor`s.
+- **`geotoolz`** consumes those `GeoTensor`s and runs per-scene
+  transforms.
+- **[`geopatcher`](https://github.com/jejjohnson/geopatcher)** handles
+  sliding-window patching for big rasters. `geotoolz.patch_ops` wraps
+  its `GridSampler`, `ApplyToChips`, and `Stitch` so a tiled-inference
+  flow composes inside a `Sequential` like any other operator.
+
+For the end-to-end multi-repo walk-through (catalog → patch → operate),
+see the canonical Lake Tahoe notebook:
+[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
 
 ## The v0.1 idiom library
 
-Beyond the bare composition primitives (`Sequential`, `Graph`), the core
-ships a small library of "operators you reach for constantly" — observers,
-control flow, and tiny building blocks. The big idea: **the `Operator`
-interface is general enough to express things that aren't just
-transforms** — side effects, branching, defaults, escape hatches all
-become first-class composable units that round-trip the same as any
-transform.
+Beyond the bare composition primitives, the core ships a small library
+of "operators you reach for constantly" — observers, control flow, and
+tiny building blocks. The idea: **the `Operator` interface is general
+enough to express things that aren't transforms** — side effects,
+branching, defaults, escape hatches all become first-class composable
+units that round-trip the same as any transform.
 
-### Identity-with-side-effect (observers)
+### Observers (identity-with-side-effect)
 
 | Operator | What it does |
 |---|---|
-| `Tap` | Calls `fn(gt)` and passes input through unchanged. Great for inline logging. |
-| `Snapshot` | A *controller* — produces snapshot-taking operators via `snap.at(key)`. After the pipeline runs, intermediates are available as `snap[key]`. |
+| `Tap` | Calls `fn(gt)` and passes input through unchanged. |
+| `Snapshot` | Capture-by-name; intermediates available as `snap[key]` after the pipeline runs. |
 | `ShapeTrace` | Prints `shape`, `dtype`, `crs` at each step. `mode="diff_only"` skips redundant lines. |
-
-```python
-import geotoolz as gz
-
-snap = gz.Snapshot()
-pipe = gz.Sequential([
-    Add(1), gz.Tap(print),               # observe
-    snap.at("intermediate"),             # capture
-    Add(10),
-    snap.at("final"),
-])
-pipe(0)
-snap["intermediate"]                     # 1
-snap["final"]                            # 11
-```
 
 ### Control flow
 
 | Operator | What it does |
 |---|---|
-| `Branch` | `if predicate(x): if_true(x) else if_false(x)`. Default `if_false=Identity()`. |
-| `Switch` | Multi-way dispatch on `key(x)`. Default `default=Identity()`. |
-
-```python
-gz.Branch(
-    predicate=lambda x: x > 0,
-    if_true=Add(100),
-    if_false=Identity(),                 # no-op for negative inputs
-)
-```
-
-### Composition
-
-| Operator | What it does |
-|---|---|
+| `Branch` | `if predicate(x): if_true(x) else if_false(x)`. |
+| `Switch` | Multi-way dispatch on `key(x)`. |
 | `Fanout` | One input → dict of outputs. Sugar over a single-input `Graph`. |
 
-```python
-gz.Fanout({
-    "doubled": gz.Lambda(lambda x: x * 2),
-    "squared": gz.Lambda(lambda x: x * x),
-})(5)                                    # {"doubled": 10, "squared": 25}
-```
-
-### Small but load-bearing building blocks
+### Building blocks
 
 | Operator | What it does |
 |---|---|
-| `Identity` | Explicit no-op. Use in `Branch.if_false`, `Switch.default`, anywhere a slot needs an `Operator`. |
-| `Const` | Return a fixed value regardless of input. Useful for test fixtures. |
-| `Lambda` | Inline-callable escape hatch. Flagged `forbid_in_yaml = True` (closures don't round-trip). |
-| `Sink` | Side-effect *terminal write that returns the input*. Composes (unlike a write op that returns `None`). |
-
-```python
-# Checkpoint an intermediate, keep going
-gz.Sequential([
-    expensive_step,
-    gz.Sink(lambda gt: save_to_disk(gt, "checkpoint.tif")),
-    next_step,                           # still receives the GeoTensor
-])
-```
-
-### `ModelOp` — framework-agnostic inference
-
-```python
-op = gz.ModelOp(my_sklearn_classifier, method="predict")
-predictions = op(features)               # arrays in, arrays out
-
-# Or with a torch model and batched inference
-op = gz.ModelOp(my_torch_unet, batch_size=8)
-preds = op(chips)                        # chunks along axis 0, concatenates
-```
-
-`ModelOp` never imports a framework — it calls `model(arr)` or
-`getattr(model, method)(arr)` directly. Use whatever fits.
-
-## The `Carrier` type
-
-```python
-from geotoolz import Carrier
-Carrier                                  # typing.Any (in v0.1)
-```
-
-`Carrier` is a deliberate type alias for `Any`. The composition core is
-*carrier-agnostic* — the same algebra runs on `GeoTensor` (production),
-ndarrays (tests), scalars, or anything else. When domain operators land,
-they'll narrow to `Carrier` annotations that effectively mean "GeoTensor"
-without ever forcing the core layer to import `georeader`.
-
-Identity-preserving operators (`Identity`, `Tap`, `Snapshot`, `ShapeTrace`,
-`Sink`) go one step further — their `_apply` uses an internal `TypeVar`
-so a static type checker can narrow `op(x: T) -> T`. The carrier survives.
+| `Identity` | Explicit no-op. Use in `Branch.if_false`, anywhere a slot needs an `Operator`. |
+| `Const` | Return a fixed value regardless of input. |
+| `Lambda` | Inline-callable escape hatch (won't YAML-round-trip). |
+| `Sink` | Side-effect terminal write that *returns the input*. Composes. |
 
 ## Two small disciplines
 
 ### Round-trip discipline (`forbid_in_yaml`)
 
-Operators that hold runtime closures (`Tap`, `Lambda`, `Branch`, `Switch`,
-`Sink`, `ModelOp`) carry `forbid_in_yaml = True`. Their `get_config()` is a
-debug repr, not a faithful YAML round-trip. The flag is documented for
-future YAML loader enforcement — production pipelines that need to be
-auditable should avoid closure-bearing operators, or accept that the YAML
-artifact won't fully reproduce them.
+Operators that hold runtime closures (`Tap`, `Lambda`, `Branch`,
+`Switch`, `Sink`, `ModelOp`) carry `forbid_in_yaml = True`. Their
+`get_config()` is a debug repr, not a faithful YAML round-trip. Use
+them freely in code; if you need a fully reproducible YAML artifact,
+avoid closures.
 
 ### Terminal-operator validation (`_terminal`)
 
-Some operators legitimately return `None` or otherwise break the carrier
-chain (`WriteCOG`, viz operators). Mark them with `_terminal = True`;
-`Sequential` then rejects them in any position except the last:
+Some operators legitimately return `None` (e.g. a write to disk). Mark
+them with `_terminal = True`; `Sequential` then rejects them in any
+position except the last:
 
 ```python
 class WriteCOG(Operator):
     _terminal = True
     def _apply(self, gt):
         save_to_disk(gt, self.path)
-        # returns None — would break the next op in a Sequential
 
-gz.Sequential([WriteCOG("/a"), Add(1)])  # TypeError
-gz.Sequential([Add(1), WriteCOG("/a")])  # ok — terminal at end
+Sequential([WriteCOG("/a"), Add(1)])  # TypeError
+Sequential([Add(1), WriteCOG("/a")])  # ok
 ```
 
-`Sink` is **not** terminal — it performs a side effect *and* returns the
-input. That's why `Sink` composes and `WriteCOG` doesn't.
+`Sink` is **not** terminal — it does a side effect *and* returns the
+input. That's why `Sink` composes mid-chain and `WriteCOG` doesn't.
 
-## What's not in the core
+## Related pages
 
-Several operators that the algebra supports are deliberately deferred to
-later releases. The [Pipeline idioms notebook][idioms] shows how to
-build minimal versions of each using just the v0.1 primitives, until the
-named ops ship:
-
-- `Profile` / `TimeIt`, `Histogram`, `Spy` / `Hook`, `Diff` — observer
-  family extensions; build on `Tap` once needed
-- `Try` / `Fallback`, `Coalesce`, `Retry` — exception-handling control
-  flow; needs careful design before shipping
-- `ApplyToBands`, `Cache` / `Memoize`, `Provenance`, `Mode` — composition
-  / stateful operators; bigger surface, separate PRs
-- `Subsample` — shape-changing transform; belongs with `radiometry`
-- `AssertX` / `Quarantine` — lives in `geotoolz.qc`, not `core`
-
-And the entire **domain operator surface** — radiometry, indices, cloud
-masking, atmospheric correction, compositing, pansharpening, SAR,
-hyperspectral, sampling, inference, sensor presets — is in the v0.2+
-roadmap. The composition algebra is ready; the operators come next.
-
-## Where next
-
-- **Hands-on:** the [Composition core notebook][notebook] runs every
-  primitive end-to-end against scalars (no GeoTensor setup required).
-- **Recipe book:** the [Pipeline idioms notebook][idioms] is a gallery
-  of observer / control-flow / composition / QC patterns, with
-  build-your-own implementations for the v0.2+ named ops.
-- **Deployment patterns:** the [Deployment shapes notebook][shapes]
-  tours 13 deployment patterns (notebook, ETL, FastAPI, tile server,
-  regulatory artifact, orchestrator, …).
-- **Reference:** the [Core API reference][api] documents each operator
-  with its constructor signature and config keys.
-
-[idioms]: notebooks/pipeline_idioms.ipynb
-[shapes]: notebooks/deployment_shapes.ipynb
-[api]: api/core.md
+- [Quickstart](quickstart.md) — 15-min real-data walk-through.
+- [Recipes](recipes/define-an-operator.md) — short focused how-tos.
+- [Normalization](normalization.md), [Multi-format readers](io.md),
+  [Sensor readers](readers.md) — module-specific deep-dives.
+- [Composition core notebook](notebooks/composition_core.ipynb) — every
+  primitive against scalars.
+- [Pipeline idioms](notebooks/pipeline_idioms.ipynb) — recipe gallery.
+- [Deployment shapes](notebooks/deployment_shapes.ipynb) — 13 deployment
+  patterns.
+- [Core API reference](api/core.md).

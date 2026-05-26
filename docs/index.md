@@ -1,101 +1,166 @@
 # geotoolz
 
-> Composable Operator library for remote sensing on top of `georeader.GeoTensor`.
+> Composable operators for remote sensing — small typed functions you
+> compose into linear chains or named DAGs, running on `GeoTensor`s.
 
-`geotoolz` lets you express remote-sensing pipelines as a `Sequential` of
-small composable Operators, or a `Graph` of named ops for branching /
-multi-input fusion. Operators run eagerly on `GeoTensor`s, compose with the
-`|` pipe operator, round-trip their configs for Hydra-zen integration, and
-support inline observation (`Tap`, `Snapshot`, `ShapeTrace`) and control
-flow (`Branch`, `Switch`, `Fanout`) without breaking the chain.
+`geotoolz` is built around one idea: **every step of a remote-sensing
+pipeline is an `Operator`** — a typed function from one carrier to
+another — and pipelines are just compositions of those operators. The
+composition core (`Operator`, `Sequential`, `Graph`, `Branch`, `Switch`,
+…) lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit)
+framework. `geotoolz` adds the RS-specific operator families on top.
 
-**Status:** pre-alpha (`0.0.1`). The **composition core** has landed —
-`Operator`, `Sequential`, `Graph`, `ModelOp`, plus the v0.1 idiom library
-(observers, control flow, building blocks). Domain operators (radiometry,
-indices, cloud masking, sampling, inference) land in subsequent releases.
-
-## Installation
-
-Not yet on PyPI. Install from source:
-
-```bash
-git clone https://github.com/jejjohnson/geotoolz.git
-cd geotoolz
-make install
+```mermaid
+flowchart LR
+    Scene([GeoTensor scene]) --> Scale --> Mask[CloudMask] --> NDVI --> Out([NDVI map])
 ```
 
-For the optional Hydra-zen integration:
+## Is this the right tool?
 
-```bash
-uv pip install -e '.[hydra]'
+```mermaid
+flowchart TD
+    Q{What are you doing?}
+    Q -->|"Single ad-hoc array op<br/>(one scene, one transform)"| A1[Use rasterio + numpy directly]
+    Q -->|"Reusable RS step you'll<br/>run on many scenes"| A2[Write an Operator]
+    Q -->|"Multi-step pipeline with<br/>branches, fusion, or QA"| A3[Compose with Graph]
+    Q -->|"Linear chain of 2-6 steps"| A4[Compose with Sequential]
+    Q -->|"Sliding-window inference<br/>over a big raster"| A5["Use <code>geopatcher</code> + <code>patch_ops</code>"]
+    Q -->|"Discover &amp; load scenes<br/>from a STAC catalogue"| A6["Use <code>geocatalog</code>, then feed into geotoolz"]
 ```
 
-## Quickstart
+If you find yourself wanting to (a) reuse the same RS step across
+scripts, (b) round-trip a pipeline to YAML, (c) compose branching /
+fan-in flows, or (d) plug into a tiled-inference setup — `geotoolz` is
+the right shape.
 
-A composition core in five lines:
+## Mental model
+
+Every operator is a typed function from inputs to outputs. The contract
+is small enough to fit in two methods:
+
+```python
+from pipekit import Operator
+
+class MyOp(Operator):
+    def __init__(self, *, knob: float) -> None:
+        self.knob = knob
+
+    def _apply(self, gt):          # the work
+        return gt * self.knob
+
+    def get_config(self):           # JSON-serialisable args
+        return {"knob": self.knob}
+```
+
+Pipelines compose:
+
+- **`Sequential([a, b, c])`** threads output → input down a linear list.
+- **`Graph(inputs=..., outputs=...)`** builds a named DAG by calling
+  operators on `Input` placeholders. Use it when you need branching,
+  fan-in, or multi-output flows.
+- **`Branch(predicate, if_true, if_false)`** and **`Switch(key, cases)`**
+  are explicit control-flow operators that round-trip the same as any
+  transform.
+
+A `Graph` is itself an `Operator`, so you can nest them inside a
+`Sequential` and vice-versa.
+
+## A two-operator pipeline
 
 ```python
 import geotoolz as gz
+from geotoolz import Operator, Sequential
 
-# Compose with the pipe operator
-pipe = gz.Tap(print) | gz.Identity()
-pipe("hello, world")     # prints "hello, world", returns "hello, world"
 
-# Or build a Sequential explicitly
-pipe = gz.Sequential([gz.Tap(print), gz.Identity()])
+class Scale(Operator):
+    def __init__(self, *, scale: float = 1e-4) -> None:
+        self.scale = scale
 
-# Branch on a predicate, fan out into multiple named outputs, etc.
-gz.Fanout({"upper": gz.Lambda(str.upper), "lower": gz.Lambda(str.lower)})("Hi")
-# {"upper": "HI", "lower": "hi"}
+    def _apply(self, gt):
+        return gt.array_as_geotensor(gt.values * self.scale)
+
+    def get_config(self):
+        return {"scale": self.scale}
+
+
+class NDVI(Operator):
+    def __init__(self, *, nir_idx: int, red_idx: int, eps: float = 1e-10) -> None:
+        self.nir_idx, self.red_idx, self.eps = nir_idx, red_idx, eps
+
+    def _apply(self, gt):
+        a = gt.values
+        nir, red = a[self.nir_idx], a[self.red_idx]
+        return gt.array_as_geotensor((nir - red) / (nir + red + self.eps))
+
+    def get_config(self):
+        return {"nir_idx": self.nir_idx, "red_idx": self.red_idx, "eps": self.eps}
+
+
+pipe = Sequential([Scale(scale=1e-4), NDVI(nir_idx=7, red_idx=3)])
+ndvi = pipe(sentinel2_geotensor)
 ```
 
-A more realistic shape (preview — domain ops not yet implemented):
+For the same shape with real data and a matplotlib plot at the end, see
+the [Quickstart](quickstart.md) or the [operator-composition
+notebook](notebooks/operators_lake_tahoe.ipynb).
 
-```python
-import geotoolz as gz
+## Where geotoolz fits
 
-ndvi = gz.Sequential([
-    gz.cloud.MaskClouds(qa_band="QA60", bits=[10, 11]),     # v0.2+
-    gz.indices.NDVI(red_idx=2, nir_idx=3),                  # v0.2+
-])
-result = ndvi(gt)                                            # GeoTensor in, GeoTensor out
+```mermaid
+flowchart LR
+    subgraph cat["geocatalog — discover &amp; load"]
+        STAC[(STAC catalogue)] --> Loader[CatalogLoader]
+    end
+    subgraph tools["geotoolz — operate"]
+        Op1[Scale] --> Op2[CloudMask] --> Op3[NDVI]
+    end
+    subgraph patch["geopatcher — tile &amp; stitch"]
+        Sampler[GridSampler] --> Apply[ApplyToChips] --> Stitch[Stitch]
+    end
+    Loader --> Op1
+    Op3 --> Sampler
 ```
 
-## What's available today
+- **[`geocatalog`](https://github.com/jejjohnson/geocatalog)** discovers
+  and loads scenes from STAC.
+- **`geotoolz`** runs the per-scene transforms.
+- **[`geopatcher`](https://github.com/jejjohnson/geopatcher)** handles
+  sliding-window patching for big rasters, exposed as Operator wrappers
+  in [`geotoolz.patch_ops`](api/core.md) (`GridSampler`, `ApplyToChips`,
+  `Stitch`) so a tiled-inference pipeline composes inside a `Sequential`.
 
-The v0.1 core composition layer ships:
+The full multi-repo walk-through lives in **the canonical Lake Tahoe
+notebook**:
+[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+The slice of that flow that's about *composition of operators* is
+[`docs/notebooks/operators_lake_tahoe.ipynb`](notebooks/operators_lake_tahoe.ipynb)
+in this repo.
 
-- **`Operator`** — base class with dual-mode `__call__` (eager vs graph)
-- **`Sequential`** — linear composition with terminal-op validation
-- **`Graph`** / **`Input`** / **`Node`** — symbolic multi-input / multi-output graphs
-- **`Fanout`** — sugar for one-input / many-output `Graph`s
-- **`ModelOp`** — framework-agnostic inference wrapper (`torch` / `sklearn` / any callable)
-- **`Tap`** / **`Snapshot`** / **`ShapeTrace`** — identity ops with side effects
-- **`Branch`** / **`Switch`** — control flow
-- **`Identity`** / **`Const`** / **`Lambda`** / **`Sink`** — small composable building blocks
+## Pre-alpha status
 
-Read the [Concepts] page for the model behind these primitives. Three
-tutorial notebooks cover the surface from different angles — the
-[Composition core notebook] walks through every primitive against
-scalars; the [Pipeline idioms] notebook is a recipe gallery of observer
-/ control-flow / QC patterns with build-your-own implementations for the
-v0.2+ named ops; the [Deployment shapes] notebook tours 13 deployment
-patterns (notebook, ETL, FastAPI, tile server, regulatory artifact,
-orchestrator, …). The [Core API reference] documents each operator in
-detail.
+`geotoolz` is `0.0.x`. The composition core has stabilised; the domain
+operator surface (radiometry, indices, cloud, compositing, segmentation,
+…) is landing module-by-module. Several submodules are partially
+implemented — check the source under `src/geotoolz/<module>/_src/` if
+you need to know what works today. Demos and recipes in these docs
+deliberately favour **inline `Operator` subclasses** over named imports,
+so they keep teaching the composition pattern even as the named-op surface
+churns.
 
-[Concepts]: concepts.md
-[Composition core notebook]: notebooks/composition_core.ipynb
-[Pipeline idioms]: notebooks/pipeline_idioms.ipynb
-[Deployment shapes]: notebooks/deployment_shapes.ipynb
-[Core API reference]: api/core.md
+## Where next
 
-## Links
+- **[Quickstart](quickstart.md)** — a 15-minute walk-through over one
+  Sentinel-2 Lake Tahoe scene.
+- **[Concepts](concepts.md)** — the composition algebra, with diagrams.
+- **Recipes**:
+  - [Define an operator](recipes/define-an-operator.md)
+  - [Branching pipelines](recipes/branching-pipelines.md)
+  - [Integration with geocatalog & geopatcher](recipes/integration-with-geocatalog-and-geopatcher.md)
+- **Tutorials**:
+  - [Composing a Sentinel-2 NDVI pipeline](notebooks/operators_lake_tahoe.ipynb)
+  - [Composition core walkthrough](notebooks/composition_core.ipynb)
+  - [Pipeline idioms](notebooks/pipeline_idioms.ipynb)
+  - [Deployment shapes](notebooks/deployment_shapes.ipynb)
+- **Reference**: [Core API](api/core.md) · [Changelog](https://github.com/jejjohnson/geotoolz/blob/main/CHANGELOG.md) · [GitHub](https://github.com/jejjohnson/geotoolz)
 
-- [Concepts](concepts.md)
-- [API Reference — Core](api/core.md)
-- [Composition core notebook](notebooks/composition_core.ipynb)
-- [Pipeline idioms](notebooks/pipeline_idioms.ipynb)
-- [Deployment shapes](notebooks/deployment_shapes.ipynb)
-- [Changelog](https://github.com/jejjohnson/geotoolz/blob/main/CHANGELOG.md)
-- [GitHub](https://github.com/jejjohnson/geotoolz)
+Related: [Normalization](normalization.md) · [Multi-format readers](io.md) · [Sensor readers](readers.md).
