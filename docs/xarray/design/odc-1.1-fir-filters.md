@@ -127,7 +127,7 @@ pipeline = Sequential([
 
 | Capability | Current state | This proposal |
 |---|---|---|
-| Butterworth IIR low/high/band/stop | [`array_smooth.lowpass_filter`](../../src/xrtoolz/interpolate/_src/array_smooth.py) | Unchanged |
+| Butterworth IIR low/high/band/stop | [`_smooth_kernels.lowpass_filter`](../../src/xrtoolz/interpolate/_src/_smooth_kernels.py) | Unchanged |
 | Generic IIR family (Cheby, Ellip, Bessel) | — | Out of scope |
 | FIR Lanczos | — | **Add** |
 | FIR Kaiser (tunable atten ↔ taps) | — | **Add** |
@@ -142,7 +142,7 @@ pipeline = Sequential([
 ### 4.1 Tap design (single helper, two windows)
 
 ```python
-# src/xrtoolz/interpolate/_src/array_smooth.py
+# src/xrtoolz/interpolate/_src/_smooth_kernels.py
 def _fir_taps(
     *,
     cutoff: float | tuple[float, float],
@@ -171,10 +171,10 @@ Band-pass = low-pass(f<sub>hi</sub>) − low-pass(f<sub>lo</sub>); high-pass
 `num_taps is None` for Kaiser; for Lanczos the default is
 `2 * ceil(2 / cutoff) + 1`.
 
-### 4.2 Tier A — array kernel
+### 4.2 Private numpy/scipy kernel
 
 ```python
-# src/xrtoolz/interpolate/_src/array_smooth.py
+# src/xrtoolz/interpolate/_src/_smooth_kernels.py
 def fir_filter(
     arr: ArrayLike, *,
     axis: int = -1,
@@ -192,7 +192,7 @@ arr, axis=axis, padtype='odd', method='gust')`. The `'gust'` method
 handles short segments better than the default. Complex inputs filtered
 component-wise (existing `_as_floating` helper).
 
-### 4.3 Tier B — xarray wrapper
+### 4.3 Layer 0 — xarray wrapper
 
 ```python
 # src/xrtoolz/interpolate/_src/smooth.py
@@ -288,11 +288,11 @@ No new top-level dependencies.
 ## 6. API summary (public surface)
 
 ```python
-# Tier A — array kernels
-xrtoolz.interpolate.array.fir_filter(arr, *, axis, cutoff, method, btype,
+# Private kernels (numpy/scipy)
+xrtoolz.interpolate._src._smooth_kernels.fir_filter(arr, *, axis, cutoff, method, btype,
                                       num_taps, attenuation_db)
 
-# Tier B — xarray
+# Layer 0 — xarray
 xrtoolz.interpolate.fir_filter(ds, *, dim, cutoff, method, btype,
                                 num_taps, attenuation_db)
 
@@ -347,8 +347,8 @@ Target: ~12 new test cases.
 
 | Slice | LOC | Notes |
 |---|---|---|
-| `_fir_taps` + `fir_filter` (Tier A) | 50 | scipy does the heavy lifting |
-| `fir_filter` (Tier B xarray wrapper) | 15 | Reuse `_apply_along_dim` |
+| `_fir_taps` + `fir_filter` (private kernel) | 50 | scipy does the heavy lifting |
+| `fir_filter` (Layer 0 xarray wrapper) | 15 | Reuse `_apply_along_dim` |
 | `median_dx_km` + `bandpass_wavelength` | 35 | New `geo/_src/along_track.py` |
 | `BandpassWavelength` operator | 20 | Standard pattern |
 | Tests | ~100 | 12 cases |

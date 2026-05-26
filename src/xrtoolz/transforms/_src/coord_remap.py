@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import xarray as xr
 
-from xrtoolz.transforms._src import array_coord_remap as _array
+from xrtoolz.transforms._src import _coord_remap_kernels as _kernels
 from xrtoolz.utils._src.finite import _finite_mask
 
 
@@ -65,7 +65,7 @@ def remap_axis(
     src = np.asarray(da[source_dim].values, dtype=float)
 
     axis = da.get_axis_num(source_dim)
-    new_values = _array.remap_axis(
+    new_values = _kernels.remap_axis(
         da.values,
         axis=axis,
         source_coords=src,

@@ -1,9 +1,10 @@
-"""Tier A — array kernels for axis remapping (D11, D12).
+"""Private numpy kernels for axis remapping.
 
-Per design decision D11, every arithmetic submodule grows a duck-array
-``axis=`` entry point. ``remap_axis`` interpolates values from a source
-1D coordinate vector to a target 1D coordinate vector along a chosen
-axis, preserving all other dimensions.
+Implementation detail — no stability guarantees. ``remap_axis``
+interpolates values from a source 1D coordinate vector to a target 1D
+coordinate vector along a chosen axis, preserving all other dimensions.
+Used internally by the Layer 0 xarray wrapper in
+:mod:`xrtoolz.transforms._src.coord_remap`.
 
 Backend: numpy. Methods: ``"linear"`` (np.interp on real/imag parts
 independently), ``"nearest"``.

@@ -1,4 +1,8 @@
-"""Tier A — gap-tolerant segmented 1-D spectral kernels."""
+"""Private numpy/scipy kernels for gap-tolerant segmented 1-D spectral analysis.
+
+Implementation detail — no stability guarantees. Used internally by the
+Layer 0 xarray wrappers in ``xrtoolz.metrics._src.segmented_psd``.
+"""
 
 from __future__ import annotations
 

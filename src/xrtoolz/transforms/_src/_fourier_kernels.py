@@ -1,10 +1,10 @@
-"""Tier A — array kernels for Fourier-domain transforms.
+"""Private numpy kernels for Fourier-domain transforms.
 
-Pure-array entry points for the canonical FFT and power-spectrum
-operations. Tier B (xarray, ``dim=``) wrappers in
-:mod:`xrtoolz.transforms._src.fourier` add coord/attr handling and the
-``xrft`` integration; this module is the numpy-only computational core
-that callers can drop down to when they have raw arrays.
+Implementation detail — no stability guarantees. Pure-array entry points
+for the canonical FFT and power-spectrum operations. The Layer 0 (xarray,
+``dim=``) wrappers in :mod:`xrtoolz.transforms._src.fourier` add
+coord/attr handling and the ``xrft`` integration; this module is the
+numpy-only computational core.
 
 Backend: numpy. JAX / CuPy variants are out of scope for the pilot.
 """
@@ -65,8 +65,8 @@ def power_spectrum(
     """Power spectrum of ``x`` along ``axis``.
 
     Computes the squared magnitude of the discrete Fourier transform,
-    ``|FFT(x)|**2``. No windowing or detrending is applied — the Tier B
-    wrapper handles those via ``xrft``. This minimal raw-array entry
+    ``|FFT(x)|**2``. No windowing or detrending is applied — the Layer 0
+    xarray wrapper handles those via ``xrft``. This minimal raw-array entry
     point also does not apply any additional density scaling by sample
     spacing beyond constructing the returned frequency coordinates;
     pass ``norm="ortho"`` (default) to keep units consistent across

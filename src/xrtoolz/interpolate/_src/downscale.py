@@ -1,4 +1,4 @@
-"""Tier B/C — learned resolution-change operators (D12, F3.4).
+"""Layer 0/1 — learned resolution-change operators (D12, F3.4).
 
 Per D12, ``Downscale`` is *learned* refinement (super-resolution) and
 ``Upscale`` is *learned* aggregation (subgrid-scale surrogate); the

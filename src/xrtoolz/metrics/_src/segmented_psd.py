@@ -11,7 +11,7 @@ from scipy import signal
 from scipy.stats import circmean
 
 from xrtoolz._operator import Operator
-from xrtoolz.metrics._src.array_segmented_psd import _segment_bounds
+from xrtoolz.metrics._src._segmented_psd_kernels import _segment_bounds
 
 
 _EARTH_RADIUS_KM = 6371.0088

@@ -15,12 +15,6 @@ Layer-1 ``Operator`` wrappers are re-exported flat from this package
 and from :mod:`xrtoolz.metrics.operators`.
 """
 
-from xrtoolz.metrics._src.array_segmented_psd import (
-    segment_signal,
-    segmented_coherence,
-    segmented_csd,
-    segmented_psd,
-)
 from xrtoolz.metrics._src.composite import psd_score_spacetime, rmse_skill_scores
 from xrtoolz.metrics._src.distributional import (
     CRPS,
@@ -189,10 +183,6 @@ __all__ = [
     "rmse",
     "rmse_skill_scores",
     "scores_by_region",
-    "segment_signal",
-    "segmented_coherence",
-    "segmented_csd",
-    "segmented_psd",
     "skill_by_lead_time",
     "spread_skill_ratio",
     "ssim",

@@ -87,36 +87,34 @@ results = pipeline(satellite_data=ds_raw, reference=ds_ref)
 
 The `Graph` is itself an `Operator` — it can be nested inside other Graphs or Sequentials. This is what makes multi-input operators (metrics, merging, concatenation) first-class citizens of the composition system rather than one-off manual wiring.
 
-## Type Contract — Three Tiers (Array, xarray, Operator)
+## Type Contract — Two Public Tiers (xarray, Operator)
 
 The composition layers above describe *how* operators stack. The type contract describes *what* each tier accepts and returns. See [decisions.md §D11](decisions.md) for the decision record.
 
 | Tier | Location | Input | Output | Coordinate semantics |
 |---|---|---|---|---|
-| **A — Array** | `xrtoolz.<module>.array` | array (numpy / JAX / numba-jitted / optionally CuPy) | array | `axis=` |
-| **B — Layer 0 xarray** | `xrtoolz.<module>` (private `_src/`) | `xr.DataArray` (single-variable) or `xr.Dataset` + variable selectors (multi-variable) | `xr.DataArray` or `xr.Dataset` | `dim=` |
-| **C — Layer 1 Operator** | `xrtoolz.<module>` | `xr.Dataset` (or two for multi-input) | `xr.Dataset` \| `xr.DataArray` \| scalar (terminal viz returns `matplotlib.Figure / Axes`, see D10) | constructor `variable=` / `dims=` |
+| **Layer 0 — xarray** (public) | `xrtoolz.<module>` (private `_src/`) | `xr.DataArray` positional (single-variable; multi-DataArray for multi-input physics) or `xr.Dataset` + selectors for inherently Dataset-shaped ops | `xr.DataArray` or `xr.Dataset` | `dim=` |
+| **Layer 1 — Operator** (public) | `xrtoolz.<module>` | `xr.Dataset` (or multiple Datasets for multi-input) | `xr.Dataset` \| `xr.DataArray` \| scalar (terminal viz returns `matplotlib.Figure / Axes`, see D10) | constructor `variable=` / `dims=` |
+
+Private implementation detail: numpy / scipy kernels live as `_*_kernels.py` siblings inside each module's `_src/`. They are not re-exported anywhere and carry no stability guarantees. Layer 0 dispatches to them via `xr.apply_ufunc`.
 
 Rules:
 
-- Each tier delegates downward; logic is never duplicated. Tier B wraps Tier A; Tier C wraps Tier B.
-- Tier A is **pragmatic, not strictly Array API-compliant**: numpy is the default backend, with JAX / numba / CuPy variants added per-function as the math benefits. Some functions dispatch via `array_namespace(x)`; others are hand-authored backend-specific kernels. The library never imports JAX / CuPy at the top level — optional backends are imported lazily.
-- Tier B uses arity to disambiguate the input type: single-variable functions take `xr.DataArray`; multi-variable functions take `xr.Dataset` plus explicit variable selectors (`variable=`, `u_var=`, …).
-- Tier C input is always `xr.Dataset` (or two `xr.Dataset` for multi-input operators). Output is **usually** `xr.Dataset` for transformations that preserve the dataset shape, but reduction-style operators (e.g., metrics) may return an `xr.DataArray` or scalar, and terminal viz operators return `matplotlib.Figure / Axes` (D10). Composition (`Sequential`, `Graph`) only sees Tier C.
-- Modules whose math is inherently coord/attr-manipulation rather than arithmetic (`validation`, `crs`, `subset`, `masks`) skip Tier A; their Tier B takes `xr.Dataset` directly.
+- Layer 1 wraps Layer 0; logic is never duplicated. Layer 0 dispatches to the private kernels.
+- Layer 0 is **DataArray-positional**: one DataArray in / one DataArray out for single-variable ops, multiple DataArrays in for multi-input physics (kinematics, balances). Inherently Dataset-shaped ops (`validation`, `crs`, `subset`, `masks`) take `xr.Dataset` directly.
+- Layer 1 input is always `xr.Dataset` (or multiple Datasets for multi-input operators). Output is **usually** `xr.Dataset` for transformations that preserve the dataset shape, but reduction-style operators (e.g., metrics) may return an `xr.DataArray` or scalar, and terminal viz operators return `matplotlib.Figure / Axes` (D10). Composition (`Sequential`, `Graph`) only sees Layer 1.
 
 Example — `metrics.rmse`:
 
 ```python
-# Tier A — duck array (numpy, JAX, CuPy, Dask)
-xrtoolz.metrics.array.rmse(pred_arr, ref_arr, axis=-1)
-
-# Tier B — Layer 0 xarray (DataArray in, DataArray out)
+# Layer 0 — xarray (DataArray in, DataArray out)
 xrtoolz.metrics.rmse(pred_da, ref_da, dim="time")
 
-# Tier C — Layer 1 Operator (Dataset in, DataArray out)
+# Layer 1 — Operator (Dataset in, DataArray out)
 RMSE(variable="ssh", dims=["time"])(pred_ds, ref_ds)
 ```
+
+Users who need raw numpy can either pre-convert (`.values` in, wrap the result back as a DataArray) or import from the private kernel module (`xrtoolz.<module>._src._<name>_kernels`) accepting the no-stability contract.
 
 ## The `Operator` Base Class
 

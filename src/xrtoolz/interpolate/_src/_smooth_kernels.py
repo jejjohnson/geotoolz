@@ -1,9 +1,9 @@
-"""Tier A — array kernels for value-preserving smoothers (D11, D12).
+"""Private numpy/scipy kernels for value-preserving smoothers.
 
-Per design decision D11, every arithmetic submodule grows a duck-array
-``axis=`` entry point. These kernels operate on raw :class:`numpy.ndarray`
-inputs with an explicit ``axis``, returning an array of the same shape
-(no reduction).
+Implementation detail — no stability guarantees. These kernels operate
+on raw :class:`numpy.ndarray` inputs with an explicit ``axis``, returning
+an array of the same shape (no reduction). Used internally by the
+Layer 0 xarray wrappers in :mod:`xrtoolz.interpolate._src.smooth`.
 
 Backend: numpy + scipy. JAX / CuPy variants are out of scope for the
 F3.3 pilot.

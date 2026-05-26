@@ -136,10 +136,10 @@ def segment_signal(
 
 Implementation: ~25 LOC using `numpy.lib.stride_tricks.sliding_window_view`.
 
-### 4.2 Tier A — array kernels
+### 4.2 Private kernels (numpy/scipy)
 
 ```python
-# src/xrtoolz/metrics/_src/array_segmented_psd.py
+# src/xrtoolz/metrics/_src/_segmented_psd_kernels.py
 def segmented_psd(
     x: ArrayLike, *,
     fs: float, npt: int, overlap: float = 0.5,
@@ -162,7 +162,7 @@ Each kernel:
    periodogram).
 3. Stack and mean across segments.
 
-### 4.3 Tier B — xarray driver
+### 4.3 Layer 0 — xarray driver
 
 ```python
 # src/xrtoolz/metrics/_src/segmented_psd.py
@@ -276,13 +276,13 @@ isn't already in scipy/numpy/xarray.
 ## 6. Public API surface
 
 ```python
-# Tier A — array kernels
-xrtoolz.metrics.array.segment_signal(x, *, npt, overlap, gap_indices, min_segment_length)
-xrtoolz.metrics.array.segmented_psd(x, *, fs, npt, overlap, gap_indices, window, scaling)
-xrtoolz.metrics.array.segmented_csd(x, y, *, fs, npt, overlap, gap_indices, window, scaling)
-xrtoolz.metrics.array.segmented_coherence(x, y, *, fs, npt, overlap, gap_indices, window)
+# Private kernels (numpy/scipy)
+xrtoolz.metrics._src._segmented_psd_kernels.segment_signal(x, *, npt, overlap, gap_indices, min_segment_length)
+xrtoolz.metrics._src._segmented_psd_kernels.segmented_psd(x, *, fs, npt, overlap, gap_indices, window, scaling)
+xrtoolz.metrics._src._segmented_psd_kernels.segmented_csd(x, y, *, fs, npt, overlap, gap_indices, window, scaling)
+xrtoolz.metrics._src._segmented_psd_kernels.segmented_coherence(x, y, *, fs, npt, overlap, gap_indices, window)
 
-# Tier B — xarray
+# Layer 0 — xarray
 xrtoolz.metrics.along_track_psd_score(ds_track, *, var_ref, var_pred, dim,
                                        npt, overlap, max_gap, spacing_km,
                                        lon, lat, time)
@@ -335,9 +335,9 @@ Target: ~12 cases.
 
 | Slice | LOC |
 |---|---|
-| `segment_signal` (Tier A) | 25 |
+| `segment_signal` (private kernel) | 25 |
 | `segmented_psd` / `segmented_csd` / `segmented_coherence` | 50 |
-| `along_track_psd_score` (Tier B) | 50 |
+| `along_track_psd_score` (Layer 0) | 50 |
 | `psd_score_by_region` | 25 |
 | `SegmentedPSDScore` operator | 20 |
 | Tests | ~120 |

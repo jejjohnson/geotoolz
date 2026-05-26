@@ -140,7 +140,7 @@ We therefore drop `pyinterp` from the proposal. It remains a viable
 duck-typed: a future `backend="pyinterp"` kwarg can dispatch to a
 pyinterp-aware path without making it a hard dependency.
 
-### 4.2 Tier B — generic primitive
+### 4.2 Layer 0 — generic primitive
 
 ```python
 # src/xrtoolz/interpolate/_src/grid_to_points.py

@@ -40,10 +40,6 @@ def test_metrics_package_root_exposes_layer0_and_operators():
         resolved_scale_2d,
         rmse,
         rmse_skill_scores,
-        segment_signal,
-        segmented_coherence,
-        segmented_csd,
-        segmented_psd,
     )
 
     # Sanity-check at least one is callable.
@@ -74,10 +70,6 @@ def test_metrics_package_root_exposes_layer0_and_operators():
         resolved_scale,
         resolved_scale_2d,
         rmse_skill_scores,
-        segment_signal,
-        segmented_coherence,
-        segmented_csd,
-        segmented_psd,
     )
 
 

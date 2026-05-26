@@ -26,14 +26,14 @@ import xarray as xr
 
 from xrtoolz.geo import get_dataset_resolution
 from xrtoolz.metrics import NRMSEScore, nrmse, nrmse_score
-from xrtoolz.metrics.array import nrmse_score as array_nrmse_score
+from xrtoolz.metrics._src._pixel_kernels import nrmse_score as array_nrmse_score
 
 
 # ---------- nrmse_score ----------------------------------------------------
 
 
 def test_nrmse_score_array_matches_mercator_formula() -> None:
-    """Tier A: ``1 - RMSE / std(ref)``."""
+    """Private kernel: ``1 - RMSE / std(ref)``."""
     rng = np.random.default_rng(0)
     pred = rng.standard_normal((4, 32))
     ref = rng.standard_normal((4, 32))
@@ -78,7 +78,7 @@ def test_nrmse_score_diverges_from_nrmse_on_nonzero_mean_reference() -> None:
 
 
 def test_nrmse_score_operator_matches_function() -> None:
-    """Layer-1 ``NRMSEScore`` selects the variable and forwards to Tier B."""
+    """Layer-1 ``NRMSEScore`` selects the variable and forwards to Layer 0."""
     rng = np.random.default_rng(3)
     pred = rng.standard_normal((6, 24))
     ref = rng.standard_normal((6, 24))

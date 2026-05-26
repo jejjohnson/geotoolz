@@ -133,7 +133,7 @@ pipeline = Sequential([
 
 ## 4. Design
 
-### 4.1 Tier B — 2D residual binning
+### 4.1 Layer 0 — 2D residual binning
 
 ```python
 # src/xrtoolz/metrics/_src/binned.py
@@ -177,7 +177,7 @@ Internals:
    on the track coords to get a categorical DataArray of region indices.
 2. `groupby` the residual + reference + prediction by the categorical
    DataArray.
-3. Apply each metric as a Tier B reduction within the groupby.
+3. Apply each metric as a Layer 0 reduction within the groupby.
 
 This single function replaces the four hard-coded regime branches in
 the upstream. The existing pixel-metric kernels in
@@ -290,7 +290,7 @@ No new top-level dependencies.
 ## 6. Public API surface
 
 ```python
-# Tier B primitives
+# Layer 0 primitives
 xrtoolz.metrics.bin_residuals_2d(ds_track, *, var_ref, var_pred,
                                   lon, lat, lon_bins, lat_bins, statistics)
 xrtoolz.metrics.scores_by_region(ds_track, *, var_ref, var_pred,

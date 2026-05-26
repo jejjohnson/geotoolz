@@ -21,14 +21,13 @@ version: 0.1.0
 
     See `xrtoolz/__init__.py` for the current export surface.
 
-!!! note "Type contract — three tiers (D11)"
-    Every module with array-meaningful math exposes three tiers:
+!!! note "Type contract — two tiers (D11)"
+    Every public-facing module exposes two tiers:
 
-    - **Tier A — `<module>.array`** — array functions (numpy / JAX / numba / optionally CuPy). Take/return arrays. Use `axis=`.
-    - **Tier B — Layer 0 xarray** — `xr.DataArray` for single-variable, `xr.Dataset` + variable selectors for multi-variable. Use `dim=`.
-    - **Tier C — Layer 1 Operator** — input is `xr.Dataset` (or two for multi-input). Output is usually `xr.Dataset`, may narrow to `xr.DataArray` or scalar for reductions (e.g., metrics), or `matplotlib.Figure / Axes` for terminal viz (D10). The only tier `Sequential` and `Graph` see.
+    - **Layer 0 — xarray** — DataArray-positional primitives. Single-variable functions take an `xr.DataArray` (and return one); multi-variable physics primitives take multiple DataArrays positionally. Inherently Dataset-shaped ops (`validation`, `crs`, `subset`, `masks`) take `xr.Dataset` directly. All use `dim=`.
+    - **Layer 1 — Operator** — input is `xr.Dataset` (or two for multi-input). Output is usually `xr.Dataset`, may narrow to `xr.DataArray` or scalar for reductions (e.g., metrics), or `matplotlib.Figure / Axes` for terminal viz (D10). The only tier `Sequential` and `Graph` see.
 
-    Modules whose math is inherently coord/attr-manipulation (`validation`, `crs`, `subset`, `masks`) skip Tier A — Tier B takes `xr.Dataset` directly. Value-resampling functionality lives under `xrtoolz.interpolate` (D12), not separate `regrid` / `interpolation` / `discretize` modules. See [architecture.md §Type Contract](../architecture.md) and [decisions.md §D11](../decisions.md).
+    Private implementation detail: numpy / scipy kernels live as `_*_kernels.py` siblings inside each module's `_src/` (e.g., `metrics/_src/_pixel_kernels.py`). They carry no stability guarantees and are not re-exported anywhere — Layer 0 dispatches to them via `xr.apply_ufunc`. Value-resampling functionality lives under `xrtoolz.interpolate` (D12), not separate `regrid` / `interpolation` / `discretize` modules. See [architecture.md §Type Contract](../architecture.md) and [decisions.md §D11](../decisions.md).
 
 # Components — Layer 1 Operators
 
@@ -74,7 +73,7 @@ enriched = diagnostics(velocity_dataset)
 
 Standardizes coordinate names, ranges, ordering, and metadata across heterogeneous data sources. This is almost always the first step in any pipeline.
 
-**Type contract (D11):** skips Tier A — the math is coord/attr manipulation, not arithmetic. Tier B takes `xr.Dataset` directly.
+**Type contract (D11):** Layer 0 takes `xr.Dataset` directly — the math is coord/attr manipulation, not arithmetic.
 
 ```python
 class ValidateCoords:
@@ -98,7 +97,7 @@ class SortCoords:
 
 Embedding and transforming CRS metadata. Wraps `rioxarray` and `pyproj`.
 
-**Type contract (D11):** skips Tier A — operations modify CRS metadata and reproject coords; the underlying numerical work is delegated to `rioxarray` / `pyproj`. Tier B takes `xr.Dataset` directly.
+**Type contract (D11):** Layer 0 takes `xr.Dataset` directly — operations modify CRS metadata and reproject coords; the underlying numerical work is delegated to `rioxarray` / `pyproj`.
 
 ```python
 class AssignCRS:
@@ -114,7 +113,7 @@ class Reproject:
 
 Extract regions of interest by bounding box, geometry, or time period.
 
-**Type contract (D11):** skips Tier A — selection is coord-driven and does no array arithmetic. Tier B takes `xr.Dataset` directly.
+**Type contract (D11):** Layer 0 takes `xr.Dataset` directly — selection is coord-driven and does no array arithmetic.
 
 ```python
 class SubsetBBox:
@@ -137,7 +136,7 @@ class SelectVariables:
 
 Add land, ocean, country, or custom masks as coordinate variables. Wraps `regionmask`.
 
-**Type contract (D11):** skips Tier A — mask construction is geometry/coord-driven via `regionmask`, not array arithmetic. Tier B takes `xr.Dataset` directly.
+**Type contract (D11):** Layer 0 takes `xr.Dataset` directly — mask construction is geometry/coord-driven via `regionmask`, not array arithmetic.
 
 ```python
 class AddLandMask:
@@ -154,13 +153,12 @@ class AddCountryMask:
 
 ## `interpolate` — Resampling, Aggregation, Smoothing
 
-Unified home for **value resampling onto new coordinate locations**: regridding, gap-filling, binning, coord-axis remapping, time resampling, smoothing, and learned super-resolution. Subsumes what the v0.1 design split across `regrid`, `interpolation`, and `discretize`. Three tiers per D11; Tier A is rich here — most algorithms are pure array math (linear / cubic / RBF / kriging / FFT-based filters).
+Unified home for **value resampling onto new coordinate locations**: regridding, gap-filling, binning, coord-axis remapping, time resampling, smoothing, and learned super-resolution. Subsumes what the v0.1 design split across `regrid`, `interpolation`, and `discretize`. Two public tiers per D11 (xarray Layer 0 + Operator Layer 1); the underlying private numpy / scipy kernels are rich here — most algorithms are pure array math (linear / cubic / RBF / kriging / FFT-based filters).
 
 Sub-organized by source/target structure:
 
 ```
 xrtoolz/interpolate/
-    array.py
     _src/
         grid_to_grid.py    # gridded → gridded (same domain, different grid)
         grid_to_points.py  # gridded → unstructured (extract at points / tracks)
@@ -184,18 +182,13 @@ Modules outside `interpolate` that handle adjacent concerns:
 Deterministic, same-domain regridding. Wraps scipy / sklearn interpolators (no xesmf hard dep).
 
 ```python
-# Tier A — array
-def regrid(values: ArrayLike, *, src_coords, tgt_coords, method: str = "linear", fill_value=np.nan) -> Array: ...
-def coarsen(values: ArrayLike, *, factor: dict[int, int], reduction: str = "mean") -> Array: ...
-def refine(values: ArrayLike, *, factor: dict[int, int], method: str = "linear") -> Array: ...
-
-# Tier B — Layer 0 xarray
+# Layer 0 — xarray
 def regrid(da: xr.DataArray, *, target: xr.Dataset | Grid, method: str = "linear",
            fill_value=np.nan, extrap: bool = False) -> xr.DataArray: ...
 def coarsen(da: xr.DataArray, *, factor: dict[str, int], reduction: str = "mean") -> xr.DataArray: ...
 def refine(da: xr.DataArray, *, factor: dict[str, int], method: str = "linear") -> xr.DataArray: ...
 
-# Tier C — Operator
+# Layer 1 — Operator
 class Regrid(Operator):
     def __init__(self, target: "Grid | xr.Dataset", *, method: str = "linear",
                  fill_value=np.nan, extrap: bool = False): ...
@@ -215,7 +208,7 @@ class Refine(Operator):
 Sample a gridded field at scattered (lon, lat[, time, depth]) locations. Useful for satellite/glider/ship match-ups against a model field.
 
 ```python
-# Tier C
+# Layer 1
 class SampleAtPoints(Operator):
     def __init__(self, points: "xr.Dataset | gpd.GeoDataFrame",
                  *, method: str = "linear", time_match: str = "nearest"): ...
@@ -230,13 +223,7 @@ class AlongTrack(SampleAtPoints):
 Project scattered observations onto a regular grid using a smooth interpolant (RBF / NN / IDW / kriging).
 
 ```python
-# Tier A
-def scatter_to_grid(values: ArrayLike, *, src_xy: ArrayLike, tgt_grid: ArrayLike,
-                    method: str = "rbf", **kwargs) -> Array: ...
-def kriging(values: ArrayLike, *, src_xy: ArrayLike, tgt_grid: ArrayLike,
-            variogram: str = "matern", **kwargs) -> Array: ...
-
-# Tier C
+# Layer 1
 class ScatterToGrid(Operator):
     def __init__(self, target: "Grid", *, method: str = "rbf", **kwargs): ...
     def __call__(self, ds: xr.Dataset) -> xr.Dataset: ...
@@ -250,7 +237,7 @@ class Kriging(ScatterToGrid):
 Project scattered observations onto a regular grid using bin-statistic aggregation. Different from `points_to_grid` in that it's a deterministic reduction, not an interpolation.
 
 ```python
-# Tier C
+# Layer 1
 class Bin2D(Operator):
     def __init__(self, target: "Grid", *, statistic: str = "mean",
                  min_count: int | None = None): ...
@@ -266,7 +253,7 @@ class Bin2DTime(Operator):
 Same grid, fill NaN holes via interpolation. (Distinguished from `points_to_grid` because the source structure is the *same* grid, just with missing values.)
 
 ```python
-# Tier C
+# Layer 1
 class FillNaN(Operator):
     def __init__(self, *, dim: str = "spatial", method: str = "linear",
                  max_gap: float | None = None): ...
@@ -284,15 +271,11 @@ class FillNaNKriging(Operator):
 Generic operation: remap a field defined on coordinate axis A onto a new axis B, where B may itself depend on the data. **Vertical coord remapping (depth ↔ σ ↔ isopycnal ↔ pressure-level) is the canonical usage**, but the same primitive handles temporal phase remapping (e.g., to-diurnal-cycle phase), curvilinear-orthogonal coord transforms, and Lagrangian ↔ Eulerian rebinning. The generic `RemapAxis` is the workhorse; named subclasses are convenience presets.
 
 ```python
-# Tier A
-def remap_axis(values: ArrayLike, *, src_axis: ArrayLike, tgt_axis: ArrayLike,
-               method: str = "linear") -> Array: ...
-
-# Tier B
+# Layer 0
 def remap_axis(da: xr.DataArray, *, src_axis: xr.DataArray, tgt_axis: xr.DataArray,
                method: str = "linear") -> xr.DataArray: ...
 
-# Tier C — generic
+# Layer 1 — generic
 class RemapAxis(Operator):
     """Remap along an arbitrary coord axis. The target axis may depend on the data
     (e.g., σ-coords are a function of SSH and bathymetry)."""
@@ -301,7 +284,7 @@ class RemapAxis(Operator):
                  method: str = "linear"): ...
     def __call__(self, ds: xr.Dataset) -> xr.Dataset: ...
 
-# Tier C — vertical specializations (canonical)
+# Layer 1 — vertical specializations (canonical)
 class ToSigma(RemapAxis):
     """Depth → σ for ocean models  (σ = (z + ssh) / (h + ssh))."""
     def __init__(self, *, ssh_var: str = "ssh", depth_var: str = "depth",
@@ -323,7 +306,7 @@ class ToPressureLevels(RemapAxis):
 class ToHeight(RemapAxis):
     """Pressure → geopotential height for atmospheric data."""
 
-# Tier C — temporal specialization
+# Layer 1 — temporal specialization
 class ToPhase(RemapAxis):
     """Time → cycle phase (diurnal, annual, ENSO, …) — folds a time series onto
     a reference cycle. Distinct from time encoders (which add features)."""
@@ -334,7 +317,7 @@ class ToPhase(RemapAxis):
 ### `interpolate.resample` — Time-axis resampling
 
 ```python
-# Tier C
+# Layer 1
 class Resample(Operator):
     """Down-sample a time series via aggregation (e.g., hourly → daily mean)."""
     def __init__(self, freq: str, *, reduction: str = "mean"): ...
@@ -349,12 +332,7 @@ class Upsample(Operator):
 Sequential along a dimension (typically time, but applies to any axis). Note: the previous design's `detrend.LowpassFilter` is the same primitive; canonical home is here. `detrend` retains only the climatology/anomaly tools.
 
 ```python
-# Tier A
-def moving_average(values: ArrayLike, *, axis: int, window: int) -> Array: ...
-def gaussian_smooth(values: ArrayLike, *, axis: int, sigma: float) -> Array: ...
-def lowpass(values: ArrayLike, *, axis: int, cutoff: float, order: int = 3) -> Array: ...
-
-# Tier C
+# Layer 1
 class MovingAverage(Operator):
     def __init__(self, *, dim: str, window: int): ...
 
@@ -376,7 +354,7 @@ class KalmanSmoother(Operator):
 Coarse → fine via a *learned* model (CNN, BCSD regression, GAN, diffusion, …). Wraps a `ModelOp` (see [architecture.md §Inference](../architecture.md)) — the user supplies the fitted model; `Downscale` does the xarray ↔ array marshalling, optional patch tiling, and reconstruction. **Deterministic upsampling is `Refine`; this is the learned counterpart.**
 
 ```python
-# Tier C
+# Layer 1
 class Downscale(Operator):
     """Learned coarse → fine super-resolution. Wraps a ModelOp."""
     def __init__(self, model_op: ModelOp, *, target: "Grid",
@@ -428,23 +406,17 @@ Organized by sub-category:
 
 ### `transforms.fourier` — Fourier-domain transforms
 
-Three-tier per D11. Tier A wraps `numpy.fft` / `scipy.fft` (numpy default; `jax.numpy.fft` variant added per-function where useful). Tier B wraps `xrft` for label preservation. Tier C wraps Tier B.
+Two public tiers per D11. Layer 0 wraps `xrft` for label preservation and dispatches to private numpy / scipy kernels under `_src/_fourier_kernels.py`. Layer 1 wraps Layer 0.
 
 ```python
-# Tier A — array (numpy default; jax variant per-function)
-def power_spectrum(x: ArrayLike, *, axis: int, isotropic: bool = False, **kwargs) -> Array: ...
-def cross_spectrum(x: ArrayLike, y: ArrayLike, *, axis: int, **kwargs) -> Array: ...
-def coherence(x: ArrayLike, y: ArrayLike, *, axis: int, **kwargs) -> Array: ...
-def stft(x: ArrayLike, *, axis: int, window_size: int, hop: int, **kwargs) -> Array: ...
-
-# Tier B — Layer 0 xarray (DataArray in, DataArray out)
+# Layer 0 — xarray (DataArray in, DataArray out)
 def power_spectrum(da: xr.DataArray, *, dim: str, isotropic: bool = False, **kwargs) -> xr.DataArray: ...
 def cross_spectrum(da_a: xr.DataArray, da_b: xr.DataArray, *, dim: str, **kwargs) -> xr.DataArray: ...
 def coherence(da_a: xr.DataArray, da_b: xr.DataArray, *, dim: str, **kwargs) -> xr.DataArray: ...
 def stft(da: xr.DataArray, *, dim: str, window_size: int, hop: int, **kwargs) -> xr.DataArray: ...
 def drop_negative_frequencies[T: xr.DataArray | xr.Dataset](da: T, *, dims, drop: bool = True) -> T: ...
 
-# Tier C — Operator (Dataset in, Dataset out)
+# Layer 1 — Operator (Dataset in, Dataset out)
 class PowerSpectrum(Operator):
     def __init__(self, variable: str, *, dims: list[str], isotropic: bool = False, **kwargs): ...
     def __call__(self, ds: xr.Dataset) -> xr.Dataset: ...
@@ -459,20 +431,14 @@ class STFT(Operator): ...
 
 ### `transforms.dct` — Cosine / sine transforms
 
-Three-tier per D11. Tier A wraps `scipy.fft.dct` / `idct` / `dst` / `idst` (numpy default; numba-jitted small-N variants where Python overhead matters).
+Two public tiers per D11. Layer 0 dispatches to private numpy / scipy kernels that wrap `scipy.fft.dct` / `idct` / `dst` / `idst`.
 
 ```python
-# Tier A — array
-def dct(x: ArrayLike, *, axis: int = -1, type: int = 2, norm: str | None = None) -> Array: ...
-def idct(x: ArrayLike, *, axis: int = -1, type: int = 2, norm: str | None = None) -> Array: ...
-def dst(x: ArrayLike, *, axis: int = -1, type: int = 2, norm: str | None = None) -> Array: ...
-def idst(x: ArrayLike, *, axis: int = -1, type: int = 2, norm: str | None = None) -> Array: ...
-
-# Tier B — Layer 0 xarray
+# Layer 0 — xarray
 def dct(da: xr.DataArray, *, dim: str, type: int = 2, norm: str | None = None) -> xr.DataArray: ...
 # (idct, dst, idst — identical shape)
 
-# Tier C — Operator
+# Layer 1 — Operator
 class DCT(Operator):
     def __init__(self, variable: str, *, dim: str, type: int = 2): ...
     def __call__(self, ds: xr.Dataset) -> xr.Dataset: ...
@@ -482,18 +448,14 @@ class DST(Operator): ...
 
 ### `transforms.wavelet` — Wavelet transforms
 
-Three-tier per D11. Tier A wraps `pywt` (optional dep `PyWavelets`).
+Two public tiers per D11. Layer 0 dispatches to private kernels that wrap `pywt` (optional dep `PyWavelets`).
 
 ```python
-# Tier A — array
-def cwt(x: ArrayLike, *, scales: ArrayLike, wavelet: str = "morl", axis: int = -1) -> Array: ...
-def dwt(x: ArrayLike, *, wavelet: str = "db4", level: int | None = None, axis: int = -1) -> dict[str, Array]: ...
-
-# Tier B — Layer 0 xarray
+# Layer 0 — xarray
 def cwt(da: xr.DataArray, *, scales, wavelet: str = "morl", dim: str) -> xr.DataArray: ...
 def dwt(da: xr.DataArray, *, wavelet: str = "db4", level: int | None = None, dim: str) -> dict[str, xr.DataArray]: ...
 
-# Tier C — Operator
+# Layer 1 — Operator
 class CWT(Operator):
     def __init__(self, variable: str, *, scales, wavelet: str = "morl", dim: str): ...
     def __call__(self, ds: xr.Dataset) -> xr.Dataset: ...
@@ -514,19 +476,15 @@ def kmeans(n_clusters, sample_dim, ...) -> XarrayEstimator: ...
 
 ### `transforms.encoders` — Coordinate and basis encoders
 
-Transform coordinates or values into feature representations. Sub-organized by what they encode. Three-tier per D11 — basis expansions have an array tier (the math is pure arithmetic over coordinate arrays); coordinate-system transforms (`LonLatToCartesian`, `GeocentricToENU`) similarly. Time encoders (`CyclicalTimeEncoding`, `JulianDate`) skip Tier A — the math depends on calendar semantics that live on `xr.DataArray`-of-datetime.
+Transform coordinates or values into feature representations. Sub-organized by what they encode. Two public tiers per D11; private numpy kernels back the arithmetic-heavy encoders (basis expansions, coordinate-system transforms). Time encoders (`CyclicalTimeEncoding`, `JulianDate`) have no kernel module — the math depends on calendar semantics that live on `xr.DataArray`-of-datetime.
 
 ```python
 # transforms/encoders/coord_space.py
-# Tier A — array
-def lonlat_to_cartesian(lon: ArrayLike, lat: ArrayLike, *, radians: bool = False) -> tuple[Array, Array, Array]: ...
-def geocentric_to_enu(x: ArrayLike, y: ArrayLike, z: ArrayLike, *, ref_lon: float, ref_lat: float) -> tuple[Array, Array, Array]: ...
-
-# Tier B — Layer 0 xarray
+# Layer 0 — xarray
 def lonlat_to_cartesian(ds: xr.Dataset, *, lon_var: str = "lon", lat_var: str = "lat") -> xr.Dataset: ...
 def geocentric_to_enu(ds: xr.Dataset, *, x_var, y_var, z_var, ref_lon, ref_lat) -> xr.Dataset: ...
 
-# Tier C — Operator
+# Layer 1 — Operator
 class LonLatToCartesian(Operator):
     def __init__(self, *, lon_var: str = "lon", lat_var: str = "lat"): ...
     def __call__(self, ds: xr.Dataset) -> xr.Dataset: ...
@@ -537,12 +495,12 @@ class GeocentricToENU(Operator):
 ```
 
 ```python
-# transforms/encoders/coord_time.py — Tier A skipped; calendar-aware
-# Tier B
+# transforms/encoders/coord_time.py — no kernel module; calendar-aware
+# Layer 0
 def cyclical_time_encoding(da_time: xr.DataArray, *, components=("dayofyear", "hour")) -> xr.Dataset: ...
 def julian_date(da_time: xr.DataArray) -> xr.DataArray: ...
 
-# Tier C
+# Layer 1
 class CyclicalTimeEncoding(Operator):
     def __init__(self, *, components: tuple = ("dayofyear", "hour"), time_dim: str = "time"): ...
     def __call__(self, ds: xr.Dataset) -> xr.Dataset: ...
@@ -554,17 +512,12 @@ class JulianDate(Operator):
 
 ```python
 # transforms/encoders/basis.py — basis / feature expansions
-# Tier A — array (numpy default; jax variant useful for downstream JAX models)
-def fourier_features(x: ArrayLike, *, num_freqs: int = 10, scale: float = 1.0) -> Array: ...
-def random_fourier_features(x: ArrayLike, *, num_features: int = 64, sigma: float = 1.0, seed: int = 0) -> Array: ...
-def polynomial_features(x: ArrayLike, *, degree: int = 2) -> Array: ...
-
-# Tier B — Layer 0 xarray
+# Layer 0 — xarray
 def fourier_features(ds: xr.Dataset, *, coords: list[str], num_freqs: int = 10, scale: float = 1.0) -> xr.Dataset: ...
 def random_fourier_features(ds: xr.Dataset, *, coords: list[str], num_features: int = 64, sigma: float = 1.0, seed: int = 0) -> xr.Dataset: ...
 def polynomial_features(ds: xr.Dataset, *, coords: list[str], degree: int = 2) -> xr.Dataset: ...
 
-# Tier C — Operator
+# Layer 1 — Operator
 class FourierFeatures(Operator):
     """NeRF-style positional encoding: [sin(2πσ⁰x), cos(2πσ⁰x), …, sin(2πσ^(L-1)x), cos(2πσ^(L-1)x)]."""
     def __init__(self, coords: list[str], num_freqs: int = 10, scale: float = 1.0): ...
@@ -580,7 +533,7 @@ class PolynomialFeatures(Operator):
 
 All encoder Operators have the standard `Dataset → Dataset` shape — they add new variables / coords carrying the encoded features. Stateless (no `fit` step required), so they slot into `Sequential` directly.
 
-#### Shipped Tier C surface (xrtoolz.transforms.operators)
+#### Shipped Layer 1 surface (xrtoolz.transforms.operators)
 
 The encoder Operators currently exported from `xrtoolz.transforms.operators` (#95):
 
@@ -631,43 +584,16 @@ Until then: use `xtremax` directly, or hand-author a `Lambda(...)` operator over
 
 Pixel-level, spectral, multiscale, and distributional skill scores. **Owned implementation, no `xskillscore` dependency** (see [decisions.md §D7](../decisions.md)).
 
-Three-tier per D11:
+Two public tiers per D11:
 
-- **Tier A — `xrtoolz.metrics.array`** — array kernels in `metrics/array.py` and `metrics/_src/array_<family>.py`. Standard signature: `(prediction: ArrayLike, reference: ArrayLike, *, axis: int | tuple[int, ...], **kwargs) → Array | float`. Numpy default; JAX-friendly variants where the metric is used inside training loops or differentiable losses.
-- **Tier B — Layer 0 xarray** — pure functions in `xrtoolz/metrics/_src/<family>.py`. Signature: `(prediction: xr.DataArray, reference: xr.DataArray, *, dim, **kwargs) → xr.DataArray | xr.Dataset | float`. Delegate to Tier A.
-- **Tier C — Operator wrappers** in `xrtoolz/metrics/operators.py`. Multi-input: `__call__(prediction: xr.Dataset, reference: xr.Dataset) → xr.DataArray | xr.Dataset | float`. Selects a variable via constructor arg, then delegates to Tier B.
+- **Layer 0 — xarray** — pure functions in `xrtoolz/metrics/_src/<family>.py`. Signature: `(prediction: xr.DataArray, reference: xr.DataArray, *, dim, **kwargs) → xr.DataArray | xr.Dataset | float`. Dispatches to the private numpy kernels in `_src/_<family>_kernels.py` via `xr.apply_ufunc`.
+- **Layer 1 — Operator wrappers** in `xrtoolz/metrics/operators.py`. Multi-input: `__call__(prediction: xr.Dataset, reference: xr.Dataset) → xr.DataArray | xr.Dataset | float`. Selects a variable via constructor arg, then delegates to Layer 0.
 
-Custom skill score: write a Tier A array kernel (numpy is enough), wrap it in a Tier B function for label preservation, optionally wrap once more with the generic `MetricOp(fn, **config)` Tier C wrapper.
+Private implementation detail: numpy kernels live as `metrics/_src/_<family>_kernels.py` siblings (e.g., `_pixel_kernels.py`, `_segmented_psd_kernels.py`). No stability guarantees, not re-exported anywhere.
 
-### Tier A — array kernels
+Custom skill score: write a Layer 0 function (DataArray in / DataArray out), optionally wrap once with the generic `MetricOp(fn, **config)` Layer 1 wrapper.
 
-```python
-# xrtoolz/metrics/_src/array_pixel.py (re-exported via xrtoolz.metrics.array)
-def rmse(prediction: ArrayLike, reference: ArrayLike, *, axis: int | tuple[int, ...] = -1) -> Array: ...
-def nrmse(prediction: ArrayLike, reference: ArrayLike, *, axis=-1, normalize: str = "std") -> Array: ...
-def mae(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
-def bias(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
-def correlation(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
-def murphy_score(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
-def nash_sutcliffe(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
-def crps(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
-
-# xrtoolz/metrics/_src/array_spectral.py
-def psd_score(prediction: ArrayLike, reference: ArrayLike, *, axis, **kwargs) -> Array: ...
-def resolved_scale(prediction: ArrayLike, reference: ArrayLike, *, axis, threshold: float = 0.5, **kwargs) -> Array: ...
-def coherence_skill(prediction: ArrayLike, reference: ArrayLike, *, axis, **kwargs) -> Array: ...
-
-# xrtoolz/metrics/_src/array_multiscale.py
-def per_scale_rmse(prediction: ArrayLike, reference: ArrayLike, *, axis, scales) -> Array: ...
-def wavelet_rmse(prediction: ArrayLike, reference: ArrayLike, *, axis, wavelet: str = "db4", level: int = 4) -> Array: ...
-
-# xrtoolz/metrics/_src/array_distributional.py
-def ks_statistic(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
-def wasserstein_1d(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
-def energy_distance(prediction: ArrayLike, reference: ArrayLike, *, axis=-1) -> Array: ...
-```
-
-### Tier B — Layer 0 xarray (DataArray in)
+### Layer 0 — xarray (DataArray in)
 
 ```python
 # xrtoolz/metrics/_src/pixel.py
@@ -699,7 +625,7 @@ def masked_rmse(prediction: xr.DataArray, reference: xr.DataArray, *, dim, mask:
 # ... mask-aware variants of the others
 ```
 
-### Tier C — Operator wrappers
+### Layer 1 — Operator wrappers
 
 ```python
 class RMSE(Operator):
@@ -732,7 +658,7 @@ class Wasserstein1D(Operator): ...
 class EnergyDistance(Operator): ...
 
 class MetricOp(Operator):
-    """Generic wrapper: turns any Tier B metric function into a Tier C Operator."""
+    """Generic wrapper: turns any Layer 0 metric function into a Layer 1 Operator."""
     def __init__(self, fn, variable: str, dims: list[str], **kwargs): ...
     def __call__(self, prediction: xr.Dataset, reference: xr.Dataset): ...
 ```
@@ -740,21 +666,20 @@ class MetricOp(Operator):
 ### Adding a custom skill score
 
 ```python
-# 1. (optional) Tier A — array kernel
-def my_score_array(prediction, reference, *, axis=-1, alpha=1.0):
-    xp = array_namespace(prediction, reference)
-    return xp.mean((prediction - reference) ** alpha, axis=axis)
+# 1. (optional, private) numpy kernel
+def _my_score_kernel(prediction, reference, *, axis=-1, alpha=1.0):
+    return np.mean((prediction - reference) ** alpha, axis=axis)
 
-# 2. Tier B — Layer 0 xarray
+# 2. Layer 0 — xarray
 def my_score(prediction: xr.DataArray, reference: xr.DataArray, *, dim, alpha=1.0) -> xr.DataArray:
     return xr.apply_ufunc(
-        my_score_array,
+        _my_score_kernel,
         prediction, reference,
         input_core_dims=[[dim], [dim]],
         kwargs={"axis": -1, "alpha": alpha},
     )
 
-# 3. Tier C — wrap once with the generic MetricOp (or hand-author an Operator subclass)
+# 3. Layer 1 — wrap once with the generic MetricOp (or hand-author an Operator subclass)
 op = MetricOp(my_score, variable="ssh", dims=["time"], alpha=2.0)
 op(pred_ds, ref_ds)
 ```
@@ -775,20 +700,15 @@ xrtoolz/viz/_src/
     eval.py         # PlotMetricsTable, QuicklookPanel
 ```
 
-Three-tier per D11. The array tier is intentionally narrow — most useful viz inputs are already `xr.DataArray` (coords carry the axis labels) — but a few low-level helpers (e.g., array → log-binned spectrum panel) are exposed at Tier A so they can be called from non-xarray code.
+Two public tiers per D11. The private kernel layer is intentionally narrow — most useful viz inputs are already `xr.DataArray` (coords carry the axis labels) — but a few low-level helpers may live as private array helpers inside `_src/` siblings when reuse warrants.
 
 ```python
-# Tier A — array (matplotlib + numpy; no xarray dependency)
-def plot_map_array(field: ArrayLike, *, lon: ArrayLike, lat: ArrayLike, ax=None, projection=None, cmap=None, **kwargs) -> matplotlib.axes.Axes: ...
-def plot_timeseries_array(values: ArrayLike, *, time: ArrayLike, ax=None, **kwargs) -> matplotlib.axes.Axes: ...
-def plot_spectrum_array(power: ArrayLike, *, freqs: ArrayLike, ax=None, log: bool = True, **kwargs) -> matplotlib.axes.Axes: ...
-
-# Tier B — Layer 0 xarray (DataArray in)
+# Layer 0 — xarray (DataArray in)
 def plot_map(da: xr.DataArray, *, ax=None, projection=None, cmap=None, **kwargs) -> matplotlib.axes.Axes: ...
 def plot_timeseries(da: xr.DataArray, *, ax=None, **kwargs) -> matplotlib.axes.Axes: ...
 def plot_spectrum(da: xr.DataArray, *, ax=None, log: bool = True, **kwargs) -> matplotlib.axes.Axes: ...
 
-# Tier C — Operator (Dataset in, Figure out — D10 exception to Dataset → Dataset)
+# Layer 1 — Operator (Dataset in, Figure out — D10 exception to Dataset → Dataset)
 class PlotMap(Operator):
     def __init__(self, variable: str, *, projection=None, cmap=None, figsize: tuple = (8, 6)): ...
     def __call__(self, ds: xr.Dataset) -> matplotlib.figure.Figure: ...
@@ -835,35 +755,21 @@ Sub-organized by domain in one-file-per-domain layout:
 
 ```
 xrtoolz/kinematics/
-    array.py                  # Tier A re-exports across all domains
     _src/
         ocean.py
-        array_ocean.py
+        _ocean_kernels.py
         atmosphere.py
-        array_atmosphere.py
+        _atmosphere_kernels.py
         ice.py
-        array_ice.py
+        _ice_kernels.py
         remote.py
-        array_remote.py
+        _remote_kernels.py
 ```
 
-Each domain ships all three D11 tiers: array kernels (Tier A), Layer 0 xarray functions (Tier B), Operator wrappers (Tier C). The kinematics math is mostly arithmetic on field arrays — finite differences, dot products, ratios — so the array tier is meaningful for every public function.
+Each domain ships both D11 public tiers: Layer 0 xarray functions and Operator wrappers (Layer 1). The kinematics math is mostly arithmetic on field arrays — finite differences, dot products, ratios — so private numpy kernels back the Layer 0 functions for every public op.
 
 ```python
-# Tier A — array (numpy default; jax variants for diff-friendly kernels)
-def streamfunction_array(ssh: ArrayLike, *, dx: float, dy: float, f0: float, g: float) -> Array: ...
-def geostrophic_velocities_array(ssh: ArrayLike, *, dx: float, dy: float, f0: float, g: float) -> tuple[Array, Array]: ...
-def relative_vorticity_array(u: ArrayLike, v: ArrayLike, *, dx: float, dy: float) -> Array: ...
-def kinetic_energy_array(u: ArrayLike, v: ArrayLike) -> Array: ...
-def okubo_weiss_array(u: ArrayLike, v: ArrayLike, *, dx: float, dy: float) -> Array: ...
-
-def wind_speed_array(u: ArrayLike, v: ArrayLike) -> Array: ...
-def potential_temperature_array(temp: ArrayLike, pressure: ArrayLike, *, p0: float = 1e5) -> Array: ...
-
-def normalized_difference_array(a: ArrayLike, b: ArrayLike) -> Array: ...
-def radiance_to_reflectance_array(radiance: ArrayLike, solar_zenith: ArrayLike, solar_irradiance: float) -> Array: ...
-
-# Tier B — Layer 0 xarray (multi-variable → Dataset in, DataArray/Dataset out)
+# Layer 0 — xarray (multi-variable → Dataset in, DataArray/Dataset out)
 # xrtoolz/kinematics/_src/ocean.py
 def streamfunction(ds: xr.Dataset, *, variable: str = "ssh", f0: float | None = None, g: float | None = None) -> xr.DataArray: ...
 def geostrophic_velocities(ds: xr.Dataset, *, variable: str = "ssh") -> xr.Dataset: ...
@@ -879,7 +785,7 @@ def potential_temperature(ds: xr.Dataset, *, temp_var: str, pressure_var: str) -
 def normalized_difference(ds: xr.Dataset, *, var_a: str, var_b: str, name: str = "ndvi") -> xr.DataArray: ...
 def radiance_to_reflectance(ds: xr.Dataset, *, solar_zenith_var: str, solar_irradiance: float) -> xr.DataArray: ...
 
-# Tier C — Operator (Dataset in, Dataset out)
+# Layer 1 — Operator (Dataset in, Dataset out)
 class Streamfunction(Operator):
     def __init__(self, *, variable: str = "ssh", f0: float | None = None, g: float | None = None): ...
     def __call__(self, ds: xr.Dataset) -> xr.Dataset: ...

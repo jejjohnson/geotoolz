@@ -1,9 +1,11 @@
-"""Tier A — array kernels for pointwise (pixel-level) evaluation metrics.
+"""Private numpy/scipy kernels for pointwise (pixel-level) evaluation metrics.
 
-Pure-array entry points used by Tier B (xarray) wrappers. Signatures
-follow D11: ``(prediction, reference, *, axis, **kwargs) -> ndarray``.
+Implementation detail — no stability guarantees. These pure-array
+entry points are used internally by the Layer 0 xarray wrappers via
+``xr.apply_ufunc``. Signatures are
+``(prediction, reference, *, axis, **kwargs) -> ndarray``.
 
-NaN handling: matches the Tier B xarray default (``skipna=True`` for
+NaN handling: matches the Layer 0 xarray default (``skipna=True`` for
 floating-point arrays). All reductions ignore NaNs via
 :func:`numpy.nanmean` / :func:`numpy.nansum`. If every element along
 ``axis`` is NaN, the result for that slice is NaN (NumPy emits a

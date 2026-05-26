@@ -246,37 +246,33 @@ Rationale:
 
 ---
 
-## D11: Three-tier type contract — array (duck array) → xarray → Operator
+## D11: Two-tier type contract — xarray (Layer 0) → Operator (Layer 1)
 
-**Status:** accepted (resolved 2026-04-27)
+**Status:** accepted (revised 2026-05-26)
 
-**Context:** Layer 0 signatures across the package drift between `numpy`, `xr.DataArray`, and `xr.Dataset`. The architecture doc claims Layer 0 is "typically `(xr.Dataset, …) → xr.Dataset`", but most fourier / dct / wavelet / metrics / viz functions take a DataArray, and most kinematics functions take a Dataset. Users who want raw-array math (numpy, JAX, CuPy, Dask) have no first-class entry point — today they have to drop down to scipy / xrft internals themselves.
+**Historical context:** Originally accepted as a three-tier contract (array / xarray / Operator) on 2026-04-27. The array tier was a public surface for raw-numpy users at `xrtoolz.<module>.array`. After PRs α / β / γ (#206 / #208 / #209) flipped Layer 0 to DataArray-positional, the array tier added more surface than it earned — it duplicated Layer 0's signatures with a different positional / keyword convention and forced every public-surface review to discuss "should this also exist as `axis=` ?". The array tier is demoted to private `_*_kernels.py` modules. Users who want raw numpy can either drop into the private kernels (no stability promise) or pre-convert DataArrays.
 
-**Options:**
-- (A) Force every Layer 0 function to take `xr.Dataset`. Forces selection-by-attr inside every function, awkward for genuinely single-variable ops, gives numpy users no entry point.
-- (B) Two tiers (xarray Layer 0, Operator Layer 1). Numpy users drop down to scipy / xrft directly. No internal numpy surface; `da` vs `ds` typing in Layer 0 stays ambiguous.
-- (C) Three tiers — duck-array (`.array`), xarray Layer 0, Operator Layer 1 — each with a strict input contract and a strict delegation rule.
+**Context:** Layer 0 signatures across the package drift between `numpy`, `xr.DataArray`, and `xr.Dataset`. Without a clear contract, fourier / dct / wavelet / metrics / viz Layer 0 functions take a DataArray, kinematics functions take a Dataset, and users have no consistent expectation.
 
-**Decision:** Option C.
+**Decision:** Two public tiers, plus a private kernel layer.
 
-- **Tier A — `xrtoolz.<module>.array`**: array-level functions. Take and return arrays (numpy, JAX, numba-jitted, optionally CuPy), not xarray. Use `axis=` (not `dim=`). The default backend is numpy; JAX / numba / CuPy variants are added per-function as the math benefits, either by `array_namespace(x)` dispatch where it's clean or by hand-authored backend-specific implementations where it isn't. **Strict Array API compliance is not a hard requirement** — pragmatism wins. A function may be numpy-only, JAX-only, or multi-backend; each is documented per-function.
-- **Tier B — Layer 0 (xarray)**: per-module functions in `xrtoolz/<module>/_src/`. Single-variable functions take `xr.DataArray`, return `xr.DataArray`. Multi-variable functions take `xr.Dataset` plus explicit variable selectors (`variable="ssh"`, `u_var="u"`, …) and may return `xr.DataArray` or `xr.Dataset`. Delegate to Tier A; add coord/attr handling and `dim=` semantics.
-- **Tier C — Layer 1 (Operators)**: input is always `xr.Dataset` (or two `xr.Dataset` for multi-input operators). Output is **usually** `xr.Dataset` for transformations that preserve the dataset shape, but reduction-style operators (e.g., metrics) may return `xr.DataArray` or scalar, and terminal viz operators return `matplotlib.Figure` / `Axes` (D10). Operators select variables via constructor args, then delegate to Tier B. Multi-input operators (metrics) take multiple Datasets.
+- **Layer 0 — xarray** (public): per-module functions in `xrtoolz/<module>/_src/<name>.py`. The Layer 0 primitive is **DataArray-positional**: one variable in, one variable out (`pred`, `ref`, …, `*, dim=`). Multi-variable physics primitives (kinematics, balances) take multiple DataArrays positionally plus `*, dim=`. Layer 0 dispatches to the private numpy / scipy kernels via `xr.apply_ufunc` and adds coord/attr handling.
+- **Layer 1 — Operator** (public): input is always `xr.Dataset` (or multiple Datasets for multi-input operators). Output is **usually** `xr.Dataset` for transformations that preserve the dataset shape, but reduction-style operators (e.g., metrics) may return `xr.DataArray` or scalar, and terminal viz operators return `matplotlib.Figure` / `Axes` (D10). Operators carry Dataset-level selectors (`variable=`, `u_var=`, …) and delegate to Layer 0.
+- **Private kernels — `_*_kernels.py`** (implementation detail, no stability guarantees): pure-array entry points (numpy / scipy) used internally by Layer 0 via `xr.apply_ufunc`. They live as `_*_kernels.py` siblings inside `_src/` — not under a `.array` namespace. No re-export from any package root.
 
 Rationale:
-- Numpy / JAX / numba / CuPy users get a first-class entry point (`xrtoolz.metrics.array.rmse(pred, ref, axis=-1)`) without the library hard-depending on JAX / CuPy at install time. Optional backends are imported lazily per-function.
-- The xarray Layer 0 contract is now unambiguous: arity decides the type. Single-variable → DataArray. Multi-variable → Dataset with selectors.
+- One public surface per scientific operation removes a category of review question ("should this also exist at the array tier?") and a category of test surface (forced numerical equivalence between tiers).
+- The xarray Layer 0 contract is now unambiguous: DataArray-positional, one in / one out (or multi-in / one out for physics).
 - The Operator contract has a uniform *input* shape (Dataset(s)); outputs may narrow (DataArray / scalar for reductions; Figure / Axes for terminal viz) without breaking composition because `Sequential` and `Graph` enforce that narrowed outputs only appear at terminal nodes.
-- Backend coverage is *opportunistic*, not enforced — a fourier transform that's numpy-only today can grow a JAX variant later without breaking the contract.
+- Numpy / JAX / numba / CuPy users who want a raw-array entry point can either pre-convert (`da.values` in, wrap the result back as a DataArray) or import from `_src/_*_kernels.py` and accept the no-stability-promise contract.
 
-**Modules where Tier A is not meaningful** (`validation`, `crs`, `subset`, `masks`, whose math is inherently coord/attr-manipulation rather than arithmetic): they skip Tier A. Tier B takes `xr.Dataset` directly. The per-module section in `api/components.md` documents this.
+**Modules where private kernels are not meaningful** (`validation`, `crs`, `subset`, `masks`, whose math is inherently coord/attr-manipulation rather than arithmetic): they have no kernel module. Layer 0 takes `xr.Dataset` directly. The per-module section in `api/components.md` documents this.
 
 **Consequences:**
-- One additional file per module (`array.py`) for modules with array-meaningful math: `metrics`, `transforms` (fourier / dct / wavelet / encoders.basis), `kinematics`, and the viz plotting helpers.
-- Tier A is intentionally permissive — backend choice is a per-function decision. The expected shape is "numpy by default, JAX where it pays off (jit-friendly metric loops, gradient-friendly losses), numba where Python overhead dominates, CuPy if/when GPU users show up." No global discipline beyond "don't import JAX / CuPy at module top level".
-- Tier-specific tests: `tests/<module>/test_array.py`, `tests/<module>/test_layer0.py`, `tests/<module>/test_operators.py`. The array tier is tested against whichever backends each function actually supports — not a forced matrix.
-- Documentation: a Type Contract section in `architecture.md` codifies the rule, and each module's `components.md` entry shows the three tiers explicitly.
-- `xskillscore`-style numpy paths inside metrics now have a clean home (Tier A) rather than being either inlined or dropped (D7 stays unchanged — owned implementation, just now exposed at the array tier as well).
+- No public `xrtoolz.<module>.array` namespace. Anyone who was importing from there should pre-convert or drop into `xrtoolz.<module>._src._<name>_kernels` (private, no stability).
+- Tests are split by layer: `tests/<module>/test_layer0.py` / `test_operators.py`. Kernel-level numerical tests still exist, but they test the kernel as an implementation detail rather than as a contract.
+- Documentation: the Type Contract section in `architecture.md` codifies the rule, and each module's `components.md` entry shows the two public tiers.
+- `xskillscore`-style numpy paths inside metrics live in the private kernel modules; D7 (own the implementation rather than depending on `xskillscore`) is unaffected — the implementation just isn't surfaced publicly any more.
 
 ---
 
@@ -296,7 +292,6 @@ Rationale:
 
 ```
 xrtoolz/interpolate/
-    array.py
     _src/
         grid_to_grid.py    # Regrid, Coarsen (deterministic aggregation), Refine (deterministic interpolation)
         grid_to_points.py  # SampleAtPoints, AlongTrack
@@ -329,5 +324,5 @@ Modules outside `interpolate` that handle adjacent concerns: `crs.Reproject` (CR
 - `xrtoolz.regrid`, `xrtoolz.interpolation`, `xrtoolz.discretize` are removed in favor of `xrtoolz.interpolate`. Pre-1.0 design doc — no compatibility shim planned.
 - `detrend.LowpassFilter` migrates to `interpolate.smooth.LowpassFilter`. `detrend` becomes climatology-only.
 - `Downscale` introduces a soft `ModelOp` dependency in `interpolate`. `ModelOp` itself has no framework dep (per D4), so the inference module is the only transitive surface added.
-- Three tiers per D11 throughout. Tier A is rich here — most algorithms are pure array math (linear / cubic / RBF / kriging / FFT-based filters) and benefit from JAX or numba variants.
+- Two public tiers per D11 throughout (xarray Layer 0 + Operator Layer 1). The underlying private numpy / scipy kernels are rich here — most algorithms are pure array math (linear / cubic / RBF / kriging / FFT-based filters).
 

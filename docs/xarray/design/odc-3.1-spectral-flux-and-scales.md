@@ -169,7 +169,7 @@ T_Z = -Re(ẑ* · F[u·∂ζ/∂x + v·∂ζ/∂y]) / (Ni·Nj)²
 Computes ζ from the same Fourier-space gradients of u, v — no
 additional FFT cost beyond what KE flux already pays.
 
-### 4.3 Tier B — primitives
+### 4.3 Layer 0 — primitives
 
 ```python
 # src/xrtoolz/transforms/_src/fourier.py
@@ -290,7 +290,7 @@ No new dependencies. Pure xrft + numpy + xarray.
 ## 6. Public API surface
 
 ```python
-# Tier B primitives
+# Layer 0 primitives
 xrtoolz.transforms.ke_spectral_flux(u, v, *, dim, window, detrend,
                                      avg_dims, return_2d)
 xrtoolz.transforms.enstrophy_spectral_flux(u, v, *, dim, window, detrend,
@@ -344,7 +344,7 @@ Target: ~16 cases.
   machinery; separate concern.
 - **Coarse-graining flux** Π(ℓ) (Aluie / Eyink) — alternative to
   spectral flux that doesn't assume periodic BCs; separate paradigm.
-- **Tier A array-kernel split** — current Fourier module is xarray-only
+- **Private numpy/scipy kernel split** — current Fourier module is xarray-only
   via `xrft`. Match the convention.
 
 ## 9. Effort

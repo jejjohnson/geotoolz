@@ -1,4 +1,4 @@
-"""Tier B — value-preserving smoothers on xarray DataArrays (D12, F3.3).
+"""Layer 0 value-preserving smoothers on xarray DataArrays (D12, F3.3).
 
 Per the PR β primitive-flip (``docs/design/xarray-native-primitives.md``),
 the Layer-0 smoothers in this module are DataArray-in / DataArray-out:
@@ -11,7 +11,9 @@ Per D12 the smoothers are deterministic and parameter-free —
 ``KalmanSmoother`` is out of scope here and lives under future
 ``assimilate.smooth``.
 
-Tier A array kernels live at :mod:`xrtoolz.interpolate._src.array_smooth`.
+The numpy/scipy compute lives in the private kernel module
+:mod:`xrtoolz.interpolate._src._smooth_kernels` (implementation detail,
+no stability guarantees).
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from xrtoolz.interpolate._src import array_smooth as _array
+from xrtoolz.interpolate._src import _smooth_kernels as _kernels
 
 
 def _apply_kernel_to_dataarray(
@@ -30,7 +32,7 @@ def _apply_kernel_to_dataarray(
     dim: str,
     fn: Callable[..., Any],
 ) -> xr.DataArray:
-    """Apply a Tier A kernel along ``dim`` of a single DataArray."""
+    """Apply a private 1-D kernel along ``dim`` of a single DataArray."""
     if dim not in da.dims:
         raise ValueError(f"dim {dim!r} not in DataArray dims {tuple(da.dims)}")
     axis = da.get_axis_num(dim)
@@ -54,12 +56,16 @@ def moving_average(
 ) -> xr.DataArray:
     """Sliding-window mean along ``dim``.
 
-    See :func:`xrtoolz.interpolate.array.moving_average` for the Tier A
-    kernel and parameter semantics.
+    Computes a centred (``center=True``) or trailing sliding-window mean
+    of length ``window`` along ``dim``. ``min_periods`` controls the
+    minimum number of valid (non-NaN) samples required inside the window
+    for the output to be non-NaN; if unset it defaults to ``window``.
+    Inputs with fewer than ``min_periods`` valid samples in a window
+    produce NaN at that position.
     """
 
     def _fn(arr: np.ndarray, *, axis: int) -> np.ndarray:
-        return _array.moving_average(
+        return _kernels.moving_average(
             arr,
             axis=axis,
             window=window,
@@ -80,7 +86,7 @@ def gaussian_smooth(
     """Gaussian smoothing along ``dim`` with standard deviation ``sigma``."""
 
     def _fn(arr: np.ndarray, *, axis: int) -> np.ndarray:
-        return _array.gaussian_smooth(arr, axis=axis, sigma=sigma, truncate=truncate)
+        return _kernels.gaussian_smooth(arr, axis=axis, sigma=sigma, truncate=truncate)
 
     return _apply_kernel_to_dataarray(da, dim, _fn)
 
@@ -140,7 +146,7 @@ def _gaussian_smooth_masked_dataarray(
         # `vectorize=True` ensures apply_ufunc only ever hands us a core-shaped
         # block, so we don't need a manual reshape / stack loop. That also
         # avoids the empty-leading-dim crash that the manual np.stack hit.
-        return _array.gaussian_smooth_nd(
+        return _kernels.gaussian_smooth_nd(
             arr,
             sigma=sigmas,
             truncate=truncate,
@@ -212,12 +218,13 @@ def lowpass_filter(
 
     ``cutoff`` is the normalized critical frequency (fraction of the
     Nyquist rate). For ``btype`` in ``{"bandpass", "bandstop"}`` pass a
-    length-2 ``(low, high)`` sequence. See
-    :func:`xrtoolz.interpolate.array.lowpass_filter`.
+    length-2 ``(low, high)`` sequence. The filter is applied with
+    ``scipy.signal.sosfiltfilt`` (forward-backward) for zero phase
+    distortion; ``order`` is the per-direction order of the SOS sections.
     """
 
     def _fn(arr: np.ndarray, *, axis: int) -> np.ndarray:
-        return _array.lowpass_filter(
+        return _kernels.lowpass_filter(
             arr, axis=axis, cutoff=cutoff, order=order, btype=btype
         )
 
@@ -236,12 +243,20 @@ def fir_filter(
 ) -> xr.DataArray:
     """Zero-phase FIR filter along ``dim``.
 
-    See :func:`xrtoolz.interpolate.array.fir_filter` for cutoff, window,
-    and tap-count semantics.
+    ``cutoff`` is the normalized critical frequency (fraction of the
+    Nyquist rate); for ``btype`` in ``{"bandpass", "bandstop"}`` pass a
+    length-2 ``(low, high)`` sequence. ``method`` selects the window
+    family used to taper the ideal sinc response — ``"lanczos"`` or
+    ``"kaiser"``. ``num_taps`` is an odd FIR tap count; if omitted, a
+    conservative default is chosen (Lanczos picks from ``cutoff``;
+    Kaiser estimates from ``attenuation_db``). ``attenuation_db`` is the
+    Kaiser stop-band attenuation target in decibels (default ``60.0``)
+    and is ignored when ``method="lanczos"``. The filter is applied with
+    ``scipy.signal.filtfilt`` for zero phase.
     """
 
     def _fn(arr: np.ndarray, *, axis: int) -> np.ndarray:
-        return _array.fir_filter(
+        return _kernels.fir_filter(
             arr,
             axis=axis,
             cutoff=cutoff,

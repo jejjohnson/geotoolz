@@ -131,7 +131,7 @@ on red/black sweep" behaviour, with virtually identical convergence on
 smooth fields. For maximum-fidelity Gauss–Seidel users can pass
 `mode="strict"` (Cython-free Python loop, slower).
 
-### 4.2 Tier B — xarray primitive
+### 4.2 Layer 0 — xarray primitive
 
 ```python
 # src/xrtoolz/interpolate/_src/gap_fill.py — new function alongside fillnan_*
@@ -281,7 +281,7 @@ Target: ~11 cases.
 - **`regrid_with_fill` convenience** — users compose
   `Sequential([RegridLike(...), FillNaNLaplacian(...)])`. No new
   abstraction.
-- **Tier A array-kernel split** — existing `fillnan_*` family is
+- **Private numpy/scipy kernel split** — existing `fillnan_*` family is
   xarray-only via `apply_ufunc`. Match the convention; don't fragment.
 - **`pyinterp` backend dispatch** — declined; pure numpy is sufficient
   and matches the explicit "no heavy C++ deps" stance of the gap_fill

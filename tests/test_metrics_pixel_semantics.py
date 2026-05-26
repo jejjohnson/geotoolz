@@ -1,9 +1,9 @@
-"""NaN and dask-chunking semantics for the Tier B pixel metrics.
+"""NaN and dask-chunking semantics for the Layer 0 pixel metrics.
 
-Regression tests for PR #101 review: Tier A kernels must skip NaNs to
-match the previous xarray ``skipna=True`` default, and the Tier B
-``apply_ufunc`` plumbing must work on dask-backed inputs whose core
-(reduce) dim is split across multiple chunks.
+Regression tests for PR #101 review: the private pixel kernels must
+skip NaNs to match the previous xarray ``skipna=True`` default, and the
+Layer 0 ``apply_ufunc`` plumbing must work on dask-backed inputs whose
+core (reduce) dim is split across multiple chunks.
 """
 
 from __future__ import annotations

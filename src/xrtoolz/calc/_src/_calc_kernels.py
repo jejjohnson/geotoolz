@@ -1,7 +1,8 @@
-"""Tier A — array kernels for finite-difference calculus.
+"""Private numpy kernels for finite-difference calculus.
 
-Pure-array entry points for the canonical central-difference derivatives
-on uniform Cartesian grids. Tier B (xarray, ``dim=``) wrappers in
+Implementation detail — no stability guarantees. Pure-array entry points
+for the canonical central-difference derivatives on uniform Cartesian
+grids. The Layer 0 (xarray, ``dim=``) wrappers in
 :mod:`xrtoolz.calc._src.cartesian` add coord/attr handling and route to
 ``finitediffx`` for higher-order accuracies; this module is the
 numpy-only computational core for the default 2nd-order central-difference
