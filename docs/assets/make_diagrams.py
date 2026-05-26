@@ -2,7 +2,7 @@
 
 Run from the repo root::
 
-    uv run python docs/assets/make_diagrams.py
+    uv run --group docs python docs/assets/make_diagrams.py
 
 Produces (under ``docs/assets/``):
 

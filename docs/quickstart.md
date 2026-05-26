@@ -40,22 +40,22 @@ import rioxarray
 import xarray as xr
 from georeader.geotensor import GeoTensor
 
-# A representative Lake Tahoe scene, summer 2024.
-# This URL is a placeholder — replace with the asset href from a STAC search
+# A representative Lake Tahoe scene, summer 2024. These URLs are
+# placeholders — replace with the asset hrefs from a STAC search
 # (see notebooks/operators_lake_tahoe.ipynb for the full search).
-B04_URL = (
-    "https://sentinel2l2a01.blob.core.windows.net/sentinel2-l2/"
-    "10/S/EH/2024/07/15/S2A_MSIL2A_20240715T184921_R070_T10SEH_20240716T013507.SAFE/"
-    "GRANULE/L2A_T10SEH_A047445_20240715T185751/IMG_DATA/R10m/T10SEH_20240715T184921_B04_10m.tif"
-)
+B04_URL = "https://…/T10SEH_20240715T184921_B04_10m.tif"  # Red
+B08_URL = "https://…/T10SEH_20240715T184921_B08_10m.tif"  # NIR
+SCL_URL = "https://…/T10SEH_20240715T184921_SCL_20m.tif"  # Cloud classes
 
-# planetary_computer signs the URL with a short-lived SAS token
-b04_url_signed = planetary_computer.sign(B04_URL)
-b04 = rioxarray.open_rasterio(b04_url_signed)  # (1, H, W) DataArray
+# planetary_computer signs the URL with a short-lived SAS token.
+# Repeat the same pattern for B08 (NIR) and SCL (cloud classes); the
+# notebook does this end-to-end — here we sketch the shape.
+b04 = rioxarray.open_rasterio(planetary_computer.sign(B04_URL))  # (1, H, W)
+b08 = rioxarray.open_rasterio(planetary_computer.sign(B08_URL))  # (1, H, W)
+scl = rioxarray.open_rasterio(planetary_computer.sign(SCL_URL))  # (1, H, W)
 
-# Stack red + NIR (and SCL for masking) into a single (C, H, W) DataArray
-# in the notebook; here we sketch the shape.
-scene = xr.concat([b04_red, b04_nir, b04_scl], dim="band")
+# Stack red + NIR + SCL into a single (C, H, W) DataArray.
+scene = xr.concat([b04, b08, scl], dim="band")
 gt = GeoTensor(
     values=scene.values,
     transform=scene.rio.transform(),
@@ -86,13 +86,14 @@ class Scale(Operator):
 
 
 class CloudMask(Operator):
-    """Boolean mask of clear pixels from a Sentinel-2 SCL band.
+    """Boolean drop-mask from a Sentinel-2 SCL band.
 
-    Keeps SCL classes 4 (vegetation), 5 (not-vegetated), 6 (water),
-    7 (unclassified), 11 (snow); drops cloud / shadow classes.
+    Marks SCL classes 3 (cloud shadow), 8 (cloud-medium), 9 (cloud-high),
+    10 (thin cirrus) as ``True`` — i.e. *True-to-drop*, matching the
+    convention used by ``geotoolz.cloud.ApplyMask`` / ``MaskFromSCL``.
     """
 
-    KEEP_CLASSES = (4, 5, 6, 7, 11)
+    DROP_CLASSES = (3, 8, 9, 10)
 
     def __init__(self, *, scl_idx: int = 2) -> None:
         self.scl_idx = scl_idx
@@ -100,8 +101,8 @@ class CloudMask(Operator):
     def _apply(self, gt):
         scl = gt.values[self.scl_idx]
         import numpy as np
-        clear = np.isin(scl, self.KEEP_CLASSES)
-        return gt.array_as_geotensor(clear.astype("uint8"))
+        drop = np.isin(scl, self.DROP_CLASSES)
+        return gt.array_as_geotensor(drop.astype("uint8"))
 
     def get_config(self):
         return {"scl_idx": self.scl_idx}
@@ -147,11 +148,12 @@ from pipekit import Operator
 
 
 class ApplyMask(Operator):
-    """Zero-out pixels where mask == 0; preserves carrier metadata."""
+    """Zero-out pixels where drop-mask == 1; preserves carrier metadata."""
 
-    def _apply(self, inputs):
-        gt, mask = inputs  # tuple of (reflectance, clear-mask)
-        masked = gt.values * mask.values[None, :, :]
+    def _apply(self, gt, drop):
+        # Graph supplies upstream node values as separate positional args.
+        keep = (drop.values == 0).astype(np.float32)
+        masked = gt.values * keep[None, :, :]
         return gt.array_as_geotensor(masked.astype(np.float32))
 
     def get_config(self):
@@ -160,8 +162,8 @@ class ApplyMask(Operator):
 
 img = gz.Input("image")
 scaled = Scale(scale=1e-4)(img)
-clear = CloudMask(scl_idx=2)(img)
-clean = ApplyMask()((scaled, clear))
+drop = CloudMask(scl_idx=2)(img)
+clean = ApplyMask()(scaled, drop)
 ndvi = NDVI(nir_idx=1, red_idx=0)(clean)
 
 g = gz.Graph(inputs={"image": img}, outputs={"ndvi": ndvi})

@@ -30,6 +30,11 @@ This page is the geotoolz-side reference.
 `geocatalog` exposes STAC discovery and scene loading as operators that
 return `GeoTensor`s. Their output is `geotoolz`'s input:
 
+`Scale` and `NDVI` below are the inline operators defined in the
+[quickstart](../quickstart.md#2-define-three-operators-inline); swap
+them for the production versions in `geotoolz.radiometry` /
+`geotoolz.indices` once you have them.
+
 ```python
 import geocatalog as gc
 import geotoolz as gz
@@ -47,7 +52,7 @@ items = gc.SearchCatalog(
 # Load one as a GeoTensor (geocatalog)
 gt = gc.LoadScene(item=items[0], assets=["B04", "B08", "SCL"])()
 
-# Operate (geotoolz)
+# Operate (geotoolz; Scale + NDVI from the quickstart)
 ndvi_pipe = Sequential([Scale(scale=1e-4), NDVI(nir_idx=1, red_idx=0)])
 ndvi = ndvi_pipe(gt)
 ```
@@ -100,18 +105,29 @@ A realistic end-to-end pipeline looks like a `Sequential` whose head
 comes from `geocatalog`, whose middle is geotoolz operators, and whose
 tail is a `patch_ops` tiled-inference block:
 
+Because `Stitch` needs a `domain` at construction time but `gc.LoadScene`
+only produces a `GeoTensor` at *runtime*, split the flow into a quick
+load step (to get a domain) and the operator pipeline that consumes it.
+Once you have the domain, the whole thing is one `Sequential`:
+
 ```python
+gt = gc.LoadScene(item=item, assets=["B04", "B08", "SCL"])()  # runtime
+domain = gt.domain
+
 pipe = Sequential([
-    gc.LoadScene(item=item, assets=["B04", "B08", "SCL"]),  # geocatalog
-    Scale(scale=1e-4),                                       # geotoolz
-    CloudMask(scl_idx=2),                                    # geotoolz
-    NDVI(nir_idx=1, red_idx=0),                              # geotoolz
-    GridSampler(patcher),                                    # geotoolz.patch_ops → geopatcher
-    ApplyToChips(ModelOp(model)),                            # geotoolz
-    Stitch(gp.SpatialOverlapAdd(), domain=gt.domain),        # geotoolz.patch_ops → geopatcher
+    Scale(scale=1e-4),                                  # geotoolz
+    CloudMask(scl_idx=2),                               # geotoolz
+    NDVI(nir_idx=1, red_idx=0),                         # geotoolz
+    GridSampler(patcher),                               # geotoolz.patch_ops → geopatcher
+    ApplyToChips(ModelOp(model)),                       # geotoolz
+    Stitch(gp.SpatialOverlapAdd(), domain=domain),      # geotoolz.patch_ops → geopatcher
 ])
-out = pipe()
+out = pipe(gt)
 ```
+
+If you want a single round-trippable artefact, wire `LoadScene` and the
+operator pipeline into a `Graph` so the `domain` flows through as an
+explicit input rather than baked into `Stitch`'s config.
 
 Every step is an `Operator`. The whole thing round-trips via
 `get_config()` for YAML / Hydra-zen. The carrier (`GeoTensor`) is

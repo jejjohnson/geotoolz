@@ -29,14 +29,19 @@ flowchart LR
     Apply --> NDVI --> Out([ndvi])
 ```
 
+`Scale`, `CloudMask`, `ApplyMask`, and `NDVI` are the inline operators
+from the [quickstart](../quickstart.md#2-define-three-operators-inline);
+substitute the real `geotoolz.radiometry` / `geotoolz.cloud` /
+`geotoolz.indices` operators once you have them.
+
 ```python
 import geotoolz as gz
 
 img = gz.Input("image")
 scaled = Scale(scale=1e-4)(img)
-mask = CloudMask()(img)
-clean = ApplyMask()((scaled, mask))
-ndvi = NDVI(nir_idx=7, red_idx=3)(clean)
+drop = CloudMask()(img)
+clean = ApplyMask()(scaled, drop)        # Graph supplies args positionally
+ndvi = NDVI(nir_idx=1, red_idx=0)(clean)
 
 g = gz.Graph(inputs={"image": img}, outputs={"ndvi": ndvi})
 result = g(image=gt)        # {"ndvi": GeoTensor}
