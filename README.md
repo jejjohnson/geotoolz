@@ -4,36 +4,98 @@
 [![Lint](https://github.com/jejjohnson/geotoolz/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/lint.yml)
 [![Type Check](https://github.com/jejjohnson/geotoolz/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/typecheck.yml)
 [![Deploy Docs](https://github.com/jejjohnson/geotoolz/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/pages.yml)
-[![codecov](https://codecov.io/gh/jejjohnson/geotoolz/branch/main/graph/badge.svg)](https://codecov.io/gh/jejjohnson/geotoolz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
-[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://pre-commit.com/)
 
-> **Status:** pre-alpha (`0.0.0`). API is in flux; the public surface is not yet stable.
+> **Compose remote-sensing pipelines like you compose functions.**
+> Sentinel-2 to NDVI in three small operators, the same code shape as your unit tests.
 
-A composable Operator library for remote sensing, built on top of `georeader.GeoTensor`. Pipelines are written as a `Sequential` of operators or a `Graph` of named ops — declared in code or YAML, executed eagerly on `GeoTensor`s. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework; `geotoolz` is a direct consumer that adds the remote-sensing operator families on top. The sibling library to `xr_toolz` for climate workflows: same architectural patterns, different substrate (`numpy`-subclass `GeoTensor` with `__array_ufunc__` vs `xarray.Dataset`), different audience.
+```mermaid
+flowchart LR
+    subgraph S["Sequential — linear chain"]
+        A[Scale] --> B[CloudMask] --> C[NDVI]
+    end
+    subgraph G["Graph — named DAG, fan-out, fan-in"]
+        I([scene]) --> S1[Scale]
+        S1 --> M[CloudMask]
+        S1 --> N[NDVI]
+        M --> AP[ApplyMask]
+        N --> AP
+        AP --> O([clean_ndvi])
+    end
+```
+
+## What is it
+
+`geotoolz` is a small algebra of **Operators** for remote-sensing rasters.
+Each operator is a typed function from one carrier (a `GeoTensor`) to
+another; pipelines are just `Sequential` chains or `Graph` DAGs of those
+operators. The composition core lives in [`pipekit`](https://github.com/jejjohnson/pipekit);
+`geotoolz` adds the RS-specific operator families (radiometry, indices,
+cloud masking, compositing, …) on top.
+
+The 30-second pitch:
+
+- **One protocol.** Every step — a band-math index, a cloud mask, a write
+  to COG — is an `Operator` with `_apply` + `get_config`.
+- **Two composition shapes.** `Sequential` for linear chains, `Graph` for
+  branches and fan-in. Both are themselves `Operator`s, so they nest.
+- **Carrier-agnostic.** The algebra runs on `GeoTensor` in production
+  and on scalars or ndarrays in tests. Same code, smaller fixtures.
+- **Round-trips to YAML.** `get_config()` lets pipelines serialise for
+  Hydra-zen, audit, and reproducibility.
+
+> **Status:** pre-alpha (`0.0.x`). The composition core (`Operator`,
+> `Sequential`, `Graph`, `Branch`, `Switch`, plus the v0.1 idiom library)
+> is stable enough to build on. The domain-operator surface (radiometry,
+> indices, cloud, compositing, …) is landing module-by-module — names and
+> defaults will move before `0.1`. Pin a commit if you depend on it.
+
+## A working snippet
 
 ```python
 import geotoolz as gz
+from geotoolz import Operator, Sequential
 
-# NDVI on cloud-masked Sentinel-2 in two operators composed
-ndvi = gz.Sequential([
-    gz.cloud.MaskClouds(qa_band="QA60", bits=[10, 11]),
-    gz.indices.NDVI(red_idx=2, nir_idx=3),
-])(gt)
+
+class Scale(Operator):
+    """Multiply DN by a scale factor — toy radiometric correction."""
+
+    def __init__(self, *, scale: float = 1e-4) -> None:
+        self.scale = scale
+
+    def _apply(self, gt):
+        return gt.array_as_geotensor(gt.values * self.scale)
+
+    def get_config(self):
+        return {"scale": self.scale}
+
+
+class NDVI(Operator):
+    """(NIR - Red) / (NIR + Red + eps)."""
+
+    def __init__(self, *, nir_idx: int = 3, red_idx: int = 2, eps: float = 1e-10) -> None:
+        self.nir_idx, self.red_idx, self.eps = nir_idx, red_idx, eps
+
+    def _apply(self, gt):
+        a = gt.values
+        nir, red = a[self.nir_idx], a[self.red_idx]
+        return gt.array_as_geotensor((nir - red) / (nir + red + self.eps))
+
+    def get_config(self):
+        return {"nir_idx": self.nir_idx, "red_idx": self.red_idx, "eps": self.eps}
+
+
+pipeline = Sequential([Scale(scale=1e-4), NDVI(nir_idx=7, red_idx=3)])
+ndvi = pipeline(sentinel2_geotensor)  # GeoTensor in, GeoTensor out
 ```
 
-The full design proposal lives in
-[`research_journal_v2/notes/geotoolz/plans/geotoolz/geotoolz.md`](../research_journal_v2/notes/geotoolz/plans/geotoolz/geotoolz.md)
-(two-tier model, ~80 operators in 12 modules, sensor presets, Hydra-zen interop). Note that **no operators have been implemented yet** — the repo currently holds only the package skeleton.
+The same shape with the `|` pipe operator: `Scale(scale=1e-4) | NDVI(nir_idx=7, red_idx=3)`.
 
-## Installation
+## Install
 
-This repo is pre-release and not yet on PyPI. `geotoolz` depends on
-[`pipekit`](https://github.com/jejjohnson/pipekit) (also pre-PyPI), so
-use `uv` — it reads the GitHub git source declared in `pyproject.toml`
-and resolves `pipekit` transitively:
+Not yet on PyPI. `geotoolz` depends on [`pipekit`](https://github.com/jejjohnson/pipekit)
+(also pre-PyPI), so use `uv` — it reads the git source declared in
+`pyproject.toml`:
 
 ```bash
 git clone https://github.com/jejjohnson/geotoolz.git
@@ -41,16 +103,17 @@ cd geotoolz
 make install        # uv sync --all-groups + pre-commit hooks
 ```
 
-Or install in one shot from GitHub:
+One-shot from GitHub:
 
 ```bash
 uv pip install "git+https://github.com/jejjohnson/geotoolz@main"
 ```
 
-Plain `pip install git+https://...` will fail until `pipekit` reaches
-PyPI, because pip doesn't read `[tool.uv.sources]`.
+Optional extras: `[hydra]` (YAML round-trip via hydra-zen), `[patch]`
+(pulls in [`geopatcher`](https://github.com/jejjohnson/geopatcher) for
+sliding-window inference).
 
-## Development
+## Dev
 
 ```bash
 make install     # uv sync --all-groups + pre-commit hooks
@@ -58,11 +121,10 @@ make test        # uv run pytest -v
 make lint        # uv run --group lint ruff check .
 make format      # ruff format + ruff check --fix
 make typecheck   # uv run --group typecheck ty check src/geotoolz
-make precommit   # uv run pre-commit run --all-files
 make docs-serve  # local MkDocs server
 ```
 
-Pre-commit checklist (all four must pass, mirrors CI):
+Pre-commit checklist (mirrors CI):
 
 ```bash
 uv run pytest -v
@@ -71,20 +133,15 @@ uv run --group lint ruff format --check .
 uv run --group typecheck ty check src/geotoolz
 ```
 
-## Layout
+## Next steps
 
-```
-geotoolz/
-├── pyproject.toml          # PEP 621 + ruff + ty + pytest config
-├── src/geotoolz/           # Package source (src layout)
-├── tests/                  # Test suite
-├── docs/                   # MkDocs site
-├── notebooks/              # Example notebooks
-├── CLAUDE.md AGENTS.md     # Agent instructions
-└── Makefile                # Common dev commands
-```
-
-Plans and design docs are tracked outside this repo in `research_journal_v2/notes/geotoolz/`. Work items are tracked as GitHub issues.
+- **Docs site:** [concepts](docs/concepts.md), [quickstart](docs/quickstart.md),
+  [recipes](docs/recipes/).
+- **End-to-end Lake Tahoe notebook (cross-repo):**
+  [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb)
+  — the canonical multi-repo flow (catalog → patch → operate).
+- **Operator-composition slice for this repo:**
+  [`docs/notebooks/operators_lake_tahoe.ipynb`](docs/notebooks/operators_lake_tahoe.ipynb).
 
 ## License
 

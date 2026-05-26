@@ -42,17 +42,19 @@ plugins:
 
 nav:
   - Home: index.md
-  - Concepts:
-      - Composition core: concepts.md
+  - Concepts: concepts.md
+  - Quickstart: quickstart.md
+  - Recipes:
+      - Define an operator: recipes/define-an-operator.md
+      - Branching pipelines: recipes/branching-pipelines.md
+      - Integration with geocatalog & geopatcher: recipes/integration-with-geocatalog-and-geopatcher.md
+  - Tutorial:
+      - Operators on Sentinel-2 (Lake Tahoe): notebooks/operators_lake_tahoe.ipynb
+  - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
+  - Module guides:
       - Normalization: normalization.md
       - Multi-format readers: io.md
-      - Readers: readers.md
-  - Tutorials:
-      - Composition core: notebooks/composition_core.ipynb
-      - Pipeline idioms: notebooks/pipeline_idioms.ipynb
-      - Deployment shapes: notebooks/deployment_shapes.ipynb
-      - Catalog ↔ patching: notebooks/catalog_patching.ipynb
-      - Image processing (radiometry + cloud + indices): notebooks/image_processing.ipynb
+      - Adding a sensor reader: readers.md
   - API Reference:
       - Core: api/core.md
       - Augment: api/augment.md
