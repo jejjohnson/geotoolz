@@ -86,6 +86,15 @@ vector-cube = ["xvec>=0.4"]
 hdf5 = ["h5py>=3.10.0"]
 hdf4 = ["pyhdf>=0.11.4"]
 netcdf = ["netCDF4>=1.6.5"]
+# Pooled object-store client (``obstore``) for cloud-backed sensor
+# reads. Sensor readers that point at ``s3://`` / ``gs://`` / ``https://``
+# scenes call ``SensorReader.set_obstore_client(...)`` to opt into
+# HTTP/2 connection reuse — every byte-range fetch then funnels
+# through the same pooled client instead of building one per file.
+# Pool is shared with ``geocatalog`` and ``geopatcher`` when they're
+# co-installed (soft-imported), so all three libraries reuse one set
+# of clients per process.
+obstore = ["obstore>=0.9.5"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
