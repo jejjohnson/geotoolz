@@ -283,6 +283,17 @@ _REMOTE_SCHEMES = frozenset(
 
 
 def _has_remote_scheme(uri: str) -> bool:
+    """Return True when ``uri`` is one of the pool's known cloud schemes.
+
+    Requires ``"://"`` in the URI before considering the scheme — this
+    avoids mis-classifying Windows drive-letter paths like ``C:/foo.bin``,
+    which ``urlsplit`` parses as scheme ``"c"`` and would otherwise route
+    through obstore (and fail with a confusing "remote scheme but no
+    client" error). Plain ``Path`` / ``str`` filesystem paths always
+    take the local path.
+    """
+    if "://" not in uri:
+        return False
     from urllib.parse import urlsplit
 
     return urlsplit(uri).scheme.lower() in _REMOTE_SCHEMES
@@ -336,23 +347,37 @@ def _run_coroutine_safely(coro: Any) -> Any:
 
 
 def _read_bytes_local(uri: str, start: int, length: int) -> bytes:
-    """Fall-back byte read for local paths and ``file://`` URIs."""
-    from urllib.parse import urlsplit
+    """Fall-back byte read for local paths and ``file://`` URIs.
 
-    parsed = urlsplit(uri)
+    Anything without a ``://`` separator is treated as a plain
+    filesystem path — including Windows drive-letter paths like
+    ``C:/scene.bin`` that ``urlsplit`` would mis-parse as scheme
+    ``"c"``. ``file://`` URIs are stripped to their path component
+    via the standard library's ``url2pathname`` so cross-platform
+    quoting / drive-letter / UNC conventions Just Work.
+    """
     fs_path: str | Path
-    if parsed.scheme in ("", "file"):
-        fs_path = parsed.path or uri
+    if "://" not in uri:
+        # Plain filesystem path (POSIX or Windows). Pass through
+        # unchanged — open() handles both natively.
+        fs_path = uri
     else:
-        # Caller passed a remote URI without an attached client — that's
-        # a user error; surface it with a clear message rather than
-        # silently fall through to local open() which would fail
-        # cryptically on a non-existent local path.
-        raise RuntimeError(
-            f"SensorReader._read_bytes: URI {uri!r} has a remote scheme but no "
-            "obstore client is attached. Call `set_obstore_client(...)` first, "
-            "or pass a local path instead."
-        )
+        from urllib.parse import urlsplit
+        from urllib.request import url2pathname
+
+        parsed = urlsplit(uri)
+        if parsed.scheme == "file":
+            fs_path = url2pathname(parsed.path) or uri
+        else:
+            # Caller passed a remote URI without an attached client —
+            # surface it with a clear message rather than silently fall
+            # through to local open() which would fail cryptically.
+            raise RuntimeError(
+                f"SensorReader._read_bytes: URI {uri!r} has a remote scheme "
+                "but no obstore client is attached. Call "
+                "`set_obstore_client(...)` first, or pass a local path "
+                "instead."
+            )
     with open(fs_path, "rb") as f:
         f.seek(start)
         return f.read(length)

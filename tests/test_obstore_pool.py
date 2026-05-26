@@ -11,7 +11,30 @@ from geotoolz import _obstore
 
 
 @pytest.fixture(autouse=True)
-def _clear_pool():
+def _isolate_pool(monkeypatch):
+    """Hermetic pool state for every test.
+
+    Three things:
+
+    1. Clear the local pool before and after each test so identity
+       tests don't see leakage between test ordering.
+    2. Force ``_try_shared_pool`` to return ``None`` so the local
+       pool is always under test — otherwise ``clear_obstore_pool``
+       is a no-op when geocatalog or geopatcher is installed and
+       owns the shared cache, which would make assertions like
+       ``test_clear_pool_drops_all_entries`` flaky depending on the
+       Python path.
+    3. Strip endpoint env vars that would otherwise contaminate the
+       pool key assertions below.
+    """
+    monkeypatch.setattr(_obstore, "_try_shared_pool", lambda: None)
+    for var in (
+        "AWS_S3_ENDPOINT",
+        "AWS_ENDPOINT_URL",
+        "GOOGLE_SERVICE_ENDPOINT",
+        "AZURE_STORAGE_ENDPOINT",
+    ):
+        monkeypatch.delenv(var, raising=False)
     _obstore.clear_obstore_pool()
     yield
     _obstore.clear_obstore_pool()
@@ -69,32 +92,6 @@ def test_clear_pool_drops_all_entries():
     _obstore.clear_obstore_pool()
     b = _obstore.get_obstore("https://example.com/foo")
     assert a is not b
-
-
-# --- shared-pool soft import -------------------------------------------
-
-
-def test_shared_pool_returns_none_when_no_sibling_packages(monkeypatch):
-    """With no sibling packages installed, ``_try_shared_pool`` is ``None``.
-
-    Verified at module-import time by simulating both siblings being
-    absent — replaces both module imports with ``ImportError`` to keep
-    the test deterministic regardless of what's actually on the path.
-    """
-    import builtins
-
-    real_import = builtins.__import__
-
-    def _fake_import(name, *args, **kwargs):
-        if name in (
-            "geocatalog._src.objstore",
-            "geopatcher._src.objstore",
-        ):
-            raise ImportError(name)
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", _fake_import)
-    assert _obstore._try_shared_pool() is None
 
 
 # --- unsupported scheme -------------------------------------------------

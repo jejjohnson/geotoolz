@@ -124,6 +124,30 @@ def test_read_bytes_file_uri(tmp_path: Path):
     assert got == payload[:8]
 
 
+def test_read_bytes_windows_drive_letter_path_treated_as_local():
+    """Regression: ``C:/foo.bin`` must not be classified as a remote scheme.
+
+    ``urlsplit("C:/foo.bin").scheme == "c"`` — without the ``"://"``
+    guard this would route through the obstore path and raise the
+    "remote scheme but no client" ``RuntimeError`` on Windows, even
+    though the user passed a plain local path. Verifies the guard
+    using a path that doesn't actually exist on disk (we only need
+    the scheme-classification logic to take the local branch — the
+    ``open()`` will of course raise ``FileNotFoundError``, which is
+    the *correct* failure mode for a non-existent local path).
+    """
+    from geotoolz.readers._base import _has_remote_scheme
+
+    # The classifier must NOT mark this as remote (no "://" in URI).
+    assert not _has_remote_scheme("C:/scene.bin")
+    assert not _has_remote_scheme(r"C:\scene.bin")
+    # End-to-end: the SensorReader path must surface FileNotFoundError
+    # (correct local-path failure), not RuntimeError (wrong-path bug).
+    r = _MinimalReader()
+    with pytest.raises(FileNotFoundError):
+        r._read_bytes("C:/nonexistent_drive_letter_path.bin", 0, 4)
+
+
 def test_read_bytes_local_with_client_attached(tmp_path: Path):
     """An attached client doesn't divert local reads to obstore.
 

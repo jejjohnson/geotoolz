@@ -128,7 +128,14 @@ def _build_store(uri: str, storage_options: dict[str, Any] | None) -> ObjectStor
     if scheme in ("gs", "gcs"):
         return GCSStore(bucket, **options)
     if scheme in ("az", "azure", "abfs"):
-        return AzureStore(bucket, **options)
+        # Azure URIs are ``az://account/container/blob`` — the container
+        # name is the FIRST path segment, not the netloc, and obstore's
+        # ``AzureStore(container, ...)`` constructor expects the
+        # container name. Use ``from_url`` so obstore's parser handles
+        # the account/container/blob split correctly; subsequent
+        # ``get_range_async`` calls use the blob key (the rest of the
+        # path) — see :func:`_object_key` below.
+        return AzureStore.from_url(uri, **options)
     if scheme in ("http", "https"):
         origin = f"{scheme}://{parsed.netloc}"
         return HTTPStore.from_url(origin, **options)
@@ -136,6 +143,24 @@ def _build_store(uri: str, storage_options: dict[str, Any] | None) -> ObjectStor
         f"obstore client pool: unsupported scheme {scheme!r} for URI {uri!r}. "
         "Supported: s3, gs, gcs, az, azure, abfs, http, https."
     )
+
+
+def _object_key(uri: str) -> str:
+    """Return the key inside the pooled store for ``uri``.
+
+    Most schemes: the path component minus the leading ``/``. Azure
+    is the exception — the first path segment is the container name
+    (already baked into the pooled :class:`AzureStore` instance) and
+    the rest is the blob key.
+    """
+    parsed = urlsplit(uri)
+    scheme = parsed.scheme.lower()
+    path = parsed.path.lstrip("/")
+    if scheme in ("az", "azure", "abfs"):
+        # Drop the container segment; what remains is the blob key.
+        _, _, blob = path.partition("/")
+        return blob
+    return path
 
 
 def get_obstore(
@@ -198,8 +223,7 @@ async def read_byte_range(
     """
     if store is None:
         store = get_obstore(uri, storage_options=storage_options)
-    path = urlsplit(uri).path.lstrip("/")
-    blob = await store.get_range_async(path, start=start, length=length)
+    blob = await store.get_range_async(_object_key(uri), start=start, length=length)
     return bytes(blob)
 
 
