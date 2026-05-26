@@ -164,6 +164,6 @@ The same composition algebra all the way down.
 ## See also
 
 - [Concepts — Graph](../concepts.md#graph-symbolic-multi-input-multi-output)
-- [Composition core notebook](../notebooks/composition_core.ipynb)
-- [Pipeline idioms notebook](../notebooks/pipeline_idioms.ipynb)
+- [Composition core notebook](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/01_composition_core.ipynb) — every primitive against scalars.
+- [Pipeline idioms notebook](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/02_pipeline_idioms.ipynb) — the full recipe gallery (observers, control flow, QC, caching).
 - [Define an operator](define-an-operator.md)

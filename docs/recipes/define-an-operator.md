@@ -196,7 +196,8 @@ shape covers every domain operator in `geotoolz`.
 
 - [Concepts](../concepts.md) — the model behind the `Operator` base
   class.
-- [Composition core notebook](../notebooks/composition_core.ipynb) —
-  every primitive against scalars, end-to-end.
+- [Composition core notebook](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/01_composition_core.ipynb) —
+  every primitive against scalars, end-to-end (lives in the
+  research_notebook geostack project).
 - [Branching pipelines](branching-pipelines.md) — when one operator
   isn't enough.

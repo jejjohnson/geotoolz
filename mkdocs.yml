@@ -48,13 +48,9 @@ nav:
       - Define an operator: recipes/define-an-operator.md
       - Branching pipelines: recipes/branching-pipelines.md
       - Integration with geocatalog & geopatcher: recipes/integration-with-geocatalog-and-geopatcher.md
-  - Tutorials:
+  - Tutorial:
       - Operators on Sentinel-2 (Lake Tahoe): notebooks/operators_lake_tahoe.ipynb
-      - Composition core walkthrough: notebooks/composition_core.ipynb
-      - Pipeline idioms: notebooks/pipeline_idioms.ipynb
-      - Deployment shapes: notebooks/deployment_shapes.ipynb
-      - Catalog ↔ patching: notebooks/catalog_patching.ipynb
-      - Image processing (radiometry + cloud + indices): notebooks/image_processing.ipynb
+  - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
   - Module guides:
       - Normalization: normalization.md
       - Multi-format readers: io.md

@@ -156,11 +156,8 @@ churns.
   - [Define an operator](recipes/define-an-operator.md)
   - [Branching pipelines](recipes/branching-pipelines.md)
   - [Integration with geocatalog & geopatcher](recipes/integration-with-geocatalog-and-geopatcher.md)
-- **Tutorials**:
-  - [Composing a Sentinel-2 NDVI pipeline](notebooks/operators_lake_tahoe.ipynb)
-  - [Composition core walkthrough](notebooks/composition_core.ipynb)
-  - [Pipeline idioms](notebooks/pipeline_idioms.ipynb)
-  - [Deployment shapes](notebooks/deployment_shapes.ipynb)
+- **Tutorial**: [Composing a Sentinel-2 NDVI pipeline](notebooks/operators_lake_tahoe.ipynb) — the docs' canonical worked example.
+- **Extended examples ↗**: chronological walkthroughs of the whole stack — composition core, pipeline idioms, image processing on real burn-scars, ML patches, deployment shapes — live in [`research_notebook/projects/geostack`](https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack). The notebooks there execute against real MPC / GBIF / Natural Earth data; this repo's docs reference them by name.
 - **Reference**: [Core API](api/core.md) · [Changelog](https://github.com/jejjohnson/geotoolz/blob/main/CHANGELOG.md) · [GitHub](https://github.com/jejjohnson/geotoolz)
 
 Related: [Normalization](normalization.md) · [Multi-format readers](io.md) · [Sensor readers](readers.md).

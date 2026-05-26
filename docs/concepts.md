@@ -2,10 +2,12 @@
 
 This page is the *why* — the composition algebra behind `geotoolz`,
 why each primitive looks the way it does, and when to reach for which
-one. For a hands-on tour, jump to the [Composition core notebook][notebook];
-for a real-data walk-through, see the [Quickstart](quickstart.md).
+one. For a real-data walk-through, see the [Quickstart](quickstart.md);
+for a hands-on tour against scalars (no GIS setup), see the
+[composition core notebook][notebook] in the research_notebook
+geostack project.
 
-[notebook]: notebooks/composition_core.ipynb
+[notebook]: https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/01_composition_core.ipynb
 
 ## The model in one diagram
 
@@ -339,9 +341,17 @@ input. That's why `Sink` composes mid-chain and `WriteCOG` doesn't.
 - [Recipes](recipes/define-an-operator.md) — short focused how-tos.
 - [Normalization](normalization.md), [Multi-format readers](io.md),
   [Sensor readers](readers.md) — module-specific deep-dives.
-- [Composition core notebook](notebooks/composition_core.ipynb) — every
-  primitive against scalars.
-- [Pipeline idioms](notebooks/pipeline_idioms.ipynb) — recipe gallery.
-- [Deployment shapes](notebooks/deployment_shapes.ipynb) — 13 deployment
-  patterns.
 - [Core API reference](api/core.md).
+
+## Extended examples
+
+The chronological walk-through that exercises every primitive on this
+page — `Operator` / `Sequential` / `Graph` / `Branch` / `Switch` /
+`Tap` / `Snapshot` / `ShapeTrace` / `Profile` / `AssertShape` —
+against plain scalars first, then real Sentinel-2 over Lake Tahoe,
+lives in
+[`research_notebook/projects/geostack`](https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack):
+
+- [`01_composition_core`](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/01_composition_core.ipynb) — every primitive against scalars.
+- [`02_pipeline_idioms`](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/02_pipeline_idioms.ipynb) — recipe gallery (Tap / Snapshot / Profile / Histogram / Try / Retry / Cache / Quarantine / Assert*).
+- [`07_deployment_shapes`](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/07_deployment_shapes.ipynb) — 13 deployment patterns (notebook, ETL, FastAPI, tile server, orchestrator, …).
