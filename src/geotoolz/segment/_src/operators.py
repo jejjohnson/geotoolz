@@ -611,9 +611,15 @@ def _mask_nms(
             if (inter / union) > iou_threshold:
                 suppressed[j] = True
 
+    # Higher-ranked masks claim pixels first; later survivors below the
+    # suppression threshold but with some overlap must not overwrite that
+    # claim, or downstream area/statistics for the highest-confidence
+    # detection would silently shrink. Paste in keep order, into pixels
+    # still unassigned.
     out = np.zeros((h, w), dtype=np.int64)
     for new_offset, src in enumerate(keep):
-        out[bool_masks[src]] = start_label + new_offset
+        target = bool_masks[src] & (out == 0)
+        out[target] = start_label + new_offset
     return out
 
 

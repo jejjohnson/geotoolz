@@ -584,6 +584,33 @@ def test_plume_qnd_features_emits_polynomial_columns() -> None:
     assert row["z_score"] > 1.0
 
 
+def test_plume_qnd_features_n_clumps_uses_dbscan_labels_not_raster_connectivity() -> (
+    None
+):
+    """Regression (PR #87 review): ``n_clumps`` must count unique DBSCAN
+    cluster labels, not re-run a 4-connected component pass on the
+    rasterised non-noise pixels. A single density-connected cluster
+    whose members sit within ``eps`` but are not 4-adjacent would
+    otherwise be over-counted."""
+    # Two pixels diagonally adjacent: 4-connectivity sees two components,
+    # 8-connectivity (and any eps >= sqrt(2)) sees one. The QND feature
+    # should report one cluster.
+    column = np.full((10, 10), -5.0, dtype=float)
+    column[4, 4] = 10.0
+    column[5, 5] = 10.0
+    labels = np.zeros((10, 10), dtype=np.int32)
+    labels[3:8, 3:8] = 1
+
+    df = gz.plume.PlumeQNDFeatures(
+        column=_gt(column),
+        degree=3,
+        eps=2.0,
+        min_samples=2,
+        perc_threshold=80.0,
+    )(_gt(labels))
+    assert int(df.iloc[0]["n_clumps"]) == 1
+
+
 def test_plume_qnd_features_handles_too_few_samples() -> None:
     column = np.zeros((20, 20), dtype=float)
     labels = np.zeros((20, 20), dtype=np.int32)

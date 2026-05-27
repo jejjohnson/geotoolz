@@ -1108,8 +1108,14 @@ def _dbscan_clump_count(
 
     Wraps ``rfc_utils.DBSCAN_clusters`` from the reference implementation.
     Returns ``0`` when no in-mask pixels clear the percentile gate.
+
+    Counts unique non-noise DBSCAN cluster labels directly rather than
+    re-rasterising to a 4-connected canvas — DBSCAN's ``eps`` already
+    encodes the proximity rule the paper relies on, and a separate
+    connected-component pass would split a single density-connected
+    DBSCAN cluster into multiple "clumps" whenever its members are within
+    ``eps`` but not 4-adjacent.
     """
-    from scipy.ndimage import label as ndi_label
     from sklearn.cluster import DBSCAN
 
     in_mask = values[mask]
@@ -1122,13 +1128,8 @@ def _dbscan_clump_count(
     if coords.shape[0] == 0:
         return 0
     labels_db = DBSCAN(eps=eps, min_samples=min_samples).fit_predict(coords)
-    keep = labels_db != -1
-    if not keep.any():
-        return 0
-    canvas = np.zeros_like(values, dtype=bool)
-    canvas[coords[keep, 0], coords[keep, 1]] = True
-    _labels, n_clumps = ndi_label(canvas)
-    return int(n_clumps)
+    non_noise = labels_db[labels_db != -1]
+    return int(np.unique(non_noise).size)
 
 
 class PlumeQNDFeatures(Operator):

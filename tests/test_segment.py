@@ -328,6 +328,25 @@ def test_mask_nms_rejects_invalid_iou_threshold() -> None:
         gz.segment.MaskNMS(iou_threshold=1.0)
 
 
+def test_mask_nms_higher_ranked_mask_keeps_overlapping_pixels() -> None:
+    """Regression (PR #87 review): in keep-order paste, the
+    higher-ranked surviving mask must retain pixels it shares with a
+    lower-ranked survivor below the IoU gate — otherwise its area in
+    the stitched label map silently shrinks."""
+    masks = np.zeros((2, 10, 10), dtype=bool)
+    masks[0, 0:10, 0:7] = True  # 70 px, higher score
+    masks[1, 0:10, 6:10] = True  # 40 px, overlaps with mask 0 in col 6
+    # IoU = 10 / (70 + 40 - 10) = 0.1 — exactly at default gate, so
+    # *neither* is suppressed (gate is strict >). Both survive, but the
+    # higher-ranked mask must keep all of its 70 pixels.
+    out = gz.segment.MaskNMS(iou_threshold=0.2, scores=np.array([0.9, 0.5]))(
+        _mask_stack_gt(masks)
+    )
+    out_arr = np.asarray(out)
+    assert (out_arr == 1).sum() == 70
+    assert (out_arr == 2).sum() == 30  # mask 1 loses col 6 to mask 0
+
+
 def test_mask_nms_rejects_non_3d_input() -> None:
     import pytest
 
