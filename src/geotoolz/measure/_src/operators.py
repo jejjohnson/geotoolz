@@ -9,6 +9,8 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from pipekit import Operator
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import shortest_path
 from shapely.geometry import LineString, Point
 from skimage.measure import (
     find_contours,
@@ -18,6 +20,7 @@ from skimage.measure import (
     regionprops_table,
     shannon_entropy,
 )
+from skimage.morphology import skeletonize
 
 
 if TYPE_CHECKING:
@@ -258,6 +261,71 @@ class RANSAC(Operator):
             "residual_threshold": self.residual_threshold,
             **self.kwargs,
         }
+
+
+def _skeleton_diameter_pixels(mask: np.ndarray) -> float:
+    """Longest shortest-path (graph diameter) of the skeleton of a binary
+    mask, with 8-connected adjacency and unit edge weight.
+
+    Returns ``0.0`` when the mask is empty or the skeleton collapses to a
+    single pixel. NaNs in the input are treated as background.
+    """
+    binary = np.asarray(mask)
+    bin_clean = binary if binary.dtype == bool else np.nan_to_num(binary, nan=0.0) > 0
+    if not bin_clean.any():
+        return 0.0
+    skel = skeletonize(bin_clean)
+    ys, xs = np.nonzero(skel)
+    n = ys.size
+    if n < 2:
+        return 0.0
+
+    coord_to_idx: dict[tuple[int, int], int] = {
+        (int(y), int(x)): i for i, (y, x) in enumerate(zip(ys, xs, strict=True))
+    }
+    rows: list[int] = []
+    cols: list[int] = []
+    for i in range(n):
+        y, x = int(ys[i]), int(xs[i])
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dy == 0 and dx == 0:
+                    continue
+                j = coord_to_idx.get((y + dy, x + dx))
+                # Add each edge once (j > i) — the graph is built as
+                # symmetric below by setting ``directed=False``.
+                if j is not None and j > i:
+                    rows.append(i)
+                    cols.append(j)
+    if not rows:
+        return 0.0
+    data = np.ones(len(rows), dtype=np.int64)
+    graph = csr_matrix((data, (rows, cols)), shape=(n, n))
+    distances = shortest_path(graph, directed=False, unweighted=True)
+    finite = distances[np.isfinite(distances)]
+    return float(finite.max()) if finite.size else 0.0
+
+
+class SkeletonLength(Operator):
+    """Longest path through the skeleton of a binary mask, in pixels.
+
+    The mask is skeletonized via :func:`skimage.morphology.skeletonize` and
+    the result is treated as an 8-connected unit-weight graph; the operator
+    returns the graph diameter (longest shortest-path between any pair of
+    skeleton pixels). For tree-like skeletons this equals the geodesic
+    "fiber length" — closely matching ``calculate_fiber_length_from_mask``
+    from Pérez Carrasco et al. (2026), which uses
+    :func:`networkx.all_pairs_shortest_path_length` for the same purpose.
+
+    Returns ``0.0`` for empty masks or skeletons that collapse to a single
+    pixel.
+    """
+
+    def _apply(self, gt: GeoTensor) -> float:
+        return _skeleton_diameter_pixels(_single_band(np.asarray(gt)))
+
+    def get_config(self) -> dict[str, Any]:
+        return {}
 
 
 class ShannonEntropy(Operator):

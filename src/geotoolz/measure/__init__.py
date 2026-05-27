@@ -9,6 +9,7 @@ from geotoolz.measure._src.operators import (
     ProfileLine,
     RegionProps,
     ShannonEntropy,
+    SkeletonLength,
 )
 
 
@@ -19,4 +20,5 @@ __all__ = [
     "ProfileLine",
     "RegionProps",
     "ShannonEntropy",
+    "SkeletonLength",
 ]
