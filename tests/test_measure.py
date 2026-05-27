@@ -124,3 +124,31 @@ def test_shannon_entropy_zero_for_constant_array() -> None:
 
     assert gz.measure.ShannonEntropy()(constant) == pytest.approx(0.0)
     assert gz.measure.ShannonEntropy()(mixed) > 0.0
+
+
+def test_skeleton_length_horizontal_line_equals_length_minus_one() -> None:
+    mask = np.zeros((5, 10), dtype=bool)
+    mask[2, :] = True
+    gt = _gt(mask)
+
+    length = gz.measure.SkeletonLength()(gt)
+
+    # 10-pixel-long line skeletonizes to itself: diameter is 9 edges.
+    assert length == pytest.approx(9.0)
+
+
+def test_skeleton_length_zero_for_empty_or_singleton_mask() -> None:
+    empty = _gt(np.zeros((4, 4), dtype=bool))
+    singleton = np.zeros((4, 4), dtype=bool)
+    singleton[1, 1] = True
+
+    assert gz.measure.SkeletonLength()(empty) == 0.0
+    assert gz.measure.SkeletonLength()(_gt(singleton)) == 0.0
+
+
+def test_skeleton_length_diagonal_uses_8_connectivity() -> None:
+    # A 5-pixel diagonal is one path of 4 unit-edge steps under
+    # 8-connectivity (not sqrt(2)-weighted — see operator docstring).
+    mask = np.eye(5, dtype=bool)
+    length = gz.measure.SkeletonLength()(_gt(mask))
+    assert length == pytest.approx(4.0)

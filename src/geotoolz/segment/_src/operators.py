@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from pipekit import Operator
+from scipy import ndimage
 from skimage.segmentation import (
     chan_vese,
     expand_labels,
@@ -369,6 +371,306 @@ class ExpandLabels(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {"distance": self.distance}
+
+
+def _bbox_edge_distance(
+    box1: tuple[int, int, int, int], box2: tuple[int, int, int, int]
+) -> float:
+    """Minimum edge-to-edge Euclidean distance between two ``(y1, x1, y2, x2)``
+    boxes. Returns 0 when the boxes overlap or touch."""
+    y1a, x1a, y2a, x2a = box1
+    y1b, x1b, y2b, x2b = box2
+    dx = max(0, x1a - x2b, x1b - x2a)
+    dy = max(0, y1a - y2b, y1b - y2a)
+    return float(np.hypot(dx, dy))
+
+
+def _bbox_iou(
+    box1: tuple[int, int, int, int], box2: tuple[int, int, int, int]
+) -> float:
+    """Box IoU using exclusive ``(y2, x2)`` convention."""
+    y1a, x1a, y2a, x2a = box1
+    y1b, x1b, y2b, x2b = box2
+    yi1, xi1 = max(y1a, y1b), max(x1a, x1b)
+    yi2, xi2 = min(y2a, y2b), min(x2a, x2b)
+    if yi2 <= yi1 or xi2 <= xi1:
+        return 0.0
+    inter = (yi2 - yi1) * (xi2 - xi1)
+    area_a = (y2a - y1a) * (x2a - x1a)
+    area_b = (y2b - y1b) * (x2b - x1b)
+    union = area_a + area_b - inter
+    return float(inter / union) if union > 0 else 0.0
+
+
+def _merge_nearby_instances(
+    labels: np.ndarray,
+    *,
+    distance_threshold: float,
+    iou_threshold_min: float,
+    iou_threshold_max: float,
+    classes: Mapping[int, int] | None,
+    start_label: int,
+) -> np.ndarray:
+    """Merge instance labels whose bboxes are close and partially overlap.
+
+    Connectivity rule (from Pérez Carrasco et al. 2026):
+    two instances are connected iff their bbox edge-to-edge distance is
+    strictly below ``distance_threshold`` *and* their box IoU lies in the
+    open interval ``(iou_threshold_min, iou_threshold_max)``.
+    Connected components are then merged via pixel-wise union.
+    """
+    work = np.where(labels > 0, labels, 0).astype(np.int64, copy=False)
+    ids = np.unique(work)
+    ids = ids[ids > 0]
+    if ids.size == 0:
+        return np.zeros_like(work, dtype=np.int64)
+
+    # ``find_objects`` returns a list indexed by ``label - 1`` whose entries are
+    # ``(slice_y, slice_x)`` with exclusive ``stop`` — matching the paper's
+    # ``[y1, x1, y2, x2]`` convention used by ``_bbox_edge_distance``/``_bbox_iou``.
+    slices = ndimage.find_objects(work)
+    boxes: dict[int, tuple[int, int, int, int]] = {}
+    for lbl_value in ids:
+        lbl = int(lbl_value)
+        sl = slices[lbl - 1]
+        if sl is None:
+            continue
+        y_sl, x_sl = sl
+        boxes[lbl] = (
+            int(y_sl.start),
+            int(x_sl.start),
+            int(y_sl.stop),
+            int(x_sl.stop),
+        )
+
+    instance_ids = list(boxes.keys())
+    n = len(instance_ids)
+
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+
+    for i in range(n):
+        bi = boxes[instance_ids[i]]
+        ci = None if classes is None else classes.get(instance_ids[i])
+        for j in range(i + 1, n):
+            if classes is not None:
+                cj = classes.get(instance_ids[j])
+                if ci != cj:
+                    continue
+            bj = boxes[instance_ids[j]]
+            if _bbox_edge_distance(bi, bj) >= distance_threshold:
+                continue
+            iou = _bbox_iou(bi, bj)
+            if not (iou_threshold_min < iou < iou_threshold_max):
+                continue
+            union(i, j)
+
+    root_to_new: dict[int, int] = {}
+    remap: dict[int, int] = {}
+    next_label = start_label
+    for i, lbl in enumerate(instance_ids):
+        root = find(i)
+        if root not in root_to_new:
+            root_to_new[root] = next_label
+            next_label += 1
+        remap[lbl] = root_to_new[root]
+
+    max_label = int(work.max())
+    lookup = np.zeros(max_label + 1, dtype=np.int64)
+    for old_lbl, new_lbl in remap.items():
+        lookup[old_lbl] = new_lbl
+    return lookup[work]
+
+
+class MergeNearbyInstances(Operator):
+    """Merge instance labels whose bboxes are close and partially overlap.
+
+    Adapted from Pérez Carrasco et al. (2026), *Plume Segmentation from
+    MethaneSAT with Cross-Sensor Transfer Learning and Physics-Informed
+    Postprocessing* (``merging.merge_spatial_fragments_v2``). Used there as
+    Mask R-CNN postprocessing to stitch instance fragments split across
+    sliding-window patches.
+
+    Two instances are connected when their bounding boxes are within
+    ``distance_threshold`` pixels edge-to-edge **and** their box IoU is in
+    the open interval ``(iou_threshold_min, iou_threshold_max)``. Connected
+    components are then merged into single instances via pixel-wise union.
+    Note that the IoU lower bound is strict, so two close-but-disjoint
+    boxes (IoU = 0) never merge — match the paper's behavior; loosen
+    ``iou_threshold_min`` to ``0.0`` to recover proximity-only merging.
+
+    Args:
+        distance_threshold: Maximum edge-to-edge bbox distance (pixels).
+        iou_threshold_min: Lower (exclusive) bound on box IoU.
+        iou_threshold_max: Upper (exclusive) bound on box IoU.
+        classes: Optional ``{instance_label: class_id}`` mapping; when
+            provided, only same-class pairs are eligible to merge.
+        start_label: Starting integer label for the relabeled output.
+    """
+
+    def __init__(
+        self,
+        *,
+        distance_threshold: float = 40.0,
+        iou_threshold_min: float = 0.01,
+        iou_threshold_max: float = 0.65,
+        classes: Mapping[int, int] | None = None,
+        start_label: int = 1,
+    ) -> None:
+        if distance_threshold < 0:
+            raise ValueError("distance_threshold must be non-negative")
+        if not 0.0 <= iou_threshold_min < iou_threshold_max <= 1.0:
+            raise ValueError("require 0 <= iou_threshold_min < iou_threshold_max <= 1")
+        if start_label < 1:
+            raise ValueError("start_label must be >= 1")
+        self.distance_threshold = float(distance_threshold)
+        self.iou_threshold_min = float(iou_threshold_min)
+        self.iou_threshold_max = float(iou_threshold_max)
+        self.classes = None if classes is None else dict(classes)
+        self.start_label = int(start_label)
+
+    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+        labels_in = _single_band(np.asarray(gt))
+        merged = _merge_nearby_instances(
+            labels_in,
+            distance_threshold=self.distance_threshold,
+            iou_threshold_min=self.iou_threshold_min,
+            iou_threshold_max=self.iou_threshold_max,
+            classes=self.classes,
+            start_label=self.start_label,
+        )
+        return gt.array_as_geotensor(merged.astype(np.int32, copy=False))
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "distance_threshold": self.distance_threshold,
+            "iou_threshold_min": self.iou_threshold_min,
+            "iou_threshold_max": self.iou_threshold_max,
+            "classes": None if self.classes is None else dict(self.classes),
+            "start_label": self.start_label,
+        }
+
+
+def _mask_nms(
+    masks: np.ndarray,
+    scores: np.ndarray | None,
+    iou_threshold: float,
+    start_label: int,
+) -> np.ndarray:
+    """Suppress overlapping mask predictions via mask-IoU and stitch
+    survivors into a 2-D label map (suppressed planes -> background).
+
+    Mirrors Pérez Carrasco et al. (2026), ``non_max_suppression_masks``.
+    When ``scores`` is None instances are ranked by area, largest first.
+    """
+    if masks.ndim != 3:
+        raise ValueError(f"expected a (N, H, W) mask stack, got shape {masks.shape}")
+    n, h, w = masks.shape
+    if n == 0:
+        return np.zeros((h, w), dtype=np.int64)
+    bool_masks = masks.astype(bool, copy=False)
+    areas = bool_masks.reshape(n, -1).sum(axis=1).astype(np.int64)
+    if scores is None:
+        rank = np.argsort(-areas, kind="stable")
+    else:
+        if scores.shape != (n,):
+            raise ValueError(
+                f"scores length {scores.shape} does not match mask count ({n})"
+            )
+        rank = np.argsort(-scores, kind="stable")
+
+    keep: list[int] = []
+    suppressed = np.zeros(n, dtype=bool)
+    for idx in rank:
+        i = int(idx)
+        if suppressed[i] or areas[i] == 0:
+            continue
+        keep.append(i)
+        mi = bool_masks[i]
+        ai = int(areas[i])
+        for jdx in rank:
+            j = int(jdx)
+            if j == i or suppressed[j] or j in keep:
+                continue
+            inter = int(np.logical_and(mi, bool_masks[j]).sum())
+            if inter == 0:
+                continue
+            union = ai + int(areas[j]) - inter
+            if union <= 0:
+                continue
+            if (inter / union) > iou_threshold:
+                suppressed[j] = True
+
+    out = np.zeros((h, w), dtype=np.int64)
+    for new_offset, src in enumerate(keep):
+        out[bool_masks[src]] = start_label + new_offset
+    return out
+
+
+class MaskNMS(Operator):
+    """Mask-IoU non-maximum suppression over a stack of instance masks.
+
+    Adapted from Pérez Carrasco et al. (2026), ``metrics_instance_segmentation.
+    non_max_suppression_masks``. The operator ranks instance masks by
+    their score (or by pixel area when no scores are supplied), then
+    suppresses any later mask whose mask-IoU against a kept mask exceeds
+    ``iou_threshold``. Surviving masks are pasted into a 2-D label map
+    numbered from ``start_label`` in keep order.
+
+    Input is a ``(N, H, W)`` mask stack carrier — one plane per candidate
+    instance. This is the natural shape for raw detector output before
+    fragments have been merged into a single non-overlapping label map;
+    use this *before* :class:`MergeNearbyInstances` when multiple
+    detections may cover the same object.
+
+    Args:
+        iou_threshold: Pairs with mask-IoU above this are suppressed.
+        scores: Optional length-``N`` array of per-instance scores. When
+            None, instances are ranked by pixel area (largest first).
+        start_label: Starting integer label for the renumbered output.
+    """
+
+    def __init__(
+        self,
+        *,
+        iou_threshold: float = 0.1,
+        scores: np.ndarray | None = None,
+        start_label: int = 1,
+    ) -> None:
+        if not 0.0 < iou_threshold < 1.0:
+            raise ValueError("iou_threshold must be in (0, 1)")
+        if start_label < 1:
+            raise ValueError("start_label must be >= 1")
+        self.iou_threshold = float(iou_threshold)
+        self.scores = None if scores is None else np.asarray(scores, dtype=float)
+        self.start_label = int(start_label)
+
+    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+        masks = np.asarray(gt)
+        out = _mask_nms(
+            masks,
+            self.scores,
+            iou_threshold=self.iou_threshold,
+            start_label=self.start_label,
+        )
+        return _labels(gt, out)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "iou_threshold": self.iou_threshold,
+            "scores": None if self.scores is None else self.scores.tolist(),
+            "start_label": self.start_label,
+        }
 
 
 class MarkBoundaries(Operator):

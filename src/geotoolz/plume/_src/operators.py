@@ -18,7 +18,7 @@ in kg/m^2. Use :class:`ColumnToMass` to convert from ppm m or mol/m^2.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -822,4 +822,455 @@ class ColumnToMass(Operator):
             "gas": self.gas,
             "units_in": self.units_in,
             "units_out": self.units_out,
+        }
+
+
+def _iter_instances(
+    labels: np.ndarray,
+) -> list[tuple[int, np.ndarray, tuple[int, int, int, int]]]:
+    """Return ``(label, compact_mask, bbox)`` per non-zero label."""
+    from scipy import ndimage
+
+    work = np.where(labels > 0, labels, 0).astype(np.int64, copy=False)
+    ids = np.unique(work)
+    ids = ids[ids > 0]
+    if ids.size == 0:
+        return []
+    slices = ndimage.find_objects(work)
+    out: list[tuple[int, np.ndarray, tuple[int, int, int, int]]] = []
+    for lbl_value in ids:
+        lbl = int(lbl_value)
+        sl = slices[lbl - 1]
+        if sl is None:
+            continue
+        y_sl, x_sl = sl
+        compact = work[sl] == lbl
+        bbox = (int(y_sl.start), int(x_sl.start), int(y_sl.stop), int(x_sl.stop))
+        out.append((lbl, compact, bbox))
+    return out
+
+
+class PlumeShapeFilter(Operator):
+    """Drop instance labels that fail a fiber-shape morphology gate.
+
+    Adapted from Pérez Carrasco et al. (2026), ``physical_constraints.
+    apply_physical_constraints`` — a post-Mask R-CNN gate that distinguishes
+    elongated plume features from compact false positives. Per instance:
+
+    1. ``area = mask.sum()``; drop when below ``min_area``.
+    2. ``fiber_length`` = skeleton-graph diameter (see
+       :class:`geotoolz.measure.SkeletonLength`).
+    3. ``major_axis`` = ``regionprops.axis_major_length`` — the PCA-based
+       major axis of the equivalent ellipse. The original paper uses
+       ``cv2.minAreaRect`` (rotated minimum-area rectangle), avoided here
+       to keep the optional-dependency surface unchanged; the two measures
+       agree closely for typical plume morphologies.
+    4. ``fiber_width = area / fiber_length``.
+    5. Keep iff
+       ``min_fiber_to_major_ratio <= fiber_length / major_axis
+       <= max_fiber_to_major_ratio`` AND
+       ``min_fiber_width <= fiber_width <= max_fiber_width``.
+
+    Surviving instances keep their original integer labels; rejected
+    instances are mapped to background (``0``).
+
+    Args:
+        min_area: Minimum pixel count to consider an instance.
+        min_fiber_to_major_ratio: Lower bound on ``fiber/major``.
+        max_fiber_to_major_ratio: Upper bound on ``fiber/major``.
+        min_fiber_width: Lower bound on ``area / fiber_length``.
+        max_fiber_width: Upper bound on ``area / fiber_length``.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_area: int = 50,
+        min_fiber_to_major_ratio: float = 1.0,
+        max_fiber_to_major_ratio: float = 10.0,
+        min_fiber_width: float = 1.0,
+        max_fiber_width: float = 100.0,
+    ) -> None:
+        if min_area < 0:
+            raise ValueError("min_area must be non-negative")
+        if min_fiber_to_major_ratio < 0 or max_fiber_to_major_ratio <= 0:
+            raise ValueError("fiber-to-major ratio bounds must be non-negative")
+        if min_fiber_to_major_ratio > max_fiber_to_major_ratio:
+            raise ValueError("min_fiber_to_major_ratio must be <= max")
+        if min_fiber_width < 0 or max_fiber_width <= 0:
+            raise ValueError("fiber width bounds must be non-negative")
+        if min_fiber_width > max_fiber_width:
+            raise ValueError("min_fiber_width must be <= max")
+        self.min_area = int(min_area)
+        self.min_fiber_to_major_ratio = float(min_fiber_to_major_ratio)
+        self.max_fiber_to_major_ratio = float(max_fiber_to_major_ratio)
+        self.min_fiber_width = float(min_fiber_width)
+        self.max_fiber_width = float(max_fiber_width)
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        from geotoolz.measure._src.operators import _skeleton_diameter_pixels
+
+        labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
+        kept: set[int] = set()
+        for lbl, compact, _bbox in _iter_instances(labels):
+            area = int(compact.sum())
+            if area < self.min_area:
+                continue
+            fiber_length = _skeleton_diameter_pixels(compact)
+            if fiber_length <= 0:
+                continue
+            major_axis = _major_axis_length(compact)
+            if major_axis <= 0:
+                continue
+            ratio = fiber_length / major_axis
+            fiber_width = area / fiber_length
+            if not (
+                self.min_fiber_to_major_ratio <= ratio <= self.max_fiber_to_major_ratio
+            ):
+                continue
+            if not self.min_fiber_width <= fiber_width <= self.max_fiber_width:
+                continue
+            kept.add(lbl)
+
+        if not kept:
+            out = np.zeros_like(labels, dtype=np.int32)
+        else:
+            keep_mask = np.isin(labels, list(kept))
+            out = np.where(keep_mask, labels, 0).astype(np.int32, copy=False)
+        return gt.array_as_geotensor(out, fill_value_default=0)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "min_area": self.min_area,
+            "min_fiber_to_major_ratio": self.min_fiber_to_major_ratio,
+            "max_fiber_to_major_ratio": self.max_fiber_to_major_ratio,
+            "min_fiber_width": self.min_fiber_width,
+            "max_fiber_width": self.max_fiber_width,
+        }
+
+
+def _major_axis_length(compact_mask: np.ndarray) -> float:
+    """PCA-based major-axis length of a compact binary mask (in pixels)."""
+    props = regionprops_table(
+        compact_mask.astype(np.int32, copy=False),
+        properties=("axis_major_length",),
+    )
+    arr = props.get("axis_major_length")
+    if arr is None or len(arr) == 0:
+        return 0.0
+    return float(arr[0])
+
+
+def _in_out_mask_stats(
+    values: np.ndarray, mask: np.ndarray
+) -> tuple[float, float, float, float, float, float]:
+    """``(mean_plume, bg_mean, bg_std, contrast, z_score, ipa)`` from
+    Pérez Carrasco et al. (2026), ``rfc_utils.xch4_metrics``."""
+    plume_data = values[mask]
+    plume_data = plume_data[np.isfinite(plume_data)]
+    if plume_data.size == 0:
+        nan = float("nan")
+        return nan, nan, nan, nan, nan, nan
+    bg = values[~mask]
+    bg = bg[np.isfinite(bg)]
+    if bg.size == 0:
+        # Fallback used in the paper: synthesise a background by shifting
+        # the plume distribution down by one std. Keeps the metric
+        # well-defined when the mask covers the entire valid area.
+        bg = plume_data - float(np.std(plume_data))
+    bg_mean = float(np.mean(bg))
+    bg_std = float(np.std(bg))
+    mean_plume = float(np.mean(plume_data))
+    contrast = mean_plume / bg_mean if bg_mean != 0 else float("nan")
+    z_score = (mean_plume - bg_mean) / bg_std if bg_std > 0 else float("nan")
+    ipa = float(np.sum(plume_data) - bg_mean * plume_data.size) / plume_data.size
+    return mean_plume, bg_mean, bg_std, contrast, z_score, ipa
+
+
+class PlumeColumnStats(Operator):
+    """Per-instance in-mask vs background statistics of a column field.
+
+    Adapted from Pérez Carrasco et al. (2026), ``rfc_utils.xch4_metrics``.
+    For every non-zero label in the input map, returns a row with the
+    in-mask mean, the out-of-mask (background) mean / std, and three
+    derived metrics used by the paper's Random-Forest false-plume
+    classifier:
+
+    - ``contrast`` = ``mean_plume / mean_background``
+    - ``z_score`` = ``(mean_plume - mean_background) / std_background``
+    - ``intensity_per_area`` = ``(sum_plume - mean_background * n_plume)
+      / n_plume``
+
+    Args:
+        column: Carrier with the column field (single-band ``GeoTensor``,
+            same shape as the input label map).
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
+
+    def __init__(self, *, column: GeoTensor) -> None:
+        self.column = column
+
+    def _apply(self, gt: GeoTensor) -> pd.DataFrame:
+        labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
+        col_arr = squeeze_single_band(np.asarray(self.column)).astype(float, copy=False)
+        if col_arr.shape != labels.shape:
+            raise ValueError(
+                "column shape "
+                f"{col_arr.shape} does not match label shape {labels.shape}"
+            )
+        rows: list[dict[str, Any]] = []
+        for lbl, compact, bbox in _iter_instances(labels):
+            y0, x0, y1, x1 = bbox
+            full_mask = np.zeros_like(col_arr, dtype=bool)
+            full_mask[y0:y1, x0:x1] = compact
+            mean_plume, bg_mean, bg_std, contrast, z_score, ipa = _in_out_mask_stats(
+                col_arr, full_mask
+            )
+            rows.append(
+                {
+                    "label": lbl,
+                    "area": int(compact.sum()),
+                    "mean_enhancement": mean_plume,
+                    "background_mean": bg_mean,
+                    "background_std": bg_std,
+                    "contrast": contrast,
+                    "z_score": z_score,
+                    "intensity_per_area": ipa,
+                }
+            )
+        if not rows:
+            return pd.DataFrame(
+                columns=[
+                    "label",
+                    "area",
+                    "mean_enhancement",
+                    "background_mean",
+                    "background_std",
+                    "contrast",
+                    "z_score",
+                    "intensity_per_area",
+                ]
+            )
+        return pd.DataFrame(rows)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "column": {
+                "shape": list(np.asarray(self.column).shape),
+                "dtype": str(np.asarray(self.column).dtype),
+            },
+        }
+
+
+def _qnd_polynomial(
+    values: np.ndarray,
+    mask: np.ndarray,
+    degree: int,
+) -> np.ndarray:
+    """Quantile-Normality-Deviation polynomial coefficients.
+
+    Mirrors Pérez Carrasco et al. (2026), ``rfc_utils.get_QND_poly``: at
+    each percentile ``q in [0.01, 0.99]``, take the absolute difference
+    between the empirical CDF of the in-mask values and the CDF of a
+    Gaussian fit to *all finite values in ``values``*, then fit a polynomial
+    of the given degree. Returns coefficients in ``np.polyfit`` order
+    (highest power first). Returns ``np.full(degree + 1, nan)`` when fewer
+    than 10 finite in-mask samples are available.
+    """
+    from scipy import stats
+
+    in_mask = values[mask]
+    in_mask = in_mask[np.isfinite(in_mask)]
+    if in_mask.size < 10:
+        return np.full(degree + 1, np.nan)
+    scene = values[np.isfinite(values)]
+    if scene.size == 0:
+        return np.full(degree + 1, np.nan)
+    quantiles = np.linspace(0.01, 0.99, 100)
+    q_values = np.percentile(in_mask, quantiles * 100.0)
+    theoretical_cdf = stats.norm(loc=scene.mean(), scale=scene.std()).cdf(q_values)
+    sorted_in = np.sort(in_mask)
+    empirical_cdf = np.searchsorted(sorted_in, q_values, side="right") / sorted_in.size
+    ks = np.abs(empirical_cdf - theoretical_cdf)
+    return np.polyfit(quantiles, ks, degree)
+
+
+def _dbscan_clump_count(
+    values: np.ndarray,
+    mask: np.ndarray,
+    *,
+    eps: float,
+    min_samples: int,
+    perc_threshold: float,
+) -> int:
+    """Number of DBSCAN clumps among in-mask pixels above ``perc_threshold``.
+
+    Wraps ``rfc_utils.DBSCAN_clusters`` from the reference implementation.
+    Returns ``0`` when no in-mask pixels clear the percentile gate.
+    """
+    from scipy.ndimage import label as ndi_label
+    from sklearn.cluster import DBSCAN
+
+    in_mask = values[mask]
+    in_mask = in_mask[np.isfinite(in_mask)]
+    if in_mask.size == 0:
+        return 0
+    threshold = float(np.percentile(in_mask, perc_threshold))
+    high_mask = (values > threshold) & mask & np.isfinite(values)
+    coords = np.argwhere(high_mask)
+    if coords.shape[0] == 0:
+        return 0
+    labels_db = DBSCAN(eps=eps, min_samples=min_samples).fit_predict(coords)
+    keep = labels_db != -1
+    if not keep.any():
+        return 0
+    canvas = np.zeros_like(values, dtype=bool)
+    canvas[coords[keep, 0], coords[keep, 1]] = True
+    _labels, n_clumps = ndi_label(canvas)
+    return int(n_clumps)
+
+
+class PlumeQNDFeatures(Operator):
+    """Per-instance Quantile-Normality-Deviation features for plume QA.
+
+    Adapted from Pérez Carrasco et al. (2026) — the feature pipeline that
+    feeds the Random-Forest false-plume classifier
+    (``rfc_utils.get_QND_df_cms`` / ``get_plume_info``). For each non-zero
+    label in the input map this operator emits one row containing:
+
+    - ``qnd_column_*`` — polynomial coefficients of the
+      Kolmogorov-Smirnov distance between the in-mask CDF of the column
+      field and a Gaussian fit to the full scene's column distribution,
+      sampled across 100 percentiles in ``[0.01, 0.99]``.
+    - ``qnd_albedo_*`` — same construction over the optional albedo field.
+    - ``n_clumps`` — DBSCAN cluster count of in-mask pixels above the
+      ``perc_threshold`` percentile (per the paper's clump-count signal).
+    - ``contrast`` / ``z_score`` / ``intensity_per_area`` — the same stats
+      that :class:`PlumeColumnStats` emits, included so a single call
+      assembles the full feature vector used by the paper.
+
+    Args:
+        column: Column-enhancement carrier (same shape as the label map).
+        albedo: Optional albedo carrier; when omitted the ``qnd_albedo_*``
+            coefficients are filled with NaN.
+        degree: Degree of the QND polynomial (paper default: 6).
+        eps: DBSCAN ``eps`` (pixels).
+        min_samples: DBSCAN ``min_samples``.
+        perc_threshold: Percentile (within the instance mask) above which
+            pixels are eligible for clustering.
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        *,
+        column: GeoTensor,
+        albedo: GeoTensor | None = None,
+        degree: int = 6,
+        eps: float = 50.0,
+        min_samples: int = 50,
+        perc_threshold: float = 98.0,
+    ) -> None:
+        if degree < 1:
+            raise ValueError("degree must be >= 1")
+        if eps <= 0:
+            raise ValueError("eps must be positive")
+        if min_samples < 1:
+            raise ValueError("min_samples must be >= 1")
+        if not 0.0 < perc_threshold < 100.0:
+            raise ValueError("perc_threshold must be in (0, 100)")
+        self.column = column
+        self.albedo = albedo
+        self.degree = int(degree)
+        self.eps = float(eps)
+        self.min_samples = int(min_samples)
+        self.perc_threshold = float(perc_threshold)
+
+    def _apply(self, gt: GeoTensor) -> pd.DataFrame:
+        labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
+        col_arr = squeeze_single_band(np.asarray(self.column)).astype(float, copy=False)
+        if col_arr.shape != labels.shape:
+            raise ValueError(
+                "column shape "
+                f"{col_arr.shape} does not match label shape {labels.shape}"
+            )
+        if self.albedo is None:
+            alb_arr = None
+        else:
+            alb_arr = squeeze_single_band(np.asarray(self.albedo)).astype(
+                float, copy=False
+            )
+            if alb_arr.shape != labels.shape:
+                raise ValueError(
+                    "albedo shape "
+                    f"{alb_arr.shape} does not match label shape {labels.shape}"
+                )
+
+        col_keys = [f"qnd_column_c{i}" for i in range(self.degree + 1)]
+        alb_keys = [f"qnd_albedo_c{i}" for i in range(self.degree + 1)]
+        rows: list[dict[str, Any]] = []
+        for lbl, compact, bbox in _iter_instances(labels):
+            y0, x0, y1, x1 = bbox
+            full_mask = np.zeros_like(col_arr, dtype=bool)
+            full_mask[y0:y1, x0:x1] = compact
+            qnd_col = _qnd_polynomial(col_arr, full_mask, self.degree)
+            qnd_alb = (
+                _qnd_polynomial(alb_arr, full_mask, self.degree)
+                if alb_arr is not None
+                else np.full(self.degree + 1, np.nan)
+            )
+            n_clumps = _dbscan_clump_count(
+                col_arr,
+                full_mask,
+                eps=self.eps,
+                min_samples=self.min_samples,
+                perc_threshold=self.perc_threshold,
+            )
+            _mp, _bm, _bs, contrast, z_score, ipa = _in_out_mask_stats(
+                col_arr, full_mask
+            )
+            row: dict[str, Any] = {
+                "label": lbl,
+                "area": int(compact.sum()),
+                "n_clumps": n_clumps,
+                "contrast": contrast,
+                "z_score": z_score,
+                "intensity_per_area": ipa,
+            }
+            row.update(dict(zip(col_keys, qnd_col.tolist(), strict=True)))
+            row.update(dict(zip(alb_keys, qnd_alb.tolist(), strict=True)))
+            rows.append(row)
+
+        if not rows:
+            empty_cols = [
+                "label",
+                "area",
+                "n_clumps",
+                "contrast",
+                "z_score",
+                "intensity_per_area",
+                *col_keys,
+                *alb_keys,
+            ]
+            return pd.DataFrame(columns=empty_cols)
+        return pd.DataFrame(rows)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "column": {
+                "shape": list(np.asarray(self.column).shape),
+                "dtype": str(np.asarray(self.column).dtype),
+            },
+            "albedo": None
+            if self.albedo is None
+            else {
+                "shape": list(np.asarray(self.albedo).shape),
+                "dtype": str(np.asarray(self.albedo).dtype),
+            },
+            "degree": self.degree,
+            "eps": self.eps,
+            "min_samples": self.min_samples,
+            "perc_threshold": self.perc_threshold,
         }

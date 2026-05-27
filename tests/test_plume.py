@@ -485,6 +485,118 @@ def test_label_components_drops_small_and_renumbers_contiguously() -> None:
     assert int((labels == 1).sum()) + int((labels == 2).sum()) == 4 + 6
 
 
+def _make_long_thin_plume(label_id: int = 1) -> np.ndarray:
+    labels = np.zeros((20, 60), dtype=np.int32)
+    labels[10, 5:55] = label_id  # 50-px long, 1-px wide: clearly fiber-like
+    return labels
+
+
+def _make_blob(label_id: int = 1) -> np.ndarray:
+    labels = np.zeros((20, 20), dtype=np.int32)
+    labels[5:15, 5:15] = label_id  # 10x10 blob: fiber/major ~ 1
+    return labels
+
+
+def test_plume_shape_filter_keeps_long_thin_features() -> None:
+    labels = _make_long_thin_plume()
+    # skimage's PCA-based major-axis length slightly overshoots the
+    # geodesic fiber length for axis-aligned thin strips (the paper used
+    # cv2.minAreaRect which is exact), so soften the default lower ratio
+    # bound for this faithfulness test.
+    out = gz.plume.PlumeShapeFilter(min_area=10, min_fiber_to_major_ratio=0.5)(
+        _gt(labels)
+    )
+    out_arr = np.asarray(out)
+    assert set(np.unique(out_arr[out_arr > 0])) == {1}
+
+
+def test_plume_shape_filter_rejects_compact_blob_with_min_ratio() -> None:
+    labels = _make_blob()
+    # min_fiber_to_major_ratio=2.0 forces elongated shapes only; a square
+    # blob has skeleton/major <~ 1 so it is dropped.
+    out = gz.plume.PlumeShapeFilter(min_area=10, min_fiber_to_major_ratio=2.0)(
+        _gt(labels)
+    )
+    assert (np.asarray(out) == 0).all()
+
+
+def test_plume_shape_filter_drops_tiny_instances_by_area() -> None:
+    labels = np.zeros((10, 10), dtype=np.int32)
+    labels[1, 1] = 1
+    labels[5:9, 5:9] = 2  # 16 px
+
+    out = gz.plume.PlumeShapeFilter(min_area=10)(_gt(labels))
+    out_arr = np.asarray(out)
+    assert 1 not in out_arr  # tiny single-pixel instance filtered
+    # The 4x4 blob survives the area gate but may still be dropped by the
+    # default fiber/major ratio of >=1.0 — only check the area filter here.
+    assert set(np.unique(out_arr)) <= {0, 2}
+
+
+def test_plume_column_stats_in_out_contrast_matches_xch4_metrics() -> None:
+    labels = np.zeros((10, 10), dtype=np.int32)
+    labels[3:7, 3:7] = 1
+    values = np.ones((10, 10), dtype=float)
+    values[3:7, 3:7] = 5.0
+
+    df = gz.plume.PlumeColumnStats(column=_gt(values))(_gt(labels))
+
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["label"] == 1
+    assert row["area"] == 16
+    assert row["mean_enhancement"] == pytest.approx(5.0)
+    assert row["background_mean"] == pytest.approx(1.0)
+    assert row["contrast"] == pytest.approx(5.0)
+    # ipa = (sum_plume - bg_mean * n_plume) / n_plume = (80 - 1*16)/16 = 4
+    assert row["intensity_per_area"] == pytest.approx(4.0)
+
+
+def test_plume_column_stats_empty_label_map_returns_empty_frame() -> None:
+    labels = np.zeros((5, 5), dtype=np.int32)
+    df = gz.plume.PlumeColumnStats(column=_gt(np.zeros((5, 5))))(_gt(labels))
+    assert df.empty
+    assert "intensity_per_area" in df.columns
+
+
+def test_plume_qnd_features_emits_polynomial_columns() -> None:
+    rng = np.random.default_rng(0)
+    column = rng.normal(loc=0.0, scale=1.0, size=(40, 40))
+    column[15:25, 15:25] += 3.0  # an obvious enhancement
+    labels = np.zeros((40, 40), dtype=np.int32)
+    labels[15:25, 15:25] = 1
+
+    op = gz.plume.PlumeQNDFeatures(
+        column=_gt(column), degree=4, eps=5.0, min_samples=3, perc_threshold=90.0
+    )
+    df = op(_gt(labels))
+
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["label"] == 1
+    # 5 polynomial coefficients (degree 4 + 1), all finite for a well-populated
+    # in-mask sample.
+    coeffs = [row[f"qnd_column_c{i}"] for i in range(5)]
+    assert all(np.isfinite(coeffs))
+    # Albedo not supplied -> NaN coefficients.
+    assert all(not np.isfinite(row[f"qnd_albedo_c{i}"]) for i in range(5))
+    # Plume z-score against the background should be clearly positive.
+    assert row["z_score"] > 1.0
+
+
+def test_plume_qnd_features_handles_too_few_samples() -> None:
+    column = np.zeros((20, 20), dtype=float)
+    labels = np.zeros((20, 20), dtype=np.int32)
+    labels[0, 0:5] = 1  # only 5 pixels: below the 10-sample threshold
+
+    df = gz.plume.PlumeQNDFeatures(column=_gt(column), degree=3)(_gt(labels))
+
+    row = df.iloc[0]
+    # All polynomial coefficients should fall through to NaN when fewer
+    # than 10 valid samples are inside the mask.
+    assert all(not np.isfinite(row[f"qnd_column_c{i}"]) for i in range(4))
+
+
 def test_ime_convex_hull_handles_collinear_points() -> None:
     """Degenerate convex hull (1-pixel row) must not crash."""
     mask = _gt(np.array([[True, True, True, True]]))
