@@ -26,6 +26,16 @@ from xrtoolz.metrics._src.distributional import (
 )
 from xrtoolz.metrics._src.dm import dm_test
 from xrtoolz.metrics._src.forecast import SkillByLeadTime, skill_by_lead_time
+from xrtoolz.metrics._src.instance import (
+    AveragePrecisionMatched,
+    InstanceF1AtIoU,
+    InstanceMatcher,
+    MaskIoU,
+    average_precision_matched,
+    instance_f1_at_iou,
+    mask_iou_matrix,
+    match_instances,
+)
 from xrtoolz.metrics._src.leaderboard import rank_methods
 from xrtoolz.metrics._src.masked import MaskedMetric, masked_metric
 from xrtoolz.metrics._src.multiscale import (
@@ -117,6 +127,7 @@ __all__ = [
     "NRMSE",
     "RMSE",
     "SSIM",
+    "AveragePrecisionMatched",
     "BandLimitedRMSE",
     "Bias",
     "BinnedResiduals2D",
@@ -130,6 +141,9 @@ __all__ = [
     "FrequencyBandSkill",
     "GeostrophicBalanceError",
     "GradientDifference",
+    "InstanceF1AtIoU",
+    "InstanceMatcher",
+    "MaskIoU",
     "MaskedMetric",
     "NRMSEScore",
     "PSDScore",
@@ -145,6 +159,7 @@ __all__ = [
     "Wasserstein1",
     "WaveletPSDScore",
     "along_track_psd_score",
+    "average_precision_matched",
     "band_limited_rmse",
     "bias",
     "bin_residuals_2d",
@@ -162,8 +177,11 @@ __all__ = [
     "find_intercept_2D",
     "geostrophic_balance_error",
     "gradient_difference",
+    "instance_f1_at_iou",
     "mae",
+    "mask_iou_matrix",
     "masked_metric",
+    "match_instances",
     "mse",
     "normalize_regions",
     "nrmse",

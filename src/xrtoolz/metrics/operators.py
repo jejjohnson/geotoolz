@@ -11,6 +11,12 @@ from xrtoolz.metrics._src.distributional import (
     Wasserstein1,
 )
 from xrtoolz.metrics._src.forecast import SkillByLeadTime
+from xrtoolz.metrics._src.instance import (
+    AveragePrecisionMatched,
+    InstanceF1AtIoU,
+    InstanceMatcher,
+    MaskIoU,
+)
 from xrtoolz.metrics._src.masked import MaskedMetric
 from xrtoolz.metrics._src.multiscale import EvaluateByRegion
 from xrtoolz.metrics._src.physical import (
@@ -58,6 +64,7 @@ __all__ = [
     "NRMSE",
     "RMSE",
     "SSIM",
+    "AveragePrecisionMatched",
     "BandLimitedRMSE",
     "Bias",
     "BinnedResiduals2D",
@@ -71,6 +78,9 @@ __all__ = [
     "FrequencyBandSkill",
     "GeostrophicBalanceError",
     "GradientDifference",
+    "InstanceF1AtIoU",
+    "InstanceMatcher",
+    "MaskIoU",
     "MaskedMetric",
     "NRMSEScore",
     "PSDScore",
