@@ -12,6 +12,7 @@ import xarray as xr
 from xrtoolz.geo.regimes import coastal_regions, eddy_regions, equatorial_regions
 from xrtoolz.metrics import (
     BinnedResiduals2D,
+    DieboldMariano,
     RegionScores,
     bin_residuals_2d,
     dm_test,
@@ -123,22 +124,26 @@ def test_eddy_regions_returns_two_class_dataarray() -> None:
 
 
 def test_dm_test_identical_and_skewed_losses() -> None:
-    losses = np.array([1.0, -2.0, 3.0, -4.0])
-    stat, p_value = dm_test(losses, losses)
-    np.testing.assert_allclose(stat, 0.0)
-    np.testing.assert_allclose(p_value, 1.0)
+    losses = xr.DataArray(np.array([1.0, -2.0, 3.0, -4.0]), dims="time")
+    out = dm_test(losses, losses)
+    np.testing.assert_allclose(out["statistic"].values, 0.0)
+    np.testing.assert_allclose(out["p_value"].values, 1.0)
 
-    stat, p_value = dm_test(np.arange(1.0, 7.0), np.ones(6), hln_correction=False)
-    assert stat > 0.0
-    assert p_value < 0.05
+    out = dm_test(
+        xr.DataArray(np.arange(1.0, 7.0), dims="time"),
+        xr.DataArray(np.ones(6), dims="time"),
+        hln_correction=False,
+    )
+    assert out["statistic"].values > 0.0
+    assert out["p_value"].values < 0.05
 
 
 def test_dm_test_hln_correction_changes_p_value() -> None:
-    a = np.array([2.0, 1.8, 2.2, 2.1, 1.9, 2.3])
-    b = np.array([1.0, 1.2, 0.8, 1.1, 0.9, 1.0])
+    a = xr.DataArray(np.array([2.0, 1.8, 2.2, 2.1, 1.9, 2.3]), dims="time")
+    b = xr.DataArray(np.array([1.0, 1.2, 0.8, 1.1, 0.9, 1.0]), dims="time")
 
-    _, p_hln = dm_test(a, b, h=2, hln_correction=True)
-    _, p_normal = dm_test(a, b, h=2, hln_correction=False)
+    p_hln = dm_test(a, b, h=2, hln_correction=True)["p_value"].values
+    p_normal = dm_test(a, b, h=2, hln_correction=False)["p_value"].values
 
     assert p_hln != p_normal
 
@@ -153,9 +158,47 @@ def test_dm_test_matches_statsmodels_hac_reference() -> None:
     cov = cov_hac(fit, nlags=1, use_correction=False)
     expected = float(fit.params[0] / np.sqrt(cov[0, 0]))
 
-    stat, _ = dm_test(a, b, h=2, hln_correction=False)
+    out = dm_test(
+        xr.DataArray(a, dims="time"),
+        xr.DataArray(b, dims="time"),
+        h=2,
+        hln_correction=False,
+    )
 
-    np.testing.assert_allclose(stat, expected, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(out["statistic"].values, expected, rtol=1e-6, atol=1e-6)
+
+
+def test_dm_test_dim_wise_broadcasts_over_remaining_dims() -> None:
+    rng = np.random.default_rng(0)
+    a = xr.DataArray(rng.standard_normal((3, 20)), dims=("site", "time"))
+    b = xr.DataArray(rng.standard_normal((3, 20)), dims=("site", "time"))
+
+    out = dm_test(a, b, dim="time")
+
+    assert out["statistic"].dims == ("site",)
+    assert out["p_value"].dims == ("site",)
+    # Each site matches the per-slice scalar computation.
+    for i in range(3):
+        scalar = dm_test(a.isel(site=i), b.isel(site=i))
+        np.testing.assert_allclose(
+            out["statistic"].isel(site=i).values, scalar["statistic"].values
+        )
+
+
+def test_dieboldmariano_operator_and_config_round_trip() -> None:
+    a = xr.DataArray(np.arange(1.0, 7.0), dims="time")
+    b = xr.DataArray(np.ones(6), dims="time")
+    ds_a = xr.Dataset({"error": a})
+    ds_b = xr.Dataset({"error": b})
+
+    op = DieboldMariano("error", hln_correction=False)
+    out = op(ds_a, ds_b)
+    expected = dm_test(a, b, hln_correction=False)
+    xr.testing.assert_allclose(out, expected)
+
+    cfg = op.get_config()
+    json.dumps(cfg)  # JSON-roundtrip-safe
+    xr.testing.assert_allclose(DieboldMariano(**cfg)(ds_a, ds_b), out)
 
 
 def test_operator_configs_round_trip() -> None:
@@ -206,9 +249,9 @@ def test_scores_by_region_count_is_zero_for_empty_region() -> None:
 
 def test_dm_test_accepts_errors_keyword_naming() -> None:
     """The renamed parameter names work as keyword args."""
-    e = np.array([0.5, -0.5, 0.5, -0.5, 0.5])
-    stat, _ = dm_test(errors_a=e, errors_b=e)
-    np.testing.assert_allclose(stat, 0.0)
+    e = xr.DataArray(np.array([0.5, -0.5, 0.5, -0.5, 0.5]), dims="time")
+    out = dm_test(errors_a=e, errors_b=e)
+    np.testing.assert_allclose(out["statistic"].values, 0.0)
 
 
 def _track_dataset() -> xr.Dataset:

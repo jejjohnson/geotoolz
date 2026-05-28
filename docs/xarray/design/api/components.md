@@ -512,7 +512,12 @@ class JulianDate(Operator):
 
 ```python
 # transforms/encoders/basis.py — basis / feature expansions
-# Layer 0 — xarray
+# NOTE: the `ds: xr.Dataset, coords: list[str]` sketch below is the original
+# aspirational shape. The shipped Layer-0 primitives are DataArray-native
+# (`fourier_features(da, *, num_freqs, scale, feature_dim)` etc.) per the
+# xarray-native-primitives contract — see the note after this block and
+# `api/primitives.md`. The Dataset/variable plumbing lives in the Layer-1
+# operators.
 def fourier_features(ds: xr.Dataset, *, coords: list[str], num_freqs: int = 10, scale: float = 1.0) -> xr.Dataset: ...
 def random_fourier_features(ds: xr.Dataset, *, coords: list[str], num_features: int = 64, sigma: float = 1.0, seed: int = 0) -> xr.Dataset: ...
 def polynomial_features(ds: xr.Dataset, *, coords: list[str], degree: int = 2) -> xr.Dataset: ...

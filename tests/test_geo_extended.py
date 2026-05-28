@@ -457,33 +457,40 @@ def test_calc_latlon_adds_2d_coords():
 
 
 def test_cyclical_encode_unit_circle():
-    sin, cos = cyclical_encode(np.array([0.0, 0.25, 0.5, 0.75]), period=1.0)
-    np.testing.assert_allclose(sin**2 + cos**2, np.ones(4), atol=1e-10)
+    da = xr.DataArray(np.array([0.0, 0.25, 0.5, 0.75]), dims="x")
+    encoded = cyclical_encode(da, period=1.0)
+    np.testing.assert_allclose(
+        encoded["sin"].values ** 2 + encoded["cos"].values ** 2,
+        np.ones(4),
+        atol=1e-10,
+    )
 
 
 def test_fourier_features_shape():
-    vals = np.linspace(0.0, 1.0, 10)
+    vals = xr.DataArray(np.linspace(0.0, 1.0, 10), dims="x")
     out = fourier_features(vals, num_freqs=4)
+    assert out.dims == ("x", "feature")
     assert out.shape == (10, 8)
 
 
 def test_random_fourier_features_reproducible_with_seed():
-    vals = np.linspace(0.0, 1.0, 5)
+    vals = xr.DataArray(np.linspace(0.0, 1.0, 5), dims="x")
     a = random_fourier_features(vals, num_features=16, seed=123)
     b = random_fourier_features(vals, num_features=16, seed=123)
-    np.testing.assert_allclose(a, b)
+    xr.testing.assert_allclose(a, b)
 
 
 def test_random_fourier_features_rejects_odd():
     with pytest.raises(ValueError, match="even"):
-        random_fourier_features(np.array([0.0]), num_features=5)
+        random_fourier_features(xr.DataArray(np.array([0.0]), dims="x"), num_features=5)
 
 
 def test_positional_encoding_includes_input_by_default():
-    vals = np.array([0.1, 0.2, 0.3])
+    vals = xr.DataArray(np.array([0.1, 0.2, 0.3]), dims="x")
     out = positional_encoding(vals, num_freqs=2)
+    assert out.dims == ("x", "feature")
     assert out.shape == (3, 5)  # 2 * 2 + 1
-    np.testing.assert_allclose(out[:, 0], vals)
+    np.testing.assert_allclose(out.isel(feature=0).values, vals.values)
 
 
 def test_time_rescale_round_trip(ds_grid_daily):

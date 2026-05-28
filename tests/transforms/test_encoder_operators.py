@@ -57,17 +57,17 @@ def ds_time() -> xr.Dataset:
 def test_cyclical_encode_parity(ds_scalar: xr.Dataset) -> None:
     op = CyclicalEncode(variable="angle", period=2 * np.pi)
     out = op(ds_scalar)
-    sin_e, cos_e = cyclical_encode(ds_scalar["angle"].values, period=2 * np.pi)
-    np.testing.assert_allclose(out["angle_sin"].values, sin_e)
-    np.testing.assert_allclose(out["angle_cos"].values, cos_e)
+    encoded = cyclical_encode(ds_scalar["angle"], period=2 * np.pi)
+    np.testing.assert_allclose(out["angle_sin"].values, encoded["sin"].values)
+    np.testing.assert_allclose(out["angle_cos"].values, encoded["cos"].values)
     assert "angle" in out  # original preserved
 
 
 def test_fourier_features_parity(ds_scalar: xr.Dataset) -> None:
     op = FourierFeatures(variable="angle", num_freqs=4, scale=2.0)
     out = op(ds_scalar)
-    expected = fourier_features(ds_scalar["angle"].values, num_freqs=4, scale=2.0)
-    np.testing.assert_allclose(out["angle_fourier"].values, expected)
+    expected = fourier_features(ds_scalar["angle"], num_freqs=4, scale=2.0)
+    np.testing.assert_allclose(out["angle_fourier"].values, expected.values)
     assert out["angle_fourier"].dims == ("sample", "feature")
     assert out.sizes["feature"] == 8
 
@@ -76,9 +76,9 @@ def test_random_fourier_features_parity(ds_scalar: xr.Dataset) -> None:
     op = RandomFourierFeatures(variable="angle", num_features=10, sigma=1.5, seed=42)
     out = op(ds_scalar)
     expected = random_fourier_features(
-        ds_scalar["angle"].values, num_features=10, sigma=1.5, seed=42
+        ds_scalar["angle"], num_features=10, sigma=1.5, seed=42
     )
-    np.testing.assert_allclose(out["angle_rff"].values, expected)
+    np.testing.assert_allclose(out["angle_rff"].values, expected.values)
     assert out["angle_rff"].dims == ("sample", "feature")
 
 
@@ -98,21 +98,19 @@ def test_random_fourier_features_replaces_trailing_axis_for_vector_input() -> No
     op = RandomFourierFeatures(variable="x", num_features=8, sigma=1.0, seed=1)
     out = op(ds)
     expected = random_fourier_features(
-        ds["x"].values, num_features=8, sigma=1.0, seed=1
+        ds["x"], num_features=8, sigma=1.0, seed=1, input_dim="channel"
     )
     # Output should be 2-D (sample, feature) — trailing channel axis replaced.
     assert out["x_rff"].dims == ("sample", "feature")
     assert out["x_rff"].shape == (6, 8)
-    np.testing.assert_allclose(out["x_rff"].values, expected)
+    np.testing.assert_allclose(out["x_rff"].values, expected.values)
 
 
 def test_positional_encoding_parity(ds_scalar: xr.Dataset) -> None:
     op = PositionalEncoding(variable="angle", num_freqs=3, include_input=True)
     out = op(ds_scalar)
-    expected = positional_encoding(
-        ds_scalar["angle"].values, num_freqs=3, include_input=True
-    )
-    np.testing.assert_allclose(out["angle_posenc"].values, expected)
+    expected = positional_encoding(ds_scalar["angle"], num_freqs=3, include_input=True)
+    np.testing.assert_allclose(out["angle_posenc"].values, expected.values)
 
 
 def test_encode_time_cyclical_parity(ds_time: xr.Dataset) -> None:

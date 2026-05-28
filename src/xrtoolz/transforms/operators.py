@@ -486,12 +486,11 @@ class CyclicalEncode(Operator):
         self.period = float(period)
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
-        da = ds[self.variable]
-        sin, cos = _basis.cyclical_encode(da.values, period=self.period)
+        encoded = _basis.cyclical_encode(ds[self.variable], period=self.period)
         return ds.assign(
             {
-                f"{self.variable}_sin": (da.dims, sin),
-                f"{self.variable}_cos": (da.dims, cos),
+                f"{self.variable}_sin": encoded["sin"],
+                f"{self.variable}_cos": encoded["cos"],
             }
         )
 
@@ -522,12 +521,14 @@ class FourierFeatures(Operator):
         self.feature_dim = feature_dim
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
-        da = ds[self.variable]
         encoded = _basis.fourier_features(
-            da.values, num_freqs=self.num_freqs, scale=self.scale
+            ds[self.variable],
+            num_freqs=self.num_freqs,
+            scale=self.scale,
+            feature_dim=self.feature_dim,
         )
         name = self.output_name or f"{self.variable}_fourier"
-        return ds.assign({name: ((*da.dims, self.feature_dim), encoded)})
+        return ds.assign({name: encoded})
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -566,21 +567,20 @@ class RandomFourierFeatures(Operator):
                 "RandomFourierFeatures requires a non-scalar input variable; "
                 f"ds[{self.variable!r}] has ndim=0."
             )
+        # 1-D inputs append a feature axis; ≥ 2-D vector inputs project the
+        # trailing axis away via a (d, num_features/2) matrix, replacing it
+        # with the feature axis.
+        input_dim = None if da.ndim == 1 else da.dims[-1]
         encoded = _basis.random_fourier_features(
-            da.values,
+            da,
             num_features=self.num_features,
             sigma=self.sigma,
             seed=self.seed,
+            input_dim=input_dim,
+            feature_dim=self.feature_dim,
         )
         name = self.output_name or f"{self.variable}_rff"
-        # random_fourier_features appends a feature axis for 1-D inputs
-        # but *replaces* the trailing feature axis for ≥ 2-D vector
-        # inputs (it projects via a (d, num_features/2) matrix).
-        if da.ndim == 1:
-            out_dims = (*da.dims, self.feature_dim)
-        else:
-            out_dims = (*da.dims[:-1], self.feature_dim)
-        return ds.assign({name: (out_dims, encoded)})
+        return ds.assign({name: encoded})
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -612,12 +612,14 @@ class PositionalEncoding(Operator):
         self.feature_dim = feature_dim
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
-        da = ds[self.variable]
         encoded = _basis.positional_encoding(
-            da.values, num_freqs=self.num_freqs, include_input=self.include_input
+            ds[self.variable],
+            num_freqs=self.num_freqs,
+            include_input=self.include_input,
+            feature_dim=self.feature_dim,
         )
         name = self.output_name or f"{self.variable}_posenc"
-        return ds.assign({name: ((*da.dims, self.feature_dim), encoded)})
+        return ds.assign({name: encoded})
 
     def get_config(self) -> dict[str, Any]:
         return {

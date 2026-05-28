@@ -24,7 +24,7 @@ from xrtoolz.metrics._src.distributional import (
     energy_distance,
     wasserstein_1,
 )
-from xrtoolz.metrics._src.dm import dm_test
+from xrtoolz.metrics._src.dm import DieboldMariano, dm_test
 from xrtoolz.metrics._src.forecast import SkillByLeadTime, skill_by_lead_time
 from xrtoolz.metrics._src.instance import (
     AveragePrecisionMatched,
@@ -134,6 +134,7 @@ __all__ = [
     "CentroidDisplacement",
     "Correlation",
     "DensityInversionFraction",
+    "DieboldMariano",
     "DivergenceError",
     "EnergyDistance",
     "EnsembleCoverage",

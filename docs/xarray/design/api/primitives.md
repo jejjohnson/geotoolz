@@ -111,15 +111,15 @@ def cartesian_to_lonlat(ds) -> xr.Dataset
 def lon_360_to_180(coord: np.ndarray) -> np.ndarray
 def lon_180_to_360(coord: np.ndarray) -> np.ndarray
 
-# Cyclical / positional encodings
-def cyclical_encode(values: np.ndarray, period: float) -> tuple[np.ndarray, np.ndarray]
-def fourier_features(values: np.ndarray, num_freqs: int, scale: float = 1.0) -> np.ndarray
-def random_fourier_features(values: np.ndarray, num_features: int, sigma: float = 1.0) -> np.ndarray
-def positional_encoding(values: np.ndarray, num_freqs: int, include_input: bool = True) -> np.ndarray
+# Cyclical / positional encodings (DataArray-native; feature encoders add a trailing feature_dim)
+def cyclical_encode(da: xr.DataArray, *, period: float) -> xr.Dataset  # sin / cos
+def fourier_features(da: xr.DataArray, *, num_freqs: int, scale: float = 1.0, feature_dim: str = "feature") -> xr.DataArray
+def random_fourier_features(da: xr.DataArray, *, num_features: int, sigma: float = 1.0, seed: int | None = None, input_dim: Hashable | None = None, feature_dim: str = "feature") -> xr.DataArray
+def positional_encoding(da: xr.DataArray, *, num_freqs: int, include_input: bool = True, feature_dim: str = "feature") -> xr.DataArray
 
-# Temporal encodings
-def encode_time_cyclical(ds, components=("dayofyear", "hour")) -> xr.Dataset
-def encode_time_ordinal(ds, reference_date=None) -> xr.Dataset
+# Temporal encodings (DataArray-native; take the time coordinate / variable)
+def encode_time_cyclical(time: xr.DataArray, *, components=("dayofyear", "hour")) -> xr.Dataset
+def encode_time_ordinal(time: xr.DataArray, *, reference_date=None, unit: str = "D") -> xr.DataArray
 ```
 
 ---

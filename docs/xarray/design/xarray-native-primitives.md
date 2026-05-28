@@ -1,6 +1,6 @@
 ---
 status: complete
-version: 0.2.0
+version: 0.3.0
 ---
 
 # Xarray-Native Primitives — Two-Layer Public Contract
@@ -70,14 +70,55 @@ version: 0.2.0
 >   and are unchanged.
 > - The basis encoders in `transforms/_src/encoders/basis.py`
 >   (`cyclical_encode`, `fourier_features`, `random_fourier_features`,
->   `positional_encoding`) consume raw `ndarray` for backward
->   compatibility with their Operator wrappers and are out of scope —
->   the Operator layer already does the DataArray plumbing.
+>   `positional_encoding`) consumed raw `ndarray` in PR γ — these are
+>   flipped in PR δ (see below).
 > - The transforms `morphology` / `decompose` / `sklearn_op` modules
 >   are stateful-estimator or coord/attr utilities (not pure Layer-0
 >   primitives) and don't fit the flip contract.
 >
-> Operator constructor signatures across all three PRs are
+> **PR δ is now complete.** The remaining `ndarray`-positional
+> primitives are flipped, and the previously deferred modules are
+> reconciled with the contract:
+>
+> - `transforms/_src/encoders/basis.py`: `cyclical_encode(da, *,
+>   period)` is DataArray-in / Dataset-out (`sin` / `cos` — the
+>   structured multi-output shape); `fourier_features`,
+>   `random_fourier_features`, and `positional_encoding` are
+>   DataArray-in / DataArray-out, each adding a trailing `feature_dim`
+>   via `xr.apply_ufunc`. `random_fourier_features` gains an
+>   `input_dim` keyword naming the channel axis to project from
+>   (replacing the old "auto-detect on `ndim`" behaviour). The numpy
+>   math is preserved verbatim as underscore-prefixed kernels
+>   (`_sin_cos`, `_fourier_features_array`,
+>   `_random_fourier_features_array`, `_positional_encoding_array`);
+>   `encode_time_cyclical` reuses `_sin_cos` directly. The
+>   `CyclicalEncode`, `FourierFeatures`, `RandomFourierFeatures`, and
+>   `PositionalEncoding` operators now select → call → `assign` instead
+>   of hand-plumbing dims off `da.values`.
+> - `metrics/_src/dm.py`: `dm_test(errors_a, errors_b, *, dim=None,
+>   ...)` is DataArray-positional and returns a `Dataset` with
+>   `statistic` / `p_value` (scalars when `dim is None`, otherwise
+>   reduced along `dim` and broadcast over the rest, via
+>   `xr.apply_ufunc`). The Newey–West / HLN math is preserved verbatim
+>   in the private `_dm_stat_pvalue` kernel. A new Layer-1
+>   `DieboldMariano(variable, *, dim, ...)` operator wraps it,
+>   selecting the error variable from two input Datasets.
+>
+> Reconciled non-flips (no code change — already contract-clean or a
+> deliberately different pattern):
+>
+> - `transforms/_src/morphology.py` already took a positional
+>   `DataArray` with keyword-only config (`remove_small_holes_2d(mask,
+>   *, area, lon, lat)`, etc.) and returned a `DataArray`; it conforms
+>   to the primitive contract as-is.
+> - `transforms/_src/decompose.py` (`pca` / `eof` / `ica` / `nmf` /
+>   `kmeans`) returns stateful `XarrayEstimator` objects (the
+>   split-object `fit` / `transform` pattern, D1/D2), and
+>   `transforms/_src/sklearn_op.py::SklearnOp` is itself a Layer-1
+>   `Operator`. Neither is a stateless Layer-0 primitive, so both are
+>   permanently exempt from the flip by the contract's own rules.
+>
+> Operator constructor signatures across all four PRs are
 > unchanged.
 
 A follow-on refactor to D11 (revised). Flips every primitive in the

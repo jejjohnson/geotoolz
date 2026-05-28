@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from xrtoolz.transforms._src.encoders.basis import cyclical_encode
+from xrtoolz.transforms._src.encoders.basis import _sin_cos
 
 
 def time_rescale(
@@ -133,7 +133,7 @@ def encode_time_cyclical(
                 f"Unknown time component {name!r}; known: {sorted(periods)}."
             )
         values = getattr(time.dt, name).values.astype(float)
-        sin, cos = cyclical_encode(values, period=periods[name])
+        sin, cos = _sin_cos(values, periods[name])
         out_vars[f"{name}_sin"] = xr.DataArray(sin, dims=time.dims, coords=time.coords)
         out_vars[f"{name}_cos"] = xr.DataArray(cos, dims=time.dims, coords=time.coords)
     # Carry the source time coords on the output Dataset so direct
