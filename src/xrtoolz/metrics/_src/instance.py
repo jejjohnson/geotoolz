@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import einx
 import numpy as np
 import xarray as xr
 
@@ -59,11 +60,12 @@ def mask_iou_matrix(
     n_p, n_r = pred.shape[0], ref.shape[0]
     if n_p == 0 or n_r == 0:
         return np.zeros((n_p, n_r), dtype=np.float64)
-    flat_pred = pred.reshape(n_p, -1).astype(np.int64)
-    flat_ref = ref.reshape(n_r, -1).astype(np.int64)
+    flat_pred = einx.id("n h w -> n (h w)", pred).astype(np.int64)
+    flat_ref = einx.id("n h w -> n (h w)", ref).astype(np.int64)
     # ``inter[i, j] = sum(pred_i AND ref_j)`` computed via boolean matmul
-    # over int64. For typical N ~ 1e2-1e3 and HW ~ 1e6 this is the cheap path.
-    inter = flat_pred @ flat_ref.T
+    # over int64 (named: contract the flattened-pixel axis). For typical
+    # N ~ 1e2-1e3 and HW ~ 1e6 this is the cheap path.
+    inter = einx.dot("pred pix, ref pix -> pred ref", flat_pred, flat_ref)
     area_p = flat_pred.sum(axis=1, keepdims=True)
     area_r = flat_ref.sum(axis=1, keepdims=True).T
     union = area_p + area_r - inter

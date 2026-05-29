@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Hashable
 
+import einx
 import numpy as np
 import xarray as xr
 from numpy.typing import ArrayLike, NDArray
@@ -60,7 +61,8 @@ def _random_fourier_features_array(
         x = values[..., None]
     rng = np.random.default_rng(seed)
     omega = rng.standard_normal((d, num_features // 2)) / sigma
-    projection = x @ omega  # (..., num_features // 2)
+    # Contract the channel axis ``d`` into the random-feature axis ``f``.
+    projection = einx.dot("... d, d f -> ... f", x, omega)  # (..., num_features // 2)
     return np.concatenate([np.sin(projection), np.cos(projection)], axis=-1)
 
 
