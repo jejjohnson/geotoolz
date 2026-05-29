@@ -26,6 +26,7 @@ All implementation lives in `src/xrtoolz/`. The public API is re-exported throug
 |------|-------|
 | `xrtoolz.combinators` | `Augment`, `ApplyToEach` — xarray-Dataset-specific combinators built on `pipekit.Operator` |
 | `xrtoolz.signature` | `Signature` — dict-keyed shape descriptor used by `compute_output_signature` |
+| `xrtoolz.einx` | Labeled named-tensor algebra bridging xarray + [einx](https://github.com/fferflo/einx) — `einsum`/`rearrange`/`reduce`/`repeat`, `matmul`/`outer`/`batch_matmul`, `pack_dataset`/`unpack_dataset`, and matching Operators. Pattern axis tokens are DataArray dim names. See `docs/design/bridges/einx/`. |
 | `xrtoolz.geo` | Generic xarray geoprocessing — validation, subset, masks, regrid, detrend, interpolation, metrics, spectral, encoders, crs, sklearn, inference |
 | `xrtoolz.ocn` | Oceanography physics — coriolis, streamfunction, geostrophic velocities, vorticity, MLD, Brunt–Väisälä, KE, Okubo–Weiss |
 | `xrtoolz.atm` | Atmospheric physics — potential temperature, wind speed/direction |
@@ -58,6 +59,7 @@ Design rule: anything domain-agnostic lives in `geo`; only true physics lives in
 | `regionmask` | Land/ocean/country masks |
 | `xrft` | Fourier transforms on xarray |
 | `xskillscore` | Verification metrics |
+| `einx` | Named-tensor algebra backend for `xrtoolz.einx` (core dep; lazily imported) |
 
 JAX, PyTorch, sklearn models are **not** transitive dependencies — `ModelOp` uses duck typing so the user installs only what they need.
 

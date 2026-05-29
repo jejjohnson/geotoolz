@@ -121,9 +121,16 @@ since these operators inherit `xrtoolz.Operator`.
 
 | Bridge   | New runtime deps                  | Extra               |
 | -------- | --------------------------------- | ------------------- |
-| `einx`   | `einx` (and its `numpy`/`jax`/`torch` backend choice) | `pip install xrtoolz[einx]`   |
+| `einx`   | `einx` (and its `numpy`/`jax`/`torch` backend choice) | **core dep** (no extra; see note) |
 | `linalg` | `gaussx`, `lineax`, `jax`         | `pip install xrtoolz[linalg]` |
 | `prob`   | `numpyro`, `pyrox`, `jax`         | `pip install xrtoolz[prob]`   |
+
+> **einx is a core dependency (v0.2.0).** Unlike `linalg` / `prob`,
+> einx is installed with base `xrtoolz` rather than behind an extra,
+> because core kernels across the package adopt it. This reverses the
+> einx decision D9. `import xrtoolz` still stays light — the
+> `xrtoolz.einx` submodule is not imported at package init and imports
+> einx lazily inside its functions.
 
 All three sit behind lazy imports (xrtoolz D4 pattern: see
 `src/xrtoolz/inference/__init__.py`). `import xrtoolz` never imports

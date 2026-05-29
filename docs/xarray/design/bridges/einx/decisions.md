@@ -1,9 +1,18 @@
 ---
-status: draft
-version: 0.1.0
+status: implemented
+version: 0.2.0
 ---
 
 # xrtoolz.einx — Decisions
+
+> **Implementation note (v0.2.0).** The bridge is implemented under
+> `src/xrtoolz/einx/`. One decision changed during implementation: **D9
+> is reversed** — einx is now a **core runtime dependency**, not an
+> optional `[einx]` extra (see D9 below). This unblocks using einx in
+> core kernels across the package. `import xrtoolz` still does not pull
+> einx eagerly; the bridge imports einx lazily inside its Layer-0
+> functions, so the cost is paid only when the bridge is used. Open
+> question O5 is resolved: the documented alias is `xnx`.
 
 ## Resolved
 
@@ -87,12 +96,18 @@ contraction case in `einsum`), that's fine and follows einx. If a
 single input has duplicate dim names (which xarray itself forbids),
 xarray raises before we ever see the array.
 
-### D9 — `einx` not bundled into core extras
+### D9 — `einx` is a core dependency *(reversed v0.2.0)*
 
-A user `pip install`-ing xrtoolz without the `[einx]` extra gets a
-clear `ImportError` pointing them at the extra. The extra is
-intentionally lightweight (einx pulls only numpy by default) so
-adding it has near-zero cost.
+**Original decision:** keep einx behind an optional `[einx]` extra so a
+plain `pip install xrtoolz` doesn't pull it.
+
+**Reversed:** einx is now a **core runtime dependency**. The motivation
+is the repo-wide adoption of einx in core kernels (metrics, transforms,
+interpolate, …) — those modules cannot depend on an optional extra. einx
+pulls only numpy by default, so the install cost is near-zero, which is
+what made the original extra "near-zero cost" anyway. `import xrtoolz`
+stays light because the `xrtoolz.einx` submodule is not imported at
+package init and imports einx lazily inside its Layer-0 functions.
 
 ## Open
 

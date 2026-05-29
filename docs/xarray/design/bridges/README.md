@@ -97,7 +97,14 @@ These hold for all three modules; see `overview.md` for the reasoning.
 
 ## Status
 
-All three modules are at **draft / pre-implementation**. The docs
-describe the proposed API surface; concrete signatures may shift once
-the first implementation lands. Tracking issues will be opened per
-module on merge.
+- **`einx`** — **implemented** (`src/xrtoolz/einx/`). einx is a core
+  dependency (reverses decision D9). The four pattern verbs
+  (`einsum` / `rearrange` / `reduce` / `repeat`), the `matmul` /
+  `outer` / `batch_matmul` conveniences, `pack_dataset` /
+  `unpack_dataset`, and the Layer-1 operators are live. Some signatures
+  shifted from the original draft (notably: `rearrange` is positional on
+  the input's current dim order, and `reduce` takes ``op=`` keyword-only).
+- **`linalg`**, **`prob`** — still **draft / pre-implementation**.
+
+The docs describe the proposed API surface; concrete signatures may
+shift once each implementation lands.
