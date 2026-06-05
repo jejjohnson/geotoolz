@@ -12,8 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
-
-from xrtoolz.types._src.variable import (
+from xrreader.types import (
     ADT,
     CHL,
     ICE_CONC,
@@ -31,6 +30,7 @@ from xrtoolz.types._src.variable import (
     WIND_SPEED,
     Variable,
 )
+
 from xrtoolz.viz import PRESETS, cmap_for, make_axes
 from xrtoolz.viz.validation import SpatialMapPanel
 

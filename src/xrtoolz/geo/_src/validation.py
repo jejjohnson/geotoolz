@@ -304,7 +304,7 @@ def rename_from_cf_standard_names(
 ) -> xr.Dataset:
     """Rename CF ``standard_name``-shaped variables to xrtoolz canonical names.
 
-    Uses the :mod:`xrtoolz.types.Variable` registry as the authoritative
+    Uses the :mod:`xrreader.types.Variable` registry as the authoritative
     ``standard_name → canonical_name`` mapping. Variables / coords whose
     name is not a registered CF ``standard_name`` pass through unchanged
     (``fallback="passthrough"``, default) or raise ``KeyError``
@@ -374,7 +374,7 @@ def _build_cf_index() -> dict[str, str]:
     Only the first registry entry per ``standard_name`` is kept (collision
     deduplication happens naturally when iterating insertion order).
     """
-    from xrtoolz.types._src.variable import REGISTRY
+    from xrreader.types import REGISTRY
 
     index: dict[str, str] = {}
     for var in REGISTRY.values():
@@ -391,6 +391,6 @@ def _canonical_name_set() -> frozenset[str]:
     aren't mistakenly flagged as unknown CF standard_names by
     ``rename_from_cf_standard_names(..., fallback="raise")``.
     """
-    from xrtoolz.types._src.variable import REGISTRY
+    from xrreader.types import REGISTRY
 
     return frozenset(var.name for var in REGISTRY.values())

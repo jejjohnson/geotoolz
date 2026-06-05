@@ -22,7 +22,7 @@ different variable naming conventions:
 | Mercator's CF normalizer | `sea_surface_height_above_geoid` |
 
 xrtoolz already maintains a comprehensive
-[`Variable`](../../src/xrtoolz/types/_src/variable.py) registry —
+[`Variable`](https://github.com/jejjohnson/xrreader/blob/main/src/xrreader/types/_src/variable.py) registry —
 78+ entries each carrying a canonical short name (`ssh`, `u`, `v`,
 `mld`, …) plus a CF `standard_name` (e.g.
 `sea_surface_height_above_geoid`). The registry is the natural
@@ -102,7 +102,7 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `Variable` registry with `standard_name` field | [`types/_src/variable.py`](../../src/xrtoolz/types/_src/variable.py) — 78+ entries | reuse |
+| `Variable` registry with `standard_name` field | [`xrreader/types/_src/variable.py`](https://github.com/jejjohnson/xrreader/blob/main/src/xrreader/types/_src/variable.py) — 78+ entries | reuse |
 | `validate_longitude` / `validate_latitude` | [`geo/_src/validation.py`](../../src/xrtoolz/geo/_src/validation.py) | unchanged |
 | Generic `rename_coords` / `rename_variables` (dict-driven) | same file | unchanged |
 | Data-var CF normalization driven by `standard_name` attr | — | **add** `rename_to_cf_standard_names` |

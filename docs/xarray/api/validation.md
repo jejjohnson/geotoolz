@@ -54,7 +54,8 @@ CRS. With a preset, the right `set_extent` is applied automatically.
 ### Variable → colormap registry
 
 Default colormaps for spatial panels are looked up from the curated
-[`xrtoolz.types.REGISTRY`][xrtoolz.types.REGISTRY]: every entry
+`xrreader.types.REGISTRY` (the CF Variable registry now lives in
+[`xrreader`](https://github.com/jejjohnson/xrreader)): every entry
 carries a `cmap` field (e.g. SSH → `RdBu_r`, SST → `RdYlBu_r`,
 salinity → `viridis`, ice → `Blues`).
 [`xrtoolz.viz.cmap_for`][xrtoolz.viz.cmap_for] performs the

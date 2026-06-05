@@ -3,7 +3,7 @@
 :class:`SpatialMapPanel` renders a single 2-D ``(lat, lon)`` snapshot
 with optional cartopy projection, coastlines, and gridlines. The
 default colormap auto-resolves from the
-:data:`xrtoolz.types.REGISTRY` via
+:data:`xrreader.types.REGISTRY` via
 :func:`xrtoolz.viz.cmap_for` so common variables pick the
 field-appropriate convention without manual ``cmap=`` kwargs (e.g.
 SSH → ``RdBu_r``, SST → ``RdYlBu_r``).

@@ -197,7 +197,7 @@ class RenameFromCFStandardNames(Operator):
     """Wrap :func:`xrtoolz.geo.rename_from_cf_standard_names`.
 
     Renames CF ``standard_name``-shaped variables to their xrtoolz
-    canonical names using the :mod:`xrtoolz.types.Variable` registry.
+    canonical names using the :mod:`xrreader.types.Variable` registry.
 
     Args:
         fallback: ``"passthrough"`` (default) leaves unrecognized names
