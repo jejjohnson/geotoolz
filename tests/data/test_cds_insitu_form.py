@@ -85,7 +85,7 @@ def test_insitu_land_form_shape(cds_source, tmp_path):
     assert form["data_format"] == "csv"
     assert "format" not in form
     # Fixed profile key.
-    assert form["version"] == "2_0_0"
+    assert form["version"] == "3_0_0"
     # No product_type on in-situ.
     assert "product_type" not in form
     assert form["time_aggregation"] == "daily"

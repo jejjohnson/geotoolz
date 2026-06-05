@@ -100,7 +100,7 @@ INSITU_LAND = CDSFormProfile(
     family="insitu-land",
     format_key="data_format",
     format_default="csv",
-    fixed={"version": "2_0_0"},
+    fixed={"version": "3_0_0"},
     includes_product_type=False,
     uses_area=True,
     year_is_array=False,
@@ -108,7 +108,7 @@ INSITU_LAND = CDSFormProfile(
 )
 """Profile for ``insitu-observations-surface-land``.
 
-CSV output, ``version=2_0_0``, single-valued ``year``, arrays for
+CSV output, ``version=3_0_0``, single-valued ``year``, arrays for
 ``month`` / ``day``, ``area`` accepted, and caller must supply
 ``time_aggregation`` ∈ ``{sub_daily, daily, monthly}`` via ``**extras``.
 """
