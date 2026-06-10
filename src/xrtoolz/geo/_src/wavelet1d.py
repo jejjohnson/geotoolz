@@ -10,6 +10,8 @@ import xarray as xr
 from scipy.fft import fft, fftfreq, ifft
 from scipy.special import gammaincinv
 
+from xrtoolz.utils._src.spacing import coord_spacing
+
 
 Mother = Literal["morlet", "paul", "dog"]
 NullModel = Literal["red", "white"]
@@ -52,7 +54,7 @@ def cwt1d(
     """
     _require_dim(da, dim)
     _raise_if_chunked_along_dim(da, dim, "cwt1d")
-    dt = _coord_spacing(da, dim)
+    dt = coord_spacing(da, dim, require_coord=False)
     scale = _scale_grid(da.sizes[dim], dt=dt, s0=s0, dj=dj, j_max=j_max)
     mother_name = _normalize_mother(mother)
     param_value = _default_param(mother_name, param)
@@ -372,24 +374,6 @@ def _scale_grid(
     if j_stop < 0:
         raise ValueError("j_max must be non-negative for the chosen s0 and dt")
     return s0_value * 2.0 ** (np.arange(j_stop + 1, dtype=float) * dj)
-
-
-def _coord_spacing(da: xr.DataArray, dim: str) -> float:
-    if dim not in da.coords:
-        return 1.0
-    values = da[dim].values
-    if values.size < 2:
-        raise ValueError(f"dim {dim!r} must contain at least two samples")
-    if np.issubdtype(values.dtype, np.datetime64):
-        numeric = values.astype("datetime64[ns]").astype("int64").astype(float) / 1.0e9
-    else:
-        numeric = np.asarray(values, dtype=float)
-    diffs = np.diff(numeric)
-    if not np.allclose(diffs, diffs[0], rtol=1e-6, atol=1e-9):
-        raise ValueError(
-            f"coord {dim!r} is not uniformly spaced; resample before cwt1d."
-        )
-    return float(abs(diffs[0]))
 
 
 def _coi(

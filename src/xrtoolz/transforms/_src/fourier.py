@@ -24,6 +24,8 @@ import numpy as np
 import xarray as xr
 import xrft
 
+from xrtoolz.utils._src.spacing import coord_spacing
+
 
 _DEFAULT_PSD_KWARGS: dict[str, Any] = {
     "scaling": "density",
@@ -516,9 +518,18 @@ def rotary_spectrum(
     spec = xrft.fft(w, dim=[dim], window=None, detrend="constant", true_amplitude=False)
     freq_dim = f"freq_{dim}"
     # DataArrays can legally have dims without explicit coord variables;
-    # fall back to unit spacing in that case rather than KeyError-ing.
-    coord = u[dim] if dim in u.coords else None
-    density_scale = (_coord_spacing(coord) if coord is not None else 1.0) / u.sizes[dim]
+    # fall back to unit spacing in that case rather than KeyError-ing. The
+    # density scaling tolerates non-uniform / singleton coords too.
+    density_scale = (
+        coord_spacing(
+            u,
+            dim,
+            require_coord=False,
+            require_min_samples=False,
+            require_uniform=False,
+        )
+        / u.sizes[dim]
+    )
     psd = (np.abs(spec) ** 2) * density_scale
 
     psd_ccw = psd.where(psd[freq_dim] > 0.0, drop=True).rename({freq_dim: "wavenumber"})
@@ -547,19 +558,6 @@ def rotary_spectrum(
         dims = [avg_dims] if isinstance(avg_dims, str) else list(avg_dims)
         out = out.mean(dim=dims)
     return out
-
-
-def _coord_spacing(coord: xr.DataArray) -> float:
-    if coord.size < 2:
-        # A singleton axis has no resolvable sample spacing; use unit spacing so
-        # callers still get deterministic density scaling.
-        return 1.0
-    values = np.asarray(coord.values)
-    if np.issubdtype(values.dtype, np.datetime64):
-        diffs = np.diff(values).astype("timedelta64[ns]").astype(float) / 1e9
-    else:
-        diffs = np.diff(values.astype(float))
-    return float(np.median(np.abs(diffs)))
 
 
 def _polarization_epsilon(da: xr.DataArray) -> float:

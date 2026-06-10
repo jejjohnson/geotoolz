@@ -7,12 +7,12 @@ import xarray as xr
 from scipy.fft import fft2, fftfreq, ifft2
 
 from xrtoolz.geo._src.wavelet_utils import (
-    _coord_spacing,
     _require_dims,
     _scale_values,
     build_coi_mask,
     scale_to_wavenumber,
 )
+from xrtoolz.utils._src.spacing import coord_spacing
 
 
 def morlet2_ft(
@@ -81,8 +81,8 @@ def cwt2(
     ydim, xdim = dim
     s = _as_scale_dataarray(s)
     _validate_cwt_input(da, s, dim=dim, ntheta=ntheta)
-    dy = _coord_spacing(da, ydim)
-    dx = _coord_spacing(da, xdim)
+    dy = coord_spacing(da, ydim)
+    dx = coord_spacing(da, xdim)
     arr = np.asarray(da.transpose(ydim, xdim).values)
     nan_mask = np.isnan(arr)
     if nan_mask.any():

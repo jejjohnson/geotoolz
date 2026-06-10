@@ -6,6 +6,8 @@ import numpy as np
 import xarray as xr
 from scipy.ndimage import distance_transform_edt
 
+from xrtoolz.utils._src.spacing import coord_spacing
+
 
 def geometric_scales(
     s0: float,
@@ -78,8 +80,8 @@ def build_coi_mask(
     """
     ydim, xdim = dim
     _require_dims(da, dim)
-    dy = _coord_spacing(da, ydim)
-    dx = _coord_spacing(da, xdim)
+    dy = coord_spacing(da, ydim)
+    dx = coord_spacing(da, xdim)
     arr = np.asarray(da.transpose(ydim, xdim).values, dtype=float)
     valid = np.isfinite(arr)
 
@@ -112,25 +114,6 @@ def build_coi_mask(
         },
         name="coi_mask",
     )
-
-
-def _coord_spacing(da: xr.DataArray, dim: str) -> float:
-    """Validate a coordinate is uniform and return its absolute spacing."""
-    if dim not in da.coords:
-        raise ValueError(
-            f"dim {dim!r} has no coordinate; wavelet spectra require "
-            "uniform locally-Cartesian coordinates."
-        )
-    values = np.asarray(da[dim].values, dtype=float)
-    if values.size < 2:
-        raise ValueError(f"dim {dim!r} must contain at least two samples")
-    diffs = np.diff(values)
-    if not np.allclose(diffs, diffs[0], rtol=1e-6, atol=1e-9):
-        raise ValueError(
-            f"coord {dim!r} is not uniformly spaced; reproject/resample onto "
-            "a regular Cartesian grid before calling cwt2."
-        )
-    return float(abs(diffs[0]))
 
 
 def _scale_values(scales: xr.DataArray) -> np.ndarray:
