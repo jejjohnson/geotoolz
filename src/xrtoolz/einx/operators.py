@@ -56,7 +56,22 @@ def _coords_config(coords: Mapping[str, Any] | None) -> dict[str, Any] | None:
 
 
 class Einsum(Operator):
-    """Layer-1 wrapper around :func:`xrtoolz.einx.einsum` (variadic)."""
+    """Named-tensor Einstein summation over one or more DataArrays.
+
+    Applies :func:`xrtoolz.einx.einsum` using DataArray dim names as the
+    pattern's axis tokens, e.g. ``"b i j, b j k -> b i k"``.
+
+    Args:
+        pattern: einx einsum pattern; axis tokens are DataArray dim names.
+        coords: Optional coordinates to attach to newly created output dims.
+        align: When ``True``, broadcast-align inputs on shared dims before
+            contracting.
+        **shape_kwargs: Sizes for composite/unknown axes in ``pattern``.
+
+    Returns:
+        The contracted DataArray with the dims named on the pattern's
+        right-hand side.
+    """
 
     def __init__(
         self,
@@ -99,7 +114,19 @@ class Einsum(Operator):
 
 
 class Rearrange(Operator):
-    """Layer-1 wrapper around :func:`xrtoolz.einx.rearrange` (single-input)."""
+    """Reshape / transpose a DataArray by a named-tensor pattern.
+
+    Applies :func:`xrtoolz.einx.rearrange`, e.g. ``"(h w) c -> h w c"`` to
+    split a flattened axis into named dims.
+
+    Args:
+        pattern: einx rearrange pattern over DataArray dim names.
+        coords: Optional coordinates for newly created dims.
+        **shape_kwargs: Sizes for composite axes that cannot be inferred.
+
+    Returns:
+        The rearranged DataArray.
+    """
 
     def __init__(
         self,
@@ -134,7 +161,25 @@ class Rearrange(Operator):
 
 
 class Reduce(Operator):
-    """Layer-1 wrapper around :func:`xrtoolz.einx.reduce` (single-input)."""
+    """Reduce a DataArray over named axes with a chosen reduction.
+
+    Applies :func:`xrtoolz.einx.reduce`, e.g. ``"b [i] j -> b j"`` to reduce
+    the bracketed axis ``i``.
+
+    Note:
+        Distinct from :class:`xrtoolz.geo.Reduce`, which aggregates a whole
+        Dataset over xarray dims; this reduces a single DataArray by an einx
+        pattern.
+
+    Args:
+        pattern: einx reduce pattern; bracketed axes are reduced.
+        op: Reduction — a name (``"sum"``, ``"mean"``, ``"max"``, …) or a
+            callable accepting an ``axis`` argument.
+        **shape_kwargs: Sizes for composite axes that cannot be inferred.
+
+    Returns:
+        The reduced DataArray.
+    """
 
     def __init__(
         self,
@@ -170,7 +215,19 @@ class Reduce(Operator):
 
 
 class Repeat(Operator):
-    """Layer-1 wrapper around :func:`xrtoolz.einx.repeat` (single-input)."""
+    """Broadcast / tile a DataArray along new named axes.
+
+    Applies :func:`xrtoolz.einx.repeat`, e.g. ``"h w -> h w c"`` with
+    ``c=3`` to add and fill a new dimension.
+
+    Args:
+        pattern: einx repeat pattern over DataArray dim names.
+        coords: Optional coordinates for the repeated dims.
+        **shape_kwargs: Sizes of the new axes introduced by ``pattern``.
+
+    Returns:
+        The repeated DataArray.
+    """
 
     def __init__(
         self,
@@ -227,7 +284,17 @@ class _BinaryLinalgOp(Operator):
 
 
 class Matmul(_BinaryLinalgOp):
-    """Layer-1 wrapper around :func:`xrtoolz.einx.matmul` (two-input)."""
+    """Contract two DataArrays over a shared dimension (matrix multiply).
+
+    Applies :func:`xrtoolz.einx.matmul`: sums the product over ``dim``,
+    keeping all other (broadcast) dims.
+
+    Args:
+        dim: Name of the shared dimension contracted over.
+
+    Returns:
+        The matrix product, with ``dim`` removed.
+    """
 
     def __init__(self, *, dim: str) -> None:
         self.dim = dim
@@ -252,7 +319,14 @@ class Matmul(_BinaryLinalgOp):
 
 
 class Outer(_BinaryLinalgOp):
-    """Layer-1 wrapper around :func:`xrtoolz.einx.outer` (two-input)."""
+    """Outer product of two DataArrays over their disjoint dims.
+
+    Applies :func:`xrtoolz.einx.outer`: the result carries every dim of the
+    first input followed by every dim of the second.
+
+    Returns:
+        The outer-product DataArray.
+    """
 
     def _apply(self, a: xr.DataArray, b: xr.DataArray) -> xr.DataArray:
         return outer(a, b)
@@ -271,7 +345,19 @@ class Outer(_BinaryLinalgOp):
 
 
 class BatchMatmul(_BinaryLinalgOp):
-    """Layer-1 wrapper around :func:`xrtoolz.einx.batch_matmul` (two-input)."""
+    """Batched matrix multiply: contract ``dim`` within shared batch dims.
+
+    Applies :func:`xrtoolz.einx.batch_matmul`, contracting ``dim`` while
+    broadcasting over ``batch_dims`` (which are kept on the output).
+
+    Args:
+        dim: Name of the shared dimension contracted over.
+        batch_dims: Dimensions broadcast over (not contracted), kept on the
+            output.
+
+    Returns:
+        The batched matrix product, with ``dim`` removed.
+    """
 
     def __init__(self, *, dim: str, batch_dims: Sequence[str] = ()) -> None:
         self.dim = dim

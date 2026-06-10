@@ -18,7 +18,25 @@ from xrtoolz.budgets._src.volume_budget import volume_budget_residual
 
 
 class ControlVolumeIntegral(Operator):
-    """Operator wrapper for :func:`control_volume_integral`."""
+    """Volume-weighted integral of a field over a control volume.
+
+    Integrates ``variable`` over ``dims`` weighted by the cell volumes in
+    ``volume_metrics`` (optionally masked to ``region``). The metrics are
+    explicit, never auto-derived — build them with
+    :func:`xrtoolz.calc.grid_metrics_from_coords` if the data does not ship
+    them.
+
+    Args:
+        variable: Name of the field to integrate.
+        volume_metrics: Dataset carrying the ``cell_volume_var`` weights.
+        region: Optional boolean mask selecting the control volume.
+        dims: Dimensions integrated over.
+        cell_volume_var: Name of the cell-volume variable in
+            ``volume_metrics``.
+
+    Returns:
+        The volume integral as a DataArray (reduced over ``dims``).
+    """
 
     def __init__(
         self,
@@ -56,7 +74,22 @@ class ControlVolumeIntegral(Operator):
 
 
 class BoundaryFlux(Operator):
-    """Operator wrapper for :func:`boundary_flux`."""
+    """Advective flux through the faces of a control volume.
+
+    Integrates the ``velocity_vars`` (optionally carrying ``variable``) over
+    the face areas in ``face_metrics``, optionally restricted to ``region``.
+    The metrics are explicit, never auto-derived.
+
+    Args:
+        variable: Tracer carried by the flow, or ``None`` for a pure volume
+            (velocity) flux.
+        velocity_vars: Mapping of face direction → velocity variable name.
+        face_metrics: Dataset carrying the face-area weights.
+        region: Optional boolean mask selecting the control volume.
+
+    Returns:
+        Dataset of per-boundary fluxes.
+    """
 
     def __init__(
         self,
@@ -90,7 +123,22 @@ class BoundaryFlux(Operator):
 
 
 class BudgetResidual(Operator):
-    """Operator wrapper for :func:`budget_residual`."""
+    """Generic conservation residual ``∂φ/∂t + ∇·F − source + sink``.
+
+    Combines a precomputed tendency and flux divergence (with optional
+    source / sink terms) into the budget-closure residual; a perfectly
+    closed budget is zero. Inputs are passed to ``__call__``, not the
+    constructor.
+
+    Args:
+        tendency: Local time tendency ``∂φ/∂t``.
+        flux_divergence: Divergence of the flux ``∇·F``.
+        source: Optional source term.
+        sink: Optional sink term.
+
+    Returns:
+        The budget-closure residual DataArray.
+    """
 
     def _apply(
         self,
@@ -107,7 +155,12 @@ class BudgetResidual(Operator):
 
 
 class _TracerBudgetOp(Operator):
-    """Shared init for the per-tracer budget operators."""
+    """Shared ``__init__`` / ``get_config`` for per-tracer budget operators.
+
+    Holds the tracer, velocity, surface-flux, and coordinate-name
+    configuration common to :class:`HeatBudgetResidual` and
+    :class:`SaltBudgetResidual`.
+    """
 
     def __init__(
         self,
@@ -147,7 +200,27 @@ class _TracerBudgetOp(Operator):
 
 
 class HeatBudgetResidual(_TracerBudgetOp):
-    """Operator wrapper for :func:`heat_budget_residual`."""
+    """Per-cell heat-budget residual ``∂θ/∂t + ∇·(u θ) − Q``.
+
+    Uses the spherical-metric divergence from :mod:`xrtoolz.calc`; returns
+    the per-cell residual (zero for a closed budget). It does **not** consume
+    volume/face metrics — multiply by ``cell_volume`` and integrate with
+    :class:`ControlVolumeIntegral` for a control-volume closure.
+
+    Args:
+        temp_var: Temperature (θ) variable name.
+        u_var: Eastward velocity variable name.
+        v_var: Northward velocity variable name.
+        w_var: Vertical velocity variable name, or ``None``.
+        surface_flux_var: Optional surface heat-flux variable name.
+        time_dim: Time dimension name.
+        lat: Latitude coordinate name.
+        lon: Longitude coordinate name.
+        depth: Vertical coordinate name, or ``None`` for a 2-D budget.
+
+    Returns:
+        The per-cell heat-budget residual DataArray.
+    """
 
     def __init__(self, *, temp_var: str = "theta", **kw: Any) -> None:
         super().__init__(tracer_var=temp_var, **kw)
@@ -168,7 +241,25 @@ class HeatBudgetResidual(_TracerBudgetOp):
 
 
 class SaltBudgetResidual(_TracerBudgetOp):
-    """Operator wrapper for :func:`salt_budget_residual`."""
+    """Per-cell salt-budget residual ``∂S/∂t + ∇·(u S) − F``.
+
+    Like :class:`HeatBudgetResidual` but for salinity; returns the per-cell
+    residual (zero for a closed budget).
+
+    Args:
+        salt_var: Salinity (S) variable name.
+        u_var: Eastward velocity variable name.
+        v_var: Northward velocity variable name.
+        w_var: Vertical velocity variable name, or ``None``.
+        surface_flux_var: Optional surface salt-flux variable name.
+        time_dim: Time dimension name.
+        lat: Latitude coordinate name.
+        lon: Longitude coordinate name.
+        depth: Vertical coordinate name, or ``None`` for a 2-D budget.
+
+    Returns:
+        The per-cell salt-budget residual DataArray.
+    """
 
     def __init__(self, *, salt_var: str = "so", **kw: Any) -> None:
         super().__init__(tracer_var=salt_var, **kw)
@@ -189,7 +280,22 @@ class SaltBudgetResidual(_TracerBudgetOp):
 
 
 class VolumeBudgetResidual(Operator):
-    """Operator wrapper for :func:`volume_budget_residual`."""
+    """Per-cell volume (continuity) residual ``∇·u``.
+
+    The horizontal + vertical velocity divergence; zero for a non-divergent
+    (volume-conserving) flow.
+
+    Args:
+        u_var: Eastward velocity variable name.
+        v_var: Northward velocity variable name.
+        w_var: Vertical velocity variable name, or ``None``.
+        lat: Latitude coordinate name.
+        lon: Longitude coordinate name.
+        depth: Vertical coordinate name, or ``None`` for a 2-D budget.
+
+    Returns:
+        The per-cell continuity residual DataArray.
+    """
 
     def __init__(
         self,
@@ -231,7 +337,25 @@ class VolumeBudgetResidual(Operator):
 
 
 class KineticEnergyBudgetResidual(Operator):
-    """Operator wrapper for :func:`kinetic_energy_budget_residual`."""
+    """Per-cell kinetic-energy budget residual.
+
+    Residual of ``∂KE/∂t + ∇·(u KE) − forcing`` with ``KE = ½(u² + v²)``;
+    zero for a closed KE budget.
+
+    Args:
+        u_var: Eastward velocity variable name.
+        v_var: Northward velocity variable name.
+        forcing_vars: Optional forcing / dissipation variable names summed as
+            the source term.
+        time_dim: Time dimension name.
+        lat: Latitude coordinate name.
+        lon: Longitude coordinate name.
+        depth: Vertical coordinate name, or ``None`` for a 2-D budget.
+        w_var: Vertical velocity variable name, or ``None``.
+
+    Returns:
+        The per-cell KE-budget residual DataArray.
+    """
 
     def __init__(
         self,
