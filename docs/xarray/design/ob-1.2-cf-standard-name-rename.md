@@ -103,7 +103,7 @@ pipeline = Sequential([
 | Capability | Current | This proposal |
 |---|---|---|
 | `Variable` registry with `standard_name` field | [`xrreader/types/_src/variable.py`](https://github.com/jejjohnson/xrreader/blob/main/src/xrreader/types/_src/variable.py) — 78+ entries | reuse |
-| `validate_longitude` / `validate_latitude` | [`geo/_src/validation.py`](../../src/xrtoolz/geo/_src/validation.py) | unchanged |
+| `validate_longitude` / `validate_latitude` | [`geo/_src/validation.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/geo/_src/validation.py) | unchanged |
 | Generic `rename_coords` / `rename_variables` (dict-driven) | same file | unchanged |
 | Data-var CF normalization driven by `standard_name` attr | — | **add** `rename_to_cf_standard_names` |
 | Inverse normalization (CF → registry canonical) | — | **add** `rename_from_cf_standard_names` |
@@ -349,7 +349,7 @@ so far.
 
 ## 10. Risks / open questions
 
-1. **Where it lives.** [`geo/_src/validation.py`](../../src/xrtoolz/geo/_src/validation.py)
+1. **Where it lives.** [`geo/_src/validation.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/geo/_src/validation.py)
    alongside `rename_coords` / `rename_variables` /
    `validate_longitude` / `validate_latitude`. Co-located naturally.
 2. **`fallback` heuristic in `rename_from_cf`.** We only flag a name

@@ -15,7 +15,7 @@ ships two paired-comparison plot recipes —
 each producing the same 6-panel layout (two scales × three methods:
 ref, study, relative-diff). Plus two utility functions
 (`regional_zoom`, `convert_longitude`) that are already covered by
-[`geo/_src/subset.py`](../../src/xrtoolz/geo/_src/subset.py).
+[`geo/_src/subset.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/geo/_src/subset.py).
 
 The new pattern that's *not* covered by existing xrtoolz viz primitives
 is the **paired study-vs-ref-with-diff column**:
@@ -112,10 +112,10 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](../../src/xrtoolz/viz/validation/_src/base.py) | reuse |
-| `SpatialMapPanel`, `PSDSpaceTimeScorePanel`, etc. | [`viz/validation/_src/`](../../src/xrtoolz/viz/validation/_src/) | reuse as inner panels |
+| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/base.py) | reuse |
+| `SpatialMapPanel`, `PSDSpaceTimeScorePanel`, etc. | [`viz/validation/_src/`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/) | reuse as inner panels |
 | `FacetPanel` (N-way over a categorical dim) | proposed in ODC-2.3 | sibling concept |
-| `regional_zoom`, `convert_longitude` | [`geo/_src/subset.py`](../../src/xrtoolz/geo/_src/subset.py) | already present |
+| `regional_zoom`, `convert_longitude` | [`geo/_src/subset.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/geo/_src/subset.py) | already present |
 | Pairwise A-vs-B-with-diff comparison | — | **add** `PairwiseComparePanel` |
 
 ## 4. Design
@@ -285,7 +285,7 @@ Target: ~13 cases.
   raw N-way side-by-side without diff. Diff over multiple methods needs
   a different UX (matrix? row of pairwise diffs?) — separate proposal.
 - **`regional_zoom`, `convert_longitude`** — already in
-  [`geo/_src/subset.py`](../../src/xrtoolz/geo/_src/subset.py).
+  [`geo/_src/subset.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/geo/_src/subset.py).
 - **NetCDF group loading** (`xr.open_dataset(..., group="all_scale")`) —
   pipeline I/O detail, not library concern.
 - **`hvplot` rendering** — matplotlib only.

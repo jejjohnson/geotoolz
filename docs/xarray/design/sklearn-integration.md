@@ -13,9 +13,9 @@ gaps so the bridge becomes a first-class composable layer.
 
 | Layer | What ships today | Path |
 |-------|------------------|------|
-| 0 | `XarrayEstimator` — stack → delegate → unstack, attribute proxy, NaN `"propagate"`/`"raise"` | [src/xrtoolz/utils/_src/sklearn_wrap.py](../../src/xrtoolz/utils/_src/sklearn_wrap.py) |
-| 1 (presets) | `pca_op`, `eof_op`, `ica_op`, `nmf_op`, `kmeans_op` returning fitted-able `XarrayEstimator`s | [src/xrtoolz/transforms/_src/decompose.py](../../src/xrtoolz/transforms/_src/decompose.py) |
-| 2 (inference) | `SklearnModelOp` — duck-typed wrapper for a *fitted* model, used in `Graph` DAGs | [src/xrtoolz/inference/modelop.py](../../src/xrtoolz/inference/modelop.py) |
+| 0 | `XarrayEstimator` — stack → delegate → unstack, attribute proxy, NaN `"propagate"`/`"raise"` | [src/xrtoolz/utils/_src/sklearn_wrap.py](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/utils/_src/sklearn_wrap.py) |
+| 1 (presets) | `pca_op`, `eof_op`, `ica_op`, `nmf_op`, `kmeans_op` returning fitted-able `XarrayEstimator`s | [src/xrtoolz/transforms/_src/decompose.py](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/transforms/_src/decompose.py) |
+| 2 (inference) | `SklearnModelOp` — duck-typed wrapper for a *fitted* model, used in `Graph` DAGs | [src/xrtoolz/inference/modelop.py](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/inference/modelop.py) |
 
 The gap is on the **composition** side. `XarrayEstimator` is an sklearn
 `BaseEstimator`, not an `xrtoolz.Operator` — so a fitted PCA cannot be
@@ -73,7 +73,7 @@ estimator beyond what already exists, which keeps thread-safety
 identical to today.
 
 **Where:** extend `NanPolicy` literal + `_check_no_nan` site in
-[sklearn_wrap.py](../../src/xrtoolz/utils/_src/sklearn_wrap.py); add a
+[sklearn_wrap.py](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/utils/_src/sklearn_wrap.py); add a
 test matrix in `tests/test_sklearn_wrap.py` covering propagate / raise /
 mask × DataArray / Dataset × transform / predict / inverse_transform.
 

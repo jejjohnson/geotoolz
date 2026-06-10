@@ -37,7 +37,7 @@ companion primitives that are universally used alongside KE flux —
   inertial-range slopes legible (true `k^{-n}` regime appears flat).
 
 This issue ships all five in one PR, all in
-[`transforms/_src/fourier.py`](../../src/xrtoolz/transforms/_src/fourier.py)
+[`transforms/_src/fourier.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/transforms/_src/fourier.py)
 alongside the existing `power_spectrum` / `cross_spectrum`.
 
 ## 2. User stories
@@ -122,8 +122,8 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `power_spectrum` (1-D and 2-D isotropic) | [`fourier.py:43`](../../src/xrtoolz/transforms/_src/fourier.py) | unchanged |
-| `cross_spectrum`, `coherence`, `stft` | [`fourier.py`](../../src/xrtoolz/transforms/_src/fourier.py) | unchanged |
+| `power_spectrum` (1-D and 2-D isotropic) | [`fourier.py:43`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/transforms/_src/fourier.py) | unchanged |
+| `cross_spectrum`, `coherence`, `stft` | [`fourier.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/transforms/_src/fourier.py) | unchanged |
 | Window / detrend kwargs | via `xrft` | reuse |
 | Radial binning (2-D → 1-D iso) | via `xrft.isotropic_power_spectrum` | reuse |
 | KE spectral flux | — | **add** `ke_spectral_flux` |
@@ -366,7 +366,7 @@ Target: ~16 cases.
 ## 10. Risks / open questions
 
 1. **Where it lives.** Two options: (a)
-   [`transforms/_src/fourier.py`](../../src/xrtoolz/transforms/_src/fourier.py)
+   [`transforms/_src/fourier.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/transforms/_src/fourier.py)
    alongside `power_spectrum` (recommended — math is generic Fourier
    transfer), (b) new `ocn/_src/spectral_flux.py` (since the formula
    assumes incompressible momentum advection). **Recommend (a)**.

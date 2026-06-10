@@ -140,8 +140,8 @@ inference = PatchedInference(
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Per-pixel sklearn-style ModelOp | [`inference/modelop.py:30`](../../src/xrtoolz/inference/modelop.py) — `(N,F)` flatten/reshape | unchanged (different paradigm) |
-| `Operator` / `Sequential` plumbing | [`core/`](../../src/xrtoolz/core/) | reuse |
+| Per-pixel sklearn-style ModelOp | [`inference/modelop.py:30`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/inference/modelop.py) — `(N,F)` flatten/reshape | unchanged (different paradigm) |
+| `Operator` / `Sequential` plumbing | [`core/`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/core/) | reuse |
 | `XRDAPatcher` (patch + reconstruct) | — | re-export from `xrpatcher` (hard dep) |
 | Layer-1 Operator: build patcher | — | **add** `PatchDataset` |
 | Layer-1 Operator: run model per patch + reconstruct | — | **add** `PatchedInference` |
@@ -164,7 +164,7 @@ dependency in `pyproject.toml`.
 ### 4.2 Why two Operators, not a `ModelOp.patcher=` retrofit
 
 The existing
-[`ModelOp`](../../src/xrtoolz/inference/modelop.py#L30) is designed
+[`ModelOp`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/inference/modelop.py#L30) is designed
 around the per-pixel paradigm:
 
 ```text

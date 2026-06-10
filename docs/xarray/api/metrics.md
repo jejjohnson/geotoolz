@@ -1,55 +1,153 @@
 # Metrics
 
-The `xrtoolz.metrics` package groups evaluation metrics by *scientific
-diagnostic family*. Each submodule pairs Layer-0 functions (xarray-aware
-pure functions) with Layer-1 `Operator` wrappers that compose into
-`Sequential` pipelines and `Graph` networks.
+`xrtoolz.metrics` groups evaluation metrics by *scientific diagnostic
+family*. Each family pairs Layer-0 xarray functions with Layer-1 `Operator`
+wrappers that compose into `Sequential` pipelines and `Graph` networks.
 
-For the design rationale, see
-[`docs/design/validation.md`](../design/validation.md) and the
-[validation API map](../design/api/validation.md).
+For the design rationale, see the [validation design
+doc](../design/validation.md) and the [validation API
+map](../design/api/validation.md).
 
-## Taxonomy
+## Diagnostic families
 
-| Submodule | Diagnostic family | Status |
+| Submodule | Family | Status |
 |---|---|---|
-| [`xrtoolz.metrics.pixel`](#pixel) | Pointwise scalar errors | shipped |
-| [`xrtoolz.metrics.spectral`](#spectral) | Power-spectrum scores and resolved-scale | shipped |
-| `xrtoolz.metrics.forecast` | Lead-time skill diagnostics | stub (V1) |
-| `xrtoolz.metrics.multiscale` | Region-conditioned and band-limited skill | stub (V1) |
-| `xrtoolz.metrics.structural` | Structural / geometric similarity (SSIM, …) | stub (V2) |
-| `xrtoolz.metrics.probabilistic` | Ensemble calibration | stub (V2) |
-| `xrtoolz.metrics.distributional` | Distributional distance (CRPS, Wasserstein) | stub (V2) |
-| `xrtoolz.metrics.masked` | Masked / coverage-aware wrappers | stub (V2) |
-| `xrtoolz.metrics.lagrangian` | Trajectory and transport metrics | stub (V3) |
-| `xrtoolz.metrics.physical` | Physical-balance and conservation residuals | stub (V4) |
-| `xrtoolz.metrics.object` | Event/object verification (POD, FAR, IoU, …) | stub (V5) |
+| [`metrics.pixel`](#pixel-pointwise-errors) | Pointwise scalar errors | shipped |
+| [`metrics.spectral`](#spectral-power-spectrum-skill) | Power-spectrum scores, resolved scale | shipped |
+| [`metrics.multiscale`](#multiscale-region-band-conditioned) | Region- and band-conditioned skill | shipped |
+| [`metrics.physical`](#physical-balance-residuals) | Physical-balance / conservation residuals | shipped |
+| [`metrics.masked`](#masked-coverage-aware) | Coverage-aware masked wrappers | shipped |
+| [`metrics.distributional`](#distributional-distances) | Distributional distances (CRPS, Wasserstein, …) | shipped |
+| `metrics.structural` | Structural / geometric similarity (SSIM, …) | partial |
+| `metrics.probabilistic` | Ensemble calibration | partial |
+| `metrics.object` | Event / object verification (POD, FAR, IoU) | partial |
+| `metrics.forecast` | Lead-time skill | stub |
+| `metrics.lagrangian` | Trajectory / transport metrics | stub |
 
-Stub submodules are importable today and export nothing — they are populated by their respective view epics.
+!!! tip "Ergonomic re-exports"
+    The Layer-1 operators are re-exported flat from the package root, and a
+    dedicated `xrtoolz.metrics.operators` module mirrors them:
 
-## Ergonomic re-exports
+    ```python
+    from xrtoolz.metrics import RMSE, MSE, MAE, NRMSE, Bias, Correlation, R2Score, PSDScore
+    # equivalently:
+    from xrtoolz.metrics.operators import RMSE, PSDScore
+    ```
 
-The Layer-1 `Operator` wrappers from `pixel` and `spectral` are
-re-exported flat from the package root for ergonomic access:
+## Pixel — pointwise errors
 
-```python
-from xrtoolz.metrics import RMSE, MSE, MAE, NRMSE, Bias, Correlation, R2Score, PSDScore
-```
+Per-pixel scalar error and skill: MSE, RMSE, MAE, bias, normalized RMSE
+(and its skill-score form), correlation, and R².
 
-Equivalent to:
+::: xrtoolz.metrics.operators.MSE
 
-```python
-from xrtoolz.metrics.pixel import RMSE, MSE, MAE, NRMSE, Bias, Correlation, R2Score
-from xrtoolz.metrics.spectral import PSDScore
-```
+::: xrtoolz.metrics.operators.RMSE
 
-A flat `xrtoolz.metrics.operators` module provides the same operator
-surface for callers that prefer a dedicated module path.
+::: xrtoolz.metrics.operators.MAE
 
-## Pixel
+::: xrtoolz.metrics.operators.Bias
+
+::: xrtoolz.metrics.operators.NRMSE
+
+::: xrtoolz.metrics.operators.NRMSEScore
+
+::: xrtoolz.metrics.operators.Correlation
+
+::: xrtoolz.metrics.operators.R2Score
+
+### Functions
 
 ::: xrtoolz.metrics.pixel
 
-## Spectral
+## Spectral — power-spectrum skill
+
+Power-spectral-density scores and the resolved-scale diagnostic (the
+wavelength at which a prediction's PSD score crosses a threshold).
+
+::: xrtoolz.metrics.operators.PSDScore
+
+::: xrtoolz.metrics.operators.SegmentedPSDScore
+
+::: xrtoolz.metrics.operators.WaveletPSDScore
+
+### Functions
 
 ::: xrtoolz.metrics.spectral
+
+## Multiscale — region & band conditioned
+
+Stratify skill by geographic region or by frequency band.
+
+::: xrtoolz.metrics.operators.EvaluateByRegion
+
+::: xrtoolz.metrics.operators.RegionScores
+
+::: xrtoolz.metrics.operators.FrequencyBandSkill
+
+::: xrtoolz.metrics.operators.BandLimitedRMSE
+
+::: xrtoolz.metrics.operators.SkillByLeadTime
+
+## Physical — balance residuals
+
+Conservation- and balance-law residuals used as physical evaluation
+diagnostics (geostrophic balance, divergence, potential-vorticity
+conservation, density inversions).
+
+::: xrtoolz.metrics.operators.GeostrophicBalanceError
+
+::: xrtoolz.metrics.operators.DivergenceError
+
+::: xrtoolz.metrics.operators.PVConservationError
+
+::: xrtoolz.metrics.operators.DensityInversionFraction
+
+## Masked — coverage aware
+
+Wrap any metric so it ignores masked / missing cells and reports coverage.
+
+::: xrtoolz.metrics.operators.MaskedMetric
+
+::: xrtoolz.metrics.operators.BinnedResiduals2D
+
+## Distributional distances
+
+Distance between predicted and reference distributions.
+
+::: xrtoolz.metrics.operators.CRPS
+
+::: xrtoolz.metrics.operators.Wasserstein1
+
+::: xrtoolz.metrics.operators.EnergyDistance
+
+## Structural & probabilistic
+
+::: xrtoolz.metrics.operators.SSIM
+
+::: xrtoolz.metrics.operators.GradientDifference
+
+::: xrtoolz.metrics.operators.PhaseShiftError
+
+::: xrtoolz.metrics.operators.EnsembleCoverage
+
+::: xrtoolz.metrics.operators.SpreadSkillRatio
+
+::: xrtoolz.metrics.operators.RankHistogram
+
+::: xrtoolz.metrics.operators.ReliabilityCurve
+
+## Object / event verification
+
+::: xrtoolz.metrics.operators.InstanceMatcher
+
+::: xrtoolz.metrics.operators.InstanceF1AtIoU
+
+::: xrtoolz.metrics.operators.AveragePrecisionMatched
+
+::: xrtoolz.metrics.operators.CentroidDisplacement
+
+::: xrtoolz.metrics.operators.MaskIoU
+
+## Forecast comparison
+
+::: xrtoolz.metrics.operators.DieboldMariano

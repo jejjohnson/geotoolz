@@ -640,7 +640,7 @@ The built-in `sklearn` submodule (`SklearnOp`, `to_2d` / `from_2d`) provides min
 
 ### xarray_sklearn — full sklearn bridge
 
-[`xarray_sklearn`](../xarray_sklearn/README.md) provides a standalone `XarrayEstimator` wrapper that preserves dims, coords, and attrs through any sklearn estimator. It handles NaN policies (`"propagate"`, `"raise"`, `"mask"`), shape-changing transforms (e.g., PCA), Dataset column-concatenation, and full compatibility with `Pipeline` and `GridSearchCV`.
+[`XarrayEstimator`](../api/utils.md) is a standalone sklearn wrapper that preserves dims, coords, and attrs through any sklearn estimator. It handles NaN policies (`"propagate"`, `"raise"`, `"mask"`), shape-changing transforms (e.g., PCA), Dataset column-concatenation, and full compatibility with `Pipeline` and `GridSearchCV`.
 
 `SklearnOp` can delegate to `XarrayEstimator` when the package is installed, gaining NaN handling and richer metadata preservation for free:
 

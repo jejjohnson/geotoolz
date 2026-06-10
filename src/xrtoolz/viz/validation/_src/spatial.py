@@ -38,7 +38,8 @@ class SpatialMapPanel(_ValidationPanel):
         cmap: Matplotlib colormap. ``None`` (default) auto-resolves
             from the variable registry; falls back to ``"viridis"`` for
             unknown names.
-        vmin, vmax: Optional colour-scale limits.
+        vmin: Optional lower colour-scale limit.
+        vmax: Optional upper colour-scale limit.
         projection: Preset name (``"global"``, ``"north_atlantic"``,
             ``"gulf_stream"``, ``"kuroshio"``, ``"mediterranean"``), a
             cartopy class name, a cartopy CRS instance, or ``None`` for

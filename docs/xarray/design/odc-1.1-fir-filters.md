@@ -31,7 +31,7 @@ The community reaches for **Lanczos** (windowed-sinc) FIR filters because:
   spacing.
 
 We currently expose only Butterworth IIR
-([`xrtoolz.interpolate.lowpass_filter`](../../src/xrtoolz/interpolate/_src/smooth.py)).
+([`xrtoolz.interpolate.lowpass_filter`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/smooth.py)).
 That covers gridded data well but is the wrong default for along-track
 SLA: gentle roll-off, opaque cutoff units, and IIR phase compensation
 relies on `sosfiltfilt`'s reverse-pass which is sensitive to short
@@ -127,7 +127,7 @@ pipeline = Sequential([
 
 | Capability | Current state | This proposal |
 |---|---|---|
-| Butterworth IIR low/high/band/stop | [`_smooth_kernels.lowpass_filter`](../../src/xrtoolz/interpolate/_src/_smooth_kernels.py) | Unchanged |
+| Butterworth IIR low/high/band/stop | [`_smooth_kernels.lowpass_filter`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/_smooth_kernels.py) | Unchanged |
 | Generic IIR family (Cheby, Ellip, Bessel) | — | Out of scope |
 | FIR Lanczos | — | **Add** |
 | FIR Kaiser (tunable atten ↔ taps) | — | **Add** |

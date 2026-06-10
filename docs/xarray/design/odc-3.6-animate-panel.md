@@ -108,8 +108,8 @@ HTML(panel(ds).to_jshtml())                                 # interactive in-not
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](../../src/xrtoolz/viz/validation/_src/base.py) | reuse |
-| Single-axes panels (SpatialMap, PSD, RegionScoreBar, …) | [`viz/validation/_src/`](../../src/xrtoolz/viz/validation/_src/) | reuse as inner panels |
+| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/base.py) | reuse |
+| Single-axes panels (SpatialMap, PSD, RegionScoreBar, …) | [`viz/validation/_src/`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/) | reuse as inner panels |
 | `FacetPanel` (N-way over a categorical dim) | proposed in ODC-2.3 | sibling — composable |
 | `PairwiseComparePanel` (A-vs-B + diff) | proposed in ODC-3.4 | sibling — composable |
 | Time-axis animation wrapper | — | **add** `AnimatePanel` |

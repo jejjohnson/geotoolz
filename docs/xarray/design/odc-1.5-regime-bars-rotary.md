@@ -27,7 +27,7 @@ two visualisations are genuinely net-new:
 Item 2 is the more substantive add: it requires a **rotary spectrum
 primitive** that doesn't yet exist in xrtoolz, sitting alongside
 `power_spectrum` / `cross_spectrum` / `coherence` in
-[`transforms.fourier`](../../src/xrtoolz/transforms/_src/fourier.py).
+[`transforms.fourier`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/transforms/_src/fourier.py).
 
 This issue therefore ships:
 - A new `rotary_spectrum` data primitive.
@@ -99,9 +99,9 @@ v1.)
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `_ValidationPanel` base | [`viz/validation/_src/base.py`](../../src/xrtoolz/viz/validation/_src/base.py) | reuse |
-| Existing panels (SpatialMap, PSDIsotropic, …) | [`viz/validation/_src/`](../../src/xrtoolz/viz/validation/_src/) | cover other upstream plots |
-| `power_spectrum`, `cross_spectrum`, `coherence` | [`transforms/_src/fourier.py`](../../src/xrtoolz/transforms/_src/fourier.py) | sibling of new primitive |
+| `_ValidationPanel` base | [`viz/validation/_src/base.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/base.py) | reuse |
+| Existing panels (SpatialMap, PSDIsotropic, …) | [`viz/validation/_src/`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/) | cover other upstream plots |
+| `power_spectrum`, `cross_spectrum`, `coherence` | [`transforms/_src/fourier.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/transforms/_src/fourier.py) | sibling of new primitive |
 | `scores_by_region` consumer | proposed in ODC-1.4 | feeds `RegionScoreBarPanel` |
 | Rotary spectrum | — | **add** `rotary_spectrum` |
 | Regime bar panel | — | **add** `RegionScoreBarPanel` |

@@ -19,7 +19,7 @@ This is the single most-reused function across the three repos and is
 the natural input for ODC-1.3 (segmented PSD scores) and ODC-1.5 (drifter
 deviation skill). It is also the canonical "grid → points" primitive
 listed as a placeholder in
-[`xrtoolz.interpolate._src.grid_to_points`](../../src/xrtoolz/interpolate/_src/grid_to_points.py)
+[`xrtoolz.interpolate._src.grid_to_points`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/grid_to_points.py)
 ("Future home for `SampleAtPoints` / `AlongTrack` primitives.").
 
 The upstream implementation depends on `pyinterp` for the interpolation
@@ -108,9 +108,9 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Placeholder module | [`interpolate/_src/grid_to_points.py`](../../src/xrtoolz/interpolate/_src/grid_to_points.py) | Implement |
-| Points → grid (sklearn-NN bin) | [`points_to_grid.py`](../../src/xrtoolz/interpolate/_src/points_to_grid.py) | Untouched |
-| Grid → grid (`regrid_like`) | [`grid_to_grid.py`](../../src/xrtoolz/interpolate/_src/grid_to_grid.py) | Untouched |
+| Placeholder module | [`interpolate/_src/grid_to_points.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/grid_to_points.py) | Implement |
+| Points → grid (sklearn-NN bin) | [`points_to_grid.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/points_to_grid.py) | Untouched |
+| Grid → grid (`regrid_like`) | [`grid_to_grid.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/grid_to_grid.py) | Untouched |
 | Pointwise interp engine | — | Use `xr.Dataset.interp` w/ advanced indexing |
 | Convenience: along-track | — | **Add** `grid_to_along_track` |
 | Convenience: drifters | — | **Add** `grid_to_drifters` |

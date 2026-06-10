@@ -11,11 +11,11 @@
 
 xrtoolz today has two parallel, incomplete region stories:
 
-1. [`subset_bbox(lon_bnds, lat_bnds)`](../../src/xrtoolz/geo/_src/subset.py#L11)
+1. [`subset_bbox(lon_bnds, lat_bnds)`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/geo/_src/subset.py#L11)
    — boolean mask + `where(drop=True)`. Works for simple bounding
    boxes on rectilinear grids. **No antimeridian wrap-around, no
    0–360 vs −180–180 auto-detect, no support for polygon regions.**
-2. [`viz/_src/projections.py:PRESETS`](../../src/xrtoolz/viz/_src/projections.py#L24)
+2. [`viz/_src/projections.py:PRESETS`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/_src/projections.py#L24)
    — a hard-coded dict mapping region names (`"gulf_stream"`,
    `"north_atlantic"`, `"mediterranean"`, ...) to cartopy projection
    class names + `(lon_min, lon_max, lat_min, lat_max)` extents.
@@ -132,7 +132,7 @@ from_disk = load_region_file("regions/gulf_stream.json")
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Simple bbox subset | [`geo/_src/subset.py:subset_bbox`](../../src/xrtoolz/geo/_src/subset.py#L11) | unchanged (kept for compat) |
+| Simple bbox subset | [`geo/_src/subset.py:subset_bbox`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/geo/_src/subset.py#L11) | unchanged (kept for compat) |
 | Antimeridian wrap-around | — | **add** (via regionmask MultiPolygon) |
 | 0–360 vs −180–180 auto-detect | — | **add** (via `regionmask.Regions.mask(wrap_lon=True)`) |
 | Gridded vs scattered point handling | partial (`where(drop=True)`) | **add** (uniform via regionmask) |
@@ -398,7 +398,7 @@ shorthand stays ergonomic.
 
 ### 4.8 Viz `PRESETS` bridge
 
-[`viz/_src/projections.py`](../../src/xrtoolz/viz/_src/projections.py)
+[`viz/_src/projections.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/_src/projections.py)
 already has:
 
 ```python

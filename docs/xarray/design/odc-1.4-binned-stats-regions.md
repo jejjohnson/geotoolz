@@ -122,7 +122,7 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Pixel metrics (RMSE/bias/MAE/correlation/R²) | [`metrics/_src/pixel.py`](../../src/xrtoolz/metrics/_src/pixel.py) | reuse |
+| Pixel metrics (RMSE/bias/MAE/correlation/R²) | [`metrics/_src/pixel.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/pixel.py) | reuse |
 | Region polygons + mask machinery | `regionmask` (already a dep) | leverage |
 | `geo/_src/masks.py` | exists | reuse / extend |
 | 2D binning of point residuals | — | **add** `bin_residuals_2d` |
@@ -181,7 +181,7 @@ Internals:
 
 This single function replaces the four hard-coded regime branches in
 the upstream. The existing pixel-metric kernels in
-[`metrics/_src/pixel.py`](../../src/xrtoolz/metrics/_src/pixel.py) are
+[`metrics/_src/pixel.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/pixel.py) are
 reused inside the groupby.
 
 ### 4.3 Canonical regime constructors
@@ -283,7 +283,7 @@ fit the `Dataset → Dataset` pipeline shape.
 | Distance-to-land | `scipy.ndimage.distance_transform_edt` (on rasterised landmask) |
 | Per-region groupby | `xarray.Dataset.groupby` |
 | HAC variance / Newey-West | hand-implemented (~15 LOC) — no `statsmodels` |
-| Existing pixel metrics | [`metrics/_src/pixel.py`](../../src/xrtoolz/metrics/_src/pixel.py) |
+| Existing pixel metrics | [`metrics/_src/pixel.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/pixel.py) |
 
 No new top-level dependencies.
 

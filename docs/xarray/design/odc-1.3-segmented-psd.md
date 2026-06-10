@@ -99,9 +99,9 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| Gridded `psd_score`, `psd_error` | [`metrics/_src/spectral.py:58-128`](../../src/xrtoolz/metrics/_src/spectral.py) | unchanged |
-| `resolved_scale` (λx-at-level) | [`spectral.py:131-204`](../../src/xrtoolz/metrics/_src/spectral.py) | **reuse as-is** |
-| Gridded `PSDScore` Operator | [`spectral.py:210`](../../src/xrtoolz/metrics/_src/spectral.py) | unchanged |
+| Gridded `psd_score`, `psd_error` | [`metrics/_src/spectral.py:58-128`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/spectral.py) | unchanged |
+| `resolved_scale` (λx-at-level) | [`spectral.py:131-204`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/spectral.py) | **reuse as-is** |
+| Gridded `PSDScore` Operator | [`spectral.py:210`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/spectral.py) | unchanged |
 | Gap-tolerant 1-D segmenter | — | **add** `segment_signal` |
 | Per-segment Welch / CSD / coherence | — | **add** thin scipy wrappers |
 | Along-track PSD score driver | — | **add** `along_track_psd_score` |
@@ -346,7 +346,7 @@ Target: ~12 cases.
 ## 10. Risks / open questions
 
 1. **Where the new code lives.** Three options:
-   (a) [`metrics/_src/spectral.py`](../../src/xrtoolz/metrics/_src/spectral.py)
+   (a) [`metrics/_src/spectral.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/spectral.py)
    alongside `psd_score`, (b) new `metrics/_src/segmented_psd.py`,
    (c) `geo/_src/along_track.py` alongside ODC-1.1/1.2 helpers.
    **Recommend (b)** — sibling metric, deserves its own module given

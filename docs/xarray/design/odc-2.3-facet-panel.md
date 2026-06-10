@@ -16,7 +16,7 @@ function name is accidental; each subplot is just
 `ds_psd.isel(experiment=i)` with the coord value as the title.
 
 xrtoolz already exposes the single-panel renderer
-([`PSDSpaceTimeScorePanel`](../../src/xrtoolz/viz/validation/_src/psd.py)).
+([`PSDSpaceTimeScorePanel`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/psd.py)).
 What's missing is a thin wrapper that turns **any** existing single-axes
 panel into a faceted grid.
 
@@ -97,10 +97,10 @@ pipeline = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](../../src/xrtoolz/viz/validation/_src/base.py) | reuse |
-| `PSDSpaceTimeScorePanel` (single panel) | [`viz/validation/_src/psd.py:518`](../../src/xrtoolz/viz/validation/_src/psd.py) | reuse |
-| `SpatialMapPanel` with cartopy | [`viz/validation/_src/spatial.py`](../../src/xrtoolz/viz/validation/_src/spatial.py) | reuse |
-| Other single-axes panels (PSD/skill/Lagrangian/events/budgets) | [`viz/validation/_src/`](../../src/xrtoolz/viz/validation/_src/) | reuse |
+| `_ValidationPanel` base + Operator | [`viz/validation/_src/base.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/base.py) | reuse |
+| `PSDSpaceTimeScorePanel` (single panel) | [`viz/validation/_src/psd.py:518`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/psd.py) | reuse |
+| `SpatialMapPanel` with cartopy | [`viz/validation/_src/spatial.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/spatial.py) | reuse |
+| Other single-axes panels (PSD/skill/Lagrangian/events/budgets) | [`viz/validation/_src/`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/) | reuse |
 | Generic facet wrapper | — | **add** `FacetPanel` |
 | Seasonal-mean helper | — | **add** optional `seasonal_groupby` |
 | `season` / `experiment` mosaic | — | falls out of `FacetPanel` |

@@ -88,12 +88,12 @@ fig, axes = panel(score)
 
 | Capability | Current | This proposal |
 |---|---|---|
-| `1 − RMSE / RMS_ref` primitive | [`_pixel_kernels.nrmse`](../../src/xrtoolz/metrics/_src/_pixel_kernels.py) — exactly the upstream formula | reuse |
-| `rmse`, `mse`, `bias`, `correlation`, `r2_score` | [`_pixel_kernels`](../../src/xrtoolz/metrics/_src/_pixel_kernels.py) | reuse |
-| 2-D `psd_score(ds_pred, ds_ref, variable, psd_dims, avg_dims)` | [`spectral.py:92`](../../src/xrtoolz/metrics/_src/spectral.py) | reuse |
-| 1-D `resolved_scale` | [`spectral.py:131`](../../src/xrtoolz/metrics/_src/spectral.py) | reuse |
-| 2-D `find_intercept_2D` (skimage `find_contours`) | [`spectral.py:207`](../../src/xrtoolz/metrics/_src/spectral.py) | reuse |
-| Space-time score viz | [`viz/validation/_src/psd.py` `PSDSpaceTimeScorePanel`](../../src/xrtoolz/viz/validation/_src/psd.py) | reuse |
+| `1 − RMSE / RMS_ref` primitive | [`_pixel_kernels.nrmse`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/_pixel_kernels.py) — exactly the upstream formula | reuse |
+| `rmse`, `mse`, `bias`, `correlation`, `r2_score` | [`_pixel_kernels`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/_pixel_kernels.py) | reuse |
+| 2-D `psd_score(ds_pred, ds_ref, variable, psd_dims, avg_dims)` | [`spectral.py:92`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/spectral.py) | reuse |
+| 1-D `resolved_scale` | [`spectral.py:131`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/spectral.py) | reuse |
+| 2-D `find_intercept_2D` (skimage `find_contours`) | [`spectral.py:207`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/spectral.py) | reuse |
+| Space-time score viz | [`viz/validation/_src/psd.py` `PSDSpaceTimeScorePanel`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/viz/validation/_src/psd.py) | reuse |
 | 2-D `resolved_scale_2d` summary | — | **add** |
 | RMSE-skill bundle | — | **add** `rmse_skill_scores` |
 | Space-time PSD-score driver | — | **add** `psd_score_spacetime` |
@@ -267,7 +267,7 @@ Target: ~9 cases.
 ## 10. Risks / open questions
 
 1. **Where the new code lives.**
-   - `resolved_scale_2d` → [`spectral.py`](../../src/xrtoolz/metrics/_src/spectral.py)
+   - `resolved_scale_2d` → [`spectral.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/metrics/_src/spectral.py)
      alongside `resolved_scale` / `find_intercept_2D`.
    - Bundles → new `metrics/_src/composite.py` (cross-cuts RMSE + PSD).
 2. **Return type of `psd_score_spacetime`.** Tuple `(score, summary)`

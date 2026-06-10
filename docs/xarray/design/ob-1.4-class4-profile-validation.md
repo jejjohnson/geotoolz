@@ -127,7 +127,7 @@ df_obs["model_value"] = interp_grid_to_profiles(ds_2d["ssh"], df_obs)
 |---|---|---|
 | 2-D `sample_at_points` (horizontal) | proposed in ODC-1.2 | reuse / extend |
 | 2-D `bin_residuals_2d` (lat/lon RMSD) | proposed in ODC-1.4 | unchanged |
-| `Variable` registry (display name / units / standard_name) | [`types/_src/variable.py`](../../src/xrtoolz/types/_src/variable.py) | reuse for label formatter |
+| `Variable` registry (display name / units / standard_name) | [`types/_src/variable.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/types/_src/variable.py) | reuse for label formatter |
 | Vertical bracket-linear interp | — | **add** (~30 LOC) |
 | Vertical NaN-aware cubic spline interp | — | **add** (~50 LOC) |
 | Depth-aware grid→profile interp (3-D) | — | **add** `interp_grid_to_profiles` |

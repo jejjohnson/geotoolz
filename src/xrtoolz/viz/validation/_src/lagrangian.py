@@ -19,8 +19,10 @@ class EulerianLagrangianPanel(_ValidationPanel):
 
     Args:
         eulerian_var: Variable to plot from the Eulerian Dataset.
-        traj_dim, time_dim: Dimension names in the trajectory Dataset.
-        lon, lat: Coordinate names in *both* Datasets.
+        traj_dim: Trajectory dimension name in the trajectory Dataset.
+        time_dim: Time dimension name in the trajectory Dataset.
+        lon: Longitude coordinate name in *both* Datasets.
+        lat: Latitude coordinate name in *both* Datasets.
     """
 
     _default_axes_layout = (1, 2)

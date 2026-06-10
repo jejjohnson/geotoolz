@@ -134,8 +134,8 @@ class SpectralSkillPanel(_ValidationPanel):
 
     Args:
         freq_dim: Frequency / wavenumber dim. Default ``"freq"``.
-        log_x, log_y: Whether to use log axes. Default ``log_x=True``,
-            ``log_y=False``.
+        log_x: Whether to use a log x-axis. Default ``True``.
+        log_y: Whether to use a log y-axis. Default ``False``.
         ylabel: Y-axis label. Default ``"PSD score"``.
     """
 

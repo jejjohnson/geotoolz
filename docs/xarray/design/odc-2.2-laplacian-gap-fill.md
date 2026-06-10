@@ -20,7 +20,7 @@ things:
 Of those two:
 
 - **(1) is already done** by our existing
-  [`regrid_like(ds, target, dims=("lat","lon","time"), method="linear")`](../../src/xrtoolz/interpolate/_src/grid_to_grid.py).
+  [`regrid_like(ds, target, dims=("lat","lon","time"), method="linear")`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/grid_to_grid.py).
   `xr.Dataset.interp` natively handles a `time` coord including
   `datetime64`. No new function needed — just a docstring nudge and a
   3-D regrid integration test for confidence.
@@ -88,10 +88,10 @@ regrid_and_fill = Sequential([
 
 | Capability | Current | This proposal |
 |---|---|---|
-| 3-D `(lon, lat, time)` regrid | [`regrid_like`](../../src/xrtoolz/interpolate/_src/grid_to_grid.py) — `xr.Dataset.interp` handles datetime64 | verify via test, document |
-| Convex-hull `griddata` infill | [`fillnan_spatial`](../../src/xrtoolz/interpolate/_src/gap_fill.py) | unchanged |
-| RBF infill | [`fillnan_rbf`](../../src/xrtoolz/interpolate/_src/gap_fill.py) | unchanged |
-| Temporal `interpolate_na` | [`fillnan_temporal`](../../src/xrtoolz/interpolate/_src/gap_fill.py) | unchanged |
+| 3-D `(lon, lat, time)` regrid | [`regrid_like`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/grid_to_grid.py) — `xr.Dataset.interp` handles datetime64 | verify via test, document |
+| Convex-hull `griddata` infill | [`fillnan_spatial`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/gap_fill.py) | unchanged |
+| RBF infill | [`fillnan_rbf`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/gap_fill.py) | unchanged |
+| Temporal `interpolate_na` | [`fillnan_temporal`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/gap_fill.py) | unchanged |
 | Iterative Laplacian relaxation | — | **add** `fillnan_laplacian` |
 | Operator wrapper | — | **add** `FillNaNLaplacian` |
 
@@ -224,7 +224,7 @@ pattern explicitly.
 
 ### 4.5 Module docstring nudge
 
-Soften the [`gap_fill.py`](../../src/xrtoolz/interpolate/_src/gap_fill.py)
+Soften the [`gap_fill.py`](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/interpolate/_src/gap_fill.py)
 header — replace:
 
 > *"for Gauss-Seidel or ESMF-conservative regridding, use those
