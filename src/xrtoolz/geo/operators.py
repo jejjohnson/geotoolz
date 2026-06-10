@@ -51,7 +51,14 @@ def _validate_signature(
 
 
 class ValidateLongitude(Operator):
-    """Wrap :func:`xrtoolz.geo.validate_longitude`."""
+    """Validate and CF-normalise the longitude coordinate.
+
+    Renames a recognised longitude alias to ``lon`` and checks the values
+    lie in range, raising on malformed input.
+
+    Returns:
+        The input dataset with a validated ``lon`` coordinate.
+    """
 
     def _apply(self, ds):
         return _validation.validate_longitude(ds)
@@ -65,7 +72,14 @@ class ValidateLongitude(Operator):
 
 
 class ValidateLatitude(Operator):
-    """Wrap :func:`xrtoolz.geo.validate_latitude`."""
+    """Validate and CF-normalise the latitude coordinate.
+
+    Renames a recognised latitude alias to ``lat`` and checks the values
+    lie in ``[-90, 90]``, raising on malformed input.
+
+    Returns:
+        The input dataset with a validated ``lat`` coordinate.
+    """
 
     def _apply(self, ds):
         return _validation.validate_latitude(ds)
@@ -79,7 +93,13 @@ class ValidateLatitude(Operator):
 
 
 class ValidateCoords(Operator):
-    """Apply longitude and latitude validation in one pass."""
+    """Validate both longitude and latitude in one pass.
+
+    Applies :class:`ValidateLongitude` then :class:`ValidateLatitude`.
+
+    Returns:
+        The input dataset with validated ``lon`` and ``lat`` coordinates.
+    """
 
     def _apply(self, ds):
         ds = _validation.validate_longitude(ds)
@@ -99,7 +119,16 @@ class ValidateCoords(Operator):
 
 
 class DecodeCFTime(Operator):
-    """Wrap :func:`xrtoolz.geo.decode_cf_time`."""
+    """Decode a CF-encoded time coordinate to ``datetime64``.
+
+    Args:
+        time: Name of the time coordinate to decode.
+        units: CF time units (e.g. ``"days since 1990-01-01"``); ``None``
+            reads them from the coordinate's ``units`` attribute.
+
+    Returns:
+        The input dataset with ``time`` decoded to ``datetime64``.
+    """
 
     def __init__(self, *, time: str = "time", units: str | None = None):
         self.time = time
@@ -113,7 +142,16 @@ class DecodeCFTime(Operator):
 
 
 class ValidateTime(Operator):
-    """Wrap :func:`xrtoolz.geo.validate_time`."""
+    """Validate and standardise a time coordinate.
+
+    Args:
+        time: Name of the time coordinate.
+        unit: Expected time unit; ``None`` infers it.
+        origin: Reference epoch for numeric times (default ``"unix"``).
+
+    Returns:
+        The input dataset with a validated ``time`` coordinate.
+    """
 
     def __init__(
         self,
@@ -136,7 +174,14 @@ class ValidateTime(Operator):
 
 
 class RenameCoords(Operator):
-    """Wrap :func:`xrtoolz.geo.rename_coords`."""
+    """Rename coordinates by an explicit mapping.
+
+    Args:
+        mapping: ``{old_name: new_name}`` coordinate renames.
+
+    Returns:
+        The input dataset with the coordinates renamed.
+    """
 
     def __init__(self, mapping: dict[str, str]):
         self.mapping = dict(mapping)
@@ -152,7 +197,14 @@ class RenameCoords(Operator):
 
 
 class RenameVariables(Operator):
-    """Wrap :func:`xrtoolz.geo.rename_variables` (data-var renames)."""
+    """Rename data variables by an explicit mapping.
+
+    Args:
+        mapping: ``{old_name: new_name}`` data-variable renames.
+
+    Returns:
+        The input dataset with the data variables renamed.
+    """
 
     def __init__(self, mapping: dict[str, str]):
         self.mapping = dict(mapping)
@@ -232,6 +284,18 @@ class RenameFromCFStandardNames(Operator):
 
 
 class SubsetBBox(Operator):
+    """Subset a dataset to a lon/lat bounding box.
+
+    Args:
+        lon_bnds: ``(min, max)`` longitude bounds.
+        lat_bnds: ``(min, max)`` latitude bounds.
+        lon: Name of the longitude coordinate.
+        lat: Name of the latitude coordinate.
+
+    Returns:
+        The dataset restricted to the bounding box.
+    """
+
     def __init__(
         self,
         lon_bnds: tuple[float, float],
@@ -266,6 +330,22 @@ class SubsetBBox(Operator):
 
 
 class SubsetToRegion(Operator):
+    """Subset a dataset to a named or custom geographic region.
+
+    Masks to the region and trims to its bounding box.
+
+    Args:
+        region: Region specification — a registry name, a
+            :class:`~xrtoolz.geo._src.regions.RegionSpec`, a
+            ``regionmask.Regions``, or the dict form from ``get_config()``.
+        lon: Name of the longitude coordinate.
+        lat: Name of the latitude coordinate.
+        validate: Whether to validate coordinates before masking.
+
+    Returns:
+        The dataset restricted to the region.
+    """
+
     def __init__(
         self,
         region: str | _regions.RegionSpec | regionmask.Regions | dict[str, Any],
@@ -311,6 +391,17 @@ class SubsetToRegion(Operator):
 
 
 class SubsetTime(Operator):
+    """Subset a dataset to an inclusive ``[time_min, time_max]`` window.
+
+    Args:
+        time_min: Start of the time window (ISO string).
+        time_max: End of the time window (ISO string).
+        time: Name of the time coordinate.
+
+    Returns:
+        The dataset restricted to the time window.
+    """
+
     def __init__(self, time_min: str, time_max: str, time: str = "time"):
         self.time_min = time_min
         self.time_max = time_max
@@ -333,6 +424,15 @@ class SubsetTime(Operator):
 
 
 class SelectVariables(Operator):
+    """Select a subset of data variables.
+
+    Args:
+        variables: A variable name or sequence of names to keep.
+
+    Returns:
+        The dataset containing only the selected variables.
+    """
+
     def __init__(self, variables: str | Sequence[str]):
         self.variables = [variables] if isinstance(variables, str) else list(variables)
 
@@ -350,7 +450,17 @@ class SelectVariables(Operator):
 
 
 class CalculateClimatology(Operator):
-    """Return a climatology at ``freq`` from the input dataset."""
+    """Compute a climatology grouped at ``freq`` from the time axis.
+
+    Args:
+        freq: Climatology grouping — e.g. ``"day"`` (day-of-year),
+            ``"month"``, ``"season"`` (one of ``CLIMATOLOGY_DIMS``).
+        time: Name of the time coordinate.
+
+    Returns:
+        A dataset of the per-group climatological means, with ``time``
+        replaced by the grouping dimension.
+    """
 
     def __init__(self, freq: str = "day", time: str = "time"):
         if freq not in _detrend.CLIMATOLOGY_DIMS:
@@ -373,6 +483,17 @@ class CalculateClimatology(Operator):
 
 
 class CalculateClimatologySmoothed(Operator):
+    """Compute a day-of-year climatology smoothed with a rolling window.
+
+    Args:
+        window: Width (in days) of the centred rolling-mean smoothing
+            applied around the day-of-year cycle.
+        time: Name of the time coordinate.
+
+    Returns:
+        A smoothed day-of-year climatology dataset.
+    """
+
     def __init__(self, window: int = 60, time: str = "time"):
         self.window = window
         self.time = time
@@ -394,7 +515,14 @@ class CalculateClimatologySmoothed(Operator):
 
 
 class RemoveMean(Operator):
-    """Subtract the mean over ``dims`` (cheap anomaly without climatology)."""
+    """Subtract the mean over ``dims`` (a cheap anomaly without a climatology).
+
+    Args:
+        dims: Dimension or dimensions to average over before subtracting.
+
+    Returns:
+        The input dataset with the per-``dims`` mean removed.
+    """
 
     def __init__(self, dims: str | tuple[str, ...]):
         self.dims = (dims,) if isinstance(dims, str) else tuple(dims)
@@ -483,7 +611,28 @@ class Reduce(Operator):
 
 
 class BandpassWavelength(Operator):
-    """Wrap :func:`xrtoolz.geo.bandpass_wavelength`."""
+    """Band-pass a field by wavelength with a windowed-sinc FIR filter.
+
+    Keeps along-``dim`` structure with wavelengths between ``lambda_min_km``
+    and ``lambda_max_km``. When ``spacing_km`` is omitted it is derived from
+    the ``lon``/``lat`` ride-along coordinates.
+
+    Args:
+        dim: Dimension to filter along (e.g. an along-track index).
+        lambda_min_km: Shortest wavelength to keep (km); ``None`` for a
+            low-pass.
+        lambda_max_km: Longest wavelength to keep (km); ``None`` for a
+            high-pass.
+        spacing_km: Sample spacing (km); ``None`` derives it from lon/lat.
+        method: FIR window — ``"lanczos"`` or ``"kaiser"``.
+        num_taps: Filter length; ``None`` chooses a default.
+        attenuation_db: Stop-band attenuation for the Kaiser window.
+        lon: Longitude coordinate name (used when ``spacing_km`` is None).
+        lat: Latitude coordinate name (used when ``spacing_km`` is None).
+
+    Returns:
+        The band-pass-filtered dataset (each numeric variable along ``dim``).
+    """
 
     def __init__(
         self,
@@ -572,7 +721,21 @@ class BandpassWavelength(Operator):
 
 
 class WaveletPowerSpectrum(Operator):
-    """Compute a 2-D Morlet wavelet power spectrum for one variable."""
+    """2-D Morlet wavelet power spectrum of one variable.
+
+    Args:
+        var: Name of the variable to transform.
+        scales: Wavelet scales (a sequence or DataArray).
+        dim: The two spatial dims ``(y, x)``.
+        x0: Reference length scale (m).
+        ntheta: Number of orientation angles.
+        k0: Morlet central wavenumber.
+        isotropic: Average over orientation when ``True``.
+        output_var: Name for the output variable (default ``"<var>_wpsd"``).
+
+    Returns:
+        The input dataset with the wavelet power-spectrum variable added.
+    """
 
     def __init__(
         self,
@@ -697,7 +860,23 @@ class WaveletScalogram(Operator):
 
 
 class WaveletSignificance(Operator):
-    """Apply a Torrence-Compo wavelet significance test to one power variable."""
+    """Torrence-Compo significance mask for a wavelet-power variable.
+
+    Args:
+        var: Name of the wavelet-power variable to test.
+        dim_time: Time dimension name.
+        dim_scale: Scale dimension name.
+        null: Null spectrum — ``"red"`` (AR(1)) or ``"white"`` noise.
+        alpha: Lag-1 autocorrelation; ``None`` uses the stored value.
+        confidence: Chi-square confidence level.
+        mother: Mother wavelet name.
+        param: Optional mother parameter.
+        output_var: Name for the mask variable (default
+            ``"<var>_signif_mask"``).
+
+    Returns:
+        The input dataset with a boolean significance-mask variable added.
+    """
 
     def __init__(
         self,
@@ -753,7 +932,16 @@ class WaveletSignificance(Operator):
 
 
 class RemoveClimatology(Operator):
-    """Subtract a precomputed climatology from the input dataset."""
+    """Subtract a precomputed climatology to form anomalies.
+
+    Args:
+        climatology: Climatology dataset (e.g. from
+            :class:`CalculateClimatology`) to subtract.
+        time: Name of the time coordinate.
+
+    Returns:
+        The anomaly dataset (input minus the matched climatology).
+    """
 
     def __init__(self, climatology, time: str = "time"):
         self.climatology = climatology
@@ -768,7 +956,15 @@ class RemoveClimatology(Operator):
 
 
 class AddClimatology(Operator):
-    """Inverse of :class:`RemoveClimatology`."""
+    """Add a climatology back to anomalies (inverse of :class:`RemoveClimatology`).
+
+    Args:
+        climatology: Climatology dataset to add.
+        time: Name of the time coordinate.
+
+    Returns:
+        The reconstructed dataset (anomaly plus climatology).
+    """
 
     def __init__(self, climatology, time: str = "time"):
         self.climatology = climatology
@@ -785,6 +981,15 @@ class AddClimatology(Operator):
 
 
 class AddLandMask(Operator):
+    """Add a boolean land mask derived from ``regionmask``.
+
+    Args:
+        name: Name of the mask variable to add.
+
+    Returns:
+        The input dataset with a boolean land-mask variable.
+    """
+
     def __init__(self, name: str = "land_mask"):
         self.name = name
 
@@ -796,6 +1001,16 @@ class AddLandMask(Operator):
 
 
 class AddOceanMask(Operator):
+    """Add a boolean ocean/basin mask derived from ``regionmask``.
+
+    Args:
+        ocean: Ocean/basin selector (e.g. ``"global"``).
+        name: Name of the mask variable to add.
+
+    Returns:
+        The input dataset with a boolean ocean-mask variable.
+    """
+
     def __init__(self, ocean: str = "global", name: str = "ocean_mask"):
         self.ocean = ocean
         self.name = name
@@ -808,6 +1023,16 @@ class AddOceanMask(Operator):
 
 
 class AddCountryMask(Operator):
+    """Add a boolean country mask derived from ``regionmask``.
+
+    Args:
+        country: Country name/selector to mask.
+        name: Name of the mask variable to add.
+
+    Returns:
+        The input dataset with a boolean country-mask variable.
+    """
+
     def __init__(self, country: str, name: str = "country_mask"):
         self.country = country
         self.name = name
@@ -820,6 +1045,18 @@ class AddCountryMask(Operator):
 
 
 class ApplyMask(Operator):
+    """Apply a boolean mask to a dataset.
+
+    Args:
+        mask: A boolean DataArray, or the name of a mask variable already
+            in the dataset.
+        drop: If ``True``, drop fully-masked slices
+            (``where(..., drop=True)``); otherwise keep them as NaN.
+
+    Returns:
+        The masked dataset.
+    """
+
     def __init__(self, mask, drop: bool = False):
         self.mask = mask
         self.drop = drop
