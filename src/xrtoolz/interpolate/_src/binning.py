@@ -23,8 +23,8 @@ from xrtoolz.utils._src.finite import _finite_mask
 class Grid:
     """Regular lon/lat grid defined by 1-D coordinate arrays."""
 
-    lon: np.ndarray
-    lat: np.ndarray
+    lon: Float[np.ndarray, "lon"]
+    lat: Float[np.ndarray, "lat"]
 
     @classmethod
     def from_bounds(
@@ -42,10 +42,12 @@ class Grid:
     def from_dataset(cls, ds: xr.Dataset, lon: str = "lon", lat: str = "lat") -> Grid:
         return cls(lon=np.asarray(ds[lon].values), lat=np.asarray(ds[lat].values))
 
-    def coords(self) -> dict[str, np.ndarray]:
+    def coords(self) -> dict[str, Float[np.ndarray, "..."]]:
         return {"lon": self.lon, "lat": self.lat}
 
-    def bin_edges(self) -> tuple[np.ndarray, np.ndarray]:
+    def bin_edges(
+        self,
+    ) -> tuple[Float[np.ndarray, "lon_edge"], Float[np.ndarray, "lat_edge"]]:
         """Return ``(lon_edges, lat_edges)`` for use by ``np.histogram2d``."""
         return _cell_edges(self.lon), _cell_edges(self.lat)
 
@@ -67,8 +69,8 @@ class Period:
 class SpaceTimeGrid:
     """Lon/lat/time grid. Use :meth:`from_bounds` for the common case."""
 
-    lon: np.ndarray
-    lat: np.ndarray
+    lon: Float[np.ndarray, "lon"]
+    lat: Float[np.ndarray, "lat"]
     time: pd.DatetimeIndex = field(default_factory=lambda: pd.DatetimeIndex([]))
 
     @classmethod

@@ -12,6 +12,7 @@ from typing import Literal
 import numpy as np
 import rioxarray  # noqa: F401  — needed so ds.rio is populated
 import xarray as xr
+from jaxtyping import Float
 from pyproj import CRS, Transformer
 
 
@@ -70,8 +71,8 @@ def lonlat_to_xy(
     crs: str,
     lon: Sequence[float] | np.ndarray,
     lat: Sequence[float] | np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Convert WGS-84 lon/lat to ``crs`` x/y coordinates."""
+) -> tuple[Float[np.ndarray, "..."], Float[np.ndarray, "..."]]:
+    """Convert WGS-84 lon/lat to ``crs`` x/y coordinates (same shape as input)."""
     transformer = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
     x, y = transformer.transform(lon, lat)
     return np.asarray(x), np.asarray(y)
@@ -81,8 +82,8 @@ def xy_to_lonlat(
     crs: str,
     x: Sequence[float] | np.ndarray,
     y: Sequence[float] | np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Convert ``crs`` x/y coordinates back to WGS-84 lon/lat."""
+) -> tuple[Float[np.ndarray, "..."], Float[np.ndarray, "..."]]:
+    """Convert ``crs`` x/y coordinates back to WGS-84 lon/lat (same shape)."""
     transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
     lon, lat = transformer.transform(x, y)
     return np.asarray(lon), np.asarray(lat)
