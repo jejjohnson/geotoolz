@@ -13,6 +13,7 @@ from typing import Literal
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float
 
 from xrtoolz.utils._src.finite import _finite_mask_da
 from xrtoolz.utils._src.optional_imports import _require_optional
@@ -261,7 +262,9 @@ def _get_skimage_resize() -> Callable[..., np.ndarray]:
     return transform.resize
 
 
-def _interp_coord(coord: np.ndarray, size: int) -> np.ndarray:
+def _interp_coord(
+    coord: Float[np.ndarray, "n"], size: int
+) -> Float[np.ndarray, "size"]:
     old = np.asarray(coord)
     old_idx = np.arange(len(old))
     new_idx = np.linspace(0, len(old) - 1, size)

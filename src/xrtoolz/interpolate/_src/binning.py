@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 import xarray as xr
+from jaxtyping import Float
 from scipy.stats import binned_statistic_2d
 
 from xrtoolz.utils._src.finite import _finite_mask
@@ -147,8 +148,8 @@ def histogram_2d(
     return bin_2d(da, grid, statistic="count", lon=lon, lat=lat)
 
 
-def _cell_edges(centers: np.ndarray) -> np.ndarray:
-    """Turn an array of cell-center coordinates into cell edges."""
+def _cell_edges(centers: Float[np.ndarray, "n"]) -> Float[np.ndarray, "edges"]:
+    """Turn an array of ``n`` cell-center coordinates into ``n + 1`` cell edges."""
     centers = np.asarray(centers, dtype=float)
     if centers.size < 2:
         raise ValueError("Need at least two coordinate values to build cell edges.")

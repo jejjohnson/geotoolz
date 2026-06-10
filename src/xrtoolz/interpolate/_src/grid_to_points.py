@@ -7,6 +7,7 @@ from typing import Literal
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float, Shaped
 from scipy.interpolate import RegularGridInterpolator
 
 from xrtoolz.utils._src.finite import _as_numeric_with_mask
@@ -16,8 +17,14 @@ from xrtoolz.utils._src.validation import _require_coords, _require_dims
 Method = Literal["linear", "nearest", "slinear", "cubic", "quintic"]
 
 
-def _as_numeric_axis(values: np.ndarray, *, name: str) -> np.ndarray:
-    """Convert source coordinate values to a finite numeric interpolation axis."""
+def _as_numeric_axis(
+    values: Shaped[np.ndarray, "n"], *, name: str
+) -> Float[np.ndarray, "n"]:
+    """Convert source coordinate values to a finite numeric interpolation axis.
+
+    ``values`` may be any 1-D coordinate dtype (including ``datetime64``); the
+    result is the corresponding floating numeric axis.
+    """
     arr = np.asarray(values)
     if np.issubdtype(arr.dtype, np.datetime64):
         if np.any(np.isnat(arr)):
@@ -52,7 +59,9 @@ def _as_numeric_points(
     return _as_numeric_with_mask(numeric)
 
 
-def _normalize_axis(da: xr.DataArray, name: str) -> tuple[xr.DataArray, np.ndarray]:
+def _normalize_axis(
+    da: xr.DataArray, name: str
+) -> tuple[xr.DataArray, Float[np.ndarray, "n"]]:
     """Validate a 1-D coordinate axis and return it in ascending order."""
     _require_dims(da, name, name="da")
     _require_coords(da, name, name="da")

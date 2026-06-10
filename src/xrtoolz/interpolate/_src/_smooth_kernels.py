@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from jaxtyping import Bool, Float, Inexact
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.signal import (
     butter,
@@ -36,7 +36,9 @@ _FIR_BTYPES: frozenset[str] = frozenset(
 _FIR_METHODS: frozenset[str] = frozenset({"lanczos", "kaiser"})
 
 
-def _as_floating(arr: ArrayLike) -> np.ndarray:
+def _as_floating(
+    arr: Inexact[np.ndarray, "*shape"],
+) -> Inexact[np.ndarray, "*shape"]:
     """Cast ``arr`` to a floating dtype while preserving complex inputs."""
     a = np.asarray(arr)
     if np.issubdtype(a.dtype, np.complexfloating):
@@ -114,7 +116,7 @@ def _lowpass_fir_taps(
     method: str,
     num_taps: int,
     attenuation_db: float | None,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "taps"]:
     m = (num_taps - 1) // 2
     n = np.arange(-m, m + 1, dtype=float)
     taps = cutoff * np.sinc(cutoff * n)
@@ -137,7 +139,7 @@ def _fir_taps(
     btype: str,
     num_taps: int | None = None,
     attenuation_db: float | None = None,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "taps"]:
     """Design odd-length FIR taps with normalized Nyquist cutoffs."""
     if method not in _FIR_METHODS:
         raise ValueError(
@@ -186,13 +188,13 @@ def _fir_taps(
 
 
 def moving_average(
-    arr: ArrayLike,
+    arr: Float[np.ndarray, "*shape"],
     *,
     axis: int = -1,
     window: int,
     center: bool = True,
     min_periods: int | None = None,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "*shape"]:
     """Sliding-window mean along ``axis``. NaN-skipping.
 
     Parameters
@@ -246,12 +248,12 @@ def moving_average(
 
 
 def gaussian_smooth(
-    arr: ArrayLike,
+    arr: Inexact[np.ndarray, "*shape"],
     *,
     axis: int = -1,
     sigma: float,
     truncate: float = 4.0,
-) -> NDArray[np.floating]:
+) -> Inexact[np.ndarray, "*shape"]:
     """Gaussian convolution along ``axis`` with standard deviation ``sigma``.
 
     Delegates to :func:`scipy.ndimage.gaussian_filter1d`. NaN inputs
@@ -268,7 +270,7 @@ def gaussian_smooth(
 
 
 def gaussian_smooth_nd(
-    arr: ArrayLike,
+    arr: Inexact[np.ndarray, "*shape"],
     *,
     sigma: float | Sequence[float],
     truncate: float = 4.0,
@@ -276,8 +278,8 @@ def gaussian_smooth_nd(
     cval: float = 0.0,
     nan_aware: bool = True,
     min_weight: float = 1e-6,
-    mask: ArrayLike | None = None,
-) -> NDArray[np.floating]:
+    mask: Bool[np.ndarray, "*shape"] | None = None,
+) -> Inexact[np.ndarray, "*shape"]:
     """N-D Gaussian convolution with optional NaN-aware normalization.
 
     With ``nan_aware=True`` (default), implements normalized convolution:
@@ -331,13 +333,13 @@ def gaussian_smooth_nd(
 
 
 def lowpass_filter(
-    arr: ArrayLike,
+    arr: Float[np.ndarray, "*shape"],
     *,
     axis: int = -1,
     cutoff: float | Sequence[float],
     order: int = 4,
     btype: str = "low",
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "*shape"]:
     """Zero-phase Butterworth filter along ``axis``.
 
     Parameters
@@ -407,7 +409,7 @@ def lowpass_filter(
 
 
 def fir_filter(
-    arr: ArrayLike,
+    arr: Float[np.ndarray, "*shape"],
     *,
     axis: int = -1,
     cutoff: float | Sequence[float],
@@ -415,7 +417,7 @@ def fir_filter(
     btype: str = "low",
     num_taps: int | None = None,
     attenuation_db: float | None = None,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "*shape"]:
     """Zero-phase FIR filter along ``axis``.
 
     Args:

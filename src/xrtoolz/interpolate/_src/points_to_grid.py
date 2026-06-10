@@ -6,7 +6,7 @@ from typing import Literal
 
 import numpy as np
 import xarray as xr
-from numpy.typing import ArrayLike
+from jaxtyping import Float
 from scipy.stats import binned_statistic_2d
 from sklearn.neighbors import KernelDensity
 
@@ -25,9 +25,9 @@ OutputMode = Literal["density", "counts", "counts_per_area"]
 
 
 def points_to_grid(
-    lons: np.ndarray,
-    lats: np.ndarray,
-    values: np.ndarray,
+    lons: Float[np.ndarray, "n"],
+    lats: Float[np.ndarray, "n"],
+    values: Float[np.ndarray, "n"],
     grid: Grid,
     statistic: str = "mean",
 ) -> xr.DataArray:
@@ -53,11 +53,11 @@ def points_to_grid(
 
 
 def kde_to_grid(
-    lons: ArrayLike,
-    lats: ArrayLike,
+    lons: Float[np.ndarray, "n"],
+    lats: Float[np.ndarray, "n"],
     grid: Grid,
     *,
-    weights: ArrayLike | None = None,
+    weights: Float[np.ndarray, "n"] | None = None,
     bandwidth: float | BandwidthRule = "scott",
     kernel: KernelName = "gaussian",
     metric: MetricName = "euclidean",

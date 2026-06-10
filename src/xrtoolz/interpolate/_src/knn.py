@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
-from numpy.typing import ArrayLike
+from jaxtyping import Float
 
 from xrtoolz.interpolate._src.binning import Grid
 from xrtoolz.interpolate._src.spatial import _build_tree, _to_metric_xy
@@ -19,13 +19,13 @@ Metric = Literal["euclidean", "haversine"]
 
 def _idw_kernel(
     tree: Any,
-    src_values: np.ndarray,
-    queries: np.ndarray,
+    src_values: Float[np.ndarray, "src"],
+    queries: Float[np.ndarray, "query two"],
     k: int,
     power: float,
     max_distance: float | None,
     eps: float,
-) -> np.ndarray:
+) -> Float[np.ndarray, "query"]:
     """Evaluate the inverse-distance weighted mean at query coordinates."""
     if queries.size == 0:
         return np.empty(0, dtype=float)
@@ -60,10 +60,10 @@ def _idw_kernel(
 
 
 def _prepare_sources(
-    lons: ArrayLike,
-    lats: ArrayLike,
-    values: ArrayLike,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    lons: Float[np.ndarray, "..."],
+    lats: Float[np.ndarray, "..."],
+    values: Float[np.ndarray, "..."],
+) -> tuple[Float[np.ndarray, "n"], Float[np.ndarray, "n"], Float[np.ndarray, "n"]]:
     """Flatten, size-check, and finite-filter scattered source arrays."""
     lon_arr = np.ravel(np.asarray(lons, dtype=float))
     lat_arr = np.ravel(np.asarray(lats, dtype=float))
@@ -79,18 +79,18 @@ def _prepare_sources(
 
 
 def idw_to_points(
-    src_lons: ArrayLike,
-    src_lats: ArrayLike,
-    src_values: ArrayLike,
-    dst_lons: ArrayLike,
-    dst_lats: ArrayLike,
+    src_lons: Float[np.ndarray, "..."],
+    src_lats: Float[np.ndarray, "..."],
+    src_values: Float[np.ndarray, "..."],
+    dst_lons: Float[np.ndarray, "..."],
+    dst_lats: Float[np.ndarray, "..."],
     *,
     k: int = 8,
     power: float = 2.0,
     metric: Metric = "euclidean",
     max_distance: float | None = None,
     eps: float = 1e-12,
-) -> np.ndarray:
+) -> Float[np.ndarray, "..."]:
     """Inverse-distance interpolate scattered samples onto target points.
 
     Args:
@@ -139,9 +139,9 @@ def idw_to_points(
 
 
 def idw_to_grid(
-    lons: ArrayLike,
-    lats: ArrayLike,
-    values: ArrayLike,
+    lons: Float[np.ndarray, "..."],
+    lats: Float[np.ndarray, "..."],
+    values: Float[np.ndarray, "..."],
     grid: Grid,
     *,
     k: int = 8,

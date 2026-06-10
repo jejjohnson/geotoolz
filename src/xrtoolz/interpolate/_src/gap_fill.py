@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float
 from scipy.interpolate import RBFInterpolator, griddata
 
 from xrtoolz.interpolate._src.knn import fillnan_idw
@@ -199,7 +200,9 @@ def _validate_laplacian_args(
         raise ValueError(f"boundary must be 'reflect' or 'wrap', got {boundary!r}")
 
 
-def _laplacian_neighbor_average(u: np.ndarray, boundary: str) -> np.ndarray:
+def _laplacian_neighbor_average(
+    u: Float[np.ndarray, "h w"], boundary: str
+) -> Float[np.ndarray, "h w"]:
     up = np.empty_like(u)
     down = np.empty_like(u)
     up[1:, :] = u[:-1, :]
