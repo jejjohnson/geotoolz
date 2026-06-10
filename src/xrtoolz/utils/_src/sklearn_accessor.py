@@ -8,10 +8,12 @@ is no parallel marshalling path. Importing :mod:`xrtoolz.utils` is
 enough to register the accessors.
 
 Example:
+    ```pycon
     >>> import xarray as xr
     >>> from sklearn.preprocessing import StandardScaler
     >>> import xrtoolz.utils  # registers the .sklearn accessor  # noqa: F401
     >>> scaled = ssh.sklearn.fit_transform(StandardScaler(), sample_dim="time")
+    ```
 """
 
 from __future__ import annotations
@@ -44,26 +46,34 @@ class _SklearnAccessor:
     through the shortcut path and produces a generic
     ``(sample_dim, component)`` layout instead.
 
+    ```pycon
     >>> from xrtoolz.utils import XarrayEstimator
     >>> from sklearn.decomposition import PCA
     >>> wrap = XarrayEstimator(PCA(n_components=2), sample_dim="time").fit(da)
     >>> # Fit once, reuse via the accessor — wrap is forwarded as-is:
     >>> scores = da.sklearn.transform(wrap)              # → (time, component)
     >>> recon = scores.sklearn.inverse_transform(wrap)   # → (time, lat, lon)
+    ```
 
     Example:
+        ```pycon
         >>> # Fit-and-transform directly off a DataArray
         >>> scores = da.sklearn.fit_transform(
         ...     PCA(n_components=3),
         ...     sample_dim="time",
         ...     nan_policy="mask",
         ... )
+        ```
 
+        ```pycon
         >>> # Score a fitted estimator against a held-out slice
         >>> r2 = da_test.sklearn.score(fitted_regressor, y_test, sample_dim="time")
+        ```
 
+        ```pycon
         >>> # Dataset variant: column-concat data_vars before fitting
         >>> scaled = ds.sklearn.fit_transform(StandardScaler(), sample_dim="time")
+        ```
     """
 
     def __init__(self, xarray_obj: xr.DataArray | xr.Dataset) -> None:

@@ -90,9 +90,11 @@ class SkillByLeadTime(Operator):
             dataset. Defaults to ``"lead_time"``.
 
     Example:
+        ```pycon
         >>> from xrtoolz.metrics import RMSE, SkillByLeadTime
         >>> op = SkillByLeadTime(RMSE("ssh", dims=("lat", "lon")))
         >>> skill = op(pred_ds, ref_ds)  # DataArray indexed by lead_time
+        ```
     """
 
     def __init__(self, metric: Operator, *, lead_dim: str = "lead_time") -> None:

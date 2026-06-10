@@ -61,7 +61,9 @@ def einsum(
         forwarded from the first input carrying each surviving dim.
 
     Example:
+        ```pycon
         >>> total = einsum("time lat lon, lat lon -> time", field, mask)
+        ```
     """
     import einx
 
@@ -93,11 +95,13 @@ def rearrange(
     supplies them.
 
     Example:
+        ```pycon
         >>> patches = rearrange(
         ...     "time (lat_blk lat_in) (lon_blk lon_in) "
         ...     "-> time (lat_blk lon_blk) lat_in lon_in",
         ...     field, lat_in=4, lon_in=4,
         ... )
+        ```
     """
     import einx
 
@@ -126,9 +130,11 @@ def reduce(
             einx's numpy-like reduce adapter for the input's backend.
 
     Example:
+        ```pycon
         >>> climatology = reduce(
         ...     "time lat lon -> lat lon", sst, op="mean",
         ... )
+        ```
     """
     parsed = parse_pattern(pattern)
     if len(parsed.inputs) != 1:
@@ -152,9 +158,11 @@ def repeat(
     New dims are unindexed unless ``coords`` supplies them.
 
     Example:
+        ```pycon
         >>> seasonal = repeat(
         ...     "lat lon -> month lat lon", mean_field, month=12,
         ... )
+        ```
     """
     import einx
 

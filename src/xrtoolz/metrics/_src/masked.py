@@ -57,12 +57,14 @@ class MaskedMetric(Operator):
             be supplied via ``__call__(pred, ref, mask=...)``.
 
     Example:
+        ```pycon
         >>> from xrtoolz.metrics import RMSE, MaskedMetric
         >>> op = MaskedMetric(RMSE("ssh", ("lat", "lon")), mask=ocean)
         >>> op(pred_ds, ref_ds)
         >>>
         >>> op2 = MaskedMetric(RMSE("sst", ("lat", "lon")))
         >>> op2(pred_ds, ref_ds, mask=cloud_free_today)
+        ```
     """
 
     def __init__(self, metric: Operator, mask: xr.DataArray | None = None) -> None:

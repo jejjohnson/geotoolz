@@ -164,9 +164,11 @@ class DieboldMariano(Operator):
         hln_correction: Apply the Harvey–Leybourne–Newbold correction.
 
     Example:
+        ```pycon
         >>> op = DieboldMariano("error", dim="time")
         >>> result = op(ds_errors_a, ds_errors_b)
         >>> result["statistic"], result["p_value"]
+        ```
     """
 
     def __init__(

@@ -19,6 +19,7 @@ is left as-is, and anything that fails to construct via :func:`np.dtype`
 falls back to ``str(dtype)`` for forward compatibility.
 
 Example:
+    ```pycon
     >>> sig = Signature({"time": 365, "lat": 181, "lon": 360}, dtype="float32")
     >>> sig.format()
     '(time=365, lat=181, lon=360); dtype=float32'
@@ -26,6 +27,7 @@ Example:
     '(lat=181, lon=360); dtype=float32'
     >>> sig.replace_dims({"lat": None}).format()
     '(time=365, lat=?, lon=360); dtype=float32'
+    ```
 """
 
 from __future__ import annotations
@@ -73,6 +75,7 @@ class Signature:
             ``int | None``.
 
     Example:
+        ```pycon
         >>> import numpy as np
         >>> from xrtoolz import Signature
         >>> Signature({"time": 12}, dtype="float32") == Signature(
@@ -83,6 +86,7 @@ class Signature:
         ...     {"lat": 4, "time": 12}, dtype="float32",
         ... )
         True
+        ```
     """
 
     dims: Mapping[str, int | None]
@@ -145,9 +149,11 @@ class Signature:
                 that don't carry the optional dim.
 
         Example:
+            ```pycon
             >>> sig = Signature({"time": 12, "lat": 4})
             >>> sig.replace_dims({"time": None}).format()
             '(time=?, lat=4)'
+            ```
         """
         if strict:
             unknown = set(updates) - set(self.dims)
@@ -166,9 +172,11 @@ class Signature:
         """Return a copy with dimension names renamed by ``mapping``.
 
         Example:
+            ```pycon
             >>> sig = Signature({"lon": 360, "lat": 181})
             >>> sig.rename_dims({"lon": "longitude"}).format()
             '(longitude=360, lat=181)'
+            ```
         """
         return Signature(
             {mapping.get(name, name): size for name, size in self.dims.items()},
@@ -179,9 +187,11 @@ class Signature:
         """Return a copy without the requested dimensions.
 
         Example:
+            ```pycon
             >>> sig = Signature({"time": 12, "lat": 4, "lon": 8})
             >>> sig.drop_dims(("time", "lat")).format()
             '(lon=8)'
+            ```
         """
         drop = {names} if isinstance(names, str) else set(names)
         return Signature(

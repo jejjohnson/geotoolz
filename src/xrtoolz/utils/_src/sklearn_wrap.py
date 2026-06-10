@@ -289,15 +289,18 @@ class XarrayEstimator(BaseEstimator):
         Decompose an SSH cube with PCA, recover the original grid, and
         reach into the fitted estimator's attributes::
 
+            ```pycon
             >>> from sklearn.decomposition import PCA
             >>> wrap = XarrayEstimator(PCA(n_components=3), sample_dim="time")
             >>> scores = wrap.fit_transform(da)            # (time, component)
             >>> recon = wrap.inverse_transform(scores)     # (time, lat, lon)
             >>> wrap.components_.shape                     # passthrough attr
             (3, lat*lon)
+            ```
 
         Cluster a multi-variable Dataset (column-concatenated)::
 
+            ```pycon
             >>> from sklearn.cluster import KMeans
             >>> wrap = XarrayEstimator(
             ...     KMeans(n_clusters=4, n_init="auto"),
@@ -305,15 +308,18 @@ class XarrayEstimator(BaseEstimator):
             ... )
             >>> labels = wrap.fit(ds).predict(ds)          # (time,)
             >>> wrap.cluster_centers_.shape                # (4, n_concat_features)
+            ```
 
         NaN-tolerant fit on a land-masked grid::
 
+            ```pycon
             >>> wrap = XarrayEstimator(
             ...     PCA(n_components=5),
             ...     sample_dim="time",
             ...     nan_policy="mask",       # drop NaN rows pre-fit, re-insert post
             ... )
             >>> scores = wrap.fit_transform(ssh)           # land cells stay NaN
+            ```
     """
 
     def __init__(

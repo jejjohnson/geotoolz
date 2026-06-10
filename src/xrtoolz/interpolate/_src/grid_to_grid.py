@@ -62,8 +62,10 @@ def coarsen_conservative(
         Coarsened dataset or data array with the same dimension names.
 
     Examples:
+        ```pycon
         >>> coarsen_conservative(da, {"lat": 4, "lon": 4})
         >>> coarsen_conservative(ds, {"latitude": 2}, lat="latitude")
+        ```
     """
     factor_dict = _validate_coarsen_factor(factor)
     if isinstance(ds, xr.Dataset):
@@ -186,7 +188,9 @@ def refine_2d(
             outside 0..5, or either resize factor is non-positive.
 
     Examples:
+        ```pycon
         >>> refined = refine_2d(da, factor={"lat": 2, "lon": 2}, order=3)
+        ```
     """
     resize = _get_skimage_resize()
     if lat not in da.dims or lon not in da.dims:

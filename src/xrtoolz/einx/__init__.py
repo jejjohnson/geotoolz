@@ -16,8 +16,10 @@ Two surfaces:
   :class:`BatchMatmul`.
 
 Example:
+    ```pycon
     >>> import xrtoolz.einx as xnx
     >>> total = xnx.einsum("time lat lon, lat lon -> time", field, mask)
+    ```
 """
 
 from __future__ import annotations

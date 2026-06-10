@@ -189,8 +189,10 @@ class EvaluateByRegion(Operator):
     Pre-normalize once and reuse via :func:`normalize_regions` if you
     intend to evaluate multiple metrics over the same regions:
 
+        ```pycon
         >>> mask, names = normalize_regions(natural_earth, ds)
         >>> EvaluateByRegion(RMSE(...), regions=mask)
+        ```
     """
 
     def __init__(self, metric: Operator, *, regions: Any) -> None:

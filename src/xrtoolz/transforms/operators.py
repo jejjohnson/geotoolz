@@ -155,8 +155,10 @@ class KESpectralFlux(Operator):
         when requested.
 
     Examples:
+        ```pycon
         >>> op = KESpectralFlux("u", "v", ("x", "y"), avg_dims="time")
         >>> flux_ds = op(ds)
+        ```
     """
 
     def __init__(
@@ -224,8 +226,10 @@ class EnstrophySpectralFlux(Operator):
         variables, plus ``transfer_2d`` when requested.
 
     Examples:
+        ```pycon
         >>> op = EnstrophySpectralFlux("u", "v", ("x", "y"))
         >>> flux_ds = op(ds)
+        ```
     """
 
     def __init__(

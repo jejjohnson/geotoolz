@@ -23,8 +23,10 @@ def matmul(a: xr.DataArray, b: xr.DataArray, *, dim: str) -> xr.DataArray:
     with ``a``'s remaining dims first.
 
     Example:
+        ```pycon
         >>> # (time, k) · (k, mode) -> (time, mode)
         >>> scores = matmul(field, basis, dim="k")
+        ```
     """
     if dim not in a.dims or dim not in b.dims:
         raise PatternError(
@@ -50,7 +52,9 @@ def outer(a: xr.DataArray, b: xr.DataArray) -> xr.DataArray:
     """Outer product. Output carries ``a``'s dims then ``b``'s dims.
 
     Example:
+        ```pycon
         >>> weights = outer(lat_weights, lon_weights)
+        ```
     """
     overlap = set(a.dims) & set(b.dims)
     if overlap:
@@ -74,8 +78,10 @@ def batch_matmul(
     """``matmul`` along ``dim`` broadcast over shared ``batch_dims``.
 
     Example:
+        ```pycon
         >>> # contract 'k', broadcast over shared 'ensemble'
         >>> out = batch_matmul(a, b, dim="k", batch_dims=["ensemble"])
+        ```
     """
     batch = list(batch_dims)
     for name in (dim, *batch):

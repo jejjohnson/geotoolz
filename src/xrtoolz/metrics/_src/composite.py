@@ -32,7 +32,9 @@ def rmse_skill_scores(
         ``error_stability``.
 
     Examples:
+        ```pycon
         >>> rmse_skill_scores(pred_da, ref_da)
+        ```
 
     ``error_stability`` uses xarray's default ``std(..., ddof=0)`` to
     match the upstream OSSE report.
@@ -91,7 +93,9 @@ def psd_score_spacetime(
         and ``summary`` contains the min/max resolved wavelengths.
 
     Examples:
+        ```pycon
         >>> score, summary = psd_score_spacetime(pred_da, ref_da)
+        ```
     """
     if xrft_kwargs.get("isotropic"):
         # Isotropic mode collapses the two spatial axes into a single

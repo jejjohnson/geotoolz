@@ -181,7 +181,9 @@ def resolved_scale_2d(
         exists at ``level``, all entries are ``NaN``.
 
     Examples:
+        ```pycon
         >>> resolved_scale_2d(score, level=0.5)
+        ```
     """
     score_da = score["score"] if isinstance(score, xr.Dataset) else score
     segments = find_intercept_2D(
