@@ -225,7 +225,7 @@ from geotoolz.viz import (
 )
 
 
-__version__ = "0.0.6"
+__version__ = "0.1.0"
 
 __all__ = [
     "ARVI",

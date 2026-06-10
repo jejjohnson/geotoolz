@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.1.0](https://github.com/jejjohnson/geotoolz/compare/v0.0.6...v0.1.0) (2026-06-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* The composition core (`Operator`, `Sequential`, `Graph`, `Input`, `Node`, `Branch`, `Switch`, `Fanout`, `Identity`, `Const`, `Lambda`, `Sink`, `Tap`, `Snapshot`, `ShapeTrace`, `Carrier`) is now re-exported from the carrier-agnostic `pipekit` framework rather than implemented inside `geotoolz.core`.
+* `from geotoolz import GeoSlice` and any `from geotoolz.catalog import ...` now fail. Install `geocatalog` (https://github.com/jejjohnson/geocatalog) and import from there.
+
+### Features
+
+* **compositing:** implement BlendMatched (mean / weighted_mean / ivw) ([#84](https://github.com/jejjohnson/geotoolz/issues/84)) ([b5a8337](https://github.com/jejjohnson/geotoolz/commit/b5a8337568a40a26b03efa2274a5345c0e3408e3))
+* **compositing:** median/max-ndvi/cloud-free/bap/min-cloud reduction operators ([#64](https://github.com/jejjohnson/geotoolz/issues/64)) ([d689f72](https://github.com/jejjohnson/geotoolz/commit/d689f72a83c1923e538eaa5e296911898a052906))
+* **coregister:** implement RasterToPoints + PointsToRaster ([#82](https://github.com/jejjohnson/geotoolz/issues/82)) ([46fcafb](https://github.com/jejjohnson/geotoolz/commit/46fcafb968f995293272260e60943c25e411e22f))
+* **coregister:** implement RasterToRasterLike + StackMatched ([#81](https://github.com/jejjohnson/geotoolz/issues/81)) ([26cc60a](https://github.com/jejjohnson/geotoolz/commit/26cc60a2098e307f5bff4df2c4d1b163e9ce2958))
+* **coregister:** point-cloud and vector-aggregation operators ([#83](https://github.com/jejjohnson/geotoolz/issues/83)) ([3faafd8](https://github.com/jejjohnson/geotoolz/commit/3faafd8311be4014538f060b273baceef9482bd2))
+* cross-modality coregister operators + matched compositing ([#80](https://github.com/jejjohnson/geotoolz/issues/80)) ([19a7679](https://github.com/jejjohnson/geotoolz/commit/19a7679bd66e354c49a51ec0b2482a87c08a6cce))
+* depend on pipekit for Operator / Sequential / Graph composition ([#74](https://github.com/jejjohnson/geotoolz/issues/74)) ([8558d05](https://github.com/jejjohnson/geotoolz/commit/8558d055abf6867a061366d65d5381c0da455ad2))
+* **geom:** bowtie/antimeridian/parallax/segment sensor helpers ([#65](https://github.com/jejjohnson/geotoolz/issues/65)) ([621f0d0](https://github.com/jejjohnson/geotoolz/commit/621f0d0544ae270631cceba353aadbc9104529eb))
+* **io:** hdf5/hdf4/netcdf-cf multi-format readers ([#63](https://github.com/jejjohnson/geotoolz/issues/63)) ([48f25b1](https://github.com/jejjohnson/geotoolz/commit/48f25b176034ba60af989f686a645c780554396d))
+* **learn:** scikit-learn estimator adapter (phase-1, provisional API) ([#67](https://github.com/jejjohnson/geotoolz/issues/67)) ([8f4cea1](https://github.com/jejjohnson/geotoolz/commit/8f4cea190fcd5aadad6aab25aec2ee1f24771229))
+* **matched_filter:** pure-numpy hyperspectral matched filter (path B) ([#62](https://github.com/jejjohnson/geotoolz/issues/62)) ([27e2531](https://github.com/jejjohnson/geotoolz/commit/27e253150749c7d5974a1365607967de1aed6acb))
+* **measure:** skimage region properties bridge + plume regionprops upgrade ([#75](https://github.com/jejjohnson/geotoolz/issues/75)) ([517a01e](https://github.com/jejjohnson/geotoolz/commit/517a01e5cacd35acb1fb407d157763011536c869))
+* **plume:** postprocessing operators from MethaneSAT segmentation paper ([#87](https://github.com/jejjohnson/geotoolz/issues/87)) ([95149da](https://github.com/jejjohnson/geotoolz/commit/95149da80c4632785402646be8497ef222f43876))
+* **readers:** optional obstore byte path for SensorReader ([#86](https://github.com/jejjohnson/geotoolz/issues/86)) ([77231df](https://github.com/jejjohnson/geotoolz/commit/77231dfedee98cdd650cadb789b60f4d0d4f54d9))
+* **readers:** sensor reader framework + toy_sensor reference reader ([#66](https://github.com/jejjohnson/geotoolz/issues/66)) ([0548f53](https://github.com/jejjohnson/geotoolz/commit/0548f53a57b5dcff9f2edb49c88add2a976e0b97))
+* **segment:** skimage segmentation bridge ([#76](https://github.com/jejjohnson/geotoolz/issues/76)) ([08c239d](https://github.com/jejjohnson/geotoolz/commit/08c239d1bd4e96ce5158e4b5d7e3dee84d6336f3))
+* **skimage:** feature extraction + CLAHE + geom registration ops ([#77](https://github.com/jejjohnson/geotoolz/issues/77)) ([e355788](https://github.com/jejjohnson/geotoolz/commit/e355788410bf7e38e98a7e9b9f283da1d5c43922))
+
+
+### Code Refactoring
+
+* extract catalog and GeoSlice into the geocatalog package ([#70](https://github.com/jejjohnson/geotoolz/issues/70)) ([830e842](https://github.com/jejjohnson/geotoolz/commit/830e842c48c0eb3de7672475c9fba41980d01eee))
+
 ## [0.0.6](https://github.com/jejjohnson/geotoolz/compare/v0.0.5...v0.0.6) (2026-05-16)
 
 
