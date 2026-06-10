@@ -28,6 +28,34 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.1.0](https://github.com/jejjohnson/xrtoolz/compare/v0.0.8...v0.1.0) (2026-06-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* xrtoolz.data and xrtoolz.types are removed; import the readers and the typed request/Variable API from xrreader / xrreader.types.
+* flip basis encoders + dm_test to DataArray-native (PR δ) ([#217](https://github.com/jejjohnson/xrtoolz/issues/217))
+* remove public array tier, collapse to two-tier contract ([#215](https://github.com/jejjohnson/xrtoolz/issues/215))
+* flip transforms + geo single-field primitives to DataArray-positional (PR γ) ([#209](https://github.com/jejjohnson/xrtoolz/issues/209))
+* flip metrics + interpolate primitives to DataArray-positional (PR β) ([#208](https://github.com/jejjohnson/xrtoolz/issues/208))
+
+### Features
+
+* **cds:** pin insitu land profile to dataset version 3_0_0 ([370bb1d](https://github.com/jejjohnson/xrtoolz/commit/370bb1da7da004ebf9467d94e38baae6101a3c4f))
+* **core:** xarray-aware Operator with DataTree dispatch (PR α) ([#206](https://github.com/jejjohnson/xrtoolz/issues/206)) ([f16ddaa](https://github.com/jejjohnson/xrtoolz/commit/f16ddaa58759330a0ba8bf40bd733adf2c39466f))
+* **einx:** implement xrtoolz.einx labeled named-tensor bridge (PR 1/3) ([#218](https://github.com/jejjohnson/xrtoolz/issues/218)) ([c2340a7](https://github.com/jejjohnson/xrtoolz/commit/c2340a7d2ddf6a130f90f374d6ad09cff9a78722))
+* flip basis encoders + dm_test to DataArray-native (PR δ) ([#217](https://github.com/jejjohnson/xrtoolz/issues/217)) ([7bcbbdd](https://github.com/jejjohnson/xrtoolz/commit/7bcbbdd45147d331d74445460d772b21c3874fd8))
+* flip metrics + interpolate primitives to DataArray-positional (PR β) ([#208](https://github.com/jejjohnson/xrtoolz/issues/208)) ([90d4173](https://github.com/jejjohnson/xrtoolz/commit/90d41733fdd7f76efbb8e05b0f9310e796550d1f))
+* flip transforms + geo single-field primitives to DataArray-positional (PR γ) ([#209](https://github.com/jejjohnson/xrtoolz/issues/209)) ([9fab49f](https://github.com/jejjohnson/xrtoolz/commit/9fab49fa7f4671ebfa8f2aa13ba6839575c6e32e))
+* **metrics,geo:** nrmse_score + get_dataset_resolution (OB-1.5, closes [#136](https://github.com/jejjohnson/xrtoolz/issues/136)) ([#210](https://github.com/jejjohnson/xrtoolz/issues/210)) ([16b322d](https://github.com/jejjohnson/xrtoolz/commit/16b322d495c27fe70da72e032977a62ee22f8a0a))
+* **metrics:** instance-segmentation matching + AP / F1 ([#216](https://github.com/jejjohnson/xrtoolz/issues/216)) ([bad16a3](https://github.com/jejjohnson/xrtoolz/commit/bad16a321bbb748301afd2d83da8183f96c31390))
+
+
+### Code Refactoring
+
+* move data + types to xrreader (P0 xrtoolz side) ([#225](https://github.com/jejjohnson/xrtoolz/issues/225)) ([8384e25](https://github.com/jejjohnson/xrtoolz/commit/8384e254423056107e4733e08ce81142fccda04e))
+* remove public array tier, collapse to two-tier contract ([#215](https://github.com/jejjohnson/xrtoolz/issues/215)) ([0c39b88](https://github.com/jejjohnson/xrtoolz/commit/0c39b884578b4423d82842fd6f936186371b430c))
+
 ## [0.0.8](https://github.com/jejjohnson/xrtoolz/compare/v0.0.7...v0.0.8) (2026-05-22)
 
 

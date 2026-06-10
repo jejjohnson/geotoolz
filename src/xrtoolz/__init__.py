@@ -7,7 +7,7 @@ from xrtoolz.combinators import ApplyToEach, Augment
 from xrtoolz.signature import Signature
 
 
-__version__ = "0.0.8"
+__version__ = "0.1.0"
 
 __all__ = [
     "ApplyToEach",
