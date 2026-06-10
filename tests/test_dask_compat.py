@@ -31,6 +31,8 @@ from xrtoolz.geo.operators import (
 )
 from xrtoolz.interpolate.operators import (
     Coarsen,
+    FillNaNBiharmonic,
+    FillNaNIDW,
     FillNaNLaplacian,
     FillNaNRBF,
     FillNaNSpatial,
@@ -133,25 +135,17 @@ CASES: list[Case] = [
         needs_ref=True,
         lazy=True,
     ),
-    # -- gap-fill: not yet dask-aware (Tier-2 remediation flips these) ----------
-    Case(
-        "interpolate.FillNaNLaplacian",
-        FillNaNLaplacian(),
-        gapped=True,
-        xfail="gap-fill apply_ufunc lacks dask handling (Tier-2)",
-    ),
+    # -- gap-fill: per-slice apply_ufunc, lazy via dask="parallelized" ----------
+    Case("interpolate.FillNaNLaplacian", FillNaNLaplacian(), gapped=True, lazy=True),
     Case(
         "interpolate.FillNaNSpatial",
         FillNaNSpatial(method="linear"),
         gapped=True,
-        xfail="gap-fill apply_ufunc lacks dask handling (Tier-2)",
+        lazy=True,
     ),
-    Case(
-        "interpolate.FillNaNRBF",
-        FillNaNRBF(),
-        gapped=True,
-        xfail="gap-fill apply_ufunc lacks dask handling (Tier-2)",
-    ),
+    Case("interpolate.FillNaNRBF", FillNaNRBF(), gapped=True, lazy=True),
+    Case("interpolate.FillNaNBiharmonic", FillNaNBiharmonic(), gapped=True, lazy=True),
+    Case("interpolate.FillNaNIDW", FillNaNIDW(), gapped=True, lazy=True),
 ]
 
 

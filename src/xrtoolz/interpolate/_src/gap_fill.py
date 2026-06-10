@@ -23,7 +23,7 @@ from jaxtyping import Float
 from scipy.interpolate import RBFInterpolator, griddata
 
 from xrtoolz.interpolate._src.knn import fillnan_idw
-from xrtoolz.utils._src.finite import _finite_mask
+from xrtoolz.utils._src.finite import _finite_mask, _floating_output_dtype
 from xrtoolz.utils._src.optional_imports import _require_optional
 from xrtoolz.utils._src.validation import _require_dims
 
@@ -97,6 +97,9 @@ def fillnan_spatial(
         input_core_dims=[[lat, lon]],
         output_core_dims=[[lat, lon]],
         vectorize=True,
+        dask="parallelized",
+        output_dtypes=[_floating_output_dtype(da)],
+        dask_gufunc_kwargs={"allow_rechunk": False},
     )
 
 
@@ -309,6 +312,9 @@ def fillnan_laplacian(
         input_core_dims=[[lat, lon]],
         output_core_dims=[[lat, lon]],
         vectorize=True,
+        dask="parallelized",
+        output_dtypes=[_floating_output_dtype(da)],
+        dask_gufunc_kwargs={"allow_rechunk": False},
     )
 
 
@@ -351,7 +357,7 @@ def fillnan_biharmonic(
         _require_dims(mask, lon, lat, name="mask")
         mask_da = mask.astype(bool)
 
-    output_dtype = da.dtype if np.issubdtype(da.dtype, np.floating) else np.float64
+    output_dtype = _floating_output_dtype(da)
 
     def _fill_slice(arr: np.ndarray, mask_arr: np.ndarray) -> np.ndarray:
         mask_bool = np.array(mask_arr, dtype=bool, copy=True)
@@ -436,4 +442,7 @@ def fillnan_rbf(
         input_core_dims=[[lat, lon]],
         output_core_dims=[[lat, lon]],
         vectorize=True,
+        dask="parallelized",
+        output_dtypes=[_floating_output_dtype(da)],
+        dask_gufunc_kwargs={"allow_rechunk": False},
     )

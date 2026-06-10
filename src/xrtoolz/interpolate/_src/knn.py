@@ -10,7 +10,11 @@ from jaxtyping import Float
 
 from xrtoolz.interpolate._src.binning import Grid
 from xrtoolz.interpolate._src.spatial import _build_tree, _to_metric_xy
-from xrtoolz.utils._src.finite import _finite_filter, _finite_mask
+from xrtoolz.utils._src.finite import (
+    _finite_filter,
+    _finite_mask,
+    _floating_output_dtype,
+)
 from xrtoolz.utils._src.validation import _validate_idw_args
 
 
@@ -276,7 +280,7 @@ def fillnan_idw(
         output_core_dims=[[lat, lon]],
         vectorize=True,
         dask="parallelized",
-        output_dtypes=[da.dtype],
+        output_dtypes=[_floating_output_dtype(da)],
         dask_gufunc_kwargs={"allow_rechunk": False},
     )
 

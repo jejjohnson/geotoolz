@@ -39,9 +39,32 @@ def _as_numeric_with_mask(values: ArrayLike) -> tuple[np.ndarray, np.ndarray]:
     return arr, np.isfinite(arr)
 
 
+def _floating_output_dtype(da: xr.DataArray | xr.Dataset) -> np.dtype:
+    """Floating output dtype for a per-slice kernel, for a DataArray or Dataset.
+
+    ``apply_ufunc(dask="parallelized")`` needs a single ``output_dtypes`` entry
+    even when it maps over a Dataset's variables. Kernels that always yield
+    floating output (gap-fill, smoothing) use this to pick the common floating
+    type across variables, falling back to ``float64`` for integer inputs.
+
+    Args:
+        da: The input the kernel was called with.
+
+    Returns:
+        A floating numpy dtype suitable for ``output_dtypes``.
+    """
+    if isinstance(da, xr.Dataset):
+        dtypes = [v.dtype for v in da.data_vars.values()]
+        base = np.result_type(*dtypes) if dtypes else np.dtype(np.float64)
+    else:
+        base = da.dtype
+    return base if np.issubdtype(base, np.floating) else np.dtype(np.float64)
+
+
 __all__ = [
     "_as_numeric_with_mask",
     "_finite_filter",
     "_finite_mask",
     "_finite_mask_da",
+    "_floating_output_dtype",
 ]
