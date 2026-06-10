@@ -5,6 +5,12 @@ entry points are used internally by the Layer 0 xarray wrappers via
 ``xr.apply_ufunc``. Signatures are
 ``(prediction, reference, *, axis, **kwargs) -> ndarray``.
 
+Shapes (jaxtyping): ``prediction`` and ``reference`` are same-shaped real
+arrays ``Float[np.ndarray, "*shape"]``; each metric returns a
+``Float[np.ndarray, "..."]`` with ``axis`` reduced away (the reduced shape
+depends on the dynamic ``axis`` argument, so it is left anonymous). See
+``docs/design/conventions/array-typing.md``.
+
 NaN handling: matches the Layer 0 xarray default (``skipna=True`` for
 floating-point arrays). All reductions ignore NaNs via
 :func:`numpy.nanmean` / :func:`numpy.nansum`. If every element along
@@ -17,18 +23,18 @@ Backend: numpy. JAX / CuPy variants are out of scope for the pilot.
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from jaxtyping import Float
 
 
 Axis = int | tuple[int, ...]
 
 
 def mse(
-    prediction: ArrayLike,
-    reference: ArrayLike,
+    prediction: Float[np.ndarray, "*shape"],
+    reference: Float[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "..."]:
     """Mean squared error along ``axis``. NaN-skipping."""
     pred = np.asarray(prediction)
     ref = np.asarray(reference)
@@ -36,21 +42,21 @@ def mse(
 
 
 def rmse(
-    prediction: ArrayLike,
-    reference: ArrayLike,
+    prediction: Float[np.ndarray, "*shape"],
+    reference: Float[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "..."]:
     """Root mean squared error along ``axis``. NaN-skipping."""
     return np.sqrt(mse(prediction, reference, axis=axis))
 
 
 def mae(
-    prediction: ArrayLike,
-    reference: ArrayLike,
+    prediction: Float[np.ndarray, "*shape"],
+    reference: Float[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "..."]:
     """Mean absolute error along ``axis``. NaN-skipping."""
     pred = np.asarray(prediction)
     ref = np.asarray(reference)
@@ -58,11 +64,11 @@ def mae(
 
 
 def bias(
-    prediction: ArrayLike,
-    reference: ArrayLike,
+    prediction: Float[np.ndarray, "*shape"],
+    reference: Float[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "..."]:
     """Mean bias ``<pred - ref>`` along ``axis``. NaN-skipping."""
     pred = np.asarray(prediction)
     ref = np.asarray(reference)
@@ -70,11 +76,11 @@ def bias(
 
 
 def nrmse(
-    prediction: ArrayLike,
-    reference: ArrayLike,
+    prediction: Float[np.ndarray, "*shape"],
+    reference: Float[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "..."]:
     """Normalized RMSE: ``1 - RMSE / sqrt(<ref^2>)`` along ``axis``. NaN-skipping."""
     err = rmse(prediction, reference, axis=axis)
     ref = np.asarray(reference)
@@ -83,11 +89,11 @@ def nrmse(
 
 
 def nrmse_score(
-    prediction: ArrayLike,
-    reference: ArrayLike,
+    prediction: Float[np.ndarray, "*shape"],
+    reference: Float[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "..."]:
     """Mercator-flavour normalized RMSE skill score: ``1 - RMSE / std(ref)``.
 
     Distinct from :func:`nrmse` — both are 1 when prediction matches the
@@ -118,11 +124,11 @@ def nrmse_score(
 
 
 def correlation(
-    prediction: ArrayLike,
-    reference: ArrayLike,
+    prediction: Float[np.ndarray, "*shape"],
+    reference: Float[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "..."]:
     """Pearson correlation between ``prediction`` and ``reference``. NaN-skipping."""
     pred = np.asarray(prediction)
     ref = np.asarray(reference)
@@ -138,11 +144,11 @@ def correlation(
 
 
 def r2_score(
-    prediction: ArrayLike,
-    reference: ArrayLike,
+    prediction: Float[np.ndarray, "*shape"],
+    reference: Float[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "..."]:
     """Coefficient of determination ``1 - SS_res / SS_tot``. NaN-skipping."""
     pred = np.asarray(prediction)
     ref = np.asarray(reference)

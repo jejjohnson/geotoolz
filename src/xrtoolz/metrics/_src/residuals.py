@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import regionmask
 import xarray as xr
+from jaxtyping import Float
 from scipy.stats import binned_statistic_2d
 
 from xrtoolz._operator import Operator
@@ -268,7 +269,9 @@ def _region_labels(
     )
 
 
-def _score_region(ref: np.ndarray, pred: np.ndarray, metric: str) -> float:
+def _score_region(
+    ref: Float[np.ndarray, "n"], pred: Float[np.ndarray, "n"], metric: str
+) -> float:
     if ref.size == 0:
         # ``count`` is a sample size, so an empty selection means zero
         # matched points — not a missing measurement. All other metrics

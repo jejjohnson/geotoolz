@@ -2,13 +2,19 @@
 
 Implementation detail — no stability guarantees. Used internally by the
 Layer 0 xarray wrappers in ``xrtoolz.metrics._src.segmented_psd``.
+
+Shapes (jaxtyping): signals are 1-D ``Float[np.ndarray, "time"]``; the
+windowing helpers return a 2-D ``Float[np.ndarray, "n npt"]`` stack of
+``n`` finite windows of length ``npt``; spectra are 1-D over frequency
+``"freq"``. See ``docs/design/conventions/array-typing.md``.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from jaxtyping import Bool, Complex, Float
 from numpy.lib.stride_tricks import sliding_window_view
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import ArrayLike
 from scipy import signal
 
 
@@ -51,14 +57,14 @@ def _segment_bounds(
     return bounds
 
 
-def _finite_rows(segments: NDArray[np.floating]) -> NDArray[np.bool_]:
+def _finite_rows(segments: Float[np.ndarray, "n npt"]) -> Bool[np.ndarray, "n"]:
     return np.all(np.isfinite(segments), axis=1)
 
 
 def _segments_from_bounds(
-    values: NDArray[np.floating],
+    values: Float[np.ndarray, "time"],
     bounds: list[tuple[int, int]],
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "n npt"]:
     if not bounds:
         return np.empty((0, 0), dtype=float)
     npt = bounds[0][1] - bounds[0][0]
@@ -69,13 +75,13 @@ def _segments_from_bounds(
 
 
 def segment_signal(
-    x: ArrayLike,
+    x: Float[np.ndarray, "time"],
     *,
     npt: int,
     overlap: float = 0.5,
     gap_indices: ArrayLike | None = None,
     min_segment_length: int | None = None,
-) -> NDArray[np.floating]:
+) -> Float[np.ndarray, "n npt"]:
     """Slice a 1-D signal into equal-length, finite, gap-free windows.
 
     When ``min_segment_length`` is omitted, chunks shorter than ``npt``
@@ -105,13 +111,13 @@ def segment_signal(
 
 
 def _paired_segments(
-    x: ArrayLike,
-    y: ArrayLike,
+    x: Float[np.ndarray, "time"],
+    y: Float[np.ndarray, "time"],
     *,
     npt: int,
     overlap: float,
     gap_indices: ArrayLike | None,
-) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
+) -> tuple[Float[np.ndarray, "n npt"], Float[np.ndarray, "n npt"]]:
     x_values = np.asarray(x, dtype=float)
     y_values = np.asarray(y, dtype=float)
     if x_values.ndim != 1 or y_values.ndim != 1:
@@ -135,7 +141,7 @@ def _paired_segments(
 
 
 def segmented_psd(
-    x: ArrayLike,
+    x: Float[np.ndarray, "time"],
     *,
     fs: float,
     npt: int,
@@ -143,8 +149,11 @@ def segmented_psd(
     gap_indices: ArrayLike | None = None,
     window: str | tuple[str, float] | ArrayLike = "hann",
     scaling: str = "density",
-) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
-    """Mean Welch PSD over finite, gap-free, overlapping 1-D windows."""
+) -> tuple[Float[np.ndarray, "freq"], Float[np.ndarray, "freq"]]:
+    """Mean Welch PSD over finite, gap-free, overlapping 1-D windows.
+
+    Returns ``(freqs, psd)``, each 1-D over frequency.
+    """
     segments = segment_signal(x, npt=npt, overlap=overlap, gap_indices=gap_indices)
     freqs, _ = signal.welch(
         np.zeros(npt),
@@ -179,8 +188,12 @@ def segmented_csd(
     gap_indices: ArrayLike | None = None,
     window: str | tuple[str, float] | ArrayLike = "hann",
     scaling: str = "density",
-) -> tuple[NDArray[np.floating], NDArray[np.complexfloating]]:
-    """Mean cross spectral density over finite, gap-free windows."""
+) -> tuple[Float[np.ndarray, "freq"], Complex[np.ndarray, "freq"]]:
+    """Mean cross spectral density over finite, gap-free windows.
+
+    Returns ``(freqs, csd)``: real frequencies and a complex cross-spectrum,
+    each 1-D over frequency.
+    """
     x_segments, y_segments = _paired_segments(
         x, y, npt=npt, overlap=overlap, gap_indices=gap_indices
     )
@@ -218,8 +231,11 @@ def segmented_coherence(
     overlap: float = 0.5,
     gap_indices: ArrayLike | None = None,
     window: str | tuple[str, float] | ArrayLike = "hann",
-) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
-    """Magnitude-squared coherence from window-averaged spectra."""
+) -> tuple[Float[np.ndarray, "freq"], Float[np.ndarray, "freq"]]:
+    """Magnitude-squared coherence from window-averaged spectra.
+
+    Returns ``(freqs, coherence)``, each 1-D over frequency.
+    """
     x_segments, y_segments = _paired_segments(
         x, y, npt=npt, overlap=overlap, gap_indices=gap_indices
     )

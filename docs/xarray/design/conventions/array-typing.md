@@ -70,9 +70,12 @@ Rules:
 ### Tooling
 
 `jaxtyping` is a core dependency (it only pulls `wadler-lindig`; no JAX). ruff
-ignores `F722` repo-wide because pyflakes mis-parses the `"*axis"` shape
-strings as starred forward annotations — this is jaxtyping's recommended
-config. `ty` understands the annotations with no extra configuration.
+ignores `F722`, `F821`, and `UP037` repo-wide because pyflakes / pyupgrade
+read the shape strings (`"lat lon"`, `"*shape"`) as forward-ref annotations
+and would otherwise flag the named axes as undefined or strip their required
+quotes — this is jaxtyping's recommended config. `ty` understands the
+annotations with no extra configuration and remains the undefined-name safety
+net.
 
 ## Docstrings
 
