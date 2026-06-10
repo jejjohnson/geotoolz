@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Bool
 
 from xrtoolz.utils._src.optional_imports import _require_optional
 from xrtoolz.utils._src.validation import _is_int_like, _validate_bool_mask
@@ -26,7 +27,7 @@ def _require_skimage() -> Any:
     )
 
 
-def _resolve_footprint(footprint: Footprint) -> np.ndarray:
+def _resolve_footprint(footprint: Footprint) -> Bool[np.ndarray, "fh fw"]:
     """Resolve a compact footprint specification to a scikit-image footprint."""
     morph = _require_skimage()
     if isinstance(footprint, np.ndarray):
@@ -81,7 +82,9 @@ def _objects_uses_max_size(morph: Any) -> bool:
     return _REMOVE_SMALL_OBJECTS_USES_MAX_SIZE
 
 
-def _remove_small_holes(m: np.ndarray, *, area: int) -> np.ndarray:
+def _remove_small_holes(
+    m: Bool[np.ndarray, "h w"], *, area: int
+) -> Bool[np.ndarray, "h w"]:
     morph = _require_skimage()
     if _holes_uses_max_size(morph):
         # scikit-image 0.26+ removes components with size <= max_size.
@@ -91,7 +94,9 @@ def _remove_small_holes(m: np.ndarray, *, area: int) -> np.ndarray:
     return morph.remove_small_holes(m, area_threshold=area)
 
 
-def _remove_small_objects(m: np.ndarray, *, area: int) -> np.ndarray:
+def _remove_small_objects(
+    m: Bool[np.ndarray, "h w"], *, area: int
+) -> Bool[np.ndarray, "h w"]:
     morph = _require_skimage()
     if _objects_uses_max_size(morph):
         return morph.remove_small_objects(m, max_size=area - 1)

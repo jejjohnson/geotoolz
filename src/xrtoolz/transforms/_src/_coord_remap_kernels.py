@@ -13,10 +13,12 @@ independently), ``"nearest"``.
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from jaxtyping import Float, Inexact
 
 
-def _as_floating(arr: ArrayLike) -> np.ndarray:
+def _as_floating(
+    arr: Inexact[np.ndarray, "*shape"],
+) -> Inexact[np.ndarray, "*shape"]:
     """Cast to a floating dtype while preserving complex inputs."""
     a = np.asarray(arr)
     if np.issubdtype(a.dtype, np.complexfloating):
@@ -27,13 +29,13 @@ def _as_floating(arr: ArrayLike) -> np.ndarray:
 
 
 def remap_axis(
-    values: ArrayLike,
+    values: Inexact[np.ndarray, "..."],
     *,
     axis: int = -1,
-    source_coords: ArrayLike,
-    target_coords: ArrayLike,
+    source_coords: Float[np.ndarray, "src"],
+    target_coords: Float[np.ndarray, "tgt"],
     method: str = "linear",
-) -> NDArray:
+) -> Inexact[np.ndarray, "..."]:
     """Interpolate values along ``axis`` from ``source_coords`` to ``target_coords``.
 
     Parameters

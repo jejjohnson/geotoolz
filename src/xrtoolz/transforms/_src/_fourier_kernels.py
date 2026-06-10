@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Literal
 
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from jaxtyping import Complex, Float, Inexact
 
 
 Axis = int | tuple[int, ...]
@@ -22,21 +22,21 @@ FFTNorm = Literal["backward", "ortho", "forward"] | None
 
 
 def fft(
-    x: ArrayLike,
+    x: Inexact[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
     norm: FFTNorm = None,
-) -> NDArray[np.complexfloating]:
+) -> Complex[np.ndarray, "*shape"]:
     """N-dimensional discrete Fourier transform along ``axis``.
 
     Args:
-        x: Input array.
+        x: Real- or complex-valued input of arbitrary shape ``(*shape)``.
         axis: Axis or axes to transform.
         norm: Normalization mode forwarded to :func:`numpy.fft.fftn`
             (``None``, ``"ortho"``, ``"forward"``, ``"backward"``).
 
     Returns:
-        Complex-valued FFT with the same shape as ``x``.
+        Complex-valued FFT, same shape ``(*shape)`` as ``x``.
     """
     arr = np.asarray(x)
     axes = [axis] if isinstance(axis, int) else list(axis)
@@ -44,24 +44,24 @@ def fft(
 
 
 def ifft(
-    x: ArrayLike,
+    x: Inexact[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
     norm: FFTNorm = None,
-) -> NDArray[np.complexfloating]:
-    """Inverse N-dimensional FFT along ``axis``."""
+) -> Complex[np.ndarray, "*shape"]:
+    """Inverse N-dimensional FFT along ``axis``. Same shape ``(*shape)`` out."""
     arr = np.asarray(x)
     axes = [axis] if isinstance(axis, int) else list(axis)
     return np.fft.ifftn(arr, axes=axes, norm=norm)
 
 
 def power_spectrum(
-    x: ArrayLike,
+    x: Inexact[np.ndarray, "*shape"],
     *,
     axis: Axis = -1,
     d: float | tuple[float, ...] = 1.0,
     norm: FFTNorm = "ortho",
-) -> tuple[NDArray[np.floating], tuple[NDArray[np.floating], ...]]:
+) -> tuple[Float[np.ndarray, "*shape"], tuple[Float[np.ndarray, "freq"], ...]]:
     """Power spectrum of ``x`` along ``axis``.
 
     Computes the squared magnitude of the discrete Fourier transform,

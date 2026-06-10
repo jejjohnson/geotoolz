@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from jaxtyping import Float
 
 
-def lon_360_to_180(coord: ArrayLike) -> NDArray:
+def lon_360_to_180(coord: Float[np.ndarray, "*shape"]) -> Float[np.ndarray, "*shape"]:
     """Wrap longitudes from ``[0, 360)`` into ``[-180, 180)``.
 
     Args:
@@ -19,7 +19,7 @@ def lon_360_to_180(coord: ArrayLike) -> NDArray:
     return (np.asarray(coord) + 180.0) % 360.0 - 180.0
 
 
-def lon_180_to_360(coord: ArrayLike) -> NDArray:
+def lon_180_to_360(coord: Float[np.ndarray, "*shape"]) -> Float[np.ndarray, "*shape"]:
     """Wrap longitudes from ``[-180, 180)`` into ``[0, 360)``.
 
     Args:
@@ -32,7 +32,7 @@ def lon_180_to_360(coord: ArrayLike) -> NDArray:
     return np.asarray(coord) % 360.0
 
 
-def lat_180_to_90(coord: ArrayLike) -> NDArray:
+def lat_180_to_90(coord: Float[np.ndarray, "*shape"]) -> Float[np.ndarray, "*shape"]:
     """Wrap latitudes from ``[0, 180)`` into ``[-90, 90)``.
 
     Useful when a dataset stores latitude as a 0-based index rather than
@@ -47,7 +47,7 @@ def lat_180_to_90(coord: ArrayLike) -> NDArray:
     return (np.asarray(coord) + 90.0) % 180.0 - 90.0
 
 
-def lat_90_to_180(coord: ArrayLike) -> NDArray:
+def lat_90_to_180(coord: Float[np.ndarray, "*shape"]) -> Float[np.ndarray, "*shape"]:
     """Wrap latitudes from ``[-90, 90)`` into ``[0, 180)``.
 
     Args:

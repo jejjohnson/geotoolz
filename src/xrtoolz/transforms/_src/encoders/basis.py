@@ -19,19 +19,23 @@ from collections.abc import Hashable
 import einx
 import numpy as np
 import xarray as xr
-from numpy.typing import ArrayLike, NDArray
+from jaxtyping import Float
 
 
 # ---------- numpy kernels --------------------------------------------------
 
 
-def _sin_cos(values: ArrayLike, period: float) -> tuple[NDArray, NDArray]:
-    """Sin/cos embedding of a periodic numpy array."""
+def _sin_cos(
+    values: Float[np.ndarray, "*shape"], period: float
+) -> tuple[Float[np.ndarray, "*shape"], Float[np.ndarray, "*shape"]]:
+    """Sin/cos embedding of a periodic numpy array (each same shape as input)."""
     x = 2.0 * np.pi * np.asarray(values) / period
     return np.sin(x), np.cos(x)
 
 
-def _fourier_features_array(values: NDArray, num_freqs: int, scale: float) -> NDArray:
+def _fourier_features_array(
+    values: Float[np.ndarray, "*shape"], num_freqs: int, scale: float
+) -> Float[np.ndarray, "*shape feat"]:
     """Deterministic Fourier features; appends a trailing feature axis."""
     freqs = (2.0 ** np.arange(num_freqs)) * scale
     angles = values[..., None] * freqs
@@ -39,13 +43,13 @@ def _fourier_features_array(values: NDArray, num_freqs: int, scale: float) -> ND
 
 
 def _random_fourier_features_array(
-    values: NDArray,
+    values: Float[np.ndarray, "..."],
     num_features: int,
     sigma: float,
     seed: int | None,
     *,
     projected: bool,
-) -> NDArray:
+) -> Float[np.ndarray, "..."]:
     """Random Fourier features (Rahimi & Recht, 2007).
 
     When ``projected`` is ``True`` the trailing axis of ``values`` is the
@@ -67,8 +71,8 @@ def _random_fourier_features_array(
 
 
 def _positional_encoding_array(
-    values: NDArray, num_freqs: int, include_input: bool
-) -> NDArray:
+    values: Float[np.ndarray, "*shape"], num_freqs: int, include_input: bool
+) -> Float[np.ndarray, "*shape feat"]:
     """NeRF-style positional encoding; appends a trailing feature axis."""
     encoded = _fourier_features_array(values, num_freqs=num_freqs, scale=np.pi)
     if include_input:
