@@ -32,18 +32,36 @@ def _apply_kernel_to_dataarray(
     dim: str,
     fn: Callable[..., Any],
 ) -> xr.DataArray:
-    """Apply a private 1-D kernel along ``dim`` of a single DataArray."""
+    """Apply a private 1-D kernel along ``dim`` of a single DataArray.
+
+    Uses ``apply_ufunc(dask="parallelized")`` so chunked inputs stay lazy.
+    ``vectorize=True`` hands the kernel a 1-D core slice with ``dim`` moved to
+    the last axis, so it is invoked with ``axis=-1``. The smoothing dim must be
+    a single chunk (rechunk it whole and chunk along the other dims instead).
+    """
     if dim not in da.dims:
         raise ValueError(f"dim {dim!r} not in DataArray dims {tuple(da.dims)}")
-    axis = da.get_axis_num(dim)
-    smoothed = fn(da.values, axis=axis)
-    return xr.DataArray(
-        smoothed,
-        dims=da.dims,
-        coords=da.coords,
-        attrs=dict(da.attrs),
-        name=da.name,
+    if _has_split_core_chunks(da, (dim,)):
+        raise ValueError(
+            f"smoothing dim {dim!r} must be a single chunk. Rechunk it whole "
+            "and chunk along the non-smoothing dims instead."
+        )
+
+    def _core(arr: np.ndarray) -> np.ndarray:
+        return fn(arr, axis=-1)
+
+    out = xr.apply_ufunc(
+        _core,
+        da,
+        input_core_dims=[[dim]],
+        output_core_dims=[[dim]],
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[np.result_type(da.dtype, np.float64)],
+        dask_gufunc_kwargs={"allow_rechunk": False},
+        keep_attrs=True,
     )
+    return out.transpose(*da.dims)
 
 
 def moving_average(

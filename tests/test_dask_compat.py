@@ -14,22 +14,27 @@ See ``docs/`` (the Dask page) for the per-operator tier table.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from sklearn.decomposition import PCA
 
 import xrtoolz.calc as calc
 from xrtoolz.geo.operators import (
+    AddLandMask,
+    AddOceanMask,
     CalculateClimatology,
     RemoveMean,
     ValidateLongitude,
 )
+from xrtoolz.interpolate import Grid
 from xrtoolz.interpolate.operators import (
+    Bin2D,
     Coarsen,
     FillNaNBiharmonic,
     FillNaNIDW,
@@ -37,7 +42,9 @@ from xrtoolz.interpolate.operators import (
     FillNaNRBF,
     FillNaNSpatial,
     GaussianSmooth,
+    Histogram2D,
     MovingAverage,
+    RegridLike,
 )
 from xrtoolz.metrics.operators import MAE, RMSE, Bias, Correlation
 from xrtoolz.ocn.operators import (
@@ -50,6 +57,7 @@ from xrtoolz.ocn.operators import (
     VelocityMagnitude,
 )
 from xrtoolz.transforms.operators import PowerSpectrum
+from xrtoolz.utils import XarrayEstimator
 
 
 pytestmark = pytest.mark.dask
@@ -91,13 +99,39 @@ def _grid(*, gap: bool = False) -> xr.Dataset:
     return ds
 
 
+def _grid_gap() -> xr.Dataset:
+    return _grid(gap=True)
+
+
+def _scattered() -> xr.DataArray:
+    """1-D scattered observations (an ``obs`` dim with lon/lat coords)."""
+    rng = np.random.default_rng(1)
+    n = 200
+    lon = rng.uniform(-10.0, 10.0, n)
+    lat = rng.uniform(-5.0, 5.0, n)
+    return xr.DataArray(
+        rng.standard_normal(n),
+        dims=("obs",),
+        coords={"lon": ("obs", lon), "lat": ("obs", lat)},
+        name="obs",
+    )
+
+
+# A coarse target grid for regridding / binning cases.
+_TARGET = xr.Dataset(
+    coords={"lat": np.linspace(-9.0, 9.0, 9), "lon": np.linspace(-48.0, -32.0, 11)}
+)
+_BIN_GRID = Grid.from_bounds((-10.0, 10.0), (-5.0, 5.0), resolution=2.0)
+
+
 @dataclass(frozen=True)
 class Case:
     """A single operator invocation to check for numpy/dask parity."""
 
     id: str
     run: Callable[..., xr.DataArray | xr.Dataset]
-    gapped: bool = False
+    data: Callable[[], xr.DataArray | xr.Dataset] = _grid
+    chunks: Mapping[str, int] = field(default_factory=lambda: dict(CHUNKS))
     needs_ref: bool = False
     lazy: bool = False
     xfail: str | None = None
@@ -122,8 +156,8 @@ CASES: list[Case] = [
     # -- transforms: lazy -------------------------------------------------------
     Case("transforms.PowerSpectrum", PowerSpectrum("ssh", ("lat", "lon")), lazy=True),
     # -- interpolate: smoothing works (eager); coarsen lazy --------------------
-    Case("interpolate.GaussianSmooth", GaussianSmooth(dim="lat", sigma=1.0)),
-    Case("interpolate.MovingAverage", MovingAverage(dim="lon", window=3)),
+    Case("interpolate.GaussianSmooth", GaussianSmooth(dim="lat", sigma=1.0), lazy=True),
+    Case("interpolate.MovingAverage", MovingAverage(dim="lon", window=3), lazy=True),
     Case("interpolate.Coarsen", Coarsen({"lat": 2, "lon": 2}), lazy=True),
     # -- metrics: lazy ----------------------------------------------------------
     Case("metrics.RMSE", RMSE("ssh", ("lat", "lon")), needs_ref=True, lazy=True),
@@ -136,16 +170,41 @@ CASES: list[Case] = [
         lazy=True,
     ),
     # -- gap-fill: per-slice apply_ufunc, lazy via dask="parallelized" ----------
-    Case("interpolate.FillNaNLaplacian", FillNaNLaplacian(), gapped=True, lazy=True),
+    Case("interpolate.FillNaNLaplacian", FillNaNLaplacian(), data=_grid_gap, lazy=True),
     Case(
         "interpolate.FillNaNSpatial",
         FillNaNSpatial(method="linear"),
-        gapped=True,
+        data=_grid_gap,
         lazy=True,
     ),
-    Case("interpolate.FillNaNRBF", FillNaNRBF(), gapped=True, lazy=True),
-    Case("interpolate.FillNaNBiharmonic", FillNaNBiharmonic(), gapped=True, lazy=True),
-    Case("interpolate.FillNaNIDW", FillNaNIDW(), gapped=True, lazy=True),
+    Case("interpolate.FillNaNRBF", FillNaNRBF(), data=_grid_gap, lazy=True),
+    Case(
+        "interpolate.FillNaNBiharmonic", FillNaNBiharmonic(), data=_grid_gap, lazy=True
+    ),
+    Case("interpolate.FillNaNIDW", FillNaNIDW(), data=_grid_gap, lazy=True),
+    # -- Tier-3: lazy (regionmask masks, xarray-interp regrid) -----------------
+    Case("geo.AddLandMask", AddLandMask(), lazy=True),
+    Case("geo.AddOceanMask", AddOceanMask(), lazy=True),
+    Case("interpolate.RegridLike", RegridLike(_TARGET), lazy=True),
+    # -- Tier-3: dask-safe but eager (materialise internally) ------------------
+    Case(
+        "interpolate.Bin2D",
+        Bin2D(grid=_BIN_GRID),
+        data=_scattered,
+        chunks={"obs": 50},
+    ),
+    Case(
+        "interpolate.Histogram2D",
+        Histogram2D(grid=_BIN_GRID),
+        data=_scattered,
+        chunks={"obs": 50},
+    ),
+    Case(
+        "utils.XarrayEstimator(PCA)",
+        lambda d: XarrayEstimator(PCA(n_components=2), sample_dim="time").fit_transform(
+            d["ssh"]
+        ),
+    ),
 ]
 
 
@@ -169,9 +228,11 @@ def _is_lazy(obj: xr.DataArray | xr.Dataset) -> bool:
 @pytest.mark.parametrize("case", _params())
 def test_operator_dask_parity(case: Case) -> None:
     """Every operator must produce identical results on numpy and dask input."""
-    ds = _grid(gap=case.gapped)
-    args_np: tuple[xr.Dataset, ...] = (ds, ds * 1.01) if case.needs_ref else (ds,)
-    args_dk = tuple(a.chunk(CHUNKS) for a in args_np)
+    data = case.data()
+    args_np: tuple[xr.DataArray | xr.Dataset, ...] = (
+        (data, data * 1.01) if case.needs_ref else (data,)
+    )
+    args_dk = tuple(a.chunk(case.chunks) for a in args_np)
 
     out_np = case.run(*args_np)
     out_dk = case.run(*args_dk)
