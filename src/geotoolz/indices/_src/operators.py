@@ -86,6 +86,10 @@ class NormalizedDifference(Operator):
     matches your band pair. Equivalent in math to all of them; the
     named subclasses are pinned-argument convenience wrappers.
 
+    This class holds the top-level ``geotoolz.NormalizedDifference``
+    name; :class:`geotoolz.spectral.NormalizedDifference` is the
+    band-name-string variant (resolved via ``attrs["band_names"]``).
+
     Args:
         a_idx: Index of the "high" band (numerator-positive term).
         b_idx: Index of the "low" band.

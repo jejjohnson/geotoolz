@@ -205,7 +205,7 @@ class SensorReader(GeoData, ABC):
         ``open(path, "rb").read()`` fallback. Callers can either pass
         a pre-built ``ObjectStore`` (e.g. for tests using
         :class:`obstore.store.LocalStore`) or fetch one from
-        :func:`geotoolz._obstore.get_obstore`.
+        :func:`geotoolz.readers._obstore.get_obstore`.
         """
         self._obstore_client = client
 

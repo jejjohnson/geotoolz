@@ -90,7 +90,7 @@ class CloudMask(Operator):
 
     Marks SCL classes 3 (cloud shadow), 8 (cloud-medium), 9 (cloud-high),
     10 (thin cirrus) as ``True`` — i.e. *True-to-drop*, matching the
-    convention used by ``geotoolz.cloud.ApplyMask`` / ``MaskFromSCL``.
+    convention used by ``geotoolz.mask.ApplyMask`` / ``geotoolz.qa.MaskFromSCL``.
     """
 
     DROP_CLASSES = (3, 8, 9, 10)

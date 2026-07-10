@@ -708,6 +708,11 @@ class ApplySRF(Operator):
     pixel that was fill in *any* source band stays fill in *every*
     target band).
 
+    This class holds the top-level ``geotoolz.ApplySRF`` name. The
+    deliberately distinct :class:`geotoolz.spectral.ApplySRF` variant
+    skips the fill propagation but adds band-name / wavelength attrs
+    bookkeeping.
+
     Args:
         target_center_wavelengths: ``λ_k`` for each target band (nm).
         target_fwhm: FWHM for each target band (nm).

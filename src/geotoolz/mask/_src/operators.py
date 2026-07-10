@@ -21,9 +21,9 @@ from pipekit import Operator
 
 from geotoolz._src.config import jsonable
 from geotoolz._src.wrap import wrap_like
-from geotoolz.cloud._src.array import apply_mask
 from geotoolz.mask._src.array import (
     altitude_mask,
+    apply_mask,
     buffer_mask,
     clean_mask,
     close_mask,
@@ -648,11 +648,10 @@ class ApplyMask(Operator):
     """Apply a boolean mask to the carrier, filling True pixels.
 
     Accepts a GeoTensor or a plain ndarray and returns the same
-    carrier kind. Mirrors :class:`geotoolz.cloud.ApplyMask` but lives in the ``mask``
-    namespace so geometry / morphology / algebra pipelines can compose
-    without importing the cloud submodule. Delegates the actual masking
-    to :func:`geotoolz.cloud._src.array.apply_mask` so the broadcasting
-    + dtype-preservation rules stay in one place.
+    carrier kind. This is the canonical mask-application operator
+    (``geotoolz.cloud.ApplyMask`` is a deprecated alias). Delegates the
+    actual masking to :func:`geotoolz.mask._src.array.apply_mask` so the
+    broadcasting + dtype-preservation rules stay in one place.
 
     Convention: the mask is True where pixels should be *masked out*.
     Geometry masks built with ``inside=True`` return True *inside* the

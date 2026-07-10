@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any
 
 from geotoolz.learn._src.estimators import GeoTensorEstimator
+from geotoolz.learn._src.model import ModelOp
 from geotoolz.learn._src.operators import SklearnOp
 
 
@@ -203,6 +204,7 @@ __all__ = [
     "KNNImputer",
     "LocalOutlierFactor",
     "MiniBatchKMeans",
+    "ModelOp",
     "OneClassSVM",
     "SklearnOp",
 ]

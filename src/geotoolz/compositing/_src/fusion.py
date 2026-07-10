@@ -1,8 +1,10 @@
-"""Matched-stack operators — multi-source fusion of co-registered tensors.
+"""Multi-source fusion operators over co-registered ("matched") tensors.
 
 Sibling to the existing composites (``MaxNDVIComposite``,
 ``CloudFreeComposite``, etc.) but for a *matched tuple* of tensors
 from different sources rather than a temporal stack of one sensor.
+"Matched" here means matched *grids* (same shape / transform / CRS) —
+unrelated to the `geotoolz.matched_filter` target-detection family.
 
 * `StackMatched` — concatenate N aligned tensors along the band axis.
 * `BlendMatched` — weighted mean across N aligned tensors, with

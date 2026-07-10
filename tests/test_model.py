@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from geotoolz.model import ModelOp
+from geotoolz.learn import ModelOp
 
 
 class _Doubler:

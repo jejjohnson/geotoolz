@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 
 import numpy as np
 import scipy.ndimage as ndi
-from jaxtyping import Bool, Float
+from jaxtyping import Bool, Float, Shaped
 
 from geotoolz._src.shape import single_band
 
@@ -516,3 +516,54 @@ def _remove_small_holes_2d(
     for label in range(1, num + 1):
         fill[label] = label not in border_labels and sizes[label] <= area_threshold
     return mask | fill[labels]
+
+
+def apply_mask(
+    arr: Shaped[np.ndarray, "*dims"],
+    mask: Bool[np.ndarray, "*mask_dims"],
+    fill_value: float = np.nan,
+    *,
+    invert: bool = False,
+) -> Shaped[np.ndarray, "*dims"]:
+    """Apply a boolean mask to a multi-band array, filling masked pixels.
+
+    By convention here, the mask is True where pixels should be
+    *masked out* — the extraction primitives in `geotoolz.qa`
+    (`mask_from_qa_bits`, `mask_from_scl`, ...) already follow that
+    convention ("True = cloudy"). The result is ``arr`` with
+    ``fill_value`` substituted wherever ``mask`` is True (or where
+    ``~mask`` is True if ``invert=True``).
+
+    The mask broadcasts against the spatial trailing axes of ``arr``,
+    so a ``(H, W)`` mask applies to every band of a ``(C, H, W)``
+    raster automatically.
+
+    Args:
+        arr: Input array, any shape.
+        mask: Boolean mask. Must broadcast against the spatial
+            (trailing two) axes of ``arr``.
+        fill_value: Value substituted where the mask says "drop".
+            Default ``np.nan`` (the right choice for float arrays;
+            switch to a sentinel like ``0`` for integer inputs).
+        invert: When True, fill where the mask is False instead of
+            True — i.e. treat the mask as "keep-only" rather than
+            "mask-out".
+
+    Returns:
+        Array of the same shape as ``arr``, masked pixels replaced
+        with ``fill_value``.
+    """
+    bool_mask = np.asarray(mask, dtype=bool)
+    if invert:
+        bool_mask = ~bool_mask
+    # `np.where` upcasts to the wider dtype of (fill_value, arr). For
+    # floating arrays we want to preserve `arr.dtype` — otherwise
+    # `fill_value=np.nan` (float64) silently doubles memory on float32
+    # inputs and undoes any upstream `ToFloat32()` stage. Cast the fill
+    # to arr's dtype when arr is floating; integer arrays keep numpy's
+    # native promotion (so `fill_value=np.nan` on int input still
+    # upcasts, which is the only sensible behaviour).
+    if np.issubdtype(arr.dtype, np.floating):
+        fill_typed = np.asarray(fill_value, dtype=arr.dtype)
+        return np.where(bool_mask, fill_typed, arr)
+    return np.where(bool_mask, fill_value, arr)

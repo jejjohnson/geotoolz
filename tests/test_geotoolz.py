@@ -38,6 +38,6 @@ def test_core_re_exports_at_top_level() -> None:
     for name in pipekit_names:
         assert getattr(geotoolz, name) is getattr(pipekit, name), name
     # ModelOp is geotoolz-specific (built on top of pipekit.Operator).
-    from geotoolz.model import ModelOp
+    from geotoolz.learn import ModelOp
 
     assert geotoolz.ModelOp is ModelOp

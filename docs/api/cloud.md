@@ -1,13 +1,12 @@
-# Cloud
+# Cloud (deprecated alias)
 
-`geotoolz.cloud` is the generic primitive layer for cloud / shadow / invalid-pixel masking. Pair these
-with the sensor-specific decoders in [`geotoolz.qa`](qa.md) when working with a known sensor product.
+!!! warning "Deprecated"
+    `geotoolz.cloud` is now a compatibility alias. Its contents moved:
+    mask **extraction** (`MaskFromQABits`, `MaskFromSCL`, `MaskValid`,
+    the `SCL` enum + convenience sets, `mask_from_qa_bits`,
+    `mask_from_scl`) lives in [`geotoolz.qa`](qa.md); mask
+    **application** (`ApplyMask`, `apply_mask`) lives in
+    [`geotoolz.mask`](mask.md). The alias re-exports the original names
+    unchanged and will be removed in a future release.
 
-- `MaskFromQABits` — decode bit-flag QA bands (Landsat-style, OR of bits).
-- `MaskFromSCL` — categorical scene-classification membership (Sentinel-2 SCL).
-- `MaskValid` / `ApplyMask` — apply a boolean mask to a `GeoTensor`.
-- `SCL`, `SCL_CLOUDS`, `SCL_INVALID` — Sentinel-2 SCL class registries.
-
-The convention is **`True` means "mask this pixel out"**.
-
-::: geotoolz.cloud
+The convention is unchanged everywhere: **`True` means "mask this pixel out"**.

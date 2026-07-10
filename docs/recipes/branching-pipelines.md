@@ -31,7 +31,7 @@ flowchart LR
 
 `Scale`, `CloudMask`, `ApplyMask`, and `NDVI` are the inline operators
 from the [quickstart](../quickstart.md#2-define-three-operators-inline);
-substitute the real `geotoolz.radiometry` / `geotoolz.cloud` /
+substitute the real `geotoolz.radiometry` / `geotoolz.qa` /
 `geotoolz.indices` operators once you have them.
 
 ```python
