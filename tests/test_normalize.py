@@ -6,7 +6,7 @@ import json
 
 import numpy as np
 import pytest
-import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
@@ -27,12 +27,9 @@ from geotoolz.normalize import (
 
 
 def _toy_geotensor(values: np.ndarray) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32629",
-        fill_value_default=np.nan,
-    )
+    # Shared factory, but with NaN fill — the NaN-awareness tests below
+    # rely on NaN marking invalid pixels.
+    return toy_geotensor(values, fill_value_default=np.nan)
 
 
 @pytest.fixture
@@ -274,6 +271,38 @@ def test_clahe_config_normalises_tuple_kernel_to_list() -> None:
     rebuilt = CLAHE(**cfg)
     assert rebuilt.kernel_size == (8, 8)
     assert rebuilt.get_config() == cfg
+
+
+# ---------------------------------------------------------------------------
+# Plain-ndarray carrier support
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        PerBandStats(percentiles=[2.0, 98.0]),
+        StandardScaler(mean=[2.0, 5.0], std=[1.5, 2.5]),
+        RobustScaler(median=[2.0, 5.0], iqr=[1.0, 2.0]),
+        MinMaxScaler(vmin=[0.0, 0.0], vmax=[9.0, 9.0]),
+        Normalize(mean=[2.0, 5.0], std=[1.5, 2.5]),
+        HistogramStretch(out_range=(0.0, 255.0)),
+        HistogramMatch(reference=np.linspace(10.0, 20.0, 16).reshape(4, 4)),
+        LogScale(),
+        AsinhScale(),
+        PowerScale(),
+        ZeroOne(),
+        CLAHE(kernel_size=(4, 4), clip_limit=0.03),
+    ],
+    ids=lambda op: type(op).__name__,
+)
+def test_operators_accept_plain_ndarray(op: object) -> None:
+    """Plain ndarray in -> plain ndarray out, values equal to the GeoTensor path."""
+    arr = np.linspace(0.0, 9.0, 2 * 4 * 4).reshape(2, 4, 4)
+    out = op(arr)  # type: ignore[operator]
+    assert type(out) is np.ndarray
+    gt_out = op(_toy_geotensor(arr))  # type: ignore[operator]
+    np.testing.assert_allclose(out, np.asarray(gt_out), equal_nan=True)
 
 
 # ---------------------------------------------------------------------------

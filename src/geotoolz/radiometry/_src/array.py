@@ -47,16 +47,17 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from jaxtyping import Float, Num, Shaped
 
 from geotoolz._src.stretch import percentile_stretch
 
 
 def dn_to_radiance(
-    dn: np.ndarray,
-    gain: float | np.ndarray,
-    offset: float | np.ndarray = 0.0,
-    scale: float | np.ndarray = 1.0,
-) -> np.ndarray:
+    dn: Num[np.ndarray, "*dims"],
+    gain: float | Float[np.ndarray, "*coef"],
+    offset: float | Float[np.ndarray, "*coef"] = 0.0,
+    scale: float | Float[np.ndarray, "*coef"] = 1.0,
+) -> Float[np.ndarray, "*dims"]:
     r"""Convert raw DN to at-sensor radiance via per-band gain/offset.
 
     .. math::
@@ -89,11 +90,11 @@ def dn_to_radiance(
 
 
 def radiance_to_dn(
-    radiance: np.ndarray,
-    gain: float | np.ndarray,
-    offset: float | np.ndarray = 0.0,
-    scale: float | np.ndarray = 1.0,
-) -> np.ndarray:
+    radiance: Float[np.ndarray, "*dims"],
+    gain: float | Float[np.ndarray, "*coef"],
+    offset: float | Float[np.ndarray, "*coef"] = 0.0,
+    scale: float | Float[np.ndarray, "*coef"] = 1.0,
+) -> Float[np.ndarray, "*dims"]:
     r"""Convert at-sensor radiance back to DN via the affine inverse.
 
     .. math::
@@ -114,10 +115,10 @@ def radiance_to_dn(
 
 
 def dn_to_reflectance(
-    dn: np.ndarray,
-    scale: float | np.ndarray,
-    offset: float | np.ndarray = 0.0,
-) -> np.ndarray:
+    dn: Num[np.ndarray, "*dims"],
+    scale: float | Float[np.ndarray, "*coef"],
+    offset: float | Float[np.ndarray, "*coef"] = 0.0,
+) -> Float[np.ndarray, "*dims"]:
     r"""Convert DN to TOA / surface reflectance via a linear affine decode.
 
     .. math::
@@ -161,12 +162,12 @@ def dn_to_reflectance(
 
 
 def min_max_normalize(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*dims"],
     vmin: float,
     vmax: float,
     *,
     clip: bool = True,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*dims"]:
     r"""Linearly map ``[vmin, vmax]`` to ``[0, 1]``.
 
     .. math::
@@ -200,12 +201,12 @@ def min_max_normalize(
 
 
 def percentile_clip(
-    arr: np.ndarray,
+    arr: Shaped[np.ndarray, "*dims"],
     p_min: float = 2.0,
     p_max: float = 98.0,
     *,
     axis: int | tuple[int, ...] | None = (-2, -1),
-) -> np.ndarray:
+) -> Float[np.ndarray, "*dims"]:
     r"""Robust contrast stretch using percentile thresholds.
 
     Computes :math:`v_{lo} = P_{p_{\min}}(\text{arr})` and
@@ -238,7 +239,9 @@ def percentile_clip(
     return percentile_stretch(arr, p_min, p_max, axis=axis)
 
 
-def gamma_correct(arr: np.ndarray, g: float = 1.2) -> np.ndarray:
+def gamma_correct(
+    arr: Float[np.ndarray, "*dims"], g: float = 1.2
+) -> Float[np.ndarray, "*dims"]:
     r"""Apply a gamma (power-law) correction.
 
     .. math::
@@ -268,10 +271,10 @@ def gamma_correct(arr: np.ndarray, g: float = 1.2) -> np.ndarray:
 
 
 def bt_from_radiance(
-    radiance: np.ndarray,
-    k1: float | np.ndarray,
-    k2: float | np.ndarray,
-) -> np.ndarray:
+    radiance: Float[np.ndarray, "*dims"],
+    k1: float | Float[np.ndarray, "*coef"],
+    k2: float | Float[np.ndarray, "*coef"],
+) -> Float[np.ndarray, "*dims"]:
     r"""Convert thermal radiance to brightness temperature.
 
     .. math::
@@ -290,11 +293,11 @@ def bt_from_radiance(
 
 
 def dos1(
-    reflectance: np.ndarray,
+    reflectance: Float[np.ndarray, "*dims"],
     dark_percentile: float = 1.0,
     *,
     axis: int | tuple[int, ...] | None = (-2, -1),
-) -> np.ndarray:
+) -> Float[np.ndarray, "*dims"]:
     """Apply a simple DOS1 dark-object subtraction to reflectance.
 
     Args:
