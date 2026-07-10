@@ -115,6 +115,7 @@ def test_toy_sensor_ndvi_preset_matches_generic_operator() -> None:
     np.testing.assert_allclose(op(gt).values, 0.5)
 
 
+@pytest.mark.slow
 def test_toy_sensor_package_data_is_in_wheel() -> None:
     wheelhouse = Path("dist")
     wheels = sorted(wheelhouse.glob("geotoolz-*.whl"))
