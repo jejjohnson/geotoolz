@@ -902,3 +902,117 @@ def test_optical_flow_ilk_returns_displacement_field() -> None:
     arr = np.asarray(flow)
     assert arr.shape == (2, *reference.shape[-2:])
     assert str(flow.crs) == str(moving.crs)
+
+
+# ----------------------------------------------------------------------------
+# numpy-compat: plain ndarray in -> plain ndarray out (or clear TypeError)
+# ----------------------------------------------------------------------------
+
+
+_PLAIN_VALUES = np.arange(1 * 8 * 8, dtype=np.float32).reshape(1, 8, 8)
+_PLAIN_REFERENCE = np.ascontiguousarray(_PLAIN_VALUES[:, ::-1, :])
+
+
+@pytest.mark.parametrize(
+    "make_op",
+    [
+        lambda: gz.geom.PadTo(shape=(10, 10), fill=0),
+        lambda: gz.geom.CropTo(shape=(2, 3)),
+        lambda: gz.geom.CropTo(shape=(2, 3), anchor="upper_left"),
+        lambda: gz.geom.BowtieCorrection(
+            scan_angle_max_deg=60.0,
+            pixels_per_scan=8,
+            scans_per_granule=8,
+            method="nearest",
+        ),
+        lambda: gz.geom.OpticalFlowTVL1(reference=_gt(_PLAIN_REFERENCE.copy())),
+        lambda: gz.geom.OpticalFlowILK(reference=_gt(_PLAIN_REFERENCE.copy())),
+        lambda: gz.geom.PhaseAlign(reference=_gt(_PLAIN_REFERENCE.copy()), apply=True),
+    ],
+)
+def test_pixel_space_operators_accept_plain_ndarray(make_op) -> None:
+    """Plain array in -> plain array out, values equal to the GeoTensor path."""
+    op = make_op()
+    out_arr = op(_PLAIN_VALUES.copy())
+    out_gt = op(_gt(_PLAIN_VALUES.copy()))
+    assert type(out_arr) is np.ndarray
+    assert isinstance(out_gt, GeoTensor)
+    np.testing.assert_allclose(out_arr, np.asarray(out_gt))
+
+
+def test_tile_accepts_plain_ndarray_and_zero_pads_edges() -> None:
+    values = np.arange(16, dtype=np.float32).reshape(1, 4, 4)
+    # Exact-fit tiling matches the GeoTensor path bit-for-bit.
+    tiles_arr = gz.geom.Tile(size=(2, 2))(values.copy())
+    tiles_gt = gz.geom.Tile(size=(2, 2))(_gt(values.copy()))
+    assert len(tiles_arr) == len(tiles_gt) == 4
+    for tile_arr, tile_gt in zip(tiles_arr, tiles_gt, strict=True):
+        assert type(tile_arr) is np.ndarray
+        np.testing.assert_array_equal(tile_arr, np.asarray(tile_gt))
+    # SlidingWindow (Tile subclass) inherits the plain-array support.
+    windows = gz.geom.SlidingWindow(size=(3, 3), overlap=1)(np.ones((4, 4)))
+    assert all(type(window) is np.ndarray for window in windows)
+
+
+def test_phase_align_plain_ndarray_returns_shift_tuple_when_apply_false() -> None:
+    reference, moving, dy, dx = _registration_pair()
+    result = gz.geom.PhaseAlign(reference=reference, apply=False)(
+        np.asarray(moving).copy()
+    )
+    assert isinstance(result, tuple)
+    assert result[0] == pytest.approx(-dy, abs=0.5)
+    assert result[1] == pytest.approx(-dx, abs=0.5)
+
+
+def test_georeference_accepts_plain_swath_array() -> None:
+    # The GLT supplies the output geometry; the swath input itself is
+    # sensor-space, so a plain ndarray is a legitimate carrier. The
+    # output is always a georeferenced GeoTensor derived from the GLT.
+    # Identity GLT: glt[0] holds source columns, glt[1] source rows.
+    glt = GeoTensor(
+        np.stack(
+            [
+                np.tile(np.arange(3, dtype=np.int32), (3, 1)),  # source cols
+                np.repeat(np.arange(3, dtype=np.int32), 3).reshape(3, 3),  # rows
+            ]
+        ),
+        transform=Affine(1, 0, 0, 0, -1, 3),
+        crs="EPSG:4326",
+        fill_value_default=-1,
+    )
+    swath = np.arange(9, dtype=np.float32).reshape(3, 3)
+    out = gz.geom.Georeference(glt=glt)(swath)
+    assert isinstance(out, GeoTensor)
+    np.testing.assert_array_equal(np.asarray(out), swath)
+
+
+@pytest.mark.parametrize(
+    "make_op",
+    [
+        lambda: gz.geom.Reproject(dst_crs="EPSG:32629"),
+        lambda: gz.geom.ReprojectLike(like=_gt()),
+        lambda: gz.geom.ResampleLike(like=_gt()),
+        lambda: gz.geom.Resize(shape=(2, 2)),
+        lambda: gz.geom.Resample(resolution=(2.0, 2.0)),
+        lambda: gz.geom.CropToBounds(bounds=(12, 16, 15, 19), crs="EPSG:4326"),
+        lambda: gz.geom.Rasterize(geometries=[box(12, 16, 15, 19)]),
+        lambda: gz.geom.Vectorize(),
+        lambda: gz.geom.AntimeridianSplit(),
+        lambda: gz.geom.GeostationaryParallaxCorrect(
+            satellite_lon_deg=0.0, target_height_m=100.0
+        ),
+    ],
+)
+def test_geo_dependent_operators_reject_plain_ndarray(make_op) -> None:
+    with pytest.raises(TypeError, match="GeoTensor"):
+        make_op()(np.zeros((1, 4, 4), dtype=np.float32))
+
+
+def test_geo_dependent_list_operators_reject_plain_ndarray() -> None:
+    arr = np.ones((1, 4, 4), dtype=np.float32)
+    with pytest.raises(TypeError, match="GeoTensor"):
+        gz.geom.Stitch()([arr])
+    with pytest.raises(TypeError, match="GeoTensor"):
+        gz.geom.Mosaic()([arr, arr])
+    with pytest.raises(TypeError, match="GeoTensor"):
+        gz.geom.SegmentStitch()([arr])

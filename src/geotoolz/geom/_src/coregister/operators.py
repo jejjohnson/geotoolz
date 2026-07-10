@@ -31,6 +31,21 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
+def _require_geotensor(value: Any, op_name: str, *, arg: str = "raster") -> None:
+    """Raise a clear ``TypeError`` when a geo-dependent op gets a plain array.
+
+    Every coregister operator is geo-dependent — alignment across
+    modalities is only meaningful with an affine transform + CRS on the
+    raster side. Duck-typed on ``transform`` so any GeoTensor-compatible
+    carrier passes.
+    """
+    if not hasattr(value, "transform"):
+        raise TypeError(
+            f"{op_name} requires a georeferenced GeoTensor {arg}; "
+            f"got a plain array ({type(value).__name__})."
+        )
+
+
 def _require_axis_aligned(transform: Any, op_name: str) -> None:
     """Reject affine transforms with rotation / shear terms.
 
@@ -179,6 +194,9 @@ class RasterToRasterLike(Operator):
     pairs where the secondary needs to be coregistered to the
     primary's grid before stacking.
 
+    Geo-dependent: both inputs must be georeferenced ``GeoTensor``s
+    (transform + CRS); plain arrays raise ``TypeError``.
+
     Args:
         resampling: One of ``"nearest"``, ``"bilinear"``, ``"cubic"``,
             ``"cubic_spline"``, ``"lanczos"``, ``"average"``,
@@ -198,6 +216,8 @@ class RasterToRasterLike(Operator):
         return {"resampling": self.resampling}
 
     def __call__(self, src: GeoTensor, like: GeoTensor) -> GeoTensor:
+        _require_geotensor(src, "RasterToRasterLike", arg="src")
+        _require_geotensor(like, "RasterToRasterLike", arg="like")
         # Delegate to the existing single-input `ReprojectLike` so
         # we share the rasterio warp code path. The price is one
         # extra Python-level Operator construction per call; the
@@ -290,6 +310,9 @@ class RasterToPoints(Operator):
     point. For 3-D ``(C, H, W)`` rasters the result carries an
     additional ``band`` dim.
 
+    Geo-dependent: the raster must be a georeferenced ``GeoTensor``
+    (transform + CRS); plain arrays raise ``TypeError``.
+
     Args:
         extract: Interpolation mode — ``"nearest"`` (default; uses
             xvec's per-pixel nearest sampling) or ``"bilinear"``
@@ -315,6 +338,7 @@ class RasterToPoints(Operator):
         return {"extract": self.extract, "out_var": self.out_var}
 
     def __call__(self, raster: GeoTensor, points: Any) -> Any:
+        _require_geotensor(raster, "RasterToPoints")
         try:
             import xvec  # noqa: F401 — registers the .xvec accessor
         except ImportError as exc:
@@ -369,6 +393,10 @@ class PointsToRaster(Operator):
     only `Point` geometries are accepted; non-axis-aligned target
     rasters are rejected.
 
+    Geo-dependent: ``like`` must be a georeferenced ``GeoTensor``
+    (its transform defines the bin grid); plain arrays raise
+    ``TypeError``.
+
     Args:
         method: Reduction strategy — ``"binned_stat"`` (scipy
             ``binned_statistic_2d``, default) or ``"idw"`` (deferred).
@@ -404,6 +432,7 @@ class PointsToRaster(Operator):
         }
 
     def __call__(self, points: Any, like: GeoTensor) -> GeoTensor:
+        _require_geotensor(like, "PointsToRaster", arg="like")
         if self.method == "idw":
             raise NotImplementedError(
                 "PointsToRaster(method='idw') is not yet implemented; "
@@ -538,6 +567,9 @@ class RasterToPointCloud(Operator):
     sampling is 2-D). For shapely-Point inputs use `RasterToPoints`;
     the distinction is the input form, not the underlying op.
 
+    Geo-dependent: the raster must be a georeferenced ``GeoTensor``
+    (transform + CRS); plain raster arrays raise ``TypeError``.
+
     Args:
         k: Number of nearest pixels per point. ``k=1`` is plain
             nearest-neighbour (matches `RasterToPoints` with
@@ -580,6 +612,7 @@ class RasterToPointCloud(Operator):
         }
 
     def __call__(self, raster: GeoTensor, cloud: Any) -> Any:
+        _require_geotensor(raster, "RasterToPointCloud")
         _require_axis_aligned(raster.transform, "RasterToPointCloud")
         xy = _cloud_to_xy_array(cloud, src_crs=raster.crs)
         if xy.size == 0:
@@ -782,6 +815,10 @@ class PointCloudToRaster(Operator):
     a tuple ``(xy_array, values_array)`` so callers don't need to
     wrap their raw arrays in a GeoDataFrame.
 
+    Geo-dependent: ``like`` must be a georeferenced ``GeoTensor``
+    (its transform defines the target grid); plain arrays raise
+    ``TypeError``.
+
     Args:
         method: ``"binned_stat"`` (scipy ``binned_statistic_2d`` —
             fast, no smoothing) or ``"idw"`` (KDTree-backed inverse-
@@ -828,6 +865,7 @@ class PointCloudToRaster(Operator):
         }
 
     def __call__(self, cloud: Any, like: GeoTensor) -> GeoTensor:
+        _require_geotensor(like, "PointCloudToRaster", arg="like")
         _require_axis_aligned(like.transform, "PointCloudToRaster")
         xy, values = _cloud_to_xy_values(cloud)
         if self.method == "binned_stat":
@@ -965,6 +1003,10 @@ class VectorToRasterAgg(Operator):
     update a running aggregator. This is more memory-friendly than
     stacking N feature rasters and reducing.
 
+    Geo-dependent: ``like`` must be a georeferenced ``GeoTensor``
+    (its transform defines the burn grid); plain arrays raise
+    ``TypeError``.
+
     Args:
         agg: One of ``"mean"``, ``"count"``, ``"sum"``, ``"max"``,
             ``"min"``, ``"first"``, ``"last"``. ``"majority"`` is
@@ -1015,6 +1057,7 @@ class VectorToRasterAgg(Operator):
                 "the others (mean / count / sum / max / min / first / last) "
                 "are wired up."
             )
+        _require_geotensor(like, "VectorToRasterAgg", arg="like")
         _require_axis_aligned(like.transform, "VectorToRasterAgg")
         import geopandas as gpd
         from rasterio.features import rasterize as rio_rasterize

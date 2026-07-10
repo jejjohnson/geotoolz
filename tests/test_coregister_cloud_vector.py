@@ -11,14 +11,16 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
 from shapely.geometry import Point, box
 
 from geotoolz.geom.coregister import (
     PointCloudToRaster,
+    PointsToRaster,
     RasterToPointCloud,
+    RasterToPoints,
     VectorToRasterAgg,
 )
 
@@ -29,12 +31,8 @@ from geotoolz.geom.coregister import (
 
 
 def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=transform
-        or rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs=crs,
-        fill_value_default=np.nan,
+    return toy_geotensor(
+        values, transform=transform, crs=crs, fill_value_default=np.nan
     )
 
 
@@ -395,6 +393,29 @@ class TestVectorToRasterAggValues:
         last = np.asarray(VectorToRasterAgg(agg="last", attribute="v")(gdf, like))
         assert first[1, 2] == 10.0
         assert last[1, 2] == 20.0
+
+
+class TestGeoDependentPlainArrayRejection:
+    """Every coregister op needs transform + CRS on its raster argument.
+
+    Plain ``np.ndarray`` rasters must raise a clear TypeError instead
+    of an AttributeError buried in transform access. The guards fire
+    before any optional-dependency import, so the `RasterToPoints` /
+    `PointsToRaster` checks run without the ``[vector-cube]`` extra.
+    """
+
+    def test_plain_array_raster_inputs_raise_type_error(self) -> None:
+        arr = np.zeros((4, 4), dtype=np.float32)
+        with pytest.raises(TypeError, match="GeoTensor"):
+            RasterToPointCloud()(arr, np.zeros((1, 2)))
+        with pytest.raises(TypeError, match="GeoTensor"):
+            PointCloudToRaster()((np.zeros((1, 2)), np.zeros(1)), arr)
+        with pytest.raises(TypeError, match="GeoTensor"):
+            VectorToRasterAgg(agg="count")(None, arr)
+        with pytest.raises(TypeError, match="GeoTensor"):
+            RasterToPoints()(arr, [Point(0.0, 0.0)])
+        with pytest.raises(TypeError, match="GeoTensor"):
+            PointsToRaster(attribute="v")(None, arr)
 
 
 class TestVectorToRasterAggValidation:

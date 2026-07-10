@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
 from shapely.geometry import Point
@@ -32,12 +33,8 @@ from geotoolz.geom.coregister import PointsToRaster, RasterToPoints
 
 
 def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=transform
-        or rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs=crs,
-        fill_value_default=np.nan,
+    return toy_geotensor(
+        values, transform=transform, crs=crs, fill_value_default=np.nan
     )
 
 
