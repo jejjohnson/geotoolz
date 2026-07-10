@@ -14,6 +14,13 @@ N-band reflectance to 3-band RGB or 4-band RGBA ``uint8``. They sit
 downstream of :mod:`geotoolz.radiometry` (``PercentileClip``,
 ``MinMax``, ``Gamma``) which already does the float contrast stretch
 — the viz operators add the band-selection and byte-cast steps.
+
+Per-pixel display ops (composites by integer index, stretch, gamma,
+colormaps, overlay blending) accept either a ``GeoTensor`` or a plain
+``np.ndarray`` and return the same carrier kind. Ops that need the
+geotransform / CRS to be meaningful (``Hillshade`` without explicit
+resolutions, ``ShadedRelief``, ``AnnotatePolygons``, ``AnnotatePoints``)
+require a georeferenced GeoTensor and raise ``TypeError`` otherwise.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.wrap import wrap_like
 from geotoolz.viz._src.array import (
     Color,
     blend_rgba,
@@ -53,7 +61,9 @@ class Composite(Operator):
     carrier carries a ``bands`` / ``band_names`` / ``descriptions``
     entry in ``attrs``. Output has ``len(bands)`` slices along ``axis``
     and the same spatial footprint as the input — ``transform`` and
-    ``crs`` round-trip unchanged.
+    ``crs`` round-trip unchanged. Plain ``np.ndarray`` carriers are
+    supported with integer band references (returning a plain array);
+    string names need a carrier with band names in ``attrs``.
 
     Args:
         bands: Sequence of band references. Each entry is either an
@@ -73,9 +83,9 @@ class Composite(Operator):
         self.bands = list(bands)
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         indices = _resolve_bands(gt, self.bands)
-        return gt.array_as_geotensor(composite(np.asarray(gt), indices, axis=self.axis))
+        return wrap_like(gt, composite(np.asarray(gt), indices, axis=self.axis))
 
     def get_config(self) -> dict[str, Any]:
         return {"bands": list(self.bands), "axis": self.axis}
@@ -204,7 +214,8 @@ class StretchToUint8(Operator):
     interval output to byte range so the result is ready for
     PIL / matplotlib. Pair this with
     :class:`geotoolz.radiometry.PercentileClip` + ``MinMax`` if you
-    instead need float outputs for further math.
+    instead need float outputs for further math. Metadata-independent:
+    plain ``np.ndarray`` carriers pass through as plain arrays.
 
     Args:
         lower: Lower percentile. Default ``2.0``.
@@ -229,14 +240,14 @@ class StretchToUint8(Operator):
         self.upper = upper
         self.per_band = per_band
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = stretch_to_uint8(
             np.asarray(gt),
             lower=self.lower,
             upper=self.upper,
             per_band=self.per_band,
         )
-        return gt.array_as_geotensor(out, fill_value_default=0)
+        return wrap_like(gt, out, fill_value_default=0)
 
     def get_config(self) -> dict[str, Any]:
         return {"lower": self.lower, "upper": self.upper, "per_band": self.per_band}
@@ -253,7 +264,8 @@ class GammaCorrect(Operator):
     and scaled back to their dtype maximum so the transform is display-
     correct rather than a raw ``256 ** (1 / gamma) = 16`` on uint8. For
     the radiometry-stage gamma correction, use
-    ``geotoolz.radiometry.Gamma``.
+    ``geotoolz.radiometry.Gamma``. Metadata-independent: plain
+    ``np.ndarray`` carriers pass through as plain arrays.
 
     Args:
         gamma: Gamma factor (must be strictly positive). Default ``1.0``.
@@ -275,11 +287,12 @@ class GammaCorrect(Operator):
         self.gamma = gamma
         self.inplace_norm = inplace_norm
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt,
             gamma_correct_display(
                 np.asarray(gt), gamma=self.gamma, inplace_norm=self.inplace_norm
-            )
+            ),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -305,6 +318,8 @@ class ApplyColormap(Operator):
     by *string name*, not by the live `Colormap` object — so
     ``get_config()`` round-trips through JSON / YAML cleanly.
     Geo-metadata (``transform`` / ``crs``) is preserved.
+    Metadata-independent: plain ``np.ndarray`` carriers pass through
+    as plain arrays.
 
     Args:
         name: Colormap registry name (e.g. ``"viridis"``, ``"terrain"``,
@@ -335,7 +350,7 @@ class ApplyColormap(Operator):
         self.vmax = vmax
         self.nan_color = nan_color
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         cmap = _get_colormap(self.name)
         out = rgba_from_scalar(
             np.asarray(gt),
@@ -344,7 +359,7 @@ class ApplyColormap(Operator):
             vmax=self.vmax,
             nan_color=self.nan_color,
         )
-        return gt.array_as_geotensor(out, fill_value_default=0)
+        return wrap_like(gt, out, fill_value_default=0)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -361,6 +376,8 @@ class ApplyDiscreteColormap(Operator):
     Classic categorical-label visualisation (land-cover classes, cloud
     masks, etc). Unmapped pixels render fully transparent. Pixels not
     in the mapping fall back to that default colour.
+    Metadata-independent: plain ``np.ndarray`` carriers pass through
+    as plain arrays.
 
     Args:
         mapping: ``{class_id: (r, g, b, a)}`` lookup table. The class
@@ -382,8 +399,9 @@ class ApplyDiscreteColormap(Operator):
     def __init__(self, *, mapping: Mapping[int, Color]) -> None:
         self.mapping = {int(k): tuple(v) for k, v in mapping.items()}
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt,
             rgba_from_categories(np.asarray(gt), self.mapping),
             fill_value_default=0,
         )
@@ -405,6 +423,9 @@ class Hillshade(Operator):
     ``(H, W)`` ``uint8`` raster, ready to compose with a colour relief
     (see `ShadedRelief`). Pixel sizes come from the carrier's
     ``transform`` so units are correct in physical projections.
+    Geo-dependent by default: plain ``np.ndarray`` DEMs are accepted
+    only when ``x_resolution`` and ``y_resolution`` are given
+    explicitly; otherwise a ``TypeError`` is raised.
 
     Args:
         azimuth_deg: Sun azimuth in degrees clockwise from north.
@@ -412,6 +433,10 @@ class Hillshade(Operator):
         altitude_deg: Sun elevation in degrees above horizon. Default
             ``45``. Values ``>= 90`` short-circuit to flat 255.
         z_factor: Vertical exaggeration. Default ``1.0``.
+        x_resolution: Explicit pixel width in map units. ``None``
+            (default) reads it from the carrier's ``transform``.
+        y_resolution: Explicit pixel height in map units. ``None``
+            (default) reads it from the carrier's ``transform``.
 
     Examples:
         >>> import geotoolz as gz
@@ -424,27 +449,48 @@ class Hillshade(Operator):
         azimuth_deg: float = 315.0,
         altitude_deg: float = 45.0,
         z_factor: float = 1.0,
+        x_resolution: float | None = None,
+        y_resolution: float | None = None,
     ) -> None:
         self.azimuth_deg = azimuth_deg
         self.altitude_deg = altitude_deg
         self.z_factor = z_factor
+        self.x_resolution = x_resolution
+        self.y_resolution = y_resolution
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        x_resolution = self.x_resolution
+        y_resolution = self.y_resolution
+        if x_resolution is None or y_resolution is None:
+            transform = getattr(gt, "transform", None)
+            if transform is None:
+                raise TypeError(
+                    "Hillshade requires a georeferenced GeoTensor input to "
+                    "derive the pixel size; got a plain array. Pass "
+                    "x_resolution/y_resolution explicitly to hillshade "
+                    "plain arrays."
+                )
+            if x_resolution is None:
+                x_resolution = float(abs(transform.a))
+            if y_resolution is None:
+                y_resolution = float(abs(transform.e))
         out = hillshade(
             np.asarray(gt),
-            x_resolution=float(abs(gt.transform.a)),
-            y_resolution=float(abs(gt.transform.e)),
+            x_resolution=x_resolution,
+            y_resolution=y_resolution,
             azimuth_deg=self.azimuth_deg,
             altitude_deg=self.altitude_deg,
             z_factor=self.z_factor,
         )
-        return gt.array_as_geotensor(out, fill_value_default=0)
+        return wrap_like(gt, out, fill_value_default=0)
 
     def get_config(self) -> dict[str, Any]:
         return {
             "azimuth_deg": self.azimuth_deg,
             "altitude_deg": self.altitude_deg,
             "z_factor": self.z_factor,
+            "x_resolution": self.x_resolution,
+            "y_resolution": self.y_resolution,
         }
 
 
@@ -454,7 +500,9 @@ class ShadedRelief(Operator):
     The composite terrain visualisation: run the DEM through
     `ApplyColormap` and modulate the RGB channels by a `Hillshade`
     so the result reads like a cartographer's shaded-relief map.
-    Alpha channel is preserved from the colormap.
+    Alpha channel is preserved from the colormap. Geo-dependent: the
+    hillshade pixel size comes from the carrier's ``transform``, so a
+    georeferenced GeoTensor input is required.
 
     Args:
         azimuth_deg: Sun azimuth (degrees clockwise from north).
@@ -483,6 +531,11 @@ class ShadedRelief(Operator):
         self.z_factor = z_factor
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
+        if getattr(gt, "transform", None) is None:
+            raise TypeError(
+                "ShadedRelief requires a georeferenced GeoTensor input; "
+                "got a plain array"
+            )
         rgba = np.asarray(ApplyColormap(name=self.colormap)(gt)).copy()
         shade = (
             np.asarray(
@@ -496,7 +549,7 @@ class ShadedRelief(Operator):
             / 255.0
         )
         rgba[:3] = (rgba[:3].astype(np.float32) * shade).astype(np.uint8)
-        return gt.array_as_geotensor(rgba, fill_value_default=0)
+        return wrap_like(gt, rgba, fill_value_default=0)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -510,11 +563,13 @@ class ShadedRelief(Operator):
 class Overlay(Operator):
     """Blend background and foreground GeoTensors on the same grid.
 
-    Two-input Operator: ``Overlay()(background, foreground)``. Both
-    carriers must share ``transform`` and ``crs`` (this is a viz
-    primitive, not a reprojector). Output is always 4-band ``uint8``
-    RGBA — even when ``alpha=0`` — so downstream code sees a
-    consistent shape.
+    Two-input Operator: ``Overlay()(background, foreground)``. When
+    both carriers are georeferenced they must share ``transform`` and
+    ``crs`` (this is a viz primitive, not a reprojector); plain
+    ``np.ndarray`` carriers skip the metadata check and blend on pixel
+    grids alone, returning the background's carrier kind. Output is
+    always 4-band ``uint8`` RGBA — even when ``alpha=0`` — so
+    downstream code sees a consistent shape.
 
     Args:
         alpha: Foreground opacity in ``[0, 1]``. Default ``0.6``.
@@ -531,15 +586,26 @@ class Overlay(Operator):
         self.alpha = alpha
         self.mode = mode
 
-    def _apply(self, background: GeoTensor, foreground: GeoTensor) -> GeoTensor:
-        if background.transform != foreground.transform or str(background.crs) != str(
-            foreground.crs
+    def _apply(
+        self,
+        background: GeoTensor | np.ndarray,
+        foreground: GeoTensor | np.ndarray,
+    ) -> GeoTensor | np.ndarray:
+        bg_transform = getattr(background, "transform", None)
+        fg_transform = getattr(foreground, "transform", None)
+        if (
+            bg_transform is not None
+            and fg_transform is not None
+            and (
+                bg_transform != fg_transform
+                or str(background.crs) != str(foreground.crs)
+            )
         ):
             raise ValueError("background and foreground must share transform and CRS")
         if self.alpha == 0.0:
             # Consistency: always return RGBA, even when no blending occurs.
-            return background.array_as_geotensor(
-                ensure_rgba(np.asarray(background)), fill_value_default=0
+            return wrap_like(
+                background, ensure_rgba(np.asarray(background)), fill_value_default=0
             )
         out = blend_rgba(
             np.asarray(background),
@@ -547,7 +613,7 @@ class Overlay(Operator):
             alpha=self.alpha,
             mode=self.mode,
         )
-        return background.array_as_geotensor(out, fill_value_default=0)
+        return wrap_like(background, out, fill_value_default=0)
 
     def get_config(self) -> dict[str, Any]:
         return {"alpha": self.alpha, "mode": self.mode}
@@ -560,7 +626,9 @@ class AnnotatePolygons(Operator):
     RGBA carrier. The geometries are reprojected into the carrier's
     CRS when they ship as a GeoDataFrame with a CRS set. Flagged
     ``forbid_in_yaml = True`` because the geometries themselves are
-    runtime objects and don't round-trip through YAML.
+    runtime objects and don't round-trip through YAML. Geo-dependent:
+    rasterisation needs the carrier's ``transform`` / ``crs``, so a
+    georeferenced GeoTensor input is required.
 
     Args:
         geometries: Iterable of Shapely geometries or a GeoDataFrame.
@@ -590,10 +658,15 @@ class AnnotatePolygons(Operator):
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         from rasterio.features import rasterize
 
+        if getattr(gt, "transform", None) is None:
+            raise TypeError(
+                "AnnotatePolygons requires a georeferenced GeoTensor input; "
+                "got a plain array"
+            )
         rgba = ensure_rgba(np.asarray(gt))
         geometries = _iter_geometries(self.geometries, dst_crs=gt.crs)
         if not geometries or self.width <= 0:
-            return gt.array_as_geotensor(rgba, fill_value_default=0)
+            return wrap_like(gt, rgba, fill_value_default=0)
         pixel_size = max(abs(float(gt.transform.a)), abs(float(gt.transform.e)))
         half_width = self.width * pixel_size / 2.0
         shapes = [(geom.boundary.buffer(half_width), 1) for geom in geometries]
@@ -606,7 +679,7 @@ class AnnotatePolygons(Operator):
             dtype="uint8",
         ).astype(bool)
         rgba[:, mask] = _color_to_uint8(self.color)[:, None]
-        return gt.array_as_geotensor(rgba, fill_value_default=0)
+        return wrap_like(gt, rgba, fill_value_default=0)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -623,7 +696,9 @@ class AnnotatePoints(Operator):
     carrier. Accepts either an ``(N, 2)`` array of ``(x, y)`` map
     coordinates or a GeoDataFrame (which is reprojected when it carries
     a CRS). Flagged ``forbid_in_yaml = True`` because the points are
-    runtime objects.
+    runtime objects. Geo-dependent: locating the markers needs the
+    carrier's ``transform`` / ``crs``, so a georeferenced GeoTensor
+    input is required.
 
     Args:
         points: ``(N, 2)`` array of map coords or a GeoDataFrame of
@@ -656,10 +731,15 @@ class AnnotatePoints(Operator):
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         from rasterio.transform import rowcol
 
+        if getattr(gt, "transform", None) is None:
+            raise TypeError(
+                "AnnotatePoints requires a georeferenced GeoTensor input; "
+                "got a plain array"
+            )
         rgba = ensure_rgba(np.asarray(gt))
         coords = _point_coords(self.points, dst_crs=gt.crs)
         if coords.size == 0:
-            return gt.array_as_geotensor(rgba, fill_value_default=0)
+            return wrap_like(gt, rgba, fill_value_default=0)
         rows, cols = rowcol(gt.transform, coords[:, 0], coords[:, 1])
         yy, xx = np.ogrid[: rgba.shape[-2], : rgba.shape[-1]]
         marker = np.zeros(rgba.shape[-2:], dtype=bool)
@@ -667,7 +747,7 @@ class AnnotatePoints(Operator):
         for row, col in zip(rows, cols, strict=True):
             marker |= (yy - row) ** 2 + (xx - col) ** 2 <= radius**2
         rgba[:, marker] = _color_to_uint8(self.color)[:, None]
-        return gt.array_as_geotensor(rgba, fill_value_default=0)
+        return wrap_like(gt, rgba, fill_value_default=0)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -677,7 +757,7 @@ class AnnotatePoints(Operator):
         }
 
 
-def _resolve_bands(gt: GeoTensor, refs: Sequence[BandRef]) -> list[int]:
+def _resolve_bands(gt: GeoTensor | np.ndarray, refs: Sequence[BandRef]) -> list[int]:
     names = _band_names(gt)
     indices: list[int] = []
     for ref in refs:
@@ -685,14 +765,21 @@ def _resolve_bands(gt: GeoTensor, refs: Sequence[BandRef]) -> list[int]:
             indices.append(ref)
             continue
         if ref not in names:
-            raise ValueError(f"band {ref!r} not found in GeoTensor attrs")
+            raise ValueError(
+                f"band {ref!r} not found in carrier attrs; string band "
+                "references require a GeoTensor with 'bands' / 'band_names' "
+                "/ 'descriptions' metadata"
+            )
         indices.append(names.index(ref))
     return indices
 
 
-def _band_names(gt: GeoTensor) -> list[str]:
+def _band_names(gt: GeoTensor | np.ndarray) -> list[str]:
+    attrs = getattr(gt, "attrs", None)
+    if not attrs:
+        return []
     for key in ("bands", "band_names", "descriptions"):
-        value = gt.attrs.get(key)
+        value = attrs.get(key)
         if value is not None:
             return [str(v) for v in value]
     return []
