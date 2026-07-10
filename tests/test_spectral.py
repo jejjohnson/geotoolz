@@ -5,21 +5,21 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 
 from geotoolz import spectral
 
 
+_BAND_NAMES = ["B2", "B4", "B8", "B11"]
+_WAVELENGTHS = [490.0, 665.0, 842.0, 1610.0]
+
+
 def _toy_geotensor(values: np.ndarray) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32629",
-        fill_value_default=-9999,
-        attrs={
-            "band_names": ["B2", "B4", "B8", "B11"],
-            "wavelengths": [490.0, 665.0, 842.0, 1610.0],
-        },
+    """Shared toy factory plus the S2-ish band metadata used here."""
+    return toy_geotensor(
+        values,
+        attrs={"band_names": list(_BAND_NAMES), "wavelengths": list(_WAVELENGTHS)},
     )
 
 
@@ -272,7 +272,7 @@ def test_spectral_get_config_serialization() -> None:
             spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
             {
                 "target_wavelengths": [1.0],
-                "width": [1.0],
+                "width": 1.0,
                 "method": "mean",
                 "source_wavelengths": None,
                 "axis": 0,
@@ -467,3 +467,64 @@ def test_collapsing_ops_drop_stale_band_attrs() -> None:
         # collapsed / single-channel output.
         assert "band_names" not in out.attrs
         assert "wavelengths" not in out.attrs
+
+
+# ---------------------------------------------------------------------------
+# Plain-ndarray carrier support (georeader GeoTensor 2.x numpy-compat)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        spectral.SelectBands(indexes=[2, 1]),
+        spectral.BandMath(expression="nir - red", band_names=["b", "red", "nir", "s"]),
+        spectral.NormalizedDifference(a=2, b=1),
+        spectral.BandRatio(numerator=2, denominator=1),
+        spectral.ContinuumRemoval(method="convex_hull", wavelengths=_WAVELENGTHS),
+        spectral.SpectralBinning(
+            target_wavelengths=[577.5],
+            width=200.0,
+            source_wavelengths=_WAVELENGTHS,
+        ),
+        spectral.SpectralSmoothing(method="moving_average", window=3),
+        spectral.ApplySRF(
+            target_center_wavelengths=[665.0, 842.0],
+            target_fwhm=[1.0, 1.0],
+            source_wavelengths=_WAVELENGTHS,
+        ),
+    ],
+    ids=lambda op: type(op).__name__,
+)
+def test_spectral_ops_accept_plain_ndarray(op) -> None:
+    """Plain ndarray in -> plain ndarray out, values matching the GeoTensor path."""
+    arr = np.linspace(0.1, 1.0, 4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2)
+
+    out = op(arr)
+    assert type(out) is np.ndarray
+
+    gt_out = op(_toy_geotensor(arr))
+    np.testing.assert_allclose(out, np.asarray(gt_out), rtol=1e-6)
+
+
+def test_stack_and_split_bands_accept_plain_ndarray() -> None:
+    arr = np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2)
+
+    split = spectral.SplitBands()(arr)
+    assert len(split) == 4
+    assert all(type(band) is np.ndarray for band in split)
+
+    stacked = spectral.StackBands()(split)
+    assert type(stacked) is np.ndarray
+    np.testing.assert_array_equal(stacked, arr)
+
+
+def test_band_name_resolution_requires_metadata_on_plain_arrays() -> None:
+    """String band keys need band_names attrs, which plain arrays lack."""
+    arr = np.ones((4, 2, 2), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="resolve band"):
+        spectral.SelectBands(indexes=["B4"])(arr)
+
+    with pytest.raises(ValueError, match="wavelengths"):
+        spectral.ContinuumRemoval()(arr)
