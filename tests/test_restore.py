@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
@@ -45,15 +45,6 @@ LEE_VARIANCE_REDUCTION_THRESHOLD = 0.5
 DESTRIPE_RMSE_TOLERANCE = 0.01
 
 
-def _toy_geotensor(values: np.ndarray) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32629",
-        fill_value_default=np.nan,
-    )
-
-
 def test_restore_namespace_is_available() -> None:
     assert gz.restore.DespeckleLee is DespeckleLee
     assert gz.DespeckleLee is DespeckleLee
@@ -72,7 +63,7 @@ def test_despeckle_lee_reduces_multiplicative_speckle_variance() -> None:
 
 def test_despeckle_operator_preserves_metadata() -> None:
     rng = np.random.default_rng(1)
-    gt = _toy_geotensor(rng.random((2, 8, 8)).astype(np.float32))
+    gt = toy_geotensor(rng.random((2, 8, 8)).astype(np.float32))
     out = DespeckleLee(window=3)(gt)
     assert isinstance(out, GeoTensor)
     assert out.shape == gt.shape
@@ -92,7 +83,7 @@ def test_destripe_column_recovers_flat_image() -> None:
 
 
 def test_destripe_operator_preserves_metadata() -> None:
-    gt = _toy_geotensor(np.ones((2, 8, 8), dtype=np.float32))
+    gt = toy_geotensor(np.ones((2, 8, 8), dtype=np.float32))
     out = DestripeColumn()(gt)
     assert isinstance(out, GeoTensor)
     assert out.shape == gt.shape
@@ -103,7 +94,7 @@ def test_destripe_operator_preserves_metadata() -> None:
 def test_mnf_inverse_with_all_components_is_identity() -> None:
     rng = np.random.default_rng(2)
     arr = rng.normal(size=(4, 10, 10)).astype(np.float32)
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     forward = MNF(n_components=4)
     scores = forward(gt)
     restored = InverseMNF(forward=forward)(scores)
@@ -118,7 +109,7 @@ def test_mnf_inverse_with_all_components_is_identity() -> None:
 def test_denoise_pca_reconstructs_original_shape() -> None:
     rng = np.random.default_rng(3)
     arr = rng.normal(size=(3, 6, 6)).astype(np.float32)
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     out = DenoisePCA(n_components=2)(gt)
     assert out.shape == gt.shape
     assert out.transform == gt.transform
@@ -149,7 +140,7 @@ def test_gap_fill_laplacian_uses_local_not_periodic_neighbours() -> None:
 def test_gaussian_denoise_preserves_nan_mask_and_metadata() -> None:
     arr = np.arange(25, dtype=float).reshape(5, 5)
     arr[2, 2] = np.nan
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     out = GaussianDenoise(sigma=1.0)(gt)
     assert np.isnan(np.asarray(out)[2, 2])
     assert out.transform == gt.transform
@@ -157,7 +148,7 @@ def test_gaussian_denoise_preserves_nan_mask_and_metadata() -> None:
 
 def test_single_band_denoisers_run_and_preserve_shape() -> None:
     arr = np.arange(25, dtype=float).reshape(5, 5)
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     for op in [
         MedianDenoise(size=3),
         BilateralDenoise(sigma_color=10.0, sigma_space=1.0),
@@ -174,7 +165,7 @@ def test_single_band_denoisers_run_and_preserve_shape() -> None:
 def test_gap_fill_biharmonic_preserves_non_nan_pixels() -> None:
     arr = np.arange(25, dtype=float).reshape(5, 5)
     arr[2, 2] = np.nan
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     out = GapFillInpaintBiharmonic()(gt)
     assert np.isfinite(np.asarray(out)[2, 2])
     np.testing.assert_array_equal(
@@ -185,7 +176,7 @@ def test_gap_fill_biharmonic_preserves_non_nan_pixels() -> None:
 def test_gap_fill_laplacian_fills_nan() -> None:
     arr = np.arange(25, dtype=float).reshape(5, 5)
     arr[2, 2] = np.nan
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     out = GapFillLaplacian()(gt)
     assert np.isfinite(np.asarray(out)[2, 2])
     assert np.isfinite(gap_fill_laplacian(arr)[2, 2])
@@ -201,7 +192,7 @@ def test_gap_fill_nearest_and_idw_fill_missing_pixel() -> None:
 
 def test_gap_fill_idw_high_power_matches_nearest_operator() -> None:
     arr = np.array([[1.0, 2.0], [3.0, np.nan]])
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     nearest = GapFillNearest(max_distance=2)(gt)
     idw = GapFillIDW(power=128.0, radius=2)(gt)
     boundary = GapFillIDW(power=64.0, radius=2)(gt)
@@ -219,7 +210,7 @@ def test_outlier_mask_and_replacement() -> None:
     arr[3, 4] = -8.0
     mask = outlier_mask(arr, method="mad", k=3.0)
     assert int(mask.sum()) == 2
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     op_mask = OutlierMask(method="mad", k=3.0)(gt)
     np.testing.assert_array_equal(np.asarray(op_mask), mask)
     replaced = ReplaceOutliers(method="mad", k=3.0, fill="median")(gt)
@@ -228,11 +219,9 @@ def test_outlier_mask_and_replacement() -> None:
 
 def test_saturation_flag_uses_dtype_max() -> None:
     arr = np.array([[0, 255]], dtype=np.uint8)
-    out = SaturationFlag()(_toy_geotensor(arr))
+    out = SaturationFlag()(toy_geotensor(arr))
     np.testing.assert_array_equal(np.asarray(out), [[False, True]])
-    thresholded = SaturationFlag(threshold=0.5)(
-        _toy_geotensor(np.array([[0.25, 0.75]]))
-    )
+    thresholded = SaturationFlag(threshold=0.5)(toy_geotensor(np.array([[0.25, 0.75]])))
     np.testing.assert_array_equal(np.asarray(thresholded), [[False, True]])
 
 
@@ -245,7 +234,7 @@ def test_saturation_flag_uses_dtype_max() -> None:
 def test_gap_fill_methods_recover_isolated_nan() -> None:
     arr = np.ones((5, 5), dtype=float)
     arr[2, 2] = np.nan
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     for op in [
         GapFillNearest(),
         GapFillIDW(power=2.0, radius=2),
@@ -264,7 +253,7 @@ def test_gap_fill_biharmonic_does_not_double_apply() -> None:
     arr = np.linspace(0.0, 1.0, 25, dtype=float).reshape(5, 5)
     arr_with_nan = arr.copy()
     arr_with_nan[2, 2] = np.nan
-    gt = _toy_geotensor(arr_with_nan)
+    gt = toy_geotensor(arr_with_nan)
     out = np.asarray(GapFillInpaintBiharmonic()(gt))
     finite_mask = np.isfinite(arr_with_nan)
     np.testing.assert_array_equal(out[finite_mask], arr_with_nan[finite_mask])
@@ -280,7 +269,7 @@ def test_bilateral_preserves_strong_edge() -> None:
     rng = np.random.default_rng(7)
     image = np.where(np.arange(32)[None, :] < 16, 0.0, 1.0) * np.ones((32, 32))
     noisy = image + 0.02 * rng.standard_normal(image.shape)
-    gt = _toy_geotensor(noisy)
+    gt = toy_geotensor(noisy)
     gauss = np.asarray(GaussianDenoise(sigma=2.0)(gt))
     bilateral = np.asarray(BilateralDenoise(sigma_color=0.05, sigma_space=2.0)(gt))
     edge_col = 15
@@ -296,8 +285,8 @@ def test_destripe_column_propagates_window_to_moment_matching() -> None:
     arr = rng.standard_normal((24, 24))
     op_default = DestripeColumn(method="moment_matching")
     op_wide = DestripeColumn(method="moment_matching", window=11)
-    out_default = np.asarray(op_default(_toy_geotensor(arr.copy())))
-    out_wide = np.asarray(op_wide(_toy_geotensor(arr.copy())))
+    out_default = np.asarray(op_default(toy_geotensor(arr.copy())))
+    out_wide = np.asarray(op_wide(toy_geotensor(arr.copy())))
     # Different smoothing windows must produce different outputs.
     assert not np.allclose(out_default, out_wide)
 
@@ -305,7 +294,7 @@ def test_destripe_column_propagates_window_to_moment_matching() -> None:
 def test_outlier_mask_operator_returns_bool_dtype() -> None:
     arr = np.ones((4, 4), dtype=float)
     arr[0, 0] = 100.0
-    out = OutlierMask(method="mad", k=3.0)(_toy_geotensor(arr))
+    out = OutlierMask(method="mad", k=3.0)(toy_geotensor(arr))
     assert np.asarray(out).dtype == np.dtype(bool)
 
 
@@ -351,3 +340,49 @@ def test_inverse_mnf_is_forbidden_in_yaml() -> None:
     inverse = InverseMNF(forward=forward)
     assert inverse.forbid_in_yaml is True
     assert inverse.get_config() == {}
+
+
+# ----------------------------------------------------------------------------
+# numpy-compat contract: every restore primitive is metadata-independent
+# per-pixel/window math, so the operators must accept a plain np.ndarray
+# and return a plain np.ndarray with the same values as the GeoTensor path.
+# ----------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "make_op",
+    [
+        pytest.param(lambda: DespeckleLee(window=3), id="DespeckleLee"),
+        pytest.param(lambda: DestripeColumn(method="median"), id="DestripeColumn"),
+        pytest.param(lambda: DenoisePCA(n_components=1), id="DenoisePCA"),
+        pytest.param(lambda: MNF(n_components=1), id="MNF"),
+        pytest.param(lambda: GaussianDenoise(sigma=1.0), id="GaussianDenoise"),
+        pytest.param(lambda: MedianDenoise(size=3), id="MedianDenoise"),
+        pytest.param(lambda: GapFillNearest(), id="GapFillNearest"),
+        pytest.param(lambda: GapFillLaplacian(), id="GapFillLaplacian"),
+        pytest.param(lambda: OutlierMask(method="mad", k=3.0), id="OutlierMask"),
+        pytest.param(
+            lambda: ReplaceOutliers(method="mad", k=3.0, fill="interp"),
+            id="ReplaceOutliers",
+        ),
+        pytest.param(lambda: SaturationFlag(threshold=0.5), id="SaturationFlag"),
+    ],
+)
+def test_operators_accept_plain_ndarray(make_op) -> None:
+    rng = np.random.default_rng(5)
+    arr = rng.random((2, 6, 6))
+    arr[0, 1, 1] = np.nan
+    out_arr = make_op()(arr)
+    assert type(out_arr) is np.ndarray
+    out_gt = make_op()(toy_geotensor(arr))
+    assert isinstance(out_gt, GeoTensor)
+    np.testing.assert_array_equal(out_arr, np.asarray(out_gt))
+
+
+def test_mnf_round_trip_accepts_plain_ndarray() -> None:
+    rng = np.random.default_rng(6)
+    arr = rng.normal(size=(3, 5, 5))
+    forward = MNF(n_components=3)
+    scores = forward(arr)
+    assert type(scores) is np.ndarray
+    restored = InverseMNF(forward=forward)(scores)
+    assert type(restored) is np.ndarray
+    np.testing.assert_allclose(restored, arr, atol=1e-10)

@@ -1,11 +1,15 @@
 """Tier-B restoration Operators — carrier-aware wrappers.
 
 Each Operator wraps a primitive in :mod:`geotoolz.restore._src.array`
-and round-trips the carrier's ``transform`` / ``crs`` /
-``fill_value_default`` via ``gt.array_as_geotensor(out)``. All
-constructor parameters are keyword-only and JSON-safe for hydra-zen
-``builds()`` round-trips, except for :class:`InverseMNF` which holds a
-runtime reference to a fitted :class:`MNF` and is therefore marked
+and rewraps the result to match the input carrier via
+:func:`geotoolz._src.wrap.wrap_like`: a ``GeoTensor`` input round-trips
+its ``transform`` / ``crs`` / ``fill_value_default``, while a plain
+``np.ndarray`` input returns a plain ``np.ndarray``. All restoration
+primitives are metadata-independent per-pixel/window math, so every
+operator here supports both carriers transparently. All constructor
+parameters are keyword-only and JSON-safe for hydra-zen ``builds()``
+round-trips, except for :class:`InverseMNF` which holds a runtime
+reference to a fitted :class:`MNF` and is therefore marked
 ``forbid_in_yaml = True``.
 """
 
@@ -16,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.wrap import wrap_like
 from geotoolz.restore._src.array import (
     bilateral_denoise,
     despeckle_frost,
@@ -65,9 +70,9 @@ class DespeckleLee(Operator):
         self.window = window
         self.cu = cu
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
-            despeckle_lee(np.asarray(gt), window=self.window, cu=self.cu)
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt, despeckle_lee(np.asarray(gt), window=self.window, cu=self.cu)
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -82,6 +87,10 @@ class DespeckleFrost(Operator):
     Lee filter and tunable via ``damping``: larger values keep more
     edge contrast, smaller values smooth more aggressively.
 
+    Args:
+        window: Side length of the local window in pixels.
+        damping: Edge-sensitivity exponent.
+
     Examples:
         >>> gz.restore.DespeckleFrost(window=7, damping=2.0)(sar_geotensor)
     """
@@ -90,9 +99,10 @@ class DespeckleFrost(Operator):
         self.window = window
         self.damping = damping
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
-            despeckle_frost(np.asarray(gt), window=self.window, damping=self.damping)
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt,
+            despeckle_frost(np.asarray(gt), window=self.window, damping=self.damping),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -107,6 +117,9 @@ class DespeckleRefinedLee(Operator):
     with default ``cu``; the eight-direction sub-window selection of the
     canonical Refined-Lee is not yet implemented.
 
+    Args:
+        window: Side length of the local window in pixels.
+
     Examples:
         >>> gz.restore.DespeckleRefinedLee(window=7)(sar_geotensor)
     """
@@ -114,10 +127,8 @@ class DespeckleRefinedLee(Operator):
     def __init__(self, *, window: int = 7) -> None:
         self.window = window
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
-            despeckle_refined_lee(np.asarray(gt), window=self.window)
-        )
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(gt, despeckle_refined_lee(np.asarray(gt), window=self.window))
 
     def get_config(self) -> dict[str, Any]:
         return {"window": self.window}
@@ -155,14 +166,15 @@ class DestripeColumn(Operator):
         self.axis = axis
         self.window = window
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt,
             destripe_column(
                 np.asarray(gt),
                 method=self.method,
                 axis=self.axis,
                 window=self.window,
-            )
+            ),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -175,6 +187,9 @@ class MomentMatching(Operator):
     Convenience operator equivalent to
     ``DestripeColumn(method="moment_matching", axis="column", window=...)``.
 
+    Args:
+        window: Side length of the local smoothing window in pixels.
+
     Examples:
         >>> gz.restore.MomentMatching(window=21)(scene)
     """
@@ -182,14 +197,15 @@ class MomentMatching(Operator):
     def __init__(self, *, window: int = 21) -> None:
         self.window = window
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt,
             destripe_column(
                 np.asarray(gt),
                 method="moment_matching",
                 axis="column",
                 window=self.window,
-            )
+            ),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -218,11 +234,11 @@ class DenoisePCA(Operator):
         self.n_components = n_components
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = pca_denoise(
             np.asarray(gt), n_components=self.n_components, axis=self.axis
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"n_components": self.n_components, "axis": self.axis}
@@ -233,7 +249,7 @@ class MNF(Operator):
 
     Wraps :func:`~geotoolz.restore._src.array.fit_pca`. The first call
     fits the principal components on the input and stores them on the
-    instance; the output GeoTensor carries the projected scores. The
+    instance; the output carrier holds the projected scores. The
     fitted state is then consumable by :class:`InverseMNF`.
 
     Note: this operator is *stateful*. Calling it on a second image
@@ -260,12 +276,12 @@ class MNF(Operator):
         self._state: dict[str, np.ndarray | int | tuple[int, ...]] | None = None
         self.snr_: np.ndarray | None = None
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         self._state = fit_pca(
             np.asarray(gt), n_components=self.n_components, axis=self.axis
         )
         self.snr_ = np.asarray(self._state["snr"])
-        return gt.array_as_geotensor(np.asarray(self._state["scores"]))
+        return wrap_like(gt, np.asarray(self._state["scores"]))
 
     def get_config(self) -> dict[str, Any]:
         return {"n_components": self.n_components, "axis": self.axis}
@@ -297,11 +313,11 @@ class InverseMNF(Operator):
     def __init__(self, *, forward: MNF) -> None:
         self.forward = forward
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         if self.forward._state is None:
             raise ValueError("InverseMNF requires a forward MNF that has been applied")
         out = inverse_pca(np.asarray(gt), self.forward._state)
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         # The fitted ``forward`` reference is not JSON-safe; report an
@@ -327,8 +343,8 @@ class GaussianDenoise(Operator):
     def __init__(self, *, sigma: float = 1.0) -> None:
         self.sigma = sigma
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(gaussian_denoise(np.asarray(gt), sigma=self.sigma))
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(gt, gaussian_denoise(np.asarray(gt), sigma=self.sigma))
 
     def get_config(self) -> dict[str, Any]:
         return {"sigma": self.sigma}
@@ -340,6 +356,9 @@ class MedianDenoise(Operator):
     Robust to impulse noise (salt-and-pepper, hot pixels). Larger
     ``size`` blurs sharper features.
 
+    Args:
+        size: Side length of the median window in pixels.
+
     Examples:
         >>> gz.restore.MedianDenoise(size=3)(scene)
     """
@@ -347,8 +366,8 @@ class MedianDenoise(Operator):
     def __init__(self, *, size: int = 3) -> None:
         self.size = size
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(median_denoise(np.asarray(gt), size=self.size))
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(gt, median_denoise(np.asarray(gt), size=self.size))
 
     def get_config(self) -> dict[str, Any]:
         return {"size": self.size}
@@ -373,13 +392,14 @@ class BilateralDenoise(Operator):
         self.sigma_color = sigma_color
         self.sigma_space = sigma_space
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt,
             bilateral_denoise(
                 np.asarray(gt),
                 sigma_color=self.sigma_color,
                 sigma_space=self.sigma_space,
-            )
+            ),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -393,6 +413,11 @@ class NLMeans(Operator):
     dependency-light approximation of the canonical NL-means; for
     production use prefer ``skimage.restoration.denoise_nl_means``.
 
+    Args:
+        patch_size: Nominal patch side length in pixels.
+        patch_distance: Nominal search-window radius in pixels.
+        h: Range bandwidth in data units.
+
     Examples:
         >>> gz.restore.NLMeans(patch_size=5, patch_distance=6, h=0.1)(scene)
     """
@@ -404,14 +429,15 @@ class NLMeans(Operator):
         self.patch_distance = patch_distance
         self.h = h
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt,
             nl_means(
                 np.asarray(gt),
                 patch_size=self.patch_size,
                 patch_distance=self.patch_distance,
                 h=self.h,
-            )
+            ),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -441,9 +467,9 @@ class GapFillIDW(Operator):
         self.power = power
         self.radius = radius
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
-            gap_fill_idw(np.asarray(gt), power=self.power, radius=self.radius)
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt, gap_fill_idw(np.asarray(gt), power=self.power, radius=self.radius)
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -465,8 +491,8 @@ class GapFillInpaintBiharmonic(Operator):
         >>> gz.restore.GapFillInpaintBiharmonic()(scene)
     """
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(gap_fill_biharmonic(np.asarray(gt)))
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(gt, gap_fill_biharmonic(np.asarray(gt)))
 
 
 class GapFillLaplacian(Operator):
@@ -481,8 +507,8 @@ class GapFillLaplacian(Operator):
         >>> gz.restore.GapFillLaplacian()(scene)
     """
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(gap_fill_laplacian(np.asarray(gt)))
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(gt, gap_fill_laplacian(np.asarray(gt)))
 
 
 class GapFillNearest(Operator):
@@ -503,9 +529,9 @@ class GapFillNearest(Operator):
     def __init__(self, *, max_distance: int | None = None) -> None:
         self.max_distance = max_distance
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
-            gap_fill_nearest(np.asarray(gt), max_distance=self.max_distance)
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt, gap_fill_nearest(np.asarray(gt), max_distance=self.max_distance)
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -516,8 +542,12 @@ class OutlierMask(Operator):
     """Flag global outliers with a MAD or z-score threshold.
 
     Wraps :func:`~geotoolz.restore._src.array.outlier_mask` and returns
-    a boolean GeoTensor (``True`` marks outliers). Outputs the result
+    a boolean carrier (``True`` marks outliers). Outputs the result
     as ``bool`` to keep the mask explicit.
+
+    Args:
+        method: ``"mad"`` (robust, default) or ``"zscore"``.
+        k: Threshold in scaled units.
 
     Examples:
         >>> gz.restore.OutlierMask(method="mad", k=3.0)(scene)
@@ -529,9 +559,9 @@ class OutlierMask(Operator):
         self.method = method
         self.k = k
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask = outlier_mask(np.asarray(gt), method=self.method, k=self.k)
-        return gt.array_as_geotensor(mask.astype(bool))
+        return wrap_like(gt, mask.astype(bool))
 
     def get_config(self) -> dict[str, Any]:
         return {"method": self.method, "k": self.k}
@@ -563,18 +593,18 @@ class ReplaceOutliers(Operator):
         self.k = k
         self.fill = fill
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = replace_outliers(
             np.asarray(gt), method=self.method, k=self.k, fill=self.fill
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"method": self.method, "k": self.k, "fill": self.fill}
 
 
 class SaturationFlag(Operator):
-    """Flag saturated pixels as a boolean GeoTensor.
+    """Flag saturated pixels as a boolean carrier.
 
     Wraps :func:`~geotoolz.restore._src.array.saturation_flag`. When
     ``threshold`` is ``None`` the default is ``np.iinfo(dtype).max`` for
@@ -588,9 +618,9 @@ class SaturationFlag(Operator):
     def __init__(self, *, threshold: float | None = None) -> None:
         self.threshold = threshold
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
-            saturation_flag(np.asarray(gt), threshold=self.threshold).astype(bool)
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt, saturation_flag(np.asarray(gt), threshold=self.threshold).astype(bool)
         )
 
     def get_config(self) -> dict[str, Any]:
