@@ -57,7 +57,7 @@ def _try_shared_pool() -> Any:
     """
     try:
         from geocatalog._src.objstore import (
-            get_obstore,  # ty: ignore[unresolved-import]
+            get_obstore,
         )
 
         return get_obstore
@@ -65,7 +65,7 @@ def _try_shared_pool() -> Any:
         pass
     try:
         from geopatcher._src.objstore import (
-            get_obstore,  # ty: ignore[unresolved-import]
+            get_obstore,
         )
 
         return get_obstore
@@ -109,7 +109,7 @@ def _pool_key(uri: str) -> tuple[str, str, str | None, str | None]:
 
 def _build_store(uri: str, storage_options: dict[str, Any] | None) -> ObjectStore:
     try:
-        from obstore.store import (  # ty: ignore[unresolved-import]
+        from obstore.store import (
             AzureStore,
             GCSStore,
             HTTPStore,

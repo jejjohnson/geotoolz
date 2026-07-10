@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import pytest
 import rasterio
@@ -622,6 +624,91 @@ def test_plume_qnd_features_handles_too_few_samples() -> None:
     # All polynomial coefficients should fall through to NaN when fewer
     # than 10 valid samples are inside the mask.
     assert all(not np.isfinite(row[f"qnd_column_c{i}"]) for i in range(4))
+
+
+def _ndarray_case_plume_mask() -> tuple[object, np.ndarray]:
+    values = np.r_[np.zeros(8), np.full(8, 10.0)].reshape(4, 4)
+    return gz.plume.PlumeMask(threshold=5.0, min_area=1), values
+
+
+def _ndarray_case_plume_contours() -> tuple[object, np.ndarray]:
+    mask = np.zeros((4, 4), dtype=bool)
+    mask[0:2, 0:2] = True
+    return gz.plume.PlumeContours(min_area=1), mask
+
+
+def _ndarray_case_column_to_mass() -> tuple[object, np.ndarray]:
+    values = np.array([[100.0, 250.0], [1.0, 2.0]])
+    return gz.plume.ColumnToMass(gas="CH4", units_in="ppm_m"), values
+
+
+def _ndarray_case_sbmp() -> tuple[object, np.ndarray]:
+    scene = np.stack([np.linspace(1.0, 2.0, 16).reshape(4, 4), np.ones((4, 4))], axis=0)
+    return gz.plume.SBMP(swir1=0, swir2=1), scene
+
+
+def _ndarray_case_shape_filter() -> tuple[object, np.ndarray]:
+    labels = np.zeros((6, 8), dtype=np.int32)
+    labels[3, 1:7] = 1  # thin 6-px strip
+    return (
+        gz.plume.PlumeShapeFilter(min_area=1, min_fiber_to_major_ratio=0.0),
+        labels,
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        _ndarray_case_plume_mask,
+        _ndarray_case_plume_contours,
+        _ndarray_case_column_to_mass,
+        _ndarray_case_sbmp,
+        _ndarray_case_shape_filter,
+    ],
+    ids=["PlumeMask", "PlumeContours", "ColumnToMass", "SBMP", "PlumeShapeFilter"],
+)
+def test_plain_ndarray_in_plain_ndarray_out(
+    case: Callable[[], tuple[object, np.ndarray]],
+) -> None:
+    """Per-pixel plume ops: ndarray in -> ndarray out, values match GeoTensor."""
+    op, values = case()
+
+    out_arr = op(values)
+    out_gt = op(_gt(values))
+
+    assert type(out_arr) is np.ndarray
+    assert np.array_equal(out_arr, np.asarray(out_gt))
+
+
+def test_geo_dependent_plume_ops_reject_plain_arrays() -> None:
+    """Transform/CRS-dependent ops must fail loudly on plain arrays."""
+    arr = np.ones((4, 4), dtype=float)
+    mask_gt = _gt(np.ones((4, 4), dtype=bool))
+    ops = [
+        gz.plume.PlumeFootprint(min_area_m2=1.0),
+        gz.plume.WindAdvectionCone(source=(0.0, 0.0), wind_u=1.0, wind_v=0.0),
+        gz.plume.IMEEstimate(plume_mask=mask_gt, wind_speed=1.0),
+        gz.plume.CrossSectionalFlux(
+            plume_mask=mask_gt, source=(0.0, 0.0), wind_u=1.0, wind_v=0.0
+        ),
+    ]
+    for op in ops:
+        with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+            op(arr)
+
+
+def test_plume_column_stats_accepts_plain_arrays() -> None:
+    import pandas as pd
+
+    labels = np.zeros((6, 6), dtype=np.int32)
+    labels[2:5, 2:5] = 1
+    values = np.ones((6, 6), dtype=float)
+    values[2:5, 2:5] = 4.0
+
+    df_arr = gz.plume.PlumeColumnStats(column=values)(labels)
+    df_gt = gz.plume.PlumeColumnStats(column=_gt(values))(_gt(labels))
+
+    pd.testing.assert_frame_equal(df_arr, df_gt)
 
 
 def test_ime_convex_hull_handles_collinear_points() -> None:

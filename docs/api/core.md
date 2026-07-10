@@ -4,7 +4,7 @@ The Operator / Sequential / Graph composition algebra lives in the
 carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit)
 framework and is re-exported at `geotoolz.*` (and `pipekit.*`) for
 convenience. The only geotoolz-specific addition on this page is
-`ModelOp`, which lives at `geotoolz.model`.
+`ModelOp`, which lives at `geotoolz.learn`.
 
 For the model behind these primitives, read the [Concepts](../concepts.md)
 page first.
@@ -49,7 +49,7 @@ page first.
 
 ## Inference
 
-::: geotoolz.model.ModelOp
+::: geotoolz.learn.ModelOp
     options:
       show_root_heading: true
       show_signature_annotations: true

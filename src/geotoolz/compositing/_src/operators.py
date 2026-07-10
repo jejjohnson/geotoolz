@@ -1,4 +1,11 @@
-"""Carrier-aware compositing operators for co-registered GeoTensors."""
+"""Carrier-aware compositing operators for co-registered GeoTensors.
+
+All composites are metadata-independent per-pixel reductions, so they
+accept sequences of plain ``np.ndarray`` frames as well as GeoTensors.
+Grid checks (transform / CRS equality) apply only to frames that carry
+georeferencing; plain arrays fall back to shape-equality checks. The
+output carrier follows the first frame.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +13,10 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from jaxtyping import Bool, Float, Int, Num, Shaped
 from pipekit import Operator
 
+from geotoolz._src.wrap import wrap_like
 from geotoolz.indices._src.bands import BandRef, resolve_band
 
 
@@ -23,16 +32,28 @@ def _validate_nan_policy(nan_policy: str) -> NanPolicy:
     return nan_policy  # type: ignore[return-value]
 
 
-def _grid_matches(a: GeoTensor, b: GeoTensor) -> bool:
+def _grid_matches(a: GeoTensor | np.ndarray, b: GeoTensor | np.ndarray) -> bool:
+    if a.shape != b.shape:
+        return False
+    a_transform = getattr(a, "transform", None)
+    b_transform = getattr(b, "transform", None)
+    if a_transform is None or b_transform is None:
+        # Plain arrays carry no georeferencing — shape equality is the only
+        # co-registration check available (mirrors mask's hasattr guards).
+        return True
     # Affine equality is exact, not tolerant: sub-pixel grid drift is a real
     # bug source and should fail loudly. Some other geotoolz modules use
     # ``np.allclose`` on transforms; compositing intentionally tightens that
     # because a per-pixel reduction over misaligned grids silently produces
     # garbage.
-    return a.shape == b.shape and a.transform == b.transform and a.crs == b.crs
+    return a_transform == b_transform and getattr(a, "crs", None) == getattr(
+        b, "crs", None
+    )
 
 
-def _require_frames(frames: Sequence[GeoTensor]) -> GeoTensor:
+def _require_frames(
+    frames: Sequence[GeoTensor | np.ndarray],
+) -> GeoTensor | np.ndarray:
     if not frames:
         raise ValueError("At least one GeoTensor is required for compositing.")
     base = frames[0]
@@ -45,22 +66,24 @@ def _require_frames(frames: Sequence[GeoTensor]) -> GeoTensor:
     return base
 
 
-def _stack_frames(frames: Sequence[GeoTensor]) -> tuple[GeoTensor, np.ndarray]:
+def _stack_frames(
+    frames: Sequence[GeoTensor | np.ndarray],
+) -> tuple[GeoTensor | np.ndarray, np.ndarray]:
     base = _require_frames(frames)
     return base, np.stack([np.asarray(frame) for frame in frames], axis=0)
 
 
-def _as_geotensor_like(base: GeoTensor, values: np.ndarray) -> GeoTensor:
-    return base.array_as_geotensor(values)
-
-
-def _take_by_spatial_index(stack: np.ndarray, index: np.ndarray) -> np.ndarray:
+def _take_by_spatial_index(
+    stack: Shaped[np.ndarray, "t *dims h w"], index: Int[np.ndarray, "h w"]
+) -> Shaped[np.ndarray, "*dims h w"]:
     """Select one frame per pixel from ``(T, ..., H, W)`` stack data."""
     indexer = np.broadcast_to(index, stack.shape[1:]).reshape((1, *stack.shape[1:]))
     return np.take_along_axis(stack, indexer, axis=0)[0]
 
 
-def _mask_array(mask: Any, target_shape: tuple[int, ...]) -> np.ndarray:
+def _mask_array(
+    mask: Any, target_shape: tuple[int, ...]
+) -> Bool[np.ndarray, "*dims h w"]:
     mask_arr = np.asarray(mask, dtype=bool)
     spatial_shape = target_shape[-2:]
     if mask_arr.shape == spatial_shape:
@@ -81,8 +104,8 @@ def _mask_array(mask: Any, target_shape: tuple[int, ...]) -> np.ndarray:
 
 
 def _require_pairs(
-    pairs: Sequence[tuple[GeoTensor, Any]],
-) -> tuple[GeoTensor, np.ndarray, np.ndarray]:
+    pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]],
+) -> tuple[GeoTensor | np.ndarray, np.ndarray, np.ndarray]:
     if not pairs:
         raise ValueError("At least one (GeoTensor, mask) pair is required.")
     frames = [scene for scene, _ in pairs]
@@ -100,7 +123,9 @@ def _metadata_value(
     return default
 
 
-def _score_array(value: Any, spatial_shape: tuple[int, int]) -> np.ndarray:
+def _score_array(
+    value: Any, spatial_shape: tuple[int, int]
+) -> Float[np.ndarray, "h w"]:
     arr = np.asarray(value, dtype=np.float32)
     if arr.shape == ():
         return np.full(spatial_shape, float(arr), dtype=np.float32)
@@ -113,7 +138,9 @@ def _score_array(value: Any, spatial_shape: tuple[int, int]) -> np.ndarray:
     )
 
 
-def _normalize_positive(stack: np.ndarray) -> np.ndarray:
+def _normalize_positive(
+    stack: Float[np.ndarray, "t h w"],
+) -> Float[np.ndarray, "t h w"]:
     """Normalize by the maximum finite positive value, or return zeros."""
     max_value = np.nanmax(stack)
     if not np.isfinite(max_value) or max_value <= 0:
@@ -121,17 +148,21 @@ def _normalize_positive(stack: np.ndarray) -> np.ndarray:
     return np.asarray(stack / max_value, dtype=np.float32)
 
 
-def _as_float_for_nan(values: np.ndarray) -> np.ndarray:
+def _as_float_for_nan(values: Num[np.ndarray, "*dims"]) -> Float[np.ndarray, "*dims"]:
     return values.astype(np.result_type(values.dtype, np.float32), copy=False)
 
 
 class MedianComposite(Operator):
     """Per-pixel median across a stack of co-registered GeoTensors.
 
+    Metadata-independent: frames may also be plain ``np.ndarray`` maps, in
+    which case the outputs are plain arrays and the grid check reduces to
+    shape equality.
+
     Args:
         nan_policy: ``"ignore"`` skips NaNs with ``np.nanmedian``;
             ``"propagate"`` uses ``np.median``.
-        return_count: When true, also return a GeoTensor with the number
+        return_count: When true, also return a carrier with the number
             of non-NaN contributors per output pixel.
     """
 
@@ -142,19 +173,19 @@ class MedianComposite(Operator):
         self.return_count = return_count
 
     def _apply(
-        self, frames: Sequence[GeoTensor]
-    ) -> GeoTensor | tuple[GeoTensor, GeoTensor]:
+        self, frames: Sequence[GeoTensor | np.ndarray]
+    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
         base, stack = _stack_frames(frames)
         values = (
             np.nanmedian(stack, axis=0)
             if self.nan_policy == "ignore"
             else np.median(stack, axis=0)
         )
-        out = _as_geotensor_like(base, values)
+        out = wrap_like(base, values)
         if not self.return_count:
             return out
         count = np.sum(~np.isnan(stack), axis=0).astype(np.int64)
-        return out, _as_geotensor_like(base, count)
+        return out, wrap_like(base, count)
 
     def get_config(self) -> dict[str, Any]:
         return {"nan_policy": self.nan_policy, "return_count": self.return_count}
@@ -168,6 +199,19 @@ class MaxNDVIComposite(Operator):
     dtype when all-invalid pixels can be represented in it (e.g. integer
     masks via ``fill_value_default``); for float inputs invalid pixels are
     set to NaN.
+
+    The per-pixel math is metadata-independent, so plain ``np.ndarray``
+    frames are accepted when ``red`` / ``nir`` are integer indices; named
+    band references need GeoTensor ``attrs`` and raise ``TypeError`` for
+    plain arrays.
+
+    Args:
+        red: Red band reference — integer band index or a band name
+            resolved against the first frame's attrs.
+        nir: NIR band reference, same conventions as ``red``.
+        return_index: When true, also return a carrier holding the
+            selected frame index per pixel (``int64``).
+        eps: Stabiliser added to the NDVI denominator.
     """
 
     def __init__(
@@ -184,8 +228,8 @@ class MaxNDVIComposite(Operator):
         self.eps = eps
 
     def _apply(
-        self, frames: Sequence[GeoTensor]
-    ) -> GeoTensor | tuple[GeoTensor, GeoTensor]:
+        self, frames: Sequence[GeoTensor | np.ndarray]
+    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
         base, stack = _stack_frames(frames)
         # NDVI needs distinct red/nir bands; 2-D GeoTensors don't have a
         # band axis and would silently broadcast `:, red_idx, ...` into
@@ -194,6 +238,14 @@ class MaxNDVIComposite(Operator):
             raise ValueError(
                 "MaxNDVIComposite requires multi-band GeoTensors (C, H, W); "
                 f"got shape {base.shape}."
+            )
+        if (isinstance(self.red, str) or isinstance(self.nir, str)) and not hasattr(
+            base, "attrs"
+        ):
+            raise TypeError(
+                "MaxNDVIComposite with named band references requires "
+                "GeoTensor inputs carrying band-name attrs; got a plain "
+                "array. Pass integer band indices instead."
             )
         red_idx = resolve_band(base, self.red)
         nir_idx = resolve_band(base, self.nir)
@@ -216,11 +268,19 @@ class MaxNDVIComposite(Operator):
             else:
                 # Integer / unsigned inputs can't carry NaN. Fall back to the
                 # input's fill_value_default so the dtype is preserved.
-                values[..., all_invalid] = base.fill_value_default
-        out = _as_geotensor_like(base, values)
+                fill = getattr(base, "fill_value_default", None)
+                if fill is None:
+                    raise ValueError(
+                        "MaxNDVIComposite: all NDVI scores are invalid for "
+                        "some pixels and the integer-dtype input carries no "
+                        "fill_value_default to mark them; use a GeoTensor "
+                        "with fill_value_default or float frames."
+                    )
+                values[..., all_invalid] = fill
+        out = wrap_like(base, values)
         if not self.return_index:
             return out
-        return out, _as_geotensor_like(base, index.astype(np.int64))
+        return out, wrap_like(base, index.astype(np.int64))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -232,7 +292,25 @@ class MaxNDVIComposite(Operator):
 
 
 class CloudFreeComposite(Operator):
-    """Per-pixel mean over frames where the cloud mask is false."""
+    """Per-pixel mean over frames where the cloud mask is false.
+
+    Consumes ``(frame, cloud_mask)`` pairs; masks may have spatial shape
+    ``(H, W)``, ``(1, H, W)``, or match the frame shape exactly. Pixels
+    with fewer than ``min_valid`` clear contributors come out as NaN.
+    Metadata-independent: plain ``np.ndarray`` frames are accepted and
+    yield plain-array outputs.
+
+    Args:
+        nan_policy: ``"ignore"`` (default) also drops NaN samples from
+            clear pixels; ``"propagate"`` lets NaNs poison the mean.
+        min_valid: Minimum number of clear contributors per pixel;
+            pixels below the threshold are NaN. Must be at least 1.
+        return_count: When true, also return a carrier with the number
+            of clear contributors per pixel (``int64``).
+
+    Raises:
+        ValueError: If ``min_valid`` is below 1.
+    """
 
     def __init__(
         self,
@@ -248,8 +326,8 @@ class CloudFreeComposite(Operator):
         self.return_count = return_count
 
     def _apply(
-        self, pairs: Sequence[tuple[GeoTensor, Any]]
-    ) -> GeoTensor | tuple[GeoTensor, GeoTensor]:
+        self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]]
+    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
         base, stack, cloudy = _require_pairs(pairs)
         clear = ~cloudy
         valid = clear & ~np.isnan(stack) if self.nan_policy == "ignore" else clear
@@ -258,10 +336,10 @@ class CloudFreeComposite(Operator):
         with np.errstate(invalid="ignore", divide="ignore"):
             values = total / count
         values = np.where(count >= self.min_valid, values, np.nan)
-        out = _as_geotensor_like(base, _as_float_for_nan(values))
+        out = wrap_like(base, _as_float_for_nan(values))
         if not self.return_count:
             return out
-        return out, _as_geotensor_like(base, count.astype(np.int64))
+        return out, wrap_like(base, count.astype(np.int64))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -276,7 +354,18 @@ class BAPComposite(Operator):
 
     Metadata may provide precomputed ``*_score`` arrays, or raw ``view_angle``,
     ``doy``, ``cloud_distance``, and ``opacity`` values used to build simple
-    scores. Each value may be a scalar or a per-pixel array.
+    scores. Each value may be a scalar or a per-pixel array. Frames may be
+    GeoTensors or plain ``np.ndarray`` maps (the scores live in the metadata
+    dicts, not in geo-metadata).
+
+    Args:
+        target_doy: Day-of-year the recency score is anchored to.
+        w_view_angle: Weight of the view-angle score.
+        w_recency: Weight of the recency score.
+        w_cloud_distance: Weight of the cloud-distance score.
+        w_opacity: Weight of the opacity score.
+        return_score: When true, also return a carrier holding the
+            winning per-pixel score (``float32``).
     """
 
     def __init__(
@@ -297,8 +386,8 @@ class BAPComposite(Operator):
         self.return_score = return_score
 
     def _apply(
-        self, pairs: Sequence[tuple[GeoTensor, Mapping[str, Any]]]
-    ) -> GeoTensor | tuple[GeoTensor, GeoTensor]:
+        self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Mapping[str, Any]]]
+    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
         if not pairs:
             raise ValueError("At least one (GeoTensor, metadata) pair is required.")
         frames = [scene for scene, _ in pairs]
@@ -370,11 +459,11 @@ class BAPComposite(Operator):
             + self.w_opacity * np.stack(opacity_scores, axis=0)
         ).astype(np.float32, copy=False)
         index = np.argmax(score_stack, axis=0)
-        out = _as_geotensor_like(base, _take_by_spatial_index(stack, index))
+        out = wrap_like(base, _take_by_spatial_index(stack, index))
         if not self.return_score:
             return out
         best_score = np.take_along_axis(score_stack, index[None, ...], axis=0)[0]
-        return out, _as_geotensor_like(base, best_score)
+        return out, wrap_like(base, best_score)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -400,14 +489,21 @@ class MinCloudComposite(Operator):
     coverage rather than by distance-to-nearest-cloud at each pixel. Use
     :class:`BAPComposite` with per-pixel ``cloud_distance`` metadata when
     that finer granularity is needed.
+
+    Metadata-independent: plain ``np.ndarray`` frames are accepted and
+    yield plain-array outputs.
+
+    Args:
+        return_count: When true, also return a carrier with the number
+            of clear contributors per pixel (``int64``).
     """
 
     def __init__(self, *, return_count: bool = False) -> None:
         self.return_count = return_count
 
     def _apply(
-        self, pairs: Sequence[tuple[GeoTensor, Any]]
-    ) -> GeoTensor | tuple[GeoTensor, GeoTensor]:
+        self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]]
+    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
         base, stack, cloudy = _require_pairs(pairs)
         clear = ~cloudy
         spatial_clear = clear.reshape((clear.shape[0], -1))
@@ -421,11 +517,11 @@ class MinCloudComposite(Operator):
         index = np.argmin(costs, axis=0)
         all_cloudy = ~np.any(clear, axis=0)
         index = np.where(all_cloudy, fallback, index)
-        out = _as_geotensor_like(base, _take_by_spatial_index(stack, index))
+        out = wrap_like(base, _take_by_spatial_index(stack, index))
         if not self.return_count:
             return out
         count = np.sum(clear, axis=0).astype(np.int64)
-        return out, _as_geotensor_like(base, count)
+        return out, wrap_like(base, count)
 
     def get_config(self) -> dict[str, Any]:
         return {"return_count": self.return_count}

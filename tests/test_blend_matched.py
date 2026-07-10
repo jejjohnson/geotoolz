@@ -16,10 +16,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
 
-from geotoolz.compositing import BlendMatched
+from geotoolz.compositing import BlendMatched, StackMatched
 
 
 # ---------------------------------------------------------------------------
@@ -28,12 +29,8 @@ from geotoolz.compositing import BlendMatched
 
 
 def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=transform
-        or rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs=crs,
-        fill_value_default=np.nan,
+    return toy_geotensor(
+        values, transform=transform, crs=crs, fill_value_default=np.nan
     )
 
 
@@ -289,6 +286,42 @@ class TestNanPolicy:
         # The rest are valid.
         assert arr[1, 0] == pytest.approx(5.0)
         assert arr[1, 1] == pytest.approx(6.0)
+
+
+# ---------------------------------------------------------------------------
+# Plain-array carrier
+# ---------------------------------------------------------------------------
+
+
+class TestPlainArrayCarrier:
+    """Plain ndarray in -> plain ndarray out for the matched-stack family."""
+
+    def test_blend_matched_plain_arrays(self) -> None:
+        a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+        b = np.array([[5.0, 6.0], [7.0, 8.0]], dtype=np.float32)
+
+        out_plain = BlendMatched()([a, b])
+        out_geo = BlendMatched()([_gt(a), _gt(b)])
+
+        assert type(out_plain) is np.ndarray
+        np.testing.assert_allclose(out_plain, np.asarray(out_geo))
+
+    def test_stack_matched_plain_arrays(self) -> None:
+        a = np.zeros((2, 2, 2), dtype=np.float32)
+        b = np.ones((3, 2, 2), dtype=np.float32)
+
+        out_plain = StackMatched()([a, b])
+        out_geo = StackMatched()([_gt(a), _gt(b)])
+
+        assert type(out_plain) is np.ndarray
+        assert out_plain.shape == (5, 2, 2)
+        np.testing.assert_allclose(out_plain, np.asarray(out_geo))
+
+    def test_plain_array_shape_mismatch_still_rejected(self) -> None:
+        a = np.zeros((4, 4), dtype=np.float32)
+        b = np.zeros((8, 8), dtype=np.float32)
+        with pytest.raises(ValueError, match=r"share spatial shape"):
+            BlendMatched()([a, b])
 
 
 # ---------------------------------------------------------------------------

@@ -1,12 +1,12 @@
 # QA
 
-`geotoolz.qa` provides **sensor-specific QA-bit decoders** layered on top of the generic primitives in [`geotoolz.cloud`](../cloud/). The two modules share one decoder implementation:
+`geotoolz.qa` is the home of QA / cloud-mask **extraction**: generic decoders, sensor presets, and the decoding primitives they share:
 
-- `geotoolz.cloud._src.array.mask_from_qa_bits` — single-bit-flag decoding (OR of bits).
-- `geotoolz.cloud._src.array.mask_from_scl` — categorical class membership.
-- `geotoolz.qa._src.array.mask_from_bit_field` — contiguous multi-bit field decoding (needed for MODIS).
+- `mask_from_qa_bits` — single-bit-flag decoding (OR of bits).
+- `mask_from_scl` — categorical class membership (Sentinel-2 SCL).
+- `mask_from_bit_field` — contiguous multi-bit field decoding (needed for MODIS).
 
-Pick `geotoolz.cloud.MaskFromQABits` / `MaskFromSCL` when you have an explicit list of bits / classes. Pick `geotoolz.qa.LandsatQA_PIXEL` / `S2QA60` / `S2SCL` / `MODISStateQA` when you want the published-spec defaults.
+Pick `MaskFromQABits` / `MaskFromSCL` when you have an explicit list of bits / classes. Pick `LandsatQA_PIXEL` / `S2QA60` / `S2SCL` / `MODISStateQA` when you want the published-spec defaults. To *apply* a mask, use [`geotoolz.mask.ApplyMask`](mask.md).
 
 ::: geotoolz.qa
 
@@ -20,7 +20,7 @@ Pick `geotoolz.cloud.MaskFromQABits` / `MaskFromSCL` when you have an explicit l
 | `LandsatQA_PIXEL` (sensor=`l7`) | Landsat 4-7 C2 `QA_PIXEL` (no cirrus bit) | cloud (bit 3), cloud shadow (bit 4) | USGS LSDS-1618 |
 | `MODISStateQA` | MODIS `state_1km` / `state_500m` | cloud (bits [0,1] field, values 1,2) + cloud shadow (bit 2) | MOD09 User's Guide, Table 12 |
 
-All QA mask operators return boolean `GeoTensor` masks with the original CRS and transform preserved and `fill_value_default=False`. The convention is **`True` means "mask this pixel out"**.
+All QA mask operators return boolean masks matching the input carrier: GeoTensor in (CRS/transform preserved, `fill_value_default=False`), plain `np.ndarray` in, plain boolean array out. The convention is **`True` means "mask this pixel out"**.
 
 ### MODIS bit-field semantics
 

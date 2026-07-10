@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 
 import joblib
 import numpy as np
+from jaxtyping import Bool, Num, Shaped
+
+from geotoolz._src.wrap import wrap_like
 
 
 if TYPE_CHECKING:
@@ -43,6 +46,41 @@ _IMPUTE_STRATEGIES = {"impute_simple", "impute_knn", "impute_iterative"}
 class GeoTensorEstimator:
     """Marshall a scikit-learn estimator to and from GeoTensor-shaped data.
 
+    scikit-learn works on 2-D ``(n_samples, n_features)`` matrices while
+    remote-sensing cubes are channel-first rasters. This class owns the
+    round trip between the two layouts. Axes follow the canonical
+    channel-first order — ``(H, W)`` for 2-D input, ``(C, H, W)`` for
+    3-D, ``(T, C, H, W)`` for 4-D — and ``mode`` picks which axes become
+    samples (rows) and which become features (columns):
+
+    - ``"pixel"``: samples ``(H, W)``, features the rest. A ``(C, H, W)``
+      cube flattens to ``(H * W, C)`` — one row per pixel, one column
+      per band.
+    - ``"pixel_time"``: samples ``(T, H, W)``; ``(T, C, H, W)`` flattens
+      to ``(T * H * W, C)``.
+    - ``"spectral"``: samples ``(C,)``; ``(C, H, W)`` flattens to
+      ``(C, H * W)`` — one row per band.
+    - ``"temporal"``: samples ``(T,)``; features are all remaining axes.
+    - ``"patch"``: samples axis ``0``; ``(N, ...)`` flattens to
+      ``(N, prod(rest))``.
+    - ``"custom"``: explicit ``sample_axes`` / ``feature_axes`` (axis
+      labels ``"T"/"C"/"H"/"W"`` or integer indices) that together must
+      cover every input axis exactly once.
+
+    On the way back, a 1-D estimator output of length ``n_samples``
+    unflattens to the sample shape (``"pixel"`` -> ``(H, W)``); a 2-D
+    output ``(n_samples, k)`` restores the sample axes to their original
+    positions and places the ``k`` output-feature axis where the first
+    input feature axis was (``"pixel"`` on ``(C, H, W)`` -> ``(k, H, W)``).
+
+    Carrier behavior: every method accepts a ``GeoTensor`` or a plain
+    ``np.ndarray``. When the unflattened output's trailing two axes still
+    match the input's spatial ``(H, W)``, the result is rewrapped to
+    match the input carrier (GeoTensor in -> GeoTensor out with metadata
+    propagated; ndarray in -> ndarray out). Otherwise a bare ndarray is
+    returned (e.g. sample-only outputs from ``mode="custom"`` or
+    ``mode="spectral"``, or ``nan_transform="drop"`` with NaN rows).
+
     Args:
         estimator: scikit-learn-compatible object to fit/apply.
         mode: Named reshape mode.
@@ -53,6 +91,16 @@ class GeoTensorEstimator:
         impute_simple_strategy: Strategy passed to ``SimpleImputer``.
         impute_knn_n_neighbors: Neighbour count passed to ``KNNImputer``.
         impute_iterative_max_iter: Iteration cap passed to ``IterativeImputer``.
+
+    Attributes:
+        estimator: The wrapped scikit-learn estimator (replaced on
+            ``load_state``).
+        imputer: Fitted imputer for the ``impute_*`` NaN strategies, or
+            ``None``.
+        is_fitted: Whether ``fit`` / ``partial_fit`` / ``fit_predict``
+            (or ``load_state``) has run.
+        fit_geotensor_shape: Shape of the last cube seen at fit time.
+        fit_n_samples: Number of sample rows the estimator was fitted on.
 
     Examples:
         >>> from sklearn.decomposition import PCA
@@ -95,8 +143,20 @@ class GeoTensorEstimator:
                 'when mode="custom"'
             )
 
-    def fit(self, gt: GeoTensor) -> Self:
-        """Fit the wrapped estimator from a GeoTensor."""
+    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Fit the wrapped estimator on the flattened sample matrix.
+
+        The cube is reshaped to ``(n_samples, n_features)`` according to
+        ``mode`` (e.g. ``"pixel"`` sends ``(C, H, W)`` to ``(H * W, C)``),
+        the ``nan_fit`` strategy is applied to the rows, and the result
+        is handed to ``estimator.fit``.
+
+        Args:
+            gt: Input cube — a ``GeoTensor`` or plain ``np.ndarray``.
+
+        Returns:
+            This estimator, for chaining.
+        """
         flat = self._flatten(gt)
         x_fit, _ = self._prepare_fit(flat.x)
         self.estimator.fit(x_fit)
@@ -105,8 +165,22 @@ class GeoTensorEstimator:
         self.fit_n_samples = int(x_fit.shape[0])
         return self
 
-    def partial_fit(self, gt: GeoTensor) -> Self:
-        """Incrementally fit the wrapped estimator from a GeoTensor."""
+    def partial_fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Incrementally fit the wrapped estimator on one flattened batch.
+
+        Same ``(n_samples, n_features)`` marshalling and ``nan_fit``
+        handling as :meth:`fit`, but routed to ``estimator.partial_fit``
+        so streaming estimators accumulate state across calls.
+
+        Args:
+            gt: Input cube — a ``GeoTensor`` or plain ``np.ndarray``.
+
+        Returns:
+            This estimator, for chaining.
+
+        Raises:
+            TypeError: If the wrapped estimator has no ``partial_fit``.
+        """
         if not hasattr(self.estimator, "partial_fit"):
             raise TypeError(
                 f"{type(self.estimator).__name__} does not support partial_fit"
@@ -119,48 +193,60 @@ class GeoTensorEstimator:
         self.fit_n_samples = int(x_fit.shape[0])
         return self
 
-    def transform(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         """Apply ``estimator.transform`` and unflatten the result.
 
-        Returns a :class:`GeoTensor` when the output's trailing axes match
-        the input's spatial ``(H, W)`` shape; otherwise returns a bare
-        :class:`numpy.ndarray` (e.g. for sample-only outputs from
-        ``mode="custom"``).
+        The cube is flattened to ``(n_samples, n_features)`` per
+        ``mode``, ``nan_transform`` is applied, and the estimator output
+        of shape ``(n_samples,)`` or ``(n_samples, k)`` is reshaped back
+        (the ``k`` output-feature axis replaces the first input feature
+        axis — ``"pixel"`` mode maps ``(C, H, W)`` input to ``(k, H, W)``
+        output).
+
+        Returns a carrier matching the input (GeoTensor in -> GeoTensor
+        out, ndarray in -> ndarray out) when the output's trailing axes
+        match the input's spatial ``(H, W)`` shape; otherwise returns a
+        bare :class:`numpy.ndarray` (e.g. for sample-only outputs from
+        ``mode="custom"``, or ``nan_transform="drop"`` with NaN rows).
         """
         return self._apply_task(gt, "transform")
 
-    def predict(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+    def predict(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         """Apply ``estimator.predict`` and unflatten the result.
 
-        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        See :meth:`transform` for the reshaping and carrier contract.
         """
         return self._apply_task(gt, "predict")
 
-    def predict_proba(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+    def predict_proba(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         """Apply ``estimator.predict_proba`` and unflatten the result.
 
-        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        See :meth:`transform` for the reshaping and carrier contract.
         """
         return self._apply_task(gt, "predict_proba")
 
-    def decision_function(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+    def decision_function(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         """Apply ``estimator.decision_function`` and unflatten the result.
 
-        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        See :meth:`transform` for the reshaping and carrier contract.
         """
         return self._apply_task(gt, "decision_function")
 
-    def inverse_transform(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+    def inverse_transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         """Apply ``estimator.inverse_transform`` and unflatten the result.
 
-        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        See :meth:`transform` for the reshaping and carrier contract.
         """
         return self._apply_task(gt, "inverse_transform")
 
-    def fit_predict(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+    def fit_predict(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         """Apply ``estimator.fit_predict`` and unflatten the result.
 
-        See :meth:`transform` for the GeoTensor / ndarray return contract.
+        Fitting uses the ``nan_fit`` strategy (like :meth:`fit`); see
+        :meth:`transform` for the reshaping and carrier contract.
+
+        Raises:
+            TypeError: If the wrapped estimator has no ``fit_predict``.
         """
         if not hasattr(self.estimator, "fit_predict"):
             raise TypeError(
@@ -208,7 +294,7 @@ class GeoTensorEstimator:
         n_samples = state.get("fit_n_samples")
         self.fit_n_samples = None if n_samples is None else int(n_samples)
 
-    def _flatten(self, gt: GeoTensor) -> _FlatGeoTensor:
+    def _flatten(self, gt: GeoTensor | np.ndarray) -> _FlatGeoTensor:
         arr = np.asarray(gt)
         axes = _resolve_axes(arr.ndim, self.mode, self.sample_axes, self.feature_axes)
         moved = np.moveaxis(arr, axes.sample_axes + axes.feature_axes, range(arr.ndim))
@@ -223,7 +309,9 @@ class GeoTensorEstimator:
             feature_shape=feature_shape,
         )
 
-    def _prepare_fit(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _prepare_fit(
+        self, x: Num[np.ndarray, "n c"]
+    ) -> tuple[Num[np.ndarray, "m c"], Bool[np.ndarray, " n"]]:
         strategy = self.nan_fit
         valid = _valid_rows(x)
         if strategy == "error" and not valid.all():
@@ -244,7 +332,9 @@ class GeoTensorEstimator:
         )
         return self.imputer.fit_transform(x), np.ones(x.shape[0], dtype=bool)
 
-    def _prepare_transform(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _prepare_transform(
+        self, x: Num[np.ndarray, "n c"]
+    ) -> tuple[Num[np.ndarray, "m c"], Bool[np.ndarray, " n"]]:
         """Apply ``nan_transform`` strategy to apply-time input.
 
         ``"drop"`` strips NaN rows and the unflatten step truncates the
@@ -283,7 +373,9 @@ class GeoTensorEstimator:
             )
         return self.imputer.transform(x), np.ones(x.shape[0], dtype=bool)
 
-    def _apply_task(self, gt: GeoTensor, task: Task) -> GeoTensor | np.ndarray:
+    def _apply_task(
+        self, gt: GeoTensor | np.ndarray, task: Task
+    ) -> GeoTensor | np.ndarray:
         if not hasattr(self.estimator, task):
             raise TypeError(f"{type(self.estimator).__name__} does not support {task}")
         flat = self._flatten(gt)
@@ -299,10 +391,10 @@ class GeoTensorEstimator:
 
     def _unflatten_apply_result(
         self,
-        gt: GeoTensor,
+        gt: GeoTensor | np.ndarray,
         flat: _FlatGeoTensor,
-        y_apply: np.ndarray,
-        valid: np.ndarray,
+        y_apply: Shaped[np.ndarray, " m"] | Shaped[np.ndarray, "m k"],
+        valid: Bool[np.ndarray, " n"],
     ) -> GeoTensor | np.ndarray:
         y = np.asarray(y_apply)
         if valid.all():
@@ -319,7 +411,7 @@ class GeoTensorEstimator:
         # / wrappers are responsible for re-attaching geo metadata.
         if out.ndim < 2 or out.shape[-2:] != np.asarray(gt).shape[-2:]:
             return out
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
 
 class _ResolvedAxes:
@@ -339,7 +431,7 @@ class _FlatGeoTensor:
     def __init__(
         self,
         *,
-        x: np.ndarray,
+        x: Num[np.ndarray, "n c"],
         axes: _ResolvedAxes,
         sample_shape: tuple[int, ...],
         feature_shape: tuple[int, ...],
@@ -428,7 +520,10 @@ def _axis_indices(
     return tuple(indices)
 
 
-def _restore_shape(y: np.ndarray, flat: _FlatGeoTensor) -> np.ndarray:
+def _restore_shape(
+    y: Shaped[np.ndarray, " n"] | Shaped[np.ndarray, "n k"],
+    flat: _FlatGeoTensor,
+) -> np.ndarray:
     if y.ndim == 1:
         return y.reshape(flat.sample_shape)
     if y.ndim != 2:
@@ -451,7 +546,7 @@ def _restore_shape(y: np.ndarray, flat: _FlatGeoTensor) -> np.ndarray:
     return restored.transpose([source_tokens.index(token) for token in target_tokens])
 
 
-def _valid_rows(x: np.ndarray) -> np.ndarray:
+def _valid_rows(x: Num[np.ndarray, "n c"]) -> Bool[np.ndarray, " n"]:
     return ~np.isnan(np.asarray(x, dtype=float)).any(axis=1)
 
 

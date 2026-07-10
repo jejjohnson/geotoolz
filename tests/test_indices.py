@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 
 from geotoolz.indices import (
@@ -70,22 +70,12 @@ from geotoolz.indices import (
 # ---------------------------------------------------------------------------
 
 
-def _toy_geotensor(values: np.ndarray) -> GeoTensor:
-    """Build a small `GeoTensor` with stable transform/CRS for round-trip tests."""
-    return GeoTensor(
-        values=values,
-        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32629",
-        fill_value_default=-9999,
-    )
-
-
 @pytest.fixture
 def reflectance_4band() -> GeoTensor:
     """``(B, G, R, NIR)`` reflectance carrier, 4 x 8 x 8."""
     rng = np.random.default_rng(0)
     arr = rng.uniform(0.05, 0.6, size=(4, 8, 8)).astype(np.float32)
-    return _toy_geotensor(arr)
+    return toy_geotensor(arr)
 
 
 @pytest.fixture
@@ -93,7 +83,7 @@ def reflectance_7band() -> GeoTensor:
     """``(B, G, R, NIR, SWIR1, SWIR2, ??)`` — 7-band stub for NDBI / NBR."""
     rng = np.random.default_rng(1)
     arr = rng.uniform(0.05, 0.6, size=(7, 8, 8)).astype(np.float32)
-    return _toy_geotensor(arr)
+    return toy_geotensor(arr)
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +296,7 @@ def test_all_indices_run_without_crashing(reflectance_7band: GeoTensor) -> None:
 def test_band_name_resolution_uses_geotensor_descriptions() -> None:
     rng = np.random.default_rng(2)
     arr = rng.uniform(0.05, 0.6, size=(4, 5, 5)).astype(np.float32)
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     gt.attrs["descriptions"] = ("B02", "B03", "B04", "B08")
 
     via_names = NDVI(red="B04", nir="B08", eps=0.0)(gt)
@@ -316,7 +306,7 @@ def test_band_name_resolution_uses_geotensor_descriptions() -> None:
 
 
 def test_band_name_resolution_missing_name_raises() -> None:
-    gt = _toy_geotensor(np.ones((2, 2, 2), dtype=np.float32))
+    gt = toy_geotensor(np.ones((2, 2, 2), dtype=np.float32))
     gt.attrs["descriptions"] = ("B02", "B03")
 
     with pytest.raises(ValueError, match="Band 'B04' was not found"):
@@ -328,7 +318,7 @@ def test_band_name_resolution_falls_back_to_band_names() -> None:
     resolver should fall through to ``band_names`` rather than raise."""
     rng = np.random.default_rng(5)
     arr = rng.uniform(0.05, 0.6, size=(4, 4, 4)).astype(np.float32)
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     # ``descriptions`` has a different vocabulary than the caller is using;
     # ``band_names`` carries the names the caller expects.
     gt.attrs["descriptions"] = ("B02", "B03", "B04", "B08")
@@ -345,7 +335,7 @@ def test_band_name_resolution_descriptions_takes_precedence() -> None:
     lookup order)."""
     rng = np.random.default_rng(6)
     arr = rng.uniform(0.05, 0.6, size=(4, 4, 4)).astype(np.float32)
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     # Same name "X" sits at index 0 in `descriptions` and index 3 in
     # `band_names`. The resolver should pick descriptions -> 0.
     gt.attrs["descriptions"] = ("X", "_", "_", "_")
@@ -360,7 +350,7 @@ def test_band_name_resolution_skips_none_and_non_iterable_keys() -> None:
     """Missing / ``None`` / non-iterable attribute values should be
     skipped silently and fall through to the next key."""
     arr = np.ones((4, 2, 2), dtype=np.float32)
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     gt.attrs["descriptions"] = None  # explicitly null
     gt.attrs["band_names"] = ("B02", "B03", "B04", "B08")
 
@@ -373,7 +363,7 @@ def test_bais2_default_uses_sentinel2_named_bands() -> None:
     explicit-index BAIS2 on a stack with descriptions tagged."""
     rng = np.random.default_rng(8)
     arr = rng.uniform(0.05, 0.6, size=(10, 4, 4)).astype(np.float32)
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
     gt.attrs["descriptions"] = (
         "B02",
         "B03",
@@ -400,7 +390,7 @@ def test_bais2_default_uses_sentinel2_named_bands() -> None:
 
 def test_ciri_default_uses_sentinel2_b10_position() -> None:
     arr = np.arange(10, dtype=np.float32).reshape(10, 1, 1)
-    gt = _toy_geotensor(arr)
+    gt = toy_geotensor(arr)
 
     out = CIRI()(gt)
 
@@ -408,8 +398,8 @@ def test_ciri_default_uses_sentinel2_b10_position() -> None:
 
 
 def test_dnbr_subtracts_matching_geotensors() -> None:
-    pre = _toy_geotensor(np.full((3, 3), 0.7, dtype=np.float32))
-    post = _toy_geotensor(np.full((3, 3), 0.2, dtype=np.float32))
+    pre = toy_geotensor(np.full((3, 3), 0.7, dtype=np.float32))
+    post = toy_geotensor(np.full((3, 3), 0.2, dtype=np.float32))
 
     out = dNBR()(pre, post)
 
@@ -419,8 +409,8 @@ def test_dnbr_subtracts_matching_geotensors() -> None:
 
 
 def test_dnbr_raises_on_grid_mismatch() -> None:
-    pre = _toy_geotensor(np.ones((3, 3), dtype=np.float32))
-    post = _toy_geotensor(np.ones((4, 4), dtype=np.float32))
+    pre = toy_geotensor(np.ones((3, 3), dtype=np.float32))
+    post = toy_geotensor(np.ones((4, 4), dtype=np.float32))
 
     with pytest.raises(ValueError, match="share shape, transform, and CRS"):
         dNBR()(pre, post)
@@ -434,6 +424,60 @@ def test_append_index_concatenates_back(reflectance_4band: GeoTensor) -> None:
     # The new last channel should equal a direct NDVI call.
     expected_ndvi = np.asarray(NDVI(nir_idx=3, red_idx=2)(reflectance_4band))
     np.testing.assert_allclose(np.asarray(out)[-1], expected_ndvi, rtol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Plain-ndarray carriers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        NDVI(nir_idx=3, red_idx=2),
+        NormalizedDifference(a_idx=3, b_idx=2),
+        SAVI(nir_idx=3, red_idx=2, L=0.5),
+        EVI(nir_idx=3, red_idx=2, blue_idx=0),
+        kNDVI(nir_idx=3, red_idx=2),
+        BAIS2(red_idx=2, red_edge1_idx=0, red_edge2_idx=1, nir_idx=3, swir2_idx=2),
+        CIRI(cirrus_idx=1),
+        AppendIndex(index_op=NDVI(nir_idx=3, red_idx=2)),
+    ],
+    ids=lambda op: type(op).__name__,
+)
+def test_plain_ndarray_in_plain_ndarray_out(op: object) -> None:
+    """Plain ndarray in -> plain ndarray out, same values as the GeoTensor path."""
+    rng = np.random.default_rng(3)
+    arr = rng.uniform(0.05, 0.6, size=(4, 6, 6)).astype(np.float32)
+
+    out = op(arr)  # type: ignore[operator]
+    assert type(out) is np.ndarray
+
+    via_gt = op(toy_geotensor(arr))  # type: ignore[operator]
+    assert isinstance(via_gt, GeoTensor)
+    np.testing.assert_allclose(out, np.asarray(via_gt))
+
+
+def test_dnbr_plain_ndarrays() -> None:
+    pre = np.full((3, 3), 0.7, dtype=np.float32)
+    post = np.full((3, 3), 0.2, dtype=np.float32)
+
+    out = dNBR()(pre, post)
+
+    assert type(out) is np.ndarray
+    np.testing.assert_allclose(out, 0.5)
+
+
+def test_dnbr_plain_ndarrays_shape_mismatch_raises() -> None:
+    with pytest.raises(ValueError, match="share shape, transform, and CRS"):
+        dNBR()(np.ones((3, 3), dtype=np.float32), np.ones((4, 4), dtype=np.float32))
+
+
+def test_named_band_on_plain_array_raises_typeerror() -> None:
+    """Named-band resolution needs GeoTensor attrs metadata."""
+    arr = np.ones((4, 4, 4), dtype=np.float32)
+    with pytest.raises(TypeError, match="requires a georeferenced GeoTensor"):
+        NDVI(red="B04", nir="B08")(arr)
 
 
 # ---------------------------------------------------------------------------

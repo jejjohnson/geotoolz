@@ -1,22 +1,22 @@
-"""Tier-A primitives — pure-numpy QA helpers built on top of `geotoolz.cloud`.
+"""Tier-A primitives — pure-numpy QA / cloud-mask decoding.
 
-This module deliberately stays a *thin* layer over the primitives already
-exported by `geotoolz.cloud._src.array`. It adds two pieces of decoding
-the cloud module does not cover:
+The canonical home for QA-band decoding (these functions used to be
+split between here and the retired ``geotoolz.cloud`` module):
 
-1. **`mask_from_bit_field`** — extract a multi-bit field (e.g. MODIS
+1. **`mask_from_qa_bits`** — single-bit-flag decoding for Landsat-style
+   bitmask QA layers (``QA_PIXEL``): True where ANY listed bit is set.
+2. **`mask_from_scl`** — Sentinel-2 SCL class-membership decoding.
+3. **`mask_from_bit_field`** — extract a multi-bit field (e.g. MODIS
    ``state_1km`` bits ``[0, 1]`` which encode a 2-bit cloud state) and
    test membership against a set of integer field-values. Different from
    ``mask_from_qa_bits`` because that helper OR-s individual bits, which
    is wrong when the bits form a single contiguous categorical field.
-2. **`reduce_bit_masks`** — combine several bit-position groups (the
+4. **`reduce_bit_masks`** — combine several bit-position groups (the
    shape used by the sensor presets in this module) into a single mask
    by OR-ing their `mask_from_qa_bits` results.
 
-For single-bit-flag decoding and SCL class-membership decoding the
-operators below import `mask_from_qa_bits` / `mask_from_scl` directly
-from `geotoolz.cloud._src.array` — no duplicate implementation lives
-here.
+Mask *application* lives in `geotoolz.mask` (`apply_mask` /
+`ApplyMask`).
 
 References:
     USGS, "Landsat 8-9 Collection 2 Level-2 Science Product Guide",
@@ -34,17 +34,104 @@ from collections.abc import Mapping, Sequence
 from itertools import pairwise
 
 import numpy as np
+from jaxtyping import Bool, Int
 
-from geotoolz.cloud._src.array import mask_from_qa_bits
+
+def mask_from_qa_bits(
+    qa: Int[np.ndarray, "*dims"],
+    bits: Sequence[int],
+    *,
+    invert: bool = False,
+) -> Bool[np.ndarray, "*dims"]:
+    r"""Decode a Landsat-style bitmask QA band.
+
+    Returns a boolean array where any of the supplied ``bits`` is set
+    in the QA value. For Landsat-8 ``QA_PIXEL`` the bit assignments
+    (Collection-2 Level-2) are:
+
+    ===== ==========================
+    Bit   Meaning
+    ===== ==========================
+    0     Fill / no-data
+    1     Dilated Cloud
+    2     Cirrus (high confidence)
+    3     Cloud
+    4     Cloud Shadow
+    5     Snow
+    6     Clear
+    7     Water
+    ===== ==========================
+
+    So ``mask_from_qa_bits(qa, bits=[3, 4])`` returns True where the
+    pixel is *either* cloudy *or* in cloud shadow.
+
+    The math is a single ``(qa & bitmask) != 0`` per bit, OR-ed
+    together — vectorised over the whole array.
+
+    Args:
+        qa: Integer QA array (any integer dtype). Typically
+            ``(H, W)``; works for arbitrary shape.
+        bits: Sequence of bit positions to test. The function returns
+            True where ANY of these is set.
+        invert: When True, flip the result. Useful for "clear" masks
+            (``mask_from_qa_bits(qa, [3,4,5], invert=True)``).
+
+    Returns:
+        Boolean array of the same shape as ``qa``.
+
+    References:
+        USGS, "Landsat 8-9 Collection 2 Level-2 Science Product
+        Guide", LSDS-1619, 2022.
+    """
+    qa_int = qa.astype(np.int64, copy=False)
+    bitmask = 0
+    for b in bits:
+        if b < 0:
+            raise ValueError(f"bit position must be non-negative; got {b}")
+        bitmask |= 1 << int(b)
+    out = (qa_int & bitmask) != 0
+    return ~out if invert else out
+
+
+def mask_from_scl(
+    scl: Int[np.ndarray, "*dims"],
+    classes: Sequence[int],
+    *,
+    invert: bool = False,
+) -> Bool[np.ndarray, "*dims"]:
+    """Decode a Sentinel-2 SCL band by class membership.
+
+    Returns True where the SCL value equals any of the listed
+    ``classes``. With ``invert=True``, returns True where the SCL value
+    is *not* in the list — handy for "keep only these classes" masks.
+
+    SCL class IDs come from `geotoolz.qa.SCL` (an IntEnum). Mixing raw
+    ints and enum members is fine — they're cast to ``int`` here.
+
+    Args:
+        scl: SCL band, integer dtype, typically ``(H, W)`` or
+            ``(1, H, W)``.
+        classes: SCL class IDs to match (raw ints or `SCL` members).
+        invert: When True, return True where SCL value is NOT in
+            ``classes`` (keep-only-these mask).
+
+    Returns:
+        Boolean array of the same shape as ``scl``.
+    """
+    if len(classes) == 0:
+        raise ValueError("mask_from_scl: `classes` must not be empty")
+    # `isin` is the vectorised any-of comparison.
+    out = np.isin(scl, np.asarray([int(c) for c in classes]))
+    return ~out if invert else out
 
 
 def mask_from_bit_field(
-    qa: np.ndarray,
+    qa: Int[np.ndarray, "*batch h w"],
     bits: Sequence[int],
     values: Sequence[int],
     *,
     invert: bool = False,
-) -> np.ndarray:
+) -> Bool[np.ndarray, "*batch h w"]:
     """Decode a contiguous multi-bit QA field by value membership.
 
     Several sensor QA layers pack a small categorical field into two or
@@ -97,9 +184,9 @@ def mask_from_bit_field(
 
 
 def reduce_bit_masks(
-    qa: np.ndarray,
+    qa: Int[np.ndarray, "*batch h w"],
     bit_groups: Mapping[str, Sequence[int]],
-) -> np.ndarray:
+) -> Bool[np.ndarray, "*batch h w"]:
     """OR-reduce several named bit-groups into a single mask.
 
     Each entry in ``bit_groups`` is a sequence of bit positions; the

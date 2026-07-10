@@ -19,8 +19,11 @@ from heapq import heappop, heappush
 from typing import Any, Literal
 
 import numpy as np
+from jaxtyping import Bool, Float, Int, Num, Shaped
 from scipy import ndimage
 from shapely.geometry import MultiPoint
+
+from geotoolz._src.shape import single_band
 
 
 ThresholdMode = float | int | str
@@ -38,20 +41,45 @@ MOLAR_MASS_KG_PER_MOL = {
 STANDARD_MOLAR_VOLUME_M3_PER_MOL = 0.024465
 
 
-def squeeze_single_band(values: np.ndarray) -> np.ndarray:
-    """Return a 2-D plume map from a 2-D or singleton-band array."""
-    arr = np.asarray(values)
-    if arr.ndim == 2:
-        return arr
-    if arr.ndim == 3 and arr.shape[0] == 1:
-        return arr[0]
-    raise ValueError(
-        "plume operators expect a single-band map with shape (H, W) or (1, H, W)"
-    )
+def squeeze_single_band(
+    values: Shaped[np.ndarray, "h w"] | Shaped[np.ndarray, "1 h w"],
+) -> Shaped[np.ndarray, "h w"]:
+    """Return a 2-D plume map from a 2-D or singleton-band array.
+
+    Thin delegate to :func:`geotoolz._src.shape.single_band`, kept under
+    its historical public name for the ``geotoolz.plume`` API.
+
+    Args:
+        values: A ``(H, W)`` array or a ``(1, H, W)`` singleton-band
+            cube. Any array-like is accepted.
+
+    Returns:
+        The ``(H, W)`` array. No copy is made for ndarray input.
+
+    Raises:
+        ValueError: If ``values`` is neither ``(H, W)`` nor ``(1, H, W)``.
+    """
+    return single_band(values, name="plume")
 
 
-def otsu_threshold(values: np.ndarray, *, nbins: int = 256) -> float:
-    """Compute Otsu's between-class-variance threshold, ignoring NaNs."""
+def otsu_threshold(values: Num[np.ndarray, "*dims"], *, nbins: int = 256) -> float:
+    """Compute Otsu's between-class-variance threshold, ignoring NaNs.
+
+    Builds an ``nbins``-bin histogram of the finite values and returns
+    the bin center that maximises the between-class variance
+    ``w_bg * w_fg * (mu_bg - mu_fg)^2`` (Otsu, 1979). A constant input
+    returns that constant.
+
+    Args:
+        values: Array of any shape; non-finite entries are ignored.
+        nbins: Number of histogram bins. Default ``256``.
+
+    Returns:
+        The threshold; pixels strictly above it are foreground.
+
+    Raises:
+        ValueError: If ``values`` contains no finite entries.
+    """
     finite = np.asarray(values, dtype=float)
     finite = finite[np.isfinite(finite)]
     if finite.size == 0:
@@ -82,8 +110,24 @@ def otsu_threshold(values: np.ndarray, *, nbins: int = 256) -> float:
     return float(centers[int(np.argmax(variance))])
 
 
-def resolve_threshold(values: np.ndarray, threshold: ThresholdMode) -> float:
-    """Resolve an absolute, Otsu, or percentile threshold to a float."""
+def resolve_threshold(
+    values: Num[np.ndarray, "*dims"], threshold: ThresholdMode
+) -> float:
+    """Resolve an absolute, Otsu, or percentile threshold to a float.
+
+    Args:
+        values: Data the data-driven modes are evaluated on.
+        threshold: A number (returned as-is), ``"otsu"`` (see
+            :func:`otsu_threshold`), or ``"percentile:<p>"`` with ``p``
+            in ``[0, 100]`` (NaN-aware percentile of ``values``).
+
+    Returns:
+        The resolved threshold value.
+
+    Raises:
+        ValueError: If a string threshold is neither ``"otsu"`` nor a
+            valid ``"percentile:<p>"`` spec.
+    """
     if isinstance(threshold, str):
         if threshold == "otsu":
             return otsu_threshold(values)
@@ -97,8 +141,20 @@ def resolve_threshold(values: np.ndarray, threshold: ThresholdMode) -> float:
     return float(threshold)
 
 
-def connectivity_structure(connectivity: Connectivity) -> np.ndarray:
-    """Return a 2-D connected-component structure for 4- or 8-connectivity."""
+def connectivity_structure(connectivity: Connectivity) -> Bool[np.ndarray, "3 3"]:
+    """Return a 2-D connected-component structure for 4- or 8-connectivity.
+
+    Args:
+        connectivity: ``4`` (edge neighbors) or ``8`` (edge + diagonal
+            neighbors).
+
+    Returns:
+        A ``(3, 3)`` boolean structuring element suitable for
+        :func:`scipy.ndimage.label`.
+
+    Raises:
+        ValueError: If ``connectivity`` is not 4 or 8.
+    """
     if connectivity == 4:
         return ndimage.generate_binary_structure(2, 1)
     if connectivity == 8:
@@ -107,17 +163,31 @@ def connectivity_structure(connectivity: Connectivity) -> np.ndarray:
 
 
 def label_components(
-    mask: np.ndarray,
+    mask: Bool[np.ndarray, "h w"],
     *,
     min_area: int = 1,
     connectivity: Connectivity = 8,
-) -> np.ndarray:
+) -> Int[np.ndarray, "h w"]:
     """Label connected True regions and drop components below ``min_area``.
 
     Uses :func:`scipy.ndimage.label` for the connectivity, then renumbers
     the surviving components contiguously (1..K) without a second
     labelling pass — dropping pixels from a labelled image cannot merge
     distinct components.
+
+    Args:
+        mask: 2-D boolean map (any array-like is coerced to bool).
+        min_area: Minimum component size in pixels; smaller components
+            are mapped to background.
+        connectivity: 4 or 8 connectivity for component labelling.
+
+    Returns:
+        An int32 label image with contiguous labels ``1..K`` for the
+        surviving components and ``0`` for background.
+
+    Raises:
+        ValueError: If ``min_area`` is smaller than 1 or ``connectivity``
+            is not 4 or 8.
     """
     if min_area < 1:
         raise ValueError("min_area must be >= 1")
@@ -138,13 +208,24 @@ def label_components(
 
 
 def plume_mask(
-    values: np.ndarray,
+    values: Num[np.ndarray, "h w"] | Num[np.ndarray, "1 h w"],
     *,
     threshold: ThresholdMode = "otsu",
     min_area: int = 50,
     connectivity: Connectivity = 8,
-) -> np.ndarray:
-    """Threshold an enhancement map and remove small connected components."""
+) -> Bool[np.ndarray, "h w"]:
+    """Threshold an enhancement map and remove small connected components.
+
+    Args:
+        values: Single-band enhancement map, ``(H, W)`` or ``(1, H, W)``.
+        threshold: Absolute number, ``"otsu"``, or ``"percentile:<p>"``;
+            see :func:`resolve_threshold`.
+        min_area: Minimum connected-component size in pixels.
+        connectivity: 4 or 8 connectivity for component labelling.
+
+    Returns:
+        Boolean ``(H, W)`` mask of the surviving plume pixels.
+    """
     arr = squeeze_single_band(values)
     cutoff = resolve_threshold(arr, threshold)
     raw = np.asarray(arr) > cutoff
@@ -152,14 +233,33 @@ def plume_mask(
 
 
 def pixel_area(transform: Any) -> float:
-    """Return pixel area from an affine-like transform determinant."""
+    """Return pixel area from an affine-like transform determinant.
+
+    Args:
+        transform: Affine-like object exposing ``a``, ``b``, ``d``, ``e``
+            coefficients (e.g. ``rasterio.Affine``).
+
+    Returns:
+        ``|a*e - b*d|`` — the pixel area in squared CRS units (m^2 for a
+        projected metric CRS).
+    """
     return float(abs(transform.a * transform.e - transform.b * transform.d))
 
 
 def pixel_centers(
     shape: tuple[int, int], transform: Any
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return x/y coordinate grids for pixel centers."""
+) -> tuple[Float[np.ndarray, "h w"], Float[np.ndarray, "h w"]]:
+    """Return x/y coordinate grids for pixel centers.
+
+    Args:
+        shape: Raster shape ``(H, W)``.
+        transform: Affine-like geotransform mapping ``(col, row)`` pixel
+            indices to CRS coordinates.
+
+    Returns:
+        Tuple ``(xs, ys)`` of ``(H, W)`` float arrays holding the CRS
+        coordinates of each pixel center.
+    """
     rows, cols = np.indices(shape, dtype=float)
     xs = transform.c + transform.a * (cols + 0.5) + transform.b * (rows + 0.5)
     ys = transform.f + transform.d * (cols + 0.5) + transform.e * (rows + 0.5)
@@ -175,8 +275,31 @@ def wind_advection_cone(
     wind_v: float,
     half_angle_deg: float = 30.0,
     max_distance: float = 5000.0,
-) -> np.ndarray:
-    """Rasterize an analytical downwind sector mask."""
+) -> Bool[np.ndarray, "h w"]:
+    """Rasterize an analytical downwind sector mask.
+
+    Marks pixels whose center lies within ``max_distance`` of ``source``
+    and whose bearing from the source is within ``half_angle_deg`` of the
+    wind direction ``(wind_u, wind_v)`` — a geometric prior for where an
+    advected plume can be. The source pixel itself is included.
+
+    Args:
+        shape: Raster shape ``(H, W)``.
+        transform: Affine-like geotransform of the raster; its CRS units
+            must match ``source`` and ``max_distance``.
+        source: ``(x, y)`` source coordinates in CRS units.
+        wind_u: Eastward wind component.
+        wind_v: Northward wind component.
+        half_angle_deg: Half-angle of the sector in degrees, in [0, 180].
+        max_distance: Sector radius in CRS units.
+
+    Returns:
+        Boolean ``(H, W)`` mask, True inside the downwind sector.
+
+    Raises:
+        ValueError: If the wind vector is zero, ``half_angle_deg`` is
+            outside [0, 180], or ``max_distance`` is not positive.
+    """
     wind_norm = float(np.hypot(wind_u, wind_v))
     if wind_norm == 0.0:
         raise ValueError("wind vector must be non-zero")
@@ -201,12 +324,12 @@ def wind_advection_cone(
 
 
 def convert_column_units(
-    values: np.ndarray,
+    values: Num[np.ndarray, "*dims"],
     *,
     gas: str = "CH4",
     units_in: ColumnUnit = "ppm_m",
     units_out: ColumnUnit = "kg_m2",
-) -> np.ndarray:
+) -> Float[np.ndarray, "*dims"]:
     r"""Convert column enhancement among ppm m, mol/m^2, and kg/m^2.
 
     The conversions are
@@ -254,7 +377,7 @@ def convert_column_units(
 
 
 def plume_length(
-    mask: np.ndarray,
+    mask: Bool[np.ndarray, "h w"],
     transform: Any,
     *,
     method: Literal["max_axis", "convex_hull", "skeleton"] = "max_axis",
@@ -303,7 +426,7 @@ def plume_length(
     raise ValueError("length_method must be 'max_axis', 'convex_hull', or 'skeleton'")
 
 
-def _longest_active_pixel_path(mask: np.ndarray, transform: Any) -> float:
+def _longest_active_pixel_path(mask: Bool[np.ndarray, "h w"], transform: Any) -> float:
     """Approximate centerline length as the longest 4-neighbor pixel path.
 
     The 4-neighbor graph avoids diagonal corner-cutting through plume

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from geotoolz.mask._src.array import (
     altitude_mask,
+    apply_mask,
     buffer_mask,
     clean_mask,
     close_mask,
@@ -62,6 +63,7 @@ __all__ = [
     "RemoveSmallObjects",
     "SlopeMask",
     "altitude_mask",
+    "apply_mask",
     "buffer_mask",
     "clean_mask",
     "close_mask",

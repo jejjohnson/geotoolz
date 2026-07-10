@@ -1,8 +1,10 @@
-"""Matched-stack operators — multi-source fusion of co-registered tensors.
+"""Multi-source fusion operators over co-registered ("matched") tensors.
 
 Sibling to the existing composites (``MaxNDVIComposite``,
 ``CloudFreeComposite``, etc.) but for a *matched tuple* of tensors
 from different sources rather than a temporal stack of one sensor.
+"Matched" here means matched *grids* (same shape / transform / CRS) —
+unrelated to the `geotoolz.matched_filter` target-detection family.
 
 * `StackMatched` — concatenate N aligned tensors along the band axis.
 * `BlendMatched` — weighted mean across N aligned tensors, with
@@ -10,7 +12,10 @@ from different sources rather than a temporal stack of one sensor.
   present.
 
 Inputs are assumed already co-registered (typically by a
-``geotoolz.geom.coregister`` operator before this op).
+``geotoolz.geom.coregister`` operator before this op). Both operators
+also accept plain ``np.ndarray`` inputs — the math is metadata-free —
+in which case the co-registration check degrades to spatial-shape
+equality and the output is a plain array.
 """
 
 from __future__ import annotations
@@ -19,24 +24,37 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from jaxtyping import Shaped
 from pipekit import Operator
+
+from geotoolz._src.wrap import wrap_like
 
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-def _grid_matches(a: GeoTensor, b: GeoTensor) -> bool:
-    """Exact grid equality — affine drift on a fused stack is a real bug source."""
-    h_w_a = a.shape[-2:]
-    h_w_b = b.shape[-2:]
-    return h_w_a == h_w_b and a.transform == b.transform and a.crs == b.crs
+def _grid_matches(a: GeoTensor | np.ndarray, b: GeoTensor | np.ndarray) -> bool:
+    """Exact grid equality — affine drift on a fused stack is a real bug source.
+
+    Plain arrays carry no georeferencing, so when either side lacks a
+    ``transform`` the check degrades to spatial-shape equality only.
+    """
+    if a.shape[-2:] != b.shape[-2:]:
+        return False
+    a_transform = getattr(a, "transform", None)
+    b_transform = getattr(b, "transform", None)
+    if a_transform is None or b_transform is None:
+        return True
+    return a_transform == b_transform and getattr(a, "crs", None) == getattr(
+        b, "crs", None
+    )
 
 
 def _normalize_to_sequence(
-    tensors: Sequence[GeoTensor] | Mapping[str, GeoTensor],
+    tensors: Sequence[GeoTensor | np.ndarray] | Mapping[str, GeoTensor | np.ndarray],
     order: list[str] | None,
-) -> tuple[list[GeoTensor], list[str] | None]:
+) -> tuple[list[GeoTensor | np.ndarray], list[str] | None]:
     """Accept either a Sequence or a Mapping; return a parallel sequence + names.
 
     When the input is a Mapping, ``order`` (if given) **must cover
@@ -72,7 +90,9 @@ def _normalize_to_sequence(
     return list(tensors), None
 
 
-def _as_band_first(values: np.ndarray) -> np.ndarray:
+def _as_band_first(
+    values: Shaped[np.ndarray, "*bands h w"],
+) -> Shaped[np.ndarray, "c h w"]:
     """Promote ``(H, W)`` to ``(1, H, W)``; leave ``(C, H, W)`` alone."""
     if values.ndim == 2:
         return values[None, :, :]
@@ -90,7 +110,10 @@ class StackMatched(Operator):
     Inputs are either a `Sequence[GeoTensor]` or a
     ``Mapping[str, GeoTensor]`` — typical when called on
     `MatchedPatch.members`. All inputs must share spatial shape,
-    transform, and CRS; the per-tensor band count may differ.
+    transform, and CRS; the per-tensor band count may differ. Plain
+    ``np.ndarray`` inputs are also accepted (the concatenation itself is
+    metadata-free); grid verification then degrades to spatial-shape
+    equality and the output carrier follows the first input.
 
     Args:
         order: When the input is a Mapping, this list fixes the
@@ -128,8 +151,9 @@ class StackMatched(Operator):
 
     def __call__(
         self,
-        tensors: Sequence[GeoTensor] | Mapping[str, GeoTensor],
-    ) -> GeoTensor:
+        tensors: Sequence[GeoTensor | np.ndarray]
+        | Mapping[str, GeoTensor | np.ndarray],
+    ) -> GeoTensor | np.ndarray:
         seq, _names = _normalize_to_sequence(tensors, self.order)
         if not seq:
             raise ValueError("StackMatched requires at least one input tensor.")
@@ -144,14 +168,14 @@ class StackMatched(Operator):
                     "StackMatched inputs must share spatial shape, "
                     "transform, and CRS; "
                     f"input 0 has shape {base.shape[-2:]}, "
-                    f"transform {base.transform!r}; "
+                    f"transform {getattr(base, 'transform', None)!r}; "
                     f"input {idx} has shape {frame.shape[-2:]}, "
-                    f"transform {frame.transform!r}."
+                    f"transform {getattr(frame, 'transform', None)!r}."
                 )
 
         arrays = [_as_band_first(np.asarray(t)) for t in seq]
         stacked = np.concatenate(arrays, axis=0)
-        return base.array_as_geotensor(stacked)
+        return wrap_like(base, stacked)
 
 
 class BlendMatched(Operator):
@@ -179,7 +203,10 @@ class BlendMatched(Operator):
     All inputs must share spatial shape, transform, and CRS. The
     band axis must also be uniform (use `StackMatched` if you want
     cross-source band concatenation; `BlendMatched` is the per-pixel
-    averaging counterpart).
+    averaging counterpart). Plain ``np.ndarray`` inputs are also
+    accepted (the blend is metadata-free per-pixel math); grid
+    verification then degrades to shape equality and the output
+    carrier follows the first input.
 
     When ``tensors`` is a ``Mapping``, the per-source order used by
     ``weighted_mean`` / ``ivw`` follows the mapping's iteration order
@@ -234,9 +261,10 @@ class BlendMatched(Operator):
 
     def __call__(
         self,
-        tensors: Sequence[GeoTensor] | Mapping[str, GeoTensor],
+        tensors: Sequence[GeoTensor | np.ndarray]
+        | Mapping[str, GeoTensor | np.ndarray],
         variances: Sequence[np.ndarray] | None = None,
-    ) -> GeoTensor:
+    ) -> GeoTensor | np.ndarray:
         if variances is not None and self.method != "ivw":
             raise ValueError(
                 "BlendMatched: `variances` is only accepted when "
@@ -256,9 +284,9 @@ class BlendMatched(Operator):
                     "BlendMatched inputs must share spatial shape, "
                     "transform, and CRS; "
                     f"input 0 has shape {base.shape[-2:]}, "
-                    f"transform {base.transform!r}; "
+                    f"transform {getattr(base, 'transform', None)!r}; "
                     f"input {idx} has shape {frame.shape[-2:]}, "
-                    f"transform {frame.transform!r}."
+                    f"transform {getattr(frame, 'transform', None)!r}."
                 )
             if frame.shape != base.shape:
                 raise ValueError(
@@ -350,4 +378,4 @@ class BlendMatched(Operator):
             with np.errstate(invalid="ignore", divide="ignore"):
                 result = np.where(den > 0, num / den, np.nan)
 
-        return base.array_as_geotensor(result)
+        return wrap_like(base, result)

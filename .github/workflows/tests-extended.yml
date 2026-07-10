@@ -1,0 +1,50 @@
+# Extended test tiers — run MANUALLY from the Actions tab.
+#
+# The automatic CI workflow (ci.yml) runs only the fast tier
+# (`-m "not slow and not integration"`). This workflow covers the rest:
+# `slow` (built wheels, big arrays, model inference) and `integration`
+# (external services / real remote data). Keeping it manual means heavy
+# tests never burn CI minutes on every push.
+name: Extended Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      marker:
+        description: "Which tier to run"
+        type: choice
+        default: "slow or integration"
+        options:
+          - "slow or integration"
+          - "slow"
+          - "integration"
+
+permissions:
+  contents: read
+
+jobs:
+  extended:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --all-extras --group dev
+      # Some slow tests exercise the built wheel (package-data checks).
+      - name: Build wheel
+        run: uv build
+      # Coverage is disabled: a marker-filtered subset can't meet the
+      # repo-wide fail_under floor. pytest exit code 5 (nothing collected
+      # for the marker) is treated as success so an empty tier stays green.
+      - name: Run extended tests
+        run: |
+          set +e
+          uv run pytest -v --no-cov -m "${{ inputs.marker }}"
+          rc=$?
+          if [ "$rc" -eq 5 ]; then
+            echo "No tests collected for marker '${{ inputs.marker }}' — OK"
+            exit 0
+          fi
+          exit $rc

@@ -13,32 +13,47 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
+from jaxtyping import Float, Int, Num, Shaped, UInt8
+
+from geotoolz._src.shape import single_band
+from geotoolz._src.stretch import percentile_stretch
 
 
 Color = tuple[float, float, float, float]
 
 
 def composite(
-    arr: np.ndarray,
+    arr: Shaped[np.ndarray, "*dims"],
     bands: Sequence[int],
     *,
     axis: int = 0,
-) -> np.ndarray:
+) -> Shaped[np.ndarray, "*dims"]:
     """Select display bands from ``arr`` while preserving spatial axes.
 
     Thin wrapper around :func:`numpy.take` that accepts any integer
     iterable so band tuples and lists round-trip through hydra-zen.
+
+    Args:
+        arr: Input cube, typically ``(C, H, W)``. Any shape works as
+            long as ``axis`` indexes the band dimension.
+        bands: Integer band positions to select, in output order.
+            Repeats are allowed (e.g. grayscale-to-RGB).
+        axis: Band axis to take along. Default ``0``.
+
+    Returns:
+        Array with ``len(bands)`` slices along ``axis``; all other axes
+        are unchanged. Same dtype as ``arr``.
     """
     return np.take(arr, list(bands), axis=axis)
 
 
 def stretch_to_uint8(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch h w"],
     *,
     lower: float = 2.0,
     upper: float = 98.0,
     per_band: bool = True,
-) -> np.ndarray:
+) -> UInt8[np.ndarray, "*batch h w"]:
     """Percentile stretch an array into display-ready ``uint8`` values.
 
     A NaN-safe variant of :func:`geotoolz.radiometry.percentile_clip`
@@ -58,16 +73,13 @@ def stretch_to_uint8(
             f"stretch_to_uint8 requires upper > lower; got {lower=}, {upper=}"
         )
     axis = (-2, -1) if per_band and arr.ndim > 2 else None
-    lo = np.nanpercentile(arr, lower, axis=axis, keepdims=True)
-    hi = np.nanpercentile(arr, upper, axis=axis, keepdims=True)
-    denom = np.where(hi > lo, hi - lo, 1.0)
-    scaled = np.clip((arr - lo) / denom, 0.0, 1.0)
+    scaled = percentile_stretch(arr, lower, upper, axis=axis)
     return np.nan_to_num(scaled * 255.0, nan=0.0).astype(np.uint8)
 
 
 def gamma_correct_display(
-    arr: np.ndarray, *, gamma: float = 1.0, inplace_norm: bool = True
-) -> np.ndarray:
+    arr: Num[np.ndarray, "*dims"], *, gamma: float = 1.0, inplace_norm: bool = True
+) -> Num[np.ndarray, "*dims"]:
     """Apply power-law gamma correction to display-range arrays.
 
     Gamma is a unit-interval operation: the math
@@ -108,15 +120,38 @@ def gamma_correct_display(
 
 
 def rgba_from_scalar(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "h w"] | Num[np.ndarray, "1 h w"],
     cmap: Callable[[np.ndarray], np.ndarray],
     *,
     vmin: float | None = None,
     vmax: float | None = None,
     nan_color: Color = (0.0, 0.0, 0.0, 0.0),
-) -> np.ndarray:
-    """Map a single-band array to a four-band uint8 RGBA image."""
-    band = _single_band(arr)
+) -> UInt8[np.ndarray, "4 h w"]:
+    """Map a single-band array to a four-band uint8 RGBA image.
+
+    Values are linearly normalised into ``[0, 1]`` between ``vmin`` and
+    ``vmax`` (auto-detected from the finite values when omitted), then
+    looked up through ``cmap``. Non-finite pixels are painted with
+    ``nan_color`` rather than whatever the colormap does at 0.
+
+    Args:
+        arr: Single-band map, ``(H, W)`` or ``(1, H, W)``.
+        cmap: Matplotlib-style callable mapping unit-interval floats to
+            ``(..., 4)`` RGBA floats in ``[0, 1]``.
+        vmin: Lower normalisation bound. ``None`` uses the finite
+            minimum of ``arr``.
+        vmax: Upper normalisation bound. ``None`` uses the finite
+            maximum of ``arr``.
+        nan_color: RGBA tuple in ``[0, 1]`` painted over non-finite
+            pixels. Default fully transparent.
+
+    Returns:
+        Channel-first ``(4, H, W)`` ``uint8`` RGBA image.
+
+    Raises:
+        ValueError: If ``arr`` is not a single-band map.
+    """
+    band = single_band(arr, name="rgba_from_scalar")
     valid = np.isfinite(band)
     if vmin is None:
         vmin = float(np.nanmin(band)) if valid.any() else 0.0
@@ -132,13 +167,31 @@ def rgba_from_scalar(
 
 
 def rgba_from_categories(
-    arr: np.ndarray,
+    arr: Int[np.ndarray, "h w"] | Int[np.ndarray, "1 h w"],
     mapping: Mapping[int, Color],
     *,
     default: Color = (0.0, 0.0, 0.0, 0.0),
-) -> np.ndarray:
-    """Map integer classes to a four-band uint8 RGBA image."""
-    band = _single_band(arr)
+) -> UInt8[np.ndarray, "4 h w"]:
+    """Map integer classes to a four-band uint8 RGBA image.
+
+    Categorical-label rendering: each class ID in ``mapping`` paints its
+    pixels with the associated colour; pixels whose value is not in the
+    mapping fall back to ``default``.
+
+    Args:
+        arr: Single-band label map, ``(H, W)`` or ``(1, H, W)``.
+        mapping: ``{class_id: (r, g, b, a)}`` lookup table with float
+            components in ``[0, 1]``.
+        default: RGBA colour for unmapped classes. Default fully
+            transparent.
+
+    Returns:
+        Channel-first ``(4, H, W)`` ``uint8`` RGBA image.
+
+    Raises:
+        ValueError: If ``arr`` is not a single-band map.
+    """
+    band = single_band(arr, name="rgba_from_categories")
     rgba = np.zeros((*band.shape, 4), dtype=np.float32)
     rgba[...] = np.asarray(default, dtype=np.float32)
     for value, color in mapping.items():
@@ -147,16 +200,42 @@ def rgba_from_categories(
 
 
 def hillshade(
-    dem: np.ndarray,
+    dem: Num[np.ndarray, "h w"] | Num[np.ndarray, "1 h w"],
     *,
     x_resolution: float = 1.0,
     y_resolution: float = 1.0,
     azimuth_deg: float = 315.0,
     altitude_deg: float = 45.0,
     z_factor: float = 1.0,
-) -> np.ndarray:
-    """Compute GDAL-style hillshade as a single ``uint8`` band."""
-    band = _single_band(dem).astype(np.float64, copy=False)
+) -> UInt8[np.ndarray, "h w"]:
+    """Compute GDAL-style hillshade as a single ``uint8`` band.
+
+    Slope and aspect are derived from the DEM gradient (in map units,
+    via ``x_resolution`` / ``y_resolution``) and combined with a sun
+    position to give the classic terrain-shading effect. Illumination
+    is clipped to ``[0, 1]`` and scaled to byte range.
+
+    Args:
+        dem: Elevation map, ``(H, W)`` or ``(1, H, W)``, in the same
+            linear units as the resolutions (after ``z_factor``).
+        x_resolution: Pixel width in map units. Default ``1.0``.
+        y_resolution: Pixel height in map units. Default ``1.0``.
+        azimuth_deg: Sun azimuth in degrees clockwise from north.
+            Default ``315`` (NW — the cartographic convention).
+        altitude_deg: Sun elevation in degrees above the horizon.
+            Default ``45``. Values ``>= 90`` short-circuit to a flat
+            fully lit (255) image.
+        z_factor: Vertical exaggeration applied to the DEM before the
+            gradient. Default ``1.0``.
+
+    Returns:
+        ``(H, W)`` ``uint8`` shading band (0 = fully shaded, 255 =
+        fully lit).
+
+    Raises:
+        ValueError: If ``dem`` is not a single-band map.
+    """
+    band = single_band(dem, name="hillshade").astype(np.float64, copy=False)
     if altitude_deg >= 90.0:
         return np.full(band.shape, 255, dtype=np.uint8)
 
@@ -174,13 +253,37 @@ def hillshade(
 
 
 def blend_rgba(
-    background: np.ndarray,
-    foreground: np.ndarray,
+    background: Num[np.ndarray, "h w"] | Num[np.ndarray, "c h w"],
+    foreground: Num[np.ndarray, "h w"] | Num[np.ndarray, "c h w"],
     *,
     alpha: float = 0.6,
     mode: str = "alpha",
-) -> np.ndarray:
-    """Blend two display images and return uint8 RGBA."""
+) -> UInt8[np.ndarray, "4 h w"]:
+    """Blend two display images and return uint8 RGBA.
+
+    Both inputs are first promoted through :func:`ensure_rgba` (2-D
+    grayscale, 3-band RGB, or 4-band RGBA in). The foreground's alpha
+    channel is scaled by ``alpha`` and composed over the background
+    using source-over alpha composition, so partially transparent
+    layers accumulate opacity correctly.
+
+    Args:
+        background: Bottom layer — ``(H, W)``, ``(3, H, W)``, or
+            ``(4, H, W)``.
+        foreground: Top layer on the same pixel grid.
+        alpha: Global foreground opacity in ``[0, 1]``. ``0`` returns
+            the background (as RGBA) untouched. Default ``0.6``.
+        mode: Blend mode for the RGB channels — ``"alpha"`` (normal
+            source-over), ``"multiply"``, or ``"screen"``. Default
+            ``"alpha"``.
+
+    Returns:
+        ``(4, H, W)`` ``uint8`` RGBA composite.
+
+    Raises:
+        ValueError: If ``alpha`` is outside ``[0, 1]``, the spatial
+            grids differ, or ``mode`` is not a supported blend mode.
+    """
     if not 0.0 <= alpha <= 1.0:
         raise ValueError(f"blend_rgba requires alpha in [0, 1]; got {alpha}")
     bg = ensure_rgba(background)
@@ -215,7 +318,9 @@ def blend_rgba(
     )
 
 
-def ensure_rgba(arr: np.ndarray) -> np.ndarray:
+def ensure_rgba(
+    arr: Num[np.ndarray, "h w"] | Num[np.ndarray, "c h w"],
+) -> UInt8[np.ndarray, "4 h w"]:
     """Return ``arr`` as a four-band uint8 RGBA image.
 
     Float inputs with all finite values in ``[0, 1]`` are scaled to byte
@@ -245,14 +350,7 @@ def ensure_rgba(arr: np.ndarray) -> np.ndarray:
     return np.nan_to_num(np.clip(scaled, 0.0, 255.0), nan=0.0).astype(np.uint8)
 
 
-def _single_band(arr: np.ndarray) -> np.ndarray:
-    values = np.asarray(arr)
-    if values.ndim == 2:
-        return values
-    if values.ndim == 3 and values.shape[0] == 1:
-        return values[0]
-    raise ValueError(f"expected a single-band array; got shape {values.shape}")
-
-
-def _float_rgba_to_uint8(rgba: np.ndarray) -> np.ndarray:
+def _float_rgba_to_uint8(
+    rgba: Float[np.ndarray, "h w 4"],
+) -> UInt8[np.ndarray, "4 h w"]:
     return np.clip(np.moveaxis(rgba, -1, 0) * 255.0, 0.0, 255.0).astype(np.uint8)

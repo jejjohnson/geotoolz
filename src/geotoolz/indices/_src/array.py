@@ -26,16 +26,17 @@ black background, etc.).
 from __future__ import annotations
 
 import numpy as np
+from jaxtyping import Float, Num
 
 
 def normalized_difference(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     a_idx: int,
     b_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Generic normalized-difference band ratio.
 
     Computes
@@ -86,13 +87,13 @@ def normalized_difference(
 
 
 def ndvi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     nir_idx: int,
     red_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Normalized Difference Vegetation Index (Rouse et al. 1974).
 
     .. math::
@@ -130,13 +131,13 @@ def ndvi(
 
 
 def ndwi_mcfeeters(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     green_idx: int,
     nir_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Normalized Difference Water Index (McFeeters 1996).
 
     .. math::
@@ -173,13 +174,13 @@ def ndwi_mcfeeters(
 
 
 def ndbi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     swir_idx: int,
     nir_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Normalized Difference Built-up Index (Zha et al. 2003).
 
     .. math::
@@ -215,13 +216,13 @@ def ndbi(
 
 
 def nbr(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     nir_idx: int,
     swir2_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Normalized Burn Ratio (Key & Benson 2006).
 
     .. math::
@@ -256,14 +257,14 @@ def nbr(
 
 
 def savi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     nir_idx: int,
     red_idx: int,
     *,
     L: float = 0.5,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Soil-Adjusted Vegetation Index (Huete 1988).
 
     .. math::
@@ -308,7 +309,7 @@ def savi(
 
 
 def evi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     nir_idx: int,
     red_idx: int,
     blue_idx: int,
@@ -319,7 +320,7 @@ def evi(
     L: float = 1.0,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Enhanced Vegetation Index (Huete et al. 2002).
 
     .. math::
@@ -366,13 +367,13 @@ def evi(
 
 
 def evi2(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     nir_idx: int,
     red_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Two-band Enhanced Vegetation Index (Jiang et al. 2008).
 
     .. math::
@@ -384,6 +385,16 @@ def evi2(
     A blue-band-free approximation to EVI tuned to track it within a
     few percent over most cover types.
 
+    Args:
+        arr: Input reflectance ndarray.
+        nir_idx: NIR band index.
+        red_idx: Red band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed.
+
     References:
         Jiang, Z., Huete, A. R., Didan, K., & Miura, T. (2008).
         *Remote Sensing of Environment*, 112(10), 3833–3845.
@@ -394,7 +405,7 @@ def evi2(
 
 
 def arvi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     nir_idx: int,
     red_idx: int,
     blue_idx: int,
@@ -402,7 +413,7 @@ def arvi(
     gamma: float = 1.0,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Atmospherically Resistant Vegetation Index (Kaufman & Tanre 1992).
 
     .. math::
@@ -415,6 +426,18 @@ def arvi(
 
     The Blue-band correction cancels aerosol-driven red inflation.
     Pass ``gamma=1`` for the original MODIS-derived value.
+
+    Args:
+        arr: Input reflectance ndarray.
+        nir_idx: NIR band index.
+        red_idx: Red band index.
+        blue_idx: Blue band index.
+        gamma: Aerosol-correction strength. Default ``1.0``.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed.
     """
     nir = np.take(arr, nir_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
@@ -424,13 +447,13 @@ def arvi(
 
 
 def gci(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     nir_idx: int,
     green_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Green Chlorophyll Index (Gitelson et al. 2003).
 
     .. math::
@@ -440,6 +463,16 @@ def gci(
 
     Roughly linear in canopy chlorophyll content; saturates much
     later than NDVI.
+
+    Args:
+        arr: Input reflectance ndarray.
+        nir_idx: NIR band index.
+        green_idx: Green band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed.
     """
     nir = np.take(arr, nir_idx, axis=axis)
     green = np.take(arr, green_idx, axis=axis)
@@ -447,13 +480,13 @@ def gci(
 
 
 def kndvi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     nir_idx: int,
     red_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Kernel NDVI (Camps-Valls et al. 2021).
 
     .. math::
@@ -462,18 +495,28 @@ def kndvi(
 
     Non-linear transform of NDVI with reduced saturation and a
     closer-to-linear relationship to GPP.
+
+    Args:
+        arr: Input reflectance ndarray.
+        nir_idx: NIR band index.
+        red_idx: Red band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed; values in ``[0, 1)``.
     """
     return np.tanh(ndvi(arr, nir_idx, red_idx, axis=axis, eps=eps) ** 2)
 
 
 def mndwi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     green_idx: int,
     swir_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Modified Normalized Difference Water Index (Xu 2006).
 
     .. math::
@@ -484,18 +527,28 @@ def mndwi(
 
     Sharper water/non-water separation than McFeeters NDWI; reduces
     urban-surface confusion.
+
+    Args:
+        arr: Input reflectance ndarray.
+        green_idx: Green band index.
+        swir_idx: SWIR-1 band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed; values in ``[-1, +1]``.
     """
     return normalized_difference(arr, green_idx, swir_idx, axis=axis, eps=eps)
 
 
 def ndmi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     nir_idx: int,
     swir1_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Normalized Difference Moisture Index (Gao 1996).
 
     .. math::
@@ -505,18 +558,28 @@ def ndmi(
                                   + \varepsilon}
 
     Tracks vegetation *liquid-water content* (not surface water).
+
+    Args:
+        arr: Input reflectance ndarray.
+        nir_idx: NIR band index.
+        swir1_idx: SWIR-1 band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed; values in ``[-1, +1]``.
     """
     return normalized_difference(arr, nir_idx, swir1_idx, axis=axis, eps=eps)
 
 
 def ndsi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     green_idx: int,
     swir_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Normalized Difference Snow Index (Hall et al. 1995).
 
     .. math::
@@ -528,18 +591,28 @@ def ndsi(
     Snow / ice mapping (NDSI > 0.4 is the standard MODIS threshold).
     Shares its arithmetic form with MNDWI; the two indices are
     interpreted differently.
+
+    Args:
+        arr: Input reflectance ndarray.
+        green_idx: Green band index.
+        swir_idx: SWIR-1 band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed; values in ``[-1, +1]``.
     """
     return normalized_difference(arr, green_idx, swir_idx, axis=axis, eps=eps)
 
 
 def nbr2(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     swir1_idx: int,
     swir2_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Normalized Burn Ratio 2 (USGS Landsat product).
 
     .. math::
@@ -547,12 +620,22 @@ def nbr2(
         \mathrm{NBR2} \;=\; \frac{\rho_{\mathrm{SWIR1}} - \rho_{\mathrm{SWIR2}}}
                                  {\rho_{\mathrm{SWIR1}} + \rho_{\mathrm{SWIR2}}
                                   + \varepsilon}
+
+    Args:
+        arr: Input reflectance ndarray.
+        swir1_idx: SWIR-1 band index.
+        swir2_idx: SWIR-2 band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed; values in ``[-1, +1]``.
     """
     return normalized_difference(arr, swir1_idx, swir2_idx, axis=axis, eps=eps)
 
 
 def bais2(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     red_idx: int,
     red_edge1_idx: int,
     red_edge2_idx: int,
@@ -561,7 +644,7 @@ def bais2(
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Burned Area Index for Sentinel-2 (Filipponi 2018).
 
     .. math::
@@ -581,6 +664,11 @@ def bais2(
         red_edge2_idx: Second red-edge (B07) index.
         nir_idx: Narrow-NIR (B8A) index.
         swir2_idx: SWIR-2 (B12) index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed.
 
     References:
         Filipponi, F. (2018). *Proceedings*, 2(7), 364.
@@ -596,7 +684,7 @@ def bais2(
 
 
 def bsi(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     blue_idx: int,
     red_idx: int,
     nir_idx: int,
@@ -604,7 +692,7 @@ def bsi(
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Bare Soil Index (Rikimaru et al. 2002).
 
     .. math::
@@ -614,6 +702,18 @@ def bsi(
               (\rho_{\mathrm{NIR}}  + \rho_{\mathrm{Blue}})}
              {(\rho_{\mathrm{SWIR1}} + \rho_{\mathrm{Red}}) +
               (\rho_{\mathrm{NIR}}  + \rho_{\mathrm{Blue}}) + \varepsilon}
+
+    Args:
+        arr: Input reflectance ndarray.
+        blue_idx: Blue band index.
+        red_idx: Red band index.
+        nir_idx: NIR band index.
+        swir_idx: SWIR-1 band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed; values in ``[-1, +1]``.
     """
     blue = np.take(arr, blue_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
@@ -623,13 +723,13 @@ def bsi(
 
 
 def iron_oxide(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     red_idx: int,
     blue_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Iron Oxide ratio (Sabins 1999).
 
     .. math::
@@ -639,6 +739,16 @@ def iron_oxide(
 
     Hematite/goethite and related Fe(III) oxides absorb blue and
     reflect red.
+
+    Args:
+        arr: Input reflectance ndarray.
+        red_idx: Red band index.
+        blue_idx: Blue band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed; a Red/Blue band ratio.
     """
     red = np.take(arr, red_idx, axis=axis)
     blue = np.take(arr, blue_idx, axis=axis)
@@ -646,13 +756,13 @@ def iron_oxide(
 
 
 def clay_minerals(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     swir1_idx: int,
     swir2_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-10,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Clay Minerals ratio (Sabins 1999; Crowley et al. 1989).
 
     .. math::
@@ -662,6 +772,16 @@ def clay_minerals(
 
     OH-bearing minerals (kaolinite, illite, montmorillonite, alunite)
     have a diagnostic 2.2 µm absorption inside SWIR-2.
+
+    Args:
+        arr: Input reflectance ndarray.
+        swir1_idx: SWIR-1 band index.
+        swir2_idx: SWIR-2 band index.
+        axis: Band axis. Default ``0``.
+        eps: Denominator stabiliser. Default ``1e-10``.
+
+    Returns:
+        ndarray with the band axis collapsed; a SWIR1/SWIR2 band ratio.
     """
     swir1 = np.take(arr, swir1_idx, axis=axis)
     swir2 = np.take(arr, swir2_idx, axis=axis)
@@ -669,11 +789,11 @@ def clay_minerals(
 
 
 def ciri(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch c h w"],
     cirrus_idx: int,
     *,
     axis: int = 0,
-) -> np.ndarray:
+) -> Num[np.ndarray, "*batch h w"]:
     r"""Cirrus Reflectance Index (Sentinel-2 B10 passthrough).
 
     .. math::
@@ -683,5 +803,14 @@ def ciri(
     The 1.36–1.39 µm cirrus channel is opaque to surface signal due
     to water-vapour absorption; any non-trivial reflectance comes
     from high-altitude cloud.
+
+    Args:
+        arr: Input reflectance ndarray.
+        cirrus_idx: Cirrus band index (Sentinel-2 B10).
+        axis: Band axis. Default ``0``.
+
+    Returns:
+        ndarray with the band axis collapsed — the cirrus band itself,
+        dtype preserved.
     """
     return np.take(arr, cirrus_idx, axis=axis)

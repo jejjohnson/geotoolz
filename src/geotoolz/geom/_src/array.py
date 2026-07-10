@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 from affine import Affine
+from jaxtyping import Bool, Float, Shaped
 from rasterio.enums import Resampling
 
 from geotoolz._src.blending import triangular_weights
@@ -98,7 +99,7 @@ def is_north_up(transform: Affine) -> bool:
     return transform.b == 0 and transform.d == 0
 
 
-def feather_weights(shape: tuple[int, int], width: int) -> np.ndarray:
+def feather_weights(shape: tuple[int, int], width: int) -> Float[np.ndarray, "h w"]:
     r"""Edge-feathered weight kernel for tile blending.
 
     Builds a 2-D weight array where each pixel's weight is the minimum
@@ -184,7 +185,9 @@ def target_slices(
     )
 
 
-def valid_pixel_mask(tile: np.ndarray, fill: float | int | None) -> np.ndarray:
+def valid_pixel_mask(
+    tile: Shaped[np.ndarray, "*batch h w"], fill: float | int | None
+) -> Bool[np.ndarray, "h w"]:
     """Boolean mask of pixels not equal to ``fill``, collapsed over band axis.
 
     Tiles produced by ``Tile(include_incomplete=True, boundless=True)``

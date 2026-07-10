@@ -1,4 +1,15 @@
-"""Carrier-aware matched-filter Operators."""
+"""Carrier-aware matched-filter Operators.
+
+Thin ``pipekit.Operator`` wrappers around the Tier-A primitives in
+:mod:`geotoolz.matched_filter._src.array`. Matched-filter math is
+metadata-independent (covariance / Mahalanobis algebra over spectra),
+so every operator here accepts either a ``GeoTensor`` or a plain
+``np.ndarray`` cube. Operators whose output is an image (score maps)
+rewrap it to match the input carrier via
+:func:`geotoolz._src.wrap.wrap_like`; the estimator operators return
+non-carrier results (mean vectors, `NumpyLinearOperator`, background
+dataclasses) unchanged for either input kind.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.config import jsonable
+from geotoolz._src.wrap import wrap_like
 from geotoolz.matched_filter._src.array import (
     AdaptiveBackground,
     ClusterBackground,
@@ -46,8 +59,30 @@ TARGET_FINITE_DIFFERENCE_EPSILON = 1e-4
 class MatchedFilter(Operator):
     """Per-pixel matched-filter score map.
 
-    Computes ``y = (x - μ)^T Σ^-1 t / (t^T Σ^-1 t)`` and returns a
-    single-band ``GeoTensor`` that preserves the input georeferencing.
+    Computes ``y = (x - mu)^T Sigma^-1 t / (t^T Sigma^-1 t)`` for every
+    pixel spectrum and returns a single-band score map. Accepts either a
+    ``GeoTensor`` (georeferencing preserved on the output) or a plain
+    ``np.ndarray`` (plain array returned) — the math is metadata-free.
+
+    Missing statistics are fitted on the incoming cube: when ``mean`` or
+    ``cov_op`` is ``None`` (or on every call with ``fit_on_call=True``)
+    they are estimated with ``mean_method`` / ``cov_method`` and stored
+    back on the operator for reuse.
+
+    Args:
+        mean: Background mean spectrum ``(c,)``; fitted from the cube
+            when ``None``.
+        cov_op: Background covariance as a `NumpyLinearOperator` or raw
+            ``(c, c)`` matrix; fitted from the cube when ``None``.
+        target: Target signature ``(c,)``. Must be set before applying.
+        fit_on_call: Refit mean and covariance on every call instead of
+            only filling in the missing ones.
+        mean_method: Mean estimator used when fitting. Default
+            ``"median"``.
+        cov_method: Covariance estimator used when fitting —
+            ``"empirical"``, ``"ledoit_wolf"``, ``"oas"``, or
+            ``"lowrank"``. Default ``"ledoit_wolf"``.
+        axis: Position of the spectral axis. Default ``0``.
     """
 
     def __init__(
@@ -69,7 +104,7 @@ class MatchedFilter(Operator):
         self.cov_method = cov_method
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mean = self.mean
         cov_op = self.cov_op
         cube = np.asarray(gt)
@@ -94,9 +129,9 @@ class MatchedFilter(Operator):
         if self.target is None:
             raise ValueError("target must be supplied before applying MatchedFilter")
         out = apply_image(
-            np.asarray(gt), mean=mean, cov_op=cov_op, target=self.target, axis=self.axis
+            cube, mean=mean, cov_op=cov_op, target=self.target, axis=self.axis
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -111,7 +146,18 @@ class MatchedFilter(Operator):
 
 
 class MatchedFilterPixel(Operator):
-    """Single-pixel matched-filter score."""
+    """Single-pixel matched-filter score.
+
+    Scalar counterpart of :class:`MatchedFilter`: scores one pixel
+    spectrum (any 1-D array-like) against fixed background statistics
+    and returns a ``float``.
+
+    Args:
+        mean: Background mean spectrum ``(c,)``.
+        cov_op: Background covariance as a `NumpyLinearOperator` or raw
+            ``(c, c)`` matrix.
+        target: Target signature ``(c,)``.
+    """
 
     def __init__(
         self,
@@ -138,7 +184,18 @@ class MatchedFilterPixel(Operator):
 
 
 class MatchedFilterSNR(Operator):
-    """Theoretical detection SNR ``amplitude * sqrt(t^T Sigma^-1 t)``."""
+    """Theoretical detection SNR ``amplitude * sqrt(t^T Sigma^-1 t)``.
+
+    Source operator (takes no runtime input): returns the scalar
+    matched-filter output SNR for the configured amplitude, background
+    covariance, and target.
+
+    Args:
+        amplitude: Target amplitude.
+        cov_op: Background covariance as a `NumpyLinearOperator` or raw
+            ``(c, c)`` matrix.
+        target: Target signature ``(c,)``.
+    """
 
     def __init__(
         self,
@@ -165,7 +222,19 @@ class MatchedFilterSNR(Operator):
 
 
 class DetectionThreshold(Operator):
-    """Gaussian false-alarm score threshold."""
+    """Gaussian false-alarm score threshold.
+
+    Source operator (takes no runtime input): returns the scalar score
+    threshold whose exceedance probability under the Gaussian no-target
+    null equals ``false_alarm_rate``.
+
+    Args:
+        false_alarm_rate: Desired false-alarm probability, strictly
+            between 0 and 1.
+        cov_op: Background covariance as a `NumpyLinearOperator` or raw
+            ``(c, c)`` matrix.
+        target: Target signature ``(c,)``.
+    """
 
     def __init__(
         self,
@@ -194,7 +263,18 @@ class DetectionThreshold(Operator):
 
 
 class ValidateMFInputs(Operator):
-    """Fail-fast pass-through validator for matched-filter inputs."""
+    """Fail-fast pass-through validator for matched-filter inputs.
+
+    Raises ``ValueError`` early for an all-zero target, a singular
+    covariance, or a non-positive filter gain; otherwise returns its
+    runtime input unchanged (whatever its type), so it can be inserted
+    anywhere in a pipeline as a guard.
+
+    Args:
+        cov_op: Background covariance as a `NumpyLinearOperator` or raw
+            ``(c, c)`` matrix.
+        target: Target signature ``(c,)``.
+    """
 
     def __init__(
         self,
@@ -217,7 +297,21 @@ class ValidateMFInputs(Operator):
 
 
 class EstimateMean(Operator):
-    """Estimate a spectral background mean vector from a cube."""
+    """Estimate a spectral background mean vector from a cube.
+
+    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns the
+    plain ``(c,)`` mean spectrum (a vector, not a carrier). See
+    :func:`geotoolz.matched_filter._src.array.estimate_mean` for the
+    estimator details.
+
+    Args:
+        method: Mean estimator — ``"mean"``, ``"median"``, ``"trimmed"``,
+            or ``"huber"``.
+        trim_proportion: Fraction cut from each tail for
+            ``method="trimmed"``.
+        huber_c: Huber tuning constant for ``method="huber"``.
+        axis: Position of the spectral axis. Default ``0``.
+    """
 
     def __init__(
         self,
@@ -232,7 +326,7 @@ class EstimateMean(Operator):
         self.huber_c = huber_c
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> np.ndarray:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
         return estimate_mean(
             np.asarray(gt),
             method=self.method,
@@ -251,7 +345,18 @@ class EstimateMean(Operator):
 
 
 class EstimateCovEmpirical(Operator):
-    """Estimate an empirical covariance operator."""
+    """Estimate an empirical covariance operator.
+
+    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns a
+    `NumpyLinearOperator` (not a carrier) wrapping the ``(c, c)`` sample
+    covariance.
+
+    Args:
+        mean: Optional precomputed mean spectrum ``(c,)`` to centre on;
+            the sample mean is used when ``None``.
+        ridge: Optional Tikhonov ridge added to the diagonal.
+        axis: Position of the spectral axis. Default ``0``.
+    """
 
     def __init__(
         self, *, mean: np.ndarray | None = None, ridge: float = 0.0, axis: int = 0
@@ -260,7 +365,7 @@ class EstimateCovEmpirical(Operator):
         self.ridge = ridge
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> NumpyLinearOperator:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> NumpyLinearOperator:
         return estimate_cov_empirical(
             np.asarray(gt), mean=self.mean, ridge=self.ridge, axis=self.axis
         )
@@ -274,7 +379,19 @@ class EstimateCovEmpirical(Operator):
 
 
 class EstimateCovShrunk(Operator):
-    """Estimate a diagonal-target shrinkage covariance operator."""
+    """Estimate a diagonal-target shrinkage covariance operator.
+
+    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns a
+    `NumpyLinearOperator` (not a carrier) wrapping the covariance shrunk
+    toward a scaled-identity target.
+
+    Args:
+        mean: Optional precomputed mean spectrum ``(c,)`` to centre on;
+            the sample mean is used when ``None``.
+        method: Shrinkage-intensity estimator, ``"ledoit_wolf"`` or
+            ``"oas"``.
+        axis: Position of the spectral axis. Default ``0``.
+    """
 
     def __init__(
         self,
@@ -287,7 +404,7 @@ class EstimateCovShrunk(Operator):
         self.method = method
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> NumpyLinearOperator:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> NumpyLinearOperator:
         return estimate_cov_shrunk(
             np.asarray(gt), mean=self.mean, method=self.method, axis=self.axis
         )
@@ -301,7 +418,23 @@ class EstimateCovShrunk(Operator):
 
 
 class EstimateCovLowRank(Operator):
-    """Estimate a low-rank-plus-Tikhonov covariance operator."""
+    """Estimate a low-rank-plus-Tikhonov covariance operator.
+
+    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns a
+    `NumpyLinearOperator` (not a carrier) approximating the covariance
+    by its top-``rank`` eigenpairs plus a Tikhonov diagonal.
+
+    Args:
+        mean: Optional precomputed mean spectrum ``(c,)`` to centre on;
+            the sample mean is used when ``None``.
+        rank: Number of leading eigenpairs kept.
+        tikhonov: Diagonal regulariser added after the low-rank
+            reconstruction.
+        random_state: Seed for the randomized range finder; the default
+            ``0`` makes the estimate deterministic.
+        n_oversamples: Extra random probe vectors beyond ``rank``.
+        axis: Position of the spectral axis. Default ``0``.
+    """
 
     def __init__(
         self,
@@ -320,7 +453,7 @@ class EstimateCovLowRank(Operator):
         self.n_oversamples = n_oversamples
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> NumpyLinearOperator:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> NumpyLinearOperator:
         return estimate_cov_lowrank(
             np.asarray(gt),
             mean=self.mean,
@@ -343,7 +476,24 @@ class EstimateCovLowRank(Operator):
 
 
 class GMMClusterBackground(Operator):
-    """Estimate clustered background statistics with a NumPy k-means backend."""
+    """Estimate clustered background statistics with a NumPy GMM backend.
+
+    Runs the deterministic diagonal-GMM clustering (k-means initialised)
+    of :func:`geotoolz.matched_filter._src.array.gmm_cluster_background`.
+    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns a
+    `ClusterBackground` (labels plus per-cluster statistics, not a
+    carrier), typically wired into :class:`ApplyClusterMF`.
+
+    Args:
+        n_clusters: Number of mixture components.
+        cov_estimator: Per-cluster covariance estimator —
+            ``"empirical"``, ``"ledoit_wolf"``, or ``"oas"``.
+        random_state: Seed for the clustering; fixed seeds give
+            reproducible backgrounds.
+        bayesian: If ``True``, prune components with negligible mixture
+            weight, so fewer than ``n_clusters`` clusters may remain.
+        axis: Position of the spectral axis. Default ``0``.
+    """
 
     def __init__(
         self,
@@ -360,7 +510,7 @@ class GMMClusterBackground(Operator):
         self.bayesian = bayesian
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> ClusterBackground:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> ClusterBackground:
         return gmm_cluster_background(
             np.asarray(gt),
             n_clusters=self.n_clusters,
@@ -381,7 +531,18 @@ class GMMClusterBackground(Operator):
 
 
 class AdaptiveWindowBackground(Operator):
-    """Per-pixel local mean and diagonal variance over a square window."""
+    """Per-pixel local mean and diagonal variance over a square window.
+
+    Accepts a ``GeoTensor`` or plain ``np.ndarray`` 3-D cube and returns
+    an `AdaptiveBackground` (a pair of statistic cubes, not a carrier).
+
+    Args:
+        window_size: Side length of the square window; positive odd
+            integer. Default ``7``.
+        pad_mode: Boundary mode forwarded to
+            :func:`scipy.ndimage.uniform_filter`. Default ``"reflect"``.
+        axis: Position of the spectral axis. Default ``0``.
+    """
 
     def __init__(
         self, *, window_size: int = 7, pad_mode: str = "reflect", axis: int = 0
@@ -390,7 +551,7 @@ class AdaptiveWindowBackground(Operator):
         self.pad_mode = pad_mode
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> AdaptiveBackground:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> AdaptiveBackground:
         return adaptive_window_background(
             np.asarray(gt),
             window_size=self.window_size,
@@ -409,11 +570,18 @@ class AdaptiveWindowBackground(Operator):
 class ApplyClusterMF(Operator):
     """Apply a matched filter dispatched by per-pixel cluster label.
 
+    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns the
+    score map as the same carrier kind.
+
     The ``cluster`` background is supplied at apply time as a runtime input
     so the operator config (``target``, ``axis``) is hydra-/YAML-safe and
     fully describes the operator's init-time state. Pair this operator
     with :class:`GMMClusterBackground` in a pipeline to wire the cluster
     state through dataflow.
+
+    Args:
+        target: Target signature ``(c,)``.
+        axis: Position of the spectral axis. Default ``0``.
     """
 
     def __init__(
@@ -425,11 +593,13 @@ class ApplyClusterMF(Operator):
         self.target = target
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor, cluster: ClusterBackground) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, cluster: ClusterBackground
+    ) -> GeoTensor | np.ndarray:
         out = apply_cluster_mf(
             np.asarray(gt), cluster=cluster, target=self.target, axis=self.axis
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"target": np.asarray(self.target).tolist(), "axis": self.axis}
@@ -438,9 +608,19 @@ class ApplyClusterMF(Operator):
 class StreamingBackground(Operator):
     """Aggregate mean/covariance across an iterable of cubes.
 
+    Streams every cube through a `WelfordAccumulator` and returns a
+    `StreamingBackgroundResult` (mean vector plus covariance operator,
+    not a carrier). Cubes may be ``GeoTensor`` or plain ``np.ndarray``
+    and can be mixed freely.
+
     The cubes iterable is supplied at apply time (runtime dataflow) so the
     operator config remains hydra-/YAML-serialisable: ``cov_kind`` and
     ``axis`` fully describe the operator's init-time state.
+
+    Args:
+        cov_kind: ``"shrunk"`` (Ledoit-Wolf toward scaled identity,
+            default) or ``"empirical"``.
+        axis: Position of the spectral axis in each cube. Default ``0``.
     """
 
     def __init__(
@@ -452,7 +632,9 @@ class StreamingBackground(Operator):
         self.cov_kind = cov_kind
         self.axis = axis
 
-    def _apply(self, cubes: Iterable[GeoTensor]) -> StreamingBackgroundResult:
+    def _apply(
+        self, cubes: Iterable[GeoTensor | np.ndarray]
+    ) -> StreamingBackgroundResult:
         acc: WelfordAccumulator | None = None
         for cube in cubes:
             samples, _ = cube_to_samples(np.asarray(cube), axis=self.axis)
@@ -473,7 +655,26 @@ class StreamingBackground(Operator):
 
 
 class LinearTargetFromObs(Operator):
-    """Finite-difference tangent-linear target from a callable observation model."""
+    """Finite-difference tangent-linear target from an observation model.
+
+    Perturbs the background state by a small scaled pattern, pushes both
+    states through ``obs_model``, and divides the response difference by
+    the perturbation size — a per-band linearised (Jacobian-action)
+    target signature ``(c,)``. Accepts a ``GeoTensor`` or plain
+    ``np.ndarray`` cube and returns a plain vector (not a carrier).
+
+    Args:
+        obs_model: Callable mapping a state cube to a spectral response
+            (either a per-band vector or a cube that is averaged over
+            space). Must be callable.
+        vmr_background: Optional explicit background state; the incoming
+            cube is used when ``None``.
+        pattern: Perturbation pattern — ``"uniform"``, ``"impulse"``, or
+            an explicit array broadcastable to the background state.
+        pixel: Spatial index of the impulse for ``pattern="impulse"``;
+            the first flat pixel when ``None``.
+        axis: Position of the spectral axis. Default ``0``.
+    """
 
     def __init__(
         self,
@@ -490,7 +691,7 @@ class LinearTargetFromObs(Operator):
         self.pixel = pixel
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> np.ndarray:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
         return (
             _target_from_obs(
                 self.obs_model,
@@ -518,7 +719,27 @@ class LinearTargetFromObs(Operator):
 
 
 class NonlinearTargetFromObs(Operator):
-    """Finite-amplitude target from a callable observation model."""
+    """Finite-amplitude target from a callable observation model.
+
+    Like :class:`LinearTargetFromObs` but with a caller-chosen finite
+    perturbation ``amplitude`` and no division by it: the returned
+    ``(c,)`` signature is the raw response difference, which retains the
+    observation model's nonlinearity at that amplitude. Accepts a
+    ``GeoTensor`` or plain ``np.ndarray`` cube and returns a plain
+    vector (not a carrier).
+
+    Args:
+        obs_model: Callable mapping a state cube to a spectral response.
+            Must be callable.
+        vmr_background: Optional explicit background state; the incoming
+            cube is used when ``None``.
+        amplitude: Finite perturbation amplitude. Default ``1.0``.
+        pattern: Perturbation pattern — ``"uniform"``, ``"impulse"``, or
+            an explicit array broadcastable to the background state.
+        pixel: Spatial index of the impulse for ``pattern="impulse"``;
+            the first flat pixel when ``None``.
+        axis: Position of the spectral axis. Default ``0``.
+    """
 
     def __init__(
         self,
@@ -537,7 +758,7 @@ class NonlinearTargetFromObs(Operator):
         self.pixel = pixel
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> np.ndarray:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
         return _target_from_obs(
             self.obs_model,
             gt,
@@ -563,7 +784,31 @@ class NonlinearTargetFromObs(Operator):
 
 
 class ColumnEnhancement(Operator):
-    """Convenience trace-gas column-enhancement matched-filter composite."""
+    """Convenience trace-gas column-enhancement matched-filter composite.
+
+    Chains :class:`EstimateMean`, a covariance estimator, an optional
+    :class:`LinearTargetFromObs`, and :class:`MatchedFilter` into one
+    call. With ``obs_model=None`` the target defaults to a uniform unit
+    spectrum. Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and
+    returns the enhancement score map as the same carrier kind.
+
+    Args:
+        gas: Gas label recorded in the config (e.g. ``"CH4"``); metadata
+            only, not used in the math.
+        sensor: Sensor label recorded in the config (e.g. ``"EMIT"``);
+            metadata only.
+        obs_model: Optional callable observation model used to derive a
+            linearised target; a uniform target is used when ``None``.
+        mean_method: Background-mean estimator. Default ``"median"``.
+        cov_method: Covariance estimator — ``"ledoit_wolf"``, ``"oas"``,
+            or ``"lowrank"``. Default ``"ledoit_wolf"``.
+        target_pattern: Perturbation pattern for target linearisation.
+        rank: Rank for ``cov_method="lowrank"``; ``None`` means the
+            default ``10``.
+        tikhonov: Tikhonov regulariser for ``cov_method="lowrank"``;
+            ``None`` means the default ``1e-3``.
+        axis: Position of the spectral axis. Default ``0``.
+    """
 
     def __init__(
         self,
@@ -588,7 +833,7 @@ class ColumnEnhancement(Operator):
         self.tikhonov = tikhonov
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mean = EstimateMean(method=self.mean_method, axis=self.axis)(gt)
         if self.cov_method == "lowrank":
             cov_op = EstimateCovLowRank(
@@ -627,16 +872,17 @@ class ColumnEnhancement(Operator):
 
 
 def _cov_config(cov_op: NumpyLinearOperator | np.ndarray | None) -> Any:
+    """Serialise a covariance operator (or raw matrix) for get_config."""
     if cov_op is None:
         return None
     if isinstance(cov_op, NumpyLinearOperator):
-        return cov_op.matrix.tolist()
-    return np.asarray(cov_op).tolist()
+        return jsonable(cov_op.matrix)
+    return jsonable(np.asarray(cov_op))
 
 
 def _target_from_obs(
     obs_model: Any,
-    gt: GeoTensor,
+    gt: GeoTensor | np.ndarray,
     *,
     vmr_background: np.ndarray | None,
     pattern: str | np.ndarray,

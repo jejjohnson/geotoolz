@@ -1,18 +1,24 @@
 """Tier-B Operators — band-space spectral operations.
 
 Each Operator wraps a Tier-A primitive in `array.py` and re-attaches
-geospatial metadata via ``gt.array_as_geotensor`` (which propagates
-``transform``, ``crs``, ``fill_value_default``, and ``attrs``). When the
-band axis is *altered* (selected, reordered, binned, stacked, etc.) the
-``band_names`` and ``wavelengths`` entries in ``attrs`` are rewritten in
-lockstep via :func:`_with_band_attrs` so downstream operators see the
-correct labels.
+geospatial metadata via :func:`geotoolz._src.wrap.wrap_like`: a
+GeoTensor input comes back as a GeoTensor (``transform``, ``crs``,
+``fill_value_default``, and ``attrs`` propagated through
+``array_as_geotensor``) while a plain ``np.ndarray`` input comes back
+as a plain ndarray. When the band axis is *altered* (selected,
+reordered, binned, stacked, etc.) the ``band_names`` and
+``wavelengths`` entries in ``attrs`` are rewritten in lockstep via
+:func:`_with_band_attrs` so downstream operators see the correct
+labels (plain-array carriers have no attrs, so this bookkeeping is
+skipped for them).
 
 Band names are resolved from an explicit ``band_names=`` constructor
 argument when present; otherwise operators look for
 ``gt.attrs["band_names"]``. Wavelength-dependent operators follow the
 same convention with explicit ``source_wavelengths=`` / ``wavelengths=``
-arguments first, then ``gt.attrs["wavelengths"]``.
+arguments first, then ``gt.attrs["wavelengths"]``. On plain arrays the
+attrs fallbacks are unavailable, so name/wavelength resolution raises a
+clear ``ValueError`` unless the values are given explicitly.
 """
 
 from __future__ import annotations
@@ -24,6 +30,8 @@ import pandas as pd
 from georeader.reflectance import srf, transform_to_srf
 from pipekit import Operator
 
+from geotoolz._src.config import jsonable
+from geotoolz._src.wrap import wrap_like
 from geotoolz.spectral._src.array import (
     band_ratio,
     continuum_removal,
@@ -42,13 +50,15 @@ if TYPE_CHECKING:
 BandKey = int | str
 
 
-def _attrs(gt: GeoTensor) -> dict[str, Any]:
+def _attrs(gt: GeoTensor | np.ndarray) -> dict[str, Any]:
     """Return a shallow copy of ``gt.attrs`` (or ``{}`` if missing)."""
     attrs = getattr(gt, "attrs", None)
     return {} if attrs is None else dict(attrs)
 
 
-def _band_names(gt: GeoTensor, band_names: list[str] | None) -> list[str] | None:
+def _band_names(
+    gt: GeoTensor | np.ndarray, band_names: list[str] | None
+) -> list[str] | None:
     """Resolve band names from an explicit override or carrier attrs."""
     if band_names is not None:
         return list(band_names)
@@ -86,38 +96,27 @@ def _resolve_bands(keys: list[BandKey], names: list[str] | None) -> list[int]:
     return indexes
 
 
-def _jsonable_keys(keys: list[BandKey]) -> list[BandKey]:
-    """Coerce a list of band keys to JSON-safe Python scalars."""
-    out: list[BandKey] = []
-    for key in keys:
-        if isinstance(key, str):
-            out.append(key)
-        else:
-            out.append(int(key))
-    return out
-
-
-def _jsonable_array(values: np.ndarray | list[float] | float) -> list[float]:
-    return np.asarray(values, dtype=float).ravel().tolist()
-
-
 def _with_band_attrs(
-    gt: GeoTensor,
+    gt: GeoTensor | np.ndarray,
     values: np.ndarray,
     *,
     band_names: list[str] | None = None,
     wavelengths: np.ndarray | None = None,
     drop_band_attrs: bool = False,
-) -> GeoTensor:
-    """Wrap ``values`` as a GeoTensor like ``gt`` and update band metadata.
+) -> GeoTensor | np.ndarray:
+    """Rewrap ``values`` like ``gt`` and update band metadata.
 
-    Uses ``gt.array_as_geotensor`` to propagate ``transform``, ``crs``,
-    ``fill_value_default``, and ``attrs``. When the band axis is altered,
-    pass ``band_names`` / ``wavelengths`` to rewrite the corresponding
-    attrs in lockstep; pass ``drop_band_attrs=True`` for operators that
-    collapse the band axis entirely.
+    Uses :func:`wrap_like` to propagate ``transform``, ``crs``,
+    ``fill_value_default``, and ``attrs`` for GeoTensor carriers (plain
+    ndarray carriers come back as plain arrays with no metadata to
+    update). When the band axis is altered, pass ``band_names`` /
+    ``wavelengths`` to rewrite the corresponding attrs in lockstep;
+    pass ``drop_band_attrs=True`` for operators that collapse the band
+    axis entirely.
     """
-    out = gt.array_as_geotensor(values)
+    out = wrap_like(gt, values)
+    if not hasattr(out, "attrs"):  # plain-array carrier: nothing to rewrite
+        return out
     if not (band_names is not None or wavelengths is not None or drop_band_attrs):
         return out
     new_attrs = _attrs(gt)
@@ -127,13 +126,13 @@ def _with_band_attrs(
     if band_names is not None:
         new_attrs["band_names"] = list(band_names)
     if wavelengths is not None:
-        new_attrs["wavelengths"] = _jsonable_array(wavelengths)
+        new_attrs["wavelengths"] = jsonable(np.asarray(wavelengths, dtype=float))
     out.attrs = new_attrs
     return out
 
 
 def _wavelengths(
-    gt: GeoTensor, wavelengths: np.ndarray | list[float] | None
+    gt: GeoTensor | np.ndarray, wavelengths: np.ndarray | list[float] | None
 ) -> np.ndarray:
     if wavelengths is None:
         wavelengths = _attrs(gt).get("wavelengths")
@@ -150,6 +149,8 @@ class SelectBands(Operator):
     Resolves string keys against ``gt.attrs["band_names"]`` (or an
     explicit ``band_names=`` override at the call site). Selected
     ``band_names`` and ``wavelengths`` attrs travel with the output.
+    Plain ``np.ndarray`` input is supported for integer indexes (a
+    plain array comes back); string names require carrier attrs.
 
     Args:
         indexes: Bands to keep, in output order. Items are either
@@ -168,7 +169,7 @@ class SelectBands(Operator):
         self.indexes = indexes
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt)
         names = _band_names(gt, None)
         indexes = _resolve_bands(self.indexes, names)
@@ -192,7 +193,7 @@ class SelectBands(Operator):
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"indexes": _jsonable_keys(self.indexes), "axis": self.axis}
+        return {"indexes": jsonable(list(self.indexes)), "axis": self.axis}
 
 
 class ReorderBands(SelectBands):
@@ -218,7 +219,7 @@ class ReorderBands(SelectBands):
         self.order = order
 
     def get_config(self) -> dict[str, Any]:
-        return {"order": _jsonable_keys(self.order), "axis": self.axis}
+        return {"order": jsonable(list(self.order)), "axis": self.axis}
 
 
 class StackBands(Operator):
@@ -227,6 +228,9 @@ class StackBands(Operator):
     All inputs must share spatial shape, transform, and CRS. When every
     input carries ``band_names`` / ``wavelengths`` they are concatenated
     in input order; otherwise those attrs are dropped on the output.
+    Plain ``np.ndarray`` inputs are supported (the transform/CRS check
+    is skipped and a plain array is returned); mixing GeoTensors and
+    plain arrays raises because their georeferencing cannot agree.
 
     Args:
         axis: Position of the band axis. Default ``0``. 2-D inputs are
@@ -241,10 +245,12 @@ class StackBands(Operator):
     def __init__(self, *, axis: int = 0) -> None:
         self.axis = axis
 
-    def _apply(self, tensors: list[GeoTensor]) -> GeoTensor:
+    def _apply(self, tensors: list[GeoTensor | np.ndarray]) -> GeoTensor | np.ndarray:
         if not tensors:
             raise ValueError("StackBands requires at least one GeoTensor")
         first = tensors[0]
+        first_transform = getattr(first, "transform", None)
+        first_crs = getattr(first, "crs", None)
         arrays = []
         names: list[str] = []
         wavelengths: list[float] = []
@@ -257,7 +263,10 @@ class StackBands(Operator):
                     f"GeoTensor at index {idx} has shape {gt.shape[-2:]}, "
                     f"expected {first.shape[-2:]}"
                 )
-            if gt.transform != first.transform or gt.crs != first.crs:
+            if (
+                getattr(gt, "transform", None) != first_transform
+                or getattr(gt, "crs", None) != first_crs
+            ):
                 raise ValueError("All GeoTensors must share transform and CRS")
             arr = np.asarray(gt)
             expanded = np.expand_dims(arr, axis=self.axis) if arr.ndim == 2 else arr
@@ -287,6 +296,9 @@ class StackBands(Operator):
 class SplitBands(Operator):
     """Split a multiband GeoTensor into one single-band GeoTensor per band.
 
+    Plain ``np.ndarray`` input is supported and yields a list of plain
+    single-band arrays.
+
     Args:
         names: Optional override for band names. If omitted, names are
             taken from ``gt.attrs["band_names"]``.
@@ -302,7 +314,7 @@ class SplitBands(Operator):
         self.names = names
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> list[GeoTensor]:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> list[GeoTensor | np.ndarray]:
         arr = np.asarray(gt)
         axis = self.axis + arr.ndim if self.axis < 0 else self.axis
         if not 0 <= axis < arr.ndim:
@@ -344,7 +356,9 @@ class BandMath(Operator):
     whitelisted functions ``abs, sqrt, log, log10, exp, where, minimum,
     maximum, clip``. Band variables resolve to slices along the band
     axis named by ``band_names`` (default: ``gt.attrs["band_names"]``
-    or synthetic ``B0, B1, ...`` labels).
+    or synthetic ``B0, B1, ...`` labels). Plain ``np.ndarray`` input is
+    supported (synthetic ``B0, B1, ...`` names apply unless
+    ``band_names`` is given) and returns a plain array.
 
     Args:
         expression: Arithmetic expression over band names, e.g.
@@ -371,7 +385,7 @@ class BandMath(Operator):
         self.band_names = band_names
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt)
         names = _band_names(gt, self.band_names) or _default_band_names(
             arr.shape[self.axis]
@@ -399,7 +413,8 @@ class NormalizedDifference(Operator):
 
     Unlike :class:`geotoolz.indices.NormalizedDifference` (integer
     indices only), this variant also accepts band-name strings resolved
-    against ``gt.attrs["band_names"]``.
+    against ``gt.attrs["band_names"]``. Plain ``np.ndarray`` input is
+    supported for integer keys and returns a plain array.
 
     Args:
         a: Index or name of the "high" band (numerator-positive term).
@@ -421,7 +436,7 @@ class NormalizedDifference(Operator):
         self.eps = eps
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         names = _band_names(gt, None)
         out = normalized_difference(
             np.asarray(gt),
@@ -433,13 +448,19 @@ class NormalizedDifference(Operator):
         return _with_band_attrs(gt, out, drop_band_attrs=True)
 
     def get_config(self) -> dict[str, Any]:
-        a = self.a if isinstance(self.a, str) else int(self.a)
-        b = self.b if isinstance(self.b, str) else int(self.b)
-        return {"a": a, "b": b, "eps": self.eps, "axis": self.axis}
+        return {
+            "a": jsonable(self.a),
+            "b": jsonable(self.b),
+            "eps": self.eps,
+            "axis": self.axis,
+        }
 
 
 class BandRatio(Operator):
     r"""Simple two-band ratio ``numerator / (denominator + eps)``.
+
+    Plain ``np.ndarray`` input is supported for integer keys and
+    returns a plain array; string names require carrier attrs.
 
     Args:
         numerator: Index or name of the numerator band.
@@ -467,7 +488,7 @@ class BandRatio(Operator):
         self.eps = eps
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         names = _band_names(gt, None)
         out = band_ratio(
             np.asarray(gt),
@@ -479,15 +500,9 @@ class BandRatio(Operator):
         return _with_band_attrs(gt, out, drop_band_attrs=True)
 
     def get_config(self) -> dict[str, Any]:
-        num = self.numerator if isinstance(self.numerator, str) else int(self.numerator)
-        den = (
-            self.denominator
-            if isinstance(self.denominator, str)
-            else int(self.denominator)
-        )
         return {
-            "numerator": num,
-            "denominator": den,
+            "numerator": jsonable(self.numerator),
+            "denominator": jsonable(self.denominator),
             "eps": self.eps,
             "axis": self.axis,
         }
@@ -500,7 +515,9 @@ class ApplySRF(Operator):
     ``target_center_wavelengths`` and ``target_fwhm`` (via
     :func:`georeader.reflectance.srf`) and integrates the hyperspectral
     cube to the target multispectral bands via
-    :func:`georeader.reflectance.transform_to_srf`.
+    :func:`georeader.reflectance.transform_to_srf`. Plain
+    ``np.ndarray`` input ``(B, H, W)`` is supported and returns a plain
+    float32 array (no band-metadata bookkeeping).
 
     Args:
         target_center_wavelengths: Center wavelengths of the synthetic
@@ -537,7 +554,7 @@ class ApplySRF(Operator):
         self.source_wavelengths = source_wavelengths
         self.band_names = band_names
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         source_wavelengths = np.asarray(self.source_wavelengths, dtype=float)
         target_center_wavelengths = np.asarray(
             self.target_center_wavelengths, dtype=float
@@ -549,21 +566,25 @@ class ApplySRF(Operator):
             gt,
             srf_df,
             source_wavelengths.tolist(),
-            fill_value_default=gt.fill_value_default,
+            fill_value_default=getattr(gt, "fill_value_default", 0.0),
         )
+        if not hasattr(out, "attrs"):  # plain-array carrier: nothing to rewrite
+            return out
         new_attrs = _attrs(gt)
         new_attrs["band_names"] = list(names)
-        new_attrs["wavelengths"] = _jsonable_array(target_center_wavelengths)
+        new_attrs["wavelengths"] = jsonable(target_center_wavelengths)
         out.attrs = new_attrs
         return out
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "target_center_wavelengths": _jsonable_array(
-                self.target_center_wavelengths
+            "target_center_wavelengths": jsonable(
+                np.asarray(self.target_center_wavelengths, dtype=float)
             ),
-            "target_fwhm": _jsonable_array(self.target_fwhm),
-            "source_wavelengths": _jsonable_array(self.source_wavelengths),
+            "target_fwhm": jsonable(np.asarray(self.target_fwhm, dtype=float)),
+            "source_wavelengths": jsonable(
+                np.asarray(self.source_wavelengths, dtype=float)
+            ),
             "band_names": self.band_names,
         }
 
@@ -573,7 +594,9 @@ class GaussianSRF(Operator):
 
     Thin wrapper around :class:`ApplySRF` that reads the source
     hyperspectral wavelengths from ``gt.attrs["wavelengths"]`` when
-    ``source_wavelengths`` is omitted.
+    ``source_wavelengths`` is omitted. Plain ``np.ndarray`` input is
+    supported when ``source_wavelengths`` is given explicitly (there
+    are no carrier attrs to fall back on) and returns a plain array.
 
     Args:
         target_center_wavelengths: Center wavelengths of the target
@@ -607,7 +630,7 @@ class GaussianSRF(Operator):
         self.source_wavelengths = source_wavelengths
         self.band_names = band_names
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         return ApplySRF(
             target_center_wavelengths=self.target_center_wavelengths,
             target_fwhm=self.target_fwhm,
@@ -617,14 +640,14 @@ class GaussianSRF(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "target_center_wavelengths": _jsonable_array(
-                self.target_center_wavelengths
+            "target_center_wavelengths": jsonable(
+                np.asarray(self.target_center_wavelengths, dtype=float)
             ),
-            "target_fwhm": _jsonable_array(self.target_fwhm),
+            "target_fwhm": jsonable(np.asarray(self.target_fwhm, dtype=float)),
             "source_wavelengths": (
                 None
                 if self.source_wavelengths is None
-                else _jsonable_array(self.source_wavelengths)
+                else jsonable(np.asarray(self.source_wavelengths, dtype=float))
             ),
             "band_names": self.band_names,
         }
@@ -642,6 +665,9 @@ class ContinuumRemoval(Operator):
     * ``method="linear"`` — a straight line between the first and last
       band. Cheaper but only valid when no spectral curvature lives
       outside the absorption band of interest.
+
+    Plain ``np.ndarray`` input is supported when ``wavelengths`` is
+    given explicitly and returns a plain array.
 
     Args:
         method: ``"convex_hull"`` or ``"linear"``. Default
@@ -668,21 +694,21 @@ class ContinuumRemoval(Operator):
         self.wavelengths = wavelengths
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = continuum_removal(
             np.asarray(gt),
             _wavelengths(gt, self.wavelengths),
             axis=self.axis,
             method=self.method,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
             "method": self.method,
             "wavelengths": None
             if self.wavelengths is None
-            else _jsonable_array(self.wavelengths),
+            else jsonable(np.asarray(self.wavelengths, dtype=float)),
             "axis": self.axis,
         }
 
@@ -698,6 +724,9 @@ class SpectralBinning(Operator):
     * ``"median"`` — robust to outliers in narrow bins.
     * ``"weighted_mean"`` — Gaussian weights with
       :math:`\\sigma = w / (2 \\sqrt{2 \\ln 2})` (FWHM equals ``width``).
+
+    Plain ``np.ndarray`` input is supported when ``source_wavelengths``
+    is given explicitly and returns a plain array.
 
     Args:
         target_wavelengths: Center wavelengths of the output bins.
@@ -734,7 +763,7 @@ class SpectralBinning(Operator):
         self.source_wavelengths = source_wavelengths
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         target_wavelengths = np.asarray(self.target_wavelengths, dtype=float)
         out = spectral_binning(
             np.asarray(gt),
@@ -752,13 +781,15 @@ class SpectralBinning(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "target_wavelengths": _jsonable_array(self.target_wavelengths),
-            "width": _jsonable_array(self.width),
+            "target_wavelengths": jsonable(
+                np.asarray(self.target_wavelengths, dtype=float)
+            ),
+            "width": jsonable(self.width),
             "method": self.method,
             "source_wavelengths": (
                 None
                 if self.source_wavelengths is None
-                else _jsonable_array(self.source_wavelengths)
+                else jsonable(np.asarray(self.source_wavelengths, dtype=float))
             ),
             "axis": self.axis,
         }
@@ -766,6 +797,9 @@ class SpectralBinning(Operator):
 
 class SpectralSmoothing(Operator):
     """Smooth spectra along the band axis.
+
+    Pure per-spectrum math — accepts a GeoTensor or a plain
+    ``np.ndarray`` and returns the same carrier kind.
 
     Args:
         method: ``"savgol"`` (Savitzky-Golay), ``"gaussian"``, or
@@ -798,7 +832,7 @@ class SpectralSmoothing(Operator):
         self.polyorder = polyorder
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = spectral_smoothing(
             np.asarray(gt),
             axis=self.axis,
@@ -806,7 +840,7 @@ class SpectralSmoothing(Operator):
             window=self.window,
             polyorder=self.polyorder,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 from shapely.geometry import LineString
 
@@ -12,12 +12,7 @@ import geotoolz as gz
 
 
 def _gt(values: np.ndarray) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32629",
-        fill_value_default=0,
-    )
+    return toy_geotensor(values, fill_value_default=0)
 
 
 def test_label_connected_components_returns_int_geotensor() -> None:
@@ -152,3 +147,62 @@ def test_skeleton_length_diagonal_uses_8_connectivity() -> None:
     mask = np.eye(5, dtype=bool)
     length = gz.measure.SkeletonLength()(_gt(mask))
     assert length == pytest.approx(4.0)
+
+
+@pytest.mark.parametrize(
+    ("op", "values"),
+    [
+        pytest.param(
+            gz.measure.LabelConnectedComponents(connectivity=1),
+            np.array([[1, 0, 1], [1, 0, 0]], dtype=bool),
+            id="label-connected-components",
+        ),
+        pytest.param(
+            gz.measure.ProfileLine(src=(1, 0), dst=(1, 4), order=0),
+            np.tile(np.arange(5, dtype=float), (3, 1)),
+            id="profile-line",
+        ),
+        pytest.param(
+            gz.measure.ShannonEntropy(),
+            np.arange(16, dtype=float).reshape(4, 4),
+            id="shannon-entropy",
+        ),
+        pytest.param(gz.measure.SkeletonLength(), np.eye(5, dtype=bool), id="skeleton"),
+    ],
+)
+def test_plain_ndarray_matches_geotensor_path(
+    op: gz.Operator, values: np.ndarray
+) -> None:
+    """Metadata-independent measure ops accept plain ndarrays and match
+    the GeoTensor path (array outputs stay plain ndarrays)."""
+    out_plain = op(values)
+    out_geo = op(_gt(values))
+
+    if isinstance(out_plain, np.ndarray):
+        assert type(out_plain) is np.ndarray
+        np.testing.assert_array_equal(out_plain, np.asarray(out_geo))
+    else:
+        assert out_plain == pytest.approx(out_geo)
+
+
+@pytest.mark.parametrize(
+    ("op", "values"),
+    [
+        pytest.param(
+            gz.measure.RegionProps(),
+            np.array([[1, 1, 0], [0, 2, 2]], dtype=np.int32),
+            id="region-props",
+        ),
+        pytest.param(
+            gz.measure.FindContours(level=0.5),
+            np.pad(np.ones((3, 3)), 2),
+            id="find-contours",
+        ),
+    ],
+)
+def test_geo_dependent_ops_reject_plain_arrays(
+    op: gz.Operator, values: np.ndarray
+) -> None:
+    """Ops whose output geometry needs the transform stay GeoTensor-only."""
+    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+        op(values)

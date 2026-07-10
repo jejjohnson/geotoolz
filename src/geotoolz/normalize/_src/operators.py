@@ -1,14 +1,16 @@
 """Tier-B Operators — carrier-aware normalization transforms.
 
 Each Operator wraps a Tier-A primitive in
-:mod:`geotoolz.normalize._src.array`. The carrier-aware wrappers handle:
+:mod:`geotoolz.normalize._src.array`. Operators accept either a
+``GeoTensor`` or a plain ``np.ndarray`` and return the same carrier
+kind (rewrap via :func:`geotoolz._src.wrap.wrap_like`). The
+carrier-aware wrappers handle:
 
 * fitting per-band statistics from the input scene
   (``fit_on_call=True``),
 * JSON-safe ``get_config()`` via the shared
-  :func:`~geotoolz.radiometry._src.operators._coef_as_jsonable` helper
-  (ndarray leaves become plain Python lists for Hydra / YAML
-  round-trip),
+  :func:`geotoolz._src.config.jsonable` helper (ndarray leaves become
+  plain Python lists for Hydra / YAML round-trip),
 * NaN-aware reductions over the spatial ``(H, W)`` axes.
 
 The display-prep min-max stretch with **scalar** bounds lives in
@@ -26,6 +28,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.config import jsonable
+from geotoolz._src.wrap import wrap_like
 from geotoolz.normalize._src.array import (
     asinh_scale,
     clahe,
@@ -40,7 +44,6 @@ from geotoolz.normalize._src.array import (
     stat_axes,
     validate_out_range,
 )
-from geotoolz.radiometry._src.operators import _coef_as_jsonable
 
 
 if TYPE_CHECKING:
@@ -50,22 +53,22 @@ if TYPE_CHECKING:
 def _stat_as_jsonable(value: Any) -> float | list[Any] | None:
     """JSON-safe coercion for cached statistics.
 
-    Mirrors :func:`_coef_as_jsonable` (Python ``float`` for scalars,
-    ``list[float]`` for 1-D) and additionally:
+    Thin wrapper over the shared :func:`geotoolz._src.config.jsonable`
+    that additionally:
 
     * passes ``None`` through unchanged (stats may be unset before fit),
-    * preserves shape for ``ndim > 1`` via ``ndarray.tolist()`` (the
-      ``PerBandStats`` cache stores ``percentiles`` as a 2-D array of
-      shape ``(n_percentiles, n_bands)``).
+    * coerces scalar stats to Python ``float``.
+
+    Shape is preserved for ``ndim > 1`` via nested lists (the
+    ``PerBandStats`` cache stores ``percentiles`` as a 2-D array of
+    shape ``(n_percentiles, n_bands)``).
     """
     if value is None:
         return None
-    arr = np.asarray(value)
+    arr = np.asarray(value, dtype=float)
     if arr.ndim == 0:
         return float(arr)
-    if arr.ndim == 1:
-        return _coef_as_jsonable(arr)
-    return arr.tolist()
+    return jsonable(arr)
 
 
 def _array_or_none(value: Any) -> np.ndarray | None:
@@ -99,7 +102,7 @@ class PerBandStats(Operator):
         self.percentiles = [1.0, 99.0] if percentiles is None else list(percentiles)
         self.stats: dict[str, Any] = {}
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt, dtype=float)
         stats = per_band_stats(arr, percentiles=self.percentiles, axis=stat_axes(arr))
         self.stats = {key: _stat_as_jsonable(value) for key, value in stats.items()}
@@ -115,6 +118,19 @@ class CLAHE(Operator):
     Wraps :func:`skimage.exposure.equalize_adapthist` and applies it
     independently per band for ``(C, H, W)`` carriers while preserving
     NaN positions and GeoTensor metadata.
+
+    Args:
+        kernel_size: Contextual-region shape for the local histograms.
+            ``None`` uses skimage's default (1/8 of the image height /
+            width). Lists (e.g. from Hydra / OmegaConf round-trips)
+            are normalised to tuples.
+        clip_limit: Contrast-limiting clip threshold in ``[0, 1]``.
+            Default ``0.01``.
+        nbins: Number of histogram bins. Default ``256``.
+
+    Examples:
+        >>> from geotoolz.normalize import CLAHE
+        >>> out = CLAHE(kernel_size=(8, 8), clip_limit=0.03)(scene)
     """
 
     def __init__(
@@ -133,14 +149,14 @@ class CLAHE(Operator):
         self.clip_limit = clip_limit
         self.nbins = nbins
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = clahe(
             np.asarray(gt),
             kernel_size=self.kernel_size,
             clip_limit=self.clip_limit,
             nbins=self.nbins,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         if isinstance(self.kernel_size, tuple):
@@ -199,7 +215,7 @@ class StandardScaler(Operator):
         self.std = _array_or_none(std)
         self.fit_on_call = fit_on_call
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt, dtype=float)
         axis = stat_axes(arr)
         if self.fit_on_call and (self.mean is None or self.std is None):
@@ -207,12 +223,20 @@ class StandardScaler(Operator):
             self.std = np.nanstd(arr, axis=axis)
         if self.mean is None or self.std is None:
             raise ValueError("StandardScaler requires mean/std or fit_on_call=True")
-        return gt.array_as_geotensor(
-            standard_scale(arr, self.mean, self.std, axis=axis)
-        )
+        return wrap_like(gt, standard_scale(arr, self.mean, self.std, axis=axis))
 
-    def inverse(self, gt: GeoTensor) -> GeoTensor:
-        """Invert a previously applied standard scaling."""
+    def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Invert a previously applied standard scaling.
+
+        Args:
+            gt: Scaled carrier (GeoTensor or plain ndarray).
+
+        Returns:
+            The un-scaled carrier, same kind as ``gt``.
+
+        Raises:
+            ValueError: If the scaler has no ``mean`` / ``std`` yet.
+        """
         if self.mean is None or self.std is None:
             raise ValueError("StandardScaler must be fitted before inverse()")
         arr = np.asarray(gt, dtype=float)
@@ -222,7 +246,7 @@ class StandardScaler(Operator):
         mean = reshape_stat(self.mean, arr, axis)
         std = reshape_stat(self.std, arr, axis)
         scale = np.where(std != 0, std, 1.0)
-        return gt.array_as_geotensor(arr * scale + mean)
+        return wrap_like(gt, arr * scale + mean)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -268,7 +292,7 @@ class RobustScaler(Operator):
         self.iqr = _array_or_none(iqr)
         self.fit_on_call = fit_on_call
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt, dtype=float)
         axis = stat_axes(arr)
         if self.fit_on_call and (self.median is None or self.iqr is None):
@@ -277,9 +301,7 @@ class RobustScaler(Operator):
             self.iqr = q75 - q25
         if self.median is None or self.iqr is None:
             raise ValueError("RobustScaler requires median/iqr or fit_on_call=True")
-        return gt.array_as_geotensor(
-            robust_scale(arr, self.median, self.iqr, axis=axis)
-        )
+        return wrap_like(gt, robust_scale(arr, self.median, self.iqr, axis=axis))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -337,7 +359,7 @@ class MinMaxScaler(Operator):
         self.out_range = validate_out_range(tuple(out_range))
         self.fit_on_call = fit_on_call
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt, dtype=float)
         axis = stat_axes(arr)
         if self.fit_on_call and (self.vmin is None or self.vmax is None):
@@ -348,7 +370,7 @@ class MinMaxScaler(Operator):
         out = minmax_scale(
             arr, self.vmin, self.vmax, out_range=self.out_range, axis=axis
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -390,13 +412,13 @@ class HistogramStretch(Operator):
         self.lower = lower
         self.upper = upper
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt, dtype=float)
         clipped = percentile_clip(
             arr, lower=self.lower, upper=self.upper, axis=stat_axes(arr)
         )
         out_min, out_max = self.out_range
-        return gt.array_as_geotensor(clipped * (out_max - out_min) + out_min)
+        return wrap_like(gt, clipped * (out_max - out_min) + out_min)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -430,15 +452,15 @@ class HistogramMatch(Operator):
     # serialisable.
     forbid_in_yaml = True
 
-    def __init__(self, *, reference: GeoTensor) -> None:
+    def __init__(self, *, reference: GeoTensor | np.ndarray) -> None:
         self.reference = reference
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = histogram_match(
             np.asarray(gt, dtype=float),
             np.asarray(self.reference, dtype=float),
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"reference_shape": list(self.reference.shape)}
@@ -470,9 +492,9 @@ class LogScale(Operator):
         self.base = base
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
-            log_scale(np.asarray(gt, dtype=float), base=self.base, eps=self.eps)
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(
+            gt, log_scale(np.asarray(gt, dtype=float), base=self.base, eps=self.eps)
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -502,8 +524,8 @@ class AsinhScale(Operator):
     def __init__(self, *, a: float = 1.0) -> None:
         self.a = a
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(asinh_scale(np.asarray(gt, dtype=float), a=self.a))
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(gt, asinh_scale(np.asarray(gt, dtype=float), a=self.a))
 
     def get_config(self) -> dict[str, Any]:
         return {"a": self.a}
@@ -533,10 +555,8 @@ class PowerScale(Operator):
     def __init__(self, *, gamma: float = 0.5) -> None:
         self.gamma = gamma
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(
-            power_scale(np.asarray(gt, dtype=float), gamma=self.gamma)
-        )
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return wrap_like(gt, power_scale(np.asarray(gt, dtype=float), gamma=self.gamma))
 
     def get_config(self) -> dict[str, Any]:
         return {"gamma": self.gamma}
@@ -601,7 +621,7 @@ class ZeroOne(Operator):
     def __init__(self, *, per_band: bool = True) -> None:
         self.per_band = per_band
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt, dtype=float)
         axis = stat_axes(arr, per_band=self.per_band)
         out = minmax_scale(
@@ -611,7 +631,7 @@ class ZeroOne(Operator):
             out_range=(0.0, 1.0),
             axis=axis,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"per_band": self.per_band}

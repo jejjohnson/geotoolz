@@ -61,7 +61,7 @@ check-env-%:
 # ---------------------------------------------------------------------------
 # Phony declarations
 # ---------------------------------------------------------------------------
-.PHONY: help install lint format typecheck test test-cov \
+.PHONY: help install lint format typecheck test test-all test-slow test-cov \
         precommit build clean version docs docs-serve docs-deploy \
         gh-labels gh-sub gh-block gh-show
 
@@ -128,14 +128,24 @@ typecheck: ## 🔬 Type-check with ty
 ##@ Testing
 # ===========================================================================
 
-test: ## 🧪 Run tests with pytest (no coverage)
-	@printf "$(YELLOW)>>> Running tests (no coverage)...$(RESET)\n"
-	uv run pytest -v -o addopts=
+test: ## 🧪 Run fast tests (excludes slow/integration; no coverage)
+	@printf "$(YELLOW)>>> Running fast tests (no coverage)...$(RESET)\n"
+	uv run pytest -v -o addopts=--strict-markers -m "not slow and not integration"
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
-test-cov: ## 📊 Run tests with coverage report
+test-all: ## 🧪 Run ALL tests including slow/integration (no coverage)
+	@printf "$(YELLOW)>>> Running full test suite (no coverage)...$(RESET)\n"
+	uv run pytest -v -o addopts=--strict-markers
+	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
+
+test-slow: ## 🐢 Run only the slow/integration tiers (no coverage)
+	@printf "$(YELLOW)>>> Running slow/integration tests (no coverage)...$(RESET)\n"
+	uv run pytest -v -o addopts=--strict-markers -m "slow or integration"
+	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
+
+test-cov: ## 📊 Run fast tests with coverage report (same tier as CI)
 	@printf "$(YELLOW)>>> Running tests with coverage...$(RESET)\n"
-	uv run pytest -v
+	uv run pytest -v -m "not slow and not integration"
 	@printf "$(GREEN)>>> ✅ Coverage report generated!$(RESET)\n"
 
 # ===========================================================================

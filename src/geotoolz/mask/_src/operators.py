@@ -19,9 +19,11 @@ import shapely.geometry.base
 from georeader import rasterize
 from pipekit import Operator
 
-from geotoolz.cloud._src.array import apply_mask
+from geotoolz._src.config import jsonable
+from geotoolz._src.wrap import wrap_like
 from geotoolz.mask._src.array import (
     altitude_mask,
+    apply_mask,
     buffer_mask,
     clean_mask,
     close_mask,
@@ -49,7 +51,25 @@ _NATURAL_EARTH_URLS = {
 
 
 class PolygonMask(Operator):
-    """Rasterize a shapely geometry or GeoDataFrame into a boolean mask."""
+    """Rasterize a shapely geometry or GeoDataFrame into a boolean mask.
+
+    Geo-dependent: rasterization needs the carrier's transform/CRS, so
+    the input must be a georeferenced ``GeoTensor``. The mask matches
+    the carrier's spatial grid and is returned as a boolean GeoTensor
+    with ``fill_value_default=False``.
+
+    Args:
+        geometry: Shapely geometry or ``GeoDataFrame`` to burn in.
+        crs: CRS of ``geometry`` when it doesn't carry one itself
+            (required for a CRS-less GeoDataFrame).
+        all_touched: Burn every pixel touched by the geometry instead
+            of only pixels whose center is inside.
+        inside: If True (default) the mask is True inside the geometry;
+            if False the complement is returned.
+
+    Examples:
+        >>> PolygonMask(geometry=box(1.0, 1.0, 3.0, 3.0))(scene)  # doctest: +SKIP
+    """
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -75,7 +95,7 @@ class PolygonMask(Operator):
         )
         if not self.inside:
             mask = ~mask
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -87,7 +107,16 @@ class PolygonMask(Operator):
 
 
 class BBoxMask(PolygonMask):
-    """Rasterize an axis-aligned bounding box into a boolean mask."""
+    """Rasterize an axis-aligned bounding box into a boolean mask.
+
+    Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
+    :class:`PolygonMask`).
+
+    Args:
+        bounds: ``(minx, miny, maxx, maxy)`` box in ``crs`` coordinates.
+        crs: CRS of ``bounds``; defaults to the carrier's CRS.
+        inside: If True (default) the mask is True inside the box.
+    """
 
     forbid_in_yaml: ClassVar[bool] = False
 
@@ -110,7 +139,22 @@ class BBoxMask(PolygonMask):
 
 
 class DistanceMask(PolygonMask):
-    """Mask pixels within or beyond a distance from a geometry."""
+    """Mask pixels within or beyond a distance from a geometry.
+
+    Rasterizes the geometry onto the carrier grid, then thresholds the
+    Euclidean distance transform at ``distance`` (CRS units, using the
+    carrier pixel size). Geo-dependent: requires a georeferenced
+    ``GeoTensor`` input.
+
+    Args:
+        geometry: Shapely geometry or ``GeoDataFrame``.
+        distance: Maximum distance from the geometry, in CRS units.
+        inside: If True (default), True within ``distance`` of the
+            geometry; if False, the complement.
+        crs: CRS of ``geometry`` when it doesn't carry one itself.
+        all_touched: Rasterization rule; see :class:`PolygonMask`.
+            Default True so thin geometries are not lost.
+    """
 
     def __init__(
         self,
@@ -139,7 +183,7 @@ class DistanceMask(PolygonMask):
             inside=self.inside,
             pixel_size=_pixel_size(gt),
         )
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -152,7 +196,16 @@ class DistanceMask(PolygonMask):
 
 
 class LandMask(PolygonMask):
-    """Rasterize Natural Earth land polygons."""
+    """Rasterize Natural Earth land polygons into a boolean mask.
+
+    Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
+    :class:`PolygonMask`).
+
+    Args:
+        source: ``"natural_earth_10m"`` (default) downloads and caches
+            the Natural Earth 1:10m land polygons; any other value is a
+            local vector file path passed to ``geopandas.read_file``.
+    """
 
     def __init__(self, *, source: str = "natural_earth_10m") -> None:
         self.source = source
@@ -163,7 +216,16 @@ class LandMask(PolygonMask):
 
 
 class OceanMask(PolygonMask):
-    """Rasterize Natural Earth ocean polygons."""
+    """Rasterize Natural Earth ocean polygons into a boolean mask.
+
+    Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
+    :class:`PolygonMask`).
+
+    Args:
+        source: ``"natural_earth_10m"`` (default) downloads and caches
+            the Natural Earth 1:10m ocean polygons; any other value is a
+            local vector file path passed to ``geopandas.read_file``.
+    """
 
     def __init__(self, *, source: str = "natural_earth_10m") -> None:
         self.source = source
@@ -174,7 +236,21 @@ class OceanMask(PolygonMask):
 
 
 class CountryMask(PolygonMask):
-    """Rasterize Natural Earth country polygons selected by ISO A3 code."""
+    """Rasterize Natural Earth country polygons selected by ISO A3 code.
+
+    Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
+    :class:`PolygonMask`).
+
+    Args:
+        iso_a3: One ISO A3 country code or a sequence of them (e.g.
+            ``"ESP"`` or ``("ESP", "PRT")``).
+        source: ``"natural_earth_10m"`` (default) downloads and caches
+            the Natural Earth 1:10m admin-0 countries; any other value
+            is a local vector file path with an ``ISO_A3`` column.
+
+    Raises:
+        ValueError: If none of the requested codes are found.
+    """
 
     def __init__(
         self,
@@ -201,6 +277,8 @@ class AltitudeMask(Operator):
 
     Marks True where the carrier DEM falls inside the requested elevation
     interval. Either bound may be ``None`` for an open-ended interval.
+    Accepts a GeoTensor or plain ndarray carrier; when both the DEM and
+    the carrier are georeferenced, their transform/CRS must match.
 
     Args:
         dem: Single-band ``GeoTensor`` whose spatial shape matches the
@@ -225,13 +303,13 @@ class AltitudeMask(Operator):
         self.min_elev = min_elev
         self.max_elev = max_elev
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask = altitude_mask(
             np.asarray(self.dem), min_elev=self.min_elev, max_elev=self.max_elev
         )
         _check_spatial_match(mask, gt, "AltitudeMask")
         _check_dem_grid_alignment(self.dem, gt, "AltitudeMask")
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -246,7 +324,10 @@ class SlopeMask(Operator):
 
     Slope is computed from the DEM with central differences scaled by
     the DEM pixel size; True where the slope (degrees) falls inside
-    the requested interval.
+    the requested interval. Geo-dependent on the DEM side: the DEM must
+    be a georeferenced ``GeoTensor`` (its transform supplies the pixel
+    size). The carrier may be a GeoTensor or plain ndarray; when both
+    are georeferenced, their transform/CRS must match.
 
     Args:
         dem: Single-band ``GeoTensor`` whose spatial shape matches the
@@ -272,7 +353,7 @@ class SlopeMask(Operator):
         self.min_slope_deg = min_slope_deg
         self.max_slope_deg = max_slope_deg
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask = slope_mask(
             np.asarray(self.dem),
             _pixel_size(self.dem),
@@ -281,7 +362,7 @@ class SlopeMask(Operator):
         )
         _check_spatial_match(mask, gt, "SlopeMask")
         _check_dem_grid_alignment(self.dem, gt, "SlopeMask")
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -296,7 +377,12 @@ class DilateMask(Operator):
 
     Wraps :func:`scipy.ndimage.binary_dilation`. The structuring element
     defaults to a 3x3 box (8-connectivity). Stacks of masks of shape
-    ``(C, H, W)`` are processed per channel.
+    ``(C, H, W)`` are processed per channel. Accepts a GeoTensor or a
+    plain ndarray and returns the same carrier kind.
+
+    Args:
+        iterations: Number of dilation passes. ``0`` is a no-op copy.
+        structure: Optional 2-D structuring element.
 
     Examples:
         >>> DilateMask(iterations=2)(mask)  # doctest: +SKIP
@@ -310,7 +396,7 @@ class DilateMask(Operator):
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = dilate_mask(np.asarray(mask), self.iterations, self.structure)
-        return _wrap_like(mask, out)
+        return wrap_like(mask, out, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return _morph_config(self.iterations, self.structure)
@@ -320,7 +406,11 @@ class ErodeMask(Operator):
     """Erode a boolean mask over its trailing spatial axes.
 
     Wraps :func:`scipy.ndimage.binary_erosion`; see :class:`DilateMask`
-    for the structuring-element convention.
+    for the structuring-element and carrier conventions.
+
+    Args:
+        iterations: Number of erosion passes. ``0`` is a no-op copy.
+        structure: Optional 2-D structuring element.
 
     Examples:
         >>> ErodeMask(iterations=1)(mask)  # doctest: +SKIP
@@ -334,7 +424,7 @@ class ErodeMask(Operator):
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = erode_mask(np.asarray(mask), self.iterations, self.structure)
-        return _wrap_like(mask, out)
+        return wrap_like(mask, out, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return _morph_config(self.iterations, self.structure)
@@ -345,6 +435,11 @@ class OpenMask(Operator):
 
     Wraps :func:`scipy.ndimage.binary_opening`. Useful for removing
     isolated True pixels (salt) while preserving large True components.
+    Accepts a GeoTensor or a plain ndarray and returns the same carrier
+    kind.
+
+    Args:
+        iterations: Number of opening passes. ``0`` is a no-op copy.
 
     Examples:
         >>> OpenMask(iterations=1)(mask)  # doctest: +SKIP
@@ -355,7 +450,7 @@ class OpenMask(Operator):
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = open_mask(np.asarray(mask), self.iterations)
-        return _wrap_like(mask, out)
+        return wrap_like(mask, out, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {"iterations": self.iterations}
@@ -365,7 +460,11 @@ class CloseMask(Operator):
     """Close (dilate then erode) a boolean mask.
 
     Wraps :func:`scipy.ndimage.binary_closing`. Useful for filling
-    pin-holes (pepper) inside otherwise solid True regions.
+    pin-holes (pepper) inside otherwise solid True regions. Accepts a
+    GeoTensor or a plain ndarray and returns the same carrier kind.
+
+    Args:
+        iterations: Number of closing passes. ``0`` is a no-op copy.
 
     Examples:
         >>> CloseMask(iterations=1)(mask)  # doctest: +SKIP
@@ -376,14 +475,29 @@ class CloseMask(Operator):
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = close_mask(np.asarray(mask), self.iterations)
-        return _wrap_like(mask, out)
+        return wrap_like(mask, out, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {"iterations": self.iterations}
 
 
 class BufferMask(Operator):
-    """Radially expand True pixels in a mask."""
+    """Radially expand True pixels in a mask by a Euclidean buffer.
+
+    Wraps :func:`geotoolz.mask.buffer_mask`. With ``unit="pixels"``
+    (default) the op is metadata-free and accepts a GeoTensor or a
+    plain ndarray, returning the same carrier kind. With
+    ``unit="meters"`` the op is geo-dependent: the input must be a
+    georeferenced ``GeoTensor`` whose transform supplies the pixel
+    size, and ``radius`` is measured in CRS units.
+
+    Args:
+        radius: Buffer distance, in pixels or CRS units per ``unit``.
+        unit: ``"pixels"`` (default), ``"meters"``, or ``"meter"``.
+
+    Examples:
+        >>> BufferMask(radius=2.0)(mask)  # doctest: +SKIP
+    """
 
     def __init__(self, *, radius: float, unit: str = "pixels") -> None:
         self.radius = radius
@@ -402,42 +516,70 @@ class BufferMask(Operator):
         out = buffer_mask(
             np.asarray(mask), self.radius, unit=self.unit, pixel_size=pixel_size
         )
-        return _wrap_like(mask, out)
+        return wrap_like(mask, out, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {"radius": self.radius, "unit": self.unit}
 
 
 class RemoveSmallObjects(Operator):
-    """Remove connected True components smaller than ``min_size`` pixels."""
+    """Remove connected True components smaller than ``min_size`` pixels.
+
+    Wraps :func:`geotoolz.mask.remove_small_objects` (4-connectivity).
+    Accepts a GeoTensor or a plain ndarray and returns the same carrier
+    kind.
+
+    Args:
+        min_size: Minimum component area, in pixels, to keep.
+    """
 
     def __init__(self, *, min_size: int) -> None:
         self.min_size = min_size
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = remove_small_objects(np.asarray(mask), self.min_size)
-        return _wrap_like(mask, out)
+        return wrap_like(mask, out, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {"min_size": self.min_size}
 
 
 class RemoveSmallHoles(Operator):
-    """Fill enclosed False components up to ``area_threshold`` pixels."""
+    """Fill enclosed False components up to ``area_threshold`` pixels.
+
+    Wraps :func:`geotoolz.mask.remove_small_holes`; holes touching the
+    image border are never filled. Accepts a GeoTensor or a plain
+    ndarray and returns the same carrier kind.
+
+    Args:
+        area_threshold: Maximum hole area, in pixels, to fill.
+    """
 
     def __init__(self, *, area_threshold: int) -> None:
         self.area_threshold = area_threshold
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = remove_small_holes(np.asarray(mask), self.area_threshold)
-        return _wrap_like(mask, out)
+        return wrap_like(mask, out, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {"area_threshold": self.area_threshold}
 
 
 class CleanMask(Operator):
-    """Remove small objects, fill small holes, then close the mask."""
+    """Remove small objects, fill small holes, then close the mask.
+
+    Convenience composition of :class:`RemoveSmallObjects`,
+    :class:`RemoveSmallHoles`, and :class:`CloseMask`, in that order.
+    Accepts a GeoTensor or a plain ndarray and returns the same carrier
+    kind.
+
+    Args:
+        min_object_size: Components smaller than this are removed.
+        max_hole_size: Enclosed holes up to this size are filled.
+        close_iter: Binary-closing iterations applied last; ``0`` skips
+            the closing step.
+    """
 
     def __init__(
         self,
@@ -457,7 +599,7 @@ class CleanMask(Operator):
             max_hole_size=self.max_hole_size,
             close_iter=self.close_iter,
         )
-        return _wrap_like(mask, out)
+        return wrap_like(mask, out, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -468,35 +610,48 @@ class CleanMask(Operator):
 
 
 class CombineMasks(Operator):
-    """Combine boolean masks with ``or``, ``and``, ``xor``, or unary ``not``."""
+    """Combine boolean masks with ``or``, ``and``, ``xor``, or unary ``not``.
+
+    Called with a *sequence* of masks (GeoTensors or plain ndarrays);
+    the output takes its carrier kind — and, for GeoTensors, its
+    metadata — from the first mask in the sequence.
+
+    Args:
+        op: ``"or"`` (default), ``"and"``, ``"xor"`` (n-ary), or the
+            unary ``"not"`` which expects exactly one mask.
+    """
 
     def __init__(self, *, op: str = "or") -> None:
         self.op = op
 
     def _apply(self, masks: Sequence[GeoTensor | np.ndarray]) -> GeoTensor | np.ndarray:
         out = combine_masks([np.asarray(mask) for mask in masks], self.op)
-        return _wrap_like(masks[0], out)
+        return wrap_like(masks[0], out, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {"op": self.op}
 
 
 class InvertMask(Operator):
-    """Invert a boolean mask."""
+    """Invert a boolean mask element-wise.
+
+    Accepts a GeoTensor or a plain ndarray and returns the same carrier
+    kind. Takes no parameters.
+    """
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = invert_mask(np.asarray(mask))
-        return _wrap_like(mask, out)
+        return wrap_like(mask, out, fill_value_default=False)
 
 
 class ApplyMask(Operator):
-    """Apply a boolean mask to a GeoTensor, filling True pixels.
+    """Apply a boolean mask to the carrier, filling True pixels.
 
-    Mirrors :class:`geotoolz.cloud.ApplyMask` but lives in the ``mask``
-    namespace so geometry / morphology / algebra pipelines can compose
-    without importing the cloud submodule. Delegates the actual masking
-    to :func:`geotoolz.cloud._src.array.apply_mask` so the broadcasting
-    + dtype-preservation rules stay in one place.
+    Accepts a GeoTensor or a plain ndarray and returns the same
+    carrier kind. This is the canonical mask-application operator
+    (``geotoolz.cloud.ApplyMask`` is a deprecated alias). Delegates the
+    actual masking to :func:`geotoolz.mask._src.array.apply_mask` so the
+    broadcasting + dtype-preservation rules stay in one place.
 
     Convention: the mask is True where pixels should be *masked out*.
     Geometry masks built with ``inside=True`` return True *inside* the
@@ -530,14 +685,14 @@ class ApplyMask(Operator):
         self.fill_value = fill_value
         self.invert = invert
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask_arr = np.asarray(
             self.mask(gt) if isinstance(self.mask, Operator) else self.mask
         )
         out = apply_mask(
             np.asarray(gt), mask_arr, fill_value=self.fill_value, invert=self.invert
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         if isinstance(self.mask, Operator):
@@ -674,12 +829,6 @@ def _safe_extract_zip(zf: ZipFile, extract_dir: Path) -> None:
     zf.extractall(extract_root)
 
 
-def _wrap_like(mask: Any, out: np.ndarray) -> Any:
-    if hasattr(mask, "array_as_geotensor"):
-        return mask.array_as_geotensor(out, fill_value_default=False)
-    return out
-
-
 def _pixel_size(gt: Any) -> tuple[float, float]:
     transform = gt.transform
     return (abs(float(transform.e)), abs(float(transform.a)))
@@ -731,12 +880,4 @@ def _geometry_config(
     # `shapely.geometry.mapping` returns the GeoJSON-style dict for any
     # base geometry (including MultiPolygon / GeometryCollection). We
     # coerce nested tuples to lists for strict JSON serialisability.
-    return _to_jsonable(shapely.geometry.mapping(geometry))
-
-
-def _to_jsonable(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {k: _to_jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(v) for v in value]
-    return value
+    return jsonable(shapely.geometry.mapping(geometry))

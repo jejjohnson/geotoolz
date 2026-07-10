@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pandas as pd
 import pytest
-import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 
 from geotoolz.radiometry import (
@@ -52,12 +52,9 @@ from geotoolz.radiometry._src.solar import (
 
 
 def _toy_geotensor(values: np.ndarray) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32629",
-        fill_value_default=0,
-    )
+    # Shared factory, but with fill_value_default=0 — the fill-value
+    # propagation tests below rely on 0 marking fill pixels.
+    return toy_geotensor(values, fill_value_default=0)
 
 
 @pytest.fixture
@@ -560,6 +557,75 @@ def test_dn_to_reflectance_parity_with_georeader_scalar_path() -> None:
     dn = np.array([1500.0, 3000.0, 6000.0])
     out = dn_to_reflectance(dn, scale=1e-4, offset=0.0)
     np.testing.assert_allclose(out, dn / 10_000.0, rtol=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Plain-ndarray carrier support
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        ToFloat32(),
+        DNToRadiance(gain=0.01, offset=-1.0),
+        RadianceToDN(gain=0.01, offset=-1.0),
+        DNToReflectance(scale=1e-4),
+        MinMax(vmin=0.0, vmax=1.0),
+        PercentileClip(p_min=2.0, p_max=98.0),
+        Gamma(g=1.2),
+        BTFromRadiance(K1=774.8853, K2=1321.0789),
+        DOS1(dark_percentile=1.0),
+        SimpleAtmosphericCorrection(method="dos1", dark_percentile=1.0),
+        RadianceToReflectance(
+            solar_irradiance=[1.95, 1.85, 1.75],
+            acquisition_date=datetime(2024, 6, 21),
+            sza_deg=30.0,
+            units="W/m2/sr/nm",
+        ),
+        ReflectanceToRadiance(
+            solar_irradiance=[1.95, 1.85, 1.75],
+            acquisition_date=datetime(2024, 6, 21),
+            sza_deg=30.0,
+        ),
+    ],
+    ids=lambda op: type(op).__name__,
+)
+def test_operators_accept_plain_ndarray(op: object) -> None:
+    """Plain ndarray in -> plain ndarray out, values equal to the GeoTensor path."""
+    # Strictly positive so fill_value_default=0 on the GeoTensor side
+    # marks no pixel as fill and both paths compute identical values.
+    arr = np.linspace(1.0, 9.0, 3 * 4 * 4).reshape(3, 4, 4)
+    out = op(arr)  # type: ignore[operator]
+    assert type(out) is np.ndarray
+    gt_out = op(_toy_geotensor(arr))  # type: ignore[operator]
+    np.testing.assert_allclose(out, np.asarray(gt_out), rtol=1e-6)
+
+
+def test_apply_srf_accepts_plain_ndarray() -> None:
+    """ApplySRF is metadata-free maths; plain arrays skip fill bookkeeping."""
+    op = ApplySRF(
+        target_center_wavelengths=[500.0, 520.0],
+        target_fwhm=[20.0, 20.0],
+        source_wavelengths=[480.0, 490.0, 500.0, 510.0, 520.0],
+    )
+    arr = np.full((5, 2, 2), 7.0, dtype=np.float32)
+    out = op(arr)
+    assert type(out) is np.ndarray
+    np.testing.assert_allclose(out, np.asarray(op(_toy_geotensor(arr))))
+
+
+def test_solar_geometry_ops_require_geotensor_for_footprint_derivation() -> None:
+    """Without sza_deg / center_coords the footprint supplies the solar
+    geometry, so a plain array must raise a clear TypeError.
+    """
+    arr = np.ones((2, 4, 4))
+    solar = [1.95, 1.85]
+    date = datetime(2024, 6, 21)
+    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+        RadianceToReflectance(solar_irradiance=solar, acquisition_date=date)(arr)
+    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+        ReflectanceToRadiance(solar_irradiance=solar, acquisition_date=date)(arr)
 
 
 # ---------------------------------------------------------------------------

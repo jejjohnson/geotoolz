@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+from jaxtyping import Float, Num, Shaped
 from scipy import ndimage, signal
 
 # Re-use the canonical normalized-difference primitive instead of
@@ -14,25 +15,74 @@ from scipy import ndimage, signal
 from geotoolz.indices._src.array import normalized_difference as normalized_difference
 
 
-def select_bands(arr: np.ndarray, indexes: list[int], *, axis: int = 0) -> np.ndarray:
-    """Select bands by integer index along the configured band axis."""
+def select_bands(
+    arr: Shaped[np.ndarray, "c h w"], indexes: list[int], *, axis: int = 0
+) -> Shaped[np.ndarray, "k h w"]:
+    """Select bands by integer index along the configured band axis.
+
+    Thin wrapper over :func:`numpy.take`. Shapes are shown for the
+    default channel-first ``(C, H, W)`` layout, but any number of
+    dimensions is supported — only the axis at position ``axis`` is
+    touched.
+
+    Args:
+        arr: Input array with the band axis at position ``axis``.
+        indexes: Integer band positions to keep, in output order.
+            Repeats are allowed (the band is duplicated in the output).
+        axis: Position of the band axis. Default ``0`` (band-first
+            convention; matches ``rasterio.read()`` output).
+
+    Returns:
+        Array with the band axis replaced by the ``len(indexes)``
+        selected bands; all other axes are unchanged.
+    """
     return np.take(arr, indexes, axis=axis)
 
 
-def reorder_bands(arr: np.ndarray, order: list[int], *, axis: int = 0) -> np.ndarray:
-    """Reorder bands by integer index along the configured band axis."""
+def reorder_bands(
+    arr: Shaped[np.ndarray, "c h w"], order: list[int], *, axis: int = 0
+) -> Shaped[np.ndarray, "c h w"]:
+    """Reorder bands by integer index along the configured band axis.
+
+    Alias of :func:`select_bands` that emphasises intent: ``order``
+    should be a permutation of ``range(arr.shape[axis])`` so every input
+    band appears exactly once in the output (this is not enforced).
+
+    Args:
+        arr: Input array with the band axis at position ``axis``.
+        order: New band ordering as integer positions.
+        axis: Position of the band axis. Default ``0``.
+
+    Returns:
+        Array with the same shape as ``arr`` and the band axis permuted
+        according to ``order``.
+    """
     return select_bands(arr, order, axis=axis)
 
 
 def band_ratio(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "c h w"],
     numerator_idx: int,
     denominator_idx: int,
     *,
     axis: int = 0,
     eps: float = 1e-6,
-) -> np.ndarray:
-    """Compute ``numerator / (denominator + eps)`` with the band axis collapsed."""
+) -> Float[np.ndarray, "h w"]:
+    """Compute ``numerator / (denominator + eps)`` with the band axis collapsed.
+
+    Args:
+        arr: Input array with the band axis at position ``axis``. Any
+            other dimensions are preserved untouched.
+        numerator_idx: Integer position of the numerator band.
+        denominator_idx: Integer position of the denominator band.
+        axis: Position of the band axis. Default ``0``.
+        eps: Small constant added to the denominator to shadow division
+            by zero on no-data / saturated pixels. Default ``1e-6``.
+            Pass ``0.0`` to see ``inf``/``nan`` on zero pixels instead.
+
+    Returns:
+        Ratio array with the band axis collapsed.
+    """
     numerator = np.take(arr, numerator_idx, axis=axis)
     denominator = np.take(arr, denominator_idx, axis=axis)
     return numerator / (denominator + eps)
@@ -52,9 +102,39 @@ _ALLOWED_FUNCS = {
 
 
 def evaluate_band_math(
-    expression: str, variables: Mapping[str, np.ndarray]
-) -> np.ndarray:
-    """Evaluate a restricted arithmetic expression over named band arrays."""
+    expression: str, variables: Mapping[str, Num[np.ndarray, "h w"]]
+) -> Num[np.ndarray, "h w"]:
+    """Evaluate a restricted arithmetic expression over named band arrays.
+
+    The expression is parsed with Python's :mod:`ast` module — never
+    ``eval`` — and only a small arithmetic grammar is permitted:
+
+    * numeric constants,
+    * unary ``+`` / ``-``,
+    * binary ``+ - * / **``,
+    * calls to the whitelisted numpy functions ``abs``, ``sqrt``,
+      ``log``, ``log10``, ``exp``, ``where``, ``minimum``, ``maximum``,
+      and ``clip``.
+
+    Bare names resolve against ``variables``; anything else (comparison
+    operators, attribute access, subscripts, lambdas, ...) raises.
+
+    Args:
+        expression: Arithmetic expression over the keys of
+            ``variables``, e.g. ``"(B8 - B4) / (B8 + B4 + 1e-6)"``.
+        variables: Mapping from band name to band array. All arrays
+            should broadcast against each other (typically identical
+            ``(H, W)`` slices of one cube).
+
+    Returns:
+        The evaluated result as an ndarray (broadcast shape of the
+        participating bands).
+
+    Raises:
+        ValueError: If the expression references an unknown band name,
+            uses a non-numeric constant, or contains any construct
+            outside the grammar above.
+    """
     tree = ast.parse(expression, mode="eval")
     return np.asarray(_eval_node(tree.body, variables))
 
@@ -120,13 +200,46 @@ def _validate_strictly_increasing(wavelengths: np.ndarray, *, context: str) -> N
 
 
 def continuum_removal(
-    arr: np.ndarray,
-    wavelengths: np.ndarray,
+    arr: Float[np.ndarray, "c h w"],
+    wavelengths: Float[np.ndarray, " c"],
     *,
     axis: int = 0,
     method: str = "convex_hull",
-) -> np.ndarray:
-    """Apply hull-quotient continuum removal along the band axis."""
+) -> Float[np.ndarray, "c h w"]:
+    """Apply hull-quotient continuum removal along the band axis.
+
+    Each spectrum (the 1-D slice along ``axis`` at every remaining
+    position) is divided by a continuum envelope so absorption features
+    stand out as dips below 1:
+
+    * ``method="convex_hull"`` — the envelope is the upper convex hull
+      of the spectrum vs wavelength. Output values lie in ``(0, 1]``,
+      with hull touch-points exactly at 1.
+    * ``method="linear"`` — the envelope is the straight line between
+      the first and last band. Cheaper, but only appropriate when no
+      spectral curvature lies outside the absorption feature of
+      interest.
+
+    Where the continuum is exactly zero the quotient is defined as 1
+    (flat), avoiding division-by-zero artefacts on empty pixels.
+
+    Args:
+        arr: Spectral cube with the band axis at position ``axis``. Any
+            number of trailing/leading non-band dimensions is supported.
+        wavelengths: Band-center wavelengths, strictly increasing, with
+            length equal to ``arr.shape[axis]``.
+        axis: Position of the band axis. Default ``0``.
+        method: Continuum model, ``"convex_hull"`` (default) or
+            ``"linear"``.
+
+    Returns:
+        Float array of the same shape as ``arr`` holding the
+        continuum-removed (hull-quotient) spectra.
+
+    Raises:
+        ValueError: If ``wavelengths`` length does not match the band
+            axis, is not strictly increasing, or ``method`` is unknown.
+    """
     arr_axis0 = np.moveaxis(np.asarray(arr, dtype=float), axis, 0)
     if arr_axis0.shape[0] != wavelengths.size:
         raise ValueError("wavelengths length must match the band axis")
@@ -184,15 +297,52 @@ def _upper_hull_line(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 def spectral_binning(
-    arr: np.ndarray,
-    source_wavelengths: np.ndarray,
-    target_wavelengths: np.ndarray,
-    width: float | np.ndarray,
+    arr: Num[np.ndarray, "c h w"],
+    source_wavelengths: Float[np.ndarray, " c"],
+    target_wavelengths: Float[np.ndarray, " k"],
+    width: float | Float[np.ndarray, " k"],
     *,
     axis: int = 0,
     method: str = "mean",
-) -> np.ndarray:
-    """Aggregate source bands into wavelength-centered bins."""
+) -> Float[np.ndarray, "k h w"]:
+    """Aggregate source bands into wavelength-centered bins.
+
+    For each target bin center :math:`\\lambda_c` with width :math:`w`,
+    the source bands satisfying
+    :math:`|\\lambda_s - \\lambda_c| \\le w/2` are aggregated into one
+    output band. Aggregation modes:
+
+    * ``method="mean"`` — uniform average of the in-bin bands.
+    * ``method="median"`` — per-pixel median; robust to outlier bands
+      in narrow bins.
+    * ``method="weighted_mean"`` — Gaussian weights centered on
+      :math:`\\lambda_c` with :math:`\\sigma = w / (2\\sqrt{2\\ln 2})`,
+      i.e. the bin width is interpreted as the FWHM of a synthetic
+      Gaussian response; weights are normalised to sum to one.
+
+    Args:
+        arr: Spectral cube with the band axis at position ``axis``. Any
+            number of non-band dimensions is supported.
+        source_wavelengths: Wavelengths of the source bands, strictly
+            increasing, with length equal to ``arr.shape[axis]``.
+        target_wavelengths: Center wavelengths of the output bins,
+            shape ``(K,)``.
+        width: Bin width(s) in the same units as the wavelengths — a
+            scalar applied to every bin, or a per-bin array broadcast
+            against ``target_wavelengths``. Must be strictly positive.
+        axis: Position of the band axis. Default ``0``.
+        method: ``"mean"`` (default), ``"median"``, or
+            ``"weighted_mean"``.
+
+    Returns:
+        Float array with the band axis replaced by the ``K`` binned
+        bands; all other axes are unchanged.
+
+    Raises:
+        ValueError: If ``source_wavelengths`` is not strictly
+            increasing, any width is non-positive, a bin captures no
+            source band, or ``method`` is unknown.
+    """
     arr_axis0 = np.moveaxis(np.asarray(arr), axis, 0)
     _validate_strictly_increasing(source_wavelengths, context="spectral_binning")
     widths = np.broadcast_to(np.asarray(width, dtype=float), target_wavelengths.shape)
@@ -235,14 +385,45 @@ def spectral_binning(
 
 
 def spectral_smoothing(
-    arr: np.ndarray,
+    arr: Float[np.ndarray, "c h w"],
     *,
     axis: int = 0,
     method: str = "savgol",
     window: int = 7,
     polyorder: int = 2,
-) -> np.ndarray:
-    """Smooth spectra along the band axis."""
+) -> Float[np.ndarray, "c h w"]:
+    """Smooth spectra along the band axis.
+
+    Filters each spectrum (1-D slice along ``axis``) independently:
+
+    * ``method="savgol"`` — Savitzky-Golay least-squares polynomial
+      fit of order ``polyorder`` over an odd ``window`` of bands.
+      Preserves peak shape better than a plain average.
+    * ``method="gaussian"`` — Gaussian filter with
+      ``sigma = window / 2`` bands (``polyorder`` ignored).
+    * ``method="moving_average"`` — uniform boxcar of ``window`` bands
+      via ``np.convolve(..., mode="same")`` (``polyorder`` ignored);
+      spectrum edges taper because the kernel overhangs zeros.
+
+    Args:
+        arr: Spectral cube with the band axis at position ``axis``. Any
+            number of non-band dimensions is supported.
+        axis: Position of the band axis. Default ``0``.
+        method: ``"savgol"`` (default), ``"gaussian"``, or
+            ``"moving_average"``.
+        window: Filter window length in bands. Must be odd for
+            ``"savgol"``. Default ``7``.
+        polyorder: Polynomial order of the Savitzky-Golay fit; must be
+            less than ``window``. Default ``2``.
+
+    Returns:
+        Float array of the same shape as ``arr`` holding the smoothed
+        spectra.
+
+    Raises:
+        ValueError: If ``method`` is unknown, or ``method="savgol"``
+            with an even ``window``.
+    """
     if method == "savgol":
         if window % 2 == 0:
             raise ValueError(f"savgol window must be odd, got {window}")

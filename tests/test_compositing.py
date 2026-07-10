@@ -7,6 +7,7 @@ import json
 import numpy as np
 import pytest
 import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
@@ -20,13 +21,7 @@ from geotoolz.compositing import (
 
 
 def _gt(values: np.ndarray, *, transform: rasterio.Affine | None = None) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=transform
-        or rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32629",
-        fill_value_default=np.nan,
-    )
+    return toy_geotensor(values, transform=transform, fill_value_default=np.nan)
 
 
 def test_compositing_namespace_is_available() -> None:
@@ -230,6 +225,66 @@ def test_bap_composite_rejects_mixed_cloud_distance_inputs() -> None:
 
     with pytest.raises(ValueError, match="mix of raw 'cloud_distance'"):
         BAPComposite(target_doy=196)(pairs)
+
+
+@pytest.mark.parametrize(
+    ("operator", "payload"),
+    [
+        (MedianComposite(), "frames"),
+        (MaxNDVIComposite(red=0, nir=1), "frames"),
+        (CloudFreeComposite(), "masks"),
+        (BAPComposite(target_doy=196), "metadata"),
+        (MinCloudComposite(), "masks"),
+    ],
+)
+def test_composites_accept_plain_ndarray_frames(
+    operator: MedianComposite
+    | MaxNDVIComposite
+    | CloudFreeComposite
+    | BAPComposite
+    | MinCloudComposite,
+    payload: str,
+) -> None:
+    frame1 = np.array(
+        [[[1.0, 2.0], [3.0, 4.0]], [[2.0, 1.0], [4.0, 3.0]]], dtype=np.float32
+    )
+    frame2 = np.array(
+        [[[5.0, 6.0], [7.0, 8.0]], [[6.0, 5.0], [8.0, 7.0]]], dtype=np.float32
+    )
+    mask1 = np.array([[False, True], [False, False]])
+    mask2 = np.array([[False, False], [True, False]])
+    meta1 = {"view_angle": 10.0, "doy": 100}
+    meta2 = {"view_angle": 2.0, "doy": 190}
+
+    def inputs(a: object, b: object) -> list:
+        return {
+            "frames": [a, b],
+            "masks": [(a, mask1), (b, mask2)],
+            "metadata": [(a, meta1), (b, meta2)],
+        }[payload]
+
+    out_plain = operator(inputs(frame1, frame2))
+    out_geo = operator(inputs(_gt(frame1), _gt(frame2)))
+
+    assert type(out_plain) is np.ndarray
+    np.testing.assert_allclose(out_plain, np.asarray(out_geo), equal_nan=True)
+
+
+def test_max_ndvi_composite_named_bands_require_geotensor_attrs() -> None:
+    frame = np.ones((2, 2, 2), dtype=np.float32)
+
+    with pytest.raises(TypeError, match="named band references"):
+        MaxNDVIComposite(red="red", nir="nir")([frame, frame])
+
+
+def test_composites_raise_on_mismatched_plain_array_shapes() -> None:
+    with pytest.raises(ValueError, match="shape, transform, and CRS"):
+        MedianComposite()(
+            [
+                np.ones((1, 2, 2), dtype=np.float32),
+                np.ones((1, 4, 4), dtype=np.float32),
+            ]
+        )
 
 
 def test_compositing_get_config_is_json_safe() -> None:

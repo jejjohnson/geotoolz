@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
 
@@ -32,12 +33,8 @@ def _gt(
     transform: rasterio.Affine | None = None,
     crs: str = "EPSG:32629",
 ) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=transform
-        or rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs=crs,
-        fill_value_default=np.nan,
+    return toy_geotensor(
+        values, transform=transform, crs=crs, fill_value_default=np.nan
     )
 
 
@@ -77,6 +74,16 @@ class TestRasterToRasterLike:
         assert out.shape == like.shape
         assert out.crs == like.crs
         assert out.transform == like.transform
+
+    def test_plain_array_inputs_rejected(self) -> None:
+        # Coregistration is geo-dependent on both sides; a plain array
+        # (no transform/CRS) must raise a clear TypeError.
+        arr = np.zeros((4, 4), dtype=np.float32)
+        like = _gt(np.zeros((4, 4), dtype=np.float32))
+        with pytest.raises(TypeError, match="GeoTensor"):
+            RasterToRasterLike()(arr, like)
+        with pytest.raises(TypeError, match="GeoTensor"):
+            RasterToRasterLike()(like, arr)
 
     def test_resampling_kwarg_propagates(self) -> None:
         # Build a checkerboard-ish input that gives a different result

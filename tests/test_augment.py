@@ -7,6 +7,7 @@ import json
 import numpy as np
 import pytest
 import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
 
@@ -15,10 +16,8 @@ from geotoolz import augment
 
 
 def _toy_geotensor(values: np.ndarray) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32629",
+    return toy_geotensor(
+        values,
         fill_value_default=0,
         attrs={
             "band_names": ["B02", "B03", "B04", "B08"],
@@ -418,3 +417,59 @@ def test_compose_forwards_seed_only_to_stochastic_children(patch: GeoTensor) -> 
     out = composed(patch, seed=7)
     assert out.shape == patch.shape
     assert out.dtype == patch.dtype
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        augment.BrightnessJitter(seed=0),
+        augment.ContrastJitter(seed=0),
+        augment.GaussianNoise(sigma=0.01, seed=0),
+        augment.SpeckleNoise(sigma=0.02, seed=0),
+        augment.BandDropout(p=0.5, fill=-1.0, seed=0),
+        augment.AtmosphericHaze(intensity=0.05, seed=0),
+        augment.SimulatedClouds(coverage=0.5, feather=1, seed=0),
+        augment.RandomFlip(p_horizontal=1.0, p_vertical=1.0, seed=0),
+        augment.RandomRotate90(p=1.0, seed=0),
+        augment.RandomCrop(size=(2, 3), seed=0),
+    ],
+    ids=lambda op: type(op).__name__,
+)
+def test_plain_ndarray_in_plain_ndarray_out(op: Operator) -> None:
+    """Plain ndarray in -> plain ndarray out, values equal to the GeoTensor path."""
+    arr = np.arange(3 * 4 * 5, dtype=np.float32).reshape(3, 4, 5) / 100.0
+    gt = toy_geotensor(arr)  # no wavelength attrs: both paths use defaults
+
+    plain_out = op(arr)
+    geo_out = op(gt)
+
+    assert type(plain_out) is np.ndarray
+    assert isinstance(geo_out, GeoTensor)
+    np.testing.assert_array_equal(plain_out, np.asarray(geo_out))
+
+
+def test_metadata_dependent_ops_reject_plain_arrays() -> None:
+    """Geo/attrs-dependent augmentations fail clearly on plain arrays."""
+    arr = np.zeros((2, 4, 4), dtype=np.float32)
+    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+        augment.RandomShift(max_shift=(1, 1), seed=0)(arr)
+    with pytest.raises(ValueError, match="band names"):
+        augment.BandJitter(groups={"g": ["B02", "B03"]}, seed=0)(arr)
+    with pytest.raises(ValueError, match="solar_zenith_angle"):
+        augment.SunAngleJitter(delta_sza_deg=1.0, seed=0)(arr)
+
+
+def test_cutmix_and_compose_support_plain_arrays() -> None:
+    arr = np.arange(2 * 4 * 4, dtype=np.float32).reshape(2, 4, 4) / 100.0
+    donor = np.full_like(arr, 9.0)
+
+    mixed = augment.CutMix(pool=[donor], p=1.0, seed=0)(arr)
+    assert type(mixed) is np.ndarray
+    assert np.any(mixed == 9.0)
+
+    composed = augment.Compose(
+        [augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)], seed=0
+    )
+    out = composed(arr)
+    assert type(out) is np.ndarray
+    np.testing.assert_array_equal(out, np.flip(arr, axis=-1))

@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Literal, cast
 
 import numpy as np
+from jaxtyping import Bool, Float, Num, Shaped
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
@@ -31,7 +32,9 @@ _IDW_POWER_THRESHOLD = 64
 _MAD_TO_STD_SCALE = 1.4826
 
 
-def _nanmean_filter(arr: np.ndarray, size: int | tuple[int, ...]) -> np.ndarray:
+def _nanmean_filter(
+    arr: Num[np.ndarray, "*dims"], size: int | tuple[int, ...]
+) -> Float[np.ndarray, "*dims"]:
     """Uniform window mean that ignores NaN entries.
 
     Computes ``sum(finite) / count(finite)`` over a uniform window of
@@ -45,19 +48,23 @@ def _nanmean_filter(arr: np.ndarray, size: int | tuple[int, ...]) -> np.ndarray:
     return np.divide(total, count, out=np.full_like(total, np.nan), where=count > 0)
 
 
-def _spatial_size(arr: np.ndarray, size: int) -> tuple[int, ...]:
+def _spatial_size(arr: Shaped[np.ndarray, "*dims"], size: int) -> tuple[int, ...]:
     """Build a per-axis window tuple that filters only the last two axes."""
     if size <= 0:
         raise ValueError("window/size must be positive")
     return (1,) * max(arr.ndim - 2, 0) + (int(size), int(size))
 
 
-def _preserve_nan(original: np.ndarray, restored: np.ndarray) -> np.ndarray:
+def _preserve_nan(
+    original: Float[np.ndarray, "*dims"], restored: Float[np.ndarray, "*dims"]
+) -> Float[np.ndarray, "*dims"]:
     """Re-stamp NaN positions from ``original`` onto ``restored``."""
     return np.where(np.isnan(original), np.nan, restored)
 
 
-def despeckle_lee(arr: np.ndarray, *, window: int = 7, cu: float = 0.523) -> np.ndarray:
+def despeckle_lee(
+    arr: Num[np.ndarray, "*batch h w"], *, window: int = 7, cu: float = 0.523
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Apply the classical Lee local-statistics speckle filter.
 
     For each pixel computes a local mean :math:`\bar{x}` and variance
@@ -89,8 +96,8 @@ def despeckle_lee(arr: np.ndarray, *, window: int = 7, cu: float = 0.523) -> np.
 
 
 def despeckle_frost(
-    arr: np.ndarray, *, window: int = 7, damping: float = 2.0
-) -> np.ndarray:
+    arr: Num[np.ndarray, "*batch h w"], *, window: int = 7, damping: float = 2.0
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Apply a compact Frost-style adaptive speckle smoother.
 
     Blends each pixel with its local mean using an edge-aware weight
@@ -104,6 +111,15 @@ def despeckle_frost(
     and dependency-light, but missing the directional weighting of the
     canonical filter. Use ``despeckle_lee`` if you want strict
     statistical optimality.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``. NaNs are preserved.
+        window: Side length of the local window. Must be positive.
+        damping: Edge-sensitivity exponent ``d``. Larger values keep
+            more edge contrast; smaller values smooth more.
+
+    Returns:
+        Smoothed array with the same shape and NaN positions as ``arr``.
     """
     values = np.asarray(arr, dtype=float)
     size = _spatial_size(values, window)
@@ -117,7 +133,9 @@ def despeckle_frost(
     return _preserve_nan(values, alpha * values + (1.0 - alpha) * mean)
 
 
-def despeckle_refined_lee(arr: np.ndarray, *, window: int = 7) -> np.ndarray:
+def despeckle_refined_lee(
+    arr: Num[np.ndarray, "*batch h w"], *, window: int = 7
+) -> Float[np.ndarray, "*batch h w"]:
     """Apply a Refined-Lee approximation.
 
     The full Refined-Lee filter chooses one of eight directional
@@ -126,17 +144,24 @@ def despeckle_refined_lee(arr: np.ndarray, *, window: int = 7) -> np.ndarray:
     just calls :func:`despeckle_lee` with the default ``cu``. It is
     kept under a distinct name so pipelines can swap in a true Refined-
     Lee later without renaming nodes.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``. NaNs are preserved.
+        window: Side length of the local window. Must be positive.
+
+    Returns:
+        Smoothed array with the same shape and NaN positions as ``arr``.
     """
     return despeckle_lee(arr, window=window, cu=0.523)
 
 
 def destripe_column(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch h w"],
     *,
     method: Literal["mean", "median", "moment_matching"] = "mean",
     axis: Literal["column", "row"] = "column",
     window: int = 21,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Remove row or column striping by matching cross-track statistics.
 
     For ``axis="column"`` (default): collapses each column to a single
@@ -159,6 +184,14 @@ def destripe_column(
             ``"row"`` for horizontal).
         window: Side length of the smoothing window for
             ``method="moment_matching"``. Ignored otherwise.
+
+    Returns:
+        Destriped array with the same shape and NaN positions as
+        ``arr``.
+
+    Raises:
+        ValueError: If ``arr`` has fewer than two dimensions or
+            ``method`` is not one of the documented choices.
     """
     values = np.asarray(arr, dtype=float)
     if values.ndim < 2:
@@ -178,7 +211,9 @@ def destripe_column(
     return _preserve_nan(values, out)
 
 
-def gaussian_denoise(arr: np.ndarray, *, sigma: float = 1.0) -> np.ndarray:
+def gaussian_denoise(
+    arr: Num[np.ndarray, "*batch h w"], *, sigma: float = 1.0
+) -> Float[np.ndarray, "*batch h w"]:
     """Gaussian smooth over the trailing two (spatial) axes.
 
     NaN-aware: missing pixels are excluded from both numerator and
@@ -189,6 +224,9 @@ def gaussian_denoise(arr: np.ndarray, *, sigma: float = 1.0) -> np.ndarray:
     Args:
         arr: Array of shape ``(..., H, W)``.
         sigma: Gaussian standard deviation in pixels. ``0`` is a no-op.
+
+    Returns:
+        Smoothed array with the same shape and NaN positions as ``arr``.
     """
     values = np.asarray(arr, dtype=float)
     sigma_tuple = (0.0,) * max(values.ndim - 2, 0) + (float(sigma), float(sigma))
@@ -202,7 +240,9 @@ def gaussian_denoise(arr: np.ndarray, *, sigma: float = 1.0) -> np.ndarray:
     return _preserve_nan(values, out)
 
 
-def median_denoise(arr: np.ndarray, *, size: int = 3) -> np.ndarray:
+def median_denoise(
+    arr: Num[np.ndarray, "*batch h w"], *, size: int = 3
+) -> Float[np.ndarray, "*batch h w"]:
     """Median smooth over the trailing two (spatial) axes.
 
     NaNs are temporarily replaced with the global ``nanmedian`` so
@@ -212,6 +252,9 @@ def median_denoise(arr: np.ndarray, *, size: int = 3) -> np.ndarray:
     Args:
         arr: Array of shape ``(..., H, W)``.
         size: Side length of the median window. Must be positive.
+
+    Returns:
+        Smoothed array with the same shape and NaN positions as ``arr``.
     """
     values = np.asarray(arr, dtype=float)
     filled = np.where(np.isfinite(values), values, np.nanmedian(values))
@@ -222,8 +265,11 @@ def median_denoise(arr: np.ndarray, *, size: int = 3) -> np.ndarray:
 
 
 def bilateral_denoise(
-    arr: np.ndarray, *, sigma_color: float = 0.1, sigma_space: float = 5.0
-) -> np.ndarray:
+    arr: Num[np.ndarray, "*batch h w"],
+    *,
+    sigma_color: float = 0.1,
+    sigma_space: float = 5.0,
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Edge-aware denoise using a range-weighted Gaussian approximation.
 
     Computes a spatially smoothed estimate ``s`` of shape ``arr`` and
@@ -245,6 +291,9 @@ def bilateral_denoise(
         sigma_color: Range bandwidth (data units). Smaller values
             preserve more edges; larger values smooth more.
         sigma_space: Spatial bandwidth in pixels.
+
+    Returns:
+        Denoised array with the same shape and NaN positions as ``arr``.
     """
     values = np.asarray(arr, dtype=float)
     smooth = gaussian_denoise(values, sigma=sigma_space)
@@ -254,8 +303,12 @@ def bilateral_denoise(
 
 
 def nl_means(
-    arr: np.ndarray, *, patch_size: int = 5, patch_distance: int = 6, h: float = 0.1
-) -> np.ndarray:
+    arr: Num[np.ndarray, "*batch h w"],
+    *,
+    patch_size: int = 5,
+    patch_distance: int = 6,
+    h: float = 0.1,
+) -> Float[np.ndarray, "*batch h w"]:
     """Lightweight non-local-means-style denoiser.
 
     True non-local-means averages each pixel with similarly-patterned
@@ -275,6 +328,9 @@ def nl_means(
         patch_size: Nominal patch side length (pixels).
         patch_distance: Nominal search-window radius (pixels).
         h: Range bandwidth (data units).
+
+    Returns:
+        Denoised array with the same shape and NaN positions as ``arr``.
     """
     sigma = max((float(patch_distance) + float(patch_size)) / 6.0, 0.1)
     smooth = gaussian_denoise(arr, sigma=sigma)
@@ -283,16 +339,62 @@ def nl_means(
     return _preserve_nan(values, weights * values + (1.0 - weights) * smooth)
 
 
-def pca_denoise(arr: np.ndarray, *, n_components: int, axis: int = 0) -> np.ndarray:
-    """Reconstruct an array from its top PCA components along ``axis``."""
+def pca_denoise(
+    arr: Num[np.ndarray, "*dims"], *, n_components: int, axis: int = 0
+) -> Float[np.ndarray, "*dims"]:
+    """Reconstruct an array from its top PCA components along ``axis``.
+
+    Convenience composition of :func:`fit_pca` and :func:`inverse_pca`.
+    Keeping fewer components than bands suppresses band-uncorrelated
+    noise while preserving the dominant spectral structure.
+
+    Args:
+        arr: Array with a band axis at position ``axis``; typically
+            ``(bands, H, W)``. NaN pixels are mean-imputed for the fit
+            and re-stamped as NaN on the output.
+        n_components: Number of principal components to keep. Must be
+            between 1 and the number of bands.
+        axis: Position of the band axis. Defaults to ``0``.
+
+    Returns:
+        Reconstructed array with the same shape and NaN positions as
+        ``arr``.
+
+    Raises:
+        ValueError: If ``n_components`` is out of range or any band is
+            entirely NaN.
+    """
     model = fit_pca(arr, n_components=n_components, axis=axis)
     return inverse_pca(model["scores"], model)
 
 
 def fit_pca(
-    arr: np.ndarray, *, n_components: int | None = None, axis: int = 0
+    arr: Num[np.ndarray, "*dims"], *, n_components: int | None = None, axis: int = 0
 ) -> dict[str, np.ndarray | int | tuple[int, ...]]:
-    """Fit PCA over a band axis and return scores plus reconstruction state."""
+    """Fit PCA over a band axis and return scores plus reconstruction state.
+
+    NaN pixels are imputed with the per-band mean for the fit; their
+    positions are recorded in the returned state so
+    :func:`inverse_pca` can re-stamp them.
+
+    Args:
+        arr: Array with a band axis at position ``axis``; typically
+            ``(bands, H, W)``.
+        n_components: Number of components to keep. ``None`` (default)
+            keeps all bands.
+        axis: Position of the band axis. Defaults to ``0``.
+
+    Returns:
+        State dict with keys ``"scores"`` (projected data, band axis
+        replaced by the component axis), ``"components"``, ``"mean"``,
+        ``"axis"``, ``"shape"``, ``"nan_mask"``, and ``"snr"``
+        (per-component variance, sorted descending). Pass it verbatim
+        to :func:`inverse_pca`.
+
+    Raises:
+        ValueError: If ``n_components`` is out of range or any band is
+            entirely NaN.
+    """
     values = np.asarray(arr, dtype=float)
     moved = np.moveaxis(values, axis, 0)
     bands = moved.shape[0]
@@ -323,9 +425,20 @@ def fit_pca(
 
 
 def inverse_pca(
-    scores: np.ndarray, state: dict[str, np.ndarray | int | tuple[int, ...]]
+    scores: Num[np.ndarray, "*dims"],
+    state: dict[str, np.ndarray | int | tuple[int, ...]],
 ) -> np.ndarray:
-    """Reconstruct an array from PCA scores and state."""
+    """Reconstruct an array from PCA scores and state.
+
+    Args:
+        scores: Projected data as returned in ``state["scores"]`` (the
+            leading component axis must match ``state["components"]``).
+        state: Reconstruction state produced by :func:`fit_pca`.
+
+    Returns:
+        Reconstructed array with the shape recorded in ``state`` and the
+        original NaN positions re-stamped.
+    """
     components = np.asarray(state["components"])
     mean = np.asarray(state["mean"])[:, None]
     shape = cast(tuple[int, ...], state["shape"])
@@ -339,8 +452,8 @@ def inverse_pca(
 
 
 def _iter_planes(
-    values: np.ndarray,
-) -> list[tuple[tuple[int, ...] | None, np.ndarray]]:
+    values: Float[np.ndarray, "*batch h w"],
+) -> list[tuple[tuple[int, ...] | None, Float[np.ndarray, "h w"]]]:
     """Yield each 2-D ``(H, W)`` plane of ``values`` with its leading index.
 
     The leading index is ``None`` for a 2-D input so callers can dispatch
@@ -351,7 +464,9 @@ def _iter_planes(
     return [(idx, values[idx]) for idx in np.ndindex(values.shape[:-2])]
 
 
-def gap_fill_nearest(arr: np.ndarray, *, max_distance: int | None = None) -> np.ndarray:
+def gap_fill_nearest(
+    arr: Num[np.ndarray, "*batch h w"], *, max_distance: int | None = None
+) -> Float[np.ndarray, "*batch h w"]:
     """Fill NaNs from the nearest finite neighbour.
 
     Uses :func:`scipy.ndimage.distance_transform_edt` per 2-D plane.
@@ -364,6 +479,9 @@ def gap_fill_nearest(arr: np.ndarray, *, max_distance: int | None = None) -> np.
         max_distance: Optional maximum Euclidean fill radius in pixels.
             ``None`` (default) fills every NaN that has at least one
             finite neighbour anywhere in the plane.
+
+    Returns:
+        Filled array with the same shape as ``arr``.
     """
     values = np.asarray(arr, dtype=float)
     out = values.copy()
@@ -385,7 +503,9 @@ def gap_fill_nearest(arr: np.ndarray, *, max_distance: int | None = None) -> np.
     return out
 
 
-def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.ndarray:
+def gap_fill_idw(
+    arr: Num[np.ndarray, "*batch h w"], *, power: float = 2.0, radius: int = 5
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Fill NaNs with inverse-distance weighted finite neighbours.
 
     For each NaN pixel ``p``, finds all finite neighbours within
@@ -404,6 +524,9 @@ def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.
         power: IDW exponent. ``2.0`` is the standard choice; larger
             values bias toward nearer neighbours.
         radius: Maximum search radius in pixels.
+
+    Returns:
+        Filled array with the same shape as ``arr``.
     """
     if power >= _IDW_POWER_THRESHOLD:
         return gap_fill_nearest(arr, max_distance=radius)
@@ -433,7 +556,9 @@ def gap_fill_idw(arr: np.ndarray, *, power: float = 2.0, radius: int = 5) -> np.
     return out
 
 
-def gap_fill_laplacian(arr: np.ndarray, *, iterations: int = 200) -> np.ndarray:
+def gap_fill_laplacian(
+    arr: Num[np.ndarray, "*batch h w"], *, iterations: int = 200
+) -> Float[np.ndarray, "*batch h w"]:
     r"""Fill NaNs by iteratively solving a discrete Laplace equation.
 
     Iterates the 4-neighbour averaging
@@ -446,6 +571,10 @@ def gap_fill_laplacian(arr: np.ndarray, *, iterations: int = 200) -> np.ndarray:
     Args:
         arr: Array of shape ``(..., H, W)``.
         iterations: Number of Jacobi sweeps. Increase for larger gaps.
+
+    Returns:
+        Filled array with the same shape as ``arr``; the original
+        finite pixels are preserved exactly.
     """
     values = np.asarray(arr, dtype=float)
     out = gap_fill_nearest(values)
@@ -466,7 +595,9 @@ def gap_fill_laplacian(arr: np.ndarray, *, iterations: int = 200) -> np.ndarray:
     return out
 
 
-def gap_fill_biharmonic(arr: np.ndarray) -> np.ndarray:
+def gap_fill_biharmonic(
+    arr: Num[np.ndarray, "*batch h w"],
+) -> Float[np.ndarray, "*batch h w"]:
     """Fill NaNs with a smooth biharmonic-style two-pass Laplacian fill.
 
     Approximates biharmonic inpainting (which solves
@@ -478,6 +609,13 @@ def gap_fill_biharmonic(arr: np.ndarray) -> np.ndarray:
     Note: this is *not* the canonical biharmonic inpainting from
     scikit-image; it is intentionally dependency-light. For sharper
     boundary continuity, use ``skimage.restoration.inpaint_biharmonic``.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``.
+
+    Returns:
+        Filled array with the same shape as ``arr``; the original
+        finite pixels are preserved exactly.
     """
     values = np.asarray(arr, dtype=float)
     smooth = gaussian_denoise(gap_fill_laplacian(values), sigma=1.0)
@@ -485,8 +623,11 @@ def gap_fill_biharmonic(arr: np.ndarray) -> np.ndarray:
 
 
 def outlier_mask(
-    arr: np.ndarray, *, method: Literal["mad", "zscore"] = "mad", k: float = 3.0
-) -> np.ndarray:
+    arr: Num[np.ndarray, "*dims"],
+    *,
+    method: Literal["mad", "zscore"] = "mad",
+    k: float = 3.0,
+) -> Bool[np.ndarray, "*dims"]:
     r"""Flag robust global outliers.
 
     ``method="mad"`` (default) uses the median + median-absolute-
@@ -499,6 +640,19 @@ def outlier_mask(
     pixel that differs from the centre, which is consistent with
     "anything that breaks the constant pattern is an outlier". When the
     scale is non-finite (all-NaN input) returns an all-False mask.
+
+    Args:
+        arr: Input array of any shape. Statistics are global (whole
+            array), not windowed.
+        method: ``"mad"`` (robust, default) or ``"zscore"``.
+        k: Threshold in scaled units (approximately standard
+            deviations).
+
+    Returns:
+        Boolean array of the same shape; ``True`` marks outliers.
+
+    Raises:
+        ValueError: If ``method`` is not ``"mad"`` or ``"zscore"``.
     """
     values = np.asarray(arr, dtype=float)
     if method == "mad":
@@ -519,12 +673,12 @@ def outlier_mask(
 
 
 def replace_outliers(
-    arr: np.ndarray,
+    arr: Num[np.ndarray, "*batch h w"],
     *,
     method: Literal["mad", "zscore"] = "mad",
     k: float = 3.0,
     fill: Literal["median", "nan", "interp"] = "median",
-) -> np.ndarray:
+) -> Float[np.ndarray, "*batch h w"]:
     """Replace detected outliers with a scalar or nearest-neighbour fill.
 
     Args:
@@ -535,6 +689,13 @@ def replace_outliers(
             inliers; ``"nan"`` sets them to NaN; ``"interp"`` fills
             them by nearest-neighbour interpolation over the spatial
             axes via :func:`gap_fill_nearest`.
+
+    Returns:
+        Array of the same shape as ``arr`` with outliers replaced.
+
+    Raises:
+        ValueError: If ``method`` or ``fill`` is not one of the
+            documented choices.
     """
     values = np.asarray(arr, dtype=float)
     mask = outlier_mask(values, method=method, k=k)
@@ -547,7 +708,9 @@ def replace_outliers(
     raise ValueError("fill must be 'median', 'nan', or 'interp'")
 
 
-def saturation_flag(arr: np.ndarray, *, threshold: float | None = None) -> np.ndarray:
+def saturation_flag(
+    arr: Shaped[np.ndarray, "*dims"], *, threshold: float | None = None
+) -> Bool[np.ndarray, "*dims"]:
     """Flag pixels at or above a saturation threshold.
 
     Args:

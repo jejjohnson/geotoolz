@@ -337,3 +337,94 @@ def test_blend_rgba_uses_source_over_alpha_composition() -> None:
     out_alpha = int(out[3, 0, 0])
     assert 188 <= out_alpha <= 194
     assert out_alpha > 150  # rules out the old `max(bg, fg)` result.
+
+
+@pytest.mark.parametrize(
+    ("op", "values"),
+    [
+        pytest.param(
+            Composite(bands=[2, 0]),
+            np.arange(12, dtype=np.float32).reshape(3, 2, 2),
+            id="composite",
+        ),
+        pytest.param(
+            StretchToUint8(lower=0.0, upper=100.0),
+            np.linspace(0.0, 2.0, 12, dtype=np.float32).reshape(3, 2, 2),
+            id="stretch-to-uint8",
+        ),
+        pytest.param(
+            GammaCorrect(gamma=2.0),
+            np.linspace(0.0, 1.0, 8, dtype=np.float32).reshape(2, 2, 2),
+            id="gamma-correct",
+        ),
+        pytest.param(
+            ApplyColormap(name="viridis", vmin=0.0, vmax=1.0),
+            np.linspace(0.0, 1.0, 4, dtype=np.float32).reshape(2, 2),
+            id="apply-colormap",
+        ),
+        pytest.param(
+            ApplyDiscreteColormap(mapping={1: (1.0, 0.0, 0.0, 1.0)}),
+            np.array([[0, 1], [1, 0]], dtype=np.uint8),
+            id="apply-discrete-colormap",
+        ),
+        pytest.param(
+            Hillshade(x_resolution=1.0, y_resolution=1.0),
+            np.arange(16, dtype=np.float32).reshape(4, 4),
+            id="hillshade-explicit-resolution",
+        ),
+    ],
+)
+def test_plain_ndarray_in_plain_ndarray_out(op, values) -> None:
+    """Plain np.ndarray in -> plain np.ndarray out, matching the GeoTensor path."""
+    out = op(values)
+    assert type(out) is np.ndarray
+    gt_out = op(_toy_geotensor(values))
+    assert isinstance(gt_out, GeoTensor)
+    np.testing.assert_array_equal(out, np.asarray(gt_out))
+
+
+def test_overlay_plain_ndarrays_blend_without_metadata() -> None:
+    """Two plain-array inputs skip the transform/CRS check and blend as arrays."""
+    bg = np.zeros((3, 2, 2), dtype=np.uint8)
+    fg = np.full((4, 2, 2), 255, dtype=np.uint8)
+    out = Overlay(alpha=0.5)(bg, fg)
+    assert type(out) is np.ndarray
+    expected = Overlay(alpha=0.5)(_toy_geotensor(bg), _toy_geotensor(fg))
+    np.testing.assert_array_equal(out, np.asarray(expected))
+
+
+@pytest.mark.parametrize(
+    ("op", "values"),
+    [
+        pytest.param(
+            Hillshade(),
+            np.arange(16, dtype=np.float32).reshape(4, 4),
+            id="hillshade-no-resolution",
+        ),
+        pytest.param(
+            ShadedRelief(),
+            np.arange(16, dtype=np.float32).reshape(4, 4),
+            id="shaded-relief",
+        ),
+        pytest.param(
+            AnnotatePolygons(geometries=[Polygon([(1, 1), (3, 1), (3, 3)])]),
+            np.zeros((3, 4, 4), dtype=np.uint8),
+            id="annotate-polygons",
+        ),
+        pytest.param(
+            AnnotatePoints(points=np.array([[1.5, 2.5]])),
+            np.zeros((3, 4, 4), dtype=np.uint8),
+            id="annotate-points",
+        ),
+    ],
+)
+def test_geo_dependent_ops_reject_plain_arrays(op, values) -> None:
+    """Geo-dependent viz ops raise a clear TypeError on plain-array input."""
+    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+        op(values)
+
+
+def test_composite_string_bands_require_attrs_metadata() -> None:
+    """String band refs need a carrier with band names in attrs."""
+    with pytest.raises(ValueError, match="string band"):
+        Composite(bands=["B04"])(np.zeros((3, 2, 2), dtype=np.float32))

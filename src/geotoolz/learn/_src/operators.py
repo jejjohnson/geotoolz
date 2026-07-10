@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.config import jsonable
 from geotoolz.learn._src.estimators import (
     GeoTensorEstimator,
     NanStrategy,
@@ -25,6 +27,14 @@ FitMode = Literal["pre_fit", "fit_on_call", "refit", "fit_streaming", "fit_only"
 
 class SklearnOp(Operator):
     """Universal adapter for scikit-learn-compatible estimators on GeoTensors.
+
+    Delegates the ``(C, H, W) <-> (n_samples, n_features)`` marshalling
+    to :class:`GeoTensorEstimator` and adds the fitting lifecycle
+    (``fit_mode``) plus joblib state persistence. Metadata-independent:
+    accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns a
+    matching carrier whenever the estimator output preserves the input's
+    spatial ``(H, W)`` layout; sample-only outputs (and
+    ``nan_transform="drop"`` with NaN rows) come back as bare ndarrays.
 
     Args:
         estimator: scikit-learn-compatible object to wrap.
@@ -104,7 +114,7 @@ class SklearnOp(Operator):
         if state_path is not None:
             self.load_state(state_path)
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         if self._task == "fit_predict":
             return self._geo_estimator.fit_predict(gt)
 
@@ -146,8 +156,8 @@ class SklearnOp(Operator):
             "estimator": estimator_path,
             "estimator_params": _jsonable_params(params),
             "mode": self.mode,
-            "sample_axes": self.sample_axes,
-            "feature_axes": self.feature_axes,
+            "sample_axes": jsonable(self.sample_axes),
+            "feature_axes": jsonable(self.feature_axes),
             "fit_mode": self.fit_mode,
             "task": self.task,
             "resolved_task": self._task,
@@ -181,10 +191,21 @@ def _validate_fit_mode(fit_mode: FitMode) -> None:
 
 
 def _jsonable_params(params: dict[str, Any]) -> dict[str, Any]:
-    jsonable: dict[str, Any] = {}
+    """Coerce sklearn ``get_params`` output to JSON-safe values.
+
+    Thin wrapper over the shared :func:`geotoolz._src.config.jsonable`:
+    sklearn param dicts routinely contain values with no JSON form
+    (nested estimators, callables, ``RandomState`` instances). The
+    shared helper passes such values through unchanged, so any entry
+    that still fails ``json.dumps`` after coercion is dropped — the
+    emitted config must always survive serialisation.
+    """
+    out: dict[str, Any] = {}
     for key, value in params.items():
-        if value is None or isinstance(value, (bool, int, float, str)):
-            jsonable[key] = value
-        elif isinstance(value, (list, tuple)):
-            jsonable[key] = list(value)
-    return jsonable
+        coerced = jsonable(value)
+        try:
+            json.dumps(coerced)
+        except (TypeError, ValueError):
+            continue
+        out[key] = coerced
+    return out

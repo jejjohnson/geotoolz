@@ -1,8 +1,11 @@
 """Carrier-aware plume operators for retrieval post-processing.
 
-These Tier-B operators wrap the Tier-A primitives in ``array.py`` so they
-accept and return ``georeader.GeoTensor`` carriers (or, for vector
-outputs, ``geopandas.GeoDataFrame``). Algorithms follow the literature
+These Tier-B operators wrap the Tier-A primitives in ``array.py``.
+Per-pixel operators accept a ``georeader.GeoTensor`` or a plain
+``np.ndarray`` and return the same carrier kind; geo-dependent operators
+(advection geometry, pixel-area math, footprints) require a
+georeferenced ``GeoTensor`` and raise ``TypeError`` otherwise. Vector
+outputs are ``geopandas.GeoDataFrame``. Algorithms follow the literature
 cited in :mod:`geotoolz.plume._src.array`:
 
 - ``SBMP`` — Varon et al. (2021) Sentinel-2 SWIR ratio retrieval.
@@ -30,6 +33,7 @@ from shapely.geometry import LineString, shape
 from shapely.ops import unary_union
 from skimage.measure import regionprops_table
 
+from geotoolz._src.wrap import wrap_like
 from geotoolz.plume._src.array import (
     ColumnUnit,
     Connectivity,
@@ -130,8 +134,9 @@ class SBMP(Operator):
     Args:
         swir1: Index or Sentinel-2 band name of the SWIR-1 channel.
         swir2: Index or Sentinel-2 band name of the SWIR-2 channel.
-        reference_scene: Optional clean-air ``GeoTensor`` with the same
-            band layout. When supplied, returns log-ratio change.
+        reference_scene: Optional clean-air ``GeoTensor`` or plain array
+            with the same band layout. When supplied, returns log-ratio
+            change.
         axis: Band axis of the input. Default ``0``.
         eps: Numerical guard against division by zero. Default ``1e-10``.
 
@@ -149,7 +154,7 @@ class SBMP(Operator):
         *,
         swir1: int | str = "B11",
         swir2: int | str = "B12",
-        reference_scene: GeoTensor | None = None,
+        reference_scene: GeoTensor | np.ndarray | None = None,
         axis: int = 0,
         eps: float = 1e-10,
     ) -> None:
@@ -159,7 +164,7 @@ class SBMP(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt, dtype=float)
         swir1 = _extract_and_clip_band(arr, self.swir1, self.axis)
         swir2 = _extract_and_clip_band(arr, self.swir2, self.axis)
@@ -172,7 +177,7 @@ class SBMP(Operator):
             out = ratio - ref_ratio
         else:
             out = (swir1 - swir2) / (swir1 + swir2 + self.eps)
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         config: dict[str, Any] = {
@@ -221,14 +226,14 @@ class PlumeMask(Operator):
         self.min_area = min_area
         self.connectivity = connectivity
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask = plume_mask(
             np.asarray(gt),
             threshold=self.threshold,
             min_area=self.min_area,
             connectivity=self.connectivity,
         )
-        return gt.array_as_geotensor(mask)
+        return wrap_like(gt, mask)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -260,14 +265,14 @@ class PlumeContours(Operator):
         self.return_labels = return_labels
         self.connectivity = connectivity
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         labels = label_components(
             squeeze_single_band(np.asarray(gt)).astype(bool),
             min_area=self.min_area,
             connectivity=self.connectivity,
         )
         out = labels if self.return_labels else labels > 0
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -287,6 +292,10 @@ class PlumeFootprint(Operator):
     supplied), ``n_pixels``, ``label_id``, and skimage region properties such as
     ``major_axis_length``, ``orientation``, ``eccentricity``, ``solidity``,
     ``perimeter``, ``bbox-*``, and ``inertia_tensor_eigvals-*``.
+
+    Geo-dependent: polygonisation needs the carrier's transform and CRS,
+    so the input must be a georeferenced ``GeoTensor`` (plain arrays
+    raise ``TypeError``).
 
     Args:
         min_area_m2: Drop polygons smaller than this area.
@@ -323,6 +332,11 @@ class PlumeFootprint(Operator):
         )
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
+        if getattr(gt, "transform", None) is None:
+            raise TypeError(
+                "PlumeFootprint requires a georeferenced GeoTensor input; "
+                "got a plain array"
+            )
         mask_arr = squeeze_single_band(np.asarray(gt))
         if mask_arr.dtype == bool:
             labels = label_components(mask_arr, min_area=1, connectivity=8)
@@ -481,6 +495,10 @@ class WindAdvectionCone(Operator):
     a reanalysis product), following the practice of Varon et al. (2018,
     2021).
 
+    Geo-dependent: the cone is rasterised in CRS coordinates via the
+    carrier's transform, so the input must be a georeferenced
+    ``GeoTensor`` (plain arrays raise ``TypeError``).
+
     Args:
         source: ``(x, y)`` source coordinates. If ``crs`` is supplied,
             ``source`` is interpreted in that CRS and reprojected to the
@@ -516,6 +534,11 @@ class WindAdvectionCone(Operator):
         self.crs = crs
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
+        if getattr(gt, "transform", None) is None:
+            raise TypeError(
+                "WindAdvectionCone requires a georeferenced GeoTensor input; "
+                "got a plain array"
+            )
         arr = squeeze_single_band(np.asarray(gt))
         source = self.source
         if self.crs is not None and gt.crs is not None:
@@ -533,7 +556,7 @@ class WindAdvectionCone(Operator):
             half_angle_deg=self.half_angle_deg,
             max_distance=self.max_distance,
         )
-        return gt.array_as_geotensor(mask)
+        return wrap_like(gt, mask)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -570,6 +593,10 @@ class IMEEstimate(Operator):
     The ``enhancement`` carrier MUST be in kg/m^2. Use
     :class:`ColumnToMass` upstream to convert from ppm m or mol/m^2:
     passing other units silently produces nonsense.
+
+    Geo-dependent: pixel area and plume length are derived from the
+    carrier's transform, so the input must be a georeferenced
+    ``GeoTensor`` (plain arrays raise ``TypeError``).
 
     Args:
         plume_mask: Boolean ``GeoTensor`` selecting plume pixels.
@@ -622,6 +649,11 @@ class IMEEstimate(Operator):
         self.uncertainty_fraction = uncertainty_fraction
 
     def _apply(self, gt: GeoTensor) -> dict[str, float]:
+        if getattr(gt, "transform", None) is None:
+            raise TypeError(
+                "IMEEstimate requires a georeferenced GeoTensor input; "
+                "got a plain array"
+            )
         mask = squeeze_single_band(np.asarray(self.plume_mask)).astype(bool)
         enhancement = squeeze_single_band(np.asarray(gt, dtype=float))
         area = (
@@ -682,6 +714,10 @@ class CrossSectionalFlux(Operator):
     :math:`\Delta y = \sqrt{\mathrm{pixel\_area}}` as the across-wind
     pixel size. For strongly anisotropic pixel grids, reproject first.
 
+    Geo-dependent: transect placement and pixel size come from the
+    carrier's transform and CRS, so the input must be a georeferenced
+    ``GeoTensor`` (plain arrays raise ``TypeError``).
+
     Args:
         plume_mask: Boolean plume ``GeoTensor``.
         source: ``(x, y)`` source coordinates in the carrier CRS.
@@ -723,6 +759,11 @@ class CrossSectionalFlux(Operator):
         self.transect_spacing_m = transect_spacing_m
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
+        if getattr(gt, "transform", None) is None:
+            raise TypeError(
+                "CrossSectionalFlux requires a georeferenced GeoTensor input; "
+                "got a plain array"
+            )
         wind_norm = float(np.hypot(self.wind_u, self.wind_v))
         if wind_norm == 0.0:
             raise ValueError("wind vector must be non-zero")
@@ -808,14 +849,14 @@ class ColumnToMass(Operator):
         self.units_in = units_in
         self.units_out = units_out
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = convert_column_units(
             np.asarray(gt),
             gas=self.gas,
             units_in=self.units_in,
             units_out=self.units_out,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -907,7 +948,7 @@ class PlumeShapeFilter(Operator):
         self.min_fiber_width = float(min_fiber_width)
         self.max_fiber_width = float(max_fiber_width)
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         from geotoolz.measure._src.operators import _skeleton_diameter_pixels
 
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
@@ -937,7 +978,7 @@ class PlumeShapeFilter(Operator):
         else:
             keep_mask = np.isin(labels, list(kept))
             out = np.where(keep_mask, labels, 0).astype(np.int32, copy=False)
-        return gt.array_as_geotensor(out, fill_value_default=0)
+        return wrap_like(gt, out, fill_value_default=0)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1002,16 +1043,16 @@ class PlumeColumnStats(Operator):
       / n_plume``
 
     Args:
-        column: Carrier with the column field (single-band ``GeoTensor``,
-            same shape as the input label map).
+        column: Carrier with the column field (single-band ``GeoTensor``
+            or plain array, same shape as the input label map).
     """
 
     forbid_in_yaml: ClassVar[bool] = True
 
-    def __init__(self, *, column: GeoTensor) -> None:
+    def __init__(self, *, column: GeoTensor | np.ndarray) -> None:
         self.column = column
 
-    def _apply(self, gt: GeoTensor) -> pd.DataFrame:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> pd.DataFrame:
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
         col_arr = squeeze_single_band(np.asarray(self.column)).astype(float, copy=False)
         if col_arr.shape != labels.shape:
@@ -1167,8 +1208,8 @@ class PlumeQNDFeatures(Operator):
     def __init__(
         self,
         *,
-        column: GeoTensor,
-        albedo: GeoTensor | None = None,
+        column: GeoTensor | np.ndarray,
+        albedo: GeoTensor | np.ndarray | None = None,
         degree: int = 6,
         eps: float = 50.0,
         min_samples: int = 50,
@@ -1189,7 +1230,7 @@ class PlumeQNDFeatures(Operator):
         self.min_samples = int(min_samples)
         self.perc_threshold = float(perc_threshold)
 
-    def _apply(self, gt: GeoTensor) -> pd.DataFrame:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> pd.DataFrame:
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
         col_arr = squeeze_single_band(np.asarray(self.column)).astype(float, copy=False)
         if col_arr.shape != labels.shape:

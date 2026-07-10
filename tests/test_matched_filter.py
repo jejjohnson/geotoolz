@@ -4,18 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
-
-
-def _make_geotensor(values: np.ndarray) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=rasterio.Affine(30.0, 0.0, 100.0, 0.0, -30.0, 200.0),
-        crs="EPSG:32629",
-    )
 
 
 def test_matched_filter_module_exports() -> None:
@@ -28,7 +20,7 @@ def test_matched_filter_recovers_known_amplitude_and_preserves_metadata() -> Non
     target = np.array([1.0, 2.0, -1.0])
     amplitudes = np.array([[0.0, 1.0], [2.0, -0.5]])
     cube = mean[:, None, None] + target[:, None, None] * amplitudes[None, :, :]
-    gt = _make_geotensor(cube)
+    gt = toy_geotensor(cube)
 
     out = gz.matched_filter.MatchedFilter(
         mean=mean,
@@ -61,7 +53,7 @@ def test_estimators_return_expected_numpy_backgrounds() -> None:
             [[10.0, 20.0], [30.0, 1000.0]],
         ]
     )
-    gt = _make_geotensor(cube)
+    gt = toy_geotensor(cube)
 
     assert np.allclose(gz.matched_filter.EstimateMean(method="median")(gt), [2.5, 25.0])
     cov = gz.matched_filter.EstimateCovEmpirical(mean=np.array([0.0, 0.0]), ridge=1e-6)(
@@ -99,7 +91,7 @@ def test_fit_on_call_populates_reusable_state() -> None:
         target=target, fit_on_call=True, cov_method="empirical"
     )
 
-    out = op(_make_geotensor(cube))
+    out = op(toy_geotensor(cube))
 
     assert np.asarray(out).shape == (2, 2)
     assert op.mean is not None
@@ -107,8 +99,8 @@ def test_fit_on_call_populates_reusable_state() -> None:
 
 
 def test_streaming_background_matches_empirical_covariance() -> None:
-    cube_a = _make_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
-    cube_b = _make_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
+    cube_a = toy_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
+    cube_b = toy_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
 
     bg = gz.matched_filter.StreamingBackground(cov_kind="empirical")([cube_a, cube_b])
     stacked = np.concatenate(
@@ -162,8 +154,8 @@ def test_shrink_covariance_ledoit_wolf_properties() -> None:
 
 
 def test_streaming_background_uses_streaming_mean_and_shrunk_covariance() -> None:
-    cube_a = _make_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
-    cube_b = _make_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
+    cube_a = toy_geotensor(np.arange(8, dtype=float).reshape(2, 2, 2))
+    cube_b = toy_geotensor(np.arange(8, 16, dtype=float).reshape(2, 2, 2))
 
     bg = gz.matched_filter.StreamingBackground()([cube_a, cube_b])
 
@@ -196,7 +188,7 @@ def test_cluster_background_and_dispatch_are_reproducible() -> None:
             [[0.0, 0.1], [10.0, 10.1]],
         ]
     )
-    gt = _make_geotensor(cube)
+    gt = toy_geotensor(cube)
 
     bg1 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
     bg2 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
@@ -238,7 +230,7 @@ def test_fit_on_call_false_preserves_explicit_mean() -> None:
         fit_on_call=False,
         cov_method="empirical",
     )
-    op(_make_geotensor(cube))
+    op(toy_geotensor(cube))
 
     np.testing.assert_allclose(op.mean, fixed_mean)
     assert op.cov_op is not None  # cov was fit on the cube
@@ -254,7 +246,7 @@ def test_linear_target_from_obs_matches_finite_difference() -> None:
         return (x * a[:, None, None]).sum(axis=(1, 2))
 
     cube = np.zeros((3, 2, 3))
-    gt = _make_geotensor(cube)
+    gt = toy_geotensor(cube)
 
     target = gz.matched_filter.LinearTargetFromObs(
         obs_model=obs_model, pattern="uniform"
@@ -270,7 +262,7 @@ def test_nonlinear_target_from_obs_amplitude_difference() -> None:
         return (x**2).mean(axis=(1, 2))
 
     base = np.full((2, 3, 3), 1.0)
-    gt = _make_geotensor(base)
+    gt = toy_geotensor(base)
 
     target = gz.matched_filter.NonlinearTargetFromObs(
         obs_model=obs_model, amplitude=0.5, pattern="uniform"
@@ -285,7 +277,7 @@ def test_column_enhancement_end_to_end_wires_components() -> None:
     bands, h, w = 4, 5, 6
     bg_mean = np.array([10.0, 11.0, 12.0, 13.0])
     cube = bg_mean[:, None, None] + rng.normal(size=(bands, h, w)) * 0.01
-    gt = _make_geotensor(cube)
+    gt = toy_geotensor(cube)
 
     out = gz.matched_filter.ColumnEnhancement(
         gas="CH4", sensor="EMIT", obs_model=None, cov_method="ledoit_wolf"
@@ -312,7 +304,7 @@ def test_matched_filter_null_distribution_at_known_false_alarm_rate() -> None:
     n_pixels = 20000
     samples = rng.multivariate_normal(mean=mean, cov=cov_matrix, size=n_pixels)
     cube = samples.T.reshape(bands, n_pixels, 1)
-    gt = _make_geotensor(cube)
+    gt = toy_geotensor(cube)
 
     scores = np.asarray(
         gz.matched_filter.MatchedFilter(mean=mean, cov_op=cov_matrix, target=target)(gt)
@@ -357,3 +349,73 @@ def test_operator_get_configs_are_json_safe_and_round_trippable() -> None:
         json.dumps(cfg)
         # And must be sufficient to reconstruct the operator without errors.
         cls(**{**kwargs, **{k: cfg[k] for k in cfg if k in kwargs}})
+
+
+_NDARRAY_TARGET = np.array([1.0, -0.5, 0.25])
+
+
+def _ndarray_cube() -> np.ndarray:
+    """Tiny bimodal (3, 4, 4) cube so GMM clustering splits cleanly."""
+    rng = np.random.default_rng(7)
+    cube = 0.01 * rng.normal(size=(3, 4, 4))
+    cube += np.array([5.0, 6.0, 7.0])[:, None, None]
+    cube[:, :, 2:] += 10.0
+    return cube
+
+
+def _run_matched_filter(cube):
+    return gz.matched_filter.MatchedFilter(
+        mean=np.array([5.0, 6.0, 7.0]), cov_op=np.eye(3), target=_NDARRAY_TARGET
+    )(cube)
+
+
+def _run_apply_cluster_mf(cube):
+    bg = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=0)(cube)
+    return gz.matched_filter.ApplyClusterMF(target=_NDARRAY_TARGET)(cube, bg)
+
+
+def _run_column_enhancement(cube):
+    return gz.matched_filter.ColumnEnhancement(obs_model=None)(cube)
+
+
+@pytest.mark.parametrize(
+    "run_op",
+    [_run_matched_filter, _run_apply_cluster_mf, _run_column_enhancement],
+    ids=["matched_filter", "apply_cluster_mf", "column_enhancement"],
+)
+def test_score_map_ops_support_plain_ndarray_carrier(run_op) -> None:
+    # Plain ndarray in -> plain ndarray out (NOT a GeoTensor), with values
+    # identical to the GeoTensor path.
+    cube = _ndarray_cube()
+
+    out_arr = run_op(cube)
+    out_gt = run_op(toy_geotensor(cube))
+
+    assert type(out_arr) is np.ndarray
+    assert isinstance(out_gt, GeoTensor)
+    np.testing.assert_allclose(out_arr, np.asarray(out_gt))
+
+
+def test_estimator_ops_accept_plain_ndarray_input() -> None:
+    # Estimator operators return non-carrier results (vectors, linear
+    # operators, background dataclasses); plain-array input must give the
+    # same values as the GeoTensor path.
+    cube = _ndarray_cube()
+    gt = toy_geotensor(cube)
+
+    np.testing.assert_allclose(
+        gz.matched_filter.EstimateMean(method="median")(cube),
+        gz.matched_filter.EstimateMean(method="median")(gt),
+    )
+    cov_arr = gz.matched_filter.EstimateCovShrunk()(cube)
+    cov_gt = gz.matched_filter.EstimateCovShrunk()(gt)
+    assert isinstance(cov_arr, gz.matched_filter.NumpyLinearOperator)
+    np.testing.assert_allclose(cov_arr.matrix, cov_gt.matrix)
+
+    adaptive = gz.matched_filter.AdaptiveWindowBackground(window_size=3)(cube)
+    assert adaptive.mean.shape == cube.shape
+
+    streaming = gz.matched_filter.StreamingBackground(cov_kind="empirical")(
+        [cube, cube]
+    )
+    np.testing.assert_allclose(streaming.mean, cube.reshape(3, -1).mean(axis=1))

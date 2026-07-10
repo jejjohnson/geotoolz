@@ -5,9 +5,13 @@ Each Operator here:
 1. Takes its parameters as **keyword-only** ctor args so YAML / Hydra
    configs are unambiguous.
 2. Calls into the matching primitive in ``array.py`` for the math.
-3. Wraps the result back into a ``GeoTensor`` via the carrier's
-   ``array_as_geotensor`` (which propagates ``transform``, ``crs``,
-   and ``fill_value_default`` — see `georeader.geotensor`).
+3. Rewraps the result to match the input carrier via
+   `geotoolz._src.wrap.wrap_like`: a ``GeoTensor`` input comes back as
+   a ``GeoTensor`` (``transform``, ``crs``, ``fill_value_default``
+   propagated through ``array_as_geotensor``); a plain ``np.ndarray``
+   comes back as a plain ndarray. Named-band references (``red="B04"``)
+   need carrier metadata and therefore require a GeoTensor input;
+   integer band indices work on both carriers.
 4. Returns its config via ``get_config()`` so the Operator round-trips
    through ``hydra_zen.builds``.
 
@@ -28,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.wrap import wrap_like
 from geotoolz.indices._src.array import (
     arvi,
     bais2,
@@ -61,13 +66,17 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-def _geotensor_grid_matches(a: GeoTensor, b: GeoTensor) -> bool:
-    """Return whether two rasters share spatial shape, transform, and CRS."""
-    return (
-        a.shape[-2:] == b.shape[-2:]
-        and np.allclose(tuple(a.transform), tuple(b.transform))
-        and a.crs == b.crs
-    )
+def _grid_matches(a: GeoTensor | np.ndarray, b: GeoTensor | np.ndarray) -> bool:
+    """Return whether two rasters share spatial shape (and, when both carry
+    georeferencing, transform and CRS)."""
+    if a.shape[-2:] != b.shape[-2:]:
+        return False
+    transform_a = getattr(a, "transform", None)
+    transform_b = getattr(b, "transform", None)
+    if transform_a is None or transform_b is None:
+        # Plain-array carriers have no georeferencing to compare.
+        return True
+    return np.allclose(tuple(transform_a), tuple(transform_b)) and a.crs == b.crs
 
 
 class NormalizedDifference(Operator):
@@ -76,6 +85,10 @@ class NormalizedDifference(Operator):
     Use this when none of the named indices (NDVI/NDWI/NDBI/NBR/...)
     matches your band pair. Equivalent in math to all of them; the
     named subclasses are pinned-argument convenience wrappers.
+
+    This class holds the top-level ``geotoolz.NormalizedDifference``
+    name; :class:`geotoolz.spectral.NormalizedDifference` is the
+    band-name-string variant (resolved via ``attrs["band_names"]``).
 
     Args:
         a_idx: Index of the "high" band (numerator-positive term).
@@ -105,7 +118,7 @@ class NormalizedDifference(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = normalized_difference(
             np.asarray(gt),
             _resolve_band(gt, self.a_idx),
@@ -113,7 +126,7 @@ class NormalizedDifference(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -177,7 +190,7 @@ class NDVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = ndvi(
             np.asarray(gt),
             _resolve_band(gt, self.nir_idx),
@@ -185,7 +198,7 @@ class NDVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -237,7 +250,7 @@ class NDWI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = ndwi_mcfeeters(
             np.asarray(gt),
             _resolve_band(gt, self.green_idx),
@@ -245,7 +258,7 @@ class NDWI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -302,7 +315,7 @@ class NDBI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = ndbi(
             np.asarray(gt),
             _resolve_band(gt, self.swir_idx),
@@ -310,7 +323,7 @@ class NDBI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -367,7 +380,7 @@ class NBR(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = nbr(
             np.asarray(gt),
             _resolve_band(gt, self.nir_idx),
@@ -375,7 +388,7 @@ class NBR(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -435,7 +448,7 @@ class SAVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = savi(
             np.asarray(gt),
             _resolve_band(gt, self.nir_idx),
@@ -444,7 +457,7 @@ class SAVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -518,7 +531,7 @@ class EVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = evi(
             np.asarray(gt),
             _resolve_band(gt, self.nir_idx),
@@ -531,7 +544,7 @@ class EVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -597,7 +610,7 @@ class EVI2(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = evi2(
             np.asarray(gt),
             _resolve_band(gt, self.nir_idx),
@@ -605,7 +618,7 @@ class EVI2(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -674,7 +687,7 @@ class ARVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = arvi(
             np.asarray(gt),
             _resolve_band(gt, self.nir_idx),
@@ -684,7 +697,7 @@ class ARVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -744,7 +757,7 @@ class GCI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = gci(
             np.asarray(gt),
             _resolve_band(gt, self.nir_idx),
@@ -752,7 +765,7 @@ class GCI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -809,7 +822,7 @@ class kNDVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = kndvi(
             np.asarray(gt),
             _resolve_band(gt, self.nir_idx),
@@ -817,7 +830,7 @@ class kNDVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -880,7 +893,7 @@ class MNDWI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = mndwi(
             np.asarray(gt),
             _resolve_band(gt, self.green_idx),
@@ -888,7 +901,7 @@ class MNDWI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -947,7 +960,7 @@ class NDMI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = ndmi(
             np.asarray(gt),
             _resolve_band(gt, self.nir_idx),
@@ -955,7 +968,7 @@ class NDMI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1016,7 +1029,7 @@ class NDSI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = ndsi(
             np.asarray(gt),
             _resolve_band(gt, self.green_idx),
@@ -1024,7 +1037,7 @@ class NDSI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1077,7 +1090,7 @@ class NBR2(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = nbr2(
             np.asarray(gt),
             _resolve_band(gt, self.swir1_idx),
@@ -1085,7 +1098,7 @@ class NBR2(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1168,7 +1181,7 @@ class BAIS2(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = bais2(
             np.asarray(gt),
             _resolve_band(gt, self.red_idx),
@@ -1179,7 +1192,7 @@ class BAIS2(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1205,7 +1218,9 @@ class dNBR(Operator):
     rasters must share grid (shape, transform, CRS) — co-register
     upstream (e.g. via `geotoolz.sampling` or rasterio reprojection)
     before passing them in. The output `GeoTensor` inherits the
-    pre-fire raster's spatial metadata.
+    pre-fire raster's spatial metadata. Plain ``np.ndarray`` inputs are
+    also accepted (only shapes can be checked then) and return a plain
+    ndarray.
 
     Typical thresholds (Key & Benson 2006): < 0.1 unburned, 0.27–0.44
     low severity, 0.44–0.66 moderate, > 0.66 high severity.
@@ -1223,10 +1238,12 @@ class dNBR(Operator):
         General Technical Report RMRS-GTR-164-CD.
     """
 
-    def _apply(self, pre: GeoTensor, post: GeoTensor) -> GeoTensor:
-        if not _geotensor_grid_matches(pre, post):
+    def _apply(
+        self, pre: GeoTensor | np.ndarray, post: GeoTensor | np.ndarray
+    ) -> GeoTensor | np.ndarray:
+        if not _grid_matches(pre, post):
             raise ValueError("dNBR inputs must share shape, transform, and CRS.")
-        return pre.array_as_geotensor(np.asarray(pre) - np.asarray(post))
+        return wrap_like(pre, np.asarray(pre) - np.asarray(post))
 
     def get_config(self) -> dict[str, Any]:
         # dNBR takes no constructor parameters — empty config is
@@ -1296,7 +1313,7 @@ class BSI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = bsi(
             np.asarray(gt),
             _resolve_band(gt, self.blue_idx),
@@ -1306,7 +1323,7 @@ class BSI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1366,7 +1383,7 @@ class IronOxide(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = iron_oxide(
             np.asarray(gt),
             _resolve_band(gt, self.red_idx),
@@ -1374,7 +1391,7 @@ class IronOxide(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1435,7 +1452,7 @@ class ClayMinerals(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = clay_minerals(
             np.asarray(gt),
             _resolve_band(gt, self.swir1_idx),
@@ -1443,7 +1460,7 @@ class ClayMinerals(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1493,9 +1510,9 @@ class CIRI(Operator):
         self.cirrus_idx = _configured_ref(cirrus, cirrus_idx)
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = ciri(np.asarray(gt), _resolve_band(gt, self.cirrus_idx), axis=self.axis)
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"cirrus_idx": self.cirrus_idx, "axis": self.axis}
@@ -1529,7 +1546,7 @@ class AppendIndex(Operator):
         self.index_op = index_op
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         index = self.index_op(gt)
         index_arr = np.asarray(index)
         # Expand back to (..., 1, ..., H, W) along the configured axis so
@@ -1537,7 +1554,7 @@ class AppendIndex(Operator):
         # correctly.
         index_3d = np.expand_dims(index_arr, axis=self.axis)
         stacked = np.concatenate([np.asarray(gt), index_3d], axis=self.axis)
-        return gt.array_as_geotensor(stacked)
+        return wrap_like(gt, stacked)
 
     def get_config(self) -> dict[str, Any]:
         # `index_op` is a nested Operator — emit the JSON-safe nested form

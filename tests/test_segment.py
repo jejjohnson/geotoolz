@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
 
@@ -353,6 +354,72 @@ def test_mask_nms_rejects_non_3d_input() -> None:
     flat = np.ones((4, 4), dtype=bool)
     with pytest.raises(ValueError, match="N, H, W"):
         gz.segment.MaskNMS()(_gt(flat))
+
+
+def _step_cube() -> np.ndarray:
+    values = np.zeros((1, 8, 8), dtype=float)
+    values[:, :, 4:] = 1.0
+    return values
+
+
+def _merge_labels() -> np.ndarray:
+    labels = np.zeros((8, 8), dtype=np.int32)
+    _stamp(labels, 1, 1, 4, 1, 4)
+    return labels
+
+
+def _nms_stack() -> np.ndarray:
+    masks = np.zeros((2, 6, 8), dtype=bool)
+    masks[0, :, 0:3] = True
+    masks[1, :, 5:8] = True
+    return masks
+
+
+@pytest.mark.parametrize(
+    ("op", "values"),
+    [
+        pytest.param(
+            gz.segment.SLIC(n_segments=4, compactness=1.0), _step_cube(), id="slic"
+        ),
+        pytest.param(
+            gz.segment.Watershed(
+                markers=np.array([[1, 0, 2], [0, 0, 0], [0, 0, 0]], dtype=np.int32)
+            ),
+            np.array([[3.0, 2.0, 3.0], [2.0, 1.0, 2.0], [3.0, 2.0, 3.0]]),
+            id="watershed",
+        ),
+        pytest.param(
+            gz.segment.ExpandLabels(distance=1.0),
+            np.eye(5, dtype=np.int32)[None],
+            id="expand-labels",
+        ),
+        pytest.param(
+            gz.segment.MergeNearbyInstances(start_label=3),
+            _merge_labels(),
+            id="merge-nearby-instances",
+        ),
+        pytest.param(
+            gz.segment.MaskNMS(scores=np.array([0.9, 0.5])),
+            _nms_stack(),
+            id="mask-nms",
+        ),
+        pytest.param(
+            gz.segment.MarkBoundaries(label_img=np.eye(6, dtype=np.int32)),
+            np.tile(np.linspace(0.0, 1.0, 6), (3, 6, 1)),
+            id="mark-boundaries",
+        ),
+    ],
+)
+def test_plain_ndarray_in_plain_ndarray_out(
+    op: gz.Operator, values: np.ndarray
+) -> None:
+    """Segment ops are metadata-independent: ndarray in -> ndarray out,
+    with values identical to the GeoTensor path."""
+    out_plain = op(values)
+    out_geo = op(_gt(values))
+
+    assert type(out_plain) is np.ndarray
+    np.testing.assert_array_equal(out_plain, np.asarray(out_geo))
 
 
 def test_slic_forbid_in_yaml_when_mask_provided() -> None:

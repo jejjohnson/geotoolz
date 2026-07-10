@@ -1,11 +1,13 @@
 """Tier-B Operators — carrier-aware radiometric transforms.
 
 Each Operator wraps a primitive in
-:mod:`geotoolz.radiometry._src.array`. Most are ufunc-pure (arithmetic,
-power, clipping) so the carrier's ``__array_ufunc__`` round-trips
-``transform`` / ``crs`` / ``fill_value_default`` for free; the
-non-ufunc cases (``PercentileClip``) explicitly wrap via
-``array_as_geotensor``.
+:mod:`geotoolz.radiometry._src.array`. Operators accept either a
+``GeoTensor`` or a plain ``np.ndarray`` and return the same carrier
+kind — the rewrap is centralised in
+:func:`geotoolz._src.wrap.wrap_like`. The only geo-dependent ops are
+`RadianceToReflectance` / `ReflectanceToRadiance` when the solar
+geometry must be derived from the footprint (no ``sza_deg`` /
+``center_coords`` given); those require a GeoTensor in that mode.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ from georeader.reflectance import (
 )
 from pipekit import Operator
 
+from geotoolz._src.config import jsonable
+from geotoolz._src.wrap import wrap_like
 from geotoolz.radiometry._src.array import (
     _broadcast_to_band_axis,
     bt_from_radiance,
@@ -68,14 +72,16 @@ def _coef_as_jsonable(coef: Any) -> float | list[float]:
     """Coerce a gain / offset coefficient into a JSON-safe scalar or list.
 
     Keeps scalars as Python ``float``; converts numpy scalars, ndarrays
-    and any sequence (list / tuple) of numerics into ``list[float]``.
-    Used by `DNToRadiance` / `DNToReflectance`'s ``get_config()`` so
-    Hydra / YAML round-trips don't choke on ndarray leaves.
+    and any sequence (list / tuple) of numerics into a *flat*
+    ``list[float]`` (via ``ravel``) — stricter semantics than the shared
+    :func:`geotoolz._src.config.jsonable`, which it builds on. Used by
+    `DNToRadiance` / `DNToReflectance`'s ``get_config()`` so Hydra /
+    YAML round-trips don't choke on ndarray leaves.
     """
-    arr = np.asarray(coef)
+    arr = np.asarray(coef, dtype=float)
     if arr.ndim == 0:
         return float(arr)
-    return [float(v) for v in arr.ravel()]
+    return jsonable(arr.ravel())
 
 
 if TYPE_CHECKING:
@@ -104,9 +110,10 @@ class ToFloat32(Operator):
         >>> reflectance = pipe(uint16_dn_geotensor)
     """
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         # `astype` on a GeoTensor returns a GeoTensor with metadata
-        # preserved via __array_finalize__.
+        # preserved via __array_finalize__; on a plain ndarray it
+        # returns a plain ndarray — carrier kind is preserved either way.
         return gt.astype(np.float32)
 
     def get_config(self) -> dict[str, Any]:
@@ -159,14 +166,14 @@ class DNToRadiance(Operator):
         self.scale = scale
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt)
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         gain = _broadcast_to_band_axis(self.gain, n_bands, self.axis, arr.ndim)
         offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
         scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
         out = dn_to_radiance(arr, gain, offset, scale)
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -220,14 +227,14 @@ class RadianceToDN(Operator):
         self.scale = scale
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt)
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         gain = _broadcast_to_band_axis(self.gain, n_bands, self.axis, arr.ndim)
         offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
         scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
         out = radiance_to_dn(arr, gain, offset, scale)
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -289,13 +296,13 @@ class DNToReflectance(Operator):
         self.offset = offset
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt)
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
         offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
         out = dn_to_reflectance(arr, scale, offset)
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -324,6 +331,11 @@ class RadianceToReflectance(Operator):
     :func:`georeader.reflectance.radiance_to_reflectance`; it does not
     duplicate the unit-conversion or geometry logic, only the JSON-safe
     ``get_config`` and the ``sza_deg`` shortcut.
+
+    Geo-dependence: when neither ``sza_deg`` nor ``center_coords`` is
+    provided, the solar geometry is derived from the footprint, so the
+    input must be a georeferenced GeoTensor (plain arrays raise
+    ``TypeError`` in that mode).
 
     Args:
         solar_irradiance: Per-band TOA solar irradiance in W/m²/nm,
@@ -371,19 +383,27 @@ class RadianceToReflectance(Operator):
         self.crs_coords = crs_coords
         self.units = units
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        obs_factor = observation_date_correction_factor(
+            self.acquisition_date,
+            sza_deg=self.sza_deg,
+            center_coords=self.center_coords,
+            crs_coords=self.crs_coords,
+        )
+        if obs_factor is None and not hasattr(gt, "transform"):
+            raise TypeError(
+                "RadianceToReflectance requires a georeferenced GeoTensor "
+                "input to derive the solar geometry from the footprint when "
+                "neither `sza_deg` nor `center_coords` is provided; got a "
+                "plain array"
+            )
         return radiance_to_reflectance(
             gt,
             solar_irradiance=self.solar_irradiance,
             date_of_acquisition=self.acquisition_date,
             center_coords=self.center_coords,
             crs_coords=self.crs_coords,
-            observation_date_corr_factor=observation_date_correction_factor(
-                self.acquisition_date,
-                sza_deg=self.sza_deg,
-                center_coords=self.center_coords,
-                crs_coords=self.crs_coords,
-            ),
+            observation_date_corr_factor=obs_factor,
             units=self.units,
         )
 
@@ -410,6 +430,11 @@ class ReflectanceToRadiance(Operator):
     Same solar-geometry inputs as the forward direction: pass
     ``sza_deg`` for a metadata-driven SZA or ``center_coords`` to let
     ``pysolar`` derive it.
+
+    Geo-dependence: when neither ``sza_deg`` nor ``center_coords`` is
+    provided, the solar geometry is derived from the footprint, so the
+    input must be a georeferenced GeoTensor (plain arrays raise
+    ``TypeError`` in that mode).
 
     Args:
         solar_irradiance: Per-band TOA solar irradiance in W/m²/nm.
@@ -452,19 +477,27 @@ class ReflectanceToRadiance(Operator):
         self.sza_deg = sza_deg
         self.crs_coords = crs_coords
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        obs_factor = observation_date_correction_factor(
+            self.acquisition_date,
+            sza_deg=self.sza_deg,
+            center_coords=self.center_coords,
+            crs_coords=self.crs_coords,
+        )
+        if obs_factor is None and not hasattr(gt, "transform"):
+            raise TypeError(
+                "ReflectanceToRadiance requires a georeferenced GeoTensor "
+                "input to derive the solar geometry from the footprint when "
+                "neither `sza_deg` nor `center_coords` is provided; got a "
+                "plain array"
+            )
         return reflectance_to_radiance(
             gt,
             solar_irradiance=self.solar_irradiance,
             date_of_acquisition=self.acquisition_date,
             center_coords=self.center_coords,
             crs_coords=self.crs_coords,
-            observation_date_corr_factor=observation_date_correction_factor(
-                self.acquisition_date,
-                sza_deg=self.sza_deg,
-                center_coords=self.center_coords,
-                crs_coords=self.crs_coords,
-            ),
+            observation_date_corr_factor=obs_factor,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -675,6 +708,11 @@ class ApplySRF(Operator):
     pixel that was fill in *any* source band stays fill in *every*
     target band).
 
+    This class holds the top-level ``geotoolz.ApplySRF`` name. The
+    deliberately distinct :class:`geotoolz.spectral.ApplySRF` variant
+    skips the fill propagation but adds band-name / wavelength attrs
+    bookkeeping.
+
     Args:
         target_center_wavelengths: ``λ_k`` for each target band (nm).
         target_fwhm: FWHM for each target band (nm).
@@ -711,7 +749,7 @@ class ApplySRF(Operator):
         self.epsilon_srf = epsilon_srf
         self.extrapolate = extrapolate
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         source_wavelengths = np.asarray(self.source_wavelengths, dtype=float)
         # 1-nm grid spanning the source range — fine enough for sensor-
         # realistic Gaussian convolutions.
@@ -725,11 +763,14 @@ class ApplySRF(Operator):
             wavelengths,
         )
         srf_df = pd.DataFrame(srf_values, index=wavelengths)
+        # Plain ndarray carriers have no fill value — skip the fill
+        # bookkeeping entirely in that case.
+        fill_value = getattr(gt, "fill_value_default", None)
         out = transform_to_srf(
             np.asarray(gt),
             srf_df,
             source_wavelengths.tolist(),
-            fill_value_default=gt.fill_value_default,
+            fill_value_default=0.0 if fill_value is None else fill_value,
             epsilon_srf=self.epsilon_srf,
             extrapolate=self.extrapolate,
         )
@@ -739,7 +780,6 @@ class ApplySRF(Operator):
         # must become fill only when one of its *contributing* source
         # bands is fill at that pixel — not when any unrelated source
         # band happens to be fill.
-        fill_value = gt.fill_value_default
         if fill_value is not None:
             src = np.asarray(gt)
             src_invalid = src == fill_value  # (n_src, H, W)
@@ -754,7 +794,7 @@ class ApplySRF(Operator):
                 > 0
             )
             out[invalid] = fill_value
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def _source_band_support(
         self,
@@ -849,12 +889,12 @@ class BTFromRadiance(Operator):
         self.K2 = K2
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt)
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         k1 = _broadcast_to_band_axis(self.K1, n_bands, self.axis, arr.ndim)
         k2 = _broadcast_to_band_axis(self.K2, n_bands, self.axis, arr.ndim)
-        fill_value = gt.fill_value_default
+        fill_value = getattr(gt, "fill_value_default", None)
         # Replace fill with NaN before the log so we don't pollute valid
         # pixels with -inf / 0; restore the original fill value after.
         work = arr.astype(float, copy=False)
@@ -863,7 +903,7 @@ class BTFromRadiance(Operator):
         out = bt_from_radiance(work, k1, k2)
         if fill_value is not None:
             out[arr == fill_value] = fill_value
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -922,16 +962,16 @@ class DOS1(Operator):
     def __init__(self, *, dark_percentile: float = 1.0) -> None:
         self.dark_percentile = dark_percentile
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt, dtype=float)
-        fill_value = gt.fill_value_default
+        fill_value = getattr(gt, "fill_value_default", None)
         valid = None if fill_value is None else arr != fill_value
         # NaN out fill pixels so the percentile reflects only valid data.
         work = arr if valid is None else np.where(valid, arr, np.nan)
         out = dos1(work, dark_percentile=self.dark_percentile, axis=(-2, -1))
         if valid is not None:
             out[~valid] = fill_value
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"dark_percentile": self.dark_percentile}
@@ -971,7 +1011,7 @@ class SimpleAtmosphericCorrection(Operator):
         self.dark_percentile = dark_percentile
         self.aod = aod
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         if self.method.lower() != "dos1":
             raise NotImplementedError(
                 "SimpleAtmosphericCorrection currently supports only "
@@ -1015,9 +1055,9 @@ class MinMax(Operator):
         self.vmax = vmax
         self.clip = clip
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = min_max_normalize(np.asarray(gt), self.vmin, self.vmax, clip=self.clip)
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"vmin": self.vmin, "vmax": self.vmax, "clip": self.clip}
@@ -1058,11 +1098,11 @@ class PercentileClip(Operator):
         self.p_max = p_max
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = percentile_clip(
             np.asarray(gt), p_min=self.p_min, p_max=self.p_max, axis=self.axis
         )
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"p_min": self.p_min, "p_max": self.p_max, "axis": self.axis}
@@ -1095,9 +1135,9 @@ class Gamma(Operator):
     def __init__(self, *, g: float = 1.2) -> None:
         self.g = g
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = gamma_correct(np.asarray(gt), g=self.g)
-        return gt.array_as_geotensor(out)
+        return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"g": self.g}

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
+import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
 
@@ -136,3 +138,63 @@ def test_hough_circles_returns_points_with_radii() -> None:
     out = gz.feature.HoughCircles(radii=[8, 9, 10], total_num_peaks=2)(gt)
     assert {"row", "col", "radius", "accumulator"}.issubset(out.columns)
     assert out.crs == gt.crs
+
+
+def _step_image() -> np.ndarray:
+    image = np.zeros((8, 8), dtype=float)
+    image[:, 4:] = 1.0
+    return image
+
+
+@pytest.mark.parametrize(
+    ("op", "values"),
+    [
+        pytest.param(gz.feature.Canny(sigma=0.5), _step_image(), id="canny"),
+        pytest.param(
+            gz.feature.StructureTensor(sigma=1.0),
+            _step_image(),
+            id="structure-tensor",
+        ),
+        pytest.param(
+            gz.feature.MultiscaleBasicFeatures(sigma_min=0.5, sigma_max=1.0),
+            np.linspace(0.0, 1.0, 64).reshape(8, 8),
+            id="multiscale-basic-features",
+        ),
+        pytest.param(
+            gz.feature.HOG(
+                orientations=4, pixels_per_cell=(4, 4), cells_per_block=(1, 1)
+            ),
+            np.linspace(0.0, 1.0, 64).reshape(8, 8),
+            id="hog",
+        ),
+        pytest.param(
+            gz.feature.HoughLines(num_peaks=2), _step_image(), id="hough-lines"
+        ),
+    ],
+)
+def test_plain_ndarray_in_plain_result_out(op: gz.Operator, values: np.ndarray) -> None:
+    """Metadata-independent feature ops accept plain ndarrays and match
+    the GeoTensor path (array outputs stay plain ndarrays)."""
+    out_plain = op(values)
+    out_geo = op(_gt(values))
+
+    if isinstance(out_plain, np.ndarray):
+        assert type(out_plain) is np.ndarray
+        np.testing.assert_array_equal(out_plain, np.asarray(out_geo))
+    else:
+        pd.testing.assert_frame_equal(out_plain, out_geo)
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        pytest.param(gz.feature.PeakLocalMax(min_distance=1), id="peak-local-max"),
+        pytest.param(gz.feature.BlobLoG(min_sigma=1.0, max_sigma=2.0), id="blob-log"),
+        pytest.param(gz.feature.CornerHarris(), id="corner-harris"),
+        pytest.param(gz.feature.HoughCircles(radii=[2]), id="hough-circles"),
+    ],
+)
+def test_geo_dependent_ops_reject_plain_arrays(op: gz.Operator) -> None:
+    """Ops whose output geometry needs the transform stay GeoTensor-only."""
+    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+        op(np.zeros((6, 6), dtype=float))

@@ -211,6 +211,33 @@ def test_combine_masks_xor_and_not() -> None:
     np.testing.assert_array_equal(not_a, [[False, True], [True, True]])
 
 
+@pytest.mark.parametrize(
+    "op",
+    [
+        DilateMask(iterations=1),
+        ErodeMask(iterations=1),
+        BufferMask(radius=1.0, unit="pixels"),
+        RemoveSmallObjects(min_size=2),
+        RemoveSmallHoles(area_threshold=1),
+        CleanMask(min_object_size=1, max_hole_size=1, close_iter=1),
+        InvertMask(),
+    ],
+    ids=lambda op: type(op).__name__,
+)
+def test_plain_ndarray_in_plain_ndarray_out(op) -> None:
+    mask = np.zeros((6, 6), dtype=bool)
+    mask[2:4, 2:4] = True
+    mask[0, 5] = True
+
+    out = op(mask)
+    gt_out = op(_toy_geotensor(mask))
+
+    assert type(out) is np.ndarray
+    assert out.dtype == bool
+    assert isinstance(gt_out, GeoTensor)
+    np.testing.assert_array_equal(out, np.asarray(gt_out))
+
+
 def test_invert_mask_operator() -> None:
     mask = np.array([[True, False]])
 

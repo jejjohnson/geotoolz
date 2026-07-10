@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import pytest
-from affine import Affine
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 from sklearn.cluster import KMeans as SKKMeans
 from sklearn.decomposition import PCA, IncrementalPCA
@@ -19,12 +20,8 @@ import geotoolz as gz
 
 
 def _gt(values: np.ndarray) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=Affine(1, 0, 10, 0, -1, 20),
-        crs="EPSG:4326",
-        fill_value_default=np.nan,
-    )
+    """NaN-filled toy carrier (learn ops treat NaN as missing data)."""
+    return toy_geotensor(values, fill_value_default=np.nan)
 
 
 def test_pixel_pca_fits_clean_pixels_and_restores_nan_sample() -> None:
@@ -239,3 +236,37 @@ def test_isolation_forest_decision_function_returns_scores() -> None:
     out = op(scene)
     assert out.shape == (4, 5)
     assert np.asarray(out).dtype.kind == "f"
+
+
+@pytest.mark.parametrize(
+    "make_op",
+    [
+        pytest.param(lambda: gz.learn.PCA(PCA(n_components=2)), id="pca-transform"),
+        pytest.param(
+            lambda: gz.learn.KMeans(SKKMeans(n_clusters=2, n_init=1, random_state=0)),
+            id="kmeans-predict",
+        ),
+        pytest.param(
+            lambda: gz.learn.SklearnOp(StandardScaler(), task="transform"),
+            id="scaler-transform",
+        ),
+    ],
+)
+def test_plain_ndarray_in_plain_ndarray_out(
+    make_op: Callable[[], gz.learn.SklearnOp],
+) -> None:
+    """ndarray in -> ndarray out, values equal to the GeoTensor path."""
+    rng = np.random.default_rng(0)
+    arr = rng.normal(size=(3, 4, 5))
+    arr[:, :, 3:] += 5.0  # two clusters so KMeans labels are stable
+
+    op = make_op()
+    from_gt = op(_gt(arr.copy()))
+    from_arr = op(arr.copy())  # same fitted state -> identical values
+
+    assert type(from_arr) is np.ndarray
+    np.testing.assert_allclose(np.asarray(from_arr), np.asarray(from_gt))
+
+    fitted_on_array = make_op()(arr.copy())  # fitting from an ndarray works too
+    assert type(fitted_on_array) is np.ndarray
+    assert fitted_on_array.shape == from_arr.shape

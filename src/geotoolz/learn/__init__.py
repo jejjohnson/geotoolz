@@ -27,11 +27,16 @@ from __future__ import annotations
 from typing import Any
 
 from geotoolz.learn._src.estimators import GeoTensorEstimator
+from geotoolz.learn._src.model import ModelOp
 from geotoolz.learn._src.operators import SklearnOp
 
 
 class PCA(SklearnOp):
-    """Pixel-wise PCA convenience operator."""
+    """Pixel-wise PCA convenience operator.
+
+    Pins ``mode="pixel"``, ``task="transform"``, ``nan_fit="drop"``;
+    every other :class:`SklearnOp` keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -41,7 +46,12 @@ class PCA(SklearnOp):
 
 
 class IPCA(SklearnOp):
-    """Streaming IncrementalPCA convenience operator."""
+    """Streaming IncrementalPCA convenience operator.
+
+    Pins ``mode="pixel"``, ``fit_mode="fit_streaming"`` (each call routes
+    through ``partial_fit``), ``task="transform"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -51,7 +61,11 @@ class IPCA(SklearnOp):
 
 
 class NMF(SklearnOp):
-    """Pixel-wise NMF convenience operator."""
+    """Pixel-wise NMF convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="transform"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -60,7 +74,12 @@ class NMF(SklearnOp):
 
 
 class KMeans(SklearnOp):
-    """Pixel-wise KMeans label convenience operator."""
+    """Pixel-wise KMeans label convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="predict"`` — the output is a
+    single-band cluster-label map; every other :class:`SklearnOp`
+    keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -69,7 +88,12 @@ class KMeans(SklearnOp):
 
 
 class MiniBatchKMeans(SklearnOp):
-    """Streaming MiniBatchKMeans convenience operator."""
+    """Streaming MiniBatchKMeans convenience operator.
+
+    Pins ``mode="pixel"``, ``fit_mode="fit_streaming"`` (each call routes
+    through ``partial_fit``), ``task="predict"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -79,7 +103,12 @@ class MiniBatchKMeans(SklearnOp):
 
 
 class GMM(SklearnOp):
-    """Gaussian mixture convenience operator."""
+    """Gaussian mixture convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="predict_proba"`` — the output has
+    one band per mixture component; every other :class:`SklearnOp`
+    keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -88,7 +117,12 @@ class GMM(SklearnOp):
 
 
 class IsolationForest(SklearnOp):
-    """Pixel-wise IsolationForest anomaly-score convenience operator."""
+    """Pixel-wise IsolationForest anomaly-score convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="decision_function"`` — the output
+    is a single-band anomaly-score map; every other :class:`SklearnOp`
+    keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -97,7 +131,11 @@ class IsolationForest(SklearnOp):
 
 
 class OneClassSVM(SklearnOp):
-    """Pixel-wise OneClassSVM anomaly-score convenience operator."""
+    """Pixel-wise OneClassSVM anomaly-score convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="decision_function"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -106,7 +144,13 @@ class OneClassSVM(SklearnOp):
 
 
 class LocalOutlierFactor(SklearnOp):
-    """Pixel-wise LocalOutlierFactor convenience operator."""
+    """Pixel-wise LocalOutlierFactor convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="decision_function"``; requires the
+    estimator to be constructed with ``novelty=True`` (sklearn only
+    exposes ``decision_function`` in novelty mode). Every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -115,7 +159,14 @@ class LocalOutlierFactor(SklearnOp):
 
 
 class KNNImputer(SklearnOp):
-    """Pixel-wise KNNImputer convenience operator."""
+    """Pixel-wise KNNImputer convenience operator.
+
+    Pins ``mode="pixel"``, ``task="transform"``, and
+    ``nan_fit=nan_transform="propagate"`` so the NaN-tolerant imputer
+    fits on the clean rows and NaN placement is preserved for it to
+    fill; every other :class:`SklearnOp` keyword argument passes
+    through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -126,7 +177,12 @@ class KNNImputer(SklearnOp):
 
 
 class IterativeImputer(SklearnOp):
-    """Pixel-wise IterativeImputer convenience operator."""
+    """Pixel-wise IterativeImputer convenience operator.
+
+    Pins ``mode="pixel"``, ``task="transform"``, and
+    ``nan_fit=nan_transform="propagate"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
 
     def __init__(self, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
@@ -148,6 +204,7 @@ __all__ = [
     "KNNImputer",
     "LocalOutlierFactor",
     "MiniBatchKMeans",
+    "ModelOp",
     "OneClassSVM",
     "SklearnOp",
 ]
