@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
+    import numpy as np
     from georeader.geotensor import GeoTensor
 
 
@@ -35,22 +36,24 @@ DEFAULT_BAND_KEYS: tuple[str, ...] = ("descriptions", "band_names", "bands")
 
 
 def resolve_band(
-    gt: GeoTensor,
+    gt: GeoTensor | np.ndarray,
     ref: BandRef,
     *,
     keys: tuple[str, ...] = DEFAULT_BAND_KEYS,
 ) -> int:
     """Resolve a band reference to an integer band-axis index.
 
-    Integer references pass through unchanged. String references are
-    looked up against ``gt.attrs[key]`` for each ``key`` in ``keys`` (in
-    order). The first key whose iterable contains the requested name
-    wins; if a key exists but doesn't contain the name, the search
-    continues to the next key. Missing keys, ``None`` values, and
-    non-iterable values are skipped silently.
+    Integer references pass through unchanged (for any carrier — plain
+    ndarrays included). String references are looked up against
+    ``gt.attrs[key]`` for each ``key`` in ``keys`` (in order). The first
+    key whose iterable contains the requested name wins; if a key exists
+    but doesn't contain the name, the search continues to the next key.
+    Missing keys, ``None`` values, and non-iterable values are skipped
+    silently.
 
     Args:
-        gt: Carrier `GeoTensor`. Its ``attrs`` dict is consulted.
+        gt: Carrier `GeoTensor` (its ``attrs`` dict is consulted for
+            named lookups) or a plain ndarray (integer refs only).
         ref: Either an existing integer index (returned as-is) or a
             string band name to look up.
         keys: Attribute keys to consult, in precedence order. Defaults
@@ -60,6 +63,8 @@ def resolve_band(
         The integer position of the band along the carrier's band axis.
 
     Raises:
+        TypeError: If ``ref`` is a string but the carrier has no
+            ``attrs`` metadata (e.g. a plain ``np.ndarray``).
         ValueError: If ``ref`` is a string and the name is not found
             under any of the configured ``keys``.
 
@@ -80,8 +85,16 @@ def resolve_band(
     if not isinstance(ref, str):
         return ref
 
+    attrs = getattr(gt, "attrs", None)
+    if attrs is None:
+        raise TypeError(
+            f"Named-band resolution ({ref!r}) requires a georeferenced "
+            "GeoTensor input carrying band-name metadata in `attrs`; got a "
+            "plain array. Pass an integer band index instead."
+        )
+
     for key in keys:
-        names = gt.attrs.get(key)
+        names = attrs.get(key)
         if names is None:
             continue
         try:
