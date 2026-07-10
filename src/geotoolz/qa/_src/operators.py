@@ -17,8 +17,12 @@ What lives where:
   Sentinel-2 ``QA60`` / ``SCL``, MODIS ``state_1km``). Pick these for
   "give me the standard cloud mask for sensor X" workflows.
 
-Both layers return a boolean ``GeoTensor`` mask following the project
-convention: **True = mask this pixel out**.
+Both layers return a boolean mask following the project convention:
+**True = mask this pixel out**. Bit decoding is metadata-independent, so
+every operator accepts either a ``GeoTensor`` or a plain ``np.ndarray``
+and returns the same carrier kind (string ``qa_band`` selectors and the
+fill-value fallback of `MaskNoData` are the metadata-dependent
+exceptions — they require a GeoTensor).
 
 References:
     USGS, "Landsat 8-9 Collection 2 Level-2 Science Product Guide",
@@ -38,6 +42,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.wrap import wrap_like
 from geotoolz.cloud import SCL
 from geotoolz.cloud._src.array import mask_from_qa_bits, mask_from_scl
 from geotoolz.qa._src.array import mask_from_bit_field
@@ -160,14 +165,22 @@ def _band_names(attrs: Mapping[str, Any]) -> Sequence[str] | Mapping[str, int] |
     return None
 
 
-def _resolve_band_index(gt: GeoTensor, qa_band: BandSelector) -> int | None:
-    """Resolve an int-or-str band selector to an integer axis position."""
+def _resolve_band_index(
+    gt: GeoTensor | np.ndarray, qa_band: BandSelector
+) -> int | None:
+    """Resolve an int-or-str band selector to an integer axis position.
+
+    String selectors need band-name metadata, so they require a
+    GeoTensor carrier; ``None`` and integer selectors work for plain
+    arrays too.
+    """
     if qa_band is None:
         return None
     if isinstance(qa_band, int):
         return qa_band
 
-    names = _band_names(gt.attrs)
+    attrs = getattr(gt, "attrs", None)
+    names = _band_names(attrs) if attrs is not None else None
     if isinstance(names, Mapping):
         try:
             return int(names[qa_band])
@@ -187,11 +200,14 @@ def _resolve_band_index(gt: GeoTensor, qa_band: BandSelector) -> int | None:
 
     raise ValueError(
         "String qa_band selectors require GeoTensor attrs with `band_names` "
-        "or a similar band-name sequence."
+        "or a similar band-name sequence; pass an integer index for plain "
+        "array inputs."
     )
 
 
-def _select_qa(gt: GeoTensor, qa_band: BandSelector, axis: int) -> np.ndarray:
+def _select_qa(
+    gt: GeoTensor | np.ndarray, qa_band: BandSelector, axis: int
+) -> np.ndarray:
     """Select the QA band from a stack, or return the carrier as-is."""
     arr = np.asarray(gt)
     band_idx = _resolve_band_index(gt, qa_band)
@@ -338,9 +354,11 @@ class DecodeBitmask(Operator):
             stack.
 
     Returns:
-        A multi-band boolean ``GeoTensor`` with shape
-        ``(n_layers, height, width)``. The output ``band_names`` attr
-        is set from the keys of ``bits``.
+        A multi-band boolean carrier with shape
+        ``(n_layers, height, width)``, matching the input carrier kind.
+        For GeoTensor input the output ``band_names`` attr is set from
+        the keys of ``bits``; plain ``np.ndarray`` input returns a
+        plain stacked boolean array (no metadata to carry the names).
 
     Examples:
         >>> from geotoolz.qa import DecodeBitmask
@@ -374,13 +392,15 @@ class DecodeBitmask(Operator):
         self.qa_band = qa_band
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = _select_qa(gt, self.qa_band, self.axis)
         names = list(self.bits)
         layers = [
             _decode_bits_with_mode(qa, self.bits[name], self.mode) for name in names
         ]
         mask = np.stack(layers, axis=0)
+        if not hasattr(gt, "transform"):
+            return mask
         return type(gt)(
             mask,
             transform=gt.transform,
@@ -403,7 +423,10 @@ class _QAMask(Operator):
 
     Subclasses differ only by semantic name (``MaskClouds``,
     ``MaskCirrus``, ...) — the runtime behaviour is identical and
-    delegates to the cloud-module primitives.
+    delegates to the cloud-module primitives. Accepts a ``GeoTensor``
+    or a plain ``np.ndarray`` and returns the same carrier kind
+    (string ``qa_band`` selectors require a GeoTensor with band-name
+    attrs).
     """
 
     _target_name: ClassVar[str] = "qa"
@@ -427,7 +450,7 @@ class _QAMask(Operator):
         self.axis = axis
         self.invert = invert
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = _select_qa(gt, self.qa_band, self.axis)
         mask = _mask_from_definition(
             qa,
@@ -436,7 +459,7 @@ class _QAMask(Operator):
             mode=self.mode,
             invert=self.invert,
         )
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -509,6 +532,11 @@ class MaskNoData(Operator):
     2. **Fill-driven** (default): without QA arguments, pixels equal to
        the carrier's ``fill_value_default`` in *any* band are marked.
 
+    The QA-driven mode accepts a ``GeoTensor`` or a plain ``np.ndarray``
+    and returns the same carrier kind; the fill-driven mode reads
+    carrier metadata, so it requires a GeoTensor with a
+    ``fill_value_default``.
+
     Args:
         qa_band: Optional QA band selector.
         bits: Bit positions that mark no-data.
@@ -539,24 +567,25 @@ class MaskNoData(Operator):
         self.values = _normalize_int_sequence(values, "values")
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         if self.bits is not None or self.values is not None or self.qa_band is not None:
             qa = _select_qa(gt, self.qa_band, self.axis)
             mask = _mask_from_definition(
                 qa, bits=self.bits, values=self.values, mode="any"
             )
         else:
-            if gt.fill_value_default is None:
+            fill_value = getattr(gt, "fill_value_default", None)
+            if fill_value is None:
                 raise ValueError(
                     "MaskNoData: no qa_band/bits/values provided and the carrier "
                     "has no fill_value_default."
                 )
             arr = np.asarray(gt)
             if arr.ndim <= 2:
-                mask = arr == gt.fill_value_default
+                mask = arr == fill_value
             else:
-                mask = np.any(arr == gt.fill_value_default, axis=self.axis)
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+                mask = np.any(arr == fill_value, axis=self.axis)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -581,7 +610,9 @@ class MaskSaturated(Operator):
             reduction when ``qa_band`` is None).
 
     Returns:
-        Boolean ``GeoTensor`` mask with saturated pixels marked True.
+        Boolean mask with saturated pixels marked True, matching the
+        input carrier kind (``GeoTensor`` in → ``GeoTensor`` out, plain
+        ``np.ndarray`` in → plain array out).
 
     Examples:
         >>> from geotoolz.qa import MaskSaturated
@@ -602,7 +633,7 @@ class MaskSaturated(Operator):
         self.saturation_value = saturation_value
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = _select_qa(gt, self.qa_band, self.axis)
         saturation_value = self.saturation_value
         if saturation_value is None:
@@ -614,7 +645,7 @@ class MaskSaturated(Operator):
         mask = arr == saturation_value
         if self.qa_band is None and np.asarray(gt).ndim > 2:
             mask = np.any(mask, axis=self.axis)
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -639,6 +670,10 @@ class S2QA60(Operator):
     (≥ 04.00). Prefer the L2A SCL band (`S2SCL`) or an ML-based
     detector when available.
 
+    Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns the
+    same carrier kind; plain arrays need an integer ``qa_band`` (the
+    default is a band *name*, which requires GeoTensor attrs).
+
     Args:
         qa_band: Band selector for QA60 within the input stack.
         axis: Band axis position.
@@ -652,10 +687,10 @@ class S2QA60(Operator):
         self.qa_band = qa_band
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = _select_qa(gt, self.qa_band, self.axis)
         mask = mask_from_qa_bits(qa, (10, 11))
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {"qa_band": self.qa_band, "axis": self.axis}
@@ -666,6 +701,9 @@ class S2SCL(Operator):
 
     Returns True for pixels to mask: every SCL class *except* those
     named in ``keep``. By default vegetation, soil, and water are kept.
+
+    Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns the
+    same carrier kind; plain arrays need an integer ``qa_band``.
 
     Args:
         qa_band: Band selector for the SCL band.
@@ -692,13 +730,13 @@ class S2SCL(Operator):
         self.keep = tuple(str(name) for name in keep)
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         keep_values = _registry_values("s2_scl", self.keep)
         qa = _select_qa(gt, self.qa_band, self.axis)
         # `invert=True` turns "in the keep set" into "NOT in the keep set"
         # — i.e. "mask this pixel out".
         mask = mask_from_scl(qa, keep_values, invert=True)
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {"qa_band": self.qa_band, "keep": list(self.keep), "axis": self.axis}
@@ -715,6 +753,9 @@ class LandsatQA_PIXEL(Operator):
     Collection-2 — same bit layout as L8/L9 except bit 2 ("cirrus") is
     unused on TM/ETM+. For ``sensor="l89"`` (default) the full L8/L9
     layout is used.
+
+    Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns the
+    same carrier kind; plain arrays need an integer ``qa_band``.
 
     Args:
         qa_band: Band selector for QA_PIXEL.
@@ -775,11 +816,11 @@ class LandsatQA_PIXEL(Operator):
         self.sensor = sensor
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         registry_key = self._SENSOR_KEYS[self.sensor]
         qa = _select_qa(gt, self.qa_band, self.axis)
         mask = _decode_targets_to_mask(qa, registry_key, self.targets)
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -802,6 +843,9 @@ class MODISStateQA(Operator):
     cirrus level (0=none, 1=small, 2=average, 3=high). The default
     "cloud" target matches cloudy + mixed; "cirrus" matches
     small/average/high.
+
+    Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns the
+    same carrier kind; plain arrays need an integer ``qa_band``.
 
     Args:
         qa_band: Band selector for the state QA band.
@@ -832,10 +876,10 @@ class MODISStateQA(Operator):
         self.targets = tuple(str(target) for target in targets)
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = _select_qa(gt, self.qa_band, self.axis)
         mask = _decode_targets_to_mask(qa, "modis_state_qa", self.targets)
-        return gt.array_as_geotensor(mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
         return {

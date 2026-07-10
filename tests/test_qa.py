@@ -4,26 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import rasterio
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geotensor as _toy_geotensor
 
 import geotoolz as gz
 from geotoolz import qa
-
-
-def _toy_geotensor(
-    values: np.ndarray,
-    *,
-    attrs: dict[str, object] | None = None,
-    fill: int | float | None = -9999,
-) -> GeoTensor:
-    return GeoTensor(
-        values=values,
-        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32629",
-        fill_value_default=fill,
-        attrs=attrs,
-    )
 
 
 def test_qa_module_is_available_from_top_level() -> None:
@@ -208,7 +192,7 @@ def test_mask_nodata_infers_from_fill_value() -> None:
         ],
         dtype=np.int16,
     )
-    gt = _toy_geotensor(arr, fill=-9999)
+    gt = _toy_geotensor(arr, fill_value_default=-9999)
 
     out = qa.MaskNoData()(gt)
 
@@ -222,7 +206,7 @@ def test_mask_nodata_can_decode_qa_values() -> None:
 
 
 def test_mask_nodata_requires_fill_when_not_decoding_qa() -> None:
-    gt = _toy_geotensor(np.zeros((2, 2), dtype=np.float32), fill=None)
+    gt = _toy_geotensor(np.zeros((2, 2), dtype=np.float32), fill_value_default=None)
     with pytest.raises(ValueError, match="fill_value_default"):
         qa.MaskNoData()(gt)
 
@@ -402,6 +386,59 @@ def test_reduce_bit_masks_ors_named_groups() -> None:
     np.testing.assert_array_equal(np.asarray(out), [[False, True, True, True]])
     with pytest.raises(ValueError, match="must not be empty"):
         reduce_bit_masks(qa_arr, {})
+
+
+# ---------------------------------------------------------------------------
+# Plain-ndarray carrier support
+# ---------------------------------------------------------------------------
+
+
+_QA_BITS_2X2 = np.array([[0, 1 << 3], [1 << 4, (1 << 3) | (1 << 4)]], dtype=np.uint16)
+_SCL_2X2 = np.array([[0, 4], [8, 9]], dtype=np.uint8)
+
+
+def _plain_array_cases() -> list[tuple[object, np.ndarray]]:
+    return [
+        (qa.DecodeBitmask(bits={"cloud": [3], "shadow": [4]}), _QA_BITS_2X2),
+        (qa.MaskClouds(qa_band=None, bits=[3, 4]), _QA_BITS_2X2),
+        (qa.MaskNoData(qa_band=None, values=[0]), _SCL_2X2),
+        (
+            qa.MaskSaturated(),
+            np.array([[0, 65535], [1, 2]], dtype=np.uint16),
+        ),
+        (
+            qa.S2QA60(qa_band=0),
+            np.array([[[0, 1 << 10], [1 << 11, 0]]], dtype=np.uint16),
+        ),
+        (qa.S2SCL(qa_band=0), _SCL_2X2[None]),
+        (qa.LandsatQA_PIXEL(qa_band=0), _QA_BITS_2X2[None]),
+        (
+            qa.MODISStateQA(qa_band=0),
+            np.array([[[0b01, 0b10], [1 << 2, 0]]], dtype=np.uint16),
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("op", "arr"), _plain_array_cases(), ids=lambda case: type(case).__name__
+)
+def test_qa_operators_accept_plain_ndarray(op, arr) -> None:
+    """Plain ndarray in -> plain ndarray out, values match the GeoTensor path."""
+    out = op(arr)
+    assert type(out) is np.ndarray
+    assert out.dtype == np.bool_
+    gt_out = op(_toy_geotensor(arr))
+    np.testing.assert_array_equal(out, np.asarray(gt_out))
+
+
+def test_string_qa_band_selector_requires_geotensor_metadata() -> None:
+    with pytest.raises(ValueError, match="band_names"):
+        qa.MaskClouds(qa_band="QA60", bits=[10])(np.zeros((2, 2, 2), dtype=np.uint16))
+
+
+def test_mask_nodata_fill_mode_rejects_plain_array() -> None:
+    with pytest.raises(ValueError, match="fill_value_default"):
+        qa.MaskNoData()(np.zeros((2, 2), dtype=np.int16))
 
 
 # ---------------------------------------------------------------------------

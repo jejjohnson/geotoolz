@@ -34,17 +34,18 @@ from collections.abc import Mapping, Sequence
 from itertools import pairwise
 
 import numpy as np
+from jaxtyping import Bool, Int
 
 from geotoolz.cloud._src.array import mask_from_qa_bits
 
 
 def mask_from_bit_field(
-    qa: np.ndarray,
+    qa: Int[np.ndarray, "*batch h w"],
     bits: Sequence[int],
     values: Sequence[int],
     *,
     invert: bool = False,
-) -> np.ndarray:
+) -> Bool[np.ndarray, "*batch h w"]:
     """Decode a contiguous multi-bit QA field by value membership.
 
     Several sensor QA layers pack a small categorical field into two or
@@ -97,9 +98,9 @@ def mask_from_bit_field(
 
 
 def reduce_bit_masks(
-    qa: np.ndarray,
+    qa: Int[np.ndarray, "*batch h w"],
     bit_groups: Mapping[str, Sequence[int]],
-) -> np.ndarray:
+) -> Bool[np.ndarray, "*batch h w"]:
     """OR-reduce several named bit-groups into a single mask.
 
     Each entry in ``bit_groups`` is a sequence of bit positions; the
