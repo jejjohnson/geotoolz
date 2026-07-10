@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from jaxtyping import Shaped
 from pipekit import Operator
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import shortest_path
@@ -21,6 +22,9 @@ from skimage.measure import (
     shannon_entropy,
 )
 from skimage.morphology import skeletonize
+
+from geotoolz._src.shape import single_band
+from geotoolz._src.wrap import wrap_like
 
 
 if TYPE_CHECKING:
@@ -44,13 +48,12 @@ DEFAULT_REGIONPROPS: tuple[str, ...] = (
 )
 
 
-def _single_band(values: np.ndarray) -> np.ndarray:
-    arr = np.asarray(values)
-    if arr.ndim == 2:
-        return arr
-    if arr.ndim == 3 and arr.shape[0] == 1:
-        return arr[0]
-    raise ValueError("measure operators expect shape (H, W) or (1, H, W)")
+def _require_geotensor(gt: Any, name: str) -> None:
+    """Raise when a geo-dependent operator receives a plain array."""
+    if not hasattr(gt, "transform"):
+        raise TypeError(
+            f"{name} requires a georeferenced GeoTensor input; got a plain array"
+        )
 
 
 def _xy(transform: Any, row: float, col: float) -> tuple[float, float]:
@@ -60,26 +63,59 @@ def _xy(transform: Any, row: float, col: float) -> tuple[float, float]:
 
 
 class LabelConnectedComponents(Operator):
-    """Convert a binary mask into an int32 connected-component label map."""
+    """Convert a binary mask into an int32 connected-component label map.
+
+    Wraps :func:`skimage.measure.label`. Expects a single-band ``(H, W)``
+    or ``(1, H, W)`` mask (values are cast to bool). Accepts a
+    ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32``
+    label map in the same carrier kind.
+
+    Args:
+        connectivity: Maximum orthogonal hops for two pixels to count as
+            neighbours (``1`` = 4-connectivity, ``2`` = 8-connectivity;
+            ``None`` = full connectivity).
+        background: Pixel value treated as background and labelled ``0``.
+    """
 
     def __init__(self, *, connectivity: int | None = 1, background: int = 0) -> None:
         self.connectivity = connectivity
         self.background = background
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         labels = label(
-            _single_band(np.asarray(gt)).astype(bool),
+            single_band(np.asarray(gt), name="LabelConnectedComponents").astype(bool),
             connectivity=self.connectivity,
             background=self.background,
         )
-        return gt.array_as_geotensor(labels.astype(np.int32, copy=False))
+        return wrap_like(gt, labels.astype(np.int32, copy=False))
 
     def get_config(self) -> dict[str, Any]:
         return {"connectivity": self.connectivity, "background": self.background}
 
 
 class RegionProps(Operator):
-    """Extract a GeoDataFrame of per-region statistics from a label map."""
+    """Extract a GeoDataFrame of per-region statistics from a label map.
+
+    Wraps :func:`skimage.measure.regionprops_table` over a single-band
+    ``(H, W)`` or ``(1, H, W)`` integer label map. When the ``centroid``
+    property is requested (the default), each row carries a ``Point``
+    geometry at the region centroid in world coordinates. Geo-dependent:
+    the output geometry needs the carrier's transform/CRS, so the input
+    must be a georeferenced ``GeoTensor`` (plain arrays raise
+    ``TypeError``).
+
+    Args:
+        intensity_image: Optional single-band intensity image aligned
+            with the label map, enabling intensity-based properties.
+        properties: Property names passed to ``regionprops_table``;
+            defaults to :data:`DEFAULT_REGIONPROPS`.
+        extra_properties: Optional callables computing custom per-region
+            properties (see skimage docs). Not YAML-serialisable, so
+            instances are forbidden in YAML.
+
+    Raises:
+        TypeError: If the input is not a georeferenced GeoTensor.
+    """
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -99,11 +135,14 @@ class RegionProps(Operator):
         )
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
-        labels = _single_band(np.asarray(gt)).astype(np.int32, copy=False)
+        _require_geotensor(gt, "RegionProps")
+        labels = single_band(np.asarray(gt), name="RegionProps").astype(
+            np.int32, copy=False
+        )
         intensity = (
             None
             if self.intensity_image is None
-            else _single_band(np.asarray(self.intensity_image))
+            else single_band(self.intensity_image, name="RegionProps intensity_image")
         )
         props = regionprops_table(
             labels,
@@ -147,7 +186,23 @@ class RegionProps(Operator):
 
 
 class FindContours(Operator):
-    """Extract iso-value contours as LineString geometries."""
+    """Extract iso-value contours as LineString geometries.
+
+    Wraps :func:`skimage.measure.find_contours` over a single-band
+    ``(H, W)`` or ``(1, H, W)`` image and maps each contour's pixel
+    coordinates into world coordinates. Geo-dependent: the output
+    geometries need the carrier's transform/CRS, so the input must be a
+    georeferenced ``GeoTensor`` (plain arrays raise ``TypeError``).
+
+    Args:
+        level: Iso-value along which to find contours; ``None`` uses the
+            midpoint of the image's value range.
+        fully_connected: Whether high- or low-valued pixels are
+            considered fully connected (``"low"`` or ``"high"``).
+
+    Raises:
+        TypeError: If the input is not a georeferenced GeoTensor.
+    """
 
     def __init__(
         self,
@@ -159,8 +214,9 @@ class FindContours(Operator):
         self.fully_connected = fully_connected
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
+        _require_geotensor(gt, "FindContours")
         contours = find_contours(
-            _single_band(np.asarray(gt, dtype=float)),
+            single_band(np.asarray(gt, dtype=float), name="FindContours"),
             level=self.level,
             fully_connected=self.fully_connected,
         )
@@ -186,7 +242,20 @@ class FindContours(Operator):
 
 
 class ProfileLine(Operator):
-    """Sample values along a line between two pixel coordinates."""
+    """Sample values along a line between two pixel coordinates.
+
+    Wraps :func:`skimage.measure.profile_line` over a single-band
+    ``(H, W)`` or ``(1, H, W)`` image. Endpoints are pixel ``(row, col)``
+    coordinates and the returned profile is a plain 1-D ``np.ndarray``,
+    so both ``GeoTensor`` and plain-array carriers are accepted.
+
+    Args:
+        src: ``(row, col)`` start pixel of the profile.
+        dst: ``(row, col)`` end pixel of the profile.
+        linewidth: Width of the sampling band, in pixels.
+        order: Spline interpolation order (0 = nearest neighbour).
+        mode: Boundary handling mode for samples outside the image.
+    """
 
     def __init__(
         self,
@@ -203,9 +272,9 @@ class ProfileLine(Operator):
         self.order = order
         self.mode = mode
 
-    def _apply(self, gt: GeoTensor) -> np.ndarray:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
         return profile_line(
-            _single_band(np.asarray(gt)),
+            single_band(np.asarray(gt), name="ProfileLine"),
             self.src,
             self.dst,
             linewidth=self.linewidth,
@@ -224,7 +293,22 @@ class ProfileLine(Operator):
 
 
 class RANSAC(Operator):
-    """Robust model fitting via :func:`skimage.measure.ransac`."""
+    """Robust model fitting via :func:`skimage.measure.ransac`.
+
+    Carrier-agnostic: the input is whatever data layout the chosen model
+    class consumes (e.g. an ``(N, D)`` point array), and the output is
+    the ``(model, inlier_mask)`` pair returned by ``ransac``.
+
+    Args:
+        model_class: skimage model class to fit (e.g.
+            ``skimage.measure.LineModelND``). Not YAML-serialisable, so
+            instances are forbidden in YAML.
+        min_samples: Minimum number of samples per model estimate.
+        residual_threshold: Maximum residual for a sample to count as an
+            inlier.
+        **kwargs: Extra keyword arguments forwarded to
+            :func:`skimage.measure.ransac` (e.g. ``max_trials``, ``rng``).
+    """
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -263,7 +347,7 @@ class RANSAC(Operator):
         }
 
 
-def _skeleton_diameter_pixels(mask: np.ndarray) -> float:
+def _skeleton_diameter_pixels(mask: Shaped[np.ndarray, "h w"]) -> float:
     """Longest shortest-path (graph diameter) of the skeleton of a binary
     mask, with 8-connected adjacency and unit edge weight.
 
@@ -318,24 +402,39 @@ class SkeletonLength(Operator):
     :func:`networkx.all_pairs_shortest_path_length` for the same purpose.
 
     Returns ``0.0`` for empty masks or skeletons that collapse to a single
-    pixel.
+    pixel. The result is a plain float in pixel units, so both
+    ``GeoTensor`` and plain-array carriers are accepted.
     """
 
-    def _apply(self, gt: GeoTensor) -> float:
-        return _skeleton_diameter_pixels(_single_band(np.asarray(gt)))
+    def _apply(self, gt: GeoTensor | np.ndarray) -> float:
+        return _skeleton_diameter_pixels(
+            single_band(np.asarray(gt), name="SkeletonLength")
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {}
 
 
 class ShannonEntropy(Operator):
-    """Compute Shannon entropy of the input image."""
+    """Compute Shannon entropy of the input image.
+
+    Wraps :func:`skimage.measure.shannon_entropy` over a single-band
+    ``(H, W)`` or ``(1, H, W)`` image. The result is a plain float, so
+    both ``GeoTensor`` and plain-array carriers are accepted.
+
+    Args:
+        base: Logarithm base for the entropy (``2.0`` gives bits).
+    """
 
     def __init__(self, *, base: float = 2.0) -> None:
         self.base = base
 
-    def _apply(self, gt: GeoTensor) -> float:
-        return float(shannon_entropy(_single_band(np.asarray(gt)), base=self.base))
+    def _apply(self, gt: GeoTensor | np.ndarray) -> float:
+        return float(
+            shannon_entropy(
+                single_band(np.asarray(gt), name="ShannonEntropy"), base=self.base
+            )
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"base": self.base}

@@ -29,18 +29,20 @@ from skimage.transform import (
     hough_line_peaks,
 )
 
+from geotoolz._src.shape import single_band
+from geotoolz._src.wrap import wrap_like
+
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-def _single_band(values: np.ndarray) -> np.ndarray:
-    arr = np.asarray(values)
-    if arr.ndim == 2:
-        return arr
-    if arr.ndim == 3 and arr.shape[0] == 1:
-        return arr[0]
-    raise ValueError("feature operator expects shape (H, W) or (1, H, W)")
+def _require_geotensor(gt: Any, name: str) -> None:
+    """Raise when a geo-dependent operator receives a plain array."""
+    if not hasattr(gt, "transform"):
+        raise TypeError(
+            f"{name} requires a georeferenced GeoTensor input; got a plain array"
+        )
 
 
 def _xy(transform: Any, row: float, col: float) -> tuple[float, float]:
@@ -63,7 +65,24 @@ def _points(
 
 
 class PeakLocalMax(Operator):
-    """Find local maxima and return point features with pixel scores."""
+    """Find local maxima and return point features with pixel scores.
+
+    Wraps :func:`skimage.feature.peak_local_max` over a single-band
+    ``(H, W)`` or ``(1, H, W)`` image and returns a ``GeoDataFrame``
+    with ``row``/``col`` pixel indices, the peak ``score``, and a
+    ``Point`` geometry in world coordinates. Geo-dependent: requires a
+    georeferenced ``GeoTensor`` input (plain arrays raise ``TypeError``).
+
+    Args:
+        min_distance: Minimum pixel distance between reported peaks.
+        threshold_abs: Minimum absolute intensity of a peak.
+        threshold_rel: Minimum intensity relative to the image maximum.
+        exclude_border: Exclude peaks within this distance of the border
+            (``True`` uses ``min_distance``).
+
+    Raises:
+        TypeError: If the input is not a georeferenced GeoTensor.
+    """
 
     def __init__(
         self,
@@ -79,7 +98,8 @@ class PeakLocalMax(Operator):
         self.exclude_border = exclude_border
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
-        image = _single_band(np.asarray(gt, dtype=float))
+        _require_geotensor(gt, "PeakLocalMax")
+        image = single_band(np.asarray(gt, dtype=float), name="PeakLocalMax")
         coords = peak_local_max(
             image,
             min_distance=self.min_distance,
@@ -109,6 +129,20 @@ class _BlobBase(Operator):
     Subclasses set ``_func`` to the underlying skimage callable and
     override :meth:`_extra_kwargs` / :meth:`_radius_from_sigma` to track
     each detector's actual signature and radius convention.
+
+    Detections are returned as a ``GeoDataFrame`` with ``row``/``col``
+    pixel indices, ``sigma``/``radius`` columns, and a ``Point`` geometry
+    in world coordinates. Geo-dependent: requires a georeferenced
+    ``GeoTensor`` input (plain arrays raise ``TypeError``).
+
+    Args:
+        min_sigma: Smallest blob scale (Gaussian sigma) considered.
+        max_sigma: Largest blob scale considered.
+        threshold: Detector response threshold; lower values detect
+            fainter blobs.
+
+    Raises:
+        TypeError: If the input is not a georeferenced GeoTensor.
     """
 
     _func: Any
@@ -133,8 +167,10 @@ class _BlobBase(Operator):
         return sigma * np.sqrt(2.0)
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
+        name = type(self).__name__
+        _require_geotensor(gt, name)
         blobs = self._func(
-            _single_band(np.asarray(gt, dtype=float)),
+            single_band(np.asarray(gt, dtype=float), name=name),
             min_sigma=self.min_sigma,
             max_sigma=self.max_sigma,
             threshold=self.threshold,
@@ -160,7 +196,15 @@ class _BlobBase(Operator):
 
 
 class BlobLoG(_BlobBase):
-    """Blob detection via Laplacian of Gaussian."""
+    """Blob detection via Laplacian of Gaussian.
+
+    See :class:`_BlobBase` for the shared parameters and carrier
+    behavior (GeoTensor-only).
+
+    Args:
+        num_sigma: Number of sigma steps between ``min_sigma`` and
+            ``max_sigma``.
+    """
 
     _func = staticmethod(blob_log)
 
@@ -183,7 +227,14 @@ class BlobLoG(_BlobBase):
 
 
 class BlobDOG(_BlobBase):
-    """Blob detection via Difference of Gaussian."""
+    """Blob detection via Difference of Gaussian.
+
+    See :class:`_BlobBase` for the shared parameters and carrier
+    behavior (GeoTensor-only).
+
+    Args:
+        sigma_ratio: Ratio between the sigmas of successive Gaussians.
+    """
 
     _func = staticmethod(blob_dog)
 
@@ -211,6 +262,13 @@ class BlobDoH(_BlobBase):
     Unlike LoG/DoG, ``blob_doh`` already returns ``sigma`` values that
     approximate blob radii directly, so no ``sqrt(2)`` scaling is
     applied when populating the ``radius`` column.
+
+    See :class:`_BlobBase` for the shared parameters and carrier
+    behavior (GeoTensor-only).
+
+    Args:
+        num_sigma: Number of sigma steps between ``min_sigma`` and
+            ``max_sigma``.
     """
 
     _func = staticmethod(blob_doh)
@@ -237,7 +295,20 @@ class BlobDoH(_BlobBase):
 
 
 class Canny(Operator):
-    """Canny edge detection returning a boolean GeoTensor."""
+    """Canny edge detection returning a boolean edge map.
+
+    Wraps :func:`skimage.feature.canny` over a single-band ``(H, W)`` or
+    ``(1, H, W)`` image. Accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` and returns a boolean edge map in the same carrier
+    kind.
+
+    Args:
+        sigma: Width of the Gaussian smoothing kernel, in pixels.
+        low_threshold: Lower hysteresis threshold; ``None`` uses the
+            skimage default.
+        high_threshold: Upper hysteresis threshold; ``None`` uses the
+            skimage default.
+    """
 
     def __init__(
         self,
@@ -250,14 +321,14 @@ class Canny(Operator):
         self.low_threshold = low_threshold
         self.high_threshold = high_threshold
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         edges = canny(
-            _single_band(np.asarray(gt, dtype=float)),
+            single_band(np.asarray(gt, dtype=float), name="Canny"),
             sigma=self.sigma,
             low_threshold=self.low_threshold,
             high_threshold=self.high_threshold,
         )
-        return gt.array_as_geotensor(edges)
+        return wrap_like(gt, edges)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -268,14 +339,32 @@ class Canny(Operator):
 
 
 class CornerHarris(Operator):
-    """Harris corner response plus peak selection as point features."""
+    """Harris corner response plus peak selection as point features.
+
+    Runs :func:`skimage.feature.corner_harris` then
+    :func:`skimage.feature.corner_peaks` over a single-band ``(H, W)``
+    or ``(1, H, W)`` image and returns a ``GeoDataFrame`` with
+    ``row``/``col`` pixel indices, the Harris ``response``, and a
+    ``Point`` geometry in world coordinates. Geo-dependent: requires a
+    georeferenced ``GeoTensor`` input (plain arrays raise ``TypeError``).
+
+    Args:
+        min_distance: Minimum pixel distance between reported corners.
+        threshold_rel: Minimum response relative to the strongest corner.
+
+    Raises:
+        TypeError: If the input is not a georeferenced GeoTensor.
+    """
 
     def __init__(self, *, min_distance: int = 1, threshold_rel: float = 0.1) -> None:
         self.min_distance = min_distance
         self.threshold_rel = threshold_rel
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
-        response = corner_harris(_single_band(np.asarray(gt, dtype=float)))
+        _require_geotensor(gt, "CornerHarris")
+        response = corner_harris(
+            single_band(np.asarray(gt, dtype=float), name="CornerHarris")
+        )
         coords = corner_peaks(
             response,
             min_distance=self.min_distance,
@@ -293,7 +382,18 @@ class CornerHarris(Operator):
 
 
 class HOG(Operator):
-    """Histogram of Oriented Gradients descriptor."""
+    """Histogram of Oriented Gradients descriptor.
+
+    Wraps :func:`skimage.feature.hog` over a single-band ``(H, W)`` or
+    ``(1, H, W)`` image. The output is a flat 1-D feature vector (a
+    plain ``np.ndarray``), so both ``GeoTensor`` and plain-array
+    carriers are accepted.
+
+    Args:
+        orientations: Number of orientation histogram bins.
+        pixels_per_cell: Cell size in pixels, ``(rows, cols)``.
+        cells_per_block: Block size in cells, ``(rows, cols)``.
+    """
 
     def __init__(
         self,
@@ -306,9 +406,9 @@ class HOG(Operator):
         self.pixels_per_cell = pixels_per_cell
         self.cells_per_block = cells_per_block
 
-    def _apply(self, gt: GeoTensor) -> np.ndarray:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
         return hog(
-            _single_band(np.asarray(gt, dtype=float)),
+            single_band(np.asarray(gt, dtype=float), name="HOG"),
             orientations=self.orientations,
             pixels_per_cell=self.pixels_per_cell,
             cells_per_block=self.cells_per_block,
@@ -324,25 +424,49 @@ class HOG(Operator):
 
 
 class StructureTensor(Operator):
-    """Local structure-tensor eigenvalue stack."""
+    """Local structure-tensor eigenvalue stack.
+
+    Runs :func:`skimage.feature.structure_tensor` then
+    :func:`skimage.feature.structure_tensor_eigenvalues` over a
+    single-band ``(H, W)`` or ``(1, H, W)`` image. Accepts a
+    ``GeoTensor`` or a plain ``np.ndarray`` and returns the ``(2, H, W)``
+    eigenvalue stack in the same carrier kind.
+
+    Args:
+        sigma: Width of the Gaussian window used to average the
+            gradient products, in pixels.
+    """
 
     def __init__(self, *, sigma: float = 1.0) -> None:
         self.sigma = sigma
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         tensor = structure_tensor(
-            _single_band(np.asarray(gt, dtype=float)),
+            single_band(np.asarray(gt, dtype=float), name="StructureTensor"),
             sigma=self.sigma,
         )
         eigvals = np.asarray(structure_tensor_eigenvalues(tensor))
-        return gt.array_as_geotensor(eigvals)
+        return wrap_like(gt, eigvals)
 
     def get_config(self) -> dict[str, Any]:
         return {"sigma": self.sigma}
 
 
 class MultiscaleBasicFeatures(Operator):
-    """General-purpose multiscale feature stack."""
+    """General-purpose multiscale feature stack.
+
+    Wraps :func:`skimage.feature.multiscale_basic_features` over a
+    single-band ``(H, W)`` or ``(1, H, W)`` image. Accepts a
+    ``GeoTensor`` or a plain ``np.ndarray`` and returns the ``(F, H, W)``
+    channel-first feature stack in the same carrier kind.
+
+    Args:
+        intensity: Include Gaussian-smoothed intensity features.
+        edges: Include gradient-magnitude (edge) features.
+        texture: Include Hessian-eigenvalue (texture) features.
+        sigma_min: Smallest smoothing scale, in pixels.
+        sigma_max: Largest smoothing scale, in pixels.
+    """
 
     def __init__(
         self,
@@ -359,9 +483,9 @@ class MultiscaleBasicFeatures(Operator):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         features = multiscale_basic_features(
-            _single_band(np.asarray(gt, dtype=float)),
+            single_band(np.asarray(gt, dtype=float), name="MultiscaleBasicFeatures"),
             intensity=self.intensity,
             edges=self.edges,
             texture=self.texture,
@@ -369,7 +493,7 @@ class MultiscaleBasicFeatures(Operator):
             sigma_max=self.sigma_max,
             channel_axis=None,
         )
-        return gt.array_as_geotensor(np.moveaxis(features, -1, 0))
+        return wrap_like(gt, np.moveaxis(features, -1, 0))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -382,13 +506,26 @@ class MultiscaleBasicFeatures(Operator):
 
 
 class HoughLines(Operator):
-    """Detect prominent straight lines with the Hough transform."""
+    """Detect prominent straight lines with the Hough transform.
+
+    Runs :func:`skimage.transform.hough_line` /
+    :func:`~skimage.transform.hough_line_peaks` over a single-band
+    ``(H, W)`` or ``(1, H, W)`` image. The output is a plain
+    ``pd.DataFrame`` of pixel-space line parameters (``accumulator``,
+    ``angle``, ``distance``), so both ``GeoTensor`` and plain-array
+    carriers are accepted.
+
+    Args:
+        num_peaks: Maximum number of line peaks to return.
+    """
 
     def __init__(self, *, num_peaks: int = 10) -> None:
         self.num_peaks = num_peaks
 
-    def _apply(self, gt: GeoTensor) -> pd.DataFrame:
-        hspace, angles, distances = hough_line(_single_band(np.asarray(gt)))
+    def _apply(self, gt: GeoTensor | np.ndarray) -> pd.DataFrame:
+        hspace, angles, distances = hough_line(
+            single_band(np.asarray(gt), name="HoughLines")
+        )
         accum, angle_peaks, dist_peaks = hough_line_peaks(
             hspace, angles, distances, num_peaks=self.num_peaks
         )
@@ -401,14 +538,33 @@ class HoughLines(Operator):
 
 
 class HoughCircles(Operator):
-    """Detect circles with the circular Hough transform."""
+    """Detect circles with the circular Hough transform.
+
+    Runs :func:`skimage.transform.hough_circle` /
+    :func:`~skimage.transform.hough_circle_peaks` over a single-band
+    ``(H, W)`` or ``(1, H, W)`` image and returns a ``GeoDataFrame``
+    with ``row``/``col`` centre pixels, ``radius`` and ``accumulator``
+    columns, and a ``Point`` geometry in world coordinates.
+    Geo-dependent: requires a georeferenced ``GeoTensor`` input (plain
+    arrays raise ``TypeError``).
+
+    Args:
+        radii: Candidate circle radii, in pixels.
+        total_num_peaks: Maximum number of circles to return.
+
+    Raises:
+        TypeError: If the input is not a georeferenced GeoTensor.
+    """
 
     def __init__(self, *, radii: list[int], total_num_peaks: int = 10) -> None:
         self.radii = radii
         self.total_num_peaks = total_num_peaks
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
-        hspaces = hough_circle(_single_band(np.asarray(gt)), self.radii)
+        _require_geotensor(gt, "HoughCircles")
+        hspaces = hough_circle(
+            single_band(np.asarray(gt), name="HoughCircles"), self.radii
+        )
         accum, cx, cy, radii = hough_circle_peaks(
             hspaces,
             self.radii,

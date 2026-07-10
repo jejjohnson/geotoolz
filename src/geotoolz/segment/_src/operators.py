@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
+from jaxtyping import Bool, Float, Int, Num
 from pipekit import Operator
 from scipy import ndimage
 from skimage.segmentation import (
@@ -19,29 +20,37 @@ from skimage.segmentation import (
     watershed,
 )
 
+from geotoolz._src.shape import single_band
+from geotoolz._src.wrap import wrap_like
+
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor as GeoTensorType
 
 
-def _as_mask(mask: Any, shape: tuple[int, int]) -> np.ndarray | None:
+def _as_mask(
+    mask: Any,
+    shape: tuple[int, int],
+    *,
+    name: str = "mask",
+) -> Bool[np.ndarray, "h w"] | None:
     if mask is None:
         return None
-    arr = np.asarray(mask)
-    if arr.ndim == 3 and arr.shape[0] == 1:
-        arr = arr[0]
+    arr = single_band(mask, name=name)
     if arr.shape != shape:
         raise ValueError(f"mask shape {arr.shape} does not match image shape {shape}")
     return arr.astype(bool)
 
 
-def _finite_mask(image: np.ndarray) -> np.ndarray:
+def _finite_mask(
+    image: Num[np.ndarray, "h w"] | Num[np.ndarray, "c h w"],
+) -> Bool[np.ndarray, "h w"]:
     if image.ndim == 2:
         return np.isfinite(image)
     return np.all(np.isfinite(image), axis=0)
 
 
-def _fill_nan(image: np.ndarray) -> np.ndarray:
+def _fill_nan(image: Num[np.ndarray, "*dims"]) -> Float[np.ndarray, "*dims"]:
     arr = np.asarray(image, dtype=float)
     finite = np.isfinite(arr)
     if finite.all():
@@ -52,28 +61,37 @@ def _fill_nan(image: np.ndarray) -> np.ndarray:
     return np.nan_to_num(arr, nan=fill, posinf=fill, neginf=fill)
 
 
-def _single_band(values: np.ndarray) -> np.ndarray:
-    arr = np.asarray(values)
-    if arr.ndim == 2:
-        return arr
-    if arr.ndim == 3 and arr.shape[0] == 1:
-        return arr[0]
-    raise ValueError("operator expects shape (H, W) or (1, H, W)")
-
-
 def _labels(
-    gt: GeoTensorType,
+    gt: GeoTensorType | np.ndarray,
     labels: np.ndarray,
     mask: np.ndarray | None = None,
-) -> GeoTensorType:
+) -> GeoTensorType | np.ndarray:
     out = np.asarray(labels, dtype=np.int32)
     if mask is not None:
         out = np.where(mask, out, 0).astype(np.int32, copy=False)
-    return gt.array_as_geotensor(out, fill_value_default=0)
+    return wrap_like(gt, out, fill_value_default=0)
 
 
 class SLIC(Operator):
-    """SLIC superpixels via :func:`skimage.segmentation.slic`."""
+    """SLIC superpixels via :func:`skimage.segmentation.slic`.
+
+    Non-finite pixels are median-filled before clustering and forced to
+    label ``0`` in the output. Accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
+    the same carrier kind.
+
+    Args:
+        n_segments: Approximate number of superpixels to produce.
+        compactness: Balance between color and spatial proximity; higher
+            values yield more compact (squarer) segments.
+        sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
+        channel_axis: Axis holding channels (``0`` for channel-first
+            cubes, ``None`` for 2-D single-band input).
+        start_label: First label assigned to a superpixel.
+        mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
+            outside it get label ``0``. Providing a mask forbids YAML
+            round-trip for the instance.
+    """
 
     def __init__(
         self,
@@ -98,10 +116,10 @@ class SLIC(Operator):
             # override here is intentional. ty rejects it, hence the ignore.
             self.forbid_in_yaml = True  # ty: ignore[invalid-attribute-access]
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         image = _fill_nan(np.asarray(gt))
         valid = _finite_mask(np.asarray(gt))
-        mask = _as_mask(self.mask, gt.shape[-2:])
+        mask = _as_mask(self.mask, gt.shape[-2:], name="SLIC mask")
         if mask is not None:
             valid &= mask
         labels = slic(
@@ -127,7 +145,24 @@ class SLIC(Operator):
 
 
 class Felzenszwalb(Operator):
-    """Graph-based segmentation via :func:`skimage.segmentation.felzenszwalb`."""
+    """Graph-based segmentation via :func:`skimage.segmentation.felzenszwalb`.
+
+    Non-finite pixels are median-filled before segmentation and forced
+    to label ``0`` in the output. Accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
+    the same carrier kind.
+
+    Args:
+        scale: Free parameter controlling segment size; larger values
+            produce larger segments.
+        sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
+        min_size: Minimum segment size, enforced by postprocessing.
+        channel_axis: Axis holding channels (``0`` for channel-first
+            cubes, ``None`` for 2-D single-band input).
+        mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
+            outside it get label ``0``. Providing a mask forbids YAML
+            round-trip for the instance.
+    """
 
     def __init__(
         self,
@@ -148,9 +183,9 @@ class Felzenszwalb(Operator):
             # override here is intentional. ty rejects it, hence the ignore.
             self.forbid_in_yaml = True  # ty: ignore[invalid-attribute-access]
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = _finite_mask(np.asarray(gt))
-        mask = _as_mask(self.mask, gt.shape[-2:])
+        mask = _as_mask(self.mask, gt.shape[-2:], name="Felzenszwalb mask")
         if mask is not None:
             valid &= mask
         labels = felzenszwalb(
@@ -173,7 +208,30 @@ class Felzenszwalb(Operator):
 
 
 class Quickshift(Operator):
-    """Mode-seeking superpixels via :func:`skimage.segmentation.quickshift`."""
+    """Mode-seeking superpixels via :func:`skimage.segmentation.quickshift`.
+
+    Non-finite pixels are median-filled before segmentation and forced
+    to label ``0`` in the output. Accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
+    the same carrier kind.
+
+    Args:
+        kernel_size: Width of the Gaussian kernel used to estimate the
+            local density.
+        max_dist: Cut-off point for data distances; higher values mean
+            fewer clusters.
+        ratio: Balance (0-1) between color-space and image-space
+            proximity.
+        sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
+        channel_axis: Axis holding channels (``0`` for channel-first
+            cubes, ``None`` for 2-D single-band input).
+        convert2lab: Convert the image to LAB space first. Defaults to
+            ``False`` (unlike skimage) so non-RGB / multispectral /
+            single-band inputs work out of the box.
+        mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
+            outside it get label ``0``. Providing a mask forbids YAML
+            round-trip for the instance.
+    """
 
     def __init__(
         self,
@@ -201,9 +259,9 @@ class Quickshift(Operator):
             # override here is intentional. ty rejects it, hence the ignore.
             self.forbid_in_yaml = True  # ty: ignore[invalid-attribute-access]
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = _finite_mask(np.asarray(gt))
-        mask = _as_mask(self.mask, gt.shape[-2:])
+        mask = _as_mask(self.mask, gt.shape[-2:], name="Quickshift mask")
         if mask is not None:
             valid &= mask
         labels = quickshift(
@@ -230,7 +288,23 @@ class Quickshift(Operator):
 
 
 class Watershed(Operator):
-    """Watershed segmentation via :func:`skimage.segmentation.watershed`."""
+    """Watershed segmentation via :func:`skimage.segmentation.watershed`.
+
+    Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Non-finite
+    pixels are median-filled before flooding and forced to label ``0``
+    in the output. Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and
+    returns an ``int32`` label map in the same carrier kind.
+
+    Args:
+        markers: Optional single-band integer marker array seeding the
+            basins; when None, local minima of the image are used.
+        connectivity: Neighbourhood connectivity used for flooding.
+        compactness: Compactness parameter; higher values produce more
+            regularly-shaped basins.
+        watershed_line: Separate basins with a zero-labelled line.
+        mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
+            outside it get label ``0``.
+    """
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -249,14 +323,16 @@ class Watershed(Operator):
         self.watershed_line = watershed_line
         self.mask = mask
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
-        image = _single_band(_fill_nan(np.asarray(gt)))
-        valid = np.isfinite(_single_band(np.asarray(gt)))
-        mask = _as_mask(self.mask, gt.shape[-2:])
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+        image = single_band(_fill_nan(np.asarray(gt)), name="Watershed")
+        valid = np.isfinite(single_band(np.asarray(gt), name="Watershed"))
+        mask = _as_mask(self.mask, gt.shape[-2:], name="Watershed mask")
         if mask is not None:
             valid &= mask
         markers = (
-            None if self.markers is None else _single_band(np.asarray(self.markers))
+            None
+            if self.markers is None
+            else single_band(self.markers, name="Watershed markers")
         )
         labels = watershed(
             image,
@@ -279,7 +355,22 @@ class Watershed(Operator):
 
 
 class ChanVese(Operator):
-    """Active-contour segmentation via :func:`skimage.segmentation.chan_vese`."""
+    """Active-contour segmentation via :func:`skimage.segmentation.chan_vese`.
+
+    Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Non-finite
+    pixels are median-filled before evolution and forced to label ``0``
+    in the output. Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and
+    returns an ``int32`` label map (0 = outside, 1 = inside) in the same
+    carrier kind.
+
+    Args:
+        mu: Edge-length penalty weight; higher values give smoother
+            boundaries.
+        lambda1: Weight of the interior fitting term.
+        lambda2: Weight of the exterior fitting term.
+        tol: Convergence tolerance on the level set.
+        max_num_iter: Maximum number of iterations.
+    """
 
     def __init__(
         self,
@@ -296,11 +387,11 @@ class ChanVese(Operator):
         self.tol = tol
         self.max_num_iter = max_num_iter
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
-        band = _single_band(np.asarray(gt))
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+        band = single_band(np.asarray(gt), name="ChanVese")
         valid = np.isfinite(band)
         labels = chan_vese(
-            _single_band(_fill_nan(np.asarray(gt))),
+            single_band(_fill_nan(np.asarray(gt)), name="ChanVese"),
             mu=self.mu,
             lambda1=self.lambda1,
             lambda2=self.lambda2,
@@ -320,7 +411,22 @@ class ChanVese(Operator):
 
 
 class RandomWalker(Operator):
-    """Seeded segmentation via :func:`skimage.segmentation.random_walker`."""
+    """Seeded segmentation via :func:`skimage.segmentation.random_walker`.
+
+    Expects a single-band ``(H, W)`` or ``(1, H, W)`` image; non-finite
+    pixels are median-filled before diffusion. Accepts a ``GeoTensor``
+    or a plain ``np.ndarray`` and returns an ``int32`` label map in the
+    same carrier kind.
+
+    Args:
+        markers: Single-band integer array of seed labels (0 = unseeded);
+            required. Not YAML-serialisable, so instances are forbidden
+            in YAML.
+        beta: Penalisation coefficient for the random-walk motion;
+            higher values make diffusion harder across intensity edges.
+        mode: Linear-system solver mode (see skimage docs).
+        tol: Solver convergence tolerance.
+    """
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -337,10 +443,12 @@ class RandomWalker(Operator):
         self.mode = mode
         self.tol = tol
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         labels = random_walker(
-            _single_band(_fill_nan(np.asarray(gt))),
-            _single_band(np.asarray(self.markers)).astype(np.int32, copy=False),
+            single_band(_fill_nan(np.asarray(gt)), name="RandomWalker"),
+            single_band(self.markers, name="RandomWalker markers").astype(
+                np.int32, copy=False
+            ),
             beta=self.beta,
             mode=self.mode,
             tol=self.tol,
@@ -357,14 +465,26 @@ class RandomWalker(Operator):
 
 
 class ExpandLabels(Operator):
-    """Grow label regions by a fixed pixel distance without overlap."""
+    """Grow label regions by a fixed pixel distance without overlap.
+
+    Wraps :func:`skimage.segmentation.expand_labels`. Expects a
+    single-band ``(H, W)`` or ``(1, H, W)`` integer label map. Accepts a
+    ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32``
+    label map in the same carrier kind.
+
+    Args:
+        distance: Euclidean distance (in pixels) by which each labelled
+            region is grown into the background.
+    """
 
     def __init__(self, *, distance: float = 1.0) -> None:
         self.distance = distance
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         labels = expand_labels(
-            _single_band(np.asarray(gt)).astype(np.int32, copy=False),
+            single_band(np.asarray(gt), name="ExpandLabels").astype(
+                np.int32, copy=False
+            ),
             distance=self.distance,
         )
         return _labels(gt, labels)
@@ -403,14 +523,14 @@ def _bbox_iou(
 
 
 def _merge_nearby_instances(
-    labels: np.ndarray,
+    labels: Num[np.ndarray, "h w"],
     *,
     distance_threshold: float,
     iou_threshold_min: float,
     iou_threshold_max: float,
     classes: Mapping[int, int] | None,
     start_label: int,
-) -> np.ndarray:
+) -> Int[np.ndarray, "h w"]:
     """Merge instance labels whose bboxes are close and partially overlap.
 
     Connectivity rule (from Pérez Carrasco et al. 2026):
@@ -516,6 +636,9 @@ class MergeNearbyInstances(Operator):
         classes: Optional ``{instance_label: class_id}`` mapping; when
             provided, only same-class pairs are eligible to merge.
         start_label: Starting integer label for the relabeled output.
+
+    Accepts a single-band ``GeoTensor`` or a plain ``np.ndarray`` label
+    map and returns an ``int32`` label map in the same carrier kind.
     """
 
     def __init__(
@@ -539,8 +662,8 @@ class MergeNearbyInstances(Operator):
         self.classes = None if classes is None else dict(classes)
         self.start_label = int(start_label)
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
-        labels_in = _single_band(np.asarray(gt))
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+        labels_in = single_band(np.asarray(gt), name="MergeNearbyInstances")
         merged = _merge_nearby_instances(
             labels_in,
             distance_threshold=self.distance_threshold,
@@ -549,7 +672,7 @@ class MergeNearbyInstances(Operator):
             classes=self.classes,
             start_label=self.start_label,
         )
-        return gt.array_as_geotensor(merged.astype(np.int32, copy=False))
+        return wrap_like(gt, merged.astype(np.int32, copy=False))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -562,11 +685,11 @@ class MergeNearbyInstances(Operator):
 
 
 def _mask_nms(
-    masks: np.ndarray,
-    scores: np.ndarray | None,
+    masks: Num[np.ndarray, "n h w"] | Bool[np.ndarray, "n h w"],
+    scores: Float[np.ndarray, " n"] | None,
     iou_threshold: float,
     start_label: int,
-) -> np.ndarray:
+) -> Int[np.ndarray, "h w"]:
     """Suppress overlapping mask predictions via mask-IoU and stitch
     survivors into a 2-D label map (suppressed planes -> background).
 
@@ -644,6 +767,9 @@ class MaskNMS(Operator):
         scores: Optional length-``N`` array of per-instance scores. When
             None, instances are ranked by pixel area (largest first).
         start_label: Starting integer label for the renumbered output.
+
+    Accepts a ``GeoTensor`` or a plain ``np.ndarray`` mask stack and
+    returns an ``int32`` label map in the same carrier kind.
     """
 
     def __init__(
@@ -661,7 +787,7 @@ class MaskNMS(Operator):
         self.scores = None if scores is None else np.asarray(scores, dtype=float)
         self.start_label = int(start_label)
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         masks = np.asarray(gt)
         out = _mask_nms(
             masks,
@@ -680,7 +806,21 @@ class MaskNMS(Operator):
 
 
 class MarkBoundaries(Operator):
-    """Overlay segmentation boundaries on an image for visual inspection."""
+    """Overlay segmentation boundaries on an image for visual inspection.
+
+    Wraps :func:`skimage.segmentation.mark_boundaries`. Channel-first
+    inputs are moved to channel-last for skimage and back afterwards.
+    Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns the
+    RGB overlay in the same carrier kind.
+
+    Args:
+        label_img: Single-band integer label map whose region boundaries
+            are drawn; required. Not YAML-serialisable, so instances are
+            forbidden in YAML.
+        color: RGB color (floats in 0-1) of the boundary lines.
+        mode: Boundary style — ``"thick"``, ``"inner"``, ``"outer"`` or
+            ``"subpixel"``.
+    """
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -695,19 +835,21 @@ class MarkBoundaries(Operator):
         self.color = color
         self.mode = mode
 
-    def _apply(self, gt: GeoTensorType) -> GeoTensorType:
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         image = np.asarray(gt)
         if image.ndim == 3:
             image = np.moveaxis(image, 0, -1)
         marked = mark_boundaries(
             image,
-            _single_band(np.asarray(self.label_img)).astype(np.int32, copy=False),
+            single_band(self.label_img, name="MarkBoundaries label_img").astype(
+                np.int32, copy=False
+            ),
             color=self.color,
             mode=self.mode,
         )
         if marked.ndim == 3:
             marked = np.moveaxis(marked, -1, 0)
-        return gt.array_as_geotensor(marked)
+        return wrap_like(gt, marked)
 
     def get_config(self) -> dict[str, Any]:
         return {
