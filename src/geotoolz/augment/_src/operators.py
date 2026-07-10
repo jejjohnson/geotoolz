@@ -9,9 +9,13 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from affine import Affine
+from jaxtyping import Float, Shaped
 from pipekit import Operator
 from rasterio.windows import Window
 from scipy.ndimage import gaussian_filter
+
+from geotoolz._src.config import jsonable
+from geotoolz._src.wrap import wrap_like
 
 
 if TYPE_CHECKING:
@@ -94,18 +98,20 @@ def _sample_nonnegative(
     return sampled
 
 
-def _band_count(arr: np.ndarray) -> int:
+def _band_count(arr: Shaped[np.ndarray, "*dims"]) -> int:
     return int(arr.shape[0]) if arr.ndim >= 3 else 1
 
 
-def _band_shape(arr: np.ndarray) -> tuple[int, ...]:
+def _band_shape(arr: Shaped[np.ndarray, "*dims"]) -> tuple[int, ...]:
     shape = [1] * arr.ndim
     if arr.ndim >= 3:
         shape[0] = arr.shape[0]
     return tuple(shape)
 
 
-def _cast_like(out: np.ndarray, dtype: np.dtype[Any]) -> np.ndarray:
+def _cast_like(
+    out: Shaped[np.ndarray, "*dims"], dtype: np.dtype[Any]
+) -> Shaped[np.ndarray, "*dims"]:
     dtype = np.dtype(dtype)
     if np.issubdtype(dtype, np.bool_):
         # Treat boolean arrays as masks: positive augmented values remain True.
@@ -116,8 +122,9 @@ def _cast_like(out: np.ndarray, dtype: np.dtype[Any]) -> np.ndarray:
     return out.astype(dtype, copy=False)
 
 
-def _wrap_like(gt: GeoTensor, out: np.ndarray) -> GeoTensor:
-    return gt.array_as_geotensor(_cast_like(out, np.asarray(gt).dtype))
+def _wrap_like(gt: GeoTensor | np.ndarray, out: np.ndarray) -> GeoTensor | np.ndarray:
+    """Cast ``out`` back to the input dtype and rewrap it like ``gt``."""
+    return wrap_like(gt, _cast_like(out, np.asarray(gt).dtype))
 
 
 def _new_geotensor(gt: GeoTensor, out: np.ndarray, transform: Affine) -> GeoTensor:
@@ -132,18 +139,6 @@ def _new_geotensor(gt: GeoTensor, out: np.ndarray, transform: Affine) -> GeoTens
     )
 
 
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, tuple):
-        return tuple(float(v) for v in value)
-    if isinstance(value, list):
-        return [_jsonable(v) for v in value]
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
-
-
 class Compose(Operator):
     """Apply augmentations sequentially with an optional pipeline probability.
 
@@ -156,6 +151,15 @@ class Compose(Operator):
     its ``get_config()``; ``forbid_in_yaml`` is set because the constructor
     accepts arbitrary ``Operator`` instances which a YAML loader cannot
     re-instantiate without an explicit registry.
+
+    The carrier is whatever the children accept: a plain ``np.ndarray``
+    input passes through unchanged when the probability check skips the
+    pipeline, and is otherwise handed to the children as-is.
+
+    Args:
+        augmentations: Operators applied in order.
+        p: Probability of applying the whole pipeline. Default ``1.0``.
+        seed: Default seed used when no per-call ``seed`` is given.
 
     Examples:
         >>> import geotoolz as gz
@@ -180,7 +184,9 @@ class Compose(Operator):
         self.p = p
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         if rng.random() >= self.p:
             return gt
@@ -209,6 +215,15 @@ class RandomFlip(Operator):
     pixel grid still maps to the same physical extent. Each axis flips
     independently with probability ``p_horizontal`` / ``p_vertical``.
 
+    The pixel math is metadata-free, so a plain ``np.ndarray`` input is
+    also accepted and returns the flipped plain array (no transform
+    bookkeeping).
+
+    Args:
+        p_horizontal: Probability of flipping the last (x) axis.
+        p_vertical: Probability of flipping the second-to-last (y) axis.
+        seed: Default seed used when no per-call ``seed`` is given.
+
     Examples:
         >>> import geotoolz as gz
         >>> op = gz.augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)
@@ -227,26 +242,33 @@ class RandomFlip(Operator):
         self.p_vertical = p_vertical
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         arr = np.asarray(gt)
         out = arr
-        transform = gt.transform
+        transform = getattr(gt, "transform", None)
+        height, width = arr.shape[-2], arr.shape[-1]
 
         if rng.random() < self.p_horizontal:
             out = np.flip(out, axis=-1)
-            transform = (
-                transform * Affine.translation(gt.width - 1, 0) * Affine.scale(-1, 1)
-            )
+            if transform is not None:
+                transform = (
+                    transform * Affine.translation(width - 1, 0) * Affine.scale(-1, 1)
+                )
 
         if rng.random() < self.p_vertical:
             out = np.flip(out, axis=-2)
-            transform = (
-                transform * Affine.translation(0, gt.height - 1) * Affine.scale(1, -1)
-            )
+            if transform is not None:
+                transform = (
+                    transform * Affine.translation(0, height - 1) * Affine.scale(1, -1)
+                )
 
         if out is arr:
             return gt
+        if transform is None:
+            return out
         return _new_geotensor(gt, out, transform)
 
     def get_config(self) -> dict[str, Any]:
@@ -264,6 +286,15 @@ class RandomRotate90(Operator):
     ``transform`` with the matching rigid rotation so the upper-left output
     pixel still maps to the correct world coordinate.
 
+    The pixel math is metadata-free, so a plain ``np.ndarray`` input is
+    also accepted and returns the rotated plain array (no transform
+    bookkeeping).
+
+    Args:
+        p: Probability of rotating; when triggered, k is drawn uniformly
+            from {1, 2, 3} quarter-turns.
+        seed: Default seed used when no per-call ``seed`` is given.
+
     Examples:
         >>> import geotoolz as gz
         >>> op = gz.augment.RandomRotate90(p=1.0, seed=0)
@@ -275,7 +306,9 @@ class RandomRotate90(Operator):
         self.p = p
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         if rng.random() >= self.p:
             return gt
@@ -283,8 +316,11 @@ class RandomRotate90(Operator):
         k = int(rng.integers(1, 4))
         arr = np.asarray(gt)
         out = np.rot90(arr, k=k, axes=(-2, -1))
-        transform = _rot90_transform(gt.transform, gt.height, gt.width, k)
-        return _new_geotensor(gt, out, transform)
+        transform = getattr(gt, "transform", None)
+        if transform is None:
+            return out
+        height, width = arr.shape[-2], arr.shape[-1]
+        return _new_geotensor(gt, out, _rot90_transform(transform, height, width, k))
 
     def get_config(self) -> dict[str, Any]:
         return {"p": self.p, "seed": self.seed}
@@ -311,6 +347,13 @@ class RandomCrop(Operator):
     upper-left world coordinate). CRS, dtype and band metadata are
     preserved.
 
+    The crop itself is pixel-space math, so a plain ``np.ndarray`` input
+    is also accepted and returns the cropped plain array.
+
+    Args:
+        size: ``(height, width)`` of the cropped window in pixels.
+        seed: Default seed used when no per-call ``seed`` is given.
+
     Examples:
         >>> import geotoolz as gz
         >>> op = gz.augment.RandomCrop(size=(3, 4), seed=0)
@@ -323,22 +366,44 @@ class RandomCrop(Operator):
         self.size = size
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         crop_h, crop_w = self.size
-        if crop_h > gt.height or crop_w > gt.width:
+        arr = np.asarray(gt)
+        height, width = arr.shape[-2], arr.shape[-1]
+        if crop_h > height or crop_w > width:
             raise ValueError("size must fit within the GeoTensor spatial shape.")
 
         rng = _rng(_seed(self.seed, seed))
-        top = int(rng.integers(0, gt.height - crop_h + 1))
-        left = int(rng.integers(0, gt.width - crop_w + 1))
-        return gt.isel({"y": slice(top, top + crop_h), "x": slice(left, left + crop_w)})
+        top = int(rng.integers(0, height - crop_h + 1))
+        left = int(rng.integers(0, width - crop_w + 1))
+        isel = getattr(gt, "isel", None)
+        if isel is not None:
+            return isel(
+                {"y": slice(top, top + crop_h), "x": slice(left, left + crop_w)}
+            )
+        return arr[..., top : top + crop_h, left : left + crop_w]
 
     def get_config(self) -> dict[str, Any]:
-        return {"size": _jsonable(self.size), "seed": self.seed}
+        return {"size": jsonable(self.size), "seed": self.seed}
 
 
 class RandomShift(Operator):
-    """Randomly shift a fixed-size spatial window in pixel units."""
+    """Randomly shift a fixed-size spatial window in pixel units.
+
+    Delegates to ``gt.read_from_window(..., boundless=True)`` so pixels
+    shifted in from outside the original extent are padded with the
+    carrier's ``fill_value_default`` and the transform tracks the new
+    window origin. Geo-dependent: requires a georeferenced ``GeoTensor``
+    input; a plain array raises ``TypeError``.
+
+    Args:
+        max_shift: ``(max_dy, max_dx)`` maximum absolute shift per axis,
+            in pixels. Each shift is drawn uniformly from
+            ``[-max, +max]``.
+        seed: Default seed used when no per-call ``seed`` is given.
+    """
 
     def __init__(self, max_shift: tuple[int, int], seed: int | None = None) -> None:
         if max_shift[0] < 0 or max_shift[1] < 0:
@@ -347,6 +412,11 @@ class RandomShift(Operator):
         self.seed = seed
 
     def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+        if not hasattr(gt, "read_from_window"):
+            raise TypeError(
+                "RandomShift requires a georeferenced GeoTensor input; "
+                "got a plain array"
+            )
         max_y, max_x = self.max_shift
         rng = _rng(_seed(self.seed, seed))
         dy = int(rng.integers(-max_y, max_y + 1)) if max_y else 0
@@ -357,11 +427,23 @@ class RandomShift(Operator):
         return gt.read_from_window(window, boundless=True)
 
     def get_config(self) -> dict[str, Any]:
-        return {"max_shift": _jsonable(self.max_shift), "seed": self.seed}
+        return {"max_shift": jsonable(self.max_shift), "seed": self.seed}
 
 
 class BrightnessJitter(Operator):
-    """Scale reflectance values by a sampled scalar or per-band factor."""
+    """Scale reflectance values by a sampled scalar or per-band factor.
+
+    Pure per-pixel math: accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` and returns the same carrier kind, cast back to the
+    input dtype.
+
+    Args:
+        factor: ``(lo, hi)`` range the multiplicative factor is drawn
+            from. Default ``(0.9, 1.1)``.
+        per_band: Draw an independent factor per band (leading axis)
+            instead of one shared factor. Default ``True``.
+        seed: Default seed used when no per-call ``seed`` is given.
+    """
 
     def __init__(
         self,
@@ -374,7 +456,9 @@ class BrightnessJitter(Operator):
         self.per_band = per_band
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         arr = np.asarray(gt)
         if self.per_band:
@@ -386,14 +470,26 @@ class BrightnessJitter(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "factor": _jsonable(self.factor),
+            "factor": jsonable(self.factor),
             "per_band": self.per_band,
             "seed": self.seed,
         }
 
 
 class ContrastJitter(Operator):
-    """Scale deviations from the per-band spatial mean."""
+    """Scale deviations from the per-band spatial mean.
+
+    Pure per-pixel math: accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` and returns the same carrier kind, cast back to the
+    input dtype.
+
+    Args:
+        factor: ``(lo, hi)`` range the contrast factor is drawn from.
+            Default ``(0.9, 1.1)``.
+        per_band: Draw an independent factor per band (leading axis)
+            instead of one shared factor. Default ``True``.
+        seed: Default seed used when no per-call ``seed`` is given.
+    """
 
     def __init__(
         self,
@@ -406,7 +502,9 @@ class ContrastJitter(Operator):
         self.per_band = per_band
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         arr = np.asarray(gt)
         data = arr.astype(np.float64, copy=False)
@@ -420,14 +518,26 @@ class ContrastJitter(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "factor": _jsonable(self.factor),
+            "factor": jsonable(self.factor),
             "per_band": self.per_band,
             "seed": self.seed,
         }
 
 
 class GaussianNoise(Operator):
-    """Add zero-mean Gaussian sensor noise."""
+    """Add zero-mean Gaussian sensor noise.
+
+    Pure per-pixel math: accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` and returns the same carrier kind, cast back to the
+    input dtype.
+
+    Args:
+        sigma: Noise standard deviation, either a scalar or a
+            ``(lo, hi)`` range to sample from. Default ``0.01``.
+        per_band: Draw an independent sigma per band (leading axis)
+            instead of one shared sigma. Default ``True``.
+        seed: Default seed used when no per-call ``seed`` is given.
+    """
 
     def __init__(
         self,
@@ -440,7 +550,9 @@ class GaussianNoise(Operator):
         self.per_band = per_band
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         arr = np.asarray(gt)
         if self.per_band:
@@ -457,21 +569,33 @@ class GaussianNoise(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "sigma": _jsonable(self.sigma),
+            "sigma": jsonable(self.sigma),
             "per_band": self.per_band,
             "seed": self.seed,
         }
 
 
 class SpeckleNoise(Operator):
-    """Apply multiplicative Gaussian speckle noise, useful for SAR."""
+    """Apply multiplicative Gaussian speckle noise, useful for SAR.
+
+    Pure per-pixel math: accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` and returns the same carrier kind, cast back to the
+    input dtype.
+
+    Args:
+        sigma: Speckle standard deviation, either a scalar or a
+            ``(lo, hi)`` range to sample from. Default ``0.05``.
+        seed: Default seed used when no per-call ``seed`` is given.
+    """
 
     def __init__(self, sigma: ScalarOrRange = 0.05, seed: int | None = None) -> None:
         _validate_range(sigma, "sigma")
         self.sigma = sigma
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         sigma = _sample_nonnegative(rng, self.sigma, "sigma")
         arr = np.asarray(gt)
@@ -479,11 +603,21 @@ class SpeckleNoise(Operator):
         return _wrap_like(gt, arr.astype(np.float64, copy=False) * (1.0 + noise))
 
     def get_config(self) -> dict[str, Any]:
-        return {"sigma": _jsonable(self.sigma), "seed": self.seed}
+        return {"sigma": jsonable(self.sigma), "seed": self.seed}
 
 
 class BandDropout(Operator):
-    """Fill each band independently with probability ``p``."""
+    """Fill each band independently with probability ``p``.
+
+    Pure per-band math: accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` and returns the same carrier kind. A 2-D input is
+    treated as a single band.
+
+    Args:
+        p: Per-band dropout probability. Default ``0.1``.
+        fill: Value written into dropped bands. Default ``0.0``.
+        seed: Default seed used when no per-call ``seed`` is given.
+    """
 
     def __init__(
         self, p: float = 0.1, fill: float = 0.0, seed: int | None = None
@@ -493,7 +627,9 @@ class BandDropout(Operator):
         self.fill = fill
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         arr = np.asarray(gt)
         out = np.array(arr, copy=True)
@@ -511,7 +647,19 @@ class BandDropout(Operator):
 
 
 class BandJitter(Operator):
-    """Permute bands within explicitly configured groups."""
+    """Permute bands within explicitly configured groups.
+
+    Metadata-dependent: band names are resolved through the carrier's
+    ``attrs`` (``band_names`` / ``bands`` / ``band_descriptions``), so a
+    plain ``np.ndarray`` input (or a GeoTensor without band names)
+    raises ``ValueError`` whenever ``groups`` is non-empty.
+
+    Args:
+        groups: Mapping of group label to the band names (or integer
+            indices) permuted within that group. ``None`` or empty
+            disables the op (identity).
+        seed: Default seed used when no per-call ``seed`` is given.
+    """
 
     def __init__(
         self, groups: dict[str, list[str]] | None = None, seed: int | None = None
@@ -519,7 +667,9 @@ class BandJitter(Operator):
         self.groups = groups
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         if not self.groups:
             return gt
 
@@ -537,12 +687,13 @@ class BandJitter(Operator):
         return _wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
-        return {"groups": _jsonable(self.groups), "seed": self.seed}
+        return {"groups": jsonable(self.groups), "seed": self.seed}
 
 
-def _band_names(gt: GeoTensor) -> Sequence[Any]:
+def _band_names(gt: GeoTensor | np.ndarray) -> Sequence[Any]:
+    attrs = getattr(gt, "attrs", None) or {}
     for key in ("band_names", "bands", "band_descriptions"):
-        names = gt.attrs.get(key)
+        names = attrs.get(key)
         if names is not None:
             return list(names)
     raise ValueError("BandJitter requires band names in GeoTensor attrs.")
@@ -559,7 +710,19 @@ def _band_index(name: str, names: Sequence[Any], n_bands: int) -> int:
 
 
 class SunAngleJitter(Operator):
-    """Rescale TOA reflectance for a simulated solar-zenith change."""
+    """Rescale TOA reflectance for a simulated solar-zenith change.
+
+    Metadata-dependent: the base solar zenith angle is read from the
+    carrier's ``attrs`` (``solar_zenith_angle`` or ``sza_deg``), so a
+    plain ``np.ndarray`` input (or a GeoTensor without those attrs)
+    raises ``ValueError``.
+
+    Args:
+        delta_sza_deg: Solar-zenith perturbation in degrees, either a
+            scalar or a ``(lo, hi)`` range to sample from. Default
+            ``(-5.0, 5.0)``.
+        seed: Default seed used when no per-call ``seed`` is given.
+    """
 
     def __init__(
         self,
@@ -572,7 +735,8 @@ class SunAngleJitter(Operator):
     def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
         rng = _rng(_seed(self.seed, seed))
         delta = _sample_uniform(rng, self.delta_sza_deg, "delta_sza_deg")
-        sza_value = gt.attrs.get("solar_zenith_angle", gt.attrs.get("sza_deg"))
+        attrs = getattr(gt, "attrs", None) or {}
+        sza_value = attrs.get("solar_zenith_angle", attrs.get("sza_deg"))
         if sza_value is None:
             raise ValueError(
                 "SunAngleJitter requires `solar_zenith_angle` or `sza_deg` in "
@@ -588,7 +752,7 @@ class SunAngleJitter(Operator):
         return _wrap_like(gt, np.asarray(gt).astype(np.float64, copy=False) * scale)
 
     def get_config(self) -> dict[str, Any]:
-        return {"delta_sza_deg": _jsonable(self.delta_sza_deg), "seed": self.seed}
+        return {"delta_sza_deg": jsonable(self.delta_sza_deg), "seed": self.seed}
 
 
 class AtmosphericHaze(Operator):
@@ -596,6 +760,15 @@ class AtmosphericHaze(Operator):
 
     Wavelength metadata is interpreted as nanometers, except values below
     ``10`` are treated as micrometers and converted to nanometers.
+    Accepts a ``GeoTensor`` or a plain ``np.ndarray``; when the carrier
+    has no wavelength attrs (``wavelengths_nm`` / ``wavelengths``), a
+    default 450-850 nm linspace is assumed.
+
+    Args:
+        intensity: Haze amplitude added to the shortest wavelength,
+            either a scalar or a ``(lo, hi)`` range to sample from.
+            Default ``(0.0, 0.05)``.
+        seed: Default seed used when no per-call ``seed`` is given.
     """
 
     def __init__(
@@ -604,7 +777,9 @@ class AtmosphericHaze(Operator):
         self.intensity = intensity
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         intensity = _sample_nonnegative(rng, self.intensity, "intensity")
         if intensity == 0.0:
@@ -615,11 +790,14 @@ class AtmosphericHaze(Operator):
         return _wrap_like(gt, arr.astype(np.float64, copy=False) + intensity * weights)
 
     def get_config(self) -> dict[str, Any]:
-        return {"intensity": _jsonable(self.intensity), "seed": self.seed}
+        return {"intensity": jsonable(self.intensity), "seed": self.seed}
 
 
-def _spectral_weights(gt: GeoTensor, n_bands: int) -> np.ndarray:
-    wavelengths = gt.attrs.get("wavelengths_nm", gt.attrs.get("wavelengths"))
+def _spectral_weights(
+    gt: GeoTensor | np.ndarray, n_bands: int
+) -> Float[np.ndarray, " c"]:
+    attrs = getattr(gt, "attrs", None) or {}
+    wavelengths = attrs.get("wavelengths_nm", attrs.get("wavelengths"))
     if wavelengths is None:
         wavelengths = np.linspace(
             DEFAULT_MIN_WAVELENGTH_NM, DEFAULT_MAX_WAVELENGTH_NM, n_bands
@@ -635,7 +813,19 @@ def _spectral_weights(gt: GeoTensor, n_bands: int) -> np.ndarray:
 
 
 class SimulatedClouds(Operator):
-    """Overlay a smooth synthetic cloud field onto reflectance imagery."""
+    """Overlay a smooth synthetic cloud field onto reflectance imagery.
+
+    Pure per-pixel math: accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` and returns the same carrier kind, cast back to the
+    input dtype.
+
+    Args:
+        coverage: Fraction of pixels covered by cloud, either a scalar
+            or a ``(lo, hi)`` range in ``[0, 1]``. Default ``(0.0, 0.3)``.
+        feather: Gaussian smoothing sigma (pixels) applied to the random
+            cloud field; ``0`` disables smoothing. Default ``5``.
+        seed: Default seed used when no per-call ``seed`` is given.
+    """
 
     def __init__(
         self,
@@ -650,7 +840,9 @@ class SimulatedClouds(Operator):
         self.feather = feather
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         coverage = _sample_uniform(rng, self.coverage, "coverage")
         if coverage == 0.0:
@@ -679,7 +871,7 @@ class SimulatedClouds(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "coverage": _jsonable(self.coverage),
+            "coverage": jsonable(self.coverage),
             "feather": self.feather,
             "seed": self.seed,
         }
@@ -694,9 +886,19 @@ class CutMix(Operator):
     different reference frames — which would produce a geographically
     incoherent result even though the pixel grids align.
 
+    Plain ``np.ndarray`` carriers (input and/or donors) are accepted:
+    the rectangle paste is pixel-space math, and the CRS / resolution
+    checks apply only when both the input and the drawn donor expose
+    that metadata.
+
     ``forbid_in_yaml`` is set because ``pool`` holds live ``GeoTensor``
     objects that cannot be round-tripped through YAML. ``get_config`` emits
     only the pool length for debug visibility.
+
+    Args:
+        pool: Donor rasters sampled uniformly at apply time.
+        p: Probability of applying the paste. Default ``0.5``.
+        seed: Default seed used when no per-call ``seed`` is given.
 
     Examples:
         >>> import geotoolz as gz
@@ -707,14 +909,19 @@ class CutMix(Operator):
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
-        self, pool: list[GeoTensor], p: float = 0.5, seed: int | None = None
+        self,
+        pool: list[GeoTensor | np.ndarray],
+        p: float = 0.5,
+        seed: int | None = None,
     ) -> None:
         _check_probability(p, "p")
         self.pool = list(pool)
         self.p = p
         self.seed = seed
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+    ) -> GeoTensor | np.ndarray:
         rng = _rng(_seed(self.seed, seed))
         if not self.pool or rng.random() >= self.p:
             return gt
@@ -724,20 +931,25 @@ class CutMix(Operator):
         donor_arr = np.asarray(donor)
         if donor_arr.shape != arr.shape:
             raise ValueError("CutMix pool GeoTensors must match the input shape.")
-        if donor.crs != gt.crs:
+        if hasattr(donor, "crs") and hasattr(gt, "crs") and donor.crs != gt.crs:
             raise ValueError("CutMix donor CRS must match the input CRS.")
-        if not np.allclose(
-            (abs(donor.transform.a), abs(donor.transform.e)),
-            (abs(gt.transform.a), abs(gt.transform.e)),
+        if (
+            hasattr(donor, "transform")
+            and hasattr(gt, "transform")
+            and not np.allclose(
+                (abs(donor.transform.a), abs(donor.transform.e)),
+                (abs(gt.transform.a), abs(gt.transform.e)),
+            )
         ):
             raise ValueError(
                 "CutMix donor pixel resolution must match the input resolution."
             )
 
-        cut_h = int(rng.integers(1, gt.height + 1))
-        cut_w = int(rng.integers(1, gt.width + 1))
-        top = int(rng.integers(0, gt.height - cut_h + 1))
-        left = int(rng.integers(0, gt.width - cut_w + 1))
+        height, width = arr.shape[-2], arr.shape[-1]
+        cut_h = int(rng.integers(1, height + 1))
+        cut_w = int(rng.integers(1, width + 1))
+        top = int(rng.integers(0, height - cut_h + 1))
+        left = int(rng.integers(0, width - cut_w + 1))
 
         out = np.array(arr, copy=True)
         out[..., top : top + cut_h, left : left + cut_w] = donor_arr[
