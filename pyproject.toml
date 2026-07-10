@@ -27,6 +27,10 @@ dependencies = [
     # available — that's the substrate the two-tier model depends on.
     "georeader-spaceml>=2.1",
     "numpy>=1.26",
+    # Shape/dtype annotations on the Tier-A numpy primitives (the
+    # `Float[np.ndarray, "c h w"]` aliases). Annotation-only usage — no
+    # runtime checking decorators — so the import cost is trivial.
+    "jaxtyping>=0.2.36",
     # Signal windows + numerical primitives used across the radiometry,
     # restore, augment, mask, spectral, and plume operator families.
     "scipy>=1.11",
@@ -156,7 +160,9 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E402", "E721", "E731", "E741"]
+# F722 is disabled per jaxtyping's documented guidance: shape-annotated
+# aliases like `Float[np.ndarray, "c h w"]` parse as forward references.
+ignore = ["E402", "E721", "E731", "E741", "F722"]
 
 [tool.ruff.lint.per-file-ignores]
 # Notebooks render to docs and use Greek/math glyphs (α, σ, ×, →) in

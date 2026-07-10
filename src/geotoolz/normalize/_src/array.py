@@ -10,6 +10,8 @@ from __future__ import annotations
 import numpy as np
 from skimage.exposure import equalize_adapthist
 
+from geotoolz._src.stretch import percentile_stretch
+
 
 def stat_axes(arr: np.ndarray, *, per_band: bool = True) -> tuple[int, ...] | None:
     """Return spatial reduction axes for per-band remote-sensing arrays."""
@@ -110,10 +112,7 @@ def percentile_clip(
         raise ValueError(
             f"upper must be greater than lower; got lower={lower}, upper={upper}"
         )
-    lo = np.nanpercentile(arr, lower, axis=axis, keepdims=True)
-    hi = np.nanpercentile(arr, upper, axis=axis, keepdims=True)
-    denom = np.where(hi > lo, hi - lo, 1.0)
-    return np.clip((arr - lo) / denom, 0.0, 1.0)
+    return percentile_stretch(arr, lower, upper, axis=axis)
 
 
 def histogram_match(source: np.ndarray, reference: np.ndarray) -> np.ndarray:

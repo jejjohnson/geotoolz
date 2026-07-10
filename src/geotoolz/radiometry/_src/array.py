@@ -48,6 +48,8 @@ from typing import Any
 
 import numpy as np
 
+from geotoolz._src.stretch import percentile_stretch
+
 
 def dn_to_radiance(
     dn: np.ndarray,
@@ -233,12 +235,7 @@ def percentile_clip(
         raise ValueError(
             f"percentile_clip requires p_max > p_min; got {p_min=}, {p_max=}"
         )
-    # `keepdims=True` so the lo/hi broadcasts back over the reduced axes.
-    lo = np.percentile(arr, p_min, axis=axis, keepdims=True)
-    hi = np.percentile(arr, p_max, axis=axis, keepdims=True)
-    # Guard the (rare) constant-array degenerate case.
-    denom = np.where(hi > lo, hi - lo, 1.0)
-    return np.clip((arr - lo) / denom, 0.0, 1.0)
+    return percentile_stretch(arr, p_min, p_max, axis=axis)
 
 
 def gamma_correct(arr: np.ndarray, g: float = 1.2) -> np.ndarray:
