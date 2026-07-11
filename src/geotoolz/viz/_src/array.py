@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 
+import einx
 import numpy as np
 from jaxtyping import Float, Int, Num, Shaped, UInt8
 
@@ -353,4 +354,5 @@ def ensure_rgba(
 def _float_rgba_to_uint8(
     rgba: Float[np.ndarray, "h w 4"],
 ) -> UInt8[np.ndarray, "4 h w"]:
-    return np.clip(np.moveaxis(rgba, -1, 0) * 255.0, 0.0, 255.0).astype(np.uint8)
+    channel_first = einx.id("h w c -> c h w", rgba)
+    return np.clip(channel_first * 255.0, 0.0, 255.0).astype(np.uint8)

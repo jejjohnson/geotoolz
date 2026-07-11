@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Literal, cast
 
+import einx
 import numpy as np
 from jaxtyping import Bool, Float, Num, Shaped
 from scipy import ndimage
@@ -412,7 +413,8 @@ def fit_pca(
     centered = filled - means
     u, s, _ = np.linalg.svd(centered, full_matrices=False)
     components = u[:, :keep]
-    scores = components.T @ centered
+    # Project the centered (bands, pixels) data onto the components.
+    scores = einx.dot("c k, c n -> k n", components, centered)
     return {
         "scores": scores.reshape((keep, *moved.shape[1:])),
         "components": components,
@@ -444,7 +446,7 @@ def inverse_pca(
     shape = cast(tuple[int, ...], state["shape"])
     axis = int(state["axis"])
     flat_scores = np.asarray(scores, dtype=float).reshape(components.shape[1], -1)
-    restored = components @ flat_scores + mean
+    restored = einx.dot("c k, k n -> c n", components, flat_scores) + mean
     nan_mask = np.asarray(state["nan_mask"])
     restored = np.where(nan_mask, np.nan, restored)
     moved_shape = np.moveaxis(np.empty(shape), axis, 0).shape
