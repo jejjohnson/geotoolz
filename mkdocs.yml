@@ -53,6 +53,7 @@ nav:
   - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
   - Module guides:
       - Normalization: normalization.md
+      - Patching (tile / stitch / sample): patch_ops.md
       - Multi-format readers: io.md
       - Adding a sensor reader: readers.md
   - API Reference:
