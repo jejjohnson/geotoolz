@@ -8,10 +8,6 @@ we reach for constantly in RS pipelines — channel-order flips, per-band
 reductions, and spatial pooling (the one op that *updates* the
 geotransform instead of preserving or dropping it).
 
-Optional extra: ``pip install 'geotoolz[einx]'``. Importing this module
-without einx installed raises a friendly ``ImportError`` naming the
-extra, mirroring ``geotoolz.patch_ops``.
-
 Design notes (geotoolz issue #69):
 
 - Arrays are unwrapped with ``np.asarray`` *before* reaching einx, so
@@ -27,21 +23,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import einx as _einx
 import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import jsonable
 from geotoolz._src.wrap import wrap_like
 from geotoolz.einx._src.array import spatial_survives
-
-
-try:
-    import einx as _einx
-except ImportError as _e:  # pragma: no cover - exercised when [einx] is missing
-    raise ImportError(
-        "geotoolz.einx requires the `einx` package. "
-        "Install with `pip install 'geotoolz[einx]'` (or `pip install einx`)."
-    ) from _e
 
 
 if TYPE_CHECKING:

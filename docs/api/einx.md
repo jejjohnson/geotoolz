@@ -1,8 +1,10 @@
 # Einx
 
 `geotoolz.einx` wraps [einx](https://github.com/fferflo/einx) — universal
-einstein-notation tensor ops — as carrier-aware Operators. Requires the
-`[einx]` extra: `pip install 'geotoolz[einx]'`.
+einstein-notation tensor ops — as carrier-aware Operators. einx is a core
+dependency: the same notation also powers the internal linear algebra of
+the Tier-A primitives (covariance products, matched-filter scoring, PCA
+projections, channel-order flips).
 
 The **spatial-survival rule** decides what a pattern does to geospatial
 metadata: if the output expression ends in the bare spatial axes
@@ -33,7 +35,7 @@ coarse = gz.SpatialPool(reduce="mean", factor=4)          # transform rescaled
 
 ## Pattern analysis
 
-These helpers are pure string processing — importable without the extra.
+These helpers are pure string processing over pattern text.
 
 ::: geotoolz.einx.spatial_survives
 

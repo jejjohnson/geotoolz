@@ -54,6 +54,7 @@ from geotoolz import (
     augment,
     cloud,
     compositing,
+    einx,
     feature,
     geom,
     indices,
@@ -97,6 +98,13 @@ from geotoolz.compositing import (
     MedianComposite,
     MinCloudComposite,
     StackMatched,
+)
+from geotoolz.einx import (
+    CHWtoHWC,
+    Einx,
+    HWCtoCHW,
+    PerBandReduce,
+    SpatialPool,
 )
 from geotoolz.feature import (
     HOG,
@@ -370,34 +378,6 @@ from geotoolz.viz import (
     ToDisplayRange,
     TrueColor,
 )
-
-
-# Extras-gated operator families resolve lazily so `import geotoolz`
-# never requires an optional dependency. Mapping: public name -> module.
-_LAZY_EXTRAS = {
-    "Einx": "geotoolz.einx",
-    "CHWtoHWC": "geotoolz.einx",
-    "HWCtoCHW": "geotoolz.einx",
-    "PerBandReduce": "geotoolz.einx",
-    "SpatialPool": "geotoolz.einx",
-    "einx": "geotoolz.einx",
-}
-
-
-def __getattr__(name: str):
-    """Lazy import for extras-gated names (the [einx] operator family).
-
-    The target module raises a friendly ImportError naming the extra
-    when its optional dependency is missing.
-    """
-    if name in _LAZY_EXTRAS:
-        import importlib
-
-        module = importlib.import_module(_LAZY_EXTRAS[name])
-        attr = module if name == "einx" else getattr(module, name)
-        globals()[name] = attr
-        return attr
-    raise AttributeError(f"module 'geotoolz' has no attribute {name!r}")
 
 
 __version__ = "0.1.0"

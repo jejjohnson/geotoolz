@@ -59,6 +59,12 @@ dependencies = [
     "pipekit>=0.0.1",
     "scikit-learn>=1.4",
     "joblib>=1.3",
+    # Universal tensor-notation layer: the `geotoolz.einx` operator
+    # family AND the internal linear algebra of the Tier-A primitives
+    # (matched_filter covariance/scoring, restore PCA, SRF fill
+    # propagation, static channel-order flips) are expressed as einx
+    # patterns. >=0.4 for the non-deprecated `einx.id` entry point.
+    "einx>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -67,10 +73,6 @@ dependencies = [
 # get_config() / __repr__ without hydra — this extra is only needed if
 # you want `builds()` / `instantiate()` from YAML.
 hydra = ["hydra-zen>=0.14"]
-# Universal tensor-notation layer for the `geotoolz.einx` operator
-# family (see issue #69). >=0.4 for the non-deprecated `einx.id`
-# entry point the presets use.
-einx = ["einx>=0.4"]
 # The four-axis Patcher framework lives in its own package now; pull it
 # in (with its `[pipekit]` extra so `geopatcher.integrations.pipekit` is
 # importable — the same wrappers ship from both locations) and use

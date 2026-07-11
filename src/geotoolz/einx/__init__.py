@@ -11,10 +11,11 @@ rule decides what happens to geospatial metadata:
 - `SpatialPool` is the deliberate exception: it *rescales* the
   transform to the pooled grid.
 
-Requires the ``[einx]`` extra (``pip install 'geotoolz[einx]'``);
-importing this module without it raises a friendly ``ImportError``.
-The pattern-analysis helpers (`spatial_survives`, `output_axes`) have
-no einx dependency and live in ``geotoolz.einx._src.array``.
+einx is a core dependency — the same notation also powers the internal
+linear algebra of the Tier-A primitives (covariance/Gram products,
+matched-filter scoring, PCA projections, static channel-order flips).
+The pattern-analysis helpers (`spatial_survives`, `output_axes`) are
+pure string processing and live in ``geotoolz.einx._src.array``.
 """
 
 from __future__ import annotations

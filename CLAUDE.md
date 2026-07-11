@@ -58,10 +58,12 @@ Top-level re-export policy: every public Operator class is available at
 name collisions the domain-canonical class wins the top-level name
 (`ApplySRF` → radiometry, `NormalizedDifference` → indices).
 
-Extras-gated operator families resolve lazily at the top level via
-`__getattr__` (`geotoolz.einx` — the `[einx]` universal-tensor-notation
-family — is the first); importing `geotoolz` never requires an optional
-dependency.
+`geotoolz.einx` is the universal-tensor-notation family (einx is a
+core dependency): carrier-aware `Einx` + presets at the top level, and
+the same einx patterns express the internal linear algebra of the
+Tier-A primitives — prefer `einx.dot` / `einx.id` over `@`, `.T`,
+`np.einsum`, or static-layout `np.moveaxis` in new numerical code
+(dynamic-axis utilities may keep `np.moveaxis`).
 
 Deprecated compatibility aliases (do not add new code under them):
 `geotoolz.cloud` (contents moved: extraction → `geotoolz.qa`,
