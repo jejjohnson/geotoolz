@@ -32,6 +32,9 @@ three groups:
 Shape conventions (mirrored in the jaxtyping annotations): cubes are
 ``(c, h, w)``, vectorised sample matrices are ``(n, c)``, covariance
 matrices are ``(c, c)``, and mean / target spectra are ``(c,)``.
+Linear algebra is expressed via einx dot patterns over this axis
+vocabulary (samples ``n``, bands ``c`` — with ``d``/``k`` as second
+band/rank axes) rather than raw ``@`` / ``.T`` notation.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+import einx
 import numpy as np
 from jaxtyping import Float, Int
 from scipy import ndimage, stats
@@ -219,7 +223,7 @@ class WelfordAccumulator:
         self.m2 = (
             self.m2
             + other.m2
-            + np.outer(delta, delta) * (self.count * other.count / total)
+            + einx.dot("c, d -> c d", delta, delta) * (self.count * other.count / total)
         )
         self.mean = self.mean + delta * (other.count / total)
         self.count = total
@@ -241,7 +245,11 @@ class WelfordAccumulator:
             return cls.empty(x.shape[1])
         mean = np.mean(x, axis=0)
         centered = x - mean
-        return cls(count=x.shape[0], mean=mean, m2=centered.T @ centered)
+        return cls(
+            count=x.shape[0],
+            mean=mean,
+            m2=einx.dot("n c, n d -> c d", centered, centered),
+        )
 
     def covariance(
         self, *, ddof: int = 1, ridge: float = 0.0
@@ -379,7 +387,7 @@ def estimate_cov_empirical(
     mu = np.mean(x, axis=0) if mean is None else _as_vector(mean, x.shape[1], "mean")
     centered = x - mu
     denom = max(x.shape[0] - 1, 1)
-    cov = centered.T @ centered / denom
+    cov = einx.dot("n c, n d -> c d", centered, centered) / denom
     if ridge:
         cov = cov + float(ridge) * np.eye(cov.shape[0], dtype=float)
     return NumpyLinearOperator(cov)
@@ -420,7 +428,7 @@ def estimate_cov_shrunk(
     mu = np.mean(x, axis=0) if mean is None else _as_vector(mean, x.shape[1], "mean")
     centered = x - mu
     denom = max(x.shape[0] - 1, 1)
-    empirical = centered.T @ centered / denom
+    empirical = einx.dot("n c, n d -> c d", centered, centered) / denom
     return NumpyLinearOperator(
         shrink_covariance(empirical, method=method, n_samples=x.shape[0])
     )
@@ -545,11 +553,15 @@ def estimate_cov_lowrank(
     sample_rank = min(rank + n_oversamples, n_features)
     rng = np.random.default_rng(random_state)
     omega = rng.normal(size=(n_features, sample_rank))
-    basis, _ = np.linalg.qr(empirical @ omega, mode="reduced")
-    u_hat, s, _ = np.linalg.svd(basis.T @ empirical, full_matrices=False)
-    u = basis @ u_hat
+    basis, _ = np.linalg.qr(
+        einx.dot("c d, d k -> c k", empirical, omega), mode="reduced"
+    )
+    u_hat, s, _ = np.linalg.svd(
+        einx.dot("c k, c d -> k d", basis, empirical), full_matrices=False
+    )
+    u = einx.dot("c k, k d -> c d", basis, u_hat)
     k = min(rank, s.shape[0])
-    cov = (u[:, :k] * s[:k]) @ u[:, :k].T
+    cov = einx.dot("c k, d k -> c d", u[:, :k] * s[:k], u[:, :k])
     cov = cov + float(tikhonov) * np.eye(cov.shape[0], dtype=float)
     return NumpyLinearOperator(cov)
 
@@ -590,10 +602,11 @@ def apply_pixel(
     mean_vec = _as_vector(mean, np.asarray(pixel).shape[0], "mean")
     target_vec = _as_vector(target, mean_vec.shape[0], "target")
     solved_target = solve(cov_op, target_vec)
-    denom = float(target_vec @ solved_target)
+    denom = float(einx.dot("c, c ->", target_vec, solved_target))
     if not np.isfinite(denom) or denom <= 0:
         raise ValueError("target/covariance produce a non-positive MF denominator")
-    return float((np.asarray(pixel, dtype=float) - mean_vec) @ solved_target / denom)
+    centered = np.asarray(pixel, dtype=float) - mean_vec
+    return float(einx.dot("c, c ->", centered, solved_target) / denom)
 
 
 def apply_image(
@@ -632,10 +645,10 @@ def apply_image(
     mean_vec = _as_vector(mean, x.shape[1], "mean")
     target_vec = _as_vector(target, x.shape[1], "target")
     solved_target = solve(cov_op, target_vec)
-    denom = float(target_vec @ solved_target)
+    denom = float(einx.dot("c, c ->", target_vec, solved_target))
     if not np.isfinite(denom) or denom <= 0:
         raise ValueError("target/covariance produce a non-positive MF denominator")
-    scores = (x - mean_vec) @ solved_target / denom
+    scores = einx.dot("n c, c -> n", x - mean_vec, solved_target) / denom
     return scores.reshape(spatial_shape)
 
 
@@ -665,7 +678,7 @@ def matched_filter_snr(
             non-positive filter gain.
     """
     t = np.asarray(target, dtype=float).reshape(-1)
-    gain = float(t @ solve(cov_op, t))
+    gain = float(einx.dot("c, c ->", t, solve(cov_op, t)))
     if not np.isfinite(gain) or gain <= 0:
         raise ValueError("target/covariance produce a non-positive MF gain")
     return float(amplitude) * float(np.sqrt(gain))
@@ -729,7 +742,7 @@ def validate_mf_inputs(
     if t.size == 0 or not np.any(t):
         raise ValueError("target must contain at least one non-zero value")
     try:
-        gain = float(t @ solve(cov_op, t))
+        gain = float(einx.dot("c, c ->", t, solve(cov_op, t)))
     except np.linalg.LinAlgError as exc:
         raise ValueError("covariance operator must be non-singular") from exc
     if not np.isfinite(gain) or gain <= 0:
@@ -865,12 +878,15 @@ def apply_cluster_mf(
         mask = labels == k
         if np.any(mask):
             solved_target = solve(cov_op, target_vec)
-            denom = float(target_vec @ solved_target)
+            denom = float(einx.dot("c, c ->", target_vec, solved_target))
             if not np.isfinite(denom) or denom <= 0:
                 raise ValueError(
                     "target/covariance produce a non-positive MF denominator"
                 )
-            scores[mask] = (x[mask] - cluster.means[k]) @ solved_target / denom
+            scores[mask] = (
+                einx.dot("n c, c -> n", x[mask] - cluster.means[k], solved_target)
+                / denom
+            )
     return scores.reshape(spatial_shape)
 
 
@@ -975,7 +991,7 @@ def _cov_from_samples(
 ) -> Float[np.ndarray, "c c"]:
     centered = values - mean
     denom = max(values.shape[0] - 1, 1)
-    cov = centered.T @ centered / denom
+    cov = einx.dot("n c, n d -> c d", centered, centered) / denom
     if ridge:
         cov = cov + ridge * np.eye(cov.shape[0], dtype=float)
     return cov
@@ -1055,7 +1071,7 @@ def _gmm_labels(
             variances[empty] = values.var(axis=0) + GMM_VARIANCE_RIDGE
             counts[empty] = 1.0
         weights = counts / counts.sum()
-        means = responsibilities.T @ values / counts[:, None]
+        means = einx.dot("n k, n c -> k c", responsibilities, values) / counts[:, None]
         centered = values[:, None, :] - means[None, :, :]
         variances = (responsibilities[:, :, None] * centered * centered).sum(
             axis=0
