@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import einx
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -493,7 +494,7 @@ class MultiscaleBasicFeatures(Operator):
             sigma_max=self.sigma_max,
             channel_axis=None,
         )
-        return wrap_like(gt, np.moveaxis(features, -1, 0))
+        return wrap_like(gt, einx.id("h w f -> f h w", features))
 
     def get_config(self) -> dict[str, Any]:
         return {

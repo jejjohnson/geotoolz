@@ -60,6 +60,7 @@ nav:
       - Augment: api/augment.md
       - Cloud: api/cloud.md
       - Compositing: api/compositing.md
+      - Einx: api/einx.md
       - Feature: api/feature.md
       - Geometry: api/geom.md
       - Indices: api/indices.md

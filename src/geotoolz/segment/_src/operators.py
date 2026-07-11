@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import einx
 import numpy as np
 from jaxtyping import Bool, Float, Int, Num
 from pipekit import Operator
@@ -838,7 +839,7 @@ class MarkBoundaries(Operator):
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         image = np.asarray(gt)
         if image.ndim == 3:
-            image = np.moveaxis(image, 0, -1)
+            image = einx.id("c h w -> h w c", image)
         marked = mark_boundaries(
             image,
             single_band(self.label_img, name="MarkBoundaries label_img").astype(
@@ -848,7 +849,7 @@ class MarkBoundaries(Operator):
             mode=self.mode,
         )
         if marked.ndim == 3:
-            marked = np.moveaxis(marked, -1, 0)
+            marked = einx.id("h w c -> c h w", marked)
         return wrap_like(gt, marked)
 
     def get_config(self) -> dict[str, Any]:

@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import einx
 import numpy as np
 import pandas as pd
 from georeader.reflectance import (
@@ -786,8 +787,8 @@ class ApplySRF(Operator):
             support = self._source_band_support(srf_df, source_wavelengths)
             # invalid[j, h, w] = any contributing source band is fill
             invalid = (
-                np.einsum(
-                    "ji,ihw->jhw",
+                einx.dot(
+                    "j i, i h w -> j h w",
                     support.astype(np.int64),
                     src_invalid.astype(np.int64),
                 )

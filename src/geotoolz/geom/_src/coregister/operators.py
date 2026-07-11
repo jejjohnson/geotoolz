@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
+import einx
 import numpy as np
 from pipekit import Operator
 
@@ -474,8 +475,8 @@ class PointsToRaster(Operator):
             xs, ys, values, statistic=self.stat, bins=[x_edges_sorted, y_edges_sorted]
         )
         # `binned_statistic_2d` returns shape (n_x_bins, n_y_bins);
-        # transpose to (H, W) raster convention, with rows = y.
-        result = stat_out.T
+        # swap to (H, W) raster convention, with rows = y.
+        result = einx.id("x y -> y x", stat_out)
         if flip_y:
             result = result[::-1, :]
         if flip_x:
@@ -941,7 +942,8 @@ def _point_cloud_binned_stat(
         statistic=stat,
         bins=[x_edges_sorted, y_edges_sorted],
     )
-    result = stat_out.T
+    # (n_x_bins, n_y_bins) -> (H, W) raster convention, with rows = y.
+    result = einx.id("x y -> y x", stat_out)
     if flip_y:
         result = result[::-1, :]
     if flip_x:
