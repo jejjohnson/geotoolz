@@ -67,6 +67,10 @@ dependencies = [
 # get_config() / __repr__ without hydra — this extra is only needed if
 # you want `builds()` / `instantiate()` from YAML.
 hydra = ["hydra-zen>=0.14"]
+# Universal tensor-notation layer for the `geotoolz.einx` operator
+# family (see issue #69). >=0.4 for the non-deprecated `einx.id`
+# entry point the presets use.
+einx = ["einx>=0.4"]
 # The four-axis Patcher framework lives in its own package now; pull it
 # in (with its `[pipekit]` extra so `geopatcher.integrations.pipekit` is
 # importable — the same wrappers ship from both locations) and use
