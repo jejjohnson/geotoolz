@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/jejjohnson/geotoolz/compare/v0.1.0...v0.1.1) (2026-07-11)
+
+
+### Features
+
+* **einx:** universal tensor-notation operators (issue [#69](https://github.com/jejjohnson/geotoolz/issues/69), phases 0-1) ([#93](https://github.com/jejjohnson/geotoolz/issues/93)) ([4697956](https://github.com/jejjohnson/geotoolz/commit/46979569e6e42f5b5f11ac402f5d5ba8061ae7ea))
+* **patch_ops:** label-aware chip samplers + train-tile/inference-stitch docs ([#95](https://github.com/jejjohnson/geotoolz/issues/95)) ([7a95e1d](https://github.com/jejjohnson/geotoolz/commit/7a95e1d4bd53c42ec73c909cb18294d708811a01))
+
 ## [0.1.0](https://github.com/jejjohnson/geotoolz/compare/v0.0.6...v0.1.0) (2026-06-10)
 
 
