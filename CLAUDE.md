@@ -4,108 +4,107 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`geotoolz` is a composable Operator library for remote sensing, sitting on top of `georeader.GeoTensor`. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework — `geotoolz` is a direct consumer that re-exports the common names at the top level and adds the RS-specific operator families (radiometry, spectral indices, cloud masking, sampling, tiled inference, sensor presets). Two-tier model: jaxtyped numpy primitives in `_src/array.py` per module (shape aliases like `Float[np.ndarray, "c h w"]`, annotation-only — no runtime checking), carrier-aware `pipekit.Operator` subclasses in `_src/operators.py`. Operators accept either a `GeoTensor` or a plain `np.ndarray` and return the same carrier kind (`geotoolz._src.wrap.wrap_like`); genuinely geo-dependent ops (reprojection, rasterisation, footprint math) require a GeoTensor and raise a clear `TypeError` on plain arrays. Built with Python 3.12+, uv, pytest, and MkDocs. See the design report in `research_journal_v2/notes/geotoolz/plans/geotoolz/geotoolz.md`.
+`geotoolz` is a uv workspace of three packages that together provide a
+composable remote-sensing stack on top of `georeader.GeoTensor`, with the
+Operator / Sequential / Graph composition core supplied by the external
+[`pipekit`](https://github.com/jejjohnson/pipekit) framework. Built with
+Python 3.12+, uv, pytest, and MkDocs.
 
-The four-axis Patcher framework that used to live at `geotoolz.patch` now ships as its own package: [`geopatcher`](https://github.com/jejjohnson/geopatcher). Install with the `[patch]` extra (`pip install 'geotoolz[patch]'`), which pulls in `geopatcher[pipekit]` and exposes the Operator-graph bridge (`GridSampler`, `ApplyToChips`, `Stitch`) at both `geotoolz.patch_ops` and `geopatcher.integrations.pipekit` — both module paths return the same classes; pick whichever reads better in your code.
+The packages (distribution name → import name):
+
+| Package            | Import       | Purpose                                                                 |
+|--------------------|--------------|-------------------------------------------------------------------------|
+| `geotoolz`         | `geotoolz`   | RS operator families (radiometry, indices, qa/mask, geom, readers, einx, patch_ops bridge, …) |
+| `geotoolz-patcher` | `geopatcher` | Four-axis Patcher framework (Geometry × Sampler × Window × Aggregation over a `Field` protocol) |
+| `geotoolz-catalog` | `geocatalog` | Queryable spatiotemporal index (GeoSlice contract, in-memory + DuckDB backends, GeoParquet interchange, sources/matchup/staging) |
+
+Import names are unchanged from the pre-monorepo repos (`import geopatcher`,
+`import geocatalog`) — only the distribution names carry the `geotoolz-`
+prefix. Cross-package wiring: `geotoolz[patch]` → `geotoolz-patcher[pipekit]`;
+`geotoolz-catalog[patch]` → `geotoolz-patcher` (for `staging.field_for`);
+soft imports (obstore pools) resolve when co-installed. The workspace root
+ships no code — the top-level `pyproject.toml` only configures
+`[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups.
 
 ## Common Commands
 
 ```bash
-make install              # Install all deps (uv sync --all-groups) + pre-commit hooks
-make test                 # Fast tier: pytest -m "not slow and not integration"
-make test-all             # Everything, including slow/integration
-make test-slow            # Only the slow/integration tiers
-make format               # Auto-fix: ruff format . && ruff check --fix .
-make lint                 # Lint code: ruff check .
-make typecheck            # Type check: ty check src/geotoolz
-make precommit            # Run pre-commit on all files
-make docs-serve           # Local docs server
+make install              # uv sync --all-packages --all-groups --all-extras + hooks
+make test                 # Fast tier across all three packages
+make test-all             # Everything incl. geotoolz slow/integration tiers
+make format               # ruff format . && ruff check --fix .
+make lint                 # ruff check .   (entire repo)
+make typecheck            # ty check per package (from each package dir)
+make docs-serve           # Local MkDocs preview (root site)
 ```
 
 ### Running a single test
 
-```bash
-uv run pytest tests/test_example.py::TestClass::test_method -v
-```
-
-### Test tiers
-
-Tests are markered `slow` / `integration` (strict markers, registered in
-`pyproject.toml`). Automatic CI runs only the fast tier; the slow and
-integration tiers run manually via the "Extended Tests" workflow
-(`workflow_dispatch`) or `make test-slow`. Never add a slow or
-network-touching test without one of these markers.
-
-### Pre-commit checklist (all four must pass)
+Run from the owning package directory so its pytest config applies:
 
 ```bash
-uv run pytest -v                              # Tests
-uv run --group lint ruff check .              # Lint — ENTIRE repo, not just src/geotoolz/
-uv run --group lint ruff format --check .     # Format — ENTIRE repo
-uv run --group typecheck ty check src/geotoolz  # Typecheck — package only
+cd packages/geotoolz && uv run pytest tests/test_indices.py::test_ndvi -v
+cd packages/geotoolz-patcher && uv run pytest tests/test_sampler.py -v
+cd packages/geotoolz-catalog && uv run pytest tests/test_geoslice.py -v
 ```
 
-**Critical**: Always lint/format with `.` (repo root), not `src/geotoolz/`. CI runs `ruff check .` which includes `tests/` and `scripts/`.
+### Pre-commit checklist (all must pass)
+
+```bash
+make test                                       # Tests (all packages)
+uv run --group lint ruff check .                # Lint — ENTIRE repo
+uv run --group lint ruff format --check .       # Format — ENTIRE repo
+make typecheck                                  # ty per package
+```
+
+**Critical**: Always lint/format with `.` (repo root). CI runs `ruff check .`
+which includes every package's `tests/`. Each member package keeps its own
+`[tool.ruff]` (ruff's nearest-pyproject discovery scopes per-package ignores,
+e.g. geotoolz's jaxtyping `F722`), its own pytest markers/coverage gates, and
+its own `[tool.ty]` rules — which is why tests and ty run from the package
+directories.
 
 ## Architecture
 
-### Package structure
+### Workspace layout
 
-All implementation lives in `src/geotoolz/`. The public API is re-exported through `src/geotoolz/__init__.py`.
+```
+packages/
+├── geotoolz/                 # src/geotoolz — operator families; two-tier model
+│   │                         # (jaxtyped numpy primitives in _src/array.py per
+│   │                         # module, carrier-aware pipekit.Operator classes in
+│   │                         # _src/operators.py). Carrier-preserving via
+│   │                         # geotoolz._src.wrap.wrap_like.
+├── geotoolz-patcher/         # src/geopatcher — SpatialPatcher / TemporalPatcher /
+│   │                         # SpatioTemporalPatcher, Field adapters, hooks,
+│   │                         # journal, PatchCache, pipekit integration.
+└── geotoolz-catalog/         # src/geocatalog — GeoCatalog Protocol (InMemory +
+                              # DuckDB), GeoSlice, loaders, sources, matchup,
+                              # staging, cyclopts CLI.
+```
 
-Top-level re-export policy: every public Operator class is available at
-`geotoolz.*`; Tier-A numpy primitives live in their submodules only. On
-name collisions the domain-canonical class wins the top-level name
-(`ApplySRF` → radiometry, `NormalizedDifference` → indices).
+Each package's public API is re-exported through its `src/<import>/__init__.py`.
+Per-package docs live under `packages/*/docs/`; the root `docs/` + `mkdocs.yml`
+is the geotoolz site.
 
-`geotoolz.einx` is the universal-tensor-notation family (einx is a
-core dependency): carrier-aware `Einx` + presets at the top level, and
-the same einx patterns express the internal linear algebra of the
-Tier-A primitives — prefer `einx.dot` / `einx.id` over `@`, `.T`,
-`np.einsum`, or static-layout `np.moveaxis` in new numerical code
-(dynamic-axis utilities may keep `np.moveaxis`).
+### Test tiers
 
-Deprecated compatibility aliases (do not add new code under them):
-`geotoolz.cloud` (contents moved: extraction → `geotoolz.qa`,
-application → `geotoolz.mask`) and `geotoolz.model` (`ModelOp` moved to
-`geotoolz.learn`).
-
-Shared cross-module primitives live in the top-level `geotoolz/_src/`:
-`wrap.py` (`wrap_like` carrier rewrap), `shape.py` (`single_band`),
-`config.py` (`jsonable` get_config coercion), `stretch.py`
-(`percentile_stretch`), `blending.py` (overlap-add). Use these instead
-of re-implementing per module.
-
-### Key directories
-
-| Path | Purpose |
-|------|---------|
-| `src/geotoolz/` | Main package source code |
-| `tests/` | Test suite |
-| `docs/` | Documentation (MkDocs) |
-| `notebooks/` | Jupyter notebooks |
-| `scripts/` | Example scripts |
-
-## Documentation Examples
-
-Example notebooks live in `docs/notebooks/` as jupytext percent-format `.py` files. The workflow:
-
-1. Write the `.py` source (jupytext percent format)
-2. Convert and execute: `jupytext --to notebook foo.py` then `jupyter nbconvert --execute --inplace foo.ipynb`
-3. Delete the `.py` — the executed `.ipynb` is the committed source of truth
-4. `mkdocs-jupyter` renders the pre-executed `.ipynb` with `execute: false`
-
-Figures render inline via `plt.show()` — do **not** use `savefig` or commit separate PNG files. The `.ipynb` cell outputs are the single source of rendered figures.
-
-See `.github/instructions/docs-examples.instructions.md` for full standards.
+`packages/geotoolz` tests are markered `slow` / `integration` (fast tier runs
+in CI; extended tiers via the "Extended Tests" workflow_dispatch).
+`packages/geotoolz-catalog` has a `live` marker (real external APIs, always
+deselected) and an opt-in `tests/bench` suite (`pytest tests/bench
+--benchmark-only`). Never add a slow or network-touching test without a marker.
 
 ## Coding Conventions
 
-- Google-style docstrings
-- `dataclasses` or `attrs` for data containers
-- Type hints on all public functions and methods
-- Pure functions where possible; side effects isolated and explicit
-- Surgical changes only — don't refactor adjacent code or add docstrings to unchanged code
+- Google-style docstrings; `dataclasses`/`attrs` for data, `Protocol` for seams.
+- Type hints on all public functions and methods.
+- Pure functions where possible; side effects isolated and explicit.
+- Surgical changes only — don't refactor adjacent code or add docstrings to
+  unchanged code.
+- Releases via release-please with per-package components (`geotoolz-vX.Y.Z`,
+  `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`); conventional-commit
+  titles are enforced.
 
 ## Plans
 

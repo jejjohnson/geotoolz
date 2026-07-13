@@ -31,14 +31,15 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install dependencies
-        run: uv sync --all-extras --group dev
+        run: uv sync --all-packages --all-groups --all-extras
       # Some slow tests exercise the built wheel (package-data checks).
       - name: Build wheel
-        run: uv build
+        run: uv build --package geotoolz
       # Coverage is disabled: a marker-filtered subset can't meet the
       # repo-wide fail_under floor. pytest exit code 5 (nothing collected
       # for the marker) is treated as success so an empty tier stays green.
       - name: Run extended tests
+        working-directory: packages/geotoolz
         run: |
           set +e
           uv run pytest -v --no-cov -m "${{ inputs.marker }}"

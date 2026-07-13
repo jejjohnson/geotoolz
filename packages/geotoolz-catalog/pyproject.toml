@@ -1,0 +1,266 @@
+[project]
+name = "geotoolz-catalog"
+version = "0.0.3"
+description = "Spatiotemporal catalog over geospatial files — the GeoSlice-driven index extracted from geotoolz."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = { file = "../../LICENSE" }
+readme = "README.md"
+keywords = ["geospatial", "catalog", "geoparquet", "duckdb", "geoslice", "remote-sensing"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+dependencies = [
+    # GeoTensor and the GeoData / AsyncGeoData protocols. Pinning to >=2.1
+    # so the v2.0 numpy-subclass GeoTensor (with __array_ufunc__) is
+    # available — that's the substrate the raster/vector loaders return.
+    "georeader-spaceml>=2.1",
+    "numpy>=1.26",
+    # `georeader.geotensor` imports `Self` from typing_extensions without
+    # declaring it as a dep (upstream packaging bug in >=2.1).
+    "typing-extensions>=4.0",
+    # pandas IntervalIndex + pyproj.CRS underpin GeoSlice and the catalog
+    # primitives; both are part of the base surface.
+    "pandas>=2.1",
+    "pyproj>=3.6",
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    # GeoParquet I/O for the catalog roundtrip. geopandas pulls pyarrow
+    # only in its [io] extra, so depend on it explicitly here — without
+    # it, `to_geoparquet` / `from_geoparquet` raise ImportError.
+    "pyarrow>=14.0",
+    # Raster loader uses rasterio for windowed reads and reprojection.
+    "rasterio>=1.3",
+    # Structured logging with library-friendly disable/enable semantics
+    # (see `_logger.disable("geocatalog")` in `geocatalog/__init__.py`).
+    "loguru>=0.7",
+    # `geocatalog` console command (#23). Cyclopts is type-annotation
+    # driven, so subcommands compose by adding type-hinted functions to
+    # the App — no Click-style decorator boilerplate.
+    "cyclopts>=2.0",
+    "tenacity>=8.0",
+]
+
+[project.scripts]
+# CLI entry point — runs the cyclopts App defined in
+# `geocatalog._cli`. `pip install geocatalog` exposes this as
+# `geocatalog ...` on the user's PATH (#23).
+geocatalog = "geocatalog._cli:app"
+
+[project.optional-dependencies]
+# xarray-backed catalog (`build_xarray_catalog`, `load_xarray`).
+xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1"]
+# DuckDB backend (Phase 2). Pinned to >=1.1 because GeoParquet 1.1
+# bbox-column predicate pushdown landed there; older versions silently
+# regress to slow ST_Intersects-per-row scans.
+duckdb = ["duckdb>=1.1"]
+# Cloud/object-storage readers for s3://, gs://, az://, https://, and hf:// URIs.
+fsspec = [
+    "adlfs>=2026.5.0",
+    "aiohttp>=3.13.5",
+    "fsspec>=2025.12.0",
+    "gcsfs>=2025.12.0",
+    "s3fs>=2025.12.0",
+]
+# Rust-backed object-store client for downstream async/Arrow integrations.
+obstore = ["obstore>=0.9.5"]
+# Streaming writer for incremental GeoParquet builds.
+streaming = ["zarr>=3.0"]
+# External data-source adapters. Each gated independently so a user
+# who only needs STAC doesn't get earthaccess. See
+# `docs/design/query-matchup.md` §4.2 for the full design.
+earthaccess = ["earthaccess>=0.10"]
+# `pystac` is needed by the catalog-builder helpers
+# (`from_stac_items`, `to_stac_collection`); `pystac-client` and
+# `planetary-computer` drive `STACSource` and `from_stac_search`.
+stac = [
+    "pystac>=1.10",
+    "pystac-client>=0.7",
+    "planetary-computer>=1.0",
+]
+gee = ["earthengine-api>=0.1.380"]
+# `field_for()` bridge — lets `geocatalog.stage()` output flow straight
+# into a `geopatcher.SpatialPatcher` without manual `RasterField`
+# construction. See `docs/design/query-matchup.md` §8 (Phase 4).
+# Pinned to a specific commit so installs are reproducible while
+# geopatcher is pre-PyPI (pinned at the 0.0.5 release commit).
+# Bump intentionally when picking up new
+# features. Once geopatcher publishes, swap to `geopatcher>=X.Y`.
+patch = [
+    "geotoolz-patcher",
+]
+sources-all = [
+    "earthaccess>=0.10",
+    "pystac>=1.10",
+    "pystac-client>=0.7",
+    "planetary-computer>=1.0",
+    "earthengine-api>=0.1.380",
+]
+full = [
+    "xarray>=2024.1",
+    "rioxarray>=0.15",
+    "zarr>=3.0",
+    "duckdb>=1.1",
+    # Source-adapter extras roll into `full` so `pip install 'geocatalog[full]'`
+    # is the one-shot install path that lights up every public surface.
+    "earthaccess>=0.10",
+    "pystac>=1.10",
+    "pystac-client>=0.7",
+    "planetary-computer>=1.0",
+    "earthengine-api>=0.1.380",
+    # geopatcher bridge — exposes `geocatalog.staging.field_for`. Pinned
+    # via direct URL until the first PyPI release; see `[patch]` extra.
+    "geotoolz-patcher",
+    # Cloud/object-storage I/O — keeps `[full]` aligned with `[fsspec]`
+    # + `[obstore]` so a single install lights up s3://, gs://, az://,
+    # https://, and hf:// URIs end-to-end.
+    "adlfs>=2026.5.0",
+    "aiohttp>=3.13.5",
+    "fsspec>=2025.12.0",
+    "gcsfs>=2025.12.0",
+    "s3fs>=2025.12.0",
+    "obstore>=0.9.5",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/geotoolz"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "pre-commit>=4.5.1",
+    # NetCDF backend for the xarray-raster tests: the test fixtures write
+    # `.nc` files via `xr.Dataset.to_netcdf`, which xarray itself can't do
+    # without a backend library. h5netcdf needs h5py at runtime.
+    "h5netcdf>=1.3",
+    "h5py>=3.10",
+    # Property-based testing — fuzzes roundtrip / CRS-invariance /
+    # intersect-symmetry invariants over arbitrary valid catalogs.
+    "hypothesis>=6.100",
+    # Microbenchmarks + CI regression gate (#21). Stays in [dev] so the
+    # base install is unaffected; the bench suite is opt-in via
+    # `pytest tests/bench --benchmark-only`.
+    "pytest-benchmark>=4.0",
+]
+lint = [
+    "ruff>=0.15.11",
+]
+typecheck = [
+    "ty>=0.0.35",
+]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.6",
+    "mkdocstrings[python]>=1.0.4",
+    "mkdocs-jupyter>=0.26.3",
+    "jupytext>=1.19.1",
+    "ipykernel>=7.2.0",
+    # matplotlib + watermark used by the example notebooks during local
+    # re-execution. The guarded watermark cell in each notebook no-ops
+    # if the package is missing, but installing it here lets the version
+    # readout actually print under `nbconvert --execute`.
+    "matplotlib>=3.10.8",
+    "watermark>=2.4",
+    # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
+    # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
+    # through as None. Pin until a fixed pymdown-extensions release ships (#38).
+    "pygments>=2.19,<2.20",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# Required so the `[patch]` extra can pin geopatcher via a PEP 508
+# direct URL (`geopatcher @ git+https://...`) until the first PyPI
+# release lands. Drop this when geopatcher publishes.
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/geocatalog"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E402", "E721", "E731", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# Notebooks render to docs and use Greek/math glyphs (α, σ, ×, →) in
+# axis labels and prose. RUF001/002/003 flag them as ambiguous, which is
+# noise here. Line-length (E501) is also relaxed because long dict /
+# tuple literals in tutorials are clearer on one line than split.
+"*.ipynb" = ["RUF001", "RUF002", "RUF003", "E501"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+# Optional-extra backends (xarray, rioxarray, zarr, duckdb) are guarded
+# with try/except ImportError. Without the extras installed in the
+# typecheck env, ty can't resolve them — that's expected and fine.
+unresolved-import = "ignore"
+# `xarray = None` after a failed import is intentional; ty doesn't
+# track the typing-redefinition pattern.
+invalid-assignment = "ignore"
+# rasterio.windows.Window doesn't carry parameter names in its stub, so
+# `Window(col_off=..., row_off=...)` looks like unknown kwargs to ty.
+unknown-argument = "ignore"
+# `pandas-stubs`'s narrow Timestamp <-> NaTType union typing leaks into
+# `Timestamp.floor()` results, into `pd.Interval(pd.NaT, ...)` (used as a
+# sentinel for empty catalogs), and into `xarray.Dataset.where()` which
+# is declared as `Dataset | DataArray`. None of these are real bugs.
+invalid-argument-type = "ignore"
+invalid-return-type = "ignore"
+# `gdf.index.left/right/overlaps` are real attrs on `IntervalIndex` but
+# the base `Index` stub doesn't declare them, so ty flags them.
+unresolved-attribute = "ignore"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `bench_*.py` is the benchmark-suite convention (#21); the default
+# `test_*.py` discovery doesn't pick them up, so opt them in
+# explicitly. Regular `pytest` runs still skip the suite via
+# `--ignore=tests/bench` in `addopts`.
+python_files = ["test_*.py", "bench_*.py"]
+# The bench suite under `tests/bench/` is opt-in: regular `pytest` runs
+# skip it (otherwise every CI run would pay the warmup + repeated-call
+# cost). Invoke explicitly with
+# ``uv run pytest tests/bench --benchmark-only``.
+addopts = "--cov=src/geocatalog --cov-report=term-missing --cov-report=xml:coverage.xml --ignore=tests/bench -m 'not live' --strict-markers"
+markers = [
+    # Tests that hit real external services (Planetary Computer, NASA
+    # CMR, etc.). Skipped by default — `addopts` filters them out — so
+    # CI is deterministic and offline-friendly. Run on demand with
+    # ``uv run pytest -m live --no-cov``.
+    "live: requires network access to a real upstream API",
+]
+
+[tool.coverage.run]
+source = ["src/geocatalog"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+# Lowered to 65 for the initial port — many code paths require optional
+# extras (xarray-raster, duckdb, streaming) that aren't installed in the
+# base CI run. CI re-runs with the extras would push this higher.
+fail_under = 65

@@ -1,6 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "include-component-in-tag": false,
+  "include-component-in-tag": true,
+  "separate-pull-requests": false,
   "changelog-sections": [
     {"type": "feat", "section": "Features", "hidden": false},
     {"type": "fix", "section": "Bug Fixes", "hidden": false},
@@ -15,14 +16,37 @@
     {"type": "chore", "section": "Miscellaneous", "hidden": true}
   ],
   "packages": {
-    ".": {
+    "packages/geotoolz": {
       "release-type": "python",
       "package-name": "geotoolz",
+      "component": "geotoolz",
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
-        "pyproject.toml"
+        "src/geotoolz/__init__.py"
+      ]
+    },
+    "packages/geotoolz-patcher": {
+      "release-type": "python",
+      "package-name": "geotoolz-patcher",
+      "component": "geotoolz-patcher",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/geopatcher/__init__.py"
+      ]
+    },
+    "packages/geotoolz-catalog": {
+      "release-type": "python",
+      "package-name": "geotoolz-catalog",
+      "component": "geotoolz-catalog",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/geocatalog/__init__.py"
       ]
     }
   }

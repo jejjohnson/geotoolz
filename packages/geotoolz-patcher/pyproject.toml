@@ -1,0 +1,176 @@
+[project]
+name = "geotoolz-patcher"
+version = "0.0.6"
+description = "Four-axis Patcher framework for geospatial fields — split a field into local patches, run an operator per patch, stitch the outputs back into a global result."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = { file = "../../LICENSE" }
+readme = "README.md"
+keywords = ["remote-sensing", "geospatial", "patching", "tiling", "stitching", "georeader"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+dependencies = [
+    # GeoTensor and the GeoData / AsyncGeoData protocols. Pinning to >=2.1
+    # so the v2.0 numpy-subclass GeoTensor (with __array_ufunc__) is
+    # available — the substrate the raster path depends on.
+    "georeader-spaceml>=2.1",
+    "numpy>=1.26",
+    # KDTree (PointDomain) + signal windows (Tukey/Gaussian).
+    "scipy>=1.11",
+    # `georeader.geotensor` imports `Self` from typing_extensions without
+    # declaring it as a dep (upstream packaging bug in >=2.1). Pin it here
+    # so a slim install (without optional extras that would otherwise drag
+    # it in transitively) still works.
+    "typing-extensions>=4.0",
+    "pyproj>=3.6",
+]
+
+[project.optional-dependencies]
+# Each `Field` adapter under `geopatcher.fields` guards its import so
+# the base install stays slim and the user only pays for the substrates
+# they actually use.
+grid = ["xarray>=2024.1"]
+vector = ["geopandas>=0.14", "shapely>=2.0"]
+point = ["xvec>=0.4"]
+xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1"]
+streaming = ["zarr>=3.0"]
+dask = ["dask[bag]>=2024.8.3", "xarray>=2024.1"]
+jax = ["jax>=0.4.23"]
+# Cloud-Optimized GeoTIFF reader with batched range fetches. obstore
+# gives us the pooled HTTP/2 client (one TLS handshake per bucket per
+# process); async-tiff parses the COG header and decodes tile bytes
+# without GDAL involvement.
+obstore-cog = [
+    "obstore>=0.9.5",
+    "async-tiff>=0.7",
+    "pyproj>=3.6",
+]
+patch-full = [
+    "xarray>=2024.1",
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "xvec>=0.4",
+    "rioxarray>=0.15",
+    "zarr>=3.0",
+    "dask[bag]>=2024.8.3",
+    "jax>=0.4.23",
+    "obstore>=0.9.5",
+    "async-tiff>=0.7",
+    "pyproj>=3.6",
+]
+# Operator-graph bridge: pull in `pipekit` and the ~125-LOC wrappers in
+# `geopatcher.integrations.pipekit` (GridSampler / ApplyToChips / Stitch).
+# The patcher core stays framework-free; only this integration module
+# imports `pipekit.Operator`.
+pipekit = ["pipekit>=0.0.1"]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/geotoolz"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "pre-commit>=4.6.0",
+    "hypothesis>=6.152.9",
+]
+lint = [
+    "ruff>=0.15.11",
+]
+typecheck = [
+    "ty>=0.0.31",
+]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.6",
+    "mkdocstrings[python]>=1.0.4",
+    "mkdocs-jupyter>=0.26.3",
+    "jupytext>=1.19.1",
+    "ipykernel>=7.2.0",
+    "matplotlib>=3.10.8",
+    "watermark>=2.4",
+    # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
+    # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
+    # through as None. Pin until a fixed pymdown-extensions release ships.
+    "pygments>=2.19,<2.21",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/geopatcher"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E402", "E721", "E731", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# Notebooks render to docs and use Greek/math glyphs in axis labels and prose.
+# RUF001/002/003 flag them as ambiguous, which is noise here. Line-length
+# (E501) is also relaxed because long dict / tuple literals in tutorials
+# are clearer on one line than split.
+"*.ipynb" = ["RUF001", "RUF002", "RUF003", "E501"]
+# The diagram-generator script uses Greek/math glyphs in axis labels and
+# titles for figure rendering — same noise as the notebooks.
+"docs/assets/make_diagrams.py" = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+# Optional-extra backends (xarray, geopandas, xvec, rioxarray, zarr) are
+# guarded with try/except ImportError. Without the extras installed in the
+# typecheck env, ty can't resolve them — that's expected and fine.
+unresolved-import = "ignore"
+# `geopandas = None` after a failed import is intentional; ty doesn't
+# track the typing-redefinition pattern.
+invalid-assignment = "ignore"
+# rasterio.windows.Window doesn't carry parameter names in its stub, so
+# `Window(col_off=..., row_off=...)` looks like unknown kwargs to ty.
+unknown-argument = "ignore"
+# zarr.Group.__getitem__ stubs only accept `str`, but the streaming
+# `OverlapAdd` path indexes into it with `slice(None)` / tuples to write
+# back accumulator buffers — runtime-correct, stub-narrow. Same noise
+# `gdf.index.left/right/overlaps` produces (real attrs on IntervalIndex,
+# missing from the base Index stub).
+invalid-argument-type = "ignore"
+invalid-return-type = "ignore"
+unresolved-attribute = "ignore"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/geopatcher --cov-report=term-missing --cov-report=xml:coverage.xml --strict-markers"
+
+[tool.coverage.run]
+source = ["src/geopatcher"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+# Approx* aggregations (sketch family) are stubs scheduled for v0.2 that
+# raise NotImplementedError, and some extras-gated paths skip in slim
+# local runs — hence a floor below the ~78% an all-extras run measures.
+# CI installs --all-extras, so the full suite runs there.
+fail_under = 65
