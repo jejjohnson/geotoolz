@@ -3,6 +3,13 @@
 > Composable operators for remote sensing — small typed functions you
 > compose into linear chains or named DAGs, running on `GeoTensor`s.
 
+!!! tip "This site covers the whole geostack"
+    This is the documentation for the **geotoolz monorepo** — three
+    packages designed as one stack. This page introduces the operator
+    library; the [Patcher](patcher/index.md) and
+    [Catalog](catalog/index.md) sections cover the other two, and
+    [The geostack](geostack.md) shows how they interlock end to end.
+
 `geotoolz` is built around one idea: **every step of a remote-sensing
 pipeline is an `Operator`** — a typed function from one carrier to
 another — and pipelines are just compositions of those operators. The
@@ -121,17 +128,17 @@ flowchart LR
     Op3 --> Sampler
 ```
 
-- **[`geocatalog`](https://github.com/jejjohnson/geocatalog)** discovers
+- **[`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog)** discovers
   and loads scenes from STAC.
 - **`geotoolz`** runs the per-scene transforms.
-- **[`geopatcher`](https://github.com/jejjohnson/geopatcher)** handles
+- **[`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)** handles
   sliding-window patching for big rasters, exposed as Operator wrappers
   in [`geotoolz.patch_ops`](api/core.md) (`GridSampler`, `ApplyToChips`,
   `Stitch`) so a tiled-inference pipeline composes inside a `Sequential`.
 
 The full multi-repo walk-through lives in **the canonical Lake Tahoe
 notebook**:
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
 The slice of that flow that's about *composition of operators* is
 [`docs/notebooks/operators_lake_tahoe.ipynb`](notebooks/operators_lake_tahoe.ipynb)
 in this repo.

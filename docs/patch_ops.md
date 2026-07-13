@@ -1,7 +1,7 @@
 # Train-tile / inference-stitch with `patch_ops`
 
 `geotoolz.patch_ops` is the bridge between the four-axis Patcher
-framework ([`geopatcher`](https://github.com/jejjohnson/geopatcher)) and
+framework ([`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)) and
 the operator graph: extract well-behaved chips from a scene, run an
 operator per chip, and stitch the outputs back into a full scene — with
 the train-time and inference-time data flow expressed as the same
@@ -128,7 +128,7 @@ For CRS-aware point extraction into a vector cube, see
 
 ## Further reading
 
-- [geopatcher's docs](https://github.com/jejjohnson/geopatcher) — the
+- [geopatcher's docs](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher) — the
   four axes (Geometry × Sampler × Window × Aggregation), boundary
   policies, streaming aggregation, async splits.
 - [Integration with geocatalog & geopatcher](recipes/integration-with-geocatalog-and-geopatcher.md)

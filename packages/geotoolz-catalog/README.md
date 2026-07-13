@@ -1,12 +1,13 @@
 # geocatalog
+> Part of the [geotoolz monorepo](https://github.com/jejjohnson/geotoolz) — ships as the `geotoolz-catalog` distribution; the import name is unchanged.
 
-[![Tests](https://github.com/jejjohnson/geocatalog/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/geocatalog/actions/workflows/ci.yml)
-[![Lint](https://github.com/jejjohnson/geocatalog/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/geocatalog/actions/workflows/lint.yml)
-[![Type Check](https://github.com/jejjohnson/geocatalog/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/geocatalog/actions/workflows/typecheck.yml)
-[![Deploy Docs](https://github.com/jejjohnson/geocatalog/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/geocatalog/actions/workflows/pages.yml)
-[![codecov](https://codecov.io/gh/jejjohnson/geocatalog/branch/main/graph/badge.svg)](https://codecov.io/gh/jejjohnson/geocatalog)
-[![PyPI version](https://img.shields.io/pypi/v/geocatalog.svg)](https://pypi.org/project/geocatalog/)
-[![Python versions](https://img.shields.io/pypi/pyversions/geocatalog.svg)](https://pypi.org/project/geocatalog/)
+[![Tests](https://github.com/jejjohnson/geotoolz/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/ci.yml)
+[![Lint](https://github.com/jejjohnson/geotoolz/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/lint.yml)
+[![Type Check](https://github.com/jejjohnson/geotoolz/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/typecheck.yml)
+[![Deploy Docs](https://github.com/jejjohnson/geotoolz/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/pages.yml)
+[![codecov](https://codecov.io/gh/jejjohnson/geotoolz/branch/main/graph/badge.svg)](https://codecov.io/gh/jejjohnson/geotoolz)
+[![PyPI version](https://img.shields.io/pypi/v/geotoolz-catalog.svg)](https://pypi.org/project/geotoolz-catalog/)
+[![Python versions](https://img.shields.io/pypi/pyversions/geocatalog.svg)](https://pypi.org/project/geotoolz-catalog/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
@@ -73,7 +74,7 @@ tensor = gc.load_raster(hits, aoi, band_indexes=[1, 2, 3])     # materialise the
 ## Install
 
 ```bash
-pip install geocatalog
+pip install geotoolz-catalog
 ```
 
 Or with `uv`:
@@ -98,7 +99,7 @@ uv add geocatalog
 - **[Concepts](https://jejjohnson.github.io/geocatalog/concepts/)** — mental model, backend comparison, set algebra
 - **[Quickstart](https://jejjohnson.github.io/geocatalog/quickstart/)** — 15-minute Lake Tahoe Sentinel-2 walkthrough
 - **[Recipes](https://jejjohnson.github.io/geocatalog/recipes/large-archives/)** — large archives, STAC ingestion, staging & bundles
-- **[End-to-end notebook](https://jejjohnson.github.io/geocatalog/notebooks/end_to_end_lake_tahoe/)** — discover → query → load → patch → stitch (cross-repo with [geotoolz](https://github.com/jejjohnson/geotoolz) and [geopatcher](https://github.com/jejjohnson/geopatcher))
+- **[End-to-end notebook](https://jejjohnson.github.io/geocatalog/notebooks/end_to_end_lake_tahoe/)** — discover → query → load → patch → stitch (cross-repo with [geotoolz](https://github.com/jejjohnson/geotoolz) and [geopatcher](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher))
 - **[API reference](https://jejjohnson.github.io/geocatalog/api/reference/)** — full mkdocstrings-generated reference
 
 ## Bridging to a patcher

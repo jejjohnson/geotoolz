@@ -259,18 +259,18 @@ flowchart LR
     Op3 --> GS
 ```
 
-- **[`geocatalog`](https://github.com/jejjohnson/geocatalog)** sits
+- **[`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog)** sits
   upstream — it discovers and loads scenes from STAC into `GeoTensor`s.
 - **`geotoolz`** consumes those `GeoTensor`s and runs per-scene
   transforms.
-- **[`geopatcher`](https://github.com/jejjohnson/geopatcher)** handles
+- **[`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)** handles
   sliding-window patching for big rasters. `geotoolz.patch_ops` wraps
   its `GridSampler`, `ApplyToChips`, and `Stitch` so a tiled-inference
   flow composes inside a `Sequential` like any other operator.
 
 For the end-to-end multi-repo walk-through (catalog → patch → operate),
 see the canonical Lake Tahoe notebook:
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
 
 ## The v0.1 idiom library
 
