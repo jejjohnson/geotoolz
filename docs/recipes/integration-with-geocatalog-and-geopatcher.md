@@ -22,7 +22,7 @@ flowchart LR
 
 The full multi-repo walk-through (one Lake Tahoe scene end-to-end) lives
 in the canonical notebook in `geocatalog`:
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
 This page is the geotoolz-side reference.
 
 ## Upstream — `geocatalog`
@@ -138,15 +138,15 @@ hop.
 
 | Concern | Package | Surface |
 |---|---|---|
-| STAC discovery, asset loading, AOI windowing | [`geocatalog`](https://github.com/jejjohnson/geocatalog) | `SearchCatalog`, `LoadScene`, … |
+| STAC discovery, asset loading, AOI windowing | [`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog) | `SearchCatalog`, `LoadScene`, … |
 | Per-scene radiometry, indices, masking, compositing | `geotoolz` | `radiometry`, `indices`, `cloud`, `compositing`, … |
-| Sliding-window tiling, chunked inference, stitching | [`geopatcher`](https://github.com/jejjohnson/geopatcher) | `SpatialPatcher`, `Stitch`, exposed as `geotoolz.patch_ops` |
+| Sliding-window tiling, chunked inference, stitching | [`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher) | `SpatialPatcher`, `Stitch`, exposed as `geotoolz.patch_ops` |
 | The composition algebra itself | [`pipekit`](https://github.com/jejjohnson/pipekit) | `Operator`, `Sequential`, `Graph`, `Branch`, `Switch`, … |
 
 ## See also
 
 - Canonical cross-repo notebook:
-  [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+  [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
 - This repo's operator-composition slice:
   [`notebooks/operators_lake_tahoe.ipynb`](../notebooks/operators_lake_tahoe.ipynb).
 - [Quickstart](../quickstart.md) and [Concepts](../concepts.md).

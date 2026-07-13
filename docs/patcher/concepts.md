@@ -271,6 +271,6 @@ walks through the migration story; ADR-005 in
 
 ## Cross-stack links
 
-- **Catalogs:** [`geocatalog`](https://github.com/jejjohnson/geocatalog) — which scenes / time range / AOI to read.
+- **Catalogs:** [`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog) — which scenes / time range / AOI to read.
 - **Operators:** [`geotoolz`](https://github.com/jejjohnson/geotoolz) — how to chain per-patch and global ops.
-- **End-to-end:** [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb) — the canonical cross-repo Sentinel-2 / Lake Tahoe notebook.
+- **End-to-end:** [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb) — the canonical cross-repo Sentinel-2 / Lake Tahoe notebook.

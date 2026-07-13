@@ -7,7 +7,7 @@ the patcher-focused slice of the canonical cross-repo scenario:
 > **Cloud-free Sentinel-2 NDVI over Lake Tahoe, summer 2024.**
 
 The full end-to-end story (catalog → operators → patcher) lives at
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
 This page covers only the **patcher** slice — the same code is also
 shipped as a runnable notebook at
 [`docs/notebooks/patcher_lake_tahoe.ipynb`](notebooks/patcher_lake_tahoe.ipynb).
@@ -187,4 +187,4 @@ plt.show()
     - [On-error policies](recipes/on-error-policies.md) — raise / skip / mask / retry.
     - [Journal & resume](recipes/journal-and-resume.md) — `PatchJournal` for restartable jobs.
 - **Notebook:** [`notebooks/patcher_lake_tahoe.ipynb`](notebooks/patcher_lake_tahoe.ipynb) — runnable mirror of this walkthrough.
-- **Full end-to-end:** [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb) — catalog → operators → patcher.
+- **Full end-to-end:** [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb) — catalog → operators → patcher.

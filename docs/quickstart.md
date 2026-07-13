@@ -3,8 +3,8 @@
 This page is the markdown mirror of [`notebooks/operators_lake_tahoe.ipynb`](notebooks/operators_lake_tahoe.ipynb).
 It walks through a small operator-composition pipeline against one
 Sentinel-2 scene from Microsoft Planetary Computer, the same canonical
-scenario used across the [`geocatalog`](https://github.com/jejjohnson/geocatalog)
-and [`geopatcher`](https://github.com/jejjohnson/geopatcher) repos.
+scenario used across the [`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog)
+and [`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher) repos.
 
 **Scenario**: cloud-free Sentinel-2 NDVI over Lake Tahoe, summer 2024
 (`-120.25, 38.85, -119.85, 39.30`, `2024-06-01..2024-09-30`,
@@ -25,7 +25,7 @@ uv pip install rioxarray planetary-computer pystac-client matplotlib
 
 The full multi-repo flow (catalog → patch → operate) is documented in
 the canonical
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
 Here we focus on the **operator-composition slice**.
 
 ## 1. Load one Sentinel-2 scene
@@ -219,7 +219,7 @@ A researcher's typical loop:
 - The full version of this walk-through as an executable notebook:
   [`notebooks/operators_lake_tahoe.ipynb`](notebooks/operators_lake_tahoe.ipynb).
 - The cross-repo end-to-end notebook (catalog → patch → operate):
-  [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+  [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
 - Concept overview: [Concepts](concepts.md).
 - Recipes:
   - [Define an operator](recipes/define-an-operator.md)

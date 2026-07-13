@@ -165,7 +165,7 @@ the flag.
   axis. The time-axis patching path is documented in
   [`recipes/temporal-stencils.md`](temporal-stencils.md).
 - **In-memory cache only.** Content-addressed caching across sessions
-  is tracked at [#24](https://github.com/jejjohnson/geopatcher/issues/24);
+  is tracked at [#24](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher/issues/24);
   this PR ships only the index-keyed in-memory variant.
 - **No xrpatcher `dims_labels` auto-discovery on reconstruct.**
   `merge_to_xarray` uses the field's coord schema; specify it via the

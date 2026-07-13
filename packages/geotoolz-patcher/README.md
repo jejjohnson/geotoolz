@@ -1,16 +1,17 @@
 # geopatcher
+> Part of the [geotoolz monorepo](https://github.com/jejjohnson/geotoolz) — ships as the `geotoolz-patcher` distribution; the import name is unchanged.
 
-[![Tests](https://github.com/jejjohnson/geopatcher/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/geopatcher/actions/workflows/ci.yml)
-[![Lint](https://github.com/jejjohnson/geopatcher/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/geopatcher/actions/workflows/lint.yml)
-[![Type Check](https://github.com/jejjohnson/geopatcher/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/geopatcher/actions/workflows/typecheck.yml)
-[![Deploy Docs](https://github.com/jejjohnson/geopatcher/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/geopatcher/actions/workflows/pages.yml)
-[![codecov](https://codecov.io/gh/jejjohnson/geopatcher/branch/main/graph/badge.svg)](https://codecov.io/gh/jejjohnson/geopatcher)
-[![PyPI version](https://img.shields.io/pypi/v/geopatcher.svg)](https://pypi.org/project/geopatcher/)
+[![Tests](https://github.com/jejjohnson/geotoolz/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/ci.yml)
+[![Lint](https://github.com/jejjohnson/geotoolz/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/lint.yml)
+[![Type Check](https://github.com/jejjohnson/geotoolz/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/typecheck.yml)
+[![Deploy Docs](https://github.com/jejjohnson/geotoolz/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/pages.yml)
+[![codecov](https://codecov.io/gh/jejjohnson/geotoolz/branch/main/graph/badge.svg)](https://codecov.io/gh/jejjohnson/geotoolz)
+[![PyPI version](https://img.shields.io/pypi/v/geotoolz-patcher.svg)](https://pypi.org/project/geotoolz-patcher/)
 
 > **Split a geospatial field into local patches, run an operator per patch, and stitch the outputs back into a global result — along four independently composable axes.**
 
 `geopatcher` is the *locality layer* between **catalogs**
-([geocatalog](https://github.com/jejjohnson/geocatalog)) and **operators**
+([geocatalog](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog)) and **operators**
 ([geotoolz](https://github.com/jejjohnson/geotoolz)). It answers a single
 question: *what slice of the data does my operator see at once, and how do
 local outputs become a global field?*
@@ -46,14 +47,14 @@ accumulator with disk-resident zarr for >1 TB outputs.
 ## Install
 
 ```bash
-pip install geopatcher                       # base — RasterField only
-pip install 'geopatcher[grid]'               # XarrayField
-pip install 'geopatcher[vector]'             # GeoPandasField
-pip install 'geopatcher[point]'              # XvecField
-pip install 'geopatcher[xarray-raster]'      # RioXarrayField
-pip install 'geopatcher[streaming]'          # disk-backed OverlapAdd
-pip install 'geopatcher[patch-full]'         # all of the above
-pip install 'geopatcher[pipekit]'            # pipekit operator-graph bridge
+pip install geotoolz-patcher                       # base — RasterField only
+pip install 'geotoolz-patcher[grid]'               # XarrayField
+pip install 'geotoolz-patcher[vector]'             # GeoPandasField
+pip install 'geotoolz-patcher[point]'              # XvecField
+pip install 'geotoolz-patcher[xarray-raster]'      # RioXarrayField
+pip install 'geotoolz-patcher[streaming]'          # disk-backed OverlapAdd
+pip install 'geotoolz-patcher[patch-full]'         # all of the above
+pip install 'geotoolz-patcher[pipekit]'            # pipekit operator-graph bridge
 ```
 
 > `pipekit` isn't on PyPI yet; the `[pipekit]` extra resolves via `uv sync
@@ -105,7 +106,7 @@ full mental model.
 - **15-min walkthrough:** [docs/quickstart.md](docs/quickstart.md) — Lake Tahoe Sentinel-2 NDVI inference.
 - **Recipes:** streaming OverlapAdd, on-error policies, PatchJournal resume.
 - **Demo notebook:** [docs/notebooks/patcher_lake_tahoe.ipynb](docs/notebooks/patcher_lake_tahoe.ipynb) — patcher slice of the Lake Tahoe scenario.
-- **See the full end-to-end story:** [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb) — catalog → operators → patcher.
+- **See the full end-to-end story:** [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb) — catalog → operators → patcher.
 - **API reference:** [docs site](https://jejjohnson.github.io/geopatcher/api/reference/).
 
 ## License

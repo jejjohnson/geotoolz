@@ -1,5 +1,5 @@
 site_name: geotoolz
-site_description: Composable Operator library for remote sensing on top of georeader.GeoTensor.
+site_description: The geotoolz geostack — RS operators, the four-axis Patcher, and a spatiotemporal catalog, composable end to end.
 site_author: J. Emmanuel Johnson
 repo_url: https://github.com/jejjohnson/geotoolz
 repo_name: jejjohnson/geotoolz
@@ -31,7 +31,10 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [src]
+          paths:
+            - packages/geotoolz/src
+            - packages/geotoolz-patcher/src
+            - packages/geotoolz-catalog/src
           options:
             docstring_style: google
             show_source: true
@@ -42,43 +45,88 @@ plugins:
 
 nav:
   - Home: index.md
-  - Concepts: concepts.md
-  - Quickstart: quickstart.md
-  - Recipes:
-      - Define an operator: recipes/define-an-operator.md
-      - Branching pipelines: recipes/branching-pipelines.md
-      - Integration with geocatalog & geopatcher: recipes/integration-with-geocatalog-and-geopatcher.md
-  - Tutorial:
-      - Operators on Sentinel-2 (Lake Tahoe): notebooks/operators_lake_tahoe.ipynb
+  - The geostack: geostack.md
+  - Operators — geotoolz:
+      - Concepts: concepts.md
+      - Quickstart: quickstart.md
+      - Recipes:
+          - Define an operator: recipes/define-an-operator.md
+          - Branching pipelines: recipes/branching-pipelines.md
+          - Catalog → patch → operate: recipes/integration-with-geocatalog-and-geopatcher.md
+      - Tutorial:
+          - Operators on Sentinel-2 (Lake Tahoe): notebooks/operators_lake_tahoe.ipynb
+      - Module guides:
+          - Normalization: normalization.md
+          - Patching (tile / stitch / sample): patch_ops.md
+          - Multi-format readers: io.md
+          - Adding a sensor reader: readers.md
+      - API Reference:
+          - Core: api/core.md
+          - Augment: api/augment.md
+          - Cloud: api/cloud.md
+          - Compositing: api/compositing.md
+          - Einx: api/einx.md
+          - Feature: api/feature.md
+          - Geometry: api/geom.md
+          - Indices: api/indices.md
+          - IO: api/io.md
+          - Learn (scikit-learn): api/learn.md
+          - Mask: api/mask.md
+          - Matched filter: api/matched_filter.md
+          - Measure: api/measure.md
+          - Normalize: api/normalize.md
+          - Plume: api/plume.md
+          - QA: api/qa.md
+          - Radiometry: api/radiometry.md
+          - Readers: api/readers.md
+          - Restore: api/restore.md
+          - Segment: api/segment.md
+          - Spectral: api/spectral.md
+          - Viz: api/viz.md
+      - Design:
+          - Query → matchup → patch: design/query-matchup.md
+  - Patcher — geopatcher:
+      - Home: patcher/index.md
+      - Concepts: patcher/concepts.md
+      - Quickstart: patcher/quickstart.md
+      - Recipes:
+          - Streaming overlap-add: patcher/recipes/streaming-overlap-add.md
+          - On-error policies: patcher/recipes/on-error-policies.md
+          - Journal & resume: patcher/recipes/journal-and-resume.md
+          - Temporal stencils: patcher/recipes/temporal-stencils.md
+          - xarray N-D patching: patcher/recipes/xarray-nd-patching.md
+      - Tutorial:
+          - Patching Sentinel-2 (Lake Tahoe): patcher/notebooks/patcher_lake_tahoe.ipynb
+      - Reference:
+          - Patching: patcher/patching.md
+          - Observability hooks: patcher/observability.md
+          - Async and prefetch: patcher/patching/async-prefetch.md
+      - API reference:
+          - Core framework: patcher/api/reference.md
+          - Matched multi-source: patcher/api/matched.md
+          - Integrations: patcher/api/integrations.md
+      - Design:
+          - Design decisions: patcher/decisions.md
+          - Query → matchup → patch: patcher/design/query-matchup.md
+  - Catalog — geocatalog:
+      - Home: catalog/index.md
+      - Concepts: catalog/concepts.md
+      - Quickstart: catalog/quickstart.md
+      - Recipes:
+          - Large archives: catalog/recipes/large-archives.md
+          - STAC ingestion: catalog/recipes/from-stac.md
+          - Staging & bundles: catalog/recipes/staging-and-bundles.md
+      - Tutorial:
+          - End-to-end (Lake Tahoe): catalog/notebooks/end_to_end_lake_tahoe.ipynb
+      - API reference: catalog/api/reference.md
+      - CLI: catalog/cli.md
+      - Schema versions: catalog/schema-versions.md
+      - Logging: catalog/logging.md
+      - Design:
+          - Exact grid alignment: catalog/design/exact-grid-alignment.md
+          - Query & matchup: catalog/design/query-matchup.md
+      - Changelog: catalog/changelog.md
   - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
-  - Module guides:
-      - Normalization: normalization.md
-      - Patching (tile / stitch / sample): patch_ops.md
-      - Multi-format readers: io.md
-      - Adding a sensor reader: readers.md
-  - API Reference:
-      - Core: api/core.md
-      - Augment: api/augment.md
-      - Cloud: api/cloud.md
-      - Compositing: api/compositing.md
-      - Einx: api/einx.md
-      - Feature: api/feature.md
-      - Geometry: api/geom.md
-      - Indices: api/indices.md
-      - IO: api/io.md
-      - Learn (scikit-learn): api/learn.md
-      - Mask: api/mask.md
-      - Matched filter: api/matched_filter.md
-      - Measure: api/measure.md
-      - Normalize: api/normalize.md
-      - Plume: api/plume.md
-      - QA: api/qa.md
-      - Radiometry: api/radiometry.md
-      - Readers: api/readers.md
-      - Restore: api/restore.md
-      - Segment: api/segment.md
-      - Spectral: api/spectral.md
-      - Viz: api/viz.md
   - Contributing: contributing.md
 
 markdown_extensions:

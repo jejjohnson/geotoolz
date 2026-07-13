@@ -54,7 +54,7 @@ flowchart TD
 
 `geopatcher` is the **locality layer** of a three-package stack:
 
-- [**geocatalog**](https://github.com/jejjohnson/geocatalog) decides
+- [**geocatalog**](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog) decides
   *which data* to read (STAC searches, time ranges, AOIs, asset
   resolution).
 - [**geotoolz**](https://github.com/jejjohnson/geotoolz) decides *what to
@@ -87,7 +87,7 @@ plug it into a `pipekit.Sequential` pipeline through the
 - **[API reference](api/reference.md)** — generated from docstrings.
 
 **See the full end-to-end story** in the canonical cross-repo notebook:
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb)
+[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb)
 — a single Sentinel-2 / Lake Tahoe / summer-2024 scenario that touches
 the catalog (geocatalog), the operator graph (geotoolz), and the
 patcher (geopatcher) end-to-end.

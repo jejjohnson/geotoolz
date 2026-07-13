@@ -1,4 +1,4 @@
-# geotoolz
+# geotoolz — the geostack
 
 [![Tests](https://github.com/jejjohnson/geotoolz/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/ci.yml)
 [![Lint](https://github.com/jejjohnson/geotoolz/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/lint.yml)
@@ -6,160 +6,114 @@
 [![Deploy Docs](https://github.com/jejjohnson/geotoolz/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/pages.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Compose remote-sensing pipelines like you compose functions.**
-> Sentinel-2 to NDVI in three small operators, the same code shape as your unit tests.
+> **Find the data, cut it to size, compute on it — one composable stack.**
+> A [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) of three
+> packages that interlock end-to-end, with the Operator / Sequential / Graph
+> composition core supplied by [pipekit](https://github.com/jejjohnson/pipekit).
 
 ```mermaid
 flowchart LR
-    subgraph S["Sequential — linear chain"]
-        A[Scale] --> B[CloudMask] --> C[NDVI]
+    subgraph C["geotoolz-catalog"]
+        direction TB
+        Q["query bbox + time<br/>→ GeoSlice"] --> S["stage() → field_for()"]
     end
-    subgraph G["Graph — named DAG, fan-out, fan-in"]
-        I([scene]) --> S1[Scale]
-        S1 --> M[CloudMask]
-        S1 --> N[NDVI]
-        M --> AP[ApplyMask]
-        N --> AP
-        AP --> O([clean_ndvi])
+    subgraph P["geotoolz-patcher"]
+        direction TB
+        F[Field] --> SP["SpatialPatcher<br/>split → patches"]
+        AGG["merge → stitched scene"]
     end
+    subgraph T["geotoolz"]
+        OPS["Operators<br/>radiometry · indices · qa · geom · learn · …"]
+    end
+    S --> F
+    SP -->|ApplyToChips| OPS --> AGG
 ```
 
-## Monorepo layout
+## The packages
 
-This repository is a [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/)
-shipping three packages (same structure as
-[pipekit](https://github.com/jejjohnson/pipekit)):
-
-| Package | Import | What it is |
-|---------|--------|------------|
-| [`geotoolz`](packages/geotoolz) | `geotoolz` | The RS operator families documented on this page |
-| [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher framework: split fields into patches, run operators, stitch back |
-| [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files (GeoSlice → loaders) |
+| Package (dist) | Import | One-liner | Docs |
+|---|---|---|---|
+| [`geotoolz`](packages/geotoolz) | `geotoolz` | Carrier-preserving `pipekit.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/) |
+| [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/patcher/) |
+| [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/catalog/) |
 
 Import names are unchanged from the pre-monorepo repos — only the
-distribution names carry the `geotoolz-` prefix. Install what you need:
-`pip install geotoolz` / `geotoolz-patcher` / `geotoolz-catalog`
-(pre-PyPI: `uv sync --all-packages` in a clone, or git+ URLs with
-`subdirectory=packages/<name>`).
+distribution names carry the `geotoolz-` prefix.
 
-## What is it
+## How they interlock
 
-`geotoolz` is a small algebra of **Operators** for remote-sensing rasters.
-Each operator is a typed function from one carrier (a `GeoTensor`) to
-another; pipelines are just `Sequential` chains or `Graph` DAGs of those
-operators. The composition core lives in [`pipekit`](https://github.com/jejjohnson/pipekit);
-`geotoolz` adds the RS-specific operator families (radiometry, indices,
-cloud masking, compositing, …) on top.
+The stack is glued by small, deliberate seams (see
+[The geostack](https://jejjohnson.github.io/geotoolz/geostack/) for the
+full tour):
 
-The 30-second pitch:
-
-- **One protocol.** Every step — a band-math index, a cloud mask, a write
-  to COG — is an `Operator` with `_apply` + `get_config`.
-- **Two composition shapes.** `Sequential` for linear chains, `Graph` for
-  branches and fan-in. Both are themselves `Operator`s, so they nest.
-- **Carrier-agnostic.** The algebra runs on `GeoTensor` in production
-  and on scalars or ndarrays in tests. Same code, smaller fixtures.
-- **Round-trips to YAML.** `get_config()` lets pipelines serialise for
-  Hydra-zen, audit, and reproducibility.
-
-> **Status:** pre-alpha (`0.0.x`). The composition core (`Operator`,
-> `Sequential`, `Graph`, `Branch`, `Switch`, plus the v0.1 idiom library)
-> is stable enough to build on. The domain-operator surface (radiometry,
-> indices, cloud, compositing, …) is landing module-by-module — names and
-> defaults will move before `0.1`. Pin a commit if you depend on it.
-
-## A working snippet
+- **`GeoSlice`** — the frozen `(bounds, interval, resolution, crs)` request
+  that catalogs produce and loaders consume, with opt-in exact grid
+  alignment for co-registration.
+- **`staging.field_for`** — staged catalog rows become `geopatcher`
+  `Field`s, so a query drops straight into `SpatialPatcher.split`.
+- **`patch_ops`** — `GridSampler → ApplyToChips → Stitch` puts the patcher
+  inside an operator `Sequential` for tile-predict-stitch inference; the
+  label-aware samplers emit the same `Patch` carrier for training draws.
+- **Coregistration operators** — `geotoolz.geom.coregister` ops are the
+  intended coreg callables for `geopatcher.MatchedField`, aligning
+  multi-source patches found by the catalog's matchup engine.
+- **One obstore pool** — all three packages soft-import a shared pooled
+  HTTP/2 client for cloud reads.
 
 ```python
-import geotoolz as gz
-from geotoolz import Operator, Sequential
+import geocatalog as gc, geopatcher as gp, geotoolz as gz
+from geotoolz.patch_ops import ApplyToChips, GridSampler, Stitch
 
+cat    = gc.from_stac_search("https://planetarycomputer.microsoft.com/api/stac/v1",
+                             collections=["sentinel-2-l2a"], bbox=aoi, datetime="2024-06")
+field  = gc.staging.field_for(gc.staging.stage(cat, dest="./cache"))[0]
 
-class Scale(Operator):
-    """Multiply DN by a scale factor — toy radiometric correction."""
+patcher = gp.SpatialPatcher(geometry=gp.SpatialRectangular(size=(256, 256)),
+                            sampler=gp.SpatialRegularStride(step=(192, 192)),
+                            window=gp.SpatialHann(), aggregation=gp.SpatialOverlapAdd())
+ndvi    = gz.Sequential([gz.DNToReflectance(scale=1e-4), gz.NDVI(nir_idx=3, red_idx=2)])
 
-    def __init__(self, *, scale: float = 1e-4) -> None:
-        self.scale = scale
-
-    def _apply(self, gt):
-        return gt.array_as_geotensor(gt.values * self.scale)
-
-    def get_config(self):
-        return {"scale": self.scale}
-
-
-class NDVI(Operator):
-    """(NIR - Red) / (NIR + Red + eps)."""
-
-    def __init__(self, *, nir_idx: int = 3, red_idx: int = 2, eps: float = 1e-10) -> None:
-        self.nir_idx, self.red_idx, self.eps = nir_idx, red_idx, eps
-
-    def _apply(self, gt):
-        a = gt.values
-        nir, red = a[self.nir_idx], a[self.red_idx]
-        return gt.array_as_geotensor((nir - red) / (nir + red + self.eps))
-
-    def get_config(self):
-        return {"nir_idx": self.nir_idx, "red_idx": self.red_idx, "eps": self.eps}
-
-
-pipeline = Sequential([Scale(scale=1e-4), NDVI(nir_idx=7, red_idx=3)])
-ndvi = pipeline(sentinel2_geotensor)  # GeoTensor in, GeoTensor out
+scene = gz.Sequential([GridSampler(patcher), ApplyToChips(ndvi),
+                       Stitch(gp.SpatialOverlapAdd(), domain=field.domain)])(field)
 ```
 
-The same shape with the `|` pipe operator: `Scale(scale=1e-4) | NDVI(nir_idx=7, red_idx=3)`.
+The end-to-end Lake Tahoe tutorial runs this flow for real:
+[catalog notebook](https://jejjohnson.github.io/geotoolz/catalog/notebooks/end_to_end_lake_tahoe/) ·
+[patcher notebook](https://jejjohnson.github.io/geotoolz/patcher/notebooks/patcher_lake_tahoe/) ·
+[operators notebook](https://jejjohnson.github.io/geotoolz/notebooks/operators_lake_tahoe/).
 
 ## Install
 
-Not yet on PyPI. `geotoolz` depends on [`pipekit`](https://github.com/jejjohnson/pipekit)
-(also pre-PyPI), so use `uv` — it reads the git source declared in
-`pyproject.toml`:
-
 ```bash
-git clone https://github.com/jejjohnson/geotoolz.git
-cd geotoolz
-make install        # uv sync --all-groups + pre-commit hooks
+pip install geotoolz                      # operators only
+pip install 'geotoolz[patch]'             # + patcher (geopatcher)
+pip install geotoolz-catalog              # catalog only
+pip install 'geotoolz-catalog[patch]'     # catalog + patcher bridge
 ```
 
-One-shot from GitHub:
+Pre-PyPI, install from a clone or via git URLs with
+`subdirectory=packages/<name>`:
 
 ```bash
-uv pip install "git+https://github.com/jejjohnson/geotoolz@main"
+git clone https://github.com/jejjohnson/geotoolz && cd geotoolz
+uv sync --all-packages --all-groups --all-extras
 ```
 
-Optional extras: `[hydra]` (YAML round-trip via hydra-zen), `[patch]`
-(pulls in [`geopatcher`](https://github.com/jejjohnson/geopatcher) for
-sliding-window inference).
-
-## Dev
+## Development
 
 ```bash
-make install     # uv sync --all-groups + pre-commit hooks
-make test        # uv run pytest -v
-make lint        # uv run --group lint ruff check .
-make format      # ruff format + ruff check --fix
-make typecheck   # uv run --group typecheck ty check src/geotoolz
-make docs-serve  # local MkDocs server
+make install              # uv sync (all packages, groups, extras) + hooks
+make test                 # fast tier across all three packages
+make lint                 # ruff check .  (entire repo)
+make format               # ruff format + ruff check --fix
+make typecheck            # ty per package
+make docs-serve           # the unified docs site, locally
 ```
 
-Pre-commit checklist (mirrors CI):
-
-```bash
-uv run pytest -v
-uv run --group lint ruff check .
-uv run --group lint ruff format --check .
-uv run --group typecheck ty check src/geotoolz
-```
-
-## Next steps
-
-- **Docs site:** [concepts](docs/concepts.md), [quickstart](docs/quickstart.md),
-  [recipes](docs/recipes/).
-- **End-to-end Lake Tahoe notebook (cross-repo):**
-  [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geocatalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb)
-  — the canonical multi-repo flow (catalog → patch → operate).
-- **Operator-composition slice for this repo:**
-  [`docs/notebooks/operators_lake_tahoe.ipynb`](docs/notebooks/operators_lake_tahoe.ipynb).
+Each package keeps its own tests, pytest markers, and coverage gates —
+run from the package directory (`cd packages/geotoolz-patcher && uv run
+pytest`). Releases are cut per package by release-please
+(`geotoolz-vX.Y.Z`, `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`).
 
 ## License
 
