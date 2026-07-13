@@ -21,20 +21,29 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv sync --all-extras --group dev
+        run: uv sync --all-packages --all-groups --all-extras
       # Fast tier only — `slow` / `integration` tests run manually via the
       # "Extended Tests" workflow (workflow_dispatch), never automatically.
-      - name: Run tests with coverage
+      # Each package runs from its own directory so its pytest + coverage
+      # config (markers, gates, bench ignores) applies unchanged.
+      - name: Test geotoolz
         run: uv run pytest -v -m "not slow and not integration"
+        working-directory: packages/geotoolz
+      - name: Test geotoolz-patcher
+        run: uv run pytest -v
+        working-directory: packages/geotoolz-patcher
+      - name: Test geotoolz-catalog
+        run: uv run pytest -v
+        working-directory: packages/geotoolz-catalog
       - name: Upload coverage report
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
-          path: coverage.xml
+          path: packages/*/coverage.xml
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v7
         with:
-          files: ./coverage.xml
+          files: packages/geotoolz/coverage.xml,packages/geotoolz-patcher/coverage.xml,packages/geotoolz-catalog/coverage.xml
           fail_ci_if_error: false

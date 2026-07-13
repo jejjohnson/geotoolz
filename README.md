@@ -24,6 +24,24 @@ flowchart LR
     end
 ```
 
+## Monorepo layout
+
+This repository is a [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/)
+shipping three packages (same structure as
+[pipekit](https://github.com/jejjohnson/pipekit)):
+
+| Package | Import | What it is |
+|---------|--------|------------|
+| [`geotoolz`](packages/geotoolz) | `geotoolz` | The RS operator families documented on this page |
+| [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher framework: split fields into patches, run operators, stitch back |
+| [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files (GeoSlice → loaders) |
+
+Import names are unchanged from the pre-monorepo repos — only the
+distribution names carry the `geotoolz-` prefix. Install what you need:
+`pip install geotoolz` / `geotoolz-patcher` / `geotoolz-catalog`
+(pre-PyPI: `uv sync --all-packages` in a clone, or git+ URLs with
+`subdirectory=packages/<name>`).
+
 ## What is it
 
 `geotoolz` is a small algebra of **Operators** for remote-sensing rasters.

@@ -464,6 +464,11 @@ def test_write_zarr_reports_missing_optional_dependency(
         io.WriteZarr(store="memory://out.zarr")(gt)
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("ee") is not None,
+    reason="earthengine-api installed (workspace [gee] extra) — the "
+    "missing-dependency error path is not exercisable",
+)
 def test_load_from_ee_reports_missing_optional_dependencies() -> None:
     op = io.LoadFromEE(
         image_id="asset",

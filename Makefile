@@ -91,7 +91,7 @@ version: ## 📋 Display package version and git hash
 
 install: ## 📦 Install all dependency groups via uv + pre-commit hooks
 	@printf "$(YELLOW)>>> Installing all dependencies...$(RESET)\n"
-	uv sync --all-groups
+	uv sync --all-packages --all-groups --all-extras
 	uv run pre-commit install
 	@printf "$(GREEN)>>> ✅ Installation complete!$(RESET)\n"
 
@@ -119,34 +119,42 @@ format: ## 🖊️  Format code with ruff (format + auto-fix) — entire repo
 	uv run --group lint ruff check --fix .
 	@printf "$(GREEN)>>> ✅ Format complete!$(RESET)\n"
 
-typecheck: ## 🔬 Type-check with ty
+typecheck: ## 🔬 Type-check with ty (all packages)
 	@printf "$(YELLOW)>>> Running type checks...$(RESET)\n"
-	uv run --group typecheck ty check $(PKGROOT)
+	cd packages/geotoolz && uv run --group typecheck ty check src/geotoolz
+	cd packages/geotoolz-patcher && uv run --group typecheck ty check src/geopatcher
+	cd packages/geotoolz-catalog && uv run --group typecheck ty check src/geocatalog
 	@printf "$(GREEN)>>> ✅ Type check passed!$(RESET)\n"
 
 # ===========================================================================
 ##@ Testing
 # ===========================================================================
 
-test: ## 🧪 Run fast tests (excludes slow/integration; no coverage)
+test: ## 🧪 Run fast tests across all packages (no coverage)
 	@printf "$(YELLOW)>>> Running fast tests (no coverage)...$(RESET)\n"
-	uv run pytest -v -o addopts=--strict-markers -m "not slow and not integration"
+	cd packages/geotoolz && uv run pytest -v -o addopts=--strict-markers -m "not slow and not integration"
+	cd packages/geotoolz-patcher && uv run pytest -v -o addopts=--strict-markers
+	cd packages/geotoolz-catalog && uv run pytest -v -o addopts="--strict-markers --ignore=tests/bench -m 'not live'"
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
 test-all: ## 🧪 Run ALL tests including slow/integration (no coverage)
 	@printf "$(YELLOW)>>> Running full test suite (no coverage)...$(RESET)\n"
-	uv run pytest -v -o addopts=--strict-markers
+	cd packages/geotoolz && uv run pytest -v -o addopts=--strict-markers
+	cd packages/geotoolz-patcher && uv run pytest -v -o addopts=--strict-markers
+	cd packages/geotoolz-catalog && uv run pytest -v -o addopts="--strict-markers --ignore=tests/bench -m 'not live'"
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
-test-slow: ## 🐢 Run only the slow/integration tiers (no coverage)
+test-slow: ## 🐢 Run only the slow/integration tiers (geotoolz; no coverage)
 	@printf "$(YELLOW)>>> Running slow/integration tests (no coverage)...$(RESET)\n"
-	uv run pytest -v -o addopts=--strict-markers -m "slow or integration"
+	cd packages/geotoolz && uv run pytest -v -o addopts=--strict-markers -m "slow or integration"
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
-test-cov: ## 📊 Run fast tests with coverage report (same tier as CI)
+test-cov: ## 📊 Run fast tests with coverage reports (same tier as CI)
 	@printf "$(YELLOW)>>> Running tests with coverage...$(RESET)\n"
-	uv run pytest -v -m "not slow and not integration"
-	@printf "$(GREEN)>>> ✅ Coverage report generated!$(RESET)\n"
+	cd packages/geotoolz && uv run pytest -v -m "not slow and not integration"
+	cd packages/geotoolz-patcher && uv run pytest -v
+	cd packages/geotoolz-catalog && uv run pytest -v
+	@printf "$(GREEN)>>> ✅ Coverage reports generated!$(RESET)\n"
 
 # ===========================================================================
 ##@ Pre-commit
