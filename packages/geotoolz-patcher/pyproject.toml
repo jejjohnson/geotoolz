@@ -1,6 +1,6 @@
 [project]
 name = "geotoolz-patcher"
-version = "0.0.6"
+version = "0.1.0"
 description = "Four-axis Patcher framework for geospatial fields — split a field into local patches, run an operator per patch, stitch the outputs back into a global result."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

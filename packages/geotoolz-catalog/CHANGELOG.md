@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.0.3...geotoolz-catalog-v0.1.0) (2026-07-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* merge geopatcher + geocatalog into a uv workspace monorepo ([#97](https://github.com/jejjohnson/geotoolz/issues/97))
+
+### Features
+
+* merge geopatcher + geocatalog into a uv workspace monorepo ([#97](https://github.com/jejjohnson/geotoolz/issues/97)) ([202286c](https://github.com/jejjohnson/geotoolz/commit/202286c2e3ea976a18142bdbaba906211e17cba1))
+
 ## [0.0.3](https://github.com/jejjohnson/geocatalog/compare/v0.0.2...v0.0.3) (2026-06-09)
 
 

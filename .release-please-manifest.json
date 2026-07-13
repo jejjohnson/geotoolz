@@ -1,5 +1,5 @@
 {
-  "packages/geotoolz": "0.1.1",
-  "packages/geotoolz-patcher": "0.0.6",
-  "packages/geotoolz-catalog": "0.0.3"
+  "packages/geotoolz": "0.2.0",
+  "packages/geotoolz-patcher": "0.1.0",
+  "packages/geotoolz-catalog": "0.1.0"
 }
