@@ -101,8 +101,12 @@ nav:
           - Patching: patcher/patching.md
           - Observability hooks: patcher/observability.md
           - Async and prefetch: patcher/patching/async-prefetch.md
-      - API reference:
-          - Core framework: patcher/api/reference.md
+      - API Reference:
+          - Overview: patcher/api/reference.md
+          - Core framework: patcher/api/core.md
+          - Spatial axes: patcher/api/spatial.md
+          - Temporal axes: patcher/api/temporal.md
+          - ML utilities: patcher/api/ml.md
           - Matched multi-source: patcher/api/matched.md
           - Integrations: patcher/api/integrations.md
       - Design:
@@ -118,7 +122,15 @@ nav:
           - Staging & bundles: catalog/recipes/staging-and-bundles.md
       - Tutorial:
           - End-to-end (Lake Tahoe): catalog/notebooks/end_to_end_lake_tahoe.ipynb
-      - API reference: catalog/api/reference.md
+      - API Reference:
+          - Overview: catalog/api/reference.md
+          - Catalogs & backends: catalog/api/catalogs.md
+          - GeoSlice & grid alignment: catalog/api/geoslice.md
+          - Loaders: catalog/api/loaders.md
+          - GeoParquet interchange: catalog/api/geoparquet.md
+          - Discovery sources & bundle: catalog/api/sources.md
+          - Matchup engine: catalog/api/matchup.md
+          - Staging & the patcher bridge: catalog/api/staging.md
       - CLI: catalog/cli.md
       - Schema versions: catalog/schema-versions.md
       - Logging: catalog/logging.md
@@ -135,7 +147,13 @@ markdown_extensions:
       generic: true
   - pymdownx.highlight:
       anchor_linenums: true
-  - pymdownx.superfences
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.details

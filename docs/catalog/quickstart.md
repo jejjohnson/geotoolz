@@ -82,7 +82,7 @@ print(f"len(catalog): {len(catalog)}")
 ```
 
 If you want provenance (which query produced which rows), use
-[`CatalogBundle`](api/reference.md#bundle) instead —
+[`CatalogBundle`](api/sources.md#bundle) instead —
 `CatalogBundle.empty().ingest(src, bounds=..., interval=..., ...)`
 runs the same `Source.query` internally and records a `QueryRecord`
 per call.
