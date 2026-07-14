@@ -23,6 +23,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float, Int
 
 from xrtoolz._operator import Operator
 from xrtoolz.utils._src.optional_imports import _require_optional
@@ -80,7 +81,10 @@ def ssim(
     if window is not None:
         base_kw["win_size"] = window
 
-    def _ssim_slice(p_slc: np.ndarray, r_slc: np.ndarray) -> float:
+    def _ssim_slice(
+        p_slc: Float[np.ndarray, "*image"],
+        r_slc: Float[np.ndarray, "*image"],
+    ) -> float:
         # Compute data_range per-slice; if the reference is constant or
         # all-NaN the standard formula collapses to 1.0 (perfect match
         # iff the prediction matches; otherwise no meaningful structural
@@ -266,7 +270,7 @@ def centroid_displacement(
     coord_a = objects_pred.coords[dims[0]].values
     coord_b = objects_pred.coords[dims[1]].values
 
-    def _centroids(lab: np.ndarray) -> dict[int, tuple[float, float]]:
+    def _centroids(lab: Int[np.ndarray, "a b"]) -> dict[int, tuple[float, float]]:
         out: dict[int, tuple[float, float]] = {}
         ids = np.unique(lab)
         ids = ids[ids > 0]

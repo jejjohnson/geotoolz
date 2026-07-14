@@ -16,6 +16,14 @@ import numpy as np
 import pytest
 import xarray as xr
 
+
+try:  # SSIM requires scikit-image (the [image] extra)
+    import skimage  # noqa: F401
+
+    _HAS_SKIMAGE = True
+except ImportError:
+    _HAS_SKIMAGE = False
+
 from xrtoolz.metrics import (
     CRPS,
     RMSE,
@@ -336,6 +344,9 @@ def test_centroid_displacement_no_common_objects() -> None:
     assert out.sizes["object"] == 0
 
 
+@pytest.mark.skipif(
+    not _HAS_SKIMAGE, reason="requires scikit-image (the [image] extra)"
+)
 def test_ssim_identical_inputs_one() -> None:
     rng = np.random.default_rng(12)
     img = rng.standard_normal((32, 32))
@@ -345,6 +356,9 @@ def test_ssim_identical_inputs_one() -> None:
     np.testing.assert_allclose(float(out.values), 1.0, atol=1e-10)
 
 
+@pytest.mark.skipif(
+    not _HAS_SKIMAGE, reason="requires scikit-image (the [image] extra)"
+)
 def test_ssim_uncorrelated_noise_low() -> None:
     rng = np.random.default_rng(13)
     coords = {"lat": np.arange(32), "lon": np.arange(32)}

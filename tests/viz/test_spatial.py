@@ -158,13 +158,13 @@ def _ssh_snapshot(with_time: bool = True) -> xr.DataArray:
 
 
 def test_panel_plain_axes_returns_figure():
-    fig = SpatialMapPanel(var="ssh")(_ssh_snapshot())
+    fig = SpatialMapPanel(variable="ssh")(_ssh_snapshot())
     assert fig is not None
     plt.close(fig)
 
 
 def test_panel_auto_cmap_from_registry():
-    panel = SpatialMapPanel(var="ssh")
+    panel = SpatialMapPanel(variable="ssh")
     fig = panel(_ssh_snapshot())
     # The pcolormesh is the first QuadMesh on the axes.
     qm = next(c for c in fig.axes[0].collections)
@@ -173,27 +173,27 @@ def test_panel_auto_cmap_from_registry():
 
 
 def test_panel_explicit_cmap_overrides_registry():
-    fig = SpatialMapPanel(var="ssh", cmap="plasma")(_ssh_snapshot())
+    fig = SpatialMapPanel(variable="ssh", cmap="plasma")(_ssh_snapshot())
     qm = next(c for c in fig.axes[0].collections)
     assert qm.cmap.name == "plasma"
     plt.close(fig)
 
 
 def test_panel_handles_no_time_dim():
-    fig = SpatialMapPanel(var="ssh")(_ssh_snapshot(with_time=False))
+    fig = SpatialMapPanel(variable="ssh")(_ssh_snapshot(with_time=False))
     assert fig is not None
     plt.close(fig)
 
 
 def test_panel_dataset_input_auto_picks_var():
     da = _ssh_snapshot()
-    fig = SpatialMapPanel()(da.to_dataset())  # var=None auto-picks
+    fig = SpatialMapPanel()(da.to_dataset())  # variable=None auto-picks
     assert fig is not None
     plt.close(fig)
 
 
 def test_panel_gulf_stream_preset_applies_extent():
-    fig = SpatialMapPanel(var="ssh", projection="gulf_stream")(_ssh_snapshot())
+    fig = SpatialMapPanel(variable="ssh", projection="gulf_stream")(_ssh_snapshot())
     ax = fig.axes[0]
     assert hasattr(ax, "set_extent")
     extent = ax.get_extent(crs=ccrs.PlateCarree())
@@ -203,14 +203,14 @@ def test_panel_gulf_stream_preset_applies_extent():
 
 def test_panel_savefig_creates_parent_dirs(tmp_path):
     out = tmp_path / "nested" / "snapshot.png"
-    fig = SpatialMapPanel(var="ssh", savefig=out)(_ssh_snapshot())
+    fig = SpatialMapPanel(variable="ssh", savefig=out)(_ssh_snapshot())
     assert out.exists()
     plt.close(fig)
 
 
 def test_panel_get_config_round_trip():
-    panel = SpatialMapPanel(var="sst", projection="north_atlantic", cbar_label="K")
+    panel = SpatialMapPanel(variable="sst", projection="north_atlantic", cbar_label="K")
     cfg = panel.get_config()
-    assert cfg["var"] == "sst"
+    assert cfg["variable"] == "sst"
     assert cfg["projection"] == "north_atlantic"
     assert cfg["cbar_label"] == "K"

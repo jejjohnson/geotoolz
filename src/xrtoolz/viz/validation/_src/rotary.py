@@ -24,7 +24,7 @@ class RotaryPolarizationPanel(_PSDPanelBase):
     def __init__(
         self,
         *,
-        var: str = "polarization",
+        variable: str = "polarization",
         wavenumber_dim: str = "wavenumber",
         y_dim: str = "lat",
         cmap: str = "RdBu_r",
@@ -39,7 +39,7 @@ class RotaryPolarizationPanel(_PSDPanelBase):
         super().__init__(figsize=figsize, **kw)
         if vmin >= vmax:
             raise ValueError(f"vmin must be less than vmax; got {vmin=} and {vmax=}.")
-        self.var = var
+        self.variable = variable
         self.wavenumber_dim = wavenumber_dim
         self.y_dim = y_dim
         self.cmap = cmap
@@ -62,7 +62,7 @@ class RotaryPolarizationPanel(_PSDPanelBase):
         axes: Any,
         spectrum: xr.Dataset | xr.DataArray,
     ) -> None:
-        da = spectrum[self.var] if isinstance(spectrum, xr.Dataset) else spectrum
+        da = spectrum[self.variable] if isinstance(spectrum, xr.Dataset) else spectrum
         da = da.transpose(self.y_dim, self.wavenumber_dim)
         ax = axes
         mesh = ax.pcolormesh(
@@ -74,7 +74,7 @@ class RotaryPolarizationPanel(_PSDPanelBase):
             vmax=self.vmax,
             shading="auto",
         )
-        fig.colorbar(mesh, ax=ax, label=self.var)
+        fig.colorbar(mesh, ax=ax, label=self.variable)
         ax.set_xlabel(self.wavenumber_dim)
         ax.set_ylabel(self.y_dim)
         if self.wavelength_axis:
@@ -91,7 +91,7 @@ class RotaryPolarizationPanel(_PSDPanelBase):
     def get_config(self) -> dict[str, Any]:
         return {
             **super().get_config(),
-            "var": self.var,
+            "variable": self.variable,
             "wavenumber_dim": self.wavenumber_dim,
             "y_dim": self.y_dim,
             "cmap": self.cmap,

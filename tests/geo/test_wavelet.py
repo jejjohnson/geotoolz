@@ -233,7 +233,7 @@ def test_wavelet_plot_helpers_return_axes() -> None:
     import matplotlib
 
     matplotlib.use("Agg")
-    from xrtoolz.geo.plot import (
+    from xrtoolz.viz import (
         plot_dominant_period_map,
         plot_global_wavelet_spectrum,
         plot_resolved_scale_map,
@@ -309,7 +309,7 @@ def test_plot_wavelet_spectrum_1d_rejects_higher_dimensional_input() -> None:
     import matplotlib
 
     matplotlib.use("Agg")
-    from xrtoolz.geo.plot import plot_wavelet_spectrum_1d
+    from xrtoolz.viz import plot_wavelet_spectrum_1d
 
     da = _plane_wave()
     scales = xr.DataArray([2.0, 4.0], dims="scale")

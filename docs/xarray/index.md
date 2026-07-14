@@ -54,17 +54,17 @@ Compute geostrophic surface currents from sea-surface height, then map them
 import xrtoolz
 from xrtoolz import Sequential
 from xrtoolz.geo import RemoveMean
-from xrtoolz.ocn.operators import Streamfunction, GeostrophicVelocities
+from xrtoolz.ocn import Streamfunction, GeostrophicVelocities
 from xrtoolz.viz.validation import SpatialMapPanel
 
 pipeline = Sequential(
-    RemoveMean(var="ssh"),       # de-mean the SSH field
+    RemoveMean(dim=("lat", "lon")),  # subtract the spatial mean
     Streamfunction(),            # ψ = g·η / f
     GeostrophicVelocities(),     # (u_g, v_g) from ψ
 )
 
 currents = pipeline(ds)          # xr.Dataset in → xr.Dataset out
-fig = SpatialMapPanel(var="u")(currents)
+fig = SpatialMapPanel(variable="u")(currents)
 ```
 
 The same three operators can be wired as a DAG with `Graph` when you need

@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float
 
 from xrtoolz.calc._src import cartesian, rectilinear, spherical
 from xrtoolz.calc._src.constants import EARTH_RADIUS
@@ -107,8 +108,8 @@ def gradient(
 
 
 def _broadcast_lat_factor(
-    factor_1d: np.ndarray, *, ref: xr.DataArray, lat: str
-) -> np.ndarray:
+    factor_1d: Float[np.ndarray, "lat"], *, ref: xr.DataArray, lat: str
+) -> Float[np.ndarray, "..."]:
     """Reshape a 1-D latitude-dependent factor to broadcast on ``ref``."""
     shape = [1] * ref.ndim
     shape[ref.get_axis_num(lat)] = factor_1d.size
@@ -163,7 +164,7 @@ def divergence(
             **geom_kw,
         )
         total = d if total is None else total + d
-    assert total is not None  # len(components) >= 2 enforced by the API
+    assert total is not None  # narrows Optional; only empty components trips this
 
     if geometry == "spherical":
         if len(components) != 2:

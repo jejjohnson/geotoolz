@@ -465,6 +465,24 @@ def test_kinetic_energy_budget_residual_operator(lonlat_grid):
     np.testing.assert_allclose(op(ds).values, 0.0, atol=1e-12)
 
 
+@pytest.mark.parametrize(
+    "op",
+    [
+        HeatBudgetResidual(temp_var="theta", surface_flux_var="F", depth=None),
+        SaltBudgetResidual(salt_var="so", w_var="w"),
+        VolumeBudgetResidual(depth=None),
+        KineticEnergyBudgetResidual(forcing_vars=("F", "diss"), depth=None),
+    ],
+    ids=lambda op: type(op).__name__,
+)
+def test_budget_operator_config_roundtrips_through_constructor(op):
+    """``type(op)(**op.get_config())`` must reconstruct an equivalent op."""
+    config = op.get_config()
+    clone = type(op)(**config)
+    assert clone.get_config() == config
+    assert vars(clone) == vars(op)
+
+
 def test_kinetic_energy_budget_residual_subtracts_forcing(lonlat_grid):
     ds = _closed_dataset(lonlat_grid)
     forcing = xr.full_like(ds["u"], 0.0)

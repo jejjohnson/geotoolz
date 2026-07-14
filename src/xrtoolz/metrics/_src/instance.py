@@ -27,11 +27,14 @@ from typing import Any
 import einx
 import numpy as np
 import xarray as xr
+from jaxtyping import Bool, Float, Shaped
 
 from xrtoolz._operator import Operator
 
 
-def _as_3d_bool(masks: xr.DataArray | np.ndarray, *, name: str) -> np.ndarray:
+def _as_3d_bool(
+    masks: xr.DataArray | Shaped[np.ndarray, "n h w"], *, name: str
+) -> Bool[np.ndarray, "n h w"]:
     """Coerce a carrier to a 3-D boolean ``(N, H, W)`` ndarray."""
     arr = np.asarray(masks)
     if arr.ndim != 3:
@@ -42,9 +45,9 @@ def _as_3d_bool(masks: xr.DataArray | np.ndarray, *, name: str) -> np.ndarray:
 
 
 def mask_iou_matrix(
-    pred_masks: xr.DataArray | np.ndarray,
-    ref_masks: xr.DataArray | np.ndarray,
-) -> np.ndarray:
+    pred_masks: xr.DataArray | Shaped[np.ndarray, "n_pred h w"],
+    ref_masks: xr.DataArray | Shaped[np.ndarray, "n_ref h w"],
+) -> Float[np.ndarray, "n_pred n_ref"]:
     """Pairwise mask-IoU matrix between two ``(N, H, W)`` stacks.
 
     Returns a dense ``(N_pred, N_ref)`` float matrix of mask

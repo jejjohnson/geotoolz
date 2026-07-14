@@ -34,7 +34,7 @@ appending derived columns. ``Augment`` does the merge-back;
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 import xarray as xr
 from pipekit import Operator as _PipekitOperator
@@ -110,6 +110,8 @@ class Augment(Operator):
         :class:`ApplyToEach` — augment with one diagnostic across many
             variables.
     """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(self, inner: _PipekitOperator) -> None:
         # Accept any pipekit Operator (xrtoolz.Operator is a subclass), so
@@ -233,6 +235,8 @@ class ApplyToEach(Operator):
     See Also:
         :class:`Augment` — wrap a single inner op to merge its output.
     """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,

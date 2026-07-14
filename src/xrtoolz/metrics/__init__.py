@@ -1,18 +1,20 @@
-"""Evaluation metrics — pixel, spectral, and (forthcoming) view-specific.
+"""Evaluation metrics, grouped by scientific diagnostic family.
 
-Submodules group metrics by *scientific diagnostic family*:
+- :mod:`xrtoolz.metrics.pixel` — pointwise scores (mse, rmse, bias, …)
+- :mod:`xrtoolz.metrics.spectral` — PSD-based scores and resolved scale
+- :mod:`xrtoolz.metrics.multiscale` / :mod:`forecast` — region and
+  lead-time composites
+- :mod:`xrtoolz.metrics.structural` / :mod:`probabilistic` /
+  :mod:`distributional` / :mod:`masked` — image structure, ensemble,
+  distribution, and masked-domain scores
+- :mod:`xrtoolz.metrics.physical` — physical-consistency diagnostics
+- :mod:`xrtoolz.metrics.object` — object-based verification
+- :mod:`xrtoolz.metrics.lagrangian` — reserved namespace (no content yet)
 
-- :mod:`xrtoolz.metrics._src.pixel` — pointwise (mse, rmse, …)
-- :mod:`xrtoolz.metrics._src.spectral` — PSD-based scores
-- :mod:`xrtoolz.metrics._src.multiscale`, :mod:`forecast` — V1
-- :mod:`xrtoolz.metrics._src.structural`, :mod:`probabilistic`,
-  :mod:`distributional`, :mod:`masked` — V2
-- :mod:`xrtoolz.metrics._src.lagrangian` — V3
-- :mod:`xrtoolz.metrics._src.physical` — V4
-- :mod:`xrtoolz.metrics._src.object` — V5
-
-Layer-1 ``Operator`` wrappers are re-exported flat from this package
-and from :mod:`xrtoolz.metrics.operators`.
+Families without a facade module (Diebold–Mariano, instance matching,
+residual binning, leaderboard, composite skill scores) are exported flat
+from this package. Layer-1 ``Operator`` wrappers are re-exported flat
+from this package and from :mod:`xrtoolz.metrics.operators`.
 """
 
 from xrtoolz.metrics._src.composite import psd_score_spacetime, rmse_skill_scores

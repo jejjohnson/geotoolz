@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 import xarray as xr
 
@@ -37,6 +37,8 @@ class ControlVolumeIntegral(Operator):
     Returns:
         The volume integral as a DataArray (reduced over ``dims``).
     """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -90,6 +92,8 @@ class BoundaryFlux(Operator):
     Returns:
         Dataset of per-boundary fluxes.
     """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -162,6 +166,12 @@ class _TracerBudgetOp(Operator):
     :class:`SaltBudgetResidual`.
     """
 
+    # Constructor-kwarg name for the tracer variable. Subclasses expose
+    # the tracer under their own kwarg (``temp_var=`` / ``salt_var=``),
+    # so ``get_config()`` must emit that key for
+    # ``type(op)(**op.get_config())`` to round-trip.
+    _tracer_key: ClassVar[str] = "tracer_var"
+
     def __init__(
         self,
         *,
@@ -186,8 +196,12 @@ class _TracerBudgetOp(Operator):
         self.depth = depth
 
     def get_config(self) -> dict[str, Any]:
+        # Explicit override: ConfigMixin auto-derivation reads the
+        # subclass ``__init__`` signature, whose shared kwargs hide
+        # behind ``**kw`` — so the config is spelled out here, with the
+        # tracer emitted under the subclass's own kwarg name.
         return {
-            "tracer_var": self.tracer_var,
+            self._tracer_key: self.tracer_var,
             "u_var": self.u_var,
             "v_var": self.v_var,
             "w_var": self.w_var,
@@ -221,6 +235,8 @@ class HeatBudgetResidual(_TracerBudgetOp):
     Returns:
         The per-cell heat-budget residual DataArray.
     """
+
+    _tracer_key: ClassVar[str] = "temp_var"
 
     def __init__(self, *, temp_var: str = "theta", **kw: Any) -> None:
         super().__init__(tracer_var=temp_var, **kw)
@@ -260,6 +276,8 @@ class SaltBudgetResidual(_TracerBudgetOp):
     Returns:
         The per-cell salt-budget residual DataArray.
     """
+
+    _tracer_key: ClassVar[str] = "salt_var"
 
     def __init__(self, *, salt_var: str = "so", **kw: Any) -> None:
         super().__init__(tracer_var=salt_var, **kw)
@@ -325,16 +343,6 @@ class VolumeBudgetResidual(Operator):
             depth=self.depth,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "u_var": self.u_var,
-            "v_var": self.v_var,
-            "w_var": self.w_var,
-            "lat": self.lat,
-            "lon": self.lon,
-            "depth": self.depth,
-        }
-
 
 class KineticEnergyBudgetResidual(Operator):
     """Per-cell kinetic-energy budget residual.
@@ -392,18 +400,12 @@ class KineticEnergyBudgetResidual(Operator):
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {
-            "u_var": self.u_var,
-            "v_var": self.v_var,
-            "forcing_vars": (
-                None if self.forcing_vars is None else list(self.forcing_vars)
-            ),
-            "time_dim": self.time_dim,
-            "lat": self.lat,
-            "lon": self.lon,
-            "depth": self.depth,
-            "w_var": self.w_var,
-        }
+        # Auto-derived config, with the ``forcing_vars`` tuple coerced
+        # to a JSON-safe list.
+        config = super().get_config()
+        if config["forcing_vars"] is not None:
+            config["forcing_vars"] = list(config["forcing_vars"])
+        return config
 
 
 __all__ = [

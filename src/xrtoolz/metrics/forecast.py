@@ -1,8 +1,16 @@
-"""Stub: lands with view V1 (Epic).
+"""Forecast-skill (lead-time) evaluation metrics — public re-export.
 
-This module is intentionally empty. It will be populated by the V1
-view epic. Importing it succeeds today so downstream PRs can land
-additively without a package layout change.
+Layer-0 functions: :func:`skill_by_lead_time`.
+
+Layer-1 operators: :class:`SkillByLeadTime`.
+
+Implementation lives in :mod:`xrtoolz.metrics._src.forecast`.
 """
 
-from xrtoolz.metrics._src.forecast import *  # noqa: F403
+from xrtoolz.metrics._src.forecast import SkillByLeadTime, skill_by_lead_time
+
+
+__all__ = [
+    "SkillByLeadTime",
+    "skill_by_lead_time",
+]

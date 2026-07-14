@@ -102,6 +102,9 @@ jaxtyping axes).
 ## Reference implementation
 
 `xrtoolz.calc` is the worked example of this convention end-to-end:
-`_src/_calc_kernels.py` holds the jaxtyped numpy kernels; `_src/operators.py`
-and the geometry modules are the xarray layer with full Google-style
-docstrings. New/updated modules should match it.
+`_src/operators.py` and the geometry modules (`_src/cartesian.py`,
+`_src/rectilinear.py`, `_src/spherical.py`) are the xarray layer with full
+Google-style docstrings; the stencil arithmetic itself is delegated to
+`finitediffx` rather than an in-repo kernel module, and the small
+module-private numpy helpers (e.g. `_difference`, `_broadcast_along`) carry
+jaxtyped shape annotations. New/updated modules should match it.

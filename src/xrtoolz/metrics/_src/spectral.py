@@ -26,6 +26,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float
 from scipy.interpolate import interp1d
 
 from xrtoolz._operator import Operator
@@ -352,8 +353,8 @@ def wavelet_resolved_scale_map(
 
 
 def find_intercept_1D(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: Float[np.ndarray, "n"],
+    y: Float[np.ndarray, "n"],
     level: float = 0.5,
     kind: str = "slinear",
     **kwargs: Any,
@@ -401,9 +402,9 @@ def find_intercept_1D(
 
 
 def _resolved_scale_column(
-    score: np.ndarray,
+    score: Float[np.ndarray, "freq"],
     *,
-    wavelengths_km: np.ndarray,
+    wavelengths_km: Float[np.ndarray, "freq"],
     threshold: float,
 ) -> float:
     """Find the threshold wavelength for one spatial score column.

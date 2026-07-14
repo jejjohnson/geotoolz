@@ -117,7 +117,7 @@ def test_eddy_regions_returns_two_class_dataarray() -> None:
         coords={"lat": np.arange(7), "lon": np.arange(7)},
     )
 
-    out = eddy_regions(ds, var="ssh", threshold=1.0, window=(3, 3))
+    out = eddy_regions(ds, variable="ssh", threshold=1.0, window=(3, 3))
 
     labels = set(np.unique(out.values[~np.isnan(out.values)]).astype(int).tolist())
     assert labels == {0, 1}

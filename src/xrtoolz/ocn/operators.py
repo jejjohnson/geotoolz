@@ -25,16 +25,17 @@ from xrtoolz.ocn._src import (
 
 
 class ValidateSSH(Operator):
-    """Validate and CF-normalise a sea-surface-height field.
+    """Attach canonical CF metadata to a sea-surface-height field.
 
-    Checks that ``variable`` is present and finite and applies the canonical
-    SSH metadata (standard name, units), raising on malformed input.
+    Assigns the canonical SSH attributes (``units``, ``standard_name``,
+    ``long_name``) to ``variable`` via ``assign_attrs``. No value checks
+    (finiteness, range, shape) are performed.
 
     Args:
-        variable: Name of the sea-surface-height variable to validate.
+        variable: Name of the sea-surface-height variable to tag.
 
     Returns:
-        The input dataset with ``variable`` validated and CF-tagged.
+        The input dataset with ``variable`` CF-tagged.
     """
 
     def __init__(self, variable: str = "ssh"):
@@ -48,17 +49,19 @@ class ValidateSSH(Operator):
 
 
 class ValidateVelocity(Operator):
-    """Validate a horizontal velocity pair ``(u, v)``.
+    """Attach canonical CF metadata to a horizontal velocity pair ``(u, v)``.
 
-    Ensures both components are present, finite, and consistently shaped, and
-    applies the canonical CF velocity metadata.
+    Assigns the canonical zonal / meridional velocity attributes
+    (``units``, ``standard_name``, ``long_name``) to both components via
+    ``assign_attrs``. No value checks (finiteness, shape consistency) are
+    performed.
 
     Args:
         u: Name of the eastward (zonal) velocity variable.
         v: Name of the northward (meridional) velocity variable.
 
     Returns:
-        The input dataset with ``u`` and ``v`` validated and CF-tagged.
+        The input dataset with ``u`` and ``v`` CF-tagged.
     """
 
     def __init__(self, u: str = "u", v: str = "v"):
@@ -403,7 +406,7 @@ class Advection(Operator):
     Args:
         scalar: Name of the advected tracer variable ``c``.
         components: Names of the velocity components ``(u, v)``.
-        dims: Spatial dimension names ``(lon, lat)`` the gradient is taken
+        dim: Spatial dimension names ``(lon, lat)`` the gradient is taken
             over.
 
     Returns:
@@ -415,22 +418,22 @@ class Advection(Operator):
         self,
         scalar: str,
         components: tuple[str, ...] = ("u", "v"),
-        dims: tuple[str, ...] = ("lon", "lat"),
+        dim: tuple[str, ...] = ("lon", "lat"),
     ):
         self.scalar = scalar
         self.components = components
-        self.dims = dims
+        self.dim = dim
 
     def _apply(self, ds):
         return _kinematics.advection(
-            ds, scalar=self.scalar, components=self.components, dims=self.dims
+            ds, scalar=self.scalar, components=self.components, dims=self.dim
         )
 
     def get_config(self) -> dict[str, Any]:
         return {
             "scalar": self.scalar,
             "components": self.components,
-            "dims": self.dims,
+            "dim": self.dim,
         }
 
 

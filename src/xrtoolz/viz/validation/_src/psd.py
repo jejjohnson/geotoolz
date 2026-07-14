@@ -54,9 +54,11 @@ class _PSDPanelBase(_ValidationPanel):
         return fig
 
 
-def _coerce_da(obj: xr.DataArray | xr.Dataset, var: str | None = None) -> xr.DataArray:
+def _coerce_da(
+    obj: xr.DataArray | xr.Dataset, variable: str | None = None
+) -> xr.DataArray:
     if isinstance(obj, xr.Dataset):
-        name = var or next(iter(obj.data_vars))
+        name = variable or next(iter(obj.data_vars))
         return obj[name]
     return obj
 

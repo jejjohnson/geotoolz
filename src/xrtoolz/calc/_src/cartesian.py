@@ -17,11 +17,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import xarray as xr
+from jaxtyping import Float
 
 
 # ``fdx.difference`` is a JIT-compiled ``PjitFunction`` whose kwargs the
 # type checker can't introspect. Re-type it as ``Any`` so we don't have
-# to plaster ``# type: ignore`` on every call site.
+# to plaster ignore comments on every call site.
 _fdx_difference: Any = cast(Any, fdx.difference)
 
 
@@ -73,13 +74,13 @@ class _x64_scope:
 
 
 def _difference(
-    values: np.ndarray,
+    values: Float[np.ndarray, "*shape"],
     *,
     axis: int,
     step_size: float,
     accuracy: int,
     method: str,
-) -> np.ndarray:
+) -> Float[np.ndarray, "*shape"]:
     """Run :func:`finitediffx.difference` while preserving input dtype."""
     in_dtype = np.asarray(values).dtype
     with _x64_scope(in_dtype == np.float64):

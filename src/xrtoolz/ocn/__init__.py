@@ -14,6 +14,8 @@ Content:
   layer depth.
 - SSH composition from altimetry products (``calculate_ssh_alongtrack``).
 - Variable attribute harmonization (``validate_ssh``, ``validate_velocity``).
+- Layer-1 ``Operator`` wrappers (:mod:`xrtoolz.ocn.operators`), all
+  re-exported here.
 
 All finite-differencing of lon/lat fields goes through
 :mod:`xrtoolz.calc`, which converts lon/lat (degrees) to metric
@@ -56,9 +58,65 @@ from xrtoolz.ocn._src.validation import (
     validate_ssh,
     validate_velocity,
 )
+from xrtoolz.ocn.operators import (
+    AbsoluteVorticity,
+    Advection,
+    AgeostrophicVelocities,
+    BruntVaisalaFrequency,
+    CalculateSSHAlongtrack,
+    CoriolisNormalized,
+    CurvatureVorticity,
+    Divergence,
+    EddyKineticEnergy,
+    Enstrophy,
+    Frontogenesis,
+    GeostrophicVelocities,
+    HorizontalVelocityMagnitude,
+    KineticEnergy,
+    LapseRate,
+    MixedLayerDepth,
+    OkuboWeiss,
+    PotentialVorticityBarotropic,
+    RelativeVorticity,
+    ShearStrain,
+    ShearVorticity,
+    StrainMagnitude,
+    Streamfunction,
+    TensorStrain,
+    ValidateSSH,
+    ValidateVelocity,
+    VelocityMagnitude,
+)
 
 
 __all__ = [
+    "AbsoluteVorticity",
+    "Advection",
+    "AgeostrophicVelocities",
+    "BruntVaisalaFrequency",
+    "CalculateSSHAlongtrack",
+    "CoriolisNormalized",
+    "CurvatureVorticity",
+    "Divergence",
+    "EddyKineticEnergy",
+    "Enstrophy",
+    "Frontogenesis",
+    "GeostrophicVelocities",
+    "HorizontalVelocityMagnitude",
+    "KineticEnergy",
+    "LapseRate",
+    "MixedLayerDepth",
+    "OkuboWeiss",
+    "PotentialVorticityBarotropic",
+    "RelativeVorticity",
+    "ShearStrain",
+    "ShearVorticity",
+    "StrainMagnitude",
+    "Streamfunction",
+    "TensorStrain",
+    "ValidateSSH",
+    "ValidateVelocity",
+    "VelocityMagnitude",
     "absolute_vorticity",
     "advection",
     "ageostrophic_velocities",

@@ -18,10 +18,10 @@ live in `xrtoolz.combinators`.
     ```python
     from xrtoolz import Sequential, Graph, Input
     from xrtoolz.geo import RemoveMean
-    from xrtoolz.ocn.operators import Streamfunction, GeostrophicVelocities
+    from xrtoolz.ocn import Streamfunction, GeostrophicVelocities
 
     # Linear pipeline
-    pipe = Sequential(RemoveMean(var="ssh"), GeostrophicVelocities())
+    pipe = Sequential(RemoveMean(dim=("lat", "lon")), GeostrophicVelocities())
     out = pipe(ds)
 
     # The same operators wired as a DAG

@@ -27,7 +27,7 @@ class SpatialMapPanel(_ValidationPanel):
     """Single 2-D ``(lat, lon)`` snapshot with optional cartopy projection.
 
     Args:
-        var: Data-variable name when input is a Dataset. ``None``
+        variable: Data-variable name when input is a Dataset. ``None``
             (default) auto-picks the first ``data_var``. Also used as
             the lookup key for :func:`xrtoolz.viz.cmap_for` when
             ``cmap`` is unset.
@@ -60,7 +60,7 @@ class SpatialMapPanel(_ValidationPanel):
     def __init__(
         self,
         *,
-        var: str | None = None,
+        variable: str | None = None,
         time_index: int | None = 0,
         cmap: str | None = None,
         vmin: float | None = None,
@@ -74,7 +74,7 @@ class SpatialMapPanel(_ValidationPanel):
         **kw: Any,
     ) -> None:
         super().__init__(**kw)
-        self.var = var
+        self.variable = variable
         self.time_index = time_index
         self.cmap = cmap
         self.vmin = vmin
@@ -87,7 +87,7 @@ class SpatialMapPanel(_ValidationPanel):
         self.lat = lat
 
     def _default_title(self) -> str:
-        return self.var or "Snapshot"
+        return self.variable or "Snapshot"
 
     def _make_fig_axes(self) -> tuple[mpl_figure.Figure, Any]:
         # Override so we can route through cartopy when a projection is set.
@@ -108,7 +108,7 @@ class SpatialMapPanel(_ValidationPanel):
 
     def _select_var(self, obj: xr.DataArray | xr.Dataset) -> xr.DataArray:
         if isinstance(obj, xr.Dataset):
-            name = self.var or next(iter(obj.data_vars))
+            name = self.variable or next(iter(obj.data_vars))
             return obj[name]
         return obj
 
@@ -126,7 +126,7 @@ class SpatialMapPanel(_ValidationPanel):
         ax = axes
         da = self._select_var(snapshot)
         da = self._select_time(da)
-        cmap = self.cmap if self.cmap is not None else cmap_for(self.var)
+        cmap = self.cmap if self.cmap is not None else cmap_for(self.variable)
         lon = np.asarray(da[self.lon].values)
         lat = np.asarray(da[self.lat].values)
         vals = np.asarray(da.values)
@@ -173,7 +173,7 @@ class SpatialMapPanel(_ValidationPanel):
     def get_config(self) -> dict[str, Any]:
         return {
             **super().get_config(),
-            "var": self.var,
+            "variable": self.variable,
             "time_index": self.time_index,
             "cmap": self.cmap,
             "vmin": self.vmin,

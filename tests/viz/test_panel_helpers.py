@@ -1,4 +1,8 @@
-"""Tests for the Foundations bundle (#119/#123/#124/#126/#127)."""
+"""Tests for viz styling helpers and score-panel clipping.
+
+Covers ``method_palette``, ``shared_norm``, and the ``clip``/``ylim``
+behaviour of the PSD score panels.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +16,6 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xrtoolz.metrics import find_intercept_2D, rank_methods
 from xrtoolz.viz import shared_norm
 from xrtoolz.viz.validation import (
     PSDIsotropicScorePanel,
@@ -21,7 +24,7 @@ from xrtoolz.viz.validation import (
 )
 
 
-# ---------- #119 method_palette ------------------------------------------
+# ---------- method_palette ------------------------------------------------
 
 
 def test_method_palette_deterministic_order():
@@ -45,7 +48,7 @@ def test_method_palette_empty_cycle_raises():
         method_palette(["a"], cycle=())
 
 
-# ---------- #123 shared_norm ---------------------------------------------
+# ---------- shared_norm ---------------------------------------------------
 
 
 def test_shared_norm_quantile_default():
@@ -100,7 +103,7 @@ def test_shared_norm_accepts_dask_backed_arrays():
     assert vmax == pytest.approx(2.0)
 
 
-# ---------- #124 clip toggle on score panels -----------------------------
+# ---------- clip toggle on score panels -----------------------------------
 
 
 def _signed_iso_score() -> xr.DataArray:
@@ -157,118 +160,3 @@ def test_space_time_score_panel_clip_toggle_returns_figure():
     assert fig_clipped is not None and fig_signed is not None
     plt.close(fig_clipped)
     plt.close(fig_signed)
-
-
-# ---------- #126 rank_methods --------------------------------------------
-
-
-def _scores_ds() -> xr.Dataset:
-    return xr.Dataset(
-        {
-            "rmse": ("method", [0.20, 0.10, 0.30]),
-            "nrmse": ("method", [0.40, 0.30, 0.50]),
-            "corr": ("method", [0.85, 0.95, 0.70]),
-        },
-        coords={"method": ["B", "A", "C"]},
-    )
-
-
-def test_rank_methods_sorts_ascending_by_rmse():
-    df = rank_methods(_scores_ds(), by="rmse")
-    assert list(df.index) == ["A", "B", "C"]
-    assert list(df["rmse"]) == [0.10, 0.20, 0.30]
-
-
-def test_rank_methods_descending_for_higher_is_better():
-    df = rank_methods(_scores_ds(), by="corr", ascending=False)
-    assert list(df.index) == ["A", "B", "C"]
-
-
-def test_rank_methods_include_subsets_columns():
-    df = rank_methods(_scores_ds(), by="rmse", include=("rmse", "corr"))
-    assert list(df.columns) == ["rmse", "corr"]
-
-
-def test_rank_methods_unknown_metric_raises():
-    with pytest.raises(ValueError, match="not in data_vars"):
-        rank_methods(_scores_ds(), by="bogus")
-
-
-def test_rank_methods_rejects_forgotten_region_dim():
-    """If the dataset has a (region, method) layout but the caller forgets
-    ``region_dim``, we must not silently mix rows across regions."""
-    ds = xr.Dataset(
-        {
-            "rmse": (
-                ("region", "method"),
-                [[0.1, 0.3, 0.2], [0.4, 0.2, 0.3]],
-            ),
-        },
-        coords={"region": ["NA", "GS"], "method": ["A", "B", "C"]},
-    )
-    with pytest.raises(ValueError, match="multi-valued extra index"):
-        rank_methods(ds, by="rmse")  # forgot region_dim
-
-
-def test_rank_methods_squeezes_singleton_extra_dim():
-    """Singleton extras (e.g. one region) are still allowed without
-    region_dim — they're silently squeezed out."""
-    ds = xr.Dataset(
-        {"rmse": (("region", "method"), [[0.1, 0.3, 0.2]])},
-        coords={"region": ["NA"], "method": ["A", "B", "C"]},
-    )
-    df = rank_methods(ds, by="rmse")
-    assert list(df.index) == ["A", "C", "B"]
-
-
-def test_rank_methods_per_region():
-    ds = xr.Dataset(
-        {
-            "rmse": (
-                ("region", "method"),
-                [[0.1, 0.3, 0.2], [0.4, 0.2, 0.3]],
-            ),
-        },
-        coords={"region": ["NA", "GS"], "method": ["A", "B", "C"]},
-    )
-    df = rank_methods(ds, by="rmse", region_dim="region")
-    # Per-region sort by ascending rmse.
-    assert list(df.loc["NA"].index) == ["A", "C", "B"]
-    assert list(df.loc["GS"].index) == ["B", "C", "A"]
-
-
-# ---------- #127 find_intercept_2D ---------------------------------------
-
-
-def test_find_intercept_2D_recovers_analytic_boundary():
-    n = 64
-    fl = np.linspace(0.0, 1.0, n)
-    ft = np.linspace(0.0, 1.0, n)
-    FL, FT = np.meshgrid(fl, ft)
-    # Linear monotone score: 1 - (fl + ft); score=0.5 along fl+ft=0.5
-    score = 1.0 - (FL + FT)
-    da = xr.DataArray(
-        score,
-        coords={"freq_time": ft, "freq_lon": fl},
-        dims=("freq_time", "freq_lon"),
-    )
-    segments = find_intercept_2D(da, level=0.5)
-    assert len(segments) >= 1
-    seg = segments[0]
-    assert "axis" in seg.dims
-    sx = seg.sel(axis="freq_lon").values
-    ty = seg.sel(axis="freq_time").values
-    # Analytic boundary: sx + ty = 0.5
-    np.testing.assert_allclose(sx + ty, 0.5, atol=2.0 / n)
-
-
-def test_find_intercept_2D_rejects_non_2d():
-    da = xr.DataArray([1.0, 2.0, 3.0], dims=("freq_lon",))
-    with pytest.raises(ValueError, match="2-D"):
-        find_intercept_2D(da)
-
-
-def test_find_intercept_2D_missing_dim_raises():
-    da = xr.DataArray(np.zeros((4, 4)), dims=("a", "b"))
-    with pytest.raises(ValueError, match="must have dims"):
-        find_intercept_2D(da)

@@ -13,13 +13,13 @@ from __future__ import annotations
 from xrreader.types import REGISTRY, Variable
 
 
-def cmap_for(var: str | Variable | None, default: str = "viridis") -> str:
-    """Return the registry-recommended colormap for ``var``.
+def cmap_for(variable: str | Variable | None, default: str = "viridis") -> str:
+    """Return the registry-recommended colormap for ``variable``.
 
     Args:
-        var: Variable instance, canonical short name (case-insensitive),
+        variable: Variable instance, canonical short name (case-insensitive),
             or ``None``.
-        default: Fallback colormap when ``var`` is ``None``, unknown, or
+        default: Fallback colormap when ``variable`` is ``None``, unknown, or
             its registry entry has no ``cmap``.
 
     Returns:
@@ -27,11 +27,11 @@ def cmap_for(var: str | Variable | None, default: str = "viridis") -> str:
         registration — cmocean colormaps via ``"cmo.<name>"`` work too
         when ``cmocean`` is installed and registered).
     """
-    if var is None:
+    if variable is None:
         return default
-    if isinstance(var, Variable):
-        return var.cmap or default
-    entry = REGISTRY.get(var) or REGISTRY.get(var.lower())
+    if isinstance(variable, Variable):
+        return variable.cmap or default
+    entry = REGISTRY.get(variable) or REGISTRY.get(variable.lower())
     if entry is None or entry.cmap is None:
         return default
     return entry.cmap

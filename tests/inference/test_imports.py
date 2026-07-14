@@ -24,6 +24,7 @@ def _leaked(script: str) -> list[str]:
     return [name for name in result.stdout.strip().splitlines() if name]
 
 
+@pytest.mark.slow  # fresh-interpreter import check
 def test_import_xrtoolz_does_not_leak_backends() -> None:
     leaked = _leaked(
         "import sys, xrtoolz\n"
@@ -35,6 +36,7 @@ def test_import_xrtoolz_does_not_leak_backends() -> None:
     assert leaked == [], f"unexpected backend imports leaked: {leaked}"
 
 
+@pytest.mark.slow  # fresh-interpreter import check
 def test_import_inference_does_not_leak_backends() -> None:
     leaked = _leaked(
         "import sys, xrtoolz.inference\n"

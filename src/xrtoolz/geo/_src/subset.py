@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import numpy as np
+import pandas as pd
 import regionmask
 import xarray as xr
 
@@ -100,8 +102,8 @@ def subset_where(
 
 def subset_time(
     ds: xr.Dataset,
-    time_min,
-    time_max,
+    time_min: str | np.datetime64 | pd.Timestamp,
+    time_max: str | np.datetime64 | pd.Timestamp,
     time: str = "time",
 ) -> xr.Dataset:
     """Restrict a dataset to the time range ``[time_min, time_max]``.

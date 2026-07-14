@@ -7,6 +7,7 @@ import xarray as xr
 from scipy.ndimage import distance_transform_edt
 
 from xrtoolz.utils._src.spacing import coord_spacing
+from xrtoolz.utils._src.validation import _require_dims
 
 
 def geometric_scales(
@@ -79,7 +80,7 @@ def build_coi_mask(
     invalid cell exceeds ``scale * x0`` in coordinate units.
     """
     ydim, xdim = dim
-    _require_dims(da, dim)
+    _require_dims(da, *dim)
     dy = coord_spacing(da, ydim)
     dx = coord_spacing(da, xdim)
     arr = np.asarray(da.transpose(ydim, xdim).values, dtype=float)
@@ -134,10 +135,3 @@ def _scale_values(scales: xr.DataArray) -> np.ndarray:
     if values.size > 1 and not np.all(np.diff(values) > 0):
         raise ValueError("scales must be strictly increasing.")
     return values
-
-
-def _require_dims(da: xr.DataArray, dim: tuple[str, str]) -> None:
-    """Validate that all required dimensions are present."""
-    missing = [d for d in dim if d not in da.dims]
-    if missing:
-        raise ValueError(f"DataArray is missing wavelet dims {missing!r}")

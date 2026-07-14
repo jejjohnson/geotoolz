@@ -16,7 +16,7 @@ first use.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import xarray as xr
@@ -56,6 +56,8 @@ class ModelOp(Operator):
         This class follows D4: no backend (sklearn / jax / torch) is
         imported here. The model is invoked via duck typing.
     """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,

@@ -1,4 +1,9 @@
-"""Tests for the xarray ↔ sklearn bridge."""
+"""Tests for :class:`~xrtoolz.transforms.SklearnOp`, the ``.sklearn``
+accessor, and ``nan_policy="mask"`` semantics.
+
+``XarrayEstimator``'s own marshalling behaviour is covered in
+``tests/utils/test_sklearn_wrap.py``.
+"""
 
 from __future__ import annotations
 

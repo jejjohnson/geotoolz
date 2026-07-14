@@ -20,21 +20,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 All implementation lives in `src/xrtoolz/`. The public API is re-exported through `src/xrtoolz/__init__.py`. The composition primitives (`Operator`, `Sequential`, `Graph`, `Input`, `Node`, `ConfigMixin`, `Tap`) are re-exported from `pipekit`.
 
-### Submodule layout — organised by Earth-science domain
+### Submodule layout
 
 | Path | Scope |
 |------|-------|
 | `xrtoolz.combinators` | `Augment`, `ApplyToEach` — xarray-Dataset-specific combinators built on `pipekit.Operator` |
 | `xrtoolz.signature` | `Signature` — dict-keyed shape descriptor used by `compute_output_signature` |
 | `xrtoolz.einx` | Labeled named-tensor algebra bridging xarray + [einx](https://github.com/fferflo/einx) — `einsum`/`rearrange`/`reduce`/`repeat`, `matmul`/`outer`/`batch_matmul`, `pack_dataset`/`unpack_dataset`, and matching Operators. Pattern axis tokens are DataArray dim names. See `docs/design/bridges/einx/`. |
-| `xrtoolz.geo` | Generic xarray geoprocessing — validation, subset, masks, regrid, detrend, interpolation, metrics, spectral, encoders, crs, sklearn, inference |
-| `xrtoolz.ocn` | Oceanography physics — coriolis, streamfunction, geostrophic velocities, vorticity, MLD, Brunt–Väisälä, KE, Okubo–Weiss |
-| `xrtoolz.atm` | Atmospheric physics — potential temperature, wind speed/direction |
-| `xrtoolz.atm.gas.ch4` | Trace-gas (methane) physics — column averaging kernel, dry air column, mixing ratio |
-| `xrtoolz.rs` | Remote sensing — radiance/reflectance, brightness temperature, NDVI |
-| `xrtoolz.ice` | Cryosphere — reserved namespace, no content yet |
+| `xrtoolz.geo` | Generic xarray geoprocessing — coordinate validation/CF renaming, subset, masks, detrend/climatology, CRS, regions, regimes, extremes, along-track, 1-D/2-D wavelet spectra |
+| `xrtoolz.ocn` | Oceanography physics — kinematics (vorticity, divergence, strain, Okubo–Weiss, streamfunction, geostrophic velocities, KE), SSH diagnostics, CF metadata validation |
+| `xrtoolz.calc` | Finite-difference calculus on labeled grids — `partial`/`gradient`/`curl`/`divergence`/`laplacian` with cartesian/rectilinear/spherical geometry dispatch, grid metrics, physical constants |
+| `xrtoolz.budgets` | Conservation budgets — heat/salt/volume/KE residuals, control-volume integrals, boundary fluxes |
+| `xrtoolz.interpolate` | Gap-filling (`FillNaN*`), regridding, KNN, binning, smoothing, coarsen/refine, downscaling, resampling, points↔grid, vertical coordinate remapping |
+| `xrtoolz.metrics` | Verification metrics — pixel, spectral (PSD, resolved scale), distributional, probabilistic, structural, object-based, physical, forecast, masked, multiscale, Diebold–Mariano, region/leadtime composites, leaderboard |
+| `xrtoolz.transforms` | Fourier/DCT/wavelet transforms, signal decompositions, morphology, coordinate remapping, space/time/basis encoders, sklearn bridge (`SklearnOp`) |
+| `xrtoolz.inference` | `ModelOp` inference wrappers (duck-typed; sklearn/JAX adapters). Not re-exported at top level — import explicitly |
+| `xrtoolz.utils` | Shared helpers — finite-mask utilities, grid spacing/resolution, validation guards, `XarrayEstimator` sklearn wrapper + `.sklearn` accessor |
+| `xrtoolz.viz` | Colormaps, norms, projections, and `viz.validation` panel Operators (spatial maps, PSD, rotary, budgets, events, regime bars) |
+| `xrtoolz.atm` / `xrtoolz.atm.gas.ch4` | Atmospheric / trace-gas physics — **empty namespace stubs**, planned scope in module docstrings |
+| `xrtoolz.rs` | Remote sensing — **empty namespace stub** |
+| `xrtoolz.ice` | Cryosphere — **empty namespace stub** |
 
-Design rule: anything domain-agnostic lives in `geo`; only true physics lives in the other domain submodules. The composition primitives themselves live in `pipekit`, not here.
+Design rules:
+
+- Anything domain-agnostic lives in `geo`/`calc`/`interpolate`/`transforms`/`utils`; only true physics lives in the domain submodules (`ocn`, `budgets`, `atm`, …). The composition primitives themselves live in `pipekit`, not here.
+- Implementation lives in each submodule's `_src/` directory; public names are re-exported through the submodule `__init__.py` (and, for `metrics`, per-family facade modules like `metrics.pixel`). **Every** public Operator class is importable from its domain package (`xrtoolz.ocn.Streamfunction`, not just `xrtoolz.ocn.operators.Streamfunction`).
+- Operator constructor conventions: `variable=` (not `var=`) for a single variable name, `variables=` for lists; singular `dim=` (accepting `str | Sequence[str]`) for reduce-style "dimension(s) to act over" parameters, plural `dims=` only when the value is inherently a fixed collection of axes (image-plane pairs, FFT axes).
 
 ### Key directories
 
@@ -67,7 +78,9 @@ JAX, PyTorch, sklearn models are **not** transitive dependencies — `ModelOp` u
 
 ```bash
 make install              # Install all deps (uv sync --all-groups) + pre-commit hooks
-make test                 # Run tests: uv run pytest -v
+make test                 # Fast tier: pytest -m "not slow and not integration"
+make test-all             # Everything, including slow/integration
+make test-slow            # Only the slow/integration tiers
 make format               # Auto-fix: ruff format . && ruff check --fix .
 make lint                 # Lint code: ruff check .
 make typecheck            # Type check: ty check src/xrtoolz
@@ -80,6 +93,14 @@ make docs-serve           # Local docs server
 ```bash
 uv run pytest tests/test_example.py::TestClass::test_method -v
 ```
+
+### Test tiers
+
+Tests are markered `slow` / `integration` (strict markers, registered in
+`pyproject.toml`). Automatic CI runs only the fast tier; the slow and
+integration tiers run manually via the "Extended Tests" workflow
+(`workflow_dispatch`) or `make test-slow`. Never add a slow or
+network-touching test without one of these markers.
 
 ### Pre-commit checklist (all four must pass)
 
@@ -96,7 +117,8 @@ uv run --group typecheck ty check src/xrtoolz  # Typecheck — package only
 
 - Every `Operator` subclass is a callable with `__call__`, `get_config()`, `__repr__()`
 - Layer 0 pure functions live alongside Layer 1 operators in the same submodule
-- Stateful operations use the split-object pattern (`CalculateX` returns state, `ApplyX(state)` applies it)
+- Stateful operations use the split-object pattern (`CalculateX` returns state, `ApplyX(state)` applies it). Exception: sklearn-style fit/transform state is handled by `utils.XarrayEstimator` + `transforms.SklearnOp` instead (documented in `transforms/operators.py`)
+- Operators holding live non-serializable state (models, closures, Datasets, child operators) set `forbid_in_yaml: ClassVar[bool] = True` (pipekit convention)
 - Google-style docstrings
 - Type hints on all public functions and methods
 - Surgical changes only — don't refactor adjacent code or add docstrings to unchanged code

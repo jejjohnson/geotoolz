@@ -1,8 +1,22 @@
-"""Stub: lands with view V1 (Epic).
+"""Multiscale (per-region) evaluation metrics — public re-export.
 
-This module is intentionally empty. It will be populated by the V1
-view epic. Importing it succeeds today so downstream PRs can land
-additively without a package layout change.
+Layer-0 functions: :func:`evaluate_by_region`,
+:func:`normalize_regions`.
+
+Layer-1 operators: :class:`EvaluateByRegion`.
+
+Implementation lives in :mod:`xrtoolz.metrics._src.multiscale`.
 """
 
-from xrtoolz.metrics._src.multiscale import *  # noqa: F403
+from xrtoolz.metrics._src.multiscale import (
+    EvaluateByRegion,
+    evaluate_by_region,
+    normalize_regions,
+)
+
+
+__all__ = [
+    "EvaluateByRegion",
+    "evaluate_by_region",
+    "normalize_regions",
+]

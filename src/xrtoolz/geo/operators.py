@@ -515,23 +515,23 @@ class CalculateClimatologySmoothed(Operator):
 
 
 class RemoveMean(Operator):
-    """Subtract the mean over ``dims`` (a cheap anomaly without a climatology).
+    """Subtract the mean over ``dim`` (a cheap anomaly without a climatology).
 
     Args:
-        dims: Dimension or dimensions to average over before subtracting.
+        dim: Dimension or dimensions to average over before subtracting.
 
     Returns:
-        The input dataset with the per-``dims`` mean removed.
+        The input dataset with the per-``dim`` mean removed.
     """
 
-    def __init__(self, dims: str | tuple[str, ...]):
-        self.dims = (dims,) if isinstance(dims, str) else tuple(dims)
+    def __init__(self, dim: str | Sequence[str]):
+        self.dim = (dim,) if isinstance(dim, str) else tuple(dim)
 
     def _apply(self, ds):
-        return _detrend.remove_mean(ds, self.dims)
+        return _detrend.remove_mean(ds, self.dim)
 
     def get_config(self) -> dict[str, Any]:
-        return {"dims": list(self.dims)}
+        return {"dim": list(self.dim)}
 
 
 # ---------- generic transforms --------------------------------------------
@@ -724,14 +724,15 @@ class WaveletPowerSpectrum(Operator):
     """2-D Morlet wavelet power spectrum of one variable.
 
     Args:
-        var: Name of the variable to transform.
+        variable: Name of the variable to transform.
         scales: Wavelet scales (a sequence or DataArray).
         dim: The two spatial dims ``(y, x)``.
         x0: Reference length scale (m).
         ntheta: Number of orientation angles.
         k0: Morlet central wavenumber.
         isotropic: Average over orientation when ``True``.
-        output_var: Name for the output variable (default ``"<var>_wpsd"``).
+        output_var: Name for the output variable (default
+            ``"<variable>_wpsd"``).
 
     Returns:
         The input dataset with the wavelet power-spectrum variable added.
@@ -739,7 +740,7 @@ class WaveletPowerSpectrum(Operator):
 
     def __init__(
         self,
-        var: str,
+        variable: str,
         scales: Sequence[float] | xr.DataArray,
         *,
         dim: tuple[str, str] = ("y", "x"),
@@ -749,7 +750,7 @@ class WaveletPowerSpectrum(Operator):
         isotropic: bool = True,
         output_var: str | None = None,
     ) -> None:
-        self.var = var
+        self.variable = variable
         self.scales = scales
         self.dim = tuple(dim)
         self.x0 = float(x0)
@@ -759,11 +760,11 @@ class WaveletPowerSpectrum(Operator):
         self.output_var = output_var
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
-        if self.var not in ds.data_vars:
-            raise KeyError(f"Dataset missing variable {self.var!r}")
-        out_name = self.output_var or f"{self.var}_wpsd"
+        if self.variable not in ds.data_vars:
+            raise KeyError(f"Dataset missing variable {self.variable!r}")
+        out_name = self.output_var or f"{self.variable}_wpsd"
         spectrum = _wavelet.wvlt_power_spectrum(
-            ds[self.var],
+            ds[self.variable],
             self.scales,
             dim=self.dim,
             x0=self.x0,
@@ -775,7 +776,7 @@ class WaveletPowerSpectrum(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "var": self.var,
+            "variable": self.variable,
             "scales": "<xr object>",
             "dim": list(self.dim),
             "x0": self.x0,
@@ -792,12 +793,13 @@ class WaveletScalogram(Operator):
     Adds six derived variables under a common prefix:
     ``<prefix>_wave``, ``<prefix>_power``, ``<prefix>_power_rect``,
     ``<prefix>_scalogram``, ``<prefix>_coi``, ``<prefix>_coi_mask``.
-    The prefix defaults to ``var`` and is overridable via ``output_prefix``.
+    The prefix defaults to ``variable`` and is overridable via
+    ``output_prefix``.
     """
 
     def __init__(
         self,
-        var: str,
+        variable: str,
         *,
         dim: str = "time",
         mother: str = "morlet",
@@ -808,7 +810,7 @@ class WaveletScalogram(Operator):
         rectify: bool = True,
         output_prefix: str | None = None,
     ) -> None:
-        self.var = var
+        self.variable = variable
         self.dim = dim
         self.mother = mother
         self.param = param
@@ -819,11 +821,11 @@ class WaveletScalogram(Operator):
         self.output_prefix = output_prefix
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
-        if self.var not in ds.data_vars:
-            raise KeyError(f"Dataset missing variable {self.var!r}")
-        prefix = self.output_prefix or self.var
+        if self.variable not in ds.data_vars:
+            raise KeyError(f"Dataset missing variable {self.variable!r}")
+        prefix = self.output_prefix or self.variable
         out = _wavelet1d.cwt1d(
-            ds[self.var],
+            ds[self.variable],
             dim=self.dim,
             mother=self.mother,
             param=self.param,
@@ -847,7 +849,7 @@ class WaveletScalogram(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "var": self.var,
+            "variable": self.variable,
             "dim": self.dim,
             "mother": self.mother,
             "param": self.param,
@@ -863,7 +865,7 @@ class WaveletSignificance(Operator):
     """Torrence-Compo significance mask for a wavelet-power variable.
 
     Args:
-        var: Name of the wavelet-power variable to test.
+        variable: Name of the wavelet-power variable to test.
         dim_time: Time dimension name.
         dim_scale: Scale dimension name.
         null: Null spectrum — ``"red"`` (AR(1)) or ``"white"`` noise.
@@ -872,7 +874,7 @@ class WaveletSignificance(Operator):
         mother: Mother wavelet name.
         param: Optional mother parameter.
         output_var: Name for the mask variable (default
-            ``"<var>_signif_mask"``).
+            ``"<variable>_signif_mask"``).
 
     Returns:
         The input dataset with a boolean significance-mask variable added.
@@ -880,7 +882,7 @@ class WaveletSignificance(Operator):
 
     def __init__(
         self,
-        var: str,
+        variable: str,
         *,
         dim_time: str = "time",
         dim_scale: str = "scale",
@@ -891,7 +893,7 @@ class WaveletSignificance(Operator):
         param: float | None = None,
         output_var: str | None = None,
     ) -> None:
-        self.var = var
+        self.variable = variable
         self.dim_time = dim_time
         self.dim_scale = dim_scale
         self.null = null
@@ -902,11 +904,11 @@ class WaveletSignificance(Operator):
         self.output_var = output_var
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
-        if self.var not in ds.data_vars:
-            raise KeyError(f"Dataset missing variable {self.var!r}")
-        out_name = self.output_var or f"{self.var}_signif_mask"
+        if self.variable not in ds.data_vars:
+            raise KeyError(f"Dataset missing variable {self.variable!r}")
+        out_name = self.output_var or f"{self.variable}_signif_mask"
         mask = _wavelet1d.wavelet_significance(
-            ds[self.var],
+            ds[self.variable],
             dim_time=self.dim_time,
             dim_scale=self.dim_scale,
             null=self.null,
@@ -919,7 +921,7 @@ class WaveletSignificance(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "var": self.var,
+            "variable": self.variable,
             "dim_time": self.dim_time,
             "dim_scale": self.dim_scale,
             "null": self.null,

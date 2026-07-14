@@ -7,6 +7,7 @@ from typing import Literal, cast
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Complex, Float
 from scipy.fft import fft, fftfreq, ifft
 from scipy.special import gammaincinv
 
@@ -305,14 +306,14 @@ def dominant_period_map(
 
 
 def _cwt1d_numpy(
-    values: np.ndarray,
+    values: Float[np.ndarray, "time"],
     *,
     dt: float,
-    scale: np.ndarray,
+    scale: Float[np.ndarray, "scale"],
     mother: str,
     param: float,
     pad: bool,
-) -> np.ndarray:
+) -> Complex[np.ndarray, "scale time"]:
     arr = np.asarray(values, dtype=float)
     n = arr.size
     if n < 2:
@@ -335,7 +336,9 @@ def _cwt1d_numpy(
     return out
 
 
-def _mother_ft(eta: np.ndarray, *, mother: str, param: float) -> np.ndarray:
+def _mother_ft(
+    eta: Float[np.ndarray, "freq"], *, mother: str, param: float
+) -> Complex[np.ndarray, "freq"]:
     positive = eta > 0.0
     out = np.zeros_like(eta, dtype=np.complex128)
     if mother == "morlet":
@@ -360,7 +363,7 @@ def _scale_grid(
     s0: float | None,
     dj: float,
     j_max: int | None,
-) -> np.ndarray:
+) -> Float[np.ndarray, "scale"]:
     if dt <= 0:
         raise ValueError("dt must be strictly positive")
     if dj <= 0:
@@ -393,8 +396,8 @@ def _coi(
 
 def _coi_mask(
     *,
-    scale: np.ndarray,
-    period: np.ndarray,
+    scale: Float[np.ndarray, "scale"],
+    period: Float[np.ndarray, "scale"],
     coi: xr.DataArray,
     dim: str,
 ) -> xr.DataArray:

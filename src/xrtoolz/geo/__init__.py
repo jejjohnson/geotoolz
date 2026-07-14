@@ -8,7 +8,7 @@ analysis, extremes, binning, and CRS utilities.
 The public API is re-exported from :mod:`xrtoolz.geo._src`. For direct
 access to a specific Layer-0 module, import e.g.
 ``xrtoolz.geo._src.detrend``. Layer-1 ``Operator`` wrappers live in
-:mod:`xrtoolz.geo.operators`.
+:mod:`xrtoolz.geo.operators` and are all re-exported here.
 
 Evaluation metrics (``mse``, ``rmse``, …, ``psd_score``, ``find_intercept_1D``)
 moved to :mod:`xrtoolz.metrics`. They remain importable from this
@@ -102,9 +102,31 @@ from xrtoolz.geo._src.wavelet_utils import (
     wavenumber_to_scale,
 )
 from xrtoolz.geo.operators import (
+    AddClimatology,
+    AddCountryMask,
+    AddLandMask,
+    AddOceanMask,
+    ApplyMask,
     BandpassWavelength,
+    CalculateClimatology,
+    CalculateClimatologySmoothed,
+    DecodeCFTime,
+    FillNaN,
+    Reduce,
+    RemoveClimatology,
+    RemoveMean,
+    RenameCoords,
     RenameFromCFStandardNames,
     RenameToCFStandardNames,
+    RenameVariables,
+    SelectVariables,
+    SubsetBBox,
+    SubsetTime,
+    SubsetToRegion,
+    ValidateCoords,
+    ValidateLatitude,
+    ValidateLongitude,
+    ValidateTime,
     WaveletPowerSpectrum,
     WaveletScalogram,
     WaveletSignificance,
@@ -175,10 +197,32 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "REGIONS",
+    "AddClimatology",
+    "AddCountryMask",
+    "AddLandMask",
+    "AddOceanMask",
+    "ApplyMask",
     "BandpassWavelength",
+    "CalculateClimatology",
+    "CalculateClimatologySmoothed",
+    "DecodeCFTime",
+    "FillNaN",
+    "Reduce",
     "RegionSpec",
+    "RemoveClimatology",
+    "RemoveMean",
+    "RenameCoords",
     "RenameFromCFStandardNames",
     "RenameToCFStandardNames",
+    "RenameVariables",
+    "SelectVariables",
+    "SubsetBBox",
+    "SubsetTime",
+    "SubsetToRegion",
+    "ValidateCoords",
+    "ValidateLatitude",
+    "ValidateLongitude",
+    "ValidateTime",
     "WaveletPowerSpectrum",
     "WaveletScalogram",
     "WaveletSignificance",

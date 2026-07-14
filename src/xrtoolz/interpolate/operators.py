@@ -59,7 +59,13 @@ def _json_fill_value(value: float | None) -> float | str | None:
 
 
 class FillNaNSpatial(Operator):
-    """Wrap :func:`xrtoolz.interpolate.fillnan_spatial`."""
+    """Wrap :func:`xrtoolz.interpolate.fillnan_spatial`.
+
+    Args:
+        method: ``"linear"``, ``"nearest"``, or ``"cubic"``.
+        lon: Name of the longitude coordinate.
+        lat: Name of the latitude coordinate.
+    """
 
     def __init__(self, method: str = "linear", lon: str = "lon", lat: str = "lat"):
         self.method = method
@@ -73,7 +79,15 @@ class FillNaNSpatial(Operator):
 
 
 class FillNaNTemporal(Operator):
-    """Wrap :func:`xrtoolz.interpolate.fillnan_temporal`."""
+    """Wrap :func:`xrtoolz.interpolate.fillnan_temporal`.
+
+    Args:
+        method: Any method accepted by xarray's ``interpolate_na``
+            (``"linear"``, ``"nearest"``, ``"cubic"``, etc.).
+        time: Name of the time dimension.
+        max_gap: Maximum time delta to interpolate across; gaps wider
+            than this stay NaN.
+    """
 
     def __init__(
         self,
@@ -92,7 +106,16 @@ class FillNaNTemporal(Operator):
 
 
 class FillNaNClimatology(Operator):
-    """Wrap :func:`xrtoolz.interpolate.fillnan_climatology`."""
+    """Wrap :func:`xrtoolz.interpolate.fillnan_climatology`.
+
+    Args:
+        time: Name of the time dimension.
+        group: Calendar grouping used to compute the climatology.
+        residual: ``"zero"`` fills missing values with climatology only;
+            ``"linear"`` linearly interpolates the anomaly and adds it back.
+        min_count: Minimum finite observations required for each
+            climatology group.
+    """
 
     def __init__(
         self,
@@ -118,7 +141,17 @@ class FillNaNClimatology(Operator):
 
 
 class FillNaNLaplacian(Operator):
-    """Wrap :func:`xrtoolz.interpolate.fillnan_laplacian`."""
+    """Wrap :func:`xrtoolz.interpolate.fillnan_laplacian`.
+
+    Args:
+        max_iter: Maximum red/black Gauss-Seidel sweeps.
+        tol: Absolute convergence tolerance for missing-cell updates.
+        relaxation: SOR relaxation factor. ``1.0`` is Gauss-Seidel.
+        boundary: ``"reflect"`` for Neumann edges, or ``"wrap"`` to wrap
+            longitude edges while reflecting latitude edges.
+        lon: Name of the longitude dimension.
+        lat: Name of the latitude dimension.
+    """
 
     def __init__(
         self,
@@ -160,7 +193,14 @@ class FillNaNLaplacian(Operator):
 
 
 class FillNaNBiharmonic(Operator):
-    """Wrap :func:`xrtoolz.interpolate.fillnan_biharmonic`."""
+    """Wrap :func:`xrtoolz.interpolate.fillnan_biharmonic`.
+
+    Args:
+        lon: Name of the longitude dimension.
+        lat: Name of the latitude dimension.
+        split_into_regions: Forwarded to scikit-image. When ``True``,
+            each connected masked region is solved independently.
+    """
 
     def __init__(
         self,
@@ -183,7 +223,16 @@ class FillNaNBiharmonic(Operator):
 
 
 class FillNaNRBF(Operator):
-    """Wrap :func:`xrtoolz.interpolate.fillnan_rbf`."""
+    """Wrap :func:`xrtoolz.interpolate.fillnan_rbf`.
+
+    Args:
+        kernel: RBF kernel passed to
+            :class:`scipy.interpolate.RBFInterpolator`.
+        neighbors: Number of nearest neighbors used per query point;
+            ``None`` uses all points.
+        lon: Name of the longitude coordinate.
+        lat: Name of the latitude coordinate.
+    """
 
     def __init__(
         self,
@@ -208,7 +257,21 @@ class FillNaNRBF(Operator):
 
 
 class FillNaNIDW(Operator):
-    """Wrap :func:`xrtoolz.interpolate.fillnan_idw`."""
+    """Wrap :func:`xrtoolz.interpolate.fillnan_idw`.
+
+    Args:
+        lon: Name of the longitude coordinate and dimension.
+        lat: Name of the latitude coordinate and dimension.
+        k: Number of nearest finite neighbours to use.
+        power: Inverse-distance exponent. ``0`` gives an unweighted
+            kNN mean.
+        metric: ``"euclidean"`` for array-index distances or
+            ``"haversine"`` for great-circle distances from coordinate
+            values.
+        max_distance: Optional neighbour cutoff (radians for
+            ``"haversine"``, index units for ``"euclidean"``).
+        eps: Small non-negative offset for non-exact distance weights.
+    """
 
     def __init__(
         self,
@@ -431,7 +494,16 @@ class CleanMask(Operator):
 
 
 class ResampleTime(Operator):
-    """Wrap :func:`xrtoolz.interpolate.resample_time`."""
+    """Wrap :func:`xrtoolz.interpolate.resample_time`.
+
+    Args:
+        freq: Pandas-style frequency string (e.g. ``"1D"``, ``"6H"``).
+        method: Zero-argument aggregation method (``"mean"``, ``"sum"``,
+            ``"max"``, …) or ``"interpolate"`` for upsampling.
+        time: Name of the time dimension.
+        interp_method: Interpolation method forwarded to xarray when
+            ``method="interpolate"``.
+    """
 
     def __init__(
         self,

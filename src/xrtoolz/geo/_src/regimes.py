@@ -64,18 +64,20 @@ def equatorial_regions(*, lat_threshold: float = 5.0) -> regionmask.Regions:
 def eddy_regions(
     ds: xr.Dataset,
     *,
-    var: str,
+    variable: str,
     threshold: float | None = None,
     window: tuple[int, int] = (5, 5),
     lon: str = "lon",
     lat: str = "lat",
 ) -> xr.DataArray:
-    """Return a two-class mask from local rolling variance of ``var``."""
-    da = ds[var]
+    """Return a two-class mask from local rolling variance of ``variable``."""
+    da = ds[variable]
     dims = (lat, lon)
     missing = [dim for dim in dims if dim not in da.dims]
     if missing:
-        raise ValueError(f"eddy_regions variable {var!r} is missing dims {missing}.")
+        raise ValueError(
+            f"eddy_regions variable {variable!r} is missing dims {missing}."
+        )
     local_var = da.rolling({lat: window[0], lon: window[1]}, center=True).var()
     cutoff = float(local_var.median(skipna=True)) if threshold is None else threshold
     mask = xr.where(local_var >= cutoff, np.int64(1), np.int64(0))

@@ -6,6 +6,14 @@ import numpy as np
 import pytest
 import xarray as xr
 
+
+try:  # resolved-scale contours require scikit-image (the [image] extra)
+    import skimage  # noqa: F401
+
+    _HAS_SKIMAGE = True
+except ImportError:
+    _HAS_SKIMAGE = False
+
 from xrtoolz.metrics import (
     nrmse,
     psd_score_spacetime,
@@ -92,6 +100,9 @@ def test_rmse_skill_scores_identical_fields_have_perfect_skill() -> None:
     assert float(scores["error_stability"]) == pytest.approx(0.0)
 
 
+@pytest.mark.skipif(
+    not _HAS_SKIMAGE, reason="requires scikit-image (the [image] extra)"
+)
 def test_resolved_scale_2d_returns_expected_wavelength_bounds() -> None:
     score = xr.DataArray(
         np.array(
@@ -121,6 +132,9 @@ def test_resolved_scale_2d_returns_expected_wavelength_bounds() -> None:
     )
 
 
+@pytest.mark.skipif(
+    not _HAS_SKIMAGE, reason="requires scikit-image (the [image] extra)"
+)
 def test_resolved_scale_2d_handles_disconnected_segments_and_no_contour() -> None:
     disconnected = xr.DataArray(
         np.array(
@@ -158,6 +172,9 @@ def test_resolved_scale_2d_handles_disconnected_segments_and_no_contour() -> Non
     assert all(np.isnan(value) for value in no_contour.values())
 
 
+@pytest.mark.skipif(
+    not _HAS_SKIMAGE, reason="requires scikit-image (the [image] extra)"
+)
 def test_psd_score_spacetime_returns_positive_frequency_score_and_summary() -> None:
     rng = np.random.default_rng(0)
     time = np.arange(64, dtype=float)

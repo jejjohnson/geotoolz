@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float
 
 from xrtoolz._operator import Operator
 
@@ -142,7 +143,7 @@ def reliability_curve(
     probability: xr.DataArray,
     event: xr.DataArray,
     *,
-    probability_bins: np.ndarray | None = None,
+    probability_bins: Float[np.ndarray, "edges"] | None = None,
 ) -> xr.Dataset:
     """Reliability diagram coordinates.
 
@@ -278,7 +279,10 @@ class ReliabilityCurve(Operator):
     """Reliability-diagram operator (probability vs event)."""
 
     def __init__(
-        self, variable: str, *, probability_bins: np.ndarray | None = None
+        self,
+        variable: str,
+        *,
+        probability_bins: Float[np.ndarray, "edges"] | None = None,
     ) -> None:
         self.variable = variable
         self.probability_bins = (

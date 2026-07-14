@@ -78,12 +78,12 @@ def test_remove_mean_subtracts_spatial_mean() -> None:
 def test_remove_mean_op_round_trip() -> None:
     op = RemoveMean(("lat", "lon"))
     cfg = json.loads(json.dumps(op.get_config()))
-    assert cfg == {"dims": ["lat", "lon"]}
+    assert cfg == {"dim": ["lat", "lon"]}
 
 
 def test_remove_mean_accepts_single_dim_string() -> None:
     op = RemoveMean("lat")
-    assert op.dims == ("lat",)
+    assert op.dim == ("lat",)
 
 
 # ---------- regrid_like ---------------------------------------------------

@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float
 from scipy import stats
 
 from xrtoolz._operator import Operator
@@ -94,8 +95,8 @@ def dm_test(
 
 
 def _dm_stat_pvalue(
-    errors_a: np.ndarray,
-    errors_b: np.ndarray,
+    errors_a: Float[np.ndarray, "*shape"],
+    errors_b: Float[np.ndarray, "*shape"],
     *,
     h: int,
     alternative: str,
@@ -129,7 +130,7 @@ def _dm_stat_pvalue(
     return float(stat), float(p_value)
 
 
-def _newey_west_variance(centered: np.ndarray, *, lag: int) -> float:
+def _newey_west_variance(centered: Float[np.ndarray, "n"], *, lag: int) -> float:
     n = centered.size
     gamma0 = float(np.dot(centered, centered) / n)
     variance = gamma0

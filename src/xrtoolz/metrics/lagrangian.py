@@ -1,8 +1,9 @@
-"""Stub: lands with view V3 (Epic).
+"""Lagrangian evaluation metrics — public re-export (reserved).
 
-This module is intentionally empty. It will be populated by the V3
-view epic. Importing it succeeds today so downstream PRs can land
-additively without a package layout change.
+The implementation module :mod:`xrtoolz.metrics._src.lagrangian` is
+still an empty stub reserved for the V3 view epic, so this facade
+exports no names yet. It ships now so downstream code can import the
+path without a package layout change once the implementation lands.
 """
 
-from xrtoolz.metrics._src.lagrangian import *  # noqa: F403
+__all__: list[str] = []

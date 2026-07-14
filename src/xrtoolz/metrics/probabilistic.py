@@ -1,8 +1,33 @@
-"""Stub: lands with view V2 (Epic).
+"""Probabilistic / ensemble evaluation metrics — public re-export.
 
-This module is intentionally empty. It will be populated by the V2
-view epic. Importing it succeeds today so downstream PRs can land
-additively without a package layout change.
+Layer-0 functions: :func:`spread_skill_ratio`, :func:`rank_histogram`,
+:func:`ensemble_coverage`, :func:`reliability_curve`.
+
+Layer-1 operators: :class:`SpreadSkillRatio`, :class:`RankHistogram`,
+:class:`EnsembleCoverage`, :class:`ReliabilityCurve`.
+
+Implementation lives in :mod:`xrtoolz.metrics._src.probabilistic`.
 """
 
-from xrtoolz.metrics._src.probabilistic import *  # noqa: F403
+from xrtoolz.metrics._src.probabilistic import (
+    EnsembleCoverage,
+    RankHistogram,
+    ReliabilityCurve,
+    SpreadSkillRatio,
+    ensemble_coverage,
+    rank_histogram,
+    reliability_curve,
+    spread_skill_ratio,
+)
+
+
+__all__ = [
+    "EnsembleCoverage",
+    "RankHistogram",
+    "ReliabilityCurve",
+    "SpreadSkillRatio",
+    "ensemble_coverage",
+    "rank_histogram",
+    "reliability_curve",
+    "spread_skill_ratio",
+]

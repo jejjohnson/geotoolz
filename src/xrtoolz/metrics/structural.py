@@ -1,8 +1,33 @@
-"""Stub: lands with view V2 (Epic).
+"""Structural evaluation metrics — public re-export.
 
-This module is intentionally empty. It will be populated by the V2
-view epic. Importing it succeeds today so downstream PRs can land
-additively without a package layout change.
+Layer-0 functions: :func:`ssim`, :func:`gradient_difference`,
+:func:`phase_shift_error`, :func:`centroid_displacement`.
+
+Layer-1 operators: :class:`SSIM`, :class:`GradientDifference`,
+:class:`PhaseShiftError`, :class:`CentroidDisplacement`.
+
+Implementation lives in :mod:`xrtoolz.metrics._src.structural`.
 """
 
-from xrtoolz.metrics._src.structural import *  # noqa: F403
+from xrtoolz.metrics._src.structural import (
+    SSIM,
+    CentroidDisplacement,
+    GradientDifference,
+    PhaseShiftError,
+    centroid_displacement,
+    gradient_difference,
+    phase_shift_error,
+    ssim,
+)
+
+
+__all__ = [
+    "SSIM",
+    "CentroidDisplacement",
+    "GradientDifference",
+    "PhaseShiftError",
+    "centroid_displacement",
+    "gradient_difference",
+    "phase_shift_error",
+    "ssim",
+]

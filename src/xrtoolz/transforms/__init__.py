@@ -39,10 +39,48 @@ from xrtoolz.transforms._src.morphology import (
 )
 from xrtoolz.transforms._src.sklearn_op import SklearnOp
 from xrtoolz.transforms._src.wavelet import cwt, dwt
+from xrtoolz.transforms.operators import (
+    CWT,
+    DCT,
+    DST,
+    STFT,
+    Coherence,
+    CrossSpectrum,
+    CyclicalEncode,
+    EncodeTimeCyclical,
+    EncodeTimeOrdinal,
+    EnstrophySpectralFlux,
+    FourierFeatures,
+    KESpectralFlux,
+    PositionalEncoding,
+    PowerSpectrum,
+    RandomFourierFeatures,
+    RotarySpectrum,
+    TimeRescale,
+    TimeUnrescale,
+)
 
 
 __all__ = [
+    "CWT",
+    "DCT",
+    "DST",
+    "STFT",
+    "Coherence",
+    "CrossSpectrum",
+    "CyclicalEncode",
+    "EncodeTimeCyclical",
+    "EncodeTimeOrdinal",
+    "EnstrophySpectralFlux",
+    "FourierFeatures",
+    "KESpectralFlux",
+    "PositionalEncoding",
+    "PowerSpectrum",
+    "RandomFourierFeatures",
+    "RotarySpectrum",
     "SklearnOp",
+    "TimeRescale",
+    "TimeUnrescale",
     "binary_closing_2d",
     "binary_opening_2d",
     "clean_mask",

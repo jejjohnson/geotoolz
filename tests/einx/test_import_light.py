@@ -10,6 +10,12 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
+
+
+# Every test here launches a fresh interpreter; keep them out of the fast tier.
+pytestmark = pytest.mark.slow
+
 
 def test_import_xrtoolz_does_not_import_einx() -> None:
     code = (

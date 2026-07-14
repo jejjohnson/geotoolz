@@ -1,8 +1,29 @@
-"""Stub: lands with view V2 (Epic).
+"""Distributional evaluation metrics — public re-export.
 
-This module is intentionally empty. It will be populated by the V2
-view epic. Importing it succeeds today so downstream PRs can land
-additively without a package layout change.
+Layer-0 functions: :func:`crps_ensemble`, :func:`energy_distance`,
+:func:`wasserstein_1`.
+
+Layer-1 operators: :class:`CRPS`, :class:`EnergyDistance`,
+:class:`Wasserstein1`.
+
+Implementation lives in :mod:`xrtoolz.metrics._src.distributional`.
 """
 
-from xrtoolz.metrics._src.distributional import *  # noqa: F403
+from xrtoolz.metrics._src.distributional import (
+    CRPS,
+    EnergyDistance,
+    Wasserstein1,
+    crps_ensemble,
+    energy_distance,
+    wasserstein_1,
+)
+
+
+__all__ = [
+    "CRPS",
+    "EnergyDistance",
+    "Wasserstein1",
+    "crps_ensemble",
+    "energy_distance",
+    "wasserstein_1",
+]

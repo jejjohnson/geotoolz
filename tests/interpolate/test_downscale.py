@@ -104,6 +104,7 @@ def test_get_config_round_trips_through_json(coarse_ds):
     assert isinstance(round_tripped["model"], str)
 
 
+@pytest.mark.slow  # fresh-interpreter import check
 def test_no_top_level_jax_or_torch_import():
     """Per D4, the downscale module must not import JAX or torch.
 

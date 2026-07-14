@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float
 
 from xrtoolz.calc._src import cartesian
 from xrtoolz.calc._src.constants import EARTH_RADIUS
@@ -35,7 +36,9 @@ def _radian_step(coord: xr.DataArray, *, rtol: float) -> float:
     return deg_step * _RAD_PER_DEG
 
 
-def _broadcast_along(values: np.ndarray, *, ndim: int, axis: int) -> np.ndarray:
+def _broadcast_along(
+    values: Float[np.ndarray, "n"], *, ndim: int, axis: int
+) -> Float[np.ndarray, "..."]:
     """Reshape a 1-D array so it broadcasts along ``axis`` of an ndim array."""
     shape = [1] * ndim
     shape[axis] = values.size

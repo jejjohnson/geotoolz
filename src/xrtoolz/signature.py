@@ -40,6 +40,9 @@ from typing import Any
 import numpy as np
 
 
+__all__ = ["Signature"]
+
+
 def _canonical_dtype(dtype: Any) -> str | None:
     """Normalize a dtype tag so equality is independent of input form.
 

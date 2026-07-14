@@ -162,6 +162,11 @@ class _PixelMetricOp(Operator):
         self,
         input_signature: Signature | tuple[Signature, ...],
     ) -> Signature:
+        """Infer the output signature: input dims minus the reduced ``dims``.
+
+        Tuple inputs (one signature per metric operand) are validated
+        for matching dim names and sizes before the first is used.
+        """
         if isinstance(input_signature, tuple):
             signature = input_signature[0]
             for other in input_signature[1:]:
@@ -175,34 +180,50 @@ class _PixelMetricOp(Operator):
 
 
 class MSE(_PixelMetricOp):
+    """Mean-squared-error operator."""
+
     _fn = staticmethod(mse)
 
 
 class RMSE(_PixelMetricOp):
+    """Root-mean-squared-error operator."""
+
     _fn = staticmethod(rmse)
 
 
 class NRMSE(_PixelMetricOp):
+    """Normalized-RMSE operator (``1 - RMSE / sqrt(<ref^2>)``)."""
+
     _fn = staticmethod(nrmse)
 
 
 class NRMSEScore(_PixelMetricOp):
+    """Mercator/OceanBench NRMSE skill operator (``1 - RMSE / std(ref)``)."""
+
     _fn = staticmethod(nrmse_score)
 
 
 class MAE(_PixelMetricOp):
+    """Mean-absolute-error operator."""
+
     _fn = staticmethod(mae)
 
 
 class Bias(_PixelMetricOp):
+    """Mean-bias operator (``<pred - ref>``)."""
+
     _fn = staticmethod(bias)
 
 
 class Correlation(_PixelMetricOp):
+    """Pearson-correlation operator."""
+
     _fn = staticmethod(correlation)
 
 
 class R2Score(_PixelMetricOp):
+    """Coefficient-of-determination operator (``1 - SS_res / SS_tot``)."""
+
     _fn = staticmethod(r2_score)
 
 

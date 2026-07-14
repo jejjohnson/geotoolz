@@ -4,27 +4,28 @@ from __future__ import annotations
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Complex, Float
 from scipy.fft import fft2, fftfreq, ifft2
 
 from xrtoolz.geo._src.wavelet_utils import (
-    _require_dims,
     _scale_values,
     build_coi_mask,
     scale_to_wavenumber,
 )
 from xrtoolz.utils._src.spacing import coord_spacing
+from xrtoolz.utils._src.validation import _require_dims
 
 
 def morlet2_ft(
-    kx: np.ndarray,
-    ky: np.ndarray,
+    kx: Float[np.ndarray, "y x"],
+    ky: Float[np.ndarray, "y x"],
     s: float,
     theta: float,
     *,
     x0: float,
     k0: float = 1.0,
     a: float = 1.0,
-) -> np.ndarray:
+) -> Complex[np.ndarray, "y x"]:
     """Analytic Fourier transform of a rotated 2-D Morlet wavelet.
 
     Args:
@@ -214,7 +215,7 @@ def _validate_cwt_input(
     ntheta: int,
 ) -> None:
     """Validate CWT dimensions, scales, angles, and spatial chunking."""
-    _require_dims(da, dim)
+    _require_dims(da, *dim)
     if da.ndim != 2:
         raise ValueError(f"cwt2 expects a 2-D DataArray; got dims {da.dims}.")
     if ntheta <= 0:

@@ -1,8 +1,16 @@
-"""Stub: lands with view V2 (Epic).
+"""Masked-metric wrappers — public re-export.
 
-This module is intentionally empty. It will be populated by the V2
-view epic. Importing it succeeds today so downstream PRs can land
-additively without a package layout change.
+Layer-0 functions: :func:`masked_metric`.
+
+Layer-1 operators: :class:`MaskedMetric`.
+
+Implementation lives in :mod:`xrtoolz.metrics._src.masked`.
 """
 
-from xrtoolz.metrics._src.masked import *  # noqa: F403
+from xrtoolz.metrics._src.masked import MaskedMetric, masked_metric
+
+
+__all__ = [
+    "MaskedMetric",
+    "masked_metric",
+]

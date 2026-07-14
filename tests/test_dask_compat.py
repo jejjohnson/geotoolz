@@ -14,6 +14,7 @@ See ``docs/`` (the Dask page) for the per-operator tier table.
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -135,6 +136,7 @@ class Case:
     needs_ref: bool = False
     lazy: bool = False
     xfail: str | None = None
+    requires: str | None = None  # optional module the operator depends on
 
 
 CASES: list[Case] = [
@@ -179,7 +181,11 @@ CASES: list[Case] = [
     ),
     Case("interpolate.FillNaNRBF", FillNaNRBF(), data=_grid_gap, lazy=True),
     Case(
-        "interpolate.FillNaNBiharmonic", FillNaNBiharmonic(), data=_grid_gap, lazy=True
+        "interpolate.FillNaNBiharmonic",
+        FillNaNBiharmonic(),
+        data=_grid_gap,
+        lazy=True,
+        requires="skimage",
     ),
     Case("interpolate.FillNaNIDW", FillNaNIDW(), data=_grid_gap, lazy=True),
     # -- Tier-3: lazy (regionmask masks, xarray-interp regrid) -----------------
@@ -211,7 +217,13 @@ CASES: list[Case] = [
 def _params() -> list[Any]:
     out = []
     for c in CASES:
-        marks = (pytest.mark.xfail(reason=c.xfail, strict=True),) if c.xfail else ()
+        marks: tuple[Any, ...] = (
+            (pytest.mark.xfail(reason=c.xfail, strict=True),) if c.xfail else ()
+        )
+        if c.requires is not None and importlib.util.find_spec(c.requires) is None:
+            marks += (
+                pytest.mark.skip(reason=f"requires the optional {c.requires} module"),
+            )
         out.append(pytest.param(c, id=c.id, marks=marks))
     return out
 
