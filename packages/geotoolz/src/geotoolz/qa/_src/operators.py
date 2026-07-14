@@ -355,11 +355,12 @@ class DecodeBitmask(Operator):
             stack.
 
     Returns:
-        A multi-band boolean carrier with shape
-        ``(n_layers, height, width)``, matching the input carrier kind.
-        For GeoTensor input the output ``band_names`` attr is set from
-        the keys of ``bits``; plain ``np.ndarray`` input returns a
-        plain stacked boolean array (no metadata to carry the names).
+        GeoTensor | numpy.ndarray: A multi-band boolean carrier with
+            shape ``(n_layers, height, width)``, matching the input
+            carrier kind. For GeoTensor input the output ``band_names``
+            attr is set from the keys of ``bits``; plain ``np.ndarray``
+            input returns a plain stacked boolean array (no metadata to
+            carry the names).
 
     Examples:
         >>> from geotoolz.qa import DecodeBitmask
@@ -720,7 +721,7 @@ class MaskNoData(Operator):
         axis: Position of the band axis.
 
     Returns:
-        Boolean ``GeoTensor`` mask.
+        GeoTensor: Boolean no-data mask.
 
     Examples:
         >>> from geotoolz.qa import MaskNoData
@@ -786,9 +787,10 @@ class MaskSaturated(Operator):
             reduction when ``qa_band`` is None).
 
     Returns:
-        Boolean mask with saturated pixels marked True, matching the
-        input carrier kind (``GeoTensor`` in → ``GeoTensor`` out, plain
-        ``np.ndarray`` in → plain array out).
+        GeoTensor | numpy.ndarray: Boolean mask with saturated pixels
+            marked True, matching the input carrier kind (``GeoTensor``
+            in → ``GeoTensor`` out, plain ``np.ndarray`` in → plain
+            array out).
 
     Examples:
         >>> from geotoolz.qa import MaskSaturated

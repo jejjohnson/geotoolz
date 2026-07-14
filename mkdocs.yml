@@ -37,6 +37,10 @@ plugins:
             - packages/geotoolz-catalog/src
           options:
             docstring_style: google
+            # Parse `Returns:  X: desc` as *type: description* (not as a
+            # named value), so typed return docstrings resolve cleanly.
+            docstring_options:
+              returns_named_value: false
             show_source: true
             show_root_heading: true
   - mkdocs-jupyter:

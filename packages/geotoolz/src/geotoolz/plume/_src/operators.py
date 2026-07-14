@@ -610,9 +610,9 @@ class IMEEstimate(Operator):
             default 0.5 follows Varon et al. (2018) Table 3.
 
     Returns:
-        Dict with keys ``ime_kg``, ``length_m``, ``wind_speed_m_s``,
-        ``emission_rate_kg_s``, and optionally
-        ``emission_rate_uncertainty_kg_s``.
+        dict: Result with keys ``ime_kg``, ``length_m``,
+            ``wind_speed_m_s``, ``emission_rate_kg_s``, and optionally
+            ``emission_rate_uncertainty_kg_s``.
 
     Examples:
         Estimate Q in kg/s from a ppm m enhancement map::
@@ -727,9 +727,9 @@ class CrossSectionalFlux(Operator):
         transect_spacing_m: Along-wind distance between transects (m).
 
     Returns:
-        ``GeoDataFrame`` with one row per transect: ``geometry``
-        (across-wind ``LineString``), ``transect_id``, ``distance_m``,
-        ``flux_kg_s``, ``n_pixels``.
+        geopandas.GeoDataFrame: One row per transect: ``geometry``
+            (across-wind ``LineString``), ``transect_id``,
+            ``distance_m``, ``flux_kg_s``, ``n_pixels``.
 
     Examples:
         Evaluate fluxes at 100 m, 200 m, 300 m downwind::
