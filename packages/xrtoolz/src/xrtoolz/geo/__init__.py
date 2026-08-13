@@ -28,6 +28,7 @@ from xrtoolz.geo._src.crs import (
     get_dataset_resolution,
     lonlat_to_xy,
     reproject,
+    reproject_match,
     xy_to_lonlat,
 )
 from xrtoolz.geo._src.detrend import (
@@ -54,6 +55,7 @@ from xrtoolz.geo._src.masks import (
     add_ocean_mask,
     apply_mask,
 )
+from xrtoolz.geo._src.mosaic import spatial_mosaic
 from xrtoolz.geo._src.regions import (
     REGIONS,
     RegionSpec,
@@ -119,7 +121,9 @@ from xrtoolz.geo.operators import (
     RenameFromCFStandardNames,
     RenameToCFStandardNames,
     RenameVariables,
+    ReprojectMatch,
     SelectVariables,
+    SpatialMosaic,
     SubsetBBox,
     SubsetTime,
     SubsetToRegion,
@@ -215,7 +219,9 @@ __all__ = [
     "RenameFromCFStandardNames",
     "RenameToCFStandardNames",
     "RenameVariables",
+    "ReprojectMatch",
     "SelectVariables",
+    "SpatialMosaic",
     "SubsetBBox",
     "SubsetTime",
     "SubsetToRegion",
@@ -271,9 +277,11 @@ __all__ = [
     "rename_to_cf_standard_names",
     "rename_variables",
     "reproject",
+    "reproject_match",
     "resolve_region",
     "scale_to_wavenumber",
     "select_variables",
+    "spatial_mosaic",
     "subset_bbox",
     "subset_time",
     "subset_to_region",

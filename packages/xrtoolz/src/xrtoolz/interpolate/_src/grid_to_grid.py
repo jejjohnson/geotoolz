@@ -288,6 +288,10 @@ def regrid_like(
     "regrid model output to observation grid" step. Coordinates listed
     in ``dims`` must exist on both ``ds`` and ``target``; values along
     other dims pass through.
+
+    Assumes ``ds`` and ``target`` share a coordinate space — if they are
+    in different CRSs, use :func:`xrtoolz.geo.reproject_match` instead,
+    which is CRS-aware and matches ``target``'s pixel grid exactly.
     """
     dim_list = list(dims)
     missing_target = [d for d in dim_list if d not in target.coords]

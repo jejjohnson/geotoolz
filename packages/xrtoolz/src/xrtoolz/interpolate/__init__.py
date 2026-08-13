@@ -11,7 +11,8 @@ source/target structure under :mod:`._src`:
 - :mod:`._src.resample` — ``resample_time``
 - :mod:`._src.binning` — ``Grid``, ``Period``, ``SpaceTimeGrid``, ``bin_2d``,
   ``histogram_2d``
-- :mod:`._src.points_to_grid` — ``points_to_grid``, ``kde_to_grid``
+- :mod:`._src.points_to_grid` — ``points_to_grid``, ``griddata_to_grid``,
+  ``kde_to_grid``
 - :mod:`._src.grid_to_points` — ``sample_at_points``, ``along_track``
 - :mod:`._src.smooth` — ``moving_average``, ``gaussian_smooth``,
   ``gaussian_smooth_masked``, ``lowpass_filter``, ``fir_filter``
@@ -54,7 +55,11 @@ from xrtoolz.interpolate._src.grid_to_grid import (
 )
 from xrtoolz.interpolate._src.grid_to_points import along_track, sample_at_points
 from xrtoolz.interpolate._src.knn import idw_to_grid, idw_to_points
-from xrtoolz.interpolate._src.points_to_grid import kde_to_grid, points_to_grid
+from xrtoolz.interpolate._src.points_to_grid import (
+    griddata_to_grid,
+    kde_to_grid,
+    points_to_grid,
+)
 from xrtoolz.interpolate._src.resample import resample_time
 from xrtoolz.interpolate._src.smooth import (
     fir_filter,
@@ -79,6 +84,7 @@ from xrtoolz.interpolate.operators import (
     FromSigma,
     GaussianSmooth,
     GaussianSmoothMasked,
+    GriddataToGrid,
     Histogram2D,
     IDWToGrid,
     IDWToPoints,
@@ -129,6 +135,7 @@ __all__ = [
     "GaussianSmooth",
     "GaussianSmoothMasked",
     "Grid",
+    "GriddataToGrid",
     "Histogram2D",
     "IDWToGrid",
     "IDWToPoints",
@@ -170,6 +177,7 @@ __all__ = [
     "fir_filter",
     "gaussian_smooth",
     "gaussian_smooth_masked",
+    "griddata_to_grid",
     "histogram_2d",
     "idw_to_grid",
     "idw_to_points",

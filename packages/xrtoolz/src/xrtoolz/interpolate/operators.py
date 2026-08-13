@@ -875,6 +875,51 @@ class PointsToGrid(Operator):
         )
 
 
+class GriddataToGrid(Operator):
+    """Wrap :func:`xrtoolz.interpolate.griddata_to_grid`.
+
+    Expects a 3-tuple ``(lons, lats, values)`` as input, so — like
+    :class:`PointsToGrid` — it is not ``DataTree``-mappable.
+    """
+
+    def __init__(
+        self,
+        grid: _binning.Grid,
+        *,
+        method: _points_to_grid.GriddataMethod = "cubic",
+        fill_value: float = np.nan,
+    ):
+        self.grid = grid
+        self.method = method
+        self.fill_value = float(fill_value)
+
+    def _apply(self, payload) -> xr.DataArray:
+        lons, lats, values = payload
+        return _points_to_grid.griddata_to_grid(
+            lons,
+            lats,
+            values,
+            grid=self.grid,
+            method=self.method,
+            fill_value=self.fill_value,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "grid": "<Grid>",
+            "method": self.method,
+            "fill_value": _json_fill_value(self.fill_value),
+        }
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        # griddata_to_grid casts its inputs to float64 before triangulating,
+        # so the result is float64 regardless of the payload's dtype.
+        return Signature(
+            {"lat": len(self.grid.lat), "lon": len(self.grid.lon)},
+            dtype=np.dtype("float64"),
+        )
+
+
 class KDEToGrid(Operator):
     """Wrap :func:`xrtoolz.interpolate.kde_to_grid`.
 

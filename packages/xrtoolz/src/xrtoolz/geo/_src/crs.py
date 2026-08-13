@@ -67,6 +67,67 @@ def reproject(
     )
 
 
+def reproject_match(
+    ds: xr.Dataset | xr.DataArray,
+    target: xr.Dataset | xr.DataArray,
+    *,
+    resampling: str = "bilinear",
+) -> xr.Dataset | xr.DataArray:
+    """Reproject ``ds`` onto ``target``'s CRS, transform and shape.
+
+    Wraps :meth:`rioxarray.raster_array.RasterArray.reproject_match`.
+    Unlike :func:`xrtoolz.interpolate.regrid_like` — which is
+    :meth:`xr.Dataset.interp` over shared coordinate names — this is
+    CRS-aware and aligns the output pixel grid exactly with ``target``.
+    Use it whenever ``ds`` and ``target`` live in different CRSs, where
+    ``regrid_like`` would interpolate mismatched coordinate spaces and
+    return a silently wrong result.
+
+    Args:
+        ds: Source raster with a CRS attached (``ds.rio.crs``).
+        target: Raster whose CRS, affine transform and shape define the
+            output grid. Must also carry a CRS.
+        resampling: Name of the :class:`rasterio.enums.Resampling`
+            member. Default ``"bilinear"`` (use ``"nearest"`` for
+            categorical data).
+
+    Returns:
+        ``ds`` on ``target``'s grid — identical CRS, transform, shape and
+        spatial coordinates.
+
+    Raises:
+        ValueError: If ``resampling`` is not a ``Resampling`` member name.
+
+    Example:
+        >>> import numpy as np, xarray as xr
+        >>> import rioxarray  # noqa: F401
+        >>> from xrtoolz.geo import reproject_match
+        >>> src = xr.DataArray(
+        ...     np.ones((4, 4)),
+        ...     dims=("y", "x"),
+        ...     coords={"y": np.arange(3.0, -1.0, -1.0), "x": np.arange(4.0)},
+        ... ).rio.write_crs("EPSG:4326")
+        >>> tgt = xr.DataArray(
+        ...     np.zeros((2, 2)),
+        ...     dims=("y", "x"),
+        ...     coords={"y": np.arange(3.0, -1.0, -2.0), "x": np.arange(0.0, 4.0, 2.0)},
+        ... ).rio.write_crs("EPSG:4326")
+        >>> out = reproject_match(src, tgt)
+        >>> out.shape == tgt.shape
+        True
+
+    """
+    from rasterio.enums import Resampling
+
+    if not hasattr(Resampling, resampling):
+        valid = [r.name for r in Resampling]
+        raise ValueError(f"Unknown resampling {resampling!r}; expected one of {valid}.")
+    return ds.rio.reproject_match(
+        target,
+        resampling=getattr(Resampling, resampling),
+    )
+
+
 def lonlat_to_xy(
     crs: str,
     lon: Sequence[float] | np.ndarray,

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 import regionmask
@@ -24,8 +24,10 @@ import xarray as xr
 from xrcore import Operator, Signature
 from xrtoolz.geo._src import (
     along_track as _along_track,
+    crs as _crs,
     detrend as _detrend,
     masks as _masks,
+    mosaic as _mosaic,
     regions as _regions,
     subset as _subset,
     validation as _validation,
@@ -1076,6 +1078,109 @@ class ApplyMask(Operator):
             {name: None for name in input_signature.dims},
             dtype=input_signature.dtype,
         )
+
+
+# ---------- CRS / mosaic ---------------------------------------------------
+
+
+class ReprojectMatch(Operator):
+    """Reproject a dataset onto ``target``'s CRS, transform and shape.
+
+    Wraps :func:`xrtoolz.geo.reproject_match`. Use this instead of
+    :class:`xrtoolz.interpolate.RegridLike` when source and target live
+    in different CRSs. Takes a single ``Dataset`` / ``DataArray``, so it
+    is ``DataTree``-mappable — each leaf lands on the same target grid.
+
+    Args:
+        target: Raster whose CRS, affine transform and shape define the
+            output grid.
+        resampling: Name of the :class:`rasterio.enums.Resampling`
+            member. Default ``"bilinear"``.
+
+    Returns:
+        The dataset on ``target``'s grid.
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        target: xr.Dataset | xr.DataArray,
+        *,
+        resampling: str = "bilinear",
+    ):
+        self.target = target
+        self.resampling = resampling
+
+    def _apply(self, ds):
+        return _crs.reproject_match(ds, self.target, resampling=self.resampling)
+
+    def get_config(self) -> dict[str, Any]:
+        kind = "Dataset" if isinstance(self.target, xr.Dataset) else "DataArray"
+        return {"target": f"<{kind}>", "resampling": self.resampling}
+
+    def compute_output_signature(self, input_signature: Signature) -> Signature:
+        # rio.reproject_match returns the *target's* spatial dim names, so
+        # when the two rasters disagree the source's names disappear rather
+        # than surviving alongside the target's. Drop any source spatial dim
+        # before inserting the target's; non-spatial dims pass through.
+        y_dim, x_dim = self.target.rio.y_dim, self.target.rio.x_dim
+        source_spatial = {"x", "y", "lat", "lon", "latitude", "longitude"}
+        dims = {
+            name: size
+            for name, size in input_signature.dims.items()
+            if name not in source_spatial
+        }
+        dims[y_dim] = self.target.sizes[y_dim]
+        dims[x_dim] = self.target.sizes[x_dim]
+        return Signature(dims, dtype=input_signature.dtype)
+
+
+class SpatialMosaic(Operator):
+    """Merge a sequence of georeferenced tiles into a single cube.
+
+    Wraps :func:`xrtoolz.geo.spatial_mosaic`. Expects a **sequence** of
+    DataArrays or Datasets as the carrier payload, so — unlike the
+    single-Dataset operators in this module — it is *not*
+    ``DataTree``-mappable.
+
+    Args:
+        method: Overlap resolution rule — ``"first"``, ``"last"``,
+            ``"min"``, ``"max"`` or ``"sum"``.
+        resampling: :class:`rasterio.enums.Resampling` member name used
+            when harmonising inputs whose CRS differs from the first
+            input's.
+        nodata: Fill value for cells covered by no input.
+
+    Returns:
+        One cube spanning the union of the input extents.
+    """
+
+    def __init__(
+        self,
+        *,
+        method: _mosaic.MosaicMethod = "first",
+        resampling: str = "nearest",
+        nodata: float | None = None,
+    ):
+        self.method = method
+        self.resampling = resampling
+        self.nodata = nodata
+
+    def _apply(self, datasets):
+        return _mosaic.spatial_mosaic(
+            datasets,
+            method=self.method,
+            resampling=self.resampling,
+            nodata=self.nodata,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "method": self.method,
+            "resampling": self.resampling,
+            "nodata": self.nodata,
+        }
 
 
 # ---------- deprecated metric ops -----------------------------------------
