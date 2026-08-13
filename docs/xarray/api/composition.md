@@ -33,7 +33,7 @@ live in `xrtoolz.combinators`.
 
 ## Operator base class
 
-::: xrtoolz.Operator
+::: xrcore.Operator
 
 ## Sequential pipelines
 
@@ -70,4 +70,4 @@ variable independently.
 `Signature` is the dict-keyed shape descriptor used by
 `compute_output_signature` for static shape inference across a pipeline.
 
-::: xrtoolz.signature.Signature
+::: xrcore.Signature

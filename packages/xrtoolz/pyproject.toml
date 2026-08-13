@@ -1,0 +1,204 @@
+[project]
+name = "xrtoolz"
+version = "0.1.0"
+description = "Composable operator library for geoprocessing Earth System Data Cubes."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+keywords = ["xarray", "earth-science", "geoprocessing", "climate", "oceanography"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "Topic :: Scientific/Engineering :: Hydrology",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+dependencies = [
+    "numpy>=1.26",
+    # Lazy/chunked xarray backend. Operators stay lazy where their kernel is
+    # naturally per-chunk; the rest accept dask input and materialise
+    # internally. See the Dask page in the docs for the per-operator tiers.
+    "dask[array]>=2024.10",
+    # Shape-and-dtype annotations for the numpy kernels (Layer 0). Used as
+    # documentation/static types only — no runtime enforcement — so it adds
+    # negligible weight. See docs/design/conventions/array-typing.md.
+    "jaxtyping>=0.2.34",
+    "scipy>=1.12",
+    "scikit-learn>=1.4",
+    # DataTree polymorphism on xrtoolz.Operator depends on
+    # ``xr.DataTree`` + ``xr.map_over_datasets``, both stabilised in
+    # xarray 2024.10. Older versions raise ``AttributeError`` on the
+    # isinstance check even for plain Dataset calls.
+    "xarray>=2024.10",
+    "pandas>=2.1",
+    "rioxarray>=0.15",
+    "pyproj>=3.6",
+    "regionmask>=0.12",
+    "xrft>=1.0",
+    "xskillscore>=0.0.26",
+    "numpy-groupies>=0.11",
+    # Named-tensor backend for the einx-based kernels that stayed in this
+    # package (transforms.encoders.basis, metrics.instance,
+    # metrics.distributional). The xarray↔einx *bridge* itself lives in
+    # the xrtoolz-einx workspace member (import name `xreinx`). einx
+    # pulls only numpy by default. Requires 0.4+ for `einx.dot`/`einx.id`.
+    "einx>=0.4",
+    # Split-out workspace members. Depending on all four keeps
+    # `pip install xrtoolz` behaviour identical to the pre-split package:
+    # xrcore supplies the xarray-aware Operator + Signature, xrgrad the
+    # finite-difference calculus (sole carrier of the finitediffx/JAX
+    # stack), xreinx the einx bridge, xrsklearn the sklearn bridge (and
+    # the `.sklearn` accessor registration re-exported via xrtoolz.utils).
+    "xrtoolz-core>=0.1.0",
+    "xrtoolz-grad>=0.1.0",
+    "xrtoolz-einx>=0.1.0",
+    "xrtoolz-sklearn>=0.1.0",
+    "matplotlib>=3.8",
+    "cartopy>=0.22",
+    # The Operator / Sequential / Graph composition layer lives in pipekit
+    # (formerly xrtoolz.core). Every per-domain operator subclasses
+    # `pipekit.Operator`; the dependency is load-bearing. See
+    # [tool.uv.sources] below for the dev-time source.
+    "pipekit>=0.0.1",
+    # The data-acquisition layer (CMEMS/CDS/AEMET readers) and the shared
+    # typed request vocabulary + CF Variable registry moved to `xrreader`.
+    # `xrtoolz.geo` / `xrtoolz.viz` import the registry from `xrreader.types`;
+    # xrreader's core is light (numpy/pandas/xarray) and its heavy service
+    # clients are optional extras, so this stays a lightweight dependency.
+    # See [tool.uv.sources] below for the dev-time source.
+    "xrreader>=0.0.2",
+]
+
+[project.optional-dependencies]
+# ``pip install xrtoolz[wavelets]`` — PyWavelets backend for the
+# continuous + discrete wavelet transforms in
+# :mod:`xrtoolz.transforms.wavelet`. Imported lazily; missing the extra
+# only breaks ``cwt`` / ``dwt``, not the rest of the transforms module.
+wavelets = [
+    "PyWavelets>=1.4",
+]
+
+# ``pip install xrtoolz[image]`` — image-processing backends for
+# biharmonic inpainting and structural image metrics. Imported lazily so
+# core interpolation and metrics remain usable without scikit-image.
+image = [
+    "scikit-image>=0.21",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/xrtoolz"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "pre-commit>=4.5.1",
+    "httpx>=0.28.1",
+    "geopandas>=1.1.3",
+    "pyarrow>=24.0.0",
+    "zarr>=3.1.6",
+    "loguru>=0.7.3",
+]
+lint = [
+    "ruff>=0.15.10",
+]
+typecheck = [
+    "ty>=0.0.30,<0.0.32",
+]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.6",
+    "mkdocstrings[python]>=1.0.3",
+    "mkdocs-jupyter>=0.26.2",
+    "jupytext>=1.19.1",
+    "ipykernel>=7.2.0",
+    # matplotlib + watermark used by the example notebooks during local
+    # re-execution. The guarded watermark cell in each notebook no-ops
+    # if the package is missing, but installing it here lets the version
+    # readout actually print under `nbconvert --execute`.
+    "matplotlib>=3.8",
+    "watermark>=2.6.0",
+    # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
+    # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
+    # through as None. Pin until a fixed pymdown-extensions release ships (#38).
+    "pygments>=2.19,<2.21",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xrtoolz"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+# Executed Jupyter notebooks are committed as output artefacts; don't
+# lint them — they were authored-and-executed pairs and re-editing
+# cell source would invalidate the inline outputs.
+extend-exclude = ["docs/notebooks/*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E402", "E721", "E731", "E741",
+    # Physics/math docstrings legitimately use Greek letters,
+    # en-dashes, minus signs, and similar Unicode. Suppress the
+    # ambiguous-character warnings that would force us to ASCII-ify
+    # every equation.
+    "RUF002", "RUF003",
+    # jaxtyping shape strings (e.g. Float[np.ndarray, "lat lon"]) are read
+    # by pyflakes/pyupgrade as forward-ref annotations, so the named axes
+    # trip F722 (multi-axis "syntax error"), F821 (undefined axis name),
+    # and UP037 (would strip the required quotes). This is the jaxtyping-
+    # recommended config; `ty` remains the undefined-name safety net.
+    "F722", "F821", "UP037",
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+# Sibling workspace members are first-party to the xrtoolz stack.
+known-first-party = ["xrtoolz", "xrcore", "xrgrad", "xreinx", "xrsklearn"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+# xarray's public API is typed with tight Literal[...] unions (e.g.
+# method=Literal["linear", "nearest", ...]) that don't compose with the
+# string parameters we forward from our wrappers. The runtime behaviour
+# is correct; silence the overload/argument noise from these false
+# positives so ty can still surface genuine issues elsewhere.
+invalid-argument-type = "warn"
+no-matching-overload = "warn"
+unresolved-attribute = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/xrtoolz --cov-report=term-missing --cov-report=xml:coverage.xml --strict-markers"
+# Tier markers. The default CI run excludes `slow` and `integration`
+# (see .github/workflows/ci.yml); the extended tiers run manually via
+# the "Extended Tests" workflow_dispatch workflow or `make test-slow`.
+markers = [
+    "dask: exercises dask-backed (chunked) xarray inputs",
+    "slow: long-running tests (subprocess isolation checks, heavy optional deps) — excluded from the default CI run",
+    "integration: tests that touch external services or real remote data — run manually, never in automatic CI",
+]
+
+[tool.coverage.run]
+source = ["src/xrtoolz"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80

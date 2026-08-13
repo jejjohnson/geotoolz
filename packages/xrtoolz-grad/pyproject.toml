@@ -1,0 +1,102 @@
+[project]
+name = "xrtoolz-grad"
+version = "0.1.0"
+description = "Finite-difference calculus on labeled xarray grids — gradient, curl, divergence, laplacian with cartesian/rectilinear/spherical geometry dispatch."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+keywords = ["xarray", "finite-differences", "gradient", "vector-calculus", "earth-science"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "Topic :: Scientific/Engineering :: Hydrology",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+dependencies = [
+    "numpy>=1.26",
+    "xarray>=2024.10",
+    # The finite-difference stencils. finitediffx is JAX-backed, which
+    # makes this package the sole carrier of the JAX stack in the
+    # xrtoolz workspace — extracting it here is what keeps JAX out of
+    # `pip install xrtoolz`'s siblings.
+    "finitediffx>=0.1.0",
+    # Shape-and-dtype annotations on the kernels; annotation-only usage.
+    "jaxtyping>=0.2.34",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/xrtoolz"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
+lint = [
+    "ruff>=0.15.10,<0.16",
+]
+typecheck = [
+    "ty>=0.0.30,<0.0.32",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xrgrad"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E402", "E721", "E731", "E741",
+    # Physics/math docstrings legitimately use Greek letters,
+    # en-dashes, minus signs, and similar Unicode.
+    "RUF002", "RUF003",
+    # jaxtyping shape strings (e.g. Float[np.ndarray, "lat lon"]) trip
+    # F722/F821/UP037 in pyflakes/pyupgrade; this is the
+    # jaxtyping-recommended config and `ty` remains the safety net.
+    "F722", "F821", "UP037",
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+known-first-party = ["xrtoolz", "xrcore", "xrgrad", "xreinx", "xrsklearn"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+# Same downgrades as the xrtoolz member: xarray/numpy/einx public APIs
+# are typed with tight Literal[...]/specialised unions that don't
+# compose with the string/array parameters these wrappers forward. The
+# runtime behaviour is correct; keep ty focused on genuine issues.
+invalid-argument-type = "warn"
+no-matching-overload = "warn"
+unresolved-attribute = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/xrgrad --cov-report=term-missing --strict-markers"
+markers = [
+    "slow: long-running tests — excluded from the default CI run",
+    "integration: tests that touch external services — run manually, never in automatic CI",
+]
+
+[tool.coverage.run]
+source = ["src/xrgrad"]
+omit = ["tests/*"]

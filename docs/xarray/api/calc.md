@@ -16,22 +16,22 @@ $$
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.calc.partial
+::: xrgrad.partial
 
-::: xrtoolz.calc.gradient
+::: xrgrad.gradient
 
-::: xrtoolz.calc.divergence
+::: xrgrad.divergence
 
-::: xrtoolz.calc.curl
+::: xrgrad.curl
 
-::: xrtoolz.calc.laplacian
+::: xrgrad.laplacian
 
-::: xrtoolz.calc.grid_metrics_from_coords
+::: xrgrad.grid_metrics_from_coords
 
 ## Physical constants
 
-::: xrtoolz.calc.EARTH_RADIUS
+::: xrgrad.EARTH_RADIUS
 
-::: xrtoolz.calc.GRAVITY
+::: xrgrad.GRAVITY
 
-::: xrtoolz.calc.OMEGA
+::: xrgrad.OMEGA

@@ -13,46 +13,46 @@ Dataset's variables into a single packed axis and back.
 
 ## Operators
 
-::: xrtoolz.einx.Einsum
+::: xreinx.Einsum
 
-::: xrtoolz.einx.Rearrange
+::: xreinx.Rearrange
 
-::: xrtoolz.einx.Reduce
+::: xreinx.Reduce
 
-::: xrtoolz.einx.Repeat
+::: xreinx.Repeat
 
-::: xrtoolz.einx.Matmul
+::: xreinx.Matmul
 
-::: xrtoolz.einx.Outer
+::: xreinx.Outer
 
-::: xrtoolz.einx.BatchMatmul
+::: xreinx.BatchMatmul
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.einx.einsum
+::: xreinx.einsum
 
-::: xrtoolz.einx.rearrange
+::: xreinx.rearrange
 
-::: xrtoolz.einx.reduce
+::: xreinx.reduce
 
-::: xrtoolz.einx.repeat
+::: xreinx.repeat
 
-::: xrtoolz.einx.matmul
+::: xreinx.matmul
 
-::: xrtoolz.einx.outer
+::: xreinx.outer
 
-::: xrtoolz.einx.batch_matmul
+::: xreinx.batch_matmul
 
-::: xrtoolz.einx.pack_dataset
+::: xreinx.pack_dataset
 
-::: xrtoolz.einx.unpack_dataset
+::: xreinx.unpack_dataset
 
 ## Errors
 
-::: xrtoolz.einx.EinxBridgeError
+::: xreinx.EinxBridgeError
 
-::: xrtoolz.einx.PatternError
+::: xreinx.PatternError
 
-::: xrtoolz.einx.CoordMismatch
+::: xreinx.CoordMismatch

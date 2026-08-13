@@ -87,7 +87,7 @@ bridge) configured for the named decomposition.
 
 ::: xrtoolz.transforms.kmeans
 
-::: xrtoolz.transforms.SklearnOp
+::: xrsklearn.SklearnOp
 
 ## Mask morphology
 

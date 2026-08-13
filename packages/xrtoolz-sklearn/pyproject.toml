@@ -1,0 +1,88 @@
+[project]
+name = "xrtoolz-sklearn"
+version = "0.1.0"
+description = "scikit-learn ↔ xarray bridge — XarrayEstimator, the .sklearn accessor, and the SklearnOp pipeline operator."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+keywords = ["xarray", "scikit-learn", "estimator", "operators", "pipelines"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+dependencies = [
+    # The xarray-aware Operator base for SklearnOp.
+    "xrtoolz-core>=0.1.0",
+    "scikit-learn>=1.4",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "xarray>=2024.10",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/xrtoolz"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
+lint = [
+    "ruff>=0.15.10,<0.16",
+]
+typecheck = [
+    "ty>=0.0.30,<0.0.32",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xrsklearn"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E402", "E721", "E731", "E741", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+known-first-party = ["xrtoolz", "xrcore", "xrgrad", "xreinx", "xrsklearn"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+# Same downgrades as the xrtoolz member: xarray/numpy/einx public APIs
+# are typed with tight Literal[...]/specialised unions that don't
+# compose with the string/array parameters these wrappers forward. The
+# runtime behaviour is correct; keep ty focused on genuine issues.
+invalid-argument-type = "warn"
+no-matching-overload = "warn"
+unresolved-attribute = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/xrsklearn --cov-report=term-missing --strict-markers"
+markers = [
+    "slow: long-running tests — excluded from the default CI run",
+    "integration: tests that touch external services — run manually, never in automatic CI",
+]
+
+[tool.coverage.run]
+source = ["src/xrsklearn"]
+omit = ["tests/*"]

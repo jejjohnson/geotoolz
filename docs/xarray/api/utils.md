@@ -6,4 +6,4 @@ bridge: it wraps any scikit-learn estimator so that `fit` / `transform` /
 dimension names. It backs the decomposition helpers in
 [Transforms](transforms.md).
 
-::: xrtoolz.utils.XarrayEstimator
+::: xrsklearn.XarrayEstimator
