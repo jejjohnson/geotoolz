@@ -19,7 +19,7 @@ from xrsklearn._src.operator import SklearnOp
 from xrsklearn._src.wrap import NanPolicy, XarrayEstimator
 
 
-__version__ = "0.0.1"
+__version__ = "0.0.0"  # x-release-please-version
 
 __all__ = [
     "NanPolicy",

@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz-einx"
-version = "0.0.1"
+version = "0.0.0"
 description = "Labeled named-tensor algebra bridging xarray and einx — einsum/rearrange/reduce/repeat with DataArray dim names as pattern axes."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
