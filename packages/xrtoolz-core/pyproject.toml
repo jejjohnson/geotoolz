@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz-core"
-version = "0.0.0"
+version = "0.0.1"
 description = "xarray-aware Operator base (DataTree dispatch) and Signature shape descriptor for the xrtoolz stack."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

@@ -28,6 +28,13 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## 0.0.1 (2026-08-13)
+
+
+### Features
+
+* split xrtoolz into a uv workspace (core, grad, einx, sklearn) ([#252](https://github.com/jejjohnson/xrtoolz/issues/252)) ([f37a532](https://github.com/jejjohnson/xrtoolz/commit/f37a53286aa622c8bb4abe7a3f83df1ddc324bb4))
+
 ## [0.1.0](https://github.com/jejjohnson/xrtoolz/compare/v0.0.8...v0.1.0) (2026-06-10)
 
 

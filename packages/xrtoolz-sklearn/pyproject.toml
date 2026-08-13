@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz-sklearn"
-version = "0.0.0"
+version = "0.0.1"
 description = "scikit-learn ↔ xarray bridge — XarrayEstimator, the .sklearn accessor, and the SklearnOp pipeline operator."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
