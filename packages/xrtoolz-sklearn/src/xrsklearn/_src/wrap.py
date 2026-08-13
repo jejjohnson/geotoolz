@@ -105,7 +105,9 @@ def _from_2d(
     *,
     new_feature_dim: str = "component",
 ) -> xr.DataArray:
-    """Inverse of :func:`_to_2d`. Three reconstruction paths:
+    """Reconstruct labeled output from a 2-D array (inverse of :func:`_to_2d`).
+
+    Three reconstruction paths:
 
     1. **1-D output** (``predict`` returning ``(n_samples,)``): wrap as a
        1-D DataArray indexed by the sample dim.
@@ -286,40 +288,61 @@ class XarrayEstimator(BaseEstimator):
             a NaN (no finite rows to fit).
 
     Example:
-        Decompose an SSH cube with PCA, recover the original grid, and
-        reach into the fitted estimator's attributes::
+        Decompose a (time, lat, lon) cube with PCA, recover the original
+        grid, and reach into the fitted estimator's attributes:
 
-            ```pycon
-            >>> from sklearn.decomposition import PCA
-            >>> wrap = XarrayEstimator(PCA(n_components=3), sample_dim="time")
-            >>> scores = wrap.fit_transform(da)            # (time, component)
-            >>> recon = wrap.inverse_transform(scores)     # (time, lat, lon)
-            >>> wrap.components_.shape                     # passthrough attr
-            (3, lat*lon)
-            ```
+        ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> from sklearn.decomposition import PCA
+        >>> rng = np.random.default_rng(0)
+        >>> da = xr.DataArray(
+        ...     rng.normal(size=(8, 3, 4)), dims=("time", "lat", "lon"),
+        ... )
+        >>> wrap = XarrayEstimator(PCA(n_components=3), sample_dim="time")
+        >>> scores = wrap.fit_transform(da)
+        >>> scores.dims, scores.shape
+        (('time', 'component'), (8, 3))
+        >>> recon = wrap.inverse_transform(scores)
+        >>> recon.dims, recon.shape
+        (('time', 'lat', 'lon'), (8, 3, 4))
+        >>> wrap.components_.shape  # passthrough to the fitted estimator
+        (3, 12)
 
-        Cluster a multi-variable Dataset (column-concatenated)::
+        ```
 
-            ```pycon
-            >>> from sklearn.cluster import KMeans
-            >>> wrap = XarrayEstimator(
-            ...     KMeans(n_clusters=4, n_init="auto"),
-            ...     sample_dim="time",
-            ... )
-            >>> labels = wrap.fit(ds).predict(ds)          # (time,)
-            >>> wrap.cluster_centers_.shape                # (4, n_concat_features)
-            ```
+        Cluster a multi-variable Dataset (data_vars column-concatenated
+        into one feature matrix):
 
-        NaN-tolerant fit on a land-masked grid::
+        ```pycon
+        >>> from sklearn.cluster import KMeans
+        >>> ds = xr.Dataset({"u": da, "v": da})
+        >>> wrap = XarrayEstimator(
+        ...     KMeans(n_clusters=2, n_init="auto", random_state=0),
+        ...     sample_dim="time",
+        ... )
+        >>> labels = wrap.fit(ds).predict(ds)
+        >>> labels.dims, labels.shape
+        (('time',), (8,))
+        >>> wrap.cluster_centers_.shape  # (n_clusters, n_concat_features)
+        (2, 24)
 
-            ```pycon
-            >>> wrap = XarrayEstimator(
-            ...     PCA(n_components=5),
-            ...     sample_dim="time",
-            ...     nan_policy="mask",       # drop NaN rows pre-fit, re-insert post
-            ... )
-            >>> scores = wrap.fit_transform(ssh)           # land cells stay NaN
-            ```
+        ```
+
+        NaN-tolerant fit — ``nan_policy="mask"`` drops sample rows with
+        any NaN before delegating and re-inserts NaN rows on the way out:
+
+        ```pycon
+        >>> ssh = da.copy()
+        >>> ssh[0, 0, 0] = np.nan
+        >>> wrap = XarrayEstimator(
+        ...     PCA(n_components=2), sample_dim="time", nan_policy="mask",
+        ... )
+        >>> scores = wrap.fit_transform(ssh)
+        >>> bool(np.isnan(scores[0]).all()), bool(np.isfinite(scores[1:]).all())
+        (True, True)
+
+        ```
     """
 
     def __init__(
@@ -410,8 +433,11 @@ class XarrayEstimator(BaseEstimator):
         y: xr.DataArray | xr.Dataset | np.ndarray | None,
         sample_dim: Hashable | None,
     ) -> np.ndarray | None:
-        """Marshal ``y`` to numpy. Errors clearly when ``x`` was numpy
-        (no ``sample_dim``) but ``y`` is an xarray object."""
+        """Marshal ``y`` to numpy.
+
+        Errors clearly when ``x`` was numpy (no ``sample_dim``) but ``y``
+        is an xarray object.
+        """
         if sample_dim is None and isinstance(y, xr.DataArray | xr.Dataset):
             raise TypeError(
                 "When x is a NumPy array, y must also be a NumPy array or None; "
@@ -568,8 +594,10 @@ class XarrayEstimator(BaseEstimator):
         x: xr.DataArray | xr.Dataset | np.ndarray,
         y: xr.DataArray | xr.Dataset | np.ndarray | None = None,
     ) -> float:
-        """Scalar score from the wrapped estimator. Not re-wrapped — sklearn
-        ``.score`` returns a Python float."""
+        """Scalar score from the wrapped estimator.
+
+        Not re-wrapped — sklearn ``.score`` returns a Python float.
+        """
         self._require_fitted()
         arr, meta, sample_dim = self._stack(x)
         y_np = self._prepare_y(y, sample_dim)

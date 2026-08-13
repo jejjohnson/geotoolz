@@ -361,3 +361,8 @@ def test_sklearn_accessor_passes_through_fitted_xarray_estimator() -> None:
     # pass-through keeps the training grid:
     assert recon.dims == da.dims
     np.testing.assert_array_equal(recon["feature"], da["feature"])
+
+
+def test_sklearn_op_is_forbidden_in_yaml() -> None:
+    op = SklearnOp(StandardScaler(), variable="ssh", sample_dim="time")
+    assert op.forbid_in_yaml is True

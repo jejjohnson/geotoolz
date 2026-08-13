@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Hashable
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 import xarray as xr
@@ -45,7 +45,12 @@ class SklearnOp(Operator):
 
     ``get_config()`` stores primitive estimator parameters directly and
     serialises non-primitive parameters as ``repr(...)`` strings, so the
-    config is JSON-safe (works with ``Sequential.get_config()``).
+    config is JSON-safe (works with ``Sequential.get_config()``) — but it
+    records only the estimator class and constructor parameters, never the
+    fitted ``estimator_`` state, so a config round-trip cannot rebuild a
+    fitted pipeline. ``forbid_in_yaml`` marks the operator accordingly
+    (pipekit convention for operators holding live state): ``dumps`` emits
+    a debug-only payload rather than pretending to round-trip.
 
     Args:
         estimator: A raw sklearn estimator (``BaseEstimator``) or an
@@ -108,6 +113,9 @@ class SklearnOp(Operator):
                            method="fit_transform", nan_policy="mask")
             # Land/NaN rows are dropped pre-fit, then re-inserted as NaN on output.
     """
+
+    # Live estimator state (possibly fitted) is not YAML-serializable.
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,

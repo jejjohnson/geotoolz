@@ -1,16 +1,54 @@
-"""Finite-difference calculus operators for xarray data.
+r"""Finite-difference calculus on labeled xarray grids.
 
 Pure-function API for partial derivatives and vector-calculus operators
-(``∇``, ``∇·``, ``∇×``, ``Δ``) on three coordinate geometries:
+(``∇``, ``∇·``, ``∇×``, ``Δ``) on three coordinate geometries, selected
+by the ``geometry=`` keyword every operator shares:
 
-- ``"cartesian"`` — uniform spacing in each dimension.
-- ``"rectilinear"`` — non-uniform 1-D coordinate per dimension.
-- ``"spherical"`` — longitude/latitude in degrees, with the metric
-  factors ``1/(R cos φ)`` and ``1/R`` applied automatically.
+- ``"cartesian"`` — uniform spacing in each dimension; the spacing is
+  read from the dimension coordinate and validated as uniform.
+- ``"rectilinear"`` — non-uniform 1-D coordinate per dimension;
+  differences are taken against the true coordinate values.
+- ``"spherical"`` — longitude/latitude in degrees. Derivatives are
+  taken in radians and scaled by the metric factors
 
-The underlying stencils come from :mod:`finitediffx`. Constants used by
-the spherical metric and downstream physics live in
-:mod:`xrgrad._src.constants`.
+  .. math::
+
+      \frac{\partial}{\partial x} =
+      \frac{1}{R\cos\varphi} \frac{\partial}{\partial \lambda},
+      \qquad
+      \frac{\partial}{\partial y} =
+      \frac{1}{R} \frac{\partial}{\partial \varphi},
+
+  and the vector operators add the curvature corrections
+  (``∓ tan φ / R`` terms) so results match the equivalent
+  ``metpy.calc`` operators on lon/lat fields.
+
+The underlying stencils come from :mod:`finitediffx` (the sole carrier
+of the JAX stack in the xrtoolz workspace). Physical constants used by
+the spherical metric and downstream physics are exported as
+:data:`EARTH_RADIUS`, :data:`GRAVITY`, and :data:`OMEGA`.
+
+Example:
+    Relative vorticity of a rigid-rotation velocity field:
+
+    ```pycon
+    >>> import numpy as np
+    >>> import xarray as xr
+    >>> import xrgrad
+    >>> x = np.linspace(0.0, 3.0, 4)
+    >>> X, Y = np.meshgrid(x, x, indexing="xy")
+    >>> coords = {"y": x, "x": x}
+    >>> ds = xr.Dataset(
+    ...     {
+    ...         "u": xr.DataArray(-Y, dims=("y", "x"), coords=coords),
+    ...         "v": xr.DataArray(X, dims=("y", "x"), coords=coords),
+    ...     }
+    ... )
+    >>> zeta = xrgrad.curl(ds, ("u", "v"), dims=("x", "y"))
+    >>> np.unique(zeta.values)
+    array([2.])
+
+    ```
 """
 
 from xrgrad._src.constants import EARTH_RADIUS, GRAVITY, OMEGA
@@ -24,7 +62,7 @@ from xrgrad._src.operators import (
 )
 
 
-__version__ = "0.1.0"
+__version__ = "0.0.1"
 
 __all__ = [
     "EARTH_RADIUS",

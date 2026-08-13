@@ -15,7 +15,7 @@ from xrcore.operator import Operator
 from xrcore.signature import Signature
 
 
-__version__ = "0.1.0"
+__version__ = "0.0.1"
 
 __all__ = [
     "Operator",

@@ -48,6 +48,21 @@ def partial(
 
     Returns:
         DataArray with the same dims/coords as ``da``.
+
+    Example:
+        ``d(x²)/dx = 2x`` — exact on interior points with the central
+        stencil; the boundary points fall back to one-sided differences
+        of the requested accuracy:
+
+        ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> x = np.linspace(0.0, 3.0, 4)
+        >>> da = xr.DataArray(x**2, dims="x", coords={"x": x})
+        >>> partial(da, "x").values
+        array([1., 2., 4., 5.])
+
+        ```
     """
     if geometry == "cartesian":
         return cartesian.cartesian_partial(
@@ -87,7 +102,23 @@ def gradient(
         **geom_kw: Geometry-specific keyword arguments.
 
     Returns:
-        Dataset with one DataArray per dim in ``dims``.
+        Dataset with one DataArray per dim in ``dims``, named
+        ``d<name>_d<axis>`` (``f`` when the input is unnamed).
+
+    Example:
+        ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> x = np.linspace(0.0, 3.0, 4)
+        >>> X, Y = np.meshgrid(x, x, indexing="xy")
+        >>> f = xr.DataArray(
+        ...     X**2 + Y**2, dims=("y", "x"), coords={"y": x, "x": x},
+        ... )
+        >>> grads = gradient(f, dims=("x", "y"))
+        >>> sorted(grads.data_vars)
+        ['df_dx', 'df_dy']
+
+        ```
     """
     if geometry == "cartesian":
         return cartesian.cartesian_gradient(
@@ -126,7 +157,7 @@ def divergence(
     method: str = "central",
     **geom_kw: Any,
 ) -> xr.DataArray:
-    """Divergence ``∇·F`` of a vector field stored as Dataset variables.
+    r"""Divergence ``∇·F`` of a vector field stored as Dataset variables.
 
     Args:
         ds: Dataset containing the vector components.
@@ -146,7 +177,34 @@ def divergence(
     Notes:
         For spherical geometry the curvature correction
         ``-(v tan φ) / R`` is added so the result matches
-        :func:`metpy.calc.divergence` on lon/lat fields.
+        :func:`metpy.calc.divergence` on lon/lat fields:
+
+        .. math::
+
+            \nabla \cdot \mathbf{F} =
+            \frac{1}{R\cos\varphi} \frac{\partial F_x}{\partial \lambda}
+            + \frac{1}{R} \frac{\partial F_y}{\partial \varphi}
+            - \frac{F_y \tan\varphi}{R}
+
+    Example:
+        The radial field ``F = (x, y)`` has constant divergence 2:
+
+        ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> x = np.linspace(0.0, 3.0, 4)
+        >>> X, Y = np.meshgrid(x, x, indexing="xy")
+        >>> coords = {"y": x, "x": x}
+        >>> ds = xr.Dataset(
+        ...     {
+        ...         "u": xr.DataArray(X, dims=("y", "x"), coords=coords),
+        ...         "v": xr.DataArray(Y, dims=("y", "x"), coords=coords),
+        ...     }
+        ... )
+        >>> np.unique(divergence(ds, ("u", "v"), dims=("x", "y")).values)
+        array([2.])
+
+        ```
     """
     if len(components) != len(dims):
         raise ValueError(
@@ -197,14 +255,17 @@ def curl(
     method: str = "central",
     **geom_kw: Any,
 ) -> xr.DataArray:
-    """2-D scalar curl ``∂v/∂x − ∂u/∂y`` (vertical component of ``∇×F``).
+    r"""2-D scalar curl ``∂v/∂x − ∂u/∂y`` (vertical component of ``∇×F``).
 
     Args:
         ds: Dataset with the two horizontal components.
         components: ``(u_name, v_name)`` — eastward then northward.
         dims: ``(x_dim, y_dim)`` paired with the components.
         geometry: ``"cartesian"`` | ``"rectilinear"`` | ``"spherical"``.
-        accuracy, method: Forwarded to :mod:`finitediffx`.
+        accuracy: Finite-difference accuracy order, forwarded to
+            :mod:`finitediffx`.
+        method: Stencil family (e.g. ``"central"``), forwarded to
+            :mod:`finitediffx`.
         **geom_kw: Forwarded to :func:`partial`.
 
     Returns:
@@ -213,7 +274,34 @@ def curl(
     Notes:
         For spherical geometry the curvature correction
         ``+(u tan φ) / R`` is added so the result matches
-        :func:`metpy.calc.vorticity` on lon/lat fields.
+        :func:`metpy.calc.vorticity` on lon/lat fields:
+
+        .. math::
+
+            \zeta =
+            \frac{1}{R\cos\varphi} \frac{\partial v}{\partial \lambda}
+            - \frac{1}{R} \frac{\partial u}{\partial \varphi}
+            + \frac{u \tan\varphi}{R}
+
+    Example:
+        Rigid rotation ``F = (-y, x)`` has constant vorticity 2:
+
+        ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> x = np.linspace(0.0, 3.0, 4)
+        >>> X, Y = np.meshgrid(x, x, indexing="xy")
+        >>> coords = {"y": x, "x": x}
+        >>> ds = xr.Dataset(
+        ...     {
+        ...         "u": xr.DataArray(-Y, dims=("y", "x"), coords=coords),
+        ...         "v": xr.DataArray(X, dims=("y", "x"), coords=coords),
+        ...     }
+        ... )
+        >>> np.unique(curl(ds, ("u", "v"), dims=("x", "y")).values)
+        array([2.])
+
+        ```
     """
     if len(components) != 2 or len(dims) != 2:
         raise ValueError("2-D curl needs exactly two components and two dims.")
@@ -265,7 +353,27 @@ def laplacian(
     """Laplacian ``Δf = ∇·∇f``.
 
     Implemented as gradient followed by divergence so the spherical
-    curvature correction is inherited automatically.
+    curvature correction is inherited automatically. Because the second
+    derivative is a composition of two first-derivative stencils, use
+    ``accuracy=2`` (or higher) when you need the interior to reproduce
+    polynomial fields exactly.
+
+    Example:
+        ``Δ(x² + y²) = 4``, exact on interior points at ``accuracy=2``:
+
+        ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> x = np.linspace(0.0, 3.0, 4)
+        >>> X, Y = np.meshgrid(x, x, indexing="xy")
+        >>> f = xr.DataArray(
+        ...     X**2 + Y**2, dims=("y", "x"), coords={"y": x, "x": x},
+        ... )
+        >>> lap = laplacian(f, dims=("x", "y"), accuracy=2)
+        >>> np.unique(lap.values[1:-1, 1:-1])
+        array([4.])
+
+        ```
     """
     if dims is None:
         if geometry == "spherical":

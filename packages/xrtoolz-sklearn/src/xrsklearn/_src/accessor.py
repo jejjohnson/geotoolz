@@ -9,10 +9,15 @@ enough to register the accessors.
 
 Example:
     ```pycon
+    >>> import numpy as np
     >>> import xarray as xr
     >>> from sklearn.preprocessing import StandardScaler
-    >>> import xrsklearn  # registers the .sklearn accessor  # noqa: F401
+    >>> import xrsklearn  # registers the .sklearn accessor
+    >>> ssh = xr.DataArray(np.arange(12.0).reshape(4, 3), dims=("time", "space"))
     >>> scaled = ssh.sklearn.fit_transform(StandardScaler(), sample_dim="time")
+    >>> scaled.dims, scaled.shape
+    (('time', 'space'), (4, 3))
+
     ```
 """
 
@@ -46,33 +51,60 @@ class _SklearnAccessor:
     through the shortcut path and produces a generic
     ``(sample_dim, component)`` layout instead.
 
-    ```pycon
-    >>> from xrsklearn import XarrayEstimator
-    >>> from sklearn.decomposition import PCA
-    >>> wrap = XarrayEstimator(PCA(n_components=2), sample_dim="time").fit(da)
-    >>> # Fit once, reuse via the accessor — wrap is forwarded as-is:
-    >>> scores = da.sklearn.transform(wrap)              # → (time, component)
-    >>> recon = scores.sklearn.inverse_transform(wrap)   # → (time, lat, lon)
-    ```
-
     Example:
+        Fit once, reuse via the accessor — a fitted ``XarrayEstimator``
+        is forwarded as-is, so ``inverse_transform`` can rebuild the
+        original ``(time, lat, lon)`` grid:
+
         ```pycon
-        >>> # Fit-and-transform directly off a DataArray
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> from sklearn.decomposition import PCA
+        >>> from xrsklearn import XarrayEstimator
+        >>> rng = np.random.default_rng(0)
+        >>> da = xr.DataArray(
+        ...     rng.normal(size=(8, 3, 4)), dims=("time", "lat", "lon"),
+        ... )
+        >>> wrap = XarrayEstimator(PCA(n_components=2), sample_dim="time").fit(da)
+        >>> scores = da.sklearn.transform(wrap)
+        >>> scores.dims
+        ('time', 'component')
+        >>> recon = scores.sklearn.inverse_transform(wrap)
+        >>> recon.dims
+        ('time', 'lat', 'lon')
+
+        ```
+
+        Fit-and-transform directly off the DataArray:
+
+        ```pycon
         >>> scores = da.sklearn.fit_transform(
         ...     PCA(n_components=3),
         ...     sample_dim="time",
         ...     nan_policy="mask",
         ... )
+        >>> scores.shape
+        (8, 3)
+
         ```
 
-        ```pycon
-        >>> # Score a fitted estimator against a held-out slice
-        >>> r2 = da_test.sklearn.score(fitted_regressor, y_test, sample_dim="time")
-        ```
+        Score a fitted estimator, and the Dataset variant (data_vars are
+        column-concatenated into one ``(sample, feature)`` matrix, so the
+        transform comes back as a single generic DataArray):
 
         ```pycon
-        >>> # Dataset variant: column-concat data_vars before fitting
+        >>> from sklearn.linear_model import LinearRegression
+        >>> from sklearn.preprocessing import StandardScaler
+        >>> X = xr.DataArray(rng.normal(size=(8, 3)), dims=("time", "feat"))
+        >>> y = X.values @ np.array([1.0, 2.0, 3.0])
+        >>> fitted = XarrayEstimator(LinearRegression(), sample_dim="time").fit(X, y)
+        >>> round(X.sklearn.score(fitted, y, sample_dim="time"), 6)
+        1.0
+        >>> ds = xr.Dataset({"u": da, "v": da})
         >>> scaled = ds.sklearn.fit_transform(StandardScaler(), sample_dim="time")
+        >>> scaled.dims, scaled.shape
+        (('time', 'component'), (8, 24))
+
         ```
     """
 

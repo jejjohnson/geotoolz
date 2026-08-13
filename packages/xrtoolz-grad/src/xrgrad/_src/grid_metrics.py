@@ -62,8 +62,10 @@ def grid_metrics_from_coords(
 
     Args:
         ds: Dataset whose coordinates define the grid.
-        lat, lon: Names of latitude / longitude coordinates. Spherical
-            mode assumes degrees.
+        lat: Name of the latitude coordinate. Spherical mode assumes
+            degrees.
+        lon: Name of the longitude coordinate. Spherical mode assumes
+            degrees.
         depth: Optional vertical coordinate name. If ``None``, ``dz``
             is omitted from ``volume_metrics`` and ``cell_volume`` is
             populated with the 2-D ``cell_area`` (in m², not m³) so
@@ -83,6 +85,22 @@ def grid_metrics_from_coords(
         Edge cells extrapolate the nearest interior spacing; this is
         adequate for budget closure tests and the demo notebook but
         will bias real-world budgets near the domain boundary.
+
+    Example:
+        A 1°×1° grid near the equator has ≈111 km cell edges:
+
+        ```pycon
+        >>> import xarray as xr
+        >>> ds = xr.Dataset(coords={"lat": [0.0, 1.0, 2.0], "lon": [10.0, 11.0, 12.0]})
+        >>> vol, face = grid_metrics_from_coords(ds)
+        >>> sorted(vol.data_vars)
+        ['cell_area', 'cell_volume', 'dx', 'dy']
+        >>> sorted(face.data_vars)
+        ['area_e', 'area_n', 'dx_e', 'dy_n']
+        >>> round(float(vol["dy"].isel(lat=0)) / 1000)  # km per degree latitude
+        111
+
+        ```
     """
     if lat not in ds.coords:
         raise ValueError(f"Dataset is missing latitude coord {lat!r}.")

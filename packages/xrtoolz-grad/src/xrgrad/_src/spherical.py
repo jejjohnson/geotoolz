@@ -141,8 +141,14 @@ def spherical_gradient(
             must be a subset of those two for ``geometry="spherical"``.
         accuracy: Scalar or per-dim tuple.
         method: Forwarded to :mod:`finitediffx`.
-        lon, lat, radius, uniform_rtol: Forwarded to
+        lon: Longitude coordinate name, forwarded to
             :func:`spherical_partial`.
+        lat: Latitude coordinate name, forwarded to
+            :func:`spherical_partial`.
+        radius: Sphere radius in metres, forwarded to
+            :func:`spherical_partial`.
+        uniform_rtol: Relative tolerance for the uniform-spacing check,
+            forwarded to :func:`spherical_partial`.
 
     Returns:
         Dataset with one DataArray per requested dim, named

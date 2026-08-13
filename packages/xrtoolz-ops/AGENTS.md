@@ -94,6 +94,7 @@ make install              # uv sync --all-packages --all-groups --all-extras + h
 make test                 # Fast tier across all five packages
 make test-all             # Everything, including slow/integration
 make test-slow            # Only the slow/integration tiers
+make test-doctest         # Docstring examples in xrcore/xrgrad/xreinx/xrsklearn
 make format               # Auto-fix: ruff format . && ruff check --fix .
 make lint                 # Lint code: ruff check .
 make typecheck            # ty check per package (from each package dir)
@@ -135,7 +136,7 @@ make typecheck                                # ty per package
 - Layer 0 pure functions live alongside Layer 1 operators in the same submodule
 - Stateful operations use the split-object pattern (`CalculateX` returns state, `ApplyX(state)` applies it). Exception: sklearn-style fit/transform state is handled by `xrsklearn.XarrayEstimator` + `xrsklearn.SklearnOp` instead
 - Operators holding live non-serializable state (models, closures, Datasets, child operators) set `forbid_in_yaml: ClassVar[bool] = True` (pipekit convention)
-- Google-style docstrings
+- Google-style docstrings. In the scoped packages (`xrcore`, `xrgrad`, `xreinx`, `xrsklearn`) the bar is enforced: ruff's pydocstyle (`D`) rules are enabled per package, and every public symbol carries Args/Returns/Raises plus a runnable, self-contained `Example:` block executed by `make test-doctest` (CI runs it too). End a doctest block with a blank line before the closing ```` ``` ```` fence, or doctest reads the fence as expected output
 - Type hints on all public functions and methods
 - Surgical changes only — don't refactor adjacent code or add docstrings to unchanged code
 

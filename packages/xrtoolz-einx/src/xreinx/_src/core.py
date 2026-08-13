@@ -61,8 +61,19 @@ def einsum(
         forwarded from the first input carrying each surviving dim.
 
     Example:
+        Area-weighted (here: mask-weighted) sum per time step:
+
         ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> field = xr.DataArray(np.ones((2, 3, 4)), dims=("time", "lat", "lon"))
+        >>> mask = xr.DataArray(np.ones((3, 4)), dims=("lat", "lon"))
         >>> total = einsum("time lat lon, lat lon -> time", field, mask)
+        >>> total.dims, total.shape
+        (('time',), (2,))
+        >>> float(total[0])
+        12.0
+
         ```
     """
     import einx
@@ -95,12 +106,21 @@ def rearrange(
     supplies them.
 
     Example:
+        Cut a gridded field into 2×2 patches (a merged group ``(a b)``
+        becomes the single dim ``a_b``):
+
         ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> field = xr.DataArray(np.zeros((2, 4, 4)), dims=("time", "lat", "lon"))
         >>> patches = rearrange(
         ...     "time (lat_blk lat_in) (lon_blk lon_in) "
         ...     "-> time (lat_blk lon_blk) lat_in lon_in",
-        ...     field, lat_in=4, lon_in=4,
+        ...     field, lat_in=2, lon_in=2,
         ... )
+        >>> patches.dims, patches.shape
+        (('time', 'lat_blk_lon_blk', 'lat_in', 'lon_in'), (2, 4, 2, 2))
+
         ```
     """
     import einx
@@ -128,12 +148,20 @@ def reduce(
             'prod' | 'std' | 'var' | 'any' | 'all'`` dispatch to einx's
             native reducers; ``'median'`` and any callable route through
             einx's numpy-like reduce adapter for the input's backend.
+        **shape_kwargs: axis-length hints (``name=size``) for composed
+            axes the pattern alone cannot solve, forwarded to einx.
 
     Example:
+        Time-mean climatology:
+
         ```pycon
-        >>> climatology = reduce(
-        ...     "time lat lon -> lat lon", sst, op="mean",
-        ... )
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> sst = xr.DataArray(np.arange(6.0).reshape(3, 2), dims=("time", "lat"))
+        >>> climatology = reduce("time lat -> lat", sst, op="mean")
+        >>> climatology.values
+        array([2., 3.])
+
         ```
     """
     parsed = parse_pattern(pattern)
@@ -158,10 +186,16 @@ def repeat(
     New dims are unindexed unless ``coords`` supplies them.
 
     Example:
+        Tile an annual-mean field out to twelve months:
+
         ```pycon
-        >>> seasonal = repeat(
-        ...     "lat lon -> month lat lon", mean_field, month=12,
-        ... )
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> mean_field = xr.DataArray(np.zeros((3, 4)), dims=("lat", "lon"))
+        >>> seasonal = repeat("lat lon -> month lat lon", mean_field, month=12)
+        >>> seasonal.dims, seasonal.shape
+        (('month', 'lat', 'lon'), (12, 3, 4))
+
         ```
     """
     import einx

@@ -48,19 +48,27 @@ class Operator(_PipekitOperator):
     ``__call__`` dispatch, not ``_apply``.
 
     Example:
-        A shape-preserving diagnostic works against any of the three
-        xarray containers without per-class branching::
+        One ``_apply`` implementation serves ``Dataset`` and
+        ``DataTree`` callers alike — the tree case maps over every leaf:
 
-            class GaussianSmooth(Operator):
-                def __init__(self, variable, *, dim, sigma):
-                    self.variable, self.dim, self.sigma = variable, dim, sigma
+        ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> from xrcore import Operator
+        >>> class Scale(Operator):
+        ...     def __init__(self, factor: float) -> None:
+        ...         self.factor = factor
+        ...     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
+        ...         return ds * self.factor
+        >>> ds = xr.Dataset({"ssh": ("x", np.arange(3.0))})
+        >>> Scale(10.0)(ds)["ssh"].values
+        array([ 0., 10., 20.])
+        >>> tree = xr.DataTree.from_dict({"coarse": ds, "fine": ds * 2})
+        >>> out = Scale(10.0)(tree)
+        >>> sorted(out.children), float(out["fine"]["ssh"][2])
+        (['coarse', 'fine'], 40.0)
 
-                def _apply(self, ds: xr.Dataset) -> xr.Dataset:
-                    return ds.assign({self.variable: ...})
-
-            op = GaussianSmooth("ssh", dim="time", sigma=3)
-            op(ds)   # → Dataset
-            op(dt)   # → DataTree, each leaf smoothed independently
+        ```
     """
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:

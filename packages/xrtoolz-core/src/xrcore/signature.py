@@ -27,6 +27,7 @@ Example:
     '(lat=181, lon=360); dtype=float32'
     >>> sig.replace_dims({"lat": None}).format()
     '(time=365, lat=?, lon=360); dtype=float32'
+
     ```
 """
 
@@ -89,6 +90,7 @@ class Signature:
         ...     {"lat": 4, "time": 12}, dtype="float32",
         ... )
         True
+
         ```
     """
 
@@ -156,6 +158,7 @@ class Signature:
             >>> sig = Signature({"time": 12, "lat": 4})
             >>> sig.replace_dims({"time": None}).format()
             '(time=?, lat=4)'
+
             ```
         """
         if strict:
@@ -179,6 +182,7 @@ class Signature:
             >>> sig = Signature({"lon": 360, "lat": 181})
             >>> sig.rename_dims({"lon": "longitude"}).format()
             '(longitude=360, lat=181)'
+
             ```
         """
         return Signature(
@@ -194,6 +198,7 @@ class Signature:
             >>> sig = Signature({"time": 12, "lat": 4, "lon": 8})
             >>> sig.drop_dims(("time", "lat")).format()
             '(lon=8)'
+
             ```
         """
         drop = {names} if isinstance(names, str) else set(names)

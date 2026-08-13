@@ -23,9 +23,17 @@ def matmul(a: xr.DataArray, b: xr.DataArray, *, dim: str) -> xr.DataArray:
     with ``a``'s remaining dims first.
 
     Example:
+        Project a time series onto a basis — ``(time, k) · (k, mode)``:
+
         ```pycon
-        >>> # (time, k) · (k, mode) -> (time, mode)
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> field = xr.DataArray(np.ones((5, 3)), dims=("time", "k"))
+        >>> basis = xr.DataArray(np.ones((3, 2)), dims=("k", "mode"))
         >>> scores = matmul(field, basis, dim="k")
+        >>> scores.dims, scores.shape
+        (('time', 'mode'), (5, 2))
+
         ```
     """
     if dim not in a.dims or dim not in b.dims:
@@ -52,8 +60,16 @@ def outer(a: xr.DataArray, b: xr.DataArray) -> xr.DataArray:
     """Outer product. Output carries ``a``'s dims then ``b``'s dims.
 
     Example:
+        Build a 2-D weight grid from per-axis weights:
+
         ```pycon
-        >>> weights = outer(lat_weights, lon_weights)
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> lat_weights = xr.DataArray(np.ones(3), dims="lat")
+        >>> lon_weights = xr.DataArray(np.ones(4), dims="lon")
+        >>> outer(lat_weights, lon_weights).dims
+        ('lat', 'lon')
+
         ```
     """
     overlap = set(a.dims) & set(b.dims)
@@ -78,9 +94,17 @@ def batch_matmul(
     """``matmul`` along ``dim`` broadcast over shared ``batch_dims``.
 
     Example:
+        Contract ``k`` while broadcasting over a shared ``ensemble`` dim:
+
         ```pycon
-        >>> # contract 'k', broadcast over shared 'ensemble'
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> a = xr.DataArray(np.ones((2, 5, 3)), dims=("ensemble", "time", "k"))
+        >>> b = xr.DataArray(np.ones((2, 3, 4)), dims=("ensemble", "k", "mode"))
         >>> out = batch_matmul(a, b, dim="k", batch_dims=["ensemble"])
+        >>> out.dims, out.shape
+        (('ensemble', 'time', 'mode'), (2, 5, 4))
+
         ```
     """
     batch = list(batch_dims)

@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz"
-version = "0.1.0"
+version = "0.0.1"
 description = "Composable operator library for geoprocessing Earth System Data Cubes."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
@@ -57,10 +57,10 @@ dependencies = [
     # finite-difference calculus (sole carrier of the finitediffx/JAX
     # stack), xreinx the einx bridge, xrsklearn the sklearn bridge (and
     # the `.sklearn` accessor registration re-exported via xrtoolz.utils).
-    "xrtoolz-core>=0.1.0",
-    "xrtoolz-grad>=0.1.0",
-    "xrtoolz-einx>=0.1.0",
-    "xrtoolz-sklearn>=0.1.0",
+    "xrtoolz-core>=0.0.1",
+    "xrtoolz-grad>=0.0.1",
+    "xrtoolz-einx>=0.0.1",
+    "xrtoolz-sklearn>=0.0.1",
     "matplotlib>=3.8",
     "cartopy>=0.22",
     # The Operator / Sequential / Graph composition layer lives in pipekit

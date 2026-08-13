@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz-sklearn"
-version = "0.1.0"
+version = "0.0.1"
 description = "scikit-learn ↔ xarray bridge — XarrayEstimator, the .sklearn accessor, and the SklearnOp pipeline operator."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     # The xarray-aware Operator base for SklearnOp.
-    "xrtoolz-core>=0.1.0",
+    "xrtoolz-core>=0.0.1",
     "scikit-learn>=1.4",
     "numpy>=1.26",
     "pandas>=2.1",
@@ -55,8 +55,21 @@ target-version = "py312"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E402", "E721", "E731", "E741", "RUF002", "RUF003"]
+# "D" (pydocstyle, Google convention) is enabled in this package — every
+# public symbol carries a full docstring; tests are exempt below.
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "D"]
+ignore = [
+    "D105", "D107","E402", "E721", "E731", "E741", "RUF002", "RUF003"]
+
+[tool.ruff.lint.pydocstyle]
+# D105/D107 are excluded package-wide (see the member ignore lists):
+# magic-method docstrings are boilerplate, and Google style documents
+# constructor args in the class docstring, not on __init__.
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Test docstrings are one-liners at most; don't hold them to the API bar.
+"tests/*" = ["D"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

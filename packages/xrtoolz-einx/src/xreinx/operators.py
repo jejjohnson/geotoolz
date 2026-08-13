@@ -95,6 +95,7 @@ class Einsum(Operator):
         )
 
     def get_config(self) -> dict[str, Any]:
+        """Return the JSON-safe constructor config for serialization."""
         cfg: dict[str, Any] = {"pattern": self.pattern, "align": self.align}
         cfg.update(self.shape_kwargs)
         if self.coords is not None:
@@ -107,6 +108,7 @@ class Einsum(Operator):
     def compute_output_signature(
         self, input_signature: Signature | tuple[Signature, ...]
     ) -> Signature:
+        """Infer the output shape from the pattern, without touching data."""
         return infer_output_signature(
             self.pattern, _as_sigs(input_signature), self.shape_kwargs
         )
@@ -142,6 +144,7 @@ class Rearrange(Operator):
         return rearrange(self.pattern, da, coords=self.coords, **self.shape_kwargs)
 
     def get_config(self) -> dict[str, Any]:
+        """Return the JSON-safe constructor config for serialization."""
         cfg: dict[str, Any] = {"pattern": self.pattern}
         cfg.update(self.shape_kwargs)
         if self.coords is not None:
@@ -154,6 +157,7 @@ class Rearrange(Operator):
     def compute_output_signature(
         self, input_signature: Signature | tuple[Signature, ...]
     ) -> Signature:
+        """Infer the output shape from the pattern, without touching data."""
         return infer_output_signature(
             self.pattern, _as_sigs(input_signature), self.shape_kwargs
         )
@@ -195,6 +199,11 @@ class Reduce(Operator):
         return reduce(self.pattern, da, op=self.op, **self.shape_kwargs)
 
     def get_config(self) -> dict[str, Any]:
+        """Return the JSON-safe constructor config for serialization.
+
+        Callable ``op`` values are recorded by ``__name__`` — good enough
+        for provenance, but only string ops round-trip through YAML.
+        """
         op = (
             self.op
             if isinstance(self.op, str)
@@ -208,6 +217,7 @@ class Reduce(Operator):
     def compute_output_signature(
         self, input_signature: Signature | tuple[Signature, ...]
     ) -> Signature:
+        """Infer the output shape from the pattern, without touching data."""
         return infer_output_signature(
             self.pattern, _as_sigs(input_signature), self.shape_kwargs
         )
@@ -243,6 +253,7 @@ class Repeat(Operator):
         return repeat(self.pattern, da, coords=self.coords, **self.shape_kwargs)
 
     def get_config(self) -> dict[str, Any]:
+        """Return the JSON-safe constructor config for serialization."""
         cfg: dict[str, Any] = {"pattern": self.pattern}
         cfg.update(self.shape_kwargs)
         if self.coords is not None:
@@ -255,6 +266,7 @@ class Repeat(Operator):
     def compute_output_signature(
         self, input_signature: Signature | tuple[Signature, ...]
     ) -> Signature:
+        """Infer the output shape from the pattern, without touching data."""
         return infer_output_signature(
             self.pattern, _as_sigs(input_signature), self.shape_kwargs
         )
@@ -302,6 +314,7 @@ class Matmul(_BinaryLinalgOp):
         return matmul(a, b, dim=self.dim)
 
     def get_config(self) -> dict[str, Any]:
+        """Return the JSON-safe constructor config for serialization."""
         return {"dim": self.dim}
 
     def __repr__(self) -> str:
@@ -310,6 +323,7 @@ class Matmul(_BinaryLinalgOp):
     def compute_output_signature(
         self, input_signature: Signature | tuple[Signature, ...]
     ) -> Signature:
+        """Infer the output shape from the operand dims, without touching data."""
         a_sig, b_sig = _as_sigs(input_signature)
         dims = [d for d in a_sig.dims if d != self.dim] + [
             d for d in b_sig.dims if d != self.dim
@@ -331,6 +345,7 @@ class Outer(_BinaryLinalgOp):
         return outer(a, b)
 
     def get_config(self) -> dict[str, Any]:
+        """Return the JSON-safe constructor config for serialization."""
         return {}
 
     def __repr__(self) -> str:
@@ -339,6 +354,7 @@ class Outer(_BinaryLinalgOp):
     def compute_output_signature(
         self, input_signature: Signature | tuple[Signature, ...]
     ) -> Signature:
+        """Infer the output shape from the operand dims, without touching data."""
         a_sig, b_sig = _as_sigs(input_signature)
         return self._signature_from_dims([*a_sig.dims, *b_sig.dims], (a_sig, b_sig))
 
@@ -366,6 +382,7 @@ class BatchMatmul(_BinaryLinalgOp):
         return batch_matmul(a, b, dim=self.dim, batch_dims=self.batch_dims)
 
     def get_config(self) -> dict[str, Any]:
+        """Return the JSON-safe constructor config for serialization."""
         return {"dim": self.dim, "batch_dims": list(self.batch_dims)}
 
     def __repr__(self) -> str:
@@ -374,6 +391,7 @@ class BatchMatmul(_BinaryLinalgOp):
     def compute_output_signature(
         self, input_signature: Signature | tuple[Signature, ...]
     ) -> Signature:
+        """Infer the output shape from the operand dims, without touching data."""
         a_sig, b_sig = _as_sigs(input_signature)
         batch = list(self.batch_dims)
         a_rest = [d for d in a_sig.dims if d != self.dim and d not in batch]

@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz-grad"
-version = "0.1.0"
+version = "0.0.1"
 description = "Finite-difference calculus on labeled xarray grids — gradient, curl, divergence, laplacian with cartesian/rectilinear/spherical geometry dispatch."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
@@ -60,8 +60,11 @@ target-version = "py312"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# "D" (pydocstyle, Google convention) is enabled in this package — every
+# public symbol carries a full docstring; tests are exempt below.
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "D"]
 ignore = [
+    "D105", "D107",
     "E402", "E721", "E731", "E741",
     # Physics/math docstrings legitimately use Greek letters,
     # en-dashes, minus signs, and similar Unicode.
@@ -71,6 +74,16 @@ ignore = [
     # jaxtyping-recommended config and `ty` remains the safety net.
     "F722", "F821", "UP037",
 ]
+
+[tool.ruff.lint.pydocstyle]
+# D105/D107 are excluded package-wide (see the member ignore lists):
+# magic-method docstrings are boilerplate, and Google style documents
+# constructor args in the class docstring, not on __init__.
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Test docstrings are one-liners at most; don't hold them to the API bar.
+"tests/*" = ["D"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

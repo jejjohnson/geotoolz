@@ -17,8 +17,14 @@ Two surfaces:
 
 Example:
     ```pycon
+    >>> import numpy as np
+    >>> import xarray as xr
     >>> import xreinx as xnx
-    >>> total = xnx.einsum("time lat lon, lat lon -> time", field, mask)
+    >>> field = xr.DataArray(np.ones((2, 3, 4)), dims=("time", "lat", "lon"))
+    >>> mask = xr.DataArray(np.ones((3, 4)), dims=("lat", "lon"))
+    >>> xnx.einsum("time lat lon, lat lon -> time", field, mask).shape
+    (2,)
+
     ```
 """
 
@@ -43,7 +49,7 @@ from xreinx.operators import (
 )
 
 
-__version__ = "0.1.0"
+__version__ = "0.0.1"
 
 __all__ = [
     "BatchMatmul",
