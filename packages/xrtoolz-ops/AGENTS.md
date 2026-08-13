@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`xrtoolz` is a uv workspace of five packages that together provide a composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework.
+`xrtoolz` is a uv workspace of six packages that together provide a composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework.
 
 The packages (distribution name → import name):
 
@@ -15,8 +15,9 @@ The packages (distribution name → import name):
 | `xrtoolz-grad` | `xrgrad` | Finite-difference calculus on labeled grids (sole carrier of the finitediffx/JAX stack) |
 | `xrtoolz-einx` | `xreinx` | xarray ↔ einx named-tensor bridge (functions + Operators; einx loads lazily) |
 | `xrtoolz-sklearn` | `xrsklearn` | scikit-learn ↔ xarray bridge (`XarrayEstimator`, `.sklearn` accessors, `SklearnOp`) |
+| `xrtoolz-reader` | `xrreader` | Authenticated archive readers (CMEMS, CDS, AEMET) + the typed request vocabulary / CF `Variable` registry |
 
-`xrtoolz` depends on the other four, so `pip install xrtoolz` behaves exactly as the pre-split package. Deprecation shims keep `xrtoolz.calc` / `xrtoolz.einx` / `xrtoolz.signature` / `xrtoolz.utils.XarrayEstimator` / `xrtoolz.transforms.SklearnOp` importable through 0.x; new code imports `xrgrad` / `xreinx` / `xrcore` / `xrsklearn` directly.
+`xrtoolz` depends on the other five, so `pip install xrtoolz` behaves exactly as the pre-split package. Deprecation shims keep `xrtoolz.calc` / `xrtoolz.einx` / `xrtoolz.signature` / `xrtoolz.utils.XarrayEstimator` / `xrtoolz.transforms.SklearnOp` importable through 0.x; new code imports `xrgrad` / `xreinx` / `xrcore` / `xrsklearn` directly.
 
 ## Architecture
 
@@ -68,6 +69,7 @@ Design rules:
 | `packages/xrtoolz-grad/src/xrgrad/` | Finite-difference calculus |
 | `packages/xrtoolz-einx/src/xreinx/` | xarray ↔ einx bridge |
 | `packages/xrtoolz-sklearn/src/xrsklearn/` | sklearn ↔ xarray bridge |
+| `packages/xrtoolz-reader/src/xrreader/` | Authenticated archive readers + request types |
 | `packages/*/tests/` | Per-package test suites |
 | `docs/` | Documentation (MkDocs root site), including `docs/design/` with the full design doc |
 | `notebooks/` | Jupyter notebooks |
@@ -91,7 +93,7 @@ The finitediffx/JAX stack rides exclusively in `xrtoolz-grad`, so it still reach
 
 ```bash
 make install              # uv sync --all-packages --all-groups --all-extras + hooks
-make test                 # Fast tier across all five packages
+make test                 # Fast tier across all six packages
 make test-all             # Everything, including slow/integration
 make test-slow            # Only the slow/integration tiers
 make test-doctest         # Docstring examples in xrcore/xrgrad/xreinx/xrsklearn

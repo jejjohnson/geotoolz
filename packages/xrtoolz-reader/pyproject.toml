@@ -1,0 +1,141 @@
+[project]
+name = "xrtoolz-reader"
+version = "0.0.2"
+description = "Authenticated archive readers for xarray geodata (CMEMS, CDS, AEMET)."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+keywords = ["xarray", "earth-science", "data", "cmems", "cds", "era5", "aemet"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+# Core stays light: only the typed request vocabulary + base adapter
+# surface need these. Service clients (copernicusmarine, cdsapi, httpx,
+# geopandas, …) are lazily imported and gated behind the extras below.
+# This is what lets `xrtoolz` depend on the reader for its CF Variable
+# registry without dragging the archive clients into every install.
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "xarray>=2024.10",
+]
+
+[project.optional-dependencies]
+# ``pip install 'xrtoolz-reader[cmems]'`` — Copernicus Marine adapter.
+cmems = [
+    "copernicusmarine>=2.0",
+]
+
+# ``pip install 'xrtoolz-reader[cds]'`` — Climate Data Store gridded
+# reanalysis (ERA5). In-situ datasets additionally need the ``cds-insitu``
+# extra. cdsapi is a thin HTTP client, so we also pull a NetCDF backend:
+# CDSSource requests NetCDF and reads the cached ``.nc`` back via
+# ``xr.open_dataset``.
+cds = [
+    "cdsapi>=0.7",
+    "netcdf4>=1.6",
+]
+
+# ``pip install 'xrtoolz-reader[grib]'`` — GRIB reader backend. Kept
+# separate from ``cds`` because cfgrib pulls the ecCodes binary stack,
+# and the CDS profiles default to NetCDF; only ``format="grib"`` needs
+# it (see _FORMAT_ENGINE in _src/cds/source.py).
+grib = [
+    "cfgrib>=0.9",
+]
+
+# ``pip install 'xrtoolz-reader[cds-insitu]'`` — CDS in-situ surface-land /
+# surface-marine adapters + the GeoParquet-backed CDSInsituArchive.
+cds-insitu = [
+    "cdsapi>=0.7",
+    "netcdf4>=1.6",
+    "geopandas>=1.1.3",
+    "pyarrow>=24.0.0",
+    "loguru>=0.7.3",
+]
+
+# ``pip install 'xrtoolz-reader[aemet]'`` — AEMET OpenData adapter + the
+# GeoParquet-backed AemetArchive.
+aemet = [
+    "httpx>=0.28.1",
+    "geopandas>=1.1.3",
+    "pyarrow>=24.0.0",
+    "loguru>=0.7.3",
+    # AemetSource.download() writes the fetched dataset with to_netcdf().
+    "netcdf4>=1.6",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/xrtoolz"
+
+# Member dev group carries only the runners; the shared fixture stack
+# (httpx, geopandas, pyarrow, loguru, netcdf4, tzdata) lives in the root
+# dev group alongside the other packages' fixture dependencies.
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
+lint = [
+    "ruff>=0.15.10,<0.16",
+]
+typecheck = [
+    "ty>=0.0.30,<0.0.32",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xrreader"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E402", "E721", "E731", "E741",
+    # Geoscience/math docstrings and comments legitimately use en-dashes,
+    # multiplication signs, Greek letters, and similar Unicode (e.g.
+    # "Brunt–Väisälä", "2 stations × 2 months"). Suppress the
+    # ambiguous-character warnings that would force ASCII-ification.
+    "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+known-first-party = ["xrtoolz", "xrcore", "xrgrad", "xreinx", "xrsklearn", "xrreader"]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/xrreader --cov-report=term-missing --cov-report=xml:coverage.xml --strict-markers"
+markers = [
+    "slow: long-running tests — excluded from the default CI run",
+    "integration: tests that touch external services — run manually, never in automatic CI",
+]
+
+[tool.coverage.run]
+source = ["src/xrreader"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80

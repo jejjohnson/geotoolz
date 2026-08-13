@@ -69,12 +69,12 @@ dependencies = [
     # [tool.uv.sources] below for the dev-time source.
     "pipekit>=0.0.1",
     # The data-acquisition layer (CMEMS/CDS/AEMET readers) and the shared
-    # typed request vocabulary + CF Variable registry moved to `xrreader`.
+    # typed request vocabulary + CF Variable registry live in the
+    # `xrtoolz-reader` workspace member, which imports as `xrreader`.
     # `xrtoolz.geo` / `xrtoolz.viz` import the registry from `xrreader.types`;
-    # xrreader's core is light (numpy/pandas/xarray) and its heavy service
+    # the reader's core is light (numpy/pandas/xarray) and its heavy service
     # clients are optional extras, so this stays a lightweight dependency.
-    # See [tool.uv.sources] below for the dev-time source.
-    "xrreader>=0.0.2",
+    "xrtoolz-reader>=0.0.2",
 ]
 
 [project.optional-dependencies]
