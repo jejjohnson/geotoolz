@@ -75,6 +75,39 @@ Power-spectrum visualisations consuming `transforms.power_spectrum` and
 
 ::: xrtoolz.viz.validation.EventVerificationPanel
 
+## Composable wrappers
+
+These consume any of the panels above — or a plain
+`(ds, ax) -> Any` callable — and multiply it. They nest, so a
+per-experiment N-up movie is
+`AnimatePanel(FacetPanel(SpatialMapPanel(...), facet_dim="experiment"))`
+and the six-panel `scale × (ref, study, diff)` mosaic is
+`FacetPanel(PairwiseComparePanel(SpatialMapPanel(...)), facet_dim="scale")`.
+
+!!! note "Generality boundary"
+    Only **single-input, single-axes** panels can be wrapped — the
+    wrappers hand an inner panel one sliced object and one Axes. That
+    covers `SpatialMapPanel`, the PSD panels, `RegionScoreBarPanel`,
+    `RotaryPolarizationPanel` and the scale-skill panels, plus any
+    `(ds, ax) -> Any` callable.
+
+    `EulerianLagrangianPanel` (eulerian + trajectories) and
+    `EventVerificationPanel` (four inputs across an axes pair) take more
+    of both and are rejected at construction with a `TypeError`. Plots
+    that own the whole figure (seaborn `JointGrid`, `pairplot`) and
+    non-matplotlib backends (plotly, hvplot, bokeh) are also out of
+    scope.
+
+::: xrtoolz.viz.validation.FacetPanel
+
+::: xrtoolz.viz.validation.seasonal_groupby
+
+::: xrtoolz.viz.validation.PairwiseComparePanel
+
+::: xrtoolz.viz.validation.AnimatePanel
+
+::: xrtoolz.viz.validation.save_animation
+
 ## Palette helper
 
 ::: xrtoolz.viz.validation.method_palette

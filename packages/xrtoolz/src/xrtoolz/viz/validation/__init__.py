@@ -13,10 +13,21 @@ Shipped:
 - :class:`ProcessBudgetPanel` — V4 budget term breakdown.
 - :class:`EventVerificationPanel` — V5 event match overlay +
   contingency stats.
+
+Composable wrappers, which consume any of the above (or a plain
+``(ds, ax) -> Any`` callable) and multiply it:
+
+- :class:`FacetPanel` — one cell per value along a categorical dim.
+- :class:`PairwiseComparePanel` — ``(ref, study, diff)`` triptych.
+- :class:`AnimatePanel` + :func:`save_animation` — frames over a
+  time-like dim. Not a panel: it yields a ``FuncAnimation``.
 """
 
+from xrtoolz.viz.validation._src.animate import AnimatePanel, save_animation
 from xrtoolz.viz.validation._src.budgets import ProcessBudgetPanel
+from xrtoolz.viz.validation._src.compare import PairwiseComparePanel
 from xrtoolz.viz.validation._src.events import EventVerificationPanel
+from xrtoolz.viz.validation._src.facet import FacetPanel, seasonal_groupby
 from xrtoolz.viz.validation._src.lagrangian import EulerianLagrangianPanel
 from xrtoolz.viz.validation._src.palette import method_palette
 from xrtoolz.viz.validation._src.psd import (
@@ -36,13 +47,16 @@ from xrtoolz.viz.validation._src.spatial import SpatialMapPanel
 
 
 __all__ = [
+    "AnimatePanel",
     "EulerianLagrangianPanel",
     "EventVerificationPanel",
+    "FacetPanel",
     "LeadTimeSkillPanel",
     "PSDIsotropicPanel",
     "PSDIsotropicScorePanel",
     "PSDSpaceTimePanel",
     "PSDSpaceTimeScorePanel",
+    "PairwiseComparePanel",
     "ProcessBudgetPanel",
     "RegionScoreBarPanel",
     "RotaryPolarizationPanel",
@@ -50,4 +64,6 @@ __all__ = [
     "SpatialMapPanel",
     "SpectralSkillPanel",
     "method_palette",
+    "save_animation",
+    "seasonal_groupby",
 ]
