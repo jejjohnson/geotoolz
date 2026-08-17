@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz"
-version = "0.0.1"
+version = "0.0.2"
 description = "Composable operator library for geoprocessing Earth System Data Cubes."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

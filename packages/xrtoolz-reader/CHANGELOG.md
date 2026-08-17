@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-reader-v0.0.2...xrtoolz-reader-v0.0.3) (2026-08-17)
+
+
+### Features
+
+* fold xrreader into the workspace as xrtoolz-reader ([#259](https://github.com/jejjohnson/xrtoolz/issues/259)) ([aa0859b](https://github.com/jejjohnson/xrtoolz/commit/aa0859b1aafb123d6d4e21967ed46dcd9386b3ef))
+
 ## [0.0.2](https://github.com/jejjohnson/xrreader/compare/v0.0.1...v0.0.2) (2026-06-05)
 
 

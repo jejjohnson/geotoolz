@@ -28,6 +28,15 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.2](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.1...xrtoolz-v0.0.2) (2026-08-17)
+
+
+### Features
+
+* fold xrreader into the workspace as xrtoolz-reader ([#259](https://github.com/jejjohnson/xrtoolz/issues/259)) ([aa0859b](https://github.com/jejjohnson/xrtoolz/commit/aa0859b1aafb123d6d4e21967ed46dcd9386b3ef))
+* **geo,interpolate:** add spatial_mosaic, reproject_match and Delaunay swath gridding ([#260](https://github.com/jejjohnson/xrtoolz/issues/260)) ([e80663c](https://github.com/jejjohnson/xrtoolz/commit/e80663ce35c5fc5cbe91b6423da6178c0218432d))
+* **grad,ocn:** mixed geometry, time derivatives, periodic boundaries, 3-D advection ([#282](https://github.com/jejjohnson/xrtoolz/issues/282)) ([afef8a3](https://github.com/jejjohnson/xrtoolz/commit/afef8a3cfd7f1367b74c8505b8d92a1cf3bc3a66))
+
 ## 0.0.1 (2026-08-13)
 
 

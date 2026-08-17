@@ -6,7 +6,7 @@ from xrcore import Operator, Signature
 from xrtoolz.combinators import ApplyToEach, Augment
 
 
-__version__ = "0.0.1"  # x-release-please-version
+__version__ = "0.0.2"  # x-release-please-version
 
 __all__ = [
     "ApplyToEach",
