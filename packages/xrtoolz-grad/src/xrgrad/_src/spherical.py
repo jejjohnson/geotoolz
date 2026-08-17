@@ -49,6 +49,7 @@ def spherical_partial(
     da: xr.DataArray,
     dim: str,
     *,
+    order: int = 1,
     accuracy: int = 1,
     method: str = "central",
     lon: str = "lon",
@@ -62,6 +63,7 @@ def spherical_partial(
         da: Input field with both ``lon`` and ``lat`` coordinates.
         dim: Either ``lon`` (returns ``∂F/∂x``) or ``lat`` (returns
             ``∂F/∂y``).
+        order: Derivative order. Only ``1`` is supported — see Raises.
         accuracy: ``finitediffx`` accuracy order.
         method: ``"central"`` | ``"forward"`` | ``"backward"``.
         lon: Name of the longitude coordinate (degrees east).
@@ -73,16 +75,41 @@ def spherical_partial(
     Returns:
         DataArray with the same dims/coords as ``da`` and a name of
         ``f"d{da.name}_dx"`` or ``f"d{da.name}_dy"``.
+
+    Raises:
+        ValueError: if ``lon``/``lat`` are missing, if ``dim`` is neither
+            of them, or if a coordinate that this derivative actually
+            needs is not 1-D. Differentiating along ``lat`` needs only the
+            latitude axis, so a scalar ``lon`` coordinate (as left behind
+            by ``da.sel(lon=...)``) is accepted.
+        NotImplementedError: if ``order > 1``. Repeating the metric
+            derivative is not the geometric second derivative — the
+            metric factors do not commute with ``∂`` — so use
+            :func:`xrgrad.laplacian`, which carries the curvature
+            corrections.
     """
+    cartesian._validate_order(order)
     if lon not in da.coords:
         raise ValueError(f"Coordinate {lon!r} not present on DataArray.")
     if lat not in da.coords:
         raise ValueError(f"Coordinate {lat!r} not present on DataArray.")
+    if order > 1:
+        raise NotImplementedError(
+            f"order={order} is not supported for geometry='spherical': "
+            "repeating the metric derivative 1/(R cos φ) ∂/∂λ is not the "
+            "geometric second derivative. Use xrgrad.laplacian, which "
+            "includes the curvature corrections."
+        )
     if dim not in (lon, lat):
         raise ValueError(
             f"dim={dim!r} must be the lon coord ({lon!r}) or the lat "
             f"coord ({lat!r}) for geometry='spherical'."
         )
+    # Only the differentiated axis has to be 1-D here. The other coordinate
+    # is constrained further down, and only when its metric factor is
+    # actually used — a lat derivative is well defined even when lon has
+    # been collapsed to a scalar by e.g. ``da.sel(lon=...)``.
+    cartesian._require_1d_coord(da[dim])
     if dim not in da.dims:
         raise ValueError(
             f"Dimension {dim!r} not present on DataArray with dims={da.dims}."
@@ -100,6 +127,9 @@ def spherical_partial(
 
     name_suffix: str
     if dim == lon:
+        # cos φ has to broadcast along the latitude axis, so the latitude
+        # coordinate must itself be 1-D for this branch only.
+        cartesian._require_1d_coord(da[lat])
         lat_values_rad = np.deg2rad(np.asarray(da[lat].values))
         cos_phi = _broadcast_along(
             np.cos(lat_values_rad), ndim=da.ndim, axis=da.get_axis_num(lat)
@@ -161,15 +191,7 @@ def spherical_gradient(
                 f"dims={target_dims!r} contains {d!r}; expected entries "
                 f"from ({lon!r}, {lat!r}) for geometry='spherical'."
             )
-    if isinstance(accuracy, int):
-        per_dim = (accuracy,) * len(target_dims)
-    else:
-        per_dim = tuple(accuracy)
-        if len(per_dim) != len(target_dims):
-            raise ValueError(
-                f"accuracy tuple length ({len(per_dim)}) does not match "
-                f"number of dims ({len(target_dims)})."
-            )
+    per_dim = cartesian._per_dim_accuracy(accuracy, target_dims)
 
     base = da.name or "f"
     out: dict[str, xr.DataArray] = {}

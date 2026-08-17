@@ -39,6 +39,16 @@ $$
 with $\lambda$ longitude, $\varphi$ latitude, and $R$ the Earth radius
 (`xrgrad.EARTH_RADIUS`, 6 371 000 m).
 
+All geometries expect the differentiated dimension to carry a **1-D
+coordinate**: step sizes come from coordinate values, so a dimension
+without one raises `ValueError`, and 2-D (curvilinear) coordinates are
+rejected rather than silently producing a nonsense step. `"rectilinear"`
+additionally requires the coordinate to be **strictly monotonic** —
+repeated or reversing values would divide by a zero coordinate
+difference. Strictly descending coordinates are fine, as are scalar
+coordinates on axes a given derivative does not use (a `lat` derivative
+still works after `da.sel(lon=...)`).
+
 ## Curvature corrections
 
 On the sphere, divergence and curl are not plain sums of partials —
@@ -60,8 +70,11 @@ $$
   + \frac{u\tan\varphi}{R}.
 $$
 
-The Laplacian is composed as $\Delta f = \nabla\cdot\nabla f$, so it
-inherits the corrections automatically.
+On spherical and rectilinear geometries the Laplacian is composed as
+$\Delta f = \nabla\cdot\nabla f$, so it inherits the corrections
+automatically. Only on Cartesian grids, where there is no curvature term
+to inherit, does `laplacian` instead sum direct second-derivative
+stencils $\sum_d \partial^2 f/\partial d^2$ — see below.
 
 ## Accuracy and stencils
 
@@ -72,9 +85,22 @@ one-sided differences of the same order. Two practical notes:
 
 - First derivatives of polynomials up to the stencil order are exact on
   interior points at `accuracy=1`.
-- `laplacian` composes two first-derivative stencils, so use
-  `accuracy=2` (or higher) when the interior must reproduce quadratic
-  fields exactly.
+- `partial` takes an `order=` argument for higher derivatives. `order=2`
+  uses a single second-derivative stencil rather than two composed
+  passes. It is available on Cartesian grids (and on rectilinear ones
+  whose coordinate turns out to be uniform); spherical geometry and
+  genuinely non-uniform coordinates raise `NotImplementedError`.
+- `laplacian` sums `order=2` stencils **only** for
+  `geometry="cartesian"`, so there it is already exact for quadratic
+  fields at the default `accuracy=1` and degrades only a single boundary
+  ring. Every other geometry — spherical, and *all* rectilinear grids,
+  including ones whose coordinate is uniform enough that each partial
+  delegates to the Cartesian backend — still composes two
+  first-derivative stencils, so pass `accuracy=2` (or higher) there when
+  the interior must reproduce quadratic fields exactly.
+- `divergence`, `curl`, and `laplacian` accept a per-dim `accuracy`
+  tuple as well as a scalar, matching `gradient`. The tuple pairs with
+  `dims` in order, which is useful on anisotropic grids.
 
 ```python
 import numpy as np

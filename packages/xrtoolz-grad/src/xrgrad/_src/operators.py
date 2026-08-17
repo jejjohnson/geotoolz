@@ -29,16 +29,22 @@ def partial(
     da: xr.DataArray,
     dim: str,
     *,
+    order: int = 1,
     geometry: Geometry = "cartesian",
     accuracy: int = 1,
     method: str = "central",
     **geom_kw: Any,
 ) -> xr.DataArray:
-    """Partial derivative ``∂da/∂<dim>`` under the given geometry.
+    """Partial derivative ``∂ᵒʳᵈᵉʳda/∂<dim>ᵒʳᵈᵉʳ`` under the given geometry.
 
     Args:
         da: Input field.
         dim: Dimension along which to differentiate.
+        order: Derivative order. ``1`` (default) is the first derivative.
+            ``order > 1`` is supported for ``geometry="cartesian"`` (and
+            for ``"rectilinear"`` when the coordinate turns out to be
+            uniformly spaced, which delegates to the cartesian backend);
+            see Raises for the other geometries.
         geometry: One of ``"cartesian"`` (uniform grid), ``"rectilinear"``
             (non-uniform 1-D coords), ``"spherical"`` (lon/lat in degrees).
         accuracy: Accuracy order forwarded to :mod:`finitediffx`.
@@ -48,6 +54,13 @@ def partial(
 
     Returns:
         DataArray with the same dims/coords as ``da``.
+
+    Raises:
+        ValueError: for an unknown ``geometry`` or a non-positive
+            ``order``.
+        NotImplementedError: for ``order > 1`` under
+            ``geometry="spherical"``, or under ``geometry="rectilinear"``
+            with a genuinely non-uniform coordinate.
 
     Example:
         ``d(x²)/dx = 2x`` — exact on interior points with the central
@@ -63,18 +76,27 @@ def partial(
         array([1., 2., 4., 5.])
 
         ```
+
+        The second derivative ``d²(x²)/dx² = 2`` comes from a single
+        order-2 stencil rather than two composed passes:
+
+        ```pycon
+        >>> partial(da, "x", order=2).values
+        array([2., 2., 2., 2.])
+
+        ```
     """
     if geometry == "cartesian":
         return cartesian.cartesian_partial(
-            da, dim, accuracy=accuracy, method=method, **geom_kw
+            da, dim, order=order, accuracy=accuracy, method=method, **geom_kw
         )
     if geometry == "rectilinear":
         return rectilinear.rectilinear_partial(
-            da, dim, accuracy=accuracy, method=method, **geom_kw
+            da, dim, order=order, accuracy=accuracy, method=method, **geom_kw
         )
     if geometry == "spherical":
         return spherical.spherical_partial(
-            da, dim, accuracy=accuracy, method=method, **geom_kw
+            da, dim, order=order, accuracy=accuracy, method=method, **geom_kw
         )
     raise ValueError(
         f"Unknown geometry {geometry!r}; expected one of "
@@ -153,7 +175,7 @@ def divergence(
     *,
     dims: tuple[str, ...],
     geometry: Geometry = "cartesian",
-    accuracy: int = 1,
+    accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     **geom_kw: Any,
 ) -> xr.DataArray:
@@ -166,7 +188,8 @@ def divergence(
         dims: Spatial dimensions that pair with each component (e.g.
             ``("x", "y")`` for cartesian, ``("lon", "lat")`` for spherical).
         geometry: ``"cartesian"`` | ``"rectilinear"`` | ``"spherical"``.
-        accuracy: Stencil accuracy order.
+        accuracy: Scalar (applied to every dim) or per-dim tuple matching
+            the length of ``dims``.
         method: ``"central"`` | ``"forward"`` | ``"backward"``.
         **geom_kw: Geometry-specific kwargs (``radius``, ``lon``, ``lat``,
             ``uniform_rtol``).
@@ -211,13 +234,14 @@ def divergence(
             f"components ({len(components)}) and dims ({len(dims)}) "
             "must have the same length."
         )
+    per_dim = cartesian._per_dim_accuracy(accuracy, dims)
     total: xr.DataArray | None = None
-    for comp_name, dim in zip(components, dims, strict=True):
+    for comp_name, dim, acc in zip(components, dims, per_dim, strict=True):
         d = partial(
             ds[comp_name],
             dim,
             geometry=geometry,
-            accuracy=accuracy,
+            accuracy=acc,
             method=method,
             **geom_kw,
         )
@@ -251,7 +275,7 @@ def curl(
     *,
     dims: tuple[str, str],
     geometry: Geometry = "cartesian",
-    accuracy: int = 1,
+    accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     **geom_kw: Any,
 ) -> xr.DataArray:
@@ -262,8 +286,8 @@ def curl(
         components: ``(u_name, v_name)`` — eastward then northward.
         dims: ``(x_dim, y_dim)`` paired with the components.
         geometry: ``"cartesian"`` | ``"rectilinear"`` | ``"spherical"``.
-        accuracy: Finite-difference accuracy order, forwarded to
-            :mod:`finitediffx`.
+        accuracy: Scalar (applied to both dims) or a 2-tuple pairing with
+            ``dims``, forwarded to :mod:`finitediffx`.
         method: Stencil family (e.g. ``"central"``), forwarded to
             :mod:`finitediffx`.
         **geom_kw: Forwarded to :func:`partial`.
@@ -307,11 +331,12 @@ def curl(
         raise ValueError("2-D curl needs exactly two components and two dims.")
     u_name, v_name = components
     x_dim, y_dim = dims
+    acc_x, acc_y = cartesian._per_dim_accuracy(accuracy, dims)
     dvdx = partial(
         ds[v_name],
         x_dim,
         geometry=geometry,
-        accuracy=accuracy,
+        accuracy=acc_x,
         method=method,
         **geom_kw,
     )
@@ -319,7 +344,7 @@ def curl(
         ds[u_name],
         y_dim,
         geometry=geometry,
-        accuracy=accuracy,
+        accuracy=acc_y,
         method=method,
         **geom_kw,
     )
@@ -346,20 +371,45 @@ def laplacian(
     *,
     dims: tuple[str, ...] | None = None,
     geometry: Geometry = "cartesian",
-    accuracy: int = 1,
+    accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     **geom_kw: Any,
 ) -> xr.DataArray:
     """Laplacian ``Δf = ∇·∇f``.
 
-    Implemented as gradient followed by divergence so the spherical
-    curvature correction is inherited automatically. Because the second
-    derivative is a composition of two first-derivative stencils, use
-    ``accuracy=2`` (or higher) when you need the interior to reproduce
-    polynomial fields exactly.
+    For ``geometry="cartesian"`` this sums direct second-derivative
+    stencils (``Σ ∂²f/∂dim²``), which is exact for quadratic fields at
+    the default ``accuracy=1`` and contaminates only a single boundary
+    ring. An axis too short to host a second-derivative stencil falls
+    back to the composed form below, so short axes keep working.
+
+    The other geometries compose gradient followed by divergence so the
+    spherical curvature correction is inherited automatically. That
+    applies to *all* rectilinear grids, including those whose coordinate
+    is uniform enough to delegate each partial to the cartesian backend.
+    On those paths the second derivative is two stacked first-derivative
+    stencils, so pass ``accuracy=2`` (or higher) when you need the
+    interior to reproduce polynomial fields exactly.
+
+    Args:
+        da: Input scalar field.
+        dims: Dimensions to differentiate against. Defaults to ``da.dims``
+            (``(lon, lat)`` for spherical geometry).
+        geometry: ``"cartesian"`` | ``"rectilinear"`` | ``"spherical"``.
+        accuracy: Scalar (applied to every dim) or per-dim tuple matching
+            the length of ``dims``.
+        method: Forwarded to :mod:`finitediffx`.
+        **geom_kw: Geometry-specific keyword arguments.
+
+    Returns:
+        Unnamed scalar DataArray with the same dims/coords as ``da``.
+
+    Raises:
+        ValueError: if ``dims`` resolves to an empty tuple, or for an
+            unknown ``geometry``.
 
     Example:
-        ``Δ(x² + y²) = 4``, exact on interior points at ``accuracy=2``:
+        ``Δ(x² + y²) = 4``, exact on interior points:
 
         ```pycon
         >>> import numpy as np
@@ -369,7 +419,7 @@ def laplacian(
         >>> f = xr.DataArray(
         ...     X**2 + Y**2, dims=("y", "x"), coords={"y": x, "x": x},
         ... )
-        >>> lap = laplacian(f, dims=("x", "y"), accuracy=2)
+        >>> lap = laplacian(f, dims=("x", "y"))
         >>> np.unique(lap.values[1:-1, 1:-1])
         array([4.])
 
@@ -386,11 +436,41 @@ def laplacian(
     else:
         target_dims = tuple(dims)
 
+    if not target_dims:
+        raise ValueError("laplacian needs at least one dimension to sum over.")
+
+    per_dim = cartesian._per_dim_accuracy(accuracy, target_dims)
+
+    if geometry == "cartesian":
+        total: xr.DataArray | None = None
+        for dim, acc in zip(target_dims, per_dim, strict=True):
+            try:
+                second = cartesian.cartesian_partial(
+                    da, dim, order=2, accuracy=acc, method=method, **geom_kw
+                )
+            except ValueError:
+                # finitediffx rejects a direct second-derivative stencil when
+                # the axis is too short to host one (e.g. two samples). Fall
+                # back to the composed two-pass form, which is what this
+                # function used before the order=2 fast path existed, so short
+                # axes keep working. A ValueError raised for any other reason
+                # — missing, non-1-D, or non-uniform coordinate — is raised
+                # again by these same calls.
+                first = cartesian.cartesian_partial(
+                    da, dim, accuracy=acc, method=method, **geom_kw
+                )
+                second = cartesian.cartesian_partial(
+                    first, dim, accuracy=acc, method=method, **geom_kw
+                )
+            total = second if total is None else total + second
+        assert total is not None  # narrowed by the empty-dims guard above
+        return total.rename(None)
+
     grad = gradient(
         da,
         dims=target_dims,
         geometry=geometry,
-        accuracy=accuracy,
+        accuracy=per_dim,
         method=method,
         **geom_kw,
     )
@@ -400,7 +480,7 @@ def laplacian(
         components=component_names,  # type: ignore[arg-type]
         dims=target_dims,
         geometry=geometry,
-        accuracy=accuracy,
+        accuracy=per_dim,
         method=method,
         **geom_kw,
     )
