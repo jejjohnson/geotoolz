@@ -35,26 +35,31 @@ def _flux_divergence(
 ) -> xr.DataArray:
     """``∇·(u φ)`` with spherical curvature + rectilinear vertical.
 
-    Uses :func:`xrgrad.divergence` for the horizontal part so the
-    ``-(F_y tan φ)/R`` curvature correction is included; otherwise
-    spatially uniform meridional fluxes would generate a spurious
-    residual on lon/lat grids.
+    Uses :func:`xrgrad.divergence` so the ``-(F_y tan φ)/R`` curvature
+    correction is included; otherwise spatially uniform meridional
+    fluxes would generate a spurious residual on lon/lat grids. A
+    vertical flux joins the same call as a third ``rectilinear`` axis.
     """
     flux_u = (u * tracer).rename("flux_u")
     flux_v = (v * tracer).rename("flux_v")
-    flux_ds = xr.Dataset({"flux_u": flux_u, "flux_v": flux_v})
-    div = xrgrad.divergence(
-        flux_ds,
+    if w is not None and depth is not None and depth in tracer.dims:
+        flux_w = (w * tracer).rename("flux_w")
+        return xrgrad.divergence(
+            xr.Dataset({"flux_u": flux_u, "flux_v": flux_v, "flux_w": flux_w}),
+            ("flux_u", "flux_v", "flux_w"),
+            dims=(lon, lat, depth),
+            geometry=("spherical", "spherical", "rectilinear"),
+            lon=lon,
+            lat=lat,
+        )
+    return xrgrad.divergence(
+        xr.Dataset({"flux_u": flux_u, "flux_v": flux_v}),
         ("flux_u", "flux_v"),
         dims=(lon, lat),
         geometry="spherical",
         lon=lon,
         lat=lat,
     )
-    if w is not None and depth is not None and depth in tracer.dims:
-        flux_w = w * tracer
-        div = div + xrgrad.partial(flux_w, depth, geometry="rectilinear")
-    return div
 
 
 def _tracer_budget_residual(

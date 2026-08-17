@@ -19,6 +19,8 @@ visible at the call site.
 
 from __future__ import annotations
 
+from collections.abc import Hashable
+
 import numpy as np
 import xarray as xr
 from jaxtyping import Float
@@ -45,6 +47,33 @@ def _broadcast_along(
     return values.reshape(shape)
 
 
+def _validate_periodic_lon(
+    da: xr.DataArray, dim: str, *, lon: str, lat: str, rtol: float
+) -> None:
+    """Guard the periodic option on a lon/lat grid.
+
+    Raises:
+        NotImplementedError: if ``dim`` is the latitude axis, which does
+            not wrap (the poles are a different problem entirely).
+        ValueError: if the longitude axis does not span a full 360°, so
+            wrapping it would join two points that are not neighbours.
+    """
+    if dim == lat:
+        raise NotImplementedError(
+            f"periodic=True is not supported for the latitude axis {lat!r}: "
+            "latitude does not wrap. Only the longitude axis is periodic on "
+            "a lon/lat grid."
+        )
+    step_deg = cartesian._uniform_step(da[lon], rtol=rtol)
+    span_deg = abs(step_deg) * da.sizes[lon]
+    if not np.isclose(span_deg, 360.0, rtol=max(rtol, 1e-6), atol=0.0):
+        raise ValueError(
+            f"periodic longitude requires a full 360° grid; coordinate "
+            f"{lon!r} spans {span_deg:g}° ({da.sizes[lon]} points of "
+            f"{step_deg:g}°). A regional grid has no wrap-around neighbour."
+        )
+
+
 def spherical_partial(
     da: xr.DataArray,
     dim: str,
@@ -52,6 +81,7 @@ def spherical_partial(
     order: int = 1,
     accuracy: int = 1,
     method: str = "central",
+    periodic: bool = False,
     lon: str = "lon",
     lat: str = "lat",
     radius: float = EARTH_RADIUS,
@@ -66,6 +96,9 @@ def spherical_partial(
         order: Derivative order. Only ``1`` is supported — see Raises.
         accuracy: ``finitediffx`` accuracy order.
         method: ``"central"`` | ``"forward"`` | ``"backward"``.
+        periodic: Wrap the longitude axis, removing the one-sided seam at
+            the dateline. Valid only when ``dim`` is the longitude
+            coordinate and the grid spans the full 360° — see Raises.
         lon: Name of the longitude coordinate (degrees east).
         lat: Name of the latitude coordinate (degrees north).
         radius: Earth radius in metres.
@@ -86,7 +119,8 @@ def spherical_partial(
             derivative is not the geometric second derivative — the
             metric factors do not commute with ``∂`` — so use
             :func:`xrgrad.laplacian`, which carries the curvature
-            corrections.
+            corrections. Also if ``periodic`` is requested for the
+            latitude axis, which does not wrap.
     """
     cartesian._validate_order(order)
     if lon not in da.coords:
@@ -115,14 +149,18 @@ def spherical_partial(
             f"Dimension {dim!r} not present on DataArray with dims={da.dims}."
         )
 
+    if periodic:
+        _validate_periodic_lon(da, dim, lon=lon, lat=lat, rtol=uniform_rtol)
+
     axis = da.get_axis_num(dim)
     step_rad = _radian_step(da[dim], rtol=uniform_rtol)
-    raw = cartesian._difference(
+    raw = cartesian._difference_maybe_periodic(
         da.values,
         axis=axis,
         step_size=step_rad,
         accuracy=accuracy,
         method=method,
+        periodic=periodic,
     )
 
     name_suffix: str
@@ -158,6 +196,7 @@ def spherical_gradient(
     dims: tuple[str, ...] | None = None,
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
+    periodic: frozenset[Hashable] = frozenset(),
     lon: str = "lon",
     lat: str = "lat",
     radius: float = EARTH_RADIUS,
@@ -171,6 +210,7 @@ def spherical_gradient(
             must be a subset of those two for ``geometry="spherical"``.
         accuracy: Scalar or per-dim tuple.
         method: Forwarded to :mod:`finitediffx`.
+        periodic: Set of coordinate names to wrap (longitude only).
         lon: Longitude coordinate name, forwarded to
             :func:`spherical_partial`.
         lat: Latitude coordinate name, forwarded to
@@ -201,6 +241,7 @@ def spherical_gradient(
             d,
             accuracy=acc,
             method=method,
+            periodic=d in periodic,
             lon=lon,
             lat=lat,
             radius=radius,

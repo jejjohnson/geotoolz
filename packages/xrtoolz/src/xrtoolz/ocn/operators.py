@@ -401,13 +401,16 @@ class AgeostrophicVelocities(Operator):
 
 
 class Advection(Operator):
-    """Horizontal tracer advection ``−u·∇c`` on the lon/lat sphere.
+    """Tracer advection ``−u·∇c`` on the lon/lat sphere.
 
     Args:
         scalar: Name of the advected tracer variable ``c``.
-        components: Names of the velocity components ``(u, v)``.
-        dim: Spatial dimension names ``(lon, lat)`` the gradient is taken
-            over.
+        components: Names of the velocity components — ``(u, v)`` for the
+            horizontal form, or ``(u, v, w)`` to include the vertical
+            term ``−w ∂c/∂z``.
+        dim: Spatial dimension names the gradient is taken over:
+            ``(lon, lat)``, optionally plus a vertical dim such as
+            ``"depth"``, which is differentiated as a rectilinear axis.
 
     Returns:
         The input dataset with a ``<scalar>_advection`` tendency variable

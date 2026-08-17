@@ -12,6 +12,8 @@ cartesian fast path.
 
 from __future__ import annotations
 
+from collections.abc import Hashable
+
 import numpy as np
 import xarray as xr
 
@@ -32,6 +34,7 @@ def rectilinear_partial(
     order: int = 1,
     accuracy: int = 1,
     method: str = "central",
+    periodic: bool = False,
     uniform_rtol: float = 1e-6,
 ) -> xr.DataArray:
     """Partial derivative ``∂da/∂<dim>`` on a non-uniform 1-D coord.
@@ -44,6 +47,9 @@ def rectilinear_partial(
             the cartesian backend, which supports any order.
         accuracy: Stencil accuracy order (forwarded to fdx).
         method: ``"central"`` | ``"forward"`` | ``"backward"``.
+        periodic: Treat ``dim`` as wrapping. Only supported when the
+            coordinate turns out to be uniform (and therefore delegates
+            to the cartesian backend) — see Raises.
         uniform_rtol: If the coord is uniform within this tolerance, we
             delegate to the cartesian implementation (cheaper and avoids
             the chain-rule step).
@@ -56,7 +62,7 @@ def rectilinear_partial(
             coordinate, has fewer than two samples, or is not strictly
             monotonic.
         NotImplementedError: if ``order > 1`` on a non-uniform
-            coordinate.
+            coordinate, or if ``periodic`` is requested for one.
     """
     cartesian._validate_order(order)
     if dim not in da.dims:
@@ -65,7 +71,7 @@ def rectilinear_partial(
         )
     cartesian._require_coord(da, dim)
     cartesian._require_1d_coord(da[dim])
-    coord_values = np.asarray(da[dim].values)
+    coord_values = cartesian._coord_to_float(da[dim].values, name=dim)
     if coord_values.size < 2:
         raise ValueError(
             f"Coordinate {dim!r} has {coord_values.size} sample(s); "
@@ -86,6 +92,7 @@ def rectilinear_partial(
             order=order,
             accuracy=accuracy,
             method=method,
+            periodic=periodic,
             uniform_rtol=uniform_rtol,
         )
     if order > 1:
@@ -95,6 +102,13 @@ def rectilinear_partial(
             "first derivatives. Use a uniform coordinate (which delegates to "
             "the cartesian backend), or compose xrgrad.laplacian for a second "
             "derivative."
+        )
+    if periodic:
+        raise NotImplementedError(
+            f"periodic=True is not supported on the non-uniform coordinate "
+            f"{dim!r}: wrapping the index grid would also have to wrap the "
+            "coordinate spacing, which has no single well-defined period "
+            "here. Use a uniform coordinate for periodic differentiation."
         )
 
     axis = da.get_axis_num(dim)
@@ -123,6 +137,7 @@ def rectilinear_gradient(
     dims: tuple[str, ...] | None = None,
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
+    periodic: frozenset[Hashable] = frozenset(),
     uniform_rtol: float = 1e-6,
 ) -> xr.Dataset:
     """Gradient ``∇da`` on rectilinear (per-axis) coordinates."""
@@ -136,6 +151,7 @@ def rectilinear_gradient(
             dim,
             accuracy=acc,
             method=method,
+            periodic=dim in periodic,
             uniform_rtol=uniform_rtol,
         )
     return xr.Dataset(out)

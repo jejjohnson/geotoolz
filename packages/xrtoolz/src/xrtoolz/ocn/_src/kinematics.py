@@ -281,10 +281,10 @@ def ageostrophic_velocities(
 def advection(
     ds: xr.Dataset,
     scalar: str,
-    components: tuple[str, str] = ("u", "v"),
-    dims: tuple[str, str] = ("lon", "lat"),
+    components: tuple[str, ...] = ("u", "v"),
+    dims: tuple[str, ...] = ("lon", "lat"),
 ) -> xr.Dataset:
-    """Horizontal tracer advection ``−u·∇c`` on the lon/lat sphere.
+    """Tracer advection ``−u·∇c`` on the lon/lat sphere.
 
     Sign convention follows :func:`metpy.calc.advection`: a positive
     value means the tracer is being increased at that point by the flow.
@@ -294,37 +294,68 @@ def advection(
             components.
         scalar: Name of the advected scalar field (e.g. ``"sst"``,
             ``"ssh"``).
-        components: Two horizontal wind/current component variable names
-            paired with ``dims``.
-        dims: Two horizontal coordinate names — must be the lon and lat
-            dims so the spherical metric applies. Vertical advection
-            (``w ∂c/∂z``) belongs in a future ``atm`` thermodynamics
-            module that adds a vertical-coord geometry; for now this
-            function is strictly horizontal.
+        components: Wind/current component variable names paired with
+            ``dims`` — ``(u, v)`` for the horizontal form, or
+            ``(u, v, w)`` to include vertical advection.
+        dims: Two horizontal coordinate names (the lon and lat dims, so
+            the spherical metric applies), optionally followed by a
+            vertical coordinate name. The vertical axis is differentiated
+            with ``geometry="rectilinear"``, so a stretched depth axis
+            needs no special handling. ``w`` must live on the same grid
+            as ``scalar`` — staggered vertical grids are not supported.
 
     Returns:
         Dataset with a single variable ``f"{scalar}_advection"``.
 
     Raises:
-        ValueError: if ``components`` / ``dims`` are not 2-D, or if
-            ``dims`` includes anything outside ``("lon", "lat")``.
+        ValueError: if ``components`` and ``dims`` lengths differ, if
+            there are not 2 or 3 of each, if the first two dims are not
+            the lon/lat pair, or if the vertical dim repeats one of them.
     """
-    if len(components) != 2 or len(dims) != 2:
+    if len(components) != len(dims):
         raise ValueError(
-            "advection is 2-D (lon/lat); pass exactly two components and "
-            f"two dims, got components={components!r} dims={dims!r}."
+            f"components ({len(components)}) and dims ({len(dims)}) must "
+            f"have the same length; got components={components!r} "
+            f"dims={dims!r}."
         )
-    invalid = [d for d in dims if d not in ("lon", "lat")]
-    if invalid:
+    if len(dims) not in (2, 3):
         raise ValueError(
-            f"advection currently supports only horizontal lon/lat "
-            f"dimensions; got invalid dim(s) {invalid!r}. Vertical "
-            "advection requires a vertical-coord geometry not yet "
-            "wired into xrgrad."
+            "advection takes two horizontal dims, optionally plus one "
+            f"vertical dim; got dims={dims!r}."
         )
+    if sorted(dims[:2]) != ["lat", "lon"]:
+        raise ValueError(
+            f"the first two dims must be the horizontal lon/lat pair so the "
+            f"spherical metric applies; got {tuple(dims[:2])!r}."
+        )
+    if len(dims) == 3 and dims[2] in ("lon", "lat"):
+        raise ValueError(
+            f"the vertical dim must differ from the horizontal pair; got dims={dims!r}."
+        )
+    missing = [d for d in dims if d not in ds[scalar].dims]
+    if missing:
+        raise ValueError(
+            f"scalar {scalar!r} has dims {tuple(ds[scalar].dims)!r} and does "
+            f"not span {missing!r}; every advected dim must be on the tracer."
+        )
+    # Each component must live on the axis it is paired with. Without this a
+    # staggered velocity (w on 'depth_w' while the tracer is on 'depth')
+    # broadcasts instead of aligning, silently returning a field carrying
+    # both vertical dims rather than the tracer's grid.
+    for comp_name, dim in zip(components, dims, strict=True):
+        if dim not in ds[comp_name].dims:
+            raise ValueError(
+                f"component {comp_name!r} has dims {tuple(ds[comp_name].dims)!r} "
+                f"and does not span its paired dim {dim!r}. Staggered grids are "
+                f"not supported — interpolate {comp_name!r} onto the {scalar!r} "
+                "grid first."
+            )
     flux: xr.DataArray | None = None
     for comp_name, dim in zip(components, dims, strict=True):
-        partial_c = xrgrad.partial(ds[scalar], dim, geometry="spherical")
+        # Horizontal axes carry the lon/lat metric; the vertical axis is a
+        # plain 1-D coordinate, typically stretched, hence rectilinear.
+        geometry = "spherical" if dim in ("lon", "lat") else "rectilinear"
+        partial_c = xrgrad.partial(ds[scalar], dim, geometry=geometry)
         term = ds[comp_name] * partial_c
         flux = term if flux is None else flux + term
     assert flux is not None

@@ -10,6 +10,7 @@ coordinate with constant spacing (within ``uniform_rtol``).
 from __future__ import annotations
 
 import threading
+import warnings
 from collections.abc import Hashable
 from typing import Any, cast
 
@@ -97,6 +98,116 @@ def _difference(
         return np.asarray(raw)
 
 
+def _stencil_halo(*, derivative: int, accuracy: int) -> int:
+    """Upper bound on the half-width of the interior (central) stencil.
+
+    ``finitediffx`` builds its interior stencil from
+    ``_generate_central_offsets(derivative, accuracy + 1)``, whose widest
+    offset is ``ceil((derivative + accuracy) / 2)``. We pad by the looser
+    ``derivative + accuracy`` so we never under-pad if that internal rule
+    changes; over-padding only costs a few extra columns, whereas
+    under-padding would silently leave one-sided values at the seam.
+    ``test_periodic.py`` pins the behaviour across accuracies so an
+    insufficient halo fails loudly.
+    """
+    return derivative + accuracy
+
+
+def _warn_duplicate_endpoint(
+    values: Float[np.ndarray, "*shape"], *, axis: int, dim: Hashable
+) -> None:
+    """Warn when an axis looks endpoint-inclusive under a periodic wrap.
+
+    The wrap treats the axis as endpoint-exclusive: the period is the
+    full extent, ``n·Δ``, so the last sample's right neighbour is the
+    first. A grid built with ``np.linspace(0, L, n)`` — endpoint
+    *inclusive*, and numpy's default — stores the same physical location
+    twice, so wrapping makes a point its own neighbour and roughly halves
+    the seam derivative.
+
+    Endpoint inclusion cannot be derived from the coordinate: both
+    conventions are uniform with the same step, and the wrap is
+    self-consistent either way. It also cannot be *concluded* from the
+    field, because a legitimate endpoint-exclusive signal may take the
+    same value at both ends (period 3 over ``[0, 1, 2]`` with values
+    ``[0, 1, 0]``). So this only warns: the computation proceeds under
+    the documented endpoint-exclusive contract, and a caller who knows
+    their grid is exclusive can silence it. Where the period *is*
+    knowable the check is a hard error instead — see the spherical
+    backend, which requires a full 360° span.
+    """
+    first = np.take(values, 0, axis=axis)
+    last = np.take(values, -1, axis=axis)
+    if not np.allclose(first, last, rtol=1e-12, atol=1e-12, equal_nan=True):
+        return
+    if np.allclose(values, np.take(values, [0], axis=axis), rtol=1e-12, atol=1e-12):
+        return  # constant along the axis: the derivative is 0 either way
+    warnings.warn(
+        f"Coordinate {dim!r} takes the same value at its first and last "
+        "sample. If this grid stores both ends of the period (as "
+        "np.linspace(0, L, n) does by default), periodic=True will make "
+        "that point its own neighbour and halve the derivative at the "
+        f"seam; drop the repeat with da.isel({dim}=slice(0, -1)). If the "
+        "grid is genuinely endpoint-exclusive, this warning is spurious.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
+def _difference_periodic(
+    values: Float[np.ndarray, "*shape"],
+    *,
+    axis: int,
+    step_size: float,
+    accuracy: int,
+    method: str,
+    derivative: int = 1,
+) -> Float[np.ndarray, "*shape"]:
+    """Finite difference with a periodic wrap along ``axis``.
+
+    Pads the axis by a full stencil halo taken from the opposite edge,
+    differentiates, then trims the padding away. Every original point
+    therefore sees a centred stencil — including the first and last,
+    which would otherwise fall back to one-sided differences and leave a
+    visible seam (e.g. at the dateline on a global longitude axis).
+    """
+    size = values.shape[axis]
+    halo = _stencil_halo(derivative=derivative, accuracy=accuracy)
+    idx = np.arange(-halo, size + halo) % size
+    padded = np.take(values, idx, axis=axis)
+    raw = _difference(
+        padded,
+        axis=axis,
+        step_size=step_size,
+        accuracy=accuracy,
+        method=method,
+        derivative=derivative,
+    )
+    return np.take(raw, np.arange(halo, halo + size), axis=axis)
+
+
+def _difference_maybe_periodic(
+    values: Float[np.ndarray, "*shape"],
+    *,
+    axis: int,
+    step_size: float,
+    accuracy: int,
+    method: str,
+    derivative: int = 1,
+    periodic: bool = False,
+) -> Float[np.ndarray, "*shape"]:
+    """Dispatch to the periodic or the plain stencil."""
+    kernel = _difference_periodic if periodic else _difference
+    return kernel(
+        values,
+        axis=axis,
+        step_size=step_size,
+        accuracy=accuracy,
+        method=method,
+        derivative=derivative,
+    )
+
+
 def _validate_order(order: int) -> None:
     """Guard the derivative order shared by all three geometry backends.
 
@@ -154,15 +265,124 @@ def _require_coord(da: xr.DataArray, dim: str) -> None:
         )
 
 
+def _coord_to_float(
+    values: np.ndarray, *, name: Hashable = None
+) -> Float[np.ndarray, "n"]:
+    """Return coordinate values as float64, measured from the first sample.
+
+    ``datetime64`` and ``timedelta64`` become float **seconds**;
+    integer dtypes are anchored before widening; floats pass through.
+    Only differences of the result are ever used (step sizes and the
+    rectilinear chain rule), so the shift is immaterial.
+
+    The result is accumulated from **adjacent gaps** rather than from a
+    full-span offset, because the full span is what overflows: nanosecond
+    ticks are a signed 64-bit count saturating at roughly ±292 years, so
+    for a ``datetime64[ns]`` axis covering 1800–2200 — comfortably inside
+    what that dtype can *store* — even ``values - values[0]`` wraps to a
+    negative offset. The same holds for a wide integer axis whose range
+    exceeds int64 while its steps do not. Each gap is converted at the
+    finest resolution that cannot overflow (see
+    :func:`_temporal_gaps_seconds` and :func:`_integer_gaps`), and the
+    running sum stays in float64.
+
+    Working from gaps also keeps precision that a straight cast loses: an
+    integer axis with a large origin (``10**18 + k``) collapses to a
+    constant if cast to float64 directly, since adjacent values fall
+    inside one float64 ulp there.
+
+    Raises:
+        ValueError: for object-dtype coordinates such as ``cftime``
+            calendars, which have no lossless conversion here.
+    """
+    values = np.asarray(values)
+    if values.dtype == object:
+        raise ValueError(
+            f"Coordinate {name!r} has object dtype (e.g. a cftime calendar); "
+            "xrgrad cannot derive a numeric step from it. Convert to "
+            "datetime64 first, e.g. ds.convert_calendar('standard', "
+            "use_cftime=False)."
+        )
+    is_temporal = np.issubdtype(values.dtype, np.datetime64) or np.issubdtype(
+        values.dtype, np.timedelta64
+    )
+    if is_temporal:
+        return _accumulate(_temporal_gaps_seconds(values), size=values.size)
+    if np.issubdtype(values.dtype, np.integer):
+        return _accumulate(_integer_gaps(values), size=values.size)
+    return np.asarray(values, dtype=np.float64)
+
+
+def _accumulate(gaps: Float[np.ndarray, "n-1"], *, size: int) -> Float[np.ndarray, "n"]:
+    """Running sum of adjacent gaps, starting from zero."""
+    out = np.zeros(size, dtype=np.float64)
+    if size > 1:
+        np.cumsum(gaps, out=out[1:])
+    return out
+
+
+def _temporal_gaps_seconds(
+    values: np.ndarray,
+) -> Float[np.ndarray, "n-1"]:
+    """Adjacent gaps of a temporal axis, in float seconds.
+
+    Subtracting in the source unit is exact but overflows when a single
+    gap exceeds that unit's signed tick range — roughly 292 years for
+    nanoseconds. Casting to a coarser unit only ever divides, so
+    second-resolution gaps are always computable; they are used to decide
+    whether the exact source-unit subtraction is safe. A gap too wide for
+    the source unit could not have carried sub-second meaning anyway, so
+    dropping to seconds there loses nothing real.
+    """
+    if values.size < 2:
+        return np.zeros(0, dtype=np.float64)
+    unit = np.datetime_data(values.dtype)[0]
+    ticks_per_second = np.timedelta64(1, "s") / np.timedelta64(1, unit)
+    if ticks_per_second <= 1.0:
+        # Second-or-coarser ticks: a gap would have to span ~3e11 years
+        # to overflow, which no representable axis does.
+        return (np.diff(values) / np.timedelta64(1, "s")).astype(np.float64)
+    coarse = (
+        "datetime64[s]"
+        if np.issubdtype(values.dtype, np.datetime64)
+        else "timedelta64[s]"
+    )
+    gaps_s = np.diff(values.astype(coarse).astype(np.int64)).astype(np.float64)
+    safe_span_s = 0.9 * np.iinfo(np.int64).max / ticks_per_second
+    if np.abs(gaps_s).max() >= safe_span_s:
+        return gaps_s
+    return (np.diff(values) / np.timedelta64(1, "s")).astype(np.float64)
+
+
+def _integer_gaps(values: np.ndarray) -> Float[np.ndarray, "n-1"]:
+    """Adjacent gaps of an integer axis, as float64.
+
+    Differencing adjacent values keeps a wide axis exact where anchoring
+    on the first sample would not: ``[-9e18, …, 6e18]`` steps uniformly
+    by ``5e18``, but its total range overflows int64. Where even an
+    adjacent gap is too wide for the integer type, the float estimate is
+    the best available and is used instead.
+    """
+    if values.size < 2:
+        return np.zeros(0, dtype=np.float64)
+    approx = np.diff(values.astype(np.float64))
+    if np.abs(approx).max() >= 0.9 * np.iinfo(np.int64).max:
+        return approx
+    return np.diff(values.astype(np.int64)).astype(np.float64)
+
+
 def _uniform_step(coord: xr.DataArray, *, rtol: float = 1e-6) -> float:
     """Return the uniform step of a 1-D coordinate.
+
+    Temporal coordinates are converted to seconds first, so the step of a
+    ``datetime64`` axis comes back as float seconds.
 
     Raises:
         ValueError: if the coordinate is not 1-D, has fewer than two
             samples, or is not uniformly spaced within ``rtol``.
     """
     _require_1d_coord(coord)
-    values = np.asarray(coord.values)
+    values = _coord_to_float(coord.values, name=coord.name)
     if values.size < 2:
         raise ValueError(
             f"Coordinate {coord.name!r} has {values.size} sample(s); "
@@ -201,6 +421,7 @@ def cartesian_partial(
     order: int = 1,
     accuracy: int = 1,
     method: str = "central",
+    periodic: bool = False,
     uniform_rtol: float = 1e-6,
 ) -> xr.DataArray:
     """Partial derivative ``∂ᵒʳᵈᵉʳda/∂<dim>ᵒʳᵈᵉʳ`` on a uniform Cartesian grid.
@@ -215,6 +436,14 @@ def cartesian_partial(
         accuracy: ``finitediffx`` accuracy order. ``1`` matches
             :func:`numpy.gradient`'s 2nd-order centred default.
         method: ``"central"``, ``"forward"``, or ``"backward"``.
+        periodic: Treat ``dim`` as wrapping, so the first and last points
+            are differentiated against each other instead of falling back
+            to one-sided stencils. The axis is taken to be **endpoint
+            exclusive**: the period is ``n * step``, so the last sample is
+            one step before the first repeats. That convention cannot be
+            verified from the coordinate, so a grid that stores both ends
+            of the period (``np.linspace(0, L, n)``, endpoint inclusive)
+            only draws a ``UserWarning`` when the field's ends coincide.
         uniform_rtol: Relative tolerance for the uniform-spacing check.
 
     Returns:
@@ -234,13 +463,19 @@ def cartesian_partial(
     _require_coord(da, dim)
     axis = da.get_axis_num(dim)
     step = _uniform_step(da[dim], rtol=uniform_rtol)
-    raw = _difference(
+    if periodic:
+        # The spherical backend has a hard check of its own (the grid must
+        # span a full 360°), so this advisory only covers the cartesian and
+        # uniform-rectilinear paths, where the period is implicit.
+        _warn_duplicate_endpoint(da.values, axis=axis, dim=dim)
+    raw = _difference_maybe_periodic(
         da.values,
         axis=axis,
         step_size=step,
         accuracy=accuracy,
         method=method,
         derivative=order,
+        periodic=periodic,
     )
     return xr.DataArray(
         raw,
@@ -257,6 +492,7 @@ def cartesian_gradient(
     dims: tuple[str, ...] | None = None,
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
+    periodic: frozenset[Hashable] = frozenset(),
     uniform_rtol: float = 1e-6,
 ) -> xr.Dataset:
     """Gradient ``∇da`` on a uniform Cartesian grid.
@@ -267,6 +503,7 @@ def cartesian_gradient(
         accuracy: Scalar (applied to every dim) or per-dim tuple matching
             the length of ``dims``.
         method: Forwarded to :func:`finitediffx.difference`.
+        periodic: Set of dimension names to treat as wrapping.
         uniform_rtol: Forwarded to :func:`cartesian_partial`.
 
     Returns:
@@ -283,6 +520,7 @@ def cartesian_gradient(
             dim,
             accuracy=acc,
             method=method,
+            periodic=dim in periodic,
             uniform_rtol=uniform_rtol,
         )
         out[f"d{base}_d{dim}"] = component

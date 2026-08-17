@@ -39,6 +39,38 @@ $$
 with $\lambda$ longitude, $\varphi$ latitude, and $R$ the Earth radius
 (`xrgrad.EARTH_RADIUS`, 6 371 000 m).
 
+### Mixed geometry
+
+`divergence` also accepts a **per-dim sequence** of geometries, one per
+entry in `dims`. The common case is a 3-D ocean budget: spherical
+horizontal, rectilinear vertical.
+
+```python
+div = xrgrad.divergence(
+    ds,
+    ("flux_e", "flux_n", "flux_w"),
+    dims=("lon", "lat", "depth"),
+    geometry=("spherical", "spherical", "rectilinear"),
+)
+```
+
+The `-(F_y \tan\varphi)/R` curvature term is applied when **both** the
+longitude and latitude axes are spherical. Marking only one of them (or
+marking the vertical axis spherical) raises — the metric couples the
+pair, so neither is meaningful alone. Geometry-specific keywords are
+routed only to the backends that accept them, so `radius=` may
+accompany a mixed call without reaching the vertical axis.
+
+### Temporal coordinates
+
+`datetime64` and `timedelta64` coordinates work anywhere a numeric one
+does; they are converted to **seconds**, so `∂c/∂t` comes back per
+second. Values are anchored at the first sample before conversion, which
+keeps nanosecond steps representable in float64. A uniform time axis
+takes the cartesian path; an irregular one (a skipped day, monthly
+means) needs `geometry="rectilinear"`. `cftime`/object-dtype calendars
+are rejected with an explicit error rather than silently mis-stepped.
+
 All geometries expect the differentiated dimension to carry a **1-D
 coordinate**: step sizes come from coordinate values, so a dimension
 without one raises `ValueError`, and 2-D (curvilinear) coordinates are
@@ -101,6 +133,50 @@ one-sided differences of the same order. Two practical notes:
 - `divergence`, `curl`, and `laplacian` accept a per-dim `accuracy`
   tuple as well as a scalar, matching `gradient`. The tuple pairs with
   `dims` in order, which is useful on anisotropic grids.
+
+## Periodic boundaries
+
+By default the first and last points of an axis fall back to one-sided
+stencils. On a genuinely periodic axis — global longitude being the
+usual case — that leaves a visible seam at the dateline. Pass
+`periodic=` to wrap instead, so those points are differentiated against
+the opposite edge and are as accurate as the interior:
+
+```python
+zeta = xrgrad.curl(
+    ds, ("u", "v"), dims=("lon", "lat"),
+    geometry="spherical", periodic="lon",
+)
+```
+
+`partial` takes a bool (it acts on one axis); the multi-dim operators
+take a dimension name or a sequence of names, which must be among the
+dims being differentiated.
+
+The axis is treated as **endpoint exclusive** — the period is `n * step`,
+so the last sample sits one step before the first repeats. This is what
+`np.linspace(0, L, n, endpoint=False)` and a `0…355` global longitude
+axis give you. A grid that stores *both* ends of the period (numpy's
+default `endpoint=True`) repeats a physical location, which makes the
+seam point its own neighbour and roughly halves its derivative; drop the
+duplicate with `da.isel(x=slice(0, -1))` first.
+
+Which convention a grid uses cannot be read off the coordinate — both
+are uniform with the same step — so on the Cartesian path this is only a
+`UserWarning`, raised when the field happens to take the same value at
+both ends. A genuinely endpoint-exclusive field can do that too (period
+3 over `[0, 1, 2]` with values `[0, 1, 0]`), so the warning is advisory
+and the computation proceeds. Spherical longitude is the exception: its
+period *is* known, so a grid that does not span exactly 360° is a hard
+error.
+
+Further restrictions:
+
+- **Spherical longitude** must span the full 360°; a regional grid has
+  no wrap-around neighbour and raises.
+- **Latitude never wraps** — the poles are a separate problem.
+- **Non-uniform rectilinear** axes raise: wrapping the index grid would
+  also have to wrap the spacing, which has no single period.
 
 ```python
 import numpy as np

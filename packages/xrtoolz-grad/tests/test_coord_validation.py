@@ -112,3 +112,28 @@ def test_single_sample_rectilinear_coord_still_raises():
     da = xr.DataArray([1.0], dims=("x",), coords={"x": [0.0]}, name="f")
     with pytest.raises(ValueError, match="need at least 2"):
         partial(da, "x", geometry="rectilinear")
+
+
+def test_wide_integer_coordinate_is_uniform():
+    """A range past int64 with representable steps must still difference.
+
+    ``[-9e18, …, 6e18]`` steps uniformly by ``5e18``; anchoring on the
+    first sample would overflow and make the axis look non-uniform.
+    """
+    coord = np.array([-9e18, -4e18, 1e18, 6e18], dtype=np.int64)
+    da = xr.DataArray(
+        np.arange(4, dtype=float), dims=("i",), coords={"i": coord}, name="f"
+    )
+    got = partial(da, "i")
+    np.testing.assert_allclose(got.values, 1.0 / 5e18, rtol=1e-9)
+
+
+def test_large_origin_integer_coordinate_keeps_its_step():
+    """``10**18 + k`` falls inside one float64 ulp if cast directly."""
+    coord = 10**18 + np.arange(8)
+    da = xr.DataArray(
+        (np.arange(8, dtype=float) ** 2), dims=("i",), coords={"i": coord}, name="f"
+    )
+    np.testing.assert_allclose(
+        partial(da, "i").values[1:-1], (2.0 * np.arange(8))[1:-1], atol=1e-9
+    )

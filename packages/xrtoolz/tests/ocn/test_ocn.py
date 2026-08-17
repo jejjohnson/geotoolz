@@ -212,13 +212,18 @@ def test_advection_sign_convention_matches_minus_u_dot_grad(ds_uv_grid):
 
 def test_advection_components_dims_mismatch_raises(ds_uv_grid):
     ds = ds_uv_grid.assign(c=lambda d: d["u"])
-    with pytest.raises(ValueError, match="exactly two components"):
+    with pytest.raises(ValueError, match="same length"):
+        advection(ds, scalar="c", components=("u", "v"), dims=("lon",))
+
+
+def test_advection_rejects_wrong_dim_count(ds_uv_grid):
+    ds = ds_uv_grid.assign(c=lambda d: d["u"])
+    with pytest.raises(ValueError, match="two horizontal dims"):
         advection(ds, scalar="c", components=("u",), dims=("lon",))
 
 
 def test_advection_rejects_non_horizontal_dim(ds_uv_grid):
-    """3-D advection isn't wired up yet — an explicit error beats a
-    confusing failure deep inside calc.partial."""
+    """The leading pair must be lon/lat so the spherical metric applies."""
     ds = ds_uv_grid.assign(c=lambda d: d["u"])
     with pytest.raises(ValueError, match="lon/lat"):
         advection(ds, scalar="c", components=("u", "v"), dims=("lon", "depth"))
@@ -678,3 +683,123 @@ def test_potential_vorticity_barotropic_operator(ds_uv_grid):
     ds = ds_uv_grid.assign(h=lambda d: d["u"] * 0.0 + 1.0)
     out = PotentialVorticityBarotropic(height="h")(ds)
     assert "pv_barotropic" in out.data_vars
+
+
+# ---------- 3-D advection (vertical term) ----------------------------------
+
+
+@pytest.fixture
+def ds_uvw_3d() -> xr.Dataset:
+    """A 3-D field on lon/lat plus a stretched (non-uniform) depth axis."""
+    lon = np.linspace(-10.0, 10.0, 11)
+    lat = np.linspace(20.0, 40.0, 9)
+    depth = np.array([0.0, 5.0, 15.0, 35.0, 80.0, 150.0])
+    shape = (depth.size, lat.size, lon.size)
+    dims = ("depth", "lat", "lon")
+    coords = {"depth": depth, "lat": lat, "lon": lon}
+    rng = np.random.default_rng(11)
+    return xr.Dataset(
+        {name: (dims, rng.normal(size=shape)) for name in ("u", "v", "w")},
+        coords=coords,
+    )
+
+
+def test_advection_vertical_term_on_linear_tracer(ds_uvw_3d):
+    """``c = αz`` advected by pure vertical motion gives exactly ``−w₀α``."""
+    alpha, w0 = 3.0, 0.25
+    depth = ds_uvw_3d["depth"]
+    ds = ds_uvw_3d.assign(
+        c=alpha * depth.broadcast_like(ds_uvw_3d["u"]),
+        u=xr.zeros_like(ds_uvw_3d["u"]),
+        v=xr.zeros_like(ds_uvw_3d["v"]),
+        w=xr.full_like(ds_uvw_3d["w"], w0),
+    )
+    out = advection(
+        ds, scalar="c", components=("u", "v", "w"), dims=("lon", "lat", "depth")
+    )
+    np.testing.assert_allclose(out["c_advection"].values, -w0 * alpha, rtol=1e-9)
+
+
+def test_advection_3d_equals_horizontal_plus_vertical_term(ds_uvw_3d):
+    import xrgrad
+
+    ds = ds_uvw_3d.assign(c=lambda d: d["u"] * 2.0)
+    full = advection(
+        ds, scalar="c", components=("u", "v", "w"), dims=("lon", "lat", "depth")
+    )["c_advection"]
+    horizontal = advection(ds, scalar="c", components=("u", "v"), dims=("lon", "lat"))[
+        "c_advection"
+    ]
+    vertical = -ds["w"] * xrgrad.partial(ds["c"], "depth", geometry="rectilinear")
+    np.testing.assert_allclose(
+        full.values, (horizontal + vertical).values, rtol=1e-12, atol=1e-18
+    )
+
+
+def test_advection_2d_unchanged_by_3d_support(ds_uv_grid):
+    ds = ds_uv_grid.assign(c=lambda d: d["u"])
+    out = advection(ds, scalar="c", components=("u", "v"), dims=("lon", "lat"))
+    assert set(out.data_vars) == {"c_advection"}
+    assert np.isfinite(out["c_advection"].values).all()
+
+
+def test_advection_rejects_repeated_vertical_dim(ds_uvw_3d):
+    ds = ds_uvw_3d.assign(c=lambda d: d["u"])
+    with pytest.raises(ValueError, match="must differ"):
+        advection(
+            ds, scalar="c", components=("u", "v", "w"), dims=("lon", "lat", "lat")
+        )
+
+
+def test_advection_error_no_longer_claims_xrgrad_gap(ds_uvw_3d):
+    """The old message promised a geometry that already existed."""
+    ds = ds_uvw_3d.assign(c=lambda d: d["u"])
+    try:
+        advection(ds, scalar="c", components=("u", "v"), dims=("lon", "depth"))
+    except ValueError as exc:
+        assert "not yet" not in str(exc)
+
+
+def test_advection_operator_forwards_three_dims(ds_uvw_3d):
+    from xrtoolz.ocn import Advection
+
+    ds = ds_uvw_3d.assign(c=lambda d: d["u"])
+    op = Advection("c", components=("u", "v", "w"), dim=("lon", "lat", "depth"))
+    assert op.get_config()["dim"] == ("lon", "lat", "depth")
+    direct = advection(
+        ds, scalar="c", components=("u", "v", "w"), dims=("lon", "lat", "depth")
+    )
+    np.testing.assert_allclose(
+        op(ds)["c_advection"].values, direct["c_advection"].values, atol=0.0
+    )
+
+
+def test_advection_rejects_staggered_vertical_grid(ds_uvw_3d):
+    """``w`` on ``depth_w`` would broadcast into a 4-D result, not align."""
+    ds = ds_uvw_3d.assign(c=lambda d: d["u"])
+    staggered = ds.assign(
+        w=xr.DataArray(
+            ds["w"].values,
+            dims=("depth_w", "lat", "lon"),
+            coords={
+                "depth_w": ds["depth"].values + 2.5,
+                "lat": ds["lat"],
+                "lon": ds["lon"],
+            },
+        )
+    )
+    with pytest.raises(ValueError, match="Staggered grids are not supported"):
+        advection(
+            staggered,
+            scalar="c",
+            components=("u", "v", "w"),
+            dims=("lon", "lat", "depth"),
+        )
+
+
+def test_advection_rejects_scalar_missing_the_vertical_dim(ds_uvw_3d):
+    ds = ds_uvw_3d.assign(c=lambda d: d["u"].isel(depth=0))
+    with pytest.raises(ValueError, match="does not span"):
+        advection(
+            ds, scalar="c", components=("u", "v", "w"), dims=("lon", "lat", "depth")
+        )

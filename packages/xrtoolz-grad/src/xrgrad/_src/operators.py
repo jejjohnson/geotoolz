@@ -12,7 +12,8 @@ operators on lon/lat fields.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from collections.abc import Hashable, Sequence
+from typing import Any, Literal, cast
 
 import numpy as np
 import xarray as xr
@@ -24,6 +25,95 @@ from xrgrad._src.constants import EARTH_RADIUS
 
 Geometry = Literal["cartesian", "rectilinear", "spherical"]
 
+# Which ``**geom_kw`` keys each geometry backend understands. Used to route
+# kwargs when ``divergence`` runs a different geometry per dimension: a
+# spherical-only key like ``radius`` must not reach the cartesian backend.
+_GEOM_KWARGS: dict[str, frozenset[str]] = {
+    "cartesian": frozenset({"uniform_rtol"}),
+    "rectilinear": frozenset({"uniform_rtol"}),
+    "spherical": frozenset({"lon", "lat", "radius", "uniform_rtol"}),
+}
+
+Periodic = str | Sequence[str] | None
+
+
+def _periodic_set(
+    periodic: Periodic, dims: tuple[Hashable, ...]
+) -> frozenset[Hashable]:
+    """Normalise the ``periodic`` argument to a validated set of dim names.
+
+    Raises:
+        ValueError: if a named dimension is not among ``dims``.
+    """
+    if periodic is None:
+        return frozenset()
+    names: tuple[str, ...] = (
+        (periodic,) if isinstance(periodic, str) else tuple(periodic)
+    )
+    unknown = [n for n in names if n not in dims]
+    if unknown:
+        raise ValueError(
+            f"periodic={periodic!r} names {unknown!r}, which are not among "
+            f"the differentiated dims {tuple(dims)!r}."
+        )
+    return frozenset(names)
+
+
+def _resolve_geometries(
+    geometry: Geometry | Sequence[Geometry], dims: tuple[Hashable, ...]
+) -> tuple[Geometry, ...]:
+    """Broadcast a scalar geometry over ``dims``, or validate a per-dim tuple.
+
+    Raises:
+        ValueError: for an unknown geometry name, or a sequence whose
+            length does not match ``dims``.
+    """
+    # ``str`` is itself a ``Sequence[str]``, so the isinstance check is what
+    # separates the scalar form from the per-dim one; the cast records that
+    # the else-branch really does yield whole geometry names, not characters.
+    per_dim: tuple[Geometry, ...]
+    if isinstance(geometry, str):
+        per_dim = (cast("Geometry", geometry),) * len(dims)
+    else:
+        per_dim = cast("tuple[Geometry, ...]", tuple(geometry))
+        if len(per_dim) != len(dims):
+            raise ValueError(
+                f"geometry sequence length ({len(per_dim)}) does not match "
+                f"number of dims ({len(dims)})."
+            )
+    unknown = [g for g in per_dim if g not in _GEOM_KWARGS]
+    if unknown:
+        raise ValueError(
+            f"Unknown geometry {unknown[0]!r}; expected one of {tuple(_GEOM_KWARGS)!r}."
+        )
+    return per_dim
+
+
+def _geom_kw_for(geometry: Geometry, geom_kw: dict[str, Any]) -> dict[str, Any]:
+    """Select the ``geom_kw`` entries that ``geometry``'s backend accepts."""
+    allowed = _GEOM_KWARGS[geometry]
+    return {k: v for k, v in geom_kw.items() if k in allowed}
+
+
+def _validate_geom_kw(
+    geometries: tuple[Geometry, ...], geom_kw: dict[str, Any]
+) -> None:
+    """Reject kwargs no geometry in play understands.
+
+    Filtering per geometry would otherwise swallow a typo silently.
+
+    Raises:
+        ValueError: if a keyword is not accepted by any active geometry.
+    """
+    accepted = frozenset().union(*(_GEOM_KWARGS[g] for g in geometries))
+    unknown = sorted(set(geom_kw) - accepted)
+    if unknown:
+        raise ValueError(
+            f"Unexpected keyword(s) {unknown!r} for geometry "
+            f"{tuple(dict.fromkeys(geometries))!r}; accepted: "
+            f"{sorted(accepted)!r}."
+        )
+
 
 def partial(
     da: xr.DataArray,
@@ -33,6 +123,7 @@ def partial(
     geometry: Geometry = "cartesian",
     accuracy: int = 1,
     method: str = "central",
+    periodic: bool = False,
     **geom_kw: Any,
 ) -> xr.DataArray:
     """Partial derivative ``∂ᵒʳᵈᵉʳda/∂<dim>ᵒʳᵈᵉʳ`` under the given geometry.
@@ -49,6 +140,10 @@ def partial(
             (non-uniform 1-D coords), ``"spherical"`` (lon/lat in degrees).
         accuracy: Accuracy order forwarded to :mod:`finitediffx`.
         method: ``"central"`` (default), ``"forward"``, or ``"backward"``.
+        periodic: Treat ``dim`` as wrapping, so the first and last points
+            are differentiated against each other rather than falling
+            back to one-sided stencils. For ``geometry="spherical"`` this
+            is valid on the longitude axis of a full 360° grid only.
         **geom_kw: Geometry-specific keyword arguments (e.g. ``radius``
             and coord names for spherical, ``uniform_rtol`` for cartesian).
 
@@ -56,11 +151,12 @@ def partial(
         DataArray with the same dims/coords as ``da``.
 
     Raises:
-        ValueError: for an unknown ``geometry`` or a non-positive
-            ``order``.
+        ValueError: for an unknown ``geometry``, a non-positive ``order``,
+            or ``periodic`` on a spherical grid that is not global.
         NotImplementedError: for ``order > 1`` under
             ``geometry="spherical"``, or under ``geometry="rectilinear"``
-            with a genuinely non-uniform coordinate.
+            with a genuinely non-uniform coordinate; likewise for
+            ``periodic`` on a latitude axis or a non-uniform coordinate.
 
     Example:
         ``d(x²)/dx = 2x`` — exact on interior points with the central
@@ -86,18 +182,19 @@ def partial(
 
         ```
     """
+    kw: dict[str, Any] = dict(
+        order=order,
+        accuracy=accuracy,
+        method=method,
+        periodic=periodic,
+        **geom_kw,
+    )
     if geometry == "cartesian":
-        return cartesian.cartesian_partial(
-            da, dim, order=order, accuracy=accuracy, method=method, **geom_kw
-        )
+        return cartesian.cartesian_partial(da, dim, **kw)
     if geometry == "rectilinear":
-        return rectilinear.rectilinear_partial(
-            da, dim, order=order, accuracy=accuracy, method=method, **geom_kw
-        )
+        return rectilinear.rectilinear_partial(da, dim, **kw)
     if geometry == "spherical":
-        return spherical.spherical_partial(
-            da, dim, order=order, accuracy=accuracy, method=method, **geom_kw
-        )
+        return spherical.spherical_partial(da, dim, **kw)
     raise ValueError(
         f"Unknown geometry {geometry!r}; expected one of "
         "'cartesian', 'rectilinear', 'spherical'."
@@ -111,6 +208,7 @@ def gradient(
     geometry: Geometry = "cartesian",
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
+    periodic: Periodic = None,
     **geom_kw: Any,
 ) -> xr.Dataset:
     """Gradient ``∇da`` under the given geometry.
@@ -121,6 +219,8 @@ def gradient(
         geometry: ``"cartesian"`` | ``"rectilinear"`` | ``"spherical"``.
         accuracy: Scalar or per-dim tuple.
         method: Forwarded to :mod:`finitediffx`.
+        periodic: Dimension name, or sequence of names, to treat as
+            wrapping. Must be among the differentiated dims.
         **geom_kw: Geometry-specific keyword arguments.
 
     Returns:
@@ -142,17 +242,27 @@ def gradient(
 
         ```
     """
+    if geometry == "spherical":
+        target = (
+            (geom_kw.get("lon", "lon"), geom_kw.get("lat", "lat"))
+            if dims is None
+            else tuple(dims)
+        )
+    else:
+        target = tuple(da.dims) if dims is None else tuple(dims)
+    wrap = _periodic_set(periodic, target)
+
     if geometry == "cartesian":
         return cartesian.cartesian_gradient(
-            da, dims=dims, accuracy=accuracy, method=method, **geom_kw
+            da, dims=dims, accuracy=accuracy, method=method, periodic=wrap, **geom_kw
         )
     if geometry == "rectilinear":
         return rectilinear.rectilinear_gradient(
-            da, dims=dims, accuracy=accuracy, method=method, **geom_kw
+            da, dims=dims, accuracy=accuracy, method=method, periodic=wrap, **geom_kw
         )
     if geometry == "spherical":
         return spherical.spherical_gradient(
-            da, dims=dims, accuracy=accuracy, method=method, **geom_kw
+            da, dims=dims, accuracy=accuracy, method=method, periodic=wrap, **geom_kw
         )
     raise ValueError(
         f"Unknown geometry {geometry!r}; expected one of "
@@ -174,9 +284,10 @@ def divergence(
     components: tuple[str, str] | tuple[str, str, str],
     *,
     dims: tuple[str, ...],
-    geometry: Geometry = "cartesian",
+    geometry: Geometry | Sequence[Geometry] = "cartesian",
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
+    periodic: Periodic = None,
     **geom_kw: Any,
 ) -> xr.DataArray:
     r"""Divergence ``∇·F`` of a vector field stored as Dataset variables.
@@ -187,20 +298,35 @@ def divergence(
             length of ``dims``.
         dims: Spatial dimensions that pair with each component (e.g.
             ``("x", "y")`` for cartesian, ``("lon", "lat")`` for spherical).
-        geometry: ``"cartesian"`` | ``"rectilinear"`` | ``"spherical"``.
+        geometry: A single geometry applied to every dim, or a per-dim
+            sequence pairing with ``dims``. The per-dim form supports
+            mixed grids — the common case being a spherical horizontal
+            pair plus a rectilinear vertical axis, e.g.
+            ``("spherical", "spherical", "rectilinear")`` with
+            ``dims=("lon", "lat", "depth")``.
         accuracy: Scalar (applied to every dim) or per-dim tuple matching
             the length of ``dims``.
         method: ``"central"`` | ``"forward"`` | ``"backward"``.
+        periodic: Dimension name, or sequence of names, to treat as
+            wrapping. Must be among ``dims``.
         **geom_kw: Geometry-specific kwargs (``radius``, ``lon``, ``lat``,
-            ``uniform_rtol``).
+            ``uniform_rtol``). Each is routed only to the backends that
+            accept it, so ``radius`` may accompany a mixed geometry
+            without reaching the cartesian or rectilinear axes.
 
     Returns:
         Scalar DataArray with the same dims/coords as the components.
 
+    Raises:
+        ValueError: if ``components`` and ``dims`` lengths differ, if a
+            geometry sequence does not match ``dims``, or if exactly one
+            axis (or more than two) is marked spherical — the metric
+            needs the lon/lat pair together.
+
     Notes:
-        For spherical geometry the curvature correction
-        ``-(v tan φ) / R`` is added so the result matches
-        :func:`metpy.calc.divergence` on lon/lat fields:
+        The curvature correction ``-(v tan φ) / R`` is added whenever both
+        the longitude and latitude axes are spherical, so the result
+        matches :func:`metpy.calc.divergence` on lon/lat fields:
 
         .. math::
 
@@ -228,35 +354,86 @@ def divergence(
         array([2.])
 
         ```
+
+        A 3-D ocean budget mixes a spherical horizontal pair with a
+        rectilinear (stretched) vertical axis in one call:
+
+        ```pycon
+        >>> depth = np.array([0.0, 10.0, 30.0, 70.0])
+        >>> lon, lat = np.array([0.0, 1.0, 2.0]), np.array([10.0, 11.0, 12.0])
+        >>> shape = (depth.size, lat.size, lon.size)
+        >>> dims3 = ("depth", "lat", "lon")
+        >>> coords3 = {"depth": depth, "lat": lat, "lon": lon}
+        >>> flow = xr.Dataset(
+        ...     {
+        ...         name: xr.DataArray(np.zeros(shape), dims=dims3, coords=coords3)
+        ...         for name in ("u", "v", "w")
+        ...     }
+        ... )
+        >>> div = divergence(
+        ...     flow,
+        ...     ("u", "v", "w"),
+        ...     dims=("lon", "lat", "depth"),
+        ...     geometry=("spherical", "spherical", "rectilinear"),
+        ... )
+        >>> div.dims
+        ('depth', 'lat', 'lon')
+
+        ```
     """
     if len(components) != len(dims):
         raise ValueError(
             f"components ({len(components)}) and dims ({len(dims)}) "
             "must have the same length."
         )
+    geometries = _resolve_geometries(geometry, dims)
+    _validate_geom_kw(geometries, geom_kw)
     per_dim = cartesian._per_dim_accuracy(accuracy, dims)
+    wrap = _periodic_set(periodic, dims)
+
+    lon = geom_kw.get("lon", "lon")
+    lat = geom_kw.get("lat", "lat")
+    spherical_dims = [
+        d for d, g in zip(dims, geometries, strict=True) if g == "spherical"
+    ]
+    # Validated up front so the geometry-level message wins over whichever
+    # per-axis partial would otherwise fail first.
+    if spherical_dims and sorted(spherical_dims) != sorted({lon, lat}):
+        if all(g == "spherical" for g in geometries):
+            raise ValueError(
+                "spherical divergence is defined for 2-D (lon, lat) "
+                f"fields; got dims={tuple(dims)!r}. For a 3-D field pass "
+                "a per-dim geometry sequence marking the vertical axis "
+                "'rectilinear' or 'cartesian', e.g. geometry="
+                "('spherical', 'spherical', 'rectilinear')."
+            )
+        raise ValueError(
+            f"spherical axes {spherical_dims!r} must be exactly the "
+            f"longitude/latitude pair ({lon!r}, {lat!r}): the metric "
+            "term -(v tan φ)/R couples the two, so neither can be "
+            "spherical on its own. Mark the remaining axes "
+            "'rectilinear' or 'cartesian'."
+        )
+
     total: xr.DataArray | None = None
-    for comp_name, dim, acc in zip(components, dims, per_dim, strict=True):
+    for comp_name, dim, geom, acc in zip(
+        components, dims, geometries, per_dim, strict=True
+    ):
         d = partial(
             ds[comp_name],
             dim,
-            geometry=geometry,
+            geometry=geom,
             accuracy=acc,
             method=method,
-            **geom_kw,
+            periodic=dim in wrap,
+            **_geom_kw_for(geom, geom_kw),
         )
         total = d if total is None else total + d
     assert total is not None  # narrows Optional; only empty components trips this
 
-    if geometry == "spherical":
-        if len(components) != 2:
-            raise ValueError(
-                "spherical divergence is defined for 2-D (lon, lat) "
-                f"fields; got {len(components)} components."
-            )
-        lat = geom_kw.get("lat", "lat")
+    if spherical_dims:
         radius = geom_kw.get("radius", EARTH_RADIUS)
-        v = ds[components[1]]
+        v = ds[components[dims.index(lat)]]
         phi = np.deg2rad(np.asarray(v[lat].values))
         tan_phi = _broadcast_lat_factor(np.tan(phi), ref=v, lat=lat)
         curvature = -(v.values * tan_phi) / radius
@@ -277,6 +454,7 @@ def curl(
     geometry: Geometry = "cartesian",
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
+    periodic: Periodic = None,
     **geom_kw: Any,
 ) -> xr.DataArray:
     r"""2-D scalar curl ``∂v/∂x − ∂u/∂y`` (vertical component of ``∇×F``).
@@ -288,6 +466,8 @@ def curl(
         geometry: ``"cartesian"`` | ``"rectilinear"`` | ``"spherical"``.
         accuracy: Scalar (applied to both dims) or a 2-tuple pairing with
             ``dims``, forwarded to :mod:`finitediffx`.
+        periodic: Dimension name, or sequence of names, to treat as
+            wrapping. Must be among ``dims``.
         method: Stencil family (e.g. ``"central"``), forwarded to
             :mod:`finitediffx`.
         **geom_kw: Forwarded to :func:`partial`.
@@ -332,12 +512,14 @@ def curl(
     u_name, v_name = components
     x_dim, y_dim = dims
     acc_x, acc_y = cartesian._per_dim_accuracy(accuracy, dims)
+    wrap = _periodic_set(periodic, dims)
     dvdx = partial(
         ds[v_name],
         x_dim,
         geometry=geometry,
         accuracy=acc_x,
         method=method,
+        periodic=x_dim in wrap,
         **geom_kw,
     )
     dudy = partial(
@@ -346,6 +528,7 @@ def curl(
         geometry=geometry,
         accuracy=acc_y,
         method=method,
+        periodic=y_dim in wrap,
         **geom_kw,
     )
     out = dvdx - dudy
@@ -373,6 +556,7 @@ def laplacian(
     geometry: Geometry = "cartesian",
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
+    periodic: Periodic = None,
     **geom_kw: Any,
 ) -> xr.DataArray:
     """Laplacian ``Δf = ∇·∇f``.
@@ -399,6 +583,8 @@ def laplacian(
         accuracy: Scalar (applied to every dim) or per-dim tuple matching
             the length of ``dims``.
         method: Forwarded to :mod:`finitediffx`.
+        periodic: Dimension name, or sequence of names, to treat as
+            wrapping. Must be among the differentiated dims.
         **geom_kw: Geometry-specific keyword arguments.
 
     Returns:
@@ -440,13 +626,21 @@ def laplacian(
         raise ValueError("laplacian needs at least one dimension to sum over.")
 
     per_dim = cartesian._per_dim_accuracy(accuracy, target_dims)
+    wrap = _periodic_set(periodic, target_dims)
 
     if geometry == "cartesian":
         total: xr.DataArray | None = None
         for dim, acc in zip(target_dims, per_dim, strict=True):
+            wrapped = dim in wrap
             try:
                 second = cartesian.cartesian_partial(
-                    da, dim, order=2, accuracy=acc, method=method, **geom_kw
+                    da,
+                    dim,
+                    order=2,
+                    accuracy=acc,
+                    method=method,
+                    periodic=wrapped,
+                    **geom_kw,
                 )
             except ValueError:
                 # finitediffx rejects a direct second-derivative stencil when
@@ -457,10 +651,10 @@ def laplacian(
                 # — missing, non-1-D, or non-uniform coordinate — is raised
                 # again by these same calls.
                 first = cartesian.cartesian_partial(
-                    da, dim, accuracy=acc, method=method, **geom_kw
+                    da, dim, accuracy=acc, method=method, periodic=wrapped, **geom_kw
                 )
                 second = cartesian.cartesian_partial(
-                    first, dim, accuracy=acc, method=method, **geom_kw
+                    first, dim, accuracy=acc, method=method, periodic=wrapped, **geom_kw
                 )
             total = second if total is None else total + second
         assert total is not None  # narrowed by the empty-dims guard above
@@ -472,6 +666,7 @@ def laplacian(
         geometry=geometry,
         accuracy=per_dim,
         method=method,
+        periodic=sorted(wrap),  # type: ignore[arg-type]
         **geom_kw,
     )
     component_names = tuple(grad.data_vars)
@@ -482,5 +677,6 @@ def laplacian(
         geometry=geometry,
         accuracy=per_dim,
         method=method,
+        periodic=sorted(wrap),  # type: ignore[arg-type]
         **geom_kw,
     )

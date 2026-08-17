@@ -26,20 +26,27 @@ def volume_budget_residual(
 
     Closes to ≈ 0 for an incompressible flow. ``w_var=None`` returns
     the surface 2-D divergence only. Uses :func:`xrgrad.divergence`
-    so the spherical curvature term is included.
+    so the spherical curvature term is included; when the vertical
+    component is present it goes in the same call as a third
+    ``rectilinear`` axis rather than a separately added partial.
     """
-    flow = ds[[u_var, v_var]]
-    div = xrgrad.divergence(
-        flow,
+    if w_var is not None and depth is not None and depth in ds[w_var].dims:
+        return xrgrad.divergence(
+            ds[[u_var, v_var, w_var]],
+            (u_var, v_var, w_var),
+            dims=(lon, lat, depth),
+            geometry=("spherical", "spherical", "rectilinear"),
+            lon=lon,
+            lat=lat,
+        ).rename("volume_budget_residual")
+    return xrgrad.divergence(
+        ds[[u_var, v_var]],
         (u_var, v_var),
         dims=(lon, lat),
         geometry="spherical",
         lon=lon,
         lat=lat,
-    )
-    if w_var is not None and depth is not None and depth in ds[w_var].dims:
-        div = div + xrgrad.partial(ds[w_var], depth, geometry="rectilinear")
-    return div.rename("volume_budget_residual")
+    ).rename("volume_budget_residual")
 
 
 __all__ = ["volume_budget_residual"]
