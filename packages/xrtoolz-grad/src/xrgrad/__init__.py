@@ -28,6 +28,16 @@ of the JAX stack in the xrtoolz workspace). Physical constants used by
 the spherical metric and downstream physics are exported as
 :data:`EARTH_RADIUS`, :data:`GRAVITY`, and :data:`OMEGA`.
 
+**NaN and land masks.** By default a stencil that reads a NaN returns
+NaN, so every masked cell costs a halo of roughly ``accuracy`` valid
+cells in each differentiated direction — on an ocean field that is a
+strip of water lost around every coastline. Pass
+``nan_policy="adaptive"`` to any operator to select, per point, the
+widest stencil that lies wholly on finite data; the recovered cells
+carry one order lower accuracy and masked cells stay NaN. See
+``docs/design/xrgrad-nan-masks.md`` for the measurements behind that
+default.
+
 Example:
     Relative vorticity of a rigid-rotation velocity field:
 

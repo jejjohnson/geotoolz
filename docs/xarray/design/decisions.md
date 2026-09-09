@@ -326,3 +326,29 @@ Modules outside `interpolate` that handle adjacent concerns: `crs.Reproject` (CR
 - `Downscale` introduces a soft `ModelOp` dependency in `interpolate`. `ModelOp` itself has no framework dep (per D4), so the inference module is the only transitive surface added.
 - Two public tiers per D11 throughout (xarray Layer 0 + Operator Layer 1). The underlying private numpy / scipy kernels are rich here — most algorithms are pure array math (linear / cubic / RBF / kriging / FFT-based filters).
 
+
+## D13: NaN/land masks — adaptive stencil selection in the kernel, opt-in
+
+**Status:** accepted (2026-08-18)
+
+**Context:** Finite-difference stencils propagate NaN, so every NaN cell costs a halo of roughly `accuracy` valid cells in each differentiated direction. xrgrad's primary consumers are masked ocean fields, so this silently ate a strip of water around every coastline; the package did not previously mention NaN at all. See `docs/design/xrgrad-nan-masks.md` for the full note and the measurements.
+
+**Options:**
+
+- (A) Documented recipe only — fill with `interpolate.fillnan_*`, differentiate, re-mask. No API change, coastal bias persists.
+- (B) Per-point stencil selection: near the mask, fall back to one-sided stencils that read only valid cells.
+- (C) Built-in fill-extrapolate as a `nan_policy` mode — a curated version of A.
+
+**Decision:** Option B, exposed as `nan_policy="adaptive"` on `partial` / `gradient` / `divergence` / `curl` / `laplacian`, defaulting to `"propagate"`.
+
+Measured on an analytic field with a synthetic coastline, at the coastal cells: propagate loses 62% of them; fill-then-mask keeps them but at RMS relative error 6.5e-01; adaptive keeps them at 7.2e-03 (`accuracy=1`) or 1.4e-04 (`accuracy=2`). Interior cells are bit-identical to propagate. Filling to fix a *derivative* is actively harmful — harmonic relaxation solves `∇²u = 0`, so the filled gradient is an artefact of the fill, converting a visible gap into an invisible wrong answer.
+
+Option B is cheap to implement because NaN is its own support detector: any stencil reading a NaN yields NaN (`0 * nan` is `nan`, so a zero centre coefficient does not save it). Differentiating three times — central, forward, backward — and taking per point the first finite variant is exactly "widest stencil that fits", with no mask-dilation pass and no dependence on `finitediffx`'s internal stencil sizing.
+
+**Consequences:**
+
+- Stencil selection lives in xrgrad, not in an `xrtoolz` wrapper: a wrapper can only pre-process the field, which is option A. This is consistent with D5 (compute in the numeric layer, xarray for interface).
+- Opt-in, because one-sided coastal values are a different numerical object from centred interior ones.
+- Three stencil passes instead of one, on requested axes only.
+- `method=` is rejected with `nan_policy="adaptive"` — the fallback chain is method selection.
+- Option A stays available and documented; `interpolate.fillnan_*` remains the right tool for producing a gap-free *field*, just not for derivative accuracy.

@@ -82,6 +82,7 @@ def spherical_partial(
     accuracy: int = 1,
     method: str = "central",
     periodic: bool = False,
+    nan_policy: str = "propagate",
     lon: str = "lon",
     lat: str = "lat",
     radius: float = EARTH_RADIUS,
@@ -99,6 +100,10 @@ def spherical_partial(
         periodic: Wrap the longitude axis, removing the one-sided seam at
             the dateline. Valid only when ``dim`` is the longitude
             coordinate and the grid spans the full 360° — see Raises.
+        nan_policy: ``"propagate"`` or ``"adaptive"``; see
+            :func:`xrgrad._src.cartesian.cartesian_partial`. The metric
+            factors are applied pointwise afterwards, so they neither
+            create nor clear NaN.
         lon: Name of the longitude coordinate (degrees east).
         lat: Name of the latitude coordinate (degrees north).
         radius: Earth radius in metres.
@@ -123,6 +128,7 @@ def spherical_partial(
             latitude axis, which does not wrap.
     """
     cartesian._validate_order(order)
+    cartesian._validate_nan_policy(nan_policy, method)
     if lon not in da.coords:
         raise ValueError(f"Coordinate {lon!r} not present on DataArray.")
     if lat not in da.coords:
@@ -154,13 +160,14 @@ def spherical_partial(
 
     axis = da.get_axis_num(dim)
     step_rad = _radian_step(da[dim], rtol=uniform_rtol)
-    raw = cartesian._difference_maybe_periodic(
+    raw = cartesian._difference_dispatch(
         da.values,
         axis=axis,
         step_size=step_rad,
         accuracy=accuracy,
         method=method,
         periodic=periodic,
+        nan_policy=nan_policy,
     )
 
     name_suffix: str
@@ -197,6 +204,7 @@ def spherical_gradient(
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     periodic: frozenset[Hashable] = frozenset(),
+    nan_policy: str = "propagate",
     lon: str = "lon",
     lat: str = "lat",
     radius: float = EARTH_RADIUS,
@@ -211,6 +219,7 @@ def spherical_gradient(
         accuracy: Scalar or per-dim tuple.
         method: Forwarded to :mod:`finitediffx`.
         periodic: Set of coordinate names to wrap (longitude only).
+        nan_policy: ``"propagate"`` or ``"adaptive"``.
         lon: Longitude coordinate name, forwarded to
             :func:`spherical_partial`.
         lat: Latitude coordinate name, forwarded to
@@ -242,6 +251,7 @@ def spherical_gradient(
             accuracy=acc,
             method=method,
             periodic=d in periodic,
+            nan_policy=nan_policy,
             lon=lon,
             lat=lat,
             radius=radius,

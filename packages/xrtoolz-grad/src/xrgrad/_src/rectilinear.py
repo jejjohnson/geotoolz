@@ -35,6 +35,7 @@ def rectilinear_partial(
     accuracy: int = 1,
     method: str = "central",
     periodic: bool = False,
+    nan_policy: str = "propagate",
     uniform_rtol: float = 1e-6,
 ) -> xr.DataArray:
     """Partial derivative ``∂da/∂<dim>`` on a non-uniform 1-D coord.
@@ -50,6 +51,10 @@ def rectilinear_partial(
         periodic: Treat ``dim`` as wrapping. Only supported when the
             coordinate turns out to be uniform (and therefore delegates
             to the cartesian backend) — see Raises.
+        nan_policy: ``"propagate"`` or ``"adaptive"``; see
+            :func:`xrgrad._src.cartesian.cartesian_partial`. The chain
+            rule divides by a coordinate-derived factor, which carries no
+            NaN of its own, so the policy applies to the field stencil.
         uniform_rtol: If the coord is uniform within this tolerance, we
             delegate to the cartesian implementation (cheaper and avoids
             the chain-rule step).
@@ -65,6 +70,7 @@ def rectilinear_partial(
             coordinate, or if ``periodic`` is requested for one.
     """
     cartesian._validate_order(order)
+    cartesian._validate_nan_policy(nan_policy, method)
     if dim not in da.dims:
         raise ValueError(
             f"Dimension {dim!r} not present on DataArray with dims={da.dims}."
@@ -93,6 +99,7 @@ def rectilinear_partial(
             accuracy=accuracy,
             method=method,
             periodic=periodic,
+            nan_policy=nan_policy,
             uniform_rtol=uniform_rtol,
         )
     if order > 1:
@@ -112,15 +119,22 @@ def rectilinear_partial(
         )
 
     axis = da.get_axis_num(dim)
-    df_di = cartesian._difference(
-        da.values, axis=axis, step_size=1.0, accuracy=accuracy, method=method
-    )
-    dxdi = cartesian._difference(
-        coord_values, axis=0, step_size=1.0, accuracy=accuracy, method=method
-    )
-    shape = [1] * da.ndim
-    shape[axis] = coord_values.size
-    out = df_di / dxdi.reshape(shape)
+    if nan_policy == "adaptive":
+        # The stencil varies per point here, so ``dx/di`` has to follow it;
+        # see ``cartesian._difference_adaptive_chain``.
+        out = cartesian._difference_adaptive_chain(
+            da.values, coord_values, axis=axis, accuracy=accuracy
+        )
+    else:
+        df_di = cartesian._difference(
+            da.values, axis=axis, step_size=1.0, accuracy=accuracy, method=method
+        )
+        dxdi = cartesian._difference(
+            coord_values, axis=0, step_size=1.0, accuracy=accuracy, method=method
+        )
+        shape = [1] * da.ndim
+        shape[axis] = coord_values.size
+        out = df_di / dxdi.reshape(shape)
 
     return xr.DataArray(
         out,
@@ -138,6 +152,7 @@ def rectilinear_gradient(
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     periodic: frozenset[Hashable] = frozenset(),
+    nan_policy: str = "propagate",
     uniform_rtol: float = 1e-6,
 ) -> xr.Dataset:
     """Gradient ``∇da`` on rectilinear (per-axis) coordinates."""
@@ -152,6 +167,7 @@ def rectilinear_gradient(
             accuracy=acc,
             method=method,
             periodic=dim in periodic,
+            nan_policy=nan_policy,
             uniform_rtol=uniform_rtol,
         )
     return xr.Dataset(out)

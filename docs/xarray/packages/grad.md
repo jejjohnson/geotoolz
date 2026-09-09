@@ -201,6 +201,62 @@ For a worked spherical example (geostrophic currents and vorticity from
 sea-surface height), see the
 [quickstart notebook](../notebooks/xrgrad_quickstart.ipynb).
 
+## NaN and land masks
+
+A stencil that reads a NaN returns NaN. By default that is exactly what
+happens, so each masked cell costs a halo of roughly `accuracy` valid
+cells in every differentiated direction — on a masked ocean field, a
+strip of water lost all the way around every coastline, silently.
+
+`nan_policy="adaptive"` picks, per point, the widest stencil lying
+wholly on finite data: centred where the full support is valid, then
+forward, then backward. Masked cells stay NaN.
+
+```python
+zeta = xrgrad.curl(
+    ds, ("u", "v"), dims=("lon", "lat"),
+    geometry="spherical", nan_policy="adaptive",
+)
+```
+
+Measured against an analytic field with a synthetic coastline
+(`docs/design/examples/xrgrad-nan-mask-comparison.py`), at the cells
+adjacent to land:
+
+| | cells lost | RMS relative error |
+|---|---|---|
+| `propagate` (default) | 62% | 5.5e-05 on the survivors |
+| fill, differentiate, re-mask | 0% | 6.5e-01 |
+| `nan_policy="adaptive"` | 0% | 7.2e-03 (`accuracy=1`), 1.4e-04 (`accuracy=2`) |
+
+Two things to take from that:
+
+- **Do not gap-fill a field to fix its derivative.** Harmonic filling
+  solves `∇²u = 0`, so the filled gradient is an artefact of the fill —
+  four orders of magnitude worse than losing the cells, and invisible
+  because the output looks complete. The `fillnan_*` family in
+  `xrtoolz.interpolate` is the right tool when you want a gap-free
+  *field*, not for derivative accuracy near a mask.
+- **Coastal cells cost one order of accuracy**, since they use a
+  one-sided stencil. Raising `accuracy` buys it back, as the table
+  shows. Interior cells are bit-identical to `propagate`.
+- **Raising `accuracy` never loses cells.** A region narrower than the
+  requested stencil — a two-cell channel between islands, say — falls
+  back to the widest *lower* accuracy that fits there, so recovery is
+  monotone in `accuracy` and only the local error order varies. The same
+  descent applies when the whole axis is shorter than the stencil. A
+  single isolated cell still has no neighbour to difference against and
+  stays NaN.
+- **Cost is up to `3 * accuracy` stencil passes** on the requested axes,
+  against one for `propagate`. The sweep exits as soon as no valid cell
+  is unresolved, so an unmasked field costs a single pass and an ordinary
+  coastline costs three; the upper bound is only reached on masks
+  fragmented into strips narrower than the requested stencil.
+
+`method=` cannot be combined with `nan_policy="adaptive"` — the fallback
+chain is itself method selection — and the option composes with
+`periodic=`, so a masked global field can wrap and adapt in one call.
+
 ## Grid metrics and constants
 
 `grid_metrics_from_coords` derives the cell-width / face-area Datasets

@@ -35,6 +35,7 @@ _GEOM_KWARGS: dict[str, frozenset[str]] = {
 }
 
 Periodic = str | Sequence[str] | None
+NanPolicy = Literal["propagate", "adaptive"]
 
 
 def _periodic_set(
@@ -124,6 +125,7 @@ def partial(
     accuracy: int = 1,
     method: str = "central",
     periodic: bool = False,
+    nan_policy: NanPolicy = "propagate",
     **geom_kw: Any,
 ) -> xr.DataArray:
     """Partial derivative ``∂ᵒʳᵈᵉʳda/∂<dim>ᵒʳᵈᵉʳ`` under the given geometry.
@@ -144,6 +146,13 @@ def partial(
             are differentiated against each other rather than falling
             back to one-sided stencils. For ``geometry="spherical"`` this
             is valid on the longitude axis of a full 360° grid only.
+        nan_policy: How to treat NaN (typically a land mask).
+            ``"propagate"`` (default) is plain stencil arithmetic, so a
+            masked cell costs a halo of roughly ``accuracy`` valid cells
+            around it. ``"adaptive"`` instead picks, per point, the
+            widest stencil that lies wholly on finite data, recovering
+            those cells at one order lower accuracy; masked cells stay
+            NaN. Raising ``accuracy`` improves the recovered cells.
         **geom_kw: Geometry-specific keyword arguments (e.g. ``radius``
             and coord names for spherical, ``uniform_rtol`` for cartesian).
 
@@ -181,12 +190,29 @@ def partial(
         array([2., 2., 2., 2.])
 
         ```
+
+        A masked cell costs its neighbour too, because the centred
+        stencil there reads the NaN. ``nan_policy="adaptive"`` gives that
+        neighbour a one-sided estimate instead, while the masked cell
+        itself stays NaN:
+
+        ```pycon
+        >>> v = np.linspace(0.0, 5.0, 6) ** 2
+        >>> v[0] = np.nan
+        >>> masked = xr.DataArray(v, dims="x", coords={"x": np.linspace(0.0, 5.0, 6)})
+        >>> partial(masked, "x").values
+        array([nan, nan,  4.,  6.,  8.,  9.])
+        >>> partial(masked, "x", nan_policy="adaptive").values
+        array([nan,  3.,  4.,  6.,  8.,  9.])
+
+        ```
     """
     kw: dict[str, Any] = dict(
         order=order,
         accuracy=accuracy,
         method=method,
         periodic=periodic,
+        nan_policy=nan_policy,
         **geom_kw,
     )
     if geometry == "cartesian":
@@ -209,6 +235,7 @@ def gradient(
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     periodic: Periodic = None,
+    nan_policy: NanPolicy = "propagate",
     **geom_kw: Any,
 ) -> xr.Dataset:
     """Gradient ``∇da`` under the given geometry.
@@ -221,6 +248,8 @@ def gradient(
         method: Forwarded to :mod:`finitediffx`.
         periodic: Dimension name, or sequence of names, to treat as
             wrapping. Must be among the differentiated dims.
+        nan_policy: ``"propagate"`` or ``"adaptive"``; see
+            :func:`partial`.
         **geom_kw: Geometry-specific keyword arguments.
 
     Returns:
@@ -254,15 +283,33 @@ def gradient(
 
     if geometry == "cartesian":
         return cartesian.cartesian_gradient(
-            da, dims=dims, accuracy=accuracy, method=method, periodic=wrap, **geom_kw
+            da,
+            dims=dims,
+            accuracy=accuracy,
+            method=method,
+            periodic=wrap,
+            nan_policy=nan_policy,
+            **geom_kw,
         )
     if geometry == "rectilinear":
         return rectilinear.rectilinear_gradient(
-            da, dims=dims, accuracy=accuracy, method=method, periodic=wrap, **geom_kw
+            da,
+            dims=dims,
+            accuracy=accuracy,
+            method=method,
+            periodic=wrap,
+            nan_policy=nan_policy,
+            **geom_kw,
         )
     if geometry == "spherical":
         return spherical.spherical_gradient(
-            da, dims=dims, accuracy=accuracy, method=method, periodic=wrap, **geom_kw
+            da,
+            dims=dims,
+            accuracy=accuracy,
+            method=method,
+            periodic=wrap,
+            nan_policy=nan_policy,
+            **geom_kw,
         )
     raise ValueError(
         f"Unknown geometry {geometry!r}; expected one of "
@@ -288,6 +335,7 @@ def divergence(
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     periodic: Periodic = None,
+    nan_policy: NanPolicy = "propagate",
     **geom_kw: Any,
 ) -> xr.DataArray:
     r"""Divergence ``∇·F`` of a vector field stored as Dataset variables.
@@ -309,6 +357,9 @@ def divergence(
         method: ``"central"`` | ``"forward"`` | ``"backward"``.
         periodic: Dimension name, or sequence of names, to treat as
             wrapping. Must be among ``dims``.
+        nan_policy: ``"propagate"`` or ``"adaptive"``; see
+            :func:`partial`. Applies to each component's stencil; the
+            spherical curvature term is pointwise and inherits the mask.
         **geom_kw: Geometry-specific kwargs (``radius``, ``lon``, ``lat``,
             ``uniform_rtol``). Each is routed only to the backends that
             accept it, so ``radius`` may accompany a mixed geometry
@@ -426,6 +477,7 @@ def divergence(
             accuracy=acc,
             method=method,
             periodic=dim in wrap,
+            nan_policy=nan_policy,
             **_geom_kw_for(geom, geom_kw),
         )
         total = d if total is None else total + d
@@ -455,6 +507,7 @@ def curl(
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     periodic: Periodic = None,
+    nan_policy: NanPolicy = "propagate",
     **geom_kw: Any,
 ) -> xr.DataArray:
     r"""2-D scalar curl ``∂v/∂x − ∂u/∂y`` (vertical component of ``∇×F``).
@@ -468,6 +521,8 @@ def curl(
             ``dims``, forwarded to :mod:`finitediffx`.
         periodic: Dimension name, or sequence of names, to treat as
             wrapping. Must be among ``dims``.
+        nan_policy: ``"propagate"`` or ``"adaptive"``; see
+            :func:`partial`.
         method: Stencil family (e.g. ``"central"``), forwarded to
             :mod:`finitediffx`.
         **geom_kw: Forwarded to :func:`partial`.
@@ -520,6 +575,7 @@ def curl(
         accuracy=acc_x,
         method=method,
         periodic=x_dim in wrap,
+        nan_policy=nan_policy,
         **geom_kw,
     )
     dudy = partial(
@@ -529,6 +585,7 @@ def curl(
         accuracy=acc_y,
         method=method,
         periodic=y_dim in wrap,
+        nan_policy=nan_policy,
         **geom_kw,
     )
     out = dvdx - dudy
@@ -557,6 +614,7 @@ def laplacian(
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     periodic: Periodic = None,
+    nan_policy: NanPolicy = "propagate",
     **geom_kw: Any,
 ) -> xr.DataArray:
     """Laplacian ``Δf = ∇·∇f``.
@@ -585,6 +643,10 @@ def laplacian(
         method: Forwarded to :mod:`finitediffx`.
         periodic: Dimension name, or sequence of names, to treat as
             wrapping. Must be among the differentiated dims.
+        nan_policy: ``"propagate"`` or ``"adaptive"``; see
+            :func:`partial`. On the composed (non-cartesian) path it is
+            applied to both the gradient and the divergence stage, so a
+            masked cell costs one halo rather than two.
         **geom_kw: Geometry-specific keyword arguments.
 
     Returns:
@@ -640,6 +702,7 @@ def laplacian(
                     accuracy=acc,
                     method=method,
                     periodic=wrapped,
+                    nan_policy=nan_policy,
                     **geom_kw,
                 )
             except ValueError:
@@ -651,10 +714,22 @@ def laplacian(
                 # — missing, non-1-D, or non-uniform coordinate — is raised
                 # again by these same calls.
                 first = cartesian.cartesian_partial(
-                    da, dim, accuracy=acc, method=method, periodic=wrapped, **geom_kw
+                    da,
+                    dim,
+                    accuracy=acc,
+                    method=method,
+                    periodic=wrapped,
+                    nan_policy=nan_policy,
+                    **geom_kw,
                 )
                 second = cartesian.cartesian_partial(
-                    first, dim, accuracy=acc, method=method, periodic=wrapped, **geom_kw
+                    first,
+                    dim,
+                    accuracy=acc,
+                    method=method,
+                    periodic=wrapped,
+                    nan_policy=nan_policy,
+                    **geom_kw,
                 )
             total = second if total is None else total + second
         assert total is not None  # narrowed by the empty-dims guard above
@@ -667,6 +742,7 @@ def laplacian(
         accuracy=per_dim,
         method=method,
         periodic=sorted(wrap),  # type: ignore[arg-type]
+        nan_policy=nan_policy,
         **geom_kw,
     )
     component_names = tuple(grad.data_vars)
@@ -678,5 +754,6 @@ def laplacian(
         accuracy=per_dim,
         method=method,
         periodic=sorted(wrap),  # type: ignore[arg-type]
+        nan_policy=nan_policy,
         **geom_kw,
     )

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 import warnings
-from collections.abc import Hashable
+from collections.abc import Callable, Hashable
 from typing import Any, cast
 
 import finitediffx as fdx
@@ -205,6 +205,216 @@ def _difference_maybe_periodic(
         accuracy=accuracy,
         method=method,
         derivative=derivative,
+    )
+
+
+# Order matters: the widest stencil first, so a point keeps the centred
+# estimate whenever its support is entirely valid.
+_ADAPTIVE_METHODS = ("central", "forward", "backward")
+
+
+def _validate_nan_policy(nan_policy: str, method: str) -> None:
+    """Guard the NaN policy and its interaction with ``method``.
+
+    Raises:
+        ValueError: for an unknown policy, or for a non-central ``method``
+            combined with ``"adaptive"`` — the fallback chain *is* method
+            selection, so the two would contradict each other.
+    """
+    if nan_policy not in ("propagate", "adaptive"):
+        raise ValueError(
+            f"Unknown nan_policy {nan_policy!r}; expected 'propagate' or 'adaptive'."
+        )
+    if nan_policy == "adaptive" and method != "central":
+        raise ValueError(
+            f"nan_policy='adaptive' selects the stencil per point, so it "
+            f"cannot be combined with method={method!r}. Leave method at "
+            "'central' (adaptive falls back to forward/backward itself), or "
+            "use nan_policy='propagate' to force one method everywhere."
+        )
+
+
+def _difference_adaptive(
+    values: Float[np.ndarray, "*shape"],
+    *,
+    axis: int,
+    step_size: float,
+    accuracy: int,
+    derivative: int = 1,
+    periodic: bool = False,
+) -> Float[np.ndarray, "*shape"]:
+    """Differentiate with the widest stencil that fits on finite data.
+
+    Near a land mask a centred stencil reaches into NaN and the result is
+    lost, taking a strip of valid water with it. This runs the same
+    kernel once per candidate stencil and keeps, per point, the first
+    result that came back finite.
+
+    No mask arithmetic is needed because NaN is its own support detector:
+    a stencil that reads a NaN yields NaN, including through a zero
+    centre coefficient, since ``0 * nan`` is ``nan``. That also means the
+    fallback never has to know how wide ``finitediffx`` built its
+    stencil — an internal rule this package deliberately does not
+    duplicate.
+
+    The input mask is re-imposed at the end. Land is NaN because there is
+    no data there, which is a property of the answer rather than of the
+    arithmetic that happened to produce it.
+    """
+
+    def candidate(method: str, acc: int) -> Float[np.ndarray, "*shape"]:
+        return _difference_maybe_periodic(
+            values,
+            axis=axis,
+            step_size=step_size,
+            accuracy=acc,
+            method=method,
+            derivative=derivative,
+            periodic=periodic,
+        )
+
+    return _select_by_finiteness(candidate, values, accuracy=accuracy)
+
+
+def _select_by_finiteness(
+    candidate: Callable[[str, int], Float[np.ndarray, "*shape"]],
+    values: Float[np.ndarray, "*shape"],
+    *,
+    accuracy: int,
+) -> Float[np.ndarray, "*shape"]:
+    """Keep, per point, the first candidate stencil that came back finite.
+
+    Candidates are tried widest-first: every method in
+    :data:`_ADAPTIVE_METHODS` at the requested ``accuracy``, then the same
+    sweep at each lower accuracy down to 1. Dropping the accuracy matters
+    for valid regions narrower than the requested one-sided stencil — a
+    two-cell channel between two masked cells supports a first-order
+    difference but nothing wider, and without the descent it would vanish
+    precisely when the caller asked for *more* accuracy.
+
+    ``candidate`` is called lazily, so a field the centred stencil already
+    covers still costs exactly one kernel evaluation, and the extra
+    accuracies are only reached while finite input cells remain
+    unresolved.
+
+    A gap that sits on the input mask can never be filled — no stencil
+    reaches data there — so only gaps that coincide with finite input
+    keep the search going.
+
+    A stencil wider than the axis itself is skipped rather than fatal, so
+    a short axis descends the same way an embedded narrow strip does:
+    without that, two samples with ``accuracy=2`` would raise while the
+    same two samples embedded in a longer masked axis resolved fine. If
+    no accuracy fits at all the rejection is re-raised, so a genuinely
+    undifferentiable axis still reports itself.
+
+    Args:
+        candidate: Builds the differenced array for a method and accuracy.
+        values: The input field, supplying the mask to re-impose.
+        accuracy: Highest stencil accuracy to try.
+
+    Returns:
+        The combined result, NaN wherever ``values`` is not finite.
+
+    Raises:
+        ValueError: If no accuracy down to 1 fits the axis. ``finitediffx``
+            also surfaces this as a :exc:`TypeError` from JAX's slicing at
+            some sizes, which is re-raised unchanged.
+    """
+    finite_input = np.isfinite(values)
+    out: Float[np.ndarray, "*shape"] | None = None
+    too_short: Exception | None = None
+    for acc in range(accuracy, 0, -1):
+        for method in _ADAPTIVE_METHODS:
+            try:
+                result = candidate(method, acc)
+            except (ValueError, TypeError) as exc:
+                # This stencil is wider than the axis; a narrower one may fit.
+                too_short = exc
+                continue
+            out = result if out is None else np.where(~np.isfinite(out), result, out)
+            if not (~np.isfinite(out) & finite_input).any():
+                return np.where(finite_input, out, np.nan)
+    if out is None:
+        assert too_short is not None  # the only way every candidate was skipped
+        raise too_short
+    return np.where(finite_input, out, np.nan)
+
+
+def _difference_adaptive_chain(
+    values: Float[np.ndarray, "*shape"],
+    coord_values: Float[np.ndarray, " n"],
+    *,
+    axis: int,
+    accuracy: int,
+) -> Float[np.ndarray, "*shape"]:
+    """Adaptive first derivative against a non-uniform coordinate.
+
+    The rectilinear backend differentiates on the index grid and divides
+    by ``dx/di``. Numerator and denominator have to come from the *same*
+    stencil at every point: a one-sided ``df/di`` over a centred ``dx/di``
+    mixes two different local approximations, and on a stretched grid
+    that is silently wrong — for ``x = [0, 1, 3, ...]`` and ``f = x`` with
+    ``f[0]`` masked it returns ``(3-1)/((3-0)/2) = 4/3`` instead of 1.
+
+    So the quotient — not just the numerator — is the candidate that
+    :func:`_select_by_finiteness` picks between. The coordinate is finite
+    and monotonic by the time we get here, so only the numerator's NaNs
+    drive the selection.
+
+    Args:
+        values: Field to differentiate.
+        coord_values: The 1-D coordinate along ``axis``.
+        axis: Axis of ``values`` to differentiate.
+        accuracy: Stencil accuracy order.
+
+    Returns:
+        ``df/dx``, NaN wherever ``values`` is not finite.
+    """
+    shape = [1] * values.ndim
+    shape[axis] = coord_values.size
+
+    def candidate(method: str, acc: int) -> Float[np.ndarray, "*shape"]:
+        df_di = _difference(
+            values, axis=axis, step_size=1.0, accuracy=acc, method=method
+        )
+        dx_di = _difference(
+            coord_values, axis=0, step_size=1.0, accuracy=acc, method=method
+        )
+        return df_di / dx_di.reshape(shape)
+
+    return _select_by_finiteness(candidate, values, accuracy=accuracy)
+
+
+def _difference_dispatch(
+    values: Float[np.ndarray, "*shape"],
+    *,
+    axis: int,
+    step_size: float,
+    accuracy: int,
+    method: str,
+    derivative: int = 1,
+    periodic: bool = False,
+    nan_policy: str = "propagate",
+) -> Float[np.ndarray, "*shape"]:
+    """Route to the plain, periodic, or NaN-adaptive stencil."""
+    if nan_policy == "adaptive":
+        return _difference_adaptive(
+            values,
+            axis=axis,
+            step_size=step_size,
+            accuracy=accuracy,
+            derivative=derivative,
+            periodic=periodic,
+        )
+    return _difference_maybe_periodic(
+        values,
+        axis=axis,
+        step_size=step_size,
+        accuracy=accuracy,
+        method=method,
+        derivative=derivative,
+        periodic=periodic,
     )
 
 
@@ -422,6 +632,7 @@ def cartesian_partial(
     accuracy: int = 1,
     method: str = "central",
     periodic: bool = False,
+    nan_policy: str = "propagate",
     uniform_rtol: float = 1e-6,
 ) -> xr.DataArray:
     """Partial derivative ``∂ᵒʳᵈᵉʳda/∂<dim>ᵒʳᵈᵉʳ`` on a uniform Cartesian grid.
@@ -444,6 +655,12 @@ def cartesian_partial(
             verified from the coordinate, so a grid that stores both ends
             of the period (``np.linspace(0, L, n)``, endpoint inclusive)
             only draws a ``UserWarning`` when the field's ends coincide.
+        nan_policy: ``"propagate"`` (default) lets NaN spread through any
+            stencil that touches it, so a masked cell costs a halo of
+            roughly ``accuracy`` valid cells. ``"adaptive"`` instead
+            falls back per point to the widest stencil lying wholly on
+            finite data, recovering those cells at one order lower
+            accuracy; masked cells stay NaN.
         uniform_rtol: Relative tolerance for the uniform-spacing check.
 
     Returns:
@@ -453,9 +670,11 @@ def cartesian_partial(
 
     Raises:
         ValueError: if ``dim`` is absent from ``da.dims``, carries no
-            coordinate, or ``order`` is not a positive integer.
+            coordinate, ``order`` is not a positive integer, or
+            ``nan_policy`` is unknown or contradicts ``method``.
     """
     _validate_order(order)
+    _validate_nan_policy(nan_policy, method)
     if dim not in da.dims:
         raise ValueError(
             f"Dimension {dim!r} not present on DataArray with dims={da.dims}."
@@ -468,7 +687,7 @@ def cartesian_partial(
         # span a full 360°), so this advisory only covers the cartesian and
         # uniform-rectilinear paths, where the period is implicit.
         _warn_duplicate_endpoint(da.values, axis=axis, dim=dim)
-    raw = _difference_maybe_periodic(
+    raw = _difference_dispatch(
         da.values,
         axis=axis,
         step_size=step,
@@ -476,6 +695,7 @@ def cartesian_partial(
         method=method,
         derivative=order,
         periodic=periodic,
+        nan_policy=nan_policy,
     )
     return xr.DataArray(
         raw,
@@ -493,6 +713,7 @@ def cartesian_gradient(
     accuracy: int | tuple[int, ...] = 1,
     method: str = "central",
     periodic: frozenset[Hashable] = frozenset(),
+    nan_policy: str = "propagate",
     uniform_rtol: float = 1e-6,
 ) -> xr.Dataset:
     """Gradient ``∇da`` on a uniform Cartesian grid.
@@ -504,6 +725,8 @@ def cartesian_gradient(
             the length of ``dims``.
         method: Forwarded to :func:`finitediffx.difference`.
         periodic: Set of dimension names to treat as wrapping.
+        nan_policy: ``"propagate"`` or ``"adaptive"``; see
+            :func:`cartesian_partial`.
         uniform_rtol: Forwarded to :func:`cartesian_partial`.
 
     Returns:
@@ -521,6 +744,7 @@ def cartesian_gradient(
             accuracy=acc,
             method=method,
             periodic=dim in periodic,
+            nan_policy=nan_policy,
             uniform_rtol=uniform_rtol,
         )
         out[f"d{base}_d{dim}"] = component
