@@ -233,7 +233,7 @@ SP = Variable(
     standard_name="surface_air_pressure",
     long_name="Surface pressure",
     units="Pa",
-    aliases={"cds": "surface_pressure"},
+    aliases={"cds": "surface_pressure", "tropomi": "surface_pressure"},
     valid_range=(50000.0, 110000.0),
     cmap="viridis",
 )

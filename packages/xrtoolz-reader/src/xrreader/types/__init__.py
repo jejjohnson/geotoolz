@@ -16,12 +16,15 @@ Exports:
 - Validation: :func:`validate_variable`, :func:`validate_dataset`,
   :func:`apply_cf_attrs`, :class:`ValidationReport`, :class:`Issue`,
   :class:`Severity`.
+- Subsetting: :func:`subset_bbox`, :func:`subset_where`,
+  :func:`subset_time` (pure xarray; re-exported by :mod:`xrtoolz.geo`).
 """
 
 from xrreader.types._src.geometry import BBox
 from xrreader.types._src.levels import DepthRange, PressureLevels
 from xrreader.types._src.request import Request
 from xrreader.types._src.station import Station, StationCollection
+from xrreader.types._src.subset import subset_bbox, subset_time, subset_where
 from xrreader.types._src.time import TimeRange
 from xrreader.types._src.validation import (
     Issue,
@@ -249,6 +252,9 @@ __all__ = [
     "apply_cf_attrs",
     "register",
     "resolve",
+    "subset_bbox",
+    "subset_time",
+    "subset_where",
     "validate_dataset",
     "validate_variable",
 ]

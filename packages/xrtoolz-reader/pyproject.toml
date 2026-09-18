@@ -76,6 +76,13 @@ aemet = [
     "netcdf4>=1.6",
 ]
 
+# ``pip install 'xrtoolz-reader[local]'`` — NetCDF backend for the on-disk
+# L2 openers (LocalL2Source: TROPOMI / EMIT / GHGSat read with
+# ``xr.open_datatree`` / ``xr.open_dataset``).
+local = [
+    "netcdf4>=1.6",
+]
+
 [project.urls]
 Repository = "https://github.com/jejjohnson/xrtoolz"
 

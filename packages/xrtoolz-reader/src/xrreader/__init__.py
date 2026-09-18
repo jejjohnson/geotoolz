@@ -10,7 +10,10 @@ and the common request types flat.
 Reader API:
 
 - :class:`DataSource`, :class:`DatasetInfo`, :class:`DatasetKind`
-- Adapters: :class:`CMEMSSource`, :class:`CDSSource`, :class:`AemetSource`
+- Adapters: :class:`CMEMSSource`, :class:`CDSSource`, :class:`AemetSource`,
+  :class:`LocalL2Source` (files already on disk; TROPOMI / EMIT / GHGSat
+  methane L2 openers :func:`open_tropomi_ch4_l2`, :func:`open_emit_ch4_l2b`,
+  :func:`open_ghgsat_ch4_l2`).
 - Credentials: :class:`CMEMSCredentials`, :class:`CDSCredentials`,
   :class:`AEMETCredentials`, :func:`load_cmems`, :func:`load_cds`,
   :func:`load_aemet`.
@@ -33,6 +36,7 @@ Request vocabulary (also available via :mod:`xrreader.types`):
 - Validation: :func:`validate_variable`, :func:`validate_dataset`,
   :func:`apply_cf_attrs`, :class:`ValidationReport`, :class:`Issue`,
   :class:`Severity`.
+- Subsetting: :func:`subset_bbox`, :func:`subset_where`, :func:`subset_time`.
 """
 
 from xrreader._src.aemet import (
@@ -61,6 +65,12 @@ from xrreader._src.credentials import (
     load_cds,
     load_cmems,
 )
+from xrreader._src.local import (
+    LocalL2Source,
+    open_emit_ch4_l2b,
+    open_ghgsat_ch4_l2,
+    open_tropomi_ch4_l2,
+)
 from xrreader.types import (
     REGISTRY,
     BBox,
@@ -77,6 +87,9 @@ from xrreader.types import (
     apply_cf_attrs,
     register,
     resolve,
+    subset_bbox,
+    subset_time,
+    subset_where,
     validate_dataset,
     validate_variable,
 )
@@ -109,6 +122,7 @@ __all__ = [
     "DatasetKind",
     "DepthRange",
     "Issue",
+    "LocalL2Source",
     "PressureLevels",
     "Request",
     "Severity",
@@ -124,8 +138,14 @@ __all__ = [
     "load_aemet",
     "load_cds",
     "load_cmems",
+    "open_emit_ch4_l2b",
+    "open_ghgsat_ch4_l2",
+    "open_tropomi_ch4_l2",
     "register",
     "resolve",
+    "subset_bbox",
+    "subset_time",
+    "subset_where",
     "validate_dataset",
     "validate_variable",
 ]

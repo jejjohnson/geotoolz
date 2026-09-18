@@ -15,6 +15,7 @@ from xrreader._src.aemet.catalog import AEMET_DATASETS
 from xrreader._src.base import DatasetInfo
 from xrreader._src.cds.catalog import CDS_DATASETS
 from xrreader._src.cmems.catalog import CMEMS_DATASETS
+from xrreader._src.local.catalog import LOCAL_DATASETS
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,10 @@ CATALOG: dict[str, CatalogEntry] = {
     "aemet.normals": CatalogEntry(source="aemet", dataset_id="aemet_normals"),
     "aemet.extremes": CatalogEntry(source="aemet", dataset_id="aemet_extremes"),
     "aemet.pollution": CatalogEntry(source="aemet", dataset_id="aemet_pollution"),
+    # ---- Local files — methane L2 products ----------------------------
+    "tropomi.ch4": CatalogEntry(source="local", dataset_id="tropomi.ch4"),
+    "emit.ch4": CatalogEntry(source="local", dataset_id="emit.ch4"),
+    "ghgsat.ch4": CatalogEntry(source="local", dataset_id="ghgsat.ch4"),
 }
 
 
@@ -152,4 +157,6 @@ def describe(name: str) -> DatasetInfo:
         return CDS_DATASETS[entry.dataset_id]
     if entry.source == "aemet":
         return AEMET_DATASETS[entry.dataset_id]
+    if entry.source == "local":
+        return LOCAL_DATASETS[entry.dataset_id]
     raise KeyError(f"Unknown source {entry.source!r}")

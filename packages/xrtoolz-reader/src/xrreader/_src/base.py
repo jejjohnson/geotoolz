@@ -31,6 +31,10 @@ class DatasetKind(StrEnum):
     - ``stations`` — fixed points, one time-series per station.
       Maps to CF's ``featureType = "timeSeries"`` (CF 9.3) with dims
       ``(station, time)`` and per-station coords.
+    - ``swath`` — satellite L2 swath on ``(time, scanline, ground_pixel)``
+      with 2-D lon/lat coordinates (TROPOMI).
+    - ``scene`` — single L2 scene / plume raster on ``(y, x)`` with 2-D
+      lon/lat coordinates (EMIT, GHGSat).
 
     Downstream code (regridding, masking, plotting) branches on this;
     e.g. antimeridian BBox wrapping is meaningless for profiles.
@@ -41,6 +45,8 @@ class DatasetKind(StrEnum):
     PROFILES = "profiles"
     TRAJECTORY = "trajectory"
     STATIONS = "stations"
+    SWATH = "swath"
+    SCENE = "scene"
 
 
 @dataclass(frozen=True)
