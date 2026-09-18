@@ -7,7 +7,8 @@ source/target structure under :mod:`._src`:
   ``fillnan_climatology``, ``fillnan_laplacian``, ``fillnan_biharmonic``,
   ``fillnan_rbf``, ``fillnan_idw``
 - :mod:`._src.grid_to_grid` — ``coarsen``, ``coarsen_conservative``,
-  ``refine``, ``refine_2d``
+  ``refine``, ``refine_2d``, ``regrid_like``, ``regrid_conservative``,
+  ``overlap_weights_1d``
 - :mod:`._src.resample` — ``resample_time``
 - :mod:`._src.binning` — ``Grid``, ``Period``, ``SpaceTimeGrid``, ``bin_2d``,
   ``histogram_2d``
@@ -49,8 +50,10 @@ from xrtoolz.interpolate._src.gap_fill import (
 from xrtoolz.interpolate._src.grid_to_grid import (
     coarsen,
     coarsen_conservative,
+    overlap_weights_1d,
     refine,
     refine_2d,
+    regrid_conservative,
     regrid_like,
 )
 from xrtoolz.interpolate._src.grid_to_points import along_track, sample_at_points
@@ -97,6 +100,7 @@ from xrtoolz.interpolate.operators import (
     MovingAverage,
     PointsToGrid,
     Refine,
+    RegridConservative,
     RegridLike,
     RemapAxis,
     ResampleTime,
@@ -149,6 +153,7 @@ __all__ = [
     "Period",
     "PointsToGrid",
     "Refine",
+    "RegridConservative",
     "RegridLike",
     "RemapAxis",
     "ResampleTime",
@@ -184,9 +189,11 @@ __all__ = [
     "kde_to_grid",
     "lowpass_filter",
     "moving_average",
+    "overlap_weights_1d",
     "points_to_grid",
     "refine",
     "refine_2d",
+    "regrid_conservative",
     "regrid_like",
     "remap_axis",
     "remove_small_holes_2d",

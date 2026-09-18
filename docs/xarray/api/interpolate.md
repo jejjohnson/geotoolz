@@ -7,7 +7,36 @@ and `Period` are the lightweight target-grid carriers.
 
 ## Regridding & resolution
 
+Three ways to move a field between grids, by what they preserve:
+
+- `RegridLike` — `xr.interp` onto another grid's coordinates. Smooth
+  point values; does **not** preserve integrals.
+- `Coarsen(conservative=True)` — integer-factor block averaging with
+  cosine-latitude weights.
+- `RegridConservative` — first-order conservative regrid onto an
+  arbitrary rectilinear grid (`mode="mean"` for intensive fields such as
+  concentrations, `mode="sum"` for extensive per-cell totals such as
+  emissions). Cell bounds are inferred from the centres (midpoints, end
+  cells symmetric) unless CF `bounds` are present; on the default
+  spherical geometry longitude is periodic with period 360°, so a
+  0–360 source regrids onto a −180–180 target directly. For an aligned
+  integer factor it reproduces `Coarsen(conservative=True)`.
+
+```python
+import numpy as np
+from xrtoolz.interpolate import RegridConservative
+
+# 0.1° inventory -> analysis grid; basin totals are preserved.
+regrid = RegridConservative(
+    {"lat": np.arange(40.05, 45.0, 0.1), "lon": np.arange(-5.95, 0.0, 0.1)},
+    mode="sum",
+)
+prior = regrid(inventory)
+```
+
 ::: xrtoolz.interpolate.operators.RegridLike
+
+::: xrtoolz.interpolate.operators.RegridConservative
 
 ::: xrtoolz.interpolate.operators.Coarsen
 
@@ -129,6 +158,10 @@ sit in a single chunk. With a 1-D dimension coordinate and the default
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
 ::: xrtoolz.interpolate.regrid_like
+
+::: xrtoolz.interpolate.regrid_conservative
+
+::: xrtoolz.interpolate.overlap_weights_1d
 
 ::: xrtoolz.interpolate.coarsen
 

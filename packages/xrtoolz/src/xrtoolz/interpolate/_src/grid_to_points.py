@@ -144,7 +144,9 @@ def _collect_point_coordinates(
     return assigned
 
 
-def _check_dask_chunks(da: xr.DataArray, coords: tuple[str, ...]) -> None:
+def _check_dask_chunks(
+    da: xr.DataArray, coords: tuple[str, ...], *, func_name: str = "sample_at_points"
+) -> None:
     """Raise if dask chunks split any interpolation dimension."""
     if da.chunks is None:
         return
@@ -153,7 +155,7 @@ def _check_dask_chunks(da: xr.DataArray, coords: tuple[str, ...]) -> None:
     ]
     if chunked:
         raise ValueError(
-            "sample_at_points requires interpolation dimensions to be contained "
+            f"{func_name} requires interpolation dimensions to be contained "
             f"in a single chunk; rechunk dimensions {chunked!r} before calling."
         )
 
