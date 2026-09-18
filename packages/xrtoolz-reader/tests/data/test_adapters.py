@@ -172,3 +172,17 @@ def test_cds_extras_passthrough(cds_source, tmp_path):
     _, form, _ = fake.calls[0]
     assert form["grid"] == [0.25, 0.25]
     assert form["product_type"] == "ensemble_mean"
+
+
+def test_cds_pressure_level_variables_encode_to_cds_aliases(cds_source, tmp_path):
+    src, fake = cds_source
+    src.download(
+        "reanalysis-era5-pressure-levels",
+        tmp_path / "uv.nc",
+        variables=["u", "v"],
+        time=TimeRange.parse("2020-01-01", "2020-01-01"),
+        levels=PressureLevels([1000, 925]),
+    )
+    _, form, _ = fake.calls[0]
+    assert form["variable"] == ["u_component_of_wind", "v_component_of_wind"]
+    assert form["pressure_level"] == ["1000", "925"]

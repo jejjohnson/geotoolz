@@ -106,3 +106,19 @@ def test_variable_aliases_translate_for_cmems_products():
     info = describe("duacs.sla")
     cmems_names = {v.for_source("cmems") for v in info.variables}
     assert {"sla", "adt", "ugos", "vgos"} <= cmems_names
+
+
+# ---- ERA5 boundary layer / pressure levels (gh-298) ------------------------
+
+
+def test_era5_pressure_levels_preset_carries_cds_aliased_variables():
+    info = describe("era5.pressure_levels")
+    assert info.variables
+    assert [v.name for v in info.variables] == ["u", "v", "w", "t", "z", "q"]
+    for var in info.variables:
+        assert "cds" in var.aliases
+
+
+def test_era5_single_levels_preset_includes_boundary_layer_height():
+    names = [v.name for v in describe("era5.single_levels").variables]
+    assert "blh" in names

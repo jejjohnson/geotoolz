@@ -247,8 +247,171 @@ SSRD = Variable(
     cmap="inferno",
 )
 
-# ---- Ocean — altimetry-derived (DUACS) ----------------------------------
+# ---- ERA5 boundary layer + pressure levels --------------------------------
+# Single-level boundary-layer height plus the pressure-level fields CDS
+# returns as ``u, v, w, t, z, q`` on ``(valid_time, pressure_level,
+# latitude, longitude)``. The ``wrf`` aliases name the raw ``wrfout``
+# variables that map onto the same CF quantity.
 
+BLH = Variable(
+    name="blh",
+    standard_name="atmosphere_boundary_layer_thickness",
+    long_name="Boundary layer height",
+    units="m",
+    aliases={"cds": "boundary_layer_height", "wrf": "PBLH"},
+    valid_range=(0.0, 6000.0),
+    cmap="viridis",
+)
+
+U = Variable(
+    name="u",
+    standard_name="eastward_wind",
+    long_name="U component of wind",
+    units="m s-1",
+    aliases={"cds": "u_component_of_wind", "wrf": "U"},
+    valid_range=(-150.0, 150.0),
+    cmap="RdBu_r",
+)
+
+V = Variable(
+    name="v",
+    standard_name="northward_wind",
+    long_name="V component of wind",
+    units="m s-1",
+    aliases={"cds": "v_component_of_wind", "wrf": "V"},
+    valid_range=(-150.0, 150.0),
+    cmap="RdBu_r",
+)
+
+W_OMEGA = Variable(
+    name="w",
+    standard_name="lagrangian_tendency_of_air_pressure",
+    long_name="Vertical velocity (omega)",
+    units="Pa s-1",
+    aliases={"cds": "vertical_velocity"},
+    valid_range=(-50.0, 50.0),
+    cmap="RdBu_r",
+)
+
+T = Variable(
+    name="t",
+    standard_name="air_temperature",
+    long_name="Temperature",
+    units="K",
+    aliases={"cds": "temperature"},
+    valid_range=(150.0, 350.0),
+    cmap="RdYlBu_r",
+)
+
+Z = Variable(
+    name="z",
+    standard_name="geopotential",
+    long_name="Geopotential",
+    units="m2 s-2",
+    aliases={"cds": "geopotential"},
+    valid_range=(-5000.0, 600000.0),
+    cmap="viridis",
+)
+
+# No ``wrf`` alias: ``QVAPOR`` is a mixing ratio w.r.t. dry air and must be
+# converted first (q = r / (1 + r)).
+Q = Variable(
+    name="q",
+    standard_name="specific_humidity",
+    long_name="Specific humidity",
+    units="kg kg-1",
+    aliases={"cds": "specific_humidity"},
+    valid_range=(0.0, 0.05),
+    cmap="Blues",
+)
+
+# ---- Methane L2 products ---------------------------------------------------
+# TROPOMI names (S5P CH4 L2 PUM, ``PRODUCT`` and
+# ``PRODUCT/SUPPORT_DATA/{DETAILED_RESULTS,INPUT_DATA}``) are the primary
+# aliases; EMIT / GHGSat carry their own where the product exposes the
+# quantity.
+
+XCH4 = Variable(
+    name="xch4",
+    standard_name="dry_atmosphere_mole_fraction_of_methane",
+    long_name="Column-averaged dry-air mole fraction of methane",
+    units="1e-9",
+    aliases={"tropomi": "methane_mixing_ratio", "ghgsat": "xch4"},
+    valid_range=(1500.0, 3000.0),
+    cmap="magma",
+)
+
+XCH4_BC = Variable(
+    name="xch4_bias_corrected",
+    standard_name="dry_atmosphere_mole_fraction_of_methane",
+    long_name="Bias-corrected XCH4",
+    units="1e-9",
+    aliases={"tropomi": "methane_mixing_ratio_bias_corrected"},
+    valid_range=(1500.0, 3000.0),
+    cmap="magma",
+)
+
+XCH4_PRECISION = Variable(
+    name="xch4_precision",
+    long_name="XCH4 retrieval precision (1-sigma)",
+    units="1e-9",
+    aliases={"tropomi": "methane_mixing_ratio_precision"},
+    valid_range=(0.0, 100.0),
+    cmap="viridis",
+)
+
+CH4_ENHANCEMENT = Variable(
+    name="ch4_enhancement",
+    long_name="Methane column enhancement above background",
+    units="ppm m",
+    aliases={"emit": "ch4_enhancement"},
+    cmap="magma",
+)
+
+COLUMN_AK = Variable(
+    name="column_averaging_kernel",
+    long_name="Column averaging kernel",
+    units="1",
+    aliases={"tropomi": "column_averaging_kernel"},
+    valid_range=(0.0, 2.0),
+    cmap="viridis",
+)
+
+CH4_PRIOR_PROFILE = Variable(
+    name="ch4_profile_apriori",
+    long_name="A-priori CH4 profile per layer",
+    units="mol m-2",
+    aliases={"tropomi": "methane_profile_apriori"},
+    cmap="viridis",
+)
+
+DRY_AIR_SUBCOLUMNS = Variable(
+    name="dry_air_subcolumns",
+    long_name="Dry-air sub-columns per layer",
+    units="mol m-2",
+    aliases={"tropomi": "dry_air_subcolumns"},
+    cmap="viridis",
+)
+
+QA_VALUE = Variable(
+    name="qa_value",
+    long_name="Quality assurance value",
+    units="1",
+    aliases={"tropomi": "qa_value"},
+    valid_range=(0.0, 1.0),
+    cmap="viridis",
+)
+
+CH4_COLUMN = Variable(
+    name="ch4_column",
+    standard_name="atmosphere_mass_content_of_methane",
+    long_name="Methane column mass",
+    units="kg m-2",
+    cmap="magma",
+)
+
+
+# ---- Ocean — altimetry-derived (DUACS) ----------------------------------
 ADT = Variable(
     name="adt",
     standard_name="sea_surface_height_above_geoid",
@@ -1115,6 +1278,24 @@ REGISTRY: dict[str, Variable] = {
         TP,
         SP,
         SSRD,
+        # ERA5 boundary layer + pressure levels
+        BLH,
+        U,
+        V,
+        W_OMEGA,
+        T,
+        Z,
+        Q,
+        # Methane L2 products
+        XCH4,
+        XCH4_BC,
+        XCH4_PRECISION,
+        CH4_ENHANCEMENT,
+        COLUMN_AK,
+        CH4_PRIOR_PROFILE,
+        DRY_AIR_SUBCOLUMNS,
+        QA_VALUE,
+        CH4_COLUMN,
         # Ocean colour
         CHL,
         KD490,

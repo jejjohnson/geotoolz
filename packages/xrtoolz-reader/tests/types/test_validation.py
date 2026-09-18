@@ -10,6 +10,7 @@ from xrreader.types import (
     Severity,
     Variable,
     apply_cf_attrs,
+    resolve,
     validate_dataset,
     validate_variable,
 )
@@ -122,3 +123,17 @@ def test_check_dtype_opt_in():
     assert any(
         i.code == "wrong_dtype" and i.severity is Severity.ERROR for i in r.issues
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "inside", "outside"),
+    [("qa_value", 0.7, 1.5), ("xch4", 1850.0, 4000.0)],
+)
+def test_validate_variable_range_methane_entries(name, inside, outside):
+    var = resolve(name)
+    ok = xr.DataArray([inside, inside], dims=("x",), attrs=var.cf_attrs())
+    bad = xr.DataArray([inside, outside], dims=("x",), attrs=var.cf_attrs())
+    assert validate_variable(ok, name).ok
+    report = validate_variable(bad, name)
+    assert not report.ok
+    assert any(i.code == "out_of_range" for i in report.errors())

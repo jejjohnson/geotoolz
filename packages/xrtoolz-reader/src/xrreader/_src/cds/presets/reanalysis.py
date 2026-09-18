@@ -12,6 +12,7 @@ from __future__ import annotations
 from xrreader._src.base import DatasetInfo
 from xrreader._src.cds.profiles import REANALYSIS, REANALYSIS_PRESSURE
 from xrreader.types import (
+    BLH,
     D2M,
     MSL,
     SP,
@@ -20,7 +21,13 @@ from xrreader.types import (
     TP,
     U10,
     V10,
+    W_OMEGA,
     BBox,
+    Q,
+    T,
+    U,
+    V,
+    Z,
 )
 
 
@@ -29,7 +36,7 @@ REANALYSIS_DATASETS: dict[str, DatasetInfo] = {
         dataset_id="reanalysis-era5-single-levels",
         source="cds",
         title="ERA5 — Single levels (surface/near-surface, hourly)",
-        variables=(T2M, D2M, U10, V10, MSL, TP, SP, SSRD),
+        variables=(T2M, D2M, U10, V10, MSL, TP, SP, SSRD, BLH),
         spatial_coverage=BBox.global_(),
         temporal_coverage=("1940-01-01", "present"),
         license="Copernicus Climate Change Service",
@@ -39,7 +46,7 @@ REANALYSIS_DATASETS: dict[str, DatasetInfo] = {
         dataset_id="reanalysis-era5-pressure-levels",
         source="cds",
         title="ERA5 — Pressure levels (hourly)",
-        variables=(),
+        variables=(U, V, W_OMEGA, T, Z, Q),
         spatial_coverage=BBox.global_(),
         temporal_coverage=("1940-01-01", "present"),
         license="Copernicus Climate Change Service",

@@ -110,3 +110,56 @@ def test_chl_has_cf_standard_name():
     chl = resolve("chl")
     assert chl.standard_name == "mass_concentration_of_chlorophyll_a_in_sea_water"
     assert chl.for_source("cmems") == "CHL"
+
+
+# ---- ERA5 boundary layer / pressure levels + methane L2 (gh-298) -----------
+
+
+ERA5_PRESSURE_LEVEL_NAMES = ["u", "v", "w", "t", "z", "q"]
+METHANE_NAMES = [
+    "xch4",
+    "xch4_bias_corrected",
+    "xch4_precision",
+    "ch4_enhancement",
+    "column_averaging_kernel",
+    "ch4_profile_apriori",
+    "dry_air_subcolumns",
+    "qa_value",
+    "ch4_column",
+]
+
+
+@pytest.mark.parametrize("name", ["blh", *ERA5_PRESSURE_LEVEL_NAMES, *METHANE_NAMES])
+def test_era5_and_methane_entries_resolve_with_units(name):
+    var = resolve(name)
+    attrs = var.cf_attrs()
+    assert var.name == name
+    assert attrs["units"] == var.units
+    if var.standard_name is not None:
+        assert attrs["standard_name"] == var.standard_name
+
+
+def test_era5_pressure_level_cds_aliases():
+    assert resolve("u").for_source("cds") == "u_component_of_wind"
+    assert resolve("v").for_source("cds") == "v_component_of_wind"
+    assert resolve("w").for_source("cds") == "vertical_velocity"
+    assert resolve("blh").for_source("cds") == "boundary_layer_height"
+    # WRF raw names ride along for the wrfout opener.
+    assert resolve("u").for_source("wrf") == "U"
+    assert resolve("blh").for_source("wrf") == "PBLH"
+    # QVAPOR is a dry-air mixing ratio, not specific humidity: no wrf alias.
+    assert "wrf" not in resolve("q").aliases
+
+
+def test_methane_tropomi_aliases():
+    assert resolve("xch4").for_source("tropomi") == "methane_mixing_ratio"
+    assert (
+        resolve("xch4_bias_corrected").for_source("tropomi")
+        == "methane_mixing_ratio_bias_corrected"
+    )
+    assert resolve("ch4_profile_apriori").for_source("tropomi") == (
+        "methane_profile_apriori"
+    )
+    assert resolve("ch4_enhancement").for_source("emit") == "ch4_enhancement"
+    assert resolve("xch4").standard_name == "dry_atmosphere_mole_fraction_of_methane"
+    assert resolve("ch4_column").standard_name == "atmosphere_mass_content_of_methane"
