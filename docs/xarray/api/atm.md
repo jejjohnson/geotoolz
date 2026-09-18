@@ -5,6 +5,34 @@ true physics lives here; anything domain-agnostic belongs in
 [`geo`](geo/coords.md). Trace-gas (methane) physics sits under
 `xrtoolz.atm.gas.ch4`.
 
+## WRF
+
+`open_wrfout` turns a WRF-ARW `wrfout` file into a CF Dataset on
+`(time, level, y, x)`: the `Times` char rows (or `XTIME` minutes) become a
+`datetime64[s]` axis, `U` / `V` / `W` are destaggered to mass points
+(`U` / `V` rotated from grid- to earth-relative when the file carries
+`COSALPHA` / `SINALPHA`), and the split base + perturbation fields are
+recombined,
+
+$$
+p = P + PB,\qquad
+T = (T' + 300\,\mathrm{K})\left(\frac{p}{10^5\,\mathrm{Pa}}\right)^{R_d/c_p},\qquad
+z_\text{agl} = \tfrac12\left(z_\text{stag}[k] + z_\text{stag}[k+1]\right) - HGT,
+\quad z_\text{stag} = \frac{PH + PHB}{g}.
+$$
+
+Everything stays lazy, so `chunks={"time": 1}` keeps the file dask backed.
+
+::: xrtoolz.atm
+    options:
+      members:
+        - open_wrfout
+        - destagger
+        - wrf_time
+        - wrf_wind
+        - wrf_height_agl
+        - wrf_temperature
+
 ## Met diagnostics
 
 Wind in the meteorological convention (bearing the wind blows *from*,

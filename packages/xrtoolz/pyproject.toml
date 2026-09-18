@@ -75,6 +75,8 @@ dependencies = [
     # the reader's core is light (numpy/pandas/xarray) and its heavy service
     # clients are optional extras, so this stays a lightweight dependency.
     "xrtoolz-reader>=0.0.2",
+    # NetCDF4/HDF5 backend for xrtoolz.atm.open_wrfout.
+    "netcdf4>=1.6",
 ]
 
 [project.optional-dependencies]
