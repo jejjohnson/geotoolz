@@ -1,13 +1,61 @@
 # Atmosphere
 
-!!! info "Planned namespace"
-    `xrtoolz.atm` is a reserved namespace for atmospheric physics. The
-    planned surface includes potential temperature and wind speed /
-    direction, with trace-gas (methane) physics under `xrtoolz.atm.gas.ch4`
-    (column averaging kernel, dry-air column, mixing ratio). It exports
-    nothing yet — this page will fill in as operators land.
+Atmospheric physics on CF datasets. The design rule still holds: only
+true physics lives here; anything domain-agnostic belongs in
+[`geo`](geo/coords.md). Trace-gas (methane) physics sits under
+`xrtoolz.atm.gas.ch4`.
 
-The design rule still holds: only true physics lives here; anything
-domain-agnostic belongs in [`geo`](geo/coords.md).
+## Met diagnostics
+
+Wind in the meteorological convention (bearing the wind blows *from*,
+degrees clockwise from north),
+
+$$
+|V|=\sqrt{u^2+v^2},\qquad
+\theta_\text{from}=\left(270^\circ-\tfrac{180}{\pi}\operatorname{atan2}(v,u)\right)\bmod 360^\circ,\qquad
+u=-|V|\sin\theta,\; v=-|V|\cos\theta,
+$$
+
+the column integral (trapezoid on the coordinate, or $\sum_k f_k\,\Delta z_k$
+with cell widths from the coordinate), the hypsometric equation
+$z_{k+1}=z_k+\frac{R_d\,\bar T_{v,k}}{g}\ln\frac{p_k}{p_{k+1}}$, and the
+bulk-Richardson boundary-layer height
+$Ri_b(z)=\frac{g\,(\theta_v-\theta_{v,s})(z-z_s)}{\theta_{v,s}\,(u^2+v^2)}$.
 
 ::: xrtoolz.atm
+    options:
+      members:
+        - wind_speed
+        - wind_direction
+        - wind_components
+        - column_integral
+        - hypsometric_height
+        - pbl_height_bulk_richardson
+        - WindSpeed
+        - WindDirection
+        - WindComponents
+        - ColumnIntegral
+        - HypsometricHeight
+        - PBLHeightBulkRichardson
+
+## Methane columns
+
+Column averaging kernel in the TROPOMI / OCO convention,
+$\hat y=\mathbf h^\top\mathbf x_a+\sum_l h_l A_l (x_l-x_{a,l})$, the
+hydrostatic dry-air column
+$N_\text{dry}=\frac{N_A}{g\,M_\text{dry}}\int_0^{p_s}(1-q)\,dp$, the
+mixing-ratio column $\Omega=\frac{N_A}{g\,M_\text{dry}}\int\chi\,(1-q)\,dp$,
+and the single-layer column mass to $\Delta\chi$ conversion
+$\Delta\chi=\frac{m\,N_A/M_\text{gas}}{n_\text{air}\,L}$ with
+$n_\text{air}=p/(k_B T)$.
+
+::: xrtoolz.atm.gas.ch4
+    options:
+      members:
+        - apply_column_averaging_kernel
+        - dry_air_column
+        - mixing_ratio_to_column
+        - column_mass_to_delta_vmr
+        - ApplyColumnAveragingKernel
+        - DryAirColumn
+        - MixingRatioToColumn

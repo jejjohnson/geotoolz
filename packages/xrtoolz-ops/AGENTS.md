@@ -50,7 +50,7 @@ Each package lives in `packages/<distribution>/src/<import name>/` with its own 
 | `xrtoolz.inference` | `ModelOp` inference wrappers (duck-typed; sklearn/JAX adapters). Not re-exported at top level — import explicitly |
 | `xrtoolz.utils` | Shared helpers — finite-mask utilities, grid spacing/resolution, validation guards; re-exports `XarrayEstimator` from `xrsklearn` (importing it still registers the `.sklearn` accessors) |
 | `xrtoolz.viz` | Colormaps, norms, projections, and `viz.validation` panel Operators (spatial maps, PSD, rotary, budgets, events, regime bars) |
-| `xrtoolz.atm` / `xrtoolz.atm.gas.ch4` | Atmospheric / trace-gas physics — **empty namespace stubs**, planned scope in module docstrings |
+| `xrtoolz.atm` / `xrtoolz.atm.gas.ch4` | Atmospheric physics — wind speed/direction/components, column integral, hypsometric height, bulk-Richardson PBL height; methane columns under `gas.ch4` (column averaging kernel, dry-air column, mixing ratio ↔ column). Potential temperature still planned |
 | `xrtoolz.rs` | Remote sensing — **empty namespace stub** |
 | `xrtoolz.ice` | Cryosphere — **empty namespace stub** |
 
