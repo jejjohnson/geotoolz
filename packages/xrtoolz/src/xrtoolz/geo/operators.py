@@ -1136,6 +1136,61 @@ class ReprojectMatch(Operator):
         return Signature(dims, dtype=input_signature.dtype)
 
 
+class AssignLocalXY(Operator):
+    """Add metric ``x``/``y`` coordinates relative to a :class:`LocalFrame`.
+
+    Wraps :func:`xrtoolz.geo.assign_local_xy` — the point / swath
+    counterpart of :class:`ReprojectMatch`. The frame is stored as its
+    JSON payload, so ``get_config()`` round-trips through the constructor.
+
+    Args:
+        frame: A :class:`xrtoolz.geo.LocalFrame` or its ``to_dict()``
+            payload (``{"crs", "origin_lon", "origin_lat"}``).
+        lon: Longitude coordinate name.
+        lat: Latitude coordinate name.
+        x: Name of the output east coordinate.
+        y: Name of the output north coordinate.
+
+    Returns:
+        The dataset with ``x``/``y`` coordinates in metres (2-D for grids
+        and swaths, 1-D for along-track points) and ``attrs["local_frame"]``
+        set.
+    """
+
+    def __init__(
+        self,
+        frame: _crs.LocalFrame | dict[str, Any],
+        *,
+        lon: str = "lon",
+        lat: str = "lat",
+        x: str = "x",
+        y: str = "y",
+    ):
+        self.frame = (
+            frame
+            if isinstance(frame, _crs.LocalFrame)
+            else _crs.LocalFrame.from_dict(frame)
+        )
+        self.lon = lon
+        self.lat = lat
+        self.x = x
+        self.y = y
+
+    def _apply(self, ds):
+        return _crs.assign_local_xy(
+            ds, self.frame, lon=self.lon, lat=self.lat, x=self.x, y=self.y
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "frame": self.frame.to_dict(),
+            "lon": self.lon,
+            "lat": self.lat,
+            "x": self.x,
+            "y": self.y,
+        }
+
+
 class SpatialMosaic(Operator):
     """Merge a sequence of georeferenced tiles into a single cube.
 
@@ -1224,6 +1279,7 @@ __all__ = [
     "AddLandMask",
     "AddOceanMask",
     "ApplyMask",
+    "AssignLocalXY",
     "BandpassWavelength",
     "CalculateClimatology",
     "CalculateClimatologySmoothed",
