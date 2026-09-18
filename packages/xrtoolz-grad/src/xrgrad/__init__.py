@@ -72,7 +72,7 @@ from xrgrad._src.operators import (
 )
 
 
-__version__ = "0.0.2"  # x-release-please-version
+__version__ = "0.0.3"  # x-release-please-version
 
 __all__ = [
     "EARTH_RADIUS",

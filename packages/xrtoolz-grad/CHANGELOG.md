@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-grad-v0.0.2...xrtoolz-grad-v0.0.3) (2026-09-09)
+
+
+### Features
+
+* **grad:** land-mask-aware differentiation via nan_policy="adaptive" ([#283](https://github.com/jejjohnson/xrtoolz/issues/283)) ([dba5200](https://github.com/jejjohnson/xrtoolz/commit/dba5200b4523f2f1229b84541513f48f4c346160))
+
 ## [0.0.2](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-grad-v0.0.1...xrtoolz-grad-v0.0.2) (2026-08-17)
 
 
