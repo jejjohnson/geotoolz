@@ -31,6 +31,7 @@ from xrtoolz.transforms._src import (
     coord_remap as _coord_remap,
     morphology as _mask_ops,
 )
+from xrtoolz.transforms._src._coord_remap_kernels import Extrapolate
 
 
 ResizeMode = Literal["reflect", "constant", "edge", "symmetric", "wrap"]
@@ -1450,18 +1451,41 @@ class RemapAxis(Operator):
     numeric variable that carries ``source_axis`` is interpolated onto
     the target axis.
 
-    Parameters
-    ----------
-    source_axis
-        Name of the existing dimension to remap.
-    target_axis
-        Target coordinate values. If an :class:`xr.DataArray`, its
-        ``.name`` becomes the new dim name; otherwise the new dim name
-        defaults to ``target_name`` or ``source_axis``.
-    target_name
-        Optional explicit new dim name.
-    method
-        ``"linear"`` or ``"nearest"``.
+    Args:
+        source_axis: Name of the existing dimension to remap.
+        target_axis: Target coordinate values. If an :class:`xr.DataArray`,
+            its ``.name`` becomes the new dim name; otherwise the new dim
+            name defaults to ``target_name`` or ``source_axis``.
+        target_name: Optional explicit new dim name.
+        method: ``"linear"`` or ``"nearest"``.
+        source_coords: Name of a coordinate on the input supplying
+            per-column source axis values (e.g. ``"z_agl"`` on a
+            terrain-following grid). It must carry ``source_axis`` and may
+            vary along the other dims. ``None`` uses the 1-D dimension
+            coordinate.
+        extrapolate: ``"nan"`` (default) — targets outside a column's range
+            become ``NaN``; ``"nearest"`` — they hold the column's end
+            value.
+
+    Example:
+        Model-level temperature with a 4-D height-above-ground coordinate
+        onto fixed heights, holding the end values beyond each column:
+
+        ```pycon
+        >>> import numpy as np, xarray as xr
+        >>> from xrtoolz.interpolate import ToHeight
+        >>> level = np.arange(4)[None, :, None, None]
+        >>> z_agl = 20.0 * (level + 1) + np.zeros((2, 4, 3, 3))
+        >>> ds = xr.Dataset(
+        ...     {"t": (("time", "level", "y", "x"), 300.0 - 0.01 * z_agl)},
+        ...     coords={"z_agl": (("time", "level", "y", "x"), z_agl)},
+        ... )
+        >>> heights = np.array([10.0, 50.0, 90.0])
+        >>> op = ToHeight(heights, source_coords="z_agl", extrapolate="nearest")
+        >>> op(ds)["t"].dims
+        ('time', 'height', 'y', 'x')
+
+        ```
     """
 
     def __init__(
@@ -1471,6 +1495,8 @@ class RemapAxis(Operator):
         *,
         target_name: str | None = None,
         method: str = "linear",
+        source_coords: str | None = None,
+        extrapolate: Extrapolate = "nan",
     ):
         self.source_axis = source_axis
         if isinstance(target_axis, xr.DataArray):
@@ -1485,6 +1511,8 @@ class RemapAxis(Operator):
             self._inferred_name = None
         self.target_name = target_name
         self.method = method
+        self.source_coords = source_coords
+        self.extrapolate = extrapolate
 
     def _apply(self, ds):
         target = self._target_da if self._target_da is not None else self._target_values
@@ -1496,6 +1524,8 @@ class RemapAxis(Operator):
                 target_coords=target,
                 target_name=self.target_name,
                 method=self.method,
+                source_coords=self.source_coords,
+                extrapolate=self.extrapolate,
             )
 
         if isinstance(ds, xr.DataArray):
@@ -1534,12 +1564,19 @@ class RemapAxis(Operator):
         return xr.Dataset(out_vars, coords=base_coords, attrs=dict(ds.attrs))
 
     def get_config(self) -> dict[str, Any]:
-        return {
+        cfg: dict[str, Any] = {
             "source_axis": self.source_axis,
             "target_axis": self._target_values.tolist(),
             "target_name": self._resolve_target_name(),
             "method": self.method,
         }
+        # Emitted only when set, so configs written before these options
+        # existed (1-D coordinate, NaN outside the range) stay identical.
+        if self.source_coords is not None:
+            cfg["source_coords"] = self.source_coords
+        if self.extrapolate != "nan":
+            cfg["extrapolate"] = self.extrapolate
+        return cfg
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         target_name = self._resolve_target_name()
@@ -1577,12 +1614,16 @@ class _VerticalPreset(RemapAxis):
         source_axis: str | None = None,
         target_name: str | None = None,
         method: str = "linear",
+        source_coords: str | None = None,
+        extrapolate: Extrapolate = "nan",
     ):
         super().__init__(
             source_axis=source_axis or self._DEFAULT_SOURCE,
             target_axis=target_axis,
             target_name=target_name or self._DEFAULT_TARGET_NAME,
             method=method,
+            source_coords=source_coords,
+            extrapolate=extrapolate,
         )
 
 

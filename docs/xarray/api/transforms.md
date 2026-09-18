@@ -103,4 +103,13 @@ bridge) configured for the named decomposition.
 
 ## Axis remapping
 
+`remap_axis` interpolates one dimension of a DataArray onto a new axis of
+target values. By default the source axis is the 1-D dimension coordinate
+and targets outside its range become `NaN`. Pass `source_coords=` (a
+coordinate name or a broadcastable DataArray) when the source levels vary
+per column — terrain-following or hybrid vertical grids — and
+`extrapolate="nearest"` to hold each column's end value beyond its own
+range. See the *Vertical & axis remapping* section of the
+[interpolation API](interpolate.md) for the operator-level presets.
+
 ::: xrtoolz.transforms.remap_axis
