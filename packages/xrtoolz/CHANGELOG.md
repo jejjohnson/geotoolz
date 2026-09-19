@@ -28,6 +28,18 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.3](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.2...xrtoolz-v0.0.3) (2026-09-18)
+
+
+### Features
+
+* **atm:** met diagnostics and atm.gas.ch4 column primitives ([#306](https://github.com/jejjohnson/xrtoolz/issues/306)) ([f3f35d4](https://github.com/jejjohnson/xrtoolz/commit/f3f35d4c763d213e1144f9fc5c040518ffb6a4d3))
+* **atm:** open_wrfout — WRF-ARW NetCDF to CF Dataset ([#307](https://github.com/jejjohnson/xrtoolz/issues/307)) ([7a37aa8](https://github.com/jejjohnson/xrtoolz/commit/7a37aa8e62fae46640bb5d67eac6b8f51fb93599))
+* **geo:** utm_crs_for + local_frame — UTM zone from an origin and a metric local frame ([#302](https://github.com/jejjohnson/xrtoolz/issues/302)) ([1588dd3](https://github.com/jejjohnson/xrtoolz/commit/1588dd3dbc638a7dda87dbd008e4bd2ed8b41708))
+* **interpolate:** regrid_conservative — area-weighted regrid onto an arbitrary rectilinear target ([#305](https://github.com/jejjohnson/xrtoolz/issues/305)) ([201230b](https://github.com/jejjohnson/xrtoolz/commit/201230bc191599100a40ae7b063ef334c2c5c397))
+* **interpolate:** remap_axis with per-column source coordinates and extrapolation policy ([#304](https://github.com/jejjohnson/xrtoolz/issues/304)) ([4a47b6f](https://github.com/jejjohnson/xrtoolz/commit/4a47b6f7990eb1b043623df78a367bf4506afcdb))
+* **reader:** add LocalL2Source with TROPOMI / EMIT / GHGSat methane L2 openers ([#303](https://github.com/jejjohnson/xrtoolz/issues/303)) ([d04768e](https://github.com/jejjohnson/xrtoolz/commit/d04768e3c489f09b8cf383db6ddf8ee8890980b0))
+
 ## [0.0.2](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.1...xrtoolz-v0.0.2) (2026-08-17)
 
 

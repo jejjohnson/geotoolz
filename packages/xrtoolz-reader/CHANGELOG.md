@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.4](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-reader-v0.0.3...xrtoolz-reader-v0.0.4) (2026-09-18)
+
+
+### Features
+
+* **reader:** add ERA5 boundary-layer / pressure-level and methane L2 Variable entries ([#301](https://github.com/jejjohnson/xrtoolz/issues/301)) ([d8314da](https://github.com/jejjohnson/xrtoolz/commit/d8314dab3de52d4a3d4109ebd238a9083fadea4b))
+* **reader:** add LocalL2Source with TROPOMI / EMIT / GHGSat methane L2 openers ([#303](https://github.com/jejjohnson/xrtoolz/issues/303)) ([d04768e](https://github.com/jejjohnson/xrtoolz/commit/d04768e3c489f09b8cf383db6ddf8ee8890980b0))
+
 ## [0.0.3](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-reader-v0.0.2...xrtoolz-reader-v0.0.3) (2026-08-17)
 
 
