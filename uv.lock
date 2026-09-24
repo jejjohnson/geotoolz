@@ -1257,7 +1257,7 @@ wheels = [
 
 [[package]]
 name = "geotoolz"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "packages/geotoolz" }
 dependencies = [
     { name = "einx" },
@@ -1373,7 +1373,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-catalog"
-version = "0.0.3"
+version = "0.1.0"
 source = { editable = "packages/geotoolz-catalog" }
 dependencies = [
     { name = "cyclopts" },
@@ -1622,7 +1622,7 @@ docs = [
     { name = "mkdocs-jupyter", specifier = ">=0.26.3" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.4" },
-    { name = "pygments", specifier = ">=2.19,<2.21" },
+    { name = "pygments", specifier = ">=2.19,<2.22" },
     { name = "watermark", specifier = ">=2.6.0" },
 ]
 lint = [{ name = "ruff", specifier = ">=0.15.11" }]
@@ -1630,7 +1630,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-patcher"
-version = "0.0.6"
+version = "0.1.0"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "georeader-spaceml" },
