@@ -26,11 +26,14 @@ from xrtoolz.geo._src import (
     along_track as _along_track,
     crs as _crs,
     detrend as _detrend,
+    footprint as _footprint,
     masks as _masks,
     mosaic as _mosaic,
+    rasterize as _rasterize,
     regions as _regions,
     subset as _subset,
     validation as _validation,
+    vectorize as _vectorize,
     wavelet as _wavelet,
     wavelet1d as _wavelet1d,
 )
@@ -1238,6 +1241,192 @@ class SpatialMosaic(Operator):
         }
 
 
+# ---------- vector <-> raster bridge ----------------------------------------
+
+
+class Vectorize(Operator):
+    """Polygonize a label / binary mask into a ``GeoDataFrame``.
+
+    Wraps :func:`xrtoolz.geo.vectorize`. Returns a ``GeoDataFrame``, so
+    it is *terminal* in ``DataTree`` mode: mapping it over a tree raises
+    ``TypeError`` — call it on a single leaf instead.
+
+    Args:
+        min_area: Drop polygons smaller than this, in CRS units².
+        connectivity: Pixel connectivity, ``4`` or ``8``.
+        attr_name: Column holding each polygon's mask value.
+
+    Returns:
+        ``GeoDataFrame`` with one row per polygon and ``crs=mask.rio.crs``.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_area: float = 0.0,
+        connectivity: int = 4,
+        attr_name: str = "value",
+    ):
+        self.min_area = min_area
+        self.connectivity = connectivity
+        self.attr_name = attr_name
+
+    def _apply(self, mask):
+        return _vectorize.vectorize(
+            mask,
+            min_area=self.min_area,
+            connectivity=self.connectivity,
+            attr_name=self.attr_name,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "min_area": self.min_area,
+            "connectivity": self.connectivity,
+            "attr_name": self.attr_name,
+        }
+
+
+class Rasterize(Operator):
+    """Burn stored vector geometries onto the grid of the input raster.
+
+    Wraps :func:`xrtoolz.geo.rasterize_like` with the input as ``like``.
+    Returns a ``DataArray``, so it *is* ``DataTree``-mappable — each leaf
+    gets the geometries burned onto its own grid.
+
+    Args:
+        geometries: ``GeoDataFrame`` / ``GeoSeries``, a shapely geometry,
+            or a sequence of them.
+        column: ``GeoDataFrame`` column holding the burn values.
+        fill: Value for pixels no geometry covers.
+        value: Burn value when ``column`` is ``None``.
+        all_touched: Burn every pixel a geometry touches.
+        dtype: Output dtype.
+        geometries_crs: CRS of bare shapely geometries.
+
+    Returns:
+        2-D DataArray on the input's grid with its CRS.
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        geometries: Any,
+        *,
+        column: str | None = None,
+        fill: float = 0.0,
+        value: float = 1.0,
+        all_touched: bool = False,
+        dtype: str = "float32",
+        geometries_crs: Any = None,
+    ):
+        self.geometries = geometries
+        self.column = column
+        self.fill = fill
+        self.value = value
+        self.all_touched = all_touched
+        self.dtype = dtype
+        self.geometries_crs = geometries_crs
+
+    def _apply(self, like):
+        return _rasterize.rasterize_like(
+            self.geometries,
+            like,
+            column=self.column,
+            fill=self.fill,
+            value=self.value,
+            all_touched=self.all_touched,
+            dtype=self.dtype,
+            geometries_crs=self.geometries_crs,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "geometries": f"<{type(self.geometries).__name__}>",
+            "column": self.column,
+            "fill": self.fill,
+            "value": self.value,
+            "all_touched": self.all_touched,
+            "dtype": self.dtype,
+            "geometries_crs": (
+                None if self.geometries_crs is None else str(self.geometries_crs)
+            ),
+        }
+
+
+class Footprint(Operator):
+    """Bounding polygon of the input raster's extent.
+
+    Wraps :func:`xrtoolz.geo.footprint`. Returns a shapely ``Polygon``,
+    so it is *terminal* in ``DataTree`` mode (mapping over a tree raises
+    ``TypeError``).
+
+    Args:
+        crs: Output CRS; ``None`` keeps the raster's CRS.
+
+    Returns:
+        ``shapely.Polygon``.
+    """
+
+    def __init__(self, *, crs: str | None = None):
+        self.crs = crs
+
+    def _apply(self, ds):
+        return _footprint.footprint(ds, crs=self.crs)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"crs": self.crs}
+
+
+class ValidFootprint(Operator):
+    """Polygon enclosing the input raster's valid (non-nodata) pixels.
+
+    Wraps :func:`xrtoolz.geo.valid_footprint`. Returns a shapely
+    geometry, so it is *terminal* in ``DataTree`` mode (mapping over a
+    tree raises ``TypeError``).
+
+    Args:
+        crs: Output CRS; ``None`` keeps the raster's CRS.
+        nodata: Invalid-pixel value; ``None`` uses ``rio.nodata``.
+        method: ``"all"`` or ``"any"`` — how extra dims / variables combine.
+        connectivity: Pixel connectivity, ``4`` or ``8``.
+
+    Returns:
+        ``shapely.Polygon`` or ``shapely.MultiPolygon``.
+    """
+
+    def __init__(
+        self,
+        *,
+        crs: str | None = None,
+        nodata: float | None = None,
+        method: Literal["all", "any"] = "all",
+        connectivity: int = 4,
+    ):
+        self.crs = crs
+        self.nodata = nodata
+        self.method = method
+        self.connectivity = connectivity
+
+    def _apply(self, ds):
+        return _footprint.valid_footprint(
+            ds,
+            crs=self.crs,
+            nodata=self.nodata,
+            method=self.method,
+            connectivity=self.connectivity,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "crs": self.crs,
+            "nodata": self.nodata,
+            "method": self.method,
+            "connectivity": self.connectivity,
+        }
+
+
 # ---------- deprecated metric ops -----------------------------------------
 
 # Moved to xrtoolz.metrics.operators. Re-export lazily for one release
@@ -1285,6 +1474,8 @@ __all__ = [
     "CalculateClimatologySmoothed",
     "DecodeCFTime",
     "FillNaN",
+    "Footprint",
+    "Rasterize",
     "Reduce",
     "RemoveClimatology",
     "RemoveMean",
@@ -1296,10 +1487,12 @@ __all__ = [
     "SubsetBBox",
     "SubsetTime",
     "SubsetToRegion",
+    "ValidFootprint",
     "ValidateCoords",
     "ValidateLatitude",
     "ValidateLongitude",
     "ValidateTime",
+    "Vectorize",
     "WaveletPowerSpectrum",
     "WaveletScalogram",
     "WaveletSignificance",

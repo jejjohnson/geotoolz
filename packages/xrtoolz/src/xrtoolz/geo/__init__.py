@@ -53,6 +53,7 @@ from xrtoolz.geo._src.extremes import (
     pp_counts,
     pp_stats,
 )
+from xrtoolz.geo._src.footprint import footprint, valid_footprint
 from xrtoolz.geo._src.masks import (
     add_country_mask,
     add_land_mask,
@@ -60,6 +61,7 @@ from xrtoolz.geo._src.masks import (
     apply_mask,
 )
 from xrtoolz.geo._src.mosaic import spatial_mosaic
+from xrtoolz.geo._src.rasterize import rasterize, rasterize_like
 from xrtoolz.geo._src.regions import (
     REGIONS,
     RegionSpec,
@@ -89,6 +91,7 @@ from xrtoolz.geo._src.validation import (
     validate_longitude,
     validate_time,
 )
+from xrtoolz.geo._src.vectorize import transform_polygon, vectorize
 from xrtoolz.geo._src.wavelet import (
     cwt2,
     morlet2_ft,
@@ -119,6 +122,8 @@ from xrtoolz.geo.operators import (
     CalculateClimatologySmoothed,
     DecodeCFTime,
     FillNaN,
+    Footprint,
+    Rasterize,
     Reduce,
     RemoveClimatology,
     RemoveMean,
@@ -136,6 +141,8 @@ from xrtoolz.geo.operators import (
     ValidateLatitude,
     ValidateLongitude,
     ValidateTime,
+    ValidFootprint,
+    Vectorize,
     WaveletPowerSpectrum,
     WaveletScalogram,
     WaveletSignificance,
@@ -217,7 +224,9 @@ __all__ = [
     "CalculateClimatologySmoothed",
     "DecodeCFTime",
     "FillNaN",
+    "Footprint",
     "LocalFrame",
+    "Rasterize",
     "Reduce",
     "RegionSpec",
     "RemoveClimatology",
@@ -232,10 +241,12 @@ __all__ = [
     "SubsetBBox",
     "SubsetTime",
     "SubsetToRegion",
+    "ValidFootprint",
     "ValidateCoords",
     "ValidateLatitude",
     "ValidateLongitude",
     "ValidateTime",
+    "Vectorize",
     "WaveletPowerSpectrum",
     "WaveletScalogram",
     "WaveletSignificance",
@@ -263,6 +274,7 @@ __all__ = [
     "cwt2",
     "decode_cf_time",
     "dominant_period_map",
+    "footprint",
     "geometric_scales",
     "get_crs",
     "get_dataset_resolution",
@@ -277,6 +289,8 @@ __all__ = [
     "pot_threshold",
     "pp_counts",
     "pp_stats",
+    "rasterize",
+    "rasterize_like",
     "region_from_dict",
     "region_to_dict",
     "remove_climatology",
@@ -295,10 +309,13 @@ __all__ = [
     "subset_time",
     "subset_to_region",
     "subset_where",
+    "transform_polygon",
     "utm_crs_for",
+    "valid_footprint",
     "validate_latitude",
     "validate_longitude",
     "validate_time",
+    "vectorize",
     "wavelet_significance",
     "wavenumber_to_scale",
     "wvlt_cross_spectrum",
