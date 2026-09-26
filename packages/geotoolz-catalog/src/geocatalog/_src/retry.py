@@ -38,9 +38,24 @@ _FATAL_OS_ERRORS: tuple[type[BaseException], ...] = (
 )
 
 
+# RasterioIOError messages for failures a retry cannot fix. Rasterio
+# reports a missing local file as RasterioIOError, not FileNotFoundError,
+# so a typo'd path used to wait out the whole backoff (#220).
+_DETERMINISTIC_RASTERIO_MESSAGES = (
+    "no such file or directory",
+    "not recognized as being in a supported file format",
+    "not recognized as a supported file format",
+    "permission denied",
+)
+
+
 def _is_transient(exc: BaseException) -> bool:
     if isinstance(exc, _FATAL_OS_ERRORS):
         return False
+    if isinstance(exc, RasterioIOError):
+        message = str(exc).lower()
+        if any(m in message for m in _DETERMINISTIC_RASTERIO_MESSAGES):
+            return False
     return isinstance(exc, _TRANSIENT_IO_ERRORS)
 
 

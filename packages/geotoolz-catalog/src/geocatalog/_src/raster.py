@@ -67,7 +67,7 @@ def _filepath_to_row(
     retries: int = 3,
     storage_options: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    resolved = _resolve_uri(filepath, storage_options=storage_options)
+    resolved = _resolve_uri(filepath, storage_options=storage_options, prefer_gdal=True)
     try:
         with retry_transient_io(rasterio.open, resolved, retries=retries) as src:
             if target_crs is None:
@@ -144,27 +144,34 @@ async def _extract_rows_async(
 ) -> list[dict[str, Any]]:
     """Gather row extraction across ``filepaths`` with a fan-out cap.
 
-    Returns one row per input file in completion order. Rows whose
+    Returns one row per input file in input order. Rows whose
     filename doesn't match ``filename_regex`` come back as ``None`` and
     are filtered out here (matching the sequential path's semantics).
     Transient I/O failures *are not* swallowed — ``retry_transient_io``
     inside ``_filepath_to_row`` re-raises after exhausting its retry
-    budget, and ``asyncio.gather`` propagates the first exception.
+    budget. The first failure cancels the files still waiting for a slot
+    (a TaskGroup, where ``asyncio.gather`` let them all run on) and is
+    re-raised as itself rather than as an ``ExceptionGroup``.
     """
     semaphore = asyncio.Semaphore(max_concurrent)
-    tasks = [
-        _filepath_to_row_async(
-            fp,
-            filename_regex=filename_regex,
-            date_format=date_format,
-            target_crs=target_crs,
-            storage_options=storage_options,
-            semaphore=semaphore,
-        )
-        for fp in filepaths
-    ]
-    results = await asyncio.gather(*tasks)
-    return [row for row in results if row is not None]
+    try:
+        async with asyncio.TaskGroup() as group:
+            tasks = [
+                group.create_task(
+                    _filepath_to_row_async(
+                        fp,
+                        filename_regex=filename_regex,
+                        date_format=date_format,
+                        target_crs=target_crs,
+                        storage_options=storage_options,
+                        semaphore=semaphore,
+                    )
+                )
+                for fp in filepaths
+            ]
+    except BaseExceptionGroup as group_error:
+        raise group_error.exceptions[0] from None
+    return [row for row in (t.result() for t in tasks) if row is not None]
 
 
 def _run_coroutine_safely(coro: Any) -> Any:
@@ -569,7 +576,7 @@ def load_raster(
     filepaths = filtered.gdf["filepath"].tolist()
 
     def _open_one(fp: str) -> tuple[Any, Any]:
-        resolved = _resolve_uri(fp, storage_options=storage_options)
+        resolved = _resolve_uri(fp, storage_options=storage_options, prefer_gdal=True)
         try:
             src = retry_transient_io(rasterio.open, resolved, retries=retries)
         except BaseException:
