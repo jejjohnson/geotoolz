@@ -743,38 +743,26 @@ class TestCaching:
         assert len(parent_relation.aggregate_calls) == 1
         assert len(child_relation.aggregate_calls) == 1
 
-    def test_backend_tag_read_is_cached_per_connection_and_source(self) -> None:
+    def test_backend_tag_read_per_source(self) -> None:
+        """Each open reads the tag from its own source (no stale cache)."""
         con = _CountingConnection()
         other_con = _CountingConnection("xarray")
-        duckdb_backend._BACKEND_TAG_CACHE.clear()
-
-        first = duckdb_backend._read_backend_tag(
-            con, "catalog.parquet", default="raster"
+        assert (
+            duckdb_backend._read_backend_tag(con, "catalog.parquet", default="raster")
+            == "vector"
         )
-        second = duckdb_backend._read_backend_tag(
-            con, "catalog.parquet", default="raster"
+        assert (
+            duckdb_backend._read_backend_tag(
+                other_con, "catalog.parquet", default="raster"
+            )
+            == "xarray"
         )
-        other_source = duckdb_backend._read_backend_tag(
-            con, "other.parquet", default="raster"
-        )
-        other_connection = duckdb_backend._read_backend_tag(
-            other_con, "catalog.parquet", default="raster"
-        )
-
-        assert first == "vector"
-        assert second == "vector"
-        assert other_source == "vector"
-        assert other_connection == "xarray"
-        assert con.calls == 2
+        assert con.calls == 1
         assert other_con.calls == 1
 
-    def test_backend_tag_read_falls_back_when_connection_not_weakrefable(
-        self,
-    ) -> None:
-        """Older DuckDB releases (>=1.1, <1.5) ship a `DuckDBPyConnection`
-        without weakref support. Adding such a connection as a
-        `WeakKeyDictionary` key raises `TypeError`; the helper must
-        degrade to no-cache rather than propagate the error."""
+    def test_backend_tag_read_with_non_weakrefable_connection(self) -> None:
+        """Older DuckDB connections can't be weakly referenced; reading
+        the tag must not depend on that."""
 
         class _NoWeakRefConnection:
             __slots__ = ("backend", "calls")
@@ -788,26 +776,10 @@ class TestCaching:
                 return _AggregateResult(pd.DataFrame({"_backend": [self.backend]}))
 
         con = _NoWeakRefConnection()
-        duckdb_backend._BACKEND_TAG_CACHE.clear()
-
-        # Sanity: this connection genuinely can't be weakref'd.
-        import weakref
-
-        with pytest.raises(TypeError):
-            weakref.ref(con)
-
-        first = duckdb_backend._read_backend_tag(
-            con, "catalog.parquet", default="raster"
+        assert (
+            duckdb_backend._read_backend_tag(con, "catalog.parquet", default="raster")
+            == "vector"
         )
-        second = duckdb_backend._read_backend_tag(
-            con, "catalog.parquet", default="raster"
-        )
-
-        # Correct value on both calls…
-        assert first == "vector"
-        assert second == "vector"
-        # …but cache was skipped, so every call re-queried.
-        assert con.calls == 2
 
 
 class TestSqlEscape:

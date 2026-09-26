@@ -442,14 +442,16 @@ class InMemoryGeoCatalog:
         """JSON-serialisable summary — backend tag, row count, CRS.
 
         Returns:
-            ``{"backend": str, "len": int, "crs": str}``. The CRS is
-            stringified via ``str(self.gdf.crs)``; it round-trips
-            through ``pyproj.CRS.from_user_input``.
+            ``{"backend": str, "len": int, "crs": str, "engine": "memory"}``.
+            The CRS is ``pyproj.CRS.to_string()`` (``"EPSG:32629"`` when an
+            authority code exists), the same form `DuckDBGeoCatalog`
+            reports, and round-trips through ``pyproj.CRS.from_user_input``.
         """
         return {
             "backend": self.backend,
             "len": len(self),
-            "crs": str(self.gdf.crs),
+            "crs": self.crs.to_string(),
+            "engine": "memory",
         }
 
 

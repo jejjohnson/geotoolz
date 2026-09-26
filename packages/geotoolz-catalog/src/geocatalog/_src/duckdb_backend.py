@@ -71,9 +71,6 @@ except ImportError:  # pragma: no cover - exercised via the [duckdb] extra
 
 
 _BACKEND_T = Literal["raster", "xarray", "vector"]
-_BACKEND_TAG_CACHE: WeakKeyDictionary[
-    duckdb_mod.DuckDBPyConnection, dict[str, _BACKEND_T]
-] = WeakKeyDictionary()
 
 
 def _require_duckdb() -> Any:
@@ -86,7 +83,7 @@ def _require_duckdb() -> Any:
     return duckdb
 
 
-def _ensure_spatial(con: duckdb_mod.DuckDBPyConnection) -> None:
+def _ensure_spatial(con: duckdb_mod.DuckDBPyConnection) -> bool:
     """Install + load the `spatial` extension on a connection.
 
     Idempotent — DuckDB no-ops on a second LOAD. If the extension cannot
@@ -94,6 +91,10 @@ def _ensure_spatial(con: duckdb_mod.DuckDBPyConnection) -> None:
     catalog still succeeds for non-spatial operations such as ``len()``
     and partition-column filters; later spatial SQL calls will raise the
     DuckDB error that names the missing extension.
+
+    Returns:
+        Whether the extension is loaded. `open_catalog(engine="auto")`
+        falls back to the in-memory engine when it is not.
     """
     dd = _require_duckdb()
     try:
@@ -109,7 +110,8 @@ def _ensure_spatial(con: duckdb_mod.DuckDBPyConnection) -> None:
                 "(check network access and extension-directory permissions): {}",
                 exc,
             )
-            return
+            return False
+    return True
 
 
 # One re-entrant lock per DuckDB connection, shared by every catalog on
@@ -248,6 +250,9 @@ class DuckDBGeoCatalog:
         # row groups with. Set by `open`; kept by `query` / `sql`; never
         # set for joins / unions, whose rows may lack a bbox.
         self._bbox_covering = False
+        # False when `open` could not load DuckDB's spatial extension; spatial
+        # queries will fail. `open_catalog(engine="auto")` checks it.
+        self._spatial_available = True
         # Strong ref back to the *owning* catalog when this instance is a
         # derivation (`query` / `intersect` / `union` / `sql`). Keeps the
         # owner — and therefore the underlying DuckDB connection — alive
@@ -422,7 +427,7 @@ class DuckDBGeoCatalog:
         dd = _require_duckdb()
         con = dd.connect()
         try:
-            _ensure_spatial(con)
+            spatial_ok = _ensure_spatial(con)
             source_str = _read_parquet_source(source)
             partitioned = _is_partitioned_source(source)
             scheme = _scheme(source)
@@ -494,6 +499,7 @@ class DuckDBGeoCatalog:
             raise
         catalog = cls(relation, con=con, crs=crs, backend=backend, _owns_con=True)
         catalog._bbox_covering = _has_bbox_covering(relation)
+        catalog._spatial_available = spatial_ok
         return catalog
 
     @classmethod
@@ -738,6 +744,60 @@ class DuckDBGeoCatalog:
     def _join(
         self, other_duck: DuckDBGeoCatalog, temporal: str, time_select: str
     ) -> duckdb_mod.DuckDBPyRelation:
+        """Spatial(-temporal) join with the same output as `InMemoryGeoCatalog`.
+
+        - Every left column is kept; right columns come back prefixed
+          ``_right_`` (#225). The time columns come from ``time_select``;
+          geometry and the file-level housekeeping columns are rebuilt.
+        - The clip keeps only the left row's geometry family, like
+          ``gpd.overlay(keep_geom_type=True)``: the polygon part of a
+          GeometryCollection is kept, while a pure boundary touch (a
+          LineString or Point clip of two polygons) drops the row.
+          Single-part MULTI results are unwrapped to match InMemory.
+        """
+        skip = {"geometry", "start_time", "end_time", "bbox", *INTERNAL_COLUMNS}
+        left_cols = [c for c in self.relation.columns if c not in skip]
+        right_cols = [c for c in other_duck.relation.columns if c not in skip]
+        # ST_GeometryType returns an enum; compare it as text.
+        left_type = "CAST(ST_GeometryType(L.geometry) AS VARCHAR)"
+        left_family = (
+            f"CASE WHEN {left_type} IN ('POINT', 'MULTIPOINT') THEN 1 "
+            f"WHEN {left_type} IN ('LINESTRING', 'MULTILINESTRING') "
+            "THEN 2 ELSE 3 END"
+        )
+        clip_col = "__geocatalog_clip"
+        stage1 = ", ".join(
+            [
+                *(f"L.{_quote_ident(c)} AS {_quote_ident(c)}" for c in left_cols),
+                f"""ST_CollectionExtract(
+                    CASE
+                        WHEN ST_AsWKB(L.geometry) > ST_AsWKB(R.geometry)
+                            THEN ST_Intersection(R.geometry, L.geometry)
+                        ELSE ST_Intersection(L.geometry, R.geometry)
+                    END,
+                    {left_family}
+                ) AS {clip_col}""",
+                time_select,
+                *(
+                    f"R.{_quote_ident(c)} AS {_quote_ident('_right_' + c)}"
+                    for c in right_cols
+                ),
+            ]
+        )
+        final = ", ".join(
+            [
+                *(_quote_ident(c) for c in left_cols),
+                f"""CASE
+                    WHEN CAST(ST_GeometryType({clip_col}) AS VARCHAR) LIKE 'MULTI%'
+                         AND ST_NumGeometries({clip_col}) = 1
+                        THEN ST_Dump({clip_col})[1].geom
+                    ELSE {clip_col}
+                END AS geometry""",
+                "start_time",
+                "end_time",
+                *(_quote_ident("_right_" + c) for c in right_cols),
+            ]
+        )
         return (
             self.relation.set_alias("L")
             .join(
@@ -745,17 +805,9 @@ class DuckDBGeoCatalog:
                 f"ST_Intersects(L.geometry, R.geometry){temporal}",
                 how="inner",
             )
-            .project(
-                f"""
-                L.filepath AS filepath,
-                CASE
-                    WHEN ST_AsWKB(L.geometry) > ST_AsWKB(R.geometry)
-                        THEN ST_Intersection(R.geometry, L.geometry)
-                    ELSE ST_Intersection(L.geometry, R.geometry)
-                END AS geometry,
-                {time_select}
-                """
-            )
+            .project(stage1)
+            .filter(f"NOT ST_IsEmpty({clip_col})")
+            .project(final)
         )
 
     def union(self, other: DuckDBGeoCatalog | InMemoryGeoCatalog) -> DuckDBGeoCatalog:
@@ -850,12 +902,17 @@ class DuckDBGeoCatalog:
                 for c in df.columns
                 if c not in RESERVED_COLUMNS and not c.startswith("_")
             ]
+            paths = df["filepath"] if "filepath" in df.columns else None
             for i in range(len(df)):
                 extras = {c: df[c].iloc[i] for c in extra_cols}
+                interval = pd.Interval(starts.iloc[i], ends.iloc[i], closed="both")
+                # Same fallback as InMemory: no or null filepath -> the
+                # row's interval (#225).
+                path = paths.iloc[i] if paths is not None else None
                 yield CatalogRow(
-                    filepath=str(df["filepath"].iloc[i]),
+                    filepath=str(interval) if pd.isna(path) else str(path),
                     geometry=geoms[i],
-                    interval=pd.Interval(starts.iloc[i], ends.iloc[i], closed="both"),
+                    interval=interval,
                     crs=self.crs,
                     extras=extras,
                 )
@@ -1080,8 +1137,6 @@ def _gdf_to_arrow_df(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
     if isinstance(gdf.index, pd.IntervalIndex):
         df["start_time"] = gdf.index.left
         df["end_time"] = gdf.index.right
-    if "filepath" not in df.columns:
-        df["filepath"] = [str(i) for i in range(len(df))]
     return df
 
 
@@ -1103,12 +1158,12 @@ def _read_geoparquet_crs(
     `FileNotFoundError` rather than silently falling back to the
     default (mistyped path == data-loss bug otherwise).
 
-    Glob *strings* (``"shards/*.parquet"`` etc.) still fall back to the
-    default — there's no unambiguous "first shard" of an arbitrary
-    glob pattern without re-implementing the glob expansion, and
-    DuckDB's own glob support pulls from heterogeneous sources where
-    picking one shard could be misleading.
+    Local glob *strings* (``"shards/*.parquet"``) are expanded the same
+    way and the first match (sorted) is inspected; a glob with no match
+    raises `FileNotFoundError`. Previously they silently fell back to
+    the default CRS even when the shards carried another one (#225).
     """
+    import glob
     import json
 
     import pyarrow as pa
@@ -1120,6 +1175,15 @@ def _read_geoparquet_crs(
         if first_shard is None:
             raise FileNotFoundError(f"No .parquet files found in directory: {path}")
         path = first_shard
+    elif (
+        isinstance(source, str)
+        and _scheme(source) is None
+        and any(ch in source for ch in "*?[")
+    ):
+        matches = sorted(glob.glob(source, recursive=True))
+        if not matches:
+            raise FileNotFoundError(f"No files match glob: {source}")
+        path = Path(matches[0])
     if not path.is_file():
         return default
     try:
@@ -1208,11 +1272,12 @@ def _check_schema_version(
        can't pick which is canonical; the user has to migrate each
        shard separately or rewrite into one file.
 
-    Ad-hoc parquet files without the column are treated as
-    ``SCHEMA_VERSION_CURRENT`` (no migration needed).
+    Files without the column are treated as the legacy unversioned
+    schema (``_LEGACY_UNVERSIONED``), exactly as `from_geoparquet` does,
+    so both engines agree on when a legacy artifact needs migrating.
     """
     from geocatalog._src.base import CatalogSchemaError
-    from geocatalog._src.parquet import SCHEMA_VERSION_CURRENT
+    from geocatalog._src.parquet import _LEGACY_UNVERSIONED, SCHEMA_VERSION_CURRENT
 
     dd = _require_duckdb()
     try:
@@ -1222,16 +1287,20 @@ def _check_schema_version(
             params={"src": source, "hive": partitioned},
         ).df()
     except dd.BinderException:
-        # Missing `_schema_version` column — externally produced parquet.
-        return
+        # Missing `_schema_version` column: a legacy or externally produced
+        # artifact. Same rule as the in-memory reader (#225).
+        df = None
     except dd.IOException:
         # Unreadable parquet path; caller will hit a clearer error
         # on the next read.
         return
-    if len(df) == 0 or pd.isna(df["lo"].iloc[0]) or pd.isna(df["hi"].iloc[0]):
+    if df is None:
+        lo = hi = _LEGACY_UNVERSIONED
+    elif len(df) == 0 or pd.isna(df["lo"].iloc[0]) or pd.isna(df["hi"].iloc[0]):
         return
-    lo = int(df["lo"].iloc[0])
-    hi = int(df["hi"].iloc[0])
+    else:
+        lo = int(df["lo"].iloc[0])
+        hi = int(df["hi"].iloc[0])
     if lo != hi:
         raise CatalogSchemaError(
             f"artifact {source} has mixed `_schema_version` values "
@@ -1273,12 +1342,6 @@ def _read_backend_tag(
     don't break the lookup, and narrowed exception handling so genuine
     SQL parse errors aren't silently swallowed as a missing column.
     """
-    source_cache = _lookup_backend_cache(con)
-    if source_cache is not None:
-        cached = source_cache.get(source)
-        if cached is not None:
-            return cached
-
     dd = _require_duckdb()
     try:
         df = con.sql(
@@ -1300,7 +1363,6 @@ def _read_backend_tag(
             source,
             default,
         )
-        _cache_backend_tag(con, source, default)
         return default
     except dd.IOException as exc:
         # Unreadable parquet path; caller will hit a clearer error
@@ -1317,7 +1379,6 @@ def _read_backend_tag(
             exc,
             default,
         )
-        _cache_backend_tag(con, source, default)
         return default
     if len(df) == 0 or pd.isna(df["_backend"].iloc[0]):
         if strict:
@@ -1332,11 +1393,9 @@ def _read_backend_tag(
             source,
             default,
         )
-        _cache_backend_tag(con, source, default)
         return default
     tag = str(df["_backend"].iloc[0])
     if tag in ("raster", "xarray", "vector"):
-        _cache_backend_tag(con, source, cast(_BACKEND_T, tag))
         return cast(_BACKEND_T, tag)
     if strict:
         raise CatalogMetadataError(
@@ -1351,39 +1410,7 @@ def _read_backend_tag(
         tag,
         default,
     )
-    _cache_backend_tag(con, source, default)
     return default
-
-
-def _lookup_backend_cache(
-    con: duckdb_mod.DuckDBPyConnection,
-) -> dict[str, _BACKEND_T] | None:
-    """`WeakKeyDictionary` lookup with a non-weakref-able-key fallback.
-
-    The repo dep is `duckdb>=1.1`, and `DuckDBPyConnection` only gained
-    weakref support in newer releases — on older DuckDBs both `.get(con)`
-    and `cache[con] = ...` raise `TypeError`. Treat that as a cache miss
-    so behaviour stays correct; only the per-source memoisation is lost.
-    """
-    try:
-        return _BACKEND_TAG_CACHE.get(con)
-    except TypeError:
-        return None
-
-
-def _cache_backend_tag(
-    con: duckdb_mod.DuckDBPyConnection, source: str, tag: _BACKEND_T
-) -> None:
-    source_cache = _lookup_backend_cache(con)
-    if source_cache is None:
-        source_cache = {}
-        # See `_lookup_backend_cache` — older DuckDB versions reject
-        # weakref keys; skip caching for those connections.
-        try:
-            _BACKEND_TAG_CACHE[con] = source_cache
-        except TypeError:
-            return
-    source_cache[source] = tag
 
 
 def _has_bbox_covering(relation: duckdb_mod.DuckDBPyRelation) -> bool:
