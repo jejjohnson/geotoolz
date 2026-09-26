@@ -156,8 +156,18 @@ class InMemoryGeoCatalog:
         if q_interval is not None:
             out = out[out.index.overlaps(q_interval)]
         if q_bounds is not None:
-            xmin, ymin, xmax, ymax = _reproject_bounds(q_bounds, q_crs, self.gdf.crs)
-            out = out.cx[xmin:xmax, ymin:ymax]
+            envelopes = _query_envelopes(q_bounds, q_crs, self.gdf.crs)
+            if len(envelopes) == 1:
+                xmin, ymin, xmax, ymax = envelopes[0]
+                out = out.cx[xmin:xmax, ymin:ymax]
+            else:
+                # Antimeridian split: same predicate as `.cx` (geometry
+                # intersects the box), OR-ed over both halves.
+                out = out[
+                    out.intersects(
+                        shapely.MultiPolygon([shapely.box(*env) for env in envelopes])
+                    )
+                ]
         return InMemoryGeoCatalog(out, backend=self.backend)
 
     def intersect(
@@ -499,3 +509,42 @@ def _reproject_bounds(
         return bounds
     transformer = pyproj.Transformer.from_crs(src, dst, always_xy=True)
     return transformer.transform_bounds(*bounds)  # type: ignore[return-value]
+
+
+def _query_envelopes(
+    bounds: tuple[float, float, float, float],
+    src_crs: Any,
+    dst_crs: Any,
+) -> list[tuple[float, float, float, float]]:
+    """Query bbox(es) in the catalog CRS, split at the antimeridian if needed.
+
+    ``transform_bounds`` into a geographic CRS reports an AOI that
+    crosses ±180° as ``xmin > xmax`` (and raw geographic ``bounds=``
+    may use the same convention). A single envelope built from those
+    numbers is the *complement* of the AOI, so it is split into
+    ``[xmin, 180]`` and ``[-180, xmax]`` instead. Inverted x in a
+    projected CRS, or inverted y anywhere, is an error.
+
+    Returns:
+        One envelope, or two for an antimeridian-crossing AOI.
+
+    Raises:
+        ValueError: If the (reprojected) bounds are inverted and cannot
+            be read as an antimeridian crossing.
+    """
+    xmin, ymin, xmax, ymax = (
+        float(v) for v in _reproject_bounds(bounds, src_crs, dst_crs)
+    )
+    if ymin > ymax:
+        raise ValueError(
+            f"query bounds have ymin > ymax in the catalog CRS: "
+            f"{(xmin, ymin, xmax, ymax)!r}"
+        )
+    if xmin <= xmax:
+        return [(xmin, ymin, xmax, ymax)]
+    if not pyproj.CRS.from_user_input(dst_crs).is_geographic:
+        raise ValueError(
+            f"query bounds have xmin > xmax in the projected catalog CRS: "
+            f"{(xmin, ymin, xmax, ymax)!r}"
+        )
+    return [(xmin, ymin, 180.0, ymax), (-180.0, ymin, xmax, ymax)]

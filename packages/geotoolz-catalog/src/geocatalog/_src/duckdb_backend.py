@@ -46,7 +46,7 @@ from geocatalog._src.geoslice import GeoSlice
 from geocatalog._src.memory import (
     InMemoryGeoCatalog,
     _coerce_interval,
-    _reproject_bounds,
+    _query_envelopes,
 )
 from geocatalog._src.retry import retry_transient_io
 
@@ -575,13 +575,14 @@ class DuckDBGeoCatalog:
         # a raw user string here.
         where: list[str] = []
         if q_bounds is not None:
-            xmin, ymin, xmax, ymax = (
-                float(v) for v in _reproject_bounds(q_bounds, q_crs, self.crs)
-            )
-            where.append(
+            # One envelope, or two when the AOI crosses the antimeridian.
+            envelopes = _query_envelopes(q_bounds, q_crs, self.crs)
+            spatial = " OR ".join(
                 f"ST_Intersects(geometry, "
                 f"ST_MakeEnvelope({xmin!r}, {ymin!r}, {xmax!r}, {ymax!r}))"
+                for xmin, ymin, xmax, ymax in envelopes
             )
+            where.append(f"({spatial})")
         if q_interval is not None:
             t_lo = pd.Timestamp(q_interval.left).isoformat()
             t_hi = pd.Timestamp(q_interval.right).isoformat()
