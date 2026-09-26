@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import numpy as np
+import pyproj
 import shapely.geometry
 from georeader.geotensor import GeoTensor
 from loguru import logger as log
@@ -29,6 +30,7 @@ from geocatalog._src._timeutil import (
 from geocatalog._src.geoslice import GeoSlice
 from geocatalog._src.io import _close_resolved_uri, _resolve_uri, _uri_name
 from geocatalog._src.memory import InMemoryGeoCatalog
+from geocatalog._src.retry import retry_transient_io
 
 
 if TYPE_CHECKING:
@@ -59,22 +61,30 @@ def _vector_row(
     observed CRS to anchor the catalog when no ``target_crs`` was
     provided, then reprojects every subsequent file to that anchor.
     """
+    import pyogrio
+
+    # Metadata only: feature count, total bounds and CRS come from the
+    # file header instead of reading every geometry (#220).
     resolved = _resolve_uri(filepath, storage_options=storage_options)
     try:
-        gdf = (
-            gpd.read_file(resolved, layer=layer)
-            if layer is not None
-            else gpd.read_file(resolved)
+        info = pyogrio.read_info(
+            resolved, layer=layer, force_feature_count=True, force_total_bounds=True
         )
     finally:
         _close_resolved_uri(resolved)
-    if gdf.empty:
+    if not info.get("features"):
         log.warning("Skipping empty vector file {}", filepath)
         return None, None
-    observed_crs = gdf.crs
-    if target_crs is not None and gdf.crs != target_crs:
-        gdf = gdf.to_crs(target_crs)
-    xmin, ymin, xmax, ymax = gdf.total_bounds
+    observed_crs = pyproj.CRS.from_user_input(info["crs"]) if info.get("crs") else None
+    xmin, ymin, xmax, ymax = (float(v) for v in info["total_bounds"])
+    if (
+        target_crs is not None
+        and observed_crs is not None
+        and observed_crs != pyproj.CRS.from_user_input(target_crs)
+    ):
+        xmin, ymin, xmax, ymax = pyproj.Transformer.from_crs(
+            observed_crs, target_crs, always_xy=True
+        ).transform_bounds(xmin, ymin, xmax, ymax, densify_pts=21)
     polygon = shapely.geometry.box(xmin, ymin, xmax, ymax)
 
     if filename_regex is None:
@@ -331,6 +341,7 @@ def load_vector(
     burn_value: int | None = None,
     fill: int = 0,
     storage_options: dict[str, Any] | None = None,
+    retries: int = 3,
 ) -> GeoTensor:
     """Rasterise the catalog's vector rows matching ``slice_`` into a `GeoTensor`.
 
@@ -362,6 +373,9 @@ def load_vector(
         burn_value: The value burnt in for ``"semantic_segmentation"``
             when ``label_field`` is ``None``. Default 1.
         fill: Background value written outside any feature. Default 0.
+        storage_options: Options forwarded to fsspec for cloud/HTTP URIs.
+        retries: Retries for transient I/O failures per file open. ``0``
+            disables retry/backoff.
 
     Returns:
         A `GeoTensor` of shape ``(1, H, W)`` with ``dtype=int64``,
@@ -399,20 +413,24 @@ def load_vector(
     else:
         layers = [None] * len(filtered.gdf)
     for fp, layer in zip(filtered.gdf["filepath"], layers, strict=True):
+        # Clip to the slice bbox. Passing it (with its CRS) to the reader
+        # lets the driver skip features outside it instead of loading the
+        # whole file; geopandas reprojects the box into the file CRS (#220).
+        xmin, ymin, xmax, ymax = slice_.bounds
+        bbox = shapely.geometry.box(xmin, ymin, xmax, ymax)
         resolved = _resolve_uri(fp, storage_options=storage_options)
         try:
-            sub = (
-                gpd.read_file(resolved, layer=layer)
-                if layer is not None
-                else gpd.read_file(resolved)
+            sub = retry_transient_io(
+                gpd.read_file,
+                resolved,
+                layer=layer,
+                bbox=gpd.GeoSeries([bbox], crs=slice_.crs),
+                retries=retries,
             )
         finally:
             _close_resolved_uri(resolved)
-        if sub.crs != slice_.crs:
+        if sub.crs is not None and sub.crs != slice_.crs:
             sub = sub.to_crs(slice_.crs)
-        # Clip to the slice bbox.
-        xmin, ymin, xmax, ymax = slice_.bounds
-        bbox = shapely.geometry.box(xmin, ymin, xmax, ymax)
         sub = sub[sub.intersects(bbox)]
         for _, row in sub.iterrows():
             if task == "semantic_segmentation":
