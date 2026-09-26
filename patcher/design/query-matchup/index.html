@@ -1,0 +1,5627 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="The geotoolz geostack — RS operators, the four-axis Patcher, and a spatiotemporal catalog, composable end to end.">
+      
+      
+        <meta name="author" content="J. Emmanuel Johnson">
+      
+      
+      
+        <link rel="prev" href="../../decisions/">
+      
+      
+        <link rel="next" href="../../../catalog/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Query → matchup → patch - geotoolz</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#query-matchup-patch-a-cross-package-design" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="geotoolz" class="md-header__button md-logo" aria-label="geotoolz" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            geotoolz
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Query → matchup → patch
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jejjohnson/geotoolz" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jejjohnson/geotoolz
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../geostack/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  The geostack
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../concepts/" class="md-tabs__link">
+          
+  
+  
+  Operators — geotoolz
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../" class="md-tabs__link">
+          
+  
+  
+  Patcher — geopatcher
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../catalog/" class="md-tabs__link">
+          
+  
+  
+  Catalog — geocatalog
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Extended examples ↗
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="geotoolz" class="md-nav__button md-logo" aria-label="geotoolz" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    geotoolz
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jejjohnson/geotoolz" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jejjohnson/geotoolz
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../geostack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The geostack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operators — geotoolz
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operators — geotoolz
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Recipes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Recipes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../recipes/define-an-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Define an operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../recipes/branching-pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Branching pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../recipes/integration-with-geocatalog-and-geopatcher/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog → patch → operate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_4" id="__nav_3_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorial
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebooks/operators_lake_tahoe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operators on Sentinel-2 (Lake Tahoe)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_5" id="__nav_3_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Module guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../normalization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Normalization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../patch_ops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Patching (tile / stitch / sample)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../io/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multi-format readers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../readers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a sensor reader
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/augment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Augment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/cloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/compositing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compositing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/einx/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Einx
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/feature/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Feature
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/geom/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Geometry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/indices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Indices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/io/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    IO
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/learn/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn (scikit-learn)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/mask/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/matched_filter/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Matched filter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/measure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/normalize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Normalize
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/plume/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plume
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/qa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/radiometry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Radiometry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/readers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Readers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/segment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Segment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/spectral/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spectral
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/viz/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Viz
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_7" id="__nav_3_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../design/query-matchup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query → matchup → patch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Patcher — geopatcher
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Patcher — geopatcher
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Recipes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Recipes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/streaming-overlap-add/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming overlap-add
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/on-error-policies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-error policies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/journal-and-resume/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Journal & resume
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/temporal-stencils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal stencils
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../recipes/xarray-nd-patching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    xarray N-D patching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_5" id="__nav_4_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorial
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/patcher_lake_tahoe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Patching Sentinel-2 (Lake Tahoe)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_6" id="__nav_4_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../patching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Patching
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../patching/async-prefetch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Async and prefetch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_7" id="__nav_4_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spatial/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spatial axes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/temporal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal axes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/ml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ML utilities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/matched/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Matched multi-source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_8" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_8" id="__nav_4_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_8_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query → matchup → patch
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query → matchup → patch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-goals-and-non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Goals and non-goals
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Goals and non-goals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goals
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-goals
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-level architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-geocatalog-sources-queries-matchups-staging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. GeoCatalog: Sources, queries, matchups, staging
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. GeoCatalog: Sources, queries, matchups, staging">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-new-file-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 New file layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-source-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Source Protocol
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-sourcerow-normalized-output-of-every-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 SourceRow — normalized output of every adapter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-persistence-a-bundle-of-three-parquet-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Persistence: a bundle of three Parquet files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-discovery-vs-ingest-verbs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Discovery vs. ingest verbs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-matchup-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Matchup engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#47-staging-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.7 Staging layer
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-geotoolz-geomcoregister-and-compositingmatched" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. GeoToolz: geom.coregister and compositing.matched
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. GeoToolz: geom.coregister and compositing.matched">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-new-file-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 New file layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-operator-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Operator catalog
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-operator-signatures-illustrative" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Operator signatures (illustrative)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-what-this-unlocks-beyond-matchups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 What this unlocks beyond matchups
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-geopatcher-matchedfield-and-matchedpatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. GeoPatcher: MatchedField and MatchedPatch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. GeoPatcher: MatchedField and MatchedPatch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-new-file-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 New file layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-matchedfield-a-composite-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 MatchedField — a composite Field
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-matchedpatch-the-carrier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 MatchedPatch — the carrier
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-aggregation-back-to-global-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Aggregation back to global field(s)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-streaming-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Streaming guarantees
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-end-to-end-walkthrough-modis-sentinel-2-patches-over-iberia" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. End-to-end walkthrough: MODIS × Sentinel-2 patches over Iberia
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-phasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Phasing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Phasing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-geocatalog-source-adapters-no-breaking-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 — geocatalog source adapters (no breaking changes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-geocatalog-matchup-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 — geocatalog matchup engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-geotoolz-coregistration-operators" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 — geotoolz coregistration operators
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-geopatcher-matched-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4 — geopatcher matched field
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-optional-later-staging-polish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5 (optional / later) — staging polish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Open questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-appendix-a-alternatives-considered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Appendix A: alternatives considered
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Appendix A: alternatives considered">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a1-source-adapters-as-plugins-entry-points-vs-in-tree-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A1. Source adapters as plugins (entry points) vs. in-tree modules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a2-coregistration-strategies-as-a-new-coregistrationstrategy-class-in-geopatcher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A2. Coregistration strategies as a new CoregistrationStrategy class in geopatcher
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a3-merge-itemsparquet-and-matchupsparquet-into-one-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A3. Merge items.parquet and matchups.parquet into one table
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a4-async-first-geocatalog-ingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A4. Async-first geocatalog ingest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a5-staging-via-symlinks-vs-real-download" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A5. Staging via symlinks vs. real download
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-appendix-b-api-surface-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Appendix B: API surface summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalog — geocatalog
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Catalog — geocatalog
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_4" id="__nav_5_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Recipes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Recipes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/recipes/large-archives/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Large archives
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/recipes/from-stac/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    STAC ingestion
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/recipes/staging-and-bundles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Staging & bundles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorial
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/notebooks/end_to_end_lake_tahoe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    End-to-end (Lake Tahoe)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_6" id="__nav_5_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/api/reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/api/catalogs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Catalogs & backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/api/geoslice/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GeoSlice & grid alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/api/loaders/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loaders
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/api/geoparquet/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GeoParquet interchange
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/api/sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Discovery sources & bundle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/api/matchup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Matchup engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/api/staging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Staging & the patcher bridge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/schema-versions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schema versions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/logging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_10" id="__nav_5_10_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Design
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/design/exact-grid-alignment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exact grid alignment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/design/query-matchup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Query & matchup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../catalog/changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extended examples ↗
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-goals-and-non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Goals and non-goals
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Goals and non-goals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goals
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-goals
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-high-level-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. High-level architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-geocatalog-sources-queries-matchups-staging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. GeoCatalog: Sources, queries, matchups, staging
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. GeoCatalog: Sources, queries, matchups, staging">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-new-file-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 New file layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-source-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Source Protocol
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-sourcerow-normalized-output-of-every-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 SourceRow — normalized output of every adapter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-persistence-a-bundle-of-three-parquet-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Persistence: a bundle of three Parquet files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-discovery-vs-ingest-verbs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Discovery vs. ingest verbs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-matchup-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Matchup engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#47-staging-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.7 Staging layer
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-geotoolz-geomcoregister-and-compositingmatched" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. GeoToolz: geom.coregister and compositing.matched
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. GeoToolz: geom.coregister and compositing.matched">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-new-file-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 New file layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-operator-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Operator catalog
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-operator-signatures-illustrative" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Operator signatures (illustrative)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-what-this-unlocks-beyond-matchups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 What this unlocks beyond matchups
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-geopatcher-matchedfield-and-matchedpatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. GeoPatcher: MatchedField and MatchedPatch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. GeoPatcher: MatchedField and MatchedPatch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-new-file-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 New file layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-matchedfield-a-composite-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 MatchedField — a composite Field
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-matchedpatch-the-carrier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 MatchedPatch — the carrier
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-aggregation-back-to-global-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Aggregation back to global field(s)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-streaming-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Streaming guarantees
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-end-to-end-walkthrough-modis-sentinel-2-patches-over-iberia" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. End-to-end walkthrough: MODIS × Sentinel-2 patches over Iberia
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-phasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Phasing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Phasing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-geocatalog-source-adapters-no-breaking-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 — geocatalog source adapters (no breaking changes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-geocatalog-matchup-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 — geocatalog matchup engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-geotoolz-coregistration-operators" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 — geotoolz coregistration operators
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-geopatcher-matched-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4 — geopatcher matched field
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-optional-later-staging-polish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5 (optional / later) — staging polish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Open questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-appendix-a-alternatives-considered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Appendix A: alternatives considered
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Appendix A: alternatives considered">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a1-source-adapters-as-plugins-entry-points-vs-in-tree-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A1. Source adapters as plugins (entry points) vs. in-tree modules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a2-coregistration-strategies-as-a-new-coregistrationstrategy-class-in-geopatcher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A2. Coregistration strategies as a new CoregistrationStrategy class in geopatcher
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a3-merge-itemsparquet-and-matchupsparquet-into-one-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A3. Merge items.parquet and matchups.parquet into one table
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a4-async-first-geocatalog-ingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A4. Async-first geocatalog ingest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a5-staging-via-symlinks-vs-real-download" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A5. Staging via symlinks vs. real download
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-appendix-b-api-surface-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Appendix B: API surface summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="query-matchup-patch-a-cross-package-design">Query → Matchup → Patch: A Cross-Package Design<a class="headerlink" href="#query-matchup-patch-a-cross-package-design" title="Permanent link">&para;</a></h1>
+<p><strong>Status:</strong> Draft, for discussion
+<strong>Author:</strong> @jejjohnson + Claude
+<strong>Date:</strong> 2026-05-23
+<strong>Affects:</strong> <code>geocatalog</code>, <code>geotoolz</code>, <code>geopatcher</code>
+<strong>Branch (all repos):</strong> <code>claude/geocatalog-query-matchup-design-zHXc4</code></p>
+<hr />
+<h2 id="1-context">1. Context<a class="headerlink" href="#1-context" title="Permanent link">&para;</a></h2>
+<p>Today the three packages cover discovery / transform / patching as separate concerns:</p>
+<ul>
+<li><strong><code>geocatalog</code></strong> is a <em>local</em> spatiotemporal index over files already on disk. Its <code>GeoCatalog</code> Protocol, <code>GeoSlice</code> wire format, GeoParquet 1.1 persistence, and DuckDB SQL backend handle "what do I have, where, when?" for raster, vector, and xarray sources.</li>
+<li><strong><code>geotoolz</code></strong> is a <code>pipekit.Operator</code> library of remote-sensing domain operations on <code>GeoTensor</code> (radiometry, indices, masking, single-source geom ops, segmentation, etc.). Every operator is serializable to YAML and composes into <code>Sequential</code> / <code>Graph</code> pipelines.</li>
+<li><strong><code>geopatcher</code></strong> is a four-axis (Geometry × Sampler × Window × Aggregation) patching framework with three patcher types (<code>SpatialPatcher</code>, <code>TemporalPatcher</code>, <code>SpatioTemporalPatcher</code>) and <code>Field</code> adapters for raster / xarray / vector / xvec / rio-xarray. Streaming-first, numpy + scipy in the core.</li>
+</ul>
+<p>What's missing is the layer <strong>above</strong> local catalogs — discovering remote granules from external systems (NASA earthaccess, STAC endpoints, Google Earth Engine), deciding what's interesting, persisting that decision, finding <em>matchups</em> between heterogeneous sources, and optionally staging bytes — and the layer <strong>between</strong> patching and these matched sources so a downstream sampler can read co-located neighborhoods across LEO, GEO, vector, and point-cloud modalities.</p>
+<p>This design covers all three packages because the user-facing workflow crosses all three: a single <code>geocatalog</code> query produces matchups, those matchups feed a <code>geopatcher</code> composite Field, which calls <code>geotoolz</code> operators per anchor to align secondary sources.</p>
+<h2 id="2-goals-and-non-goals">2. Goals and non-goals<a class="headerlink" href="#2-goals-and-non-goals" title="Permanent link">&para;</a></h2>
+<h3 id="goals">Goals<a class="headerlink" href="#goals" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Issue a query against any of {earthaccess, STAC, GEE, CMR} via a uniform <code>Source</code> Protocol; iterate or persist the results.</li>
+<li>Persist queries themselves (not just their results) so workflows are reproducible and shareable.</li>
+<li>Compute matchups (pairwise or N-way) between persisted catalog entries with explicit spatial + temporal tolerances; persist matchups as first-class catalog artifacts.</li>
+<li>Stage / download bytes for a matchup set or query tag with caching, retry, and parallelism.</li>
+<li>Express cross-modality coregistration (LEO ↔ GEO, raster ↔ points, raster ↔ point-cloud, vector ↔ raster) as standard <code>pipekit.Operator</code>s in geotoolz so they compose declaratively and serialize to YAML.</li>
+<li>Let a downstream <code>geopatcher</code> sampler emit <em>matched patches</em> — joint local neighborhoods across the matched sources — without changing any existing patcher, geometry, window, or aggregation code.</li>
+</ol>
+<h3 id="non-goals">Non-goals<a class="headerlink" href="#non-goals" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A new query DSL. <code>bounds + interval + filters dict</code> is sufficient.</li>
+<li>Scheduling, background workers, or distributed orchestration. That stays in <code>pipekit</code> or downstream tooling.</li>
+<li>Auth UI. Defer to each library's native flow (<code>earthaccess.login</code>, <code>ee.Authenticate</code>).</li>
+<li>Replacing rasterio / pyproj / odc-geo. Geotoolz keeps wrapping them.</li>
+<li>Cross-cloud abstraction. <code>fsspec</code> + the libraries' native URI handling is enough.</li>
+<li>Bayesian / probabilistic patches. Weights stay deterministic.</li>
+</ul>
+<h2 id="3-high-level-architecture">3. High-level architecture<a class="headerlink" href="#3-high-level-architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│                                  GEOCATALOG                                     │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│                                                                                 │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│   external source ──┐    ┌──────────────┐         ┌──────────────────────┐      │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   (earthaccess,     │    │              │         │  items.parquet       │      │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│    STAC, GEE, CMR)  ├───►│ Source.query ├────────►│  queries.parquet     │      │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│                     │    │              │         │  matchups.parquet    │      │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│                     │    └──────────────┘         └────────┬─────────────┘      │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│                                                            │                    │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│                                                            ▼                    │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│                                                   ┌──────────────────┐          │
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│                                                   │ matchup engine   │          │
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│                                                   │ (spatial+temporal│          │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│                                                   │  join, DuckDB)   │          │
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│                                                   └────────┬─────────┘          │
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│                                                            ▼                    │
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│                                                   ┌──────────────────┐          │
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│                                                   │  staging layer   │          │
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│                                                   │  (fsspec cache)  │          │
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│                                                   └────────┬─────────┘          │
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>└────────────────────────────────────────────────────────────┼────────────────────┘
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>                                                             │ resolved URIs
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>                                                             ▼ + GeoSlices
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>┌─────────────────────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│                                  GEOPATCHER                                     │
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│                                                                                 │
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>│   ┌───────────────┐     ┌───────────────────────────────────────────┐           │
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>│   │ primary Field │     │            MatchedField                   │           │
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>│   │ (e.g. GEO)    ├────►│   primary + {name: secondary Field}       │           │
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>│   └───────────────┘     │           + {name: coreg Operator}        │           │
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>│   ┌───────────────┐     │                                           │           │
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>│   │ sec. Field(s) ├────►│                                           │           │
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>│   │ (e.g. LEO,    │     │            implements Field protocol      │           │
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>│   │  vector, pc)  │     └────────────────┬──────────────────────────┘           │
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>│   └───────────────┘                      ▼                                      │
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>│                       ┌─────────────────────────────────────────┐               │
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>│                       │  any existing SpatialPatcher / sampler  │               │
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>│                       │  → iter MatchedPatch (members per src)  │               │
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>│                       └─────────────────────────────────────────┘               │
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>└─────────────────────────────────────────┼───────────────────────────────────────┘
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>                                          │ calls per-anchor
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>                                          ▼
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>┌─────────────────────────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>│                                   GEOTOOLZ                                      │
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>│                                                                                 │
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>│   geotoolz.geom.coregister                                                      │
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>│   ─────────────────────────                                                     │
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>│     RasterToRasterLike        RasterToPoints      PointsToRaster                │
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>│     SwathToGrid               GridToSwath         RasterToPointCloud            │
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>│     VectorToRasterAgg         PointCloudToRaster                                │
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>│                                                                                 │
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>│   geotoolz.compositing                                                          │
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>│   ────────────────────                                                          │
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>│     StackMatched              BlendMatched (IVW, weighted mean)                 │
+<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>│                                                                                 │
+<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>│   All are pipekit.Operator subclasses with get_config() → YAML serializable     │
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>└─────────────────────────────────────────────────────────────────────────────────┘
+</code></pre></div>
+<p>Three boundary rules that drive the rest of the document:</p>
+<ol>
+<li><strong>Geocatalog never transforms pixels.</strong> It returns URIs and metadata; staging is opt-in; loading remains delegated to <code>georeader</code>/<code>rasterio</code>/<code>xarray</code>.</li>
+<li><strong>Geotoolz operators are the only place coregistration logic lives.</strong> They take 1–N <code>GeoTensor</code>s in, return one out, are stateless, and serialize. Geopatcher and geocatalog both <em>call</em> them; neither <em>contains</em> them.</li>
+<li><strong>Geopatcher's core stays numpy+scipy.</strong> <code>MatchedField</code> adds a composite Field that dispatches to operators (provided by the user, typically from geotoolz). The 4-axis machinery is untouched.</li>
+</ol>
+<h2 id="4-geocatalog-sources-queries-matchups-staging">4. GeoCatalog: Sources, queries, matchups, staging<a class="headerlink" href="#4-geocatalog-sources-queries-matchups-staging" title="Permanent link">&para;</a></h2>
+<h3 id="41-new-file-layout">4.1 New file layout<a class="headerlink" href="#41-new-file-layout" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>src/geocatalog/_src/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  base.py                      # GeoCatalog Protocol  [existing]
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  geoslice.py                  # GeoSlice             [existing]
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  memory.py, duckdb_backend.py # backends             [existing]
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  raster.py, vector.py, xarray_backend.py            [existing]
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  parquet.py, streaming.py, ops.py                   [existing]
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  domain.py, _cli.py                                 [existing]
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  sources/                     # NEW
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    __init__.py                # Source Protocol, SourceRow dataclass, registry
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    earthaccess.py             # EarthAccessSource
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    stac.py                    # STACSource (+ planetary_computer() / earth_search() helpers)
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    gee.py                     # GEESource (asset enumeration only in v1)
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    cmr.py                     # CMRSource (lightweight REST fallback)
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    _extras.py                 # friendly ImportError messages
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>  matchup/                     # NEW
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>    __init__.py                # public API: matchup(), MatchupRow
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>    spatial.py                 # intersects, iou_threshold, buffer_contains, centroid_within
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    temporal.py                # nearest_in_time, within_window, synchronous
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    engine.py                  # combines strategies; emits MatchupRows; SQL-where-possible
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>  staging/                     # NEW
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>    __init__.py                # public API: stage(), LocalCache
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>    cache.py                   # fsspec-backed cache, key = (uri, asset)
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>    download.py                # parallel fetch, retry/backoff (shared with PR #51)
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>    gee.py                     # GEE materialization (ee.Image.getDownloadURL)
+</code></pre></div>
+<p>Top-level re-exports follow the existing pattern:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># src/geocatalog/sources/__init__.py</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">geocatalog._src.sources</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">Source</span><span class="p">,</span> <span class="n">SourceRow</span><span class="p">,</span> <span class="n">EarthAccessSource</span><span class="p">,</span> <span class="n">STACSource</span><span class="p">,</span> <span class="n">GEESource</span><span class="p">,</span> <span class="n">CMRSource</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># src/geocatalog/matchup/__init__.py</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">geocatalog._src.matchup</span><span class="w"> </span><span class="kn">import</span> <span class="n">matchup</span><span class="p">,</span> <span class="n">MatchupRow</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># src/geocatalog/staging/__init__.py</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="kn">from</span><span class="w"> </span><span class="nn">geocatalog._src.staging</span><span class="w"> </span><span class="kn">import</span> <span class="n">stage</span><span class="p">,</span> <span class="n">LocalCache</span>
+</code></pre></div>
+<h3 id="42-source-protocol">4.2 <code>Source</code> Protocol<a class="headerlink" href="#42-source-protocol" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># src/geocatalog/_src/sources/__init__.py</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">Source</span><span class="p">(</span><span class="n">Protocol</span><span class="p">):</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;A remote data catalog that can be queried by bounds + interval + filters.&quot;&quot;&quot;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>  <span class="c1"># stable identifier, e.g. &quot;earthaccess&quot;, &quot;stac.pc&quot;, &quot;gee&quot;</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">query</span><span class="p">(</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>        <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>        <span class="n">bounds</span><span class="p">:</span> <span class="n">Bounds</span><span class="p">,</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>        <span class="n">interval</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Interval</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>        <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>        <span class="n">collection</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>        <span class="n">filters</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>        <span class="n">limit</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="n">SourceRow</span><span class="p">]:</span> <span class="o">...</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">auth_status</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AuthStatus</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<p>Adapters live in <code>_src/sources/&lt;name&gt;.py</code>. None are required at install time — all guarded by try/except + <code>_extras.py</code>, matching the geopatcher pattern. New optional extras in <code>pyproject.toml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[project.optional-dependencies]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">earthaccess</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;earthaccess&gt;=0.10&quot;</span><span class="p">]</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">stac</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;pystac-client&gt;=0.7&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;planetary-computer&gt;=1.0&quot;</span><span class="p">]</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">gee</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;earthengine-api&gt;=0.1.380&quot;</span><span class="p">]</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># Aggregate extra: expanded explicitly because self-referencing</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="c1"># project extras don&#39;t resolve reliably in all build backends.</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">sources-all</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="s2">&quot;earthaccess&gt;=0.10&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="s2">&quot;pystac-client&gt;=0.7&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">    </span><span class="s2">&quot;planetary-computer&gt;=1.0&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">    </span><span class="s2">&quot;earthengine-api&gt;=0.1.380&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="p">]</span>
+</code></pre></div>
+<h3 id="43-sourcerow-normalized-output-of-every-adapter">4.3 <code>SourceRow</code> — normalized output of every adapter<a class="headerlink" href="#43-sourcerow-normalized-output-of-every-adapter" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p><strong>Naming note.</strong> The scaffolding PR landed this carrier as
+<code>SourceRow</code> (output of <code>Source.query</code>) to keep it distinct from the
+existing in-catalog <code>CatalogRow</code> (the row shape persisted in
+<code>items.parquet</code>). Ingestion (<code>catalog.ingest(...)</code>) maps the
+richer <code>SourceRow</code> shape into a <code>CatalogRow</code> — promoting the
+primary asset to <code>filepath</code>, folding extras into <code>extras</code>. The
+schema below describes <code>SourceRow</code>; <code>CatalogRow</code> is the existing
+dataclass in <code>geocatalog._src.base</code> and is unchanged.</p>
+</blockquote>
+<p>A single schema that every adapter must produce. This is the on-wire
+shape returned by <code>Source.query</code> and the same shape passed to the
+<code>v0 → v1</code> schema migration that lifts an existing local catalog into
+the new bundle layout.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td><code>str</code></td>
+<td>granule UR / STAC item id / EE asset path</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td><code>str</code></td>
+<td><code>"earthaccess"</code>, <code>"stac.pc"</code>, <code>"gee"</code>, <code>"cmr"</code></td>
+</tr>
+<tr>
+<td><code>collection</code></td>
+<td><code>str</code></td>
+<td>e.g. <code>MOD09GA</code>, <code>sentinel-2-l2a</code>, <code>COPERNICUS/S2_SR</code></td>
+</tr>
+<tr>
+<td><code>geometry</code></td>
+<td><code>shapely.Geometry</code></td>
+<td>footprint, in catalog target CRS</td>
+</tr>
+<tr>
+<td><code>time_start</code>, <code>time_end</code></td>
+<td><code>datetime</code> (UTC)</td>
+<td>observation interval</td>
+</tr>
+<tr>
+<td><code>assets</code></td>
+<td><code>JSON</code></td>
+<td><code>{"red": "s3://...", "nir": "..."}</code> — STAC-style asset map</td>
+</tr>
+<tr>
+<td><code>properties</code></td>
+<td><code>JSON</code></td>
+<td>sensor-specific (cloud_cover, sza, orbit_number, …)</td>
+</tr>
+<tr>
+<td><code>_provenance</code></td>
+<td><code>JSON</code></td>
+<td><code>{query_id, fetched_at, source_version}</code></td>
+</tr>
+<tr>
+<td><code>_schema_version</code></td>
+<td><code>int</code></td>
+<td>existing column, reused</td>
+</tr>
+</tbody>
+</table>
+<p>Migration from today's catalog: existing <code>path: str</code> becomes <code>assets: {"default": path}</code> and <code>source: "local"</code>. The existing schema-migrations framework (PR #39) gets its first non-empty registration: <code>v0 → v1</code> performs this remapping.</p>
+<h3 id="44-persistence-a-bundle-of-three-parquet-files">4.4 Persistence: a bundle of three Parquet files<a class="headerlink" href="#44-persistence-a-bundle-of-three-parquet-files" title="Permanent link">&para;</a></h3>
+<p>A catalog becomes a <em>directory</em> of GeoParquet files (already idiomatic for partitioned writes):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>my_catalog/
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  items.parquet              # one row per granule (CatalogRow schema)
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>  queries.parquet            # one row per Source.query() invocation
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>  matchups.parquet           # one row per matched tuple
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  _meta.json                 # schema_version, target_crs, created_at
+</code></pre></div>
+<p>Both new sibling tables are first-class — they have <code>query_id</code> / <code>matchup_id</code> primary keys, and DuckDB views join them to <code>items</code> for everything (lineage, "which items came from query X", "members of matchup Y").</p>
+<p><strong><code>queries.parquet</code> schema:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>query_id</code></td>
+<td><code>str</code> (uuid)</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td><code>str</code></td>
+</tr>
+<tr>
+<td><code>collection</code></td>
+<td><code>str</code></td>
+</tr>
+<tr>
+<td><code>bounds_wkt</code></td>
+<td><code>str</code></td>
+</tr>
+<tr>
+<td><code>time_start</code>, <code>time_end</code></td>
+<td><code>datetime</code></td>
+</tr>
+<tr>
+<td><code>filters_json</code></td>
+<td><code>str</code> (JSON-encoded)</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td><code>datetime</code></td>
+</tr>
+<tr>
+<td><code>n_returned</code></td>
+<td><code>int</code></td>
+</tr>
+<tr>
+<td><code>tag</code></td>
+<td><code>str \| null</code> (user label)</td>
+</tr>
+<tr>
+<td><code>notes</code></td>
+<td><code>str \| null</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>matchups.parquet</code> schema:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>matchup_id</code></td>
+<td><code>str</code> (uuid)</td>
+</tr>
+<tr>
+<td><code>strategy</code></td>
+<td><code>str</code> (<code>"nearest_in_time"</code>, <code>"within_window"</code>, <code>"synchronous"</code>)</td>
+</tr>
+<tr>
+<td><code>tolerance_json</code></td>
+<td><code>str</code> (e.g. <code>{"dt": "1h", "spatial": "iou&gt;0.3"}</code>)</td>
+</tr>
+<tr>
+<td><code>member_ids</code></td>
+<td><code>array&lt;str&gt;</code> (refs <code>items.id</code>)</td>
+</tr>
+<tr>
+<td><code>member_sources</code></td>
+<td><code>array&lt;str&gt;</code> (parallel to <code>member_ids</code>)</td>
+</tr>
+<tr>
+<td><code>member_roles</code></td>
+<td><code>array&lt;str&gt;</code> (<code>"primary"</code> / <code>"secondary"</code> / etc.)</td>
+</tr>
+<tr>
+<td><code>geometry_intersect</code></td>
+<td><code>shapely</code> (the common footprint)</td>
+</tr>
+<tr>
+<td><code>time_reference</code></td>
+<td><code>datetime</code></td>
+</tr>
+<tr>
+<td><code>time_offset_sec</code></td>
+<td><code>array&lt;float&gt;</code> (per member, relative to <code>time_reference</code>)</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td><code>datetime</code></td>
+</tr>
+<tr>
+<td><code>query_set</code></td>
+<td><code>str \| null</code> (tag)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="45-discovery-vs-ingest-verbs">4.5 Discovery vs. ingest verbs<a class="headerlink" href="#45-discovery-vs-ingest-verbs" title="Permanent link">&para;</a></h3>
+<p>A deliberate split between "I want to see what's out there" and "I want to persist what's out there":</p>
+<ul>
+<li><code>Source.query()</code> returns an <code>Iterator[SourceRow]</code> — for ad-hoc exploration; never writes.</li>
+<li><code>catalog.ingest(source, query) → query_id</code> materializes results into <code>items.parquet</code>, writes a <code>queries.parquet</code> row, and stamps each item's <code>_provenance.query_id</code>.</li>
+</ul>
+<p>CLI form:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Discover (one-shot, prints, doesn&#39;t persist)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>geocatalog<span class="w"> </span>search<span class="w"> </span>earthaccess<span class="w"> </span>MOD09GA<span class="w"> </span>--bbox<span class="w"> </span>-10<span class="w"> </span><span class="m">35</span><span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="m">45</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span>--start<span class="w"> </span><span class="m">2024</span>-06-01<span class="w"> </span>--end<span class="w"> </span><span class="m">2024</span>-06-30<span class="w"> </span>--limit<span class="w"> </span><span class="m">50</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>geocatalog<span class="w"> </span>search<span class="w"> </span>stac.pc<span class="w"> </span>sentinel-2-l2a<span class="w"> </span>--bbox<span class="w"> </span>-10<span class="w"> </span><span class="m">35</span><span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="m">45</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span>--start<span class="w"> </span><span class="m">2024</span>-06-01<span class="w"> </span>--end<span class="w"> </span><span class="m">2024</span>-06-30<span class="w"> </span>--filter<span class="w"> </span><span class="s2">&quot;eo:cloud_cover&lt;20&quot;</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="c1"># Ingest into catalog (persists items + records the query)</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>geocatalog<span class="w"> </span>ingest<span class="w"> </span>earthaccess<span class="w"> </span>MOD09GA<span class="w"> </span>--bbox<span class="w"> </span>-10<span class="w"> </span><span class="m">35</span><span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="m">45</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="w">    </span>--start<span class="w"> </span><span class="m">2024</span>-06-01<span class="w"> </span>--end<span class="w"> </span><span class="m">2024</span>-06-30<span class="w"> </span>--tag<span class="w"> </span><span class="s2">&quot;iberia_summer24&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="w">    </span>--out<span class="w"> </span>my_catalog/
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="c1"># Matchup across already-ingested items</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>geocatalog<span class="w"> </span>matchup<span class="w"> </span>my_catalog/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="w">    </span>--primary<span class="w">  </span><span class="s2">&quot;source=earthaccess,collection=MOD09GA&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="w">    </span>--secondary<span class="w"> </span><span class="s2">&quot;source=stac.pc,collection=sentinel-2-l2a&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="w">    </span>--strategy<span class="w"> </span>nearest_in_time<span class="w"> </span>--dt<span class="w"> </span>6h<span class="w"> </span>--spatial<span class="w"> </span>iou&gt;0.2<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a><span class="w">    </span>--tag<span class="w"> </span><span class="s2">&quot;modis_s2_pairs_v1&quot;</span>
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a><span class="c1"># Stage / download for a matchup set or query tag</span>
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>geocatalog<span class="w"> </span>stage<span class="w"> </span>my_catalog/<span class="w"> </span>--matchup-tag<span class="w"> </span>modis_s2_pairs_v1<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a><span class="w">    </span>--dest<span class="w"> </span>./staged/<span class="w"> </span>--asset<span class="w"> </span>red,nir,scl<span class="w"> </span>--parallel<span class="w"> </span><span class="m">8</span>
+</code></pre></div>
+<h3 id="46-matchup-engine">4.6 Matchup engine<a class="headerlink" href="#46-matchup-engine" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># src/geocatalog/_src/matchup/__init__.py</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">matchup</span><span class="p">(</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">catalog</span><span class="p">:</span> <span class="n">GeoCatalog</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">primary</span><span class="p">:</span> <span class="n">Selector</span><span class="p">,</span>                 <span class="c1"># filter dict, e.g. {&quot;source&quot;: &quot;earthaccess&quot;, &quot;collection&quot;: &quot;MOD09GA&quot;}</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">secondary</span><span class="p">:</span> <span class="n">Selector</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="n">Selector</span><span class="p">],</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="n">spatial</span><span class="p">:</span> <span class="n">SpatialStrategy</span><span class="p">,</span>           <span class="c1"># IntersectsAtLeast(iou=0.2), CentroidWithin(buffer=&quot;5km&quot;)</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">temporal</span><span class="p">:</span> <span class="n">TemporalStrategy</span><span class="p">,</span>         <span class="c1"># NearestInTime(dt=&quot;6h&quot;), WithinWindow(start=, end=)</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">join</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;all&quot;</span><span class="p">,</span> <span class="s2">&quot;any&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;all&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="n">MatchupRow</span><span class="p">]:</span> <span class="o">...</span>
+</code></pre></div>
+<p><strong>Spatial strategies</strong> (<code>spatial.py</code>):
+- <code>Intersects()</code> — non-zero intersection
+- <code>IouAtLeast(t: float)</code> — IoU ≥ t
+- <code>CentroidWithin(buffer: str | float)</code> — secondary centroid within buffer of primary
+- <code>Contains()</code> — secondary fully contained in primary footprint</p>
+<p><strong>Temporal strategies</strong> (<code>temporal.py</code>):
+- <code>NearestInTime(dt: str)</code> — pick secondary nearest in time, only if Δt ≤ dt
+- <code>WithinWindow(start: timedelta, end: timedelta)</code> — all secondaries in [t+start, t+end] relative to primary
+- <code>Synchronous(tolerance: str = "0s")</code> — overlapping observation intervals</p>
+<p>Implementation: emit DuckDB SQL where possible (range joins on time, spatial via DuckDB's <code>spatial</code> extension), fall back to shapely + pandas merge_asof for the non-SQL bits. Matchup output is itself a <code>GeoCatalog</code> of <code>MatchupRow</code>s and supports the same <code>query(bounds, interval)</code> calls — patchers downstream don't need to distinguish "items" from "matchups".</p>
+<h3 id="47-staging-layer">4.7 Staging layer<a class="headerlink" href="#47-staging-layer" title="Permanent link">&para;</a></h3>
+<p>Explicit, never automatic:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># src/geocatalog/_src/staging/__init__.py</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">stage</span><span class="p">(</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">catalog</span><span class="p">:</span> <span class="n">GeoCatalog</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">dest</span><span class="p">:</span> <span class="n">PathLike</span><span class="p">,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="n">assets</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>         <span class="c1"># asset keys; None = all</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="n">parallel</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">8</span><span class="p">,</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="n">cache</span><span class="p">:</span> <span class="n">LocalCache</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="n">retries</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">GeoCatalog</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<ul>
+<li>Returns a new catalog whose <code>assets</code> columns have been rewritten to local paths (a <code>_staged_path</code> field per asset preserves the original URI).</li>
+<li><code>LocalCache</code> is fsspec-backed; default location <code>~/.cache/geocatalog/</code> or <code>$GEOCATALOG_CACHE</code>.</li>
+<li>GEE-specific path: <code>staging/gee.py</code> materializes via <code>ee.Image.getDownloadURL</code> or <code>ee_export_image</code> — does not bypass EE compute.</li>
+<li>Reuses the retry/backoff machinery from PR #51 (currently scoped to raster loaders).</li>
+</ul>
+<p>The staged catalog is a normal <code>GeoCatalog</code>, so the existing <code>load_raster</code> / <code>load_vector</code> / <code>xarray_backend</code> loaders see it as local files and read them in-place.</p>
+<h2 id="5-geotoolz-geomcoregister-and-compositingmatched">5. GeoToolz: <code>geom.coregister</code> and <code>compositing.matched</code><a class="headerlink" href="#5-geotoolz-geomcoregister-and-compositingmatched" title="Permanent link">&para;</a></h2>
+<p>All cross-modality alignment lives in geotoolz under the existing <code>geom</code> namespace, plus two new operators in <code>compositing</code>. Each follows the package's two-tier convention: a pure numpy/scipy primitive in <code>_src/array.py</code>, a <code>pipekit.Operator</code> wrapper in <code>_src/operators.py</code>.</p>
+<h3 id="51-new-file-layout">5.1 New file layout<a class="headerlink" href="#51-new-file-layout" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>src/geotoolz/
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>  geom/
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    _src/
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>      array.py          # existing array primitives (reproject, resample, rasterize, …)
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>      operators.py      # existing Operator wrappers (Reproject, Resample, Rasterize, …)
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>      coregister/                                     # NEW
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        __init__.py
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>        array.py        # numpy/scipy primitives for cross-modality alignment
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>        operators.py    # pipekit.Operator wrappers
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    coregister.py       # public re-exports: from geotoolz.geom.coregister import *
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>  compositing/
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>    _src/
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>      operators.py      # + StackMatched, BlendMatched (NEW)
+</code></pre></div>
+<h3 id="52-operator-catalog">5.2 Operator catalog<a class="headerlink" href="#52-operator-catalog" title="Permanent link">&para;</a></h3>
+<p>All operators are <code>pipekit.Operator</code> subclasses, <code>__call__(*inputs) → GeoTensor</code>, with <code>get_config()</code> for YAML round-trip.</p>
+<table>
+<thead>
+<tr>
+<th>Operator</th>
+<th>Inputs → Output</th>
+<th>Builds on</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RasterToRasterLike(resampling=…)</code></td>
+<td><code>(src, like) → aligned_src</code></td>
+<td><code>Reproject</code> + <code>Resample</code></td>
+<td>Convenience for the common case; one op instead of two</td>
+</tr>
+<tr>
+<td><code>SwathToGrid(method="bowtie_aware", target_crs=…, target_res=…)</code></td>
+<td><code>swath → grid</code></td>
+<td>rasterio + per-pixel lat/lon</td>
+<td>Track-B gap; handles MODIS/VIIRS bowtie</td>
+</tr>
+<tr>
+<td><code>GridToSwath(time_match="nearest", dt_max="15min")</code></td>
+<td><code>(grid_series, swath_like) → grid_at_swath_geom</code></td>
+<td>rasterio + temporal index</td>
+<td>GEO → LEO acquisition geometry</td>
+</tr>
+<tr>
+<td><code>RasterToPoints(extract="nearest" \| "bilinear")</code></td>
+<td><code>(raster, points) → xvec_cube</code></td>
+<td>xvec</td>
+<td>Extract raster at point geometries → vector cube</td>
+</tr>
+<tr>
+<td><code>PointsToRaster(method="binned_stat", stat="mean", like=…)</code></td>
+<td><code>(points, like) → raster</code></td>
+<td>scipy.stats.binned_statistic_2d</td>
+<td>Bin point cube into grid</td>
+</tr>
+<tr>
+<td><code>RasterToPointCloud(k=…, max_radius=…)</code></td>
+<td><code>(raster, cloud) → cloud_with_attrs</code></td>
+<td>scipy.spatial.KDTree</td>
+<td>Sample raster onto cloud nodes</td>
+</tr>
+<tr>
+<td><code>PointCloudToRaster(method="idw" \| "binned_stat", like=…)</code></td>
+<td><code>(cloud, like) → raster</code></td>
+<td>scipy KDTree + IDW</td>
+<td>Rasterize point cloud</td>
+</tr>
+<tr>
+<td><code>VectorToRasterAgg(agg="mean" \| "majority" \| "count", like=…)</code></td>
+<td><code>(vector, like) → raster</code></td>
+<td>extends <code>Rasterize</code></td>
+<td>Aggregation policy for overlapping features</td>
+</tr>
+<tr>
+<td><code>StackMatched(order=…, fill=NaN)</code></td>
+<td><code>[t1, t2, …] → multi_band</code></td>
+<td>numpy stack + reproject-to-like</td>
+<td>Compositing-style: N aligned tensors → 1 multi-band GeoTensor</td>
+</tr>
+<tr>
+<td><code>BlendMatched(weights=… \| "ivw", method="mean")</code></td>
+<td><code>[t1, t2, …] → blended</code></td>
+<td>numpy weighted mean</td>
+<td>IVW = inverse-variance weighting</td>
+</tr>
+</tbody>
+</table>
+<p><strong>xvec dependency.</strong> Added as a new optional extra:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[project.optional-dependencies]</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">vector-cube</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;xvec&gt;=0.4&quot;</span><span class="p">]</span>
+</code></pre></div>
+<p><code>RasterToPoints</code> / <code>PointsToRaster</code> require it; the rest of geotoolz is unaffected.</p>
+<h3 id="53-operator-signatures-illustrative">5.3 Operator signatures (illustrative)<a class="headerlink" href="#53-operator-signatures-illustrative" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># geotoolz/geom/_src/coregister/operators.py</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">RasterToRasterLike</span><span class="p">(</span><span class="n">Operator</span><span class="p">):</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">resampling</span><span class="p">:</span> <span class="n">Resampling</span> <span class="o">=</span> <span class="n">Resampling</span><span class="o">.</span><span class="n">bilinear</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">src</span><span class="p">:</span> <span class="n">GeoTensor</span><span class="p">,</span> <span class="n">like</span><span class="p">:</span> <span class="n">GeoTensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">GeoTensor</span><span class="p">:</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>        <span class="o">...</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_config</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;resampling&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">resampling</span><span class="o">.</span><span class="n">name</span><span class="p">}</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="k">class</span><span class="w"> </span><span class="nc">SwathToGrid</span><span class="p">(</span><span class="n">Operator</span><span class="p">):</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>    <span class="n">method</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;bowtie_aware&quot;</span><span class="p">,</span> <span class="s2">&quot;naive&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;bowtie_aware&quot;</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>    <span class="n">target_crs</span><span class="p">:</span> <span class="nb">str</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>    <span class="n">target_res</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    <span class="n">bounds</span><span class="p">:</span> <span class="n">Bounds</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">swath</span><span class="p">:</span> <span class="n">GeoTensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">GeoTensor</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_config</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span> <span class="o">...</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>
+<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a><span class="k">class</span><span class="w"> </span><span class="nc">RasterToPoints</span><span class="p">(</span><span class="n">Operator</span><span class="p">):</span>
+<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>    <span class="n">extract</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;nearest&quot;</span><span class="p">,</span> <span class="s2">&quot;bilinear&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;bilinear&quot;</span>
+<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>    <span class="n">out_var</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;value&quot;</span>
+<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a>
+<a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">raster</span><span class="p">:</span> <span class="n">GeoTensor</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="s2">&quot;xvec.DataArray&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;xvec.DataArray&quot;</span><span class="p">:</span> <span class="o">...</span>
+</code></pre></div>
+<h3 id="54-what-this-unlocks-beyond-matchups">5.4 What this unlocks beyond matchups<a class="headerlink" href="#54-what-this-unlocks-beyond-matchups" title="Permanent link">&para;</a></h3>
+<p>Because these are stateless <code>pipekit.Operator</code>s, they're useful outside any matchup or patching context:</p>
+<ul>
+<li>A flat pipeline that stacks Sentinel-2 + Landsat for a single AOI: <code>Sequential([RasterToRasterLike(), StackMatched()])</code>.</li>
+<li>A station-validation script: <code>RasterToPoints()</code> to extract model output at in-situ buoy locations.</li>
+<li>A point-cloud-to-DEM conversion: <code>PointCloudToRaster(method="idw")</code>.</li>
+</ul>
+<p>This is the payoff of putting them in geotoolz rather than burying them inside geopatcher.</p>
+<h2 id="6-geopatcher-matchedfield-and-matchedpatch">6. GeoPatcher: <code>MatchedField</code> and <code>MatchedPatch</code><a class="headerlink" href="#6-geopatcher-matchedfield-and-matchedpatch" title="Permanent link">&para;</a></h2>
+<h3 id="61-new-file-layout">6.1 New file layout<a class="headerlink" href="#61-new-file-layout" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>src/geopatcher/_src/
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>  matched/                                  # NEW
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    __init__.py
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    field.py        # MatchedField composite Field
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    patch.py        # MatchedPatch carrier
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    patcher.py      # MatchedSpatialPatcher (+ Temporal / SpatioTemporal variants)
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    aggregation.py  # MatchedAggregator (per-source dict of aggregators)
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>  spatial/, time/, …                         # unchanged
+</code></pre></div>
+<p>Public re-export at <code>geopatcher.matched</code>.</p>
+<h3 id="62-matchedfield-a-composite-field">6.2 <code>MatchedField</code> — a composite Field<a class="headerlink" href="#62-matchedfield-a-composite-field" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># geopatcher/_src/matched/field.py</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">eq</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">MatchedField</span><span class="p">:</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;N co-registered Fields presented as one Field.</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="sd">    Satisfies the `Field` Protocol via the primary (anchor space, CRS, domain).</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="sd">    On select(), delegates to each secondary and pipes through its coreg callable.</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>    <span class="n">primary</span><span class="p">:</span> <span class="n">Field</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>    <span class="n">secondaries</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Field</span><span class="p">]</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>    <span class="n">coreg</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Callable</span><span class="p">]</span>   <span class="c1"># any Callable; pipekit.Operator (e.g. from</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>                                    <span class="c1"># geotoolz.geom.coregister) is the recommended choice</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>                                    <span class="c1"># — see ADR-003 for why the type is the broader Callable.</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>    <span class="n">valid_mask</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>         <span class="c1"># emit per-source nodata masks</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>    <span class="nd">@property</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">domain</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Domain</span><span class="p">:</span>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">primary</span><span class="o">.</span><span class="n">domain</span>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a>
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">select</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">indexer</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MatchedPatch</span><span class="p">:</span>
+<a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a>        <span class="c1"># `Field.select` takes a single `indexer` (the shape is decided by</span>
+<a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a>        <span class="c1"># the primary&#39;s Domain — Window for raster, dict[str, slice] for</span>
+<a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a>        <span class="c1"># grid, etc.). MatchedField forwards the same indexer to every</span>
+<a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a>        <span class="c1"># member.</span>
+<a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a>        <span class="n">primary_patch</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">primary</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">indexer</span><span class="p">)</span>
+<a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a>        <span class="n">members</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Patch</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;primary&quot;</span><span class="p">:</span> <span class="n">primary_patch</span><span class="p">}</span>
+<a id="__codelineno-13-28" name="__codelineno-13-28" href="#__codelineno-13-28"></a>        <span class="n">masks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-13-29" name="__codelineno-13-29" href="#__codelineno-13-29"></a>        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">sec</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">secondaries</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+<a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a>            <span class="n">raw</span> <span class="o">=</span> <span class="n">sec</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">indexer</span><span class="p">)</span>
+<a id="__codelineno-13-31" name="__codelineno-13-31" href="#__codelineno-13-31"></a>            <span class="n">aligned</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">coreg</span><span class="p">[</span><span class="n">name</span><span class="p">](</span><span class="n">raw</span><span class="p">,</span> <span class="n">primary_patch</span><span class="p">)</span>  <span class="c1"># any geotoolz op</span>
+<a id="__codelineno-13-32" name="__codelineno-13-32" href="#__codelineno-13-32"></a>            <span class="n">members</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">aligned</span>
+<a id="__codelineno-13-33" name="__codelineno-13-33" href="#__codelineno-13-33"></a>            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">valid_mask</span><span class="p">:</span>
+<a id="__codelineno-13-34" name="__codelineno-13-34" href="#__codelineno-13-34"></a>                <span class="n">masks</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">_compute_mask</span><span class="p">(</span><span class="n">aligned</span><span class="p">)</span>
+<a id="__codelineno-13-35" name="__codelineno-13-35" href="#__codelineno-13-35"></a>        <span class="k">return</span> <span class="n">MatchedPatch</span><span class="p">(</span><span class="n">anchor</span><span class="o">=</span><span class="n">primary_patch</span><span class="o">.</span><span class="n">anchor</span><span class="p">,</span> <span class="n">members</span><span class="o">=</span><span class="n">members</span><span class="p">,</span> <span class="n">valid_mask</span><span class="o">=</span><span class="n">masks</span><span class="p">)</span>
+</code></pre></div>
+<p>Three properties this design preserves:</p>
+<ol>
+<li><strong>Existing samplers, geometries, windows, and aggregations work unchanged.</strong> <code>MatchedField</code> <em>is</em> a <code>Field</code>; <code>SpatialPatcher(MatchedField(...))</code> is valid.</li>
+<li><strong>Geopatcher's core stays numpy + scipy.</strong> The <code>coreg</code> dict holds opaque callables; geopatcher never imports <code>geotoolz</code>.</li>
+<li><strong>Coregistration logic is reusable outside patching.</strong> Same operators serve flat pipelines, validation scripts, and matchup builds.</li>
+</ol>
+<h3 id="63-matchedpatch-the-carrier">6.3 <code>MatchedPatch</code> — the carrier<a class="headerlink" href="#63-matchedpatch-the-carrier" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># geopatcher/_src/matched/patch.py</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="nd">@dataclass</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">MatchedPatch</span><span class="p">:</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="n">anchor</span><span class="p">:</span> <span class="n">Anchor</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>    <span class="n">members</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Patch</span><span class="p">]</span>                    <span class="c1"># &quot;primary&quot; + secondaries by name</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>    <span class="n">valid_mask</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span>     <span class="c1"># NaN / out-of-swath per source</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>    <span class="n">weights</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span> <span class="c1"># per-source window weights, optional</span>
+</code></pre></div>
+<p><code>MatchedPatch</code> does not subclass <code>Patch</code> — it's a sibling carrier. Operators that want to consume one explicitly type against <code>MatchedPatch</code>; legacy operators see a single primary <code>Patch</code> via <code>mp.members["primary"]</code>.</p>
+<h3 id="64-aggregation-back-to-global-fields">6.4 Aggregation back to global field(s)<a class="headerlink" href="#64-aggregation-back-to-global-fields" title="Permanent link">&para;</a></h3>
+<p>Merge is per-source. <code>MatchedSpatialPatcher.merge(patches)</code> returns a <code>dict[str, Field]</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">MatchedSpatialPatcher</span><span class="p">:</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="n">primary</span><span class="p">:</span> <span class="n">SpatialPatcher</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>    <span class="n">secondary_aggregators</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Aggregation</span><span class="p">]</span>  <span class="c1"># per-source aggregator</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">merge</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">patches</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">MatchedPatch</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Field</span><span class="p">]:</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>        <span class="o">...</span>
+</code></pre></div>
+<p>This is the only API shape change relative to existing patchers, and it's introduced by a new class so backwards compat is untouched.</p>
+<h3 id="65-streaming-guarantees">6.5 Streaming guarantees<a class="headerlink" href="#65-streaming-guarantees" title="Permanent link">&para;</a></h3>
+<p><code>MatchedField.iter_patches</code> yields one <code>MatchedPatch</code> at a time. Memory is bounded by <code>patch_size × len(secondaries)</code>. All existing streaming aggregators (e.g. <code>SpatialOverlapAdd</code> with Zarr backing) work per-source.</p>
+<h2 id="7-end-to-end-walkthrough-modis-sentinel-2-patches-over-iberia">7. End-to-end walkthrough: MODIS × Sentinel-2 patches over Iberia<a class="headerlink" href="#7-end-to-end-walkthrough-modis-sentinel-2-patches-over-iberia" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">geocatalog</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gc</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">geocatalog.sources</span><span class="w"> </span><span class="kn">import</span> <span class="n">EarthAccessSource</span><span class="p">,</span> <span class="n">STACSource</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">geocatalog.matchup</span><span class="w"> </span><span class="kn">import</span> <span class="n">IouAtLeast</span><span class="p">,</span> <span class="n">NearestInTime</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">geopatcher</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gp</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">geopatcher.matched</span><span class="w"> </span><span class="kn">import</span> <span class="n">MatchedField</span><span class="p">,</span> <span class="n">MatchedSpatialPatcher</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">geotoolz.geom.coregister</span><span class="w"> </span><span class="kn">import</span> <span class="n">RasterToRasterLike</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="c1"># 1. Discover &amp; ingest</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="n">cat</span> <span class="o">=</span> <span class="n">gc</span><span class="o">.</span><span class="n">DuckDBGeoCatalog</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;my_catalog/&quot;</span><span class="p">,</span> <span class="n">target_crs</span><span class="o">=</span><span class="s2">&quot;EPSG:32629&quot;</span><span class="p">,</span> <span class="n">create</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="n">cat</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>    <span class="n">EarthAccessSource</span><span class="p">(),</span>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>    <span class="n">collection</span><span class="o">=</span><span class="s2">&quot;MOD09GA&quot;</span><span class="p">,</span>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a>    <span class="n">bounds</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">10</span><span class="p">,</span> <span class="mi">35</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">45</span><span class="p">),</span> <span class="n">interval</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;2024-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2024-06-30&quot;</span><span class="p">),</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a>    <span class="n">tag</span><span class="o">=</span><span class="s2">&quot;iberia_summer24&quot;</span><span class="p">,</span>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a><span class="p">)</span>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a>
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a><span class="n">cat</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span>
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a>    <span class="n">STACSource</span><span class="o">.</span><span class="n">planetary_computer</span><span class="p">(),</span>
+<a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a>    <span class="n">collection</span><span class="o">=</span><span class="s2">&quot;sentinel-2-l2a&quot;</span><span class="p">,</span>
+<a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a>    <span class="n">bounds</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">10</span><span class="p">,</span> <span class="mi">35</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">45</span><span class="p">),</span> <span class="n">interval</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;2024-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2024-06-30&quot;</span><span class="p">),</span>
+<a id="__codelineno-16-22" name="__codelineno-16-22" href="#__codelineno-16-22"></a>    <span class="n">filters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;eo:cloud_cover&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;lt&quot;</span><span class="p">:</span> <span class="mi">20</span><span class="p">}},</span>
+<a id="__codelineno-16-23" name="__codelineno-16-23" href="#__codelineno-16-23"></a>    <span class="n">tag</span><span class="o">=</span><span class="s2">&quot;iberia_summer24&quot;</span><span class="p">,</span>
+<a id="__codelineno-16-24" name="__codelineno-16-24" href="#__codelineno-16-24"></a><span class="p">)</span>
+<a id="__codelineno-16-25" name="__codelineno-16-25" href="#__codelineno-16-25"></a>
+<a id="__codelineno-16-26" name="__codelineno-16-26" href="#__codelineno-16-26"></a><span class="c1"># 2. Build matchups</span>
+<a id="__codelineno-16-27" name="__codelineno-16-27" href="#__codelineno-16-27"></a><span class="n">matchup_id</span> <span class="o">=</span> <span class="n">cat</span><span class="o">.</span><span class="n">matchup</span><span class="p">(</span>
+<a id="__codelineno-16-28" name="__codelineno-16-28" href="#__codelineno-16-28"></a>    <span class="n">primary</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;earthaccess&quot;</span><span class="p">,</span> <span class="s2">&quot;collection&quot;</span><span class="p">:</span> <span class="s2">&quot;MOD09GA&quot;</span><span class="p">},</span>
+<a id="__codelineno-16-29" name="__codelineno-16-29" href="#__codelineno-16-29"></a>    <span class="n">secondary</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;stac.pc&quot;</span><span class="p">,</span> <span class="s2">&quot;collection&quot;</span><span class="p">:</span> <span class="s2">&quot;sentinel-2-l2a&quot;</span><span class="p">},</span>
+<a id="__codelineno-16-30" name="__codelineno-16-30" href="#__codelineno-16-30"></a>    <span class="n">spatial</span><span class="o">=</span><span class="n">IouAtLeast</span><span class="p">(</span><span class="mf">0.2</span><span class="p">),</span>
+<a id="__codelineno-16-31" name="__codelineno-16-31" href="#__codelineno-16-31"></a>    <span class="n">temporal</span><span class="o">=</span><span class="n">NearestInTime</span><span class="p">(</span><span class="n">dt</span><span class="o">=</span><span class="s2">&quot;6h&quot;</span><span class="p">),</span>
+<a id="__codelineno-16-32" name="__codelineno-16-32" href="#__codelineno-16-32"></a>    <span class="n">tag</span><span class="o">=</span><span class="s2">&quot;modis_s2_pairs_v1&quot;</span><span class="p">,</span>
+<a id="__codelineno-16-33" name="__codelineno-16-33" href="#__codelineno-16-33"></a><span class="p">)</span>
+<a id="__codelineno-16-34" name="__codelineno-16-34" href="#__codelineno-16-34"></a>
+<a id="__codelineno-16-35" name="__codelineno-16-35" href="#__codelineno-16-35"></a><span class="c1"># 3. Stage bytes for the matched assets only</span>
+<a id="__codelineno-16-36" name="__codelineno-16-36" href="#__codelineno-16-36"></a><span class="n">staged</span> <span class="o">=</span> <span class="n">cat</span><span class="o">.</span><span class="n">stage</span><span class="p">(</span><span class="n">matchup_tag</span><span class="o">=</span><span class="s2">&quot;modis_s2_pairs_v1&quot;</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">&quot;./staged/&quot;</span><span class="p">,</span>
+<a id="__codelineno-16-37" name="__codelineno-16-37" href="#__codelineno-16-37"></a>                   <span class="n">assets</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;red&quot;</span><span class="p">,</span> <span class="s2">&quot;nir&quot;</span><span class="p">,</span> <span class="s2">&quot;scl&quot;</span><span class="p">],</span> <span class="n">parallel</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+<a id="__codelineno-16-38" name="__codelineno-16-38" href="#__codelineno-16-38"></a>
+<a id="__codelineno-16-39" name="__codelineno-16-39" href="#__codelineno-16-39"></a><span class="c1"># 4. Build a MatchedField from a matchup row</span>
+<a id="__codelineno-16-40" name="__codelineno-16-40" href="#__codelineno-16-40"></a><span class="n">modis_field</span> <span class="o">=</span> <span class="n">staged</span><span class="o">.</span><span class="n">field_for</span><span class="p">(</span><span class="n">matchup_id</span><span class="p">,</span> <span class="n">role</span><span class="o">=</span><span class="s2">&quot;primary&quot;</span><span class="p">)</span>     <span class="c1"># RasterField</span>
+<a id="__codelineno-16-41" name="__codelineno-16-41" href="#__codelineno-16-41"></a><span class="n">s2_field</span>    <span class="o">=</span> <span class="n">staged</span><span class="o">.</span><span class="n">field_for</span><span class="p">(</span><span class="n">matchup_id</span><span class="p">,</span> <span class="n">role</span><span class="o">=</span><span class="s2">&quot;secondary&quot;</span><span class="p">)</span>   <span class="c1"># RasterField</span>
+<a id="__codelineno-16-42" name="__codelineno-16-42" href="#__codelineno-16-42"></a>
+<a id="__codelineno-16-43" name="__codelineno-16-43" href="#__codelineno-16-43"></a><span class="n">matched</span> <span class="o">=</span> <span class="n">MatchedField</span><span class="p">(</span>
+<a id="__codelineno-16-44" name="__codelineno-16-44" href="#__codelineno-16-44"></a>    <span class="n">primary</span><span class="o">=</span><span class="n">modis_field</span><span class="p">,</span>
+<a id="__codelineno-16-45" name="__codelineno-16-45" href="#__codelineno-16-45"></a>    <span class="n">secondaries</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;s2&quot;</span><span class="p">:</span> <span class="n">s2_field</span><span class="p">},</span>
+<a id="__codelineno-16-46" name="__codelineno-16-46" href="#__codelineno-16-46"></a>    <span class="n">coreg</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;s2&quot;</span><span class="p">:</span> <span class="n">RasterToRasterLike</span><span class="p">(</span><span class="n">resampling</span><span class="o">=</span><span class="s2">&quot;bilinear&quot;</span><span class="p">)},</span>
+<a id="__codelineno-16-47" name="__codelineno-16-47" href="#__codelineno-16-47"></a><span class="p">)</span>
+<a id="__codelineno-16-48" name="__codelineno-16-48" href="#__codelineno-16-48"></a>
+<a id="__codelineno-16-49" name="__codelineno-16-49" href="#__codelineno-16-49"></a><span class="c1"># 5. Patch with any existing geopatcher sampler</span>
+<a id="__codelineno-16-50" name="__codelineno-16-50" href="#__codelineno-16-50"></a><span class="n">patcher</span> <span class="o">=</span> <span class="n">MatchedSpatialPatcher</span><span class="p">(</span>
+<a id="__codelineno-16-51" name="__codelineno-16-51" href="#__codelineno-16-51"></a>    <span class="n">primary</span><span class="o">=</span><span class="n">gp</span><span class="o">.</span><span class="n">SpatialPatcher</span><span class="p">(</span>
+<a id="__codelineno-16-52" name="__codelineno-16-52" href="#__codelineno-16-52"></a>        <span class="n">geometry</span><span class="o">=</span><span class="n">gp</span><span class="o">.</span><span class="n">spatial</span><span class="o">.</span><span class="n">SpatialRectangular</span><span class="p">(</span><span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="mi">512</span><span class="p">,</span> <span class="mi">512</span><span class="p">)),</span>
+<a id="__codelineno-16-53" name="__codelineno-16-53" href="#__codelineno-16-53"></a>        <span class="n">sampler</span><span class="o">=</span><span class="n">gp</span><span class="o">.</span><span class="n">spatial</span><span class="o">.</span><span class="n">SpatialRegularStride</span><span class="p">(</span><span class="n">stride</span><span class="o">=</span><span class="p">(</span><span class="mi">256</span><span class="p">,</span> <span class="mi">256</span><span class="p">)),</span>
+<a id="__codelineno-16-54" name="__codelineno-16-54" href="#__codelineno-16-54"></a>        <span class="n">window</span><span class="o">=</span><span class="n">gp</span><span class="o">.</span><span class="n">spatial</span><span class="o">.</span><span class="n">SpatialBoxcar</span><span class="p">(),</span>
+<a id="__codelineno-16-55" name="__codelineno-16-55" href="#__codelineno-16-55"></a>        <span class="n">aggregation</span><span class="o">=</span><span class="n">gp</span><span class="o">.</span><span class="n">spatial</span><span class="o">.</span><span class="n">SpatialMean</span><span class="p">(),</span>
+<a id="__codelineno-16-56" name="__codelineno-16-56" href="#__codelineno-16-56"></a>    <span class="p">),</span>
+<a id="__codelineno-16-57" name="__codelineno-16-57" href="#__codelineno-16-57"></a>    <span class="n">secondary_aggregators</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;s2&quot;</span><span class="p">:</span> <span class="n">gp</span><span class="o">.</span><span class="n">spatial</span><span class="o">.</span><span class="n">SpatialMean</span><span class="p">()},</span>
+<a id="__codelineno-16-58" name="__codelineno-16-58" href="#__codelineno-16-58"></a><span class="p">)</span>
+<a id="__codelineno-16-59" name="__codelineno-16-59" href="#__codelineno-16-59"></a>
+<a id="__codelineno-16-60" name="__codelineno-16-60" href="#__codelineno-16-60"></a><span class="k">for</span> <span class="n">matched_patch</span> <span class="ow">in</span> <span class="n">patcher</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">matched</span><span class="p">):</span>
+<a id="__codelineno-16-61" name="__codelineno-16-61" href="#__codelineno-16-61"></a>    <span class="n">modis_chip</span> <span class="o">=</span> <span class="n">matched_patch</span><span class="o">.</span><span class="n">members</span><span class="p">[</span><span class="s2">&quot;primary&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">data</span>     <span class="c1"># (bands, H, W) MODIS</span>
+<a id="__codelineno-16-62" name="__codelineno-16-62" href="#__codelineno-16-62"></a>    <span class="n">s2_chip</span>    <span class="o">=</span> <span class="n">matched_patch</span><span class="o">.</span><span class="n">members</span><span class="p">[</span><span class="s2">&quot;s2&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">data</span>          <span class="c1"># (bands, H, W) S2 at MODIS grid</span>
+<a id="__codelineno-16-63" name="__codelineno-16-63" href="#__codelineno-16-63"></a>    <span class="n">mask</span>       <span class="o">=</span> <span class="n">matched_patch</span><span class="o">.</span><span class="n">valid_mask</span><span class="p">[</span><span class="s2">&quot;s2&quot;</span><span class="p">]</span>            <span class="c1"># where S2 is valid</span>
+<a id="__codelineno-16-64" name="__codelineno-16-64" href="#__codelineno-16-64"></a>    <span class="c1"># → into model / training loop / further geotoolz pipeline</span>
+</code></pre></div>
+<p>Three things to notice:</p>
+<ul>
+<li>The user never touches a coregistration class — they pick a <code>geotoolz</code> operator.</li>
+<li>The matchup is reproducible: re-running step 2 with the same tag against an updated catalog produces a new <code>matchup_id</code> but the same matchup logic, persisted.</li>
+<li>Every step is independently usable: ingest without matchup, matchup without staging, stage without patching, patch without matchup (just <code>MatchedField(primary, {}, {})</code>).</li>
+</ul>
+<h2 id="8-phasing">8. Phasing<a class="headerlink" href="#8-phasing" title="Permanent link">&para;</a></h2>
+<p>A suggested four-phase rollout. Each phase ships independently and is useful on its own.</p>
+<h3 id="phase-1-geocatalog-source-adapters-no-breaking-changes">Phase 1 — <code>geocatalog</code> source adapters (no breaking changes)<a class="headerlink" href="#phase-1-geocatalog-source-adapters-no-breaking-changes" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>_src/sources/__init__.py</code> with <code>Source</code> Protocol, <code>SourceRow</code></li>
+<li><code>EarthAccessSource</code>, <code>STACSource</code>, <code>CMRSource</code></li>
+<li><code>catalog.ingest()</code> + <code>geocatalog ingest</code> CLI</li>
+<li><code>queries.parquet</code> schema + migration v0 → v1</li>
+<li>GEE deferred to Phase 3</li>
+</ul>
+<p><strong>Exit criteria:</strong> <code>geocatalog ingest earthaccess MOD09GA …</code> works end-to-end; round-trip test ingest → query → load_raster passes.</p>
+<h3 id="phase-2-geocatalog-matchup-engine">Phase 2 — <code>geocatalog</code> matchup engine<a class="headerlink" href="#phase-2-geocatalog-matchup-engine" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>_src/matchup/</code> with spatial + temporal strategy classes</li>
+<li><code>matchups.parquet</code> schema</li>
+<li><code>catalog.matchup()</code> + <code>geocatalog matchup</code> CLI</li>
+<li>DuckDB-backed implementation for performance</li>
+</ul>
+<p><strong>Exit criteria:</strong> MODIS × S2 matchup over Iberia completes in &lt; 30s for ~1k granules each.</p>
+<h3 id="phase-3-geotoolz-coregistration-operators">Phase 3 — <code>geotoolz</code> coregistration operators<a class="headerlink" href="#phase-3-geotoolz-coregistration-operators" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>geotoolz.geom.coregister</code> submodule, eight new operators</li>
+<li><code>geotoolz.compositing.StackMatched</code> / <code>BlendMatched</code></li>
+<li>xvec optional extra</li>
+<li>YAML round-trip tests for all new operators</li>
+<li>(Parallel track) <code>GEESource</code> in geocatalog</li>
+</ul>
+<p><strong>Exit criteria:</strong> <code>RasterToRasterLike</code> parity-tests against existing <code>Reproject + Resample</code>; <code>SwathToGrid</code> produces a regular-grid MOD09GA tile from raw swath input.</p>
+<h3 id="phase-4-geopatcher-matched-field">Phase 4 — <code>geopatcher</code> matched field<a class="headerlink" href="#phase-4-geopatcher-matched-field" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>geopatcher.matched</code> submodule with <code>MatchedField</code> / <code>MatchedPatch</code> / <code>MatchedSpatialPatcher</code></li>
+<li>Streaming determinism tests (extends existing Hypothesis suite)</li>
+<li>Notebook recipe: MODIS × S2 matched patches → torch DataLoader</li>
+<li><code>geocatalog.stage().field_for()</code> helper that returns ready-to-go Fields</li>
+</ul>
+<p><strong>Exit criteria:</strong> The end-to-end walkthrough in §7 runs as a notebook.</p>
+<h3 id="phase-5-optional-later-staging-polish">Phase 5 (optional / later) — staging polish<a class="headerlink" href="#phase-5-optional-later-staging-polish" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>geocatalog.staging</code> with cache, parallelism, retry</li>
+<li><code>obstore</code> / <code>fsspec</code> adapter for multi-cloud (lines up with existing branch <code>copilot/feat-io-fsspec-obstore-path-resolution</code>)</li>
+</ul>
+<h2 id="9-open-questions">9. Open questions<a class="headerlink" href="#9-open-questions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Question</th>
+<th>Default if undecided</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Matchup catalog as sibling Parquet vs. separate artifact?</td>
+<td><strong>Sibling</strong> (§4.4)</td>
+</tr>
+<tr>
+<td>2</td>
+<td>GEE scope: enumerate only, or run <code>ee.Image</code> recipes in staging?</td>
+<td><strong>Enumerate only in v1</strong>; recipes deferred</td>
+</tr>
+<tr>
+<td>3</td>
+<td>STAC adapter: one generic + named factory helpers, or distinct subclasses per provider?</td>
+<td><strong>Generic <code>STACSource(endpoint=...)</code> with class-method factories</strong></td>
+</tr>
+<tr>
+<td>4</td>
+<td>Auth surface: defer to libraries, or add <code>geocatalog auth status</code> aggregator?</td>
+<td><strong>Defer</strong>; add aggregator if users ask</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>MatchedPatch</code> subclasses <code>Patch</code> or sibling carrier?</td>
+<td><strong>Sibling</strong> (avoid LSP issues)</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>MatchedField.coreg</code> typed as <code>dict[str, Operator]</code> (pipekit) or untyped <code>Callable</code>?</td>
+<td><strong>Resolved (ADR-003):</strong> typed as <code>Mapping[str, Callable]</code>; <code>pipekit.Operator</code> is the recommended value but not required, so geopatcher's core stays framework-free.</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Should the matchup engine emit a <em>new catalog</em> or in-place new rows in <code>items.parquet</code>?</td>
+<td><strong>New rows in <code>matchups.parquet</code></strong>; <code>items</code> stays atoms</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Cache scope for staging: per-catalog, per-user, or per-host?</td>
+<td><strong>Per-user</strong> (<code>~/.cache/geocatalog/</code>), overridable by env var</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Do we want <code>BlendMatched(method="ivw")</code> in Phase 3 or defer (uncertainty maps not always present)?</td>
+<td><strong>Defer</strong>; ship <code>StackMatched</code> first</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Where does this design doc finally live?</td>
+<td>TBD — currently <code>~/query-matchup-design.md</code>; candidates: <code>geocatalog/docs/design/</code>, a new cross-package <code>docs/</code> repo, or split into per-package ADRs</td>
+</tr>
+</tbody>
+</table>
+<h2 id="10-appendix-a-alternatives-considered">10. Appendix A: alternatives considered<a class="headerlink" href="#10-appendix-a-alternatives-considered" title="Permanent link">&para;</a></h2>
+<h3 id="a1-source-adapters-as-plugins-entry-points-vs-in-tree-modules">A1. Source adapters as plugins (entry points) vs. in-tree modules<a class="headerlink" href="#a1-source-adapters-as-plugins-entry-points-vs-in-tree-modules" title="Permanent link">&para;</a></h3>
+<p><strong>Chosen:</strong> in-tree modules under <code>_src/sources/</code>, behind optional extras.
+<strong>Rejected:</strong> entry-point plugin system. Premature; locks in a contract before we know what real adapters need. We can always promote to entry points later without breaking the in-tree code.</p>
+<h3 id="a2-coregistration-strategies-as-a-new-coregistrationstrategy-class-in-geopatcher">A2. Coregistration strategies as a new <code>CoregistrationStrategy</code> class in geopatcher<a class="headerlink" href="#a2-coregistration-strategies-as-a-new-coregistrationstrategy-class-in-geopatcher" title="Permanent link">&para;</a></h3>
+<p><strong>Chosen:</strong> plain <code>pipekit.Operator</code>s in geotoolz, held in a <code>dict[str, Operator]</code> on <code>MatchedField</code>.
+<strong>Rejected:</strong> dedicated <code>CoregistrationStrategy</code> ABC in geopatcher. Reasons:
+- Duplicates work geotoolz's <code>geom</code> module already does for single-source ops.
+- Forces geopatcher to import or re-implement reprojection, rasterization, KDTree binning.
+- Breaks the "geopatcher core is numpy + scipy only" invariant.
+- Loses YAML serializability that <code>pipekit.Operator</code> gives for free.</p>
+<h3 id="a3-merge-itemsparquet-and-matchupsparquet-into-one-table">A3. Merge <code>items.parquet</code> and <code>matchups.parquet</code> into one table<a class="headerlink" href="#a3-merge-itemsparquet-and-matchupsparquet-into-one-table" title="Permanent link">&para;</a></h3>
+<p><strong>Chosen:</strong> two tables.
+<strong>Rejected:</strong> unified "rows-with-optional-members" schema. Reasons:
+- <code>items</code> are atoms; <code>matchups</code> are compositions of atoms. Different cardinality semantics (1:1 vs. 1:N).
+- DuckDB joins are cheap; one combined schema would be sparse and confusing.</p>
+<h3 id="a4-async-first-geocatalog-ingest">A4. Async-first geocatalog ingest<a class="headerlink" href="#a4-async-first-geocatalog-ingest" title="Permanent link">&para;</a></h3>
+<p><strong>Chosen:</strong> sync <code>Source.query</code> returning an <code>Iterator</code>. Internal parallelism via <code>concurrent.futures</code> where adapters benefit.
+<strong>Rejected:</strong> <code>AsyncSource</code> Protocol. Adapters' upstream libraries (<code>earthaccess</code>, <code>pystac-client</code>, <code>ee</code>) are sync; async would mostly be wrapping with <code>asyncio.to_thread</code>. Revisit if <code>aiohttp</code>-native adapters appear.</p>
+<h3 id="a5-staging-via-symlinks-vs-real-download">A5. Staging via symlinks vs. real download<a class="headerlink" href="#a5-staging-via-symlinks-vs-real-download" title="Permanent link">&para;</a></h3>
+<p><strong>Chosen:</strong> real download into cache (with re-use). Optionally support <code>--symlink</code> for local URIs.
+<strong>Rejected:</strong> symlink-only. Defeats the purpose for cloud URIs; complicates cache invalidation.</p>
+<h2 id="11-appendix-b-api-surface-summary">11. Appendix B: API surface summary<a class="headerlink" href="#11-appendix-b-api-surface-summary" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>geocatalog
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>  .sources
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>    .Source                         # Protocol
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>    .SourceRow                      # normalized output of every Source.query
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>    .EarthAccessSource              # adapter
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>    .STACSource                     # adapter (+ .planetary_computer(), .earth_search())
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    .GEESource                      # adapter (Phase 3)
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>    .CMRSource                      # adapter
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>  .matchup
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>    .matchup(...)                   # functional
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>    .MatchupRow                     # dataclass
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>    .IouAtLeast, .CentroidWithin, .Intersects, .Contains   # spatial strategies
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a>    .NearestInTime, .WithinWindow, .Synchronous            # temporal strategies
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>  .staging
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a>    .stage(...)                     # functional
+<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a>    .LocalCache                     # cache class
+<a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a>  .GeoCatalog                       # (existing) extended with .ingest, .matchup, .stage
+<a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a>  .GeoSlice                         # (existing)
+<a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a>  .DuckDBGeoCatalog, .InMemoryGeoCatalog  # (existing)
+<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a>
+<a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a>geotoolz.geom.coregister
+<a id="__codelineno-17-22" name="__codelineno-17-22" href="#__codelineno-17-22"></a>  .RasterToRasterLike
+<a id="__codelineno-17-23" name="__codelineno-17-23" href="#__codelineno-17-23"></a>  .SwathToGrid
+<a id="__codelineno-17-24" name="__codelineno-17-24" href="#__codelineno-17-24"></a>  .GridToSwath
+<a id="__codelineno-17-25" name="__codelineno-17-25" href="#__codelineno-17-25"></a>  .RasterToPoints                   # requires [vector-cube] extra (xvec)
+<a id="__codelineno-17-26" name="__codelineno-17-26" href="#__codelineno-17-26"></a>  .PointsToRaster                   # requires [vector-cube] extra
+<a id="__codelineno-17-27" name="__codelineno-17-27" href="#__codelineno-17-27"></a>  .RasterToPointCloud
+<a id="__codelineno-17-28" name="__codelineno-17-28" href="#__codelineno-17-28"></a>  .PointCloudToRaster
+<a id="__codelineno-17-29" name="__codelineno-17-29" href="#__codelineno-17-29"></a>  .VectorToRasterAgg
+<a id="__codelineno-17-30" name="__codelineno-17-30" href="#__codelineno-17-30"></a>
+<a id="__codelineno-17-31" name="__codelineno-17-31" href="#__codelineno-17-31"></a>geotoolz.compositing
+<a id="__codelineno-17-32" name="__codelineno-17-32" href="#__codelineno-17-32"></a>  .StackMatched                     # new
+<a id="__codelineno-17-33" name="__codelineno-17-33" href="#__codelineno-17-33"></a>  .BlendMatched                     # new (Phase 3+, deferred if uncertainty rare)
+<a id="__codelineno-17-34" name="__codelineno-17-34" href="#__codelineno-17-34"></a>
+<a id="__codelineno-17-35" name="__codelineno-17-35" href="#__codelineno-17-35"></a>geopatcher.matched
+<a id="__codelineno-17-36" name="__codelineno-17-36" href="#__codelineno-17-36"></a>  .MatchedField
+<a id="__codelineno-17-37" name="__codelineno-17-37" href="#__codelineno-17-37"></a>  .MatchedPatch
+<a id="__codelineno-17-38" name="__codelineno-17-38" href="#__codelineno-17-38"></a>  .MatchedSpatialPatcher
+<a id="__codelineno-17-39" name="__codelineno-17-39" href="#__codelineno-17-39"></a>  .MatchedTemporalPatcher           # mirror, Phase 4+
+<a id="__codelineno-17-40" name="__codelineno-17-40" href="#__codelineno-17-40"></a>  .MatchedSpatioTemporalPatcher     # mirror, Phase 4+
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "content.code.copy", "content.code.annotate"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3.2.2/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
