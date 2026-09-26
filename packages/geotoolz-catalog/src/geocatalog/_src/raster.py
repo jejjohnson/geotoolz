@@ -412,8 +412,39 @@ def build_raster_catalog(
         raise ValueError("build_raster_catalog: no files matched the regex")
 
     crs_value = target_crs if target_crs is not None else rows[0]["crs"]
+    if target_crs is None:
+        # Without a target CRS each footprint is in its file's own CRS.
+        # Latch the first row's CRS and reproject the others into it, as
+        # `build_vector_catalog` does, so the catalog never mixes CRSs
+        # under one label (#217).
+        rows = [_reproject_row(row, crs_value) for row in rows]
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs_value)
     return InMemoryGeoCatalog(gdf, backend="raster")
+
+
+def _reproject_row(row: dict[str, Any], dst_crs: Any) -> dict[str, Any]:
+    """Return ``row`` with its bbox footprint reprojected into ``dst_crs``."""
+    src = pyproj.CRS.from_user_input(str(row["crs"]))
+    dst = pyproj.CRS.from_user_input(str(dst_crs))
+    if src == dst:
+        return row
+    transformer = pyproj.Transformer.from_crs(src, dst, always_xy=True)
+    bounds = transformer.transform_bounds(*row["geometry"].bounds, densify_pts=21)
+    return {**row, "geometry": shapely.geometry.box(*bounds)}
+
+
+def _check_nodata_fits(nodata: float, dtype: np.dtype) -> None:
+    """Raise ``ValueError`` if ``nodata`` can't be stored exactly in ``dtype``."""
+    if np.issubdtype(dtype, np.floating):
+        return
+    info = np.iinfo(dtype)
+    if not (np.isfinite(nodata) and float(nodata).is_integer()) or not (
+        info.min <= nodata <= info.max
+    ):
+        raise ValueError(
+            f"load_raster: nodata={nodata!r} cannot be represented in the "
+            f"output dtype {dtype}; pick a value in [{info.min}, {info.max}]."
+        )
 
 
 def _build_raster_catalog_duckdb(
@@ -532,8 +563,10 @@ def load_raster(
         first source nodata found, else 0.
 
     Raises:
-        ValueError: If no catalog rows match the slice, or if
-            ``merge_method`` is not one of the valid rasterio modes.
+        ValueError: If no catalog rows match the slice, if
+            ``merge_method`` is not one of the valid rasterio modes, or
+            if ``nodata`` cannot be represented in the output dtype
+            (e.g. ``-1`` or ``NaN`` for ``uint16`` sources).
         TypeError: If the catalog's backend tag is not ``"raster"``.
     """
     if merge_method not in _VALID_MERGE_METHODS:
@@ -548,7 +581,9 @@ def load_raster(
     if len(filtered) == 0:
         raise ValueError("load_raster: no catalog rows match the slice")
 
-    resampling = resampling or Resampling.bilinear
+    # `is None`, not truthiness: Resampling.nearest == 0 (#217).
+    if resampling is None:
+        resampling = Resampling.bilinear
     filepaths = filtered.gdf["filepath"].tolist()
 
     def _open_one(fp: str) -> tuple[Any, Any]:
@@ -622,6 +657,9 @@ def load_raster(
             )
             warped.append(vrt)
             sources.append(vrt)
+        out_dtype = np.result_type(*(np.dtype(s.dtypes[0]) for s in sources))
+        if nodata is not None:
+            _check_nodata_fits(nodata, out_dtype)
         merged, transform = rio_merge(
             sources,
             bounds=slice_.bounds,
@@ -629,7 +667,7 @@ def load_raster(
             indexes=list(band_indexes) if band_indexes is not None else None,
             method=merge_method,
             nodata=out_nodata,
-            dtype=np.result_type(*(np.dtype(s.dtypes[0]) for s in sources)),
+            dtype=out_dtype,
             resampling=resampling,
             dst_path=None,
         )
