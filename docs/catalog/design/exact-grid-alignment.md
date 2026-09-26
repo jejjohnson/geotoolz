@@ -23,9 +23,12 @@ divide_evenly(length=100.5, step=10.0, label="x-extent")
 # outward, or fix the bounds/resolution.
 ```
 
-Default `tol` is tied to the project's `PIXEL_PRECISION` constant
-(`10 ** -PIXEL_PRECISION`). Pass `tol=` explicitly when you need
-tighter checks.
+Default `tol` is relative to the grid pitch:
+`step * 10 ** -PIXEL_PRECISION`, i.e. one thousandth of a pixel.
+That scales with the resolution, so the check is as strict at
+0.0001° as at 10 m. Pass `tol=` (absolute, in CRS units) when you
+need a different bound. `is_grid_aligned` uses the same per-axis
+default.
 
 ## `GeoSlice.aligned_shape()`
 
@@ -39,12 +42,13 @@ sl = GeoSlice(
     resolution=(10.0, 10.0),
     crs="EPSG:32629",
 )
-sl.shape          # (10, 11)        — round-based, silent
+sl.shape          # (10, 11)        — rounds half up, silent
 sl.aligned_shape()                    # raises ValueError on x-extent
 ```
 
-`.shape` stays `round`-based for backwards compatibility with all
-existing loaders. `aligned_shape()` is the explicit strict path.
+`.shape` stays rounding-based for backwards compatibility with all
+existing loaders; it rounds half up on both axes (not Python's
+half-to-even `round`). `aligned_shape()` is the explicit strict path.
 
 ## `align=` constructor modes
 
