@@ -73,6 +73,8 @@ catalog = append_files(
 `partition_by` is validated against the archive's existing layout —
 mismatched layouts raise `ValueError` rather than silently producing
 a mixed-layout archive that downstream readers can't reconstruct.
+The archive must be a local directory; build it locally and sync it to
+object storage. Appending the same files twice writes their rows twice.
 
 ### Reading a partitioned archive
 
@@ -81,7 +83,8 @@ as one virtual table:
 
 ```python
 catalog = gc.open_catalog("/data/s2_archive/")
-hits = catalog.query(aoi)   # DuckDB skips partitions that don't overlap
+hits = catalog.query(aoi)   # bbox statistics prune row groups
+hits_2024 = catalog.sql("year = 2024")   # partition columns prune directories
 ```
 
 ## Pattern 3 — Remote artifacts on S3 / GCS / HF
@@ -91,7 +94,8 @@ upload it, and let readers query it lazily over HTTP-range. DuckDB's
 `httpfs` extension fetches only the row-groups your query touches:
 
 ```python
-catalog = gc.open_catalog("s3://my-bucket/s2_archive.parquet")
+# Remote files can't have their CRS read from metadata yet; pass it.
+catalog = gc.open_catalog("s3://my-bucket/s2_archive.parquet", crs="EPSG:4326")
 
 # Small-AOI query — DuckDB pushes the bbox predicate down and reads
 # only the bbox column + matching geometry row-groups (~MB, not GB).
@@ -107,14 +111,18 @@ hits = catalog.query(gc.GeoSlice(
 ))
 ```
 
-For directory-of-shards archives on S3:
+For directory-of-shards archives on S3, pass a glob; a bare remote
+directory is not expanded:
 
 ```python
-catalog = gc.open_catalog("s3://my-bucket/s2_archive/")
+catalog = gc.open_catalog(
+    "s3://my-bucket/s2_archive/**/*.parquet", crs="EPSG:4326"
+)
 ```
 
-DuckDB recurses through the Hive partitions and prunes whole
-directory subtrees when the partition column is in a query predicate.
+DuckDB reads the Hive partition columns from the paths and prunes whole
+directory subtrees when a partition column appears in a predicate
+(`catalog.sql("year = 2024")`).
 
 ## Performance knobs
 

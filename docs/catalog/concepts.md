@@ -194,8 +194,10 @@ catalog = gc.open_catalog("cat.parquet")
 catalog = gc.open_catalog("cat.parquet", engine="duckdb")
 catalog = gc.open_catalog("cat.parquet", engine="memory")
 
-# Remote — DuckDB reads only the row-groups your query touches.
-catalog = gc.open_catalog("s3://my-bucket/cat.parquet")
+# Remote — opening is lazy, and a spatial query reads only the row
+# groups whose bbox covering column intersects it. CRS can't be read
+# from a remote file's metadata yet, so pass it.
+catalog = gc.open_catalog("s3://my-bucket/cat.parquet", crs="EPSG:32629")
 ```
 
 ## Set algebra
@@ -248,7 +250,7 @@ Hive-partitioned shards and append new rows incrementally:
 from geocatalog import append_files
 
 catalog = append_files(
-    archive="s3://my-bucket/s2_archive/",
+    archive="data/s2_archive/",              # a local directory
     filepaths=new_scene_paths,
     extract_fn=extract_raster_row,         # picklable
     crs="EPSG:4326",
@@ -257,9 +259,11 @@ catalog = append_files(
 )
 ```
 
-Only new rows are written; existing shards are untouched. Mismatched
+New rows go into new shards; existing shards are untouched. Mismatched
 `partition_by` against an existing archive raises `ValueError` rather
-than silently producing a mixed layout.
+than silently producing a mixed layout. The archive must be a local
+directory (write locally, then sync to object storage), and appending
+the same files twice writes their rows twice.
 
 ### Streaming build (`backend="duckdb"`)
 
