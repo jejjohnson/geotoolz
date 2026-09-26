@@ -235,6 +235,12 @@ class DuckDBGeoCatalog:
         self.backend = backend
         self._owns_con = _owns_con
         self._lock = _con_lock(con)
+        # True when every row carries a trustworthy GeoParquet 1.1 `bbox`
+        # covering struct (a relation read by `open`, and filters of it).
+        # `query` then adds bbox predicates the Parquet scan can prune
+        # row groups with. Set by `open`; kept by `query` / `sql`; never
+        # set for joins / unions, whose rows may lack a bbox.
+        self._bbox_covering = False
         # Strong ref back to the *owning* catalog when this instance is a
         # derivation (`query` / `intersect` / `union` / `sql`). Keeps the
         # owner — and therefore the underlying DuckDB connection — alive
@@ -269,13 +275,24 @@ class DuckDBGeoCatalog:
         with self._lock:
             yield self._require_open_con()
 
-    def _derive(self, relation: duckdb_mod.DuckDBPyRelation) -> DuckDBGeoCatalog:
+    def _derive(
+        self,
+        relation: duckdb_mod.DuckDBPyRelation,
+        *,
+        keeps_rows: bool = False,
+    ) -> DuckDBGeoCatalog:
+        """Wrap ``relation`` as a catalog sharing this one's connection.
+
+        ``keeps_rows`` marks a pure row filter of ``self.relation``, which
+        may inherit the bbox-covering guarantee.
+        """
         derived = DuckDBGeoCatalog(
             relation,
             con=self._require_open_con(),
             crs=self.crs,
             backend=self.backend,
         )
+        derived._bbox_covering = keeps_rows and self._bbox_covering
         # Anchor the derivation chain at the originating owning catalog.
         # If `self` owns its connection, `self` is the owner; otherwise
         # `self` itself is a derivation and we inherit its owner. This
@@ -448,18 +465,19 @@ class DuckDBGeoCatalog:
                 partitioned=partitioned,
                 retries=retries,
             )
-            # Parameter binding (rather than f-string interpolation) keeps
-            # paths containing apostrophes — `s3://bucket/o'malley/cat.parquet`
-            # or tmpdirs under a username with one — from breaking the
-            # query, and avoids opening a SQL-injection surface if `source`
-            # ever flows from untrusted input.
+            # `con.read_parquet` builds a lazy scan: nothing is read until a
+            # query executes, and filters are pushed into the Parquet scan.
+            # (`con.sql(..., params=...)` executes immediately and returns a
+            # materialised relation — the whole artifact, remote included,
+            # was pulled at open; #221.) The path is passed as a value, not
+            # interpolated, so apostrophes and hostile input are safe.
             # `hive_partitioning` is conditional: enabling it on a single
             # file under a `key=value` directory would inject a synthetic
             # partition column into the schema.
             relation = retry_transient_io(
-                con.sql,
-                "SELECT * FROM read_parquet($src, hive_partitioning = $hive)",
-                params={"src": source_str, "hive": partitioned},
+                con.read_parquet,
+                source_str,
+                hive_partitioning=partitioned,
                 retries=retries,
             )
         except BaseException:
@@ -467,7 +485,9 @@ class DuckDBGeoCatalog:
             # don't leak the freshly opened connection.
             con.close()
             raise
-        return cls(relation, con=con, crs=crs, backend=backend, _owns_con=True)
+        catalog = cls(relation, con=con, crs=crs, backend=backend, _owns_con=True)
+        catalog._bbox_covering = _has_bbox_covering(relation)
+        return catalog
 
     @classmethod
     def from_memory(
@@ -602,7 +622,7 @@ class DuckDBGeoCatalog:
             q_interval = slice_.interval
         else:
             if bounds is None and time is None:
-                return self._derive(self.relation)
+                return self._derive(self.relation, keeps_rows=True)
             q_bounds = bounds
             q_crs = crs
             q_interval = _coerce_interval(time) if time is not None else None
@@ -615,13 +635,23 @@ class DuckDBGeoCatalog:
         where: list[str] = []
         if q_bounds is not None:
             # One envelope, or two when the AOI crosses the antimeridian.
+            # With a bbox covering column, a plain comparison on it comes
+            # first: DuckDB pushes it into the Parquet scan (row-group
+            # pruning), which it cannot do for ST_Intersects (#221).
             envelopes = _query_envelopes(q_bounds, q_crs, self.crs)
-            spatial = " OR ".join(
-                f"ST_Intersects(geometry, "
-                f"ST_MakeEnvelope({xmin!r}, {ymin!r}, {xmax!r}, {ymax!r}))"
-                for xmin, ymin, xmax, ymax in envelopes
-            )
-            where.append(f"({spatial})")
+            terms = []
+            for xmin, ymin, xmax, ymax in envelopes:
+                st = (
+                    f"ST_Intersects(geometry, "
+                    f"ST_MakeEnvelope({xmin!r}, {ymin!r}, {xmax!r}, {ymax!r}))"
+                )
+                if self._bbox_covering:
+                    st = (
+                        f"bbox.xmax >= {xmin!r} AND bbox.xmin <= {xmax!r} AND "
+                        f"bbox.ymax >= {ymin!r} AND bbox.ymin <= {ymax!r} AND {st}"
+                    )
+                terms.append(f"({st})")
+            where.append(f"({' OR '.join(terms)})")
         if q_interval is not None:
             # Bounds are naive UTC (`_coerce_interval` / GeoSlice). Type the
             # literal to match the column so DuckDB never casts through the
@@ -635,11 +665,11 @@ class DuckDBGeoCatalog:
             where.append(f"start_time <= {literal} '{t_hi}'")
 
         if not where:
-            return self._derive(self.relation)
+            return self._derive(self.relation, keeps_rows=True)
         clause = " AND ".join(where)
         with self._locked():
             filtered = self.relation.filter(clause)
-        return self._derive(filtered)
+        return self._derive(filtered, keeps_rows=True)
 
     def intersect(
         self,
@@ -957,7 +987,7 @@ class DuckDBGeoCatalog:
         """
         with self._locked():
             filtered = self.relation.filter(where)
-        return self._derive(filtered)
+        return self._derive(filtered, keeps_rows=True)
 
     @cached_property
     def _row_count(self) -> int:
@@ -1347,6 +1377,15 @@ def _cache_backend_tag(
         except TypeError:
             return
     source_cache[source] = tag
+
+
+def _has_bbox_covering(relation: duckdb_mod.DuckDBPyRelation) -> bool:
+    """True if ``relation`` has a GeoParquet 1.1 ``bbox`` STRUCT (xmin..ymax)."""
+    types = dict(zip(relation.columns, relation.types, strict=True))
+    bbox_type = str(types.get("bbox", "")).upper()
+    return bbox_type.startswith("STRUCT") and all(
+        f in bbox_type for f in ("XMIN", "YMIN", "XMAX", "YMAX")
+    )
 
 
 def _read_parquet_source(source: str | Path) -> str:
