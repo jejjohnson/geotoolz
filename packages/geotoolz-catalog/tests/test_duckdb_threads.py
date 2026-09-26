@@ -98,3 +98,16 @@ def test_opposite_direction_joins_do_not_deadlock() -> None:
         counts = [f.result(timeout=120) for f in futures]
     assert len(set(counts)) == 1
     assert counts[0] > 0
+
+
+def test_connection_without_weakref_support_gets_fallback_lock() -> None:
+    """DuckDB releases before weakref support must not raise (#224)."""
+    from geocatalog._src import duckdb_backend
+
+    class _NoWeakref:
+        __slots__ = ()
+
+    lock = duckdb_backend._con_lock(_NoWeakref())
+    assert lock is duckdb_backend._FALLBACK_CON_LOCK
+    with lock:
+        pass

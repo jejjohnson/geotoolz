@@ -119,14 +119,21 @@ def _ensure_spatial(con: duckdb_mod.DuckDBPyConnection) -> None:
 # Weak keys: a closed, dropped connection frees its lock.
 _CON_LOCKS: WeakKeyDictionary[Any, threading.RLock] = WeakKeyDictionary()
 _CON_LOCKS_GUARD = threading.Lock()
+# Older DuckDB releases (the dependency floor is 1.1) have connections that
+# can't be weakly referenced. Those share one process-wide lock: coarser,
+# but safe, since no code path ever holds two connections' locks.
+_FALLBACK_CON_LOCK = threading.RLock()
 
 
 def _con_lock(con: Any) -> threading.RLock:
     """Return the lock serialising all work on ``con``."""
     with _CON_LOCKS_GUARD:
-        lock = _CON_LOCKS.get(con)
-        if lock is None:
-            lock = _CON_LOCKS[con] = threading.RLock()
+        try:
+            lock = _CON_LOCKS.get(con)
+            if lock is None:
+                lock = _CON_LOCKS[con] = threading.RLock()
+        except TypeError:
+            return _FALLBACK_CON_LOCK
         return lock
 
 
