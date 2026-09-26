@@ -495,3 +495,99 @@ class TestQueryFreeFunction:
     def test_delegates(self, two_tile_catalog: InMemoryGeoCatalog) -> None:
         out = query(two_tile_catalog, bounds=(0, 0, 50, 50), crs="EPSG:32629")
         assert len(out) == 1
+
+
+def _row(geom: shapely.Geometry, start: str, end: str, path: str) -> dict:
+    return {
+        "geometry": geom,
+        "start_time": pd.Timestamp(start),
+        "end_time": pd.Timestamp(end),
+        "filepath": path,
+    }
+
+
+class TestIntersectFixes:
+    """#230: GeometryCollection clips, index-column sync, empty schema."""
+
+    @pytest.mark.parametrize("engine", ["sjoin", "overlay"])
+    def test_geometry_collection_clip_keeps_polygon_part(self, engine: str) -> None:
+        left = _build([_row(shapely.box(0, 0, 2, 2), "2024-01-01", "2024-01-03", "l")])
+        # Overlaps [1, 2] x [0, 2] and touches the left edge at x = 0, so the
+        # clip is GeometryCollection(Polygon, LineString).
+        right_geom = shapely.MultiPolygon(
+            [shapely.box(1, 0, 3, 2), shapely.box(-1, 0, 0, 2)]
+        )
+        right = _build([_row(right_geom, "2024-01-01", "2024-01-03", "r")])
+        out = left.intersect(right, engine=engine)  # type: ignore[arg-type]
+        assert len(out) == 1
+        geom = out.gdf.geometry.iloc[0]
+        assert geom.geom_type == "Polygon"
+        assert geom.equals(shapely.box(1, 0, 2, 2))
+
+    def test_time_columns_follow_clipped_index(self) -> None:
+        left = _build([_row(shapely.box(0, 0, 2, 2), "2024-01-01", "2024-01-03", "l")])
+        right = _build([_row(shapely.box(1, 0, 3, 2), "2024-01-02", "2024-01-05", "r")])
+        out = left.intersect(right)
+        assert out.gdf.index[0] == pd.Interval(
+            pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03"), closed="both"
+        )
+        assert out.gdf["start_time"].iloc[0] == pd.Timestamp("2024-01-02")
+        assert out.gdf["end_time"].iloc[0] == pd.Timestamp("2024-01-03")
+        assert "_right_start_time" not in out.gdf.columns
+        assert "_right_end_time" not in out.gdf.columns
+        assert out.gdf["_right_filepath"].iloc[0] == "r"
+
+    def test_empty_intersect_keeps_schema(
+        self, two_tile_catalog: InMemoryGeoCatalog
+    ) -> None:
+        far = _build(
+            [_row(shapely.box(1e6, 1e6, 2e6, 2e6), "2024-01-01", "2024-01-02", "x")]
+        )
+        out = two_tile_catalog.intersect(far)
+        assert len(out) == 0
+        assert list(out.gdf.columns) == list(two_tile_catalog.gdf.columns)
+        assert out.gdf.crs == two_tile_catalog.gdf.crs
+        assert out.temporal_extent is None
+
+
+class TestUnionGeometryName:
+    def test_differently_named_geometry_column(
+        self, two_tile_catalog: InMemoryGeoCatalog
+    ) -> None:
+        other_gdf = gpd.GeoDataFrame(
+            {
+                "footprint": [shapely.box(500, 0, 600, 100)],
+                "start_time": [pd.Timestamp("2024-01-05")],
+                "end_time": [pd.Timestamp("2024-01-06")],
+                "filepath": ["tile_C.tif"],
+            },
+            geometry="footprint",
+            crs="EPSG:32629",
+        )
+        other = InMemoryGeoCatalog(other_gdf, backend="raster")
+        merged = two_tile_catalog.union(other)
+        assert len(merged) == 3
+        assert merged.gdf.geometry.notna().all()
+        assert "footprint" not in merged.gdf.columns
+        assert merged.total_bounds == (0.0, 0.0, 600.0, 100.0)
+
+
+class TestConstructorValidation:
+    def test_rejects_half_open_interval_index(self) -> None:
+        idx = pd.IntervalIndex.from_arrays(
+            [pd.Timestamp("2024-01-01")], [pd.Timestamp("2024-01-02")], closed="left"
+        )
+        gdf = gpd.GeoDataFrame(
+            {"geometry": [shapely.box(0, 0, 1, 1)]},
+            geometry="geometry",
+            crs="EPSG:32629",
+            index=idx,
+        )
+        with pytest.raises(ValueError, match="closed='both'"):
+            InMemoryGeoCatalog(gdf, backend="raster")
+
+    def test_rejects_unknown_backend_tag(
+        self, two_tile_catalog: InMemoryGeoCatalog
+    ) -> None:
+        with pytest.raises(ValueError, match="backend must be one of"):
+            InMemoryGeoCatalog(two_tile_catalog.gdf, backend="rastr")  # type: ignore[arg-type]
