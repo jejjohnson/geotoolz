@@ -8,6 +8,7 @@ axis is parsed from a ``time`` coordinate (configurable).
 
 from __future__ import annotations
 
+import contextlib
 import functools
 from collections.abc import Sequence
 from pathlib import Path
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 
 
 from geocatalog._src.io import _close_resolved_uri, _resolve_uri
-from geocatalog._src.memory import InMemoryGeoCatalog
+from geocatalog._src.memory import InMemoryGeoCatalog, _reproject_bounds
 
 
 # Only `xarray` is genuinely optional — geopandas + shapely are base deps.
@@ -84,6 +85,38 @@ def _xarray_engine(filepath: str | Path) -> str | None:
     return None
 
 
+def _register_rio_accessor() -> None:
+    """Import rioxarray if installed so ``Dataset.rio`` exists (#218).
+
+    The accessor only registers on import; without this, CRS recovery
+    depended on the *caller* having imported rioxarray first.
+    """
+    with contextlib.suppress(ImportError):
+        import rioxarray  # noqa: F401
+
+
+def _edge_extent(coord: Any) -> tuple[float, float]:
+    """``(min, max)`` of a centre-coordinate axis, padded to pixel edges."""
+    values = pd.to_numeric(pd.Series(coord.ravel()))
+    lo, hi = float(values.min()), float(values.max())
+    if len(values) > 1:
+        half = abs(float(values.iloc[1]) - float(values.iloc[0])) / 2
+        lo, hi = lo - half, hi + half
+    return lo, hi
+
+
+def _axis_slice(coord: Any, lo: float, hi: float) -> slice:
+    """A ``.sel`` slice covering ``[lo, hi]`` in the coordinate's own order.
+
+    ``slice(lo, hi)`` on a descending axis (the usual north-up ``y``)
+    selects nothing; reverse it for descending coordinates (#218).
+    """
+    values = coord.values
+    if values.size > 1 and values[0] > values[-1]:
+        return slice(hi, lo)
+    return slice(lo, hi)
+
+
 def _xarray_row(
     filepath: str | Path,
     *,
@@ -97,13 +130,19 @@ def _xarray_row(
             "build_xarray_catalog requires xarray; install via "
             "`pip install 'geocatalog[xarray-raster]'`."
         )
+    _register_rio_accessor()
     engine = _xarray_engine(filepath)
     resolved = _resolve_uri(filepath, storage_options=storage_options)
     try:
-        with xr.open_dataset(resolved, engine=engine) as ds:
+        # decode_coords="all" turns the CF grid-mapping variable
+        # (`spatial_ref`) into a coordinate; with the default, `.rio.crs`
+        # can't see it and CRS recovery fails even with rioxarray loaded.
+        with xr.open_dataset(resolved, engine=engine, decode_coords="all") as ds:
             x_name, y_name = _xy_dims(ds)
-            xmin, xmax = float(ds[x_name].min()), float(ds[x_name].max())
-            ymin, ymax = float(ds[y_name].min()), float(ds[y_name].max())
+            # Coordinates are pixel centres; pad by half a pixel so the
+            # footprint covers the pixel edges (#218).
+            xmin, xmax = _edge_extent(ds[x_name].values)
+            ymin, ymax = _edge_extent(ds[y_name].values)
             polygon = shapely.geometry.box(xmin, ymin, xmax, ymax)
 
             if time_var in ds.coords:
@@ -346,16 +385,16 @@ def load_xarray(
     Args:
         catalog: An xarray-backend catalog.
         slice_: Window to read. Bounds may be in a different CRS than
-            the catalog; the loader reprojects internally on the query
-            but the *coordinate selection* still uses the catalog CRS,
-            so cross-CRS slicing only works if the catalog and slice
-            CRSs agree.
+            the catalog; they are reprojected into the catalog CRS for
+            both the row query and the coordinate selection. Ascending
+            and descending coordinate axes are both handled.
         data_vars: Subset of data variables to keep per file. ``None``
             preserves the dataset's full variable set.
 
     Returns:
-        An ``xr.Dataset`` concatenated along the time coordinate, or a
-        single-file Dataset if only one row matched.
+        An ``xr.Dataset`` concatenated along the time coordinate (sorted,
+        duplicate timesteps dropped), or a single-file Dataset if only
+        one row matched.
 
     Raises:
         ImportError: If xarray is not installed (``[xarray-raster]``
@@ -376,12 +415,19 @@ def load_xarray(
     if len(filtered) == 0:
         raise ValueError("load_xarray: no catalog rows match the slice")
 
-    xmin, ymin, xmax, ymax = slice_.bounds
+    # Coordinates are in the catalog CRS (the builder doesn't reproject
+    # them), so the selection box must be too (#218).
+    xmin, ymin, xmax, ymax = _reproject_bounds(
+        slice_.bounds, slice_.crs, filtered.gdf.crs
+    )
     t_start, t_end = slice_.interval.left, slice_.interval.right
+    time_vars = (
+        filtered.gdf["time_var"]
+        if "time_var" in filtered.gdf.columns
+        else pd.Series(["time"] * len(filtered.gdf))
+    )
     pieces: list[xr.Dataset] = []
-    for fp, row_time_var in zip(
-        filtered.gdf["filepath"], filtered.gdf["time_var"], strict=False
-    ):
+    for fp, row_time_var in zip(filtered.gdf["filepath"], time_vars, strict=True):
         engine = _xarray_engine(fp)
         resolved = _resolve_uri(fp, storage_options=storage_options)
         try:
@@ -390,7 +436,10 @@ def load_xarray(
                 # `.sel(slice)` requires monotonic coords; fall back to `.where`.
                 try:
                     piece = ds.sel(
-                        {x_name: slice(xmin, xmax), y_name: slice(ymin, ymax)}
+                        {
+                            x_name: _axis_slice(ds[x_name], xmin, xmax),
+                            y_name: _axis_slice(ds[y_name], ymin, ymax),
+                        }
                     )
                 except KeyError:
                     mask = (
@@ -419,7 +468,11 @@ def load_xarray(
             _close_resolved_uri(resolved)
     if len(pieces) == 1:
         return pieces[0]
-    time_var = filtered.gdf["time_var"].iloc[0]
+    time_var = time_vars.iloc[0]
     if time_var in pieces[0].coords:
-        return xr.concat(pieces, dim=time_var)
+        # Catalog row order is arbitrary: sort along time and drop
+        # timesteps repeated across overlapping files (first one wins).
+        out = xr.concat(pieces, dim=time_var).sortby(time_var)
+        keep = ~out.indexes[time_var].duplicated()
+        return out.isel({time_var: keep})
     return xr.merge(pieces)
