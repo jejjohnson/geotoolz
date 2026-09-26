@@ -10,6 +10,12 @@ The dataclass is ``frozen=True`` so it can be hashed, used as a dict
 key, or shipped across function boundaries without anyone mutating it
 in flight. Code that wants to "change" a slice uses
 ``dataclasses.replace(slice_, bounds=new_bounds)``.
+
+Equality compares CRSs with pyproj's PROJ-equivalence, so a CRS read
+from a raster header equals ``CRS.from_epsg(...)`` even when their WKT
+differs. The hash therefore leaves the CRS out (hashing its WKT would
+give equal slices different hashes); it covers bounds, interval and
+resolution only.
 """
 
 from __future__ import annotations
@@ -71,6 +77,13 @@ class GeoSlice:
     )
 
     def __post_init__(self) -> None:
+        # Normalise to tuples of Python floats: lists would make the slice
+        # unhashable and compare unequal to the tuple form, and numpy
+        # scalars would leak into repr / get_config.
+        bounds = _float_tuple(self.bounds, 4, "bounds")
+        resolution = _float_tuple(self.resolution, 2, "resolution")
+        object.__setattr__(self, "bounds", bounds)
+        object.__setattr__(self, "resolution", resolution)
         xmin, ymin, xmax, ymax = self.bounds
         if not (xmin < xmax and ymin < ymax):
             raise ValueError(
@@ -109,6 +122,12 @@ class GeoSlice:
             )
         if self.align != "off":
             self._check_or_snap_alignment()
+
+    def __hash__(self) -> int:
+        # Consistent with the dataclass __eq__: equal slices have equal
+        # bounds/interval/resolution. The CRS is excluded because pyproj
+        # hashes its WKT while equality is PROJ equivalence (#227).
+        return hash((self.bounds, self.interval, self.resolution))
 
     def _check_or_snap_alignment(self) -> None:
         """Validate or snap ``bounds`` against the alignment policy.
@@ -271,6 +290,19 @@ class GeoSlice:
             crs=target,
             align="off",
         )
+
+
+def _float_tuple(value: Any, n: int, name: str) -> tuple[float, ...]:
+    """Coerce ``value`` to an ``n``-tuple of finite floats or raise ``ValueError``."""
+    try:
+        out = tuple(float(v) for v in value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"GeoSlice.{name} must be {n} numbers; got {value!r}") from exc
+    if len(out) != n:
+        raise ValueError(f"GeoSlice.{name} must have {n} values; got {len(out)}")
+    if not all(np.isfinite(v) for v in out):
+        raise ValueError(f"GeoSlice.{name} must be finite; got {out!r}")
+    return out
 
 
 def slice_to_window(slice_: GeoSlice, transform: Affine) -> Window:

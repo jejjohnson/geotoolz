@@ -133,8 +133,13 @@ class InMemoryGeoCatalog:
         internally — the canonical anti-footgun path (§10.1 of the
         design plan).
         """
-        if slice_ is not None and (bounds is not None or time is not None):
-            raise TypeError("query: pass either slice_ or (bounds + time), not both")
+        if slice_ is not None and (
+            bounds is not None or time is not None or crs is not None
+        ):
+            raise TypeError(
+                "query: pass either slice_ or (bounds + crs + time), not both; "
+                "a GeoSlice carries its own crs"
+            )
         if slice_ is not None:
             q_bounds = slice_.bounds
             q_crs = slice_.crs
