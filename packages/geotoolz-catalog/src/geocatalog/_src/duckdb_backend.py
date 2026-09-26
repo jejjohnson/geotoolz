@@ -462,9 +462,9 @@ class DuckDBGeoCatalog:
                 caller (close is a no-op for it).
 
         Returns:
-            A `DuckDBGeoCatalog` over a view of the same rows. The view
-            holds a reference to the original gdf; mutating the gdf in
-            place after this call leads to undefined behaviour.
+            A `DuckDBGeoCatalog` over the same rows. The relation scans a
+            WKB-encoded copy of the gdf, so later changes to the gdf are
+            not seen.
         """
         dd = _require_duckdb()
         owns_con = con is None
@@ -473,12 +473,12 @@ class DuckDBGeoCatalog:
         try:
             _ensure_spatial(con)
             df = _gdf_to_arrow_df(catalog.gdf)
-            view_name = f"_geocatalog_mem_{id(catalog):x}"
-            con.register(view_name, df)
-            relation = con.sql(
-                f"SELECT * EXCLUDE (geometry), "
-                f"  ST_GeomFromWKB(geometry) AS geometry "
-                f"FROM {view_name}"
+            # `from_df` scans the DataFrame object directly: no named view
+            # or registration, so nothing another call can overwrite
+            # (named views keyed on `id()` were rebound when CPython
+            # reused an id; #222).
+            relation = con.from_df(df).project(
+                "* EXCLUDE (geometry), ST_GeomFromWKB(geometry) AS geometry"
             )
         except BaseException:
             if owns_con:
@@ -638,14 +638,6 @@ class DuckDBGeoCatalog:
         con = self._require_open_con()
         other_duck = _coerce_to_duckdb(other, con=con, target_crs=self.crs)
 
-        left_name = f"_geocatalog_left_{id(self):x}"
-        right_name = f"_geocatalog_right_{id(other_duck):x}"
-        # `relation.create_view` registers via SQL so the planner sees
-        # GEOMETRY-typed columns directly (Arrow round-trips would
-        # drop the GEOMETRY type back to BLOB and force a re-decode).
-        self.relation.create_view(left_name, replace=True)
-        other_duck.relation.create_view(right_name, replace=True)
-
         temporal = (
             ""
             if spatial_only
@@ -664,8 +656,19 @@ class DuckDBGeoCatalog:
         # pair's operand order by WKB bytes, mirroring the in-memory
         # engine's `_symmetric_intersection`, so `a.intersect(b)` and
         # `b.intersect(a)` compute identical geometry per row pair.
-        sql = f"""
-            SELECT
+        # Relation-API join on aliased relations rather than SQL over
+        # named views: the result holds both inputs by reference, so no
+        # later `intersect` / `union` can rebind it (#222) and no views
+        # accumulate on the connection.
+        joined = (
+            self.relation.set_alias("L")
+            .join(
+                other_duck.relation.set_alias("R"),
+                f"ST_Intersects(L.geometry, R.geometry){temporal}",
+                how="inner",
+            )
+            .project(
+                f"""
                 L.filepath AS filepath,
                 CASE
                     WHEN ST_AsWKB(L.geometry) > ST_AsWKB(R.geometry)
@@ -673,12 +676,9 @@ class DuckDBGeoCatalog:
                     ELSE ST_Intersection(L.geometry, R.geometry)
                 END AS geometry,
                 {time_select}
-            FROM {left_name} AS L
-            JOIN {right_name} AS R
-              ON ST_Intersects(L.geometry, R.geometry)
-                 {temporal}
-        """
-        joined = con.sql(sql)
+                """
+            )
+        )
         return self._derive(joined)
 
     def union(self, other: DuckDBGeoCatalog | InMemoryGeoCatalog) -> DuckDBGeoCatalog:
@@ -697,22 +697,28 @@ class DuckDBGeoCatalog:
         """
         con = self._require_open_con()
         other_duck = _coerce_to_duckdb(other, con=con, target_crs=self.crs)
-        left_name = f"_geocatalog_unionL_{id(self):x}"
-        right_name = f"_geocatalog_unionR_{id(other_duck):x}"
-        self.relation.create_view(left_name, replace=True)
-        other_duck.relation.create_view(right_name, replace=True)
-        # `UNION ALL BY NAME` matches columns by name and fills missing
-        # ones with NULL on the other side — that's what preserves
+        del con
+        # `UNION ALL BY NAME` semantics without named views (#222): both
+        # sides are projected onto the same ordered column list, with a
+        # typed NULL for columns only the other side has. That preserves
         # backend-specific columns (`time_var`, `data_vars`, `layer`)
-        # rather than dropping them like a positional `UNION ALL`
-        # would. Without this, downstream xarray/vector loaders break
-        # after a union because the metadata columns vanish.
-        sql = f"""
-            SELECT * FROM {left_name}
-            UNION ALL BY NAME
-            SELECT * FROM {right_name}
-        """
-        unioned = con.sql(sql)
+        # instead of dropping them like a positional `UNION ALL` would.
+        left, right = self.relation, other_duck.relation
+        left_types = dict(zip(left.columns, left.types, strict=True))
+        right_types = dict(zip(right.columns, right.types, strict=True))
+        columns = [*left_types, *(c for c in right_types if c not in left_types)]
+
+        def _aligned(types: dict[str, Any], fill: dict[str, Any]) -> str:
+            return ", ".join(
+                _quote_ident(c)
+                if c in types
+                else f"CAST(NULL AS {fill[c]}) AS {_quote_ident(c)}"
+                for c in columns
+            )
+
+        unioned = left.project(_aligned(left_types, right_types)).union(
+            right.project(_aligned(right_types, left_types))
+        )
         return self._derive(unioned)
 
     def iter_rows(self, *, batch_size: int = 1024) -> Iterator[CatalogRow]:
@@ -933,6 +939,11 @@ class DuckDBGeoCatalog:
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
+def _quote_ident(name: str) -> str:
+    """Quote a column name as a DuckDB SQL identifier."""
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _coerce_to_duckdb(
     other: DuckDBGeoCatalog | InMemoryGeoCatalog,
     *,
@@ -941,8 +952,8 @@ def _coerce_to_duckdb(
 ) -> DuckDBGeoCatalog:
     """Pull ``other`` into a DuckDB relation on ``con`` in ``target_crs``.
 
-    DuckDB views are connection-scoped — a relation on one connection
-    can't be referenced from another. Always re-register onto ``con``
+    Relations are connection-scoped — a relation on one connection
+    can't be joined with one from another. Always re-register onto ``con``
     when ``other`` carries a different connection (independently
     `open()`-ed catalogs hit this) by materialising and re-importing
     through `from_memory`.
