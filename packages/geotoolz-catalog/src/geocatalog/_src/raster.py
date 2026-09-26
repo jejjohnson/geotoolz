@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyproj
 import rasterio
 import shapely.geometry
 from georeader.geotensor import GeoTensor
@@ -487,6 +488,13 @@ def load_raster(
     returned `GeoTensor` carries the right transform + CRS for
     downstream operators.
 
+    Sources whose CRS differs from ``slice_.crs`` are warped on the fly
+    (`rasterio.vrt.WarpedVRT` with ``resampling``), so the output is
+    always on the slice grid in the slice CRS, and files in different
+    CRSs mosaic together. Overlaps are resolved in catalog row order
+    (with ``merge_method="last"``, later rows win). The output dtype is
+    the common type of all sources.
+
     Args:
         catalog: A raster-backend catalog.
         slice_: The window to read. Bounds may be in a different CRS
@@ -519,8 +527,9 @@ def load_raster(
 
     Returns:
         A `GeoTensor` of shape ``(bands, H, W)`` with ``transform`` and
-        ``crs`` set from ``slice_``; ``fill_value_default`` is
-        ``nodata`` if supplied, else 0.
+        ``crs`` set from ``slice_``. ``fill_value_default`` is the nodata
+        value the mosaic actually used: ``nodata`` if supplied, else the
+        first source nodata found, else 0.
 
     Raises:
         ValueError: If no catalog rows match the slice, or if
@@ -553,6 +562,7 @@ def load_raster(
 
     handles = []
     resolved_handles = []
+    warped: list[WarpedVRT] = []
     try:
         n_workers = max(1, min(max_open_workers, len(filepaths)))
         if n_workers == 1:
@@ -580,19 +590,52 @@ def load_raster(
                     handles.append(src)
                 if first_exc is not None:
                     raise first_exc
-        sources = list(handles)
-        target_resolution = slice_.resolution
+        # The nodata value the mosaic uses: an explicit override, else the
+        # first source that declares one (rasterio's own rule is "first
+        # source", which silently becomes 0 when that one has none).
+        out_nodata = (
+            nodata
+            if nodata is not None
+            else next((s.nodata for s in handles if s.nodata is not None), None)
+        )
+        target_crs = pyproj.CRS.from_user_input(slice_.crs)
+        sources = []
+        for src in handles:
+            if pyproj.CRS.from_user_input(src.crs.to_wkt()) == target_crs:
+                sources.append(src)
+                continue
+            # Reproject into the slice CRS (#216). The VRT needs a nodata
+            # value so pixels outside the source footprint are masked in
+            # the merge instead of being written as data.
+            vrt_nodata = (
+                src.nodata
+                if src.nodata is not None
+                else out_nodata
+                if out_nodata is not None
+                else 0
+            )
+            vrt = WarpedVRT(
+                src,
+                crs=target_crs.to_wkt(),
+                resampling=resampling,
+                nodata=vrt_nodata,
+            )
+            warped.append(vrt)
+            sources.append(vrt)
         merged, transform = rio_merge(
             sources,
             bounds=slice_.bounds,
-            res=target_resolution,
+            res=slice_.resolution,
             indexes=list(band_indexes) if band_indexes is not None else None,
             method=merge_method,
-            nodata=nodata,
+            nodata=out_nodata,
+            dtype=np.result_type(*(np.dtype(s.dtypes[0]) for s in sources)),
             resampling=resampling,
             dst_path=None,
         )
     finally:
+        for vrt in warped:
+            vrt.close()
         for h in handles:
             h.close()
         for h in resolved_handles:
@@ -602,7 +645,7 @@ def load_raster(
         values=merged,
         transform=transform,
         crs=slice_.crs,
-        fill_value_default=nodata if nodata is not None else 0,
+        fill_value_default=out_nodata if out_nodata is not None else 0,
     )
 
 
