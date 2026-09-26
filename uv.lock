@@ -1373,7 +1373,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-catalog"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/geotoolz-catalog" }
 dependencies = [
     { name = "cyclopts" },
