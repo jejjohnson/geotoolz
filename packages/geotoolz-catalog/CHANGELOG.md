@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.1.1...geotoolz-catalog-v0.1.2) (2026-09-26)
+
+
+### Bug Fixes
+
+* **catalog:** bring DuckDB catalogs to parity with InMemory ([#270](https://github.com/jejjohnson/geotoolz/issues/270)) ([3345987](https://github.com/jejjohnson/geotoolz/commit/3345987548e86b3f0306631ac980ee6502a43dea)), closes [#225](https://github.com/jejjohnson/geotoolz/issues/225)
+* **catalog:** build DuckDB set algebra without named views ([#265](https://github.com/jejjohnson/geotoolz/issues/265)) ([abe154a](https://github.com/jejjohnson/geotoolz/commit/abe154a900b1d3509a50ce3f849813d9a31221f8)), closes [#222](https://github.com/jejjohnson/geotoolz/issues/222)
+* **catalog:** derive timeseries steps from the slice; parse regex dates reliably ([#275](https://github.com/jejjohnson/geotoolz/issues/275)) ([7f11f24](https://github.com/jejjohnson/geotoolz/commit/7f11f2489c7850d772b5882e9ae56aef7839fb47)), closes [#219](https://github.com/jejjohnson/geotoolz/issues/219)
+* **catalog:** drop housekeeping columns when materialising a DuckDB catalog ([#264](https://github.com/jejjohnson/geotoolz/issues/264)) ([06d5811](https://github.com/jejjohnson/geotoolz/commit/06d58116dc8003f8f1d451f596133110f02aabd0)), closes [#223](https://github.com/jejjohnson/geotoolz/issues/223)
+* **catalog:** honour Resampling.nearest, validate nodata, unify builder CRS ([#273](https://github.com/jejjohnson/geotoolz/issues/273)) ([23beab0](https://github.com/jejjohnson/geotoolz/commit/23beab0e71baed9f8e6038283031e6ad8822e704)), closes [#217](https://github.com/jejjohnson/geotoolz/issues/217)
+* **catalog:** reproject load_raster sources into the slice CRS ([#272](https://github.com/jejjohnson/geotoolz/issues/272)) ([ab7678f](https://github.com/jejjohnson/geotoolz/commit/ab7678fb8d213b8013e5011e5bd9197398cd67e0))
+* **catalog:** select the right window in load_xarray and cover pixel edges ([#274](https://github.com/jejjohnson/geotoolz/issues/274)) ([48b96ce](https://github.com/jejjohnson/geotoolz/commit/48b96ce1ed40810b2e931a5a5be9dab8cd20178c)), closes [#218](https://github.com/jejjohnson/geotoolz/issues/218)
+* **catalog:** serialise work on a shared DuckDB connection across threads ([#267](https://github.com/jejjohnson/geotoolz/issues/267)) ([6adedd7](https://github.com/jejjohnson/geotoolz/commit/6adedd7228a9931df8ddd374a0b031af4761e710))
+
+
+### Performance Improvements
+
+* **catalog:** open DuckDB catalogs lazily and prune with the bbox column ([#269](https://github.com/jejjohnson/geotoolz/issues/269)) ([c57c578](https://github.com/jejjohnson/geotoolz/commit/c57c578502a8257ecd538291e53a467398fa1429)), closes [#221](https://github.com/jejjohnson/geotoolz/issues/221)
+* **catalog:** range-read remote rasters via GDAL; fail fast on missing files ([#276](https://github.com/jejjohnson/geotoolz/issues/276)) ([23a5249](https://github.com/jejjohnson/geotoolz/commit/23a52494def705a2e2798265944d8456f4b12faf)), closes [#220](https://github.com/jejjohnson/geotoolz/issues/220)
+
 ## [0.1.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.1.0...geotoolz-catalog-v0.1.1) (2026-09-26)
 
 
