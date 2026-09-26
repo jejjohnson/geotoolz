@@ -21,8 +21,10 @@ Why DuckDB:
 
 from __future__ import annotations
 
+import threading
 import warnings
 from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -108,6 +110,24 @@ def _ensure_spatial(con: duckdb_mod.DuckDBPyConnection) -> None:
                 exc,
             )
             return
+
+
+# One re-entrant lock per DuckDB connection, shared by every catalog on
+# it (owner, derivations, `from_memory` wrappers). A DuckDBPyConnection
+# is not thread-safe, and starting any query on it closes a result that
+# is still streaming, so every execution holds the connection's lock.
+# Weak keys: a closed, dropped connection frees its lock.
+_CON_LOCKS: WeakKeyDictionary[Any, threading.RLock] = WeakKeyDictionary()
+_CON_LOCKS_GUARD = threading.Lock()
+
+
+def _con_lock(con: Any) -> threading.RLock:
+    """Return the lock serialising all work on ``con``."""
+    with _CON_LOCKS_GUARD:
+        lock = _CON_LOCKS.get(con)
+        if lock is None:
+            lock = _CON_LOCKS[con] = threading.RLock()
+        return lock
 
 
 def _scheme(source: str | Path) -> str | None:
@@ -214,6 +234,7 @@ class DuckDBGeoCatalog:
         self.crs = pyproj.CRS.from_user_input(crs)
         self.backend = backend
         self._owns_con = _owns_con
+        self._lock = _con_lock(con)
         # Strong ref back to the *owning* catalog when this instance is a
         # derivation (`query` / `intersect` / `union` / `sql`). Keeps the
         # owner — and therefore the underlying DuckDB connection — alive
@@ -242,6 +263,12 @@ class DuckDBGeoCatalog:
             )
         return con
 
+    @contextmanager
+    def _locked(self) -> Iterator[duckdb_mod.DuckDBPyConnection]:
+        """Hold the connection's lock and yield the open connection."""
+        with self._lock:
+            yield self._require_open_con()
+
     def _derive(self, relation: duckdb_mod.DuckDBPyRelation) -> DuckDBGeoCatalog:
         derived = DuckDBGeoCatalog(
             relation,
@@ -268,9 +295,10 @@ class DuckDBGeoCatalog:
         down the connection. A derived catalog used as a context
         manager closes its owner on ``__exit__``.
         """
-        if self._owns_con and self.con is not None:
-            self.con.close()
-            self.con = None
+        with self._lock:
+            if self._owns_con and self.con is not None:
+                self.con.close()
+                self.con = None
 
     def __enter__(self) -> DuckDBGeoCatalog:
         self._require_open_con()
@@ -471,15 +499,19 @@ class DuckDBGeoCatalog:
         if con is None:
             con = dd.connect()
         try:
-            _ensure_spatial(con)
             df = _gdf_to_arrow_df(catalog.gdf)
-            # `from_df` scans the DataFrame object directly: no named view
-            # or registration, so nothing another call can overwrite
-            # (named views keyed on `id()` were rebound when CPython
-            # reused an id; #222).
-            relation = con.from_df(df).project(
-                "* EXCLUDE (geometry), ST_GeomFromWKB(geometry) AS geometry"
-            )
+            # Every statement on ``con`` — including the extension LOAD —
+            # holds its lock: ``con`` may be shared with a catalog that is
+            # executing in another thread (#224).
+            with _con_lock(con):
+                _ensure_spatial(con)
+                # `from_df` scans the DataFrame object directly: no named
+                # view or registration, so nothing another call can
+                # overwrite (named views keyed on `id()` were rebound when
+                # CPython reused an id; #222).
+                relation = con.from_df(df).project(
+                    "* EXCLUDE (geometry), ST_GeomFromWKB(geometry) AS geometry"
+                )
         except BaseException:
             if owns_con:
                 con.close()
@@ -518,8 +550,8 @@ class DuckDBGeoCatalog:
             An `InMemoryGeoCatalog` over the materialised rows, same
             CRS, same backend tag.
         """
-        self._require_open_con()
-        df = self.relation.df()
+        with self._locked():
+            df = self.relation.df()
         return _df_to_inmemory(df, crs=self.crs, backend=self.backend)
 
     # ── Protocol surface ─────────────────────────────────────────────────
@@ -605,7 +637,8 @@ class DuckDBGeoCatalog:
         if not where:
             return self._derive(self.relation)
         clause = " AND ".join(where)
-        filtered = self.relation.filter(clause)
+        with self._locked():
+            filtered = self.relation.filter(clause)
         return self._derive(filtered)
 
     def intersect(
@@ -659,8 +692,16 @@ class DuckDBGeoCatalog:
         # Relation-API join on aliased relations rather than SQL over
         # named views: the result holds both inputs by reference, so no
         # later `intersect` / `union` can rebind it (#222) and no views
-        # accumulate on the connection.
-        joined = (
+        # accumulate on the connection. `other` was coerced above, before
+        # taking our lock, so we never hold two connections' locks.
+        with self._locked():
+            joined = self._join(other_duck, temporal, time_select)
+        return self._derive(joined)
+
+    def _join(
+        self, other_duck: DuckDBGeoCatalog, temporal: str, time_select: str
+    ) -> duckdb_mod.DuckDBPyRelation:
+        return (
             self.relation.set_alias("L")
             .join(
                 other_duck.relation.set_alias("R"),
@@ -679,7 +720,6 @@ class DuckDBGeoCatalog:
                 """
             )
         )
-        return self._derive(joined)
 
     def union(self, other: DuckDBGeoCatalog | InMemoryGeoCatalog) -> DuckDBGeoCatalog:
         """Cross-catalog OR via SQL ``UNION ALL``.
@@ -696,8 +736,16 @@ class DuckDBGeoCatalog:
             A new `DuckDBGeoCatalog` over the union relation.
         """
         con = self._require_open_con()
+        # Coerce before taking our lock (see `intersect`).
         other_duck = _coerce_to_duckdb(other, con=con, target_crs=self.crs)
         del con
+        with self._locked():
+            unioned = self._union_by_name(other_duck)
+        return self._derive(unioned)
+
+    def _union_by_name(
+        self, other_duck: DuckDBGeoCatalog
+    ) -> duckdb_mod.DuckDBPyRelation:
         # `UNION ALL BY NAME` semantics without named views (#222): both
         # sides are projected onto the same ordered column list, with a
         # typed NULL for columns only the other side has. That preserves
@@ -716,10 +764,9 @@ class DuckDBGeoCatalog:
                 for c in columns
             )
 
-        unioned = left.project(_aligned(left_types, right_types)).union(
+        return left.project(_aligned(left_types, right_types)).union(
             right.project(_aligned(right_types, left_types))
         )
-        return self._derive(unioned)
 
     def iter_rows(self, *, batch_size: int = 1024) -> Iterator[CatalogRow]:
         """Stream rows as `CatalogRow` instances in Arrow batches.
@@ -738,9 +785,16 @@ class DuckDBGeoCatalog:
         Yields:
             `CatalogRow` with ``geometry`` decoded from WKB.
         """
-        self._require_open_con()
         if batch_size < 1:
             raise ValueError(f"batch_size must be >= 1; got {batch_size}")
+        # The lock is held for the whole iteration: any other query on the
+        # connection would close this stream. Other threads using the same
+        # catalog wait until the iteration finishes (or the generator is
+        # closed); don't block inside the loop on such a thread.
+        with self._locked():
+            yield from self._iter_batches(batch_size)
+
+    def _iter_batches(self, batch_size: int) -> Iterator[CatalogRow]:
         for batch in self._arrow_reader(batch_size):
             df = batch.to_pandas()
             if len(df) == 0:
@@ -812,13 +866,13 @@ class DuckDBGeoCatalog:
             ``(xmin, ymin, xmax, ymax)`` in catalog-CRS units. Four
             NaNs for an empty catalog.
         """
-        self._require_open_con()
-        df = self.relation.aggregate(
-            "MIN(ST_XMin(geometry)) AS xmin, "
-            "MIN(ST_YMin(geometry)) AS ymin, "
-            "MAX(ST_XMax(geometry)) AS xmax, "
-            "MAX(ST_YMax(geometry)) AS ymax"
-        ).df()
+        with self._locked():
+            df = self.relation.aggregate(
+                "MIN(ST_XMin(geometry)) AS xmin, "
+                "MIN(ST_YMin(geometry)) AS ymin, "
+                "MAX(ST_XMax(geometry)) AS xmax, "
+                "MAX(ST_YMax(geometry)) AS ymax"
+            ).df()
         if pd.isna(df["xmin"].iloc[0]):
             return (np.nan, np.nan, np.nan, np.nan)
         return (
@@ -836,10 +890,10 @@ class DuckDBGeoCatalog:
             ``pd.Interval(min(start_time), max(end_time), closed='both')``,
             or ``None`` for an empty catalog.
         """
-        self._require_open_con()
-        df = self.relation.aggregate(
-            "MIN(start_time) AS tmin, MAX(end_time) AS tmax"
-        ).df()
+        with self._locked():
+            df = self.relation.aggregate(
+                "MIN(start_time) AS tmin, MAX(end_time) AS tmax"
+            ).df()
         if pd.isna(df["tmin"].iloc[0]):
             return None
         return pd.Interval(
@@ -851,7 +905,8 @@ class DuckDBGeoCatalog:
     @cached_property
     def _time_literal(self) -> str:
         """SQL literal type matching ``end_time``: TIMESTAMPTZ or TIMESTAMP."""
-        types = dict(zip(self.relation.columns, self.relation.types, strict=True))
+        with self._locked():
+            types = dict(zip(self.relation.columns, self.relation.types, strict=True))
         col_type = str(types.get("end_time", "")).upper()
         return "TIMESTAMPTZ" if "TIME ZONE" in col_type else "TIMESTAMP"
 
@@ -900,14 +955,15 @@ class DuckDBGeoCatalog:
         Returns:
             A filtered `DuckDBGeoCatalog`.
         """
-        self._require_open_con()
-        return self._derive(self.relation.filter(where))
+        with self._locked():
+            filtered = self.relation.filter(where)
+        return self._derive(filtered)
 
     @cached_property
     def _row_count(self) -> int:
         """Cached row count from one COUNT(*) query."""
-        self._require_open_con()
-        df = self.relation.aggregate("COUNT(*) AS n").df()
+        with self._locked():
+            df = self.relation.aggregate("COUNT(*) AS n").df()
         return int(df["n"].iloc[0])
 
     def __len__(self) -> int:
