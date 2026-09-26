@@ -321,6 +321,39 @@ def test_info_json(
     assert "geometry" in payload
 
 
+def test_convert_plain_round_trip(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`convert src --out dst` without --partition-by (#223).
+
+    With DuckDB installed the source opens on the DuckDB backend; its
+    materialised rows used to carry the source's `bbox` column, so the
+    writer failed with "column 'bbox' already exists".
+    """
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    out = tmp_path / "converted.parquet"
+    capsys.readouterr()
+    exit_code = _run("convert", str(source), "--out", str(out), "--json")
+    assert exit_code == 0, capsys.readouterr().err
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["rows"] == 1
+    assert _run("stats", str(out), "--json") == 0
+
+
+def test_info_json_omits_housekeeping_columns(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    capsys.readouterr()
+    assert _run("info", str(source), "--json") == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert not {"_backend", "_schema_version", "bbox"} & set(payload)
+
+
 def test_convert_partition_by_default_out(
     tmp_path: Path,
     utm29_tile_factory: Callable[..., Path],

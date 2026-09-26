@@ -608,6 +608,34 @@ class TestRoundTrip:
         assert len(reopened) == 2
         assert reopened.crs.to_epsg() == 32629
 
+    def test_open_then_to_geoparquet_round_trip(self, tmp_path: Path) -> None:
+        """An artifact with a bbox covering column re-writes cleanly (#223)."""
+        src = tmp_path / "src.parquet"
+        to_geoparquet(_mem_two_tiles(), src)
+        duck = open_catalog(src, engine="duckdb")
+        out = tmp_path / "copy.parquet"
+        duck.to_geoparquet(out)
+        again = open_catalog(out, engine="duckdb")
+        assert len(again) == 2
+        assert again.total_bounds == duck.total_bounds
+
+    def test_materialize_columns_match_memory_reader(self, tmp_path: Path) -> None:
+        """No `_backend` / `_schema_version` / `bbox` in materialised rows (#223)."""
+        src = tmp_path / "src.parquet"
+        to_geoparquet(_mem_two_tiles(), src)
+        duck_cols = set(open_catalog(src, engine="duckdb").materialize().gdf.columns)
+        mem_cols = set(open_catalog(src, engine="memory").gdf.columns)
+        assert duck_cols == mem_cols
+        assert not duck_cols & {"_backend", "_schema_version", "bbox"}
+
+    def test_empty_materialize_keeps_columns(self, tmp_path: Path) -> None:
+        src = tmp_path / "src.parquet"
+        to_geoparquet(_mem_two_tiles(), src)
+        duck = open_catalog(src, engine="duckdb")
+        full_cols = list(duck.materialize().gdf.columns)
+        empty = duck.query(bounds=(1e6, 1e6, 2e6, 2e6), crs="EPSG:32629")
+        assert list(empty.materialize().gdf.columns) == full_cols
+
     def test_empty_catalog_round_trip(self, tmp_path: Path) -> None:
         """A filtered-to-zero catalog should still materialise cleanly."""
         mem = _mem_two_tiles()
