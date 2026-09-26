@@ -51,9 +51,16 @@ The same flow as a static figure (rendered by
    `build_xarray_catalog`) read filenames + metadata directly.
 2. **Index** — a `GeoCatalog` Protocol implementation. Two backends
    ship: `InMemoryGeoCatalog` (eager, GeoDataFrame + R-tree) and
-   `DuckDBGeoCatalog` (lazy, SQL over GeoParquet 1.1). The Protocol
-   surface — `query`, `intersect`, `union`, `iter_rows`,
-   `iter_slices`, `to_geoparquet` — is identical across both.
+   `DuckDBGeoCatalog` (lazy, SQL over GeoParquet 1.1). The shared
+   `GeoCatalog` Protocol surface is `query`, `intersect`, `union`,
+   `iter_rows`, `iter_slices`, `total_bounds`, `temporal_extent`,
+   `crs`, `backend`, `len()` and `get_config`. Persist either backend
+   with the free function `geocatalog.to_geoparquet(catalog, path)`.
+   Backend-specific extras sit outside the Protocol:
+   `InMemoryGeoCatalog.where(pandas_query)` and
+   `intersect(engine="sjoin" | "overlay")`;
+   `DuckDBGeoCatalog.sql(where=...)`, `.to_geoparquet(path)` and
+   `.materialize()`.
 3. **Materialise** — loaders (`load_raster`, `load_raster_timeseries`,
    `load_xarray`, `load_vector`) consume a `GeoSlice` plus a catalog
    and return a `GeoTensor` (or `xr.Dataset`).
@@ -76,15 +83,19 @@ aoi = GeoSlice(
 )
 ```
 
-The dataclass is `frozen=True`. Slices can be cached, hashed, sent
-across process boundaries, or persisted as JSON. To "change" a slice,
+The dataclass is `frozen=True`. Slices can be cached, hashed, used as
+dict keys, and sent across process boundaries. Two slices whose CRSs
+are PROJ-equivalent compare and hash equal even when their WKT differs,
+and tz-aware intervals are stored in naive UTC like catalog rows. There
+is no JSON serialiser; `pd.Interval` is not JSON-native. To "change" a
+slice,
 use `dataclasses.replace(aoi, bounds=...)`. The explicit copy is
 intentional — silent mutation of a query that's been logged is the
 worst kind of bug.
 
 ### Grid alignment
 
-`GeoSlice.shape` rounds `(xmax-xmin)/x_res` to the nearest integer,
+`GeoSlice.shape` rounds `(xmax-xmin)/x_res` half up to an integer,
 which silently accepts bounds that aren't a whole number of pixels.
 That's fine for most pipelines but bites at the matchup boundary
 (stacking a chip against a label raster a pixel short). Two opt-in
@@ -287,8 +298,10 @@ for slice_ in domain.slices():
 ```
 
 The canonical consumer is
-[`geotoolz.patch.SpatialPatcher`](https://github.com/jejjohnson/geotoolz),
-but any code that iterates `domain.slices()` works.
+[`geopatcher.SpatialPatcher`](https://github.com/jejjohnson/geotoolz),
+but any code that iterates `domain.slices()` works. `CatalogDomain`
+accepts either backend; point and line footprints become one-pixel
+slices, and rows without a footprint are skipped with a warning.
 
 With the `[patch]` extra installed, `geocatalog.staging.field_for`
 hands a catalog directly to `geopatcher.SpatialPatcher` as a

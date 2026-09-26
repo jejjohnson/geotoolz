@@ -47,6 +47,7 @@ from geocatalog._src.geoslice import GeoSlice
 from geocatalog._src.memory import (
     InMemoryGeoCatalog,
     _coerce_interval,
+    _footprint_slices,
     _query_envelopes,
 )
 from geocatalog._src.retry import retry_transient_io
@@ -782,19 +783,13 @@ class DuckDBGeoCatalog:
         Yields:
             `GeoSlice` instances in catalog row order.
         """
-        # `align="off"` because footprints are arbitrary shapes; their
-        # bbox extents are almost never integer multiples of an
-        # arbitrary target resolution, so a stricter default would
-        # warn on every row. Callers wanting validation call
-        # `aligned_shape()` on the emitted slice.
-        for row in self.iter_rows():
-            yield GeoSlice(
-                bounds=tuple(row.geometry.bounds),  # type: ignore[arg-type]
-                interval=row.interval,
-                resolution=resolution,
-                crs=row.crs,
-                align="off",
-            )
+        # Same per-row rules as InMemory (degenerate axes widened to one
+        # pixel, missing footprints skipped); see `_footprint_slices`.
+        yield from _footprint_slices(
+            ((row.geometry, row.interval) for row in self.iter_rows()),
+            resolution,
+            self.crs,
+        )
 
     # ── properties + persistence ─────────────────────────────────────────
 

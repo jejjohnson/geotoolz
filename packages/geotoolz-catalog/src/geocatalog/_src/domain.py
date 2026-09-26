@@ -1,6 +1,6 @@
 """`CatalogDomain` — adapter that lets a `GeoCatalog` act as a Patcher domain.
 
-A downstream `SpatialPatcher` (e.g. `geotoolz.patch.SpatialPatcher`)
+A downstream `SpatialPatcher` (e.g. `geopatcher.SpatialPatcher`)
 operates on a `Domain` — an object with ``bounds``, an iterable tiling,
 and (downstream) a `Field` that knows how to read bytes for a given
 sub-region. The single-file case is `RasterDomain` + `RasterField`. The
@@ -21,13 +21,13 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
+    from geocatalog._src.base import GeoCatalog
     from geocatalog._src.geoslice import GeoSlice
-    from geocatalog._src.memory import InMemoryGeoCatalog
 
 
 @dataclass(frozen=True)
 class CatalogDomain:
-    """A `geotoolz.patch.Domain` view of a `GeoCatalog`.
+    """A patcher ``Domain`` view of a `GeoCatalog`.
 
     Use this when you want to run a `SpatialPatcher` (or any consumer
     that takes a `Domain`) across a multi-file archive instead of a
@@ -59,7 +59,7 @@ class CatalogDomain:
                 yield model(chip.values)
     """
 
-    catalog: InMemoryGeoCatalog
+    catalog: GeoCatalog
     resolution: tuple[float, float]
 
     @property
@@ -74,8 +74,8 @@ class CatalogDomain:
 
     @property
     def crs(self) -> Any:
-        """The catalog's CRS — proxied from ``catalog.gdf.crs``."""
-        return self.catalog.gdf.crs
+        """The catalog's CRS — ``catalog.crs``; never materialises rows."""
+        return self.catalog.crs
 
     def __len__(self) -> int:
         """Number of sub-domains (== number of catalog rows)."""
