@@ -42,7 +42,12 @@ if TYPE_CHECKING:
     import duckdb as duckdb_mod
 
 from geocatalog._src._timeutil import naive_utc_datetimes, to_naive_utc
-from geocatalog._src.base import RESERVED_COLUMNS, CatalogMetadataError, CatalogRow
+from geocatalog._src.base import (
+    INTERNAL_COLUMNS,
+    RESERVED_COLUMNS,
+    CatalogMetadataError,
+    CatalogRow,
+)
 from geocatalog._src.geoslice import GeoSlice
 from geocatalog._src.memory import (
     InMemoryGeoCatalog,
@@ -1308,24 +1313,19 @@ def _df_to_inmemory(
     crs: pyproj.CRS,
     backend: _BACKEND_T,
 ) -> InMemoryGeoCatalog:
-    """Build an `InMemoryGeoCatalog` from a DuckDB-materialised DataFrame."""
-    if len(df) == 0:
-        gdf = gpd.GeoDataFrame(
-            {"geometry": []},
-            geometry="geometry",
-            crs=crs,
-            index=pd.IntervalIndex.from_arrays(
-                np.array([], dtype="datetime64[ns]"),
-                np.array([], dtype="datetime64[ns]"),
-                closed="both",
-                name="datetime",
-            ),
-        )
-        return InMemoryGeoCatalog(gdf, backend=backend)
+    """Build an `InMemoryGeoCatalog` from a DuckDB-materialised DataFrame.
+
+    Mirrors `from_geoparquet`: the writer-managed columns (``_backend``,
+    ``_schema_version``) and the GeoParquet 1.1 ``bbox`` covering struct
+    are dropped, since they describe the file rather than the rows and
+    `to_geoparquet` re-emits its own. Empty frames keep every other
+    column.
+    """
     geom = _decode_geometry_column(df["geometry"])
     starts = pd.to_datetime(df["start_time"])
     ends = pd.to_datetime(df["end_time"])
-    out = df.drop(columns=["geometry", "start_time", "end_time"]).copy()
+    housekeeping = [c for c in (*INTERNAL_COLUMNS, "bbox") if c in df.columns]
+    out = df.drop(columns=["geometry", "start_time", "end_time", *housekeeping]).copy()
     out["geometry"] = geom
     gdf = gpd.GeoDataFrame(out, geometry="geometry", crs=crs)
     idx = pd.IntervalIndex.from_arrays(starts, ends, closed="both", name="datetime")
