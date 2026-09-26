@@ -437,8 +437,8 @@ def stats(
         {
             "rows": len(cat),
             "bounds": list(cat.total_bounds),
-            "temporal_start": extent.left,
-            "temporal_end": extent.right,
+            "temporal_start": None if extent is None else extent.left,
+            "temporal_end": None if extent is None else extent.right,
             "backend": cat.backend,
             "crs": _catalog_crs(cat),
         },

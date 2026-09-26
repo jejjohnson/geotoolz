@@ -77,6 +77,13 @@ class TestProperties:
     def test_len(self, two_tile_catalog: InMemoryGeoCatalog) -> None:
         assert len(two_tile_catalog) == 2
 
+    def test_temporal_extent_empty_is_none(
+        self, two_tile_catalog: InMemoryGeoCatalog
+    ) -> None:
+        empty = two_tile_catalog.query(bounds=(1e6, 1e6, 2e6, 2e6), crs="EPSG:32629")
+        assert len(empty) == 0
+        assert empty.temporal_extent is None
+
 
 class TestQuery:
     def test_query_filters_by_bbox(self, two_tile_catalog: InMemoryGeoCatalog) -> None:

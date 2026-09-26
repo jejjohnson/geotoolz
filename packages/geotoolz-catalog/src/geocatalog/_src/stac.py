@@ -322,8 +322,8 @@ def _collection_extent(catalog: GeoCatalog, pystac: Any) -> Any:
         spatial = pystac.SpatialExtent([list(bounds)])
 
     interval = catalog.temporal_extent
-    start = _datetime_or_none(interval.left)
-    end = _datetime_or_none(interval.right)
+    start = None if interval is None else _datetime_or_none(interval.left)
+    end = None if interval is None else _datetime_or_none(interval.right)
     temporal = pystac.TemporalExtent([[start, end]])
     return pystac.Extent(spatial, temporal)
 

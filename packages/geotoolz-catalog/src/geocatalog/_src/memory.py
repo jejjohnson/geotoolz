@@ -92,16 +92,16 @@ class InMemoryGeoCatalog:
         return tuple(self.gdf.total_bounds.tolist())  # type: ignore[return-value]
 
     @cached_property
-    def temporal_extent(self) -> pd.Interval:
+    def temporal_extent(self) -> pd.Interval | None:
         """Tightest interval spanning every row's time window.
 
         Returns:
             ``pd.Interval(min(start_times), max(end_times),
-            closed='both')``. Both endpoints are ``pd.NaT`` for an
-            empty catalog.
+            closed='both')``, or ``None`` for an empty catalog
+            (``pd.Interval`` cannot hold ``NaT`` endpoints).
         """
         if len(self.gdf) == 0:
-            return pd.Interval(pd.NaT, pd.NaT, closed="both")
+            return None
         return pd.Interval(
             self.gdf.index.left.min(),
             self.gdf.index.right.max(),
