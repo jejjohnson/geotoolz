@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import geopandas as gpd
 import numpy as np
@@ -190,7 +191,7 @@ def test_load_raster_retries_data_open(
 def test_duckdb_open_retries_read_parquet_sql(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    relation = object()
+    relation = SimpleNamespace(columns=[], types=[])
 
     class FakeConnection:
         def __init__(self) -> None:
@@ -198,10 +199,10 @@ def test_duckdb_open_retries_read_parquet_sql(
 
         def execute(self, *args: object, **kwargs: object) -> None:
             # httpfs auto-load (INSTALL/LOAD) goes through `con.execute`;
-            # the retry path under test runs `con.sql` for `read_parquet`.
+            # the retry path under test is `con.read_parquet`.
             return None
 
-        def sql(self, *args: object, **kwargs: object) -> object:
+        def read_parquet(self, *args: object, **kwargs: object) -> object:
             self.attempts += 1
             if self.attempts < 3:
                 raise OSError("temporary duckdb read failure")

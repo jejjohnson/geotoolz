@@ -5,7 +5,6 @@ from __future__ import annotations
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
@@ -14,7 +13,9 @@ from geocatalog import DuckDBGeoCatalog
 
 
 class _FakeRelation:
-    pass
+    def __init__(self) -> None:
+        self.columns: list[str] = []
+        self.types: list[str] = []
 
 
 class _FakeConnection:
@@ -28,7 +29,7 @@ class _FakeConnection:
     def close(self) -> None:
         self.closed = True
 
-    def sql(self, query: str, *, params: dict[str, Any]) -> _FakeRelation:
+    def read_parquet(self, source: str, *, hive_partitioning: bool) -> _FakeRelation:
         return _FakeRelation()
 
 
@@ -143,12 +144,11 @@ def test_open_loads_extension_for_supported_uri_schemes(
 ) -> None:
     captured_source: list[str] = []
 
-    def fake_sql(query: str, *, params: dict[str, Any]) -> _FakeRelation:
-        assert query == "SELECT * FROM read_parquet($src, hive_partitioning = $hive)"
-        captured_source.append(params["src"])
+    def fake_read_parquet(source: str, *, hive_partitioning: bool) -> _FakeRelation:
+        captured_source.append(source)
         return _FakeRelation()
 
-    monkeypatch.setattr(fake_duckdb, "sql", fake_sql)
+    monkeypatch.setattr(fake_duckdb, "read_parquet", fake_read_parquet)
 
     cat = DuckDBGeoCatalog.open(source)
 
