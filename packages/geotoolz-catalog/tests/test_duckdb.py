@@ -630,6 +630,19 @@ class TestProperties:
         assert ext.left == pd.Timestamp("2024-01-01")
         assert ext.right == pd.Timestamp("2024-01-03")
 
+    def test_query_rejects_crs_alongside_slice(self, parquet_two_tiles: Path) -> None:
+        duck = open_catalog(parquet_two_tiles, engine="duckdb")
+        sl = GeoSlice(
+            (0.0, 0.0, 100.0, 100.0),
+            pd.Interval(
+                pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-03"), closed="both"
+            ),
+            (10.0, 10.0),
+            "EPSG:32629",
+        )
+        with pytest.raises(TypeError, match="carries its own crs"):
+            duck.query(sl, crs="EPSG:4326")
+
     def test_temporal_extent_empty_is_none(self, parquet_two_tiles: Path) -> None:
         duck = open_catalog(parquet_two_tiles, engine="duckdb")
         empty = duck.query(bounds=(1e6, 1e6, 2e6, 2e6), crs="EPSG:32629")

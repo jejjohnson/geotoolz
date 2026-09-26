@@ -77,6 +77,20 @@ class TestProperties:
     def test_len(self, two_tile_catalog: InMemoryGeoCatalog) -> None:
         assert len(two_tile_catalog) == 2
 
+    def test_query_rejects_crs_alongside_slice(
+        self, two_tile_catalog: InMemoryGeoCatalog
+    ) -> None:
+        sl = GeoSlice(
+            (0.0, 0.0, 100.0, 100.0),
+            pd.Interval(
+                pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-03"), closed="both"
+            ),
+            (10.0, 10.0),
+            "EPSG:32629",
+        )
+        with pytest.raises(TypeError, match="carries its own crs"):
+            two_tile_catalog.query(sl, crs="EPSG:4326")
+
     def test_temporal_extent_empty_is_none(
         self, two_tile_catalog: InMemoryGeoCatalog
     ) -> None:

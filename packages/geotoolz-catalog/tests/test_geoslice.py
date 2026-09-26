@@ -169,3 +169,71 @@ class TestToCrsDegenerateGuards:
         out = sl.to_crs("EPSG:3857")
         assert out.crs.to_epsg() == 3857
         assert out.bounds[0] < out.bounds[2] and out.bounds[1] < out.bounds[3]
+
+
+def _iv() -> pd.Interval:
+    return pd.Interval(
+        pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02"), closed="both"
+    )
+
+
+class TestHashEqConsistency:
+    """`a == b` must imply `hash(a) == hash(b)` (#227)."""
+
+    def test_equivalent_crs_with_different_wkt(self) -> None:
+        epsg = pyproj.CRS.from_epsg(32629)
+        # Round-trip through WKT1_GDAL, as a raster header would: PROJ says
+        # it is equivalent, but its WKT (and so pyproj's hash) differs.
+        from_header = pyproj.CRS.from_wkt(epsg.to_wkt("WKT1_GDAL"))
+        assert from_header == epsg
+        assert from_header.to_wkt() != epsg.to_wkt()
+
+        a = GeoSlice((0.0, 0.0, 10.0, 10.0), _iv(), (1.0, 1.0), epsg)
+        b = GeoSlice((0.0, 0.0, 10.0, 10.0), _iv(), (1.0, 1.0), from_header)
+        assert a == b
+        assert hash(a) == hash(b)
+        assert {a: "hit"}[b] == "hit"
+
+    def test_different_crs_still_unequal(self) -> None:
+        a = GeoSlice((0.0, 0.0, 10.0, 10.0), _iv(), (1.0, 1.0), "EPSG:32629")
+        b = GeoSlice((0.0, 0.0, 10.0, 10.0), _iv(), (1.0, 1.0), "EPSG:32630")
+        assert a != b
+        assert len({a, b}) == 2
+
+
+class TestBoundsResolutionCoercion:
+    def test_list_bounds_coerced_to_tuple(self) -> None:
+        sl = GeoSlice([0, 0, 10, 10], _iv(), [1, 1], "EPSG:4326")
+        assert sl.bounds == (0.0, 0.0, 10.0, 10.0)
+        assert sl.resolution == (1.0, 1.0)
+        assert all(type(v) is float for v in sl.bounds + sl.resolution)
+        assert sl == GeoSlice((0.0, 0.0, 10.0, 10.0), _iv(), (1.0, 1.0), "EPSG:4326")
+        hash(sl)
+
+    def test_numpy_bounds_coerced(self) -> None:
+        sl = GeoSlice(np.array([0, 0, 10, 10]), _iv(), (1.0, 1.0), "EPSG:4326")
+        assert sl.bounds == (0.0, 0.0, 10.0, 10.0)
+
+    @pytest.mark.parametrize(
+        "bounds",
+        [
+            (0.0, 0.0, float("inf"), 10.0),
+            (float("-inf"), 0.0, 10.0, 10.0),
+            (0.0, float("nan"), 10.0, 10.0),
+        ],
+    )
+    def test_non_finite_bounds_rejected(self, bounds: tuple[float, ...]) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            GeoSlice(bounds, _iv(), (1.0, 1.0), "EPSG:4326")
+
+    def test_non_finite_resolution_rejected(self) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            GeoSlice((0.0, 0.0, 10.0, 10.0), _iv(), (float("inf"), 1.0), "EPSG:4326")
+
+    def test_wrong_arity_rejected(self) -> None:
+        with pytest.raises(ValueError, match="4 values"):
+            GeoSlice((0.0, 0.0, 10.0), _iv(), (1.0, 1.0), "EPSG:4326")  # type: ignore[arg-type]
+
+    def test_non_numeric_rejected(self) -> None:
+        with pytest.raises(ValueError, match="4 numbers"):
+            GeoSlice(("a", 0, 1, 1), _iv(), (1.0, 1.0), "EPSG:4326")  # type: ignore[arg-type]
