@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.1.0...geotoolz-catalog-v0.1.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **catalog:** align the GeoCatalog Protocol, CatalogDomain and iter_slices with both backends ([#262](https://github.com/jejjohnson/geotoolz/issues/262)) ([ae74904](https://github.com/jejjohnson/geotoolz/commit/ae74904008d5ad70c3f06fb12bb017e4596587ef)), closes [#232](https://github.com/jejjohnson/geotoolz/issues/232)
+* **catalog:** hold catalog times in naive UTC across constructors, queries and backends ([#261](https://github.com/jejjohnson/geotoolz/issues/261)) ([b0ab340](https://github.com/jejjohnson/geotoolz/commit/b0ab3405bdf1ac09a2b0952e04a0998a5ec3e323)), closes [#231](https://github.com/jejjohnson/geotoolz/issues/231)
+* **catalog:** keep GeometryCollection overlaps and sync time columns in intersect ([#260](https://github.com/jejjohnson/geotoolz/issues/260)) ([329935a](https://github.com/jejjohnson/geotoolz/commit/329935a653cc8bf0ff4c14393fa1208fdbabd1f7)), closes [#230](https://github.com/jejjohnson/geotoolz/issues/230)
+* **catalog:** keep GeoSlice hash consistent with equality; validate bounds ([#257](https://github.com/jejjohnson/geotoolz/issues/257)) ([d93c6dc](https://github.com/jejjohnson/geotoolz/commit/d93c6dce311a38c4c88301151ad0c3a0d8db61d5)), closes [#227](https://github.com/jejjohnson/geotoolz/issues/227)
+* **catalog:** make grid-alignment tolerance pixel-relative; round shape half up ([#256](https://github.com/jejjohnson/geotoolz/issues/256)) ([f22acda](https://github.com/jejjohnson/geotoolz/commit/f22acdad78aef2811336a0d2a92c361129d49e1e)), closes [#226](https://github.com/jejjohnson/geotoolz/issues/226)
+* **catalog:** return None from temporal_extent on empty catalogs ([#255](https://github.com/jejjohnson/geotoolz/issues/255)) ([f500ccb](https://github.com/jejjohnson/geotoolz/commit/f500ccbb27073d79f7149ce1e57f1101072a2b81)), closes [#228](https://github.com/jejjohnson/geotoolz/issues/228)
+* **catalog:** split antimeridian-crossing query AOIs instead of inverting them ([#258](https://github.com/jejjohnson/geotoolz/issues/258)) ([3146e9c](https://github.com/jejjohnson/geotoolz/commit/3146e9c1c11d15e017c9eceb78aa8f04464ac592)), closes [#229](https://github.com/jejjohnson/geotoolz/issues/229)
+
 ## [0.1.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.0.3...geotoolz-catalog-v0.1.0) (2026-07-13)
 
 
