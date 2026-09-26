@@ -32,6 +32,12 @@ from rasterio.enums import Resampling
 from rasterio.merge import merge as rio_merge
 from rasterio.vrt import WarpedVRT
 
+from geocatalog._src._timeutil import (
+    TIME_INVARIANT_END,
+    TIME_INVARIANT_START,
+    filename_interval,
+    is_time_invariant,
+)
 from geocatalog._src.geoslice import GeoSlice
 from geocatalog._src.io import _close_resolved_uri, _resolve_uri, _uri_name
 from geocatalog._src.memory import InMemoryGeoCatalog
@@ -50,19 +56,6 @@ _VALID_MERGE_METHODS: tuple[_RasterMergeMethod, ...] = (
     "max",
     "sum",
 )
-
-
-def _parse_date(value: str, fmt: str) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """Return ``(start, end)`` for the UTC day containing ``value``.
-
-    `Timestamp.ceil('D')` is a no-op when the input is already at a day
-    boundary, which would produce start > end for a date-only string
-    like "20240115". Add a full day to the floor instead.
-    """
-    ts = pd.to_datetime(value, format=fmt)
-    start = ts.floor("D")
-    end = start + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
-    return start, end
 
 
 def _filepath_to_row(
@@ -93,24 +86,13 @@ def _filepath_to_row(
         # No date parsing — files are treated as time-invariant. Use a
         # narrow sentinel interval that won't dominate IntervalIndex
         # logs the way Timestamp.min/max would (§7.2 of the design plan).
-        start = pd.Timestamp("1900-01-01")
-        end = pd.Timestamp("2100-01-01")
+        start, end = TIME_INVARIANT_START, TIME_INVARIANT_END
     else:
         match = filename_regex.search(_uri_name(filepath))
         if match is None:
             log.warning("Skipping {}: filename does not match regex", filepath)
             return None
-        groups = match.groupdict()
-        if "date" in groups:
-            start, end = _parse_date(groups["date"], date_format)
-        elif "start" in groups and "stop" in groups:
-            start, _ = _parse_date(groups["start"], date_format)
-            _, end = _parse_date(groups["stop"], date_format)
-        else:
-            raise ValueError(
-                f"filename_regex must capture either 'date' or "
-                f"'start'+'stop' named groups; got {list(groups.keys())}"
-            )
+        start, end = filename_interval(match.groupdict(), date_format)
 
     return {
         "filepath": str(filepath),
@@ -723,6 +705,21 @@ async def aload_raster(
     )
 
 
+def _timeseries_days(
+    index: pd.IntervalIndex, window: pd.Interval
+) -> list[pd.Timestamp]:
+    """Step days for `load_raster_timeseries` (#219).
+
+    A day for every row whose time window begins inside ``window`` (rows
+    that began earlier count from the window start); days never fall
+    outside ``window``. Time-invariant rows add no day unless nothing
+    else matched.
+    """
+    dated = [iv for iv in index if not is_time_invariant(iv)]
+    starts = [max(iv.left, window.left) for iv in (dated or list(index)[:1])]
+    return sorted({s.floor("D") for s in starts if s <= window.right})
+
+
 def load_raster_timeseries(
     catalog: InMemoryGeoCatalog,
     slice_: GeoSlice,
@@ -736,9 +733,14 @@ def load_raster_timeseries(
 ) -> GeoTensor:
     """Stack daily mosaics across the slice's interval into ``(time, b, h, w)``.
 
-    For each distinct day with matching rows in ``slice_.interval``,
-    runs `load_raster` for that day's sub-slice and stacks the results
-    along a new leading time axis sorted in chronological order. By
+    For each distinct day on which a matching row's time window begins
+    inside ``slice_.interval`` (a row that began earlier counts from the
+    slice start), runs `load_raster` for that day's sub-slice, clipped to
+    the slice interval, and stacks the results along a new leading time
+    axis in chronological order. Rows of time-invariant files (the
+    1900-2100 sentinel interval) create no step of their own but are
+    mosaicked into every step; if only such rows match, there is one
+    step at the slice start. By
     default, days whose per-day load raises `ValueError` are dropped —
     the time axis is the *observed* day count, not a dense calendar.
     The transform / CRS come from the chronologically last successful
@@ -778,12 +780,16 @@ def load_raster_timeseries(
     if len(filtered) == 0:
         raise ValueError("load_raster_timeseries: no catalog rows match the slice")
 
-    days = sorted({i.left.floor("D") for i in filtered.gdf.index})
+    days = _timeseries_days(filtered.gdf.index, slice_.interval)
 
     def load_day(day: pd.Timestamp) -> tuple[pd.Timestamp, GeoTensor] | None:
+        # Clip the day to the slice: a sub-day slice stays sub-day (#219).
         day_interval = pd.Interval(
-            day,
-            day + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1),
+            max(day, slice_.interval.left),
+            min(
+                day + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1),
+                slice_.interval.right,
+            ),
             closed="both",
         )
         day_slice = dataclasses.replace(slice_, interval=day_interval)

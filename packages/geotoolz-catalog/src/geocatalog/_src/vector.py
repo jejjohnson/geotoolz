@@ -16,12 +16,16 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 import shapely.geometry
 from georeader.geotensor import GeoTensor
 from loguru import logger as log
 from rasterio.features import rasterize
 
+from geocatalog._src._timeutil import (
+    TIME_INVARIANT_END,
+    TIME_INVARIANT_START,
+    filename_interval,
+)
 from geocatalog._src.geoslice import GeoSlice
 from geocatalog._src.io import _close_resolved_uri, _resolve_uri, _uri_name
 from geocatalog._src.memory import InMemoryGeoCatalog
@@ -74,28 +78,13 @@ def _vector_row(
     polygon = shapely.geometry.box(xmin, ymin, xmax, ymax)
 
     if filename_regex is None:
-        start = pd.Timestamp("1900-01-01")
-        end = pd.Timestamp("2100-01-01")
+        start, end = TIME_INVARIANT_START, TIME_INVARIANT_END
     else:
         match = filename_regex.search(_uri_name(filepath))
         if match is None:
             log.warning("Skipping {}: filename does not match regex", filepath)
             return None, observed_crs
-        groups = match.groupdict()
-        if "date" in groups:
-            ts = pd.to_datetime(groups["date"], format=date_format)
-            start = ts.floor("D")
-            end = start + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
-        elif "start" in groups and "stop" in groups:
-            t0 = pd.to_datetime(groups["start"], format=date_format)
-            t1 = pd.to_datetime(groups["stop"], format=date_format)
-            start = t0.floor("D")
-            end = t1.floor("D") + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
-        else:
-            raise ValueError(
-                f"filename_regex must capture either 'date' or "
-                f"'start'+'stop'; got {list(groups.keys())}"
-            )
+        start, end = filename_interval(match.groupdict(), date_format)
 
     return (
         {

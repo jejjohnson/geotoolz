@@ -38,6 +38,53 @@ def to_utc_ts(value: Any) -> pd.Timestamp:
     return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
 
 
+# Interval stamped on rows of time-invariant files (no date in the name,
+# no time coordinate). Narrow enough not to dominate IntervalIndex logs.
+TIME_INVARIANT_START = pd.Timestamp("1900-01-01")
+TIME_INVARIANT_END = pd.Timestamp("2100-01-01")
+
+
+def is_time_invariant(interval: pd.Interval) -> bool:
+    """True for the sentinel interval of a time-invariant row."""
+    return (
+        interval.left == TIME_INVARIANT_START and interval.right == TIME_INVARIANT_END
+    )
+
+
+def filename_interval(
+    groups: dict[str, str | None], date_format: str
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Day-aligned ``(start, end)`` from a filename regex match's groups.
+
+    Uses the ``date`` group when it matched, else ``start`` + ``stop``.
+    Membership alone is not enough: in an alternation such as
+    ``(?P<date>\\d{8})|(?P<start>\\d{8})_(?P<stop>\\d{8})`` every group
+    name is present and the unmatched ones are ``None``, which used to
+    become ``NaT`` intervals silently (#219).
+
+    Raises:
+        ValueError: If neither a ``date`` nor a ``start`` + ``stop`` pair
+            matched.
+    """
+
+    def _day(value: str) -> pd.Timestamp:
+        return pd.to_datetime(value, format=date_format).floor("D")
+
+    one_day = pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+    date = groups.get("date")
+    if date is not None:
+        start = _day(date)
+        return start, start + one_day
+    t0, t1 = groups.get("start"), groups.get("stop")
+    if t0 is not None and t1 is not None:
+        return _day(t0), _day(t1) + one_day
+    matched = {k: v for k, v in groups.items() if v is not None}
+    raise ValueError(
+        "filename_regex must match either a 'date' group or both 'start' and "
+        f"'stop' groups; matched groups: {matched}"
+    )
+
+
 def to_naive_utc(value: Any) -> pd.Timestamp:
     """Coerce a datetime-like to the catalog's stored form: naive, in UTC.
 
