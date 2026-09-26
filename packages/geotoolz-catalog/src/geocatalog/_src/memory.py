@@ -1,4 +1,4 @@
-"""`InMemoryGeoCatalog` — Phase 1 in-RAM catalog backend.
+"""`InMemoryGeoCatalog` — the in-RAM catalog backend.
 
 Wraps a ``geopandas.GeoDataFrame`` whose row index is a
 ``pd.IntervalIndex`` over the time axis and whose ``geometry`` column
@@ -6,13 +6,14 @@ carries each file's footprint in a uniform target CRS. Queries leverage
 geopandas's R-tree (built lazily on first access via ``gdf.sindex``)
 and pandas's IntervalIndex for O(log n + k) lookups in both axes.
 
-Good for catalogs up to ~10⁵ rows. Beyond that, switch to the v0.2
-DuckDB backend (same Protocol, different store).
+Good for catalogs up to ~10⁵ rows. Beyond that, switch to
+`DuckDBGeoCatalog` (same Protocol, different store).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import warnings
+from collections.abc import Iterable, Iterator
 from functools import cached_property
 from typing import Any, Literal, get_args
 
@@ -108,6 +109,11 @@ class InMemoryGeoCatalog:
             )
         self.gdf = gdf
         self.backend = backend
+
+    @property
+    def crs(self) -> pyproj.CRS:
+        """The catalog CRS (``gdf.crs``) as a ``pyproj.CRS``."""
+        return pyproj.CRS.from_user_input(self.gdf.crs)
 
     @cached_property
     def total_bounds(self) -> tuple[float, float, float, float]:
@@ -400,19 +406,15 @@ class InMemoryGeoCatalog:
                 downstream loader will produce.
 
         Yields:
-            `GeoSlice` instances in catalog row order.
+            `GeoSlice` instances in catalog row order. Point and line
+            footprints with a zero-width axis get a one-pixel extent on
+            that axis, centred on the footprint; rows with a missing or
+            empty footprint are skipped with a single warning.
         """
-        crs = pyproj.CRS.from_user_input(self.gdf.crs)
-        # `align="off"` because footprints are arbitrary shapes; see
-        # the matching comment in `DuckDBGeoCatalog.iter_slices`.
-        for interval, geom in zip(self.gdf.index, self.gdf.geometry, strict=True):
-            yield GeoSlice(
-                bounds=tuple(geom.bounds),  # type: ignore[arg-type]
-                interval=interval,
-                resolution=resolution,
-                crs=crs,
-                align="off",
-            )
+        crs = self.crs
+        yield from _footprint_slices(
+            zip(self.gdf.geometry, self.gdf.index, strict=True), resolution, crs
+        )
 
     def where(self, query: str) -> InMemoryGeoCatalog:
         """Filter by a non-geometric predicate — escape hatch via pandas ``.query()``.
@@ -549,6 +551,49 @@ def _coerce_interval(time: tuple[Any, Any] | pd.Interval) -> pd.Interval:
     else:
         t0, t1 = time
     return pd.Interval(to_naive_utc(t0), to_naive_utc(t1), closed="both")
+
+
+def _footprint_slices(
+    rows: Iterable[tuple[Any, pd.Interval]],
+    resolution: tuple[float, float],
+    crs: pyproj.CRS,
+) -> Iterator[GeoSlice]:
+    """One `GeoSlice` per ``(footprint, interval)``; shared by both backends.
+
+    ``align="off"`` because footprints are arbitrary shapes; their bbox
+    extents are almost never integer multiples of an arbitrary target
+    resolution. A zero-width axis (Point, or an axis-parallel line) is
+    widened to one pixel centred on the footprint, since `GeoSlice`
+    requires ``xmin < xmax`` and ``ymin < ymax``. Missing or empty
+    footprints have no extent at all; they are skipped and counted, and
+    one warning reports the count once iteration finishes.
+    """
+    x_res, y_res = resolution
+    skipped = 0
+    for geom, interval in rows:
+        if geom is None or geom.is_empty:
+            skipped += 1
+            continue
+        xmin, ymin, xmax, ymax = geom.bounds
+        if not xmin < xmax:
+            cx = (xmin + xmax) / 2
+            xmin, xmax = cx - x_res / 2, cx + x_res / 2
+        if not ymin < ymax:
+            cy = (ymin + ymax) / 2
+            ymin, ymax = cy - y_res / 2, cy + y_res / 2
+        yield GeoSlice(
+            bounds=(xmin, ymin, xmax, ymax),
+            interval=interval,
+            resolution=resolution,
+            crs=crs,
+            align="off",
+        )
+    if skipped:
+        warnings.warn(
+            f"iter_slices skipped {skipped} row(s) with a missing or empty footprint.",
+            UserWarning,
+            stacklevel=3,
+        )
 
 
 def _reproject_bounds(
