@@ -41,6 +41,7 @@ from loguru import logger as log
 if TYPE_CHECKING:
     import duckdb as duckdb_mod
 
+from geocatalog._src._timeutil import naive_utc_datetimes, to_naive_utc
 from geocatalog._src.base import RESERVED_COLUMNS, CatalogMetadataError, CatalogRow
 from geocatalog._src.geoslice import GeoSlice
 from geocatalog._src.memory import (
@@ -584,10 +585,16 @@ class DuckDBGeoCatalog:
             )
             where.append(f"({spatial})")
         if q_interval is not None:
-            t_lo = pd.Timestamp(q_interval.left).isoformat()
-            t_hi = pd.Timestamp(q_interval.right).isoformat()
-            where.append(f"end_time >= TIMESTAMP '{t_lo}'")
-            where.append(f"start_time <= TIMESTAMP '{t_hi}'")
+            # Bounds are naive UTC (`_coerce_interval` / GeoSlice). Type the
+            # literal to match the column so DuckDB never casts through the
+            # session time zone: a TIMESTAMP literal compared with a
+            # TIMESTAMPTZ column would be read in the host's zone.
+            literal = self._time_literal
+            suffix = "+00:00" if literal == "TIMESTAMPTZ" else ""
+            t_lo = to_naive_utc(q_interval.left).isoformat() + suffix
+            t_hi = to_naive_utc(q_interval.right).isoformat() + suffix
+            where.append(f"end_time >= {literal} '{t_lo}'")
+            where.append(f"start_time <= {literal} '{t_hi}'")
 
         if not where:
             return self._derive(self.relation)
@@ -727,8 +734,10 @@ class DuckDBGeoCatalog:
             if len(df) == 0:
                 continue
             geoms = _decode_geometry_column(df["geometry"])
-            starts = pd.to_datetime(df["start_time"])
-            ends = pd.to_datetime(df["end_time"])
+            # TIMESTAMPTZ columns arrive in the session time zone; convert
+            # to the catalog's naive-UTC form so rows match InMemory's.
+            starts = naive_utc_datetimes(pd.to_datetime(df["start_time"]))
+            ends = naive_utc_datetimes(pd.to_datetime(df["end_time"]))
             # `_backend`, `_schema_version` and any other underscore-prefixed
             # column belong to the on-disk schema, not the user-visible row
             # metadata. Filtering them keeps `extras` clean for downstream
@@ -828,10 +837,17 @@ class DuckDBGeoCatalog:
         if pd.isna(df["tmin"].iloc[0]):
             return None
         return pd.Interval(
-            pd.Timestamp(df["tmin"].iloc[0]),
-            pd.Timestamp(df["tmax"].iloc[0]),
+            to_naive_utc(df["tmin"].iloc[0]),
+            to_naive_utc(df["tmax"].iloc[0]),
             closed="both",
         )
+
+    @cached_property
+    def _time_literal(self) -> str:
+        """SQL literal type matching ``end_time``: TIMESTAMPTZ or TIMESTAMP."""
+        types = dict(zip(self.relation.columns, self.relation.types, strict=True))
+        col_type = str(types.get("end_time", "")).upper()
+        return "TIMESTAMPTZ" if "TIME ZONE" in col_type else "TIMESTAMP"
 
     def to_geoparquet(
         self,

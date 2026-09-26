@@ -31,6 +31,7 @@ import pyproj
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
+from geocatalog._src._timeutil import to_naive_utc
 from geocatalog._src.memory import InMemoryGeoCatalog
 
 
@@ -139,8 +140,10 @@ def source_row_to_gdf_row(
 
     return {
         "geometry": geometry,
-        "start_time": pd.Timestamp(row.interval.left),
-        "end_time": pd.Timestamp(row.interval.right),
+        # Naive UTC, the catalog's stored time form: source adapters emit
+        # tz-aware intervals, existing catalogs hold naive ones (#231).
+        "start_time": to_naive_utc(row.interval.left),
+        "end_time": to_naive_utc(row.interval.right),
         "filepath": filepath,
         "id": row.id,
         "source": row.source,

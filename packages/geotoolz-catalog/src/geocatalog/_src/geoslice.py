@@ -35,6 +35,7 @@ from rasterio.windows import (
 )
 
 from geocatalog._src._align import Align, GridAlignmentWarning, divide_evenly
+from geocatalog._src._timeutil import naive_utc_interval
 
 
 _VALID_ALIGN_MODES: frozenset[str] = frozenset(get_args(Align))
@@ -57,6 +58,8 @@ class GeoSlice:
     Args:
         bounds: ``(xmin, ymin, xmax, ymax)`` in ``crs`` units.
         interval: A ``pd.Interval`` (``closed='both'``) over the time axis.
+            tz-aware timestamp endpoints are converted to naive UTC, the
+            catalog's stored time form.
         resolution: ``(x_res, y_res)`` in CRS units. Both positive.
         crs: A ``pyproj.CRS``. String / EPSG-int inputs are coerced.
     """
@@ -100,6 +103,9 @@ class GeoSlice:
                 "GeoSlice.interval must be closed='both' for consistency with "
                 f"the catalog IntervalIndex; got closed={self.interval.closed!r}"
             )
+        # Catalog time contract: naive UTC. A tz-aware slice becomes the
+        # equal (and equally hashed) naive-UTC slice.
+        object.__setattr__(self, "interval", naive_utc_interval(self.interval))
         x_res, y_res = self.resolution
         if x_res <= 0 or y_res <= 0:
             raise ValueError(

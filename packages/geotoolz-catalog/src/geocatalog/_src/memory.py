@@ -22,6 +22,11 @@ import pandas as pd
 import pyproj
 import shapely
 
+from geocatalog._src._timeutil import (
+    naive_utc_datetimes,
+    naive_utc_interval_index,
+    to_naive_utc,
+)
 from geocatalog._src.base import CatalogRow
 from geocatalog._src.geoslice import GeoSlice
 
@@ -63,6 +68,16 @@ class InMemoryGeoCatalog:
     ) -> None:
         if gdf.crs is None:
             raise ValueError("InMemoryGeoCatalog requires gdf.crs to be set; got None.")
+        # Stored time contract: naive UTC (see `_timeutil`). Convert any
+        # tz-aware / mixed time columns before they become the index so
+        # naive and aware inputs never meet in a comparison.
+        time_cols = {
+            c: naive_utc_datetimes(gdf[c])
+            for c in ("start_time", "end_time")
+            if c in gdf.columns
+        }
+        if any(time_cols[c] is not gdf[c] for c in time_cols):
+            gdf = gdf.assign(**time_cols)
         if not isinstance(gdf.index, pd.IntervalIndex):
             if "start_time" in gdf.columns and "end_time" in gdf.columns:
                 idx = pd.IntervalIndex.from_arrays(
@@ -76,6 +91,9 @@ class InMemoryGeoCatalog:
                     f"index={type(gdf.index).__name__}, "
                     f"columns={list(gdf.columns)}."
                 )
+        normalized_index = naive_utc_interval_index(gdf.index)
+        if normalized_index is not gdf.index:
+            gdf = gdf.set_axis(normalized_index, axis=0)
         if gdf.index.closed != "both":
             # query() uses IntervalIndex.overlaps, whose endpoint semantics
             # follow ``closed``; GeoSlice intervals are always closed='both'.
@@ -523,13 +541,14 @@ def _coerce_interval(time: tuple[Any, Any] | pd.Interval) -> pd.Interval:
     Accepts either a ``(start, end)`` pair of ``pd.Timestamp``-likes or
     a `pd.Interval`. Half-open intervals are rebuilt as ``closed='both'``
     to match the catalog's IntervalIndex convention.
+    Timestamp endpoints are returned in naive UTC, the catalog's stored
+    time form, so tz-aware and naive bounds query identically.
     """
     if isinstance(time, pd.Interval):
-        if time.closed != "both":
-            return pd.Interval(time.left, time.right, closed="both")
-        return time
-    t0, t1 = time
-    return pd.Interval(pd.Timestamp(t0), pd.Timestamp(t1), closed="both")
+        t0, t1 = time.left, time.right
+    else:
+        t0, t1 = time
+    return pd.Interval(to_naive_utc(t0), to_naive_utc(t1), closed="both")
 
 
 def _reproject_bounds(
