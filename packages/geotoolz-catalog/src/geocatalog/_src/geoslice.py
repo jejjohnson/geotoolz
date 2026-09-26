@@ -34,9 +34,10 @@ from geocatalog._src._align import Align, GridAlignmentWarning, divide_evenly
 _VALID_ALIGN_MODES: frozenset[str] = frozenset(get_args(Align))
 
 
-# Number of decimal digits within which ``(bounds, resolution)`` must
-# round to integer pixel counts. The catalog/sampler layer guarantees
-# this; loaders may rely on it without re-checking.
+# Alignment precision in decimal digits of a *pixel*: extents and origins
+# within ``resolution * 10 ** -PIXEL_PRECISION`` of the lattice count as
+# aligned. Only enforced when a slice opts in via ``align=`` or when
+# callers use `aligned_shape` / `divide_evenly` / `is_grid_aligned`.
 PIXEL_PRECISION: int = 3
 
 
@@ -168,12 +169,19 @@ class GeoSlice:
 
     @property
     def shape(self) -> tuple[int, int]:
-        """Output grid shape ``(height, width)`` from bounds + resolution."""
+        """Output grid shape ``(height, width)`` from bounds + resolution.
+
+        Each axis is ``extent / resolution`` rounded half up, so an
+        extent of 10.5 pixels gives 11 on either axis. (Python's
+        built-in ``round`` is half-to-even and would give 10 on one
+        axis and 12 for 11.5 on the other.) Use `aligned_shape` to
+        reject non-integer extents instead.
+        """
         x_res, y_res = self.resolution
         xmin, ymin, xmax, ymax = self.bounds
         return (
-            round((ymax - ymin) / y_res),
-            round((xmax - xmin) / x_res),
+            int(np.floor((ymax - ymin) / y_res + 0.5)),
+            int(np.floor((xmax - xmin) / x_res + 0.5)),
         )
 
     @property
@@ -189,8 +197,8 @@ class GeoSlice:
 
         Use this when you need a guaranteed-exact pixel count without
         flipping the constructor's default ``align`` mode. ``.shape``
-        stays `round`-based for backwards compatibility with existing
-        loaders.
+        stays rounding-based (half up) for backwards compatibility with
+        existing loaders.
 
         Raises:
             ValueError: if either axis's extent is not an integer

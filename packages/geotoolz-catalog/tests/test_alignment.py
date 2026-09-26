@@ -83,15 +83,31 @@ class TestDivideEvenly:
             divide_evenly(100.5, 10.0, label="x-extent")
 
     def test_within_default_tol_passes(self) -> None:
-        # PIXEL_PRECISION=3 → default tol = 1e-3, so residual 5e-4 passes.
-        assert divide_evenly(100.0005, 10.00005) == 10
+        # PIXEL_PRECISION=3 → default tol = step * 1e-3 = 1e-2 at 10 m,
+        # so a non-zero residual of 5e-3 passes.
+        assert divide_evenly(100.005, 10.0) == 10
+
+    def test_just_outside_default_tol_raises(self) -> None:
+        # Residual 2e-2 at 10 m is 2/1000 of a pixel → outside tol.
+        with pytest.raises(ValueError, match="residual"):
+            divide_evenly(100.02, 10.0)
 
     def test_custom_tol_tightens(self) -> None:
         # 100.0005 / 10 = 10.00005 → round = 10; residual = -5e-4.
-        # The default tol (1e-3) accepts it; a tight tol must reject.
+        # The default tol (1e-2 at 10 m) accepts it; a tight tol must reject.
         assert divide_evenly(100.0005, 10.0) == 10
         with pytest.raises(ValueError):
             divide_evenly(100.0005, 10.0, tol=1e-9)
+
+    def test_default_tol_scales_with_degree_resolution(self) -> None:
+        """Half a pixel at 0.001° must fail (#226).
+
+        The former fixed 1e-3 CRS-unit tolerance was a full pixel at
+        this resolution, so every degree-resolution extent passed.
+        """
+        with pytest.raises(ValueError, match="residual"):
+            divide_evenly(1.0005, 0.001, label="x-extent")
+        assert divide_evenly(1.0, 0.001) == 1000
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +338,24 @@ class TestIsGridAligned:
         b = _make_slice(crs="EPSG:32630")
         assert is_grid_aligned(a, b) is False
 
+    def test_degree_resolution_mismatch_not_aligned(self) -> None:
+        """0.0001° vs 0.0009° differ 9x; both are < 1e-3 in CRS units (#226)."""
+        a = _make_slice((0.0, 0.0, 0.009, 0.009), (0.0001, 0.0001), crs="EPSG:4326")
+        b = _make_slice((0.0, 0.0, 0.009, 0.009), (0.0009, 0.0009), crs="EPSG:4326")
+        assert is_grid_aligned(a, b) is False
+
+    def test_degree_subpixel_origin_offset_not_aligned(self) -> None:
+        a = _make_slice((0.0, 0.0, 0.01, 0.01), (0.0001, 0.0001), crs="EPSG:4326")
+        b = _make_slice(
+            (0.00005, 0.0, 0.01005, 0.01), (0.0001, 0.0001), crs="EPSG:4326"
+        )
+        assert is_grid_aligned(a, b) is False
+
+    def test_explicit_tol_is_absolute(self) -> None:
+        a = _make_slice((0.0, 0.0, 100.0, 100.0), (10.0, 10.0))
+        b = _make_slice((0.5, 0.0, 100.5, 100.0), (10.0, 10.0))
+        assert is_grid_aligned(a, b, tol=1.0) is True
+
     def test_explain_returns_diagnostic_dict(self) -> None:
         a = _make_slice((0.0, 0.0, 100.0, 100.0), (10.0, 10.0))
         b = _make_slice((0.5, 0.0, 100.5, 100.0), (10.0, 10.0))
@@ -362,6 +396,32 @@ class TestAlignedShape:
     def test_matches_round_shape_when_aligned(self) -> None:
         sl = _make_slice((0.0, 0.0, 100.0, 80.0), (10.0, 10.0))
         assert sl.aligned_shape() == sl.shape
+
+
+class TestShapeRounding:
+    """`.shape` rounds half up on both axes (#226), not half-to-even."""
+
+    def test_half_pixel_rounds_up_on_both_axes(self) -> None:
+        # 3.5 px tall, 2.5 px wide: half-to-even gave (4, 2).
+        sl = _make_slice((0.0, 0.0, 25.0, 35.0), (10.0, 10.0))
+        assert sl.shape == (4, 3)
+
+    def test_design_doc_example(self) -> None:
+        # docs/catalog/design/exact-grid-alignment.md: 105 m at 10 m → 11.
+        sl = _make_slice((0.0, 0.0, 105.0, 100.0), (10.0, 10.0))
+        assert sl.shape == (10, 11)
+
+    def test_below_half_rounds_down(self) -> None:
+        sl = _make_slice((0.0, 0.0, 104.9, 100.0), (10.0, 10.0))
+        assert sl.shape == (10, 10)
+
+
+class TestDegreeAlignError:
+    def test_align_error_rejects_half_pixel_at_degrees(self) -> None:
+        with pytest.raises(ValueError, match="x-extent"):
+            _make_slice(
+                (0.0, 0.0, 1.0005, 1.0), (0.001, 0.001), crs="EPSG:4326", align="error"
+            )
 
 
 # ---------------------------------------------------------------------------

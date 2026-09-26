@@ -59,15 +59,19 @@ class GridAlignmentWarning(UserWarning):
     """
 
 
-def _default_tol() -> float:
-    """Default tolerance for `divide_evenly`, tied to `PIXEL_PRECISION`.
+def _default_tol(step: float) -> float:
+    """Default absolute tolerance for a residual on a grid of pitch ``step``.
+
+    ``10 ** -PIXEL_PRECISION`` of one pixel, so the check scales with the
+    resolution: 1e-5° at 0.01° resolution, 1e-2 m at 10 m. A fixed
+    CRS-unit tolerance would be a no-op at degree resolutions.
 
     Imported lazily to dodge the circular import between this module
     and ``geoslice`` (which depends on `Align` from here).
     """
     from geocatalog._src.geoslice import PIXEL_PRECISION
 
-    return 10**-PIXEL_PRECISION
+    return abs(step) * 10**-PIXEL_PRECISION
 
 
 def divide_evenly(
@@ -86,8 +90,10 @@ def divide_evenly(
     Args:
         length: numerator in CRS units (e.g. ``xmax - xmin``).
         step: denominator in CRS units (e.g. ``x_res``).
-        tol: absolute tolerance on the residual ``q*step - length``;
-            ``None`` (default) uses ``10 ** -PIXEL_PRECISION``.
+        tol: absolute tolerance (CRS units) on the residual
+            ``q*step - length``; ``None`` (default) uses
+            ``step * 10 ** -PIXEL_PRECISION``, i.e. a fixed fraction of
+            one pixel.
         label: name of the dividend, surfaced in the error message.
 
     Returns:
@@ -97,7 +103,7 @@ def divide_evenly(
         ValueError: if ``|q*step - length| > tol``.
     """
     if tol is None:
-        tol = _default_tol()
+        tol = _default_tol(step)
     q = int(np.round(length / step))
     residual = q * step - length
     if abs(residual) > tol:
@@ -130,17 +136,16 @@ def is_grid_aligned(
     Args:
         a: First slice.
         b: Second slice.
-        tol: Absolute tolerance for the residual checks; defaults to
-            ``10 ** -PIXEL_PRECISION``.
+        tol: Absolute tolerance (CRS units) for the resolution and
+            origin checks. ``None`` (default) uses
+            ``resolution * 10 ** -PIXEL_PRECISION`` per axis, i.e. a
+            fixed fraction of one pixel.
         explain: If ``True``, return a dict with per-axis residuals
             and resolution-match booleans instead of a plain bool.
 
     Returns:
         ``bool`` (or a diagnostic dict if ``explain=True``).
     """
-    if tol is None:
-        tol = _default_tol()
-
     rx_a, ry_a = a.resolution
     rx_b, ry_b = b.resolution
     # North-up affine origin is (xmin, ymax) — the top-left corner
@@ -149,14 +154,17 @@ def is_grid_aligned(
     xmin_a, _, _, ymax_a = a.bounds
     xmin_b, _, _, ymax_b = b.bounds
 
+    x_tol = tol if tol is not None else _default_tol(max(rx_a, rx_b))
+    y_tol = tol if tol is not None else _default_tol(max(ry_a, ry_b))
+
     crs_match = a.crs == b.crs
-    x_res_match = abs(rx_a - rx_b) <= tol
-    y_res_match = abs(ry_a - ry_b) <= tol
+    x_res_match = abs(rx_a - rx_b) <= x_tol
+    y_res_match = abs(ry_a - ry_b) <= y_tol
 
     if x_res_match:
         x_off = (xmin_a - xmin_b) / rx_a
         x_origin_residual = (x_off - round(x_off)) * rx_a
-        x_origin_match = abs(x_origin_residual) <= tol
+        x_origin_match = abs(x_origin_residual) <= x_tol
     else:
         x_origin_residual = float("nan")
         x_origin_match = False
@@ -164,7 +172,7 @@ def is_grid_aligned(
     if y_res_match:
         y_off = (ymax_a - ymax_b) / ry_a
         y_origin_residual = (y_off - round(y_off)) * ry_a
-        y_origin_match = abs(y_origin_residual) <= tol
+        y_origin_match = abs(y_origin_residual) <= y_tol
     else:
         y_origin_residual = float("nan")
         y_origin_match = False
