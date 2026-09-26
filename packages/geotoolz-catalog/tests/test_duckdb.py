@@ -630,6 +630,12 @@ class TestProperties:
         assert ext.left == pd.Timestamp("2024-01-01")
         assert ext.right == pd.Timestamp("2024-01-03")
 
+    def test_temporal_extent_empty_is_none(self, parquet_two_tiles: Path) -> None:
+        duck = open_catalog(parquet_two_tiles, engine="duckdb")
+        empty = duck.query(bounds=(1e6, 1e6, 2e6, 2e6), crs="EPSG:32629")
+        assert len(empty) == 0
+        assert empty.temporal_extent is None
+
     def test_get_config(self, parquet_two_tiles: Path) -> None:
         duck = open_catalog(parquet_two_tiles, engine="duckdb")
         cfg = duck.get_config()

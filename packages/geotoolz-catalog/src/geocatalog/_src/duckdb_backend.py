@@ -808,19 +808,19 @@ class DuckDBGeoCatalog:
         )
 
     @cached_property
-    def temporal_extent(self) -> pd.Interval:
+    def temporal_extent(self) -> pd.Interval | None:
         """Tightest interval over the relation — one SQL aggregate.
 
         Returns:
-            ``pd.Interval(min(start_time), max(end_time), closed='both')``.
-            Both endpoints are ``pd.NaT`` for an empty catalog.
+            ``pd.Interval(min(start_time), max(end_time), closed='both')``,
+            or ``None`` for an empty catalog.
         """
         self._require_open_con()
         df = self.relation.aggregate(
             "MIN(start_time) AS tmin, MAX(end_time) AS tmax"
         ).df()
         if pd.isna(df["tmin"].iloc[0]):
-            return pd.Interval(pd.NaT, pd.NaT, closed="both")
+            return None
         return pd.Interval(
             pd.Timestamp(df["tmin"].iloc[0]),
             pd.Timestamp(df["tmax"].iloc[0]),

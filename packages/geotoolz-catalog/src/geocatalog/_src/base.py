@@ -253,13 +253,12 @@ class GeoCatalog(Protocol):
         ...
 
     @property
-    def temporal_extent(self) -> pd.Interval:
+    def temporal_extent(self) -> pd.Interval | None:
         """Tightest interval that contains every row's time window.
 
         Returns:
             A ``pd.Interval(closed='both')`` from ``min(start_times)``
-            to ``max(end_times)``. For an empty catalog, both endpoints
-            are ``pd.NaT``.
+            to ``max(end_times)``, or ``None`` for an empty catalog.
         """
         ...
 

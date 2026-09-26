@@ -122,6 +122,40 @@ def test_stats_json(
     assert payload["backend"] == "raster"
 
 
+def test_stats_json_empty_catalog(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`stats` on a zero-row artifact reports a null temporal extent (#228)."""
+    import geopandas as gpd
+    import pandas as pd
+    import shapely.geometry
+
+    from geocatalog import InMemoryGeoCatalog, to_geoparquet
+
+    gdf = gpd.GeoDataFrame(
+        {
+            "geometry": [shapely.geometry.box(0, 0, 1, 1)],
+            "start_time": [pd.Timestamp("2024-01-01")],
+            "end_time": [pd.Timestamp("2024-01-02")],
+            "filepath": ["a.tif"],
+        },
+        geometry="geometry",
+        crs="EPSG:32629",
+    )
+    empty = InMemoryGeoCatalog(gdf, backend="raster").query(
+        bounds=(1e6, 1e6, 2e6, 2e6), crs="EPSG:32629"
+    )
+    out = tmp_path / "empty.parquet"
+    to_geoparquet(empty, out)
+
+    exit_code = _run("stats", str(out), "--json")
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["rows"] == 0
+    assert payload["temporal_start"] is None
+    assert payload["temporal_end"] is None
+
+
 # ---------------------------------------------------------------------------
 # Exit-code matrix
 # ---------------------------------------------------------------------------
