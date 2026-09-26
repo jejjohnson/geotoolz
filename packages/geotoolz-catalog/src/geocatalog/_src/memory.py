@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from functools import cached_property
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import geopandas as gpd
 import numpy as np
@@ -76,6 +76,18 @@ class InMemoryGeoCatalog:
                     f"index={type(gdf.index).__name__}, "
                     f"columns={list(gdf.columns)}."
                 )
+        if gdf.index.closed != "both":
+            # query() uses IntervalIndex.overlaps, whose endpoint semantics
+            # follow ``closed``; GeoSlice intervals are always closed='both'.
+            raise ValueError(
+                "InMemoryGeoCatalog requires a closed='both' IntervalIndex; "
+                f"got closed={gdf.index.closed!r}."
+            )
+        if backend not in get_args(_BACKEND_T):
+            raise ValueError(
+                f"InMemoryGeoCatalog backend must be one of "
+                f"{list(get_args(_BACKEND_T))}; got {backend!r}."
+            )
         self.gdf = gdf
         self.backend = backend
 
@@ -214,7 +226,10 @@ class InMemoryGeoCatalog:
                 left_array = _repair_invalid(left_geometry.to_numpy())
                 right_array = _repair_invalid(right_geometry.to_numpy())
                 clipped = gpd.GeoSeries(
-                    _symmetric_intersection(left_array, right_array),
+                    _extract_same_family(
+                        _symmetric_intersection(left_array, right_array),
+                        left_geometry.to_numpy(),
+                    ),
                     index=joined.index,
                     crs=self.gdf.crs,
                 )
@@ -227,7 +242,7 @@ class InMemoryGeoCatalog:
             raise ValueError(f"Unsupported intersect engine: {engine!r}")
 
         if joined.empty:
-            return _empty_catalog(self.gdf.crs, self.backend)
+            return self._empty()
 
         if spatial_only:
             mint = joined["_left_interval"].apply(lambda i: i.left)
@@ -250,13 +265,30 @@ class InMemoryGeoCatalog:
             maxt = maxt[keep_mask.to_numpy()]
 
         if joined.empty:
-            return _empty_catalog(self.gdf.crs, self.backend)
+            return self._empty()
 
         idx = pd.IntervalIndex.from_arrays(mint, maxt, closed="both", name="datetime")
         joined = joined.drop(
-            columns=["_left_interval", "_right_interval"], errors="ignore"
+            columns=[
+                "_left_interval",
+                "_right_interval",
+                # The right side's time columns duplicate the index.
+                "_right_start_time",
+                "_right_end_time",
+            ],
+            errors="ignore",
         ).set_index(idx)
+        # Keep the time columns (if present) in step with the new,
+        # clipped index rather than the left side's original times.
+        if "start_time" in joined.columns:
+            joined["start_time"] = idx.left
+        if "end_time" in joined.columns:
+            joined["end_time"] = idx.right
         return InMemoryGeoCatalog(joined, backend=self.backend)
+
+    def _empty(self) -> InMemoryGeoCatalog:
+        """Zero-row catalog with this catalog's columns, dtypes, CRS and tag."""
+        return InMemoryGeoCatalog(self.gdf.iloc[:0].copy(), backend=self.backend)
 
     def union(self, other: InMemoryGeoCatalog) -> InMemoryGeoCatalog:
         """Cross-catalog OR — concatenate rows.
@@ -274,6 +306,11 @@ class InMemoryGeoCatalog:
             right_gdf = other.gdf.to_crs(self.gdf.crs)
         else:
             right_gdf = other.gdf
+        geom_name = str(self.gdf.geometry.name)
+        if right_gdf.geometry.name != geom_name:
+            # Otherwise concat puts other's footprints in a separate
+            # column and the merged geometry is null for those rows.
+            right_gdf = right_gdf.rename_geometry(geom_name, inplace=False)
         merged = gpd.GeoDataFrame(
             pd.concat([self.gdf, right_gdf], axis=0), crs=self.gdf.crs
         )
@@ -396,28 +433,6 @@ class InMemoryGeoCatalog:
         }
 
 
-def _empty_catalog(crs: Any, backend: _BACKEND_T) -> InMemoryGeoCatalog:
-    """Build a zero-row `InMemoryGeoCatalog` with the right schema.
-
-    Constructed on demand when `intersect` / `query` filters to nothing
-    — the caller still needs a typed catalog (right CRS, right
-    IntervalIndex schema, right backend tag) rather than a bare
-    GeoDataFrame.
-    """
-    empty_gdf = gpd.GeoDataFrame(
-        {"geometry": []},
-        geometry="geometry",
-        crs=crs,
-        index=pd.IntervalIndex.from_arrays(
-            np.array([], dtype="datetime64[ns]"),
-            np.array([], dtype="datetime64[ns]"),
-            closed="both",
-            name="datetime",
-        ),
-    )
-    return InMemoryGeoCatalog(empty_gdf, backend=backend)
-
-
 def _repair_invalid(geometries: np.ndarray) -> np.ndarray:
     """Apply ``shapely.make_valid`` only to invalid geometries.
 
@@ -455,6 +470,34 @@ def _symmetric_intersection(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     first = np.where(swap, right, left)
     second = np.where(swap, left, right)
     return shapely.intersection(first, second)
+
+
+def _extract_same_family(clipped: np.ndarray, left: np.ndarray) -> np.ndarray:
+    """Reduce ``GeometryCollection`` clips to the left geometry's family.
+
+    Two polygons that overlap in an area *and* touch along an edge
+    intersect as ``GeometryCollection(Polygon, LineString)``. Mirror
+    ``gpd.overlay(..., keep_geom_type=True)``: keep the parts in the
+    left row's family (e.g. the polygon) and union them, rather than
+    dropping the whole row. Collections with no matching part are left
+    as they are and filtered out by `_keep_geom_type_mask`.
+    """
+    is_collection = (
+        shapely.get_type_id(clipped) == shapely.GeometryType.GEOMETRYCOLLECTION
+    )
+    if not is_collection.any():
+        return clipped
+    out = clipped.copy()
+    for i in np.flatnonzero(is_collection):
+        family = _GEOMETRY_TYPE_FAMILY.get(left[i].geom_type)
+        parts = [
+            p
+            for p in shapely.get_parts(clipped[i])
+            if _GEOMETRY_TYPE_FAMILY.get(p.geom_type) == family
+        ]
+        if parts:
+            out[i] = shapely.union_all(parts)
+    return out
 
 
 def _keep_geom_type_mask(
