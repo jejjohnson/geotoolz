@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import copy
 import json
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import pytest
@@ -50,7 +53,9 @@ def test_random_flip_noop_and_forced_transform(patch: GeoTensor) -> None:
     np.testing.assert_array_equal(np.asarray(flipped), np.flip(np.asarray(patch), -1))
     assert flipped.crs == patch.crs
     assert flipped.dtype == patch.dtype
-    assert _xy(flipped.transform, 0, 0) == _xy(patch.transform, patch.width - 1, 0)
+    # The mirrored origin is the far pixel edge, so the extent is unchanged.
+    assert _xy(flipped.transform, 0, 0) == _xy(patch.transform, patch.width, 0)
+    assert flipped.bounds == patch.bounds
 
 
 def test_random_rotate90_matches_numpy_and_updates_transform(patch: GeoTensor) -> None:
@@ -66,13 +71,14 @@ def test_random_rotate90_matches_numpy_and_updates_transform(patch: GeoTensor) -
     )
     assert out.shape[-2:] == np.rot90(np.asarray(patch)[0], k=k).shape
     if k == 1:
-        assert _xy(out.transform, 0, 0) == _xy(patch.transform, patch.width - 1, 0)
+        assert _xy(out.transform, 0, 0) == _xy(patch.transform, patch.width, 0)
     elif k == 2:
         assert _xy(out.transform, 0, 0) == _xy(
-            patch.transform, patch.width - 1, patch.height - 1
+            patch.transform, patch.width, patch.height
         )
     else:
-        assert _xy(out.transform, 0, 0) == _xy(patch.transform, 0, patch.height - 1)
+        assert _xy(out.transform, 0, 0) == _xy(patch.transform, 0, patch.height)
+    assert out.bounds == patch.bounds
 
 
 def test_random_crop_and_shift_update_spatial_metadata(patch: GeoTensor) -> None:
@@ -286,11 +292,12 @@ def test_random_rotate90_known_transform_on_unit_raster() -> None:
         )
 
         expected = {
-            1: gt.transform * (gt.width - 1, 0),
-            2: gt.transform * (gt.width - 1, gt.height - 1),
-            3: gt.transform * (0, gt.height - 1),
+            1: gt.transform * (gt.width, 0),
+            2: gt.transform * (gt.width, gt.height),
+            3: gt.transform * (0, gt.height),
         }[k]
         assert out.transform * (0, 0) == expected
+        assert out.bounds == gt.bounds
         seen_corners.add(k)
     assert seen_corners == {1, 2, 3}
 
@@ -442,8 +449,9 @@ def test_plain_ndarray_in_plain_ndarray_out(op: Operator) -> None:
     arr = np.arange(3 * 4 * 5, dtype=np.float32).reshape(3, 4, 5) / 100.0
     gt = toy_geotensor(arr)  # no wavelength attrs: both paths use defaults
 
-    plain_out = op(arr)
-    geo_out = op(gt)
+    # Independent copies: a seeded op's stream advances on every call.
+    plain_out = copy.deepcopy(op)(arr)
+    geo_out = copy.deepcopy(op)(gt)
 
     assert type(plain_out) is np.ndarray
     assert isinstance(geo_out, GeoTensor)
@@ -482,3 +490,140 @@ def test_compose_rejects_non_operator_children() -> None:
     payload = augment.Compose([augment.RandomFlip()]).get_config()["augmentations"]
     with pytest.raises(TypeError, match="must be an Operator"):
         augment.Compose(payload)
+
+
+@pytest.mark.parametrize(
+    ("p_horizontal", "p_vertical"),
+    [(1.0, 0.0), (0.0, 1.0), (1.0, 1.0)],
+    ids=["horizontal", "vertical", "both"],
+)
+def test_flip_preserves_footprint(
+    patch: GeoTensor, p_horizontal: float, p_vertical: float
+) -> None:
+    """A flip mirrors pixels in place: same bounds, same footprint (#126)."""
+    out = augment.RandomFlip(p_horizontal=p_horizontal, p_vertical=p_vertical)(patch)
+    assert out.bounds == patch.bounds
+    assert out.footprint().equals(patch.footprint())
+    # Mirrored pixels keep their world coordinates.
+    unflipped = np.asarray(out)
+    if p_horizontal:
+        unflipped = np.flip(unflipped, -1)
+    if p_vertical:
+        unflipped = np.flip(unflipped, -2)
+    np.testing.assert_array_equal(unflipped, np.asarray(patch))
+    assert not np.shares_memory(np.asarray(out), np.asarray(patch))
+
+
+def _seed_for_k(k: int) -> int:
+    """Per-call seed whose RandomRotate90(p=1) draw is ``k`` quarter-turns."""
+    for seed in range(100):
+        rng = np.random.default_rng(seed)
+        rng.random()  # mirror the p-check draw inside _apply
+        if int(rng.integers(1, 4)) == k:
+            return seed
+    raise AssertionError(f"no seed draws k={k}")
+
+
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_rot90_preserves_footprint(patch: GeoTensor, k: int) -> None:
+    """Every quarter-turn keeps the input bounds and footprint (#126)."""
+    out = augment.RandomRotate90(p=1.0)(patch, seed=_seed_for_k(k))
+    np.testing.assert_array_equal(
+        np.asarray(out), np.rot90(np.asarray(patch), k=k, axes=(-2, -1))
+    )
+    assert out.bounds == pytest.approx(patch.bounds)
+    assert out.footprint().equals(patch.footprint())
+    assert not np.shares_memory(np.asarray(out), np.asarray(patch))
+
+
+def test_geometric_ops_do_not_alias_plain_array_input() -> None:
+    arr = np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4)
+    flipped = augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0)(arr)
+    rotated = augment.RandomRotate90(p=1.0, seed=0)(arr)
+    assert not np.shares_memory(flipped, arr)
+    assert not np.shares_memory(rotated, arr)
+
+
+_SEEDED_OPS: list[Any] = [
+    lambda: augment.RandomFlip(seed=0),
+    lambda: augment.RandomRotate90(p=1.0, seed=0),
+    lambda: augment.RandomCrop(size=(2, 3), seed=0),
+    lambda: augment.RandomShift(max_shift=(1, 1), seed=0),
+    lambda: augment.BrightnessJitter(seed=0),
+    lambda: augment.ContrastJitter(seed=0),
+    lambda: augment.GaussianNoise(sigma=0.01, seed=0),
+    lambda: augment.SpeckleNoise(sigma=0.05, seed=0),
+    lambda: augment.BandDropout(p=0.5, seed=0),
+    lambda: augment.BandJitter(groups={"vis": ["B02", "B03", "B04"]}, seed=0),
+    lambda: augment.SunAngleJitter(seed=0),
+    lambda: augment.AtmosphericHaze(seed=0),
+    lambda: augment.SimulatedClouds(coverage=(0.1, 0.5), feather=1, seed=0),
+    lambda: augment.CutMix(
+        pool=[_toy_geotensor(np.full((4, 5, 6), 9.0, dtype=np.float32))],
+        seed=0,
+    ),
+    lambda: augment.Compose(
+        [augment.RandomFlip(), augment.GaussianNoise(sigma=0.01)], seed=0
+    ),
+]
+
+
+@pytest.mark.parametrize("make_op", _SEEDED_OPS, ids=lambda make: type(make()).__name__)
+def test_seeded_operator_varies_across_calls_and_is_reproducible(
+    patch: GeoTensor, make_op: Callable[[], Operator]
+) -> None:
+    """A seeded op draws a reproducible *sequence*, not one repeated draw (#134)."""
+    op = make_op()
+    draws = [np.asarray(op(patch)).copy() for _ in range(8)]
+    # Successive calls apply different augmentations ...
+    assert any(
+        a.shape != draws[0].shape or not np.array_equal(a, draws[0]) for a in draws[1:]
+    )
+    # ... and a second instance with the same seed replays the same sequence.
+    replay = make_op()
+    for expected in draws:
+        np.testing.assert_array_equal(np.asarray(replay(patch)), expected)
+    # A reload from config restarts the stream from the constructor seed.
+    if not op.forbid_in_yaml and not isinstance(op, augment.Compose):
+        clone = Operator.from_state(json.loads(json.dumps(op.state)))
+        np.testing.assert_array_equal(np.asarray(clone(patch)), draws[0])
+
+
+def test_per_call_seed_is_one_off_and_leaves_stream_untouched(
+    patch: GeoTensor,
+) -> None:
+    op = augment.GaussianNoise(sigma=0.01, seed=5)
+    reference = augment.GaussianNoise(sigma=0.01, seed=5)
+    np.testing.assert_array_equal(
+        np.asarray(op(patch, seed=42)),
+        np.asarray(augment.GaussianNoise(sigma=0.01)(patch, seed=42)),
+    )
+    # The one-off draw did not advance the instance stream.
+    np.testing.assert_array_equal(np.asarray(op(patch)), np.asarray(reference(patch)))
+
+
+def test_unseeded_compose_honours_seeded_children(patch: GeoTensor) -> None:
+    pipe = augment.Compose([augment.GaussianNoise(sigma=0.01, seed=3)])
+    expected = augment.GaussianNoise(sigma=0.01, seed=3)
+    for _ in range(3):
+        np.testing.assert_array_equal(
+            np.asarray(pipe(patch)), np.asarray(expected(patch))
+        )
+
+
+def test_integer_carriers_round_instead_of_truncating() -> None:
+    """Integer DNs are rounded to nearest, not truncated toward zero (#134)."""
+    arr = np.full((1, 2, 2), 3, dtype=np.uint16)
+    out = augment.BrightnessJitter(factor=(1.3, 1.3), per_band=False, seed=0)(arr)
+    assert out.dtype == np.uint16
+    np.testing.assert_array_equal(out, np.full((1, 2, 2), 4, dtype=np.uint16))
+
+
+def test_boolean_carriers_pass_geometry_but_reject_radiometry() -> None:
+    mask = np.zeros((1, 3, 4), dtype=bool)
+    mask[0, 0, 0] = True
+    flipped = augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0)(mask)
+    assert flipped.dtype == np.bool_
+    np.testing.assert_array_equal(flipped, np.flip(mask, -1))
+    with pytest.raises(TypeError, match="boolean"):
+        augment.GaussianNoise(sigma=0.01, seed=0)(mask)

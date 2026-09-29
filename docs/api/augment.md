@@ -44,16 +44,26 @@ augmented_patch = augment(training_patch, seed=0)
 ## Seeding contract
 
 Every random operator accepts a constructor `seed` and a per-call `seed`
-override:
+override. The constructor `seed` starts a stream held on the instance: each
+call draws the *next* augmentation, so a seeded operator varies from sample
+to sample while two operators built with the same seed replay the same
+sequence. A per-call `seed` is a deterministic one-off draw that leaves the
+stream untouched:
 
 ```python
 op = gz.augment.GaussianNoise(sigma=0.01, seed=1)
+a, b = op(patch), op(patch)          # different noise, reproducible sequence
 same_a = op(patch, seed=42)
-same_b = op(patch, seed=42)
+same_b = op(patch, seed=42)          # identical to same_a
 ```
 
+`get_config` only records the constructor seed, so a reloaded operator
+restarts its stream. A seeded `Compose` owns its children's draws (it
+forwards a derived per-call seed to each); an unseeded one lets each child
+use its own stream.
+
 Use the same seed for multiple geometric pipelines when different modalities
-must receive identical spatial transforms.
+must receive identical spatial transforms (call them in lockstep).
 
 ## Composer
 
