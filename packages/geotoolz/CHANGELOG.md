@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.2.1...geotoolz-v0.2.2) (2026-09-29)
+
+
+### Features
+
+* **geotoolz:** valid_pixels helper and fill-pixel exclusion across families ([#298](https://github.com/jejjohnson/geotoolz/issues/298)) ([47ffe8c](https://github.com/jejjohnson/geotoolz/commit/47ffe8ce415ee7f92e7ed70d9cf7326c34f8df95)), closes [#145](https://github.com/jejjohnson/geotoolz/issues/145)
+
+
+### Bug Fixes
+
+* **geotoolz:** einx nodata-aware pooling, validation and 4-D presets ([#301](https://github.com/jejjohnson/geotoolz/issues/301)) ([6651a99](https://github.com/jejjohnson/geotoolz/commit/6651a998ba08ddee7894b78aa5a3b10848818cb6)), closes [#149](https://github.com/jejjohnson/geotoolz/issues/149)
+* **geotoolz:** learn outputs are channel-first, named, and nodata-aware ([#300](https://github.com/jejjohnson/geotoolz/issues/300)) ([071be0d](https://github.com/jejjohnson/geotoolz/commit/071be0d27e6cfef29f51429a2b72192e50ab6638)), closes [#148](https://github.com/jejjohnson/geotoolz/issues/148)
+* **geotoolz:** output fill values follow the output's dtype and meaning ([#299](https://github.com/jejjohnson/geotoolz/issues/299)) ([aaf0911](https://github.com/jejjohnson/geotoolz/commit/aaf0911221728ee73a3225474cf03d10d3d3d921)), closes [#146](https://github.com/jejjohnson/geotoolz/issues/146)
+* **geotoolz:** resolve the band axis as -3 and handle 4-D time stacks ([#302](https://github.com/jejjohnson/geotoolz/issues/302)) ([5074bf2](https://github.com/jejjohnson/geotoolz/commit/5074bf2c9f26fa8b0bc3f5c43d25482c71b1fe2a)), closes [#147](https://github.com/jejjohnson/geotoolz/issues/147)
+* **geotoolz:** wrap_like copies attrs and rewrites per-band metadata ([#297](https://github.com/jejjohnson/geotoolz/issues/297)) ([881c7f9](https://github.com/jejjohnson/geotoolz/commit/881c7f937adef0e80c85b0ba749b18402189d137)), closes [#144](https://github.com/jejjohnson/geotoolz/issues/144)
+
 ## [0.2.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.2.0...geotoolz-v0.2.1) (2026-09-29)
 
 
