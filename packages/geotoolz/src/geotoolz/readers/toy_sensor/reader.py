@@ -24,7 +24,14 @@ class Reader(SensorReader):
         data: Optional in-memory array in ``(band, y, x)`` order.
         transform: Affine transform for the synthetic grid.
         crs: Coordinate reference system.
-        fill_value_default: Fill value used for boundless reads.
+        fill_value_default: Fill value used for boundless reads. ``None``
+            (default) picks ``NaN`` for floating-point data and ``0`` for
+            integer / boolean data.
+
+    Raises:
+        ValueError: If ``fill_value_default`` is not exactly representable
+            in the data dtype (e.g. ``NaN`` or ``1.5`` with integer data,
+            or a value outside the integer range).
 
     Examples:
         >>> import numpy as np
@@ -41,7 +48,7 @@ class Reader(SensorReader):
         data: np.ndarray | None = None,
         transform: Affine | None = None,
         crs: Any = "EPSG:4326",
-        fill_value_default: float = np.nan,
+        fill_value_default: float | None = None,
     ) -> None:
         self.path = as_path(path)
         self._data = (
@@ -62,7 +69,9 @@ class Reader(SensorReader):
             )
         self._reader_transform = Affine.identity() if transform is None else transform
         self._reader_crs = crs
-        self._fill_value_default = fill_value_default
+        self._fill_value_default = _resolve_fill_value(
+            fill_value_default, self._data.dtype
+        )
 
     @property
     def _crs(self) -> Any:
@@ -90,7 +99,7 @@ class Reader(SensorReader):
         )
 
     @property
-    def _fill_value(self) -> float:
+    def _fill_value(self) -> float | int | bool:
         return self._fill_value_default
 
     @property
@@ -123,3 +132,33 @@ class Reader(SensorReader):
             ..., src_row_start:src_row_stop, src_col_start:src_col_stop
         ]
         return out
+
+
+def _resolve_fill_value(
+    fill_value: float | None, dtype: np.dtype
+) -> float | int | bool:
+    """Return a fill value exactly representable in ``dtype``.
+
+    ``None`` defaults to ``NaN`` for inexact dtypes and ``0`` otherwise.
+    An explicit value that would change when cast to ``dtype`` (``NaN``,
+    fractional or out-of-range values for integer data) raises instead of
+    silently padding with a different value than
+    ``fill_value_default`` reports.
+    """
+    if fill_value is None:
+        return np.nan if np.issubdtype(dtype, np.inexact) else dtype.type(0).item()
+    if np.issubdtype(dtype, np.inexact):
+        return fill_value
+    try:
+        with np.errstate(invalid="ignore", over="ignore"):
+            cast = dtype.type(fill_value)
+        ok = bool(np.isfinite(fill_value)) and cast == fill_value
+    except (OverflowError, TypeError, ValueError):
+        ok = False
+    if not ok:
+        raise ValueError(
+            f"toy_sensor.Reader: fill_value_default={fill_value!r} is not "
+            f"representable in data dtype {dtype}; pass a value that "
+            "survives the cast (e.g. 0) or use floating-point data."
+        )
+    return cast.item()

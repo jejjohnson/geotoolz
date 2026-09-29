@@ -57,6 +57,94 @@ def test_toy_sensor_reader_passes_geodata_conformance() -> None:
     assert np.all(boundless.values[:, 0, 0] == -9999.0)
 
 
+def test_center_coords_matches_georeader() -> None:
+    from georeader import read
+
+    data = np.arange(4 * 10 * 10, dtype=np.float32).reshape(4, 10, 10)
+    reader = toy_sensor.Reader(
+        "synthetic-toy",
+        data=data,
+        transform=Affine.translation(0, 100) * Affine.scale(10, -10),
+        crs="EPSG:32631",
+        fill_value_default=-9999.0,
+    )
+
+    ours = reader.read_from_center_coords(35, 45, width=4, height=4)
+    ref = read.read_from_center_coords(reader, (35, 45), (4, 4))
+    assert ours.transform == ref.transform
+    np.testing.assert_array_equal(ours.values, ref.values)
+
+    bounds = (12.0, 31.0, 58.0, 77.0)
+    ours_b = reader.read_from_bounds(bounds)
+    ref_b = read.read_from_bounds(reader, bounds)
+    assert ours_b.transform == ref_b.transform
+    np.testing.assert_array_equal(ours_b.values, ref_b.values)
+
+
+class _FourDReader(SensorReader):
+    """Minimal ``(time, band, y, x)`` reader for dims checks."""
+
+    def __init__(self, shape: tuple[int, ...] = (2, 3, 4, 5)) -> None:
+        self._array = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
+
+    def _read_window(self, window: Window) -> np.ndarray:
+        r0, c0 = int(window.row_off), int(window.col_off)
+        return self._array[
+            ..., r0 : r0 + int(window.height), c0 : c0 + int(window.width)
+        ]
+
+    _crs = "EPSG:4326"  # type: ignore[assignment]
+    _transform = Affine.identity()  # type: ignore[assignment]
+    _dtype = np.dtype("float32")  # type: ignore[assignment]
+    _bands = ("a", "b", "c")  # type: ignore[assignment]
+    _fill_value = 0.0  # type: ignore[assignment]
+    _track = "A"  # type: ignore[assignment]
+
+    @property
+    def _shape(self) -> tuple[int, ...]:
+        return self._array.shape
+
+
+def test_dims_4d() -> None:
+    reader = _FourDReader()
+    assert tuple(reader.dims) == ("time", "band", "y", "x")
+    assert reader.width == 5
+    assert reader.height == 4
+
+    tile = reader.read_from_window(Window(1, 1, 2, 2))
+    assert tile.shape == (2, 3, 2, 2)
+    assert tuple(tile.dims) == tuple(reader.dims)
+
+    assert tuple(_FourDReader((4, 5)).dims) == ("y", "x")
+    assert tuple(_FourDReader((3, 4, 5)).dims) == ("band", "y", "x")
+    with pytest.raises(ValueError, match="2d-4d"):
+        _ = _FourDReader((1, 2, 3, 4, 5)).dims
+
+
+def test_toy_sensor_fill_default_matches_dtype() -> None:
+    ints = np.ones((4, 2, 2), dtype=np.uint16)
+    reader = toy_sensor.Reader("int-toy", data=ints)
+    assert reader.fill_value_default == 0
+    out = reader.read_from_window(Window(-1, -1, 3, 3))
+    assert out.values[0, 0, 0] == reader.fill_value_default
+
+    floats = np.ones((4, 2, 2), dtype=np.float32)
+    assert np.isnan(toy_sensor.Reader("f-toy", data=floats).fill_value_default)
+    assert (
+        toy_sensor.Reader(
+            "int-toy", data=ints, fill_value_default=65535
+        ).fill_value_default
+        == 65535
+    )
+
+
+@pytest.mark.parametrize("fill", [np.nan, 1.5, -1, 70000])
+def test_toy_sensor_rejects_unrepresentable_fill(fill: float) -> None:
+    ints = np.ones((4, 2, 2), dtype=np.uint16)
+    with pytest.raises(ValueError, match="not representable"):
+        toy_sensor.Reader("int-toy", data=ints, fill_value_default=fill)
+
+
 def test_toy_sensor_constants_are_lazy_and_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
