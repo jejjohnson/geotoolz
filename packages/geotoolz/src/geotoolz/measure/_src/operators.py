@@ -25,6 +25,7 @@ from skimage.morphology import skeletonize
 
 from geotoolz._src.config import as_tuple
 from geotoolz._src.shape import single_band
+from geotoolz._src.valid import valid_pixels
 from geotoolz._src.wrap import wrap_like
 
 
@@ -69,7 +70,9 @@ class LabelConnectedComponents(Operator):
     Wraps :func:`skimage.measure.label`. Expects a single-band ``(H, W)``
     or ``(1, H, W)`` mask (values are cast to bool). Accepts a
     ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32``
-    label map in the same carrier kind.
+    label map in the same carrier kind, with ``fill_value_default=0``;
+    nodata input pixels (non-finite or equal to the input's fill) are
+    background ``0``.
 
     Args:
         connectivity: Maximum orthogonal hops for two pixels to count as
@@ -88,7 +91,9 @@ class LabelConnectedComponents(Operator):
             connectivity=self.connectivity,
             background=self.background,
         )
-        return wrap_like(gt, labels.astype(np.int32, copy=False))
+        # Nodata input pixels are background; 0 marks "no component".
+        labels = np.where(valid_pixels(gt), labels, 0).astype(np.int32, copy=False)
+        return wrap_like(gt, labels, fill_value_default=0)
 
 
 class RegionProps(Operator):

@@ -12,6 +12,16 @@ lockstep (see :mod:`geotoolz._src.bands`) so downstream operators see
 the correct labels (plain-array carriers have no attrs, so this
 bookkeeping is skipped for them).
 
+Nodata: pixels that are non-finite or equal the input's
+``fill_value_default`` in any band (see :mod:`geotoolz._src.valid`) hold
+the output's fill value. Band subsets and stacks keep the input's fill;
+value-preserving transforms (SRF convolution, binning, smoothing) keep
+it too, switching to ``NaN`` when integer input is promoted to float
+(:func:`geotoolz._src.valid.carried_fill`); derived products
+(:class:`BandMath`, :class:`NormalizedDifference`, :class:`BandRatio`,
+:class:`ContinuumRemoval`) hold ``NaN`` and declare
+``fill_value_default=NaN``.
+
 Band names are resolved from an explicit ``band_names=`` constructor
 argument when present; otherwise operators look for
 ``gt.attrs["band_names"]``. Wavelength-dependent operators follow the
@@ -32,6 +42,7 @@ from pipekit import Operator
 
 from geotoolz._src.bands import concat_band_attrs, strip_band_attrs, take_band_attrs
 from geotoolz._src.config import jsonable
+from geotoolz._src.valid import carried_fill, wrap_filled
 from geotoolz._src.wrap import wrap_like
 from geotoolz.spectral._src.array import (
     band_ratio,
@@ -105,14 +116,22 @@ def _with_band_attrs(
     band_names: list[str] | None = None,
     wavelengths: np.ndarray | None = None,
 ) -> GeoTensor | np.ndarray:
-    """:func:`wrap_like` that also writes ``attrs["wavelengths"]``.
+    """:func:`wrap_filled` that also writes ``attrs["wavelengths"]``.
 
-    ``attrs`` and ``band_names`` go straight to :func:`wrap_like` (which
-    copies attrs and drops stale per-band keys); ``wavelengths``, when
-    given, is then stored as a JSON-friendly float list. Plain ndarray
-    carriers come back as plain arrays with no metadata to update.
+    ``values`` carries ``gt``'s values, so nodata pixels get the carried
+    fill (:func:`~geotoolz._src.valid.carried_fill`). ``attrs`` and
+    ``band_names`` go straight to :func:`wrap_like` (which copies attrs
+    and drops stale per-band keys); ``wavelengths``, when given, is then
+    stored as a JSON-friendly float list. Plain ndarray carriers come back
+    as plain arrays with no metadata to update.
     """
-    out = wrap_like(gt, values, attrs=attrs, band_names=band_names)
+    out = wrap_filled(
+        gt,
+        values,
+        fill_value_default=carried_fill(gt, np.asarray(values).dtype),
+        attrs=attrs,
+        band_names=band_names,
+    )
     if wavelengths is not None and hasattr(out, "attrs"):
         out.attrs["wavelengths"] = jsonable(np.asarray(wavelengths, dtype=float))
     return out
@@ -357,8 +376,17 @@ class BandMath(Operator):
         variables = {
             name: np.take(arr, idx, axis=self.axis) for idx, name in enumerate(names)
         }
-        out = evaluate_band_math(self.expression, variables)
-        return wrap_like(gt, out, attrs=strip_band_attrs(_attrs(gt)))
+        out = np.asarray(evaluate_band_math(self.expression, variables))
+        # A float result is a new quantity (NaN nodata); an integer or
+        # boolean one (``b0 + b1`` on DN, ``b0 > b1``) keeps a fill its
+        # dtype can hold.
+        if np.issubdtype(out.dtype, np.inexact):
+            fill = np.nan
+        else:
+            fill = carried_fill(gt, out.dtype)
+        return wrap_filled(
+            gt, out, fill_value_default=fill, attrs=strip_band_attrs(_attrs(gt))
+        )
 
 
 class NormalizedDifference(Operator):
@@ -402,7 +430,9 @@ class NormalizedDifference(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out, attrs=strip_band_attrs(_attrs(gt)))
+        return wrap_filled(
+            gt, out, fill_value_default=np.nan, attrs=strip_band_attrs(_attrs(gt))
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -454,7 +484,9 @@ class BandRatio(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out, attrs=strip_band_attrs(_attrs(gt)))
+        return wrap_filled(
+            gt, out, fill_value_default=np.nan, attrs=strip_band_attrs(_attrs(gt))
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -660,7 +692,7 @@ class ContinuumRemoval(Operator):
             axis=self.axis,
             method=self.method,
         )
-        return wrap_like(gt, out)
+        return wrap_filled(gt, out, fill_value_default=np.nan)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -802,4 +834,4 @@ class SpectralSmoothing(Operator):
             window=self.window,
             polyorder=self.polyorder,
         )
-        return wrap_like(gt, out)
+        return wrap_filled(gt, out, fill_value_default=carried_fill(gt, out.dtype))

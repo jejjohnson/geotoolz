@@ -821,3 +821,151 @@ def test_output_attrs_are_fresh_and_consistent(cls: type) -> None:
         assert_fresh_consistent_attrs(scene, out)
     if not ran:
         pytest.skip("no toy input is valid for this operator")
+
+
+#: Operators that fill nodata gaps by design: input fill pixels become
+#: valid output, so only the dtype half of the fill contract applies.
+GAP_FILLERS: frozenset[str] = frozenset(
+    f"restore._src.operators.{name}"
+    for name in (
+        "GapFillIDW",
+        "GapFillInpaintBiharmonic",
+        "GapFillLaplacian",
+        "GapFillNearest",
+    )
+)
+
+_LEARN_FILL: Known = (
+    "#148: learn outputs inherit the input fill (owned by the learn branch)",
+    AssertionError,
+)
+
+#: Strict xfails for ``test_output_fill_matches_dtype``, owned by later
+#: branches of the #112 stack.
+FILL_KNOWN_FAILURES: dict[str, Known] = {
+    "einx._src.operators.SpatialPool": (
+        "#149: einx reductions inherit the input fill (owned by the einx branch)",
+        AssertionError,
+    ),
+    **{
+        f"learn.{name}": _LEARN_FILL
+        for name in (
+            "GMM",
+            "IPCA",
+            "IsolationForest",
+            "KMeans",
+            "LocalOutlierFactor",
+            "MiniBatchKMeans",
+            "OneClassSVM",
+            "PCA",
+        )
+    },
+    "learn._src.operators.SklearnOp": _LEARN_FILL,
+}
+
+
+def _fill_params() -> list[Any]:
+    out = []
+    for cls in _CLASSES:
+        key = _key(cls)
+        marks = []
+        if key in FILL_KNOWN_FAILURES:
+            reason, raises = FILL_KNOWN_FAILURES[key]
+            marks.append(pytest.mark.xfail(reason=reason, raises=raises, strict=True))
+        out.append(pytest.param(cls, id=key, marks=marks))
+    return out
+
+
+def _with_fill_pixels(scene: Any) -> Any:
+    """``scene`` (or each scene of a list) with nodata written into two pixels."""
+    from _helpers import toy_geotensor
+
+    if isinstance(scene, list):
+        return [_with_fill_pixels(s) for s in scene]
+    return toy_geotensor(
+        np.asarray(scene),
+        fill_value_default=scene.fill_value_default,
+        attrs=scene.attrs,
+        with_fill_pixels=True,
+    )
+
+
+def _is_nan(value: Any) -> bool:
+    return isinstance(value, float | np.floating) and bool(np.isnan(value))
+
+
+def assert_fill_matches_dtype(src: Any, gt: Any, *, gap_filler: bool = False) -> None:
+    """``gt.fill_value_default`` suits ``gt``'s dtype and marks ``src``'s nodata.
+
+    * boolean outputs declare ``False``;
+    * integer outputs declare an integer their dtype can hold;
+    * float outputs declare a fill, and ``NaN`` when ``src`` is an integer
+      carrier (an integer fill such as ``0`` collides with promoted data);
+    * every nodata pixel of ``src`` is still invalid in an output on the
+      same grid (unless the operator fills gaps by design).
+    """
+    from _helpers import fill_pixel_mask
+
+    from geotoolz._src.valid import valid_pixels
+
+    fill = gt.fill_value_default
+    kind = gt.dtype.kind
+    if kind == "b":
+        assert isinstance(fill, bool | np.bool_) and not fill, (
+            f"bool output declares fill {fill!r}, expected False"
+        )
+        return
+    if kind in "iu":
+        assert isinstance(fill, int | np.integer) and not isinstance(fill, bool), (
+            f"{gt.dtype} output declares fill {fill!r}, expected an integer"
+        )
+        assert np.asarray(fill).astype(gt.dtype).item() == fill, (
+            f"fill {fill!r} does not fit in {gt.dtype}"
+        )
+    elif kind == "f":
+        assert fill is not None, "float output declares no fill"
+        if np.asarray(src).dtype.kind in "biu":
+            assert _is_nan(fill), (
+                f"float output of a {np.asarray(src).dtype} input declares fill "
+                f"{fill!r}, expected NaN"
+            )
+    if gap_filler or gt.shape[-2:] != src.shape[-2:]:
+        return
+    n_fill = int(fill_pixel_mask(src.shape).sum())
+    n_invalid = int((~valid_pixels(gt)).sum())
+    assert n_invalid >= n_fill, (
+        f"input nodata pixels are valid in the output (fill {fill!r}): "
+        f"{n_invalid} invalid pixels, expected >= {n_fill}"
+    )
+
+
+@pytest.mark.parametrize("cls", _fill_params())
+def test_output_fill_matches_dtype(cls: type) -> None:
+    """Output fill values follow the output's dtype and meaning (#146).
+
+    Runs every buildable single-input operator on toy scenes whose corner
+    pixels hold the input's fill value, and checks each GeoTensor output
+    with :func:`assert_fill_matches_dtype`.
+    """
+    op = build(cls)
+    if op._terminal or _n_inputs(op) != 1:
+        pytest.skip("terminal or not a single-input operator")
+    ran = False
+    takes_sequence = _takes_sequence(op)
+    for scene in _attributed_inputs():
+        if isinstance(scene, list) != takes_sequence:
+            continue
+        scene = _with_fill_pixels(scene)
+        try:
+            out = op(scene)
+        except Exception:
+            continue
+        ran = True
+        src = scene[0] if isinstance(scene, list) else scene
+        sources = _geotensors(scene)
+        for gt in _geotensors(out):
+            if any(gt is s for s in sources):
+                continue
+            assert_fill_matches_dtype(src, gt, gap_filler=_key(cls) in GAP_FILLERS)
+    if not ran:
+        pytest.skip("no toy input is valid for this operator")

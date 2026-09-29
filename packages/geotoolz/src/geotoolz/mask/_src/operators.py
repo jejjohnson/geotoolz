@@ -20,6 +20,7 @@ from georeader import rasterize
 from pipekit import Operator
 
 from geotoolz._src.config import jsonable, nested_config
+from geotoolz._src.valid import carried_fill, carrier_fill_value, wrap_filled
 from geotoolz._src.wrap import wrap_like
 from geotoolz.mask._src.array import (
     altitude_mask,
@@ -642,8 +643,15 @@ class ApplyMask(Operator):
     Args:
         mask: Boolean array, ``GeoTensor``, or ``Operator`` producing
             one when called on the input.
-        fill_value: Value substituted where the mask says "drop".
-            Default ``np.nan``.
+        fill_value: Value substituted where the mask says "drop". The
+            default ``None`` uses the carrier's ``fill_value_default``
+            when it has one that the carrier's dtype can hold (so an
+            integer carrier is not upcast), and ``NaN`` otherwise. The
+            output declares this value as its ``fill_value_default``, and
+            the input's own nodata pixels are rewritten to it, so
+            ``validmask()`` marks every dropped and nodata pixel.
+            Note that georeader treats the fill value as nodata even when
+            it is ``0``.
         invert: Flip the mask before applying it.
 
     Examples:
@@ -659,7 +667,7 @@ class ApplyMask(Operator):
         self,
         *,
         mask: Operator | np.ndarray | Any,
-        fill_value: float = float("nan"),
+        fill_value: float | None = None,
         invert: bool = False,
     ) -> None:
         self.mask = mask
@@ -670,10 +678,24 @@ class ApplyMask(Operator):
         mask_arr = np.asarray(
             self.mask(gt) if isinstance(self.mask, Operator) else self.mask
         )
-        out = apply_mask(
-            np.asarray(gt), mask_arr, fill_value=self.fill_value, invert=self.invert
-        )
-        return wrap_like(gt, out)
+        fill = self._resolve_fill(gt)
+        out = apply_mask(np.asarray(gt), mask_arr, fill_value=fill, invert=self.invert)
+        if np.ndim(out) < 2:
+            return wrap_like(gt, out, fill_value_default=fill)
+        return wrap_filled(gt, out, fill_value_default=fill)
+
+    def _resolve_fill(self, gt: GeoTensor | np.ndarray) -> Any:
+        """The fill to write: explicit, else a usable carrier fill, else NaN."""
+        if self.fill_value is not None:
+            return self.fill_value
+        fill = carrier_fill_value(gt)
+        dtype = np.asarray(gt).dtype
+        if np.issubdtype(dtype, np.bool_):
+            usable = isinstance(fill, bool | np.bool_)
+        else:
+            # ``carried_fill`` is None when an integer dtype cannot hold it.
+            usable = carried_fill(gt, dtype) is not None
+        return fill if usable else np.nan
 
     def get_config(self) -> dict[str, Any]:
         if isinstance(self.mask, Operator):

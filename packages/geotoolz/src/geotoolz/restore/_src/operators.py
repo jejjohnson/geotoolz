@@ -17,13 +17,16 @@ carrier's ``fill_value_default`` (see :mod:`geotoolz._src.valid`; per
 frame for ``(T, C, H, W)``, and per pixel across the band ``axis`` for
 the PCA / MNF operators). Filters, fits and outlier statistics are
 computed from valid pixels only -- invalid pixels never leak into their
-neighbours -- and invalid pixels hold the output's fill value (the
-inherited ``fill_value_default``; ``NaN`` for plain ndarrays). The
+neighbours -- and invalid pixels hold the output's fill value. Outputs
+that carry the input's values keep its ``fill_value_default`` when the
+input is floating point and switch to ``NaN`` when an integer input is
+promoted to float (see :func:`geotoolz._src.valid.carried_fill`); the
+:class:`MNF` scores always use ``NaN``. The
 exceptions are the ``GapFill*`` operators, which treat every invalid
 *element* as a gap and replace it with the interpolated value (only
 gaps they cannot fill hold the fill value), and the boolean
 :class:`OutlierMask` / :class:`SaturationFlag`, which report ``False``
-at invalid pixels.
+at invalid pixels and declare ``fill_value_default=False``.
 """
 
 from __future__ import annotations
@@ -34,13 +37,12 @@ import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.valid import (
-    carrier_fill_value,
+    carried_fill,
     invalid_values,
     mask_invalid_to_nan,
-    restore_fill,
     valid_pixels,
+    wrap_filled,
 )
-from geotoolz._src.wrap import wrap_like
 from geotoolz.restore._src.array import (
     bilateral_denoise,
     despeckle_frost,
@@ -87,8 +89,9 @@ def _masked(gt: Any) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _rewrap(gt: Any, out: np.ndarray, valid: np.ndarray) -> Any:
-    """Write the output fill into invalid pixels and rewrap like ``gt``."""
-    return wrap_like(gt, restore_fill(out, valid, carrier_fill_value(gt)))
+    """Write the carried output fill into invalid pixels and rewrap like ``gt``."""
+    fill = carried_fill(gt, np.asarray(out).dtype)
+    return wrap_filled(gt, out, fill_value_default=fill, valid=valid)
 
 
 def _filter(gt: Any, fn: Callable[[np.ndarray], np.ndarray]) -> Any:
@@ -106,7 +109,7 @@ def _band_masked(gt: Any, axis: int) -> np.ndarray:
 
 def _rewrap_finite(gt: Any, out: np.ndarray) -> Any:
     """Write the output fill wherever ``out`` is non-finite and rewrap."""
-    return wrap_like(gt, restore_fill(out, np.isfinite(out), carrier_fill_value(gt)))
+    return _rewrap(gt, out, np.isfinite(out))
 
 
 def _gap_fill(gt: Any, fn: Callable[[np.ndarray], np.ndarray]) -> Any:
@@ -345,7 +348,13 @@ class MNF(Operator):
         # report them as nodata instead.
         pixel_nan = np.asarray(self._state["nan_mask"]).any(axis=0)
         valid = ~pixel_nan.reshape(scores.shape[1:])
-        return _rewrap(gt, scores, np.broadcast_to(valid, scores.shape))
+        # Scores are a new quantity: NaN marks nodata, never the input fill.
+        return wrap_filled(
+            gt,
+            scores,
+            fill_value_default=np.nan,
+            valid=np.broadcast_to(valid, scores.shape),
+        )
 
 
 class InverseMNF(Operator):
@@ -620,7 +629,7 @@ class OutlierMask(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr, valid = _masked(gt)
         mask = outlier_mask(arr, method=self.method, k=self.k).astype(bool)
-        return wrap_like(gt, restore_fill(mask, valid, False))
+        return wrap_filled(gt, mask, fill_value_default=False, valid=valid)
 
 
 class ReplaceOutliers(Operator):
@@ -676,4 +685,4 @@ class SaturationFlag(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         flag = saturation_flag(np.asarray(gt), threshold=self.threshold).astype(bool)
-        return wrap_like(gt, restore_fill(flag, _valid(gt), False))
+        return wrap_filled(gt, flag, fill_value_default=False, valid=_valid(gt))

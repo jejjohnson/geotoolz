@@ -390,20 +390,28 @@ def test_geotensor_metadata_propagates_through_spectral_ops() -> None:
     """Spatial transform/CRS must survive every spectral Operator (Tier-B)."""
     gt = _toy_geotensor(np.arange(4 * 3 * 3, dtype=np.float32).reshape(4, 3, 3))
 
+    # Band subsets and value-preserving transforms keep the input's fill;
+    # derived products (new quantities) declare NaN (#146).
     ops = [
-        spectral.SelectBands(indexes=["B2", "B8"]),
-        spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)"),
-        spectral.NormalizedDifference(a="B8", b="B4"),
-        spectral.BandRatio(numerator="B8", denominator="B4"),
-        spectral.ContinuumRemoval(method="linear"),
-        spectral.SpectralBinning(target_wavelengths=[577.5], width=200.0),
-        spectral.SpectralSmoothing(method="moving_average", window=3),
+        (spectral.SelectBands(indexes=["B2", "B8"]), gt.fill_value_default),
+        (spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)"), np.nan),
+        (spectral.NormalizedDifference(a="B8", b="B4"), np.nan),
+        (spectral.BandRatio(numerator="B8", denominator="B4"), np.nan),
+        (spectral.ContinuumRemoval(method="linear"), np.nan),
+        (
+            spectral.SpectralBinning(target_wavelengths=[577.5], width=200.0),
+            gt.fill_value_default,
+        ),
+        (
+            spectral.SpectralSmoothing(method="moving_average", window=3),
+            gt.fill_value_default,
+        ),
     ]
-    for op in ops:
+    for op, fill in ops:
         out = op(gt)
         assert out.transform == gt.transform
         assert str(out.crs) == str(gt.crs)
-        assert out.fill_value_default == gt.fill_value_default
+        np.testing.assert_equal(out.fill_value_default, fill)
 
 
 def test_split_bands_rejects_out_of_range_axis() -> None:

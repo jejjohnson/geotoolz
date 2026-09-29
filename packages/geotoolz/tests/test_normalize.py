@@ -400,11 +400,15 @@ def test_fill_pixels_are_excluded(make_op) -> None:
 
     Valid pixels must equal the result on the same data with the fill
     pixels marked missing (NaN), i.e. statistics over valid pixels only.
+    Normalized values live on a new scale, so the output fill is NaN
+    rather than the input's -9999 (#146).
     """
     gt, values, fill = _fill_scene()
-    out = np.asarray(make_op()(gt))
+    result = make_op()(gt)
+    out = np.asarray(result)
 
-    assert np.all(out[:, fill] == -9999)
+    assert np.isnan(result.fill_value_default)
+    assert np.isnan(out[:, fill]).all()
     reference = values.copy()
     reference[:, fill] = np.nan
     expected = np.asarray(make_op()(reference))
@@ -428,7 +432,7 @@ def test_fill_pixels_are_excluded_from_fitted_stats() -> None:
     minmax(gt)
     np.testing.assert_allclose(minmax.vmin, valid.min(axis=1))
 
-    # inverse() maps fill pixels of the scaled carrier back to the fill.
+    # inverse() keeps fill pixels of the scaled carrier as nodata (NaN).
     restored = np.asarray(scaler.inverse(scaler(gt)))
-    assert np.all(restored[:, fill] == -9999)
+    assert np.isnan(restored[:, fill]).all()
     np.testing.assert_allclose(restored[:, ~fill], valid)

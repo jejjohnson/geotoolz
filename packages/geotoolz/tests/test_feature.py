@@ -16,7 +16,9 @@ def _gt(values: np.ndarray) -> GeoTensor:
         values=values,
         transform=rasterio.Affine(2.0, 0.0, 100.0, 0.0, -2.0, 200.0),
         crs="EPSG:32629",
-        fill_value_default=0,
+        # 0 is real data in these images; georeader would treat a 0 fill
+        # as nodata, which the feature maps then mask out.
+        fill_value_default=None,
     )
 
 

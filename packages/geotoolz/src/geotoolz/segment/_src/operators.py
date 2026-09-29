@@ -36,7 +36,7 @@ from geotoolz._src.config import (
     reject_config_summary,
 )
 from geotoolz._src.shape import single_band
-from geotoolz._src.valid import valid_pixels
+from geotoolz._src.valid import carried_fill, valid_pixels, wrap_filled
 from geotoolz._src.wrap import wrap_like
 
 
@@ -661,7 +661,8 @@ class MergeNearbyInstances(Operator):
         start_label: Starting integer label for the relabeled output.
 
     Accepts a single-band ``GeoTensor`` or a plain ``np.ndarray`` label
-    map and returns an ``int32`` label map in the same carrier kind.
+    map and returns an ``int32`` label map in the same carrier kind, with
+    ``fill_value_default=0``; nodata input pixels are ``0``.
     """
 
     def __init__(
@@ -695,7 +696,8 @@ class MergeNearbyInstances(Operator):
             classes=self.classes,
             start_label=self.start_label,
         )
-        return wrap_like(gt, merged.astype(np.int32, copy=False))
+        # Label map: 0 is "no instance", including at nodata input pixels.
+        return _labels(gt, merged, valid_pixels(gt))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -792,7 +794,8 @@ class MaskNMS(Operator):
         start_label: Starting integer label for the renumbered output.
 
     Accepts a ``GeoTensor`` or a plain ``np.ndarray`` mask stack and
-    returns an ``int32`` label map in the same carrier kind.
+    returns an ``int32`` label map in the same carrier kind, with
+    ``fill_value_default=0``; pixels that are nodata in any plane are ``0``.
     """
 
     def __init__(
@@ -818,7 +821,7 @@ class MaskNMS(Operator):
             iou_threshold=self.iou_threshold,
             start_label=self.start_label,
         )
-        return _labels(gt, out)
+        return _labels(gt, out, valid_pixels(gt))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -883,7 +886,9 @@ class MarkBoundaries(Operator):
         )
         if marked.ndim == 3:
             marked = einx.id("h w c -> c h w", marked)
-        return wrap_like(gt, marked)
+        return wrap_filled(
+            gt, marked, fill_value_default=carried_fill(gt, np.asarray(marked).dtype)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {

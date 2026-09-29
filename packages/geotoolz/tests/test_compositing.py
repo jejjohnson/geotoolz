@@ -339,6 +339,8 @@ def _case_median() -> None:
     out, count = MedianComposite(return_count=True)(_fill_frames())
     _assert_composite(out, [3.0, 2.0], [6.0, 1.5])
     np.testing.assert_array_equal(np.asarray(count)[:, 0], [[3, 2, 0], [3, 2, 0]])
+    # A contributor count declares 0 (no frame), not the frames' fill (#146).
+    assert count.fill_value_default == 0
 
 
 def _case_max_ndvi() -> None:
@@ -346,6 +348,9 @@ def _case_max_ndvi() -> None:
     # Pixel 1: frame 2 (NDVI -0.56) beats frame 1 (-0.67); the fill
     # frame's NDVI of 0 must not win.
     assert np.asarray(index)[0, 1] == 2
+    # No frame is valid at pixel 2; frame 0 is a real index, so -1 marks it.
+    assert np.asarray(index)[0, 2] == -1
+    assert index.fill_value_default == -1
     _assert_composite(out, [1.0, 2.0], [7.0, 2.0])
 
 
@@ -370,7 +375,9 @@ def _case_bap() -> None:
         list(zip(frames, metadata, strict=True))
     )
     _assert_composite(out, [3.0, 1.0], [5.0, 1.0])
-    assert np.asarray(score)[0, 2] == _FILL
+    # A score is a new quantity: NaN nodata, never the frames' fill (#146).
+    assert np.isnan(score.fill_value_default)
+    assert np.isnan(np.asarray(score)[0, 2])
 
 
 def _case_min_cloud() -> None:

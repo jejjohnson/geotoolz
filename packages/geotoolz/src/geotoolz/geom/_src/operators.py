@@ -49,6 +49,7 @@ from geotoolz._src.bands import band_count
 from geotoolz._src.blending import normalize_overlap_add, overlap_add
 from geotoolz._src.config import as_tuple
 from geotoolz._src.shape import single_band
+from geotoolz._src.valid import valid_pixels, wrap_filled
 from geotoolz._src.wrap import adopt_attrs, rewrap_attrs, wrap_like
 from geotoolz.geom._src.array import (
     center_offsets,
@@ -437,6 +438,17 @@ class PhaseAlign(Operator):
         }
 
 
+def _wrap_flow(gt: Any, reference: Any, flow: np.ndarray) -> Any:
+    """Rewrap a ``(2, H, W)`` displacement field with ``NaN`` as its nodata.
+
+    A displacement is a new quantity: pixels that are nodata in either
+    scene (non-finite or equal to that scene's ``fill_value_default``)
+    hold ``NaN`` and the output declares ``fill_value_default=NaN``.
+    """
+    valid = valid_pixels(gt) & valid_pixels(reference)
+    return wrap_filled(gt, flow, fill_value_default=np.nan, valid=valid)
+
+
 class OpticalFlowTVL1(Operator):
     """Dense per-pixel displacement via TV-L1 optical flow.
 
@@ -444,7 +456,8 @@ class OpticalFlowTVL1(Operator):
     registration band. The output is a ``(2, H, W)`` displacement field
     (``[dy, dx]`` per pixel) on the input's carrier: pixel-space math,
     so both ``GeoTensor`` and plain ``np.ndarray`` inputs are supported
-    and returned in kind.
+    and returned in kind. Pixels that are nodata in either scene are
+    ``NaN`` (``fill_value_default=NaN``).
 
     Args:
         reference: The fixed scene the input is registered against.
@@ -464,7 +477,7 @@ class OpticalFlowTVL1(Operator):
                 _registration_band(np.asarray(gt), self.band),
             )
         )
-        return wrap_like(gt, flow)
+        return _wrap_flow(gt, self.reference, flow)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -490,7 +503,7 @@ class OpticalFlowILK(OpticalFlowTVL1):
                 _registration_band(np.asarray(gt), self.band),
             )
         )
-        return wrap_like(gt, flow)
+        return _wrap_flow(gt, self.reference, flow)
 
 
 class Resize(Operator):

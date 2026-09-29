@@ -532,7 +532,11 @@ _FILL_OPS = [
 
 @pytest.mark.parametrize("op", _FILL_OPS, ids=lambda op: type(op).__name__)
 def test_fill_pixels_are_excluded(op: object, reflectance_7band: GeoTensor) -> None:
-    """A -9999 fill pixel is not computed as data: it holds the output fill."""
+    """A -9999 fill pixel is not computed as data: it holds the output fill.
+
+    An index is a new quantity, so the output fill is NaN, not the
+    input's -9999 (#146).
+    """
     clean = np.asarray(reflectance_7band)
     gt = toy_geotensor(clean, with_fill_pixels=True)
     fill = fill_pixel_mask(gt.shape)
@@ -540,8 +544,8 @@ def test_fill_pixels_are_excluded(op: object, reflectance_7band: GeoTensor) -> N
     out = op(gt)  # type: ignore[operator]
     expected = np.asarray(op(toy_geotensor(clean)))  # type: ignore[operator]
 
-    assert out.fill_value_default == -9999
-    np.testing.assert_array_equal(np.asarray(out)[fill], -9999)
+    assert np.isnan(out.fill_value_default)
+    assert np.isnan(np.asarray(out)[fill]).all()
     np.testing.assert_allclose(np.asarray(out)[~fill], expected[~fill])
 
 
@@ -570,14 +574,36 @@ def test_fill_pixels_are_excluded_dnbr_and_append_index(
     fill = fill_pixel_mask(clean.shape)
     pre = toy_geotensor(clean[0], with_fill_pixels=True)
     post = toy_geotensor(clean[1])
-    out = np.asarray(dNBR()(pre, post))
-    np.testing.assert_array_equal(out[fill], -9999)
-    np.testing.assert_allclose(out[~fill], (clean[0] - clean[1])[~fill])
+    out = dNBR()(pre, post)
+    assert np.isnan(out.fill_value_default)
+    assert np.isnan(np.asarray(out)[fill]).all()
+    np.testing.assert_allclose(np.asarray(out)[~fill], (clean[0] - clean[1])[~fill])
 
-    stacked = np.asarray(
-        AppendIndex(index_op=NDVI())(toy_geotensor(clean, with_fill_pixels=True))
-    )
-    np.testing.assert_array_equal(stacked[-1][fill], -9999)
+    # AppendIndex carries the input bands, so it keeps their fill -- in
+    # the appended index band too.
+    stacked = AppendIndex(index_op=NDVI())(toy_geotensor(clean, with_fill_pixels=True))
+    assert stacked.fill_value_default == -9999
+    np.testing.assert_array_equal(np.asarray(stacked)[-1][fill], -9999)
+
+
+def test_index_of_integer_dn_declares_nan_fill() -> None:
+    """A 0 fill on uint16 DN must not carry over: NDVI 0 is real data (#146)."""
+    from _helpers import uint16_dn_cube
+
+    dn = uint16_dn_cube(4, size=6)
+    dn[2, 1, 1] = dn[3, 1, 1]  # red == nir -> NDVI exactly 0 at a valid pixel
+    gt = toy_geotensor(dn, fill_value_default=0, with_fill_pixels=True)
+    fill = fill_pixel_mask(gt.shape)
+
+    out = NDVI()(gt)
+    assert np.isnan(out.fill_value_default)
+    assert np.isnan(np.asarray(out)[fill]).all()
+    assert np.asarray(out)[1, 1] == 0.0
+    assert np.asarray(out.validmask())[1, 1]
+
+    stacked = AppendIndex(index_op=NDVI())(gt)
+    assert np.isnan(stacked.fill_value_default)
+    assert np.isnan(np.asarray(stacked)[:, fill]).all()
 
 
 # ---------------------------------------------------------------------------

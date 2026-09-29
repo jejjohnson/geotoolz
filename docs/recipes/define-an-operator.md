@@ -62,6 +62,17 @@ def _apply(self, gt):
 - **Wrap the result back via `gt.array_as_geotensor(out)`** so
   `transform`, `crs`, and `fill_value_default` propagate. Don't
   construct a new `GeoTensor` by hand unless you really need to.
+- **Declare a fill value that matches the output.** georeader treats
+  `fill_value_default` as nodata (`validmask()` is `values != fill`),
+  even when it is `0`, so an inherited fill is wrong once the output's
+  dtype or meaning changes. Rewrap with
+  `geotoolz._src.wrap.wrap_like(gt, out, fill_value_default=...)`
+  (or `geotoolz._src.valid.wrap_filled`, which also writes the fill into
+  the input's nodata pixels): `False` for boolean masks, `0` for label /
+  count maps, `NaN` for new float quantities (indices, scores, features),
+  and `geotoolz._src.valid.carried_fill(gt, out.dtype)` for outputs that
+  carry the input's values. If `0` is real data in your input, give it
+  `fill_value_default=None` (or `NaN`) rather than georeader's default `0`.
 - **Preserve trailing spatial dims.** If your op collapses the channel
   axis (e.g. NDVI), make sure the output's last two dims still agree
   with the input's `(H, W)` so `array_as_geotensor` accepts it.

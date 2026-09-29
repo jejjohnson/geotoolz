@@ -12,8 +12,9 @@ dataclasses) unchanged for either input kind.
 
 Nodata: pixels that are non-finite or equal the carrier's
 ``fill_value_default`` in any band are excluded from every fitted
-statistic (see :mod:`geotoolz._src.valid`); score maps hold the input's
-fill value (``NaN`` for plain arrays) at those pixels.
+statistic (see :mod:`geotoolz._src.valid`); score maps are a new
+quantity, so they hold ``NaN`` at those pixels and declare
+``fill_value_default=NaN`` whatever the input's fill value.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import callable_name, jsonable, reject_config_summary
-from geotoolz._src.valid import carrier_fill_value, invalid_values, restore_fill
+from geotoolz._src.valid import invalid_values, restore_fill
 from geotoolz._src.wrap import wrap_like
 from geotoolz.matched_filter._src.array import (
     AdaptiveBackground,
@@ -76,8 +77,8 @@ class MatchedFilter(Operator):
     back on the operator for reuse.
 
     Nodata pixels (non-finite or equal to the input's fill value in any
-    band) are left out of the fit and hold the input's fill value
-    (``NaN`` for plain arrays) in the score map.
+    band) are left out of the fit and hold ``NaN`` in the score map,
+    which declares ``fill_value_default=NaN``.
 
     Args:
         mean: Background mean spectrum ``(c,)``; fitted from the cube
@@ -141,7 +142,7 @@ class MatchedFilter(Operator):
         out = apply_image(
             cube, mean=mean, cov_op=cov_op, target=self.target, axis=self.axis
         )
-        return wrap_like(gt, _restore(gt, out, valid))
+        return wrap_like(gt, _restore(gt, out, valid), fill_value_default=np.nan)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -584,7 +585,7 @@ class ApplyClusterMF(Operator):
     Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns the
     score map as the same carrier kind. Nodata pixels (non-finite or
     equal to the input's fill value in any band, or labelled ``-1``)
-    hold the input's fill value (``NaN`` for plain arrays).
+    hold ``NaN`` (``fill_value_default=NaN``).
 
     The ``cluster`` background is supplied at apply time as a runtime input
     so the operator config (``target``, ``axis``) is hydra-/YAML-safe and
@@ -613,7 +614,7 @@ class ApplyClusterMF(Operator):
         out = apply_cluster_mf(
             cube, cluster=cluster, target=self.target, axis=self.axis
         )
-        return wrap_like(gt, _restore(gt, out, valid))
+        return wrap_like(gt, _restore(gt, out, valid), fill_value_default=np.nan)
 
     def get_config(self) -> dict[str, Any]:
         return {"target": np.asarray(self.target).tolist(), "axis": self.axis}
@@ -929,10 +930,10 @@ def _mask_invalid(
 def _restore(
     gt: GeoTensor | np.ndarray, out: np.ndarray, valid: np.ndarray | None
 ) -> np.ndarray:
-    """Write the input's fill value into invalid pixels of a score map."""
+    """Write ``NaN`` into invalid pixels of a score map."""
     if valid is None:
         return out
-    return restore_fill(out, valid, carrier_fill_value(gt))
+    return restore_fill(out, valid, np.nan)
 
 
 def _target_from_obs(

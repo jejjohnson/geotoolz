@@ -1183,6 +1183,22 @@ def test_optical_flow_tvl1_returns_displacement_field() -> None:
     assert str(flow.crs) == str(moving.crs)
 
 
+@pytest.mark.parametrize("name", ["OpticalFlowTVL1", "OpticalFlowILK"])
+def test_optical_flow_declares_nan_fill(name: str) -> None:
+    """A displacement is a new quantity: NaN nodata, not the scene fill (#146)."""
+    reference, moving, _dy, _dx = _registration_pair()
+    values = np.asarray(moving).copy()
+    values[:, 5, 7] = 0.0  # nodata in the moving scene (fill 0.0)
+    moving = GeoTensor(
+        values, transform=moving.transform, crs=moving.crs, fill_value_default=0.0
+    )
+    flow = getattr(gz.geom, name)(reference=reference)(moving)
+    assert np.isnan(flow.fill_value_default)
+    arr = np.asarray(flow)
+    assert np.isnan(arr[:, 5, 7]).all()
+    assert np.isfinite(arr[:, 20, 20]).all()
+
+
 def test_optical_flow_ilk_returns_displacement_field() -> None:
     reference, moving, _dy, _dx = _registration_pair()
     flow = gz.geom.OpticalFlowILK(reference=reference)(moving)

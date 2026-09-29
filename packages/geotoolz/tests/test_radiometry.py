@@ -61,7 +61,8 @@ def _toy_geotensor(values: np.ndarray) -> GeoTensor:
 def dn_4band() -> GeoTensor:
     """4-band uint16 DN raster mimicking Sentinel-2 L1C."""
     rng = np.random.default_rng(0)
-    arr = rng.integers(0, 12_000, size=(4, 8, 8), dtype=np.uint16)
+    # DN start at 1: 0 is this raster's fill value (nodata).
+    arr = rng.integers(1, 12_000, size=(4, 8, 8), dtype=np.uint16)
     return _toy_geotensor(arr)
 
 
@@ -350,6 +351,50 @@ def test_radiometry_pipeline_composes(dn_4band: GeoTensor) -> None:
     assert out.shape == dn_4band.shape
     assert np.all(np.asarray(out) >= 0.0)
     assert np.all(np.asarray(out) <= 1.0)
+
+
+def test_integer_dn_promoted_to_float_declares_nan_fill() -> None:
+    """A 0 fill on uint16 DN would collide with real float values (#146)."""
+    from _helpers import fill_pixel_mask
+
+    gt = toy_geotensor(uint16_dn_cube(2), fill_value_default=0, with_fill_pixels=True)
+    fill = fill_pixel_mask(gt.shape)
+    for op in (ToFloat32(), DNToReflectance(scale=1e-4), DNToRadiance(gain=0.1)):
+        out = op(gt)
+        assert np.isnan(out.fill_value_default)
+        assert np.isnan(np.asarray(out)[:, fill]).all()
+        assert np.isfinite(np.asarray(out)[:, ~fill]).all()
+
+
+def test_float_unit_conversions_keep_and_write_the_fill() -> None:
+    """Float input keeps its fill, as georeader's conversions do, and the
+    fill pixels hold it instead of a scaled -9999 (#146)."""
+    from _helpers import fill_pixel_mask
+
+    values = np.full((2, 4, 4), 1000.0)
+    gt = toy_geotensor(values, fill_value_default=-9999, with_fill_pixels=True)
+    fill = fill_pixel_mask(gt.shape)
+    for op in (DNToReflectance(scale=1e-4), DNToRadiance(gain=0.1)):
+        out = op(gt)
+        assert out.fill_value_default == -9999
+        np.testing.assert_array_equal(np.asarray(out)[:, fill], -9999)
+
+
+def test_display_stretches_declare_nan_fill() -> None:
+    """[0, 1] stretches must not keep a fill such as 0 that is a valid value."""
+    from _helpers import fill_pixel_mask
+
+    values = np.random.default_rng(0).uniform(0.1, 0.9, (2, 4, 4))
+    gt = toy_geotensor(values, fill_value_default=0.0, with_fill_pixels=True)
+    fill = fill_pixel_mask(gt.shape)
+    for op in (MinMax(vmin=0.0, vmax=1.0), PercentileClip(), Gamma()):
+        out = op(gt)
+        assert np.isnan(out.fill_value_default)
+        assert np.isnan(np.asarray(out)[:, fill]).all()
+    # The fill pixels no longer drag the percentiles down to 0.
+    clipped = np.asarray(PercentileClip(p_min=0.0, p_max=100.0)(gt))
+    np.testing.assert_allclose(np.nanmin(clipped, axis=(-2, -1)), 0.0)
+    np.testing.assert_allclose(np.nanmax(clipped, axis=(-2, -1)), 1.0)
 
 
 def test_radiance_reflectance_roundtrip_preserves_metadata() -> None:

@@ -20,6 +20,18 @@ Operators exclude invalid pixels from statistics, fits and reductions
 (NaN-aware ``np.nan*`` reductions over :func:`mask_invalid_to_nan`
 output), then write the output's fill value back into them with
 :func:`restore_fill`.
+
+The output's fill value follows its dtype and meaning, never blindly the
+input's (see :func:`carried_fill` and :func:`wrap_filled`):
+
+* boolean masks use ``False`` (as georeader's own comparison operators do);
+* label / count maps use ``0``;
+* float *products* whose values mean something new (indices, scores,
+  features, masses, binned statistics) use ``NaN``;
+* outputs that carry the input's values (filters, scalings, resampling)
+  keep the input's fill when it is representable and unambiguous in the
+  output dtype, and switch to ``NaN`` when an integer input is promoted to
+  float (an integer fill such as ``0`` would collide with real data).
 """
 
 from __future__ import annotations
@@ -30,16 +42,18 @@ from typing import Any
 import numpy as np
 from jaxtyping import Bool, Float
 
-from geotoolz._src.wrap import INHERIT, FillValue
+from geotoolz._src.wrap import INHERIT, FillValue, wrap_like
 
 
 __all__ = [
+    "carried_fill",
     "carrier_fill_value",
     "invalid_values",
     "is_fill",
     "mask_invalid_to_nan",
     "restore_fill",
     "valid_pixels",
+    "wrap_filled",
 ]
 
 
@@ -236,3 +250,81 @@ def restore_fill(out: Any, valid: np.ndarray, fill_value: Any) -> np.ndarray:
     arr = arr.copy()
     arr[invalid] = value
     return arr
+
+
+def carried_fill(ref: Any, dtype: Any) -> Any:
+    """Fill value for an output that carries ``ref``'s values in ``dtype``.
+
+    For value-preserving operators (filters, scalings, resampling, casts)
+    whose output may change dtype. Operators whose output *means*
+    something new pass the canonical fill for that meaning instead
+    (``False`` / ``0`` / ``NaN``; see the module docstring).
+
+    Args:
+        ref: The operator's input carrier.
+        dtype: The output dtype.
+
+    Returns:
+        * ``False`` for a boolean output;
+        * for a floating-point output: ``NaN`` when ``ref`` is an integer
+          / boolean carrier with a fill (the integer fill would collide
+          with promoted real data, e.g. ``0``), otherwise ``ref``'s fill
+          (``None`` stays ``None``);
+        * for an integer output: ``ref``'s fill when it is representable
+          in ``dtype``, otherwise ``None``.
+
+    Examples:
+        >>> carried_fill(np.zeros(2, dtype=np.uint16), np.float32) is None
+        True
+        >>> carried_fill(np.zeros(2), bool)
+        False
+    """
+    dtype = np.dtype(dtype)
+    if dtype == np.bool_:
+        return False
+    fill = carrier_fill_value(ref)
+    if fill is None:
+        return None
+    if np.issubdtype(dtype, np.inexact):
+        if _is_nan_scalar(fill) or not np.issubdtype(np.asarray(ref).dtype, np.inexact):
+            return np.nan
+        return fill
+    if _is_nan_scalar(fill) or not isinstance(fill, numbers.Real):
+        return None
+    try:
+        cast = np.asarray(fill).astype(dtype)
+    except (OverflowError, ValueError):
+        return None
+    return fill if cast.item() == fill else None
+
+
+def wrap_filled(
+    ref: Any,
+    out: Any,
+    *,
+    fill_value_default: Any,
+    valid: np.ndarray | None = None,
+    **wrap_kwargs: Any,
+) -> Any:
+    """Write an explicit fill into ``ref``'s invalid pixels and rewrap ``out``.
+
+    The one-call form of ``restore_fill`` + ``wrap_like`` that keeps the
+    declared ``fill_value_default`` in step with the values written.
+
+    Args:
+        ref: The operator's input carrier.
+        out: The computed output, on ``ref``'s grid.
+        fill_value_default: The output's fill value (``None`` writes ``NaN``
+            into a float output, and nothing is declared).
+        valid: Validity mask (see :func:`restore_fill`); defaults to
+            ``valid_pixels(ref)`` (per frame for 4-D input).
+        **wrap_kwargs: Forwarded to :func:`~geotoolz._src.wrap.wrap_like`
+            (``attrs``, ``band_names``, ``transform``).
+
+    Returns:
+        ``out`` rewrapped like ``ref`` with ``fill_value_default`` declared.
+    """
+    if valid is None:
+        valid = valid_pixels(ref, keep_time=np.ndim(out) == 4)
+    filled = restore_fill(out, valid, fill_value_default)
+    return wrap_like(ref, filled, fill_value_default=fill_value_default, **wrap_kwargs)
