@@ -128,6 +128,8 @@ def test_read_netcdf_decodes_cf_and_recovers_grid_mapping(tmp_path: Path) -> Non
         group.createDimension("x", 3)
         crs_var = group.createVariable("crs", "i4")
         crs_var.crs_wkt = CRS.from_epsg(4326).to_wkt()
+        # GDAL's netCDF driver writes GeoTransform on the grid_mapping variable.
+        crs_var.GeoTransform = "10 1 0 20 0 -1"
         variable = group.createVariable(
             "methane_mixing_ratio_bias_corrected",
             "i2",
@@ -137,7 +139,6 @@ def test_read_netcdf_decodes_cf_and_recovers_grid_mapping(tmp_path: Path) -> Non
         variable.scale_factor = 0.5
         variable.add_offset = 10.0
         variable.grid_mapping = "crs"
-        variable.GeoTransform = "10 1 0 20 0 -1"
         variable.set_auto_maskandscale(False)
         variable[:] = np.arange(12, dtype=np.int16).reshape(2, 2, 3)
 
@@ -151,7 +152,8 @@ def test_read_netcdf_decodes_cf_and_recovers_grid_mapping(tmp_path: Path) -> Non
     np.testing.assert_allclose(out.values, np.arange(6, 12).reshape(1, 2, 3) * 0.5 + 10)
     assert out.crs == CRS.from_epsg(4326)
     assert tuple(out.transform)[:6] == (1.0, 0.0, 10.0, 0.0, -1.0, 20.0)
-    assert out.fill_value_default == -9999
+    # Decoded values are scaled floats, so the fill sentinel is NaN, not -9999.
+    assert np.isnan(out.fill_value_default)
 
 
 def test_read_netcdf_decodes_fill_value_to_nan(tmp_path: Path) -> None:
@@ -653,3 +655,293 @@ def test_sink_mapping_options_round_trip() -> None:
         assert clone.get_config() == op.get_config()
     assert ops[2].get_config()["chunks"] == [["y", 256], ["x", 256]]
     assert Operator.from_state(ops[0].state).profile == {"blocksize": 512}
+
+
+# ---------------------------------------------------------------------------
+# #127 — non-intersecting boundless=False reads
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "make_op",
+    [
+        pytest.param(
+            lambda path: io.ReadBounds(
+                src=path, bounds=(1e6, 1e6, 1e6 + 10, 1e6 + 10), boundless=False
+            ),
+            id="ReadBounds",
+        ),
+        pytest.param(
+            lambda path: io.ReadPolygon(
+                src=path, polygon=box(1e6, 1e6, 1e6 + 10, 1e6 + 10), boundless=False
+            ),
+            id="ReadPolygon",
+        ),
+        pytest.param(
+            lambda path: io.ReadCenterCoords(
+                src=path, center=(1e6, 1e6), shape=(2, 2), boundless=False
+            ),
+            id="ReadCenterCoords",
+        ),
+    ],
+)
+def test_read_bounds_outside_raises_io_error(tmp_path: Path, make_op) -> None:
+    path = tmp_path / "sample.tif"
+    io.WriteGeoTIFF(path=path)(_sample_geotensor())
+
+    with pytest.raises(io.GeoToolzIOError, match="does not intersect"):
+        make_op(path)()
+
+
+# ---------------------------------------------------------------------------
+# #128 — LoadFromEE bounds are in ``crs``
+# ---------------------------------------------------------------------------
+
+
+def test_load_from_ee_projected_crs_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """UTM bounds must be interpreted in the UTM ``crs``, not EPSG:4326."""
+    ee = pytest.importorskip("ee")
+    pytest.importorskip("georeader.readers.ee_image")
+    import rasterio
+    from rasterio.io import MemoryFile
+
+    requests: list[dict] = []
+
+    def fake_get_pixels(params: dict) -> bytes:
+        # Stand-in for the Earth Engine server: return a GeoTIFF on the
+        # requested grid.
+        requests.append(params)
+        grid = params["grid"]
+        affine = grid["affineTransform"]
+        transform = rasterio.Affine(
+            affine["scaleX"],
+            affine["shearX"],
+            affine["translateX"],
+            affine["shearY"],
+            affine["scaleY"],
+            affine["translateY"],
+        )
+        height, width = grid["dimensions"]["height"], grid["dimensions"]["width"]
+        with MemoryFile() as memfile:
+            with memfile.open(
+                driver="GTiff",
+                height=height,
+                width=width,
+                count=1,
+                dtype="uint16",
+                crs=grid["crsCode"],
+                transform=transform,
+            ) as dst:
+                dst.write(np.ones((1, height, width), dtype=np.uint16))
+            return memfile.read()
+
+    monkeypatch.setattr(ee.data, "getPixels", fake_get_pixels)
+
+    bounds = (500_000.0, 4_500_000.0, 500_300.0, 4_500_600.0)
+    out = io.LoadFromEE(
+        image_id="asset", bounds=bounds, crs="EPSG:32631", scale=30.0, bands=["B4"]
+    )()
+
+    (params,) = requests
+    # The request grid is anchored at the UTM upper-left corner. georeader's
+    # ``window_surrounding=True`` may add one trailing pixel per axis.
+    dims = params["grid"]["dimensions"]
+    assert dims["height"] in (20, 21)
+    assert dims["width"] in (10, 11)
+    assert params["grid"]["affineTransform"]["translateX"] == 500_000.0
+    assert params["grid"]["affineTransform"]["translateY"] == 4_500_600.0
+    assert out.shape == (1, dims["height"], dims["width"])
+    assert out.crs == CRS.from_epsg(32631)
+    assert tuple(out.transform)[:6] == (30.0, 0.0, 500_000.0, 0.0, -30.0, 4_500_600.0)
+
+
+# ---------------------------------------------------------------------------
+# #130 — reader edge cases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("on_grid_mapping", [True, False])
+def test_read_netcdf_geotransform_on_grid_mapping(
+    tmp_path: Path, on_grid_mapping: bool
+) -> None:
+    """GDAL writes GeoTransform on the grid_mapping variable; the data
+    variable is only a fallback."""
+    netcdf4 = pytest.importorskip("netCDF4")
+    path = tmp_path / "gdal.nc"
+    with netcdf4.Dataset(path, "w") as root:
+        root.createDimension("y", 2)
+        root.createDimension("x", 3)
+        crs_var = root.createVariable("spatial_ref", "i4")
+        crs_var.crs_wkt = CRS.from_epsg(32631).to_wkt()
+        variable = root.createVariable("values", "f4", ("y", "x"))
+        variable.grid_mapping = "spatial_ref"
+        target = crs_var if on_grid_mapping else variable
+        target.GeoTransform = "500000 10 0 4500000 0 -10"
+        variable[:] = np.arange(6, dtype=np.float32).reshape(2, 3)
+
+    out = io.ReadNetCDF(path=path, variable="values")()
+
+    assert out.crs == CRS.from_epsg(32631)
+    assert tuple(out.transform)[:6] == (10.0, 0.0, 500000.0, 0.0, -10.0, 4500000.0)
+
+
+def test_read_hdf_array_fill_value_scalar(tmp_path: Path) -> None:
+    """A ``(1,)``-shaped ``_FillValue`` (netCDF4/xarray style) is a scalar fill."""
+    h5py = pytest.importorskip("h5py")
+    path = tmp_path / "fill.h5"
+    values = np.array([[[1, -9999], [3, 4]]], dtype=np.int16)
+    with h5py.File(path, "w") as file:
+        dataset = file.create_dataset("data", data=values)
+        dataset.attrs["_FillValue"] = np.array([-9999], dtype=np.int16)
+
+    out = io.ReadHDF(path=path, dataset="data")()
+
+    assert out.fill_value_default == -9999
+    assert np.ndim(out.fill_value_default) == 0
+    np.testing.assert_array_equal(out.validmask().values, values != -9999)
+
+
+def test_read_netcdf_nan_fill_consistent(tmp_path: Path) -> None:
+    """decode_cf NaN-fills masked values, so the fill sentinel must be NaN;
+    undecoded reads keep the raw ``_FillValue``."""
+    netcdf4 = pytest.importorskip("netCDF4")
+    path = tmp_path / "fill.nc"
+    raw = np.array([[[1, -9999], [3, 4]]], dtype=np.int16)
+    with netcdf4.Dataset(path, "w") as root:
+        root.createDimension("band", 1)
+        root.createDimension("y", 2)
+        root.createDimension("x", 2)
+        variable = root.createVariable(
+            "values", "i2", ("band", "y", "x"), fill_value=-9999
+        )
+        variable.scale_factor = 0.5
+        variable.set_auto_maskandscale(False)
+        variable[:] = raw
+
+    decoded = io.ReadNetCDF(path=path, variable="values")()
+    assert np.isnan(decoded.fill_value_default)
+    np.testing.assert_array_equal(np.isnan(decoded.values), raw == -9999)
+
+    undecoded = io.ReadNetCDF(path=path, variable="values", decode_cf=False)()
+    assert undecoded.fill_value_default == -9999
+    np.testing.assert_array_equal(undecoded.values, raw)
+
+
+@pytest.mark.parametrize("indexes", [None, [2]])
+def test_read_window_open_dataset_source(
+    tmp_path: Path, indexes: list[int] | None
+) -> None:
+    import rasterio
+
+    gt = _sample_geotensor()
+    path = tmp_path / "sample.tif"
+    io.WriteGeoTIFF(path=path)(gt)
+
+    with rasterio.open(path) as dataset:
+        out = io.ReadWindow(src=dataset, window=Window(0, 0, 2, 2), indexes=indexes)()
+
+    expected = gt.values if indexes is None else gt.values[[i - 1 for i in indexes]]
+    np.testing.assert_array_equal(out.values, expected[:, :2, :2])
+
+
+def test_read_reproject_like_path(tmp_path: Path) -> None:
+    gt = _sample_geotensor()
+    path = tmp_path / "sample.tif"
+    io.WriteGeoTIFF(path=path)(gt)
+
+    out = io.ReadReprojectLike(src=path, like=str(path), indexes=[1])()
+
+    assert out.shape == (1, 4, 5)
+    assert out.transform == gt.transform
+    assert out.crs == gt.crs
+    np.testing.assert_array_equal(out.values, gt.values[:1])
+
+
+def test_read_reproject_like_missing_path_raises_io_error(tmp_path: Path) -> None:
+    path = tmp_path / "sample.tif"
+    io.WriteGeoTIFF(path=path)(_sample_geotensor())
+
+    with pytest.raises(io.GeoToolzIOError, match=r"missing\.tif"):
+        io.ReadReprojectLike(src=path, like=str(tmp_path / "missing.tif"))()
+
+
+# ---------------------------------------------------------------------------
+# #131 — WriteZarr
+# ---------------------------------------------------------------------------
+
+
+def test_write_zarr_two_groups_coexist(tmp_path: Path) -> None:
+    zarr = pytest.importorskip("zarr")
+    store = str(tmp_path / "out.zarr")
+    gt = _sample_geotensor()
+    other = GeoTensor(
+        gt.values[:1] + 100,
+        transform=gt.transform,
+        crs=gt.crs,
+        fill_value_default=-1,
+    )
+
+    io.WriteZarr(store=store, group="a")(gt)
+    io.WriteZarr(store=store, group="b", chunks={"y": 2, "x": 2})(other)
+
+    root = zarr.open_group(store, mode="r")
+    np.testing.assert_array_equal(root["a/values"][...], gt.values)
+    np.testing.assert_array_equal(root["b/values"][...], other.values)
+    assert root["b/values"].chunks == (1, 2, 2)
+    assert root["a"].attrs["crs"] == str(gt.crs)
+    assert tuple(root["a"].attrs["transform"]) == tuple(gt.transform)
+    assert root["a"].attrs["fill_value_default"] == -9999
+    assert root["b"].attrs["fill_value_default"] == -1
+
+
+def test_write_zarr_overwrites_same_group(tmp_path: Path) -> None:
+    zarr = pytest.importorskip("zarr")
+    store = str(tmp_path / "out.zarr")
+    gt = _sample_geotensor()
+    doubled = GeoTensor(
+        gt.values[:1] * 2,
+        transform=gt.transform,
+        crs=gt.crs,
+        fill_value_default=np.int16(-1),
+    )
+
+    io.WriteZarr(store=store)(gt)
+    io.WriteZarr(store=store)(doubled)
+
+    root = zarr.open_group(store, mode="r")
+    np.testing.assert_array_equal(root["values"][...], doubled.values)
+    # numpy-scalar fills are stored as JSON scalars.
+    assert root.attrs["fill_value_default"] == -1
+
+
+def test_write_zarr_4d(tmp_path: Path) -> None:
+    zarr = pytest.importorskip("zarr")
+    store = str(tmp_path / "cube.zarr")
+    values = np.arange(3 * 2 * 4 * 5, dtype=np.float32).reshape(3, 2, 4, 5)
+    gt = GeoTensor(
+        values,
+        transform=from_origin(100.0, 200.0, 10.0, 10.0),
+        crs="EPSG:32631",
+        fill_value_default=np.nan,
+    )
+
+    io.WriteZarr(store=store, chunks={"time": 1, "band": 1, "y": 2})(gt)
+
+    array = zarr.open_group(store, mode="r")["values"]
+    np.testing.assert_array_equal(array[...], values)
+    assert array.chunks == (1, 1, 2, 5)
+
+
+def test_write_zarr_rejects_unsupported_ndim(tmp_path: Path) -> None:
+    pytest.importorskip("zarr")
+    store = tmp_path / "bad.zarr"
+    invalid = SimpleNamespace(
+        values=np.zeros((1, 1, 1, 1, 1), dtype=np.uint8),
+        crs="EPSG:32631",
+        transform=from_origin(0.0, 0.0, 1.0, 1.0),
+        fill_value_default=None,
+    )
+
+    with pytest.raises(io.GeoToolzIOError, match="2D to 4D"):
+        io.WriteZarr(store=str(store))(invalid)
+    assert not store.exists()
