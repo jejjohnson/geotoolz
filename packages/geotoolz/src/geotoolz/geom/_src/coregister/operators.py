@@ -216,7 +216,7 @@ class RasterToRasterLike(Operator):
     def get_config(self) -> dict[str, Any]:
         return {"resampling": self.resampling}
 
-    def __call__(self, src: GeoTensor, like: GeoTensor) -> GeoTensor:
+    def _apply(self, src: GeoTensor, like: GeoTensor) -> GeoTensor:
         _require_geotensor(src, "RasterToRasterLike", arg="src")
         _require_geotensor(like, "RasterToRasterLike", arg="like")
         # Delegate to the existing single-input `ReprojectLike` so
@@ -260,7 +260,7 @@ class SwathToGrid(Operator):
             "bounds": list(self.bounds) if self.bounds is not None else None,
         }
 
-    def __call__(self, swath: GeoTensor) -> GeoTensor:
+    def _apply(self, swath: GeoTensor) -> GeoTensor:
         raise NotImplementedError("Phase 3 PR — see design §5.")
 
 
@@ -289,7 +289,7 @@ class GridToSwath(Operator):
     def get_config(self) -> dict[str, Any]:
         return {"time_match": self.time_match, "dt_max": self.dt_max}
 
-    def __call__(self, grid_series: GeoTensor, swath_like: GeoTensor) -> GeoTensor:
+    def _apply(self, grid_series: GeoTensor, swath_like: GeoTensor) -> GeoTensor:
         raise NotImplementedError("Phase 3 PR — see design §5.")
 
 
@@ -338,7 +338,7 @@ class RasterToPoints(Operator):
     def get_config(self) -> dict[str, Any]:
         return {"extract": self.extract, "out_var": self.out_var}
 
-    def __call__(self, raster: GeoTensor, points: Any) -> Any:
+    def _apply(self, raster: GeoTensor, points: Any) -> Any:
         _require_geotensor(raster, "RasterToPoints")
         try:
             import xvec  # noqa: F401 — registers the .xvec accessor
@@ -432,7 +432,7 @@ class PointsToRaster(Operator):
             "attribute": self.attribute,
         }
 
-    def __call__(self, points: Any, like: GeoTensor) -> GeoTensor:
+    def _apply(self, points: Any, like: GeoTensor) -> GeoTensor:
         _require_geotensor(like, "PointsToRaster", arg="like")
         if self.method == "idw":
             raise NotImplementedError(
@@ -612,7 +612,7 @@ class RasterToPointCloud(Operator):
             "power": self.power,
         }
 
-    def __call__(self, raster: GeoTensor, cloud: Any) -> Any:
+    def _apply(self, raster: GeoTensor, cloud: Any) -> Any:
         _require_geotensor(raster, "RasterToPointCloud")
         _require_axis_aligned(raster.transform, "RasterToPointCloud")
         xy = _cloud_to_xy_array(cloud, src_crs=raster.crs)
@@ -865,7 +865,7 @@ class PointCloudToRaster(Operator):
             "max_radius": self.max_radius,
         }
 
-    def __call__(self, cloud: Any, like: GeoTensor) -> GeoTensor:
+    def _apply(self, cloud: Any, like: GeoTensor) -> GeoTensor:
         _require_geotensor(like, "PointCloudToRaster", arg="like")
         _require_axis_aligned(like.transform, "PointCloudToRaster")
         xy, values = _cloud_to_xy_values(cloud)
@@ -1052,7 +1052,7 @@ class VectorToRasterAgg(Operator):
             "all_touched": self.all_touched,
         }
 
-    def __call__(self, vector: Any, like: GeoTensor) -> GeoTensor:
+    def _apply(self, vector: Any, like: GeoTensor) -> GeoTensor:
         if self.agg == "majority":
             raise NotImplementedError(
                 "VectorToRasterAgg(agg='majority') not yet implemented; "
