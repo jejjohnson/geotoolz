@@ -42,6 +42,7 @@ from geotoolz._src.bands import (
     strip_band_attrs,
 )
 from geotoolz._src.config import nested_config
+from geotoolz._src.valid import carrier_fill_value, invalid_values, restore_fill
 from geotoolz._src.wrap import wrap_like
 from geotoolz.indices._src.array import (
     arvi,
@@ -71,6 +72,30 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
+def _wrap_index(
+    gt: GeoTensor | np.ndarray,
+    out: np.ndarray,
+    *,
+    axis: int,
+    bands: tuple[BandRef, ...],
+) -> GeoTensor | np.ndarray:
+    """Rewrap an index result, writing the input's fill into nodata pixels.
+
+    A pixel is nodata when *any band the index reads* (``bands``) is
+    non-finite or equals ``gt.fill_value_default`` (see
+    :mod:`geotoolz._src.valid`); its index value is meaningless (e.g. NDVI
+    of ``-9999 / -9999``), so it is replaced by the output's (inherited)
+    fill value -- ``NaN`` for plain arrays. Bands the index does not read
+    do not affect validity.
+    """
+    idx = [_resolve_band(gt, band) for band in bands]
+    used = np.take(np.asarray(gt), idx, axis=axis)
+    fill = carrier_fill_value(gt)
+    valid = ~invalid_values(used, fill_value=fill).any(axis=axis)
+    out = restore_fill(out, valid, fill)
+    return wrap_like(gt, out)
+
+
 def _grid_matches(a: GeoTensor | np.ndarray, b: GeoTensor | np.ndarray) -> bool:
     """Return whether two rasters share spatial shape (and, when both carry
     georeferencing, transform and CRS)."""
@@ -94,6 +119,10 @@ class NormalizedDifference(Operator):
     This class holds the top-level ``geotoolz.NormalizedDifference``
     name; :class:`geotoolz.spectral.NormalizedDifference` is the
     band-name-string variant (resolved via ``attrs["band_names"]``).
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         a_idx: Index of the "high" band (numerator-positive term).
@@ -131,7 +160,7 @@ class NormalizedDifference(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(gt, out, axis=self.axis, bands=(self.a_idx, self.b_idx))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -159,6 +188,10 @@ class NDVI(Operator):
     ``NDVI(nir_idx=7, red_idx=3)`` (B8 NIR, B4 Red after 0-indexing past
     B1/B2/B3); for Landsat-8 use ``NDVI(nir_idx=4, red_idx=3)``
     (B5 NIR, B4 Red).
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         nir_idx: Band-axis index of the NIR reflectance. Default ``3``.
@@ -203,7 +236,7 @@ class NDVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir_idx, self.red_idx))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -226,6 +259,10 @@ class NDWI(Operator):
     leaf-water NDWI (SWIR/NIR). High over open water, low over
     vegetation. See :func:`~geotoolz.indices._src.array.ndwi_mcfeeters`
     for physics.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         green_idx: Band index of Green reflectance. Default ``1``.
@@ -263,7 +300,9 @@ class NDWI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.green_idx, self.nir_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -285,6 +324,10 @@ class NDBI(Operator):
     High over impervious surfaces (concrete, asphalt). Pair with NDVI
     as ``NDBI - NDVI`` to suppress bare-soil confounders. See
     :func:`~geotoolz.indices._src.array.ndbi` for physics.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         swir_idx: Band index of SWIR-1 reflectance. Default ``5``.
@@ -328,7 +371,7 @@ class NDBI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(gt, out, axis=self.axis, bands=(self.swir_idx, self.nir_idx))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -351,6 +394,10 @@ class NBR(Operator):
     surfaces. dNBR (``pre - post``) is the standard burn-severity
     quantitative measure. See
     :func:`~geotoolz.indices._src.array.nbr` for physics.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         nir_idx: NIR band index. Default ``3``.
@@ -393,7 +440,9 @@ class NBR(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.nir_idx, self.swir2_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -419,6 +468,10 @@ class SAVI(Operator):
     for very sparse cover.
 
     See :func:`~geotoolz.indices._src.array.savi` for physics.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         nir_idx: NIR band index. Default ``3``.
@@ -462,7 +515,7 @@ class SAVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir_idx, self.red_idx))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -489,6 +542,10 @@ class EVI(Operator):
 
     Standard MODIS / S2 / L8 coefficients: ``G=2.5, C1=6, C2=7.5, L=1``.
     See :func:`~geotoolz.indices._src.array.evi` for physics.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         nir_idx: NIR band index. Default ``3``.
@@ -549,7 +606,9 @@ class EVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.nir_idx, self.red_idx, self.blue_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -579,6 +638,10 @@ class EVI2(Operator):
     with poor blue calibration). The fixed coefficients ``2.4`` and
     ``1`` are tuned to track EVI within a few percent on most cover
     types. See :func:`~geotoolz.indices._src.array.evi2` for physics.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         red: Optional named Red band (e.g. ``"B04"``). Overrides
@@ -623,7 +686,7 @@ class EVI2(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir_idx, self.red_idx))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -648,6 +711,10 @@ class ARVI(Operator):
     Extends NDVI with a Blue-band correction (``rb``) that cancels the
     aerosol-driven inflation of the red signal. ``gamma=1`` is the
     standard value derived from MODIS Rayleigh-scattering simulations.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         blue: Optional named Blue band. Overrides ``blue_idx``.
@@ -702,7 +769,9 @@ class ARVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.nir_idx, self.red_idx, self.blue_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -726,6 +795,10 @@ class GCI(Operator):
     Linearly proportional to canopy chlorophyll content over a broader
     dynamic range than NDVI. Saturates much later — useful for dense
     crops and forests where NDVI plateaus.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         green: Optional named Green band.
@@ -770,7 +843,9 @@ class GCI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.nir_idx, self.green_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -792,6 +867,10 @@ class kNDVI(Operator):
     resilient to saturation, more linearly related to gross primary
     productivity, and more robust to atmospheric noise than NDVI on
     most cover types.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         red: Optional named Red band.
@@ -835,7 +914,7 @@ class kNDVI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir_idx, self.red_idx))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -862,6 +941,10 @@ class MNDWI(Operator):
     Green/SWIR1 ratio happens to separate snow from rock just as it
     separates water from soil, so the two indices share a formula but
     are interpreted differently.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         green: Optional named Green band.
@@ -906,7 +989,9 @@ class MNDWI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.green_idx, self.swir_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -930,6 +1015,10 @@ class NDMI(Operator):
     over moist canopies, low over water-stressed or dry vegetation.
     Sometimes also called "Gao's NDWI"; we use ``NDMI`` here to keep
     the McFeeters surface-water ``NDWI`` distinct.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         nir: Optional named NIR band.
@@ -973,7 +1062,9 @@ class NDMI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.nir_idx, self.swir1_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -998,6 +1089,10 @@ class NDSI(Operator):
     and ice while suppressing clouds, which are bright in both. NDSI >
     0.4 is the MODIS / Sentinel-2 default snow threshold. Shares the
     arithmetic form of MNDWI — same formula, different physics target.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         green: Optional named Green band.
@@ -1042,7 +1137,9 @@ class NDSI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.green_idx, self.swir_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1065,6 +1162,10 @@ class NBR2(Operator):
     Complements NBR by sharpening sensitivity to burned-area moisture
     differences in the SWIR window. Published by USGS alongside NBR as
     part of the Landsat Analysis-Ready burn-severity stack.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         swir1: Optional named SWIR-1 band.
@@ -1103,7 +1204,9 @@ class NBR2(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.swir1_idx, self.swir2_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1137,6 +1240,10 @@ class BAIS2(Operator):
     ``B02, B03, B04, B05, B06, B07, B08, B8A, B11, B12`` (10 bands,
     skipping the cirrus/aerosol bands). For different stacking
     conventions, pass explicit indices or named bands.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         red: Optional named Red band (B04).
@@ -1197,7 +1304,18 @@ class BAIS2(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt,
+            out,
+            axis=self.axis,
+            bands=(
+                self.red_idx,
+                self.red_edge1_idx,
+                self.red_edge2_idx,
+                self.nir_idx,
+                self.swir2_idx,
+            ),
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1230,6 +1348,10 @@ class dNBR(Operator):
     Typical thresholds (Key & Benson 2006): < 0.1 unburned, 0.27–0.44
     low severity, 0.44–0.66 moderate, > 0.66 high severity.
 
+    Nodata pixels (non-finite, or equal to that raster's
+    ``fill_value_default``, in either input) hold the pre-fire raster's
+    fill value in the output (``NaN`` for plain arrays).
+
     Examples:
         >>> from geotoolz.indices import NBR, dNBR
         >>> nbr_op = NBR(nir_idx=7, swir2_idx=11)
@@ -1248,7 +1370,9 @@ class dNBR(Operator):
     ) -> GeoTensor | np.ndarray:
         if not _grid_matches(pre, post):
             raise ValueError("dNBR inputs must share shape, transform, and CRS.")
-        return wrap_like(pre, np.asarray(pre) - np.asarray(post))
+        out = np.asarray(pre) - np.asarray(post)
+        valid = ~(invalid_values(pre) | invalid_values(post))
+        return wrap_like(pre, restore_fill(out, valid, carrier_fill_value(pre)))
 
 
 class BSI(Operator):
@@ -1267,6 +1391,10 @@ class BSI(Operator):
     zero over mixed vegetation/soil, negative over dense canopy. The
     Rikimaru variant is the most widely cited; other "BSI" variants
     in the literature exist — pick deliberately if comparing studies.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         blue: Optional named Blue band.
@@ -1323,7 +1451,12 @@ class BSI(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt,
+            out,
+            axis=self.axis,
+            bands=(self.blue_idx, self.red_idx, self.nir_idx, self.swir_idx),
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1348,6 +1481,10 @@ class IronOxide(Operator):
     and other Fe(III) oxides absorb strongly in the blue and reflect
     in the red, giving Red/Blue ratios well above unity over
     iron-oxide-rich soils, weathered surfaces, and lateritic crusts.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         red: Optional named Red band.
@@ -1391,7 +1528,7 @@ class IronOxide(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(gt, out, axis=self.axis, bands=(self.red_idx, self.blue_idx))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1415,6 +1552,10 @@ class ClayMinerals(Operator):
     SWIR-2 while SWIR-1 (~1.6 µm) lies in a relative reflectance
     high. Their SWIR1/SWIR2 ratio is therefore well above unity over
     clay-rich exposures and near unity elsewhere.
+
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
 
     Args:
         swir1: Optional named SWIR-1 band.
@@ -1460,7 +1601,9 @@ class ClayMinerals(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return wrap_like(gt, out)
+        return _wrap_index(
+            gt, out, axis=self.axis, bands=(self.swir1_idx, self.swir2_idx)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1489,6 +1632,10 @@ class CIRI(Operator):
     ordered by band number as
     ``B01, B02, B03, B04, B05, B06, B07, B08, B8A, B10, B11, B12``.
 
+    Nodata pixels (any band it reads non-finite or equal to the input's
+    ``fill_value_default``) hold that fill value in the output (``NaN``
+    for plain arrays).
+
     Args:
         cirrus: Optional named cirrus band (e.g. ``"B10"``).
         cirrus_idx: Integer cirrus band index. Default ``9``.
@@ -1512,7 +1659,7 @@ class CIRI(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = ciri(np.asarray(gt), _resolve_band(gt, self.cirrus_idx), axis=self.axis)
-        return wrap_like(gt, out)
+        return _wrap_index(gt, out, axis=self.axis, bands=(self.cirrus_idx,))
 
     def get_config(self) -> dict[str, Any]:
         return {"cirrus_idx": self.cirrus_idx, "axis": self.axis}
@@ -1526,6 +1673,9 @@ class AppendIndex(Operator):
     expands the result to ``(1, H, W)``, and concatenates it back onto
     the original carrier along the band axis — so the output has shape
     ``(C+1, H, W)`` with the index sitting as the last channel.
+
+    Nodata pixels come out of ``index_op`` holding the fill value; the
+    original bands are passed through unchanged.
 
     Useful when the index is a feature for a downstream model that
     expects a fixed multi-channel input.

@@ -14,11 +14,21 @@ Seeding semantics (shared by every operator here):
 - The generator state travels with ``copy`` / ``pickle``, so replicas of an
   already-seeded operator (e.g. dataloader workers) repeat each other's
   draws unless each is given its own ``seed``.
+
+Nodata semantics (see :mod:`geotoolz._src.valid`): radiometric operators
+never perturb fill pixels -- every pixel invalid under
+:func:`~geotoolz._src.valid.valid_pixels` (non-finite, or equal to the
+carrier's ``fill_value_default`` in any band) holds the output's fill value
+(``NaN`` for plain float arrays), and any statistic they compute (a band
+mean, a brightness percentile) is taken over valid pixels only. Nodata
+handling never consumes random draws, so a given seed yields the same draws
+with or without fill pixels.
 """
 
 from __future__ import annotations
 
 import inspect
+import warnings
 from collections.abc import Sequence
 from numbers import Real
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -37,6 +47,7 @@ from geotoolz._src.config import (
     mapping_to_pairs,
     nested_config,
 )
+from geotoolz._src.valid import carrier_fill_value, restore_fill, valid_pixels
 from geotoolz._src.wrap import adopt_attrs, wrap_like
 
 
@@ -167,9 +178,34 @@ def _cast_like(
     return out.astype(dtype, copy=False)
 
 
-def _wrap_like(gt: GeoTensor | np.ndarray, out: np.ndarray) -> GeoTensor | np.ndarray:
-    """Cast ``out`` back to the input dtype and rewrap it like ``gt``."""
-    return wrap_like(gt, _cast_like(out, np.asarray(gt).dtype))
+def _valid(arr: Shaped[np.ndarray, "*dims"], gt: Any) -> np.ndarray | None:
+    """Spatial validity mask of ``gt`` (``None`` when every pixel is valid).
+
+    ``None`` flags the fast path: operators then run exactly the math they
+    always did. Inputs with fewer than two dims have no pixel grid and are
+    treated as all-valid.
+    """
+    if arr.ndim < 2:
+        return None
+    valid = valid_pixels(gt)
+    return None if valid.all() else valid
+
+
+def _wrap_like(
+    gt: GeoTensor | np.ndarray,
+    out: np.ndarray,
+    valid: np.ndarray | None = None,
+) -> GeoTensor | np.ndarray:
+    """Cast ``out`` back to the input dtype and rewrap it like ``gt``.
+
+    When ``valid`` is given, invalid pixels are reset to the output's fill
+    value -- the fill ``wrap_like`` inherits from ``gt`` (``NaN`` for a plain
+    float array) -- after the cast, so the fill survives clipping/rounding.
+    """
+    out = _cast_like(out, np.asarray(gt).dtype)
+    if valid is not None:
+        out = restore_fill(out, valid, carrier_fill_value(gt))
+    return wrap_like(gt, out)
 
 
 def _new_geotensor(
@@ -496,6 +532,9 @@ class BrightnessJitter(Operator):
     ``np.ndarray`` and returns the same carrier kind, cast back to the
     input dtype.
 
+    Nodata: fill / non-finite pixels are left untouched and hold the
+    output's fill value (see the module docstring).
+
     Args:
         factor: ``(lo, hi)`` range the multiplicative factor is drawn
             from. Default ``(0.9, 1.1)``.
@@ -527,7 +566,9 @@ class BrightnessJitter(Operator):
             factors = factors.reshape(_band_shape(arr))
         else:
             factors = _sample_uniform(rng, self.factor, "factor")
-        return _wrap_like(gt, arr.astype(np.float64, copy=False) * factors)
+        return _wrap_like(
+            gt, arr.astype(np.float64, copy=False) * factors, _valid(arr, gt)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -543,6 +584,10 @@ class ContrastJitter(Operator):
     Pure per-pixel math: accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` and returns the same carrier kind, cast back to the
     input dtype.
+
+    Nodata: the per-band mean is taken over valid pixels only, and fill /
+    non-finite pixels hold the output's fill value (see the module
+    docstring).
 
     Args:
         factor: ``(lo, hi)`` range the contrast factor is drawn from.
@@ -571,13 +616,21 @@ class ContrastJitter(Operator):
         rng = _call_rng(self, seed)
         arr = np.asarray(gt)
         data = arr.astype(np.float64, copy=False)
-        mean = np.mean(data, axis=(-2, -1), keepdims=True)
+        valid = _valid(arr, gt)
+        if valid is None:
+            mean = np.mean(data, axis=(-2, -1), keepdims=True)
+        else:
+            masked = np.where(valid, data, np.nan)
+            with warnings.catch_warnings():
+                # An all-nodata band has no mean; its pixels are all refilled.
+                warnings.simplefilter("ignore", RuntimeWarning)
+                mean = np.nanmean(masked, axis=(-2, -1), keepdims=True)
         if self.per_band:
             factors = rng.uniform(self.factor[0], self.factor[1], _band_count(arr))
             factors = factors.reshape(_band_shape(arr))
         else:
             factors = _sample_uniform(rng, self.factor, "factor")
-        return _wrap_like(gt, (data - mean) * factors + mean)
+        return _wrap_like(gt, (data - mean) * factors + mean, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -593,6 +646,9 @@ class GaussianNoise(Operator):
     Pure per-pixel math: accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` and returns the same carrier kind, cast back to the
     input dtype.
+
+    Nodata: fill / non-finite pixels are left untouched and hold the
+    output's fill value (see the module docstring).
 
     Args:
         sigma: Noise standard deviation, either a scalar or a
@@ -630,7 +686,9 @@ class GaussianNoise(Operator):
         else:
             sigmas = _sample_nonnegative(rng, self.sigma, "sigma")
         noise = rng.normal(0.0, sigmas, size=arr.shape)
-        return _wrap_like(gt, arr.astype(np.float64, copy=False) + noise)
+        return _wrap_like(
+            gt, arr.astype(np.float64, copy=False) + noise, _valid(arr, gt)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -646,6 +704,9 @@ class SpeckleNoise(Operator):
     Pure per-pixel math: accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` and returns the same carrier kind, cast back to the
     input dtype.
+
+    Nodata: fill / non-finite pixels are left untouched and hold the
+    output's fill value (see the module docstring).
 
     Args:
         sigma: Speckle standard deviation, either a scalar or a
@@ -667,7 +728,9 @@ class SpeckleNoise(Operator):
         sigma = _sample_nonnegative(rng, self.sigma, "sigma")
         arr = np.asarray(gt)
         noise = rng.normal(0.0, sigma, size=arr.shape)
-        return _wrap_like(gt, arr.astype(np.float64, copy=False) * (1.0 + noise))
+        return _wrap_like(
+            gt, arr.astype(np.float64, copy=False) * (1.0 + noise), _valid(arr, gt)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"sigma": jsonable(self.sigma), "seed": self.seed}
@@ -679,6 +742,9 @@ class BandDropout(Operator):
     Pure per-band math: accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` and returns the same carrier kind. A 2-D input is
     treated as a single band.
+
+    Nodata: pixels that were fill / non-finite on input keep the output's
+    fill value rather than ``fill`` (see the module docstring).
 
     Args:
         p: Per-band dropout probability. Default ``0.1``.
@@ -704,11 +770,11 @@ class BandDropout(Operator):
         if arr.ndim < 3:
             if rng.random() < self.p:
                 out[...] = self.fill
-            return _wrap_like(gt, out)
+            return _wrap_like(gt, out, _valid(arr, gt))
 
         mask = rng.random(arr.shape[0]) < self.p
         out[mask, ...] = self.fill
-        return _wrap_like(gt, out)
+        return _wrap_like(gt, out, _valid(arr, gt))
 
 
 class BandJitter(Operator):
@@ -786,6 +852,9 @@ class SunAngleJitter(Operator):
     plain ``np.ndarray`` input (or a GeoTensor without those attrs)
     raises ``ValueError``.
 
+    Nodata: fill / non-finite pixels are left untouched and hold the
+    output's fill value (see the module docstring).
+
     Args:
         delta_sza_deg: Solar-zenith perturbation in degrees, either a
             scalar or a ``(lo, hi)`` range to sample from. Default
@@ -819,7 +888,10 @@ class SunAngleJitter(Operator):
                 f"solar zenith angle ({base_sza:.2f} deg) is too close to 90 degrees."
             )
         scale = np.cos(np.deg2rad(base_sza + delta)) / denom
-        return _wrap_like(gt, np.asarray(gt).astype(np.float64, copy=False) * scale)
+        arr = np.asarray(gt)
+        return _wrap_like(
+            gt, arr.astype(np.float64, copy=False) * scale, _valid(arr, gt)
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"delta_sza_deg": jsonable(self.delta_sza_deg), "seed": self.seed}
@@ -833,6 +905,9 @@ class AtmosphericHaze(Operator):
     Accepts a ``GeoTensor`` or a plain ``np.ndarray``; when the carrier
     has no wavelength attrs (``wavelengths_nm`` / ``wavelengths``), a
     default 450-850 nm linspace is assumed.
+
+    Nodata: fill / non-finite pixels are left untouched and hold the
+    output's fill value (see the module docstring).
 
     Args:
         intensity: Haze amplitude added to the shortest wavelength,
@@ -858,7 +933,11 @@ class AtmosphericHaze(Operator):
 
         arr = np.asarray(gt)
         weights = _spectral_weights(gt, _band_count(arr)).reshape(_band_shape(arr))
-        return _wrap_like(gt, arr.astype(np.float64, copy=False) + intensity * weights)
+        return _wrap_like(
+            gt,
+            arr.astype(np.float64, copy=False) + intensity * weights,
+            _valid(arr, gt),
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"intensity": jsonable(self.intensity), "seed": self.seed}
@@ -889,6 +968,10 @@ class SimulatedClouds(Operator):
     Pure per-pixel math: accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` and returns the same carrier kind, cast back to the
     input dtype.
+
+    Nodata: the cloud brightness (max / percentile of the scene) is taken
+    over valid pixels only, and fill / non-finite pixels hold the output's
+    fill value (see the module docstring).
 
     Args:
         coverage: Fraction of pixels covered by cloud, either a scalar
@@ -933,14 +1016,16 @@ class SimulatedClouds(Operator):
             1,
         )
         alpha = alpha.reshape((1,) * (arr.ndim - 2) + alpha.shape)
+        valid = _valid(arr, gt)
+        scene = arr if valid is None else arr[..., valid]
         # Assume [0, 1] reflectance if max <= 1; otherwise approximate bright clouds.
         cloud_value = (
             1.0
-            if np.nanmax(arr) <= 1.0
-            else np.nanpercentile(arr, BRIGHT_CLOUD_PERCENTILE)
+            if scene.size == 0 or np.nanmax(scene) <= 1.0
+            else np.nanpercentile(scene, BRIGHT_CLOUD_PERCENTILE)
         )
         out = arr.astype(np.float64, copy=False) * (1.0 - alpha) + cloud_value * alpha
-        return _wrap_like(gt, out)
+        return _wrap_like(gt, out, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -963,6 +1048,10 @@ class CutMix(Operator):
     the rectangle paste is pixel-space math, and the CRS / resolution
     checks apply only when both the input and the drawn donor expose
     that metadata.
+
+    Nodata: donor pixels that are fill / non-finite under the *donor's*
+    fill value are written as the input's fill value, so a pasted hole
+    stays a hole for the output carrier.
 
     ``forbid_in_yaml`` is set because ``pool`` holds live ``GeoTensor``
     objects that cannot be round-tripped through YAML. ``get_config`` emits
@@ -1026,10 +1115,16 @@ class CutMix(Operator):
         left = int(rng.integers(0, width - cut_w + 1))
 
         out = np.array(arr, copy=True)
-        out[..., top : top + cut_h, left : left + cut_w] = donor_arr[
-            ..., top : top + cut_h, left : left + cut_w
-        ]
-        return _wrap_like(gt, out)
+        region = (slice(top, top + cut_h), slice(left, left + cut_w))
+        out[..., region[0], region[1]] = donor_arr[..., region[0], region[1]]
+        donor_valid = _valid(donor_arr, donor)
+        valid = None
+        if donor_valid is not None:
+            # Input pixels outside the rectangle keep their own values
+            # (fills included); only donor holes need the input's fill.
+            valid = np.ones(arr.shape[-2:], dtype=bool)
+            valid[region] = donor_valid[region]
+        return _wrap_like(gt, out, valid)
 
     def get_config(self) -> dict[str, Any]:
         # Debug payload: the pool holds runtime rasters (forbid_in_yaml).

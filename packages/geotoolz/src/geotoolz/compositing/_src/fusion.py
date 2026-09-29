@@ -20,6 +20,7 @@ equality and the output is a plain array.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
@@ -28,6 +29,12 @@ from jaxtyping import Shaped
 from pipekit import Operator
 
 from geotoolz._src.bands import concat_band_attrs, strip_band_attrs
+from geotoolz._src.valid import (
+    carrier_fill_value,
+    is_fill,
+    restore_fill,
+    valid_pixels,
+)
 from geotoolz._src.wrap import wrap_like
 
 
@@ -105,6 +112,31 @@ def _as_band_first(
     )
 
 
+def _translate_fills(
+    stacked: Shaped[np.ndarray, "c h w"],
+    seq: Sequence[GeoTensor | np.ndarray],
+    arrays: Sequence[np.ndarray],
+    out_fill: object,
+) -> Shaped[np.ndarray, "c h w"]:
+    """Rewrite each input's nodata pixels to the output fill, in its own bands.
+
+    The output inherits the first input's ``fill_value_default``; an input
+    with a different fill would otherwise leave nodata that the output's
+    fill no longer marks. When the output fill cannot be represented in
+    the concatenated dtype, the input's values are left untouched.
+    """
+    offset = 0
+    for tensor, arr in zip(seq, arrays, strict=True):
+        n = arr.shape[0]
+        valid = valid_pixels(tensor)
+        block = stacked[offset : offset + n]
+        if not valid.all() and not is_fill(block[:, ~valid], out_fill).all():
+            with contextlib.suppress(ValueError):
+                stacked[offset : offset + n] = restore_fill(block, valid, out_fill)
+        offset += n
+    return stacked
+
+
 class StackMatched(Operator):
     """Concatenate aligned tensors along the band axis.
 
@@ -139,7 +171,10 @@ class StackMatched(Operator):
         a future revision; today the operator requires strict grid
         equality. Pre-coregister with
         ``geotoolz.geom.coregister.RasterToRasterLike`` if the
-        inputs aren't already on the same grid.
+        inputs aren't already on the same grid. Nodata pixels of each
+        input (non-finite or that input's fill) are rewritten to the
+        output's fill (the first input's ``fill_value_default``) in that
+        input's bands, when the output dtype can represent it.
     """
 
     def __init__(
@@ -175,6 +210,7 @@ class StackMatched(Operator):
 
         arrays = [_as_band_first(np.asarray(t)) for t in seq]
         stacked = np.concatenate(arrays, axis=0)
+        stacked = _translate_fills(stacked, seq, arrays, carrier_fill_value(base))
         attrs = strip_band_attrs(getattr(base, "attrs", None))
         attrs.update(
             concat_band_attrs(
@@ -206,6 +242,11 @@ class BlendMatched(Operator):
       surviving weights renormalise. If every input is NaN at a pixel,
       the output is NaN.
     * ``"propagate"`` — any NaN at a pixel poisons the output pixel.
+
+    Nodata pixels of each input (non-finite, or that input's
+    ``fill_value_default``, in any band) are treated as NaN; pixels that
+    are nodata in every input hold the output fill (the first input's
+    ``fill_value_default``; NaN when it has none).
 
     All inputs must share spatial shape, transform, and CRS. The
     band axis must also be uniform (use `StackMatched` if you want
@@ -296,8 +337,14 @@ class BlendMatched(Operator):
                 )
 
         # Stack along a new "source" axis at position 0. Shape is now
-        # (N, ...spatial...) for 2-D or (N, C, H, W) for 3-D.
+        # (N, ...spatial...) for 2-D or (N, C, H, W) for 3-D. Each input's
+        # nodata pixels (non-finite or its own fill) become NaN in every
+        # band, so the NaN policy below excludes / propagates them.
         stack = np.stack([np.asarray(t).astype(np.float64) for t in seq], axis=0)
+        source_valid = np.stack([valid_pixels(t) for t in seq], axis=0)
+        if not source_valid.all():
+            per_source = source_valid[:, None] if stack.ndim == 4 else source_valid
+            stack[~np.broadcast_to(per_source, stack.shape)] = np.nan
 
         # Build the per-source weight broadcastable to `stack`.
         if self.method == "ivw":
@@ -378,4 +425,7 @@ class BlendMatched(Operator):
             with np.errstate(invalid="ignore", divide="ignore"):
                 result = np.where(den > 0, num / den, np.nan)
 
+        result = restore_fill(
+            result, source_valid.any(axis=0), carrier_fill_value(base)
+        )
         return wrap_like(base, result)

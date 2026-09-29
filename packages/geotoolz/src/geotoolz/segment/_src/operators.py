@@ -1,4 +1,13 @@
-"""Carrier-aware wrappers around :mod:`skimage.segmentation` primitives."""
+"""Carrier-aware wrappers around :mod:`skimage.segmentation` primitives.
+
+The image segmenters (SLIC, Felzenszwalb, Quickshift, Watershed, ChanVese,
+RandomWalker) judge nodata with :func:`geotoolz._src.valid.valid_pixels`
+-- a pixel is invalid when any band is non-finite or equals the carrier's
+``fill_value_default``. Invalid pixels are median-filled (from valid pixels
+only) before the skimage call, kept out of it where the algorithm takes a
+mask, and always carry the "no segment" label ``0`` in the output (whose
+``fill_value_default`` is ``0``).
+"""
 
 from __future__ import annotations
 
@@ -27,6 +36,7 @@ from geotoolz._src.config import (
     reject_config_summary,
 )
 from geotoolz._src.shape import single_band
+from geotoolz._src.valid import valid_pixels
 from geotoolz._src.wrap import wrap_like
 
 
@@ -56,23 +66,22 @@ def _array_summary(value: Any) -> dict[str, Any] | None:
     return {"shape": list(arr.shape), "dtype": str(arr.dtype)}
 
 
-def _finite_mask(
-    image: Num[np.ndarray, "h w"] | Num[np.ndarray, "c h w"],
-) -> Bool[np.ndarray, "h w"]:
-    if image.ndim == 2:
-        return np.isfinite(image)
-    return np.all(np.isfinite(image), axis=0)
+def _fill_invalid(
+    image: Num[np.ndarray, "*dims"], valid: Bool[np.ndarray, "h w"]
+) -> Float[np.ndarray, "*dims"]:
+    """Float copy of ``image`` with every invalid pixel set to the valid median.
 
-
-def _fill_nan(image: Num[np.ndarray, "*dims"]) -> Float[np.ndarray, "*dims"]:
+    The fill statistic is the median over valid pixels only, so neither a
+    ``fill_value_default`` sentinel nor ``+/-inf`` can leak into it.
+    """
     arr = np.asarray(image, dtype=float)
-    finite = np.isfinite(arr)
-    if finite.all():
+    if valid.all():
         return arr
-    # Compute fill statistic from finite values only so +/-inf cannot leak
-    # into the result via ``np.nanmedian`` (which ignores NaN but not inf).
-    fill = float(np.median(arr[finite])) if finite.any() else 0.0
-    return np.nan_to_num(arr, nan=fill, posinf=fill, neginf=fill)
+    invalid = np.broadcast_to(~valid, arr.shape)
+    fill = float(np.median(arr[~invalid])) if valid.any() else 0.0
+    arr = arr.copy()
+    arr[invalid] = fill
+    return arr
 
 
 def _labels(
@@ -89,8 +98,9 @@ def _labels(
 class SLIC(Operator):
     """SLIC superpixels via :func:`skimage.segmentation.slic`.
 
-    Non-finite pixels are median-filled before clustering and forced to
-    label ``0`` in the output. Accepts a ``GeoTensor`` or a plain
+    Nodata pixels (non-finite or ``fill_value_default`` in any band) are
+    median-filled, excluded from clustering and forced to label ``0`` in
+    the output. Accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
     the same carrier kind.
 
@@ -127,8 +137,8 @@ class SLIC(Operator):
         self.mask = reject_config_summary(mask, "mask")
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
-        image = _fill_nan(np.asarray(gt))
-        valid = _finite_mask(np.asarray(gt))
+        valid = valid_pixels(gt)
+        image = _fill_invalid(np.asarray(gt), valid)
         mask = _as_mask(self.mask, gt.shape[-2:], name="SLIC mask")
         if mask is not None:
             valid &= mask
@@ -159,8 +169,9 @@ class SLIC(Operator):
 class Felzenszwalb(Operator):
     """Graph-based segmentation via :func:`skimage.segmentation.felzenszwalb`.
 
-    Non-finite pixels are median-filled before segmentation and forced
-    to label ``0`` in the output; valid segments are labelled from ``1``.
+    Nodata pixels (non-finite or ``fill_value_default`` in any band) are
+    median-filled before segmentation and forced to label ``0`` in the
+    output; valid segments are labelled from ``1``.
     Accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
     the same carrier kind.
@@ -194,12 +205,13 @@ class Felzenszwalb(Operator):
         self.mask = reject_config_summary(mask, "mask")
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
-        valid = _finite_mask(np.asarray(gt))
+        valid = valid_pixels(gt)
+        image = _fill_invalid(np.asarray(gt), valid)
         mask = _as_mask(self.mask, gt.shape[-2:], name="Felzenszwalb mask")
         if mask is not None:
             valid &= mask
         labels = felzenszwalb(
-            _fill_nan(np.asarray(gt)),
+            image,
             scale=self.scale,
             sigma=self.sigma,
             min_size=self.min_size,
@@ -222,8 +234,9 @@ class Felzenszwalb(Operator):
 class Quickshift(Operator):
     """Mode-seeking superpixels via :func:`skimage.segmentation.quickshift`.
 
-    Non-finite pixels are median-filled before segmentation and forced
-    to label ``0`` in the output; valid segments are labelled from ``1``.
+    Nodata pixels (non-finite or ``fill_value_default`` in any band) are
+    median-filled before segmentation and forced to label ``0`` in the
+    output; valid segments are labelled from ``1``.
     Accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
     the same carrier kind.
@@ -270,12 +283,13 @@ class Quickshift(Operator):
         self.mask = reject_config_summary(mask, "mask")
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
-        valid = _finite_mask(np.asarray(gt))
+        valid = valid_pixels(gt)
+        image = _fill_invalid(np.asarray(gt), valid)
         mask = _as_mask(self.mask, gt.shape[-2:], name="Quickshift mask")
         if mask is not None:
             valid &= mask
         labels = quickshift(
-            _fill_nan(np.asarray(gt)),
+            image,
             kernel_size=self.kernel_size,
             max_dist=self.max_dist,
             ratio=self.ratio,
@@ -302,10 +316,11 @@ class Quickshift(Operator):
 class Watershed(Operator):
     """Watershed segmentation via :func:`skimage.segmentation.watershed`.
 
-    Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Non-finite
-    pixels are median-filled before flooding and forced to label ``0``
-    in the output. Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and
-    returns an ``int32`` label map in the same carrier kind.
+    Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Nodata pixels
+    (non-finite or ``fill_value_default``) are median-filled, masked out of
+    the flooding and forced to label ``0`` in the output. Accepts a
+    ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32`` label
+    map in the same carrier kind.
 
     Args:
         markers: Optional single-band integer marker array seeding the
@@ -336,8 +351,8 @@ class Watershed(Operator):
         self.mask = reject_config_summary(mask, "mask")
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
-        image = single_band(_fill_nan(np.asarray(gt)), name="Watershed")
-        valid = np.isfinite(single_band(np.asarray(gt), name="Watershed"))
+        valid = valid_pixels(gt)
+        image = single_band(_fill_invalid(np.asarray(gt), valid), name="Watershed")
         mask = _as_mask(self.mask, gt.shape[-2:], name="Watershed mask")
         if mask is not None:
             valid &= mask
@@ -369,11 +384,11 @@ class Watershed(Operator):
 class ChanVese(Operator):
     """Active-contour segmentation via :func:`skimage.segmentation.chan_vese`.
 
-    Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Non-finite
-    pixels are median-filled before evolution and forced to label ``0``
-    in the output. Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and
-    returns an ``int32`` label map (0 = outside, 1 = inside) in the same
-    carrier kind.
+    Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Nodata pixels
+    (non-finite or ``fill_value_default``) are median-filled before
+    evolution and forced to label ``0`` in the output. Accepts a
+    ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32`` label
+    map (0 = outside, 1 = inside) in the same carrier kind.
 
     Args:
         mu: Edge-length penalty weight; higher values give smoother
@@ -400,10 +415,9 @@ class ChanVese(Operator):
         self.max_num_iter = max_num_iter
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
-        band = single_band(np.asarray(gt), name="ChanVese")
-        valid = np.isfinite(band)
+        valid = valid_pixels(gt)
         labels = chan_vese(
-            single_band(_fill_nan(np.asarray(gt)), name="ChanVese"),
+            single_band(_fill_invalid(np.asarray(gt), valid), name="ChanVese"),
             mu=self.mu,
             lambda1=self.lambda1,
             lambda2=self.lambda2,
@@ -416,8 +430,10 @@ class ChanVese(Operator):
 class RandomWalker(Operator):
     """Seeded segmentation via :func:`skimage.segmentation.random_walker`.
 
-    Expects a single-band ``(H, W)`` or ``(1, H, W)`` image; non-finite
-    pixels are median-filled before diffusion. Accepts a ``GeoTensor``
+    Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Nodata pixels
+    (non-finite or ``fill_value_default``) are median-filled, marked
+    inactive (removed from the diffusion graph) and labelled ``0`` in the
+    output. Accepts a ``GeoTensor``
     or a plain ``np.ndarray`` and returns an ``int32`` label map in the
     same carrier kind.
 
@@ -447,16 +463,21 @@ class RandomWalker(Operator):
         self.tol = tol
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+        valid = valid_pixels(gt)
+        markers = single_band(self.markers, name="RandomWalker markers").astype(
+            np.int32, copy=True
+        )
+        # Negative markers are inactive in skimage: nodata pixels are removed
+        # from the diffusion graph so no label can spread through them.
+        markers[~valid] = -1
         labels = random_walker(
-            single_band(_fill_nan(np.asarray(gt)), name="RandomWalker"),
-            single_band(self.markers, name="RandomWalker markers").astype(
-                np.int32, copy=False
-            ),
+            single_band(_fill_invalid(np.asarray(gt), valid), name="RandomWalker"),
+            markers,
             beta=self.beta,
             mode=self.mode,
             tol=self.tol,
         )
-        return _labels(gt, labels)
+        return _labels(gt, labels, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {

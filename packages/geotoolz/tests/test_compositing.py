@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import pytest
@@ -297,3 +299,119 @@ def test_compositing_get_config_is_json_safe() -> None:
     ]
     for op in ops:
         json.dumps(op.get_config())
+
+
+# ---------------------------------------------------------------------------
+# #145: nodata (fill_value_default) frame-pixels are excluded
+# ---------------------------------------------------------------------------
+
+_FILL = -9999.0
+
+
+def _fill_frames() -> list[GeoTensor]:
+    """Three ``(2, 1, 3)`` frames with a ``-9999`` fill.
+
+    Pixel 0 is valid everywhere, pixel 1 is nodata in frame 0 only, and
+    pixel 2 is nodata in every frame. Band 0 reproduces the #145 median
+    example ``[1, -9999], [3, 5], [5, 7] -> [3, 6]``; read as (red, NIR)
+    the valid frames at pixel 1 have *negative* NDVI, which the fill
+    frame's NDVI of 0 used to beat.
+    """
+    band0 = [[1.0, _FILL, _FILL], [3.0, 5.0, _FILL], [5.0, 7.0, _FILL]]
+    band1 = [[2.0, _FILL, _FILL], [1.0, 1.0, _FILL], [2.0, 2.0, _FILL]]
+    return [
+        toy_geotensor(
+            np.array([[b0], [b1]], dtype=np.float32), fill_value_default=_FILL
+        )
+        for b0, b1 in zip(band0, band1, strict=True)
+    ]
+
+
+def _assert_composite(out: Any, pixel0: list[float], pixel1: list[float]) -> None:
+    """Valid pixels match the fill-free reduction; all-nodata pixel is fill."""
+    arr = np.asarray(out)
+    np.testing.assert_allclose(arr[:, 0, :2], np.array([pixel0, pixel1]).T)
+    assert (arr[:, 0, 2] == _FILL).all()
+    assert out.fill_value_default == _FILL
+
+
+def _case_median() -> None:
+    out, count = MedianComposite(return_count=True)(_fill_frames())
+    _assert_composite(out, [3.0, 2.0], [6.0, 1.5])
+    np.testing.assert_array_equal(np.asarray(count)[:, 0], [[3, 2, 0], [3, 2, 0]])
+
+
+def _case_max_ndvi() -> None:
+    out, index = MaxNDVIComposite(red=0, nir=1, return_index=True)(_fill_frames())
+    # Pixel 1: frame 2 (NDVI -0.56) beats frame 1 (-0.67); the fill
+    # frame's NDVI of 0 must not win.
+    assert np.asarray(index)[0, 1] == 2
+    _assert_composite(out, [1.0, 2.0], [7.0, 2.0])
+
+
+def _case_cloud_free() -> None:
+    clear = np.zeros((1, 3), dtype=bool)
+    out, count = CloudFreeComposite(return_count=True)(
+        [(frame, clear) for frame in _fill_frames()]
+    )
+    _assert_composite(out, [3.0, 5.0 / 3.0], [6.0, 1.5])
+    np.testing.assert_array_equal(np.asarray(count)[:, 0], [[3, 2, 0], [3, 2, 0]])
+
+
+def _case_bap() -> None:
+    frames = _fill_frames()
+    # A NaN band also makes a frame-pixel nodata: frame 0 has the best
+    # score, but its pixel 0 is unusable, so frame 1 must win there.
+    values0 = np.asarray(frames[0]).copy()
+    values0[1, 0, 0] = np.nan
+    frames[0] = toy_geotensor(values0, fill_value_default=_FILL)
+    metadata = [{"view_angle": 0.0}, {"view_angle": 1.0}, {"view_angle": 2.0}]
+    out, score = BAPComposite(target_doy=196, return_score=True)(
+        list(zip(frames, metadata, strict=True))
+    )
+    _assert_composite(out, [3.0, 1.0], [5.0, 1.0])
+    assert np.asarray(score)[0, 2] == _FILL
+
+
+def _case_min_cloud() -> None:
+    clear = np.zeros((1, 3), dtype=bool)
+    cloudy = np.array([[True, False, False]])
+    out = MinCloudComposite()(
+        list(zip(_fill_frames(), [clear, cloudy, clear], strict=True))
+    )
+    # Pixel 1: frame 0 is nodata -> least-cloudy valid clear frame (2).
+    _assert_composite(out, [1.0, 2.0], [7.0, 2.0])
+
+
+def _case_blend_matched() -> None:
+    out = gz.compositing.BlendMatched()(_fill_frames())
+    _assert_composite(out, [3.0, 5.0 / 3.0], [6.0, 1.5])
+
+
+def _case_stack_matched() -> None:
+    other = toy_geotensor(
+        np.array([[[4.0, 0.0, 6.0]]], dtype=np.float32), fill_value_default=0.0
+    )
+    out = gz.compositing.StackMatched()([_fill_frames()[0], other])
+    # The second input's nodata (its own fill, 0) is rewritten to the
+    # output's fill so it stays marked as nodata.
+    np.testing.assert_array_equal(np.asarray(out)[2, 0], [4.0, _FILL, 6.0])
+    assert out.fill_value_default == _FILL
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        _case_median,
+        _case_max_ndvi,
+        _case_cloud_free,
+        _case_bap,
+        _case_min_cloud,
+        _case_blend_matched,
+        _case_stack_matched,
+    ],
+    ids=lambda case: case.__name__.removeprefix("_case_"),
+)
+def test_fill_pixels_are_excluded(case: Callable[[], None]) -> None:
+    """#145: a frame's nodata never enters a composite; all-nodata -> fill."""
+    case()

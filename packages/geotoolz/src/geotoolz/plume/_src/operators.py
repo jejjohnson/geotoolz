@@ -19,10 +19,16 @@ cited in :mod:`geotoolz.plume._src.array`:
 
 The IME and cross-section operators expect the enhancement carrier to be
 in kg/m^2. Use :class:`ColumnToMass` to convert from ppm m or mol/m^2.
+
+Nodata: pixels that are non-finite or equal the carrier's
+``fill_value_default`` (see :mod:`geotoolz._src.valid`) never enter a
+threshold, statistic or sum, are never part of a plume mask or
+contour, and hold the input's fill value in per-pixel raster outputs.
 """
 
 from __future__ import annotations
 
+import numbers
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -40,6 +46,13 @@ from geotoolz._src.config import (
     as_tuple,
     callable_name,
     reject_config_summary,
+)
+from geotoolz._src.valid import (
+    carrier_fill_value,
+    invalid_values,
+    mask_invalid_to_nan,
+    restore_fill,
+    valid_pixels,
 )
 from geotoolz._src.wrap import wrap_like
 from geotoolz.plume._src.array import (
@@ -104,6 +117,11 @@ def _band_index(band: int | str) -> int:
 
 def _extract_and_clip_band(arr: np.ndarray, band: int | str, axis: int) -> np.ndarray:
     return np.maximum(np.take(arr, _band_index(band), axis=axis), 0.0)
+
+
+def _single_band_nan(x: GeoTensor | np.ndarray) -> np.ndarray:
+    """Single-band ``(H, W)`` float map of ``x`` with nodata pixels set to NaN."""
+    return squeeze_single_band(mask_invalid_to_nan(x))
 
 
 def require_projected_crs(gt: GeoTensor, op_name: str) -> None:
@@ -177,7 +195,10 @@ class SBMP(Operator):
 
     Inputs are radiance or reflectance arrays with band axis ``axis``;
     negative values are clipped to zero before the log to keep the
-    operator finite over noisy radiances. The output is single-band.
+    operator finite over noisy radiances. The output is single-band;
+    nodata pixels (non-finite or equal to the fill value in any band of
+    the input or the reference scene) hold the input's fill value
+    (``NaN`` for plain arrays).
 
     Args:
         swir1: Index or Sentinel-2 band name of the SWIR-1 channel.
@@ -225,6 +246,10 @@ class SBMP(Operator):
             out = ratio - ref_ratio
         else:
             out = (swir1 - swir2) / (swir1 + swir2 + self.eps)
+        invalid = invalid_values(gt).any(axis=self.axis)
+        if self.reference_scene is not None:
+            invalid = invalid | invalid_values(self.reference_scene).any(axis=self.axis)
+        out = restore_fill(out, ~invalid, carrier_fill_value(gt))
         return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
@@ -257,6 +282,10 @@ class PlumeMask(Operator):
         min_area: Minimum component size in pixels.
         connectivity: 4 or 8 connectivity for component labelling.
 
+    Nodata pixels (non-finite or equal to the input's fill value) are
+    excluded from the Otsu / percentile threshold and are always
+    ``False`` in the mask.
+
     Examples:
         >>> mask = gz.plume.PlumeMask(
         ...     threshold="percentile:99.5", min_area=50,
@@ -276,7 +305,7 @@ class PlumeMask(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask = plume_mask(
-            np.asarray(gt),
+            _single_band_nan(gt),
             threshold=self.threshold,
             min_area=self.min_area,
             connectivity=self.connectivity,
@@ -290,6 +319,14 @@ class PlumeContours(Operator):
     Returns either an int32 label image (default) or a boolean mask of
     the retained components. Component size threshold and connectivity
     follow :func:`label_components`.
+
+    Nodata pixels (non-finite -- e.g. a ``NaN`` score -- or equal to the
+    input's fill value) are never part of a contour. In the boolean
+    output they are ``False``. In the label image they hold the input's
+    fill value when it is a non-positive int32 value (e.g. ``-9999``, so
+    it cannot collide with a label); otherwise (``NaN``, no fill, or a
+    positive fill) they are ``0`` (background), and a GeoTensor output
+    then carries ``fill_value_default=0``.
 
     Examples:
         >>> labels = gz.plume.PlumeContours(min_area=50)(mask)
@@ -307,13 +344,24 @@ class PlumeContours(Operator):
         self.connectivity = connectivity
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        valid = valid_pixels(gt)
         labels = label_components(
-            squeeze_single_band(np.asarray(gt)).astype(bool),
+            squeeze_single_band(np.asarray(gt)).astype(bool) & valid,
             min_area=self.min_area,
             connectivity=self.connectivity,
         )
-        out = labels if self.return_labels else labels > 0
-        return wrap_like(gt, out)
+        if not self.return_labels:
+            return wrap_like(gt, labels > 0)
+        if valid.all():
+            return wrap_like(gt, labels)
+        fill = carrier_fill_value(gt)
+        # A positive fill would collide with a component label.
+        if isinstance(fill, numbers.Real) and fill <= 0:
+            try:
+                return wrap_like(gt, restore_fill(labels, valid, fill))
+            except ValueError:  # not an int32 value (NaN, -0.5, ...)
+                pass
+        return wrap_like(gt, labels, fill_value_default=0)
 
 
 class PlumeFootprint(Operator):
@@ -326,6 +374,10 @@ class PlumeFootprint(Operator):
     supplied), ``n_pixels``, ``label_id``, and skimage region properties such as
     ``major_axis_length``, ``orientation``, ``eccentricity``, ``solidity``,
     ``perimeter``, ``bbox-*``, and ``inertia_tensor_eigvals-*``.
+
+    Nodata pixels of a boolean mask never form a polygon, non-positive
+    labels are background, and nodata ``enhancement`` pixels are ignored
+    by the per-polygon statistics.
 
     Geo-dependent: polygonisation needs the carrier's transform and CRS,
     so the input must be a georeferenced ``GeoTensor`` (plain arrays
@@ -383,14 +435,16 @@ class PlumeFootprint(Operator):
         require_projected_crs(gt, "PlumeFootprint")
         mask_arr = squeeze_single_band(np.asarray(gt))
         if mask_arr.dtype == bool:
-            labels = label_components(mask_arr, min_area=1, connectivity=8)
+            labels = label_components(
+                mask_arr & squeeze_single_band(valid_pixels(gt)),
+                min_area=1,
+                connectivity=8,
+            )
         else:
-            labels = mask_arr.astype(np.int32, copy=False)
-        enh = (
-            None
-            if self.enhancement is None
-            else squeeze_single_band(np.asarray(self.enhancement))
-        )
+            # Non-positive labels (background, or a label image's fill
+            # value such as -9999) are not plumes.
+            labels = np.where(mask_arr > 0, mask_arr, 0).astype(np.int32, copy=False)
+        enh = None if self.enhancement is None else _single_band_nan(self.enhancement)
         properties = list(self.properties)
         if enh is not None:
             properties.extend(
@@ -638,7 +692,8 @@ class IMEEstimate(Operator):
 
     The ``enhancement`` carrier MUST be in kg/m^2. Use
     :class:`ColumnToMass` upstream to convert from ppm m or mol/m^2:
-    passing other units silently produces nonsense.
+    passing other units silently produces nonsense. Nodata enhancement
+    pixels (non-finite or equal to the fill value) add nothing to the IME.
 
     Geo-dependent: pixel area (m^2) and plume length (m) are derived from
     the carrier's transform, so the input must be a georeferenced
@@ -711,7 +766,7 @@ class IMEEstimate(Operator):
             )
         require_projected_crs(gt, "IMEEstimate")
         mask = squeeze_single_band(np.asarray(self.plume_mask)).astype(bool)
-        enhancement = squeeze_single_band(np.asarray(gt, dtype=float))
+        enhancement = _single_band_nan(gt)
         area = (
             self.pixel_area_m2
             if self.pixel_area_m2 is not None
@@ -766,6 +821,8 @@ class CrossSectionalFlux(Operator):
     :math:`Q_k` versus :math:`d_k` confirms a steady-state estimate.
 
     The enhancement carrier MUST be in kg/m^2 (see :class:`ColumnToMass`).
+    Nodata enhancement pixels (non-finite or equal to the fill value) add
+    nothing to a transect's flux.
     The implementation assumes (approximately) square pixels: it uses
     :math:`\Delta y = \sqrt{\mathrm{pixel\_area}}` as the across-wind
     pixel size. For strongly anisotropic pixel grids, reproject first.
@@ -831,7 +888,7 @@ class CrossSectionalFlux(Operator):
         if wind_norm == 0.0:
             raise ValueError("wind vector must be non-zero")
         mask = squeeze_single_band(np.asarray(self.plume_mask)).astype(bool)
-        enhancement = squeeze_single_band(np.asarray(gt, dtype=float))
+        enhancement = _single_band_nan(gt)
         area = pixel_area(gt.transform)
         width = float(np.sqrt(area))
         xs, ys = pixel_centers(mask.shape, gt.transform)
@@ -888,7 +945,9 @@ class ColumnToMass(Operator):
 
     Thin wrapper over :func:`convert_column_units`. The ppm m conversion
     assumes a standard molar volume (298.15 K, 1 atm); see that
-    function's docstring for the exact relation and caveats.
+    function's docstring for the exact relation and caveats. Nodata
+    pixels (non-finite or equal to the fill value) are not converted and
+    hold the input's fill value.
 
     Args:
         gas: ``"CH4"`` (default) or ``"CO2"``.
@@ -919,6 +978,8 @@ class ColumnToMass(Operator):
             units_in=self.units_in,
             units_out=self.units_out,
         )
+        if np.ndim(out) >= 2:
+            out = restore_fill(out, valid_pixels(gt), carrier_fill_value(gt))
         return wrap_like(gt, out)
 
 
@@ -1089,6 +1150,9 @@ class PlumeColumnStats(Operator):
     - ``intensity_per_area`` = ``(sum_plume - mean_background * n_plume)
       / n_plume``
 
+    Nodata column pixels (non-finite or equal to the column carrier's
+    fill value) are left out of every statistic.
+
     Args:
         column: Carrier with the column field (single-band ``GeoTensor``
             or plain array, same shape as the input label map).
@@ -1103,7 +1167,7 @@ class PlumeColumnStats(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> pd.DataFrame:
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
-        col_arr = squeeze_single_band(np.asarray(self.column)).astype(float, copy=False)
+        col_arr = _single_band_nan(self.column).astype(float, copy=False)
         if col_arr.shape != labels.shape:
             raise ValueError(
                 "column shape "
@@ -1241,6 +1305,9 @@ class PlumeQNDFeatures(Operator):
       that :class:`PlumeColumnStats` emits, included so a single call
       assembles the full feature vector used by the paper.
 
+    Nodata column / albedo pixels (non-finite or equal to the carrier's
+    fill value) are left out of every feature.
+
     Args:
         column: Column-enhancement carrier (same shape as the label map).
         albedo: Optional albedo carrier; when omitted the ``qnd_albedo_*``
@@ -1283,7 +1350,7 @@ class PlumeQNDFeatures(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> pd.DataFrame:
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
-        col_arr = squeeze_single_band(np.asarray(self.column)).astype(float, copy=False)
+        col_arr = _single_band_nan(self.column).astype(float, copy=False)
         if col_arr.shape != labels.shape:
             raise ValueError(
                 "column shape "
@@ -1292,9 +1359,7 @@ class PlumeQNDFeatures(Operator):
         if self.albedo is None:
             alb_arr = None
         else:
-            alb_arr = squeeze_single_band(np.asarray(self.albedo)).astype(
-                float, copy=False
-            )
+            alb_arr = _single_band_nan(self.albedo).astype(float, copy=False)
             if alb_arr.shape != labels.shape:
                 raise ValueError(
                     "albedo shape "

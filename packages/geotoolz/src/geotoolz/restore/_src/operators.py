@@ -11,6 +11,19 @@ parameters are keyword-only and JSON-safe for hydra-zen ``builds()``
 round-trips, except for :class:`InverseMNF` which holds a runtime
 reference to a fitted :class:`MNF` and is therefore marked
 ``forbid_in_yaml = True``.
+
+Nodata: a pixel is invalid when any band is non-finite or equals the
+carrier's ``fill_value_default`` (see :mod:`geotoolz._src.valid`; per
+frame for ``(T, C, H, W)``, and per pixel across the band ``axis`` for
+the PCA / MNF operators). Filters, fits and outlier statistics are
+computed from valid pixels only -- invalid pixels never leak into their
+neighbours -- and invalid pixels hold the output's fill value (the
+inherited ``fill_value_default``; ``NaN`` for plain ndarrays). The
+exceptions are the ``GapFill*`` operators, which treat every invalid
+*element* as a gap and replace it with the interpolated value (only
+gaps they cannot fill hold the fill value), and the boolean
+:class:`OutlierMask` / :class:`SaturationFlag`, which report ``False``
+at invalid pixels.
 """
 
 from __future__ import annotations
@@ -20,6 +33,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.valid import (
+    carrier_fill_value,
+    invalid_values,
+    mask_invalid_to_nan,
+    restore_fill,
+    valid_pixels,
+)
 from geotoolz._src.wrap import wrap_like
 from geotoolz.restore._src.array import (
     bilateral_denoise,
@@ -44,7 +64,59 @@ from geotoolz.restore._src.array import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from georeader.geotensor import GeoTensor
+
+
+def _valid(gt: Any) -> np.ndarray:
+    """Validity mask of ``gt``.
+
+    Per pixel over the trailing ``(H, W)`` axes (per frame for 4-D
+    input); 1-D input falls back to elementwise validity.
+    """
+    if np.ndim(gt) < 2:
+        return ~invalid_values(gt)
+    return valid_pixels(gt, keep_time=True)
+
+
+def _masked(gt: Any) -> tuple[np.ndarray, np.ndarray]:
+    """Float64 copy of ``gt`` with invalid pixels ``NaN``, plus the validity mask."""
+    valid = _valid(gt)
+    return mask_invalid_to_nan(gt, valid=valid, dtype=float), valid
+
+
+def _rewrap(gt: Any, out: np.ndarray, valid: np.ndarray) -> Any:
+    """Write the output fill into invalid pixels and rewrap like ``gt``."""
+    return wrap_like(gt, restore_fill(out, valid, carrier_fill_value(gt)))
+
+
+def _filter(gt: Any, fn: Callable[[np.ndarray], np.ndarray]) -> Any:
+    """Apply a NaN-aware primitive to valid pixels only; invalid -> fill."""
+    arr, valid = _masked(gt)
+    return _rewrap(gt, fn(arr), valid)
+
+
+def _band_masked(gt: Any, axis: int) -> np.ndarray:
+    """Float64 copy of ``gt`` with pixels invalid in any band along ``axis`` NaN."""
+    values = np.asarray(gt, dtype=float)
+    invalid = invalid_values(gt).any(axis=axis, keepdims=True)
+    return np.where(invalid, np.nan, values)
+
+
+def _rewrap_finite(gt: Any, out: np.ndarray) -> Any:
+    """Write the output fill wherever ``out`` is non-finite and rewrap."""
+    return wrap_like(gt, restore_fill(out, np.isfinite(out), carrier_fill_value(gt)))
+
+
+def _gap_fill(gt: Any, fn: Callable[[np.ndarray], np.ndarray]) -> Any:
+    """Treat every invalid element (fill / non-finite) as a gap and fill it.
+
+    Filled gaps hold the interpolated value; gaps the primitive leaves
+    unfilled hold the output fill value.
+    """
+    values = np.where(invalid_values(gt), np.nan, np.asarray(gt, dtype=float))
+    return _rewrap_finite(gt, fn(values))
 
 
 class DespeckleLee(Operator):
@@ -53,7 +125,8 @@ class DespeckleLee(Operator):
     Carrier-aware wrapper around
     :func:`~geotoolz.restore._src.array.despeckle_lee`. Best suited to
     multiplicative speckle (single-look or multi-look SAR amplitude
-    imagery). For multi-look intensity, halve ``cu``.
+    imagery). For multi-look intensity, halve ``cu``. Nodata (fill / non-finite) pixels
+    are excluded from the window statistics and hold the output fill.
 
     Args:
         window: Side length of the local window in pixels.
@@ -71,9 +144,7 @@ class DespeckleLee(Operator):
         self.cu = cu
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
-            gt, despeckle_lee(np.asarray(gt), window=self.window, cu=self.cu)
-        )
+        return _filter(gt, lambda a: despeckle_lee(a, window=self.window, cu=self.cu))
 
 
 class DespeckleFrost(Operator):
@@ -82,7 +153,9 @@ class DespeckleFrost(Operator):
     Wraps :func:`~geotoolz.restore._src.array.despeckle_frost`. Uses an
     edge-aware exponential weight on the local mean. Faster than the
     Lee filter and tunable via ``damping``: larger values keep more
-    edge contrast, smaller values smooth more aggressively.
+    edge contrast, smaller values smooth more aggressively. Nodata (fill
+    / non-finite) pixels are excluded from the window statistics and
+    hold the output fill.
 
     Args:
         window: Side length of the local window in pixels.
@@ -97,9 +170,8 @@ class DespeckleFrost(Operator):
         self.damping = damping
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
-            gt,
-            despeckle_frost(np.asarray(gt), window=self.window, damping=self.damping),
+        return _filter(
+            gt, lambda a: despeckle_frost(a, window=self.window, damping=self.damping)
         )
 
 
@@ -109,7 +181,8 @@ class DespeckleRefinedLee(Operator):
     Wraps :func:`~geotoolz.restore._src.array.despeckle_refined_lee`.
     This is currently a dependency-light alias for :class:`DespeckleLee`
     with default ``cu``; the eight-direction sub-window selection of the
-    canonical Refined-Lee is not yet implemented.
+    canonical Refined-Lee is not yet implemented. Nodata pixels are
+    handled as in :class:`DespeckleLee`.
 
     Args:
         window: Side length of the local window in pixels.
@@ -122,7 +195,7 @@ class DespeckleRefinedLee(Operator):
         self.window = window
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(gt, despeckle_refined_lee(np.asarray(gt), window=self.window))
+        return _filter(gt, lambda a: despeckle_refined_lee(a, window=self.window))
 
 
 class DestripeColumn(Operator):
@@ -132,7 +205,8 @@ class DestripeColumn(Operator):
     ``method="mean"`` for additive stripes, ``"median"`` for stripes
     with outlier contamination, and ``"moment_matching"`` to also apply
     a local smoothing pass (the smoothing kernel size is set by
-    ``window``).
+    ``window``). Nodata (fill / non-finite) pixels are excluded from the
+    column / row profiles and hold the output fill.
 
     Args:
         method: Reducer used to estimate per-column offsets.
@@ -158,13 +232,10 @@ class DestripeColumn(Operator):
         self.window = window
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
+        return _filter(
             gt,
-            destripe_column(
-                np.asarray(gt),
-                method=self.method,
-                axis=self.axis,
-                window=self.window,
+            lambda a: destripe_column(
+                a, method=self.method, axis=self.axis, window=self.window
             ),
         )
 
@@ -173,7 +244,8 @@ class MomentMatching(Operator):
     """Match per-column moments via a local smoothing pass.
 
     Convenience operator equivalent to
-    ``DestripeColumn(method="moment_matching", axis="column", window=...)``.
+    ``DestripeColumn(method="moment_matching", axis="column", window=...)``
+    (same nodata handling).
 
     Args:
         window: Side length of the local smoothing window in pixels.
@@ -186,13 +258,10 @@ class MomentMatching(Operator):
         self.window = window
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
+        return _filter(
             gt,
-            destripe_column(
-                np.asarray(gt),
-                method="moment_matching",
-                axis="column",
-                window=self.window,
+            lambda a: destripe_column(
+                a, method="moment_matching", axis="column", window=self.window
             ),
         )
 
@@ -203,7 +272,9 @@ class DenoisePCA(Operator):
     Projects the carrier onto its leading ``n_components`` principal
     directions and reconstructs in the original space. Effective at
     suppressing band-uncorrelated noise; can soften sharp
-    band-localised features.
+    band-localised features. The components are fitted on valid pixels
+    only (a pixel invalid in any band is excluded); invalid pixels hold
+    the output fill.
 
     Args:
         n_components: Number of principal components to keep.
@@ -221,9 +292,9 @@ class DenoisePCA(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = pca_denoise(
-            np.asarray(gt), n_components=self.n_components, axis=self.axis
+            _band_masked(gt, self.axis), n_components=self.n_components, axis=self.axis
         )
-        return wrap_like(gt, out)
+        return _rewrap_finite(gt, out)
 
 
 class MNF(Operator):
@@ -237,6 +308,10 @@ class MNF(Operator):
     Note: this operator is *stateful*. Calling it on a second image
     will refit the components and discard the previous state — the
     forward/inverse pair must be applied to the same image.
+
+    The components are fitted on valid pixels only (a pixel invalid in
+    any band is excluded); invalid pixels hold the output fill in the
+    returned scores.
 
     Args:
         n_components: Number of components to keep. ``None`` keeps all.
@@ -260,10 +335,17 @@ class MNF(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         self._state = fit_pca(
-            np.asarray(gt), n_components=self.n_components, axis=self.axis
+            _band_masked(gt, self.axis),
+            n_components=self.n_components,
+            axis=self.axis,
         )
         self.snr_ = np.asarray(self._state["snr"])
-        return wrap_like(gt, np.asarray(self._state["scores"]))
+        scores = np.asarray(self._state["scores"])
+        # fit_pca imputes invalid pixels with the band mean (score 0);
+        # report them as nodata instead.
+        pixel_nan = np.asarray(self._state["nan_mask"]).any(axis=0)
+        valid = ~pixel_nan.reshape(scores.shape[1:])
+        return _rewrap(gt, scores, np.broadcast_to(valid, scores.shape))
 
 
 class InverseMNF(Operator):
@@ -274,7 +356,8 @@ class InverseMNF(Operator):
     a live, stateful object, this operator cannot be faithfully
     serialised — ``forbid_in_yaml = True`` flags that to future YAML
     loaders, and ``get_config`` returns an empty config rather than a
-    spurious payload.
+    spurious payload. Pixels that are nodata in the scores (or were
+    nodata in the forward input) hold the output fill.
 
     Args:
         forward: A fitted :class:`MNF` whose ``_apply`` has already
@@ -295,8 +378,8 @@ class InverseMNF(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         if self.forward._state is None:
             raise ValueError("InverseMNF requires a forward MNF that has been applied")
-        out = inverse_pca(np.asarray(gt), self.forward._state)
-        return wrap_like(gt, out)
+        out = inverse_pca(_band_masked(gt, 0), self.forward._state)
+        return _rewrap_finite(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         # The fitted ``forward`` reference is not JSON-safe; report an
@@ -308,9 +391,10 @@ class InverseMNF(Operator):
 class GaussianDenoise(Operator):
     """Gaussian smoother over the trailing two spatial axes.
 
-    NaN-aware: missing pixels are excluded from both the numerator and
-    the normalising weight. Non-spatial axes (e.g. bands) are not
-    filtered.
+    Normalized convolution: nodata (fill / non-finite) pixels are
+    excluded from both the numerator and the normalising weight, so
+    they never smear into their neighbours, and hold the output fill.
+    Non-spatial axes (e.g. bands) are not filtered.
 
     Args:
         sigma: Gaussian standard deviation in pixels.
@@ -323,14 +407,16 @@ class GaussianDenoise(Operator):
         self.sigma = sigma
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(gt, gaussian_denoise(np.asarray(gt), sigma=self.sigma))
+        return _filter(gt, lambda a: gaussian_denoise(a, sigma=self.sigma))
 
 
 class MedianDenoise(Operator):
     """Median filter over the trailing two spatial axes.
 
     Robust to impulse noise (salt-and-pepper, hot pixels). Larger
-    ``size`` blurs sharper features.
+    ``size`` blurs sharper features. Nodata (fill / non-finite) pixels
+    are replaced by the median of the valid pixels before filtering and
+    hold the output fill.
 
     Args:
         size: Side length of the median window in pixels.
@@ -343,7 +429,7 @@ class MedianDenoise(Operator):
         self.size = size
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(gt, median_denoise(np.asarray(gt), size=self.size))
+        return _filter(gt, lambda a: median_denoise(a, size=self.size))
 
 
 class BilateralDenoise(Operator):
@@ -355,7 +441,9 @@ class BilateralDenoise(Operator):
     spatial smoothing scale.
 
     Caveat: this is a single-pass approximation of a full bilateral
-    filter, not the canonical per-pixel-neighbourhood form.
+    filter, not the canonical per-pixel-neighbourhood form. Nodata (fill
+    / non-finite) pixels are excluded from the smoothing and hold the
+    output fill.
 
     Examples:
         >>> gz.restore.BilateralDenoise(sigma_color=0.1, sigma_space=5.0)(scene)
@@ -366,12 +454,10 @@ class BilateralDenoise(Operator):
         self.sigma_space = sigma_space
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
+        return _filter(
             gt,
-            bilateral_denoise(
-                np.asarray(gt),
-                sigma_color=self.sigma_color,
-                sigma_space=self.sigma_space,
+            lambda a: bilateral_denoise(
+                a, sigma_color=self.sigma_color, sigma_space=self.sigma_space
             ),
         )
 
@@ -382,6 +468,8 @@ class NLMeans(Operator):
     Wraps :func:`~geotoolz.restore._src.array.nl_means`. This is a
     dependency-light approximation of the canonical NL-means; for
     production use prefer ``skimage.restoration.denoise_nl_means``.
+    Nodata (fill / non-finite) pixels are excluded from the smoothing
+    and hold the output fill.
 
     Args:
         patch_size: Nominal patch side length in pixels.
@@ -400,10 +488,10 @@ class NLMeans(Operator):
         self.h = h
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
+        return _filter(
             gt,
-            nl_means(
-                np.asarray(gt),
+            lambda a: nl_means(
+                a,
                 patch_size=self.patch_size,
                 patch_distance=self.patch_distance,
                 h=self.h,
@@ -416,7 +504,10 @@ class GapFillIDW(Operator):
 
     Wraps :func:`~geotoolz.restore._src.array.gap_fill_idw`. NaNs whose
     neighbourhood within ``radius`` contains no finite pixels are left
-    as NaN — chain with :class:`GapFillNearest` for unconditional fill.
+    unfilled — chain with :class:`GapFillNearest` for unconditional fill.
+    Nodata elements (fill value or non-finite) are the gaps: the output
+    there is the filled value, *not* the fill value; only gaps left
+    unfilled hold the output fill.
 
     Args:
         power: IDW exponent. ``2.0`` is the standard choice.
@@ -431,8 +522,8 @@ class GapFillIDW(Operator):
         self.radius = radius
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
-            gt, gap_fill_idw(np.asarray(gt), power=self.power, radius=self.radius)
+        return _gap_fill(
+            gt, lambda a: gap_fill_idw(a, power=self.power, radius=self.radius)
         )
 
 
@@ -442,6 +533,9 @@ class GapFillInpaintBiharmonic(Operator):
     Wraps :func:`~geotoolz.restore._src.array.gap_fill_biharmonic`,
     which already preserves the original finite pixels — the operator
     just round-trips carrier metadata.
+    Nodata elements (fill value or non-finite) are the gaps: the output
+    there is the filled value, *not* the fill value; only gaps left
+    unfilled hold the output fill.
 
     Caveat: this is a dependency-light surrogate, not the canonical
     scikit-image biharmonic inpainting; it can be slow for very large
@@ -452,7 +546,7 @@ class GapFillInpaintBiharmonic(Operator):
     """
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(gt, gap_fill_biharmonic(np.asarray(gt)))
+        return _gap_fill(gt, gap_fill_biharmonic)
 
 
 class GapFillLaplacian(Operator):
@@ -462,13 +556,16 @@ class GapFillLaplacian(Operator):
     harmonic interpolant — smooth, but linearly biased toward the mean
     of the boundary. Pair with :class:`GaussianDenoise` for a smoother
     transition near the mask edge.
+    Nodata elements (fill value or non-finite) are the gaps: the output
+    there is the filled value, *not* the fill value; only gaps left
+    unfilled hold the output fill.
 
     Examples:
         >>> gz.restore.GapFillLaplacian()(scene)
     """
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(gt, gap_fill_laplacian(np.asarray(gt)))
+        return _gap_fill(gt, gap_fill_laplacian)
 
 
 class GapFillNearest(Operator):
@@ -476,6 +573,9 @@ class GapFillNearest(Operator):
 
     Wraps :func:`~geotoolz.restore._src.array.gap_fill_nearest`. Fast
     and unconditional unless ``max_distance`` is set.
+    Nodata elements (fill value or non-finite) are the gaps: the output
+    there is the filled value, *not* the fill value; only gaps left
+    unfilled hold the output fill.
 
     Args:
         max_distance: Maximum Euclidean fill radius in pixels. ``None``
@@ -490,8 +590,8 @@ class GapFillNearest(Operator):
         self.max_distance = max_distance
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
-            gt, gap_fill_nearest(np.asarray(gt), max_distance=self.max_distance)
+        return _gap_fill(
+            gt, lambda a: gap_fill_nearest(a, max_distance=self.max_distance)
         )
 
 
@@ -500,7 +600,8 @@ class OutlierMask(Operator):
 
     Wraps :func:`~geotoolz.restore._src.array.outlier_mask` and returns
     a boolean carrier (``True`` marks outliers). Outputs the result
-    as ``bool`` to keep the mask explicit.
+    as ``bool`` to keep the mask explicit. Nodata (fill / non-finite)
+    pixels are excluded from the statistics and reported as ``False``.
 
     Args:
         method: ``"mad"`` (robust, default) or ``"zscore"``.
@@ -517,14 +618,17 @@ class OutlierMask(Operator):
         self.k = k
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        mask = outlier_mask(np.asarray(gt), method=self.method, k=self.k)
-        return wrap_like(gt, mask.astype(bool))
+        arr, valid = _masked(gt)
+        mask = outlier_mask(arr, method=self.method, k=self.k).astype(bool)
+        return wrap_like(gt, restore_fill(mask, valid, False))
 
 
 class ReplaceOutliers(Operator):
     """Replace outliers with median, NaN, or nearest-neighbour interpolation.
 
     Wraps :func:`~geotoolz.restore._src.array.replace_outliers`.
+    Nodata (fill / non-finite) pixels are excluded from the outlier
+    statistics and hold the output fill value (they are not filled).
 
     Args:
         method: Outlier detector. See :class:`OutlierMask`.
@@ -548,10 +652,9 @@ class ReplaceOutliers(Operator):
         self.fill = fill
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        out = replace_outliers(
-            np.asarray(gt), method=self.method, k=self.k, fill=self.fill
-        )
-        return wrap_like(gt, out)
+        arr, valid = _masked(gt)
+        out = replace_outliers(arr, method=self.method, k=self.k, fill=self.fill)
+        return _rewrap(gt, out, valid)
 
 
 class SaturationFlag(Operator):
@@ -559,7 +662,9 @@ class SaturationFlag(Operator):
 
     Wraps :func:`~geotoolz.restore._src.array.saturation_flag`. When
     ``threshold`` is ``None`` the default is ``np.iinfo(dtype).max`` for
-    integer carriers and ``1.0`` for floats.
+    integer carriers and ``1.0`` for floats. Nodata (fill /
+    non-finite) pixels are reported as ``False`` (not saturated), so a
+    fill value at the dtype maximum is never flagged.
 
     Examples:
         >>> gz.restore.SaturationFlag()(uint16_scene)
@@ -570,6 +675,5 @@ class SaturationFlag(Operator):
         self.threshold = threshold
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
-            gt, saturation_flag(np.asarray(gt), threshold=self.threshold).astype(bool)
-        )
+        flag = saturation_flag(np.asarray(gt), threshold=self.threshold).astype(bool)
+        return wrap_like(gt, restore_fill(flag, _valid(gt), False))

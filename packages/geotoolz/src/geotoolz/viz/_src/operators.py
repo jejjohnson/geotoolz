@@ -21,6 +21,12 @@ colormaps, overlay blending) accept either a ``GeoTensor`` or a plain
 geotransform / CRS to be meaningful (``Hillshade`` without explicit
 resolutions, ``ShadedRelief``, ``AnnotatePolygons``, ``AnnotatePoints``)
 require a georeferenced GeoTensor and raise ``TypeError`` otherwise.
+
+Nodata: a pixel is invalid when any band is non-finite or equals the
+carrier's ``fill_value_default`` (:mod:`geotoolz._src.valid`). Stretches
+and colormaps compute their percentiles / ranges over valid pixels only;
+their ``uint8`` outputs carry ``fill_value_default=0`` and write ``0``
+(RGBA: fully transparent, alpha ``0``) into invalid pixels.
 """
 
 from __future__ import annotations
@@ -32,6 +38,13 @@ import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
+from geotoolz._src.valid import (
+    carrier_fill_value,
+    invalid_values,
+    mask_invalid_to_nan,
+    restore_fill,
+    valid_pixels,
+)
 from geotoolz._src.wrap import wrap_like
 from geotoolz.viz._src.array import (
     Color,
@@ -64,7 +77,8 @@ class Composite(Operator):
     and the same spatial footprint as the input — ``transform`` and
     ``crs`` round-trip unchanged. Plain ``np.ndarray`` carriers are
     supported with integer band references (returning a plain array);
-    string names need a carrier with band names in ``attrs``.
+    string names need a carrier with band names in ``attrs``. Fill
+    values pass through unchanged (pure band selection).
 
     Args:
         bands: Sequence of band references. Each entry is either an
@@ -218,6 +232,11 @@ class StretchToUint8(Operator):
     instead need float outputs for further math. Metadata-independent:
     plain ``np.ndarray`` carriers pass through as plain arrays.
 
+    Nodata pixels (any band non-finite or equal to the carrier's
+    ``fill_value_default``) are excluded from the percentiles, so a
+    ``-9999`` fill cannot dominate the stretch, and are written as ``0``
+    -- the output's ``fill_value_default``.
+
     Args:
         lower: Lower percentile. Default ``2.0``.
         upper: Upper percentile. Default ``98.0``.
@@ -242,13 +261,15 @@ class StretchToUint8(Operator):
         self.per_band = per_band
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        valid = valid_pixels(gt, keep_time=True)
+        arr = np.asarray(gt) if valid.all() else mask_invalid_to_nan(gt, valid=valid)
         out = stretch_to_uint8(
-            np.asarray(gt),
+            arr,
             lower=self.lower,
             upper=self.upper,
             per_band=self.per_band,
         )
-        return wrap_like(gt, out, fill_value_default=0)
+        return wrap_like(gt, restore_fill(out, valid, 0), fill_value_default=0)
 
 
 class GammaCorrect(Operator):
@@ -263,7 +284,9 @@ class GammaCorrect(Operator):
     correct rather than a raw ``256 ** (1 / gamma) = 16`` on uint8. For
     the radiometry-stage gamma correction, use
     ``geotoolz.radiometry.Gamma``. Metadata-independent: plain
-    ``np.ndarray`` carriers pass through as plain arrays.
+    ``np.ndarray`` carriers pass through as plain arrays. Elementwise:
+    fill (and non-finite) values are passed through unchanged rather
+    than gamma-corrected.
 
     Args:
         gamma: Gamma factor (must be strictly positive). Default ``1.0``.
@@ -286,12 +309,11 @@ class GammaCorrect(Operator):
         self.inplace_norm = inplace_norm
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
-            gt,
-            gamma_correct_display(
-                np.asarray(gt), gamma=self.gamma, inplace_norm=self.inplace_norm
-            ),
+        out = gamma_correct_display(
+            np.asarray(gt), gamma=self.gamma, inplace_norm=self.inplace_norm
         )
+        valid = ~invalid_values(gt)
+        return wrap_like(gt, restore_fill(out, valid, carrier_fill_value(gt)))
 
 
 class ToDisplayRange(StretchToUint8):
@@ -321,8 +343,11 @@ class ApplyColormap(Operator):
             ``"cmocean.balance"``).
         vmin: Optional explicit lower bound. ``None`` auto-detects.
         vmax: Optional explicit upper bound. ``None`` auto-detects.
-        nan_color: RGBA tuple in ``[0, 1]`` to paint NaN pixels.
-            Default fully transparent.
+        nan_color: RGBA tuple in ``[0, 1]`` to paint nodata pixels
+            (non-finite, or equal to the carrier's
+            ``fill_value_default``). Default fully transparent, i.e. the
+            output fill ``0``. Nodata pixels never enter the auto-detected
+            ``vmin`` / ``vmax``.
 
     Examples:
         >>> import geotoolz as gz
@@ -347,8 +372,9 @@ class ApplyColormap(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         cmap = _get_colormap(self.name)
+        valid = valid_pixels(gt)
         out = rgba_from_scalar(
-            np.asarray(gt),
+            np.asarray(gt) if valid.all() else mask_invalid_to_nan(gt, valid=valid),
             cmap,
             vmin=self.vmin,
             vmax=self.vmax,
@@ -370,7 +396,9 @@ class ApplyDiscreteColormap(Operator):
 
     Classic categorical-label visualisation (land-cover classes, cloud
     masks, etc). Unmapped pixels render fully transparent. Pixels not
-    in the mapping fall back to that default colour.
+    in the mapping fall back to that default colour. Nodata pixels
+    (equal to the carrier's ``fill_value_default``) render fully
+    transparent (``0``) even if the fill value appears in ``mapping``.
     Metadata-independent: plain ``np.ndarray`` carriers pass through
     as plain arrays.
 
@@ -398,11 +426,9 @@ class ApplyDiscreteColormap(Operator):
         self.mapping = {int(k): tuple(v) for k, v in pairs.items()}
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
-            gt,
-            rgba_from_categories(np.asarray(gt), self.mapping),
-            fill_value_default=0,
-        )
+        out = rgba_from_categories(np.asarray(gt), self.mapping)
+        out = restore_fill(out, valid_pixels(gt), 0)
+        return wrap_like(gt, out, fill_value_default=0)
 
     def get_config(self) -> dict[str, Any]:
         return {"mapping": mapping_to_pairs(self.mapping)}
@@ -418,7 +444,9 @@ class Hillshade(Operator):
     ``transform`` so units are correct in physical projections.
     Geo-dependent by default: plain ``np.ndarray`` DEMs are accepted
     only when ``x_resolution`` and ``y_resolution`` are given
-    explicitly; otherwise a ``TypeError`` is raised.
+    explicitly; otherwise a ``TypeError`` is raised. Nodata DEM pixels
+    (non-finite or equal to ``fill_value_default``) do not leak into
+    their neighbours' slope and are written as ``0`` (the output fill).
 
     Args:
         azimuth_deg: Sun azimuth in degrees clockwise from north.
@@ -474,6 +502,7 @@ class Hillshade(Operator):
             azimuth_deg=self.azimuth_deg,
             altitude_deg=self.altitude_deg,
             z_factor=self.z_factor,
+            valid=valid_pixels(gt),
         )
         return wrap_like(gt, out, fill_value_default=0)
 
@@ -484,7 +513,8 @@ class ShadedRelief(Operator):
     The composite terrain visualisation: run the DEM through
     `ApplyColormap` and modulate the RGB channels by a `Hillshade`
     so the result reads like a cartographer's shaded-relief map.
-    Alpha channel is preserved from the colormap. Geo-dependent: the
+    Alpha channel is preserved from the colormap, so nodata DEM pixels
+    stay fully transparent (see `ApplyColormap` / `Hillshade`). Geo-dependent: the
     hillshade pixel size comes from the carrier's ``transform``, so a
     georeferenced GeoTensor input is required.
 

@@ -42,6 +42,7 @@ from pipekit import Operator
 
 from geotoolz._src.bands import strip_band_attrs
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
+from geotoolz._src.valid import invalid_values, is_fill
 from geotoolz._src.wrap import wrap_like
 from geotoolz.qa._src.array import (
     mask_from_bit_field,
@@ -552,7 +553,8 @@ class MaskValid(Operator):
 
     The mask broadcasts across all bands — a pixel is invalid if it
     matches the sentinel in ANY band. (Use a per-band check if you'd
-    rather mask only where every band is invalid.)
+    rather mask only where every band is invalid.) A ``NaN`` sentinel
+    (e.g. ``fill_value_default=nan``) matches ``NaN`` pixels.
 
     Args:
         invalid_value: Sentinel value treated as "invalid". ``None``
@@ -584,11 +586,8 @@ class MaskValid(Operator):
                 "MaskValid: no invalid_value provided and the carrier has no "
                 "fill_value_default. Pass `invalid_value=...` explicitly."
             )
-        arr = np.asarray(gt)
-        if arr.ndim <= 2:
-            mask = arr == sentinel
-        else:
-            mask = np.any(arr == sentinel, axis=self.axis)
+        match = is_fill(np.asarray(gt), sentinel)
+        mask = match if match.ndim <= 2 else np.any(match, axis=self.axis)
         return wrap_like(gt, mask, fill_value_default=False)
 
 
@@ -703,8 +702,10 @@ class MaskNoData(Operator):
 
     1. **QA-driven**: pass ``qa_band``/``bits``/``values`` to decode
        no-data from a dedicated QA band.
-    2. **Fill-driven** (default): without QA arguments, pixels equal to
-       the carrier's ``fill_value_default`` in *any* band are marked.
+    2. **Fill-driven** (default): without QA arguments, pixels that are
+       invalid in *any* band -- equal to the carrier's
+       ``fill_value_default`` (a ``NaN`` fill matches ``NaN``) or
+       non-finite -- are marked (see :mod:`geotoolz._src.valid`).
 
     The QA-driven mode accepts a ``GeoTensor`` or a plain ``np.ndarray``
     and returns the same carrier kind; the fill-driven mode reads
@@ -754,11 +755,8 @@ class MaskNoData(Operator):
                     "MaskNoData: no qa_band/bits/values provided and the carrier "
                     "has no fill_value_default."
                 )
-            arr = np.asarray(gt)
-            if arr.ndim <= 2:
-                mask = arr == fill_value
-            else:
-                mask = np.any(arr == fill_value, axis=self.axis)
+            invalid = invalid_values(gt, fill_value=fill_value)
+            mask = invalid if invalid.ndim <= 2 else np.any(invalid, axis=self.axis)
         return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:

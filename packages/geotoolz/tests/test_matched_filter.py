@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
+from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
@@ -447,3 +447,91 @@ def test_column_enhancement_obs_model_refuses_reload() -> None:
 
     plain = ColumnEnhancement()
     assert Operator.from_state(plain.state).get_config() == plain.get_config()
+
+
+def _fill_cube(fill: float) -> tuple[GeoTensor, np.ndarray, np.ndarray]:
+    """(3, 4, 4) cube with fill pixels, its valid mask, and the valid-only cube."""
+    rng = np.random.default_rng(3)
+    values = rng.normal(loc=[[[1.0]], [[2.0]], [[3.0]]], size=(3, 4, 4))
+    gt = toy_geotensor(values, fill_value_default=fill, with_fill_pixels=True)
+    valid = ~fill_pixel_mask(values.shape)
+    # The same spectra with the fill pixels absent, as a (3, n_valid, 1) cube.
+    clean = values[:, valid][:, :, None]
+    return gt, valid, clean
+
+
+@pytest.mark.parametrize("fill", [-9999.0, np.nan], ids=["fill-9999", "fill-nan"])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "estimate_mean",
+        "cov_empirical",
+        "cov_shrunk",
+        "cov_lowrank",
+        "matched_filter",
+        "cluster",
+        "adaptive_window",
+        "streaming",
+    ],
+)
+def test_fill_pixels_are_excluded(case: str, fill: float) -> None:
+    """Fill pixels never enter a fitted statistic; score maps hold the fill (#145)."""
+    mf = gz.matched_filter
+    gt, valid, clean = _fill_cube(fill)
+    target = np.array([1.0, 0.5, -1.0])
+
+    def assert_fill(out: np.ndarray) -> None:
+        if np.isnan(fill):
+            assert np.isnan(out[~valid]).all()
+        else:
+            assert (out[~valid] == fill).all()
+        assert np.isfinite(out[valid]).all()
+
+    if case == "estimate_mean":
+        for method in ("mean", "median", "trimmed", "huber"):
+            np.testing.assert_allclose(
+                mf.EstimateMean(method=method)(gt),
+                mf.EstimateMean(method=method)(clean),
+            )
+    elif case == "cov_empirical":
+        np.testing.assert_allclose(
+            mf.EstimateCovEmpirical()(gt).matrix,
+            mf.EstimateCovEmpirical()(clean).matrix,
+        )
+    elif case == "cov_shrunk":
+        np.testing.assert_allclose(
+            mf.EstimateCovShrunk()(gt).matrix, mf.EstimateCovShrunk()(clean).matrix
+        )
+    elif case == "cov_lowrank":
+        np.testing.assert_allclose(
+            mf.EstimateCovLowRank(rank=2)(gt).matrix,
+            mf.EstimateCovLowRank(rank=2)(clean).matrix,
+        )
+    elif case == "matched_filter":
+        # Issue reproduction: the fitted mean was [-615.6, -615.6, -615.6].
+        op = mf.MatchedFilter(target=target, mean_method="mean")
+        out = op(gt)
+        np.testing.assert_allclose(op.mean, clean.reshape(3, -1).mean(axis=1))
+        ref = mf.MatchedFilter(target=target, mean_method="mean")(clean)
+        scores = np.asarray(out)
+        np.testing.assert_allclose(scores[valid], np.asarray(ref).ravel())
+        assert_fill(scores)
+    elif case == "cluster":
+        cluster = mf.GMMClusterBackground(n_clusters=2)(gt)
+        assert (cluster.labels[~valid] == -1).all()
+        assert (cluster.labels[valid] >= 0).all()
+        assert np.isfinite(cluster.means).all()
+        assert_fill(np.asarray(mf.ApplyClusterMF(target=target)(gt, cluster)))
+    elif case == "adaptive_window":
+        bg = mf.AdaptiveWindowBackground(window_size=3)(gt)
+        assert np.isnan(bg.mean[:, ~valid]).all()
+        assert np.isnan(bg.variance[:, ~valid]).all()
+        # Pixel (1, 1): its 3x3 window holds the (0, 0) fill pixel.
+        window = np.asarray(gt)[:, 0:3, 0:3].reshape(3, -1)[:, 1:]
+        np.testing.assert_allclose(bg.mean[:, 1, 1], window.mean(axis=1))
+        np.testing.assert_allclose(bg.variance[:, 1, 1], window.var(axis=1, ddof=1))
+    elif case == "streaming":
+        result = mf.StreamingBackground(cov_kind="empirical")([gt, gt])
+        expected = mf.StreamingBackground(cov_kind="empirical")([clean, clean])
+        np.testing.assert_allclose(result.mean, expected.mean)
+        np.testing.assert_allclose(result.cov_op.matrix, expected.cov_op.matrix)

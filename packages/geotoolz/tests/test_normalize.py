@@ -6,10 +6,11 @@ import json
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
+from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
+from geotoolz._src.valid import mask_invalid_to_nan
 from geotoolz.normalize import (
     CLAHE,
     AsinhScale,
@@ -55,11 +56,11 @@ def test_per_band_stats_caches_nan_aware_stats(scene: GeoTensor) -> None:
     out = op(scene)
 
     assert out is scene
-    np.testing.assert_allclose(
-        op.stats["mean"], np.nanmean(np.asarray(scene), axis=(-2, -1))
-    )
+    # A pixel with a NaN in any band is excluded from every band's stats.
+    masked = mask_invalid_to_nan(scene)
+    np.testing.assert_allclose(op.stats["mean"], np.nanmean(masked, axis=(-2, -1)))
     assert op.stats["percentiles"][0][0] == pytest.approx(
-        np.nanpercentile(np.asarray(scene)[0], 2.0)
+        np.nanpercentile(masked[0], 2.0)
     )
 
 
@@ -71,7 +72,10 @@ def test_standard_scaler_fit_inverse_state_roundtrip(
     restored = scaler.inverse(scaled)
 
     assert_metadata_preserved(scaled, scene)
-    np.testing.assert_allclose(np.asarray(restored), np.asarray(scene), equal_nan=True)
+    # The pixel NaN in band 0 is invalid in every band (any-band rule).
+    np.testing.assert_allclose(
+        np.asarray(restored), mask_invalid_to_nan(scene), equal_nan=True
+    )
 
     state = json.loads(json.dumps(scaler.state))
     restored_scaler = gz.Operator.from_state(state)
@@ -355,3 +359,76 @@ def test_normalize_geotensor_metadata_preserved(scene: GeoTensor) -> None:
     for op in ops:
         out = op(scene)
         assert_metadata_preserved(out, scene)
+
+
+# ---------------------------------------------------------------------------
+# Nodata (fill pixels) handling
+# ---------------------------------------------------------------------------
+
+
+def _fill_scene() -> tuple[GeoTensor, np.ndarray, np.ndarray]:
+    """(2, 4, 5) scene with -9999 fill pixels, its clean values and fill mask."""
+    rng = np.random.default_rng(0)
+    values = rng.uniform(0.5, 9.0, size=(2, 4, 5))
+    gt = toy_geotensor(values, fill_value_default=-9999, with_fill_pixels=True)
+    return gt, values, fill_pixel_mask(values.shape)
+
+
+_REFERENCE = np.linspace(10.0, 20.0, 20).reshape(4, 5)
+
+
+@pytest.mark.parametrize(
+    "make_op",
+    [
+        lambda: StandardScaler(fit_on_call=True),
+        lambda: RobustScaler(fit_on_call=True),
+        lambda: MinMaxScaler(fit_on_call=True),
+        lambda: Normalize(mean=[2.0, 5.0], std=[1.5, 2.5]),
+        lambda: HistogramStretch(out_range=(0.0, 255.0)),
+        lambda: HistogramMatch(reference=_REFERENCE),
+        lambda: LogScale(),
+        lambda: AsinhScale(),
+        lambda: PowerScale(),
+        lambda: ZeroOne(),
+        lambda: ZeroOne(per_band=False),
+        lambda: CLAHE(kernel_size=(2, 2), clip_limit=0.03),
+    ],
+    ids=lambda f: type(f()).__name__,
+)
+def test_fill_pixels_are_excluded(make_op) -> None:
+    """Fill pixels never enter a fit and map to the output fill value.
+
+    Valid pixels must equal the result on the same data with the fill
+    pixels marked missing (NaN), i.e. statistics over valid pixels only.
+    """
+    gt, values, fill = _fill_scene()
+    out = np.asarray(make_op()(gt))
+
+    assert np.all(out[:, fill] == -9999)
+    reference = values.copy()
+    reference[:, fill] = np.nan
+    expected = np.asarray(make_op()(reference))
+    np.testing.assert_allclose(out[:, ~fill], expected[:, ~fill])
+
+
+def test_fill_pixels_are_excluded_from_fitted_stats() -> None:
+    gt, values, fill = _fill_scene()
+    valid = values[:, ~fill]
+
+    scaler = StandardScaler(fit_on_call=True)
+    scaler(gt)
+    np.testing.assert_allclose(scaler.mean, valid.mean(axis=1))
+    np.testing.assert_allclose(scaler.std, valid.std(axis=1))
+
+    stats = PerBandStats()
+    assert stats(gt) is gt
+    np.testing.assert_allclose(stats.stats["min"], valid.min(axis=1))
+
+    minmax = MinMaxScaler(fit_on_call=True)
+    minmax(gt)
+    np.testing.assert_allclose(minmax.vmin, valid.min(axis=1))
+
+    # inverse() maps fill pixels of the scaled carrier back to the fill.
+    restored = np.asarray(scaler.inverse(scaler(gt)))
+    assert np.all(restored[:, fill] == -9999)
+    np.testing.assert_allclose(restored[:, ~fill], valid)

@@ -35,6 +35,12 @@ matrices are ``(c, c)``, and mean / target spectra are ``(c,)``.
 Linear algebra is expressed via einx dot patterns over this axis
 vocabulary (samples ``n``, bands ``c`` — with ``d``/``k`` as second
 band/rank axes) rather than raw ``@`` / ``.T`` notation.
+
+Nodata: a pixel whose spectrum has any non-finite band (``NaN`` /
+``±inf``) is invalid. The estimators fit their statistics on valid
+pixels only, and the filters score invalid pixels as ``NaN``. The
+Operator wrappers map a carrier's ``fill_value_default`` to ``NaN``
+before calling in here.
 """
 
 from __future__ import annotations
@@ -109,7 +115,8 @@ class ClusterBackground:
 
     Attributes:
         labels: Integer cluster-label map over the cube's spatial shape;
-            values index into ``means`` and ``cov_ops``.
+            values index into ``means`` and ``cov_ops``. Invalid
+            (non-finite) pixels are labelled ``-1``.
         means: Per-cluster mean spectra, shaped ``(k, c)``.
         cov_ops: Per-cluster ``(c, c)`` covariance operators, one entry
             per cluster.
@@ -238,9 +245,9 @@ class WelfordAccumulator:
 
         Returns:
             An accumulator holding the batch's exact mean and centred
-            sum-of-products.
+            sum-of-products. Rows with a non-finite value are skipped.
         """
-        x = _as_2d_samples(values)
+        x = _finite_rows(_as_2d_samples(values))
         if x.shape[0] == 0:
             return cls.empty(x.shape[1])
         mean = np.mean(x, axis=0)
@@ -336,13 +343,14 @@ def estimate_mean(
         axis: Position of the spectral axis. Default ``0``.
 
     Returns:
-        Mean spectrum with one entry per band.
+        Mean spectrum with one entry per band, fitted on valid pixels
+        only (pixels with any non-finite band are ignored).
 
     Raises:
         ValueError: If ``method`` is unknown, ``trim_proportion`` is out
             of range, or ``huber_c`` is not positive.
     """
-    x, _ = cube_to_samples(cube, axis=axis)
+    x = _finite_rows(cube_to_samples(cube, axis=axis)[0])
     if method == "mean":
         return np.mean(x, axis=0)
     if method == "median":
@@ -378,12 +386,14 @@ def estimate_cov_empirical(
         axis: Position of the spectral axis. Default ``0``.
 
     Returns:
-        `NumpyLinearOperator` wrapping the ``(c, c)`` sample covariance.
+        `NumpyLinearOperator` wrapping the ``(c, c)`` sample covariance
+        of the valid pixels (pixels with any non-finite band are
+        ignored).
 
     Raises:
         ValueError: If ``mean`` length does not match the band count.
     """
-    x, _ = cube_to_samples(cube, axis=axis)
+    x = _finite_rows(cube_to_samples(cube, axis=axis)[0])
     mu = np.mean(x, axis=0) if mean is None else _as_vector(mean, x.shape[1], "mean")
     centered = x - mu
     denom = max(x.shape[0] - 1, 1)
@@ -416,7 +426,9 @@ def estimate_cov_shrunk(
         axis: Position of the spectral axis. Default ``0``.
 
     Returns:
-        `NumpyLinearOperator` wrapping the shrunk ``(c, c)`` covariance.
+        `NumpyLinearOperator` wrapping the shrunk ``(c, c)`` covariance
+        of the valid pixels (pixels with any non-finite band are
+        ignored).
 
     Raises:
         ValueError: If ``mean`` length does not match the band count or
@@ -424,7 +436,7 @@ def estimate_cov_shrunk(
     """
     # Vectorise the cube once and reuse the sample matrix for both the
     # empirical covariance and the sample count that shrink_covariance needs.
-    x, _ = cube_to_samples(cube, axis=axis)
+    x = _finite_rows(cube_to_samples(cube, axis=axis)[0])
     mu = np.mean(x, axis=0) if mean is None else _as_vector(mean, x.shape[1], "mean")
     centered = x - mu
     denom = max(x.shape[0] - 1, 1)
@@ -634,7 +646,8 @@ def apply_image(
 
     Returns:
         Matched-filter score map with the cube's spatial shape (e.g.
-        ``(h, w)`` for a ``(c, h, w)`` cube).
+        ``(h, w)`` for a ``(c, h, w)`` cube); ``NaN`` at pixels with a
+        non-finite band.
 
     Raises:
         ValueError: If vector lengths disagree with the band count, or
@@ -807,24 +820,28 @@ def gmm_cluster_background(
 
     Returns:
         `ClusterBackground` with the per-pixel label map and per-cluster
-        means and covariance operators.
+        means and covariance operators. The mixture is fitted on valid
+        pixels only; pixels with any non-finite band are labelled ``-1``.
 
     Raises:
         ValueError: If ``n_clusters`` is not positive or exceeds the
-            pixel count, a cluster ends up empty, or ``cov_estimator``
-            is unknown.
+            valid pixel count, a cluster ends up empty, or
+            ``cov_estimator`` is unknown.
     """
     if n_clusters < 1:
         raise ValueError("n_clusters must be positive")
-    x, spatial_shape = cube_to_samples(cube, axis=axis)
-    labels = _gmm_labels(
+    samples, spatial_shape = cube_to_samples(cube, axis=axis)
+    valid = np.isfinite(samples).all(axis=1)
+    x = samples[valid]
+    labels = np.full(samples.shape[0], -1, dtype=np.intp)
+    labels[valid] = _gmm_labels(
         x, n_clusters=n_clusters, random_state=random_state, bayesian=bayesian
     )
     n_active = int(labels.max()) + 1
     means = np.empty((n_active, x.shape[1]), dtype=float)
     cov_ops: list[NumpyLinearOperator] = []
     for k in range(n_active):
-        group = x[labels == k]
+        group = samples[labels == k]
         if group.shape[0] == 0:
             raise ValueError("GMM produced an empty cluster")
         means[k] = np.mean(group, axis=0)
@@ -861,7 +878,9 @@ def apply_cluster_mf(
         axis: Position of the spectral axis. Default ``0``.
 
     Returns:
-        Matched-filter score map with the cube's spatial shape.
+        Matched-filter score map with the cube's spatial shape; ``NaN``
+        at pixels labelled outside ``0..k-1`` (e.g. the ``-1`` of invalid
+        pixels) or with a non-finite band.
 
     Raises:
         ValueError: If the label map does not match the cube's spatial
@@ -873,7 +892,7 @@ def apply_cluster_mf(
     if labels.shape[0] != x.shape[0]:
         raise ValueError("cluster labels must match cube spatial shape")
     target_vec = _as_vector(target, x.shape[1], "target")
-    scores = np.empty(x.shape[0], dtype=float)
+    scores = np.full(x.shape[0], np.nan, dtype=float)
     for k, cov_op in enumerate(cluster.cov_ops):
         mask = labels == k
         if np.any(mask):
@@ -916,7 +935,11 @@ def adaptive_window_background(
 
     Returns:
         `AdaptiveBackground` with per-pixel ``mean`` and diagonal
-        ``variance`` cubes shaped like the input.
+        ``variance`` cubes shaped like the input. Window statistics use
+        valid pixels only (pixels with any non-finite band are ignored,
+        so they never leak into neighbours); invalid pixels, and pixels
+        whose window holds fewer than two valid pixels (variance) or
+        none (mean), are ``NaN``.
 
     Raises:
         ValueError: If ``window_size`` is not a positive odd integer or
@@ -928,10 +951,29 @@ def adaptive_window_background(
     if arr.ndim != 3:
         raise ValueError("adaptive windows require a 3-D cube")
     size = (window_size, window_size, 1)
-    mean = ndimage.uniform_filter(arr, size=size, mode=pad_mode)
-    mean_sq = ndimage.uniform_filter(arr * arr, size=size, mode=pad_mode)
     n_window = window_size * window_size
-    variance = np.maximum(mean_sq - mean * mean, 0.0) * n_window / max(n_window - 1, 1)
+    valid = np.isfinite(arr).all(axis=-1, keepdims=True)
+    if valid.all():
+        mean = ndimage.uniform_filter(arr, size=size, mode=pad_mode)
+        mean_sq = ndimage.uniform_filter(arr * arr, size=size, mode=pad_mode)
+        variance = (
+            np.maximum(mean_sq - mean * mean, 0.0) * n_window / max(n_window - 1, 1)
+        )
+    else:
+        # Normalised convolution: filter the zero-filled data and the
+        # validity weights, then divide, so invalid pixels carry no weight.
+        weights = np.broadcast_to(valid, arr.shape).astype(float)
+        filled = np.where(weights > 0, arr, 0.0)
+        frac = ndimage.uniform_filter(weights, size=size, mode=pad_mode)
+        count = np.rint(frac * n_window)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            mean = ndimage.uniform_filter(filled, size=size, mode=pad_mode) / frac
+            mean_sq = (
+                ndimage.uniform_filter(filled * filled, size=size, mode=pad_mode) / frac
+            )
+            variance = np.maximum(mean_sq - mean * mean, 0.0) * count / (count - 1)
+        mean = np.where((count >= 1) & valid, mean, np.nan)
+        variance = np.where((count >= 2) & valid, variance, np.nan)
     return AdaptiveBackground(
         mean=np.moveaxis(mean, -1, axis), variance=np.moveaxis(variance, -1, axis)
     )
@@ -944,6 +986,12 @@ def _as_vector(values: np.ndarray, size: int, name: str) -> Float[np.ndarray, " 
             f"{name} length {vec.shape[0]} does not match band count {size}"
         )
     return vec
+
+
+def _finite_rows(values: Float[np.ndarray, "n c"]) -> Float[np.ndarray, "n c"]:
+    """Drop sample rows with any non-finite band (no copy when all are finite)."""
+    finite = np.isfinite(values).all(axis=1)
+    return values if finite.all() else values[finite]
 
 
 def _as_2d_samples(values: np.ndarray) -> Float[np.ndarray, "n c"]:
