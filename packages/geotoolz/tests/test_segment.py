@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
+from pipekit import Operator
 
 import geotoolz as gz
 
@@ -423,11 +426,21 @@ def test_plain_ndarray_in_plain_ndarray_out(
     np.testing.assert_array_equal(out_plain, np.asarray(out_geo))
 
 
-def test_slic_forbid_in_yaml_when_mask_provided() -> None:
-    mask = np.ones((8, 8), dtype=bool)
-    op_with_mask = gz.segment.SLIC(n_segments=4, mask=mask)
-    op_without_mask = gz.segment.SLIC(n_segments=4)
+@pytest.mark.parametrize(
+    "cls", [gz.segment.SLIC, gz.segment.Felzenszwalb, gz.segment.Quickshift]
+)
+def test_segment_mask_config_refuses_reload(cls: type) -> None:
+    """A runtime mask is summarised, so from_state refuses it (#140).
 
-    assert op_with_mask.forbid_in_yaml is True
-    # Class-level default should remain falsy when no mask is provided.
-    assert getattr(op_without_mask, "forbid_in_yaml", False) is False
+    Without a mask the operator still round-trips.
+    """
+    mask = np.ones((8, 8), dtype=bool)
+    op_with_mask = cls(mask=mask)
+    assert op_with_mask.get_config()["mask"] == {"shape": [8, 8], "dtype": "bool"}
+    with pytest.raises(RuntimeError, match="non-primitive"):
+        Operator.from_state(json.loads(json.dumps(op_with_mask.state)))
+    with pytest.raises(TypeError, match="config summary"):
+        cls(mask=op_with_mask.get_config()["mask"])
+
+    op = cls()
+    assert Operator.from_state(op.state).get_config() == op.get_config()

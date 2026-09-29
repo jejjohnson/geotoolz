@@ -33,7 +33,11 @@ from shapely.geometry import LineString, shape
 from shapely.ops import unary_union
 from skimage.measure import regionprops_table
 
-from geotoolz._src.config import as_tuple
+from geotoolz._src.config import (
+    as_tuple,
+    callable_name,
+    reject_config_summary,
+)
 from geotoolz._src.wrap import wrap_like
 from geotoolz.plume._src.array import (
     ColumnUnit,
@@ -161,7 +165,7 @@ class SBMP(Operator):
     ) -> None:
         self.swir1 = swir1
         self.swir2 = swir2
-        self.reference_scene = reference_scene
+        self.reference_scene = reject_config_summary(reference_scene, "reference_scene")
         self.axis = axis
         self.eps = eps
 
@@ -312,10 +316,14 @@ class PlumeFootprint(Operator):
     ) -> None:
         self.min_area_m2 = min_area_m2
         self.simplify_tolerance = simplify_tolerance
-        self.enhancement = enhancement
+        self.enhancement = reject_config_summary(enhancement, "enhancement")
         self.properties = tuple(PLUME_REGIONPROPS if properties is None else properties)
         self.extra_properties = (
-            None if extra_properties is None else tuple(extra_properties)
+            None
+            if extra_properties is None
+            else tuple(
+                reject_config_summary(f, "extra_properties") for f in extra_properties
+            )
         )
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
@@ -466,9 +474,7 @@ class PlumeFootprint(Operator):
             "properties": list(self.properties),
             "extra_properties": None
             if self.extra_properties is None
-            else [
-                getattr(func, "__name__", repr(func)) for func in self.extra_properties
-            ],
+            else [{"callable": callable_name(f)} for f in self.extra_properties],
         }
 
 
@@ -606,6 +612,8 @@ class IMEEstimate(Operator):
             print(result["emission_rate_kg_s"])
     """
 
+    forbid_in_yaml: ClassVar[bool] = True
+
     def __init__(
         self,
         *,
@@ -717,6 +725,8 @@ class CrossSectionalFlux(Operator):
                 n_transects=3, transect_spacing_m=100.0,
             )(kg_m2)
     """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,

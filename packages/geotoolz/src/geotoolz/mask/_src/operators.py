@@ -207,6 +207,8 @@ class LandMask(PolygonMask):
             local vector file path passed to ``geopandas.read_file``.
     """
 
+    forbid_in_yaml: ClassVar[bool] = False
+
     def __init__(self, *, source: str = "natural_earth_10m") -> None:
         self.source = source
         super().__init__(geometry=_load_natural_earth("land", source), crs="EPSG:4326")
@@ -226,6 +228,8 @@ class OceanMask(PolygonMask):
             the Natural Earth 1:10m ocean polygons; any other value is a
             local vector file path passed to ``geopandas.read_file``.
     """
+
+    forbid_in_yaml: ClassVar[bool] = False
 
     def __init__(self, *, source: str = "natural_earth_10m") -> None:
         self.source = source
@@ -251,6 +255,8 @@ class CountryMask(PolygonMask):
     Raises:
         ValueError: If none of the requested codes are found.
     """
+
+    forbid_in_yaml: ClassVar[bool] = False
 
     def __init__(
         self,

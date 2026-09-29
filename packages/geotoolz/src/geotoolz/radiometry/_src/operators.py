@@ -360,10 +360,6 @@ class RadianceToReflectance(Operator):
         >>> reflectance = op(radiance_geotensor)
     """
 
-    # Holds a ``datetime`` instance — emit ISO-8601 from ``get_config``
-    # so hydra-zen / OmegaConf YAML round-trips succeed.
-    forbid_in_yaml: ClassVar[bool] = False
-
     def __init__(
         self,
         *,

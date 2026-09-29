@@ -70,12 +70,34 @@ def _mf(**extra: Any) -> Callable[[], dict[str, Any]]:
 
 
 _DATE = "2024-06-01T10:30:00"
+_BOUNDS = (500_000.0, 3_999_840.0, 500_160.0, 4_000_000.0)
+
+
+def _natural_earth_stub() -> str:
+    """A tiny local vector file, so Natural Earth masks never download."""
+    import tempfile
+
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    path = f"{tempfile.gettempdir()}/geotoolz-contract-natural-earth.gpkg"
+    gpd.GeoDataFrame(
+        {"ISO_A3": ["GRL"], "geometry": [box(0.0, 0.0, 1.0, 1.0)]},
+        crs="EPSG:4326",
+    ).to_file(path)
+    return path
+
 
 #: Constructor kwargs for operators that cannot be built with no arguments.
 #: Values are dicts, or zero-arg callables returning one (for runtime objects).
 #: ``forbid_in_yaml`` classes need no entry: their round-trip is checked on
 #: a synthetic state record.
 CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
+    "augment._src.operators.Compose": lambda: {
+        "augmentations": [
+            __import__("geotoolz.augment", fromlist=["RandomFlip"]).RandomFlip()
+        ]
+    },
     "augment._src.operators.RandomCrop": {"size": (4, 4)},
     "augment._src.operators.RandomShift": {"max_shift": (2, 2)},
     "compositing._src.operators.BAPComposite": {"target_doy": 180},
@@ -104,6 +126,30 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
         "index_op": __import__("geotoolz.indices", fromlist=["NDVI"]).NDVI(red=0, nir=1)
     },
     "indices._src.operators.NormalizedDifference": {"a": 0, "b": 1},
+    "io._src.operators.LoadFromEE": {
+        "image_id": "COPERNICUS/S2/20240601T000000_20240601T000000_T29SND",
+        "bounds": _BOUNDS,
+        "crs": "EPSG:32629",
+        "scale": 10.0,
+    },
+    "io._src.operators.ReadBounds": {"src": "scene.tif", "bounds": _BOUNDS},
+    "io._src.operators.ReadCenterCoords": {
+        "src": "scene.tif",
+        "center": (500_080.0, 3_999_920.0),
+        "shape": (8, 8),
+    },
+    "io._src.operators.ReadHDF": {"path": "scene.h5", "dataset": "radiance"},
+    "io._src.operators.ReadNetCDF": {"path": "scene.nc", "variable": "radiance"},
+    "io._src.operators.ReadPolygon": lambda: {
+        "src": "scene.tif",
+        "polygon": __import__("shapely.geometry", fromlist=["box"]).box(*_BOUNDS),
+    },
+    "io._src.operators.ReadTile": {"src": "scene.tif", "tile": (1, 2, 3)},
+    "io._src.operators.ReadToCRS": {"src": "scene.tif", "dst_crs": "EPSG:4326"},
+    "io._src.operators.ReadWindow": {"src": "scene.tif", "window": (0, 0, 8, 8)},
+    "io._src.operators.WriteCOG": {"path": "out.tif"},
+    "io._src.operators.WriteGeoTIFF": {"path": "out.tif"},
+    "io._src.operators.WriteZarr": {"store": "out.zarr"},
     **{
         f"learn.{name}": _sklearn(name)
         for name in (
@@ -131,6 +177,12 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "learn._src.operators.SklearnOp": _sklearn("PCA"),
     "mask._src.operators.BBoxMask": {"bounds": (0.0, 0.0, 1.0, 1.0)},
     "mask._src.operators.BufferMask": {"radius": 10.0},
+    "mask._src.operators.CountryMask": lambda: {
+        "iso_a3": "GRL",
+        "source": _natural_earth_stub(),
+    },
+    "mask._src.operators.LandMask": lambda: {"source": _natural_earth_stub()},
+    "mask._src.operators.OceanMask": lambda: {"source": _natural_earth_stub()},
     "mask._src.operators.RemoveSmallHoles": {"area_threshold": 4},
     "mask._src.operators.RemoveSmallObjects": {"min_size": 4},
     "matched_filter._src.operators.ApplyClusterMF": lambda: {"target": np.ones(3)},
@@ -229,35 +281,10 @@ UNBUILDABLE: dict[str, str] = {
 #: removed as fixed. The exception type pins each case to its documented
 #: failure mode, so a different failure is reported instead of swallowed.
 Known = tuple[str, type[BaseException]]
-_SKLEARN: Known = (
-    "#140: holds a fitted estimator but is not forbid_in_yaml",
-    RuntimeError,
-)
 
 KNOWN_FAILURES: dict[str, dict[str, Known]] = {
-    "round_trip": {
-        "learn._src.operators.SklearnOp": _SKLEARN,
-        **{
-            f"learn.{name}": _SKLEARN
-            for name in (
-                "GMM",
-                "IPCA",
-                "IsolationForest",
-                "IterativeImputer",
-                "KMeans",
-                "KNNImputer",
-                "LocalOutlierFactor",
-                "MiniBatchKMeans",
-                "NMF",
-                "OneClassSVM",
-                "PCA",
-            )
-        },
-    },
-    "config_is_json": {
-        "learn.IterativeImputer": ("#140: estimator_params carries NaN", ValueError),
-        "learn.KNNImputer": ("#140: estimator_params carries NaN", ValueError),
-    },
+    "round_trip": {},
+    "config_is_json": {},
     "config_keys": {},
     "graph_mode": {},
 }
@@ -335,6 +362,8 @@ def test_tables_name_real_operators() -> None:
 
 
 def _is_nested_operator(value: Any) -> bool:
+    if isinstance(value, list):
+        return bool(value) and all(map(_is_nested_operator, value))
     return isinstance(value, dict) and set(value) == {"class", "config"}
 
 

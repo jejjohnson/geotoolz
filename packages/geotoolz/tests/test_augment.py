@@ -355,9 +355,11 @@ def test_get_config_is_json_safe(patch: GeoTensor) -> None:
         json.dumps(op.get_config())
 
 
-def test_compose_and_cutmix_are_forbid_in_yaml() -> None:
-    assert augment.Compose([]).forbid_in_yaml is True
+def test_cutmix_is_forbid_in_yaml_but_compose_is_a_container() -> None:
+    # CutMix holds runtime rasters; Compose only nests operators, which
+    # pipekit's container rule leaves to the children (#140).
     assert augment.CutMix(pool=[]).forbid_in_yaml is True
+    assert augment.Compose([]).forbid_in_yaml is False
 
 
 def test_simulated_clouds_rejects_invalid_coverage_at_construction() -> None:
@@ -473,3 +475,10 @@ def test_cutmix_and_compose_support_plain_arrays() -> None:
     out = composed(arr)
     assert type(out) is np.ndarray
     np.testing.assert_array_equal(out, np.flip(arr, axis=-1))
+
+
+def test_compose_rejects_non_operator_children() -> None:
+    """A reloaded nested payload fails at construction, not at apply."""
+    payload = augment.Compose([augment.RandomFlip()]).get_config()["augmentations"]
+    with pytest.raises(TypeError, match="must be an Operator"):
+        augment.Compose(payload)

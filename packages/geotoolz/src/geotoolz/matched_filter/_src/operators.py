@@ -14,12 +14,12 @@ dataclasses) unchanged for either input kind.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
 from pipekit import Operator
 
-from geotoolz._src.config import jsonable
+from geotoolz._src.config import callable_name, jsonable, reject_config_summary
 from geotoolz._src.wrap import wrap_like
 from geotoolz.matched_filter._src.array import (
     AdaptiveBackground,
@@ -649,6 +649,8 @@ class LinearTargetFromObs(Operator):
         axis: Position of the spectral axis. Default ``0``.
     """
 
+    forbid_in_yaml: ClassVar[bool] = True
+
     def __init__(
         self,
         *,
@@ -686,6 +688,7 @@ class LinearTargetFromObs(Operator):
             "pattern": self.pattern
             if isinstance(self.pattern, str)
             else np.asarray(self.pattern).tolist(),
+            "obs_model": callable_name(self.obs_model),
             "pixel": self.pixel,
             "axis": self.axis,
         }
@@ -713,6 +716,8 @@ class NonlinearTargetFromObs(Operator):
             the first flat pixel when ``None``.
         axis: Position of the spectral axis. Default ``0``.
     """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -751,6 +756,7 @@ class NonlinearTargetFromObs(Operator):
             "pattern": self.pattern
             if isinstance(self.pattern, str)
             else np.asarray(self.pattern).tolist(),
+            "obs_model": callable_name(self.obs_model),
             "pixel": self.pixel,
             "axis": self.axis,
         }
@@ -798,7 +804,7 @@ class ColumnEnhancement(Operator):
     ) -> None:
         self.gas = gas
         self.sensor = sensor
-        self.obs_model = obs_model
+        self.obs_model = reject_config_summary(obs_model, "obs_model")
         self.mean_method = mean_method
         self.cov_method = cov_method
         self.target_pattern = target_pattern
@@ -835,6 +841,11 @@ class ColumnEnhancement(Operator):
         return {
             "gas": self.gas,
             "sensor": self.sensor,
+            # A callable has no config form: the summary makes from_state
+            # refuse the reload instead of silently using a uniform target.
+            "obs_model": None
+            if self.obs_model is None
+            else {"callable": callable_name(self.obs_model)},
             "mean_method": self.mean_method,
             "cov_method": self.cov_method,
             "target_pattern": self.target_pattern,

@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from georeader.geotensor import GeoTensor
 from georeader.rasterio_reader import RasterioReader
-from pipekit import Identity, Sequential
+from pipekit import Identity, Operator, Sequential
 from pyproj import CRS
 from rasterio.transform import array_bounds, from_origin
 from rasterio.windows import Window
@@ -487,27 +487,42 @@ def test_load_from_ee_reports_missing_optional_dependencies() -> None:
 # ---------------------------------------------------------------------------
 
 
-_IO_OPERATOR_CLASSES = (
-    io.ReadWindow,
-    io.ReadBounds,
-    io.ReadCenterCoords,
-    io.ReadTile,
-    io.ReadPolygon,
-    io.ReadReprojectLike,
-    io.ReadToCRS,
-    io.WriteCOG,
-    io.WriteGeoTIFF,
-    io.WriteZarr,
-    io.LoadFromSTAC,
-    io.LoadFromEE,
+_RUNTIME_IO_OPERATOR_CLASSES = (io.ReadReprojectLike, io.LoadFromSTAC)
+
+
+@pytest.mark.parametrize(
+    "op_cls",
+    [
+        io.ReadWindow,
+        io.ReadBounds,
+        io.ReadCenterCoords,
+        io.ReadTile,
+        io.ReadPolygon,
+        io.ReadToCRS,
+        io.ReadHDF,
+        io.ReadNetCDF,
+        io.WriteCOG,
+        io.WriteGeoTIFF,
+        io.WriteZarr,
+        io.LoadFromEE,
+    ],
 )
+def test_path_configured_io_operators_round_trip(op_cls: type) -> None:
+    """Paths, bounds, windows and asset IDs are plain JSON (#140)."""
+    assert op_cls.forbid_in_yaml is False
 
 
-@pytest.mark.parametrize("op_cls", _IO_OPERATOR_CLASSES)
-def test_io_operators_are_marked_forbid_in_yaml(op_cls: type) -> None:
-    """All public IO operators carry runtime references (paths, items,
-    EE asset IDs, reference grids) and so should refuse YAML serialisation."""
+@pytest.mark.parametrize("op_cls", _RUNTIME_IO_OPERATOR_CLASSES)
+def test_runtime_io_operators_are_forbid_in_yaml(op_cls: type) -> None:
+    """A STAC item or a reference grid is a runtime object."""
     assert op_cls.forbid_in_yaml is True
+
+
+def test_io_source_given_as_object_is_refused_by_from_state() -> None:
+    reader = object()
+    op = io.ReadWindow(src=reader, window=(0, 0, 4, 4))
+    with pytest.raises(RuntimeError, match="non-primitive"):
+        Operator.from_state(op.state)
 
 
 def test_write_operators_are_terminal() -> None:
@@ -622,3 +637,19 @@ def test_io_hydra_zen_builds_roundtrip(op: gz.Operator) -> None:
     restored = hydra_zen.instantiate(cfg)
     assert type(restored) is type(op)
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+def test_sink_mapping_options_round_trip() -> None:
+    """``profile`` / ``tags`` / ``chunks`` are emitted as pairs (#140 review)."""
+    import json
+
+    ops = [
+        io.WriteCOG(path="out.tif", profile={"blocksize": 512}, tags={"a": "1"}),
+        io.WriteGeoTIFF(path="out.tif", profile={"nodata": 0}, tags={"a": "1"}),
+        io.WriteZarr(store="out.zarr", chunks={"y": 256, "x": 256}),
+    ]
+    for op in ops:
+        clone = Operator.from_state(json.loads(json.dumps(op.state)))
+        assert clone.get_config() == op.get_config()
+    assert ops[2].get_config()["chunks"] == [["y", 256], ["x", 256]]
+    assert Operator.from_state(ops[0].state).profile == {"blocksize": 512}

@@ -16,7 +16,7 @@ See ``docs/design/query-matchup.md`` §5.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import einx
 import numpy as np
@@ -398,8 +398,6 @@ class PointsToRaster(Operator):
             Required for GeoDataFrame; ignored for xvec-indexed
             DataArray.
     """
-
-    forbid_in_yaml: ClassVar[bool] = False
 
     def __init__(
         self,
