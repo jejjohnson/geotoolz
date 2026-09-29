@@ -221,14 +221,21 @@ UNBUILDABLE: dict[str, str] = {
     "qa._src.operators._QAMask": "private base class",
 }
 
-#: ``{check: {operator key: issue}}`` — strict xfails, removed as fixed.
-_TUPLE_LIST = "#139: tuple config reloads as a list"
-_DICT_CFG = "#139: dict config is not a from_state primitive"
-_SKLEARN = "#140: holds a fitted estimator but is not forbid_in_yaml"
+#: ``{check: {operator key: (issue, expected exception)}}`` — strict xfails
+#: removed as fixed. The exception type pins each case to its documented
+#: failure mode, so a different failure is reported instead of swallowed.
+Known = tuple[str, type[BaseException]]
+_TUPLE_LIST: Known = ("#139: tuple config reloads as a list", AssertionError)
+_TUPLE_CRASH: Known = ("#139: constructor rejects the reloaded list", TypeError)
+_DICT_CFG: Known = ("#139: dict config is not a from_state primitive", RuntimeError)
+_SKLEARN: Known = (
+    "#140: holds a fitted estimator but is not forbid_in_yaml",
+    RuntimeError,
+)
 
-KNOWN_FAILURES: dict[str, dict[str, str]] = {
+KNOWN_FAILURES: dict[str, dict[str, Known]] = {
     "round_trip": {
-        "augment._src.operators.SimulatedClouds": _TUPLE_LIST,
+        "augment._src.operators.SimulatedClouds": _TUPLE_CRASH,
         "feature._src.operators.HOG": _TUPLE_LIST,
         "measure._src.operators.ProfileLine": _TUPLE_LIST,
         "plume._src.operators.WindAdvectionCone": _TUPLE_LIST,
@@ -254,12 +261,18 @@ KNOWN_FAILURES: dict[str, dict[str, str]] = {
         },
     },
     "config_is_json": {
-        "geom._src.operators.SegmentStitch": "#139: default fill=NaN is not JSON",
-        "learn.IterativeImputer": "#140: estimator_params carries NaN",
-        "learn.KNNImputer": "#140: estimator_params carries NaN",
+        "geom._src.operators.SegmentStitch": (
+            "#139: default fill=NaN is not JSON",
+            ValueError,
+        ),
+        "learn.IterativeImputer": ("#140: estimator_params carries NaN", ValueError),
+        "learn.KNNImputer": ("#140: estimator_params carries NaN", ValueError),
     },
     "config_keys": {
-        "learn._src.operators.SklearnOp": "#138: emits estimator_params, resolved_task",
+        "learn._src.operators.SklearnOp": (
+            "#138: emits estimator_params, resolved_task",
+            AssertionError,
+        ),
     },
     "graph_mode": {},
 }
@@ -274,7 +287,8 @@ def _params(check: str, classes: list[type] | None = None) -> list[Any]:
         key = _key(cls)
         marks = []
         if key in known:
-            marks.append(pytest.mark.xfail(reason=known[key], strict=True))
+            reason, raises = known[key]
+            marks.append(pytest.mark.xfail(reason=reason, raises=raises, strict=True))
         out.append(pytest.param(cls, id=key, marks=marks))
     return out
 
@@ -315,10 +329,23 @@ def test_every_operator_is_classified() -> None:
     assert missing == [], "add constructor kwargs to CTOR_KWARGS"
 
 
+def _importable(key: str) -> bool:
+    """Whether the module behind a table key imports (optional extras)."""
+    import importlib
+
+    parts = key.split(".")[:-1]
+    try:
+        importlib.import_module(".".join(["geotoolz", *parts]))
+    except ImportError:
+        return False
+    return True
+
+
 def test_tables_name_real_operators() -> None:
+    """Table keys name operators; entries for missing extras are ignored."""
     keys = {_key(c) for c in _CLASSES}
     tables = [CTOR_KWARGS, UNBUILDABLE, *KNOWN_FAILURES.values()]
-    stale = sorted({k for t in tables for k in t} - keys)
+    stale = sorted(k for k in {k for t in tables for k in t} - keys if _importable(k))
     assert stale == []
 
 
@@ -379,13 +406,21 @@ def test_get_config_keys_are_constructor_params(cls: type) -> None:
 
 
 def _n_inputs(op: Operator) -> int:
-    params = inspect.signature(op._apply).parameters.values()
-    return sum(
-        1
-        for p in params
-        if p.default is inspect.Parameter.empty
-        and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
-    ) or int(any(p.kind is p.VAR_POSITIONAL for p in params))
+    """Graph inputs to feed: the required positional parameters of ``_apply``.
+
+    An ``_apply`` whose only positional parameters are optional (pass-through
+    validators, optional-input ops) or variadic still takes one input; zero is
+    reserved for ``_apply`` methods with no positional parameters at all.
+    """
+    params = list(inspect.signature(op._apply).parameters.values())
+    positional = (
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    )
+    required = sum(1 for p in params if p.kind in positional and p.default is p.empty)
+    if required:
+        return required
+    return int(any(p.kind in positional or p.kind is p.VAR_POSITIONAL for p in params))
 
 
 @pytest.mark.parametrize("cls", _params("graph_mode"))
