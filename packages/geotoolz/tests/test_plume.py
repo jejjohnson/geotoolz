@@ -174,9 +174,14 @@ def test_ime_estimate_uses_integrated_mass_and_max_axis_length() -> None:
 
 
 def test_ime_skeleton_length_and_uncertainty_fraction() -> None:
-    mask_arr = np.array([[True, True], [False, True]])
+    # Bent 1-pixel-wide plume: along the top row, then down the right
+    # column. The skeleton follows the bend (cutting the corner with one
+    # diagonal step), so it is longer than the endpoint chord.
+    mask_arr = np.zeros((5, 5), dtype=bool)
+    mask_arr[0, :] = True
+    mask_arr[:, 4] = True
     mask = _gt(mask_arr)
-    enhancement = _gt(np.ones((2, 2), dtype=float))
+    enhancement = _gt(np.ones((5, 5), dtype=float))
 
     estimate = gz.plume.IMEEstimate(
         plume_mask=mask,
@@ -190,11 +195,85 @@ def test_ime_skeleton_length_and_uncertainty_fraction() -> None:
         length_method="max_axis",
     )(enhancement)
 
-    assert estimate["ime_kg"] == pytest.approx(300.0)
-    assert estimate["length_m"] == pytest.approx(20.0)
-    assert estimate["length_m"] != pytest.approx(max_axis["length_m"])
-    assert estimate["emission_rate_kg_s"] == pytest.approx(30.0)
-    assert estimate["emission_rate_uncertainty_kg_s"] == pytest.approx(6.0)
+    # 3 + 3 orthogonal 10 m steps plus one diagonal step at the corner.
+    expected_length = 60.0 + 10.0 * np.sqrt(2.0)
+    assert estimate["ime_kg"] == pytest.approx(900.0)
+    assert estimate["length_m"] == pytest.approx(expected_length)
+    assert max_axis["length_m"] == pytest.approx(40.0 * np.sqrt(2.0))
+    assert estimate["emission_rate_kg_s"] == pytest.approx(
+        900.0 * 2.0 / expected_length
+    )
+    assert estimate["emission_rate_uncertainty_kg_s"] == pytest.approx(
+        0.2 * 900.0 * 2.0 / expected_length
+    )
+
+
+def test_skeleton_length_diagonal_plume() -> None:
+    from geotoolz.plume._src.array import plume_length
+
+    # An 8-connected diagonal plume is one component for PlumeMask, so it
+    # must have a positive skeleton length (was 0 with 4-connectivity).
+    mask = np.eye(10, dtype=bool)
+    transform = rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 100.0)
+
+    assert plume_length(mask, transform, method="skeleton") == pytest.approx(
+        90.0 * np.sqrt(2.0)
+    )
+    estimate = gz.plume.IMEEstimate(
+        plume_mask=_gt(mask), wind_speed=1.0, length_method="skeleton"
+    )(_gt(np.ones((10, 10))))
+    assert estimate["length_m"] == pytest.approx(127.279, abs=1e-3)
+    assert estimate["emission_rate_kg_s"] > 0.0
+
+
+def test_skeleton_length_honours_anisotropic_pixels() -> None:
+    from geotoolz.plume._src.array import plume_length
+
+    mask = np.eye(10, dtype=bool)
+    # 10 m wide, 20 m tall pixels: each diagonal step is hypot(10, 20).
+    transform = rasterio.Affine(10.0, 0.0, 0.0, 0.0, -20.0, 200.0)
+
+    assert plume_length(mask, transform, method="skeleton") == pytest.approx(
+        9.0 * np.hypot(10.0, 20.0)
+    )
+    # A vertical line measures 20 m per step, a horizontal one 10 m.
+    vertical = np.zeros((10, 10), dtype=bool)
+    vertical[:, 3] = True
+    assert plume_length(vertical, transform, method="skeleton") == pytest.approx(180.0)
+    assert plume_length(vertical.T, transform, method="skeleton") == pytest.approx(90.0)
+
+
+def test_skeleton_length_does_not_exceed_chord_for_straight_thick_plume() -> None:
+    from geotoolz.plume._src.array import plume_length
+
+    # A straight 5-pixel-thick plume: the old Manhattan diameter (330 m)
+    # over-estimated L beyond the chord; the centreline cannot.
+    mask = np.zeros((9, 34), dtype=bool)
+    mask[2:7, 2:32] = True
+    transform = rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 100.0)
+
+    skeleton = plume_length(mask, transform, method="skeleton")
+    chord = plume_length(mask, transform, method="max_axis")
+    assert 0.0 < skeleton <= chord
+
+
+def test_skeleton_length_single_pixel_and_compact_blob() -> None:
+    from geotoolz.plume._src.array import plume_length
+
+    transform = rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 100.0)
+    # Single pixel: documented one-pixel-size proxy, same as other methods.
+    single = np.zeros((4, 4), dtype=bool)
+    single[1, 1] = True
+    assert plume_length(single, transform, method="skeleton") == pytest.approx(10.0)
+    # A compact blob whose skeleton collapses to one pixel raises rather
+    # than silently returning L = 0 (which zeroed Q in IMEEstimate).
+    blob = np.array([[True, True], [False, True]])
+    with pytest.raises(ValueError, match="skeleton plume length is 0"):
+        plume_length(blob, transform, method="skeleton")
+    with pytest.raises(ValueError, match="max_axis"):
+        gz.plume.IMEEstimate(
+            plume_mask=_gt(blob), wind_speed=1.0, length_method="skeleton"
+        )(_gt(np.ones((2, 2))))
 
 
 def test_skeleton_plume_length_is_deterministic_for_multi_component_mask() -> None:
@@ -229,6 +308,73 @@ def test_skeleton_plume_length_is_deterministic_for_multi_component_mask() -> No
     # connected component as the dominant one.
     reflected = mask[::-1, ::-1].copy()
     assert _longest_active_pixel_path(reflected, transform) == pytest.approx(90.0)
+
+
+_GEO_OPS = ("PlumeFootprint", "IMEEstimate", "WindAdvectionCone", "CrossSectionalFlux")
+
+
+def _geo_case(name: str, make: Callable[[np.ndarray], GeoTensor]) -> tuple:
+    """Build ``(operator, input)`` for a metre-assuming plume operator."""
+    mask_arr = np.zeros((10, 15), dtype=bool)
+    mask_arr[4:6, :] = True
+    mask = make(mask_arr)
+    enhancement = make(mask_arr.astype(float))
+    if name == "PlumeFootprint":
+        return gz.plume.PlumeFootprint(min_area_m2=0.0), mask
+    if name == "IMEEstimate":
+        return gz.plume.IMEEstimate(plume_mask=mask, wind_speed=2.0), enhancement
+    if name == "WindAdvectionCone":
+        op = gz.plume.WindAdvectionCone(
+            source=(0.0, 0.0), wind_u=1.0, wind_v=0.0, max_distance=200.0
+        )
+        return op, mask
+    op = gz.plume.CrossSectionalFlux(
+        plume_mask=mask, source=(0.0, 0.0), wind_u=1.0, wind_v=0.0
+    )
+    return op, enhancement
+
+
+@pytest.mark.parametrize(
+    ("crs", "match"),
+    [("EPSG:4326", "geographic"), ("EPSG:2263", "linear units")],
+    ids=["geographic", "us-feet"],
+)
+@pytest.mark.parametrize("name", _GEO_OPS)
+def test_geo_ops_reject_geographic_crs(crs: str, match: str, name: str) -> None:
+    def make(values: np.ndarray) -> GeoTensor:
+        return GeoTensor(
+            values=values,
+            transform=rasterio.Affine(1e-4, 0.0, 0.0, 0.0, -1e-4, 0.001),
+            crs=crs,
+        )
+
+    op, carrier = _geo_case(name, make)
+    with pytest.raises(ValueError, match=rf"{name}.*{match}.*Reproject"):
+        op(carrier)
+
+
+@pytest.mark.parametrize("name", _GEO_OPS)
+def test_geo_ops_accept_projected_crs(name: str) -> None:
+    op, carrier = _geo_case(name, _gt)
+    op(carrier)
+
+
+def test_wind_cone_source_crs_requires_carrier_crs() -> None:
+    gt = GeoTensor(
+        values=np.zeros((5, 5)),
+        transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 50.0),
+        crs=None,
+    )
+    op = gz.plume.WindAdvectionCone(
+        source=(-8.0, 53.0), wind_u=1.0, wind_v=0.0, crs="EPSG:4326"
+    )
+    with pytest.raises(ValueError, match="has no CRS"):
+        op(gt)
+    # Without a source CRS the crs-less carrier is still accepted (metres).
+    out = gz.plume.WindAdvectionCone(
+        source=(0.0, 25.0), wind_u=1.0, wind_v=0.0, max_distance=30.0
+    )(gt)
+    assert np.asarray(out).any()
 
 
 def test_ime_rejects_negative_uncertainty_fraction() -> None:

@@ -22,6 +22,7 @@ import numpy as np
 from jaxtyping import Bool, Float, Int, Num, Shaped
 from scipy import ndimage
 from shapely.geometry import MultiPoint
+from skimage.morphology import skeletonize
 
 from geotoolz._src.shape import single_band
 
@@ -394,8 +395,38 @@ def plume_length(
       pixels. For degenerate hulls (single point, collinear points) we
       fall back to the point-set diameter so the result is always well
       defined.
-    - ``"skeleton"``: longest 4-connected pixel path through the plume,
-      better for curved plumes where the chord underestimates ``L``.
+    - ``"skeleton"``: length of the plume centreline. The mask is
+      skeletonised with :func:`skimage.morphology.skeletonize` and ``L``
+      is the longest geodesic path through the 8-connected skeleton,
+      with each step weighted by its Euclidean length in CRS units
+      (so diagonal steps and anisotropic pixels are measured
+      correctly). Better than the chord for curved plumes. The path
+      runs between skeleton pixel centres, so for thick plumes it is
+      shorter than the mask extent by roughly the plume width.
+
+    Lengths are in CRS units (m for a projected metric CRS) and measured
+    between pixel centres.
+
+    A single-pixel mask returns one linear pixel size,
+    ``sqrt(pixel_area)``, for every method: it has no geometry to
+    measure, and the one-pixel proxy is the documented convention.
+
+    Args:
+        mask: Boolean ``(H, W)`` plume mask.
+        transform: Affine-like geotransform (``a``, ``b``, ``d``, ``e``
+            coefficients) mapping pixel indices to CRS coordinates.
+        method: Length estimator (see above).
+
+    Returns:
+        The plume length in CRS units; ``0.0`` for an empty mask.
+
+    Raises:
+        ValueError: If ``method`` is unknown, or if ``method="skeleton"``
+            and a multi-pixel mask yields ``L == 0`` (every skeleton
+            component collapses to a single pixel, e.g. a compact blob a
+            few pixels across or scattered isolated pixels). A one-pixel
+            proxy would badly under-estimate ``L`` (and over-estimate
+            ``Q``) there, so use ``"max_axis"`` or ``"convex_hull"``.
     """
     active = np.asarray(mask, dtype=bool)
     if not active.any():
@@ -422,22 +453,40 @@ def plume_length(
         diff = coords[:, None, :] - coords[None, :, :]
         return float(np.sqrt(np.max(np.sum(diff**2, axis=-1))))
     if method == "skeleton":
-        return _longest_active_pixel_path(active, transform)
+        length = _longest_active_pixel_path(skeletonize(active), transform)
+        if length <= 0.0:
+            raise ValueError(
+                f"skeleton plume length is 0 for a non-empty {int(active.sum())}-"
+                "pixel mask: every skeleton component collapses to a single "
+                "pixel (compact blob or isolated pixels). Use "
+                "length_method='max_axis' or 'convex_hull' for such plumes."
+            )
+        return length
     raise ValueError("length_method must be 'max_axis', 'convex_hull', or 'skeleton'")
 
 
+# 8-neighbour offsets ``(drow, dcol)``.
+_NEIGHBOURS_8 = tuple(
+    (drow, dcol) for drow in (-1, 0, 1) for dcol in (-1, 0, 1) if (drow, dcol) != (0, 0)
+)
+
+
 def _longest_active_pixel_path(mask: Bool[np.ndarray, "h w"], transform: Any) -> float:
-    """Approximate centerline length as the longest 4-neighbor pixel path.
+    """Longest geodesic path through the 8-connected active pixels.
 
-    The 4-neighbor graph avoids diagonal corner-cutting through plume
-    pixels, so bent plumes are measured along their active-pixel path
-    rather than by a straight endpoint chord.
+    Each step between 8-neighbours is weighted by its Euclidean length
+    in CRS units, derived from the transform so anisotropic and rotated
+    grids are handled. ``plume_length(method="skeleton")`` calls this on
+    the skeletonised mask.
 
-    The starting node for the double-BFS is chosen deterministically as
-    the lexicographically smallest ``(row, col)`` so the resulting length
+    Uses a double Dijkstra sweep per component (farthest pixel from a
+    seed, then farthest from that), which is exact for tree-shaped
+    skeletons and a close lower bound for skeletons with loops. The
+    seed is the lexicographically smallest ``(row, col)`` so the result
     does not depend on set iteration order. For masks with multiple
     disconnected components, each component is processed independently
-    and the maximum path length across components is returned.
+    and the maximum path length across components is returned; a
+    single-pixel component contributes ``0``.
     """
     rows, cols = np.nonzero(mask)
     nodes = {(int(r), int(c)) for r, c in zip(rows, cols, strict=True)}
@@ -461,12 +510,12 @@ def _longest_active_pixel_path(mask: Bool[np.ndarray, "h w"], transform: Any) ->
 def _connected_component(
     seed: tuple[int, int], nodes: set[tuple[int, int]]
 ) -> set[tuple[int, int]]:
-    """Return the 4-connected component of ``seed`` within ``nodes``."""
+    """Return the 8-connected component of ``seed`` within ``nodes``."""
     component: set[tuple[int, int]] = {seed}
     stack: list[tuple[int, int]] = [seed]
     while stack:
         row, col = stack.pop()
-        for drow, dcol in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        for drow, dcol in _NEIGHBOURS_8:
             neighbor = (row + drow, col + dcol)
             if neighbor in nodes and neighbor not in component:
                 component.add(neighbor)
@@ -479,6 +528,18 @@ def _farthest_active_pixel(
     nodes: set[tuple[int, int]],
     transform: Any,
 ) -> tuple[tuple[int, int], float]:
+    """Dijkstra over 8-neighbours with Euclidean (CRS-unit) step weights."""
+    # Step length for each offset: the transform maps a (dcol, drow)
+    # pixel step to (step_x, step_y) in CRS units.
+    step_length = {
+        (drow, dcol): float(
+            np.hypot(
+                transform.a * dcol + transform.b * drow,
+                transform.d * dcol + transform.e * drow,
+            )
+        )
+        for drow, dcol in _NEIGHBOURS_8
+    }
     distances = {start: 0.0}
     heap = [(0.0, start)]
     farthest = start
@@ -486,20 +547,16 @@ def _farthest_active_pixel(
         distance, node = heappop(heap)
         if distance != distances[node]:
             continue
+        # Nodes pop in non-decreasing distance order, so the last one
+        # settled is the farthest.
         farthest = node
         row, col = node
-        for drow in (-1, 0, 1):
-            for dcol in (-1, 0, 1):
-                # 4-neighbor connectivity: exclude the center and diagonals.
-                if abs(drow) + abs(dcol) != 1:
-                    continue
-                neighbor = (row + drow, col + dcol)
-                if neighbor not in nodes:
-                    continue
-                step_x = transform.a * dcol + transform.b * drow
-                step_y = transform.d * dcol + transform.e * drow
-                new_distance = distance + float(np.hypot(step_x, step_y))
-                if new_distance < distances.get(neighbor, np.inf):
-                    distances[neighbor] = new_distance
-                    heappush(heap, (new_distance, neighbor))
+        for (drow, dcol), step in step_length.items():
+            neighbor = (row + drow, col + dcol)
+            if neighbor not in nodes:
+                continue
+            new_distance = distance + step
+            if new_distance < distances.get(neighbor, np.inf):
+                distances[neighbor] = new_distance
+                heappush(heap, (new_distance, neighbor))
     return farthest, distances[farthest]

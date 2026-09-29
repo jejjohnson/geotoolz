@@ -4,8 +4,11 @@ These Tier-B operators wrap the Tier-A primitives in ``array.py``.
 Per-pixel operators accept a ``georeader.GeoTensor`` or a plain
 ``np.ndarray`` and return the same carrier kind; geo-dependent operators
 (advection geometry, pixel-area math, footprints) require a
-georeferenced ``GeoTensor`` and raise ``TypeError`` otherwise. Vector
-outputs are ``geopandas.GeoDataFrame``. Algorithms follow the literature
+georeferenced ``GeoTensor`` and raise ``TypeError`` otherwise. The
+area / distance operators (``PlumeFootprint``, ``WindAdvectionCone``,
+``IMEEstimate``, ``CrossSectionalFlux``) work in metres and raise
+``ValueError`` on a geographic CRS (see :func:`require_projected_crs`).
+Vector outputs are ``geopandas.GeoDataFrame``. Algorithms follow the literature
 cited in :mod:`geotoolz.plume._src.array`:
 
 - ``SBMP`` — Varon et al. (2021) Sentinel-2 SWIR ratio retrieval.
@@ -101,6 +104,46 @@ def _band_index(band: int | str) -> int:
 
 def _extract_and_clip_band(arr: np.ndarray, band: int | str, axis: int) -> np.ndarray:
     return np.maximum(np.take(arr, _band_index(band), axis=axis), 0.0)
+
+
+def require_projected_crs(gt: GeoTensor, op_name: str) -> None:
+    """Raise unless ``gt`` is in a projected CRS with metre units.
+
+    The area / distance plume operators treat the affine transform as
+    metres (pixel area in m^2, distances and lengths in m). On a
+    geographic CRS those numbers would silently be degrees, so they are
+    rejected with a hint to reproject first. A carrier without a CRS is
+    accepted as-is: its transform is then assumed to be in metres.
+
+    Args:
+        gt: Georeferenced carrier (anything exposing ``.crs``).
+        op_name: Operator name used in the error message.
+
+    Raises:
+        ValueError: If the CRS is geographic (or otherwise not
+            projected), or projected with non-metre linear units.
+    """
+    crs_input = getattr(gt, "crs", None)
+    if crs_input is None:
+        return
+    crs = CRS.from_user_input(crs_input)
+    hint = (
+        "Reproject to a projected metric CRS (e.g. the local UTM zone) first, "
+        "e.g. with geotoolz.geom.Reproject(dst_crs=...) or "
+        "geotoolz.geom.ReprojectLike."
+    )
+    if not crs.is_projected:
+        kind = "geographic" if crs.is_geographic else "not projected"
+        raise ValueError(
+            f"{op_name} computes areas and distances in metres and needs a "
+            f"projected CRS; got {crs.name!r} ({kind}). {hint}"
+        )
+    if any(axis.unit_conversion_factor != 1.0 for axis in crs.axis_info):
+        units = sorted({axis.unit_name for axis in crs.axis_info})
+        raise ValueError(
+            f"{op_name} computes areas and distances in metres; CRS "
+            f"{crs.name!r} has linear units {units}. {hint}"
+        )
 
 
 class SBMP(Operator):
@@ -286,12 +329,15 @@ class PlumeFootprint(Operator):
 
     Geo-dependent: polygonisation needs the carrier's transform and CRS,
     so the input must be a georeferenced ``GeoTensor`` (plain arrays
-    raise ``TypeError``).
+    raise ``TypeError``). Areas are in m^2 and the simplify tolerance in
+    m, so the CRS must be projected with metre units; a geographic CRS
+    raises ``ValueError`` (reproject with :class:`geotoolz.geom.Reproject`
+    first).
 
     Args:
-        min_area_m2: Drop polygons smaller than this area.
-        simplify_tolerance: Douglas-Peucker tolerance (in CRS units) for
-            polygon simplification; ``None`` to skip.
+        min_area_m2: Drop polygons smaller than this area (m^2).
+        simplify_tolerance: Douglas-Peucker tolerance (m) for polygon
+            simplification; ``None`` to skip.
         enhancement: Optional enhancement ``GeoTensor`` aligned with the
             mask; enables ``mean_enhancement`` / ``max_enhancement``
             statistics per polygon.
@@ -334,6 +380,7 @@ class PlumeFootprint(Operator):
                 "PlumeFootprint requires a georeferenced GeoTensor input; "
                 "got a plain array"
             )
+        require_projected_crs(gt, "PlumeFootprint")
         mask_arr = squeeze_single_band(np.asarray(gt))
         if mask_arr.dtype == bool:
             labels = label_components(mask_arr, min_area=1, connectivity=8)
@@ -492,16 +539,21 @@ class WindAdvectionCone(Operator):
 
     Geo-dependent: the cone is rasterised in CRS coordinates via the
     carrier's transform, so the input must be a georeferenced
-    ``GeoTensor`` (plain arrays raise ``TypeError``).
+    ``GeoTensor`` (plain arrays raise ``TypeError``). ``max_distance`` is
+    in metres and the cone angle is measured in the map plane, so the
+    carrier CRS must be projected with metre units; a geographic CRS
+    raises ``ValueError`` (reproject with :class:`geotoolz.geom.Reproject`
+    first).
 
     Args:
         source: ``(x, y)`` source coordinates. If ``crs`` is supplied,
             ``source`` is interpreted in that CRS and reprojected to the
-            carrier CRS.
+            carrier CRS (which must then be set); otherwise it is in
+            carrier CRS coordinates (m).
         wind_u: Eastward wind component (m/s).
         wind_v: Northward wind component (m/s).
         half_angle_deg: Half-angle of the cone (degrees).
-        max_distance: Radius of the cone (m, in carrier CRS units).
+        max_distance: Radius of the cone (m).
         crs: Optional CRS of ``source``.
 
     Examples:
@@ -534,9 +586,18 @@ class WindAdvectionCone(Operator):
                 "WindAdvectionCone requires a georeferenced GeoTensor input; "
                 "got a plain array"
             )
+        require_projected_crs(gt, "WindAdvectionCone")
         arr = squeeze_single_band(np.asarray(gt))
         source = self.source
-        if self.crs is not None and gt.crs is not None:
+        if self.crs is not None:
+            if gt.crs is None:
+                raise ValueError(
+                    "WindAdvectionCone was given source crs="
+                    f"{self.crs!r} but the input GeoTensor has no CRS, so "
+                    "the source cannot be reprojected onto it. Set the "
+                    "carrier CRS, or pass source in carrier coordinates "
+                    "with crs=None."
+                )
             src_crs = CRS.from_user_input(self.crs)
             dst_crs = CRS.from_user_input(gt.crs)
             if src_crs != dst_crs:
@@ -579,17 +640,22 @@ class IMEEstimate(Operator):
     :class:`ColumnToMass` upstream to convert from ppm m or mol/m^2:
     passing other units silently produces nonsense.
 
-    Geo-dependent: pixel area and plume length are derived from the
-    carrier's transform, so the input must be a georeferenced
-    ``GeoTensor`` (plain arrays raise ``TypeError``).
+    Geo-dependent: pixel area (m^2) and plume length (m) are derived from
+    the carrier's transform, so the input must be a georeferenced
+    ``GeoTensor`` (plain arrays raise ``TypeError``) in a projected CRS
+    with metre units; a geographic CRS raises ``ValueError`` (reproject
+    with :class:`geotoolz.geom.Reproject` first).
 
     Args:
         plume_mask: Boolean ``GeoTensor`` selecting plume pixels.
         wind_speed: Effective wind speed :math:`U_{\mathrm{eff}}` in m/s.
         length_method: Length estimator: ``"max_axis"``, ``"convex_hull"``,
-            or ``"skeleton"``. See :func:`plume_length`.
-        pixel_area_m2: Override the pixel area; default is taken from the
-            input transform determinant (correct for an equal-area CRS).
+            or ``"skeleton"``. See :func:`plume_length`; ``"skeleton"``
+            raises ``ValueError`` for compact plumes whose skeleton
+            collapses to a point.
+        pixel_area_m2: Override the pixel area (m^2); default is taken
+            from the input transform determinant (correct for an
+            equal-area CRS).
         return_uncertainty: Append ``emission_rate_uncertainty_kg_s``.
         uncertainty_fraction: Fractional 1-sigma uncertainty on Q. The
             default 0.5 follows Varon et al. (2018) Table 3.
@@ -643,6 +709,7 @@ class IMEEstimate(Operator):
                 "IMEEstimate requires a georeferenced GeoTensor input; "
                 "got a plain array"
             )
+        require_projected_crs(gt, "IMEEstimate")
         mask = squeeze_single_band(np.asarray(self.plume_mask)).astype(bool)
         enhancement = squeeze_single_band(np.asarray(gt, dtype=float))
         area = (
@@ -705,11 +772,13 @@ class CrossSectionalFlux(Operator):
 
     Geo-dependent: transect placement and pixel size come from the
     carrier's transform and CRS, so the input must be a georeferenced
-    ``GeoTensor`` (plain arrays raise ``TypeError``).
+    ``GeoTensor`` (plain arrays raise ``TypeError``) in a projected CRS
+    with metre units; a geographic CRS raises ``ValueError`` (reproject
+    with :class:`geotoolz.geom.Reproject` first).
 
     Args:
         plume_mask: Boolean plume ``GeoTensor``.
-        source: ``(x, y)`` source coordinates in the carrier CRS.
+        source: ``(x, y)`` source coordinates in the carrier CRS (m).
         wind_u: Eastward wind component (m/s).
         wind_v: Northward wind component (m/s).
         n_transects: Number of downwind transects to evaluate.
@@ -757,6 +826,7 @@ class CrossSectionalFlux(Operator):
                 "CrossSectionalFlux requires a georeferenced GeoTensor input; "
                 "got a plain array"
             )
+        require_projected_crs(gt, "CrossSectionalFlux")
         wind_norm = float(np.hypot(self.wind_u, self.wind_v))
         if wind_norm == 0.0:
             raise ValueError("wind vector must be non-zero")
