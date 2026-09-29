@@ -15,7 +15,9 @@ file/cloud IO primitives in :mod:`georeader.read` and
   accepts them as the last step.
 
 Configs built from paths, bounds, windows and asset IDs are plain JSON
-and round-trip through ``Operator.from_state`` / YAML. A source given as
+and round-trip through ``Operator.from_state`` / YAML. Mapping options
+(sink ``profile`` / ``tags`` / ``chunks``) are emitted as
+``[[key, value], ...]`` pairs and accepted in either form. A source given as
 a runtime object (an open reader, a ``GeoTensor``) stays in the config
 as-is, so ``from_state`` refuses it as non-primitive. ``LoadFromSTAC``
 (a runtime STAC item) and ``ReadReprojectLike`` (a runtime reference
@@ -44,7 +46,7 @@ from rasterio.io import DatasetReaderBase
 from rasterio.windows import Window
 from shapely.geometry import MultiPolygon, Polygon, box
 
-from geotoolz._src.config import as_tuple
+from geotoolz._src.config import as_tuple, mapping_from_pairs, mapping_to_pairs
 
 
 Source = str | PathLike[str] | Any
@@ -996,16 +998,16 @@ class WriteCOG(SinkOperator):
         self,
         *,
         path: str | PathLike[str],
-        profile: dict[str, Any] | None = None,
+        profile: dict[str, Any] | list[list[Any]] | None = None,
         compress: str = "deflate",
         descriptions: list[str] | None = None,
-        tags: dict[str, Any] | None = None,
+        tags: dict[str, Any] | list[list[Any]] | None = None,
     ) -> None:
         self.path = Path(path)
-        self.profile = profile
+        self.profile = mapping_from_pairs(profile)
         self.compress = compress
         self.descriptions = descriptions
-        self.tags = tags
+        self.tags = mapping_from_pairs(tags)
 
     def _apply(self, gt: GeoTensor) -> None:
         merged_profile: dict[str, Any] = {"compress": self.compress}
@@ -1026,10 +1028,10 @@ class WriteCOG(SinkOperator):
     def get_config(self) -> dict[str, Any]:
         return {
             "path": str(self.path),
-            "profile": self.profile,
+            "profile": mapping_to_pairs(self.profile),
             "compress": self.compress,
             "descriptions": self.descriptions,
-            "tags": self.tags,
+            "tags": mapping_to_pairs(self.tags),
         }
 
 
@@ -1065,16 +1067,16 @@ class WriteGeoTIFF(SinkOperator):
         self,
         *,
         path: str | PathLike[str],
-        profile: dict[str, Any] | None = None,
+        profile: dict[str, Any] | list[list[Any]] | None = None,
         blocksize: int = 256,
         descriptions: list[str] | None = None,
-        tags: dict[str, Any] | None = None,
+        tags: dict[str, Any] | list[list[Any]] | None = None,
     ) -> None:
         self.path = Path(path)
-        self.profile = profile
+        self.profile = mapping_from_pairs(profile)
         self.blocksize = blocksize
         self.descriptions = descriptions
-        self.tags = tags
+        self.tags = mapping_from_pairs(tags)
 
     def _apply(self, gt: GeoTensor) -> None:
         if np.ndim(gt.values) not in (2, 3):
@@ -1104,10 +1106,10 @@ class WriteGeoTIFF(SinkOperator):
     def get_config(self) -> dict[str, Any]:
         return {
             "path": str(self.path),
-            "profile": self.profile,
+            "profile": mapping_to_pairs(self.profile),
             "blocksize": self.blocksize,
             "descriptions": self.descriptions,
-            "tags": self.tags,
+            "tags": mapping_to_pairs(self.tags),
         }
 
 
@@ -1147,11 +1149,15 @@ class WriteZarr(SinkOperator):
         *,
         store: str,
         group: str | None = None,
-        chunks: dict[str, int] | None = None,
+        chunks: dict[str, int] | list[list[Any]] | None = None,
     ) -> None:
         self.store = store
         self.group = group
-        self.chunks = chunks
+        self.chunks = mapping_from_pairs(chunks)
+
+    def get_config(self) -> dict[str, Any]:
+        # ``from_state`` rejects dict leaves; emit ``chunks`` as pairs.
+        return {**super().get_config(), "chunks": mapping_to_pairs(self.chunks)}
 
     def _apply(self, gt: GeoTensor) -> None:
         try:

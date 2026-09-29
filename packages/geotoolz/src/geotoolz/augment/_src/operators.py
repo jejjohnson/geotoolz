@@ -184,6 +184,15 @@ class Compose(Operator):
         seed: int | None = None,
     ) -> None:
         _check_probability(p, "p")
+        for i, op in enumerate(augmentations):
+            # A YAML / Hydra loader hands back the nested {"class", "config"}
+            # payloads as dicts; fail here rather than at apply time.
+            if not isinstance(op, Operator):
+                raise TypeError(
+                    f"Compose.augmentations[{i}] must be an Operator, got "
+                    f"{type(op).__name__}; nested configs are not rebuilt "
+                    "automatically — construct the children in code."
+                )
         self.augmentations = list(augmentations)
         self.p = p
         self.seed = seed

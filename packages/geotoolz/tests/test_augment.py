@@ -475,3 +475,10 @@ def test_cutmix_and_compose_support_plain_arrays() -> None:
     out = composed(arr)
     assert type(out) is np.ndarray
     np.testing.assert_array_equal(out, np.flip(arr, axis=-1))
+
+
+def test_compose_rejects_non_operator_children() -> None:
+    """A reloaded nested payload fails at construction, not at apply."""
+    payload = augment.Compose([augment.RandomFlip()]).get_config()["augmentations"]
+    with pytest.raises(TypeError, match="must be an Operator"):
+        augment.Compose(payload)

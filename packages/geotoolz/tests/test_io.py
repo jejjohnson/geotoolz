@@ -637,3 +637,19 @@ def test_io_hydra_zen_builds_roundtrip(op: gz.Operator) -> None:
     restored = hydra_zen.instantiate(cfg)
     assert type(restored) is type(op)
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+def test_sink_mapping_options_round_trip() -> None:
+    """``profile`` / ``tags`` / ``chunks`` are emitted as pairs (#140 review)."""
+    import json
+
+    ops = [
+        io.WriteCOG(path="out.tif", profile={"blocksize": 512}, tags={"a": "1"}),
+        io.WriteGeoTIFF(path="out.tif", profile={"nodata": 0}, tags={"a": "1"}),
+        io.WriteZarr(store="out.zarr", chunks={"y": 256, "x": 256}),
+    ]
+    for op in ops:
+        clone = Operator.from_state(json.loads(json.dumps(op.state)))
+        assert clone.get_config() == op.get_config()
+    assert ops[2].get_config()["chunks"] == [["y", 256], ["x", 256]]
+    assert Operator.from_state(ops[0].state).profile == {"blocksize": 512}
