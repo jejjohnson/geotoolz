@@ -19,7 +19,7 @@ import shapely.geometry.base
 from georeader import rasterize
 from pipekit import Operator
 
-from geotoolz._src.config import jsonable
+from geotoolz._src.config import jsonable, nested_config
 from geotoolz._src.wrap import wrap_like
 from geotoolz.mask._src.array import (
     altitude_mask,
@@ -452,9 +452,6 @@ class OpenMask(Operator):
         out = open_mask(np.asarray(mask), self.iterations)
         return wrap_like(mask, out, fill_value_default=False)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"iterations": self.iterations}
-
 
 class CloseMask(Operator):
     """Close (dilate then erode) a boolean mask.
@@ -476,9 +473,6 @@ class CloseMask(Operator):
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = close_mask(np.asarray(mask), self.iterations)
         return wrap_like(mask, out, fill_value_default=False)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"iterations": self.iterations}
 
 
 class BufferMask(Operator):
@@ -518,9 +512,6 @@ class BufferMask(Operator):
         )
         return wrap_like(mask, out, fill_value_default=False)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"radius": self.radius, "unit": self.unit}
-
 
 class RemoveSmallObjects(Operator):
     """Remove connected True components smaller than ``min_size`` pixels.
@@ -540,9 +531,6 @@ class RemoveSmallObjects(Operator):
         out = remove_small_objects(np.asarray(mask), self.min_size)
         return wrap_like(mask, out, fill_value_default=False)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"min_size": self.min_size}
-
 
 class RemoveSmallHoles(Operator):
     """Fill enclosed False components up to ``area_threshold`` pixels.
@@ -561,9 +549,6 @@ class RemoveSmallHoles(Operator):
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = remove_small_holes(np.asarray(mask), self.area_threshold)
         return wrap_like(mask, out, fill_value_default=False)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"area_threshold": self.area_threshold}
 
 
 class CleanMask(Operator):
@@ -601,13 +586,6 @@ class CleanMask(Operator):
         )
         return wrap_like(mask, out, fill_value_default=False)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "min_object_size": self.min_object_size,
-            "max_hole_size": self.max_hole_size,
-            "close_iter": self.close_iter,
-        }
-
 
 class CombineMasks(Operator):
     """Combine boolean masks with ``or``, ``and``, ``xor``, or unary ``not``.
@@ -627,9 +605,6 @@ class CombineMasks(Operator):
     def _apply(self, masks: Sequence[GeoTensor | np.ndarray]) -> GeoTensor | np.ndarray:
         out = combine_masks([np.asarray(mask) for mask in masks], self.op)
         return wrap_like(masks[0], out, fill_value_default=False)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"op": self.op}
 
 
 class InvertMask(Operator):
@@ -696,10 +671,7 @@ class ApplyMask(Operator):
 
     def get_config(self) -> dict[str, Any]:
         if isinstance(self.mask, Operator):
-            mask_config: Any = {
-                "class": type(self.mask).__name__,
-                "config": self.mask.get_config(),
-            }
+            mask_config: Any = nested_config(self.mask)
         else:
             arr = np.asarray(self.mask)
             mask_config = {

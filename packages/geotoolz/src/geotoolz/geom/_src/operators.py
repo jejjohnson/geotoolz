@@ -1048,14 +1048,6 @@ class BowtieCorrection(Operator):
         )
         return wrap_like(gt, sampled)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "scan_angle_max_deg": self.scan_angle_max_deg,
-            "pixels_per_scan": self.pixels_per_scan,
-            "scans_per_granule": self.scans_per_granule,
-            "method": self.method,
-        }
-
 
 class AntimeridianSplit(Operator):
     """Split a geographic swath at a longitude wrap.
@@ -1109,9 +1101,6 @@ class AntimeridianSplit(Operator):
         left_mean = float(np.nanmean(_normalise_longitudes(lons[:, :split_col])))
         right_mean = float(np.nanmean(_normalise_longitudes(lons[:, split_col:])))
         return [left, right] if left_mean < right_mean else [right, left]
-
-    def get_config(self) -> dict[str, Any]:
-        return {"crs": self.crs, "tolerance_deg": self.tolerance_deg}
 
 
 class GeostationaryParallaxCorrect(Operator):
@@ -1285,9 +1274,6 @@ class SegmentStitch(Operator):
             attrs=attrs,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"axis": self.axis, "fill": self.fill}
-
 
 class Mosaic(Operator):
     r"""Mosaic multiple `GeoTensor`s onto a single grid.
@@ -1367,9 +1353,6 @@ class Mosaic(Operator):
         if fill is not None:
             values = np.where(np.isnan(values), fill, values)
         return base.array_as_geotensor(values.astype(base.dtype, copy=False))
-
-    def get_config(self) -> dict[str, Any]:
-        return {"method": self.method, "resampling": self.resampling}
 
 
 class Georeference(Operator):
@@ -1590,12 +1573,6 @@ class Vectorize(Operator):
         if self.simplify_tolerance is None:
             return polygons
         return [polygon.simplify(self.simplify_tolerance) for polygon in polygons]
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "min_area": self.min_area,
-            "simplify_tolerance": self.simplify_tolerance,
-        }
 
 
 def _rasterize_like(

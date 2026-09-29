@@ -402,15 +402,6 @@ class ChanVese(Operator):
         )
         return _labels(gt, labels.astype(np.int32), mask=valid)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "mu": self.mu,
-            "lambda1": self.lambda1,
-            "lambda2": self.lambda2,
-            "tol": self.tol,
-            "max_num_iter": self.max_num_iter,
-        }
-
 
 class RandomWalker(Operator):
     """Seeded segmentation via :func:`skimage.segmentation.random_walker`.
@@ -490,9 +481,6 @@ class ExpandLabels(Operator):
             distance=self.distance,
         )
         return _labels(gt, labels)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"distance": self.distance}
 
 
 def _bbox_edge_distance(

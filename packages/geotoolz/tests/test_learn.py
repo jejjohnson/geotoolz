@@ -205,7 +205,8 @@ def test_get_config_records_resolved_task() -> None:
     op = gz.learn.SklearnOp(PCA(n_components=2), mode="pixel")  # task=None
     cfg = op.get_config()
     assert cfg["task"] is None
-    assert cfg["resolved_task"] == "transform"
+    assert cfg["estimator"]["resolved_task"] == "transform"
+    assert cfg["estimator"]["params"]["n_components"] == 2
 
 
 def test_ipca_streaming_fits_via_partial_fit() -> None:

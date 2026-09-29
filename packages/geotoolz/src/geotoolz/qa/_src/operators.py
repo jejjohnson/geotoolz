@@ -596,9 +596,6 @@ class MaskValid(Operator):
             mask = np.any(arr == sentinel, axis=self.axis)
         return wrap_like(gt, mask, fill_value_default=False)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"invalid_value": self.invalid_value, "axis": self.axis}
-
 
 class _QAMask(Operator):
     """Base class for single-target QA mask shortcuts.
@@ -830,13 +827,6 @@ class MaskSaturated(Operator):
             mask = np.any(mask, axis=self.axis)
         return wrap_like(gt, mask, fill_value_default=False)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "qa_band": self.qa_band,
-            "saturation_value": self.saturation_value,
-            "axis": self.axis,
-        }
-
 
 # ---------------------------------------------------------------------------
 # Sensor presets
@@ -874,9 +864,6 @@ class S2QA60(Operator):
         qa = _select_qa(gt, self.qa_band, self.axis)
         mask = mask_from_qa_bits(qa, (10, 11))
         return wrap_like(gt, mask, fill_value_default=False)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"qa_band": self.qa_band, "axis": self.axis}
 
 
 class S2SCL(Operator):
@@ -1105,9 +1092,6 @@ class S2Cloudless(Operator):
             "packaged in this release."
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"threshold": self.threshold}
-
 
 class OmniCloudMask(Operator):
     """Placeholder for the optional ML-based OmniCloudMask detector.
@@ -1131,9 +1115,6 @@ class OmniCloudMask(Operator):
             "packaged in this release."
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"checkpoint": self.checkpoint}
-
 
 class CloudSEN12(Operator):
     """Placeholder for the optional ML-based CloudSEN12 detector.
@@ -1156,6 +1137,3 @@ class CloudSEN12(Operator):
             "CloudSEN12 requires the optional ML mask extra, which is not "
             "packaged in this release."
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"checkpoint": self.checkpoint}

@@ -144,6 +144,8 @@ class SklearnOp(Operator):
         self.state_path = str(path)
 
     def get_config(self) -> dict[str, Any]:
+        # Keys mirror the constructor; the estimator (a runtime object) is
+        # summarised as a debug payload with the task it resolves to.
         params = (
             self.estimator.get_params(deep=False)
             if hasattr(self.estimator, "get_params")
@@ -153,14 +155,16 @@ class SklearnOp(Operator):
             f"{type(self.estimator).__module__}.{type(self.estimator).__name__}"
         )
         return {
-            "estimator": estimator_path,
-            "estimator_params": _jsonable_params(params),
+            "estimator": {
+                "class": estimator_path,
+                "params": _jsonable_params(params),
+                "resolved_task": self._task,
+            },
             "mode": self.mode,
             "sample_axes": jsonable(self.sample_axes),
             "feature_axes": jsonable(self.feature_axes),
             "fit_mode": self.fit_mode,
             "task": self.task,
-            "resolved_task": self._task,
             "nan_fit": self.nan_fit,
             "nan_transform": self.nan_transform,
             "impute_simple_strategy": self.impute_simple_strategy,

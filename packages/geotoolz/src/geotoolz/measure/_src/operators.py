@@ -90,9 +90,6 @@ class LabelConnectedComponents(Operator):
         )
         return wrap_like(gt, labels.astype(np.int32, copy=False))
 
-    def get_config(self) -> dict[str, Any]:
-        return {"connectivity": self.connectivity, "background": self.background}
-
 
 class RegionProps(Operator):
     """Extract a GeoDataFrame of per-region statistics from a label map.
@@ -238,9 +235,6 @@ class FindContours(Operator):
             )
         return gpd.GeoDataFrame(rows, geometry="geometry", crs=gt.crs)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"level": self.level, "fully_connected": self.fully_connected}
-
 
 class ProfileLine(Operator):
     """Sample values along a line between two pixel coordinates.
@@ -282,15 +276,6 @@ class ProfileLine(Operator):
             order=self.order,
             mode=self.mode,
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "src": self.src,
-            "dst": self.dst,
-            "linewidth": self.linewidth,
-            "order": self.order,
-            "mode": self.mode,
-        }
 
 
 class RANSAC(Operator):
@@ -412,9 +397,6 @@ class SkeletonLength(Operator):
             single_band(np.asarray(gt), name="SkeletonLength")
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {}
-
 
 class ShannonEntropy(Operator):
     """Compute Shannon entropy of the input image.
@@ -436,6 +418,3 @@ class ShannonEntropy(Operator):
                 single_band(np.asarray(gt), name="ShannonEntropy"), base=self.base
             )
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"base": self.base}

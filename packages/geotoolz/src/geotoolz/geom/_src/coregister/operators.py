@@ -213,9 +213,6 @@ class RasterToRasterLike(Operator):
     def __init__(self, *, resampling: str = "bilinear") -> None:
         self.resampling = resampling
 
-    def get_config(self) -> dict[str, Any]:
-        return {"resampling": self.resampling}
-
     def _apply(self, src: GeoTensor, like: GeoTensor) -> GeoTensor:
         _require_geotensor(src, "RasterToRasterLike", arg="src")
         _require_geotensor(like, "RasterToRasterLike", arg="like")
@@ -286,9 +283,6 @@ class GridToSwath(Operator):
         self.time_match = time_match
         self.dt_max = dt_max
 
-    def get_config(self) -> dict[str, Any]:
-        return {"time_match": self.time_match, "dt_max": self.dt_max}
-
     def _apply(self, grid_series: GeoTensor, swath_like: GeoTensor) -> GeoTensor:
         raise NotImplementedError("Phase 3 PR — see design §5.")
 
@@ -334,9 +328,6 @@ class RasterToPoints(Operator):
             )
         self.extract = extract
         self.out_var = out_var
-
-    def get_config(self) -> dict[str, Any]:
-        return {"extract": self.extract, "out_var": self.out_var}
 
     def _apply(self, raster: GeoTensor, points: Any) -> Any:
         _require_geotensor(raster, "RasterToPoints")
@@ -424,13 +415,6 @@ class PointsToRaster(Operator):
         self.method = method
         self.stat = stat
         self.attribute = attribute
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "method": self.method,
-            "stat": self.stat,
-            "attribute": self.attribute,
-        }
 
     def _apply(self, points: Any, like: GeoTensor) -> GeoTensor:
         _require_geotensor(like, "PointsToRaster", arg="like")
@@ -603,14 +587,6 @@ class RasterToPointCloud(Operator):
         self.max_radius = max_radius
         self.method = method
         self.power = power
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "k": self.k,
-            "max_radius": self.max_radius,
-            "method": self.method,
-            "power": self.power,
-        }
 
     def _apply(self, raster: GeoTensor, cloud: Any) -> Any:
         _require_geotensor(raster, "RasterToPointCloud")
@@ -856,15 +832,6 @@ class PointCloudToRaster(Operator):
         self.k = k
         self.max_radius = max_radius
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "method": self.method,
-            "stat": self.stat,
-            "power": self.power,
-            "k": self.k,
-            "max_radius": self.max_radius,
-        }
-
     def _apply(self, cloud: Any, like: GeoTensor) -> GeoTensor:
         _require_geotensor(like, "PointCloudToRaster", arg="like")
         _require_axis_aligned(like.transform, "PointCloudToRaster")
@@ -1044,13 +1011,6 @@ class VectorToRasterAgg(Operator):
         self.agg = agg
         self.attribute = attribute
         self.all_touched = all_touched
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "agg": self.agg,
-            "attribute": self.attribute,
-            "all_touched": self.all_touched,
-        }
 
     def _apply(self, vector: Any, like: GeoTensor) -> GeoTensor:
         if self.agg == "majority":

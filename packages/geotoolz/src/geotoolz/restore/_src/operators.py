@@ -75,9 +75,6 @@ class DespeckleLee(Operator):
             gt, despeckle_lee(np.asarray(gt), window=self.window, cu=self.cu)
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"window": self.window, "cu": self.cu}
-
 
 class DespeckleFrost(Operator):
     """Frost-style adaptive speckle filter.
@@ -105,9 +102,6 @@ class DespeckleFrost(Operator):
             despeckle_frost(np.asarray(gt), window=self.window, damping=self.damping),
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"window": self.window, "damping": self.damping}
-
 
 class DespeckleRefinedLee(Operator):
     """Refined-Lee speckle filter approximation.
@@ -129,9 +123,6 @@ class DespeckleRefinedLee(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         return wrap_like(gt, despeckle_refined_lee(np.asarray(gt), window=self.window))
-
-    def get_config(self) -> dict[str, Any]:
-        return {"window": self.window}
 
 
 class DestripeColumn(Operator):
@@ -177,9 +168,6 @@ class DestripeColumn(Operator):
             ),
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"method": self.method, "axis": self.axis, "window": self.window}
-
 
 class MomentMatching(Operator):
     """Match per-column moments via a local smoothing pass.
@@ -207,9 +195,6 @@ class MomentMatching(Operator):
                 window=self.window,
             ),
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"window": self.window}
 
 
 class DenoisePCA(Operator):
@@ -239,9 +224,6 @@ class DenoisePCA(Operator):
             np.asarray(gt), n_components=self.n_components, axis=self.axis
         )
         return wrap_like(gt, out)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"n_components": self.n_components, "axis": self.axis}
 
 
 class MNF(Operator):
@@ -282,9 +264,6 @@ class MNF(Operator):
         )
         self.snr_ = np.asarray(self._state["snr"])
         return wrap_like(gt, np.asarray(self._state["scores"]))
-
-    def get_config(self) -> dict[str, Any]:
-        return {"n_components": self.n_components, "axis": self.axis}
 
 
 class InverseMNF(Operator):
@@ -346,9 +325,6 @@ class GaussianDenoise(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         return wrap_like(gt, gaussian_denoise(np.asarray(gt), sigma=self.sigma))
 
-    def get_config(self) -> dict[str, Any]:
-        return {"sigma": self.sigma}
-
 
 class MedianDenoise(Operator):
     """Median filter over the trailing two spatial axes.
@@ -368,9 +344,6 @@ class MedianDenoise(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         return wrap_like(gt, median_denoise(np.asarray(gt), size=self.size))
-
-    def get_config(self) -> dict[str, Any]:
-        return {"size": self.size}
 
 
 class BilateralDenoise(Operator):
@@ -401,9 +374,6 @@ class BilateralDenoise(Operator):
                 sigma_space=self.sigma_space,
             ),
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"sigma_color": self.sigma_color, "sigma_space": self.sigma_space}
 
 
 class NLMeans(Operator):
@@ -440,13 +410,6 @@ class NLMeans(Operator):
             ),
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "patch_size": self.patch_size,
-            "patch_distance": self.patch_distance,
-            "h": self.h,
-        }
-
 
 class GapFillIDW(Operator):
     """Fill NaNs with inverse-distance weighted finite neighbours.
@@ -471,9 +434,6 @@ class GapFillIDW(Operator):
         return wrap_like(
             gt, gap_fill_idw(np.asarray(gt), power=self.power, radius=self.radius)
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"power": self.power, "radius": self.radius}
 
 
 class GapFillInpaintBiharmonic(Operator):
@@ -534,9 +494,6 @@ class GapFillNearest(Operator):
             gt, gap_fill_nearest(np.asarray(gt), max_distance=self.max_distance)
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"max_distance": self.max_distance}
-
 
 class OutlierMask(Operator):
     """Flag global outliers with a MAD or z-score threshold.
@@ -562,9 +519,6 @@ class OutlierMask(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask = outlier_mask(np.asarray(gt), method=self.method, k=self.k)
         return wrap_like(gt, mask.astype(bool))
-
-    def get_config(self) -> dict[str, Any]:
-        return {"method": self.method, "k": self.k}
 
 
 class ReplaceOutliers(Operator):
@@ -599,9 +553,6 @@ class ReplaceOutliers(Operator):
         )
         return wrap_like(gt, out)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"method": self.method, "k": self.k, "fill": self.fill}
-
 
 class SaturationFlag(Operator):
     """Flag saturated pixels as a boolean carrier.
@@ -622,6 +573,3 @@ class SaturationFlag(Operator):
         return wrap_like(
             gt, saturation_flag(np.asarray(gt), threshold=self.threshold).astype(bool)
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"threshold": self.threshold}

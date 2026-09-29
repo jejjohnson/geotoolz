@@ -1171,9 +1171,6 @@ class WriteZarr(SinkOperator):
         group.attrs["fill_value_default"] = gt.fill_value_default
         return None
 
-    def get_config(self) -> dict[str, Any]:
-        return {"store": self.store, "group": self.group, "chunks": self.chunks}
-
 
 class LoadFromSTAC(SourceOperator):
     """Load a raster asset from a STAC item by asset key.
@@ -1329,15 +1326,6 @@ class LoadFromEE(SourceOperator):
             raise GeoToolzIOError(
                 f"Unable to load Earth Engine image {self.image_id!r}: {exc}"
             ) from exc
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "image_id": self.image_id,
-            "bounds": self.bounds,
-            "crs": self.crs,
-            "scale": self.scale,
-            "bands": self.bands,
-        }
 
 
 __all__ = [
