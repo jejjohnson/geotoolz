@@ -10,6 +10,8 @@ import numpy as np
 from jaxtyping import Float, Num, Shaped
 from scipy import ndimage, signal
 
+from geotoolz._src.dtype import as_float
+
 # Re-use the canonical normalized-difference primitive instead of
 # duplicating the maths here. Same algebra as NDVI / NDWI / NDBI / NBR.
 from geotoolz.indices._src.array import normalized_difference as normalized_difference
@@ -81,8 +83,10 @@ def band_ratio(
             Pass ``0.0`` to see ``inf``/``nan`` on zero pixels instead.
 
     Returns:
-        Ratio array with the band axis collapsed.
+        Float ratio array with the band axis collapsed. Integer input is
+        promoted to float first (see `geotoolz._src.dtype.as_float`).
     """
+    arr = as_float(arr)
     numerator = np.take(arr, numerator_idx, axis=axis)
     denominator = np.take(arr, denominator_idx, axis=axis)
     return numerator / (denominator + eps)
@@ -126,8 +130,13 @@ def evaluate_band_math(
             should broadcast against each other (typically identical
             ``(H, W)`` slices of one cube).
 
+    Every band array is promoted to floating point before evaluation
+    (see `geotoolz._src.dtype.as_float`), so integer DN never wrap
+    around or overflow: ``"a - b"`` over ``uint16`` bands ``1000`` and
+    ``3000`` gives ``-2000.0``, not ``63536``.
+
     Returns:
-        The evaluated result as an ndarray (broadcast shape of the
+        The evaluated result as a float ndarray (broadcast shape of the
         participating bands).
 
     Raises:
@@ -136,7 +145,8 @@ def evaluate_band_math(
             outside the grammar above.
     """
     tree = ast.parse(expression, mode="eval")
-    return np.asarray(_eval_node(tree.body, variables))
+    float_vars = {name: as_float(value) for name, value in variables.items()}
+    return np.asarray(_eval_node(tree.body, float_vars))
 
 
 def _eval_node(node: ast.AST, variables: Mapping[str, np.ndarray]) -> Any:
@@ -418,12 +428,15 @@ def spectral_smoothing(
 
     Returns:
         Float array of the same shape as ``arr`` holding the smoothed
-        spectra.
+        spectra. Integer input is promoted to float64 first (see
+        `geotoolz._src.dtype.as_float`), so every method returns a
+        float array rather than a truncated integer one.
 
     Raises:
         ValueError: If ``method`` is unknown, or ``method="savgol"``
             with an even ``window``.
     """
+    arr = as_float(arr, np.float64)
     if method == "savgol":
         if window % 2 == 0:
             raise ValueError(f"savgol window must be odd, got {window}")

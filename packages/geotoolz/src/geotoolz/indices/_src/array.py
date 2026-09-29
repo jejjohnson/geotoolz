@@ -21,12 +21,20 @@ magnitude of TOA reflectance noise (~1e-4) divided by a typical
 denominator (~1) — small enough not to bias the index, large enough to
 shadow division by zero for genuinely-zero pixels (water in NIR over a
 black background, etc.).
+
+Integer inputs: every primitive that does arithmetic promotes its input
+to floating point *before* touching the bands, so raw ``uint16`` /
+``int16`` DN never wrap around or overflow in ``a - b`` / ``a + b``.
+Integers of up to 16 bits are promoted to ``float32``, wider integers
+to ``float64``; float inputs keep their own precision.
 """
 
 from __future__ import annotations
 
 import numpy as np
 from jaxtyping import Float, Num
+
+from geotoolz._src.dtype import as_float
 
 
 def normalized_difference(
@@ -81,6 +89,7 @@ def normalized_difference(
         original normalized-difference vegetation index paper — the
         form generalises to any two bands.)
     """
+    arr = as_float(arr)
     a = np.take(arr, a_idx, axis=axis)
     b = np.take(arr, b_idx, axis=axis)
     return (a - b) / (a + b + eps)
@@ -303,6 +312,7 @@ def savi(
         Huete, A. R. (1988). "A soil-adjusted vegetation index (SAVI)."
         *Remote Sensing of Environment*, 25(3), 295–309.
     """
+    arr = as_float(arr)
     nir = np.take(arr, nir_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
     return (nir - red) / (nir + red + L + eps) * (1.0 + L)
@@ -360,6 +370,7 @@ def evi(
         biophysical performance of the MODIS vegetation indices."
         *Remote Sensing of Environment*, 83(1-2), 195–213.
     """
+    arr = as_float(arr)
     nir = np.take(arr, nir_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
     blue = np.take(arr, blue_idx, axis=axis)
@@ -399,6 +410,7 @@ def evi2(
         Jiang, Z., Huete, A. R., Didan, K., & Miura, T. (2008).
         *Remote Sensing of Environment*, 112(10), 3833–3845.
     """
+    arr = as_float(arr)
     nir = np.take(arr, nir_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
     return 2.5 * (nir - red) / (nir + 2.4 * red + 1.0 + eps)
@@ -439,6 +451,7 @@ def arvi(
     Returns:
         ndarray with the band axis collapsed.
     """
+    arr = as_float(arr)
     nir = np.take(arr, nir_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
     blue = np.take(arr, blue_idx, axis=axis)
@@ -474,6 +487,7 @@ def gci(
     Returns:
         ndarray with the band axis collapsed.
     """
+    arr = as_float(arr)
     nir = np.take(arr, nir_idx, axis=axis)
     green = np.take(arr, green_idx, axis=axis)
     return nir / (green + eps) - 1.0
@@ -673,6 +687,7 @@ def bais2(
     References:
         Filipponi, F. (2018). *Proceedings*, 2(7), 364.
     """
+    arr = as_float(arr)
     red = np.take(arr, red_idx, axis=axis)
     red_edge1 = np.take(arr, red_edge1_idx, axis=axis)
     red_edge2 = np.take(arr, red_edge2_idx, axis=axis)
@@ -715,6 +730,7 @@ def bsi(
     Returns:
         ndarray with the band axis collapsed; values in ``[-1, +1]``.
     """
+    arr = as_float(arr)
     blue = np.take(arr, blue_idx, axis=axis)
     red = np.take(arr, red_idx, axis=axis)
     nir = np.take(arr, nir_idx, axis=axis)
@@ -750,6 +766,7 @@ def iron_oxide(
     Returns:
         ndarray with the band axis collapsed; a Red/Blue band ratio.
     """
+    arr = as_float(arr)
     red = np.take(arr, red_idx, axis=axis)
     blue = np.take(arr, blue_idx, axis=axis)
     return red / (blue + eps)
@@ -783,6 +800,7 @@ def clay_minerals(
     Returns:
         ndarray with the band axis collapsed; a SWIR1/SWIR2 band ratio.
     """
+    arr = as_float(arr)
     swir1 = np.take(arr, swir1_idx, axis=axis)
     swir2 = np.take(arr, swir2_idx, axis=axis)
     return swir1 / (swir2 + eps)

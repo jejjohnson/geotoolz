@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from _helpers import toy_geotensor
+from _helpers import toy_geotensor, uint16_dn_cube
 from georeader.geotensor import GeoTensor
 
 from geotoolz import spectral
@@ -70,6 +70,24 @@ def test_band_math_allows_safe_numpy_functions() -> None:
     out = spectral.BandMath(expression="sqrt(B8)")(gt)
 
     np.testing.assert_allclose(np.asarray(out), np.sqrt(0.8))
+
+
+def test_band_math_uint16_no_wrap() -> None:
+    # Regression for #117: the band variables were raw uint16 views, so
+    # ``a - b`` wrapped to 63536 instead of -2000.
+    cube = np.array([[[1000]], [[3000]]], dtype=np.uint16)
+
+    out = spectral.BandMath(expression="a - b", band_names=["a", "b"])(cube)
+    np.testing.assert_allclose(out, [[-2000.0]])
+
+    ndvi = spectral.BandMath(expression="(a - b) / (a + b)", band_names=["a", "b"])
+    np.testing.assert_allclose(np.asarray(ndvi(toy_geotensor(cube))), [[-0.5]])
+
+    # Signed overflow in ``a + b`` / ``a * b`` is gone too.
+    cube16 = uint16_dn_cube(2).astype(np.int16) * 10
+    direct = spectral.evaluate_band_math("a * b + a", {"a": cube16[0], "b": cube16[1]})
+    reference = cube16[0].astype(np.float64) * cube16[1] + cube16[0]
+    np.testing.assert_allclose(direct, reference, rtol=1e-6)
 
 
 def test_band_ratio_by_name() -> None:
@@ -210,6 +228,20 @@ def test_spectral_smoothing_savgol_and_gaussian() -> None:
 
     assert savgol.shape == gt.shape
     assert gaussian.shape == gt.shape
+
+
+def test_spectral_smoothing_gaussian_uint16_returns_float() -> None:
+    # Regression for #117: gaussian_filter1d kept the uint16 dtype and
+    # truncated the smoothed spectra, contradicting the "float array"
+    # docstring.
+    cube = uint16_dn_cube(5)
+    op = spectral.SpectralSmoothing(method="gaussian", window=3)
+
+    out = op(toy_geotensor(cube))
+    expected = op(cube.astype(np.float64))
+
+    assert np.asarray(out).dtype == np.float64
+    np.testing.assert_allclose(np.asarray(out), expected)
 
 
 def test_stack_and_split_bands() -> None:

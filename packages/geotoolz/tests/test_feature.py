@@ -48,6 +48,42 @@ def test_canny_returns_boolean_geotensor() -> None:
     assert np.asarray(edges).dtype == bool
 
 
+def test_canny_uint16_matches_skimage() -> None:
+    # Regression for #133: the float cast turned skimage's dtype-relative
+    # default thresholds (10 % / 20 % of the uint16 max) into absolute
+    # 0.1 / 0.2, so a smooth DN ramp came out ~17 % edges.
+    from skimage.feature import canny
+
+    ramp = np.linspace(0, 8000, 64 * 64).reshape(64, 64).astype(np.uint16)
+    step = np.zeros((32, 32), dtype=np.uint16)
+    step[:, 16:] = 20_000
+
+    for image in (ramp, step):
+        edges = gz.feature.Canny(sigma=1)(_gt(image))
+        np.testing.assert_array_equal(np.asarray(edges), canny(image, sigma=1))
+        # Explicit thresholds are in DN for integer input, as in skimage.
+        explicit = gz.feature.Canny(sigma=1, low_threshold=500, high_threshold=1000)
+        np.testing.assert_array_equal(
+            np.asarray(explicit(image)),
+            canny(image, sigma=1, low_threshold=500, high_threshold=1000),
+        )
+    assert not np.asarray(gz.feature.Canny(sigma=1)(ramp)).any()
+    assert np.asarray(gz.feature.Canny(sigma=1)(step)).any()
+
+
+def test_canny_int64_input_still_supported() -> None:
+    # skimage rejects 64-bit integers; Canny casts those to float64.
+    image = np.zeros((10, 10), dtype=np.int64)
+    image[:, 5:] = 1
+
+    edges = gz.feature.Canny(sigma=0.5)(image)
+
+    np.testing.assert_array_equal(
+        edges, gz.feature.Canny(sigma=0.5)(image.astype(np.float64))
+    )
+    assert edges.any()
+
+
 def _blob_scene() -> GeoTensor:
     rng = np.random.default_rng(0)
     image = rng.uniform(0.0, 0.1, size=(32, 32))

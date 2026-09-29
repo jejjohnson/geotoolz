@@ -53,6 +53,29 @@ def toy_geotensor(
     )
 
 
+def uint16_dn_cube(n_bands: int = 2, *, size: int = 4, seed: int = 0) -> np.ndarray:
+    """A ``uint16`` DN cube whose band arithmetic would wrap in its own dtype.
+
+    Band ``k`` holds DN drawn from ``[1000 + 1000 * k, 2000 + 1000 * k)``,
+    so every band is strictly darker than the next: ``band[0] - band[1]``
+    is negative everywhere, which in ``uint16`` silently wraps to ~65 000.
+    Values stay far below the ``uint16`` limit, so the float64 reference
+    ``cube.astype(np.float64)`` is exact.
+
+    Args:
+        n_bands: Number of bands (the leading axis). Default ``2``.
+        size: Height and width in pixels. Default ``4``.
+        seed: RNG seed. Default ``0``.
+
+    Returns:
+        A ``(n_bands, size, size)`` ``uint16`` array.
+    """
+    rng = np.random.default_rng(seed)
+    offsets = (1000 + 1000 * np.arange(n_bands)).reshape(-1, 1, 1)
+    noise = rng.integers(0, 1000, size=(n_bands, size, size))
+    return (offsets + noise).astype(np.uint16)
+
+
 def all_operator_classes() -> list[type]:
     """Every ``pipekit.Operator`` subclass defined in ``geotoolz``.
 

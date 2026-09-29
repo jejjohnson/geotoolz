@@ -49,6 +49,7 @@ from typing import Any
 import numpy as np
 from jaxtyping import Float, Num, Shaped
 
+from geotoolz._src.dtype import as_float
 from geotoolz._src.stretch import percentile_stretch
 
 
@@ -83,9 +84,12 @@ def dn_to_radiance(
         scale: Optional DN scale divisor. Default ``1``.
 
     Returns:
-        Radiance array of the same shape as ``dn``, in float64 by
-        default (cast outside if you want float32 to save memory).
+        Radiance array of the same shape as ``dn``. Integer DN are
+        promoted to float64 before any arithmetic, so integer
+        coefficients can't overflow the DN dtype (cast outside if you
+        want float32 to save memory); float input keeps its precision.
     """
+    dn = as_float(dn, np.float64)
     return gain * dn / scale + offset
 
 
@@ -109,8 +113,9 @@ def radiance_to_dn(
 
     Returns:
         DN array in floating point. Cast or round outside if integer DN are
-        required.
+        required. Integer radiance is promoted to float64 first.
     """
+    radiance = as_float(radiance, np.float64)
     return (radiance - offset) * scale / gain
 
 
@@ -156,8 +161,10 @@ def dn_to_reflectance(
 
     Returns:
         Reflectance array; values should fall in :math:`[0, 1]` for
-        well-calibrated inputs.
+        well-calibrated inputs. Integer DN are promoted to float64
+        before any arithmetic.
     """
+    dn = as_float(dn, np.float64)
     return scale * dn + offset
 
 
@@ -188,12 +195,16 @@ def min_max_normalize(
         clip: Whether to clamp output to ``[0, 1]``. Default ``True``.
 
     Returns:
-        Float array. Shape and broadcasting preserved.
+        Float array. Shape and broadcasting preserved. Integer input
+        (e.g. ``uint16`` DN with integer bounds) is promoted to float64
+        before subtracting ``vmin``, so values below ``vmin`` map below
+        0 instead of wrapping around.
     """
     if vmax <= vmin:
         raise ValueError(
             f"min_max_normalize requires vmax > vmin; got {vmin=}, {vmax=}"
         )
+    arr = as_float(arr, np.float64)
     out = (arr - vmin) / (vmax - vmin)
     if clip:
         out = np.clip(out, 0.0, 1.0)
