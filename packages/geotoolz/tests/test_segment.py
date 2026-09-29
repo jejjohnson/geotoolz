@@ -95,6 +95,30 @@ def test_quickshift_convert2lab_true_still_works_for_rgb() -> None:
     assert out.shape == gt.shape[-2:]
 
 
+@pytest.mark.parametrize(
+    "op",
+    [
+        gz.segment.Felzenszwalb(scale=1.0, min_size=1),
+        gz.segment.Quickshift(kernel_size=2.0, max_dist=4.0),
+    ],
+    ids=["felzenszwalb", "quickshift"],
+)
+def test_felzenszwalb_quickshift_valid_labels_start_at_one(op: Operator) -> None:
+    # skimage numbers these segments from 0; label 0 is reserved for
+    # invalid pixels, so every finite pixel must carry a label >= 1.
+    # NaN in the last pixel so skimage's segment 0 (which starts at the
+    # top-left) is a real, finite segment.
+    arr = np.asarray(_checker_gt()).copy()
+    arr[:, -1, -1] = np.nan
+    gt_nan = _gt(arr)
+
+    labels = np.asarray(op(gt_nan))
+
+    valid = np.isfinite(arr[0])
+    assert labels[~valid].tolist() == [0]
+    assert labels[valid].min() >= 1
+
+
 def test_chanvese_forces_non_finite_pixels_to_zero_label() -> None:
     gt = _checker_gt()
     arr = np.asarray(gt).copy()
@@ -157,6 +181,44 @@ def test_mark_boundaries_uses_array_as_geotensor() -> None:
     assert np.asarray(out).shape[-2:] == gt.shape[-2:]
     # Non-serializable label_img -> forbid_in_yaml at the class level.
     assert gz.segment.MarkBoundaries.forbid_in_yaml is True
+
+
+def test_mark_boundaries_single_band_input() -> None:
+    values = np.tile(np.linspace(0, 1, 6, dtype=float), (1, 6, 1))
+    gt = _gt(values)
+    label_img = np.zeros((6, 6), dtype=np.int32)
+    label_img[:, 3:] = 1
+
+    out = gz.segment.MarkBoundaries(label_img=label_img, color=(1.0, 0.0, 0.0))(gt)
+
+    out_arr = np.asarray(out)
+    assert out_arr.shape == (3, 6, 6)
+    assert out.transform == gt.transform
+    # Boundary pixels carry the requested colour; interior pixels keep
+    # the grey value replicated across the three channels.
+    np.testing.assert_allclose(out_arr[:, 0, 3], [1.0, 0.0, 0.0])
+    np.testing.assert_allclose(out_arr[:, 0, 0], [0.0, 0.0, 0.0])
+    # Plain (H, W) ndarray follows the same single-band path.
+    out_2d = gz.segment.MarkBoundaries(label_img=label_img)(values[0])
+    assert np.asarray(out_2d).shape == (3, 6, 6)
+
+
+def test_mark_boundaries_rejects_non_rgb_multiband() -> None:
+    label_img = np.zeros((6, 6), dtype=np.int32)
+    with pytest.raises(ValueError, match=r"\(3, H, W\) RGB"):
+        gz.segment.MarkBoundaries(label_img=label_img)(np.zeros((4, 6, 6)))
+
+
+def test_slic_accepts_2d() -> None:
+    values = np.zeros((8, 8), dtype=float)
+    values[:, 4:] = 1.0
+
+    labels = np.asarray(gz.segment.SLIC(n_segments=4, compactness=1.0)(values))
+
+    assert labels.shape == (8, 8)
+    assert labels.dtype == np.int32
+    assert labels.min() >= 1
+    assert labels[0, 0] != labels[0, -1]
 
 
 def _labels_gt(values: np.ndarray) -> GeoTensor:

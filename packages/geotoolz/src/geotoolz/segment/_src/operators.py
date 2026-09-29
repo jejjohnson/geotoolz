@@ -100,7 +100,8 @@ class SLIC(Operator):
             values yield more compact (squarer) segments.
         sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
         channel_axis: Axis holding channels (``0`` for channel-first
-            cubes, ``None`` for 2-D single-band input).
+            cubes, ``None`` for 2-D single-band input). Ignored for 2-D
+            input, which is always treated as single-band.
         start_label: First label assigned to a superpixel.
         mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
             outside it get label ``0``. ``get_config`` summarises a mask
@@ -131,12 +132,14 @@ class SLIC(Operator):
         mask = _as_mask(self.mask, gt.shape[-2:], name="SLIC mask")
         if mask is not None:
             valid &= mask
+        # A 2-D image has no channel axis; skimage raises if one is given.
+        channel_axis = None if image.ndim == 2 else self.channel_axis
         labels = slic(
             image,
             n_segments=self.n_segments,
             compactness=self.compactness,
             sigma=self.sigma,
-            channel_axis=self.channel_axis,
+            channel_axis=channel_axis,
             start_label=self.start_label,
             mask=valid,
         )
@@ -157,7 +160,8 @@ class Felzenszwalb(Operator):
     """Graph-based segmentation via :func:`skimage.segmentation.felzenszwalb`.
 
     Non-finite pixels are median-filled before segmentation and forced
-    to label ``0`` in the output. Accepts a ``GeoTensor`` or a plain
+    to label ``0`` in the output; valid segments are labelled from ``1``.
+    Accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
     the same carrier kind.
 
@@ -201,7 +205,9 @@ class Felzenszwalb(Operator):
             min_size=self.min_size,
             channel_axis=self.channel_axis,
         )
-        return _labels(gt, labels, valid)
+        # skimage numbers segments from 0, which collides with the
+        # invalid-pixel label; shift so valid segments start at 1.
+        return _labels(gt, labels + 1, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -217,7 +223,8 @@ class Quickshift(Operator):
     """Mode-seeking superpixels via :func:`skimage.segmentation.quickshift`.
 
     Non-finite pixels are median-filled before segmentation and forced
-    to label ``0`` in the output. Accepts a ``GeoTensor`` or a plain
+    to label ``0`` in the output; valid segments are labelled from ``1``.
+    Accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
     the same carrier kind.
 
@@ -276,7 +283,9 @@ class Quickshift(Operator):
             channel_axis=self.channel_axis,
             convert2lab=self.convert2lab,
         )
-        return _labels(gt, labels, valid)
+        # skimage numbers segments from 0, which collides with the
+        # invalid-pixel label; shift so valid segments start at 1.
+        return _labels(gt, labels + 1, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -801,10 +810,13 @@ class MaskNMS(Operator):
 class MarkBoundaries(Operator):
     """Overlay segmentation boundaries on an image for visual inspection.
 
-    Wraps :func:`skimage.segmentation.mark_boundaries`. Channel-first
-    inputs are moved to channel-last for skimage and back afterwards.
-    Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns the
-    RGB overlay in the same carrier kind.
+    Wraps :func:`skimage.segmentation.mark_boundaries`. Accepts a
+    single-band ``(H, W)`` / ``(1, H, W)`` image or a 3-band ``(3, H, W)``
+    RGB image; channel-first inputs are moved to channel-last for skimage
+    and back afterwards. The output is always a ``(3, H, W)`` RGB overlay.
+    Any other band count raises ``ValueError``. Accepts a ``GeoTensor``
+    or a plain ``np.ndarray`` and returns the overlay in the same carrier
+    kind.
 
     Args:
         label_img: Single-band integer label map whose region boundaries
@@ -831,7 +843,15 @@ class MarkBoundaries(Operator):
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         image = np.asarray(gt)
         if image.ndim == 3:
-            image = einx.id("c h w -> h w c", image)
+            if image.shape[0] == 1:
+                image = single_band(image, name="MarkBoundaries")
+            elif image.shape[0] == 3:
+                image = einx.id("c h w -> h w c", image)
+            else:
+                raise ValueError(
+                    "MarkBoundaries expects a single-band (H, W) / (1, H, W) "
+                    f"image or a 3-band (3, H, W) RGB image; got shape {image.shape}"
+                )
         marked = mark_boundaries(
             image,
             single_band(self.label_img, name="MarkBoundaries label_img").astype(
