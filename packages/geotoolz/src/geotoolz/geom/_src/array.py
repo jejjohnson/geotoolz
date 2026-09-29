@@ -85,18 +85,19 @@ def center_offsets(
 def is_north_up(transform: Affine) -> bool:
     """Return ``True`` iff the affine transform is axis-aligned, north-up.
 
-    Equivalent to ``b == 0 and d == 0`` on
-    :class:`affine.Affine` — no rotation or shear. North-up transforms
-    are the only ones that admit pixel-aligned mosaicking with the
-    `Stitch` operator.
+    Equivalent to ``b == 0 and d == 0 and a > 0 and e < 0`` on
+    :class:`affine.Affine` — no rotation or shear, columns increasing
+    eastward and rows increasing southward. North-up transforms are the
+    only ones that admit pixel-aligned mosaicking with the `Stitch`
+    operator (a south-up ``e > 0`` grid would be placed upside down).
 
     Args:
         transform: An :class:`affine.Affine` transform.
 
     Returns:
-        ``True`` if the transform is axis-aligned.
+        ``True`` if the transform is axis-aligned and north-up.
     """
-    return transform.b == 0 and transform.d == 0
+    return transform.b == 0 and transform.d == 0 and transform.a > 0 and transform.e < 0
 
 
 def feather_weights(shape: tuple[int, int], width: int) -> Float[np.ndarray, "h w"]:

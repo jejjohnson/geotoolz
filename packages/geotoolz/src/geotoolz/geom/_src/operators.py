@@ -17,13 +17,22 @@ hydra-zen ``builds()`` cannot recreate them from ``get_config()``.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 import rasterio.windows
 from affine import Affine
-from georeader import griddata, mosaic, rasterize, read, slices, vectorize
+from georeader import (
+    griddata,
+    mosaic,
+    rasterize,
+    read,
+    slices,
+    vectorize,
+    window_utils,
+)
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
 from pyproj import CRS
@@ -38,6 +47,7 @@ from skimage.registration import (
 
 from geotoolz._src.blending import normalize_overlap_add, overlap_add
 from geotoolz._src.config import as_tuple
+from geotoolz._src.shape import single_band
 from geotoolz._src.wrap import wrap_like
 from geotoolz.geom._src.array import (
     center_offsets,
@@ -103,6 +113,88 @@ def _read_window_boundless(
     return np.pad(view, pad_width, mode="constant", constant_values=0)
 
 
+def _resize_to_shape(
+    gt: GeoTensor,
+    shape: tuple[int, int],
+    *,
+    anti_aliasing: bool,
+    interpolation: str,
+) -> GeoTensor:
+    """``GeoTensor.resize(output_shape=...)`` with a per-axis transform.
+
+    ``GeoTensor.resize`` scales the transform's *x* axis by the *height*
+    ratio, which is only right when both axes are scaled by the same
+    factor. Rebuild the transform from the per-axis pixel-space scale so
+    the output keeps the input's geographic extent.
+    """
+    height, width = gt.shape[-2:]
+    out_h, out_w = int(shape[0]), int(shape[1])
+    resized = gt.resize(
+        output_shape=(out_h, out_w),
+        anti_aliasing=anti_aliasing,
+        interpolation=interpolation,
+    )
+    transform = gt.transform * Affine.scale(width / out_w, height / out_h)
+    return GeoTensor(
+        resized.values,
+        transform=transform,
+        crs=resized.crs,
+        fill_value_default=resized.fill_value_default,
+        attrs=resized.attrs,
+    )
+
+
+def _mosaic_frame(gts: Sequence[GeoTensor]) -> tuple[Affine, rasterio.windows.Window]:
+    """Union-of-bounds frame on the first input's pixel grid.
+
+    Mirrors the frame :func:`georeader.mosaic.spatial_mosaic` builds
+    (first raster's CRS + pixel grid, outer-rounded to cover every
+    input) without warping any data. Returns the frame transform and the
+    ``(0, 0, W, H)`` output window.
+    """
+    first = gts[0]
+    first_crs = CRS.from_user_input(first.crs)
+    all_bounds = []
+    for gt in gts:
+        bounds = gt.bounds
+        if CRS.from_user_input(gt.crs) != first_crs:
+            bounds = transform_bounds(gt.crs, first.crs, *bounds)
+        all_bounds.append(bounds)
+    union = (
+        min(bound[0] for bound in all_bounds),
+        min(bound[1] for bound in all_bounds),
+        max(bound[2] for bound in all_bounds),
+        max(bound[3] for bound in all_bounds),
+    )
+    window = window_utils.round_outer_window(
+        rasterio.windows.from_bounds(*union, transform=first.transform)
+    )
+    transform = rasterio.windows.transform(window, first.transform)
+    return transform, rasterio.windows.Window(
+        col_off=0, row_off=0, width=window.width, height=window.height
+    )
+
+
+def _nan_masked(gt: GeoTensor) -> GeoTensor:
+    """``float32`` copy of ``gt`` with its fill sentinel replaced by NaN.
+
+    NaN then serves as both source and destination nodata when warping
+    onto the mosaic frame, which also covers inputs whose
+    ``fill_value_default`` is ``None``.
+    """
+    arr = np.asarray(gt.values, dtype=np.float32)
+    fill = gt.fill_value_default
+    if fill is not None and not np.isnan(fill):
+        arr = np.where(arr == fill, np.float32(np.nan), arr)
+    return GeoTensor(arr, transform=gt.transform, crs=gt.crs, fill_value_default=np.nan)
+
+
+def _nan_first(stack: np.ndarray, axis: int = 0) -> np.ndarray:
+    """First non-NaN value along ``axis`` (NaN where every entry is NaN)."""
+    index = np.expand_dims(np.argmax(~np.isnan(stack), axis=axis), axis)
+    return np.take_along_axis(stack, index, axis=axis).squeeze(axis)
+
+
 class Reproject(Operator):
     """Reproject a `GeoTensor` to a destination CRS (and optional resolution).
 
@@ -119,7 +211,8 @@ class Reproject(Operator):
             anything :class:`pyproj.CRS.from_user_input` accepts).
         resolution: Optional ``(pixel_size_x, pixel_size_y)`` in
             destination-CRS units. ``None`` lets georeader derive it
-            from the source pixel size.
+            from the source pixel size. Honoured even when ``dst_crs``
+            equals the input CRS (the call then acts as a resample).
         resampling: One of ``"nearest"``, ``"bilinear"`` /
             ``"linear"``, ``"cubic"`` / ``"bicubic"``,
             ``"cubic_spline"``, ``"lanczos"``, ``"average"``, ``"mode"``.
@@ -146,11 +239,21 @@ class Reproject(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         _require_geotensor(gt, "Reproject")
-        return read.read_to_crs(
+        resampling = resolve_resampling(self.resampling)
+        if self.resolution is None:
+            return read.read_to_crs(gt, self.dst_crs, resampling=resampling)
+        # ``read_to_crs`` returns its input untouched when the CRS already
+        # matches, silently dropping ``resolution``; build the destination
+        # grid explicitly so a same-CRS call still resamples.
+        window, dst_transform = read.calculate_transform_window(
+            gt, self.dst_crs, self.resolution
+        )
+        return read.read_reproject(
             gt,
-            self.dst_crs,
-            resampling=resolve_resampling(self.resampling),
-            resolution_dst_crs=self.resolution,
+            dst_crs=self.dst_crs,
+            dst_transform=dst_transform,
+            window_out=window,
+            resampling=resampling,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -413,8 +516,9 @@ class Resize(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         _require_geotensor(gt, "Resize")
-        return gt.resize(
-            output_shape=self.shape,
+        return _resize_to_shape(
+            gt,
+            self.shape,
             anti_aliasing=self.anti_aliasing,
             interpolation=resolve_interpolation(self.resampling),
         )
@@ -430,9 +534,12 @@ class Resize(Operator):
 class Resample(Operator):
     """Resample a `GeoTensor` to a target spatial resolution.
 
-    Delegates to :meth:`georeader.geotensor.GeoTensor.resize` via the
-    ``resolution_dst`` argument. The output shape is implied by the
-    ratio of the input pixel size to the requested resolution.
+    The output shape is derived per axis from the ratio of the input
+    pixel size to the requested resolution,
+    ``(round(H * res_y / dst_y), round(W * res_x / dst_x))``, and the
+    resize is delegated to :meth:`georeader.geotensor.GeoTensor.resize`.
+    The geographic extent is preserved, so the achieved pixel size
+    matches ``resolution`` exactly only when it divides the extent.
 
     Geo-dependent: the target resolution is expressed in CRS units, so
     a georeferenced ``GeoTensor`` input is required; plain arrays raise
@@ -464,8 +571,19 @@ class Resample(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         _require_geotensor(gt, "Resample")
-        return gt.resize(
-            resolution_dst=self.resolution,
+        res_x, res_y = gt.res
+        dst_x, dst_y = self.resolution
+        height, width = gt.shape[-2:]
+        # Derive the shape per axis here instead of passing
+        # ``resolution_dst`` to ``GeoTensor.resize``, which scales the
+        # height by the *x* resolution ratio (wrong for non-square pixels).
+        shape = (
+            max(round(height * res_y / abs(dst_y)), 1),
+            max(round(width * res_x / abs(dst_x)), 1),
+        )
+        return _resize_to_shape(
+            gt,
+            shape,
             anti_aliasing=self.anti_aliasing,
             interpolation=resolve_interpolation(self.resampling),
         )
@@ -499,8 +617,8 @@ class PadTo(Operator):
         mode: Numpy pad mode. ``"constant"`` (default), ``"edge"``,
             ``"reflect"``, ``"symmetric"``, ...
         fill: Constant value when ``mode == "constant"``. ``None``
-            falls back to the carrier's ``fill_value_default``
-            (``0`` for plain-array input).
+            falls back to the carrier's ``fill_value_default``, or ``0``
+            when the carrier has none (and for plain-array input).
 
     Examples:
         >>> import geotoolz as gz
@@ -532,7 +650,12 @@ class PadTo(Operator):
         if hasattr(gt, "transform"):
             kwargs: dict[str, Any] = {}
             if self.mode == "constant":
-                kwargs["constant_values"] = self.fill
+                fill = self.fill
+                if fill is None:
+                    # ``GeoTensor.pad`` raises when neither a constant nor a
+                    # carrier fill is set; fall back to 0 like the ndarray path.
+                    fill = 0 if gt.fill_value_default is None else None
+                kwargs["constant_values"] = fill
             return gt.pad({"y": pad_yx[0], "x": pad_yx[1]}, mode=self.mode, **kwargs)
         arr = np.asarray(gt)
         pad_width = [(0, 0)] * (arr.ndim - 2) + list(pad_yx)
@@ -660,11 +783,15 @@ class CropToBounds(Operator):
 class Tile(Operator):
     """Split a `GeoTensor` into spatial tiles.
 
-    Wraps :func:`georeader.slices.create_windows` and then reads each
-    window with ``boundless=True`` so the trailing-edge tiles match
-    ``size`` exactly. Out-of-bounds areas are padded with the carrier's
+    Wraps :func:`georeader.slices.create_windows` (with
+    ``trim_incomplete=False``) and then reads each window with
+    ``boundless=True`` so the trailing-edge tiles match ``size``
+    exactly. Out-of-bounds areas are padded with the carrier's
     ``fill_value_default``; use :func:`Stitch` (which masks the
-    sentinel) to recover the original extent.
+    sentinel) to recover the original extent. A ``GeoTensor`` with
+    ``fill_value_default=None`` is zero-padded instead — ``Stitch``
+    cannot tell that padding from data, so pin its ``target_shape`` /
+    ``target_transform`` to the source grid to drop it.
 
     Pixel-space tiling: plain ``np.ndarray`` inputs are supported and
     yield a list of plain arrays (out-of-bounds areas zero-padded, since
@@ -678,8 +805,9 @@ class Tile(Operator):
             implied overlap is ``size - stride``. ``None`` (default)
             means non-overlapping tiles (``stride == size``).
         include_incomplete: Whether to keep edge tiles that don't fully
-            fit (still emitted at ``size`` shape because of
-            ``boundless=True``).
+            fit (still emitted at ``size`` shape, padded as above).
+            ``False`` drops them, so the trailing rows / columns that no
+            full tile covers are not emitted at all.
 
     Examples:
         >>> import geotoolz as gz
@@ -704,16 +832,33 @@ class Tile(Operator):
             overlap = (self.size[0] - self.stride[0], self.size[1] - self.stride[1])
             if overlap[0] < 0 or overlap[1] < 0:
                 raise ValueError("stride must be less than or equal to size.")
+        # ``trim_incomplete=False`` keeps every window at ``size`` so the
+        # trailing tiles extend past the raster and get padded below
+        # (georeader's default trims them to the raster bounds instead).
         windows = slices.create_windows(
             gt.shape[-2:],
             self.size,
             overlap=overlap,
             include_incomplete=self.include_incomplete,
+            trim_incomplete=False,
         )
-        if hasattr(gt, "transform"):
+        if not hasattr(gt, "transform"):
+            arr = np.asarray(gt)
+            return [_read_window_boundless(arr, window) for window in windows]
+        if gt.fill_value_default is not None:
             return [gt.read_from_window(window, boundless=True) for window in windows]
-        arr = np.asarray(gt)
-        return [_read_window_boundless(arr, window) for window in windows]
+        # ``GeoTensor.read_from_window(boundless=True)`` refuses to pad
+        # without a fill value; zero-pad like the plain-array path.
+        return [
+            GeoTensor(
+                _read_window_boundless(np.asarray(gt.values), window),
+                transform=rasterio.windows.transform(window, gt.transform),
+                crs=gt.crs,
+                fill_value_default=None,
+                attrs=gt.attrs,
+            )
+            for window in windows
+        ]
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -781,9 +926,17 @@ class Stitch(Operator):
     otherwise). Pixels with no valid contributor are filled with
     ``fill`` (default: the first tile's ``fill_value_default``).
 
+    Unless ``target_shape`` is pinned, trailing bottom rows / right
+    columns with no valid contributor (the sentinel padding
+    :class:`Tile` adds to its edge tiles) are cropped off, so a
+    ``Tile`` → ``Stitch`` round trip recovers the source extent. Pin
+    ``target_shape`` to keep them.
+
     Geo-dependent: every tile must be a georeferenced ``GeoTensor`` —
     the tile transforms place each tile on the output grid. Plain-array
-    tiles raise ``TypeError``.
+    tiles raise ``TypeError``. Every tile must be north-up
+    (``b == d == 0``, ``a > 0``, ``e < 0``) and share the first tile's
+    pixel size; otherwise ``ValueError`` is raised.
 
     Args:
         blend: Blend mode (see above). Default ``"average"``.
@@ -791,7 +944,8 @@ class Stitch(Operator):
         target_shape: Optional ``(H, W)`` override for the output grid.
         target_transform: Optional :class:`affine.Affine` override for
             the output grid origin, or its first six coefficients
-            ``[a, b, c, d, e, f]`` (the form ``get_config`` emits).
+            ``[a, b, c, d, e, f]`` (the form ``get_config`` emits). Must
+            be north-up with the tiles' pixel size.
         target_crs: Optional CRS override for the output. Defaults to
             the first tile's CRS.
         fill: Output fill value. ``None`` (default) inherits from the
@@ -841,25 +995,53 @@ class Stitch(Operator):
             if not is_north_up(tile.transform):
                 raise ValueError(
                     f"Stitch only supports north-up, non-rotated GeoTensors; "
-                    f"tile {index} has a rotated/sheared transform."
+                    f"tile {index} has a rotated/sheared or flipped transform "
+                    f"({tuple(tile.transform)[:6]})."
                 )
+            # ``target_slices`` places tiles by origin only and assumes one
+            # pixel size, so a coarser/finer tile would be pasted at the
+            # wrong scale.
+            if not np.allclose(tile.res, first.res):
+                raise ValueError(
+                    f"Stitch requires every tile to share the first tile's "
+                    f"resolution {tuple(first.res)}; tile {index} has "
+                    f"{tuple(tile.res)}."
+                )
+        if self.target_transform is not None and not (
+            is_north_up(self.target_transform)
+            and np.allclose(
+                (self.target_transform.a, -self.target_transform.e), first.res
+            )
+        ):
+            raise ValueError(
+                f"target_transform must be north-up with the tiles' resolution "
+                f"{tuple(first.res)}; got {tuple(self.target_transform)[:6]}."
+            )
         transform, shape = self._target_grid(tiles)
         fill = first.fill_value_default if self.fill is None else self.fill
         dtype = first.dtype if self.blend in {"first", "max"} else np.float32
         out_shape = first.shape[:-2] + shape
         if self.blend == "max":
             values = np.full(out_shape, fill, dtype=dtype)
-            filled = np.zeros(shape, dtype=bool)
-            self._stitch_max(tiles, transform, values, filled, fill)
+            covered = np.zeros(shape, dtype=bool)
+            self._stitch_max(tiles, transform, values, covered, fill)
         elif self.blend == "first":
             values = np.full(out_shape, fill, dtype=dtype)
-            filled = np.zeros(shape, dtype=bool)
-            self._stitch_first(tiles, transform, values, filled, fill)
+            covered = np.zeros(shape, dtype=bool)
+            self._stitch_first(tiles, transform, values, covered, fill)
         else:  # average / feather
             values = np.zeros(out_shape, dtype=dtype)
             weights = np.zeros(shape, dtype=np.float32)
             self._stitch_average(tiles, transform, values, weights, fill)
+            covered = weights > 0
             normalize_overlap_add(values, weights, fill)
+        if self.target_shape is None:
+            # Drop the trailing rows / columns that only :class:`Tile`'s
+            # sentinel padding reached, recovering the source extent.
+            rows = np.flatnonzero(covered.any(axis=1))
+            cols = np.flatnonzero(covered.any(axis=0))
+            if rows.size and cols.size:
+                values = values[..., : rows[-1] + 1, : cols[-1] + 1]
         return GeoTensor(
             values,
             transform,
@@ -1287,9 +1469,10 @@ class Mosaic(Operator):
     For ``method="first"`` this is a thin wrapper around
     :func:`georeader.mosaic.spatial_mosaic`: rasters are processed in
     order and the first valid pixel wins. For all other methods the
-    function is still used to compute the *frame* (union of extents
-    + first raster's CRS / dtype), then every input is reprojected onto
-    that frame and the per-pixel reduction is applied:
+    *frame* is the union of the input bounds on the first raster's pixel
+    grid (its CRS / dtype), every input is reprojected onto that frame
+    (its fill sentinel becoming NaN) and the per-pixel reduction is
+    applied:
 
     .. math::
 
@@ -1298,6 +1481,10 @@ class Mosaic(Operator):
         \right)
 
     with ``agg`` chosen from ``mean``, ``median``, ``max``, ``min``.
+    Pixels no input covers get the first raster's ``fill_value_default``;
+    when that is ``None`` they get NaN (float dtypes) or ``0`` (integer
+    dtypes), and ``"first"`` also takes this stacked path because
+    ``spatial_mosaic`` cannot pad fill-less inputs.
 
     Geo-dependent: every input must be a georeferenced ``GeoTensor``
     (transform + CRS drive the mosaic frame); plain arrays raise
@@ -1316,6 +1503,7 @@ class Mosaic(Operator):
     """
 
     _REDUCERS: ClassVar[dict[str, Any]] = {
+        "first": _nan_first,
         "mean": np.nanmean,
         "average": np.nanmean,
         "median": np.nanmedian,
@@ -1330,35 +1518,49 @@ class Mosaic(Operator):
     def _apply(self, gts: list[GeoTensor]) -> GeoTensor:
         for gt in gts:
             _require_geotensor(gt, "Mosaic")
-        if self.method == "first":
+        if self.method == "first" and all(
+            gt.fill_value_default is not None for gt in gts
+        ):
             return mosaic.spatial_mosaic(
                 gts, resampling=resolve_resampling(self.resampling)
             )
+        # ``spatial_mosaic`` cannot pad inputs that carry no fill value, so
+        # ``"first"`` over such inputs goes through the stacked path below.
         if self.method not in self._REDUCERS:
             raise ValueError(
                 "method must be 'first', 'mean', 'median', 'max', or 'min'."
             )
-        base = mosaic.spatial_mosaic(
-            gts, resampling=resolve_resampling(self.resampling)
-        )
-        fill = base.fill_value_default
-        arrays = []
-        for gt in gts:
-            aligned = read.read_reproject_like(
-                gt,
-                base,
-                resampling=resolve_resampling(self.resampling),
+        first = gts[0]
+        transform, window = _mosaic_frame(gts)
+        arrays = [
+            np.asarray(
+                read.read_reproject(
+                    _nan_masked(gt),
+                    dst_crs=first.crs,
+                    dst_transform=transform,
+                    window_out=window,
+                    resampling=resolve_resampling(self.resampling),
+                    dst_nodata=np.nan,
+                )
             )
-            arr = np.asarray(aligned, dtype=np.float32)
-            if fill is not None:
-                arr = np.where(arr == fill, np.nan, arr)
-            arrays.append(arr)
+            for gt in gts
+        ]
         stack = np.stack(arrays, axis=0)
-        with np.errstate(invalid="ignore"):
+        # Pixels no input covers are all-NaN slices; numpy warns about
+        # them, but they are expected here and refilled below.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
             values = self._REDUCERS[self.method](stack, axis=0)
-        if fill is not None:
-            values = np.where(np.isnan(values), fill, values)
-        return base.array_as_geotensor(values.astype(base.dtype, copy=False))
+        fill = first.fill_value_default
+        if fill is None:
+            fill = np.nan if np.issubdtype(first.dtype, np.floating) else 0
+        values = np.where(np.isnan(values), fill, values)
+        return GeoTensor(
+            values.astype(first.dtype, copy=False),
+            transform=transform,
+            crs=first.crs,
+            fill_value_default=fill,
+        )
 
 
 class Georeference(Operator):
@@ -1434,7 +1636,9 @@ class Rasterize(Operator):
             values. ``None`` means "burn ``1``".
         all_touched: Whether to mark every pixel the geometry touches
             (vs. only those whose centre is inside).
-        fill: Background value. Default ``0``.
+        fill: Background value. Default ``0``. For a list of geometries
+            the output is ``uint8`` when ``fill`` is an integer in
+            ``[0, 255]`` and ``float32`` otherwise (e.g. ``np.nan``).
 
     Examples:
         >>> import geotoolz as gz
@@ -1550,7 +1754,8 @@ class Vectorize(Operator):
 
     Geo-dependent: requires a georeferenced ``GeoTensor`` input (the
     transform maps pixels to polygon coordinates); plain arrays raise
-    ``TypeError``.
+    ``TypeError``. The mask must be single-band, ``(H, W)`` or
+    ``(1, H, W)``; other shapes raise ``ValueError``.
 
     Args:
         min_area: Minimum polygon area in square *pixels*. Default
@@ -1577,7 +1782,12 @@ class Vectorize(Operator):
 
     def _apply(self, gt: GeoTensor) -> list[BaseGeometry]:
         _require_geotensor(gt, "Vectorize")
-        polygons = vectorize.get_polygons(gt, min_area=self.min_area, tolerance=0.0)
+        # ``get_polygons`` asserts a 2-D mask; squeeze the canonical
+        # ``(1, H, W)`` band axis and pass the transform explicitly.
+        mask = single_band(np.asarray(gt.values), name="Vectorize")
+        polygons = vectorize.get_polygons(
+            mask, min_area=self.min_area, tolerance=0.0, transform=gt.transform
+        )
         if self.simplify_tolerance is None:
             return polygons
         return [polygon.simplify(self.simplify_tolerance) for polygon in polygons]
@@ -1611,10 +1821,15 @@ def _rasterize_like(
             all_touched=all_touched,
         )
     geometry = unary_union(geometries)
+    # georeader defaults to ``uint8``, which cannot hold a NaN / negative /
+    # fractional / >255 background; widen to ``float32`` for those.
+    fill_value = float(fill)
+    fits_uint8 = fill_value.is_integer() and 0 <= fill_value <= 255
     return rasterize.rasterize_geometry_like(
         geometry,
         like,
         value=1,
+        dtype=np.uint8 if fits_uint8 else np.float32,
         fill=fill,
         all_touched=all_touched,
     )
