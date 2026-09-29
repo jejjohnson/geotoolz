@@ -131,6 +131,68 @@ def test_hillshade_sun_overhead_and_flat_dem_are_constant() -> None:
     assert out.transform == flat.transform
 
 
+def _plane(east_rise: float, south_rise: float, n: int = 6) -> np.ndarray:
+    """Tilted plane DEM: z rises by the given amounts per pixel east / south."""
+    rows, cols = np.mgrid[0:n, 0:n].astype(np.float64)
+    return east_rise * cols + south_rise * rows
+
+
+def test_hillshade_lights_slopes_facing_the_sun() -> None:
+    # Row 0 = north. A plane rising towards the SE faces NW (towards the
+    # default az-315 sun): bright; the opposite plane is in shadow.
+    nw_facing = _plane(1.0, 1.0)
+    se_facing = _plane(-1.0, -1.0)
+    assert hillshade(nw_facing)[2, 2] == 251
+    assert hillshade(se_facing)[2, 2] == 0
+    # N-facing (rises to the south) is lit by a NW sun, S-facing less so.
+    assert hillshade(_plane(0.0, 1.0))[2, 2] > hillshade(_plane(0.0, -1.0))[2, 2]
+    # E-facing is lit by an eastern sun and shadowed by a western one.
+    e_facing = _plane(-1.0, 0.0)
+    assert hillshade(e_facing, azimuth_deg=90)[2, 2] > 200
+    assert hillshade(e_facing, azimuth_deg=270)[2, 2] == 0
+
+
+@pytest.mark.parametrize("azimuth_deg", [0.0, 45.0, 90.0, 135.0, 200.0, 315.0])
+@pytest.mark.parametrize("altitude_deg", [30.0, 45.0, 60.0])
+@pytest.mark.parametrize(
+    ("east_rise", "south_rise"),
+    [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (1.0, 1.0), (2.0, -0.5)],
+)
+def test_hillshade_matches_matplotlib_lightsource(
+    azimuth_deg: float, altitude_deg: float, east_rise: float, south_rise: float
+) -> None:
+    mcolors = pytest.importorskip("matplotlib.colors")
+    dem = _plane(east_rise, south_rise)
+    ours = hillshade(
+        dem,
+        x_resolution=2.0,
+        y_resolution=3.0,
+        azimuth_deg=azimuth_deg,
+        altitude_deg=altitude_deg,
+    )
+    # Planar DEM -> constant intensity, so matplotlib's contrast stretch
+    # is a no-op and the two are directly comparable (up to uint8 floor).
+    expected = (
+        mcolors.LightSource(azdeg=azimuth_deg, altdeg=altitude_deg).hillshade(
+            dem, dx=2.0, dy=3.0
+        )
+        * 255.0
+    )
+    np.testing.assert_allclose(ours, expected, atol=1.0)
+
+
+def test_hillshade_operator_uses_north_up_transform() -> None:
+    # Hillshade inherits the fixed orientation (resolution from transform).
+    nw_facing = _toy_geotensor(_plane(1.0, 1.0).astype(np.float32))
+    out = Hillshade(azimuth_deg=315.0, altitude_deg=45.0)(nw_facing)
+    assert np.asarray(out)[2, 2] == 251
+    relief = ShadedRelief(colormap="gray")(nw_facing)
+    shadow = ShadedRelief(colormap="gray")(
+        _toy_geotensor(_plane(-1.0, -1.0).astype(np.float32))
+    )
+    assert np.asarray(relief)[2, 2, :3].sum() > np.asarray(shadow)[2, 2, :3].sum()
+
+
 def test_shaded_relief_outputs_rgba() -> None:
     dem = _toy_geotensor(np.arange(16, dtype=np.float32).reshape(4, 4))
     out = ShadedRelief(colormap="terrain")(dem)
@@ -153,6 +215,63 @@ def test_overlay_alpha_blends_to_rgba() -> None:
     out = Overlay(alpha=0.5)(bg, fg)
     assert out.shape == (4, 2, 2)
     np.testing.assert_array_equal(np.asarray(out)[:3], 127)
+
+
+def test_ensure_rgba_float_rgb_scales_to_bytes() -> None:
+    rgb = np.full((3, 2, 2), 0.5)
+    np.testing.assert_array_equal(
+        gz.viz.ensure_rgba(rgb)[:, 0, 0], [127, 127, 127, 255]
+    )
+    gray = np.full((2, 2), 0.5, dtype=np.float32)
+    out = gz.viz.ensure_rgba(gray)
+    assert out.dtype == np.uint8
+    np.testing.assert_array_equal(out[:, 0, 0], [127, 127, 127, 255])
+    rgba = np.full((4, 2, 2), 0.5)
+    np.testing.assert_array_equal(gz.viz.ensure_rgba(rgba)[:, 0, 0], [127] * 4)
+
+
+def test_ensure_rgba_byte_range_inputs_are_not_rescaled() -> None:
+    # Float values > 1 are already display-scaled; NaNs map to 0.
+    rgb = np.array([[[0.5, 200.0]], [[1.0, 300.0]], [[np.nan, 2.0]]])
+    out = gz.viz.ensure_rgba(rgb)
+    np.testing.assert_array_equal(out[:, 0, 0], [0, 1, 0, 255])
+    np.testing.assert_array_equal(out[:, 0, 1], [200, 255, 2, 255])
+    ints = np.ones((3, 2, 2), dtype=np.int16)
+    np.testing.assert_array_equal(gz.viz.ensure_rgba(ints)[:, 0, 0], [1, 1, 1, 255])
+    u8 = np.full((2, 2), 7, dtype=np.uint8)
+    np.testing.assert_array_equal(gz.viz.ensure_rgba(u8)[:, 0, 0], [7, 7, 7, 255])
+
+
+def test_overlay_float_inputs_not_black() -> None:
+    bg = _toy_geotensor(np.full((3, 2, 2), 0.5, dtype=np.float32))
+    transparent_fg = _toy_geotensor(np.zeros((4, 2, 2), dtype=np.float32))
+    out = np.asarray(Overlay(alpha=0.5)(bg, transparent_fg))
+    np.testing.assert_array_equal(out[:, 0, 0], [127, 127, 127, 255])
+    # Float grayscale foreground over float RGB background blends to grey.
+    fg = _toy_geotensor(np.ones((2, 2), dtype=np.float32))
+    out = np.asarray(Overlay(alpha=0.5)(bg, fg))
+    assert np.all(out[:3] > 180)
+    np.testing.assert_array_equal(out[3], 255)
+    zero = np.asarray(Overlay(alpha=0.0)(bg, fg))
+    np.testing.assert_array_equal(zero[:, 0, 0], [127, 127, 127, 255])
+
+
+def test_annotate_float_inputs_not_black() -> None:
+    image = _toy_geotensor(np.full((3, 8, 8), 0.5, dtype=np.float32))
+    polygon = Polygon([(1, 1), (3, 1), (3, 3), (1, 3)])
+    poly = np.asarray(
+        AnnotatePolygons(geometries=[polygon], color=(1.0, 0.0, 0.0, 1.0), width=1)(
+            image
+        )
+    )
+    points = np.asarray(AnnotatePoints(points=np.array([[1.5, 2.5]]), radius=0)(image))
+    grey = np.array([127, 127, 127, 255])[:, None, None]
+    for arr in (poly, points):
+        # Unannotated pixels keep the float image's grey instead of black.
+        assert np.all(arr == grey, axis=0).any()
+        assert not np.all(arr[:3] == 0, axis=0).any()
+    assert np.any(np.all(poly == np.array([255, 0, 0, 255])[:, None, None], axis=0))
+    np.testing.assert_array_equal(points[:, 1, 1], [255, 255, 0, 255])
 
 
 def test_annotate_polygons_rasterizes_polygon_outline() -> None:
