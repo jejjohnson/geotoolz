@@ -117,9 +117,6 @@ class ToFloat32(Operator):
         # returns a plain ndarray — carrier kind is preserved either way.
         return gt.astype(np.float32)
 
-    def get_config(self) -> dict[str, Any]:
-        return {}
-
 
 class DNToRadiance(Operator):
     r"""Convert DN to at-sensor radiance.
@@ -681,15 +678,6 @@ class IntegratedIrradiance(Operator):
             epsilon_srf=self.epsilon_srf,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        # The DataFrame leaves are kept as-is for debugging; ``forbid_in_yaml``
-        # signals to YAML loaders that this op cannot be serialised verbatim.
-        return {
-            "srf": self.srf,
-            "solar_irradiance": self.solar_irradiance,
-            "epsilon_srf": self.epsilon_srf,
-        }
-
 
 class ApplySRF(Operator):
     r"""Convolve hyperspectral bands to target Gaussian-SRF multispectral bands.
@@ -974,9 +962,6 @@ class DOS1(Operator):
             out[~valid] = fill_value
         return wrap_like(gt, out)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"dark_percentile": self.dark_percentile}
-
 
 class SimpleAtmosphericCorrection(Operator):
     """Dispatch simple BOA approximations; currently supports ``method='dos1'``.
@@ -1020,13 +1005,6 @@ class SimpleAtmosphericCorrection(Operator):
             )
         return DOS1(dark_percentile=self.dark_percentile)(gt)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "method": self.method,
-            "dark_percentile": self.dark_percentile,
-            "aod": self.aod,
-        }
-
 
 class MinMax(Operator):
     r"""Linear contrast stretch into ``[0, 1]``.
@@ -1059,9 +1037,6 @@ class MinMax(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = min_max_normalize(np.asarray(gt), self.vmin, self.vmax, clip=self.clip)
         return wrap_like(gt, out)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"vmin": self.vmin, "vmax": self.vmax, "clip": self.clip}
 
 
 class PercentileClip(Operator):
@@ -1105,9 +1080,6 @@ class PercentileClip(Operator):
         )
         return wrap_like(gt, out)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"p_min": self.p_min, "p_max": self.p_max, "axis": self.axis}
-
 
 class Gamma(Operator):
     r"""Power-law gamma correction.
@@ -1139,6 +1111,3 @@ class Gamma(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = gamma_correct(np.asarray(gt), g=self.g)
         return wrap_like(gt, out)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"g": self.g}

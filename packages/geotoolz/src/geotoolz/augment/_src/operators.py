@@ -19,6 +19,7 @@ from geotoolz._src.config import (
     jsonable,
     mapping_from_pairs,
     mapping_to_pairs,
+    nested_config,
 )
 from geotoolz._src.wrap import wrap_like
 
@@ -204,10 +205,7 @@ class Compose(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "augmentations": [
-                {"class": type(op).__name__, "config": op.get_config()}
-                for op in self.augmentations
-            ],
+            "augmentations": [nested_config(op) for op in self.augmentations],
             "p": self.p,
             "seed": self.seed,
         }
@@ -276,13 +274,6 @@ class RandomFlip(Operator):
             return out
         return _new_geotensor(gt, out, transform)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "p_horizontal": self.p_horizontal,
-            "p_vertical": self.p_vertical,
-            "seed": self.seed,
-        }
-
 
 class RandomRotate90(Operator):
     """Randomly rotate by 90, 180, or 270 degrees.
@@ -326,9 +317,6 @@ class RandomRotate90(Operator):
             return out
         height, width = arr.shape[-2], arr.shape[-1]
         return _new_geotensor(gt, out, _rot90_transform(transform, height, width, k))
-
-    def get_config(self) -> dict[str, Any]:
-        return {"p": self.p, "seed": self.seed}
 
 
 def _rot90_transform(transform: Affine, height: int, width: int, k: int) -> Affine:
@@ -651,9 +639,6 @@ class BandDropout(Operator):
         out[mask, ...] = self.fill
         return _wrap_like(gt, out)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"p": self.p, "fill": self.fill, "seed": self.seed}
-
 
 class BandJitter(Operator):
     """Permute bands within explicitly configured groups.
@@ -971,4 +956,5 @@ class CutMix(Operator):
         return _wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
-        return {"pool_size": len(self.pool), "p": self.p, "seed": self.seed}
+        # Debug payload: the pool holds runtime rasters (forbid_in_yaml).
+        return {"pool": {"n": len(self.pool)}, "p": self.p, "seed": self.seed}

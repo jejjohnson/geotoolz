@@ -187,9 +187,6 @@ class MedianComposite(Operator):
         count = np.sum(~np.isnan(stack), axis=0).astype(np.int64)
         return out, wrap_like(base, count)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"nan_policy": self.nan_policy, "return_count": self.return_count}
-
 
 class MaxNDVIComposite(Operator):
     """Pick the frame with maximum NDVI per pixel and return its band values.
@@ -282,14 +279,6 @@ class MaxNDVIComposite(Operator):
             return out
         return out, wrap_like(base, index.astype(np.int64))
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "red": self.red,
-            "nir": self.nir,
-            "return_index": self.return_index,
-            "eps": self.eps,
-        }
-
 
 class CloudFreeComposite(Operator):
     """Per-pixel mean over frames where the cloud mask is false.
@@ -340,13 +329,6 @@ class CloudFreeComposite(Operator):
         if not self.return_count:
             return out
         return out, wrap_like(base, count.astype(np.int64))
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "nan_policy": self.nan_policy,
-            "min_valid": self.min_valid,
-            "return_count": self.return_count,
-        }
 
 
 class BAPComposite(Operator):
@@ -465,16 +447,6 @@ class BAPComposite(Operator):
         best_score = np.take_along_axis(score_stack, index[None, ...], axis=0)[0]
         return out, wrap_like(base, best_score)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "target_doy": self.target_doy,
-            "w_view_angle": self.w_view_angle,
-            "w_recency": self.w_recency,
-            "w_cloud_distance": self.w_cloud_distance,
-            "w_opacity": self.w_opacity,
-            "return_score": self.return_score,
-        }
-
 
 class MinCloudComposite(Operator):
     """Pick each pixel from the scene with the lowest *global* cloud coverage.
@@ -522,9 +494,6 @@ class MinCloudComposite(Operator):
             return out
         count = np.sum(clear, axis=0).astype(np.int64)
         return out, wrap_like(base, count)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"return_count": self.return_count}
 
 
 __all__ = [

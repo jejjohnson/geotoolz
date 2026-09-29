@@ -202,9 +202,10 @@ class PerBandReduce(Einx):
 
     def __init__(self, *, reduce: str = "mean") -> None:
         super().__init__(op=reduce, pattern="c y x -> c")
+        self.reduce = reduce
 
     def get_config(self) -> dict[str, Any]:
-        return {"reduce": self.op}
+        return {"reduce": self.reduce}
 
 
 class SpatialPool(Operator):

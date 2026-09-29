@@ -116,14 +116,6 @@ class PeakLocalMax(Operator):
         rows, cols = coords[:, 0], coords[:, 1]
         return _points(gt, rows, cols, {"score": image[rows, cols]})
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "min_distance": self.min_distance,
-            "threshold_abs": self.threshold_abs,
-            "threshold_rel": self.threshold_rel,
-            "exclude_border": self.exclude_border,
-        }
-
 
 class _BlobBase(Operator):
     """Common base for ``skimage.feature.blob_*`` wrappers.
@@ -188,13 +180,6 @@ class _BlobBase(Operator):
             blobs[:, 1],
             {"sigma": blobs[:, 2], "radius": self._radius_from_sigma(blobs[:, 2])},
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "min_sigma": self.min_sigma,
-            "max_sigma": self.max_sigma,
-            "threshold": self.threshold,
-        }
 
 
 class BlobLoG(_BlobBase):
@@ -332,13 +317,6 @@ class Canny(Operator):
         )
         return wrap_like(gt, edges)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "sigma": self.sigma,
-            "low_threshold": self.low_threshold,
-            "high_threshold": self.high_threshold,
-        }
-
 
 class CornerHarris(Operator):
     """Harris corner response plus peak selection as point features.
@@ -379,9 +357,6 @@ class CornerHarris(Operator):
         rows, cols = coords[:, 0], coords[:, 1]
         return _points(gt, rows, cols, {"response": response[rows, cols]})
 
-    def get_config(self) -> dict[str, Any]:
-        return {"min_distance": self.min_distance, "threshold_rel": self.threshold_rel}
-
 
 class HOG(Operator):
     """Histogram of Oriented Gradients descriptor.
@@ -417,13 +392,6 @@ class HOG(Operator):
             feature_vector=True,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "orientations": self.orientations,
-            "pixels_per_cell": self.pixels_per_cell,
-            "cells_per_block": self.cells_per_block,
-        }
-
 
 class StructureTensor(Operator):
     """Local structure-tensor eigenvalue stack.
@@ -449,9 +417,6 @@ class StructureTensor(Operator):
         )
         eigvals = np.asarray(structure_tensor_eigenvalues(tensor))
         return wrap_like(gt, eigvals)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"sigma": self.sigma}
 
 
 class MultiscaleBasicFeatures(Operator):
@@ -497,15 +462,6 @@ class MultiscaleBasicFeatures(Operator):
         )
         return wrap_like(gt, einx.id("h w f -> f h w", features))
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "intensity": self.intensity,
-            "edges": self.edges,
-            "texture": self.texture,
-            "sigma_min": self.sigma_min,
-            "sigma_max": self.sigma_max,
-        }
-
 
 class HoughLines(Operator):
     """Detect prominent straight lines with the Hough transform.
@@ -534,9 +490,6 @@ class HoughLines(Operator):
         return pd.DataFrame(
             {"accumulator": accum, "angle": angle_peaks, "distance": dist_peaks}
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"num_peaks": self.num_peaks}
 
 
 class HoughCircles(Operator):
@@ -573,6 +526,3 @@ class HoughCircles(Operator):
             total_num_peaks=self.total_num_peaks,
         )
         return _points(gt, cy, cx, {"radius": radii, "accumulator": accum})
-
-    def get_config(self) -> dict[str, Any]:
-        return {"radii": self.radii, "total_num_peaks": self.total_num_peaks}

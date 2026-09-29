@@ -17,9 +17,19 @@ from pathlib import PurePath
 from typing import Any
 
 import numpy as np
+from pipekit._base.operator import nested_config
 
 
-__all__ = ["as_tuple", "jsonable", "mapping_from_pairs", "mapping_to_pairs"]
+# ``nested_config`` is pipekit's canonical ``{"class", "config"}`` payload for
+# an operator nested in another's config; re-exported here because pipekit
+# does not expose it at the top level.
+__all__ = [
+    "as_tuple",
+    "jsonable",
+    "mapping_from_pairs",
+    "mapping_to_pairs",
+    "nested_config",
+]
 
 
 def jsonable(value: Any) -> Any:

@@ -250,9 +250,6 @@ class StretchToUint8(Operator):
         )
         return wrap_like(gt, out, fill_value_default=0)
 
-    def get_config(self) -> dict[str, Any]:
-        return {"lower": self.lower, "upper": self.upper, "per_band": self.per_band}
-
 
 class GammaCorrect(Operator):
     """Apply display gamma correction.
@@ -295,9 +292,6 @@ class GammaCorrect(Operator):
                 np.asarray(gt), gamma=self.gamma, inplace_norm=self.inplace_norm
             ),
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {"gamma": self.gamma, "inplace_norm": self.inplace_norm}
 
 
 class ToDisplayRange(StretchToUint8):
@@ -483,15 +477,6 @@ class Hillshade(Operator):
         )
         return wrap_like(gt, out, fill_value_default=0)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "azimuth_deg": self.azimuth_deg,
-            "altitude_deg": self.altitude_deg,
-            "z_factor": self.z_factor,
-            "x_resolution": self.x_resolution,
-            "y_resolution": self.y_resolution,
-        }
-
 
 class ShadedRelief(Operator):
     """Apply an elevation colormap and modulate RGB with hillshade.
@@ -550,14 +535,6 @@ class ShadedRelief(Operator):
         rgba[:3] = (rgba[:3].astype(np.float32) * shade).astype(np.uint8)
         return wrap_like(gt, rgba, fill_value_default=0)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "azimuth_deg": self.azimuth_deg,
-            "altitude_deg": self.altitude_deg,
-            "colormap": self.colormap,
-            "z_factor": self.z_factor,
-        }
-
 
 class Overlay(Operator):
     """Blend background and foreground GeoTensors on the same grid.
@@ -613,9 +590,6 @@ class Overlay(Operator):
             mode=self.mode,
         )
         return wrap_like(background, out, fill_value_default=0)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"alpha": self.alpha, "mode": self.mode}
 
 
 class AnnotatePolygons(Operator):

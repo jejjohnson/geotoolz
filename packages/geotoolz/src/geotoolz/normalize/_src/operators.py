@@ -108,9 +108,6 @@ class PerBandStats(Operator):
         self.stats = {key: _stat_as_jsonable(value) for key, value in stats.items()}
         return gt
 
-    def get_config(self) -> dict[str, Any]:
-        return {"percentiles": self.percentiles}
-
 
 class CLAHE(Operator):
     """Contrast-Limited Adaptive Histogram Equalization.
@@ -463,7 +460,14 @@ class HistogramMatch(Operator):
         return wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
-        return {"reference_shape": list(self.reference.shape)}
+        # Debug payload: the reference is a runtime raster (forbid_in_yaml).
+        reference = np.asarray(self.reference)
+        return {
+            "reference": {
+                "shape": list(reference.shape),
+                "dtype": str(reference.dtype),
+            }
+        }
 
 
 class LogScale(Operator):
@@ -497,9 +501,6 @@ class LogScale(Operator):
             gt, log_scale(np.asarray(gt, dtype=float), base=self.base, eps=self.eps)
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"base": self.base, "eps": self.eps}
-
 
 class AsinhScale(Operator):
     r"""Inverse-hyperbolic-sine scaling.
@@ -526,9 +527,6 @@ class AsinhScale(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         return wrap_like(gt, asinh_scale(np.asarray(gt, dtype=float), a=self.a))
-
-    def get_config(self) -> dict[str, Any]:
-        return {"a": self.a}
 
 
 class PowerScale(Operator):
@@ -557,9 +555,6 @@ class PowerScale(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         return wrap_like(gt, power_scale(np.asarray(gt, dtype=float), gamma=self.gamma))
-
-    def get_config(self) -> dict[str, Any]:
-        return {"gamma": self.gamma}
 
 
 class Normalize(StandardScaler):
@@ -632,6 +627,3 @@ class ZeroOne(Operator):
             axis=axis,
         )
         return wrap_like(gt, out)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"per_band": self.per_band}

@@ -17,8 +17,10 @@ xfail pass, so remove the entry in the same PR.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
+import textwrap
 from collections.abc import Callable
 from typing import Any
 
@@ -256,12 +258,7 @@ KNOWN_FAILURES: dict[str, dict[str, Known]] = {
         "learn.IterativeImputer": ("#140: estimator_params carries NaN", ValueError),
         "learn.KNNImputer": ("#140: estimator_params carries NaN", ValueError),
     },
-    "config_keys": {
-        "learn._src.operators.SklearnOp": (
-            "#138: emits estimator_params, resolved_task",
-            AssertionError,
-        ),
-    },
+    "config_keys": {},
     "graph_mode": {},
 }
 
@@ -391,6 +388,55 @@ def test_get_config_keys_are_constructor_params(cls: type) -> None:
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
         return
     assert set(op.get_config()) <= set(params) - {"self"}
+
+
+def _is_boilerplate_get_config(cls: type) -> bool:
+    """``get_config`` returns exactly ``{p: self.p}`` for every ctor param."""
+    fn = ast.parse(textwrap.dedent(inspect.getsource(cls.get_config))).body[0]
+    body = [
+        s
+        for s in fn.body  # ty: ignore[unresolved-attribute]
+        if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))
+    ]
+    if len(body) != 1 or not isinstance(body[0], ast.Return):
+        return False
+    ret = body[0].value
+    if not isinstance(ret, ast.Dict):
+        return False
+    keys = []
+    for key, value in zip(ret.keys, ret.values, strict=True):
+        if not (
+            isinstance(key, ast.Constant)
+            and isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.value.id == "self"
+            and value.attr == key.value
+        ):
+            return False
+        keys.append(key.value)
+    params = inspect.signature(cls.__init__).parameters.values()
+    names = [p.name for p in params if p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)]
+    return sorted(keys) == sorted(n for n in names if n != "self")
+
+
+def test_no_boilerplate_get_config_overrides() -> None:
+    """Overrides that restate ``ConfigMixin``'s auto-derived config drift (#138).
+
+    Store constructor kwargs under the same attribute name and let
+    ``ConfigMixin`` derive the config. An override is only needed to
+    coerce values or to shadow a parent's custom ``get_config``.
+    """
+    offenders = []
+    for cls in _CLASSES:
+        if "get_config" not in vars(cls) or not _is_boilerplate_get_config(cls):
+            continue
+        shadows_parent = any(
+            "get_config" in vars(base)
+            for base in cls.__mro__[1 : cls.__mro__.index(Operator)]
+        )
+        if not shadows_parent:
+            offenders.append(_key(cls))
+    assert offenders == []
 
 
 def _n_inputs(op: Operator) -> int:

@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.config import nested_config
 from geotoolz._src.wrap import wrap_like
 from geotoolz.indices._src.array import (
     arvi,
@@ -1245,11 +1246,6 @@ class dNBR(Operator):
             raise ValueError("dNBR inputs must share shape, transform, and CRS.")
         return wrap_like(pre, np.asarray(pre) - np.asarray(post))
 
-    def get_config(self) -> dict[str, Any]:
-        # dNBR takes no constructor parameters — empty config is
-        # JSON-safe and round-trips through hydra-zen.
-        return {}
-
 
 class BSI(Operator):
     r"""Bare Soil Index — Rikimaru et al. 2002.
@@ -1557,13 +1553,4 @@ class AppendIndex(Operator):
         return wrap_like(gt, stacked)
 
     def get_config(self) -> dict[str, Any]:
-        # `index_op` is a nested Operator — emit the JSON-safe nested form
-        # (matches `Sequential` / `Branch`'s pattern) instead of leaking
-        # the raw instance into config.
-        return {
-            "index_op": {
-                "class": type(self.index_op).__name__,
-                "config": self.index_op.get_config(),
-            },
-            "axis": self.axis,
-        }
+        return {"index_op": nested_config(self.index_op), "axis": self.axis}

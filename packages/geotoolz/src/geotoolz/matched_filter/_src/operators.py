@@ -335,14 +335,6 @@ class EstimateMean(Operator):
             axis=self.axis,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "method": self.method,
-            "trim_proportion": self.trim_proportion,
-            "huber_c": self.huber_c,
-            "axis": self.axis,
-        }
-
 
 class EstimateCovEmpirical(Operator):
     """Estimate an empirical covariance operator.
@@ -520,15 +512,6 @@ class GMMClusterBackground(Operator):
             axis=self.axis,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "n_clusters": self.n_clusters,
-            "cov_estimator": self.cov_estimator,
-            "random_state": self.random_state,
-            "bayesian": self.bayesian,
-            "axis": self.axis,
-        }
-
 
 class AdaptiveWindowBackground(Operator):
     """Per-pixel local mean and diagonal variance over a square window.
@@ -558,13 +541,6 @@ class AdaptiveWindowBackground(Operator):
             pad_mode=self.pad_mode,
             axis=self.axis,
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "window_size": self.window_size,
-            "pad_mode": self.pad_mode,
-            "axis": self.axis,
-        }
 
 
 class ApplyClusterMF(Operator):
@@ -649,9 +625,6 @@ class StreamingBackground(Operator):
         elif self.cov_kind != "empirical":
             raise ValueError(f"unknown cov_kind {self.cov_kind!r}")
         return StreamingBackgroundResult(mean=acc.mean, cov_op=NumpyLinearOperator(cov))
-
-    def get_config(self) -> dict[str, Any]:
-        return {"cov_kind": self.cov_kind, "axis": self.axis}
 
 
 class LinearTargetFromObs(Operator):

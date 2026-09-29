@@ -42,6 +42,7 @@ from pipekit import Operator
 from rasterio.windows import Window
 
 from geotoolz._src.blending import triangular_weights
+from geotoolz._src.config import nested_config
 
 
 try:
@@ -141,12 +142,7 @@ class ApplyToChips(Operator):
         return out
 
     def get_config(self) -> dict[str, Any]:
-        return {
-            "operator": {
-                "class": type(self.operator).__name__,
-                "config": self.operator.get_config(),
-            }
-        }
+        return {"operator": nested_config(self.operator)}
 
 
 class Stitch(Operator):

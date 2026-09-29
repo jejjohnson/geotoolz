@@ -289,9 +289,6 @@ class StackBands(Operator):
             drop_band_attrs=not keep_both,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        return {"axis": self.axis}
-
 
 class SplitBands(Operator):
     """Split a multiband GeoTensor into one single-band GeoTensor per band.
@@ -344,9 +341,6 @@ class SplitBands(Operator):
             )
         return outputs
 
-    def get_config(self) -> dict[str, Any]:
-        return {"names": self.names, "axis": self.axis}
-
 
 class BandMath(Operator):
     """Evaluate a restricted arithmetic expression over named bands.
@@ -395,13 +389,6 @@ class BandMath(Operator):
         }
         out = evaluate_band_math(self.expression, variables)
         return _with_band_attrs(gt, out, drop_band_attrs=True)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "expression": self.expression,
-            "band_names": self.band_names,
-            "axis": self.axis,
-        }
 
 
 class NormalizedDifference(Operator):
@@ -841,11 +828,3 @@ class SpectralSmoothing(Operator):
             polyorder=self.polyorder,
         )
         return wrap_like(gt, out)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "method": self.method,
-            "window": self.window,
-            "polyorder": self.polyorder,
-            "axis": self.axis,
-        }

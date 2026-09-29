@@ -21,7 +21,7 @@ equality and the output is a plain array.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from jaxtyping import Shaped
@@ -146,9 +146,6 @@ class StackMatched(Operator):
     ) -> None:
         self.order = list(order) if order is not None else None
 
-    def get_config(self) -> dict[str, Any]:
-        return {"order": self.order}
-
     def _apply(
         self,
         tensors: Sequence[GeoTensor | np.ndarray]
@@ -251,13 +248,6 @@ class BlendMatched(Operator):
         self.method = method
         self.weights = list(weights) if weights is not None else None
         self.nan_policy = nan_policy
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "method": self.method,
-            "weights": self.weights,
-            "nan_policy": self.nan_policy,
-        }
 
     def _apply(
         self,

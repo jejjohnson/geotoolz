@@ -236,13 +236,6 @@ class PlumeMask(Operator):
         )
         return wrap_like(gt, mask)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "threshold": self.threshold,
-            "min_area": self.min_area,
-            "connectivity": self.connectivity,
-        }
-
 
 class PlumeContours(Operator):
     """Connected-component labelling of a plume mask.
@@ -274,13 +267,6 @@ class PlumeContours(Operator):
         )
         out = labels if self.return_labels else labels > 0
         return wrap_like(gt, out)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "min_area": self.min_area,
-            "return_labels": self.return_labels,
-            "connectivity": self.connectivity,
-        }
 
 
 class PlumeFootprint(Operator):
@@ -558,16 +544,6 @@ class WindAdvectionCone(Operator):
             max_distance=self.max_distance,
         )
         return wrap_like(gt, mask)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "source": self.source,
-            "wind_u": self.wind_u,
-            "wind_v": self.wind_v,
-            "half_angle_deg": self.half_angle_deg,
-            "max_distance": self.max_distance,
-            "crs": self.crs,
-        }
 
 
 class IMEEstimate(Operator):
@@ -859,13 +835,6 @@ class ColumnToMass(Operator):
         )
         return wrap_like(gt, out)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "gas": self.gas,
-            "units_in": self.units_in,
-            "units_out": self.units_out,
-        }
-
 
 def _iter_instances(
     labels: np.ndarray,
@@ -980,15 +949,6 @@ class PlumeShapeFilter(Operator):
             keep_mask = np.isin(labels, list(kept))
             out = np.where(keep_mask, labels, 0).astype(np.int32, copy=False)
         return wrap_like(gt, out, fill_value_default=0)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "min_area": self.min_area,
-            "min_fiber_to_major_ratio": self.min_fiber_to_major_ratio,
-            "max_fiber_to_major_ratio": self.max_fiber_to_major_ratio,
-            "min_fiber_width": self.min_fiber_width,
-            "max_fiber_width": self.max_fiber_width,
-        }
 
 
 def _major_axis_length(compact_mask: np.ndarray) -> float:
