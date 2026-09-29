@@ -115,6 +115,8 @@ class RegionProps(Operator):
         TypeError: If the input is not a georeferenced GeoTensor.
     """
 
+    _terminal: ClassVar[bool] = True
+
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
@@ -202,6 +204,8 @@ class FindContours(Operator):
         TypeError: If the input is not a georeferenced GeoTensor.
     """
 
+    _terminal: ClassVar[bool] = True
+
     def __init__(
         self,
         *,
@@ -252,6 +256,8 @@ class ProfileLine(Operator):
         mode: Boundary handling mode for samples outside the image.
     """
 
+    _terminal: ClassVar[bool] = True
+
     def __init__(
         self,
         *,
@@ -295,6 +301,8 @@ class RANSAC(Operator):
         **kwargs: Extra keyword arguments forwarded to
             :func:`skimage.measure.ransac` (e.g. ``max_trials``, ``rng``).
     """
+
+    _terminal: ClassVar[bool] = True
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -392,6 +400,8 @@ class SkeletonLength(Operator):
     ``GeoTensor`` and plain-array carriers are accepted.
     """
 
+    _terminal: ClassVar[bool] = True
+
     def _apply(self, gt: GeoTensor | np.ndarray) -> float:
         return _skeleton_diameter_pixels(
             single_band(np.asarray(gt), name="SkeletonLength")
@@ -408,6 +418,8 @@ class ShannonEntropy(Operator):
     Args:
         base: Logarithm base for the entropy (``2.0`` gives bits).
     """
+
+    _terminal: ClassVar[bool] = True
 
     def __init__(self, *, base: float = 2.0) -> None:
         self.base = base

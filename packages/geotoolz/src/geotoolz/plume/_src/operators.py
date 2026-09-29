@@ -305,6 +305,8 @@ class PlumeFootprint(Operator):
         ... )(mask)
     """
 
+    _terminal: ClassVar[bool] = True
+
     def __init__(
         self,
         *,
@@ -612,6 +614,8 @@ class IMEEstimate(Operator):
             print(result["emission_rate_kg_s"])
     """
 
+    _terminal: ClassVar[bool] = True
+
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
@@ -725,6 +729,8 @@ class CrossSectionalFlux(Operator):
                 n_transects=3, transect_spacing_m=100.0,
             )(kg_m2)
     """
+
+    _terminal: ClassVar[bool] = True
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -1018,6 +1024,8 @@ class PlumeColumnStats(Operator):
             or plain array, same shape as the input label map).
     """
 
+    _terminal: ClassVar[bool] = True
+
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(self, *, column: GeoTensor | np.ndarray) -> None:
@@ -1173,6 +1181,8 @@ class PlumeQNDFeatures(Operator):
         perc_threshold: Percentile (within the instance mask) above which
             pixels are eligible for clustering.
     """
+
+    _terminal: ClassVar[bool] = True
 
     forbid_in_yaml: ClassVar[bool] = True
 

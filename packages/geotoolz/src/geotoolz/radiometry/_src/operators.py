@@ -509,6 +509,9 @@ class ReflectanceToRadiance(Operator):
 class EarthSunDistanceCorrection(Operator):
     r"""Compute the Earth–Sun distance ``d`` (in AU) for an acquisition date.
 
+    Graph source: computed from its configuration alone. An optional
+    input is accepted and ignored, so it can close a ``Sequential``.
+
     .. math::
 
         d \;=\; 1 - 0.01673 \cdot \cos\!\bigl(0.0172 \cdot (t - 4)\bigr)
@@ -538,6 +541,8 @@ class EarthSunDistanceCorrection(Operator):
         position of the sun. *Search* 2(5), 172.
     """
 
+    _terminal: ClassVar[bool] = True
+
     def __init__(self, *, acquisition_date: datetime | str) -> None:
         self.acquisition_date = _parse_datetime(acquisition_date)
 
@@ -550,6 +555,9 @@ class EarthSunDistanceCorrection(Operator):
 
 class ComputeSZA(Operator):
     """Compute the solar zenith angle (degrees) for a location and UTC datetime.
+
+    Graph source: computed from its configuration alone. An optional
+    input is accepted and ignored, so it can close a ``Sequential``.
 
     Thin wrapper over :func:`geotoolz.radiometry._src.solar.compute_sza`
     (which delegates to ``pysolar``). The SZA is the complement of the
@@ -572,6 +580,8 @@ class ComputeSZA(Operator):
         ... )
         >>> sza_deg = op()  # ~16° (close to local solar noon)
     """
+
+    _terminal: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -601,6 +611,9 @@ class ComputeSZA(Operator):
 
 class IntegratedIrradiance(Operator):
     r"""Compute band-integrated TOA solar irradiance from an SRF table.
+
+    Graph source: computed from its configuration alone. An optional
+    input is accepted and ignored, so it can close a ``Sequential``.
 
     .. math::
 
@@ -650,6 +663,7 @@ class IntegratedIrradiance(Operator):
 
     # Holds a ``pandas.DataFrame``, not YAML-serialisable.
     forbid_in_yaml: ClassVar[bool] = True
+    _terminal: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -673,6 +687,19 @@ class IntegratedIrradiance(Operator):
             solar_irradiance=solar_irradiance,
             epsilon_srf=self.epsilon_srf,
         )
+
+    def get_config(self) -> dict[str, Any]:
+        # Debug payload: summarise the DataFrames instead of embedding them.
+        def summary(frame: pd.DataFrame | None) -> dict[str, Any] | None:
+            if frame is None:
+                return None
+            return {"columns": [str(c) for c in frame.columns], "n_rows": len(frame)}
+
+        return {
+            "srf": summary(self.srf),
+            "solar_irradiance": summary(self.solar_irradiance),
+            "epsilon_srf": self.epsilon_srf,
+        }
 
 
 class ApplySRF(Operator):

@@ -243,7 +243,8 @@ class PhaseAlign(Operator):
         band: Band (axis-0 index) used for registration on 3-D inputs.
         apply: If ``True`` (default), return the shifted image; if
             ``False``, return the raw ``(shift_y, shift_x, error)``
-            tuple instead.
+            tuple instead; the operator is then terminal (last step
+            only) in a ``Sequential``.
     """
 
     forbid_in_yaml: ClassVar[bool] = True
@@ -260,6 +261,11 @@ class PhaseAlign(Operator):
         self.upsample_factor = upsample_factor
         self.band = band
         self.apply = apply
+
+    @property
+    def _terminal(self) -> bool:  # ty: ignore[invalid-attribute-override]
+        """The ``apply=False`` tuple breaks carrier-in / carrier-out."""
+        return not self.apply
 
     def _apply(
         self, gt: GeoTensor | np.ndarray
@@ -1557,6 +1563,8 @@ class Vectorize(Operator):
         >>> import geotoolz as gz
         >>> polys = gz.geom.Vectorize(min_area=100.0)(water_mask)
     """
+
+    _terminal: ClassVar[bool] = True
 
     def __init__(
         self,
