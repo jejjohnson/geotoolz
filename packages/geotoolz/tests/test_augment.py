@@ -714,3 +714,43 @@ def test_fill_pixels_are_excluded_cutmix_donor_holes() -> None:
     assert not np.any(out == -1.0)
     assert np.any(out == _FILL)
     assert set(np.unique(out)) <= {1.0, 9.0, _FILL}
+
+
+def test_4d_time_stack() -> None:
+    """The band axis of a (T, C, H, W) stack is -3, not time (#147)."""
+    from _helpers import time_stack
+
+    stack = time_stack()
+    values = np.asarray(stack)
+
+    # Per-band factors: one per band, shared by every frame.
+    out = np.asarray(gz.augment.BrightnessJitter(factor=(0.5, 1.5), seed=0)(stack))
+    ratio = out / values
+    per_band = ratio[..., 0, 0]  # (T, C)
+    np.testing.assert_allclose(
+        ratio, np.broadcast_to(per_band[..., None, None], ratio.shape)
+    )
+    np.testing.assert_allclose(per_band[0], per_band[1])
+    assert len(np.unique(np.round(per_band[0], 12))) == 3
+
+    # Dropout removes bands of every frame, never whole frames.
+    dropped = np.asarray(gz.augment.BandDropout(p=0.5, fill=0.0, seed=3)(stack))
+    band_dropped = (dropped == 0.0).all(axis=(0, 2, 3))
+    assert band_dropped.any() and not band_dropped.all()
+    np.testing.assert_array_equal(dropped[:, ~band_dropped], values[:, ~band_dropped])
+
+    # Jitter permutes bands (the same permutation in every frame).
+    jitter = gz.augment.BandJitter(groups={"all": ["b0", "b1", "b2"]}, seed=1)
+    permuted = np.asarray(jitter(stack))
+    order = [
+        next(j for j in range(3) if np.array_equal(permuted[0, c], values[0, j]))
+        for c in range(3)
+    ]
+    assert sorted(order) == [0, 1, 2]
+    np.testing.assert_array_equal(permuted, values[:, order])
+
+    # Haze reads one wavelength per band (3), not per frame (2).
+    hazed = np.asarray(gz.augment.AtmosphericHaze(intensity=0.1, seed=0)(stack))
+    haze = hazed - values
+    np.testing.assert_allclose(haze[0], haze[1])
+    assert haze[0, 0, 0, 0] > haze[0, 1, 0, 0] > haze[0, 2, 0, 0]

@@ -465,3 +465,22 @@ def test_country_mask_rejects_unknown_iso(monkeypatch: pytest.MonkeyPatch) -> No
 
     with pytest.raises(ValueError, match="no countries"):
         CountryMask(iso_a3="USA")
+
+
+def test_4d_time_stack() -> None:
+    """Geometry masks are one (H, W) grid mask for every frame (#147)."""
+    from _helpers import frames, time_stack
+
+    stack = time_stack()
+    bounds = (500_000.0, 3_999_980.0, 500_020.0, 4_000_000.0)
+    mask = BBoxMask(bounds=bounds)(stack)
+    assert mask.shape == (4, 4)
+    np.testing.assert_array_equal(
+        np.asarray(mask), np.asarray(BBoxMask(bounds=bounds)(frames(stack)[0]))
+    )
+    # Morphology runs on every (H, W) plane of a stack.
+    planes = np.zeros((2, 1, 5, 5), dtype=bool)
+    planes[0, 0, 2, 2] = True
+    dilated = DilateMask(iterations=1)(planes)
+    assert dilated.shape == planes.shape
+    assert dilated[0, 0].sum() == 9 and not dilated[1].any()

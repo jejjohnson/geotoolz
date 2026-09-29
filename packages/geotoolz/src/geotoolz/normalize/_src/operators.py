@@ -11,7 +11,11 @@ carrier-aware wrappers handle:
 * JSON-safe ``get_config()`` via the shared
   :func:`geotoolz._src.config.jsonable` helper (ndarray leaves become
   plain Python lists for Hydra / YAML round-trip),
-* NaN-aware reductions over the spatial ``(H, W)`` axes.
+* NaN-aware reductions over every axis except the band axis (``-3``):
+  the spatial ``(H, W)`` axes of a ``(C, H, W)`` cube, plus the time
+  axis of a ``(T, C, H, W)`` stack -- per-band statistics are ``(C,)``
+  pooled over every frame, so one fit (and one stretch) serves the whole
+  time series. :class:`CLAHE` equalizes each frame's bands separately.
 
 Nodata: a pixel is invalid when any band is non-finite or equals the
 carrier's ``fill_value_default`` (see :mod:`geotoolz._src.valid`;

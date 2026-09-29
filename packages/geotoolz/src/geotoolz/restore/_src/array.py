@@ -341,7 +341,7 @@ def nl_means(
 
 
 def pca_denoise(
-    arr: Num[np.ndarray, "*dims"], *, n_components: int, axis: int = 0
+    arr: Num[np.ndarray, "*dims"], *, n_components: int, axis: int = -3
 ) -> Float[np.ndarray, "*dims"]:
     """Reconstruct an array from its top PCA components along ``axis``.
 
@@ -355,7 +355,7 @@ def pca_denoise(
             and re-stamped as NaN on the output.
         n_components: Number of principal components to keep. Must be
             between 1 and the number of bands.
-        axis: Position of the band axis. Defaults to ``0``.
+        axis: Position of the band axis. Defaults to ``-3``.
 
     Returns:
         Reconstructed array with the same shape and NaN positions as
@@ -370,7 +370,7 @@ def pca_denoise(
 
 
 def fit_pca(
-    arr: Num[np.ndarray, "*dims"], *, n_components: int | None = None, axis: int = 0
+    arr: Num[np.ndarray, "*dims"], *, n_components: int | None = None, axis: int = -3
 ) -> dict[str, np.ndarray | int | tuple[int, ...]]:
     """Fit PCA over a band axis and return scores plus reconstruction state.
 
@@ -383,7 +383,7 @@ def fit_pca(
             ``(bands, H, W)``.
         n_components: Number of components to keep. ``None`` (default)
             keeps all bands.
-        axis: Position of the band axis. Defaults to ``0``.
+        axis: Position of the band axis. Defaults to ``-3``.
 
     Returns:
         State dict with keys ``"scores"`` (projected data, band axis

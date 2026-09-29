@@ -27,7 +27,7 @@ def composite(
     arr: Shaped[np.ndarray, "*dims"],
     bands: Sequence[int],
     *,
-    axis: int = 0,
+    axis: int = -3,
 ) -> Shaped[np.ndarray, "*dims"]:
     """Select display bands from ``arr`` while preserving spatial axes.
 
@@ -39,7 +39,7 @@ def composite(
             long as ``axis`` indexes the band dimension.
         bands: Integer band positions to select, in output order.
             Repeats are allowed (e.g. grayscale-to-RGB).
-        axis: Band axis to take along. Default ``0``.
+        axis: Band axis to take along. Default ``-3``.
 
     Returns:
         Array with ``len(bands)`` slices along ``axis``; all other axes

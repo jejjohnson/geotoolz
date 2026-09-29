@@ -29,6 +29,12 @@ same convention with explicit ``source_wavelengths=`` / ``wavelengths=``
 arguments first, then ``gt.attrs["wavelengths"]``. On plain arrays the
 attrs fallbacks are unavailable, so name/wavelength resolution raises a
 clear ``ValueError`` unless the values are given explicitly.
+
+The band axis is ``-3`` by default (georeader's ``(C, H, W)`` /
+``(T, C, H, W)`` layout). On a ``(T, C, H, W)`` time stack every operator
+works per frame: band-collapsing products (:class:`BandMath`,
+:class:`NormalizedDifference`, :class:`BandRatio`) come back as
+``(T, 1, H, W)`` and SRF convolutions convolve each frame.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ from pipekit import Operator
 
 from geotoolz._src.bands import concat_band_attrs, strip_band_attrs, take_band_attrs
 from geotoolz._src.config import jsonable
+from geotoolz._src.shape import keep_band_axis, over_frames
 from geotoolz._src.valid import carried_fill, wrap_filled
 from geotoolz._src.wrap import wrap_like
 from geotoolz.spectral._src.array import (
@@ -162,7 +169,7 @@ class SelectBands(Operator):
         indexes: Bands to keep, in output order. Items are either
             integer positions along ``axis`` or string names looked up
             in ``gt.attrs["band_names"]``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz import spectral
@@ -171,7 +178,7 @@ class SelectBands(Operator):
         >>> out = rgb(reflectance_geotensor)
     """
 
-    def __init__(self, *, indexes: list[BandKey], axis: int = 0) -> None:
+    def __init__(self, *, indexes: list[BandKey], axis: int = -3) -> None:
         self.indexes = indexes
         self.axis = axis
 
@@ -208,7 +215,7 @@ class ReorderBands(SelectBands):
 
     Args:
         order: New band ordering. Items are integer positions or names.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz import spectral
@@ -217,7 +224,7 @@ class ReorderBands(SelectBands):
         >>> rgbn = reorder(bgrn_geotensor)
     """
 
-    def __init__(self, *, order: list[BandKey], axis: int = 0) -> None:
+    def __init__(self, *, order: list[BandKey], axis: int = -3) -> None:
         super().__init__(indexes=order, axis=axis)
         self.order = order
 
@@ -237,7 +244,7 @@ class StackBands(Operator):
     plain arrays raises because their georeferencing cannot agree.
 
     Args:
-        axis: Position of the band axis. Default ``0``. 2-D inputs are
+        axis: Position of the band axis. Default ``-3``. 2-D inputs are
             promoted to 3-D by inserting a unit dimension at ``axis``.
 
     Examples:
@@ -246,10 +253,15 @@ class StackBands(Operator):
         >>> stacked = stack([gt_b4, gt_b8])  # (2, H, W)
     """
 
-    def __init__(self, *, axis: int = 0) -> None:
+    def __init__(self, *, axis: int = -3) -> None:
         self.axis = axis
 
     def _apply(self, tensors: list[GeoTensor | np.ndarray]) -> GeoTensor | np.ndarray:
+        if isinstance(tensors, np.ndarray):
+            raise TypeError(
+                "StackBands takes a sequence of carriers to concatenate along the "
+                f"band axis; got a single {tensors.ndim}-D array"
+            )
         if not tensors:
             raise ValueError("StackBands requires at least one GeoTensor")
         first = tensors[0]
@@ -291,7 +303,7 @@ class SplitBands(Operator):
     Args:
         names: Optional override for band names. If omitted, names are
             taken from ``gt.attrs["band_names"]``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz import spectral
@@ -299,7 +311,7 @@ class SplitBands(Operator):
         >>> red, green, blue = bands
     """
 
-    def __init__(self, *, names: list[str] | None = None, axis: int = 0) -> None:
+    def __init__(self, *, names: list[str] | None = None, axis: int = -3) -> None:
         self.names = names
         self.axis = axis
 
@@ -348,7 +360,7 @@ class BandMath(Operator):
             ``"(B8 - B4) / (B8 + B4 + 1e-6)"``.
         band_names: Override for the names used in ``expression``.
             Default ``None`` (read from ``gt.attrs["band_names"]``).
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz import spectral
@@ -362,7 +374,7 @@ class BandMath(Operator):
         *,
         expression: str,
         band_names: list[str] | None = None,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.expression = expression
         self.band_names = band_names
@@ -376,7 +388,9 @@ class BandMath(Operator):
         variables = {
             name: np.take(arr, idx, axis=self.axis) for idx, name in enumerate(names)
         }
-        out = np.asarray(evaluate_band_math(self.expression, variables))
+        out = keep_band_axis(
+            np.asarray(evaluate_band_math(self.expression, variables)), gt
+        )
         # A float result is a new quantity (NaN nodata); an integer or
         # boolean one (``b0 + b1`` on DN, ``b0 > b1``) keeps a fill its
         # dtype can hold.
@@ -405,7 +419,7 @@ class NormalizedDifference(Operator):
         a: Index or name of the "high" band (numerator-positive term).
         b: Index or name of the "low" band.
         eps: Denominator stabiliser. Default ``1e-6``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz import spectral
@@ -414,7 +428,7 @@ class NormalizedDifference(Operator):
     """
 
     def __init__(
-        self, *, a: BandKey, b: BandKey, eps: float = 1e-6, axis: int = 0
+        self, *, a: BandKey, b: BandKey, eps: float = 1e-6, axis: int = -3
     ) -> None:
         self.a = a
         self.b = b
@@ -431,7 +445,10 @@ class NormalizedDifference(Operator):
             eps=self.eps,
         )
         return wrap_filled(
-            gt, out, fill_value_default=np.nan, attrs=strip_band_attrs(_attrs(gt))
+            gt,
+            keep_band_axis(out, gt),
+            fill_value_default=np.nan,
+            attrs=strip_band_attrs(_attrs(gt)),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -453,7 +470,7 @@ class BandRatio(Operator):
         numerator: Index or name of the numerator band.
         denominator: Index or name of the denominator band.
         eps: Denominator stabiliser. Default ``1e-6``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz import spectral
@@ -468,7 +485,7 @@ class BandRatio(Operator):
         numerator: BandKey,
         denominator: BandKey,
         eps: float = 1e-6,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.numerator = numerator
         self.denominator = denominator
@@ -485,7 +502,10 @@ class BandRatio(Operator):
             eps=self.eps,
         )
         return wrap_filled(
-            gt, out, fill_value_default=np.nan, attrs=strip_band_attrs(_attrs(gt))
+            gt,
+            keep_band_axis(out, gt),
+            fill_value_default=np.nan,
+            attrs=strip_band_attrs(_attrs(gt)),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -543,6 +563,7 @@ class ApplySRF(Operator):
         self.source_wavelengths = source_wavelengths
         self.band_names = band_names
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         source_wavelengths = np.asarray(self.source_wavelengths, dtype=float)
         target_center_wavelengths = np.asarray(
@@ -665,7 +686,7 @@ class ContinuumRemoval(Operator):
             ``"convex_hull"``.
         wavelengths: Source wavelengths in strictly increasing order.
             Default ``None`` (read from ``gt.attrs["wavelengths"]``).
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz import spectral
@@ -679,7 +700,7 @@ class ContinuumRemoval(Operator):
         *,
         method: str = "convex_hull",
         wavelengths: np.ndarray | list[float] | None = None,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.method = method
         self.wavelengths = wavelengths
@@ -726,7 +747,7 @@ class SpectralBinning(Operator):
             Default ``"mean"``.
         source_wavelengths: Source band wavelengths. Default ``None``
             (read from ``gt.attrs["wavelengths"]``).
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz import spectral
@@ -746,7 +767,7 @@ class SpectralBinning(Operator):
         width: float | np.ndarray | list[float],
         method: str = "mean",
         source_wavelengths: np.ndarray | list[float] | None = None,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.target_wavelengths = target_wavelengths
         self.width = width
@@ -802,7 +823,7 @@ class SpectralSmoothing(Operator):
             ``"savgol"``. Default ``7``.
         polyorder: Polynomial order for Savitzky-Golay (ignored by the
             other methods). Default ``2``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz import spectral
@@ -819,7 +840,7 @@ class SpectralSmoothing(Operator):
         method: str = "savgol",
         window: int = 7,
         polyorder: int = 2,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.method = method
         self.window = window

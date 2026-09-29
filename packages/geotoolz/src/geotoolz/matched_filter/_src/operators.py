@@ -10,6 +10,14 @@ rewrap it to match the input carrier via
 non-carrier results (mean vectors, `NumpyLinearOperator`, background
 dataclasses) unchanged for either input kind.
 
+Band axis: the spectral axis defaults to ``-3`` (georeader's
+``(C, H, W)`` / ``(T, C, H, W)`` layout). A 2-D ``(H, W)`` map has no
+band axis and raises ``ValueError`` (its rows are never read as bands); a
+2-D ``(N, C)`` sample matrix needs an explicit ``axis``. On a
+``(T, C, H, W)`` stack the background statistics are fitted once over the
+pixels of every frame (one background for the time series) and score maps
+come back as ``(T, 1, H, W)``.
+
 Nodata: pixels that are non-finite or equal the carrier's
 ``fill_value_default`` in any band are excluded from every fitted
 statistic (see :mod:`geotoolz._src.valid`); score maps are a new
@@ -26,6 +34,7 @@ import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import callable_name, jsonable, reject_config_summary
+from geotoolz._src.shape import keep_band_axis, require_ndim
 from geotoolz._src.valid import invalid_values, restore_fill
 from geotoolz._src.wrap import wrap_like
 from geotoolz.matched_filter._src.array import (
@@ -93,7 +102,7 @@ class MatchedFilter(Operator):
         cov_method: Covariance estimator used when fitting —
             ``"empirical"``, ``"ledoit_wolf"``, ``"oas"``, or
             ``"lowrank"``. Default ``"ledoit_wolf"``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     def __init__(
@@ -105,7 +114,7 @@ class MatchedFilter(Operator):
         fit_on_call: bool = False,
         mean_method: MeanMethod = "median",
         cov_method: CovMethod = "ledoit_wolf",
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.mean = mean
         self.cov_op = cov_op
@@ -118,7 +127,7 @@ class MatchedFilter(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mean = self.mean
         cov_op = self.cov_op
-        cube, valid = _mask_invalid(gt, self.axis)
+        cube, valid = _mask_invalid(gt, self.axis, type(self).__name__)
         # Only refit the components that are missing (or all of them when
         # fit_on_call=True). Preserving an explicitly provided mean while
         # fitting cov on the incoming cube is a supported workflow.
@@ -142,7 +151,11 @@ class MatchedFilter(Operator):
         out = apply_image(
             cube, mean=mean, cov_op=cov_op, target=self.target, axis=self.axis
         )
-        return wrap_like(gt, _restore(gt, out, valid), fill_value_default=np.nan)
+        return wrap_like(
+            gt,
+            keep_band_axis(_restore(gt, out, valid), gt),
+            fill_value_default=np.nan,
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -332,7 +345,7 @@ class EstimateMean(Operator):
             trim_proportion: Fraction cut from each tail for
                 ``method="trimmed"``.
             huber_c: Huber tuning constant for ``method="huber"``.
-            axis: Position of the spectral axis. Default ``0``.
+            axis: Position of the spectral axis. Default ``-3``.
     """
 
     def __init__(
@@ -341,7 +354,7 @@ class EstimateMean(Operator):
         method: MeanMethod = "mean",
         trim_proportion: float = 0.1,
         huber_c: float = 1.345,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.method = method
         self.trim_proportion = trim_proportion
@@ -350,7 +363,7 @@ class EstimateMean(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
         return estimate_mean(
-            _mask_invalid(gt, self.axis)[0],
+            _mask_invalid(gt, self.axis, type(self).__name__)[0],
             method=self.method,
             trim_proportion=self.trim_proportion,
             huber_c=self.huber_c,
@@ -370,11 +383,11 @@ class EstimateCovEmpirical(Operator):
         mean: Optional precomputed mean spectrum ``(c,)`` to centre on;
             the sample mean is used when ``None``.
         ridge: Optional Tikhonov ridge added to the diagonal.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     def __init__(
-        self, *, mean: np.ndarray | None = None, ridge: float = 0.0, axis: int = 0
+        self, *, mean: np.ndarray | None = None, ridge: float = 0.0, axis: int = -3
     ) -> None:
         self.mean = mean
         self.ridge = ridge
@@ -382,7 +395,7 @@ class EstimateCovEmpirical(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> NumpyLinearOperator:
         return estimate_cov_empirical(
-            _mask_invalid(gt, self.axis)[0],
+            _mask_invalid(gt, self.axis, type(self).__name__)[0],
             mean=self.mean,
             ridge=self.ridge,
             axis=self.axis,
@@ -409,7 +422,7 @@ class EstimateCovShrunk(Operator):
             the sample mean is used when ``None``.
         method: Shrinkage-intensity estimator, ``"ledoit_wolf"`` or
             ``"oas"``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     def __init__(
@@ -417,7 +430,7 @@ class EstimateCovShrunk(Operator):
         *,
         mean: np.ndarray | None = None,
         method: CovShrinkageMethod = "ledoit_wolf",
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.mean = mean
         self.method = method
@@ -425,7 +438,7 @@ class EstimateCovShrunk(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> NumpyLinearOperator:
         return estimate_cov_shrunk(
-            _mask_invalid(gt, self.axis)[0],
+            _mask_invalid(gt, self.axis, type(self).__name__)[0],
             mean=self.mean,
             method=self.method,
             axis=self.axis,
@@ -457,7 +470,7 @@ class EstimateCovLowRank(Operator):
         random_state: Seed for the randomized range finder; the default
             ``0`` makes the estimate deterministic.
         n_oversamples: Extra random probe vectors beyond ``rank``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     def __init__(
@@ -468,7 +481,7 @@ class EstimateCovLowRank(Operator):
         tikhonov: float = 1e-3,
         random_state: int | None = 0,
         n_oversamples: int = 10,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.mean = mean
         self.rank = rank
@@ -479,7 +492,7 @@ class EstimateCovLowRank(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> NumpyLinearOperator:
         return estimate_cov_lowrank(
-            _mask_invalid(gt, self.axis)[0],
+            _mask_invalid(gt, self.axis, type(self).__name__)[0],
             mean=self.mean,
             rank=self.rank,
             tikhonov=self.tikhonov,
@@ -518,7 +531,7 @@ class GMMClusterBackground(Operator):
             reproducible backgrounds.
         bayesian: If ``True``, prune components with negligible mixture
             weight, so fewer than ``n_clusters`` clusters may remain.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     def __init__(
@@ -528,7 +541,7 @@ class GMMClusterBackground(Operator):
         cov_estimator: Literal["empirical", "ledoit_wolf", "oas"] = "ledoit_wolf",
         random_state: int | None = 0,
         bayesian: bool = False,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.n_clusters = n_clusters
         self.cov_estimator = cov_estimator
@@ -538,7 +551,7 @@ class GMMClusterBackground(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> ClusterBackground:
         return gmm_cluster_background(
-            _mask_invalid(gt, self.axis)[0],
+            _mask_invalid(gt, self.axis, type(self).__name__)[0],
             n_clusters=self.n_clusters,
             cov_estimator=self.cov_estimator,
             random_state=self.random_state,
@@ -560,19 +573,20 @@ class AdaptiveWindowBackground(Operator):
             integer. Default ``7``.
         pad_mode: Boundary mode forwarded to
             :func:`scipy.ndimage.uniform_filter`. Default ``"reflect"``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     def __init__(
-        self, *, window_size: int = 7, pad_mode: str = "reflect", axis: int = 0
+        self, *, window_size: int = 7, pad_mode: str = "reflect", axis: int = -3
     ) -> None:
         self.window_size = window_size
         self.pad_mode = pad_mode
         self.axis = axis
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> AdaptiveBackground:
+        require_ndim(gt, 3, type(self).__name__)
         return adaptive_window_background(
-            _mask_invalid(gt, self.axis)[0],
+            _mask_invalid(gt, self.axis, type(self).__name__)[0],
             window_size=self.window_size,
             pad_mode=self.pad_mode,
             axis=self.axis,
@@ -595,14 +609,14 @@ class ApplyClusterMF(Operator):
 
     Args:
         target: Target signature ``(c,)``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     def __init__(
         self,
         *,
         target: np.ndarray,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.target = target
         self.axis = axis
@@ -610,11 +624,15 @@ class ApplyClusterMF(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, cluster: ClusterBackground
     ) -> GeoTensor | np.ndarray:
-        cube, valid = _mask_invalid(gt, self.axis)
+        cube, valid = _mask_invalid(gt, self.axis, type(self).__name__)
         out = apply_cluster_mf(
             cube, cluster=cluster, target=self.target, axis=self.axis
         )
-        return wrap_like(gt, _restore(gt, out, valid), fill_value_default=np.nan)
+        return wrap_like(
+            gt,
+            keep_band_axis(_restore(gt, out, valid), gt),
+            fill_value_default=np.nan,
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"target": np.asarray(self.target).tolist(), "axis": self.axis}
@@ -636,14 +654,14 @@ class StreamingBackground(Operator):
     Args:
         cov_kind: ``"shrunk"`` (Ledoit-Wolf toward scaled identity,
             default) or ``"empirical"``.
-        axis: Position of the spectral axis in each cube. Default ``0``.
+        axis: Position of the spectral axis in each cube. Default ``-3``.
     """
 
     def __init__(
         self,
         *,
         cov_kind: Literal["empirical", "shrunk"] = "shrunk",
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.cov_kind = cov_kind
         self.axis = axis
@@ -654,7 +672,7 @@ class StreamingBackground(Operator):
         acc: WelfordAccumulator | None = None
         for cube in cubes:
             samples, _ = cube_to_samples(
-                _mask_invalid(cube, self.axis)[0], axis=self.axis
+                _mask_invalid(cube, self.axis, type(self).__name__)[0], axis=self.axis
             )
             if acc is None:
                 acc = WelfordAccumulator.empty(samples.shape[1])
@@ -688,7 +706,7 @@ class LinearTargetFromObs(Operator):
             an explicit array broadcastable to the background state.
         pixel: Spatial index of the impulse for ``pattern="impulse"``;
             the first flat pixel when ``None``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     forbid_in_yaml: ClassVar[bool] = True
@@ -700,7 +718,7 @@ class LinearTargetFromObs(Operator):
         vmr_background: np.ndarray | None = None,
         pattern: str | np.ndarray = "uniform",
         pixel: tuple[int, int] | None = None,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.obs_model = obs_model
         self.vmr_background = vmr_background
@@ -756,7 +774,7 @@ class NonlinearTargetFromObs(Operator):
             an explicit array broadcastable to the background state.
         pixel: Spatial index of the impulse for ``pattern="impulse"``;
             the first flat pixel when ``None``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     forbid_in_yaml: ClassVar[bool] = True
@@ -769,7 +787,7 @@ class NonlinearTargetFromObs(Operator):
         amplitude: float = 1.0,
         pattern: str | np.ndarray = "uniform",
         pixel: tuple[int, int] | None = None,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.obs_model = obs_model
         self.vmr_background = vmr_background
@@ -828,7 +846,7 @@ class ColumnEnhancement(Operator):
             default ``10``.
         tikhonov: Tikhonov regulariser for ``cov_method="lowrank"``;
             ``None`` means the default ``1e-3``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
     """
 
     def __init__(
@@ -842,7 +860,7 @@ class ColumnEnhancement(Operator):
         target_pattern: str = "uniform",
         rank: int | None = None,
         tikhonov: float | None = None,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.gas = gas
         self.sensor = sensor
@@ -855,6 +873,7 @@ class ColumnEnhancement(Operator):
         self.axis = axis
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        _check_spectral_axis(gt, self.axis, type(self).__name__)
         mean = EstimateMean(method=self.mean_method, axis=self.axis)(gt)
         if self.cov_method == "lowrank":
             cov_op = EstimateCovLowRank(
@@ -906,8 +925,25 @@ def _cov_config(cov_op: NumpyLinearOperator | np.ndarray | None) -> Any:
     return jsonable(np.asarray(cov_op))
 
 
+def _check_spectral_axis(gt: Any, axis: int, name: str) -> None:
+    """Raise a clear ``ValueError`` when ``axis`` is not an axis of ``gt``.
+
+    The default spectral axis ``-3`` needs a ``(C, H, W)`` cube or a
+    ``(T, C, H, W)`` stack: a 2-D ``(H, W)`` map has no band axis, and its
+    rows must not be read as bands. A 2-D ``(N, C)`` sample matrix is
+    accepted with an explicit ``axis`` (e.g. ``axis=1``).
+    """
+    ndim = np.ndim(gt)
+    if not -ndim <= axis < ndim:
+        raise ValueError(
+            f"{name}: spectral axis {axis} does not exist on a {ndim}-D input "
+            f"of shape {np.shape(gt)}; pass a (C, H, W) cube or a (T, C, H, W) "
+            "stack (or set `axis` for a sample matrix)"
+        )
+
+
 def _mask_invalid(
-    gt: GeoTensor | np.ndarray, axis: int
+    gt: GeoTensor | np.ndarray, axis: int, name: str = "matched filter"
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """Cube with nodata pixels set to NaN in every band, plus the validity map.
 
@@ -917,6 +953,7 @@ def _mask_invalid(
     copy with invalid pixels NaN and the boolean validity map over the
     non-band axes (the score-map shape of :func:`apply_image`).
     """
+    _check_spectral_axis(gt, axis, name)
     cube = np.asarray(gt)
     invalid = invalid_values(gt)
     if cube.ndim < 2 or not invalid.any():
@@ -944,7 +981,7 @@ def _target_from_obs(
     pattern: str | np.ndarray,
     pixel: tuple[int, int] | None,
     amplitude: float,
-    axis: int = 0,
+    axis: int = -3,
 ) -> np.ndarray:
     if not callable(obs_model):
         raise TypeError("obs_model must be callable for the NumPy target wrappers")
@@ -970,7 +1007,7 @@ def _target_pattern(
     *,
     pattern: str | np.ndarray,
     pixel: tuple[int, int] | None,
-    axis: int = 0,
+    axis: int = -3,
 ) -> np.ndarray:
     if not isinstance(pattern, str):
         return np.asarray(pattern, dtype=float)

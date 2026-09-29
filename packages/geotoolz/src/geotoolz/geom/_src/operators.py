@@ -48,7 +48,7 @@ from skimage.registration import (
 from geotoolz._src.bands import band_count
 from geotoolz._src.blending import normalize_overlap_add, overlap_add
 from geotoolz._src.config import as_tuple
-from geotoolz._src.shape import single_band
+from geotoolz._src.shape import BAND_AXIS, require_ndim, single_band
 from geotoolz._src.valid import valid_pixels, wrap_filled
 from geotoolz._src.wrap import adopt_attrs, rewrap_attrs, wrap_like
 from geotoolz.geom._src.array import (
@@ -71,11 +71,17 @@ if TYPE_CHECKING:
     from shapely.geometry.base import BaseGeometry
 
 
-def _registration_band(values: np.ndarray, band: int) -> np.ndarray:
+def _registration_band(values: np.ndarray, band: int, name: str) -> np.ndarray:
+    """The ``(H, W)`` registration band of a 2-D map or ``(C, H, W)`` cube.
+
+    Registration pairs one scene with one reference, so a ``(T, C, H, W)``
+    stack is rejected (``ValueError`` naming the operator) rather than
+    having a time slice taken as a band.
+    """
     arr = np.asarray(values)
-    if arr.ndim == 2:
+    if require_ndim(arr, (2, 3), name) == 2:
         return arr
-    return np.take(arr, int(band), axis=0)
+    return np.take(arr, int(band), axis=BAND_AXIS)
 
 
 def _require_geotensor(value: Any, op_name: str) -> None:
@@ -346,7 +352,9 @@ class PhaseAlign(Operator):
     """Sub-pixel image registration via phase cross-correlation.
 
     Arrays are interpreted as ``(H, W)`` or channel-first ``(C, H, W)``;
-    the selected registration band is taken from axis 0. The estimated
+    the selected registration band is taken from the band axis (``-3``).
+    A 4-D ``(T, C, H, W)`` stack raises ``ValueError``: register each
+    frame separately. The estimated
     ``(dy, dx)`` shift is applied with linear interpolation
     (``scipy.ndimage.shift``) when ``apply=True``.
 
@@ -362,7 +370,8 @@ class PhaseAlign(Operator):
         reference: The fixed scene the input is registered against.
         upsample_factor: Sub-pixel upsampling factor passed to
             :func:`skimage.registration.phase_cross_correlation`.
-        band: Band (axis-0 index) used for registration on 3-D inputs.
+        band: Band index (along the band axis) used for registration on
+            3-D inputs.
         apply: If ``True`` (default), return the shifted image; if
             ``False``, return the raw ``(shift_y, shift_x, error)``
             tuple instead; the operator is then terminal (last step
@@ -393,13 +402,10 @@ class PhaseAlign(Operator):
         self, gt: GeoTensor | np.ndarray
     ) -> GeoTensor | np.ndarray | tuple[float, float, float]:
         arr = np.asarray(gt)
-        if arr.ndim not in (2, 3):
-            raise ValueError(
-                "PhaseAlign expects a (H, W) or (C, H, W) input; "
-                f"got ndim={arr.ndim} with shape {arr.shape}."
-            )
-        ref_band = _registration_band(np.asarray(self.reference), self.band)
-        mov_band = _registration_band(arr, self.band)
+        mov_band = _registration_band(arr, self.band, "PhaseAlign")
+        ref_band = _registration_band(
+            np.asarray(self.reference), self.band, "PhaseAlign reference"
+        )
         if ref_band.shape != mov_band.shape:
             raise ValueError(
                 "PhaseAlign requires reference and moving bands of identical "
@@ -457,11 +463,14 @@ class OpticalFlowTVL1(Operator):
     (``[dy, dx]`` per pixel) on the input's carrier: pixel-space math,
     so both ``GeoTensor`` and plain ``np.ndarray`` inputs are supported
     and returned in kind. Pixels that are nodata in either scene are
-    ``NaN`` (``fill_value_default=NaN``).
+    ``NaN`` (``fill_value_default=NaN``). Inputs are ``(H, W)`` or
+    ``(C, H, W)``; a 4-D ``(T, C, H, W)`` stack raises ``ValueError``
+    (compute the flow of each frame separately).
 
     Args:
         reference: The fixed scene the input is registered against.
-        band: Band (axis-0 index) used for registration on 3-D inputs.
+        band: Band index (along the band axis) used for registration on
+            3-D inputs.
     """
 
     forbid_in_yaml: ClassVar[bool] = True
@@ -471,10 +480,13 @@ class OpticalFlowTVL1(Operator):
         self.band = band
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        name = type(self).__name__
         flow = np.asarray(
             optical_flow_tvl1(
-                _registration_band(np.asarray(self.reference), self.band),
-                _registration_band(np.asarray(gt), self.band),
+                _registration_band(
+                    np.asarray(self.reference), self.band, f"{name} reference"
+                ),
+                _registration_band(np.asarray(gt), self.band, name),
             )
         )
         return _wrap_flow(gt, self.reference, flow)
@@ -497,10 +509,13 @@ class OpticalFlowILK(OpticalFlowTVL1):
     """
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        name = type(self).__name__
         flow = np.asarray(
             optical_flow_ilk(
-                _registration_band(np.asarray(self.reference), self.band),
-                _registration_band(np.asarray(gt), self.band),
+                _registration_band(
+                    np.asarray(self.reference), self.band, f"{name} reference"
+                ),
+                _registration_band(np.asarray(gt), self.band, name),
             )
         )
         return _wrap_flow(gt, self.reference, flow)
@@ -1013,7 +1028,7 @@ class Stitch(Operator):
         self.fill = fill
 
     def _apply(self, tiles: list[GeoTensor]) -> GeoTensor:
-        if not tiles:
+        if len(tiles) == 0:
             raise ValueError("Stitch requires at least one tile.")
         if self.blend not in {"average", "feather", "max", "first"}:
             raise ValueError("blend must be 'average', 'feather', 'max', or 'first'.")
@@ -1443,7 +1458,7 @@ class SegmentStitch(Operator):
         self.fill = None if fill is None or np.isnan(fill) else fill
 
     def _apply(self, segments: list[GeoTensor]) -> GeoTensor:
-        if not segments:
+        if len(segments) == 0:
             raise ValueError("SegmentStitch requires at least one segment.")
         for segment in segments:
             _require_geotensor(segment, "SegmentStitch")

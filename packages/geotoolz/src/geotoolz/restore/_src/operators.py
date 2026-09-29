@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.shape import require_ndim
 from geotoolz._src.valid import (
     carried_fill,
     invalid_values,
@@ -282,18 +283,24 @@ class DenoisePCA(Operator):
     Args:
         n_components: Number of principal components to keep.
             ``n_components < bands`` performs noise reduction.
-        axis: Position of the band axis. Defaults to ``0``
-            (``(bands, H, W)``).
+        axis: Position of the band axis. Defaults to ``-3``
+            (``(bands, H, W)`` or ``(time, bands, H, W)``).
+
+    Inputs are ``(C, H, W)`` cubes or ``(T, C, H, W)`` stacks; a stack is
+    fitted once over the pixels of every frame (one PCA basis for the
+    time series). A 2-D ``(H, W)`` map has no band axis and raises
+    ``ValueError`` -- its rows are never treated as bands.
 
     Examples:
         >>> gz.restore.DenoisePCA(n_components=10)(hyperspectral_scene)
     """
 
-    def __init__(self, *, n_components: int, axis: int = 0) -> None:
+    def __init__(self, *, n_components: int, axis: int = -3) -> None:
         self.n_components = n_components
         self.axis = axis
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        require_ndim(gt, (3, 4), type(self).__name__)
         out = pca_denoise(
             _band_masked(gt, self.axis), n_components=self.n_components, axis=self.axis
         )
@@ -316,9 +323,14 @@ class MNF(Operator):
     any band is excluded); invalid pixels hold the output fill in the
     returned scores.
 
+    Inputs are ``(C, H, W)`` cubes or ``(T, C, H, W)`` stacks (one fit
+    over every frame's pixels); the scores keep the input layout with the
+    band axis replaced by the component axis (``(K, H, W)`` /
+    ``(T, K, H, W)``). A 2-D ``(H, W)`` map raises ``ValueError``.
+
     Args:
         n_components: Number of components to keep. ``None`` keeps all.
-        axis: Position of the band axis.
+        axis: Position of the band axis. Default ``-3``.
 
     Attributes:
         snr_: Per-component variance (proxy for signal-to-noise ratio),
@@ -330,13 +342,14 @@ class MNF(Operator):
         >>> reconstructed = gz.restore.InverseMNF(forward=forward)(scores)
     """
 
-    def __init__(self, *, n_components: int | None = None, axis: int = 0) -> None:
+    def __init__(self, *, n_components: int | None = None, axis: int = -3) -> None:
         self.n_components = n_components
         self.axis = axis
         self._state: dict[str, np.ndarray | int | tuple[int, ...]] | None = None
         self.snr_: np.ndarray | None = None
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        require_ndim(gt, (3, 4), type(self).__name__)
         self._state = fit_pca(
             _band_masked(gt, self.axis),
             n_components=self.n_components,
@@ -348,13 +361,14 @@ class MNF(Operator):
         # report them as nodata instead.
         pixel_nan = np.asarray(self._state["nan_mask"]).any(axis=0)
         valid = ~pixel_nan.reshape(scores.shape[1:])
-        # Scores are a new quantity: NaN marks nodata, never the input fill.
-        return wrap_filled(
-            gt,
-            scores,
-            fill_value_default=np.nan,
-            valid=np.broadcast_to(valid, scores.shape),
+        # fit_pca returns component-first scores; put the component axis
+        # where the band axis was so a (T, C, H, W) stack stays (T, K, H, W).
+        scores = np.moveaxis(scores, 0, self.axis)
+        valid = np.moveaxis(
+            np.broadcast_to(valid, self._state["scores"].shape), 0, self.axis
         )
+        # Scores are a new quantity: NaN marks nodata, never the input fill.
+        return wrap_filled(gt, scores, fill_value_default=np.nan, valid=valid)
 
 
 class InverseMNF(Operator):
@@ -387,7 +401,9 @@ class InverseMNF(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         if self.forward._state is None:
             raise ValueError("InverseMNF requires a forward MNF that has been applied")
-        out = inverse_pca(_band_masked(gt, 0), self.forward._state)
+        axis = int(self.forward._state["axis"])
+        scores = np.moveaxis(_band_masked(gt, axis), axis, 0)
+        out = inverse_pca(scores, self.forward._state)
         return _rewrap_finite(gt, out)
 
     def get_config(self) -> dict[str, Any]:

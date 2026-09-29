@@ -7,6 +7,10 @@ RandomWalker) judge nodata with :func:`geotoolz._src.valid.valid_pixels`
 only) before the skimage call, kept out of it where the algorithm takes a
 mask, and always carry the "no segment" label ``0`` in the output (whose
 ``fill_value_default`` is ``0``).
+
+A ``(T, C, H, W)`` time stack is segmented frame by frame: the output is
+the per-frame label maps (or boundary images) stacked as
+``(T, 1, H, W)`` (``(T, 3, H, W)`` for :class:`MarkBoundaries`).
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ from geotoolz._src.config import (
     mapping_to_pairs,
     reject_config_summary,
 )
-from geotoolz._src.shape import single_band
+from geotoolz._src.shape import over_frames, single_band
 from geotoolz._src.valid import carried_fill, valid_pixels, wrap_filled
 from geotoolz._src.wrap import wrap_like
 
@@ -136,6 +140,7 @@ class SLIC(Operator):
         self.start_label = start_label
         self.mask = reject_config_summary(mask, "mask")
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
         image = _fill_invalid(np.asarray(gt), valid)
@@ -204,6 +209,7 @@ class Felzenszwalb(Operator):
         self.channel_axis = channel_axis
         self.mask = reject_config_summary(mask, "mask")
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
         image = _fill_invalid(np.asarray(gt), valid)
@@ -282,6 +288,7 @@ class Quickshift(Operator):
         self.convert2lab = convert2lab
         self.mask = reject_config_summary(mask, "mask")
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
         image = _fill_invalid(np.asarray(gt), valid)
@@ -350,6 +357,7 @@ class Watershed(Operator):
         self.watershed_line = watershed_line
         self.mask = reject_config_summary(mask, "mask")
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
         image = single_band(_fill_invalid(np.asarray(gt), valid), name="Watershed")
@@ -414,6 +422,7 @@ class ChanVese(Operator):
         self.tol = tol
         self.max_num_iter = max_num_iter
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
         labels = chan_vese(
@@ -462,6 +471,7 @@ class RandomWalker(Operator):
         self.mode = mode
         self.tol = tol
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
         markers = single_band(self.markers, name="RandomWalker markers").astype(
@@ -504,6 +514,7 @@ class ExpandLabels(Operator):
     def __init__(self, *, distance: float = 1.0) -> None:
         self.distance = distance
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         labels = expand_labels(
             single_band(np.asarray(gt), name="ExpandLabels").astype(
@@ -686,6 +697,7 @@ class MergeNearbyInstances(Operator):
         self.classes = mapping_from_pairs(classes)
         self.start_label = int(start_label)
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         labels_in = single_band(np.asarray(gt), name="MergeNearbyInstances")
         merged = _merge_nearby_instances(
@@ -813,6 +825,7 @@ class MaskNMS(Operator):
         self.scores = None if scores is None else np.asarray(scores, dtype=float)
         self.start_label = int(start_label)
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         masks = np.asarray(gt)
         out = _mask_nms(
@@ -864,6 +877,7 @@ class MarkBoundaries(Operator):
         self.color = color
         self.mode = mode
 
+    @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         image = np.asarray(gt)
         if image.ndim == 3:

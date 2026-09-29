@@ -206,3 +206,11 @@ def test_geo_dependent_ops_reject_plain_arrays(
     """Ops whose output geometry needs the transform stay GeoTensor-only."""
     with pytest.raises(TypeError, match="georeferenced GeoTensor"):
         op(values)
+
+
+def test_4d_time_stack() -> None:
+    """Measurements are per scene: a stack is rejected by name (#147)."""
+    from _helpers import time_stack
+
+    with pytest.raises(ValueError, match="RegionProps expects a single-band map"):
+        gz.measure.RegionProps()(time_stack((2, 1, 8, 8)))

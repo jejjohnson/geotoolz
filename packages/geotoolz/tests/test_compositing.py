@@ -422,3 +422,21 @@ def _case_stack_matched() -> None:
 def test_fill_pixels_are_excluded(case: Callable[[], None]) -> None:
     """#145: a frame's nodata never enters a composite; all-nodata -> fill."""
     case()
+
+
+def test_4d_time_stack() -> None:
+    """Composites reduce a (T, C, H, W) stack over time (#147)."""
+    from _helpers import frames, time_stack
+
+    stack = time_stack(with_fill_pixels=True)
+    for op in (MedianComposite(), MaxNDVIComposite(red=0, nir=1)):
+        out = op(stack)
+        expected = op(frames(stack))
+        assert isinstance(out, GeoTensor)
+        assert out.shape == (3, 4, 4)
+        np.testing.assert_array_equal(np.asarray(out), np.asarray(expected))
+        assert out.transform == stack.transform
+        assert out.fill_value_default == stack.fill_value_default
+        assert out.attrs == stack.attrs and out.attrs is not stack.attrs
+    with pytest.raises(ValueError, match="MedianComposite takes a sequence"):
+        MedianComposite()(stack.isel({"time": 0}))

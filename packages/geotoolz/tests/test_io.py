@@ -945,3 +945,24 @@ def test_write_zarr_rejects_unsupported_ndim(tmp_path: Path) -> None:
     with pytest.raises(io.GeoToolzIOError, match="2D to 4D"):
         io.WriteZarr(store=str(store))(invalid)
     assert not store.exists()
+
+
+def test_4d_time_stack(tmp_path: Path) -> None:
+    """GeoTIFF sinks reject a stack with GeoToolzIOError; Zarr keeps it (#147)."""
+    from _helpers import time_stack
+
+    stack = time_stack()
+    for sink in (
+        io.WriteCOG(path=tmp_path / "stack.tif"),
+        io.WriteGeoTIFF(path=tmp_path / "stack_tiled.tif"),
+    ):
+        with pytest.raises(
+            io.GeoToolzIOError, match=rf"{type(sink).__name__} expects 2D or 3D"
+        ):
+            sink(stack)
+    zarr = pytest.importorskip("zarr")
+    store = str(tmp_path / "stack.zarr")
+    io.WriteZarr(store=store)(stack)
+    np.testing.assert_array_equal(
+        zarr.open_group(store, mode="r")["values"][...], np.asarray(stack)
+    )

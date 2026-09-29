@@ -56,8 +56,11 @@ class PolygonMask(Operator):
 
     Geo-dependent: rasterization needs the carrier's transform/CRS, so
     the input must be a georeferenced ``GeoTensor``. The mask matches
-    the carrier's spatial grid and is returned as a boolean GeoTensor
-    with ``fill_value_default=False``.
+    the carrier's spatial grid and is returned as a boolean ``(H, W)``
+    GeoTensor with ``fill_value_default=False`` whatever the carrier's
+    rank: every band and every frame of a ``(T, C, H, W)`` stack share
+    the same grid, so one mask serves them all (it broadcasts in
+    :class:`ApplyMask`).
 
     Args:
         geometry: Shapely geometry or ``GeoDataFrame`` to burn in.

@@ -11,31 +11,38 @@ import numpy as np
 from jaxtyping import Float, Shaped
 from skimage.exposure import equalize_adapthist
 
+from geotoolz._src.shape import BAND_AXIS
 from geotoolz._src.stretch import percentile_stretch
 
 
 def stat_axes(
     arr: Shaped[np.ndarray, "*dims"], *, per_band: bool = True
 ) -> tuple[int, ...] | None:
-    """Return spatial reduction axes for per-band remote-sensing arrays.
+    """Return the reduction axes for per-band remote-sensing statistics.
 
-    Statistics for a channel-first cube (``(C, H, W)`` or
-    ``(T, C, H, W)``) should reduce over the trailing spatial axes so
-    each band keeps its own value; a 2-D map (or a global reduction)
-    uses ``None``.
+    Per-band statistics keep only the band axis (``-3``) and reduce over
+    every other axis: the spatial ``(H, W)`` axes of a ``(C, H, W)`` cube,
+    and also the time axis of a ``(T, C, H, W)`` stack, so a stack yields
+    one ``(C,)`` statistic per band pooled over all frames (never a
+    ``(T, C)`` table). A 2-D map (or a global reduction) uses ``None``.
 
     Args:
         arr: Input array whose rank decides the reduction mode.
         per_band: If ``True`` (default) and ``arr`` has three or more
-            dimensions, reduce per band over ``(-2, -1)``. If ``False``
-            always reduce globally.
+            dimensions, reduce over every axis except the band axis. If
+            ``False`` always reduce globally.
 
     Returns:
-        ``(-2, -1)`` for per-band reductions, or ``None`` for a global
-        reduction (also for 2-D inputs).
+        ``(-2, -1)`` for a 3-D cube, ``(-4, -2, -1)`` for a 4-D stack
+        (every axis but ``-3``), or ``None`` for a global reduction (also
+        for 2-D inputs).
+
+    Examples:
+        >>> stat_axes(np.zeros((3, 4, 4))), stat_axes(np.zeros((2, 3, 4, 4)))
+        ((-2, -1), (-4, -2, -1))
     """
     if per_band and arr.ndim >= 3:
-        return (-2, -1)
+        return tuple(axis for axis in range(-arr.ndim, 0) if axis != BAND_AXIS)
     return None
 
 
@@ -61,8 +68,12 @@ def reshape_stat(
 
     Returns:
         A float array broadcastable against ``arr`` (returned unchanged
-        when it is scalar, ``axis`` is ``None``, or its shape does not
-        match the kept axes).
+        when it is scalar or ``axis`` is ``None``).
+
+    Raises:
+        ValueError: If a non-scalar ``stat`` does not have the shape of the
+            kept axes (e.g. a 2-entry per-band statistic for a 3-band
+            input); it would otherwise broadcast silently along ``x``.
     """
     stat_arr = np.asarray(stat, dtype=float)
     if stat_arr.ndim == 0 or axis is None:
@@ -71,8 +82,14 @@ def reshape_stat(
     axes = tuple(a % arr.ndim for a in axis)
     kept_axes = tuple(i for i in range(arr.ndim) if i not in axes)
     kept_shape = tuple(arr.shape[i] for i in kept_axes)
+    if stat_arr.size == 1:
+        return stat_arr.reshape(())
     if stat_arr.shape != kept_shape:
-        return stat_arr
+        raise ValueError(
+            f"statistic of shape {stat_arr.shape} does not match the kept axes "
+            f"{kept_shape} of an input of shape {arr.shape}; pass one value "
+            "per band (or a scalar)"
+        )
 
     shape = [1] * arr.ndim
     for stat_axis, arr_axis in enumerate(kept_axes):
@@ -299,8 +316,9 @@ def clahe(
 ) -> Float[np.ndarray, "*dims"]:
     """Apply contrast-limited adaptive histogram equalization per image band.
 
-    Wraps :func:`skimage.exposure.equalize_adapthist`. Each band of a
-    3-D+ cube is equalized independently. Because skimage requires
+    Wraps :func:`skimage.exposure.equalize_adapthist`. Each ``(H, W)``
+    slice -- every band of a ``(C, H, W)`` cube, every band of every
+    frame of a ``(T, C, H, W)`` stack -- is equalized independently. Because skimage requires
     inputs in ``[0, 1]``, every slice is rescaled to ``[0, 1]`` over its
     finite range, equalized, then mapped back to its native units. NaN
     pixels are preserved and excluded from the histograms.
@@ -319,24 +337,15 @@ def clahe(
         slices are returned unchanged).
     """
     values = np.asarray(arr, dtype=float)
-    if values.ndim >= 3:
-        return np.stack(
-            [
-                _clahe_slice(
-                    band,
-                    kernel_size=kernel_size,
-                    clip_limit=clip_limit,
-                    nbins=nbins,
-                )
-                for band in values
-            ]
+    out = np.empty_like(values)
+    for idx in np.ndindex(values.shape[:-2]):
+        out[idx] = _clahe_slice(
+            values[idx],
+            kernel_size=kernel_size,
+            clip_limit=clip_limit,
+            nbins=nbins,
         )
-    return _clahe_slice(
-        values,
-        kernel_size=kernel_size,
-        clip_limit=clip_limit,
-        nbins=nbins,
-    )
+    return out
 
 
 def _clahe_slice(

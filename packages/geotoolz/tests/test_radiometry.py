@@ -793,3 +793,17 @@ def test_dn_to_radiance_per_band_coef_jsonable() -> None:
     cfg_builds = hydra_zen.builds(DNToRadiance, **cfg)  # type: ignore[union-attr]
     restored = hydra_zen.instantiate(cfg_builds)
     assert restored.get_config() == cfg
+
+
+def test_4d_time_stack() -> None:
+    """Per-band coefficients broadcast along -3 on a time stack (#147)."""
+    from _helpers import time_stack
+
+    stack = time_stack()
+    out = DNToRadiance(gain=[1.0, 2.0, 3.0])(stack)
+    assert out.shape == stack.shape
+    expected = np.asarray(stack) * np.array([1.0, 2.0, 3.0])[:, None, None]
+    np.testing.assert_allclose(np.asarray(out), expected)
+    # A 2-D map is a single band: a length-1 coefficient still applies.
+    flat = DNToRadiance(gain=[2.0])(toy_geotensor(np.ones((4, 4))))
+    np.testing.assert_allclose(np.asarray(flat), 2.0)

@@ -2,7 +2,8 @@
 
 Tier-A layer of the matched-filter module: everything here is plain
 numpy (plus scipy for filtering and distributions) operating on spectral
-cubes shaped ``(c, h, w)`` — band axis first by default, movable via the
+cubes shaped ``(c, h, w)`` (or ``(t, c, h, w)`` stacks) — the band axis
+defaults to ``-3``, georeader's band axis, and is movable via the
 ``axis`` argument. The carrier-aware Operator wrappers live in
 :mod:`geotoolz.matched_filter._src.operators`.
 
@@ -284,7 +285,7 @@ class WelfordAccumulator:
 
 
 def cube_to_samples(
-    cube: Float[np.ndarray, "c h w"], *, axis: int = 0
+    cube: Float[np.ndarray, "c h w"], *, axis: int = -3
 ) -> tuple[Float[np.ndarray, "n c"], tuple[int, ...]]:
     """Vectorise a spectral cube into a ``(pixels, bands)`` sample matrix.
 
@@ -295,7 +296,7 @@ def cube_to_samples(
         cube: Spectral cube, canonically ``(c, h, w)``; any number of
             non-band dimensions (at least one) is supported. Array-likes
             are coerced to float.
-        axis: Position of the spectral (band) axis. Default ``0``.
+        axis: Position of the spectral (band) axis. Default ``-3``.
 
     Returns:
         A pair ``(samples, spatial_shape)`` where ``samples`` is the
@@ -320,7 +321,7 @@ def estimate_mean(
     method: MeanMethod = "mean",
     trim_proportion: float = 0.1,
     huber_c: float = 1.345,
-    axis: int = 0,
+    axis: int = -3,
 ) -> Float[np.ndarray, " c"]:
     """Estimate a per-band background mean spectrum from a cube.
 
@@ -340,7 +341,7 @@ def estimate_mean(
         huber_c: Huber tuning constant in robust z-score units for
             ``method="huber"``; smaller values down-weight outliers more
             aggressively. Must be positive.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
 
     Returns:
         Mean spectrum with one entry per band, fitted on valid pixels
@@ -369,7 +370,7 @@ def estimate_cov_empirical(
     *,
     mean: Float[np.ndarray, " c"] | None = None,
     ridge: float = 0.0,
-    axis: int = 0,
+    axis: int = -3,
 ) -> NumpyLinearOperator:
     """Estimate an empirical covariance operator from a cube.
 
@@ -383,7 +384,7 @@ def estimate_cov_empirical(
             when ``None`` the arithmetic sample mean is used.
         ridge: Optional Tikhonov ridge added to the diagonal to keep the
             matrix invertible for near-degenerate backgrounds.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
 
     Returns:
         `NumpyLinearOperator` wrapping the ``(c, c)`` sample covariance
@@ -408,7 +409,7 @@ def estimate_cov_shrunk(
     *,
     mean: Float[np.ndarray, " c"] | None = None,
     method: CovShrinkageMethod = "ledoit_wolf",
-    axis: int = 0,
+    axis: int = -3,
 ) -> NumpyLinearOperator:
     """Estimate a diagonal-target shrinkage covariance operator.
 
@@ -423,7 +424,7 @@ def estimate_cov_shrunk(
             when ``None`` the arithmetic sample mean is used.
         method: Shrinkage-intensity estimator, ``"ledoit_wolf"`` or
             ``"oas"``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
 
     Returns:
         `NumpyLinearOperator` wrapping the shrunk ``(c, c)`` covariance
@@ -520,7 +521,7 @@ def estimate_cov_lowrank(
     tikhonov: float = 1e-3,
     random_state: int | None = 0,
     n_oversamples: int = 10,
-    axis: int = 0,
+    axis: int = -3,
 ) -> NumpyLinearOperator:
     """Estimate a low-rank-plus-Tikhonov dense covariance operator.
 
@@ -546,7 +547,7 @@ def estimate_cov_lowrank(
         n_oversamples: Extra random probe vectors beyond ``rank`` used
             by the range finder; improves subspace capture at negligible
             cost. Must be non-negative.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
 
     Returns:
         `NumpyLinearOperator` wrapping the regularised ``(c, c)``
@@ -627,7 +628,7 @@ def apply_image(
     mean: Float[np.ndarray, " c"],
     cov_op: NumpyLinearOperator | Float[np.ndarray, "c c"],
     target: Float[np.ndarray, " c"],
-    axis: int = 0,
+    axis: int = -3,
 ) -> Float[np.ndarray, "h w"]:
     """Apply a matched filter over a hyperspectral image cube.
 
@@ -642,7 +643,7 @@ def apply_image(
         cov_op: Background covariance as a `NumpyLinearOperator` or a
             raw ``(c, c)`` matrix.
         target: Target signature ``(c,)``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
 
     Returns:
         Matched-filter score map with the cube's spatial shape (e.g.
@@ -793,7 +794,7 @@ def gmm_cluster_background(
     cov_estimator: Literal["empirical", "ledoit_wolf", "oas"] = "ledoit_wolf",
     random_state: int | None = 0,
     bayesian: bool = False,
-    axis: int = 0,
+    axis: int = -3,
 ) -> ClusterBackground:
     """Estimate a clustered background with a deterministic diagonal GMM.
 
@@ -816,7 +817,7 @@ def gmm_cluster_background(
         bayesian: If ``True``, drop components whose mixture weight
             falls below ``1 / n_pixels`` (a cheap sparsifying prune), so
             fewer than ``n_clusters`` clusters may be returned.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
 
     Returns:
         `ClusterBackground` with the per-pixel label map and per-cluster
@@ -862,7 +863,7 @@ def apply_cluster_mf(
     *,
     cluster: ClusterBackground,
     target: Float[np.ndarray, " c"],
-    axis: int = 0,
+    axis: int = -3,
 ) -> Float[np.ndarray, "h w"]:
     """Apply a matched filter with per-cluster background statistics.
 
@@ -875,7 +876,7 @@ def apply_cluster_mf(
             shape must match ``cluster.labels``.
         cluster: Clustered background statistics for the cube.
         target: Target signature ``(c,)``.
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
 
     Returns:
         Matched-filter score map with the cube's spatial shape; ``NaN``
@@ -914,7 +915,7 @@ def adaptive_window_background(
     *,
     window_size: int = 7,
     pad_mode: str = "reflect",
-    axis: int = 0,
+    axis: int = -3,
 ) -> AdaptiveBackground:
     """Estimate local mean and diagonal variance over square windows.
 
@@ -931,7 +932,7 @@ def adaptive_window_background(
         pad_mode: Boundary mode forwarded to
             :func:`scipy.ndimage.uniform_filter` (e.g. ``"reflect"``,
             ``"nearest"``, ``"wrap"``).
-        axis: Position of the spectral axis. Default ``0``.
+        axis: Position of the spectral axis. Default ``-3``.
 
     Returns:
         `AdaptiveBackground` with per-pixel ``mean`` and diagonal

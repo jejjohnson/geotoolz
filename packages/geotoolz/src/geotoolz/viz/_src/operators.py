@@ -22,6 +22,11 @@ geotransform / CRS to be meaningful (``Hillshade`` without explicit
 resolutions, ``ShadedRelief``, ``AnnotatePolygons``, ``AnnotatePoints``)
 require a georeferenced GeoTensor and raise ``TypeError`` otherwise.
 
+Time stacks: composites select along the band axis (``-3`` by default),
+so a ``(T, C, H, W)`` stack gives a ``(T, 3, H, W)`` composite;
+colormaps and terrain shading render each frame (``(T, 4, H, W)`` RGBA,
+``(T, 1, H, W)`` hillshade).
+
 Nodata: a pixel is invalid when any band is non-finite or equals the
 carrier's ``fill_value_default`` (:mod:`geotoolz._src.valid`). Stretches
 and colormaps compute their percentiles / ranges over valid pixels only;
@@ -38,6 +43,7 @@ import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
+from geotoolz._src.shape import over_frames
 from geotoolz._src.valid import (
     carried_fill,
     carrier_fill_value,
@@ -85,7 +91,7 @@ class Composite(Operator):
         bands: Sequence of band references. Each entry is either an
             integer position or a string name resolved against the
             carrier's ``attrs``.
-        axis: Band axis. Default ``0`` (``(C, H, W)`` convention).
+        axis: Band axis. Default ``-3`` (``(C, H, W)`` convention).
 
     Examples:
         >>> import geotoolz as gz
@@ -95,7 +101,7 @@ class Composite(Operator):
         >>> rgb = gz.viz.Composite(bands=[3, 2, 1])(s2_geotensor)
     """
 
-    def __init__(self, *, bands: Sequence[BandRef], axis: int = 0) -> None:
+    def __init__(self, *, bands: Sequence[BandRef], axis: int = -3) -> None:
         self.bands = list(bands)
         self.axis = axis
 
@@ -124,7 +130,7 @@ class TrueColor(Composite):
         red: Red-band reference (int index or string name).
         green: Green-band reference.
         blue: Blue-band reference.
-        axis: Band axis. Default ``0``.
+        axis: Band axis. Default ``-3``.
 
     Examples:
         >>> import geotoolz as gz
@@ -139,7 +145,7 @@ class TrueColor(Composite):
     """
 
     def __init__(
-        self, *, red: BandRef, green: BandRef, blue: BandRef, axis: int = 0
+        self, *, red: BandRef, green: BandRef, blue: BandRef, axis: int = -3
     ) -> None:
         super().__init__(bands=[red, green, blue], axis=axis)
         self.red = red
@@ -166,7 +172,7 @@ class FalseColor(Composite):
         nir: Near-infrared band reference (rendered as red).
         red: Red band reference (rendered as green).
         green: Green band reference (rendered as blue).
-        axis: Band axis. Default ``0``.
+        axis: Band axis. Default ``-3``.
 
     Examples:
         >>> import geotoolz as gz
@@ -175,7 +181,7 @@ class FalseColor(Composite):
     """
 
     def __init__(
-        self, *, nir: BandRef, red: BandRef, green: BandRef, axis: int = 0
+        self, *, nir: BandRef, red: BandRef, green: BandRef, axis: int = -3
     ) -> None:
         super().__init__(bands=[nir, red, green], axis=axis)
         self.nir = nir
@@ -201,7 +207,7 @@ class SWIRComposite(Composite):
         swir2: SWIR2 band reference (rendered as red).
         nir: NIR band reference (rendered as green).
         red: Red band reference (rendered as blue).
-        axis: Band axis. Default ``0``.
+        axis: Band axis. Default ``-3``.
 
     Examples:
         >>> import geotoolz as gz
@@ -210,7 +216,7 @@ class SWIRComposite(Composite):
     """
 
     def __init__(
-        self, *, swir2: BandRef, nir: BandRef, red: BandRef, axis: int = 0
+        self, *, swir2: BandRef, nir: BandRef, red: BandRef, axis: int = -3
     ) -> None:
         super().__init__(bands=[swir2, nir, red], axis=axis)
         self.swir2 = swir2
@@ -377,6 +383,7 @@ class ApplyColormap(Operator):
         self.vmax = vmax
         self.nan_color = nan_color
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         cmap = _get_colormap(self.name)
         valid = valid_pixels(gt)
@@ -432,6 +439,7 @@ class ApplyDiscreteColormap(Operator):
         pairs = mapping_from_pairs(mapping) or {}
         self.mapping = {int(k): tuple(v) for k, v in pairs.items()}
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = rgba_from_categories(np.asarray(gt), self.mapping)
         out = restore_fill(out, valid_pixels(gt), 0)
@@ -486,6 +494,7 @@ class Hillshade(Operator):
         self.x_resolution = x_resolution
         self.y_resolution = y_resolution
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         x_resolution = self.x_resolution
         y_resolution = self.y_resolution
@@ -551,6 +560,7 @@ class ShadedRelief(Operator):
         self.colormap = colormap
         self.z_factor = z_factor
 
+    @over_frames
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         if getattr(gt, "transform", None) is None:
             raise TypeError(
