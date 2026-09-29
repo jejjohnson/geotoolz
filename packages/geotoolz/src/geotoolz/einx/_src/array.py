@@ -9,8 +9,13 @@ The survival rule (design decision for geotoolz issue #69, Q3): a
 pattern *preserves spatial structure* iff
 
 1. the trailing two top-level axes of its output expression are exactly
-   the bare spatial axis names (default ``("y", "x")``), and
-2. neither spatial axis appears inside a composed / bracketed group
+   the bare spatial axis names (default ``("y", "x")``),
+2. the trailing two top-level axes of the carrier's input expression
+   (the first comma-separated part before ``->``) are those same bare
+   names in the same order — otherwise the pattern moves or renames a
+   spatial axis on the way in (e.g. ``"c x y -> c y x"`` transposes the
+   grid while the output *looks* spatially intact), and
+3. neither spatial axis appears inside a composed / bracketed group
    anywhere in the pattern (composition means the axis is being split
    or merged, so its size — and therefore the geotransform — changes).
 
@@ -111,7 +116,9 @@ def spatial_survives(
     """Return whether an einx pattern preserves the carrier's spatial grid.
 
     True iff the output expression's trailing two top-level tokens are
-    exactly the bare ``spatial_axes`` names in order, AND neither
+    exactly the bare ``spatial_axes`` names in order, AND the carrier's
+    input expression (the first comma-separated part of the input side)
+    ends in those same bare names in the same order, AND neither
     spatial axis appears inside a composed / bracketed group anywhere
     in the pattern (composition splits or merges the axis, changing its
     size and invalidating the geotransform).
@@ -129,6 +136,10 @@ def spatial_survives(
         True
         >>> spatial_survives("c y x -> x y")               # transposed
         False
+        >>> spatial_survives("c x y -> c y x")             # input-side transpose
+        False
+        >>> spatial_survives("y x c -> c y x")             # channels-last input
+        False
         >>> spatial_survives("c y x -> y x c")             # channels-last
         False
         >>> spatial_survives("c (y py) (x px) -> c y x")   # pooled: resized
@@ -140,6 +151,16 @@ def spatial_survives(
     if tokens is None or len(tokens) < 2:
         return False
     if tokens[-2] != spatial_axes[0] or tokens[-1] != spatial_axes[1]:
+        return False
+    # The carrier (first input) must also carry the grid in the trailing
+    # two positions under the same names: otherwise the output's `y x`
+    # is a transpose / rename of the input's grid and the carrier's
+    # transform no longer describes it (undetectable by shape on square
+    # tiles). Top-level commas separate inputs; brackets can't contain
+    # a spatial axis here (rejected below), so the first split is safe.
+    carrier_expr = pattern.split("->", 1)[0]
+    carrier_tokens = _tokenize(carrier_expr.split(",", 1)[0], pattern=pattern)
+    if carrier_tokens[-2:] != list(spatial_axes):
         return False
     # Reject patterns that compose/split a spatial axis anywhere: the
     # axis size changes, so the trailing dims can't keep their extent.
