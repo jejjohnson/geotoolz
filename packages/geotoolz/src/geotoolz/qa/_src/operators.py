@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
 from geotoolz._src.wrap import wrap_like
 from geotoolz.qa._src.array import (
     mask_from_bit_field,
@@ -345,7 +346,9 @@ class DecodeBitmask(Operator):
     ``bits``.
 
     Args:
-        bits: Mapping from output-layer name to bit positions.
+        bits: Mapping from output-layer name to bit positions, or the
+            equivalent ``[[name, bits], ...]`` pairs that ``get_config``
+            emits.
         mode: ``"any"`` marks a pixel when any listed bit is set;
             ``"all"`` requires every listed bit to be set (rare —
             useful for confidence-pair sub-fields).
@@ -375,17 +378,19 @@ class DecodeBitmask(Operator):
     def __init__(
         self,
         *,
-        bits: Mapping[str, Sequence[int]],
+        bits: Mapping[str, Sequence[int]] | Sequence[Sequence[Any]],
         mode: str = "any",
         qa_band: BandSelector = None,
         axis: int = 0,
     ) -> None:
-        if not bits:
+        bits_map = mapping_from_pairs(bits)
+        if not bits_map:
             raise ValueError("DecodeBitmask: `bits` must not be empty")
         if mode not in {"any", "all"}:
             raise ValueError("mode must be 'any' or 'all'")
         self.bits = {
-            name: tuple(int(bit) for bit in bit_list) for name, bit_list in bits.items()
+            name: tuple(int(bit) for bit in bit_list)
+            for name, bit_list in bits_map.items()
         }
         for name, bit_list in self.bits.items():
             if not bit_list:
@@ -413,7 +418,7 @@ class DecodeBitmask(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "bits": {name: list(bits) for name, bits in self.bits.items()},
+            "bits": mapping_to_pairs(self.bits),
             "mode": self.mode,
             "qa_band": self.qa_band,
             "axis": self.axis,

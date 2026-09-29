@@ -199,7 +199,9 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
         "target_wavelengths": [500.0, 600.0],
         "width": 20.0,
     },
-    "viz._src.operators.ApplyDiscreteColormap": {"mapping": {0: "black", 1: "red"}},
+    "viz._src.operators.ApplyDiscreteColormap": {
+        "mapping": {0: (0.0, 0.0, 0.0, 0.0), 1: (1.0, 0.0, 0.0, 1.0)}
+    },
     "viz._src.operators.Composite": {"bands": [0, 1, 2]},
     "viz._src.operators.FalseColor": {"nir": 0, "red": 1, "green": 2},
     "viz._src.operators.SWIRComposite": {"swir2": 0, "nir": 1, "red": 2},
@@ -225,9 +227,6 @@ UNBUILDABLE: dict[str, str] = {
 #: removed as fixed. The exception type pins each case to its documented
 #: failure mode, so a different failure is reported instead of swallowed.
 Known = tuple[str, type[BaseException]]
-_TUPLE_LIST: Known = ("#139: tuple config reloads as a list", AssertionError)
-_TUPLE_CRASH: Known = ("#139: constructor rejects the reloaded list", TypeError)
-_DICT_CFG: Known = ("#139: dict config is not a from_state primitive", RuntimeError)
 _SKLEARN: Known = (
     "#140: holds a fitted estimator but is not forbid_in_yaml",
     RuntimeError,
@@ -235,13 +234,6 @@ _SKLEARN: Known = (
 
 KNOWN_FAILURES: dict[str, dict[str, Known]] = {
     "round_trip": {
-        "augment._src.operators.SimulatedClouds": _TUPLE_CRASH,
-        "feature._src.operators.HOG": _TUPLE_LIST,
-        "measure._src.operators.ProfileLine": _TUPLE_LIST,
-        "plume._src.operators.WindAdvectionCone": _TUPLE_LIST,
-        "radiometry._src.operators.PercentileClip": _TUPLE_LIST,
-        "qa._src.operators.DecodeBitmask": _DICT_CFG,
-        "viz._src.operators.ApplyDiscreteColormap": _DICT_CFG,
         "learn._src.operators.SklearnOp": _SKLEARN,
         **{
             f"learn.{name}": _SKLEARN
@@ -261,10 +253,6 @@ KNOWN_FAILURES: dict[str, dict[str, Known]] = {
         },
     },
     "config_is_json": {
-        "geom._src.operators.SegmentStitch": (
-            "#139: default fill=NaN is not JSON",
-            ValueError,
-        ),
         "learn.IterativeImputer": ("#140: estimator_params carries NaN", ValueError),
         "learn.KNNImputer": ("#140: estimator_params carries NaN", ValueError),
     },
@@ -433,3 +421,59 @@ def test_graph_mode(cls: type) -> None:
     node = op(*(Input(f"x{i}") for i in range(n)))
     assert isinstance(node, Node)
     assert node.operator is op
+
+
+def _scene() -> Any:
+    from _helpers import toy_geotensor
+
+    values = np.random.default_rng(0).uniform(0.0, 1.0, (3, 16, 16))
+    return toy_geotensor(values, attrs={"band_names": ["b0", "b1", "b2"]})
+
+
+def _labels() -> Any:
+    from _helpers import toy_geotensor
+
+    labels = np.zeros((16, 16), dtype=np.int32)
+    labels[2:5, 2:5] = 1
+    labels[2:5, 7:10] = 2
+    return toy_geotensor(labels, fill_value_default=0)
+
+
+def _tiles() -> Any:
+    from geotoolz.geom import Tile
+
+    return list(Tile(size=(8, 8))(_scene()))
+
+
+def _reload_cases() -> list[Any]:
+    from affine import Affine
+
+    import geotoolz as gz
+
+    scene_transform = Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0)
+    cases = [
+        (gz.augment.GaussianNoise(sigma=(0.0, 0.1), seed=0), _scene),
+        (gz.augment.AtmosphericHaze(intensity=(0.0, 0.2), seed=0), _scene),
+        (gz.augment.SimulatedClouds(seed=0), _scene),
+        (gz.augment.BrightnessJitter(factor=(0.9, 1.1), seed=0), _scene),
+        (gz.augment.BandJitter(groups={"vis": ["b0", "b1"]}, seed=0), _scene),
+        (gz.radiometry.PercentileClip(axis=(-2, -1)), _scene),
+        (gz.qa.DecodeBitmask(bits={"low": [0], "high": [1]}), _labels),
+        (gz.segment.MergeNearbyInstances(classes={1: 0, 2: 0}), _labels),
+        (
+            gz.geom.Stitch(target_transform=scene_transform, target_shape=(16, 16)),
+            _tiles,
+        ),
+    ]
+    return [pytest.param(op, make, id=type(op).__name__) for op, make in cases]
+
+
+@pytest.mark.parametrize(("op", "make_input"), _reload_cases())
+def test_reloaded_operator_applies_identically(
+    op: Operator, make_input: Callable[[], Any]
+) -> None:
+    """Tuple / mapping configs reload into operators that still run (#139)."""
+    clone = Operator.from_state(json.loads(json.dumps(op.state)))
+    np.testing.assert_array_equal(
+        np.asarray(clone(make_input())), np.asarray(op(make_input()))
+    )

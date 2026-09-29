@@ -23,6 +23,7 @@ from skimage.measure import (
 )
 from skimage.morphology import skeletonize
 
+from geotoolz._src.config import as_tuple
 from geotoolz._src.shape import single_band
 from geotoolz._src.wrap import wrap_like
 
@@ -266,8 +267,8 @@ class ProfileLine(Operator):
         order: int = 1,
         mode: str = "reflect",
     ) -> None:
-        self.src = src
-        self.dst = dst
+        self.src = as_tuple(src)
+        self.dst = as_tuple(dst)
         self.linewidth = linewidth
         self.order = order
         self.mode = mode

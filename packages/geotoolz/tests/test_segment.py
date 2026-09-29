@@ -277,9 +277,10 @@ def test_merge_nearby_instances_get_config_round_trip() -> None:
         "distance_threshold": 12.5,
         "iou_threshold_min": 0.05,
         "iou_threshold_max": 0.5,
-        "classes": {1: 0, 2: 1},
+        "classes": [[1, 0], [2, 1]],
         "start_label": 3,
     }
+    assert gz.segment.MergeNearbyInstances(**cfg).classes == {1: 0, 2: 1}
 
 
 def _mask_stack_gt(masks: np.ndarray) -> GeoTensor:

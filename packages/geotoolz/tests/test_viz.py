@@ -232,16 +232,17 @@ def test_stretch_preserves_geometadata_no_mutation() -> None:
 
 
 def test_apply_discrete_colormap_get_config_is_json_safe() -> None:
-    """`get_config()` must JSON-serialise (str keys, list colours)."""
+    """`get_config()` emits ``[[class_id, rgba], ...]`` pairs that reload."""
     op = ApplyDiscreteColormap(
         mapping={1: (1.0, 0.0, 0.0, 1.0), 2: (0.0, 1.0, 0.0, 1.0)}
     )
     cfg = op.get_config()
-    # Round-trip through json — fails if int keys or tuples leak through.
+    # Round-trip through json: pairs keep the int class IDs intact.
     restored = json.loads(json.dumps(cfg))
     assert restored == {
-        "mapping": {"1": [1.0, 0.0, 0.0, 1.0], "2": [0.0, 1.0, 0.0, 1.0]}
+        "mapping": [[1, [1.0, 0.0, 0.0, 1.0]], [2, [0.0, 1.0, 0.0, 1.0]]]
     }
+    assert ApplyDiscreteColormap(**restored).mapping == op.mapping
 
 
 def test_apply_colormap_get_config_references_cmap_by_name() -> None:

@@ -14,7 +14,12 @@ from pipekit import Operator
 from rasterio.windows import Window
 from scipy.ndimage import gaussian_filter
 
-from geotoolz._src.config import jsonable
+from geotoolz._src.config import (
+    as_tuple,
+    jsonable,
+    mapping_from_pairs,
+    mapping_to_pairs,
+)
 from geotoolz._src.wrap import wrap_like
 
 
@@ -451,6 +456,7 @@ class BrightnessJitter(Operator):
         per_band: bool = True,
         seed: int | None = None,
     ) -> None:
+        factor = as_tuple(factor)
         _validate_range(factor, "factor")
         self.factor = factor
         self.per_band = per_band
@@ -497,6 +503,7 @@ class ContrastJitter(Operator):
         per_band: bool = True,
         seed: int | None = None,
     ) -> None:
+        factor = as_tuple(factor)
         _validate_range(factor, "factor")
         self.factor = factor
         self.per_band = per_band
@@ -545,6 +552,7 @@ class GaussianNoise(Operator):
         per_band: bool = True,
         seed: int | None = None,
     ) -> None:
+        sigma = as_tuple(sigma)
         _validate_range(sigma, "sigma")
         self.sigma = sigma
         self.per_band = per_band
@@ -589,6 +597,7 @@ class SpeckleNoise(Operator):
     """
 
     def __init__(self, sigma: ScalarOrRange = 0.05, seed: int | None = None) -> None:
+        sigma = as_tuple(sigma)
         _validate_range(sigma, "sigma")
         self.sigma = sigma
         self.seed = seed
@@ -656,15 +665,18 @@ class BandJitter(Operator):
 
     Args:
         groups: Mapping of group label to the band names (or integer
-            indices) permuted within that group. ``None`` or empty
-            disables the op (identity).
+            indices) permuted within that group, or the equivalent
+            ``[[label, names], ...]`` pairs that ``get_config`` emits.
+            ``None`` or empty disables the op (identity).
         seed: Default seed used when no per-call ``seed`` is given.
     """
 
     def __init__(
-        self, groups: dict[str, list[str]] | None = None, seed: int | None = None
+        self,
+        groups: dict[str, list[str]] | list[list[Any]] | None = None,
+        seed: int | None = None,
     ) -> None:
-        self.groups = groups
+        self.groups = mapping_from_pairs(groups)
         self.seed = seed
 
     def _apply(
@@ -687,7 +699,7 @@ class BandJitter(Operator):
         return _wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
-        return {"groups": jsonable(self.groups), "seed": self.seed}
+        return {"groups": mapping_to_pairs(self.groups), "seed": self.seed}
 
 
 def _band_names(gt: GeoTensor | np.ndarray) -> Sequence[Any]:
@@ -729,7 +741,7 @@ class SunAngleJitter(Operator):
         delta_sza_deg: ScalarOrRange = (-5.0, 5.0),
         seed: int | None = None,
     ) -> None:
-        self.delta_sza_deg = delta_sza_deg
+        self.delta_sza_deg = as_tuple(delta_sza_deg)
         self.seed = seed
 
     def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
@@ -774,7 +786,7 @@ class AtmosphericHaze(Operator):
     def __init__(
         self, intensity: ScalarOrRange = (0.0, 0.05), seed: int | None = None
     ) -> None:
-        self.intensity = intensity
+        self.intensity = as_tuple(intensity)
         self.seed = seed
 
     def _apply(
@@ -835,6 +847,7 @@ class SimulatedClouds(Operator):
     ) -> None:
         if feather < 0:
             raise ValueError("feather must be non-negative.")
+        coverage = as_tuple(coverage)
         _validate_probability_range(coverage, "coverage")
         self.coverage = coverage
         self.feather = feather

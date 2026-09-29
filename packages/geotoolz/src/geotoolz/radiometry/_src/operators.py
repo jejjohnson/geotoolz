@@ -28,7 +28,7 @@ from georeader.reflectance import (
 )
 from pipekit import Operator
 
-from geotoolz._src.config import jsonable
+from geotoolz._src.config import as_tuple, jsonable
 from geotoolz._src.wrap import wrap_like
 from geotoolz.radiometry._src.array import (
     _broadcast_to_band_axis,
@@ -1097,7 +1097,7 @@ class PercentileClip(Operator):
     ) -> None:
         self.p_min = p_min
         self.p_max = p_max
-        self.axis = axis
+        self.axis = as_tuple(axis)
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = percentile_clip(

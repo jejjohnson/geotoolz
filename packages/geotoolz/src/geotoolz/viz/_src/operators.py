@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
 from geotoolz._src.wrap import wrap_like
 from geotoolz.viz._src.array import (
     Color,
@@ -382,8 +383,8 @@ class ApplyDiscreteColormap(Operator):
     Args:
         mapping: ``{class_id: (r, g, b, a)}`` lookup table. The class
             IDs are integers; the RGBA components are floats in
-            ``[0, 1]``. ``get_config()`` stringifies the integer keys
-            so the config is JSON-safe.
+            ``[0, 1]``. Also accepts the ``[[class_id, rgba], ...]``
+            pairs that ``get_config()`` emits.
 
     Examples:
         >>> import geotoolz as gz
@@ -396,8 +397,11 @@ class ApplyDiscreteColormap(Operator):
         >>> rgba = gz.viz.ApplyDiscreteColormap(mapping=cmap)(lulc_gt)
     """
 
-    def __init__(self, *, mapping: Mapping[int, Color]) -> None:
-        self.mapping = {int(k): tuple(v) for k, v in mapping.items()}
+    def __init__(
+        self, *, mapping: Mapping[int, Color] | Sequence[Sequence[Any]]
+    ) -> None:
+        pairs = mapping_from_pairs(mapping) or {}
+        self.mapping = {int(k): tuple(v) for k, v in pairs.items()}
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         return wrap_like(
@@ -407,12 +411,7 @@ class ApplyDiscreteColormap(Operator):
         )
 
     def get_config(self) -> dict[str, Any]:
-        # JSON object keys must be strings; cast int class IDs and
-        # convert Color tuples to lists so the config round-trips
-        # through json / yaml / hydra-zen cleanly.
-        return {
-            "mapping": {str(k): list(v) for k, v in self.mapping.items()},
-        }
+        return {"mapping": mapping_to_pairs(self.mapping)}
 
 
 class Hillshade(Operator):
