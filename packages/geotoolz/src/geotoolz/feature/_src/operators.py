@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import einx
 import geopandas as gpd
@@ -86,6 +86,8 @@ class PeakLocalMax(Operator):
         TypeError: If the input is not a georeferenced GeoTensor.
     """
 
+    _terminal: ClassVar[bool] = True
+
     def __init__(
         self,
         *,
@@ -138,6 +140,8 @@ class _BlobBase(Operator):
     Raises:
         TypeError: If the input is not a georeferenced GeoTensor.
     """
+
+    _terminal: ClassVar[bool] = True
 
     _func: Any
 
@@ -336,6 +340,8 @@ class CornerHarris(Operator):
         TypeError: If the input is not a georeferenced GeoTensor.
     """
 
+    _terminal: ClassVar[bool] = True
+
     def __init__(self, *, min_distance: int = 1, threshold_rel: float = 0.1) -> None:
         self.min_distance = min_distance
         self.threshold_rel = threshold_rel
@@ -371,6 +377,8 @@ class HOG(Operator):
         pixels_per_cell: Cell size in pixels, ``(rows, cols)``.
         cells_per_block: Block size in cells, ``(rows, cols)``.
     """
+
+    _terminal: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -477,6 +485,8 @@ class HoughLines(Operator):
         num_peaks: Maximum number of line peaks to return.
     """
 
+    _terminal: ClassVar[bool] = True
+
     def __init__(self, *, num_peaks: int = 10) -> None:
         self.num_peaks = num_peaks
 
@@ -510,6 +520,8 @@ class HoughCircles(Operator):
     Raises:
         TypeError: If the input is not a georeferenced GeoTensor.
     """
+
+    _terminal: ClassVar[bool] = True
 
     def __init__(self, *, radii: list[int], total_num_peaks: int = 10) -> None:
         self.radii = radii

@@ -164,6 +164,8 @@ class MedianComposite(Operator):
             ``"propagate"`` uses ``np.median``.
         return_count: When true, also return a carrier with the number
             of non-NaN contributors per output pixel.
+            The output is then a tuple, so the operator is terminal
+            (last step only) in a ``Sequential``.
     """
 
     def __init__(
@@ -171,6 +173,11 @@ class MedianComposite(Operator):
     ) -> None:
         self.nan_policy = _validate_nan_policy(nan_policy)
         self.return_count = return_count
+
+    @property
+    def _terminal(self) -> bool:  # ty: ignore[invalid-attribute-override]
+        """A tuple output breaks carrier-in / carrier-out (last step only)."""
+        return self.return_count
 
     def _apply(
         self, frames: Sequence[GeoTensor | np.ndarray]
@@ -208,6 +215,8 @@ class MaxNDVIComposite(Operator):
         nir: NIR band reference, same conventions as ``red``.
         return_index: When true, also return a carrier holding the
             selected frame index per pixel (``int64``).
+            The output is then a tuple, so the operator is terminal
+            (last step only) in a ``Sequential``.
         eps: Stabiliser added to the NDVI denominator.
     """
 
@@ -223,6 +232,11 @@ class MaxNDVIComposite(Operator):
         self.nir = nir
         self.return_index = return_index
         self.eps = eps
+
+    @property
+    def _terminal(self) -> bool:  # ty: ignore[invalid-attribute-override]
+        """A tuple output breaks carrier-in / carrier-out (last step only)."""
+        return self.return_index
 
     def _apply(
         self, frames: Sequence[GeoTensor | np.ndarray]
@@ -298,6 +312,8 @@ class CloudFreeComposite(Operator):
             of clear contributors per pixel (``int64``).
 
     Raises:
+            The output is then a tuple, so the operator is terminal
+            (last step only) in a ``Sequential``.
         ValueError: If ``min_valid`` is below 1.
     """
 
@@ -313,6 +329,11 @@ class CloudFreeComposite(Operator):
         self.nan_policy = _validate_nan_policy(nan_policy)
         self.min_valid = min_valid
         self.return_count = return_count
+
+    @property
+    def _terminal(self) -> bool:  # ty: ignore[invalid-attribute-override]
+        """A tuple output breaks carrier-in / carrier-out (last step only)."""
+        return self.return_count
 
     def _apply(
         self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]]
@@ -348,6 +369,8 @@ class BAPComposite(Operator):
         w_opacity: Weight of the opacity score.
         return_score: When true, also return a carrier holding the
             winning per-pixel score (``float32``).
+            The output is then a tuple, so the operator is terminal
+            (last step only) in a ``Sequential``.
     """
 
     def __init__(
@@ -366,6 +389,11 @@ class BAPComposite(Operator):
         self.w_cloud_distance = w_cloud_distance
         self.w_opacity = w_opacity
         self.return_score = return_score
+
+    @property
+    def _terminal(self) -> bool:  # ty: ignore[invalid-attribute-override]
+        """A tuple output breaks carrier-in / carrier-out (last step only)."""
+        return self.return_score
 
     def _apply(
         self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Mapping[str, Any]]]
@@ -468,10 +496,17 @@ class MinCloudComposite(Operator):
     Args:
         return_count: When true, also return a carrier with the number
             of clear contributors per pixel (``int64``).
+            The output is then a tuple, so the operator is terminal
+            (last step only) in a ``Sequential``.
     """
 
     def __init__(self, *, return_count: bool = False) -> None:
         self.return_count = return_count
+
+    @property
+    def _terminal(self) -> bool:  # ty: ignore[invalid-attribute-override]
+        """A tuple output breaks carrier-in / carrier-out (last step only)."""
+        return self.return_count
 
     def _apply(
         self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]]

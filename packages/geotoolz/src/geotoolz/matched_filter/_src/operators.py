@@ -186,7 +186,9 @@ class MatchedFilterPixel(Operator):
 class MatchedFilterSNR(Operator):
     """Theoretical detection SNR ``amplitude * sqrt(t^T Sigma^-1 t)``.
 
-    Source operator (takes no runtime input): returns the scalar
+    Graph source: computed from its configuration alone. An optional
+    input is accepted and ignored, so it can close a ``Sequential``;
+    it returns the scalar
     matched-filter output SNR for the configured amplitude, background
     covariance, and target.
 
@@ -196,6 +198,8 @@ class MatchedFilterSNR(Operator):
             ``(c, c)`` matrix.
         target: Target signature ``(c,)``.
     """
+
+    _terminal: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -208,7 +212,7 @@ class MatchedFilterSNR(Operator):
         self.cov_op = cov_op
         self.target = target
 
-    def _apply(self) -> float:
+    def _apply(self, _input: Any | None = None) -> float:
         return matched_filter_snr(
             amplitude=self.amplitude, cov_op=self.cov_op, target=self.target
         )
@@ -224,7 +228,9 @@ class MatchedFilterSNR(Operator):
 class DetectionThreshold(Operator):
     """Gaussian false-alarm score threshold.
 
-    Source operator (takes no runtime input): returns the scalar score
+    Graph source: computed from its configuration alone. An optional
+    input is accepted and ignored, so it can close a ``Sequential``;
+    it returns the scalar score
     threshold whose exceedance probability under the Gaussian no-target
     null equals ``false_alarm_rate``.
 
@@ -235,6 +241,8 @@ class DetectionThreshold(Operator):
             ``(c, c)`` matrix.
         target: Target signature ``(c,)``.
     """
+
+    _terminal: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -247,7 +255,7 @@ class DetectionThreshold(Operator):
         self.cov_op = cov_op
         self.target = target
 
-    def _apply(self) -> float:
+    def _apply(self, _input: Any | None = None) -> float:
         return detection_threshold(
             false_alarm_rate=self.false_alarm_rate,
             cov_op=self.cov_op,

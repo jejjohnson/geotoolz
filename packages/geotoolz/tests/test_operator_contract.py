@@ -552,3 +552,95 @@ def test_reloaded_operator_applies_identically(
     np.testing.assert_array_equal(
         np.asarray(clone(make_input())), np.asarray(op(make_input()))
     )
+
+
+#: Operators whose non-carrier output is meant to feed a downstream step:
+#: fan-outs returning a list of carriers, and matched-filter stages that
+#: hand a statistic to the next stage. Not terminal by design.
+INTERMEDIATE_OUTPUTS: dict[str, str] = {
+    "geom._src.operators.SlidingWindow": "fan-out: list of tiles",
+    "geom._src.operators.Tile": "fan-out: list of tiles",
+    "spectral._src.operators.SplitBands": "fan-out: list of bands",
+    "einx._src.operators.PerBandReduce": "per-band statistic vector",
+    "matched_filter._src.operators.AdaptiveWindowBackground": "MF stage",
+    "matched_filter._src.operators.EstimateCovEmpirical": "MF stage",
+    "matched_filter._src.operators.EstimateCovLowRank": "MF stage",
+    "matched_filter._src.operators.EstimateCovShrunk": "MF stage",
+    "matched_filter._src.operators.EstimateMean": "MF stage",
+    "matched_filter._src.operators.GMMClusterBackground": "MF stage",
+    "matched_filter._src.operators.StreamingBackground": "MF stage",
+}
+
+
+def _toy_inputs() -> list[Any]:
+    from _helpers import toy_geotensor
+
+    rng = np.random.default_rng(0)
+    labels = np.zeros((16, 16), dtype=np.int32)
+    labels[2:6, 2:6] = 1
+    return [
+        toy_geotensor(
+            rng.uniform(0.01, 1.0, (3, 16, 16)),
+            attrs={"band_names": ["b0", "b1", "b2"]},
+        ),
+        toy_geotensor(rng.uniform(0.01, 1.0, (16, 16))),
+        toy_geotensor(labels, fill_value_default=0),
+    ]
+
+
+def _is_carrier(value: Any) -> bool:
+    from georeader.geotensor import GeoTensor
+
+    return isinstance(value, GeoTensor) or (
+        isinstance(value, np.ndarray) and value.ndim >= 2
+    )
+
+
+@pytest.mark.parametrize("cls", _params("graph_mode"))
+def test_non_carrier_outputs_are_terminal(cls: type) -> None:
+    """An operator that returns a non-carrier is ``_terminal`` (#142).
+
+    ``Sequential`` then rejects it mid-pipeline at construction instead
+    of failing downstream with an unrelated error. Runs the operator on
+    a few toy scenes; skips when none is a valid input.
+    """
+    op = build(cls)
+    if op._terminal:
+        # Already terminal; also keeps sinks from writing files here.
+        return
+    if _key(cls) in INTERMEDIATE_OUTPUTS or _n_inputs(op) != 1:
+        pytest.skip("intermediate output or not a single-input operator")
+    for scene in _toy_inputs():
+        try:
+            out = op(scene)
+        except Exception:
+            continue
+        if not _is_carrier(out):
+            assert op._terminal, f"returns {type(out).__name__}"
+        return
+    pytest.skip("no toy input is valid for this operator")
+
+
+@pytest.mark.parametrize(
+    ("cls_path", "kwargs"),
+    [
+        ("compositing.MedianComposite", {"return_count": True}),
+        ("compositing.MaxNDVIComposite", {"red": 0, "nir": 1, "return_index": True}),
+        ("compositing.CloudFreeComposite", {"return_count": True}),
+        ("compositing.BAPComposite", {"target_doy": 180, "return_score": True}),
+        ("compositing.MinCloudComposite", {"return_count": True}),
+    ],
+)
+def test_tuple_returning_composites_are_terminal_only_when_flagged(
+    cls_path: str, kwargs: dict[str, Any]
+) -> None:
+    from pipekit import Identity, Sequential
+
+    import geotoolz as gz
+
+    module, name = cls_path.split(".")
+    cls = getattr(getattr(gz, module), name)
+    flag = next(k for k in kwargs if k.startswith("return_"))
+    Sequential([cls(**{**kwargs, flag: False}), Identity()])
+    with pytest.raises(TypeError, match="terminal"):
+        Sequential([cls(**kwargs), Identity()])
