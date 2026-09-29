@@ -17,6 +17,7 @@ hydra-zen ``builds()`` cannot recreate them from ``get_config()``.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
@@ -36,6 +37,7 @@ from skimage.registration import (
 )
 
 from geotoolz._src.blending import normalize_overlap_add, overlap_add
+from geotoolz._src.config import as_tuple
 from geotoolz._src.wrap import wrap_like
 from geotoolz.geom._src.array import (
     center_offsets,
@@ -777,17 +779,13 @@ class Stitch(Operator):
     the tile transforms place each tile on the output grid. Plain-array
     tiles raise ``TypeError``.
 
-    Note:
-        Set ``forbid_in_yaml = True`` when ``target_transform`` is
-        supplied — :class:`affine.Affine` is not JSON-safe. The auto-
-        derived (bbox-union) path round-trips cleanly through hydra-zen.
-
     Args:
         blend: Blend mode (see above). Default ``"average"``.
         feather_width: Pixel ramp width for ``"feather"`` blending.
         target_shape: Optional ``(H, W)`` override for the output grid.
         target_transform: Optional :class:`affine.Affine` override for
-            the output grid origin.
+            the output grid origin, or its first six coefficients
+            ``[a, b, c, d, e, f]`` (the form ``get_config`` emits).
         target_crs: Optional CRS override for the output. Defaults to
             the first tile's CRS.
         fill: Output fill value. ``None`` (default) inherits from the
@@ -809,13 +807,15 @@ class Stitch(Operator):
         blend: str = "average",
         feather_width: int = 16,
         target_shape: tuple[int, int] | None = None,
-        target_transform: Affine | None = None,
+        target_transform: Affine | Sequence[float] | None = None,
         target_crs: str | None = None,
         fill: float | int | None = None,
     ) -> None:
         self.blend = blend
         self.feather_width = feather_width
-        self.target_shape = target_shape
+        self.target_shape = as_tuple(target_shape)
+        if target_transform is not None and not isinstance(target_transform, Affine):
+            target_transform = Affine(*target_transform[:6])
         self.target_transform = target_transform
         self.target_crs = target_crs
         self.fill = fill
@@ -1220,12 +1220,14 @@ class SegmentStitch(Operator):
     Args:
         axis: ``"scan"`` / ``"y"`` for along-track, or ``"sample"`` /
             ``"x"`` for cross-track.
-        fill: Value used for missing segments.
+        fill: Value used for missing segments. ``None`` (default) means
+            ``NaN``; a ``NaN`` argument is stored as ``None`` so the config
+            stays strict JSON.
     """
 
-    def __init__(self, *, axis: str = "scan", fill: float = np.nan) -> None:
+    def __init__(self, *, axis: str = "scan", fill: float | None = None) -> None:
         self.axis = axis
-        self.fill = fill
+        self.fill = None if fill is None or np.isnan(fill) else fill
 
     def _apply(self, segments: list[GeoTensor]) -> GeoTensor:
         if not segments:
@@ -1256,7 +1258,8 @@ class SegmentStitch(Operator):
         # Choose a fill that is representable in the segment dtype: integer
         # tensors cannot hold NaN, so fall back to the first segment's own
         # fill (or zero) when the requested fill is non-finite.
-        segment_fill = _coerce_segment_fill(self.fill, first)
+        fill = np.nan if self.fill is None else self.fill
+        segment_fill = _coerce_segment_fill(fill, first)
         pieces: list[np.ndarray] = []
         segment_shape = first.shape
         for index in range(n_segments):

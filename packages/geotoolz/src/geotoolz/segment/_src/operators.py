@@ -21,6 +21,7 @@ from skimage.segmentation import (
     watershed,
 )
 
+from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
 from geotoolz._src.shape import single_band
 from geotoolz._src.wrap import wrap_like
 
@@ -634,8 +635,10 @@ class MergeNearbyInstances(Operator):
         distance_threshold: Maximum edge-to-edge bbox distance (pixels).
         iou_threshold_min: Lower (exclusive) bound on box IoU.
         iou_threshold_max: Upper (exclusive) bound on box IoU.
-        classes: Optional ``{instance_label: class_id}`` mapping; when
-            provided, only same-class pairs are eligible to merge.
+        classes: Optional ``{instance_label: class_id}`` mapping (or the
+            ``[[instance_label, class_id], ...]`` pairs ``get_config``
+            emits); when provided, only same-class pairs are eligible to
+            merge.
         start_label: Starting integer label for the relabeled output.
 
     Accepts a single-band ``GeoTensor`` or a plain ``np.ndarray`` label
@@ -648,7 +651,7 @@ class MergeNearbyInstances(Operator):
         distance_threshold: float = 40.0,
         iou_threshold_min: float = 0.01,
         iou_threshold_max: float = 0.65,
-        classes: Mapping[int, int] | None = None,
+        classes: Mapping[int, int] | list[list[int]] | None = None,
         start_label: int = 1,
     ) -> None:
         if distance_threshold < 0:
@@ -660,7 +663,7 @@ class MergeNearbyInstances(Operator):
         self.distance_threshold = float(distance_threshold)
         self.iou_threshold_min = float(iou_threshold_min)
         self.iou_threshold_max = float(iou_threshold_max)
-        self.classes = None if classes is None else dict(classes)
+        self.classes = mapping_from_pairs(classes)
         self.start_label = int(start_label)
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
@@ -680,7 +683,7 @@ class MergeNearbyInstances(Operator):
             "distance_threshold": self.distance_threshold,
             "iou_threshold_min": self.iou_threshold_min,
             "iou_threshold_max": self.iou_threshold_max,
-            "classes": None if self.classes is None else dict(self.classes),
+            "classes": mapping_to_pairs(self.classes),
             "start_label": self.start_label,
         }
 

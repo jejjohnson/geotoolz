@@ -30,6 +30,7 @@ from skimage.transform import (
     hough_line_peaks,
 )
 
+from geotoolz._src.config import as_tuple
 from geotoolz._src.shape import single_band
 from geotoolz._src.wrap import wrap_like
 
@@ -404,8 +405,8 @@ class HOG(Operator):
         cells_per_block: tuple[int, int] = (3, 3),
     ) -> None:
         self.orientations = orientations
-        self.pixels_per_cell = pixels_per_cell
-        self.cells_per_block = cells_per_block
+        self.pixels_per_cell = as_tuple(pixels_per_cell)
+        self.cells_per_block = as_tuple(cells_per_block)
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
         return hog(

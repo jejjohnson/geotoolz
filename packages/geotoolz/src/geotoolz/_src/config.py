@@ -11,6 +11,7 @@ replacing the per-module ``_jsonable`` / ``_to_jsonable`` /
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime
 from pathlib import PurePath
 from typing import Any
@@ -18,7 +19,7 @@ from typing import Any
 import numpy as np
 
 
-__all__ = ["jsonable"]
+__all__ = ["as_tuple", "jsonable", "mapping_from_pairs", "mapping_to_pairs"]
 
 
 def jsonable(value: Any) -> Any:
@@ -48,3 +49,74 @@ def jsonable(value: Any) -> Any:
     if isinstance(value, PurePath):
         return str(value)
     return value
+
+
+def as_tuple(value: Any) -> Any:
+    """Normalise a list or tuple constructor argument to a tuple.
+
+    JSON and YAML have no tuple type, so a config reloaded through
+    ``Operator.from_state`` hands the constructor a list where a tuple
+    was emitted. Constructors call this on tuple-typed parameters so the
+    reloaded operator is identical; scalars and ``None`` pass through.
+
+    Args:
+        value: The constructor argument.
+
+    Returns:
+        ``tuple(value)`` for a non-string sequence (list, tuple, OmegaConf
+        ``ListConfig``), otherwise ``value``.
+    """
+    if _is_sequence(value):
+        return tuple(value)
+    return value
+
+
+def _is_sequence(value: Any) -> bool:
+    return isinstance(value, Sequence) and not isinstance(value, str | bytes)
+
+
+def mapping_to_pairs(mapping: Mapping[Any, Any] | None) -> list[list[Any]] | None:
+    """Emit a mapping config value as ``[[key, value], ...]``.
+
+    ``Operator.from_state`` rejects dict config values (they are reserved
+    for nested-operator payloads) and JSON would stringify non-string
+    keys, so mapping-valued parameters are emitted as a list of pairs.
+    Constructors accept that form back through :func:`mapping_from_pairs`.
+
+    Args:
+        mapping: The mapping to emit, or ``None``.
+
+    Returns:
+        A JSON-safe list of ``[key, value]`` pairs, or ``None``.
+    """
+    if mapping is None:
+        return None
+    return [[jsonable(k), jsonable(v)] for k, v in mapping.items()]
+
+
+def mapping_from_pairs(
+    value: Mapping[Any, Any] | Iterable[Any] | None,
+) -> dict[Any, Any] | None:
+    """Accept a mapping or its ``[[key, value], ...]`` config form.
+
+    Args:
+        value: A mapping, an iterable of ``(key, value)`` pairs as emitted
+            by :func:`mapping_to_pairs`, or ``None``.
+
+    Returns:
+        A ``dict`` (list-valued keys become tuples), or ``None``.
+
+    Raises:
+        ValueError: if an item of the iterable form is not a pair.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return dict(value)
+    out: dict[Any, Any] = {}
+    for item in value:
+        if not _is_sequence(item) or len(item) != 2:
+            raise ValueError(f"expected a mapping or [key, value] pairs; got {item!r}")
+        key, val = item
+        out[as_tuple(key)] = val
+    return out

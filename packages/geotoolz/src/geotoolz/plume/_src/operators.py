@@ -33,6 +33,7 @@ from shapely.geometry import LineString, shape
 from shapely.ops import unary_union
 from skimage.measure import regionprops_table
 
+from geotoolz._src.config import as_tuple
 from geotoolz._src.wrap import wrap_like
 from geotoolz.plume._src.array import (
     ColumnUnit,
@@ -526,7 +527,7 @@ class WindAdvectionCone(Operator):
         max_distance: float = 5000.0,
         crs: str | None = None,
     ) -> None:
-        self.source = source
+        self.source = as_tuple(source)
         self.wind_u = wind_u
         self.wind_v = wind_v
         self.half_angle_deg = half_angle_deg
@@ -752,7 +753,7 @@ class CrossSectionalFlux(Operator):
         transect_spacing_m: float = 100.0,
     ) -> None:
         self.plume_mask = plume_mask
-        self.source = source
+        self.source = as_tuple(source)
         self.wind_u = wind_u
         self.wind_v = wind_v
         self.n_transects = n_transects
