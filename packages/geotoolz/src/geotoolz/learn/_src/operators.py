@@ -35,7 +35,7 @@ class SklearnOp(Operator):
     accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns a
     matching carrier whenever the estimator output preserves the input's
     spatial ``(H, W)`` layout; sample-only outputs (and
-    ``nan_transform="drop"`` with NaN rows) come back as bare ndarrays.
+    ``nan_transform="drop"`` with invalid rows) come back as bare ndarrays.
 
     Args:
         estimator: scikit-learn-compatible object to wrap.
@@ -48,6 +48,15 @@ class SklearnOp(Operator):
         nan_fit: NaN strategy used while fitting.
         nan_transform: NaN strategy used while applying the estimator.
         state_path: Optional joblib path to load immediately.
+        out_band_names: Names of the output bands, written to
+            ``attrs["band_names"]`` of GeoTensor outputs (must match the
+            output band count). ``None`` keeps the input's band keys when
+            the band count is unchanged and drops them otherwise.
+        label_fill_value: Fill value of integer outputs such as
+            cluster-label maps (default ``-1``). Float outputs always use
+            ``NaN``. See :class:`GeoTensorEstimator` for the nodata rules
+            (fill pixels of the input are excluded from fits and come back
+            as the output fill).
 
     Examples:
         >>> from sklearn.decomposition import PCA
@@ -73,6 +82,7 @@ class SklearnOp(Operator):
         impute_iterative_max_iter: int = 10,
         state_path: str | Path | None = None,
         out_band_names: list[str] | None = None,
+        label_fill_value: int = -1,
     ) -> None:
         _validate_fit_mode(fit_mode)
         resolved_task = _resolve_task(estimator, task)
@@ -102,6 +112,7 @@ class SklearnOp(Operator):
         self.impute_iterative_max_iter = impute_iterative_max_iter
         self.state_path = None if state_path is None else str(state_path)
         self.out_band_names = out_band_names
+        self.label_fill_value = label_fill_value
         self._task = resolved_task
         self._geo_estimator = GeoTensorEstimator(
             estimator,
@@ -113,6 +124,8 @@ class SklearnOp(Operator):
             impute_simple_strategy=impute_simple_strategy,
             impute_knn_n_neighbors=impute_knn_n_neighbors,
             impute_iterative_max_iter=impute_iterative_max_iter,
+            out_band_names=out_band_names,
+            label_fill_value=label_fill_value,
         )
         if state_path is not None:
             self.load_state(state_path)
@@ -175,6 +188,7 @@ class SklearnOp(Operator):
             "impute_iterative_max_iter": self.impute_iterative_max_iter,
             "state_path": self.state_path,
             "out_band_names": self.out_band_names,
+            "label_fill_value": self.label_fill_value,
         }
 
 

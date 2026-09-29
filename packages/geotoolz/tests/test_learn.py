@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
+from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
 from sklearn.cluster import KMeans as SKKMeans
 from sklearn.decomposition import PCA, IncrementalPCA
@@ -271,3 +271,176 @@ def test_plain_ndarray_in_plain_ndarray_out(
     fitted_on_array = make_op()(arr.copy())  # fitting from an ndarray works too
     assert type(fitted_on_array) is np.ndarray
     assert fitted_on_array.shape == from_arr.shape
+
+
+# --- #112 metadata / nodata hygiene (#145-#148) -------------------------------
+
+
+def test_2d_input_returns_channel_first_geotensor() -> None:
+    """A single-band ``(H, W)`` raster maps to ``(k, H, W)``, not ``(H, W, k)``."""
+    rng = np.random.default_rng(0)
+    scene = _gt(rng.normal(size=(4, 5)))
+
+    out = gz.learn.SklearnOp(PCA(n_components=1), task="transform")(scene)
+
+    assert isinstance(out, GeoTensor)
+    assert out.shape == (1, 4, 5)
+    assert out.transform == scene.transform
+
+    from_arr = gz.learn.SklearnOp(StandardScaler(), task="transform")(np.asarray(scene))
+    assert type(from_arr) is np.ndarray
+    assert from_arr.shape == (1, 4, 5)
+
+
+def test_out_band_names_applied() -> None:
+    """``out_band_names`` names the output bands on fresh attrs (#148)."""
+    rng = np.random.default_rng(0)
+    scene = toy_geotensor(
+        rng.normal(size=(3, 4, 5)),
+        fill_value_default=np.nan,
+        attrs={"band_names": ["b1", "b2", "b3"], "wavelengths": [1.0, 2.0, 3.0]},
+    )
+
+    out = gz.learn.PCA(PCA(n_components=2), out_band_names=["pc1", "pc2"])(scene)
+
+    assert out.shape == (2, 4, 5)
+    assert out.attrs["band_names"] == ["pc1", "pc2"]
+    assert "wavelengths" not in out.attrs
+    assert out.attrs is not scene.attrs
+    assert scene.attrs["band_names"] == ["b1", "b2", "b3"]
+
+    labels = gz.learn.KMeans(
+        SKKMeans(n_clusters=2, n_init=1, random_state=0), out_band_names=["cluster"]
+    )(scene)
+    assert labels.attrs["band_names"] == ["cluster"]
+
+    with pytest.raises(ValueError, match="band_names"):
+        gz.learn.PCA(PCA(n_components=2), out_band_names=["only_one"])(scene)
+
+
+def test_partial_fit_imputer_created_once() -> None:
+    """Streaming ``partial_fit`` fits the imputer on the first batch only (#148)."""
+    rng = np.random.default_rng(0)
+    first = rng.normal(size=(2, 4, 5))
+    first[0, 0, 0] = np.nan
+    second = rng.normal(loc=100.0, size=(2, 4, 5))
+    second[0, 1, 1] = np.nan
+
+    est = gz.GeoTensorEstimator(
+        IncrementalPCA(n_components=1),
+        nan_fit="impute_simple",
+        nan_transform="impute_simple",
+    )
+    est.partial_fit(_gt(first))
+    imputer = est.imputer
+    assert imputer is not None
+    stats = imputer.statistics_.copy()
+    est.partial_fit(_gt(second))
+
+    assert est.imputer is imputer
+    np.testing.assert_array_equal(imputer.statistics_, stats)
+
+    # ``fit`` starts over and refits the imputer on its own input.
+    est.fit(_gt(second))
+    assert est.imputer is not imputer
+
+
+def test_fill_pixels_are_excluded() -> None:
+    """Numeric fill pixels never enter a fit and come back as nodata (#145, #146)."""
+    rng = np.random.default_rng(0)
+    arr = rng.normal(size=(2, 4, 5))
+    scene = toy_geotensor(arr, fill_value_default=-9999, with_fill_pixels=True)
+    fill = fill_pixel_mask(scene.shape)
+
+    op = gz.learn.SklearnOp(StandardScaler(), task="transform", nan_fit="drop")
+    out = op(scene)
+
+    scaler = op._geo_estimator.estimator
+    np.testing.assert_allclose(scaler.mean_, arr[:, ~fill].mean(axis=1))
+    assert op._geo_estimator.fit_n_samples == int((~fill).sum())
+    assert np.isnan(out.fill_value_default)
+    assert np.isnan(np.asarray(out)[:, fill]).all()
+    assert np.isfinite(np.asarray(out)[:, ~fill]).all()
+
+
+def test_kmeans_labels_are_integer_with_minus_one_fill() -> None:
+    """Label maps stay integer; nodata pixels hold the ``-1`` label fill (#146)."""
+    rng = np.random.default_rng(0)
+    arr = rng.normal(size=(2, 4, 5))
+    arr[:, :, 2:] += 10
+    scene = toy_geotensor(arr, fill_value_default=-9999, with_fill_pixels=True)
+    fill = fill_pixel_mask(scene.shape)
+
+    out = gz.learn.KMeans(SKKMeans(n_clusters=2, n_init=1, random_state=0))(scene)
+
+    assert out.shape == (4, 5)
+    assert np.asarray(out).dtype.kind == "i"
+    assert out.fill_value_default == -1
+    assert (np.asarray(out)[fill] == -1).all()
+    assert set(np.asarray(out)[~fill].tolist()) == {0, 1}
+    np.testing.assert_array_equal(np.asarray(out.validmask()), ~fill)
+
+    clean = gz.learn.KMeans(
+        SKKMeans(n_clusters=2, n_init=1, random_state=0), label_fill_value=-99
+    )(toy_geotensor(arr, fill_value_default=-9999))
+    assert np.asarray(clean).dtype.kind == "i"
+    assert clean.fill_value_default == -99
+
+
+def test_gmm_probabilities_use_nan_fill() -> None:
+    """Probability maps mark nodata with NaN, never an ambiguous ``0`` (#146)."""
+    from sklearn.mixture import GaussianMixture
+
+    rng = np.random.default_rng(0)
+    arr = rng.normal(size=(2, 4, 5))
+    arr[:, :, 2:] += 10
+    scene = toy_geotensor(arr, fill_value_default=0, with_fill_pixels=True)
+    fill = fill_pixel_mask(scene.shape)
+
+    out = gz.learn.GMM(GaussianMixture(n_components=2, random_state=0))(scene)
+
+    assert out.shape == (2, 4, 5)
+    assert np.isnan(out.fill_value_default)
+    assert np.isnan(np.asarray(out)[:, fill]).all()
+    np.testing.assert_allclose(np.asarray(out)[:, ~fill].sum(axis=0), 1.0)
+
+
+def test_4d_time_stack() -> None:
+    """``(T, C, H, W)`` stacks: per-frame fills, band axis at ``-3`` (#147)."""
+    rng = np.random.default_rng(0)
+    arr = rng.normal(size=(2, 3, 4, 5))
+    arr[1, :, 2, 3] = -9999  # nodata in one frame only
+    scene = toy_geotensor(arr, fill_value_default=-9999)
+
+    per_frame = gz.learn.SklearnOp(
+        PCA(n_components=2),
+        mode="pixel_time",
+        task="transform",
+        out_band_names=["pc1", "pc2"],
+    )(scene)
+    assert isinstance(per_frame, GeoTensor)
+    assert per_frame.shape == (2, 2, 4, 5)
+    assert per_frame.attrs["band_names"] == ["pc1", "pc2"]
+    assert np.isnan(np.asarray(per_frame)[1, :, 2, 3]).all()
+    assert np.isfinite(np.asarray(per_frame)[0]).all()
+
+    stacked = gz.learn.PCA(PCA(n_components=2))(scene)
+    assert stacked.shape == (2, 4, 5)
+    assert np.isnan(np.asarray(stacked)[:, 2, 3]).all()
+
+
+@pytest.mark.parametrize(
+    ("mode", "shape", "match"),
+    [
+        ("pixel_time", (3, 4, 5), r"pixel_time.*4-D"),
+        ("temporal", (4, 5), r"temporal.*T"),
+        ("pixel", (5,), r"at least 2.*got a 1-D"),
+    ],
+)
+def test_rank_errors_name_mode_and_shape(
+    mode: str, shape: tuple[int, ...], match: str
+) -> None:
+    """Modes that need a time axis reject lower-rank input up front (#147)."""
+    est = gz.GeoTensorEstimator(StandardScaler(), mode=mode)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match=match):
+        est.fit(np.ones(shape))
