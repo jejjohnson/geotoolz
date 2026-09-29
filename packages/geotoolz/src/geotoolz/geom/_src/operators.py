@@ -336,8 +336,11 @@ class PhaseAlign(Operator):
 
     The registration math is pixel-space, so plain ``np.ndarray`` inputs
     are supported: they come back as plain shifted arrays. For
-    ``GeoTensor`` input the affine transform is additionally translated
-    to compensate for the detected displacement.
+    ``GeoTensor`` input the shifted array keeps the input's affine
+    transform (which must share the reference's grid), so a feature at
+    pixel ``(r, c)`` of the output sits at the same world coordinate as
+    pixel ``(r, c)`` of the reference. Edge pixels uncovered by the
+    shift are filled from the nearest valid pixel.
 
     Args:
         reference: The fixed scene the input is registered against.
@@ -374,6 +377,11 @@ class PhaseAlign(Operator):
         self, gt: GeoTensor | np.ndarray
     ) -> GeoTensor | np.ndarray | tuple[float, float, float]:
         arr = np.asarray(gt)
+        if arr.ndim not in (2, 3):
+            raise ValueError(
+                "PhaseAlign expects a (H, W) or (C, H, W) input; "
+                f"got ndim={arr.ndim} with shape {arr.shape}."
+            )
         ref_band = _registration_band(np.asarray(self.reference), self.band)
         mov_band = _registration_band(arr, self.band)
         if ref_band.shape != mov_band.shape:
@@ -397,16 +405,10 @@ class PhaseAlign(Operator):
             order=1,
             mode="nearest",
         )
-        transform = getattr(gt, "transform", None)
-        if transform is None:
-            return np.asarray(shifted)
-        return GeoTensor(
-            shifted,
-            transform=transform * Affine.translation(-shift_x, -shift_y),
-            crs=gt.crs,
-            fill_value_default=gt.fill_value_default,
-            attrs=gt.attrs,
-        )
+        # The array shift already moves the content onto the reference
+        # grid; keep the original transform (translating it as well would
+        # cancel the alignment in world coordinates, #118).
+        return wrap_like(gt, np.asarray(shifted))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1296,7 +1298,8 @@ class GeostationaryParallaxCorrect(Operator):
 
     A spherical Earth ray-intersection model is used: for each output ground
     pixel, the operator finds where an elevated target would appear to a
-    geostationary satellite and samples the input there. ``target_height_m=0``
+    geostationary satellite and samples the input there, treating each
+    input value as located at its pixel centre. ``target_height_m=0``
     is an exact identity. Off-limb pixels (whose viewing ray misses the Earth
     sphere) are filled with ``gt.fill_value_default``.
 
@@ -1349,10 +1352,13 @@ class GeostationaryParallaxCorrect(Operator):
         )
         inv = ~gt.transform
         src_cols, src_rows = inv * (apparent_lon, apparent_lat)
+        # ``~transform`` yields continuous pixel coordinates in which pixel
+        # ``(r, c)`` is centred at ``(r + 0.5, c + 0.5)``; the samplers index
+        # ``arr[r]`` at coordinate ``r``, so shift to centre-indexed space.
         sampled = _sample_array(
             np.asarray(gt),
-            src_rows,
-            src_cols,
+            np.asarray(src_rows) - 0.5,
+            np.asarray(src_cols) - 0.5,
             method=self.method,
             fill=gt.fill_value_default,
         )
@@ -1871,15 +1877,23 @@ def _sample_bilinear(
     fill: float | int | None,
 ) -> np.ndarray:
     height, width = arr.shape[-2:]
+    # ``rows`` / ``cols`` are centre-indexed: ``arr[r]`` sits at coordinate
+    # ``r`` and pixel ``r`` covers ``[r - 0.5, r + 0.5]``. A sample is valid
+    # whenever it lies inside that raster footprint; in the outer half-pixel
+    # ring (between the edge centres and the footprint boundary) the
+    # coordinate is clamped to the edge centre, returning the edge value.
+    valid = (
+        (rows >= -0.5) & (rows <= height - 0.5) & (cols >= -0.5) & (cols <= width - 0.5)
+    )
+    rows = np.clip(rows, 0, height - 1)
+    cols = np.clip(cols, 0, width - 1)
     row0 = np.floor(rows).astype(int)
     col0 = np.floor(cols).astype(int)
     row1 = row0 + 1
     col1 = col0 + 1
-    # A sample is valid whenever the source coordinate lies inside the raster
-    # footprint, including the trailing row/column. Clamping the upper
-    # neighbour below keeps the bilinear formula well defined at the edge —
-    # its weight is zero there, so the edge value is returned exactly.
-    valid = (rows >= 0) & (rows <= height - 1) & (cols >= 0) & (cols <= width - 1)
+    # Clamping the upper neighbour below keeps the bilinear formula well
+    # defined at the trailing edge — its weight is zero there, so the edge
+    # value is returned exactly.
     safe_row0 = np.clip(row0, 0, height - 1)
     safe_row1 = np.clip(row1, 0, height - 1)
     safe_col0 = np.clip(col0, 0, width - 1)

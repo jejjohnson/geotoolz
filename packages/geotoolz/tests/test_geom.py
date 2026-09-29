@@ -559,24 +559,50 @@ def test_geostationary_parallax_zero_height_is_identity() -> None:
     assert out.transform == gt.transform
 
 
-def test_geostationary_parallax_moves_elevated_point_toward_nadir() -> None:
-    values = np.zeros((1, 9, 9), dtype=np.float32)
-    values[0, 5, 5] = 1.0
+@pytest.mark.parametrize("method", ["nearest", "bilinear"])
+def test_parallax_near_identity_small_height(method: str) -> None:
+    # A 1 mm target height displaces the apparent position by far less than
+    # a pixel, so sampling at pixel centres must reproduce the input (#119).
+    values = np.arange(6 * 8, dtype=np.float64).reshape(1, 6, 8)
     gt = GeoTensor(
         values,
-        transform=Affine(0.25, 0, -76.0, 0, -0.25, 1.0),
+        transform=Affine(0.1, 0, -75.4, 0, -0.1, 0.3),
+        crs="EPSG:4326",
+        fill_value_default=np.nan,
+    )
+
+    out = gz.geom.GeostationaryParallaxCorrect(
+        satellite_lon_deg=-75.0,
+        target_height_m=1e-3,
+        method=method,
+    )(gt)
+
+    arr = np.asarray(out)
+    assert not np.isnan(arr).any()
+    np.testing.assert_allclose(arr, values, atol=1e-6)
+
+
+def test_geostationary_parallax_moves_elevated_point_toward_nadir() -> None:
+    # Grid centred on (30N, 75W), due north of the GOES-East sub-satellite
+    # point. A 40 km target is displaced ~0.25 deg (2 pixels) poleward in
+    # the apparent view, so correction moves it 2 rows south, toward nadir.
+    values = np.zeros((1, 9, 9), dtype=np.float32)
+    values[0, 2, 4] = 1.0
+    gt = GeoTensor(
+        values,
+        transform=Affine(0.125, 0, -75.5625, 0, -0.125, 30.5625),
         crs="EPSG:4326",
         fill_value_default=0.0,
     )
 
     out = gz.geom.GeostationaryParallaxCorrect(
         satellite_lon_deg=-75.0,
-        target_height_m=400_000.0,
+        target_height_m=40_000.0,
         method="nearest",
     )(gt)
 
     assert np.asarray(out)[0, 4, 4] == 1.0
-    assert np.asarray(out)[0, 5, 5] == 0.0
+    assert np.asarray(out)[0, 2, 4] == 0.0
     assert out.transform == gt.transform
     assert str(out.crs) == str(gt.crs)
 
@@ -1095,14 +1121,46 @@ def test_phase_align_returns_shift_when_apply_false() -> None:
     assert error >= 0.0
 
 
-def test_phase_align_apply_updates_transform_and_preserves_metadata() -> None:
+def test_phase_align_apply_keeps_transform_and_preserves_metadata() -> None:
     reference, moving, _dy, _dx = _registration_pair()
+    moving.attrs = {"sensor": "test"}
     aligned = gz.geom.PhaseAlign(reference=reference, apply=True)(moving)
     assert isinstance(aligned, GeoTensor)
     assert aligned.shape == moving.shape
     assert str(aligned.crs) == str(moving.crs)
-    # Transform must shift to compensate for the detected displacement.
-    assert aligned.transform != moving.transform
+    assert aligned.fill_value_default == moving.fill_value_default
+    assert aligned.attrs == moving.attrs
+    # The array shift carries the alignment; the grid is unchanged (#118).
+    assert aligned.transform == moving.transform
+
+
+def test_phase_align_world_coordinates_match_reference() -> None:
+    reference, moving, _dy, _dx = _registration_pair()
+    aligned = gz.geom.PhaseAlign(reference=reference, apply=True)(moving)
+
+    def peak_world(gt: GeoTensor) -> tuple[float, float]:
+        row, col = np.unravel_index(np.argmax(np.asarray(gt)[0]), gt.shape[-2:])
+        return gt.transform * (col + 0.5, row + 0.5)
+
+    ref_x, ref_y = peak_world(reference)
+    mov_x, mov_y = peak_world(moving)
+    out_x, out_y = peak_world(aligned)
+    # Sanity: the moving scene's peak is displaced before alignment.
+    assert (mov_x, mov_y) != pytest.approx((ref_x, ref_y))
+    assert (out_x, out_y) == pytest.approx((ref_x, ref_y))
+    # Interior pixels (away from the edge-filled border) match exactly.
+    np.testing.assert_allclose(
+        np.asarray(aligned)[0, 4:-4, 4:-4],
+        np.asarray(reference)[0, 4:-4, 4:-4],
+        atol=1e-5,
+    )
+
+
+def test_phase_align_rejects_unsupported_ndim() -> None:
+    reference, moving, _dy, _dx = _registration_pair()
+    four_d = np.asarray(moving)[None, ...]
+    with pytest.raises(ValueError, match="ndim=4"):
+        gz.geom.PhaseAlign(reference=reference)(four_d)
 
 
 def test_phase_align_rejects_mismatched_shapes() -> None:
