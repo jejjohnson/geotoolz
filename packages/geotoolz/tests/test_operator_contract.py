@@ -777,12 +777,7 @@ def _takes_sequence(op: Operator) -> bool:
 
 #: Strict xfails for ``test_output_attrs_are_fresh_and_consistent``, owned by
 #: later branches of the #112 stack.
-ATTRS_KNOWN_FAILURES: dict[str, Known] = {
-    "einx._src.operators.SpatialPool": (
-        "#149: einx outputs alias the input attrs (owned by the einx branch)",
-        AssertionError,
-    ),
-}
+ATTRS_KNOWN_FAILURES: dict[str, Known] = {}
 
 
 def _attrs_params() -> list[Any]:
@@ -840,12 +835,7 @@ GAP_FILLERS: frozenset[str] = frozenset(
 
 #: Strict xfails for ``test_output_fill_matches_dtype``, owned by later
 #: branches of the #112 stack.
-FILL_KNOWN_FAILURES: dict[str, Known] = {
-    "einx._src.operators.SpatialPool": (
-        "#149: einx reductions inherit the input fill (owned by the einx branch)",
-        AssertionError,
-    ),
-}
+FILL_KNOWN_FAILURES: dict[str, Known] = {}
 
 
 def _fill_params() -> list[Any]:
@@ -1015,19 +1005,10 @@ STACK_AS_FEATURES: frozenset[str] = frozenset(
         "learn._src.operators.SklearnOp",
     }
 )
-_EINX_4D: Known = (
-    "#149: einx presets raise einx RankError on 4-D input (owned by the einx branch)",
-    AssertionError,
-)
 
 #: Strict xfails for the 4-D contract, owned by later branches of the #112
 #: stack.
-TIME_STACK_KNOWN_FAILURES: dict[str, Known] = {
-    **{
-        f"einx._src.operators.{name}": _EINX_4D
-        for name in ("CHWtoHWC", "Einx", "HWCtoCHW", "PerBandReduce", "SpatialPool")
-    },
-}
+TIME_STACK_KNOWN_FAILURES: dict[str, Known] = {}
 
 
 def _time_stack_params() -> list[Any]:
@@ -1119,9 +1100,16 @@ def _assert_matches_frames(key: str, out: Any, expected: list[Any]) -> None:
             _assert_matches_frames(key, piece, [e[t] for e in expected])
         return
     if isinstance(expected[0], np.ndarray):
-        # Stack-level statistics (a mean spectrum, a covariance) pool the
-        # frames: same shape as one frame's statistic.
-        assert np.shape(out) == expected[0].shape
+        # Stack-level statistics (a mean spectrum, a covariance) either pool
+        # the frames -- same shape as one frame's statistic -- or keep one
+        # statistic per frame, which must then equal the per-frame results.
+        if np.shape(out) == expected[0].shape:
+            return
+        np.testing.assert_allclose(
+            np.asarray(out, dtype=np.float64),
+            np.stack(expected).astype(np.float64),
+            equal_nan=True,
+        )
 
 
 @pytest.mark.parametrize("cls", _time_stack_params())
