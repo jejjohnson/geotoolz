@@ -22,7 +22,7 @@ geotoolz-catalog = { workspace = true }
 # monorepo. Pull it from GitHub until the first PyPI release lands; the
 # published wheel metadata still carries the PyPI-flavoured `pipekit>=…`
 # requirement from each member's [project] table.
-pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit" }
+pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" }  # pipekit-v0.0.2
 
 [build-system]
 requires = ["hatchling"]

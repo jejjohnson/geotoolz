@@ -1339,7 +1339,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "obstore", marker = "extra == 'obstore'", specifier = ">=0.9.5" },
     { name = "pandas", specifier = ">=2.1" },
-    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit" },
+    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" },
     { name = "pyhdf", marker = "extra == 'hdf4'", specifier = ">=0.11.4" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "scikit-image", specifier = ">=0.25" },
@@ -1373,7 +1373,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-catalog"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/geotoolz-catalog" }
 dependencies = [
     { name = "cyclopts" },
@@ -1726,7 +1726,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "obstore", marker = "extra == 'obstore-cog'", specifier = ">=0.9.5" },
     { name = "obstore", marker = "extra == 'patch-full'", specifier = ">=0.9.5" },
-    { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit" },
+    { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "pyproj", marker = "extra == 'obstore-cog'", specifier = ">=3.6" },
     { name = "pyproj", marker = "extra == 'patch-full'", specifier = ">=3.6" },
@@ -3604,8 +3604,8 @@ wheels = [
 
 [[package]]
 name = "pipekit"
-version = "0.0.1"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit#6340234241589ffdef1f3ffdf99c61b56c624ef5" }
+version = "0.0.2"
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=ef3c17f85678dbcdd739f27ef75a0eaab6d5163f#ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" }
 
 [[package]]
 name = "planetary-computer"

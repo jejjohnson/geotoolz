@@ -238,3 +238,18 @@ Note that `make format` **mutates files** — it formats and applies autofixes. 
 Pre-commit hooks run ruff on every commit. Run `make precommit` to apply them to all files manually.
 
 Commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/) specification — enforced on PR titles by `.github/workflows/conventional-commits.yml`.
+
+---
+
+## Bumping the pipekit pin
+
+`pipekit` is pulled from GitHub (not PyPI) and pinned to a commit in the root
+`pyproject.toml` under `[tool.uv.sources]`, so the `Operator` contract geotoolz
+is written against is the one that is installed and tested. To move it:
+
+1. Pick the commit of a pipekit release tag (`git rev-list -n1 pipekit-vX.Y.Z`
+   in a pipekit clone) and set it as `rev = "<sha>"`, updating the trailing
+   `# pipekit-vX.Y.Z` comment.
+2. Raise the `pipekit>=X.Y.Z` floor in `packages/geotoolz/pyproject.toml` and
+   `packages/geotoolz-patcher/pyproject.toml` if the new release is required.
+3. Run `uv lock --upgrade-package pipekit`, then the full pre-commit checklist.

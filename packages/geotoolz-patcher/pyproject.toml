@@ -74,7 +74,7 @@ patch-full = [
 # `geopatcher.integrations.pipekit` (GridSampler / ApplyToChips / Stitch).
 # The patcher core stays framework-free; only this integration module
 # imports `pipekit.Operator`.
-pipekit = ["pipekit>=0.0.1"]
+pipekit = ["pipekit>=0.0.2"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
