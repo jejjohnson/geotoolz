@@ -293,12 +293,27 @@ class Canny(Operator):
     ``np.ndarray`` and returns a boolean edge map in the same carrier
     kind.
 
+    The input is handed to skimage in its own dtype, so the result is
+    identical to ``skimage.feature.canny`` on the same array. skimage
+    rescales the image with ``img_as_float`` internally, which makes the
+    threshold units dtype-dependent:
+
+    * integer input (e.g. ``uint16`` DN): explicit thresholds are in
+      input units (DN), and the ``None`` defaults are 10 % / 20 % of the
+      dtype maximum (``6553.5`` / ``13107`` for ``uint16``);
+    * float input: thresholds are absolute gradient magnitudes and the
+      ``None`` defaults are ``0.1`` / ``0.2`` — sensible for ``[0, 1]``
+      reflectance, too low for unscaled float DN.
+
+    ``int64`` / ``uint64`` input, which skimage rejects, is cast to
+    ``float64`` first and so follows the float convention.
+
     Args:
         sigma: Width of the Gaussian smoothing kernel, in pixels.
-        low_threshold: Lower hysteresis threshold; ``None`` uses the
-            skimage default.
-        high_threshold: Upper hysteresis threshold; ``None`` uses the
-            skimage default.
+        low_threshold: Lower hysteresis threshold, in the units above;
+            ``None`` uses the skimage default.
+        high_threshold: Upper hysteresis threshold, in the units above;
+            ``None`` uses the skimage default.
     """
 
     def __init__(
@@ -313,8 +328,13 @@ class Canny(Operator):
         self.high_threshold = high_threshold
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        arr = np.asarray(gt)
+        # skimage.feature.canny rejects 64-bit integers; everything else
+        # goes through untouched so its dtype-relative defaults apply.
+        if arr.dtype in (np.int64, np.uint64):
+            arr = arr.astype(np.float64)
         edges = canny(
-            single_band(np.asarray(gt, dtype=float), name="Canny"),
+            single_band(arr, name="Canny"),
             sigma=self.sigma,
             low_threshold=self.low_threshold,
             high_threshold=self.high_threshold,
