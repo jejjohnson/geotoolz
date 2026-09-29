@@ -86,6 +86,9 @@ def test_array_center_offsets_and_north_up() -> None:
     assert geom_array.center_offsets((5, 5), (5, 5)) == (0, 0)
     assert geom_array.is_north_up(Affine(1, 0, 0, 0, -1, 0)) is True
     assert geom_array.is_north_up(Affine(1, 0.1, 0, 0, -1, 0)) is False
+    # South-up (``e > 0``) and east-to-west (``a < 0``) grids are flipped.
+    assert geom_array.is_north_up(Affine(1, 0, 0, 0, 1, 0)) is False
+    assert geom_array.is_north_up(Affine(-1, 0, 0, 0, -1, 0)) is False
 
 
 def test_array_valid_pixel_mask_handles_dtypes_and_collapse() -> None:
@@ -209,11 +212,17 @@ def test_stitch_masks_fill_sentinels_from_padded_tiles() -> None:
     )
     stitched = gz.geom.Stitch(blend="average")([left, right])
     out = np.asarray(stitched)
-    # Sentinel pixels did not bleed: the right column of the right tile
-    # gets the fill, every other pixel is the genuine value 1.
-    assert out.shape == (1, 3, 6)
-    np.testing.assert_array_equal(out[..., :5], np.ones((1, 3, 5)))
-    np.testing.assert_array_equal(out[..., 5], np.full((1, 3), fill))
+    # Sentinel pixels did not bleed, and the trailing all-sentinel column
+    # (Tile's edge padding) is cropped off: only genuine values remain.
+    assert out.shape == (1, 3, 5)
+    np.testing.assert_array_equal(out, np.ones((1, 3, 5)))
+    # Pinning the target grid keeps the padded column, filled with the fill.
+    pinned = np.asarray(
+        gz.geom.Stitch(blend="average", target_shape=(3, 6))([left, right])
+    )
+    assert pinned.shape == (1, 3, 6)
+    np.testing.assert_array_equal(pinned[..., :5], np.ones((1, 3, 5)))
+    np.testing.assert_array_equal(pinned[..., 5], np.full((1, 3), fill))
 
 
 def test_reproject_like_matches_reference_grid_and_propagates_crs() -> None:
@@ -761,6 +770,226 @@ def test_mosaic_methods_cover_adjacent_tiles() -> None:
 
     with pytest.raises(ValueError, match="method"):
         gz.geom.Mosaic(method="unknown")([left, right])
+
+
+# ----------------------------------------------------------------------------
+# georeader delegation regressions (#129)
+# ----------------------------------------------------------------------------
+
+
+def test_resample_non_square_pixels() -> None:
+    """Each axis is scaled by its own resolution ratio (x: 1 -> 2, y: 2 -> 2).
+
+    ``GeoTensor.resize(resolution_dst=...)`` scales the height by the x
+    ratio, which gave ``(1, 5, 20)`` here.
+    """
+    gt = GeoTensor(
+        np.ones((1, 10, 20), dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -2, 0),
+        crs="EPSG:32629",
+        fill_value_default=-9999,
+    )
+
+    out = gz.geom.Resample(resolution=(2, 2), anti_aliasing=False)(gt)
+
+    assert out.shape == (1, 10, 10)
+    assert out.res == pytest.approx((2.0, 2.0))
+    assert out.transform == Affine(2, 0, 0, 0, -2, 0)
+    assert out.bounds == pytest.approx(gt.bounds)
+    # Resize with a non-uniform scale shares the per-axis transform fix.
+    resized = gz.geom.Resize(shape=(5, 10), anti_aliasing=False)(gt)
+    assert resized.transform == Affine(2, 0, 0, 0, -4, 0)
+    assert resized.bounds == pytest.approx(gt.bounds)
+
+
+def test_reproject_same_crs_applies_resolution() -> None:
+    gt = GeoTensor(
+        np.arange(10 * 20, dtype=np.float32).reshape(1, 10, 20),
+        transform=Affine(10, 0, 500_000, 0, -10, 4_000_000),
+        crs="EPSG:32629",
+        fill_value_default=-9999,
+    )
+
+    out = gz.geom.Reproject(
+        dst_crs="EPSG:32629", resolution=(20.0, 20.0), resampling="average"
+    )(gt)
+
+    assert out.shape == (1, 5, 10)
+    assert out.res == pytest.approx((20.0, 20.0))
+    assert out.bounds == pytest.approx(gt.bounds)
+    assert str(out.crs) == str(gt.crs)
+    # Without a resolution a same-CRS call is still the identity.
+    same = gz.geom.Reproject(dst_crs="EPSG:32629")(gt)
+    assert same.shape == gt.shape
+    assert same.transform == gt.transform
+
+
+def test_vectorize_band_axis_input() -> None:
+    values = np.zeros((1, 5, 7), dtype=np.uint8)
+    values[0, 1:4, 2:5] = 1
+    mask = _gt(values)
+
+    polygons = gz.geom.Vectorize(min_area=0.5)(mask)
+
+    assert len(polygons) == 1
+    assert polygons[0].equals(box(12, 16, 15, 19))
+    with pytest.raises(ValueError, match="single-band"):
+        gz.geom.Vectorize()(_gt(np.zeros((2, 5, 7), dtype=np.uint8)))
+
+
+def test_tile_trailing_shapes_documented() -> None:
+    """Trailing tiles are emitted at ``size``, padded with the fill sentinel."""
+    gt = _gt()  # (1, 5, 7), fill -9999
+
+    tiles = gz.geom.Tile(size=(3, 4))(gt)
+
+    assert [tile.shape for tile in tiles] == [(1, 3, 4)] * 4
+    bottom_right = np.asarray(tiles[-1])
+    np.testing.assert_array_equal(bottom_right[0, :2, :3], np.asarray(gt)[0, 3:, 4:])
+    assert (bottom_right[0, 2, :] == -9999).all()
+    assert (bottom_right[0, :, 3] == -9999).all()
+    # Stitch masks the sentinel and crops the padding: exact round trip.
+    for blend in ("average", "feather", "first", "max"):
+        stitched = gz.geom.Stitch(blend=blend, feather_width=1)(tiles)
+        assert stitched.transform == gt.transform
+        np.testing.assert_allclose(np.asarray(stitched), np.asarray(gt))
+    # Overlapping tiles round-trip too.
+    overlapping = gz.geom.SlidingWindow(size=(3, 3), overlap=1)(gt)
+    assert {tile.shape for tile in overlapping} == {(1, 3, 3)}
+    stitched = gz.geom.Stitch()(overlapping)
+    np.testing.assert_allclose(np.asarray(stitched), np.asarray(gt))
+    # Plain arrays and fill-less GeoTensors are zero-padded to ``size``.
+    plain = gz.geom.Tile(size=(3, 4))(np.ones((1, 5, 7), dtype=np.float32))
+    assert [tile.shape for tile in plain] == [(1, 3, 4)] * 4
+    assert plain[-1][0, 2, :].tolist() == [0.0] * 4
+    no_fill = GeoTensor(
+        np.ones((1, 5, 7), dtype=np.float32),
+        transform=gt.transform,
+        crs=gt.crs,
+        fill_value_default=None,
+    )
+    no_fill_tiles = gz.geom.Tile(size=(3, 4))(no_fill)
+    assert [tile.shape for tile in no_fill_tiles] == [(1, 3, 4)] * 4
+    assert no_fill_tiles[-1].transform == Affine(1, 0, 14, 0, -1, 17)
+    np.testing.assert_array_equal(
+        np.asarray(no_fill_tiles[-1]),
+        plain[-1],
+    )
+    # ``include_incomplete=False`` keeps only full tiles.
+    full_only = gz.geom.Tile(size=(3, 4), include_incomplete=False)(gt)
+    assert [tile.shape for tile in full_only] == [(1, 3, 4)]
+
+
+def test_pad_to_without_any_fill_falls_back_to_zero() -> None:
+    gt = GeoTensor(
+        np.ones((1, 5, 7), dtype=np.float32),
+        transform=Affine(1, 0, 10, 0, -1, 20),
+        crs="EPSG:4326",
+        fill_value_default=None,
+    )
+
+    padded = gz.geom.PadTo(shape=(7, 9))(gt)
+
+    assert padded.shape == (1, 7, 9)
+    assert np.asarray(padded).sum() == 35
+    assert np.asarray(padded)[0, 0, 0] == 0
+    assert padded.transform == Affine(1, 0, 9, 0, -1, 21)
+    # With a carrier fill, ``fill=None`` still uses it.
+    padded_fill = gz.geom.PadTo(shape=(7, 9))(_gt())
+    assert np.asarray(padded_fill)[0, 0, 0] == -9999
+
+
+def test_rasterize_float_fill() -> None:
+    gt = _gt()
+    geometry = box(12, 16, 15, 19)
+
+    burned = gz.geom.Rasterize(geometries=[geometry], fill=np.nan)(gt)
+
+    values = np.asarray(burned)
+    assert values.dtype == np.float32
+    assert np.nansum(values) == 9
+    assert np.isnan(values).sum() == values.size - 9
+    # A negative fill cannot live in the default ``uint8`` either.
+    negative = gz.geom.Rasterize(geometries=[geometry], fill=-1)(gt)
+    assert np.asarray(negative).min() == -1
+    # The default integer background keeps the compact ``uint8`` mask.
+    assert np.asarray(gz.geom.Rasterize(geometries=[geometry])(gt)).dtype == np.uint8
+
+
+def test_mosaic_builds_frame_without_spatial_mosaic_and_handles_no_fill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import warnings
+
+    from geotoolz.geom._src import operators as geom_operators
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("reducer methods must not run spatial_mosaic")
+
+    monkeypatch.setattr(geom_operators.mosaic, "spatial_mosaic", _fail)
+
+    def _pair(fill):
+        left = GeoTensor(
+            np.ones((1, 3, 4), dtype=np.float32),
+            transform=Affine(1, 0, 10, 0, -1, 20),
+            crs="EPSG:4326",
+            fill_value_default=fill,
+        )
+        right = GeoTensor(
+            np.full((1, 3, 4), 3, dtype=np.float32),
+            transform=Affine(1, 0, 12, 0, -1, 18),
+            crs="EPSG:4326",
+            fill_value_default=fill,
+        )
+        return left, right
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out = gz.geom.Mosaic(method="mean", resampling="nearest")(_pair(-9999))
+    values = np.asarray(out)[0]
+    assert out.shape == (1, 5, 6)
+    assert out.transform == Affine(1, 0, 10, 0, -1, 20)
+    assert values[2, 2] == 2  # overlap -> mean(1, 3)
+    assert values[0, 5] == -9999  # covered by neither input
+    assert out.fill_value_default == -9999
+
+    for method in ("mean", "median", "max", "min", "first"):
+        no_fill = gz.geom.Mosaic(method=method, resampling="nearest")(_pair(None))
+        values = np.asarray(no_fill)[0]
+        assert no_fill.shape == (1, 5, 6)
+        assert np.isnan(values[0, 5])
+        assert values[0, 0] == 1
+        assert values[4, 5] == 3
+    first = np.asarray(gz.geom.Mosaic(method="first")(_pair(None)))
+    assert first[0, 2, 2] == 1  # first valid input wins on overlap
+
+
+def test_stitch_rejects_mismatched_resolution() -> None:
+    """A 2 m tile on a 1 m grid would be pasted at 1 m; raise instead."""
+    fine = GeoTensor(
+        np.ones((1, 2, 2), dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, -1, 2),
+        crs="EPSG:4326",
+    )
+    coarse = GeoTensor(
+        np.ones((1, 2, 2), dtype=np.float32),
+        transform=Affine(2, 0, 2, 0, -2, 2),
+        crs="EPSG:4326",
+    )
+    with pytest.raises(ValueError, match="tile 1"):
+        gz.geom.Stitch()([fine, coarse])
+    with pytest.raises(ValueError, match="target_transform"):
+        gz.geom.Stitch(target_transform=Affine(2, 0, 0, 0, -2, 2))([fine])
+
+
+def test_stitch_rejects_south_up_tile() -> None:
+    south_up = GeoTensor(
+        np.ones((1, 2, 2), dtype=np.float32),
+        transform=Affine(1, 0, 0, 0, 1, 0),
+        crs="EPSG:4326",
+    )
+    with pytest.raises(ValueError, match="north-up"):
+        gz.geom.Stitch()([south_up])
 
 
 def test_carrier_referencing_operators_flagged_forbid_in_yaml() -> None:
