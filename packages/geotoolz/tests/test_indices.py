@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
+from _helpers import toy_geotensor, uint16_dn_cube
 from georeader.geotensor import GeoTensor
 
 from geotoolz.indices import (
@@ -236,6 +236,51 @@ def test_savi_l0_equals_ndvi() -> None:
         ndvi(arr, 3, 2, eps=0.0),
         rtol=1e-5,
     )
+
+
+def test_ndvi_uint16_dn() -> None:
+    # Regression for #117: NIR < Red in uint16 used to wrap in ``a - b``
+    # (NDVI came out as 15.884 instead of -0.5).
+    cube = np.array([[[1000]], [[3000]]], dtype=np.uint16)
+
+    np.testing.assert_allclose(normalized_difference(cube, 0, 1), [[-0.5]])
+    np.testing.assert_allclose(np.asarray(NDVI(nir_idx=0, red_idx=1)(cube)), -0.5)
+    out = NDVI(nir_idx=0, red_idx=1)(toy_geotensor(cube))
+    np.testing.assert_allclose(np.asarray(out), -0.5)
+    assert np.asarray(out).dtype == np.float32
+
+
+# Band positions chosen so the subtraction terms go negative (or the
+# products overflow) on ``uint16_dn_cube``, where band k < band k + 1.
+_UINT16_PRIMITIVE_CASES = [
+    pytest.param(normalized_difference, (0, 1), id="normalized_difference"),
+    pytest.param(ndvi, (0, 1), id="ndvi"),
+    pytest.param(ndwi_mcfeeters, (0, 1), id="ndwi"),
+    pytest.param(ndbi, (0, 1), id="ndbi"),
+    pytest.param(nbr, (0, 1), id="nbr"),
+    pytest.param(mndwi, (0, 1), id="mndwi"),
+    pytest.param(ndmi, (0, 1), id="ndmi"),
+    pytest.param(ndsi, (0, 1), id="ndsi"),
+    pytest.param(nbr2, (0, 1), id="nbr2"),
+    pytest.param(kndvi, (0, 1), id="kndvi"),
+    pytest.param(savi, (0, 1), id="savi"),
+    pytest.param(evi, (0, 1, 2), id="evi"),
+    pytest.param(evi2, (0, 1), id="evi2"),
+    pytest.param(arvi, (0, 2, 1), id="arvi"),
+    pytest.param(bais2, (0, 1, 2, 4, 3), id="bais2"),
+    pytest.param(bsi, (4, 3, 2, 0), id="bsi"),
+]
+
+
+@pytest.mark.parametrize(("fn", "idx"), _UINT16_PRIMITIVE_CASES)
+def test_index_primitives_uint16_match_float(fn, idx) -> None:
+    cube = uint16_dn_cube(5)
+
+    got = fn(cube, *idx)
+    expected = fn(cube.astype(np.float64), *idx)
+
+    assert np.issubdtype(got.dtype, np.floating)
+    np.testing.assert_allclose(got, expected, rtol=1e-5)
 
 
 # ---------------------------------------------------------------------------

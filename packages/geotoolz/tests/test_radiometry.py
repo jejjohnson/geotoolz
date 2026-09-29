@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pandas as pd
 import pytest
-from _helpers import toy_geotensor
+from _helpers import toy_geotensor, uint16_dn_cube
 from georeader.geotensor import GeoTensor
 
 from geotoolz.radiometry import (
@@ -127,6 +127,35 @@ def test_min_max_normalize() -> None:
     # clip=False leaves the tail untouched.
     out_unclipped = min_max_normalize(arr, vmin=0.0, vmax=1.0, clip=False)
     np.testing.assert_allclose(out_unclipped, [0.0, 0.5, 1.0, 2.0])
+
+
+def test_min_max_uint16_int_bounds() -> None:
+    # Regression for #117: ``arr - vmin`` ran in uint16, so 50 - 100
+    # wrapped to 65486 and clipped to 1.0 instead of 0.0.
+    arr = np.array([50, 100, 200], dtype=np.uint16)
+
+    out = min_max_normalize(arr, vmin=100, vmax=200)
+    np.testing.assert_allclose(out, [0.0, 0.0, 1.0])
+    assert out.dtype == np.float64
+    out_unclipped = min_max_normalize(arr, vmin=100, vmax=200, clip=False)
+    np.testing.assert_allclose(out_unclipped, [-0.5, 0.0, 1.0])
+
+    cube = uint16_dn_cube(2)
+    via_op = MinMax(vmin=1500, vmax=2500, clip=False)(toy_geotensor(cube))
+    np.testing.assert_allclose(
+        np.asarray(via_op), (cube.astype(np.float64) - 1500) / 1000
+    )
+
+
+def test_linear_decodes_uint16_with_integer_coefficients() -> None:
+    # Integer gain / scale / offset used to keep the arithmetic in the
+    # DN dtype, overflowing uint16 before the float division.
+    dn = np.array([40_000, 100], dtype=np.uint16)
+    ref = dn.astype(np.float64)
+
+    np.testing.assert_allclose(dn_to_radiance(dn, gain=2), 2 * ref)
+    np.testing.assert_allclose(dn_to_reflectance(dn, scale=2, offset=-1), 2 * ref - 1)
+    np.testing.assert_allclose(radiance_to_dn(dn, gain=1, offset=200), ref - 200)
 
 
 def test_min_max_normalize_rejects_degenerate_range() -> None:
