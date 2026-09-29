@@ -16,8 +16,9 @@ carrier-aware wrappers handle:
 Nodata: a pixel is invalid when any band is non-finite or equals the
 carrier's ``fill_value_default`` (see :mod:`geotoolz._src.valid`;
 per frame for ``(T, C, H, W)``). Invalid pixels are excluded from every
-fitted statistic and hold the output's fill value (the inherited
-``fill_value_default``; ``NaN`` for plain ndarrays) in every output.
+fitted statistic and hold ``NaN`` in every output. Normalized values
+live on a new scale where the input's fill value (``0`` especially) can be
+a real value, so outputs always declare ``fill_value_default=NaN``.
 
 The display-prep min-max stretch with **scalar** bounds lives in
 :class:`geotoolz.radiometry.MinMax`; the per-scene robust percentile
@@ -36,13 +37,11 @@ from pipekit import Operator
 
 from geotoolz._src.config import jsonable
 from geotoolz._src.valid import (
-    carrier_fill_value,
     invalid_values,
     mask_invalid_to_nan,
-    restore_fill,
     valid_pixels,
+    wrap_filled,
 )
-from geotoolz._src.wrap import wrap_like
 from geotoolz.normalize._src.array import (
     asinh_scale,
     clahe,
@@ -98,8 +97,8 @@ def _masked(x: Any) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _rewrap(gt: Any, out: np.ndarray, valid: np.ndarray) -> Any:
-    """Write the output fill into invalid pixels and rewrap like ``gt``."""
-    return wrap_like(gt, restore_fill(out, valid, carrier_fill_value(gt)))
+    """Write ``NaN`` into invalid pixels and rewrap like ``gt`` with a NaN fill."""
+    return wrap_filled(gt, out, fill_value_default=np.nan, valid=valid)
 
 
 def _array_or_none(value: Any) -> np.ndarray | None:

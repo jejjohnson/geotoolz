@@ -475,17 +475,17 @@ def _fill_cube(fill: float) -> tuple[GeoTensor, np.ndarray, np.ndarray]:
     ],
 )
 def test_fill_pixels_are_excluded(case: str, fill: float) -> None:
-    """Fill pixels never enter a fitted statistic; score maps hold the fill (#145)."""
+    """Fill pixels never enter a fitted statistic (#145); score maps hold NaN
+    there and declare ``fill_value_default=NaN`` whatever the input fill (#146)."""
     mf = gz.matched_filter
     gt, valid, clean = _fill_cube(fill)
     target = np.array([1.0, 0.5, -1.0])
 
-    def assert_fill(out: np.ndarray) -> None:
-        if np.isnan(fill):
-            assert np.isnan(out[~valid]).all()
-        else:
-            assert (out[~valid] == fill).all()
-        assert np.isfinite(out[valid]).all()
+    def assert_fill(out: GeoTensor) -> None:
+        assert np.isnan(out.fill_value_default)
+        values = np.asarray(out)
+        assert np.isnan(values[~valid]).all()
+        assert np.isfinite(values[valid]).all()
 
     if case == "estimate_mean":
         for method in ("mean", "median", "trimmed", "huber"):
@@ -515,13 +515,13 @@ def test_fill_pixels_are_excluded(case: str, fill: float) -> None:
         ref = mf.MatchedFilter(target=target, mean_method="mean")(clean)
         scores = np.asarray(out)
         np.testing.assert_allclose(scores[valid], np.asarray(ref).ravel())
-        assert_fill(scores)
+        assert_fill(out)
     elif case == "cluster":
         cluster = mf.GMMClusterBackground(n_clusters=2)(gt)
         assert (cluster.labels[~valid] == -1).all()
         assert (cluster.labels[valid] >= 0).all()
         assert np.isfinite(cluster.means).all()
-        assert_fill(np.asarray(mf.ApplyClusterMF(target=target)(gt, cluster)))
+        assert_fill(mf.ApplyClusterMF(target=target)(gt, cluster))
     elif case == "adaptive_window":
         bg = mf.AdaptiveWindowBackground(window_size=3)(gt)
         assert np.isnan(bg.mean[:, ~valid]).all()

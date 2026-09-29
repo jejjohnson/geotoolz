@@ -1,4 +1,10 @@
-"""Carrier-aware wrappers around :mod:`skimage.feature` primitives."""
+"""Carrier-aware wrappers around :mod:`skimage.feature` primitives.
+
+Raster outputs mark nodata input pixels (non-finite or equal to the
+input's ``fill_value_default``; see :mod:`geotoolz._src.valid`) with a
+fill that matches the output's dtype: ``False`` for the boolean
+:class:`Canny` edge map, ``NaN`` for the float feature stacks.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +38,7 @@ from skimage.transform import (
 
 from geotoolz._src.config import as_tuple
 from geotoolz._src.shape import single_band
-from geotoolz._src.wrap import wrap_like
+from geotoolz._src.valid import wrap_filled
 
 
 if TYPE_CHECKING:
@@ -291,7 +297,8 @@ class Canny(Operator):
     Wraps :func:`skimage.feature.canny` over a single-band ``(H, W)`` or
     ``(1, H, W)`` image. Accepts a ``GeoTensor`` or a plain
     ``np.ndarray`` and returns a boolean edge map in the same carrier
-    kind.
+    kind; nodata input pixels are ``False`` and a GeoTensor output
+    declares ``fill_value_default=False``.
 
     The input is handed to skimage in its own dtype, so the result is
     identical to ``skimage.feature.canny`` on the same array. skimage
@@ -339,7 +346,7 @@ class Canny(Operator):
             low_threshold=self.low_threshold,
             high_threshold=self.high_threshold,
         )
-        return wrap_like(gt, edges)
+        return wrap_filled(gt, edges, fill_value_default=False)
 
 
 class CornerHarris(Operator):
@@ -428,7 +435,8 @@ class StructureTensor(Operator):
     :func:`skimage.feature.structure_tensor_eigenvalues` over a
     single-band ``(H, W)`` or ``(1, H, W)`` image. Accepts a
     ``GeoTensor`` or a plain ``np.ndarray`` and returns the ``(2, H, W)``
-    eigenvalue stack in the same carrier kind.
+    eigenvalue stack in the same carrier kind; nodata input pixels are
+    ``NaN`` (``fill_value_default=NaN``).
 
     Args:
         sigma: Width of the Gaussian window used to average the
@@ -444,7 +452,7 @@ class StructureTensor(Operator):
             sigma=self.sigma,
         )
         eigvals = np.asarray(structure_tensor_eigenvalues(tensor))
-        return wrap_like(gt, eigvals)
+        return wrap_filled(gt, eigvals, fill_value_default=np.nan)
 
 
 class MultiscaleBasicFeatures(Operator):
@@ -453,7 +461,8 @@ class MultiscaleBasicFeatures(Operator):
     Wraps :func:`skimage.feature.multiscale_basic_features` over a
     single-band ``(H, W)`` or ``(1, H, W)`` image. Accepts a
     ``GeoTensor`` or a plain ``np.ndarray`` and returns the ``(F, H, W)``
-    channel-first feature stack in the same carrier kind.
+    channel-first feature stack in the same carrier kind; nodata input
+    pixels are ``NaN`` (``fill_value_default=NaN``).
 
     Args:
         intensity: Include Gaussian-smoothed intensity features.
@@ -488,7 +497,8 @@ class MultiscaleBasicFeatures(Operator):
             sigma_max=self.sigma_max,
             channel_axis=None,
         )
-        return wrap_like(gt, einx.id("h w f -> f h w", features))
+        stack = einx.id("h w f -> f h w", features)
+        return wrap_filled(gt, stack, fill_value_default=np.nan)
 
 
 class HoughLines(Operator):

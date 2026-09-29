@@ -7,8 +7,8 @@ Each Operator here:
 2. Calls into the matching primitive in ``array.py`` for the math.
 3. Rewraps the result to match the input carrier via
    `geotoolz._src.wrap.wrap_like`: a ``GeoTensor`` input comes back as
-   a ``GeoTensor`` (``transform``, ``crs``, ``fill_value_default`` and a
-   copy of ``attrs`` propagated, with per-band keys such as
+   a ``GeoTensor`` (``transform``, ``crs`` and a
+   copy of ``attrs`` propagated, ``fill_value_default=NaN``, with per-band keys such as
    ``band_names`` dropped because the band axis collapsed); a plain ``np.ndarray``
    comes back as a plain ndarray. Named-band references (``red="B04"``)
    need carrier metadata and therefore require a GeoTensor input;
@@ -42,7 +42,13 @@ from geotoolz._src.bands import (
     strip_band_attrs,
 )
 from geotoolz._src.config import nested_config
-from geotoolz._src.valid import carrier_fill_value, invalid_values, restore_fill
+from geotoolz._src.valid import (
+    carried_fill,
+    carrier_fill_value,
+    invalid_values,
+    restore_fill,
+    wrap_filled,
+)
 from geotoolz._src.wrap import wrap_like
 from geotoolz.indices._src.array import (
     arvi,
@@ -79,21 +85,20 @@ def _wrap_index(
     axis: int,
     bands: tuple[BandRef, ...],
 ) -> GeoTensor | np.ndarray:
-    """Rewrap an index result, writing the input's fill into nodata pixels.
+    """Rewrap an index result, writing ``NaN`` into nodata pixels.
 
     A pixel is nodata when *any band the index reads* (``bands``) is
     non-finite or equals ``gt.fill_value_default`` (see
     :mod:`geotoolz._src.valid`); its index value is meaningless (e.g. NDVI
-    of ``-9999 / -9999``), so it is replaced by the output's (inherited)
-    fill value -- ``NaN`` for plain arrays. Bands the index does not read
-    do not affect validity.
+    of ``-9999 / -9999``), so it is replaced by ``NaN``. An index is a new
+    quantity -- the input's fill (``0`` especially) can be a real index
+    value -- so the output always declares ``fill_value_default=NaN``.
+    Bands the index does not read do not affect validity.
     """
     idx = [_resolve_band(gt, band) for band in bands]
     used = np.take(np.asarray(gt), idx, axis=axis)
-    fill = carrier_fill_value(gt)
-    valid = ~invalid_values(used, fill_value=fill).any(axis=axis)
-    out = restore_fill(out, valid, fill)
-    return wrap_like(gt, out)
+    valid = ~invalid_values(used, fill_value=carrier_fill_value(gt)).any(axis=axis)
+    return wrap_filled(gt, out, fill_value_default=np.nan, valid=valid)
 
 
 def _grid_matches(a: GeoTensor | np.ndarray, b: GeoTensor | np.ndarray) -> bool:
@@ -121,8 +126,8 @@ class NormalizedDifference(Operator):
     band-name-string variant (resolved via ``attrs["band_names"]``).
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         a_idx: Index of the "high" band (numerator-positive term).
@@ -190,8 +195,8 @@ class NDVI(Operator):
     (B5 NIR, B4 Red).
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         nir_idx: Band-axis index of the NIR reflectance. Default ``3``.
@@ -261,8 +266,8 @@ class NDWI(Operator):
     for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         green_idx: Band index of Green reflectance. Default ``1``.
@@ -326,8 +331,8 @@ class NDBI(Operator):
     :func:`~geotoolz.indices._src.array.ndbi` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         swir_idx: Band index of SWIR-1 reflectance. Default ``5``.
@@ -396,8 +401,8 @@ class NBR(Operator):
     :func:`~geotoolz.indices._src.array.nbr` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         nir_idx: NIR band index. Default ``3``.
@@ -470,8 +475,8 @@ class SAVI(Operator):
     See :func:`~geotoolz.indices._src.array.savi` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         nir_idx: NIR band index. Default ``3``.
@@ -544,8 +549,8 @@ class EVI(Operator):
     See :func:`~geotoolz.indices._src.array.evi` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         nir_idx: NIR band index. Default ``3``.
@@ -640,8 +645,8 @@ class EVI2(Operator):
     types. See :func:`~geotoolz.indices._src.array.evi2` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         red: Optional named Red band (e.g. ``"B04"``). Overrides
@@ -713,8 +718,8 @@ class ARVI(Operator):
     standard value derived from MODIS Rayleigh-scattering simulations.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         blue: Optional named Blue band. Overrides ``blue_idx``.
@@ -797,8 +802,8 @@ class GCI(Operator):
     crops and forests where NDVI plateaus.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         green: Optional named Green band.
@@ -869,8 +874,8 @@ class kNDVI(Operator):
     most cover types.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         red: Optional named Red band.
@@ -943,8 +948,8 @@ class MNDWI(Operator):
     are interpreted differently.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         green: Optional named Green band.
@@ -1017,8 +1022,8 @@ class NDMI(Operator):
     the McFeeters surface-water ``NDWI`` distinct.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         nir: Optional named NIR band.
@@ -1091,8 +1096,8 @@ class NDSI(Operator):
     arithmetic form of MNDWI — same formula, different physics target.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         green: Optional named Green band.
@@ -1164,8 +1169,8 @@ class NBR2(Operator):
     part of the Landsat Analysis-Ready burn-severity stack.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         swir1: Optional named SWIR-1 band.
@@ -1242,8 +1247,8 @@ class BAIS2(Operator):
     conventions, pass explicit indices or named bands.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         red: Optional named Red band (B04).
@@ -1349,8 +1354,8 @@ class dNBR(Operator):
     low severity, 0.44–0.66 moderate, > 0.66 high severity.
 
     Nodata pixels (non-finite, or equal to that raster's
-    ``fill_value_default``, in either input) hold the pre-fire raster's
-    fill value in the output (``NaN`` for plain arrays).
+    ``fill_value_default``, in either input) hold ``NaN`` in the output,
+    which declares ``fill_value_default=NaN``.
 
     Examples:
         >>> from geotoolz.indices import NBR, dNBR
@@ -1372,7 +1377,8 @@ class dNBR(Operator):
             raise ValueError("dNBR inputs must share shape, transform, and CRS.")
         out = np.asarray(pre) - np.asarray(post)
         valid = ~(invalid_values(pre) | invalid_values(post))
-        return wrap_like(pre, restore_fill(out, valid, carrier_fill_value(pre)))
+        out = restore_fill(out.astype(np.result_type(out, np.float32)), valid, np.nan)
+        return wrap_like(pre, out, fill_value_default=np.nan)
 
 
 class BSI(Operator):
@@ -1393,8 +1399,8 @@ class BSI(Operator):
     in the literature exist — pick deliberately if comparing studies.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         blue: Optional named Blue band.
@@ -1483,8 +1489,8 @@ class IronOxide(Operator):
     iron-oxide-rich soils, weathered surfaces, and lateritic crusts.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         red: Optional named Red band.
@@ -1554,8 +1560,8 @@ class ClayMinerals(Operator):
     clay-rich exposures and near unity elsewhere.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         swir1: Optional named SWIR-1 band.
@@ -1633,8 +1639,8 @@ class CIRI(Operator):
     ``B01, B02, B03, B04, B05, B06, B07, B08, B8A, B10, B11, B12``.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold that fill value in the output (``NaN``
-    for plain arrays).
+    ``fill_value_default``) hold ``NaN`` in the output, which declares
+    ``fill_value_default=NaN``.
 
     Args:
         cirrus: Optional named cirrus band (e.g. ``"B10"``).
@@ -1714,7 +1720,14 @@ class AppendIndex(Operator):
             names = per_band_values(src_attrs, key, arr.shape[self.axis])
             if names is not None:
                 attrs[key] = [*names, name]
-        return wrap_like(gt, stacked, attrs=attrs)
+        # The stacked bands keep the input's values, so the fill follows
+        # the input's (NaN once integer bands are promoted by the float index).
+        return wrap_filled(
+            gt,
+            stacked,
+            fill_value_default=carried_fill(gt, stacked.dtype),
+            attrs=attrs,
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"index_op": nested_config(self.index_op), "axis": self.axis}

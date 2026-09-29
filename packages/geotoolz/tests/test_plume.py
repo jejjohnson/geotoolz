@@ -899,8 +899,9 @@ def test_fill_pixels_are_excluded(case: str) -> None:
         labels = np.asarray(gz.plume.PlumeContours(min_area=1)(gt))
         assert (labels[fill] == -9999).all()
         assert (labels[valid] == 1).all()
-        mask = np.asarray(gz.plume.PlumeContours(min_area=1, return_labels=False)(gt))
-        np.testing.assert_array_equal(mask, valid)
+        mask = gz.plume.PlumeContours(min_area=1, return_labels=False)(gt)
+        np.testing.assert_array_equal(np.asarray(mask), valid)
+        assert mask.fill_value_default is False
     elif case == "contours_nan":
         # Issue reproduction: NaN scores used to be treated as plume.
         score = np.zeros(shape)
@@ -921,7 +922,10 @@ def test_fill_pixels_are_excluded(case: str) -> None:
     elif case == "mask_percentile":
         values = np.arange(25, dtype=float).reshape(shape)
         gt = toy_geotensor(values, with_fill_pixels=True)
-        out = np.asarray(gz.plume.PlumeMask(threshold="percentile:50", min_area=1)(gt))
+        result = gz.plume.PlumeMask(threshold="percentile:50", min_area=1)(gt)
+        # A boolean mask declares False, not the score's -9999 (#146).
+        assert result.fill_value_default is False
+        out = np.asarray(result)
         cutoff = np.percentile(values[valid], 50)
         np.testing.assert_array_equal(out, (values > cutoff) & valid)
         otsu = np.asarray(gz.plume.PlumeMask(threshold="otsu", min_area=1)(gt))
@@ -936,7 +940,11 @@ def test_fill_pixels_are_excluded(case: str) -> None:
         )(enhancement)
         assert result["ime_kg"] == pytest.approx(valid.sum() * 100.0)
     elif case == "column_to_mass":
+        # Issue reproduction (#146): the fill pixel used to be scaled to
+        # -6.6e-3 kg/m^2 while the output still declared -9999.
         gt = toy_geotensor(np.full(shape, 1000.0), with_fill_pixels=True)
-        out = np.asarray(gz.plume.ColumnToMass(units_in="ppm_m")(gt))
-        assert (out[fill] == -9999).all()
+        result = gz.plume.ColumnToMass(units_in="ppm_m")(gt)
+        out = np.asarray(result)
+        assert np.isnan(result.fill_value_default)
+        assert np.isnan(out[fill]).all()
         assert (out[valid] > 0).all()

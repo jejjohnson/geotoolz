@@ -8,6 +8,16 @@ kind — the rewrap is centralised in
 `RadianceToReflectance` / `ReflectanceToRadiance` when the solar
 geometry must be derived from the footprint (no ``sza_deg`` /
 ``center_coords`` given); those require a GeoTensor in that mode.
+
+Nodata: pixels that are non-finite or equal the input's
+``fill_value_default`` in any band (see :mod:`geotoolz._src.valid`) hold
+the output's fill value. Unit conversions carry the input's values, so
+they keep its fill when the input is floating point -- as georeader's
+own radiance / reflectance conversions do -- and switch to ``NaN`` when
+integer DN are promoted to float, where an integer fill such as ``0``
+would collide with real data (:func:`geotoolz._src.valid.carried_fill`).
+The display stretches (:class:`MinMax`, :class:`PercentileClip`,
+:class:`Gamma`) map onto ``[0, 1]``, so they always use ``NaN``.
 """
 
 from __future__ import annotations
@@ -30,6 +40,12 @@ from pipekit import Operator
 
 from geotoolz._src.bands import strip_band_attrs
 from geotoolz._src.config import as_tuple, jsonable
+from geotoolz._src.valid import (
+    carried_fill,
+    invalid_values,
+    mask_invalid_to_nan,
+    wrap_filled,
+)
 from geotoolz._src.wrap import wrap_like
 from geotoolz.radiometry._src.array import (
     _broadcast_to_band_axis,
@@ -47,6 +63,24 @@ from geotoolz.radiometry._src.solar import (
     earth_sun_distance_correction_factor,
     observation_date_correction_factor,
 )
+
+
+def _rewrap_carried(gt: Any, out: Any, **kwargs: Any) -> Any:
+    """Rewrap a unit conversion of ``gt`` with the carried fill at nodata pixels."""
+    out = np.asarray(out)
+    if out.ndim < 2:
+        return wrap_like(gt, out, **kwargs)
+    return wrap_filled(
+        gt, out, fill_value_default=carried_fill(gt, out.dtype), **kwargs
+    )
+
+
+def _rewrap_stretch(gt: Any, out: Any) -> Any:
+    """Rewrap a ``[0, 1]`` display stretch of ``gt`` with ``NaN`` at nodata pixels."""
+    out = np.asarray(out)
+    if out.ndim < 2:
+        return wrap_like(gt, out, fill_value_default=np.nan)
+    return wrap_filled(gt, out, fill_value_default=np.nan)
 
 
 def _datetime_as_jsonable(value: datetime | None) -> str | None:
@@ -99,8 +133,10 @@ class ToFloat32(Operator):
     imagery — half the memory of ``float64`` with plenty of dynamic
     range for reflectance.
 
-    Pure ufunc — `GeoTensor.__array_ufunc__` preserves transform / CRS /
-    fill-value automatically.
+    Integer input with a fill value comes back with
+    ``fill_value_default=NaN`` and ``NaN`` at its nodata pixels (an
+    integer fill such as ``0`` would be a valid float value); float input
+    keeps its fill.
 
     Examples:
         >>> import geotoolz as gz
@@ -115,7 +151,7 @@ class ToFloat32(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         # `GeoTensor.astype` would alias the input's attrs dict via
         # __array_finalize__; rewrap so the output gets its own copy.
-        return wrap_like(gt, np.asarray(gt).astype(np.float32))
+        return _rewrap_carried(gt, np.asarray(gt).astype(np.float32))
 
 
 class DNToRadiance(Operator):
@@ -171,7 +207,7 @@ class DNToRadiance(Operator):
         offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
         scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
         out = dn_to_radiance(arr, gain, offset, scale)
-        return wrap_like(gt, out)
+        return _rewrap_carried(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -232,7 +268,7 @@ class RadianceToDN(Operator):
         offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
         scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
         out = radiance_to_dn(arr, gain, offset, scale)
-        return wrap_like(gt, out)
+        return _rewrap_carried(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -300,7 +336,7 @@ class DNToReflectance(Operator):
         scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
         offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
         out = dn_to_reflectance(arr, scale, offset)
-        return wrap_like(gt, out)
+        return _rewrap_carried(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -401,7 +437,7 @@ class RadianceToReflectance(Operator):
             units=self.units,
         )
         # georeader rebuilds the GeoTensor without ``attrs``; restore them.
-        return wrap_like(gt, np.asarray(out))
+        return _rewrap_carried(gt, np.asarray(out))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -496,7 +532,7 @@ class ReflectanceToRadiance(Operator):
             observation_date_corr_factor=obs_factor,
         )
         # georeader rebuilds the GeoTensor without ``attrs``; restore them.
-        return wrap_like(gt, np.asarray(out))
+        return _rewrap_carried(gt, np.asarray(out))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -796,9 +832,9 @@ class ApplySRF(Operator):
         # must become fill only when one of its *contributing* source
         # bands is fill at that pixel — not when any unrelated source
         # band happens to be fill.
+        fill = carried_fill(gt, out.dtype)
         if fill_value is not None:
-            src = np.asarray(gt)
-            src_invalid = src == fill_value  # (n_src, H, W)
+            src_invalid = invalid_values(gt)  # (n_src, H, W)
             support = self._source_band_support(srf_df, source_wavelengths)
             # invalid[j, h, w] = any contributing source band is fill
             invalid = (
@@ -809,10 +845,15 @@ class ApplySRF(Operator):
                 )
                 > 0
             )
-            out[invalid] = fill_value
+            out[invalid] = np.nan if fill is None else fill
         # Target bands replace the source bands: source per-band attrs are
         # dropped and the target centres become the new wavelengths.
-        wrapped = wrap_like(gt, out, attrs=strip_band_attrs(getattr(gt, "attrs", None)))
+        wrapped = wrap_like(
+            gt,
+            out,
+            fill_value_default=fill,
+            attrs=strip_band_attrs(getattr(gt, "attrs", None)),
+        )
         if hasattr(wrapped, "attrs"):
             wrapped.attrs["wavelengths"] = jsonable(
                 np.asarray(self.target_center_wavelengths, dtype=float)
@@ -877,7 +918,7 @@ class BTFromRadiance(Operator):
     emit the observed radiance — not the true surface temperature,
     which additionally requires emissivity and atmospheric correction.
 
-    Fill-value pixels are propagated through unchanged.
+    Nodata pixels hold the output fill (see the module docstring).
 
     Args:
         K1: Per-band Planck constant ``K1``. Scalar or per-band 1-D
@@ -917,16 +958,11 @@ class BTFromRadiance(Operator):
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         k1 = _broadcast_to_band_axis(self.K1, n_bands, self.axis, arr.ndim)
         k2 = _broadcast_to_band_axis(self.K2, n_bands, self.axis, arr.ndim)
-        fill_value = getattr(gt, "fill_value_default", None)
-        # Replace fill with NaN before the log so we don't pollute valid
-        # pixels with -inf / 0; restore the original fill value after.
-        work = arr.astype(float, copy=False)
-        if fill_value is not None:
-            work = np.where(arr == fill_value, np.nan, work)
+        # NaN out nodata before the log so we don't pollute valid pixels
+        # with -inf / 0; the output fill is written back afterwards.
+        work = np.where(invalid_values(gt), np.nan, arr.astype(float, copy=False))
         out = bt_from_radiance(work, k1, k2)
-        if fill_value is not None:
-            out[arr == fill_value] = fill_value
-        return wrap_like(gt, out)
+        return _rewrap_carried(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -957,7 +993,7 @@ class DOS1(Operator):
     and Rayleigh modelling on top.
 
     Fill-value pixels are excluded from the dark-object percentile and
-    propagated through unchanged.
+    hold the output fill (see the module docstring).
 
     Args:
         dark_percentile: Spatial percentile in ``[0, 100]`` taken as
@@ -986,15 +1022,10 @@ class DOS1(Operator):
         self.dark_percentile = dark_percentile
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        arr = np.asarray(gt, dtype=float)
-        fill_value = getattr(gt, "fill_value_default", None)
-        valid = None if fill_value is None else arr != fill_value
-        # NaN out fill pixels so the percentile reflects only valid data.
-        work = arr if valid is None else np.where(valid, arr, np.nan)
+        # NaN out nodata so the percentile reflects only valid data.
+        work = mask_invalid_to_nan(gt, dtype=float)
         out = dos1(work, dark_percentile=self.dark_percentile, axis=(-2, -1))
-        if valid is not None:
-            out[~valid] = fill_value
-        return wrap_like(gt, out)
+        return _rewrap_carried(gt, out)
 
 
 class SimpleAtmosphericCorrection(Operator):
@@ -1070,7 +1101,7 @@ class MinMax(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = min_max_normalize(np.asarray(gt), self.vmin, self.vmax, clip=self.clip)
-        return wrap_like(gt, out)
+        return _rewrap_stretch(gt, out)
 
 
 class PercentileClip(Operator):
@@ -1109,10 +1140,12 @@ class PercentileClip(Operator):
         self.axis = as_tuple(axis)
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        # Nodata never enters the percentiles (``nanpercentile``).
+        values = mask_invalid_to_nan(gt) if np.ndim(gt) >= 2 else np.asarray(gt)
         out = percentile_clip(
-            np.asarray(gt), p_min=self.p_min, p_max=self.p_max, axis=self.axis
+            values, p_min=self.p_min, p_max=self.p_max, axis=self.axis
         )
-        return wrap_like(gt, out)
+        return _rewrap_stretch(gt, out)
 
 
 class Gamma(Operator):
@@ -1144,4 +1177,4 @@ class Gamma(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = gamma_correct(np.asarray(gt), g=self.g)
-        return wrap_like(gt, out)
+        return _rewrap_stretch(gt, out)

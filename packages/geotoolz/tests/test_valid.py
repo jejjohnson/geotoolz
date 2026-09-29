@@ -7,12 +7,14 @@ import pytest
 from _helpers import fill_pixel_mask, toy_geotensor
 
 from geotoolz._src.valid import (
+    carried_fill,
     carrier_fill_value,
     invalid_values,
     is_fill,
     mask_invalid_to_nan,
     restore_fill,
     valid_pixels,
+    wrap_filled,
 )
 from geotoolz._src.wrap import INHERIT
 
@@ -132,3 +134,52 @@ def test_toy_geotensor_with_fill_pixels_copies_values():
     assert (vals == 1).all()
     with pytest.raises(ValueError, match="fill_value_default"):
         toy_geotensor(vals, fill_value_default=None, with_fill_pixels=True)
+
+
+def test_carried_fill_follows_the_output_dtype():
+    f64 = toy_geotensor(np.zeros((2, 2)), fill_value_default=-9999)
+    u16 = toy_geotensor(np.zeros((2, 2), dtype=np.uint16), fill_value_default=0)
+    # Booleans are always False.
+    assert carried_fill(f64, bool) is False
+    # Float -> float keeps the fill; integer -> float switches to NaN.
+    assert carried_fill(f64, np.float32) == -9999
+    assert np.isnan(carried_fill(u16, np.float32))
+    # Integer outputs keep a fill they can hold, else declare none.
+    assert carried_fill(u16, np.uint16) == 0
+    assert carried_fill(f64, np.int32) == -9999
+    assert carried_fill(f64, np.uint8) is None
+    assert (
+        carried_fill(
+            toy_geotensor(np.zeros((2, 2)), fill_value_default=np.nan), np.int32
+        )
+        is None
+    )
+    # No fill stays no fill.
+    assert carried_fill(np.zeros((2, 2), dtype=np.uint16), np.float32) is None
+
+
+def test_wrap_filled_writes_and_declares_the_fill():
+    gt = toy_geotensor(np.ones((2, 3, 3)), with_fill_pixels=True)
+    fill = fill_pixel_mask(gt.shape)
+
+    out = wrap_filled(gt, np.full((3, 3), 5.0), fill_value_default=np.nan)
+    assert np.isnan(out.fill_value_default)
+    assert np.isnan(np.asarray(out)[fill]).all()
+    assert (np.asarray(out)[~fill] == 5.0).all()
+    assert out.transform == gt.transform
+
+    mask = wrap_filled(gt, np.ones((3, 3), dtype=bool), fill_value_default=False)
+    assert mask.fill_value_default is False
+    assert not np.asarray(mask)[fill].any()
+
+    # An explicit validity mask overrides the input's.
+    valid = np.ones((3, 3), dtype=bool)
+    out = wrap_filled(gt, np.zeros((3, 3)), fill_value_default=np.nan, valid=valid)
+    assert not np.isnan(np.asarray(out)).any()
+
+    # Plain arrays come back plain, NaN at non-finite pixels.
+    arr = np.ones((3, 3))
+    arr[0, 0] = np.nan
+    plain = wrap_filled(arr, np.zeros((3, 3)), fill_value_default=np.nan)
+    assert type(plain) is np.ndarray
+    assert np.isnan(plain[0, 0]) and plain[1, 1] == 0.0

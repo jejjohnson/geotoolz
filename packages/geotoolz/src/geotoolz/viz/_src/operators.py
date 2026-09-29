@@ -39,6 +39,7 @@ from pipekit import Operator
 
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
 from geotoolz._src.valid import (
+    carried_fill,
     carrier_fill_value,
     invalid_values,
     mask_invalid_to_nan,
@@ -100,7 +101,12 @@ class Composite(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         indices = _resolve_bands(gt, self.bands)
-        return wrap_like(gt, composite(np.asarray(gt), indices, axis=self.axis))
+        # Pure band selection: the values, and so the fill, are the input's.
+        return wrap_like(
+            gt,
+            composite(np.asarray(gt), indices, axis=self.axis),
+            fill_value_default=carrier_fill_value(gt),
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {"bands": list(self.bands), "axis": self.axis}
@@ -313,7 +319,8 @@ class GammaCorrect(Operator):
             np.asarray(gt), gamma=self.gamma, inplace_norm=self.inplace_norm
         )
         valid = ~invalid_values(gt)
-        return wrap_like(gt, restore_fill(out, valid, carrier_fill_value(gt)))
+        fill = carried_fill(gt, np.asarray(out).dtype)
+        return wrap_like(gt, restore_fill(out, valid, fill), fill_value_default=fill)
 
 
 class ToDisplayRange(StretchToUint8):

@@ -254,6 +254,35 @@ class TestPointCloudToRasterBinnedStat:
             PointCloudToRaster()((xy, values), like)
 
 
+def test_binned_rasters_do_not_inherit_the_like_fill() -> None:
+    """Empty cells are NaN (0 for counts), not ``like``'s -9999 (#146)."""
+    like = toy_geotensor(np.zeros((4, 4), dtype=np.float32), fill_value_default=-9999)
+    xy = np.array([[PX_X(1), PX_Y(1)]])
+    values = np.array([5.0])
+
+    mean = PointCloudToRaster(stat="mean")((xy, values), like)
+    assert np.isnan(mean.fill_value_default)
+    assert np.isnan(np.asarray(mean)[0, 0])
+    count = PointCloudToRaster(stat="count")((xy, values), like)
+    assert count.fill_value_default == 0.0
+    idw = PointCloudToRaster(method="idw", k=1, max_radius=1.0)((xy, values), like)
+    assert np.isnan(idw.fill_value_default)
+
+    gpd = pytest.importorskip("geopandas")
+    gdf = gpd.GeoDataFrame(
+        {"v": [5.0]}, geometry=[Point(PX_X(1), PX_Y(1))], crs=like.crs
+    )
+    binned = PointsToRaster(attribute="v")(gdf, like)
+    assert np.isnan(binned.fill_value_default)
+    polys = gpd.GeoDataFrame(
+        {"v": [1.0]}, geometry=[box(PX_X(0), PX_Y(1), PX_X(1), PX_Y(0))], crs=like.crs
+    )
+    assert VectorToRasterAgg(agg="count")(polys, like).fill_value_default == 0.0
+    assert np.isnan(
+        VectorToRasterAgg(agg="mean", attribute="v")(polys, like).fill_value_default
+    )
+
+
 class TestPointCloudToRasterIDW:
     def test_idw_constant_field_reduces_to_constant(self) -> None:
         # A single value sample: IDW everywhere returns that value

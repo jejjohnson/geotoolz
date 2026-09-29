@@ -272,6 +272,64 @@ def test_apply_mask_get_config_for_array_and_operator_masks() -> None:
     assert operator_cfg["mask"]["class"] == "BBoxMask"
 
 
+def test_apply_mask_explicit_fill_is_declared_and_marks_nodata() -> None:
+    """Issue #146: ``fill_value=0.0`` wrote 0.0 but kept -9999, so
+    ``validmask()`` reported every pixel valid."""
+    values = np.arange(1, 9, dtype=np.float32).reshape(2, 2, 2)
+    values[:, 1, 0] = -9999  # an existing nodata pixel
+    gt = _toy_geotensor(values)
+    mask = np.array([[True, False], [False, False]])
+
+    out = ApplyMask(mask=mask, fill_value=0.0)(gt)
+
+    assert out.fill_value_default == 0.0
+    arr = np.asarray(out)
+    assert np.all(arr[:, 0, 0] == 0.0)
+    # The input's own nodata is rewritten to the declared fill.
+    assert np.all(arr[:, 1, 0] == 0.0)
+    np.testing.assert_array_equal(
+        np.asarray(out.validmask()).all(axis=0), [[False, True], [False, True]]
+    )
+
+
+def test_apply_mask_default_fill_is_the_carrier_fill() -> None:
+    mask = np.array([[True, False], [False, False]])
+
+    # A float carrier with a -9999 fill is masked with -9999.
+    out = ApplyMask(mask=mask)(_toy_geotensor(np.ones((2, 2), dtype=np.float32)))
+    assert out.fill_value_default == -9999
+    assert np.asarray(out)[0, 0] == -9999
+
+    # A uint16 carrier with a usable fill is not upcast to float64.
+    dn = GeoTensor(
+        np.full((2, 2), 100, dtype=np.uint16),
+        transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
+        crs="EPSG:3857",
+        fill_value_default=0,
+    )
+    out = ApplyMask(mask=mask)(dn)
+    assert out.dtype == np.uint16
+    assert out.fill_value_default == 0
+    np.testing.assert_array_equal(np.asarray(out), [[0, 100], [100, 100]])
+
+
+def test_apply_mask_default_fill_falls_back_to_nan() -> None:
+    mask = np.array([[True, False]])
+    gt = GeoTensor(
+        np.ones((1, 2), dtype=np.float32),
+        transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
+        crs="EPSG:3857",
+        fill_value_default=None,
+    )
+
+    out = ApplyMask(mask=mask)(gt)
+
+    assert np.isnan(out.fill_value_default)
+    assert np.isnan(np.asarray(out)[0, 0])
+    assert np.isnan(ApplyMask(mask=mask)(np.ones((1, 2)))[0, 0])
+    assert ApplyMask(mask=mask).get_config()["fill_value"] is None
+
+
 def test_apply_mask_broadcasts_2d_mask_against_3d_carrier() -> None:
     gt = _toy_geotensor(np.ones((3, 4, 4), dtype=np.float32))
     mask = np.zeros((4, 4), dtype=bool)

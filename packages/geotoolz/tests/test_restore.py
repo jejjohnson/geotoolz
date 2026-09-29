@@ -433,9 +433,17 @@ def test_fill_pixels_are_excluded(make_op) -> None:
     -9999 into the neighbours of a fill pixel.
     """
     gt, values, fill = _fill_scene()
-    out = np.asarray(make_op()(gt))
+    op = make_op()
+    result = op(gt)
+    out = np.asarray(result)
 
-    assert np.all(out[:, fill] == -9999)
+    if isinstance(op, MNF):
+        # Component scores are a new quantity: NaN nodata (#146).
+        assert np.isnan(result.fill_value_default)
+        assert np.isnan(out[:, fill]).all()
+    else:
+        assert result.fill_value_default == -9999
+        assert np.all(out[:, fill] == -9999)
     expected = np.asarray(make_op()(_nan_at(values, fill)))
     np.testing.assert_allclose(out[:, ~fill], expected[:, ~fill])
     # No fill leakage: every valid output stays in the data's range.
@@ -475,20 +483,25 @@ def test_fill_pixels_are_excluded_from_masks_and_pca_fit() -> None:
     gt, values, fill = _fill_scene()
 
     # OutlierMask: the -9999 fill is not an outlier and does not skew stats.
-    outliers = np.asarray(OutlierMask(method="zscore", k=3.0)(gt))
-    assert not outliers.any()
+    outliers = OutlierMask(method="zscore", k=3.0)(gt)
+    assert not np.asarray(outliers).any()
+    # A boolean flag declares False, not the input's -9999 (#146).
+    assert outliers.fill_value_default is False
 
     # SaturationFlag: a uint16 fill at the dtype max is not "saturated".
     counts = np.full((1, 4, 4), 100, dtype=np.uint16)
     sat_gt = toy_geotensor(counts, fill_value_default=65535, with_fill_pixels=True)
-    assert not np.asarray(SaturationFlag()(sat_gt)).any()
+    saturated = SaturationFlag()(sat_gt)
+    assert not np.asarray(saturated).any()
+    assert saturated.fill_value_default is False
 
-    # MNF: fitted on valid pixels only; inverse restores fill pixels.
+    # MNF: fitted on valid pixels only; the scores' NaN nodata carries
+    # through the inverse.
     forward = MNF(n_components=3)
     scores = forward(gt)
     reference = MNF(n_components=3)
     reference(_nan_at(values, fill))
     np.testing.assert_allclose(forward.snr_, reference.snr_)
     restored = np.asarray(InverseMNF(forward=forward)(scores))
-    assert np.all(restored[:, fill] == -9999)
+    assert np.isnan(restored[:, fill]).all()
     np.testing.assert_allclose(restored[:, ~fill], values[:, ~fill], atol=1e-10)

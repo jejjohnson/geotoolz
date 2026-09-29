@@ -22,13 +22,16 @@ in kg/m^2. Use :class:`ColumnToMass` to convert from ppm m or mol/m^2.
 
 Nodata: pixels that are non-finite or equal the carrier's
 ``fill_value_default`` (see :mod:`geotoolz._src.valid`) never enter a
-threshold, statistic or sum, are never part of a plume mask or
-contour, and hold the input's fill value in per-pixel raster outputs.
+threshold, statistic or sum, and are never part of a plume mask or
+contour. Output fill values follow the output's meaning, not the
+input's: boolean masks declare ``fill_value_default=False``, float
+products (scores, converted columns) hold ``NaN`` at nodata pixels and
+declare ``fill_value_default=NaN``, and label images use ``0`` (see
+:class:`PlumeContours` for its one documented exception).
 """
 
 from __future__ import annotations
 
-import numbers
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -48,11 +51,11 @@ from geotoolz._src.config import (
     reject_config_summary,
 )
 from geotoolz._src.valid import (
-    carrier_fill_value,
+    carried_fill,
     invalid_values,
     mask_invalid_to_nan,
-    restore_fill,
     valid_pixels,
+    wrap_filled,
 )
 from geotoolz._src.wrap import wrap_like
 from geotoolz.plume._src.array import (
@@ -197,8 +200,8 @@ class SBMP(Operator):
     negative values are clipped to zero before the log to keep the
     operator finite over noisy radiances. The output is single-band;
     nodata pixels (non-finite or equal to the fill value in any band of
-    the input or the reference scene) hold the input's fill value
-    (``NaN`` for plain arrays).
+    the input or the reference scene) hold ``NaN``, and a GeoTensor
+    output declares ``fill_value_default=NaN``.
 
     Args:
         swir1: Index or Sentinel-2 band name of the SWIR-1 channel.
@@ -249,8 +252,7 @@ class SBMP(Operator):
         invalid = invalid_values(gt).any(axis=self.axis)
         if self.reference_scene is not None:
             invalid = invalid | invalid_values(self.reference_scene).any(axis=self.axis)
-        out = restore_fill(out, ~invalid, carrier_fill_value(gt))
-        return wrap_like(gt, out)
+        return wrap_filled(gt, out, fill_value_default=np.nan, valid=~invalid)
 
     def get_config(self) -> dict[str, Any]:
         config: dict[str, Any] = {
@@ -284,7 +286,7 @@ class PlumeMask(Operator):
 
     Nodata pixels (non-finite or equal to the input's fill value) are
     excluded from the Otsu / percentile threshold and are always
-    ``False`` in the mask.
+    ``False`` in the mask, which declares ``fill_value_default=False``.
 
     Examples:
         >>> mask = gz.plume.PlumeMask(
@@ -310,7 +312,7 @@ class PlumeMask(Operator):
             min_area=self.min_area,
             connectivity=self.connectivity,
         )
-        return wrap_like(gt, mask)
+        return wrap_like(gt, mask, fill_value_default=False)
 
 
 class PlumeContours(Operator):
@@ -322,9 +324,10 @@ class PlumeContours(Operator):
 
     Nodata pixels (non-finite -- e.g. a ``NaN`` score -- or equal to the
     input's fill value) are never part of a contour. In the boolean
-    output they are ``False``. In the label image they hold the input's
-    fill value when it is a non-positive int32 value (e.g. ``-9999``, so
-    it cannot collide with a label); otherwise (``NaN``, no fill, or a
+    output they are ``False`` (``fill_value_default=False``). In the
+    label image they hold the input's fill value when it is a
+    non-positive int32 value (e.g. ``-9999``, so it cannot collide with
+    a label); otherwise (``NaN``, no fill, or a
     positive fill) they are ``0`` (background), and a GeoTensor output
     then carries ``fill_value_default=0``.
 
@@ -351,17 +354,13 @@ class PlumeContours(Operator):
             connectivity=self.connectivity,
         )
         if not self.return_labels:
-            return wrap_like(gt, labels > 0)
-        if valid.all():
-            return wrap_like(gt, labels)
-        fill = carrier_fill_value(gt)
-        # A positive fill would collide with a component label.
-        if isinstance(fill, numbers.Real) and fill <= 0:
-            try:
-                return wrap_like(gt, restore_fill(labels, valid, fill))
-            except ValueError:  # not an int32 value (NaN, -0.5, ...)
-                pass
-        return wrap_like(gt, labels, fill_value_default=0)
+            return wrap_like(gt, labels > 0, fill_value_default=False)
+        # ``carried_fill`` is None unless the fill is an int32 value; a
+        # positive fill would collide with a component label.
+        fill = carried_fill(gt, labels.dtype)
+        if fill is None or isinstance(fill, bool | np.bool_) or fill > 0:
+            fill = 0
+        return wrap_filled(gt, labels, fill_value_default=fill, valid=valid)
 
 
 class PlumeFootprint(Operator):
@@ -666,7 +665,7 @@ class WindAdvectionCone(Operator):
             half_angle_deg=self.half_angle_deg,
             max_distance=self.max_distance,
         )
-        return wrap_like(gt, mask)
+        return wrap_like(gt, mask, fill_value_default=False)
 
 
 class IMEEstimate(Operator):
@@ -946,8 +945,10 @@ class ColumnToMass(Operator):
     Thin wrapper over :func:`convert_column_units`. The ppm m conversion
     assumes a standard molar volume (298.15 K, 1 atm); see that
     function's docstring for the exact relation and caveats. Nodata
-    pixels (non-finite or equal to the fill value) are not converted and
-    hold the input's fill value.
+    pixels (non-finite or equal to the fill value) are not converted:
+    they hold ``NaN`` and the output declares ``fill_value_default=NaN``
+    (a converted column is a new quantity, so the input's fill -- e.g.
+    ``-9999`` ppm m -- is not carried over).
 
     Args:
         gas: ``"CH4"`` (default) or ``"CO2"``.
@@ -978,9 +979,10 @@ class ColumnToMass(Operator):
             units_in=self.units_in,
             units_out=self.units_out,
         )
-        if np.ndim(out) >= 2:
-            out = restore_fill(out, valid_pixels(gt), carrier_fill_value(gt))
-        return wrap_like(gt, out)
+        if np.ndim(out) < 2:
+            return wrap_like(gt, out)
+        out = np.asarray(out, dtype=np.result_type(out, np.float32))
+        return wrap_filled(gt, out, fill_value_default=np.nan)
 
 
 def _iter_instances(

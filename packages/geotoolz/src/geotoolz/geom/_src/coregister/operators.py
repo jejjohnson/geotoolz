@@ -364,6 +364,16 @@ class RasterToPoints(Operator):
         return result.rename(self.out_var)
 
 
+def _binned_fill(stat: str) -> float:
+    """Output fill of a binned / aggregated raster: ``0.0`` for counts, else NaN.
+
+    Empty cells of a count raster hold ``0``; every other statistic leaves
+    them ``NaN``. Either way the target grid's own fill value (the
+    ``like`` raster's) says nothing about the new values.
+    """
+    return 0.0 if stat == "count" else float("nan")
+
+
 class PointsToRaster(Operator):
     """Bin a vector cube of point measurements onto a target raster grid.
 
@@ -465,8 +475,12 @@ class PointsToRaster(Operator):
         if flip_x:
             result = result[:, ::-1]
 
-        # 4) Wrap back into a GeoTensor on the `like` grid.
-        return wrap_like(like, result.astype(np.float64))
+        # 4) Wrap back into a GeoTensor on the `like` grid. The binned
+        # statistic is a new quantity: empty cells are NaN (0 for counts),
+        # never ``like``'s fill.
+        return wrap_like(
+            like, result.astype(np.float64), fill_value_default=_binned_fill(self.stat)
+        )
 
 
 def _points_with_values(
@@ -914,7 +928,9 @@ def _point_cloud_binned_stat(
         result = result[::-1, :]
     if flip_x:
         result = result[:, ::-1]
-    return wrap_like(like, result.astype(np.float64))
+    return wrap_like(
+        like, result.astype(np.float64), fill_value_default=_binned_fill(stat)
+    )
 
 
 def _point_cloud_idw(
@@ -933,7 +949,9 @@ def _point_cloud_idw(
     # Empty cloud → all-NaN raster on the `like` grid (well-defined
     # rather than KDTree crash on zero-row input).
     if xy.shape[0] == 0:
-        return wrap_like(like, np.full((h, w), np.nan, dtype=np.float64))
+        return wrap_like(
+            like, np.full((h, w), np.nan, dtype=np.float64), fill_value_default=np.nan
+        )
     x_centers, y_centers = _pixel_center_coords(like.transform, like.shape)
     yy, xx = np.meshgrid(y_centers, x_centers, indexing="ij")
     pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])  # (H*W, 2)
@@ -955,7 +973,7 @@ def _point_cloud_idw(
         # Mask pixels whose nearest point exceeds the radius.
         nearest_dist = distances[:, 0].reshape(h, w)
         result = np.where(nearest_dist > max_radius, np.nan, result)
-    return wrap_like(like, result)
+    return wrap_like(like, result, fill_value_default=np.nan)
 
 
 class VectorToRasterAgg(Operator):
@@ -1130,4 +1148,5 @@ class VectorToRasterAgg(Operator):
             assert ordinal_arr is not None
             result = ordinal_arr
 
-        return wrap_like(like, result)
+        # Empty cells are NaN (0 for counts), never ``like``'s fill.
+        return wrap_like(like, result, fill_value_default=_binned_fill(self.agg))

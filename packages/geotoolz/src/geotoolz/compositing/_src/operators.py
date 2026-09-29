@@ -10,8 +10,14 @@ Nodata is judged *per frame* with :func:`geotoolz._src.valid.valid_pixels`
 (non-finite values, or the frame's ``fill_value_default``, in any band):
 an invalid frame never contributes to a reduction, a score or a
 selection at that pixel, and pixels invalid in every frame come out
-holding the output's fill value (the first frame's
-``fill_value_default``; ``NaN`` when it has none).
+holding the output's fill value. Composites carry the frames' values, so
+they keep the first frame's ``fill_value_default`` -- switching to
+``NaN`` when integer frames are averaged into float (see
+:func:`geotoolz._src.valid.carried_fill`) and using ``NaN`` when the first
+frame has none. Auxiliary outputs follow their own meaning: contributor
+counts declare ``fill_value_default=0`` (a pixel no frame covers has
+count ``0``), float scores use ``NaN``, and the frame-index map of
+:class:`MaxNDVIComposite` uses ``-1`` (``0`` is a valid frame index).
 """
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ from pipekit import Operator
 
 from geotoolz._src.bands import BandRef, resolve_band
 from geotoolz._src.valid import (
-    carrier_fill_value,
+    carried_fill,
     invalid_values,
     restore_fill,
     valid_pixels,
@@ -250,12 +256,13 @@ class MedianComposite(Operator):
                 if self.nan_policy == "ignore"
                 else np.median(masked, axis=0)
             )
-        values = restore_fill(values, valid.any(axis=0), carrier_fill_value(base))
-        out = wrap_like(base, values)
+        fill = carried_fill(base, values.dtype)
+        values = restore_fill(values, valid.any(axis=0), fill)
+        out = wrap_like(base, values, fill_value_default=fill)
         if not self.return_count:
             return out
         count = np.sum(~np.isnan(masked), axis=0).astype(np.int64)
-        return out, wrap_like(base, count)
+        return out, wrap_like(base, count, fill_value_default=0)
 
 
 class MaxNDVIComposite(Operator):
@@ -278,7 +285,8 @@ class MaxNDVIComposite(Operator):
             resolved against the first frame's attrs.
         nir: NIR band reference, same conventions as ``red``.
         return_index: When true, also return a carrier holding the
-            selected frame index per pixel (``int64``).
+            selected frame index per pixel (``int64``; ``-1``, the
+            declared ``fill_value_default``, where no frame is valid).
             The output is then a tuple, so the operator is terminal
             (last step only) in a ``Sequential``.
         eps: Stabiliser added to the NDVI denominator.
@@ -340,8 +348,8 @@ class MaxNDVIComposite(Operator):
         index = np.argmax(scores, axis=0)
         values = _take_by_spatial_index(stack, index)
         all_invalid = np.all(~np.isfinite(scores), axis=0)
+        fill = carried_fill(base, values.dtype)
         if np.any(all_invalid):
-            fill = carrier_fill_value(base)
             if np.issubdtype(values.dtype, np.floating):
                 values = restore_fill(values, ~all_invalid, fill)
             else:
@@ -355,10 +363,12 @@ class MaxNDVIComposite(Operator):
                         "with fill_value_default or float frames."
                     )
                 values[..., all_invalid] = fill
-        out = wrap_like(base, values)
+        out = wrap_like(base, values, fill_value_default=fill)
         if not self.return_index:
             return out
-        return out, wrap_like(base, index.astype(np.int64))
+        # Frame 0 is a real index, so pixels no frame covers are -1.
+        index = np.where(all_invalid, -1, index).astype(np.int64)
+        return out, wrap_like(base, index, fill_value_default=-1)
 
 
 class CloudFreeComposite(Operator):
@@ -417,15 +427,13 @@ class CloudFreeComposite(Operator):
         with np.errstate(invalid="ignore", divide="ignore"):
             values = total / count
         values = np.where(count >= self.min_valid, values, np.nan)
-        values = restore_fill(
-            _as_float_for_nan(values),
-            frame_valid.any(axis=0),
-            carrier_fill_value(base),
-        )
-        out = wrap_like(base, values)
+        values = _as_float_for_nan(values)
+        fill = carried_fill(base, values.dtype)
+        values = restore_fill(values, frame_valid.any(axis=0), fill)
+        out = wrap_like(base, values, fill_value_default=fill)
         if not self.return_count:
             return out
-        return out, wrap_like(base, count.astype(np.int64))
+        return out, wrap_like(base, count.astype(np.int64), fill_value_default=0)
 
 
 class BAPComposite(Operator):
@@ -553,13 +561,15 @@ class BAPComposite(Operator):
         ).astype(np.float32, copy=False)
         index = np.argmax(score_stack, axis=0)
         any_valid = np.isfinite(score_stack).any(axis=0)
-        fill = carrier_fill_value(base)
-        values = restore_fill(_take_by_spatial_index(stack, index), any_valid, fill)
-        out = wrap_like(base, values)
+        values = _take_by_spatial_index(stack, index)
+        fill = carried_fill(base, values.dtype)
+        values = restore_fill(values, any_valid, fill)
+        out = wrap_like(base, values, fill_value_default=fill)
         if not self.return_score:
             return out
         best_score = np.take_along_axis(score_stack, index[None, ...], axis=0)[0]
-        return out, wrap_like(base, restore_fill(best_score, any_valid, fill))
+        best_score = restore_fill(best_score, any_valid, np.nan)
+        return out, wrap_like(base, best_score, fill_value_default=np.nan)
 
 
 class MinCloudComposite(Operator):
@@ -618,16 +628,14 @@ class MinCloudComposite(Operator):
             clear, cloud_coverage, np.where(valid, cloud_coverage + 2.0, np.inf)
         )
         index = np.argmin(costs, axis=0)
-        values = restore_fill(
-            _take_by_spatial_index(stack, index),
-            valid.any(axis=0),
-            carrier_fill_value(base),
-        )
-        out = wrap_like(base, values)
+        values = _take_by_spatial_index(stack, index)
+        fill = carried_fill(base, values.dtype)
+        values = restore_fill(values, valid.any(axis=0), fill)
+        out = wrap_like(base, values, fill_value_default=fill)
         if not self.return_count:
             return out
         count = np.sum(clear, axis=0).astype(np.int64)
-        return out, wrap_like(base, count)
+        return out, wrap_like(base, count, fill_value_default=0)
 
 
 __all__ = [

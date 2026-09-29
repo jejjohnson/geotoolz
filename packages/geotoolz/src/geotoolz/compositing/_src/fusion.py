@@ -30,7 +30,7 @@ from pipekit import Operator
 
 from geotoolz._src.bands import concat_band_attrs, strip_band_attrs
 from geotoolz._src.valid import (
-    carrier_fill_value,
+    carried_fill,
     is_fill,
     restore_fill,
     valid_pixels,
@@ -120,7 +120,8 @@ def _translate_fills(
 ) -> Shaped[np.ndarray, "c h w"]:
     """Rewrite each input's nodata pixels to the output fill, in its own bands.
 
-    The output inherits the first input's ``fill_value_default``; an input
+    The output keeps the first input's ``fill_value_default`` (``NaN``
+    when concatenation promotes integer bands to float); an input
     with a different fill would otherwise leave nodata that the output's
     fill no longer marks. When the output fill cannot be represented in
     the concatenated dtype, the input's values are left untouched.
@@ -210,7 +211,8 @@ class StackMatched(Operator):
 
         arrays = [_as_band_first(np.asarray(t)) for t in seq]
         stacked = np.concatenate(arrays, axis=0)
-        stacked = _translate_fills(stacked, seq, arrays, carrier_fill_value(base))
+        fill = carried_fill(base, stacked.dtype)
+        stacked = _translate_fills(stacked, seq, arrays, fill)
         attrs = strip_band_attrs(getattr(base, "attrs", None))
         attrs.update(
             concat_band_attrs(
@@ -218,7 +220,7 @@ class StackMatched(Operator):
                 [arr.shape[0] for arr in arrays],
             )
         )
-        return wrap_like(base, stacked, attrs=attrs)
+        return wrap_like(base, stacked, fill_value_default=fill, attrs=attrs)
 
 
 class BlendMatched(Operator):
@@ -245,8 +247,9 @@ class BlendMatched(Operator):
 
     Nodata pixels of each input (non-finite, or that input's
     ``fill_value_default``, in any band) are treated as NaN; pixels that
-    are nodata in every input hold the output fill (the first input's
-    ``fill_value_default``; NaN when it has none).
+    are nodata in every input hold the output fill: the first input's
+    ``fill_value_default``, or ``NaN`` when it has none or is an integer
+    input blended into float (see :func:`geotoolz._src.valid.carried_fill`).
 
     All inputs must share spatial shape, transform, and CRS. The
     band axis must also be uniform (use `StackMatched` if you want
@@ -425,7 +428,6 @@ class BlendMatched(Operator):
             with np.errstate(invalid="ignore", divide="ignore"):
                 result = np.where(den > 0, num / den, np.nan)
 
-        result = restore_fill(
-            result, source_valid.any(axis=0), carrier_fill_value(base)
-        )
-        return wrap_like(base, result)
+        fill = carried_fill(base, result.dtype)
+        result = restore_fill(result, source_valid.any(axis=0), fill)
+        return wrap_like(base, result, fill_value_default=fill)
