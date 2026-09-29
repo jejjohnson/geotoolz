@@ -236,3 +236,11 @@ def test_geo_dependent_ops_reject_plain_arrays(op: gz.Operator) -> None:
     """Ops whose output geometry needs the transform stay GeoTensor-only."""
     with pytest.raises(TypeError, match="georeferenced GeoTensor"):
         op(np.zeros((6, 6), dtype=float))
+
+
+def test_4d_time_stack() -> None:
+    """Single-band feature detectors reject a (T, 1, H, W) stack by name (#147)."""
+    from _helpers import time_stack
+
+    with pytest.raises(ValueError, match="Canny expects a single-band map"):
+        gz.feature.Canny()(time_stack((2, 1, 8, 8)))

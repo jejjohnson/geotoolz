@@ -535,3 +535,22 @@ def test_fill_pixels_are_excluded(case: str, fill: float) -> None:
         expected = mf.StreamingBackground(cov_kind="empirical")([clean, clean])
         np.testing.assert_allclose(result.mean, expected.mean)
         np.testing.assert_allclose(result.cov_op.matrix, expected.cov_op.matrix)
+
+
+def test_4d_time_stack() -> None:
+    """The spectral axis defaults to -3; 2-D maps are rejected (#147)."""
+    from _helpers import time_stack
+
+    stack = time_stack((2, 3, 6, 6))
+    samples = np.moveaxis(np.asarray(stack), 1, -1).reshape(-1, 3)
+    mean = gz.matched_filter.EstimateMean(method="mean")(stack)
+    np.testing.assert_allclose(mean, samples.mean(axis=0))
+    scores = gz.matched_filter.MatchedFilter(target=np.ones(3))(stack)
+    assert isinstance(scores, GeoTensor)
+    assert scores.shape == (2, 1, 6, 6)
+    with pytest.raises(ValueError, match="MatchedFilter: spectral axis -3"):
+        gz.matched_filter.MatchedFilter(target=np.ones(3))(
+            toy_geotensor(np.ones((6, 6)))
+        )
+    with pytest.raises(ValueError, match="AdaptiveWindowBackground accepts 3-D"):
+        gz.matched_filter.AdaptiveWindowBackground(window_size=3)(stack)

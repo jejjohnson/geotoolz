@@ -556,3 +556,15 @@ def test_fill_pixels_are_excluded(op: Operator) -> None:
     np.testing.assert_array_equal(out, np.asarray(op(as_nan)))
     if not isinstance(op, gz.segment.ChanVese):  # ChanVese: 0 = "outside"
         assert (out[~fill] >= 1).all()
+
+
+def test_4d_time_stack() -> None:
+    """Multi-band segmenters label each frame of a stack (#147)."""
+    from _helpers import frames, time_stack
+
+    stack = time_stack((2, 3, 16, 16))
+    op = gz.segment.SLIC(n_segments=4, compactness=10.0)
+    out = op(stack)
+    assert out.shape == (2, 1, 16, 16)
+    for t, frame in enumerate(frames(stack)):
+        np.testing.assert_array_equal(np.asarray(out)[t, 0], np.asarray(op(frame)))

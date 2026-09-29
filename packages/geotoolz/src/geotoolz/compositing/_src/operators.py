@@ -2,6 +2,10 @@
 
 All composites are metadata-independent per-pixel reductions, so they
 accept sequences of plain ``np.ndarray`` frames as well as GeoTensors.
+The frame-sequence composites (:class:`MedianComposite`,
+:class:`MaxNDVIComposite`) also accept a single ``(T, C, H, W)`` time
+stack -- georeader's ``("time", "band", "y", "x")`` GeoTensor -- which is
+reduced over its time axis and rewrapped like ``stack.isel({"time": 0})``.
 Grid checks (transform / CRS equality) apply only to frames that carry
 georeferencing; plain arrays fall back to shape-equality checks. The
 output carrier follows the first frame.
@@ -68,6 +72,32 @@ def _grid_matches(a: GeoTensor | np.ndarray, b: GeoTensor | np.ndarray) -> bool:
     # garbage.
     return a_transform == b_transform and getattr(a, "crs", None) == getattr(
         b, "crs", None
+    )
+
+
+def _as_frames(
+    frames: Sequence[GeoTensor | np.ndarray] | GeoTensor | np.ndarray, name: str
+) -> Sequence[GeoTensor | np.ndarray]:
+    """Accept a sequence of frames or a single ``(T, C, H, W)`` stack.
+
+    A GeoTensor stack (dims ``time, band, y, x``) is split into its
+    ``gt.isel({"time": t})`` frames, which keep its transform, CRS, fill
+    value and attrs, so the composite is rewrapped like frame 0. A plain
+    ndarray stack (``(T, C, H, W)``, or ``(T, H, W)`` for single-band
+    frames) is split along axis 0. A 2-D / 3-D GeoTensor is not a time
+    stack (its leading axis is bands) and is rejected.
+    """
+    if not isinstance(frames, np.ndarray):
+        return frames
+    isel = getattr(frames, "isel", None)
+    if isel is not None and frames.ndim == 4:
+        return [isel({"time": t}) for t in range(frames.shape[0])]
+    if isel is None and frames.ndim in (3, 4):
+        return list(frames)
+    raise ValueError(
+        f"{name} takes a sequence of co-registered frames or a (T, C, H, W) "
+        f"time stack; got a {frames.ndim}-D "
+        f"{'GeoTensor' if isel is not None else 'array'} of shape {frames.shape}"
     )
 
 
@@ -245,6 +275,7 @@ class MedianComposite(Operator):
     def _apply(
         self, frames: Sequence[GeoTensor | np.ndarray]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
+        frames = _as_frames(frames, type(self).__name__)
         base, stack = _stack_frames(frames)
         valid = _frame_validity(frames)
         masked = _mask_frames(stack, valid)
@@ -313,6 +344,7 @@ class MaxNDVIComposite(Operator):
     def _apply(
         self, frames: Sequence[GeoTensor | np.ndarray]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
+        frames = _as_frames(frames, type(self).__name__)
         base, stack = _stack_frames(frames)
         # NDVI needs distinct red/nir bands; 2-D GeoTensors don't have a
         # band axis and would silently broadcast `:, red_idx, ...` into

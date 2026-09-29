@@ -15,6 +15,12 @@ Seeding semantics (shared by every operator here):
   already-seeded operator (e.g. dataloader workers) repeat each other's
   draws unless each is given its own ``seed``.
 
+Time stacks: a ``(T, C, H, W)`` input is one sample. The band axis is
+``-3``, so per-band draws (factors, sigmas, dropout, permutations) are made
+once per band and shared by every frame, and geometric draws (flips,
+rotations, crops, shifts) move all frames together; per-pixel noise is
+drawn for the full stack. Nodata is judged per frame.
+
 Nodata semantics (see :mod:`geotoolz._src.valid`): radiometric operators
 never perturb fill pixels -- every pixel invalid under
 :func:`~geotoolz._src.valid.valid_pixels` (non-finite, or equal to the
@@ -40,6 +46,7 @@ from pipekit import Operator
 from rasterio.windows import Window
 from scipy.ndimage import gaussian_filter
 
+from geotoolz._src.bands import band_count
 from geotoolz._src.config import (
     as_tuple,
     jsonable,
@@ -47,6 +54,7 @@ from geotoolz._src.config import (
     mapping_to_pairs,
     nested_config,
 )
+from geotoolz._src.shape import BAND_AXIS
 from geotoolz._src.valid import carrier_fill_value, restore_fill, valid_pixels
 from geotoolz._src.wrap import adopt_attrs, wrap_like
 
@@ -146,14 +154,29 @@ def _sample_nonnegative(
 
 
 def _band_count(arr: Shaped[np.ndarray, "*dims"]) -> int:
-    return int(arr.shape[0]) if arr.ndim >= 3 else 1
+    """Number of bands: ``shape[-3]`` (a 2-D map is one band)."""
+    return band_count(arr.shape)
 
 
 def _band_shape(arr: Shaped[np.ndarray, "*dims"]) -> tuple[int, ...]:
+    """Shape of a per-band factor broadcasting as ``(..., C, 1, 1)``.
+
+    The band axis is ``-3`` (``(C, H, W)`` or ``(T, C, H, W)``), so one
+    factor per band is shared by every frame of a time stack.
+    """
     shape = [1] * arr.ndim
     if arr.ndim >= 3:
-        shape[0] = arr.shape[0]
+        shape[BAND_AXIS] = arr.shape[BAND_AXIS]
     return tuple(shape)
+
+
+def _broadcast_valid(
+    valid: np.ndarray, shape: tuple[int, ...]
+) -> Shaped[np.ndarray, "*dims"]:
+    """Broadcast an ``(H, W)`` / per-frame ``(T, H, W)`` mask against ``shape``."""
+    if valid.ndim == 3 and len(shape) == 4:
+        valid = valid[:, None]
+    return np.broadcast_to(valid, shape)
 
 
 def _cast_like(
@@ -183,11 +206,12 @@ def _valid(arr: Shaped[np.ndarray, "*dims"], gt: Any) -> np.ndarray | None:
 
     ``None`` flags the fast path: operators then run exactly the math they
     always did. Inputs with fewer than two dims have no pixel grid and are
-    treated as all-valid.
+    treated as all-valid. A ``(T, C, H, W)`` stack gets a per-frame
+    ``(T, H, W)`` mask, so nodata in one frame does not blank the others.
     """
     if arr.ndim < 2:
         return None
-    valid = valid_pixels(gt)
+    valid = valid_pixels(gt, keep_time=True)
     return None if valid.all() else valid
 
 
@@ -538,8 +562,8 @@ class BrightnessJitter(Operator):
     Args:
         factor: ``(lo, hi)`` range the multiplicative factor is drawn
             from. Default ``(0.9, 1.1)``.
-        per_band: Draw an independent factor per band (leading axis)
-            instead of one shared factor. Default ``True``.
+        per_band: Draw an independent factor per band (the band
+            axis, ``-3``) instead of one shared factor. Default ``True``.
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
@@ -592,8 +616,8 @@ class ContrastJitter(Operator):
     Args:
         factor: ``(lo, hi)`` range the contrast factor is drawn from.
             Default ``(0.9, 1.1)``.
-        per_band: Draw an independent factor per band (leading axis)
-            instead of one shared factor. Default ``True``.
+        per_band: Draw an independent factor per band (the band
+            axis, ``-3``) instead of one shared factor. Default ``True``.
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
@@ -620,7 +644,7 @@ class ContrastJitter(Operator):
         if valid is None:
             mean = np.mean(data, axis=(-2, -1), keepdims=True)
         else:
-            masked = np.where(valid, data, np.nan)
+            masked = np.where(_broadcast_valid(valid, data.shape), data, np.nan)
             with warnings.catch_warnings():
                 # An all-nodata band has no mean; its pixels are all refilled.
                 warnings.simplefilter("ignore", RuntimeWarning)
@@ -653,8 +677,8 @@ class GaussianNoise(Operator):
     Args:
         sigma: Noise standard deviation, either a scalar or a
             ``(lo, hi)`` range to sample from. Default ``0.01``.
-        per_band: Draw an independent sigma per band (leading axis)
-            instead of one shared sigma. Default ``True``.
+        per_band: Draw an independent sigma per band (the band
+            axis, ``-3``) instead of one shared sigma. Default ``True``.
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
@@ -772,8 +796,8 @@ class BandDropout(Operator):
                 out[...] = self.fill
             return _wrap_like(gt, out, _valid(arr, gt))
 
-        mask = rng.random(arr.shape[0]) < self.p
-        out[mask, ...] = self.fill
+        mask = rng.random(arr.shape[BAND_AXIS]) < self.p
+        out[..., mask, :, :] = self.fill
         return _wrap_like(gt, out, _valid(arr, gt))
 
 
@@ -816,9 +840,11 @@ class BandJitter(Operator):
         rng = _call_rng(self, seed)
         out = np.array(arr, copy=True)
         for group in self.groups.values():
-            indices = [_band_index(name, band_names, arr.shape[0]) for name in group]
+            indices = [
+                _band_index(name, band_names, arr.shape[BAND_AXIS]) for name in group
+            ]
             if len(indices) > 1:
-                out[indices, ...] = arr[rng.permutation(indices), ...]
+                out[..., indices, :, :] = arr[..., rng.permutation(indices), :, :]
         return _wrap_like(gt, out)
 
     def get_config(self) -> dict[str, Any]:
@@ -1017,7 +1043,7 @@ class SimulatedClouds(Operator):
         )
         alpha = alpha.reshape((1,) * (arr.ndim - 2) + alpha.shape)
         valid = _valid(arr, gt)
-        scene = arr if valid is None else arr[..., valid]
+        scene = arr if valid is None else arr[_broadcast_valid(valid, arr.shape)]
         # Assume [0, 1] reflectance if max <= 1; otherwise approximate bright clouds.
         cloud_value = (
             1.0
@@ -1122,8 +1148,8 @@ class CutMix(Operator):
         if donor_valid is not None:
             # Input pixels outside the rectangle keep their own values
             # (fills included); only donor holes need the input's fill.
-            valid = np.ones(arr.shape[-2:], dtype=bool)
-            valid[region] = donor_valid[region]
+            valid = np.ones(donor_valid.shape, dtype=bool)
+            valid[..., region[0], region[1]] = donor_valid[..., region[0], region[1]]
         return _wrap_like(gt, out, valid)
 
     def get_config(self) -> dict[str, Any]:

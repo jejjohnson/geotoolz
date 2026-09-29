@@ -18,7 +18,7 @@ from geotoolz.indices._src.array import normalized_difference as normalized_diff
 
 
 def select_bands(
-    arr: Shaped[np.ndarray, "c h w"], indexes: list[int], *, axis: int = 0
+    arr: Shaped[np.ndarray, "c h w"], indexes: list[int], *, axis: int = -3
 ) -> Shaped[np.ndarray, "k h w"]:
     """Select bands by integer index along the configured band axis.
 
@@ -31,8 +31,9 @@ def select_bands(
         arr: Input array with the band axis at position ``axis``.
         indexes: Integer band positions to keep, in output order.
             Repeats are allowed (the band is duplicated in the output).
-        axis: Position of the band axis. Default ``0`` (band-first
-            convention; matches ``rasterio.read()`` output).
+        axis: Position of the band axis. Default ``-3`` (georeader's
+            ``(C, H, W)`` / ``(T, C, H, W)`` layout; matches
+            ``rasterio.read()`` output).
 
     Returns:
         Array with the band axis replaced by the ``len(indexes)``
@@ -42,7 +43,7 @@ def select_bands(
 
 
 def reorder_bands(
-    arr: Shaped[np.ndarray, "c h w"], order: list[int], *, axis: int = 0
+    arr: Shaped[np.ndarray, "c h w"], order: list[int], *, axis: int = -3
 ) -> Shaped[np.ndarray, "c h w"]:
     """Reorder bands by integer index along the configured band axis.
 
@@ -53,7 +54,7 @@ def reorder_bands(
     Args:
         arr: Input array with the band axis at position ``axis``.
         order: New band ordering as integer positions.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Returns:
         Array with the same shape as ``arr`` and the band axis permuted
@@ -67,7 +68,7 @@ def band_ratio(
     numerator_idx: int,
     denominator_idx: int,
     *,
-    axis: int = 0,
+    axis: int = -3,
     eps: float = 1e-6,
 ) -> Float[np.ndarray, "h w"]:
     """Compute ``numerator / (denominator + eps)`` with the band axis collapsed.
@@ -77,7 +78,7 @@ def band_ratio(
             other dimensions are preserved untouched.
         numerator_idx: Integer position of the numerator band.
         denominator_idx: Integer position of the denominator band.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Small constant added to the denominator to shadow division
             by zero on no-data / saturated pixels. Default ``1e-6``.
             Pass ``0.0`` to see ``inf``/``nan`` on zero pixels instead.
@@ -213,7 +214,7 @@ def continuum_removal(
     arr: Float[np.ndarray, "c h w"],
     wavelengths: Float[np.ndarray, " c"],
     *,
-    axis: int = 0,
+    axis: int = -3,
     method: str = "convex_hull",
 ) -> Float[np.ndarray, "c h w"]:
     """Apply hull-quotient continuum removal along the band axis.
@@ -238,7 +239,7 @@ def continuum_removal(
             number of trailing/leading non-band dimensions is supported.
         wavelengths: Band-center wavelengths, strictly increasing, with
             length equal to ``arr.shape[axis]``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         method: Continuum model, ``"convex_hull"`` (default) or
             ``"linear"``.
 
@@ -312,7 +313,7 @@ def spectral_binning(
     target_wavelengths: Float[np.ndarray, " k"],
     width: float | Float[np.ndarray, " k"],
     *,
-    axis: int = 0,
+    axis: int = -3,
     method: str = "mean",
 ) -> Float[np.ndarray, "k h w"]:
     """Aggregate source bands into wavelength-centered bins.
@@ -340,7 +341,7 @@ def spectral_binning(
         width: Bin width(s) in the same units as the wavelengths — a
             scalar applied to every bin, or a per-bin array broadcast
             against ``target_wavelengths``. Must be strictly positive.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         method: ``"mean"`` (default), ``"median"``, or
             ``"weighted_mean"``.
 
@@ -397,7 +398,7 @@ def spectral_binning(
 def spectral_smoothing(
     arr: Float[np.ndarray, "c h w"],
     *,
-    axis: int = 0,
+    axis: int = -3,
     method: str = "savgol",
     window: int = 7,
     polyorder: int = 2,
@@ -418,7 +419,7 @@ def spectral_smoothing(
     Args:
         arr: Spectral cube with the band axis at position ``axis``. Any
             number of non-band dimensions is supported.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         method: ``"savgol"`` (default), ``"gaussian"``, or
             ``"moving_average"``.
         window: Filter window length in bands. Must be odd for

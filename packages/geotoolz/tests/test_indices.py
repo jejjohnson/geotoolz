@@ -728,7 +728,7 @@ def test_append_index_get_config_is_jsonable() -> None:
     assert decoded == {
         "index_op": {
             "class": "NDVI",
-            "config": {"nir_idx": 7, "red_idx": 3, "axis": 0, "eps": 1e-10},
+            "config": {"nir_idx": 7, "red_idx": 3, "axis": -3, "eps": 1e-10},
         },
         "axis": 0,
     }
@@ -739,3 +739,20 @@ def test_append_index_get_config_is_jsonable() -> None:
         index_op=NDVI(**decoded["index_op"]["config"]), axis=decoded["axis"]
     )
     assert restored.get_config() == cfg
+
+
+def test_4d_time_stack() -> None:
+    """Indices read bands along -3 and keep the time axis (#147)."""
+    from _helpers import frames, time_stack
+
+    stack = time_stack()
+    out = NDVI(nir_idx=1, red_idx=0)(stack)
+    assert isinstance(out, GeoTensor)
+    assert out.shape == (2, 1, 4, 4)
+    for t, frame in enumerate(frames(stack)):
+        np.testing.assert_allclose(
+            np.asarray(out)[t, 0], np.asarray(NDVI(nir_idx=1, red_idx=0)(frame))
+        )
+    appended = AppendIndex(index_op=NDVI(nir_idx=1, red_idx=0))(stack)
+    assert appended.shape == (2, 4, 4, 4)
+    assert appended.attrs["band_names"] == ["b0", "b1", "b2", "NDVI"]

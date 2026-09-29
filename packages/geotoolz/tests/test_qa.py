@@ -532,3 +532,17 @@ def test_qa_hydra_zen_roundtrip(op: object) -> None:
     restored = hydra_zen.instantiate(cfg)
     assert type(restored) is type(op)
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
+
+
+def test_4d_time_stack() -> None:
+    """QA decoders select the QA band along -3, per frame (#147)."""
+    qa_frame = np.zeros((2, 4, 4), dtype=np.uint16)
+    qa_frame[1, 0, 0] = 1 << 3
+    stack_values = np.stack([qa_frame, np.roll(qa_frame, 1, axis=-1)])
+    stack = _toy_geotensor(stack_values, fill_value_default=None)
+    mask = qa.MaskFromQABits(band_idx=1, bits=[3])(stack)
+    assert mask.shape == (2, 1, 4, 4)
+    np.testing.assert_array_equal(np.asarray(mask)[:, 0], stack_values[:, 1] > 0)
+    layers = qa.DecodeBitmask(bits={"cloud": [3], "none": [5]}, qa_band=1)(stack)
+    assert layers.shape == (2, 2, 4, 4)
+    assert layers.attrs["band_names"] == ["cloud", "none"]

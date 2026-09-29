@@ -436,3 +436,29 @@ def test_fill_pixels_are_excluded_from_fitted_stats() -> None:
     restored = np.asarray(scaler.inverse(scaler(gt)))
     assert np.isnan(restored[:, fill]).all()
     np.testing.assert_allclose(restored[:, ~fill], valid)
+
+
+def test_4d_time_stack() -> None:
+    """Per-band stats are (C,) on a stack; CLAHE equalises each slice (#147)."""
+    from _helpers import frames, time_stack
+
+    from geotoolz.normalize._src.array import reshape_stat, stat_axes
+
+    stack = time_stack((2, 3, 8, 8))
+    values = np.asarray(stack)
+    assert stat_axes(values) == (-4, -2, -1)
+    scaler = StandardScaler(fit_on_call=True)
+    out = scaler(stack)
+    assert np.shape(scaler.mean) == (3,)
+    np.testing.assert_allclose(scaler.mean, values.mean(axis=(0, 2, 3)))
+    np.testing.assert_allclose(np.asarray(out).mean(axis=(0, 2, 3)), 0.0, atol=1e-12)
+
+    clahe = CLAHE(kernel_size=(4, 4))
+    equalised = clahe(stack)
+    for t, frame in enumerate(frames(stack)):
+        np.testing.assert_allclose(np.asarray(equalised)[t], np.asarray(clahe(frame)))
+
+    with pytest.raises(ValueError, match="does not match the kept axes"):
+        reshape_stat(np.zeros(2), values, stat_axes(values))
+    with pytest.raises(ValueError, match="does not match the kept axes"):
+        Normalize(mean=[0.0, 0.0], std=[1.0, 1.0])(stack)

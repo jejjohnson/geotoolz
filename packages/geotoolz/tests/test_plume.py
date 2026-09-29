@@ -948,3 +948,20 @@ def test_fill_pixels_are_excluded(case: str) -> None:
         assert np.isnan(result.fill_value_default)
         assert np.isnan(out[fill]).all()
         assert (out[valid] > 0).all()
+
+
+def test_4d_time_stack() -> None:
+    """SBMP reads bands along -3; table outputs reject a stack (#147)."""
+    from _helpers import time_stack
+
+    stack = time_stack()
+    values = np.asarray(stack)
+    score = gz.plume.SBMP(swir1=1, swir2=0, eps=0.0)(stack)
+    assert score.shape == (2, 1, 4, 4)
+    expected = (values[:, 1] - values[:, 0]) / (values[:, 1] + values[:, 0])
+    np.testing.assert_allclose(np.asarray(score)[:, 0], expected)
+
+    masks = gz.plume.PlumeMask(threshold=0.5, min_area=1)(time_stack((2, 1, 4, 4)))
+    assert masks.shape == (2, 1, 4, 4)
+    with pytest.raises(ValueError, match="PlumeFootprint accepts 2-D"):
+        gz.plume.PlumeFootprint()(stack)

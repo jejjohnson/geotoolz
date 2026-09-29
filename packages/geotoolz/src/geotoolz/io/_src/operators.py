@@ -1039,7 +1039,8 @@ class WriteCOG(SinkOperator):
         tags: Optional rasterio tags stored as TIFF metadata.
 
     Raises:
-        GeoToolzIOError: If the file cannot be written.
+        GeoToolzIOError: If ``gt`` is not 2D or 3D (a 4-D ``(T, C, H, W)``
+            stack has no GeoTIFF layout), or the file cannot be written.
 
     Examples:
         Save an NDVI raster as a COG::
@@ -1065,6 +1066,12 @@ class WriteCOG(SinkOperator):
         self.tags = mapping_from_pairs(tags)
 
     def _apply(self, gt: GeoTensor) -> None:
+        if np.ndim(gt.values) not in (2, 3):
+            raise GeoToolzIOError(
+                "WriteCOG expects 2D or 3D data ((H, W) or (C, H, W)), found shape "
+                f"{np.shape(gt.values)!r}; write each frame of a (T, C, H, W) "
+                "stack separately or use WriteZarr."
+            )
         merged_profile: dict[str, Any] = {"compress": self.compress}
         if self.profile is not None:
             merged_profile.update(self.profile)
@@ -1136,8 +1143,9 @@ class WriteGeoTIFF(SinkOperator):
     def _apply(self, gt: GeoTensor) -> None:
         if np.ndim(gt.values) not in (2, 3):
             raise GeoToolzIOError(
-                "GeoTIFF output expects 2D or 3D data, found shape "
-                f"{np.shape(gt.values)!r}."
+                "WriteGeoTIFF expects 2D or 3D data ((H, W) or (C, H, W)), found shape "
+                f"{np.shape(gt.values)!r}; write each frame of a (T, C, H, W) "
+                "stack separately or use WriteZarr."
             )
         try:
             save.save_tiled_geotiff(

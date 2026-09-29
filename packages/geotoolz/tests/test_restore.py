@@ -505,3 +505,26 @@ def test_fill_pixels_are_excluded_from_masks_and_pca_fit() -> None:
     restored = np.asarray(InverseMNF(forward=forward)(scores))
     assert np.isnan(restored[:, fill]).all()
     np.testing.assert_allclose(restored[:, ~fill], values[:, ~fill], atol=1e-10)
+
+
+def test_4d_time_stack() -> None:
+    """PCA transforms fit on the band axis (-3); 2-D maps are rejected (#147)."""
+    from _helpers import time_stack
+
+    stack = time_stack((2, 4, 6, 6))
+    forward = MNF(n_components=2)
+    scores = forward(stack)
+    assert scores.shape == (2, 2, 6, 6)
+    restored = InverseMNF(forward=forward)(scores)
+    assert restored.shape == stack.shape
+    full = MNF()
+    np.testing.assert_allclose(
+        np.asarray(InverseMNF(forward=full)(full(stack))), np.asarray(stack)
+    )
+    denoised = DenoisePCA(n_components=4)(stack)
+    np.testing.assert_allclose(np.asarray(denoised), np.asarray(stack))
+    # Rows of a 2-D map are never treated as bands.
+    with pytest.raises(ValueError, match="DenoisePCA accepts 3-D"):
+        DenoisePCA(n_components=1)(toy_geotensor(np.ones((4, 4))))
+    with pytest.raises(ValueError, match="MNF accepts 3-D"):
+        MNF(n_components=1)(toy_geotensor(np.ones((4, 4))))

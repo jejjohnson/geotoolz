@@ -258,21 +258,21 @@ def test_stack_and_split_bands() -> None:
 
 def test_spectral_get_config_serialization() -> None:
     ops_and_configs = [
-        (spectral.SelectBands(indexes=[0]), {"indexes": [0], "axis": 0}),
-        (spectral.ReorderBands(order=[0]), {"order": [0], "axis": 0}),
-        (spectral.StackBands(), {"axis": 0}),
-        (spectral.SplitBands(), {"names": None, "axis": 0}),
+        (spectral.SelectBands(indexes=[0]), {"indexes": [0], "axis": -3}),
+        (spectral.ReorderBands(order=[0]), {"order": [0], "axis": -3}),
+        (spectral.StackBands(), {"axis": -3}),
+        (spectral.SplitBands(), {"names": None, "axis": -3}),
         (
             spectral.BandMath(expression="B0"),
-            {"expression": "B0", "band_names": None, "axis": 0},
+            {"expression": "B0", "band_names": None, "axis": -3},
         ),
         (
             spectral.NormalizedDifference(a=0, b=1),
-            {"a": 0, "b": 1, "eps": 1e-6, "axis": 0},
+            {"a": 0, "b": 1, "eps": 1e-6, "axis": -3},
         ),
         (
             spectral.BandRatio(numerator=0, denominator=1),
-            {"numerator": 0, "denominator": 1, "eps": 1e-6, "axis": 0},
+            {"numerator": 0, "denominator": 1, "eps": 1e-6, "axis": -3},
         ),
         (
             spectral.ApplySRF(
@@ -298,7 +298,7 @@ def test_spectral_get_config_serialization() -> None:
         ),
         (
             spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
-            {"method": "convex_hull", "wavelengths": [1.0, 2.0, 3.0], "axis": 0},
+            {"method": "convex_hull", "wavelengths": [1.0, 2.0, 3.0], "axis": -3},
         ),
         (
             spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
@@ -307,12 +307,12 @@ def test_spectral_get_config_serialization() -> None:
                 "width": 1.0,
                 "method": "mean",
                 "source_wavelengths": None,
-                "axis": 0,
+                "axis": -3,
             },
         ),
         (
             spectral.SpectralSmoothing(),
-            {"method": "savgol", "window": 7, "polyorder": 2, "axis": 0},
+            {"method": "savgol", "window": 7, "polyorder": 2, "axis": -3},
         ),
     ]
 
@@ -592,3 +592,24 @@ def test_band_name_resolution_requires_metadata_on_plain_arrays() -> None:
 
     with pytest.raises(ValueError, match="wavelengths"):
         spectral.ContinuumRemoval()(arr)
+
+
+def test_4d_time_stack() -> None:
+    """Band selection and band math act on the band axis (-3) (#147)."""
+    from _helpers import time_stack
+
+    stack = time_stack()
+    values = np.asarray(stack)
+    picked = spectral.SelectBands(indexes=["b2", "b0"])(stack)
+    assert picked.shape == (2, 2, 4, 4)
+    np.testing.assert_array_equal(np.asarray(picked), values[:, [2, 0]])
+    assert picked.attrs["band_names"] == ["b2", "b0"]
+    assert picked.attrs["wavelengths"] == [690.0, 490.0]
+
+    nd = spectral.NormalizedDifference(a="b1", b="b0", eps=0.0)(stack)
+    assert nd.shape == (2, 1, 4, 4)
+    expected = (values[:, 1] - values[:, 0]) / (values[:, 1] + values[:, 0])
+    np.testing.assert_allclose(np.asarray(nd)[:, 0], expected)
+
+    with pytest.raises(TypeError, match="StackBands takes a sequence"):
+        spectral.StackBands()(stack)

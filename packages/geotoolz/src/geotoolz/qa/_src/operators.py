@@ -22,6 +22,10 @@ and returns the same carrier kind (string ``qa_band`` selectors and the
 fill-value fallback of `MaskNoData` are the metadata-dependent
 exceptions — they require a GeoTensor).
 
+The band axis is ``-3`` by default. A ``(T, C, H, W)`` time stack is
+decoded frame by frame into a ``(T, 1, H, W)`` mask
+(``(T, n_layers, H, W)`` for `DecodeBitmask`).
+
 References:
     USGS, "Landsat 8-9 Collection 2 Level-2 Science Product Guide",
     LSDS-1619, 2022.
@@ -42,6 +46,7 @@ from pipekit import Operator
 
 from geotoolz._src.bands import strip_band_attrs
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
+from geotoolz._src.shape import over_frames
 from geotoolz._src.valid import invalid_values, is_fill
 from geotoolz._src.wrap import wrap_like
 from geotoolz.qa._src.array import (
@@ -377,7 +382,7 @@ class DecodeBitmask(Operator):
         bits: Mapping[str, Sequence[int]] | Sequence[Sequence[Any]],
         mode: str = "any",
         qa_band: BandSelector = None,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         bits_map = mapping_from_pairs(bits)
         if not bits_map:
@@ -395,6 +400,7 @@ class DecodeBitmask(Operator):
         self.qa_band = qa_band
         self.axis = axis
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = _select_qa(gt, self.qa_band, self.axis)
         names = list(self.bits)
@@ -437,7 +443,7 @@ class MaskFromQABits(Operator):
         band_idx: Index of the QA band along the carrier's channel
             axis. ``-1`` for "last band" is the typical convention.
         bits: Bit positions to test.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         invert: Return True for *unset* bits instead.
 
     Examples:
@@ -452,7 +458,7 @@ class MaskFromQABits(Operator):
         *,
         band_idx: int,
         bits: Sequence[int],
-        axis: int = 0,
+        axis: int = -3,
         invert: bool = False,
     ) -> None:
         self.band_idx = band_idx
@@ -460,6 +466,7 @@ class MaskFromQABits(Operator):
         self.axis = axis
         self.invert = invert
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = np.take(np.asarray(gt), self.band_idx, axis=self.axis)
         mask = mask_from_qa_bits(qa, self.bits, invert=self.invert)
@@ -493,7 +500,7 @@ class MaskFromSCL(Operator):
             depends on how you loaded it.
         classes: SCL class IDs to match. Accepts raw ints or `SCL`
             enum members.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         invert: When True, return True where the SCL value is NOT in
             ``classes`` (keep-only-these mask).
 
@@ -517,7 +524,7 @@ class MaskFromSCL(Operator):
         *,
         band_idx: int,
         classes: Sequence[int],
-        axis: int = 0,
+        axis: int = -3,
         invert: bool = False,
     ) -> None:
         if len(classes) == 0:
@@ -528,6 +535,7 @@ class MaskFromSCL(Operator):
         self.axis = axis
         self.invert = invert
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         scl = np.take(np.asarray(gt), self.band_idx, axis=self.axis)
         mask = mask_from_scl(scl, self.classes, invert=self.invert)
@@ -570,11 +578,12 @@ class MaskValid(Operator):
     """
 
     def __init__(
-        self, *, invalid_value: float | int | None = None, axis: int = 0
+        self, *, invalid_value: float | int | None = None, axis: int = -3
     ) -> None:
         self.invalid_value = invalid_value
         self.axis = axis
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         sentinel = (
             self.invalid_value
@@ -611,7 +620,7 @@ class _QAMask(Operator):
         bits: Sequence[int] | None = None,
         values: Sequence[int] | None = None,
         mode: str = "any",
-        axis: int = 0,
+        axis: int = -3,
         invert: bool = False,
     ) -> None:
         self.qa_band = qa_band
@@ -623,6 +632,7 @@ class _QAMask(Operator):
         self.axis = axis
         self.invert = invert
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = _select_qa(gt, self.qa_band, self.axis)
         mask = _mask_from_definition(
@@ -716,7 +726,7 @@ class MaskNoData(Operator):
         qa_band: Optional QA band selector.
         bits: Bit positions that mark no-data.
         values: Categorical values that mark no-data (e.g. SCL=0).
-        axis: Position of the band axis.
+        axis: Position of the band axis. Default ``-3``.
 
     Returns:
         GeoTensor: Boolean no-data mask.
@@ -735,13 +745,14 @@ class MaskNoData(Operator):
         qa_band: BandSelector = None,
         bits: Sequence[int] | None = None,
         values: Sequence[int] | None = None,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.qa_band = qa_band
         self.bits = _normalize_int_sequence(bits, "bits")
         self.values = _normalize_int_sequence(values, "values")
         self.axis = axis
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         if self.bits is not None or self.values is not None or self.qa_band is not None:
             qa = _select_qa(gt, self.qa_band, self.axis)
@@ -800,12 +811,13 @@ class MaskSaturated(Operator):
         *,
         qa_band: BandSelector = None,
         saturation_value: float | int | None = None,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.qa_band = qa_band
         self.saturation_value = saturation_value
         self.axis = axis
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = _select_qa(gt, self.qa_band, self.axis)
         saturation_value = self.saturation_value
@@ -842,17 +854,18 @@ class S2QA60(Operator):
 
     Args:
         qa_band: Band selector for QA60 within the input stack.
-        axis: Band axis position.
+        axis: Band axis position. Default ``-3``.
 
     Examples:
         >>> from geotoolz.qa import S2QA60
         >>> mask = S2QA60()(s2_l1c_stack_with_qa60_appended)
     """
 
-    def __init__(self, *, qa_band: int | str = "QA60", axis: int = 0) -> None:
+    def __init__(self, *, qa_band: int | str = "QA60", axis: int = -3) -> None:
         self.qa_band = qa_band
         self.axis = axis
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = _select_qa(gt, self.qa_band, self.axis)
         mask = mask_from_qa_bits(qa, (10, 11))
@@ -872,7 +885,7 @@ class S2SCL(Operator):
         qa_band: Band selector for the SCL band.
         keep: Class names to keep (do not mask). See
             ``SENSOR_QA_REGISTRY["s2_scl"]`` for the full vocabulary.
-        axis: Band axis position.
+        axis: Band axis position. Default ``-3``.
 
     Examples:
         >>> from geotoolz.qa import S2SCL
@@ -887,12 +900,13 @@ class S2SCL(Operator):
         *,
         qa_band: int | str = "SCL",
         keep: Sequence[str] = ("vegetation", "soil", "water"),
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.qa_band = qa_band
         self.keep = tuple(str(name) for name in keep)
         self.axis = axis
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         keep_values = _registry_values("s2_scl", self.keep)
         qa = _select_qa(gt, self.qa_band, self.axis)
@@ -927,7 +941,7 @@ class LandsatQA_PIXEL(Operator):
             target names.
         sensor: ``"l89"`` (Landsat 8/9, default) or ``"l7"`` (Landsat
             4-7).
-        axis: Band axis position.
+        axis: Band axis position. Default ``-3``.
 
     Examples:
         >>> from geotoolz.qa import LandsatQA_PIXEL
@@ -962,7 +976,7 @@ class LandsatQA_PIXEL(Operator):
         qa_band: int | str = "QA_PIXEL",
         targets: Sequence[str] | None = None,
         sensor: str = "l89",
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         if sensor not in self._SENSOR_KEYS:
             raise ValueError(
@@ -979,6 +993,7 @@ class LandsatQA_PIXEL(Operator):
         self.sensor = sensor
         self.axis = axis
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         registry_key = self._SENSOR_KEYS[self.sensor]
         qa = _select_qa(gt, self.qa_band, self.axis)
@@ -1014,7 +1029,7 @@ class MODISStateQA(Operator):
         qa_band: Band selector for the state QA band.
         targets: Target flag names to OR together. See
             ``SENSOR_QA_REGISTRY["modis_state_qa"]``.
-        axis: Band axis position.
+        axis: Band axis position. Default ``-3``.
 
     Examples:
         >>> from geotoolz.qa import MODISStateQA
@@ -1033,12 +1048,13 @@ class MODISStateQA(Operator):
         *,
         qa_band: int | str = "state_1km",
         targets: Sequence[str] = ("cloud", "cloud_shadow"),
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.qa_band = qa_band
         self.targets = tuple(str(target) for target in targets)
         self.axis = axis
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = _select_qa(gt, self.qa_band, self.axis)
         mask = _decode_targets_to_mask(qa, "modis_state_qa", self.targets)

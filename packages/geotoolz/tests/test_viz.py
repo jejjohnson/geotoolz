@@ -618,3 +618,20 @@ def test_fill_pixels_are_excluded() -> None:
     np.testing.assert_allclose(
         gamma[:, ~fill], np.asarray(GammaCorrect(gamma=2.0)(clean))[:, ~fill]
     )
+
+
+def test_4d_time_stack() -> None:
+    """Composites select along -3; colormaps render each frame (#147)."""
+    from _helpers import time_stack
+
+    stack = time_stack()
+    rgb = TrueColor(red=2, green=1, blue=0)(stack)
+    assert rgb.shape == (2, 3, 4, 4)
+    np.testing.assert_array_equal(np.asarray(rgb), np.asarray(stack)[:, [2, 1, 0]])
+    single = time_stack((2, 1, 4, 4))
+    rgba = gz.viz.ApplyColormap(name="viridis")(single)
+    assert rgba.shape == (2, 4, 4, 4)
+    np.testing.assert_array_equal(
+        np.asarray(rgba)[1],
+        np.asarray(gz.viz.ApplyColormap(name="viridis")(single.isel({"time": 1}))),
+    )

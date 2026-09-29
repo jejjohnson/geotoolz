@@ -40,6 +40,7 @@ from pipekit import Operator
 
 from geotoolz._src.bands import strip_band_attrs
 from geotoolz._src.config import as_tuple, jsonable
+from geotoolz._src.shape import over_frames
 from geotoolz._src.valid import (
     carried_fill,
     invalid_values,
@@ -174,7 +175,7 @@ class DNToRadiance(Operator):
         gain: Slope of the DN→L decode. Scalar or per-band sequence.
         offset: Intercept. Default ``0.0``.
         axis: Position of the band axis when ``gain`` / ``offset`` are
-            per-band sequences. Default ``0``.
+            per-band sequences. Default ``-3``.
 
     Examples:
         >>> import numpy as np
@@ -193,7 +194,7 @@ class DNToRadiance(Operator):
         gain: float | np.ndarray | list,
         offset: float | np.ndarray | list = 0.0,
         scale: float | np.ndarray | list = 1.0,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.gain = gain
         self.offset = offset
@@ -236,7 +237,7 @@ class RadianceToDN(Operator):
         scale: DN scale divisor used by the forward decode.
             Default ``1.0``.
         axis: Position of the band axis for per-band coefficients.
-            Default ``0``.
+            Default ``-3``.
 
     Examples:
         >>> import numpy as np
@@ -254,7 +255,7 @@ class RadianceToDN(Operator):
         gain: float | np.ndarray | list,
         offset: float | np.ndarray | list = 0.0,
         scale: float | np.ndarray | list = 1.0,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.gain = gain
         self.offset = offset
@@ -301,7 +302,7 @@ class DNToReflectance(Operator):
         scale: Quantification slope (reflectance per DN unit). Scalar
             or per-band 1-D sequence.
         offset: Reflectance-units intercept. Default ``0.0``.
-        axis: Band axis when ``scale`` / ``offset`` are per-band.
+        axis: Band axis when ``scale`` / ``offset`` are per-band. Default ``-3``.
 
     Examples:
         >>> from geotoolz.radiometry import DNToReflectance
@@ -324,7 +325,7 @@ class DNToReflectance(Operator):
         *,
         scale: float | np.ndarray | list,
         offset: float | np.ndarray | list = 0.0,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.scale = scale
         self.offset = offset
@@ -413,6 +414,7 @@ class RadianceToReflectance(Operator):
         self.crs_coords = crs_coords
         self.units = units
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         obs_factor = observation_date_correction_factor(
             self.acquisition_date,
@@ -509,6 +511,7 @@ class ReflectanceToRadiance(Operator):
         self.sza_deg = sza_deg
         self.crs_coords = crs_coords
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         obs_factor = observation_date_correction_factor(
             self.acquisition_date,
@@ -801,6 +804,7 @@ class ApplySRF(Operator):
         self.epsilon_srf = epsilon_srf
         self.extrapolate = extrapolate
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         source_wavelengths = np.asarray(self.source_wavelengths, dtype=float)
         # 1-nm grid spanning the source range — fine enough for sensor-
@@ -926,7 +930,7 @@ class BTFromRadiance(Operator):
         K2: Per-band Planck constant ``K2``. Scalar or per-band 1-D
             sequence (Kelvin).
         axis: Position of the band axis for per-band ``K1``/``K2``.
-            Default ``0``.
+            Default ``-3``.
 
     Examples:
         >>> from geotoolz.radiometry import BTFromRadiance
@@ -947,7 +951,7 @@ class BTFromRadiance(Operator):
         *,
         K1: float | np.ndarray | list,
         K2: float | np.ndarray | list,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.K1 = K1
         self.K2 = K2

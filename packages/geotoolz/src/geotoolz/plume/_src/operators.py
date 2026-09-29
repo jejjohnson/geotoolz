@@ -50,6 +50,7 @@ from geotoolz._src.config import (
     callable_name,
     reject_config_summary,
 )
+from geotoolz._src.shape import keep_band_axis, over_frames, require_ndim
 from geotoolz._src.valid import (
     carried_fill,
     invalid_values,
@@ -209,7 +210,7 @@ class SBMP(Operator):
         reference_scene: Optional clean-air ``GeoTensor`` or plain array
             with the same band layout. When supplied, returns log-ratio
             change.
-        axis: Band axis of the input. Default ``0``.
+        axis: Band axis of the input. Default ``-3``.
         eps: Numerical guard against division by zero. Default ``1e-10``.
 
     Examples:
@@ -227,7 +228,7 @@ class SBMP(Operator):
         swir1: int | str = "B11",
         swir2: int | str = "B12",
         reference_scene: GeoTensor | np.ndarray | None = None,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.swir1 = swir1
@@ -252,7 +253,9 @@ class SBMP(Operator):
         invalid = invalid_values(gt).any(axis=self.axis)
         if self.reference_scene is not None:
             invalid = invalid | invalid_values(self.reference_scene).any(axis=self.axis)
-        return wrap_filled(gt, out, fill_value_default=np.nan, valid=~invalid)
+        return wrap_filled(
+            gt, keep_band_axis(out, gt), fill_value_default=np.nan, valid=~invalid
+        )
 
     def get_config(self) -> dict[str, Any]:
         config: dict[str, Any] = {
@@ -305,6 +308,7 @@ class PlumeMask(Operator):
         self.min_area = min_area
         self.connectivity = connectivity
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask = plume_mask(
             _single_band_nan(gt),
@@ -346,6 +350,7 @@ class PlumeContours(Operator):
         self.return_labels = return_labels
         self.connectivity = connectivity
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         valid = valid_pixels(gt)
         labels = label_components(
@@ -426,6 +431,7 @@ class PlumeFootprint(Operator):
         )
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
+        require_ndim(gt, (2, 3), "PlumeFootprint")
         if getattr(gt, "transform", None) is None:
             raise TypeError(
                 "PlumeFootprint requires a georeferenced GeoTensor input; "
@@ -633,6 +639,7 @@ class WindAdvectionCone(Operator):
         self.max_distance = max_distance
         self.crs = crs
 
+    @over_frames
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         if getattr(gt, "transform", None) is None:
             raise TypeError(
@@ -758,6 +765,7 @@ class IMEEstimate(Operator):
         self.uncertainty_fraction = uncertainty_fraction
 
     def _apply(self, gt: GeoTensor) -> dict[str, float]:
+        require_ndim(gt, (2, 3), "IMEEstimate")
         if getattr(gt, "transform", None) is None:
             raise TypeError(
                 "IMEEstimate requires a georeferenced GeoTensor input; "
@@ -877,6 +885,7 @@ class CrossSectionalFlux(Operator):
         self.transect_spacing_m = transect_spacing_m
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
+        require_ndim(gt, (2, 3), "CrossSectionalFlux")
         if getattr(gt, "transform", None) is None:
             raise TypeError(
                 "CrossSectionalFlux requires a georeferenced GeoTensor input; "
@@ -1067,6 +1076,7 @@ class PlumeShapeFilter(Operator):
         self.min_fiber_width = float(min_fiber_width)
         self.max_fiber_width = float(max_fiber_width)
 
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         from geotoolz.measure._src.operators import _skeleton_diameter_pixels
 
@@ -1168,6 +1178,7 @@ class PlumeColumnStats(Operator):
         self.column = column
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> pd.DataFrame:
+        require_ndim(gt, (2, 3), "PlumeColumnStats")
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
         col_arr = _single_band_nan(self.column).astype(float, copy=False)
         if col_arr.shape != labels.shape:
@@ -1351,6 +1362,7 @@ class PlumeQNDFeatures(Operator):
         self.perc_threshold = float(perc_threshold)
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> pd.DataFrame:
+        require_ndim(gt, (2, 3), "PlumeQNDFeatures")
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
         col_arr = _single_band_nan(self.column).astype(float, copy=False)
         if col_arr.shape != labels.shape:

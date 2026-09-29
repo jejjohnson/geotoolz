@@ -8,6 +8,9 @@ extras such as hydra-zen, that:
 * ``get_config()`` is strict JSON (no NaN / inf) and names only
   constructor parameters;
 * calling the operator on ``Input`` nodes builds a graph ``Node``.
+* on a 4-D ``(T, C, H, W)`` time stack the operator returns the per-frame
+  results restacked along time, or rejects the rank with a clear error
+  naming itself (``test_time_stack_contract``).
 
 Operators that need constructor arguments get them from ``CTOR_KWARGS``.
 Known contract violations are listed in ``KNOWN_FAILURES`` as strict
@@ -967,5 +970,230 @@ def test_output_fill_matches_dtype(cls: type) -> None:
             if any(gt is s for s in sources):
                 continue
             assert_fill_matches_dtype(src, gt, gap_filler=_key(cls) in GAP_FILLERS)
+    if not ran:
+        pytest.skip("no toy input is valid for this operator")
+
+
+# ---------------------------------------------------------------------------
+# 4-D (T, C, H, W) time stacks (#147)
+# ---------------------------------------------------------------------------
+
+#: Operators whose per-pixel draws depend on the input's full shape, so a
+#: stack cannot reproduce the per-frame draws; only the output shape is
+#: checked.
+STOCHASTIC_PER_PIXEL: frozenset[str] = frozenset(
+    {
+        "augment._src.operators.GaussianNoise",
+        "augment._src.operators.SpeckleNoise",
+    }
+)
+
+#: Operators that fit statistics (a per-band mean, a background covariance,
+#: a stretch range, principal components) and deliberately pool them over
+#: every frame of a stack -- one fit for the whole time series -- so their
+#: values differ from per-frame fits; only the output shape is checked.
+POOLED_STATISTICS: dict[str, str] = {
+    "augment._src.operators.SimulatedClouds": "cloud brightness of the stack",
+    "matched_filter._src.operators.ColumnEnhancement": "one background fit",
+    "normalize._src.operators.HistogramStretch": "per-band percentiles",
+    "normalize._src.operators.ZeroOne": "per-band min / max",
+    "restore._src.operators.DenoisePCA": "one PCA basis",
+    "restore._src.operators.MNF": "one PCA basis",
+}
+
+#: Operators whose output depends only on the carrier's grid (a rasterised
+#: geometry), so one ``(H, W)`` mask serves every frame of a stack.
+TIME_INVARIANT: frozenset[str] = frozenset(
+    f"mask._src.operators.{name}"
+    for name in ("BBoxMask", "CountryMask", "LandMask", "OceanMask")
+)
+
+_LEARN_4D: Known = (
+    "#148: learn takes axis 0 as the band axis on 4-D input (owned by the "
+    "learn branch)",
+    AssertionError,
+)
+_EINX_4D: Known = (
+    "#149: einx presets raise einx RankError on 4-D input (owned by the einx branch)",
+    AssertionError,
+)
+
+#: Strict xfails for the 4-D contract, owned by later branches of the #112
+#: stack.
+TIME_STACK_KNOWN_FAILURES: dict[str, Known] = {
+    **{
+        f"einx._src.operators.{name}": _EINX_4D
+        for name in ("CHWtoHWC", "Einx", "HWCtoCHW", "PerBandReduce", "SpatialPool")
+    },
+    **{
+        f"learn.{name}": _LEARN_4D
+        for name in (
+            "GMM",
+            "IPCA",
+            "IsolationForest",
+            "IterativeImputer",
+            "KMeans",
+            "KNNImputer",
+            "LocalOutlierFactor",
+            "MiniBatchKMeans",
+            "NMF",
+            "OneClassSVM",
+            "PCA",
+        )
+    },
+    "learn._src.operators.SklearnOp": _LEARN_4D,
+}
+
+
+def _time_stack_params() -> list[Any]:
+    out = []
+    for cls in _CLASSES:
+        key = _key(cls)
+        marks = []
+        if key in TIME_STACK_KNOWN_FAILURES:
+            reason, raises = TIME_STACK_KNOWN_FAILURES[key]
+            marks.append(pytest.mark.xfail(reason=reason, raises=raises, strict=True))
+        out.append(pytest.param(cls, id=key, marks=marks))
+    return out
+
+
+def _stack_of(scene: Any) -> Any:
+    """A 2-frame ``(T, C, H, W)`` stack whose second frame is a perturbed copy.
+
+    Float scenes are rescaled per pixel so the frames differ; integer (label
+    / QA) scenes repeat. A 2-D scene becomes ``(T, 1, H, W)``.
+    """
+    from _helpers import toy_geotensor
+
+    values = np.asarray(scene)
+    if values.ndim == 2:
+        values = values[None]
+    second = values.copy()
+    if values.dtype.kind == "f":
+        rng = np.random.default_rng(1)
+        second = values * rng.uniform(0.8, 1.2, values.shape)
+    return toy_geotensor(
+        np.stack([values, second]),
+        fill_value_default=scene.fill_value_default,
+        attrs=dict(scene.attrs),
+    )
+
+
+def _build_seeded(cls: type) -> Operator:
+    """``build(cls)`` with ``seed=0`` for stochastic operators."""
+    op = build(cls)
+    if "seed" in inspect.signature(cls.__init__).parameters:
+        op.seed = 0
+    return op
+
+
+def _as_frame_result(value: Any) -> Any:
+    """Per-frame carrier result as ``(C, H, W)`` (2-D maps gain a band axis)."""
+    arr = np.asarray(value)
+    return arr[None] if arr.ndim == 2 else arr
+
+
+def _is_frame_carrier(value: Any) -> bool:
+    return isinstance(value, np.ndarray) and value.ndim in (2, 3)
+
+
+def _assert_clear_rank_error(cls: type, exc: BaseException) -> None:
+    """A 4-D rejection is a ValueError / TypeError / GeoToolzIOError naming the op."""
+    from geotoolz.io import GeoToolzIOError
+
+    assert isinstance(exc, ValueError | TypeError | GeoToolzIOError), (
+        f"library-internal {type(exc).__name__} on a 4-D input: {exc}"
+    )
+    assert cls.__name__ in str(exc), (
+        f"4-D rejection does not name the operator: {type(exc).__name__}: {exc}"
+    )
+
+
+def _assert_matches_frames(key: str, out: Any, expected: list[Any]) -> None:
+    """``out`` equals the per-frame results restacked along time."""
+    if key in TIME_INVARIANT:
+        for e in expected:
+            np.testing.assert_array_equal(np.asarray(out), np.asarray(e))
+        return
+    if all(_is_frame_carrier(e) for e in expected):
+        want = np.stack([_as_frame_result(e) for e in expected])
+        got = np.asarray(out)
+        assert got.shape == want.shape, (
+            f"4-D output shape {got.shape}; per-frame results restack to {want.shape}"
+        )
+        if key in STOCHASTIC_PER_PIXEL or key in POOLED_STATISTICS:
+            return
+        np.testing.assert_allclose(
+            got.astype(np.float64), want.astype(np.float64), equal_nan=True
+        )
+        return
+    if isinstance(expected[0], list):
+        # Fan-outs (tiles): each 4-D piece restacks the per-frame pieces.
+        assert isinstance(out, list) and len(out) == len(expected[0])
+        for t, piece in enumerate(out):
+            _assert_matches_frames(key, piece, [e[t] for e in expected])
+        return
+    if isinstance(expected[0], np.ndarray):
+        # Stack-level statistics (a mean spectrum, a covariance) pool the
+        # frames: same shape as one frame's statistic.
+        assert np.shape(out) == expected[0].shape
+
+
+@pytest.mark.parametrize("cls", _time_stack_params())
+def test_time_stack_contract(cls: type) -> None:
+    """Every operator handles a ``(T, C, H, W)`` stack correctly or says no (#147).
+
+    Runs each buildable single-input operator on 4-D stacks of the toy
+    scenes it accepts. The output must equal the per-frame results
+    restacked along time (band-collapsing results keep a singleton band
+    axis, ``(T, 1, H, W)``), or the operator must reject the rank with a
+    ``ValueError`` / ``TypeError`` / ``GeoToolzIOError`` naming itself --
+    never a library-internal error or a silently wrong shape.
+    Sequence operators (composites, mosaics) given a stack must match the
+    same operator on the list of its frames.
+    """
+    from _helpers import frames
+
+    from geotoolz.io._src.operators import SinkOperator
+
+    op = _build_seeded(cls)
+    if isinstance(op, SinkOperator) or _n_inputs(op) != 1:
+        pytest.skip("sink (see test_io) or not a single-input operator")
+    key = _key(cls)
+    takes_sequence = _takes_sequence(op)
+    ran = False
+    for scene in _attributed_inputs():
+        if isinstance(scene, list) != takes_sequence:
+            continue
+        if takes_sequence:
+            stack = _stack_of(scene[0])
+            try:
+                expected = _build_seeded(cls)(frames(stack))
+            except Exception:
+                continue
+        else:
+            try:
+                _build_seeded(cls)(scene)
+            except Exception:
+                continue
+            stack = _stack_of(scene)
+            expected = None
+        ran = True
+        try:
+            # A fresh operator per stack: stochastic operators then make the
+            # same draws as the fresh per-frame references.
+            out = _build_seeded(cls)(stack)
+        except Exception as exc:
+            _assert_clear_rank_error(cls, exc)
+            continue
+        if takes_sequence:
+            np.testing.assert_allclose(
+                np.asarray(out, dtype=np.float64),
+                np.asarray(expected, dtype=np.float64),
+                equal_nan=True,
+            )
+            continue
+        per_frame = [_build_seeded(cls)(frame) for frame in frames(stack)]
+        _assert_matches_frames(key, out, per_frame)
     if not ran:
         pytest.skip("no toy input is valid for this operator")

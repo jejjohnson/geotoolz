@@ -353,6 +353,9 @@ def _broadcast_to_band_axis(
             f"per-band coefficient length {arr.shape[0]} doesn't match "
             f"band count {n_bands}"
         )
+    if target_ndim <= 2:
+        # A 2-D map is a single band: nothing to align the coefficient with.
+        return arr.reshape([1] * target_ndim)
     norm_axis = axis if axis >= 0 else target_ndim + axis
     if not 0 <= norm_axis < target_ndim:
         raise ValueError(f"axis {axis} out of range for ndim {target_ndim}")

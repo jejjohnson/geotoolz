@@ -1159,7 +1159,10 @@ def test_phase_align_world_coordinates_match_reference() -> None:
 def test_phase_align_rejects_unsupported_ndim() -> None:
     reference, moving, _dy, _dx = _registration_pair()
     four_d = np.asarray(moving)[None, ...]
-    with pytest.raises(ValueError, match="ndim=4"):
+    with pytest.raises(
+        ValueError,
+        match=r"PhaseAlign accepts 2-D \(H, W\) or 3-D \(C, H, W\) input; got a 4-D",
+    ):
         gz.geom.PhaseAlign(reference=reference)(four_d)
 
 
@@ -1319,3 +1322,21 @@ def test_geo_dependent_list_operators_reject_plain_ndarray() -> None:
         gz.geom.Mosaic()([arr, arr])
     with pytest.raises(TypeError, match="GeoTensor"):
         gz.geom.SegmentStitch()([arr])
+
+
+def test_4d_time_stack() -> None:
+    """Registration rejects a stack; grid ops keep it (#147)."""
+    from _helpers import time_stack
+
+    stack = time_stack((2, 3, 8, 8))
+    reference = stack.isel({"time": 0})
+    for cls in (gz.geom.OpticalFlowTVL1, gz.geom.OpticalFlowILK):
+        with pytest.raises(ValueError, match=rf"{cls.__name__} accepts 2-D"):
+            cls(reference=reference)(stack)
+        with pytest.raises(ValueError, match=rf"{cls.__name__} reference accepts"):
+            cls(reference=stack)(reference)
+    # Registration reads the band along -3 (band 1, not frame 1).
+    flow = gz.geom.OpticalFlowILK(reference=reference, band=2)(reference)
+    assert flow.shape == (2, 8, 8)
+    padded = gz.geom.PadTo(shape=(10, 10))(stack)
+    assert padded.shape == (2, 3, 10, 10)

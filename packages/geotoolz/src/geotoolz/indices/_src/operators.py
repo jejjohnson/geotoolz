@@ -16,8 +16,11 @@ Each Operator here:
 4. Returns its config via ``get_config()`` so the Operator round-trips
    through ``hydra_zen.builds``.
 
-The wrap discipline: index primitives collapse the channel axis but
-preserve the trailing two spatial axes ``(H, W)``. That matches
+The wrap discipline: index primitives collapse the channel axis (``-3``
+by default) but preserve the trailing two spatial axes ``(H, W)``. On a
+``(T, C, H, W)`` time stack the result is ``(T, 1, H, W)``: one index map
+per frame, with a singleton band axis so the time axis is not read as
+bands. That matches
 ``wrap_like``'s contract exactly — it accepts any result whose
 last two dims agree with the input's. Carriers' transforms therefore
 survive unchanged through every index operator here.
@@ -42,6 +45,7 @@ from geotoolz._src.bands import (
     strip_band_attrs,
 )
 from geotoolz._src.config import nested_config
+from geotoolz._src.shape import keep_band_axis
 from geotoolz._src.valid import (
     carried_fill,
     carrier_fill_value,
@@ -94,10 +98,14 @@ def _wrap_index(
     quantity -- the input's fill (``0`` especially) can be a real index
     value -- so the output always declares ``fill_value_default=NaN``.
     Bands the index does not read do not affect validity.
+
+    On a ``(T, C, H, W)`` stack the ``(T, H, W)`` result keeps a singleton
+    band axis, ``(T, 1, H, W)``, so it stays a time series.
     """
     idx = [_resolve_band(gt, band) for band in bands]
     used = np.take(np.asarray(gt), idx, axis=axis)
     valid = ~invalid_values(used, fill_value=carrier_fill_value(gt)).any(axis=axis)
+    out = keep_band_axis(out, gt)
     return wrap_filled(gt, out, fill_value_default=np.nan, valid=valid)
 
 
@@ -132,7 +140,7 @@ class NormalizedDifference(Operator):
     Args:
         a_idx: Index of the "high" band (numerator-positive term).
         b_idx: Index of the "low" band.
-        axis: Position of the band axis in the carrier. Default ``0``.
+        axis: Position of the band axis in the carrier. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -149,7 +157,7 @@ class NormalizedDifference(Operator):
         b: BandRef | None = None,
         a_idx: int | None = None,
         b_idx: int | None = None,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.a_idx = _configured_ref(a, a_idx)
@@ -201,7 +209,7 @@ class NDVI(Operator):
     Args:
         nir_idx: Band-axis index of the NIR reflectance. Default ``3``.
         red_idx: Band-axis index of the Red reflectance. Default ``2``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -225,7 +233,7 @@ class NDVI(Operator):
         nir: BandRef | None = None,
         nir_idx: int | None = 3,
         red_idx: int | None = 2,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.nir_idx = _configured_ref(nir, nir_idx)
@@ -272,7 +280,7 @@ class NDWI(Operator):
     Args:
         green_idx: Band index of Green reflectance. Default ``1``.
         nir_idx: Band index of NIR reflectance. Default ``3``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser.
 
     Examples:
@@ -289,7 +297,7 @@ class NDWI(Operator):
         nir: BandRef | None = None,
         green_idx: int | None = 1,
         nir_idx: int | None = 3,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.green_idx = _configured_ref(green, green_idx)
@@ -337,7 +345,7 @@ class NDBI(Operator):
     Args:
         swir_idx: Band index of SWIR-1 reflectance. Default ``5``.
         nir_idx: Band index of NIR reflectance. Default ``3``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser.
 
     Examples:
@@ -360,7 +368,7 @@ class NDBI(Operator):
         nir: BandRef | None = None,
         swir_idx: int | None = 5,
         nir_idx: int | None = 3,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.swir_idx = _configured_ref(swir, swir_idx)
@@ -407,7 +415,7 @@ class NBR(Operator):
     Args:
         nir_idx: NIR band index. Default ``3``.
         swir2_idx: SWIR-2 band index. Default ``6``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser.
 
     Examples:
@@ -429,7 +437,7 @@ class NBR(Operator):
         swir2: BandRef | None = None,
         nir_idx: int | None = 3,
         swir2_idx: int | None = 6,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.nir_idx = _configured_ref(nir, nir_idx)
@@ -482,7 +490,7 @@ class SAVI(Operator):
         nir_idx: NIR band index. Default ``3``.
         red_idx: Red band index. Default ``2``.
         L: Soil-adjustment factor in ``[0, 1]``. Default ``0.5``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz.indices import SAVI
@@ -502,7 +510,7 @@ class SAVI(Operator):
         nir_idx: int | None = 3,
         red_idx: int | None = 2,
         L: float = 0.5,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.nir_idx = _configured_ref(nir, nir_idx)
@@ -560,7 +568,7 @@ class EVI(Operator):
         C1: Red aerosol-resistance coefficient. Default ``6``.
         C2: Blue aerosol-resistance coefficient. Default ``7.5``.
         L: Canopy-background correction. Default ``1``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz.indices import EVI
@@ -585,7 +593,7 @@ class EVI(Operator):
         C1: float = 6.0,
         C2: float = 7.5,
         L: float = 1.0,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.nir_idx = _configured_ref(nir, nir_idx)
@@ -654,7 +662,7 @@ class EVI2(Operator):
         nir: Optional named NIR band (e.g. ``"B08"``).
         red_idx: Integer Red band index. Default ``2``.
         nir_idx: Integer NIR band index. Default ``3``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -675,7 +683,7 @@ class EVI2(Operator):
         nir: BandRef | None = None,
         red_idx: int | None = 2,
         nir_idx: int | None = 3,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.red_idx = _configured_ref(red, red_idx)
@@ -729,7 +737,7 @@ class ARVI(Operator):
         red_idx: Integer Red band index. Default ``2``.
         nir_idx: Integer NIR band index. Default ``3``.
         gamma: Aerosol-correction strength. Default ``1.0``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -754,7 +762,7 @@ class ARVI(Operator):
         red_idx: int | None = 2,
         nir_idx: int | None = 3,
         gamma: float = 1.0,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.blue_idx = _configured_ref(blue, blue_idx)
@@ -810,7 +818,7 @@ class GCI(Operator):
         nir: Optional named NIR band.
         green_idx: Integer Green band index. Default ``1``.
         nir_idx: Integer NIR band index. Default ``3``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -832,7 +840,7 @@ class GCI(Operator):
         nir: BandRef | None = None,
         green_idx: int | None = 1,
         nir_idx: int | None = 3,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.green_idx = _configured_ref(green, green_idx)
@@ -882,7 +890,7 @@ class kNDVI(Operator):
         nir: Optional named NIR band.
         red_idx: Integer Red band index. Default ``2``.
         nir_idx: Integer NIR band index. Default ``3``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -903,7 +911,7 @@ class kNDVI(Operator):
         nir: BandRef | None = None,
         red_idx: int | None = 2,
         nir_idx: int | None = 3,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.red_idx = _configured_ref(red, red_idx)
@@ -956,7 +964,7 @@ class MNDWI(Operator):
         swir: Optional named SWIR-1 band.
         green_idx: Integer Green band index. Default ``1``.
         swir_idx: Integer SWIR-1 band index. Default ``5``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -978,7 +986,7 @@ class MNDWI(Operator):
         swir: BandRef | None = None,
         green_idx: int | None = 1,
         swir_idx: int | None = 5,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.green_idx = _configured_ref(green, green_idx)
@@ -1030,7 +1038,7 @@ class NDMI(Operator):
         swir1: Optional named SWIR-1 band.
         nir_idx: Integer NIR band index. Default ``3``.
         swir1_idx: Integer SWIR-1 band index. Default ``5``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1051,7 +1059,7 @@ class NDMI(Operator):
         swir1: BandRef | None = None,
         nir_idx: int | None = 3,
         swir1_idx: int | None = 5,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.nir_idx = _configured_ref(nir, nir_idx)
@@ -1104,7 +1112,7 @@ class NDSI(Operator):
         swir: Optional named SWIR-1 band.
         green_idx: Integer Green band index. Default ``1``.
         swir_idx: Integer SWIR-1 band index. Default ``5``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1126,7 +1134,7 @@ class NDSI(Operator):
         swir: BandRef | None = None,
         green_idx: int | None = 1,
         swir_idx: int | None = 5,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.green_idx = _configured_ref(green, green_idx)
@@ -1177,7 +1185,7 @@ class NBR2(Operator):
         swir2: Optional named SWIR-2 band.
         swir1_idx: Integer SWIR-1 band index. Default ``5``.
         swir2_idx: Integer SWIR-2 band index. Default ``6``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1193,7 +1201,7 @@ class NBR2(Operator):
         swir2: BandRef | None = None,
         swir1_idx: int | None = 5,
         swir2_idx: int | None = 6,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.swir1_idx = _configured_ref(swir1, swir1_idx)
@@ -1261,7 +1269,7 @@ class BAIS2(Operator):
         red_edge2_idx: Integer second red-edge index. Default ``5``.
         nir_idx: Integer narrow-NIR index. Default ``7``.
         swir2_idx: Integer SWIR-2 index. Default ``9``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1287,7 +1295,7 @@ class BAIS2(Operator):
         red_edge2_idx: int | None = 5,
         nir_idx: int | None = 7,
         swir2_idx: int | None = 9,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.red_idx = _configured_ref(red, red_idx)
@@ -1411,7 +1419,7 @@ class BSI(Operator):
         red_idx: Integer Red band index. Default ``2``.
         nir_idx: Integer NIR band index. Default ``3``.
         swir_idx: Integer SWIR-1 band index. Default ``5``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1437,7 +1445,7 @@ class BSI(Operator):
         red_idx: int | None = 2,
         nir_idx: int | None = 3,
         swir_idx: int | None = 5,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.blue_idx = _configured_ref(blue, blue_idx)
@@ -1497,7 +1505,7 @@ class IronOxide(Operator):
         blue: Optional named Blue band.
         red_idx: Integer Red band index. Default ``2``.
         blue_idx: Integer Blue band index. Default ``0``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1518,7 +1526,7 @@ class IronOxide(Operator):
         blue: BandRef | None = None,
         red_idx: int | None = 2,
         blue_idx: int | None = 0,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.red_idx = _configured_ref(red, red_idx)
@@ -1568,7 +1576,7 @@ class ClayMinerals(Operator):
         swir2: Optional named SWIR-2 band.
         swir1_idx: Integer SWIR-1 band index. Default ``5``.
         swir2_idx: Integer SWIR-2 band index. Default ``6``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1591,7 +1599,7 @@ class ClayMinerals(Operator):
         swir2: BandRef | None = None,
         swir1_idx: int | None = 5,
         swir2_idx: int | None = 6,
-        axis: int = 0,
+        axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.swir1_idx = _configured_ref(swir1, swir1_idx)
@@ -1645,7 +1653,7 @@ class CIRI(Operator):
     Args:
         cirrus: Optional named cirrus band (e.g. ``"B10"``).
         cirrus_idx: Integer cirrus band index. Default ``9``.
-        axis: Position of the band axis. Default ``0``.
+        axis: Position of the band axis. Default ``-3``.
 
     Examples:
         >>> from geotoolz.indices import CIRI
@@ -1658,7 +1666,7 @@ class CIRI(Operator):
         *,
         cirrus: BandRef | None = None,
         cirrus_idx: int | None = 9,
-        axis: int = 0,
+        axis: int = -3,
     ) -> None:
         self.cirrus_idx = _configured_ref(cirrus, cirrus_idx)
         self.axis = axis
@@ -1689,7 +1697,7 @@ class AppendIndex(Operator):
     Args:
         index_op: An index operator (e.g. ``NDVI()``, ``EVI()``). Must
             return a `GeoTensor` whose band-axis is collapsed.
-        axis: Position of the band axis. Default ``0``. Must match the
+        axis: Position of the band axis. Default ``-3``. Must match the
             ``axis`` configured on ``index_op``.
 
     Examples:
@@ -1698,7 +1706,7 @@ class AppendIndex(Operator):
         >>> stacked = bands_plus_ndvi(reflectance_geotensor)  # (C+1, H, W)
     """
 
-    def __init__(self, *, index_op: Operator, axis: int = 0) -> None:
+    def __init__(self, *, index_op: Operator, axis: int = -3) -> None:
         self.index_op = index_op
         self.axis = axis
 
@@ -1708,8 +1716,12 @@ class AppendIndex(Operator):
         # Expand back to (..., 1, ..., H, W) along the configured axis so
         # concatenation lines up. np.expand_dims handles negative axes
         # correctly.
-        index_3d = np.expand_dims(index_arr, axis=self.axis)
         arr = np.asarray(gt)
+        index_3d = (
+            index_arr
+            if index_arr.ndim == arr.ndim
+            else np.expand_dims(index_arr, axis=self.axis)
+        )
         stacked = np.concatenate([arr, index_3d], axis=self.axis)
         # Band-name lists gain the index operator's name; per-band values
         # with no meaning for an index (wavelengths) are dropped.
