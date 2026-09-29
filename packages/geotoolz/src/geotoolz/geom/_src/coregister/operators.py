@@ -22,6 +22,7 @@ import einx
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.wrap import wrap_like
 from geotoolz.geom._src.operators import ReprojectLike
 
 
@@ -465,7 +466,7 @@ class PointsToRaster(Operator):
             result = result[:, ::-1]
 
         # 4) Wrap back into a GeoTensor on the `like` grid.
-        return like.array_as_geotensor(result.astype(np.float64))
+        return wrap_like(like, result.astype(np.float64))
 
 
 def _points_with_values(
@@ -913,7 +914,7 @@ def _point_cloud_binned_stat(
         result = result[::-1, :]
     if flip_x:
         result = result[:, ::-1]
-    return like.array_as_geotensor(result.astype(np.float64))
+    return wrap_like(like, result.astype(np.float64))
 
 
 def _point_cloud_idw(
@@ -932,7 +933,7 @@ def _point_cloud_idw(
     # Empty cloud → all-NaN raster on the `like` grid (well-defined
     # rather than KDTree crash on zero-row input).
     if xy.shape[0] == 0:
-        return like.array_as_geotensor(np.full((h, w), np.nan, dtype=np.float64))
+        return wrap_like(like, np.full((h, w), np.nan, dtype=np.float64))
     x_centers, y_centers = _pixel_center_coords(like.transform, like.shape)
     yy, xx = np.meshgrid(y_centers, x_centers, indexing="ij")
     pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])  # (H*W, 2)
@@ -954,7 +955,7 @@ def _point_cloud_idw(
         # Mask pixels whose nearest point exceeds the radius.
         nearest_dist = distances[:, 0].reshape(h, w)
         result = np.where(nearest_dist > max_radius, np.nan, result)
-    return like.array_as_geotensor(result)
+    return wrap_like(like, result)
 
 
 class VectorToRasterAgg(Operator):
@@ -1129,4 +1130,4 @@ class VectorToRasterAgg(Operator):
             assert ordinal_arr is not None
             result = ordinal_arr
 
-        return like.array_as_geotensor(result)
+        return wrap_like(like, result)

@@ -28,6 +28,7 @@ from georeader.reflectance import (
 )
 from pipekit import Operator
 
+from geotoolz._src.bands import strip_band_attrs
 from geotoolz._src.config import as_tuple, jsonable
 from geotoolz._src.wrap import wrap_like
 from geotoolz.radiometry._src.array import (
@@ -112,10 +113,9 @@ class ToFloat32(Operator):
     """
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        # `astype` on a GeoTensor returns a GeoTensor with metadata
-        # preserved via __array_finalize__; on a plain ndarray it
-        # returns a plain ndarray — carrier kind is preserved either way.
-        return gt.astype(np.float32)
+        # `GeoTensor.astype` would alias the input's attrs dict via
+        # __array_finalize__; rewrap so the output gets its own copy.
+        return wrap_like(gt, np.asarray(gt).astype(np.float32))
 
 
 class DNToRadiance(Operator):
@@ -391,7 +391,7 @@ class RadianceToReflectance(Operator):
                 "neither `sza_deg` nor `center_coords` is provided; got a "
                 "plain array"
             )
-        return radiance_to_reflectance(
+        out = radiance_to_reflectance(
             gt,
             solar_irradiance=self.solar_irradiance,
             date_of_acquisition=self.acquisition_date,
@@ -400,6 +400,8 @@ class RadianceToReflectance(Operator):
             observation_date_corr_factor=obs_factor,
             units=self.units,
         )
+        # georeader rebuilds the GeoTensor without ``attrs``; restore them.
+        return wrap_like(gt, np.asarray(out))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -485,7 +487,7 @@ class ReflectanceToRadiance(Operator):
                 "neither `sza_deg` nor `center_coords` is provided; got a "
                 "plain array"
             )
-        return reflectance_to_radiance(
+        out = reflectance_to_radiance(
             gt,
             solar_irradiance=self.solar_irradiance,
             date_of_acquisition=self.acquisition_date,
@@ -493,6 +495,8 @@ class ReflectanceToRadiance(Operator):
             crs_coords=self.crs_coords,
             observation_date_corr_factor=obs_factor,
         )
+        # georeader rebuilds the GeoTensor without ``attrs``; restore them.
+        return wrap_like(gt, np.asarray(out))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -806,7 +810,14 @@ class ApplySRF(Operator):
                 > 0
             )
             out[invalid] = fill_value
-        return wrap_like(gt, out)
+        # Target bands replace the source bands: source per-band attrs are
+        # dropped and the target centres become the new wavelengths.
+        wrapped = wrap_like(gt, out, attrs=strip_band_attrs(getattr(gt, "attrs", None)))
+        if hasattr(wrapped, "attrs"):
+            wrapped.attrs["wavelengths"] = jsonable(
+                np.asarray(self.target_center_wavelengths, dtype=float)
+            )
+        return wrapped
 
     def _source_band_support(
         self,

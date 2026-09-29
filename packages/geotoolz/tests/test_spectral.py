@@ -432,8 +432,32 @@ def test_spectral_binning_weighted_mean_rejects_nonpositive_width() -> None:
         spectral_binning(arr, source, target, -10.0, method="weighted_mean")
 
 
-def test_stack_bands_drops_band_attrs_when_only_names_present() -> None:
-    """If one input has band_names but no wavelengths, drop BOTH on output."""
+def test_select_and_split_bands_subset_every_per_band_key() -> None:
+    """``descriptions`` / ``bands`` follow the selection, not just names (#144)."""
+    gt = toy_geotensor(
+        np.arange(12, dtype=np.float32).reshape(3, 2, 2),
+        attrs={
+            "band_names": ["a", "b", "c"],
+            "descriptions": ["A", "B", "C"],
+            "wavelengths": [1.0, 2.0, 3.0],
+            "k": 1,
+        },
+    )
+    out = spectral.SelectBands(indexes=["c", "a"])(gt)
+    assert out.attrs == {
+        "band_names": ["c", "a"],
+        "descriptions": ["C", "A"],
+        "wavelengths": [3.0, 1.0],
+        "k": 1,
+    }
+    parts = spectral.SplitBands()(gt)
+    assert [p.attrs["descriptions"] for p in parts] == [["A"], ["B"], ["C"]]
+    ndiff = spectral.NormalizedDifference(a=0, b=1)(gt)
+    assert ndiff.attrs == {"k": 1}
+
+
+def test_stack_bands_keeps_each_band_key_only_when_every_input_has_it() -> None:
+    """Names present on every input are stacked; partial wavelengths are dropped."""
     base_transform = rasterio.Affine.identity()
     crs = "EPSG:32629"
     gt_a = GeoTensor(
@@ -452,7 +476,7 @@ def test_stack_bands_drops_band_attrs_when_only_names_present() -> None:
     )
 
     stacked = spectral.StackBands()([gt_a, gt_b])
-    assert "band_names" not in stacked.attrs
+    assert stacked.attrs["band_names"] == ["A", "B"]
     assert "wavelengths" not in stacked.attrs
 
 

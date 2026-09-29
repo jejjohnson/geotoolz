@@ -35,11 +35,12 @@ References:
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.bands import strip_band_attrs
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
 from geotoolz._src.wrap import wrap_like
 from geotoolz.qa._src.array import (
@@ -264,12 +265,6 @@ def _mask_from_definition(
     return ~mask if invert else mask
 
 
-def _attrs_with_band_names(gt: GeoTensor, names: Sequence[str]) -> dict[str, Any]:
-    attrs = dict(cast(Mapping[str, Any], gt.attrs))
-    attrs["band_names"] = list(names)
-    return attrs
-
-
 def _decode_registry_entry(
     qa: np.ndarray, entry: Mapping[str, Sequence[int]]
 ) -> np.ndarray:
@@ -408,12 +403,12 @@ class DecodeBitmask(Operator):
         mask = np.stack(layers, axis=0)
         if not hasattr(gt, "transform"):
             return mask
-        return type(gt)(
+        return wrap_like(
+            gt,
             mask,
-            transform=gt.transform,
-            crs=gt.crs,
             fill_value_default=False,
-            attrs=_attrs_with_band_names(gt, names),
+            attrs=strip_band_attrs(gt.attrs),
+            band_names=names,
         )
 
     def get_config(self) -> dict[str, Any]:

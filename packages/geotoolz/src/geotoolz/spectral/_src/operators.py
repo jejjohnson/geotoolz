@@ -3,14 +3,14 @@
 Each Operator wraps a Tier-A primitive in `array.py` and re-attaches
 geospatial metadata via :func:`geotoolz._src.wrap.wrap_like`: a
 GeoTensor input comes back as a GeoTensor (``transform``, ``crs``,
-``fill_value_default``, and ``attrs`` propagated through
-``array_as_geotensor``) while a plain ``np.ndarray`` input comes back
-as a plain ndarray. When the band axis is *altered* (selected,
-reordered, binned, stacked, etc.) the ``band_names`` and
-``wavelengths`` entries in ``attrs`` are rewritten in lockstep via
-:func:`_with_band_attrs` so downstream operators see the correct
-labels (plain-array carriers have no attrs, so this bookkeeping is
-skipped for them).
+``fill_value_default``, and a copy of ``attrs`` propagated) while a
+plain ``np.ndarray`` input comes back as a plain ndarray. When the band
+axis is *altered* (selected, reordered, binned, stacked, etc.) the
+per-band ``attrs`` entries (``band_names``, ``descriptions``,
+``wavelengths``, ...) are subset, concatenated, rewritten or dropped in
+lockstep (see :mod:`geotoolz._src.bands`) so downstream operators see
+the correct labels (plain-array carriers have no attrs, so this
+bookkeeping is skipped for them).
 
 Band names are resolved from an explicit ``band_names=`` constructor
 argument when present; otherwise operators look for
@@ -30,6 +30,7 @@ import pandas as pd
 from georeader.reflectance import srf, transform_to_srf
 from pipekit import Operator
 
+from geotoolz._src.bands import concat_band_attrs, strip_band_attrs, take_band_attrs
 from geotoolz._src.config import jsonable
 from geotoolz._src.wrap import wrap_like
 from geotoolz.spectral._src.array import (
@@ -100,34 +101,20 @@ def _with_band_attrs(
     gt: GeoTensor | np.ndarray,
     values: np.ndarray,
     *,
+    attrs: dict[str, Any] | None = None,
     band_names: list[str] | None = None,
     wavelengths: np.ndarray | None = None,
-    drop_band_attrs: bool = False,
 ) -> GeoTensor | np.ndarray:
-    """Rewrap ``values`` like ``gt`` and update band metadata.
+    """:func:`wrap_like` that also writes ``attrs["wavelengths"]``.
 
-    Uses :func:`wrap_like` to propagate ``transform``, ``crs``,
-    ``fill_value_default``, and ``attrs`` for GeoTensor carriers (plain
-    ndarray carriers come back as plain arrays with no metadata to
-    update). When the band axis is altered, pass ``band_names`` /
-    ``wavelengths`` to rewrite the corresponding attrs in lockstep;
-    pass ``drop_band_attrs=True`` for operators that collapse the band
-    axis entirely.
+    ``attrs`` and ``band_names`` go straight to :func:`wrap_like` (which
+    copies attrs and drops stale per-band keys); ``wavelengths``, when
+    given, is then stored as a JSON-friendly float list. Plain ndarray
+    carriers come back as plain arrays with no metadata to update.
     """
-    out = wrap_like(gt, values)
-    if not hasattr(out, "attrs"):  # plain-array carrier: nothing to rewrite
-        return out
-    if not (band_names is not None or wavelengths is not None or drop_band_attrs):
-        return out
-    new_attrs = _attrs(gt)
-    if drop_band_attrs:
-        new_attrs.pop("band_names", None)
-        new_attrs.pop("wavelengths", None)
-    if band_names is not None:
-        new_attrs["band_names"] = list(band_names)
-    if wavelengths is not None:
-        new_attrs["wavelengths"] = jsonable(np.asarray(wavelengths, dtype=float))
-    out.attrs = new_attrs
+    out = wrap_like(gt, values, attrs=attrs, band_names=band_names)
+    if wavelengths is not None and hasattr(out, "attrs"):
+        out.attrs["wavelengths"] = jsonable(np.asarray(wavelengths, dtype=float))
     return out
 
 
@@ -173,23 +160,20 @@ class SelectBands(Operator):
         arr = np.asarray(gt)
         names = _band_names(gt, None)
         indexes = _resolve_bands(self.indexes, names)
-        selected_names = [names[idx] for idx in indexes] if names is not None else None
-        wavelengths = _attrs(gt).get("wavelengths")
+        attrs = _attrs(gt)
+        band_axis_len = arr.shape[self.axis]
+        wavelengths = attrs.get("wavelengths")
         if wavelengths is not None:
             wavelengths_arr = np.asarray(wavelengths, dtype=float)
-            band_axis_len = arr.shape[self.axis]
             if wavelengths_arr.size != band_axis_len:
                 raise ValueError(
                     "gt.attrs['wavelengths'] length "
                     f"({wavelengths_arr.size}) does not match the band axis "
                     f"length ({band_axis_len}) at axis {self.axis}"
                 )
-            selected_wavelengths = wavelengths_arr[indexes]
-        else:
-            selected_wavelengths = None
         out = select_bands(arr, indexes, axis=self.axis)
-        return _with_band_attrs(
-            gt, out, band_names=selected_names, wavelengths=selected_wavelengths
+        return wrap_like(
+            gt, out, attrs=take_band_attrs(attrs, indexes, n_bands=band_axis_len)
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -225,9 +209,10 @@ class ReorderBands(SelectBands):
 class StackBands(Operator):
     """Concatenate GeoTensors along the band axis.
 
-    All inputs must share spatial shape, transform, and CRS. When every
-    input carries ``band_names`` / ``wavelengths`` they are concatenated
-    in input order; otherwise those attrs are dropped on the output.
+    All inputs must share spatial shape, transform, and CRS. Each per-band
+    attrs key (``band_names``, ``descriptions``, ``wavelengths``, ...)
+    is concatenated in input order when every input carries it with one
+    entry per band; otherwise that key is dropped on the output.
     Plain ``np.ndarray`` inputs are supported (the transform/CRS check
     is skipped and a plain array is returned); mixing GeoTensors and
     plain arrays raises because their georeferencing cannot agree.
@@ -252,10 +237,6 @@ class StackBands(Operator):
         first_transform = getattr(first, "transform", None)
         first_crs = getattr(first, "crs", None)
         arrays = []
-        names: list[str] = []
-        wavelengths: list[float] = []
-        have_names = True
-        have_wavelengths = True
         for idx, gt in enumerate(tensors):
             if gt.shape[-2:] != first.shape[-2:]:
                 raise ValueError(
@@ -271,23 +252,15 @@ class StackBands(Operator):
             arr = np.asarray(gt)
             expanded = np.expand_dims(arr, axis=self.axis) if arr.ndim == 2 else arr
             arrays.append(expanded)
-            gt_names = _attrs(gt).get("band_names")
-            gt_wavelengths = _attrs(gt).get("wavelengths")
-            have_names = have_names and gt_names is not None
-            have_wavelengths = have_wavelengths and gt_wavelengths is not None
-            if gt_names is not None:
-                names.extend(str(name) for name in gt_names)
-            if gt_wavelengths is not None:
-                wavelengths.extend(float(wavelength) for wavelength in gt_wavelengths)
         out = np.concatenate(arrays, axis=self.axis)
-        keep_both = have_names and have_wavelengths
-        return _with_band_attrs(
-            first,
-            out,
-            band_names=names if keep_both else None,
-            wavelengths=np.asarray(wavelengths) if keep_both else None,
-            drop_band_attrs=not keep_both,
+        attrs = strip_band_attrs(_attrs(first))
+        attrs.update(
+            concat_band_attrs(
+                [_attrs(gt) for gt in tensors],
+                [arr.shape[self.axis] for arr in arrays],
+            )
         )
+        return wrap_like(first, out, attrs=attrs)
 
 
 class SplitBands(Operator):
@@ -324,19 +297,16 @@ class SplitBands(Operator):
         source_names = _band_names(gt, self.names)
         if source_names is not None and len(source_names) != n_bands:
             raise ValueError("names length must match the number of bands")
-        wavelengths = _attrs(gt).get("wavelengths")
+        attrs = _attrs(gt)
         outputs = []
         for idx in range(n_bands):
             out = np.take(arr, [idx], axis=axis)
-            band_name = [source_names[idx]] if source_names is not None else None
-            band_wavelength = (
-                np.asarray([np.asarray(wavelengths, dtype=float)[idx]])
-                if wavelengths is not None
-                else None
-            )
             outputs.append(
-                _with_band_attrs(
-                    gt, out, band_names=band_name, wavelengths=band_wavelength
+                wrap_like(
+                    gt,
+                    out,
+                    attrs=take_band_attrs(attrs, [idx], n_bands=n_bands),
+                    band_names=None if self.names is None else [self.names[idx]],
                 )
             )
         return outputs
@@ -388,7 +358,7 @@ class BandMath(Operator):
             name: np.take(arr, idx, axis=self.axis) for idx, name in enumerate(names)
         }
         out = evaluate_band_math(self.expression, variables)
-        return _with_band_attrs(gt, out, drop_band_attrs=True)
+        return wrap_like(gt, out, attrs=strip_band_attrs(_attrs(gt)))
 
 
 class NormalizedDifference(Operator):
@@ -432,7 +402,7 @@ class NormalizedDifference(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return _with_band_attrs(gt, out, drop_band_attrs=True)
+        return wrap_like(gt, out, attrs=strip_band_attrs(_attrs(gt)))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -484,7 +454,7 @@ class BandRatio(Operator):
             axis=self.axis,
             eps=self.eps,
         )
-        return _with_band_attrs(gt, out, drop_band_attrs=True)
+        return wrap_like(gt, out, attrs=strip_band_attrs(_attrs(gt)))
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -557,11 +527,13 @@ class ApplySRF(Operator):
         )
         if not hasattr(out, "attrs"):  # plain-array carrier: nothing to rewrite
             return out
-        new_attrs = _attrs(gt)
-        new_attrs["band_names"] = list(names)
-        new_attrs["wavelengths"] = jsonable(target_center_wavelengths)
-        out.attrs = new_attrs
-        return out
+        return _with_band_attrs(
+            gt,
+            np.asarray(out),
+            attrs=strip_band_attrs(_attrs(gt)),
+            band_names=list(names),
+            wavelengths=target_center_wavelengths,
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -763,7 +735,10 @@ class SpectralBinning(Operator):
         # Band axis is reshaped; band_names from the source no longer
         # apply, but new wavelengths do.
         return _with_band_attrs(
-            gt, out, wavelengths=target_wavelengths, drop_band_attrs=True
+            gt,
+            out,
+            attrs=strip_band_attrs(_attrs(gt)),
+            wavelengths=target_wavelengths,
         )
 
     def get_config(self) -> dict[str, Any]:
