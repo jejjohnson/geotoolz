@@ -1,4 +1,20 @@
-"""RS-safe augmentation operators."""
+"""RS-safe augmentation operators.
+
+Seeding semantics (shared by every operator here):
+
+- ``op = Op(seed=s)`` holds a private ``np.random.Generator`` seeded from
+  ``s`` (created lazily on the first call). Each call draws from it, so
+  successive calls apply *different* augmentations, while two operators
+  built with the same ``s`` produce the same sequence of draws. With
+  ``seed=None`` the generator is seeded from OS entropy.
+- ``op(x, seed=k)`` is a deterministic one-off draw from a fresh generator
+  seeded with ``k``; it does not advance the operator's own stream.
+- ``get_config`` only ever reports the constructor ``seed``: a reloaded
+  (or freshly built) operator restarts its stream from the beginning.
+- The generator state travels with ``copy`` / ``pickle``, so replicas of an
+  already-seeded operator (e.g. dataloader workers) repeat each other's
+  draws unless each is given its own ``seed``.
+"""
 
 from __future__ import annotations
 
@@ -36,12 +52,26 @@ BRIGHT_CLOUD_PERCENTILE = 98.0
 CLOUD_ALPHA_EPSILON = 1e-12
 
 
-def _rng(seed: int | None) -> np.random.Generator:
-    return np.random.default_rng(seed)
+def _call_rng(op: Operator, seed: int | None) -> np.random.Generator:
+    """Return the generator that drives one ``op`` call.
 
-
-def _seed(default: int | None, override: int | None) -> int | None:
-    return default if override is None else override
+    A per-call ``seed`` gives a fresh, one-off generator (a deterministic
+    draw that leaves the operator's own stream untouched). Otherwise the
+    draw comes from a generator held privately on the instance, created
+    lazily from ``op.seed`` on first use, so successive calls continue one
+    stream: reproducible across instances built with the same seed, yet
+    different from call to call. The generator lives outside the
+    constructor parameters, so ``get_config`` stays the pure-JSON seed;
+    a reloaded operator starts its stream from the beginning. Changing
+    ``op.seed`` after construction restarts the stream from the new seed.
+    """
+    if seed is not None:
+        return np.random.default_rng(seed)
+    state = op.__dict__.get("_rng_state")
+    if state is None or state[0] != op.seed:
+        state = (op.seed, np.random.default_rng(op.seed))
+        op.__dict__["_rng_state"] = state
+    return state[1]
 
 
 def _check_probability(value: float, name: str) -> None:
@@ -120,9 +150,18 @@ def _cast_like(
 ) -> Shaped[np.ndarray, "*dims"]:
     dtype = np.dtype(dtype)
     if np.issubdtype(dtype, np.bool_):
-        # Treat boolean arrays as masks: positive augmented values remain True.
-        return (out > 0).astype(dtype, copy=False)
+        # Pixel-rearranging ops (flip, crop, dropout, ...) keep a mask a mask;
+        # radiometric math on a boolean carrier has no meaningful cast back.
+        if out.dtype == np.bool_:
+            return out
+        raise TypeError(
+            "radiometric augmentations are undefined for boolean carriers; "
+            "cast the mask to a numeric dtype first."
+        )
     if np.issubdtype(dtype, np.integer):
+        if not np.issubdtype(out.dtype, np.integer):
+            # Round to the nearest DN; a bare cast truncates (-0.5 DN bias).
+            out = np.rint(out)
         info = np.iinfo(dtype.name)
         out = np.clip(out, info.min, info.max)
     return out.astype(dtype, copy=False)
@@ -148,10 +187,16 @@ def _new_geotensor(gt: GeoTensor, out: np.ndarray, transform: Affine) -> GeoTens
 class Compose(Operator):
     """Apply augmentations sequentially with an optional pipeline probability.
 
-    Per-call ``seed`` deterministically derives a fresh child seed for each
-    augmentation so the same top-level seed always produces the same chain
-    of inner draws. When ``seed`` is omitted, ``Compose`` uses ``self.seed``
-    (set at construction) before falling back to non-deterministic entropy.
+    Seeding follows the module contract. When ``Compose`` is seeded — by
+    a per-call ``seed`` (one-off) or a constructor ``seed`` (its own
+    stream, advancing each call) — it owns the randomness of the whole
+    chain: it draws one child seed per augmentation and forwards it as
+    that child's per-call ``seed``, so the same top-level seed always
+    reproduces the same chain of inner draws and the children's own
+    streams are left untouched. An unseeded ``Compose`` forwards nothing,
+    so each child draws from its own stream (honouring any child
+    ``seed``). Children whose ``__init__`` takes no ``seed`` are called
+    without one either way.
 
     ``get_config`` emits a JSON-safe nested description of each child via
     its ``get_config()``; ``forbid_in_yaml`` is set because the constructor
@@ -165,7 +210,8 @@ class Compose(Operator):
     Args:
         augmentations: Operators applied in order.
         p: Probability of applying the whole pipeline. Default ``1.0``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the pipeline's own stream (see above); ``None``
+            leaves each child to its own stream.
 
     Examples:
         >>> import geotoolz as gz
@@ -200,14 +246,18 @@ class Compose(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        seeded = seed is not None or self.seed is not None
+        rng = _call_rng(self, seed)
         if rng.random() >= self.p:
             return gt
 
         out = gt
         child_seeds = rng.integers(0, np.iinfo(np.int64).max, len(self.augmentations))
         for op, child_seed in zip(self.augmentations, child_seeds, strict=True):
-            out = op(out, seed=int(child_seed)) if _accepts_seed_kwarg(op) else op(out)
+            if seeded and _accepts_seed_kwarg(op):
+                out = op(out, seed=int(child_seed))
+            else:
+                out = op(out)
         return out
 
     def get_config(self) -> dict[str, Any]:
@@ -222,8 +272,10 @@ class RandomFlip(Operator):
     """Randomly flip a GeoTensor horizontally and/or vertically.
 
     Preserves the CRS and updates the affine ``transform`` so the output
-    pixel grid still maps to the same physical extent. Each axis flips
-    independently with probability ``p_horizontal`` / ``p_vertical``.
+    pixel grid still maps to the same physical extent (identical
+    ``bounds``/footprint; the mirrored axis is anchored at the far pixel
+    edge). Each axis flips independently with probability
+    ``p_horizontal`` / ``p_vertical``.
 
     The pixel math is metadata-free, so a plain ``np.ndarray`` input is
     also accepted and returns the flipped plain array (no transform
@@ -232,7 +284,8 @@ class RandomFlip(Operator):
     Args:
         p_horizontal: Probability of flipping the last (x) axis.
         p_vertical: Probability of flipping the second-to-last (y) axis.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
 
     Examples:
         >>> import geotoolz as gz
@@ -255,7 +308,7 @@ class RandomFlip(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         arr = np.asarray(gt)
         out = arr
         transform = getattr(gt, "transform", None)
@@ -265,18 +318,20 @@ class RandomFlip(Operator):
             out = np.flip(out, axis=-1)
             if transform is not None:
                 transform = (
-                    transform * Affine.translation(width - 1, 0) * Affine.scale(-1, 1)
+                    transform * Affine.translation(width, 0) * Affine.scale(-1, 1)
                 )
 
         if rng.random() < self.p_vertical:
             out = np.flip(out, axis=-2)
             if transform is not None:
                 transform = (
-                    transform * Affine.translation(0, height - 1) * Affine.scale(1, -1)
+                    transform * Affine.translation(0, height) * Affine.scale(1, -1)
                 )
 
         if out is arr:
             return gt
+        # np.flip returns a view; copy so the output never aliases the input.
+        out = out.copy()
         if transform is None:
             return out
         return _new_geotensor(gt, out, transform)
@@ -286,8 +341,8 @@ class RandomRotate90(Operator):
     """Randomly rotate by 90, 180, or 270 degrees.
 
     Uses ``np.rot90`` over the trailing two axes and composes the input
-    ``transform`` with the matching rigid rotation so the upper-left output
-    pixel still maps to the correct world coordinate.
+    ``transform`` with the matching rigid rotation so every output pixel
+    still maps to its world location and the footprint is unchanged.
 
     The pixel math is metadata-free, so a plain ``np.ndarray`` input is
     also accepted and returns the rotated plain array (no transform
@@ -296,7 +351,8 @@ class RandomRotate90(Operator):
     Args:
         p: Probability of rotating; when triggered, k is drawn uniformly
             from {1, 2, 3} quarter-turns.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
 
     Examples:
         >>> import geotoolz as gz
@@ -312,13 +368,14 @@ class RandomRotate90(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         if rng.random() >= self.p:
             return gt
 
         k = int(rng.integers(1, 4))
         arr = np.asarray(gt)
-        out = np.rot90(arr, k=k, axes=(-2, -1))
+        # np.rot90 returns a view; copy so the output never aliases the input.
+        out = np.rot90(arr, k=k, axes=(-2, -1)).copy()
         transform = getattr(gt, "transform", None)
         if transform is None:
             return out
@@ -327,15 +384,19 @@ class RandomRotate90(Operator):
 
 
 def _rot90_transform(transform: Affine, height: int, width: int, k: int) -> Affine:
+    """Compose ``transform`` with the pixel map of ``np.rot90(..., k)``.
+
+    The affine maps pixel *corners*, so the mirrored axes are anchored at
+    the far edge (``width`` / ``height``), not the last pixel index; the
+    rotated grid then covers exactly the input footprint.
+    """
     k %= 4
     if k == 1:
-        return transform * Affine(0, -1, width - 1, 1, 0, 0)
+        return transform * Affine(0, -1, width, 1, 0, 0)
     if k == 2:
-        return (
-            transform * Affine.translation(width - 1, height - 1) * Affine.scale(-1, -1)
-        )
+        return transform * Affine.translation(width, height) * Affine.scale(-1, -1)
     if k == 3:
-        return transform * Affine(0, 1, 0, -1, 0, height - 1)
+        return transform * Affine(0, 1, 0, -1, 0, height)
     return transform
 
 
@@ -352,7 +413,8 @@ class RandomCrop(Operator):
 
     Args:
         size: ``(height, width)`` of the cropped window in pixels.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
 
     Examples:
         >>> import geotoolz as gz
@@ -375,7 +437,7 @@ class RandomCrop(Operator):
         if crop_h > height or crop_w > width:
             raise ValueError("size must fit within the GeoTensor spatial shape.")
 
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         top = int(rng.integers(0, height - crop_h + 1))
         left = int(rng.integers(0, width - crop_w + 1))
         isel = getattr(gt, "isel", None)
@@ -402,7 +464,8 @@ class RandomShift(Operator):
         max_shift: ``(max_dy, max_dx)`` maximum absolute shift per axis,
             in pixels. Each shift is drawn uniformly from
             ``[-max, +max]``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(self, max_shift: tuple[int, int], seed: int | None = None) -> None:
@@ -418,7 +481,7 @@ class RandomShift(Operator):
                 "got a plain array"
             )
         max_y, max_x = self.max_shift
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         dy = int(rng.integers(-max_y, max_y + 1)) if max_y else 0
         dx = int(rng.integers(-max_x, max_x + 1)) if max_x else 0
         if dx == 0 and dy == 0:
@@ -442,7 +505,8 @@ class BrightnessJitter(Operator):
             from. Default ``(0.9, 1.1)``.
         per_band: Draw an independent factor per band (leading axis)
             instead of one shared factor. Default ``True``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(
@@ -460,7 +524,7 @@ class BrightnessJitter(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         arr = np.asarray(gt)
         if self.per_band:
             factors = rng.uniform(self.factor[0], self.factor[1], _band_count(arr))
@@ -489,7 +553,8 @@ class ContrastJitter(Operator):
             Default ``(0.9, 1.1)``.
         per_band: Draw an independent factor per band (leading axis)
             instead of one shared factor. Default ``True``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(
@@ -507,7 +572,7 @@ class ContrastJitter(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         arr = np.asarray(gt)
         data = arr.astype(np.float64, copy=False)
         mean = np.mean(data, axis=(-2, -1), keepdims=True)
@@ -538,7 +603,8 @@ class GaussianNoise(Operator):
             ``(lo, hi)`` range to sample from. Default ``0.01``.
         per_band: Draw an independent sigma per band (leading axis)
             instead of one shared sigma. Default ``True``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(
@@ -556,7 +622,7 @@ class GaussianNoise(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         arr = np.asarray(gt)
         if self.per_band:
             sigmas = np.array(
@@ -588,7 +654,8 @@ class SpeckleNoise(Operator):
     Args:
         sigma: Speckle standard deviation, either a scalar or a
             ``(lo, hi)`` range to sample from. Default ``0.05``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(self, sigma: ScalarOrRange = 0.05, seed: int | None = None) -> None:
@@ -600,7 +667,7 @@ class SpeckleNoise(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         sigma = _sample_nonnegative(rng, self.sigma, "sigma")
         arr = np.asarray(gt)
         noise = rng.normal(0.0, sigma, size=arr.shape)
@@ -620,7 +687,8 @@ class BandDropout(Operator):
     Args:
         p: Per-band dropout probability. Default ``0.1``.
         fill: Value written into dropped bands. Default ``0.0``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(
@@ -634,7 +702,7 @@ class BandDropout(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         arr = np.asarray(gt)
         out = np.array(arr, copy=True)
         if arr.ndim < 3:
@@ -660,7 +728,8 @@ class BandJitter(Operator):
             indices) permuted within that group, or the equivalent
             ``[[label, names], ...]`` pairs that ``get_config`` emits.
             ``None`` or empty disables the op (identity).
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(
@@ -682,7 +751,7 @@ class BandJitter(Operator):
             return gt
 
         band_names = _band_names(gt)
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         out = np.array(arr, copy=True)
         for group in self.groups.values():
             indices = [_band_index(name, band_names, arr.shape[0]) for name in group]
@@ -725,7 +794,8 @@ class SunAngleJitter(Operator):
         delta_sza_deg: Solar-zenith perturbation in degrees, either a
             scalar or a ``(lo, hi)`` range to sample from. Default
             ``(-5.0, 5.0)``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(
@@ -737,7 +807,7 @@ class SunAngleJitter(Operator):
         self.seed = seed
 
     def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         delta = _sample_uniform(rng, self.delta_sza_deg, "delta_sza_deg")
         attrs = getattr(gt, "attrs", None) or {}
         sza_value = attrs.get("solar_zenith_angle", attrs.get("sza_deg"))
@@ -772,7 +842,8 @@ class AtmosphericHaze(Operator):
         intensity: Haze amplitude added to the shortest wavelength,
             either a scalar or a ``(lo, hi)`` range to sample from.
             Default ``(0.0, 0.05)``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(
@@ -784,7 +855,7 @@ class AtmosphericHaze(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         intensity = _sample_nonnegative(rng, self.intensity, "intensity")
         if intensity == 0.0:
             return gt
@@ -828,7 +899,8 @@ class SimulatedClouds(Operator):
             or a ``(lo, hi)`` range in ``[0, 1]``. Default ``(0.0, 0.3)``.
         feather: Gaussian smoothing sigma (pixels) applied to the random
             cloud field; ``0`` disables smoothing. Default ``5``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(
@@ -848,7 +920,7 @@ class SimulatedClouds(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         coverage = _sample_uniform(rng, self.coverage, "coverage")
         if coverage == 0.0:
             return gt
@@ -903,7 +975,8 @@ class CutMix(Operator):
     Args:
         pool: Donor rasters sampled uniformly at apply time.
         p: Probability of applying the paste. Default ``0.5``.
-        seed: Default seed used when no per-call ``seed`` is given.
+        seed: Seed of the operator's own draw stream, which advances on
+            every call; a per-call ``seed`` makes a one-off draw instead.
 
     Examples:
         >>> import geotoolz as gz
@@ -927,7 +1000,7 @@ class CutMix(Operator):
     def _apply(
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
-        rng = _rng(_seed(self.seed, seed))
+        rng = _call_rng(self, seed)
         if not self.pool or rng.random() >= self.p:
             return gt
 
