@@ -229,10 +229,12 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "radiometry._src.operators.RadianceToReflectance": {
         "solar_irradiance": [1900.0, 1800.0],
         "acquisition_date": _DATE,
+        "sza_deg": 30.0,
     },
     "radiometry._src.operators.ReflectanceToRadiance": {
         "solar_irradiance": [1900.0, 1800.0],
         "acquisition_date": _DATE,
+        "sza_deg": 30.0,
     },
     "restore._src.operators.DenoisePCA": {"n_components": 2},
     "spectral._src.operators.ApplySRF": {
@@ -662,3 +664,160 @@ def test_tuple_returning_composites_are_terminal_only_when_flagged(
     Sequential([cls(**{**kwargs, flag: False}), Identity()])
     with pytest.raises(TypeError, match="terminal"):
         Sequential([cls(**kwargs), Identity()])
+
+
+def _spectral_scene(wavelengths: list[float], *, seed: int = 0, **extra: Any) -> Any:
+    """A float scene with one ``band_names`` / ``descriptions`` / ``wavelengths``
+    entry per band."""
+    from _helpers import toy_geotensor
+
+    n = len(wavelengths)
+    names = [f"b{i}" for i in range(n)]
+    values = np.random.default_rng(seed).uniform(0.01, 1.0, (n, 16, 16))
+    return toy_geotensor(
+        values,
+        attrs={
+            "band_names": names,
+            "descriptions": list(names),
+            "wavelengths": list(wavelengths),
+            "sensor": "toy",
+            **extra,
+        },
+    )
+
+
+def _attributed_inputs() -> list[Any]:
+    """Toy inputs whose per-band attrs are consistent with their band count.
+
+    Band counts and names are chosen so that operators with sensor-style
+    defaults (indices, SRFs, QA registries, list-input composites) run.
+    """
+    from _helpers import toy_geotensor
+
+    rng = np.random.default_rng(0)
+    labels = np.zeros((16, 16), dtype=np.int32)
+    labels[2:6, 2:6] = 1
+    qa_names = ["QA60", "SCL", "QA_PIXEL", "state_1km"]
+    return [
+        _spectral_scene([490.0, 560.0, 665.0]),
+        _spectral_scene(
+            [
+                *(443.0, 490.0, 560.0, 665.0, 705.0, 740.0, 783.0, 842.0, 865.0),
+                *(945.0, 1375.0, 1610.0, 2190.0),
+            ],
+            sza_deg=30.0,
+        ),
+        _spectral_scene([500.0, 600.0]),
+        _spectral_scene([495.0, 505.0, 595.0, 605.0]),
+        toy_geotensor(
+            rng.uniform(0.01, 1.0, (16, 16)),
+            attrs={"band_names": ["b0"], "sensor": "toy"},
+        ),
+        toy_geotensor(labels, fill_value_default=0, attrs={"band_names": ["labels"]}),
+        toy_geotensor(
+            labels.astype(np.uint8), fill_value_default=0, attrs={"band_names": ["qa"]}
+        ),
+        toy_geotensor(
+            rng.integers(0, 2**12, (4, 16, 16)).astype(np.uint16),
+            fill_value_default=0,
+            attrs={"band_names": qa_names, "descriptions": list(qa_names)},
+        ),
+        [
+            _spectral_scene([490.0, 560.0, 665.0], seed=1),
+            _spectral_scene([490.0, 560.0, 665.0], seed=2),
+        ],
+    ]
+
+
+def _geotensors(value: Any) -> list[Any]:
+    """Every GeoTensor in an operator output (a carrier, list or tuple)."""
+    from georeader.geotensor import GeoTensor
+
+    if isinstance(value, GeoTensor):
+        return [value]
+    if isinstance(value, list | tuple):
+        return [gt for item in value for gt in _geotensors(item)]
+    return []
+
+
+def assert_fresh_consistent_attrs(inputs: Any, out: Any) -> None:
+    """``out``'s attrs are new dicts whose per-band lists match the band count.
+
+    ``inputs`` is the operator's input (a carrier or a list of carriers).
+    Returning an input object itself is allowed (a pass-through).
+    """
+    from geotoolz._src.bands import PER_BAND_KEYS, band_count
+
+    sources = _geotensors(inputs)
+    for gt in _geotensors(out):
+        if any(gt is src for src in sources):
+            continue
+        assert all(gt.attrs is not src.attrs for src in sources), (
+            "output shares an input's attrs dict"
+        )
+        n_bands = band_count(gt.shape)
+        for key in PER_BAND_KEYS:
+            value = gt.attrs.get(key)
+            if value is None or isinstance(value, str | dict):
+                continue
+            assert len(value) == n_bands, (
+                f"attrs[{key!r}] has {len(value)} entries for {n_bands} band(s)"
+            )
+
+
+def _takes_sequence(op: Operator) -> bool:
+    """Whether ``op._apply``'s input is a sequence / mapping of carriers."""
+    params = list(inspect.signature(op._apply).parameters.values())
+    annotation = str(params[0].annotation) if params else ""
+    return any(tag in annotation for tag in ("Sequence", "Mapping", "list["))
+
+
+#: Strict xfails for ``test_output_attrs_are_fresh_and_consistent``, owned by
+#: later branches of the #112 stack.
+ATTRS_KNOWN_FAILURES: dict[str, Known] = {
+    "einx._src.operators.SpatialPool": (
+        "#149: einx outputs alias the input attrs (owned by the einx branch)",
+        AssertionError,
+    ),
+}
+
+
+def _attrs_params() -> list[Any]:
+    out = []
+    for cls in _CLASSES:
+        key = _key(cls)
+        marks = []
+        if key in ATTRS_KNOWN_FAILURES:
+            reason, raises = ATTRS_KNOWN_FAILURES[key]
+            marks.append(pytest.mark.xfail(reason=reason, raises=raises, strict=True))
+        out.append(pytest.param(cls, id=key, marks=marks))
+    return out
+
+
+@pytest.mark.parametrize("cls", _attrs_params())
+def test_output_attrs_are_fresh_and_consistent(cls: type) -> None:
+    """Outputs never alias the input's ``attrs`` nor carry stale band keys (#144).
+
+    Runs every buildable single-input operator on toy scenes carrying
+    ``band_names`` / ``descriptions`` / ``wavelengths``; for each GeoTensor
+    output, ``out.attrs is not gt.attrs`` and every per-band attrs list has
+    one entry per output band.
+    """
+    op = build(cls)
+    if op._terminal or _n_inputs(op) != 1:
+        pytest.skip("terminal or not a single-input operator")
+    ran = False
+    takes_sequence = _takes_sequence(op)
+    for scene in _attributed_inputs():
+        # A bare carrier handed to a sequence operator iterates as band
+        # slices that alias its attrs; that is not a supported call.
+        if isinstance(scene, list) != takes_sequence:
+            continue
+        try:
+            out = op(scene)
+        except Exception:
+            continue
+        ran = True
+        assert_fresh_consistent_attrs(scene, out)
+    if not ran:
+        pytest.skip("no toy input is valid for this operator")

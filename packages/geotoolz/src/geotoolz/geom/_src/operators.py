@@ -45,10 +45,11 @@ from skimage.registration import (
     phase_cross_correlation,
 )
 
+from geotoolz._src.bands import band_count
 from geotoolz._src.blending import normalize_overlap_add, overlap_add
 from geotoolz._src.config import as_tuple
 from geotoolz._src.shape import single_band
-from geotoolz._src.wrap import wrap_like
+from geotoolz._src.wrap import adopt_attrs, rewrap_attrs, wrap_like
 from geotoolz.geom._src.array import (
     center_offsets,
     feather_weights,
@@ -135,12 +136,18 @@ def _resize_to_shape(
         interpolation=interpolation,
     )
     transform = gt.transform * Affine.scale(width / out_w, height / out_h)
-    return GeoTensor(
+    return wrap_like(
+        gt,
         resized.values,
         transform=transform,
-        crs=resized.crs,
         fill_value_default=resized.fill_value_default,
-        attrs=resized.attrs,
+    )
+
+
+def _copied_attrs(ref: GeoTensor, values: np.ndarray) -> dict[str, Any]:
+    """Fresh attrs for a new-grid output built from ``ref`` (see ``rewrap_attrs``)."""
+    return rewrap_attrs(
+        ref.attrs, in_bands=band_count(ref.shape), out_bands=band_count(values.shape)
     )
 
 
@@ -241,19 +248,24 @@ class Reproject(Operator):
         _require_geotensor(gt, "Reproject")
         resampling = resolve_resampling(self.resampling)
         if self.resolution is None:
-            return read.read_to_crs(gt, self.dst_crs, resampling=resampling)
+            return adopt_attrs(
+                gt, read.read_to_crs(gt, self.dst_crs, resampling=resampling)
+            )
         # ``read_to_crs`` returns its input untouched when the CRS already
         # matches, silently dropping ``resolution``; build the destination
         # grid explicitly so a same-CRS call still resamples.
         window, dst_transform = read.calculate_transform_window(
             gt, self.dst_crs, self.resolution
         )
-        return read.read_reproject(
+        return adopt_attrs(
             gt,
-            dst_crs=self.dst_crs,
-            dst_transform=dst_transform,
-            window_out=window,
-            resampling=resampling,
+            read.read_reproject(
+                gt,
+                dst_crs=self.dst_crs,
+                dst_transform=dst_transform,
+                window_out=window,
+                resampling=resampling,
+            ),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -300,10 +312,13 @@ class ReprojectLike(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         _require_geotensor(gt, type(self).__name__)
-        return read.read_reproject_like(
+        return adopt_attrs(
             gt,
-            self.like,
-            resampling=resolve_resampling(self.resampling),
+            read.read_reproject_like(
+                gt,
+                self.like,
+                resampling=resolve_resampling(self.resampling),
+            ),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -658,7 +673,8 @@ class PadTo(Operator):
                     # carrier fill is set; fall back to 0 like the ndarray path.
                     fill = 0 if gt.fill_value_default is None else None
                 kwargs["constant_values"] = fill
-            return gt.pad({"y": pad_yx[0], "x": pad_yx[1]}, mode=self.mode, **kwargs)
+            padded = gt.pad({"y": pad_yx[0], "x": pad_yx[1]}, mode=self.mode, **kwargs)
+            return adopt_attrs(gt, padded)
         arr = np.asarray(gt)
         pad_width = [(0, 0)] * (arr.ndim - 2) + list(pad_yx)
         if self.mode == "constant":
@@ -725,7 +741,7 @@ class CropTo(Operator):
             width=self.shape[1],
             height=self.shape[0],
         )
-        return gt.read_from_window(window, boundless=False)
+        return adopt_attrs(gt, gt.read_from_window(window, boundless=False))
 
     def get_config(self) -> dict[str, Any]:
         return {"shape": list(self.shape), "anchor": self.anchor}
@@ -776,7 +792,7 @@ class CropToBounds(Operator):
             bounds = transform_bounds(self.crs, gt.crs, *bounds)
         window = rasterio.windows.from_bounds(*bounds, transform=gt.transform)
         window = window.round_offsets().round_lengths()
-        return gt.read_from_window(window, boundless=False)
+        return adopt_attrs(gt, gt.read_from_window(window, boundless=False))
 
     def get_config(self) -> dict[str, Any]:
         return {"bounds": list(self.bounds), "crs": self.crs}
@@ -848,16 +864,17 @@ class Tile(Operator):
             arr = np.asarray(gt)
             return [_read_window_boundless(arr, window) for window in windows]
         if gt.fill_value_default is not None:
-            return [gt.read_from_window(window, boundless=True) for window in windows]
+            return [
+                adopt_attrs(gt, gt.read_from_window(window, boundless=True))
+                for window in windows
+            ]
         # ``GeoTensor.read_from_window(boundless=True)`` refuses to pad
         # without a fill value; zero-pad like the plain-array path.
         return [
-            GeoTensor(
+            wrap_like(
+                gt,
                 _read_window_boundless(np.asarray(gt.values), window),
                 transform=rasterio.windows.transform(window, gt.transform),
-                crs=gt.crs,
-                fill_value_default=None,
-                attrs=gt.attrs,
             )
             for window in windows
         ]
@@ -1049,7 +1066,7 @@ class Stitch(Operator):
             transform,
             self.target_crs or first.crs,
             fill_value_default=fill,
-            attrs=first.attrs,
+            attrs=_copied_attrs(first, values),
         )
 
     def _target_grid(
@@ -1286,8 +1303,8 @@ class AntimeridianSplit(Operator):
         split_col = int(np.nanargmax(per_col_max)) + 1
         left = gt.isel({"x": slice(0, split_col)})
         right = gt.isel({"x": slice(split_col, gt.shape[-1])})
-        left = _with_sliced_longitudes(left, lons[:, :split_col])
-        right = _with_sliced_longitudes(right, lons[:, split_col:])
+        left = _with_sliced_longitudes(gt, left, lons[:, :split_col])
+        right = _with_sliced_longitudes(gt, right, lons[:, split_col:])
         left_mean = float(np.nanmean(_normalise_longitudes(lons[:, :split_col])))
         right_mean = float(np.nanmean(_normalise_longitudes(lons[:, split_col:])))
         return [left, right] if left_mean < right_mean else [right, left]
@@ -1368,7 +1385,7 @@ class GeostationaryParallaxCorrect(Operator):
                 np.asarray(gt.fill_value_default, dtype=sampled.dtype),
                 sampled,
             )
-        return gt.array_as_geotensor(sampled)
+        return wrap_like(gt, sampled)
 
     def get_config(self) -> dict[str, Any]:
         target: float | str
@@ -1454,19 +1471,15 @@ class SegmentStitch(Operator):
         row_before = first_index * segment_shape[-2] if axis_num == -2 else 0
         col_before = first_index * segment_shape[-1] if axis_num == -1 else 0
         transform = first.transform * Affine.translation(-col_before, -row_before)
-        attrs = dict(first.attrs or {})
-        attrs["__geotoolz_segment_meta__"] = {
+        out = wrap_like(
+            first, values, transform=transform, fill_value_default=segment_fill
+        )
+        out.attrs["__geotoolz_segment_meta__"] = {
             "segment_index": 0,
             "n_segments": 1,
             "source_n_segments": n_segments,
         }
-        return GeoTensor(
-            values,
-            transform,
-            first.crs,
-            fill_value_default=segment_fill,
-            attrs=attrs,
-        )
+        return out
 
 
 class Mosaic(Operator):
@@ -1527,8 +1540,11 @@ class Mosaic(Operator):
         if self.method == "first" and all(
             gt.fill_value_default is not None for gt in gts
         ):
-            return mosaic.spatial_mosaic(
-                gts, resampling=resolve_resampling(self.resampling)
+            return adopt_attrs(
+                gts[0],
+                mosaic.spatial_mosaic(
+                    gts, resampling=resolve_resampling(self.resampling)
+                ),
             )
         # ``spatial_mosaic`` cannot pad inputs that carry no fill value, so
         # ``"first"`` over such inputs goes through the stacked path below.
@@ -1561,10 +1577,10 @@ class Mosaic(Operator):
         if fill is None:
             fill = np.nan if np.issubdtype(first.dtype, np.floating) else 0
         values = np.where(np.isnan(values), fill, values)
-        return GeoTensor(
+        return wrap_like(
+            first,
             values.astype(first.dtype, copy=False),
             transform=transform,
-            crs=first.crs,
             fill_value_default=fill,
         )
 
@@ -1993,16 +2009,12 @@ def _normalise_longitudes(lons: np.ndarray) -> np.ndarray:
     return ((lons + 180.0) % 360.0) - 180.0
 
 
-def _with_sliced_longitudes(gt: GeoTensor, lons: np.ndarray) -> GeoTensor:
-    attrs = dict(gt.attrs or {})
-    attrs["lons"] = _normalise_longitudes(lons)
-    return GeoTensor(
-        np.asarray(gt),
-        gt.transform,
-        gt.crs,
-        fill_value_default=gt.fill_value_default,
-        attrs=attrs,
-    )
+def _with_sliced_longitudes(
+    ref: GeoTensor, part: GeoTensor, lons: np.ndarray
+) -> GeoTensor:
+    out = adopt_attrs(ref, part)
+    out.attrs["lons"] = _normalise_longitudes(lons)
+    return out
 
 
 def _height_array(

@@ -27,6 +27,7 @@ import numpy as np
 from jaxtyping import Shaped
 from pipekit import Operator
 
+from geotoolz._src.bands import concat_band_attrs, strip_band_attrs
 from geotoolz._src.wrap import wrap_like
 
 
@@ -131,10 +132,12 @@ class StackMatched(Operator):
         (5, 256, 256)
 
     Notes:
-        Band-name metadata propagation and NaN-fill padding on grid
-        mismatch are tracked for a future revision; today the
-        operator requires strict grid equality and emits an unnamed
-        band stack. Pre-coregister with
+        Per-band attrs (``band_names``, ``descriptions``, ``wavelengths``,
+        ...) are concatenated in stacking order when every input carries
+        them; a key missing from any input is dropped. Other attrs follow
+        the first input. NaN-fill padding on grid mismatch is tracked for
+        a future revision; today the operator requires strict grid
+        equality. Pre-coregister with
         ``geotoolz.geom.coregister.RasterToRasterLike`` if the
         inputs aren't already on the same grid.
     """
@@ -172,7 +175,14 @@ class StackMatched(Operator):
 
         arrays = [_as_band_first(np.asarray(t)) for t in seq]
         stacked = np.concatenate(arrays, axis=0)
-        return wrap_like(base, stacked)
+        attrs = strip_band_attrs(getattr(base, "attrs", None))
+        attrs.update(
+            concat_band_attrs(
+                [getattr(t, "attrs", None) for t in seq],
+                [arr.shape[0] for arr in arrays],
+            )
+        )
+        return wrap_like(base, stacked, attrs=attrs)
 
 
 class BlendMatched(Operator):

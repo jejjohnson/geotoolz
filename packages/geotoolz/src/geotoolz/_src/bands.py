@@ -1,0 +1,295 @@
+"""Shared utilities for resolving band references against GeoTensor metadata.
+
+Spectral-index operators accept band references either as integer indices
+(``red_idx=3``) or as sensor-style names (``red="B04"``). The helpers
+here translate names to integer positions using metadata carried on the
+``GeoTensor`` — looked up under a configurable list of attribute keys.
+
+The defaults match conventions used across `rasterio` (``descriptions``),
+``xarray`` (``band_names``), and assorted DataArray pipelines (``bands``)
+so common upstream readers Just Work without per-key wiring.
+
+The helpers live in ``geotoolz._src`` so every operator family (indices,
+compositing, masking, :func:`geotoolz._src.wrap.wrap_like`) shares one
+definition of which ``attrs`` keys describe the band axis.
+``geotoolz.indices._src.bands`` re-exports them for backwards compatibility.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+
+
+if TYPE_CHECKING:
+    from georeader.geotensor import GeoTensor
+
+
+#: Type alias for band references — either an integer index or a string
+#: band name that needs resolution against ``GeoTensor.attrs``.
+BandRef = int | str
+
+
+#: Default lookup order for named-band resolution. The first key that
+#: holds a non-``None`` iterable wins; subsequent keys are only consulted
+#: when the band name is missing from earlier keys.
+DEFAULT_BAND_KEYS: tuple[str, ...] = ("descriptions", "band_names", "bands")
+
+#: Canonical ``attrs`` key operators write band names under.
+CANONICAL_BAND_KEY: str = "band_names"
+
+#: Every ``attrs`` key that holds one entry per band. Band-name aliases
+#: (:data:`DEFAULT_BAND_KEYS` plus ``band_descriptions``) and per-band
+#: spectral metadata (``wavelengths`` / ``wavelengths_nm``). A value under
+#: any of these keys goes stale as soon as the band axis changes size, so
+#: :func:`geotoolz._src.wrap.wrap_like` drops them in that case.
+PER_BAND_KEYS: tuple[str, ...] = (
+    *DEFAULT_BAND_KEYS,
+    "band_descriptions",
+    "wavelengths",
+    "wavelengths_nm",
+)
+
+#: The band-name aliases within :data:`PER_BAND_KEYS` (everything except
+#: spectral metadata). Superseded when new band names are written.
+BAND_NAME_KEYS: tuple[str, ...] = (*DEFAULT_BAND_KEYS, "band_descriptions")
+
+
+def band_count(shape: tuple[int, ...]) -> int:
+    """Size of the band axis of a carrier with the given ``shape``.
+
+    Carriers are ``(H, W)``, ``(C, H, W)`` or ``(T, C, H, W)``: the band
+    axis is ``shape[-3]`` for 3-D and 4-D carriers, and a 2-D carrier is a
+    single band.
+
+    Args:
+        shape: The carrier's shape (at least 2-D).
+
+    Returns:
+        The number of bands.
+
+    Examples:
+        >>> band_count((5, 4, 4)), band_count((2, 5, 4, 4)), band_count((4, 4))
+        (5, 5, 1)
+    """
+    return int(shape[-3]) if len(shape) >= 3 else 1
+
+
+def per_band_values(
+    attrs: Mapping[str, Any] | None, key: str, n_bands: int
+) -> list[Any] | None:
+    """The per-band list stored under ``attrs[key]``, if it fits ``n_bands``.
+
+    Args:
+        attrs: A carrier's ``attrs`` (``None`` means empty).
+        key: The attrs key to read.
+        n_bands: The carrier's band count.
+
+    Returns:
+        ``attrs[key]`` as a list of plain Python values (NumPy scalars are
+        unwrapped so the result stays JSON-friendly), or ``None`` when the
+        key is missing, is not a sequence (strings and mappings are not
+        per-band lists), or has a length other than ``n_bands``.
+    """
+    value = (attrs or {}).get(key)
+    if value is None or isinstance(value, str | bytes | Mapping):
+        return None
+    try:
+        values = list(value)
+    except TypeError:
+        return None
+    if len(values) != n_bands:
+        return None
+    return [v.item() if isinstance(v, np.generic) else v for v in values]
+
+
+def strip_band_attrs(attrs: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Shallow copy of ``attrs`` without any :data:`PER_BAND_KEYS` entry.
+
+    For outputs whose bands no longer correspond to any input band (an
+    index or band-math result), so input band metadata would be stale.
+
+    Examples:
+        >>> strip_band_attrs({"band_names": ["a"], "wavelengths": [1.0], "id": 7})
+        {'id': 7}
+    """
+    return {k: v for k, v in (attrs or {}).items() if k not in PER_BAND_KEYS}
+
+
+def take_band_attrs(
+    attrs: Mapping[str, Any] | None, indexes: Sequence[int], *, n_bands: int
+) -> dict[str, Any]:
+    """Copy ``attrs`` for a band selection, subsetting every per-band key.
+
+    Each key in :data:`PER_BAND_KEYS` whose value is a list of
+    ``n_bands`` entries is replaced by the entries at ``indexes`` (in that
+    order); per-band keys that do not fit ``n_bands`` are dropped rather
+    than left stale. Other keys are shallow-copied unchanged.
+
+    Args:
+        attrs: The source carrier's ``attrs`` (``None`` means empty).
+        indexes: Selected band positions, in output order.
+        n_bands: The source carrier's band count.
+
+    Returns:
+        A new attrs dict for the selected bands.
+
+    Examples:
+        >>> take_band_attrs(
+        ...     {"band_names": ["a", "b", "c"], "sensor": "x"}, [2, 0], n_bands=3
+        ... )
+        {'sensor': 'x', 'band_names': ['c', 'a']}
+    """
+    out = strip_band_attrs(attrs)
+    for key in PER_BAND_KEYS:
+        values = per_band_values(attrs, key, n_bands)
+        if values is not None:
+            out[key] = [values[int(i)] for i in indexes]
+    return out
+
+
+def concat_band_attrs(
+    attrs_list: Sequence[Mapping[str, Any] | None], band_counts: Sequence[int]
+) -> dict[str, list[Any]]:
+    """Concatenate per-band attrs across carriers stacked along the band axis.
+
+    A key from :data:`PER_BAND_KEYS` is kept only when every input carries
+    it with one entry per band; otherwise the stacked output could not
+    carry a list matching its band count, so the key is omitted.
+
+    Args:
+        attrs_list: Each input's ``attrs``, in stacking order.
+        band_counts: Each input's band count (1 for a 2-D carrier).
+
+    Returns:
+        The concatenated per-band keys only; merge them into the output's
+        other attrs.
+
+    Examples:
+        >>> concat_band_attrs(
+        ...     [{"band_names": ["a"]}, {"band_names": ["b", "c"]}], [1, 2]
+        ... )
+        {'band_names': ['a', 'b', 'c']}
+    """
+    out: dict[str, list[Any]] = {}
+    for key in PER_BAND_KEYS:
+        parts = [
+            per_band_values(attrs, key, n)
+            for attrs, n in zip(attrs_list, band_counts, strict=True)
+        ]
+        if parts and all(part is not None for part in parts):
+            out[key] = [v for part in parts for v in part or ()]
+    return out
+
+
+def resolve_band(
+    gt: GeoTensor | np.ndarray,
+    ref: BandRef,
+    *,
+    keys: tuple[str, ...] = DEFAULT_BAND_KEYS,
+) -> int:
+    """Resolve a band reference to an integer band-axis index.
+
+    Integer references pass through unchanged (for any carrier — plain
+    ndarrays included). String references are looked up against
+    ``gt.attrs[key]`` for each ``key`` in ``keys`` (in order). The first
+    key whose iterable contains the requested name wins; if a key exists
+    but doesn't contain the name, the search continues to the next key.
+    Missing keys, ``None`` values, and non-iterable values are skipped
+    silently.
+
+    Args:
+        gt: Carrier `GeoTensor` (its ``attrs`` dict is consulted for
+            named lookups) or a plain ndarray (integer refs only).
+        ref: Either an existing integer index (returned as-is) or a
+            string band name to look up.
+        keys: Attribute keys to consult, in precedence order. Defaults
+            to ``("descriptions", "band_names", "bands")``.
+
+    Returns:
+        The integer position of the band along the carrier's band axis.
+
+    Raises:
+        TypeError: If ``ref`` is a string but the carrier has no
+            ``attrs`` metadata (e.g. a plain ``np.ndarray``).
+        ValueError: If ``ref`` is a string and the name is not found
+            under any of the configured ``keys``.
+
+    Examples:
+        >>> import numpy as np, rasterio
+        >>> from georeader.geotensor import GeoTensor
+        >>> gt = GeoTensor(
+        ...     values=np.zeros((4, 2, 2), dtype=np.float32),
+        ...     transform=rasterio.Affine.identity(),
+        ...     crs="EPSG:4326",
+        ... )
+        >>> gt.attrs["descriptions"] = ("B02", "B03", "B04", "B08")
+        >>> resolve_band(gt, "B04")
+        2
+        >>> resolve_band(gt, 7)  # integers pass through untouched
+        7
+    """
+    if not isinstance(ref, str):
+        return ref
+
+    attrs = getattr(gt, "attrs", None)
+    if attrs is None:
+        raise TypeError(
+            f"Named-band resolution ({ref!r}) requires a georeferenced "
+            "GeoTensor input carrying band-name metadata in `attrs`; got a "
+            "plain array. Pass an integer band index instead."
+        )
+
+    for key in keys:
+        names = attrs.get(key)
+        if names is None:
+            continue
+        try:
+            band_names = tuple(names)
+        except TypeError:
+            continue
+        try:
+            return band_names.index(ref)
+        except ValueError:
+            continue
+
+    raise ValueError(
+        f"Band {ref!r} was not found in GeoTensor attrs "
+        + ", ".join(f"{k!r}" for k in keys)
+        + "."
+    )
+
+
+def configured_ref(value: BandRef | None, fallback: BandRef | None) -> BandRef:
+    """Apply the dual ``band=`` / ``band_idx=`` constructor pattern.
+
+    Index operators accept both a named-or-positional ``band`` keyword
+    *and* an integer-only ``band_idx`` keyword (with a sensible
+    sensor-agnostic default) so that callers can either:
+
+    * leave defaults alone and pass integer ``..._idx`` overrides, or
+    * pass named bands via the sensor-style alias keyword
+      (``red="B04"``).
+
+    Args:
+        value: The named-or-positional keyword's value (e.g. ``red=``).
+            Wins when not ``None``.
+        fallback: The integer-only keyword's value (e.g. ``red_idx=``).
+            Used when ``value`` is ``None``.
+
+    Returns:
+        Whichever of the two is non-``None``.
+
+    Raises:
+        ValueError: When both arguments are ``None``.
+    """
+    if value is not None:
+        return value
+    if fallback is None:
+        raise ValueError(
+            "A band reference must be provided through the named parameter "
+            "or its *_idx fallback."
+        )
+    return fallback

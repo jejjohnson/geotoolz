@@ -37,7 +37,7 @@ from geotoolz._src.config import (
     mapping_to_pairs,
     nested_config,
 )
-from geotoolz._src.wrap import wrap_like
+from geotoolz._src.wrap import adopt_attrs, wrap_like
 
 
 if TYPE_CHECKING:
@@ -172,16 +172,11 @@ def _wrap_like(gt: GeoTensor | np.ndarray, out: np.ndarray) -> GeoTensor | np.nd
     return wrap_like(gt, _cast_like(out, np.asarray(gt).dtype))
 
 
-def _new_geotensor(gt: GeoTensor, out: np.ndarray, transform: Affine) -> GeoTensor:
-    from georeader.geotensor import GeoTensor
-
-    return GeoTensor(
-        _cast_like(out, np.asarray(gt).dtype),
-        transform=transform,
-        crs=gt.crs,
-        fill_value_default=gt.fill_value_default,
-        attrs=gt.attrs,
-    )
+def _new_geotensor(
+    gt: GeoTensor, out: np.ndarray, transform: Affine
+) -> GeoTensor | np.ndarray:
+    """Rewrap a pixel-rearranged ``out`` like ``gt`` on a new ``transform``."""
+    return wrap_like(gt, _cast_like(out, np.asarray(gt).dtype), transform=transform)
 
 
 class Compose(Operator):
@@ -442,8 +437,9 @@ class RandomCrop(Operator):
         left = int(rng.integers(0, width - crop_w + 1))
         isel = getattr(gt, "isel", None)
         if isel is not None:
-            return isel(
-                {"y": slice(top, top + crop_h), "x": slice(left, left + crop_w)}
+            return adopt_attrs(
+                gt,
+                isel({"y": slice(top, top + crop_h), "x": slice(left, left + crop_w)}),
             )
         return arr[..., top : top + crop_h, left : left + crop_w]
 
@@ -487,7 +483,7 @@ class RandomShift(Operator):
         if dx == 0 and dy == 0:
             return gt
         window = Window(col_off=dx, row_off=dy, width=gt.width, height=gt.height)
-        return gt.read_from_window(window, boundless=True)
+        return adopt_attrs(gt, gt.read_from_window(window, boundless=True))
 
     def get_config(self) -> dict[str, Any]:
         return {"max_shift": jsonable(self.max_shift), "seed": self.seed}

@@ -16,8 +16,8 @@ import numpy as np
 from jaxtyping import Bool, Float, Int, Num, Shaped
 from pipekit import Operator
 
+from geotoolz._src.bands import BandRef, resolve_band
 from geotoolz._src.wrap import wrap_like
-from geotoolz.indices._src.bands import BandRef, resolve_band
 
 
 if TYPE_CHECKING:

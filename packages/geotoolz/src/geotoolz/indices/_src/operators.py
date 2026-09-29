@@ -7,8 +7,9 @@ Each Operator here:
 2. Calls into the matching primitive in ``array.py`` for the math.
 3. Rewraps the result to match the input carrier via
    `geotoolz._src.wrap.wrap_like`: a ``GeoTensor`` input comes back as
-   a ``GeoTensor`` (``transform``, ``crs``, ``fill_value_default``
-   propagated through ``array_as_geotensor``); a plain ``np.ndarray``
+   a ``GeoTensor`` (``transform``, ``crs``, ``fill_value_default`` and a
+   copy of ``attrs`` propagated, with per-band keys such as
+   ``band_names`` dropped because the band axis collapsed); a plain ``np.ndarray``
    comes back as a plain ndarray. Named-band references (``red="B04"``)
    need carrier metadata and therefore require a GeoTensor input;
    integer band indices work on both carriers.
@@ -17,7 +18,7 @@ Each Operator here:
 
 The wrap discipline: index primitives collapse the channel axis but
 preserve the trailing two spatial axes ``(H, W)``. That matches
-``array_as_geotensor``'s contract exactly — it accepts any result whose
+``wrap_like``'s contract exactly — it accepts any result whose
 last two dims agree with the input's. Carriers' transforms therefore
 survive unchanged through every index operator here.
 
@@ -32,6 +33,14 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.bands import (
+    BAND_NAME_KEYS,
+    BandRef,
+    configured_ref as _configured_ref,
+    per_band_values,
+    resolve_band as _resolve_band,
+    strip_band_attrs,
+)
 from geotoolz._src.config import nested_config
 from geotoolz._src.wrap import wrap_like
 from geotoolz.indices._src.array import (
@@ -55,11 +64,6 @@ from geotoolz.indices._src.array import (
     ndwi_mcfeeters,
     normalized_difference,
     savi,
-)
-from geotoolz.indices._src.bands import (
-    BandRef,
-    configured_ref as _configured_ref,
-    resolve_band as _resolve_band,
 )
 
 
@@ -1549,8 +1553,18 @@ class AppendIndex(Operator):
         # concatenation lines up. np.expand_dims handles negative axes
         # correctly.
         index_3d = np.expand_dims(index_arr, axis=self.axis)
-        stacked = np.concatenate([np.asarray(gt), index_3d], axis=self.axis)
-        return wrap_like(gt, stacked)
+        arr = np.asarray(gt)
+        stacked = np.concatenate([arr, index_3d], axis=self.axis)
+        # Band-name lists gain the index operator's name; per-band values
+        # with no meaning for an index (wavelengths) are dropped.
+        src_attrs = getattr(gt, "attrs", None)
+        attrs = strip_band_attrs(src_attrs)
+        name = type(self.index_op).__name__
+        for key in BAND_NAME_KEYS:
+            names = per_band_values(src_attrs, key, arr.shape[self.axis])
+            if names is not None:
+                attrs[key] = [*names, name]
+        return wrap_like(gt, stacked, attrs=attrs)
 
     def get_config(self) -> dict[str, Any]:
         return {"index_op": nested_config(self.index_op), "axis": self.axis}

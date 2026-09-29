@@ -471,6 +471,36 @@ def test_append_index_concatenates_back(reflectance_4band: GeoTensor) -> None:
     np.testing.assert_allclose(np.asarray(out)[-1], expected_ndvi, rtol=1e-6)
 
 
+def test_append_index_appends_band_name() -> None:
+    """Band-name lists gain the index name; wavelengths are dropped (#144)."""
+    names = ["B02", "B03", "B04", "B08"]
+    gt = toy_geotensor(
+        np.full((4, 2, 2), 0.5),
+        attrs={
+            "band_names": names,
+            "descriptions": list(names),
+            "wavelengths": [490.0, 560.0, 665.0, 842.0],
+            "sensor": "S2",
+        },
+    )
+    out = AppendIndex(index_op=NDVI(red="B04", nir="B08"))(gt)
+    assert out.attrs["band_names"] == [*names, "NDVI"]
+    assert out.attrs["descriptions"] == [*names, "NDVI"]
+    assert "wavelengths" not in out.attrs
+    assert out.attrs["sensor"] == "S2"
+    assert gt.attrs["band_names"] == names
+
+
+def test_index_output_drops_band_names() -> None:
+    """A collapsed index output carries no stale per-band attrs (#144)."""
+    gt = toy_geotensor(
+        np.full((4, 2, 2), 0.5), attrs={"band_names": ["a", "b", "c", "d"], "k": 1}
+    )
+    out = NDVI(red_idx=2, nir_idx=3)(gt)
+    assert out.attrs == {"k": 1}
+    assert out.attrs is not gt.attrs
+
+
 # ---------------------------------------------------------------------------
 # Plain-ndarray carriers
 # ---------------------------------------------------------------------------

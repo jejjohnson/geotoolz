@@ -379,6 +379,23 @@ def test_radiance_reflectance_roundtrip_preserves_metadata() -> None:
     assert out.transform == radiance.transform
 
 
+def test_radiance_reflectance_keep_attrs() -> None:
+    """georeader rebuilds these without attrs; the operators restore a copy (#144)."""
+    attrs = {"band_names": ["B1", "B2"], "sensor": "toy"}
+    radiance = toy_geotensor(np.full((2, 2, 2), 10.0), attrs=dict(attrs))
+    kwargs = {
+        "solar_irradiance": np.array([1.95, 1.85]),
+        "acquisition_date": datetime(2024, 7, 14, 11, 32),
+        "sza_deg": 30.0,
+    }
+    reflectance = RadianceToReflectance(**kwargs)(radiance)
+    assert reflectance.attrs == attrs
+    assert reflectance.attrs is not radiance.attrs
+    back = ReflectanceToRadiance(**kwargs)(reflectance)
+    assert back.attrs == attrs
+    assert back.attrs is not reflectance.attrs
+
+
 def test_earth_sun_distance_correction_operator() -> None:
     date = datetime(2024, 1, 3)
     out = EarthSunDistanceCorrection(acquisition_date=date)()

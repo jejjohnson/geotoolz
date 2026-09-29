@@ -127,6 +127,17 @@ class TestStackMatchedBasics:
 
 
 class TestStackMatchedSequence:
+    def test_band_names_are_concatenated(self) -> None:
+        """Per-band attrs stack in order; partial keys are dropped (#144)."""
+        a = _gt(np.zeros((2, 4, 4), dtype=np.float32))
+        a.attrs = {"band_names": ["m1", "m2"], "wavelengths": [1.0, 2.0], "id": "a"}
+        b = _gt(np.ones((4, 4), dtype=np.float32))
+        b.attrs = {"band_names": ["s1"]}
+        out = StackMatched()([a, b])
+        assert out.attrs == {"band_names": ["m1", "m2", "s1"], "id": "a"}
+        assert out.attrs is not a.attrs
+        assert a.attrs["band_names"] == ["m1", "m2"]
+
     def test_two_2d_tensors_stack_to_2_bands(self) -> None:
         a = _gt(np.full((4, 4), 1.0, dtype=np.float32))
         b = _gt(np.full((4, 4), 2.0, dtype=np.float32))
