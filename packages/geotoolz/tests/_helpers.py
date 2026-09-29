@@ -31,6 +31,7 @@ def toy_geotensor(
     crs: Any = DEFAULT_CRS,
     fill_value_default: Any = -9999,
     attrs: dict[str, Any] | None = None,
+    with_fill_pixels: bool = False,
 ) -> GeoTensor:
     """Wrap an array in a GeoTensor with stable toy georeferencing.
 
@@ -40,10 +41,19 @@ def toy_geotensor(
         crs: Coordinate reference system. Default ``EPSG:32629``.
         fill_value_default: Fill value stored on the carrier.
         attrs: Optional metadata dict.
+        with_fill_pixels: Write ``fill_value_default`` into every band of
+            the pixels marked by :func:`fill_pixel_mask` (the first and
+            last pixel of the grid). ``values`` is copied first.
 
     Returns:
-        A ``GeoTensor`` viewing ``values``.
+        A ``GeoTensor`` viewing ``values`` (a copy when
+        ``with_fill_pixels`` is set).
     """
+    if with_fill_pixels:
+        if fill_value_default is None:
+            raise ValueError("with_fill_pixels needs a fill_value_default")
+        values = np.array(values, copy=True)
+        values[..., fill_pixel_mask(values.shape)] = fill_value_default
     return GeoTensor(
         values,
         transform=DEFAULT_TRANSFORM if transform is None else transform,
@@ -51,6 +61,24 @@ def toy_geotensor(
         fill_value_default=fill_value_default,
         attrs=attrs,
     )
+
+
+def fill_pixel_mask(shape: tuple[int, ...]) -> np.ndarray:
+    """``(H, W)`` mask of the pixels ``toy_geotensor(with_fill_pixels=True)`` fills.
+
+    The first and the last pixel of the grid -- the ``[0, 0]`` and
+    ``[-1, -1]`` corners -- so tests can check both edges.
+
+    Args:
+        shape: The carrier's shape; only the trailing two dims are used.
+
+    Returns:
+        A boolean ``(H, W)`` array, ``True`` at fill pixels.
+    """
+    mask = np.zeros(shape[-2:], dtype=bool)
+    mask[0, 0] = True
+    mask[-1, -1] = True
+    return mask
 
 
 def uint16_dn_cube(n_bands: int = 2, *, size: int = 4, seed: int = 0) -> np.ndarray:

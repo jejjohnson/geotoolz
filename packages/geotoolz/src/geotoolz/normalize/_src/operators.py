@@ -13,6 +13,12 @@ carrier-aware wrappers handle:
   plain Python lists for Hydra / YAML round-trip),
 * NaN-aware reductions over the spatial ``(H, W)`` axes.
 
+Nodata: a pixel is invalid when any band is non-finite or equals the
+carrier's ``fill_value_default`` (see :mod:`geotoolz._src.valid`;
+per frame for ``(T, C, H, W)``). Invalid pixels are excluded from every
+fitted statistic and hold the output's fill value (the inherited
+``fill_value_default``; ``NaN`` for plain ndarrays) in every output.
+
 The display-prep min-max stretch with **scalar** bounds lives in
 :class:`geotoolz.radiometry.MinMax`; the per-scene robust percentile
 stretch lives in :class:`geotoolz.radiometry.PercentileClip`. This
@@ -29,6 +35,13 @@ import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import jsonable
+from geotoolz._src.valid import (
+    carrier_fill_value,
+    invalid_values,
+    mask_invalid_to_nan,
+    restore_fill,
+    valid_pixels,
+)
 from geotoolz._src.wrap import wrap_like
 from geotoolz.normalize._src.array import (
     asinh_scale,
@@ -71,6 +84,24 @@ def _stat_as_jsonable(value: Any) -> float | list[Any] | None:
     return jsonable(arr)
 
 
+def _valid_mask(x: Any) -> np.ndarray:
+    """Validity mask of ``x``: per pixel (per frame for 4-D), else elementwise."""
+    if np.ndim(x) < 2:
+        return ~invalid_values(x)
+    return valid_pixels(x, keep_time=True)
+
+
+def _masked(x: Any) -> tuple[np.ndarray, np.ndarray]:
+    """Float64 copy of ``x`` with invalid pixels set to ``NaN``, plus the mask."""
+    valid = _valid_mask(x)
+    return mask_invalid_to_nan(x, valid=valid, dtype=float), valid
+
+
+def _rewrap(gt: Any, out: np.ndarray, valid: np.ndarray) -> Any:
+    """Write the output fill into invalid pixels and rewrap like ``gt``."""
+    return wrap_like(gt, restore_fill(out, valid, carrier_fill_value(gt)))
+
+
 def _array_or_none(value: Any) -> np.ndarray | None:
     if value is None:
         return None
@@ -84,7 +115,8 @@ class PerBandStats(Operator):
     a ``stats`` dict containing per-band ``mean``, ``std``, ``min``,
     ``max``, and ``percentiles`` over the spatial ``(H, W)`` axes. Use
     this in a ``Tap``-style stage to inspect a scene before applying a
-    downstream normaliser.
+    downstream normaliser. Nodata (fill / non-finite) pixels are
+    excluded from every statistic.
 
     Args:
         percentiles: Percentiles (in ``[0, 100]``) to cache alongside
@@ -103,7 +135,7 @@ class PerBandStats(Operator):
         self.stats: dict[str, Any] = {}
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        arr = np.asarray(gt, dtype=float)
+        arr, _ = _masked(gt)
         stats = per_band_stats(arr, percentiles=self.percentiles, axis=stat_axes(arr))
         self.stats = {key: _stat_as_jsonable(value) for key, value in stats.items()}
         return gt
@@ -114,7 +146,8 @@ class CLAHE(Operator):
 
     Wraps :func:`skimage.exposure.equalize_adapthist` and applies it
     independently per band for ``(C, H, W)`` carriers while preserving
-    NaN positions and GeoTensor metadata.
+    NaN positions and GeoTensor metadata. Nodata (fill / non-finite)
+    pixels are excluded from the histograms and hold the output fill.
 
     Args:
         kernel_size: Contextual-region shape for the local histograms.
@@ -147,13 +180,14 @@ class CLAHE(Operator):
         self.nbins = nbins
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        arr, valid = _masked(gt)
         out = clahe(
-            np.asarray(gt),
+            arr,
             kernel_size=self.kernel_size,
             clip_limit=self.clip_limit,
             nbins=self.nbins,
         )
-        return wrap_like(gt, out)
+        return _rewrap(gt, out, valid)
 
     def get_config(self) -> dict[str, Any]:
         if isinstance(self.kernel_size, tuple):
@@ -180,7 +214,8 @@ class StandardScaler(Operator):
     for inference, or set ``fit_on_call=True`` to fit on the first
     scene seen. When ``sigma == 0`` (a constant band) the divisor falls
     back to ``1`` so the band collapses to zero instead of producing
-    ``inf`` / ``nan``.
+    ``inf`` / ``nan``. Nodata (fill / non-finite) pixels are excluded
+    from the fit and hold the output fill value.
 
     Args:
         mean: Per-band mean (scalar, list, or ndarray) or ``None``.
@@ -213,14 +248,14 @@ class StandardScaler(Operator):
         self.fit_on_call = fit_on_call
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        arr = np.asarray(gt, dtype=float)
+        arr, valid = _masked(gt)
         axis = stat_axes(arr)
         if self.fit_on_call and (self.mean is None or self.std is None):
             self.mean = np.nanmean(arr, axis=axis)
             self.std = np.nanstd(arr, axis=axis)
         if self.mean is None or self.std is None:
             raise ValueError("StandardScaler requires mean/std or fit_on_call=True")
-        return wrap_like(gt, standard_scale(arr, self.mean, self.std, axis=axis))
+        return _rewrap(gt, standard_scale(arr, self.mean, self.std, axis=axis), valid)
 
     def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         """Invert a previously applied standard scaling.
@@ -229,21 +264,22 @@ class StandardScaler(Operator):
             gt: Scaled carrier (GeoTensor or plain ndarray).
 
         Returns:
-            The un-scaled carrier, same kind as ``gt``.
+            The un-scaled carrier, same kind as ``gt``; nodata pixels
+            hold the output fill value.
 
         Raises:
             ValueError: If the scaler has no ``mean`` / ``std`` yet.
         """
         if self.mean is None or self.std is None:
             raise ValueError("StandardScaler must be fitted before inverse()")
-        arr = np.asarray(gt, dtype=float)
+        arr, valid = _masked(gt)
         axis = stat_axes(arr)
         from geotoolz.normalize._src.array import reshape_stat
 
         mean = reshape_stat(self.mean, arr, axis)
         std = reshape_stat(self.std, arr, axis)
         scale = np.where(std != 0, std, 1.0)
-        return wrap_like(gt, arr * scale + mean)
+        return _rewrap(gt, arr * scale + mean, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -263,7 +299,8 @@ class RobustScaler(Operator):
     Identical role to :class:`StandardScaler` but uses the median and
     interquartile range instead of mean and std — robust against
     bright-pixel outliers (cumulus, glint, saturation). When
-    ``iqr == 0`` the divisor falls back to ``1``.
+    ``iqr == 0`` the divisor falls back to ``1``. Nodata (fill /
+    non-finite) pixels are excluded from the fit and hold the output fill.
 
     Args:
         median: Per-band median (scalar, list, or ndarray) or ``None``.
@@ -290,7 +327,7 @@ class RobustScaler(Operator):
         self.fit_on_call = fit_on_call
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        arr = np.asarray(gt, dtype=float)
+        arr, valid = _masked(gt)
         axis = stat_axes(arr)
         if self.fit_on_call and (self.median is None or self.iqr is None):
             q25, q50, q75 = np.nanpercentile(arr, [25.0, 50.0, 75.0], axis=axis)
@@ -298,7 +335,7 @@ class RobustScaler(Operator):
             self.iqr = q75 - q25
         if self.median is None or self.iqr is None:
             raise ValueError("RobustScaler requires median/iqr or fit_on_call=True")
-        return wrap_like(gt, robust_scale(arr, self.median, self.iqr, axis=axis))
+        return _rewrap(gt, robust_scale(arr, self.median, self.iqr, axis=axis), valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -321,7 +358,9 @@ class MinMaxScaler(Operator):
     pick when you already know fixed reflectance limits; this version
     fits **per-band** bounds (one ``vmin`` / ``vmax`` per channel) or
     accepts cached training-time bounds for inference. When
-    ``vmax == vmin`` for a band the divisor falls back to ``1``.
+    ``vmax == vmin`` for a band the divisor falls back to ``1``. Nodata
+    (fill / non-finite) pixels are excluded from the fit and hold the
+    output fill value.
 
     Args:
         vmin: Per-band lower bound, scalar / list / ndarray, or
@@ -357,7 +396,7 @@ class MinMaxScaler(Operator):
         self.fit_on_call = fit_on_call
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        arr = np.asarray(gt, dtype=float)
+        arr, valid = _masked(gt)
         axis = stat_axes(arr)
         if self.fit_on_call and (self.vmin is None or self.vmax is None):
             self.vmin = np.nanmin(arr, axis=axis)
@@ -367,7 +406,7 @@ class MinMaxScaler(Operator):
         out = minmax_scale(
             arr, self.vmin, self.vmax, out_range=self.out_range, axis=axis
         )
-        return wrap_like(gt, out)
+        return _rewrap(gt, out, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -384,6 +423,8 @@ class HistogramStretch(Operator):
     Lighter-weight cousin of :class:`geotoolz.radiometry.PercentileClip`:
     clips to ``[P_lower, P_upper]`` using NaN-aware percentiles, then
     maps the result into ``out_range`` instead of fixed ``[0, 1]``.
+    Nodata (fill / non-finite) pixels are excluded from the percentiles
+    and hold the output fill value.
 
     Args:
         out_range: Two-element increasing tuple. Default
@@ -410,12 +451,12 @@ class HistogramStretch(Operator):
         self.upper = upper
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        arr = np.asarray(gt, dtype=float)
+        arr, valid = _masked(gt)
         clipped = percentile_clip(
             arr, lower=self.lower, upper=self.upper, axis=stat_axes(arr)
         )
         out_min, out_max = self.out_range
-        return wrap_like(gt, clipped * (out_max - out_min) + out_min)
+        return _rewrap(gt, clipped * (out_max - out_min) + out_min, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -430,7 +471,9 @@ class HistogramMatch(Operator):
 
     Reshapes the per-band empirical CDF of the input to match the
     reference. Useful for visual harmonisation across scenes acquired
-    under different illumination.
+    under different illumination. Nodata (fill / non-finite) pixels of
+    both the input and the reference are excluded from the CDFs; input
+    nodata pixels hold the output fill value.
 
     The reference is a live GeoTensor — not JSON / YAML serialisable —
     so ``forbid_in_yaml = True``.
@@ -453,11 +496,9 @@ class HistogramMatch(Operator):
         self.reference = reference
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        out = histogram_match(
-            np.asarray(gt, dtype=float),
-            np.asarray(self.reference, dtype=float),
-        )
-        return wrap_like(gt, out)
+        arr, valid = _masked(gt)
+        reference, _ = _masked(self.reference)
+        return _rewrap(gt, histogram_match(arr, reference), valid)
 
     def get_config(self) -> dict[str, Any]:
         # Debug payload: the reference is a runtime raster (forbid_in_yaml).
@@ -479,7 +520,8 @@ class LogScale(Operator):
 
     Compresses heavy-tailed distributions (radar backscatter, fire
     radiative power, etc.) before downstream training. ``eps`` keeps
-    the log finite at zero.
+    the log finite at zero. Nodata (fill / non-finite) pixels hold the
+    output fill value.
 
     Args:
         base: Logarithm base. Must be ``> 0`` and ``!= 1``. Default
@@ -497,9 +539,8 @@ class LogScale(Operator):
         self.eps = eps
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(
-            gt, log_scale(np.asarray(gt, dtype=float), base=self.base, eps=self.eps)
-        )
+        arr, valid = _masked(gt)
+        return _rewrap(gt, log_scale(arr, base=self.base, eps=self.eps), valid)
 
 
 class AsinhScale(Operator):
@@ -511,7 +552,8 @@ class AsinhScale(Operator):
 
     Linear near zero, logarithmic for ``|x| >> a``. Symmetric and
     well-defined for negative values (unlike ``log``) — a common pick
-    for astronomy and signed radar quantities.
+    for astronomy and signed radar quantities. Nodata (fill /
+    non-finite) pixels hold the output fill value.
 
     Args:
         a: Scale parameter. Must be strictly positive. Default
@@ -526,7 +568,8 @@ class AsinhScale(Operator):
         self.a = a
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(gt, asinh_scale(np.asarray(gt, dtype=float), a=self.a))
+        arr, valid = _masked(gt)
+        return _rewrap(gt, asinh_scale(arr, a=self.a), valid)
 
 
 class PowerScale(Operator):
@@ -539,7 +582,8 @@ class PowerScale(Operator):
     A simple ``gamma``-style brightness curve. ``gamma < 1`` brightens
     midtones; ``gamma > 1`` darkens. Differs from
     :class:`geotoolz.radiometry.Gamma` only in convention
-    (``Gamma`` raises to ``1/g``).
+    (``Gamma`` raises to ``1/g``). Nodata (fill / non-finite) pixels
+    hold the output fill value.
 
     Args:
         gamma: Power exponent. Must be strictly positive. Default
@@ -554,7 +598,8 @@ class PowerScale(Operator):
         self.gamma = gamma
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return wrap_like(gt, power_scale(np.asarray(gt, dtype=float), gamma=self.gamma))
+        arr, valid = _masked(gt)
+        return _rewrap(gt, power_scale(arr, gamma=self.gamma), valid)
 
 
 class Normalize(StandardScaler):
@@ -603,7 +648,8 @@ class ZeroOne(Operator):
 
     Stateless per-scene min-max stretch. ``per_band=True`` (default)
     stretches each band independently; ``per_band=False`` uses a
-    single global min / max.
+    single global min / max. Nodata (fill / non-finite) pixels are
+    excluded from the min / max and hold the output fill value.
 
     Args:
         per_band: Compute min / max per band rather than globally.
@@ -617,7 +663,7 @@ class ZeroOne(Operator):
         self.per_band = per_band
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        arr = np.asarray(gt, dtype=float)
+        arr, valid = _masked(gt)
         axis = stat_axes(arr, per_band=self.per_band)
         out = minmax_scale(
             arr,
@@ -626,4 +672,4 @@ class ZeroOne(Operator):
             out_range=(0.0, 1.0),
             axis=axis,
         )
-        return wrap_like(gt, out)
+        return _rewrap(gt, out, valid)

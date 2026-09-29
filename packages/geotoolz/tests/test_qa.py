@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor as _toy_geotensor
+from _helpers import fill_pixel_mask, toy_geotensor as _toy_geotensor
 
 import geotoolz as gz
 from geotoolz import qa
@@ -223,6 +223,31 @@ def test_mask_nodata_requires_fill_when_not_decoding_qa() -> None:
     gt = _toy_geotensor(np.zeros((2, 2), dtype=np.float32), fill_value_default=None)
     with pytest.raises(ValueError, match="fill_value_default"):
         qa.MaskNoData()(gt)
+
+
+@pytest.mark.parametrize("fill", [-9999, np.nan], ids=["numeric", "nan"])
+@pytest.mark.parametrize(
+    "op", [qa.MaskValid(), qa.MaskNoData()], ids=["MaskValid", "MaskNoData"]
+)
+def test_fill_pixels_are_excluded(op, fill) -> None:
+    """Fill pixels are flagged -- including a NaN fill (``nan == nan`` is False)."""
+    rng = np.random.default_rng(0)
+    arr = rng.uniform(0.0, 1.0, size=(3, 4, 4)).astype(np.float32)
+    gt = _toy_geotensor(arr, fill_value_default=fill, with_fill_pixels=True)
+
+    out = op(gt)
+
+    np.testing.assert_array_equal(np.asarray(out), fill_pixel_mask(arr.shape))
+    assert out.dtype == np.bool_
+
+
+def test_mask_nodata_flags_non_finite_under_numeric_fill() -> None:
+    arr = np.ones((2, 2, 2), dtype=np.float32)
+    arr[1, 0, 1] = np.nan
+    gt = _toy_geotensor(arr, fill_value_default=-9999)
+    np.testing.assert_array_equal(
+        np.asarray(qa.MaskNoData()(gt)), [[False, True], [False, False]]
+    )
 
 
 def test_mask_saturated_infers_integer_max() -> None:

@@ -5,10 +5,18 @@ accept sequences of plain ``np.ndarray`` frames as well as GeoTensors.
 Grid checks (transform / CRS equality) apply only to frames that carry
 georeferencing; plain arrays fall back to shape-equality checks. The
 output carrier follows the first frame.
+
+Nodata is judged *per frame* with :func:`geotoolz._src.valid.valid_pixels`
+(non-finite values, or the frame's ``fill_value_default``, in any band):
+an invalid frame never contributes to a reduction, a score or a
+selection at that pixel, and pixels invalid in every frame come out
+holding the output's fill value (the first frame's
+``fill_value_default``; ``NaN`` when it has none).
 """
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -17,6 +25,12 @@ from jaxtyping import Bool, Float, Int, Num, Shaped
 from pipekit import Operator
 
 from geotoolz._src.bands import BandRef, resolve_band
+from geotoolz._src.valid import (
+    carrier_fill_value,
+    invalid_values,
+    restore_fill,
+    valid_pixels,
+)
 from geotoolz._src.wrap import wrap_like
 
 
@@ -71,6 +85,47 @@ def _stack_frames(
 ) -> tuple[GeoTensor | np.ndarray, np.ndarray]:
     base = _require_frames(frames)
     return base, np.stack([np.asarray(frame) for frame in frames], axis=0)
+
+
+def _frame_validity(
+    frames: Sequence[GeoTensor | np.ndarray],
+) -> Bool[np.ndarray, "t h w"]:
+    """Per-frame ``(T, H, W)`` validity; each frame judged by its own fill.
+
+    A ``(T, C, H, W)`` / ``(T, H, W)`` array carrier passed whole is judged
+    against its own ``fill_value_default`` (slicing a frame out of it could
+    drop the fill); a sequence is judged frame by frame.
+    """
+    if isinstance(frames, np.ndarray):
+        invalid = invalid_values(frames)
+        if invalid.ndim > 3:
+            invalid = invalid.any(axis=tuple(range(1, invalid.ndim - 2)))
+        return ~invalid
+    return np.stack([valid_pixels(frame) for frame in frames], axis=0)
+
+
+def _broadcast_frame_valid(
+    valid: Bool[np.ndarray, "t h w"], shape: tuple[int, ...]
+) -> Bool[np.ndarray, "t *dims h w"]:
+    """Broadcast ``(T, H, W)`` frame validity against a ``(T, ..., H, W)`` stack."""
+    extra = len(shape) - valid.ndim
+    return np.broadcast_to(
+        valid.reshape((valid.shape[0], *([1] * extra), *valid.shape[1:])), shape
+    )
+
+
+def _mask_frames(
+    stack: Num[np.ndarray, "t *dims h w"], valid: Bool[np.ndarray, "t h w"]
+) -> Float[np.ndarray, "t *dims h w"]:
+    """Float copy of ``stack`` with every invalid frame-pixel set to NaN.
+
+    Float stacks keep their dtype; integer stacks become ``float64`` --
+    the dtype ``np.median`` / integer division already produced for them.
+    """
+    dtype = stack.dtype if np.issubdtype(stack.dtype, np.inexact) else np.float64
+    out = stack.astype(dtype, copy=True)
+    out[~_broadcast_frame_valid(valid, out.shape)] = np.nan
+    return out
 
 
 def _take_by_spatial_index(
@@ -157,13 +212,15 @@ class MedianComposite(Operator):
 
     Metadata-independent: frames may also be plain ``np.ndarray`` maps, in
     which case the outputs are plain arrays and the grid check reduces to
-    shape equality.
+    shape equality. Nodata frame-pixels (non-finite or the frame's fill)
+    are treated like NaN; pixels invalid in every frame hold the output fill.
 
     Args:
-        nan_policy: ``"ignore"`` skips NaNs with ``np.nanmedian``;
-            ``"propagate"`` uses ``np.median``.
+        nan_policy: ``"ignore"`` skips NaN / nodata samples with
+            ``np.nanmedian``; ``"propagate"`` uses ``np.median`` so any
+            nodata sample makes the pixel NaN.
         return_count: When true, also return a carrier with the number
-            of non-NaN contributors per output pixel.
+            of valid contributors per output pixel.
             The output is then a tuple, so the operator is terminal
             (last step only) in a ``Sequential``.
     """
@@ -183,15 +240,21 @@ class MedianComposite(Operator):
         self, frames: Sequence[GeoTensor | np.ndarray]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
         base, stack = _stack_frames(frames)
-        values = (
-            np.nanmedian(stack, axis=0)
-            if self.nan_policy == "ignore"
-            else np.median(stack, axis=0)
-        )
+        valid = _frame_validity(frames)
+        masked = _mask_frames(stack, valid)
+        with warnings.catch_warnings():
+            # All-nodata pixels are expected; they get the output fill below.
+            warnings.filterwarnings("ignore", "All-NaN slice", RuntimeWarning)
+            values = (
+                np.nanmedian(masked, axis=0)
+                if self.nan_policy == "ignore"
+                else np.median(masked, axis=0)
+            )
+        values = restore_fill(values, valid.any(axis=0), carrier_fill_value(base))
         out = wrap_like(base, values)
         if not self.return_count:
             return out
-        count = np.sum(~np.isnan(stack), axis=0).astype(np.int64)
+        count = np.sum(~np.isnan(masked), axis=0).astype(np.int64)
         return out, wrap_like(base, count)
 
 
@@ -199,10 +262,11 @@ class MaxNDVIComposite(Operator):
     """Pick the frame with maximum NDVI per pixel and return its band values.
 
     Inputs must be multi-band (``(C, H, W)``); 2-D GeoTensors raise because
-    NDVI needs distinct red and NIR bands. The output dtype is the input
-    dtype when all-invalid pixels can be represented in it (e.g. integer
-    masks via ``fill_value_default``); for float inputs invalid pixels are
-    set to NaN.
+    NDVI needs distinct red and NIR bands. Nodata frame-pixels (non-finite
+    or the frame's fill in any band) never win the selection. Pixels with
+    no valid NDVI in any frame hold the first frame's
+    ``fill_value_default`` (``NaN`` for float inputs without one), so the
+    output dtype is the input dtype.
 
     The per-pixel math is metadata-independent, so plain ``np.ndarray``
     frames are accepted when ``red`` / ``nir`` are integer indices; named
@@ -268,18 +332,21 @@ class MaxNDVIComposite(Operator):
             )
         red = stack[:, red_idx, ...].astype(np.float32, copy=False)
         nir = stack[:, nir_idx, ...].astype(np.float32, copy=False)
-        ndvi = (nir - red) / (nir + red + self.eps)
-        scores = np.where(np.isnan(ndvi), -np.inf, ndvi)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            ndvi = (nir - red) / (nir + red + self.eps)
+        # A nodata frame (e.g. -9999 in both bands -> NDVI 0) must never win.
+        frame_valid = _frame_validity(frames)
+        scores = np.where(np.isnan(ndvi) | ~frame_valid, -np.inf, ndvi)
         index = np.argmax(scores, axis=0)
         values = _take_by_spatial_index(stack, index)
         all_invalid = np.all(~np.isfinite(scores), axis=0)
         if np.any(all_invalid):
+            fill = carrier_fill_value(base)
             if np.issubdtype(values.dtype, np.floating):
-                values[..., all_invalid] = np.nan
+                values = restore_fill(values, ~all_invalid, fill)
             else:
                 # Integer / unsigned inputs can't carry NaN. Fall back to the
                 # input's fill_value_default so the dtype is preserved.
-                fill = getattr(base, "fill_value_default", None)
                 if fill is None:
                     raise ValueError(
                         "MaxNDVIComposite: all NDVI scores are invalid for "
@@ -300,6 +367,8 @@ class CloudFreeComposite(Operator):
     Consumes ``(frame, cloud_mask)`` pairs; masks may have spatial shape
     ``(H, W)``, ``(1, H, W)``, or match the frame shape exactly. Pixels
     with fewer than ``min_valid`` clear contributors come out as NaN.
+    Nodata frame-pixels (non-finite or the frame's fill) never contribute;
+    pixels invalid in every frame hold the output fill value.
     Metadata-independent: plain ``np.ndarray`` frames are accepted and
     yield plain-array outputs.
 
@@ -339,6 +408,8 @@ class CloudFreeComposite(Operator):
         self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
         base, stack, cloudy = _require_pairs(pairs)
+        frame_valid = _frame_validity([scene for scene, _ in pairs])
+        stack = _mask_frames(stack, frame_valid)
         clear = ~cloudy
         valid = clear & ~np.isnan(stack) if self.nan_policy == "ignore" else clear
         count = np.sum(valid, axis=0)
@@ -346,7 +417,12 @@ class CloudFreeComposite(Operator):
         with np.errstate(invalid="ignore", divide="ignore"):
             values = total / count
         values = np.where(count >= self.min_valid, values, np.nan)
-        out = wrap_like(base, _as_float_for_nan(values))
+        values = restore_fill(
+            _as_float_for_nan(values),
+            frame_valid.any(axis=0),
+            carrier_fill_value(base),
+        )
+        out = wrap_like(base, values)
         if not self.return_count:
             return out
         return out, wrap_like(base, count.astype(np.int64))
@@ -359,7 +435,9 @@ class BAPComposite(Operator):
     ``doy``, ``cloud_distance``, and ``opacity`` values used to build simple
     scores. Each value may be a scalar or a per-pixel array. Frames may be
     GeoTensors or plain ``np.ndarray`` maps (the scores live in the metadata
-    dicts, not in geo-metadata).
+    dicts, not in geo-metadata). A nodata frame-pixel (non-finite or the
+    frame's fill) or a NaN score is never selected; pixels with no valid
+    frame hold the output fill value (also in the score output).
 
     Args:
         target_doy: Day-of-year the recency score is anchored to.
@@ -468,12 +546,20 @@ class BAPComposite(Operator):
             + self.w_cloud_distance * cloud_distance_stack
             + self.w_opacity * np.stack(opacity_scores, axis=0)
         ).astype(np.float32, copy=False)
+        # A nodata frame-pixel (or a NaN score) must never win the argmax.
+        frame_valid = _frame_validity(frames)
+        score_stack = np.where(
+            frame_valid & ~np.isnan(score_stack), score_stack, -np.inf
+        ).astype(np.float32, copy=False)
         index = np.argmax(score_stack, axis=0)
-        out = wrap_like(base, _take_by_spatial_index(stack, index))
+        any_valid = np.isfinite(score_stack).any(axis=0)
+        fill = carrier_fill_value(base)
+        values = restore_fill(_take_by_spatial_index(stack, index), any_valid, fill)
+        out = wrap_like(base, values)
         if not self.return_score:
             return out
         best_score = np.take_along_axis(score_stack, index[None, ...], axis=0)[0]
-        return out, wrap_like(base, best_score)
+        return out, wrap_like(base, restore_fill(best_score, any_valid, fill))
 
 
 class MinCloudComposite(Operator):
@@ -482,7 +568,9 @@ class MinCloudComposite(Operator):
     For every pixel, the selected frame is the one with the smallest
     scene-wide cloud fraction among those where the pixel is clear. Pixels
     cloudy in every frame fall back to the globally least-cloudy frame so
-    the output is a complete composite.
+    the output is a complete composite. Nodata frame-pixels (non-finite or
+    the frame's fill) are never picked and do not count towards a scene's
+    cloud fraction; pixels invalid in every frame hold the output fill.
 
     This is a coarse cloud-aware composite, not a per-pixel
     cloud-distance composite — frames are ranked by their overall cloud
@@ -512,19 +600,30 @@ class MinCloudComposite(Operator):
         self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
         base, stack, cloudy = _require_pairs(pairs)
-        clear = ~cloudy
-        spatial_clear = clear.reshape((clear.shape[0], -1))
-        cloud_coverage = 1.0 - spatial_clear.mean(axis=1)
-        costs = np.where(
-            clear,
-            cloud_coverage.reshape((-1, *([1] * (clear.ndim - 1)))),
-            np.inf,
+        valid = _broadcast_frame_valid(
+            _frame_validity([scene for scene, _ in pairs]), cloudy.shape
         )
-        fallback = int(np.argmin(cloud_coverage))
+        clear = ~cloudy & valid
+        # Scene-wide cloud fraction over each frame's *valid* pixels only; a
+        # frame with no valid pixel counts as fully cloudy.
+        n_valid = valid.reshape((valid.shape[0], -1)).sum(axis=1)
+        n_cloudy = (cloudy & valid).reshape((valid.shape[0], -1)).sum(axis=1)
+        cloud_coverage = np.where(
+            n_valid > 0, n_cloudy / np.maximum(n_valid, 1), 1.0
+        ).reshape((-1, *([1] * (clear.ndim - 1))))
+        # Clear pixels win; cloudy-but-valid pixels fall back to the least
+        # cloudy valid frame (the +2 keeps them behind every clear option);
+        # nodata frame-pixels are never picked.
+        costs = np.where(
+            clear, cloud_coverage, np.where(valid, cloud_coverage + 2.0, np.inf)
+        )
         index = np.argmin(costs, axis=0)
-        all_cloudy = ~np.any(clear, axis=0)
-        index = np.where(all_cloudy, fallback, index)
-        out = wrap_like(base, _take_by_spatial_index(stack, index))
+        values = restore_fill(
+            _take_by_spatial_index(stack, index),
+            valid.any(axis=0),
+            carrier_fill_value(base),
+        )
+        out = wrap_like(base, values)
         if not self.return_count:
             return out
         count = np.sum(clear, axis=0).astype(np.int64)

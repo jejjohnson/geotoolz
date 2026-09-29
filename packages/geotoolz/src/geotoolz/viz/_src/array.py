@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 import einx
 import numpy as np
-from jaxtyping import Float, Int, Num, Shaped, UInt8
+from jaxtyping import Bool, Float, Int, Num, Shaped, UInt8
 
 from geotoolz._src.shape import single_band
 from geotoolz._src.stretch import percentile_stretch
@@ -208,6 +208,7 @@ def hillshade(
     azimuth_deg: float = 315.0,
     altitude_deg: float = 45.0,
     z_factor: float = 1.0,
+    valid: Bool[np.ndarray, "h w"] | None = None,
 ) -> UInt8[np.ndarray, "h w"]:
     """Compute GDAL-style hillshade as a single ``uint8`` band.
 
@@ -233,6 +234,12 @@ def hillshade(
             fully lit (255) image.
         z_factor: Vertical exaggeration applied to the DEM before the
             gradient. Default ``1.0``.
+        valid: Optional ``(H, W)`` mask of valid DEM pixels. Invalid
+            pixels never enter a neighbour's gradient (a one-sided
+            difference is used instead, or a flat ``0`` slope when both
+            neighbours along an axis are invalid) and are written as
+            ``0`` in the output. ``None`` (default) treats every pixel
+            as valid.
 
     Returns:
         ``(H, W)`` ``uint8`` shading band (0 = fully shaded, 255 =
@@ -242,10 +249,21 @@ def hillshade(
         ValueError: If ``dem`` is not a single-band map.
     """
     band = single_band(dem, name="hillshade").astype(np.float64, copy=False)
+    invalid = None if valid is None else ~np.asarray(valid, dtype=bool)
+    if invalid is not None and not invalid.any():
+        invalid = None
     if altitude_deg >= 90.0:
-        return np.full(band.shape, 255, dtype=np.uint8)
+        out = np.full(band.shape, 255, dtype=np.uint8)
+        if invalid is not None:
+            out[invalid] = 0
+        return out
 
-    dy, dx = np.gradient(band * z_factor, abs(y_resolution), abs(x_resolution))
+    if invalid is None:
+        dy, dx = np.gradient(band * z_factor, abs(y_resolution), abs(x_resolution))
+    else:
+        masked = np.where(invalid, np.nan, band * z_factor)
+        dy = _nan_gradient(masked, abs(y_resolution), axis=0)
+        dx = _nan_gradient(masked, abs(x_resolution), axis=1)
     slope = np.pi / 2.0 - np.arctan(np.hypot(dx, dy))
     # Aspect = math angle (CCW from east) of the surface normal's
     # horizontal part, (-dz/deast, -dz/dnorth). `dy` is the gradient
@@ -259,7 +277,31 @@ def hillshade(
     shaded = np.sin(altitude) * np.sin(slope) + np.cos(altitude) * np.cos(
         slope
     ) * np.cos(azimuth - aspect)
-    return (np.clip(shaded, 0.0, 1.0) * 255.0).astype(np.uint8)
+    out = (np.clip(shaded, 0.0, 1.0) * 255.0).astype(np.uint8)
+    if invalid is not None:
+        out[invalid] = 0
+    return out
+
+
+def _nan_gradient(
+    values: Float[np.ndarray, "h w"], spacing: float, *, axis: int
+) -> Float[np.ndarray, "h w"]:
+    """First-order gradient along ``axis`` that never reads a NaN neighbour.
+
+    Central difference where both neighbours are finite, one-sided where
+    only one is (matching :func:`numpy.gradient` at the edges), ``0``
+    where neither is.
+    """
+    moved = np.moveaxis(values, axis, 0)
+    diff = np.diff(moved, axis=0) / spacing  # diff[i] = z[i + 1] - z[i]
+    pad = np.full((1, *moved.shape[1:]), np.nan)
+    forward = np.concatenate([diff, pad], axis=0)
+    backward = np.concatenate([pad, diff], axis=0)
+    both = np.stack([forward, backward])
+    count = np.isfinite(both).sum(axis=0)
+    total = np.nansum(both, axis=0)
+    grad = np.where(count > 0, total / np.maximum(count, 1), 0.0)
+    return np.moveaxis(grad, 0, axis)
 
 
 def blend_rgba(

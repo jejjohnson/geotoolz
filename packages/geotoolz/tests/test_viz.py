@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import numpy as np
 import pytest
 import rasterio
+from _helpers import fill_pixel_mask
 from georeader.geotensor import GeoTensor
 from shapely.geometry import Point, Polygon
 
@@ -34,12 +36,16 @@ from geotoolz.viz import (
 )
 
 
-def _toy_geotensor(values: np.ndarray, attrs: dict | None = None) -> GeoTensor:
+def _toy_geotensor(
+    values: np.ndarray, attrs: dict | None = None, fill_value_default: Any = -9999
+) -> GeoTensor:
+    # The fill must not collide with the data: 0.0 is a real value in most
+    # fixtures here, and a pixel equal to ``fill_value_default`` is nodata.
     return GeoTensor(
         values=values,
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
         crs="EPSG:32629",
-        fill_value_default=0,
+        fill_value_default=fill_value_default,
         attrs=attrs,
     )
 
@@ -548,3 +554,67 @@ def test_composite_string_bands_require_attrs_metadata() -> None:
     """String band refs need a carrier with band names in attrs."""
     with pytest.raises(ValueError, match="string band"):
         Composite(bands=["B04"])(np.zeros((3, 2, 2), dtype=np.float32))
+
+
+# ---------------------------------------------------------------------------
+# Nodata (fill) pixels
+# ---------------------------------------------------------------------------
+
+
+def _with_fill(values: np.ndarray, fill: Any = -9999) -> GeoTensor:
+    values = np.array(values, copy=True)
+    values[..., fill_pixel_mask(values.shape)] = fill
+    return _toy_geotensor(values, fill_value_default=fill)
+
+
+def test_fill_pixels_are_excluded() -> None:
+    """-9999 fill pixels neither drive stretches / colormaps nor leak."""
+    rng = np.random.default_rng(0)
+    clean = rng.uniform(0.0, 1.0, size=(3, 6, 6)).astype(np.float32)
+    fill = fill_pixel_mask(clean.shape)
+    nan_clean = np.where(fill, np.nan, clean)
+
+    # StretchToUint8: percentiles over valid pixels only; fill -> 0.
+    out = StretchToUint8()(_with_fill(clean))
+    assert out.fill_value_default == 0
+    np.testing.assert_array_equal(np.asarray(out)[:, fill], 0)
+    expected = stretch_to_uint8(nan_clean)
+    np.testing.assert_array_equal(np.asarray(out)[:, ~fill], expected[:, ~fill])
+    assert np.asarray(out)[:, ~fill].max() == 255  # -9999 did not squash the range
+
+    # NaN fill is detected too.
+    out_nan = StretchToUint8()(_with_fill(clean, fill=np.nan))
+    np.testing.assert_array_equal(np.asarray(out_nan), np.asarray(out))
+
+    # ApplyColormap: auto vmin / vmax over valid pixels; fill -> transparent 0.
+    band = clean[0]
+    rgba = np.asarray(ApplyColormap(name="viridis")(_with_fill(band)))
+    np.testing.assert_array_equal(rgba[:, fill], 0)
+    ref = ApplyColormap(
+        name="viridis", vmin=float(band[~fill].min()), vmax=float(band[~fill].max())
+    )(band)
+    np.testing.assert_array_equal(rgba[:, ~fill], ref[:, ~fill])
+
+    # ApplyDiscreteColormap: fill renders transparent even if mapped.
+    labels = np.ones((6, 6), dtype=np.int16)
+    mapping = {1: (1.0, 0.0, 0.0, 1.0), -9999: (0.0, 1.0, 0.0, 1.0)}
+    cat = np.asarray(ApplyDiscreteColormap(mapping=mapping)(_with_fill(labels)))
+    np.testing.assert_array_equal(cat[:, fill], 0)
+    red = np.broadcast_to(np.array([[255], [0], [0], [255]]), (4, int((~fill).sum())))
+    np.testing.assert_array_equal(cat[:, ~fill], red)
+
+    # Hillshade: on a planar DEM the fill does not leak into any neighbour.
+    yy, xx = np.mgrid[0:6, 0:6].astype(np.float64)
+    dem = 3.0 * xx - 2.0 * yy
+    shade = np.asarray(Hillshade()(_with_fill(dem)))
+    np.testing.assert_array_equal(shade[fill], 0)
+    np.testing.assert_array_equal(
+        shade[~fill], np.asarray(Hillshade()(_toy_geotensor(dem)))[~fill]
+    )
+
+    # GammaCorrect is elementwise: fill values pass through untouched.
+    gamma = np.asarray(GammaCorrect(gamma=2.0)(_with_fill(clean)))
+    np.testing.assert_array_equal(gamma[:, fill], -9999)
+    np.testing.assert_allclose(
+        gamma[:, ~fill], np.asarray(GammaCorrect(gamma=2.0)(clean))[:, ~fill]
+    )

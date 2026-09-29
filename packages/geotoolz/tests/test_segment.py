@@ -7,6 +7,7 @@ import json
 import numpy as np
 import pytest
 import rasterio
+from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
 
@@ -14,11 +15,13 @@ import geotoolz as gz
 
 
 def _gt(values: np.ndarray) -> GeoTensor:
+    # NaN fill: the toy images hold real zeros, which a ``0`` fill would
+    # mark as nodata (the segmenters honour ``fill_value_default``).
     return GeoTensor(
         values=values,
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
         crs="EPSG:4326",
-        fill_value_default=0,
+        fill_value_default=np.nan,
     )
 
 
@@ -177,7 +180,7 @@ def test_mark_boundaries_uses_array_as_geotensor() -> None:
     # Metadata propagation comes from array_as_geotensor.
     assert out.transform == gt.transform
     assert out.crs == gt.crs
-    assert out.fill_value_default == gt.fill_value_default
+    np.testing.assert_equal(out.fill_value_default, gt.fill_value_default)
     assert np.asarray(out).shape[-2:] == gt.shape[-2:]
     # Non-serializable label_img -> forbid_in_yaml at the class level.
     assert gz.segment.MarkBoundaries.forbid_in_yaml is True
@@ -506,3 +509,50 @@ def test_segment_mask_config_refuses_reload(cls: type) -> None:
 
     op = cls()
     assert Operator.from_state(op.state).get_config() == op.get_config()
+
+
+def _fill_step_image() -> np.ndarray:
+    values = np.full((1, 8, 8), 1.0)
+    values[:, :, 4:] = 2.0
+    return values
+
+
+def _row_markers() -> np.ndarray:
+    markers = np.zeros((8, 8), dtype=np.int32)
+    markers[3, 1] = 1
+    markers[3, 6] = 2
+    return markers
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        gz.segment.SLIC(n_segments=4, compactness=1.0),
+        gz.segment.Felzenszwalb(scale=1.0, min_size=1),
+        gz.segment.Quickshift(kernel_size=2.0, max_dist=4.0),
+        gz.segment.Watershed(markers=_row_markers()),
+        gz.segment.ChanVese(max_num_iter=10),
+        gz.segment.RandomWalker(markers=_row_markers(), beta=10.0),
+    ],
+    ids=["slic", "felzenszwalb", "quickshift", "watershed", "chanvese", "rw"],
+)
+def test_fill_pixels_are_excluded(op: Operator) -> None:
+    """#145: a ``fill_value_default`` pixel is nodata, not a region.
+
+    It gets the "no segment" label 0, and the labels match those obtained
+    when the same pixels are NaN (the nodata path that already worked).
+    """
+    fill = fill_pixel_mask((8, 8))
+    gt = toy_geotensor(_fill_step_image(), with_fill_pixels=True)
+    as_nan = _fill_step_image()
+    as_nan[:, fill] = np.nan
+
+    labels = op(gt)
+
+    out = np.asarray(labels)
+    assert out.dtype == np.int32
+    assert labels.fill_value_default == 0
+    assert (out[fill] == 0).all()
+    np.testing.assert_array_equal(out, np.asarray(op(as_nan)))
+    if not isinstance(op, gz.segment.ChanVese):  # ChanVese: 0 = "outside"
+        assert (out[~fill] >= 1).all()

@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from _helpers import toy_geotensor
+from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
 
@@ -18,10 +18,13 @@ import geotoolz as gz
 from geotoolz import augment
 
 
-def _toy_geotensor(values: np.ndarray) -> GeoTensor:
+def _toy_geotensor(values: np.ndarray, **kwargs: Any) -> GeoTensor:
+    # The ``patch`` data starts at 0.0, so a 0 fill would silently mark
+    # pixel (0, 0) as nodata; use a fill the toy data never takes.
+    kwargs.setdefault("fill_value_default", -9999.0)
     return toy_geotensor(
         values,
-        fill_value_default=0,
+        **kwargs,
         attrs={
             "band_names": ["B02", "B03", "B04", "B08"],
             "wavelengths_nm": [490.0, 560.0, 665.0, 842.0],
@@ -627,3 +630,87 @@ def test_boolean_carriers_pass_geometry_but_reject_radiometry() -> None:
     np.testing.assert_array_equal(flipped, np.flip(mask, -1))
     with pytest.raises(TypeError, match="boolean"):
         augment.GaussianNoise(sigma=0.01, seed=0)(mask)
+
+
+_FILL = -9999.0
+_RADIOMETRIC_OPS: list[Any] = [
+    lambda: augment.BrightnessJitter(factor=(1.1, 1.1), seed=0),
+    lambda: augment.BrightnessJitter(seed=0),
+    lambda: augment.ContrastJitter(factor=(0.5, 1.5), seed=0),
+    lambda: augment.GaussianNoise(sigma=0.5, seed=0),
+    lambda: augment.SpeckleNoise(sigma=0.2, seed=0),
+    lambda: augment.BandDropout(p=0.5, fill=-1.0, seed=2),
+    lambda: augment.SunAngleJitter(delta_sza_deg=(10.0, 20.0), seed=0),
+    lambda: augment.AtmosphericHaze(intensity=(0.5, 1.0), seed=0),
+    lambda: augment.SimulatedClouds(coverage=(0.3, 0.6), feather=1, seed=0),
+]
+
+
+@pytest.mark.parametrize(
+    "make_op", _RADIOMETRIC_OPS, ids=lambda make: type(make()).__name__
+)
+def test_fill_pixels_are_excluded(make_op: Callable[[], Operator]) -> None:
+    """Radiometric ops leave nodata as nodata and ignore it in statistics (#145)."""
+    clean = np.arange(4 * 5 * 6, dtype=np.float64).reshape(4, 5, 6) / 10.0 + 1.0
+    fill = fill_pixel_mask(clean.shape)
+    valid = ~fill
+    gt = _toy_geotensor(clean, fill_value_default=_FILL, with_fill_pixels=True)
+    op = make_op()
+
+    out = np.asarray(op(gt))
+
+    # Fill pixels hold the output fill in every band (not e.g. -10998.9).
+    np.testing.assert_array_equal(out[:, fill], _FILL)
+
+    # Valid pixels match the same op (same seed -> same draws) run on data
+    # without fill pixels.
+    if isinstance(op, augment.ContrastJitter):
+        # Put the valid-pixel band mean at the fill locations, so the plain
+        # spatial mean of the reference equals the valid-only mean.
+        reference_in = clean.copy()
+        reference_in[:, fill] = clean[:, valid].mean(axis=1, keepdims=True)
+        expected = np.asarray(make_op()(_toy_geotensor(reference_in)))
+    elif isinstance(op, augment.SimulatedClouds):
+        # The cloud brightness percentile must ignore nodata: compare with the
+        # fill pixels absent (NaN, which the percentile already skipped).
+        reference_in = clean.copy()
+        reference_in[:, fill] = np.nan
+        expected = make_op()(reference_in)
+    else:
+        expected = np.asarray(make_op()(_toy_geotensor(clean)))
+    np.testing.assert_allclose(out[:, valid], expected[:, valid])
+
+
+def test_fill_pixels_are_excluded_nan_fill_contrast() -> None:
+    """One NaN pixel must not poison ContrastJitter's band mean (#145)."""
+    clean = np.arange(2 * 3 * 4, dtype=np.float64).reshape(2, 3, 4)
+    arr = clean.copy()
+    arr[:, 1, 2] = np.nan
+    valid = np.ones(arr.shape[-2:], dtype=bool)
+    valid[1, 2] = False
+
+    out = augment.ContrastJitter(factor=(0.5, 0.5), seed=0)(arr)
+
+    assert np.isnan(out[:, 1, 2]).all()
+    mean = clean[:, valid].mean(axis=1)[:, None]
+    np.testing.assert_allclose(out[:, valid], (clean[:, valid] - mean) * 0.5 + mean)
+
+
+def test_fill_pixels_are_excluded_cutmix_donor_holes() -> None:
+    """Donor nodata pasted by CutMix becomes the input's fill value (#145)."""
+    base = _toy_geotensor(np.ones((4, 5, 6), dtype=np.float32))
+    donor = _toy_geotensor(
+        np.full((4, 5, 6), 9.0, dtype=np.float32),
+        fill_value_default=-1.0,
+        with_fill_pixels=True,
+    )
+    # Draw until the pasted rectangle covers a donor fill pixel.
+    for seed in range(100):
+        out = np.asarray(augment.CutMix(pool=[donor], p=1.0)(base, seed=seed))
+        if np.any(out == -1.0) or np.any(out == _FILL):
+            break
+    else:  # pragma: no cover - the draw space makes this unreachable
+        pytest.fail("no CutMix draw covered a donor fill pixel")
+    assert not np.any(out == -1.0)
+    assert np.any(out == _FILL)
+    assert set(np.unique(out)) <= {1.0, 9.0, _FILL}

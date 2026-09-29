@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
+from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
@@ -142,7 +142,9 @@ def test_gaussian_denoise_preserves_nan_mask_and_metadata() -> None:
     arr[2, 2] = np.nan
     gt = toy_geotensor(arr)
     out = GaussianDenoise(sigma=1.0)(gt)
-    assert np.isnan(np.asarray(out)[2, 2])
+    # The NaN pixel is nodata: it holds the carrier's fill value.
+    assert np.asarray(out)[2, 2] == gt.fill_value_default
+    assert np.isnan(np.asarray(GaussianDenoise(sigma=1.0)(arr))[2, 2])
     assert out.transform == gt.transform
 
 
@@ -372,7 +374,8 @@ def test_operators_accept_plain_ndarray(make_op) -> None:
     arr[0, 1, 1] = np.nan
     out_arr = make_op()(arr)
     assert type(out_arr) is np.ndarray
-    out_gt = make_op()(toy_geotensor(arr))
+    # NaN fill so nodata pixels hold NaN on both carriers.
+    out_gt = make_op()(toy_geotensor(arr, fill_value_default=np.nan))
     assert isinstance(out_gt, GeoTensor)
     np.testing.assert_array_equal(out_arr, np.asarray(out_gt))
 
@@ -386,3 +389,106 @@ def test_mnf_round_trip_accepts_plain_ndarray() -> None:
     restored = InverseMNF(forward=forward)(scores)
     assert type(restored) is np.ndarray
     np.testing.assert_allclose(restored, arr, atol=1e-10)
+
+
+# ----------------------------------------------------------------------------
+# Nodata (fill pixels) handling
+# ----------------------------------------------------------------------------
+def _fill_scene() -> tuple[GeoTensor, np.ndarray, np.ndarray]:
+    """(3, 6, 7) positive scene with -9999 fill pixels, clean values, fill mask."""
+    rng = np.random.default_rng(11)
+    values = rng.uniform(1.0, 2.0, size=(3, 6, 7))
+    gt = toy_geotensor(values, fill_value_default=-9999, with_fill_pixels=True)
+    return gt, values, fill_pixel_mask(values.shape)
+
+
+def _nan_at(values: np.ndarray, fill: np.ndarray) -> np.ndarray:
+    out = values.copy()
+    out[..., fill] = np.nan
+    return out
+
+
+_FILTERS = [
+    pytest.param(lambda: DespeckleLee(window=3), id="DespeckleLee"),
+    pytest.param(lambda: DespeckleFrost(window=3), id="DespeckleFrost"),
+    pytest.param(lambda: DespeckleRefinedLee(window=3), id="DespeckleRefinedLee"),
+    pytest.param(lambda: DestripeColumn(method="mean"), id="DestripeColumn"),
+    pytest.param(lambda: MomentMatching(window=3), id="MomentMatching"),
+    pytest.param(lambda: DenoisePCA(n_components=1), id="DenoisePCA"),
+    pytest.param(lambda: MNF(n_components=2), id="MNF"),
+    pytest.param(lambda: GaussianDenoise(sigma=1.0), id="GaussianDenoise"),
+    pytest.param(lambda: MedianDenoise(size=3), id="MedianDenoise"),
+    pytest.param(lambda: BilateralDenoise(sigma_space=1.0), id="BilateralDenoise"),
+    pytest.param(lambda: NLMeans(), id="NLMeans"),
+    pytest.param(lambda: ReplaceOutliers(fill="interp"), id="ReplaceOutliers"),
+]
+
+
+@pytest.mark.parametrize("make_op", _FILTERS)
+def test_fill_pixels_are_excluded(make_op) -> None:
+    """Fill pixels never enter a filter / fit and hold the output fill.
+
+    Valid pixels must equal the result on the same data with the fill
+    pixels marked missing (NaN) -- e.g. ``GaussianDenoise`` must not smear
+    -9999 into the neighbours of a fill pixel.
+    """
+    gt, values, fill = _fill_scene()
+    out = np.asarray(make_op()(gt))
+
+    assert np.all(out[:, fill] == -9999)
+    expected = np.asarray(make_op()(_nan_at(values, fill)))
+    np.testing.assert_allclose(out[:, ~fill], expected[:, ~fill])
+    # No fill leakage: every valid output stays in the data's range.
+    assert out[:, ~fill].min() > -10.0
+
+
+@pytest.mark.parametrize(
+    "make_op",
+    [
+        pytest.param(lambda: GapFillNearest(), id="GapFillNearest"),
+        pytest.param(lambda: GapFillIDW(radius=3), id="GapFillIDW"),
+        pytest.param(lambda: GapFillLaplacian(), id="GapFillLaplacian"),
+        pytest.param(lambda: GapFillInpaintBiharmonic(), id="GapFillBiharmonic"),
+    ],
+)
+def test_fill_pixels_are_gaps_for_gap_fill(make_op) -> None:
+    """Gap-fill operators fill fill pixels from valid neighbours only."""
+    gt, values, fill = _fill_scene()
+    out = np.asarray(make_op()(gt))
+
+    expected = np.asarray(make_op()(_nan_at(values, fill)))
+    np.testing.assert_allclose(out, expected)
+    assert np.all(np.isfinite(out[:, fill]))
+    assert np.all((out[:, fill] >= 1.0) & (out[:, fill] <= 2.0))
+    np.testing.assert_array_equal(out[:, ~fill], values[:, ~fill])
+
+
+def test_gap_fill_unfilled_gaps_hold_fill_value() -> None:
+    values = np.ones((1, 6, 6))
+    gt = toy_geotensor(values, fill_value_default=-9999, with_fill_pixels=True)
+    out = np.asarray(GapFillNearest(max_distance=0)(gt))
+    fill = fill_pixel_mask(values.shape)
+    assert np.all(out[:, fill] == -9999)
+
+
+def test_fill_pixels_are_excluded_from_masks_and_pca_fit() -> None:
+    gt, values, fill = _fill_scene()
+
+    # OutlierMask: the -9999 fill is not an outlier and does not skew stats.
+    outliers = np.asarray(OutlierMask(method="zscore", k=3.0)(gt))
+    assert not outliers.any()
+
+    # SaturationFlag: a uint16 fill at the dtype max is not "saturated".
+    counts = np.full((1, 4, 4), 100, dtype=np.uint16)
+    sat_gt = toy_geotensor(counts, fill_value_default=65535, with_fill_pixels=True)
+    assert not np.asarray(SaturationFlag()(sat_gt)).any()
+
+    # MNF: fitted on valid pixels only; inverse restores fill pixels.
+    forward = MNF(n_components=3)
+    scores = forward(gt)
+    reference = MNF(n_components=3)
+    reference(_nan_at(values, fill))
+    np.testing.assert_allclose(forward.snr_, reference.snr_)
+    restored = np.asarray(InverseMNF(forward=forward)(scores))
+    assert np.all(restored[:, fill] == -9999)
+    np.testing.assert_allclose(restored[:, ~fill], values[:, ~fill], atol=1e-10)

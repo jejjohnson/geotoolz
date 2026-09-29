@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor, uint16_dn_cube
+from _helpers import fill_pixel_mask, toy_geotensor, uint16_dn_cube
 from georeader.geotensor import GeoTensor
 
 from geotoolz.indices import (
@@ -499,6 +499,85 @@ def test_index_output_drops_band_names() -> None:
     out = NDVI(red_idx=2, nir_idx=3)(gt)
     assert out.attrs == {"k": 1}
     assert out.attrs is not gt.attrs
+
+
+# ---------------------------------------------------------------------------
+# Nodata (fill) pixels
+# ---------------------------------------------------------------------------
+
+
+_FILL_OPS = [
+    ARVI(),
+    BAIS2(red_idx=2, red_edge1_idx=4, red_edge2_idx=5, nir_idx=3, swir2_idx=6),
+    BSI(),
+    ClayMinerals(),
+    EVI(),
+    EVI2(),
+    GCI(),
+    IronOxide(),
+    kNDVI(),
+    MNDWI(),
+    NBR(),
+    NBR2(),
+    NDBI(),
+    NDMI(),
+    NDSI(),
+    NDVI(),
+    NDWI(),
+    SAVI(),
+    CIRI(cirrus_idx=6),
+    NormalizedDifference(a_idx=3, b_idx=2),
+]
+
+
+@pytest.mark.parametrize("op", _FILL_OPS, ids=lambda op: type(op).__name__)
+def test_fill_pixels_are_excluded(op: object, reflectance_7band: GeoTensor) -> None:
+    """A -9999 fill pixel is not computed as data: it holds the output fill."""
+    clean = np.asarray(reflectance_7band)
+    gt = toy_geotensor(clean, with_fill_pixels=True)
+    fill = fill_pixel_mask(gt.shape)
+
+    out = op(gt)  # type: ignore[operator]
+    expected = np.asarray(op(toy_geotensor(clean)))  # type: ignore[operator]
+
+    assert out.fill_value_default == -9999
+    np.testing.assert_array_equal(np.asarray(out)[fill], -9999)
+    np.testing.assert_allclose(np.asarray(out)[~fill], expected[~fill])
+
+
+def test_fill_pixels_are_excluded_nan_fill_and_plain_array(
+    reflectance_7band: GeoTensor,
+) -> None:
+    """NaN fills (GeoTensor) and NaN pixels (plain ndarray) map to NaN."""
+    clean = np.asarray(reflectance_7band)
+    fill = fill_pixel_mask(clean.shape)
+    gt = toy_geotensor(clean, fill_value_default=np.nan, with_fill_pixels=True)
+    assert np.isnan(np.asarray(NDVI()(gt))[fill]).all()
+
+    arr = clean.copy()
+    arr[3, 0, 0] = np.nan  # NIR
+    arr[2, -1, -1] = np.nan  # red
+    arr[1, 0, 1] = np.nan  # green is not read by NDVI: pixel stays valid
+    out = NDVI()(arr)
+    assert np.isnan(out[fill]).all()
+    np.testing.assert_allclose(out[~fill], NDVI()(clean)[~fill])
+
+
+def test_fill_pixels_are_excluded_dnbr_and_append_index(
+    reflectance_4band: GeoTensor,
+) -> None:
+    clean = np.asarray(reflectance_4band)
+    fill = fill_pixel_mask(clean.shape)
+    pre = toy_geotensor(clean[0], with_fill_pixels=True)
+    post = toy_geotensor(clean[1])
+    out = np.asarray(dNBR()(pre, post))
+    np.testing.assert_array_equal(out[fill], -9999)
+    np.testing.assert_allclose(out[~fill], (clean[0] - clean[1])[~fill])
+
+    stacked = np.asarray(
+        AppendIndex(index_op=NDVI())(toy_geotensor(clean, with_fill_pixels=True))
+    )
+    np.testing.assert_array_equal(stacked[-1][fill], -9999)
 
 
 # ---------------------------------------------------------------------------

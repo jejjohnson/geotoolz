@@ -7,6 +7,7 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 import rasterio
+from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
@@ -14,10 +15,13 @@ from geotoolz.plume import convert_column_units, resolve_threshold
 
 
 def _gt(values: np.ndarray) -> GeoTensor:
+    # Explicit -9999 fill: GeoTensor's default fill of 0 would mark the
+    # zero-valued backgrounds used throughout these tests as nodata.
     return GeoTensor(
         values=values,
         transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 100.0),
         crs="EPSG:32629",
+        fill_value_default=-9999,
     )
 
 
@@ -871,3 +875,68 @@ def test_ime_convex_hull_handles_collinear_points() -> None:
 
     # Four pixels at 10 m spacing -> length = 3 * 10 = 30 m.
     assert result["length_m"] == pytest.approx(30.0)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "contours_fill",
+        "contours_nan",
+        "contours_nan_fill",
+        "mask_percentile",
+        "ime",
+        "column_to_mass",
+    ],
+)
+def test_fill_pixels_are_excluded(case: str) -> None:
+    """Fill / NaN pixels are never plume and never enter a statistic (#145)."""
+    shape = (5, 5)
+    fill = fill_pixel_mask(shape)
+    valid = ~fill
+    if case == "contours_fill":
+        # -9999 is truthy: it used to be labelled as plume.
+        gt = toy_geotensor(np.ones(shape), with_fill_pixels=True)
+        labels = np.asarray(gz.plume.PlumeContours(min_area=1)(gt))
+        assert (labels[fill] == -9999).all()
+        assert (labels[valid] == 1).all()
+        mask = np.asarray(gz.plume.PlumeContours(min_area=1, return_labels=False)(gt))
+        np.testing.assert_array_equal(mask, valid)
+    elif case == "contours_nan":
+        # Issue reproduction: NaN scores used to be treated as plume.
+        score = np.zeros(shape)
+        score[fill] = np.nan
+        labels = gz.plume.PlumeContours(min_area=1)(score)
+        assert not labels.any()
+        mask = gz.plume.PlumeContours(min_area=1, return_labels=False)(score)
+        assert not mask.any()
+    elif case == "contours_nan_fill":
+        gt = toy_geotensor(np.ones(shape), fill_value_default=np.nan)
+        gt.values[fill] = np.nan
+        out = gz.plume.PlumeContours(min_area=1)(gt)
+        labels = np.asarray(out)
+        # NaN cannot live in int32 labels: fill pixels are background (0).
+        assert (labels[fill] == 0).all()
+        assert (labels[valid] == 1).all()
+        assert out.fill_value_default == 0
+    elif case == "mask_percentile":
+        values = np.arange(25, dtype=float).reshape(shape)
+        gt = toy_geotensor(values, with_fill_pixels=True)
+        out = np.asarray(gz.plume.PlumeMask(threshold="percentile:50", min_area=1)(gt))
+        cutoff = np.percentile(values[valid], 50)
+        np.testing.assert_array_equal(out, (values > cutoff) & valid)
+        otsu = np.asarray(gz.plume.PlumeMask(threshold="otsu", min_area=1)(gt))
+        assert not otsu[fill].any()
+        expected = (values > resolve_threshold(values[valid], "otsu")) & valid
+        np.testing.assert_array_equal(otsu, expected)
+    elif case == "ime":
+        enhancement = toy_geotensor(np.ones(shape), with_fill_pixels=True)
+        plume = toy_geotensor(np.ones(shape, dtype=bool))
+        result = gz.plume.IMEEstimate(
+            plume_mask=plume, wind_speed=1.0, return_uncertainty=False
+        )(enhancement)
+        assert result["ime_kg"] == pytest.approx(valid.sum() * 100.0)
+    elif case == "column_to_mass":
+        gt = toy_geotensor(np.full(shape, 1000.0), with_fill_pixels=True)
+        out = np.asarray(gz.plume.ColumnToMass(units_in="ppm_m")(gt))
+        assert (out[fill] == -9999).all()
+        assert (out[valid] > 0).all()
