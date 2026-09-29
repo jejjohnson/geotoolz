@@ -1299,6 +1299,9 @@ patch = [
 vector-cube = [
     { name = "xvec" },
 ]
+zarr = [
+    { name = "zarr" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1348,8 +1351,9 @@ requires-dist = [
     { name = "shapely", specifier = ">=2.0" },
     { name = "typing-extensions", specifier = ">=4.0" },
     { name = "xvec", marker = "extra == 'vector-cube'", specifier = ">=0.4" },
+    { name = "zarr", marker = "extra == 'zarr'", specifier = ">=3" },
 ]
-provides-extras = ["hydra", "patch", "vector-cube", "hdf5", "hdf4", "netcdf", "obstore"]
+provides-extras = ["hydra", "patch", "vector-cube", "hdf5", "hdf4", "netcdf", "zarr", "obstore"]
 
 [package.metadata.requires-dev]
 dev = [

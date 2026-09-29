@@ -46,7 +46,12 @@ from rasterio.io import DatasetReaderBase
 from rasterio.windows import Window
 from shapely.geometry import MultiPolygon, Polygon, box
 
-from geotoolz._src.config import as_tuple, mapping_from_pairs, mapping_to_pairs
+from geotoolz._src.config import (
+    as_tuple,
+    jsonable,
+    mapping_from_pairs,
+    mapping_to_pairs,
+)
 
 
 Source = str | PathLike[str] | Any
@@ -111,7 +116,9 @@ def _coerce_source(src: Source, indexes: list[int] | None = None) -> Any:
             reader.set_indexes(indexes, relative=False)
         return reader
 
-    if indexes is not None and isinstance(src, DatasetReaderBase):
+    if isinstance(src, DatasetReaderBase):
+        # An open dataset does not implement the GeoData protocol; reopen
+        # it by name through a reader.
         return RasterioReader(src.name, indexes=indexes)
 
     if indexes is not None:
@@ -130,6 +137,25 @@ def _read_error(src: Source, exc: Exception) -> GeoToolzIOError:
     return GeoToolzIOError(f"Unable to read raster source {src!r}: {exc}")
 
 
+def _load_or_raise(out: Any, src: Source, what: str) -> GeoTensor:
+    """Materialise a georeader read, or raise if it missed the source.
+
+    georeader's ``read_from_*`` helpers return ``None`` when a
+    ``boundless=False`` request (or a web-map tile) lies outside the raster.
+
+    Args:
+        out: Lazy georeader result, or ``None``.
+        src: User-supplied source, used in the error message.
+        what: Human-readable description of the request.
+
+    Raises:
+        GeoToolzIOError: If ``out`` is ``None``.
+    """
+    if out is None:
+        raise GeoToolzIOError(f"{what} does not intersect {src!r}.")
+    return out.load()
+
+
 def _import_optional(module: str, extra: str) -> Any:
     try:
         return importlib.import_module(module)
@@ -142,14 +168,10 @@ def _import_optional(module: str, extra: str) -> Any:
 def _json_attrs(attrs: Any) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in dict(attrs).items():
-        if isinstance(value, np.ndarray):
-            out[str(key)] = value.tolist()
-        elif isinstance(value, np.generic):
-            out[str(key)] = value.item()
-        elif isinstance(value, bytes):
+        if isinstance(value, bytes):
             out[str(key)] = value.decode("utf-8", errors="replace")
         else:
-            out[str(key)] = value
+            out[str(key)] = jsonable(value)
     return out
 
 
@@ -199,9 +221,23 @@ def _read_hdf5_dataset(source: Any, indexes: list[int] | None) -> np.ndarray:
 
 
 def _fill_value_from_attrs(attrs: dict[str, Any]) -> Any:
+    """Return the scalar fill value declared in ``attrs`` (default ``0``).
+
+    HDF5 attributes written by netCDF4/xarray are ``(1,)``-shaped arrays
+    (lists after :func:`_json_attrs`); size-1 values are unwrapped to a
+    scalar and multi-element values are skipped, since a ``GeoTensor`` fill
+    must be a scalar.
+    """
     for name in ("_FillValue", "missing_value", "fill_value", "nodata"):
-        if name in attrs:
-            return attrs[name]
+        if name not in attrs:
+            continue
+        value = attrs[name]
+        if isinstance(value, list | tuple | np.ndarray):
+            flat = np.ravel(np.asarray(value))
+            if flat.size != 1:
+                continue
+            value = flat[0].item()
+        return value
     return 0
 
 
@@ -233,14 +269,16 @@ def _netcdf_group(root: Any, group: str | None) -> Any:
     return current
 
 
-def _netcdf_crs(group: Any, variable: Any, use_cf_grid_mapping: bool) -> Any:
-    if not use_cf_grid_mapping:
-        return None
+def _netcdf_grid_mapping(group: Any, variable: Any) -> Any:
+    """Return the CF ``grid_mapping`` variable of ``variable``, or ``None``."""
     grid_mapping = getattr(variable, "grid_mapping", None)
     if not isinstance(grid_mapping, str):
         return None
-    mapping = group.variables.get(grid_mapping)
-    if mapping is None:
+    return group.variables.get(grid_mapping)
+
+
+def _netcdf_crs(mapping: Any, use_cf_grid_mapping: bool) -> Any:
+    if not use_cf_grid_mapping or mapping is None:
         return None
     try:
         from pyproj import CRS
@@ -250,11 +288,21 @@ def _netcdf_crs(group: Any, variable: Any, use_cf_grid_mapping: bool) -> Any:
         return None
 
 
-def _netcdf_transform(variable: Any) -> Affine:
-    grid_mapping = getattr(variable, "GeoTransform", None)
-    if grid_mapping is None:
+def _netcdf_transform(variable: Any, mapping: Any) -> Affine:
+    """Read the GDAL ``GeoTransform`` attribute.
+
+    The GDAL netCDF driver writes it on the ``grid_mapping`` variable; the
+    data variable is checked as a fallback for non-GDAL writers.
+    """
+    geotransform = None
+    for source in (mapping, variable):
+        if source is not None:
+            geotransform = getattr(source, "GeoTransform", None)
+        if geotransform is not None:
+            break
+    if geotransform is None:
         return Affine.identity()
-    parts = [float(part) for part in str(grid_mapping).split()]
+    parts = [float(part) for part in str(geotransform).split()]
     if len(parts) != 6:
         return Affine.identity()
     return Affine.from_gdal(*parts)
@@ -314,10 +362,7 @@ class ReadWindow(SourceOperator):
             out = read.read_from_window(data, self.window, boundless=self.boundless)
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise _read_error(self.src, exc) from exc
-        if out is None:
-            window = _window_config(self.window)
-            raise GeoToolzIOError(f"Window {window!r} does not intersect {self.src!r}.")
-        return out.load()
+        return _load_or_raise(out, self.src, f"Window {_window_config(self.window)!r}")
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -346,8 +391,9 @@ class ReadBounds(SourceOperator):
             where the bounds extend outside the raster.
 
     Raises:
-        GeoToolzIOError: If the source cannot be opened or ``indexes`` is
-            given for a non-path-like source.
+        GeoToolzIOError: If the source cannot be opened, the request does
+            not intersect the source (``boundless=False``), or ``indexes``
+            is given for a non-path-like source.
 
     Examples:
         Read the full extent of a GeoTIFF as a single chip::
@@ -385,7 +431,7 @@ class ReadBounds(SourceOperator):
             )
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise _read_error(self.src, exc) from exc
-        return out.load()
+        return _load_or_raise(out, self.src, f"Bounds {self.bounds!r}")
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -416,8 +462,9 @@ class ReadCenterCoords(SourceOperator):
             zero-padded; if ``False`` they raise.
 
     Raises:
-        GeoToolzIOError: If the source cannot be opened or ``indexes`` is
-            given for a non-path-like source.
+        GeoToolzIOError: If the source cannot be opened, the request does
+            not intersect the source (``boundless=False``), or ``indexes``
+            is given for a non-path-like source.
 
     Examples:
         Read a 64 by 64 chip around a longitude/latitude point::
@@ -461,7 +508,9 @@ class ReadCenterCoords(SourceOperator):
             )
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise _read_error(self.src, exc) from exc
-        return out.load()
+        return _load_or_raise(
+            out, self.src, f"Window of shape {self.shape!r} centred on {self.center!r}"
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -541,11 +590,7 @@ class ReadTile(SourceOperator):
             )
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise _read_error(self.src, exc) from exc
-        if out is None:
-            raise GeoToolzIOError(
-                f"Tile {self.tile!r} does not intersect {self.src!r}."
-            )
-        return out.load()
+        return _load_or_raise(out, self.src, f"Tile {self.tile!r}")
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -578,8 +623,9 @@ class ReadPolygon(SourceOperator):
             raster.
 
     Raises:
-        GeoToolzIOError: If the source cannot be opened or ``indexes`` is
-            given for a non-path-like source.
+        GeoToolzIOError: If the source cannot be opened, the request does
+            not intersect the source (``boundless=False``), or ``indexes``
+            is given for a non-path-like source.
 
     Examples:
         Read all pixels intersecting an AOI polygon::
@@ -623,7 +669,9 @@ class ReadPolygon(SourceOperator):
             )
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise _read_error(self.src, exc) from exc
-        return out.load()
+        return _load_or_raise(
+            out, self.src, f"Polygon with bounds {self.polygon.bounds!r}"
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -686,10 +734,14 @@ class ReadReprojectLike(SourceOperator):
 
     def _apply(self) -> GeoTensor:
         try:
+            like = _coerce_source(self.like)
+        except (FileNotFoundError, OSError, RasterioIOError) as exc:
+            raise _read_error(self.like, exc) from exc
+        try:
             data = _coerce_source(self.src, self.indexes)
             out = read.read_reproject_like(
                 data,
-                self.like,
+                like,
                 resolution_dst=self.resolution,
             )
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
@@ -938,17 +990,20 @@ class ReadNetCDF(SourceOperator):
                 variable.set_auto_maskandscale(self.decode_cf)
                 attrs = _json_attrs(variable.__dict__)
                 values = _select_indexes(variable[:], self.indexes)
+                fill_value = _fill_value_from_attrs(attrs)
                 if np.ma.isMaskedArray(values):
-                    fill_value = _fill_value_from_attrs(attrs)
-                    values = values.filled(
-                        np.nan if values.dtype.kind == "f" else fill_value
-                    )
+                    # Decoded (scaled) floats are NaN-filled, so NaN is the
+                    # sentinel the returned tensor actually carries.
+                    if values.dtype.kind == "f":
+                        fill_value = np.nan
+                    values = values.filled(fill_value)
+                mapping = _netcdf_grid_mapping(group, variable)
                 return _geotensor(
                     values,
-                    crs=_netcdf_crs(group, variable, self.use_cf_grid_mapping),
-                    fill_value=_fill_value_from_attrs(attrs),
+                    crs=_netcdf_crs(mapping, self.use_cf_grid_mapping),
+                    fill_value=fill_value,
                     attrs={"attrs": attrs},
-                    transform=_netcdf_transform(variable),
+                    transform=_netcdf_transform(variable, mapping),
                 )
         except (KeyError, OSError, RuntimeError, ValueError) as exc:
             raise _read_error(self.path, exc) from exc
@@ -1118,20 +1173,24 @@ class WriteZarr(SinkOperator):
 
     Stores the array under ``values`` and the spatial metadata (CRS as
     a string, ``transform`` as a 6- or 9-tuple, ``fill_value_default``)
-    as group attributes. Requires the optional ``streaming`` extra
-    (``pip install geotoolz[streaming]``).
+    as group attributes. The store is opened in append mode: other
+    groups already in it are kept, while an existing ``values`` array in
+    the target group is overwritten. Requires the optional ``zarr`` extra
+    (``pip install geotoolz[zarr]``, zarr-python >= 3).
 
     Args:
         store: Zarr store URI (``"/path/to/output.zarr"``,
             ``"s3://bucket/output.zarr"``, etc.).
         group: Optional sub-group inside the store. ``None`` writes at
             the root.
-        chunks: Optional per-axis chunk size, keyed by axis name
-            (``"band"``, ``"y"``, ``"x"``). Missing axes inherit the
-            array shape.
+        chunks: Optional per-axis chunk size, keyed by axis name. Axes
+            are named ``("time", "band", "y", "x")`` right-aligned to the
+            array, so a 3-D array has ``"band"``, ``"y"``, ``"x"``.
+            Missing axes inherit the array shape.
 
     Raises:
-        GeoToolzIOError: If ``zarr`` is not installed.
+        GeoToolzIOError: If ``zarr`` is not installed or ``gt`` is not
+            2-D to 4-D.
 
     Examples:
         Write a time-series result to a chunked Zarr store::
@@ -1167,21 +1226,29 @@ class WriteZarr(SinkOperator):
                 "WriteZarr requires the optional zarr dependency."
             ) from exc
 
-        root = zarr.open_group(self.store, mode="w")
-        group = root if self.group is None else root.require_group(self.group)
         values = np.asarray(gt.values)
+        all_axes = ("time", "band", "y", "x")
+        if not 2 <= values.ndim <= len(all_axes):
+            raise GeoToolzIOError(
+                f"Zarr output expects 2D to 4D data, found shape {values.shape!r}."
+            )
+        # Append mode: never truncate other groups already in the store.
+        root = zarr.open_group(self.store, mode="a")
+        group = root if self.group is None else root.require_group(self.group)
         if self.chunks is not None:
-            axis_names = ("band", "y", "x")[-values.ndim :]
+            axis_names = all_axes[-values.ndim :]
             chunk_shape: tuple[int, ...] = tuple(
                 self.chunks.get(name, size)
                 for name, size in zip(axis_names, values.shape, strict=True)
             )
-            group.create_array("values", data=values, chunks=chunk_shape)
+            group.create_array(
+                "values", data=values, chunks=chunk_shape, overwrite=True
+            )
         else:
-            group.create_array("values", data=values)
+            group.create_array("values", data=values, overwrite=True)
         group.attrs["crs"] = str(gt.crs)
         group.attrs["transform"] = tuple(gt.transform)
-        group.attrs["fill_value_default"] = gt.fill_value_default
+        group.attrs["fill_value_default"] = jsonable(gt.fill_value_default)
         return None
 
 
@@ -1329,13 +1396,16 @@ class LoadFromEE(SourceOperator):
         xmin, ymax = self.bounds[0], self.bounds[3]
         transform: Affine = Affine(self.scale, 0.0, xmin, 0.0, -self.scale, ymax)
         try:
+            # ``bounds`` are in ``crs`` (georeader assumes EPSG:4326 unless
+            # told otherwise). The pixel size is already encoded in
+            # ``transform``, so no ``resolution_dst`` is passed.
             return export_image(
                 self.image_id,
                 geometry=box(*self.bounds),
                 transform=transform,
                 crs=self.crs,
+                crs_polygon=self.crs,
                 bands_gee=[] if self.bands is None else self.bands,
-                resolution_dst=self.scale,
             )
         except (ee.EEException, RuntimeError, ValueError, OSError) as exc:
             raise GeoToolzIOError(
