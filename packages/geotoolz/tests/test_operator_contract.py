@@ -585,6 +585,8 @@ def _toy_inputs() -> list[Any]:
         ),
         toy_geotensor(rng.uniform(0.01, 1.0, (16, 16))),
         toy_geotensor(labels, fill_value_default=0),
+        toy_geotensor(labels.astype(np.uint8), fill_value_default=0),
+        np.full(3, 0.5),  # a single 1-D spectrum (per-pixel MF ops)
     ]
 
 
@@ -619,6 +621,22 @@ def test_non_carrier_outputs_are_terminal(cls: type) -> None:
             assert op._terminal, f"returns {type(out).__name__}"
         return
     pytest.skip("no toy input is valid for this operator")
+
+
+def test_phase_align_is_terminal_only_without_apply() -> None:
+    """``PhaseAlign(apply=False)`` returns a shift tuple (#142 review)."""
+    from pipekit import Identity, Sequential
+
+    from geotoolz.geom import PhaseAlign
+
+    reference = _toy_inputs()[1]
+    shifted = PhaseAlign(reference=reference)
+    assert not shifted._terminal
+    Sequential([shifted, Identity()])
+    raw = PhaseAlign(reference=reference, apply=False)
+    assert isinstance(raw(reference), tuple)
+    with pytest.raises(TypeError, match="terminal"):
+        Sequential([raw, Identity()])
 
 
 @pytest.mark.parametrize(

@@ -159,6 +159,8 @@ class MatchedFilterPixel(Operator):
         target: Target signature ``(c,)``.
     """
 
+    _terminal: ClassVar[bool] = True
+
     def __init__(
         self,
         *,
