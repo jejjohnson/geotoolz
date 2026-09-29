@@ -1,12 +1,10 @@
 """Tier-A helpers — einx pattern analysis, pure string processing.
 
 No ``einx`` import happens here: the spatial-survival check is static
-analysis of the pattern text, so it is importable (and testable) even
-without the ``[einx]`` extra installed. The carrier-aware dispatch that
-actually calls einx lives in ``operators.py``.
+analysis of the pattern text. The carrier-aware dispatch that actually
+calls einx lives in ``operators.py``.
 
-The survival rule (design decision for geotoolz issue #69, Q3): a
-pattern *preserves spatial structure* iff
+The survival rule: a pattern *preserves spatial structure* iff
 
 1. the trailing two top-level axes of its output expression are exactly
    the bare spatial axis names (default ``("y", "x")``),
