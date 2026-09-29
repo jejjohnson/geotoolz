@@ -17,18 +17,21 @@ from pathlib import PurePath
 from typing import Any
 
 import numpy as np
-from pipekit._base.operator import nested_config
+from pipekit._base.operator import callable_name, nested_config
 
 
-# ``nested_config`` is pipekit's canonical ``{"class", "config"}`` payload for
-# an operator nested in another's config; re-exported here because pipekit
-# does not expose it at the top level.
+# ``nested_config`` (pipekit's canonical ``{"class", "config"}`` payload for an
+# operator nested in another's config) and ``callable_name`` (display name for
+# a callable in a debug config) are re-exported here because pipekit does not
+# expose them at the top level.
 __all__ = [
     "as_tuple",
+    "callable_name",
     "jsonable",
     "mapping_from_pairs",
     "mapping_to_pairs",
     "nested_config",
+    "reject_config_summary",
 ]
 
 
@@ -130,3 +133,30 @@ def mapping_from_pairs(
         key, val = item
         out[as_tuple(key)] = val
     return out
+
+
+def reject_config_summary(value: Any, name: str) -> Any:
+    """Refuse a debug summary passed back as a runtime constructor argument.
+
+    Operators with an *optional* runtime argument (an array, a callable)
+    stay reloadable when it is unset, and summarise it as a dict in
+    ``get_config`` when it is set. ``Operator.from_state`` refuses dict
+    values, but a YAML / Hydra loader would hand the summary back to the
+    constructor; this turns that into a clear error.
+
+    Args:
+        value: The constructor argument.
+        name: Parameter name for the error message.
+
+    Returns:
+        ``value`` unchanged.
+
+    Raises:
+        TypeError: if ``value`` is a mapping (a config summary).
+    """
+    if isinstance(value, Mapping):
+        raise TypeError(
+            f"{name} got a config summary; runtime values cannot be rebuilt "
+            "from a config — construct the operator in code instead."
+        )
+    return value

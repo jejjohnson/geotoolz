@@ -23,7 +23,7 @@ fixed-stats alias ``Normalize``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from pipekit import Operator
@@ -447,7 +447,7 @@ class HistogramMatch(Operator):
 
     # Holds a live GeoTensor reference, which is not JSON/YAML
     # serialisable.
-    forbid_in_yaml = True
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(self, *, reference: GeoTensor | np.ndarray) -> None:
         self.reference = reference

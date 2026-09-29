@@ -26,7 +26,7 @@ require a georeferenced GeoTensor and raise ``TypeError`` otherwise.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from pipekit import Operator
@@ -615,7 +615,7 @@ class AnnotatePolygons(Operator):
         >>> annotated = gz.viz.AnnotatePolygons(geometries=[field])(rgb_gt)
     """
 
-    forbid_in_yaml = True
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -688,7 +688,7 @@ class AnnotatePoints(Operator):
         ... )(rgb_gt)
     """
 
-    forbid_in_yaml = True
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,

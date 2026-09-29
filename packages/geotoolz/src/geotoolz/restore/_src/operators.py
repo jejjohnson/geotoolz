@@ -15,7 +15,7 @@ reference to a fitted :class:`MNF` and is therefore marked
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
 from pipekit import Operator
@@ -287,7 +287,7 @@ class InverseMNF(Operator):
     """
 
     # Holds a stateful forward reference that cannot be serialized faithfully.
-    forbid_in_yaml = True
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(self, *, forward: MNF) -> None:
         self.forward = forward

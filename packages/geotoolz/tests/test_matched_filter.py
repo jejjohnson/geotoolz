@@ -419,3 +419,31 @@ def test_estimator_ops_accept_plain_ndarray_input() -> None:
         [cube, cube]
     )
     np.testing.assert_allclose(streaming.mean, cube.reshape(3, -1).mean(axis=1))
+
+
+def test_obs_model_operators_are_forbid_in_yaml() -> None:
+    """``obs_model`` is a required callable: no config form exists (#140)."""
+    from geotoolz.matched_filter import LinearTargetFromObs, NonlinearTargetFromObs
+
+    assert LinearTargetFromObs.forbid_in_yaml is True
+    assert NonlinearTargetFromObs.forbid_in_yaml is True
+
+
+def test_column_enhancement_obs_model_refuses_reload() -> None:
+    """A dropped ``obs_model`` used to reload as a uniform target (#140)."""
+    import json
+
+    from pipekit import Operator
+
+    from geotoolz.matched_filter import ColumnEnhancement
+
+    def obs_model(state: object) -> object:
+        return state
+
+    op = ColumnEnhancement(obs_model=obs_model)
+    assert op.get_config()["obs_model"] == {"callable": "obs_model"}
+    with pytest.raises(RuntimeError, match="non-primitive"):
+        Operator.from_state(json.loads(json.dumps(op.state)))
+
+    plain = ColumnEnhancement()
+    assert Operator.from_state(plain.state).get_config() == plain.get_config()

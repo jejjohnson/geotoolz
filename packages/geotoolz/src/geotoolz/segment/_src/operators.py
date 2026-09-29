@@ -21,7 +21,11 @@ from skimage.segmentation import (
     watershed,
 )
 
-from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
+from geotoolz._src.config import (
+    mapping_from_pairs,
+    mapping_to_pairs,
+    reject_config_summary,
+)
 from geotoolz._src.shape import single_band
 from geotoolz._src.wrap import wrap_like
 
@@ -42,6 +46,14 @@ def _as_mask(
     if arr.shape != shape:
         raise ValueError(f"mask shape {arr.shape} does not match image shape {shape}")
     return arr.astype(bool)
+
+
+def _array_summary(value: Any) -> dict[str, Any] | None:
+    """Debug-config summary of a runtime array argument (``None`` passes)."""
+    if value is None:
+        return None
+    arr = np.asarray(value)
+    return {"shape": list(arr.shape), "dtype": str(arr.dtype)}
 
 
 def _finite_mask(
@@ -91,8 +103,9 @@ class SLIC(Operator):
             cubes, ``None`` for 2-D single-band input).
         start_label: First label assigned to a superpixel.
         mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
-            outside it get label ``0``. Providing a mask forbids YAML
-            round-trip for the instance.
+            outside it get label ``0``. ``get_config`` summarises a mask
+            as ``{"shape", "dtype"}``, which ``Operator.from_state``
+            refuses to rebuild.
     """
 
     def __init__(
@@ -110,13 +123,7 @@ class SLIC(Operator):
         self.sigma = sigma
         self.channel_axis = channel_axis
         self.start_label = start_label
-        self.mask = mask
-        # SLIC's `mask` is a non-JSON-safe carrier; forbid yaml round-trip
-        # for this instance whenever the user provided one.
-        if mask is not None:
-            # The parent's `forbid_in_yaml` is a ClassVar; the per-instance
-            # override here is intentional. ty rejects it, hence the ignore.
-            self.forbid_in_yaml = True  # ty: ignore[invalid-attribute-access]
+        self.mask = reject_config_summary(mask, "mask")
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         image = _fill_nan(np.asarray(gt))
@@ -142,7 +149,7 @@ class SLIC(Operator):
             "sigma": self.sigma,
             "channel_axis": self.channel_axis,
             "start_label": self.start_label,
-            "mask": None if self.mask is None else "provided",
+            "mask": _array_summary(self.mask),
         }
 
 
@@ -162,8 +169,9 @@ class Felzenszwalb(Operator):
         channel_axis: Axis holding channels (``0`` for channel-first
             cubes, ``None`` for 2-D single-band input).
         mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
-            outside it get label ``0``. Providing a mask forbids YAML
-            round-trip for the instance.
+            outside it get label ``0``. ``get_config`` summarises a mask
+            as ``{"shape", "dtype"}``, which ``Operator.from_state``
+            refuses to rebuild.
     """
 
     def __init__(
@@ -179,11 +187,7 @@ class Felzenszwalb(Operator):
         self.sigma = sigma
         self.min_size = min_size
         self.channel_axis = channel_axis
-        self.mask = mask
-        if mask is not None:
-            # The parent's `forbid_in_yaml` is a ClassVar; the per-instance
-            # override here is intentional. ty rejects it, hence the ignore.
-            self.forbid_in_yaml = True  # ty: ignore[invalid-attribute-access]
+        self.mask = reject_config_summary(mask, "mask")
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = _finite_mask(np.asarray(gt))
@@ -205,7 +209,7 @@ class Felzenszwalb(Operator):
             "sigma": self.sigma,
             "min_size": self.min_size,
             "channel_axis": self.channel_axis,
-            "mask": None if self.mask is None else "provided",
+            "mask": _array_summary(self.mask),
         }
 
 
@@ -231,8 +235,9 @@ class Quickshift(Operator):
             ``False`` (unlike skimage) so non-RGB / multispectral /
             single-band inputs work out of the box.
         mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
-            outside it get label ``0``. Providing a mask forbids YAML
-            round-trip for the instance.
+            outside it get label ``0``. ``get_config`` summarises a mask
+            as ``{"shape", "dtype"}``, which ``Operator.from_state``
+            refuses to rebuild.
     """
 
     def __init__(
@@ -255,11 +260,7 @@ class Quickshift(Operator):
         # work out of the box. skimage's quickshift defaults convert2lab=True,
         # which raises on any input that is not exactly 3-channel RGB.
         self.convert2lab = convert2lab
-        self.mask = mask
-        if mask is not None:
-            # The parent's `forbid_in_yaml` is a ClassVar; the per-instance
-            # override here is intentional. ty rejects it, hence the ignore.
-            self.forbid_in_yaml = True  # ty: ignore[invalid-attribute-access]
+        self.mask = reject_config_summary(mask, "mask")
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = _finite_mask(np.asarray(gt))
@@ -285,7 +286,7 @@ class Quickshift(Operator):
             "sigma": self.sigma,
             "channel_axis": self.channel_axis,
             "convert2lab": self.convert2lab,
-            "mask": None if self.mask is None else "provided",
+            "mask": _array_summary(self.mask),
         }
 
 
@@ -323,7 +324,7 @@ class Watershed(Operator):
         self.connectivity = connectivity
         self.compactness = compactness
         self.watershed_line = watershed_line
-        self.mask = mask
+        self.mask = reject_config_summary(mask, "mask")
 
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         image = single_band(_fill_nan(np.asarray(gt)), name="Watershed")
@@ -348,11 +349,11 @@ class Watershed(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "markers": None if self.markers is None else "provided",
+            "markers": _array_summary(self.markers),
             "connectivity": self.connectivity,
             "compactness": self.compactness,
             "watershed_line": self.watershed_line,
-            "mask": None if self.mask is None else "provided",
+            "mask": _array_summary(self.mask),
         }
 
 
@@ -450,7 +451,7 @@ class RandomWalker(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "markers": "provided",
+            "markers": _array_summary(self.markers),
             "beta": self.beta,
             "mode": self.mode,
             "tol": self.tol,
@@ -845,7 +846,7 @@ class MarkBoundaries(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "label_img": "provided",
+            "label_img": _array_summary(self.label_img),
             "color": self.color,
             "mode": self.mode,
         }

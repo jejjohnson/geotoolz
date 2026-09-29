@@ -355,9 +355,11 @@ def test_get_config_is_json_safe(patch: GeoTensor) -> None:
         json.dumps(op.get_config())
 
 
-def test_compose_and_cutmix_are_forbid_in_yaml() -> None:
-    assert augment.Compose([]).forbid_in_yaml is True
+def test_cutmix_is_forbid_in_yaml_but_compose_is_a_container() -> None:
+    # CutMix holds runtime rasters; Compose only nests operators, which
+    # pipekit's container rule leaves to the children (#140).
     assert augment.CutMix(pool=[]).forbid_in_yaml is True
+    assert augment.Compose([]).forbid_in_yaml is False
 
 
 def test_simulated_clouds_rejects_invalid_coverage_at_construction() -> None:

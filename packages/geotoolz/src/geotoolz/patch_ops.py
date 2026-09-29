@@ -100,7 +100,7 @@ class GridSampler(Operator):
         patcher: The `SpatialPatcher` to drive.
     """
 
-    forbid_in_yaml: ClassVar[bool] = False
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(self, patcher: SpatialPatcher) -> None:
         self.patcher = patcher
@@ -122,8 +122,6 @@ class ApplyToChips(Operator):
     Args:
         operator: The per-chip operator (a `ModelOp`, an `NDVI`, …).
     """
-
-    forbid_in_yaml: ClassVar[bool] = False
 
     def __init__(self, operator: Operator) -> None:
         self.operator = operator
@@ -160,8 +158,6 @@ class Stitch(Operator):
             because the aggregation's output shape is fixed by the
             domain.
     """
-
-    forbid_in_yaml: ClassVar[bool] = False
 
     def __init__(self, aggregation: SpatialAggregation, domain: Any) -> None:
         self.aggregation = aggregation

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
 from pipekit import Operator
@@ -53,6 +54,8 @@ class SklearnOp(Operator):
         >>> op = SklearnOp(PCA(n_components=3), mode="pixel")
         >>> projected = op(scene)
     """
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -201,14 +204,18 @@ def _jsonable_params(params: dict[str, Any]) -> dict[str, Any]:
     sklearn param dicts routinely contain values with no JSON form
     (nested estimators, callables, ``RandomState`` instances). The
     shared helper passes such values through unchanged, so any entry
-    that still fails ``json.dumps`` after coercion is dropped — the
-    emitted config must always survive serialisation.
+    that still fails strict ``json.dumps`` after coercion is dropped —
+    the emitted config must always survive serialisation. Non-finite
+    floats (``missing_values=nan``, ``max_value=inf``) are kept as their
+    ``repr`` string.
     """
     out: dict[str, Any] = {}
     for key, value in params.items():
         coerced = jsonable(value)
+        if isinstance(coerced, float) and not math.isfinite(coerced):
+            coerced = repr(coerced)
         try:
-            json.dumps(coerced)
+            json.dumps(coerced, allow_nan=False)
         except (TypeError, ValueError):
             continue
         out[key] = coerced

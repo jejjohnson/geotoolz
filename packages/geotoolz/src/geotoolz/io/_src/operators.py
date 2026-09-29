@@ -14,10 +14,12 @@ file/cloud IO primitives in :mod:`georeader.read` and
   ``_terminal = True`` so :class:`~pipekit.Sequential` only
   accepts them as the last step.
 
-All public IO operators set ``forbid_in_yaml = True`` — their
-``get_config()`` returns a debug-friendly dict but cannot round-trip
-through YAML cleanly (file paths, STAC items, EE asset IDs, reference
-grids, and ``shapely`` geometries are runtime references).
+Configs built from paths, bounds, windows and asset IDs are plain JSON
+and round-trip through ``Operator.from_state`` / YAML. A source given as
+a runtime object (an open reader, a ``GeoTensor``) stays in the config
+as-is, so ``from_state`` refuses it as non-primitive. ``LoadFromSTAC``
+(a runtime STAC item) and ``ReadReprojectLike`` (a runtime reference
+grid) always hold runtime objects and set ``forbid_in_yaml = True``.
 
 See `geotoolz` design report §4 (two-tier model) and §6.2 (round-trip
 discipline).
@@ -31,6 +33,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import numpy as np
+import shapely.wkt
 from affine import Affine
 from georeader import read, save
 from georeader.geotensor import GeoTensor
@@ -40,6 +43,8 @@ from rasterio.errors import RasterioIOError
 from rasterio.io import DatasetReaderBase
 from rasterio.windows import Window
 from shapely.geometry import MultiPolygon, Polygon, box
+
+from geotoolz._src.config import as_tuple
 
 
 Source = str | PathLike[str] | Any
@@ -62,8 +67,6 @@ class SourceOperator(Operator):
     pipeline is invoked without a carrier.
     """
 
-    forbid_in_yaml: ClassVar[bool] = True
-
 
 class SinkOperator(Operator):
     """Terminal operator that consumes a :class:`GeoTensor` and writes it.
@@ -75,7 +78,6 @@ class SinkOperator(Operator):
     """
 
     _terminal: ClassVar[bool] = True
-    forbid_in_yaml: ClassVar[bool] = True
 
 
 def _window_config(window: Window) -> tuple[float, float, float, float]:
@@ -365,7 +367,7 @@ class ReadBounds(SourceOperator):
         boundless: bool = True,
     ) -> None:
         self.src = src
-        self.bounds = bounds
+        self.bounds = as_tuple(bounds)
         self.crs = crs
         self.indexes = indexes
         self.boundless = boundless
@@ -439,8 +441,8 @@ class ReadCenterCoords(SourceOperator):
         boundless: bool = True,
     ) -> None:
         self.src = src
-        self.center = center
-        self.shape = shape
+        self.center = as_tuple(center)
+        self.shape = as_tuple(shape)
         self.crs = crs
         self.indexes = indexes
         self.boundless = boundless
@@ -516,11 +518,11 @@ class ReadTile(SourceOperator):
         resolution: Resolution | None = None,
     ) -> None:
         self.src = src
-        self.tile = tile
+        self.tile = as_tuple(tile)
         self.indexes = indexes
         self.dst_crs = dst_crs
-        self.out_shape = out_shape
-        self.resolution = resolution
+        self.out_shape = as_tuple(out_shape)
+        self.resolution = as_tuple(resolution)
 
     def _apply(self) -> GeoTensor:
         z, x, y = self.tile
@@ -565,7 +567,8 @@ class ReadPolygon(SourceOperator):
         src: Path, :class:`RasterioReader`, open rasterio dataset, or any
             ``GeoData``-protocol object.
         polygon: :class:`shapely.geometry.Polygon` or
-            :class:`shapely.geometry.MultiPolygon`.
+            :class:`shapely.geometry.MultiPolygon`, or its WKT string (the
+            form ``get_config`` emits).
         crs: CRS of ``polygon``. ``None`` uses the source CRS directly.
         indexes: 1-indexed list of bands to read. ``None`` reads all.
         boundless: If ``True``, the read is padded with the source's
@@ -594,13 +597,15 @@ class ReadPolygon(SourceOperator):
         self,
         *,
         src: Source,
-        polygon: Polygon | MultiPolygon,
+        polygon: Polygon | MultiPolygon | str,
         crs: str | None = None,
         indexes: list[int] | None = None,
         boundless: bool = True,
     ) -> None:
         self.src = src
-        self.polygon = polygon
+        self.polygon = (
+            shapely.wkt.loads(polygon) if isinstance(polygon, str) else polygon
+        )
         self.crs = crs
         self.indexes = indexes
         self.boundless = boundless
@@ -662,6 +667,8 @@ class ReadReprojectLike(SourceOperator):
             )()
     """
 
+    forbid_in_yaml: ClassVar[bool] = True
+
     def __init__(
         self,
         *,
@@ -673,7 +680,7 @@ class ReadReprojectLike(SourceOperator):
         self.src = src
         self.like = like
         self.indexes = indexes
-        self.resolution = resolution
+        self.resolution = as_tuple(resolution)
 
     def _apply(self) -> GeoTensor:
         try:
@@ -746,8 +753,8 @@ class ReadToCRS(SourceOperator):
     ) -> None:
         self.src = src
         self.dst_crs = dst_crs
-        self.resolution = resolution
-        self.bounds = bounds
+        self.resolution = as_tuple(resolution)
+        self.bounds = as_tuple(bounds)
         self.indexes = indexes
 
     def _apply(self) -> GeoTensor:
@@ -810,7 +817,7 @@ class ReadHDF(SourceOperator):
         self.path = Path(path)
         self.dataset = dataset
         self.indexes = indexes
-        self.geolocation = geolocation
+        self.geolocation = as_tuple(geolocation)
         self.metadata_groups = metadata_groups
 
     def _apply(self) -> GeoTensor:
@@ -1207,6 +1214,8 @@ class LoadFromSTAC(SourceOperator):
             )()
     """
 
+    forbid_in_yaml: ClassVar[bool] = True
+
     def __init__(
         self,
         *,
@@ -1217,8 +1226,8 @@ class LoadFromSTAC(SourceOperator):
     ) -> None:
         self.item = item
         self.asset_key = asset_key
-        self.bounds = bounds
-        self.resolution = resolution
+        self.bounds = as_tuple(bounds)
+        self.resolution = as_tuple(resolution)
 
     def _apply(self) -> GeoTensor:
         try:
@@ -1296,7 +1305,7 @@ class LoadFromEE(SourceOperator):
         bands: list[str] | None = None,
     ) -> None:
         self.image_id = image_id
-        self.bounds = bounds
+        self.bounds = as_tuple(bounds)
         self.crs = crs
         self.scale = scale
         self.bands = bands

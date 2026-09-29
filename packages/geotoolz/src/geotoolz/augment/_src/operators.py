@@ -177,8 +177,6 @@ class Compose(Operator):
         >>> out = pipe(patch)  # doctest: +SKIP
     """
 
-    forbid_in_yaml: ClassVar[bool] = True
-
     def __init__(
         self,
         augmentations: list[Operator],
