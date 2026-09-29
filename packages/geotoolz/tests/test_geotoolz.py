@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import geotoolz
 
 
@@ -58,3 +60,49 @@ def test_from_state_refuses_forbid_in_yaml() -> None:
     assert type(op).forbid_in_yaml
     with pytest.raises(RuntimeError, match="forbid_in_yaml"):
         Operator.from_state(op.state)
+
+
+def test_no_operator_overrides_call() -> None:
+    """Operators implement ``_apply``; ``Operator.__call__`` owns dispatch.
+
+    Overriding ``__call__`` bypasses graph construction (``Node``) and the
+    post-apply hook, so the operator cannot be used with ``Input``.
+    """
+    from _helpers import all_operator_classes
+
+    offenders = [
+        c.__qualname__ for c in all_operator_classes() if "__call__" in vars(c)
+    ]
+    assert offenders == []
+
+
+def _multi_input_operators() -> list[Any]:
+    from geotoolz.compositing import BlendMatched, StackMatched
+    from geotoolz.geom import coregister as co
+
+    return [
+        StackMatched(),
+        BlendMatched(),
+        co.RasterToRasterLike(),
+        co.SwathToGrid(target_crs="EPSG:4326", target_res=0.1),
+        co.GridToSwath(),
+        co.RasterToPoints(),
+        co.PointsToRaster(),
+        co.RasterToPointCloud(),
+        co.PointCloudToRaster(),
+        co.VectorToRasterAgg(agg="count"),
+    ]
+
+
+def test_formerly_call_overriding_operators_support_graph_mode() -> None:
+    """Regression for #135: these ten used to override ``__call__``."""
+    import inspect
+
+    from pipekit import Input, Node
+
+    for op in _multi_input_operators():
+        params = inspect.signature(op._apply).parameters.values()
+        n_inputs = sum(1 for p in params if p.default is inspect.Parameter.empty)
+        node = op(*(Input(f"x{i}") for i in range(n_inputs)))
+        assert isinstance(node, Node), type(op).__name__
+        assert node.operator is op

@@ -51,3 +51,39 @@ def toy_geotensor(
         fill_value_default=fill_value_default,
         attrs=attrs,
     )
+
+
+def all_operator_classes() -> list[type]:
+    """Every ``pipekit.Operator`` subclass defined in ``geotoolz``.
+
+    Imports every ``geotoolz`` submodule first (skipping ones whose
+    optional extras are missing) so that lazily-registered subclasses
+    are visible, then walks ``Operator`` subclasses transitively.
+
+    Returns:
+        The classes sorted by qualified name, for stable parametrisation.
+    """
+    import importlib
+    import pkgutil
+
+    from pipekit import Operator
+
+    import geotoolz
+
+    for info in pkgutil.walk_packages(geotoolz.__path__, "geotoolz."):
+        try:
+            importlib.import_module(info.name)
+        except ImportError:
+            continue
+
+    seen: set[type] = set()
+    stack = [Operator]
+    while stack:
+        for sub in stack.pop().__subclasses__():
+            if sub not in seen:
+                seen.add(sub)
+                stack.append(sub)
+    return sorted(
+        (c for c in seen if c.__module__.startswith("geotoolz")),
+        key=lambda c: f"{c.__module__}.{c.__qualname__}",
+    )

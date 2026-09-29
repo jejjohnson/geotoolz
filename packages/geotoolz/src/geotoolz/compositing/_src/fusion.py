@@ -149,7 +149,7 @@ class StackMatched(Operator):
     def get_config(self) -> dict[str, Any]:
         return {"order": self.order}
 
-    def __call__(
+    def _apply(
         self,
         tensors: Sequence[GeoTensor | np.ndarray]
         | Mapping[str, GeoTensor | np.ndarray],
@@ -259,7 +259,7 @@ class BlendMatched(Operator):
             "nan_policy": self.nan_policy,
         }
 
-    def __call__(
+    def _apply(
         self,
         tensors: Sequence[GeoTensor | np.ndarray]
         | Mapping[str, GeoTensor | np.ndarray],
