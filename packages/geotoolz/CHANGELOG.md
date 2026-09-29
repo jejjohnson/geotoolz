@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.2.0...geotoolz-v0.2.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **compositing,geom:** implement _apply instead of overriding __call__ ([#280](https://github.com/jejjohnson/geotoolz/issues/280)) ([3f79385](https://github.com/jejjohnson/geotoolz/commit/3f79385528dfc572b21c35bf3752eb989c1a0d3a)), closes [#135](https://github.com/jejjohnson/geotoolz/issues/135)
+* **geotoolz:** align geom operators with their documented georeader delegation ([#129](https://github.com/jejjohnson/geotoolz/issues/129)) ([#295](https://github.com/jejjohnson/geotoolz/issues/295)) ([ecdc456](https://github.com/jejjohnson/geotoolz/commit/ecdc4565bcd330f999f93c3ee73e05ed958c0ca7))
+* **geotoolz:** align readers with obstore pool keys and georeader ([#132](https://github.com/jejjohnson/geotoolz/issues/132)) ([#288](https://github.com/jejjohnson/geotoolz/issues/288)) ([d994867](https://github.com/jejjohnson/geotoolz/commit/d9948670c43eaeedab89b33568819edf7b7aba15))
+* **geotoolz:** correct PhaseAlign georeferencing and parallax pixel-centre sampling ([#118](https://github.com/jejjohnson/geotoolz/issues/118), [#119](https://github.com/jejjohnson/geotoolz/issues/119)) ([#289](https://github.com/jejjohnson/geotoolz/issues/289)) ([2ac1a3e](https://github.com/jejjohnson/geotoolz/commit/2ac1a3e55d582ccf8338feeaacc70ea5f20bb274))
+* **geotoolz:** einx input-side survival, hillshade orientation, float ensure_rgba ([#123](https://github.com/jejjohnson/geotoolz/issues/123), [#124](https://github.com/jejjohnson/geotoolz/issues/124), [#125](https://github.com/jejjohnson/geotoolz/issues/125)) ([#290](https://github.com/jejjohnson/geotoolz/issues/290)) ([cc6f97b](https://github.com/jejjohnson/geotoolz/commit/cc6f97bb870f0d5c49bdbecf9672a220e5e24b3d))
+* **geotoolz:** exact flip/rot90 transforms and per-call augment streams ([#126](https://github.com/jejjohnson/geotoolz/issues/126), [#134](https://github.com/jejjohnson/geotoolz/issues/134)) ([#291](https://github.com/jejjohnson/geotoolz/issues/291)) ([2263b53](https://github.com/jejjohnson/geotoolz/commit/2263b5320c2d88a0ff0a6688f8bd1b781ba000c7))
+* **geotoolz:** io reader/writer correctness fixes ([#127](https://github.com/jejjohnson/geotoolz/issues/127), [#128](https://github.com/jejjohnson/geotoolz/issues/128), [#130](https://github.com/jejjohnson/geotoolz/issues/130), [#131](https://github.com/jejjohnson/geotoolz/issues/131)) ([#294](https://github.com/jejjohnson/geotoolz/issues/294)) ([fc59788](https://github.com/jejjohnson/geotoolz/commit/fc59788b562a17faf6138a986d6f027136c755e3))
+* **geotoolz:** promote integer inputs before band arithmetic; Canny keeps skimage thresholds ([#117](https://github.com/jejjohnson/geotoolz/issues/117), [#133](https://github.com/jejjohnson/geotoolz/issues/133)) ([#292](https://github.com/jejjohnson/geotoolz/issues/292)) ([f4a0a88](https://github.com/jejjohnson/geotoolz/commit/f4a0a88af574e10d703f96c7ec1eae2e8d5f8c9a))
+* **geotoolz:** segment label/shape fixes; real skeleton plume length; plume ops require metric CRS ([#120](https://github.com/jejjohnson/geotoolz/issues/120), [#121](https://github.com/jejjohnson/geotoolz/issues/121), [#122](https://github.com/jejjohnson/geotoolz/issues/122)) ([#293](https://github.com/jejjohnson/geotoolz/issues/293)) ([54e26e0](https://github.com/jejjohnson/geotoolz/commit/54e26e0c6c26ad0b7b35ee8a40cdca45bc49e682))
+* **geotoolz:** set forbid_in_yaml exactly where operators hold runtime state ([#284](https://github.com/jejjohnson/geotoolz/issues/284)) ([c7ce202](https://github.com/jejjohnson/geotoolz/commit/c7ce20297119ab96d74cea3d5e4338a460703e31))
+* **geotoolz:** tuple and mapping configs survive a from_state reload ([#282](https://github.com/jejjohnson/geotoolz/issues/282)) ([9a6e9fc](https://github.com/jejjohnson/geotoolz/commit/9a6e9fc07a8c0d4d6e0233925781c99b52c81795)), closes [#139](https://github.com/jejjohnson/geotoolz/issues/139)
+
 ## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.1.1...geotoolz-v0.2.0) (2026-07-13)
 
 
