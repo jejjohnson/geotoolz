@@ -838,11 +838,6 @@ GAP_FILLERS: frozenset[str] = frozenset(
     )
 )
 
-_LEARN_FILL: Known = (
-    "#148: learn outputs inherit the input fill (owned by the learn branch)",
-    AssertionError,
-)
-
 #: Strict xfails for ``test_output_fill_matches_dtype``, owned by later
 #: branches of the #112 stack.
 FILL_KNOWN_FAILURES: dict[str, Known] = {
@@ -850,20 +845,6 @@ FILL_KNOWN_FAILURES: dict[str, Known] = {
         "#149: einx reductions inherit the input fill (owned by the einx branch)",
         AssertionError,
     ),
-    **{
-        f"learn.{name}": _LEARN_FILL
-        for name in (
-            "GMM",
-            "IPCA",
-            "IsolationForest",
-            "KMeans",
-            "LocalOutlierFactor",
-            "MiniBatchKMeans",
-            "OneClassSVM",
-            "PCA",
-        )
-    },
-    "learn._src.operators.SklearnOp": _LEARN_FILL,
 }
 
 
@@ -1008,10 +989,31 @@ TIME_INVARIANT: frozenset[str] = frozenset(
     for name in ("BBoxMask", "CountryMask", "LandMask", "OceanMask")
 )
 
-_LEARN_4D: Known = (
-    "#148: learn takes axis 0 as the band axis on 4-D input (owned by the "
-    "learn branch)",
-    AssertionError,
+#: learn estimators in their default ``mode="pixel"`` treat every
+#: non-spatial axis as a feature, so a ``(T, C, H, W)`` stack is fitted on
+#: ``T * C`` features per pixel and returns one ``(k, H, W)`` map -- by
+#: design, not per frame (``mode="pixel_time"`` gives ``(T, k, H, W)``; see
+#: ``test_learn``). Only the output grid is checked.
+STACK_AS_FEATURES: frozenset[str] = frozenset(
+    {
+        *(
+            f"learn.{name}"
+            for name in (
+                "GMM",
+                "IPCA",
+                "IsolationForest",
+                "IterativeImputer",
+                "KMeans",
+                "KNNImputer",
+                "LocalOutlierFactor",
+                "MiniBatchKMeans",
+                "NMF",
+                "OneClassSVM",
+                "PCA",
+            )
+        ),
+        "learn._src.operators.SklearnOp",
+    }
 )
 _EINX_4D: Known = (
     "#149: einx presets raise einx RankError on 4-D input (owned by the einx branch)",
@@ -1025,23 +1027,6 @@ TIME_STACK_KNOWN_FAILURES: dict[str, Known] = {
         f"einx._src.operators.{name}": _EINX_4D
         for name in ("CHWtoHWC", "Einx", "HWCtoCHW", "PerBandReduce", "SpatialPool")
     },
-    **{
-        f"learn.{name}": _LEARN_4D
-        for name in (
-            "GMM",
-            "IPCA",
-            "IsolationForest",
-            "IterativeImputer",
-            "KMeans",
-            "KNNImputer",
-            "LocalOutlierFactor",
-            "MiniBatchKMeans",
-            "NMF",
-            "OneClassSVM",
-            "PCA",
-        )
-    },
-    "learn._src.operators.SklearnOp": _LEARN_4D,
 }
 
 
@@ -1192,6 +1177,9 @@ def test_time_stack_contract(cls: type) -> None:
                 np.asarray(expected, dtype=np.float64),
                 equal_nan=True,
             )
+            continue
+        if key in STACK_AS_FEATURES:
+            assert np.shape(out)[-2:] == np.shape(stack)[-2:]
             continue
         per_frame = [_build_seeded(cls)(frame) for frame in frames(stack)]
         _assert_matches_frames(key, out, per_frame)

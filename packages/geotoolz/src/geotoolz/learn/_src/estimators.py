@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from math import prod
 from pathlib import Path
@@ -13,6 +13,8 @@ import joblib
 import numpy as np
 from jaxtyping import Bool, Num, Shaped
 
+from geotoolz._src.dtype import as_float
+from geotoolz._src.valid import invalid_values
 from geotoolz._src.wrap import wrap_like
 
 
@@ -71,15 +73,35 @@ class GeoTensorEstimator:
     unflattens to the sample shape (``"pixel"`` -> ``(H, W)``); a 2-D
     output ``(n_samples, k)`` restores the sample axes to their original
     positions and places the ``k`` output-feature axis where the first
-    input feature axis was (``"pixel"`` on ``(C, H, W)`` -> ``(k, H, W)``).
+    input feature axis was (``"pixel"`` on ``(C, H, W)`` -> ``(k, H, W)``),
+    or in front of the sample axes when there is no feature axis
+    (``"pixel"`` on a single-band ``(H, W)`` -> ``(k, H, W)``), so outputs
+    stay channel-first.
+
+    Nodata: a sample row is *invalid* when any of its elements is
+    non-finite or equals the carrier's ``fill_value_default`` (see
+    :mod:`geotoolz._src.valid`; plain ndarrays have no fill, so only
+    non-finite values count). The ``nan_*`` strategies apply to every
+    invalid row, not only NaN ones, and invalid elements are handed to
+    NaN-tolerant estimators and imputers as ``NaN``. Following georeader,
+    a carrier with ``fill_value_default=0`` treats ``0`` as nodata; pass
+    ``fill_value_default=None`` (or ``NaN``) on the input when ``0`` is
+    real data.
+
+    Output fill values: rows that were not handed to the estimator are
+    written back as nodata, and every GeoTensor output declares an
+    explicit ``fill_value_default`` that matches its dtype -- ``NaN`` for
+    floating-point outputs (scores, projections, probabilities),
+    ``label_fill_value`` (default ``-1``) for integer outputs such as
+    cluster-label maps (the dtype is kept), ``False`` for boolean outputs.
 
     Carrier behavior: every method accepts a ``GeoTensor`` or a plain
     ``np.ndarray``. When the unflattened output's trailing two axes still
     match the input's spatial ``(H, W)``, the result is rewrapped to
-    match the input carrier (GeoTensor in -> GeoTensor out with metadata
-    propagated; ndarray in -> ndarray out). Otherwise a bare ndarray is
+    match the input carrier (GeoTensor in -> GeoTensor out with a fresh
+    ``attrs`` copy; ndarray in -> ndarray out). Otherwise a bare ndarray is
     returned (e.g. sample-only outputs from ``mode="custom"`` or
-    ``mode="spectral"``, or ``nan_transform="drop"`` with NaN rows).
+    ``mode="spectral"``, or ``nan_transform="drop"`` with invalid rows).
 
     Args:
         estimator: scikit-learn-compatible object to fit/apply.
@@ -91,12 +113,24 @@ class GeoTensorEstimator:
         impute_simple_strategy: Strategy passed to ``SimpleImputer``.
         impute_knn_n_neighbors: Neighbour count passed to ``KNNImputer``.
         impute_iterative_max_iter: Iteration cap passed to ``IterativeImputer``.
+        out_band_names: Names of the output bands, written to
+            ``attrs["band_names"]`` of GeoTensor outputs (one per output
+            band; a mismatch raises ``ValueError``). ``None`` keeps the
+            input's band keys when the band count is unchanged and drops
+            them otherwise.
+        label_fill_value: Fill value for integer outputs (e.g. cluster
+            labels). ``-1`` by default -- sklearn's "no cluster" label and
+            never a valid KMeans / GMM component index. Pick another value
+            if ``-1`` is a real class of the wrapped estimator (e.g.
+            ``IsolationForest.predict`` outliers).
 
     Attributes:
         estimator: The wrapped scikit-learn estimator (replaced on
             ``load_state``).
         imputer: Fitted imputer for the ``impute_*`` NaN strategies, or
-            ``None``.
+            ``None``. Refitted by :meth:`fit`; in streaming mode it is
+            fitted on the first :meth:`partial_fit` batch and reused
+            (frozen) for later batches.
         is_fitted: Whether ``fit`` / ``partial_fit`` / ``fit_predict``
             (or ``load_state``) has run.
         fit_geotensor_shape: Shape of the last cube seen at fit time.
@@ -120,6 +154,8 @@ class GeoTensorEstimator:
         impute_simple_strategy: str = "mean",
         impute_knn_n_neighbors: int = 5,
         impute_iterative_max_iter: int = 10,
+        out_band_names: Sequence[str] | None = None,
+        label_fill_value: int = -1,
     ) -> None:
         self.estimator = estimator
         self.mode = mode
@@ -130,6 +166,8 @@ class GeoTensorEstimator:
         self.impute_simple_strategy = impute_simple_strategy
         self.impute_knn_n_neighbors = impute_knn_n_neighbors
         self.impute_iterative_max_iter = impute_iterative_max_iter
+        self.out_band_names = None if out_band_names is None else list(out_band_names)
+        self.label_fill_value = int(label_fill_value)
         self.imputer: Any | None = None
         self.is_fitted = False
         self.fit_geotensor_shape: tuple[int, ...] | None = None
@@ -158,7 +196,7 @@ class GeoTensorEstimator:
             This estimator, for chaining.
         """
         flat = self._flatten(gt)
-        x_fit, _ = self._prepare_fit(flat.x)
+        x_fit, _ = self._prepare_fit(flat)
         self.estimator.fit(x_fit)
         self.is_fitted = True
         self.fit_geotensor_shape = tuple(np.asarray(gt).shape)
@@ -170,7 +208,10 @@ class GeoTensorEstimator:
 
         Same ``(n_samples, n_features)`` marshalling and ``nan_fit``
         handling as :meth:`fit`, but routed to ``estimator.partial_fit``
-        so streaming estimators accumulate state across calls.
+        so streaming estimators accumulate state across calls. With an
+        ``impute_*`` ``nan_fit`` strategy the imputer is fitted on the
+        first batch only and reused (``imputer.transform``) for every
+        later batch, so no batch re-derives the imputation statistics.
 
         Args:
             gt: Input cube — a ``GeoTensor`` or plain ``np.ndarray``.
@@ -186,7 +227,7 @@ class GeoTensorEstimator:
                 f"{type(self.estimator).__name__} does not support partial_fit"
             )
         flat = self._flatten(gt)
-        x_fit, _ = self._prepare_fit(flat.x)
+        x_fit, _ = self._prepare_fit(flat, reuse_imputer=True)
         self.estimator.partial_fit(x_fit)
         self.is_fitted = True
         self.fit_geotensor_shape = tuple(np.asarray(gt).shape)
@@ -207,7 +248,7 @@ class GeoTensorEstimator:
         out, ndarray in -> ndarray out) when the output's trailing axes
         match the input's spatial ``(H, W)`` shape; otherwise returns a
         bare :class:`numpy.ndarray` (e.g. for sample-only outputs from
-        ``mode="custom"``, or ``nan_transform="drop"`` with NaN rows).
+        ``mode="custom"``, or ``nan_transform="drop"`` with invalid rows).
         """
         return self._apply_task(gt, "transform")
 
@@ -253,7 +294,7 @@ class GeoTensorEstimator:
                 f"{type(self.estimator).__name__} does not support fit_predict"
             )
         flat = self._flatten(gt)
-        x_fit, valid = self._prepare_fit(flat.x)
+        x_fit, valid = self._prepare_fit(flat)
         y_fit = self.estimator.fit_predict(x_fit)
         self.is_fitted = True
         self.fit_geotensor_shape = tuple(np.asarray(gt).shape)
@@ -302,20 +343,32 @@ class GeoTensorEstimator:
         feature_shape = tuple(arr.shape[axis] for axis in axes.feature_axes)
         n_samples = prod(sample_shape)
         n_features = prod(feature_shape) if feature_shape else 1
+        x = moved.reshape(n_samples, n_features)
+        invalid = np.moveaxis(
+            invalid_values(gt), axes.sample_axes + axes.feature_axes, range(arr.ndim)
+        ).reshape(n_samples, n_features)
+        if invalid.any():
+            # Fill values become NaN so imputers / NaN-tolerant estimators
+            # (``propagate_raw``) recognise them as missing.
+            x = as_float(x).copy()
+            x[invalid] = np.nan
         return _FlatGeoTensor(
-            x=moved.reshape(n_samples, n_features),
+            x=x,
+            valid=~invalid.any(axis=1),
             axes=axes,
             sample_shape=sample_shape,
             feature_shape=feature_shape,
         )
 
     def _prepare_fit(
-        self, x: Num[np.ndarray, "n c"]
+        self, flat: _FlatGeoTensor, *, reuse_imputer: bool = False
     ) -> tuple[Num[np.ndarray, "m c"], Bool[np.ndarray, " n"]]:
         strategy = self.nan_fit
-        valid = _valid_rows(x)
+        x, valid = flat.x, flat.valid
         if strategy == "error" and not valid.all():
-            raise ValueError("GeoTensorEstimator.fit received NaN values")
+            raise ValueError(
+                "GeoTensorEstimator.fit received NaN / non-finite / fill values"
+            )
         if strategy == "error":
             return x, valid
         if strategy == "drop":
@@ -324,6 +377,8 @@ class GeoTensorEstimator:
             # At fit time both pass the array through unchanged; the
             # apply-time behavior diverges (see ``_prepare_transform``).
             return x, np.ones(x.shape[0], dtype=bool)
+        if reuse_imputer and self.imputer is not None:
+            return self.imputer.transform(x), np.ones(x.shape[0], dtype=bool)
         self.imputer = _make_imputer(
             strategy,
             simple_strategy=self.impute_simple_strategy,
@@ -333,31 +388,36 @@ class GeoTensorEstimator:
         return self.imputer.fit_transform(x), np.ones(x.shape[0], dtype=bool)
 
     def _prepare_transform(
-        self, x: Num[np.ndarray, "n c"]
+        self, flat: _FlatGeoTensor
     ) -> tuple[Num[np.ndarray, "m c"], Bool[np.ndarray, " n"]]:
         """Apply ``nan_transform`` strategy to apply-time input.
 
-        ``"drop"`` strips NaN rows and the unflatten step truncates the
+        Invalid rows are those with a NaN, non-finite or fill element.
+        ``"drop"`` strips invalid rows and the unflatten step truncates the
         sample axis to the valid rows only (output has fewer samples).
-        ``"propagate"`` also strips NaN rows from the estimator input but
-        the unflatten step restores NaN at those positions so the spatial
-        layout is preserved -- callers using raster carriers want this.
-        ``"propagate_raw"`` passes rows through unchanged so NaN-tolerant
-        estimators (e.g. imputers) can see the missing values.
+        ``"propagate"`` also strips invalid rows from the estimator input
+        but the unflatten step writes the output fill (``NaN`` or
+        ``label_fill_value``) at those positions so the spatial layout is
+        preserved -- callers using raster carriers want this.
+        ``"propagate_raw"`` passes rows through unchanged (fill elements
+        as ``NaN``) so NaN-tolerant estimators (e.g. imputers) can see the
+        missing values.
         Imputer strategies require a previously fitted imputer to avoid
         leaking inference-batch statistics into preprocessing.
         """
         strategy = self.nan_transform
-        valid = _valid_rows(x)
+        x, valid = flat.x, flat.valid
         if strategy == "error" and not valid.all():
-            raise ValueError("GeoTensorEstimator.transform received NaN values")
+            raise ValueError(
+                "GeoTensorEstimator.transform received NaN / non-finite / fill values"
+            )
         if strategy == "error":
             return x, valid
         if strategy == "drop":
             return x[valid], valid
         if strategy == "propagate":
-            # Strip NaN rows from the estimator input; unflatten will refill
-            # those positions with NaN so the spatial layout is preserved.
+            # Strip invalid rows from the estimator input; unflatten will
+            # refill those positions with the output fill value.
             return x[valid], valid
         if strategy == "propagate_raw":
             # Pass rows through unchanged so NaN-tolerant estimators receive
@@ -379,7 +439,7 @@ class GeoTensorEstimator:
         if not hasattr(self.estimator, task):
             raise TypeError(f"{type(self.estimator).__name__} does not support {task}")
         flat = self._flatten(gt)
-        x_apply, valid = self._prepare_transform(flat.x)
+        x_apply, valid = self._prepare_transform(flat)
         y_apply = getattr(self.estimator, task)(x_apply)
         if self.nan_transform == "drop" and not valid.all():
             # ``drop`` returns only the rows the estimator actually saw,
@@ -397,11 +457,21 @@ class GeoTensorEstimator:
         valid: Bool[np.ndarray, " n"],
     ) -> GeoTensor | np.ndarray:
         y = np.asarray(y_apply)
+        fill_value = _output_fill_value(y.dtype, self.label_fill_value)
         if valid.all():
             dense = y
         else:
             out_shape = (valid.shape[0], *y.shape[1:])
-            dense = np.full(out_shape, np.nan, dtype=np.result_type(y.dtype, float))
+            if fill_value is None:
+                dtype = np.result_type(y.dtype, float)
+            elif y.dtype.kind in "iu":
+                # Widen (e.g. uint8 labels with a -1 fill) only when needed.
+                dtype = np.promote_types(y.dtype, np.min_scalar_type(fill_value))
+            else:
+                dtype = y.dtype
+            dense = np.full(
+                out_shape, np.nan if fill_value is None else fill_value, dtype=dtype
+            )
             dense[valid] = y
         out = _restore_shape(dense, flat)
         # When the trailing axes do not match the input spatial (H, W),
@@ -411,7 +481,12 @@ class GeoTensorEstimator:
         # / wrappers are responsible for re-attaching geo metadata.
         if out.ndim < 2 or out.shape[-2:] != np.asarray(gt).shape[-2:]:
             return out
-        return wrap_like(gt, out)
+        return wrap_like(
+            gt,
+            out,
+            fill_value_default=np.nan if fill_value is None else fill_value,
+            band_names=self.out_band_names,
+        )
 
 
 class _ResolvedAxes:
@@ -432,11 +507,13 @@ class _FlatGeoTensor:
         self,
         *,
         x: Num[np.ndarray, "n c"],
+        valid: Bool[np.ndarray, " n"],
         axes: _ResolvedAxes,
         sample_shape: tuple[int, ...],
         feature_shape: tuple[int, ...],
     ) -> None:
         self.x = x
+        self.valid = valid
         self.axes = axes
         self.sample_shape = sample_shape
         self.feature_shape = feature_shape
@@ -456,6 +533,16 @@ def _resolve_axes(
         )
 
     axis_order = _canonical_axis_order(ndim)
+    if mode in {"pixel_time", "temporal"} and "T" not in axis_order:
+        raise ValueError(
+            f"mode={mode!r} needs a time axis, i.e. a 4-D (T, C, H, W) "
+            f"input; got a {ndim}-D input"
+        )
+    if mode == "spectral" and "C" not in axis_order:
+        raise ValueError(
+            "mode='spectral' needs a band axis, i.e. a 3-D (C, H, W) or 4-D "
+            f"(T, C, H, W) input; got a {ndim}-D input"
+        )
     if mode == "custom":
         if sample_axes is None or feature_axes is None:
             raise ValueError(
@@ -491,7 +578,10 @@ def _resolve_axes(
 
 def _canonical_axis_order(ndim: int) -> tuple[str, ...]:
     if ndim < 2:
-        raise ValueError("GeoTensorEstimator expects at least 2 dimensions")
+        raise ValueError(
+            "GeoTensorEstimator expects at least 2 dimensions ((H, W), "
+            f"(C, H, W) or (T, C, H, W)); got a {ndim}-D input"
+        )
     if ndim == 2:
         return ("H", "W")
     labels = ("T", "C", "H", "W")
@@ -542,12 +632,24 @@ def _restore_shape(
             target_tokens.append("__out__")
             out_axis_inserted = True
     if not out_axis_inserted:
-        target_tokens.append("__out__")
+        # No feature axis (e.g. ``"pixel"`` on a single-band ``(H, W)``
+        # raster): put the output features in front of the sample axes so
+        # the result stays channel-first ``(k, H, W)``.
+        target_tokens.insert(0, "__out__")
     return restored.transpose([source_tokens.index(token) for token in target_tokens])
 
 
-def _valid_rows(x: Num[np.ndarray, "n c"]) -> Bool[np.ndarray, " n"]:
-    return ~np.isnan(np.asarray(x, dtype=float)).any(axis=1)
+def _output_fill_value(dtype: np.dtype, label_fill_value: int) -> Any:
+    """Fill value for an estimator output of ``dtype``.
+
+    ``label_fill_value`` for integer outputs, ``False`` for booleans, and
+    ``None`` -- meaning ``NaN`` in a float result -- for everything else.
+    """
+    if dtype.kind in "iu":
+        return label_fill_value
+    if dtype.kind == "b":
+        return False
+    return None
 
 
 def _validate_nan_strategy(strategy: NanStrategy) -> None:
