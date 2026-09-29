@@ -192,3 +192,27 @@ def test_remote_scheme_routes_through_client(tmp_path: Path):
     r.set_obstore_client(client)
     got = r._read_bytes("s3://bucket/blob.bin", 16, 10)
     assert got == payload[16:26]
+
+
+def test_azure_key_matches_pool(tmp_path: Path):
+    """``az://account/container/blob`` strips the container like the pool.
+
+    The pooled ``AzureStore.from_url`` already binds the container, so the
+    attached-client path must request the blob key only — the same key
+    :func:`geotoolz.readers._obstore._object_key` derives.
+    """
+    obstore_store = pytest.importorskip("obstore.store")
+    from geotoolz.readers._obstore import _object_key
+
+    payload = b"the quick brown fox jumps over the lazy dog"
+    (tmp_path / "path").mkdir()
+    (tmp_path / "path" / "blob.bin").write_bytes(payload)
+
+    uri = "az://account/container/path/blob.bin"
+    assert _object_key(uri) == "path/blob.bin"
+
+    # LocalStore rooted at the "container": only the container-stripped
+    # key resolves, exactly as with a real container-bound AzureStore.
+    r = _MinimalReader()
+    r.set_obstore_client(obstore_store.LocalStore(prefix=str(tmp_path)))
+    assert r._read_bytes(uri, 4, 5) == payload[4:9]

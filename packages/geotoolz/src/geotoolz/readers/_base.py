@@ -11,13 +11,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from affine import Affine
+from georeader import read
 from georeader.abstract_reader import GeoData
 from georeader.geotensor import GeoTensor
-from rasterio.windows import (
-    Window,
-    from_bounds as window_from_bounds,
-    transform as window_transform,
-)
+from rasterio.windows import Window, transform as window_transform
+
+from geotoolz.readers._obstore import _object_key
 
 
 if TYPE_CHECKING:
@@ -114,12 +113,22 @@ class SensorReader(GeoData, ABC):
         return self._dtype
 
     @property
-    def dims(self) -> list[str]:
-        """Dimension names compatible with georeader ``GeoData``.
+    def dims(self) -> tuple[str, ...]:
+        """Dimension names, mirroring ``georeader.GeoTensor.dims``.
 
-        The framework expects 2D single-band or 3D band-first image arrays.
+        ``("time", "band", "y", "x")[-ndim:]`` — i.e. ``("y", "x")`` for 2-D,
+        ``("band", "y", "x")`` for 3-D and ``("time", "band", "y", "x")``
+        for 4-D readers.
+
+        Raises:
+            ValueError: If the reader shape is not 2-D, 3-D or 4-D.
         """
-        return ["band", "y", "x"] if len(self.shape) == 3 else ["y", "x"]
+        ndim = len(self.shape)
+        if ndim not in (2, 3, 4):
+            raise ValueError(
+                f"SensorReader expects a 2d-4d array shape; got {self.shape}."
+            )
+        return ("time", "band", "y", "x")[-ndim:]
 
     @property
     def bands(self) -> tuple[str, ...]:
@@ -160,10 +169,17 @@ class SensorReader(GeoData, ABC):
         self,
         bounds: tuple[float, float, float, float],
         boundless: bool = True,
+        crs_bounds: Any = None,
     ) -> GeoTensor:
-        """Read map-coordinate bounds as a ``GeoTensor``."""
-        window = window_from_bounds(*bounds, transform=self.transform)
-        return self.read_from_window(window.round_offsets().round_lengths(), boundless)
+        """Read map-coordinate bounds as a ``GeoTensor``.
+
+        Thin wrapper over :func:`georeader.read.read_from_bounds` so the
+        window maths (outward rounding, CRS transform of ``bounds``) match
+        georeader exactly.
+        """
+        return read.read_from_bounds(
+            self, bounds, crs_bounds=crs_bounds, boundless=boundless
+        )
 
     def read_from_center_coords(
         self,
@@ -172,18 +188,20 @@ class SensorReader(GeoData, ABC):
         width: int,
         height: int,
         boundless: bool = True,
+        crs_center_coords: Any = None,
     ) -> GeoTensor:
-        """Read a window centered on map coordinates."""
-        col_px_float, row_px_float = ~self.transform * (x, y)
-        row = int(np.floor(row_px_float))
-        col = int(np.floor(col_px_float))
-        window = Window(
-            col_off=col - width // 2,
-            row_off=row - height // 2,
-            width=width,
-            height=height,
+        """Read a ``height x width`` window centered on map coordinates.
+
+        Thin wrapper over :func:`georeader.read.read_from_center_coords`
+        so the window placement matches georeader exactly.
+        """
+        return read.read_from_center_coords(
+            self,
+            (x, y),
+            (height, width),
+            crs_center_coords=crs_center_coords,
+            boundless=boundless,
         )
-        return self.read_from_window(window, boundless)
 
     def _clip_window(self, window: Window) -> Window:
         base = Window(col_off=0, row_off=0, width=self.width, height=self.height)
@@ -303,10 +321,9 @@ async def _get_range_async(
     client: ObjectStore, uri: str, start: int, length: int
 ) -> bytes:
     """Fetch ``length`` bytes from ``uri`` via an attached obstore client."""
-    from urllib.parse import urlsplit
-
-    path = urlsplit(uri).path.lstrip("/")
-    blob = await client.get_range_async(path, start=start, length=length)
+    # Same key derivation as the pooled store: for Azure the container is
+    # already bound into ``AzureStore.from_url`` and must be stripped.
+    blob = await client.get_range_async(_object_key(uri), start=start, length=length)
     return bytes(blob)
 
 
