@@ -69,8 +69,9 @@ class Einx(Operator):
 
     The pattern is analyzed once at construction with
     `geotoolz.einx._src.array.spatial_survives`: when the trailing two
-    output axes are the bare spatial axes (default ``("y", "x")``) and
-    no spatial axis is composed anywhere, a ``GeoTensor`` input comes
+    axes of both the output and the carrier's (first) input expression
+    are the bare spatial axes (default ``("y", "x")``) and no spatial
+    axis is composed anywhere, a ``GeoTensor`` input comes
     back as a ``GeoTensor`` (transform / CRS / fill propagated via
     ``wrap_like``); otherwise the result is a plain ``np.ndarray``.
     Plain-array input always returns a plain array.
@@ -173,11 +174,9 @@ class HWCtoCHW(Einx):
     """
 
     def __init__(self) -> None:
+        # `spatial_survives` rejects this pattern (the carrier's input
+        # doesn't end in `y x`), so the output is always a plain array.
         super().__init__(op="id", pattern="y x c -> c y x")
-        # A channels-last input can't be a well-formed GeoTensor (its
-        # trailing dims aren't the spatial grid), so never attempt a
-        # metadata rewrap even though the output pattern ends in `y x`.
-        self._survives = False
 
     def get_config(self) -> dict[str, Any]:
         return {}

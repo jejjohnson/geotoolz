@@ -45,6 +45,10 @@ from geotoolz.einx import (
         ("b [y x] -> b [y x]", False),  # bracketed vmap axes
         ("c y x", False),  # no explicit output
         ("t c y x -> t c y x", True),
+        ("c x y -> c y x", False),  # input-side transpose (#123)
+        ("y x c -> c y x", False),  # channels-last input (#123)
+        ("c a b -> c y x", False),  # renamed spatial axes (#123)
+        ("sig band, band y x -> sig y x", False),  # carrier is the first input
     ],
 )
 def test_spatial_survives(pattern: str, expected: bool) -> None:
@@ -108,6 +112,21 @@ def test_einx_multi_input_dot_keeps_georeferencing() -> None:
     assert out.transform == gt.transform
     expected = np.einsum("byx,sb->syx", np.asarray(gt), signatures)
     np.testing.assert_allclose(np.asarray(out), expected)
+
+
+def test_input_side_transpose_does_not_survive() -> None:
+    # Square tile: the transposed output has the carrier's shape, so the
+    # shape check in `array_as_geotensor` can't catch a stale transform.
+    gt = _gt(np.arange(48, dtype=float).reshape(3, 4, 4))
+    out = Einx(op="id", pattern="c x y -> c y x")(gt)
+    assert type(out) is np.ndarray
+    np.testing.assert_allclose(out, np.swapaxes(np.asarray(gt), 1, 2))
+
+
+def test_hwc_to_chw_survival_comes_from_pattern_analysis() -> None:
+    # No hand-set override needed: the pattern itself is non-surviving.
+    assert not spatial_survives("y x c -> c y x")
+    assert HWCtoCHW()._survives is False
 
 
 def test_einx_rejects_bad_ops() -> None:

@@ -214,7 +214,12 @@ def hillshade(
     Slope and aspect are derived from the DEM gradient (in map units,
     via ``x_resolution`` / ``y_resolution``) and combined with a sun
     position to give the classic terrain-shading effect. Illumination
-    is clipped to ``[0, 1]`` and scaled to byte range.
+    is clipped to ``[0, 1]`` and scaled to byte range. The DEM is
+    assumed north-up (row 0 is the northern edge, as in a standard
+    geotransform), so for a planar DEM the result matches
+    ``matplotlib.colors.LightSource(azimuth_deg, altitude_deg).hillshade``
+    (up to byte quantization; matplotlib additionally contrast-stretches
+    non-constant outputs).
 
     Args:
         dem: Elevation map, ``(H, W)`` or ``(1, H, W)``, in the same
@@ -242,7 +247,11 @@ def hillshade(
 
     dy, dx = np.gradient(band * z_factor, abs(y_resolution), abs(x_resolution))
     slope = np.pi / 2.0 - np.arctan(np.hypot(dx, dy))
-    aspect = np.arctan2(-dx, dy)
+    # Aspect = math angle (CCW from east) of the surface normal's
+    # horizontal part, (-dz/deast, -dz/dnorth). `dy` is the gradient
+    # along rows, i.e. towards the *south* (row 0 is north), so
+    # dz/dnorth = -dy and the normal points along (-dx, dy).
+    aspect = np.arctan2(dy, -dx)
     # Convert geographic azimuth (clockwise from north) to the mathematical
     # angle expected by the aspect term (counter-clockwise from east).
     azimuth = np.deg2rad(360.0 - azimuth_deg + 90.0)
@@ -324,9 +333,16 @@ def ensure_rgba(
 ) -> UInt8[np.ndarray, "4 h w"]:
     """Return ``arr`` as a four-band uint8 RGBA image.
 
-    Float inputs with all finite values in ``[0, 1]`` are scaled to byte
-    range; other numeric inputs are treated as already display-scaled and
-    clipped into ``[0, 255]``.
+    Accepts ``(H, W)`` grayscale (replicated to RGB), ``(3, H, W)`` RGB,
+    or ``(4, H, W)`` RGBA. Float (or boolean) inputs whose finite values
+    are all ``<= 1`` are treated as ``[0, 1]`` fractions and scaled to
+    byte range; other numeric inputs are treated as already
+    display-scaled and clipped into ``[0, 255]``. The decision is made on
+    the input values alone; RGB / grayscale inputs then get an opaque
+    (255) alpha plane. NaNs map to 0.
+
+    Raises:
+        ValueError: If ``arr`` is not 2-D or a 3-/4-band cube.
     """
     values = np.asarray(arr)
     if values.ndim == 2:
@@ -335,20 +351,31 @@ def ensure_rgba(
         raise ValueError(
             f"display arrays must be 2D, RGB, or RGBA; got shape {values.shape}"
         )
-    if values.shape[0] == 4:
-        rgba = values
-    elif values.shape[0] == 3:
-        alpha = np.full((1, *values.shape[-2:]), 255, dtype=values.dtype)
-        rgba = np.concatenate([values, alpha], axis=0)
-    else:
+    if values.shape[0] not in (3, 4):
         raise ValueError(
             f"display arrays must have 3 or 4 bands; got {values.shape[0]}"
         )
-    if rgba.dtype == np.uint8:
-        return rgba.copy()
-    max_value = np.nanmax(rgba) if np.isfinite(rgba).any() else 0.0
-    scaled = rgba if max_value > 1.0 else rgba * 255.0
-    return np.nan_to_num(np.clip(scaled, 0.0, 255.0), nan=0.0).astype(np.uint8)
+    # Decide byte-vs-fraction scaling from the *input* values, before any
+    # opaque alpha plane is added (a 255 alpha would otherwise make every
+    # float [0, 1] RGB / grayscale input look byte-scaled -> black).
+    if values.dtype == np.uint8:
+        rgb_bytes = values
+    else:
+        is_fractional = values.dtype == np.bool_ or np.issubdtype(
+            values.dtype, np.floating
+        )
+        finite = np.isfinite(values)
+        max_value = float(np.max(values[finite])) if finite.any() else 0.0
+        scaled = (
+            values.astype(np.float64) * 255.0
+            if is_fractional and max_value <= 1.0
+            else values.astype(np.float64)
+        )
+        rgb_bytes = np.nan_to_num(np.clip(scaled, 0.0, 255.0), nan=0.0).astype(np.uint8)
+    if rgb_bytes.shape[0] == 4:
+        return rgb_bytes.copy()
+    alpha = np.full((1, *rgb_bytes.shape[-2:]), 255, dtype=np.uint8)
+    return np.concatenate([rgb_bytes, alpha], axis=0)
 
 
 def _float_rgba_to_uint8(
