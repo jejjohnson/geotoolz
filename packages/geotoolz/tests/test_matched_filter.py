@@ -123,20 +123,22 @@ def test_shrink_covariance_ledoit_wolf_properties() -> None:
         for j in range(n_features):
             if i != j:
                 cov[i, j] = off * np.sqrt(cov[i, i] * cov[j, j])
+    # Gaussian fourth moment E‖x − μ‖⁴ = tr(Σ)² + 2 tr(Σ²).
+    m4 = float(np.trace(cov) ** 2 + 2 * np.sum(cov * cov))
 
     # Scaled-identity input is already at the target, so shrinkage = 0.
     scaled_identity = 2.0 * np.eye(n_features)
     shrunk_id = gz.matched_filter.shrink_covariance(
-        scaled_identity, method="ledoit_wolf", n_samples=100
+        scaled_identity, method="ledoit_wolf", n_samples=100, fourth_moment=m4
     )
     np.testing.assert_allclose(shrunk_id, scaled_identity)
 
     # Larger n_samples => less shrinkage => closer to empirical.
     shrunk_small = gz.matched_filter.shrink_covariance(
-        cov, method="ledoit_wolf", n_samples=10
+        cov, method="ledoit_wolf", n_samples=10, fourth_moment=m4
     )
     shrunk_large = gz.matched_filter.shrink_covariance(
-        cov, method="ledoit_wolf", n_samples=10_000
+        cov, method="ledoit_wolf", n_samples=10_000, fourth_moment=m4
     )
     err_small = float(np.linalg.norm(shrunk_small - cov))
     err_large = float(np.linalg.norm(shrunk_large - cov))
@@ -151,6 +153,196 @@ def test_shrink_covariance_ledoit_wolf_properties() -> None:
         upper = np.maximum(cov, target)
         assert np.all(shrunk >= lower - 1e-10)
         assert np.all(shrunk <= upper + 1e-10)
+
+    # LW needs the fourth moment; S and n alone do not determine it.
+    with pytest.raises(ValueError, match="fourth_moment"):
+        gz.matched_filter.shrink_covariance(cov, method="ledoit_wolf", n_samples=10)
+
+
+def _correlated_samples(n: int, p: int, seed: int) -> np.ndarray:
+    """``(n, p)`` correlated Gaussian samples with a non-zero mean."""
+    rng = np.random.default_rng(seed)
+    mix = rng.normal(size=(p, p))
+    return rng.normal(size=(n, p)) @ mix.T + np.linspace(1.0, 5.0, p)
+
+
+_SHRINK_SIZES = [(10, 6), (30, 6), (500, 6), (5, 20), (12, 40), (200, 3)]
+
+
+@pytest.mark.parametrize(("n", "p"), _SHRINK_SIZES)
+def test_ledoit_wolf_matches_sklearn(n: int, p: int) -> None:
+    """LW equals ``sklearn.covariance.ledoit_wolf`` on the same centred samples.
+
+    sklearn normalises the scatter by ``1/n``; the package's covariance is
+    ``1/(n − 1)``, so the shrunk matrices differ by exactly ``n/(n − 1)``
+    and the intensity is identical (#159). Covers ``n < p``.
+    """
+    from sklearn.covariance import ledoit_wolf
+
+    x = _correlated_samples(n, p, seed=n + p)
+    cube = x.T.reshape(p, n, 1)
+    ours = gz.matched_filter.estimate_cov_shrunk(cube, method="ledoit_wolf").matrix
+    ref, _ = ledoit_wolf(x)
+    np.testing.assert_allclose(ours * (n - 1) / n, ref, rtol=1e-10, atol=1e-12)
+
+    # A caller-supplied (robust) mean is sklearn's assume_centered=True on x − m.
+    median = np.median(x, axis=0)
+    ours_med = gz.matched_filter.estimate_cov_shrunk(
+        cube, mean=median, method="ledoit_wolf"
+    ).matrix
+    ref_med, _ = ledoit_wolf(x - median, assume_centered=True)
+    np.testing.assert_allclose(ours_med * (n - 1) / n, ref_med, rtol=1e-10, atol=1e-12)
+
+
+@pytest.mark.parametrize(("n", "p"), _SHRINK_SIZES)
+def test_oas_matches_sklearn(n: int, p: int) -> None:
+    """OAS equals ``sklearn.covariance.oas`` up to the ``n/(n − 1)`` scale (#159)."""
+    from sklearn.covariance import oas
+
+    x = _correlated_samples(n, p, seed=2 * n + p)
+    ours = gz.matched_filter.estimate_cov_shrunk(
+        x.T.reshape(p, n, 1), method="oas"
+    ).matrix
+    ref, _ = oas(x)
+    np.testing.assert_allclose(ours * (n - 1) / n, ref, rtol=1e-10, atol=1e-12)
+    # shrink_covariance only needs S and n for OAS.
+    d = x - x.mean(axis=0)
+    direct = gz.matched_filter.shrink_covariance(
+        d.T @ d / (n - 1), method="oas", n_samples=n
+    )
+    np.testing.assert_allclose(direct, ours, rtol=1e-12)
+
+
+def test_streaming_ledoit_wolf_matches_sklearn() -> None:
+    """Streamed batches give the same LW covariance as sklearn on the whole set.
+
+    The Welford accumulator merges the centred fourth moment exactly, so the
+    streaming shrinkage is not an approximation (#159).
+    """
+    from sklearn.covariance import ledoit_wolf
+
+    n, p = 60, 5
+    x = _correlated_samples(n, p, seed=7)
+    batches = [x[:7], x[7:30], x[30:31], x[31:]]
+    cubes = [b.T.reshape(p, -1, 1) for b in batches]
+    bg = gz.matched_filter.StreamingBackground()(cubes)
+    ref, _ = ledoit_wolf(x)
+    np.testing.assert_allclose(
+        bg.cov_op.matrix, ref * n / (n - 1) + 1e-8 * np.eye(p), rtol=1e-10
+    )
+
+    acc = gz.matched_filter.WelfordAccumulator.empty(p)
+    for b in batches:
+        acc.update(b)
+    d = x - x.mean(axis=0)
+    sq = np.sum(d * d, axis=1)
+    np.testing.assert_allclose(acc.m4, np.sum(sq * sq), rtol=1e-12)
+    np.testing.assert_allclose(acc.m3, sq @ d, rtol=1e-10, atol=1e-9)
+
+
+def test_gmm_empty_component_restart_survives_m_step(monkeypatch) -> None:
+    """A component EM empties is restarted after the M-step and keeps pixels.
+
+    Crafted init: two tight clusters (at 5 and 10) and a third k-means
+    group made of one pixel from each, so its mean sits halfway with a huge
+    variance and it loses all responsibility in the first E-step. The old
+    restart was overwritten by the M-step (mean ≈ 0, no pixels), making
+    ``gmm_cluster_background`` raise "GMM produced an empty cluster" (#159).
+    """
+    from geotoolz.matched_filter._src import array as mf_array
+
+    rng = np.random.default_rng(0)
+    n_bands, n_half = 8, 20
+    x = np.concatenate(
+        [
+            5.0 + 1e-3 * rng.normal(size=(n_half, n_bands)),
+            10.0 + 1e-3 * rng.normal(size=(n_half, n_bands)),
+        ]
+    )
+    init = np.repeat([0, 1], n_half)
+    init[[0, n_half]] = 2  # component 2 = one pixel from each cluster
+
+    def crafted_kmeans(values, *, n_clusters, random_state, max_iter=50):
+        assert n_clusters == 3
+        return init.copy()
+
+    monkeypatch.setattr(mf_array, "_kmeans_labels", crafted_kmeans)
+    cube = x.T.reshape(n_bands, 2 * n_half, 1)
+    bg = gz.matched_filter._src.array.gmm_cluster_background(cube, n_clusters=3)
+
+    labels = bg.labels.reshape(-1)
+    assert bg.means.shape == (3, n_bands)
+    counts = np.bincount(labels, minlength=3)
+    assert (counts > 0).all(), counts
+    # The restarted component sits on real data, not on the ≈0 M-step mean.
+    for k in range(3):
+        np.testing.assert_allclose(bg.means[k], x[labels == k].mean(axis=0))
+        assert np.all(bg.means[k] > 4.0)
+
+
+def _brute_force_adaptive_mf(
+    cube: np.ndarray, target: np.ndarray, window: int, ridge: float = 0.0
+) -> np.ndarray:
+    """Per-pixel loop: reflect-padded window mean/var (ddof=1), diagonal MF."""
+    half = window // 2
+    # scipy.ndimage mode="reflect" is numpy's half-sample "symmetric".
+    padded = np.pad(cube, ((0, 0), (half, half), (half, half)), mode="symmetric")
+    _, h, w = cube.shape
+    out = np.empty((h, w))
+    for i in range(h):
+        for j in range(w):
+            win = padded[:, i : i + window, j : j + window].reshape(cube.shape[0], -1)
+            mu = win.mean(axis=1)
+            var = win.var(axis=1, ddof=1) + ridge
+            numer = sum(target[c] * (cube[c, i, j] - mu[c]) / var[c] for c in range(3))
+            denom = sum(target[c] ** 2 / var[c] for c in range(3))
+            out[i, j] = numer / denom
+    return out
+
+
+def test_apply_adaptive_mf_matches_brute_force() -> None:
+    """AdaptiveWindowBackground → ApplyAdaptiveMF equals a per-pixel loop (#159).
+
+    Score α = tᵀΛ⁻¹(x − μ) / tᵀΛ⁻¹t with the pixel's own window mean μ and
+    Λ = diag(σ² + ridge).
+    """
+    rng = np.random.default_rng(11)
+    cube = rng.normal(loc=[[[1.0]], [[2.0]], [[3.0]]], size=(3, 9, 7))
+    cube[:, 4, 3] += np.array([0.5, 1.0, -0.5])  # an implanted target
+    target = np.array([0.5, 1.0, -0.5])
+    gt = toy_geotensor(cube)
+    mf = gz.matched_filter
+
+    bg = mf.AdaptiveWindowBackground(window_size=5)(gt)
+    for ridge in (0.0, 0.3):
+        out = mf.ApplyAdaptiveMF(target=target, ridge=ridge)(gt, bg)
+        assert isinstance(out, GeoTensor)
+        assert out.shape == (9, 7)
+        assert out.transform == gt.transform
+        np.testing.assert_allclose(
+            np.asarray(out),
+            _brute_force_adaptive_mf(cube, target, window=5, ridge=ridge),
+            rtol=1e-9,
+            atol=1e-12,
+        )
+    # Array primitive and plain-ndarray carrier agree.
+    arr_bg = mf.AdaptiveWindowBackground(window_size=5)(cube)
+    np.testing.assert_allclose(
+        mf.apply_adaptive_mf(cube, background=arr_bg, target=target),
+        np.asarray(mf.ApplyAdaptiveMF(target=target)(gt, bg)),
+    )
+    with pytest.raises(ValueError, match="background mean shape"):
+        mf.apply_adaptive_mf(cube[:, :5], background=arr_bg, target=target)
+    with pytest.raises(ValueError, match="ridge"):
+        mf.apply_adaptive_mf(cube, background=arr_bg, target=target, ridge=-1.0)
+    # A zero-variance band (flat window) is unscoreable without a ridge.
+    flat = cube.copy()
+    flat[0] = 1.0
+    flat_bg = mf.AdaptiveWindowBackground(window_size=3)(flat)
+    assert np.isnan(mf.apply_adaptive_mf(flat, background=flat_bg, target=target)).all()
+    assert np.isfinite(
+        mf.apply_adaptive_mf(flat, background=flat_bg, target=target, ridge=1e-3)
+    ).all()
 
 
 def test_streaming_background_uses_streaming_mean_and_shrunk_covariance() -> None:
@@ -338,6 +530,7 @@ def test_operator_get_configs_are_json_safe_and_round_trippable() -> None:
         (mf.ValidateMFInputs, {"cov_op": cov, "target": target}),
         (mf.StreamingBackground, {}),
         (mf.ApplyClusterMF, {"target": target}),
+        (mf.ApplyAdaptiveMF, {"target": target, "ridge": 0.1}),
         (mf.EstimateMean, {}),
         (mf.EstimateCovEmpirical, {}),
         (mf.EstimateCovShrunk, {}),
@@ -530,6 +723,7 @@ def test_fill_pixels_are_excluded(case: str, fill: float) -> None:
         window = np.asarray(gt)[:, 0:3, 0:3].reshape(3, -1)[:, 1:]
         np.testing.assert_allclose(bg.mean[:, 1, 1], window.mean(axis=1))
         np.testing.assert_allclose(bg.variance[:, 1, 1], window.var(axis=1, ddof=1))
+        assert_fill(mf.ApplyAdaptiveMF(target=target)(gt, bg))
     elif case == "streaming":
         result = mf.StreamingBackground(cov_kind="empirical")([gt, gt])
         expected = mf.StreamingBackground(cov_kind="empirical")([clean, clean])

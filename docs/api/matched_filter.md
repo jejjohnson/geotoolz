@@ -8,17 +8,22 @@ algebra is composable.
 - **Background statistics:**
   - `EstimateMean`, `EstimateCovEmpirical`, `EstimateCovLowRank`, `EstimateCovShrunk`
   - `StreamingBackground` — Welford accumulator + shrunk covariance across many cubes
-  - `AdaptiveWindowBackground` — sliding-window local background
+  - `AdaptiveWindowBackground` / `ApplyAdaptiveMF` — sliding-window local mean + diagonal variance,
+    scored per pixel with `α = tᵀΛ⁻¹(x − μ) / (tᵀΛ⁻¹t)`, `Λ = diag(σ² + ridge)`
   - `GMMClusterBackground` / `ApplyClusterMF` — cluster-conditional background
 - **Target construction:** `LinearTargetFromObs`, `NonlinearTargetFromObs`
 - **Composed:** `ColumnEnhancement` — mean → cov → target → MF in one operator
 - **Post-processing:** `DetectionThreshold`, `ValidateMFInputs`
-- **Array primitives** (no GeoTensor): `apply_image`, `apply_pixel`, `matched_filter_snr`,
+- **Array primitives** (no GeoTensor): `apply_image`, `apply_pixel`, `apply_adaptive_mf`, `matched_filter_snr`,
   `estimate_cov_empirical`, `estimate_cov_shrunk`, `estimate_cov_lowrank`, `shrink_covariance`,
   `detection_threshold`
 
-The covariance shrinkage uses an analytical Ledoit-Wolf approximation that only needs the empirical
-covariance and the sample count (`shrink_covariance(method="ledoit_wolf", ...)`); see the docstring
-for the formula and properties.
+Covariance shrinkage (`"ledoit_wolf"`, the default, and `"oas"`) reproduces
+`sklearn.covariance.ledoit_wolf` / `sklearn.covariance.oas`: the shrinkage intensity is identical on
+the same centred samples, and because this package uses the `1/(n − 1)` sample covariance the shrunk
+matrix is exactly `n/(n − 1)` times sklearn's (matched-filter scores are invariant to that scale).
+Ledoit-Wolf needs the sample fourth moment `m₄ = mean‖xₖ − x̄‖⁴`: `estimate_cov_shrunk` computes it
+from the pixels, `StreamingBackground` streams it through `WelfordAccumulator.m4`, and a direct
+`shrink_covariance(method="ledoit_wolf", ...)` call must pass `fourth_moment=`.
 
 ::: geotoolz.matched_filter

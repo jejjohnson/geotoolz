@@ -188,6 +188,7 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "mask._src.operators.OceanMask": lambda: {"source": _natural_earth_stub()},
     "mask._src.operators.RemoveSmallHoles": {"area_threshold": 4},
     "mask._src.operators.RemoveSmallObjects": {"min_size": 4},
+    "matched_filter._src.operators.ApplyAdaptiveMF": lambda: {"target": np.ones(3)},
     "matched_filter._src.operators.ApplyClusterMF": lambda: {"target": np.ones(3)},
     "matched_filter._src.operators.DetectionThreshold": _mf(false_alarm_rate=0.01),
     "matched_filter._src.operators.GMMClusterBackground": {"n_clusters": 2},
