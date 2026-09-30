@@ -178,6 +178,8 @@ ignore = ["E402", "E721", "E731", "E741", "F722"]
 "tests/test_matched_filter.py" = ["RUF001", "RUF002", "RUF003"]
 "src/geotoolz/compositing/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "src/geotoolz/plume/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
+"src/geotoolz/restore/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
+"tests/test_restore.py" = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
