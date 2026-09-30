@@ -18,12 +18,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-import einx
 import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.geo import require_geotensor
+from geotoolz._src.shape import require_ndim
 from geotoolz._src.wrap import wrap_like
+from geotoolz.geom._src.coregister.array import (
+    _require_axis_aligned,
+    _values_to_dataarray,
+    points_to_raster_binned,
+    points_to_raster_idw,
+    raster_to_point_cloud,
+)
 from geotoolz.geom._src.operators import ReprojectLike
 
 
@@ -34,68 +41,16 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-def _require_axis_aligned(transform: Any, op_name: str) -> None:
-    """Reject affine transforms with rotation / shear terms.
-
-    ``_pixel_center_coords`` and the bin-edge logic in
-    `PointsToRaster` derive ``x``/``y`` from only the ``a/c`` and
-    ``e/f`` affine terms. For non-axis-aligned grids (``b != 0`` or
-    ``d != 0``) that's silently wrong — the world coordinates would
-    drop the rotation/shear contribution. Fail loudly upfront
-    rather than emit misregistered output.
-    """
-    if transform.b != 0.0 or transform.d != 0.0:
-        raise ValueError(
-            f"{op_name} requires an axis-aligned affine "
-            "(rotation/shear terms b and d must be 0); got "
-            f"b={transform.b!r}, d={transform.d!r}. Reproject to an "
-            "axis-aligned grid first (e.g. via "
-            "`gz.geom.Reproject(dst_crs=...)`)."
-        )
-
-
-def _pixel_center_coords(
-    transform: Any, shape: tuple[int, ...]
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute ``(x_centers, y_centers)`` for a raster from its affine.
-
-    Returns 1-D arrays of length ``W`` and ``H`` respectively — the
-    pixel-center coordinates suitable for an xarray-backed extraction.
-    Requires an axis-aligned affine (no rotation/shear) — call
-    ``_require_axis_aligned`` first.
-    """
-    h, w = shape[-2], shape[-1]
-    x = transform.c + transform.a * (np.arange(w) + 0.5)
-    y = transform.f + transform.e * (np.arange(h) + 0.5)
-    return x, y
-
-
-def _geotensor_to_dataarray(tensor: GeoTensor) -> Any:
+def _geotensor_to_dataarray(tensor: GeoTensor, op_name: str) -> Any:
     """Convert a `GeoTensor` to an `xarray.DataArray` with proper coords.
 
     The result has ``x`` / ``y`` 1-D coords at pixel centers and a
     ``band`` dim if the input is 3-D ``(C, H, W)``. The CRS isn't
     attached here — callers pass it as a kwarg to `extract_points`
     so we don't need a full xvec geometry index on the raster side.
+    Errors name ``op_name``.
     """
-    import xarray as xr
-
-    _require_axis_aligned(tensor.transform, "RasterToPoints")
-    arr = np.asarray(tensor)
-    x, y = _pixel_center_coords(tensor.transform, tensor.shape)
-    if arr.ndim == 2:
-        return xr.DataArray(arr, dims=("y", "x"), coords={"x": x, "y": y})
-    if arr.ndim == 3:
-        bands = np.arange(arr.shape[0])
-        return xr.DataArray(
-            arr,
-            dims=("band", "y", "x"),
-            coords={"band": bands, "x": x, "y": y},
-        )
-    raise ValueError(
-        "RasterToPoints expects 2-D (H, W) or 3-D (C, H, W) GeoTensor input; "
-        f"got ndim={arr.ndim}."
-    )
+    return _values_to_dataarray(np.asarray(tensor), tensor.transform, op_name)
 
 
 def _resolve_geometries(points: Any) -> Sequence[shapely.geometry.base.BaseGeometry]:
@@ -326,7 +281,7 @@ class RasterToPoints(Operator):
                 "Install with `pip install 'geotoolz[vector-cube]'`."
             ) from exc
 
-        da = _geotensor_to_dataarray(raster)
+        da = _geotensor_to_dataarray(raster, "RasterToPoints")
         geoms = _resolve_geometries(points)
         crs = str(raster.crs)
 
@@ -418,55 +373,25 @@ class PointsToRaster(Operator):
                 "PointsToRaster(method='idw') is not yet implemented; "
                 "use method='binned_stat' for now."
             )
-        from scipy.stats import binned_statistic_2d
-
         # Reject non-axis-aligned target rasters — bin edges derived
         # from only a/c and e/f would silently drop rotation/shear.
         _require_axis_aligned(like.transform, "PointsToRaster")
 
-        # 1) Resolve geometries + parallel values array. CRS sanity
-        # check happens inside `_points_with_values` for GeoDataFrame
-        # inputs where the .crs attribute is set.
+        # CRS sanity check happens inside `_points_with_values` for
+        # GeoDataFrame inputs where the .crs attribute is set.
         xs, ys, values = _points_with_values(
             points, attribute=self.attribute, like_crs=like.crs
         )
-
-        # 2) Build bin edges from the `like` raster's affine. The
-        # affine maps pixel (col, row) corners → CRS coords; for an
-        # H x W grid we need W+1 x edges and H+1 y edges.
-        h, w = like.shape[-2], like.shape[-1]
-        x_edges = like.transform.c + like.transform.a * np.arange(w + 1)
-        y_edges = like.transform.f + like.transform.e * np.arange(h + 1)
-        # binned_statistic_2d requires monotonically-increasing edges.
-        # rasterio's "north-up" affine has negative `e` (rows go
-        # south-to-north backwards), which makes y_edges decrease;
-        # "west-up" rasters with negative `a` likewise make x_edges
-        # decrease. Sort each axis independently and flip the
-        # corresponding output dimension so the result keeps the
-        # raster convention (row 0 = top, col 0 = left).
-        flip_y = y_edges[0] > y_edges[-1]
-        flip_x = x_edges[0] > x_edges[-1]
-        y_edges_sorted = y_edges[::-1] if flip_y else y_edges
-        x_edges_sorted = x_edges[::-1] if flip_x else x_edges
-
-        # 3) Run the bin.
-        stat_out, _, _, _ = binned_statistic_2d(
-            xs, ys, values, statistic=self.stat, bins=[x_edges_sorted, y_edges_sorted]
+        result = points_to_raster_binned(
+            np.column_stack([xs, ys]),
+            values,
+            dst_shape=like.shape[-2:],
+            dst_transform=like.transform,
+            stat=self.stat,
         )
-        # `binned_statistic_2d` returns shape (n_x_bins, n_y_bins);
-        # swap to (H, W) raster convention, with rows = y.
-        result = einx.id("x y -> y x", stat_out)
-        if flip_y:
-            result = result[::-1, :]
-        if flip_x:
-            result = result[:, ::-1]
-
-        # 4) Wrap back into a GeoTensor on the `like` grid. The binned
-        # statistic is a new quantity: empty cells are NaN (0 for counts),
-        # never ``like``'s fill.
-        return wrap_like(
-            like, result.astype(np.float64), fill_value_default=_binned_fill(self.stat)
-        )
+        # The binned statistic is a new quantity: empty cells are NaN
+        # (0 for counts), never ``like``'s fill.
+        return wrap_like(like, result, fill_value_default=_binned_fill(self.stat))
 
 
 def _points_with_values(
@@ -590,19 +515,11 @@ class RasterToPointCloud(Operator):
     def _apply(self, raster: GeoTensor, cloud: Any) -> Any:
         require_geotensor(raster, "RasterToPointCloud")
         _require_axis_aligned(raster.transform, "RasterToPointCloud")
+        require_ndim(raster, (2, 3), "RasterToPointCloud")
         xy = _cloud_to_xy_array(cloud, src_crs=raster.crs)
-        if xy.size == 0:
-            # Empty cloud → empty result with the right last-axis shape.
-            arr = np.asarray(raster)
-            if arr.ndim == 2:
-                return np.zeros((0,), dtype=arr.dtype)
-            return np.zeros((arr.shape[0], 0), dtype=arr.dtype)
-
-        if self.method == "bilinear":
-            return _raster_to_cloud_bilinear(raster, xy, self.max_radius)
-        # Nearest + IDW both rely on a KDTree built on pixel centers.
-        return _raster_to_cloud_kdtree(
-            raster,
+        return raster_to_point_cloud(
+            np.asarray(raster),
+            raster.transform,
             xy,
             k=self.k,
             max_radius=self.max_radius,
@@ -679,111 +596,6 @@ def _cloud_to_xy_array(cloud: Any, *, src_crs: Any = None) -> np.ndarray:
     return np.asarray([[g.x, g.y] for g in geoms], dtype=np.float64).reshape(-1, 2)
 
 
-def _raster_to_cloud_bilinear(
-    raster: GeoTensor, xy: np.ndarray, max_radius: float | None
-) -> np.ndarray:
-    """Bilinear sample of `raster` at every point in `xy`."""
-    da = _geotensor_to_dataarray(raster)
-    point_xs = xy[:, 0]
-    point_ys = xy[:, 1]
-    interp = da.interp(x=("point", point_xs), y=("point", point_ys))
-    values = np.asarray(interp.values)
-    if max_radius is not None:
-        # Use KDTree to compute nearest-pixel distance; mask out
-        # points whose nearest pixel sits outside the radius.
-        _, distances = _nearest_pixel_distances(raster, xy)
-        mask = distances > max_radius
-        if values.ndim == 1:
-            values = values.astype(np.float64, copy=True)
-            values[mask] = np.nan
-        else:
-            values = values.astype(np.float64, copy=True)
-            values[:, mask] = np.nan
-    return values
-
-
-def _raster_to_cloud_kdtree(
-    raster: GeoTensor,
-    xy: np.ndarray,
-    *,
-    k: int,
-    max_radius: float | None,
-    method: Literal["nearest", "bilinear", "idw"],
-    power: float,
-) -> np.ndarray:
-    """KDTree-based sampling: nearest (k=1) or IDW (k>=1)."""
-    from scipy.spatial import KDTree
-
-    arr = np.asarray(raster)
-    x_centers, y_centers = _pixel_center_coords(raster.transform, raster.shape)
-    yy, xx = np.meshgrid(y_centers, x_centers, indexing="ij")
-    pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])
-    tree = KDTree(pixel_xy)
-
-    # Clamp k to the number of available pixels — querying KDTree
-    # with k > N returns placeholder out-of-bounds indices that
-    # would crash the subsequent `flat[indices]` lookup. Mirrors
-    # the same guard `_point_cloud_idw` uses on the other side.
-    eff_k = min(k, pixel_xy.shape[0])
-    distances, indices = tree.query(xy, k=eff_k)
-    # `KDTree.query` returns scalars / 1D arrays for k=1; promote
-    # to (N, 1) so the downstream IDW code path is uniform.
-    if eff_k == 1:
-        distances = distances[:, None]
-        indices = indices[:, None]
-
-    # Flatten the raster's spatial dims for fancy-index lookup.
-    if arr.ndim == 2:
-        flat = arr.reshape(-1)
-        gathered = flat[indices]  # (N, k)
-    else:
-        # 3-D (C, H, W) → (C, H*W); gather along last axis.
-        c = arr.shape[0]
-        flat = arr.reshape(c, -1)
-        gathered = flat[:, indices]  # (C, N, k)
-
-    if method in {"nearest"} or (method == "idw" and eff_k == 1):
-        if arr.ndim == 2:
-            result = gathered[:, 0].astype(np.float64)
-        else:
-            result = gathered[:, :, 0].astype(np.float64)
-    else:
-        # IDW with k >= 2.
-        weights = 1.0 / np.maximum(distances**power, 1e-12)
-        if arr.ndim == 2:
-            num = (gathered * weights).sum(axis=1)
-            den = weights.sum(axis=1)
-            result = (num / den).astype(np.float64)
-        else:
-            num = (gathered * weights[None, :, :]).sum(axis=2)
-            den = weights.sum(axis=1)[None, :]
-            result = (num / den).astype(np.float64)
-
-    # Out-of-radius gate: use the *closest* pixel's distance.
-    if max_radius is not None:
-        nearest_dist = distances[:, 0]
-        out = nearest_dist > max_radius
-        if arr.ndim == 2:
-            result[out] = np.nan
-        else:
-            result[:, out] = np.nan
-    return result
-
-
-def _nearest_pixel_distances(
-    raster: GeoTensor, xy: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """Helper: (indices, distances) of the single nearest pixel per point."""
-    from scipy.spatial import KDTree
-
-    x_centers, y_centers = _pixel_center_coords(raster.transform, raster.shape)
-    yy, xx = np.meshgrid(y_centers, x_centers, indexing="ij")
-    pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])
-    tree = KDTree(pixel_xy)
-    distances, indices = tree.query(xy, k=1)
-    return indices, distances
-
-
 class PointCloudToRaster(Operator):
     """Rasterize a point cloud onto a target grid.
 
@@ -836,15 +648,24 @@ class PointCloudToRaster(Operator):
         _require_axis_aligned(like.transform, "PointCloudToRaster")
         xy, values = _cloud_to_xy_values(cloud)
         if self.method == "binned_stat":
-            return _point_cloud_binned_stat(xy, values, like, stat=self.stat)
-        return _point_cloud_idw(
+            result = points_to_raster_binned(
+                xy,
+                values,
+                dst_shape=like.shape[-2:],
+                dst_transform=like.transform,
+                stat=self.stat,
+            )
+            return wrap_like(like, result, fill_value_default=_binned_fill(self.stat))
+        result = points_to_raster_idw(
             xy,
             values,
-            like,
-            power=self.power,
+            dst_shape=like.shape[-2:],
+            dst_transform=like.transform,
             k=self.k,
+            power=self.power,
             max_radius=self.max_radius,
         )
+        return wrap_like(like, result, fill_value_default=np.nan)
 
 
 def _cloud_to_xy_values(cloud: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -885,81 +706,6 @@ def _cloud_to_xy_values(cloud: Any) -> tuple[np.ndarray, np.ndarray]:
         "or a structured ndarray with fields {x, y, value}; got "
         f"{type(cloud).__name__}."
     )
-
-
-def _point_cloud_binned_stat(
-    xy: np.ndarray, values: np.ndarray, like: GeoTensor, *, stat: str
-) -> GeoTensor:
-    """Bin via scipy.stats.binned_statistic_2d (shares logic with PointsToRaster)."""
-    from scipy.stats import binned_statistic_2d
-
-    h, w = like.shape[-2], like.shape[-1]
-    x_edges = like.transform.c + like.transform.a * np.arange(w + 1)
-    y_edges = like.transform.f + like.transform.e * np.arange(h + 1)
-    flip_y = y_edges[0] > y_edges[-1]
-    flip_x = x_edges[0] > x_edges[-1]
-    y_edges_sorted = y_edges[::-1] if flip_y else y_edges
-    x_edges_sorted = x_edges[::-1] if flip_x else x_edges
-
-    stat_out, _, _, _ = binned_statistic_2d(
-        xy[:, 0],
-        xy[:, 1],
-        values,
-        statistic=stat,
-        bins=[x_edges_sorted, y_edges_sorted],
-    )
-    # (n_x_bins, n_y_bins) -> (H, W) raster convention, with rows = y.
-    result = einx.id("x y -> y x", stat_out)
-    if flip_y:
-        result = result[::-1, :]
-    if flip_x:
-        result = result[:, ::-1]
-    return wrap_like(
-        like, result.astype(np.float64), fill_value_default=_binned_fill(stat)
-    )
-
-
-def _point_cloud_idw(
-    xy: np.ndarray,
-    values: np.ndarray,
-    like: GeoTensor,
-    *,
-    power: float,
-    k: int,
-    max_radius: float | None,
-) -> GeoTensor:
-    """KDTree-based inverse-distance weighting onto the `like` grid."""
-    from scipy.spatial import KDTree
-
-    h, w = like.shape[-2], like.shape[-1]
-    # Empty cloud → all-NaN raster on the `like` grid (well-defined
-    # rather than KDTree crash on zero-row input).
-    if xy.shape[0] == 0:
-        return wrap_like(
-            like, np.full((h, w), np.nan, dtype=np.float64), fill_value_default=np.nan
-        )
-    x_centers, y_centers = _pixel_center_coords(like.transform, like.shape)
-    yy, xx = np.meshgrid(y_centers, x_centers, indexing="ij")
-    pixel_xy = np.column_stack([xx.ravel(), yy.ravel()])  # (H*W, 2)
-
-    tree = KDTree(xy)
-    eff_k = min(k, xy.shape[0])
-    distances, indices = tree.query(pixel_xy, k=eff_k)
-    if eff_k == 1:
-        distances = distances[:, None]
-        indices = indices[:, None]
-
-    sampled = values[indices]  # (H*W, eff_k)
-    weights = 1.0 / np.maximum(distances**power, 1e-12)
-    num = (sampled * weights).sum(axis=1)
-    den = weights.sum(axis=1)
-    result = (num / den).reshape(h, w).astype(np.float64)
-
-    if max_radius is not None:
-        # Mask pixels whose nearest point exceeds the radius.
-        nearest_dist = distances[:, 0].reshape(h, w)
-        result = np.where(nearest_dist > max_radius, np.nan, result)
-    return wrap_like(like, result, fill_value_default=np.nan)
 
 
 class VectorToRasterAgg(Operator):

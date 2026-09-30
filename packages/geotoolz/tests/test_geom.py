@@ -19,6 +19,7 @@ import pytest
 from affine import Affine
 from georeader.geotensor import GeoTensor
 from rasterio.enums import Resampling
+from rasterio.windows import WindowError
 from shapely.geometry import box
 
 import geotoolz as gz
@@ -256,6 +257,40 @@ def test_resize_resample_and_crop_to_bounds() -> None:
     assert str(resized.crs) == str(gt.crs)
     assert str(resampled.crs) == str(gt.crs)
     assert str(cropped.crs) == str(gt.crs)
+
+
+@pytest.mark.parametrize("crs", [None, "EPSG:4326", "EPSG:3857"])
+def test_crop_to_bounds_matches_read_from_bounds(crs: str | None) -> None:
+    from georeader import read
+    from rasterio.warp import transform_bounds
+
+    gt = _gt()
+    gt.attrs = {"band_names": ["b1"]}
+    # Partial-pixel bounds: every pixel they touch is kept (outer
+    # rounding), so the crop is 4 x 4 rather than the 3 x 3 that nearest
+    # rounding of the window used to give.
+    bounds = (12.4, 16.4, 15.6, 19.6)
+    if crs == "EPSG:3857":
+        bounds = transform_bounds("EPSG:4326", crs, *bounds)
+
+    cropped = gz.geom.CropToBounds(bounds=bounds, crs=crs)(gt)
+    expected = read.read_from_bounds(gt, bounds, crs_bounds=crs, boundless=False)
+
+    assert cropped.shape == expected.shape == (1, 4, 4)
+    assert cropped.transform == expected.transform
+    np.testing.assert_array_equal(np.asarray(cropped), np.asarray(expected))
+    np.testing.assert_array_equal(np.asarray(cropped), np.asarray(gt)[:, 0:4, 2:6])
+    assert cropped.fill_value_default == gt.fill_value_default
+    assert cropped.attrs["band_names"] == ["b1"]
+
+
+def test_crop_to_bounds_clips_to_the_carrier_and_rejects_disjoint_bounds() -> None:
+    gt = _gt()
+    clipped = gz.geom.CropToBounds(bounds=(8.5, 13.0, 12.5, 30.0))(gt)
+    assert clipped.shape == (1, 5, 3)
+    assert clipped.transform == gt.transform
+    with pytest.raises(WindowError):
+        gz.geom.CropToBounds(bounds=(100.0, 50.0, 101.0, 51.0))(gt)
 
 
 def test_crop_to_validates_target_and_anchor() -> None:
