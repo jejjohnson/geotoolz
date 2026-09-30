@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.1.0...geotoolz-patcher-v0.2.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geotoolz:** geotoolz.patch_ops.Stitch is removed; use geotoolz.patch_ops.MergePatches (the same class as geopatcher.integrations.pipekit.Stitch). The old name collided with geotoolz.geom.Stitch / top-level geotoolz.Stitch. patch_ops.Stitch is now forbid_in_yaml and emits `domain` in get_config(); geopatcher.integrations.pipekit.GridSampler (and patch_ops.GridSampler) is now forbid_in_yaml. SpatialTriangular.weights returns float64 instead of float32.
+
+### Code Refactoring
+
+* **geotoolz:** re-export patch_ops bridge from geopatcher, rename Stitch to MergePatches ([#305](https://github.com/jejjohnson/geotoolz/issues/305)) ([380e115](https://github.com/jejjohnson/geotoolz/commit/380e115f0e5915f4af3c601d76a5fc9b581ae136)), closes [#156](https://github.com/jejjohnson/geotoolz/issues/156)
+
 ## [0.1.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.0.6...geotoolz-patcher-v0.1.0) (2026-07-13)
 
 
