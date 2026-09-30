@@ -51,7 +51,7 @@ from geotoolz.restore._src.array import (
     despeckle_lee,
     despeckle_refined_lee,
     destripe_column,
-    fit_pca,
+    fit_mnf,
     gap_fill_biharmonic,
     gap_fill_idw,
     gap_fill_laplacian,
@@ -124,18 +124,22 @@ def _gap_fill(gt: Any, fn: Callable[[np.ndarray], np.ndarray]) -> Any:
 
 
 class DespeckleLee(Operator):
-    """Lee local-statistics speckle filter.
+    """Lee (1980) local-statistics speckle filter.
 
     Carrier-aware wrapper around
-    :func:`~geotoolz.restore._src.array.despeckle_lee`. Best suited to
-    multiplicative speckle (single-look or multi-look SAR amplitude
-    imagery). For multi-look intensity, halve ``cu``. Nodata (fill / non-finite) pixels
-    are excluded from the window statistics and hold the output fill.
+    :func:`~geotoolz.restore._src.array.despeckle_lee`:
+    ``x̂ = z̄ + k·(z − z̄)`` with the MMSE gain
+    ``k = σ_x² / (σ_x² + Cᵤ²·z̄²)``, ``σ_x² = (σ_z² − Cᵤ²·z̄²) / (1 + Cᵤ²)``
+    clipped at ``0`` -- the local mean on homogeneous speckle, ``k → 1``
+    (pass-through) at edges. Best suited to multiplicative speckle in SAR
+    imagery. Nodata (fill / non-finite) pixels are excluded from the
+    window statistics and hold the output fill.
 
     Args:
         window: Side length of the local window in pixels.
-        cu: Noise coefficient of variation. ``0.523`` is the canonical
-            single-look value.
+        cu: Noise coefficient of variation ``Cᵤ``. ``0.523`` is the
+            single-look amplitude value; use ``1/√L`` for ``L``-look
+            intensity.
 
     Examples:
         >>> import geotoolz as gz
@@ -152,18 +156,20 @@ class DespeckleLee(Operator):
 
 
 class DespeckleFrost(Operator):
-    """Frost-style adaptive speckle filter.
+    """Frost (1982) adaptive exponential-kernel speckle filter.
 
-    Wraps :func:`~geotoolz.restore._src.array.despeckle_frost`. Uses an
-    edge-aware exponential weight on the local mean. Faster than the
-    Lee filter and tunable via ``damping``: larger values keep more
-    edge contrast, smaller values smooth more aggressively. Nodata (fill
-    / non-finite) pixels are excluded from the window statistics and
-    hold the output fill.
+    Wraps :func:`~geotoolz.restore._src.array.despeckle_frost`: a
+    normalised weighted window mean with kernel
+    ``m(t) = exp(−K·Cᵥ²·|t|)``, where ``Cᵥ² = σ_z²/z̄²`` is the local
+    squared coefficient of variation and ``|t|`` the distance from the
+    centre pixel. The kernel is wide on homogeneous speckle and narrows
+    onto the centre pixel at edges. Nodata (fill / non-finite) pixels
+    get zero weight and hold the output fill.
 
     Args:
-        window: Side length of the local window in pixels.
-        damping: Edge-sensitivity exponent.
+        window: Side length of the kernel window in pixels.
+        damping: Damping factor ``K``; larger values keep more edge
+            contrast, ``0`` is the box mean.
 
     Examples:
         >>> gz.restore.DespeckleFrost(window=7, damping=2.0)(sar_geotensor)
@@ -184,7 +190,7 @@ class DespeckleRefinedLee(Operator):
 
     Wraps :func:`~geotoolz.restore._src.array.despeckle_refined_lee`.
     This is currently a dependency-light alias for :class:`DespeckleLee`
-    with default ``cu``; the eight-direction sub-window selection of the
+    (Lee 1980 gain) with default ``cu``; the eight-direction sub-window selection of the
     canonical Refined-Lee is not yet implemented. Nodata pixels are
     handled as in :class:`DespeckleLee`.
 
@@ -207,18 +213,23 @@ class DestripeColumn(Operator):
 
     Wraps :func:`~geotoolz.restore._src.array.destripe_column`. Use
     ``method="mean"`` for additive stripes, ``"median"`` for stripes
-    with outlier contamination, and ``"moment_matching"`` to also apply
-    a local smoothing pass (the smoothing kernel size is set by
-    ``window``). Nodata (fill / non-finite) pixels are excluded from the
-    column / row profiles and hold the output fill.
+    with outlier contamination, and ``"moment_matching"`` for stripes
+    with a per-detector gain *and* offset: every column is linearly
+    rescaled so its mean and standard deviation match a reference
+    (``(z − μ_j)·σᵣ/σ_j + μᵣ``; the moving average of the column moments
+    over ``window`` columns, or global with ``window=None``). Nodata
+    (fill / non-finite) pixels are excluded from the column / row
+    statistics and hold the output fill.
 
     Args:
-        method: Reducer used to estimate per-column offsets.
+        method: ``"mean"``, ``"median"`` (offset only) or
+            ``"moment_matching"`` (gain and offset).
         axis: Striping direction. ``"column"`` removes vertical
             stripes, ``"row"`` removes horizontal stripes.
-        window: Smoothing window for ``method="moment_matching"``.
-            Ignored for the other methods but accepted for hydra-zen
-            round-trip uniformity.
+        window: Reference window (in columns / rows) for
+            ``method="moment_matching"``; ``None`` uses a global
+            reference. Ignored for the other methods but accepted for
+            hydra-zen round-trip uniformity.
 
     Examples:
         >>> gz.restore.DestripeColumn(method="median", axis="column")(scene)
@@ -229,7 +240,7 @@ class DestripeColumn(Operator):
         *,
         method: Literal["mean", "median", "moment_matching"] = "mean",
         axis: Literal["column", "row"] = "column",
-        window: int = 21,
+        window: int | None = 21,
     ) -> None:
         self.method = method
         self.axis = axis
@@ -245,20 +256,22 @@ class DestripeColumn(Operator):
 
 
 class MomentMatching(Operator):
-    """Match per-column moments via a local smoothing pass.
+    """Destripe by matching every column's mean and std to a reference.
 
     Convenience operator equivalent to
     ``DestripeColumn(method="moment_matching", axis="column", window=...)``
-    (same nodata handling).
+    (same nodata handling): ``out[:, j] = (z[:, j] − μ_j)·σᵣ_j/σ_j + μᵣ_j``
+    (Gadallah et al. 2000).
 
     Args:
-        window: Side length of the local smoothing window in pixels.
+        window: Number of neighbouring columns averaged into the
+            reference moments, or ``None`` for a global reference.
 
     Examples:
         >>> gz.restore.MomentMatching(window=21)(scene)
     """
 
-    def __init__(self, *, window: int = 21) -> None:
+    def __init__(self, *, window: int | None = 21) -> None:
         self.window = window
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
@@ -308,60 +321,75 @@ class DenoisePCA(Operator):
 
 
 class MNF(Operator):
-    """Forward MNF / PCA transform that captures reconstruction state.
+    """Forward Minimum Noise Fraction transform (Green et al. 1988).
 
-    Wraps :func:`~geotoolz.restore._src.array.fit_pca`. The first call
-    fits the principal components on the input and stores them on the
-    instance; the output carrier holds the projected scores. The
-    fitted state is then consumable by :class:`InverseMNF`.
+    Wraps :func:`~geotoolz.restore._src.array.fit_mnf`. The noise
+    covariance ``Σ_N`` is estimated from horizontal shift differences
+    (``Σ_N = Cov(z(i, j) − z(i, j + 1)) / 2``, see
+    :func:`~geotoolz.restore._src.array.shift_difference_noise_covariance`);
+    the data are noise-whitened with ``Σ_N^(−1/2)`` (Cholesky) and the
+    whitened data are rotated onto their principal components. The
+    output carrier holds the scores, ordered by decreasing SNR, and the
+    fitted state is consumable by :class:`InverseMNF` -- keeping the
+    first ``n_components`` and inverting is the classical MNF noise
+    filter.
 
     Note: this operator is *stateful*. Calling it on a second image
-    will refit the components and discard the previous state — the
+    will refit the transform and discard the previous state — the
     forward/inverse pair must be applied to the same image.
 
-    The components are fitted on valid pixels only (a pixel invalid in
-    any band is excluded); invalid pixels hold the output fill in the
+    The covariance and noise covariance are estimated from valid pixels
+    only (a pixel invalid in any band is excluded, and so is any
+    neighbour pair touching it); invalid pixels hold ``NaN`` in the
     returned scores.
 
     Inputs are ``(C, H, W)`` cubes or ``(T, C, H, W)`` stacks (one fit
-    over every frame's pixels); the scores keep the input layout with the
-    band axis replaced by the component axis (``(K, H, W)`` /
-    ``(T, K, H, W)``). A 2-D ``(H, W)`` map raises ``ValueError``.
+    over every frame's pixels; noise pairs never cross frames); the
+    scores keep the input layout with the band axis replaced by the
+    component axis (``(K, H, W)`` / ``(T, K, H, W)``). A 2-D ``(H, W)``
+    map raises ``ValueError``.
 
     Args:
         n_components: Number of components to keep. ``None`` keeps all.
         axis: Position of the band axis. Default ``-3``.
 
     Attributes:
-        snr_: Per-component variance (proxy for signal-to-noise ratio),
-            populated after the first call. Sorted descending.
+        eigenvalues_: The generalised eigenvalues ``λᵢ`` of
+            ``Σ·a = λ·Σ_N·a`` (descending) -- the variance of each MNF
+            score in units of its noise variance, i.e. the inverse of the
+            component's noise fraction. Populated after the first call.
+        snr_: Per-component signal-to-noise ratio ``λᵢ − 1`` (signal
+            variance over noise variance for signal uncorrelated with the
+            noise), descending. Populated after the first call.
 
     Examples:
         >>> forward = gz.restore.MNF(n_components=3)
         >>> scores = forward(scene)
-        >>> reconstructed = gz.restore.InverseMNF(forward=forward)(scores)
+        >>> denoised = gz.restore.InverseMNF(forward=forward)(scores)
     """
 
     def __init__(self, *, n_components: int | None = None, axis: int = -3) -> None:
         self.n_components = n_components
         self.axis = axis
         self._state: dict[str, np.ndarray | int | tuple[int, ...]] | None = None
+        self.eigenvalues_: np.ndarray | None = None
         self.snr_: np.ndarray | None = None
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         require_ndim(gt, (3, 4), type(self).__name__)
-        self._state = fit_pca(
+        self._state = fit_mnf(
             _band_masked(gt, self.axis),
             n_components=self.n_components,
             axis=self.axis,
         )
-        self.snr_ = np.asarray(self._state["snr"])
+        self.eigenvalues_ = np.asarray(self._state["eigenvalues"])
+        self.snr_ = self.eigenvalues_ - 1.0
         scores = np.asarray(self._state["scores"])
-        # fit_pca imputes invalid pixels with the band mean (score 0);
+        # fit_mnf imputes invalid pixels with the band mean (score 0);
         # report them as nodata instead.
         pixel_nan = np.asarray(self._state["nan_mask"]).any(axis=0)
         valid = ~pixel_nan.reshape(scores.shape[1:])
-        # fit_pca returns component-first scores; put the component axis
+        # fit_mnf returns component-first scores; put the component axis
         # where the band axis was so a (T, C, H, W) stack stays (T, K, H, W).
         scores = np.moveaxis(scores, 0, self.axis)
         valid = np.moveaxis(
@@ -374,9 +402,11 @@ class MNF(Operator):
 class InverseMNF(Operator):
     """Reconstruct a raster from a prior :class:`MNF` transform.
 
-    Holds a runtime reference to a fitted :class:`MNF` so it can reuse
-    the principal components and mean. Because the reference points at
-    a live, stateful object, this operator cannot be faithfully
+    Holds a runtime reference to a fitted :class:`MNF` and maps scores
+    back with ``x̂ = Σ_N·A_k·y + x̄`` (the first ``k`` columns of the
+    inverse transform ``A⁻ᵀ``); with all components this is exact, with
+    fewer it removes the low-SNR components. Because the reference
+    points at a live, stateful object, this operator cannot be faithfully
     serialised — ``forbid_in_yaml = True`` flags that to future YAML
     loaders, and ``get_config`` returns an empty config rather than a
     spurious payload. Pixels that are nodata in the scores (or were
@@ -585,12 +615,20 @@ class GapFillLaplacian(Operator):
     there is the filled value, *not* the fill value; only gaps left
     unfilled hold the output fill.
 
+    Args:
+        iterations: Number of Jacobi sweeps. Increase for larger gaps.
+
     Examples:
-        >>> gz.restore.GapFillLaplacian()(scene)
+        >>> gz.restore.GapFillLaplacian(iterations=500)(scene)
     """
 
+    def __init__(self, *, iterations: int = 200) -> None:
+        self.iterations = iterations
+
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return _gap_fill(gt, gap_fill_laplacian)
+        return _gap_fill(
+            gt, lambda a: gap_fill_laplacian(a, iterations=self.iterations)
+        )
 
 
 class GapFillNearest(Operator):

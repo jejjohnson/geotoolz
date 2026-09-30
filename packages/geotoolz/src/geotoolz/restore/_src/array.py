@@ -1,9 +1,14 @@
 """Tier-A primitives for image restoration.
 
-All functions in this module are pure NumPy / SciPy. They take a plain
-``ndarray`` (shape ``(..., H, W)`` for spatial filters, ``(bands, H, W)``
-for spectral PCA / MNF) and return a plain ``ndarray`` of the same
-shape. Carrier-aware ``Operator`` wrappers live in
+All functions in this module are pure NumPy / SciPy on plain
+``ndarray`` inputs. Spatial filters (despeckle, destripe, denoise,
+gap fill, outliers) take ``(..., H, W)`` arrays, filter the trailing two
+axes and return an array of the same shape. The spectral transforms take
+an array with a band axis (``(bands, H, W)`` by default):
+:func:`pca_denoise` returns a same-shaped reconstruction, while
+:func:`fit_pca` / :func:`fit_mnf` return a state dict (scores plus the
+fitted transform) that :func:`inverse_pca` maps back to the input shape.
+Carrier-aware ``Operator`` wrappers live in
 :mod:`geotoolz.restore._src.operators`.
 
 NaN convention: input NaNs are treated as missing pixels. Filters that
@@ -14,6 +19,7 @@ with a finite estimate.
 
 from __future__ import annotations
 
+import warnings
 from typing import Literal, cast
 
 import einx
@@ -22,7 +28,12 @@ from jaxtyping import Bool, Float, Num, Shaped
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
-from geotoolz._src.samples import cube_to_samples, sample_layout, samples_to_cube
+from geotoolz._src.samples import (
+    SampleLayout,
+    cube_to_samples,
+    sample_layout,
+    samples_to_cube,
+)
 
 
 _EPSILON = 1e-12
@@ -65,75 +76,123 @@ def _preserve_nan(
     return np.where(np.isnan(original), np.nan, restored)
 
 
-def despeckle_lee(
-    arr: Num[np.ndarray, "*batch h w"], *, window: int = 7, cu: float = 0.523
-) -> Float[np.ndarray, "*batch h w"]:
-    r"""Apply the classical Lee local-statistics speckle filter.
-
-    For each pixel computes a local mean :math:`\bar{x}` and variance
-    :math:`s^2` over a ``window`` x ``window`` neighbourhood, then
-    returns :math:`\bar{x} + k (x - \bar{x})` with the adaptive gain
-    :math:`k = \tfrac{1}{2} s^2 / (s^2 + c_u^2 \bar{x}^2)`. In flat
-    regions the filter collapses to the local mean; near edges the gain
-    approaches ``1`` and the pixel passes through.
-
-    Args:
-        arr: Array of shape ``(..., H, W)``. NaNs are preserved.
-        window: Side length of the local window. Must be positive.
-        cu: Noise coefficient of variation. ``0.523`` is the standard
-            value for a single-look SAR image; halve for multi-look.
-
-    Returns:
-        Smoothed array with the same shape and NaN positions as ``arr``.
-    """
-    values = np.asarray(arr, dtype=float)
+def _local_moments(
+    values: Float[np.ndarray, "*batch h w"], window: int
+) -> tuple[Float[np.ndarray, "*batch h w"], Float[np.ndarray, "*batch h w"]]:
+    """NaN-aware local mean and (population) variance over a square window."""
     size = _spatial_size(values, window)
     mean = _nanmean_filter(values, size)
     mean_sq = _nanmean_filter(values * values, size)
-    var = np.maximum(mean_sq - mean * mean, 0.0)
-    noise_var = (cu * mean) ** 2
-    weight = 0.5 * np.divide(
-        var, var + noise_var, out=np.zeros_like(var), where=var > 0
-    )
-    return _preserve_nan(values, mean + weight * (values - mean))
+    return mean, np.maximum(mean_sq - mean * mean, 0.0)
+
+
+def despeckle_lee(
+    arr: Num[np.ndarray, "*batch h w"], *, window: int = 7, cu: float = 0.523
+) -> Float[np.ndarray, "*batch h w"]:
+    r"""Apply the Lee (1980) local-statistics speckle filter.
+
+    Speckle model: ``z = x·v`` with ``x`` the unspeckled signal and ``v``
+    unit-mean multiplicative noise of coefficient of variation
+    ``Cᵤ = σᵥ`` (``cu``). With the local mean ``z̄`` and variance ``σ_z²``
+    over a ``window`` × ``window`` neighbourhood, the model gives
+    (Lee 1980)::
+
+        σ_x² = max((σ_z² − Cᵤ²·z̄²) / (1 + Cᵤ²), 0)
+        k    = σ_x² / (σ_x² + Cᵤ²·z̄²)
+        x̂    = z̄ + k·(z − z̄)
+
+    In terms of the local coefficient of variation ``Cᵢ = σ_z / z̄`` the
+    gain is ``k = (Cᵢ² − Cᵤ²) / (Cᵢ² + Cᵤ⁴)`` clipped at ``0``, so
+    ``k ∈ [0, 1)``: on homogeneous speckle (``Cᵢ ≤ Cᵤ``) ``k = 0`` and
+    the filter returns the local mean; at edges and point targets
+    (``Cᵢ ≫ Cᵤ``) ``k → 1`` and the pixel passes through. Dropping the
+    ``O(Cᵤ⁴)`` term gives the familiar linearised ``k ≈ 1 − Cᵤ²/Cᵢ²``.
+
+    Args:
+        arr: Array of shape ``(..., H, W)``. NaNs are preserved and
+            excluded from the window statistics.
+        window: Side length of the local window. Must be positive.
+        cu: Noise coefficient of variation ``Cᵤ``. ``1/√L`` for
+            ``L``-look intensity; ``0.523 ≈ √(4/π − 1)`` is the
+            single-look *amplitude* value (default).
+
+    Returns:
+        Smoothed array with the same shape and NaN positions as ``arr``.
+
+    References:
+        Lee, J.-S. (1980). Digital image enhancement and noise filtering
+        by use of local statistics. IEEE TPAMI, 2(2), 165-168.
+    """
+    values = np.asarray(arr, dtype=float)
+    mean, var = _local_moments(values, window)
+    noise_var = (float(cu) * mean) ** 2
+    signal_var = np.maximum((var - noise_var) / (1.0 + float(cu) ** 2), 0.0)
+    denom = signal_var + noise_var
+    gain = np.divide(signal_var, denom, out=np.zeros_like(signal_var), where=denom > 0)
+    return _preserve_nan(values, mean + gain * (values - mean))
 
 
 def despeckle_frost(
     arr: Num[np.ndarray, "*batch h w"], *, window: int = 7, damping: float = 2.0
 ) -> Float[np.ndarray, "*batch h w"]:
-    r"""Apply a compact Frost-style adaptive speckle smoother.
+    r"""Apply the Frost (1982) adaptive exponential-kernel speckle filter.
 
-    Blends each pixel with its local mean using an edge-aware weight
-    :math:`\alpha = \exp(-d \cdot c_v)`, where ``d`` is ``damping`` and
-    :math:`c_v = s / |\bar{x}|` is the local coefficient of variation.
-    Flat regions (small :math:`c_v`) push :math:`\alpha \to 1` and keep
-    the pixel; high-variance regions (edges) push :math:`\alpha \to 0`
-    and smooth.
+    Each output pixel is a normalised weighted mean of its
+    ``window`` × ``window`` neighbourhood with the exponentially
+    decaying kernel::
 
-    This is a single-pixel reduction of the full Frost kernel — fast
-    and dependency-light, but missing the directional weighting of the
-    canonical filter. Use ``despeckle_lee`` if you want strict
-    statistical optimality.
+        m(t) = exp(−K · Cᵥ² · |t|)
+        x̂    = Σₜ m(t)·z(t) / Σₜ m(t)
+
+    where ``K`` is ``damping``, ``|t|`` is the Euclidean distance (in
+    pixels) from the centre pixel and ``Cᵥ² = σ_z² / z̄²`` is the local
+    squared coefficient of variation, computed over the same window.
+    On homogeneous areas ``Cᵥ²`` is small, the kernel is wide and the
+    filter approaches the box mean; at edges ``Cᵥ²`` is large, the
+    kernel narrows onto the centre pixel and the edge is preserved.
+    Where ``z̄ = 0`` the kernel is the box mean.
 
     Args:
-        arr: Array of shape ``(..., H, W)``. NaNs are preserved.
-        window: Side length of the local window. Must be positive.
-        damping: Edge-sensitivity exponent ``d``. Larger values keep
-            more edge contrast; smaller values smooth more.
+        arr: Array of shape ``(..., H, W)``. NaNs are preserved and
+            excluded (zero weight) from the neighbourhood sums.
+        window: Side length of the kernel window. Must be positive.
+        damping: Damping factor ``K``. Larger values narrow the kernel
+            (keep more edge contrast); ``0`` is the box mean.
 
     Returns:
         Smoothed array with the same shape and NaN positions as ``arr``.
+
+    References:
+        Frost, V. S., Stiles, J. A., Shanmugan, K. S., & Holtzman, J. C.
+        (1982). A model for radar images and its application to adaptive
+        digital filtering of multiplicative noise. IEEE TPAMI, 4(2),
+        157-166.
     """
     values = np.asarray(arr, dtype=float)
-    size = _spatial_size(values, window)
-    mean = _nanmean_filter(values, size)
-    mean_sq = _nanmean_filter(values * values, size)
-    var = np.maximum(mean_sq - mean * mean, 0.0)
-    coeff = np.divide(
-        np.sqrt(var), np.abs(mean), out=np.zeros_like(var), where=mean != 0
+    mean, var = _local_moments(values, window)
+    cv_sq = np.divide(var, mean * mean, out=np.zeros_like(var), where=mean != 0)
+    rate = float(damping) * cv_sq
+    valid = np.isfinite(values)
+    filled = np.where(valid, values, 0.0)
+    half = int(window) // 2
+    lo, hi = -half, int(window) - half
+    pad = [(0, 0)] * (values.ndim - 2) + [(half, window - 1 - half)] * 2
+    padded = np.pad(filled, pad, mode="edge")
+    padded_valid = np.pad(valid, pad, mode="edge")
+    height, width = values.shape[-2:]
+    total = np.zeros_like(filled)
+    weight_sum = np.zeros_like(filled)
+    for dy in range(lo, hi):
+        for dx in range(lo, hi):
+            rows = slice(dy + half, dy + half + height)
+            cols = slice(dx + half, dx + half + width)
+            weight = np.exp(-rate * np.hypot(dy, dx)) * padded_valid[..., rows, cols]
+            total += weight * padded[..., rows, cols]
+            weight_sum += weight
+    out = np.divide(
+        total, weight_sum, out=np.full_like(total, np.nan), where=weight_sum > 0
     )
-    alpha = np.exp(-float(damping) * coeff)
-    return _preserve_nan(values, alpha * values + (1.0 - alpha) * mean)
+    return _preserve_nan(values, out)
 
 
 def despeckle_refined_lee(
@@ -163,38 +222,58 @@ def destripe_column(
     *,
     method: Literal["mean", "median", "moment_matching"] = "mean",
     axis: Literal["column", "row"] = "column",
-    window: int = 21,
+    window: int | None = 21,
 ) -> Float[np.ndarray, "*batch h w"]:
-    r"""Remove row or column striping by matching cross-track statistics.
+    r"""Remove row or column striping by matching per-line statistics.
 
-    For ``axis="column"`` (default): collapses each column to a single
-    statistic (its mean or median over rows), subtracts the difference
-    from the global statistic, and re-adds the per-pixel residual so
-    column-constant offsets are zeroed out.
+    For ``axis="column"`` (default) every column ``j`` is summarised over
+    its rows; ``axis="row"`` swaps the roles. Leading axes are independent
+    planes.
 
-    ``method="moment_matching"`` follows up the global recentre with a
-    locally-windowed smoothing pass to handle slowly varying gain
-    drift; the ``window`` controls the smoothing kernel size and is
-    only consulted in that case.
+    ``method="mean"`` / ``"median"`` remove a per-column *offset*::
+
+        out[:, j] = z[:, j] − (s_j − s̄)
+
+    where ``s_j`` is the column mean (median) and ``s̄`` the mean (median)
+    of all ``s_j``.
+
+    ``method="moment_matching"`` removes a per-column *gain and offset*
+    (Gadallah et al. 2000): each column is linearly rescaled so its mean
+    ``μ_j`` and standard deviation ``σ_j`` match a reference ``(μᵣ, σᵣ)``::
+
+        out[:, j] = (z[:, j] − μ_j) · σᵣ_j / σ_j + μᵣ_j
+
+    With ``window=None`` the reference is global (``μᵣ`` and ``σᵣ`` are
+    the averages of ``μ_j`` and ``σ_j`` over all columns); with an integer
+    ``window`` it is the moving average of ``μ_j`` / ``σ_j`` over the
+    ``window`` neighbouring columns, which keeps genuine cross-track
+    trends (e.g. illumination) while removing the detector-to-detector
+    stripes. Within-column detail is untouched apart from the per-column
+    linear map. A column with ``σ_j = 0`` only has its offset matched.
 
     Args:
-        arr: Array of shape ``(..., H, W)``. NaNs are preserved.
-        method: ``"mean"`` and ``"median"`` subtract a per-column offset
-            with the corresponding reducer; ``"moment_matching"``
-            additionally smooths the result with a ``window`` x
-            ``window`` neighbourhood.
+        arr: Array of shape ``(..., H, W)``. NaNs are preserved and
+            excluded from the statistics.
+        method: ``"mean"``, ``"median"`` or ``"moment_matching"``.
         axis: Striping direction (``"column"`` for vertical stripes,
             ``"row"`` for horizontal).
-        window: Side length of the smoothing window for
-            ``method="moment_matching"``. Ignored otherwise.
+        window: Number of neighbouring columns (rows) averaged into the
+            moment-matching reference, or ``None`` for a global
+            reference. Only consulted for ``method="moment_matching"``.
 
     Returns:
         Destriped array with the same shape and NaN positions as
         ``arr``.
 
     Raises:
-        ValueError: If ``arr`` has fewer than two dimensions or
-            ``method`` is not one of the documented choices.
+        ValueError: If ``arr`` has fewer than two dimensions, ``method``
+            is not one of the documented choices or ``window`` is not
+            positive.
+
+    References:
+        Gadallah, F. L., Csillag, F., & Smith, E. J. M. (2000).
+        Destriping multisensor imagery with moment matching.
+        International Journal of Remote Sensing, 21(12), 2505-2511.
     """
     values = np.asarray(arr, dtype=float)
     if values.ndim < 2:
@@ -203,15 +282,29 @@ def destripe_column(
         raise ValueError("method must be 'mean', 'median', or 'moment_matching'")
     spatial_axis = -1 if axis == "column" else -2
     reduce_axis = -2 if axis == "column" else -1
-    reducer = np.nanmedian if method == "median" else np.nanmean
-    profile = reducer(values, axis=reduce_axis, keepdims=True)
-    target = reducer(profile, axis=spatial_axis, keepdims=True)
-    out = values - (profile - target)
-    if method == "moment_matching":
-        # Replace each pixel with its local-window mean so slowly
-        # varying per-column gain drift is absorbed into the smoothing.
-        out = _nanmean_filter(out, _spatial_size(out, window))
-    return _preserve_nan(values, out)
+    # All-NaN lines (e.g. a nodata column) have NaN statistics by design;
+    # silence numpy's empty-slice warnings for them.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        if method != "moment_matching":
+            reducer = np.nanmedian if method == "median" else np.nanmean
+            profile = reducer(values, axis=reduce_axis, keepdims=True)
+            target = reducer(profile, axis=spatial_axis, keepdims=True)
+            return _preserve_nan(values, values - (profile - target))
+        line_mean = np.nanmean(values, axis=reduce_axis, keepdims=True)
+        line_std = np.nanstd(values, axis=reduce_axis, keepdims=True)
+    if window is None:
+        ref_mean = np.nanmean(line_mean, axis=spatial_axis, keepdims=True)
+        ref_std = np.nanmean(line_std, axis=spatial_axis, keepdims=True)
+    else:
+        if window <= 0:
+            raise ValueError("window must be positive or None")
+        size = [1] * values.ndim
+        size[spatial_axis] = int(window)
+        ref_mean = _nanmean_filter(line_mean, tuple(size))
+        ref_std = _nanmean_filter(line_std, tuple(size))
+    gain = np.divide(ref_std, line_std, out=np.ones_like(line_std), where=line_std > 0)
+    return _preserve_nan(values, (values - line_mean) * gain + ref_mean)
 
 
 def gaussian_denoise(
@@ -250,7 +343,8 @@ def median_denoise(
 
     NaNs are temporarily replaced with the global ``nanmedian`` so
     SciPy's median filter is well-defined, then re-stamped on the
-    output. Edge pixels use ``mode="nearest"`` (reflected boundary).
+    output. Edge pixels use ``mode="nearest"`` (the edge pixel is
+    repeated outwards, not reflected).
 
     Args:
         arr: Array of shape ``(..., H, W)``.
@@ -353,8 +447,9 @@ def pca_denoise(
 
     Args:
         arr: Array with a band axis at position ``axis``; typically
-            ``(bands, H, W)``. NaN pixels are mean-imputed for the fit
-            and re-stamped as NaN on the output.
+            ``(bands, H, W)``. The components are fitted on the pixels
+            that are finite in every band; NaN positions are re-stamped
+            as NaN on the output.
         n_components: Number of principal components to keep. Must be
             between 1 and the number of bands.
         axis: Position of the band axis. Defaults to ``-3``.
@@ -364,11 +459,56 @@ def pca_denoise(
         ``arr``.
 
     Raises:
-        ValueError: If ``n_components`` is out of range or any band is
-            entirely NaN.
+        ValueError: If ``n_components`` is out of range, any band is
+            entirely NaN or no pixel is finite in every band.
     """
     model = fit_pca(arr, n_components=n_components, axis=axis)
     return inverse_pca(model["scores"], model)
+
+
+def _band_samples(
+    arr: Num[np.ndarray, "*dims"], axis: int, n_components: int | None, name: str
+) -> tuple[
+    Float[np.ndarray, "c n"],
+    Bool[np.ndarray, "c n"],
+    Bool[np.ndarray, " n"],
+    SampleLayout,
+    int,
+]:
+    """Band-major samples, their NaN mask, the complete-pixel mask, layout and ``k``.
+
+    A pixel is *complete* when it is finite in every band; only complete
+    pixels enter the fitted statistics.
+    """
+    values = np.asarray(arr, dtype=float)
+    samples, layout = cube_to_samples(values, band_axis=axis)
+    bands = layout.n_bands
+    keep = bands if n_components is None else int(n_components)
+    if not 1 <= keep <= bands:
+        raise ValueError("n_components must be between 1 and the number of bands")
+    flat = np.ascontiguousarray(samples.T)
+    nan_mask = ~np.isfinite(flat)
+    all_nan_bands = nan_mask.all(axis=1)
+    if all_nan_bands.any():
+        bad = tuple(int(i) for i in np.where(all_nan_bands)[0])
+        raise ValueError(
+            f"{name} cannot fit on bands that are entirely NaN: bands {bad}"
+        )
+    complete = ~nan_mask.any(axis=0)
+    if complete.sum() < 2:
+        raise ValueError(f"{name} needs at least two pixels finite in every band")
+    return flat, nan_mask, complete, layout, keep
+
+
+def _project(
+    flat: Float[np.ndarray, "c n"],
+    nan_mask: Bool[np.ndarray, "c n"],
+    mean: Float[np.ndarray, " c"],
+    components: Float[np.ndarray, "c k"],
+) -> Float[np.ndarray, "k n"]:
+    """Project mean-centred samples (NaN entries imputed by the mean) onto ``components``."""
+    centered = np.where(nan_mask, 0.0, flat - mean[:, None])
+    return einx.dot("c k, c n -> k n", components, centered)
 
 
 def fit_pca(
@@ -376,8 +516,12 @@ def fit_pca(
 ) -> dict[str, np.ndarray | int | tuple[int, ...]]:
     """Fit PCA over a band axis and return scores plus reconstruction state.
 
-    NaN pixels are imputed with the per-band mean for the fit; their
-    positions are recorded in the returned state so
+    With ``X`` the ``(n, c)`` matrix of mean-centred pixels that are
+    finite in every band and ``X = U·S·Vᵀ`` its SVD, the components are
+    the columns of ``V`` and the explained variance of component ``i`` is
+    ``sᵢ² / (n − 1)`` (the eigenvalues of the sample covariance). Every
+    pixel is projected; NaN entries are imputed with the band mean for
+    the projection and their positions are recorded so
     :func:`inverse_pca` can re-stamp them.
 
     Args:
@@ -389,43 +533,34 @@ def fit_pca(
 
     Returns:
         State dict with keys ``"scores"`` (projected data, band axis
-        replaced by the component axis), ``"components"``, ``"mean"``,
-        ``"axis"``, ``"shape"``, ``"nan_mask"``, and ``"snr"``
-        (per-component variance, sorted descending). Pass it verbatim
-        to :func:`inverse_pca`.
+        replaced by the component axis), ``"components"`` (``(c, k)``
+        projection), ``"loadings"`` (``(c, k)`` reconstruction; equal to
+        ``"components"`` for PCA), ``"mean"``, ``"axis"``, ``"shape"``,
+        ``"nan_mask"`` and ``"explained_variance"`` (``sᵢ² / (n − 1)``,
+        sorted descending). Pass it verbatim to :func:`inverse_pca`.
 
     Raises:
-        ValueError: If ``n_components`` is out of range or any band is
-            entirely NaN.
+        ValueError: If ``n_components`` is out of range, any band is
+            entirely NaN or fewer than two pixels are finite in every
+            band.
     """
-    values = np.asarray(arr, dtype=float)
-    samples, layout = cube_to_samples(values, band_axis=axis)
-    bands = layout.n_bands
-    keep = bands if n_components is None else int(n_components)
-    if not 1 <= keep <= bands:
-        raise ValueError("n_components must be between 1 and the number of bands")
-    # Band-major ``(bands, pixels)`` for the SVD below.
-    flat = np.ascontiguousarray(samples.T)
-    nan_mask = ~np.isfinite(flat)
-    all_nan_bands = nan_mask.all(axis=1)
-    if all_nan_bands.any():
-        bad = tuple(int(i) for i in np.where(all_nan_bands)[0])
-        raise ValueError(f"PCA cannot fit on bands that are entirely NaN: bands {bad}")
-    means = np.nanmean(flat, axis=1, keepdims=True)
-    filled = np.where(nan_mask, means, flat)
-    centered = filled - means
-    u, s, _ = np.linalg.svd(centered, full_matrices=False)
+    flat, nan_mask, complete, layout, keep = _band_samples(
+        arr, axis, n_components, "PCA"
+    )
+    fit = flat[:, complete]
+    mean = fit.mean(axis=1)
+    u, s, _ = np.linalg.svd(fit - mean[:, None], full_matrices=False)
     components = u[:, :keep]
-    # Project the centered (bands, pixels) data onto the components.
-    scores = einx.dot("c k, c n -> k n", components, centered)
+    scores = _project(flat, nan_mask, mean, components)
     return {
         "scores": scores.reshape((keep, *layout.sample_shape)),
         "components": components,
-        "mean": means[:, 0],
+        "loadings": components,
+        "mean": mean,
         "axis": axis,
-        "shape": values.shape,
+        "shape": layout.shape,
         "nan_mask": nan_mask,
-        "snr": s[:keep] ** 2,
+        "explained_variance": s[:keep] ** 2 / (fit.shape[1] - 1),
     }
 
 
@@ -433,26 +568,153 @@ def inverse_pca(
     scores: Num[np.ndarray, "*dims"],
     state: dict[str, np.ndarray | int | tuple[int, ...]],
 ) -> np.ndarray:
-    """Reconstruct an array from PCA scores and state.
+    """Reconstruct an array from PCA (or MNF) scores and state.
+
+    Computes ``x̂ = L·y + x̄`` with ``L`` the ``(c, k)`` reconstruction
+    loadings stored in ``state`` (the components themselves for PCA,
+    ``Σ_N·A`` for MNF; see :func:`fit_mnf`).
 
     Args:
         scores: Projected data as returned in ``state["scores"]`` (the
-            leading component axis must match ``state["components"]``).
-        state: Reconstruction state produced by :func:`fit_pca`.
+            leading component axis must match ``state["loadings"]``).
+        state: Reconstruction state produced by :func:`fit_pca` or
+            :func:`fit_mnf`.
 
     Returns:
         Reconstructed array with the shape recorded in ``state`` and the
         original NaN positions re-stamped.
     """
-    components = np.asarray(state["components"])
+    loadings = np.asarray(state["loadings"])
     mean = np.asarray(state["mean"])[:, None]
     shape = cast(tuple[int, ...], state["shape"])
     axis = int(state["axis"])
-    flat_scores = np.asarray(scores, dtype=float).reshape(components.shape[1], -1)
-    restored = einx.dot("c k, k n -> c n", components, flat_scores) + mean
+    flat_scores = np.asarray(scores, dtype=float).reshape(loadings.shape[1], -1)
+    restored = einx.dot("c k, k n -> c n", loadings, flat_scores) + mean
     nan_mask = np.asarray(state["nan_mask"])
     restored = np.where(nan_mask, np.nan, restored)
     return samples_to_cube(restored.T, sample_layout(shape, band_axis=axis))
+
+
+def shift_difference_noise_covariance(
+    arr: Num[np.ndarray, "*dims"], *, axis: int = -3
+) -> Float[np.ndarray, "c c"]:
+    """Estimate the band noise covariance from horizontal shift differences.
+
+    Green et al. (1988): with ``d(p) = z(p) − z(p + δ)`` the difference
+    between each pixel and its right-hand neighbour (``δ`` = one step
+    along the last non-band axis, i.e. along a row ``W``), and noise that
+    is white in space while the signal is locally smooth,
+    ``Cov(d) ≈ 2·Σ_N``, so::
+
+        Σ_N = Cov(d) / 2
+
+    Pairs that straddle a NaN in any band are skipped, and pairs never
+    cross rows, frames or planes. The difference covariance is the
+    unbiased (``n − 1``) sample covariance of ``d``.
+
+    Args:
+        arr: Array with a band axis at ``axis``, e.g. ``(C, H, W)`` or
+            ``(T, C, H, W)``.
+        axis: Position of the band axis. Defaults to ``-3``.
+
+    Returns:
+        ``(c, c)`` noise covariance estimate.
+
+    Raises:
+        ValueError: If fewer than two complete neighbour pairs exist.
+    """
+    values = np.asarray(arr, dtype=float)
+    bands_last = np.moveaxis(values, axis, -1)
+    diff = np.diff(bands_last, axis=-2).reshape(-1, bands_last.shape[-1])
+    diff = diff[np.isfinite(diff).all(axis=1)]
+    if diff.shape[0] < 2:
+        raise ValueError(
+            "MNF needs at least two horizontally adjacent pixel pairs that are "
+            "finite in every band to estimate the noise covariance"
+        )
+    return np.atleast_2d(np.cov(diff, rowvar=False)) / 2.0
+
+
+def fit_mnf(
+    arr: Num[np.ndarray, "*dims"], *, n_components: int | None = None, axis: int = -3
+) -> dict[str, np.ndarray | int | tuple[int, ...]]:
+    """Fit a Minimum Noise Fraction transform (Green et al. 1988).
+
+    Steps, with ``Σ`` the band covariance of the pixels that are finite in
+    every band and ``Σ_N`` the shift-difference noise covariance
+    (:func:`shift_difference_noise_covariance`):
+
+    1. Noise whitening: ``Σ_N = L·Lᵀ`` (Cholesky) and ``W = L⁻¹``, so the
+       whitened noise has identity covariance.
+    2. PCA of the whitened data: ``W·Σ·Wᵀ = V·diag(λ)·Vᵀ`` with ``λ``
+       sorted descending.
+    3. MNF transform ``A = Wᵀ·V``; scores ``y = Aᵀ·(x − x̄)``.
+
+    ``A`` solves the generalised eigenproblem ``Σ·a = λ·Σ_N·a`` with the
+    normalisation ``Aᵀ·Σ_N·A = I``, so each score has unit noise
+    variance and total variance ``λᵢ``. ``λᵢ`` is the inverse of the
+    component's noise fraction; for signal uncorrelated with the noise
+    its signal-to-noise ratio is ``λᵢ − 1``. Reconstruction from the
+    first ``k`` components uses the loadings ``L_k = Σ_N·A_k`` (the first
+    ``k`` columns of ``A⁻ᵀ``), so all components give an exact inverse.
+
+    Args:
+        arr: Array with a band axis at position ``axis``; typically
+            ``(bands, H, W)`` or ``(T, bands, H, W)`` (one fit over every
+            frame; noise pairs never cross frames).
+        n_components: Number of components to keep. ``None`` (default)
+            keeps all bands.
+        axis: Position of the band axis. Defaults to ``-3``.
+
+    Returns:
+        State dict with the keys of :func:`fit_pca` except
+        ``"explained_variance"``; instead ``"eigenvalues"`` (``λᵢ``,
+        descending) and ``"noise_covariance"`` (``Σ_N``).
+        ``"components"`` is ``A_k`` and ``"loadings"`` is ``Σ_N·A_k``.
+        Pass it verbatim to :func:`inverse_pca`.
+
+    Raises:
+        ValueError: If ``n_components`` is out of range, any band is
+            entirely NaN, too few complete pixels / neighbour pairs exist,
+            or the noise covariance is singular (e.g. a noise-free band).
+
+    References:
+        Green, A. A., Berman, M., Switzer, P., & Craig, M. D. (1988). A
+        transformation for ordering multispectral data in terms of image
+        quality with implications for noise removal. IEEE TGRS, 26(1),
+        65-74.
+    """
+    flat, nan_mask, complete, layout, keep = _band_samples(
+        arr, axis, n_components, "MNF"
+    )
+    fit = flat[:, complete]
+    mean = fit.mean(axis=1)
+    cov = np.atleast_2d(np.cov(fit))
+    noise_cov = shift_difference_noise_covariance(arr, axis=axis)
+    try:
+        chol = np.linalg.cholesky(noise_cov)
+    except np.linalg.LinAlgError as err:
+        raise ValueError(
+            "MNF noise covariance is singular (a band has no pixel-to-pixel "
+            "noise); drop constant or noise-free bands first"
+        ) from err
+    whiten = np.linalg.inv(chol)
+    eigvals, eigvecs = np.linalg.eigh(whiten @ cov @ whiten.T)
+    order = np.argsort(eigvals)[::-1]
+    transform = whiten.T @ eigvecs[:, order]
+    components = transform[:, :keep]
+    scores = _project(flat, nan_mask, mean, components)
+    return {
+        "scores": scores.reshape((keep, *layout.sample_shape)),
+        "components": components,
+        "loadings": noise_cov @ components,
+        "mean": mean,
+        "axis": axis,
+        "shape": layout.shape,
+        "nan_mask": nan_mask,
+        "eigenvalues": eigvals[order][:keep],
+        "noise_covariance": noise_cov,
+    }
 
 
 def _iter_planes(
