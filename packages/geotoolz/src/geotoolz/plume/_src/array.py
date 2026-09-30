@@ -15,21 +15,18 @@ referenced per-function:
 
 from __future__ import annotations
 
-from heapq import heappop, heappush
 from typing import Any, Literal
 
 import numpy as np
-from jaxtyping import Bool, Float, Int, Num, Shaped
-from scipy import ndimage
+from jaxtyping import Bool, Float, Num, Shaped
 from shapely.geometry import MultiPoint
-from skimage.morphology import skeletonize
 
 from geotoolz._src.geo import pixel_xy
+from geotoolz._src.labels import Connectivity, label_components, skeleton_length
 from geotoolz._src.shape import single_band
 
 
 ThresholdMode = float | int | str
-Connectivity = Literal[4, 8]
 ColumnUnit = Literal["ppm_m", "mol_m2", "kg_m2"]
 
 # Molar masses (kg/mol) for supported trace gases.
@@ -141,72 +138,6 @@ def resolve_threshold(
             return float(np.nanpercentile(values, percentile))
         raise ValueError("threshold must be a number, 'otsu', or 'percentile:<p>'")
     return float(threshold)
-
-
-def connectivity_structure(connectivity: Connectivity) -> Bool[np.ndarray, "3 3"]:
-    """Return a 2-D connected-component structure for 4- or 8-connectivity.
-
-    Args:
-        connectivity: ``4`` (edge neighbors) or ``8`` (edge + diagonal
-            neighbors).
-
-    Returns:
-        A ``(3, 3)`` boolean structuring element suitable for
-        :func:`scipy.ndimage.label`.
-
-    Raises:
-        ValueError: If ``connectivity`` is not 4 or 8.
-    """
-    if connectivity == 4:
-        return ndimage.generate_binary_structure(2, 1)
-    if connectivity == 8:
-        return ndimage.generate_binary_structure(2, 2)
-    raise ValueError("connectivity must be 4 or 8")
-
-
-def label_components(
-    mask: Bool[np.ndarray, "h w"],
-    *,
-    min_area: int = 1,
-    connectivity: Connectivity = 8,
-) -> Int[np.ndarray, "h w"]:
-    """Label connected True regions and drop components below ``min_area``.
-
-    Uses :func:`scipy.ndimage.label` for the connectivity, then renumbers
-    the surviving components contiguously (1..K) without a second
-    labelling pass — dropping pixels from a labelled image cannot merge
-    distinct components.
-
-    Args:
-        mask: 2-D boolean map (any array-like is coerced to bool).
-        min_area: Minimum component size in pixels; smaller components
-            are mapped to background.
-        connectivity: 4 or 8 connectivity for component labelling.
-
-    Returns:
-        An int32 label image with contiguous labels ``1..K`` for the
-        surviving components and ``0`` for background.
-
-    Raises:
-        ValueError: If ``min_area`` is smaller than 1 or ``connectivity``
-            is not 4 or 8.
-    """
-    if min_area < 1:
-        raise ValueError("min_area must be >= 1")
-    labels, n_labels = ndimage.label(
-        np.asarray(mask, dtype=bool), structure=connectivity_structure(connectivity)
-    )
-    if n_labels == 0:
-        return labels.astype(np.int32, copy=False)
-
-    counts = np.bincount(labels.ravel())
-    keep = counts >= min_area
-    keep[0] = False
-    # Build a 0..K renumbering LUT so labels remain contiguous after
-    # dropping small components.
-    lut = np.zeros_like(counts, dtype=np.int32)
-    lut[keep] = np.arange(1, int(keep.sum()) + 1, dtype=np.int32)
-    return lut[labels]
 
 
 def plume_mask(
@@ -394,9 +325,10 @@ def plume_length(
       pixels. For degenerate hulls (single point, collinear points) we
       fall back to the point-set diameter so the result is always well
       defined.
-    - ``"skeleton"``: length of the plume centreline. The mask is
-      skeletonised with :func:`skimage.morphology.skeletonize` and ``L``
-      is the longest geodesic path through the 8-connected skeleton,
+    - ``"skeleton"``: length of the plume centreline, via
+      :func:`geotoolz.measure.skeleton_length` with the transform as the
+      pixel step. The mask is skeletonised and ``L`` is the longest
+      geodesic path through the 8-connected skeleton,
       with each step weighted by its Euclidean length in CRS units
       (so diagonal steps and anisotropic pixels are measured
       correctly). Better than the chord for curved plumes. The path
@@ -452,7 +384,7 @@ def plume_length(
         diff = coords[:, None, :] - coords[None, :, :]
         return float(np.sqrt(np.max(np.sum(diff**2, axis=-1))))
     if method == "skeleton":
-        length = _longest_active_pixel_path(skeletonize(active), transform)
+        length = skeleton_length(active, step=transform)
         if length <= 0.0:
             raise ValueError(
                 f"skeleton plume length is 0 for a non-empty {int(active.sum())}-"
@@ -462,100 +394,3 @@ def plume_length(
             )
         return length
     raise ValueError("length_method must be 'max_axis', 'convex_hull', or 'skeleton'")
-
-
-# 8-neighbour offsets ``(drow, dcol)``.
-_NEIGHBOURS_8 = tuple(
-    (drow, dcol) for drow in (-1, 0, 1) for dcol in (-1, 0, 1) if (drow, dcol) != (0, 0)
-)
-
-
-def _longest_active_pixel_path(mask: Bool[np.ndarray, "h w"], transform: Any) -> float:
-    """Longest geodesic path through the 8-connected active pixels.
-
-    Each step between 8-neighbours is weighted by its Euclidean length
-    in CRS units, derived from the transform so anisotropic and rotated
-    grids are handled. ``plume_length(method="skeleton")`` calls this on
-    the skeletonised mask.
-
-    Uses a double Dijkstra sweep per component (farthest pixel from a
-    seed, then farthest from that), which is exact for tree-shaped
-    skeletons and a close lower bound for skeletons with loops. The
-    seed is the lexicographically smallest ``(row, col)`` so the result
-    does not depend on set iteration order. For masks with multiple
-    disconnected components, each component is processed independently
-    and the maximum path length across components is returned; a
-    single-pixel component contributes ``0``.
-    """
-    rows, cols = np.nonzero(mask)
-    nodes = {(int(r), int(c)) for r, c in zip(rows, cols, strict=True)}
-    if not nodes:
-        return 0.0
-    longest = 0.0
-    remaining = nodes
-    while remaining:
-        # Deterministic start: lexicographically smallest (topmost, then
-        # leftmost) pixel in the remaining component pool.
-        seed = min(remaining)
-        component = _connected_component(seed, remaining)
-        farthest, _ = _farthest_active_pixel(seed, component, transform)
-        _, distance = _farthest_active_pixel(farthest, component, transform)
-        if distance > longest:
-            longest = distance
-        remaining = remaining - component
-    return float(longest)
-
-
-def _connected_component(
-    seed: tuple[int, int], nodes: set[tuple[int, int]]
-) -> set[tuple[int, int]]:
-    """Return the 8-connected component of ``seed`` within ``nodes``."""
-    component: set[tuple[int, int]] = {seed}
-    stack: list[tuple[int, int]] = [seed]
-    while stack:
-        row, col = stack.pop()
-        for drow, dcol in _NEIGHBOURS_8:
-            neighbor = (row + drow, col + dcol)
-            if neighbor in nodes and neighbor not in component:
-                component.add(neighbor)
-                stack.append(neighbor)
-    return component
-
-
-def _farthest_active_pixel(
-    start: tuple[int, int],
-    nodes: set[tuple[int, int]],
-    transform: Any,
-) -> tuple[tuple[int, int], float]:
-    """Dijkstra over 8-neighbours with Euclidean (CRS-unit) step weights."""
-    # Step length for each offset: the transform maps a (dcol, drow)
-    # pixel step to (step_x, step_y) in CRS units.
-    step_length = {
-        (drow, dcol): float(
-            np.hypot(
-                transform.a * dcol + transform.b * drow,
-                transform.d * dcol + transform.e * drow,
-            )
-        )
-        for drow, dcol in _NEIGHBOURS_8
-    }
-    distances = {start: 0.0}
-    heap = [(0.0, start)]
-    farthest = start
-    while heap:
-        distance, node = heappop(heap)
-        if distance != distances[node]:
-            continue
-        # Nodes pop in non-decreasing distance order, so the last one
-        # settled is the farthest.
-        farthest = node
-        row, col = node
-        for (drow, dcol), step in step_length.items():
-            neighbor = (row + drow, col + dcol)
-            if neighbor not in nodes:
-                continue
-            new_distance = distance + step
-            if new_distance < distances.get(neighbor, np.inf):
-                distances[neighbor] = new_distance
-                heappush(heap, (new_distance, neighbor))
-    return farthest, distances[farthest]

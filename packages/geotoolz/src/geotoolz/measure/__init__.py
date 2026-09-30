@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from geotoolz._src.labels import (
+    DEFAULT_REGIONPROPS,
+    label_components,
+    regionprops_frame,
+    skeleton_length,
+)
 from geotoolz.measure._src.operators import (
     RANSAC,
     FindContours,
@@ -14,6 +20,7 @@ from geotoolz.measure._src.operators import (
 
 
 __all__ = [
+    "DEFAULT_REGIONPROPS",
     "RANSAC",
     "FindContours",
     "LabelConnectedComponents",
@@ -21,4 +28,7 @@ __all__ = [
     "RegionProps",
     "ShannonEntropy",
     "SkeletonLength",
+    "label_components",
+    "regionprops_frame",
+    "skeleton_length",
 ]

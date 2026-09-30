@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
-from math import prod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
@@ -14,6 +13,7 @@ import numpy as np
 from jaxtyping import Bool, Num, Shaped
 
 from geotoolz._src.dtype import as_float
+from geotoolz._src.samples import SampleLayout, cube_to_samples, samples_to_cube
 from geotoolz._src.valid import invalid_values
 from geotoolz._src.wrap import wrap_like
 
@@ -338,27 +338,20 @@ class GeoTensorEstimator:
     def _flatten(self, gt: GeoTensor | np.ndarray) -> _FlatGeoTensor:
         arr = np.asarray(gt)
         axes = _resolve_axes(arr.ndim, self.mode, self.sample_axes, self.feature_axes)
-        moved = np.moveaxis(arr, axes.sample_axes + axes.feature_axes, range(arr.ndim))
-        sample_shape = tuple(arr.shape[axis] for axis in axes.sample_axes)
-        feature_shape = tuple(arr.shape[axis] for axis in axes.feature_axes)
-        n_samples = prod(sample_shape)
-        n_features = prod(feature_shape) if feature_shape else 1
-        x = moved.reshape(n_samples, n_features)
-        invalid = np.moveaxis(
-            invalid_values(gt), axes.sample_axes + axes.feature_axes, range(arr.ndim)
-        ).reshape(n_samples, n_features)
+        x, layout = cube_to_samples(
+            arr, band_axis=axes.feature_axes, sample_axes=axes.sample_axes
+        )
+        invalid, _ = cube_to_samples(
+            invalid_values(gt),
+            band_axis=axes.feature_axes,
+            sample_axes=axes.sample_axes,
+        )
         if invalid.any():
             # Fill values become NaN so imputers / NaN-tolerant estimators
             # (``propagate_raw``) recognise them as missing.
             x = as_float(x).copy()
             x[invalid] = np.nan
-        return _FlatGeoTensor(
-            x=x,
-            valid=~invalid.any(axis=1),
-            axes=axes,
-            sample_shape=sample_shape,
-            feature_shape=feature_shape,
-        )
+        return _FlatGeoTensor(x=x, valid=~invalid.any(axis=1), layout=layout)
 
     def _prepare_fit(
         self, flat: _FlatGeoTensor, *, reuse_imputer: bool = False
@@ -508,15 +501,11 @@ class _FlatGeoTensor:
         *,
         x: Num[np.ndarray, "n c"],
         valid: Bool[np.ndarray, " n"],
-        axes: _ResolvedAxes,
-        sample_shape: tuple[int, ...],
-        feature_shape: tuple[int, ...],
+        layout: SampleLayout,
     ) -> None:
         self.x = x
         self.valid = valid
-        self.axes = axes
-        self.sample_shape = sample_shape
-        self.feature_shape = feature_shape
+        self.layout = layout
 
 
 def _resolve_axes(
@@ -614,29 +603,13 @@ def _restore_shape(
     y: Shaped[np.ndarray, " n"] | Shaped[np.ndarray, "n k"],
     flat: _FlatGeoTensor,
 ) -> np.ndarray:
-    if y.ndim == 1:
-        return y.reshape(flat.sample_shape)
-    if y.ndim != 2:
+    # Sample axes return to their input order; a 2-D output's features
+    # become one channel axis at the first feature axis (or in front when
+    # there is none, e.g. ``"pixel"`` on a single-band ``(H, W)``
+    # raster), so the result stays channel-first ``(k, H, W)``.
+    if y.ndim not in (1, 2):
         raise ValueError("Estimator output must be 1-D or 2-D")
-
-    sample_axes = set(flat.axes.sample_axes)
-    first_feature_axis = min(flat.axes.feature_axes) if flat.axes.feature_axes else None
-    restored = y.reshape((*flat.sample_shape, y.shape[1]))
-    source_tokens: list[int | str] = [*flat.axes.sample_axes, "__out__"]
-    target_tokens: list[int | str] = []
-    out_axis_inserted = False
-    for axis in range(len(flat.axes.axis_order)):
-        if axis in sample_axes:
-            target_tokens.append(axis)
-        elif axis == first_feature_axis and not out_axis_inserted:
-            target_tokens.append("__out__")
-            out_axis_inserted = True
-    if not out_axis_inserted:
-        # No feature axis (e.g. ``"pixel"`` on a single-band ``(H, W)``
-        # raster): put the output features in front of the sample axes so
-        # the result stays channel-first ``(k, H, W)``.
-        target_tokens.insert(0, "__out__")
-    return restored.transpose([source_tokens.index(token) for token in target_tokens])
+    return samples_to_cube(y, flat.layout)
 
 
 def _output_fill_value(dtype: np.dtype, label_fill_value: int) -> Any:

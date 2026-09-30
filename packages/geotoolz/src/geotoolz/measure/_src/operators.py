@@ -8,23 +8,19 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from jaxtyping import Shaped
 from pipekit import Operator
-from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import shortest_path
 from shapely.geometry import LineString
-from skimage.measure import (
-    find_contours,
-    label,
-    profile_line,
-    ransac,
-    regionprops_table,
-    shannon_entropy,
-)
-from skimage.morphology import skeletonize
+from skimage.measure import find_contours, profile_line, ransac, shannon_entropy
 
 from geotoolz._src.config import as_tuple
 from geotoolz._src.geo import pixel_xy, require_geotensor
+from geotoolz._src.labels import (
+    DEFAULT_REGIONPROPS,
+    Connectivity,
+    label_components,
+    regionprops_frame,
+    skeleton_length,
+)
 from geotoolz._src.shape import single_band
 from geotoolz._src.valid import valid_pixels
 from geotoolz._src.wrap import wrap_like
@@ -34,52 +30,63 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-DEFAULT_REGIONPROPS: tuple[str, ...] = (
-    "label",
-    "area",
-    "area_convex",
-    "area_filled",
-    "centroid",
-    "major_axis_length",
-    "minor_axis_length",
-    "orientation",
-    "eccentricity",
-    "solidity",
-    "perimeter",
-    "bbox",
-    "inertia_tensor_eigvals",
+# Region properties that ``RegionProps(scale_to_crs=True)`` converts from
+# pixel units: areas scale by the pixel area, lengths by the pixel size,
+# second moments by the squared pixel size. Everything else (positions,
+# angles, ratios, the label itself) stays as skimage reports it.
+_AREA_PROPS = frozenset({"area", "area_bbox", "area_convex", "area_filled"})
+_LENGTH_PROPS = frozenset(
+    {
+        "axis_major_length",
+        "axis_minor_length",
+        "equivalent_diameter_area",
+        "feret_diameter_max",
+        "major_axis_length",
+        "minor_axis_length",
+        "perimeter",
+        "perimeter_crofton",
+    }
 )
+_MOMENT_PROPS = frozenset({"inertia_tensor", "inertia_tensor_eigvals"})
 
 
 class LabelConnectedComponents(Operator):
     """Convert a binary mask into an int32 connected-component label map.
 
-    Wraps :func:`skimage.measure.label`. Expects a single-band ``(H, W)``
-    or ``(1, H, W)`` mask (values are cast to bool). Accepts a
-    ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32``
-    label map in the same carrier kind, with ``fill_value_default=0``;
-    nodata input pixels (non-finite or equal to the input's fill) are
-    background ``0``.
+    Delegates to :func:`geotoolz.measure.label_components`. Expects a
+    single-band ``(H, W)`` or ``(1, H, W)`` mask; pixels different from
+    ``background`` are foreground. Accepts a ``GeoTensor`` or a plain
+    ``np.ndarray`` and returns an ``int32`` label map (contiguous labels
+    ``1..K`` in raster order) in the same carrier kind, with
+    ``fill_value_default=0``. Nodata input pixels (non-finite or equal to
+    the input's fill) are background ``0`` and never join components.
 
     Args:
-        connectivity: Maximum orthogonal hops for two pixels to count as
-            neighbours (``1`` = 4-connectivity, ``2`` = 8-connectivity;
-            ``None`` = full connectivity).
+        connectivity: ``4`` (edge neighbours, default) or ``8`` (edge +
+            diagonal neighbours).
         background: Pixel value treated as background and labelled ``0``.
+        min_area: Minimum component size in pixels; smaller components
+            become background. ``0`` keeps every component.
     """
 
-    def __init__(self, *, connectivity: int | None = 1, background: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        connectivity: Connectivity = 4,
+        background: int = 0,
+        min_area: int = 0,
+    ) -> None:
         self.connectivity = connectivity
         self.background = background
+        self.min_area = min_area
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        labels = label(
-            single_band(np.asarray(gt), name="LabelConnectedComponents").astype(bool),
+        values = single_band(np.asarray(gt), name="LabelConnectedComponents")
+        labels = label_components(
+            (values != self.background) & single_band(valid_pixels(gt)),
             connectivity=self.connectivity,
-            background=self.background,
+            min_area=self.min_area,
         )
-        # Nodata input pixels are background; 0 marks "no component".
-        labels = np.where(valid_pixels(gt), labels, 0).astype(np.int32, copy=False)
         return wrap_like(gt, labels, fill_value_default=0)
 
 
@@ -94,6 +101,15 @@ class RegionProps(Operator):
     must be a georeferenced ``GeoTensor`` (plain arrays raise
     ``TypeError``).
 
+    Units: the ``geometry`` column is in CRS units. The property columns
+    are in **pixel units** by default -- areas in pixels, lengths
+    (``perimeter``, ``major_axis_length``, ...) in pixel widths, second
+    moments (``inertia_tensor*``) in squared pixel widths, positions
+    (``centroid-*``, ``bbox-*``) as ``(row, col)`` indices. With
+    ``scale_to_crs=True`` areas, lengths and second moments are converted
+    to CRS units (m^2 / m / m^2 for a projected metric CRS); positions,
+    angles and dimensionless ratios are unchanged.
+
     Args:
         intensity_image: Optional single-band intensity image aligned
             with the label map, enabling intensity-based properties.
@@ -101,10 +117,16 @@ class RegionProps(Operator):
             defaults to :data:`DEFAULT_REGIONPROPS`.
         extra_properties: Optional callables computing custom per-region
             properties (see skimage docs). Not YAML-serialisable, so
-            instances are forbidden in YAML.
+            instances are forbidden in YAML. Their outputs are never
+            rescaled.
+        scale_to_crs: Convert area / length / second-moment columns from
+            pixel to CRS units using the carrier's transform.
 
     Raises:
         TypeError: If the input is not a georeferenced GeoTensor.
+        ValueError: If ``scale_to_crs=True`` and a length or moment
+            column is requested on non-square (anisotropic or sheared)
+            pixels, where no single pixel length exists.
     """
 
     _terminal: ClassVar[bool] = True
@@ -117,6 +139,7 @@ class RegionProps(Operator):
         intensity_image: GeoTensor | None = None,
         properties: Sequence[str] | None = None,
         extra_properties: Sequence[Callable[..., Any]] | None = None,
+        scale_to_crs: bool = False,
     ) -> None:
         self.intensity_image = intensity_image
         self.properties = tuple(
@@ -125,6 +148,7 @@ class RegionProps(Operator):
         self.extra_properties = (
             None if extra_properties is None else tuple(extra_properties)
         )
+        self.scale_to_crs = scale_to_crs
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
         require_geotensor(gt, "RegionProps")
@@ -136,13 +160,14 @@ class RegionProps(Operator):
             if self.intensity_image is None
             else single_band(self.intensity_image, name="RegionProps intensity_image")
         )
-        props = regionprops_table(
+        frame = regionprops_frame(
             labels,
             intensity_image=intensity,
             properties=self.properties,
             extra_properties=self.extra_properties,
         )
-        frame = pd.DataFrame(props)
+        if self.scale_to_crs:
+            frame = _scale_to_crs(frame, gt.transform)
         if frame.empty:
             return gpd.GeoDataFrame(frame, geometry=[], crs=gt.crs)
         if {"centroid-0", "centroid-1"}.issubset(frame.columns):
@@ -168,6 +193,7 @@ class RegionProps(Operator):
             else [
                 getattr(func, "__name__", repr(func)) for func in self.extra_properties
             ],
+            "scale_to_crs": self.scale_to_crs,
         }
 
 
@@ -179,6 +205,11 @@ class FindContours(Operator):
     coordinates into world coordinates. Geo-dependent: the output
     geometries need the carrier's transform/CRS, so the input must be a
     georeferenced ``GeoTensor`` (plain arrays raise ``TypeError``).
+
+    Units: the ``geometry`` column is in CRS units (contour vertices are
+    sub-pixel positions mapped through the transform, pixel centres at
+    integer ``(row, col)``); ``contour_id`` is a 1-based index. There are
+    no pixel-unit columns, so there is no ``scale_to_crs`` switch.
 
     Args:
         level: Iso-value along which to find contours; ``None`` uses the
@@ -328,70 +359,46 @@ class RANSAC(Operator):
         }
 
 
-def _skeleton_diameter_pixels(mask: Shaped[np.ndarray, "h w"]) -> float:
-    """Longest shortest-path (graph diameter) of the skeleton of a binary
-    mask, with 8-connected adjacency and unit edge weight.
-
-    Returns ``0.0`` when the mask is empty or the skeleton collapses to a
-    single pixel. NaNs in the input are treated as background.
-    """
-    binary = np.asarray(mask)
-    bin_clean = binary if binary.dtype == bool else np.nan_to_num(binary, nan=0.0) > 0
-    if not bin_clean.any():
-        return 0.0
-    skel = skeletonize(bin_clean)
-    ys, xs = np.nonzero(skel)
-    n = ys.size
-    if n < 2:
-        return 0.0
-
-    coord_to_idx: dict[tuple[int, int], int] = {
-        (int(y), int(x)): i for i, (y, x) in enumerate(zip(ys, xs, strict=True))
-    }
-    rows: list[int] = []
-    cols: list[int] = []
-    for i in range(n):
-        y, x = int(ys[i]), int(xs[i])
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                if dy == 0 and dx == 0:
-                    continue
-                j = coord_to_idx.get((y + dy, x + dx))
-                # Add each edge once (j > i) — the graph is built as
-                # symmetric below by setting ``directed=False``.
-                if j is not None and j > i:
-                    rows.append(i)
-                    cols.append(j)
-    if not rows:
-        return 0.0
-    data = np.ones(len(rows), dtype=np.int64)
-    graph = csr_matrix((data, (rows, cols)), shape=(n, n))
-    distances = shortest_path(graph, directed=False, unweighted=True)
-    finite = distances[np.isfinite(distances)]
-    return float(finite.max()) if finite.size else 0.0
-
-
 class SkeletonLength(Operator):
-    """Longest path through the skeleton of a binary mask, in pixels.
+    """Longest path through the skeleton of a binary mask.
 
-    The mask is skeletonized via :func:`skimage.morphology.skeletonize` and
-    the result is treated as an 8-connected unit-weight graph; the operator
-    returns the graph diameter (longest shortest-path between any pair of
-    skeleton pixels). For tree-like skeletons this equals the geodesic
-    "fiber length" — closely matching ``calculate_fiber_length_from_mask``
-    from Pérez Carrasco et al. (2026), which uses
-    :func:`networkx.all_pairs_shortest_path_length` for the same purpose.
+    Delegates to :func:`geotoolz.measure.skeleton_length`: the mask is
+    skeletonised with :func:`skimage.morphology.skeletonize` and the
+    longest geodesic path through the 8-connected skeleton is measured
+    between pixel centres, each step weighted by its Euclidean length
+    (a diagonal step counts ``sqrt(2)``). This is the geodesic "fiber
+    length" of Pérez Carrasco et al. (2026) with Euclidean rather than
+    unit step weights.
+
+    Units: pixel widths by default, so both ``GeoTensor`` and plain-array
+    carriers are accepted. With ``scale_to_crs=True`` steps are measured
+    through the carrier's transform (anisotropic and rotated grids
+    included) and the result is in CRS units (m for a projected metric
+    CRS); the input must then be a georeferenced ``GeoTensor``.
 
     Returns ``0.0`` for empty masks or skeletons that collapse to a single
-    pixel. The result is a plain float in pixel units, so both
-    ``GeoTensor`` and plain-array carriers are accepted.
+    pixel.
+
+    Args:
+        scale_to_crs: Measure in CRS units via the carrier's transform
+            instead of pixel widths.
+
+    Raises:
+        TypeError: If ``scale_to_crs=True`` and the input is not a
+            georeferenced GeoTensor.
     """
 
     _terminal: ClassVar[bool] = True
 
+    def __init__(self, *, scale_to_crs: bool = False) -> None:
+        self.scale_to_crs = scale_to_crs
+
     def _apply(self, gt: GeoTensor | np.ndarray) -> float:
-        return _skeleton_diameter_pixels(
-            single_band(np.asarray(gt), name="SkeletonLength")
+        step: Any = (1.0, 1.0)
+        if self.scale_to_crs:
+            step = require_geotensor(gt, "SkeletonLength(scale_to_crs=True)").transform
+        return skeleton_length(
+            single_band(np.asarray(gt), name="SkeletonLength"), step=step
         )
 
 
@@ -417,3 +424,32 @@ class ShannonEntropy(Operator):
                 single_band(np.asarray(gt), name="ShannonEntropy"), base=self.base
             )
         )
+
+
+def _scale_to_crs(frame: pd.DataFrame, transform: Any) -> pd.DataFrame:
+    """Convert pixel-unit region-property columns to CRS units."""
+    a, b = float(transform.a), float(transform.b)
+    d, e = float(transform.d), float(transform.e)
+    pixel_area = abs(a * e - b * d)
+    # Transform columns: the CRS step of one pixel column / row.
+    col_step, row_step = float(np.hypot(a, d)), float(np.hypot(b, e))
+    square = bool(
+        np.isclose(col_step, row_step)
+        and np.isclose(a * b + d * e, 0.0, atol=1e-12 * max(pixel_area, 1.0))
+    )
+    out = frame.copy()
+    for column in frame.columns:
+        base = str(column).split("-")[0]
+        if base in _AREA_PROPS:
+            out[column] = frame[column] * pixel_area
+        elif base in _LENGTH_PROPS or base in _MOMENT_PROPS:
+            if not square:
+                raise ValueError(
+                    f"RegionProps(scale_to_crs=True): {base!r} has no CRS-unit "
+                    f"equivalent on non-square pixels (transform a={a}, b={b}, "
+                    f"d={d}, e={e}); request area properties only, or resample "
+                    "to square pixels first."
+                )
+            power = 1 if base in _LENGTH_PROPS else 2
+            out[column] = frame[column] * col_step**power
+    return out

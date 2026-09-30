@@ -13,7 +13,9 @@ rule decides what happens to geospatial metadata:
 
 einx is a core dependency — the same notation also powers the internal
 linear algebra of the Tier-A primitives (covariance/Gram products,
-matched-filter scoring, PCA projections, static channel-order flips).
+matched-filter scoring, PCA projections, static channel-order flips) and
+the shared ``(c, h, w) -> (n, c)`` pixel flattening
+(``geotoolz._src.samples.cube_to_samples``).
 The pattern-analysis helpers (`spatial_survives`, `output_axes`) are
 pure string processing and live in ``geotoolz.einx._src.array``.
 """

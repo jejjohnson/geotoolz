@@ -54,6 +54,8 @@ import numpy as np
 from jaxtyping import Float, Int
 from scipy import ndimage, stats
 
+from geotoolz._src.samples import cube_to_samples
+
 
 MeanMethod = Literal["mean", "median", "trimmed", "huber"]
 CovShrinkageMethod = Literal["ledoit_wolf", "oas"]
@@ -284,35 +286,19 @@ class WelfordAccumulator:
         return cov
 
 
-def cube_to_samples(
-    cube: Float[np.ndarray, "c h w"], *, axis: int = -3
+def _cube_samples(
+    cube: Float[np.ndarray, "c h w"], axis: int
 ) -> tuple[Float[np.ndarray, "n c"], tuple[int, ...]]:
-    """Vectorise a spectral cube into a ``(pixels, bands)`` sample matrix.
+    """``(pixels, bands)`` float sample matrix plus the non-band shape.
 
-    Moves the spectral axis last and flattens the remaining (spatial)
-    axes — the layout every estimator in this module works in.
-
-    Args:
-        cube: Spectral cube, canonically ``(c, h, w)``; any number of
-            non-band dimensions (at least one) is supported. Array-likes
-            are coerced to float.
-        axis: Position of the spectral (band) axis. Default ``-3``.
-
-    Returns:
-        A pair ``(samples, spatial_shape)`` where ``samples`` is the
-        ``(n, c)`` float sample matrix and ``spatial_shape`` is the shape
-        of the non-band axes, for reshaping per-pixel results back into
-        maps.
-
-    Raises:
-        ValueError: If ``cube`` has fewer than two dimensions.
+    Delegates to :func:`geotoolz._src.samples.cube_to_samples`; the
+    non-band shape reshapes per-pixel results back into maps.
     """
     arr = np.asarray(cube, dtype=float)
     if arr.ndim < 2:
         raise ValueError("matched-filter input must have at least two dimensions")
-    moved = np.moveaxis(arr, axis, -1)
-    spatial_shape = moved.shape[:-1]
-    return moved.reshape(-1, moved.shape[-1]), spatial_shape
+    samples, layout = cube_to_samples(arr, band_axis=axis)
+    return samples, layout.sample_shape
 
 
 def estimate_mean(
@@ -351,7 +337,7 @@ def estimate_mean(
         ValueError: If ``method`` is unknown, ``trim_proportion`` is out
             of range, or ``huber_c`` is not positive.
     """
-    x = _finite_rows(cube_to_samples(cube, axis=axis)[0])
+    x = _finite_rows(_cube_samples(cube, axis)[0])
     if method == "mean":
         return np.mean(x, axis=0)
     if method == "median":
@@ -394,7 +380,7 @@ def estimate_cov_empirical(
     Raises:
         ValueError: If ``mean`` length does not match the band count.
     """
-    x = _finite_rows(cube_to_samples(cube, axis=axis)[0])
+    x = _finite_rows(_cube_samples(cube, axis)[0])
     mu = np.mean(x, axis=0) if mean is None else _as_vector(mean, x.shape[1], "mean")
     centered = x - mu
     denom = max(x.shape[0] - 1, 1)
@@ -437,7 +423,7 @@ def estimate_cov_shrunk(
     """
     # Vectorise the cube once and reuse the sample matrix for both the
     # empirical covariance and the sample count that shrink_covariance needs.
-    x = _finite_rows(cube_to_samples(cube, axis=axis)[0])
+    x = _finite_rows(_cube_samples(cube, axis)[0])
     mu = np.mean(x, axis=0) if mean is None else _as_vector(mean, x.shape[1], "mean")
     centered = x - mu
     denom = max(x.shape[0] - 1, 1)
@@ -655,7 +641,7 @@ def apply_image(
             the target/covariance pair produces a non-positive filter
             denominator.
     """
-    x, spatial_shape = cube_to_samples(cube, axis=axis)
+    x, spatial_shape = _cube_samples(cube, axis)
     mean_vec = _as_vector(mean, x.shape[1], "mean")
     target_vec = _as_vector(target, x.shape[1], "target")
     solved_target = solve(cov_op, target_vec)
@@ -831,7 +817,7 @@ def gmm_cluster_background(
     """
     if n_clusters < 1:
         raise ValueError("n_clusters must be positive")
-    samples, spatial_shape = cube_to_samples(cube, axis=axis)
+    samples, spatial_shape = _cube_samples(cube, axis)
     valid = np.isfinite(samples).all(axis=1)
     x = samples[valid]
     labels = np.full(samples.shape[0], -1, dtype=np.intp)
@@ -888,7 +874,7 @@ def apply_cluster_mf(
             size, the target length disagrees with the band count, or a
             cluster produces a non-positive filter denominator.
     """
-    x, spatial_shape = cube_to_samples(cube, axis=axis)
+    x, spatial_shape = _cube_samples(cube, axis)
     labels = np.asarray(cluster.labels).reshape(-1)
     if labels.shape[0] != x.shape[0]:
         raise ValueError("cluster labels must match cube spatial shape")
