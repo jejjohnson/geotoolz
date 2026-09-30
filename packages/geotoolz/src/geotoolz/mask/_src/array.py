@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Literal
 
 import numpy as np
 import scipy.ndimage as ndi
@@ -16,43 +17,86 @@ from geotoolz._src.labels import (
 from geotoolz._src.shape import single_band
 
 
+#: The ``keep=`` flag shared by every geometry / DEM mask: which side of
+#: the region (polygon, elevation / slope interval, distance zone) is
+#: *kept*. The mask itself is True on the other side (True = drop).
+Keep = Literal["inside", "outside"]
+
+_KEEP_VALUES = ("inside", "outside")
+
+
+def _check_keep(keep: str, name: str) -> str:
+    """Validate a ``keep=`` flag (``"inside"`` or ``"outside"``).
+
+    Args:
+        keep: The flag value.
+        name: Caller name used in the error message.
+
+    Returns:
+        ``keep`` unchanged.
+
+    Raises:
+        ValueError: If ``keep`` is not ``"inside"`` or ``"outside"``.
+    """
+    if keep not in _KEEP_VALUES:
+        raise ValueError(f"{name}: `keep` must be 'inside' or 'outside'; got {keep!r}")
+    return keep
+
+
+def _drop_polarity(region: np.ndarray, keep: str, name: str) -> np.ndarray:
+    """Turn a True-in-region map into a True-means-drop mask.
+
+    ``keep="inside"`` keeps the region, so the mask is True *outside*
+    it; ``keep="outside"`` keeps everything but the region, so the mask
+    is True *inside* it.
+    """
+    return ~region if _check_keep(keep, name) == "inside" else region
+
+
 def combine_masks(
     masks: Sequence[Bool[np.ndarray, "*batch h w"]], op: str = "or"
 ) -> Bool[np.ndarray, "*batch h w"]:
-    """Combine boolean masks element-wise with a logical operator.
+    """Combine boolean masks element-wise with an n-ary logical operator.
 
-    All masks must share (or broadcast to) a common shape. Non-boolean
-    inputs are coerced with ``np.asarray(mask, dtype=bool)``.
+    All masks must have the *same* shape — they are not broadcast (a
+    ``(H, W)`` mask cannot be combined with a ``(C, H, W)`` stack; index
+    or ``np.broadcast_to`` it first). Non-boolean inputs are coerced with
+    ``np.asarray(mask, dtype=bool)``. Use :func:`invert_mask` for the
+    unary complement.
 
     Args:
-        masks: Non-empty sequence of boolean masks.
-        op: One of ``"or"``, ``"and"``, ``"xor"`` (n-ary reductions over
-            the sequence), or the unary ``"not"`` which expects exactly
-            one mask and returns its complement. Case-insensitive.
+        masks: Non-empty sequence of equally shaped boolean masks.
+        op: One of ``"or"``, ``"and"``, ``"xor"`` (reductions over the
+            sequence). Case-insensitive.
 
     Returns:
         The combined boolean mask.
 
     Raises:
-        ValueError: If ``masks`` is empty, ``op`` is unknown, or
-            ``op='not'`` receives more than one mask.
+        ValueError: If ``masks`` is empty, the shapes differ, or ``op``
+            is unknown.
     """
     if len(masks) == 0:
         raise ValueError("combine_masks: `masks` must not be empty")
 
     bool_masks = [np.asarray(mask, dtype=bool) for mask in masks]
-    op_norm = op.lower()
-    if op_norm == "or":
-        return np.logical_or.reduce(bool_masks)
-    if op_norm == "and":
-        return np.logical_and.reduce(bool_masks)
-    if op_norm == "xor":
-        return np.logical_xor.reduce(bool_masks)
-    if op_norm == "not":
-        if len(bool_masks) != 1:
-            raise ValueError("combine_masks: op='not' expects exactly one mask")
-        return ~bool_masks[0]
-    raise ValueError("combine_masks: `op` must be one of 'or', 'and', 'xor', 'not'")
+    shapes = {mask.shape for mask in bool_masks}
+    if len(shapes) > 1:
+        raise ValueError(
+            f"combine_masks: all masks must share one shape; got {sorted(shapes)}"
+        )
+    reducers = {
+        "or": np.logical_or,
+        "and": np.logical_and,
+        "xor": np.logical_xor,
+    }
+    try:
+        reducer = reducers[op.lower()]
+    except KeyError:
+        raise ValueError(
+            "combine_masks: `op` must be one of 'or', 'and', 'xor'"
+        ) from None
+    return reducer.reduce(bool_masks)
 
 
 def invert_mask(mask: Bool[np.ndarray, "*batch h w"]) -> Bool[np.ndarray, "*batch h w"]:
@@ -325,8 +369,9 @@ def altitude_mask(
     *,
     min_elev: float | None = None,
     max_elev: float | None = None,
+    keep: Keep = "inside",
 ) -> Bool[np.ndarray, "h w"]:
-    """Mask DEM cells inside the requested elevation interval.
+    """Mask DEM cells by an elevation interval (True = drop).
 
     Args:
         dem: Single-band elevation raster, ``(H, W)`` or ``(1, H, W)``.
@@ -334,14 +379,16 @@ def altitude_mask(
             leaves the interval open below.
         max_elev: Inclusive upper elevation bound. ``None`` leaves the
             interval open above.
+        keep: ``"inside"`` (default) keeps cells inside
+            ``[min_elev, max_elev]`` — the mask is True outside it;
+            ``"outside"`` keeps cells outside the interval.
 
     Returns:
-        Boolean ``(H, W)`` mask, True where the elevation lies inside
-        ``[min_elev, max_elev]``.
+        Boolean ``(H, W)`` mask, True where the cell should be dropped.
 
     Raises:
-        ValueError: If both bounds are ``None`` or ``dem`` is not a
-            single-band map.
+        ValueError: If both bounds are ``None``, ``keep`` is unknown, or
+            ``dem`` is not a single-band map.
     """
     if min_elev is None and max_elev is None:
         raise ValueError("altitude_mask: at least one elevation bound is required")
@@ -351,7 +398,7 @@ def altitude_mask(
         mask &= arr >= min_elev
     if max_elev is not None:
         mask &= arr <= max_elev
-    return mask
+    return _drop_polarity(mask, keep, "altitude_mask")
 
 
 def slope_degrees(
@@ -388,8 +435,9 @@ def slope_mask(
     *,
     min_slope_deg: float | None = None,
     max_slope_deg: float | None = None,
+    keep: Keep = "inside",
 ) -> Bool[np.ndarray, "h w"]:
-    """Mask DEM cells inside the requested slope interval.
+    """Mask DEM cells by a slope interval (True = drop).
 
     Slope is computed with :func:`slope_degrees`; see there for the
     pixel-size / unit contract.
@@ -402,14 +450,16 @@ def slope_mask(
             leaves the interval open below.
         max_slope_deg: Inclusive upper slope bound in degrees. ``None``
             leaves the interval open above.
+        keep: ``"inside"`` (default) keeps cells whose slope lies inside
+            ``[min_slope_deg, max_slope_deg]`` — the mask is True outside
+            it; ``"outside"`` keeps cells outside the interval.
 
     Returns:
-        Boolean ``(H, W)`` mask, True where the slope lies inside
-        ``[min_slope_deg, max_slope_deg]``.
+        Boolean ``(H, W)`` mask, True where the cell should be dropped.
 
     Raises:
-        ValueError: If both bounds are ``None`` or ``dem`` is not a
-            single-band map.
+        ValueError: If both bounds are ``None``, ``keep`` is unknown, or
+            ``dem`` is not a single-band map.
     """
     if min_slope_deg is None and max_slope_deg is None:
         raise ValueError("slope_mask: at least one slope bound is required")
@@ -419,44 +469,49 @@ def slope_mask(
         mask &= slope >= min_slope_deg
     if max_slope_deg is not None:
         mask &= slope <= max_slope_deg
-    return mask
+    return _drop_polarity(mask, keep, "slope_mask")
 
 
 def distance_mask(
     geometry_mask: Bool[np.ndarray, "h w"],
     distance: float,
     *,
-    inside: bool = True,
+    keep: Keep = "inside",
     pixel_size: tuple[float, float] = (1.0, 1.0),
 ) -> Bool[np.ndarray, "h w"]:
-    """Mask pixels within ``distance`` of an already-rasterized geometry.
+    """Mask pixels by their distance to an already-rasterized geometry.
 
-    Computes the Euclidean distance transform from the True pixels of
-    ``geometry_mask`` and thresholds it at ``distance``. As with
-    :func:`buffer_mask`, ``distance`` is measured in the units of
-    ``pixel_size`` — leave the default ``(1.0, 1.0)`` for pixel units,
-    or pass ``(abs(yres), abs(xres))`` for CRS units.
+    The zone within ``distance`` of the geometry is
+    :func:`buffer_mask` of ``geometry_mask`` in ``pixel_size`` units —
+    leave the default ``(1.0, 1.0)`` for pixel units, or pass
+    ``(abs(yres), abs(xres))`` for CRS units. The result follows the
+    package polarity (True = drop).
 
     Args:
         geometry_mask: Boolean ``(H, W)`` mask, True on the geometry.
         distance: Maximum distance from the geometry. Pixels on the
             geometry itself are at distance ``0``.
-        inside: If True (default), mark pixels within ``distance``;
-            if False, return the complement.
+        keep: ``"inside"`` (default) keeps pixels within ``distance`` —
+            the mask is True beyond it; ``"outside"`` keeps pixels beyond
+            ``distance`` and drops the zone around the geometry.
         pixel_size: ``(row_height, col_width)`` distance sampling.
 
     Returns:
-        Boolean ``(H, W)`` mask.
+        Boolean ``(H, W)`` mask, True where the pixel should be dropped.
 
     Raises:
-        ValueError: If ``distance`` is negative.
+        ValueError: If ``distance`` is negative or ``keep`` is unknown.
     """
     if distance < 0:
         raise ValueError("distance_mask: `distance` must be non-negative")
-    base = np.asarray(geometry_mask, dtype=bool)
-    dist = ndi.distance_transform_edt(~base, sampling=pixel_size)
-    out = dist <= distance
-    return out if inside else ~out
+    _check_keep(keep, "distance_mask")
+    within = buffer_mask(
+        np.asarray(geometry_mask, dtype=bool),
+        distance,
+        unit="meters",
+        pixel_size=pixel_size,
+    )
+    return _drop_polarity(within, keep, "distance_mask")
 
 
 def _apply_binary_morphology(
@@ -515,17 +570,14 @@ def apply_mask(
     arr: Shaped[np.ndarray, "*dims"],
     mask: Bool[np.ndarray, "*mask_dims"],
     fill_value: float = np.nan,
-    *,
-    invert: bool = False,
 ) -> Shaped[np.ndarray, "*dims"]:
     """Apply a boolean mask to a multi-band array, filling masked pixels.
 
-    By convention here, the mask is True where pixels should be
-    *masked out* — the extraction primitives in `geotoolz.qa`
-    (`mask_from_qa_bits`, `mask_from_scl`, ...) already follow that
-    convention ("True = cloudy"). The result is ``arr`` with
-    ``fill_value`` substituted wherever ``mask`` is True (or where
-    ``~mask`` is True if ``invert=True``).
+    The mask follows the package polarity: True where pixels should be
+    *masked out* (dropped) — see "Mask polarity" in ``docs/concepts.md``.
+    The result is ``arr`` with ``fill_value`` substituted wherever
+    ``mask`` is True. Flip a keep-polarity mask with :func:`invert_mask`
+    first.
 
     The mask broadcasts against the spatial trailing axes of ``arr``,
     so a ``(H, W)`` mask applies to every band of a ``(C, H, W)``
@@ -538,17 +590,12 @@ def apply_mask(
         fill_value: Value substituted where the mask says "drop".
             Default ``np.nan`` (the right choice for float arrays;
             switch to a sentinel like ``0`` for integer inputs).
-        invert: When True, fill where the mask is False instead of
-            True — i.e. treat the mask as "keep-only" rather than
-            "mask-out".
 
     Returns:
         Array of the same shape as ``arr``, masked pixels replaced
         with ``fill_value``.
     """
     bool_mask = np.asarray(mask, dtype=bool)
-    if invert:
-        bool_mask = ~bool_mask
     # `np.where` upcasts to the wider dtype of (fill_value, arr). For
     # floating arrays we want to preserve `arr.dtype` — otherwise
     # `fill_value=np.nan` (float64) silently doubles memory on float32

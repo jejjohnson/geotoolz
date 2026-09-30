@@ -212,8 +212,6 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
             "MaskWater",
         )
     },
-    "qa._src.operators.MaskFromQABits": {"band_idx": 0, "bits": [3, 4]},
-    "qa._src.operators.MaskFromSCL": {"band_idx": 0, "classes": [8, 9]},
     "radiometry._src.operators.ApplySRF": {
         "target_center_wavelengths": [500.0, 600.0],
         "target_fwhm": [20.0, 20.0],

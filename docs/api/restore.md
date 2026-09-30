@@ -7,7 +7,7 @@ Denoising, despeckling, destriping, gap-fill, and inpainting operators.
 - **SAR despeckle:** `DespeckleLee`, `DespeckleRefinedLee`, `DespeckleFrost`
 - **Destripe:** `DestripeColumn`
 - **Gap fill:** `GapFillNearest`, `GapFillIDW`, `GapFillInpaintBiharmonic`, `GapFillLaplacian`
-- **Outlier handling:** `OutlierMask`, `ReplaceOutliers`, `SaturationFlag`
+- **Outlier handling:** `OutlierMask`, `ReplaceOutliers` (saturation flags: `geotoolz.qa.MaskSaturated`)
 - **Histogram matching:** `MomentMatching`
 
 ::: geotoolz.restore

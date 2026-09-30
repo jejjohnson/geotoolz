@@ -25,8 +25,9 @@ promoted to float (see :func:`geotoolz._src.valid.carried_fill`); the
 exceptions are the ``GapFill*`` operators, which treat every invalid
 *element* as a gap and replace it with the interpolated value (only
 gaps they cannot fill hold the fill value), and the boolean
-:class:`OutlierMask` / :class:`SaturationFlag`, which report ``False``
-at invalid pixels and declare ``fill_value_default=False``.
+:class:`OutlierMask`, which reports ``False`` at invalid pixels and
+declares ``fill_value_default=False`` (saturation flags live in
+:class:`geotoolz.qa.MaskSaturated`, with the same nodata rule).
 """
 
 from __future__ import annotations
@@ -62,7 +63,6 @@ from geotoolz.restore._src.array import (
     outlier_mask,
     pca_denoise,
     replace_outliers,
-    saturation_flag,
 )
 
 
@@ -680,25 +680,3 @@ class ReplaceOutliers(Operator):
         arr, valid = _masked(gt)
         out = replace_outliers(arr, method=self.method, k=self.k, fill=self.fill)
         return _rewrap(gt, out, valid)
-
-
-class SaturationFlag(Operator):
-    """Flag saturated pixels as a boolean carrier.
-
-    Wraps :func:`~geotoolz.restore._src.array.saturation_flag`. When
-    ``threshold`` is ``None`` the default is ``np.iinfo(dtype).max`` for
-    integer carriers and ``1.0`` for floats. Nodata (fill /
-    non-finite) pixels are reported as ``False`` (not saturated), so a
-    fill value at the dtype maximum is never flagged.
-
-    Examples:
-        >>> gz.restore.SaturationFlag()(uint16_scene)
-        >>> gz.restore.SaturationFlag(threshold=0.95)(reflectance_scene)
-    """
-
-    def __init__(self, *, threshold: float | None = None) -> None:
-        self.threshold = threshold
-
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        flag = saturation_flag(np.asarray(gt), threshold=self.threshold).astype(bool)
-        return wrap_filled(gt, flag, fill_value_default=False, valid=_valid(gt))

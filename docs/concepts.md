@@ -30,7 +30,7 @@ flowchart TB
 
 The composition core is **carrier-agnostic**. The same algebra runs on
 `GeoTensor`s in production and on scalars or ndarrays in tests. Domain
-operators (`NDVI`, `MaskFromSCL`, …) narrow to `GeoTensor` at their own
+operators (`NDVI`, `MaskClouds`, …) narrow to `GeoTensor` at their own
 signatures; the core stays generic.
 
 ![Pipeline shapes — linear, branching, DAG](assets/composition-shapes.png){ loading=lazy }
@@ -373,6 +373,45 @@ band in every family:
   raises `ValueError`. The single documented exception is `plume.SBMP`, which
   maps its `"B11"`/`"B12"` defaults onto the Sentinel-2 L2A order for a plain
   12-band array only (`SENTINEL2_L2A_BANDS`).
+
+## Mask polarity
+
+*Decision record (#154).* Every masking mask — produced by
+`geotoolz.qa` / `geotoolz.mask` or consumed by `ApplyMask` — uses one
+polarity: **`True` = masked out (drop the pixel)**. (Detection outputs
+such as segmentation or plume masks mark the detected feature; feed them
+to `ApplyMask` directly to drop it, or through `InvertMask` to keep it.)
+
+- **Producers.** `geotoolz.qa` (`MaskClouds`, `MaskNoData`, `MaskInvalid`,
+  `MaskSaturated`, the sensor presets), `restore.OutlierMask`, and every
+  geometry / DEM mask in `geotoolz.mask` (`PolygonMask`, `BBoxMask`,
+  `DistanceMask`, `LandMask`, `OceanMask`, `CountryMask`, `AltitudeMask`,
+  `SlopeMask`, and the `altitude_mask` / `slope_mask` / `distance_mask`
+  primitives) return `True` where the pixel should be dropped.
+- **Region masks choose a side with `keep=`.** Geometry and DEM masks
+  describe a region (a polygon, an elevation or slope interval, a
+  distance zone) and take `keep="inside"` (default) or `keep="outside"`
+  — the side that survives. With the default, the mask is `True`
+  *outside* the region, so `ApplyMask(mask=BBoxMask(bounds=aoi))` keeps
+  the AOI and `ApplyMask(mask=LandMask())` keeps land.
+- **Consumers.** `ApplyMask` / `apply_mask` fill where the mask is
+  `True`; `CombineMasks(op="or")` drops a pixel any input drops. There is
+  no `invert=` switch on the consumers: a keep-polarity mask from
+  elsewhere (e.g. georeader's `validmask()`) is flipped explicitly with
+  `InvertMask` / `invert_mask`.
+- **Invalid pixels.** `qa.MaskInvalid` is georeader's `invalidmask()`
+  reduced over bands with the package's nodata rule (a `NaN` fill matches
+  `NaN`; non-finite values are invalid; see `geotoolz._src.valid`).
+- **Morphology is polarity-neutral.** `DilateMask`, `BufferMask`,
+  `RemoveSmallObjects`, … grow / shrink / clean the `True` pixels,
+  whatever they mean.
+
+*Why:* `apply_mask`, all of `qa` and every consumer already assumed
+`True` = drop; the geometry masks were the odd ones out, which made
+`ApplyMask(mask=BBoxMask(...))` delete the AOI and let
+`CombineMasks("or")` silently mix polarities. A single polarity with a
+named side (`keep=`) removes the need for `invert=` flags at every
+consumer.
 
 ## Related pages
 
