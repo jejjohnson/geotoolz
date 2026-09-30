@@ -61,7 +61,10 @@ class SklearnOp(Operator):
         task: Estimator method used at apply time. ``None`` auto-detects.
         nan_fit: NaN strategy used while fitting.
         nan_transform: NaN strategy used while applying the estimator.
-        state_path: Optional joblib path to load immediately.
+        state_path: Optional joblib path to load immediately, in the
+            constructor. Loading unpickles the file, which can execute
+            arbitrary code: only pass files from a trusted source (see
+            :meth:`load_state`).
         out_band_names: Names of the output bands, written to
             ``attrs["band_names"]`` of GeoTensor outputs (must match the
             output band count). ``None`` keeps the input's band keys when
@@ -161,14 +164,28 @@ class SklearnOp(Operator):
 
         return getattr(self._geo_estimator, self._task)(gt)
 
-    def save_state(self, path: str | Path) -> None:
-        """Persist fitted estimator state to ``path``."""
-        self._geo_estimator.save_state(path)
+    def save_state(self, path: str | Path, *, write_meta: bool = False) -> None:
+        """Persist fitted estimator state to ``path`` (a joblib pickle).
+
+        Args:
+            path: Destination file.
+            write_meta: Also write a timestamped ``<path>.meta.json``
+                sidecar (scikit-learn version, fit shape / sample count,
+                UTC ``fit_timestamp``); off by default. See
+                :meth:`GeoTensorEstimator.save_state`.
+        """
+        self._geo_estimator.save_state(path, write_meta=write_meta)
         self.estimator = self._geo_estimator.estimator
         self.state_path = str(path)
 
     def load_state(self, path: str | Path) -> None:
-        """Load fitted estimator state from ``path``."""
+        """Load fitted estimator state from ``path``.
+
+        Warning:
+            The state file is a joblib pickle and unpickling can execute
+            arbitrary code. Only load files you created or that come from
+            a source you trust as much as the code you run.
+        """
         self._geo_estimator.load_state(path)
         self.estimator = self._geo_estimator.estimator
         self.state_path = str(path)

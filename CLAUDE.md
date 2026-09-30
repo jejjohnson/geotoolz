@@ -103,7 +103,12 @@ geotoolz/<family>/
 
 - A primitive lives in `array.py` and is exported from the family
   `__init__` (Tier-A names stay out of the top-level `gz.*` namespace; every
-  public Operator class is top-level).
+  public Operator class is top-level, including subnamespaces such as
+  `geom.coregister`, except the justified few listed in the
+  `geotoolz/__init__.py` docstring). Each public name has one home family —
+  no cross-family re-exports. Enforced by
+  `tests/test_geotoolz.py::test_public_operators_exported` and
+  `::test_one_home_per_public_name`.
 - Plumbing shared by two or more families (band resolution, nodata,
   rewrapping, labelling, sample flattening, …) goes in `geotoolz/_src/`
   (`bands.py`, `valid.py`, `wrap.py`, `labels.py`, `samples.py`, …). A family
@@ -115,7 +120,11 @@ geotoolz/<family>/
   (`SklearnOp`, the `Pixelwise*` wrappers, `ModelOp`).
 - Not families: `readers/` (sensor-reader framework — `_src/` plus public
   per-sensor subpackages such as `readers.toy_sensor`), the top-level
-  `patch_ops.py` geopatcher bridge, and the deprecated `model.py` alias.
+  `patch_ops.py` geopatcher bridge (optional `[patch]` extra).
+- Removals and renames are outright — no deprecated aliases or shim modules
+  (`tests/test_geotoolz.py::test_removed_modules_are_gone`).
+- Constructors do no network I/O: downloads (e.g. the Natural Earth
+  masks) are deferred to the first call.
 
 Each package's public API is re-exported through its `src/<import>/__init__.py`.
 Per-package docs live under `packages/*/docs/`; the root `docs/` + `mkdocs.yml`

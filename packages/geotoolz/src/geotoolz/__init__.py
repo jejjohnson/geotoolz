@@ -9,18 +9,26 @@ adds the per-domain operator families (`radiometry`, `indices`, `qa`,
     import geotoolz as gz
     pipe = gz.Sequential([gz.Tap(print), gz.Identity()])
 
-Re-export policy: every public **Operator class** (plus a few
-constants like the ``SCL`` sets) is available at the top level;
+Re-export policy: every public **Operator class** of every family
+(including subnamespaces such as ``geom.coregister``) plus the ``SCL``
+class sets and ``SENSOR_QA_REGISTRY`` is available at the top level;
 the **Tier-A numpy primitives** (``ndvi``, ``apply_mask``,
-``percentile_clip``, ...) live in their submodules only. Each operator
-is defined in exactly one family, so every top-level name is unambiguous
-(``ApplySRF`` is ``radiometry``'s, ``NormalizedDifference`` is
-``indices``').
+``percentile_clip``, ...) and other helpers live in their submodules
+only. Each public name has exactly one home family, so every top-level
+name is unambiguous. ``tests/test_geotoolz.py::test_public_operators_exported``
+enforces this; the only exceptions are:
 
-``augment.Compose`` (a probability-gated ``Sequential`` of
-augmentations) is deliberately *not* re-exported: at the top level it
-would sit next to pipekit's right-to-left ``compose`` and read as a
-generic composer, so it is spelled ``gz.augment.Compose``.
+- ``augment.Compose`` (a probability-gated ``Sequential`` of
+  augmentations): at the top level it would sit next to pipekit's
+  right-to-left ``compose`` and read as a generic composer, so it is
+  spelled ``gz.augment.Compose``.
+- ``io.SourceOperator`` / ``io.SinkOperator``: abstract base classes
+  for writing new readers / writers (they have no ``_apply``), not
+  pipeline steps, and ``SinkOperator`` would sit next to pipekit's
+  ``Sink``. Subclass them from ``gz.io``.
+- ``patch_ops``: an optional extra (below); ``import geotoolz`` must not
+  require geopatcher, so its operators are only reachable as
+  ``gz.patch_ops.*``.
 
 The four-axis Patcher framework lives in the standalone
 [`geopatcher`](https://github.com/jejjohnson/geopatcher) package. Install
@@ -144,6 +152,14 @@ from geotoolz.geom import (
     Stitch,
     Tile,
     Vectorize,
+)
+from geotoolz.geom.coregister import (
+    PointCloudToRaster,
+    PointsToRaster,
+    RasterToPointCloud,
+    RasterToPoints,
+    RasterToRasterLike,
+    VectorToRasterAgg,
 )
 from geotoolz.indices import (
     ARVI,
@@ -282,7 +298,11 @@ from geotoolz.qa import (
     S2SCL,
     SCL,
     SCL_CLOUDS,
+    SCL_CLOUDS_AND_INVALID,
     SCL_INVALID,
+    SCL_LAND,
+    SCL_WATER,
+    SENSOR_QA_REGISTRY,
     CloudSEN12,
     DecodeBitmask,
     LandsatQA_PIXEL,
@@ -407,7 +427,11 @@ __all__ = [
     "SBMP",
     "SCL",
     "SCL_CLOUDS",
+    "SCL_CLOUDS_AND_INVALID",
     "SCL_INVALID",
+    "SCL_LAND",
+    "SCL_WATER",
+    "SENSOR_QA_REGISTRY",
     "SLIC",
     "AdaptiveWindowBackground",
     "AltitudeMask",
@@ -580,6 +604,8 @@ __all__ = [
     "PlumeMask",
     "PlumeQNDFeatures",
     "PlumeShapeFilter",
+    "PointCloudToRaster",
+    "PointsToRaster",
     "PolygonMask",
     "PowerScale",
     "ProfileLine",
@@ -591,6 +617,9 @@ __all__ = [
     "RandomRotate90",
     "RandomShift",
     "RandomWalker",
+    "RasterToPointCloud",
+    "RasterToPoints",
+    "RasterToRasterLike",
     "Rasterize",
     "RasterizeLike",
     "ReadBounds",
@@ -651,6 +680,7 @@ __all__ = [
     "ToFloat32",
     "TrueColor",
     "ValidateMFInputs",
+    "VectorToRasterAgg",
     "Vectorize",
     "Watershed",
     "WindAdvectionCone",

@@ -645,8 +645,9 @@ def test_threshold_round_trips_and_is_top_level() -> None:
 
 def test_plume_mask_is_threshold_plus_area_filter() -> None:
     """``PlumeMask`` shares the segment thresholding primitives."""
-    assert gz.plume.otsu_threshold is gz.segment.otsu_threshold
-    assert gz.plume.resolve_threshold is gz.segment.resolve_threshold
+    # One home per public name: plume uses, but does not re-export, them.
+    assert not hasattr(gz.plume, "otsu_threshold")
+    assert not hasattr(gz.plume, "resolve_threshold")
     rng = np.random.default_rng(0)
     values = rng.normal(size=(1, 16, 16))
     for threshold in ("otsu", "percentile:90", 0.5):

@@ -262,6 +262,7 @@ UNBUILDABLE: dict[str, str] = {
     "matched_filter._src.operators.NonlinearTargetFromObs": "needs an obs_model",
     "plume._src.operators.CrossSectionalFlux": "needs a plume_mask GeoTensor",
     "plume._src.operators.IMEEstimate": "needs a plume_mask GeoTensor",
+    "mask._src.operators._NaturalEarthMask": "private base class",
     "qa._src.operators._QAMask": "private base class",
 }
 
