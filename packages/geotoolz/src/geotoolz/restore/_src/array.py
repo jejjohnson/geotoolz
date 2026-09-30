@@ -221,13 +221,13 @@ def destripe_column(
     arr: Num[np.ndarray, "*batch h w"],
     *,
     method: Literal["mean", "median", "moment_matching"] = "mean",
-    axis: Literal["column", "row"] = "column",
+    direction: Literal["column", "row"] = "column",
     window: int | None = 21,
 ) -> Float[np.ndarray, "*batch h w"]:
     r"""Remove row or column striping by matching per-line statistics.
 
-    For ``axis="column"`` (default) every column ``j`` is summarised over
-    its rows; ``axis="row"`` swaps the roles. Leading axes are independent
+    For ``direction="column"`` (default) every column ``j`` is summarised over
+    its rows; ``direction="row"`` swaps the roles. Leading axes are independent
     planes.
 
     ``method="mean"`` / ``"median"`` remove a per-column *offset*::
@@ -255,7 +255,7 @@ def destripe_column(
         arr: Array of shape ``(..., H, W)``. NaNs are preserved and
             excluded from the statistics.
         method: ``"mean"``, ``"median"`` or ``"moment_matching"``.
-        axis: Striping direction (``"column"`` for vertical stripes,
+        direction: Striping direction (``"column"`` for vertical stripes,
             ``"row"`` for horizontal).
         window: Number of neighbouring columns (rows) averaged into the
             moment-matching reference, or ``None`` for a global
@@ -280,8 +280,8 @@ def destripe_column(
         raise ValueError("destripe_column expects at least two spatial dimensions")
     if method not in {"mean", "median", "moment_matching"}:
         raise ValueError("method must be 'mean', 'median', or 'moment_matching'")
-    spatial_axis = -1 if axis == "column" else -2
-    reduce_axis = -2 if axis == "column" else -1
+    spatial_axis = -1 if direction == "column" else -2
+    reduce_axis = -2 if direction == "column" else -1
     # All-NaN lines (e.g. a nodata column) have NaN statistics by design;
     # silence numpy's empty-slice warnings for them.
     with warnings.catch_warnings():
@@ -337,7 +337,7 @@ def gaussian_denoise(
 
 
 def median_denoise(
-    arr: Num[np.ndarray, "*batch h w"], *, size: int = 3
+    arr: Num[np.ndarray, "*batch h w"], *, window: int = 3
 ) -> Float[np.ndarray, "*batch h w"]:
     """Median smooth over the trailing two (spatial) axes.
 
@@ -348,7 +348,7 @@ def median_denoise(
 
     Args:
         arr: Array of shape ``(..., H, W)``.
-        size: Side length of the median window. Must be positive.
+        window: Side length of the median window. Must be positive.
 
     Returns:
         Smoothed array with the same shape and NaN positions as ``arr``.
@@ -356,7 +356,7 @@ def median_denoise(
     values = np.asarray(arr, dtype=float)
     filled = np.where(np.isfinite(values), values, np.nanmedian(values))
     out = ndimage.median_filter(
-        filled, size=_spatial_size(values, size), mode="nearest"
+        filled, size=_spatial_size(values, window), mode="nearest"
     )
     return _preserve_nan(values, out)
 
@@ -402,8 +402,8 @@ def bilateral_denoise(
 def nl_means(
     arr: Num[np.ndarray, "*batch h w"],
     *,
-    patch_size: int = 5,
-    patch_distance: int = 6,
+    window: int = 5,
+    search_radius: int = 6,
     h: float = 0.1,
 ) -> Float[np.ndarray, "*batch h w"]:
     """Lightweight non-local-means-style denoiser.
@@ -413,7 +413,7 @@ def nl_means(
     scikit-image as a dependency. This implementation is a
     *dependency-light approximation*: it computes a wide Gaussian
     smoothing estimate whose effective radius is set by
-    ``(patch_distance + patch_size) / 6``, then blends it with the
+    ``(search_radius + window) / 6``, then blends it with the
     original using the same range-weighted scheme as
     :func:`bilateral_denoise` with bandwidth ``h``.
 
@@ -422,14 +422,14 @@ def nl_means(
 
     Args:
         arr: Array of shape ``(..., H, W)``.
-        patch_size: Nominal patch side length (pixels).
-        patch_distance: Nominal search-window radius (pixels).
+        window: Nominal patch side length (pixels).
+        search_radius: Nominal search-window radius (pixels).
         h: Range bandwidth (data units).
 
     Returns:
         Denoised array with the same shape and NaN positions as ``arr``.
     """
-    sigma = max((float(patch_distance) + float(patch_size)) / 6.0, 0.1)
+    sigma = max((float(search_radius) + float(window)) / 6.0, 0.1)
     smooth = gaussian_denoise(arr, sigma=sigma)
     values = np.asarray(arr, dtype=float)
     weights = np.exp(-0.5 * ((values - smooth) / max(float(h), _EPSILON)) ** 2)
@@ -943,7 +943,7 @@ def replace_outliers(
     *,
     method: Literal["mad", "zscore"] = "mad",
     k: float = 3.0,
-    fill: Literal["median", "nan", "interp"] = "median",
+    strategy: Literal["median", "nan", "interp"] = "median",
 ) -> Float[np.ndarray, "*batch h w"]:
     """Replace detected outliers with a scalar or nearest-neighbour fill.
 
@@ -951,7 +951,7 @@ def replace_outliers(
         arr: Input array.
         method: Outlier-detection strategy. See :func:`outlier_mask`.
         k: Outlier threshold in scaled units.
-        fill: ``"median"`` replaces outliers with the median of the
+        strategy: ``"median"`` replaces outliers with the median of the
             inliers; ``"nan"`` sets them to NaN; ``"interp"`` fills
             them by nearest-neighbour interpolation over the spatial
             axes via :func:`gap_fill_nearest`.
@@ -960,15 +960,15 @@ def replace_outliers(
         Array of the same shape as ``arr`` with outliers replaced.
 
     Raises:
-        ValueError: If ``method`` or ``fill`` is not one of the
+        ValueError: If ``method`` or ``strategy`` is not one of the
             documented choices.
     """
     values = np.asarray(arr, dtype=float)
     mask = outlier_mask(values, method=method, k=k)
-    if fill == "median":
+    if strategy == "median":
         return np.where(mask, np.nanmedian(values[~mask]), values)
-    if fill == "nan":
+    if strategy == "nan":
         return np.where(mask, np.nan, values)
-    if fill == "interp":
+    if strategy == "interp":
         return gap_fill_nearest(np.where(mask, np.nan, values))
-    raise ValueError("fill must be 'median', 'nan', or 'interp'")
+    raise ValueError("strategy must be 'median', 'nan', or 'interp'")

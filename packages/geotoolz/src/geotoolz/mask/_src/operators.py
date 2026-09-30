@@ -569,40 +569,40 @@ class BufferMask(Operator):
 
 
 class RemoveSmallObjects(Operator):
-    """Remove connected True components smaller than ``min_size`` pixels.
+    """Remove connected True components smaller than ``min_area_px`` pixels.
 
     Wraps :func:`geotoolz.mask.remove_small_objects` (4-connectivity).
     Accepts a GeoTensor or a plain ndarray and returns the same carrier
     kind.
 
     Args:
-        min_size: Minimum component area, in pixels, to keep.
+        min_area_px: Minimum component area, in pixels, to keep.
     """
 
-    def __init__(self, *, min_size: int) -> None:
-        self.min_size = min_size
+    def __init__(self, *, min_area_px: int) -> None:
+        self.min_area_px = min_area_px
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        out = remove_small_objects(np.asarray(mask), self.min_size)
+        out = remove_small_objects(np.asarray(mask), self.min_area_px)
         return wrap_like(mask, out, fill_value_default=False)
 
 
 class RemoveSmallHoles(Operator):
-    """Fill enclosed False components up to ``area_threshold`` pixels.
+    """Fill enclosed False components up to ``max_hole_area_px`` pixels.
 
     Wraps :func:`geotoolz.mask.remove_small_holes`; holes touching the
     image border are never filled. Accepts a GeoTensor or a plain
     ndarray and returns the same carrier kind.
 
     Args:
-        area_threshold: Maximum hole area, in pixels, to fill.
+        max_hole_area_px: Maximum hole area, in pixels, to fill.
     """
 
-    def __init__(self, *, area_threshold: int) -> None:
-        self.area_threshold = area_threshold
+    def __init__(self, *, max_hole_area_px: int) -> None:
+        self.max_hole_area_px = max_hole_area_px
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        out = remove_small_holes(np.asarray(mask), self.area_threshold)
+        out = remove_small_holes(np.asarray(mask), self.max_hole_area_px)
         return wrap_like(mask, out, fill_value_default=False)
 
 
@@ -615,8 +615,8 @@ class CleanMask(Operator):
     kind.
 
     Args:
-        min_object_size: Components smaller than this are removed.
-        max_hole_size: Enclosed holes up to this size are filled.
+        min_area_px: Components smaller than this are removed.
+        max_hole_area_px: Enclosed holes up to this size are filled.
         close_iter: Binary-closing iterations applied last; ``0`` skips
             the closing step.
     """
@@ -624,19 +624,19 @@ class CleanMask(Operator):
     def __init__(
         self,
         *,
-        min_object_size: int = 25,
-        max_hole_size: int = 25,
+        min_area_px: int = 25,
+        max_hole_area_px: int = 25,
         close_iter: int = 1,
     ) -> None:
-        self.min_object_size = min_object_size
-        self.max_hole_size = max_hole_size
+        self.min_area_px = min_area_px
+        self.max_hole_area_px = max_hole_area_px
         self.close_iter = close_iter
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         out = clean_mask(
             np.asarray(mask),
-            min_object_size=self.min_object_size,
-            max_hole_size=self.max_hole_size,
+            min_area_px=self.min_area_px,
+            max_hole_area_px=self.max_hole_area_px,
             close_iter=self.close_iter,
         )
         return wrap_like(mask, out, fill_value_default=False)

@@ -45,7 +45,7 @@ class LabelConnectedComponents(Operator):
         connectivity: ``4`` (edge neighbours, default) or ``8`` (edge +
             diagonal neighbours).
         background: Pixel value treated as background and labelled ``0``.
-        min_area: Minimum component size in pixels; smaller components
+        min_area_px: Minimum component size in pixels; smaller components
             become background. ``0`` keeps every component.
     """
 
@@ -54,18 +54,18 @@ class LabelConnectedComponents(Operator):
         *,
         connectivity: Connectivity = 4,
         background: int = 0,
-        min_area: int = 0,
+        min_area_px: int = 0,
     ) -> None:
         self.connectivity = connectivity
         self.background = background
-        self.min_area = min_area
+        self.min_area_px = min_area_px
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         values = single_band(np.asarray(gt), name="LabelConnectedComponents")
         labels = label_components(
             (values != self.background) & single_band(valid_pixels(gt)),
             connectivity=self.connectivity,
-            min_area=self.min_area,
+            min_area_px=self.min_area_px,
         )
         return wrap_like(gt, labels, fill_value_default=0)
 

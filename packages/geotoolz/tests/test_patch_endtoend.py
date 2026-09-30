@@ -54,9 +54,9 @@ def test_sliding_window_inference_boxcar() -> None:
     double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
     pipe = Sequential(
         [
-            GridSampler(patcher),
-            ApplyToChips(double),
-            MergePatches(SpatialOverlapAdd(), domain=field.reader),
+            GridSampler(patcher=patcher),
+            ApplyToChips(operator=double),
+            MergePatches(aggregation=SpatialOverlapAdd(), domain=field.reader),
         ]
     )
     result = pipe(field)
@@ -77,9 +77,9 @@ def test_sliding_window_inference_hann_overlap() -> None:
     double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
     pipe = Sequential(
         [
-            GridSampler(patcher),
-            ApplyToChips(double),
-            MergePatches(SpatialOverlapAdd(), domain=field.reader),
+            GridSampler(patcher=patcher),
+            ApplyToChips(operator=double),
+            MergePatches(aggregation=SpatialOverlapAdd(), domain=field.reader),
         ]
     )
     result = pipe(field)

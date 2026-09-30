@@ -216,13 +216,13 @@ def percentile_clip(
     lower: float = 2.0,
     upper: float = 98.0,
     *,
-    axis: int | tuple[int, ...] | None = (-2, -1),
+    reduce_axes: int | tuple[int, ...] | None = (-2, -1),
 ) -> Float[np.ndarray, "*dims"]:
     r"""Robust contrast stretch using percentile thresholds.
 
     Computes :math:`v_{lo} = P_{\text{lower}}(\text{arr})` and
     :math:`v_{hi} = P_{\text{upper}}(\text{arr})` over the configured
-    ``axis``, then min-max normalises ``arr`` between them with
+    ``reduce_axes``, then min-max normalises ``arr`` between them with
     clipping. The percentile thresholds are far more robust than fixed
     ``vmin / vmax`` against bright outliers (cumulus clouds, specular
     water glint, sensor saturation).
@@ -232,9 +232,9 @@ def percentile_clip(
     are ``np.nanpercentile`` (NaN pixels never shift the thresholds and
     stay NaN in the output).
 
-    Default ``axis=(-2, -1)`` computes percentiles per leading band /
+    Default ``reduce_axes=(-2, -1)`` computes percentiles per leading band /
     time slice — the typical "RGB display per band" mode. Pass
-    ``axis=None`` for a single global percentile across the whole
+    ``reduce_axes=None`` for a single global percentile across the whole
     array.
 
     Args:
@@ -242,7 +242,7 @@ def percentile_clip(
         lower: Lower percentile (in ``[0, 100]``). Default ``2.0``.
         upper: Upper percentile. Default ``98.0``. Must be strictly
             greater than ``lower``.
-        axis: Axis (or tuple of axes) to compute percentiles over.
+        reduce_axes: Axis (or tuple of axes) to compute percentiles over.
             ``(-2, -1)`` -> per-band/-time stretch. ``None`` -> global.
 
     Returns:
@@ -251,7 +251,7 @@ def percentile_clip(
     Raises:
         ValueError: If ``upper <= lower``.
     """
-    return percentile_stretch(arr, lower, upper, axis=axis)
+    return percentile_stretch(arr, lower, upper, reduce_axes=reduce_axes)
 
 
 def gamma_correct(
@@ -316,14 +316,14 @@ def dos1(
     reflectance: Float[np.ndarray, "*dims"],
     dark_percentile: float = 1.0,
     *,
-    axis: int | tuple[int, ...] | None = (-2, -1),
+    reduce_axes: int | tuple[int, ...] | None = (-2, -1),
 ) -> Float[np.ndarray, "*dims"]:
     """Apply a simple DOS1 dark-object subtraction to reflectance.
 
     Args:
         reflectance: TOA reflectance array.
         dark_percentile: Percentile used as the dark-object estimate.
-        axis: Axes over which to estimate the dark-object value.
+        reduce_axes: Axes over which to estimate the dark-object value.
 
     Returns:
         Reflectance with per-band dark-object values subtracted and clipped
@@ -333,7 +333,9 @@ def dos1(
         raise ValueError(
             f"dos1 requires dark_percentile in [0, 100]; got {dark_percentile}"
         )
-    dark = np.nanpercentile(reflectance, dark_percentile, axis=axis, keepdims=True)
+    dark = np.nanpercentile(
+        reflectance, dark_percentile, axis=reduce_axes, keepdims=True
+    )
     return np.maximum(reflectance - dark, 0.0)
 
 

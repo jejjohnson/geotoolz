@@ -244,8 +244,8 @@ def test_ndvi_uint16_dn() -> None:
     cube = np.array([[[1000]], [[3000]]], dtype=np.uint16)
 
     np.testing.assert_allclose(normalized_difference(cube, 0, 1), [[-0.5]])
-    np.testing.assert_allclose(np.asarray(NDVI(nir_idx=0, red_idx=1)(cube)), -0.5)
-    out = NDVI(nir_idx=0, red_idx=1)(toy_geotensor(cube))
+    np.testing.assert_allclose(np.asarray(NDVI(nir=0, red=1)(cube)), -0.5)
+    out = NDVI(nir=0, red=1)(toy_geotensor(cube))
     np.testing.assert_allclose(np.asarray(out), -0.5)
     assert np.asarray(out).dtype == np.float32
 
@@ -289,7 +289,7 @@ def test_index_primitives_uint16_match_float(fn, idx) -> None:
 
 
 def test_ndvi_preserves_transform_and_crs(reflectance_4band: GeoTensor) -> None:
-    out = NDVI(nir_idx=3, red_idx=2)(reflectance_4band)
+    out = NDVI(nir=3, red=2)(reflectance_4band)
     assert isinstance(out, GeoTensor)
     assert out.transform == reflectance_4band.transform
     assert str(out.crs) == "EPSG:32629"
@@ -303,8 +303,8 @@ def test_ndvi_preserves_transform_and_crs(reflectance_4band: GeoTensor) -> None:
 def test_normalized_difference_op_matches_named_subclass(
     reflectance_4band: GeoTensor,
 ) -> None:
-    via_named = NDVI(nir_idx=3, red_idx=2, eps=0.0)(reflectance_4band)
-    via_generic = NormalizedDifference(a_idx=3, b_idx=2, eps=0.0)(reflectance_4band)
+    via_named = NDVI(nir=3, red=2, eps=0.0)(reflectance_4band)
+    via_generic = NormalizedDifference(a=3, b=2, eps=0.0)(reflectance_4band)
     np.testing.assert_allclose(np.asarray(via_named), np.asarray(via_generic))
 
 
@@ -312,7 +312,7 @@ def test_all_indices_run_without_crashing(reflectance_7band: GeoTensor) -> None:
     """Smoke test every Operator's _apply path."""
     for op in [
         ARVI(),
-        BAIS2(red_idx=2, red_edge1_idx=4, red_edge2_idx=5, nir_idx=3, swir2_idx=6),
+        BAIS2(red=2, red_edge1=4, red_edge2=5, nir=3, swir2=6),
         BSI(),
         ClayMinerals(),
         EVI2(),
@@ -329,8 +329,8 @@ def test_all_indices_run_without_crashing(reflectance_7band: GeoTensor) -> None:
         NBR2(),
         SAVI(),
         EVI(),
-        CIRI(cirrus_idx=6),
-        NormalizedDifference(a_idx=3, b_idx=2),
+        CIRI(cirrus=6),
+        NormalizedDifference(a=3, b=2),
     ]:
         out = op(reflectance_7band)
         assert isinstance(out, GeoTensor)
@@ -345,7 +345,7 @@ def test_band_name_resolution_uses_geotensor_descriptions() -> None:
     gt.attrs["descriptions"] = ("B02", "B03", "B04", "B08")
 
     via_names = NDVI(red="B04", nir="B08", eps=0.0)(gt)
-    via_indices = NDVI(red_idx=2, nir_idx=3, eps=0.0)(gt)
+    via_indices = NDVI(red=2, nir=3, eps=0.0)(gt)
 
     np.testing.assert_allclose(np.asarray(via_names), np.asarray(via_indices))
 
@@ -370,7 +370,7 @@ def test_band_name_resolution_falls_back_to_band_names() -> None:
     gt.attrs["band_names"] = ("blue", "green", "red", "nir")
 
     via_names = NDVI(red="red", nir="nir", eps=0.0)(gt)
-    via_indices = NDVI(red_idx=2, nir_idx=3, eps=0.0)(gt)
+    via_indices = NDVI(red=2, nir=3, eps=0.0)(gt)
     np.testing.assert_allclose(np.asarray(via_names), np.asarray(via_indices))
 
 
@@ -386,8 +386,8 @@ def test_band_name_resolution_band_names_takes_precedence() -> None:
     gt.attrs["descriptions"] = ("X", "_", "_", "_")
     gt.attrs["band_names"] = ("_", "_", "_", "X")
 
-    out = NDVI(red="X", nir_idx=0)(gt)
-    expected = NDVI(red_idx=3, nir_idx=0)(gt)
+    out = NDVI(red="X", nir=0)(gt)
+    expected = NDVI(red=3, nir=0)(gt)
     np.testing.assert_allclose(np.asarray(out), np.asarray(expected))
 
 
@@ -462,12 +462,12 @@ def test_dnbr_raises_on_grid_mismatch() -> None:
 
 
 def test_append_index_concatenates_back(reflectance_4band: GeoTensor) -> None:
-    op = AppendIndex(index_op=NDVI(nir_idx=3, red_idx=2))
+    op = AppendIndex(index_op=NDVI(nir=3, red=2))
     out = op(reflectance_4band)
     assert isinstance(out, GeoTensor)
     assert out.shape == (5, 8, 8)  # original 4 bands + 1 NDVI channel
     # The new last channel should equal a direct NDVI call.
-    expected_ndvi = np.asarray(NDVI(nir_idx=3, red_idx=2)(reflectance_4band))
+    expected_ndvi = np.asarray(NDVI(nir=3, red=2)(reflectance_4band))
     np.testing.assert_allclose(np.asarray(out)[-1], expected_ndvi, rtol=1e-6)
 
 
@@ -496,7 +496,7 @@ def test_index_output_drops_band_names() -> None:
     gt = toy_geotensor(
         np.full((4, 2, 2), 0.5), attrs={"band_names": ["a", "b", "c", "d"], "k": 1}
     )
-    out = NDVI(red_idx=2, nir_idx=3)(gt)
+    out = NDVI(red=2, nir=3)(gt)
     assert out.attrs == {"k": 1}
     assert out.attrs is not gt.attrs
 
@@ -508,7 +508,7 @@ def test_index_output_drops_band_names() -> None:
 
 _FILL_OPS = [
     ARVI(),
-    BAIS2(red_idx=2, red_edge1_idx=4, red_edge2_idx=5, nir_idx=3, swir2_idx=6),
+    BAIS2(red=2, red_edge1=4, red_edge2=5, nir=3, swir2=6),
     BSI(),
     ClayMinerals(),
     EVI(),
@@ -525,8 +525,8 @@ _FILL_OPS = [
     NDVI(),
     NDWI(),
     SAVI(),
-    CIRI(cirrus_idx=6),
-    NormalizedDifference(a_idx=3, b_idx=2),
+    CIRI(cirrus=6),
+    NormalizedDifference(a=3, b=2),
 ]
 
 
@@ -614,14 +614,14 @@ def test_index_of_integer_dn_declares_nan_fill() -> None:
 @pytest.mark.parametrize(
     "op",
     [
-        NDVI(nir_idx=3, red_idx=2),
-        NormalizedDifference(a_idx=3, b_idx=2),
-        SAVI(nir_idx=3, red_idx=2, L=0.5),
-        EVI(nir_idx=3, red_idx=2, blue_idx=0),
-        kNDVI(nir_idx=3, red_idx=2),
-        BAIS2(red_idx=2, red_edge1_idx=0, red_edge2_idx=1, nir_idx=3, swir2_idx=2),
-        CIRI(cirrus_idx=1),
-        AppendIndex(index_op=NDVI(nir_idx=3, red_idx=2)),
+        NDVI(nir=3, red=2),
+        NormalizedDifference(a=3, b=2),
+        SAVI(nir=3, red=2, L=0.5),
+        EVI(nir=3, red=2, blue=0),
+        kNDVI(nir=3, red=2),
+        BAIS2(red=2, red_edge1=0, red_edge2=1, nir=3, swir2=2),
+        CIRI(cirrus=1),
+        AppendIndex(index_op=NDVI(nir=3, red=2)),
     ],
     ids=lambda op: type(op).__name__,
 )
@@ -675,26 +675,26 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
 @pytest.mark.parametrize(
     "op",
     [
-        NDVI(nir_idx=7, red_idx=3, eps=1e-8),
-        NDWI(green_idx=2, nir_idx=7),
-        NDBI(swir_idx=10, nir_idx=7),
-        NBR(nir_idx=7, swir2_idx=11),
-        SAVI(nir_idx=7, red_idx=3, L=0.3),
-        EVI(nir_idx=7, red_idx=3, blue_idx=1, G=2.5, C1=6.0, C2=7.5, L=1.0),
-        NormalizedDifference(a_idx=4, b_idx=2, axis=0, eps=1e-9),
-        EVI2(nir_idx=7, red_idx=3),
-        ARVI(blue_idx=1, red_idx=3, nir_idx=7, gamma=1.0),
-        GCI(green_idx=2, nir_idx=7),
-        kNDVI(nir_idx=7, red_idx=3),
-        MNDWI(green_idx=2, swir_idx=10),
-        NDMI(nir_idx=7, swir1_idx=10),
-        NDSI(green_idx=2, swir_idx=10),
-        NBR2(swir1_idx=10, swir2_idx=11),
+        NDVI(nir=7, red=3, eps=1e-8),
+        NDWI(green=2, nir=7),
+        NDBI(swir=10, nir=7),
+        NBR(nir=7, swir2=11),
+        SAVI(nir=7, red=3, L=0.3),
+        EVI(nir=7, red=3, blue=1, G=2.5, C1=6.0, C2=7.5, L=1.0),
+        NormalizedDifference(a=4, b=2, axis=0, eps=1e-9),
+        EVI2(nir=7, red=3),
+        ARVI(blue=1, red=3, nir=7, gamma=1.0),
+        GCI(green=2, nir=7),
+        kNDVI(nir=7, red=3),
+        MNDWI(green=2, swir=10),
+        NDMI(nir=7, swir1=10),
+        NDSI(green=2, swir=10),
+        NBR2(swir1=10, swir2=11),
         BAIS2(),
-        BSI(blue_idx=1, red_idx=3, nir_idx=7, swir_idx=10),
-        IronOxide(red_idx=3, blue_idx=1),
-        ClayMinerals(swir1_idx=10, swir2_idx=11),
-        CIRI(cirrus_idx=9),
+        BSI(blue=1, red=3, nir=7, swir=10),
+        IronOxide(red=3, blue=1),
+        ClayMinerals(swir1=10, swir2=11),
+        CIRI(cirrus=9),
         dNBR(),
     ],
 )
@@ -720,7 +720,7 @@ def test_append_index_get_config_is_jsonable() -> None:
     its inner Operator, not the raw instance."""
     import json
 
-    op = AppendIndex(index_op=NDVI(nir_idx=7, red_idx=3), axis=0)
+    op = AppendIndex(index_op=NDVI(nir=7, red=3), axis=0)
     cfg = op.get_config()
     # Round-trips through JSON without choking on raw Operator instances.
     encoded = json.dumps(cfg)
@@ -728,7 +728,7 @@ def test_append_index_get_config_is_jsonable() -> None:
     assert decoded == {
         "index_op": {
             "class": "NDVI",
-            "config": {"nir_idx": 7, "red_idx": 3, "axis": -3, "eps": 1e-10},
+            "config": {"nir": 7, "red": 3, "axis": -3, "eps": 1e-10},
         },
         "axis": 0,
     }
@@ -746,13 +746,13 @@ def test_4d_time_stack() -> None:
     from _helpers import frames, time_stack
 
     stack = time_stack()
-    out = NDVI(nir_idx=1, red_idx=0)(stack)
+    out = NDVI(nir=1, red=0)(stack)
     assert isinstance(out, GeoTensor)
     assert out.shape == (2, 1, 4, 4)
     for t, frame in enumerate(frames(stack)):
         np.testing.assert_allclose(
-            np.asarray(out)[t, 0], np.asarray(NDVI(nir_idx=1, red_idx=0)(frame))
+            np.asarray(out)[t, 0], np.asarray(NDVI(nir=1, red=0)(frame))
         )
-    appended = AppendIndex(index_op=NDVI(nir_idx=1, red_idx=0))(stack)
+    appended = AppendIndex(index_op=NDVI(nir=1, red=0))(stack)
     assert appended.shape == (2, 4, 4, 4)
     assert appended.attrs["band_names"] == ["b0", "b1", "b2", "NDVI"]

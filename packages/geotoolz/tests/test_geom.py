@@ -162,7 +162,7 @@ def test_geom_module_is_public() -> None:
 def test_pad_to_then_crop_to_recovers_original_values() -> None:
     gt = _gt()
 
-    padded = gz.geom.PadTo(shape=(9, 11), fill=-9999)(gt)
+    padded = gz.geom.PadTo(shape=(9, 11), fill_value=-9999)(gt)
     cropped = gz.geom.CropTo(shape=gt.shape[-2:])(padded)
 
     assert cropped.shape == gt.shape
@@ -323,8 +323,8 @@ def test_rasterize_and_vectorize_round_trip_geometry() -> None:
     gt = _gt(np.zeros((5, 7), dtype=np.uint8))
     geometry = box(12, 16, 15, 19)
 
-    mask = gz.geom.Rasterize(geometries=[geometry], fill=0)(gt)
-    polygons = gz.geom.Vectorize(min_area=0.5, simplify_tolerance=0.0)(mask)
+    mask = gz.geom.Rasterize(geometries=[geometry], fill_value=0)(gt)
+    polygons = gz.geom.Vectorize(min_area_px=0.5, simplify_tolerance=0.0)(mask)
 
     assert np.asarray(mask).sum() > 0
     assert polygons
@@ -964,7 +964,7 @@ def test_segment_stitch_orders_segments_and_fills_missing_scan() -> None:
         attrs={"__geotoolz_segment_meta__": {"segment_index": 2, "n_segments": 3}},
     )
 
-    out = gz.geom.SegmentStitch(axis="scan", fill=fill)([seg2, seg0])
+    out = gz.geom.SegmentStitch(direction="scan", fill_value=fill)([seg2, seg0])
 
     expected = np.concatenate(
         [
@@ -994,7 +994,7 @@ def test_segment_stitch_roundtrips_sample_segments() -> None:
         attrs={"__geotoolz_segment_meta__": {"segment_index": 1, "n_segments": 2}},
     )
 
-    out = gz.geom.SegmentStitch(axis="sample")([right, left])
+    out = gz.geom.SegmentStitch(direction="sample")([right, left])
 
     np.testing.assert_array_equal(np.asarray(out), values)
     assert out.transform == left.transform
@@ -1002,7 +1002,7 @@ def test_segment_stitch_roundtrips_sample_segments() -> None:
 
 def test_segment_stitch_integer_dtype_uses_existing_fill() -> None:
     # Integer sensor counts cannot hold NaN; stitching with the default
-    # fill=np.nan must fall back to the segment's existing fill (or 0)
+    # fill_value=np.nan must fall back to the segment's existing fill (or 0)
     # rather than raising.
     seg0 = GeoTensor(
         np.full((1, 2, 3), 1, dtype=np.int16),
@@ -1019,7 +1019,7 @@ def test_segment_stitch_integer_dtype_uses_existing_fill() -> None:
         attrs={"__geotoolz_segment_meta__": {"segment_index": 2, "n_segments": 3}},
     )
 
-    out = gz.geom.SegmentStitch(axis="scan")([seg2, seg0])
+    out = gz.geom.SegmentStitch(direction="scan")([seg2, seg0])
 
     arr = np.asarray(out)
     assert arr.dtype == np.int16
@@ -1151,7 +1151,7 @@ def test_vectorize_band_axis_input() -> None:
     values[0, 1:4, 2:5] = 1
     mask = _gt(values)
 
-    polygons = gz.geom.Vectorize(min_area=0.5)(mask)
+    polygons = gz.geom.Vectorize(min_area_px=0.5)(mask)
 
     assert len(polygons) == 1
     assert polygons[0].equals(box(12, 16, 15, 19))
@@ -1216,7 +1216,7 @@ def test_pad_to_without_any_fill_falls_back_to_zero() -> None:
     assert np.asarray(padded).sum() == 35
     assert np.asarray(padded)[0, 0, 0] == 0
     assert padded.transform == Affine(1, 0, 9, 0, -1, 21)
-    # With a carrier fill, ``fill=None`` still uses it.
+    # With a carrier fill, ``fill_value=None`` still uses it.
     padded_fill = gz.geom.PadTo(shape=(7, 9))(_gt())
     assert np.asarray(padded_fill)[0, 0, 0] == -9999
 
@@ -1225,14 +1225,14 @@ def test_rasterize_float_fill() -> None:
     gt = _gt()
     geometry = box(12, 16, 15, 19)
 
-    burned = gz.geom.Rasterize(geometries=[geometry], fill=np.nan)(gt)
+    burned = gz.geom.Rasterize(geometries=[geometry], fill_value=np.nan)(gt)
 
     values = np.asarray(burned)
     assert values.dtype == np.float32
     assert np.nansum(values) == 9
     assert np.isnan(values).sum() == values.size - 9
     # A negative fill cannot live in the default ``uint8`` either.
-    negative = gz.geom.Rasterize(geometries=[geometry], fill=-1)(gt)
+    negative = gz.geom.Rasterize(geometries=[geometry], fill_value=-1)(gt)
     assert np.asarray(negative).min() == -1
     # The default integer background keeps the compact ``uint8`` mask.
     assert np.asarray(gz.geom.Rasterize(geometries=[geometry])(gt)).dtype == np.uint8
@@ -1360,14 +1360,14 @@ except ImportError:
         gz.geom.Reproject(dst_crs="EPSG:4326", resolution=(10.0, 10.0)),
         gz.geom.Resize(shape=(256, 256)),
         gz.geom.Resample(resolution=(20.0, 20.0)),
-        gz.geom.PadTo(shape=(512, 512), fill=0.0),
+        gz.geom.PadTo(shape=(512, 512), fill_value=0.0),
         gz.geom.CropTo(shape=(256, 256), anchor="upper_left"),
         gz.geom.CropToBounds(bounds=(0.0, 0.0, 1.0, 1.0), crs="EPSG:4326"),
         gz.geom.Tile(size=(128, 128), stride=(64, 64)),
         gz.geom.SlidingWindow(size=(128, 128), overlap=16),
         gz.geom.Stitch(blend="feather", feather_width=8),
         gz.geom.Mosaic(method="median", resampling="bilinear"),
-        gz.geom.Vectorize(min_area=10.0, simplify_tolerance=0.5),
+        gz.geom.Vectorize(min_area_px=10.0, simplify_tolerance=0.5),
     ],
 )
 def test_yaml_safe_operators_roundtrip_through_hydra_zen(operator) -> None:
@@ -1518,7 +1518,7 @@ _PLAIN_REFERENCE = np.ascontiguousarray(_PLAIN_VALUES[:, ::-1, :])
 @pytest.mark.parametrize(
     "make_op",
     [
-        lambda: gz.geom.PadTo(shape=(10, 10), fill=0),
+        lambda: gz.geom.PadTo(shape=(10, 10), fill_value=0),
         lambda: gz.geom.CropTo(shape=(2, 3)),
         lambda: gz.geom.CropTo(shape=(2, 3), anchor="upper_left"),
         lambda: gz.geom.BowtieCorrection(

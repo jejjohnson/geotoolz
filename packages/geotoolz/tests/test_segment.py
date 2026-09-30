@@ -50,6 +50,26 @@ def test_watershed_separates_marker_basins() -> None:
     assert set(np.unique(np.asarray(labels))) >= {1, 2}
 
 
+@pytest.mark.parametrize(("connectivity", "skimage_connectivity"), [(4, 1), (8, 2)])
+def test_watershed_connectivity_is_4_or_8(
+    connectivity: int, skimage_connectivity: int
+) -> None:
+    """``connectivity`` uses the package-wide 4 | 8 spelling, not skimage's 1 | 2."""
+    from skimage.segmentation import watershed
+
+    rng = np.random.default_rng(0)
+    image = rng.uniform(size=(9, 9))
+    markers = np.zeros((9, 9), dtype=np.int32)
+    markers[0, 0], markers[-1, -1], markers[0, -1] = 1, 2, 3
+
+    labels = gz.segment.Watershed(markers=markers, connectivity=connectivity)(image)
+
+    expected = watershed(image, markers=markers, connectivity=skimage_connectivity)
+    np.testing.assert_array_equal(np.asarray(labels), expected)
+    with pytest.raises(ValueError, match="4 or 8"):
+        gz.segment.Watershed(connectivity=1)  # ty: ignore[invalid-argument-type]
+
+
 def _checker_gt(shape: tuple[int, int] = (8, 8)) -> GeoTensor:
     h, w = shape
     values = np.zeros((1, h, w), dtype=float)
@@ -64,7 +84,7 @@ def test_felzenszwalb_metadata_and_nan_mask() -> None:
     arr[:, 0, 0] = np.nan
     gt_nan = _gt(arr)
 
-    out = gz.segment.Felzenszwalb(scale=1.0, min_size=1)(gt_nan)
+    out = gz.segment.Felzenszwalb(scale=1.0, min_area_px=1)(gt_nan)
 
     assert out.transform == gt_nan.transform
     assert out.crs == gt_nan.crs
@@ -101,7 +121,7 @@ def test_quickshift_convert2lab_true_still_works_for_rgb() -> None:
 @pytest.mark.parametrize(
     "op",
     [
-        gz.segment.Felzenszwalb(scale=1.0, min_size=1),
+        gz.segment.Felzenszwalb(scale=1.0, min_area_px=1),
         gz.segment.Quickshift(kernel_size=2.0, max_dist=4.0),
     ],
     ids=["felzenszwalb", "quickshift"],
@@ -528,7 +548,7 @@ def _row_markers() -> np.ndarray:
     "op",
     [
         gz.segment.SLIC(n_segments=4, compactness=1.0),
-        gz.segment.Felzenszwalb(scale=1.0, min_size=1),
+        gz.segment.Felzenszwalb(scale=1.0, min_area_px=1),
         gz.segment.Quickshift(kernel_size=2.0, max_dist=4.0),
         gz.segment.Watershed(markers=_row_markers()),
         gz.segment.ChanVese(max_num_iter=10),
@@ -630,6 +650,6 @@ def test_plume_mask_is_threshold_plus_area_filter() -> None:
     rng = np.random.default_rng(0)
     values = rng.normal(size=(1, 16, 16))
     for threshold in ("otsu", "percentile:90", 0.5):
-        plume = gz.plume.PlumeMask(threshold=threshold, min_area=0)(values)
+        plume = gz.plume.PlumeMask(threshold=threshold, min_area_px=0)(values)
         seg = gz.segment.Threshold(threshold=threshold)(values)
         np.testing.assert_array_equal(np.asarray(plume)[None], np.asarray(seg))

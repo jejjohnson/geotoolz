@@ -48,11 +48,11 @@ def stat_axes(
 def reshape_stat(
     stat: Float[np.ndarray, "*stat"] | float,
     arr: Shaped[np.ndarray, "*dims"],
-    axis: tuple[int, ...] | None,
+    reduce_axes: tuple[int, ...] | None,
 ) -> Float[np.ndarray, "*bcast"]:
     """Reshape a reduced statistic so it broadcasts over ``arr``.
 
-    Inverse of the ``axis`` reduction: a statistic computed with
+    Inverse of the ``reduce_axes`` reduction: a statistic computed with
     ``np.nanmean(arr, axis=axis)`` (and friends) loses the reduced
     axes, so it can't broadcast back against ``arr`` directly when the
     kept axes are leading. This re-inserts singleton dimensions at the
@@ -62,12 +62,12 @@ def reshape_stat(
         stat: Scalar or reduced-statistic array (e.g. per-band means of
             shape ``(C,)`` for a ``(C, H, W)`` input).
         arr: The array the statistic was computed from.
-        axis: The axes that were reduced, or ``None`` for a global /
+        reduce_axes: The axes that were reduced, or ``None`` for a global /
             scalar statistic.
 
     Returns:
         A float array broadcastable against ``arr`` (returned unchanged
-        when it is scalar or ``axis`` is ``None``).
+        when it is scalar or ``reduce_axes`` is ``None``).
 
     Raises:
         ValueError: If a non-scalar ``stat`` does not have the shape of the
@@ -75,10 +75,10 @@ def reshape_stat(
             input); it would otherwise broadcast silently along ``x``.
     """
     stat_arr = np.asarray(stat, dtype=float)
-    if stat_arr.ndim == 0 or axis is None:
+    if stat_arr.ndim == 0 or reduce_axes is None:
         return stat_arr
 
-    axes = tuple(a % arr.ndim for a in axis)
+    axes = tuple(a % arr.ndim for a in reduce_axes)
     kept_axes = tuple(i for i in range(arr.ndim) if i not in axes)
     kept_shape = tuple(arr.shape[i] for i in kept_axes)
     if stat_arr.size == 1:
@@ -100,7 +100,7 @@ def per_band_stats(
     arr: Float[np.ndarray, "*dims"],
     *,
     percentiles: list[float] | tuple[float, ...] = (1.0, 99.0),
-    axis: tuple[int, ...] | None = (-2, -1),
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
 ) -> dict[str, np.ndarray]:
     """Compute NaN-aware statistics over spatial axes.
 
@@ -109,7 +109,7 @@ def per_band_stats(
             cube. NaN pixels are excluded from every statistic.
         percentiles: Percentiles (in ``[0, 100]``) to compute alongside
             the moments. Default ``(1.0, 99.0)``.
-        axis: Axes to reduce over. Default ``(-2, -1)`` yields one value
+        reduce_axes: Axes to reduce over. Default ``(-2, -1)`` yields one value
             per band; ``None`` reduces globally.
 
     Returns:
@@ -118,11 +118,11 @@ def per_band_stats(
         ``"percentiles"`` of shape ``(len(percentiles), C)``.
     """
     return {
-        "mean": np.nanmean(arr, axis=axis),
-        "std": np.nanstd(arr, axis=axis),
-        "min": np.nanmin(arr, axis=axis),
-        "max": np.nanmax(arr, axis=axis),
-        "percentiles": np.nanpercentile(arr, percentiles, axis=axis),
+        "mean": np.nanmean(arr, axis=reduce_axes),
+        "std": np.nanstd(arr, axis=reduce_axes),
+        "min": np.nanmin(arr, axis=reduce_axes),
+        "max": np.nanmax(arr, axis=reduce_axes),
+        "percentiles": np.nanpercentile(arr, percentiles, axis=reduce_axes),
     }
 
 
@@ -131,7 +131,7 @@ def standard_scale(
     mean: Float[np.ndarray, "*stat"] | float,
     std: Float[np.ndarray, "*stat"] | float,
     *,
-    axis: tuple[int, ...] | None = (-2, -1),
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
 ) -> Float[np.ndarray, "*dims"]:
     r"""Apply z-score scaling while preserving NaN pixels.
 
@@ -146,14 +146,14 @@ def standard_scale(
         std: Scalar or per-band standard deviation :math:`\sigma`. Bands
             with ``std == 0`` fall back to a divisor of ``1`` so a
             constant band maps to zero instead of ``inf`` / ``nan``.
-        axis: Axes the statistics were reduced over. Default
+        reduce_axes: Axes the statistics were reduced over. Default
             ``(-2, -1)``; ``None`` for global statistics.
 
     Returns:
         Float array of the same shape as ``arr``.
     """
-    mean_b = reshape_stat(mean, arr, axis)
-    std_b = reshape_stat(std, arr, axis)
+    mean_b = reshape_stat(mean, arr, reduce_axes)
+    std_b = reshape_stat(std, arr, reduce_axes)
     denom = np.where(std_b != 0, std_b, 1.0)
     return (arr - mean_b) / denom
 
@@ -163,7 +163,7 @@ def robust_scale(
     median: Float[np.ndarray, "*stat"] | float,
     iqr: Float[np.ndarray, "*stat"] | float,
     *,
-    axis: tuple[int, ...] | None = (-2, -1),
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
 ) -> Float[np.ndarray, "*dims"]:
     r"""Apply median/IQR scaling while preserving NaN pixels.
 
@@ -181,14 +181,14 @@ def robust_scale(
             axes).
         iqr: Scalar or per-band interquartile range ``Q3 - Q1``. Bands
             with ``iqr == 0`` fall back to a divisor of ``1``.
-        axis: Axes the statistics were reduced over. Default
+        reduce_axes: Axes the statistics were reduced over. Default
             ``(-2, -1)``; ``None`` for global statistics.
 
     Returns:
         Float array of the same shape as ``arr``.
     """
-    median_b = reshape_stat(median, arr, axis)
-    iqr_b = reshape_stat(iqr, arr, axis)
+    median_b = reshape_stat(median, arr, reduce_axes)
+    iqr_b = reshape_stat(iqr, arr, reduce_axes)
     denom = np.where(iqr_b != 0, iqr_b, 1.0)
     return (arr - median_b) / denom
 
@@ -199,7 +199,7 @@ def minmax_scale(
     vmax: Float[np.ndarray, "*stat"] | float,
     *,
     out_range: tuple[float, float] = (0.0, 1.0),
-    axis: tuple[int, ...] | None = (-2, -1),
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
 ) -> Float[np.ndarray, "*dims"]:
     r"""Linearly map ``[vmin, vmax]`` into ``out_range``.
 
@@ -215,7 +215,7 @@ def minmax_scale(
             Bands with ``vmax <= vmin`` fall back to a divisor of ``1``.
         out_range: ``(out_min, out_max)`` target range; must be
             increasing. Default ``(0.0, 1.0)``.
-        axis: Axes the bounds were reduced over. Default ``(-2, -1)``;
+        reduce_axes: Axes the bounds were reduced over. Default ``(-2, -1)``;
             ``None`` for global bounds.
 
     Returns:
@@ -227,8 +227,8 @@ def minmax_scale(
             tuple.
     """
     out_min, out_max = validate_out_range(out_range)
-    vmin_b = reshape_stat(vmin, arr, axis)
-    vmax_b = reshape_stat(vmax, arr, axis)
+    vmin_b = reshape_stat(vmin, arr, reduce_axes)
+    vmax_b = reshape_stat(vmax, arr, reduce_axes)
     denom = np.where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
     return (arr - vmin_b) / denom * (out_max - out_min) + out_min
 
@@ -274,7 +274,7 @@ def histogram_match(
 def clahe(
     arr: Shaped[np.ndarray, "*dims"],
     *,
-    kernel_size: int | tuple[int, int] | None = None,
+    window: int | tuple[int, int] | None = None,
     clip_limit: float = 0.01,
     nbins: int = 256,
 ) -> Float[np.ndarray, "*dims"]:
@@ -289,7 +289,7 @@ def clahe(
 
     Args:
         arr: Input array; trailing axes are ``(H, W)``.
-        kernel_size: Contextual-region shape for the local histograms.
+        window: Contextual-region shape for the local histograms.
             ``None`` uses skimage's default (1/8 of the slice height /
             width).
         clip_limit: Contrast-limiting clip threshold in ``[0, 1]``.
@@ -305,7 +305,7 @@ def clahe(
     for idx in np.ndindex(values.shape[:-2]):
         out[idx] = _clahe_slice(
             values[idx],
-            kernel_size=kernel_size,
+            window=window,
             clip_limit=clip_limit,
             nbins=nbins,
         )
@@ -315,7 +315,7 @@ def clahe(
 def _clahe_slice(
     values: np.ndarray,
     *,
-    kernel_size: int | tuple[int, int] | None,
+    window: int | tuple[int, int] | None,
     clip_limit: float,
     nbins: int,
 ) -> np.ndarray:
@@ -340,7 +340,7 @@ def _clahe_slice(
     np.clip(normalised, 0.0, 1.0, out=normalised)
     equalized = equalize_adapthist(
         normalised,
-        kernel_size=kernel_size,
+        kernel_size=window,
         clip_limit=clip_limit,
         nbins=nbins,
     )

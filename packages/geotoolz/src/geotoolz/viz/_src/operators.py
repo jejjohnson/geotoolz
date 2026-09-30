@@ -47,7 +47,6 @@ from pipekit import Operator
 from geotoolz._src.bands import BandRef
 from geotoolz._src.config import (
     as_tuple,
-    jsonable,
     mapping_from_pairs,
     mapping_to_pairs,
 )
@@ -112,19 +111,7 @@ class Composite(SelectBands):
     """
 
     def __init__(self, *, bands: Sequence[BandRef], axis: int = -3) -> None:
-        super().__init__(indexes=list(bands), axis=axis)
-
-    @property
-    def bands(self) -> list[BandRef]:
-        """The selected band references -- the inherited ``indexes`` list itself."""
-        return self.indexes
-
-    @bands.setter
-    def bands(self, value: Sequence[BandRef]) -> None:
-        self.indexes = list(value)
-
-    def get_config(self) -> dict[str, Any]:
-        return {"bands": jsonable(list(self.bands)), "axis": self.axis}
+        super().__init__(bands=list(bands), axis=axis)
 
 
 class TrueColor(Composite):
@@ -245,7 +232,7 @@ class StretchToUint8(Operator):
     """Percentile-stretch display data to ``uint8``.
 
     Exactly :class:`geotoolz.radiometry.PercentileClip` (same ``lower`` /
-    ``upper`` / ``axis``) followed by a rounded byte cast, so the result
+    ``upper`` / ``reduce_axes``) followed by a rounded byte cast, so the result
     is ready for PIL / matplotlib. Use ``PercentileClip`` directly if you
     instead need the ``[0, 1]`` floats for further math.
     Metadata-independent: plain ``np.ndarray`` carriers pass through as
@@ -259,7 +246,7 @@ class StretchToUint8(Operator):
     Args:
         lower: Lower percentile. Default ``2.0``.
         upper: Upper percentile. Default ``98.0``; must exceed ``lower``.
-        axis: Axes the percentiles are computed over. Default
+        reduce_axes: Axes the percentiles are computed over. Default
             ``(-2, -1)`` stretches each band (and frame) independently;
             ``None`` uses one global pair of thresholds.
 
@@ -278,17 +265,17 @@ class StretchToUint8(Operator):
         *,
         lower: float = 2.0,
         upper: float = 98.0,
-        axis: int | tuple[int, ...] | None = (-2, -1),
+        reduce_axes: int | tuple[int, ...] | None = (-2, -1),
     ) -> None:
         self.lower = lower
         self.upper = upper
-        self.axis = as_tuple(axis)
+        self.reduce_axes = as_tuple(reduce_axes)
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         # Nodata comes back NaN from PercentileClip and casts to the 0 fill.
-        stretched = PercentileClip(lower=self.lower, upper=self.upper, axis=self.axis)(
-            gt
-        )
+        stretched = PercentileClip(
+            lower=self.lower, upper=self.upper, reduce_axes=self.reduce_axes
+        )(gt)
         return wrap_like(gt, _unit_to_uint8(stretched), fill_value_default=0)
 
 

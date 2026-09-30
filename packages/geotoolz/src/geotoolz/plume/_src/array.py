@@ -65,7 +65,7 @@ def plume_mask(
     values: Num[np.ndarray, "h w"] | Num[np.ndarray, "1 h w"],
     *,
     threshold: ThresholdMode = "otsu",
-    min_area: int = 50,
+    min_area_px: int = 50,
     connectivity: Connectivity = 8,
     nbins: int = 256,
 ) -> Bool[np.ndarray, "h w"]:
@@ -75,7 +75,7 @@ def plume_mask(
         values: Single-band enhancement map, ``(H, W)`` or ``(1, H, W)``.
         threshold: Absolute number, ``"otsu"``, or ``"percentile:<p>"``;
             see :func:`geotoolz.segment.resolve_threshold`.
-        min_area: Minimum connected-component size in pixels.
+        min_area_px: Minimum connected-component size in pixels.
         connectivity: 4 or 8 connectivity for component labelling.
         nbins: Histogram bins for the ``"otsu"`` threshold. Default ``256``.
 
@@ -84,7 +84,7 @@ def plume_mask(
     """
     arr = squeeze_single_band(values)
     raw = threshold_mask(arr, threshold, nbins=nbins)
-    return label_components(raw, min_area=min_area, connectivity=connectivity) > 0
+    return label_components(raw, min_area_px=min_area_px, connectivity=connectivity) > 0
 
 
 def pixel_area(transform: Any) -> float:

@@ -38,6 +38,7 @@ from geotoolz._src.config import (
     mapping_to_pairs,
     reject_config_summary,
 )
+from geotoolz._src.labels import Connectivity, connectivity_structure
 from geotoolz._src.shape import over_frames, single_band
 from geotoolz._src.valid import (
     carried_fill,
@@ -106,7 +107,7 @@ class SLIC(Operator):
         compactness: Balance between color and spatial proximity; higher
             values yield more compact (squarer) segments.
         sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
-        channel_axis: Axis holding channels (``0`` for channel-first
+        axis: Position of the band (channel) axis (``0`` for channel-first
             cubes, ``None`` for 2-D single-band input). Ignored for 2-D
             input, which is always treated as single-band.
         start_label: First label assigned to a superpixel.
@@ -122,14 +123,14 @@ class SLIC(Operator):
         n_segments: int = 100,
         compactness: float = 10.0,
         sigma: float = 0.0,
-        channel_axis: int | None = 0,
+        axis: int | None = 0,
         start_label: int = 1,
         mask: Any = None,
     ) -> None:
         self.n_segments = n_segments
         self.compactness = compactness
         self.sigma = sigma
-        self.channel_axis = channel_axis
+        self.axis = axis
         self.start_label = start_label
         self.mask = reject_config_summary(mask, "mask")
 
@@ -141,7 +142,7 @@ class SLIC(Operator):
         if mask is not None:
             valid &= mask
         # A 2-D image has no channel axis; skimage raises if one is given.
-        channel_axis = None if image.ndim == 2 else self.channel_axis
+        channel_axis = None if image.ndim == 2 else self.axis
         labels = slic(
             image,
             n_segments=self.n_segments,
@@ -158,7 +159,7 @@ class SLIC(Operator):
             "n_segments": self.n_segments,
             "compactness": self.compactness,
             "sigma": self.sigma,
-            "channel_axis": self.channel_axis,
+            "axis": self.axis,
             "start_label": self.start_label,
             "mask": _array_summary(self.mask),
         }
@@ -178,8 +179,9 @@ class Felzenszwalb(Operator):
         scale: Free parameter controlling segment size; larger values
             produce larger segments.
         sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
-        min_size: Minimum segment size, enforced by postprocessing.
-        channel_axis: Axis holding channels (``0`` for channel-first
+        min_area_px: Minimum segment area in pixels, enforced by
+            postprocessing (skimage's ``min_size``).
+        axis: Position of the band (channel) axis (``0`` for channel-first
             cubes, ``None`` for 2-D single-band input).
         mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
             outside it get label ``0``. ``get_config`` summarises a mask
@@ -192,14 +194,14 @@ class Felzenszwalb(Operator):
         *,
         scale: float = 1.0,
         sigma: float = 0.8,
-        min_size: int = 20,
-        channel_axis: int | None = 0,
+        min_area_px: int = 20,
+        axis: int | None = 0,
         mask: Any = None,
     ) -> None:
         self.scale = scale
         self.sigma = sigma
-        self.min_size = min_size
-        self.channel_axis = channel_axis
+        self.min_area_px = min_area_px
+        self.axis = axis
         self.mask = reject_config_summary(mask, "mask")
 
     @over_frames
@@ -213,8 +215,8 @@ class Felzenszwalb(Operator):
             image,
             scale=self.scale,
             sigma=self.sigma,
-            min_size=self.min_size,
-            channel_axis=self.channel_axis,
+            min_size=self.min_area_px,
+            channel_axis=self.axis,
         )
         # skimage numbers segments from 0, which collides with the
         # invalid-pixel label; shift so valid segments start at 1.
@@ -224,8 +226,8 @@ class Felzenszwalb(Operator):
         return {
             "scale": self.scale,
             "sigma": self.sigma,
-            "min_size": self.min_size,
-            "channel_axis": self.channel_axis,
+            "min_area_px": self.min_area_px,
+            "axis": self.axis,
             "mask": _array_summary(self.mask),
         }
 
@@ -248,7 +250,7 @@ class Quickshift(Operator):
         ratio: Balance (0-1) between color-space and image-space
             proximity.
         sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
-        channel_axis: Axis holding channels (``0`` for channel-first
+        axis: Position of the band (channel) axis (``0`` for channel-first
             cubes, ``None`` for 2-D single-band input).
         convert2lab: Convert the image to LAB space first. Defaults to
             ``False`` (unlike skimage) so non-RGB / multispectral /
@@ -266,7 +268,7 @@ class Quickshift(Operator):
         max_dist: float = 10.0,
         ratio: float = 1.0,
         sigma: float = 0.0,
-        channel_axis: int | None = 0,
+        axis: int | None = 0,
         convert2lab: bool = False,
         mask: Any = None,
     ) -> None:
@@ -274,7 +276,7 @@ class Quickshift(Operator):
         self.max_dist = max_dist
         self.ratio = ratio
         self.sigma = sigma
-        self.channel_axis = channel_axis
+        self.axis = axis
         # Default to False so non-RGB / multispectral / single-band inputs
         # work out of the box. skimage's quickshift defaults convert2lab=True,
         # which raises on any input that is not exactly 3-channel RGB.
@@ -294,7 +296,7 @@ class Quickshift(Operator):
             max_dist=self.max_dist,
             ratio=self.ratio,
             sigma=self.sigma,
-            channel_axis=self.channel_axis,
+            channel_axis=self.axis,
             convert2lab=self.convert2lab,
         )
         # skimage numbers segments from 0, which collides with the
@@ -307,7 +309,7 @@ class Quickshift(Operator):
             "max_dist": self.max_dist,
             "ratio": self.ratio,
             "sigma": self.sigma,
-            "channel_axis": self.channel_axis,
+            "axis": self.axis,
             "convert2lab": self.convert2lab,
             "mask": _array_summary(self.mask),
         }
@@ -325,7 +327,10 @@ class Watershed(Operator):
     Args:
         markers: Optional single-band integer marker array seeding the
             basins; when None, local minima of the image are used.
-        connectivity: Neighbourhood connectivity used for flooding.
+        connectivity: ``4`` (edge neighbours, default) or ``8`` (edge +
+            diagonal neighbours) used for flooding -- the package-wide
+            spelling, converted to a footprint for skimage (whose ``1`` /
+            ``2`` spelling is not accepted).
         compactness: Compactness parameter; higher values produce more
             regularly-shaped basins.
         watershed_line: Separate basins with a zero-labelled line.
@@ -339,11 +344,12 @@ class Watershed(Operator):
         self,
         *,
         markers: Any = None,
-        connectivity: int = 1,
+        connectivity: Connectivity = 4,
         compactness: float = 0.0,
         watershed_line: bool = False,
         mask: Any = None,
     ) -> None:
+        connectivity_structure(connectivity)  # validate 4 | 8 up front
         self.markers = markers
         self.connectivity = connectivity
         self.compactness = compactness
@@ -365,7 +371,7 @@ class Watershed(Operator):
         labels = watershed(
             image,
             markers=markers,
-            connectivity=self.connectivity,
+            connectivity=connectivity_structure(self.connectivity),
             mask=valid,
             compactness=self.compactness,
             watershed_line=self.watershed_line,

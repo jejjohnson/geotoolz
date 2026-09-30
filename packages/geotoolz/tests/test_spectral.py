@@ -25,8 +25,8 @@ def _toy_geotensor(values: np.ndarray) -> GeoTensor:
 
 def test_select_bands_by_name_and_index_match() -> None:
     gt = _toy_geotensor(np.arange(4 * 2 * 3, dtype=np.float32).reshape(4, 2, 3))
-    by_name = spectral.SelectBands(indexes=["B8", "B4"])(gt)
-    by_index = spectral.SelectBands(indexes=[2, 1])(gt)
+    by_name = spectral.SelectBands(bands=["B8", "B4"])(gt)
+    by_index = spectral.SelectBands(bands=[2, 1])(gt)
 
     np.testing.assert_array_equal(np.asarray(by_name), np.asarray(by_index))
     assert by_name.transform == gt.transform
@@ -212,7 +212,7 @@ def test_stack_and_split_bands() -> None:
 
 def test_spectral_get_config_serialization() -> None:
     ops_and_configs = [
-        (spectral.SelectBands(indexes=[0]), {"indexes": [0], "axis": -3}),
+        (spectral.SelectBands(bands=[0]), {"bands": [0], "axis": -3}),
         (spectral.ReorderBands(order=[0]), {"order": [0], "axis": -3}),
         (spectral.StackBands(), {"axis": -3}),
         (spectral.SplitBands(), {"names": None, "axis": -3}),
@@ -253,7 +253,7 @@ def test_spectral_get_config_is_json_safe() -> None:
     import json
 
     ops = [
-        spectral.SelectBands(indexes=["B4", 1]),
+        spectral.SelectBands(bands=["B4", 1]),
         spectral.ReorderBands(order=[0, "B8"]),
         spectral.StackBands(),
         spectral.SplitBands(names=["a", "b"]),
@@ -282,7 +282,7 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
 @pytest.mark.parametrize(
     "op",
     [
-        spectral.SelectBands(indexes=[0, 1]),
+        spectral.SelectBands(bands=[0, 1]),
         spectral.ReorderBands(order=[1, 0]),
         spectral.StackBands(),
         spectral.SplitBands(),
@@ -307,7 +307,7 @@ def test_geotensor_metadata_propagates_through_spectral_ops() -> None:
     # Band subsets and value-preserving transforms keep the input's fill;
     # derived products (new quantities) declare NaN (#146).
     ops = [
-        (spectral.SelectBands(indexes=["B2", "B8"]), gt.fill_value_default),
+        (spectral.SelectBands(bands=["B2", "B8"]), gt.fill_value_default),
         (spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)"), np.nan),
         (spectral.BandRatio(numerator="B8", denominator="B4"), np.nan),
         (spectral.ContinuumRemoval(method="linear"), np.nan),
@@ -364,7 +364,7 @@ def test_select_and_split_bands_subset_every_per_band_key() -> None:
             "k": 1,
         },
     )
-    out = spectral.SelectBands(indexes=["c", "a"])(gt)
+    out = spectral.SelectBands(bands=["c", "a"])(gt)
     assert out.attrs == {
         "band_names": ["c", "a"],
         "descriptions": ["C", "A"],
@@ -427,7 +427,7 @@ def test_select_bands_rejects_mismatched_wavelengths_length() -> None:
     )
 
     with pytest.raises(ValueError, match="does not match the band axis"):
-        spectral.SelectBands(indexes=[0])(gt)
+        spectral.SelectBands(bands=[0])(gt)
 
 
 def test_collapsing_ops_drop_stale_band_attrs() -> None:
@@ -453,7 +453,7 @@ def test_collapsing_ops_drop_stale_band_attrs() -> None:
 @pytest.mark.parametrize(
     "op",
     [
-        spectral.SelectBands(indexes=[2, 1]),
+        spectral.SelectBands(bands=[2, 1]),
         spectral.BandMath(expression="nir - red", band_names=["b", "red", "nir", "s"]),
         spectral.BandRatio(numerator=2, denominator=1),
         spectral.ContinuumRemoval(method="convex_hull", wavelengths=_WAVELENGTHS),
@@ -494,7 +494,7 @@ def test_band_name_resolution_requires_metadata_on_plain_arrays() -> None:
     arr = np.ones((4, 2, 2), dtype=np.float32)
 
     with pytest.raises(TypeError, match="band-name metadata"):
-        spectral.SelectBands(indexes=["B4"])(arr)
+        spectral.SelectBands(bands=["B4"])(arr)
 
     with pytest.raises(ValueError, match="wavelengths"):
         spectral.ContinuumRemoval()(arr)
@@ -506,7 +506,7 @@ def test_4d_time_stack() -> None:
 
     stack = time_stack()
     values = np.asarray(stack)
-    picked = spectral.SelectBands(indexes=["b2", "b0"])(stack)
+    picked = spectral.SelectBands(bands=["b2", "b0"])(stack)
     assert picked.shape == (2, 2, 4, 4)
     np.testing.assert_array_equal(np.asarray(picked), values[:, [2, 0]])
     assert picked.attrs["band_names"] == ["b2", "b0"]

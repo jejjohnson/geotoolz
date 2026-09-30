@@ -26,9 +26,9 @@ record, not a replay recipe.
 
 | Operator | Signature | Purpose |
 |----------|-----------|---------|
-| `GridSampler(patcher)` | `Field → list[Patch]` | Drive a `SpatialPatcher` and materialise its chips |
-| `ApplyToChips(op)` | `list[Patch] → list[Patch]` | Map any operator over each chip's data |
-| `MergePatches(aggregation, domain)` | `list[Patch] → field` | Merge chips back into a global field |
+| `GridSampler(patcher=patcher)` | `Field → list[Patch]` | Drive a `SpatialPatcher` and materialise its chips |
+| `ApplyToChips(operator=op)` | `list[Patch] → list[Patch]` | Map any operator over each chip's data |
+| `MergePatches(aggregation=aggregation, domain)` | `list[Patch] → field` | Merge chips back into a global field |
 | `SpatialTriangular(width)` | window axis | Linear feather ramp (`float64`) matching `geom.Stitch(blend="feather")` |
 | `StratifiedSample(...)` | `scene → list[Patch]` | Chips with class proportions matching a target distribution |
 | `BalancedSampler(...)` | `scene → list[Patch]` | Exactly N chips per class label |
@@ -57,9 +57,9 @@ patcher = gp.SpatialPatcher(
 )
 
 pipe = Sequential([
-    GridSampler(patcher),
-    ApplyToChips(cloud_segmentation_model),   # any Operator, e.g. gz.learn.ModelOp
-    MergePatches(gp.SpatialOverlapAdd(), domain=field.domain),
+    GridSampler(patcher=patcher),
+    ApplyToChips(operator=cloud_segmentation_model),   # any Operator, e.g. gz.learn.ModelOp
+    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=field.domain),
 ])
 prediction = pipe(field)
 ```
@@ -102,10 +102,10 @@ Both samplers:
   positions than requested;
 - are reproducible for a fixed `seed`;
 - emit `list[Patch]`, so augmentation or feature extraction composes
-  directly: `Sequential([StratifiedSample(...), ApplyToChips(gz.augment.RandomFlip())])`.
+  directly: `Sequential([StratifiedSample(...), ApplyToChips(operator=gz.augment.RandomFlip())])`.
 
 Because train-time sampling and inference-time tiling both speak
-`list[Patch]`, the per-chip part of the graph (`ApplyToChips(model)`)
+`list[Patch]`, the per-chip part of the graph (`ApplyToChips(operator=model)`)
 is identical in both settings — only the endpoints differ.
 
 ## Along-track and point sampling

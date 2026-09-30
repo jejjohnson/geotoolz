@@ -167,7 +167,7 @@ def test_min_max_normalize_rejects_degenerate_range() -> None:
 def test_percentile_clip_global() -> None:
     arr = np.linspace(0.0, 100.0, 101)  # 0, 1, ..., 100
     # With lower=10, upper=90 percentiles are 10 and 90.
-    out = percentile_clip(arr, lower=10.0, upper=90.0, axis=None)
+    out = percentile_clip(arr, lower=10.0, upper=90.0, reduce_axes=None)
     # The percentile-bound values map to exactly 0 and 1.
     np.testing.assert_allclose(out[10], 0.0, atol=1e-9)
     np.testing.assert_allclose(out[90], 1.0, atol=1e-9)
@@ -184,7 +184,7 @@ def test_percentile_clip_per_band_axis() -> None:
             np.linspace(0, 1000, 100).reshape(10, 10),  # band 1: range 0-1000
         ]
     )
-    out = percentile_clip(arr, lower=0.0, upper=100.0, axis=(-2, -1))
+    out = percentile_clip(arr, lower=0.0, upper=100.0, reduce_axes=(-2, -1))
     # Both bands should now be normalised into [0, 1].
     assert np.isclose(out[0].max(), 1.0)
     assert np.isclose(out[1].max(), 1.0)

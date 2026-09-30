@@ -102,11 +102,11 @@ class SelectBands(Operator):
     (``gt.attrs`` ``band_names``, then ``descriptions``, then
     ``bands``). Selected
     ``band_names`` and ``wavelengths`` attrs travel with the output.
-    Plain ``np.ndarray`` input is supported for integer indexes (a
+    Plain ``np.ndarray`` input is supported for integer positions (a
     plain array comes back); string names require carrier attrs.
 
     Args:
-        indexes: Bands to keep, in output order. Items are either
+        bands: Bands to keep, in output order. Items are either
             integer positions along ``axis`` or band names resolved
             against ``gt.attrs``.
         axis: Position of the band axis. Default ``-3``.
@@ -114,17 +114,17 @@ class SelectBands(Operator):
     Examples:
         >>> from geotoolz import spectral
         >>> # Sentinel-2 RGB stacked as (B2, B3, B4, B8) -> keep (B4, B3, B2).
-        >>> rgb = spectral.SelectBands(indexes=["B4", "B3", "B2"])
+        >>> rgb = spectral.SelectBands(bands=["B4", "B3", "B2"])
         >>> out = rgb(reflectance_geotensor)
     """
 
-    def __init__(self, *, indexes: list[BandRef], axis: int = -3) -> None:
-        self.indexes = indexes
+    def __init__(self, *, bands: list[BandRef], axis: int = -3) -> None:
+        self.bands = bands
         self.axis = axis
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt)
-        indexes = resolve_bands(gt, self.indexes)
+        indexes = resolve_bands(gt, self.bands)
         attrs = _attrs(gt)
         band_axis_len = arr.shape[self.axis]
         wavelengths = attrs.get("wavelengths")
@@ -142,7 +142,7 @@ class SelectBands(Operator):
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"indexes": jsonable(list(self.indexes)), "axis": self.axis}
+        return {"bands": jsonable(list(self.bands)), "axis": self.axis}
 
 
 class ReorderBands(SelectBands):
@@ -164,7 +164,7 @@ class ReorderBands(SelectBands):
     """
 
     def __init__(self, *, order: list[BandRef], axis: int = -3) -> None:
-        super().__init__(indexes=order, axis=axis)
+        super().__init__(bands=order, axis=axis)
         self.order = order
 
     def get_config(self) -> dict[str, Any]:

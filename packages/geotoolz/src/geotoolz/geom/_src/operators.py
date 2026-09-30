@@ -650,14 +650,14 @@ class PadTo(Operator):
         shape: Target minimum spatial shape ``(H, W)``.
         mode: Numpy pad mode. ``"constant"`` (default), ``"edge"``,
             ``"reflect"``, ``"symmetric"``, ...
-        fill: Constant value when ``mode == "constant"``. ``None``
+        fill_value: Constant value when ``mode == "constant"``. ``None``
             falls back to the carrier's ``fill_value_default``, or ``0``
             when the carrier has none (and for plain-array input).
 
     Examples:
         >>> import geotoolz as gz
         >>> # Pad to a multiple of 256 before tiling.
-        >>> snug = gz.geom.PadTo(shape=(2048, 2048), fill=0)(scene)
+        >>> snug = gz.geom.PadTo(shape=(2048, 2048), fill_value=0)(scene)
     """
 
     def __init__(
@@ -665,11 +665,11 @@ class PadTo(Operator):
         *,
         shape: tuple[int, int],
         mode: str = "constant",
-        fill: float | None = None,
+        fill_value: float | None = None,
     ) -> None:
         self.shape = shape
         self.mode = mode
-        self.fill = fill
+        self.fill_value = fill_value
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         height, width = gt.shape[-2:]
@@ -684,7 +684,7 @@ class PadTo(Operator):
         if hasattr(gt, "transform"):
             kwargs: dict[str, Any] = {}
             if self.mode == "constant":
-                fill = self.fill
+                fill = self.fill_value
                 if fill is None:
                     # ``GeoTensor.pad`` raises when neither a constant nor a
                     # carrier fill is set; fall back to 0 like the ndarray path.
@@ -699,14 +699,18 @@ class PadTo(Operator):
                 arr,
                 pad_width,
                 mode="constant",
-                constant_values=0 if self.fill is None else self.fill,
+                constant_values=0 if self.fill_value is None else self.fill_value,
             )
         # `mode` is user-supplied (numpy pad-mode name); numpy's stubs only
         # accept the literal names, so widen the check away for ty.
         return np.pad(arr, pad_width, mode=cast("Any", self.mode))
 
     def get_config(self) -> dict[str, Any]:
-        return {"shape": list(self.shape), "mode": self.mode, "fill": self.fill}
+        return {
+            "shape": list(self.shape),
+            "mode": self.mode,
+            "fill_value": self.fill_value,
+        }
 
 
 class CropTo(Operator):
@@ -963,7 +967,7 @@ class Stitch(Operator):
     where ``m_k`` is the validity mask of tile ``k`` and ``w_k`` is the
     weight kernel (1 everywhere for ``"average"``, the feather kernel
     otherwise). Pixels with no valid contributor are filled with
-    ``fill`` (default: the first tile's ``fill_value_default``).
+    ``fill_value`` (default: the first tile's ``fill_value_default``).
 
     Unless ``target_shape`` is pinned, trailing bottom rows / right
     columns with no valid contributor (the sentinel padding
@@ -987,7 +991,7 @@ class Stitch(Operator):
             be north-up with the tiles' pixel size.
         target_crs: Optional CRS override for the output. Defaults to
             the first tile's CRS.
-        fill: Output fill value. ``None`` (default) inherits from the
+        fill_value: Output fill value. ``None`` (default) inherits from the
             first tile.
 
     Examples:
@@ -1008,7 +1012,7 @@ class Stitch(Operator):
         target_shape: tuple[int, int] | None = None,
         target_transform: Affine | Sequence[float] | None = None,
         target_crs: str | None = None,
-        fill: float | int | None = None,
+        fill_value: float | int | None = None,
     ) -> None:
         self.blend = blend
         self.feather_width = feather_width
@@ -1017,7 +1021,7 @@ class Stitch(Operator):
             target_transform = Affine(*target_transform[:6])
         self.target_transform = target_transform
         self.target_crs = target_crs
-        self.fill = fill
+        self.fill_value = fill_value
 
     def _apply(self, tiles: list[GeoTensor]) -> GeoTensor:
         if len(tiles) == 0:
@@ -1053,7 +1057,7 @@ class Stitch(Operator):
                 f"{tuple(first.res)}; got {tuple(self.target_transform)[:6]}."
             )
         transform, shape = self._target_grid(tiles)
-        fill = first.fill_value_default if self.fill is None else self.fill
+        fill = first.fill_value_default if self.fill_value is None else self.fill_value
         dtype = first.dtype if self.blend in {"first", "max"} else np.float32
         out_shape = first.shape[:-2] + shape
         if self.blend == "max":
@@ -1189,7 +1193,7 @@ class Stitch(Operator):
                 else list(self.target_transform)[:6]
             ),
             "target_crs": self.target_crs,
-            "fill": self.fill,
+            "fill_value": self.fill_value,
         }
 
 
@@ -1641,30 +1645,34 @@ class SegmentStitch(Operator):
     (``0..n_segments-1``) and one-based (``1..n_segments``) indexing are
     accepted. One-based indexing is selected only when an index equal to
     ``n_segments`` is present; ambiguous missing-edge cases default to
-    zero-based. Missing segments are filled with ``fill``.
+    zero-based. Missing segments are filled with ``fill_value``.
 
     Geo-dependent: every segment must be a georeferenced ``GeoTensor``
     (attrs metadata + transform bookkeeping); plain arrays raise
     ``TypeError``.
 
     Args:
-        axis: ``"scan"`` / ``"y"`` for along-track, or ``"sample"`` /
-            ``"x"`` for cross-track.
-        fill: Value used for missing segments. ``None`` (default) means
+        direction: Stitching direction: ``"scan"`` / ``"y"`` for
+            along-track, or ``"sample"`` / ``"x"`` for cross-track.
+        fill_value: Value used for missing segments. ``None`` (default) means
             ``NaN``; a ``NaN`` argument is stored as ``None`` so the config
             stays strict JSON.
     """
 
-    def __init__(self, *, axis: str = "scan", fill: float | None = None) -> None:
-        self.axis = axis
-        self.fill = None if fill is None or np.isnan(fill) else fill
+    def __init__(
+        self, *, direction: str = "scan", fill_value: float | None = None
+    ) -> None:
+        self.direction = direction
+        self.fill_value = (
+            None if fill_value is None or np.isnan(fill_value) else fill_value
+        )
 
     def _apply(self, segments: list[GeoTensor]) -> GeoTensor:
         if len(segments) == 0:
             raise ValueError("SegmentStitch requires at least one segment.")
         for segment in segments:
             require_geotensor(segment, "SegmentStitch")
-        axis_num = _segment_axis(self.axis)
+        axis_num = _segment_axis(self.direction)
         metas = [_segment_meta(segment) for segment in segments]
         n_segments = metas[0][1]
         if any(n != n_segments for _, n in metas):
@@ -1688,7 +1696,7 @@ class SegmentStitch(Operator):
         # Choose a fill that is representable in the segment dtype: integer
         # tensors cannot hold NaN, so fall back to the first segment's own
         # fill (or zero) when the requested fill is non-finite.
-        fill = np.nan if self.fill is None else self.fill
+        fill = np.nan if self.fill_value is None else self.fill_value
         segment_fill = _coerce_segment_fill(fill, first)
         pieces: list[np.ndarray] = []
         segment_shape = first.shape
@@ -1888,8 +1896,8 @@ class Rasterize(Operator):
             values. ``None`` means "burn ``1``".
         all_touched: Whether to mark every pixel the geometry touches
             (vs. only those whose centre is inside).
-        fill: Background value. Default ``0``. For a list of geometries
-            the output is ``uint8`` when ``fill`` is an integer in
+        fill_value: Background value. Default ``0``. For a list of geometries
+            the output is ``uint8`` when ``fill_value`` is an integer in
             ``[0, 255]`` and ``float32`` otherwise (e.g. ``np.nan``).
 
     Examples:
@@ -1906,12 +1914,12 @@ class Rasterize(Operator):
         geometries: list[BaseGeometry] | gpd.GeoDataFrame,
         column: str | None = None,
         all_touched: bool = False,
-        fill: float = 0.0,
+        fill_value: float = 0.0,
     ) -> None:
         self.geometries = geometries
         self.column = column
         self.all_touched = all_touched
-        self.fill = fill
+        self.fill_value = fill_value
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         require_geotensor(gt, "Rasterize")
@@ -1919,7 +1927,7 @@ class Rasterize(Operator):
             self.geometries,
             gt,
             column=self.column,
-            fill=self.fill,
+            fill=self.fill_value,
             all_touched=self.all_touched,
         )
 
@@ -1928,7 +1936,7 @@ class Rasterize(Operator):
             "geometries": f"<{type(self.geometries).__name__} n={len(self.geometries)}>",
             "column": self.column,
             "all_touched": self.all_touched,
-            "fill": self.fill,
+            "fill_value": self.fill_value,
         }
 
 
@@ -1950,7 +1958,7 @@ class RasterizeLike(Operator):
         geometries: Shapely geometries or a `GeoDataFrame`.
         column: Attribute column for the burn-in value, or ``None``.
         all_touched: As in :class:`Rasterize`.
-        fill: Background value.
+        fill_value: Background value.
 
     Examples:
         >>> import geotoolz as gz
@@ -1969,20 +1977,20 @@ class RasterizeLike(Operator):
         geometries: gpd.GeoDataFrame,
         column: str | None = None,
         all_touched: bool = False,
-        fill: float = 0.0,
+        fill_value: float = 0.0,
     ) -> None:
         self.like = like
         self.geometries = geometries
         self.column = column
         self.all_touched = all_touched
-        self.fill = fill
+        self.fill_value = fill_value
 
     def _apply(self, gt: GeoTensor | None = None) -> GeoTensor:
         return _rasterize_like(
             self.geometries,
             self.like,
             column=self.column,
-            fill=self.fill,
+            fill=self.fill_value,
             all_touched=self.all_touched,
         )
 
@@ -1992,7 +2000,7 @@ class RasterizeLike(Operator):
             "geometries": f"<{type(self.geometries).__name__} n={len(self.geometries)}>",
             "column": self.column,
             "all_touched": self.all_touched,
-            "fill": self.fill,
+            "fill_value": self.fill_value,
         }
 
 
@@ -2001,7 +2009,7 @@ class Vectorize(Operator):
 
     Wraps :func:`georeader.vectorize.get_polygons`. The carrier's
     transform is used to express polygons in geographic coordinates.
-    Polygons with area below ``min_area`` (in square pixels of the
+    Polygons with area below ``min_area_px`` (in square pixels of the
     mask) are dropped.
 
     Geo-dependent: requires a georeferenced ``GeoTensor`` input (the
@@ -2010,7 +2018,7 @@ class Vectorize(Operator):
     ``(1, H, W)``; other shapes raise ``ValueError``.
 
     Args:
-        min_area: Minimum polygon area in square *pixels*. Default
+        min_area_px: Minimum polygon area in square *pixels*. Default
             ``25.5`` (~5×5 px), matching the georeader default.
         simplify_tolerance: Optional post-hoc :meth:`shapely.simplify`
             tolerance (in CRS units). ``None`` (default) leaves the
@@ -2018,7 +2026,7 @@ class Vectorize(Operator):
 
     Examples:
         >>> import geotoolz as gz
-        >>> polys = gz.geom.Vectorize(min_area=100.0)(water_mask)
+        >>> polys = gz.geom.Vectorize(min_area_px=100.0)(water_mask)
     """
 
     _terminal: ClassVar[bool] = True
@@ -2026,10 +2034,10 @@ class Vectorize(Operator):
     def __init__(
         self,
         *,
-        min_area: float = 25.5,
+        min_area_px: float = 25.5,
         simplify_tolerance: float | None = None,
     ) -> None:
-        self.min_area = min_area
+        self.min_area_px = min_area_px
         self.simplify_tolerance = simplify_tolerance
 
     def _apply(self, gt: GeoTensor) -> list[BaseGeometry]:
@@ -2038,7 +2046,7 @@ class Vectorize(Operator):
         # ``(1, H, W)`` band axis and pass the transform explicitly.
         mask = single_band(np.asarray(gt.values), name="Vectorize")
         polygons = vectorize.get_polygons(
-            mask, min_area=self.min_area, tolerance=0.0, transform=gt.transform
+            mask, min_area=self.min_area_px, tolerance=0.0, transform=gt.transform
         )
         if self.simplify_tolerance is None:
             return polygons
@@ -2319,12 +2327,12 @@ def _spherical_xyz(
     )
 
 
-def _segment_axis(axis: str) -> int:
-    if axis in {"scan", "y"}:
+def _segment_axis(direction: str) -> int:
+    if direction in {"scan", "y"}:
         return -2
-    if axis in {"sample", "x"}:
+    if direction in {"sample", "x"}:
         return -1
-    raise ValueError("axis must be 'scan'/'y' or 'sample'/'x'.")
+    raise ValueError("direction must be 'scan'/'y' or 'sample'/'x'.")
 
 
 def _coerce_segment_fill(fill: float | int, first: GeoTensor) -> float | int:

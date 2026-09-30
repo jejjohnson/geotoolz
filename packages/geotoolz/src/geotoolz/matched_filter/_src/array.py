@@ -596,7 +596,7 @@ def estimate_cov_lowrank(
     mean: Float[np.ndarray, " c"] | None = None,
     rank: int = 10,
     tikhonov: float = 1e-3,
-    random_state: int | None = 0,
+    seed: int | None = 0,
     n_oversamples: int = 10,
     axis: int = -3,
 ) -> NumpyLinearOperator:
@@ -618,7 +618,7 @@ def estimate_cov_lowrank(
         tikhonov: Diagonal regulariser added after the low-rank
             reconstruction; keeps the operator invertible even though
             the low-rank part is singular for ``rank < c``.
-        random_state: Seed for the randomized range finder. The default
+        seed: Seed for the randomized range finder. The default
             ``0`` makes the estimate deterministic; ``None`` draws fresh
             OS entropy.
         n_oversamples: Extra random probe vectors beyond ``rank`` used
@@ -641,7 +641,7 @@ def estimate_cov_lowrank(
         raise ValueError("n_oversamples must be non-negative")
     n_features = empirical.shape[0]
     sample_rank = min(rank + n_oversamples, n_features)
-    rng = np.random.default_rng(random_state)
+    rng = np.random.default_rng(seed)
     omega = rng.normal(size=(n_features, sample_rank))
     basis, _ = np.linalg.qr(
         einx.dot("c d, d k -> c k", empirical, omega), mode="reduced"
@@ -869,7 +869,7 @@ def gmm_cluster_background(
     *,
     n_clusters: int,
     cov_estimator: Literal["empirical", "ledoit_wolf", "oas"] = "ledoit_wolf",
-    random_state: int | None = 0,
+    seed: int | None = 0,
     bayesian: bool = False,
     axis: int = -3,
 ) -> ClusterBackground:
@@ -888,7 +888,7 @@ def gmm_cluster_background(
         cov_estimator: Per-cluster covariance estimator —
             ``"empirical"`` (with a tiny stabilising ridge) or shrunk
             via ``"ledoit_wolf"`` / ``"oas"``.
-        random_state: Seed for the k-means initialisation (and the
+        seed: Seed for the k-means initialisation (and the
             reseeding of clusters k-means leaves empty); a fixed seed makes
             the clustering reproducible. Components that lose all
             responsibility during EM are restarted after the M-step at the
@@ -914,9 +914,7 @@ def gmm_cluster_background(
     valid = np.isfinite(samples).all(axis=1)
     x = samples[valid]
     labels = np.full(samples.shape[0], -1, dtype=np.intp)
-    labels[valid] = _gmm_labels(
-        x, n_clusters=n_clusters, random_state=random_state, bayesian=bayesian
-    )
+    labels[valid] = _gmm_labels(x, n_clusters=n_clusters, seed=seed, bayesian=bayesian)
     n_active = int(labels.max()) + 1
     means = np.empty((n_active, x.shape[1]), dtype=float)
     cov_ops: list[NumpyLinearOperator] = []
@@ -994,21 +992,21 @@ def apply_cluster_mf(
 def adaptive_window_background(
     cube: Float[np.ndarray, "c h w"],
     *,
-    window_size: int = 7,
+    window: int = 7,
     pad_mode: str = "reflect",
     axis: int = -3,
 ) -> AdaptiveBackground:
     """Estimate local mean and diagonal variance over square windows.
 
     Per-band uniform filtering yields, for every pixel, the mean and
-    unbiased variance of its ``window_size x window_size``
+    unbiased variance of its ``window x window``
     neighbourhood — a cheap, locally adaptive background model for
     detection over non-stationary scenes.
 
     Args:
         cube: Spectral cube; must be exactly 3-D, canonically
             ``(c, h, w)``.
-        window_size: Side length of the square window; must be a
+        window: Side length of the square window; must be a
             positive odd integer so windows are centred.
         pad_mode: Boundary mode forwarded to
             :func:`scipy.ndimage.uniform_filter` (e.g. ``"reflect"``,
@@ -1024,16 +1022,16 @@ def adaptive_window_background(
         none (mean), are ``NaN``.
 
     Raises:
-        ValueError: If ``window_size`` is not a positive odd integer or
+        ValueError: If ``window`` is not a positive odd integer or
             the cube is not 3-D.
     """
-    if window_size < 1 or window_size % 2 == 0:
-        raise ValueError("window_size must be a positive odd integer")
+    if window < 1 or window % 2 == 0:
+        raise ValueError("window must be a positive odd integer")
     arr = np.moveaxis(np.asarray(cube, dtype=float), axis, -1)
     if arr.ndim != 3:
         raise ValueError("adaptive windows require a 3-D cube")
-    size = (window_size, window_size, 1)
-    n_window = window_size * window_size
+    size = (window, window, 1)
+    n_window = window * window
     valid = np.isfinite(arr).all(axis=-1, keepdims=True)
     if valid.all():
         mean = ndimage.uniform_filter(arr, size=size, mode=pad_mode)
@@ -1106,7 +1104,7 @@ def apply_adaptive_mf(
     Examples:
         >>> import numpy as np
         >>> cube = np.random.default_rng(0).normal(size=(3, 8, 8))
-        >>> bg = adaptive_window_background(cube, window_size=3)
+        >>> bg = adaptive_window_background(cube, window=3)
         >>> apply_adaptive_mf(cube, background=bg, target=np.ones(3)).shape
         (8, 8)
         >>> apply_adaptive_mf(
@@ -1234,10 +1232,10 @@ def _kmeans_labels(
     values: Float[np.ndarray, "n c"],
     *,
     n_clusters: int,
-    random_state: int | None,
+    seed: int | None,
     max_iter: int = 50,
 ) -> Int[np.ndarray, " n"]:
-    rng = np.random.default_rng(random_state)
+    rng = np.random.default_rng(seed)
     if values.shape[0] < n_clusters:
         raise ValueError("n_clusters must be <= number of pixels")
     centers = values[rng.choice(values.shape[0], size=n_clusters, replace=False)].copy()
@@ -1258,17 +1256,15 @@ def _gmm_labels(
     values: Float[np.ndarray, "n c"],
     *,
     n_clusters: int,
-    random_state: int | None,
+    seed: int | None,
     bayesian: bool,
     max_iter: int = 50,
     tol: float = 1e-5,
 ) -> Int[np.ndarray, " n"]:
-    rng = np.random.default_rng(random_state)
+    rng = np.random.default_rng(seed)
     if values.shape[0] < n_clusters:
         raise ValueError("n_clusters must be <= number of pixels")
-    labels = _kmeans_labels(
-        values, n_clusters=n_clusters, random_state=random_state, max_iter=10
-    )
+    labels = _kmeans_labels(values, n_clusters=n_clusters, seed=seed, max_iter=10)
     means = np.empty((n_clusters, values.shape[1]), dtype=float)
     variances = np.empty_like(means)
     global_variance = values.var(axis=0) + GMM_VARIANCE_RIDGE

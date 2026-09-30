@@ -1,7 +1,7 @@
 """Shared utilities for resolving band references against GeoTensor metadata.
 
-Spectral-index operators accept band references either as integer indices
-(``red_idx=3``) or as sensor-style names (``red="B04"``). The helpers
+Operators accept each band reference (a :data:`BandRef`) either as an
+integer position (``red=3``) or as a sensor-style name (``red="B04"``). The helpers
 here translate names to integer positions using metadata carried on the
 ``GeoTensor`` — looked up under a configurable list of attribute keys.
 
@@ -65,7 +65,9 @@ CANONICAL_BAND_KEY: str = "band_names"
 
 #: Every ``attrs`` key that holds one entry per band. Band-name aliases
 #: (:data:`DEFAULT_BAND_KEYS` plus ``band_descriptions``) and per-band
-#: spectral metadata (``wavelengths`` / ``wavelengths_nm``). A value under
+#: spectral metadata (``wavelengths``, in nm -- the key every geotoolz
+#: operator reads -- plus the foreign ``wavelengths_nm`` spelling some
+#: upstream readers write, dropped defensively). A value under
 #: any of these keys goes stale as soon as the band axis changes size, so
 #: :func:`geotoolz._src.wrap.wrap_like` drops them in that case.
 PER_BAND_KEYS: tuple[str, ...] = (
@@ -415,39 +417,6 @@ def resolve_bands(
         [2, 0, 1]
     """
     return [resolve_band(gt, ref, keys=keys, fallback=fallback) for ref in refs]
-
-
-def configured_ref(value: BandRef | None, fallback: BandRef | None) -> BandRef:
-    """Apply the dual ``band=`` / ``band_idx=`` constructor pattern.
-
-    Index operators accept both a named-or-positional ``band`` keyword
-    *and* an integer-only ``band_idx`` keyword (with a sensible
-    sensor-agnostic default) so that callers can either:
-
-    * leave defaults alone and pass integer ``..._idx`` overrides, or
-    * pass named bands via the sensor-style alias keyword
-      (``red="B04"``).
-
-    Args:
-        value: The named-or-positional keyword's value (e.g. ``red=``).
-            Wins when not ``None``.
-        fallback: The integer-only keyword's value (e.g. ``red_idx=``).
-            Used when ``value`` is ``None``.
-
-    Returns:
-        Whichever of the two is non-``None``.
-
-    Raises:
-        ValueError: When both arguments are ``None``.
-    """
-    if value is not None:
-        return value
-    if fallback is None:
-        raise ValueError(
-            "A band reference must be provided through the named parameter "
-            "or its *_idx fallback."
-        )
-    return fallback
 
 
 def resolve_wavelengths(

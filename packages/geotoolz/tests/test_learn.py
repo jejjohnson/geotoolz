@@ -29,8 +29,8 @@ def test_pixel_pca_fits_clean_pixels_and_restores_nan_sample() -> None:
     arr[:, 0, 0] = np.nan
     scene = _gt(arr)
 
-    out = gz.learn.PCA(
-        PCA(n_components=2),
+    out = gz.learn.PixelwisePCA(
+        estimator=PCA(n_components=2),
         nan_fit="drop",
         nan_transform="propagate",
     )(scene)
@@ -47,7 +47,7 @@ def test_pixel_time_mode_restores_output_feature_axis_position() -> None:
     scene = _gt(arr)
 
     out = gz.learn.SklearnOp(
-        StandardScaler(),
+        estimator=StandardScaler(),
         mode="pixel_time",
         task="transform",
         nan_fit="error",
@@ -68,7 +68,7 @@ def test_impute_simple_strategy_fills_before_estimator() -> None:
     scene = _gt(arr)
 
     out = gz.learn.SklearnOp(
-        StandardScaler(),
+        estimator=StandardScaler(),
         nan_fit="impute_simple",
         nan_transform="impute_simple",
         task="transform",
@@ -106,13 +106,13 @@ def test_custom_axes_fit_predict_returns_sample_shape() -> None:
 
 def test_state_roundtrip_saves_joblib_and_metadata(tmp_path: Path) -> None:
     scene = _gt(np.arange(3 * 4 * 5, dtype=float).reshape(3, 4, 5))
-    op = gz.learn.PCA(PCA(n_components=2))
+    op = gz.learn.PixelwisePCA(estimator=PCA(n_components=2))
     expected = op(scene)
     state_path = tmp_path / "pca.joblib"
 
     op.save_state(state_path)
-    loaded = gz.learn.PCA(
-        PCA(n_components=2),
+    loaded = gz.learn.PixelwisePCA(
+        estimator=PCA(n_components=2),
         fit_mode="pre_fit",
         state_path=state_path,
     )
@@ -126,7 +126,7 @@ def test_state_roundtrip_saves_joblib_and_metadata(tmp_path: Path) -> None:
 
 def test_fit_streaming_requires_partial_fit_estimator() -> None:
     with pytest.raises(TypeError, match="partial_fit"):
-        gz.learn.SklearnOp(PCA(n_components=2), fit_mode="fit_streaming")
+        gz.learn.SklearnOp(estimator=PCA(n_components=2), fit_mode="fit_streaming")
 
 
 def test_top_level_exports_learn_symbols() -> None:
@@ -140,13 +140,13 @@ def test_drop_vs_propagate_produce_different_shapes() -> None:
     scene = _gt(arr)
 
     propagated = gz.learn.SklearnOp(
-        StandardScaler(),
+        estimator=StandardScaler(),
         nan_fit="drop",
         nan_transform="propagate",
         task="transform",
     )(scene)
     dropped = gz.learn.SklearnOp(
-        StandardScaler(),
+        estimator=StandardScaler(),
         nan_fit="drop",
         nan_transform="drop",
         task="transform",
@@ -170,7 +170,7 @@ def test_propagate_raw_passes_nan_rows_to_estimator() -> None:
     # KNNImputer is NaN-tolerant; ``propagate_raw`` should hand it the NaN
     # rows directly instead of stripping them.
     out = gz.learn.SklearnOp(
-        SKKNNImputer(n_neighbors=2),
+        estimator=SKKNNImputer(n_neighbors=2),
         nan_fit="propagate_raw",
         nan_transform="propagate_raw",
         task="transform",
@@ -198,11 +198,11 @@ def test_impute_transform_refuses_to_refit_on_inference_batch() -> None:
 
 def test_pre_fit_without_state_path_raises() -> None:
     with pytest.raises(ValueError, match="state_path"):
-        gz.learn.SklearnOp(PCA(n_components=2), fit_mode="pre_fit")
+        gz.learn.SklearnOp(estimator=PCA(n_components=2), fit_mode="pre_fit")
 
 
 def test_get_config_records_resolved_task() -> None:
-    op = gz.learn.SklearnOp(PCA(n_components=2), mode="pixel")  # task=None
+    op = gz.learn.SklearnOp(estimator=PCA(n_components=2), mode="pixel")  # task=None
     cfg = op.get_config()
     assert cfg["task"] is None
     assert cfg["estimator"]["resolved_task"] == "transform"
@@ -211,7 +211,7 @@ def test_get_config_records_resolved_task() -> None:
 
 def test_ipca_streaming_fits_via_partial_fit() -> None:
     scene = _gt(np.arange(3 * 4 * 5, dtype=float).reshape(3, 4, 5))
-    op = gz.learn.IPCA(IncrementalPCA(n_components=2))
+    op = gz.learn.PixelwiseIPCA(estimator=IncrementalPCA(n_components=2))
     out = op(scene)
     assert out.shape == (2, 4, 5)
     assert op._geo_estimator.is_fitted
@@ -222,7 +222,9 @@ def test_kmeans_predict_labels_pixels() -> None:
     arr = rng.normal(size=(2, 4, 5))
     arr[:, :, 2:] += 10  # two clusters in feature space
     scene = _gt(arr)
-    op = gz.learn.KMeans(SKKMeans(n_clusters=2, n_init=1, random_state=0))
+    op = gz.learn.PixelwiseKMeans(
+        estimator=SKKMeans(n_clusters=2, n_init=1, random_state=0)
+    )
     out = op(scene)
     assert out.shape == (4, 5)
     assert set(np.unique(np.asarray(out)).tolist()) == {0, 1}
@@ -231,8 +233,8 @@ def test_kmeans_predict_labels_pixels() -> None:
 def test_isolation_forest_decision_function_returns_scores() -> None:
     rng = np.random.default_rng(0)
     scene = _gt(rng.normal(size=(2, 4, 5)))
-    op = gz.learn.IsolationForest(
-        SKIsolationForest(n_estimators=10, random_state=0),
+    op = gz.learn.PixelwiseIsolationForest(
+        estimator=SKIsolationForest(n_estimators=10, random_state=0),
     )
     out = op(scene)
     assert out.shape == (4, 5)
@@ -242,13 +244,18 @@ def test_isolation_forest_decision_function_returns_scores() -> None:
 @pytest.mark.parametrize(
     "make_op",
     [
-        pytest.param(lambda: gz.learn.PCA(PCA(n_components=2)), id="pca-transform"),
         pytest.param(
-            lambda: gz.learn.KMeans(SKKMeans(n_clusters=2, n_init=1, random_state=0)),
+            lambda: gz.learn.PixelwisePCA(estimator=PCA(n_components=2)),
+            id="pca-transform",
+        ),
+        pytest.param(
+            lambda: gz.learn.PixelwiseKMeans(
+                estimator=SKKMeans(n_clusters=2, n_init=1, random_state=0)
+            ),
             id="kmeans-predict",
         ),
         pytest.param(
-            lambda: gz.learn.SklearnOp(StandardScaler(), task="transform"),
+            lambda: gz.learn.SklearnOp(estimator=StandardScaler(), task="transform"),
             id="scaler-transform",
         ),
     ],
@@ -281,13 +288,15 @@ def test_2d_input_returns_channel_first_geotensor() -> None:
     rng = np.random.default_rng(0)
     scene = _gt(rng.normal(size=(4, 5)))
 
-    out = gz.learn.SklearnOp(PCA(n_components=1), task="transform")(scene)
+    out = gz.learn.SklearnOp(estimator=PCA(n_components=1), task="transform")(scene)
 
     assert isinstance(out, GeoTensor)
     assert out.shape == (1, 4, 5)
     assert out.transform == scene.transform
 
-    from_arr = gz.learn.SklearnOp(StandardScaler(), task="transform")(np.asarray(scene))
+    from_arr = gz.learn.SklearnOp(estimator=StandardScaler(), task="transform")(
+        np.asarray(scene)
+    )
     assert type(from_arr) is np.ndarray
     assert from_arr.shape == (1, 4, 5)
 
@@ -301,7 +310,9 @@ def test_out_band_names_applied() -> None:
         attrs={"band_names": ["b1", "b2", "b3"], "wavelengths": [1.0, 2.0, 3.0]},
     )
 
-    out = gz.learn.PCA(PCA(n_components=2), out_band_names=["pc1", "pc2"])(scene)
+    out = gz.learn.PixelwisePCA(
+        estimator=PCA(n_components=2), out_band_names=["pc1", "pc2"]
+    )(scene)
 
     assert out.shape == (2, 4, 5)
     assert out.attrs["band_names"] == ["pc1", "pc2"]
@@ -309,13 +320,16 @@ def test_out_band_names_applied() -> None:
     assert out.attrs is not scene.attrs
     assert scene.attrs["band_names"] == ["b1", "b2", "b3"]
 
-    labels = gz.learn.KMeans(
-        SKKMeans(n_clusters=2, n_init=1, random_state=0), out_band_names=["cluster"]
+    labels = gz.learn.PixelwiseKMeans(
+        estimator=SKKMeans(n_clusters=2, n_init=1, random_state=0),
+        out_band_names=["cluster"],
     )(scene)
     assert labels.attrs["band_names"] == ["cluster"]
 
     with pytest.raises(ValueError, match="band_names"):
-        gz.learn.PCA(PCA(n_components=2), out_band_names=["only_one"])(scene)
+        gz.learn.PixelwisePCA(
+            estimator=PCA(n_components=2), out_band_names=["only_one"]
+        )(scene)
 
 
 def test_partial_fit_imputer_created_once() -> None:
@@ -352,7 +366,9 @@ def test_fill_pixels_are_excluded() -> None:
     scene = toy_geotensor(arr, fill_value_default=-9999, with_fill_pixels=True)
     fill = fill_pixel_mask(scene.shape)
 
-    op = gz.learn.SklearnOp(StandardScaler(), task="transform", nan_fit="drop")
+    op = gz.learn.SklearnOp(
+        estimator=StandardScaler(), task="transform", nan_fit="drop"
+    )
     out = op(scene)
 
     scaler = op._geo_estimator.estimator
@@ -371,7 +387,9 @@ def test_kmeans_labels_are_integer_with_minus_one_fill() -> None:
     scene = toy_geotensor(arr, fill_value_default=-9999, with_fill_pixels=True)
     fill = fill_pixel_mask(scene.shape)
 
-    out = gz.learn.KMeans(SKKMeans(n_clusters=2, n_init=1, random_state=0))(scene)
+    out = gz.learn.PixelwiseKMeans(
+        estimator=SKKMeans(n_clusters=2, n_init=1, random_state=0)
+    )(scene)
 
     assert out.shape == (4, 5)
     assert np.asarray(out).dtype.kind == "i"
@@ -380,8 +398,8 @@ def test_kmeans_labels_are_integer_with_minus_one_fill() -> None:
     assert set(np.asarray(out)[~fill].tolist()) == {0, 1}
     np.testing.assert_array_equal(np.asarray(out.validmask()), ~fill)
 
-    clean = gz.learn.KMeans(
-        SKKMeans(n_clusters=2, n_init=1, random_state=0), label_fill_value=-99
+    clean = gz.learn.PixelwiseKMeans(
+        estimator=SKKMeans(n_clusters=2, n_init=1, random_state=0), label_fill_value=-99
     )(toy_geotensor(arr, fill_value_default=-9999))
     assert np.asarray(clean).dtype.kind == "i"
     assert clean.fill_value_default == -99
@@ -397,7 +415,9 @@ def test_gmm_probabilities_use_nan_fill() -> None:
     scene = toy_geotensor(arr, fill_value_default=0, with_fill_pixels=True)
     fill = fill_pixel_mask(scene.shape)
 
-    out = gz.learn.GMM(GaussianMixture(n_components=2, random_state=0))(scene)
+    out = gz.learn.PixelwiseGMM(
+        estimator=GaussianMixture(n_components=2, random_state=0)
+    )(scene)
 
     assert out.shape == (2, 4, 5)
     assert np.isnan(out.fill_value_default)
@@ -413,7 +433,7 @@ def test_4d_time_stack() -> None:
     scene = toy_geotensor(arr, fill_value_default=-9999)
 
     per_frame = gz.learn.SklearnOp(
-        PCA(n_components=2),
+        estimator=PCA(n_components=2),
         mode="pixel_time",
         task="transform",
         out_band_names=["pc1", "pc2"],
@@ -424,7 +444,7 @@ def test_4d_time_stack() -> None:
     assert np.isnan(np.asarray(per_frame)[1, :, 2, 3]).all()
     assert np.isfinite(np.asarray(per_frame)[0]).all()
 
-    stacked = gz.learn.PCA(PCA(n_components=2))(scene)
+    stacked = gz.learn.PixelwisePCA(estimator=PCA(n_components=2))(scene)
     assert stacked.shape == (2, 4, 5)
     assert np.isnan(np.asarray(stacked)[:, 2, 3]).all()
 

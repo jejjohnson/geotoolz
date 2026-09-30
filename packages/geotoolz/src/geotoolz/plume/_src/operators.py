@@ -274,14 +274,14 @@ class PlumeMask(Operator):
     """Binary plume mask from a single-band score or enhancement map.
 
     Thresholds the input (absolute number, Otsu, or percentile) and
-    drops connected components smaller than ``min_area`` pixels — the
+    drops connected components smaller than ``min_area_px`` pixels — the
     Frankenberg et al. (2016) detection convention, also used by Varon
     et al. (2018, 2021) for S2/AVIRIS plume identification.
 
     Args:
         threshold: ``float`` (absolute), ``"otsu"``, or
             ``"percentile:<p>"`` with ``p`` in [0, 100].
-        min_area: Minimum component size in pixels.
+        min_area_px: Minimum component size in pixels.
         connectivity: 4 or 8 connectivity for component labelling.
         nbins: Histogram bins for the ``"otsu"`` threshold (see
             :func:`geotoolz.segment.otsu_threshold`); ignored by the other modes.
@@ -293,7 +293,7 @@ class PlumeMask(Operator):
 
     Examples:
         >>> mask = gz.plume.PlumeMask(
-        ...     threshold="percentile:99.5", min_area=50,
+        ...     threshold="percentile:99.5", min_area_px=50,
         ... )(enhancement)
     """
 
@@ -301,12 +301,12 @@ class PlumeMask(Operator):
         self,
         *,
         threshold: ThresholdMode = "otsu",
-        min_area: int = 50,
+        min_area_px: int = 50,
         connectivity: Connectivity = 8,
         nbins: int = 256,
     ) -> None:
         self.threshold = threshold
-        self.min_area = min_area
+        self.min_area_px = min_area_px
         self.connectivity = connectivity
         self.nbins = nbins
 
@@ -315,7 +315,7 @@ class PlumeMask(Operator):
         mask = plume_mask(
             _single_band_nan(gt),
             threshold=self.threshold,
-            min_area=self.min_area,
+            min_area_px=self.min_area_px,
             connectivity=self.connectivity,
             nbins=self.nbins,
         )
@@ -339,17 +339,17 @@ class PlumeContours(Operator):
     then carries ``fill_value_default=0``.
 
     Examples:
-        >>> labels = gz.plume.PlumeContours(min_area=50)(mask)
+        >>> labels = gz.plume.PlumeContours(min_area_px=50)(mask)
     """
 
     def __init__(
         self,
         *,
-        min_area: int = 50,
+        min_area_px: int = 50,
         return_labels: bool = True,
         connectivity: Connectivity = 8,
     ) -> None:
-        self.min_area = min_area
+        self.min_area_px = min_area_px
         self.return_labels = return_labels
         self.connectivity = connectivity
 
@@ -358,7 +358,7 @@ class PlumeContours(Operator):
         valid = valid_pixels(gt)
         labels = label_components(
             squeeze_single_band(np.asarray(gt)).astype(bool) & valid,
-            min_area=self.min_area,
+            min_area_px=self.min_area_px,
             connectivity=self.connectivity,
         )
         if not self.return_labels:
@@ -446,7 +446,7 @@ class PlumeFootprint(Operator):
         if mask_arr.dtype == bool:
             labels = label_components(
                 mask_arr & squeeze_single_band(valid_pixels(gt)),
-                min_area=1,
+                min_area_px=1,
                 connectivity=8,
             )
         else:
@@ -1013,7 +1013,7 @@ class PlumeShapeFilter(Operator):
     apply_physical_constraints`` — a post-Mask R-CNN gate that distinguishes
     elongated plume features from compact false positives. Per instance:
 
-    1. ``area = mask.sum()``; drop when below ``min_area``.
+    1. ``area = mask.sum()``; drop when below ``min_area_px``.
     2. ``fiber_length`` = longest Euclidean path through the skeleton, in
        pixel widths (diagonal steps count ``sqrt(2)``; see
        :func:`geotoolz.measure.skeleton_length`).
@@ -1032,7 +1032,7 @@ class PlumeShapeFilter(Operator):
     instances are mapped to background (``0``).
 
     Args:
-        min_area: Minimum pixel count to consider an instance.
+        min_area_px: Minimum pixel count to consider an instance.
         min_fiber_to_major_ratio: Lower bound on ``fiber/major``.
         max_fiber_to_major_ratio: Upper bound on ``fiber/major``.
         min_fiber_width: Lower bound on ``area / fiber_length``.
@@ -1042,14 +1042,14 @@ class PlumeShapeFilter(Operator):
     def __init__(
         self,
         *,
-        min_area: int = 50,
+        min_area_px: int = 50,
         min_fiber_to_major_ratio: float = 1.0,
         max_fiber_to_major_ratio: float = 10.0,
         min_fiber_width: float = 1.0,
         max_fiber_width: float = 100.0,
     ) -> None:
-        if min_area < 0:
-            raise ValueError("min_area must be non-negative")
+        if min_area_px < 0:
+            raise ValueError("min_area_px must be non-negative")
         if min_fiber_to_major_ratio < 0 or max_fiber_to_major_ratio <= 0:
             raise ValueError("fiber-to-major ratio bounds must be non-negative")
         if min_fiber_to_major_ratio > max_fiber_to_major_ratio:
@@ -1058,7 +1058,7 @@ class PlumeShapeFilter(Operator):
             raise ValueError("fiber width bounds must be non-negative")
         if min_fiber_width > max_fiber_width:
             raise ValueError("min_fiber_width must be <= max")
-        self.min_area = int(min_area)
+        self.min_area_px = int(min_area_px)
         self.min_fiber_to_major_ratio = float(min_fiber_to_major_ratio)
         self.max_fiber_to_major_ratio = float(max_fiber_to_major_ratio)
         self.min_fiber_width = float(min_fiber_width)
@@ -1070,7 +1070,7 @@ class PlumeShapeFilter(Operator):
         kept: set[int] = set()
         for lbl, compact, _bbox in _iter_instances(labels):
             area = int(compact.sum())
-            if area < self.min_area:
+            if area < self.min_area_px:
                 continue
             fiber_length = skeleton_length(compact)
             if fiber_length <= 0:

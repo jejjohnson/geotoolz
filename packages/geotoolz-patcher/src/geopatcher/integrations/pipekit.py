@@ -10,9 +10,9 @@ so a sliding-window inference pipeline composes inside a `Sequential` or
     )
 
     pipe = Sequential([
-        GridSampler(patcher),
-        ApplyToChips(model_op),
-        Stitch(SpatialOverlapAdd(), domain=field.domain),
+        GridSampler(patcher=patcher),
+        ApplyToChips(operator=model_op),
+        Stitch(aggregation=SpatialOverlapAdd(), domain=field.domain),
     ])
 
 Optional extra: install the ``[pipekit]`` extra to pull in pipekit.
@@ -64,7 +64,7 @@ class GridSampler(Operator):
 
     forbid_in_yaml: ClassVar[bool] = True
 
-    def __init__(self, patcher: SpatialPatcher) -> None:
+    def __init__(self, *, patcher: SpatialPatcher) -> None:
         self.patcher = patcher
 
     def _apply(self, field: Any) -> list[Patch]:
@@ -87,7 +87,7 @@ class ApplyToChips(Operator):
 
     forbid_in_yaml: ClassVar[bool] = False
 
-    def __init__(self, operator: Operator) -> None:
+    def __init__(self, *, operator: Operator) -> None:
         self.operator = operator
 
     def _apply(self, patches: list[Patch]) -> list[Patch]:
@@ -123,7 +123,7 @@ class Stitch(Operator):
 
     forbid_in_yaml: ClassVar[bool] = True
 
-    def __init__(self, aggregation: SpatialAggregation, domain: Any) -> None:
+    def __init__(self, *, aggregation: SpatialAggregation, domain: Any) -> None:
         self.aggregation = aggregation
         self.domain = domain
 

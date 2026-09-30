@@ -53,7 +53,7 @@ items = gc.SearchCatalog(
 gt = gc.LoadScene(item=items[0], assets=["B04", "B08", "SCL"])()
 
 # Operate (geotoolz; Scale + NDVI from the quickstart)
-ndvi_pipe = Sequential([Scale(scale=1e-4), NDVI(nir_idx=1, red_idx=0)])
+ndvi_pipe = Sequential([Scale(scale=1e-4), NDVI(nir=1, red=0)])
 ndvi = ndvi_pipe(gt)
 ```
 
@@ -84,9 +84,9 @@ patcher = gp.SpatialPatcher(
 )
 
 infer = Sequential([
-    GridSampler(patcher),
-    ApplyToChips(ModelOp(my_torch_unet, batch_size=8)),
-    MergePatches(gp.SpatialOverlapAdd(), domain=gt.domain),
+    GridSampler(patcher=patcher),
+    ApplyToChips(operator=ModelOp(model=my_torch_unet, batch_size=8)),
+    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=gt.domain),
 ])
 
 prediction = infer(gt)
@@ -117,10 +117,10 @@ domain = gt.domain
 pipe = Sequential([
     Scale(scale=1e-4),                                  # geotoolz
     CloudMask(scl_idx=2),                               # geotoolz
-    NDVI(nir_idx=1, red_idx=0),                         # geotoolz
-    GridSampler(patcher),                               # geotoolz.patch_ops → geopatcher
-    ApplyToChips(ModelOp(model)),                       # geotoolz
-    MergePatches(gp.SpatialOverlapAdd(), domain=domain), # geotoolz.patch_ops → geopatcher
+    NDVI(nir=1, red=0),                         # geotoolz
+    GridSampler(patcher=patcher),                               # geotoolz.patch_ops → geopatcher
+    ApplyToChips(operator=ModelOp(model=model)),                       # geotoolz
+    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=domain), # geotoolz.patch_ops → geopatcher
 ])
 out = pipe(gt)
 ```

@@ -172,13 +172,15 @@ def test_learn_params_keep_nested_estimators_and_random_state() -> None:
             ("km", KMeans(n_clusters=2, random_state=np.random.RandomState(0))),
         ]
     )
-    params = gz.learn.SklearnOp(pipe).get_config()["estimator"]["params"]
+    params = gz.learn.SklearnOp(estimator=pipe).get_config()["estimator"]["params"]
     assert params["steps"][0] == ["scale", "StandardScaler()"]
     assert params["steps"][1][0] == "km"
     assert params["steps"][1][1].startswith("KMeans(")
     json.dumps(params, allow_nan=False)
 
-    km = gz.learn.KMeans(KMeans(n_clusters=2, random_state=np.random.RandomState(0)))
+    km = gz.learn.PixelwiseKMeans(
+        estimator=KMeans(n_clusters=2, random_state=np.random.RandomState(0))
+    )
     params = km.get_config()["estimator"]["params"]
     assert params["random_state"].startswith("RandomState(")
     assert params["n_clusters"] == 2

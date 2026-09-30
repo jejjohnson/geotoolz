@@ -120,7 +120,7 @@ class NDVI(Operator):
         return gt.array_as_geotensor((nir - red) / (nir + red + self.eps))
 
     def get_config(self):
-        return {"nir_idx": self.nir_idx, "red_idx": self.red_idx, "eps": self.eps}
+        return {"nir": self.nir_idx, "red": self.red_idx, "eps": self.eps}
 ```
 
 Each operator follows the same two-method contract: `_apply` does the
@@ -133,7 +133,7 @@ The simplest shape — a `Sequential` chain:
 ```python
 from pipekit import Sequential
 
-pipe = Sequential([Scale(scale=1e-4), NDVI(nir_idx=1, red_idx=0)])
+pipe = Sequential([Scale(scale=1e-4), NDVI(nir=1, red=0)])
 ndvi = pipe(gt)        # GeoTensor in, GeoTensor out
 ```
 
@@ -164,7 +164,7 @@ img = gz.Input("image")
 scaled = Scale(scale=1e-4)(img)
 drop = CloudMask(scl_idx=2)(img)
 clean = ApplyMask()(scaled, drop)
-ndvi = NDVI(nir_idx=1, red_idx=0)(clean)
+ndvi = NDVI(nir=1, red=0)(clean)
 
 g = gz.Graph(inputs={"image": img}, outputs={"ndvi": ndvi})
 result = g(image=gt)

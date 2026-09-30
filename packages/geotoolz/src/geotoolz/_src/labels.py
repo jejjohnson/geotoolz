@@ -96,9 +96,9 @@ def label_components(
     mask: Bool[np.ndarray, "h w"],
     *,
     connectivity: Connectivity = 8,
-    min_area: int = 0,
+    min_area_px: int = 0,
 ) -> Int[np.ndarray, "h w"]:
-    """Label connected True regions and drop components below ``min_area``.
+    """Label connected True regions and drop components below ``min_area_px``.
 
     Uses :func:`scipy.ndimage.label` (raster-order labels, identical to
     :func:`skimage.measure.label` on a boolean mask), then renumbers the
@@ -111,7 +111,7 @@ def label_components(
             ``np.asarray(mask, dtype=bool)``.
         connectivity: ``4`` or ``8`` neighbourhood for component
             membership.
-        min_area: Minimum component size in pixels; smaller components
+        min_area_px: Minimum component size in pixels; smaller components
             become background. ``0`` and ``1`` keep every component.
 
     Returns:
@@ -119,18 +119,18 @@ def label_components(
         surviving components and ``0`` for background.
 
     Raises:
-        ValueError: If ``min_area`` is negative or ``connectivity`` is
+        ValueError: If ``min_area_px`` is negative or ``connectivity`` is
             not 4 or 8.
     """
-    if min_area < 0:
-        raise ValueError(f"min_area must be non-negative, got {min_area}")
+    if min_area_px < 0:
+        raise ValueError(f"min_area_px must be non-negative, got {min_area_px}")
     labels, n_labels = ndimage.label(
         np.asarray(mask, dtype=bool), structure=connectivity_structure(connectivity)
     )
-    if n_labels == 0 or min_area <= 1:
+    if n_labels == 0 or min_area_px <= 1:
         return labels.astype(np.int32, copy=False)
     counts = np.bincount(labels.ravel())
-    keep = counts >= min_area
+    keep = counts >= min_area_px
     keep[0] = False
     # 0..K renumbering LUT so labels stay contiguous after dropping.
     lut = np.zeros_like(counts, dtype=np.int32)

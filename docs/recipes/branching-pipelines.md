@@ -41,7 +41,7 @@ img = gz.Input("image")
 scaled = Scale(scale=1e-4)(img)
 drop = CloudMask()(img)
 clean = ApplyMask()(scaled, drop)        # Graph supplies args positionally
-ndvi = NDVI(nir_idx=1, red_idx=0)(clean)
+ndvi = NDVI(nir=1, red=0)(clean)
 
 g = gz.Graph(inputs={"image": img}, outputs={"ndvi": ndvi})
 result = g(image=gt)        # {"ndvi": GeoTensor}
@@ -128,9 +128,9 @@ flowchart LR
 
 ```python
 gz.Fanout({
-    "ndvi": NDVI(nir_idx=7, red_idx=3),
-    "ndwi": NDWI(green_idx=2, nir_idx=7),
-    "nbr":  NBR(nir_idx=7, swir_idx=11),
+    "ndvi": NDVI(nir=7, red=3),
+    "ndwi": NDWI(green=2, nir=7),
+    "nbr":  NBR(nir=7, swir2=11),
 })(gt)
 # {"ndvi": GeoTensor, "ndwi": GeoTensor, "nbr": GeoTensor}
 ```

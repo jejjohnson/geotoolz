@@ -13,14 +13,14 @@ Examples:
     Eager mode::
 
         import geotoolz as gz
-        ndvi = gz.indices.NDVI(nir_idx=7, red_idx=3)  # S2 band order
+        ndvi = gz.indices.NDVI(nir=7, red=3)  # S2 band order
         v = ndvi(reflectance_geotensor)               # GeoTensor (H, W)
 
     Composition::
 
         pipeline = (
             gz.radiometry.DNToReflectance(scale=1e-4)
-            | gz.indices.NDVI(nir_idx=7, red_idx=3)
+            | gz.indices.NDVI(nir=7, red=3)
         )
         v = pipeline(dn_geotensor)
 
