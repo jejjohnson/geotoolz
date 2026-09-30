@@ -263,18 +263,3 @@ class TestStackMatchedMapping:
         assert out.shape == (2, 4, 4)
         np.testing.assert_array_equal(np.asarray(out)[0], 1.0)
         np.testing.assert_array_equal(np.asarray(out)[1], 3.0)
-
-
-# ---------------------------------------------------------------------------
-# Skeleton coverage: confirm the rest of the coregister surface still
-# raises NotImplementedError (unchanged from the scaffolding PR).
-# ---------------------------------------------------------------------------
-
-
-class TestRemainingScaffoldingUntouched:
-    def test_swath_to_grid_still_scaffolding(self) -> None:
-        from geotoolz.geom.coregister import SwathToGrid
-
-        op = SwathToGrid(target_crs="EPSG:32629", target_res=(500.0, 500.0))
-        with pytest.raises(NotImplementedError):
-            op(object())  # type: ignore[arg-type]

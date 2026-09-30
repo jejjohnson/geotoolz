@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from geotoolz.feature._src.array import (
+    canny_edges,
+    multiscale_features,
+    structure_tensor_eigvals,
+)
 from geotoolz.feature._src.operators import (
     HOG,
     BlobDOG,
@@ -29,4 +34,7 @@ __all__ = [
     "MultiscaleBasicFeatures",
     "PeakLocalMax",
     "StructureTensor",
+    "canny_edges",
+    "multiscale_features",
+    "structure_tensor_eigvals",
 ]

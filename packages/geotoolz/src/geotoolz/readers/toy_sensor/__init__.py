@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from geotoolz.readers.toy_sensor import constants, ops, presets
+from geotoolz.readers.toy_sensor import constants, presets
 from geotoolz.readers.toy_sensor.presets import NDVI
 from geotoolz.readers.toy_sensor.reader import Reader
 
@@ -15,4 +15,4 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["BANDS", "CONSTANTS", "NDVI", "Reader", "constants", "ops", "presets"]
+__all__ = ["BANDS", "CONSTANTS", "NDVI", "Reader", "constants", "presets"]

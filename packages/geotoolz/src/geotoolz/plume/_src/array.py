@@ -24,9 +24,9 @@ from shapely.geometry import MultiPoint
 from geotoolz._src.geo import pixel_xy
 from geotoolz._src.labels import Connectivity, label_components, skeleton_length
 from geotoolz._src.shape import single_band
+from geotoolz.segment._src.array import ThresholdMode, threshold_mask
 
 
-ThresholdMode = float | int | str
 ColumnUnit = Literal["ppm_m", "mol_m2", "kg_m2"]
 
 # Molar masses (kg/mol) for supported trace gases.
@@ -61,87 +61,6 @@ def squeeze_single_band(
     return single_band(values, name="plume")
 
 
-def otsu_threshold(values: Num[np.ndarray, "*dims"], *, nbins: int = 256) -> float:
-    """Compute Otsu's between-class-variance threshold, ignoring NaNs.
-
-    Builds an ``nbins``-bin histogram of the finite values and returns
-    the bin center that maximises the between-class variance
-    ``w_bg * w_fg * (mu_bg - mu_fg)^2`` (Otsu, 1979). A constant input
-    returns that constant.
-
-    Args:
-        values: Array of any shape; non-finite entries are ignored.
-        nbins: Number of histogram bins. Default ``256``.
-
-    Returns:
-        The threshold; pixels strictly above it are foreground.
-
-    Raises:
-        ValueError: If ``values`` contains no finite entries.
-    """
-    finite = np.asarray(values, dtype=float)
-    finite = finite[np.isfinite(finite)]
-    if finite.size == 0:
-        raise ValueError("cannot compute an Otsu threshold on all-NaN data")
-    if np.all(finite == finite[0]):
-        return float(finite[0])
-
-    hist, bin_edges = np.histogram(finite, bins=nbins)
-    centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
-    weight_bg = np.cumsum(hist)
-    weight_fg = finite.size - weight_bg
-
-    valid = (weight_bg > 0) & (weight_fg > 0)
-    mean_bg = np.divide(
-        np.cumsum(hist * centers),
-        weight_bg,
-        out=np.zeros_like(centers, dtype=float),
-        where=weight_bg > 0,
-    )
-    mean_fg = np.divide(
-        np.cumsum((hist * centers)[::-1])[::-1] - hist * centers,
-        weight_fg,
-        out=np.zeros_like(centers, dtype=float),
-        where=weight_fg > 0,
-    )
-    variance = weight_bg * weight_fg * (mean_bg - mean_fg) ** 2
-    variance[~valid] = -np.inf
-    return float(centers[int(np.argmax(variance))])
-
-
-def resolve_threshold(
-    values: Num[np.ndarray, "*dims"], threshold: ThresholdMode, *, nbins: int = 256
-) -> float:
-    """Resolve an absolute, Otsu, or percentile threshold to a float.
-
-    Args:
-        values: Data the data-driven modes are evaluated on.
-        threshold: A number (returned as-is), ``"otsu"`` (see
-            :func:`otsu_threshold`), or ``"percentile:<p>"`` with ``p``
-            in ``[0, 100]`` (NaN-aware percentile of ``values``).
-        nbins: Histogram bins for the ``"otsu"`` mode, passed to
-            :func:`otsu_threshold`. Default ``256``.
-
-    Returns:
-        The resolved threshold value.
-
-    Raises:
-        ValueError: If a string threshold is neither ``"otsu"`` nor a
-            valid ``"percentile:<p>"`` spec.
-    """
-    if isinstance(threshold, str):
-        if threshold == "otsu":
-            return otsu_threshold(values, nbins=nbins)
-        prefix = "percentile:"
-        if threshold.startswith(prefix):
-            percentile = float(threshold.removeprefix(prefix))
-            if not 0.0 <= percentile <= 100.0:
-                raise ValueError("percentile threshold must be in [0, 100]")
-            return float(np.nanpercentile(values, percentile))
-        raise ValueError("threshold must be a number, 'otsu', or 'percentile:<p>'")
-    return float(threshold)
-
-
 def plume_mask(
     values: Num[np.ndarray, "h w"] | Num[np.ndarray, "1 h w"],
     *,
@@ -155,7 +74,7 @@ def plume_mask(
     Args:
         values: Single-band enhancement map, ``(H, W)`` or ``(1, H, W)``.
         threshold: Absolute number, ``"otsu"``, or ``"percentile:<p>"``;
-            see :func:`resolve_threshold`.
+            see :func:`geotoolz.segment.resolve_threshold`.
         min_area: Minimum connected-component size in pixels.
         connectivity: 4 or 8 connectivity for component labelling.
         nbins: Histogram bins for the ``"otsu"`` threshold. Default ``256``.
@@ -164,8 +83,7 @@ def plume_mask(
         Boolean ``(H, W)`` mask of the surviving plume pixels.
     """
     arr = squeeze_single_band(values)
-    cutoff = resolve_threshold(arr, threshold, nbins=nbins)
-    raw = np.asarray(arr) > cutoff
+    raw = threshold_mask(arr, threshold, nbins=nbins)
     return label_components(raw, min_area=min_area, connectivity=connectivity) > 0
 
 

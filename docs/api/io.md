@@ -10,5 +10,7 @@ Reader and writer source/sink operators. See the concept page
 - **Cloud / catalog source:** `LoadFromEE`, `LoadFromSTAC`
 - **Writers:** `WriteGeoTIFF`, `WriteCOG`, `WriteZarr`
 - **Base classes:** `SourceOperator`, `SinkOperator`, `GeoToolzIOError`
+- **Tier-A primitives:** `select_indexes` / `read_indexes` (1-based band selection),
+  `fill_value_from_attrs` (CF / HDF fill lookup), `affine_from_geotransform` (GDAL `GeoTransform`)
 
 ::: geotoolz.io

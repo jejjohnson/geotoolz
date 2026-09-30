@@ -107,10 +107,6 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "compositing._src.operators.MaxNDVIComposite": {"red": 0, "nir": 1},
     "einx._src.operators.Einx": {"op": "rearrange", "pattern": "c h w -> c w h"},
     "feature._src.operators.HoughCircles": {"radii": [3, 5]},
-    "geom._src.coregister.operators.SwathToGrid": {
-        "target_crs": "EPSG:4326",
-        "target_res": (0.1, 0.1),
-    },
     "geom._src.coregister.operators.VectorToRasterAgg": {"agg": "count"},
     "geom._src.operators.BowtieCorrection": {
         "detectors_per_scan": 4,
@@ -155,7 +151,7 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "io._src.operators.WriteGeoTIFF": {"path": "out.tif"},
     "io._src.operators.WriteZarr": {"store": "out.zarr"},
     **{
-        f"learn.{name}": _sklearn(name)
+        f"learn._src.operators.{name}": _sklearn(name)
         for name in (
             "IsolationForest",
             "IterativeImputer",
@@ -167,15 +163,15 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
             "PCA",
         )
     },
-    "learn.LocalOutlierFactor": lambda: {
+    "learn._src.operators.LocalOutlierFactor": lambda: {
         "estimator": __import__("sklearn.neighbors").neighbors.LocalOutlierFactor(
             novelty=True
         )
     },
-    "learn.GMM": lambda: {
+    "learn._src.operators.GMM": lambda: {
         "estimator": __import__("sklearn.mixture").mixture.GaussianMixture()
     },
-    "learn.IPCA": lambda: {
+    "learn._src.operators.IPCA": lambda: {
         "estimator": __import__("sklearn.decomposition").decomposition.IncrementalPCA()
     },
     "learn._src.operators.SklearnOp": _sklearn("PCA"),
@@ -979,7 +975,7 @@ TIME_INVARIANT: frozenset[str] = frozenset(
 STACK_AS_FEATURES: frozenset[str] = frozenset(
     {
         *(
-            f"learn.{name}"
+            f"learn._src.operators.{name}"
             for name in (
                 "GMM",
                 "IPCA",

@@ -84,8 +84,6 @@ def _multi_input_operators() -> list[Any]:
         StackMatched(),
         BlendMatched(),
         co.RasterToRasterLike(),
-        co.SwathToGrid(target_crs="EPSG:4326", target_res=0.1),
-        co.GridToSwath(),
         co.RasterToPoints(),
         co.PointsToRaster(),
         co.RasterToPointCloud(),
@@ -95,7 +93,7 @@ def _multi_input_operators() -> list[Any]:
 
 
 def test_formerly_call_overriding_operators_support_graph_mode() -> None:
-    """Regression for #135: these ten used to override ``__call__``."""
+    """Regression for #135: these used to override ``__call__``."""
     import inspect
 
     from pipekit import Input, Node
@@ -106,3 +104,48 @@ def test_formerly_call_overriding_operators_support_graph_mode() -> None:
         node = op(*(Input(f"x{i}") for i in range(n_inputs)))
         assert isinstance(node, Node), type(op).__name__
         assert node.operator is op
+
+
+#: Subpackages exempt from the operator-family file pair: ``readers`` holds
+#: the sensor-reader framework (``_src/`` plus public per-sensor
+#: subpackages), not Tier-A / Tier-B operators.
+_NON_OPERATOR_PACKAGES = frozenset({"readers"})
+
+
+def _families() -> list[Any]:
+    from pathlib import Path
+
+    root = Path(geotoolz.__file__).parent
+    return sorted(
+        p for p in root.iterdir() if (p / "__init__.py").is_file() and p.name != "_src"
+    )
+
+
+def test_family_layout() -> None:
+    """Every family follows the canonical two-tier layout (#162).
+
+    ``family/__init__.py`` re-exports only (no ``def`` / ``class``);
+    ``family/_src/array.py`` holds the Tier-A numpy primitives and
+    ``family/_src/operators.py`` the Tier-B Operators. Optional
+    ``family/_src/<topic>.py`` modules hold constants / tables / helpers.
+    """
+    import ast
+
+    families = _families()
+    assert len(families) >= 20
+    problems: list[str] = []
+    for family in families:
+        name = family.name
+        if not (family / "_src" / "__init__.py").is_file():
+            problems.append(f"{name}: missing _src/")
+        if name not in _NON_OPERATOR_PACKAGES:
+            for module in ("array.py", "operators.py"):
+                if not (family / "_src" / module).is_file():
+                    problems.append(f"{name}: missing _src/{module}")
+        tree = ast.parse((family / "__init__.py").read_text(encoding="utf-8"))
+        problems.extend(
+            f"{name}/__init__.py defines {node.name!r}"
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        )
+    assert problems == []

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -16,13 +16,17 @@ from geotoolz._src.dtype import as_float
 from geotoolz._src.samples import SampleLayout, cube_to_samples, samples_to_cube
 from geotoolz._src.valid import invalid_values
 from geotoolz._src.wrap import wrap_like
+from geotoolz.learn._src.array import (
+    ReshapeMode,
+    output_fill_value,
+    resolve_axes,
+)
 
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-ReshapeMode = Literal["pixel", "pixel_time", "spectral", "temporal", "patch", "custom"]
 NanStrategy = Literal[
     "drop",
     "propagate",
@@ -337,7 +341,7 @@ class GeoTensorEstimator:
 
     def _flatten(self, gt: GeoTensor | np.ndarray) -> _FlatGeoTensor:
         arr = np.asarray(gt)
-        axes = _resolve_axes(arr.ndim, self.mode, self.sample_axes, self.feature_axes)
+        axes = resolve_axes(arr.ndim, self.mode, self.sample_axes, self.feature_axes)
         x, layout = cube_to_samples(
             arr, band_axis=axes.feature_axes, sample_axes=axes.sample_axes
         )
@@ -450,7 +454,7 @@ class GeoTensorEstimator:
         valid: Bool[np.ndarray, " n"],
     ) -> GeoTensor | np.ndarray:
         y = np.asarray(y_apply)
-        fill_value = _output_fill_value(y.dtype, self.label_fill_value)
+        fill_value = output_fill_value(y.dtype, self.label_fill_value)
         if valid.all():
             dense = y
         else:
@@ -482,19 +486,6 @@ class GeoTensorEstimator:
         )
 
 
-class _ResolvedAxes:
-    def __init__(
-        self,
-        *,
-        axis_order: tuple[str, ...],
-        sample_axes: tuple[int, ...],
-        feature_axes: tuple[int, ...],
-    ) -> None:
-        self.axis_order = axis_order
-        self.sample_axes = sample_axes
-        self.feature_axes = feature_axes
-
-
 class _FlatGeoTensor:
     def __init__(
         self,
@@ -508,97 +499,6 @@ class _FlatGeoTensor:
         self.layout = layout
 
 
-def _resolve_axes(
-    ndim: int,
-    mode: ReshapeMode,
-    sample_axes: tuple[str | int, ...] | None,
-    feature_axes: tuple[str | int, ...] | None,
-) -> _ResolvedAxes:
-    if mode == "patch":
-        return _ResolvedAxes(
-            axis_order=tuple(str(i) for i in range(ndim)),
-            sample_axes=(0,),
-            feature_axes=tuple(range(1, ndim)),
-        )
-
-    axis_order = _canonical_axis_order(ndim)
-    if mode in {"pixel_time", "temporal"} and "T" not in axis_order:
-        raise ValueError(
-            f"mode={mode!r} needs a time axis, i.e. a 4-D (T, C, H, W) "
-            f"input; got a {ndim}-D input"
-        )
-    if mode == "spectral" and "C" not in axis_order:
-        raise ValueError(
-            "mode='spectral' needs a band axis, i.e. a 3-D (C, H, W) or 4-D "
-            f"(T, C, H, W) input; got a {ndim}-D input"
-        )
-    if mode == "custom":
-        if sample_axes is None or feature_axes is None:
-            raise ValueError(
-                "sample_axes and feature_axes are required when mode='custom'"
-            )
-        samples = _axis_indices(sample_axes, axis_order, ndim)
-        features = _axis_indices(feature_axes, axis_order, ndim)
-    elif mode == "pixel":
-        samples = _axis_indices(("H", "W"), axis_order, ndim)
-        features = tuple(axis for axis in range(ndim) if axis not in samples)
-    elif mode == "pixel_time":
-        samples = _axis_indices(("T", "H", "W"), axis_order, ndim)
-        features = tuple(axis for axis in range(ndim) if axis not in samples)
-    elif mode == "spectral":
-        samples = _axis_indices(("C",), axis_order, ndim)
-        features = tuple(axis for axis in range(ndim) if axis not in samples)
-    elif mode == "temporal":
-        samples = _axis_indices(("T",), axis_order, ndim)
-        features = tuple(axis for axis in range(ndim) if axis not in samples)
-    else:
-        raise ValueError(f"Unknown reshape mode: {mode!r}")
-
-    if set(samples) & set(features):
-        raise ValueError("sample_axes and feature_axes must be disjoint")
-    if len(samples) + len(features) != ndim:
-        raise ValueError("sample_axes and feature_axes must cover every input axis")
-    return _ResolvedAxes(
-        axis_order=axis_order,
-        sample_axes=samples,
-        feature_axes=features,
-    )
-
-
-def _canonical_axis_order(ndim: int) -> tuple[str, ...]:
-    if ndim < 2:
-        raise ValueError(
-            "GeoTensorEstimator expects at least 2 dimensions ((H, W), "
-            f"(C, H, W) or (T, C, H, W)); got a {ndim}-D input"
-        )
-    if ndim == 2:
-        return ("H", "W")
-    labels = ("T", "C", "H", "W")
-    if ndim <= 4:
-        return labels[-ndim:]
-    extra = tuple(f"X{i}" for i in range(ndim - 4))
-    return extra + labels
-
-
-def _axis_indices(
-    axes: Iterable[str | int],
-    axis_order: tuple[str, ...],
-    ndim: int,
-) -> tuple[int, ...]:
-    indices: list[int] = []
-    for axis in axes:
-        if isinstance(axis, str):
-            if axis not in axis_order:
-                raise ValueError(f"Axis label {axis!r} is not present in this input")
-            idx = axis_order.index(axis)
-        else:
-            idx = axis % ndim
-        indices.append(idx)
-    if len(set(indices)) != len(indices):
-        raise ValueError("Axes must not contain duplicates")
-    return tuple(indices)
-
-
 def _restore_shape(
     y: Shaped[np.ndarray, " n"] | Shaped[np.ndarray, "n k"],
     flat: _FlatGeoTensor,
@@ -610,19 +510,6 @@ def _restore_shape(
     if y.ndim not in (1, 2):
         raise ValueError("Estimator output must be 1-D or 2-D")
     return samples_to_cube(y, flat.layout)
-
-
-def _output_fill_value(dtype: np.dtype, label_fill_value: int) -> Any:
-    """Fill value for an estimator output of ``dtype``.
-
-    ``label_fill_value`` for integer outputs, ``False`` for booleans, and
-    ``None`` -- meaning ``NaN`` in a float result -- for everything else.
-    """
-    if dtype.kind in "iu":
-        return label_fill_value
-    if dtype.kind == "b":
-        return False
-    return None
 
 
 def _validate_nan_strategy(strategy: NanStrategy) -> None:

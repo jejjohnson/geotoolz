@@ -7,6 +7,12 @@ per-call seed handling for reproducible training pipelines.
 
 from __future__ import annotations
 
+from geotoolz.augment._src.array import (
+    cloud_alpha,
+    rayleigh_weights,
+    rot90_transform,
+    sun_angle_scale,
+)
 from geotoolz.augment._src.operators import (
     AtmosphericHaze,
     BandDropout,
@@ -42,4 +48,8 @@ __all__ = [
     "SimulatedClouds",
     "SpeckleNoise",
     "SunAngleJitter",
+    "cloud_alpha",
+    "rayleigh_weights",
+    "rot90_transform",
+    "sun_angle_scale",
 ]

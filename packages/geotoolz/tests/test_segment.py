@@ -568,3 +568,68 @@ def test_4d_time_stack() -> None:
     assert out.shape == (2, 1, 16, 16)
     for t, frame in enumerate(frames(stack)):
         np.testing.assert_array_equal(np.asarray(out)[t, 0], np.asarray(op(frame)))
+
+
+# ---------------------------------------------------------------------------
+# Threshold (moved from plume in #162)
+# ---------------------------------------------------------------------------
+
+
+def _bimodal() -> np.ndarray:
+    values = np.zeros((1, 8, 8), dtype=float)
+    values[:, :, 4:] = 10.0
+    return values
+
+
+def test_threshold_otsu_splits_bimodal_map_and_keeps_carrier() -> None:
+    gt = _gt(_bimodal())
+    mask = gz.segment.Threshold()(gt)
+    assert mask.shape == gt.shape
+    assert mask.transform == gt.transform
+    assert np.asarray(mask).dtype == bool
+    np.testing.assert_array_equal(np.asarray(mask), _bimodal() > 5.0)
+    assert mask.fill_value_default is False
+
+
+@pytest.mark.parametrize(
+    ("threshold", "expected"),
+    [(4.0, 32), ("percentile:0", 32), ("percentile:100", 0)],
+)
+def test_threshold_absolute_and_percentile_modes(
+    threshold: float | str, expected: int
+) -> None:
+    mask = gz.segment.Threshold(threshold=threshold)(_bimodal())
+    assert int(np.asarray(mask).sum()) == expected
+
+
+def test_threshold_nodata_is_false_and_excluded_from_statistic() -> None:
+    values = _bimodal()
+    gt = toy_geotensor(values, with_fill_pixels=True)
+    invalid = fill_pixel_mask(gt.shape)
+    mask = np.asarray(gz.segment.Threshold()(gt))
+    assert not mask[..., invalid].any()
+    np.testing.assert_array_equal(mask[..., ~invalid], (values > 5.0)[..., ~invalid])
+
+
+def test_threshold_rejects_unknown_mode() -> None:
+    with pytest.raises(ValueError, match="otsu"):
+        gz.segment.Threshold(threshold="triangle")
+
+
+def test_threshold_round_trips_and_is_top_level() -> None:
+    op = gz.Threshold(threshold="percentile:95", nbins=64)
+    assert gz.Threshold is gz.segment.Threshold
+    rebuilt = Operator.from_state(json.loads(json.dumps(op.state)))
+    assert rebuilt.get_config() == op.get_config()
+
+
+def test_plume_mask_is_threshold_plus_area_filter() -> None:
+    """``PlumeMask`` shares the segment thresholding primitives."""
+    assert gz.plume.otsu_threshold is gz.segment.otsu_threshold
+    assert gz.plume.resolve_threshold is gz.segment.resolve_threshold
+    rng = np.random.default_rng(0)
+    values = rng.normal(size=(1, 16, 16))
+    for threshold in ("otsu", "percentile:90", 0.5):
+        plume = gz.plume.PlumeMask(threshold=threshold, min_area=0)(values)
+        seg = gz.segment.Threshold(threshold=threshold)(values)
+        np.testing.assert_array_equal(np.asarray(plume)[None], np.asarray(seg))

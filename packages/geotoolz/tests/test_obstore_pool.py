@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("obstore")
 
-from geotoolz.readers import _obstore
+from geotoolz.readers._src import obstore as _obstore
 
 
 @pytest.fixture(autouse=True)

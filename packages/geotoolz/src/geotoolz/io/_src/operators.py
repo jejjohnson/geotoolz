@@ -52,6 +52,13 @@ from geotoolz._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
+from geotoolz.io._src.array import (
+    affine_from_geotransform,
+    fill_value_from_attrs,
+    read_indexes,
+    select_indexes,
+)
+from geotoolz.io._src.errors import GeoToolzIOError
 
 
 Source = str | PathLike[str] | Any
@@ -59,10 +66,6 @@ Bounds = tuple[float, float, float, float]
 Resolution = float | tuple[float, float]
 HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
 HDF4_SIGNATURE = b"\x0e\x03\x13\x01"
-
-
-class GeoToolzIOError(RuntimeError):
-    """Raised when a geotoolz I/O operator cannot read or write data."""
 
 
 class SourceOperator(Operator):
@@ -165,72 +168,6 @@ def _import_optional(module: str, extra: str) -> Any:
         ) from exc
 
 
-def _select_indexes(values: Any, indexes: list[int] | None) -> np.ndarray:
-    array = np.asanyarray(values)
-    if indexes is None:
-        return array
-    zero_based = [index - 1 for index in indexes]
-    if any(index < 0 for index in zero_based):
-        raise GeoToolzIOError("indexes are 1-based and must be positive.")
-    if array.ndim < 3:
-        # Treat a non-band dataset as a single-layer raster: indexes=[1]
-        # selects the only layer and is a no-op; anything else is invalid.
-        if zero_based != [0]:
-            raise GeoToolzIOError("indexes require a dataset with a leading band axis.")
-        return array
-    return np.take(array, zero_based, axis=0)
-
-
-def _read_hdf5_dataset(source: Any, indexes: list[int] | None) -> np.ndarray:
-    """Read an h5py dataset, applying a band hyperslab when ``indexes`` is set.
-
-    Avoids materializing the full dataset before band selection so that
-    requesting a single band only reads that band off disk.
-    """
-    if indexes is None:
-        return np.asanyarray(source[...])
-    zero_based = [index - 1 for index in indexes]
-    if any(index < 0 for index in zero_based):
-        raise GeoToolzIOError("indexes are 1-based and must be positive.")
-    ndim = getattr(source, "ndim", None)
-    if ndim is None:
-        ndim = np.asarray(source.shape).size
-    if ndim < 3:
-        if zero_based != [0]:
-            raise GeoToolzIOError("indexes require a dataset with a leading band axis.")
-        return np.asanyarray(source[...])
-    # h5py supports fancy indexing on the leading axis only when indices are
-    # in increasing order; sort, hyperslab-read, then reorder if needed.
-    order = np.argsort(zero_based)
-    sorted_indexes = [zero_based[i] for i in order]
-    sliced = np.asanyarray(source[sorted_indexes])
-    if list(order) == list(range(len(order))):
-        return sliced
-    inverse = np.argsort(order)
-    return sliced[inverse]
-
-
-def _fill_value_from_attrs(attrs: dict[str, Any]) -> Any:
-    """Return the scalar fill value declared in ``attrs`` (default ``0``).
-
-    HDF5 attributes written by netCDF4/xarray are ``(1,)``-shaped arrays
-    (lists after :func:`~geotoolz._src.config.jsonable`); size-1 values are
-    unwrapped to a scalar and multi-element values are skipped, since a
-    ``GeoTensor`` fill must be a scalar.
-    """
-    for name in ("_FillValue", "missing_value", "fill_value", "nodata"):
-        if name not in attrs:
-            continue
-        value = attrs[name]
-        if isinstance(value, list | tuple | np.ndarray):
-            flat = np.ravel(np.asarray(value))
-            if flat.size != 1:
-                continue
-            value = flat[0].item()
-        return value
-    return 0
-
-
 def _geotensor(
     values: Any,
     *,
@@ -290,12 +227,7 @@ def _netcdf_transform(variable: Any, mapping: Any) -> Affine:
             geotransform = getattr(source, "GeoTransform", None)
         if geotransform is not None:
             break
-    if geotransform is None:
-        return Affine.identity()
-    parts = [float(part) for part in str(geotransform).split()]
-    if len(parts) != 6:
-        return Affine.identity()
-    return Affine.from_gdal(*parts)
+    return affine_from_geotransform(geotransform)
 
 
 class ReadWindow(SourceOperator):
@@ -885,7 +817,7 @@ class ReadHDF(SourceOperator):
             with h5py.File(self.path, "r") as file:
                 source = file[self.dataset]
                 attrs = jsonable(dict(source.attrs))
-                values = _read_hdf5_dataset(source, self.indexes)
+                values = read_indexes(source, self.indexes)
                 out_attrs: dict[str, Any] = {"attrs": attrs}
                 if self.geolocation is not None:
                     lat_name, lon_name = self.geolocation
@@ -902,7 +834,7 @@ class ReadHDF(SourceOperator):
             raise _read_error(self.path, exc) from exc
         return _geotensor(
             values,
-            fill_value=_fill_value_from_attrs(attrs),
+            fill_value=fill_value_from_attrs(attrs),
             attrs=out_attrs,
         )
 
@@ -913,7 +845,7 @@ class ReadHDF(SourceOperator):
             try:
                 source = hdf.select(self.dataset)
                 attrs = jsonable(dict(source.attributes()))
-                values = _select_indexes(source.get(), self.indexes)
+                values = select_indexes(source.get(), self.indexes)
                 out_attrs: dict[str, Any] = {"attrs": attrs}
                 if self.geolocation is not None:
                     lat_name, lon_name = self.geolocation
@@ -927,7 +859,7 @@ class ReadHDF(SourceOperator):
             raise _read_error(self.path, exc) from exc
         return _geotensor(
             values,
-            fill_value=_fill_value_from_attrs(attrs),
+            fill_value=fill_value_from_attrs(attrs),
             attrs=out_attrs,
         )
 
@@ -979,8 +911,8 @@ class ReadNetCDF(SourceOperator):
                 variable = group.variables[self.variable]
                 variable.set_auto_maskandscale(self.decode_cf)
                 attrs = jsonable(dict(variable.__dict__))
-                values = _select_indexes(variable[:], self.indexes)
-                fill_value = _fill_value_from_attrs(attrs)
+                values = select_indexes(variable[:], self.indexes)
+                fill_value = fill_value_from_attrs(attrs)
                 if np.ma.isMaskedArray(values):
                     # Decoded (scaled) floats are NaN-filled, so NaN is the
                     # sentinel the returned tensor actually carries.

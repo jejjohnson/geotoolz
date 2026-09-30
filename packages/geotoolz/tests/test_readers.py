@@ -13,7 +13,6 @@ from rasterio.windows import Window
 
 import geotoolz as gz
 from geotoolz.readers import SensorReader, toy_sensor
-from geotoolz.readers._base import require_optional_dependency
 from geotoolz.readers.toy_sensor import constants as toy_constants
 
 
@@ -169,16 +168,12 @@ def test_toy_sensor_constants_are_lazy_and_cached(
 
 
 def test_shared_csv_loader_caches_package_data() -> None:
-    from geotoolz.readers._constants import load_csv
+    from geotoolz.readers._src.constants import load_csv
 
     load_csv.cache_clear()
     bands = load_csv("geotoolz.readers.toy_sensor", "data/bands.csv")
     assert bands[2]["name"] == "red"
     assert bands is load_csv("geotoolz.readers.toy_sensor", "data/bands.csv")
-
-
-def test_optional_extra_guard_accepts_available_package() -> None:
-    require_optional_dependency("json", extra="toy_sensor")
 
 
 def test_toy_sensor_ndvi_preset_matches_generic_operator() -> None:

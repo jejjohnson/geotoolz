@@ -1088,7 +1088,7 @@ def _target_pattern(
 ) -> np.ndarray:
     if not isinstance(pattern, str):
         return np.asarray(pattern, dtype=float)
-    out = np.zeros_like(base, dtype=float)
+    out = np.zeros_like(np.asarray(base), dtype=float)
     if pattern == "uniform":
         out[...] = 1.0
     elif pattern == "impulse":

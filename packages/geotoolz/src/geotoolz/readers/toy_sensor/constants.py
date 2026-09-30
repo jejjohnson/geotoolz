@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from geotoolz.readers._constants import load_csv
+from geotoolz.readers._src.constants import load_csv
 
 
 BAND_BLUE = "blue"

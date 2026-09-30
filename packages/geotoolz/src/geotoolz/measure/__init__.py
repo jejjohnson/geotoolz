@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from geotoolz._src.labels import (
+from geotoolz.measure._src.array import (
     DEFAULT_REGIONPROPS,
     label_components,
     regionprops_frame,
+    regionprops_to_crs_units,
     skeleton_length,
 )
 from geotoolz.measure._src.operators import (
@@ -30,5 +31,6 @@ __all__ = [
     "SkeletonLength",
     "label_components",
     "regionprops_frame",
+    "regionprops_to_crs_units",
     "skeleton_length",
 ]

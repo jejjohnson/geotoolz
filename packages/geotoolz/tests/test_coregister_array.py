@@ -287,14 +287,3 @@ def test_reproject_like_primitive_integer_grid_offset_is_a_window_read() -> None
     )
     np.testing.assert_array_equal(out, values[1:4, 1:5])
     assert out.dtype == np.int16
-
-
-def test_swath_to_grid_is_still_scaffolding() -> None:
-    with pytest.raises(NotImplementedError):
-        coreg_array.swath_to_grid(
-            np.zeros((2, 2)),
-            lat=np.zeros((2, 2)),
-            lon=np.zeros((2, 2)),
-            target_crs="EPSG:4326",
-            target_res=(1.0, 1.0),
-        )

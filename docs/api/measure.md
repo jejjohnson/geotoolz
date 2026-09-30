@@ -17,6 +17,7 @@ either label `GeoTensor`s or `GeoDataFrame`s with geometries in the input CRS.
 - `ShannonEntropy` — single-band scalar entropy
 
 Shared primitives (also used by `geotoolz.mask` and `geotoolz.plume`): `label_components`,
-`skeleton_length`, `regionprops_frame` and `DEFAULT_REGIONPROPS`.
+`skeleton_length`, `regionprops_frame` and `DEFAULT_REGIONPROPS`, plus
+`regionprops_to_crs_units` (the `scale_to_crs=True` conversion).
 
 ::: geotoolz.measure

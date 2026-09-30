@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import einx
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -19,14 +18,10 @@ from skimage.feature import (
     blob_dog,
     blob_doh,
     blob_log,
-    canny,
     corner_harris,
     corner_peaks,
     hog,
-    multiscale_basic_features,
     peak_local_max,
-    structure_tensor,
-    structure_tensor_eigenvalues,
 )
 from skimage.transform import (
     hough_circle,
@@ -39,6 +34,11 @@ from geotoolz._src.config import as_tuple
 from geotoolz._src.geo import pixel_xy, require_geotensor
 from geotoolz._src.shape import single_band
 from geotoolz._src.valid import wrap_filled
+from geotoolz.feature._src.array import (
+    canny_edges,
+    multiscale_features,
+    structure_tensor_eigvals,
+)
 
 
 if TYPE_CHECKING:
@@ -167,7 +167,9 @@ class _BlobBase(Operator):
         )
         if blobs.size == 0:
             return gpd.GeoDataFrame(
-                {"row": [], "col": [], "sigma": []}, geometry=[], crs=gt.crs
+                {"row": [], "col": [], "sigma": [], "radius": []},
+                geometry=[],
+                crs=gt.crs,
             )
         return _points(
             gt,
@@ -320,13 +322,8 @@ class Canny(Operator):
         self.high_threshold = high_threshold
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        arr = np.asarray(gt)
-        # skimage.feature.canny rejects 64-bit integers; everything else
-        # goes through untouched so its dtype-relative defaults apply.
-        if arr.dtype in (np.int64, np.uint64):
-            arr = arr.astype(np.float64)
-        edges = canny(
-            single_band(arr, name="Canny"),
+        edges = canny_edges(
+            single_band(np.asarray(gt), name="Canny"),
             sigma=self.sigma,
             low_threshold=self.low_threshold,
             high_threshold=self.high_threshold,
@@ -432,11 +429,10 @@ class StructureTensor(Operator):
         self.sigma = sigma
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        tensor = structure_tensor(
+        eigvals = structure_tensor_eigvals(
             single_band(np.asarray(gt, dtype=float), name="StructureTensor"),
             sigma=self.sigma,
         )
-        eigvals = np.asarray(structure_tensor_eigenvalues(tensor))
         return wrap_filled(gt, eigvals, fill_value_default=np.nan)
 
 
@@ -473,16 +469,14 @@ class MultiscaleBasicFeatures(Operator):
         self.sigma_max = sigma_max
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        features = multiscale_basic_features(
+        stack = multiscale_features(
             single_band(np.asarray(gt, dtype=float), name="MultiscaleBasicFeatures"),
             intensity=self.intensity,
             edges=self.edges,
             texture=self.texture,
             sigma_min=self.sigma_min,
             sigma_max=self.sigma_max,
-            channel_axis=None,
         )
-        stack = einx.id("y x f -> f y x", features)
         return wrap_filled(gt, stack, fill_value_default=np.nan)
 
 

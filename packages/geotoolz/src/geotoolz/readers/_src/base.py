@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
@@ -16,7 +15,7 @@ from georeader.abstract_reader import GeoData
 from georeader.geotensor import GeoTensor
 from rasterio.windows import Window, transform as window_transform
 
-from geotoolz.readers._obstore import _object_key
+from geotoolz.readers._src.obstore import _object_key
 
 
 if TYPE_CHECKING:
@@ -224,7 +223,7 @@ class SensorReader(GeoData, ABC):
         ``open(path, "rb").read()`` fallback. Callers can either pass
         a pre-built ``ObjectStore`` (e.g. for tests using
         :class:`obstore.store.LocalStore`) or fetch one from
-        :func:`geotoolz.readers._obstore.get_obstore`.
+        :func:`geotoolz.readers._src.obstore.get_obstore`.
         """
         self._obstore_client = client
 
@@ -259,34 +258,6 @@ class SensorReader(GeoData, ABC):
         if client is not None and _has_remote_scheme(uri):
             return _run_coroutine_safely(_get_range_async(client, uri, start, length))
         return _read_bytes_local(uri, start, length)
-
-
-def require_optional_dependency(package: str, *, extra: str) -> None:
-    """Raise an actionable error when a sensor optional dependency is missing.
-
-    Args:
-        package: Import package name to check.
-        extra: Sensor optional-extra name to include in the install command.
-    """
-    if importlib.util.find_spec(package) is not None:
-        return
-    raise ImportError(
-        f"Missing optional dependency {package!r} required for "
-        f"geotoolz.readers.{extra}. Install it with "
-        f"`pip install 'geotoolz[{extra}]'`."
-    )
-
-
-def as_path(path: str | Path) -> Path:
-    """Normalize a reader path argument.
-
-    Args:
-        path: String or ``Path`` reader input.
-
-    Returns:
-        The input converted to a ``Path`` object.
-    """
-    return Path(path)
 
 
 # ----------------------------------------------------------------------

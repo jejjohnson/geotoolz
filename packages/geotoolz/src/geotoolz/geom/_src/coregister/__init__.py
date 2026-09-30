@@ -17,24 +17,20 @@ See ``docs/design/query-matchup.md`` §5 for the full design.
 from __future__ import annotations
 
 from geotoolz.geom._src.coregister.operators import (
-    GridToSwath,
     PointCloudToRaster,
     PointsToRaster,
     RasterToPointCloud,
     RasterToPoints,
     RasterToRasterLike,
-    SwathToGrid,
     VectorToRasterAgg,
 )
 
 
 __all__ = [
-    "GridToSwath",
     "PointCloudToRaster",
     "PointsToRaster",
     "RasterToPointCloud",
     "RasterToPoints",
     "RasterToRasterLike",
-    "SwathToGrid",
     "VectorToRasterAgg",
 ]

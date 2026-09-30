@@ -20,9 +20,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import einx
 import numpy as np
-from jaxtyping import Bool, Float, Int, Num
+from jaxtyping import Bool
 from pipekit import Operator
-from scipy import ndimage
 from skimage.segmentation import (
     chan_vese,
     expand_labels,
@@ -40,8 +39,20 @@ from geotoolz._src.config import (
     reject_config_summary,
 )
 from geotoolz._src.shape import over_frames, single_band
-from geotoolz._src.valid import carried_fill, valid_pixels, wrap_filled
+from geotoolz._src.valid import (
+    carried_fill,
+    mask_invalid_to_nan,
+    valid_pixels,
+    wrap_filled,
+)
 from geotoolz._src.wrap import wrap_like
+from geotoolz.segment._src.array import (
+    ThresholdMode,
+    fill_invalid,
+    mask_nms,
+    merge_nearby_instances,
+    threshold_mask,
+)
 
 
 if TYPE_CHECKING:
@@ -68,24 +79,6 @@ def _array_summary(value: Any) -> dict[str, Any] | None:
         return None
     arr = np.asarray(value)
     return {"shape": list(arr.shape), "dtype": str(arr.dtype)}
-
-
-def _fill_invalid(
-    image: Num[np.ndarray, "*dims"], valid: Bool[np.ndarray, "h w"]
-) -> Float[np.ndarray, "*dims"]:
-    """Float copy of ``image`` with every invalid pixel set to the valid median.
-
-    The fill statistic is the median over valid pixels only, so neither a
-    ``fill_value_default`` sentinel nor ``+/-inf`` can leak into it.
-    """
-    arr = np.asarray(image, dtype=float)
-    if valid.all():
-        return arr
-    invalid = np.broadcast_to(~valid, arr.shape)
-    fill = float(np.median(arr[~invalid])) if valid.any() else 0.0
-    arr = arr.copy()
-    arr[invalid] = fill
-    return arr
 
 
 def _labels(
@@ -143,7 +136,7 @@ class SLIC(Operator):
     @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
-        image = _fill_invalid(np.asarray(gt), valid)
+        image = fill_invalid(np.asarray(gt), valid)
         mask = _as_mask(self.mask, gt.shape[-2:], name="SLIC mask")
         if mask is not None:
             valid &= mask
@@ -212,7 +205,7 @@ class Felzenszwalb(Operator):
     @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
-        image = _fill_invalid(np.asarray(gt), valid)
+        image = fill_invalid(np.asarray(gt), valid)
         mask = _as_mask(self.mask, gt.shape[-2:], name="Felzenszwalb mask")
         if mask is not None:
             valid &= mask
@@ -291,7 +284,7 @@ class Quickshift(Operator):
     @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
-        image = _fill_invalid(np.asarray(gt), valid)
+        image = fill_invalid(np.asarray(gt), valid)
         mask = _as_mask(self.mask, gt.shape[-2:], name="Quickshift mask")
         if mask is not None:
             valid &= mask
@@ -360,7 +353,7 @@ class Watershed(Operator):
     @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
-        image = single_band(_fill_invalid(np.asarray(gt), valid), name="Watershed")
+        image = single_band(fill_invalid(np.asarray(gt), valid), name="Watershed")
         mask = _as_mask(self.mask, gt.shape[-2:], name="Watershed mask")
         if mask is not None:
             valid &= mask
@@ -426,7 +419,7 @@ class ChanVese(Operator):
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         valid = valid_pixels(gt)
         labels = chan_vese(
-            single_band(_fill_invalid(np.asarray(gt), valid), name="ChanVese"),
+            single_band(fill_invalid(np.asarray(gt), valid), name="ChanVese"),
             mu=self.mu,
             lambda1=self.lambda1,
             lambda2=self.lambda2,
@@ -481,7 +474,7 @@ class RandomWalker(Operator):
         # from the diffusion graph so no label can spread through them.
         markers[~valid] = -1
         labels = random_walker(
-            single_band(_fill_invalid(np.asarray(gt), valid), name="RandomWalker"),
+            single_band(fill_invalid(np.asarray(gt), valid), name="RandomWalker"),
             markers,
             beta=self.beta,
             mode=self.mode,
@@ -496,6 +489,57 @@ class RandomWalker(Operator):
             "mode": self.mode,
             "tol": self.tol,
         }
+
+
+class Threshold(Operator):
+    """Binary mask of the pixels strictly above a global threshold.
+
+    Delegates to :func:`geotoolz.segment.threshold_mask`: the threshold is
+    an absolute number, Otsu's (1979) between-class-variance optimum, or
+    a percentile of the input, and the mask is ``values > t``. The
+    data-driven modes use one threshold over every band and pixel of a
+    frame; a ``(T, C, H, W)`` time stack is thresholded frame by frame.
+
+    Nodata pixels (non-finite or equal to the input's fill value, in any
+    band) are excluded from the Otsu / percentile statistic and are always
+    ``False``; the output declares ``fill_value_default=False``. Accepts a
+    ``GeoTensor`` or a plain ``np.ndarray`` and returns a boolean mask of
+    the input's shape in the same carrier kind.
+
+    :class:`geotoolz.plume.PlumeMask` is this thresholding followed by a
+    minimum-component-size filter.
+
+    Args:
+        threshold: ``float`` (absolute), ``"otsu"``, or
+            ``"percentile:<p>"`` with ``p`` in ``[0, 100]``.
+        nbins: Histogram bins for the ``"otsu"`` threshold; ignored by
+            the other modes. Default ``256``.
+
+    Raises:
+        ValueError: If ``threshold`` is a string other than ``"otsu"`` or
+            ``"percentile:<p>"``.
+
+    Examples:
+        >>> mask = gz.segment.Threshold(threshold="otsu")(score_map)
+        >>> hot = gz.segment.Threshold(threshold="percentile:99")(score_map)
+        >>> above = gz.segment.Threshold(threshold=0.5)(probability)
+    """
+
+    def __init__(self, *, threshold: ThresholdMode = "otsu", nbins: int = 256) -> None:
+        if isinstance(threshold, str) and not (
+            threshold == "otsu" or threshold.startswith("percentile:")
+        ):
+            raise ValueError(
+                "threshold must be a number, 'otsu', or 'percentile:<p>'; "
+                f"got {threshold!r}"
+            )
+        self.threshold = threshold
+        self.nbins = nbins
+
+    @over_frames
+    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+        mask = threshold_mask(mask_invalid_to_nan(gt), self.threshold, nbins=self.nbins)
+        return wrap_like(gt, mask, fill_value_default=False)
 
 
 class ExpandLabels(Operator):
@@ -523,125 +567,6 @@ class ExpandLabels(Operator):
             distance=self.distance,
         )
         return _labels(gt, labels)
-
-
-def _bbox_edge_distance(
-    box1: tuple[int, int, int, int], box2: tuple[int, int, int, int]
-) -> float:
-    """Minimum edge-to-edge Euclidean distance between two ``(y1, x1, y2, x2)``
-    boxes. Returns 0 when the boxes overlap or touch."""
-    y1a, x1a, y2a, x2a = box1
-    y1b, x1b, y2b, x2b = box2
-    dx = max(0, x1a - x2b, x1b - x2a)
-    dy = max(0, y1a - y2b, y1b - y2a)
-    return float(np.hypot(dx, dy))
-
-
-def _bbox_iou(
-    box1: tuple[int, int, int, int], box2: tuple[int, int, int, int]
-) -> float:
-    """Box IoU using exclusive ``(y2, x2)`` convention."""
-    y1a, x1a, y2a, x2a = box1
-    y1b, x1b, y2b, x2b = box2
-    yi1, xi1 = max(y1a, y1b), max(x1a, x1b)
-    yi2, xi2 = min(y2a, y2b), min(x2a, x2b)
-    if yi2 <= yi1 or xi2 <= xi1:
-        return 0.0
-    inter = (yi2 - yi1) * (xi2 - xi1)
-    area_a = (y2a - y1a) * (x2a - x1a)
-    area_b = (y2b - y1b) * (x2b - x1b)
-    union = area_a + area_b - inter
-    return float(inter / union) if union > 0 else 0.0
-
-
-def _merge_nearby_instances(
-    labels: Num[np.ndarray, "h w"],
-    *,
-    distance_threshold: float,
-    iou_threshold_min: float,
-    iou_threshold_max: float,
-    classes: Mapping[int, int] | None,
-    start_label: int,
-) -> Int[np.ndarray, "h w"]:
-    """Merge instance labels whose bboxes are close and partially overlap.
-
-    Connectivity rule (from Pérez Carrasco et al. 2026):
-    two instances are connected iff their bbox edge-to-edge distance is
-    strictly below ``distance_threshold`` *and* their box IoU lies in the
-    open interval ``(iou_threshold_min, iou_threshold_max)``.
-    Connected components are then merged via pixel-wise union.
-    """
-    work = np.where(labels > 0, labels, 0).astype(np.int64, copy=False)
-    ids = np.unique(work)
-    ids = ids[ids > 0]
-    if ids.size == 0:
-        return np.zeros_like(work, dtype=np.int64)
-
-    # ``find_objects`` returns a list indexed by ``label - 1`` whose entries are
-    # ``(slice_y, slice_x)`` with exclusive ``stop`` — matching the paper's
-    # ``[y1, x1, y2, x2]`` convention used by ``_bbox_edge_distance``/``_bbox_iou``.
-    slices = ndimage.find_objects(work)
-    boxes: dict[int, tuple[int, int, int, int]] = {}
-    for lbl_value in ids:
-        lbl = int(lbl_value)
-        sl = slices[lbl - 1]
-        if sl is None:
-            continue
-        y_sl, x_sl = sl
-        boxes[lbl] = (
-            int(y_sl.start),
-            int(x_sl.start),
-            int(y_sl.stop),
-            int(x_sl.stop),
-        )
-
-    instance_ids = list(boxes.keys())
-    n = len(instance_ids)
-
-    parent = list(range(n))
-
-    def find(i: int) -> int:
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    def union(i: int, j: int) -> None:
-        ri, rj = find(i), find(j)
-        if ri != rj:
-            parent[ri] = rj
-
-    for i in range(n):
-        bi = boxes[instance_ids[i]]
-        ci = None if classes is None else classes.get(instance_ids[i])
-        for j in range(i + 1, n):
-            if classes is not None:
-                cj = classes.get(instance_ids[j])
-                if ci != cj:
-                    continue
-            bj = boxes[instance_ids[j]]
-            if _bbox_edge_distance(bi, bj) >= distance_threshold:
-                continue
-            iou = _bbox_iou(bi, bj)
-            if not (iou_threshold_min < iou < iou_threshold_max):
-                continue
-            union(i, j)
-
-    root_to_new: dict[int, int] = {}
-    remap: dict[int, int] = {}
-    next_label = start_label
-    for i, lbl in enumerate(instance_ids):
-        root = find(i)
-        if root not in root_to_new:
-            root_to_new[root] = next_label
-            next_label += 1
-        remap[lbl] = root_to_new[root]
-
-    max_label = int(work.max())
-    lookup = np.zeros(max_label + 1, dtype=np.int64)
-    for old_lbl, new_lbl in remap.items():
-        lookup[old_lbl] = new_lbl
-    return lookup[work]
 
 
 class MergeNearbyInstances(Operator):
@@ -700,7 +625,7 @@ class MergeNearbyInstances(Operator):
     @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         labels_in = single_band(np.asarray(gt), name="MergeNearbyInstances")
-        merged = _merge_nearby_instances(
+        merged = merge_nearby_instances(
             labels_in,
             distance_threshold=self.distance_threshold,
             iou_threshold_min=self.iou_threshold_min,
@@ -719,68 +644,6 @@ class MergeNearbyInstances(Operator):
             "classes": mapping_to_pairs(self.classes),
             "start_label": self.start_label,
         }
-
-
-def _mask_nms(
-    masks: Num[np.ndarray, "n h w"] | Bool[np.ndarray, "n h w"],
-    scores: Float[np.ndarray, " n"] | None,
-    iou_threshold: float,
-    start_label: int,
-) -> Int[np.ndarray, "h w"]:
-    """Suppress overlapping mask predictions via mask-IoU and stitch
-    survivors into a 2-D label map (suppressed planes -> background).
-
-    Mirrors Pérez Carrasco et al. (2026), ``non_max_suppression_masks``.
-    When ``scores`` is None instances are ranked by area, largest first.
-    """
-    if masks.ndim != 3:
-        raise ValueError(f"expected a (N, H, W) mask stack, got shape {masks.shape}")
-    n, h, w = masks.shape
-    if n == 0:
-        return np.zeros((h, w), dtype=np.int64)
-    bool_masks = masks.astype(bool, copy=False)
-    areas = bool_masks.reshape(n, -1).sum(axis=1).astype(np.int64)
-    if scores is None:
-        rank = np.argsort(-areas, kind="stable")
-    else:
-        if scores.shape != (n,):
-            raise ValueError(
-                f"scores length {scores.shape} does not match mask count ({n})"
-            )
-        rank = np.argsort(-scores, kind="stable")
-
-    keep: list[int] = []
-    suppressed = np.zeros(n, dtype=bool)
-    for idx in rank:
-        i = int(idx)
-        if suppressed[i] or areas[i] == 0:
-            continue
-        keep.append(i)
-        mi = bool_masks[i]
-        ai = int(areas[i])
-        for jdx in rank:
-            j = int(jdx)
-            if j == i or suppressed[j] or j in keep:
-                continue
-            inter = int(np.logical_and(mi, bool_masks[j]).sum())
-            if inter == 0:
-                continue
-            union = ai + int(areas[j]) - inter
-            if union <= 0:
-                continue
-            if (inter / union) > iou_threshold:
-                suppressed[j] = True
-
-    # Higher-ranked masks claim pixels first; later survivors below the
-    # suppression threshold but with some overlap must not overwrite that
-    # claim, or downstream area/statistics for the highest-confidence
-    # detection would silently shrink. Paste in keep order, into pixels
-    # still unassigned.
-    out = np.zeros((h, w), dtype=np.int64)
-    for new_offset, src in enumerate(keep):
-        target = bool_masks[src] & (out == 0)
-        out[target] = start_label + new_offset
-    return out
 
 
 class MaskNMS(Operator):
@@ -828,7 +691,7 @@ class MaskNMS(Operator):
     @over_frames
     def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
         masks = np.asarray(gt)
-        out = _mask_nms(
+        out = mask_nms(
             masks,
             self.scores,
             iou_threshold=self.iou_threshold,

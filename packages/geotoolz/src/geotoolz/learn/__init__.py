@@ -24,172 +24,22 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from geotoolz.learn._src.estimators import GeoTensorEstimator
-from geotoolz.learn._src.model import ModelOp
-from geotoolz.learn._src.operators import SklearnOp
-
-
-class PCA(SklearnOp):
-    """Pixel-wise PCA convenience operator.
-
-    Pins ``mode="pixel"``, ``task="transform"``, ``nan_fit="drop"``;
-    every other :class:`SklearnOp` keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("task", "transform")
-        kwargs.setdefault("nan_fit", "drop")
-        super().__init__(estimator, **kwargs)
-
-
-class IPCA(SklearnOp):
-    """Streaming IncrementalPCA convenience operator.
-
-    Pins ``mode="pixel"``, ``fit_mode="fit_streaming"`` (each call routes
-    through ``partial_fit``), ``task="transform"``; every other
-    :class:`SklearnOp` keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("fit_mode", "fit_streaming")
-        kwargs.setdefault("task", "transform")
-        super().__init__(estimator, **kwargs)
-
-
-class NMF(SklearnOp):
-    """Pixel-wise NMF convenience operator.
-
-    Pins ``mode="pixel"`` and ``task="transform"``; every other
-    :class:`SklearnOp` keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("task", "transform")
-        super().__init__(estimator, **kwargs)
-
-
-class KMeans(SklearnOp):
-    """Pixel-wise KMeans label convenience operator.
-
-    Pins ``mode="pixel"`` and ``task="predict"`` — the output is a
-    single-band cluster-label map; every other :class:`SklearnOp`
-    keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("task", "predict")
-        super().__init__(estimator, **kwargs)
-
-
-class MiniBatchKMeans(SklearnOp):
-    """Streaming MiniBatchKMeans convenience operator.
-
-    Pins ``mode="pixel"``, ``fit_mode="fit_streaming"`` (each call routes
-    through ``partial_fit``), ``task="predict"``; every other
-    :class:`SklearnOp` keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("fit_mode", "fit_streaming")
-        kwargs.setdefault("task", "predict")
-        super().__init__(estimator, **kwargs)
-
-
-class GMM(SklearnOp):
-    """Gaussian mixture convenience operator.
-
-    Pins ``mode="pixel"`` and ``task="predict_proba"`` — the output has
-    one band per mixture component; every other :class:`SklearnOp`
-    keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("task", "predict_proba")
-        super().__init__(estimator, **kwargs)
-
-
-class IsolationForest(SklearnOp):
-    """Pixel-wise IsolationForest anomaly-score convenience operator.
-
-    Pins ``mode="pixel"`` and ``task="decision_function"`` — the output
-    is a single-band anomaly-score map; every other :class:`SklearnOp`
-    keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("task", "decision_function")
-        super().__init__(estimator, **kwargs)
-
-
-class OneClassSVM(SklearnOp):
-    """Pixel-wise OneClassSVM anomaly-score convenience operator.
-
-    Pins ``mode="pixel"`` and ``task="decision_function"``; every other
-    :class:`SklearnOp` keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("task", "decision_function")
-        super().__init__(estimator, **kwargs)
-
-
-class LocalOutlierFactor(SklearnOp):
-    """Pixel-wise LocalOutlierFactor convenience operator.
-
-    Pins ``mode="pixel"`` and ``task="decision_function"``; requires the
-    estimator to be constructed with ``novelty=True`` (sklearn only
-    exposes ``decision_function`` in novelty mode). Every other
-    :class:`SklearnOp` keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("task", "decision_function")
-        super().__init__(estimator, **kwargs)
-
-
-class KNNImputer(SklearnOp):
-    """Pixel-wise KNNImputer convenience operator.
-
-    Pins ``mode="pixel"``, ``task="transform"``, and
-    ``nan_fit=nan_transform="propagate"`` so the NaN-tolerant imputer
-    fits on the clean rows and NaN placement is preserved for it to
-    fill; every other :class:`SklearnOp` keyword argument passes
-    through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("task", "transform")
-        kwargs.setdefault("nan_fit", "propagate")
-        kwargs.setdefault("nan_transform", "propagate")
-        super().__init__(estimator, **kwargs)
-
-
-class IterativeImputer(SklearnOp):
-    """Pixel-wise IterativeImputer convenience operator.
-
-    Pins ``mode="pixel"``, ``task="transform"``, and
-    ``nan_fit=nan_transform="propagate"``; every other
-    :class:`SklearnOp` keyword argument passes through.
-    """
-
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
-        kwargs.setdefault("mode", "pixel")
-        kwargs.setdefault("task", "transform")
-        kwargs.setdefault("nan_fit", "propagate")
-        kwargs.setdefault("nan_transform", "propagate")
-        super().__init__(estimator, **kwargs)
+from geotoolz.learn._src.operators import (
+    GMM,
+    IPCA,
+    NMF,
+    PCA,
+    IsolationForest,
+    IterativeImputer,
+    KMeans,
+    KNNImputer,
+    LocalOutlierFactor,
+    MiniBatchKMeans,
+    ModelOp,
+    OneClassSVM,
+    SklearnOp,
+)
 
 
 __all__ = [

@@ -11,6 +11,10 @@ Operators in this module:
 - **Local features:** `PeakLocalMax`, `StructureTensor`, `MultiscaleBasicFeatures`, `HOG`
 - **Hough transforms:** `HoughLines`, `HoughCircles`
 
+Tier-A primitives for the dense maps: `canny_edges`, `structure_tensor_eigvals`,
+`multiscale_features`. Blob detectors return the same `row` / `col` / `sigma` / `radius` columns
+whether or not anything is detected.
+
 Operators that emit vector coordinates use `gt.transform` to project pixel `(row, col)` into world
 `(x, y)` before constructing the output GeoDataFrame.
 
