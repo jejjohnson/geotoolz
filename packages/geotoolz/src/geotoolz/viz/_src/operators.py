@@ -13,7 +13,9 @@ pre- and post-render) but typically change the band axis from
 N-band reflectance to 3-band RGB or 4-band RGBA ``uint8``. They sit
 downstream of :mod:`geotoolz.radiometry` (``PercentileClip``,
 ``MinMax``, ``Gamma``) which already does the float contrast stretch
-— the viz operators add the band-selection and byte-cast steps.
+— the composites are :class:`geotoolz.spectral.SelectBands` presets and
+``StretchToUint8`` / ``GammaCorrect`` reuse radiometry's stretch / gamma
+and add the (rounded) byte cast.
 
 Per-pixel display ops (composites by integer index, stretch, gamma,
 colormaps, overlay blending) accept either a ``GeoTensor`` or a plain
@@ -42,29 +44,34 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from pipekit import Operator
 
-from geotoolz._src.bands import BandRef, resolve_bands
-from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
+from geotoolz._src.bands import BandRef
+from geotoolz._src.config import (
+    as_tuple,
+    jsonable,
+    mapping_from_pairs,
+    mapping_to_pairs,
+)
 from geotoolz._src.geo import require_geotensor
 from geotoolz._src.shape import over_frames
 from geotoolz._src.valid import (
     carried_fill,
-    carrier_fill_value,
     invalid_values,
     mask_invalid_to_nan,
     restore_fill,
     valid_pixels,
 )
 from geotoolz._src.wrap import wrap_like
+from geotoolz.radiometry._src.operators import PercentileClip
+from geotoolz.spectral._src.operators import SelectBands
 from geotoolz.viz._src.array import (
     Color,
+    _unit_to_uint8,
     blend_rgba,
-    composite,
     ensure_rgba,
     gamma_correct_display,
     hillshade,
     rgba_from_categories,
     rgba_from_scalar,
-    stretch_to_uint8,
 )
 
 
@@ -72,20 +79,23 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-class Composite(Operator):
+class Composite(SelectBands):
     """Build a multi-band composite by arbitrary band reference.
 
-    The generic band-selection operator the named composites
+    A thin :class:`geotoolz.spectral.SelectBands` subclass spelled with
+    ``bands`` — the generic band-selection operator the named composites
     (`TrueColor`, `FalseColor`, `SWIRComposite`) wrap. Bands may be
     referenced by integer position along ``axis`` or by name, resolved
     against the carrier's ``attrs`` by the package-wide resolver
     (``band_names``, then ``descriptions``, then ``bands``). Output has
     ``len(bands)`` slices along ``axis`` and the same spatial footprint
-    as the input — ``transform`` and ``crs`` round-trip unchanged. Plain
-    ``np.ndarray`` carriers are supported with integer band references
-    (returning a plain array);
-    string names need a carrier with band names in ``attrs``. Fill
-    values pass through unchanged (pure band selection).
+    as the input — ``transform`` and ``crs`` round-trip unchanged. The
+    selected bands' per-band attrs (``band_names``, ``wavelengths``, ...)
+    travel with the output in output order, in a fresh ``attrs`` dict.
+    Plain ``np.ndarray`` carriers are supported with integer band
+    references (returning a plain array); string names need a carrier
+    with band names in ``attrs``. Fill values pass through unchanged
+    (pure band selection).
 
     Args:
         bands: Sequence of band references. Each entry is either an
@@ -102,20 +112,11 @@ class Composite(Operator):
     """
 
     def __init__(self, *, bands: Sequence[BandRef], axis: int = -3) -> None:
+        super().__init__(indexes=list(bands), axis=axis)
         self.bands = list(bands)
-        self.axis = axis
-
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        indices = resolve_bands(gt, self.bands)
-        # Pure band selection: the values, and so the fill, are the input's.
-        return wrap_like(
-            gt,
-            composite(np.asarray(gt), indices, axis=self.axis),
-            fill_value_default=carrier_fill_value(gt),
-        )
 
     def get_config(self) -> dict[str, Any]:
-        return {"bands": list(self.bands), "axis": self.axis}
+        return {"bands": jsonable(list(self.bands)), "axis": self.axis}
 
 
 class TrueColor(Composite):
@@ -235,14 +236,12 @@ class SWIRComposite(Composite):
 class StretchToUint8(Operator):
     """Percentile-stretch display data to ``uint8``.
 
-    The display-ready counterpart of
-    :class:`geotoolz.radiometry.PercentileClip`: it uses the same
-    percentile-based stretch but is NaN-safe and casts the unit-
-    interval output to byte range so the result is ready for
-    PIL / matplotlib. Pair this with
-    :class:`geotoolz.radiometry.PercentileClip` + ``MinMax`` if you
-    instead need float outputs for further math. Metadata-independent:
-    plain ``np.ndarray`` carriers pass through as plain arrays.
+    Exactly :class:`geotoolz.radiometry.PercentileClip` (same ``lower`` /
+    ``upper`` / ``axis``) followed by a rounded byte cast, so the result
+    is ready for PIL / matplotlib. Use ``PercentileClip`` directly if you
+    instead need the ``[0, 1]`` floats for further math.
+    Metadata-independent: plain ``np.ndarray`` carriers pass through as
+    plain arrays.
 
     Nodata pixels (any band non-finite or equal to the carrier's
     ``fill_value_default``) are excluded from the percentiles, so a
@@ -251,9 +250,10 @@ class StretchToUint8(Operator):
 
     Args:
         lower: Lower percentile. Default ``2.0``.
-        upper: Upper percentile. Default ``98.0``.
-        per_band: Compute percentiles independently per band. Default
-            ``True``.
+        upper: Upper percentile. Default ``98.0``; must exceed ``lower``.
+        axis: Axes the percentiles are computed over. Default
+            ``(-2, -1)`` stretches each band (and frame) independently;
+            ``None`` uses one global pair of thresholds.
 
     Examples:
         >>> import geotoolz as gz
@@ -266,39 +266,38 @@ class StretchToUint8(Operator):
     """
 
     def __init__(
-        self, *, lower: float = 2.0, upper: float = 98.0, per_band: bool = True
+        self,
+        *,
+        lower: float = 2.0,
+        upper: float = 98.0,
+        axis: int | tuple[int, ...] | None = (-2, -1),
     ) -> None:
         self.lower = lower
         self.upper = upper
-        self.per_band = per_band
+        self.axis = as_tuple(axis)
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        valid = valid_pixels(gt, keep_time=True)
-        arr = np.asarray(gt) if valid.all() else mask_invalid_to_nan(gt, valid=valid)
-        out = stretch_to_uint8(
-            arr,
-            lower=self.lower,
-            upper=self.upper,
-            per_band=self.per_band,
+        # Nodata comes back NaN from PercentileClip and casts to the 0 fill.
+        stretched = PercentileClip(lower=self.lower, upper=self.upper, axis=self.axis)(
+            gt
         )
-        return wrap_like(gt, restore_fill(out, valid, 0), fill_value_default=0)
+        return wrap_like(gt, _unit_to_uint8(stretched), fill_value_default=0)
 
 
 class GammaCorrect(Operator):
     """Apply display gamma correction.
 
     Power-law correction for display-range arrays — brightens midtones
-    when ``gamma > 1``. Distinct from
-    :class:`geotoolz.radiometry.Gamma` in that it operates on already
-    display-prepped (``[0, 1]`` float or byte-range integer) arrays.
-    Integer carriers are normalised to ``[0, 1]`` before the exponent
-    and scaled back to their dtype maximum so the transform is display-
-    correct rather than a raw ``256 ** (1 / gamma) = 16`` on uint8. For
-    the radiometry-stage gamma correction, use
-    ``geotoolz.radiometry.Gamma``. Metadata-independent: plain
-    ``np.ndarray`` carriers pass through as plain arrays. Elementwise:
-    fill (and non-finite) values are passed through unchanged rather
-    than gamma-corrected.
+    when ``gamma > 1``. The exponent is
+    :func:`geotoolz.radiometry.gamma_correct` (the math behind
+    :class:`geotoolz.radiometry.Gamma`); this operator adds the display
+    range handling: float carriers are clipped to ``[0, 1]`` before the
+    exponent, and integer carriers are normalised to ``[0, 1]`` by their
+    dtype maximum and rounded back so the transform is display-correct
+    rather than a raw ``256 ** (1 / gamma) = 16`` on uint8.
+    Metadata-independent: plain ``np.ndarray`` carriers pass through as
+    plain arrays. Elementwise: fill (and non-finite) values are passed
+    through unchanged rather than gamma-corrected.
 
     Args:
         gamma: Gamma factor (must be strictly positive). Default ``1.0``.
@@ -327,17 +326,6 @@ class GammaCorrect(Operator):
         valid = ~invalid_values(gt)
         fill = carried_fill(gt, np.asarray(out).dtype)
         return wrap_like(gt, restore_fill(out, valid, fill), fill_value_default=fill)
-
-
-class ToDisplayRange(StretchToUint8):
-    """Alias for `StretchToUint8` — percentile clip + ``uint8`` cast.
-
-    Kept for naming familiarity. Prefer `StretchToUint8` in new code.
-
-    Examples:
-        >>> import geotoolz as gz
-        >>> uint8 = gz.viz.ToDisplayRange()(reflectance_geotensor)
-    """
 
 
 class ApplyColormap(Operator):
@@ -573,7 +561,7 @@ class ShadedRelief(Operator):
             )
             / 255.0
         )
-        rgba[:3] = (rgba[:3].astype(np.float32) * shade).astype(np.uint8)
+        rgba[:3] = np.rint(rgba[:3].astype(np.float32) * shade).astype(np.uint8)
         return wrap_like(gt, rgba, fill_value_default=0)
 
 
@@ -670,7 +658,8 @@ class AnnotatePolygons(Operator):
         self.width = width
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        from rasterio.features import rasterize
+        import geopandas as gpd
+        from georeader.rasterize import rasterize_geopandas_like
 
         require_geotensor(gt, "AnnotatePolygons")
         rgba = ensure_rgba(np.asarray(gt))
@@ -679,14 +668,17 @@ class AnnotatePolygons(Operator):
             return wrap_like(gt, rgba, fill_value_default=0)
         pixel_size = max(abs(float(gt.transform.a)), abs(float(gt.transform.e)))
         half_width = self.width * pixel_size / 2.0
-        shapes = [(geom.boundary.buffer(half_width), 1) for geom in geometries]
-        mask = rasterize(
-            shapes,
-            out_shape=rgba.shape[-2:],
-            transform=gt.transform,
-            fill=0,
-            all_touched=True,
-            dtype="uint8",
+        # Buffer in the carrier's CRS (pixel-width outlines), then burn
+        # through georeader onto the carrier's grid.
+        outlines = gpd.GeoDataFrame(
+            {"burn": np.ones(len(geometries), dtype=np.uint8)},
+            geometry=[geom.boundary.buffer(half_width) for geom in geometries],
+            crs=gt.crs,
+        )
+        mask = np.asarray(
+            rasterize_geopandas_like(
+                outlines, gt, "burn", fill=0, all_touched=True, return_only_data=True
+            )
         ).astype(bool)
         rgba[:, mask] = _color_to_uint8(self.color)[:, None]
         return wrap_like(gt, rgba, fill_value_default=0)
@@ -800,6 +792,4 @@ def _point_coords(points: Any, *, dst_crs: Any) -> np.ndarray:
 
 
 def _color_to_uint8(color: Color) -> np.ndarray:
-    return np.clip(np.asarray(color, dtype=np.float32) * 255.0, 0.0, 255.0).astype(
-        np.uint8
-    )
+    return _unit_to_uint8(np.asarray(color, dtype=np.float32))

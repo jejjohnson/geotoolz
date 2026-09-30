@@ -213,19 +213,24 @@ def min_max_normalize(
 
 def percentile_clip(
     arr: Shaped[np.ndarray, "*dims"],
-    p_min: float = 2.0,
-    p_max: float = 98.0,
+    lower: float = 2.0,
+    upper: float = 98.0,
     *,
     axis: int | tuple[int, ...] | None = (-2, -1),
 ) -> Float[np.ndarray, "*dims"]:
     r"""Robust contrast stretch using percentile thresholds.
 
-    Computes :math:`v_{lo} = P_{p_{\min}}(\text{arr})` and
-    :math:`v_{hi} = P_{p_{\max}}(\text{arr})` over the configured
+    Computes :math:`v_{lo} = P_{\text{lower}}(\text{arr})` and
+    :math:`v_{hi} = P_{\text{upper}}(\text{arr})` over the configured
     ``axis``, then min-max normalises ``arr`` between them with
     clipping. The percentile thresholds are far more robust than fixed
     ``vmin / vmax`` against bright outliers (cumulus clouds, specular
     water glint, sensor saturation).
+
+    NaN-safe: thin wrapper over the shared
+    :func:`geotoolz._src.stretch.percentile_stretch`, whose percentiles
+    are ``np.nanpercentile`` (NaN pixels never shift the thresholds and
+    stay NaN in the output).
 
     Default ``axis=(-2, -1)`` computes percentiles per leading band /
     time slice — the typical "RGB display per band" mode. Pass
@@ -234,24 +239,23 @@ def percentile_clip(
 
     Args:
         arr: Input float array.
-        p_min: Lower percentile (in ``[0, 100]``). Default ``2.0``.
-        p_max: Upper percentile. Default ``98.0``. Must be strictly
-            greater than ``p_min``.
+        lower: Lower percentile (in ``[0, 100]``). Default ``2.0``.
+        upper: Upper percentile. Default ``98.0``. Must be strictly
+            greater than ``lower``.
         axis: Axis (or tuple of axes) to compute percentiles over.
             ``(-2, -1)`` -> per-band/-time stretch. ``None`` -> global.
 
     Returns:
         Float array of the same shape, values in ``[0, 1]``.
+
+    Raises:
+        ValueError: If ``upper <= lower``.
     """
-    if p_max <= p_min:
-        raise ValueError(
-            f"percentile_clip requires p_max > p_min; got {p_min=}, {p_max=}"
-        )
-    return percentile_stretch(arr, p_min, p_max, axis=axis)
+    return percentile_stretch(arr, lower, upper, axis=axis)
 
 
 def gamma_correct(
-    arr: Float[np.ndarray, "*dims"], g: float = 1.2
+    arr: Float[np.ndarray, "*dims"], gamma: float = 1.2
 ) -> Float[np.ndarray, "*dims"]:
     r"""Apply a gamma (power-law) correction.
 
@@ -261,24 +265,29 @@ def gamma_correct(
 
     Display-prep helper: human visual perception of brightness is
     nonlinear, so a power-law tweak after a min-max stretch brightens
-    midtones (``g > 1``) or darkens them (``g < 1``). Standard sRGB
-    encoding uses ``g ≈ 2.2``; a gentle ``g = 1.2`` is a common
-    "make satellite RGBs pop" default.
+    midtones (``gamma > 1``) or darkens them (``gamma < 1``). Standard
+    sRGB encoding uses ``gamma ≈ 2.2``; a gentle ``gamma = 1.2`` is a
+    common "make satellite RGBs pop" default.
 
     Negative inputs are clipped to zero before the power to avoid
     complex-number warnings; reflectance should be non-negative anyway.
+    Values above ``1`` are *not* clipped (the display-range variant,
+    :func:`geotoolz.viz.gamma_correct_display`, clips to ``[0, 1]``).
 
     Args:
         arr: Input float array, ideally already in ``[0, 1]``.
-        g: Gamma factor. ``> 1`` brightens; ``< 1`` darkens.
+        gamma: Gamma factor. ``> 1`` brightens; ``< 1`` darkens.
             Default ``1.2``.
 
     Returns:
         Float array of the same shape, gamma-corrected.
+
+    Raises:
+        ValueError: If ``gamma <= 0``.
     """
-    if g <= 0:
-        raise ValueError(f"gamma_correct requires g > 0; got {g}")
-    return np.maximum(arr, 0.0) ** (1.0 / g)
+    if gamma <= 0:
+        raise ValueError(f"gamma_correct requires gamma > 0; got {gamma}")
+    return np.maximum(arr, 0.0) ** (1.0 / gamma)
 
 
 def bt_from_radiance(

@@ -1,10 +1,10 @@
 """Shared percentile clip-and-stretch core.
 
-Both ``radiometry.percentile_clip`` (display-oriented, ``p_min/p_max``
-naming) and ``normalize.percentile_clip`` (scaler-oriented,
-``lower/upper`` naming) expose the same math; this module holds the
-single NaN-aware implementation they delegate to so a fix in one place
-reaches both.
+The single NaN-aware percentile stretch behind
+``radiometry.percentile_clip`` / ``radiometry.PercentileClip``,
+``normalize.HistogramStretch`` and ``viz.StretchToUint8`` (all spelled
+``lower`` / ``upper`` / ``axis``). It owns the ``upper > lower``
+validation, so the wrappers delegate without re-checking.
 """
 
 from __future__ import annotations
