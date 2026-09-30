@@ -764,12 +764,13 @@ class CropTo(Operator):
 class CropToBounds(Operator):
     """Crop a `GeoTensor` to a geographic bounding box.
 
-    Computes the pixel window covering ``bounds`` via
-    :func:`rasterio.windows.from_bounds` (after reprojecting ``bounds``
-    into the carrier's CRS if ``crs`` differs from it) and reads the
-    intersection with the carrier. Non-intersecting bounds raise
-    :class:`rasterio.windows.WindowError` via
-    :meth:`georeader.geotensor.GeoTensor.read_from_window`.
+    Thin wrapper over :func:`georeader.read.read_from_bounds` with
+    ``boundless=False``: ``bounds`` are reprojected into the carrier's
+    CRS if ``crs`` differs from it, the pixel window is rounded
+    *outward* (every pixel the bounds touch, even partially, is kept —
+    matching georeader's readers), and the intersection with the carrier
+    is read. Non-intersecting bounds raise
+    :class:`rasterio.windows.WindowError`.
 
     Geo-dependent: requires a georeferenced ``GeoTensor`` input
     (transform + CRS); plain arrays raise ``TypeError``.
@@ -799,14 +800,16 @@ class CropToBounds(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         require_geotensor(gt, "CropToBounds")
-        bounds = self.bounds
-        if self.crs is not None and CRS.from_user_input(
-            self.crs
-        ) != CRS.from_user_input(gt.crs):
-            bounds = transform_bounds(self.crs, gt.crs, *bounds)
-        window = rasterio.windows.from_bounds(*bounds, transform=gt.transform)
-        window = window.round_offsets().round_lengths()
-        return adopt_attrs(gt, gt.read_from_window(window, boundless=False))
+        cropped = read.read_from_bounds(
+            gt, tuple(self.bounds), crs_bounds=self.crs, boundless=False
+        )
+        if cropped is None:
+            # georeader signals an empty intersection with ``None``.
+            raise rasterio.windows.WindowError(
+                f"CropToBounds: bounds {tuple(self.bounds)!r} (crs={self.crs!r}) "
+                f"do not intersect the carrier's bounds {gt.bounds!r}."
+            )
+        return adopt_attrs(gt, cropped)
 
     def get_config(self) -> dict[str, Any]:
         return {"bounds": list(self.bounds), "crs": self.crs}
