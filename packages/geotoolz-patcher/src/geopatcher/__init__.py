@@ -12,6 +12,9 @@ Public surface re-exports:
 - Top-level patchers: `SpatialPatcher`, `AsyncSpatialPatcher`,
   `TemporalPatcher`, `SpatioTemporalPatcher`.
 - ML / random access: `IndexedPatchView`, `PatchCache`, `stack_patches`.
+- Axis helpers: `config_from_fields` (dataclass axis → ``get_config``
+  dict) and `geom_shape` (a fixed-size geometry's weight-array shape),
+  for third-party axes such as custom `SpatialWindow` subclasses.
 - Observability: `PatcherHook` callback protocol, `PatchJournal`,
   `PatchErrorRecord`, `get_strict` / `set_strict`,
   `IncompleteScanConfiguration`.
@@ -32,6 +35,7 @@ The patcher core itself remains framework-free.
 from __future__ import annotations
 
 from geopatcher import fields, spatial, time
+from geopatcher._src._serialize import config_from_fields
 from geopatcher._src.cache import PatchCache
 from geopatcher._src.config import (
     get_strict,
@@ -108,6 +112,7 @@ from geopatcher._src.spatial import (  # re-export of all spatial concretes + ba
     SpatialVariance,
     SpatialWeightedSum,
     SpatialWindow,
+    geom_shape,
 )
 from geopatcher._src.spatial_time import SpatioTemporalPatcher
 from geopatcher._src.stacking import stack_patches
@@ -242,8 +247,10 @@ __all__ = [
     "VectorDomain",
     "__version__",
     "build_sampling_slices",
+    "config_from_fields",
     "divide_evenly",
     "fields",
+    "geom_shape",
     "get_strict",
     "set_strict",
     "spatial",

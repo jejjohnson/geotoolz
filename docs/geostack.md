@@ -55,7 +55,7 @@ catalog query drops straight into `SpatialPatcher.split` (enabled by the
 **3. `patch_ops` — the patcher joins the operator graph.**
 `geotoolz.patch_ops` (same classes as `geopatcher.integrations.pipekit`)
 wraps a `SpatialPatcher` as pipeline stages: `GridSampler → ApplyToChips →
-Stitch` composes tile-predict-stitch inference inside a `Sequential`, and
+MergePatches` composes tile-predict-stitch inference inside a `Sequential`, and
 the label-aware `StratifiedSample` / `BalancedSampler` emit the same
 `Patch` carrier for training-time draws. See the
 [patching module guide](patch_ops.md).
@@ -79,7 +79,7 @@ HTTP/2 connection pool.
 import geocatalog as gc
 import geopatcher as gp
 import geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, GridSampler, Stitch
+from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 # 1. Discover + index (catalog)
 cat = gc.from_stac_search(
@@ -105,7 +105,7 @@ ndvi = gz.Sequential([
 pipe = gz.Sequential([
     GridSampler(patcher),
     ApplyToChips(ndvi),
-    Stitch(gp.SpatialOverlapAdd(), domain=field.domain),
+    MergePatches(gp.SpatialOverlapAdd(), domain=field.domain),
 ])
 ndvi_scene = pipe(field)
 ```

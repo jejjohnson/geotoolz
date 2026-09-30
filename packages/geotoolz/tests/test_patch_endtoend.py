@@ -32,7 +32,7 @@ from geotoolz import Sequential
 from geotoolz.patch_ops import (
     ApplyToChips,
     GridSampler,
-    Stitch,
+    MergePatches,
 )
 
 
@@ -56,7 +56,7 @@ def test_sliding_window_inference_boxcar() -> None:
         [
             GridSampler(patcher),
             ApplyToChips(double),
-            Stitch(SpatialOverlapAdd(), domain=field.reader),
+            MergePatches(SpatialOverlapAdd(), domain=field.reader),
         ]
     )
     result = pipe(field)
@@ -79,7 +79,7 @@ def test_sliding_window_inference_hann_overlap() -> None:
         [
             GridSampler(patcher),
             ApplyToChips(double),
-            Stitch(SpatialOverlapAdd(), domain=field.reader),
+            MergePatches(SpatialOverlapAdd(), domain=field.reader),
         ]
     )
     result = pipe(field)

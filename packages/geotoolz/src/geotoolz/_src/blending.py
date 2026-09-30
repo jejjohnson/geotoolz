@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 
 
-def triangular_weights(shape: tuple[int, ...], width: int) -> np.ndarray:
+def triangular_weights(
+    shape: tuple[int, ...], width: int, *, dtype: npt.DTypeLike = np.float32
+) -> np.ndarray:
     r"""Linear-ramp edge taper for overlap-add blending.
 
     Builds an N-D weight array where each axis ramps linearly from the
@@ -15,12 +18,15 @@ def triangular_weights(shape: tuple[int, ...], width: int) -> np.ndarray:
     Args:
         shape: Spatial shape of the window.
         width: Ramp width in pixels.
+        dtype: Output dtype. The ramp is computed in float64 and cast
+            once, so ``float64`` output carries no float32 rounding.
 
     Returns:
-        ``float32`` array of shape ``shape`` with values in ``[0, 1]``.
+        Array of shape ``shape`` and dtype ``dtype`` with values in
+        ``[0, 1]``.
     """
     if width <= 0:
-        return np.ones(shape, dtype=np.float32)
+        return np.ones(shape, dtype=dtype)
     axes = []
     for size in shape:
         positions = np.arange(size)
@@ -29,7 +35,7 @@ def triangular_weights(shape: tuple[int, ...], width: int) -> np.ndarray:
     weights = axes[0]
     for axis in axes[1:]:
         weights = np.multiply.outer(weights, axis)
-    return weights.astype(np.float32)
+    return weights.astype(dtype)
 
 
 def overlap_add(

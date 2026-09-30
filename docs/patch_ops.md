@@ -13,9 +13,14 @@ Install the optional `[patch]` extra to pull in `geopatcher[pipekit]`:
 pip install 'geotoolz[patch]'
 ```
 
-The same classes are also importable from
-`geopatcher.integrations.pipekit`; the two module paths return the same
-objects — use whichever reads better in your code.
+`GridSampler`, `ApplyToChips` and `MergePatches` are re-exported from
+`geopatcher.integrations.pipekit` — the two module paths return the same
+class objects. `MergePatches` is geopatcher's `Stitch` operator, renamed
+here so it does not collide with `geotoolz.geom.Stitch` (the GeoTensor
+tile mosaicker, also exported as top-level `geotoolz.Stitch`).
+`GridSampler` and `MergePatches` hold runtime objects (a patcher, a
+domain), so both are `forbid_in_yaml`; their `get_config()` is a debug
+record, not a replay recipe.
 
 ## The pieces
 
@@ -23,8 +28,8 @@ objects — use whichever reads better in your code.
 |----------|-----------|---------|
 | `GridSampler(patcher)` | `Field → list[Patch]` | Drive a `SpatialPatcher` and materialise its chips |
 | `ApplyToChips(op)` | `list[Patch] → list[Patch]` | Map any operator over each chip's data |
-| `Stitch(aggregation, domain)` | `list[Patch] → field` | Merge chips back into a global field |
-| `SpatialTriangular(width)` | window axis | Linear feather ramp matching `geom.Stitch(blend="feather")` |
+| `MergePatches(aggregation, domain)` | `list[Patch] → field` | Merge chips back into a global field |
+| `SpatialTriangular(width)` | window axis | Linear feather ramp (`float64`) matching `geom.Stitch(blend="feather")` |
 | `StratifiedSample(...)` | `scene → list[Patch]` | Chips with class proportions matching a target distribution |
 | `BalancedSampler(...)` | `scene → list[Patch]` | Exactly N chips per class label |
 
@@ -40,7 +45,7 @@ give seam-free full-scene predictions:
 ```python
 import geopatcher as gp
 from geotoolz import Sequential
-from geotoolz.patch_ops import ApplyToChips, GridSampler, SpatialTriangular, Stitch
+from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches, SpatialTriangular
 
 field = gp.RasterField(scene)          # scene: GeoTensor or RasterioReader
 
@@ -54,7 +59,7 @@ patcher = gp.SpatialPatcher(
 pipe = Sequential([
     GridSampler(patcher),
     ApplyToChips(cloud_segmentation_model),   # any Operator, e.g. gz.learn.ModelOp
-    Stitch(gp.SpatialOverlapAdd(), domain=field.domain),
+    MergePatches(gp.SpatialOverlapAdd(), domain=field.domain),
 ])
 prediction = pipe(field)
 ```

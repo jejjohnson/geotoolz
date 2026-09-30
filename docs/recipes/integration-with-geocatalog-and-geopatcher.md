@@ -14,7 +14,7 @@ flowchart LR
         Sc[Scale] --> Cm[CloudMask] --> Nv[NDVI]
     end
     subgraph patch["geopatcher (via geotoolz.patch_ops) — tile &amp; stitch"]
-        GS[GridSampler] --> AC[ApplyToChips] --> St[Stitch]
+        GS[GridSampler] --> AC[ApplyToChips] --> St[MergePatches]
     end
     Load --> Sc
     Nv --> GS
@@ -67,7 +67,7 @@ operator pipeline.
 When the input raster is too big to fit in memory (or you're running a
 patch-based ML model), `geopatcher` provides the four-axis Patcher
 framework: a `Sampler` tiles the raster into chips, an `Apply` runs the
-per-chip transform, and a `Stitch` re-assembles the output.
+per-chip transform, and a `MergePatches` re-assembles the output.
 
 `geotoolz.patch_ops` wraps those three pieces as `Operator`s so a
 tiled-inference flow composes inside a `Sequential`:
@@ -75,7 +75,7 @@ tiled-inference flow composes inside a `Sequential`:
 ```python
 import geopatcher as gp
 from geotoolz import ModelOp, Sequential
-from geotoolz.patch_ops import GridSampler, ApplyToChips, Stitch
+from geotoolz.patch_ops import GridSampler, ApplyToChips, MergePatches
 
 patcher = gp.SpatialPatcher(
     domain=gt.domain,
@@ -86,7 +86,7 @@ patcher = gp.SpatialPatcher(
 infer = Sequential([
     GridSampler(patcher),
     ApplyToChips(ModelOp(my_torch_unet, batch_size=8)),
-    Stitch(gp.SpatialOverlapAdd(), domain=gt.domain),
+    MergePatches(gp.SpatialOverlapAdd(), domain=gt.domain),
 ])
 
 prediction = infer(gt)
@@ -96,8 +96,8 @@ Install with the `[patch]` extra: `uv pip install 'geotoolz[patch]'`.
 
 The same wrappers are reachable as
 `geopatcher.integrations.pipekit.{GridSampler, ApplyToChips, Stitch}` —
-both module paths re-import the same classes. Use whichever reads
-better in your code.
+`geotoolz.patch_ops` re-exports the same class objects, with `Stitch`
+renamed `MergePatches` so it doesn't collide with `geotoolz.geom.Stitch`.
 
 ## The combined shape
 
@@ -105,7 +105,7 @@ A realistic end-to-end pipeline looks like a `Sequential` whose head
 comes from `geocatalog`, whose middle is geotoolz operators, and whose
 tail is a `patch_ops` tiled-inference block:
 
-Because `Stitch` needs a `domain` at construction time but `gc.LoadScene`
+Because `MergePatches` needs a `domain` at construction time but `gc.LoadScene`
 only produces a `GeoTensor` at *runtime*, split the flow into a quick
 load step (to get a domain) and the operator pipeline that consumes it.
 Once you have the domain, the whole thing is one `Sequential`:
@@ -120,14 +120,14 @@ pipe = Sequential([
     NDVI(nir_idx=1, red_idx=0),                         # geotoolz
     GridSampler(patcher),                               # geotoolz.patch_ops → geopatcher
     ApplyToChips(ModelOp(model)),                       # geotoolz
-    Stitch(gp.SpatialOverlapAdd(), domain=domain),      # geotoolz.patch_ops → geopatcher
+    MergePatches(gp.SpatialOverlapAdd(), domain=domain), # geotoolz.patch_ops → geopatcher
 ])
 out = pipe(gt)
 ```
 
 If you want a single round-trippable artefact, wire `LoadScene` and the
 operator pipeline into a `Graph` so the `domain` flows through as an
-explicit input rather than baked into `Stitch`'s config.
+explicit input rather than baked into `MergePatches`' config.
 
 Every step is an `Operator`. The whole thing round-trips via
 `get_config()` for YAML / Hydra-zen. The carrier (`GeoTensor`) is
@@ -140,7 +140,7 @@ hop.
 |---|---|---|
 | STAC discovery, asset loading, AOI windowing | [`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog) | `SearchCatalog`, `LoadScene`, … |
 | Per-scene radiometry, indices, masking, compositing | `geotoolz` | `radiometry`, `indices`, `cloud`, `compositing`, … |
-| Sliding-window tiling, chunked inference, stitching | [`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher) | `SpatialPatcher`, `Stitch`, exposed as `geotoolz.patch_ops` |
+| Sliding-window tiling, chunked inference, stitching | [`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher) | `SpatialPatcher`, `Stitch` (exposed as `geotoolz.patch_ops.MergePatches`) |
 | The composition algebra itself | [`pipekit`](https://github.com/jejjohnson/pipekit) | `Operator`, `Sequential`, `Graph`, `Branch`, `Switch`, … |
 
 ## See also

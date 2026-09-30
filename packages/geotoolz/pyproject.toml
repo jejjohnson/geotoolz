@@ -75,7 +75,7 @@ dependencies = [
 hydra = ["hydra-zen>=0.14"]
 # The four-axis Patcher framework lives in its own package now; pull it
 # in (with its `[pipekit]` extra so `geopatcher.integrations.pipekit` is
-# importable — the same wrappers ship from both locations) and use
+# importable — `geotoolz.patch_ops` re-exports the same classes) and use
 # either `geotoolz.patch_ops` or `geopatcher.integrations.pipekit` for
 # the Operator-graph bridge. The substrate extras (grid, vector, point,
 # xarray-raster, streaming) are exposed through `geopatcher` directly —

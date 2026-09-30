@@ -1,4 +1,4 @@
-"""Tests for the operator wrappers (`GridSampler`, `ApplyToChips`, `Stitch`).
+"""Tests for `geotoolz.patch_ops` (`GridSampler`, `ApplyToChips`, `MergePatches`, …).
 
 The wrappers re-export `geopatcher` primitives at runtime; skip cleanly
 when the optional ``[patch]`` extra (which pulls in geopatcher) isn't
@@ -29,13 +29,14 @@ from geopatcher import (
 from georeader.geotensor import GeoTensor
 from pipekit import Lambda
 
+import geotoolz
+import geotoolz.patch_ops as patch_ops
 from geotoolz import Sequential
-from geotoolz.geom._src import array as geom_array
 from geotoolz.patch_ops import (
     ApplyToChips,
     GridSampler,
+    MergePatches,
     SpatialTriangular,
-    Stitch,
 )
 
 
@@ -72,26 +73,76 @@ class TestGridSampler:
         assert len(patches) == 4  # 2x2 tiles
 
 
-def test_spatial_triangular_matches_geom_feather_kernel() -> None:
-    weights = SpatialTriangular(width=2).weights(SpatialRectangular(size=(5, 7)))
-    np.testing.assert_array_equal(weights, geom_array.feather_weights((5, 7), width=2))
-    assert weights[0, 0] == pytest.approx(0.25)
-    assert weights[2, 3] == pytest.approx(1.0)
-    np.testing.assert_array_equal(weights, np.flip(weights, axis=0))
-    np.testing.assert_array_equal(weights, np.flip(weights, axis=1))
+def test_reexports_are_geopatcher_classes() -> None:
+    from geopatcher.integrations import pipekit as gp_pipekit
 
-    small = SpatialTriangular(width=2).weights(SpatialRectangular(size=(3, 3)))
-    np.testing.assert_array_equal(
-        small,
-        np.array(
-            [
-                [0.25, 0.5, 0.25],
-                [0.5, 1.0, 0.5],
-                [0.25, 0.5, 0.25],
-            ],
-            dtype=np.float32,
-        ),
+    assert GridSampler is gp_pipekit.GridSampler
+    assert ApplyToChips is gp_pipekit.ApplyToChips
+    assert MergePatches is gp_pipekit.Stitch
+    # No shadowing `Stitch` here: the name belongs to `geotoolz.geom.Stitch`.
+    assert not hasattr(patch_ops, "Stitch")
+    assert geotoolz.Stitch is geotoolz.geom.Stitch
+    assert MergePatches is not geotoolz.Stitch
+
+
+def test_all_lists_public_surface() -> None:
+    assert sorted(patch_ops.__all__) == [
+        "ApplyToChips",
+        "BalancedSampler",
+        "GridSampler",
+        "MergePatches",
+        "SpatialTriangular",
+        "StratifiedSample",
+    ]
+    for name in patch_ops.__all__:
+        assert hasattr(patch_ops, name)
+
+
+def test_runtime_holders_are_forbid_in_yaml(patcher: SpatialPatcher) -> None:
+    """Operators holding runtime objects (a patcher, a domain) opt out of YAML."""
+    assert GridSampler.forbid_in_yaml is True
+    assert MergePatches.forbid_in_yaml is True
+    field = RasterField(
+        GeoTensor(np.ones((4, 4)), rasterio.Affine.identity(), "EPSG:32630")
     )
+    config = MergePatches(SpatialOverlapAdd(), domain=field.domain).get_config()
+    assert config["domain"] == {"class": type(field.domain).__name__}
+    assert GridSampler(patcher).get_config() == {"patcher": patcher.get_config()}
+
+
+class TestSpatialTriangular:
+    def test_numeric_ramp(self) -> None:
+        # Per-axis ramp: min(i + 1, n - i) / width, clipped to [0, 1].
+        # n=7, width=3 -> [1/3, 2/3, 1, 1, 1, 2/3, 1/3]; n=4 -> [1/3, 2/3, 2/3, 1/3].
+        rows = np.array([1, 2, 2, 1]) / 3
+        cols = np.array([1, 2, 3, 3, 3, 2, 1]) / 3
+        cols = np.minimum(cols, 1.0)
+        weights = SpatialTriangular(width=3).weights(SpatialRectangular(size=(4, 7)))
+        assert weights.dtype == np.float64
+        np.testing.assert_array_equal(weights, np.outer(rows, cols))
+        assert weights[0, 0] == pytest.approx(1 / 9, rel=1e-15)
+        assert weights[1, 3] == 2 / 3
+
+    def test_small_window_values(self) -> None:
+        weights = SpatialTriangular(width=2).weights(SpatialRectangular(size=(3, 3)))
+        np.testing.assert_array_equal(
+            weights,
+            [[0.25, 0.5, 0.25], [0.5, 1.0, 0.5], [0.25, 0.5, 0.25]],
+        )
+
+    def test_non_positive_width_is_boxcar(self) -> None:
+        weights = SpatialTriangular(width=0).weights(SpatialRectangular(size=(2, 3)))
+        assert weights.dtype == np.float64
+        np.testing.assert_array_equal(weights, np.ones((2, 3)))
+
+    def test_ragged_geometry_raises(self) -> None:
+        with pytest.raises(TypeError, match="fixed-shape"):
+            SpatialTriangular(width=2).weights(object())  # ty: ignore[invalid-argument-type]
+
+    def test_config_roundtrip(self) -> None:
+        window = SpatialTriangular(width=5)
+        assert window.get_config() == {"width": 5}
+        assert SpatialTriangular(**window.get_config()).width == 5
 
 
 class TestApplyToChips:
@@ -104,7 +155,16 @@ class TestApplyToChips:
         assert len(out) == len(patches)
         for src, dst in zip(patches, out, strict=True):
             assert dst.anchor == src.anchor
+            assert dst.indices == src.indices
+            assert dst.weights is src.weights
             np.testing.assert_allclose(dst.data, 2.0)
+
+    def test_config_nests_operator(self) -> None:
+        double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
+        config = ApplyToChips(double).get_config()
+        assert config == {
+            "operator": {"class": "Lambda", "config": double.get_config()}
+        }
 
 
 class TestStitchInSequential:
@@ -116,7 +176,7 @@ class TestStitchInSequential:
             [
                 GridSampler(patcher),
                 ApplyToChips(double),
-                Stitch(SpatialOverlapAdd(), domain=field.reader),
+                MergePatches(SpatialOverlapAdd(), domain=field.reader),
             ]
         )
         result = pipe(field)

@@ -43,7 +43,7 @@ class SpatialBoxcar(SpatialWindow):
     """Constant 1.0 — no edge taper."""
 
     def weights(self, geometry: SpatialGeometry) -> np.ndarray:
-        shape = _geom_shape(geometry)
+        shape = geom_shape(geometry)
         return np.ones(shape, dtype=np.float64)
 
 
@@ -52,7 +52,7 @@ class SpatialHann(SpatialWindow):
     """SpatialHann (raised-cosine) window — the standard overlap-add taper."""
 
     def weights(self, geometry: SpatialGeometry) -> np.ndarray:
-        shape = _geom_shape(geometry)
+        shape = geom_shape(geometry)
         return _separable(shape, lambda n: np.hanning(n))
 
 
@@ -70,7 +70,7 @@ class SpatialTukey(SpatialWindow):
     def weights(self, geometry: SpatialGeometry) -> np.ndarray:
         from scipy.signal.windows import tukey
 
-        shape = _geom_shape(geometry)
+        shape = geom_shape(geometry)
         return _separable(shape, lambda n: tukey(n, alpha=self.alpha, sym=False))
 
     def get_config(self) -> dict[str, Any]:
@@ -89,7 +89,7 @@ class SpatialGaussian(SpatialWindow):
     sigma: float = 0.5
 
     def weights(self, geometry: SpatialGeometry) -> np.ndarray:
-        shape = _geom_shape(geometry)
+        shape = geom_shape(geometry)
         return _separable(shape, lambda n: _gaussian_1d(n, self.sigma))
 
     def get_config(self) -> dict[str, Any]:
@@ -113,8 +113,22 @@ class SpatialCustom(SpatialWindow):
         return self.fn(geometry)
 
 
-def _geom_shape(geometry: SpatialGeometry) -> tuple[int, ...]:
-    """Best-effort shape extraction for a geometry's weight array."""
+def geom_shape(geometry: SpatialGeometry) -> tuple[int, ...]:
+    """Shape of the weight array a `SpatialWindow` returns for ``geometry``.
+
+    Public so third-party windows (e.g. ``geotoolz.patch_ops.SpatialTriangular``)
+    size their weights exactly like the built-in ones.
+
+    Args:
+        geometry: A fixed-size geometry — `SpatialRectangular`, or any
+            object exposing a ``size`` sequence.
+
+    Returns:
+        ``size`` with every entry coerced to ``int``.
+
+    Raises:
+        TypeError: if the geometry has no fixed size (ragged geometries).
+    """
     if isinstance(geometry, SpatialRectangular):
         return tuple(int(s) for s in geometry.size)
     size = getattr(geometry, "size", None)
