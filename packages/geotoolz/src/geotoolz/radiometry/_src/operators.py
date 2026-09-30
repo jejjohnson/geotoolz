@@ -22,10 +22,10 @@ The display stretches (:class:`MinMax`, :class:`PercentileClip`,
 
 from __future__ import annotations
 
+import warnings
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import einx
 import numpy as np
 import pandas as pd
 from georeader.reflectance import (
@@ -38,7 +38,7 @@ from georeader.reflectance import (
 )
 from pipekit import Operator
 
-from geotoolz._src.bands import strip_band_attrs
+from geotoolz._src.bands import resolve_wavelengths, strip_band_attrs
 from geotoolz._src.config import as_tuple, jsonable
 from geotoolz._src.geo import require_geotensor
 from geotoolz._src.shape import over_frames
@@ -46,6 +46,7 @@ from geotoolz._src.valid import (
     carried_fill,
     invalid_values,
     mask_invalid_to_nan,
+    restore_fill,
     wrap_filled,
 )
 from geotoolz._src.wrap import wrap_like
@@ -720,37 +721,127 @@ class IntegratedIrradiance(Operator):
         }
 
 
+#: Spacing (nm) of the wavelength grid the SRFs are integrated on.
+_SRF_GRID_STEP_NM = 1.0
+
+
+def _srf_grid(source_wavelengths: np.ndarray, *, extrapolate: bool) -> np.ndarray:
+    """The 1-nm integration grid over the source wavelength range.
+
+    Integer nanometres from ``floor(min)`` to ``ceil(max)``. Without
+    ``extrapolate``, points outside ``[min, max]`` (only possible for
+    fractional source wavelengths) are dropped: georeader maps each grid
+    point to its nearest source band and cannot do so outside the range.
+    """
+    lo, hi = float(source_wavelengths.min()), float(source_wavelengths.max())
+    grid = np.arange(np.floor(lo), np.ceil(hi) + 1, _SRF_GRID_STEP_NM)
+    if not extrapolate:
+        grid = grid[(grid >= lo) & (grid <= hi)]
+    return grid
+
+
+def _check_srf_targets(
+    centers: np.ndarray,
+    fwhm: np.ndarray,
+    source_wavelengths: np.ndarray,
+    grid: np.ndarray,
+    *,
+    epsilon_srf: float,
+) -> None:
+    """Reject target bands the source cube cannot represent.
+
+    Raises:
+        ValueError: If the target arrays disagree in shape, a FWHM is not
+            strictly positive and finite, fewer than two source bands are
+            given, a target centre lies outside the source range, or a
+            target's Gaussian SRF has no grid weight above ``epsilon_srf``
+            (FWHM far below the 1-nm grid spacing) -- georeader would
+            otherwise divide by a zero SRF sum and return garbage.
+    """
+    if centers.ndim != 1 or centers.shape != fwhm.shape:
+        raise ValueError(
+            "target_center_wavelengths and target_fwhm must be 1-D and the same "
+            f"length; got shapes {centers.shape} and {fwhm.shape}"
+        )
+    if not np.all(np.isfinite(fwhm) & (fwhm > 0)):
+        raise ValueError(f"target_fwhm must be strictly positive; got {fwhm.tolist()}")
+    if source_wavelengths.size < 2 or not np.all(np.isfinite(source_wavelengths)):
+        raise ValueError(
+            "ApplySRF needs at least two finite source wavelengths; got "
+            f"{source_wavelengths.tolist()}"
+        )
+    lo, hi = float(source_wavelengths.min()), float(source_wavelengths.max())
+    sigma = fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    for k, (center, width, s) in enumerate(zip(centers, fwhm, sigma, strict=True)):
+        if not lo <= center <= hi:
+            raise ValueError(
+                f"target band {k} (centre {center:g} nm) lies outside the source "
+                f"wavelength range [{lo:g}, {hi:g}] nm"
+            )
+        # Same Gaussian as georeader.reflectance.srf, normalised on the grid.
+        response = np.exp(-((grid - center) ** 2) / (2.0 * s**2))
+        total = response.sum()
+        if total <= 0 or response.max() / total <= epsilon_srf:
+            raise ValueError(
+                f"target band {k} (centre {center:g} nm, FWHM {width:g} nm) has no "
+                f"SRF weight above epsilon_srf={epsilon_srf:g} on the "
+                f"{_SRF_GRID_STEP_NM:g}-nm integration grid; the FWHM must be "
+                f"comparable to or wider than {_SRF_GRID_STEP_NM:g} nm"
+            )
+
+
 class ApplySRF(Operator):
     r"""Convolve hyperspectral bands to target Gaussian-SRF multispectral bands.
 
     For each target band ``k`` with center wavelength ``λ_k`` and FWHM
-    ``Δλ_k``, build a normalised Gaussian SRF on a 1-nm wavelength grid
-    spanning the source range, then integrate:
+    ``Δλ_k``, build a normalised Gaussian SRF (:func:`georeader.reflectance.srf`)
+    on a 1-nm wavelength grid spanning the source range, then integrate
+    with :func:`georeader.reflectance.transform_to_srf`, which maps each
+    grid wavelength to its nearest source band:
 
     .. math::
 
         L_k \;=\; \frac{\displaystyle \int L(\lambda) \, R_k(\lambda) \, d\lambda}
                        {\displaystyle \int R_k(\lambda) \, d\lambda}
 
-    Carrier-aware wrapper around
-    :func:`georeader.reflectance.transform_to_srf`. Source-pixel
-    fill-value locations are propagated into the target bands (any
-    pixel that was fill in *any* source band stays fill in *every*
-    target band).
+    The 1-nm grid keeps the SRF well defined when a target FWHM is much
+    narrower than the source band spacing (the target then reads its
+    nearest source band). Targets the grid cannot represent -- a centre
+    outside the source range, or a FWHM far below 1 nm -- raise
+    ``ValueError`` instead of returning an all-zero band.
 
-    This class holds the top-level ``geotoolz.ApplySRF`` name. The
-    deliberately distinct :class:`geotoolz.spectral.ApplySRF` variant
-    skips the fill propagation but adds band-name / wavelength attrs
-    bookkeeping.
+    Nodata: the GeoTensor goes straight to ``transform_to_srf``, which
+    marks a target pixel missing when any source band *that target reads*
+    (weight above ``epsilon_srf``) equals the input's
+    ``fill_value_default``; non-finite source values propagate through the
+    weighted sum the same way. Those pixels hold the carried fill
+    (:func:`geotoolz._src.valid.carried_fill`: the input's fill for float
+    input, ``NaN`` for integer DN promoted to float). Source bands a
+    target does not read never invalidate it.
+
+    Output ``attrs``: source per-band keys are dropped; ``wavelengths``
+    holds the target centres and ``band_names`` the given ``band_names``.
+    A ``(T, C, H, W)`` stack is convolved frame by frame. Plain
+    ``np.ndarray`` input ``(B, H, W)`` returns a plain float32 array
+    (``NaN`` at non-finite pixels; there is no fill value to match).
 
     Args:
         target_center_wavelengths: ``λ_k`` for each target band (nm).
         target_fwhm: FWHM for each target band (nm).
         source_wavelengths: Source hyperspectral band centres (nm).
+            Default ``None`` reads ``gt.attrs["wavelengths"]``.
+        band_names: Optional names for the target bands, written to the
+            output's ``attrs["band_names"]``. Default ``None`` (no names).
         epsilon_srf: SRF threshold below which contribution is ignored.
             Default ``1e-4``.
-        extrapolate: Whether to extrapolate when target FWHM extends
-            outside the source range. Default ``False``.
+        extrapolate: Let georeader map grid wavelengths outside the source
+            range to the nearest edge band (only matters for fractional
+            source wavelengths). Default ``False``.
+
+    Raises:
+        ValueError: On inconsistent target arrays, a non-positive FWHM, a
+            target the source range / 1-nm grid cannot represent, or
+            source wavelengths missing or not matching the band count.
 
     Examples:
         >>> from geotoolz.radiometry import ApplySRF
@@ -760,112 +851,85 @@ class ApplySRF(Operator):
         ...     target_center_wavelengths=[500.0, 520.0],
         ...     target_fwhm=[20.0, 20.0],
         ...     source_wavelengths=[480.0, 490.0, 500.0, 510.0, 520.0],
+        ...     band_names=["b500", "b520"],
         ... )
         >>> multispectral = op(hyperspectral_geotensor)
+        >>> # Source wavelengths can come from gt.attrs["wavelengths"].
+        >>> s2_like = ApplySRF(
+        ...     target_center_wavelengths=[490.0, 665.0, 842.0],
+        ...     target_fwhm=[65.0, 30.0, 115.0],
+        ... )(emit_geotensor)
     """
 
     def __init__(
         self,
         *,
-        target_center_wavelengths: np.ndarray | list,
-        target_fwhm: np.ndarray | list,
-        source_wavelengths: np.ndarray | list,
+        target_center_wavelengths: np.ndarray | list[float],
+        target_fwhm: np.ndarray | list[float],
+        source_wavelengths: np.ndarray | list[float] | None = None,
+        band_names: list[str] | None = None,
         epsilon_srf: float = 1e-4,
         extrapolate: bool = False,
     ) -> None:
         self.target_center_wavelengths = target_center_wavelengths
         self.target_fwhm = target_fwhm
         self.source_wavelengths = source_wavelengths
+        self.band_names = band_names
         self.epsilon_srf = epsilon_srf
         self.extrapolate = extrapolate
 
     @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        source_wavelengths = np.asarray(self.source_wavelengths, dtype=float)
-        # 1-nm grid spanning the source range — fine enough for sensor-
-        # realistic Gaussian convolutions.
-        wavelengths = np.arange(
-            np.floor(source_wavelengths.min()),
-            np.ceil(source_wavelengths.max()) + 1,
-        )
-        srf_values = srf(
-            self.target_center_wavelengths,
-            self.target_fwhm,
-            wavelengths,
-        )
-        srf_df = pd.DataFrame(srf_values, index=wavelengths)
-        # Plain ndarray carriers have no fill value — skip the fill
-        # bookkeeping entirely in that case.
-        fill_value = getattr(gt, "fill_value_default", None)
-        out = transform_to_srf(
-            np.asarray(gt),
-            srf_df,
-            source_wavelengths.tolist(),
-            fill_value_default=0.0 if fill_value is None else fill_value,
-            epsilon_srf=self.epsilon_srf,
-            extrapolate=self.extrapolate,
-        )
-        # Propagate fill-value masks per target band. Each target band's
-        # SRF only depends on a subset of source bands (those covered by
-        # wavelengths with non-negligible SRF weight); a target band
-        # must become fill only when one of its *contributing* source
-        # bands is fill at that pixel — not when any unrelated source
-        # band happens to be fill.
-        fill = carried_fill(gt, out.dtype)
-        if fill_value is not None:
-            src_invalid = invalid_values(gt)  # (n_src, H, W)
-            support = self._source_band_support(srf_df, source_wavelengths)
-            # invalid[j, h, w] = any contributing source band is fill
-            invalid = (
-                einx.dot(
-                    "j i, i h w -> j h w",
-                    support.astype(np.int64),
-                    src_invalid.astype(np.int64),
-                )
-                > 0
+        n_bands = np.shape(gt)[0] if np.ndim(gt) == 3 else None
+        if n_bands is None:
+            raise ValueError(
+                f"ApplySRF expects a (B, H, W) cube or a (T, B, H, W) stack; "
+                f"got shape {np.shape(gt)}"
             )
-            out[invalid] = np.nan if fill is None else fill
-        # Target bands replace the source bands: source per-band attrs are
-        # dropped and the target centres become the new wavelengths.
-        wrapped = wrap_like(
+        source_wavelengths = resolve_wavelengths(
+            gt, self.source_wavelengths, n_bands=n_bands, name="source_wavelengths"
+        )
+        centers = np.asarray(self.target_center_wavelengths, dtype=float)
+        fwhm = np.asarray(self.target_fwhm, dtype=float)
+        if self.band_names is not None and len(self.band_names) != centers.size:
+            raise ValueError(
+                f"band_names has {len(self.band_names)} entries but there are "
+                f"{centers.size} target band(s)"
+            )
+        grid = _srf_grid(source_wavelengths, extrapolate=self.extrapolate)
+        _check_srf_targets(
+            centers, fwhm, source_wavelengths, grid, epsilon_srf=self.epsilon_srf
+        )
+        with warnings.catch_warnings():
+            # georeader normalises with ``np.divide(..., where=sum > 0)`` and
+            # no ``out``; every column has a positive sum (checked above), so
+            # the "uninitialized memory" warning does not apply.
+            warnings.filterwarnings("ignore", message="'where' used without 'out'")
+            srf_df = pd.DataFrame(srf(centers, fwhm, grid), index=grid)
+        # A NaN fill_value_default makes every georeader-detected missing
+        # pixel NaN, so it is found below together with pixels made
+        # non-finite by NaN / inf source values.
+        out = np.asarray(
+            transform_to_srf(
+                gt,
+                srf_df,
+                source_wavelengths.tolist(),
+                fill_value_default=np.nan,
+                epsilon_srf=self.epsilon_srf,
+                extrapolate=self.extrapolate,
+            )
+        )
+        fill = carried_fill(gt, out.dtype)
+        out = restore_fill(out, np.isfinite(out), fill)
+        attrs = strip_band_attrs(getattr(gt, "attrs", None))
+        attrs["wavelengths"] = jsonable(centers)
+        return wrap_like(
             gt,
             out,
             fill_value_default=fill,
-            attrs=strip_band_attrs(getattr(gt, "attrs", None)),
+            attrs=attrs,
+            band_names=self.band_names,
         )
-        if hasattr(wrapped, "attrs"):
-            wrapped.attrs["wavelengths"] = jsonable(
-                np.asarray(self.target_center_wavelengths, dtype=float)
-            )
-        return wrapped
-
-    def _source_band_support(
-        self,
-        srf_df: pd.DataFrame,
-        source_wavelengths: np.ndarray,
-    ) -> np.ndarray:
-        """Boolean (n_target, n_source) matrix of SRF support.
-
-        ``support[j, i]`` is ``True`` iff source band ``i`` is the
-        nearest source band for at least one SRF wavelength where the
-        target band ``j`` has weight above ``epsilon_srf``. This
-        mirrors the per-target source-band selection inside
-        ``transform_to_srf``.
-        """
-        n_target = srf_df.shape[1]
-        n_source = source_wavelengths.shape[0]
-        # Nearest source-band index per SRF wavelength.
-        nearest = np.abs(
-            srf_df.index.to_numpy()[:, None] - source_wavelengths[None, :]
-        ).argmin(axis=1)
-        weights = srf_df.to_numpy()  # (n_wavelength, n_target)
-        support = np.zeros((n_target, n_source), dtype=bool)
-        for j in range(n_target):
-            active = weights[:, j] > self.epsilon_srf
-            if not np.any(active):
-                continue
-            support[j, np.unique(nearest[active])] = True
-        return support
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -873,9 +937,12 @@ class ApplySRF(Operator):
                 np.asarray(self.target_center_wavelengths, dtype=float)
             ),
             "target_fwhm": jsonable(np.asarray(self.target_fwhm, dtype=float)),
-            "source_wavelengths": jsonable(
-                np.asarray(self.source_wavelengths, dtype=float)
+            "source_wavelengths": (
+                None
+                if self.source_wavelengths is None
+                else jsonable(np.asarray(self.source_wavelengths, dtype=float))
             ),
+            "band_names": None if self.band_names is None else list(self.band_names),
             "epsilon_srf": self.epsilon_srf,
             "extrapolate": self.extrapolate,
         }

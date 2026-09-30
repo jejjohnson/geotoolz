@@ -1,4 +1,12 @@
-"""Band-space operators for spectral remote-sensing workflows."""
+"""Band-space operators for spectral remote-sensing workflows.
+
+Band selection / reordering / stacking / splitting, band math and
+ratios, spectral binning and smoothing, and continuum removal. The
+normalized difference lives in :mod:`geotoolz.indices`
+(:class:`~geotoolz.indices.NormalizedDifference`) and the Gaussian-SRF
+convolution in :mod:`geotoolz.radiometry`
+(:class:`~geotoolz.radiometry.ApplySRF`).
+"""
 
 from __future__ import annotations
 
@@ -6,19 +14,15 @@ from geotoolz.spectral._src.array import (
     band_ratio,
     continuum_removal,
     evaluate_band_math,
-    normalized_difference,
     reorder_bands,
     select_bands,
     spectral_binning,
     spectral_smoothing,
 )
 from geotoolz.spectral._src.operators import (
-    ApplySRF,
     BandMath,
     BandRatio,
     ContinuumRemoval,
-    GaussianSRF,
-    NormalizedDifference,
     ReorderBands,
     SelectBands,
     SpectralBinning,
@@ -29,12 +33,9 @@ from geotoolz.spectral._src.operators import (
 
 
 __all__ = [
-    "ApplySRF",
     "BandMath",
     "BandRatio",
     "ContinuumRemoval",
-    "GaussianSRF",
-    "NormalizedDifference",
     "ReorderBands",
     "SelectBands",
     "SpectralBinning",
@@ -44,7 +45,6 @@ __all__ = [
     "band_ratio",
     "continuum_removal",
     "evaluate_band_math",
-    "normalized_difference",
     "reorder_bands",
     "select_bands",
     "spectral_binning",
