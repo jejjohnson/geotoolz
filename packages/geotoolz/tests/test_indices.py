@@ -374,20 +374,20 @@ def test_band_name_resolution_falls_back_to_band_names() -> None:
     np.testing.assert_allclose(np.asarray(via_names), np.asarray(via_indices))
 
 
-def test_band_name_resolution_descriptions_takes_precedence() -> None:
-    """When the name resolves in both ``descriptions`` and ``band_names``
-    at different positions, ``descriptions`` wins (it's first in the
-    lookup order)."""
+def test_band_name_resolution_band_names_takes_precedence() -> None:
+    """When the name resolves in both ``band_names`` and ``descriptions``
+    at different positions, ``band_names`` wins (it's first in the
+    package-wide lookup order)."""
     rng = np.random.default_rng(6)
     arr = rng.uniform(0.05, 0.6, size=(4, 4, 4)).astype(np.float32)
     gt = toy_geotensor(arr)
     # Same name "X" sits at index 0 in `descriptions` and index 3 in
-    # `band_names`. The resolver should pick descriptions -> 0.
+    # `band_names`. The resolver should pick band_names -> 3.
     gt.attrs["descriptions"] = ("X", "_", "_", "_")
     gt.attrs["band_names"] = ("_", "_", "_", "X")
 
-    out = NDVI(red="X", nir_idx=3)(gt)
-    expected = NDVI(red_idx=0, nir_idx=3)(gt)
+    out = NDVI(red="X", nir_idx=0)(gt)
+    expected = NDVI(red_idx=3, nir_idx=0)(gt)
     np.testing.assert_allclose(np.asarray(out), np.asarray(expected))
 
 

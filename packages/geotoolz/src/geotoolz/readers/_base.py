@@ -155,8 +155,9 @@ class SensorReader(GeoData, ABC):
         if not boundless:
             window = self._clip_window(window)
         values = self._read_window(window)
-        # Keep both keys for geotoolz.indices named-band compatibility.
-        attrs = {"band_names": self.bands, "bands": self.bands}
+        # The canonical key every band resolver reads first (see
+        # geotoolz._src.bands.DEFAULT_BAND_KEYS).
+        attrs = {"band_names": self.bands}
         return GeoTensor(
             values,
             transform=window_transform(window, self.transform),

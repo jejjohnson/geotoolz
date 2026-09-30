@@ -35,8 +35,6 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from collections.abc import Sequence
-from numbers import Real
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
@@ -46,7 +44,7 @@ from pipekit import Operator
 from rasterio.windows import Window
 from scipy.ndimage import gaussian_filter
 
-from geotoolz._src.bands import band_count
+from geotoolz._src.bands import band_count, resolve_bands
 from geotoolz._src.config import (
     as_tuple,
     jsonable,
@@ -802,9 +800,10 @@ class BandJitter(Operator):
     """Permute bands within explicitly configured groups.
 
     Metadata-dependent: band names are resolved through the carrier's
-    ``attrs`` (``band_names`` / ``bands`` / ``band_descriptions``), so a
-    plain ``np.ndarray`` input (or a GeoTensor without band names)
-    raises ``ValueError`` whenever ``groups`` is non-empty.
+    ``attrs`` by the package-wide resolver (``band_names``, then
+    ``descriptions``, then ``bands``), so named groups on a plain
+    ``np.ndarray`` raise ``TypeError`` and on a GeoTensor without those
+    names raise ``ValueError``. Integer indices work on any carrier.
 
     Args:
         groups: Mapping of group label to the band names (or integer
@@ -833,38 +832,20 @@ class BandJitter(Operator):
         if arr.ndim < 3:
             return gt
 
-        band_names = _band_names(gt)
+        n_bands = arr.shape[BAND_AXIS]
+        groups = [resolve_bands(gt, group) for group in self.groups.values()]
         rng = _call_rng(self, seed)
         out = np.array(arr, copy=True)
-        for group in self.groups.values():
-            indices = [
-                _band_index(name, band_names, arr.shape[BAND_AXIS]) for name in group
-            ]
+        for indices in groups:
+            for index in indices:
+                if not 0 <= index < n_bands:
+                    raise ValueError(f"Band index {index} is outside [0, {n_bands}).")
             if len(indices) > 1:
                 out[..., indices, :, :] = arr[..., rng.permutation(indices), :, :]
         return _cast_and_wrap(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"groups": mapping_to_pairs(self.groups), "seed": self.seed}
-
-
-def _band_names(gt: GeoTensor | np.ndarray) -> Sequence[Any]:
-    attrs = getattr(gt, "attrs", None) or {}
-    for key in ("band_names", "bands", "band_descriptions"):
-        names = attrs.get(key)
-        if names is not None:
-            return list(names)
-    raise ValueError("BandJitter requires band names in GeoTensor attrs.")
-
-
-def _band_index(name: str, names: Sequence[Any], n_bands: int) -> int:
-    if (isinstance(name, str) and name.isdigit()) or isinstance(name, Real):
-        index = int(name)
-    else:
-        index = list(names).index(name)
-    if not 0 <= index < n_bands:
-        raise ValueError(f"Band index {index} is outside [0, {n_bands}).")
-    return index
 
 
 class SunAngleJitter(Operator):

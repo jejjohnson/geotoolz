@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.bands import BandRef, resolve_bands
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
 from geotoolz._src.geo import require_geotensor
 from geotoolz._src.shape import over_frames
@@ -71,20 +72,18 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-BandRef = int | str
-
-
 class Composite(Operator):
     """Build a multi-band composite by arbitrary band reference.
 
     The generic band-selection operator the named composites
     (`TrueColor`, `FalseColor`, `SWIRComposite`) wrap. Bands may be
-    referenced by integer position along ``axis`` or by name when the
-    carrier carries a ``bands`` / ``band_names`` / ``descriptions``
-    entry in ``attrs``. Output has ``len(bands)`` slices along ``axis``
-    and the same spatial footprint as the input — ``transform`` and
-    ``crs`` round-trip unchanged. Plain ``np.ndarray`` carriers are
-    supported with integer band references (returning a plain array);
+    referenced by integer position along ``axis`` or by name, resolved
+    against the carrier's ``attrs`` by the package-wide resolver
+    (``band_names``, then ``descriptions``, then ``bands``). Output has
+    ``len(bands)`` slices along ``axis`` and the same spatial footprint
+    as the input — ``transform`` and ``crs`` round-trip unchanged. Plain
+    ``np.ndarray`` carriers are supported with integer band references
+    (returning a plain array);
     string names need a carrier with band names in ``attrs``. Fill
     values pass through unchanged (pure band selection).
 
@@ -107,7 +106,7 @@ class Composite(Operator):
         self.axis = axis
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        indices = _resolve_bands(gt, self.bands)
+        indices = resolve_bands(gt, self.bands)
         # Pure band selection: the values, and so the fill, are the input's.
         return wrap_like(
             gt,
@@ -762,34 +761,6 @@ class AnnotatePoints(Operator):
             "radius": self.radius,
             "color": list(self.color),
         }
-
-
-def _resolve_bands(gt: GeoTensor | np.ndarray, refs: Sequence[BandRef]) -> list[int]:
-    names = _band_names(gt)
-    indices: list[int] = []
-    for ref in refs:
-        if isinstance(ref, int):
-            indices.append(ref)
-            continue
-        if ref not in names:
-            raise ValueError(
-                f"band {ref!r} not found in carrier attrs; string band "
-                "references require a GeoTensor with 'bands' / 'band_names' "
-                "/ 'descriptions' metadata"
-            )
-        indices.append(names.index(ref))
-    return indices
-
-
-def _band_names(gt: GeoTensor | np.ndarray) -> list[str]:
-    attrs = getattr(gt, "attrs", None)
-    if not attrs:
-        return []
-    for key in ("bands", "band_names", "descriptions"):
-        value = attrs.get(key)
-        if value is not None:
-            return [str(v) for v in value]
-    return []
 
 
 def _get_colormap(name: str) -> Any:
