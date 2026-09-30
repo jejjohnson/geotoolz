@@ -47,6 +47,7 @@ from geotoolz._src.valid import (
     invalid_values,
     mask_invalid_to_nan,
     restore_fill,
+    valid_pixels,
     wrap_filled,
 )
 from geotoolz._src.wrap import wrap_like
@@ -1194,8 +1195,14 @@ class PercentileClip(Operator):
         self.axis = as_tuple(axis)
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        # Nodata never enters the percentiles (``nanpercentile``).
-        values = mask_invalid_to_nan(gt) if np.ndim(gt) >= 2 else np.asarray(gt)
+        # Nodata never enters the percentiles (``nanpercentile``). The mask
+        # is per frame, so a pixel missing in one frame of a (T, C, H, W)
+        # stack stays valid in the others.
+        values = (
+            mask_invalid_to_nan(gt, valid=valid_pixels(gt, keep_time=True))
+            if np.ndim(gt) >= 2
+            else np.asarray(gt)
+        )
         out = percentile_clip(
             values, lower=self.lower, upper=self.upper, axis=self.axis
         )

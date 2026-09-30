@@ -670,6 +670,34 @@ def test_stretch_to_uint8_equals_percentile_clip_pipeline(axis: Any) -> None:
     np.testing.assert_array_equal(np.asarray(out)[0, :, 1, 1], 0)
 
 
+def test_stretch_keeps_per_frame_nodata_on_time_stacks() -> None:
+    """A pixel missing in one frame must stay valid in the others (4-D)."""
+    rng = np.random.default_rng(1)
+    values = rng.uniform(0.1, 0.9, (2, 3, 4, 4)).astype(np.float32)
+    values[0, :, 2, 2] = -9999.0  # nodata in frame 0 only
+    gt = _toy_geotensor(values)
+    frame1 = StretchToUint8()(_toy_geotensor(values[1]))
+
+    out = np.asarray(StretchToUint8()(gt))
+    np.testing.assert_array_equal(out[0, :, 2, 2], 0)
+    np.testing.assert_array_equal(out[1], np.asarray(frame1))
+    assert (out[1, :, 2, 2] > 0).all()
+    clipped = np.asarray(gz.radiometry.PercentileClip()(gt))
+    assert np.isfinite(clipped[1, :, 2, 2]).all()
+
+
+def test_composite_bands_is_the_selected_indexes() -> None:
+    """Mutating ``bands`` changes what is selected *and* what is serialised."""
+    op = Composite(bands=[0])
+    op.bands.append(1)
+    assert op.indexes == [0, 1]
+    assert op.get_config()["bands"] == [0, 1]
+    op.bands = [2]
+    assert op.indexes == [2]
+    arr = np.arange(3 * 2 * 2, dtype=np.float32).reshape(3, 2, 2)
+    np.testing.assert_array_equal(op(arr), arr[[2]])
+
+
 def test_stretch_to_uint8_rounds_instead_of_truncating() -> None:
     # 0.999 * 255 = 254.7 -> 255 (a bare cast truncated it to 254).
     arr = np.array([[[0.0, 0.999, 1.0]]], dtype=np.float32)

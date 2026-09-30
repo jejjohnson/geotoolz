@@ -788,6 +788,24 @@ class _ApplySeededOp(Operator):
         return np.asarray(gt)
 
 
+class _KwargsSeededOp(Operator):
+    """Consumes the per-call seed through ``**kwargs``."""
+
+    def __init__(self) -> None:
+        self.seen: list[int | None] = []
+
+    def _apply(self, gt: np.ndarray, **kwargs: Any) -> np.ndarray:
+        self.seen.append(kwargs.get("seed"))
+        return np.asarray(gt)
+
+
+def test_compose_forwards_seed_to_var_keyword_apply() -> None:
+    child = _KwargsSeededOp()
+    augment.Compose([child], seed=0)(np.zeros((1, 2, 2), dtype=np.float32))
+    assert len(child.seen) == 1
+    assert isinstance(child.seen[0], int)
+
+
 def test_compose_forwards_seed_only_when_apply_accepts_it() -> None:
     arr = np.zeros((1, 2, 2), dtype=np.float32)
     init_seeded = _InitSeededOp(seed=3)

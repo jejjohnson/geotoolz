@@ -129,12 +129,15 @@ def _apply_accepts_seed(op: Operator) -> bool:
     """Return True if ``op._apply`` takes a ``seed`` keyword.
 
     The per-call ``seed`` is forwarded to ``_apply`` (via ``op(x, seed=...)``),
-    so that signature -- not ``__init__`` -- decides whether it is accepted.
+    so that signature -- not ``__init__`` -- decides whether it is accepted:
+    an explicit ``seed`` parameter or a ``**kwargs`` catch-all.
     """
     try:
         params = inspect.signature(op._apply).parameters
     except (TypeError, ValueError):
         return False
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
     param = params.get("seed")
     return param is not None and param.kind in (
         inspect.Parameter.POSITIONAL_OR_KEYWORD,

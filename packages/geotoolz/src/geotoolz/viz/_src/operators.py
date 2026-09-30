@@ -113,7 +113,15 @@ class Composite(SelectBands):
 
     def __init__(self, *, bands: Sequence[BandRef], axis: int = -3) -> None:
         super().__init__(indexes=list(bands), axis=axis)
-        self.bands = list(bands)
+
+    @property
+    def bands(self) -> list[BandRef]:
+        """The selected band references -- the inherited ``indexes`` list itself."""
+        return self.indexes
+
+    @bands.setter
+    def bands(self, value: Sequence[BandRef]) -> None:
+        self.indexes = list(value)
 
     def get_config(self) -> dict[str, Any]:
         return {"bands": jsonable(list(self.bands)), "axis": self.axis}
