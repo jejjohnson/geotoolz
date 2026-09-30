@@ -15,7 +15,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from pipekit import Operator
-from shapely.geometry import Point
 from skimage.feature import (
     blob_dog,
     blob_doh,
@@ -37,26 +36,13 @@ from skimage.transform import (
 )
 
 from geotoolz._src.config import as_tuple
+from geotoolz._src.geo import pixel_xy, require_geotensor
 from geotoolz._src.shape import single_band
 from geotoolz._src.valid import wrap_filled
 
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
-
-
-def _require_geotensor(gt: Any, name: str) -> None:
-    """Raise when a geo-dependent operator receives a plain array."""
-    if not hasattr(gt, "transform"):
-        raise TypeError(
-            f"{name} requires a georeferenced GeoTensor input; got a plain array"
-        )
-
-
-def _xy(transform: Any, row: float, col: float) -> tuple[float, float]:
-    x = transform.c + transform.a * (col + 0.5) + transform.b * (row + 0.5)
-    y = transform.f + transform.d * (col + 0.5) + transform.e * (row + 0.5)
-    return float(x), float(y)
 
 
 def _points(
@@ -66,9 +52,8 @@ def _points(
     data: dict[str, Any] | None = None,
 ) -> gpd.GeoDataFrame:
     frame = pd.DataFrame({"row": rows, "col": cols, **(data or {})})
-    geometry = [
-        Point(_xy(gt.transform, row, col)) for row, col in zip(rows, cols, strict=True)
-    ]
+    xs, ys = pixel_xy(gt.transform, rows, cols)
+    geometry = gpd.points_from_xy(xs, ys)
     return gpd.GeoDataFrame(frame, geometry=geometry, crs=gt.crs)
 
 
@@ -108,7 +93,7 @@ class PeakLocalMax(Operator):
         self.exclude_border = exclude_border
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
-        _require_geotensor(gt, "PeakLocalMax")
+        require_geotensor(gt, "PeakLocalMax")
         image = single_band(np.asarray(gt, dtype=float), name="PeakLocalMax")
         coords = peak_local_max(
             image,
@@ -172,7 +157,7 @@ class _BlobBase(Operator):
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
         name = type(self).__name__
-        _require_geotensor(gt, name)
+        require_geotensor(gt, name)
         blobs = self._func(
             single_band(np.asarray(gt, dtype=float), name=name),
             min_sigma=self.min_sigma,
@@ -374,7 +359,7 @@ class CornerHarris(Operator):
         self.threshold_rel = threshold_rel
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
-        _require_geotensor(gt, "CornerHarris")
+        require_geotensor(gt, "CornerHarris")
         response = corner_harris(
             single_band(np.asarray(gt, dtype=float), name="CornerHarris")
         )
@@ -558,7 +543,7 @@ class HoughCircles(Operator):
         self.total_num_peaks = total_num_peaks
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
-        _require_geotensor(gt, "HoughCircles")
+        require_geotensor(gt, "HoughCircles")
         hspaces = hough_circle(
             single_band(np.asarray(gt), name="HoughCircles"), self.radii
         )

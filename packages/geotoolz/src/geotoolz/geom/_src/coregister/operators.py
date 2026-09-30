@@ -22,6 +22,7 @@ import einx
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.geo import require_geotensor
 from geotoolz._src.wrap import wrap_like
 from geotoolz.geom._src.operators import ReprojectLike
 
@@ -31,21 +32,6 @@ if TYPE_CHECKING:
 
     import shapely.geometry.base
     from georeader.geotensor import GeoTensor
-
-
-def _require_geotensor(value: Any, op_name: str, *, arg: str = "raster") -> None:
-    """Raise a clear ``TypeError`` when a geo-dependent op gets a plain array.
-
-    Every coregister operator is geo-dependent — alignment across
-    modalities is only meaningful with an affine transform + CRS on the
-    raster side. Duck-typed on ``transform`` so any GeoTensor-compatible
-    carrier passes.
-    """
-    if not hasattr(value, "transform"):
-        raise TypeError(
-            f"{op_name} requires a georeferenced GeoTensor {arg}; "
-            f"got a plain array ({type(value).__name__})."
-        )
 
 
 def _require_axis_aligned(transform: Any, op_name: str) -> None:
@@ -215,8 +201,8 @@ class RasterToRasterLike(Operator):
         self.resampling = resampling
 
     def _apply(self, src: GeoTensor, like: GeoTensor) -> GeoTensor:
-        _require_geotensor(src, "RasterToRasterLike", arg="src")
-        _require_geotensor(like, "RasterToRasterLike", arg="like")
+        require_geotensor(src, "RasterToRasterLike", arg="src")
+        require_geotensor(like, "RasterToRasterLike", arg="like")
         # Delegate to the existing single-input `ReprojectLike` so
         # we share the rasterio warp code path. The price is one
         # extra Python-level Operator construction per call; the
@@ -331,7 +317,7 @@ class RasterToPoints(Operator):
         self.out_var = out_var
 
     def _apply(self, raster: GeoTensor, points: Any) -> Any:
-        _require_geotensor(raster, "RasterToPoints")
+        require_geotensor(raster, "RasterToPoints")
         try:
             import xvec  # noqa: F401 — registers the .xvec accessor
         except ImportError as exc:
@@ -426,7 +412,7 @@ class PointsToRaster(Operator):
         self.attribute = attribute
 
     def _apply(self, points: Any, like: GeoTensor) -> GeoTensor:
-        _require_geotensor(like, "PointsToRaster", arg="like")
+        require_geotensor(like, "PointsToRaster", arg="like")
         if self.method == "idw":
             raise NotImplementedError(
                 "PointsToRaster(method='idw') is not yet implemented; "
@@ -602,7 +588,7 @@ class RasterToPointCloud(Operator):
         self.power = power
 
     def _apply(self, raster: GeoTensor, cloud: Any) -> Any:
-        _require_geotensor(raster, "RasterToPointCloud")
+        require_geotensor(raster, "RasterToPointCloud")
         _require_axis_aligned(raster.transform, "RasterToPointCloud")
         xy = _cloud_to_xy_array(cloud, src_crs=raster.crs)
         if xy.size == 0:
@@ -846,7 +832,7 @@ class PointCloudToRaster(Operator):
         self.max_radius = max_radius
 
     def _apply(self, cloud: Any, like: GeoTensor) -> GeoTensor:
-        _require_geotensor(like, "PointCloudToRaster", arg="like")
+        require_geotensor(like, "PointCloudToRaster", arg="like")
         _require_axis_aligned(like.transform, "PointCloudToRaster")
         xy, values = _cloud_to_xy_values(cloud)
         if self.method == "binned_stat":
@@ -1036,7 +1022,7 @@ class VectorToRasterAgg(Operator):
                 "the others (mean / count / sum / max / min / first / last) "
                 "are wired up."
             )
-        _require_geotensor(like, "VectorToRasterAgg", arg="like")
+        require_geotensor(like, "VectorToRasterAgg", arg="like")
         _require_axis_aligned(like.transform, "VectorToRasterAgg")
         import geopandas as gpd
         from rasterio.features import rasterize as rio_rasterize

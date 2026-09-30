@@ -40,6 +40,7 @@ from pipekit import Operator
 
 from geotoolz._src.bands import strip_band_attrs
 from geotoolz._src.config import as_tuple, jsonable
+from geotoolz._src.geo import require_geotensor
 from geotoolz._src.shape import over_frames
 from geotoolz._src.valid import (
     carried_fill,
@@ -84,41 +85,11 @@ def _rewrap_stretch(gt: Any, out: Any) -> Any:
     return wrap_filled(gt, out, fill_value_default=np.nan)
 
 
-def _datetime_as_jsonable(value: datetime | None) -> str | None:
-    """Coerce a ``datetime`` config field into an ISO-8601 string.
-
-    Hydra-zen / OmegaConf YAML serialisers can't round-trip arbitrary
-    ``datetime`` objects, so we always emit ISO-8601 strings from
-    ``get_config()`` and accept either form on the way back in.
-    """
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    return value.isoformat()
-
-
 def _parse_datetime(value: datetime | str) -> datetime:
     """Accept either a ``datetime`` or an ISO-8601 string."""
     if isinstance(value, datetime):
         return value
     return datetime.fromisoformat(value)
-
-
-def _coef_as_jsonable(coef: Any) -> float | list[float]:
-    """Coerce a gain / offset coefficient into a JSON-safe scalar or list.
-
-    Keeps scalars as Python ``float``; converts numpy scalars, ndarrays
-    and any sequence (list / tuple) of numerics into a *flat*
-    ``list[float]`` (via ``ravel``) — stricter semantics than the shared
-    :func:`geotoolz._src.config.jsonable`, which it builds on. Used by
-    `DNToRadiance` / `DNToReflectance`'s ``get_config()`` so Hydra /
-    YAML round-trips don't choke on ndarray leaves.
-    """
-    arr = np.asarray(coef, dtype=float)
-    if arr.ndim == 0:
-        return float(arr)
-    return jsonable(arr.ravel())
 
 
 if TYPE_CHECKING:
@@ -212,9 +183,9 @@ class DNToRadiance(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "gain": _coef_as_jsonable(self.gain),
-            "offset": _coef_as_jsonable(self.offset),
-            "scale": _coef_as_jsonable(self.scale),
+            "gain": jsonable(np.asarray(self.gain, dtype=float)),
+            "offset": jsonable(np.asarray(self.offset, dtype=float)),
+            "scale": jsonable(np.asarray(self.scale, dtype=float)),
             "axis": self.axis,
         }
 
@@ -273,9 +244,9 @@ class RadianceToDN(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "gain": _coef_as_jsonable(self.gain),
-            "offset": _coef_as_jsonable(self.offset),
-            "scale": _coef_as_jsonable(self.scale),
+            "gain": jsonable(np.asarray(self.gain, dtype=float)),
+            "offset": jsonable(np.asarray(self.offset, dtype=float)),
+            "scale": jsonable(np.asarray(self.scale, dtype=float)),
             "axis": self.axis,
         }
 
@@ -341,8 +312,8 @@ class DNToReflectance(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "scale": _coef_as_jsonable(self.scale),
-            "offset": _coef_as_jsonable(self.offset),
+            "scale": jsonable(np.asarray(self.scale, dtype=float)),
+            "offset": jsonable(np.asarray(self.offset, dtype=float)),
             "axis": self.axis,
         }
 
@@ -422,12 +393,12 @@ class RadianceToReflectance(Operator):
             center_coords=self.center_coords,
             crs_coords=self.crs_coords,
         )
-        if obs_factor is None and not hasattr(gt, "transform"):
-            raise TypeError(
-                "RadianceToReflectance requires a georeferenced GeoTensor "
-                "input to derive the solar geometry from the footprint when "
-                "neither `sza_deg` nor `center_coords` is provided; got a "
-                "plain array"
+        if obs_factor is None:
+            require_geotensor(
+                gt,
+                "RadianceToReflectance",
+                hint="The solar geometry is derived from the footprint when "
+                "neither `sza_deg` nor `center_coords` is provided.",
             )
         out = radiance_to_reflectance(
             gt,
@@ -443,8 +414,10 @@ class RadianceToReflectance(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "solar_irradiance": _coef_as_jsonable(self.solar_irradiance),
-            "acquisition_date": _datetime_as_jsonable(self.acquisition_date),
+            "solar_irradiance": jsonable(
+                np.asarray(self.solar_irradiance, dtype=float)
+            ),
+            "acquisition_date": jsonable(self.acquisition_date),
             "center_coords": (
                 list(self.center_coords) if self.center_coords is not None else None
             ),
@@ -519,12 +492,12 @@ class ReflectanceToRadiance(Operator):
             center_coords=self.center_coords,
             crs_coords=self.crs_coords,
         )
-        if obs_factor is None and not hasattr(gt, "transform"):
-            raise TypeError(
-                "ReflectanceToRadiance requires a georeferenced GeoTensor "
-                "input to derive the solar geometry from the footprint when "
-                "neither `sza_deg` nor `center_coords` is provided; got a "
-                "plain array"
+        if obs_factor is None:
+            require_geotensor(
+                gt,
+                "ReflectanceToRadiance",
+                hint="The solar geometry is derived from the footprint when "
+                "neither `sza_deg` nor `center_coords` is provided.",
             )
         out = reflectance_to_radiance(
             gt,
@@ -539,8 +512,10 @@ class ReflectanceToRadiance(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "solar_irradiance": _coef_as_jsonable(self.solar_irradiance),
-            "acquisition_date": _datetime_as_jsonable(self.acquisition_date),
+            "solar_irradiance": jsonable(
+                np.asarray(self.solar_irradiance, dtype=float)
+            ),
+            "acquisition_date": jsonable(self.acquisition_date),
             "center_coords": (
                 list(self.center_coords) if self.center_coords is not None else None
             ),
@@ -593,7 +568,7 @@ class EarthSunDistanceCorrection(Operator):
         return earth_sun_distance_correction_factor(self.acquisition_date)
 
     def get_config(self) -> dict[str, Any]:
-        return {"acquisition_date": _datetime_as_jsonable(self.acquisition_date)}
+        return {"acquisition_date": jsonable(self.acquisition_date)}
 
 
 class ComputeSZA(Operator):
@@ -647,7 +622,7 @@ class ComputeSZA(Operator):
     def get_config(self) -> dict[str, Any]:
         return {
             "center_coords": list(self.center_coords),
-            "acquisition_date": _datetime_as_jsonable(self.acquisition_date),
+            "acquisition_date": jsonable(self.acquisition_date),
             "crs_coords": self.crs_coords,
         }
 
@@ -894,11 +869,13 @@ class ApplySRF(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "target_center_wavelengths": _coef_as_jsonable(
-                self.target_center_wavelengths
+            "target_center_wavelengths": jsonable(
+                np.asarray(self.target_center_wavelengths, dtype=float)
             ),
-            "target_fwhm": _coef_as_jsonable(self.target_fwhm),
-            "source_wavelengths": _coef_as_jsonable(self.source_wavelengths),
+            "target_fwhm": jsonable(np.asarray(self.target_fwhm, dtype=float)),
+            "source_wavelengths": jsonable(
+                np.asarray(self.source_wavelengths, dtype=float)
+            ),
             "epsilon_srf": self.epsilon_srf,
             "extrapolate": self.extrapolate,
         }
@@ -970,8 +947,8 @@ class BTFromRadiance(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "K1": _coef_as_jsonable(self.K1),
-            "K2": _coef_as_jsonable(self.K2),
+            "K1": jsonable(np.asarray(self.K1, dtype=float)),
+            "K2": jsonable(np.asarray(self.K2, dtype=float)),
             "axis": self.axis,
         }
 

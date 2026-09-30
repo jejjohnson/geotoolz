@@ -29,6 +29,7 @@ from jaxtyping import Shaped
 from pipekit import Operator
 
 from geotoolz._src.bands import concat_band_attrs, strip_band_attrs
+from geotoolz._src.geo import grid_matches
 from geotoolz._src.valid import (
     carried_fill,
     is_fill,
@@ -40,23 +41,6 @@ from geotoolz._src.wrap import wrap_like
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
-
-
-def _grid_matches(a: GeoTensor | np.ndarray, b: GeoTensor | np.ndarray) -> bool:
-    """Exact grid equality — affine drift on a fused stack is a real bug source.
-
-    Plain arrays carry no georeferencing, so when either side lacks a
-    ``transform`` the check degrades to spatial-shape equality only.
-    """
-    if a.shape[-2:] != b.shape[-2:]:
-        return False
-    a_transform = getattr(a, "transform", None)
-    b_transform = getattr(b, "transform", None)
-    if a_transform is None or b_transform is None:
-        return True
-    return a_transform == b_transform and getattr(a, "crs", None) == getattr(
-        b, "crs", None
-    )
 
 
 def _normalize_to_sequence(
@@ -199,7 +183,7 @@ class StackMatched(Operator):
         # than emit subtly misregistered output.
         base = seq[0]
         for idx, frame in enumerate(seq[1:], start=1):
-            if not _grid_matches(base, frame):
+            if not grid_matches(base, frame):
                 raise ValueError(
                     "StackMatched inputs must share spatial shape, "
                     "transform, and CRS; "
@@ -323,7 +307,7 @@ class BlendMatched(Operator):
         # would mean we're averaging different physical quantities.
         base = seq[0]
         for idx, frame in enumerate(seq[1:], start=1):
-            if not _grid_matches(base, frame):
+            if not grid_matches(base, frame):
                 raise ValueError(
                     "BlendMatched inputs must share spatial shape, "
                     "transform, and CRS; "

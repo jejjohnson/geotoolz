@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -173,7 +171,11 @@ class SklearnOp(Operator):
         return {
             "estimator": {
                 "class": estimator_path,
-                "params": _jsonable_params(params),
+                # ``strict``: nested estimators (``Pipeline.steps``),
+                # ``RandomState`` and callables become their ``repr`` and
+                # non-finite floats ``'nan'`` / ``'inf'``, so the payload
+                # always survives strict ``json.dumps`` with no key dropped.
+                "params": jsonable(params, strict=True),
                 "resolved_task": self._task,
             },
             "mode": self.mode,
@@ -209,28 +211,3 @@ def _resolve_task(estimator: Any, task: Task | None) -> Task:
 def _validate_fit_mode(fit_mode: FitMode) -> None:
     if fit_mode not in {"pre_fit", "fit_on_call", "refit", "fit_streaming", "fit_only"}:
         raise ValueError(f"Unknown fit mode: {fit_mode!r}")
-
-
-def _jsonable_params(params: dict[str, Any]) -> dict[str, Any]:
-    """Coerce sklearn ``get_params`` output to JSON-safe values.
-
-    Thin wrapper over the shared :func:`geotoolz._src.config.jsonable`:
-    sklearn param dicts routinely contain values with no JSON form
-    (nested estimators, callables, ``RandomState`` instances). The
-    shared helper passes such values through unchanged, so any entry
-    that still fails strict ``json.dumps`` after coercion is dropped —
-    the emitted config must always survive serialisation. Non-finite
-    floats (``missing_values=nan``, ``max_value=inf``) are kept as their
-    ``repr`` string.
-    """
-    out: dict[str, Any] = {}
-    for key, value in params.items():
-        coerced = jsonable(value)
-        if isinstance(coerced, float) and not math.isfinite(coerced):
-            coerced = repr(coerced)
-        try:
-            json.dumps(coerced, allow_nan=False)
-        except (TypeError, ValueError):
-            continue
-        out[key] = coerced
-    return out
