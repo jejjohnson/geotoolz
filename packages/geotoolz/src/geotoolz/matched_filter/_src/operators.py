@@ -48,6 +48,7 @@ from geotoolz.matched_filter._src.array import (
     StreamingBackgroundResult,
     WelfordAccumulator,
     adaptive_window_background,
+    apply_adaptive_mf,
     apply_cluster_mf,
     apply_image,
     apply_pixel,
@@ -638,6 +639,69 @@ class ApplyClusterMF(Operator):
         return {"target": np.asarray(self.target).tolist(), "axis": self.axis}
 
 
+class ApplyAdaptiveMF(Operator):
+    """Apply a matched filter against per-pixel local window statistics.
+
+    Scores each pixel with ``α = tᵀΛ⁻¹(x − μ) / (tᵀΛ⁻¹t)`` where ``μ`` and
+    ``Λ = diag(σ² + ridge)`` are the pixel's own local mean and diagonal
+    variance from :class:`AdaptiveWindowBackground` (see
+    :func:`geotoolz.matched_filter._src.array.apply_adaptive_mf`).
+    Accepts a ``GeoTensor`` or plain ``np.ndarray`` 3-D cube and returns
+    the score map as the same carrier kind. Nodata pixels (non-finite or
+    equal to the input's fill value in any band) and pixels whose window
+    statistics are undefined hold ``NaN`` (``fill_value_default=NaN``).
+
+    The ``background`` is supplied at apply time as a runtime input so the
+    config (``target``, ``ridge``, ``axis``) stays hydra-/YAML-safe; pair
+    it with :class:`AdaptiveWindowBackground` in a pipeline::
+
+        bg = AdaptiveWindowBackground(window_size=7)(gt)
+        scores = ApplyAdaptiveMF(target=t)(gt, bg)
+
+    Args:
+        target: Target signature ``(c,)``.
+        ridge: Non-negative variance floor added to every local ``σ²``.
+            Default ``0.0``.
+        axis: Position of the spectral axis. Default ``-3``.
+    """
+
+    def __init__(
+        self,
+        *,
+        target: np.ndarray,
+        ridge: float = 0.0,
+        axis: int = -3,
+    ) -> None:
+        self.target = target
+        self.ridge = ridge
+        self.axis = axis
+
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, background: AdaptiveBackground
+    ) -> GeoTensor | np.ndarray:
+        require_ndim(gt, 3, type(self).__name__)
+        cube, valid = _mask_invalid(gt, self.axis, type(self).__name__)
+        out = apply_adaptive_mf(
+            cube,
+            background=background,
+            target=self.target,
+            ridge=self.ridge,
+            axis=self.axis,
+        )
+        return wrap_like(
+            gt,
+            keep_band_axis(_restore(gt, out, valid), gt),
+            fill_value_default=np.nan,
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "target": np.asarray(self.target).tolist(),
+            "ridge": self.ridge,
+            "axis": self.axis,
+        }
+
+
 class StreamingBackground(Operator):
     """Aggregate mean/covariance across an iterable of cubes.
 
@@ -653,7 +717,10 @@ class StreamingBackground(Operator):
 
     Args:
         cov_kind: ``"shrunk"`` (Ledoit-Wolf toward scaled identity,
-            default) or ``"empirical"``.
+            default — identical to `estimate_cov_shrunk` on the
+            concatenated pixels, since the accumulator streams the
+            fourth moment LW needs) or ``"empirical"``. A ``1e-8`` ridge
+            is added to the diagonal in both cases.
         axis: Position of the spectral axis in each cube. Default ``-3``.
     """
 
@@ -681,11 +748,19 @@ class StreamingBackground(Operator):
             acc.update(samples)
         if acc is None:
             raise ValueError("cubes must contain at least one cube")
-        cov = acc.covariance(ridge=1e-8)
+        cov = acc.covariance()
         if self.cov_kind == "shrunk":
-            cov = shrink_covariance(cov, method="ledoit_wolf", n_samples=acc.count)
+            # Exact Ledoit-Wolf: the accumulator's streamed m4 = Σ‖xₖ − x̄‖⁴
+            # gives the fourth moment LW needs without holding the samples.
+            cov = shrink_covariance(
+                cov,
+                method="ledoit_wolf",
+                n_samples=acc.count,
+                fourth_moment=acc.m4 / acc.count,
+            )
         elif self.cov_kind != "empirical":
             raise ValueError(f"unknown cov_kind {self.cov_kind!r}")
+        cov = cov + 1e-8 * np.eye(cov.shape[0], dtype=float)
         return StreamingBackgroundResult(mean=acc.mean, cov_op=NumpyLinearOperator(cov))
 
 

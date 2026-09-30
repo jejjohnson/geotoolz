@@ -224,6 +224,7 @@ from geotoolz.mask import (
 )
 from geotoolz.matched_filter import (
     AdaptiveWindowBackground,
+    ApplyAdaptiveMF,
     ApplyClusterMF,
     ColumnEnhancement,
     DetectionThreshold,
@@ -417,6 +418,7 @@ __all__ = [
     "AnnotatePolygons",
     "AntimeridianSplit",
     "AppendIndex",
+    "ApplyAdaptiveMF",
     "ApplyClusterMF",
     "ApplyColormap",
     "ApplyDiscreteColormap",

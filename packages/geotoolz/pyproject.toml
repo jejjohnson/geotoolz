@@ -174,6 +174,8 @@ ignore = ["E402", "E721", "E731", "E741", "F722"]
 "src/geotoolz/radiometry/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "src/geotoolz/geom/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "src/geotoolz/normalize/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
+"src/geotoolz/matched_filter/**/*.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_matched_filter.py" = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

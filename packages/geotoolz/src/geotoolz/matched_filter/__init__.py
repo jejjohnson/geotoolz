@@ -8,6 +8,7 @@ from geotoolz.matched_filter._src.array import (
     NumpyLinearOperator,
     StreamingBackgroundResult,
     WelfordAccumulator,
+    apply_adaptive_mf,
     apply_image,
     apply_pixel,
     detection_threshold,
@@ -21,6 +22,7 @@ from geotoolz.matched_filter._src.array import (
 )
 from geotoolz.matched_filter._src.operators import (
     AdaptiveWindowBackground,
+    ApplyAdaptiveMF,
     ApplyClusterMF,
     ColumnEnhancement,
     DetectionThreshold,
@@ -42,6 +44,7 @@ from geotoolz.matched_filter._src.operators import (
 __all__ = [
     "AdaptiveBackground",
     "AdaptiveWindowBackground",
+    "ApplyAdaptiveMF",
     "ApplyClusterMF",
     "ClusterBackground",
     "ColumnEnhancement",
@@ -61,6 +64,7 @@ __all__ = [
     "StreamingBackgroundResult",
     "ValidateMFInputs",
     "WelfordAccumulator",
+    "apply_adaptive_mf",
     "apply_image",
     "apply_pixel",
     "detection_threshold",

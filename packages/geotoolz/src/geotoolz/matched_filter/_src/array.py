@@ -26,16 +26,18 @@ three groups:
   (`gmm_cluster_background`) and locally adaptive
   (`adaptive_window_background`) backgrounds; and the streaming
   `WelfordAccumulator`;
-- **filtering** — `apply_pixel`, `apply_image`, `apply_cluster_mf`;
+- **filtering** — `apply_pixel`, `apply_image`, `apply_cluster_mf`,
+  `apply_adaptive_mf`;
 - **detection theory** — `matched_filter_snr`, `detection_threshold`,
   `validate_mf_inputs`.
 
 Shape conventions (mirrored in the jaxtyping annotations): cubes are
 ``(c, h, w)``, vectorised sample matrices are ``(n, c)``, covariance
 matrices are ``(c, c)``, and mean / target spectra are ``(c,)``.
-Linear algebra is expressed via einx dot patterns over this axis
-vocabulary (samples ``n``, bands ``c`` — with ``d``/``k`` as second
-band/rank axes) rather than raw ``@`` / ``.T`` notation.
+Matrix-shaped linear algebra is expressed via einx dot patterns over
+this axis vocabulary (samples ``n``, bands ``c`` — with ``d``/``k`` as
+second band/rank axes) rather than raw ``.T`` notation; plain
+vector-vector dot products (``tᵀv``) use ``@``.
 
 Nodata: a pixel whose spectrum has any non-finite band (``NaN`` /
 ``±inf``) is invalid. The estimators fit their statistics on valid
@@ -176,11 +178,28 @@ class WelfordAccumulator:
         mean: Running mean spectrum ``(c,)``.
         m2: Running centred sum-of-products matrix ``(c, c)``;
             ``m2 / (count - ddof)`` is the sample covariance.
+        m3: Running centred third-moment vector
+            ``Σₖ ‖xₖ − x̄‖² (xₖ − x̄)`` ``(c,)``; only needed to merge ``m4``.
+        m4: Running centred fourth moment ``Σₖ ‖xₖ − x̄‖⁴``;
+            ``m4 / count`` is the Ledoit-Wolf ``fourth_moment`` of
+            `shrink_covariance`.
+
+    Merging two accumulators ``A``, ``B`` with pooled mean ``x̄`` and
+    offsets ``δ_X = x̄_X − x̄`` (all sums centred, so ``Σ d = 0``)::
+
+        M2 = Σ_X [M2_X + n_X δ_X δ_Xᵀ]
+        M3 = Σ_X [M3_X + tr(M2_X) δ_X + 2 M2_X δ_X + n_X ‖δ_X‖² δ_X]
+        M4 = Σ_X [M4_X + 4 δ_Xᵀ M3_X + 4 δ_Xᵀ M2_X δ_X
+                  + 2 ‖δ_X‖² tr(M2_X) + n_X ‖δ_X‖⁴]
+
+    which follows from expanding ``‖d + δ‖²`` with ``d = x − x̄_X``.
     """
 
     count: int
     mean: Float[np.ndarray, " c"]
     m2: Float[np.ndarray, "c c"]
+    m3: Float[np.ndarray, " c"]
+    m4: float
 
     @classmethod
     def empty(cls, n_features: int) -> WelfordAccumulator:
@@ -196,6 +215,8 @@ class WelfordAccumulator:
             count=0,
             mean=np.zeros(n_features, dtype=float),
             m2=np.zeros((n_features, n_features), dtype=float),
+            m3=np.zeros(n_features, dtype=float),
+            m4=0.0,
         )
 
     def update(self, values: Float[np.ndarray, "n c"]) -> None:
@@ -227,15 +248,39 @@ class WelfordAccumulator:
             self.count = other.count
             self.mean = other.mean.copy()
             self.m2 = other.m2.copy()
+            self.m3 = other.m3.copy()
+            self.m4 = other.m4
             return
-        delta = other.mean - self.mean
         total = self.count + other.count
-        self.m2 = (
-            self.m2
-            + other.m2
-            + einx.dot("c, d -> c d", delta, delta) * (self.count * other.count / total)
-        )
-        self.mean = self.mean + delta * (other.count / total)
+        mean = self.mean + (other.mean - self.mean) * (other.count / total)
+        m2 = np.zeros_like(self.m2)
+        m3 = np.zeros_like(self.m3)
+        m4 = 0.0
+        for part in (self, other):
+            # δ = x̄_part − x̄ shifts the part's centred sums to the pooled mean.
+            delta = part.mean - mean
+            delta_sq = float(delta @ delta)
+            m2_delta = part.m2 @ delta
+            trace_m2 = float(np.trace(part.m2))
+            m2 = m2 + part.m2 + part.count * einx.dot("c, d -> c d", delta, delta)
+            m3 = (
+                m3
+                + part.m3
+                + trace_m2 * delta
+                + 2.0 * m2_delta
+                + part.count * delta_sq * delta
+            )
+            m4 += (
+                part.m4
+                + 4.0 * float(part.m3 @ delta)
+                + 4.0 * float(delta @ m2_delta)
+                + 2.0 * delta_sq * trace_m2
+                + part.count * delta_sq * delta_sq
+            )
+        self.mean = mean
+        self.m2 = m2
+        self.m3 = m3
+        self.m4 = m4
         self.count = total
 
     @classmethod
@@ -255,10 +300,13 @@ class WelfordAccumulator:
             return cls.empty(x.shape[1])
         mean = np.mean(x, axis=0)
         centered = x - mean
+        sq_norm = np.sum(centered * centered, axis=1)
         return cls(
             count=x.shape[0],
             mean=mean,
             m2=einx.dot("n c, n d -> c d", centered, centered),
+            m3=sq_norm @ centered,
+            m4=float(sq_norm @ sq_norm),
         )
 
     def covariance(
@@ -397,17 +445,26 @@ def estimate_cov_shrunk(
     method: CovShrinkageMethod = "ledoit_wolf",
     axis: int = -3,
 ) -> NumpyLinearOperator:
-    """Estimate a diagonal-target shrinkage covariance operator.
+    """Estimate a scaled-identity-target shrinkage covariance operator.
 
-    Forms the empirical covariance of the vectorised spectra and blends
-    it toward the scaled-identity target ``tr(S)/c * I`` with a
-    data-driven intensity (see `shrink_covariance`) — the standard fix
-    when the pixel count is small relative to the band count.
+    Forms the ``ddof=1`` empirical covariance ``S`` of the vectorised
+    spectra and blends it toward the scaled-identity target
+    ``F = tr(S)/c · I`` with a data-driven intensity ``s`` (see
+    `shrink_covariance`) — the standard fix when the pixel count is small
+    relative to the band count. The Ledoit-Wolf intensity needs the
+    sample fourth moment, which is computed here from the sample matrix,
+    so the intensity equals ``sklearn.covariance.ledoit_wolf`` /
+    ``sklearn.covariance.oas`` on the same centred samples and the
+    returned matrix is exactly ``n/(n − 1)`` times sklearn's (sklearn
+    uses the ``1/n`` scatter; this package uses ``1/(n − 1)``). The
+    matched-filter score is invariant to that scale.
 
     Args:
         cube: Spectral cube, canonically ``(c, h, w)``.
         mean: Optional precomputed mean spectrum ``(c,)`` to centre on;
-            when ``None`` the arithmetic sample mean is used.
+            when ``None`` the arithmetic sample mean is used. A supplied
+            mean corresponds to sklearn's ``assume_centered=True`` on
+            ``x − mean``.
         method: Shrinkage-intensity estimator, ``"ledoit_wolf"`` or
             ``"oas"``.
         axis: Position of the spectral axis. Default ``-3``.
@@ -420,17 +477,18 @@ def estimate_cov_shrunk(
     Raises:
         ValueError: If ``mean`` length does not match the band count or
             ``method`` is unknown.
+
+    Examples:
+        >>> import numpy as np
+        >>> cube = np.random.default_rng(0).normal(size=(4, 5, 5))
+        >>> estimate_cov_shrunk(cube).shape
+        (4, 4)
+        >>> estimate_cov_shrunk(cube, method="oas").shape
+        (4, 4)
     """
-    # Vectorise the cube once and reuse the sample matrix for both the
-    # empirical covariance and the sample count that shrink_covariance needs.
     x = _finite_rows(_cube_samples(cube, axis)[0])
     mu = np.mean(x, axis=0) if mean is None else _as_vector(mean, x.shape[1], "mean")
-    centered = x - mu
-    denom = max(x.shape[0] - 1, 1)
-    empirical = einx.dot("n c, n d -> c d", centered, centered) / denom
-    return NumpyLinearOperator(
-        shrink_covariance(empirical, method=method, n_samples=x.shape[0])
-    )
+    return NumpyLinearOperator(_shrunk_cov_from_samples(x, mu, method=method))
 
 
 def shrink_covariance(
@@ -438,65 +496,98 @@ def shrink_covariance(
     *,
     method: CovShrinkageMethod,
     n_samples: int,
+    fourth_moment: float | None = None,
 ) -> Float[np.ndarray, "c c"]:
     """Shrink an empirical covariance toward a scaled-identity target.
 
-    Returns the convex combination ``(1 - s) * S + s * (tr(S)/c) * I``
-    where the intensity ``s`` in ``[0, 1]`` is estimated from the data:
+    Returns the convex combination ``(1 − s)·S + s·F`` with target
+    ``F = μ·I``, ``μ = tr(S)/p``, where ``S`` is the ``ddof=1`` sample
+    covariance of ``n`` samples in ``p`` bands and the intensity
+    ``s ∈ [0, 1]`` is estimated from the data. Both estimators reproduce
+    scikit-learn exactly: with the ``1/n`` scatter ``Sₙ = S·(n − 1)/n``
+    (sklearn's ``empirical_covariance``), ``s`` is sklearn's shrinkage
+    and the result is ``n/(n − 1)`` times sklearn's shrunk matrix (the
+    intensity is scale-free, the target scales with ``S``).
 
-    - ``"ledoit_wolf"``: analytical Ledoit-Wolf approximation (see the
-      derivation notes inline);
-    - ``"oas"``: Oracle Approximating Shrinkage (Chen et al. 2010).
+    - ``"ledoit_wolf"`` (Ledoit & Wolf 2004, sklearn's
+      ``ledoit_wolf_shrinkage``), with ``dₖ = xₖ − x̄`` the centred
+      samples and ``m₄ = (1/n) Σₖ ‖dₖ‖⁴``::
+
+          δ² = ‖Sₙ − μₙ I‖²_F                      (distance to target)
+          β̄² = (1/n²) Σₖ ‖dₖdₖᵀ − Sₙ‖²_F = (m₄ − ‖Sₙ‖²_F) / n
+          s  = min(β̄², δ²) / δ²                    (0 when δ² = 0)
+
+      β̄² is the sample variance of the entries of ``Sₙ``; it needs the
+      fourth moment ``m₄``, which cannot be recovered from ``S`` alone.
+
+    - ``"oas"`` (Chen et al. 2010, as implemented by
+      ``sklearn.covariance.oas``)::
+
+          s = min(1, (tr(S²) + tr(S)²) / ((n + 1)·(tr(S²) − tr(S)²/p)))
+
+      sklearn omits the ``2/p`` terms of Chen et al. Eq. 23,
+      ``((1 − 2/p)·tr(S²) + tr(S)²) / ((n + 1 − 2/p)·(…))``; they vanish
+      for large ``p`` and are omitted here too so the two agree exactly.
 
     Args:
-        empirical: Empirical covariance matrix ``(c, c)``.
+        empirical: ``ddof=1`` empirical covariance matrix ``(c, c)``
+            (``Σ dₖdₖᵀ / max(n − 1, 1)``).
         method: Shrinkage-intensity estimator.
         n_samples: Number of samples used to form ``empirical``; more
             samples mean less shrinkage.
+        fourth_moment: ``m₄ = (1/n) Σₖ ‖xₖ − x̄‖⁴`` over the same centred
+            samples. Required for ``method="ledoit_wolf"`` (ignored by
+            ``"oas"``); `WelfordAccumulator` tracks it as ``m4 / count``.
+            `estimate_cov_shrunk` computes it for you from a cube.
 
     Returns:
         The shrunk ``(c, c)`` covariance matrix.
 
     Raises:
-        ValueError: If ``method`` is unknown.
+        ValueError: If ``method`` is unknown or ``fourth_moment`` is
+            missing for ``"ledoit_wolf"``.
+
+    Examples:
+        >>> import numpy as np
+        >>> x = np.random.default_rng(0).normal(size=(30, 4))
+        >>> d = x - x.mean(axis=0)
+        >>> s = d.T @ d / 29
+        >>> m4 = float(np.mean(np.sum(d * d, axis=1) ** 2))
+        >>> shrink_covariance(s, method="ledoit_wolf", n_samples=30,
+        ...                   fourth_moment=m4).shape
+        (4, 4)
+        >>> shrink_covariance(s, method="oas", n_samples=30).shape
+        (4, 4)
     """
     cov = np.asarray(empirical, dtype=float)
     n_features = cov.shape[0]
-    target = np.trace(cov) / n_features * np.eye(n_features, dtype=float)
+    mu = float(np.trace(cov)) / n_features
     if method == "oas":
-        trace = np.trace(cov)
-        trace_sq = trace * trace
+        # Scale-free ratio, so S (1/(n−1)) and Sₙ (1/n) give the same s.
+        trace_sq = float(np.trace(cov)) ** 2
         fro_sq = float(np.sum(cov * cov))
         denom = (n_samples + 1) * (fro_sq - trace_sq / n_features)
-        shrinkage = (
-            1.0
-            if denom <= 0
-            else min(
-                1.0,
-                ((1 - 2 / n_features) * fro_sq + trace_sq) / denom,
-            )
-        )
+        shrinkage = 1.0 if denom <= 0 else min(1.0, (fro_sq + trace_sq) / denom)
     elif method == "ledoit_wolf":
-        # Analytical Ledoit-Wolf approximation. The proper LW estimator
-        # (Ledoit & Wolf 2004) requires the sample matrix X to estimate
-        # b^2 = variance of the empirical-covariance entries; with only
-        # the empirical covariance and the sample count available we use
-        # the asymptotic estimate b^2 ~= (1/n) * (tr(S^2) + tr(S)^2 / p)
-        # under iid samples, with d^2 = ||S - mu*I||_F^2 as the distance
-        # to the scaled-identity target. Behaves correctly: no shrinkage
-        # when S is already scaled-identity (d^2 = 0 -> shrinkage = 0),
-        # vanishing shrinkage as n_samples grows, and full shrinkage when
-        # n_samples is tiny.
-        mu = float(np.trace(cov)) / n_features
-        diff = cov - mu * np.eye(n_features, dtype=float)
+        if fourth_moment is None:
+            raise ValueError(
+                "ledoit_wolf shrinkage needs fourth_moment = mean(‖xₖ − x̄‖⁴); "
+                "use estimate_cov_shrunk on the samples or WelfordAccumulator.m4"
+            )
+        n = max(int(n_samples), 1)
+        # Sₙ = Σ dₖdₖᵀ / n — the scatter normalisation LW is defined on.
+        scatter = cov * (max(n - 1, 1) / n)
+        mu_n = float(np.trace(scatter)) / n_features
+        diff = scatter - mu_n * np.eye(n_features, dtype=float)
         d_sq = float(np.sum(diff * diff))
-        trace_cov_sq = float(np.sum(cov * cov))
-        trace_sq = float(np.trace(cov)) ** 2
-        b_sq = (trace_cov_sq + trace_sq / n_features) / max(n_samples, 1)
-        shrinkage = 0.0 if d_sq == 0 else min(1.0, b_sq / d_sq)
+        b_bar_sq = max(
+            (float(fourth_moment) - float(np.sum(scatter * scatter))) / n, 0.0
+        )
+        b_sq = min(b_bar_sq, d_sq)
+        shrinkage = 0.0 if b_sq == 0 else b_sq / d_sq
     else:
         raise ValueError(f"unknown covariance shrinkage method {method!r}")
-    return (1.0 - shrinkage) * cov + shrinkage * target
+    return (1.0 - shrinkage) * cov + shrinkage * mu * np.eye(n_features, dtype=float)
 
 
 def estimate_cov_lowrank(
@@ -601,11 +692,11 @@ def apply_pixel(
     mean_vec = _as_vector(mean, np.asarray(pixel).shape[0], "mean")
     target_vec = _as_vector(target, mean_vec.shape[0], "target")
     solved_target = solve(cov_op, target_vec)
-    denom = float(einx.dot("c, c ->", target_vec, solved_target))
+    denom = float(target_vec @ solved_target)
     if not np.isfinite(denom) or denom <= 0:
         raise ValueError("target/covariance produce a non-positive MF denominator")
     centered = np.asarray(pixel, dtype=float) - mean_vec
-    return float(einx.dot("c, c ->", centered, solved_target) / denom)
+    return float((centered @ solved_target) / denom)
 
 
 def apply_image(
@@ -645,7 +736,7 @@ def apply_image(
     mean_vec = _as_vector(mean, x.shape[1], "mean")
     target_vec = _as_vector(target, x.shape[1], "target")
     solved_target = solve(cov_op, target_vec)
-    denom = float(einx.dot("c, c ->", target_vec, solved_target))
+    denom = float(target_vec @ solved_target)
     if not np.isfinite(denom) or denom <= 0:
         raise ValueError("target/covariance produce a non-positive MF denominator")
     scores = einx.dot("n c, c -> n", x - mean_vec, solved_target) / denom
@@ -678,7 +769,7 @@ def matched_filter_snr(
             non-positive filter gain.
     """
     t = np.asarray(target, dtype=float).reshape(-1)
-    gain = float(einx.dot("c, c ->", t, solve(cov_op, t)))
+    gain = float(t @ solve(cov_op, t))
     if not np.isfinite(gain) or gain <= 0:
         raise ValueError("target/covariance produce a non-positive MF gain")
     return float(amplitude) * float(np.sqrt(gain))
@@ -742,7 +833,7 @@ def validate_mf_inputs(
     if t.size == 0 or not np.any(t):
         raise ValueError("target must contain at least one non-zero value")
     try:
-        gain = float(einx.dot("c, c ->", t, solve(cov_op, t)))
+        gain = float(t @ solve(cov_op, t))
     except np.linalg.LinAlgError as exc:
         raise ValueError("covariance operator must be non-singular") from exc
     if not np.isfinite(gain) or gain <= 0:
@@ -797,9 +888,11 @@ def gmm_cluster_background(
         cov_estimator: Per-cluster covariance estimator —
             ``"empirical"`` (with a tiny stabilising ridge) or shrunk
             via ``"ledoit_wolf"`` / ``"oas"``.
-        random_state: Seed for the k-means initialisation and
-            empty-cluster restarts; a fixed seed makes the clustering
-            reproducible.
+        random_state: Seed for the k-means initialisation (and the
+            reseeding of clusters k-means leaves empty); a fixed seed makes
+            the clustering reproducible. Components that lose all
+            responsibility during EM are restarted after the M-step at the
+            worst-explained pixels (deterministic given the initialisation).
         bayesian: If ``True``, drop components whose mixture weight
             falls below ``1 / n_pixels`` (a cheap sparsifying prune), so
             fewer than ``n_clusters`` clusters may be returned.
@@ -835,7 +928,9 @@ def gmm_cluster_background(
         if cov_estimator == "empirical":
             cov = _cov_from_samples(group, means[k], ridge=1e-8)
         elif cov_estimator in {"ledoit_wolf", "oas"}:
-            cov = _shrunk_cov_from_samples(group, means[k], method=cov_estimator)
+            cov = _shrunk_cov_from_samples(
+                group, means[k], method=cov_estimator, ridge=1e-8
+            )
         else:
             raise ValueError(f"unknown covariance estimator {cov_estimator!r}")
         cov_ops.append(NumpyLinearOperator(cov))
@@ -884,7 +979,7 @@ def apply_cluster_mf(
         mask = labels == k
         if np.any(mask):
             solved_target = solve(cov_op, target_vec)
-            denom = float(einx.dot("c, c ->", target_vec, solved_target))
+            denom = float(target_vec @ solved_target)
             if not np.isfinite(denom) or denom <= 0:
                 raise ValueError(
                     "target/covariance produce a non-positive MF denominator"
@@ -966,6 +1061,85 @@ def adaptive_window_background(
     )
 
 
+def apply_adaptive_mf(
+    cube: Float[np.ndarray, "c h w"],
+    *,
+    background: AdaptiveBackground,
+    target: Float[np.ndarray, " c"],
+    ridge: float = 0.0,
+    axis: int = -3,
+) -> Float[np.ndarray, "h w"]:
+    """Apply a matched filter against a local diagonal-covariance background.
+
+    Scores every pixel against its own window statistics from
+    `adaptive_window_background`: local mean ``μ(r)`` and diagonal
+    covariance ``Λ(r) = diag(σ²(r) + ridge)``. With the same amplitude
+    normalisation as `apply_image` (the Manolakis MF with ``Σ → Λ(r)``)::
+
+        α(r) = tᵀ Λ(r)⁻¹ (x(r) − μ(r)) / (tᵀ Λ(r)⁻¹ t)
+             = Σ_c t_c (x_c − μ_c) / σ²_c  /  Σ_c t_c² / σ²_c
+
+    i.e. the per-pixel maximum-likelihood target amplitude under an
+    independent-band Gaussian background. The window includes the pixel
+    itself, so a strong target slightly biases its own ``μ`` and ``σ²``.
+
+    Args:
+        cube: Spectral cube, canonically ``(c, h, w)``; must have the
+            shape of ``background.mean`` / ``background.variance``.
+        background: Local statistics from `adaptive_window_background`
+            on the same cube (or a compatible background cube).
+        target: Target signature ``(c,)``.
+        ridge: Non-negative variance floor added to every ``σ²`` before
+            inversion; use it when flat windows give zero variance.
+        axis: Position of the spectral axis. Default ``-3``.
+
+    Returns:
+        Score map with the cube's spatial shape; ``NaN`` where the pixel,
+        its local mean, or its local variance is non-finite, or where a
+        band's ``σ² + ridge`` is not positive.
+
+    Raises:
+        ValueError: If the background shapes differ from the cube's, the
+            target length disagrees with the band count, ``ridge`` is
+            negative, or the target is all-zero.
+
+    Examples:
+        >>> import numpy as np
+        >>> cube = np.random.default_rng(0).normal(size=(3, 8, 8))
+        >>> bg = adaptive_window_background(cube, window_size=3)
+        >>> apply_adaptive_mf(cube, background=bg, target=np.ones(3)).shape
+        (8, 8)
+        >>> apply_adaptive_mf(
+        ...     cube, background=bg, target=np.array([1.0, 0.0, 0.0]), ridge=1e-6
+        ... ).shape
+        (8, 8)
+    """
+    if ridge < 0:
+        raise ValueError("ridge must be non-negative")
+    arr = np.asarray(cube, dtype=float)
+    for name, stat in (("mean", background.mean), ("variance", background.variance)):
+        if np.shape(stat) != arr.shape:
+            raise ValueError(
+                f"background {name} shape {np.shape(stat)} does not match "
+                f"cube shape {arr.shape}"
+            )
+    x, spatial_shape = _cube_samples(arr, axis)
+    mean, _ = _cube_samples(background.mean, axis)
+    variance, _ = _cube_samples(background.variance, axis)
+    target_vec = _as_vector(target, x.shape[1], "target")
+    if not np.any(target_vec):
+        raise ValueError("target must contain at least one non-zero value")
+    variance = variance + float(ridge)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        # Λ⁻¹ per pixel; bands with σ² ≤ 0 make the pixel unscoreable.
+        inv_var = np.where(variance > 0, 1.0 / variance, np.nan)
+        numer = ((x - mean) * inv_var) @ target_vec  # tᵀ Λ⁻¹ (x − μ)
+        denom = inv_var @ (target_vec * target_vec)  # tᵀ Λ⁻¹ t
+        scores = numer / denom
+    scores = np.where(np.isfinite(scores), scores, np.nan)
+    return scores.reshape(spatial_shape)
+
+
 def _as_vector(values: np.ndarray, size: int, name: str) -> Float[np.ndarray, " c"]:
     vec = np.asarray(values, dtype=float).reshape(-1)
     if vec.shape[0] != size:
@@ -1036,10 +1210,24 @@ def _shrunk_cov_from_samples(
     values: Float[np.ndarray, "n c"],
     mean: Float[np.ndarray, " c"],
     *,
-    method: Literal["ledoit_wolf", "oas"],
+    method: CovShrinkageMethod,
+    ridge: float = 0.0,
 ) -> Float[np.ndarray, "c c"]:
-    cov = _cov_from_samples(values, mean, ridge=1e-8)
-    return shrink_covariance(cov, method=method, n_samples=values.shape[0])
+    """Shrunk ``ddof=1`` covariance of ``values`` centred on ``mean``.
+
+    Computes the LW fourth moment ``m₄ = (1/n) Σₖ ‖xₖ − mean‖⁴`` from the
+    samples, then adds ``ridge·I`` after shrinking.
+    """
+    centered = values - mean
+    cov = _cov_from_samples(values, mean)
+    sq_norm = np.sum(centered * centered, axis=1)
+    fourth_moment = float(np.mean(sq_norm * sq_norm)) if sq_norm.size else 0.0
+    shrunk = shrink_covariance(
+        cov, method=method, n_samples=values.shape[0], fourth_moment=fourth_moment
+    )
+    if ridge:
+        shrunk = shrunk + ridge * np.eye(shrunk.shape[0], dtype=float)
+    return shrunk
 
 
 def _kmeans_labels(
@@ -1095,24 +1283,46 @@ def _gmm_labels(
     weights = np.bincount(labels, minlength=n_clusters).astype(float) / values.shape[0]
     previous_ll = -np.inf
     for _ in range(max_iter):
+        # E-step: rₙₖ = wₖ 𝒩(xₙ | μₖ, diag σ²ₖ) / Σⱼ wⱼ 𝒩(xₙ | μⱼ, diag σ²ⱼ).
         log_prob = _diag_gmm_log_prob(values, means, variances, weights)
         log_norm = np.logaddexp.reduce(log_prob, axis=1)
         responsibilities = np.exp(log_prob - log_norm[:, None])
         counts = responsibilities.sum(axis=0)
         empty = counts <= np.finfo(float).eps
-        if np.any(empty):
-            repl = rng.choice(values.shape[0], size=int(empty.sum()), replace=False)
-            means[empty] = values[repl]
-            variances[empty] = values.var(axis=0) + GMM_VARIANCE_RIDGE
-            counts[empty] = 1.0
-        weights = counts / counts.sum()
-        means = einx.dot("n k, n c -> k c", responsibilities, values) / counts[:, None]
-        centered = values[:, None, :] - means[None, :, :]
-        variances = (responsibilities[:, :, None] * centered * centered).sum(
+        # M-step on the populated components (Nₖ = Σₙ rₙₖ):
+        # μₖ = Σₙ rₙₖ xₙ / Nₖ,  σ²ₖ = Σₙ rₙₖ (xₙ − μₖ)² / Nₖ,  wₖ = Nₖ / n.
+        safe_counts = np.where(empty, 1.0, counts)
+        next_means = (
+            einx.dot("n k, n c -> k c", responsibilities, values) / safe_counts[:, None]
+        )
+        centered = values[:, None, :] - next_means[None, :, :]
+        next_variances = (responsibilities[:, :, None] * centered * centered).sum(
             axis=0
-        ) / counts[:, None]
-        variances = np.maximum(variances, GMM_VARIANCE_RIDGE)
+        ) / safe_counts[:, None]
+        means = np.where(empty[:, None], means, next_means)
+        variances = np.where(
+            empty[:, None], variances, np.maximum(next_variances, GMM_VARIANCE_RIDGE)
+        )
         ll = float(np.sum(log_norm))
+        if np.any(empty):
+            # Restart empty components *after* the M-step (so it cannot
+            # overwrite them) at the worst-explained pixels — the k-means
+            # "farthest point" relocation — with the tightest populated
+            # variance and weight 1/n, so each restart wins at least its
+            # seed pixel in the next E-step. Never stop on a restart step.
+            seeds = np.argsort(log_norm)[: int(empty.sum())]
+            means[empty] = values[seeds]
+            tightest = (
+                variances[~empty].min(axis=0)
+                if np.any(~empty)
+                else values.var(axis=0) + GMM_VARIANCE_RIDGE
+            )
+            variances[empty] = tightest
+            counts = np.where(empty, 1.0, counts)
+            weights = counts / counts.sum()
+            previous_ll = -np.inf
+            continue
+        weights = counts / counts.sum()
         if abs(ll - previous_ll) / max(abs(ll), 1.0) < tol:
             break
         previous_ll = ll
