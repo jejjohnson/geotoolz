@@ -162,6 +162,98 @@ def test_wind_advection_cone_follows_wind_orientation() -> None:
     assert not bool(np.asarray(north)[5, 8])
 
 
+_CONE_TRANSFORM = rasterio.Affine.translation(-5.5, 5.5) * rasterio.Affine.scale(
+    1.0, -1.0
+)
+
+
+def test_cone_full_disc_at_180() -> None:
+    from geotoolz.plume import wind_advection_cone
+
+    cone = wind_advection_cone(
+        (11, 11),
+        _CONE_TRANSFORM,
+        source=(0.0, 0.0),
+        wind_u=1.0,
+        wind_v=0.0,
+        half_angle_deg=180.0,
+        max_distance=4.0,
+    )
+    rows, cols = np.indices((11, 11))
+    disc = np.hypot(cols - 5.0, rows - 5.0) <= 4.0
+    np.testing.assert_array_equal(cone, disc)
+    assert cone[5, 1]  # directly upwind of the source
+
+
+@pytest.mark.parametrize("half_angle", [0.0, 30.0, 89.0, 90.0, 120.0, 150.0])
+@pytest.mark.parametrize(("wind_u", "wind_v"), [(1.0, 0.0), (-2.0, 1.5), (0.3, -1.0)])
+def test_cone_matches_brute_force_angle(
+    half_angle: float, wind_u: float, wind_v: float
+) -> None:
+    from geotoolz.plume import wind_advection_cone
+
+    shape, source, radius = (15, 15), (0.3, -0.2), 6.0
+    transform = _CONE_TRANSFORM * rasterio.Affine.scale(15 / 11)
+    cone = wind_advection_cone(
+        shape,
+        transform,
+        source=source,
+        wind_u=wind_u,
+        wind_v=wind_v,
+        half_angle_deg=half_angle,
+        max_distance=radius,
+    )
+    wind_bearing = np.degrees(np.arctan2(wind_v, wind_u))
+    expected = np.zeros(shape, dtype=bool)
+    for row in range(shape[0]):
+        for col in range(shape[1]):
+            x, y = transform * (col + 0.5, row + 0.5)
+            dx, dy = x - source[0], y - source[1]
+            if np.hypot(dx, dy) > radius:
+                continue
+            bearing = np.degrees(np.arctan2(dy, dx))
+            angle = abs((bearing - wind_bearing + 180.0) % 360.0 - 180.0)
+            expected[row, col] = angle <= half_angle + 1e-9
+    np.testing.assert_array_equal(cone, expected)
+    if half_angle > 90.0:
+        # Wider than a half-plane: some pixels behind the crosswind line.
+        xs, ys = np.meshgrid(np.arange(15) + 0.5, np.arange(15) + 0.5)
+        x, y = transform * (xs, ys)
+        assert ((x - source[0]) * wind_u + (y - source[1]) * wind_v < 0)[cone].any()
+
+
+def test_contours_ignore_nan() -> None:
+    score = np.array([[np.nan, 0.0], [0.0, 0.0]])
+
+    labels = gz.plume.PlumeContours(min_area=1)(score)
+    mask = gz.plume.PlumeContours(min_area=1, return_labels=False)(score)
+
+    np.testing.assert_array_equal(np.asarray(labels), np.zeros((2, 2)))
+    assert not np.asarray(mask).any()
+
+
+def test_plume_mask_threads_otsu_nbins() -> None:
+    from geotoolz.plume import otsu_threshold
+
+    rng = np.random.default_rng(0)
+    values = np.concatenate(
+        [rng.normal(0.0, 1.0, 300), rng.normal(3.0, 1.0, 100), [40.0]]
+    )
+    values = np.pad(values, (0, 441 - values.size)).reshape(21, 21)
+    coarse = otsu_threshold(values, nbins=4)
+    assert coarse != otsu_threshold(values)
+    assert resolve_threshold(values, "otsu", nbins=4) == coarse
+
+    op = gz.plume.PlumeMask(threshold="otsu", min_area=1, nbins=4)
+    np.testing.assert_array_equal(np.asarray(op(_gt(values))), values > coarse)
+    config = op.get_config()
+    assert config["nbins"] == 4
+    rebuilt = gz.plume.PlumeMask(**config)
+    np.testing.assert_array_equal(
+        np.asarray(rebuilt(_gt(values))), np.asarray(op(_gt(values)))
+    )
+
+
 def test_ime_estimate_uses_integrated_mass_and_max_axis_length() -> None:
     mask = _gt(np.array([[True, True, True]]))
     enhancement = _gt(np.array([[2.0, 2.0, 2.0]]))

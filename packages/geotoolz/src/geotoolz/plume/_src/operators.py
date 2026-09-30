@@ -283,6 +283,9 @@ class PlumeMask(Operator):
             ``"percentile:<p>"`` with ``p`` in [0, 100].
         min_area: Minimum component size in pixels.
         connectivity: 4 or 8 connectivity for component labelling.
+        nbins: Histogram bins for the ``"otsu"`` threshold (see
+            :func:`otsu_threshold`); ignored by the other modes.
+            Default ``256``.
 
     Nodata pixels (non-finite or equal to the input's fill value) are
     excluded from the Otsu / percentile threshold and are always
@@ -300,10 +303,12 @@ class PlumeMask(Operator):
         threshold: ThresholdMode = "otsu",
         min_area: int = 50,
         connectivity: Connectivity = 8,
+        nbins: int = 256,
     ) -> None:
         self.threshold = threshold
         self.min_area = min_area
         self.connectivity = connectivity
+        self.nbins = nbins
 
     @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
@@ -312,6 +317,7 @@ class PlumeMask(Operator):
             threshold=self.threshold,
             min_area=self.min_area,
             connectivity=self.connectivity,
+            nbins=self.nbins,
         )
         return wrap_like(gt, mask, fill_value_default=False)
 
@@ -603,7 +609,8 @@ class WindAdvectionCone(Operator):
             carrier CRS coordinates (m).
         wind_u: Eastward wind component (m/s).
         wind_v: Northward wind component (m/s).
-        half_angle_deg: Half-angle of the cone (degrees).
+        half_angle_deg: Half-angle of the cone in degrees, in [0, 180];
+            ``180`` is the full disc (see :func:`wind_advection_cone`).
         max_distance: Radius of the cone (m).
         crs: Optional CRS of ``source``.
 

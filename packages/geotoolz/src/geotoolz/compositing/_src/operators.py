@@ -213,14 +213,80 @@ def _score_array(
     )
 
 
-def _normalize_positive(
-    stack: Float[np.ndarray, "t h w"],
-) -> Float[np.ndarray, "t h w"]:
-    """Normalize by the maximum finite positive value, or return zeros."""
-    max_value = np.nanmax(stack)
-    if not np.isfinite(max_value) or max_value <= 0:
-        return np.zeros_like(stack, dtype=np.float32)
-    return np.asarray(stack / max_value, dtype=np.float32)
+_DAYS_PER_YEAR = 365
+
+
+def _doy_distance(
+    doy: Float[np.ndarray, "*dims"], target_doy: float
+) -> Float[np.ndarray, "*dims"]:
+    """Circular day-of-year distance to ``target_doy``, in days.
+
+        Δ = |doy − target_doy| mod 365,   d = min(Δ, 365 − Δ)
+
+    so DOY 360 and target DOY 5 are 10 days apart, not 355. A 365-day
+    year is assumed (DOY 366 coincides with DOY 1).
+    """
+    delta = np.mod(
+        np.abs(np.asarray(doy, dtype=np.float64) - target_doy), _DAYS_PER_YEAR
+    )
+    return np.minimum(delta, _DAYS_PER_YEAR - delta)
+
+
+def _doy_score(
+    doy: Float[np.ndarray, "*dims"], target_doy: float, sigma: float
+) -> Float[np.ndarray, "*dims"]:
+    """Gaussian day-of-year score (Griffiths et al., 2013), peak-normalised.
+
+        S_doy = exp(−½ · (d / σ_doy)²),   d = circular DOY distance
+
+    Griffiths et al. score DOY with a Gaussian centred on the target DOY;
+    the ``1/(σ√(2π))`` density factor is dropped so ``S_doy ∈ (0, 1]``
+    shares a scale with the other scores (``S_doy = e^(−½) ≈ 0.61`` at
+    ``d = σ_doy``).
+    """
+    d = _doy_distance(doy, target_doy)
+    return np.exp(-0.5 * (d / sigma) ** 2)
+
+
+def _view_angle_score(
+    view_angle: Float[np.ndarray, "*dims"], sigma: float
+) -> Float[np.ndarray, "*dims"]:
+    """Gaussian view-zenith-angle score, best at nadir.
+
+        S_view = exp(−½ · (θ / σ_θ)²)
+
+    ``θ`` (sign ignored) and ``σ_θ`` in degrees.
+    """
+    theta = np.asarray(view_angle, dtype=np.float64)
+    return np.exp(-0.5 * (theta / sigma) ** 2)
+
+
+def _cloud_distance_score(
+    distance: Float[np.ndarray, "*dims"], *, d_req: float, d_min: float, slope: float
+) -> Float[np.ndarray, "*dims"]:
+    """Sigmoid distance-to-cloud score (Griffiths et al., 2013, eq. 2).
+
+        S_cloud = 1 / (1 + exp(−k · (min(D, D_req) − (D_req − D_min) / 2)))
+
+    ``D`` distance to the nearest cloud / shadow, ``D_req`` the distance
+    at which the score saturates, ``D_min`` the minimum distance, ``k`` the
+    slope; ``D``, ``D_req``, ``D_min`` share one unit and ``k`` is per it.
+    """
+    d = np.minimum(np.asarray(distance, dtype=np.float64), d_req)
+    return 1.0 / (1.0 + np.exp(-slope * (d - (d_req - d_min) / 2.0)))
+
+
+def _opacity_score(
+    opacity: Float[np.ndarray, "*dims"], *, low: float, high: float
+) -> Float[np.ndarray, "*dims"]:
+    """Piecewise-linear atmospheric-opacity score (White et al., 2014).
+
+        S_opacity = clip((τ_high − τ) / (τ_high − τ_low), 0, 1)
+
+    i.e. 1 for ``τ ≤ τ_low``, 0 for ``τ ≥ τ_high``, linear between.
+    """
+    tau = np.asarray(opacity, dtype=np.float64)
+    return np.clip((high - tau) / (high - low), 0.0, 1.0)
 
 
 def _as_float_for_nan(values: Num[np.ndarray, "*dims"]) -> Float[np.ndarray, "*dims"]:
@@ -455,24 +521,89 @@ class CloudFreeComposite(Operator):
 class BAPComposite(Operator):
     """Best Available Pixel compositing from quality-score metadata.
 
-    Metadata may provide precomputed ``*_score`` arrays, or raw ``view_angle``,
-    ``doy``, ``cloud_distance``, and ``opacity`` values used to build simple
-    scores. Each value may be a scalar or a per-pixel array. Frames may be
-    GeoTensors or plain ``np.ndarray`` maps (the scores live in the metadata
-    dicts, not in geo-metadata). A nodata frame-pixel (non-finite or the
-    frame's fill) or a NaN score is never selected; pixels with no valid
-    frame hold the output fill value (also in the score output).
+    Each frame-pixel gets a weighted sum of per-criterion scores in
+    ``[0, 1]`` and the highest-scoring valid frame wins (Griffiths et al.,
+    2013; White et al., 2014):
+
+        S = w_view · S_view + w_recency · S_doy
+            + w_cloud · S_cloud + w_opacity · S_opacity
+
+    Metadata may give precomputed ``view_angle_score``, ``recency_score``,
+    ``cloud_distance_score`` and ``opacity_score`` values, or the raw
+    values the scores are built from:
+
+    * ``doy`` / ``day_of_year`` → Gaussian of the *circular* DOY distance
+      (Griffiths et al.), so late December is close to early January::
+
+          Δ = |doy − target_doy| mod 365,   d = min(Δ, 365 − Δ)
+          S_doy = exp(−½ · (d / σ_doy)²)
+
+    * ``view_angle`` (view zenith angle, degrees; sign ignored)::
+
+          S_view = exp(−½ · (θ / σ_θ)²)
+
+    * ``cloud_distance`` (distance to the nearest cloud / shadow, in the
+      unit of ``cloud_distance_req``, e.g. pixels) → Griffiths et al.
+      eq. 2 sigmoid::
+
+          S_cloud = 1 / (1 + exp(−k · (min(D, D_req) − (D_req − D_min) / 2)))
+
+    * ``opacity`` (unitless atmospheric opacity τ, e.g. LEDAPS
+      ``atmos_opacity``) → White et al. (2014) ramp::
+
+          S_opacity = clip((τ_high − τ) / (τ_high − τ_low), 0, 1)
+
+    Missing raw values default to the best case (``doy = target_doy``,
+    ``view_angle = 0``, ``opacity = 0``), except ``cloud_distance``, which
+    defaults to ``0`` (next to a cloud). Every score lies in ``[0, 1]``, so
+    raw and precomputed values may be mixed across frames. Each value may
+    be a scalar or a per-pixel array. Frames may be GeoTensors or plain
+    ``np.ndarray`` maps (the scores live in the metadata dicts, not in
+    geo-metadata). A nodata frame-pixel (non-finite or the frame's fill)
+    or a NaN score is never selected; pixels with no valid frame hold the
+    output fill value (also in the score output). Griffiths et al. also
+    score acquisition year and sensor; those have no raw input here.
 
     Args:
-        target_doy: Day-of-year the recency score is anchored to.
+        target_doy: Day of year (1-366) the DOY score is centred on.
         w_view_angle: Weight of the view-angle score.
-        w_recency: Weight of the recency score.
+        w_recency: Weight of the DOY score.
         w_cloud_distance: Weight of the cloud-distance score.
         w_opacity: Weight of the opacity score.
+        doy_sigma: ``σ_doy``, width of the DOY Gaussian in days. Default
+            ``30`` (a scene 30 days off target scores e^(−½) ≈ 0.61).
+        view_angle_sigma: ``σ_θ``, width of the view-angle Gaussian in
+            degrees. Default ``15`` (7.5°, the Landsat swath edge, scores
+            ≈ 0.88).
+        cloud_distance_req: ``D_req``, distance at which the cloud
+            score saturates. Default ``50`` (pixels; 1.5 km at 30 m).
+        cloud_distance_min: ``D_min`` of the sigmoid. Default ``0``.
+        cloud_distance_slope: Sigmoid slope ``k`` per distance unit.
+            Default ``0.2``.
+        opacity_low: ``τ_low``, opacity at or below which the score is 1.
+            Default ``0.2``.
+        opacity_high: ``τ_high``, opacity at or above which the score is
+            0. Default ``0.3``.
         return_score: When true, also return a carrier holding the
             winning per-pixel score (``float32``).
             The output is then a tuple, so the operator is terminal
             (last step only) in a ``Sequential``.
+
+    Raises:
+        ValueError: If ``doy_sigma``, ``view_angle_sigma`` or
+            ``cloud_distance_slope`` is not positive, or
+            ``cloud_distance_req ≤ cloud_distance_min`` or
+            ``opacity_high ≤ opacity_low``.
+
+    References:
+        Griffiths, P., van der Linden, S., Kuemmerle, T. & Hostert, P.
+        (2013). A pixel-based Landsat compositing algorithm for large area
+        land cover mapping. IEEE JSTARS 6(5), 2088-2101.
+
+        White, J. C., Wulder, M. A., Hobart, G. W., et al. (2014).
+        Pixel-based image compositing for large-area dense time series
+        applications and science. Canadian Journal of Remote Sensing
+        40(3), 192-212.
     """
 
     def __init__(
@@ -483,19 +614,81 @@ class BAPComposite(Operator):
         w_recency: float = 0.4,
         w_cloud_distance: float = 0.2,
         w_opacity: float = 0.1,
+        doy_sigma: float = 30.0,
+        view_angle_sigma: float = 15.0,
+        cloud_distance_req: float = 50.0,
+        cloud_distance_min: float = 0.0,
+        cloud_distance_slope: float = 0.2,
+        opacity_low: float = 0.2,
+        opacity_high: float = 0.3,
         return_score: bool = False,
     ) -> None:
+        if min(doy_sigma, view_angle_sigma, cloud_distance_slope) <= 0:
+            raise ValueError(
+                "doy_sigma, view_angle_sigma and cloud_distance_slope must be positive."
+            )
+        if cloud_distance_req <= cloud_distance_min:
+            raise ValueError("cloud_distance_req must exceed cloud_distance_min.")
+        if opacity_high <= opacity_low:
+            raise ValueError("opacity_high must exceed opacity_low.")
         self.target_doy = target_doy
         self.w_view_angle = w_view_angle
         self.w_recency = w_recency
         self.w_cloud_distance = w_cloud_distance
         self.w_opacity = w_opacity
+        self.doy_sigma = doy_sigma
+        self.view_angle_sigma = view_angle_sigma
+        self.cloud_distance_req = cloud_distance_req
+        self.cloud_distance_min = cloud_distance_min
+        self.cloud_distance_slope = cloud_distance_slope
+        self.opacity_low = opacity_low
+        self.opacity_high = opacity_high
         self.return_score = return_score
 
     @property
     def _terminal(self) -> bool:  # ty: ignore[invalid-attribute-override]
         """A tuple output breaks carrier-in / carrier-out (last step only)."""
         return self.return_score
+
+    def _frame_scores(
+        self, metadata: Mapping[str, Any], spatial_shape: tuple[int, int]
+    ) -> Float[np.ndarray, "4 h w"]:
+        """Stack one frame's (view, DOY, cloud-distance, opacity) scores."""
+
+        def raw(*names: str, default: float) -> Float[np.ndarray, "h w"]:
+            value = _metadata_value(metadata, *names, default=default)
+            return _score_array(value, spatial_shape)
+
+        view = _metadata_value(metadata, "view_angle_score")
+        if view is None:
+            view = _view_angle_score(
+                raw("view_angle", default=0.0), self.view_angle_sigma
+            )
+        recency = _metadata_value(metadata, "recency_score")
+        if recency is None:
+            recency = _doy_score(
+                raw("doy", "day_of_year", default=float(self.target_doy)),
+                self.target_doy,
+                self.doy_sigma,
+            )
+        cloud = _metadata_value(metadata, "cloud_distance_score")
+        if cloud is None:
+            cloud = _cloud_distance_score(
+                raw("cloud_distance", default=0.0),
+                d_req=self.cloud_distance_req,
+                d_min=self.cloud_distance_min,
+                slope=self.cloud_distance_slope,
+            )
+        opacity = _metadata_value(metadata, "opacity_score")
+        if opacity is None:
+            opacity = _opacity_score(
+                raw("opacity", default=0.0),
+                low=self.opacity_low,
+                high=self.opacity_high,
+            )
+        return np.stack(
+            [_score_array(s, spatial_shape) for s in (view, recency, cloud, opacity)]
+        )
 
     def _apply(
         self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Mapping[str, Any]]]
@@ -505,71 +698,17 @@ class BAPComposite(Operator):
         frames = [scene for scene, _ in pairs]
         base, stack = _stack_frames(frames)
         spatial_shape = base.shape[-2:]
-        view_scores = []
-        recency_scores = []
-        cloud_distance_scores = []
-        raw_cloud_distance = []
-        opacity_scores = []
-        for _, metadata in pairs:
-            view = _metadata_value(metadata, "view_angle_score")
-            if view is None:
-                view_angle = _score_array(
-                    _metadata_value(metadata, "view_angle", default=0.0), spatial_shape
-                )
-                view = 1.0 / (1.0 + np.abs(view_angle))
-            view_scores.append(_score_array(view, spatial_shape))
-
-            recency = _metadata_value(metadata, "recency_score")
-            if recency is None:
-                doy = _score_array(
-                    _metadata_value(
-                        metadata, "doy", "day_of_year", default=self.target_doy
-                    ),
-                    spatial_shape,
-                )
-                recency = 1.0 / (1.0 + np.abs(doy - self.target_doy))
-            recency_scores.append(_score_array(recency, spatial_shape))
-
-            cloud_distance = _metadata_value(metadata, "cloud_distance_score")
-            if cloud_distance is None:
-                cloud_distance = _score_array(
-                    _metadata_value(metadata, "cloud_distance", default=0.0),
-                    spatial_shape,
-                )
-                raw_cloud_distance.append(True)
-            else:
-                raw_cloud_distance.append(False)
-            cloud_distance_scores.append(_score_array(cloud_distance, spatial_shape))
-
-            opacity = _metadata_value(metadata, "opacity_score")
-            if opacity is None:
-                opacity_value = _score_array(
-                    _metadata_value(metadata, "opacity", default=0.0), spatial_shape
-                )
-                opacity = 1.0 - np.clip(opacity_value, 0.0, 1.0)
-            opacity_scores.append(_score_array(opacity, spatial_shape))
-
-        if any(raw_cloud_distance) and not all(raw_cloud_distance):
-            # Raw ``cloud_distance`` values (typically pixel/meter scale) and
-            # precomputed ``cloud_distance_score`` values (0-1) live on
-            # incompatible scales. Silently mixing them would let raw
-            # distances dominate the weighted sum, so refuse rather than
-            # produce metadata-dependent rankings.
-            raise ValueError(
-                "BAPComposite received a mix of raw 'cloud_distance' and "
-                "precomputed 'cloud_distance_score' metadata across frames. "
-                "Provide the same representation for every frame so the "
-                "values share a common scale."
-            )
-        cloud_distance_stack = np.stack(cloud_distance_scores, axis=0)
-        if all(raw_cloud_distance):
-            cloud_distance_stack = _normalize_positive(cloud_distance_stack)
-        score_stack = (
-            self.w_view_angle * np.stack(view_scores, axis=0)
-            + self.w_recency * np.stack(recency_scores, axis=0)
-            + self.w_cloud_distance * cloud_distance_stack
-            + self.w_opacity * np.stack(opacity_scores, axis=0)
-        ).astype(np.float32, copy=False)
+        # (T, 4, H, W): view, DOY, cloud-distance, opacity score per frame.
+        scores = np.stack(
+            [self._frame_scores(metadata, spatial_shape) for _, metadata in pairs]
+        )
+        weights = np.array(
+            [self.w_view_angle, self.w_recency, self.w_cloud_distance, self.w_opacity],
+            dtype=np.float32,
+        )
+        score_stack = np.einsum("k,tkhw->thw", weights, scores).astype(
+            np.float32, copy=False
+        )
         # A nodata frame-pixel (or a NaN score) must never win the argmax.
         frame_valid = _frame_validity(frames)
         score_stack = np.where(
