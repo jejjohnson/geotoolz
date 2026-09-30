@@ -8,7 +8,7 @@ import rasterio
 from _helpers import toy_geotensor, uint16_dn_cube
 from georeader.geotensor import GeoTensor
 
-from geotoolz import spectral
+from geotoolz import indices, spectral
 
 
 _BAND_NAMES = ["B2", "B4", "B8", "B11"]
@@ -50,7 +50,7 @@ def test_band_math_matches_normalized_difference() -> None:
     )
 
     via_math = spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)")(gt)
-    via_op = spectral.NormalizedDifference(a="B8", b="B4", eps=1e-6)(gt)
+    via_op = indices.NormalizedDifference(a="B8", b="B4", eps=1e-6)(gt)
 
     np.testing.assert_allclose(np.asarray(via_math), np.asarray(via_op), rtol=1e-6)
 
@@ -98,52 +98,6 @@ def test_band_ratio_by_name() -> None:
     out = spectral.BandRatio(numerator="B8", denominator="B4", eps=0.0)(gt)
 
     np.testing.assert_allclose(np.asarray(out), 2.0)
-
-
-def test_apply_srf_preserves_values_when_source_equals_target() -> None:
-    wavelengths = np.array([490.0, 560.0, 665.0], dtype=float)
-    values = np.arange(3 * 2 * 2, dtype=np.float32).reshape(3, 2, 2)
-    gt = GeoTensor(
-        values=values,
-        transform=rasterio.Affine.identity(),
-        crs="EPSG:32629",
-        fill_value_default=-9999,
-    )
-
-    out = spectral.ApplySRF(
-        target_center_wavelengths=wavelengths,
-        target_fwhm=np.ones(3),
-        source_wavelengths=wavelengths,
-    )(gt)
-    np.testing.assert_allclose(np.asarray(out), values, atol=1e-5)
-
-    flat = GeoTensor(
-        values=np.ones((3, 2, 2), dtype=np.float32) * 0.3,
-        transform=gt.transform,
-        crs=gt.crs,
-        fill_value_default=-9999,
-    )
-    flat_out = spectral.ApplySRF(
-        target_center_wavelengths=wavelengths,
-        target_fwhm=np.ones(3),
-        source_wavelengths=wavelengths,
-    )(flat)
-    np.testing.assert_allclose(np.asarray(flat_out), 0.3, rtol=0.01)
-    assert flat_out.transform == flat.transform
-    assert str(flat_out.crs) == str(flat.crs)
-
-
-def test_gaussian_srf_reads_source_wavelengths_from_attrs() -> None:
-    gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))
-
-    out = spectral.GaussianSRF(
-        target_center_wavelengths=[490.0, 665.0],
-        target_fwhm=[1.0, 1.0],
-        band_names=["blue", "red"],
-    )(gt)
-
-    assert out.shape == (2, 2, 2)
-    assert out.attrs["band_names"] == ["blue", "red"]
 
 
 def test_continuum_removal_flat_and_absorption() -> None:
@@ -267,34 +221,8 @@ def test_spectral_get_config_serialization() -> None:
             {"expression": "B0", "band_names": None, "axis": -3},
         ),
         (
-            spectral.NormalizedDifference(a=0, b=1),
-            {"a": 0, "b": 1, "eps": 1e-6, "axis": -3},
-        ),
-        (
             spectral.BandRatio(numerator=0, denominator=1),
-            {"numerator": 0, "denominator": 1, "eps": 1e-6, "axis": -3},
-        ),
-        (
-            spectral.ApplySRF(
-                target_center_wavelengths=[1.0],
-                target_fwhm=[1.0],
-                source_wavelengths=[1.0],
-            ),
-            {
-                "target_center_wavelengths": [1.0],
-                "target_fwhm": [1.0],
-                "source_wavelengths": [1.0],
-                "band_names": None,
-            },
-        ),
-        (
-            spectral.GaussianSRF(target_center_wavelengths=[1.0], target_fwhm=[1.0]),
-            {
-                "target_center_wavelengths": [1.0],
-                "target_fwhm": [1.0],
-                "source_wavelengths": None,
-                "band_names": None,
-            },
+            {"numerator": 0, "denominator": 1, "eps": 1e-10, "axis": -3},
         ),
         (
             spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
@@ -330,14 +258,7 @@ def test_spectral_get_config_is_json_safe() -> None:
         spectral.StackBands(),
         spectral.SplitBands(names=["a", "b"]),
         spectral.BandMath(expression="B0 + B1", band_names=["B0", "B1"]),
-        spectral.NormalizedDifference(a="B8", b=1),
         spectral.BandRatio(numerator=1, denominator="B4"),
-        spectral.ApplySRF(
-            target_center_wavelengths=np.array([1.0, 2.0]),
-            target_fwhm=np.array([0.5, 0.5]),
-            source_wavelengths=np.array([1.0, 2.0]),
-        ),
-        spectral.GaussianSRF(target_center_wavelengths=[1.0], target_fwhm=[1.0]),
         spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
         spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
         spectral.SpectralSmoothing(),
@@ -366,17 +287,10 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
         spectral.StackBands(),
         spectral.SplitBands(),
         spectral.BandMath(expression="B0 + B1"),
-        spectral.NormalizedDifference(a=0, b=1),
         spectral.BandRatio(numerator=0, denominator=1),
         spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
         spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
         spectral.SpectralSmoothing(),
-        spectral.ApplySRF(
-            target_center_wavelengths=[1.0],
-            target_fwhm=[1.0],
-            source_wavelengths=[1.0],
-        ),
-        spectral.GaussianSRF(target_center_wavelengths=[1.0], target_fwhm=[1.0]),
     ],
 )
 def test_spectral_hydra_zen_roundtrip(op: object) -> None:
@@ -395,7 +309,6 @@ def test_geotensor_metadata_propagates_through_spectral_ops() -> None:
     ops = [
         (spectral.SelectBands(indexes=["B2", "B8"]), gt.fill_value_default),
         (spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)"), np.nan),
-        (spectral.NormalizedDifference(a="B8", b="B4"), np.nan),
         (spectral.BandRatio(numerator="B8", denominator="B4"), np.nan),
         (spectral.ContinuumRemoval(method="linear"), np.nan),
         (
@@ -460,8 +373,8 @@ def test_select_and_split_bands_subset_every_per_band_key() -> None:
     }
     parts = spectral.SplitBands()(gt)
     assert [p.attrs["descriptions"] for p in parts] == [["A"], ["B"], ["C"]]
-    ndiff = spectral.NormalizedDifference(a=0, b=1)(gt)
-    assert ndiff.attrs == {"k": 1}
+    ratio = spectral.BandRatio(numerator=0, denominator=1)(gt)
+    assert ratio.attrs == {"k": 1}
 
 
 def test_stack_bands_keeps_each_band_key_only_when_every_input_has_it() -> None:
@@ -522,7 +435,6 @@ def test_collapsing_ops_drop_stale_band_attrs() -> None:
     gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))
 
     for op in [
-        spectral.NormalizedDifference(a="B8", b="B4"),
         spectral.BandRatio(numerator="B8", denominator="B4"),
         spectral.BandMath(expression="B8 + B4"),
     ]:
@@ -543,7 +455,6 @@ def test_collapsing_ops_drop_stale_band_attrs() -> None:
     [
         spectral.SelectBands(indexes=[2, 1]),
         spectral.BandMath(expression="nir - red", band_names=["b", "red", "nir", "s"]),
-        spectral.NormalizedDifference(a=2, b=1),
         spectral.BandRatio(numerator=2, denominator=1),
         spectral.ContinuumRemoval(method="convex_hull", wavelengths=_WAVELENGTHS),
         spectral.SpectralBinning(
@@ -552,11 +463,6 @@ def test_collapsing_ops_drop_stale_band_attrs() -> None:
             source_wavelengths=_WAVELENGTHS,
         ),
         spectral.SpectralSmoothing(method="moving_average", window=3),
-        spectral.ApplySRF(
-            target_center_wavelengths=[665.0, 842.0],
-            target_fwhm=[1.0, 1.0],
-            source_wavelengths=_WAVELENGTHS,
-        ),
     ],
     ids=lambda op: type(op).__name__,
 )
@@ -606,10 +512,96 @@ def test_4d_time_stack() -> None:
     assert picked.attrs["band_names"] == ["b2", "b0"]
     assert picked.attrs["wavelengths"] == [690.0, 490.0]
 
-    nd = spectral.NormalizedDifference(a="b1", b="b0", eps=0.0)(stack)
+    nd = spectral.BandMath(expression="(b1 - b0) / (b1 + b0)")(stack)
     assert nd.shape == (2, 1, 4, 4)
     expected = (values[:, 1] - values[:, 0]) / (values[:, 1] + values[:, 0])
     np.testing.assert_allclose(np.asarray(nd)[:, 0], expected)
 
     with pytest.raises(TypeError, match="StackBands takes a sequence"):
         spectral.StackBands()(stack)
+
+
+# ---------------------------------------------------------------------------
+# StackBands grid / fill checks (#153)
+# ---------------------------------------------------------------------------
+
+
+def test_stack_bands_rejects_mismatched_fill() -> None:
+    """Stacking fill 0 with fill -9999 used to silently declare fill 0."""
+    values = np.ones((1, 2, 2), dtype=np.float32)
+    gt_a = toy_geotensor(values, fill_value_default=0)
+    gt_b = toy_geotensor(values, fill_value_default=-9999)
+
+    with pytest.raises(ValueError, match="fill_value_default"):
+        spectral.StackBands()([gt_a, gt_b])
+
+
+def test_stack_bands_nan_fills_match() -> None:
+    values = np.ones((1, 2, 2), dtype=np.float32)
+    gt_a = toy_geotensor(values, fill_value_default=np.nan)
+    gt_b = toy_geotensor(np.full((2, 2, 2), 2.0, np.float32), fill_value_default=np.nan)
+
+    stacked = spectral.StackBands()([gt_a, gt_b])
+
+    assert stacked.shape == (3, 2, 2)
+    assert np.isnan(stacked.fill_value_default)
+    np.testing.assert_array_equal(np.asarray(stacked)[:, 0, 0], [1.0, 2.0, 2.0])
+
+
+def test_stack_bands_rejects_mismatched_grid() -> None:
+    values = np.ones((1, 2, 2), dtype=np.float32)
+    gt_a = toy_geotensor(values)
+    shifted = toy_geotensor(
+        values, transform=gt_a.transform * rasterio.Affine.translation(1, 0)
+    )
+    other_crs = toy_geotensor(values, crs="EPSG:4326")
+    other_shape = toy_geotensor(np.ones((1, 3, 2), dtype=np.float32))
+
+    for other in (shifted, other_crs, other_shape):
+        with pytest.raises(ValueError, match="different grid"):
+            spectral.StackBands()([gt_a, other])
+
+
+def test_stack_bands_rejects_mixed_carriers() -> None:
+    values = np.ones((1, 2, 2), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="cannot mix"):
+        spectral.StackBands()([toy_geotensor(values), values])
+
+
+def test_stack_bands_promotes_2d_and_mixed_band_counts() -> None:
+    gt_a = toy_geotensor(np.zeros((2, 2), dtype=np.float32))
+    gt_b = toy_geotensor(np.ones((2, 2, 2), dtype=np.float32))
+
+    stacked = spectral.StackBands()([gt_a, gt_b])
+
+    assert stacked.shape == (3, 2, 2)
+    assert stacked.fill_value_default == gt_a.fill_value_default
+    np.testing.assert_array_equal(np.asarray(stacked)[:, 0, 0], [0.0, 1.0, 1.0])
+
+
+def test_band_ratio_eps_matches_indices_ratio_primitives() -> None:
+    """One package-wide denominator stabiliser (1e-10) for the same maths."""
+    arr = np.array([[[0.3]], [[0.0]]], dtype=np.float64)  # zero denominator
+
+    np.testing.assert_array_equal(
+        spectral.band_ratio(arr, 0, 1), indices.iron_oxide(arr, 0, 1)
+    )
+    assert spectral.BandRatio(numerator=0, denominator=1).eps == 1e-10
+    assert indices.NormalizedDifference(a=0, b=1).eps == 1e-10
+
+
+def test_removed_duplicates_are_gone() -> None:
+    """NormalizedDifference / ApplySRF / GaussianSRF live in one family each."""
+    import geotoolz as gz
+
+    for name in (
+        "NormalizedDifference",
+        "ApplySRF",
+        "GaussianSRF",
+        "normalized_difference",
+    ):
+        assert not hasattr(spectral, name)
+    assert not hasattr(gz, "GaussianSRF")
+    assert gz.ApplySRF is gz.radiometry.ApplySRF
+    assert gz.NormalizedDifference is gz.indices.NormalizedDifference

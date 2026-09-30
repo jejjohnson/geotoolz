@@ -20,7 +20,10 @@ added to the denominator. Default ``1e-10`` matches the order of
 magnitude of TOA reflectance noise (~1e-4) divided by a typical
 denominator (~1) — small enough not to bias the index, large enough to
 shadow division by zero for genuinely-zero pixels (water in NIR over a
-black background, etc.).
+black background, etc.). It is the package-wide default: the
+spectral-family ratio (:func:`geotoolz.spectral.band_ratio` /
+:class:`geotoolz.spectral.BandRatio`) uses the same value, so the same
+maths gives the same numbers in every family.
 
 Integer inputs: every primitive that does arithmetic promotes its input
 to floating point *before* touching the bands, so raw ``uint16`` /

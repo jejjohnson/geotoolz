@@ -12,10 +12,6 @@ from scipy import ndimage, signal
 
 from geotoolz._src.dtype import as_float
 
-# Re-use the canonical normalized-difference primitive instead of
-# duplicating the maths here. Same algebra as NDVI / NDWI / NDBI / NBR.
-from geotoolz.indices._src.array import normalized_difference as normalized_difference
-
 
 def select_bands(
     arr: Shaped[np.ndarray, "c h w"], indexes: list[int], *, axis: int = -3
@@ -69,7 +65,7 @@ def band_ratio(
     denominator_idx: int,
     *,
     axis: int = -3,
-    eps: float = 1e-6,
+    eps: float = 1e-10,
 ) -> Float[np.ndarray, "h w"]:
     """Compute ``numerator / (denominator + eps)`` with the band axis collapsed.
 
@@ -80,7 +76,10 @@ def band_ratio(
         denominator_idx: Integer position of the denominator band.
         axis: Position of the band axis. Default ``-3``.
         eps: Small constant added to the denominator to shadow division
-            by zero on no-data / saturated pixels. Default ``1e-6``.
+            by zero on no-data / saturated pixels. Default ``1e-10``, the
+            package-wide denominator stabiliser shared with every
+            ratio / normalized-difference primitive in
+            :mod:`geotoolz.indices` (e.g. ``iron_oxide``, ``clay_minerals``).
             Pass ``0.0`` to see ``inf``/``nan`` on zero pixels instead.
 
     Returns:

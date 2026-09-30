@@ -240,18 +240,8 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
         "sza_deg": 30.0,
     },
     "restore._src.operators.DenoisePCA": {"n_components": 2},
-    "spectral._src.operators.ApplySRF": {
-        "target_center_wavelengths": [500.0, 600.0],
-        "target_fwhm": [20.0, 20.0],
-        "source_wavelengths": [480.0, 520.0, 580.0, 620.0],
-    },
     "spectral._src.operators.BandMath": {"expression": "b0 + b1"},
     "spectral._src.operators.BandRatio": {"numerator": 0, "denominator": 1},
-    "spectral._src.operators.GaussianSRF": {
-        "target_center_wavelengths": [500.0, 600.0],
-        "target_fwhm": [20.0, 20.0],
-    },
-    "spectral._src.operators.NormalizedDifference": {"a": 0, "b": 1},
     "spectral._src.operators.ReorderBands": {"order": [1, 0]},
     "spectral._src.operators.SelectBands": {"indexes": [0, 1]},
     "spectral._src.operators.SpectralBinning": {

@@ -541,6 +541,171 @@ def test_apply_srf_propagates_fill_on_contributing_source_band() -> None:
     assert out_arr[1, 1, 1] != 0.0, "non-contributing target must remain valid"
 
 
+def _legacy_srf_expected(
+    values: np.ndarray,
+    source: np.ndarray,
+    centers: list[float],
+    fwhm: list[float],
+) -> np.ndarray:
+    """The pre-#153 ``radiometry.ApplySRF`` maths on fill-free pixels.
+
+    SRFs on the integer-nm grid ``floor(min)..ceil(max)`` and a plain
+    ndarray through ``transform_to_srf`` (no fill handling).
+    """
+    import warnings
+
+    from georeader.reflectance import srf, transform_to_srf
+
+    grid = np.arange(np.floor(source.min()), np.ceil(source.max()) + 1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        srf_df = pd.DataFrame(srf(centers, fwhm, grid), index=grid)
+    return transform_to_srf(values, srf_df, source.tolist())
+
+
+def test_apply_srf_matches_radiometry() -> None:
+    """The merged ApplySRF reproduces the old radiometry numbers exactly.
+
+    ``radiometry.ApplySRF`` is the single SRF implementation (#153). It
+    now hands the GeoTensor to georeader's ``transform_to_srf`` for the
+    fill bookkeeping instead of re-deriving each target's source-band
+    support, with bit-identical values. The removed
+    ``spectral.ApplySRF`` sampled the Gaussian only at the source
+    wavelengths (no 1-nm grid), which differed by up to ~0.03 here (e.g.
+    the 705 nm / 15 nm target), and filled every target when any source
+    band was nodata; neither behaviour survives.
+    """
+    rng = np.random.default_rng(0)
+    source = np.arange(400.0, 1001.0, 10.0)  # 61 bands
+    values = rng.uniform(0.0, 1.0, size=(source.size, 4, 5)).astype(np.float32)
+    centers = [490.0, 560.0, 665.0, 705.0, 842.0, 945.0]
+    fwhm = [65.0, 35.0, 30.0, 15.0, 115.0, 20.0]
+    expected = _legacy_srf_expected(values, source, centers, fwhm)
+
+    dirty = values.copy()
+    dirty[5, 0, 0] = -9999.0  # 450 nm: read by the 490 nm target only
+    dirty[30, 1, 1] = np.nan  # 700 nm: read by the 665 / 705 / 842 nm targets
+    gt = toy_geotensor(dirty, fill_value_default=-9999.0)
+    out = ApplySRF(
+        target_center_wavelengths=centers, target_fwhm=fwhm, source_wavelengths=source
+    )(gt)
+
+    arr = np.asarray(out)
+    assert arr.dtype == np.float32
+    assert out.fill_value_default == -9999.0
+    fill = np.zeros(arr.shape, dtype=bool)
+    fill[0, 0, 0] = True
+    fill[[2, 3, 4], 1, 1] = True
+    np.testing.assert_array_equal(arr[fill], -9999.0)
+    np.testing.assert_array_equal(arr[~fill], expected[~fill])
+    # Pinned values (pixel (2, 2)) guard against a silent change in georeader.
+    np.testing.assert_allclose(
+        arr[:, 2, 2],
+        [0.42043233, 0.54606116, 0.5710548, 0.16623245, 0.5703217, 0.6355086],
+        rtol=1e-6,
+    )
+
+
+def test_apply_srf_reads_source_wavelengths_and_writes_band_attrs() -> None:
+    """``source_wavelengths=None`` reads attrs; names / centres are written."""
+    source = [490.0, 560.0, 665.0, 842.0]
+    gt = toy_geotensor(
+        np.ones((4, 2, 2), dtype=np.float32),
+        attrs={"band_names": ["B2", "B3", "B4", "B8"], "wavelengths": source, "k": 1},
+    )
+
+    op = ApplySRF(
+        target_center_wavelengths=[490.0, 665.0],
+        target_fwhm=[1.0, 1.0],
+        band_names=["blue", "red"],
+    )
+    out = op(gt)
+
+    assert out.shape == (2, 2, 2)
+    np.testing.assert_allclose(np.asarray(out), 1.0)
+    assert out.attrs == {
+        "k": 1,
+        "band_names": ["blue", "red"],
+        "wavelengths": [490.0, 665.0],
+    }
+    assert op.get_config()["source_wavelengths"] is None
+    explicit = ApplySRF(
+        target_center_wavelengths=[490.0, 665.0],
+        target_fwhm=[1.0, 1.0],
+        source_wavelengths=source,
+    )(gt)
+    np.testing.assert_array_equal(np.asarray(explicit), np.asarray(out))
+    assert "band_names" not in explicit.attrs
+
+
+def test_apply_srf_narrow_fwhm_reads_nearest_source_band() -> None:
+    """FWHM far below the source spacing picks the nearest band (no zero SRF)."""
+    source = np.array([490.0, 560.0, 665.0])
+    values = np.arange(3 * 2 * 2, dtype=np.float32).reshape(3, 2, 2)
+    gt = toy_geotensor(values)
+
+    out = ApplySRF(
+        target_center_wavelengths=[490.0, 600.0, 665.0],
+        target_fwhm=[1.0, 2.0, 1.0],
+        source_wavelengths=source,
+    )(gt)
+
+    np.testing.assert_allclose(np.asarray(out)[[0, 2]], values[[0, 2]], atol=1e-5)
+    # 600 nm lies between 560 and 665; the 1-nm grid maps it to the nearer 560.
+    np.testing.assert_allclose(np.asarray(out)[1], values[1], atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"target_fwhm": [0.01]}, "no SRF weight"),
+        ({"target_fwhm": [0.0]}, "strictly positive"),
+        ({"target_center_wavelengths": [300.0]}, "outside the source"),
+        ({"target_fwhm": [10.0, 10.0]}, "same length"),
+        ({"band_names": ["a", "b"]}, "band_names"),
+        ({"source_wavelengths": [480.0, 500.0]}, "source_wavelengths has 2"),
+    ],
+)
+def test_apply_srf_rejects_unrepresentable_targets(
+    kwargs: dict[str, object], match: str
+) -> None:
+    config: dict[str, object] = {
+        "target_center_wavelengths": [500.5],
+        "target_fwhm": [10.0],
+        "source_wavelengths": [480.0, 490.0, 500.0, 510.0, 520.0],
+        **kwargs,
+    }
+    gt = toy_geotensor(np.ones((5, 2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match=match):
+        ApplySRF(**config)(gt)  # type: ignore[arg-type]
+
+
+def test_apply_srf_requires_source_wavelengths() -> None:
+    op = ApplySRF(target_center_wavelengths=[500.0], target_fwhm=[10.0])
+
+    with pytest.raises(ValueError, match="source_wavelengths"):
+        op(np.ones((3, 2, 2), dtype=np.float32))
+
+
+def test_apply_srf_integer_dn_fill_becomes_nan() -> None:
+    """Integer DN with fill 0: nodata carries as NaN in the float output."""
+    values = np.full((3, 2, 2), 100, dtype=np.uint16)
+    values[1, 0, 0] = 0
+    gt = toy_geotensor(values, fill_value_default=0)
+
+    out = ApplySRF(
+        target_center_wavelengths=[500.0],
+        target_fwhm=[40.0],
+        source_wavelengths=[480.0, 500.0, 520.0],
+    )(gt)
+
+    assert np.isnan(out.fill_value_default)
+    arr = np.asarray(out)
+    assert np.isnan(arr[0, 0, 0])
+    np.testing.assert_allclose(arr[0, 1:, :], 100.0, rtol=1e-6)
+
+
 def test_integrated_irradiance_operator_with_flat_solar_spectrum() -> None:
     srf_df = pd.DataFrame({"B1": [1.0, 1.0, 1.0]}, index=[499.0, 500.0, 501.0])
     solar = pd.DataFrame(
