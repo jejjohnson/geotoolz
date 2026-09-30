@@ -164,6 +164,33 @@ class TestStackMatchedSequence:
         out = StackMatched()([a, b])
         assert out.shape == (3, 8, 8)
 
+    def test_matches_geotensor_concatenate_where_it_applies(self) -> None:
+        """Same grid, band count and finite fill: identical to georeader.
+
+        ``GeoTensor.concatenate`` asserts equal full shapes and equal
+        ``fill_value_default`` (so NaN fills and differing band counts
+        are refused) and keeps only the first input's attrs, which is why
+        `StackMatched` does not delegate to it (#157).
+        """
+        transform = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0)
+        a = toy_geotensor(
+            np.arange(32, dtype=np.float32).reshape(2, 4, 4),
+            transform=transform,
+            fill_value_default=-1.0,
+        )
+        b = toy_geotensor(
+            np.arange(32, 64, dtype=np.float32).reshape(2, 4, 4),
+            transform=transform,
+            fill_value_default=-1.0,
+        )
+        out = StackMatched()([a, b])
+        expected = GeoTensor.concatenate([a, b], axis=0)
+        np.testing.assert_array_equal(np.asarray(out), np.asarray(expected))
+        assert out.transform == expected.transform
+        assert out.crs == expected.crs
+        assert out.fill_value_default == expected.fill_value_default
+        assert out.dtype == expected.dtype
+
     def test_higher_dim_input_rejected(self) -> None:
         # 4-D (T, C, H, W) isn't a valid GeoTensor shape for this op.
         a = _gt(np.zeros((1, 2, 8, 8), dtype=np.float32))

@@ -160,6 +160,13 @@ class StackMatched(Operator):
         input (non-finite or that input's fill) are rewritten to the
         output's fill (the first input's ``fill_value_default``) in that
         input's bands, when the output dtype can represent it.
+
+        Where :meth:`georeader.geotensor.GeoTensor.concatenate` applies
+        (3-D inputs with equal band counts and equal, non-NaN fills) the
+        output matches it. The operator does not delegate to it because
+        ``concatenate`` refuses differing band counts, 2-D inputs, and
+        NaN fills (``NaN != NaN``), and it keeps only the first input's
+        attrs.
     """
 
     def __init__(
