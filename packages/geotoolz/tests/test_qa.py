@@ -351,10 +351,14 @@ def test_mask_saturated_infers_integer_max() -> None:
     np.testing.assert_array_equal(np.asarray(out), [[False, True], [True, False]])
 
 
-def test_mask_saturated_requires_value_for_float_inputs() -> None:
-    gt = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
+def test_mask_saturated_defaults_float_inputs_to_reflectance_ceiling() -> None:
+    """Float input defaults to 1.0, as the removed ``SaturationFlag`` did."""
+    refl = np.array([[[0.5, 1.0], [1.2, 0.99]]], dtype=np.float32)
+    np.testing.assert_array_equal(
+        qa.MaskSaturated()(refl), [[False, True], [True, False]]
+    )
     with pytest.raises(ValueError, match="saturation_value"):
-        qa.MaskSaturated()(gt)
+        qa.MaskSaturated()(np.zeros((1, 2, 2), dtype=bool))
 
 
 def test_mask_saturated_is_a_threshold_with_optional_band_reduction() -> None:

@@ -613,8 +613,9 @@ class MaskSaturated(Operator):
         qa_band: Optional band selector. When omitted, every band is
             tested.
         saturation_value: Saturation threshold; pixels ``>=`` it are
-            flagged. If omitted for integer arrays, the dtype maximum is
-            used; float arrays require an explicit value.
+            flagged. If omitted, integer arrays use the dtype maximum and
+            float arrays use ``1.0`` (the reflectance ceiling); other
+            dtypes require an explicit value.
         reduce_bands: When True (default) and ``qa_band`` is None,
             OR-reduce the per-band flags over ``axis`` into one
             ``(H, W)`` mask; when False, return one flag per band
@@ -654,11 +655,14 @@ class MaskSaturated(Operator):
         arr = _select_qa(gt, self.qa_band, self.axis)
         saturation_value = self.saturation_value
         if saturation_value is None:
-            if not np.issubdtype(arr.dtype, np.integer):
+            if np.issubdtype(arr.dtype, np.integer):
+                saturation_value = np.iinfo(arr.dtype).max
+            elif np.issubdtype(arr.dtype, np.floating):
+                saturation_value = 1.0
+            else:
                 raise ValueError(
-                    "MaskSaturated: pass saturation_value for non-integer inputs."
+                    f"MaskSaturated: pass saturation_value for {arr.dtype} inputs."
                 )
-            saturation_value = np.iinfo(arr.dtype).max
         mask = arr >= saturation_value
         if self.reduce_bands and self.qa_band is None and mask.ndim > 2:
             mask = np.any(mask, axis=self.axis)
