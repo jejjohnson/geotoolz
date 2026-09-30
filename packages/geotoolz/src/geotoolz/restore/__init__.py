@@ -18,7 +18,6 @@ from geotoolz.restore._src.array import (
     outlier_mask,
     pca_denoise,
     replace_outliers,
-    saturation_flag,
 )
 from geotoolz.restore._src.operators import (
     MNF,
@@ -39,7 +38,6 @@ from geotoolz.restore._src.operators import (
     NLMeans,
     OutlierMask,
     ReplaceOutliers,
-    SaturationFlag,
 )
 
 
@@ -62,7 +60,6 @@ __all__ = [
     "NLMeans",
     "OutlierMask",
     "ReplaceOutliers",
-    "SaturationFlag",
     "bilateral_denoise",
     "despeckle_frost",
     "despeckle_lee",
@@ -78,5 +75,4 @@ __all__ = [
     "outlier_mask",
     "pca_denoise",
     "replace_outliers",
-    "saturation_flag",
 ]

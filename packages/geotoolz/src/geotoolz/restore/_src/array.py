@@ -710,29 +710,3 @@ def replace_outliers(
     if fill == "interp":
         return gap_fill_nearest(np.where(mask, np.nan, values))
     raise ValueError("fill must be 'median', 'nan', or 'interp'")
-
-
-def saturation_flag(
-    arr: Shaped[np.ndarray, "*dims"], *, threshold: float | None = None
-) -> Bool[np.ndarray, "*dims"]:
-    """Flag pixels at or above a saturation threshold.
-
-    Args:
-        arr: Input array of any dtype.
-        threshold: Saturation cutoff. When ``None`` defaults to
-            ``np.iinfo(dtype).max`` for integer arrays and ``1.0`` for
-            float arrays (the standard top-of-atmosphere reflectance
-            ceiling).
-
-    Returns:
-        Boolean array of the same shape; ``True`` marks saturated
-        pixels.
-    """
-    values = np.asarray(arr)
-    if threshold is None:
-        threshold = (
-            float(np.iinfo(values.dtype).max)
-            if np.issubdtype(values.dtype, np.integer)
-            else 1.0
-        )
-    return values >= threshold

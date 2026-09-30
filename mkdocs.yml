@@ -67,7 +67,6 @@ nav:
       - API Reference:
           - Core: api/core.md
           - Augment: api/augment.md
-          - Cloud: api/cloud.md
           - Compositing: api/compositing.md
           - Einx: api/einx.md
           - Feature: api/feature.md

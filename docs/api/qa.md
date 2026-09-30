@@ -6,7 +6,9 @@
 - `mask_from_scl` — categorical class membership (Sentinel-2 SCL).
 - `mask_from_bit_field` — contiguous multi-bit field decoding (needed for MODIS).
 
-Pick `MaskFromQABits` / `MaskFromSCL` when you have an explicit list of bits / classes. Pick `LandsatQA_PIXEL` / `S2QA60` / `S2SCL` / `MODISStateQA` when you want the published-spec defaults. To *apply* a mask, use [`geotoolz.mask.ApplyMask`](mask.md).
+One vocabulary throughout: `qa_band` selects the QA band from a stack (`None`, the default for the generic decoders, means the carrier *is* the QA band), `bits` lists independent flag bits, `values` lists categorical class / field values, and the sensor presets take `targets` — registry names to mask out.
+
+Pick the generic decoders (`MaskClouds`, `MaskCloudShadow`, `MaskCirrus`, `MaskSnow`, `MaskWater`, `MaskNoData` — one implementation under several semantic names) when you have an explicit list of `bits` / `values`; `invert=True` turns the list into a keep-list. `MaskInvalid` marks nodata pixels (the carrier fill, `NaN` fills included, or non-finite values); `MaskSaturated` flags pixels at or above a saturation value (`reduce_bands=False` for per-band flags). Pick `LandsatQA_PIXEL` / `S2QA60` / `S2SCL` / `MODISStateQA` when you want the published-spec defaults. To *apply* a mask, use [`geotoolz.mask.ApplyMask`](mask.md).
 
 ::: geotoolz.qa
 
@@ -15,12 +17,12 @@ Pick `MaskFromQABits` / `MaskFromSCL` when you have an explicit list of bits / c
 | Preset | QA source | Default mask targets | Reference |
 | --- | --- | --- | --- |
 | `S2QA60` | Sentinel-2 L1C `QA60` bitmask (bit 10 cloud, 11 cirrus) | cloud + cirrus | ESA S2 L1C product spec |
-| `S2SCL` | Sentinel-2 L2A `SCL` classes | mask everything except vegetation (4), soil (5), water (6) | Sen2Cor product spec |
+| `S2SCL` | Sentinel-2 L2A `SCL` classes (registry derived from `SCL_TARGETS`) | every target except vegetation (4), soil (5), water (6) | Sen2Cor product spec |
 | `LandsatQA_PIXEL` (sensor=`l89`) | Landsat 8/9 C2 `QA_PIXEL` | cloud (bit 3), cloud shadow (bit 4), cirrus (bit 2) | USGS LSDS-1619 |
 | `LandsatQA_PIXEL` (sensor=`l7`) | Landsat 4-7 C2 `QA_PIXEL` (no cirrus bit) | cloud (bit 3), cloud shadow (bit 4) | USGS LSDS-1618 |
 | `MODISStateQA` | MODIS `state_1km` / `state_500m` | cloud (bits [0,1] field, values 1,2) + cloud shadow (bit 2) | MOD09 User's Guide, Table 12 |
 
-All QA mask operators return boolean masks matching the input carrier: GeoTensor in (CRS/transform preserved, `fill_value_default=False`), plain `np.ndarray` in, plain boolean array out. The convention is **`True` means "mask this pixel out"**.
+All QA mask operators return boolean masks matching the input carrier: GeoTensor in (CRS/transform preserved, `fill_value_default=False`), plain `np.ndarray` in, plain boolean array out. The convention is **`True` means "mask this pixel out"** (see [Mask polarity](../concepts.md#mask-polarity)).
 
 ### MODIS bit-field semantics
 

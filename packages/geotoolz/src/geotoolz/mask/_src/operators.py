@@ -24,6 +24,9 @@ from geotoolz._src.geo import grid_matches
 from geotoolz._src.valid import carried_fill, carrier_fill_value, wrap_filled
 from geotoolz._src.wrap import wrap_like
 from geotoolz.mask._src.array import (
+    Keep,
+    _check_keep,
+    _drop_polarity,
     altitude_mask,
     apply_mask,
     buffer_mask,
@@ -55,6 +58,10 @@ _NATURAL_EARTH_URLS = {
 class PolygonMask(Operator):
     """Rasterize a shapely geometry or GeoDataFrame into a boolean mask.
 
+    Follows the package polarity (True = drop): with the default
+    ``keep="inside"`` the mask is True *outside* the geometry, so
+    ``ApplyMask(mask=PolygonMask(...))`` keeps the area of interest.
+
     Geo-dependent: rasterization needs the carrier's transform/CRS, so
     the input must be a georeferenced ``GeoTensor``. The mask matches
     the carrier's spatial grid and is returned as a boolean ``(H, W)``
@@ -69,8 +76,9 @@ class PolygonMask(Operator):
             (required for a CRS-less GeoDataFrame).
         all_touched: Burn every pixel touched by the geometry instead
             of only pixels whose center is inside.
-        inside: If True (default) the mask is True inside the geometry;
-            if False the complement is returned.
+        keep: ``"inside"`` (default) keeps the geometry's interior (mask
+            True outside it); ``"outside"`` keeps the exterior (mask True
+            inside the geometry).
 
     Examples:
         >>> PolygonMask(geometry=box(1.0, 1.0, 3.0, 3.0))(scene)  # doctest: +SKIP
@@ -84,22 +92,21 @@ class PolygonMask(Operator):
         geometry: shapely.geometry.base.BaseGeometry | gpd.GeoDataFrame,
         crs: str | None = None,
         all_touched: bool = False,
-        inside: bool = True,
+        keep: Keep = "inside",
     ) -> None:
         self.geometry = geometry
         self.crs = crs
         self.all_touched = all_touched
-        self.inside = inside
+        self.keep = _check_keep(keep, type(self).__name__)
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        mask = _rasterize_geometry_like(
+        burned = _rasterize_geometry_like(
             self.geometry,
             gt,
             crs=self.crs,
             all_touched=self.all_touched,
         )
-        if not self.inside:
-            mask = ~mask
+        mask = _drop_polarity(burned, self.keep, type(self).__name__)
         return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
@@ -107,7 +114,7 @@ class PolygonMask(Operator):
             "geometry": _geometry_config(self.geometry),
             "crs": self.crs,
             "all_touched": self.all_touched,
-            "inside": self.inside,
+            "keep": self.keep,
         }
 
 
@@ -120,7 +127,12 @@ class BBoxMask(PolygonMask):
     Args:
         bounds: ``(minx, miny, maxx, maxy)`` box in ``crs`` coordinates.
         crs: CRS of ``bounds``; defaults to the carrier's CRS.
-        inside: If True (default) the mask is True inside the box.
+        keep: ``"inside"`` (default) keeps the box (mask True outside
+            it); ``"outside"`` drops the box.
+
+    Examples:
+        >>> aoi = BBoxMask(bounds=(1.0, 1.0, 3.0, 3.0))  # doctest: +SKIP
+        >>> ApplyMask(mask=aoi)(scene)  # keeps the box  # doctest: +SKIP
     """
 
     forbid_in_yaml: ClassVar[bool] = False
@@ -130,32 +142,33 @@ class BBoxMask(PolygonMask):
         *,
         bounds: tuple[float, float, float, float],
         crs: str | None = None,
-        inside: bool = True,
+        keep: Keep = "inside",
     ) -> None:
         self.bounds = tuple(bounds)
         if len(self.bounds) != 4:
             raise ValueError("BBoxMask: `bounds` must contain exactly four values")
         super().__init__(
-            geometry=shapely.geometry.box(*self.bounds), crs=crs, inside=inside
+            geometry=shapely.geometry.box(*self.bounds), crs=crs, keep=keep
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"bounds": self.bounds, "crs": self.crs, "inside": self.inside}
+        return {"bounds": self.bounds, "crs": self.crs, "keep": self.keep}
 
 
 class DistanceMask(PolygonMask):
-    """Mask pixels within or beyond a distance from a geometry.
+    """Mask pixels by their distance from a geometry (True = drop).
 
-    Rasterizes the geometry onto the carrier grid, then thresholds the
-    Euclidean distance transform at ``distance`` (CRS units, using the
-    carrier pixel size). Geo-dependent: requires a georeferenced
-    ``GeoTensor`` input.
+    Rasterizes the geometry onto the carrier grid, then buffers it by
+    ``distance`` (CRS units, using the carrier pixel size; see
+    :func:`geotoolz.mask.distance_mask`). Geo-dependent: requires a
+    georeferenced ``GeoTensor`` input.
 
     Args:
         geometry: Shapely geometry or ``GeoDataFrame``.
         distance: Maximum distance from the geometry, in CRS units.
-        inside: If True (default), True within ``distance`` of the
-            geometry; if False, the complement.
+        keep: ``"inside"`` (default) keeps pixels within ``distance`` of
+            the geometry (mask True beyond it); ``"outside"`` drops the
+            zone within ``distance``.
         crs: CRS of ``geometry`` when it doesn't carry one itself.
         all_touched: Rasterization rule; see :class:`PolygonMask`.
             Default True so thin geometries are not lost.
@@ -166,14 +179,12 @@ class DistanceMask(PolygonMask):
         *,
         geometry: shapely.geometry.base.BaseGeometry | gpd.GeoDataFrame,
         distance: float,
-        inside: bool = True,
+        keep: Keep = "inside",
         crs: str | None = None,
         all_touched: bool = True,
     ) -> None:
         self.distance = distance
-        super().__init__(
-            geometry=geometry, crs=crs, all_touched=all_touched, inside=inside
-        )
+        super().__init__(geometry=geometry, crs=crs, all_touched=all_touched, keep=keep)
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         burned = _rasterize_geometry_like(
@@ -185,7 +196,7 @@ class DistanceMask(PolygonMask):
         mask = distance_mask(
             burned,
             self.distance,
-            inside=self.inside,
+            keep=self.keep,
             pixel_size=_pixel_size(gt),
         )
         return wrap_like(gt, mask, fill_value_default=False)
@@ -194,7 +205,7 @@ class DistanceMask(PolygonMask):
         return {
             "geometry": _geometry_config(self.geometry),
             "distance": self.distance,
-            "inside": self.inside,
+            "keep": self.keep,
             "crs": self.crs,
             "all_touched": self.all_touched,
         }
@@ -210,16 +221,22 @@ class LandMask(PolygonMask):
         source: ``"natural_earth_10m"`` (default) downloads and caches
             the Natural Earth 1:10m land polygons; any other value is a
             local vector file path passed to ``geopandas.read_file``.
+        keep: ``"inside"`` (default) keeps land pixels (mask True
+            elsewhere); ``"outside"`` drops them.
     """
 
     forbid_in_yaml: ClassVar[bool] = False
 
-    def __init__(self, *, source: str = "natural_earth_10m") -> None:
+    def __init__(
+        self, *, source: str = "natural_earth_10m", keep: Keep = "inside"
+    ) -> None:
         self.source = source
-        super().__init__(geometry=_load_natural_earth("land", source), crs="EPSG:4326")
+        super().__init__(
+            geometry=_load_natural_earth("land", source), crs="EPSG:4326", keep=keep
+        )
 
     def get_config(self) -> dict[str, Any]:
-        return {"source": self.source}
+        return {"source": self.source, "keep": self.keep}
 
 
 class OceanMask(PolygonMask):
@@ -232,16 +249,22 @@ class OceanMask(PolygonMask):
         source: ``"natural_earth_10m"`` (default) downloads and caches
             the Natural Earth 1:10m ocean polygons; any other value is a
             local vector file path passed to ``geopandas.read_file``.
+        keep: ``"inside"`` (default) keeps ocean pixels (mask True
+            elsewhere); ``"outside"`` drops them.
     """
 
     forbid_in_yaml: ClassVar[bool] = False
 
-    def __init__(self, *, source: str = "natural_earth_10m") -> None:
+    def __init__(
+        self, *, source: str = "natural_earth_10m", keep: Keep = "inside"
+    ) -> None:
         self.source = source
-        super().__init__(geometry=_load_natural_earth("ocean", source), crs="EPSG:4326")
+        super().__init__(
+            geometry=_load_natural_earth("ocean", source), crs="EPSG:4326", keep=keep
+        )
 
     def get_config(self) -> dict[str, Any]:
-        return {"source": self.source}
+        return {"source": self.source, "keep": self.keep}
 
 
 class CountryMask(PolygonMask):
@@ -256,6 +279,8 @@ class CountryMask(PolygonMask):
         source: ``"natural_earth_10m"`` (default) downloads and caches
             the Natural Earth 1:10m admin-0 countries; any other value
             is a local vector file path with an ``ISO_A3`` column.
+        keep: ``"inside"`` (default) keeps the selected countries (mask
+            True elsewhere); ``"outside"`` drops them.
 
     Raises:
         ValueError: If none of the requested codes are found.
@@ -268,6 +293,7 @@ class CountryMask(PolygonMask):
         *,
         iso_a3: str | Sequence[str],
         source: str = "natural_earth_10m",
+        keep: Keep = "inside",
     ) -> None:
         self.iso_a3 = (iso_a3,) if isinstance(iso_a3, str) else tuple(iso_a3)
         self.source = source
@@ -275,19 +301,21 @@ class CountryMask(PolygonMask):
         selected = countries[countries["ISO_A3"].isin(self.iso_a3)]
         if selected.empty:
             raise ValueError(f"CountryMask: no countries found for {list(self.iso_a3)}")
-        super().__init__(geometry=selected, crs="EPSG:4326")
+        super().__init__(geometry=selected, crs="EPSG:4326", keep=keep)
 
     def get_config(self) -> dict[str, Any]:
         iso_a3: str | list[str]
         iso_a3 = self.iso_a3[0] if len(self.iso_a3) == 1 else list(self.iso_a3)
-        return {"iso_a3": iso_a3, "source": self.source}
+        return {"iso_a3": iso_a3, "source": self.source, "keep": self.keep}
 
 
 class AltitudeMask(Operator):
     """Build a boolean mask from DEM elevation bounds.
 
-    Marks True where the carrier DEM falls inside the requested elevation
-    interval. Either bound may be ``None`` for an open-ended interval.
+    Follows the package polarity (True = drop): with the default
+    ``keep="inside"`` the mask is True where the DEM falls *outside* the
+    requested elevation interval. Either bound may be ``None`` for an
+    open-ended interval.
     Accepts a GeoTensor or plain ndarray carrier; when both the DEM and
     the carrier are georeferenced, their transform/CRS must match.
 
@@ -296,6 +324,8 @@ class AltitudeMask(Operator):
             input scene.
         min_elev: Inclusive lower bound (units of the DEM).
         max_elev: Inclusive upper bound.
+        keep: ``"inside"`` (default) keeps cells inside the interval;
+            ``"outside"`` keeps cells outside it.
 
     Examples:
         >>> AltitudeMask(dem=dem, min_elev=500.0)(scene)  # doctest: +SKIP
@@ -309,14 +339,19 @@ class AltitudeMask(Operator):
         dem: GeoTensor,
         min_elev: float | None = None,
         max_elev: float | None = None,
+        keep: Keep = "inside",
     ) -> None:
         self.dem = dem
         self.min_elev = min_elev
         self.max_elev = max_elev
+        self.keep = _check_keep(keep, "AltitudeMask")
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask = altitude_mask(
-            np.asarray(self.dem), min_elev=self.min_elev, max_elev=self.max_elev
+            np.asarray(self.dem),
+            min_elev=self.min_elev,
+            max_elev=self.max_elev,
+            keep=self.keep,
         )
         _check_spatial_match(mask, gt, "AltitudeMask")
         _check_dem_grid_alignment(self.dem, gt, "AltitudeMask")
@@ -327,6 +362,7 @@ class AltitudeMask(Operator):
             "dem": {"shape": list(self.dem.shape), "dtype": str(self.dem.dtype)},
             "min_elev": self.min_elev,
             "max_elev": self.max_elev,
+            "keep": self.keep,
         }
 
 
@@ -334,11 +370,13 @@ class SlopeMask(Operator):
     """Build a boolean mask from DEM slope bounds in degrees.
 
     Slope is computed from the DEM with central differences scaled by
-    the DEM pixel size; True where the slope (degrees) falls inside
-    the requested interval. Geo-dependent on the DEM side: the DEM must
-    be a georeferenced ``GeoTensor`` (its transform supplies the pixel
-    size). The carrier may be a GeoTensor or plain ndarray; when both
-    are georeferenced, their transform/CRS must match.
+    the DEM pixel size. Follows the package polarity (True = drop): with
+    the default ``keep="inside"`` the mask is True where the slope
+    (degrees) falls *outside* the requested interval. Geo-dependent on
+    the DEM side: the DEM must be a georeferenced ``GeoTensor`` (its
+    transform supplies the pixel size). The carrier may be a GeoTensor or
+    plain ndarray; when both are georeferenced, their transform/CRS must
+    match.
 
     Args:
         dem: Single-band ``GeoTensor`` whose spatial shape matches the
@@ -346,6 +384,8 @@ class SlopeMask(Operator):
             the elevation values.
         min_slope_deg: Inclusive lower bound, degrees.
         max_slope_deg: Inclusive upper bound, degrees.
+        keep: ``"inside"`` (default) keeps cells inside the interval;
+            ``"outside"`` keeps cells outside it.
 
     Examples:
         >>> SlopeMask(dem=dem, max_slope_deg=10.0)(scene)  # doctest: +SKIP
@@ -359,10 +399,12 @@ class SlopeMask(Operator):
         dem: GeoTensor,
         min_slope_deg: float | None = None,
         max_slope_deg: float | None = None,
+        keep: Keep = "inside",
     ) -> None:
         self.dem = dem
         self.min_slope_deg = min_slope_deg
         self.max_slope_deg = max_slope_deg
+        self.keep = _check_keep(keep, "SlopeMask")
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask = slope_mask(
@@ -370,6 +412,7 @@ class SlopeMask(Operator):
             _pixel_size(self.dem),
             min_slope_deg=self.min_slope_deg,
             max_slope_deg=self.max_slope_deg,
+            keep=self.keep,
         )
         _check_spatial_match(mask, gt, "SlopeMask")
         _check_dem_grid_alignment(self.dem, gt, "SlopeMask")
@@ -380,6 +423,7 @@ class SlopeMask(Operator):
             "dem": {"shape": list(self.dem.shape), "dtype": str(self.dem.dtype)},
             "min_slope_deg": self.min_slope_deg,
             "max_slope_deg": self.max_slope_deg,
+            "keep": self.keep,
         }
 
 
@@ -599,15 +643,16 @@ class CleanMask(Operator):
 
 
 class CombineMasks(Operator):
-    """Combine boolean masks with ``or``, ``and``, ``xor``, or unary ``not``.
+    """Combine equally shaped boolean masks with ``or``, ``and`` or ``xor``.
 
     Called with a *sequence* of masks (GeoTensors or plain ndarrays);
     the output takes its carrier kind — and, for GeoTensors, its
-    metadata — from the first mask in the sequence.
+    metadata — from the first mask in the sequence. Every input must
+    use the package polarity (True = drop), so ``op="or"`` drops a pixel
+    that *any* mask drops. Use :class:`InvertMask` for the complement.
 
     Args:
-        op: ``"or"`` (default), ``"and"``, ``"xor"`` (n-ary), or the
-            unary ``"not"`` which expects exactly one mask.
+        op: ``"or"`` (default), ``"and"`` or ``"xor"``.
     """
 
     def __init__(self, *, op: str = "or") -> None:
@@ -621,8 +666,10 @@ class CombineMasks(Operator):
 class InvertMask(Operator):
     """Invert a boolean mask element-wise.
 
-    Accepts a GeoTensor or a plain ndarray and returns the same carrier
-    kind. Takes no parameters.
+    The one complement operator (wraps :func:`geotoolz.mask.invert_mask`):
+    turns a keep-polarity mask (True = keep, e.g. ``validmask()``) into
+    the package's drop polarity, and back. Accepts a GeoTensor or a
+    plain ndarray and returns the same carrier kind. Takes no parameters.
     """
 
     def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
@@ -634,15 +681,16 @@ class ApplyMask(Operator):
     """Apply a boolean mask to the carrier, filling True pixels.
 
     Accepts a GeoTensor or a plain ndarray and returns the same
-    carrier kind. This is the canonical mask-application operator
-    (``geotoolz.cloud.ApplyMask`` is a deprecated alias). Delegates the
-    actual masking to :func:`geotoolz.mask._src.array.apply_mask` so the
-    broadcasting + dtype-preservation rules stay in one place.
+    carrier kind. This is the canonical mask-application operator.
+    Delegates the actual masking to
+    :func:`geotoolz.mask._src.array.apply_mask` so the broadcasting +
+    dtype-preservation rules stay in one place.
 
-    Convention: the mask is True where pixels should be *masked out*.
-    Geometry masks built with ``inside=True`` return True *inside* the
-    polygon, so use ``invert=True`` to keep only the polygon interior
-    (or build the geometry mask with ``inside=False``).
+    Convention: the mask is True where pixels should be *masked out* —
+    the polarity every ``geotoolz.mask`` and ``geotoolz.qa`` producer
+    returns, so geometry masks keep their area of interest by default.
+    Flip a keep-polarity mask (e.g. ``validmask()``) with
+    :class:`InvertMask` / :func:`~geotoolz.mask.invert_mask` first.
 
     Args:
         mask: Boolean array, ``GeoTensor``, or ``Operator`` producing
@@ -656,12 +704,11 @@ class ApplyMask(Operator):
             ``validmask()`` marks every dropped and nodata pixel.
             Note that georeader treats the fill value as nodata even when
             it is ``0``.
-        invert: Flip the mask before applying it.
 
     Examples:
         >>> import geotoolz as gz, numpy as np
         >>> aoi = gz.mask.BBoxMask(bounds=(1.0, 1.0, 3.0, 3.0))
-        >>> keep_aoi = gz.mask.ApplyMask(mask=aoi, invert=True)
+        >>> keep_aoi = gz.mask.ApplyMask(mask=aoi)  # fills outside the box
         >>> out = keep_aoi(scene)  # doctest: +SKIP
     """
 
@@ -672,18 +719,16 @@ class ApplyMask(Operator):
         *,
         mask: Operator | np.ndarray | Any,
         fill_value: float | None = None,
-        invert: bool = False,
     ) -> None:
         self.mask = mask
         self.fill_value = fill_value
-        self.invert = invert
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         mask_arr = np.asarray(
             self.mask(gt) if isinstance(self.mask, Operator) else self.mask
         )
         fill = self._resolve_fill(gt)
-        out = apply_mask(np.asarray(gt), mask_arr, fill_value=fill, invert=self.invert)
+        out = apply_mask(np.asarray(gt), mask_arr, fill_value=fill)
         if np.ndim(out) < 2:
             return wrap_like(gt, out, fill_value_default=fill)
         return wrap_filled(gt, out, fill_value_default=fill)
@@ -714,7 +759,6 @@ class ApplyMask(Operator):
         return {
             "mask": mask_config,
             "fill_value": self.fill_value,
-            "invert": self.invert,
         }
 
 

@@ -54,21 +54,40 @@ class SCL(IntEnum):
     SNOW = 11
 
 
+#: Target name → SCL classes: the vocabulary of ``S2SCL(targets=...)``
+#: and the single source for ``SENSOR_QA_REGISTRY["s2_scl"]`` and the
+#: convenience sets below.
+SCL_TARGETS: dict[str, tuple[SCL, ...]] = {
+    "no_data": (SCL.NO_DATA,),
+    "saturated": (SCL.SATURATED_OR_DEFECTIVE,),
+    "dark": (SCL.DARK_AREA_PIXELS,),
+    "cloud_shadow": (SCL.CLOUD_SHADOWS,),
+    "vegetation": (SCL.VEGETATION,),
+    "soil": (SCL.NOT_VEGETATED,),
+    "water": (SCL.WATER,),
+    "unclassified": (SCL.UNCLASSIFIED,),
+    "cloud": (SCL.CLOUD_MEDIUM_PROBABILITY, SCL.CLOUD_HIGH_PROBABILITY),
+    "cirrus": (SCL.THIN_CIRRUS,),
+    "snow": (SCL.SNOW,),
+}
+
+
+def _classes(*targets: str) -> frozenset[int]:
+    return frozenset(c for target in targets for c in SCL_TARGETS[target])
+
+
 #: Cloud-like classes — what you'd typically mask out before NDVI etc.
-SCL_CLOUDS: frozenset[int] = frozenset(
-    {SCL.CLOUD_MEDIUM_PROBABILITY, SCL.CLOUD_HIGH_PROBABILITY, SCL.THIN_CIRRUS}
-)
+#: (the ``"cloud"`` + ``"cirrus"`` targets).
+SCL_CLOUDS: frozenset[int] = _classes("cloud", "cirrus")
 
 #: Pixels you'd want to drop entirely (no-data + defective + shadows).
-SCL_INVALID: frozenset[int] = frozenset(
-    {SCL.NO_DATA, SCL.SATURATED_OR_DEFECTIVE, SCL.CLOUD_SHADOWS}
-)
+SCL_INVALID: frozenset[int] = _classes("no_data", "saturated", "cloud_shadow")
 
 #: Cloud + invalid combined — "everything I don't want for vegetation analysis".
 SCL_CLOUDS_AND_INVALID: frozenset[int] = SCL_CLOUDS | SCL_INVALID
 
 #: Land-cover classes (vegetation + bare soil).
-SCL_LAND: frozenset[int] = frozenset({SCL.VEGETATION, SCL.NOT_VEGETATED})
+SCL_LAND: frozenset[int] = _classes("vegetation", "soil")
 
 #: Water class (singleton — included for symmetry).
-SCL_WATER: frozenset[int] = frozenset({SCL.WATER})
+SCL_WATER: frozenset[int] = _classes("water")

@@ -6,10 +6,12 @@ multi-bit-field, and bit-group-reduction decoding).
 
 Two operator families live here:
 
-- *Generic* mask extraction (`MaskFromQABits`, `MaskFromSCL`,
-  `MaskValid`) — pick these when you want to feed an explicit list of
-  bits or SCL classes. Pair with `geotoolz.mask.ApplyMask` to apply the
-  result.
+- *Generic* mask extraction (`MaskClouds`, `MaskCloudShadow`,
+  `MaskCirrus`, `MaskSnow`, `MaskWater`, `MaskNoData` — one decoder,
+  several semantic names — plus `MaskInvalid`, `MaskSaturated` and the
+  multi-layer `DecodeBitmask`) — pick these when you want to feed an
+  explicit list of bits or class values. Pair with
+  `geotoolz.mask.ApplyMask` to apply the result.
 - *Sensor presets* whose defaults encode the published bit / class
   layouts (Landsat C2 ``QA_PIXEL``, Sentinel-2 ``QA60`` / ``SCL``,
   MODIS ``state_1km``). Pick these for "give me the standard cloud mask
@@ -19,8 +21,15 @@ Both layers return a boolean mask following the project convention:
 **True = mask this pixel out**. Bit decoding is metadata-independent, so
 every operator accepts either a ``GeoTensor`` or a plain ``np.ndarray``
 and returns the same carrier kind (string ``qa_band`` selectors and the
-fill-value fallback of `MaskNoData` are the metadata-dependent
-exceptions — they require a GeoTensor).
+fill-value path of `MaskInvalid` / `MaskNoData` are the
+metadata-dependent exceptions — they require a GeoTensor or an explicit
+``invalid_value``).
+
+One vocabulary throughout: ``qa_band`` selects the QA band from a stack
+(``None`` = the carrier itself *is* the QA band), ``bits`` lists
+independent flag bits, ``values`` lists categorical class / field
+values, and the sensor presets take ``targets`` — names from
+`SENSOR_QA_REGISTRY` to mask out.
 
 The band axis is ``-3`` by default. A ``(T, C, H, W)`` time stack is
 decoded frame by frame into a ``(T, 1, H, W)`` mask
@@ -47,14 +56,14 @@ from pipekit import Operator
 from geotoolz._src.bands import resolve_band, strip_band_attrs
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
 from geotoolz._src.shape import over_frames
-from geotoolz._src.valid import invalid_values, is_fill
+from geotoolz._src.valid import invalid_values, valid_pixels, wrap_filled
 from geotoolz._src.wrap import wrap_like
 from geotoolz.qa._src.array import (
     mask_from_bit_field,
     mask_from_qa_bits,
     mask_from_scl,
 )
-from geotoolz.qa._src.scl import SCL
+from geotoolz.qa._src.scl import SCL_TARGETS
 
 
 if TYPE_CHECKING:
@@ -95,23 +104,11 @@ SENSOR_QA_REGISTRY: dict[str, dict[str, dict[str, tuple[int, ...]]]] = {
         "cloud": {"bits": (10,)},
         "cirrus": {"bits": (11,)},
     },
+    # Derived from `geotoolz.qa._src.scl.SCL_TARGETS` so the registry and
+    # the SCL_* convenience sets cannot disagree.
     "s2_scl": {
-        "no_data": {"values": (int(SCL.NO_DATA),)},
-        "saturated": {"values": (int(SCL.SATURATED_OR_DEFECTIVE),)},
-        "dark": {"values": (int(SCL.DARK_AREA_PIXELS),)},
-        "cloud_shadow": {"values": (int(SCL.CLOUD_SHADOWS),)},
-        "vegetation": {"values": (int(SCL.VEGETATION),)},
-        "soil": {"values": (int(SCL.NOT_VEGETATED),)},
-        "water": {"values": (int(SCL.WATER),)},
-        "unclassified": {"values": (int(SCL.UNCLASSIFIED),)},
-        "cloud": {
-            "values": (
-                int(SCL.CLOUD_MEDIUM_PROBABILITY),
-                int(SCL.CLOUD_HIGH_PROBABILITY),
-            )
-        },
-        "cirrus": {"values": (int(SCL.THIN_CIRRUS),)},
-        "snow": {"values": (int(SCL.SNOW),)},
+        name: {"values": tuple(int(c) for c in classes)}
+        for name, classes in SCL_TARGETS.items()
     },
     # Landsat 8/9 Collection-2 Level-2 QA_PIXEL (LSDS-1619 Table 6-3).
     "landsat_qa_pixel": {
@@ -256,18 +253,6 @@ def _registry_bit_groups(
     return out
 
 
-def _registry_values(sensor: str, targets: Sequence[str]) -> tuple[int, ...]:
-    """Collect class-value lists from a registry slice."""
-    sensor_def = SENSOR_QA_REGISTRY[sensor]
-    values: list[int] = []
-    for target in targets:
-        try:
-            values.extend(sensor_def[target]["values"])
-        except KeyError as exc:
-            raise ValueError(f"unknown {sensor} QA target: {target!r}") from exc
-    return tuple(values)
-
-
 def _decode_targets_to_mask(
     qa: np.ndarray,
     sensor: str,
@@ -291,7 +276,7 @@ def _decode_targets_to_mask(
 class DecodeBitmask(Operator):
     """Unpack a QA bitmask into named boolean mask layers.
 
-    A more general sibling of `MaskFromQABits`: instead
+    A more general sibling of `MaskClouds` (``bits=`` mode): instead
     of returning a single OR-ed mask, this operator returns a *stacked*
     multi-band boolean carrier with one layer per named entry in
     ``bits``.
@@ -377,154 +362,56 @@ class DecodeBitmask(Operator):
         }
 
 
-class MaskFromQABits(Operator):
-    """Extract a boolean mask from a Landsat-style bitmask QA band.
+def _invalid_mask(
+    gt: GeoTensor | np.ndarray,
+    invalid_value: float | None,
+    axis: int,
+    name: str,
+) -> np.ndarray:
+    """Per-pixel invalid mask shared by `MaskInvalid` and `MaskNoData`.
 
-    Pulls the band at index ``band_idx`` from the carrier, then returns
-    True where ANY of the supplied ``bits`` is set. Accepts a GeoTensor
-    or a plain ndarray and returns the same carrier kind.
-
-    For Landsat-8 Collection-2 ``QA_PIXEL``: cloud is bit 3, cirrus is
-    bit 2, cloud-shadow is bit 4. So
-    ``MaskFromQABits(band_idx=-1, bits=[2, 3, 4])`` builds the standard
-    "everything non-clear" mask.
-
-    Args:
-        band_idx: Index of the QA band along the carrier's channel
-            axis. ``-1`` for "last band" is the typical convention.
-        bits: Bit positions to test.
-        axis: Position of the band axis. Default ``-3``.
-        invert: Return True for *unset* bits instead.
-
-    Examples:
-        >>> from geotoolz.qa import MaskFromQABits
-        >>> # Landsat-8 cloud + cirrus + shadow.
-        >>> qa_op = MaskFromQABits(band_idx=-1, bits=[2, 3, 4])
-        >>> cloudy = qa_op(landsat_stack_geotensor)  # (H, W) bool GeoTensor
+    An element is invalid when it equals the fill (a ``NaN`` fill matches
+    ``NaN``) or is non-finite (see :mod:`geotoolz._src.valid`); a pixel is
+    invalid when any band is.
     """
-
-    def __init__(
-        self,
-        *,
-        band_idx: int,
-        bits: Sequence[int],
-        axis: int = -3,
-        invert: bool = False,
-    ) -> None:
-        self.band_idx = band_idx
-        self.bits = tuple(bits)
-        self.axis = axis
-        self.invert = invert
-
-    @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        qa = np.take(np.asarray(gt), self.band_idx, axis=self.axis)
-        mask = mask_from_qa_bits(qa, self.bits, invert=self.invert)
-        return wrap_like(gt, mask, fill_value_default=False)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "band_idx": self.band_idx,
-            "bits": list(self.bits),
-            "axis": self.axis,
-            "invert": self.invert,
-        }
+    fill = (
+        invalid_value
+        if invalid_value is not None
+        else getattr(gt, "fill_value_default", None)
+    )
+    if fill is None:
+        raise ValueError(
+            f"{name}: no invalid_value provided and the carrier has no "
+            "fill_value_default. Pass `invalid_value=...` explicitly."
+        )
+    invalid = invalid_values(gt, fill_value=fill)
+    return invalid if invalid.ndim <= 2 else np.any(invalid, axis=axis)
 
 
-class MaskFromSCL(Operator):
-    """Extract a boolean mask from a Sentinel-2 SCL band by class membership.
+class MaskInvalid(Operator):
+    """Mark invalid (nodata) pixels: True = invalid, drop it.
 
-    Pulls the band at index ``band_idx`` from the carrier, returns True
-    where the SCL value equals any of the listed ``classes``. Accepts a
-    GeoTensor or a plain ndarray and returns the same carrier kind.
+    The package-polarity counterpart of georeader's
+    ``GeoTensor.invalidmask()`` reduced over bands: a pixel is invalid
+    when *any* band equals the fill value or is non-finite. Unlike
+    georeader's comparison, a ``NaN`` fill (``fill_value_default=nan``)
+    matches ``NaN`` pixels (see :mod:`geotoolz._src.valid`).
 
-    Pair with `geotoolz.qa.SCL_CLOUDS` (the canonical cloud-class
-    bundle) for "everything cloudy" or pass an explicit list of `SCL`
-    enum members for finer control.
-
-    Args:
-        band_idx: Index of the SCL band along the carrier's channel
-            axis. For Sentinel-2 stacks where SCL is appended last,
-            ``-1`` works; for the per-band-resolution L2A products
-            where SCL is a separate file, the band-stack convention
-            depends on how you loaded it.
-        classes: SCL class IDs to match. Accepts raw ints or `SCL`
-            enum members.
-        axis: Position of the band axis. Default ``-3``.
-        invert: When True, return True where the SCL value is NOT in
-            ``classes`` (keep-only-these mask).
-
-    Examples:
-        >>> from geotoolz.qa import MaskFromSCL, SCL_CLOUDS
-        >>> # Standard "drop everything cloudy" mask.
-        >>> cloud_op = MaskFromSCL(band_idx=-1, classes=SCL_CLOUDS)
-        >>> cloudy = cloud_op(s2_l2a_geotensor)
-        >>>
-        >>> # Or: "keep only vegetation and water"
-        >>> from geotoolz.qa import SCL
-        >>> keep = MaskFromSCL(
-        ...     band_idx=-1,
-        ...     classes=[SCL.VEGETATION, SCL.WATER],
-        ...     invert=True,  # True = mask out everything NOT in classes
-        ... )
-    """
-
-    def __init__(
-        self,
-        *,
-        band_idx: int,
-        classes: Sequence[int],
-        axis: int = -3,
-        invert: bool = False,
-    ) -> None:
-        if len(classes) == 0:
-            raise ValueError("MaskFromSCL: `classes` must not be empty")
-        self.band_idx = band_idx
-        # Cast through int so enum members + raw ints both serialize.
-        self.classes = tuple(int(c) for c in classes)
-        self.axis = axis
-        self.invert = invert
-
-    @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        scl = np.take(np.asarray(gt), self.band_idx, axis=self.axis)
-        mask = mask_from_scl(scl, self.classes, invert=self.invert)
-        return wrap_like(gt, mask, fill_value_default=False)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "band_idx": self.band_idx,
-            "classes": list(self.classes),
-            "axis": self.axis,
-            "invert": self.invert,
-        }
-
-
-class MaskValid(Operator):
-    """Mark pixels equal to a sentinel "invalid" value.
-
-    Returns a boolean carrier where True means "this pixel is invalid
-    and should probably be dropped." Uses the carrier's
-    ``fill_value_default`` by default; pass ``invalid_value`` explicitly
-    to mark a different sentinel (required for plain-ndarray carriers,
-    which have no fill value).
-
-    The mask broadcasts across all bands — a pixel is invalid if it
-    matches the sentinel in ANY band. (Use a per-band check if you'd
-    rather mask only where every band is invalid.) A ``NaN`` sentinel
-    (e.g. ``fill_value_default=nan``) matches ``NaN`` pixels.
+    Uses the carrier's ``fill_value_default`` by default; pass
+    ``invalid_value`` explicitly to mark a different sentinel (required
+    for plain-ndarray carriers, which have no fill value).
 
     Args:
         invalid_value: Sentinel value treated as "invalid". ``None``
             uses the carrier's ``fill_value_default``.
         axis: Position of the band axis (used for the per-pixel
-            ANY-band reduction). Default ``0``.
+            ANY-band reduction). Default ``-3``.
 
     Examples:
         >>> from geotoolz.mask import ApplyMask
-        >>> from geotoolz.qa import MaskValid
-        >>> mask = MaskValid()(geotensor)        # True = invalid
-        >>> clean = ApplyMask(mask=MaskValid())(geotensor)  # NaN-fills invalid
+        >>> from geotoolz.qa import MaskInvalid
+        >>> mask = MaskInvalid()(geotensor)  # True = invalid
+        >>> clean = ApplyMask(mask=MaskInvalid(), fill_value=np.nan)(geotensor)
     """
 
     def __init__(
@@ -535,30 +422,35 @@ class MaskValid(Operator):
 
     @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        sentinel = (
-            self.invalid_value
-            if self.invalid_value is not None
-            else getattr(gt, "fill_value_default", None)
-        )
-        if sentinel is None:
-            raise ValueError(
-                "MaskValid: no invalid_value provided and the carrier has no "
-                "fill_value_default. Pass `invalid_value=...` explicitly."
-            )
-        match = is_fill(np.asarray(gt), sentinel)
-        mask = match if match.ndim <= 2 else np.any(match, axis=self.axis)
+        mask = _invalid_mask(gt, self.invalid_value, self.axis, "MaskInvalid")
         return wrap_like(gt, mask, fill_value_default=False)
 
 
 class _QAMask(Operator):
-    """Base class for single-target QA mask shortcuts.
+    """The one generic QA decoder behind the ``Mask*`` shortcuts.
 
     Subclasses differ only by semantic name (``MaskClouds``,
     ``MaskCirrus``, ...) — the runtime behaviour is identical and
-    delegates to the cloud-module primitives. Accepts a ``GeoTensor``
+    delegates to the `geotoolz.qa` primitives. Accepts a ``GeoTensor``
     or a plain ``np.ndarray`` and returns the same carrier kind
     (string ``qa_band`` selectors require a GeoTensor with band-name
     attrs).
+
+    Args:
+        qa_band: Integer or named band selector for the QA band. ``None``
+            (default) treats the carrier itself as the QA band.
+        bits: Independent flag bits; a pixel is marked when any
+            (``mode="any"``) or every (``mode="all"``) bit is set.
+        values: Categorical values (e.g. SCL classes) to mark. Pass
+            exactly one of ``bits`` / ``values``.
+        mode: ``"any"`` (default) or ``"all"``; only used with ``bits``.
+        axis: Position of the band axis. Default ``-3``.
+        invert: Mark pixels that do *not* match instead — a keep-list
+            (e.g. ``values=[SCL.VEGETATION], invert=True`` drops every
+            other class).
+
+    Returns:
+        GeoTensor | numpy.ndarray: Boolean mask, True = drop.
     """
 
     _target_name: ClassVar[str] = "qa"
@@ -566,7 +458,7 @@ class _QAMask(Operator):
     def __init__(
         self,
         *,
-        qa_band: BandSelector,
+        qa_band: BandSelector = None,
         bits: Sequence[int] | None = None,
         values: Sequence[int] | None = None,
         mode: str = "any",
@@ -612,6 +504,9 @@ class MaskClouds(_QAMask):
         >>> from geotoolz.qa import MaskClouds
         >>> # Sentinel-2 QA60: bit 10 is "opaque clouds".
         >>> mask = MaskClouds(qa_band="QA60", bits=[10])(s2_geotensor)
+        >>> # Sentinel-2 SCL: the cloud-like classes.
+        >>> from geotoolz.qa import SCL_CLOUDS
+        >>> mask = MaskClouds(qa_band="SCL", values=sorted(SCL_CLOUDS))(s2_l2a)
     """
 
 
@@ -655,17 +550,19 @@ class MaskWater(_QAMask):
     """
 
 
-class MaskNoData(Operator):
+class MaskNoData(_QAMask):
     """Return True where pixels are no-data by QA value or carrier fill value.
 
     Two operating modes:
 
-    1. **QA-driven**: pass ``qa_band``/``bits``/``values`` to decode
-       no-data from a dedicated QA band.
-    2. **Fill-driven** (default): without QA arguments, pixels that are
-       invalid in *any* band -- equal to the carrier's
-       ``fill_value_default`` (a ``NaN`` fill matches ``NaN``) or
-       non-finite -- are marked (see :mod:`geotoolz._src.valid`).
+    1. **QA-driven**: pass ``bits`` / ``values`` (plus ``qa_band`` when
+       the QA band is part of a stack) to decode no-data from a
+       dedicated QA band, exactly like the other `_QAMask` shortcuts.
+    2. **Fill-driven** (default): without ``bits`` / ``values`` it is
+       `MaskInvalid` — pixels invalid in *any* band (equal to the
+       carrier's ``fill_value_default``, a ``NaN`` fill matching
+       ``NaN``, or non-finite) are marked (see
+       :mod:`geotoolz._src.valid`).
 
     The QA-driven mode accepts a ``GeoTensor`` or a plain ``np.ndarray``
     and returns the same carrier kind; the fill-driven mode reads
@@ -673,10 +570,12 @@ class MaskNoData(Operator):
     ``fill_value_default``.
 
     Args:
-        qa_band: Optional QA band selector.
+        qa_band: Optional QA band selector (QA-driven mode only).
         bits: Bit positions that mark no-data.
         values: Categorical values that mark no-data (e.g. SCL=0).
+        mode: ``"any"`` (default) or ``"all"``; only used with ``bits``.
         axis: Position of the band axis. Default ``-3``.
+        invert: Flip the QA-driven mask (see `MaskClouds`).
 
     Returns:
         GeoTensor: Boolean no-data mask.
@@ -689,58 +588,39 @@ class MaskNoData(Operator):
         >>> nodata = MaskNoData()(carrier_with_fill_value)
     """
 
-    def __init__(
-        self,
-        *,
-        qa_band: BandSelector = None,
-        bits: Sequence[int] | None = None,
-        values: Sequence[int] | None = None,
-        axis: int = -3,
-    ) -> None:
-        self.qa_band = qa_band
-        self.bits = _normalize_int_sequence(bits, "bits")
-        self.values = _normalize_int_sequence(values, "values")
-        self.axis = axis
-
     @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        if self.bits is not None or self.values is not None or self.qa_band is not None:
-            qa = _select_qa(gt, self.qa_band, self.axis)
-            mask = _mask_from_definition(
-                qa, bits=self.bits, values=self.values, mode="any"
+        if self.bits is not None or self.values is not None:
+            return super()._apply(gt)
+        if self.qa_band is not None:
+            raise ValueError(
+                "MaskNoData: qa_band needs bits or values to decode; drop "
+                "qa_band to fall back to the carrier fill value."
             )
-        else:
-            fill_value = getattr(gt, "fill_value_default", None)
-            if fill_value is None:
-                raise ValueError(
-                    "MaskNoData: no qa_band/bits/values provided and the carrier "
-                    "has no fill_value_default."
-                )
-            invalid = invalid_values(gt, fill_value=fill_value)
-            mask = invalid if invalid.ndim <= 2 else np.any(invalid, axis=self.axis)
+        mask = _invalid_mask(gt, None, self.axis, "MaskNoData")
         return wrap_like(gt, mask, fill_value_default=False)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "qa_band": self.qa_band,
-            "bits": None if self.bits is None else list(self.bits),
-            "values": None if self.values is None else list(self.values),
-            "axis": self.axis,
-        }
 
 
 class MaskSaturated(Operator):
-    """Return True where pixels equal a saturation value.
+    """Return True where pixels are at or above a saturation value.
+
+    The one saturation mask in the package. Nodata pixels (fill value or
+    non-finite, see :mod:`geotoolz._src.valid`) are never reported as
+    saturated — so a ``uint16`` fill at the dtype maximum is not flagged
+    — and the output declares ``fill_value_default=False``.
 
     Args:
-        qa_band: Optional band selector. When omitted, all bands are
-            checked and the per-pixel OR-reduction across bands is
-            returned.
-        saturation_value: Explicit saturation value. If omitted for
-            integer arrays, the dtype maximum is used; float arrays
-            require an explicit value.
+        qa_band: Optional band selector. When omitted, every band is
+            tested.
+        saturation_value: Saturation threshold; pixels ``>=`` it are
+            flagged. If omitted for integer arrays, the dtype maximum is
+            used; float arrays require an explicit value.
+        reduce_bands: When True (default) and ``qa_band`` is None,
+            OR-reduce the per-band flags over ``axis`` into one
+            ``(H, W)`` mask; when False, return one flag per band
+            (same shape as the input).
         axis: Position of the band axis (used for the cross-band
-            reduction when ``qa_band`` is None).
+            reduction).
 
     Returns:
         GeoTensor | numpy.ndarray: Boolean mask with saturated pixels
@@ -752,8 +632,8 @@ class MaskSaturated(Operator):
         >>> from geotoolz.qa import MaskSaturated
         >>> # uint16 Sentinel-2 — saturation_value defaults to 65535.
         >>> sat = MaskSaturated()(s2_uint16_stack)
-        >>> # Explicit value for reflectance ratios.
-        >>> sat = MaskSaturated(saturation_value=1.0)(reflectance_stack)
+        >>> # Per-band flags at a reflectance ceiling.
+        >>> sat = MaskSaturated(saturation_value=1.0, reduce_bands=False)(refl)
     """
 
     def __init__(
@@ -761,10 +641,12 @@ class MaskSaturated(Operator):
         *,
         qa_band: BandSelector = None,
         saturation_value: float | int | None = None,
+        reduce_bands: bool = True,
         axis: int = -3,
     ) -> None:
         self.qa_band = qa_band
         self.saturation_value = saturation_value
+        self.reduce_bands = reduce_bands
         self.axis = axis
 
     @over_frames
@@ -777,10 +659,11 @@ class MaskSaturated(Operator):
                     "MaskSaturated: pass saturation_value for non-integer inputs."
                 )
             saturation_value = np.iinfo(arr.dtype).max
-        mask = arr == saturation_value
-        if self.qa_band is None and np.asarray(gt).ndim > 2:
+        mask = arr >= saturation_value
+        if self.reduce_bands and self.qa_band is None and mask.ndim > 2:
             mask = np.any(mask, axis=self.axis)
-        return wrap_like(gt, mask, fill_value_default=False)
+        valid = valid_pixels(gt) if np.ndim(gt) >= 2 else ~invalid_values(gt)
+        return wrap_filled(gt, mask, fill_value_default=False, valid=valid)
 
 
 # ---------------------------------------------------------------------------
@@ -792,7 +675,8 @@ class S2QA60(Operator):
     """Sentinel-2 L1C QA60 cloud + cirrus mask preset.
 
     QA60 (per ESA's S2 L1C product specification) encodes opaque clouds
-    in bit 10 and cirrus in bit 11. Returns True where either is set.
+    in bit 10 and cirrus in bit 11 (``SENSOR_QA_REGISTRY["s2_qa60"]``).
+    Returns True where any requested ``targets`` bit is set.
 
     Note: QA60 is unreliable / zeroed-out on newer processing baselines
     (≥ 04.00). Prefer the L2A SCL band (`S2SCL`) or an ML-based
@@ -804,6 +688,8 @@ class S2QA60(Operator):
 
     Args:
         qa_band: Band selector for QA60 within the input stack.
+        targets: Target names to OR together (``"cloud"``,
+            ``"cirrus"``). Default both.
         axis: Band axis position. Default ``-3``.
 
     Examples:
@@ -811,29 +697,46 @@ class S2QA60(Operator):
         >>> mask = S2QA60()(s2_l1c_stack_with_qa60_appended)
     """
 
-    def __init__(self, *, qa_band: int | str = "QA60", axis: int = -3) -> None:
+    def __init__(
+        self,
+        *,
+        qa_band: int | str = "QA60",
+        targets: Sequence[str] = ("cloud", "cirrus"),
+        axis: int = -3,
+    ) -> None:
         self.qa_band = qa_band
+        self.targets = tuple(str(target) for target in targets)
         self.axis = axis
 
     @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         qa = _select_qa(gt, self.qa_band, self.axis)
-        mask = mask_from_qa_bits(qa, (10, 11))
+        mask = _decode_targets_to_mask(qa, "s2_qa60", self.targets)
         return wrap_like(gt, mask, fill_value_default=False)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "qa_band": self.qa_band,
+            "targets": list(self.targets),
+            "axis": self.axis,
+        }
 
 
 class S2SCL(Operator):
-    """Sentinel-2 L2A SCL preset that masks pixels outside ``keep`` classes.
+    """Sentinel-2 L2A SCL preset that masks the requested ``targets`` classes.
 
-    Returns True for pixels to mask: every SCL class *except* those
-    named in ``keep``. By default vegetation, soil, and water are kept.
+    Returns True for pixels whose SCL class belongs to any of the named
+    ``targets`` (see ``SENSOR_QA_REGISTRY["s2_scl"]``, derived from
+    `geotoolz.qa.SCL`). The default targets are every class except
+    vegetation, soil and water — i.e. vegetation, soil, and water are
+    kept.
 
     Accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns the
     same carrier kind; plain arrays need an integer ``qa_band``.
 
     Args:
         qa_band: Band selector for the SCL band.
-        keep: Class names to keep (do not mask). See
+        targets: Class names to mask out. See
             ``SENSOR_QA_REGISTRY["s2_scl"]`` for the full vocabulary.
         axis: Band axis position. Default ``-3``.
 
@@ -841,32 +744,44 @@ class S2SCL(Operator):
         >>> from geotoolz.qa import S2SCL
         >>> # Default: mask everything that isn't vegetation/soil/water.
         >>> mask = S2SCL()(s2_l2a_with_scl)
-        >>> # Custom: keep only vegetation.
-        >>> mask = S2SCL(keep=["vegetation"])(s2_l2a_with_scl)
+        >>> # Custom: mask clouds, cirrus and cloud shadow only.
+        >>> mask = S2SCL(targets=["cloud", "cirrus", "cloud_shadow"])(s2_l2a)
     """
+
+    _DEFAULT_TARGETS: ClassVar[tuple[str, ...]] = (
+        "no_data",
+        "saturated",
+        "dark",
+        "cloud_shadow",
+        "unclassified",
+        "cloud",
+        "cirrus",
+        "snow",
+    )
 
     def __init__(
         self,
         *,
         qa_band: int | str = "SCL",
-        keep: Sequence[str] = ("vegetation", "soil", "water"),
+        targets: Sequence[str] = _DEFAULT_TARGETS,
         axis: int = -3,
     ) -> None:
         self.qa_band = qa_band
-        self.keep = tuple(str(name) for name in keep)
+        self.targets = tuple(str(name) for name in targets)
         self.axis = axis
 
     @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        keep_values = _registry_values("s2_scl", self.keep)
         qa = _select_qa(gt, self.qa_band, self.axis)
-        # `invert=True` turns "in the keep set" into "NOT in the keep set"
-        # — i.e. "mask this pixel out".
-        mask = mask_from_scl(qa, keep_values, invert=True)
+        mask = _decode_targets_to_mask(qa, "s2_scl", self.targets)
         return wrap_like(gt, mask, fill_value_default=False)
 
     def get_config(self) -> dict[str, Any]:
-        return {"qa_band": self.qa_band, "keep": list(self.keep), "axis": self.axis}
+        return {
+            "qa_band": self.qa_band,
+            "targets": list(self.targets),
+            "axis": self.axis,
+        }
 
 
 class LandsatQA_PIXEL(Operator):

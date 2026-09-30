@@ -27,7 +27,6 @@ from geotoolz.restore import (
     NLMeans,
     OutlierMask,
     ReplaceOutliers,
-    SaturationFlag,
     bilateral_denoise,
     despeckle_lee,
     destripe_column,
@@ -219,14 +218,6 @@ def test_outlier_mask_and_replacement() -> None:
     assert np.asarray(replaced)[1, 2] == 1.0
 
 
-def test_saturation_flag_uses_dtype_max() -> None:
-    arr = np.array([[0, 255]], dtype=np.uint8)
-    out = SaturationFlag()(toy_geotensor(arr))
-    np.testing.assert_array_equal(np.asarray(out), [[False, True]])
-    thresholded = SaturationFlag(threshold=0.5)(toy_geotensor(np.array([[0.25, 0.75]])))
-    np.testing.assert_array_equal(np.asarray(thresholded), [[False, True]])
-
-
 # ----------------------------------------------------------------------------
 # Known-answer tests for gap-fill primitives.
 # A single NaN surrounded by 1s should be filled with ~1 by every method
@@ -325,7 +316,6 @@ def test_operator_configs_are_json_safe() -> None:
         GapFillNearest(max_distance=5),
         OutlierMask(method="zscore", k=3.0),
         ReplaceOutliers(method="mad", k=3.0, fill="interp"),
-        SaturationFlag(threshold=0.5),
     ]
     for op in operators:
         config = op.get_config()
@@ -365,7 +355,6 @@ def test_inverse_mnf_is_forbidden_in_yaml() -> None:
             lambda: ReplaceOutliers(method="mad", k=3.0, fill="interp"),
             id="ReplaceOutliers",
         ),
-        pytest.param(lambda: SaturationFlag(threshold=0.5), id="SaturationFlag"),
     ],
 )
 def test_operators_accept_plain_ndarray(make_op) -> None:
@@ -487,13 +476,6 @@ def test_fill_pixels_are_excluded_from_masks_and_pca_fit() -> None:
     assert not np.asarray(outliers).any()
     # A boolean flag declares False, not the input's -9999 (#146).
     assert outliers.fill_value_default is False
-
-    # SaturationFlag: a uint16 fill at the dtype max is not "saturated".
-    counts = np.full((1, 4, 4), 100, dtype=np.uint16)
-    sat_gt = toy_geotensor(counts, fill_value_default=65535, with_fill_pixels=True)
-    saturated = SaturationFlag()(sat_gt)
-    assert not np.asarray(saturated).any()
-    assert saturated.fill_value_default is False
 
     # MNF: fitted on valid pixels only; the scores' NaN nodata carries
     # through the inverse.
