@@ -8,6 +8,11 @@ import numpy as np
 import scipy.ndimage as ndi
 from jaxtyping import Bool, Float, Shaped
 
+from geotoolz._src.labels import (
+    Connectivity,
+    label_components,
+    remove_small_holes as _remove_small_holes_2d,
+)
 from geotoolz._src.shape import single_band
 
 
@@ -217,17 +222,21 @@ def buffer_mask(
 
 
 def remove_small_objects(
-    mask: Bool[np.ndarray, "*batch h w"], min_size: int
+    mask: Bool[np.ndarray, "*batch h w"],
+    min_size: int,
+    *,
+    connectivity: Connectivity = 4,
 ) -> Bool[np.ndarray, "*batch h w"]:
     """Remove connected True components smaller than ``min_size`` pixels.
 
-    Connectivity is 4-neighbour (:func:`scipy.ndimage.label` default).
-    Each leading (batch / band) slice is cleaned independently.
+    Delegates to :func:`geotoolz.measure.label_components`. Each leading
+    (batch / band) slice is cleaned independently.
 
     Args:
         mask: Boolean mask, at least 2-D; trailing axes are ``(H, W)``.
         min_size: Minimum component area, in pixels, for a component to
             be kept. ``0`` keeps everything.
+        connectivity: ``4`` (default) or ``8`` neighbourhood.
 
     Returns:
         The cleaned boolean mask, same shape as ``mask``.
@@ -238,11 +247,16 @@ def remove_small_objects(
     """
     if min_size < 0:
         raise ValueError("remove_small_objects: `min_size` must be non-negative")
-    return _apply_spatial(mask, _remove_small_objects_2d, min_size=min_size)
+    return _apply_spatial(
+        mask, _remove_small_objects_2d, min_size=min_size, connectivity=connectivity
+    )
 
 
 def remove_small_holes(
-    mask: Bool[np.ndarray, "*batch h w"], area_threshold: int
+    mask: Bool[np.ndarray, "*batch h w"],
+    area_threshold: int,
+    *,
+    connectivity: Connectivity = 4,
 ) -> Bool[np.ndarray, "*batch h w"]:
     """Fill enclosed False components up to ``area_threshold`` pixels.
 
@@ -253,6 +267,8 @@ def remove_small_holes(
         mask: Boolean mask, at least 2-D; trailing axes are ``(H, W)``.
         area_threshold: Maximum hole area, in pixels, to fill. ``0``
             fills nothing.
+        connectivity: ``4`` (default) or ``8`` neighbourhood used to
+            group background pixels into holes.
 
     Returns:
         The filled boolean mask, same shape as ``mask``.
@@ -263,7 +279,13 @@ def remove_small_holes(
     """
     if area_threshold < 0:
         raise ValueError("remove_small_holes: `area_threshold` must be non-negative")
-    return _apply_spatial(mask, _remove_small_holes_2d, area_threshold=area_threshold)
+    return _apply_spatial(
+        mask,
+        _remove_small_holes_2d,
+        max_area=area_threshold,
+        connectivity=connectivity,
+        exclude_border=True,
+    )
 
 
 def clean_mask(
@@ -484,38 +506,9 @@ def _buffer_2d(
 
 
 def _remove_small_objects_2d(
-    mask: Bool[np.ndarray, "h w"], *, min_size: int
+    mask: Bool[np.ndarray, "h w"], *, min_size: int, connectivity: Connectivity
 ) -> Bool[np.ndarray, "h w"]:
-    labels, num = ndi.label(mask)
-    if num == 0 or min_size == 0:
-        return mask.copy()
-    sizes = np.bincount(labels.ravel())
-    keep = sizes >= min_size
-    keep[0] = False
-    return keep[labels]
-
-
-def _remove_small_holes_2d(
-    mask: Bool[np.ndarray, "h w"], *, area_threshold: int
-) -> Bool[np.ndarray, "h w"]:
-    inv = ~mask
-    labels, num = ndi.label(inv)
-    if num == 0 or area_threshold == 0:
-        return mask.copy()
-
-    border_labels = set(
-        np.unique(
-            np.concatenate(
-                [labels[0, :], labels[-1, :], labels[1:-1, 0], labels[1:-1, -1]]
-            )
-        )
-    )
-
-    sizes = np.bincount(labels.ravel())
-    fill = np.zeros(num + 1, dtype=bool)
-    for label in range(1, num + 1):
-        fill[label] = label not in border_labels and sizes[label] <= area_threshold
-    return mask | fill[labels]
+    return label_components(mask, connectivity=connectivity, min_area=min_size) > 0
 
 
 def apply_mask(

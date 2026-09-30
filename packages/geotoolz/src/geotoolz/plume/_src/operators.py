@@ -38,12 +38,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from georeader import vectorize
 from pipekit import Operator
 from pyproj import CRS, Transformer
-from rasterio import features
-from shapely.geometry import LineString, shape
+from shapely.geometry import LineString
 from shapely.ops import unary_union
-from skimage.measure import regionprops_table
 
 from geotoolz._src.bands import SENTINEL2_L2A_BANDS, BandRef, resolve_band
 from geotoolz._src.config import (
@@ -52,6 +51,11 @@ from geotoolz._src.config import (
     reject_config_summary,
 )
 from geotoolz._src.geo import require_geotensor
+from geotoolz._src.labels import (
+    DEFAULT_REGIONPROPS,
+    regionprops_frame,
+    skeleton_length,
+)
 from geotoolz._src.shape import keep_band_axis, over_frames, require_ndim
 from geotoolz._src.valid import (
     carried_fill,
@@ -78,23 +82,6 @@ from geotoolz.plume._src.array import (
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
-
-
-PLUME_REGIONPROPS: tuple[str, ...] = (
-    "label",
-    "area",
-    "area_convex",
-    "area_filled",
-    "centroid",
-    "major_axis_length",
-    "minor_axis_length",
-    "orientation",
-    "eccentricity",
-    "solidity",
-    "perimeter",
-    "bbox",
-    "inertia_tensor_eigvals",
-)
 
 
 def _band_position(carrier: GeoTensor | np.ndarray, band: BandRef, axis: int) -> int:
@@ -381,7 +368,10 @@ class PlumeContours(Operator):
 class PlumeFootprint(Operator):
     """Vectorize a plume mask into polygons with per-plume metadata.
 
-    Implemented over :func:`skimage.measure.regionprops_table`. Returns a
+    The region properties come from the same machinery as
+    :class:`geotoolz.measure.RegionProps` (defaults to
+    :data:`geotoolz.measure.DEFAULT_REGIONPROPS`, pixel units) and the
+    polygons from :func:`georeader.vectorize.get_polygons`. Returns a
     ``GeoDataFrame`` with one row per surviving plume: ``geometry``, ``area_m2``,
     ``centroid``,
     ``mean_enhancement`` / ``max_enhancement`` (if ``enhancement`` is
@@ -431,7 +421,9 @@ class PlumeFootprint(Operator):
         self.min_area_m2 = min_area_m2
         self.simplify_tolerance = simplify_tolerance
         self.enhancement = reject_config_summary(enhancement, "enhancement")
-        self.properties = tuple(PLUME_REGIONPROPS if properties is None else properties)
+        self.properties = tuple(
+            DEFAULT_REGIONPROPS if properties is None else properties
+        )
         self.extra_properties = (
             None
             if extra_properties is None
@@ -463,13 +455,11 @@ class PlumeFootprint(Operator):
                 for prop in ("centroid_weighted", "mean_intensity", "max_intensity")
                 if prop not in properties
             )
-        props = pd.DataFrame(
-            regionprops_table(
-                labels,
-                intensity_image=enh,
-                properties=properties,
-                extra_properties=self.extra_properties,
-            )
+        props = regionprops_frame(
+            labels,
+            intensity_image=enh,
+            properties=properties,
+            extra_properties=self.extra_properties,
         )
         # Cast keys to int defensively: skimage returns numpy-int labels and
         # pandas to_dict("index") propagates that dtype. Python int hashes
@@ -491,18 +481,14 @@ class PlumeFootprint(Operator):
             props_by_label = {int(k): v for k, v in indexed.to_dict("index").items()}
 
         rows: list[dict[str, Any]] = []
-        labels_i32 = labels.astype(np.int32, copy=False)
         for label_id in sorted(int(v) for v in np.unique(labels) if v != 0):
             component = labels == label_id
             n_pixels = int(component.sum())
-            # ``mask=component`` already restricts the output to this
-            # connected component, so no value-based filter is needed.
-            geometries = [
-                shape(geom)
-                for geom, _ in features.shapes(
-                    labels_i32, mask=component, transform=gt.transform
-                )
-            ]
+            # One component can still vectorise to several 4-connected
+            # polygons (diagonal-only contacts); union them.
+            geometries = vectorize.get_polygons(
+                component, min_area=0.0, tolerance=0.0, transform=gt.transform
+            )
             if not geometries:
                 continue
             geometry = unary_union(geometries)
@@ -1021,8 +1007,9 @@ class PlumeShapeFilter(Operator):
     elongated plume features from compact false positives. Per instance:
 
     1. ``area = mask.sum()``; drop when below ``min_area``.
-    2. ``fiber_length`` = skeleton-graph diameter (see
-       :class:`geotoolz.measure.SkeletonLength`).
+    2. ``fiber_length`` = longest Euclidean path through the skeleton, in
+       pixel widths (diagonal steps count ``sqrt(2)``; see
+       :func:`geotoolz.measure.skeleton_length`).
     3. ``major_axis`` = ``regionprops.axis_major_length`` — the PCA-based
        major axis of the equivalent ellipse. The original paper uses
        ``cv2.minAreaRect`` (rotated minimum-area rectangle), avoided here
@@ -1072,15 +1059,13 @@ class PlumeShapeFilter(Operator):
 
     @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        from geotoolz.measure._src.operators import _skeleton_diameter_pixels
-
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
         kept: set[int] = set()
         for lbl, compact, _bbox in _iter_instances(labels):
             area = int(compact.sum())
             if area < self.min_area:
                 continue
-            fiber_length = _skeleton_diameter_pixels(compact)
+            fiber_length = skeleton_length(compact)
             if fiber_length <= 0:
                 continue
             major_axis = _major_axis_length(compact)
@@ -1106,14 +1091,10 @@ class PlumeShapeFilter(Operator):
 
 def _major_axis_length(compact_mask: np.ndarray) -> float:
     """PCA-based major-axis length of a compact binary mask (in pixels)."""
-    props = regionprops_table(
-        compact_mask.astype(np.int32, copy=False),
-        properties=("axis_major_length",),
-    )
-    arr = props.get("axis_major_length")
-    if arr is None or len(arr) == 0:
+    props = regionprops_frame(compact_mask, properties=("axis_major_length",))
+    if props.empty:
         return 0.0
-    return float(arr[0])
+    return float(props["axis_major_length"].iloc[0])
 
 
 def _in_out_mask_stats(

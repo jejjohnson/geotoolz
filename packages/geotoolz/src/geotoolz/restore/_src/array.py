@@ -22,6 +22,8 @@ from jaxtyping import Bool, Float, Num, Shaped
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
+from geotoolz._src.samples import cube_to_samples, sample_layout, samples_to_cube
+
 
 _EPSILON = 1e-12
 # Powers above this threshold converge numerically to nearest-neighbour
@@ -397,12 +399,13 @@ def fit_pca(
             entirely NaN.
     """
     values = np.asarray(arr, dtype=float)
-    moved = np.moveaxis(values, axis, 0)
-    bands = moved.shape[0]
+    samples, layout = cube_to_samples(values, band_axis=axis)
+    bands = layout.n_bands
     keep = bands if n_components is None else int(n_components)
     if not 1 <= keep <= bands:
         raise ValueError("n_components must be between 1 and the number of bands")
-    flat = moved.reshape(bands, -1)
+    # Band-major ``(bands, pixels)`` for the SVD below.
+    flat = np.ascontiguousarray(samples.T)
     nan_mask = ~np.isfinite(flat)
     all_nan_bands = nan_mask.all(axis=1)
     if all_nan_bands.any():
@@ -416,7 +419,7 @@ def fit_pca(
     # Project the centered (bands, pixels) data onto the components.
     scores = einx.dot("c k, c n -> k n", components, centered)
     return {
-        "scores": scores.reshape((keep, *moved.shape[1:])),
+        "scores": scores.reshape((keep, *layout.sample_shape)),
         "components": components,
         "mean": means[:, 0],
         "axis": axis,
@@ -449,8 +452,7 @@ def inverse_pca(
     restored = einx.dot("c k, k n -> c n", components, flat_scores) + mean
     nan_mask = np.asarray(state["nan_mask"])
     restored = np.where(nan_mask, np.nan, restored)
-    moved_shape = np.moveaxis(np.empty(shape), axis, 0).shape
-    return np.moveaxis(restored.reshape(moved_shape), 0, axis)
+    return samples_to_cube(restored.T, sample_layout(shape, band_axis=axis))
 
 
 def _iter_planes(
