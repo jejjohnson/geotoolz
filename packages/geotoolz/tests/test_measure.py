@@ -18,7 +18,7 @@ def _gt(values: np.ndarray) -> GeoTensor:
 def test_label_connected_components_returns_int_geotensor() -> None:
     mask = _gt(np.array([[1, 0, 1], [1, 0, 0]], dtype=bool))
 
-    labels = gz.measure.LabelConnectedComponents(connectivity=1)(mask)
+    labels = gz.measure.LabelConnectedComponents(connectivity=4)(mask)
 
     assert labels.shape == mask.shape
     assert labels.transform == mask.transform
@@ -141,19 +141,19 @@ def test_skeleton_length_zero_for_empty_or_singleton_mask() -> None:
     assert gz.measure.SkeletonLength()(_gt(singleton)) == 0.0
 
 
-def test_skeleton_length_diagonal_uses_8_connectivity() -> None:
-    # A 5-pixel diagonal is one path of 4 unit-edge steps under
-    # 8-connectivity (not sqrt(2)-weighted — see operator docstring).
+def test_skeleton_length_diagonal_steps_are_euclidean() -> None:
+    # A 5-pixel diagonal is one 8-connected path of 4 diagonal steps,
+    # each sqrt(2) pixel widths long.
     mask = np.eye(5, dtype=bool)
     length = gz.measure.SkeletonLength()(_gt(mask))
-    assert length == pytest.approx(4.0)
+    assert length == pytest.approx(4.0 * np.sqrt(2.0))
 
 
 @pytest.mark.parametrize(
     ("op", "values"),
     [
         pytest.param(
-            gz.measure.LabelConnectedComponents(connectivity=1),
+            gz.measure.LabelConnectedComponents(connectivity=4),
             np.array([[1, 0, 1], [1, 0, 0]], dtype=bool),
             id="label-connected-components",
         ),

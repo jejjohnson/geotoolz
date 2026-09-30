@@ -34,6 +34,7 @@ import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import callable_name, jsonable, reject_config_summary
+from geotoolz._src.samples import cube_to_samples
 from geotoolz._src.shape import keep_band_axis, require_ndim
 from geotoolz._src.valid import invalid_values, restore_fill
 from geotoolz._src.wrap import wrap_like
@@ -50,7 +51,6 @@ from geotoolz.matched_filter._src.array import (
     apply_cluster_mf,
     apply_image,
     apply_pixel,
-    cube_to_samples,
     detection_threshold,
     estimate_cov_empirical,
     estimate_cov_lowrank,
@@ -672,7 +672,9 @@ class StreamingBackground(Operator):
         acc: WelfordAccumulator | None = None
         for cube in cubes:
             samples, _ = cube_to_samples(
-                _mask_invalid(cube, self.axis, type(self).__name__)[0], axis=self.axis
+                _mask_invalid(cube, self.axis, type(self).__name__)[0],
+                band_axis=self.axis,
+                dtype=float,
             )
             if acc is None:
                 acc = WelfordAccumulator.empty(samples.shape[1])
@@ -996,7 +998,7 @@ def _target_from_obs(
     target = y1 - y0
     if target.ndim > 1:
         # Average the response over valid (finite) pixels only.
-        samples, _ = cube_to_samples(target, axis=axis)
+        samples, _ = cube_to_samples(target, band_axis=axis, dtype=float)
         finite = np.isfinite(samples).all(axis=1)
         return np.mean(samples if finite.all() else samples[finite], axis=0)
     return target.reshape(-1)

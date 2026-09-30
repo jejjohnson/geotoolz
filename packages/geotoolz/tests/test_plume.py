@@ -283,13 +283,14 @@ def test_skeleton_length_single_pixel_and_compact_blob() -> None:
 def test_skeleton_plume_length_is_deterministic_for_multi_component_mask() -> None:
     """Skeleton length must not depend on set iteration order.
 
-    Regression test: previously ``_longest_active_pixel_path`` seeded the
+    Regression test: previously the longest-path helper seeded the
     double-BFS from ``next(iter(nodes))`` where ``nodes`` was a Python
     set. Across two disconnected components, the arbitrary starting node
     made the result depend on insertion order (effectively the hash of
     the tuple coordinates).
     """
-    from geotoolz.plume._src.array import _longest_active_pixel_path, plume_length
+    from geotoolz.measure import skeleton_length
+    from geotoolz.plume._src.array import plume_length
 
     # Two disconnected components: a long horizontal arm (10 px) and a
     # short isolated blob (1 px). The longest path should come from the
@@ -299,8 +300,8 @@ def test_skeleton_plume_length_is_deterministic_for_multi_component_mask() -> No
     mask[4, 10] = True  # isolated single pixel
     transform = rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 100.0)
 
-    length_a = _longest_active_pixel_path(mask, transform)
-    length_b = _longest_active_pixel_path(mask, transform)
+    length_a = skeleton_length(mask, step=transform)
+    length_b = skeleton_length(mask, step=transform)
     length_via_api = plume_length(mask, transform, method="skeleton")
 
     # 10 pixels at 10 m spacing => 9 * 10 m between endpoint centroids.
@@ -311,7 +312,7 @@ def test_skeleton_plume_length_is_deterministic_for_multi_component_mask() -> No
     # Permuting the mask via row/col reflection still picks the same
     # connected component as the dominant one.
     reflected = mask[::-1, ::-1].copy()
-    assert _longest_active_pixel_path(reflected, transform) == pytest.approx(90.0)
+    assert skeleton_length(reflected, step=transform) == pytest.approx(90.0)
 
 
 _GEO_OPS = ("PlumeFootprint", "IMEEstimate", "WindAdvectionCone", "CrossSectionalFlux")

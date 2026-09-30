@@ -5,8 +5,8 @@ footprint vectorisation, integrated mass enhancement, and cross-sectional flux. 
 are cited in the operator docstrings (Varon et al., Frankenberg et al., Krings et al.).
 
 - **Retrieval:** `SBMP` (Sentinel-2 SWIR ratio, Varon 2021)
-- **Detection / segmentation:** `PlumeMask`, `PlumeContours`, `PlumeFootprint` (with `regionprops`
-  metadata in the output GDF)
+- **Detection / segmentation:** `PlumeMask`, `PlumeContours`, `PlumeFootprint` (polygons from
+  `georeader.vectorize.get_polygons`, `measure.DEFAULT_REGIONPROPS` metadata in pixel units)
 - **Quantification:** `ColumnToMass`, `IMEEstimate`, `CrossSectionalFlux`, `WindAdvectionCone`
 
 ::: geotoolz.plume
