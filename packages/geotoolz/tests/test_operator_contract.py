@@ -262,9 +262,6 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
 UNBUILDABLE: dict[str, str] = {
     "matched_filter._src.operators.LinearTargetFromObs": "needs an obs_model",
     "matched_filter._src.operators.NonlinearTargetFromObs": "needs an obs_model",
-    "patch_ops.ApplyToChips": "needs a wrapped operator",
-    "patch_ops.GridSampler": "needs a SpatialPatcher",
-    "patch_ops.Stitch": "needs an aggregation and a domain",
     "plume._src.operators.CrossSectionalFlux": "needs a plume_mask GeoTensor",
     "plume._src.operators.IMEEstimate": "needs a plume_mask GeoTensor",
     "qa._src.operators._QAMask": "private base class",

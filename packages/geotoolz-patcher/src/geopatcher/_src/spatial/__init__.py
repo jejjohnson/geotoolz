@@ -60,6 +60,7 @@ from geopatcher._src.spatial.window import (
     SpatialHann,
     SpatialTukey,
     SpatialWindow,
+    geom_shape,
 )
 
 
@@ -109,4 +110,5 @@ __all__ = [
     "SpatialVariance",
     "SpatialWeightedSum",
     "SpatialWindow",
+    "geom_shape",
 ]

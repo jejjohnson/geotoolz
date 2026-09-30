@@ -122,7 +122,7 @@ flowchart LR
         Op1[Scale] --> Op2[CloudMask] --> Op3[NDVI]
     end
     subgraph patch["geopatcher — tile &amp; stitch"]
-        Sampler[GridSampler] --> Apply[ApplyToChips] --> Stitch[Stitch]
+        Sampler[GridSampler] --> Apply[ApplyToChips] --> Merge[MergePatches]
     end
     Loader --> Op1
     Op3 --> Sampler
@@ -134,7 +134,7 @@ flowchart LR
 - **[`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)** handles
   sliding-window patching for big rasters, exposed as Operator wrappers
   in [`geotoolz.patch_ops`](api/core.md) (`GridSampler`, `ApplyToChips`,
-  `Stitch`) so a tiled-inference pipeline composes inside a `Sequential`.
+  `MergePatches`) so a tiled-inference pipeline composes inside a `Sequential`.
 
 The full multi-repo walk-through lives in **the canonical Lake Tahoe
 notebook**:

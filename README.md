@@ -51,7 +51,7 @@ full tour):
   alignment for co-registration.
 - **`staging.field_for`** — staged catalog rows become `geopatcher`
   `Field`s, so a query drops straight into `SpatialPatcher.split`.
-- **`patch_ops`** — `GridSampler → ApplyToChips → Stitch` puts the patcher
+- **`patch_ops`** — `GridSampler → ApplyToChips → MergePatches` puts the patcher
   inside an operator `Sequential` for tile-predict-stitch inference; the
   label-aware samplers emit the same `Patch` carrier for training draws.
 - **Coregistration operators** — `geotoolz.geom.coregister` ops are the
@@ -62,7 +62,7 @@ full tour):
 
 ```python
 import geocatalog as gc, geopatcher as gp, geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, GridSampler, Stitch
+from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 cat    = gc.from_stac_search("https://planetarycomputer.microsoft.com/api/stac/v1",
                              collections=["sentinel-2-l2a"], bbox=aoi, datetime="2024-06")
@@ -74,7 +74,7 @@ patcher = gp.SpatialPatcher(geometry=gp.SpatialRectangular(size=(256, 256)),
 ndvi    = gz.Sequential([gz.DNToReflectance(scale=1e-4), gz.NDVI(nir_idx=3, red_idx=2)])
 
 scene = gz.Sequential([GridSampler(patcher), ApplyToChips(ndvi),
-                       Stitch(gp.SpatialOverlapAdd(), domain=field.domain)])(field)
+                       MergePatches(gp.SpatialOverlapAdd(), domain=field.domain)])(field)
 ```
 
 The end-to-end Lake Tahoe tutorial runs this flow for real:

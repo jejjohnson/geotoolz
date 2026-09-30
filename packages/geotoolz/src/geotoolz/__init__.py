@@ -29,7 +29,7 @@ it in and use ``geotoolz.patch_ops`` for the Operator-graph bridge:
 
     import geopatcher as gp
     from geotoolz import Sequential
-    from geotoolz.patch_ops import GridSampler, ApplyToChips, Stitch
+    from geotoolz.patch_ops import GridSampler, ApplyToChips, MergePatches
 """
 
 from __future__ import annotations

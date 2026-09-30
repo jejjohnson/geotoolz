@@ -33,6 +33,7 @@ from typing import Any, ClassVar
 
 try:
     from pipekit import Operator
+    from pipekit._base.operator import nested_config
 except ImportError as _e:  # pragma: no cover - exercised when [pipekit] is missing
     raise ImportError(
         "geopatcher.integrations.pipekit requires the `pipekit` package. "
@@ -53,9 +54,15 @@ class GridSampler(Operator):
 
     Args:
         patcher: The `SpatialPatcher` to drive.
+
+    Note:
+        ``forbid_in_yaml = True`` — `patcher` is a runtime `SpatialPatcher`
+        (not a `pipekit.Operator`), so the constructor cannot be rebuilt
+        from `get_config()`. The config is a debug record, not a replay
+        recipe.
     """
 
-    forbid_in_yaml: ClassVar[bool] = False
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(self, patcher: SpatialPatcher) -> None:
         self.patcher = patcher
@@ -84,25 +91,10 @@ class ApplyToChips(Operator):
         self.operator = operator
 
     def _apply(self, patches: list[Patch]) -> list[Patch]:
-        out: list[Patch] = []
-        for p in patches:
-            out.append(
-                Patch(
-                    data=self.operator(p.data),
-                    anchor=p.anchor,
-                    indices=p.indices,
-                    weights=p.weights,
-                )
-            )
-        return out
+        return [p.with_data(self.operator(p.data)) for p in patches]
 
     def get_config(self) -> dict[str, Any]:
-        return {
-            "operator": {
-                "class": type(self.operator).__name__,
-                "config": self.operator.get_config(),
-            }
-        }
+        return {"operator": nested_config(self.operator)}
 
 
 class Stitch(Operator):
