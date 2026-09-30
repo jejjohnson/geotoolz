@@ -5,19 +5,21 @@ Spectral-index operators accept band references either as integer indices
 here translate names to integer positions using metadata carried on the
 ``GeoTensor`` — looked up under a configurable list of attribute keys.
 
-The defaults match conventions used across `rasterio` (``descriptions``),
-``xarray`` (``band_names``), and assorted DataArray pipelines (``bands``)
-so common upstream readers Just Work without per-key wiring.
+The lookup order (:data:`DEFAULT_BAND_KEYS`) is ``band_names`` (what
+geotoolz readers and operators write), then ``descriptions`` (rasterio),
+then ``bands`` (assorted DataArray pipelines), so common upstream readers
+Just Work without per-key wiring.
 
 The helpers live in ``geotoolz._src`` so every operator family (indices,
-compositing, masking, :func:`geotoolz._src.wrap.wrap_like`) shares one
-definition of which ``attrs`` keys describe the band axis.
-``geotoolz.indices._src.bands`` re-exports them for backwards compatibility.
+spectral, qa, augment, viz, compositing, plume and
+:func:`geotoolz._src.wrap.wrap_like`) shares one definition of which
+``attrs`` keys describe the band axis and in which order they are read.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import numbers
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -32,10 +34,31 @@ if TYPE_CHECKING:
 BandRef = int | str
 
 
-#: Default lookup order for named-band resolution. The first key that
-#: holds a non-``None`` iterable wins; subsequent keys are only consulted
-#: when the band name is missing from earlier keys.
-DEFAULT_BAND_KEYS: tuple[str, ...] = ("descriptions", "band_names", "bands")
+#: Package-wide lookup order for named-band resolution: geotoolz's own
+#: ``band_names`` first, then rasterio-style ``descriptions``, then the
+#: legacy ``bands`` alias. The first key whose names contain the
+#: requested band wins; later keys are only consulted when the name is
+#: missing from earlier ones. Readers write only ``band_names``.
+DEFAULT_BAND_KEYS: tuple[str, ...] = ("band_names", "descriptions", "bands")
+
+#: Sentinel-2 L2A band order (12 bands, no B10) — the layout assumed for
+#: a *plain ndarray* when an operator (``plume.SBMP``) is given S2 band
+#: names but the carrier has no ``attrs`` to resolve them against. Never
+#: used for a GeoTensor: carriers must name their bands.
+SENTINEL2_L2A_BANDS: tuple[str, ...] = (
+    "B1",
+    "B2",
+    "B3",
+    "B4",
+    "B5",
+    "B6",
+    "B7",
+    "B8",
+    "B8A",
+    "B9",
+    "B11",
+    "B12",
+)
 
 #: Canonical ``attrs`` key operators write band names under.
 CANONICAL_BAND_KEY: str = "band_names"
@@ -184,38 +207,132 @@ def concat_band_attrs(
     return out
 
 
+def _names_under(
+    attrs: Mapping[str, Any], key: str
+) -> list[str] | dict[str, int] | None:
+    """Band-name metadata stored under ``attrs[key]``, normalised.
+
+    A sequence value becomes a list of ``str`` names (in band order); a
+    ``Mapping`` value (the ``{name: index}`` form some QA products use)
+    becomes a ``dict[str, int]``. Missing, ``None``, string and
+    non-iterable values yield ``None`` so the caller moves on.
+    """
+    value = attrs.get(key)
+    if value is None or isinstance(value, str | bytes):
+        return None
+    if isinstance(value, Mapping):
+        return {str(name): int(idx) for name, idx in value.items()}
+    try:
+        return [str(name) for name in value]
+    except TypeError:
+        return None
+
+
+def band_names(
+    gt: GeoTensor | np.ndarray | Any,
+    *,
+    keys: tuple[str, ...] = DEFAULT_BAND_KEYS,
+) -> list[str | None] | None:
+    """The carrier's band names, read from the first usable ``attrs`` key.
+
+    Keys are consulted in ``keys`` order (default
+    :data:`DEFAULT_BAND_KEYS`: ``band_names``, then ``descriptions``, then
+    ``bands``); the first one holding a sequence or a ``{name: index}``
+    mapping wins. A mapping keeps its declared positions: entry ``i`` is
+    the name mapped to band ``i``, or ``None`` for a band the mapping
+    does not name, and the list is padded to the carrier's band count.
+    When several names map to one band (aliases), the first one wins.
+
+    Args:
+        gt: A GeoTensor-like carrier with ``attrs``, or a plain array.
+        keys: Attribute keys to consult, in precedence order.
+
+    Returns:
+        The names as ``str`` in band order, or ``None`` when the carrier
+        has no ``attrs`` (a plain ndarray) or none of ``keys`` holds
+        band names.
+
+    Examples:
+        >>> import numpy as np
+        >>> class Carrier:
+        ...     attrs = {"descriptions": ("red", "nir"), "band_names": ["B04", "B08"]}
+        >>> band_names(Carrier())
+        ['B04', 'B08']
+        >>> band_names(np.zeros((2, 3, 3))) is None
+        True
+    """
+    attrs = getattr(gt, "attrs", None)
+    if attrs is None:
+        return None
+    for key in keys:
+        names = _names_under(attrs, key)
+        if isinstance(names, dict):
+            return _slotted_names(names, gt)
+        if names is not None:
+            return list(names)
+    return None
+
+
+def _slotted_names(mapping: dict[str, int], gt: Any) -> list[str | None]:
+    """``{name: index}`` as a position-indexed list (``None`` = unnamed)."""
+    shape = np.shape(gt)
+    n_bands = band_count(shape) if len(shape) >= 2 else 0
+    slots: list[str | None] = [None] * max(
+        n_bands, max(mapping.values(), default=-1) + 1
+    )
+    for name, idx in mapping.items():
+        if idx < 0:
+            raise ValueError(f"band-name mapping has a negative index: {name!r}: {idx}")
+        if slots[idx] is None:
+            slots[idx] = name
+    return slots
+
+
 def resolve_band(
-    gt: GeoTensor | np.ndarray,
+    gt: GeoTensor | np.ndarray | Any,
     ref: BandRef,
     *,
     keys: tuple[str, ...] = DEFAULT_BAND_KEYS,
+    fallback: Sequence[str] | None = None,
 ) -> int:
     """Resolve a band reference to an integer band-axis index.
 
-    Integer references pass through unchanged (for any carrier — plain
-    ndarrays included). String references are looked up against
+    This is the one band-name resolver every operator family uses, so
+    ``"B04"`` means the same band in ``indices``, ``spectral``, ``qa``,
+    ``augment``, ``viz``, ``compositing`` and ``plume``.
+
+    Integer references (any :class:`numbers.Integral` except ``bool``,
+    so ``np.int64`` works) pass through as ``int`` for any carrier —
+    plain ndarrays included. String references are looked up against
     ``gt.attrs[key]`` for each ``key`` in ``keys`` (in order). The first
-    key whose iterable contains the requested name wins; if a key exists
-    but doesn't contain the name, the search continues to the next key.
-    Missing keys, ``None`` values, and non-iterable values are skipped
-    silently.
+    key whose names contain the requested one wins; a key that exists
+    but doesn't contain the name hands over to the next key. Each value
+    may be a sequence of names (position = band index) or a
+    ``{name: index}`` mapping. Missing keys, ``None`` values and
+    non-iterable values are skipped silently.
 
     Args:
-        gt: Carrier `GeoTensor` (its ``attrs`` dict is consulted for
-            named lookups) or a plain ndarray (integer refs only).
-        ref: Either an existing integer index (returned as-is) or a
-            string band name to look up.
+        gt: Carrier ``GeoTensor`` (its ``attrs`` dict is consulted for
+            named lookups) or a plain ndarray.
+        ref: An integer index (returned as ``int``) or a band name.
         keys: Attribute keys to consult, in precedence order. Defaults
-            to ``("descriptions", "band_names", "bands")``.
+            to :data:`DEFAULT_BAND_KEYS` —
+            ``("band_names", "descriptions", "bands")``.
+        fallback: Band names in array order, used *only* when ``gt``
+            has no ``attrs`` at all (a plain ndarray). ``plume.SBMP``
+            passes :data:`SENTINEL2_L2A_BANDS` here so its ``"B11"`` /
+            ``"B12"`` defaults work on a bare 12-band L2A array. A
+            GeoTensor never uses the fallback.
 
     Returns:
         The integer position of the band along the carrier's band axis.
 
     Raises:
-        TypeError: If ``ref`` is a string but the carrier has no
-            ``attrs`` metadata (e.g. a plain ``np.ndarray``).
+        TypeError: If ``ref`` is neither a string nor an integer, or
+            ``ref`` is a string, the carrier has no ``attrs`` (e.g. a
+            plain ``np.ndarray``) and no ``fallback`` was given.
         ValueError: If ``ref`` is a string and the name is not found
-            under any of the configured ``keys``.
+            under any of the configured ``keys`` (or in ``fallback``).
 
     Examples:
         >>> import numpy as np, rasterio
@@ -225,17 +342,30 @@ def resolve_band(
         ...     transform=rasterio.Affine.identity(),
         ...     crs="EPSG:4326",
         ... )
-        >>> gt.attrs["descriptions"] = ("B02", "B03", "B04", "B08")
+        >>> gt.attrs["band_names"] = ("B02", "B03", "B04", "B08")
         >>> resolve_band(gt, "B04")
         2
-        >>> resolve_band(gt, 7)  # integers pass through untouched
+        >>> resolve_band(gt, np.int64(7))  # integers pass through as int
         7
     """
+    if isinstance(ref, numbers.Integral) and not isinstance(ref, bool):
+        return int(ref)
     if not isinstance(ref, str):
-        return ref
+        raise TypeError(
+            f"Band reference must be an integer index or a band name; got {ref!r}"
+        )
 
     attrs = getattr(gt, "attrs", None)
     if attrs is None:
+        if fallback is not None:
+            try:
+                return list(fallback).index(ref)
+            except ValueError:
+                raise ValueError(
+                    f"Band {ref!r} is not one of the default band names "
+                    f"{tuple(fallback)} assumed for a plain array; pass an "
+                    "integer index or a GeoTensor carrying band names."
+                ) from None
         raise TypeError(
             f"Named-band resolution ({ref!r}) requires a georeferenced "
             "GeoTensor input carrying band-name metadata in `attrs`; got a "
@@ -243,23 +373,48 @@ def resolve_band(
         )
 
     for key in keys:
-        names = attrs.get(key)
+        names = _names_under(attrs, key)
         if names is None:
             continue
-        try:
-            band_names = tuple(names)
-        except TypeError:
+        if isinstance(names, dict):
+            if ref in names:
+                return names[ref]
             continue
-        try:
-            return band_names.index(ref)
-        except ValueError:
-            continue
+        if ref in names:
+            return names.index(ref)
 
     raise ValueError(
-        f"Band {ref!r} was not found in GeoTensor attrs "
+        f"Band {ref!r} was not found in the band names under GeoTensor attrs "
         + ", ".join(f"{k!r}" for k in keys)
         + "."
     )
+
+
+def resolve_bands(
+    gt: GeoTensor | np.ndarray | Any,
+    refs: Iterable[BandRef],
+    *,
+    keys: tuple[str, ...] = DEFAULT_BAND_KEYS,
+    fallback: Sequence[str] | None = None,
+) -> list[int]:
+    """Resolve several band references with :func:`resolve_band`.
+
+    Args:
+        gt: Carrier whose ``attrs`` name the bands.
+        refs: Integer indices and/or band names, in output order.
+        keys: Attribute keys to consult, in precedence order.
+        fallback: Plain-array fallback names (see :func:`resolve_band`).
+
+    Returns:
+        One integer index per reference, in ``refs`` order.
+
+    Examples:
+        >>> class Carrier:
+        ...     attrs = {"band_names": ["B02", "B03", "B04"]}
+        >>> resolve_bands(Carrier(), ["B04", 0, "B03"])
+        [2, 0, 1]
+    """
+    return [resolve_band(gt, ref, keys=keys, fallback=fallback) for ref in refs]
 
 
 def configured_ref(value: BandRef | None, fallback: BandRef | None) -> BandRef:

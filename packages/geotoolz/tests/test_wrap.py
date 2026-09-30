@@ -40,10 +40,7 @@ def _scene(n_bands: int = 3, **extra) -> GeoTensor:
 # --- bands ------------------------------------------------------------------
 
 
-def test_default_band_keys_reexported_from_indices() -> None:
-    from geotoolz.indices._src import bands as legacy
-
-    assert legacy.DEFAULT_BAND_KEYS is DEFAULT_BAND_KEYS
+def test_default_band_keys_are_per_band_keys() -> None:
     assert set(DEFAULT_BAND_KEYS) < set(PER_BAND_KEYS)
     assert "wavelengths" in PER_BAND_KEYS
 

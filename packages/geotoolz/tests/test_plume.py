@@ -460,15 +460,44 @@ def test_sbmp_reference_scene_correlates_with_injected_signal() -> None:
     assert corr > 0.99
 
 
-def test_sbmp_default_sentinel2_swir_band_names() -> None:
+def test_sbmp_default_sentinel2_swir_band_names_on_plain_l2a_array() -> None:
+    """A bare 12-band array falls back to the documented S2 L2A order."""
     truth = np.linspace(0.0, 0.2, 25).reshape(5, 5)
     reference = np.ones((12, 5, 5), dtype=float)
     scene = reference.copy()
     scene[10] = np.exp(truth)
 
-    out = gz.plume.SBMP(reference_scene=_gt(reference))(_gt(scene))
+    out = gz.plume.SBMP(reference_scene=reference)(scene)
 
     assert np.allclose(np.asarray(out), truth)
+
+
+def test_sbmp_resolves_band_names_from_carrier_attrs() -> None:
+    """A GeoTensor names its own bands: a 13-band L1C stack picks real B11."""
+    from geotoolz._src.bands import SENTINEL2_L2A_BANDS
+
+    l1c = [*SENTINEL2_L2A_BANDS[:10], "B10", *SENTINEL2_L2A_BANDS[10:]]
+    truth = np.linspace(0.0, 0.2, 25).reshape(5, 5)
+    reference = np.ones((13, 5, 5), dtype=float)
+    scene = reference.copy()
+    scene[l1c.index("B11")] = np.exp(truth)
+    ref_gt = _gt(reference)
+    ref_gt.attrs["band_names"] = l1c
+    scene_gt = _gt(scene)
+    scene_gt.attrs["band_names"] = l1c
+
+    out = gz.plume.SBMP(reference_scene=ref_gt)(scene_gt)
+
+    assert np.allclose(np.asarray(out), truth)
+
+
+def test_sbmp_named_bands_need_names_outside_plain_l2a_arrays() -> None:
+    # An unnamed GeoTensor never falls back to the S2 table ...
+    with pytest.raises(ValueError, match="'B11'"):
+        gz.plume.SBMP()(_gt(np.ones((12, 2, 2))))
+    # ... nor does a plain array that is not 12-band (e.g. L1C).
+    with pytest.raises(TypeError, match="band-name metadata"):
+        gz.plume.SBMP()(np.ones((13, 2, 2)))
 
 
 def test_sbmp_clips_non_positive_swir_values_before_log() -> None:

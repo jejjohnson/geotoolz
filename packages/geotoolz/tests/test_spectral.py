@@ -587,7 +587,7 @@ def test_band_name_resolution_requires_metadata_on_plain_arrays() -> None:
     """String band keys need band_names attrs, which plain arrays lack."""
     arr = np.ones((4, 2, 2), dtype=np.float32)
 
-    with pytest.raises(ValueError, match="resolve band"):
+    with pytest.raises(TypeError, match="band-name metadata"):
         spectral.SelectBands(indexes=["B4"])(arr)
 
     with pytest.raises(ValueError, match="wavelengths"):

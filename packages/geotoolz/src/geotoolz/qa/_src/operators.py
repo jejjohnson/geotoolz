@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from pipekit import Operator
 
-from geotoolz._src.bands import strip_band_attrs
+from geotoolz._src.bands import resolve_band, strip_band_attrs
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
 from geotoolz._src.shape import over_frames
 from geotoolz._src.valid import invalid_values, is_fill
@@ -165,64 +165,14 @@ def _normalize_int_sequence(
     return normalized
 
 
-def _band_names(attrs: Mapping[str, Any]) -> Sequence[str] | Mapping[str, int] | None:
-    """Look up band-name metadata under any of the conventional attr keys."""
-    for key in ("band_names", "bands", "band_descriptions", "descriptions"):
-        names = attrs.get(key)
-        if names is not None:
-            return names
-    return None
-
-
-def _resolve_band_index(
-    gt: GeoTensor | np.ndarray, qa_band: BandSelector
-) -> int | None:
-    """Resolve an int-or-str band selector to an integer axis position.
-
-    String selectors need band-name metadata, so they require a
-    GeoTensor carrier; ``None`` and integer selectors work for plain
-    arrays too.
-    """
-    if qa_band is None:
-        return None
-    if isinstance(qa_band, int):
-        return qa_band
-
-    attrs = getattr(gt, "attrs", None)
-    names = _band_names(attrs) if attrs is not None else None
-    if isinstance(names, Mapping):
-        try:
-            return int(names[qa_band])
-        except KeyError as exc:
-            raise ValueError(
-                f"qa_band {qa_band!r} is not present in GeoTensor attrs"
-            ) from exc
-
-    if names is not None:
-        names_list = [str(name) for name in names]
-        try:
-            return names_list.index(qa_band)
-        except ValueError as exc:
-            raise ValueError(
-                f"qa_band {qa_band!r} is not present in GeoTensor attrs"
-            ) from exc
-
-    raise ValueError(
-        "String qa_band selectors require GeoTensor attrs with `band_names` "
-        "or a similar band-name sequence; pass an integer index for plain "
-        "array inputs."
-    )
-
-
 def _select_qa(
     gt: GeoTensor | np.ndarray, qa_band: BandSelector, axis: int
 ) -> np.ndarray:
     """Select the QA band from a stack, or return the carrier as-is."""
     arr = np.asarray(gt)
-    band_idx = _resolve_band_index(gt, qa_band)
-    if band_idx is None:
+    if qa_band is None:
         return arr
-    return np.take(arr, band_idx, axis=axis)
+    return np.take(arr, resolve_band(gt, qa_band), axis=axis)
 
 
 def _decode_bits_with_mode(
