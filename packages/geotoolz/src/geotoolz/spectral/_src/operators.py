@@ -85,7 +85,7 @@ def _attrs(gt: GeoTensor | np.ndarray) -> dict[str, Any]:
 
 def _names_or_attrs(
     gt: GeoTensor | np.ndarray, override: list[str] | None
-) -> list[str] | None:
+) -> list[str | None] | None:
     """An explicit ``names`` override, else the carrier's band names."""
     return list(override) if override is not None else band_names(gt)
 
@@ -367,7 +367,9 @@ class BandMath(Operator):
             arr.shape[self.axis]
         )
         variables = {
-            name: np.take(arr, idx, axis=self.axis) for idx, name in enumerate(names)
+            name: np.take(arr, idx, axis=self.axis)
+            for idx, name in enumerate(names)
+            if name is not None
         }
         out = keep_band_axis(
             np.asarray(evaluate_band_math(self.expression, variables)), gt

@@ -232,13 +232,16 @@ def band_names(
     gt: GeoTensor | np.ndarray | Any,
     *,
     keys: tuple[str, ...] = DEFAULT_BAND_KEYS,
-) -> list[str] | None:
+) -> list[str | None] | None:
     """The carrier's band names, read from the first usable ``attrs`` key.
 
     Keys are consulted in ``keys`` order (default
     :data:`DEFAULT_BAND_KEYS`: ``band_names``, then ``descriptions``, then
     ``bands``); the first one holding a sequence or a ``{name: index}``
-    mapping wins. A mapping is returned as a list ordered by index.
+    mapping wins. A mapping keeps its declared positions: entry ``i`` is
+    the name mapped to band ``i``, or ``None`` for a band the mapping
+    does not name, and the list is padded to the carrier's band count.
+    When several names map to one band (aliases), the first one wins.
 
     Args:
         gt: A GeoTensor-like carrier with ``attrs``, or a plain array.
@@ -264,10 +267,25 @@ def band_names(
     for key in keys:
         names = _names_under(attrs, key)
         if isinstance(names, dict):
-            return [name for name, _ in sorted(names.items(), key=lambda kv: kv[1])]
+            return _slotted_names(names, gt)
         if names is not None:
-            return names
+            return list(names)
     return None
+
+
+def _slotted_names(mapping: dict[str, int], gt: Any) -> list[str | None]:
+    """``{name: index}`` as a position-indexed list (``None`` = unnamed)."""
+    shape = np.shape(gt)
+    n_bands = band_count(shape) if len(shape) >= 2 else 0
+    slots: list[str | None] = [None] * max(
+        n_bands, max(mapping.values(), default=-1) + 1
+    )
+    for name, idx in mapping.items():
+        if idx < 0:
+            raise ValueError(f"band-name mapping has a negative index: {name!r}: {idx}")
+        if slots[idx] is None:
+            slots[idx] = name
+    return slots
 
 
 def resolve_band(

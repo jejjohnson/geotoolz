@@ -163,6 +163,22 @@ def test_band_names_helper() -> None:
     assert band_names(only_desc) == ["r", "n"]
 
 
+def test_sparse_mapping_keeps_declared_positions() -> None:
+    """``{"red": 1, "nir": 2}`` must not compact to band 0 / band 1."""
+    values = np.stack([np.full((2, 2), v, dtype=np.float32) for v in (10, 20, 30, 40)])
+    gt = toy_geotensor(values, attrs={"band_names": {"red": 1, "nir": 2}})
+    assert band_names(gt) == [None, "red", "nir", None]
+
+    out = gz.spectral.BandMath(expression="nir - red")(gt)
+    np.testing.assert_array_equal(np.squeeze(_values(out)), np.full((2, 2), 10.0))
+
+    parts = gz.spectral.SplitBands()(gt)
+    assert len(parts) == 4
+
+    aliases = toy_geotensor(values, attrs={"band_names": {"red": 1, "B04": 1}})
+    assert band_names(aliases) == [None, "red", None, None]
+
+
 def test_readers_write_only_band_names() -> None:
     from geotoolz.readers.toy_sensor import Reader
 
