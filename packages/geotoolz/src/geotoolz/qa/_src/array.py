@@ -1,7 +1,7 @@
 """Tier-A primitives — pure-numpy QA / cloud-mask decoding.
 
 The canonical home for QA-band decoding (these functions used to be
-split between here and the retired ``geotoolz.cloud`` module):
+split between here and the removed ``geotoolz.cloud`` module):
 
 1. **`mask_from_qa_bits`** — single-bit-flag decoding for Landsat-style
    bitmask QA layers (``QA_PIXEL``): True where ANY listed bit is set.
@@ -11,9 +11,6 @@ split between here and the retired ``geotoolz.cloud`` module):
    test membership against a set of integer field-values. Different from
    ``mask_from_qa_bits`` because that helper OR-s individual bits, which
    is wrong when the bits form a single contiguous categorical field.
-4. **`reduce_bit_masks`** — combine several bit-position groups (the
-   shape used by the sensor presets in this module) into a single mask
-   by OR-ing their `mask_from_qa_bits` results.
 
 Mask *application* lives in `geotoolz.mask` (`apply_mask` /
 `ApplyMask`).
@@ -30,7 +27,7 @@ References:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from itertools import pairwise
 
 import numpy as np
@@ -181,35 +178,3 @@ def mask_from_bit_field(
     field = (qa_int >> shift) & ((1 << width) - 1)
     out = np.isin(field, np.asarray(values_tuple))
     return ~out if invert else out
-
-
-def reduce_bit_masks(
-    qa: Int[np.ndarray, "*batch h w"],
-    bit_groups: Mapping[str, Sequence[int]],
-) -> Bool[np.ndarray, "*batch h w"]:
-    """OR-reduce several named bit-groups into a single mask.
-
-    Each entry in ``bit_groups`` is a sequence of bit positions; the
-    helper calls ``mask_from_qa_bits`` per group and OR-s the results.
-    Used by the sensor-preset Operators to materialise a single boolean
-    mask from a registry slice.
-
-    Args:
-        qa: Integer QA array.
-        bit_groups: Mapping from group name (purely for readability —
-            keys are ignored at runtime) to bit positions.
-
-    Returns:
-        Boolean array of the same shape as ``qa``.
-
-    Raises:
-        ValueError: If ``bit_groups`` is empty.
-    """
-    if not bit_groups:
-        raise ValueError("reduce_bit_masks: `bit_groups` must not be empty")
-    out: np.ndarray | None = None
-    for bits in bit_groups.values():
-        layer = mask_from_qa_bits(qa, bits)
-        out = layer if out is None else np.logical_or(out, layer)
-    assert out is not None  # for type-checkers; we checked emptiness above
-    return out

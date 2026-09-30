@@ -6,10 +6,12 @@ downstream mask-combination operators.
 
 Two operator families:
 
-- Generic extraction (`MaskFromQABits`, `MaskFromSCL`, `MaskValid`,
-  `DecodeBitmask`) — pass explicit bits / SCL classes.
-- Sensor presets (`S2QA60`, `S2SCL`, `LandsatQA_PIXEL`, `MODISStateQA`,
-  `MaskClouds`, ...) — published bit/class layouts baked in.
+- Generic extraction (`MaskClouds`, `MaskCloudShadow`, `MaskCirrus`,
+  `MaskSnow`, `MaskWater`, `MaskNoData`, `MaskInvalid`, `MaskSaturated`,
+  `DecodeBitmask`) — pass explicit ``bits`` / ``values`` with an optional
+  ``qa_band`` (``None`` = the carrier is the QA band).
+- Sensor presets (`S2QA60`, `S2SCL`, `LandsatQA_PIXEL`, `MODISStateQA`)
+  — published bit/class layouts baked in; pick ``targets`` by name.
 """
 
 from __future__ import annotations
@@ -18,7 +20,6 @@ from geotoolz.qa._src.array import (
     mask_from_bit_field,
     mask_from_qa_bits,
     mask_from_scl,
-    reduce_bit_masks,
 )
 from geotoolz.qa._src.operators import (
     S2QA60,
@@ -30,12 +31,10 @@ from geotoolz.qa._src.operators import (
     MaskCirrus,
     MaskClouds,
     MaskCloudShadow,
-    MaskFromQABits,
-    MaskFromSCL,
+    MaskInvalid,
     MaskNoData,
     MaskSaturated,
     MaskSnow,
-    MaskValid,
     MaskWater,
     MODISStateQA,
     OmniCloudMask,
@@ -68,17 +67,14 @@ __all__ = [
     "MaskCirrus",
     "MaskCloudShadow",
     "MaskClouds",
-    "MaskFromQABits",
-    "MaskFromSCL",
+    "MaskInvalid",
     "MaskNoData",
     "MaskSaturated",
     "MaskSnow",
-    "MaskValid",
     "MaskWater",
     "OmniCloudMask",
     "S2Cloudless",
     "mask_from_bit_field",
     "mask_from_qa_bits",
     "mask_from_scl",
-    "reduce_bit_masks",
 ]

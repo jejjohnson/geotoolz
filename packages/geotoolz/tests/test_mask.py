@@ -31,7 +31,12 @@ from geotoolz.mask import (
     RemoveSmallHoles,
     RemoveSmallObjects,
     SlopeMask,
+    altitude_mask,
+    apply_mask,
     combine_masks,
+    distance_mask,
+    invert_mask,
+    slope_mask,
 )
 from geotoolz.mask._src import operators as mask_operators
 from geotoolz.mask._src.array import (
@@ -52,33 +57,61 @@ def _toy_geotensor(values: np.ndarray) -> GeoTensor:
     )
 
 
-def test_polygon_mask_inside_and_outside_are_complements() -> None:
+_BOX_INTERIOR = np.array(
+    [
+        [False, False, False, False],
+        [False, True, True, False],
+        [False, True, True, False],
+        [False, False, False, False],
+    ]
+)
+
+
+def test_polygon_mask_keep_inside_and_outside_are_complements() -> None:
     gt = _toy_geotensor(np.zeros((1, 4, 4), dtype=np.float32))
     polygon = box(1.0, 1.0, 3.0, 3.0)
 
-    inside = PolygonMask(geometry=polygon, inside=True)(gt)
-    outside = PolygonMask(geometry=polygon, inside=False)(gt)
+    keep_inside = PolygonMask(geometry=polygon, keep="inside")(gt)
+    keep_outside = PolygonMask(geometry=polygon, keep="outside")(gt)
 
-    np.testing.assert_array_equal(np.asarray(outside), ~np.asarray(inside))
-    assert inside.dtype == bool
-    assert inside.transform == gt.transform
-    assert inside.crs == gt.crs
+    np.testing.assert_array_equal(np.asarray(keep_outside), ~np.asarray(keep_inside))
+    # Drop polarity: keep="inside" masks (True) everything outside the polygon.
+    np.testing.assert_array_equal(np.asarray(keep_inside), ~_BOX_INTERIOR)
+    assert keep_inside.dtype == bool
+    assert keep_inside.transform == gt.transform
+    assert keep_inside.crs == gt.crs
 
 
-def test_bbox_mask_matches_expected_pixel_centers() -> None:
+def test_bbox_mask_default_drops_outside_the_box() -> None:
     gt = _toy_geotensor(np.zeros((4, 4), dtype=np.float32))
 
     mask = BBoxMask(bounds=(1.0, 1.0, 3.0, 3.0))(gt)
+    dropped_box = BBoxMask(bounds=(1.0, 1.0, 3.0, 3.0), keep="outside")(gt)
 
-    expected = np.array(
-        [
-            [False, False, False, False],
-            [False, True, True, False],
-            [False, True, True, False],
-            [False, False, False, False],
-        ]
-    )
-    np.testing.assert_array_equal(np.asarray(mask), expected)
+    np.testing.assert_array_equal(np.asarray(mask), ~_BOX_INTERIOR)
+    np.testing.assert_array_equal(np.asarray(dropped_box), _BOX_INTERIOR)
+
+
+def test_apply_mask_with_geometry_mask_keeps_aoi() -> None:
+    """#154: ``ApplyMask(mask=BBoxMask(...))`` keeps the AOI by default."""
+    values = np.arange(1, 17, dtype=np.float32).reshape(1, 4, 4)
+    gt = _toy_geotensor(values)
+
+    out = ApplyMask(mask=BBoxMask(bounds=(1.0, 1.0, 3.0, 3.0)), fill_value=0.0)(gt)
+
+    arr = np.asarray(out)[0]
+    np.testing.assert_array_equal(arr[_BOX_INTERIOR], values[0][_BOX_INTERIOR])
+    assert np.all(arr[~_BOX_INTERIOR] == 0.0)
+
+
+def test_geometry_masks_reject_unknown_keep() -> None:
+    with pytest.raises(ValueError, match="'inside' or 'outside'"):
+        BBoxMask(bounds=(0.0, 0.0, 1.0, 1.0), keep="both")  # type: ignore[arg-type]
+    dem = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
+    with pytest.raises(ValueError, match="'inside' or 'outside'"):
+        AltitudeMask(dem=dem, min_elev=0.0, keep="nope")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="'inside' or 'outside'"):
+        slope_mask(np.zeros((2, 2)), (1.0, 1.0), max_slope_deg=1.0, keep="x")  # type: ignore[arg-type]
 
 
 def test_polygon_mask_accepts_geodataframe() -> None:
@@ -88,19 +121,46 @@ def test_polygon_mask_accepts_geodataframe() -> None:
     mask = PolygonMask(geometry=gdf)(gt)
 
     assert mask.shape == gt.shape
-    assert bool(np.asarray(mask)[1, 1])
-    assert not bool(np.asarray(mask)[0, 0])
+    # Drop polarity: the polygon interior is kept (False).
+    assert not bool(np.asarray(mask)[1, 1])
+    assert bool(np.asarray(mask)[0, 0])
     assert PolygonMask(geometry=gdf).get_config()["geometry"]["type"] == "GeoDataFrame"
 
 
-def test_distance_mask_inside_false_is_complement() -> None:
+def test_distance_mask_keep_outside_is_complement() -> None:
     gt = _toy_geotensor(np.zeros((5, 5), dtype=np.float32))
     polygon = box(2.0, 2.0, 3.0, 3.0)
 
-    inside = DistanceMask(geometry=polygon, distance=1.0, inside=True)(gt)
-    outside = DistanceMask(geometry=polygon, distance=1.0, inside=False)(gt)
+    keep_inside = DistanceMask(geometry=polygon, distance=1.0, keep="inside")(gt)
+    keep_outside = DistanceMask(geometry=polygon, distance=1.0, keep="outside")(gt)
 
-    np.testing.assert_array_equal(np.asarray(outside), ~np.asarray(inside))
+    np.testing.assert_array_equal(np.asarray(keep_outside), ~np.asarray(keep_inside))
+    # The geometry pixel itself is within distance, so it is kept by default.
+    assert not bool(np.asarray(keep_inside)[2, 2])
+    assert bool(np.asarray(keep_inside)[0, 0])
+
+
+@pytest.mark.parametrize("pixel_size", [(1.0, 1.0), (2.0, 0.5)])
+@pytest.mark.parametrize("distance", [0.0, 1.0, 1.5, 3.0])
+def test_distance_mask_is_buffer_mask_complement(distance, pixel_size) -> None:
+    """``distance_mask`` is ``buffer_mask`` (+ the drop-polarity flip); the
+    numerics equal the pre-refactor distance-transform threshold."""
+    import scipy.ndimage as ndi
+
+    geom = np.zeros((7, 7), dtype=bool)
+    geom[3, 2:4] = True
+
+    buffered = buffer_mask(geom, distance, unit="meters", pixel_size=pixel_size)
+    reference = ndi.distance_transform_edt(~geom, sampling=pixel_size) <= distance
+
+    np.testing.assert_array_equal(buffered, reference)
+    np.testing.assert_array_equal(
+        distance_mask(geom, distance, pixel_size=pixel_size), ~reference
+    )
+    np.testing.assert_array_equal(
+        distance_mask(geom, distance, keep="outside", pixel_size=pixel_size),
+        reference,
+    )
 
 
 def test_buffer_mask_pixels_matches_euclidean_radius() -> None:
@@ -129,8 +189,10 @@ def test_buffer_mask_meters_requires_geotensor_carrier() -> None:
 def test_array_helpers_validate_inputs() -> None:
     with pytest.raises(ValueError, match="must not be empty"):
         combine_masks_array([], "or")
-    with pytest.raises(ValueError, match="exactly one"):
-        combine_masks_array([np.zeros((1, 1)), np.ones((1, 1))], "not")
+    with pytest.raises(ValueError, match="'or', 'and', 'xor'"):
+        combine_masks_array([np.zeros((1, 1))], "not")
+    with pytest.raises(ValueError, match="share one shape"):
+        combine_masks_array([np.zeros((2, 2)), np.zeros((3, 2, 2))], "or")
     with pytest.raises(ValueError, match="unit"):
         buffer_mask(np.zeros((1, 1)), 1, unit="feet")
     with pytest.raises(ValueError, match="2D"):
@@ -200,15 +262,18 @@ def test_combine_masks_or_is_commutative_and_operator_preserves_metadata() -> No
     np.testing.assert_array_equal(np.asarray(out), [[True, False], [True, False]])
 
 
-def test_combine_masks_xor_and_not() -> None:
+def test_combine_masks_xor_and_invert() -> None:
     a = np.array([[True, False], [False, False]])
     b = np.array([[True, True], [False, False]])
 
     xor = CombineMasks(op="xor")([a, b])
-    not_a = CombineMasks(op="not")([a])
+    and_ = CombineMasks(op="AND")([a, b])
+    not_a = InvertMask()(a)
 
     np.testing.assert_array_equal(xor, [[False, True], [False, False]])
+    np.testing.assert_array_equal(and_, [[True, False], [False, False]])
     np.testing.assert_array_equal(not_a, [[False, True], [True, True]])
+    np.testing.assert_array_equal(invert_mask(a), not_a)
 
 
 @pytest.mark.parametrize(
@@ -347,7 +412,7 @@ def test_polygon_mask_handles_multipolygon() -> None:
     gt = _toy_geotensor(np.zeros((5, 5), dtype=np.float32))
     multi = MultiPolygon([box(0.0, 0.0, 1.0, 1.0), box(3.0, 3.0, 4.0, 4.0)])
 
-    mask = np.asarray(PolygonMask(geometry=multi)(gt))
+    mask = np.asarray(PolygonMask(geometry=multi, keep="outside")(gt))
 
     # Two disjoint True components, one per polygon in the MultiPolygon.
     assert bool(mask[3, 0])  # bottom-left polygon (row 3 = y in [0,1])
@@ -358,8 +423,10 @@ def test_polygon_mask_handles_multipolygon() -> None:
 def test_polygon_mask_get_config_emits_geojson_dict() -> None:
     polygon = box(1.0, 1.0, 3.0, 3.0)
 
-    cfg = PolygonMask(geometry=polygon, inside=True).get_config()
+    cfg = PolygonMask(geometry=polygon, keep="outside").get_config()
 
+    assert cfg["keep"] == "outside"
+    assert "inside" not in cfg
     assert cfg["geometry"]["type"] == "Polygon"
     assert "coordinates" in cfg["geometry"]
     # JSON-safe: nested tuples coerced to lists.
@@ -381,8 +448,16 @@ def test_altitude_mask_bounds() -> None:
     scene = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
 
     out = AltitudeMask(dem=dem, min_elev=5.0, max_elev=20.0)(scene)
+    dropped_band = AltitudeMask(dem=dem, min_elev=5.0, max_elev=20.0, keep="outside")
 
-    np.testing.assert_array_equal(np.asarray(out), [[False, True], [True, False]])
+    # Drop polarity: cells inside [5, 20] are kept (False).
+    np.testing.assert_array_equal(np.asarray(out), [[True, False], [False, True]])
+    np.testing.assert_array_equal(
+        np.asarray(dropped_band(scene)), [[False, True], [True, False]]
+    )
+    np.testing.assert_array_equal(
+        altitude_mask(np.asarray(dem), min_elev=5.0, max_elev=20.0), np.asarray(out)
+    )
 
 
 def test_slope_mask_matches_flat_reference() -> None:
@@ -390,8 +465,11 @@ def test_slope_mask_matches_flat_reference() -> None:
     scene = _toy_geotensor(np.zeros((4, 4), dtype=np.float32))
 
     out = SlopeMask(dem=dem, max_slope_deg=0.5)(scene)
+    steep_only = SlopeMask(dem=dem, max_slope_deg=0.5, keep="outside")(scene)
 
-    assert np.all(np.asarray(out))
+    # A flat DEM is inside the slope interval everywhere, so nothing drops.
+    assert not np.any(np.asarray(out))
+    assert np.all(np.asarray(steep_only))
 
 
 def test_dem_masks_reject_mismatched_grid() -> None:
@@ -438,17 +516,27 @@ def test_natural_earth_mask_constructors_use_cached_loader(
     source = str(tmp_path / "natural-earth.gpkg")
 
     try:
-        assert LandMask(source=source).get_config() == {"source": source}
-        assert OceanMask(source=source).get_config() == {"source": source}
+        assert LandMask(source=source).get_config() == {
+            "source": source,
+            "keep": "inside",
+        }
+        assert OceanMask(source=source, keep="outside").get_config() == {
+            "source": source,
+            "keep": "outside",
+        }
         country = CountryMask(iso_a3="GRL", source=source)
         assert country.get_config() == {
             "iso_a3": "GRL",
             "source": source,
+            "keep": "inside",
         }
         scene = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
         country_mask = country(scene)
         assert country_mask.shape == scene.shape
-        assert bool(np.asarray(country_mask)[1, 0])
+        # Drop polarity: pixels inside the country are kept (False).
+        assert not bool(np.asarray(country_mask)[1, 0])
+        dropped = CountryMask(iso_a3="GRL", source=source, keep="outside")(scene)
+        np.testing.assert_array_equal(np.asarray(dropped), ~np.asarray(country_mask))
         assert calls == [source, source, source]
     finally:
         mask_operators._load_natural_earth.cache_clear()
@@ -484,3 +572,39 @@ def test_4d_time_stack() -> None:
     dilated = DilateMask(iterations=1)(planes)
     assert dilated.shape == planes.shape
     assert dilated[0, 0].sum() == 9 and not dilated[1].any()
+
+
+def test_apply_mask_primitive_fills_where_true_and_broadcasts() -> None:
+    arr = np.array([[1.0, 2.0, 3.0]])
+    np.testing.assert_array_equal(
+        apply_mask(arr, np.array([[True, False, True]]), fill_value=-1.0),
+        [[-1.0, 2.0, -1.0]],
+    )
+    cube = np.array([[[1.0, 2.0]], [[3.0, 4.0]]])  # (2 bands, 1, 2)
+    np.testing.assert_array_equal(
+        apply_mask(cube, np.array([[True, False]]), fill_value=0.0),
+        [[[0.0, 2.0]], [[0.0, 4.0]]],
+    )
+
+
+def test_apply_mask_preserves_float32_with_nan_fill() -> None:
+    """Regression: fill_value=np.nan used to upcast float32 -> float64."""
+    gt = _toy_geotensor(np.ones((2, 2, 2), dtype=np.float32))
+    out = ApplyMask(mask=np.array([[True, False], [False, False]]), fill_value=np.nan)(
+        gt
+    )
+    assert out.dtype == np.float32
+    assert np.all(np.isnan(np.asarray(out)[:, 0, 0]))
+
+
+def test_apply_mask_get_config_is_jsonable_and_has_no_invert() -> None:
+    import json
+
+    op = ApplyMask(mask=BBoxMask(bounds=(0.0, 0.0, 1.0, 1.0)), fill_value=float("nan"))
+    decoded = json.loads(json.dumps(op.get_config()))
+    assert decoded["mask"]["class"] == "BBoxMask"
+    assert decoded["mask"]["config"]["keep"] == "inside"
+    assert "invert" not in decoded
+    assert ApplyMask.forbid_in_yaml is True
+    with pytest.raises(TypeError):
+        ApplyMask(mask=np.array([[True]]), invert=True)  # type: ignore[call-arg]

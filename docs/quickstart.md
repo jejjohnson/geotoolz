@@ -11,7 +11,7 @@ and [`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geo
 `sentinel-2-l2a`, cloud cover < 20 %).
 
 > **Pre-alpha note.** Several `geotoolz` operator modules (`indices`,
-> `cloud`, `radiometry`, …) are in flux. To keep this quickstart stable
+> `qa`, `radiometry`, …) are in flux. To keep this quickstart stable
 > as the named-op surface churns, we define `Scale`, `CloudMask`, and
 > `NDVI` inline as small `Operator` subclasses. The patterns transfer
 > directly to the named imports once you adopt them.
@@ -90,7 +90,7 @@ class CloudMask(Operator):
 
     Marks SCL classes 3 (cloud shadow), 8 (cloud-medium), 9 (cloud-high),
     10 (thin cirrus) as ``True`` — i.e. *True-to-drop*, matching the
-    convention used by ``geotoolz.mask.ApplyMask`` / ``geotoolz.qa.MaskFromSCL``.
+    convention used by ``geotoolz.mask.ApplyMask`` / ``geotoolz.qa.MaskClouds``.
     """
 
     DROP_CLASSES = (3, 8, 9, 10)

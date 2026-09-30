@@ -152,18 +152,50 @@ def test_s2qa60_preset_masks_cloud_and_cirrus() -> None:
 
     np.testing.assert_array_equal(np.asarray(out), [[False, True], [True, False]])
     assert out.dtype == np.bool_
+    cloud_only = qa.S2QA60(targets=["cloud"])(gt)
+    np.testing.assert_array_equal(
+        np.asarray(cloud_only), [[False, True], [False, False]]
+    )
 
 
-def test_s2scl_keep_masks_everything_else() -> None:
+def test_s2qa60_reads_the_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S2QA60 decodes ``SENSOR_QA_REGISTRY["s2_qa60"]``, not hardcoded bits."""
+    qa60 = np.array([[1 << 10, 1 << 3]], dtype=np.uint16)
+    monkeypatch.setitem(
+        qa.SENSOR_QA_REGISTRY,
+        "s2_qa60",
+        {"cloud": {"bits": (3,)}, "cirrus": {"bits": (11,)}},
+    )
+    out = qa.S2QA60(qa_band=None)(qa60)
+    np.testing.assert_array_equal(out, [[False, True]])
+
+
+def test_s2scl_targets_mask_listed_classes() -> None:
     scl = np.array([[4, 5, 6], [9, 11, 3]], dtype=np.uint8)
     gt = _toy_geotensor(scl[None], attrs={"band_names": ["SCL"]})
 
-    out = qa.S2SCL(keep=["vegetation"])(gt)
+    out = qa.S2SCL(targets=["cloud", "snow"])(gt)
 
     np.testing.assert_array_equal(
         np.asarray(out),
-        [[False, True, True], [True, True, True]],
+        [[False, False, False], [True, True, False]],
     )
+
+
+def test_scl_constants_agree_with_the_registry() -> None:
+    """``SCL_CLOUDS`` and ``SENSOR_QA_REGISTRY["s2_scl"]`` share one source."""
+    registry = qa.SENSOR_QA_REGISTRY["s2_scl"]
+
+    def classes(*targets: str) -> set[int]:
+        return {v for target in targets for v in registry[target]["values"]}
+
+    assert set(qa.SCL_CLOUDS) == classes("cloud", "cirrus") == {8, 9, 10}
+    assert set(qa.SCL_INVALID) == classes("no_data", "saturated", "cloud_shadow")
+    assert set(qa.SCL_LAND) == classes("vegetation", "soil")
+    assert set(qa.SCL_WATER) == classes("water")
+    # Every SCL class is reachable from exactly one registry target.
+    all_values = [v for entry in registry.values() for v in entry["values"]]
+    assert sorted(all_values) == [int(c) for c in qa.SCL]
 
 
 def test_landsat_qa_pixel_preset_targets() -> None:
@@ -195,7 +227,7 @@ def test_presets_reject_unknown_targets() -> None:
         np.zeros((1, 1, 1), dtype=np.uint8), attrs={"band_names": ["SCL"]}
     )
     with pytest.raises(ValueError, match="unknown s2_scl"):
-        qa.S2SCL(keep=["not_a_class"])(scl)
+        qa.S2SCL(targets=["not_a_class"])(scl)
 
 
 def test_mask_nodata_infers_from_fill_value() -> None:
@@ -223,11 +255,64 @@ def test_mask_nodata_requires_fill_when_not_decoding_qa() -> None:
     gt = _toy_geotensor(np.zeros((2, 2), dtype=np.float32), fill_value_default=None)
     with pytest.raises(ValueError, match="fill_value_default"):
         qa.MaskNoData()(gt)
+    with pytest.raises(ValueError, match="needs bits or values"):
+        qa.MaskNoData(qa_band=0)(gt)
+
+
+def test_mask_nodata_is_a_qa_decoder() -> None:
+    """MaskNoData is the shared `_QAMask` decoder with a fill fallback."""
+    from geotoolz.qa._src.operators import _QAMask
+
+    assert isinstance(qa.MaskNoData(), _QAMask)
+    assert isinstance(qa.MaskClouds(bits=[3]), _QAMask)
+
+
+def test_mask_invalid_matches_georeader_invalidmask() -> None:
+    """#154: MaskInvalid == georeader ``invalidmask()`` reduced over bands."""
+    rng = np.random.default_rng(1)
+    arr = rng.integers(1, 100, size=(3, 5, 5)).astype(np.int16)
+    arr[0, 1, 1] = -9999
+    arr[2, 3, 4] = -9999
+    arr[:, 0, 0] = -9999
+    gt = _toy_geotensor(arr, fill_value_default=-9999)
+
+    out = qa.MaskInvalid()(gt)
+
+    expected = np.asarray(gt.invalidmask()).any(axis=0)
+    np.testing.assert_array_equal(np.asarray(out), expected)
+    assert expected.sum() == 3
+    assert out.dtype == np.bool_
+    assert out.fill_value_default is False
+    # MaskNoData's fill fallback is the same mask.
+    np.testing.assert_array_equal(np.asarray(qa.MaskNoData()(gt)), expected)
+
+
+def test_mask_invalid_detects_nan_fill() -> None:
+    """A NaN fill is found although georeader's ``invalidmask()`` misses it."""
+    arr = np.ones((2, 3, 3), dtype=np.float32)
+    arr[:, 1, 2] = np.nan
+    gt = _toy_geotensor(arr, fill_value_default=np.nan)
+
+    out = qa.MaskInvalid()(gt)
+
+    expected = np.zeros((3, 3), dtype=bool)
+    expected[1, 2] = True
+    np.testing.assert_array_equal(np.asarray(out), expected)
+    assert not np.asarray(gt.invalidmask()).any()  # georeader's blind spot
+
+
+def test_mask_invalid_explicit_value_and_plain_array() -> None:
+    arr = np.array([[[1, 7], [7, 2]]], dtype=np.int16)
+    np.testing.assert_array_equal(
+        qa.MaskInvalid(invalid_value=7)(arr), [[False, True], [True, False]]
+    )
+    with pytest.raises(ValueError, match="invalid_value"):
+        qa.MaskInvalid()(arr)
 
 
 @pytest.mark.parametrize("fill", [-9999, np.nan], ids=["numeric", "nan"])
 @pytest.mark.parametrize(
-    "op", [qa.MaskValid(), qa.MaskNoData()], ids=["MaskValid", "MaskNoData"]
+    "op", [qa.MaskInvalid(), qa.MaskNoData()], ids=["MaskInvalid", "MaskNoData"]
 )
 def test_fill_pixels_are_excluded(op, fill) -> None:
     """Fill pixels are flagged -- including a NaN fill (``nan == nan`` is False)."""
@@ -266,10 +351,45 @@ def test_mask_saturated_infers_integer_max() -> None:
     np.testing.assert_array_equal(np.asarray(out), [[False, True], [True, False]])
 
 
-def test_mask_saturated_requires_value_for_float_inputs() -> None:
-    gt = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
+def test_mask_saturated_defaults_float_inputs_to_reflectance_ceiling() -> None:
+    """Float input defaults to 1.0, as the removed ``SaturationFlag`` did."""
+    refl = np.array([[[0.5, 1.0], [1.2, 0.99]]], dtype=np.float32)
+    np.testing.assert_array_equal(
+        qa.MaskSaturated()(refl), [[False, True], [True, False]]
+    )
     with pytest.raises(ValueError, match="saturation_value"):
-        qa.MaskSaturated()(gt)
+        qa.MaskSaturated()(np.zeros((1, 2, 2), dtype=bool))
+
+
+def test_mask_saturated_is_a_threshold_with_optional_band_reduction() -> None:
+    """Folds in the removed ``restore.SaturationFlag``: ``>=`` + per-band."""
+    arr = np.array([[[0.25, 0.75]], [[1.5, 0.1]]])  # (2, 1, 2)
+
+    per_band = qa.MaskSaturated(saturation_value=0.5, reduce_bands=False)(arr)
+    reduced = qa.MaskSaturated(saturation_value=0.5)(arr)
+
+    np.testing.assert_array_equal(per_band, [[[False, True]], [[True, False]]])
+    np.testing.assert_array_equal(reduced, [[True, True]])
+    # Band attrs survive the per-band form.
+    gt = _toy_geotensor(arr, attrs={"band_names": ["B1", "B2"]})
+    out = qa.MaskSaturated(saturation_value=0.5, reduce_bands=False)(gt)
+    assert out.attrs["band_names"] == ["B1", "B2"]
+
+
+def test_mask_saturated_never_flags_nodata() -> None:
+    """A uint16 fill at the dtype max is not "saturated" (#146)."""
+    counts = np.full((1, 4, 4), 100, dtype=np.uint16)
+    gt = _toy_geotensor(counts, fill_value_default=65535, with_fill_pixels=True)
+
+    out = qa.MaskSaturated()(gt)
+
+    assert not np.asarray(out).any()
+    assert out.fill_value_default is False
+    # Plain arrays: NaN pixels are never saturated either.
+    arr = np.array([[[np.nan, 2.0]]])
+    np.testing.assert_array_equal(
+        qa.MaskSaturated(saturation_value=1.0)(arr), [[False, True]]
+    )
 
 
 def test_ml_placeholders_are_configurable_and_explicit() -> None:
@@ -417,14 +537,93 @@ def test_mask_from_bit_field_invert_flips_result() -> None:
     np.testing.assert_array_equal(np.asarray(out), [[True, False, True, True]])
 
 
-def test_reduce_bit_masks_ors_named_groups() -> None:
-    from geotoolz.qa._src.array import reduce_bit_masks
+def test_mask_from_qa_bits_decodes_and_inverts() -> None:
+    qa_arr = np.array(
+        [
+            [0b00000000, 0b00001000, 0b00010000],  # 0, bit3, bit4
+            [0b00011000, 0b00100000, 0b11111111],  # bits3+4, bit5, all
+        ],
+        dtype=np.uint16,
+    )
+    np.testing.assert_array_equal(
+        qa.mask_from_qa_bits(qa_arr, bits=[3, 4]),
+        [[False, True, True], [True, False, True]],
+    )
+    np.testing.assert_array_equal(
+        qa.mask_from_qa_bits(np.array([[0, 8]], dtype=np.uint16), [3], invert=True),
+        [[True, False]],
+    )
+    with pytest.raises(ValueError, match="non-negative"):
+        qa.mask_from_qa_bits(np.zeros(1, dtype=np.uint16), bits=[-1])
 
-    qa_arr = np.array([[0, 1 << 3, 1 << 4, (1 << 3) | (1 << 4)]], dtype=np.uint16)
-    out = reduce_bit_masks(qa_arr, {"cloud": (3,), "shadow": (4,)})
-    np.testing.assert_array_equal(np.asarray(out), [[False, True, True, True]])
+
+def test_mask_from_scl_classes_enum_members_and_invert() -> None:
+    scl = np.array([[9, 8, 4, 4], [10, 6, 5, 0]], dtype=np.uint8)
+    np.testing.assert_array_equal(
+        qa.mask_from_scl(scl, list(qa.SCL_CLOUDS)),
+        [[True, True, False, False], [True, False, False, False]],
+    )
+    np.testing.assert_array_equal(
+        qa.mask_from_scl(scl[:1, :3], [qa.SCL.CLOUD_HIGH_PROBABILITY]),
+        [[True, False, False]],
+    )
+    np.testing.assert_array_equal(
+        qa.mask_from_scl(scl[:1, 1:3], [qa.SCL.VEGETATION], invert=True),
+        [[True, False]],
+    )
     with pytest.raises(ValueError, match="must not be empty"):
-        reduce_bit_masks(qa_arr, {})
+        qa.mask_from_scl(np.zeros(1, dtype=np.uint8), [])
+
+
+def test_scl_enum_values_and_disjoint_sets() -> None:
+    assert qa.SCL.NO_DATA == 0
+    assert qa.SCL.VEGETATION == 4
+    assert qa.SCL.CLOUD_HIGH_PROBABILITY == 9
+    assert qa.SCL.SNOW == 11
+    assert qa.SCL_CLOUDS.isdisjoint(qa.SCL_INVALID)
+    assert qa.SCL_LAND.isdisjoint(qa.SCL_CLOUDS | qa.SCL_INVALID)
+
+
+def test_removed_duplicates_are_gone() -> None:
+    """#154 removed the duplicate spellings outright (no aliases)."""
+    for name in ("MaskFromQABits", "MaskFromSCL", "MaskValid", "reduce_bit_masks"):
+        assert not hasattr(qa, name)
+        assert not hasattr(gz, name)
+    assert not hasattr(gz.restore, "SaturationFlag")
+    assert not hasattr(gz, "SaturationFlag")
+    with pytest.raises(ImportError):
+        import geotoolz.cloud  # noqa: F401
+
+
+def test_generic_decoder_defaults_to_carrier_as_qa_band() -> None:
+    """``qa_band=None`` (default) treats the carrier as the QA band."""
+    qa_arr = np.array([[0, 1 << 3], [1 << 4, 0]], dtype=np.uint16)
+    np.testing.assert_array_equal(
+        qa.MaskClouds(bits=[3])(qa_arr), [[False, True], [False, False]]
+    )
+    keep_veg = qa.MaskClouds(values=[qa.SCL.VEGETATION], invert=True)
+    np.testing.assert_array_equal(
+        keep_veg(np.array([[4, 9]], dtype=np.uint8)), [[False, True]]
+    )
+
+
+def test_apply_mask_with_qa_operator_on_scl_stack() -> None:
+    """ApplyMask(mask=MaskClouds(...)) runs the decoder on the input first."""
+    from geotoolz.mask import ApplyMask
+
+    rng = np.random.default_rng(0)
+    refl = rng.uniform(0.05, 0.6, size=(2, 2, 2)).astype(np.float32)
+    scl = np.array([[9, 4], [6, 0]], dtype=np.float32)
+    stack = _toy_geotensor(
+        np.concatenate([refl, scl[None]]), attrs={"band_names": ["B4", "B8", "SCL"]}
+    )
+    op = ApplyMask(
+        mask=qa.MaskClouds(qa_band="SCL", values=sorted(qa.SCL_CLOUDS)),
+        fill_value=np.nan,
+    )
+    out = np.asarray(op(stack))
+    assert np.all(np.isnan(out[:, 0, 0]))
+    assert not np.any(np.isnan(out[:2, 0, 1]))
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +649,7 @@ def _plain_array_cases() -> list[tuple[object, np.ndarray]]:
             np.array([[[0, 1 << 10], [1 << 11, 0]]], dtype=np.uint16),
         ),
         (qa.S2SCL(qa_band=0), _SCL_2X2[None]),
+        (qa.MaskInvalid(invalid_value=0), _SCL_2X2),
         (qa.LandsatQA_PIXEL(qa_band=0), _QA_BITS_2X2[None]),
         (
             qa.MODISStateQA(qa_band=0),
@@ -494,9 +694,13 @@ def _qa_test_ops() -> list[object]:
         qa.MaskSnow(qa_band=0, bits=[5]),
         qa.MaskWater(qa_band=0, bits=[7]),
         qa.MaskNoData(qa_band=0, values=[0]),
+        qa.MaskNoData(),
+        qa.MaskInvalid(invalid_value=-9999),
         qa.MaskSaturated(saturation_value=65535),
+        qa.MaskSaturated(saturation_value=0.5, reduce_bands=False),
         qa.S2QA60(qa_band="QA60"),
-        qa.S2SCL(qa_band="SCL", keep=["vegetation", "water"]),
+        qa.S2QA60(targets=["cirrus"]),
+        qa.S2SCL(qa_band="SCL", targets=["cloud", "cirrus"]),
         qa.LandsatQA_PIXEL(targets=["cloud", "cloud_shadow"], sensor="l89"),
         qa.LandsatQA_PIXEL(targets=["cloud"], sensor="l7"),
         qa.MODISStateQA(targets=["cloud", "cloud_shadow", "cirrus"]),
@@ -540,7 +744,7 @@ def test_4d_time_stack() -> None:
     qa_frame[1, 0, 0] = 1 << 3
     stack_values = np.stack([qa_frame, np.roll(qa_frame, 1, axis=-1)])
     stack = _toy_geotensor(stack_values, fill_value_default=None)
-    mask = qa.MaskFromQABits(band_idx=1, bits=[3])(stack)
+    mask = qa.MaskClouds(qa_band=1, bits=[3])(stack)
     assert mask.shape == (2, 1, 4, 4)
     np.testing.assert_array_equal(np.asarray(mask)[:, 0], stack_values[:, 1] > 0)
     layers = qa.DecodeBitmask(bits={"cloud": [3], "none": [5]}, qa_band=1)(stack)

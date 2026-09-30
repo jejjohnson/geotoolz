@@ -3,8 +3,8 @@
 The composition core (`Operator`, `Sequential`, `Graph`, …) lives in
 the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit)
 framework — `geotoolz` re-exports the common names at the top level and
-adds the per-domain operator families (`radiometry`, `indices`, `cloud`,
-…) on top.
+adds the per-domain operator families (`radiometry`, `indices`, `qa`,
+`mask`, …) on top.
 
     import geotoolz as gz
     pipe = gz.Sequential([gz.Tap(print), gz.Identity()])
@@ -50,7 +50,6 @@ from pipekit import (
 
 from geotoolz import (
     augment,
-    cloud,
     compositing,
     einx,
     feature,
@@ -285,12 +284,10 @@ from geotoolz.qa import (
     MaskCirrus,
     MaskClouds,
     MaskCloudShadow,
-    MaskFromQABits,
-    MaskFromSCL,
+    MaskInvalid,
     MaskNoData,
     MaskSaturated,
     MaskSnow,
-    MaskValid,
     MaskWater,
     MODISStateQA,
     OmniCloudMask,
@@ -334,7 +331,6 @@ from geotoolz.restore import (
     NLMeans,
     OutlierMask,
     ReplaceOutliers,
-    SaturationFlag,
 )
 from geotoolz.segment import (
     SLIC,
@@ -532,13 +528,11 @@ __all__ = [
     "MaskCirrus",
     "MaskCloudShadow",
     "MaskClouds",
-    "MaskFromQABits",
-    "MaskFromSCL",
+    "MaskInvalid",
     "MaskNMS",
     "MaskNoData",
     "MaskSaturated",
     "MaskSnow",
-    "MaskValid",
     "MaskWater",
     "MatchedFilter",
     "MatchedFilterPixel",
@@ -617,7 +611,6 @@ __all__ = [
     "RobustScaler",
     "S2Cloudless",
     "SWIRComposite",
-    "SaturationFlag",
     "SegmentStitch",
     "SelectBands",
     "SensorReader",
@@ -662,7 +655,6 @@ __all__ = [
     "ZeroOne",
     "__version__",
     "augment",
-    "cloud",
     "compositing",
     "dNBR",
     "einx",
