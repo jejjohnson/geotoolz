@@ -448,3 +448,49 @@ def configured_ref(value: BandRef | None, fallback: BandRef | None) -> BandRef:
             "or its *_idx fallback."
         )
     return fallback
+
+
+def resolve_wavelengths(
+    gt: Any,
+    wavelengths: Sequence[float] | np.ndarray | None = None,
+    *,
+    n_bands: int | None = None,
+    name: str = "wavelengths",
+) -> np.ndarray:
+    """Per-band centre wavelengths: an explicit value, else ``gt.attrs``.
+
+    The one lookup every wavelength-dependent operator (SRF convolution,
+    spectral binning, continuum removal) uses: the constructor argument
+    wins; otherwise ``gt.attrs["wavelengths"]`` is read (plain arrays have
+    no attrs, so they need the explicit value).
+
+    Args:
+        gt: The carrier.
+        wavelengths: Explicit wavelengths, or ``None`` to read attrs.
+        n_bands: When given, the number of bands the wavelengths must
+            describe.
+        name: Argument name used in error messages.
+
+    Returns:
+        The wavelengths as a 1-D float64 array.
+
+    Raises:
+        ValueError: If no wavelengths are available, or their count does
+            not match ``n_bands``.
+
+    Examples:
+        >>> resolve_wavelengths(None, [490, 665]).tolist()
+        [490.0, 665.0]
+    """
+    if wavelengths is None:
+        wavelengths = (getattr(gt, "attrs", None) or {}).get("wavelengths")
+    if wavelengths is None:
+        raise ValueError(
+            f"{name} must be provided or available as gt.attrs['wavelengths']"
+        )
+    values = np.asarray(wavelengths, dtype=float).reshape(-1)
+    if n_bands is not None and values.size != n_bands:
+        raise ValueError(
+            f"{name} has {values.size} entries but the input has {n_bands} band(s)"
+        )
+    return values

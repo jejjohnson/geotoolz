@@ -117,26 +117,38 @@ class NormalizedDifference(Operator):
     matches your band pair. Equivalent in math to all of them; the
     named subclasses are pinned-argument convenience wrappers.
 
-    This class holds the top-level ``geotoolz.NormalizedDifference``
-    name; :class:`geotoolz.spectral.NormalizedDifference` is the
-    variant in the spectral family; both resolve band names with the
-    package-wide resolver (:func:`geotoolz._src.bands.resolve_band`).
+    The package's one normalized-difference operator (also the top-level
+    ``geotoolz.NormalizedDifference``). Bands are given either as
+    ``a`` / ``b`` -- an integer position or a band name resolved against
+    ``gt.attrs`` by the package-wide resolver
+    (:func:`geotoolz._src.bands.resolve_band`) -- or as integer
+    ``a_idx`` / ``b_idx``; ``a`` / ``b`` win when both are given. Names
+    need a GeoTensor carrying band-name attrs; on a plain ``np.ndarray``
+    a name raises ``TypeError`` and integer positions work.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
     ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value_default=NaN``. On a ``(T, C, H, W)`` stack the result is
+    ``(T, 1, H, W)``.
 
     Args:
-        a_idx: Index of the "high" band (numerator-positive term).
-        b_idx: Index of the "low" band.
+        a: Index or name of the "high" band (numerator-positive term).
+        b: Index or name of the "low" band.
+        a_idx: Integer index of the "high" band, used when ``a`` is
+            ``None``.
+        b_idx: Integer index of the "low" band, used when ``b`` is
+            ``None``.
         axis: Position of the band axis in the carrier. Default ``-3``.
-        eps: Denominator stabiliser. Default ``1e-10``.
+        eps: Denominator stabiliser. Default ``1e-10``, the package-wide
+            value (see :mod:`geotoolz.indices._src.array`).
 
     Examples:
         >>> from geotoolz.indices import NormalizedDifference
         >>> # A custom water/snow index using SWIR vs Green.
         >>> swsi = NormalizedDifference(a_idx=2, b_idx=10)  # Green=2, SWIR1=10
         >>> result = swsi(reflectance_geotensor)
+        >>> # By band name (resolved against gt.attrs["band_names"]).
+        >>> ndvi = NormalizedDifference(a="B8", b="B4")(reflectance_geotensor)
     """
 
     def __init__(

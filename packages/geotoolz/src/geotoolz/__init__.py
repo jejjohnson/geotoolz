@@ -12,12 +12,10 @@ adds the per-domain operator families (`radiometry`, `indices`, `cloud`,
 Re-export policy: every public **Operator class** (plus a few
 constants like the ``SCL`` sets) is available at the top level;
 the **Tier-A numpy primitives** (``ndvi``, ``apply_mask``,
-``percentile_clip``, ...) live in their submodules only. Where two
-domains define same-named, deliberately distinct operators, the
-domain-canonical class wins the top-level name: ``ApplySRF`` is
-``radiometry``'s (``spectral.ApplySRF`` adds band-name bookkeeping) and
-``NormalizedDifference`` is ``indices``' (``spectral``'s variant
-resolves band names).
+``percentile_clip``, ...) live in their submodules only. Each operator
+is defined in exactly one family, so every top-level name is unambiguous
+(``ApplySRF`` is ``radiometry``'s, ``NormalizedDifference`` is
+``indices``').
 
 The four-axis Patcher framework lives in the standalone
 [`geopatcher`](https://github.com/jejjohnson/geopatcher) package. Install
@@ -354,7 +352,6 @@ from geotoolz.spectral import (
     BandMath,
     BandRatio,
     ContinuumRemoval,
-    GaussianSRF,
     ReorderBands,
     SelectBands,
     SpectralBinning,
@@ -500,7 +497,6 @@ __all__ = [
     "GapFillNearest",
     "GaussianDenoise",
     "GaussianNoise",
-    "GaussianSRF",
     "GeoTensorEstimator",
     "Georeference",
     "GeostationaryParallaxCorrect",
