@@ -55,6 +55,20 @@ def test_jsonable_non_strict_passes_unknown_through() -> None:
     assert np.isnan(out["nan"])
 
 
+def test_jsonable_extended_precision_scalars_do_not_recurse() -> None:
+    """``np.longdouble(...).item()`` stays a numpy scalar; don't loop on it."""
+    out = jsonable(
+        {
+            "ld": np.longdouble(1.5),
+            "cld": np.clongdouble(1 + 2j),
+            "arr": np.array([0.25, 0.5], dtype=np.longdouble),
+        }
+    )
+    assert out == {"ld": 1.5, "cld": 1 + 2j, "arr": [0.25, 0.5]}
+    assert type(out["ld"]) is float
+    assert jsonable(np.clongdouble(1 + 2j), strict=True) == "(1+2j)"
+
+
 def test_jsonable_strict_reprs_instead_of_dropping() -> None:
     class Thing:
         def __repr__(self) -> str:

@@ -71,7 +71,13 @@ def jsonable(value: Any, *, strict: bool = False) -> Any:
     if isinstance(value, np.generic):
         # ``.item()`` can itself yield bytes / datetime (``np.bytes_``,
         # ``np.datetime64``), so coerce the Python scalar in turn.
-        return jsonable(value.item(), strict=strict)
+        item = value.item()
+        if isinstance(item, np.generic):
+            # ``np.longdouble`` / ``np.clongdouble`` have no lossless
+            # builtin, so ``.item()`` hands back the numpy scalar itself;
+            # narrow to float / complex rather than recursing forever.
+            item = complex(item) if np.iscomplexobj(item) else float(item)
+        return jsonable(item, strict=strict)
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     if isinstance(value, (datetime, date)):
