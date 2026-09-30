@@ -113,9 +113,10 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     },
     "geom._src.coregister.operators.VectorToRasterAgg": {"agg": "count"},
     "geom._src.operators.BowtieCorrection": {
-        "scan_angle_max_deg": 55.0,
-        "pixels_per_scan": 10,
-        "scans_per_granule": 20,
+        "detectors_per_scan": 4,
+        "max_scan_angle_deg": 55.0,
+        "altitude_km": 705.0,
+        "aggregation_zones": ((8, 2), (4, 1)),
     },
     "geom._src.operators.CropTo": {"shape": (4, 4)},
     "geom._src.operators.CropToBounds": {"bounds": (0.0, 0.0, 1.0, 1.0)},
@@ -817,7 +818,12 @@ GAP_FILLERS: frozenset[str] = frozenset(
         "GapFillLaplacian",
         "GapFillNearest",
     )
-)
+) | {
+    # Swath-edge nodata (e.g. VIIRS bowtie-deleted rows) is refilled from
+    # the overlapping scan that sees the same ground; the toy scene's
+    # corner fill pixels sit in that overlap.
+    "geom._src.operators.BowtieCorrection",
+}
 
 #: Strict xfails for ``test_output_fill_matches_dtype``, owned by later
 #: branches of the #112 stack.

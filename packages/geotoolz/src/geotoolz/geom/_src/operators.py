@@ -48,22 +48,25 @@ from skimage.registration import (
 from geotoolz._src.bands import band_count
 from geotoolz._src.blending import normalize_overlap_add, overlap_add
 from geotoolz._src.config import as_tuple
+from geotoolz._src.dtype import as_float
 from geotoolz._src.geo import require_geotensor
-from geotoolz._src.shape import BAND_AXIS, require_ndim, single_band
-from geotoolz._src.valid import valid_pixels, wrap_filled
+from geotoolz._src.shape import BAND_AXIS, over_frames, require_ndim, single_band
+from geotoolz._src.valid import carried_fill, valid_pixels, wrap_filled
 from geotoolz._src.wrap import adopt_attrs, rewrap_attrs, wrap_like
 from geotoolz.geom._src.array import (
+    bowtie_detector_positions,
     center_offsets,
     feather_weights,
     is_north_up,
     resolve_interpolation,
     resolve_resampling,
+    scan_angles,
+    scan_pixel_growth,
     target_slices,
     valid_pixel_mask,
 )
 
 
-_MIN_BOWTIE_COS = 0.1
 _RAY_DISCRIMINANT_TOLERANCE = 1.0e-6
 
 
@@ -1190,83 +1193,297 @@ class Stitch(Operator):
         }
 
 
-class BowtieCorrection(Operator):
-    """Resample scan-edge pixels to reduce bowtie overlap.
+#: Mean Earth radius R₁ (km), IUGG / Moritz (2000), "Geodetic Reference
+#: System 1980", J. Geodesy 74:128-133.
+_EARTH_MEAN_RADIUS_KM: float = 6371.0088
 
-    The correction uses the sensor cross-track scan angle to estimate the
-    scan-angle IFOV expansion (``1 / cos(θ)``), then samples each scan row
-    from a compressed cross-track coordinate. ``scan_angle_max_deg=0`` is an
-    exact identity.
+# MODIS: 10 / 20 / 40 detectors per scan at 1 km / 500 m / 250 m; 1354 /
+# 2708 / 5416 frames over ±55°; Terra/Aqua nominal altitude 705 km.
+# Barnes, Pagano & Salomonson (1998), IEEE TGRS 36(4):1088-1100;
+# Wolfe et al. (2002), Remote Sens. Environ. 83:31-49; MCST MODIS Level 1B
+# Product User's Guide.
+_MODIS_DETECTORS: dict[int, int] = {1000: 10, 500: 20, 250: 40}
+_MODIS_MAX_SCAN_ANGLE_DEG = 55.0
+_MODIS_ALTITUDE_KM = 705.0
+
+# VIIRS: 16 M-band / 32 I-band detectors per scan over ±56.28°, S-NPP /
+# JPSS nominal altitude 824 km, three along-scan aggregation zones per
+# half-scan (nadir → 31.72°: 3 native samples per pixel; → 44.86°: 2;
+# → 56.28°: 1), i.e. 1776 + 736 + 640 native M-band samples giving
+# 592 + 368 + 640 pixels (3200 per scan; I-band doubles every count, 6400).
+# NOAA Technical Report NESDIS 142, "VIIRS Sensor Data Record (SDR) User's
+# Guide" (Cao et al.), §2.1-2.2 and Fig. 3.
+_VIIRS_DETECTORS: dict[str, int] = {"M": 16, "I": 32}
+_VIIRS_MAX_SCAN_ANGLE_DEG = 56.28
+_VIIRS_ALTITUDE_KM = 824.0
+_VIIRS_M_ZONES: tuple[tuple[int, int], ...] = ((1776, 3), (736, 2), (640, 1))
+
+
+class BowtieCorrection(Operator):
+    """Remove whiskbroom bowtie overlap by resampling each scan along track.
+
+    A whiskbroom scanner (MODIS, VIIRS) images ``N`` detector rows per
+    mirror scan. The along-track footprint of a detector grows with scan
+    angle θ, while the satellite advances by the same distance every scan,
+    so consecutive scans overlap along track towards the swath edges: the
+    same ground appears in the last rows of scan ``j`` and the first rows of
+    scan ``j + 1`` (the "bowtie" effect). This operator removes that
+    duplication, per column, from the scan geometry alone.
+
+    **Geometry** (spherical Earth, radius ``R``; altitude ``h``; see
+    :func:`~geotoolz.geom._src.array.scan_pixel_growth`)::
+
+        β(θ) = arcsin(((R + h)/R)·sin θ) − θ          Earth central angle
+        s(θ) = (R + h)·cos θ − √(R² − (R + h)²·sin² θ)  slant range
+        g(θ) = s / (h·cos β)                          along-track growth
+
+    ``g`` is the along-track size of a detector, measured in orbit angle
+    (the coordinate in which every scan advances by the same amount),
+    relative to nadir; ``g(0) = 1`` and the flat-Earth limit is
+    ``1 / cos θ``. The column scan angles ``θ_c`` follow the constant
+    mirror rate (see :func:`~geotoolz.geom._src.array.scan_angles`),
+    including VIIRS along-scan aggregation when ``aggregation_zones`` is
+    given.
+
+    **De-overlap.** In units of one nadir detector, scans are contiguous
+    at nadir (scan ``j`` spans rows ``j·N … j·N + N − 1``) and detector
+    ``k`` of scan ``j`` lies at ``y = j·N + (N − 1)/2 + (k − (N − 1)/2)·g``.
+    Output row ``r = j·N + m`` is the ground at ``y = r`` — a uniform
+    along-track grid, identical to the input grid at nadir — sampled from
+    the scan whose centre is nearest (scan ``j``) at fractional detector
+    ``k₀ = (N − 1)/2 + (m − (N − 1)/2)/g`` (nearest or linear in ``k``).
+    Each scan is therefore shrunk about its centre by ``1/g`` so the rows
+    it shares with a neighbour are taken once, from the nearer scan. If
+    that sample is nodata, the overlapping neighbour scan ``j ± 1`` is
+    used instead when its footprint covers ``y = r``; otherwise the output
+    is fill.
+
+    **Output grid.** Same shape, transform and CRS as the input; only
+    along-track values change. Columns are never moved (cross-track pixel
+    growth is left for a swath-to-grid resampler such as
+    ``coregister.SwathToGrid``) and the along-track extent is conserved.
+
+    **Assumptions / limitations.** Spherical Earth, circular orbit at a
+    constant altitude, no terrain; scans exactly contiguous at nadir;
+    detectors equally spaced along track (first order in the detector
+    angle, error ~ (N·IFOV)² ≈ 10⁻⁴ of a row); the along-track shift of a
+    scan line caused by satellite motion and Earth rotation during a scan
+    is common to all scans of a column and does not change the overlap, so
+    it is ignored. Input rows must be whole scans (``H % N == 0``) with
+    row 0 the first detector of a scan.
+
+    **VIIRS.** On-board aggregation makes the columns non-uniform in angle;
+    pass ``aggregation_zones`` (the ``viirs`` preset does). On-board
+    *bowtie deletion* (1 row per scan edge in the 2-sample zone, 2 in the
+    unaggregated zone, M-band; doubled for I-bands) delivers the duplicated
+    rows as fill: they are nodata here, so the neighbouring scan's copy of
+    that ground is used and no gap remains.
+
+    Nodata: a pixel is invalid when any band is non-finite or equals the
+    carrier's fill; invalid samples never contribute to an output pixel,
+    and output pixels without a valid source hold the output's fill
+    (``carried_fill``: the input's fill for ``"nearest"``; ``NaN`` for
+    ``"linear"`` on integer input, which is promoted to float).
+    ``(T, C, H, W)`` stacks are corrected frame by frame.
 
     Pixel-space resampling (driven entirely by the scan-geometry
     constructor arguments): both ``GeoTensor`` and plain ``np.ndarray``
     inputs are supported and returned in kind.
 
     Args:
-        scan_angle_max_deg: Maximum off-nadir scan angle in degrees.
-        pixels_per_scan: Cross-track sample count.
-        scans_per_granule: Along-track scan count.
-        method: ``"nearest"`` or ``"bilinear"``.
+        detectors_per_scan: Detector rows per scan ``N``.
+        max_scan_angle_deg: Scan-edge angle ``θ_max`` in degrees (outer edge
+            of the outermost native sample); ``0`` is the identity.
+        altitude_km: Orbit altitude ``h`` (km).
+        earth_radius_km: Earth radius ``R`` (km); defaults to the mean
+            radius 6371.0088 km.
+        aggregation_zones: Optional along-scan aggregation table,
+            ``(native_samples, factor)`` per zone from nadir outward for one
+            half-scan (VIIRS); ``None`` means one column per native sample.
+        method: ``"nearest"`` (dtype-preserving, safe for masks / QA) or
+            ``"linear"`` interpolation between detectors.
 
     Examples:
         >>> import geotoolz as gz
-        >>> debowtie = gz.geom.BowtieCorrection(
-        ...     scan_angle_max_deg=55.0,
-        ...     pixels_per_scan=1354,
-        ...     scans_per_granule=203,
+        >>> debowtie = gz.geom.BowtieCorrection.modis()  # 1 km bands
+        >>> viirs = gz.geom.BowtieCorrection.viirs(band="M", method="linear")
+        >>> custom = gz.geom.BowtieCorrection(
+        ...     detectors_per_scan=10, max_scan_angle_deg=55.0, altitude_km=705.0
         ... )
     """
 
     def __init__(
         self,
         *,
-        scan_angle_max_deg: float,
-        pixels_per_scan: int,
-        scans_per_granule: int,
+        detectors_per_scan: int,
+        max_scan_angle_deg: float,
+        altitude_km: float,
+        earth_radius_km: float = _EARTH_MEAN_RADIUS_KM,
+        aggregation_zones: Sequence[Sequence[int]] | None = None,
         method: str = "nearest",
     ) -> None:
-        if not 0.0 <= scan_angle_max_deg < 70.0:
+        if detectors_per_scan < 1:
+            raise ValueError("detectors_per_scan must be >= 1.")
+        if altitude_km <= 0 or earth_radius_km <= 0:
+            raise ValueError("altitude_km and earth_radius_km must be > 0.")
+        horizon = np.rad2deg(
+            np.arcsin(earth_radius_km / (earth_radius_km + altitude_km))
+        )
+        if not 0.0 <= max_scan_angle_deg < horizon:
             raise ValueError(
-                "scan_angle_max_deg must be >= 0.0 and < 70.0 for stable "
-                "cosine-based IFOV correction."
+                f"max_scan_angle_deg must be in [0, {horizon:.2f}) — the horizon "
+                f"seen from {altitude_km} km."
             )
-        self.scan_angle_max_deg = scan_angle_max_deg
-        self.pixels_per_scan = pixels_per_scan
-        self.scans_per_granule = scans_per_granule
+        if method not in {"nearest", "linear"}:
+            raise ValueError("method must be 'nearest' or 'linear'.")
+        self.detectors_per_scan = int(detectors_per_scan)
+        self.max_scan_angle_deg = max_scan_angle_deg
+        self.altitude_km = altitude_km
+        self.earth_radius_km = earth_radius_km
+        self.aggregation_zones = (
+            None
+            if aggregation_zones is None
+            else tuple(
+                (int(native), int(factor)) for native, factor in aggregation_zones
+            )
+        )
         self.method = method
 
+    @classmethod
+    def modis(
+        cls, resolution_m: int = 1000, *, method: str = "nearest"
+    ) -> BowtieCorrection:
+        """MODIS (Terra / Aqua) preset.
+
+        10 / 20 / 40 detectors per scan at 1 km / 500 m / 250 m, ±55°,
+        705 km (Barnes et al. 1998; Wolfe et al. 2002).
+
+        Args:
+            resolution_m: Band resolution: ``1000``, ``500`` or ``250``.
+            method: ``"nearest"`` or ``"linear"``.
+
+        Returns:
+            The configured operator.
+
+        Examples:
+            >>> BowtieCorrection.modis().detectors_per_scan
+            10
+            >>> BowtieCorrection.modis(250).detectors_per_scan
+            40
+        """
+        if resolution_m not in _MODIS_DETECTORS:
+            raise ValueError(f"resolution_m must be one of {sorted(_MODIS_DETECTORS)}.")
+        return cls(
+            detectors_per_scan=_MODIS_DETECTORS[resolution_m],
+            max_scan_angle_deg=_MODIS_MAX_SCAN_ANGLE_DEG,
+            altitude_km=_MODIS_ALTITUDE_KM,
+            method=method,
+        )
+
+    @classmethod
+    def viirs(cls, band: str = "M", *, method: str = "nearest") -> BowtieCorrection:
+        """VIIRS (S-NPP / JPSS) preset for aggregated SDR swaths.
+
+        16 M-band (3200 columns) or 32 I-band (6400 columns) detectors per
+        scan, ±56.28°, 824 km, with the three on-board aggregation zones
+        (NOAA NESDIS 142, VIIRS SDR User's Guide). Bowtie-deleted rows are
+        expected as fill and are refilled from the overlapping scan.
+
+        Args:
+            band: ``"M"`` (750 m) or ``"I"`` (375 m).
+            method: ``"nearest"`` or ``"linear"``.
+
+        Returns:
+            The configured operator.
+
+        Examples:
+            >>> BowtieCorrection.viirs().detectors_per_scan
+            16
+            >>> BowtieCorrection.viirs("I").aggregation_zones[0]
+            (3552, 3)
+        """
+        if band not in _VIIRS_DETECTORS:
+            raise ValueError(f"band must be one of {sorted(_VIIRS_DETECTORS)}.")
+        scale = 2 if band == "I" else 1
+        return cls(
+            detectors_per_scan=_VIIRS_DETECTORS[band],
+            max_scan_angle_deg=_VIIRS_MAX_SCAN_ANGLE_DEG,
+            altitude_km=_VIIRS_ALTITUDE_KM,
+            aggregation_zones=tuple(
+                (native * scale, factor) for native, factor in _VIIRS_M_ZONES
+            ),
+            method=method,
+        )
+
+    @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        if self.method not in {"nearest", "bilinear"}:
-            raise ValueError("method must be 'nearest' or 'bilinear'.")
+        require_ndim(gt, (2, 3), "BowtieCorrection")
+        n = self.detectors_per_scan
         height, width = gt.shape[-2:]
-        if width != self.pixels_per_scan:
+        if height % n:
             raise ValueError(
-                f"Expected {self.pixels_per_scan} cross-track pixels, got {width}."
+                f"BowtieCorrection needs whole scans: {height} rows is not a "
+                f"multiple of detectors_per_scan={n}."
             )
-        if height != self.scans_per_granule:
-            raise ValueError(
-                f"Expected {self.scans_per_granule} along-track scans, got {height}."
-            )
-        if self.scan_angle_max_deg == 0:
-            return gt
-        rows = np.broadcast_to(
-            np.arange(height, dtype=np.float64)[:, None], (height, width)
+        theta = scan_angles(width, self.max_scan_angle_deg, self.aggregation_zones)
+        _, growth, _ = scan_pixel_growth(theta, self.altitude_km, self.earth_radius_km)
+        k0, k1, step = bowtie_detector_positions(growth, n)
+
+        values = np.asarray(gt)
+        if self.method == "linear":
+            values = as_float(values)
+        valid = valid_pixels(gt)
+        rows = np.arange(height)
+        scan = rows // n
+        m = rows % n
+        n_scans = height // n
+        # Primary source: the scan whose nadir rows contain the output row.
+        out, ok = self._sample_scan(values, valid, scan, k0[m], n)
+        # Fallback: the overlapping neighbour scan, where the primary is nodata.
+        neighbour = scan + step[m]
+        in_granule = (neighbour >= 0) & (neighbour < n_scans)
+        alt, alt_ok = self._sample_scan(
+            values, valid, np.clip(neighbour, 0, n_scans - 1), k1[m], n
         )
-        centre = (width - 1) / 2.0
-        cols = np.arange(width, dtype=np.float64)
-        angles = np.deg2rad(
-            np.linspace(-self.scan_angle_max_deg, self.scan_angle_max_deg, width)
-        )
-        expansion = 1.0 / np.clip(np.cos(angles), _MIN_BOWTIE_COS, None)
-        src_cols = centre + (cols - centre) / expansion
-        sampled = _sample_array(
-            np.asarray(gt),
-            rows,
-            np.broadcast_to(src_cols[None, :], (height, width)),
-            method=self.method,
-            fill=getattr(gt, "fill_value_default", None),
-        )
-        return wrap_like(gt, sampled)
+        use_alt = ~ok & alt_ok & in_granule[:, None]
+        out = np.where(use_alt, alt, out)
+        filled = ok | use_alt
+        fill = carried_fill(gt, out.dtype)
+        return wrap_filled(gt, out, fill_value_default=fill, valid=filled)
+
+    def _sample_scan(
+        self,
+        values: np.ndarray,
+        valid: np.ndarray,
+        scan: np.ndarray,
+        k: np.ndarray,
+        n: int,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Sample ``values`` at fractional detector ``k`` of scan ``scan``.
+
+        Returns the ``(..., H, W)`` samples and the ``(H, W)`` mask of
+        samples inside the scan footprint (``−½ ≤ k ≤ N − ½``) whose
+        contributing input pixels are all valid.
+        """
+        cols = np.arange(k.shape[-1])[None, :]
+        base = (scan * n)[:, None]
+        inside = (k >= -0.5) & (k <= n - 0.5)
+        kc = np.clip(k, 0.0, n - 1.0)
+        if self.method == "nearest":
+            row = base + np.rint(kc).astype(int)
+            return values[..., row, cols], inside & valid[row, cols]
+        # Linear in k: v = v[k₀] + w·(v[k₀ + 1] − v[k₀]), w = k − k₀ (exact when
+        # the two detectors agree, so a cross-track ramp maps to itself).
+        lo = np.minimum(np.floor(kc).astype(int), max(n - 2, 0))
+        hi = np.minimum(lo + 1, n - 1)
+        weight = (kc - lo).astype(values.dtype)
+        row_lo, row_hi = base + lo, base + hi
+        valid_lo, valid_hi = valid[row_lo, cols], valid[row_hi, cols]
+        # Zero-weight neighbours may be nodata without spoiling the sample.
+        ok = inside & (valid_lo | (weight == 1)) & (valid_hi | (weight == 0))
+        v_lo = np.where(valid_lo, values[..., row_lo, cols], 0)
+        v_hi = np.where(valid_hi, values[..., row_hi, cols], 0)
+        return v_lo + weight * (v_hi - v_lo), ok
 
 
 class AntimeridianSplit(Operator):
