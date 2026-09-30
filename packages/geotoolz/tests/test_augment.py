@@ -466,7 +466,7 @@ def test_metadata_dependent_ops_reject_plain_arrays() -> None:
     arr = np.zeros((2, 4, 4), dtype=np.float32)
     with pytest.raises(TypeError, match="georeferenced GeoTensor"):
         augment.RandomShift(max_shift=(1, 1), seed=0)(arr)
-    with pytest.raises(ValueError, match="band names"):
+    with pytest.raises(TypeError, match="band-name metadata"):
         augment.BandJitter(groups={"g": ["B02", "B03"]}, seed=0)(arr)
     with pytest.raises(ValueError, match="solar_zenith_angle"):
         augment.SunAngleJitter(delta_sza_deg=1.0, seed=0)(arr)

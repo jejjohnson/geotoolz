@@ -351,6 +351,29 @@ Every operator family uses the same helpers from `geotoolz._src.geo`:
   require the full shape, band axis included, to match. Plain arrays
   carry no georeferencing, so for them only the shape is compared.
 
+## Band names
+
+Every operator that takes a band reference (`indices.NDVI(red="B04")`,
+`spectral.SelectBands`, `viz.Composite`/`TrueColor`, `qa.MaskClouds(qa_band=...)`,
+`augment.BandJitter`, `compositing`, `plume.SBMP`, …) resolves it with the one
+shared resolver, `geotoolz._src.bands.resolve_band`, so `"B04"` means the same
+band in every family:
+
+- **Integers** (any integral type, `np.int64` included) are band-axis positions
+  and pass through unchanged, on GeoTensors and plain arrays alike.
+- **Strings** are looked up in the carrier's `attrs` under these keys, **in this
+  order**: `band_names` → `descriptions` → `bands`. The first key whose names
+  contain the requested band wins; a key that lacks it hands over to the next.
+  A key may hold a sequence of names (position = band index) or a
+  `{name: index}` mapping.
+- geotoolz readers and operators write **only** `band_names`; `descriptions`
+  (rasterio) and `bands` are read for compatibility with other producers.
+- A string reference on a plain `np.ndarray` raises `TypeError` (there is no
+  metadata to resolve it against); a name missing from a GeoTensor's `attrs`
+  raises `ValueError`. The single documented exception is `plume.SBMP`, which
+  maps its `"B11"`/`"B12"` defaults onto the Sentinel-2 L2A order for a plain
+  12-band array only (`SENTINEL2_L2A_BANDS`).
+
 ## Related pages
 
 - [Quickstart](quickstart.md) — 15-min real-data walk-through.

@@ -23,12 +23,15 @@ it too, switching to ``NaN`` when integer input is promoted to float
 ``fill_value_default=NaN``.
 
 Band names are resolved from an explicit ``band_names=`` constructor
-argument when present; otherwise operators look for
-``gt.attrs["band_names"]``. Wavelength-dependent operators follow the
-same convention with explicit ``source_wavelengths=`` / ``wavelengths=``
-arguments first, then ``gt.attrs["wavelengths"]``. On plain arrays the
-attrs fallbacks are unavailable, so name/wavelength resolution raises a
-clear ``ValueError`` unless the values are given explicitly.
+argument when present; otherwise through the package-wide resolver
+(:func:`geotoolz._src.bands.resolve_band`), which reads ``gt.attrs``
+under ``band_names``, then ``descriptions``, then ``bands``.
+Wavelength-dependent operators follow the same convention with explicit
+``source_wavelengths=`` / ``wavelengths=`` arguments first, then
+``gt.attrs["wavelengths"]``. On plain arrays the attrs fallbacks are
+unavailable, so a string band reference raises ``TypeError`` and a
+missing wavelength table raises ``ValueError`` unless the values are
+given explicitly.
 
 The band axis is ``-3`` by default (georeader's ``(C, H, W)`` /
 ``(T, C, H, W)`` layout). On a ``(T, C, H, W)`` time stack every operator
@@ -46,7 +49,15 @@ import pandas as pd
 from georeader.reflectance import srf, transform_to_srf
 from pipekit import Operator
 
-from geotoolz._src.bands import concat_band_attrs, strip_band_attrs, take_band_attrs
+from geotoolz._src.bands import (
+    BandRef,
+    band_names,
+    concat_band_attrs,
+    resolve_band,
+    resolve_bands,
+    strip_band_attrs,
+    take_band_attrs,
+)
 from geotoolz._src.config import jsonable
 from geotoolz._src.shape import keep_band_axis, over_frames
 from geotoolz._src.valid import carried_fill, wrap_filled
@@ -66,53 +77,21 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-BandKey = int | str
-
-
 def _attrs(gt: GeoTensor | np.ndarray) -> dict[str, Any]:
     """Return a shallow copy of ``gt.attrs`` (or ``{}`` if missing)."""
     attrs = getattr(gt, "attrs", None)
     return {} if attrs is None else dict(attrs)
 
 
-def _band_names(
-    gt: GeoTensor | np.ndarray, band_names: list[str] | None
+def _names_or_attrs(
+    gt: GeoTensor | np.ndarray, override: list[str] | None
 ) -> list[str] | None:
-    """Resolve band names from an explicit override or carrier attrs."""
-    if band_names is not None:
-        return list(band_names)
-    names = _attrs(gt).get("band_names")
-    if names is None:
-        return None
-    return [str(name) for name in names]
+    """An explicit ``names`` override, else the carrier's band names."""
+    return list(override) if override is not None else band_names(gt)
 
 
 def _default_band_names(n_bands: int) -> list[str]:
     return [f"B{idx}" for idx in range(n_bands)]
-
-
-def _resolve_band(key: BandKey, names: list[str] | None) -> int:
-    if isinstance(key, int):
-        return key
-    if names is None:
-        raise ValueError(
-            f"Cannot resolve band name {key!r}: band_names must be provided "
-            "or present in gt.attrs['band_names']"
-        )
-    try:
-        return names.index(key)
-    except ValueError as exc:
-        raise ValueError(f"Band name {key!r} is not present in band_names") from exc
-
-
-def _resolve_bands(keys: list[BandKey], names: list[str] | None) -> list[int]:
-    indexes = []
-    for idx, key in enumerate(keys):
-        try:
-            indexes.append(_resolve_band(key, names))
-        except ValueError as exc:
-            raise ValueError(f"Failed to resolve band at index {idx}: {key!r}") from exc
-    return indexes
 
 
 def _with_band_attrs(
@@ -159,16 +138,17 @@ def _wavelengths(
 class SelectBands(Operator):
     """Select bands by integer index or band name along the band axis.
 
-    Resolves string keys against ``gt.attrs["band_names"]`` (or an
-    explicit ``band_names=`` override at the call site). Selected
+    Resolves string keys with the package-wide band resolver
+    (``gt.attrs`` ``band_names``, then ``descriptions``, then
+    ``bands``). Selected
     ``band_names`` and ``wavelengths`` attrs travel with the output.
     Plain ``np.ndarray`` input is supported for integer indexes (a
     plain array comes back); string names require carrier attrs.
 
     Args:
         indexes: Bands to keep, in output order. Items are either
-            integer positions along ``axis`` or string names looked up
-            in ``gt.attrs["band_names"]``.
+            integer positions along ``axis`` or band names resolved
+            against ``gt.attrs``.
         axis: Position of the band axis. Default ``-3``.
 
     Examples:
@@ -178,14 +158,13 @@ class SelectBands(Operator):
         >>> out = rgb(reflectance_geotensor)
     """
 
-    def __init__(self, *, indexes: list[BandKey], axis: int = -3) -> None:
+    def __init__(self, *, indexes: list[BandRef], axis: int = -3) -> None:
         self.indexes = indexes
         self.axis = axis
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt)
-        names = _band_names(gt, None)
-        indexes = _resolve_bands(self.indexes, names)
+        indexes = resolve_bands(gt, self.indexes)
         attrs = _attrs(gt)
         band_axis_len = arr.shape[self.axis]
         wavelengths = attrs.get("wavelengths")
@@ -224,7 +203,7 @@ class ReorderBands(SelectBands):
         >>> rgbn = reorder(bgrn_geotensor)
     """
 
-    def __init__(self, *, order: list[BandKey], axis: int = -3) -> None:
+    def __init__(self, *, order: list[BandRef], axis: int = -3) -> None:
         super().__init__(indexes=order, axis=axis)
         self.order = order
 
@@ -302,7 +281,8 @@ class SplitBands(Operator):
 
     Args:
         names: Optional override for band names. If omitted, names are
-            taken from ``gt.attrs["band_names"]``.
+            read from ``gt.attrs`` (``band_names``, then ``descriptions``,
+            then ``bands``).
         axis: Position of the band axis. Default ``-3``.
 
     Examples:
@@ -325,7 +305,7 @@ class SplitBands(Operator):
                 f"{-arr.ndim} to {arr.ndim - 1})"
             )
         n_bands = arr.shape[axis]
-        source_names = _band_names(gt, self.names)
+        source_names = _names_or_attrs(gt, self.names)
         if source_names is not None and len(source_names) != n_bands:
             raise ValueError("names length must match the number of bands")
         attrs = _attrs(gt)
@@ -350,7 +330,8 @@ class BandMath(Operator):
     permits constants, unary +/-, binary ``+ - * / **``, and the
     whitelisted functions ``abs, sqrt, log, log10, exp, where, minimum,
     maximum, clip``. Band variables resolve to slices along the band
-    axis named by ``band_names`` (default: ``gt.attrs["band_names"]``
+    axis named by ``band_names`` (default: the carrier's band names from
+    ``gt.attrs`` — ``band_names``, then ``descriptions``, then ``bands`` —
     or synthetic ``B0, B1, ...`` labels). Plain ``np.ndarray`` input is
     supported (synthetic ``B0, B1, ...`` names apply unless
     ``band_names`` is given) and returns a plain array.
@@ -359,7 +340,7 @@ class BandMath(Operator):
         expression: Arithmetic expression over band names, e.g.
             ``"(B8 - B4) / (B8 + B4 + 1e-6)"``.
         band_names: Override for the names used in ``expression``.
-            Default ``None`` (read from ``gt.attrs["band_names"]``).
+            Default ``None`` (read from the carrier's ``attrs``).
         axis: Position of the band axis. Default ``-3``.
 
     Examples:
@@ -382,7 +363,7 @@ class BandMath(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt)
-        names = _band_names(gt, self.band_names) or _default_band_names(
+        names = _names_or_attrs(gt, self.band_names) or _default_band_names(
             arr.shape[self.axis]
         )
         variables = {
@@ -412,8 +393,9 @@ class NormalizedDifference(Operator):
 
     Unlike :class:`geotoolz.indices.NormalizedDifference` (integer
     indices only), this variant also accepts band-name strings resolved
-    against ``gt.attrs["band_names"]``. Plain ``np.ndarray`` input is
-    supported for integer keys and returns a plain array.
+    against ``gt.attrs`` by the package-wide band resolver. Plain
+    ``np.ndarray`` input is supported for integer keys and returns a
+    plain array.
 
     Args:
         a: Index or name of the "high" band (numerator-positive term).
@@ -428,7 +410,7 @@ class NormalizedDifference(Operator):
     """
 
     def __init__(
-        self, *, a: BandKey, b: BandKey, eps: float = 1e-6, axis: int = -3
+        self, *, a: BandRef, b: BandRef, eps: float = 1e-6, axis: int = -3
     ) -> None:
         self.a = a
         self.b = b
@@ -436,11 +418,10 @@ class NormalizedDifference(Operator):
         self.axis = axis
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        names = _band_names(gt, None)
         out = normalized_difference(
             np.asarray(gt),
-            _resolve_band(self.a, names),
-            _resolve_band(self.b, names),
+            resolve_band(gt, self.a),
+            resolve_band(gt, self.b),
             axis=self.axis,
             eps=self.eps,
         )
@@ -482,8 +463,8 @@ class BandRatio(Operator):
     def __init__(
         self,
         *,
-        numerator: BandKey,
-        denominator: BandKey,
+        numerator: BandRef,
+        denominator: BandRef,
         eps: float = 1e-6,
         axis: int = -3,
     ) -> None:
@@ -493,11 +474,10 @@ class BandRatio(Operator):
         self.axis = axis
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        names = _band_names(gt, None)
         out = band_ratio(
             np.asarray(gt),
-            _resolve_band(self.numerator, names),
-            _resolve_band(self.denominator, names),
+            resolve_band(gt, self.numerator),
+            resolve_band(gt, self.denominator),
             axis=self.axis,
             eps=self.eps,
         )

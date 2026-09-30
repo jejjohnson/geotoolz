@@ -119,7 +119,8 @@ class NormalizedDifference(Operator):
 
     This class holds the top-level ``geotoolz.NormalizedDifference``
     name; :class:`geotoolz.spectral.NormalizedDifference` is the
-    band-name-string variant (resolved via ``attrs["band_names"]``).
+    variant in the spectral family; both resolve band names with the
+    package-wide resolver (:func:`geotoolz._src.bands.resolve_band`).
 
     Nodata pixels (any band it reads non-finite or equal to the input's
     ``fill_value_default``) hold ``NaN`` in the output, which declares

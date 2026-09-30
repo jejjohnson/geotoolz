@@ -45,6 +45,7 @@ from shapely.geometry import LineString, shape
 from shapely.ops import unary_union
 from skimage.measure import regionprops_table
 
+from geotoolz._src.bands import SENTINEL2_L2A_BANDS, BandRef, resolve_band
 from geotoolz._src.config import (
     as_tuple,
     callable_name,
@@ -79,21 +80,6 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-S2_BAND_TO_INDEX = {
-    "B1": 0,
-    "B2": 1,
-    "B3": 2,
-    "B4": 3,
-    "B5": 4,
-    "B6": 5,
-    "B7": 6,
-    "B8": 7,
-    "B8A": 8,
-    "B9": 9,
-    "B11": 10,
-    "B12": 11,
-}
-
 PLUME_REGIONPROPS: tuple[str, ...] = (
     "label",
     "area",
@@ -111,17 +97,24 @@ PLUME_REGIONPROPS: tuple[str, ...] = (
 )
 
 
-def _band_index(band: int | str) -> int:
-    if isinstance(band, str):
-        key = band.upper()
-        if key not in S2_BAND_TO_INDEX:
-            raise ValueError(f"unknown Sentinel-2 band name {band!r}")
-        return S2_BAND_TO_INDEX[key]
-    return int(band)
+def _band_position(carrier: GeoTensor | np.ndarray, band: BandRef, axis: int) -> int:
+    """Resolve ``band`` on ``carrier`` with the package-wide resolver.
+
+    A GeoTensor must name its bands in ``attrs``. Only a *plain ndarray*
+    whose band axis has exactly 12 entries falls back to the Sentinel-2
+    L2A layout (:data:`~geotoolz._src.bands.SENTINEL2_L2A_BANDS`), so
+    ``"B11"`` never silently selects B10 on a 13-band L1C stack.
+    """
+    fallback = None
+    if getattr(carrier, "attrs", None) is None and np.shape(carrier)[axis] == len(
+        SENTINEL2_L2A_BANDS
+    ):
+        fallback = SENTINEL2_L2A_BANDS
+    return resolve_band(carrier, band, fallback=fallback)
 
 
-def _extract_and_clip_band(arr: np.ndarray, band: int | str, axis: int) -> np.ndarray:
-    return np.maximum(np.take(arr, _band_index(band), axis=axis), 0.0)
+def _extract_and_clip_band(arr: np.ndarray, index: int, axis: int) -> np.ndarray:
+    return np.maximum(np.take(arr, index, axis=axis), 0.0)
 
 
 def _single_band_nan(x: GeoTensor | np.ndarray) -> np.ndarray:
@@ -205,11 +198,20 @@ class SBMP(Operator):
     the input or the reference scene) hold ``NaN``, and a GeoTensor
     output declares ``fill_value_default=NaN``.
 
+    Band names are resolved with the package-wide resolver
+    (:func:`geotoolz._src.bands.resolve_band`: ``attrs`` ``band_names``,
+    then ``descriptions``, then ``bands``), so a GeoTensor must name its
+    bands. Only a plain ndarray with exactly 12 bands falls back to the
+    Sentinel-2 L2A order (``B1``-``B8``, ``B8A``, ``B9``, ``B11``,
+    ``B12``; no B10); on any other unnamed input pass integer indices.
+
     Args:
-        swir1: Index or Sentinel-2 band name of the SWIR-1 channel.
-        swir2: Index or Sentinel-2 band name of the SWIR-2 channel.
+        swir1: Index or band name of the SWIR-1 channel. Default ``"B11"``.
+        swir2: Index or band name of the SWIR-2 channel. Default ``"B12"``.
         reference_scene: Optional clean-air ``GeoTensor`` or plain array
-            with the same band layout. When supplied, returns log-ratio
+            with the same band layout. A GeoTensor reference resolves the
+            band names against its own ``attrs``; a plain array uses the
+            scene's band positions. When supplied, returns log-ratio
             change.
         axis: Band axis of the input. Default ``-3``.
         eps: Numerical guard against division by zero. Default ``1e-10``.
@@ -226,8 +228,8 @@ class SBMP(Operator):
     def __init__(
         self,
         *,
-        swir1: int | str = "B11",
-        swir2: int | str = "B12",
+        swir1: BandRef = "B11",
+        swir2: BandRef = "B12",
         reference_scene: GeoTensor | np.ndarray | None = None,
         axis: int = -3,
         eps: float = 1e-10,
@@ -240,13 +242,20 @@ class SBMP(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr = np.asarray(gt, dtype=float)
-        swir1 = _extract_and_clip_band(arr, self.swir1, self.axis)
-        swir2 = _extract_and_clip_band(arr, self.swir2, self.axis)
+        idx1 = _band_position(gt, self.swir1, self.axis)
+        idx2 = _band_position(gt, self.swir2, self.axis)
+        swir1 = _extract_and_clip_band(arr, idx1, self.axis)
+        swir2 = _extract_and_clip_band(arr, idx2, self.axis)
         ratio = np.log((swir1 + self.eps) / (swir2 + self.eps))
         if self.reference_scene is not None:
             ref = np.asarray(self.reference_scene, dtype=float)
-            ref_swir1 = _extract_and_clip_band(ref, self.swir1, self.axis)
-            ref_swir2 = _extract_and_clip_band(ref, self.swir2, self.axis)
+            # A named reference resolves its own bands; an unnamed one is
+            # assumed to share the scene's band layout.
+            if getattr(self.reference_scene, "attrs", None) is not None:
+                idx1 = _band_position(self.reference_scene, self.swir1, self.axis)
+                idx2 = _band_position(self.reference_scene, self.swir2, self.axis)
+            ref_swir1 = _extract_and_clip_band(ref, idx1, self.axis)
+            ref_swir2 = _extract_and_clip_band(ref, idx2, self.axis)
             ref_ratio = np.log((ref_swir1 + self.eps) / (ref_swir2 + self.eps))
             out = ratio - ref_ratio
         else:

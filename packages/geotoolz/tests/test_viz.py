@@ -552,7 +552,7 @@ def test_geo_dependent_ops_reject_plain_arrays(op, values) -> None:
 
 def test_composite_string_bands_require_attrs_metadata() -> None:
     """String band refs need a carrier with band names in attrs."""
-    with pytest.raises(ValueError, match="string band"):
+    with pytest.raises(TypeError, match="band-name metadata"):
         Composite(bands=["B04"])(np.zeros((3, 2, 2), dtype=np.float32))
 
 

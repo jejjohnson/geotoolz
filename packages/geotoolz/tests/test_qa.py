@@ -471,7 +471,7 @@ def test_qa_operators_accept_plain_ndarray(op, arr) -> None:
 
 
 def test_string_qa_band_selector_requires_geotensor_metadata() -> None:
-    with pytest.raises(ValueError, match="band_names"):
+    with pytest.raises(TypeError, match="band-name metadata"):
         qa.MaskClouds(qa_band="QA60", bits=[10])(np.zeros((2, 2, 2), dtype=np.uint16))
 
 
