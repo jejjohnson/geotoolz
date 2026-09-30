@@ -20,8 +20,8 @@ Examples:
         s2_display = (
             gz.radiometry.ToFloat32()
             | gz.radiometry.DNToReflectance(scale=1e-4)
-            | gz.radiometry.PercentileClip(p_min=2, p_max=98)
-            | gz.radiometry.Gamma(g=1.2)
+            | gz.radiometry.PercentileClip(lower=2, upper=98)
+            | gz.radiometry.Gamma(gamma=1.2)
         )
 
         rgb = s2_display(s2_dn_geotensor)

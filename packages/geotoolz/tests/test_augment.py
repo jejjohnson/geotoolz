@@ -12,7 +12,7 @@ import pytest
 import rasterio
 from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
-from pipekit import Operator
+from pipekit import Operator, Sequential
 
 import geotoolz as gz
 from geotoolz import augment
@@ -319,7 +319,7 @@ def test_random_crop_translation_matches_origin(patch: GeoTensor) -> None:
     assert out.shape == (4, 3, 4)
 
 
-def test_cutmix_rejects_mismatched_crs_and_resolution(patch: GeoTensor) -> None:
+def test_cutmix_rejects_donors_off_the_input_grid(patch: GeoTensor) -> None:
     arr = np.full(patch.shape, 9.0, dtype=np.float32)
     different_crs = GeoTensor(
         values=arr,
@@ -334,10 +334,18 @@ def test_cutmix_rejects_mismatched_crs_and_resolution(patch: GeoTensor) -> None:
         fill_value_default=0,
     )
 
-    with pytest.raises(ValueError, match="CRS"):
-        augment.CutMix(pool=[different_crs], p=1.0, seed=0)(patch)
-    with pytest.raises(ValueError, match="resolution"):
-        augment.CutMix(pool=[different_res], p=1.0, seed=0)(patch)
+    # Same resolution and CRS but a different origin: pasting it pixel-for-
+    # pixel would put the donor's content at the wrong place.
+    shifted = GeoTensor(
+        values=arr,
+        transform=patch.transform * rasterio.Affine.translation(2, 0),
+        crs=patch.crs,
+        fill_value_default=0,
+    )
+
+    for donor in (different_crs, different_res, shifted):
+        with pytest.raises(ValueError, match="pixel grid"):
+            augment.CutMix(pool=[donor], p=1.0, seed=0)(patch)
 
 
 def test_get_config_is_json_safe(patch: GeoTensor) -> None:
@@ -754,3 +762,77 @@ def test_4d_time_stack() -> None:
     haze = hazed - values
     np.testing.assert_allclose(haze[0], haze[1])
     assert haze[0, 0, 0, 0] > haze[0, 1, 0, 0] > haze[0, 2, 0, 0]
+
+
+# --- #155: Compose is a gated pipekit.Sequential ---------------------------
+
+
+class _InitSeededOp(Operator):
+    """Seed is constructor-only (like ``patch_ops.StratifiedSample``)."""
+
+    def __init__(self, seed: int | None = None) -> None:
+        self.seed = seed
+
+    def _apply(self, gt: np.ndarray) -> np.ndarray:
+        return np.asarray(gt) + 1.0
+
+
+class _ApplySeededOp(Operator):
+    """Takes the per-call seed in ``_apply`` but has no ``seed`` in ``__init__``."""
+
+    def __init__(self) -> None:
+        self.seen: list[int | None] = []
+
+    def _apply(self, gt: np.ndarray, *, seed: int | None = None) -> np.ndarray:
+        self.seen.append(seed)
+        return np.asarray(gt)
+
+
+def test_compose_forwards_seed_only_when_apply_accepts_it() -> None:
+    arr = np.zeros((1, 2, 2), dtype=np.float32)
+    init_seeded = _InitSeededOp(seed=3)
+    apply_seeded = _ApplySeededOp()
+    pipe = augment.Compose([init_seeded, apply_seeded], seed=0)
+
+    # Used to raise TypeError: `seed` was forwarded because __init__ took one.
+    out = pipe(arr)
+    np.testing.assert_array_equal(out, arr + 1.0)
+    out = pipe(arr, seed=5)
+    assert len(apply_seeded.seen) == 2
+    assert all(isinstance(seed, int) for seed in apply_seeded.seen)
+
+    # The same top-level seed derives the same child seed.
+    again = _ApplySeededOp()
+    augment.Compose([_InitSeededOp(), again], seed=0)(arr)
+    assert again.seen == apply_seeded.seen[:1]
+
+    # An unseeded Compose forwards nothing.
+    unseeded = _ApplySeededOp()
+    augment.Compose([unseeded])(arr)
+    assert unseeded.seen == [None]
+
+
+def test_compose_is_a_gated_sequential(patch: GeoTensor) -> None:
+    flip = augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)
+    pipe = augment.Compose([flip], p=0.0, seed=0)
+    assert isinstance(pipe, Sequential)
+    assert pipe.augmentations is pipe.operators
+    assert pipe.get_config() == {
+        "augmentations": Sequential([flip]).get_config()["operators"],
+        "p": 0.0,
+        "seed": 0,
+    }
+    assert "Compose(" in repr(pipe)
+    # `compose | op` keeps the gate: p=0 skips the flip, Identity passes through.
+    chained = pipe | gz.Identity()
+    assert isinstance(chained, Sequential)
+    assert chained.operators[0] is pipe
+    assert chained(patch) is patch
+    with pytest.raises(TypeError, match="must be an Operator"):
+        augment.Compose([{"class": "x"}])  # type: ignore[list-item]
+
+
+def test_compose_is_not_a_top_level_export() -> None:
+    # `gz.compose`-style names belong to pipekit's right-to-left composer.
+    assert not hasattr(gz, "Compose")
+    assert gz.augment.Compose is augment.Compose

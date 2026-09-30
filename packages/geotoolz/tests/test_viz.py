@@ -26,10 +26,8 @@ from geotoolz.viz import (
     ShadedRelief,
     StretchToUint8,
     SWIRComposite,
-    ToDisplayRange,
     TrueColor,
     blend_rgba,
-    composite,
     gamma_correct_display,
     hillshade,
     stretch_to_uint8,
@@ -48,12 +46,6 @@ def _toy_geotensor(
         fill_value_default=fill_value_default,
         attrs=attrs,
     )
-
-
-def test_composite_selects_requested_bands() -> None:
-    arr = np.arange(4 * 2 * 2).reshape(4, 2, 2)
-    out = composite(arr, [2, 1, 0])
-    np.testing.assert_array_equal(out, arr[[2, 1, 0]])
 
 
 def test_true_color_produces_rgb_order_and_preserves_metadata() -> None:
@@ -82,20 +74,15 @@ def test_false_color_and_swir_composites() -> None:
 
 def test_stretch_to_uint8_lower0_upper100_matches_minmax_cast() -> None:
     arr = np.array([[[0.0, 0.5], [1.0, 2.0]]], dtype=np.float32)
-    expected = (((arr - arr.min()) / (arr.max() - arr.min())) * 255).astype(np.uint8)
+    expected = np.rint(((arr - arr.min()) / (arr.max() - arr.min())) * 255).astype(
+        np.uint8
+    )
     np.testing.assert_array_equal(
         stretch_to_uint8(arr, lower=0.0, upper=100.0),
         expected,
     )
     out = StretchToUint8(lower=0.0, upper=100.0)(_toy_geotensor(arr))
     assert out.dtype == np.uint8
-    np.testing.assert_array_equal(np.asarray(out), expected)
-
-
-def test_to_display_range_alias() -> None:
-    arr = np.arange(9, dtype=np.float32).reshape(1, 3, 3)
-    expected = np.asarray(StretchToUint8(lower=0.0, upper=100.0)(_toy_geotensor(arr)))
-    out = ToDisplayRange(lower=0.0, upper=100.0)(_toy_geotensor(arr))
     np.testing.assert_array_equal(np.asarray(out), expected)
 
 
@@ -220,20 +207,20 @@ def test_overlay_alpha_blends_to_rgba() -> None:
     fg = _toy_geotensor(np.full((4, 2, 2), 255, dtype=np.uint8))
     out = Overlay(alpha=0.5)(bg, fg)
     assert out.shape == (4, 2, 2)
-    np.testing.assert_array_equal(np.asarray(out)[:3], 127)
+    np.testing.assert_array_equal(np.asarray(out)[:3], 128)
 
 
 def test_ensure_rgba_float_rgb_scales_to_bytes() -> None:
     rgb = np.full((3, 2, 2), 0.5)
     np.testing.assert_array_equal(
-        gz.viz.ensure_rgba(rgb)[:, 0, 0], [127, 127, 127, 255]
+        gz.viz.ensure_rgba(rgb)[:, 0, 0], [128, 128, 128, 255]
     )
     gray = np.full((2, 2), 0.5, dtype=np.float32)
     out = gz.viz.ensure_rgba(gray)
     assert out.dtype == np.uint8
-    np.testing.assert_array_equal(out[:, 0, 0], [127, 127, 127, 255])
+    np.testing.assert_array_equal(out[:, 0, 0], [128, 128, 128, 255])
     rgba = np.full((4, 2, 2), 0.5)
-    np.testing.assert_array_equal(gz.viz.ensure_rgba(rgba)[:, 0, 0], [127] * 4)
+    np.testing.assert_array_equal(gz.viz.ensure_rgba(rgba)[:, 0, 0], [128] * 4)
 
 
 def test_ensure_rgba_byte_range_inputs_are_not_rescaled() -> None:
@@ -252,14 +239,14 @@ def test_overlay_float_inputs_not_black() -> None:
     bg = _toy_geotensor(np.full((3, 2, 2), 0.5, dtype=np.float32))
     transparent_fg = _toy_geotensor(np.zeros((4, 2, 2), dtype=np.float32))
     out = np.asarray(Overlay(alpha=0.5)(bg, transparent_fg))
-    np.testing.assert_array_equal(out[:, 0, 0], [127, 127, 127, 255])
+    np.testing.assert_array_equal(out[:, 0, 0], [128, 128, 128, 255])
     # Float grayscale foreground over float RGB background blends to grey.
     fg = _toy_geotensor(np.ones((2, 2), dtype=np.float32))
     out = np.asarray(Overlay(alpha=0.5)(bg, fg))
     assert np.all(out[:3] > 180)
     np.testing.assert_array_equal(out[3], 255)
     zero = np.asarray(Overlay(alpha=0.0)(bg, fg))
-    np.testing.assert_array_equal(zero[:, 0, 0], [127, 127, 127, 255])
+    np.testing.assert_array_equal(zero[:, 0, 0], [128, 128, 128, 255])
 
 
 def test_annotate_float_inputs_not_black() -> None:
@@ -271,7 +258,7 @@ def test_annotate_float_inputs_not_black() -> None:
         )
     )
     points = np.asarray(AnnotatePoints(points=np.array([[1.5, 2.5]]), radius=0)(image))
-    grey = np.array([127, 127, 127, 255])[:, None, None]
+    grey = np.array([128, 128, 128, 255])[:, None, None]
     for arr in (poly, points):
         # Unannotated pixels keep the float image's grey instead of black.
         assert np.all(arr == grey, axis=0).any()
@@ -398,7 +385,7 @@ def test_hydra_zen_roundtrip_viz_operators() -> None:
         (FalseColor, {"nir": 3, "red": 2, "green": 1}),
         (SWIRComposite, {"swir2": 4, "nir": 3, "red": 2}),
         (Composite, {"bands": [2, 1, 0]}),
-        (StretchToUint8, {"lower": 1.0, "upper": 99.0, "per_band": True}),
+        (StretchToUint8, {"lower": 1.0, "upper": 99.0, "axis": None}),
         (GammaCorrect, {"gamma": 1.4}),
         (ApplyColormap, {"name": "viridis", "vmin": 0.0, "vmax": 1.0}),
         (Hillshade, {"azimuth_deg": 315.0, "altitude_deg": 45.0}),
@@ -635,3 +622,117 @@ def test_4d_time_stack() -> None:
         np.asarray(rgba)[1],
         np.asarray(gz.viz.ApplyColormap(name="viridis")(single.isel({"time": 1}))),
     )
+
+
+# --- #155: viz delegates to spectral / radiometry -------------------------
+
+
+def test_composite_output_band_attrs() -> None:
+    """Composites carry the *selected* bands' attrs, in output order."""
+    attrs = {
+        "band_names": ["B02", "B03", "B04", "B08"],
+        "wavelengths": [490.0, 560.0, 665.0, 842.0],
+        "sensor": "S2A",
+    }
+    gt = _toy_geotensor(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2), attrs)
+    out = TrueColor(red="B04", green="B03", blue="B02")(gt)
+    assert isinstance(Composite(bands=[0]), gz.spectral.SelectBands)
+    assert out.attrs is not gt.attrs
+    assert out.attrs["band_names"] == ["B04", "B03", "B02"]
+    np.testing.assert_array_equal(out.attrs["wavelengths"], [665.0, 560.0, 490.0])
+    assert out.attrs["sensor"] == "S2A"
+    assert gt.attrs["band_names"] == ["B02", "B03", "B04", "B08"]  # not mutated
+
+    # Same band count, reordered: the names must follow the pixels too.
+    rgb = _toy_geotensor(
+        np.arange(3 * 2 * 2, dtype=np.float32).reshape(3, 2, 2),
+        {"band_names": ["B02", "B03", "B04"]},
+    )
+    out = Composite(bands=[2, 1, 0])(rgb)
+    assert out.attrs["band_names"] == ["B04", "B03", "B02"]
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(rgb)[[2, 1, 0]])
+    assert out.fill_value_default == rgb.fill_value_default
+
+
+@pytest.mark.parametrize("axis", [(-2, -1), None])
+def test_stretch_to_uint8_equals_percentile_clip_pipeline(axis: Any) -> None:
+    rng = np.random.default_rng(0)
+    values = rng.normal(0.3, 0.1, (2, 3, 5, 5)).astype(np.float32)
+    values[0, :, 1, 1] = -9999.0  # nodata pixel in frame 0
+    values[1, 2, 0, 3] = np.nan
+    gt = _toy_geotensor(values)
+    out = StretchToUint8(lower=5.0, upper=95.0, axis=axis)(gt)
+    stretched = gz.radiometry.PercentileClip(lower=5.0, upper=95.0, axis=axis)(gt)
+    expected = np.rint(np.nan_to_num(np.asarray(stretched)) * 255.0).astype(np.uint8)
+    assert out.dtype == np.uint8
+    assert out.fill_value_default == 0
+    np.testing.assert_array_equal(np.asarray(out), expected)
+    np.testing.assert_array_equal(np.asarray(out)[0, :, 1, 1], 0)
+
+
+def test_stretch_to_uint8_rounds_instead_of_truncating() -> None:
+    # 0.999 * 255 = 254.7 -> 255 (a bare cast truncated it to 254).
+    arr = np.array([[[0.0, 0.999, 1.0]]], dtype=np.float32)
+    out = stretch_to_uint8(arr, lower=0.0, upper=100.0)
+    np.testing.assert_array_equal(out, [[[0, 255, 255]]])
+
+
+def test_stretch_vocabulary_is_lower_upper_axis() -> None:
+    for cls in (StretchToUint8, gz.radiometry.PercentileClip):
+        cfg = cls(lower=1.0, upper=99.0, axis=None).get_config()
+        assert {"lower", "upper", "axis"} <= set(cfg)
+    assert {"lower", "upper"} <= set(gz.normalize.HistogramStretch().get_config())
+    with pytest.raises(TypeError):
+        StretchToUint8(per_band=True)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        gz.radiometry.PercentileClip(p_min=2.0)  # type: ignore[call-arg]
+    with pytest.raises(ValueError, match="upper > lower"):
+        StretchToUint8(lower=50.0, upper=10.0)(np.zeros((1, 2, 2)))
+
+
+def test_gamma_correct_clips_floats_to_unit_interval() -> None:
+    out = gamma_correct_display(np.array([2.0, -1.0, 0.25, np.nan]), gamma=2.0)
+    np.testing.assert_allclose(out, [1.0, 0.0, 0.5, np.nan])
+    unit = np.linspace(0.0, 1.0, 7).reshape(1, 1, 7)
+    np.testing.assert_allclose(
+        np.asarray(GammaCorrect(gamma=1.7)(_toy_geotensor(unit))),
+        np.asarray(gz.radiometry.Gamma(gamma=1.7)(_toy_geotensor(unit))),
+    )
+    with pytest.raises(ValueError, match="gamma > 0"):
+        gamma_correct_display(np.ones(2), gamma=0.0)
+
+
+def test_gamma_correct_display_rounds_integer_outputs() -> None:
+    arr = np.arange(256, dtype=np.uint8)
+    out = gamma_correct_display(arr, gamma=2.2)
+    expected = np.rint((arr / 255.0) ** (1 / 2.2) * 255.0).astype(np.uint8)
+    np.testing.assert_array_equal(out, expected)
+
+
+def test_to_display_range_and_composite_primitive_are_removed() -> None:
+    assert not hasattr(gz.viz, "ToDisplayRange")
+    assert not hasattr(gz, "ToDisplayRange")
+    assert not hasattr(gz.viz, "composite")
+    assert not hasattr(gz.normalize, "percentile_clip")
+
+
+def test_annotate_polygons_matches_direct_rasterize() -> None:
+    """Delegating to georeader keeps the burned outline pixel-identical."""
+    from rasterio.features import rasterize
+
+    image = _toy_geotensor(np.zeros((3, 8, 8), dtype=np.uint8))
+    polygons = [
+        Polygon([(1, 1), (5, 1), (5, 3), (1, 3)]),
+        Polygon([(2.5, 0.5), (6.5, 0.5), (6.5, 3.5)]),
+    ]
+    out = np.asarray(
+        AnnotatePolygons(geometries=polygons, color=(0.0, 1.0, 0.0, 1.0), width=1)(
+            image
+        )
+    )
+    shapes = [(poly.boundary.buffer(0.5), 1) for poly in polygons]
+    expected = rasterize(
+        shapes, out_shape=(8, 8), transform=image.transform, all_touched=True
+    ).astype(bool)
+    assert expected.any()
+    np.testing.assert_array_equal(out[1] == 255, expected)

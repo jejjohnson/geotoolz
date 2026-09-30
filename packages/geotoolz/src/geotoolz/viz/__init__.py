@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from geotoolz.viz._src.array import (
     blend_rgba,
-    composite,
     ensure_rgba,
     gamma_correct_display,
     hillshade,
@@ -25,7 +24,6 @@ from geotoolz.viz._src.operators import (
     ShadedRelief,
     StretchToUint8,
     SWIRComposite,
-    ToDisplayRange,
     TrueColor,
 )
 
@@ -43,10 +41,8 @@ __all__ = [
     "SWIRComposite",
     "ShadedRelief",
     "StretchToUint8",
-    "ToDisplayRange",
     "TrueColor",
     "blend_rgba",
-    "composite",
     "ensure_rgba",
     "gamma_correct_display",
     "hillshade",

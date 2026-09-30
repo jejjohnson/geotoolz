@@ -17,6 +17,11 @@ is defined in exactly one family, so every top-level name is unambiguous
 (``ApplySRF`` is ``radiometry``'s, ``NormalizedDifference`` is
 ``indices``').
 
+``augment.Compose`` (a probability-gated ``Sequential`` of
+augmentations) is deliberately *not* re-exported: at the top level it
+would sit next to pipekit's right-to-left ``compose`` and read as a
+generic composer, so it is spelled ``gz.augment.Compose``.
+
 The four-axis Patcher framework lives in the standalone
 [`geopatcher`](https://github.com/jejjohnson/geopatcher) package. Install
 the optional `[patch]` extra (``pip install 'geotoolz[patch]'``) to pull
@@ -75,7 +80,6 @@ from geotoolz.augment import (
     BandDropout,
     BandJitter,
     BrightnessJitter,
-    Compose,
     ContrastJitter,
     CutMix,
     GaussianNoise,
@@ -368,7 +372,6 @@ from geotoolz.viz import (
     ShadedRelief,
     StretchToUint8,
     SWIRComposite,
-    ToDisplayRange,
     TrueColor,
 )
 
@@ -449,7 +452,6 @@ __all__ = [
     "ColumnEnhancement",
     "ColumnToMass",
     "CombineMasks",
-    "Compose",
     "Composite",
     "ComputeSZA",
     "Const",
@@ -642,7 +644,6 @@ __all__ = [
     "Switch",
     "Tap",
     "Tile",
-    "ToDisplayRange",
     "ToFloat32",
     "TrueColor",
     "ValidateMFInputs",

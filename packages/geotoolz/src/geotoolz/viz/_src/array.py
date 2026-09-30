@@ -2,80 +2,64 @@
 
 These pure-numpy helpers cover the steps that ``radiometry`` doesn't:
 casting to ``uint8`` for display, mapping a single-band array through
-a matplotlib colormap, hillshading, and alpha blending. The float-only
-contrast stretches (`MinMax`, `PercentileClip`) live in
-:mod:`geotoolz.radiometry`; this module composes them with a byte
-cast rather than re-implementing the percentile math.
+a matplotlib colormap, hillshading, and alpha blending. The float
+contrast stretch and gamma live in :mod:`geotoolz.radiometry`
+(``percentile_clip`` / ``gamma_correct``, both NaN-safe); this module
+composes them with a rounded byte cast rather than re-implementing the
+math. Every float -> ``uint8`` cast here rounds to the nearest byte
+(``np.rint``) instead of truncating.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 
 import einx
 import numpy as np
-from jaxtyping import Bool, Float, Int, Num, Shaped, UInt8
+from jaxtyping import Bool, Float, Int, Num, UInt8
 
 from geotoolz._src.shape import single_band
-from geotoolz._src.stretch import percentile_stretch
+from geotoolz.radiometry._src.array import gamma_correct, percentile_clip
 
 
 Color = tuple[float, float, float, float]
 
 
-def composite(
-    arr: Shaped[np.ndarray, "*dims"],
-    bands: Sequence[int],
-    *,
-    axis: int = -3,
-) -> Shaped[np.ndarray, "*dims"]:
-    """Select display bands from ``arr`` while preserving spatial axes.
-
-    Thin wrapper around :func:`numpy.take` that accepts any integer
-    iterable so band tuples and lists round-trip through hydra-zen.
-
-    Args:
-        arr: Input cube, typically ``(C, H, W)``. Any shape works as
-            long as ``axis`` indexes the band dimension.
-        bands: Integer band positions to select, in output order.
-            Repeats are allowed (e.g. grayscale-to-RGB).
-        axis: Band axis to take along. Default ``-3``.
-
-    Returns:
-        Array with ``len(bands)`` slices along ``axis``; all other axes
-        are unchanged. Same dtype as ``arr``.
-    """
-    return np.take(arr, list(bands), axis=axis)
+def _unit_to_uint8(arr: Float[np.ndarray, "*dims"]) -> UInt8[np.ndarray, "*dims"]:
+    """Map unit-interval floats to bytes, rounding to nearest; NaN -> ``0``."""
+    scaled = np.clip(np.nan_to_num(np.asarray(arr) * 255.0, nan=0.0), 0.0, 255.0)
+    return np.rint(scaled).astype(np.uint8)
 
 
 def stretch_to_uint8(
-    arr: Num[np.ndarray, "*batch h w"],
+    arr: Num[np.ndarray, "*batch y x"],
     *,
     lower: float = 2.0,
     upper: float = 98.0,
-    per_band: bool = True,
-) -> UInt8[np.ndarray, "*batch h w"]:
+    axis: int | tuple[int, ...] | None = (-2, -1),
+) -> UInt8[np.ndarray, "*batch y x"]:
     """Percentile stretch an array into display-ready ``uint8`` values.
 
-    A NaN-safe variant of :func:`geotoolz.radiometry.percentile_clip`
-    that additionally rescales the unit-interval output to byte range.
-    Distinct from radiometry's primitive in two ways:
+    Exactly :func:`geotoolz.radiometry.percentile_clip` (NaN-safe:
+    percentiles via ``np.nanpercentile``) followed by a rounded byte
+    cast; NaN pixels map to ``0``. Use ``percentile_clip`` directly if
+    you need the intermediate ``[0, 1]`` floats for further math.
 
-    1. Uses ``np.nanpercentile`` so cloud / nodata pixels don't pull
-       the bounds toward the extremes.
-    2. Returns ``uint8`` rather than ``float`` for direct use with
-       PIL / matplotlib display sinks.
+    Args:
+        arr: Input array, typically ``(C, H, W)``.
+        lower: Lower percentile. Default ``2.0``.
+        upper: Upper percentile. Default ``98.0``; must exceed ``lower``.
+        axis: Axes the percentiles are computed over. Default
+            ``(-2, -1)`` stretches each band (and frame) independently;
+            ``None`` uses one global pair of thresholds.
 
-    Use radiometry's ``PercentileClip`` + ``MinMax`` if you need the
-    intermediate floats for further math.
+    Returns:
+        ``uint8`` array of the same shape.
+
+    Raises:
+        ValueError: If ``upper <= lower``.
     """
-    if upper <= lower:
-        raise ValueError(
-            f"stretch_to_uint8 requires upper > lower; got {lower=}, {upper=}"
-        )
-    axis = (-2, -1) if per_band and arr.ndim > 2 else None
-    scaled = percentile_stretch(arr, lower, upper, axis=axis)
-    return np.nan_to_num(scaled * 255.0, nan=0.0).astype(np.uint8)
+    return _unit_to_uint8(percentile_clip(arr, lower, upper, axis=axis))
 
 
 def gamma_correct_display(
@@ -84,18 +68,20 @@ def gamma_correct_display(
     """Apply power-law gamma correction to display-range arrays.
 
     Gamma is a unit-interval operation: the math
-    ``out = clip(arr, 0, 1) ** (1 / gamma)`` is only meaningful when the
-    input is normalised to ``[0, 1]``. Display arrays, however, arrive
-    in two flavours — float in ``[0, 1]`` *or* integer in ``[0, 255]``
-    (uint8) / ``[0, 65535]`` (uint16). Without normalisation, an integer
-    input is raised to ``1 / gamma`` directly, giving e.g.
-    ``256 ** 0.5 = 16`` — not a display-correct gamma transform.
+    ``out = clip(arr, 0, 1) ** (1 / gamma)`` (via
+    :func:`geotoolz.radiometry.gamma_correct`) is only meaningful when
+    the input is normalised to ``[0, 1]``. Display arrays, however,
+    arrive in two flavours — float in ``[0, 1]`` *or* integer in
+    ``[0, 255]`` (uint8) / ``[0, 65535]`` (uint16). Without
+    normalisation, an integer input is raised to ``1 / gamma`` directly,
+    giving e.g. ``256 ** 0.5 = 16`` — not a display-correct gamma
+    transform.
 
     With ``inplace_norm=True`` (the default), integer inputs are scaled
     by their dtype maximum into ``[0, 1]``, the gamma exponent is
-    applied, and the result is scaled back to the original integer
-    dtype's full range. Floating-point inputs are assumed to already be
-    in ``[0, 1]`` and are left unscaled.
+    applied, and the result is rounded back to the original integer
+    dtype's full range. Floating-point inputs are clipped to ``[0, 1]``
+    (the display range) before the exponent; NaN stays NaN.
 
     Args:
         arr: Display array. Integer (``uint8`` / ``uint16``) or float.
@@ -103,21 +89,25 @@ def gamma_correct_display(
             midtones; ``< 1`` darkens them.
         inplace_norm: When ``True`` (default), normalise integer inputs
             to ``[0, 1]`` before the exponent and scale back. When
-            ``False``, apply ``arr ** (1 / gamma)`` directly — only set
-            this if you've already normalised upstream.
+            ``False``, integer inputs get ``arr ** (1 / gamma)`` directly
+            (a float result) — only set this if you've already
+            normalised upstream. Float inputs are unaffected.
 
     Returns:
-        Gamma-corrected array of the same shape and dtype as ``arr``.
+        Gamma-corrected array of the same shape; same dtype as ``arr``
+        for float input and for integer input with ``inplace_norm``.
+
+    Raises:
+        ValueError: If ``gamma <= 0``.
     """
-    if gamma <= 0:
-        raise ValueError(f"gamma_correct_display requires gamma > 0; got {gamma}")
-    exponent = 1.0 / gamma
-    if not inplace_norm or not np.issubdtype(arr.dtype, np.integer):
-        return np.maximum(arr, 0.0) ** exponent
+    if not np.issubdtype(arr.dtype, np.integer):
+        return gamma_correct(np.clip(arr, 0.0, 1.0), gamma=gamma)
+    if not inplace_norm:
+        return gamma_correct(arr, gamma=gamma)
     dtype_max = float(np.iinfo(arr.dtype).max)
     normed = np.clip(arr.astype(np.float64) / dtype_max, 0.0, 1.0)
-    corrected = normed**exponent
-    return np.clip(corrected * dtype_max, 0.0, dtype_max).astype(arr.dtype)
+    corrected = gamma_correct(normed, gamma=gamma)
+    return np.rint(np.clip(corrected * dtype_max, 0.0, dtype_max)).astype(arr.dtype)
 
 
 def rgba_from_scalar(
@@ -277,7 +267,7 @@ def hillshade(
     shaded = np.sin(altitude) * np.sin(slope) + np.cos(altitude) * np.cos(
         slope
     ) * np.cos(azimuth - aspect)
-    out = (np.clip(shaded, 0.0, 1.0) * 255.0).astype(np.uint8)
+    out = _unit_to_uint8(np.clip(shaded, 0.0, 1.0))
     if invalid is not None:
         out[invalid] = 0
     return out
@@ -365,9 +355,7 @@ def blend_rgba(
     # max(fg_alpha, bg_alpha) only when one of them is 0 or 1; mixing
     # two partially transparent layers must accumulate opacity.
     out_alpha = fg_alpha + bg_f[3:4] * (1.0 - fg_alpha)
-    return np.clip(np.concatenate([rgb, out_alpha], axis=0) * 255.0, 0.0, 255.0).astype(
-        np.uint8
-    )
+    return _unit_to_uint8(np.concatenate([rgb, out_alpha], axis=0))
 
 
 def ensure_rgba(
@@ -413,7 +401,9 @@ def ensure_rgba(
             if is_fractional and max_value <= 1.0
             else values.astype(np.float64)
         )
-        rgb_bytes = np.nan_to_num(np.clip(scaled, 0.0, 255.0), nan=0.0).astype(np.uint8)
+        rgb_bytes = np.rint(np.nan_to_num(np.clip(scaled, 0.0, 255.0), nan=0.0)).astype(
+            np.uint8
+        )
     if rgb_bytes.shape[0] == 4:
         return rgb_bytes.copy()
     alpha = np.full((1, *rgb_bytes.shape[-2:]), 255, dtype=np.uint8)
@@ -421,7 +411,6 @@ def ensure_rgba(
 
 
 def _float_rgba_to_uint8(
-    rgba: Float[np.ndarray, "h w 4"],
-) -> UInt8[np.ndarray, "4 h w"]:
-    channel_first = einx.id("h w c -> c h w", rgba)
-    return np.clip(channel_first * 255.0, 0.0, 255.0).astype(np.uint8)
+    rgba: Float[np.ndarray, "y x 4"],
+) -> UInt8[np.ndarray, "4 y x"]:
+    return _unit_to_uint8(einx.id("y x c -> c y x", rgba))

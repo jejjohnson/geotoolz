@@ -166,8 +166,8 @@ def test_min_max_normalize_rejects_degenerate_range() -> None:
 
 def test_percentile_clip_global() -> None:
     arr = np.linspace(0.0, 100.0, 101)  # 0, 1, ..., 100
-    # With p_min=10, p_max=90 percentiles are 10 and 90.
-    out = percentile_clip(arr, p_min=10.0, p_max=90.0, axis=None)
+    # With lower=10, upper=90 percentiles are 10 and 90.
+    out = percentile_clip(arr, lower=10.0, upper=90.0, axis=None)
     # The percentile-bound values map to exactly 0 and 1.
     np.testing.assert_allclose(out[10], 0.0, atol=1e-9)
     np.testing.assert_allclose(out[90], 1.0, atol=1e-9)
@@ -184,7 +184,7 @@ def test_percentile_clip_per_band_axis() -> None:
             np.linspace(0, 1000, 100).reshape(10, 10),  # band 1: range 0-1000
         ]
     )
-    out = percentile_clip(arr, p_min=0.0, p_max=100.0, axis=(-2, -1))
+    out = percentile_clip(arr, lower=0.0, upper=100.0, axis=(-2, -1))
     # Both bands should now be normalised into [0, 1].
     assert np.isclose(out[0].max(), 1.0)
     assert np.isclose(out[1].max(), 1.0)
@@ -194,18 +194,18 @@ def test_percentile_clip_per_band_axis() -> None:
 
 def test_gamma_correct_monotone() -> None:
     arr = np.linspace(0.0, 1.0, 11)
-    out = gamma_correct(arr, g=2.2)
+    out = gamma_correct(arr, gamma=2.2)
     # Strictly monotone increasing.
     assert np.all(np.diff(out) > 0)
-    # g > 1 brightens midtones -> 0.5 -> 0.5**(1/2.2) ~ 0.73
+    # gamma > 1 brightens midtones -> 0.5 -> 0.5**(1/2.2) ~ 0.73
     np.testing.assert_allclose(
-        gamma_correct(np.array([0.5]), g=2.2), [0.5 ** (1 / 2.2)]
+        gamma_correct(np.array([0.5]), gamma=2.2), [0.5 ** (1 / 2.2)]
     )
 
 
 def test_gamma_correct_handles_negatives() -> None:
     arr = np.array([-0.5, 0.0, 0.5])
-    out = gamma_correct(arr, g=1.2)
+    out = gamma_correct(arr, gamma=1.2)
     assert out[0] == 0.0  # negative clipped to zero before power
     assert np.isfinite(out).all()
 
@@ -323,7 +323,7 @@ def test_min_max_operator(dn_4band: GeoTensor) -> None:
 
 def test_percentile_clip_operator(dn_4band: GeoTensor) -> None:
     rho = DNToReflectance(scale=1e-4)(dn_4band)
-    op = PercentileClip(p_min=2.0, p_max=98.0)
+    op = PercentileClip(lower=2.0, upper=98.0)
     out = op(rho)
     assert out.shape == rho.shape
     assert np.all(np.asarray(out) >= 0.0)
@@ -333,7 +333,7 @@ def test_percentile_clip_operator(dn_4band: GeoTensor) -> None:
 
 def test_gamma_operator(dn_4band: GeoTensor) -> None:
     rho = DNToReflectance(scale=1e-4)(dn_4band)
-    out = Gamma(g=1.2)(rho)
+    out = Gamma(gamma=1.2)(rho)
     assert out.shape == rho.shape
     assert out.transform == rho.transform
 
@@ -343,8 +343,8 @@ def test_radiometry_pipeline_composes(dn_4band: GeoTensor) -> None:
     pipe = (
         ToFloat32()
         | DNToReflectance(scale=1e-4)
-        | PercentileClip(p_min=2.0, p_max=98.0)
-        | Gamma(g=1.2)
+        | PercentileClip(lower=2.0, upper=98.0)
+        | Gamma(gamma=1.2)
     )
     out = pipe(dn_4band)
     assert isinstance(out, GeoTensor)
@@ -392,7 +392,7 @@ def test_display_stretches_declare_nan_fill() -> None:
         assert np.isnan(out.fill_value_default)
         assert np.isnan(np.asarray(out)[:, fill]).all()
     # The fill pixels no longer drag the percentiles down to 0.
-    clipped = np.asarray(PercentileClip(p_min=0.0, p_max=100.0)(gt))
+    clipped = np.asarray(PercentileClip(lower=0.0, upper=100.0)(gt))
     np.testing.assert_allclose(np.nanmin(clipped, axis=(-2, -1)), 0.0)
     np.testing.assert_allclose(np.nanmax(clipped, axis=(-2, -1)), 1.0)
 
@@ -828,8 +828,8 @@ def test_dn_to_reflectance_parity_with_georeader_scalar_path() -> None:
         RadianceToDN(gain=0.01, offset=-1.0),
         DNToReflectance(scale=1e-4),
         MinMax(vmin=0.0, vmax=1.0),
-        PercentileClip(p_min=2.0, p_max=98.0),
-        Gamma(g=1.2),
+        PercentileClip(lower=2.0, upper=98.0),
+        Gamma(gamma=1.2),
         BTFromRadiance(K1=774.8853, K2=1321.0789),
         DOS1(dark_percentile=1.0),
         SimpleAtmosphericCorrection(method="dos1", dark_percentile=1.0),
@@ -906,11 +906,11 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
         DNToReflectance(scale=1e-4, offset=-0.1),  # S2 L1C post-2022
         DNToReflectance(scale=2.75e-5, offset=-0.2),  # Landsat-8/9 C2 SR
         MinMax(vmin=0.0, vmax=0.3),
-        PercentileClip(p_min=2.0, p_max=98.0),
+        PercentileClip(lower=2.0, upper=98.0),
         BTFromRadiance(K1=774.8853, K2=1321.0789),
         DOS1(dark_percentile=1.0),
         SimpleAtmosphericCorrection(method="dos1", dark_percentile=1.0),
-        Gamma(g=1.4),
+        Gamma(gamma=1.4),
         EarthSunDistanceCorrection(acquisition_date=datetime(2024, 6, 21)),
         ComputeSZA(
             center_coords=(0.0, 0.0),

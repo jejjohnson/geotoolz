@@ -482,7 +482,7 @@ class MultiscaleBasicFeatures(Operator):
             sigma_max=self.sigma_max,
             channel_axis=None,
         )
-        stack = einx.id("h w f -> f h w", features)
+        stack = einx.id("y x f -> f y x", features)
         return wrap_filled(gt, stack, fill_value_default=np.nan)
 
 

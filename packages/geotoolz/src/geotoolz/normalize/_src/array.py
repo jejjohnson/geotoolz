@@ -12,7 +12,6 @@ from jaxtyping import Float, Shaped
 from skimage.exposure import equalize_adapthist
 
 from geotoolz._src.shape import BAND_AXIS
-from geotoolz._src.stretch import percentile_stretch
 
 
 def stat_axes(
@@ -232,41 +231,6 @@ def minmax_scale(
     vmax_b = reshape_stat(vmax, arr, axis)
     denom = np.where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
     return (arr - vmin_b) / denom * (out_max - out_min) + out_min
-
-
-def percentile_clip(
-    arr: Shaped[np.ndarray, "*dims"],
-    *,
-    lower: float = 1.0,
-    upper: float = 99.0,
-    axis: tuple[int, ...] | None = (-2, -1),
-) -> Float[np.ndarray, "*dims"]:
-    """Clip to percentile bounds and stretch the result into ``[0, 1]``.
-
-    Thin delegating wrapper over the shared
-    :func:`geotoolz._src.stretch.percentile_stretch` (NaN-aware; a
-    constant slice maps to ``0``).
-
-    Args:
-        arr: Input array of any shape.
-        lower: Lower percentile in ``[0, 100]``. Default ``1.0``.
-        upper: Upper percentile in ``[0, 100]``. Default ``99.0``.
-        axis: Axes to compute the percentiles over. Default ``(-2, -1)``
-            stretches each leading band / time slice independently;
-            ``None`` uses one global pair of thresholds.
-
-    Returns:
-        Float array of the same shape with values in ``[0, 1]`` (NaNs
-        propagate through untouched).
-
-    Raises:
-        ValueError: If ``upper <= lower``.
-    """
-    if upper <= lower:
-        raise ValueError(
-            f"upper must be greater than lower; got lower={lower}, upper={upper}"
-        )
-    return percentile_stretch(arr, lower, upper, axis=axis)
 
 
 def histogram_match(
