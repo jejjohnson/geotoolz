@@ -110,7 +110,7 @@ def otsu_threshold(values: Num[np.ndarray, "*dims"], *, nbins: int = 256) -> flo
 
 
 def resolve_threshold(
-    values: Num[np.ndarray, "*dims"], threshold: ThresholdMode
+    values: Num[np.ndarray, "*dims"], threshold: ThresholdMode, *, nbins: int = 256
 ) -> float:
     """Resolve an absolute, Otsu, or percentile threshold to a float.
 
@@ -119,6 +119,8 @@ def resolve_threshold(
         threshold: A number (returned as-is), ``"otsu"`` (see
             :func:`otsu_threshold`), or ``"percentile:<p>"`` with ``p``
             in ``[0, 100]`` (NaN-aware percentile of ``values``).
+        nbins: Histogram bins for the ``"otsu"`` mode, passed to
+            :func:`otsu_threshold`. Default ``256``.
 
     Returns:
         The resolved threshold value.
@@ -129,7 +131,7 @@ def resolve_threshold(
     """
     if isinstance(threshold, str):
         if threshold == "otsu":
-            return otsu_threshold(values)
+            return otsu_threshold(values, nbins=nbins)
         prefix = "percentile:"
         if threshold.startswith(prefix):
             percentile = float(threshold.removeprefix(prefix))
@@ -146,6 +148,7 @@ def plume_mask(
     threshold: ThresholdMode = "otsu",
     min_area: int = 50,
     connectivity: Connectivity = 8,
+    nbins: int = 256,
 ) -> Bool[np.ndarray, "h w"]:
     """Threshold an enhancement map and remove small connected components.
 
@@ -155,12 +158,13 @@ def plume_mask(
             see :func:`resolve_threshold`.
         min_area: Minimum connected-component size in pixels.
         connectivity: 4 or 8 connectivity for component labelling.
+        nbins: Histogram bins for the ``"otsu"`` threshold. Default ``256``.
 
     Returns:
         Boolean ``(H, W)`` mask of the surviving plume pixels.
     """
     arr = squeeze_single_band(values)
-    cutoff = resolve_threshold(arr, threshold)
+    cutoff = resolve_threshold(arr, threshold, nbins=nbins)
     raw = np.asarray(arr) > cutoff
     return label_components(raw, min_area=min_area, connectivity=connectivity) > 0
 
@@ -214,6 +218,18 @@ def wind_advection_cone(
     wind direction ``(wind_u, wind_v)`` — a geometric prior for where an
     advected plume can be. The source pixel itself is included.
 
+    With ``d = (x − x₀, y − y₀)`` the offset of a pixel center from the
+    source and ``ŵ = (u, v) / ‖(u, v)‖`` the unit wind vector, a pixel is
+    inside when
+
+        ‖d‖ ≤ max_distance  and  d·ŵ ≥ ‖d‖ · cos(half_angle_deg)
+
+    i.e. the angle between ``d`` and ``ŵ`` is at most ``half_angle_deg``.
+    For ``half_angle_deg ≤ 90`` the angle test alone keeps the sector in
+    the downwind half-plane (``cos ≥ 0 ⇒ d·ŵ ≥ 0``); ``half_angle_deg > 90``
+    widens it past the crosswind line, and ``half_angle_deg = 180`` is the
+    full disc of radius ``max_distance``, upwind pixels included.
+
     Args:
         shape: Raster shape ``(H, W)``.
         transform: Affine-like geotransform of the raster; its CRS units
@@ -250,8 +266,10 @@ def wind_advection_cone(
         out=np.ones_like(distances, dtype=float),
         where=distances > 0,
     )
+    # Clip rounding overshoot so half_angle_deg=180 (cos = −1) is the full disc.
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)
     min_cos = np.cos(np.deg2rad(half_angle_deg))
-    return (projection >= 0.0) & (distances <= max_distance) & (cos_angle >= min_cos)
+    return (distances <= max_distance) & (cos_angle >= min_cos)
 
 
 def convert_column_units(

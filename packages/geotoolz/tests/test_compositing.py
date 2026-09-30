@@ -217,16 +217,139 @@ def test_cloud_free_composite_accepts_one_channel_mask_for_two_d_input() -> None
     np.testing.assert_allclose(np.asarray(out), [[5.5, 11.0], [3.0, 4.0]])
 
 
-def test_bap_composite_rejects_mixed_cloud_distance_inputs() -> None:
+def _single_score(**kwargs: Any) -> Callable[[dict[str, Any]], float]:
+    """Winning score of a one-frame BAP with only the given weight non-zero."""
+    weights = {
+        "w_view_angle": 0.0,
+        "w_recency": 0.0,
+        "w_cloud_distance": 0.0,
+        "w_opacity": 0.0,
+    }
+    weights.update(kwargs.pop("weights"))
+    op = BAPComposite(return_score=True, **weights, **kwargs)
+    scene = _gt(np.ones((1, 1, 1), dtype=np.float32))
+
+    def score(metadata: dict[str, Any]) -> float:
+        _, best = op([(scene, metadata)])
+        return float(np.asarray(best)[0, 0])
+
+    return score
+
+
+def test_bap_recency_wraps_year() -> None:
+    # DOY 360 vs target 5 is 10 days apart (not 355): exp(-½ (10/30)²).
+    score = _single_score(target_doy=5, weights={"w_recency": 1.0})
+    np.testing.assert_allclose(
+        score({"doy": 360}), np.exp(-0.5 * (10 / 30) ** 2), rtol=1e-6
+    )
+    np.testing.assert_allclose(score({"doy": 360}), score({"doy": 15}), rtol=1e-6)
+    # The farthest point on the circle is half a year away.
+    np.testing.assert_allclose(
+        score({"doy": 187.5}), np.exp(-0.5 * (182.5 / 30) ** 2), rtol=1e-5
+    )
+
+
+@pytest.mark.parametrize("doy", [1, 30, 100, 196, 250, 300, 365])
+@pytest.mark.parametrize("sigma", [10.0, 45.0])
+def test_bap_doy_score_matches_gaussian(doy: int, sigma: float) -> None:
+    target = 20
+    delta = abs(doy - target) % 365
+    d = min(delta, 365 - delta)
+    score = _single_score(
+        target_doy=target, doy_sigma=sigma, weights={"w_recency": 1.0}
+    )
+    np.testing.assert_allclose(
+        score({"day_of_year": doy}),
+        np.exp(-0.5 * (d / sigma) ** 2),
+        rtol=1e-6,
+        atol=1e-12,  # far tails underflow float32
+    )
+
+
+@pytest.mark.parametrize("theta", [-12.0, 0.0, 7.5, 30.0])
+def test_bap_view_angle_score_is_gaussian_in_degrees(theta: float) -> None:
+    score = _single_score(target_doy=1, weights={"w_view_angle": 1.0})
+    np.testing.assert_allclose(
+        score({"view_angle": theta}), np.exp(-0.5 * (theta / 15.0) ** 2), rtol=1e-6
+    )
+
+
+@pytest.mark.parametrize("distance", [0.0, 10.0, 28.0, 40.0, 60.0, 500.0])
+def test_bap_cloud_distance_score_is_griffiths_sigmoid(distance: float) -> None:
+    d_req, d_min, k = 60.0, 4.0, 0.15
+    score = _single_score(
+        target_doy=1,
+        cloud_distance_req=d_req,
+        cloud_distance_min=d_min,
+        cloud_distance_slope=k,
+        weights={"w_cloud_distance": 1.0},
+    )
+    expected = 1.0 / (1.0 + np.exp(-k * (min(distance, d_req) - (d_req - d_min) / 2)))
+    np.testing.assert_allclose(score({"cloud_distance": distance}), expected, rtol=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("opacity", "expected"),
+    [(0.0, 1.0), (0.2, 1.0), (0.225, 0.75), (0.25, 0.5), (0.3, 0.0), (0.9, 0.0)],
+)
+def test_bap_opacity_score_is_linear_ramp(opacity: float, expected: float) -> None:
+    score = _single_score(target_doy=1, weights={"w_opacity": 1.0})
+    np.testing.assert_allclose(score({"opacity": opacity}), expected, atol=1e-6)
+
+
+def test_bap_late_december_beats_spring_for_january_target() -> None:
+    december = _gt(np.full((1, 2, 2), 1.0, dtype=np.float32))
+    spring = _gt(np.full((1, 2, 2), 2.0, dtype=np.float32))
+    pairs = [(spring, {"doy": 60}), (december, {"doy": 358})]
+
+    out, score = BAPComposite(target_doy=10, return_score=True)(pairs)
+
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(december))
+    # Default weights; view/opacity at their best (1), cloud_distance 0.
+    s_cloud = 1.0 / (1.0 + np.exp(0.2 * 25.0))
+    expected = 0.3 + 0.4 * np.exp(-0.5 * (17 / 30) ** 2) + 0.2 * s_cloud + 0.1
+    np.testing.assert_allclose(np.asarray(score), expected, rtol=1e-6)
+
+
+def test_bap_composite_accepts_mixed_cloud_distance_inputs() -> None:
+    # Raw distances map through the sigmoid onto [0, 1], so they share the
+    # precomputed scores' scale and may be mixed across frames.
     scene1 = _gt(np.full((1, 2, 2), 1.0, dtype=np.float32))
     scene2 = _gt(np.full((1, 2, 2), 2.0, dtype=np.float32))
     pairs = [
         (scene1, {"cloud_distance": 50.0}),
         (scene2, {"cloud_distance_score": 0.5}),
     ]
+    op = BAPComposite(
+        target_doy=196,
+        w_view_angle=0.0,
+        w_recency=0.0,
+        w_opacity=0.0,
+        w_cloud_distance=1.0,
+        return_score=True,
+    )
 
-    with pytest.raises(ValueError, match="mix of raw 'cloud_distance'"):
-        BAPComposite(target_doy=196)(pairs)
+    out, score = op(pairs)
+
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(scene1))
+    np.testing.assert_allclose(np.asarray(score), 1.0 / (1.0 + np.exp(-5.0)))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"doy_sigma": 0.0},
+        {"view_angle_sigma": -1.0},
+        {"cloud_distance_slope": 0.0},
+        {"cloud_distance_req": 5.0, "cloud_distance_min": 5.0},
+        {"opacity_low": 0.3, "opacity_high": 0.3},
+    ],
+)
+def test_bap_composite_rejects_degenerate_score_parameters(
+    kwargs: dict[str, float],
+) -> None:
+    with pytest.raises(ValueError, match="must"):
+        BAPComposite(target_doy=1, **kwargs)
 
 
 @pytest.mark.parametrize(
