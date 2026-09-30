@@ -53,7 +53,8 @@ def test_raster_to_point_cloud_nearest_pinned() -> None:
             _NAN,
         ],
     ]
-    np.testing.assert_array_equal(out, expected)
+    # Pinned literals: allow last-bit differences across numpy / BLAS builds.
+    np.testing.assert_allclose(out, expected, rtol=1e-14)
     assert out.dtype == np.float64
 
 
@@ -193,7 +194,7 @@ def test_raster_to_point_cloud_wraps_primitive(method: str, k: int) -> None:
 def test_raster_to_point_cloud_primitive_2d_input() -> None:
     values = np.asarray(_raster())[0]
     out = coreg_array.raster_to_point_cloud(values, _TRANSFORM, _XY)
-    np.testing.assert_array_equal(
+    np.testing.assert_allclose(
         out,
         [
             0.0,
@@ -202,6 +203,7 @@ def test_raster_to_point_cloud_primitive_2d_input() -> None:
             36.4828726939094,
             18.520259177452132,
         ],
+        rtol=1e-14,
     )
 
 
