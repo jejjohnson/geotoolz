@@ -500,40 +500,321 @@ def test_stitch_handles_target_shape_smaller_than_tile_union() -> None:
     np.testing.assert_array_equal(out, np.full((1, 2, 2), 1.0, dtype=np.float32))
 
 
+# ----------------------------------------------------------------------------
+# BowtieCorrection (#160): a brute-force whiskbroom simulator
+# ----------------------------------------------------------------------------
+#
+# The simulator below traces every detector's line of sight exactly (3-D
+# ray / sphere intersection, no small-angle approximation) and reads a
+# known ground scene at the hit point, producing a bowtied swath whose
+# scans overlap along track. It is independent of the operator's
+# first-order model, so agreement with the ground truth checks the model.
+
+_R_KM = 6371.0088
+
+
+def _ray_orbit_angle(
+    theta: np.ndarray, phi: np.ndarray, altitude_km: float
+) -> np.ndarray:
+    """Along-track orbit angle ψ of the ground point seen at (θ, φ).
+
+    Satellite at (0, 0, R + h), cross-track x, along-track y; the line of
+    sight ``d = (cos φ sin θ, sin φ, -cos φ cos θ)`` hits the sphere
+    ``|P + t·d| = R`` at the nearer root; ψ = atan2(G_y, G_z) is the
+    rotation about the cross-track axis, the coordinate in which every
+    scan advances by the same amount.
+    """
+    rh = _R_KM + altitude_km
+    c = np.cos(phi) * np.cos(theta)
+    t = rh * c - np.sqrt(rh**2 * c**2 - (rh**2 - _R_KM**2))
+    g_y = t * np.sin(phi)
+    g_z = rh - t * c
+    return np.arctan2(g_y, g_z)
+
+
+def _simulate_swath(
+    scene,
+    *,
+    detectors: int,
+    scans: int,
+    theta: np.ndarray,
+    ifov_rad: float,
+    altitude_km: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bowtied swath ``(H, W)`` and each sample's true row coordinate ``y``.
+
+    ``y`` is along-track orbit angle in units of one nadir detector, with
+    scans contiguous at nadir; ``scene(y, col)`` is the ground truth.
+    """
+    phi = (np.arange(detectors) - (detectors - 1) / 2) * ifov_rad
+    half = detectors * ifov_rad / 2
+    nadir_row = (
+        _ray_orbit_angle(np.array(0.0), np.array(half), altitude_km)
+        - _ray_orbit_angle(np.array(0.0), np.array(-half), altitude_km)
+    ) / detectors
+    offsets = _ray_orbit_angle(theta[None, :], phi[:, None], altitude_km) / nadir_row
+    y = np.concatenate(
+        [j * detectors + (detectors - 1) / 2 + offsets for j in range(scans)]
+    )
+    cols = np.broadcast_to(np.arange(theta.size)[None, :], y.shape)
+    return scene(y, cols), y
+
+
+def _smooth_scene(y: np.ndarray, col: np.ndarray) -> np.ndarray:
+    return np.sin(2 * np.pi * y / 50.0) + np.cos(2 * np.pi * y / 40.0 + col / 9.0)
+
+
+# max |∂²f/∂y²| of ``_smooth_scene``.
+_SMOOTH_CURVATURE = (2 * np.pi / 50.0) ** 2 + (2 * np.pi / 40.0) ** 2
+
+
+def _linear_error_bound(g_max: float) -> float:
+    """Linear-interpolation error bound between detectors ``g`` rows apart.
+
+    |f - f̂| ≤ g²/8 · max|f''| (plus a small allowance for the operator's
+    first-order-in-IFOV detector spacing against the exact ray trace).
+    """
+    return g_max**2 / 8 * _SMOOTH_CURVATURE + 2e-3
+
+
+# MODIS 1 km: 10 detectors, ±55°, 705 km, 1 km IFOV; 135 columns (odd, so
+# the centre column is exactly nadir) keep the test fast.
+_MODIS_N, _MODIS_SCANS, _MODIS_W = 10, 12, 135
+_MODIS_THETA = np.deg2rad(55.0) * (2 * np.arange(_MODIS_W) + 1 - _MODIS_W) / _MODIS_W
+
+
+def _modis_swath(scene) -> tuple[np.ndarray, np.ndarray]:
+    return _simulate_swath(
+        scene,
+        detectors=_MODIS_N,
+        scans=_MODIS_SCANS,
+        theta=_MODIS_THETA,
+        ifov_rad=1.0 / 705.0,
+        altitude_km=705.0,
+    )
+
+
+def _modis_op(method: str) -> gz.geom.BowtieCorrection:
+    return gz.geom.BowtieCorrection.modis(method=method)
+
+
+def test_bowtie_synthetic_swath() -> None:
+    height = _MODIS_N * _MODIS_SCANS
+    rows = np.arange(height, dtype=np.float64)[:, None]
+
+    # (a) Duplicated along-track ground is removed. On a scene whose value
+    # is the ground row coordinate, the bowtied swath runs backwards at
+    # every scan boundary of the edge columns (overlap: scan j's last
+    # detectors see further than scan j+1's first ones)...
+    ramp, _ = _modis_swath(lambda y, col: y)
+    assert (np.diff(ramp[:, 0]) < 0).any()
+    assert np.ptp(ramp[:, 0]) > height  # the bowtie wings extend the scan
+    # ...while the corrected swath sees each ground row once, in order, on
+    # the uniform nadir grid.
+    out = np.asarray(_modis_op("linear")(ramp))
+    assert out.shape == ramp.shape
+    assert (np.diff(out, axis=0) > 0).all()
+    np.testing.assert_allclose(out, np.broadcast_to(rows, out.shape), atol=5e-3)
+    # Nearest lands within half an edge-of-scan detector (g/2 ≤ 1.02 rows)
+    # of the target ground row.
+    nearest = np.asarray(_modis_op("nearest")(ramp))
+    assert np.abs(nearest - rows).max() <= 1.03
+
+    # (b) Cross-track extent conserved: the column-index ramp maps to itself.
+    cols = np.tile(np.arange(_MODIS_W, dtype=np.float32), (height, 1))
+    for method in ("nearest", "linear"):
+        np.testing.assert_array_equal(np.asarray(_modis_op(method)(cols)), cols)
+
+    # (c) The de-overlapped swath matches the ground truth on the nadir grid;
+    # the raw bowtied swath does not.
+    swath, _ = _modis_swath(_smooth_scene)
+    truth = _smooth_scene(rows, np.arange(_MODIS_W)[None, :])
+    corrected = np.asarray(_modis_op("linear")(swath))
+    assert np.abs(corrected - truth).max() < _linear_error_bound(2.04)  # ≈ 0.023
+    assert np.abs(swath - truth).max() > 0.5
+
+
+def test_bowtie_correction_is_near_identity_at_nadir() -> None:
+    swath, _ = _modis_swath(_smooth_scene)
+    nadir = _MODIS_W // 2
+    near_nadir = np.abs(np.rad2deg(_MODIS_THETA)) < 10.0
+    for method in ("nearest", "linear"):
+        out = np.asarray(_modis_op(method)(swath))
+        # g(0) = 1: the nadir column is returned unchanged.
+        np.testing.assert_allclose(out[:, nadir], swath[:, nadir], rtol=0, atol=1e-12)
+        # Near nadir the scans barely overlap (< 0.2 detector at 10°).
+        np.testing.assert_allclose(out[:, near_nadir], swath[:, near_nadir], atol=0.05)
+
+
 def test_bowtie_correction_is_identity_for_zero_scan_angle() -> None:
-    gt = _gt()
+    gt = _gt(np.arange(1 * 6 * 7, dtype=np.float32).reshape(1, 6, 7))
+    for method in ("nearest", "linear"):
+        out = gz.geom.BowtieCorrection(
+            detectors_per_scan=3,
+            max_scan_angle_deg=0.0,
+            altitude_km=705.0,
+            method=method,
+        )(gt)
+        np.testing.assert_array_equal(np.asarray(out), np.asarray(gt))
+        assert out.dtype == gt.dtype
+        assert out.transform == gt.transform
+        assert str(out.crs) == str(gt.crs)
 
-    out = gz.geom.BowtieCorrection(
-        scan_angle_max_deg=0.0,
-        pixels_per_scan=gt.shape[-1],
-        scans_per_granule=gt.shape[-2],
+
+def test_bowtie_scan_pixel_growth_matches_published_sensor_numbers() -> None:
+    # MODIS: 1 km nadir pixel grows to ≈ 2.0 km along track and ≈ 4.8 km
+    # along scan at 55° (Wolfe et al. 2002, RSE 83:31-49).
+    along, orbit, cross = geom_array.scan_pixel_growth(np.deg2rad(55.0), 705.0, _R_KM)
+    np.testing.assert_allclose(along, 2.0, rtol=0.01)
+    np.testing.assert_allclose(cross, 4.8, rtol=0.01)
+    assert orbit > along  # orbit-angle growth adds the 1/cos β factor
+    # VIIRS: scan width 11.7 km at nadir, 25.8 km at 56.28° (NOAA NESDIS 142,
+    # VIIRS SDR User's Guide §2.2).
+    along, orbit, _ = geom_array.scan_pixel_growth(np.deg2rad(56.28), 824.0, _R_KM)
+    np.testing.assert_allclose(along, 25.8 / 11.7, rtol=0.01)
+    # Same guide: scan-to-scan overlap starts at ≈ 19° and exceeds 1 (2)
+    # M-band detectors per scan edge beyond 31.72° (44.86°), which is why
+    # 1 (2) rows per edge are deleted on board. Overlap per edge in
+    # detectors: N·(1 - 1/g)/2.
+    _, g, _ = geom_array.scan_pixel_growth(
+        np.deg2rad([19.0, 31.72, 44.86]), 824.0, _R_KM
+    )
+    per_edge = 16 * (1 - 1 / g) / 2
+    np.testing.assert_allclose(2 * per_edge[0], 1.0, atol=0.05)
+    assert per_edge[1] > 1.0
+    assert per_edge[2] > 2.0
+    # Flat-Earth limit R → ∞: g → 1/cos θ.
+    _, g_flat, _ = geom_array.scan_pixel_growth(np.deg2rad(40.0), 705.0, 1e9)
+    np.testing.assert_allclose(g_flat, 1 / np.cos(np.deg2rad(40.0)), rtol=1e-6)
+
+
+def test_bowtie_viirs_scan_angles_follow_aggregation_zones() -> None:
+    theta = np.rad2deg(
+        geom_array.scan_angles(3200, 56.28, ((1776, 3), (736, 2), (640, 1)))
+    )
+    assert theta.shape == (3200,)
+    np.testing.assert_allclose(theta, -theta[::-1])
+    right = theta[1600:]
+    # Zone boundaries (guide: 31.72° and 44.86°) fall between the last
+    # 3-sample pixel and the first 2-sample one, and so on.
+    step = 56.28 / 3152
+    assert right[591] < 1776 * step < right[592]
+    assert abs(1776 * step - 31.72) < 0.02
+    assert abs((1776 + 736) * step - 44.86) < 0.02
+    np.testing.assert_allclose(np.diff(right[:592]), 3 * step)
+    np.testing.assert_allclose(np.diff(right[592:960]), 2 * step)
+    np.testing.assert_allclose(np.diff(right[960:]), step)
+    with pytest.raises(ValueError, match="describe 3200 columns"):
+        geom_array.scan_angles(3000, 56.28, ((1776, 3), (736, 2), (640, 1)))
+
+
+def test_bowtie_viirs_refills_onboard_deleted_rows() -> None:
+    # VIIRS M-band: bowtie-deleted rows (1 per scan edge in the 2-sample
+    # zone, 2 in the unaggregated zone) arrive as fill; the corrected swath
+    # has no gaps and matches the ground truth.
+    op = gz.geom.BowtieCorrection.viirs(method="linear")
+    theta = geom_array.scan_angles(3200, 56.28, op.aggregation_zones)
+    swath, _ = _simulate_swath(
+        _smooth_scene,
+        detectors=16,
+        scans=3,
+        theta=theta,
+        ifov_rad=11.7 / 16 / 824.0,
+        altitude_km=824.0,
+    )
+    swath = swath.astype(np.float32)
+    deg = np.abs(np.rad2deg(theta))
+    detector = np.arange(48) % 16
+    zone2 = (deg > 31.72) & (deg <= 44.86)
+    zone3 = deg > 44.86
+    swath[np.ix_(np.isin(detector, [0, 15]), zone2)] = -999.0
+    swath[np.ix_(np.isin(detector, [0, 1, 14, 15]), zone3)] = -999.0
+    gt = GeoTensor(
+        swath[None],
+        transform=Affine(1, 0, 0, 0, -1, 0),
+        crs=None,
+        fill_value_default=-999.0,
+    )
+    out = np.asarray(op(gt))[0]
+    truth = _smooth_scene(np.arange(48.0)[:, None], np.arange(3200)[None, :])
+    assert (out != -999.0).all()
+    assert np.abs(out - truth).max() < _linear_error_bound(2.26)  # ≈ 0.028
+
+
+def test_bowtie_uses_overlapping_scan_where_primary_is_nodata() -> None:
+    # Ramp scene: each sample's value is its true ground row.
+    swath, _ = _modis_swath(lambda y, col: y)
+    swath[50:60] = np.nan  # scan 5 lost entirely
+    out = np.asarray(_modis_op("linear")(swath))
+    rows = np.broadcast_to(np.arange(120.0)[:, None], out.shape)
+    lost = out[50:60]
+    recovered = np.isfinite(lost)
+    # Nadir has no overlap: the lost scan stays nodata there...
+    assert not recovered[:, _MODIS_W // 2].any()
+    # ...but at the swath edges the neighbouring scans cover its outer rows,
+    # and the ground they supply is the right one: within half an edge
+    # detector footprint (g/2 ≤ 1.02 rows; exact where the neighbour scan
+    # can interpolate, only its outer half-pixel is clamped).
+    assert recovered[[0, -1]][:, [0, -1]].all()
+    err = np.abs(lost - rows[50:60])[recovered]
+    assert err.max() <= 1.03
+    assert np.median(err) < 1e-2
+    # Scans away from the gap are unaffected.
+    np.testing.assert_allclose(out[:40], rows[:40], atol=5e-3)
+
+
+def test_bowtie_correction_nodata_and_dtype() -> None:
+    values = np.full((1, 20, 9), 7, dtype=np.uint16)
+    values[0, 4, 4] = 0  # nadir fill pixel: no overlapping scan covers it
+    gt = GeoTensor(
+        values,
+        transform=Affine(1, 0, 0, 0, -1, 0),
+        crs="EPSG:4326",
+        fill_value_default=0,
+    )
+    op = gz.geom.BowtieCorrection(
+        detectors_per_scan=10, max_scan_angle_deg=55.0, altitude_km=705.0
+    )
+    out = op(gt)
+    assert out.dtype == np.uint16
+    assert out.fill_value_default == 0
+    assert np.asarray(out)[0, 4, 4] == 0
+    assert (np.asarray(out)[0][np.arange(20) != 4] == 7).all()
+    linear = gz.geom.BowtieCorrection(
+        detectors_per_scan=10,
+        max_scan_angle_deg=55.0,
+        altitude_km=705.0,
+        method="linear",
     )(gt)
+    assert np.issubdtype(linear.dtype, np.floating)
+    assert np.isnan(linear.fill_value_default)
+    assert np.isnan(np.asarray(linear)[0, 4, 4])
+    np.testing.assert_allclose(np.asarray(linear)[0, 10:], 7.0)
 
-    assert out is gt
-    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt))
-    assert out.transform == gt.transform
-    assert str(out.crs) == str(gt.crs)
 
-
-def test_bowtie_correction_resamples_edges_and_preserves_fill() -> None:
-    values = np.tile(np.arange(7, dtype=np.float32), (5, 1))[None, ...]
-    values[..., 2, 1] = -9999.0
-    gt = _gt(values)
-
-    out = gz.geom.BowtieCorrection(
-        scan_angle_max_deg=60.0,
-        pixels_per_scan=7,
-        scans_per_granule=5,
-        method="nearest",
-    )(gt)
-
-    assert out.shape == gt.shape
-    assert out.transform == gt.transform
-    assert str(out.crs) == str(gt.crs)
-    assert np.asarray(out)[0, 2, 0] == -9999.0
-    assert np.asarray(out)[0, 2, 1] == -9999.0
-    assert np.asarray(out)[0, 0, 3] == np.asarray(gt)[0, 0, 3]
-    assert np.asarray(out)[0, 0, 0] > np.asarray(gt)[0, 0, 0]
+def test_bowtie_correction_validates_inputs() -> None:
+    op = gz.geom.BowtieCorrection(
+        detectors_per_scan=4, max_scan_angle_deg=55.0, altitude_km=705.0
+    )
+    with pytest.raises(ValueError, match="whole scans"):
+        op(np.zeros((6, 5), dtype=np.float32))
+    with pytest.raises(ValueError, match="BowtieCorrection accepts"):
+        op(np.zeros(8, dtype=np.float32))
+    with pytest.raises(ValueError, match="horizon"):
+        gz.geom.BowtieCorrection(
+            detectors_per_scan=4, max_scan_angle_deg=70.0, altitude_km=705.0
+        )
+    with pytest.raises(ValueError, match="method"):
+        gz.geom.BowtieCorrection(
+            detectors_per_scan=4,
+            max_scan_angle_deg=55.0,
+            altitude_km=705.0,
+            method="bilinear",
+        )
+    with pytest.raises(ValueError, match="resolution_m"):
+        gz.geom.BowtieCorrection.modis(300)
+    assert gz.geom.BowtieCorrection.modis(500).detectors_per_scan == 20
+    assert gz.geom.BowtieCorrection.viirs("I").detectors_per_scan == 32
 
 
 def test_antimeridian_split_uses_lon_attrs_and_returns_west_east() -> None:
@@ -774,26 +1055,6 @@ def test_segment_stitch_handles_attrs_none_with_clear_error() -> None:
     )
     with pytest.raises(ValueError, match="__geotoolz_segment_meta__"):
         gz.geom.SegmentStitch()([bad])
-
-
-def test_bowtie_correction_preserves_float32_dtype_and_edge_pixels() -> None:
-    values = np.tile(np.arange(7, dtype=np.float32), (5, 1))[None, ...]
-    gt = _gt(values)
-
-    out = gz.geom.BowtieCorrection(
-        scan_angle_max_deg=60.0,
-        pixels_per_scan=7,
-        scans_per_granule=5,
-        method="bilinear",
-    )(gt)
-
-    arr = np.asarray(out)
-    # Bilinear resampling must not silently promote float32 -> float64.
-    assert arr.dtype == np.float32
-    # The trailing row/column lies inside the raster footprint and must not
-    # be replaced with the fill value.
-    assert arr[0, -1, 0] != gt.fill_value_default
-    assert arr[0, 0, -1] != gt.fill_value_default
 
 
 def test_antimeridian_split_rejects_mismatched_lon_shape() -> None:
@@ -1261,10 +1522,10 @@ _PLAIN_REFERENCE = np.ascontiguousarray(_PLAIN_VALUES[:, ::-1, :])
         lambda: gz.geom.CropTo(shape=(2, 3)),
         lambda: gz.geom.CropTo(shape=(2, 3), anchor="upper_left"),
         lambda: gz.geom.BowtieCorrection(
-            scan_angle_max_deg=60.0,
-            pixels_per_scan=8,
-            scans_per_granule=8,
-            method="nearest",
+            detectors_per_scan=4,
+            max_scan_angle_deg=60.0,
+            altitude_km=705.0,
+            method="linear",
         ),
         lambda: gz.geom.OpticalFlowTVL1(reference=_gt(_PLAIN_REFERENCE.copy())),
         lambda: gz.geom.OpticalFlowILK(reference=_gt(_PLAIN_REFERENCE.copy())),
