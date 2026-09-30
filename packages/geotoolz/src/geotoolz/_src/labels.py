@@ -29,6 +29,8 @@ import numpy as np
 import pandas as pd
 from jaxtyping import Bool, Int, Shaped
 from scipy import ndimage
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import dijkstra
 from skimage.measure import regionprops_table
 from skimage.morphology import skeletonize
 
@@ -196,11 +198,14 @@ def skeleton_length(
     The path runs between skeleton pixel *centres*: a straight line of
     ``n`` pixels measures ``n - 1`` steps.
 
-    Per connected skeleton component a double Dijkstra sweep (farthest
-    pixel from a seed, then farthest from that) is run -- exact for
-    tree-shaped skeletons and a close lower bound for skeletons with
-    loops. The seed is the lexicographically smallest ``(row, col)``, so
-    the result is deterministic. The maximum over components is returned.
+    The result is the exact graph diameter of each connected skeleton
+    component (the longest of its shortest paths), maximised over
+    components. A tree-shaped component uses a double Dijkstra sweep
+    (farthest pixel from a seed, then farthest from that), which is exact
+    for trees; a component with a loop -- where that sweep can
+    under-estimate -- runs Dijkstra from every pixel. The sweep seed is
+    the lexicographically smallest ``(row, col)``, so the result is
+    deterministic.
 
     Args:
         mask: 2-D mask. Boolean input is used as is; other dtypes are
@@ -287,8 +292,9 @@ def _longest_path(
 
     ``step_length`` maps each allowed ``(drow, dcol)`` neighbour offset to
     its length; it also defines the connectivity. Each connected
-    component gets a deterministic double Dijkstra sweep; a single-pixel
-    component contributes ``0``.
+    component contributes its exact diameter: a deterministic double
+    Dijkstra sweep for a tree, all-sources Dijkstra when it has a loop.
+    A single-pixel component contributes ``0``.
     """
     rows, cols = np.nonzero(mask)
     remaining = {(int(r), int(c)) for r, c in zip(rows, cols, strict=True)}
@@ -296,11 +302,57 @@ def _longest_path(
     while remaining:
         seed = min(remaining)
         component = _component(seed, remaining, step_length)
-        farthest, _ = _farthest(seed, component, step_length)
-        _, distance = _farthest(farthest, component, step_length)
+        if _is_tree(component, step_length):
+            farthest, _ = _farthest(seed, component, step_length)
+            _, distance = _farthest(farthest, component, step_length)
+        else:
+            distance = _exact_diameter(component, step_length)
         longest = max(longest, distance)
         remaining = remaining - component
     return float(longest)
+
+
+def _is_tree(
+    nodes: set[tuple[int, int]], step_length: dict[tuple[int, int], float]
+) -> bool:
+    """A connected component is a tree iff it has ``len(nodes) - 1`` edges."""
+    edges = sum(
+        (row + drow, col + dcol) in nodes
+        for row, col in nodes
+        for drow, dcol in step_length
+    )
+    # Every undirected edge is seen from both ends.
+    return edges // 2 == len(nodes) - 1
+
+
+def _exact_diameter(
+    nodes: set[tuple[int, int]],
+    step_length: dict[tuple[int, int], float],
+    *,
+    chunk: int = 256,
+) -> float:
+    """Longest shortest path in a component, by Dijkstra from every node.
+
+    Sources are processed ``chunk`` at a time so memory stays
+    ``O(chunk * len(nodes))``.
+    """
+    order = sorted(nodes)
+    index = {node: i for i, node in enumerate(order)}
+    src, dst, weight = [], [], []
+    for (row, col), i in index.items():
+        for (drow, dcol), step in step_length.items():
+            j = index.get((row + drow, col + dcol))
+            if j is not None:
+                src.append(i)
+                dst.append(j)
+                weight.append(step)
+    graph = csr_matrix((weight, (src, dst)), shape=(len(order), len(order)))
+    longest = 0.0
+    for start in range(0, len(order), chunk):
+        sources = np.arange(start, min(start + chunk, len(order)))
+        distances = dijkstra(graph, directed=True, indices=sources)
+        longest = max(longest, float(distances.max()))
+    return longest
 
 
 def _component(

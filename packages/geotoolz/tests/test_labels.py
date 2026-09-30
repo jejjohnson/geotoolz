@@ -249,6 +249,39 @@ def test_skeleton_length_diagonal_steps_are_euclidean() -> None:
     assert skeleton_length(np.eye(5, dtype=bool)) == pytest.approx(4 * np.sqrt(2))
 
 
+def test_skeleton_length_is_exact_on_looped_skeletons() -> None:
+    """A double Dijkstra sweep under-measures a loop; the diameter must be exact."""
+    pixels = [
+        *[(r, c) for r in (2, 3) for c in range(4, 12)],
+        *[(r, c) for r in (4, 5) for c in (*range(1, 7), 10, 11)],
+        *[(r, c) for r in (6, 7) for c in (4, 5, 10, 11)],
+        *[(r, c) for r in (8, 9) for c in range(4, 12)],
+    ]
+    mask = np.zeros((13, 13), dtype=bool)
+    mask[tuple(np.array(pixels).T)] = True
+
+    # The old two-sweep heuristic returned 6 + 3*sqrt(2) here.
+    assert skeleton_length(mask) == pytest.approx(9 + 3 * np.sqrt(2))
+
+    # Brute force: all-pairs shortest paths over the 8-connected skeleton.
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import shortest_path
+    from skimage.morphology import skeletonize
+
+    nodes = [tuple(p) for p in np.argwhere(skeletonize(mask))]
+    index = {n: i for i, n in enumerate(nodes)}
+    edges = [
+        (index[(r, c)], index[(r + dr, c + dc)], float(np.hypot(dr, dc)))
+        for r, c in nodes
+        for dr in (-1, 0, 1)
+        for dc in (-1, 0, 1)
+        if (dr, dc) != (0, 0) and (r + dr, c + dc) in index
+    ]
+    i, j, w = zip(*edges, strict=True)
+    graph = csr_matrix((w, (i, j)), shape=(len(nodes), len(nodes)))
+    assert skeleton_length(mask) == pytest.approx(shortest_path(graph).max())
+
+
 def test_skeleton_length_4_connectivity_does_not_walk_diagonals() -> None:
     assert skeleton_length(np.eye(5, dtype=bool), connectivity=4) == 0.0
 
