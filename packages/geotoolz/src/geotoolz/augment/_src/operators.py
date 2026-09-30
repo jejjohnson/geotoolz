@@ -40,7 +40,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from affine import Affine
 from jaxtyping import Float, Shaped
-from pipekit import Operator
+from pipekit import Operator, Sequential
+from pipekit._base.operator import require_operator
 from rasterio.windows import Window
 from scipy.ndimage import gaussian_filter
 
@@ -50,9 +51,8 @@ from geotoolz._src.config import (
     jsonable,
     mapping_from_pairs,
     mapping_to_pairs,
-    nested_config,
 )
-from geotoolz._src.geo import require_geotensor
+from geotoolz._src.geo import grid_matches, require_geotensor
 from geotoolz._src.shape import BAND_AXIS
 from geotoolz._src.valid import carrier_fill_value, restore_fill, valid_pixels
 from geotoolz._src.wrap import adopt_attrs, wrap_like
@@ -125,13 +125,24 @@ def _validate_probability_range(value: ScalarOrRange, name: str) -> None:
             raise ValueError(f"{name} must be in [0, 1]; got {value}")
 
 
-def _accepts_seed_kwarg(op: Operator) -> bool:
-    """Return True if ``type(op).__init__`` accepts a ``seed`` parameter."""
+def _apply_accepts_seed(op: Operator) -> bool:
+    """Return True if ``op._apply`` takes a ``seed`` keyword.
+
+    The per-call ``seed`` is forwarded to ``_apply`` (via ``op(x, seed=...)``),
+    so that signature -- not ``__init__`` -- decides whether it is accepted:
+    an explicit ``seed`` parameter or a ``**kwargs`` catch-all.
+    """
     try:
-        sig = inspect.signature(type(op).__init__)
+        params = inspect.signature(op._apply).parameters
     except (TypeError, ValueError):
         return False
-    return "seed" in sig.parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
+    param = params.get("seed")
+    return param is not None and param.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
 
 
 def _sample_uniform(rng: np.random.Generator, value: ScalarOrRange, name: str) -> float:
@@ -238,8 +249,11 @@ def _new_geotensor(
     return wrap_like(gt, _cast_like(out, np.asarray(gt).dtype), transform=transform)
 
 
-class Compose(Operator):
-    """Apply augmentations sequentially with an optional pipeline probability.
+class Compose(Sequential):
+    """Apply augmentations sequentially behind a pipeline probability gate.
+
+    A :class:`pipekit.Sequential` whose whole chain runs with probability
+    ``p`` and whose children can be seeded from one top-level seed.
 
     Seeding follows the module contract. When ``Compose`` is seeded — by
     a per-call ``seed`` (one-off) or a constructor ``seed`` (its own
@@ -249,13 +263,21 @@ class Compose(Operator):
     reproduces the same chain of inner draws and the children's own
     streams are left untouched. An unseeded ``Compose`` forwards nothing,
     so each child draws from its own stream (honouring any child
-    ``seed``). Children whose ``__init__`` takes no ``seed`` are called
-    without one either way.
+    ``seed``). A child receives a ``seed`` only when its ``_apply``
+    accepts one (the per-call ``seed`` goes to ``_apply``, not
+    ``__init__``), so deterministic operators and samplers whose seed is
+    constructor-only are called plainly.
 
-    ``get_config`` emits a JSON-safe nested description of each child via
-    its ``get_config()``; ``forbid_in_yaml`` is set because the constructor
-    accepts arbitrary ``Operator`` instances which a YAML loader cannot
-    re-instantiate without an explicit registry.
+    ``get_config`` emits the children's nested configs (via
+    :class:`~pipekit.Sequential`) under ``augmentations``. ``Compose`` is
+    a container, so it is not ``forbid_in_yaml`` itself; a flagged child
+    is found structurally by pipekit's walker.
+
+    Composition: ``compose | op`` keeps the gate (``Sequential([compose,
+    op])``), but pipekit flattens a ``Sequential`` on the right of ``|``,
+    so ``op | compose`` would splice the children in *without* the gate —
+    write ``Sequential([op, compose])`` instead. Slicing (``compose[1:]``)
+    likewise returns an ungated ``Sequential`` of the children.
 
     The carrier is whatever the children accept: a plain ``np.ndarray``
     input passes through unchanged when the probability check skips the
@@ -266,6 +288,10 @@ class Compose(Operator):
         p: Probability of applying the whole pipeline. Default ``1.0``.
         seed: Seed of the pipeline's own stream (see above); ``None``
             leaves each child to its own stream.
+
+    Raises:
+        TypeError: If a child is not an ``Operator`` (e.g. a reloaded
+            nested-config dict) or is a stateful operator.
 
     Examples:
         >>> import geotoolz as gz
@@ -287,17 +313,22 @@ class Compose(Operator):
         for i, op in enumerate(augmentations):
             # A YAML / Hydra loader hands back the nested {"class", "config"}
             # payloads as dicts; fail here rather than at apply time.
-            if not isinstance(op, Operator):
+            require_operator(op, "Compose", f"augmentations[{i}]")
+            if getattr(op, "_is_stateful", False):
                 raise TypeError(
-                    f"Compose.augmentations[{i}] must be an Operator, got "
-                    f"{type(op).__name__}; nested configs are not rebuilt "
-                    "automatically — construct the children in code."
+                    f"Compose.augmentations[{i}] is a stateful operator "
+                    f"({type(op).__name__}); Compose does not thread state."
                 )
-        self.augmentations = list(augmentations)
+        super().__init__(list(augmentations))
         self.p = p
         self.seed = seed
 
-    def _apply(
+    @property
+    def augmentations(self) -> list[Operator]:
+        """The child operators, in application order."""
+        return self.operators
+
+    def _apply(  # ty: ignore[invalid-method-override]
         self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
     ) -> GeoTensor | np.ndarray:
         seeded = seed is not None or self.seed is not None
@@ -306,9 +337,9 @@ class Compose(Operator):
             return gt
 
         out = gt
-        child_seeds = rng.integers(0, np.iinfo(np.int64).max, len(self.augmentations))
-        for op, child_seed in zip(self.augmentations, child_seeds, strict=True):
-            if seeded and _accepts_seed_kwarg(op):
+        child_seeds = rng.integers(0, np.iinfo(np.int64).max, len(self.operators))
+        for op, child_seed in zip(self.operators, child_seeds, strict=True):
+            if seeded and _apply_accepts_seed(op):
                 out = op(out, seed=int(child_seed))
             else:
                 out = op(out)
@@ -316,10 +347,28 @@ class Compose(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "augmentations": [nested_config(op) for op in self.augmentations],
+            "augmentations": super().get_config()["operators"],
             "p": self.p,
             "seed": self.seed,
         }
+
+    def __or__(self, other: Operator) -> Sequential:
+        """``compose | op`` -> ``Sequential([compose, op])`` (the gate is kept)."""
+        if not isinstance(other, Operator):
+            return NotImplemented
+        if isinstance(other, Sequential) and not isinstance(other, Compose):
+            return Sequential([self, *other.operators])
+        return Sequential([self, other])
+
+    def __repr__(self) -> str:
+        inner = ", ".join(repr(op) for op in self.operators)
+        return f"Compose([{inner}], p={self.p!r}, seed={self.seed!r})"
+
+    def describe(self, indent: int = 0) -> str:
+        pad = "  " * indent
+        body = super().describe(indent).split("\n", 1)
+        head = f"{pad}Compose(p={self.p!r}, seed={self.seed!r}, ["
+        return "\n".join([head, *body[1:]]) if len(body) > 1 else f"{pad}{self!r}"
 
 
 class RandomFlip(Operator):
@@ -1040,18 +1089,28 @@ class SimulatedClouds(Operator):
 
 
 class CutMix(Operator):
-    """Paste a random rectangle from a pool donor that shares geo metadata.
+    """Paste a random rectangle from a pool donor on the input's pixel grid.
 
-    Donors must match the input ``shape``, ``crs`` and pixel resolution
-    (i.e. the absolute components of ``transform.a``/``transform.e``). This
-    guards against blending samples drawn at different scales or in
-    different reference frames — which would produce a geographically
-    incoherent result even though the pixel grids align.
+    Donors must share the input's pixel grid exactly
+    (:func:`geotoolz._src.geo.grid_matches` with ``spatial_only=False``:
+    the full shape, and -- when both carry georeferencing -- the CRS and
+    every ``transform`` coefficient, origin included). The paste is
+    pixel-space math: pixel ``(i, j)`` of the donor lands on pixel
+    ``(i, j)`` of the input, so requiring the same grid keeps the result
+    geographically coherent (e.g. a donor from another acquisition date
+    or sensor over the same tile). A donor at a different origin, scale
+    or CRS is rejected rather than pasted at the wrong location.
 
     Plain ``np.ndarray`` carriers (input and/or donors) are accepted:
-    the rectangle paste is pixel-space math, and the CRS / resolution
-    checks apply only when both the input and the drawn donor expose
-    that metadata.
+    the georeferencing check applies only when both the input and the
+    drawn donor carry a ``transform``; plain arrays are compared by shape.
+
+    Sampling: with probability ``p`` one donor is drawn uniformly from
+    ``pool``; the rectangle's height and width are drawn independently
+    and uniformly from ``[1, H]`` and ``[1, W]``, and its top-left corner
+    uniformly among the positions that keep it inside the raster. This
+    is *not* the Beta(alpha, alpha) area-ratio convention of Yun et al.
+    (2019) and no label-mixing ratio is returned (see #141).
 
     Nodata: donor pixels that are fill / non-finite under the *donor's*
     fill value are written as the input's fill value, so a pasted hole
@@ -1066,6 +1125,10 @@ class CutMix(Operator):
         p: Probability of applying the paste. Default ``0.5``.
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
+
+    Raises:
+        ValueError: At apply time, if the drawn donor is not on the
+            input's pixel grid.
 
     Examples:
         >>> import geotoolz as gz
@@ -1096,20 +1159,11 @@ class CutMix(Operator):
         donor = self.pool[int(rng.integers(0, len(self.pool)))]
         arr = np.asarray(gt)
         donor_arr = np.asarray(donor)
-        if donor_arr.shape != arr.shape:
-            raise ValueError("CutMix pool GeoTensors must match the input shape.")
-        if hasattr(donor, "crs") and hasattr(gt, "crs") and donor.crs != gt.crs:
-            raise ValueError("CutMix donor CRS must match the input CRS.")
-        if (
-            hasattr(donor, "transform")
-            and hasattr(gt, "transform")
-            and not np.allclose(
-                (abs(donor.transform.a), abs(donor.transform.e)),
-                (abs(gt.transform.a), abs(gt.transform.e)),
-            )
-        ):
+        if not grid_matches(gt, donor, spatial_only=False):
             raise ValueError(
-                "CutMix donor pixel resolution must match the input resolution."
+                "CutMix donor must match the input's pixel grid (shape, CRS and "
+                f"transform); got donor shape {donor_arr.shape} for input shape "
+                f"{arr.shape}"
             )
 
         height, width = arr.shape[-2], arr.shape[-1]

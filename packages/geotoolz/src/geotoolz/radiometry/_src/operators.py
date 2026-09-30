@@ -47,6 +47,7 @@ from geotoolz._src.valid import (
     invalid_values,
     mask_invalid_to_nan,
     restore_fill,
+    valid_pixels,
     wrap_filled,
 )
 from geotoolz._src.wrap import wrap_like
@@ -1155,43 +1156,55 @@ class MinMax(Operator):
 class PercentileClip(Operator):
     r"""Per-band robust contrast stretch using percentile thresholds.
 
-    Computes :math:`v_{lo} = P_{p_{\min}}(\text{arr})` and
-    :math:`v_{hi} = P_{p_{\max}}(\text{arr})` over the configured
-    ``axis`` and rescales each slice into ``[0, 1]``.
+    Computes :math:`v_{lo} = P_{\text{lower}}(\text{arr})` and
+    :math:`v_{hi} = P_{\text{upper}}(\text{arr})` over the configured
+    ``axis`` and rescales each slice into ``[0, 1]``. NaN-safe: nodata
+    (fill / non-finite) pixels never enter the percentiles and come back
+    ``NaN``. This is the one percentile stretch the display operators
+    build on — :class:`geotoolz.viz.StretchToUint8` is this operator
+    followed by a byte cast, and :class:`geotoolz.normalize.HistogramStretch`
+    rescales its output into an arbitrary ``out_range``; all three share
+    the ``lower`` / ``upper`` / ``axis`` vocabulary.
 
     Robust against bright outliers (cumulus, specular reflection, sensor
     saturation): a tiny sub-percent population of bright pixels won't
     crush the rest of the histogram the way a true min/max would.
 
     Args:
-        p_min: Lower percentile. Default ``2.0``.
-        p_max: Upper percentile. Default ``98.0``.
+        lower: Lower percentile. Default ``2.0``.
+        upper: Upper percentile. Default ``98.0``; must exceed ``lower``.
         axis: Axis (or tuple) to compute percentiles over.
             ``(-2, -1)`` is per-band/-time. ``None`` is global.
 
     Examples:
         >>> from geotoolz.radiometry import PercentileClip
         >>> # Standard "satellite RGB" stretch -- per-band 2-98 %.
-        >>> op = PercentileClip(p_min=2.0, p_max=98.0)
+        >>> op = PercentileClip(lower=2.0, upper=98.0)
         >>> rgb = op(reflectance_geotensor)
     """
 
     def __init__(
         self,
         *,
-        p_min: float = 2.0,
-        p_max: float = 98.0,
+        lower: float = 2.0,
+        upper: float = 98.0,
         axis: int | tuple[int, ...] | None = (-2, -1),
     ) -> None:
-        self.p_min = p_min
-        self.p_max = p_max
+        self.lower = lower
+        self.upper = upper
         self.axis = as_tuple(axis)
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        # Nodata never enters the percentiles (``nanpercentile``).
-        values = mask_invalid_to_nan(gt) if np.ndim(gt) >= 2 else np.asarray(gt)
+        # Nodata never enters the percentiles (``nanpercentile``). The mask
+        # is per frame, so a pixel missing in one frame of a (T, C, H, W)
+        # stack stays valid in the others.
+        values = (
+            mask_invalid_to_nan(gt, valid=valid_pixels(gt, keep_time=True))
+            if np.ndim(gt) >= 2
+            else np.asarray(gt)
+        )
         out = percentile_clip(
-            values, p_min=self.p_min, p_max=self.p_max, axis=self.axis
+            values, lower=self.lower, upper=self.upper, axis=self.axis
         )
         return _rewrap_stretch(gt, out)
 
@@ -1203,26 +1216,29 @@ class Gamma(Operator):
 
         y \;=\; x^{1/\gamma}
 
-    Display-prep — ``g > 1`` brightens midtones, ``g < 1`` darkens
-    them. A gentle ``g = 1.2`` is the workhorse "satellite RGB pop"
-    default; sRGB encoding uses ``g ≈ 2.2``.
+    Display-prep — ``gamma > 1`` brightens midtones, ``gamma < 1``
+    darkens them. A gentle ``gamma = 1.2`` is the workhorse "satellite
+    RGB pop" default; sRGB encoding uses ``gamma ≈ 2.2``. Values above
+    ``1`` are not clipped; :class:`geotoolz.viz.GammaCorrect` is the
+    display-range variant (clips floats to ``[0, 1]``, handles byte
+    carriers) built on the same :func:`gamma_correct`.
 
     Args:
-        g: Gamma factor (must be strictly positive). Default ``1.2``.
+        gamma: Gamma factor (must be strictly positive). Default ``1.2``.
 
     Examples:
         >>> import geotoolz as gz
         >>> # Classic display pipeline: stretch, then gamma-brighten.
         >>> pipe = (
         ...     gz.radiometry.PercentileClip()
-        ...     | gz.radiometry.Gamma(g=1.4)
+        ...     | gz.radiometry.Gamma(gamma=1.4)
         ... )
         >>> rgb = pipe(reflectance_geotensor)
     """
 
-    def __init__(self, *, g: float = 1.2) -> None:
-        self.g = g
+    def __init__(self, *, gamma: float = 1.2) -> None:
+        self.gamma = gamma
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        out = gamma_correct(np.asarray(gt), g=self.g)
+        out = gamma_correct(np.asarray(gt), gamma=self.gamma)
         return _rewrap_stretch(gt, out)

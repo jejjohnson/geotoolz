@@ -40,6 +40,7 @@ import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import jsonable
+from geotoolz._src.stretch import percentile_stretch
 from geotoolz._src.valid import (
     invalid_values,
     mask_invalid_to_nan,
@@ -53,7 +54,6 @@ from geotoolz.normalize._src.array import (
     log_scale,
     minmax_scale,
     per_band_stats,
-    percentile_clip,
     power_scale,
     robust_scale,
     standard_scale,
@@ -405,17 +405,21 @@ class MinMaxScaler(Operator):
 class HistogramStretch(Operator):
     r"""Per-band percentile stretch into ``out_range`` for visualisation.
 
-    Lighter-weight cousin of :class:`geotoolz.radiometry.PercentileClip`:
-    clips to ``[P_lower, P_upper]`` using NaN-aware percentiles, then
-    maps the result into ``out_range`` instead of fixed ``[0, 1]``.
-    Nodata (fill / non-finite) pixels are excluded from the percentiles
-    and hold the output fill value.
+    Lighter-weight cousin of :class:`geotoolz.radiometry.PercentileClip`
+    (same shared percentile stretch, same ``lower`` / ``upper``
+    vocabulary): clips to ``[P_lower, P_upper]`` using NaN-aware
+    percentiles, then maps the result into ``out_range`` instead of
+    fixed ``[0, 1]``. Percentiles follow the ``normalize`` per-band
+    statistics convention: per band, pooled over the frames of a
+    ``(T, C, H, W)`` stack (``PercentileClip`` stretches each frame
+    independently by default). Nodata (fill / non-finite) pixels are
+    excluded from the percentiles and hold the output fill value.
 
     Args:
         out_range: Two-element increasing tuple. Default
             ``(0.0, 1.0)``.
         lower: Lower percentile. Default ``2.0``.
-        upper: Upper percentile. Default ``98.0``.
+        upper: Upper percentile. Default ``98.0``; must exceed ``lower``.
 
     Examples:
         >>> from geotoolz.normalize import HistogramStretch
@@ -437,9 +441,7 @@ class HistogramStretch(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr, valid = _masked(gt)
-        clipped = percentile_clip(
-            arr, lower=self.lower, upper=self.upper, axis=stat_axes(arr)
-        )
+        clipped = percentile_stretch(arr, self.lower, self.upper, axis=stat_axes(arr))
         out_min, out_max = self.out_range
         return _rewrap(gt, clipped * (out_max - out_min) + out_min, valid)
 

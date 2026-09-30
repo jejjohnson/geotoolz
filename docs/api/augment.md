@@ -39,7 +39,7 @@ augmented_patch = augment(training_patch, seed=0)
 | RS-specific | `patch` | `SunAngleJitter(delta_sza_deg=(-3, 3))(patch, seed=0)` rescales reflectance for a simulated SZA shift. |
 | RS-specific | `patch` | `AtmosphericHaze(intensity=(0, 0.05))(patch, seed=0)` adds stronger haze to shorter wavelengths. |
 | RS-specific | `patch` | `SimulatedClouds(coverage=(0, 0.2))(patch, seed=0)` blends in a smooth synthetic cloud field. |
-| Mixing | `patch` | `CutMix(pool=[other_patch], p=0.5)(patch, seed=0)` pastes a rectangle from a same-shaped pool sample. |
+| Mixing | `patch` | `CutMix(pool=[other_patch], p=0.5)(patch, seed=0)` pastes a rectangle from a pool sample on the same pixel grid (shape, CRS and transform). |
 
 ## Seeding contract
 
@@ -59,8 +59,14 @@ same_b = op(patch, seed=42)          # identical to same_a
 
 `get_config` only records the constructor seed, so a reloaded operator
 restarts its stream. A seeded `Compose` owns its children's draws (it
-forwards a derived per-call seed to each); an unseeded one lets each child
-use its own stream.
+forwards a derived per-call seed to each child whose `_apply` accepts a
+`seed`); an unseeded one lets each child use its own stream.
+
+`Compose` is a probability-gated `pipekit.Sequential`. It lives only at
+`gz.augment.Compose` (not `gz.Compose`, which would read as pipekit's
+right-to-left `compose`). `compose | op` keeps the gate, but pipekit
+flattens a `Sequential` on the right of `|`, so write
+`gz.Sequential([op, compose])` rather than `op | compose`.
 
 Use the same seed for multiple geometric pipelines when different modalities
 must receive identical spatial transforms (call them in lockstep).
