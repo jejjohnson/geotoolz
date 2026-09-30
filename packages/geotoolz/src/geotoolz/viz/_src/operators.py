@@ -43,6 +43,7 @@ import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import mapping_from_pairs, mapping_to_pairs
+from geotoolz._src.geo import require_geotensor
 from geotoolz._src.shape import over_frames
 from geotoolz._src.valid import (
     carried_fill,
@@ -499,14 +500,12 @@ class Hillshade(Operator):
         x_resolution = self.x_resolution
         y_resolution = self.y_resolution
         if x_resolution is None or y_resolution is None:
-            transform = getattr(gt, "transform", None)
-            if transform is None:
-                raise TypeError(
-                    "Hillshade requires a georeferenced GeoTensor input to "
-                    "derive the pixel size; got a plain array. Pass "
-                    "x_resolution/y_resolution explicitly to hillshade "
-                    "plain arrays."
-                )
+            transform = require_geotensor(
+                gt,
+                "Hillshade",
+                hint="Pass x_resolution/y_resolution explicitly to hillshade "
+                "plain arrays.",
+            ).transform
             if x_resolution is None:
                 x_resolution = float(abs(transform.a))
             if y_resolution is None:
@@ -562,11 +561,7 @@ class ShadedRelief(Operator):
 
     @over_frames
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        if getattr(gt, "transform", None) is None:
-            raise TypeError(
-                "ShadedRelief requires a georeferenced GeoTensor input; "
-                "got a plain array"
-            )
+        require_geotensor(gt, "ShadedRelief")
         rgba = np.asarray(ApplyColormap(name=self.colormap)(gt)).copy()
         shade = (
             np.asarray(
@@ -678,11 +673,7 @@ class AnnotatePolygons(Operator):
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         from rasterio.features import rasterize
 
-        if getattr(gt, "transform", None) is None:
-            raise TypeError(
-                "AnnotatePolygons requires a georeferenced GeoTensor input; "
-                "got a plain array"
-            )
+        require_geotensor(gt, "AnnotatePolygons")
         rgba = ensure_rgba(np.asarray(gt))
         geometries = _iter_geometries(self.geometries, dst_crs=gt.crs)
         if not geometries or self.width <= 0:
@@ -751,11 +742,7 @@ class AnnotatePoints(Operator):
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         from rasterio.transform import rowcol
 
-        if getattr(gt, "transform", None) is None:
-            raise TypeError(
-                "AnnotatePoints requires a georeferenced GeoTensor input; "
-                "got a plain array"
-            )
+        require_geotensor(gt, "AnnotatePoints")
         rgba = ensure_rgba(np.asarray(gt))
         coords = _point_coords(self.points, dst_crs=gt.crs)
         if coords.size == 0:

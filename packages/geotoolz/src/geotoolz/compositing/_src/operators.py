@@ -35,6 +35,7 @@ from jaxtyping import Bool, Float, Int, Num, Shaped
 from pipekit import Operator
 
 from geotoolz._src.bands import BandRef, resolve_band
+from geotoolz._src.geo import grid_matches
 from geotoolz._src.valid import (
     carried_fill,
     invalid_values,
@@ -54,25 +55,6 @@ def _validate_nan_policy(nan_policy: str) -> NanPolicy:
     if nan_policy not in {"ignore", "propagate"}:
         raise ValueError("nan_policy must be 'ignore' or 'propagate'.")
     return nan_policy  # type: ignore[return-value]
-
-
-def _grid_matches(a: GeoTensor | np.ndarray, b: GeoTensor | np.ndarray) -> bool:
-    if a.shape != b.shape:
-        return False
-    a_transform = getattr(a, "transform", None)
-    b_transform = getattr(b, "transform", None)
-    if a_transform is None or b_transform is None:
-        # Plain arrays carry no georeferencing — shape equality is the only
-        # co-registration check available (mirrors mask's hasattr guards).
-        return True
-    # Affine equality is exact, not tolerant: sub-pixel grid drift is a real
-    # bug source and should fail loudly. Some other geotoolz modules use
-    # ``np.allclose`` on transforms; compositing intentionally tightens that
-    # because a per-pixel reduction over misaligned grids silently produces
-    # garbage.
-    return a_transform == b_transform and getattr(a, "crs", None) == getattr(
-        b, "crs", None
-    )
 
 
 def _as_frames(
@@ -108,7 +90,9 @@ def _require_frames(
         raise ValueError("At least one GeoTensor is required for compositing.")
     base = frames[0]
     for idx, frame in enumerate(frames[1:], start=1):
-        if not _grid_matches(base, frame):
+        # Full shape and exact affine: a per-pixel reduction over misaligned
+        # grids (or mismatched band counts) silently produces garbage.
+        if not grid_matches(base, frame, spatial_only=False):
             raise ValueError(
                 "All input GeoTensors must share shape, transform, and CRS; "
                 f"frame 0 has shape {base.shape}, frame {idx} has shape {frame.shape}."

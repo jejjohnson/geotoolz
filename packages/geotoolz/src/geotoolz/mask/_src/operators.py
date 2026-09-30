@@ -20,6 +20,7 @@ from georeader import rasterize
 from pipekit import Operator
 
 from geotoolz._src.config import jsonable, nested_config
+from geotoolz._src.geo import grid_matches
 from geotoolz._src.valid import carried_fill, carrier_fill_value, wrap_filled
 from geotoolz._src.wrap import wrap_like
 from geotoolz.mask._src.array import (
@@ -850,11 +851,7 @@ def _check_dem_grid_alignment(dem: Any, gt: Any, name: str) -> None:
     inputs expose ``transform`` / ``crs`` (i.e. are GeoTensor-like), we
     require them to match.
     """
-    if not (hasattr(dem, "transform") and hasattr(gt, "transform")):
-        return
-    if not (hasattr(dem, "crs") and hasattr(gt, "crs")):
-        return
-    if dem.transform != gt.transform or str(dem.crs) != str(gt.crs):
+    if not grid_matches(dem, gt):
         raise ValueError(f"{name}: DEM grid (transform/crs) doesn't match carrier")
 
 

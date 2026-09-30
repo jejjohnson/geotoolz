@@ -45,6 +45,7 @@ from geotoolz._src.bands import (
     strip_band_attrs,
 )
 from geotoolz._src.config import nested_config
+from geotoolz._src.geo import grid_matches
 from geotoolz._src.shape import keep_band_axis
 from geotoolz._src.valid import (
     carried_fill,
@@ -107,19 +108,6 @@ def _wrap_index(
     valid = ~invalid_values(used, fill_value=carrier_fill_value(gt)).any(axis=axis)
     out = keep_band_axis(out, gt)
     return wrap_filled(gt, out, fill_value_default=np.nan, valid=valid)
-
-
-def _grid_matches(a: GeoTensor | np.ndarray, b: GeoTensor | np.ndarray) -> bool:
-    """Return whether two rasters share spatial shape (and, when both carry
-    georeferencing, transform and CRS)."""
-    if a.shape[-2:] != b.shape[-2:]:
-        return False
-    transform_a = getattr(a, "transform", None)
-    transform_b = getattr(b, "transform", None)
-    if transform_a is None or transform_b is None:
-        # Plain-array carriers have no georeferencing to compare.
-        return True
-    return np.allclose(tuple(transform_a), tuple(transform_b)) and a.crs == b.crs
 
 
 class NormalizedDifference(Operator):
@@ -1381,7 +1369,7 @@ class dNBR(Operator):
     def _apply(
         self, pre: GeoTensor | np.ndarray, post: GeoTensor | np.ndarray
     ) -> GeoTensor | np.ndarray:
-        if not _grid_matches(pre, post):
+        if not grid_matches(pre, post):
             raise ValueError("dNBR inputs must share shape, transform, and CRS.")
         out = np.asarray(pre) - np.asarray(post)
         valid = ~(invalid_values(pre) | invalid_values(post))

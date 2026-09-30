@@ -165,16 +165,6 @@ def _import_optional(module: str, extra: str) -> Any:
         ) from exc
 
 
-def _json_attrs(attrs: Any) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for key, value in dict(attrs).items():
-        if isinstance(value, bytes):
-            out[str(key)] = value.decode("utf-8", errors="replace")
-        else:
-            out[str(key)] = jsonable(value)
-    return out
-
-
 def _select_indexes(values: Any, indexes: list[int] | None) -> np.ndarray:
     array = np.asanyarray(values)
     if indexes is None:
@@ -224,9 +214,9 @@ def _fill_value_from_attrs(attrs: dict[str, Any]) -> Any:
     """Return the scalar fill value declared in ``attrs`` (default ``0``).
 
     HDF5 attributes written by netCDF4/xarray are ``(1,)``-shaped arrays
-    (lists after :func:`_json_attrs`); size-1 values are unwrapped to a
-    scalar and multi-element values are skipped, since a ``GeoTensor`` fill
-    must be a scalar.
+    (lists after :func:`~geotoolz._src.config.jsonable`); size-1 values are
+    unwrapped to a scalar and multi-element values are skipped, since a
+    ``GeoTensor`` fill must be a scalar.
     """
     for name in ("_FillValue", "missing_value", "fill_value", "nodata"):
         if name not in attrs:
@@ -283,7 +273,7 @@ def _netcdf_crs(mapping: Any, use_cf_grid_mapping: bool) -> Any:
     try:
         from pyproj import CRS
 
-        return CRS.from_cf(_json_attrs(mapping.__dict__))
+        return CRS.from_cf(jsonable(dict(mapping.__dict__)))
     except (KeyError, RuntimeError, ValueError):
         return None
 
@@ -894,7 +884,7 @@ class ReadHDF(SourceOperator):
         try:
             with h5py.File(self.path, "r") as file:
                 source = file[self.dataset]
-                attrs = _json_attrs(source.attrs)
+                attrs = jsonable(dict(source.attrs))
                 values = _read_hdf5_dataset(source, self.indexes)
                 out_attrs: dict[str, Any] = {"attrs": attrs}
                 if self.geolocation is not None:
@@ -905,7 +895,7 @@ class ReadHDF(SourceOperator):
                     }
                 if self.metadata_groups is not None:
                     out_attrs["metadata"] = {
-                        group: _json_attrs(file[group].attrs)
+                        group: jsonable(dict(file[group].attrs))
                         for group in self.metadata_groups
                     }
         except (KeyError, OSError, ValueError) as exc:
@@ -922,7 +912,7 @@ class ReadHDF(SourceOperator):
             hdf = pyhdf_sd.SD(str(self.path), pyhdf_sd.SDC.READ)
             try:
                 source = hdf.select(self.dataset)
-                attrs = _json_attrs(source.attributes())
+                attrs = jsonable(dict(source.attributes()))
                 values = _select_indexes(source.get(), self.indexes)
                 out_attrs: dict[str, Any] = {"attrs": attrs}
                 if self.geolocation is not None:
@@ -988,7 +978,7 @@ class ReadNetCDF(SourceOperator):
                 group = _netcdf_group(root, self.group)
                 variable = group.variables[self.variable]
                 variable.set_auto_maskandscale(self.decode_cf)
-                attrs = _json_attrs(variable.__dict__)
+                attrs = jsonable(dict(variable.__dict__))
                 values = _select_indexes(variable[:], self.indexes)
                 fill_value = _fill_value_from_attrs(attrs)
                 if np.ma.isMaskedArray(values):

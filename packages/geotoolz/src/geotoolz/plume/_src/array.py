@@ -24,6 +24,7 @@ from scipy import ndimage
 from shapely.geometry import MultiPoint
 from skimage.morphology import skeletonize
 
+from geotoolz._src.geo import pixel_xy
 from geotoolz._src.shape import single_band
 
 
@@ -262,9 +263,7 @@ def pixel_centers(
         coordinates of each pixel center.
     """
     rows, cols = np.indices(shape, dtype=float)
-    xs = transform.c + transform.a * (cols + 0.5) + transform.b * (rows + 0.5)
-    ys = transform.f + transform.d * (cols + 0.5) + transform.e * (rows + 0.5)
-    return xs, ys
+    return pixel_xy(transform, rows, cols)
 
 
 def wind_advection_cone(

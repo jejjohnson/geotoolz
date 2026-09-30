@@ -12,7 +12,7 @@ from jaxtyping import Shaped
 from pipekit import Operator
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import shortest_path
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString
 from skimage.measure import (
     find_contours,
     label,
@@ -24,6 +24,7 @@ from skimage.measure import (
 from skimage.morphology import skeletonize
 
 from geotoolz._src.config import as_tuple
+from geotoolz._src.geo import pixel_xy, require_geotensor
 from geotoolz._src.shape import single_band
 from geotoolz._src.valid import valid_pixels
 from geotoolz._src.wrap import wrap_like
@@ -48,20 +49,6 @@ DEFAULT_REGIONPROPS: tuple[str, ...] = (
     "bbox",
     "inertia_tensor_eigvals",
 )
-
-
-def _require_geotensor(gt: Any, name: str) -> None:
-    """Raise when a geo-dependent operator receives a plain array."""
-    if not hasattr(gt, "transform"):
-        raise TypeError(
-            f"{name} requires a georeferenced GeoTensor input; got a plain array"
-        )
-
-
-def _xy(transform: Any, row: float, col: float) -> tuple[float, float]:
-    x = transform.c + transform.a * (col + 0.5) + transform.b * (row + 0.5)
-    y = transform.f + transform.d * (col + 0.5) + transform.e * (row + 0.5)
-    return float(x), float(y)
 
 
 class LabelConnectedComponents(Operator):
@@ -140,7 +127,7 @@ class RegionProps(Operator):
         )
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
-        _require_geotensor(gt, "RegionProps")
+        require_geotensor(gt, "RegionProps")
         labels = single_band(np.asarray(gt), name="RegionProps").astype(
             np.int32, copy=False
         )
@@ -159,14 +146,8 @@ class RegionProps(Operator):
         if frame.empty:
             return gpd.GeoDataFrame(frame, geometry=[], crs=gt.crs)
         if {"centroid-0", "centroid-1"}.issubset(frame.columns):
-            geometry = [
-                Point(_xy(gt.transform, row, col))
-                for row, col in zip(
-                    frame["centroid-0"],
-                    frame["centroid-1"],
-                    strict=True,
-                )
-            ]
+            xs, ys = pixel_xy(gt.transform, frame["centroid-0"], frame["centroid-1"])
+            geometry = gpd.points_from_xy(xs, ys)
             return gpd.GeoDataFrame(frame, geometry=geometry, crs=gt.crs)
         # Caller omitted centroid: still return a valid GeoDataFrame with an
         # empty (None-valued) geometry column rather than raising in the
@@ -221,7 +202,7 @@ class FindContours(Operator):
         self.fully_connected = fully_connected
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
-        _require_geotensor(gt, "FindContours")
+        require_geotensor(gt, "FindContours")
         contours = find_contours(
             single_band(np.asarray(gt, dtype=float), name="FindContours"),
             level=self.level,
@@ -229,9 +210,10 @@ class FindContours(Operator):
         )
         rows = []
         for contour_id, coords in enumerate(contours, start=1):
-            xy = [_xy(gt.transform, float(row), float(col)) for row, col in coords]
-            if len(xy) >= 2:
-                rows.append({"contour_id": contour_id, "geometry": LineString(xy)})
+            if len(coords) >= 2:
+                xs, ys = pixel_xy(gt.transform, coords[:, 0], coords[:, 1])
+                geometry = LineString(np.column_stack([xs, ys]))
+                rows.append({"contour_id": contour_id, "geometry": geometry})
         if not rows:
             # No contours (constant raster, out-of-range level, or all
             # segments degenerate to <2 points). Return an empty

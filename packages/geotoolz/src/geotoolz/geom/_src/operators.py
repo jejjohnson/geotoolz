@@ -48,6 +48,7 @@ from skimage.registration import (
 from geotoolz._src.bands import band_count
 from geotoolz._src.blending import normalize_overlap_add, overlap_add
 from geotoolz._src.config import as_tuple
+from geotoolz._src.geo import require_geotensor
 from geotoolz._src.shape import BAND_AXIS, require_ndim, single_band
 from geotoolz._src.valid import valid_pixels, wrap_filled
 from geotoolz._src.wrap import adopt_attrs, rewrap_attrs, wrap_like
@@ -82,21 +83,6 @@ def _registration_band(values: np.ndarray, band: int, name: str) -> np.ndarray:
     if require_ndim(arr, (2, 3), name) == 2:
         return arr
     return np.take(arr, int(band), axis=BAND_AXIS)
-
-
-def _require_geotensor(value: Any, op_name: str) -> None:
-    """Raise a clear ``TypeError`` when a geo-dependent op gets a plain array.
-
-    Geo-dependent operators (reprojection, geometry rasterisation,
-    transform-updating resizes, ...) are only meaningful with an affine
-    transform + CRS attached. Duck-typed on ``transform`` so any
-    GeoTensor-compatible carrier passes.
-    """
-    if not hasattr(value, "transform"):
-        raise TypeError(
-            f"{op_name} requires a georeferenced GeoTensor input; "
-            f"got a plain array ({type(value).__name__})."
-        )
 
 
 def _read_window_boundless(
@@ -252,7 +238,7 @@ class Reproject(Operator):
         self.resampling = resampling
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        _require_geotensor(gt, "Reproject")
+        require_geotensor(gt, "Reproject")
         resampling = resolve_resampling(self.resampling)
         if self.resolution is None:
             return adopt_attrs(
@@ -318,7 +304,7 @@ class ReprojectLike(Operator):
         self.resampling = resampling
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        _require_geotensor(gt, type(self).__name__)
+        require_geotensor(gt, type(self).__name__)
         return adopt_attrs(
             gt,
             read.read_reproject_like(
@@ -560,7 +546,7 @@ class Resize(Operator):
         self.resampling = resampling
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        _require_geotensor(gt, "Resize")
+        require_geotensor(gt, "Resize")
         return _resize_to_shape(
             gt,
             self.shape,
@@ -615,7 +601,7 @@ class Resample(Operator):
         self.anti_aliasing = anti_aliasing
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        _require_geotensor(gt, "Resample")
+        require_geotensor(gt, "Resample")
         res_x, res_y = gt.res
         dst_x, dst_y = self.resolution
         height, width = gt.shape[-2:]
@@ -812,7 +798,7 @@ class CropToBounds(Operator):
         self.crs = crs
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        _require_geotensor(gt, "CropToBounds")
+        require_geotensor(gt, "CropToBounds")
         bounds = self.bounds
         if self.crs is not None and CRS.from_user_input(
             self.crs
@@ -1034,11 +1020,7 @@ class Stitch(Operator):
             raise ValueError("blend must be 'average', 'feather', 'max', or 'first'.")
         first = tiles[0]
         for index, tile in enumerate(tiles):
-            if not hasattr(tile, "transform"):
-                raise TypeError(
-                    f"Stitch requires georeferenced GeoTensor tiles; tile "
-                    f"{index} is a plain array ({type(tile).__name__})."
-                )
+            require_geotensor(tile, "Stitch", arg=f"tile at index {index}")
             if not is_north_up(tile.transform):
                 raise ValueError(
                     f"Stitch only supports north-up, non-rotated GeoTensors; "
@@ -1306,7 +1288,7 @@ class AntimeridianSplit(Operator):
         self.tolerance_deg = tolerance_deg
 
     def _apply(self, gt: GeoTensor) -> list[GeoTensor]:
-        _require_geotensor(gt, "AntimeridianSplit")
+        require_geotensor(gt, "AntimeridianSplit")
         lons = _longitude_grid(gt, self._parsed_crs)
         if lons is None:
             raise ValueError(
@@ -1377,7 +1359,7 @@ class GeostationaryParallaxCorrect(Operator):
         self.method = method
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        _require_geotensor(gt, "GeostationaryParallaxCorrect")
+        require_geotensor(gt, "GeostationaryParallaxCorrect")
         if self.method not in {"nearest", "bilinear"}:
             raise ValueError("method must be 'nearest' or 'bilinear'.")
         heights = _height_array(self.target_height_m, gt.shape[-2:])
@@ -1461,7 +1443,7 @@ class SegmentStitch(Operator):
         if len(segments) == 0:
             raise ValueError("SegmentStitch requires at least one segment.")
         for segment in segments:
-            _require_geotensor(segment, "SegmentStitch")
+            require_geotensor(segment, "SegmentStitch")
         axis_num = _segment_axis(self.axis)
         metas = [_segment_meta(segment) for segment in segments]
         n_segments = metas[0][1]
@@ -1564,7 +1546,7 @@ class Mosaic(Operator):
 
     def _apply(self, gts: list[GeoTensor]) -> GeoTensor:
         for gt in gts:
-            _require_geotensor(gt, "Mosaic")
+            require_geotensor(gt, "Mosaic")
         if self.method == "first" and all(
             gt.fill_value_default is not None for gt in gts
         ):
@@ -1712,7 +1694,7 @@ class Rasterize(Operator):
         self.fill = fill
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        _require_geotensor(gt, "Rasterize")
+        require_geotensor(gt, "Rasterize")
         return _rasterize_like(
             self.geometries,
             gt,
@@ -1831,7 +1813,7 @@ class Vectorize(Operator):
         self.simplify_tolerance = simplify_tolerance
 
     def _apply(self, gt: GeoTensor) -> list[BaseGeometry]:
-        _require_geotensor(gt, "Vectorize")
+        require_geotensor(gt, "Vectorize")
         # ``get_polygons`` asserts a 2-D mask; squeeze the canonical
         # ``(1, H, W)`` band axis and pass the transform explicitly.
         mask = single_band(np.asarray(gt.values), name="Vectorize")

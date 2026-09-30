@@ -50,6 +50,7 @@ from geotoolz._src.config import (
     callable_name,
     reject_config_summary,
 )
+from geotoolz._src.geo import require_geotensor
 from geotoolz._src.shape import keep_band_axis, over_frames, require_ndim
 from geotoolz._src.valid import (
     carried_fill,
@@ -432,11 +433,7 @@ class PlumeFootprint(Operator):
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
         require_ndim(gt, (2, 3), "PlumeFootprint")
-        if getattr(gt, "transform", None) is None:
-            raise TypeError(
-                "PlumeFootprint requires a georeferenced GeoTensor input; "
-                "got a plain array"
-            )
+        require_geotensor(gt, "PlumeFootprint")
         require_projected_crs(gt, "PlumeFootprint")
         mask_arr = squeeze_single_band(np.asarray(gt))
         if mask_arr.dtype == bool:
@@ -641,11 +638,7 @@ class WindAdvectionCone(Operator):
 
     @over_frames
     def _apply(self, gt: GeoTensor) -> GeoTensor:
-        if getattr(gt, "transform", None) is None:
-            raise TypeError(
-                "WindAdvectionCone requires a georeferenced GeoTensor input; "
-                "got a plain array"
-            )
+        require_geotensor(gt, "WindAdvectionCone")
         require_projected_crs(gt, "WindAdvectionCone")
         arr = squeeze_single_band(np.asarray(gt))
         source = self.source
@@ -766,11 +759,7 @@ class IMEEstimate(Operator):
 
     def _apply(self, gt: GeoTensor) -> dict[str, float]:
         require_ndim(gt, (2, 3), "IMEEstimate")
-        if getattr(gt, "transform", None) is None:
-            raise TypeError(
-                "IMEEstimate requires a georeferenced GeoTensor input; "
-                "got a plain array"
-            )
+        require_geotensor(gt, "IMEEstimate")
         require_projected_crs(gt, "IMEEstimate")
         mask = squeeze_single_band(np.asarray(self.plume_mask)).astype(bool)
         enhancement = _single_band_nan(gt)
@@ -886,11 +875,7 @@ class CrossSectionalFlux(Operator):
 
     def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
         require_ndim(gt, (2, 3), "CrossSectionalFlux")
-        if getattr(gt, "transform", None) is None:
-            raise TypeError(
-                "CrossSectionalFlux requires a georeferenced GeoTensor input; "
-                "got a plain array"
-            )
+        require_geotensor(gt, "CrossSectionalFlux")
         require_projected_crs(gt, "CrossSectionalFlux")
         wind_norm = float(np.hypot(self.wind_u, self.wind_v))
         if wind_norm == 0.0:

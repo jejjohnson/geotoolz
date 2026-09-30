@@ -66,27 +66,6 @@ if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-def _stat_as_jsonable(value: Any) -> float | list[Any] | None:
-    """JSON-safe coercion for cached statistics.
-
-    Thin wrapper over the shared :func:`geotoolz._src.config.jsonable`
-    that additionally:
-
-    * passes ``None`` through unchanged (stats may be unset before fit),
-    * coerces scalar stats to Python ``float``.
-
-    Shape is preserved for ``ndim > 1`` via nested lists (the
-    ``PerBandStats`` cache stores ``percentiles`` as a 2-D array of
-    shape ``(n_percentiles, n_bands)``).
-    """
-    if value is None:
-        return None
-    arr = np.asarray(value, dtype=float)
-    if arr.ndim == 0:
-        return float(arr)
-    return jsonable(arr)
-
-
 def _valid_mask(x: Any) -> np.ndarray:
     """Validity mask of ``x``: per pixel (per frame for 4-D), else elementwise."""
     if np.ndim(x) < 2:
@@ -140,7 +119,10 @@ class PerBandStats(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr, _ = _masked(gt)
         stats = per_band_stats(arr, percentiles=self.percentiles, axis=stat_axes(arr))
-        self.stats = {key: _stat_as_jsonable(value) for key, value in stats.items()}
+        self.stats = {
+            key: jsonable(np.asarray(value, dtype=float))
+            for key, value in stats.items()
+        }
         return gt
 
 
@@ -286,8 +268,8 @@ class StandardScaler(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "mean": _stat_as_jsonable(self.mean),
-            "std": _stat_as_jsonable(self.std),
+            "mean": jsonable(self.mean),
+            "std": jsonable(self.std),
             "fit_on_call": self.fit_on_call,
         }
 
@@ -342,8 +324,8 @@ class RobustScaler(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "median": _stat_as_jsonable(self.median),
-            "iqr": _stat_as_jsonable(self.iqr),
+            "median": jsonable(self.median),
+            "iqr": jsonable(self.iqr),
             "fit_on_call": self.fit_on_call,
         }
 
@@ -413,8 +395,8 @@ class MinMaxScaler(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "vmin": _stat_as_jsonable(self.vmin),
-            "vmax": _stat_as_jsonable(self.vmax),
+            "vmin": jsonable(self.vmin),
+            "vmax": jsonable(self.vmax),
             "out_range": list(self.out_range),
             "fit_on_call": self.fit_on_call,
         }
@@ -637,8 +619,8 @@ class Normalize(StandardScaler):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "mean": _stat_as_jsonable(self.mean),
-            "std": _stat_as_jsonable(self.std),
+            "mean": jsonable(self.mean),
+            "std": jsonable(self.std),
         }
 
 

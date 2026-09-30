@@ -54,6 +54,7 @@ from geotoolz._src.config import (
     mapping_to_pairs,
     nested_config,
 )
+from geotoolz._src.geo import require_geotensor
 from geotoolz._src.shape import BAND_AXIS
 from geotoolz._src.valid import carrier_fill_value, restore_fill, valid_pixels
 from geotoolz._src.wrap import adopt_attrs, wrap_like
@@ -215,7 +216,7 @@ def _valid(arr: Shaped[np.ndarray, "*dims"], gt: Any) -> np.ndarray | None:
     return None if valid.all() else valid
 
 
-def _wrap_like(
+def _cast_and_wrap(
     gt: GeoTensor | np.ndarray,
     out: np.ndarray,
     valid: np.ndarray | None = None,
@@ -531,11 +532,7 @@ class RandomShift(Operator):
         self.seed = seed
 
     def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
-        if not hasattr(gt, "read_from_window"):
-            raise TypeError(
-                "RandomShift requires a georeferenced GeoTensor input; "
-                "got a plain array"
-            )
+        require_geotensor(gt, "RandomShift")
         max_y, max_x = self.max_shift
         rng = _call_rng(self, seed)
         dy = int(rng.integers(-max_y, max_y + 1)) if max_y else 0
@@ -590,7 +587,7 @@ class BrightnessJitter(Operator):
             factors = factors.reshape(_band_shape(arr))
         else:
             factors = _sample_uniform(rng, self.factor, "factor")
-        return _wrap_like(
+        return _cast_and_wrap(
             gt, arr.astype(np.float64, copy=False) * factors, _valid(arr, gt)
         )
 
@@ -654,7 +651,7 @@ class ContrastJitter(Operator):
             factors = factors.reshape(_band_shape(arr))
         else:
             factors = _sample_uniform(rng, self.factor, "factor")
-        return _wrap_like(gt, (data - mean) * factors + mean, valid)
+        return _cast_and_wrap(gt, (data - mean) * factors + mean, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -710,7 +707,7 @@ class GaussianNoise(Operator):
         else:
             sigmas = _sample_nonnegative(rng, self.sigma, "sigma")
         noise = rng.normal(0.0, sigmas, size=arr.shape)
-        return _wrap_like(
+        return _cast_and_wrap(
             gt, arr.astype(np.float64, copy=False) + noise, _valid(arr, gt)
         )
 
@@ -752,7 +749,7 @@ class SpeckleNoise(Operator):
         sigma = _sample_nonnegative(rng, self.sigma, "sigma")
         arr = np.asarray(gt)
         noise = rng.normal(0.0, sigma, size=arr.shape)
-        return _wrap_like(
+        return _cast_and_wrap(
             gt, arr.astype(np.float64, copy=False) * (1.0 + noise), _valid(arr, gt)
         )
 
@@ -794,11 +791,11 @@ class BandDropout(Operator):
         if arr.ndim < 3:
             if rng.random() < self.p:
                 out[...] = self.fill
-            return _wrap_like(gt, out, _valid(arr, gt))
+            return _cast_and_wrap(gt, out, _valid(arr, gt))
 
         mask = rng.random(arr.shape[BAND_AXIS]) < self.p
         out[..., mask, :, :] = self.fill
-        return _wrap_like(gt, out, _valid(arr, gt))
+        return _cast_and_wrap(gt, out, _valid(arr, gt))
 
 
 class BandJitter(Operator):
@@ -845,7 +842,7 @@ class BandJitter(Operator):
             ]
             if len(indices) > 1:
                 out[..., indices, :, :] = arr[..., rng.permutation(indices), :, :]
-        return _wrap_like(gt, out)
+        return _cast_and_wrap(gt, out)
 
     def get_config(self) -> dict[str, Any]:
         return {"groups": mapping_to_pairs(self.groups), "seed": self.seed}
@@ -915,7 +912,7 @@ class SunAngleJitter(Operator):
             )
         scale = np.cos(np.deg2rad(base_sza + delta)) / denom
         arr = np.asarray(gt)
-        return _wrap_like(
+        return _cast_and_wrap(
             gt, arr.astype(np.float64, copy=False) * scale, _valid(arr, gt)
         )
 
@@ -959,7 +956,7 @@ class AtmosphericHaze(Operator):
 
         arr = np.asarray(gt)
         weights = _spectral_weights(gt, _band_count(arr)).reshape(_band_shape(arr))
-        return _wrap_like(
+        return _cast_and_wrap(
             gt,
             arr.astype(np.float64, copy=False) + intensity * weights,
             _valid(arr, gt),
@@ -1051,7 +1048,7 @@ class SimulatedClouds(Operator):
             else np.nanpercentile(scene, BRIGHT_CLOUD_PERCENTILE)
         )
         out = arr.astype(np.float64, copy=False) * (1.0 - alpha) + cloud_value * alpha
-        return _wrap_like(gt, out, valid)
+        return _cast_and_wrap(gt, out, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1150,7 +1147,7 @@ class CutMix(Operator):
             # (fills included); only donor holes need the input's fill.
             valid = np.ones(donor_valid.shape, dtype=bool)
             valid[..., region[0], region[1]] = donor_valid[..., region[0], region[1]]
-        return _wrap_like(gt, out, valid)
+        return _cast_and_wrap(gt, out, valid)
 
     def get_config(self) -> dict[str, Any]:
         # Debug payload: the pool holds runtime rasters (forbid_in_yaml).

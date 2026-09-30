@@ -335,6 +335,22 @@ Sequential([Add(1), WriteCOG("/a")])  # ok
 `Sink` is **not** terminal — it does a side effect *and* returns the
 input. That's why `Sink` composes mid-chain and `WriteCOG` doesn't.
 
+## Georeferencing checks
+
+Every operator family uses the same helpers from `geotoolz._src.geo`:
+
+- **Geo-dependent operators** (reprojection, rasterisation, metre-based
+  measurements, …) reject a plain array with one message:
+  `"<Op> requires a georeferenced GeoTensor input; got a plain array (ndarray)."`
+- **Multi-input operators** (`dNBR`, the compositors, `StackMatched`,
+  `BlendMatched`, DEM-driven masks) require the inputs to be on the same
+  grid: equal spatial shape `(H, W)` and — when both inputs are
+  georeferenced — equal CRS and an **exactly** equal affine transform.
+  Sub-pixel drift is a real bug source, so there is no default tolerance.
+  Per-pixel reductions over a stack (the `compositing` operators) also
+  require the full shape, band axis included, to match. Plain arrays
+  carry no georeferencing, so for them only the shape is compared.
+
 ## Related pages
 
 - [Quickstart](quickstart.md) — 15-min real-data walk-through.
