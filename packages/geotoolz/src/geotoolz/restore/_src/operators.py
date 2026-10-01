@@ -224,7 +224,7 @@ class DestripeColumn(Operator):
     Args:
         method: ``"mean"``, ``"median"`` (offset only) or
             ``"moment_matching"`` (gain and offset).
-        axis: Striping direction. ``"column"`` removes vertical
+        direction: Striping direction. ``"column"`` removes vertical
             stripes, ``"row"`` removes horizontal stripes.
         window: Reference window (in columns / rows) for
             ``method="moment_matching"``; ``None`` uses a global
@@ -232,25 +232,25 @@ class DestripeColumn(Operator):
             hydra-zen round-trip uniformity.
 
     Examples:
-        >>> gz.restore.DestripeColumn(method="median", axis="column")(scene)
+        >>> gz.restore.DestripeColumn(method="median", direction="column")(scene)
     """
 
     def __init__(
         self,
         *,
         method: Literal["mean", "median", "moment_matching"] = "mean",
-        axis: Literal["column", "row"] = "column",
+        direction: Literal["column", "row"] = "column",
         window: int | None = 21,
     ) -> None:
         self.method = method
-        self.axis = axis
+        self.direction = direction
         self.window = window
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         return _filter(
             gt,
             lambda a: destripe_column(
-                a, method=self.method, axis=self.axis, window=self.window
+                a, method=self.method, direction=self.direction, window=self.window
             ),
         )
 
@@ -259,7 +259,7 @@ class MomentMatching(Operator):
     """Destripe by matching every column's mean and std to a reference.
 
     Convenience operator equivalent to
-    ``DestripeColumn(method="moment_matching", axis="column", window=...)``
+    ``DestripeColumn(method="moment_matching", direction="column", window=...)``
     (same nodata handling): ``out[:, j] = (z[:, j] − μ_j)·σᵣ_j/σ_j + μᵣ_j``
     (Gadallah et al. 2000).
 
@@ -278,7 +278,7 @@ class MomentMatching(Operator):
         return _filter(
             gt,
             lambda a: destripe_column(
-                a, method="moment_matching", axis="column", window=self.window
+                a, method="moment_matching", direction="column", window=self.window
             ),
         )
 
@@ -469,22 +469,22 @@ class MedianDenoise(Operator):
     """Median filter over the trailing two spatial axes.
 
     Robust to impulse noise (salt-and-pepper, hot pixels). Larger
-    ``size`` blurs sharper features. Nodata (fill / non-finite) pixels
+    ``window`` blurs sharper features. Nodata (fill / non-finite) pixels
     are replaced by the median of the valid pixels before filtering and
     hold the output fill.
 
     Args:
-        size: Side length of the median window in pixels.
+        window: Side length of the median window in pixels.
 
     Examples:
-        >>> gz.restore.MedianDenoise(size=3)(scene)
+        >>> gz.restore.MedianDenoise(window=3)(scene)
     """
 
-    def __init__(self, *, size: int = 3) -> None:
-        self.size = size
+    def __init__(self, *, window: int = 3) -> None:
+        self.window = window
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        return _filter(gt, lambda a: median_denoise(a, size=self.size))
+        return _filter(gt, lambda a: median_denoise(a, window=self.window))
 
 
 class BilateralDenoise(Operator):
@@ -527,19 +527,19 @@ class NLMeans(Operator):
     and hold the output fill.
 
     Args:
-        patch_size: Nominal patch side length in pixels.
-        patch_distance: Nominal search-window radius in pixels.
+        window: Nominal patch (comparison-window) side length in pixels.
+        search_radius: Nominal search-window radius in pixels.
         h: Range bandwidth in data units.
 
     Examples:
-        >>> gz.restore.NLMeans(patch_size=5, patch_distance=6, h=0.1)(scene)
+        >>> gz.restore.NLMeans(window=5, search_radius=6, h=0.1)(scene)
     """
 
     def __init__(
-        self, *, patch_size: int = 5, patch_distance: int = 6, h: float = 0.1
+        self, *, window: int = 5, search_radius: int = 6, h: float = 0.1
     ) -> None:
-        self.patch_size = patch_size
-        self.patch_distance = patch_distance
+        self.window = window
+        self.search_radius = search_radius
         self.h = h
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
@@ -547,8 +547,8 @@ class NLMeans(Operator):
             gt,
             lambda a: nl_means(
                 a,
-                patch_size=self.patch_size,
-                patch_distance=self.patch_distance,
+                window=self.window,
+                search_radius=self.search_radius,
                 h=self.h,
             ),
         )
@@ -696,11 +696,11 @@ class ReplaceOutliers(Operator):
     Args:
         method: Outlier detector. See :class:`OutlierMask`.
         k: Threshold in scaled units.
-        fill: ``"median"`` (inlier median), ``"nan"`` (mark as missing),
+        strategy: ``"median"`` (inlier median), ``"nan"`` (mark as missing),
             or ``"interp"`` (NaN then nearest-neighbour fill).
 
     Examples:
-        >>> gz.restore.ReplaceOutliers(method="mad", k=3.0, fill="median")(scene)
+        >>> gz.restore.ReplaceOutliers(method="mad", k=3.0, strategy="median")(scene)
     """
 
     def __init__(
@@ -708,13 +708,15 @@ class ReplaceOutliers(Operator):
         *,
         method: Literal["mad", "zscore"] = "mad",
         k: float = 3.0,
-        fill: Literal["median", "nan", "interp"] = "median",
+        strategy: Literal["median", "nan", "interp"] = "median",
     ) -> None:
         self.method = method
         self.k = k
-        self.fill = fill
+        self.strategy = strategy
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr, valid = _masked(gt)
-        out = replace_outliers(arr, method=self.method, k=self.k, fill=self.fill)
+        out = replace_outliers(
+            arr, method=self.method, k=self.k, strategy=self.strategy
+        )
         return _rewrap(gt, out, valid)

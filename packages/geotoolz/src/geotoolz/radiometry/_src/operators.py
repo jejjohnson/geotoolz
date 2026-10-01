@@ -1073,7 +1073,7 @@ class DOS1(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         # NaN out nodata so the percentile reflects only valid data.
         work = mask_invalid_to_nan(gt, dtype=float)
-        out = dos1(work, dark_percentile=self.dark_percentile, axis=(-2, -1))
+        out = dos1(work, dark_percentile=self.dark_percentile, reduce_axes=(-2, -1))
         return _rewrap_carried(gt, out)
 
 
@@ -1158,13 +1158,13 @@ class PercentileClip(Operator):
 
     Computes :math:`v_{lo} = P_{\text{lower}}(\text{arr})` and
     :math:`v_{hi} = P_{\text{upper}}(\text{arr})` over the configured
-    ``axis`` and rescales each slice into ``[0, 1]``. NaN-safe: nodata
+    ``reduce_axes`` and rescales each slice into ``[0, 1]``. NaN-safe: nodata
     (fill / non-finite) pixels never enter the percentiles and come back
     ``NaN``. This is the one percentile stretch the display operators
     build on — :class:`geotoolz.viz.StretchToUint8` is this operator
     followed by a byte cast, and :class:`geotoolz.normalize.HistogramStretch`
     rescales its output into an arbitrary ``out_range``; all three share
-    the ``lower`` / ``upper`` / ``axis`` vocabulary.
+    the ``lower`` / ``upper`` / ``reduce_axes`` vocabulary.
 
     Robust against bright outliers (cumulus, specular reflection, sensor
     saturation): a tiny sub-percent population of bright pixels won't
@@ -1173,7 +1173,7 @@ class PercentileClip(Operator):
     Args:
         lower: Lower percentile. Default ``2.0``.
         upper: Upper percentile. Default ``98.0``; must exceed ``lower``.
-        axis: Axis (or tuple) to compute percentiles over.
+        reduce_axes: Axis (or tuple) to compute percentiles over.
             ``(-2, -1)`` is per-band/-time. ``None`` is global.
 
     Examples:
@@ -1188,11 +1188,11 @@ class PercentileClip(Operator):
         *,
         lower: float = 2.0,
         upper: float = 98.0,
-        axis: int | tuple[int, ...] | None = (-2, -1),
+        reduce_axes: int | tuple[int, ...] | None = (-2, -1),
     ) -> None:
         self.lower = lower
         self.upper = upper
-        self.axis = as_tuple(axis)
+        self.reduce_axes = as_tuple(reduce_axes)
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         # Nodata never enters the percentiles (``nanpercentile``). The mask
@@ -1204,7 +1204,7 @@ class PercentileClip(Operator):
             else np.asarray(gt)
         )
         out = percentile_clip(
-            values, lower=self.lower, upper=self.upper, axis=self.axis
+            values, lower=self.lower, upper=self.upper, reduce_axes=self.reduce_axes
         )
         return _rewrap_stretch(gt, out)
 

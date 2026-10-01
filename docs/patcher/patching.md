@@ -205,8 +205,8 @@ with one of two coupling modes:
 Operator-graph composition libraries (e.g.
 [`geotoolz`](https://github.com/jejjohnson/geotoolz)) ship thin wrappers
 that adapt the Patcher into their `Operator` world — typically a triple
-of `GridSampler(patcher)`, `ApplyToChips(operator)`, and
-`Stitch(aggregation, domain)`. Those wrappers live in the consuming
+of `GridSampler(patcher=patcher)`, `ApplyToChips(operator=operator)`, and
+`Stitch(aggregation=aggregation, domain=domain)`. Those wrappers live in the consuming
 library, not here; geopatcher itself has no operator-graph dependency.
 
 ## Streaming aggregations

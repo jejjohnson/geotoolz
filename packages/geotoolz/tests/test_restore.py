@@ -81,7 +81,7 @@ def test_destripe_column_recovers_flat_image() -> None:
     base = np.ones((32, 32), dtype=float)
     stripe = np.linspace(-0.2, 0.2, 32)
     striped = base + stripe[None, :]
-    out = destripe_column(striped, method="mean", axis="column")
+    out = destripe_column(striped, method="mean", direction="column")
     rmse = np.sqrt(np.nanmean((out - base) ** 2))
     assert rmse < DESTRIPE_RMSE_TOLERANCE
 
@@ -156,16 +156,16 @@ def test_single_band_denoisers_run_and_preserve_shape() -> None:
     arr = np.arange(25, dtype=float).reshape(5, 5)
     gt = toy_geotensor(arr)
     for op in [
-        MedianDenoise(size=3),
+        MedianDenoise(window=3),
         BilateralDenoise(sigma_color=10.0, sigma_space=1.0),
-        NLMeans(patch_size=3, patch_distance=3, h=10.0),
+        NLMeans(window=3, search_radius=3, h=10.0),
     ]:
         out = op(gt)
         assert out.shape == gt.shape
         assert out.transform == gt.transform
-    assert median_denoise(arr, size=3).shape == arr.shape
+    assert median_denoise(arr, window=3).shape == arr.shape
     assert bilateral_denoise(arr, sigma_color=10.0, sigma_space=1.0).shape == arr.shape
-    assert nl_means(arr, patch_size=3, patch_distance=3, h=10.0).shape == arr.shape
+    assert nl_means(arr, window=3, search_radius=3, h=10.0).shape == arr.shape
 
 
 def test_gap_fill_biharmonic_preserves_non_nan_pixels() -> None:
@@ -219,7 +219,7 @@ def test_outlier_mask_and_replacement() -> None:
     gt = toy_geotensor(arr)
     op_mask = OutlierMask(method="mad", k=3.0)(gt)
     np.testing.assert_array_equal(np.asarray(op_mask), mask)
-    replaced = ReplaceOutliers(method="mad", k=3.0, fill="median")(gt)
+    replaced = ReplaceOutliers(method="mad", k=3.0, strategy="median")(gt)
     assert np.asarray(replaced)[1, 2] == 1.0
 
 
@@ -309,18 +309,18 @@ def test_operator_configs_are_json_safe() -> None:
         DespeckleLee(window=5, cu=0.523),
         DespeckleFrost(window=5, damping=2.0),
         DespeckleRefinedLee(window=5),
-        DestripeColumn(method="median", axis="row", window=15),
+        DestripeColumn(method="median", direction="row", window=15),
         MomentMatching(window=11),
         DenoisePCA(n_components=2, axis=0),
         MNF(n_components=2, axis=0),
         GaussianDenoise(sigma=1.0),
-        MedianDenoise(size=3),
+        MedianDenoise(window=3),
         BilateralDenoise(sigma_color=0.1, sigma_space=2.0),
-        NLMeans(patch_size=3, patch_distance=3, h=0.1),
+        NLMeans(window=3, search_radius=3, h=0.1),
         GapFillIDW(power=2.0, radius=4),
         GapFillNearest(max_distance=5),
         OutlierMask(method="zscore", k=3.0),
-        ReplaceOutliers(method="mad", k=3.0, fill="interp"),
+        ReplaceOutliers(method="mad", k=3.0, strategy="interp"),
     ]
     for op in operators:
         config = op.get_config()
@@ -352,12 +352,12 @@ def test_inverse_mnf_is_forbidden_in_yaml() -> None:
         pytest.param(lambda: DenoisePCA(n_components=1), id="DenoisePCA"),
         pytest.param(lambda: MNF(n_components=1), id="MNF"),
         pytest.param(lambda: GaussianDenoise(sigma=1.0), id="GaussianDenoise"),
-        pytest.param(lambda: MedianDenoise(size=3), id="MedianDenoise"),
+        pytest.param(lambda: MedianDenoise(window=3), id="MedianDenoise"),
         pytest.param(lambda: GapFillNearest(), id="GapFillNearest"),
         pytest.param(lambda: GapFillLaplacian(), id="GapFillLaplacian"),
         pytest.param(lambda: OutlierMask(method="mad", k=3.0), id="OutlierMask"),
         pytest.param(
-            lambda: ReplaceOutliers(method="mad", k=3.0, fill="interp"),
+            lambda: ReplaceOutliers(method="mad", k=3.0, strategy="interp"),
             id="ReplaceOutliers",
         ),
     ],
@@ -411,10 +411,10 @@ _FILTERS = [
     pytest.param(lambda: DenoisePCA(n_components=1), id="DenoisePCA"),
     pytest.param(lambda: MNF(n_components=2), id="MNF"),
     pytest.param(lambda: GaussianDenoise(sigma=1.0), id="GaussianDenoise"),
-    pytest.param(lambda: MedianDenoise(size=3), id="MedianDenoise"),
+    pytest.param(lambda: MedianDenoise(window=3), id="MedianDenoise"),
     pytest.param(lambda: BilateralDenoise(sigma_space=1.0), id="BilateralDenoise"),
     pytest.param(lambda: NLMeans(), id="NLMeans"),
-    pytest.param(lambda: ReplaceOutliers(fill="interp"), id="ReplaceOutliers"),
+    pytest.param(lambda: ReplaceOutliers(strategy="interp"), id="ReplaceOutliers"),
 ]
 
 
@@ -700,7 +700,7 @@ def test_moment_matching_preserves_detail() -> None:
     np.testing.assert_allclose(out, expected, atol=1e-10)
     # Rows: the transposed problem.
     np.testing.assert_allclose(
-        destripe_column(striped.T, method="moment_matching", axis="row", window=9),
+        destripe_column(striped.T, method="moment_matching", direction="row", window=9),
         _moment_matching_reference(striped, 9).T,
         atol=1e-10,
     )

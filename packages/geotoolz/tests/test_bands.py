@@ -51,8 +51,8 @@ CASES: list[tuple[str, Callable[[], Any], Callable[[], Any]]] = [
     ),
     (
         "spectral.SelectBands",
-        lambda: gz.spectral.SelectBands(indexes=["B04", "B08"]),
-        lambda: gz.spectral.SelectBands(indexes=[_B04, _B08]),
+        lambda: gz.spectral.SelectBands(bands=["B04", "B08"]),
+        lambda: gz.spectral.SelectBands(bands=[_B04, _B08]),
     ),
     (
         "spectral.BandRatio",

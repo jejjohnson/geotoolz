@@ -100,12 +100,12 @@ patcher = gp.SpatialPatcher(
 )
 ndvi = gz.Sequential([
     gz.DNToReflectance(scale=1e-4),        # geotoolz radiometry
-    gz.NDVI(nir_idx=3, red_idx=2),         # geotoolz indices
+    gz.NDVI(nir=3, red=2),         # geotoolz indices
 ])
 pipe = gz.Sequential([
-    GridSampler(patcher),
-    ApplyToChips(ndvi),
-    MergePatches(gp.SpatialOverlapAdd(), domain=field.domain),
+    GridSampler(patcher=patcher),
+    ApplyToChips(operator=ndvi),
+    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=field.domain),
 ])
 ndvi_scene = pipe(field)
 ```

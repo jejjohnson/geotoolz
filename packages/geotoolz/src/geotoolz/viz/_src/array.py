@@ -36,7 +36,7 @@ def stretch_to_uint8(
     *,
     lower: float = 2.0,
     upper: float = 98.0,
-    axis: int | tuple[int, ...] | None = (-2, -1),
+    reduce_axes: int | tuple[int, ...] | None = (-2, -1),
 ) -> UInt8[np.ndarray, "*batch y x"]:
     """Percentile stretch an array into display-ready ``uint8`` values.
 
@@ -49,7 +49,7 @@ def stretch_to_uint8(
         arr: Input array, typically ``(C, H, W)``.
         lower: Lower percentile. Default ``2.0``.
         upper: Upper percentile. Default ``98.0``; must exceed ``lower``.
-        axis: Axes the percentiles are computed over. Default
+        reduce_axes: Axes the percentiles are computed over. Default
             ``(-2, -1)`` stretches each band (and frame) independently;
             ``None`` uses one global pair of thresholds.
 
@@ -59,7 +59,7 @@ def stretch_to_uint8(
     Raises:
         ValueError: If ``upper <= lower``.
     """
-    return _unit_to_uint8(percentile_clip(arr, lower, upper, axis=axis))
+    return _unit_to_uint8(percentile_clip(arr, lower, upper, reduce_axes=reduce_axes))
 
 
 def gamma_correct_display(

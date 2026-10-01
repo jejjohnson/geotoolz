@@ -385,7 +385,7 @@ def test_hydra_zen_roundtrip_viz_operators() -> None:
         (FalseColor, {"nir": 3, "red": 2, "green": 1}),
         (SWIRComposite, {"swir2": 4, "nir": 3, "red": 2}),
         (Composite, {"bands": [2, 1, 0]}),
-        (StretchToUint8, {"lower": 1.0, "upper": 99.0, "axis": None}),
+        (StretchToUint8, {"lower": 1.0, "upper": 99.0, "reduce_axes": None}),
         (GammaCorrect, {"gamma": 1.4}),
         (ApplyColormap, {"name": "viridis", "vmin": 0.0, "vmax": 1.0}),
         (Hillshade, {"azimuth_deg": 315.0, "altitude_deg": 45.0}),
@@ -661,8 +661,10 @@ def test_stretch_to_uint8_equals_percentile_clip_pipeline(axis: Any) -> None:
     values[0, :, 1, 1] = -9999.0  # nodata pixel in frame 0
     values[1, 2, 0, 3] = np.nan
     gt = _toy_geotensor(values)
-    out = StretchToUint8(lower=5.0, upper=95.0, axis=axis)(gt)
-    stretched = gz.radiometry.PercentileClip(lower=5.0, upper=95.0, axis=axis)(gt)
+    out = StretchToUint8(lower=5.0, upper=95.0, reduce_axes=axis)(gt)
+    stretched = gz.radiometry.PercentileClip(lower=5.0, upper=95.0, reduce_axes=axis)(
+        gt
+    )
     expected = np.rint(np.nan_to_num(np.asarray(stretched)) * 255.0).astype(np.uint8)
     assert out.dtype == np.uint8
     assert out.fill_value_default == 0
@@ -686,14 +688,13 @@ def test_stretch_keeps_per_frame_nodata_on_time_stacks() -> None:
     assert np.isfinite(clipped[1, :, 2, 2]).all()
 
 
-def test_composite_bands_is_the_selected_indexes() -> None:
-    """Mutating ``bands`` changes what is selected *and* what is serialised."""
+def test_composite_bands_is_the_selected_bands() -> None:
+    """``Composite`` shares ``SelectBands``' single ``bands`` list."""
     op = Composite(bands=[0])
     op.bands.append(1)
-    assert op.indexes == [0, 1]
     assert op.get_config()["bands"] == [0, 1]
+    assert not hasattr(op, "indexes")
     op.bands = [2]
-    assert op.indexes == [2]
     arr = np.arange(3 * 2 * 2, dtype=np.float32).reshape(3, 2, 2)
     np.testing.assert_array_equal(op(arr), arr[[2]])
 
@@ -705,10 +706,11 @@ def test_stretch_to_uint8_rounds_instead_of_truncating() -> None:
     np.testing.assert_array_equal(out, [[[0, 255, 255]]])
 
 
-def test_stretch_vocabulary_is_lower_upper_axis() -> None:
+def test_stretch_vocabulary_is_lower_upper_reduce_axes() -> None:
     for cls in (StretchToUint8, gz.radiometry.PercentileClip):
-        cfg = cls(lower=1.0, upper=99.0, axis=None).get_config()
-        assert {"lower", "upper", "axis"} <= set(cfg)
+        cfg = cls(lower=1.0, upper=99.0, reduce_axes=None).get_config()
+        assert {"lower", "upper", "reduce_axes"} <= set(cfg)
+        assert "axis" not in cfg
     assert {"lower", "upper"} <= set(gz.normalize.HistogramStretch().get_config())
     with pytest.raises(TypeError):
         StretchToUint8(per_band=True)  # type: ignore[call-arg]

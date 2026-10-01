@@ -100,10 +100,10 @@ class NDVI(Operator):
         return gt.array_as_geotensor((nir - red) / (nir + red + self.eps))
 
     def get_config(self):
-        return {"nir_idx": self.nir_idx, "red_idx": self.red_idx, "eps": self.eps}
+        return {"nir": self.nir_idx, "red": self.red_idx, "eps": self.eps}
 
 
-pipe = Sequential([Scale(scale=1e-4), NDVI(nir_idx=7, red_idx=3)])
+pipe = Sequential([Scale(scale=1e-4), NDVI(nir=7, red=3)])
 ndvi = pipe(sentinel2_geotensor)
 ```
 

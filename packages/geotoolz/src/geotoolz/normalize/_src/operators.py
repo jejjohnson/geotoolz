@@ -118,7 +118,9 @@ class PerBandStats(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr, _ = _masked(gt)
-        stats = per_band_stats(arr, percentiles=self.percentiles, axis=stat_axes(arr))
+        stats = per_band_stats(
+            arr, percentiles=self.percentiles, reduce_axes=stat_axes(arr)
+        )
         self.stats = {
             key: jsonable(np.asarray(value, dtype=float))
             for key, value in stats.items()
@@ -135,7 +137,7 @@ class CLAHE(Operator):
     pixels are excluded from the histograms and hold the output fill.
 
     Args:
-        kernel_size: Contextual-region shape for the local histograms.
+        window: Contextual-region shape for the local histograms.
             ``None`` uses skimage's default (1/8 of the image height /
             width). Lists (e.g. from Hydra / OmegaConf round-trips)
             are normalised to tuples.
@@ -145,22 +147,22 @@ class CLAHE(Operator):
 
     Examples:
         >>> from geotoolz.normalize import CLAHE
-        >>> out = CLAHE(kernel_size=(8, 8), clip_limit=0.03)(scene)
+        >>> out = CLAHE(window=(8, 8), clip_limit=0.03)(scene)
     """
 
     def __init__(
         self,
         *,
-        kernel_size: int | tuple[int, int] | list[int] | None = None,
+        window: int | tuple[int, int] | list[int] | None = None,
         clip_limit: float = 0.01,
         nbins: int = 256,
     ) -> None:
         # Accept list inputs (e.g. round-trips through Hydra/OmegaConf,
         # which materialise sequences as lists) and normalise to tuple
         # so :func:`equalize_adapthist` receives its expected type.
-        if isinstance(kernel_size, list):
-            kernel_size = tuple(kernel_size)
-        self.kernel_size = kernel_size
+        if isinstance(window, list):
+            window = tuple(window)
+        self.window = window
         self.clip_limit = clip_limit
         self.nbins = nbins
 
@@ -168,19 +170,19 @@ class CLAHE(Operator):
         arr, valid = _masked(gt)
         out = clahe(
             arr,
-            kernel_size=self.kernel_size,
+            window=self.window,
             clip_limit=self.clip_limit,
             nbins=self.nbins,
         )
         return _rewrap(gt, out, valid)
 
     def get_config(self) -> dict[str, Any]:
-        if isinstance(self.kernel_size, tuple):
-            kernel_size: int | list[int] | None = list(self.kernel_size)
+        if isinstance(self.window, tuple):
+            window: int | list[int] | None = list(self.window)
         else:
-            kernel_size = self.kernel_size
+            window = self.window
         return {
-            "kernel_size": kernel_size,
+            "window": window,
             "clip_limit": self.clip_limit,
             "nbins": self.nbins,
         }
@@ -240,7 +242,9 @@ class StandardScaler(Operator):
             self.std = np.nanstd(arr, axis=axis)
         if self.mean is None or self.std is None:
             raise ValueError("StandardScaler requires mean/std or fit_on_call=True")
-        return _rewrap(gt, standard_scale(arr, self.mean, self.std, axis=axis), valid)
+        return _rewrap(
+            gt, standard_scale(arr, self.mean, self.std, reduce_axes=axis), valid
+        )
 
     def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         """Invert a previously applied standard scaling.
@@ -320,7 +324,9 @@ class RobustScaler(Operator):
             self.iqr = q75 - q25
         if self.median is None or self.iqr is None:
             raise ValueError("RobustScaler requires median/iqr or fit_on_call=True")
-        return _rewrap(gt, robust_scale(arr, self.median, self.iqr, axis=axis), valid)
+        return _rewrap(
+            gt, robust_scale(arr, self.median, self.iqr, reduce_axes=axis), valid
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -389,7 +395,7 @@ class MinMaxScaler(Operator):
         if self.vmin is None or self.vmax is None:
             raise ValueError("MinMaxScaler requires vmin/vmax or fit_on_call=True")
         out = minmax_scale(
-            arr, self.vmin, self.vmax, out_range=self.out_range, axis=axis
+            arr, self.vmin, self.vmax, out_range=self.out_range, reduce_axes=axis
         )
         return _rewrap(gt, out, valid)
 
@@ -441,7 +447,9 @@ class HistogramStretch(Operator):
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr, valid = _masked(gt)
-        clipped = percentile_stretch(arr, self.lower, self.upper, axis=stat_axes(arr))
+        clipped = percentile_stretch(
+            arr, self.lower, self.upper, reduce_axes=stat_axes(arr)
+        )
         out_min, out_max = self.out_range
         return _rewrap(gt, clipped * (out_max - out_min) + out_min, valid)
 
@@ -657,6 +665,6 @@ class ZeroOne(Operator):
             np.nanmin(arr, axis=axis),
             np.nanmax(arr, axis=axis),
             out_range=(0.0, 1.0),
-            axis=axis,
+            reduce_axes=axis,
         )
         return _rewrap(gt, out, valid)

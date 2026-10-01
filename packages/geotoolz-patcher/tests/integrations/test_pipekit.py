@@ -60,7 +60,7 @@ class TestGridSampler:
     def test_returns_list_of_patches(
         self, field: RasterField, patcher: SpatialPatcher
     ) -> None:
-        op = GridSampler(patcher)
+        op = GridSampler(patcher=patcher)
         patches = op(field)
         assert isinstance(patches, list)
         assert all(isinstance(p, Patch) for p in patches)
@@ -73,7 +73,7 @@ class TestApplyToChips:
     ) -> None:
         patches = list(patcher.split(field))
         double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
-        out = ApplyToChips(double)(patches)
+        out = ApplyToChips(operator=double)(patches)
         assert len(out) == len(patches)
         for src, dst in zip(patches, out, strict=True):
             assert dst.anchor == src.anchor
@@ -87,9 +87,9 @@ class TestStitchInSequential:
         double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
         pipe = Sequential(
             [
-                GridSampler(patcher),
-                ApplyToChips(double),
-                Stitch(SpatialOverlapAdd(), domain=field.domain),
+                GridSampler(patcher=patcher),
+                ApplyToChips(operator=double),
+                Stitch(aggregation=SpatialOverlapAdd(), domain=field.domain),
             ]
         )
         result = pipe(field)

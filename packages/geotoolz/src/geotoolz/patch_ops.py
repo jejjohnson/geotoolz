@@ -7,9 +7,9 @@ import paths. They put the four-axis Patcher framework inside a
 `Sequential` / `Graph`::
 
     pipe = Sequential([
-        GridSampler(patcher),
-        ApplyToChips(model_op),
-        MergePatches(SpatialOverlapAdd(), domain=field.domain),
+        GridSampler(patcher=patcher),
+        ApplyToChips(operator=model_op),
+        MergePatches(aggregation=SpatialOverlapAdd(), domain=field.domain),
     ])
 
 ``MergePatches`` is geopatcher's ``Stitch`` operator under a name that

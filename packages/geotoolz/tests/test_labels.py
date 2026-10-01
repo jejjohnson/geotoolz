@@ -112,7 +112,7 @@ def test_min_area_drops_small_and_renumbers_contiguously() -> None:
     mask[2, 2:5] = True  # 3 px
     mask[4, 7:9] = True  # 2 px
 
-    labels = label_components(mask, min_area=2)
+    labels = label_components(mask, min_area_px=2)
 
     assert set(np.unique(labels)) == {0, 1, 2}
     assert labels[0, 0] == 0
@@ -123,14 +123,14 @@ def test_min_area_drops_small_and_renumbers_contiguously() -> None:
 def test_min_area_zero_and_one_keep_everything() -> None:
     for mask in _random_masks(3):
         np.testing.assert_array_equal(
-            label_components(mask, min_area=0), label_components(mask, min_area=1)
+            label_components(mask, min_area_px=0), label_components(mask, min_area_px=1)
         )
-        np.testing.assert_array_equal(label_components(mask, min_area=0) > 0, mask)
+        np.testing.assert_array_equal(label_components(mask, min_area_px=0) > 0, mask)
 
 
 def test_min_area_negative_raises() -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        label_components(np.ones((2, 2), dtype=bool), min_area=-1)
+        label_components(np.ones((2, 2), dtype=bool), min_area_px=-1)
 
 
 @pytest.mark.parametrize("connectivity", [4, 8])
@@ -139,7 +139,7 @@ def test_min_area_matches_skimage_remove_small_objects(connectivity: int) -> Non
         expected = sk_remove_small_objects(
             mask, max_size=4, connectivity=_SK_CONNECTIVITY[connectivity]
         )
-        got = label_components(mask, connectivity=connectivity, min_area=5) > 0  # ty: ignore[invalid-argument-type]
+        got = label_components(mask, connectivity=connectivity, min_area_px=5) > 0  # ty: ignore[invalid-argument-type]
         np.testing.assert_array_equal(got, expected)
 
 
@@ -419,7 +419,7 @@ def test_label_connected_components_nodata_never_bridges_components() -> None:
 def test_label_connected_components_min_area_and_background() -> None:
     mask = np.array([[1, 1, 0, 1], [0, 0, 0, 0]], dtype=np.uint8)
     np.testing.assert_array_equal(
-        gz.measure.LabelConnectedComponents(min_area=2)(mask),
+        gz.measure.LabelConnectedComponents(min_area_px=2)(mask),
         [[1, 1, 0, 0], [0, 0, 0, 0]],
     )
     # background=1: the zeros are the foreground (one 4-connected region).

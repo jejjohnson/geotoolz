@@ -149,7 +149,7 @@ img = gz.Input("image")
 scaled = Scale(scale=1e-4)(img)
 mask = CloudMask()(img)
 clean = ApplyMask()(scaled, mask)
-ndvi = NDVI(nir_idx=7, red_idx=3)(clean)
+ndvi = NDVI(nir=7, red=3)(clean)
 
 g = gz.Graph(inputs={"image": img}, outputs={"ndvi": ndvi})
 result = g(image=img_gt)                   # {"ndvi": GeoTensor}

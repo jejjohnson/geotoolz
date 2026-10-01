@@ -213,7 +213,7 @@ def test_clahe_preserves_nan_mask_and_metadata() -> None:
     gt = _toy_geotensor(np.linspace(0.0, 1.0, 100).reshape(1, 10, 10))
     np.asarray(gt)[0, 0, 0] = np.nan
 
-    out = CLAHE(kernel_size=(4, 4), clip_limit=0.03)(gt)
+    out = CLAHE(window=(4, 4), clip_limit=0.03)(gt)
 
     assert_metadata_preserved(out, gt)
     assert np.isnan(np.asarray(out)[0, 0, 0])
@@ -259,21 +259,21 @@ def test_get_config_is_json_safe() -> None:
         AsinhScale(),
         PowerScale(),
         ZeroOne(),
-        CLAHE(kernel_size=(4, 4), clip_limit=0.03),
-        CLAHE(kernel_size=None),
+        CLAHE(window=(4, 4), clip_limit=0.03),
+        CLAHE(window=None),
     ]
     for op in ops:
         json.dumps(op.get_config())  # must not raise
 
 
 def test_clahe_config_normalises_tuple_kernel_to_list() -> None:
-    """Tuple ``kernel_size`` must serialise as a list for config round-trips."""
-    op = CLAHE(kernel_size=(8, 8))
+    """Tuple ``window`` must serialise as a list for config round-trips."""
+    op = CLAHE(window=(8, 8))
     cfg = op.get_config()
-    assert cfg["kernel_size"] == [8, 8]
+    assert cfg["window"] == [8, 8]
     # Round-trip via list input rebuilds the operator equivalently.
     rebuilt = CLAHE(**cfg)
-    assert rebuilt.kernel_size == (8, 8)
+    assert rebuilt.window == (8, 8)
     assert rebuilt.get_config() == cfg
 
 
@@ -296,7 +296,7 @@ def test_clahe_config_normalises_tuple_kernel_to_list() -> None:
         AsinhScale(),
         PowerScale(),
         ZeroOne(),
-        CLAHE(kernel_size=(4, 4), clip_limit=0.03),
+        CLAHE(window=(4, 4), clip_limit=0.03),
     ],
     ids=lambda op: type(op).__name__,
 )
@@ -333,7 +333,7 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
         AsinhScale(a=0.5),
         PowerScale(gamma=0.4),
         ZeroOne(per_band=True),
-        CLAHE(kernel_size=(4, 4), clip_limit=0.03),
+        CLAHE(window=(4, 4), clip_limit=0.03),
     ],
 )
 def test_normalize_hydra_zen_roundtrip(op: object) -> None:
@@ -391,7 +391,7 @@ _REFERENCE = np.linspace(10.0, 20.0, 20).reshape(4, 5)
         lambda: PowerScale(),
         lambda: ZeroOne(),
         lambda: ZeroOne(per_band=False),
-        lambda: CLAHE(kernel_size=(2, 2), clip_limit=0.03),
+        lambda: CLAHE(window=(2, 2), clip_limit=0.03),
     ],
     ids=lambda f: type(f()).__name__,
 )
@@ -453,7 +453,7 @@ def test_4d_time_stack() -> None:
     np.testing.assert_allclose(scaler.mean, values.mean(axis=(0, 2, 3)))
     np.testing.assert_allclose(np.asarray(out).mean(axis=(0, 2, 3)), 0.0, atol=1e-12)
 
-    clahe = CLAHE(kernel_size=(4, 4))
+    clahe = CLAHE(window=(4, 4))
     equalised = clahe(stack)
     for t, frame in enumerate(frames(stack)):
         np.testing.assert_allclose(np.asarray(equalised)[t], np.asarray(clahe(frame)))

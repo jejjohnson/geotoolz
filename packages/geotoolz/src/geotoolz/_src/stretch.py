@@ -3,7 +3,7 @@
 The single NaN-aware percentile stretch behind
 ``radiometry.percentile_clip`` / ``radiometry.PercentileClip``,
 ``normalize.HistogramStretch`` and ``viz.StretchToUint8`` (all spelled
-``lower`` / ``upper`` / ``axis``). It owns the ``upper > lower``
+``lower`` / ``upper`` / ``reduce_axes``). It owns the ``upper > lower``
 validation, so the wrappers delegate without re-checking.
 """
 
@@ -21,7 +21,7 @@ def percentile_stretch(
     lower: float,
     upper: float,
     *,
-    axis: int | tuple[int, ...] | None = (-2, -1),
+    reduce_axes: int | tuple[int, ...] | None = (-2, -1),
 ) -> Float[np.ndarray, "*dims"]:
     """Clip to percentile bounds and stretch the result into ``[0, 1]``.
 
@@ -33,7 +33,7 @@ def percentile_stretch(
         arr: Input array of any shape.
         lower: Lower percentile in ``[0, 100]``.
         upper: Upper percentile in ``[0, 100]``; must exceed ``lower``.
-        axis: Axis (or axes) to compute percentiles over. The default
+        reduce_axes: Axis (or axes) to compute percentiles over. The default
             ``(-2, -1)`` stretches each leading band / time slice
             independently; ``None`` uses one global pair of thresholds.
 
@@ -49,8 +49,8 @@ def percentile_stretch(
             f"percentile_stretch requires upper > lower; got {lower=}, {upper=}"
         )
     # `keepdims=True` so lo/hi broadcast back over the reduced axes.
-    lo = np.nanpercentile(arr, lower, axis=axis, keepdims=True)
-    hi = np.nanpercentile(arr, upper, axis=axis, keepdims=True)
+    lo = np.nanpercentile(arr, lower, axis=reduce_axes, keepdims=True)
+    hi = np.nanpercentile(arr, upper, axis=reduce_axes, keepdims=True)
     # Guard the constant-slice degenerate case.
     denom = np.where(hi > lo, hi - lo, 1.0)
     return np.clip((arr - lo) / denom, 0.0, 1.0)

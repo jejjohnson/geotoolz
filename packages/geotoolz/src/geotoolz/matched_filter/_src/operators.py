@@ -468,7 +468,7 @@ class EstimateCovLowRank(Operator):
         rank: Number of leading eigenpairs kept.
         tikhonov: Diagonal regulariser added after the low-rank
             reconstruction.
-        random_state: Seed for the randomized range finder; the default
+        seed: Seed for the randomized range finder; the default
             ``0`` makes the estimate deterministic.
         n_oversamples: Extra random probe vectors beyond ``rank``.
         axis: Position of the spectral axis. Default ``-3``.
@@ -480,14 +480,14 @@ class EstimateCovLowRank(Operator):
         mean: np.ndarray | None = None,
         rank: int = 10,
         tikhonov: float = 1e-3,
-        random_state: int | None = 0,
+        seed: int | None = 0,
         n_oversamples: int = 10,
         axis: int = -3,
     ) -> None:
         self.mean = mean
         self.rank = rank
         self.tikhonov = tikhonov
-        self.random_state = random_state
+        self.seed = seed
         self.n_oversamples = n_oversamples
         self.axis = axis
 
@@ -497,7 +497,7 @@ class EstimateCovLowRank(Operator):
             mean=self.mean,
             rank=self.rank,
             tikhonov=self.tikhonov,
-            random_state=self.random_state,
+            seed=self.seed,
             n_oversamples=self.n_oversamples,
             axis=self.axis,
         )
@@ -507,7 +507,7 @@ class EstimateCovLowRank(Operator):
             "mean": None if self.mean is None else np.asarray(self.mean).tolist(),
             "rank": self.rank,
             "tikhonov": self.tikhonov,
-            "random_state": self.random_state,
+            "seed": self.seed,
             "n_oversamples": self.n_oversamples,
             "axis": self.axis,
         }
@@ -528,7 +528,7 @@ class GMMClusterBackground(Operator):
         n_clusters: Number of mixture components.
         cov_estimator: Per-cluster covariance estimator —
             ``"empirical"``, ``"ledoit_wolf"``, or ``"oas"``.
-        random_state: Seed for the clustering; fixed seeds give
+        seed: Seed for the clustering; fixed seeds give
             reproducible backgrounds.
         bayesian: If ``True``, prune components with negligible mixture
             weight, so fewer than ``n_clusters`` clusters may remain.
@@ -540,13 +540,13 @@ class GMMClusterBackground(Operator):
         *,
         n_clusters: int,
         cov_estimator: Literal["empirical", "ledoit_wolf", "oas"] = "ledoit_wolf",
-        random_state: int | None = 0,
+        seed: int | None = 0,
         bayesian: bool = False,
         axis: int = -3,
     ) -> None:
         self.n_clusters = n_clusters
         self.cov_estimator = cov_estimator
-        self.random_state = random_state
+        self.seed = seed
         self.bayesian = bayesian
         self.axis = axis
 
@@ -555,7 +555,7 @@ class GMMClusterBackground(Operator):
             _mask_invalid(gt, self.axis, type(self).__name__)[0],
             n_clusters=self.n_clusters,
             cov_estimator=self.cov_estimator,
-            random_state=self.random_state,
+            seed=self.seed,
             bayesian=self.bayesian,
             axis=self.axis,
         )
@@ -570,7 +570,7 @@ class AdaptiveWindowBackground(Operator):
     band) carry no window weight and are ``NaN`` in both cubes.
 
     Args:
-        window_size: Side length of the square window; positive odd
+        window: Side length of the square window; positive odd
             integer. Default ``7``.
         pad_mode: Boundary mode forwarded to
             :func:`scipy.ndimage.uniform_filter`. Default ``"reflect"``.
@@ -578,9 +578,9 @@ class AdaptiveWindowBackground(Operator):
     """
 
     def __init__(
-        self, *, window_size: int = 7, pad_mode: str = "reflect", axis: int = -3
+        self, *, window: int = 7, pad_mode: str = "reflect", axis: int = -3
     ) -> None:
-        self.window_size = window_size
+        self.window = window
         self.pad_mode = pad_mode
         self.axis = axis
 
@@ -588,7 +588,7 @@ class AdaptiveWindowBackground(Operator):
         require_ndim(gt, 3, type(self).__name__)
         return adaptive_window_background(
             _mask_invalid(gt, self.axis, type(self).__name__)[0],
-            window_size=self.window_size,
+            window=self.window,
             pad_mode=self.pad_mode,
             axis=self.axis,
         )
@@ -655,7 +655,7 @@ class ApplyAdaptiveMF(Operator):
     config (``target``, ``ridge``, ``axis``) stays hydra-/YAML-safe; pair
     it with :class:`AdaptiveWindowBackground` in a pipeline::
 
-        bg = AdaptiveWindowBackground(window_size=7)(gt)
+        bg = AdaptiveWindowBackground(window=7)(gt)
         scores = ApplyAdaptiveMF(target=t)(gt, bg)
 
     Args:

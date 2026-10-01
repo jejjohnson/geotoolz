@@ -298,7 +298,10 @@ class Compose(Sequential):
     Examples:
         >>> import geotoolz as gz
         >>> pipe = gz.augment.Compose(
-        ...     [gz.augment.RandomFlip(), gz.augment.GaussianNoise(sigma=0.01)],
+        ...     augmentations=[
+        ...         gz.augment.RandomFlip(),
+        ...         gz.augment.GaussianNoise(sigma=0.01),
+        ...     ],
         ...     p=1.0,
         ...     seed=0,
         ... )
@@ -307,6 +310,7 @@ class Compose(Sequential):
 
     def __init__(
         self,
+        *,
         augmentations: list[Operator],
         p: float = 1.0,
         seed: int | None = None,
@@ -364,7 +368,7 @@ class Compose(Sequential):
 
     def __repr__(self) -> str:
         inner = ", ".join(repr(op) for op in self.operators)
-        return f"Compose([{inner}], p={self.p!r}, seed={self.seed!r})"
+        return f"Compose(augmentations=[{inner}], p={self.p!r}, seed={self.seed!r})"
 
     def describe(self, indent: int = 0) -> str:
         pad = "  " * indent
@@ -400,6 +404,7 @@ class RandomFlip(Operator):
 
     def __init__(
         self,
+        *,
         p_horizontal: float = 0.5,
         p_vertical: float = 0.5,
         seed: int | None = None,
@@ -465,7 +470,7 @@ class RandomRotate90(Operator):
         >>> out = op(patch)  # doctest: +SKIP
     """
 
-    def __init__(self, p: float = 0.75, seed: int | None = None) -> None:
+    def __init__(self, *, p: float = 0.75, seed: int | None = None) -> None:
         _check_probability(p, "p")
         self.p = p
         self.seed = seed
@@ -510,7 +515,7 @@ class RandomCrop(Operator):
         >>> out = op(patch)  # doctest: +SKIP
     """
 
-    def __init__(self, size: tuple[int, int], seed: int | None = None) -> None:
+    def __init__(self, *, size: tuple[int, int], seed: int | None = None) -> None:
         if size[0] <= 0 or size[1] <= 0:
             raise ValueError("size entries must be positive.")
         self.size = size
@@ -557,7 +562,7 @@ class RandomShift(Operator):
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
-    def __init__(self, max_shift: tuple[int, int], seed: int | None = None) -> None:
+    def __init__(self, *, max_shift: tuple[int, int], seed: int | None = None) -> None:
         if max_shift[0] < 0 or max_shift[1] < 0:
             raise ValueError("max_shift entries must be non-negative.")
         self.max_shift = max_shift
@@ -599,6 +604,7 @@ class BrightnessJitter(Operator):
 
     def __init__(
         self,
+        *,
         factor: Range = (0.9, 1.1),
         per_band: bool = True,
         seed: int | None = None,
@@ -653,6 +659,7 @@ class ContrastJitter(Operator):
 
     def __init__(
         self,
+        *,
         factor: Range = (0.9, 1.1),
         per_band: bool = True,
         seed: int | None = None,
@@ -714,6 +721,7 @@ class GaussianNoise(Operator):
 
     def __init__(
         self,
+        *,
         sigma: ScalarOrRange = 0.01,
         per_band: bool = True,
         seed: int | None = None,
@@ -768,7 +776,7 @@ class SpeckleNoise(Operator):
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
-    def __init__(self, sigma: ScalarOrRange = 0.05, seed: int | None = None) -> None:
+    def __init__(self, *, sigma: ScalarOrRange = 0.05, seed: int | None = None) -> None:
         sigma = as_tuple(sigma)
         _validate_range(sigma, "sigma")
         self.sigma = sigma
@@ -797,21 +805,21 @@ class BandDropout(Operator):
     treated as a single band.
 
     Nodata: pixels that were fill / non-finite on input keep the output's
-    fill value rather than ``fill`` (see the module docstring).
+    fill value rather than ``fill_value`` (see the module docstring).
 
     Args:
         p: Per-band dropout probability. Default ``0.1``.
-        fill: Value written into dropped bands. Default ``0.0``.
+        fill_value: Value written into dropped bands. Default ``0.0``.
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
     def __init__(
-        self, p: float = 0.1, fill: float = 0.0, seed: int | None = None
+        self, *, p: float = 0.1, fill_value: float = 0.0, seed: int | None = None
     ) -> None:
         _check_probability(p, "p")
         self.p = p
-        self.fill = fill
+        self.fill_value = fill_value
         self.seed = seed
 
     def _apply(
@@ -822,11 +830,11 @@ class BandDropout(Operator):
         out = np.array(arr, copy=True)
         if arr.ndim < 3:
             if rng.random() < self.p:
-                out[...] = self.fill
+                out[...] = self.fill_value
             return _cast_and_wrap(gt, out, _valid(arr, gt))
 
         mask = rng.random(arr.shape[BAND_AXIS]) < self.p
-        out[..., mask, :, :] = self.fill
+        out[..., mask, :, :] = self.fill_value
         return _cast_and_wrap(gt, out, _valid(arr, gt))
 
 
@@ -850,6 +858,7 @@ class BandJitter(Operator):
 
     def __init__(
         self,
+        *,
         groups: dict[str, list[str]] | list[list[Any]] | None = None,
         seed: int | None = None,
     ) -> None:
@@ -903,6 +912,7 @@ class SunAngleJitter(Operator):
 
     def __init__(
         self,
+        *,
         delta_sza_deg: ScalarOrRange = (-5.0, 5.0),
         seed: int | None = None,
     ) -> None:
@@ -932,10 +942,10 @@ class SunAngleJitter(Operator):
 class AtmosphericHaze(Operator):
     """Add a sampled haze term following an inverse fourth-power spectrum.
 
-    Wavelength metadata is interpreted as nanometers, except values below
-    ``10`` are treated as micrometers and converted to nanometers.
-    Accepts a ``GeoTensor`` or a plain ``np.ndarray``; when the carrier
-    has no wavelength attrs (``wavelengths_nm`` / ``wavelengths``), a
+    Wavelengths are read from ``attrs["wavelengths"]`` (the package-wide
+    key, in nanometers; values below ``10`` are treated as micrometers and
+    converted to nanometers). Accepts a ``GeoTensor`` or a plain
+    ``np.ndarray``; when the carrier has no ``wavelengths`` attr, a
     default 450-850 nm linspace is assumed.
 
     Nodata: fill / non-finite pixels are left untouched and hold the
@@ -950,7 +960,7 @@ class AtmosphericHaze(Operator):
     """
 
     def __init__(
-        self, intensity: ScalarOrRange = (0.0, 0.05), seed: int | None = None
+        self, *, intensity: ScalarOrRange = (0.0, 0.05), seed: int | None = None
     ) -> None:
         self.intensity = as_tuple(intensity)
         self.seed = seed
@@ -965,7 +975,7 @@ class AtmosphericHaze(Operator):
 
         arr = np.asarray(gt)
         attrs = getattr(gt, "attrs", None) or {}
-        wavelengths = attrs.get("wavelengths_nm", attrs.get("wavelengths"))
+        wavelengths = attrs.get("wavelengths")
         weights = rayleigh_weights(wavelengths, _band_count(arr)).reshape(
             _band_shape(arr)
         )
@@ -1001,6 +1011,7 @@ class SimulatedClouds(Operator):
 
     def __init__(
         self,
+        *,
         coverage: ScalarOrRange = (0.0, 0.3),
         feather: int = 5,
         seed: int | None = None,
@@ -1097,6 +1108,7 @@ class CutMix(Operator):
 
     def __init__(
         self,
+        *,
         pool: list[GeoTensor | np.ndarray],
         p: float = 0.5,
         seed: int | None = None,

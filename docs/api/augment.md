@@ -11,7 +11,7 @@ physical measurements instead of generic RGB channels.
 import geotoolz as gz
 
 augment = gz.augment.Compose(
-    [
+    augmentations=[
         gz.augment.RandomFlip(p_horizontal=0.5, p_vertical=0.5),
         gz.augment.RandomRotate90(p=0.75),
         gz.augment.BrightnessJitter(factor=(0.95, 1.05), per_band=True),
@@ -34,7 +34,7 @@ augmented_patch = augment(training_patch, seed=0)
 | Radiometric | `patch` | `ContrastJitter(per_band=False)(patch, seed=0)` applies one contrast factor to every band. |
 | Noise | `patch` | `GaussianNoise(sigma=0.01)(patch, seed=0)` adds reproducible additive sensor noise. |
 | Noise | `patch` | `SpeckleNoise(sigma=0.05)(patch, seed=0)` applies multiplicative SAR-style noise. |
-| Band-level | `patch` | `BandDropout(p=0.1, fill=0)(patch, seed=0)` independently masks bands. |
+| Band-level | `patch` | `BandDropout(p=0.1, fill_value=0)(patch, seed=0)` independently masks bands. |
 | Band-level | `patch` | `BandJitter(groups={"swir": ["B11", "B12"]})(patch, seed=0)` only permutes configured band groups. |
 | RS-specific | `patch` | `SunAngleJitter(delta_sza_deg=(-3, 3))(patch, seed=0)` rescales reflectance for a simulated SZA shift. |
 | RS-specific | `patch` | `AtmosphericHaze(intensity=(0, 0.05))(patch, seed=0)` adds stronger haze to shorter wavelengths. |

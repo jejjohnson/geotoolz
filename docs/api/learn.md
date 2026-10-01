@@ -11,10 +11,13 @@ scikit-learn integration. Wraps any sklearn-compatible estimator (`fit` / `predi
     in-graph supervised fit helpers are tracked for v0.2.
 
 - **Universal adapter:** `SklearnOp`, `GeoTensorEstimator`
-- **Convenience wrappers** (named algorithm, sensible defaults):
-  - Decomposition: `PCA`, `IPCA`, `NMF`
-  - Clustering: `KMeans`, `MiniBatchKMeans`, `GMM`
-  - Anomaly: `IsolationForest`, `OneClassSVM`, `LocalOutlierFactor`
-  - Imputation: `KNNImputer`, `IterativeImputer`
+- **Convenience wrappers** (named algorithm, sensible defaults). Each is prefixed `Pixelwise` so it
+  never shadows the scikit-learn class it wraps, and takes that estimator by keyword —
+  `gz.learn.PixelwisePCA(estimator=PCA(n_components=3))`:
+  - Decomposition: `PixelwisePCA`, `PixelwiseIPCA`, `PixelwiseNMF`
+  - Clustering: `PixelwiseKMeans`, `PixelwiseMiniBatchKMeans`, `PixelwiseGMM`
+  - Anomaly: `PixelwiseIsolationForest`, `PixelwiseOneClassSVM`, `PixelwiseLocalOutlierFactor`
+  - Imputation: `PixelwiseKNNImputer`, `PixelwiseIterativeImputer`
+- **Framework-agnostic inference:** `ModelOp(model=...)`
 
 ::: geotoolz.learn

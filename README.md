@@ -71,10 +71,10 @@ field  = gc.staging.field_for(gc.staging.stage(cat, dest="./cache"))[0]
 patcher = gp.SpatialPatcher(geometry=gp.SpatialRectangular(size=(256, 256)),
                             sampler=gp.SpatialRegularStride(step=(192, 192)),
                             window=gp.SpatialHann(), aggregation=gp.SpatialOverlapAdd())
-ndvi    = gz.Sequential([gz.DNToReflectance(scale=1e-4), gz.NDVI(nir_idx=3, red_idx=2)])
+ndvi    = gz.Sequential([gz.DNToReflectance(scale=1e-4), gz.NDVI(nir=3, red=2)])
 
-scene = gz.Sequential([GridSampler(patcher), ApplyToChips(ndvi),
-                       MergePatches(gp.SpatialOverlapAdd(), domain=field.domain)])(field)
+scene = gz.Sequential([GridSampler(patcher=patcher), ApplyToChips(operator=ndvi),
+                       MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=field.domain)])(field)
 ```
 
 The end-to-end Lake Tahoe tutorial runs this flow for real:

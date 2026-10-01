@@ -267,18 +267,18 @@ def buffer_mask(
 
 def remove_small_objects(
     mask: Bool[np.ndarray, "*batch h w"],
-    min_size: int,
+    min_area_px: int,
     *,
     connectivity: Connectivity = 4,
 ) -> Bool[np.ndarray, "*batch h w"]:
-    """Remove connected True components smaller than ``min_size`` pixels.
+    """Remove connected True components smaller than ``min_area_px`` pixels.
 
     Delegates to :func:`geotoolz.measure.label_components`. Each leading
     (batch / band) slice is cleaned independently.
 
     Args:
         mask: Boolean mask, at least 2-D; trailing axes are ``(H, W)``.
-        min_size: Minimum component area, in pixels, for a component to
+        min_area_px: Minimum component area, in pixels, for a component to
             be kept. ``0`` keeps everything.
         connectivity: ``4`` (default) or ``8`` neighbourhood.
 
@@ -286,30 +286,33 @@ def remove_small_objects(
         The cleaned boolean mask, same shape as ``mask``.
 
     Raises:
-        ValueError: If ``min_size`` is negative or ``mask`` has fewer
+        ValueError: If ``min_area_px`` is negative or ``mask`` has fewer
             than two dimensions.
     """
-    if min_size < 0:
-        raise ValueError("remove_small_objects: `min_size` must be non-negative")
+    if min_area_px < 0:
+        raise ValueError("remove_small_objects: `min_area_px` must be non-negative")
     return _apply_spatial(
-        mask, _remove_small_objects_2d, min_size=min_size, connectivity=connectivity
+        mask,
+        _remove_small_objects_2d,
+        min_area_px=min_area_px,
+        connectivity=connectivity,
     )
 
 
 def remove_small_holes(
     mask: Bool[np.ndarray, "*batch h w"],
-    area_threshold: int,
+    max_hole_area_px: int,
     *,
     connectivity: Connectivity = 4,
 ) -> Bool[np.ndarray, "*batch h w"]:
-    """Fill enclosed False components up to ``area_threshold`` pixels.
+    """Fill enclosed False components up to ``max_hole_area_px`` pixels.
 
     A hole is a False component that does not touch the image border.
     Each leading (batch / band) slice is processed independently.
 
     Args:
         mask: Boolean mask, at least 2-D; trailing axes are ``(H, W)``.
-        area_threshold: Maximum hole area, in pixels, to fill. ``0``
+        max_hole_area_px: Maximum hole area, in pixels, to fill. ``0``
             fills nothing.
         connectivity: ``4`` (default) or ``8`` neighbourhood used to
             group background pixels into holes.
@@ -318,15 +321,15 @@ def remove_small_holes(
         The filled boolean mask, same shape as ``mask``.
 
     Raises:
-        ValueError: If ``area_threshold`` is negative or ``mask`` has
+        ValueError: If ``max_hole_area_px`` is negative or ``mask`` has
             fewer than two dimensions.
     """
-    if area_threshold < 0:
-        raise ValueError("remove_small_holes: `area_threshold` must be non-negative")
+    if max_hole_area_px < 0:
+        raise ValueError("remove_small_holes: `max_hole_area_px` must be non-negative")
     return _apply_spatial(
         mask,
         _remove_small_holes_2d,
-        max_area=area_threshold,
+        max_area=max_hole_area_px,
         connectivity=connectivity,
         exclude_border=True,
     )
@@ -335,8 +338,8 @@ def remove_small_holes(
 def clean_mask(
     mask: Bool[np.ndarray, "*batch h w"],
     *,
-    min_object_size: int = 25,
-    max_hole_size: int = 25,
+    min_area_px: int = 25,
+    max_hole_area_px: int = 25,
     close_iter: int = 1,
 ) -> Bool[np.ndarray, "*batch h w"]:
     """Remove small objects, fill small holes, then close the mask.
@@ -346,9 +349,9 @@ def clean_mask(
 
     Args:
         mask: Boolean mask, at least 2-D; trailing axes are ``(H, W)``.
-        min_object_size: Components smaller than this many pixels are
+        min_area_px: Components smaller than this many pixels are
             removed.
-        max_hole_size: Enclosed holes up to this many pixels are filled.
+        max_hole_area_px: Enclosed holes up to this many pixels are filled.
         close_iter: Binary-closing iterations applied last. ``0`` skips
             the closing step.
 
@@ -359,8 +362,8 @@ def clean_mask(
         ValueError: If any size/iteration argument is negative or
             ``mask`` has fewer than two dimensions.
     """
-    out = remove_small_objects(mask, min_object_size)
-    out = remove_small_holes(out, max_hole_size)
+    out = remove_small_objects(mask, min_area_px)
+    out = remove_small_holes(out, max_hole_area_px)
     return close_mask(out, close_iter)
 
 
@@ -561,9 +564,11 @@ def _buffer_2d(
 
 
 def _remove_small_objects_2d(
-    mask: Bool[np.ndarray, "h w"], *, min_size: int, connectivity: Connectivity
+    mask: Bool[np.ndarray, "h w"], *, min_area_px: int, connectivity: Connectivity
 ) -> Bool[np.ndarray, "h w"]:
-    return label_components(mask, connectivity=connectivity, min_area=min_size) > 0
+    return (
+        label_components(mask, connectivity=connectivity, min_area_px=min_area_px) > 0
+    )
 
 
 def apply_mask(

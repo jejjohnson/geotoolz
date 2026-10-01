@@ -10,7 +10,7 @@ Module rule for ``learn/_src``:
   joblib state I/O.
 * ``operators.py`` (this module) -- the Operators: :class:`SklearnOp`
   (fitting lifecycle over a :class:`GeoTensorEstimator`), the named
-  convenience wrappers (``PCA``, ``KMeans``, ...), and the
+  convenience wrappers (``PixelwisePCA``, ``PixelwiseKMeans``, ...), and the
   framework-agnostic :class:`ModelOp`, which wraps any callable (torch,
   JAX, sklearn ``predict``, a plain function) without importing a
   framework.
@@ -74,7 +74,7 @@ class SklearnOp(Operator):
 
     Examples:
         >>> from sklearn.decomposition import PCA
-        >>> op = SklearnOp(PCA(n_components=3), mode="pixel")
+        >>> op = SklearnOp(estimator=PCA(n_components=3), mode="pixel")
         >>> projected = op(scene)
     """
 
@@ -82,8 +82,8 @@ class SklearnOp(Operator):
 
     def __init__(
         self,
-        estimator: Any,
         *,
+        estimator: Any,
         mode: ReshapeMode = "pixel",
         sample_axes: tuple[str | int, ...] | None = None,
         feature_axes: tuple[str | int, ...] | None = None,
@@ -229,21 +229,21 @@ def _validate_fit_mode(fit_mode: FitMode) -> None:
         raise ValueError(f"Unknown fit mode: {fit_mode!r}")
 
 
-class PCA(SklearnOp):
+class PixelwisePCA(SklearnOp):
     """Pixel-wise PCA convenience operator.
 
     Pins ``mode="pixel"``, ``task="transform"``, ``nan_fit="drop"``;
     every other :class:`SklearnOp` keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("task", "transform")
         kwargs.setdefault("nan_fit", "drop")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class IPCA(SklearnOp):
+class PixelwiseIPCA(SklearnOp):
     """Streaming IncrementalPCA convenience operator.
 
     Pins ``mode="pixel"``, ``fit_mode="fit_streaming"`` (each call routes
@@ -251,27 +251,27 @@ class IPCA(SklearnOp):
     :class:`SklearnOp` keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("fit_mode", "fit_streaming")
         kwargs.setdefault("task", "transform")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class NMF(SklearnOp):
+class PixelwiseNMF(SklearnOp):
     """Pixel-wise NMF convenience operator.
 
     Pins ``mode="pixel"`` and ``task="transform"``; every other
     :class:`SklearnOp` keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("task", "transform")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class KMeans(SklearnOp):
+class PixelwiseKMeans(SklearnOp):
     """Pixel-wise KMeans label convenience operator.
 
     Pins ``mode="pixel"`` and ``task="predict"`` — the output is a
@@ -279,13 +279,13 @@ class KMeans(SklearnOp):
     keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("task", "predict")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class MiniBatchKMeans(SklearnOp):
+class PixelwiseMiniBatchKMeans(SklearnOp):
     """Streaming MiniBatchKMeans convenience operator.
 
     Pins ``mode="pixel"``, ``fit_mode="fit_streaming"`` (each call routes
@@ -293,14 +293,14 @@ class MiniBatchKMeans(SklearnOp):
     :class:`SklearnOp` keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("fit_mode", "fit_streaming")
         kwargs.setdefault("task", "predict")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class GMM(SklearnOp):
+class PixelwiseGMM(SklearnOp):
     """Gaussian mixture convenience operator.
 
     Pins ``mode="pixel"`` and ``task="predict_proba"`` — the output has
@@ -308,13 +308,13 @@ class GMM(SklearnOp):
     keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("task", "predict_proba")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class IsolationForest(SklearnOp):
+class PixelwiseIsolationForest(SklearnOp):
     """Pixel-wise IsolationForest anomaly-score convenience operator.
 
     Pins ``mode="pixel"`` and ``task="decision_function"`` — the output
@@ -322,26 +322,26 @@ class IsolationForest(SklearnOp):
     keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("task", "decision_function")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class OneClassSVM(SklearnOp):
+class PixelwiseOneClassSVM(SklearnOp):
     """Pixel-wise OneClassSVM anomaly-score convenience operator.
 
     Pins ``mode="pixel"`` and ``task="decision_function"``; every other
     :class:`SklearnOp` keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("task", "decision_function")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class LocalOutlierFactor(SklearnOp):
+class PixelwiseLocalOutlierFactor(SklearnOp):
     """Pixel-wise LocalOutlierFactor convenience operator.
 
     Pins ``mode="pixel"`` and ``task="decision_function"``; requires the
@@ -350,13 +350,13 @@ class LocalOutlierFactor(SklearnOp):
     :class:`SklearnOp` keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("task", "decision_function")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class KNNImputer(SklearnOp):
+class PixelwiseKNNImputer(SklearnOp):
     """Pixel-wise KNNImputer convenience operator.
 
     Pins ``mode="pixel"``, ``task="transform"``, and
@@ -366,15 +366,15 @@ class KNNImputer(SklearnOp):
     through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("task", "transform")
         kwargs.setdefault("nan_fit", "propagate")
         kwargs.setdefault("nan_transform", "propagate")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
-class IterativeImputer(SklearnOp):
+class PixelwiseIterativeImputer(SklearnOp):
     """Pixel-wise IterativeImputer convenience operator.
 
     Pins ``mode="pixel"``, ``task="transform"``, and
@@ -382,12 +382,12 @@ class IterativeImputer(SklearnOp):
     :class:`SklearnOp` keyword argument passes through.
     """
 
-    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+    def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("task", "transform")
         kwargs.setdefault("nan_fit", "propagate")
         kwargs.setdefault("nan_transform", "propagate")
-        super().__init__(estimator, **kwargs)
+        super().__init__(estimator=estimator, **kwargs)
 
 
 class ModelOp(Operator):
@@ -418,12 +418,12 @@ class ModelOp(Operator):
     Examples:
         Inference with a sklearn classifier::
 
-            op = ModelOp(rf_clf, method="predict")
+            op = ModelOp(model=rf_clf, method="predict")
             preds = op(features_gt)
 
         Batched inference with a torch model::
 
-            op = ModelOp(unet_model, batch_size=8)
+            op = ModelOp(model=unet_model, batch_size=8)
             preds = op(chips_gt)  # iterates 8 chips at a time
     """
 
@@ -434,8 +434,8 @@ class ModelOp(Operator):
 
     def __init__(
         self,
-        model: Any,
         *,
+        model: Any,
         method: str = "__call__",
         batch_size: int | None = None,
     ) -> None:
@@ -484,17 +484,17 @@ class ModelOp(Operator):
 
 
 __all__ = [
-    "GMM",
-    "IPCA",
-    "NMF",
-    "PCA",
-    "IsolationForest",
-    "IterativeImputer",
-    "KMeans",
-    "KNNImputer",
-    "LocalOutlierFactor",
-    "MiniBatchKMeans",
     "ModelOp",
-    "OneClassSVM",
+    "PixelwiseGMM",
+    "PixelwiseIPCA",
+    "PixelwiseIsolationForest",
+    "PixelwiseIterativeImputer",
+    "PixelwiseKMeans",
+    "PixelwiseKNNImputer",
+    "PixelwiseLocalOutlierFactor",
+    "PixelwiseMiniBatchKMeans",
+    "PixelwiseNMF",
+    "PixelwiseOneClassSVM",
+    "PixelwisePCA",
     "SklearnOp",
 ]

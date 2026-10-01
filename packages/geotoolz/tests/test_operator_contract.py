@@ -151,7 +151,7 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "io._src.operators.WriteGeoTIFF": {"path": "out.tif"},
     "io._src.operators.WriteZarr": {"store": "out.zarr"},
     **{
-        f"learn._src.operators.{name}": _sklearn(name)
+        f"learn._src.operators.Pixelwise{name}": _sklearn(name)
         for name in (
             "IsolationForest",
             "IterativeImputer",
@@ -163,15 +163,15 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
             "PCA",
         )
     },
-    "learn._src.operators.LocalOutlierFactor": lambda: {
+    "learn._src.operators.PixelwiseLocalOutlierFactor": lambda: {
         "estimator": __import__("sklearn.neighbors").neighbors.LocalOutlierFactor(
             novelty=True
         )
     },
-    "learn._src.operators.GMM": lambda: {
+    "learn._src.operators.PixelwiseGMM": lambda: {
         "estimator": __import__("sklearn.mixture").mixture.GaussianMixture()
     },
-    "learn._src.operators.IPCA": lambda: {
+    "learn._src.operators.PixelwiseIPCA": lambda: {
         "estimator": __import__("sklearn.decomposition").decomposition.IncrementalPCA()
     },
     "learn._src.operators.SklearnOp": _sklearn("PCA"),
@@ -183,8 +183,8 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     },
     "mask._src.operators.LandMask": lambda: {"source": _natural_earth_stub()},
     "mask._src.operators.OceanMask": lambda: {"source": _natural_earth_stub()},
-    "mask._src.operators.RemoveSmallHoles": {"area_threshold": 4},
-    "mask._src.operators.RemoveSmallObjects": {"min_size": 4},
+    "mask._src.operators.RemoveSmallHoles": {"max_hole_area_px": 4},
+    "mask._src.operators.RemoveSmallObjects": {"min_area_px": 4},
     "matched_filter._src.operators.ApplyAdaptiveMF": lambda: {"target": np.ones(3)},
     "matched_filter._src.operators.ApplyClusterMF": lambda: {"target": np.ones(3)},
     "matched_filter._src.operators.DetectionThreshold": _mf(false_alarm_rate=0.01),
@@ -239,7 +239,7 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "spectral._src.operators.BandMath": {"expression": "b0 + b1"},
     "spectral._src.operators.BandRatio": {"numerator": 0, "denominator": 1},
     "spectral._src.operators.ReorderBands": {"order": [1, 0]},
-    "spectral._src.operators.SelectBands": {"indexes": [0, 1]},
+    "spectral._src.operators.SelectBands": {"bands": [0, 1]},
     "spectral._src.operators.SpectralBinning": {
         "target_wavelengths": [500.0, 600.0],
         "width": 20.0,
@@ -327,6 +327,93 @@ def test_every_operator_is_classified() -> None:
         except (TypeError, ValueError):
             missing.append(key)
     assert missing == [], "add constructor kwargs to CTOR_KWARGS"
+
+
+def _patch_ops_operators() -> list[type]:
+    """The geopatcher operators ``geotoolz.patch_ops`` re-exports as its own."""
+    try:
+        import geotoolz.patch_ops as patch_ops
+    except ImportError:  # pragma: no cover - the [patch] extra is missing
+        return []
+    return [
+        obj
+        for name in patch_ops.__all__
+        if isinstance(obj := getattr(patch_ops, name), type)
+        and issubclass(obj, Operator)
+        and not obj.__module__.startswith("geotoolz")
+    ]
+
+
+@pytest.mark.parametrize(
+    "cls",
+    [pytest.param(c, id=_key(c)) for c in [*_CLASSES, *_patch_ops_operators()]],
+)
+def test_constructors_are_keyword_only(cls: type) -> None:
+    """Every operator constructor takes its parameters by keyword only.
+
+    ``__init__`` must start with a bare ``*`` -- no exception for the
+    wrapped estimator / model / patcher -- so YAML / Hydra configs and
+    call sites are unambiguous and parameters can be renamed or reordered
+    safely. ``*args`` / ``**kwargs`` pass-throughs (inherited base
+    constructors) are allowed.
+    """
+    params = list(inspect.signature(cls.__init__).parameters.values())[1:]
+    positional = [
+        p.name for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ]
+    assert positional == [], (
+        f"{cls.__qualname__}.__init__ takes {positional} positionally"
+    )
+
+
+#: Retired constructor spellings -> the package-wide name (see the
+#: vocabulary table in CLAUDE.md "Coding Conventions").
+RETIRED_PARAMS: dict[str, str] = {
+    "fill": "fill_value",
+    "random_state": "seed",
+    "window_size": "window",
+    "patch_size": "window",
+    "min_area": "min_area_px",
+    "min_size": "min_area_px",
+    "channel_axis": "axis",
+    "wavelengths_nm": "wavelengths",
+}
+
+#: Documented exceptions: (class key, parameter) pairs whose name is kept
+#: because it is a different concept from the retired spelling's target.
+VOCABULARY_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset(
+    {
+        # Gaussian kernel *width* (a float scale), not a window side length.
+        ("segment._src.operators.Quickshift", "kernel_size"),
+    }
+)
+
+
+@pytest.mark.parametrize("cls", [pytest.param(c, id=_key(c)) for c in _CLASSES])
+def test_constructor_vocabulary(cls: type) -> None:
+    """Constructors use the package-wide parameter spellings.
+
+    No retired alias (``fill``, ``random_state``, ``window_size`` ...), no
+    ``*_idx`` band-index twin, no ``kernel_size`` window, and ``axis`` is
+    only ever an integer band position (reductions use ``reduce_axes``,
+    orientations ``direction``).
+    """
+    key = _key(cls)
+    params = inspect.signature(cls.__init__).parameters
+    for name, param in params.items():
+        if (key, name) in VOCABULARY_EXCEPTIONS:
+            continue
+        assert name not in RETIRED_PARAMS, (
+            f"{key}: rename {name!r} -> {RETIRED_PARAMS[name]!r}"
+        )
+        assert not name.endswith("_idx"), f"{key}: {name!r} -- use one BandRef name"
+        assert name != "kernel_size", f"{key}: 'kernel_size' -> 'window'"
+        if name == "axis" and param.default is not inspect.Parameter.empty:
+            default = param.default
+            assert default is None or isinstance(default, int), (
+                f"{key}: axis={default!r} -- 'axis' is a band position; use "
+                "'reduce_axes' for reductions and 'direction' for orientations"
+            )
 
 
 def _importable(key: str) -> bool:
@@ -520,7 +607,7 @@ def _reload_cases() -> list[Any]:
         (gz.augment.SimulatedClouds(seed=0), _scene),
         (gz.augment.BrightnessJitter(factor=(0.9, 1.1), seed=0), _scene),
         (gz.augment.BandJitter(groups={"vis": ["b0", "b1"]}, seed=0), _scene),
-        (gz.radiometry.PercentileClip(axis=(-2, -1)), _scene),
+        (gz.radiometry.PercentileClip(reduce_axes=(-2, -1)), _scene),
         (gz.qa.DecodeBitmask(bits={"low": [0], "high": [1]}), _labels),
         (gz.segment.MergeNearbyInstances(classes={1: 0, 2: 0}), _labels),
         (
@@ -975,7 +1062,7 @@ TIME_INVARIANT: frozenset[str] = frozenset(
 STACK_AS_FEATURES: frozenset[str] = frozenset(
     {
         *(
-            f"learn._src.operators.{name}"
+            f"learn._src.operators.Pixelwise{name}"
             for name in (
                 "GMM",
                 "IPCA",

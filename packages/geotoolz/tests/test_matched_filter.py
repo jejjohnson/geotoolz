@@ -262,7 +262,7 @@ def test_gmm_empty_component_restart_survives_m_step(monkeypatch) -> None:
     init = np.repeat([0, 1], n_half)
     init[[0, n_half]] = 2  # component 2 = one pixel from each cluster
 
-    def crafted_kmeans(values, *, n_clusters, random_state, max_iter=50):
+    def crafted_kmeans(values, *, n_clusters, seed, max_iter=50):
         assert n_clusters == 3
         return init.copy()
 
@@ -313,7 +313,7 @@ def test_apply_adaptive_mf_matches_brute_force() -> None:
     gt = toy_geotensor(cube)
     mf = gz.matched_filter
 
-    bg = mf.AdaptiveWindowBackground(window_size=5)(gt)
+    bg = mf.AdaptiveWindowBackground(window=5)(gt)
     for ridge in (0.0, 0.3):
         out = mf.ApplyAdaptiveMF(target=target, ridge=ridge)(gt, bg)
         assert isinstance(out, GeoTensor)
@@ -326,7 +326,7 @@ def test_apply_adaptive_mf_matches_brute_force() -> None:
             atol=1e-12,
         )
     # Array primitive and plain-ndarray carrier agree.
-    arr_bg = mf.AdaptiveWindowBackground(window_size=5)(cube)
+    arr_bg = mf.AdaptiveWindowBackground(window=5)(cube)
     np.testing.assert_allclose(
         mf.apply_adaptive_mf(cube, background=arr_bg, target=target),
         np.asarray(mf.ApplyAdaptiveMF(target=target)(gt, bg)),
@@ -338,7 +338,7 @@ def test_apply_adaptive_mf_matches_brute_force() -> None:
     # A zero-variance band (flat window) is unscoreable without a ridge.
     flat = cube.copy()
     flat[0] = 1.0
-    flat_bg = mf.AdaptiveWindowBackground(window_size=3)(flat)
+    flat_bg = mf.AdaptiveWindowBackground(window=3)(flat)
     assert np.isnan(mf.apply_adaptive_mf(flat, background=flat_bg, target=target)).all()
     assert np.isfinite(
         mf.apply_adaptive_mf(flat, background=flat_bg, target=target, ridge=1e-3)
@@ -382,8 +382,8 @@ def test_cluster_background_and_dispatch_are_reproducible() -> None:
     )
     gt = toy_geotensor(cube)
 
-    bg1 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
-    bg2 = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=4)(gt)
+    bg1 = gz.matched_filter.GMMClusterBackground(n_clusters=2, seed=4)(gt)
+    bg2 = gz.matched_filter.GMMClusterBackground(n_clusters=2, seed=4)(gt)
     out = gz.matched_filter.ApplyClusterMF(target=target)(gt, bg1)
     samples = np.asarray(gt).reshape(2, -1).T
     labels = bg1.labels.reshape(-1)
@@ -563,7 +563,7 @@ def _run_matched_filter(cube):
 
 
 def _run_apply_cluster_mf(cube):
-    bg = gz.matched_filter.GMMClusterBackground(n_clusters=2, random_state=0)(cube)
+    bg = gz.matched_filter.GMMClusterBackground(n_clusters=2, seed=0)(cube)
     return gz.matched_filter.ApplyClusterMF(target=_NDARRAY_TARGET)(cube, bg)
 
 
@@ -605,7 +605,7 @@ def test_estimator_ops_accept_plain_ndarray_input() -> None:
     assert isinstance(cov_arr, gz.matched_filter.NumpyLinearOperator)
     np.testing.assert_allclose(cov_arr.matrix, cov_gt.matrix)
 
-    adaptive = gz.matched_filter.AdaptiveWindowBackground(window_size=3)(cube)
+    adaptive = gz.matched_filter.AdaptiveWindowBackground(window=3)(cube)
     assert adaptive.mean.shape == cube.shape
 
     streaming = gz.matched_filter.StreamingBackground(cov_kind="empirical")(
@@ -716,7 +716,7 @@ def test_fill_pixels_are_excluded(case: str, fill: float) -> None:
         assert np.isfinite(cluster.means).all()
         assert_fill(mf.ApplyClusterMF(target=target)(gt, cluster))
     elif case == "adaptive_window":
-        bg = mf.AdaptiveWindowBackground(window_size=3)(gt)
+        bg = mf.AdaptiveWindowBackground(window=3)(gt)
         assert np.isnan(bg.mean[:, ~valid]).all()
         assert np.isnan(bg.variance[:, ~valid]).all()
         # Pixel (1, 1): its 3x3 window holds the (0, 0) fill pixel.
@@ -747,7 +747,7 @@ def test_4d_time_stack() -> None:
             toy_geotensor(np.ones((6, 6)))
         )
     with pytest.raises(ValueError, match="AdaptiveWindowBackground accepts 3-D"):
-        gz.matched_filter.AdaptiveWindowBackground(window_size=3)(stack)
+        gz.matched_filter.AdaptiveWindowBackground(window=3)(stack)
 
 
 @pytest.mark.parametrize(

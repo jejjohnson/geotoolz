@@ -34,7 +34,7 @@ def test_plume_mask_otsu_matches_resolved_threshold() -> None:
     values = np.r_[np.zeros(50), np.full(50, 10.0)].reshape(10, 10)
     gt = _gt(values)
 
-    out = gz.plume.PlumeMask(threshold="otsu", min_area=1)(gt)
+    out = gz.plume.PlumeMask(threshold="otsu", min_area_px=1)(gt)
 
     assert np.array_equal(np.asarray(out), values > resolve_threshold(values, "otsu"))
     assert out.transform == gt.transform
@@ -44,7 +44,7 @@ def test_plume_mask_otsu_matches_resolved_threshold() -> None:
 def test_plume_mask_percentile_keeps_top_half_percent() -> None:
     values = np.arange(10_000, dtype=float).reshape(100, 100)
 
-    out = gz.plume.PlumeMask(threshold="percentile:99.5", min_area=1)(_gt(values))
+    out = gz.plume.PlumeMask(threshold="percentile:99.5", min_area_px=1)(_gt(values))
 
     assert int(np.asarray(out).sum()) == 50
 
@@ -54,7 +54,7 @@ def test_plume_contours_labels_connected_components() -> None:
     mask[0:2, 0:2] = True
     mask[4, 4] = True
 
-    labels = gz.plume.PlumeContours(min_area=2)(_gt(mask))
+    labels = gz.plume.PlumeContours(min_area_px=2)(_gt(mask))
 
     assert set(np.unique(np.asarray(labels))) == {0, 1}
     assert np.asarray(labels)[0, 0] == 1
@@ -225,8 +225,8 @@ def test_cone_matches_brute_force_angle(
 def test_contours_ignore_nan() -> None:
     score = np.array([[np.nan, 0.0], [0.0, 0.0]])
 
-    labels = gz.plume.PlumeContours(min_area=1)(score)
-    mask = gz.plume.PlumeContours(min_area=1, return_labels=False)(score)
+    labels = gz.plume.PlumeContours(min_area_px=1)(score)
+    mask = gz.plume.PlumeContours(min_area_px=1, return_labels=False)(score)
 
     np.testing.assert_array_equal(np.asarray(labels), np.zeros((2, 2)))
     assert not np.asarray(mask).any()
@@ -244,7 +244,7 @@ def test_plume_mask_threads_otsu_nbins() -> None:
     assert coarse != otsu_threshold(values)
     assert resolve_threshold(values, "otsu", nbins=4) == coarse
 
-    op = gz.plume.PlumeMask(threshold="otsu", min_area=1, nbins=4)
+    op = gz.plume.PlumeMask(threshold="otsu", min_area_px=1, nbins=4)
     np.testing.assert_array_equal(np.asarray(op(_gt(values))), values > coarse)
     config = op.get_config()
     assert config["nbins"] == 4
@@ -716,8 +716,8 @@ def test_plume_operators_get_config_is_json_safe() -> None:
     mask_gt = _gt(np.ones((2, 2), dtype=bool))
 
     ops = [
-        gz.plume.PlumeMask(threshold="otsu", min_area=10),
-        gz.plume.PlumeContours(min_area=5),
+        gz.plume.PlumeMask(threshold="otsu", min_area_px=10),
+        gz.plume.PlumeContours(min_area_px=5),
         gz.plume.PlumeFootprint(min_area_m2=100.0),
         gz.plume.WindAdvectionCone(
             source=(0.0, 0.0),
@@ -748,12 +748,12 @@ def test_label_components_drops_small_and_renumbers_contiguously() -> None:
     # Three isolated components separated by >=2 pixels on every side so
     # 8-connectivity does not merge them.
     mask[0:2, 0:2] = True  # 4 px component
-    mask[6, 6] = True  # 1 px component (dropped at min_area=2)
+    mask[6, 6] = True  # 1 px component (dropped at min_area_px=2)
     mask[5:7, 0:3] = True  # 6 px component (top-right diagonal of [6,6]
     # is (5,5)=False, so [6,6] stays isolated)
     mask[5, 5] = False
 
-    labels = label_components(mask, min_area=2, connectivity=4)
+    labels = label_components(mask, min_area_px=2, connectivity=4)
     unique = sorted(set(np.unique(labels).tolist()))
     assert unique == [0, 1, 2]
     assert int((labels == 1).sum()) + int((labels == 2).sum()) == 4 + 6
@@ -777,7 +777,7 @@ def test_plume_shape_filter_keeps_long_thin_features() -> None:
     # geodesic fiber length for axis-aligned thin strips (the paper used
     # cv2.minAreaRect which is exact), so soften the default lower ratio
     # bound for this faithfulness test.
-    out = gz.plume.PlumeShapeFilter(min_area=10, min_fiber_to_major_ratio=0.5)(
+    out = gz.plume.PlumeShapeFilter(min_area_px=10, min_fiber_to_major_ratio=0.5)(
         _gt(labels)
     )
     out_arr = np.asarray(out)
@@ -788,7 +788,7 @@ def test_plume_shape_filter_rejects_compact_blob_with_min_ratio() -> None:
     labels = _make_blob()
     # min_fiber_to_major_ratio=2.0 forces elongated shapes only; a square
     # blob has skeleton/major <~ 1 so it is dropped.
-    out = gz.plume.PlumeShapeFilter(min_area=10, min_fiber_to_major_ratio=2.0)(
+    out = gz.plume.PlumeShapeFilter(min_area_px=10, min_fiber_to_major_ratio=2.0)(
         _gt(labels)
     )
     assert (np.asarray(out) == 0).all()
@@ -799,7 +799,7 @@ def test_plume_shape_filter_drops_tiny_instances_by_area() -> None:
     labels[1, 1] = 1
     labels[5:9, 5:9] = 2  # 16 px
 
-    out = gz.plume.PlumeShapeFilter(min_area=10)(_gt(labels))
+    out = gz.plume.PlumeShapeFilter(min_area_px=10)(_gt(labels))
     out_arr = np.asarray(out)
     assert 1 not in out_arr  # tiny single-pixel instance filtered
     # The 4x4 blob survives the area gate but may still be dropped by the
@@ -900,13 +900,13 @@ def test_plume_qnd_features_handles_too_few_samples() -> None:
 
 def _ndarray_case_plume_mask() -> tuple[object, np.ndarray]:
     values = np.r_[np.zeros(8), np.full(8, 10.0)].reshape(4, 4)
-    return gz.plume.PlumeMask(threshold=5.0, min_area=1), values
+    return gz.plume.PlumeMask(threshold=5.0, min_area_px=1), values
 
 
 def _ndarray_case_plume_contours() -> tuple[object, np.ndarray]:
     mask = np.zeros((4, 4), dtype=bool)
     mask[0:2, 0:2] = True
-    return gz.plume.PlumeContours(min_area=1), mask
+    return gz.plume.PlumeContours(min_area_px=1), mask
 
 
 def _ndarray_case_column_to_mass() -> tuple[object, np.ndarray]:
@@ -923,7 +923,7 @@ def _ndarray_case_shape_filter() -> tuple[object, np.ndarray]:
     labels = np.zeros((6, 8), dtype=np.int32)
     labels[3, 1:7] = 1  # thin 6-px strip
     return (
-        gz.plume.PlumeShapeFilter(min_area=1, min_fiber_to_major_ratio=0.0),
+        gz.plume.PlumeShapeFilter(min_area_px=1, min_fiber_to_major_ratio=0.0),
         labels,
     )
 
@@ -1018,24 +1018,24 @@ def test_fill_pixels_are_excluded(case: str) -> None:
     if case == "contours_fill":
         # -9999 is truthy: it used to be labelled as plume.
         gt = toy_geotensor(np.ones(shape), with_fill_pixels=True)
-        labels = np.asarray(gz.plume.PlumeContours(min_area=1)(gt))
+        labels = np.asarray(gz.plume.PlumeContours(min_area_px=1)(gt))
         assert (labels[fill] == -9999).all()
         assert (labels[valid] == 1).all()
-        mask = gz.plume.PlumeContours(min_area=1, return_labels=False)(gt)
+        mask = gz.plume.PlumeContours(min_area_px=1, return_labels=False)(gt)
         np.testing.assert_array_equal(np.asarray(mask), valid)
         assert mask.fill_value_default is False
     elif case == "contours_nan":
         # Issue reproduction: NaN scores used to be treated as plume.
         score = np.zeros(shape)
         score[fill] = np.nan
-        labels = gz.plume.PlumeContours(min_area=1)(score)
+        labels = gz.plume.PlumeContours(min_area_px=1)(score)
         assert not labels.any()
-        mask = gz.plume.PlumeContours(min_area=1, return_labels=False)(score)
+        mask = gz.plume.PlumeContours(min_area_px=1, return_labels=False)(score)
         assert not mask.any()
     elif case == "contours_nan_fill":
         gt = toy_geotensor(np.ones(shape), fill_value_default=np.nan)
         gt.values[fill] = np.nan
-        out = gz.plume.PlumeContours(min_area=1)(gt)
+        out = gz.plume.PlumeContours(min_area_px=1)(gt)
         labels = np.asarray(out)
         # NaN cannot live in int32 labels: fill pixels are background (0).
         assert (labels[fill] == 0).all()
@@ -1044,13 +1044,13 @@ def test_fill_pixels_are_excluded(case: str) -> None:
     elif case == "mask_percentile":
         values = np.arange(25, dtype=float).reshape(shape)
         gt = toy_geotensor(values, with_fill_pixels=True)
-        result = gz.plume.PlumeMask(threshold="percentile:50", min_area=1)(gt)
+        result = gz.plume.PlumeMask(threshold="percentile:50", min_area_px=1)(gt)
         # A boolean mask declares False, not the score's -9999 (#146).
         assert result.fill_value_default is False
         out = np.asarray(result)
         cutoff = np.percentile(values[valid], 50)
         np.testing.assert_array_equal(out, (values > cutoff) & valid)
-        otsu = np.asarray(gz.plume.PlumeMask(threshold="otsu", min_area=1)(gt))
+        otsu = np.asarray(gz.plume.PlumeMask(threshold="otsu", min_area_px=1)(gt))
         assert not otsu[fill].any()
         expected = (values > resolve_threshold(values[valid], "otsu")) & valid
         np.testing.assert_array_equal(otsu, expected)
@@ -1083,7 +1083,7 @@ def test_4d_time_stack() -> None:
     expected = (values[:, 1] - values[:, 0]) / (values[:, 1] + values[:, 0])
     np.testing.assert_allclose(np.asarray(score)[:, 0], expected)
 
-    masks = gz.plume.PlumeMask(threshold=0.5, min_area=1)(time_stack((2, 1, 4, 4)))
+    masks = gz.plume.PlumeMask(threshold=0.5, min_area_px=1)(time_stack((2, 1, 4, 4)))
     assert masks.shape == (2, 1, 4, 4)
     with pytest.raises(ValueError, match="PlumeFootprint accepts 2-D"):
         gz.plume.PlumeFootprint()(stack)

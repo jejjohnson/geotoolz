@@ -205,7 +205,7 @@ def test_dilate_mask_then_remove_small_objects() -> None:
     mask[0, 0] = True
 
     dilated = DilateMask(iterations=1)(mask)
-    cleaned = RemoveSmallObjects(min_size=5)(dilated)
+    cleaned = RemoveSmallObjects(min_area_px=5)(dilated)
 
     assert bool(cleaned[3, 3])
     assert not bool(cleaned[0, 0])
@@ -230,7 +230,7 @@ def test_remove_small_holes_fills_enclosed_hole_only() -> None:
     mask[2, 2] = False
     mask[0, 0] = False
 
-    out = RemoveSmallHoles(area_threshold=1)(mask)
+    out = RemoveSmallHoles(max_hole_area_px=1)(mask)
 
     assert bool(out[2, 2])
     assert not bool(out[0, 0])
@@ -240,7 +240,7 @@ def test_clean_mask_returns_boolean() -> None:
     mask = np.ones((5, 5), dtype=bool)
     mask[2, 2] = False
 
-    out = CleanMask(max_hole_size=1, min_object_size=1, close_iter=0)(mask)
+    out = CleanMask(max_hole_area_px=1, min_area_px=1, close_iter=0)(mask)
 
     assert out.dtype == bool
     assert bool(out[2, 2])
@@ -282,9 +282,9 @@ def test_combine_masks_xor_and_invert() -> None:
         DilateMask(iterations=1),
         ErodeMask(iterations=1),
         BufferMask(radius=1.0, unit="pixels"),
-        RemoveSmallObjects(min_size=2),
-        RemoveSmallHoles(area_threshold=1),
-        CleanMask(min_object_size=1, max_hole_size=1, close_iter=1),
+        RemoveSmallObjects(min_area_px=2),
+        RemoveSmallHoles(max_hole_area_px=1),
+        CleanMask(min_area_px=1, max_hole_area_px=1, close_iter=1),
         InvertMask(),
     ],
     ids=lambda op: type(op).__name__,

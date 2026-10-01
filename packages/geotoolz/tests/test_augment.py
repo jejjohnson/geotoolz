@@ -27,7 +27,7 @@ def _toy_geotensor(values: np.ndarray, **kwargs: Any) -> GeoTensor:
         **kwargs,
         attrs={
             "band_names": ["B02", "B03", "B04", "B08"],
-            "wavelengths_nm": [490.0, 560.0, 665.0, 842.0],
+            "wavelengths": [490.0, 560.0, 665.0, 842.0],
             "solar_zenith_angle": 30.0,
         },
     )
@@ -161,8 +161,8 @@ def test_negative_noise_parameters_raise(patch: GeoTensor) -> None:
 
 
 def test_band_dropout_identity_and_all_fill(patch: GeoTensor) -> None:
-    identity = augment.BandDropout(p=0.0, fill=-1, seed=0)(patch)
-    filled = augment.BandDropout(p=1.0, fill=-1, seed=0)(patch)
+    identity = augment.BandDropout(p=0.0, fill_value=-1, seed=0)(patch)
+    filled = augment.BandDropout(p=1.0, fill_value=-1, seed=0)(patch)
 
     np.testing.assert_array_equal(np.asarray(identity), np.asarray(patch))
     np.testing.assert_array_equal(np.asarray(filled), np.full(patch.shape, -1.0))
@@ -250,14 +250,17 @@ class _AffineTestOp(Operator):
 
 def test_compose_applies_in_order_and_respects_probability(patch: GeoTensor) -> None:
     composed = augment.Compose(
-        [_AffineTestOp(scale=2.0, offset=0.0), _AffineTestOp(scale=1.0, offset=3.0)]
+        augmentations=[
+            _AffineTestOp(scale=2.0, offset=0.0),
+            _AffineTestOp(scale=1.0, offset=3.0),
+        ]
     )
     out = composed(patch, seed=0)
     np.testing.assert_allclose(np.asarray(out), np.asarray(patch) * 2.0 + 3.0)
 
-    skipped = augment.Compose([_AffineTestOp(scale=2.0, offset=0.0)], p=0.0)(
-        patch, seed=0
-    )
+    skipped = augment.Compose(
+        augmentations=[_AffineTestOp(scale=2.0, offset=0.0)], p=0.0
+    )(patch, seed=0)
     assert skipped is patch
 
 
@@ -366,7 +369,7 @@ def test_get_config_is_json_safe(patch: GeoTensor) -> None:
         augment.AtmosphericHaze(seed=0),
         augment.SimulatedClouds(seed=0),
         augment.CutMix(pool=[donor], seed=0),
-        augment.Compose([augment.RandomFlip(seed=0)], seed=0),
+        augment.Compose(augmentations=[augment.RandomFlip(seed=0)], seed=0),
     ]
     for op in ops:
         # Should not raise — tuples become lists, no live objects leak through.
@@ -377,7 +380,7 @@ def test_cutmix_is_forbid_in_yaml_but_compose_is_a_container() -> None:
     # CutMix holds runtime rasters; Compose only nests operators, which
     # pipekit's container rule leaves to the children (#140).
     assert augment.CutMix(pool=[]).forbid_in_yaml is True
-    assert augment.Compose([]).forbid_in_yaml is False
+    assert augment.Compose(augmentations=[]).forbid_in_yaml is False
 
 
 def test_simulated_clouds_rejects_invalid_coverage_at_construction() -> None:
@@ -430,7 +433,10 @@ class _NonStochasticOp(Operator):
 def test_compose_forwards_seed_only_to_stochastic_children(patch: GeoTensor) -> None:
     """Mixing a non-stochastic child into Compose must not raise TypeError."""
     composed = augment.Compose(
-        [_NonStochasticOp(scale=2.0), augment.GaussianNoise(sigma=0.0, seed=0)],
+        augmentations=[
+            _NonStochasticOp(scale=2.0),
+            augment.GaussianNoise(sigma=0.0, seed=0),
+        ],
         seed=0,
     )
     # Should not raise even though `_NonStochasticOp._apply` rejects `seed`.
@@ -446,7 +452,7 @@ def test_compose_forwards_seed_only_to_stochastic_children(patch: GeoTensor) -> 
         augment.ContrastJitter(seed=0),
         augment.GaussianNoise(sigma=0.01, seed=0),
         augment.SpeckleNoise(sigma=0.02, seed=0),
-        augment.BandDropout(p=0.5, fill=-1.0, seed=0),
+        augment.BandDropout(p=0.5, fill_value=-1.0, seed=0),
         augment.AtmosphericHaze(intensity=0.05, seed=0),
         augment.SimulatedClouds(coverage=0.5, feather=1, seed=0),
         augment.RandomFlip(p_horizontal=1.0, p_vertical=1.0, seed=0),
@@ -489,7 +495,8 @@ def test_cutmix_and_compose_support_plain_arrays() -> None:
     assert np.any(mixed == 9.0)
 
     composed = augment.Compose(
-        [augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)], seed=0
+        augmentations=[augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)],
+        seed=0,
     )
     out = composed(arr)
     assert type(out) is np.ndarray
@@ -498,9 +505,11 @@ def test_cutmix_and_compose_support_plain_arrays() -> None:
 
 def test_compose_rejects_non_operator_children() -> None:
     """A reloaded nested payload fails at construction, not at apply."""
-    payload = augment.Compose([augment.RandomFlip()]).get_config()["augmentations"]
+    payload = augment.Compose(augmentations=[augment.RandomFlip()]).get_config()[
+        "augmentations"
+    ]
     with pytest.raises(TypeError, match="must be an Operator"):
-        augment.Compose(payload)
+        augment.Compose(augmentations=payload)
 
 
 @pytest.mark.parametrize(
@@ -574,7 +583,7 @@ _SEEDED_OPS: list[Any] = [
         seed=0,
     ),
     lambda: augment.Compose(
-        [augment.RandomFlip(), augment.GaussianNoise(sigma=0.01)], seed=0
+        augmentations=[augment.RandomFlip(), augment.GaussianNoise(sigma=0.01)], seed=0
     ),
 ]
 
@@ -614,7 +623,7 @@ def test_per_call_seed_is_one_off_and_leaves_stream_untouched(
 
 
 def test_unseeded_compose_honours_seeded_children(patch: GeoTensor) -> None:
-    pipe = augment.Compose([augment.GaussianNoise(sigma=0.01, seed=3)])
+    pipe = augment.Compose(augmentations=[augment.GaussianNoise(sigma=0.01, seed=3)])
     expected = augment.GaussianNoise(sigma=0.01, seed=3)
     for _ in range(3):
         np.testing.assert_array_equal(
@@ -647,7 +656,7 @@ _RADIOMETRIC_OPS: list[Any] = [
     lambda: augment.ContrastJitter(factor=(0.5, 1.5), seed=0),
     lambda: augment.GaussianNoise(sigma=0.5, seed=0),
     lambda: augment.SpeckleNoise(sigma=0.2, seed=0),
-    lambda: augment.BandDropout(p=0.5, fill=-1.0, seed=2),
+    lambda: augment.BandDropout(p=0.5, fill_value=-1.0, seed=2),
     lambda: augment.SunAngleJitter(delta_sza_deg=(10.0, 20.0), seed=0),
     lambda: augment.AtmosphericHaze(intensity=(0.5, 1.0), seed=0),
     lambda: augment.SimulatedClouds(coverage=(0.3, 0.6), feather=1, seed=0),
@@ -742,7 +751,7 @@ def test_4d_time_stack() -> None:
     assert len(np.unique(np.round(per_band[0], 12))) == 3
 
     # Dropout removes bands of every frame, never whole frames.
-    dropped = np.asarray(gz.augment.BandDropout(p=0.5, fill=0.0, seed=3)(stack))
+    dropped = np.asarray(gz.augment.BandDropout(p=0.5, fill_value=0.0, seed=3)(stack))
     band_dropped = (dropped == 0.0).all(axis=(0, 2, 3))
     assert band_dropped.any() and not band_dropped.all()
     np.testing.assert_array_equal(dropped[:, ~band_dropped], values[:, ~band_dropped])
@@ -801,7 +810,9 @@ class _KwargsSeededOp(Operator):
 
 def test_compose_forwards_seed_to_var_keyword_apply() -> None:
     child = _KwargsSeededOp()
-    augment.Compose([child], seed=0)(np.zeros((1, 2, 2), dtype=np.float32))
+    augment.Compose(augmentations=[child], seed=0)(
+        np.zeros((1, 2, 2), dtype=np.float32)
+    )
     assert len(child.seen) == 1
     assert isinstance(child.seen[0], int)
 
@@ -810,7 +821,7 @@ def test_compose_forwards_seed_only_when_apply_accepts_it() -> None:
     arr = np.zeros((1, 2, 2), dtype=np.float32)
     init_seeded = _InitSeededOp(seed=3)
     apply_seeded = _ApplySeededOp()
-    pipe = augment.Compose([init_seeded, apply_seeded], seed=0)
+    pipe = augment.Compose(augmentations=[init_seeded, apply_seeded], seed=0)
 
     # Used to raise TypeError: `seed` was forwarded because __init__ took one.
     out = pipe(arr)
@@ -821,18 +832,18 @@ def test_compose_forwards_seed_only_when_apply_accepts_it() -> None:
 
     # The same top-level seed derives the same child seed.
     again = _ApplySeededOp()
-    augment.Compose([_InitSeededOp(), again], seed=0)(arr)
+    augment.Compose(augmentations=[_InitSeededOp(), again], seed=0)(arr)
     assert again.seen == apply_seeded.seen[:1]
 
     # An unseeded Compose forwards nothing.
     unseeded = _ApplySeededOp()
-    augment.Compose([unseeded])(arr)
+    augment.Compose(augmentations=[unseeded])(arr)
     assert unseeded.seen == [None]
 
 
 def test_compose_is_a_gated_sequential(patch: GeoTensor) -> None:
     flip = augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)
-    pipe = augment.Compose([flip], p=0.0, seed=0)
+    pipe = augment.Compose(augmentations=[flip], p=0.0, seed=0)
     assert isinstance(pipe, Sequential)
     assert pipe.augmentations is pipe.operators
     assert pipe.get_config() == {
@@ -840,14 +851,14 @@ def test_compose_is_a_gated_sequential(patch: GeoTensor) -> None:
         "p": 0.0,
         "seed": 0,
     }
-    assert "Compose(" in repr(pipe)
+    assert "Compose(augmentations=" in repr(pipe)
     # `compose | op` keeps the gate: p=0 skips the flip, Identity passes through.
     chained = pipe | gz.Identity()
     assert isinstance(chained, Sequential)
     assert chained.operators[0] is pipe
     assert chained(patch) is patch
     with pytest.raises(TypeError, match="must be an Operator"):
-        augment.Compose([{"class": "x"}])  # type: ignore[list-item]
+        augment.Compose(augmentations=[{"class": "x"}])  # type: ignore[list-item]
 
 
 def test_compose_is_not_a_top_level_export() -> None:

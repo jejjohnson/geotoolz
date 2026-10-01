@@ -112,7 +112,7 @@ geotoolz/<family>/
   `viz` → `radiometry` stretches) rather than re-implementing it inline.
 - `learn/_src`: `array.py` axis bookkeeping, `estimators.py` the
   non-Operator `GeoTensorEstimator` adapter, `operators.py` every Operator
-  (`SklearnOp`, the named wrappers, `ModelOp`).
+  (`SklearnOp`, the `Pixelwise*` wrappers, `ModelOp`).
 - Not families: `readers/` (sensor-reader framework — `_src/` plus public
   per-sensor subpackages such as `readers.toy_sensor`), the top-level
   `patch_ops.py` geopatcher bridge, and the deprecated `model.py` alias.
@@ -139,6 +139,37 @@ deselected) and an opt-in `tests/bench` suite (`pytest tests/bench
 - Releases via release-please with per-package components (`geotoolz-vX.Y.Z`,
   `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`); conventional-commit
   titles are enforced.
+
+### Operator parameter vocabulary
+
+Every `pipekit.Operator` constructor is **keyword-only** — `__init__(self, *, ...)`,
+with no exception for a wrapped estimator / model / patcher
+(`PixelwisePCA(estimator=PCA())`, `ModelOp(model=net)`, `GridSampler(patcher=p)`).
+One concept has one parameter name across every family:
+
+| Concept | Name | Notes |
+|---|---|---|
+| Band axis position | `axis: int` (default `-3`) | Only ever the band axis — never a reduction or an orientation (`segment`'s skimage wrappers, formerly `channel_axis`, default to `0` of their per-frame `(C, H, W)` input). |
+| Reduction axes | `reduce_axes` | Tuple of axes (or `None` = global): `radiometry.PercentileClip`, `viz.StretchToUint8`, the `normalize` primitives, `radiometry.dos1`. |
+| Orientation | `direction` | `"column"` / `"row"` (`restore.DestripeColumn`), `"scan"` / `"sample"` (`geom.SegmentStitch`). |
+| One band | one `BandRef` name per band (`red`, `nir`, `swir1`, `qa_band`, `band`, …) | Integer position *or* band name; no `*_idx` twins. Tier-A primitives take integer `*_idx` positions. |
+| Several bands | `bands` | List of `BandRef` (`spectral.SelectBands`, `viz.Composite`). `io` readers keep rasterio's 1-based file `indexes`. |
+| Value written into pixels | `fill_value` | The carrier attribute stays georeader's `fill_value_default`; a strategy string is `strategy` (`restore.ReplaceOutliers`). |
+| RNG seed | `seed` | |
+| Neighbourhood side length | `window` | Pixels (odd int, or `(h, w)`): despeckle, destripe, `MedianDenoise`, `NLMeans`, `CLAHE`, `AdaptiveWindowBackground`, `SpectralSmoothing`. |
+| Neighbourhood half-width / distance | `radius`, `search_radius` | Not a window (radius `r` ≈ window `2r + 1`): `mask.BufferMask` (with `unit`), `restore.GapFillIDW`, `restore.NLMeans`, `viz.AnnotatePoints`. |
+| Output size | `size` | Crop / tile / chip size (`augment.RandomCrop`, `geom.Tile`, `geom.SlidingWindow`, `patch_ops` samplers) — not a window. `io.ReadWindow(window=...)` is a rasterio pixel window, not a size. |
+| Gaussian scale | `sigma` | `segment.Quickshift(kernel_size=...)` keeps skimage's name: a kernel *width*, not a window. |
+| Areas | `min_area_px`, `max_hole_area_px`, `min_area_m2` | Unit suffix is mandatory. |
+| Connectivity | `connectivity: 4 \| 8` | Converted internally for skimage / scipy (`1` / `2` is rejected). |
+| Wavelengths | `wavelengths` (nm) | Also the `attrs["wavelengths"]` key; qualified variants `source_wavelengths` / `target_wavelengths`. |
+| Percentile stretch bounds | `lower` / `upper` | |
+| QA selection | `qa_band`, `bits`, `values`, `targets` | `targets` = `SENSOR_QA_REGISTRY` names. |
+| Denominator stabiliser | `eps` (default `1e-10`) | |
+| scikit-learn wrappers | `Pixelwise*` | `PixelwisePCA`, `PixelwiseKMeans`, … never shadow the sklearn class they wrap. |
+
+`tests/test_operator_contract.py::test_constructors_are_keyword_only` and
+`::test_constructor_vocabulary` enforce the style and reject the retired spellings.
 
 ## Plans
 

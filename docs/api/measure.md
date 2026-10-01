@@ -4,7 +4,7 @@
 either label `GeoTensor`s or `GeoDataFrame`s with geometries in the input CRS.
 
 - `LabelConnectedComponents` — component labelling with `connectivity=4|8` (skimage's `1|2`
-  spelling is not accepted) and an optional `min_area` filter
+  spelling is not accepted) and an optional `min_area_px` filter
 - `RegionProps` — per-component property table; carries `forbid_in_yaml=True` when given an
   `intensity_image`. Property columns are in **pixel units** (areas in pixels, lengths in pixel
   widths, positions as `(row, col)`); `scale_to_crs=True` converts areas / lengths / second moments

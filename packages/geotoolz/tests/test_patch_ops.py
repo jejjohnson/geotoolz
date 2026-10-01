@@ -66,7 +66,7 @@ class TestGridSampler:
     def test_returns_list_of_patches(
         self, field: RasterField, patcher: SpatialPatcher
     ) -> None:
-        op = GridSampler(patcher)
+        op = GridSampler(patcher=patcher)
         patches = op(field)
         assert isinstance(patches, list)
         assert all(isinstance(p, Patch) for p in patches)
@@ -105,9 +105,13 @@ def test_runtime_holders_are_forbid_in_yaml(patcher: SpatialPatcher) -> None:
     field = RasterField(
         GeoTensor(np.ones((4, 4)), rasterio.Affine.identity(), "EPSG:32630")
     )
-    config = MergePatches(SpatialOverlapAdd(), domain=field.domain).get_config()
+    config = MergePatches(
+        aggregation=SpatialOverlapAdd(), domain=field.domain
+    ).get_config()
     assert config["domain"] == {"class": type(field.domain).__name__}
-    assert GridSampler(patcher).get_config() == {"patcher": patcher.get_config()}
+    assert GridSampler(patcher=patcher).get_config() == {
+        "patcher": patcher.get_config()
+    }
 
 
 class TestSpatialTriangular:
@@ -151,7 +155,7 @@ class TestApplyToChips:
     ) -> None:
         patches = list(patcher.split(field))
         double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
-        out = ApplyToChips(double)(patches)
+        out = ApplyToChips(operator=double)(patches)
         assert len(out) == len(patches)
         for src, dst in zip(patches, out, strict=True):
             assert dst.anchor == src.anchor
@@ -161,7 +165,7 @@ class TestApplyToChips:
 
     def test_config_nests_operator(self) -> None:
         double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
-        config = ApplyToChips(double).get_config()
+        config = ApplyToChips(operator=double).get_config()
         assert config == {
             "operator": {"class": "Lambda", "config": double.get_config()}
         }
@@ -174,9 +178,9 @@ class TestStitchInSequential:
         double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
         pipe = Sequential(
             [
-                GridSampler(patcher),
-                ApplyToChips(double),
-                MergePatches(SpatialOverlapAdd(), domain=field.reader),
+                GridSampler(patcher=patcher),
+                ApplyToChips(operator=double),
+                MergePatches(aggregation=SpatialOverlapAdd(), domain=field.reader),
             ]
         )
         result = pipe(field)
@@ -310,7 +314,7 @@ class TestLabelSamplers:
                     size=(4, 4),
                     seed=0,
                 ),
-                ApplyToChips(double),
+                ApplyToChips(operator=double),
             ]
         )
         out = pipe(scene)
