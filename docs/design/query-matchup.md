@@ -395,7 +395,7 @@ All operators are `pipekit.Operator` subclasses, `__call__(*inputs) → GeoTenso
 | `RasterToPointCloud(k=…, max_radius=…)` | `(raster, cloud) → cloud_with_attrs` | scipy.spatial.KDTree | Sample raster onto cloud nodes |
 | `PointCloudToRaster(method="idw" \| "binned_stat", like=…)` | `(cloud, like) → raster` | scipy KDTree + IDW | Rasterize point cloud |
 | `VectorToRasterAgg(agg="mean" \| "majority" \| "count", like=…)` | `(vector, like) → raster` | extends `Rasterize` | Aggregation policy for overlapping features |
-| `StackMatched(order=…, fill=NaN)` | `[t1, t2, …] → multi_band` | numpy stack + reproject-to-like | Compositing-style: N aligned tensors → 1 multi-band GeoTensor |
+| `StackMatched(order=…, fill_value=NaN)` | `[t1, t2, …] → multi_band` | numpy stack + reproject-to-like | Compositing-style: N aligned tensors → 1 multi-band GeoTensor |
 | `BlendMatched(weights=… \| "ivw", method="mean")` | `[t1, t2, …] → blended` | numpy weighted mean | IVW = inverse-variance weighting |
 
 **xvec dependency.** Added as a new optional extra:

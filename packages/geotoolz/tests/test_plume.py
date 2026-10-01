@@ -11,7 +11,8 @@ from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
 
 import geotoolz as gz
-from geotoolz.plume import convert_column_units, resolve_threshold
+from geotoolz.plume import convert_column_units
+from geotoolz.segment import resolve_threshold
 
 
 def _gt(values: np.ndarray) -> GeoTensor:
@@ -233,7 +234,7 @@ def test_contours_ignore_nan() -> None:
 
 
 def test_plume_mask_threads_otsu_nbins() -> None:
-    from geotoolz.plume import otsu_threshold
+    from geotoolz.segment import otsu_threshold
 
     rng = np.random.default_rng(0)
     values = np.concatenate(

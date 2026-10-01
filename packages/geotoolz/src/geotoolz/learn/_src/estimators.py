@@ -305,8 +305,19 @@ class GeoTensorEstimator:
         self.fit_n_samples = int(x_fit.shape[0])
         return self._unflatten_apply_result(gt, flat, y_fit, valid)
 
-    def save_state(self, path: str | Path) -> None:
-        """Persist the fitted estimator and any fitted imputer with joblib."""
+    def save_state(self, path: str | Path, *, write_meta: bool = False) -> None:
+        """Persist the fitted estimator and any fitted imputer with joblib.
+
+        The file is a joblib pickle: load it only where you would run code
+        from its author (see :meth:`load_state`).
+
+        Args:
+            path: Destination file (parent directories are created).
+            write_meta: Also write a ``<path>.meta.json`` sidecar recording
+                the scikit-learn version, the fit input shape / sample
+                count and a UTC ``fit_timestamp``. Off by default so saving
+                is deterministic and writes exactly one file.
+        """
         state_path = Path(path)
         state_path.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump(
@@ -319,14 +330,22 @@ class GeoTensorEstimator:
             },
             state_path,
         )
-        _write_metadata(
-            state_path,
-            fit_geotensor_shape=self.fit_geotensor_shape,
-            fit_n_samples=self.fit_n_samples,
-        )
+        if write_meta:
+            _write_metadata(
+                state_path,
+                fit_geotensor_shape=self.fit_geotensor_shape,
+                fit_n_samples=self.fit_n_samples,
+            )
 
     def load_state(self, path: str | Path) -> None:
-        """Load a fitted estimator and imputer previously saved with joblib."""
+        """Load a fitted estimator and imputer previously saved with joblib.
+
+        Warning:
+            ``joblib.load`` unpickles the file, and unpickling can execute
+            arbitrary code. Only load state files you created yourself or
+            obtained from a source you trust as much as the code you run;
+            never load one from an untrusted upload, download or share.
+        """
         state_path = Path(path)
         if not state_path.exists():
             raise FileNotFoundError(f"Sklearn state file not found: {state_path}")

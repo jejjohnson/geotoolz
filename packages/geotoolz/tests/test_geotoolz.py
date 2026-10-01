@@ -149,3 +149,101 @@ def test_family_layout() -> None:
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
         )
     assert problems == []
+
+
+#: Public operators deliberately *not* re-exported at the top level; the
+#: justification for each is in the ``geotoolz/__init__.py`` docstring.
+_TOP_LEVEL_EXCEPTIONS = frozenset(
+    {
+        "geotoolz.augment.Compose",  # reads like pipekit's generic ``compose``
+        "geotoolz.io.SinkOperator",  # abstract base; next to pipekit's ``Sink``
+        "geotoolz.io.SourceOperator",  # abstract base for custom readers
+    }
+)
+#: Optional-extra modules: ``import geotoolz`` must not require their deps.
+_OPTIONAL_MODULES = frozenset({"geotoolz.patch_ops"})
+
+
+def _public_modules() -> list[Any]:
+    """Every public ``geotoolz.*`` module: families and their subnamespaces."""
+    import importlib
+    import pkgutil
+
+    return [
+        importlib.import_module(info.name)
+        for info in pkgutil.walk_packages(geotoolz.__path__, "geotoolz.")
+        if not any(part.startswith("_") for part in info.name.split("."))
+    ]
+
+
+def test_public_operators_exported() -> None:
+    """Every public Operator (and the SCL / QA constants) is top-level (#164)."""
+    from pipekit import Operator
+
+    assert len(geotoolz.__all__) == len(set(geotoolz.__all__))
+    modules = _public_modules()
+    assert {"geotoolz.geom.coregister", "geotoolz.qa"} <= {m.__name__ for m in modules}
+    problems: list[str] = []
+    for module in modules:
+        names = getattr(module, "__all__", None)
+        if names is None:
+            problems.append(f"{module.__name__}: no __all__")
+            continue
+        if len(names) != len(set(names)):
+            problems.append(f"{module.__name__}: duplicate names in __all__")
+        if module.__name__ in _OPTIONAL_MODULES:
+            continue
+        for name in names:
+            obj = getattr(module, name)
+            qualified = f"{module.__name__}.{name}"
+            if not (isinstance(obj, type) and issubclass(obj, Operator)):
+                continue
+            if qualified in _TOP_LEVEL_EXCEPTIONS:
+                assert name not in geotoolz.__all__, f"stale exception {qualified}"
+            elif getattr(geotoolz, name, None) is not obj:
+                problems.append(f"{qualified} is not geotoolz.{name}")
+    assert problems == []
+    qa_constants = [n for n in geotoolz.qa.__all__ if n.isupper() and "_" in n]
+    assert {"SCL_CLOUDS_AND_INVALID", "SENSOR_QA_REGISTRY"} <= set(qa_constants)
+    for name in [*qa_constants, "SCL"]:
+        assert getattr(geotoolz, name) is getattr(geotoolz.qa, name), name
+        assert name in geotoolz.__all__
+
+
+def test_one_home_per_public_name() -> None:
+    """No object is exported from two geotoolz families (#164).
+
+    A package re-exporting its own submodules' names (``readers.toy_sensor``
+    re-exporting ``toy_sensor.reader.Reader``) is one home; ``plume``
+    re-exporting ``segment.otsu_threshold`` is two.
+    """
+    import types
+
+    homes: dict[int, dict[str, str]] = {}
+    for module in _public_modules():
+        family = module.__name__.split(".")[1]
+        for name in module.__all__:
+            obj = getattr(module, name)
+            if isinstance(obj, types.ModuleType | int | float | str | bool):
+                continue
+            homes.setdefault(id(obj), {}).setdefault(
+                family, f"{module.__name__}.{name}"
+            )
+    shared = sorted(sorted(w.values()) for w in homes.values() if len(w) > 1)
+    assert shared == []
+
+
+def test_removed_modules_are_gone() -> None:
+    """Removed aliases stay removed — no deprecation shims (#164)."""
+    import importlib
+
+    import pytest
+
+    for module in ("geotoolz.cloud", "geotoolz.model"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module)
+    for name in ("cloud", "model"):
+        assert not hasattr(geotoolz, name)
+        assert name not in geotoolz.__all__
+    assert not hasattr(geotoolz.viz, "ToDisplayRange")
+    assert geotoolz.ModelOp is geotoolz.learn.ModelOp

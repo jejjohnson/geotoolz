@@ -13,6 +13,8 @@ from geotoolz.readers._src.base import SensorReader, Track
 from geotoolz.readers.toy_sensor import constants
 
 
+__all__ = ["Reader"]
+
 _DEFAULT_NUM_BANDS = 4
 
 

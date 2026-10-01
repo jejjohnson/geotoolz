@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import geopandas as gpd
@@ -9,6 +10,7 @@ import numpy as np
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
+from pipekit import Operator
 from shapely.geometry import MultiPolygon, box
 
 from geotoolz.mask import (
@@ -537,9 +539,35 @@ def test_natural_earth_mask_constructors_use_cached_loader(
         assert not bool(np.asarray(country_mask)[1, 0])
         dropped = CountryMask(iso_a3="GRL", source=source, keep="outside")(scene)
         np.testing.assert_array_equal(np.asarray(dropped), ~np.asarray(country_mask))
-        assert calls == [source, source, source]
+        # Land / Ocean never ran, so never loaded; the two CountryMasks share
+        # one process-cached read of the countries layer.
+        assert calls == [source]
+        mask_operators.clear_natural_earth_cache()
+        CountryMask(iso_a3="GRL", source=source)(scene)
+        assert calls == [source, source]
     finally:
         mask_operators._load_natural_earth.cache_clear()
+
+
+def test_natural_earth_not_loaded_in_ctor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Building / configuring / hydrating a Natural Earth mask does no I/O."""
+
+    def boom(_kind: str, _source: str) -> gpd.GeoDataFrame:
+        raise AssertionError("Natural Earth loaded eagerly")
+
+    monkeypatch.setattr(mask_operators, "_load_natural_earth", boom)
+    for op in (
+        LandMask(),
+        OceanMask(keep="outside"),
+        CountryMask(iso_a3=("ESP", "PRT")),
+    ):
+        state = json.loads(json.dumps(op.state))
+        rebuilt = Operator.from_state(state)
+        assert type(rebuilt) is type(op)
+        assert rebuilt.get_config() == op.get_config()
+    scene = _toy_geotensor(np.zeros((2, 2), dtype=np.float32))
+    with pytest.raises(AssertionError, match="eagerly"):
+        LandMask()(scene)
 
 
 def test_country_mask_rejects_unknown_iso(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -551,8 +579,9 @@ def test_country_mask_rejects_unknown_iso(monkeypatch: pytest.MonkeyPatch) -> No
         mask_operators, "_load_natural_earth", lambda _kind, _source: countries
     )
 
+    op = CountryMask(iso_a3="USA")  # codes are checked on first use
     with pytest.raises(ValueError, match="no countries"):
-        CountryMask(iso_a3="USA")
+        op(_toy_geotensor(np.zeros((2, 2), dtype=np.float32)))
 
 
 def test_4d_time_stack() -> None:

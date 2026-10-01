@@ -211,82 +211,116 @@ class DistanceMask(PolygonMask):
         }
 
 
-class LandMask(PolygonMask):
+class _NaturalEarthMask(PolygonMask):
+    """Base for the Natural Earth masks: the polygons load on first use.
+
+    Construction, ``get_config`` and ``Operator.from_state`` never touch the
+    network or disk, so building (or hydra-instantiating) a pipeline has no
+    I/O side effects. The vectors are read by :meth:`_load_geometry` the
+    first time :attr:`geometry` is needed (normally the first call) and
+    memoised on the instance. Loads go through a process-lifetime cache
+    shared by every instance; release it with
+    :func:`geotoolz.mask.clear_natural_earth_cache`.
+    """
+
+    forbid_in_yaml: ClassVar[bool] = False
+
+    def __init__(self, *, source: str, keep: Keep) -> None:
+        # Deliberately not ``PolygonMask.__init__``: ``geometry`` is lazy.
+        self.source = source
+        self.crs = "EPSG:4326"
+        self.all_touched = False
+        self.keep = _check_keep(keep, type(self).__name__)
+        self._geometry: gpd.GeoDataFrame | None = None
+
+    @property
+    def geometry(self) -> gpd.GeoDataFrame:
+        """The mask polygons, loaded (and memoised) on first access."""
+        if self._geometry is None:
+            self._geometry = self._load_geometry()
+        return self._geometry
+
+    def _load_geometry(self) -> gpd.GeoDataFrame:
+        raise NotImplementedError
+
+
+class LandMask(_NaturalEarthMask):
     """Rasterize Natural Earth land polygons into a boolean mask.
 
     Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
-    :class:`PolygonMask`).
+    :class:`PolygonMask`). The polygons are loaded on the first call,
+    never in the constructor.
 
     Args:
         source: ``"natural_earth_10m"`` (default) downloads and caches
-            the Natural Earth 1:10m land polygons; any other value is a
-            local vector file path passed to ``geopandas.read_file``.
+            the Natural Earth 1:10m land polygons on first use; any other
+            value is a local vector file path passed to
+            ``geopandas.read_file``.
         keep: ``"inside"`` (default) keeps land pixels (mask True
             elsewhere); ``"outside"`` drops them.
     """
 
-    forbid_in_yaml: ClassVar[bool] = False
-
     def __init__(
         self, *, source: str = "natural_earth_10m", keep: Keep = "inside"
     ) -> None:
-        self.source = source
-        super().__init__(
-            geometry=_load_natural_earth("land", source), crs="EPSG:4326", keep=keep
-        )
+        super().__init__(source=source, keep=keep)
+
+    def _load_geometry(self) -> gpd.GeoDataFrame:
+        return _load_natural_earth("land", self.source)
 
     def get_config(self) -> dict[str, Any]:
         return {"source": self.source, "keep": self.keep}
 
 
-class OceanMask(PolygonMask):
+class OceanMask(_NaturalEarthMask):
     """Rasterize Natural Earth ocean polygons into a boolean mask.
 
     Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
-    :class:`PolygonMask`).
+    :class:`PolygonMask`). The polygons are loaded on the first call,
+    never in the constructor.
 
     Args:
         source: ``"natural_earth_10m"`` (default) downloads and caches
-            the Natural Earth 1:10m ocean polygons; any other value is a
-            local vector file path passed to ``geopandas.read_file``.
+            the Natural Earth 1:10m ocean polygons on first use; any
+            other value is a local vector file path passed to
+            ``geopandas.read_file``.
         keep: ``"inside"`` (default) keeps ocean pixels (mask True
             elsewhere); ``"outside"`` drops them.
     """
 
-    forbid_in_yaml: ClassVar[bool] = False
-
     def __init__(
         self, *, source: str = "natural_earth_10m", keep: Keep = "inside"
     ) -> None:
-        self.source = source
-        super().__init__(
-            geometry=_load_natural_earth("ocean", source), crs="EPSG:4326", keep=keep
-        )
+        super().__init__(source=source, keep=keep)
+
+    def _load_geometry(self) -> gpd.GeoDataFrame:
+        return _load_natural_earth("ocean", self.source)
 
     def get_config(self) -> dict[str, Any]:
         return {"source": self.source, "keep": self.keep}
 
 
-class CountryMask(PolygonMask):
+class CountryMask(_NaturalEarthMask):
     """Rasterize Natural Earth country polygons selected by ISO A3 code.
 
     Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
-    :class:`PolygonMask`).
+    :class:`PolygonMask`). The polygons are loaded on the first call,
+    never in the constructor.
 
     Args:
         iso_a3: One ISO A3 country code or a sequence of them (e.g.
             ``"ESP"`` or ``("ESP", "PRT")``).
         source: ``"natural_earth_10m"`` (default) downloads and caches
-            the Natural Earth 1:10m admin-0 countries; any other value
-            is a local vector file path with an ``ISO_A3`` column.
+            the Natural Earth 1:10m admin-0 countries on first use; any
+            other value is a local vector file path with an ``ISO_A3``
+            column.
         keep: ``"inside"`` (default) keeps the selected countries (mask
             True elsewhere); ``"outside"`` drops them.
 
     Raises:
-        ValueError: If none of the requested codes are found.
+        ValueError: On the first call, if none of the requested codes are
+            found (codes are checked only once the polygons load).
     """
-
-    forbid_in_yaml: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -296,12 +330,14 @@ class CountryMask(PolygonMask):
         keep: Keep = "inside",
     ) -> None:
         self.iso_a3 = (iso_a3,) if isinstance(iso_a3, str) else tuple(iso_a3)
-        self.source = source
-        countries = _load_natural_earth("countries", source)
+        super().__init__(source=source, keep=keep)
+
+    def _load_geometry(self) -> gpd.GeoDataFrame:
+        countries = _load_natural_earth("countries", self.source)
         selected = countries[countries["ISO_A3"].isin(self.iso_a3)]
         if selected.empty:
             raise ValueError(f"CountryMask: no countries found for {list(self.iso_a3)}")
-        super().__init__(geometry=selected, crs="EPSG:4326", keep=keep)
+        return selected
 
     def get_config(self) -> dict[str, Any]:
         iso_a3: str | list[str]
@@ -804,9 +840,12 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
     The special ``source="natural_earth_10m"`` downloads the corresponding
     Natural Earth 1:10m zip once into the geotoolz cache directory and reuses
     the extracted shapefile. Any other source is passed to
-    ``geopandas.read_file``. The in-process ``@cache`` avoids repeated reads
-    across multiple operator instances in one Python session; the downloaded
-    zip and extracted shapefile are cached separately on disk across sessions.
+    ``geopandas.read_file``. Called lazily, on a Natural Earth mask's first
+    use. The in-process ``@cache`` avoids repeated reads across operator
+    instances and holds the GeoDataFrames for the process lifetime (the
+    1:10m layers are tens of MB); release them with
+    :func:`clear_natural_earth_cache`. The downloaded zip and extracted
+    shapefile are cached separately on disk across sessions.
     """
     if source != "natural_earth_10m":
         return gpd.read_file(source)
@@ -842,6 +881,19 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
         )
     shp = shapefiles[0]
     return gpd.read_file(shp)
+
+
+def clear_natural_earth_cache() -> None:
+    """Release the in-process Natural Earth GeoDataFrames.
+
+    `LandMask` / `OceanMask` / `CountryMask` share one process-lifetime
+    cache keyed on ``(kind, source)``, so each layer is read at most once
+    per session. Call this to free that memory, or to re-read a local
+    ``source`` file that changed on disk. Mask instances that already
+    loaded their polygons keep them; the on-disk download cache is
+    untouched.
+    """
+    _load_natural_earth.cache_clear()
 
 
 def _download_url(url: str, destination: Path, *, timeout: float = 60.0) -> None:

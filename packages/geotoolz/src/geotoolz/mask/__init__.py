@@ -39,6 +39,7 @@ from geotoolz.mask._src.operators import (
     RemoveSmallHoles,
     RemoveSmallObjects,
     SlopeMask,
+    clear_natural_earth_cache,
 )
 
 
@@ -66,6 +67,7 @@ __all__ = [
     "apply_mask",
     "buffer_mask",
     "clean_mask",
+    "clear_natural_earth_cache",
     "close_mask",
     "combine_masks",
     "dilate_mask",

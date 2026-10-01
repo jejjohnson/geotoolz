@@ -2,8 +2,8 @@
 
 ``geotoolz._src.labels`` is the one implementation behind
 ``mask.remove_small_*``, ``measure.LabelConnectedComponents`` /
-``RegionProps`` / ``SkeletonLength`` and ``plume.label_components`` /
-``PlumeContours`` / ``PlumeFootprint`` / ``plume_length("skeleton")``.
+``RegionProps`` / ``SkeletonLength`` and ``plume`` (``plume_mask`` /
+``PlumeContours`` / ``PlumeFootprint`` / ``plume_length("skeleton")``).
 The ``*_matches_legacy`` tests pin the refactor to the pre-consolidation
 algorithms, kept here as reference implementations.
 """

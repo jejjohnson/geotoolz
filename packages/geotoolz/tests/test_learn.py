@@ -111,6 +111,10 @@ def test_state_roundtrip_saves_joblib_and_metadata(tmp_path: Path) -> None:
     state_path = tmp_path / "pca.joblib"
 
     op.save_state(state_path)
+    assert not state_path.with_suffix(".joblib.meta.json").exists()  # opt-in
+    op.save_state(state_path, write_meta=True)
+    meta = json.loads(state_path.with_suffix(".joblib.meta.json").read_text())
+    assert {"sklearn_version", "fit_timestamp"} <= meta.keys()
     loaded = gz.learn.PixelwisePCA(
         estimator=PCA(n_components=2),
         fit_mode="pre_fit",
@@ -120,7 +124,6 @@ def test_state_roundtrip_saves_joblib_and_metadata(tmp_path: Path) -> None:
 
     np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
     assert state_path.exists()
-    assert state_path.with_suffix(".joblib.meta.json").exists()
     json.dumps(loaded.get_config())
 
 

@@ -12,7 +12,12 @@
     ``Clusterer`` / ``Proba`` / ``Decision``) backed by a ``NanPolicy``
     dataclass. Those are not in this PR; the current ``mode=`` /
     ``nan_fit=`` / ``nan_transform=`` keyword surface will be replaced
-    with that vocabulary in a follow-up, with deprecation shims.
+    with that vocabulary in a follow-up (a breaking change, without aliases).
+
+    **State files are pickles.** ``load_state`` / ``state_path=`` unpickle
+    with ``joblib.load``, which can execute arbitrary code: only load
+    files from a trusted source. ``save_state(..., write_meta=True)``
+    opts in to a timestamped ``<path>.meta.json`` sidecar.
 
     **Supervised estimators (classifiers / regressors) must be pre-fit**
     out-of-graph and loaded via ``state_path=``. The operator's in-graph
