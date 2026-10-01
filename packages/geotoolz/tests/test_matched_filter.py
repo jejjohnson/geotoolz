@@ -748,3 +748,21 @@ def test_4d_time_stack() -> None:
         )
     with pytest.raises(ValueError, match="AdaptiveWindowBackground accepts 3-D"):
         gz.matched_filter.AdaptiveWindowBackground(window_size=3)(stack)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "pixel", "total"),
+    [("impulse", None, 1.0), ("impulse", (1, 2), 3.0), ("uniform", None, 48.0)],
+)
+def test_target_pattern_on_geotensor_returns_plain_array(
+    pattern: str, pixel: tuple[int, int] | None, total: float
+) -> None:
+    """``_target_pattern`` must not build its pattern as a GeoTensor (#162)."""
+    from geotoolz.matched_filter._src.operators import _target_pattern
+
+    out = _target_pattern(
+        toy_geotensor(np.ones((3, 4, 4))), pattern=pattern, pixel=pixel
+    )
+    assert type(out) is np.ndarray
+    assert out.shape == (3, 4, 4)
+    assert out.sum() == total

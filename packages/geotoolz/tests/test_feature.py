@@ -125,6 +125,20 @@ def test_blob_doh_radius_is_sigma_not_sqrt_two_scaled() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "op_cls", [gz.feature.BlobLoG, gz.feature.BlobDOG, gz.feature.BlobDoH]
+)
+def test_blob_empty_result_has_same_columns_as_detections(op_cls: type) -> None:
+    """A blob-free image returns the same schema, ``radius`` included."""
+    found = op_cls(min_sigma=1.0, max_sigma=4.0, threshold=0.001)(_blob_scene())
+    empty = op_cls(min_sigma=1.0, max_sigma=4.0, threshold=0.001)(
+        _gt(np.zeros((32, 32)))
+    )
+    assert len(found) > 0
+    assert len(empty) == 0
+    assert list(empty.columns) == list(found.columns)
+
+
 def test_corner_harris_returns_points() -> None:
     image = np.zeros((20, 20), dtype=float)
     image[5:15, 5:15] = 1.0

@@ -284,7 +284,7 @@ class PlumeMask(Operator):
         min_area: Minimum component size in pixels.
         connectivity: 4 or 8 connectivity for component labelling.
         nbins: Histogram bins for the ``"otsu"`` threshold (see
-            :func:`otsu_threshold`); ignored by the other modes.
+            :func:`geotoolz.segment.otsu_threshold`); ignored by the other modes.
             Default ``256``.
 
     Nodata pixels (non-finite or equal to the input's fill value) are

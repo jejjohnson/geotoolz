@@ -1,7 +1,8 @@
 # Readers
 
 Sensor reader framework. See the concept page [Adding a new sensor reader](../readers.md) for the
-namespace contract (`Reader`, `BANDS`, `CONSTANTS`, `ops`, `presets`) and the package-data layout.
+namespace contract (`Reader`, `BANDS`, `CONSTANTS`, `presets`, and `ops` once a sensor has its own
+operators) and the package-data layout.
 
 - **Base class:** `SensorReader` — extends `georeader.GeoData` with the sensor surface (`_track`,
   `_bands`, lazy `_read_window`, …)

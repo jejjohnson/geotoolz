@@ -1,4 +1,20 @@
-"""Operator wrappers for scikit-learn estimators."""
+"""Tier-B operators of :mod:`geotoolz.learn` -- every ``pipekit.Operator`` here.
+
+Module rule for ``learn/_src``:
+
+* ``array.py`` -- Tier A: axis bookkeeping (reshape modes, output fill
+  values); no sklearn, no carriers.
+* ``estimators.py`` -- :class:`GeoTensorEstimator`, the non-Operator
+  adapter that marshals a carrier to ``(n_samples, n_features)``, applies
+  the NaN strategy, calls the estimator and restores the grid, plus its
+  joblib state I/O.
+* ``operators.py`` (this module) -- the Operators: :class:`SklearnOp`
+  (fitting lifecycle over a :class:`GeoTensorEstimator`), the named
+  convenience wrappers (``PCA``, ``KMeans``, ...), and the
+  framework-agnostic :class:`ModelOp`, which wraps any callable (torch,
+  JAX, sklearn ``predict``, a plain function) without importing a
+  framework.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
-from pipekit import Operator
+from pipekit import Carrier, Operator
 
 from geotoolz._src.config import jsonable
 from geotoolz.learn._src.estimators import (
@@ -211,3 +227,274 @@ def _resolve_task(estimator: Any, task: Task | None) -> Task:
 def _validate_fit_mode(fit_mode: FitMode) -> None:
     if fit_mode not in {"pre_fit", "fit_on_call", "refit", "fit_streaming", "fit_only"}:
         raise ValueError(f"Unknown fit mode: {fit_mode!r}")
+
+
+class PCA(SklearnOp):
+    """Pixel-wise PCA convenience operator.
+
+    Pins ``mode="pixel"``, ``task="transform"``, ``nan_fit="drop"``;
+    every other :class:`SklearnOp` keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("task", "transform")
+        kwargs.setdefault("nan_fit", "drop")
+        super().__init__(estimator, **kwargs)
+
+
+class IPCA(SklearnOp):
+    """Streaming IncrementalPCA convenience operator.
+
+    Pins ``mode="pixel"``, ``fit_mode="fit_streaming"`` (each call routes
+    through ``partial_fit``), ``task="transform"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("fit_mode", "fit_streaming")
+        kwargs.setdefault("task", "transform")
+        super().__init__(estimator, **kwargs)
+
+
+class NMF(SklearnOp):
+    """Pixel-wise NMF convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="transform"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("task", "transform")
+        super().__init__(estimator, **kwargs)
+
+
+class KMeans(SklearnOp):
+    """Pixel-wise KMeans label convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="predict"`` — the output is a
+    single-band cluster-label map; every other :class:`SklearnOp`
+    keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("task", "predict")
+        super().__init__(estimator, **kwargs)
+
+
+class MiniBatchKMeans(SklearnOp):
+    """Streaming MiniBatchKMeans convenience operator.
+
+    Pins ``mode="pixel"``, ``fit_mode="fit_streaming"`` (each call routes
+    through ``partial_fit``), ``task="predict"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("fit_mode", "fit_streaming")
+        kwargs.setdefault("task", "predict")
+        super().__init__(estimator, **kwargs)
+
+
+class GMM(SklearnOp):
+    """Gaussian mixture convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="predict_proba"`` — the output has
+    one band per mixture component; every other :class:`SklearnOp`
+    keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("task", "predict_proba")
+        super().__init__(estimator, **kwargs)
+
+
+class IsolationForest(SklearnOp):
+    """Pixel-wise IsolationForest anomaly-score convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="decision_function"`` — the output
+    is a single-band anomaly-score map; every other :class:`SklearnOp`
+    keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("task", "decision_function")
+        super().__init__(estimator, **kwargs)
+
+
+class OneClassSVM(SklearnOp):
+    """Pixel-wise OneClassSVM anomaly-score convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="decision_function"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("task", "decision_function")
+        super().__init__(estimator, **kwargs)
+
+
+class LocalOutlierFactor(SklearnOp):
+    """Pixel-wise LocalOutlierFactor convenience operator.
+
+    Pins ``mode="pixel"`` and ``task="decision_function"``; requires the
+    estimator to be constructed with ``novelty=True`` (sklearn only
+    exposes ``decision_function`` in novelty mode). Every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("task", "decision_function")
+        super().__init__(estimator, **kwargs)
+
+
+class KNNImputer(SklearnOp):
+    """Pixel-wise KNNImputer convenience operator.
+
+    Pins ``mode="pixel"``, ``task="transform"``, and
+    ``nan_fit=nan_transform="propagate"`` so the NaN-tolerant imputer
+    fits on the clean rows and NaN placement is preserved for it to
+    fill; every other :class:`SklearnOp` keyword argument passes
+    through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("task", "transform")
+        kwargs.setdefault("nan_fit", "propagate")
+        kwargs.setdefault("nan_transform", "propagate")
+        super().__init__(estimator, **kwargs)
+
+
+class IterativeImputer(SklearnOp):
+    """Pixel-wise IterativeImputer convenience operator.
+
+    Pins ``mode="pixel"``, ``task="transform"``, and
+    ``nan_fit=nan_transform="propagate"``; every other
+    :class:`SklearnOp` keyword argument passes through.
+    """
+
+    def __init__(self, estimator: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("mode", "pixel")
+        kwargs.setdefault("task", "transform")
+        kwargs.setdefault("nan_fit", "propagate")
+        kwargs.setdefault("nan_transform", "propagate")
+        super().__init__(estimator, **kwargs)
+
+
+class ModelOp(Operator):
+    """Wrap any callable as an Operator.
+
+    Materialises the GeoTensor to a plain ``np.ndarray`` (via
+    ``np.asarray``) before handing it to the model — frameworks that
+    strip the subclass (torch, JAX, sklearn) don't care, and frameworks
+    that preserve it (numpy proper) still see something sensible.
+
+    Args:
+        model: Any object that can be called as ``model(arr)`` or whose
+            ``method`` attribute can be called as
+            ``model.predict(arr)``. No isinstance / framework imports.
+        method: Method name to invoke on ``model``. Default
+            ``"__call__"`` — equivalent to ``model(arr)``. Set to
+            ``"predict"`` for sklearn estimators.
+        batch_size: If set, split the input along axis 0 into chunks of
+            this size, call the model once per chunk, concatenate the
+            results along axis 0. Useful when the model can't fit the
+            whole input in GPU memory.
+
+    Note:
+        ``forbid_in_yaml = True`` — the model is a runtime object and
+        won't round-trip to YAML. Users typically pin a model artifact
+        (state-dict + class config) themselves.
+
+    Examples:
+        Inference with a sklearn classifier::
+
+            op = ModelOp(rf_clf, method="predict")
+            preds = op(features_gt)
+
+        Batched inference with a torch model::
+
+            op = ModelOp(unet_model, batch_size=8)
+            preds = op(chips_gt)  # iterates 8 chips at a time
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
+    # ConfigMixin would auto-derive `model` from `__init__` as a non-JSON
+    # opaque object; override with a curated debug repr below.
+    __config_mixin_auto__: ClassVar[bool] = False
+
+    def __init__(
+        self,
+        model: Any,
+        *,
+        method: str = "__call__",
+        batch_size: int | None = None,
+    ) -> None:
+        self.model = model
+        self.method = method
+        self.batch_size = batch_size
+
+    def _resolve_callable(self) -> Any:
+        if self.method == "__call__":
+            return self.model
+        return getattr(self.model, self.method)
+
+    def _apply(self, gt: Carrier) -> Any:
+        arr = np.asarray(gt)
+        fn = self._resolve_callable()
+        if self.batch_size is None:
+            return fn(arr)
+        return self._batched(fn, arr)
+
+    def _batched(self, fn: Any, arr: np.ndarray) -> np.ndarray:
+        """Split ``arr`` along axis 0, call ``fn`` per chunk, concatenate.
+
+        Plain ``np.concatenate`` along axis 0 — works when the model's
+        output preserves the batch dimension (the common case).
+
+        Empty inputs (``arr.shape[0] == 0``) are passed straight to the
+        model in one call: ``np.concatenate`` cannot accept an empty list
+        of chunks, and the model is free to return a meaningful
+        zero-length result.
+        """
+        n = arr.shape[0]
+        if n == 0:
+            return fn(arr)
+        chunks: list[Any] = []
+        bs = int(self.batch_size or n)
+        for start in range(0, n, bs):
+            chunks.append(fn(arr[start : start + bs]))
+        return np.concatenate(chunks, axis=0)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "model_type": type(self.model).__name__,
+            "method": self.method,
+            "batch_size": self.batch_size,
+        }
+
+
+__all__ = [
+    "GMM",
+    "IPCA",
+    "NMF",
+    "PCA",
+    "IsolationForest",
+    "IterativeImputer",
+    "KMeans",
+    "KNNImputer",
+    "LocalOutlierFactor",
+    "MiniBatchKMeans",
+    "ModelOp",
+    "OneClassSVM",
+    "SklearnOp",
+]

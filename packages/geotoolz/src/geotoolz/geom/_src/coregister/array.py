@@ -4,9 +4,6 @@ The two-tier discipline (``_src/array.py`` pure numpy / scipy; the
 sibling ``_src/operators.py`` carrier-aware) mirrors the rest of
 geotoolz. Operators wrap these primitives and add GeoTensor /
 GeoDataFrame / xvec metadata handling.
-
-``swath_to_grid`` is still scaffolding (raises `NotImplementedError`)
-until `SwathToGrid` lands; every other primitive is live.
 """
 
 from __future__ import annotations
@@ -157,40 +154,6 @@ def reproject_like(
             dst_nodata=fill_value,
         )
     )
-
-
-def swath_to_grid(
-    swath_values: Num[np.ndarray, "*batch h w"],
-    *,
-    lat: Float[np.ndarray, "h w"],
-    lon: Float[np.ndarray, "h w"],
-    target_crs: Any,
-    target_res: tuple[float, float],
-    bounds: tuple[float, float, float, float] | None = None,
-    method: Literal["bowtie_aware", "naive"] = "bowtie_aware",
-) -> tuple[Num[np.ndarray, "*batch dst_h dst_w"], Affine]:
-    """Project a swath product (per-pixel lat/lon) onto a regular grid.
-
-    The "bowtie_aware" path handles MODIS/VIIRS scan-edge pixel
-    growth that a naive nearest-neighbour resample double-counts.
-
-    Args:
-        swath_values: Sensor-space values, ``(H, W)`` or ``(..., H, W)``.
-        lat: Per-pixel latitudes, shape ``(H, W)``.
-        lon: Per-pixel longitudes, shape ``(H, W)``.
-        target_crs: CRS of the output grid.
-        target_res: ``(x_res, y_res)`` in destination units.
-        bounds: Optional ``(xmin, ymin, xmax, ymax)`` clip.
-        method: ``"bowtie_aware"`` (default) or ``"naive"``.
-
-    Returns:
-        ``(grid_values, dst_transform)`` ready for GeoTensor
-        construction.
-
-    Raises:
-        NotImplementedError: Always — Phase 3 scaffolding.
-    """
-    raise NotImplementedError("Phase 3 PR — see design §5.3.")
 
 
 def points_to_raster_binned(

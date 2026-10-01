@@ -5,9 +5,7 @@ from __future__ import annotations
 from geotoolz.plume._src.array import (
     convert_column_units,
     label_components,
-    otsu_threshold,
     plume_mask,
-    resolve_threshold,
     wind_advection_cone,
 )
 from geotoolz.plume._src.operators import (
@@ -23,6 +21,7 @@ from geotoolz.plume._src.operators import (
     PlumeShapeFilter,
     WindAdvectionCone,
 )
+from geotoolz.segment._src.array import otsu_threshold, resolve_threshold
 
 
 __all__ = [

@@ -9,7 +9,7 @@ import numpy as np
 from affine import Affine
 from rasterio.windows import Window
 
-from geotoolz.readers._base import SensorReader, Track, as_path
+from geotoolz.readers._src.base import SensorReader, Track
 from geotoolz.readers.toy_sensor import constants
 
 
@@ -50,7 +50,7 @@ class Reader(SensorReader):
         crs: Any = "EPSG:4326",
         fill_value_default: float | None = None,
     ) -> None:
-        self.path = as_path(path)
+        self.path = Path(path)
         self._data = (
             np.zeros((_DEFAULT_NUM_BANDS, 1, 1), dtype=np.float32)
             if data is None

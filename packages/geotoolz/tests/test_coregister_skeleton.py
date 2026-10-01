@@ -13,13 +13,11 @@ from pipekit import Operator
 from geotoolz.compositing import BlendMatched, StackMatched
 from geotoolz.geom import coregister as cg
 from geotoolz.geom.coregister import (
-    GridToSwath,
     PointCloudToRaster,
     PointsToRaster,
     RasterToPointCloud,
     RasterToPoints,
     RasterToRasterLike,
-    SwathToGrid,
     VectorToRasterAgg,
 )
 
@@ -36,8 +34,6 @@ class TestSubnamespaceWiring:
     def test_all_exports(self) -> None:
         expected = {
             "RasterToRasterLike",
-            "SwathToGrid",
-            "GridToSwath",
             "RasterToPoints",
             "PointsToRaster",
             "RasterToPointCloud",
@@ -55,8 +51,6 @@ class TestOperatorContract:
         "op",
         [
             RasterToRasterLike(resampling="cubic"),
-            SwathToGrid(target_crs="EPSG:32629", target_res=(500.0, 500.0)),
-            GridToSwath(dt_max="30min"),
             RasterToPoints(extract="bilinear", out_var="albedo"),
             PointsToRaster(method="binned_stat", stat="median"),
             RasterToPointCloud(k=3, max_radius=50.0, method="idw"),
@@ -73,11 +67,6 @@ class TestOperatorContract:
         ("op", "expected_subset"),
         [
             (RasterToRasterLike(resampling="lanczos"), {"resampling": "lanczos"}),
-            (
-                SwathToGrid(target_crs="EPSG:4326", target_res=(0.01, 0.01)),
-                {"target_crs": "EPSG:4326"},
-            ),
-            (GridToSwath(dt_max="45min"), {"dt_max": "45min"}),
             (PointsToRaster(stat="sum"), {"stat": "sum"}),
             (RasterToPointCloud(k=5, method="idw"), {"k": 5}),
             (VectorToRasterAgg(agg="count"), {"agg": "count"}),
@@ -99,16 +88,14 @@ class TestValidation:
         RasterToPointCloud(k=1)
 
 
-class TestCallNotImplemented:
-    """Operators still scaffolded — bodies land in later PRs.
+class TestSwathStubsRemoved:
+    """The never-implemented swath operators are not public API (#162)."""
 
-    `RasterToRasterLike` and `StackMatched` are implemented; their
-    behaviour lives in ``tests/test_coregister_rtrl_stack.py``.
-    """
+    @pytest.mark.parametrize("name", ["SwathToGrid", "GridToSwath"])
+    def test_not_exported(self, name: str) -> None:
+        assert not hasattr(cg, name)
 
-    def test_swath_to_grid(self) -> None:
-        with pytest.raises(NotImplementedError):
-            SwathToGrid(target_crs="EPSG:32629", target_res=(500.0, 500.0))(object())  # type: ignore[arg-type]
+    def test_no_swath_to_grid_primitive(self) -> None:
+        from geotoolz.geom._src.coregister import array
 
-    # BlendMatched is now implemented; behavioural coverage lives in
-    # tests/test_blend_matched.py.
+        assert not hasattr(array, "swath_to_grid")

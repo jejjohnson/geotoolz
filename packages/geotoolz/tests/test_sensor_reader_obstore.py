@@ -20,7 +20,7 @@ import pytest
 from affine import Affine
 from rasterio.windows import Window
 
-from geotoolz.readers._base import SensorReader, Track
+from geotoolz.readers._src.base import SensorReader, Track
 
 
 # --- minimal concrete reader for the test surface -----------------------
@@ -136,7 +136,7 @@ def test_read_bytes_windows_drive_letter_path_treated_as_local():
     ``open()`` will of course raise ``FileNotFoundError``, which is
     the *correct* failure mode for a non-existent local path).
     """
-    from geotoolz.readers._base import _has_remote_scheme
+    from geotoolz.readers._src.base import _has_remote_scheme
 
     # The classifier must NOT mark this as remote (no "://" in URI).
     assert not _has_remote_scheme("C:/scene.bin")
@@ -199,10 +199,10 @@ def test_azure_key_matches_pool(tmp_path: Path):
 
     The pooled ``AzureStore.from_url`` already binds the container, so the
     attached-client path must request the blob key only — the same key
-    :func:`geotoolz.readers._obstore._object_key` derives.
+    :func:`geotoolz.readers._src.obstore._object_key` derives.
     """
     obstore_store = pytest.importorskip("obstore.store")
-    from geotoolz.readers._obstore import _object_key
+    from geotoolz.readers._src.obstore import _object_key
 
     payload = b"the quick brown fox jumps over the lazy dog"
     (tmp_path / "path").mkdir()

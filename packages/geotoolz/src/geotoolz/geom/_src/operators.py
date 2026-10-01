@@ -1260,8 +1260,8 @@ class BowtieCorrection(Operator):
 
     **Output grid.** Same shape, transform and CRS as the input; only
     along-track values change. Columns are never moved (cross-track pixel
-    growth is left for a swath-to-grid resampler such as
-    ``coregister.SwathToGrid``) and the along-track extent is conserved.
+    growth is left for a swath-to-grid resampler) and the along-track
+    extent is conserved.
 
     **Assumptions / limitations.** Spherical Earth, circular orbit at a
     constant altitude, no terrain; scans exactly contiguous at nadir;

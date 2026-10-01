@@ -347,6 +347,7 @@ from geotoolz.segment import (
     MergeNearbyInstances,
     Quickshift,
     RandomWalker,
+    Threshold,
     Watershed,
 )
 from geotoolz.spectral import (
@@ -645,6 +646,7 @@ __all__ = [
     "SunAngleJitter",
     "Switch",
     "Tap",
+    "Threshold",
     "Tile",
     "ToFloat32",
     "TrueColor",

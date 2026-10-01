@@ -83,6 +83,40 @@ packages/
                               # staging, cyclopts CLI.
 ```
 
+### geotoolz family layout
+
+Every operator family (`radiometry`, `indices`, `compositing`, `segment`, …)
+has the same shape, enforced by `tests/test_geotoolz.py::test_family_layout`:
+
+```
+geotoolz/<family>/
+├── __init__.py         # re-exports only — no def / class
+└── _src/
+    ├── array.py        # Tier A: pure numpy primitives, jaxtyping-annotated,
+    │                   # no GeoTensor / metadata / operator state (may be small)
+    ├── operators.py    # Tier B: every pipekit.Operator of the family; judges
+    │                   # nodata, calls Tier A, rewraps via wrap_like
+    └── <topic>.py      # optional: constants / lookup tables / non-Operator
+                        # helpers (qa/_src/scl.py, radiometry/_src/solar.py,
+                        # io/_src/errors.py, learn/_src/estimators.py)
+```
+
+- A primitive lives in `array.py` and is exported from the family
+  `__init__` (Tier-A names stay out of the top-level `gz.*` namespace; every
+  public Operator class is top-level).
+- Plumbing shared by two or more families (band resolution, nodata,
+  rewrapping, labelling, sample flattening, …) goes in `geotoolz/_src/`
+  (`bands.py`, `valid.py`, `wrap.py`, `labels.py`, `samples.py`, …). A family
+  may call another family's primitive or operator when that *is* the maths
+  (`compositing` → `indices.ndvi`, `plume` → `segment` thresholding,
+  `viz` → `radiometry` stretches) rather than re-implementing it inline.
+- `learn/_src`: `array.py` axis bookkeeping, `estimators.py` the
+  non-Operator `GeoTensorEstimator` adapter, `operators.py` every Operator
+  (`SklearnOp`, the named wrappers, `ModelOp`).
+- Not families: `readers/` (sensor-reader framework — `_src/` plus public
+  per-sensor subpackages such as `readers.toy_sensor`), the top-level
+  `patch_ops.py` geopatcher bridge, and the deprecated `model.py` alias.
+
 Each package's public API is re-exported through its `src/<import>/__init__.py`.
 Per-package docs live under `packages/*/docs/`; the root `docs/` + `mkdocs.yml`
 is the geotoolz site.

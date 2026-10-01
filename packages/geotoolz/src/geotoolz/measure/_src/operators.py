@@ -7,47 +7,27 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 from pipekit import Operator
 from shapely.geometry import LineString
 from skimage.measure import find_contours, profile_line, ransac, shannon_entropy
 
 from geotoolz._src.config import as_tuple
 from geotoolz._src.geo import pixel_xy, require_geotensor
-from geotoolz._src.labels import (
+from geotoolz._src.shape import single_band
+from geotoolz._src.valid import valid_pixels
+from geotoolz._src.wrap import wrap_like
+from geotoolz.measure._src.array import (
     DEFAULT_REGIONPROPS,
     Connectivity,
     label_components,
     regionprops_frame,
+    regionprops_to_crs_units,
     skeleton_length,
 )
-from geotoolz._src.shape import single_band
-from geotoolz._src.valid import valid_pixels
-from geotoolz._src.wrap import wrap_like
 
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
-
-
-# Region properties that ``RegionProps(scale_to_crs=True)`` converts from
-# pixel units: areas scale by the pixel area, lengths by the pixel size,
-# second moments by the squared pixel size. Everything else (positions,
-# angles, ratios, the label itself) stays as skimage reports it.
-_AREA_PROPS = frozenset({"area", "area_bbox", "area_convex", "area_filled"})
-_LENGTH_PROPS = frozenset(
-    {
-        "axis_major_length",
-        "axis_minor_length",
-        "equivalent_diameter_area",
-        "feret_diameter_max",
-        "major_axis_length",
-        "minor_axis_length",
-        "perimeter",
-        "perimeter_crofton",
-    }
-)
-_MOMENT_PROPS = frozenset({"inertia_tensor", "inertia_tensor_eigvals"})
 
 
 class LabelConnectedComponents(Operator):
@@ -167,7 +147,7 @@ class RegionProps(Operator):
             extra_properties=self.extra_properties,
         )
         if self.scale_to_crs:
-            frame = _scale_to_crs(frame, gt.transform)
+            frame = regionprops_to_crs_units(frame, gt.transform)
         if frame.empty:
             return gpd.GeoDataFrame(frame, geometry=[], crs=gt.crs)
         if {"centroid-0", "centroid-1"}.issubset(frame.columns):
@@ -424,32 +404,3 @@ class ShannonEntropy(Operator):
                 single_band(np.asarray(gt), name="ShannonEntropy"), base=self.base
             )
         )
-
-
-def _scale_to_crs(frame: pd.DataFrame, transform: Any) -> pd.DataFrame:
-    """Convert pixel-unit region-property columns to CRS units."""
-    a, b = float(transform.a), float(transform.b)
-    d, e = float(transform.d), float(transform.e)
-    pixel_area = abs(a * e - b * d)
-    # Transform columns: the CRS step of one pixel column / row.
-    col_step, row_step = float(np.hypot(a, d)), float(np.hypot(b, e))
-    square = bool(
-        np.isclose(col_step, row_step)
-        and np.isclose(a * b + d * e, 0.0, atol=1e-12 * max(pixel_area, 1.0))
-    )
-    out = frame.copy()
-    for column in frame.columns:
-        base = str(column).split("-")[0]
-        if base in _AREA_PROPS:
-            out[column] = frame[column] * pixel_area
-        elif base in _LENGTH_PROPS or base in _MOMENT_PROPS:
-            if not square:
-                raise ValueError(
-                    f"RegionProps(scale_to_crs=True): {base!r} has no CRS-unit "
-                    f"equivalent on non-square pixels (transform a={a}, b={b}, "
-                    f"d={d}, e={e}); request area properties only, or resample "
-                    "to square pixels first."
-                )
-            power = 1 if base in _LENGTH_PROPS else 2
-            out[column] = frame[column] * col_step**power
-    return out

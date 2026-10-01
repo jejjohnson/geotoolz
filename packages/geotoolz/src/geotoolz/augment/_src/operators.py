@@ -39,11 +39,10 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from affine import Affine
-from jaxtyping import Float, Shaped
+from jaxtyping import Shaped
 from pipekit import Operator, Sequential
 from pipekit._base.operator import require_operator
 from rasterio.windows import Window
-from scipy.ndimage import gaussian_filter
 
 from geotoolz._src.bands import band_count, resolve_bands
 from geotoolz._src.config import (
@@ -56,6 +55,12 @@ from geotoolz._src.geo import grid_matches, require_geotensor
 from geotoolz._src.shape import BAND_AXIS
 from geotoolz._src.valid import carrier_fill_value, restore_fill, valid_pixels
 from geotoolz._src.wrap import adopt_attrs, wrap_like
+from geotoolz.augment._src.array import (
+    cloud_alpha,
+    rayleigh_weights,
+    rot90_transform,
+    sun_angle_scale,
+)
 
 
 if TYPE_CHECKING:
@@ -64,10 +69,7 @@ if TYPE_CHECKING:
 
 Range = tuple[float, float]
 ScalarOrRange = float | Range
-DEFAULT_MIN_WAVELENGTH_NM = 450.0
-DEFAULT_MAX_WAVELENGTH_NM = 850.0
 BRIGHT_CLOUD_PERCENTILE = 98.0
-CLOUD_ALPHA_EPSILON = 1e-12
 
 
 def _call_rng(op: Operator, seed: int | None) -> np.random.Generator:
@@ -483,24 +485,7 @@ class RandomRotate90(Operator):
         if transform is None:
             return out
         height, width = arr.shape[-2], arr.shape[-1]
-        return _new_geotensor(gt, out, _rot90_transform(transform, height, width, k))
-
-
-def _rot90_transform(transform: Affine, height: int, width: int, k: int) -> Affine:
-    """Compose ``transform`` with the pixel map of ``np.rot90(..., k)``.
-
-    The affine maps pixel *corners*, so the mirrored axes are anchored at
-    the far edge (``width`` / ``height``), not the last pixel index; the
-    rotated grid then covers exactly the input footprint.
-    """
-    k %= 4
-    if k == 1:
-        return transform * Affine(0, -1, width, 1, 0, 0)
-    if k == 2:
-        return transform * Affine.translation(width, height) * Affine.scale(-1, -1)
-    if k == 3:
-        return transform * Affine(0, 1, 0, -1, 0, height)
-    return transform
+        return _new_geotensor(gt, out, rot90_transform(transform, height, width, k))
 
 
 class RandomCrop(Operator):
@@ -934,13 +919,7 @@ class SunAngleJitter(Operator):
                 "SunAngleJitter requires `solar_zenith_angle` or `sza_deg` in "
                 "gt.attrs; got neither."
             )
-        base_sza = float(sza_value)
-        denom = np.cos(np.deg2rad(base_sza))
-        if np.isclose(denom, 0.0):
-            raise ValueError(
-                f"solar zenith angle ({base_sza:.2f} deg) is too close to 90 degrees."
-            )
-        scale = np.cos(np.deg2rad(base_sza + delta)) / denom
+        scale = sun_angle_scale(float(sza_value), delta)
         arr = np.asarray(gt)
         return _cast_and_wrap(
             gt, arr.astype(np.float64, copy=False) * scale, _valid(arr, gt)
@@ -985,7 +964,11 @@ class AtmosphericHaze(Operator):
             return gt
 
         arr = np.asarray(gt)
-        weights = _spectral_weights(gt, _band_count(arr)).reshape(_band_shape(arr))
+        attrs = getattr(gt, "attrs", None) or {}
+        wavelengths = attrs.get("wavelengths_nm", attrs.get("wavelengths"))
+        weights = rayleigh_weights(wavelengths, _band_count(arr)).reshape(
+            _band_shape(arr)
+        )
         return _cast_and_wrap(
             gt,
             arr.astype(np.float64, copy=False) + intensity * weights,
@@ -994,25 +977,6 @@ class AtmosphericHaze(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {"intensity": jsonable(self.intensity), "seed": self.seed}
-
-
-def _spectral_weights(
-    gt: GeoTensor | np.ndarray, n_bands: int
-) -> Float[np.ndarray, " c"]:
-    attrs = getattr(gt, "attrs", None) or {}
-    wavelengths = attrs.get("wavelengths_nm", attrs.get("wavelengths"))
-    if wavelengths is None:
-        wavelengths = np.linspace(
-            DEFAULT_MIN_WAVELENGTH_NM, DEFAULT_MAX_WAVELENGTH_NM, n_bands
-        )
-    wavelengths = np.asarray(wavelengths, dtype=np.float64)
-    if wavelengths.size != n_bands:
-        raise ValueError("wavelength metadata must have one value per band.")
-    if np.nanmax(wavelengths) < 10.0:
-        # Convert micrometers to nanometers; RS visible/NIR values are never <10 nm.
-        wavelengths = wavelengths * 1000.0
-    weights = 1.0 / np.power(wavelengths, 4)
-    return weights / np.nanmax(weights)
 
 
 class SimulatedClouds(Operator):
@@ -1058,15 +1022,8 @@ class SimulatedClouds(Operator):
             return gt
 
         arr = np.asarray(gt)
-        field = rng.normal(size=arr.shape[-2:])
-        if self.feather:
-            field = gaussian_filter(field, sigma=self.feather, mode="reflect")
-        field = (field - field.min()) / (np.ptp(field) + np.finfo(np.float64).eps)
-        threshold = np.quantile(field, 1.0 - coverage)
-        alpha = np.clip(
-            (field - threshold) / (field.max() - threshold + CLOUD_ALPHA_EPSILON),
-            0,
-            1,
+        alpha = cloud_alpha(
+            rng.normal(size=arr.shape[-2:]), coverage, feather=self.feather
         )
         alpha = alpha.reshape((1,) * (arr.ndim - 2) + alpha.shape)
         valid = _valid(arr, gt)
