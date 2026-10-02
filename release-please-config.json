@@ -24,7 +24,8 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
-        "src/geotoolz/__init__.py"
+        "src/geotoolz/__init__.py",
+        {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='geotoolz')].version"}
       ]
     },
     "packages/geotoolz-patcher": {
@@ -35,7 +36,8 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
-        "src/geopatcher/__init__.py"
+        "src/geopatcher/__init__.py",
+        {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='geotoolz-patcher')].version"}
       ]
     },
     "packages/geotoolz-catalog": {
@@ -46,7 +48,8 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
-        "src/geocatalog/__init__.py"
+        "src/geocatalog/__init__.py",
+        {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='geotoolz-catalog')].version"}
       ]
     }
   }
