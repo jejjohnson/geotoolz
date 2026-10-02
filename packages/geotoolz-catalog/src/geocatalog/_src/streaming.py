@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
 from loguru import logger as log
 
+from geocatalog._src._timeutil import to_naive_utc
 from geocatalog._src.base import INTERNAL_COLUMNS, RESERVED_COLUMNS
 from geocatalog._src.parquet import SCHEMA_VERSION_CURRENT as _SCHEMA_VERSION
 
@@ -214,6 +215,20 @@ class StreamingParquetWriter:
             True; turn off only if a downstream consumer chokes on 1.1.
         batch_size: Rows per Arrow record batch. Default 10 000 → peak
             memory ≈ 10 MB for ~1 KB-per-row catalogs (design §4.6).
+        schema: Arrow types for the extras columns. Fields named like a
+            reserved or internal column are ignored (the writer owns
+            those). ``None`` infers the extras schema from the whole
+            first batch: the union of keys in first-seen order, each
+            column typed by `pyarrow.array` over all its values (numpy
+            scalars, `pandas.Timestamp`, dicts and lists included). Rows
+            missing a key get a null. The schema is sealed after the
+            first batch, so a key first seen later — or a column that
+            was all-null in the first batch and gains values — raises
+            rather than being dropped; pass ``schema=`` for such streams.
+
+    ``start_time`` / ``end_time`` are stored as ``timestamp("ns")`` in
+    naive UTC — the catalog's time-axis contract (tz-aware inputs are
+    converted, naive inputs are taken as UTC).
 
     Usage::
 
@@ -231,10 +246,12 @@ class StreamingParquetWriter:
         schema_version: int = _SCHEMA_VERSION,
         write_bbox: bool = True,
         batch_size: int = 10_000,
+        schema: pa.Schema | None = None,
     ) -> None:
         if batch_size < 1:
             raise ValueError(f"batch_size must be >= 1; got {batch_size}")
         self._path = Path(path)
+        self._extras_schema = schema
         self._crs = pyproj.CRS.from_user_input(crs)
         self._backend: _BACKEND_T = backend
         self._schema_version = schema_version
@@ -283,7 +300,7 @@ class StreamingParquetWriter:
         if self._writer is None:
             # No rows were written. Build an empty file so the artifact path
             # exists with valid metadata — downstream code can still open it.
-            schema = self._build_schema_from_first(row=None)
+            schema = self._seal_schema([])
             self._writer = pq.ParquetWriter(self._path, schema=schema)
         self._writer.add_key_value_metadata(
             {"geo": json.dumps(self._build_geo_metadata())}
@@ -296,50 +313,36 @@ class StreamingParquetWriter:
         rows = self._buffer
         self._buffer = []
         if self._schema is None:
-            self._schema = self._build_schema_from_first(row=rows[0])
+            self._schema = self._seal_schema(rows)
             self._writer = pq.ParquetWriter(self._path, schema=self._schema)
         table = self._rows_to_table(rows, schema=self._schema)
         assert self._writer is not None  # for ty
         self._writer.write_table(table)
 
-    def _build_schema_from_first(self, row: dict[str, Any] | None) -> pa.Schema:
-        """Infer the Arrow schema from the first row (or build a minimal one).
+    def _seal_schema(self, rows: list[dict[str, Any]]) -> pa.Schema:
+        """Build the file schema from ``schema=`` or the first batch.
 
-        The schema is sealed from the first row's extras keyset; subsequent
-        rows must share the same keys. The current per-backend extractors
-        (`_filepath_to_row`, `_xarray_row`, `_vector_row`) all return a
-        uniform shape, so this holds. If a future extractor returns
-        per-row optional extras, this branch will need to pre-union keys
-        across the first N rows before sealing the schema.
+        Reserved columns come first in a fixed order (matching what
+        `to_geoparquet` writes for the InMemory backend), then the
+        extras, then the internal ``_backend`` / ``_schema_version``.
         """
-        # Reserved column order (matches what `to_geoparquet` writes for the
-        # InMemory backend — keeps reader code uniform).
-        fields: list[pa.Field] = []
-        sample = dict(row) if row is not None else {}
-        # Required columns first.
-        fields.append(pa.field("filepath", pa.string()))
-        fields.append(pa.field("start_time", pa.timestamp("us")))
-        fields.append(pa.field("end_time", pa.timestamp("us")))
-        fields.append(pa.field("geometry", pa.binary()))
+        fields: list[pa.Field] = [
+            pa.field("filepath", pa.string()),
+            pa.field("start_time", _TIME_TYPE),
+            pa.field("end_time", _TIME_TYPE),
+            pa.field("geometry", pa.binary()),
+        ]
         if self._write_bbox:
-            fields.append(
-                pa.field(
-                    "bbox",
-                    pa.struct(
-                        [
-                            pa.field("xmin", pa.float64()),
-                            pa.field("ymin", pa.float64()),
-                            pa.field("xmax", pa.float64()),
-                            pa.field("ymax", pa.float64()),
-                        ]
-                    ),
-                )
-            )
-        # Extras: infer per-column type from the sample row.
-        for key, value in sample.items():
-            if key in RESERVED_COLUMNS:
-                continue
-            fields.append(pa.field(key, _infer_arrow_type(value)))
+            fields.append(pa.field("bbox", _BBOX_TYPE))
+        if self._extras_schema is not None:
+            fields.extend(f for f in self._extras_schema if f.name not in _WRITER_OWNED)
+        else:
+            keys: dict[str, None] = {}
+            for row in rows:
+                keys.update(dict.fromkeys(k for k in row if k not in _WRITER_OWNED))
+            for key in keys:
+                values = [row.get(key) for row in rows]
+                fields.append(pa.field(key, _column_array(key, values).type))
         fields.append(pa.field("_backend", pa.string()))
         fields.append(pa.field("_schema_version", pa.int32()))
         return pa.schema(fields)
@@ -351,8 +354,17 @@ class StreamingParquetWriter:
         schema: pa.Schema,
     ) -> pa.Table:
         """Convert a list of row dicts into an Arrow table matching `schema`."""
-        encoded: list[dict[str, Any]] = []
+        known = set(schema.names)
+        wkbs: list[bytes] = []
+        boxes: list[dict[str, float]] = []
         for row in rows:
+            unknown = [k for k in row if k not in known and k not in _WRITER_OWNED]
+            if unknown:
+                raise ValueError(
+                    f"StreamingParquetWriter: row has columns {unknown} that are "
+                    "not in the sealed schema (inferred from the first batch). "
+                    "Pass schema= covering every extras column."
+                )
             geom = row.get("geometry")
             if not isinstance(geom, shapely.geometry.base.BaseGeometry):
                 raise TypeError(
@@ -368,15 +380,28 @@ class StreamingParquetWriter:
                 self._total_bbox[1] = min(self._total_bbox[1], ymin)
                 self._total_bbox[2] = max(self._total_bbox[2], xmax)
                 self._total_bbox[3] = max(self._total_bbox[3], ymax)
+            wkbs.append(shapely.wkb.dumps(geom))
+            boxes.append({"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax})
 
-            out = {k: v for k, v in row.items() if k != "geometry"}
-            out["geometry"] = shapely.wkb.dumps(geom)
-            if self._write_bbox:
-                out["bbox"] = {"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax}
-            out["_backend"] = self._backend
-            out["_schema_version"] = self._schema_version
-            encoded.append(out)
-        return pa.Table.from_pylist(encoded, schema=schema)
+        n = len(rows)
+        arrays: list[pa.Array] = []
+        for field in schema:
+            name = field.name
+            if name == "geometry":
+                arrays.append(pa.array(wkbs, type=field.type))
+            elif name == "bbox":
+                arrays.append(pa.array(boxes, type=field.type))
+            elif name == "_backend":
+                arrays.append(pa.array([self._backend] * n, type=field.type))
+            elif name == "_schema_version":
+                arrays.append(pa.array([self._schema_version] * n, type=field.type))
+            elif name in ("start_time", "end_time"):
+                times = [_naive_utc_or_none(row.get(name)) for row in rows]
+                arrays.append(_column_array(name, times, field.type))
+            else:
+                values = [row.get(name) for row in rows]
+                arrays.append(_column_array(name, values, field.type))
+        return pa.Table.from_arrays(arrays, schema=schema)
 
     def _build_geo_metadata(self) -> dict[str, Any]:
         column_meta: dict[str, Any] = {
@@ -402,28 +427,48 @@ class StreamingParquetWriter:
         }
 
 
-def _infer_arrow_type(value: Any) -> pa.DataType:
-    """Conservative type inference for extras columns.
+_TIME_TYPE = pa.timestamp("ns")
+_BBOX_TYPE = pa.struct(
+    [
+        pa.field("xmin", pa.float64()),
+        pa.field("ymin", pa.float64()),
+        pa.field("xmax", pa.float64()),
+        pa.field("ymax", pa.float64()),
+    ]
+)
+# Columns whose values the writer derives itself; never taken from extras.
+_WRITER_OWNED: frozenset[str] = RESERVED_COLUMNS | INTERNAL_COLUMNS
 
-    Only the types our three builders actually produce; anything weirder
-    falls through to a string column so the writer doesn't crash on a
-    badly-typed extras value.
-    """
+
+def _naive_utc_or_none(value: Any) -> pd.Timestamp | None:
+    """Coerce a time value to naive UTC; ``None`` / ``NaT`` become ``None``."""
     if value is None:
-        return pa.string()
-    if isinstance(value, bool):
-        return pa.bool_()
-    if isinstance(value, int):
-        return pa.int64()
-    if isinstance(value, float):
-        return pa.float64()
-    if isinstance(value, str):
-        return pa.string()
-    if isinstance(value, list):
-        if not value:
-            return pa.list_(pa.string())
-        return pa.list_(_infer_arrow_type(value[0]))
-    return pa.string()
+        return None
+    ts = to_naive_utc(value)
+    return None if ts is pd.NaT else ts
+
+
+def _column_array(
+    name: str, values: list[Any], type: pa.DataType | None = None
+) -> pa.Array:
+    """Build one Arrow column, naming the column in any conversion error.
+
+    ``from_pandas=True`` maps ``NaN`` / ``NaT`` to null and accepts numpy
+    scalars and `pandas.Timestamp`.
+    """
+    try:
+        return pa.array(values, type=type, from_pandas=True)
+    except (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError) as exc:
+        hint = (
+            " It was all-null in the first batch, so its type could not be inferred."
+            if type is not None and pa.types.is_null(type)
+            else ""
+        )
+        raise TypeError(
+            f"StreamingParquetWriter: column {name!r} cannot be written as "
+            f"{type if type is not None else 'one Arrow type'}: {exc}.{hint} "
+            "Pass schema= to fix the extras types up front."
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +549,9 @@ def sort_geoparquet(
         # arrow output looks like.
         # `to_arrow_reader` since duckdb 1.1; `fetch_arrow_reader` deprecated.
         reader = relation.to_arrow_reader(batch_size=batch_size)
+        # Carry the input's extras types through: re-inferring from the
+        # first *sorted* batch would retype a column whose leading values
+        # happen to be missing.
         with StreamingParquetWriter(
             dst_path,
             crs=crs,
@@ -511,6 +559,7 @@ def sort_geoparquet(
             schema_version=schema_version,
             write_bbox=write_bbox,
             batch_size=batch_size,
+            schema=pq.read_schema(src_str),
         ) as writer:
             for batch in reader:
                 _write_arrow_batch(writer, batch)
