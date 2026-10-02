@@ -172,8 +172,7 @@ omit = ["tests/*"]
 
 [tool.coverage.report]
 show_missing = true
-# Approx* aggregations (sketch family) are stubs scheduled for v0.2 that
-# raise NotImplementedError, and some extras-gated paths skip in slim
-# local runs — hence a floor below the ~78% an all-extras run measures.
+# Some extras-gated paths skip in slim local runs — hence a floor below
+# the ~78% an all-extras run measures.
 # CI installs --all-extras, so the full suite runs there.
 fail_under = 65
