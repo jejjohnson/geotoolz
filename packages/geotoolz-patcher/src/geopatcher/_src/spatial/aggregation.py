@@ -745,9 +745,9 @@ class SpatialByIndex(SpatialAggregation):
 class SpatialMedian(SpatialAggregation):
     """Per-cell median — exact, requires per-cell history.
 
-    ``streaming_safe = False``: callers asking for the disk-backed path
-    get a warning pointing at ``SpatialApproxQuantile(q=0.5)`` as the streamable
-    substitute.
+    ``streaming_safe = False`` and there is no streamable per-cell
+    substitute. ``SpatialApproxQuantile(q=0.5)`` is *not* one: it is a
+    global sketch returning one scalar for the whole field.
     """
 
     streaming_safe: ClassVar[bool] = False
@@ -830,7 +830,20 @@ class SpatialLearned(SpatialAggregation):
 
 
 class _SketchAggregation(SpatialAggregation):
-    """Shared ``merge(patches, domain)`` loop for global sketch reducers."""
+    """Shared ``merge(patches, domain)`` loop for global sketch reducers.
+
+    Sketches are **global** reducers: ``merge`` folds every finite value of
+    every patch into one bounded summary and returns a scalar / dict / small
+    array describing the whole field — never an ``(H, W)`` field. They are
+    not per-cell substitutes for `SpatialMedian` / `SpatialMode`; for a
+    streamable per-cell majority use `SpatialHardVote`.
+
+    Every ``merge(patches)`` call starts from fresh state (``_reset``), so
+    reusing one instance across ``merge()`` / ``reduce()`` calls never
+    leaks values from an earlier call. Incremental accumulation goes
+    through ``update`` / ``update_many`` / ``merge_state`` (or
+    ``merge(other_sketch)``), which do not reset.
+    """
 
     streaming_safe: ClassVar[bool] = True
 
@@ -845,14 +858,13 @@ class _SketchAggregation(SpatialAggregation):
         return self.finalize()
 
     def _reset(self) -> None:
-        """Hook run at each ``merge(patches)`` entry (not `merge_state`).
+        """Rebuild all accumulator state (and RNG, if any) from the config.
 
-        Default no-op. Stochastic sketches override it to rebuild their
-        accumulator state and RNG from ``seed`` so repeated ``merge()``
-        calls on one instance are reproducible — the same convention as
-        the samplers, which rebuild ``default_rng(seed)`` per call.
+        Run at each ``merge(patches)`` entry and from ``__post_init__``.
+        Stochastic sketches rebuild ``default_rng(seed)`` here — the same
+        convention as the samplers, which rebuild it per call.
         """
-        return None
+        raise NotImplementedError
 
     def update(self, patch: Any) -> None:
         self.update_many(_patch_values(patch))
@@ -863,11 +875,22 @@ class _SketchAggregation(SpatialAggregation):
     def finalize(self) -> Any:
         raise NotImplementedError
 
-    def _values(self) -> Iterable[Any]:
+    def merge_state(self, other: Any) -> None:
+        """Fold another sketch of the same type and configuration into this one."""
         raise NotImplementedError
 
-    def merge_state(self, other: Any) -> None:
-        self.update_many(other._values())
+    def _check_mergeable(self, other: Any, *names: str) -> None:
+        if type(other) is not type(self):
+            raise TypeError(
+                f"cannot merge {type(other).__name__} into {type(self).__name__}"
+            )
+        for name in names:
+            mine, theirs = getattr(self, name), getattr(other, name)
+            if mine != theirs:
+                raise ValueError(
+                    f"cannot merge {type(self).__name__} sketches with different "
+                    f"{name} ({mine!r} vs {theirs!r})"
+                )
 
 
 def _patch_values(patch: Any) -> np.ndarray:
@@ -878,64 +901,135 @@ def _patch_values(patch: Any) -> np.ndarray:
     )
 
 
-@dataclass(eq=False)
-class SpatialApproxQuantile(_SketchAggregation):
-    """Global approximate quantile via bounded reservoir sampling.
+class _ReservoirSketch(_SketchAggregation):
+    """Algorithm R reservoir of capacity ``k`` plus an exact uniform union.
 
-    Each ``merge(patches)`` call rebuilds the reservoir and its RNG from
-    ``seed`` before consuming the patches, so reusing one instance across
-    multiple ``merge()`` / ``reduce()`` calls is reproducible — the same
-    contract as the samplers, which rebuild ``default_rng(seed)`` per
-    call. Incremental accumulation goes through ``update`` /
-    ``update_many`` / ``merge_state`` instead.
+    Subclasses are dataclasses declaring ``k: int`` and ``seed: int | None``.
     """
 
-    q: float | list[float] = 0.5
-    compression: int = 200
-    seed: int | None = 0
-    _sample: list[float] = field(default_factory=list, init=False, repr=False)
-    _seen: int = field(default=0, init=False, repr=False)
-    _rng: np.random.Generator = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        if self.compression < 1:
-            raise ValueError("compression must be >= 1")
-        self._rng = np.random.default_rng(self.seed)
+    k: int
+    seed: int | None
+    _sample: list[Any]
+    _seen: int
+    _rng: np.random.Generator
 
     def _reset(self) -> None:
-        """Rebuild reservoir state + RNG from ``seed`` (per-merge determinism)."""
         self._sample = []
         self._seen = 0
         self._rng = np.random.default_rng(self.seed)
 
+    def _coerce(self, value: Any) -> Any:
+        return _python_scalar(value)
+
     def update_many(self, values: Iterable[Any]) -> None:
         for value in values:
-            x = float(value)
+            item = self._coerce(value)
             self._seen += 1
-            if len(self._sample) < self.compression:
-                self._sample.append(x)
+            if len(self._sample) < self.k:
+                self._sample.append(item)
                 continue
             j = int(self._rng.integers(0, self._seen))
-            if j < self.compression:
-                self._sample[j] = x
+            if j < self.k:
+                self._sample[j] = item
+
+    def merge_state(self, other: Any) -> None:
+        """Replace the sample with a uniform ``k``-sample of the union.
+
+        Each reservoir is a uniform ``min(k, seen)``-subset of its stream.
+        The number of merged slots drawn from ``self`` is hypergeometric in
+        the two stream sizes (drawn slot by slot, so it is exact for any
+        ``seen``), and those slots are a uniform subset of ``self``'s
+        sample (likewise for ``other``). The result is a uniform
+        ``min(k, seen_a + seen_b)``-subset of the concatenated streams, and
+        ``_seen`` becomes ``seen_a + seen_b`` so Algorithm R continues
+        correctly afterwards.
+        """
+        self._check_mergeable(other, "k")
+        n_a, n_b = self._seen, other._seen
+        size = min(self.k, n_a + n_b)
+        take_a = 0
+        rem_a, rem_b = n_a, n_b
+        for _ in range(size):
+            if self._rng.random() * (rem_a + rem_b) < rem_a:
+                take_a += 1
+                rem_a -= 1
+            else:
+                rem_b -= 1
+        take_b = size - take_a
+        pick_a = self._rng.choice(len(self._sample), size=take_a, replace=False)
+        pick_b = self._rng.choice(len(other._sample), size=take_b, replace=False)
+        merged = [self._sample[i] for i in pick_a] + [other._sample[i] for i in pick_b]
+        self._rng.shuffle(merged)
+        self._sample = merged
+        self._seen = n_a + n_b
+
+
+@dataclass(eq=False)
+class SpatialApproxQuantile(_ReservoirSketch):
+    """Global approximate quantile(s) from a uniform reservoir of ``k`` values.
+
+    A **global** reducer: ``merge`` returns ``{str(float(q)): value}`` for
+    the whole field, not a per-cell quantile field. There is no streamable
+    per-cell median; `SpatialMedian` stays the exact in-RAM option.
+
+    Args:
+        q: Quantile or list of quantiles in ``[0, 1]`` (int or float).
+        k: Reservoir size — number of values retained for the estimate.
+        seed: RNG seed. ``None`` (the default, as for the samplers) draws
+            fresh OS entropy on every ``merge``; pass an int to make
+            repeated ``merge()`` calls on one instance reproducible.
+    """
+
+    q: float | list[float] = 0.5
+    k: int = 200
+    seed: int | None = None
+    _sample: list[Any] = field(default_factory=list, init=False, repr=False)
+    _seen: int = field(default=0, init=False, repr=False)
+    _rng: np.random.Generator = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.k < 1:
+            raise ValueError("k must be >= 1")
+        for q in self._quantiles():
+            if not 0.0 <= q <= 1.0:
+                raise ValueError(f"q must be in [0, 1], got {q!r}")
+        self._reset()
+
+    def _quantiles(self) -> list[float]:
+        if isinstance(self.q, (list, tuple)):
+            return [float(q) for q in self.q]
+        return [float(self.q)]
+
+    def _coerce(self, value: Any) -> Any:
+        return float(value)
 
     def finalize(self) -> dict[str, float]:
         if not self._sample:
             return {}
-        qs = [self.q] if isinstance(self.q, float) else list(self.q)
         values = np.asarray(self._sample, dtype=np.float64)
-        return {str(q): float(np.quantile(values, float(q))) for q in qs}
-
-    def _values(self) -> Iterable[Any]:
-        return self._sample
+        return {str(q): float(np.quantile(values, q)) for q in self._quantiles()}
 
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)
 
 
+def _hll_alpha(m: int) -> float:
+    """HyperLogLog bias-correction constant ``alpha_m`` (Flajolet et al. 2007)."""
+    if m == 16:
+        return 0.673
+    if m == 32:
+        return 0.697
+    if m == 64:
+        return 0.709
+    return 0.7213 / (1.0 + 1.079 / m)
+
+
 @dataclass(eq=False)
 class SpatialApproxCardinality(_SketchAggregation):
-    """Global approximate unique-value count via HyperLogLog."""
+    """Global approximate unique-value count via HyperLogLog.
+
+    A **global** reducer: ``merge`` returns one float for the whole field.
+    """
 
     p: int = 14
     _registers: np.ndarray = field(init=False, repr=False)
@@ -943,6 +1037,9 @@ class SpatialApproxCardinality(_SketchAggregation):
     def __post_init__(self) -> None:
         if not 4 <= self.p <= 16:
             raise ValueError("p must be between 4 and 16")
+        self._reset()
+
+    def _reset(self) -> None:
         self._registers = np.zeros(1 << self.p, dtype=np.uint8)
 
     def update_many(self, values: Iterable[Any]) -> None:
@@ -958,19 +1055,17 @@ class SpatialApproxCardinality(_SketchAggregation):
             self._registers[idx] = max(int(self._registers[idx]), rank)
 
     def finalize(self) -> float:
-        m = float(1 << self.p)
-        # HyperLogLog bias-correction constants from Flajolet et al. for m >= 128.
-        alpha = 0.7213 / (1.0 + 1.079 / m)
-        estimate = alpha * m * m / np.sum(2.0 ** (-self._registers.astype(float)))
+        m = 1 << self.p
+        estimate = (
+            _hll_alpha(m) * m * m / np.sum(2.0 ** (-self._registers.astype(float)))
+        )
         zeros = int(np.count_nonzero(self._registers == 0))
         if estimate <= 2.5 * m and zeros > 0:
             estimate = m * math.log(m / zeros)
         return float(estimate)
 
-    def _values(self) -> Iterable[Any]:
-        return []
-
     def merge_state(self, other: SpatialApproxCardinality) -> None:
+        self._check_mergeable(other, "p")
         self._registers = np.maximum(self._registers, other._registers)
 
     def get_config(self) -> dict[str, Any]:
@@ -979,7 +1074,12 @@ class SpatialApproxCardinality(_SketchAggregation):
 
 @dataclass(eq=False)
 class SpatialApproxMode(_SketchAggregation):
-    """Global approximate heavy hitters via Misra-Gries counters."""
+    """Global approximate heavy hitters via Misra-Gries counters.
+
+    A **global** reducer: ``merge`` returns ``{value: count}`` for the
+    whole field, not a per-cell mode. For a streamable per-cell majority
+    use `SpatialHardVote`.
+    """
 
     k: int = 16
     _counts: dict[Any, int] = field(default_factory=dict, init=False, repr=False)
@@ -987,6 +1087,9 @@ class SpatialApproxMode(_SketchAggregation):
     def __post_init__(self) -> None:
         if self.k < 1:
             raise ValueError("k must be >= 1")
+
+    def _reset(self) -> None:
+        self._counts = {}
 
     def update_many(self, values: Iterable[Any]) -> None:
         for value in values:
@@ -1009,8 +1112,20 @@ class SpatialApproxMode(_SketchAggregation):
             sorted(self._counts.items(), key=lambda item: item[1], reverse=True)
         )
 
-    def _values(self) -> Iterable[Any]:
-        return self._counts.keys()
+    def merge_state(self, other: SpatialApproxMode) -> None:
+        """Mergeable Misra-Gries union (Agarwal et al. 2012).
+
+        Sum the counters; if more than ``k`` survive, subtract the
+        ``(k + 1)``-th largest count from all and drop the non-positive ones.
+        """
+        self._check_mergeable(other, "k")
+        counts = dict(self._counts)
+        for key, count in other._counts.items():
+            counts[key] = counts.get(key, 0) + count
+        if len(counts) > self.k:
+            cut = sorted(counts.values(), reverse=True)[self.k]
+            counts = {key: c - cut for key, c in counts.items() if c > cut}
+        self._counts = counts
 
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)
@@ -1018,7 +1133,11 @@ class SpatialApproxMode(_SketchAggregation):
 
 @dataclass(eq=False)
 class SpatialStreamingHistogram(_SketchAggregation):
-    """Global online histogram with at most ``bins`` centroids."""
+    """Global online histogram with at most ``bins`` centroids.
+
+    A **global** reducer: ``merge`` returns ``{"centers", "counts"}`` for
+    the whole field.
+    """
 
     bins: int = 64
     _centers: list[float] = field(default_factory=list, init=False, repr=False)
@@ -1027,6 +1146,10 @@ class SpatialStreamingHistogram(_SketchAggregation):
     def __post_init__(self) -> None:
         if self.bins < 1:
             raise ValueError("bins must be >= 1")
+
+    def _reset(self) -> None:
+        self._centers = []
+        self._counts = []
 
     def update_many(self, values: Iterable[Any]) -> None:
         for value in values:
@@ -1042,9 +1165,13 @@ class SpatialStreamingHistogram(_SketchAggregation):
             "counts": np.asarray(self._counts, dtype=np.int64)[order],
         }
 
-    def _values(self) -> Iterable[Any]:
-        for center, count in zip(self._centers, self._counts, strict=True):
-            yield from [center] * count
+    def merge_state(self, other: SpatialStreamingHistogram) -> None:
+        """Add ``other``'s weighted centroids, then re-compress to ``bins``."""
+        self._check_mergeable(other, "bins")
+        self._centers = [*self._centers, *other._centers]
+        self._counts = [*self._counts, *other._counts]
+        while len(self._centers) > self.bins:
+            self._merge_closest_bins()
 
     def _merge_closest_bins(self) -> None:
         order = np.argsort(self._centers)
@@ -1068,19 +1195,21 @@ class SpatialStreamingHistogram(_SketchAggregation):
 
 
 @dataclass(eq=False)
-class SpatialReservoir(_SketchAggregation):
-    """Uniform global reservoir sample using Vitter's Algorithm R.
+class SpatialReservoir(_ReservoirSketch):
+    """Uniform global reservoir sample of ``k`` values (Vitter's Algorithm R).
 
-    Each ``merge(patches)`` call rebuilds the reservoir and its RNG from
-    ``seed`` before consuming the patches, so reusing one instance across
-    multiple ``merge()`` / ``reduce()`` calls is reproducible — the same
-    contract as the samplers, which rebuild ``default_rng(seed)`` per
-    call. Incremental accumulation goes through ``update`` /
-    ``update_many`` / ``merge_state`` instead.
+    A **global** reducer: ``merge`` returns a 1-D array of at most ``k``
+    values drawn uniformly from every finite value of every patch.
+
+    Args:
+        k: Reservoir size.
+        seed: RNG seed. ``None`` (the default, as for the samplers) draws
+            fresh OS entropy on every ``merge``; pass an int to make
+            repeated ``merge()`` calls on one instance reproducible.
     """
 
     k: int = 100
-    seed: int | None = 0
+    seed: int | None = None
     _sample: list[Any] = field(default_factory=list, init=False, repr=False)
     _seen: int = field(default=0, init=False, repr=False)
     _rng: np.random.Generator = field(init=False, repr=False)
@@ -1088,30 +1217,10 @@ class SpatialReservoir(_SketchAggregation):
     def __post_init__(self) -> None:
         if self.k < 1:
             raise ValueError("k must be >= 1")
-        self._rng = np.random.default_rng(self.seed)
-
-    def _reset(self) -> None:
-        """Rebuild reservoir state + RNG from ``seed`` (per-merge determinism)."""
-        self._sample = []
-        self._seen = 0
-        self._rng = np.random.default_rng(self.seed)
-
-    def update_many(self, values: Iterable[Any]) -> None:
-        for value in values:
-            self._seen += 1
-            item = _python_scalar(value)
-            if len(self._sample) < self.k:
-                self._sample.append(item)
-                continue
-            j = int(self._rng.integers(0, self._seen))
-            if j < self.k:
-                self._sample[j] = item
+        self._reset()
 
     def finalize(self) -> np.ndarray:
         return np.asarray(self._sample)
-
-    def _values(self) -> Iterable[Any]:
-        return self._sample
 
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)
@@ -1139,10 +1248,11 @@ def _warn_if_unsafe_streaming(aggregation: SpatialAggregation) -> None:
 
     msg = (
         f"{type(aggregation).__name__} has streaming_safe = False — "
-        "the merge is happening in-RAM. For streaming alternatives see "
-        "docs/patching.md §'Streaming aggregations' "
-        "(Median->ApproxQuantile, Mode->HardVote or "
-        "ApproxMode, Learned->two-pass)."
+        "the merge is happening in-RAM. Per-cell streaming alternatives: "
+        "Mode->HardVote, Learned->patcher.two_pass; Median has none (the "
+        "Approx* sketches are global reducers returning one summary for the "
+        "whole field, not an (H, W) field). See docs/patcher/patching.md "
+        "§'Streaming aggregations'."
     )
     if get_strict():
         raise RuntimeError(msg)

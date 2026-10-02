@@ -30,7 +30,7 @@ class TestReservoirDeterminism:
         np.testing.assert_array_equal(first, second)
 
     def test_approx_quantile_same_instance_repeated_merge(self) -> None:
-        agg = SpatialApproxQuantile(q=[0.1, 0.5, 0.9], compression=32, seed=0)
+        agg = SpatialApproxQuantile(q=[0.1, 0.5, 0.9], k=32, seed=0)
         first = agg.merge(_patches(), None)
         second = agg.merge(_patches(), None)
         assert first == second

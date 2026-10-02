@@ -88,7 +88,7 @@ flowchart LR
     P --> MN[SpatialMean / WeightedSum / InvVarWMean]
     P --> HV[SpatialHardVote / SoftVote]
     P --> MD[SpatialMedian / Mode<br/>non-streaming]
-    P --> AX[SpatialApproxQuantile<br/>streaming sketch]
+    P --> AX[SpatialApproxQuantile / ApproxMode / …<br/>global sketch → one summary]
     style P fill:#c8e6c9,stroke:#2e7d32
 ```
 
@@ -186,7 +186,12 @@ flag. The fully-streaming family (`Sum`, `Mean`, `Variance`,
 `SoftVote`) folds one patch at a time; the non-streaming members
 (`Median`, `Mode`, `Learned`) need the full patch list. Streaming the
 non-streaming ones emits a `RuntimeWarning` pointing at the streamable
-substitute (`Median` → `ApproxQuantile`, `Mode` → `HardVote`).
+per-cell substitute where one exists (`Mode` → `HardVote`; `Median` has
+none and stays in-RAM). The approximate sketch family (`ApproxQuantile`,
+`ApproxCardinality`, `ApproxMode`, `StreamingHistogram`, `Reservoir`) is
+streaming-safe but **global**: each `merge` returns one summary for the
+whole field (e.g. `{"0.5": 12.3}`), never an `(H, W)` field, so it is not
+a per-cell replacement for `Median` / `Mode`.
 
 **Eager** is opt-in: `list(patcher.split(field))`.
 

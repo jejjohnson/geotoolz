@@ -158,18 +158,24 @@ never gets ahead.
 
 `SpatialMedian`, `SpatialMode`, and `SpatialLearned` need per-cell
 history that doesn't fit in a monoidal fold. Calling `merge` on them
-emits a `RuntimeWarning` pointing at the streamable substitute:
+emits a `RuntimeWarning` pointing at the streamable per-cell substitute,
+where one exists:
 
-| Non-streaming | Streaming substitute |
+| Non-streaming | Per-cell streaming substitute |
 |---|---|
-| `SpatialMedian` | `SpatialApproxQuantile` (sketch) |
-| `SpatialMode` | `SpatialHardVote` (or `SpatialApproxMode`) |
+| `SpatialMedian` | none — stays in-RAM |
+| `SpatialMode` | `SpatialHardVote` |
 | `SpatialLearned` | codified two-pass via `patcher.two_pass` |
 
 For the approximate sketch family (`ApproxQuantile`, `ApproxCardinality`,
 `ApproxMode`, `StreamingHistogram`, `Reservoir`), the streaming reducer
 state stays bounded by the sketch parameters — independent of input
-size.
+size. These are **global** reducers: `merge` returns one summary for the
+whole field (a quantile dict, a count, heavy hitters, a histogram, a
+sample), not an `(H, W)` field, so they answer "what is the scene's
+median?" rather than "what is each cell's median?". Each `merge(patches)`
+starts from fresh state; combine partial sketches with
+`a.merge(b)` / `a.merge_state(b)`.
 
 ## See also
 

@@ -116,7 +116,7 @@ def test_split_rejects_patch_larger_than_byte_budget(field: RasterField) -> None
 def test_sketch_aggregations_finalize_streaming_summaries() -> None:
     patch = _patch(np.array([[1, 2, 2, 3, 4, 5, 100]], dtype=np.float64))
 
-    quantile = SpatialApproxQuantile(q=[0.5], compression=32).merge([patch], None)
+    quantile = SpatialApproxQuantile(q=[0.5], k=32).merge([patch], None)
     cardinality = SpatialApproxCardinality(p=8).merge([patch], None)
     mode = SpatialApproxMode(k=3).merge([patch], None)
     histogram = SpatialStreamingHistogram(bins=3).merge([patch], None)
