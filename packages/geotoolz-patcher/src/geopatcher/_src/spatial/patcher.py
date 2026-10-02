@@ -24,6 +24,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from geopatcher._src.domains import GridDomain
 from geopatcher._src.hooks import (
     PatcherHook,
     _as_hooks,
@@ -1053,7 +1054,7 @@ def _build_patch_from_indices(
         data = _select_padded(field, domain, window, boundary, pad_value)
     else:
         data = field.select(window)
-    weights = _build_weights(indices, base_weights, boundary=boundary)
+    weights = _build_weights(indices, base_weights, boundary=boundary, anchor=anchor)
     return Patch(data=data, anchor=anchor, indices=indices, weights=weights)
 
 
@@ -1094,7 +1095,7 @@ async def _build_patch_async_from_indices(
         data = await _select_padded_async(field, domain, window, boundary, pad_value)
     else:
         data = await _select_async(field, window)
-    weights = _build_weights(indices, base_weights, boundary=boundary)
+    weights = _build_weights(indices, base_weights, boundary=boundary, anchor=anchor)
     return Patch(data=data, anchor=anchor, indices=indices, weights=weights)
 
 
@@ -1107,7 +1108,7 @@ def _build_mask_patch(
 ) -> Patch:
     if boundary == "raise":
         _raise_if_overflows(indices, domain)
-    weights = _build_weights(indices, base_weights, boundary=boundary)
+    weights = _build_weights(indices, base_weights, boundary=boundary, anchor=anchor)
     h, w = _indices_hw(indices)
     prefix = tuple(getattr(domain, "shape", ())[:-2])
     if prefix:
@@ -1169,81 +1170,188 @@ def _build_weights(
     base_weights: np.ndarray | None,
     *,
     boundary: str = "drop",
+    anchor: Any = None,
 ) -> Any:
     """Resolve a patch's weight array.
 
     If the indices is a `_MaskedWindow` (SpatialPolygonIntersection on a raster),
     return the interior mask — the window controls *which pixels count*,
     not how heavily they're tapered. Otherwise return the geometry-shaped
-    base weights from `SpatialWindow.weights`, cropped to the actual window
-    size when boundary == "shrink" (because the window was clipped).
+    base weights from `SpatialWindow.weights`. Under ``boundary="shrink"``
+    the geometry clipped the window to the domain on every side (top/left
+    too, for a negative anchor), so the weights are cropped to the same
+    in-domain part of the full patch: rows
+    ``[row_off - anchor_row, row_off - anchor_row + height)``, and
+    likewise for columns or `GridDomain` dims.
     """
     if isinstance(indices, _MaskedWindow):
         return indices.mask
-    if boundary == "shrink" and base_weights is not None:
-        h = getattr(indices, "height", None)
-        w = getattr(indices, "width", None)
-        if h is not None and w is not None:
-            bh, bw = base_weights.shape[-2:]
-            if (h, w) != (bh, bw):
-                return base_weights[..., : int(h), : int(w)]
-    return base_weights
+    if boundary != "shrink" or base_weights is None:
+        return base_weights
+    crop = _shrink_crop(indices, anchor, base_weights.ndim)
+    return base_weights if crop is None else base_weights[crop]
+
+
+def _shrink_crop(indices: Any, anchor: Any, ndim: int) -> tuple[Any, ...] | None:
+    """Slicer cropping full-patch weights to a shrunk window, or ``None``."""
+    if hasattr(indices, "row_off") and hasattr(indices, "col_off"):
+        r0, c0 = int(indices.row_off), int(indices.col_off)
+        ar, ac = (r0, c0) if anchor is None else (int(anchor[-2]), int(anchor[-1]))
+        dr, dc = r0 - ar, c0 - ac
+        return (
+            Ellipsis,
+            slice(dr, dr + int(indices.height)),
+            slice(dc, dc + int(indices.width)),
+        )
+    if not (isinstance(indices, dict) and isinstance(anchor, dict)):
+        return None
+    crop = []
+    for dim, index in indices.items():
+        if not isinstance(index, slice) or dim not in anchor:
+            return None
+        offset = int(index.start) - int(anchor[dim])
+        crop.append(slice(offset, offset + int(index.stop) - int(index.start)))
+    return tuple(crop) if len(crop) == ndim else None
 
 
 def _raise_if_overflows(indices: Any, domain: Any) -> None:
     """Raise ``ValueError`` if ``indices`` extends past ``domain``.
 
     Used by `SpatialPatcher.split` when the geometry's ``boundary``
-    policy is ``"raise"``. Only meaningful for raster-shaped indices
-    (rasterio `Window`); non-raster indices return early.
+    policy is ``"raise"``. Meaningful for raster windows and `GridDomain`
+    slice dicts; any other indices return early.
     """
-    if not (hasattr(indices, "row_off") and hasattr(indices, "col_off")):
-        return
-    if not (hasattr(domain, "shape") and len(domain.shape) >= 2):
-        return
-    dh, dw = int(domain.shape[-2]), int(domain.shape[-1])
-    r0, c0 = int(indices.row_off), int(indices.col_off)
-    rh, cw = int(indices.height), int(indices.width)
-    if r0 < 0 or c0 < 0 or r0 + rh > dh or c0 + cw > dw:
+    if _pad_request(indices, domain) is not None:
         raise ValueError(
             f"patch window {indices!r} overflows the domain shape "
-            f"({dh}, {dw}); set boundary='pad' or 'shrink' to allow."
+            f"{tuple(getattr(domain, 'shape', ()))}; set boundary='pad', "
+            "'reflect' or 'shrink' to allow."
         )
 
 
-def _overflows_window(window: Any, domain: Any) -> bool:
-    """True if a raster ``window`` extends past the ``domain`` edge."""
-    if not (hasattr(window, "row_off") and hasattr(window, "col_off")):
-        return False
-    if not (hasattr(domain, "shape") and len(domain.shape) >= 2):
-        return False
-    dh, dw = int(domain.shape[-2]), int(domain.shape[-1])
-    r0, c0 = int(window.row_off), int(window.col_off)
-    rh, cw = int(window.height), int(window.width)
-    return r0 < 0 or c0 < 0 or r0 + rh > dh or c0 + cw > dw
+@dataclass(frozen=True)
+class _Span:
+    """One axis of a padded read: ``[start, stop)`` requested on ``[0, length)``."""
+
+    start: int
+    stop: int
+    length: int
+
+    @property
+    def clipped(self) -> tuple[int, int]:
+        """The in-domain part ``[lo, hi)`` of the requested range."""
+        return max(self.start, 0), min(self.stop, self.length)
+
+    @property
+    def pads(self) -> tuple[int, int]:
+        """``(before, after)`` widths that grow the clipped read back to full size."""
+        lo, hi = self.clipped
+        return lo - self.start, self.stop - hi
+
+    def source(self, reflect: bool) -> tuple[int, int]:
+        """The in-domain range to read so the pad can be filled.
+
+        ``"pad"`` reads just the clipped range. ``"reflect"`` mirrors
+        about the edge pixel (numpy's ``mode="reflect"``), so a pad of
+        ``p`` before needs rows ``1 … p`` and a pad after needs
+        ``L - 1 - p … L - 2``; the read grows inward to cover them, capped
+        at the domain. When the pad exceeds ``L - 1`` the whole axis is
+        read and numpy reflects repeatedly (period ``2(L - 1)``) — the same
+        values a reflect-extended domain would hold.
+        """
+        lo, hi = self.clipped
+        if not reflect:
+            return lo, hi
+        before, after = self.pads
+        if before:
+            hi = max(hi, min(before + 1, self.length))
+        if after:
+            lo = min(lo, max(self.length - 1 - after, 0))
+        return lo, hi
 
 
-def _clip_pads(window: Any, domain: Any) -> tuple[Any, tuple[int, int, int, int]]:
-    """Clip ``window`` to the domain, returning ``(clipped, (t, b, l, r))``.
+@dataclass(frozen=True)
+class _PadRequest:
+    """An overflowing raster window or `GridDomain` slice dict, per axis.
 
-    ``(t, b, l, r)`` are the pad widths that grow the clipped read back up
-    to the original window size on the top / bottom / left / right edges.
+    ``spans`` is keyed ``"y"`` / ``"x"`` for a raster `Window` and by dim
+    name (in indexer order) for a `GridDomain` dict; ``indexer`` is the
+    original indices, kept for the non-slice entries of a grid dict.
     """
-    from rasterio.windows import Window
 
-    dh, dw = int(domain.shape[-2]), int(domain.shape[-1])
-    r0, c0 = int(window.row_off), int(window.col_off)
-    r1, c1 = r0 + int(window.height), c0 + int(window.width)
-    cr0, cc0 = max(r0, 0), max(c0, 0)
-    cr1, cc1 = min(r1, dh), min(c1, dw)
-    clipped = Window(
-        col_off=cc0,
-        row_off=cr0,
-        width=max(cc1 - cc0, 0),
-        height=max(cr1 - cr0, 0),
-    )
-    pads = (cr0 - r0, r1 - cr1, cc0 - c0, c1 - cc1)
-    return clipped, pads
+    spans: dict[str, _Span]
+    raster: bool
+    indexer: Any
+
+    def sources(self, reflect: bool) -> dict[str, tuple[int, int]]:
+        if reflect:
+            for dim, span in self.spans.items():
+                if any(span.pads) and span.length < 2:
+                    raise ValueError(
+                        f"boundary='reflect' cannot mirror axis {dim!r} of "
+                        f"length {span.length}; use boundary='pad'."
+                    )
+        return {dim: span.source(reflect) for dim, span in self.spans.items()}
+
+    def source_indexer(self, sources: dict[str, tuple[int, int]]) -> Any:
+        """The in-domain indexer handed to ``field.select``."""
+        if self.raster:
+            from rasterio.windows import Window
+
+            (r0, r1), (c0, c1) = sources["y"], sources["x"]
+            return Window(col_off=c0, row_off=r0, width=c1 - c0, height=r1 - r0)
+        return {**self.indexer, **{d: slice(lo, hi) for d, (lo, hi) in sources.items()}}
+
+    def crops(self, sources: dict[str, tuple[int, int]]) -> dict[str, slice]:
+        """Per-axis slice taking the padded source read down to the request.
+
+        The padded read spans ``[src_lo - before, src_hi + after)``; the
+        request starts ``clipped_lo - src_lo`` cells into it.
+        """
+        out = {}
+        for dim, span in self.spans.items():
+            offset = span.clipped[0] - sources[dim][0]
+            out[dim] = slice(offset, offset + span.stop - span.start)
+        return out
+
+
+def _pad_request(indices: Any, domain: Any) -> _PadRequest | None:
+    """Describe how ``indices`` overflows ``domain``, or ``None`` if it fits.
+
+    Raises ``ValueError`` for a window with no in-domain cell at all —
+    nothing can be read, and there is no edge to pad or mirror from.
+    """
+    if hasattr(indices, "row_off") and hasattr(indices, "col_off"):
+        shape: tuple[int, ...] = tuple(getattr(domain, "shape", ()))
+        if len(shape) < 2:
+            return None
+        r0, c0 = int(indices.row_off), int(indices.col_off)
+        spans = {
+            "y": _Span(r0, r0 + int(indices.height), int(shape[-2])),
+            "x": _Span(c0, c0 + int(indices.width), int(shape[-1])),
+        }
+        raster = True
+    elif isinstance(indices, dict) and isinstance(domain, GridDomain):
+        spans = {}
+        for dim, index in indices.items():
+            if isinstance(index, slice) and index.step in (None, 1):
+                length = len(domain.coords[dim])
+                start = 0 if index.start is None else int(index.start)
+                stop = length if index.stop is None else int(index.stop)
+                spans[dim] = _Span(start, stop, length)
+        raster = False
+    else:
+        return None
+    if not any(any(span.pads) for span in spans.values()):
+        return None
+    for dim, span in spans.items():
+        lo, hi = span.clipped
+        if hi <= lo:
+            raise ValueError(
+                f"patch window {indices!r} does not intersect the domain on "
+                f"axis {dim!r} (length {span.length})."
+            )
+    return _PadRequest(spans=spans, raster=raster, indexer=indices)
 
 
 def _carrier_nodata(data: Any) -> Any:
@@ -1255,6 +1363,36 @@ def _carrier_nodata(data: Any) -> Any:
     if rio is not None and getattr(rio, "nodata", None) is not None:
         return rio.nodata
     return 0
+
+
+def _check_pad_value(pad_value: float, data: Any) -> None:
+    """Raise if ``pad_value`` cannot be stored exactly in ``data``'s dtype.
+
+    ``np.pad`` casts the constant silently: ``-999.0`` into ``uint16``
+    wraps to ``64537``, ``NaN`` into an integer raster becomes an
+    arbitrary integer. The check is ``np.can_cast`` of the value's
+    minimal scalar type: an integer dtype needs a finite, integral value
+    in range; a float dtype needs one that does not overflow it.
+    """
+    dtype = getattr(data, "dtype", None)
+    dtype = np.asarray(data).dtype if dtype is None else np.dtype(dtype)
+    value = float(pad_value)
+    if dtype == np.bool_:
+        ok = value in (0.0, 1.0)
+    elif np.issubdtype(dtype, np.integer):
+        ok = (
+            np.isfinite(value)
+            and value.is_integer()
+            and bool(np.can_cast(np.min_scalar_type(int(value)), dtype))
+        )
+    else:
+        ok = bool(np.can_cast(np.min_scalar_type(value), dtype))
+    if not ok:
+        raise ValueError(
+            f"pad_value={pad_value!r} cannot be represented in the field's "
+            f"{dtype} dtype; choose a value that fits it (or leave pad_value "
+            "unset to pad with the reader's nodata)."
+        )
 
 
 def _is_rio_dataarray(data: Any) -> bool:
@@ -1294,17 +1432,148 @@ def _pad_carrier(
     return np.pad(arr, pad_width, mode="reflect")
 
 
-def _reflect_guard(window: Any, clipped: Any, pads: tuple[int, int, int, int]) -> None:
-    """Raise a clear error when a reflect pad exceeds the in-domain extent."""
-    pt, pb, pl, pr = pads
-    ch, cw = int(clipped.height), int(clipped.width)
-    if pt >= ch or pb >= ch or pl >= cw or pr >= cw:
-        raise ValueError(
-            f"boundary='reflect' needs the in-domain extent to exceed the "
-            f"overflow on every side; window {window!r} clips to ({ch}, {cw}) "
-            f"but the pads are (top={pt}, bottom={pb}, left={pl}, right={pr}). "
-            f"Use boundary='pad' for overflows this large."
+def _crop_carrier(data: Any, rows: slice, cols: slice) -> Any:
+    """Crop a raster carrier's spatial axes, keeping its georeferencing exact."""
+    if _is_rio_dataarray(data):
+        from rasterio.windows import Window, transform as window_transform
+
+        from geopatcher._src.fields.rio_xarray import _georeference
+
+        y_dim, x_dim = data.rio.y_dim, data.rio.x_dim
+        sub = data.isel({y_dim: rows, x_dim: cols})
+        window = Window(
+            col_off=cols.start,
+            row_off=rows.start,
+            width=sub.sizes[x_dim],
+            height=sub.sizes[y_dim],
         )
+        return _georeference(sub, window_transform(window, data.rio.transform()))
+    if hasattr(data, "isel") and hasattr(data, "transform"):
+        return data.isel({"y": rows, "x": cols})
+    return np.asarray(data)[..., rows, cols]
+
+
+def _finish_raster(
+    data: Any,
+    request: _PadRequest,
+    sources: dict[str, tuple[int, int]],
+    mode: str,
+    fill: Any,
+) -> Any:
+    """Pad the in-domain raster read to the requested window."""
+    (pt, pb), (pl, pr) = request.spans["y"].pads, request.spans["x"].pads
+    padded = _pad_carrier(data, (pt, pb, pl, pr), mode, fill)
+    crops = request.crops(sources)
+    rows, cols = crops["y"], crops["x"]
+    height, width = np.shape(padded)[-2:]
+    if (rows.start, cols.start, rows.stop, cols.stop) == (0, 0, height, width):
+        return padded
+    return _crop_carrier(padded, rows, cols)
+
+
+def _finish_grid(
+    data: Any,
+    request: _PadRequest,
+    sources: dict[str, tuple[int, int]],
+    domain: GridDomain,
+    mode: str,
+    fill: Any,
+) -> Any:
+    """Pad the in-domain `GridDomain` read to the requested slices.
+
+    A `DataArray` chip is padded by dim name; its 1-D coordinates on the
+    padded dims are rebuilt from the domain's (extrapolated past the edge
+    at the edge spacing), and a rioxarray-georeferenced chip gets its
+    transform shifted to the request origin. A plain array is padded
+    positionally, in indexer order.
+    """
+    pads = {d: span.pads for d, span in request.spans.items()}
+    crops = request.crops(sources)
+    const = {"constant_values": fill} if mode == "constant" else {}
+    if hasattr(data, "dims") and hasattr(data, "pad"):
+        padded = data.pad(pads, mode=mode, **const).isel(crops)
+        return _regrid_chip(data, padded, request, sources, domain)
+    arr = np.asarray(data)
+    dims = list(request.indexer)
+    width = [pads.get(d, (0, 0)) for d in dims] + [(0, 0)] * (arr.ndim - len(dims))
+    if mode == "constant":
+        padded_arr = np.pad(arr, width, mode="constant", constant_values=fill)
+    else:
+        padded_arr = np.pad(arr, width, mode="reflect")
+    return padded_arr[tuple(crops.get(d, slice(None)) for d in dims)]
+
+
+def _regrid_chip(
+    source: Any,
+    padded: Any,
+    request: _PadRequest,
+    sources: dict[str, tuple[int, int]],
+    domain: GridDomain,
+) -> Any:
+    """Rebuild a padded grid chip's coordinates (and rio transform)."""
+    updates = {}
+    for dim, span in request.spans.items():
+        if dim in padded.coords and padded[dim].dims == (dim,):
+            values = _extended_coord(domain.coords[dim], span.start, span.stop)
+            if values is not None:
+                updates[dim] = (dim, values, padded[dim].attrs)
+    if updates:
+        padded = padded.assign_coords(updates)
+    if not _is_rio_dataarray(source):
+        return padded
+    try:
+        rio = source.rio
+        y_dim, x_dim = rio.y_dim, rio.x_dim
+        georeferenced = rio.grid_mapping in source.coords
+    except Exception:  # rioxarray's MissingSpatialDimensionError & co.
+        return padded
+    if not georeferenced:
+        return padded
+    from rasterio import Affine
+
+    dy = request.spans[y_dim].start - sources[y_dim][0] if y_dim in sources else 0
+    dx = request.spans[x_dim].start - sources[x_dim][0] if x_dim in sources else 0
+    return padded.rio.write_transform(rio.transform() * Affine.translation(dx, dy))
+
+
+def _extended_coord(coord: np.ndarray, start: int, stop: int) -> np.ndarray | None:
+    """``coord[start:stop]``, linearly extrapolated past either end.
+
+    Out-of-domain positions continue at the edge spacing (``c[1] - c[0]``
+    before, ``c[-1] - c[-2]`` after). ``None`` for a coordinate shorter
+    than two entries (no spacing to extrapolate with).
+    """
+    coord = np.asarray(coord)
+    if len(coord) < 2:
+        return None
+    idx = np.arange(start, stop)
+    inside = np.clip(idx, 0, len(coord) - 1)
+    values = coord[inside]
+    below, above = idx < 0, idx >= len(coord)
+    if below.any():
+        values[below] = coord[0] + idx[below] * (coord[1] - coord[0])
+    if above.any():
+        steps = idx[above] - (len(coord) - 1)
+        values[above] = coord[-1] + steps * (coord[-1] - coord[-2])
+    return values
+
+
+def _finish_padded(
+    data: Any,
+    request: _PadRequest,
+    sources: dict[str, tuple[int, int]],
+    domain: Any,
+    boundary: str,
+    pad_value: float | None,
+) -> Any:
+    """Grow the in-domain read back to the requested window / slices."""
+    mode = "reflect" if boundary == "reflect" else "constant"
+    if mode == "constant" and pad_value is not None:
+        _check_pad_value(pad_value, data)
+    fill = pad_value if pad_value is not None else _carrier_nodata(data)
+    if request.raster:
+        return _finish_raster(data, request, sources, mode, fill)
+    return _finish_grid(data, request, sources, domain, mode, fill)
 
 
 def _select_padded(
@@ -1313,17 +1582,17 @@ def _select_padded(
     """Read ``window`` under ``pad`` / ``reflect``, padding overflow to full size.
 
     Interior (non-overflowing) windows take the plain read path — the
-    padding machinery only engages at the domain edge.
+    padding machinery only engages at the domain edge. An overflowing
+    window is clipped to the domain (grown inward under ``reflect`` so
+    the mirror source is in hand), read once, padded, and cropped back
+    to the requested extent.
     """
-    if not _overflows_window(window, domain):
+    request = _pad_request(window, domain)
+    if request is None:
         return field.select(window)
-    clipped, pads = _clip_pads(window, domain)
-    if boundary == "reflect":
-        _reflect_guard(window, clipped, pads)
-    data = field.select(clipped)
-    mode = "reflect" if boundary == "reflect" else "constant"
-    fill = pad_value if pad_value is not None else _carrier_nodata(data)
-    return _pad_carrier(data, pads, mode, fill)
+    sources = request.sources(boundary == "reflect")
+    data = field.select(request.source_indexer(sources))
+    return _finish_padded(data, request, sources, domain, boundary, pad_value)
 
 
 async def _select_padded_async(
@@ -1334,15 +1603,12 @@ async def _select_padded_async(
     pad_value: float | None,
 ) -> Any:
     """Async mirror of `_select_padded`."""
-    if not _overflows_window(window, domain):
+    request = _pad_request(window, domain)
+    if request is None:
         return await _select_async(field, window)
-    clipped, pads = _clip_pads(window, domain)
-    if boundary == "reflect":
-        _reflect_guard(window, clipped, pads)
-    data = await _select_async(field, clipped)
-    mode = "reflect" if boundary == "reflect" else "constant"
-    fill = pad_value if pad_value is not None else _carrier_nodata(data)
-    return _pad_carrier(data, pads, mode, fill)
+    sources = request.sources(boundary == "reflect")
+    data = await _select_async(field, request.source_indexer(sources))
+    return _finish_padded(data, request, sources, domain, boundary, pad_value)
 
 
 # Re-export `_is_raster_domain` to discourage cross-imports from geometry.py.

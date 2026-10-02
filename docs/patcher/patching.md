@@ -93,14 +93,22 @@ geom = SpatialRectangular(size=(256, 256), boundary="pad")
 
 | Mode | Behavior |
 |------|----------|
-| `"drop"` (default) | Sampler clips so overflowing anchors are never emitted. Edge residual is silently dropped — exactly the pre-issue-19 behavior. |
-| `"pad"` | Edge anchors are emitted; the patch is the full geometry size, padded in the overflow region with the reader's nodata (or `pad_value` when set). |
-| `"reflect"` | Edge anchors are emitted; the overflow region is mirror-padded from the in-domain interior, so a tapered window's trailing (bottom/right) flank lands on mirrored data rather than a constant fill. It does not reach the leading row/column (regular samplers start at anchor 0) — see [Window convention](#window-convention). Requires the overflow on each side to be smaller than the in-domain extent, else a clear `ValueError` is raised. |
-| `"shrink"` | Edge anchors are emitted; the geometry clips the returned Window so the patch is *smaller* at the edge. Weights crop to match. |
-| `"raise"` | Edge anchors are emitted; `SpatialPatcher.split` raises a `ValueError` on the first overflow. Useful with `SpatialExplicit` when the caller wants strict edge handling. |
+| `"drop"` (default) | Samplers only place anchors whose patch lies wholly in-domain; the trailing residual is dropped. A patch larger than the domain places **no** anchor (with a `RuntimeWarning`). |
+| `"pad"` | Samplers also place the edge anchor — the first whose patch reaches the edge, never an extra one past it. The patch is the full geometry size, padded in the overflow region with the reader's nodata (or `pad_value`, which must be representable in the field's dtype). |
+| `"reflect"` | As `"pad"`, but the overflow region is mirror-padded from the in-domain interior (numpy `mode="reflect"`, repeated when the overflow exceeds the domain) — so a tapered window's trailing (bottom/right) flank lands on mirrored data rather than a constant fill. It does not reach the leading row/column (regular samplers start at anchor 0) — see [Window convention](#window-convention). Needs at least two cells on a padded axis. |
+| `"shrink"` | As `"pad"` for anchor placement, but the window is clipped to the domain on every side — a negative anchor included — so the patch is *smaller* at the edge. Weights crop to the same in-domain part. |
+| `"raise"` | As `"pad"` for anchor placement; `SpatialPatcher.split` raises a `ValueError` on the first overflowing window. Useful with `SpatialExplicit` when the caller wants strict edge handling. |
+
+Every mode survives `merge`: each dense aggregation (`SpatialOverlapAdd`
+in memory and streaming, `SpatialSum`, `SpatialMean`, `SpatialMax`, …)
+crops a chip's data and weights to the in-domain part of its window, so
+padded or reflected cells are read for context but never written back.
+`SpatialRegularStride(check_full_scan=True)` only applies under `"drop"`
+— the other modes cover the trailing edge themselves.
 
 `"pad"` and `"reflect"` are guaranteed by the patcher itself — the
-overflowing window is clipped to the domain, read once, then padded up
+overflowing window is clipped to the domain (grown inward under
+`"reflect"` so the mirror source is in hand), read once, then padded up
 to the full geometry size, with the chip's transform shifted so its
 georeferencing stays exact (a `GeoTensor` via its own `pad`; a rioxarray
 `DataArray` gets its spatial coords rebuilt from the shifted affine).
@@ -111,10 +119,11 @@ Set a specific constant fill with `pad_value`:
 geom = SpatialRectangular(size=(256, 256), boundary="pad", pad_value=0.0)
 ```
 
-Only `SpatialRectangular` on raster domains honors the parameter in v0.x;
-graph and polygon geometries always behave as if `"drop"` (their natural
-clipping is already correct), and `GridDomain` support is pending an
-xarray-pad story.
+`SpatialRectangular` honours the parameter on raster domains and on
+`GridDomain` (`XarrayField`, `DaskField`): grid chips are padded by dim
+name, with their coordinates continued past the edge at the edge
+spacing. Graph and polygon geometries always behave as if `"drop"`
+(their natural clipping is already correct).
 
 ## Mixed-CRS patching
 

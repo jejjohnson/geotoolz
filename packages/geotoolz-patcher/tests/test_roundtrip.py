@@ -20,12 +20,18 @@ The properties (with the operator fixed to identity):
   touched region of a constant field maps to the same constant.
 - **Anchor-count contract.** `SpatialRegularStride.anchors(...)` with
   `boundary="drop"` returns exactly the integer lattice count
-  determined by the domain shape, patch size, and stride.
+  determined by the domain shape, patch size, and stride — zero when
+  the patch is larger than the domain (#185). Under the edge-covering
+  modes the lattice ends at the first anchor whose patch reaches the
+  edge.
 """
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
+import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
 from hypothesis import HealthCheck, given, settings, strategies as st
@@ -203,26 +209,52 @@ def test_constant_field_preserves_constant(
 def test_regular_stride_anchor_count_matches_formula(
     h: int, w: int, patch: int, stride: int
 ) -> None:
-    # The drop-mode formula: floor((D - P) / S) + 1 along each axis,
-    # clamped to >= 1 when P > D. Patch / stride / domain bounds
-    # deliberately overlap (patch up to 12, domain down to 2) so the
-    # patch > domain branch is part of the property — the clamp comment
-    # would be a lie otherwise.
-    arr = np.zeros((h, w), dtype=np.float32)
-    field = RasterField(
-        GeoTensor(
-            values=arr,
-            transform=rasterio.Affine.identity(),
-            crs="EPSG:32630",
-        )
-    )
+    # The drop-mode formula: floor((D - P) / S) + 1 along each axis, and
+    # no anchor at all when P > D on any axis — "drop" places only
+    # patches lying wholly in-domain (#185: it used to clamp to one
+    # overflowing anchor). Patch / stride / domain bounds deliberately
+    # overlap (patch up to 12, domain down to 2) so the patch > domain
+    # branch is part of the property.
+    field = _field((h, w))
     geom = SpatialRectangular(size=(patch, patch))
     sampler = SpatialRegularStride(step=stride)
-    expected_rows = max((h - patch) // stride + 1, 1)
-    expected_cols = max((w - patch) // stride + 1, 1)
-    expected = expected_rows * expected_cols
-    actual = sum(1 for _ in sampler.anchors(field.domain, geom))
-    assert actual == expected
+    if patch > h or patch > w:
+        expected = 0
+    else:
+        expected = ((h - patch) // stride + 1) * ((w - patch) // stride + 1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        anchors = list(sampler.anchors(field.domain, geom))
+    assert len(anchors) == expected
+    assert all(r + patch <= h and c + patch <= w for r, c in anchors)
+
+
+def _edge_lattice(length: int, patch: int, stride: int) -> list[int]:
+    """Reference: 0, S, 2S, … up to the first anchor reaching the edge."""
+    starts = [0]
+    while starts[-1] + patch < length:
+        starts.append(starts[-1] + stride)
+    return starts
+
+
+@pytest.mark.parametrize("boundary", ["pad", "reflect", "shrink", "raise"])
+@settings(max_examples=60, deadline=None)
+@given(
+    h=st.integers(min_value=2, max_value=64),
+    w=st.integers(min_value=2, max_value=64),
+    patch=st.integers(min_value=2, max_value=12),
+    stride=st.integers(min_value=1, max_value=12),
+)
+def test_edge_covering_lattice_matches_reference(
+    boundary: str, h: int, w: int, patch: int, stride: int
+) -> None:
+    # #185: non-drop samplers used ``stop = D``, adding a trailing anchor
+    # past the first one that already reaches the edge (56 for 64/16/8).
+    field = _field((h, w))
+    geom = SpatialRectangular(size=(patch, patch), boundary=boundary)  # type: ignore[arg-type]
+    anchors = list(SpatialRegularStride(step=stride).anchors(field.domain, geom))
+    rows, cols = _edge_lattice(h, patch, stride), _edge_lattice(w, patch, stride)
+    assert anchors == [(r, c) for r in rows for c in cols]
 
 
 @settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])

@@ -12,10 +12,10 @@ the same place:
 - ``with_data(merged)`` rebuilds a field on the same grid.
 
 The 40 x 50 extent is not a multiple of the 16-px chip, so the edge
-chips are exercised. ``boundary="shrink"`` keeps them mergeable;
-merging ``boundary="pad"`` chips that overhang the domain is #185, and
-so is the `GridDomain` sampler path ignoring the boundary policy (the
-`XarrayField` / `DaskField` cases are strict xfails until then).
+chips are exercised under every edge-covering boundary mode: ``shrink``
+clips them, ``pad`` / ``reflect`` overhang the domain and the merge
+crops them back (#185) — on the raster path and the `GridDomain` path
+(`XarrayField` / `DaskField`) alike.
 """
 
 from __future__ import annotations
@@ -158,14 +158,6 @@ def _reprojecting_3d(tmp_path: Path) -> Case:
     return Case(field, _values(), field.domain.transform)
 
 
-# #185: on a `GridDomain` the regular-stride sampler always drops the
-# trailing partial strip, whatever the geometry's boundary policy, so the
-# merge leaves the last rows/columns uncovered.
-_GRID_SHRINK = pytest.mark.xfail(
-    strict=True,
-    reason="#185: GridDomain anchors ignore boundary='shrink' (edge strip dropped)",
-)
-
 ADAPTERS: dict[str, Callable[[Path], Case]] = {
     "RasterField-GeoTensor": _raster_geotensor,
     "RasterField-RasterioReader": _raster_rasterio_reader,
@@ -177,9 +169,9 @@ ADAPTERS: dict[str, Callable[[Path], Case]] = {
 }
 
 
-def _patcher() -> SpatialPatcher:
+def _patcher(boundary: str) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16), boundary="shrink"),
+        geometry=SpatialRectangular(size=(16, 16), boundary=boundary),  # type: ignore[arg-type]
         sampler=SpatialRegularStride(step=16),
         window=SpatialBoxcar(),
         aggregation=SpatialOverlapAdd(),
@@ -192,20 +184,14 @@ def _chip_transform(data: Any) -> Affine:
     return data.rio.transform()
 
 
-_GRID_ADAPTERS = {"XarrayField", "DaskField"}
-
-
-@pytest.mark.parametrize(
-    "adapter",
-    [
-        pytest.param(name, marks=_GRID_SHRINK) if name in _GRID_ADAPTERS else name
-        for name in ADAPTERS
-    ],
-)
-def test_adapter_split_merge_round_trip(adapter: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize("boundary", ["shrink", "pad", "reflect"])
+@pytest.mark.parametrize("adapter", list(ADAPTERS))
+def test_adapter_split_merge_round_trip(
+    adapter: str, boundary: str, tmp_path: Path
+) -> None:
     case = ADAPTERS[adapter](tmp_path)
     field = case.field
-    patcher = _patcher()
+    patcher = _patcher(boundary)
 
     patches = list(patcher.split(field))
     assert patches

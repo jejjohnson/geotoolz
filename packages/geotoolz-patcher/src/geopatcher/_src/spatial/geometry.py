@@ -18,6 +18,7 @@ Five geometries:
 
 from __future__ import annotations
 
+import numbers
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal
 
@@ -91,31 +92,37 @@ class SpatialRectangular(SpatialGeometry):
         size: For raster, ``(height, width)`` in pixels. For grid, one
             length per declared dim in the domain's coord order.
         boundary: How to treat anchors whose patch would overflow the
-            domain edge. ``"drop"`` (default — current behavior) clips
-            the sampler so overflowing anchors are never placed.
-            ``"pad"`` emits edge anchors and fills out-of-bounds pixels
-            with the reader's nodata (or ``pad_value`` when set).
-            ``"reflect"`` emits edge anchors and mirror-pads the
-            out-of-bounds region from the in-domain interior — the
-            spectrally correct choice for overlap-add stitching with
-            tapered windows (no DC dip at the scene boundary).
-            ``"shrink"`` clips the returned Window so the patch becomes
-            smaller at the edge. ``"raise"`` emits edge anchors and
-            raises at split time. See `BoundaryMode`.
+            domain edge. See `BoundaryMode` and ``docs/patcher/patching.md``.
 
-            Only honored on raster domains in v0.x; GridDomain treats
-            every mode as ``"drop"`` until an xarray-pad story lands.
+            - ``"drop"`` (default): samplers only place anchors whose
+              patch fits in-domain; the trailing residual is dropped, and
+              a patch larger than the domain yields no anchors at all.
+            - ``"pad"``: the sampler places the edge anchor (the first
+              whose patch reaches the edge); out-of-bounds cells are
+              filled with the reader's nodata, or ``pad_value``.
+            - ``"reflect"``: as ``"pad"``, but the overflow is
+              mirror-padded from the interior (numpy ``mode="reflect"``,
+              repeated when the overflow exceeds the domain).
+            - ``"shrink"``: as ``"pad"``, but the window is clipped to the
+              domain on every side (a negative anchor included), so the
+              patch is smaller at the edge; weights crop to match.
+            - ``"raise"``: as ``"pad"``, but `SpatialPatcher.split`
+              raises on the first overflowing window.
 
-            ``"pad"`` and ``"reflect"`` are guaranteed by the patcher
-            itself — the overflowing window is clipped to the domain,
-            read once, then padded up to the full geometry size. This is
-            field-independent: it works identically for `RasterField`,
-            `RioXarrayField`, and any other `Field`, with the chip's
-            georeferencing (transform origin) shifted to stay exact.
+            Honoured on raster domains and on `GridDomain` slice dicts.
+            ``"pad"`` / ``"reflect"`` are applied by the patcher itself —
+            the overflowing window is clipped to the domain, read once,
+            then padded up to the full geometry size with the chip's
+            georeferencing kept exact — so they work for any `Field`.
+            Merging is likewise boundary-agnostic: every dense
+            aggregation crops chip data and weights to the in-domain part
+            of the patch's indices.
         pad_value: Constant fill for ``boundary="pad"``. When ``None``
             (default) the out-of-bounds region is filled with the
-            reader's nodata; set a float to force a specific constant.
-            Ignored by every other boundary mode.
+            reader's nodata; set a number to force a specific constant.
+            It must be representable in the field's dtype (checked at
+            read time — ``-999`` into a ``uint16`` raster raises instead
+            of wrapping). Ignored by every other boundary mode.
     """
 
     size: tuple[int, ...]
@@ -128,6 +135,13 @@ class SpatialRectangular(SpatialGeometry):
                 f"invalid boundary mode {self.boundary!r}; "
                 f"expected one of {_VALID_BOUNDARY_MODES}"
             )
+        if self.pad_value is not None and (
+            isinstance(self.pad_value, bool)
+            or not isinstance(self.pad_value, numbers.Real)
+        ):
+            raise TypeError(
+                f"pad_value must be a real number or None, got {self.pad_value!r}"
+            )
 
     def neighborhood(self, domain: Any, anchor: Any) -> Any:
         if _is_raster_domain(domain):
@@ -137,15 +151,18 @@ class SpatialRectangular(SpatialGeometry):
             ph, pw = int(self.size[-2]), int(self.size[-1])
             if self.boundary == "shrink":
                 dh, dw = int(domain.shape[-2]), int(domain.shape[-1])
-                ph = min(ph, max(dh - row_off, 0))
-                pw = min(pw, max(dw - col_off, 0))
+                row_off, ph = _shrink_axis(row_off, ph, dh)
+                col_off, pw = _shrink_axis(col_off, pw, dw)
             return Window(col_off=col_off, row_off=row_off, width=pw, height=ph)
         if isinstance(domain, GridDomain):
             dims = list(domain.coords)
-            return {
-                d: slice(int(anchor[d]), int(anchor[d]) + int(sz))
-                for d, sz in zip(dims, self.size, strict=False)
-            }
+            out = {}
+            for d, sz in zip(dims, self.size, strict=False):
+                start, length = int(anchor[d]), int(sz)
+                if self.boundary == "shrink":
+                    start, length = _shrink_axis(start, length, len(domain.coords[d]))
+                out[d] = slice(start, start + length)
+            return out
         raise NotImplementedError(
             f"SpatialRectangular doesn't support {type(domain).__name__} domains."
         )
@@ -193,6 +210,13 @@ class SpatialSphericalCap(SpatialGeometry):
 
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)
+
+
+def _shrink_axis(start: int, size: int, length: int) -> tuple[int, int]:
+    """Clip ``[start, start + size)`` to ``[0, length)`` → ``(start, size)``."""
+    lo = min(max(start, 0), length)
+    hi = min(max(start + size, lo), length)
+    return lo, hi - lo
 
 
 def _haversine_km(
