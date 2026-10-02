@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
+from scipy.spatial.distance import pdist
 
 from geopatcher import (
     GridDomain,
@@ -43,6 +44,17 @@ class TestSpatialRegularStride:
         # All anchors are valid (row, col) pairs
         assert all(0 <= r <= 48 and 0 <= c <= 48 for r, c in anchors)
 
+    @pytest.mark.parametrize("step", [0, -4, (16, 0), 2.5])
+    @pytest.mark.parametrize("cls", [SpatialRegularStride, SpatialJitteredStride])
+    def test_rejects_non_positive_step(self, cls: type, step: object) -> None:
+        # #187: step=0 used to fail late with "range() arg 3 must not be zero".
+        with pytest.raises(ValueError, match="step must be a positive integer"):
+            cls(step=step)
+
+    def test_rejects_negative_n_samples(self) -> None:
+        with pytest.raises(ValueError, match="n_samples"):
+            SpatialRandom(n_samples=-1)
+
 
 class TestSpatialJitteredStride:
     def test_reproducible_seed(
@@ -53,6 +65,39 @@ class TestSpatialJitteredStride:
         assert list(s1.anchors(raster_domain, rect)) == list(
             s2.anchors(raster_domain, rect)
         )
+
+    @pytest.mark.parametrize("grid", [False, True], ids=["raster", "grid"])
+    def test_jitter_uniform(self, grid: bool) -> None:
+        # #187: int() truncation toward zero gave P(offset == 0) = 0.126
+        # and never reached -8. floor() makes the 16 offsets -8..7 uniform.
+        size, step, n = 4, 16, 64 * 16 + 4
+        if grid:
+            domain: object = GridDomain(coords={"a": np.arange(n), "b": np.arange(n)})
+        else:
+            domain = GeoTensor(
+                values=np.zeros((n, n), dtype=np.uint8),
+                transform=rasterio.Affine.identity(),
+                crs="EPSG:32630",
+            )
+        geom = SpatialRectangular(size=(size, size))
+        s = SpatialJitteredStride(step=step, jitter=0.5, seed=0)
+        base = SpatialRegularStride(step=step).anchors(domain, geom)
+        offsets = []
+        for b, a in zip(base, s.anchors(domain, geom), strict=True):
+            pairs = (
+                zip(b.values(), a.values(), strict=True)
+                if grid
+                else zip(b, a, strict=True)
+            )
+            offsets += [ai - bi for bi, ai in pairs if 8 <= bi <= n - size - 8]
+        values, counts = np.unique(offsets, return_counts=True)
+        assert values.tolist() == list(range(-8, 8))
+        freq = counts / counts.sum()
+        assert np.all(np.abs(freq - 1 / 16) < 0.02)
+
+    def test_rejects_negative_jitter(self) -> None:
+        with pytest.raises(ValueError, match="jitter"):
+            SpatialJitteredStride(step=4, jitter=-0.1)
 
 
 class TestSpatialRandom:
@@ -78,13 +123,54 @@ class TestSpatialPoissonDisk:
         self, raster_domain: GeoTensor, rect: SpatialRectangular
     ) -> None:
         s = SpatialPoissonDisk(min_dist=8.0, seed=0)
-        anchors = list(s.anchors(raster_domain, rect))
-        # Bridson samples are floats internally; the integer pixel cast can
-        # shorten the integer-space distance by up to sqrt(2). Use a tolerance.
-        for i, a in enumerate(anchors):
-            for b in anchors[i + 1 :]:
-                d = ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
-                assert d >= 8.0 - 2.0  # generous: sqrt(2) per coord
+        anchors = np.asarray(list(s.anchors(raster_domain, rect)), dtype=float)
+        # #187: the guarantee holds exactly between the integer anchors
+        # (it used to be checked on the float candidates, then cast).
+        assert len(anchors) > 1
+        assert pdist(anchors).min() >= 8.0
+
+    @pytest.mark.parametrize("min_dist", [1.0, 2.0, 2.5, 8.0])
+    @pytest.mark.parametrize("seed", range(10))
+    def test_poisson_disk_min_distance_exact(self, min_dist: float, seed: int) -> None:
+        domain = GeoTensor(
+            values=np.zeros((40, 40), dtype=np.float32),
+            transform=rasterio.Affine.identity(),
+            crs="EPSG:32630",
+        )
+        geom = SpatialRectangular(size=(1, 1))
+        s = SpatialPoissonDisk(min_dist=min_dist, seed=seed)
+        anchors = np.asarray(list(s.anchors(domain, geom)), dtype=float)
+        assert len(anchors) > 1
+        assert pdist(anchors).min() >= min_dist
+        assert len({tuple(a) for a in anchors}) == len(anchors)
+
+    def test_point_subset_is_maximal_and_spaced(self) -> None:
+        from scipy.spatial import cKDTree
+
+        from geopatcher import PointDomain
+
+        rng = np.random.default_rng(0)
+        coords = rng.uniform(0, 100, size=(3000, 2))
+        domain = PointDomain(coords=coords, kdtree=cKDTree(coords))
+        s = SpatialPoissonDisk(min_dist=5.0, seed=1)
+        picked = list(s.anchors(domain, SpatialRectangular(size=(1, 1))))
+        assert len(set(picked)) == len(picked)
+        assert pdist(coords[picked]).min() >= 5.0
+        # Maximal: every rejected point is within min_dist of a kept one.
+        tree = cKDTree(coords[picked])
+        rejected = np.setdiff1d(np.arange(len(coords)), picked)
+        d, _ = tree.query(coords[rejected])
+        assert np.all(d < 5.0)
+
+    @pytest.mark.parametrize("min_dist", [0.0, -1.0, float("nan")])
+    def test_rejects_non_positive_min_dist(self, min_dist: float) -> None:
+        # min_dist=0 used to surface as an OverflowError from the grid.
+        with pytest.raises(ValueError, match="min_dist"):
+            SpatialPoissonDisk(min_dist=min_dist)
+
+    def test_rejects_zero_max_tries(self) -> None:
+        with pytest.raises(ValueError, match="max_tries"):
+            SpatialPoissonDisk(min_dist=1.0, max_tries=0)
 
 
 class TestSpatialExplicit:
@@ -256,3 +342,43 @@ class TestSpatialAlongTrack:
         assert list(s.anchors(raster_domain, padded)) == [(-2, -2)]
         dropped = SpatialRectangular(size=(4, 4), boundary="drop")
         assert list(s.anchors(raster_domain, dropped)) == [(0, 0)]
+
+    def test_spacing_keeps_final_vertex(self) -> None:
+        from geopatcher import SpatialAlongTrack
+
+        # #187: length 25 at spacing 10 used to stop at s = 20, silently
+        # dropping the track's end; the last interval is now shorter.
+        s = SpatialAlongTrack(track=np.array([[0.0, 0.0], [25.0, 0.0]]), spacing=10.0)
+        np.testing.assert_allclose(s._resampled()[:, 0], [0.0, 10.0, 20.0, 25.0])
+
+    def test_xyz_array_accepted_like_3d_linestring(self) -> None:
+        shapely = pytest.importorskip("shapely")
+        from geopatcher import SpatialAlongTrack
+
+        xyz = np.array([[0.0, 0.0, 5.0], [3.0, 4.0, 7.0]])
+        from_array = SpatialAlongTrack(track=xyz)
+        from_line = SpatialAlongTrack(track=shapely.LineString(xyz))
+        np.testing.assert_array_equal(from_array.track, xyz[:, :2])
+        np.testing.assert_array_equal(from_line.track, xyz[:, :2])
+
+
+class TestCentredAnchorConvention:
+    """#187: the coordinate's pixel lands at chip index ``size // 2``.
+
+    `georeader.read.window_from_center_coords` rounds the continuous UL
+    corner instead (banker's rounding), so for even sizes the two can
+    differ by one pixel; the docstring no longer claims they agree.
+    """
+
+    @pytest.mark.parametrize("size", [3, 4, 5, 16])
+    @pytest.mark.parametrize("frac", [0.01, 0.5, 0.99])
+    def test_pixel_lands_at_chip_centre_index(
+        self, raster_domain: GeoTensor, size: int, frac: float
+    ) -> None:
+        from geopatcher import SpatialExplicitCoords
+
+        row, col = 30, 21
+        s = SpatialExplicitCoords([(col + frac, row + frac)])
+        geom = SpatialRectangular(size=(size, size))
+        ((ar, ac),) = list(s.anchors(raster_domain, geom))
+        assert (row - ar, col - ac) == (size // 2, size // 2)

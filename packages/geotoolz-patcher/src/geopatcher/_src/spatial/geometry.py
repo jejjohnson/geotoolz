@@ -51,7 +51,7 @@ class SpatialGeometry:
     """Base for spatial neighborhood definitions.
 
     Subclasses override `neighborhood` (anchor → backend-specific
-    indices) and `extent` (domain → bounds on anchor placement).
+    indices). Anchor placement is the sampler's job.
     """
 
     forbid_in_yaml: ClassVar[bool] = False
@@ -59,25 +59,6 @@ class SpatialGeometry:
     def neighborhood(self, domain: Any, anchor: Any) -> Any:
         raise NotImplementedError(
             f"{type(self).__name__} doesn't support {type(domain).__name__} domains."
-        )
-
-    def extent(self, domain: Any) -> Any:
-        """Return the placement-space the SpatialSampler should iterate over.
-
-        For raster: ``(height, width)`` tuple.
-        For grid: ``{dim_name: length}`` dict.
-        For point/vector: the number of features (``int``).
-        """
-        if _is_raster_domain(domain):
-            return tuple(domain.shape[-2:])
-        if isinstance(domain, GridDomain):
-            return {d: len(c) for d, c in domain.coords.items()}
-        if isinstance(domain, PointDomain):
-            return len(domain.coords)
-        if isinstance(domain, VectorDomain):
-            return len(domain.geometry)
-        raise NotImplementedError(
-            f"extent() doesn't support {type(domain).__name__} domains."
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -156,8 +137,13 @@ class SpatialRectangular(SpatialGeometry):
             return Window(col_off=col_off, row_off=row_off, width=pw, height=ph)
         if isinstance(domain, GridDomain):
             dims = list(domain.coords)
+            if len(self.size) != len(dims):
+                raise ValueError(
+                    f"size must name every GridDomain dim: got size={tuple(self.size)} "
+                    f"for dims {tuple(dims)}."
+                )
             out = {}
-            for d, sz in zip(dims, self.size, strict=False):
+            for d, sz in zip(dims, self.size, strict=True):
                 start, length = int(anchor[d]), int(sz)
                 if self.boundary == "shrink":
                     start, length = _shrink_axis(start, length, len(domain.coords[d]))
@@ -175,6 +161,15 @@ class SpatialRectangular(SpatialGeometry):
 class SpatialSphericalCap(SpatialGeometry):
     """Geodesic cap of radius ``radius_km`` — for lat/lon fields near the poles.
 
+    On a `GridDomain` the latitude / longitude dims are found by name
+    (``lat`` / ``latitude`` and ``lon`` / ``longitude``). The anchor is
+    either the index dict a grid sampler yields (the cap is centred on
+    the cell at those indices) or a ``(lat, lon)`` value pair. The
+    neighborhood is the cap's bounding box as a ``{dim: slice}`` dict —
+    every other dim kept whole — plus the boolean mask of cells inside
+    the cap, which becomes the patch weights. On a `PointDomain` it is
+    the indices of the points inside the cap.
+
     Args:
         radius_km: Cap radius in kilometres, used as great-circle distance
             from the anchor. Earth radius is fixed at 6371 km.
@@ -184,15 +179,9 @@ class SpatialSphericalCap(SpatialGeometry):
 
     _EARTH_RADIUS_KM: ClassVar[float] = 6371.0
 
-    def neighborhood(self, domain: Any, anchor: tuple[float, float]) -> np.ndarray:
+    def neighborhood(self, domain: Any, anchor: Any) -> Any:
         if isinstance(domain, GridDomain):
-            # GridDomain stores named axes; anchor is (lat, lon) by convention.
-            lat_a, lon_a = float(anchor[0]), float(anchor[1])
-            lat = np.asarray(domain.coords["lat"])
-            lon = np.asarray(domain.coords["lon"])
-            llat, llon = np.meshgrid(lat, lon, indexing="ij")
-            d = _haversine_km(lat_a, lon_a, llat, llon)
-            return np.argwhere(d <= self.radius_km)
+            return self._grid_neighborhood(domain, anchor)
         if isinstance(domain, PointDomain):
             # PointDomain coords are (x, y) = (lon, lat), matching the
             # GeoPandas / xvec adapter convention. The KNN/radius haversine
@@ -208,8 +197,57 @@ class SpatialSphericalCap(SpatialGeometry):
             f"SpatialSphericalCap doesn't support {type(domain).__name__} domains."
         )
 
+    def _grid_neighborhood(self, domain: GridDomain, anchor: Any) -> _MaskedWindow:
+        lat_dim = _find_dim(domain, ("lat", "latitude"))
+        lon_dim = _find_dim(domain, ("lon", "longitude"))
+        lat = np.asarray(domain.coords[lat_dim], dtype=float)
+        lon = np.asarray(domain.coords[lon_dim], dtype=float)
+        if isinstance(anchor, dict):
+            lat_a, lon_a = lat[int(anchor[lat_dim])], lon[int(anchor[lon_dim])]
+        else:
+            lat_a, lon_a = float(anchor[0]), float(anchor[1])
+        llat, llon = np.meshgrid(lat, lon, indexing="ij")
+        inside = _haversine_km(lat_a, lon_a, llat, llon) <= self.radius_km
+        rows, cols = (
+            np.flatnonzero(inside.any(axis=1)),
+            np.flatnonzero(inside.any(axis=0)),
+        )
+        if rows.size == 0:
+            raise ValueError(
+                f"SpatialSphericalCap of {self.radius_km} km around "
+                f"({lat_a}, {lon_a}) contains no grid cell."
+            )
+        box = {
+            lat_dim: slice(int(rows[0]), int(rows[-1]) + 1),
+            lon_dim: slice(int(cols[0]), int(cols[-1]) + 1),
+        }
+        mask_2d = inside[box[lat_dim], box[lon_dim]]
+        indexer = {
+            d: box.get(d, slice(0, len(domain.coords[d]))) for d in domain.coords
+        }
+        # Lay the (lat, lon) mask out in the domain's dim order, broadcast
+        # over every other dim, so it matches the selected chip's shape.
+        spatial = [d for d in domain.coords if d in box]
+        if spatial != [lat_dim, lon_dim]:
+            mask_2d = mask_2d.T
+        shape = [s.stop - s.start for s in indexer.values()]
+        expand = [1 if d not in box else n for d, n in zip(indexer, shape, strict=True)]
+        mask = np.broadcast_to(mask_2d.reshape(expand), shape)
+        return _MaskedWindow(window=indexer, mask=mask)
+
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)
+
+
+def _find_dim(domain: GridDomain, names: tuple[str, ...]) -> str:
+    """The first of ``names`` that is a dim of ``domain``."""
+    for name in names:
+        if name in domain.coords:
+            return name
+    raise ValueError(
+        f"SpatialSphericalCap needs one of the dims {names} on the GridDomain; "
+        f"got {tuple(domain.coords)}."
+    )
 
 
 def _shrink_axis(start: int, size: int, length: int) -> tuple[int, int]:
@@ -238,19 +276,29 @@ class SpatialKNNGraph(SpatialGeometry):
     """Fixed-k nearest-neighbor neighborhood.
 
     Args:
-        k: Number of neighbors to return per anchor.
+        k: Number of neighbors to return per anchor (``>= 1``); capped at
+            the number of features, so ``k > N`` returns all ``N``.
         metric: ``"euclidean"`` (planar; uses the domain's kdtree) or
             ``"haversine"`` (great-circle; requires lat/lon coords).
+
+    An integer anchor (e.g. from `SpatialRandom`) is the index of a point,
+    or of a vector feature whose centroid is used.
     """
 
     k: int
     metric: str = "euclidean"
 
+    def __post_init__(self) -> None:
+        if int(self.k) != self.k or self.k < 1:
+            raise ValueError(f"k must be an integer >= 1, got {self.k!r}")
+
     def neighborhood(self, domain: Any, anchor: Any) -> np.ndarray:
         if isinstance(domain, PointDomain):
             anchor_xy = _to_xy(domain, anchor)
             if self.metric == "euclidean":
-                _, idx = domain.kdtree.query(anchor_xy, k=self.k)
+                # scipy pads k > N with the sentinel index N; cap k instead.
+                k = min(int(self.k), len(domain.coords))
+                _, idx = domain.kdtree.query(anchor_xy, k=k)
                 return np.atleast_1d(idx).astype(int)
             if self.metric == "haversine":
                 lats = domain.coords[:, 1]
@@ -259,7 +307,7 @@ class SpatialKNNGraph(SpatialGeometry):
                 return np.argsort(d)[: self.k]
             raise ValueError(f"unknown metric: {self.metric!r}")
         if isinstance(domain, VectorDomain):
-            anchor_geom = _to_shapely_point(anchor)
+            anchor_geom = _to_shapely_point(anchor, domain)
             centroids = domain.geometry.centroid
             d = centroids.distance(anchor_geom).values
             return np.argsort(d)[: self.k]
@@ -297,7 +345,7 @@ class SpatialRadiusGraph(SpatialGeometry):
                 return np.flatnonzero(d <= self.radius)
             raise ValueError(f"unknown metric: {self.metric!r}")
         if isinstance(domain, VectorDomain):
-            anchor_geom = _to_shapely_point(anchor)
+            anchor_geom = _to_shapely_point(anchor, domain)
             buf = anchor_geom.buffer(self.radius)
             tree = domain.sindex
             hits = tree.query(buf, predicate="intersects")
@@ -347,11 +395,13 @@ class SpatialPolygonIntersection(SpatialGeometry):
 
 @dataclass(eq=False)
 class _MaskedWindow:
-    """A bounding rasterio Window + an interior boolean mask.
+    """A bounding window + an interior boolean mask.
 
-    Returned by `SpatialPolygonIntersection.neighborhood` on `RasterDomain`. The
-    `RasterField.select` will read the rectangular window; the mask is
-    forwarded to the `Patch.weights` so downstream aggregation honours it.
+    Returned by `SpatialPolygonIntersection.neighborhood` on `RasterDomain`
+    (a rasterio `Window`) and by `SpatialSphericalCap.neighborhood` on a
+    `GridDomain` (a ``{dim: slice}`` dict). ``Field.select`` reads the
+    rectangular window; the mask is forwarded to the `Patch.weights` so
+    downstream aggregation honours it.
     """
 
     window: Any
@@ -409,10 +459,16 @@ def _to_xy(domain: PointDomain, anchor: Any) -> np.ndarray:
     return np.asarray(anchor, dtype=float)
 
 
-def _to_shapely_point(anchor: Any) -> Any:
-    """Coerce an anchor into a `shapely.Point`."""
+def _to_shapely_point(anchor: Any, domain: VectorDomain) -> Any:
+    """Coerce an anchor into a `shapely.Point`.
+
+    An integer anchor (what `SpatialRandom` yields on a `VectorDomain`) is
+    a feature index and maps to that feature's centroid.
+    """
     import shapely
 
+    if isinstance(anchor, int | np.integer):
+        return domain.geometry.iloc[int(anchor)].centroid
     if hasattr(anchor, "x") and hasattr(anchor, "y"):
         return anchor
     return shapely.Point(*anchor)

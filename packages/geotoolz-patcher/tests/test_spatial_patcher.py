@@ -341,3 +341,30 @@ def test_with_data_preserves_nodata_and_attrs(adapter: str) -> None:
     # A copy — mutating the output must not leak back into the source.
     out.attrs["k"] = 2
     assert source.attrs == {"k": 1}
+
+
+def test_window_type_error_is_not_swallowed() -> None:
+    # #187: `_safe_base_weights` caught every TypeError, so a bug inside
+    # a `SpatialCustom` fn silently turned into "no weights".
+    from _helpers import make_raster_field
+
+    from geopatcher import SpatialCustom
+
+    def broken(geometry: Any) -> np.ndarray:
+        raise TypeError("bug in user code")
+
+    patcher = SpatialPatcher(
+        geometry=SpatialRectangular(size=(8, 8)),
+        sampler=SpatialRegularStride(step=8),
+        window=SpatialCustom(fn=broken),
+        aggregation=SpatialOverlapAdd(),
+    )
+    with pytest.raises(TypeError, match="bug in user code"):
+        list(patcher.split(make_raster_field(16)))
+
+
+def test_ragged_geometry_gets_no_base_weights() -> None:
+    from geopatcher import SpatialKNNGraph
+    from geopatcher._src.spatial.patcher import _safe_base_weights
+
+    assert _safe_base_weights(SpatialBoxcar(), SpatialKNNGraph(k=2)) is None

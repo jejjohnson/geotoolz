@@ -139,6 +139,35 @@ class TestPolarDatelineGuard:
         with pytest.warns(RuntimeWarning, match="antimeridian"):
             list(sampler.anchors(field.domain, geom))
 
+    def test_unordered_catalogue_across_antimeridian_is_silent(self) -> None:
+        # #187: an event catalogue holding 179.5 and -179.5 is not a track
+        # crossing the dateline; consecutive differences mean nothing.
+        field = _utm_field()
+        geom = SpatialRectangular(size=(8, 8))
+        sampler = SpatialExplicitCoords(
+            coords=[(179.5, 0.5), (-179.5, 0.5)], crs="EPSG:4326"
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            list(sampler.anchors(field.domain, geom))
+
+    def test_polar_destination_crs_is_silent(self) -> None:
+        # #187: the polar check ignored the destination CRS; a polar
+        # stereographic domain (EPSG:3413, valid to 90N) is exactly where
+        # 85N coordinates belong.
+        arr = np.zeros((10, 10), dtype=np.float32)
+        polar = RasterField(
+            GeoTensor(
+                values=arr,
+                transform=rasterio.Affine(1000, 0, -5000, 0, -1000, 5000),
+                crs="EPSG:3413",
+            )
+        )
+        geom = SpatialRectangular(size=(2, 2))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            list(self._sampler("warn").anchors(polar.domain, geom))
+
     def test_invalid_guard_rejected(self) -> None:
         with pytest.raises(ValueError, match="invalid polar_guard"):
             SpatialExplicitCoords(coords=[(0.0, 0.0)], polar_guard="mirror")
