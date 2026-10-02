@@ -121,7 +121,10 @@ def evaluate_band_math(
       and ``clip``.
 
     Bare names resolve against ``variables``; anything else (comparison
-    operators, attribute access, subscripts, lambdas, ...) raises.
+    operators, attribute access, subscripts, lambdas, ...) raises. With
+    no comparisons in the grammar, ``where``'s condition is a numeric
+    expression read as truthy where non-zero (e.g.
+    ``where(clip(B8 - B4, 0, 1), B8, B4)``), not ``B8 > B4``.
 
     Args:
         expression: Arithmetic expression over the keys of

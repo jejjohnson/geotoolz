@@ -55,7 +55,7 @@ full tour):
   inside an operator `Sequential` for tile-predict-stitch inference; the
   label-aware samplers emit the same `Patch` carrier for training draws.
 - **Coregistration operators** — `geotoolz.geom.coregister` ops are the
-  intended coreg callables for `geopatcher.MatchedField`, aligning
+  intended coreg callables for `geopatcher.matched.MatchedField`, aligning
   multi-source patches found by the catalog's matchup engine.
 - **One obstore pool** — all three packages soft-import a shared pooled
   HTTP/2 client for cloud reads.
@@ -66,7 +66,7 @@ from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 cat    = gc.from_stac_search("https://planetarycomputer.microsoft.com/api/stac/v1",
                              collections=["sentinel-2-l2a"], bbox=aoi, datetime="2024-06")
-field  = gc.staging.field_for(gc.staging.stage(cat, dest="./cache"))[0]
+field  = gc.field_for(gc.stage(cat, dest="./cache"))[0]
 
 patcher = gp.SpatialPatcher(geometry=gp.SpatialRectangular(size=(256, 256)),
                             sampler=gp.SpatialRegularStride(step=(192, 192)),

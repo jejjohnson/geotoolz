@@ -13,10 +13,12 @@ algebra is composable.
   - `GMMClusterBackground` / `ApplyClusterMF` — cluster-conditional background
 - **Target construction:** `LinearTargetFromObs`, `NonlinearTargetFromObs`
 - **Composed:** `ColumnEnhancement` — mean → cov → target → MF in one operator
+- **Result containers:** `NumpyLinearOperator` (dense covariance with `solve`), `AdaptiveBackground`,
+  `ClusterBackground`, `StreamingBackgroundResult`, `WelfordAccumulator`
 - **Post-processing:** `DetectionThreshold`, `ValidateMFInputs`
 - **Array primitives** (no GeoTensor): `apply_image`, `apply_pixel`, `apply_adaptive_mf`, `matched_filter_snr`,
-  `estimate_cov_empirical`, `estimate_cov_shrunk`, `estimate_cov_lowrank`, `shrink_covariance`,
-  `detection_threshold`
+  `estimate_mean`, `estimate_cov_empirical`, `estimate_cov_shrunk`, `estimate_cov_lowrank`,
+  `shrink_covariance`, `detection_threshold`, `validate_mf_inputs`
 
 Covariance shrinkage (`"ledoit_wolf"`, the default, and `"oas"`) reproduces
 `sklearn.covariance.ledoit_wolf` / `sklearn.covariance.oas`: the shrinkage intensity is identical on

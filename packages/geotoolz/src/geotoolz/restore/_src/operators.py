@@ -143,7 +143,7 @@ class DespeckleLee(Operator):
 
     Examples:
         >>> import geotoolz as gz
-        >>> pipe = gz.restore.DespeckleLee(window=7) | gz.restore.MedianDenoise(size=3)
+        >>> pipe = gz.restore.DespeckleLee(window=7) | gz.restore.MedianDenoise(window=3)
         >>> clean = pipe(sar_geotensor)
     """
 

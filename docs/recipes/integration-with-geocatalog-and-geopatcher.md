@@ -7,54 +7,62 @@ ever leaving the `Operator` interface.
 ```mermaid
 flowchart LR
     subgraph cat["geocatalog — discover &amp; load"]
-        STAC[(STAC catalogue)] --> Search[SearchCatalog]
-        Search --> Load[LoadScene]
+        STAC[(STAC catalogue)] --> Search[from_stac_search]
+        Search --> Load[load_raster / stage + field_for]
     end
     subgraph tools["geotoolz — operate"]
-        Sc[Scale] --> Cm[CloudMask] --> Nv[NDVI]
+        Sc[DNToReflectance] --> Nv[NDVI]
     end
     subgraph patch["geopatcher (via geotoolz.patch_ops) — tile &amp; stitch"]
         GS[GridSampler] --> AC[ApplyToChips] --> St[MergePatches]
     end
     Load --> Sc
-    Nv --> GS
+    Load --> GS
 ```
 
-The full multi-repo walk-through (one Lake Tahoe scene end-to-end) lives
-in the canonical notebook in `geocatalog`:
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+The full multi-package walk-through (one Lake Tahoe scene end-to-end)
+lives in the canonical catalog notebook:
+[`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 This page is the geotoolz-side reference.
 
 ## Upstream — `geocatalog`
 
-`geocatalog` exposes STAC discovery and scene loading as operators that
-return `GeoTensor`s. Their output is `geotoolz`'s input:
-
-`Scale` and `NDVI` below are the inline operators defined in the
-[quickstart](../quickstart.md#2-define-three-operators-inline); swap
-them for the production versions in `geotoolz.radiometry` /
-`geotoolz.indices` once you have them.
+`geocatalog` indexes STAC search results (or local files) as a
+queryable catalog and loads a `GeoSlice` of it as a `GeoTensor`. That
+`GeoTensor` is `geotoolz`'s input. The catalog indexes one asset per row
+(`asset_key`), so a multi-band scene is one catalog per band, stacked:
 
 ```python
 import geocatalog as gc
 import geotoolz as gz
-from pipekit import Sequential
+import pandas as pd
 
-# Discover scenes (geocatalog)
-items = gc.SearchCatalog(
-    catalog_url="https://planetarycomputer.microsoft.com/api/stac/v1",
-    collections=["sentinel-2-l2a"],
-    bbox=(-120.25, 38.85, -119.85, 39.30),
-    datetime="2024-06-01/2024-09-30",
-    query={"eo:cloud_cover": {"lt": 20}},
-)()
+TAHOE_BBOX = (-120.25, 38.85, -119.85, 39.30)
 
-# Load one as a GeoTensor (geocatalog)
-gt = gc.LoadScene(item=items[0], assets=["B04", "B08", "SCL"])()
 
-# Operate (geotoolz; Scale + NDVI from the quickstart)
-ndvi_pipe = Sequential([Scale(scale=1e-4), NDVI(nir=1, red=0)])
-ndvi = ndvi_pipe(gt)
+def band_catalog(asset_key):
+    return gc.from_stac_search(
+        "https://planetarycomputer.microsoft.com/api/stac/v1",
+        collections=["sentinel-2-l2a"],
+        bbox=TAHOE_BBOX,
+        datetime="2024-07-01/2024-07-31",
+        asset_key=asset_key,
+    )
+
+
+aoi = gc.GeoSlice(
+    bounds=TAHOE_BBOX,
+    interval=pd.Interval(
+        pd.Timestamp("2024-07-01", tz="UTC"), pd.Timestamp("2024-07-31", tz="UTC"), closed="both"
+    ),
+    resolution=(0.0001, 0.0001),
+    crs="EPSG:4326",
+)
+red = gc.load_raster(band_catalog("B04").query(aoi), aoi)   # (1, H, W) GeoTensor
+nir = gc.load_raster(band_catalog("B08").query(aoi), aoi)
+scene = gz.StackBands()([red, nir])                          # (2, H, W)
+
+ndvi = (gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir=1, red=0))(scene)
 ```
 
 The boundary is *just* the `GeoTensor` — nothing about geotoolz knows
@@ -66,30 +74,31 @@ operator pipeline.
 
 When the input raster is too big to fit in memory (or you're running a
 patch-based ML model), `geopatcher` provides the four-axis Patcher
-framework: a `Sampler` tiles the raster into chips, an `Apply` runs the
-per-chip transform, and a `MergePatches` re-assembles the output.
+framework (Geometry × Sampler × Window × Aggregation): `split` tiles a
+`Field` into chips, an operator runs per chip, and the aggregation
+stitches the results back.
 
-`geotoolz.patch_ops` wraps those three pieces as `Operator`s so a
+`geotoolz.patch_ops` exposes those pieces as `Operator`s so a
 tiled-inference flow composes inside a `Sequential`:
 
 ```python
 import geopatcher as gp
-from geotoolz import ModelOp, Sequential
-from geotoolz.patch_ops import GridSampler, ApplyToChips, MergePatches
+from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 patcher = gp.SpatialPatcher(
-    domain=gt.domain,
-    window=gp.SpatialWindow(width=512, height=512),
-    stride=(256, 256),
+    geometry=gp.SpatialRectangular(size=(512, 512)),
+    sampler=gp.SpatialRegularStride(step=(256, 256)),
+    window=gp.SpatialHann(),
+    aggregation=gp.SpatialOverlapAdd(),
 )
 
-infer = Sequential([
+infer = gz.Sequential([
     GridSampler(patcher=patcher),
-    ApplyToChips(operator=ModelOp(model=my_torch_unet, batch_size=8)),
-    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=gt.domain),
+    ApplyToChips(operator=gz.ModelOp(model=my_torch_unet, batch_size=8)),
+    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=field.domain),
 ])
 
-prediction = infer(gt)
+prediction = infer(field)
 ```
 
 Install with the `[patch]` extra: `uv pip install 'geotoolz[patch]'`.
@@ -101,52 +110,44 @@ renamed `MergePatches` so it doesn't collide with `geotoolz.geom.Stitch`.
 
 ## The combined shape
 
-A realistic end-to-end pipeline looks like a `Sequential` whose head
-comes from `geocatalog`, whose middle is geotoolz operators, and whose
-tail is a `patch_ops` tiled-inference block:
-
-Because `MergePatches` needs a `domain` at construction time but `gc.LoadScene`
-only produces a `GeoTensor` at *runtime*, split the flow into a quick
-load step (to get a domain) and the operator pipeline that consumes it.
-Once you have the domain, the whole thing is one `Sequential`:
+The catalog → patcher seam is `staging`: `stage` caches a catalog's
+assets locally and `field_for` turns each staged row into a `geopatcher`
+`Field`. `MergePatches` needs the output `domain` at construction time,
+so build the `Field` first; then the whole flow is one `Sequential`:
 
 ```python
-gt = gc.LoadScene(item=item, assets=["B04", "B08", "SCL"])()  # runtime
-domain = gt.domain
+staged = gc.stage(band_catalog("B04").query(aoi), dest="./cache")
+field = gc.field_for(staged)[0]                     # one Field per catalog row
 
-pipe = Sequential([
-    Scale(scale=1e-4),                                  # geotoolz
-    CloudMask(scl_idx=2),                               # geotoolz
-    NDVI(nir=1, red=0),                         # geotoolz
-    GridSampler(patcher=patcher),                               # geotoolz.patch_ops → geopatcher
-    ApplyToChips(operator=ModelOp(model=model)),                       # geotoolz
-    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=domain), # geotoolz.patch_ops → geopatcher
+pipe = gz.Sequential([
+    GridSampler(patcher=patcher),                    # geotoolz.patch_ops → geopatcher
+    ApplyToChips(operator=gz.DNToReflectance(scale=1e-4)),  # geotoolz, per chip
+    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=field.domain),
 ])
-out = pipe(gt)
+reflectance = pipe(field)
 ```
 
-If you want a single round-trippable artefact, wire `LoadScene` and the
-operator pipeline into a `Graph` so the `domain` flows through as an
-explicit input rather than baked into `MergePatches`' config.
-
-Every step is an `Operator`. The whole thing round-trips via
-`get_config()` for YAML / Hydra-zen. The carrier (`GeoTensor`) is
-preserved from start to finish, with metadata propagating through every
-hop.
+Every step is an `Operator`, so the pipeline's structure is inspectable
+via `get_config()`. `GridSampler` and `MergePatches` hold runtime
+objects (a patcher, a domain) and are flagged `forbid_in_yaml`, so a
+pipeline that contains them is rebuilt in code rather than from YAML. The carrier
+metadata (CRS, transform, fill) is preserved chip by chip and restored
+by the aggregation.
 
 ## Where each package owns what
 
 | Concern | Package | Surface |
 |---|---|---|
-| STAC discovery, asset loading, AOI windowing | [`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog) | `SearchCatalog`, `LoadScene`, … |
-| Per-scene radiometry, indices, masking, compositing | `geotoolz` | `radiometry`, `indices`, `cloud`, `compositing`, … |
+| STAC discovery, asset loading, AOI windowing | [`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog) | `from_stac_search`, `GeoSlice`, `load_raster`, `stage`, `field_for`, … |
+| Per-scene radiometry, indices, masking, compositing | `geotoolz` | `radiometry`, `indices`, `qa`, `mask`, `compositing`, … |
 | Sliding-window tiling, chunked inference, stitching | [`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher) | `SpatialPatcher`, `Stitch` (exposed as `geotoolz.patch_ops.MergePatches`) |
 | The composition algebra itself | [`pipekit`](https://github.com/jejjohnson/pipekit) | `Operator`, `Sequential`, `Graph`, `Branch`, `Switch`, … |
 
 ## See also
 
-- Canonical cross-repo notebook:
-  [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+- Canonical end-to-end notebook:
+  [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 - This repo's operator-composition slice:
   [`notebooks/operators_lake_tahoe.ipynb`](../notebooks/operators_lake_tahoe.ipynb).
-- [Quickstart](../quickstart.md) and [Concepts](../concepts.md).
+- [The geostack](../geostack.md), [Quickstart](../quickstart.md) and
+  [Concepts](../concepts.md).

@@ -13,5 +13,8 @@ Geometry-based masks, morphological mask ops, and boolean mask algebra. Conventi
   `RemoveSmallObjects`, `RemoveSmallHoles`, `CleanMask`
 - **Algebra:** `CombineMasks(op="or" | "and" | "xor")` (equally shaped masks), `InvertMask`
 - **Apply:** `ApplyMask` (fill values where mask is `True`)
+- **Tier-A primitives:** `apply_mask`, `dilate_mask`, `erode_mask`, `open_mask`, `close_mask`,
+  `buffer_mask`, `clean_mask`, `remove_small_objects`, `remove_small_holes`, `combine_masks`,
+  `invert_mask`, `distance_mask`, `altitude_mask`, `slope_mask`, `slope_degrees`
 
 ::: geotoolz.mask

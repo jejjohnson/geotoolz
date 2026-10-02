@@ -14,7 +14,7 @@ The notebook continues into pipelines (`geotoolz`) and patching
 Install the extras we need:
 
 ```bash
-pip install 'geocatalog[full]'
+pip install 'geotoolz-catalog[full]'
 # or with uv:
 uv add 'geocatalog[full]'
 ```
@@ -22,7 +22,7 @@ uv add 'geocatalog[full]'
 The `[full]` extra is the kitchen-sink combo — it bundles the STAC
 client (`pystac`, `pystac-client`, `planetary-computer`), the DuckDB
 backend, xarray, and cloud-storage support. If you only need the
-STAC ingestion path, `pip install 'geocatalog[stac]'` is enough.
+STAC ingestion path, `pip install 'geotoolz-catalog[stac]'` is enough.
 
 ## The scenario
 
@@ -200,7 +200,7 @@ to share with collaborators (or your future self).
 ## Troubleshooting
 
 - **`ModuleNotFoundError: No module named 'pystac_client'`** — install
-  `[stac]`: `pip install 'geocatalog[stac]'`.
+  `[stac]`: `pip install 'geotoolz-catalog[stac]'`.
 - **`PermissionError` from blob storage** — the signed URLs expire
   after ~1 hour. Re-run the STAC search to refresh them, or call
   `planetary_computer.sign(item)` again per scene.

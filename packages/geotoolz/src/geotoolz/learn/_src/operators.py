@@ -433,10 +433,13 @@ class ModelOp(Operator):
         (state-dict + class config) themselves.
 
     Examples:
-        Inference with a sklearn classifier::
+        A scikit-learn estimator sees the raw array, so feed it the
+        ``(n_samples, n_features)`` table it was fit on; for per-pixel
+        prediction on a ``(C, H, W)`` scene use :class:`SklearnOp`,
+        which flattens the pixels and restores the grid::
 
             op = ModelOp(model=rf_clf, method="predict")
-            preds = op(features_gt)
+            labels = op(features)  # features: (n_samples, n_features)
 
         Batched inference with a torch model::
 

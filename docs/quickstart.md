@@ -10,22 +10,25 @@ and [`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geo
 (`-120.25, 38.85, -119.85, 39.30`, `2024-06-01..2024-09-30`,
 `sentinel-2-l2a`, cloud cover < 20 %).
 
-> **Pre-alpha note.** Several `geotoolz` operator modules (`indices`,
-> `qa`, `radiometry`, …) are in flux. To keep this quickstart stable
-> as the named-op surface churns, we define `Scale`, `CloudMask`, and
-> `NDVI` inline as small `Operator` subclasses. The patterns transfer
-> directly to the named imports once you adopt them.
+> **Why inline operators?** To show the composition pattern end to end,
+> this quickstart defines `Scale`, `CloudMask`, and `NDVI` inline as
+> small `Operator` subclasses. The library ships tested equivalents —
+> `gz.DNToReflectance(scale=1e-4)`, `gz.S2SCL(qa_band=2)` and
+> `gz.NDVI(nir=1, red=0)` — that also handle band names and nodata; swap
+> them in once the pattern is clear.
 
 ## 0. Install
 
 ```bash
-uv pip install "git+https://github.com/jejjohnson/geotoolz@main"
+uv pip install \
+  "pipekit @ git+https://github.com/jejjohnson/pipekit#subdirectory=packages/pipekit" \
+  "geotoolz @ git+https://github.com/jejjohnson/geotoolz@main#subdirectory=packages/geotoolz"
 uv pip install rioxarray planetary-computer pystac-client matplotlib
 ```
 
 The full multi-repo flow (catalog → patch → operate) is documented in
 the canonical
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+[`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 Here we focus on the **operator-composition slice**.
 
 ## 1. Load one Sentinel-2 scene
@@ -64,12 +67,15 @@ gt = GeoTensor(
 ```
 
 The `GeoTensor` carries the array plus `transform` and `crs`. Operators
-preserve those across `gt.array_as_geotensor(new_array)`.
+preserve those by rewrapping their result with
+`geotoolz._src.wrap.wrap_like(gt, new_array)`.
 
 ## 2. Define three operators inline
 
 ```python
+import numpy as np
 from pipekit import Operator
+from geotoolz._src.wrap import wrap_like
 
 
 class Scale(Operator):
@@ -79,10 +85,7 @@ class Scale(Operator):
         self.scale = scale
 
     def _apply(self, gt):
-        return gt.array_as_geotensor(gt.values.astype("float32") * self.scale)
-
-    def get_config(self):
-        return {"scale": self.scale}
+        return wrap_like(gt, np.asarray(gt, dtype=np.float32) * self.scale)
 
 
 class CloudMask(Operator):
@@ -95,36 +98,34 @@ class CloudMask(Operator):
 
     DROP_CLASSES = (3, 8, 9, 10)
 
-    def __init__(self, *, scl_idx: int = 2) -> None:
-        self.scl_idx = scl_idx
+    def __init__(self, *, qa_band: int = 2) -> None:
+        self.qa_band = qa_band
 
     def _apply(self, gt):
-        scl = gt.values[self.scl_idx]
-        import numpy as np
-        drop = np.isin(scl, self.DROP_CLASSES)
-        return gt.array_as_geotensor(drop.astype("uint8"))
-
-    def get_config(self):
-        return {"scl_idx": self.scl_idx}
+        drop = np.isin(np.asarray(gt)[self.qa_band], self.DROP_CLASSES)
+        return wrap_like(gt, drop, fill_value_default=False)
 
 
 class NDVI(Operator):
-    """(NIR - Red) / (NIR + Red + eps)."""
+    """(NIR - Red) / (NIR + Red + eps); collapses the band axis."""
 
-    def __init__(self, *, nir_idx: int = 1, red_idx: int = 0, eps: float = 1e-10) -> None:
-        self.nir_idx, self.red_idx, self.eps = nir_idx, red_idx, eps
+    def __init__(self, *, nir: int = 1, red: int = 0, eps: float = 1e-10) -> None:
+        self.nir, self.red, self.eps = nir, red, eps
 
     def _apply(self, gt):
-        a = gt.values
-        nir, red = a[self.nir_idx], a[self.red_idx]
-        return gt.array_as_geotensor((nir - red) / (nir + red + self.eps))
-
-    def get_config(self):
-        return {"nir": self.nir_idx, "red": self.red_idx, "eps": self.eps}
+        a = np.asarray(gt, dtype=np.float32)
+        nir, red = a[self.nir], a[self.red]
+        return wrap_like(gt, (nir - red) / (nir + red + self.eps), fill_value_default=np.nan)
 ```
 
-Each operator follows the same two-method contract: `_apply` does the
-work, `get_config` round-trips the constructor args.
+Each operator follows the same contract: a keyword-only constructor that
+stores every argument under its own name, and an `_apply` that does the
+work and rewraps the result with `wrap_like` (which keeps `transform` /
+`crs` and declares the output's fill value: `False` for a mask, `NaN` for
+a new float quantity). `get_config()` is derived automatically from the
+constructor (`NDVI(nir=1, red=0).get_config()` is
+`{"nir": 1, "red": 0, "eps": 1e-10}`), so the operator round-trips with no
+extra code.
 
 ## 3. Compose
 
@@ -143,27 +144,21 @@ For cloud masking before NDVI, where you need to *split* the scene into
 
 ```python
 import geotoolz as gz
-import numpy as np
-from pipekit import Operator
 
 
-class ApplyMask(Operator):
-    """Zero-out pixels where drop-mask == 1; preserves carrier metadata."""
+class ApplyDropMask(Operator):
+    """Set pixels where the drop-mask is True to NaN; keeps carrier metadata."""
 
     def _apply(self, gt, drop):
         # Graph supplies upstream node values as separate positional args.
-        keep = (drop.values == 0).astype(np.float32)
-        masked = gt.values * keep[None, :, :]
-        return gt.array_as_geotensor(masked.astype(np.float32))
-
-    def get_config(self):
-        return {}
+        masked = np.where(np.asarray(drop), np.nan, np.asarray(gt, dtype=np.float32))
+        return wrap_like(gt, masked, fill_value_default=np.nan)
 
 
 img = gz.Input("image")
 scaled = Scale(scale=1e-4)(img)
-drop = CloudMask(scl_idx=2)(img)
-clean = ApplyMask()(scaled, drop)
+drop = CloudMask(qa_band=2)(img)
+clean = ApplyDropMask()(scaled, drop)
 ndvi = NDVI(nir=1, red=0)(clean)
 
 g = gz.Graph(inputs={"image": img}, outputs={"ndvi": ndvi})
@@ -206,7 +201,7 @@ A researcher's typical loop:
    pipe = Sequential([
        gz.Branch(
            predicate=lambda g: g.crs.is_geographic,
-           if_true=ReprojectToUTM(),
+           if_true=gz.Reproject(dst_crs="EPSG:32610"),
            if_false=gz.Identity(),
        ),
        Scale(),
@@ -219,7 +214,7 @@ A researcher's typical loop:
 - The full version of this walk-through as an executable notebook:
   [`notebooks/operators_lake_tahoe.ipynb`](notebooks/operators_lake_tahoe.ipynb).
 - The cross-repo end-to-end notebook (catalog → patch → operate):
-  [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+  [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 - Concept overview: [Concepts](concepts.md).
 - Recipes:
   - [Define an operator](recipes/define-an-operator.md)

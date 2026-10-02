@@ -5,12 +5,13 @@ DN→reflectance scalar decodes, dtype casts, and display-prep
 (min-max, percentile clip, gamma). They take user-supplied gain /
 offset / scale constants rather than reading sensor metadata.
 
-Sensor-specific TOA pipelines that need full solar-geometry awareness
-(Sentinel-2 ESA processor, Landsat USGS processor, MODIS, EMIT) belong
-in the v0.4 ``geotoolz.presets.*`` modules that will wrap
-`georeader.reflectance.radiance_to_reflectance`. For now, users with
-those needs call georeader directly and wrap the result in
-``gz.Lambda(...)`` if they need it inside a `Sequential`.
+Solar-geometry-aware TOA conversion is covered by `RadianceToReflectance`
+/ `ReflectanceToRadiance` (carrier-aware wrappers over
+`georeader.reflectance.radiance_to_reflectance`), with `ComputeSZA`,
+`EarthSunDistanceCorrection` and `IntegratedIrradiance` for the
+individual geometry terms. Sensor presets that read these constants
+from product metadata are not part of this module: pass the per-band
+irradiance / acquisition date yourself.
 
 Examples:
     Sentinel-2 L1C display pipeline::

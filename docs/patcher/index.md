@@ -87,7 +87,7 @@ plug it into a `pipekit.Sequential` pipeline through the
 - **[API reference](api/reference.md)** — generated from docstrings.
 
 **See the full end-to-end story** in the canonical cross-repo notebook:
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb)
+[`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb)
 — a single Sentinel-2 / Lake Tahoe / summer-2024 scenario that touches
 the catalog (geocatalog), the operator graph (geotoolz), and the
 patcher (geopatcher) end-to-end.

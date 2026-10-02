@@ -28,7 +28,7 @@ geotoolz's own additions:
   ``list[Patch]``, so their output feeds straight into `ApplyToChips`.
 
 Optional extra: ``pip install 'geotoolz[patch]'`` to pull in
-``geopatcher[pipekit]`` (which transitively installs `pipekit`).
+``geotoolz-patcher[pipekit]`` (which transitively installs `pipekit`).
 Importing this module without geopatcher installed raises a friendly
 ``ImportError`` pointing at the right extra.
 """
@@ -63,8 +63,8 @@ try:
     )
 except ImportError as _e:  # pragma: no cover - exercised when [patch] is missing
     raise ImportError(
-        "geotoolz.patch_ops requires the `geopatcher` package. "
-        "Install with `pip install 'geotoolz[patch]'` (or `pip install geopatcher`)."
+        "geotoolz.patch_ops requires the `geopatcher` package (distribution "
+        "`geotoolz-patcher`). Install with `pip install 'geotoolz[patch]'`."
     ) from _e
 
 

@@ -133,7 +133,7 @@ class DNToRadiance(Operator):
 
     .. math::
 
-        L \;=\; \text{gain} \cdot DN + \text{offset}
+        L \;=\; \text{gain} \cdot DN / \text{scale} + \text{offset}
 
     Pure linear decode; gain and offset come from sensor metadata. Pass
     scalars for uniform per-pixel coefficients, or 1-D sequences with
@@ -147,8 +147,10 @@ class DNToRadiance(Operator):
     Args:
         gain: Slope of the DN→L decode. Scalar or per-band sequence.
         offset: Intercept. Default ``0.0``.
-        axis: Position of the band axis when ``gain`` / ``offset`` are
-            per-band sequences. Default ``-3``.
+        scale: DN scale divisor, applied before the gain. Scalar or
+            per-band sequence. Default ``1.0``.
+        axis: Position of the band axis when ``gain`` / ``offset`` /
+            ``scale`` are per-band sequences. Default ``-3``.
 
     Examples:
         >>> import numpy as np

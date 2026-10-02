@@ -25,8 +25,9 @@ bands. That matches
 last two dims agree with the input's. Carriers' transforms therefore
 survive unchanged through every index operator here.
 
-See geotoolz design report §4.1 (two-tier delegation chain) for the
-overall pattern.
+Each operator delegates its maths to the matching Tier-A primitive in
+``indices/_src/array.py``; this module only resolves bands, judges
+nodata and rewraps the result.
 """
 
 from __future__ import annotations
@@ -1133,7 +1134,7 @@ class dNBR(Operator):
 
     Standard quantitative burn-severity index. Pre- and post-fire NBR
     rasters must share grid (shape, transform, CRS) — co-register
-    upstream (e.g. via `geotoolz.sampling` or rasterio reprojection)
+    upstream (e.g. with `geotoolz.geom.ReprojectLike`)
     before passing them in. The output `GeoTensor` inherits the
     pre-fire raster's spatial metadata. Plain ``np.ndarray`` inputs are
     also accepted (only shapes can be checked then) and return a plain

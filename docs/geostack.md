@@ -61,7 +61,7 @@ the label-aware `StratifiedSample` / `BalancedSampler` emit the same
 [patching module guide](patch_ops.md).
 
 **4. Coregistration operators plug into matched patching.**
-`geopatcher.MatchedField` fans one anchor out across N sources and takes a
+`geopatcher.matched.MatchedField` fans one anchor out across N sources and takes a
 *coregistration callable* per secondary — the intended callables are
 `geotoolz.geom.coregister` operators (`RasterToRasterLike`,
 `RasterToPoints`, …). The catalog's [matchup engine](catalog/design/query-matchup.md)
@@ -88,8 +88,8 @@ cat = gc.from_stac_search(
 )
 
 # 2. Stage + bridge to Fields (catalog → patcher seam)
-staged = gc.staging.stage(cat, dest="./cache")
-field = gc.staging.field_for(staged)[0]          # one Field per catalog row
+staged = gc.stage(cat, dest="./cache")
+field = gc.field_for(staged)[0]          # one Field per catalog row
 
 # 3. Patch + operate + stitch (patcher → operators seam)
 patcher = gp.SpatialPatcher(

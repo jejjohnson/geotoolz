@@ -235,13 +235,13 @@ garbage-collected.
 Field adapter behind an extra:
 
 ```bash
-pip install 'geopatcher[grid]'           # XarrayField
-pip install 'geopatcher[vector]'         # GeoPandasField
-pip install 'geopatcher[point]'          # XvecField
-pip install 'geopatcher[xarray-raster]'  # RioXarrayField
-pip install 'geopatcher[dask]'           # DaskField + Dask helpers
-pip install 'geopatcher[streaming]'      # OverlapAdd(streaming=True)
-pip install 'geopatcher[patch-full]'     # everything above
+pip install 'geotoolz-patcher[grid]'           # XarrayField
+pip install 'geotoolz-patcher[vector]'         # GeoPandasField
+pip install 'geotoolz-patcher[point]'          # XvecField
+pip install 'geotoolz-patcher[xarray-raster]'  # RioXarrayField
+pip install 'geotoolz-patcher[dask]'           # DaskField + Dask helpers
+pip install 'geotoolz-patcher[streaming]'      # OverlapAdd(streaming=True)
+pip install 'geotoolz-patcher[patch-full]'     # everything above
 ```
 
 Each adapter raises a friendly `ImportError` pointing at the right extra if

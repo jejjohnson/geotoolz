@@ -23,8 +23,8 @@ as-is, so ``from_state`` refuses it as non-primitive. ``LoadFromSTAC``
 (a runtime STAC item) and ``ReadReprojectLike`` (a runtime reference
 grid) always hold runtime objects and set ``forbid_in_yaml = True``.
 
-See `geotoolz` design report §4 (two-tier model) and §6.2 (round-trip
-discipline).
+See the docs' Concepts page ("Round-trip discipline") for the
+``forbid_in_yaml`` contract.
 """
 
 from __future__ import annotations
@@ -75,6 +75,14 @@ class SourceOperator(Operator):
     :class:`~pipekit.Sequential` because
     :class:`~pipekit.Sequential` calls ``op()`` (no input) when the
     pipeline is invoked without a carrier.
+
+    Graph mode: a source is not a :class:`~pipekit.Graph` node. Its
+    ``_apply`` takes no carrier, while a graph node is always built from
+    (and later called with) at least one parent ``Node`` — and calling
+    ``op()`` with no argument while building a graph simply reads
+    eagerly. Run the source first (or as the head of a ``Sequential``
+    that wraps the graph) and feed its ``GeoTensor`` to the graph's
+    ``Input``.
     """
 
 

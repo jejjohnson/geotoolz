@@ -3,10 +3,9 @@
 These are the deliberately *generic* radiometry primitives that work
 regardless of sensor: they take user-supplied gain / offset / scale
 constants rather than reading them from sensor metadata. Sensor-specific
-TOA / BOA pipelines (e.g. Sentinel-2 L1C with the metadata-driven
-``solar_irradiance`` and ``radio_add_offsets`` tables) live in the
-v0.4 ``geotoolz.presets.*`` modules that will wrap
-`georeader.reflectance.radiance_to_reflectance`.
+TOA conversion that needs solar geometry is not a primitive here: the
+`RadianceToReflectance` / `ReflectanceToRadiance` operators wrap
+`georeader.reflectance.radiance_to_reflectance` for that.
 
 Quick refresher on the physical quantities, so the function signatures
 make sense:
@@ -26,9 +25,9 @@ make sense:
 
 The DN→radiance step is a per-band linear decode the sensor specifies
 in metadata: :math:`L = \\text{gain} \\cdot DN + \\text{offset}`.
-The radiance→reflectance step requires solar geometry and is the
-sensor-preset responsibility (or the user calls
-`georeader.reflectance.radiance_to_reflectance` directly).
+The radiance→reflectance step requires solar geometry and is done by
+the `RadianceToReflectance` operator (a wrapper over
+`georeader.reflectance.radiance_to_reflectance`).
 
 Sentinel-2 L1C is the convenient special case where ESA's processor
 has already done the work: DN are scaled TOA reflectance, and
@@ -148,9 +147,9 @@ def dn_to_reflectance(
 
     For sensors where the metadata gives gain/offset to radiance but
     *not* a direct DN→ρ shortcut, do the two-step decode via
-    `dn_to_radiance` then call
-    `georeader.reflectance.radiance_to_reflectance` for the proper
-    solar-geometry correction.
+    `dn_to_radiance` then the `RadianceToReflectance` operator (a
+    wrapper over `georeader.reflectance.radiance_to_reflectance`) for
+    the proper solar-geometry correction.
 
     Args:
         dn: Raw DN array.

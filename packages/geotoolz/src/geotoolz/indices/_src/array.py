@@ -294,13 +294,12 @@ def savi(
     ``L = 0`` recovers NDVI exactly. ``L = 0.5`` (Huete's default) is
     appropriate for intermediate vegetation cover; ``L = 1`` for very
     sparse cover; ``L = 0.25`` for dense cover. For unknown cover, the
-    self-adjusting variant MSAVI2 (deferred to v0.2) replaces the
+    self-adjusting variant MSAVI2 (not provided here) replaces the
     constant with a closed-form scene-adaptive term.
 
-    Note this primitive does **not** add ``eps`` to the denominator —
-    when ``L > 0`` the denominator is already strictly positive for
-    non-negative reflectance, so the stabiliser is unnecessary. Pass
-    reflectance, not DN.
+    ``eps`` is added to the denominator like the other ratio indices,
+    so ``L = 0`` with ``NIR + Red = 0`` stays finite; for ``L > 0`` and
+    non-negative reflectance it is negligible. Pass reflectance, not DN.
 
     Args:
         arr: Input ndarray of reflectance.
@@ -308,6 +307,7 @@ def savi(
         red_idx: Red band index.
         L: Soil-adjustment factor in ``[0, 1]``. Default ``0.5``.
         axis: Band axis. Default ``-3``.
+        eps: Denominator stabiliser. Default ``1e-10``.
 
     Returns:
         ndarray with band axis collapsed.

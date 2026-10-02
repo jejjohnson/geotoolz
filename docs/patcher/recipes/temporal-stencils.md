@@ -25,7 +25,7 @@ backwards-compatibility story.
 ## Prerequisites
 
 ```bash
-pip install 'geopatcher[grid]'   # xarray + numpy already in core
+pip install 'geotoolz-patcher[grid]'   # xarray + numpy already in core
 ```
 
 A 1-D coordinate array along the time axis. For an `xarray.DataArray`,

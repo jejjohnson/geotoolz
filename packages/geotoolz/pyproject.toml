@@ -86,7 +86,7 @@ viz = ["matplotlib>=3.10.8"]
 # usually brings scikit-learn itself.
 learn = ["scikit-learn>=1.4", "joblib>=1.3"]
 # Optional `hydra-zen` integration for declarative pipeline construction
-# (see geotoolz §6.6). The core composition layer round-trips its own
+# (`docs/concepts.md`). The core composition layer round-trips its own
 # get_config() / __repr__ without hydra — this extra is only needed if
 # you want `builds()` / `instantiate()` from YAML.
 hydra = ["hydra-zen>=0.14"]
@@ -96,7 +96,7 @@ hydra = ["hydra-zen>=0.14"]
 # either `geotoolz.patch_ops` or `geopatcher.integrations.pipekit` for
 # the Operator-graph bridge. The substrate extras (grid, vector, point,
 # xarray-raster, streaming) are exposed through `geopatcher` directly —
-# install e.g. `pip install 'geopatcher[patch-full]'` for the full
+# install e.g. `pip install 'geotoolz-patcher[patch-full]'` for the full
 # substrate matrix.
 patch = ["geotoolz-patcher[pipekit]"]
 # Vector-cube backend (`xvec`, which brings `xarray`) needed by the
