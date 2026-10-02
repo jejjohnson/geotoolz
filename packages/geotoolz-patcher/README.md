@@ -41,8 +41,8 @@ go), a **Window** (boundary treatment), and an **Aggregation** (local →
 global merge). Plug in any `Field` (raster, xarray grid, GeoPandas
 polygons, xvec points) and any per-patch callable. `patcher.split`
 returns an iterator and `SpatialOverlapAdd` defaults to an in-memory
-accumulator; flip `streaming=True` + `target_path=…` to back the
-accumulator with disk-resident zarr for >1 TB outputs.
+accumulator; flip `streaming=True` + `target_path=…` + `chunks=…` to
+back the accumulator with disk-resident zarr for >1 TB outputs.
 
 ## Install
 

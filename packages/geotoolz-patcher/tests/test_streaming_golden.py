@@ -25,6 +25,9 @@ Concrete content of #22 for the v0.x aggregation family:
 
 from __future__ import annotations
 
+import tracemalloc
+from collections.abc import Iterator
+
 import numpy as np
 import pytest
 import rasterio
@@ -43,11 +46,11 @@ from geopatcher import (
 )
 
 
-# Import-time skip: the streaming overlap-add path needs zarr (the
-# `streaming` extra). CI installs `--extra streaming` so this no
-# longer silently hides the suite from the matrix; locally a slim
-# install will still skip gracefully.
-pytest.importorskip("zarr")
+def _needs_zarr() -> None:
+    # Only the streaming overlap-add tests need zarr (the `streaming`
+    # extra); the permutation / Welford goldens below run on a slim
+    # install too, so the skip is per test, not per module.
+    pytest.importorskip("zarr")
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +101,6 @@ def overlapping_patches() -> list[Patch]:
 @pytest.mark.parametrize(
     "chunks",
     [
-        None,  # default — derived from first patch
         (8, 8),  # patch-misaligned small chunk (16 / 8 = 2)
         (7, 7),  # prime, deliberately misaligned with patches
         (16, 16),  # patch-aligned
@@ -109,8 +111,9 @@ def test_overlap_add_streaming_matches_in_memory(
     domain: GeoTensor,
     overlapping_patches: list[Patch],
     tmp_path,
-    chunks: tuple[int, int] | None,
+    chunks: tuple[int, int],
 ) -> None:
+    _needs_zarr()
     in_mem = SpatialOverlapAdd().merge(overlapping_patches, domain)
 
     streamed_agg = SpatialOverlapAdd(
@@ -120,18 +123,18 @@ def test_overlap_add_streaming_matches_in_memory(
     )
     streamed = np.asarray(streamed_agg.merge(overlapping_patches, domain)[:])
 
-    # The streaming path stores float32 accumulators (see zarr.open
-    # dtype="float32" in aggregation._merge_streaming); the in-memory
-    # path uses float64. The float32 rtol of 1e-6 is the right ceiling.
+    # The streaming path stores float32 accumulators (the default
+    # `dtype="float32"`); the in-memory path uses float64. The float32
+    # rtol of 1e-6 is the right ceiling.
     np.testing.assert_allclose(streamed, in_mem, rtol=1e-6, atol=1e-6)
 
 
 def test_overlap_add_streaming_empty_patches_returns_fill_array(
     domain: GeoTensor, tmp_path
 ) -> None:
-    # The peeked-iterator branch in `_merge_streaming`: no patches at
-    # all should yield a fill-valued zarr of the domain's shape.
-    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path))
+    # No patches at all should yield a fill-valued zarr of the domain's shape.
+    _needs_zarr()
+    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path), chunks=(16, 16))
     result = np.asarray(agg.merge([], domain)[:])
     assert result.shape == (64, 64)
     assert np.isnan(result).all()
@@ -146,6 +149,7 @@ def test_overlap_add_streaming_chunk_size_invariant(
     # produce the same numerical result *to each other*, not just to
     # the in-memory path. Catches any bug where blocking introduces
     # per-chunk drift.
+    _needs_zarr()
     results = []
     for i, chunks in enumerate([(7, 7), (8, 8), (16, 16), (64, 64)]):
         agg = SpatialOverlapAdd(
@@ -303,3 +307,142 @@ def test_welford_variance_no_worse_than_naive_on_ill_conditioned_data(
         "the whole reason SpatialVariance uses Welford is that this "
         "inequality should hold."
     )
+
+
+# ---------------------------------------------------------------------------
+# #193 — streaming store hygiene and bounded memory
+# ---------------------------------------------------------------------------
+
+
+class _ShapeDomain:
+    """A dense domain that is only a shape — no backing array to count."""
+
+    def __init__(self, shape: tuple[int, ...]) -> None:
+        self.shape = shape
+
+
+def _hann_patches(n: int, size: int = 16, step: int = 8) -> Iterator[Patch]:
+    """Lazily generated Hann-weighted patches covering an ``n x n`` domain.
+
+    ``n`` is deliberately not a multiple of the zarr chunk, and the last
+    anchor overhangs the domain (pad-style), so edge chunks are partial.
+    """
+    from geopatcher import SpatialHann, SpatialRectangular
+
+    weights = SpatialHann().weights(SpatialRectangular(size=(size, size)))
+    for r in range(0, n, step):
+        for c in range(0, n, step):
+            rows = np.arange(r, r + size, dtype=np.float64)[:, None]
+            cols = np.arange(c, c + size, dtype=np.float64)[None, :]
+            yield Patch(
+                data=np.sin(rows / 7.0) + np.cos(cols / 5.0),
+                anchor=(r, c),
+                indices=Window(col_off=c, row_off=r, width=size, height=size),
+                weights=weights,
+            )
+
+
+def test_streaming_matches_in_memory_on_partial_chunks(tmp_path) -> None:
+    _needs_zarr()
+    domain = _ShapeDomain((70, 60))  # chunk 32 → partial edge chunks
+    in_mem = SpatialOverlapAdd().merge(_hann_patches(70), domain)
+    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path), chunks=(32, 32))
+    streamed = np.asarray(agg.merge(_hann_patches(70), domain)[:])
+    # Same NaN fill (the Σw = 0 leading ring) and the same values.
+    np.testing.assert_array_equal(np.isnan(streamed), np.isnan(in_mem))
+    assert np.isnan(streamed[0]).all() and np.isnan(streamed[:, 0]).all()
+    np.testing.assert_allclose(streamed, in_mem, rtol=1e-5, atol=1e-6, equal_nan=True)
+
+
+def test_streaming_peak_memory(tmp_path) -> None:
+    # The final normalisation used to read both accumulators whole and
+    # build a third full-size result (>= 3x the domain in RAM). Chunk-wise
+    # normalisation keeps the peak at O(patch + chunk). 1000 is not a
+    # multiple of the 128 chunk, so edge chunks are partial and the last
+    # patches overhang the domain.
+    _needs_zarr()
+    n = 1000
+    domain = _ShapeDomain((n, n))
+    domain_bytes = n * n * np.dtype("float32").itemsize
+
+    def patches() -> Iterator[Patch]:
+        return _hann_patches(n, size=128, step=128)
+
+    # Warm zarr's lazy imports / codec registry outside the measurement.
+    SpatialOverlapAdd(
+        streaming=True, target_path=str(tmp_path / "warm"), chunks=(8, 8)
+    ).merge(_hann_patches(16, size=8, step=8), _ShapeDomain((16, 16)))
+    agg = SpatialOverlapAdd(
+        streaming=True, target_path=str(tmp_path / "run"), chunks=(128, 128)
+    )
+    tracemalloc.start()
+    try:
+        out = agg.merge(patches(), domain)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < domain_bytes / 2, f"peak {peak} B vs domain {domain_bytes} B"
+    in_mem = SpatialOverlapAdd().merge(patches(), domain)
+    streamed = np.asarray(out[:])
+    np.testing.assert_array_equal(np.isnan(streamed), np.isnan(in_mem))
+    np.testing.assert_allclose(streamed, in_mem, rtol=1e-5, atol=1e-6, equal_nan=True)
+
+
+def test_store_not_overwritten(tmp_path) -> None:
+    _needs_zarr()
+    domain = _ShapeDomain((32, 32))
+    first = [Patch(data=np.ones((16, 16)), anchor=(0, 0), indices=Window(0, 0, 16, 16))]
+    second = [
+        Patch(data=np.full((16, 16), 2.0), anchor=(0, 0), indices=Window(0, 0, 16, 16))
+    ]
+    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path), chunks=(16, 16))
+    agg.merge(first, domain)
+    with pytest.raises(FileExistsError, match="overwrite=True"):
+        agg.merge(second, domain)
+    import zarr
+
+    kept = np.asarray(zarr.open_array(str(tmp_path / "rec.zarr"), mode="r")[:])
+    assert kept[0, 0] == 1.0
+    replaced = SpatialOverlapAdd(
+        streaming=True, target_path=str(tmp_path), chunks=(16, 16), overwrite=True
+    ).merge(second, domain)
+    assert np.asarray(replaced[:])[0, 0] == 2.0
+
+
+def test_streaming_requires_chunks(tmp_path) -> None:
+    # The chunk shape used to come from the first patch — a shrunk 2x2
+    # edge chip made the whole store 2x2-chunked.
+    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path))
+    with pytest.raises(ValueError, match="needs chunks="):
+        agg.merge([], _ShapeDomain((8, 8)))
+
+
+def test_streaming_dtype_knob(tmp_path) -> None:
+    _needs_zarr()
+    domain = _ShapeDomain((3, 16, 16))  # chunks right-align: band axis whole
+    patch = Patch(
+        data=np.full((3, 16, 16), 1.0 / 3.0),
+        anchor=(0, 0),
+        indices=Window(0, 0, 16, 16),
+    )
+    agg = SpatialOverlapAdd(
+        streaming=True, target_path=str(tmp_path), chunks=(8, 8), dtype="float64"
+    )
+    out = agg.merge([patch], domain)
+    assert out.dtype == np.float64
+    assert out.chunks == (3, 8, 8)
+    assert np.asarray(out[:])[0, 0, 0] == 1.0 / 3.0
+    with pytest.raises(ValueError, match="floating dtype"):
+        SpatialOverlapAdd(dtype="int16")
+
+
+def test_streaming_rejects_extra_patch_dims(tmp_path) -> None:
+    # A patch with more dims than the domain used to fail inside zarr with
+    # a different error than the in-RAM path; both now raise the same one.
+    patch = Patch(data=np.ones((2, 4, 4)), anchor=(0, 0), indices=Window(0, 0, 4, 4))
+    with pytest.raises(ValueError, match="patch data has 3 dims"):
+        SpatialOverlapAdd().merge([patch], _ShapeDomain((8, 8)))
+    _needs_zarr()
+    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path), chunks=(4, 4))
+    with pytest.raises(ValueError, match="patch data has 3 dims"):
+        agg.merge([patch], _ShapeDomain((8, 8)))

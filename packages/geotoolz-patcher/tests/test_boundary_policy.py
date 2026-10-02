@@ -550,7 +550,9 @@ def test_every_dense_aggregation_merges_pad_chips(aggregation: Any) -> None:
 def test_streaming_overlap_add_merges_pad_chips(tmp_path: Path) -> None:
     pytest.importorskip("zarr")
     field, patches = _pad_patches(step=_SIZE // 2)
-    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path))
+    agg = SpatialOverlapAdd(
+        streaming=True, target_path=str(tmp_path), chunks=(_SIZE, _SIZE)
+    )
     np.testing.assert_allclose(np.asarray(agg.merge(patches, field.domain)[:]), _ramp())
 
 
