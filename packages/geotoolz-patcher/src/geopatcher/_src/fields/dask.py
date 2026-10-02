@@ -33,11 +33,42 @@ class DaskField:
             self.array = self.array.chunk()
 
     @classmethod
-    def from_zarr(cls, store: Any, **kwargs: Any) -> DaskField:
-        """Open a zarr-backed array with xarray and wrap it as a `DaskField`."""
+    def from_zarr(
+        cls, store: Any, *, var: str | None = None, **kwargs: Any
+    ) -> DaskField:
+        """Open one variable of a zarr store with xarray as a `DaskField`.
+
+        ``xr.open_zarr`` returns a `Dataset`; the field wraps one of its
+        data variables.
+
+        Args:
+            store: Anything ``xarray.open_zarr`` accepts (path, URL, store).
+            var: Data variable to wrap. May be omitted when the store holds
+                exactly one data variable.
+            **kwargs: Forwarded to ``xarray.open_zarr``.
+
+        Raises:
+            KeyError: ``var`` is not a data variable of the store.
+            ValueError: ``var`` is omitted and the store holds zero or
+                several data variables.
+        """
         if xr is None:
             raise _missing_extra("DaskField", "dask", "dask[bag]>=2024.8.3")
-        return cls(xr.open_zarr(store, **kwargs))
+        ds = xr.open_zarr(store, **kwargs)
+        names = list(ds.data_vars)
+        if var is None:
+            if len(names) != 1:
+                raise ValueError(
+                    f"DaskField.from_zarr: store {store!r} has data variables "
+                    f"{names}; pass var=<name> to choose one."
+                )
+            var = names[0]
+        elif var not in ds.data_vars:
+            raise KeyError(
+                f"DaskField.from_zarr: {var!r} is not a data variable of "
+                f"{store!r}; available: {names}."
+            )
+        return cls(ds[var])
 
     @cached_property
     def domain(self) -> GridDomain:

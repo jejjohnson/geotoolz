@@ -497,13 +497,21 @@ class SpatialPatcher:
         return rewrapped.da
 
     def to_delayed(self, field: Field, operator: Any | None = None) -> list[Any]:
-        """Build a Dask delayed graph for patches, optionally mapped by an operator."""
+        """Build a Dask delayed graph for patches, optionally mapped by an operator.
+
+        One ``patch_at`` task per anchor; the field enters the graph once.
+        Runner-level policies (``on_error``, hooks, journal, cache,
+        prefetch) do not apply — see `geopatcher.dask`.
+        """
         from geopatcher.dask import to_delayed
 
         return to_delayed(self, field, operator)
 
     def to_dask_bag(self, field: Field) -> Any:
-        """Build a Dask bag containing one item per patch."""
+        """Build a Dask bag with one item (and one partition) per patch.
+
+        Same per-patch tasks and policy caveats as `to_delayed`.
+        """
         from geopatcher.dask import to_dask_bag
 
         return to_dask_bag(self, field)

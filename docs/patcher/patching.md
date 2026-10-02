@@ -256,6 +256,16 @@ pip install 'geotoolz-patcher[patch-full]'     # everything above
 Each adapter raises a friendly `ImportError` pointing at the right extra if
 the backend library is missing.
 
+`DaskField.from_zarr(store, var="sst")` wraps one data variable of a zarr
+store (`var` may be omitted when the store holds exactly one; zarr itself
+comes with the `[streaming]` extra). `SpatialPatcher.to_delayed(field)` /
+`to_dask_bag(field)` build one Dask task (bag: one single-element
+partition) per patch around `patch_at`, with the field entering the graph
+once as a shared delayed node. They are plain read tasks: the runner-level
+policies of `split` — `on_error` / retries, hooks, journal, `PatchCache`,
+prefetch — do not apply; failures, retries and caching are the scheduler's
+concern.
+
 ## Where the framework draws the line
 
 - **Mesh / `uxarray`** (`UXarrayField`) is deferred to v0.2.
