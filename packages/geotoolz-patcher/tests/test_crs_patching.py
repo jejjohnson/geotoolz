@@ -195,3 +195,138 @@ class TestReprojectingRasterField:
         reader = _utm_field().reader
         with pytest.raises(ValueError, match="unknown resampling"):
             ReprojectingRasterField(reader, dst_crs="EPSG:3857", resampling="quantic")
+
+
+def _utm_3d_geotensor(n: int = 100, bands: int = 2) -> GeoTensor:
+    arr = np.stack(
+        [
+            np.arange(n * n, dtype=np.float32).reshape(n, n) + 1e5 * b
+            for b in range(bands)
+        ]
+    )
+    return GeoTensor(values=arr, transform=_UTM_TRANSFORM, crs=_UTM_CRS)
+
+
+def _stride_patcher(size: int = 16) -> SpatialPatcher:
+    return SpatialPatcher(
+        geometry=SpatialRectangular(size=(size, size)),
+        sampler=SpatialRegularStride(step=size),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+    )
+
+
+def _write_tif(path, gt: GeoTensor) -> str:
+    values = np.asarray(gt.values)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=values.shape[-2],
+        width=values.shape[-1],
+        count=values.shape[0],
+        dtype=values.dtype,
+        crs=gt.crs,
+        transform=gt.transform,
+    ) as dst:
+        dst.write(values)
+    return str(path)
+
+
+class TestReprojectingRasterField3D:
+    def test_domain_shape_keeps_leading_dims(self) -> None:
+        field = ReprojectingRasterField(_utm_3d_geotensor(), dst_crs="EPSG:3857")
+        assert len(field.domain.shape) == 3
+        assert field.domain.shape[0] == 2
+
+    @pytest.mark.parametrize("backend", ["geotensor", "rasterio"])
+    def test_reprojecting_field_3d_merge(self, backend: str, tmp_path) -> None:
+        from georeader.rasterio_reader import RasterioReader
+        from georeader.read import read_reproject
+
+        gt = _utm_3d_geotensor()
+        reader = (
+            gt
+            if backend == "geotensor"
+            else RasterioReader(_write_tif(tmp_path / "src.tif", gt))
+        )
+        field = ReprojectingRasterField(reader, dst_crs="EPSG:3857")
+        patcher = _stride_patcher()
+        chips = list(patcher.split(field))
+        assert chips
+        assert all(c.data.values.shape == (2, 16, 16) for c in chips)
+        merged = np.asarray(patcher.merge(iter(chips), field.domain))
+        assert merged.shape == field.domain.shape
+
+        # Reference: one full warp of the whole source onto the same grid.
+        # Chips are warped independently, so allow the documented
+        # approximate-transformer drift (well under a ramp step of 1).
+        full = read_reproject(
+            gt,
+            dst_crs="EPSG:3857",
+            dst_transform=field.domain.transform,
+            window_out=rasterio.windows.Window(
+                0, 0, field.domain.shape[-1], field.domain.shape[-2]
+            ),
+            resampling=rasterio.warp.Resampling.bilinear,
+        )
+        # Compare only the region tiled by full chips (stride "drop").
+        hh = (field.domain.shape[-2] // 16) * 16
+        ww = (field.domain.shape[-1] // 16) * 16
+        np.testing.assert_allclose(
+            merged[:, :hh, :ww], np.asarray(full.values)[:, :hh, :ww], atol=1.0
+        )
+
+    def test_per_chip_warp_reads_only_chip_footprint(self, monkeypatch) -> None:
+        # Work guard (not wall-clock): every warp call must see a source
+        # crop around the chip, never the whole 200x200 source.
+        import rasterio.warp
+
+        seen: list[tuple[int, ...]] = []
+        real = rasterio.warp.reproject
+
+        def spy(source, *args, **kwargs):
+            seen.append(tuple(np.shape(source)))
+            return real(source, *args, **kwargs)
+
+        monkeypatch.setattr(rasterio.warp, "reproject", spy)
+        field = ReprojectingRasterField(_utm_3d_geotensor(n=200), dst_crs="EPSG:3857")
+        chips = list(_stride_patcher().split(field))
+        assert len(chips) > 50
+        assert seen
+        # 16x16 chip ≈ 16x16 source pixels (+ curvature + 3 px margin per side).
+        assert max(s[-2] for s in seen) <= 32
+        assert max(s[-1] for s in seen) <= 32
+
+    @pytest.mark.parametrize("resolution", [None, 40.0])
+    def test_cropped_chip_matches_uncropped_warp(self, resolution) -> None:
+        # The pre-crop is an optimisation only: each chip must equal a warp
+        # of the *whole* source onto the same chip grid, including when the
+        # destination is coarser than the source (widened kernel margin).
+        from georeader.read import read_reproject
+        from rasterio.windows import Window, transform as window_transform
+
+        gt = _utm_3d_geotensor()
+        field = ReprojectingRasterField(gt, dst_crs="EPSG:3857", resolution=resolution)
+        h, w = field.domain.shape[-2:]
+        for window in (Window(0, 0, 8, 8), Window(w // 3, h // 3, 8, 8)):
+            chip = field.select(window)
+            ref = read_reproject(
+                gt,
+                dst_crs="EPSG:3857",
+                dst_transform=window_transform(window, field.domain.transform),
+                window_out=Window(0, 0, 8, 8),
+                resampling=rasterio.warp.Resampling.bilinear,
+            )
+            np.testing.assert_array_equal(
+                np.asarray(chip.values), np.asarray(ref.values)
+            )
+
+    def test_chip_outside_source_is_nodata(self) -> None:
+        from rasterio.windows import Window
+
+        field = ReprojectingRasterField(_utm_3d_geotensor(), dst_crs="EPSG:3857")
+        h, w = field.domain.shape[-2:]
+        chip = field.select(Window(w + 50, h + 50, 8, 8))
+        assert chip.values.shape == (2, 8, 8)
+        assert np.all(np.asarray(chip.values) == chip.fill_value_default)

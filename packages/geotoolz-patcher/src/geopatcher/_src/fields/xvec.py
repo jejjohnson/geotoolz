@@ -10,6 +10,7 @@ Optional extra: ``pip install 'geopatcher[point]'``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 import numpy as np
@@ -34,18 +35,23 @@ class XvecField:
     Args:
         ds: An `xarray.Dataset` with a ``geometry`` coordinate of
             `shapely.Point` instances (the xvec convention).
+        geometry_dim: Name of the geometry dimension / coordinate.
+            Defaults to ``"geometry"``.
+
+    ``domain`` (including its ``cKDTree``) is built on first access and
+    cached; treat ``ds`` as immutable once wrapped.
     """
 
     ds: Any
-    _geometry_dim: str = "geometry"
+    geometry_dim: str = "geometry"
 
     def __post_init__(self) -> None:
         if xvec is None:
             raise _missing_extra("XvecField", "point", "xvec>=0.4 scipy")
 
-    @property
+    @cached_property
     def domain(self) -> PointDomain:
-        geom_var = self.ds[self._geometry_dim]
+        geom_var = self.ds[self.geometry_dim]
         coords = np.c_[[g.x for g in geom_var.values], [g.y for g in geom_var.values]]
         # xvec stashes the CRS on the geometry coord's attrs (set_geom_indexes
         # writes `crs=...` there). Newer xvec versions may expose it through
@@ -54,9 +60,11 @@ class XvecField:
         return PointDomain(coords=coords, kdtree=cKDTree(coords), crs=crs)
 
     def select(self, indexer: Any) -> XvecField:
-        return XvecField(self.ds.isel({self._geometry_dim: indexer}))
+        return XvecField(
+            self.ds.isel({self.geometry_dim: indexer}), geometry_dim=self.geometry_dim
+        )
 
     def with_data(self, array: Any) -> XvecField:
         new = self.ds.copy()
-        new["_value"] = ((self._geometry_dim,), np.asarray(array))
-        return XvecField(new)
+        new["_value"] = ((self.geometry_dim,), np.asarray(array))
+        return XvecField(new, geometry_dim=self.geometry_dim)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 import numpy as np
@@ -38,7 +39,7 @@ class DaskField:
             raise _missing_extra("DaskField", "dask", "dask[bag]>=2024.8.3")
         return cls(xr.open_zarr(store, **kwargs))
 
-    @property
+    @cached_property
     def domain(self) -> GridDomain:
         coords = {d: np.asarray(self.array[d].values) for d in self.array.dims}
         crs = getattr(self.array, "rio", None)

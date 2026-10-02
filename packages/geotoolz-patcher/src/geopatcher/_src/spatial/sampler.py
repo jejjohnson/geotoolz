@@ -99,7 +99,7 @@ class SpatialRegularStride(SpatialSampler):
         if isinstance(domain, GridDomain):
             dims = list(domain.coords)
             steps = self._broadcast(len(dims))
-            size = getattr(geometry, "size", tuple([1] * len(dims)))
+            size = _grid_size(domain, geometry)
             lens = [len(domain.coords[d]) for d in dims]
             ranges = [
                 range(0, max(L - int(p) + 1, 1), int(s))
@@ -122,9 +122,7 @@ class SpatialRegularStride(SpatialSampler):
         elif isinstance(domain, GridDomain):
             dims = list(domain.coords)
             lens = tuple(len(domain.coords[d]) for d in dims)
-            sizes = tuple(
-                int(s) for s in getattr(geometry, "size", tuple([1] * len(dims)))
-            )
+            sizes = _grid_size(domain, geometry)
             steps = self._broadcast(len(dims))
             axes = tuple(dims)
         else:
@@ -195,7 +193,7 @@ class SpatialJitteredStride(SpatialSampler):
         if isinstance(domain, GridDomain):
             dims = list(domain.coords)
             steps = base._broadcast(len(dims))
-            size = getattr(geometry, "size", tuple([1] * len(dims)))
+            size = _grid_size(domain, geometry)
             lens = [len(domain.coords[d]) for d in dims]
             maxes = {
                 d: max(L - int(p), 0) for d, L, p in zip(dims, lens, size, strict=True)
@@ -253,7 +251,7 @@ class SpatialRandom(SpatialSampler):
             return
         if isinstance(domain, GridDomain):
             dims = list(domain.coords)
-            size = getattr(geometry, "size", tuple([1] * len(dims)))
+            size = _grid_size(domain, geometry)
             for _ in range(self.n_samples):
                 yield {
                     d: int(rng.integers(0, max(len(domain.coords[d]) - int(p) + 1, 1)))
@@ -633,6 +631,29 @@ def _track_coords(track: Any) -> np.ndarray:
             f"got shape {coords.shape}."
         )
     return coords
+
+
+def _grid_size(domain: GridDomain, geometry: SpatialGeometry) -> tuple[int, ...]:
+    """The geometry's patch size on a `GridDomain`, one entry per dim.
+
+    Grid samplers tile *every* coord dim, so a size that omits a dim
+    (e.g. a 2-D ``size`` on a ``(time, lat, lon)`` cube) is ambiguous;
+    raise a clear error instead of a bare ``zip()`` length mismatch.
+    A geometry without a ``size`` defaults to ``1`` per dim.
+    """
+    dims = list(domain.coords)
+    size = getattr(geometry, "size", None)
+    if size is None:
+        return tuple([1] * len(dims))
+    size = tuple(int(p) for p in size)
+    if len(size) != len(dims):
+        raise ValueError(
+            f"size must name every GridDomain dim: got size={size} "
+            f"({len(size)} entries) for dims {tuple(dims)} ({len(dims)} dims). "
+            "Pass one entry per dim (use the full dim length to keep a dim "
+            "whole, e.g. size=(n_time, 32, 32))."
+        )
+    return size
 
 
 def _ndrange(ranges: list[range]) -> Iterator[tuple[int, ...]]:

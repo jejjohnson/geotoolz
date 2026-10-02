@@ -7,11 +7,11 @@ The xrpatcher migration story in one place:
 3. Random-access via `IndexedPatchView`.
 4. Reconstruct with `merge_to_xarray` and assert round-trip identity.
 
-We keep the cube 2-D — `SpatialRegularStride` over a `GridDomain` tiles
-every coord dim, so adding a `time` axis would mean also tiling time
-(which is the `TemporalPatcher` job, covered separately by
-`test_temporal_stencils.py`). xrpatcher's quickstart is similarly 2-D
-(``data.u[..., :240, :360]``).
+Most cases keep the cube 2-D — `SpatialRegularStride` over a `GridDomain`
+tiles every coord dim, so a `time` axis must be named in ``size`` (use the
+full time length to keep it whole). `TestNDCube` covers that 3-D path and
+the error raised when ``size`` omits a dim. xrpatcher's quickstart is
+similarly 2-D (``data.u[..., :240, :360]``).
 """
 
 from __future__ import annotations
@@ -26,8 +26,10 @@ from geopatcher import (
     IncompleteScanConfiguration,
     IndexedPatchView,
     SpatialBoxcar,
+    SpatialJitteredStride,
     SpatialOverlapAdd,
     SpatialPatcher,
+    SpatialRandom,
     SpatialRectangular,
     SpatialRegularStride,
 )
@@ -146,3 +148,51 @@ class TestCoordsPerPatch:
         np.testing.assert_array_equal(
             first["longitude"].values, da["longitude"].values[:6]
         )
+
+
+def _time_cube() -> xr.DataArray:
+    """(time=3, latitude=12, longitude=24) cube with a datetime axis."""
+    return xr.DataArray(
+        np.arange(3 * 12 * 24, dtype=np.float32).reshape(3, 12, 24),
+        dims=("time", "latitude", "longitude"),
+        coords={
+            "time": np.array(
+                ["2020-01-01", "2020-01-02", "2020-01-03"], dtype="datetime64[ns]"
+            ),
+            "latitude": np.linspace(-30, 30, 12),
+            "longitude": np.linspace(0, 60, 24),
+        },
+    )
+
+
+class TestNDCube:
+    @pytest.mark.parametrize("check_full_scan", [False, True])
+    def test_3d_cube_size_validation(self, check_full_scan: bool) -> None:
+        # A 2-D size on a 3-D cube is ambiguous — the sampler must say so
+        # instead of failing with a bare zip() length mismatch.
+        field = XarrayField(_time_cube())
+        geom = SpatialRectangular(size=(6, 6))
+        stride = SpatialRegularStride(step=(1, 6, 6), check_full_scan=check_full_scan)
+        with pytest.raises(ValueError, match="size must name every GridDomain dim"):
+            list(stride.anchors(field.domain, geom))
+        jittered = SpatialJitteredStride(step=(1, 6, 6), seed=0)
+        with pytest.raises(ValueError, match="size must name every GridDomain dim"):
+            list(jittered.anchors(field.domain, geom))
+        rand = SpatialRandom(n_samples=2, seed=0)
+        with pytest.raises(ValueError, match="size must name every GridDomain dim"):
+            list(rand.anchors(field.domain, geom))
+
+    def test_3d_cube_split_merge_round_trip(self) -> None:
+        da = _time_cube()
+        field = XarrayField(da)
+        patcher = SpatialPatcher(
+            geometry=SpatialRectangular(size=(3, 6, 6)),
+            sampler=SpatialRegularStride(step=(3, 6, 6), check_full_scan=True),
+            window=SpatialBoxcar(),
+            aggregation=SpatialOverlapAdd(),
+        )
+        patches = list(patcher.split(field))
+        assert len(patches) == 8
+        recon = patcher.merge_to_xarray(patches, field)
+        np.testing.assert_allclose(recon.values, da.values)
+        np.testing.assert_array_equal(recon["time"].values, da["time"].values)

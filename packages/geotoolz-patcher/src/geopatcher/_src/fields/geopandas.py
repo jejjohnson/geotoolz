@@ -11,6 +11,7 @@ Optional extra: ``pip install 'geopatcher[vector]'``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 import numpy as np
@@ -43,6 +44,9 @@ class GeoPandasField:
         gdf: The underlying `geopandas.GeoDataFrame`.
         as_points: If ``True``, expose a `PointDomain` instead of a
             `VectorDomain`. The GDF must hold Point geometries.
+
+    ``domain`` (including its spatial index / ``cKDTree``) is built on
+    first access and cached; treat ``gdf`` as immutable once wrapped.
     """
 
     gdf: Any
@@ -54,7 +58,7 @@ class GeoPandasField:
                 "GeoPandasField", "vector", "geopandas>=0.14 shapely>=2"
             )
 
-    @property
+    @cached_property
     def domain(self) -> VectorDomain | PointDomain:
         if self.as_points:
             coords = np.c_[self.gdf.geometry.x, self.gdf.geometry.y]
@@ -64,16 +68,35 @@ class GeoPandasField:
         )
 
     def select(self, indexer: Any) -> GeoPandasField:
-        # `indexer` may be a boolean mask, an iloc-style index array, or a
-        # list of row labels. `iloc` covers the first two; `loc` is the
-        # fallback for labels.
-        try:
-            sub = self.gdf.iloc[indexer]
-        except (TypeError, IndexError, KeyError):
-            sub = self.gdf.loc[indexer]
-        return GeoPandasField(sub.copy(), as_points=self.as_points)
+        """Return the sub-field at ``indexer`` — positional indexing only.
+
+        ``indexer`` is a boolean mask, an integer position array, or a
+        positional slice, all resolved via ``gdf.iloc``. Row *labels* are
+        never consulted: samplers emit positions into the domain
+        (``PointDomain.coords`` / ``VectorDomain.geometry`` order), so a
+        label fallback would silently read the wrong rows whenever the
+        index is not a ``RangeIndex``.
+        """
+        return GeoPandasField(self.gdf.iloc[indexer].copy(), as_points=self.as_points)
 
     def with_data(self, array: Any) -> GeoPandasField:
+        """Attach one value per row as a ``_value`` column.
+
+        Args:
+            array: A 1-D array with exactly one entry per row of ``gdf``.
+                Multi-dimensional payloads (e.g. per-row feature vectors)
+                are not supported — a GeoDataFrame column holds scalars.
+
+        Raises:
+            ValueError: If ``array`` is not 1-D or its length differs
+                from the number of rows.
+        """
+        values = np.asarray(array)
+        if values.ndim != 1 or values.shape[0] != len(self.gdf):
+            raise ValueError(
+                "GeoPandasField.with_data expects a 1-D array with one value "
+                f"per row ({len(self.gdf)}); got shape {values.shape}."
+            )
         new = self.gdf.copy()
-        new["_value"] = np.asarray(array)
+        new["_value"] = values
         return GeoPandasField(new, as_points=self.as_points)

@@ -33,7 +33,10 @@ class GridDomain:
 
     Attributes:
         shape: ``tuple(len(coords[d]) for d in coords)``.
-        bounds: ``(min, max)`` per dim — derived lazily on access.
+        bounds: ``{dim: (min, max)}`` — derived lazily on access. Values
+            keep the coordinate's own type (``np.datetime64`` for a time
+            axis, a float for lat/lon, …) rather than being coerced to
+            ``float``, so time-bearing cubes honour the `Domain` contract.
     """
 
     coords: dict[str, np.ndarray]
@@ -44,8 +47,8 @@ class GridDomain:
         return tuple(len(self.coords[d]) for d in self.coords)
 
     @property
-    def bounds(self) -> dict[str, tuple[float, float]]:
-        return {d: (float(np.min(c)), float(np.max(c))) for d, c in self.coords.items()}
+    def bounds(self) -> dict[str, tuple[Any, Any]]:
+        return {d: (np.min(c), np.max(c)) for d, c in self.coords.items()}
 
 
 @dataclass(eq=False)
