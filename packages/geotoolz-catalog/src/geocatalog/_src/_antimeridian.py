@@ -157,6 +157,38 @@ def lonlat_line(
         east = shapely.LineString([(180.0, lat) for _, lat in coords])
         west = shapely.LineString([(-180.0, lat) for _, lat in coords])
         return shapely.MultiLineString([east, west])
+    runs = _split_at_poles(coords)
+    if len(runs) > 1:
+        parts = [_lonlat_run(run) for run in runs if len(run) >= 2]
+        flat = [g for part in parts for g in getattr(part, "geoms", [part])]
+        return shapely.MultiLineString(flat)
+    return _lonlat_run(coords)
+
+
+def _lonlat_run(
+    coords: Sequence[tuple[float, float]],
+) -> shapely.geometry.base.BaseGeometry:
     if not crosses_antimeridian(coords):
         return shapely.LineString(coords)
     return wrap_to_lonlat(shapely.LineString(unwrap_longitudes(coords)))
+
+
+def _split_at_poles(
+    coords: Sequence[tuple[float, float]],
+) -> list[list[tuple[float, float]]]:
+    """Split a vertex list where a segment passes over a pole.
+
+    Two vertices exactly 180° of longitude apart are joined, on the
+    sphere, by the meridian arc over the nearer pole — not by a parallel.
+    Such a segment becomes two meridian legs, each ending at that pole.
+    """
+    runs: list[list[tuple[float, float]]] = [[coords[0]]]
+    for a, b in itertools.pairwise(coords):
+        dlon = abs(b[0] - a[0])
+        if dlon == 180.0 and abs(a[1]) < 90.0 and abs(b[1]) < 90.0:
+            pole = 90.0 if a[1] + b[1] >= 0 else -90.0
+            runs[-1].append((a[0], pole))
+            runs.append([(b[0], pole), b])
+        else:
+            runs[-1].append(b)
+    return runs

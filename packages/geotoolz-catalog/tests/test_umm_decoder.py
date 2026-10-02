@@ -319,3 +319,10 @@ def test_seam_only_line_is_on_both_edges() -> None:
     assert geom is not None
     assert geom.intersects(shapely.box(179, -1, 180, 1))
     assert geom.intersects(shapely.box(-180, -1, -179, 1))
+
+
+def test_segment_180_degrees_apart_goes_over_the_pole() -> None:
+    geom = granule_geometry(_umm({"Lines": [_points([(0, 80), (180, 80)])]}))
+    assert geom is not None
+    assert geom.intersects(shapely.Point(0, 89.5))  # near the pole
+    assert not geom.intersects(shapely.box(80, 79, 100, 81))  # not along the parallel
