@@ -70,9 +70,10 @@ geom = SpatialRectangular(size=(256, 256), boundary="pad")
 
 `"pad"` and `"reflect"` are guaranteed by the patcher itself — the
 overflowing window is clipped to the domain, read once, then padded up
-to the full geometry size, with a `GeoTensor` chip's transform shifted so
-its georeferencing stays exact. This is **field-independent**: it works
-identically for `RasterField`, `RioXarrayField`, and any other `Field`.
+to the full geometry size, with the chip's transform shifted so its
+georeferencing stays exact (a `GeoTensor` via its own `pad`; a rioxarray
+`DataArray` gets its spatial coords rebuilt from the shifted affine).
+This is **field-independent**: it works identically for `RasterField`, `RioXarrayField`, and any other `Field`.
 Set a specific constant fill with `pad_value`:
 
 ```python
