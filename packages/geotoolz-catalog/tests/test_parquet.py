@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+import pyarrow.parquet as pq
 import shapely.geometry
 
 from geocatalog import (
@@ -51,11 +53,24 @@ class TestParquetRoundtrip:
         assert recovered.gdf.crs == cat.gdf.crs
 
     def test_bbox_column_survives(self, tmp_path: Path) -> None:
-        """GeoParquet 1.1 covering-bbox column should round-trip; the test
-        is a soft check — if the geopandas pin doesn't emit it, this just
-        asserts that the file is still readable."""
+        """The GeoParquet 1.1 covering bbox is written, declared and correct."""
         cat = _toy_catalog()
         path = tmp_path / "cat.parquet"
         to_geoparquet(cat, path, write_covering_bbox=True)
+
+        table = pq.read_table(path)
+        bbox = table.column("bbox").to_pylist()
+        assert bbox == [
+            {"xmin": 0.0, "ymin": 0.0, "xmax": 100.0, "ymax": 100.0},
+            {"xmin": 200.0, "ymin": 0.0, "xmax": 300.0, "ymax": 100.0},
+        ]
+        geo = json.loads(table.schema.metadata[b"geo"])
+        assert geo["columns"]["geometry"]["covering"]["bbox"]["xmin"] == [
+            "bbox",
+            "xmin",
+        ]
+
         recovered = from_geoparquet(path)
         assert len(recovered) == len(cat)
+        # The covering column is storage, not a catalog extra.
+        assert all("bbox" not in row.extras for row in recovered.iter_rows())
