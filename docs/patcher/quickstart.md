@@ -94,8 +94,12 @@ patcher = gp.SpatialPatcher(
 )
 ```
 
-`step = size - overlap`. A `SpatialHann` window has zero weight at the
-patch boundary, so OverlapAdd's normalisation hides the seams.
+`step = size - overlap`. `SpatialHann` is a periodic taper that falls to
+zero on each patch's leading edge, and OverlapAdd divides by the summed
+weights, so interior seams are feathered (an identity operator
+reconstructs them exactly). The one exception is the
+scene's first row and column, which no chip weights above zero and which
+come back as `0.0` — see [Window convention](patching.md#window-convention).
 
 ## 5. Per-patch operator — channel normalisation
 
@@ -173,8 +177,9 @@ plt.show()
 - A bounded-memory pipeline that splits a Sentinel-2 scene into 256×256
   patches with 32-pixel overlap.
 - A per-patch operator that runs independently on each chip.
-- A `SpatialOverlapAdd` reconstruction that hides seams thanks to the
-  `SpatialHann` window.
+- A `SpatialOverlapAdd` reconstruction whose interior seams are
+  feathered by the `SpatialHann` window (all but the scene's leading
+  row and column).
 - The same code swaps to disk-backed streaming by changing two lines of
   the aggregation config.
 
