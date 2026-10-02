@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from _helpers import make_rasterio_reader_field
 
 from geopatcher import (
     Patch,
@@ -259,3 +260,84 @@ class TestGetConfig:
         assert cfg["sampler"]["class"] == "SpatialRegularStride"
         assert cfg["window"]["class"] == "SpatialBoxcar"
         assert cfg["aggregation"]["class"] == "SpatialOverlapAdd"
+
+
+def test_rasterio_reader_field_split_merge_pad(tmp_path: Any) -> None:
+    """File-backed `RasterioReader` field: split → merge → pad (issue #177).
+
+    Every chip must be a materialised `GeoTensor` matching rasterio's own
+    read (pixels, nodata fill past the edge, window transform), and an
+    overlap-add merge must reproduce the file exactly.
+    """
+    import rasterio
+    from georeader.geotensor import GeoTensor
+    from rasterio.windows import Window, transform as window_transform
+
+    path = tmp_path / "scene.tif"
+    field = make_rasterio_reader_field(path, size=(70, 70), bands=2, nodata=-1.0)
+    with rasterio.open(path) as src:
+        src_transform = src.transform
+        reference = src.read()
+
+        # split → merge: 14 px chips tile the 70x70 scene exactly.
+        tiler = SpatialPatcher(
+            geometry=SpatialRectangular(size=(14, 14)),
+            sampler=SpatialRegularStride(step=14),
+            window=SpatialBoxcar(),
+            aggregation=SpatialOverlapAdd(),
+        )
+        tiles = list(tiler.split(field))
+        assert len(tiles) == 25
+        assert all(isinstance(t.data, GeoTensor) for t in tiles)
+        merged = tiler.merge(tiles, field.domain)
+        np.testing.assert_array_equal(merged, reference)
+
+        # pad: 16 px chips, the 64 anchors overflow the edge by 10 px and
+        # must be filled with the file's nodata, exactly as rasterio does.
+        padder = SpatialPatcher(
+            geometry=SpatialRectangular(size=(16, 16), boundary="pad"),
+            sampler=SpatialRegularStride(step=16),
+            window=SpatialBoxcar(),
+            aggregation=SpatialOverlapAdd(),
+        )
+        chips = list(padder.split(field))
+        assert len(chips) == 25
+        for chip in chips:
+            assert isinstance(chip.data, GeoTensor)
+            row, col = chip.anchor
+            window = Window(col_off=col, row_off=row, width=16, height=16)
+            expected = src.read(window=window, boundless=True, fill_value=-1.0)
+            np.testing.assert_array_equal(np.asarray(chip.data), expected)
+            assert chip.data.transform == window_transform(window, src_transform)
+
+    out = field.with_data(merged)
+    assert out.fill_value_default == -1.0
+    assert out.transform == src_transform
+
+
+@pytest.mark.parametrize("adapter", ["raster", "reproject"])
+def test_with_data_preserves_nodata_and_attrs(adapter: str) -> None:
+    """`with_data` keeps the source's ``fill_value_default`` and ``attrs``."""
+    import rasterio
+    from georeader.geotensor import GeoTensor
+
+    from geopatcher import ReprojectingRasterField
+
+    source = GeoTensor(
+        values=np.ones((8, 8), dtype=np.float32),
+        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0),
+        crs="EPSG:32630",
+        fill_value_default=-1.0,
+        attrs={"k": 1},
+    )
+    field: Any = (
+        RasterField(source)
+        if adapter == "raster"
+        else ReprojectingRasterField(source, dst_crs="EPSG:3857")
+    )
+    out = field.with_data(np.zeros((8, 8), dtype=np.float32))
+    assert out.fill_value_default == -1.0
+    assert out.attrs == {"k": 1}
+    # A copy — mutating the output must not leak back into the source.
+    out.attrs["k"] = 2
+    assert source.attrs == {"k": 1}
