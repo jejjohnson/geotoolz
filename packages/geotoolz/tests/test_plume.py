@@ -1088,3 +1088,30 @@ def test_4d_time_stack() -> None:
     assert masks.shape == (2, 1, 4, 4)
     with pytest.raises(ValueError, match="PlumeFootprint accepts 2-D"):
         gz.plume.PlumeFootprint()(stack)
+
+
+# ---------------------------------------------------------------------------
+# Non-default grids (``_helpers.TOY_GRIDS``)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("grid", "area_ratio"),
+    [("non_square", 2.0), ("rotated", 1.0), ("sheared", 1.0)],
+)
+def test_ime_mass_scales_with_the_true_pixel_area(grid: str, area_ratio: float) -> None:
+    """IME sums column x pixel area, and the area is |det(transform)|.
+
+    10 m x 20 m pixels double the mass of the 10 m grid; rotation and
+    shear keep the 100 m^2 area even though ``a`` / ``e`` change.
+    """
+    mask = np.zeros((8, 8), dtype=bool)
+    mask[2:5, 2:6] = True
+    column = np.full((1, 8, 8), 0.5)
+
+    def ime(g: str) -> float:
+        plume = toy_geotensor(mask, grid=g, fill_value_default=None)
+        op = gz.plume.IMEEstimate(plume_mask=plume, wind_speed=1.0)
+        return op(toy_geotensor(column, grid=g))["ime_kg"]
+
+    assert ime(grid) == pytest.approx(area_ratio * ime("utm"))

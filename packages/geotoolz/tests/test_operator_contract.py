@@ -12,7 +12,10 @@ extras such as hydra-zen, that:
   results restacked along time, or rejects the rank with a clear error
   naming itself (``test_time_stack_contract``).
 
-Operators that need constructor arguments get them from ``CTOR_KWARGS``.
+Operators that need constructor arguments get them from ``CTOR_KWARGS``;
+runtime objects (GeoTensors, geometries, fitted operators) for the
+``forbid_in_yaml`` classes come from ``RUNTIME_CTOR_KWARGS`` in the checks
+that never serialise the operator.
 Known contract violations are listed in ``KNOWN_FAILURES`` as strict
 xfails pointing at the issue that fixes them; fixing one makes the
 xfail pass, so remove the entry in the same PR.
@@ -266,6 +269,125 @@ UNBUILDABLE: dict[str, str] = {
     "qa._src.operators._QAMask": "private base class",
 }
 
+
+def _grid() -> Any:
+    from _helpers import toy_geotensor
+
+    return toy_geotensor(np.random.default_rng(0).uniform(0.01, 1.0, (3, 16, 16)))
+
+
+def _mask_grid() -> Any:
+    from _helpers import toy_geotensor
+
+    mask = np.zeros((16, 16), dtype=bool)
+    mask[4:8, 4:8] = True
+    return toy_geotensor(mask, fill_value_default=None)
+
+
+def _square() -> Any:
+    from shapely.geometry import box
+
+    return box(*_BOUNDS)
+
+
+def _runtime(**kwargs: Callable[[], Any]) -> Callable[[], dict[str, Any]]:
+    """Zero-arg spec building each runtime-object kwarg lazily."""
+    return lambda: {name: make() for name, make in kwargs.items()}
+
+
+def _fitted_mnf() -> Any:
+    from geotoolz.restore import MNF
+
+    forward = MNF(n_components=2)
+    forward(_grid())
+    return forward
+
+
+#: Runtime constructor objects (GeoTensors, geometries, callables, fitted
+#: operators) for the ``forbid_in_yaml`` / ``UNBUILDABLE`` operators. They
+#: cannot come from a config, so only the checks that never serialise the
+#: operator use them (``build(cls, runtime=True)``): graph mode, terminal
+#: outputs, output attrs, output fill and the 4-D time-stack contract.
+RUNTIME_CTOR_KWARGS: dict[str, Callable[[], dict[str, Any]]] = {
+    "augment._src.operators.CutMix": _runtime(pool=lambda: [_grid()]),
+    "geom._src.operators.Georeference": _runtime(glt=_grid),
+    "geom._src.operators.GeostationaryParallaxCorrect": lambda: {
+        "satellite_lon_deg": 0.0
+    },
+    "geom._src.operators.OpticalFlowILK": _runtime(reference=_grid),
+    "geom._src.operators.OpticalFlowTVL1": _runtime(reference=_grid),
+    "geom._src.operators.PhaseAlign": _runtime(reference=_grid),
+    "geom._src.operators.Rasterize": _runtime(geometries=lambda: [_square()]),
+    "geom._src.operators.RasterizeLike": _runtime(
+        like=_grid,
+        geometries=lambda: __import__("geopandas").GeoDataFrame(
+            geometry=[_square()], crs="EPSG:32629"
+        ),
+    ),
+    "geom._src.operators.ReprojectLike": _runtime(like=_grid),
+    "geom._src.operators.ResampleLike": _runtime(like=_grid),
+    "io._src.operators.LoadFromSTAC": lambda: {"item": object(), "asset_key": "b"},
+    "io._src.operators.ReadReprojectLike": lambda: {
+        "src": "scene.tif",
+        "like": _grid(),
+    },
+    "learn._src.operators.ModelOp": _runtime(model=lambda: np.negative),
+    "mask._src.operators.AltitudeMask": _runtime(dem=_grid),
+    "mask._src.operators.ApplyMask": _runtime(mask=lambda: np.zeros((16, 16), bool)),
+    "mask._src.operators.DistanceMask": _runtime(
+        geometry=_square, distance=lambda: 10.0
+    ),
+    "mask._src.operators.PolygonMask": _runtime(geometry=_square),
+    "mask._src.operators.SlopeMask": _runtime(dem=_grid),
+    "matched_filter._src.operators.LinearTargetFromObs": _runtime(
+        obs_model=lambda: np.exp
+    ),
+    "matched_filter._src.operators.NonlinearTargetFromObs": _runtime(
+        obs_model=lambda: np.exp
+    ),
+    "measure._src.operators.RANSAC": lambda: {
+        "model_class": __import__("skimage.measure").measure.LineModelND,
+        "min_samples": 2,
+        "residual_threshold": 1.0,
+    },
+    "normalize._src.operators.HistogramMatch": _runtime(reference=_grid),
+    "patch_ops.BalancedSampler": lambda: {
+        "labels": np.zeros((16, 16), np.int32),
+        "n_per_class": 1,
+        "size": (4, 4),
+    },
+    "patch_ops.StratifiedSample": lambda: {
+        "labels": np.zeros((16, 16), np.int32),
+        "target_proportions": {0: 1.0},
+        "n_samples": 1,
+        "size": (4, 4),
+    },
+    "plume._src.operators.CrossSectionalFlux": lambda: {
+        "plume_mask": _mask_grid(),
+        "source": (500_050.0, 3_999_950.0),
+        "wind_u": 1.0,
+        "wind_v": 0.0,
+    },
+    "plume._src.operators.IMEEstimate": lambda: {
+        "plume_mask": _mask_grid(),
+        "wind_speed": 1.0,
+    },
+    "plume._src.operators.PlumeColumnStats": _runtime(column=_grid),
+    "plume._src.operators.PlumeQNDFeatures": _runtime(column=_grid),
+    "radiometry._src.operators.IntegratedIrradiance": lambda: {
+        "srf": __import__("pandas").DataFrame({"B1": [1.0]}, index=[500.0])
+    },
+    "restore._src.operators.InverseMNF": _runtime(forward=_fitted_mnf),
+    "segment._src.operators.MarkBoundaries": _runtime(
+        label_img=lambda: np.zeros((16, 16), np.int32)
+    ),
+    "segment._src.operators.RandomWalker": _runtime(
+        markers=lambda: np.zeros((16, 16), np.int32)
+    ),
+    "viz._src.operators.AnnotatePoints": _runtime(points=lambda: [(0.0, 0.0)]),
+    "viz._src.operators.AnnotatePolygons": _runtime(geometries=lambda: [_square()]),
+}
+
 #: ``{check: {operator key: (issue, expected exception)}}`` — strict xfails
 #: removed as fixed. The exception type pins each case to its documented
 #: failure mode, so a different failure is reported instead of swallowed.
@@ -294,13 +416,17 @@ def _params(check: str, classes: list[type] | None = None) -> list[Any]:
     return out
 
 
-def build(cls: type) -> Operator:
+def build(cls: type, *, runtime: bool = False) -> Operator:
     """Construct ``cls`` from ``CTOR_KWARGS`` or with no arguments.
 
-    Skips when the class needs runtime objects (``UNBUILDABLE``) or is a
+    With ``runtime=True`` (checks that never serialise the operator),
+    ``RUNTIME_CTOR_KWARGS`` supplies the runtime objects first. Otherwise
+    skips when the class needs runtime objects (``UNBUILDABLE``) or is a
     ``forbid_in_yaml`` class with no entry.
     """
     key = _key(cls)
+    if runtime and key in RUNTIME_CTOR_KWARGS:
+        return cls(**RUNTIME_CTOR_KWARGS[key]())
     if key in UNBUILDABLE:
         pytest.skip(UNBUILDABLE[key])
     spec = CTOR_KWARGS.get(key, {})
@@ -316,18 +442,22 @@ def build(cls: type) -> Operator:
 def test_every_operator_is_classified() -> None:
     """New operators must be buildable, in ``CTOR_KWARGS``, or listed as unbuildable.
 
-    Keeps the contract tests below from silently skipping new classes.
+    ``forbid_in_yaml`` / ``UNBUILDABLE`` classes that need runtime objects
+    must be in ``RUNTIME_CTOR_KWARGS`` (private bases excepted). Keeps the
+    contract tests below from silently skipping new classes.
     """
     missing = []
     for cls in _CLASSES:
         key = _key(cls)
-        if cls.forbid_in_yaml or key in CTOR_KWARGS or key in UNBUILDABLE:
+        if key in CTOR_KWARGS or key in RUNTIME_CTOR_KWARGS:
+            continue
+        if cls.__name__.startswith("_"):
             continue
         try:
             cls()
         except (TypeError, ValueError):
             missing.append(key)
-    assert missing == [], "add constructor kwargs to CTOR_KWARGS"
+    assert missing == [], "add constructor kwargs to (RUNTIME_)CTOR_KWARGS"
 
 
 def _patch_ops_operators() -> list[type]:
@@ -432,7 +562,16 @@ def _importable(key: str) -> bool:
 def test_tables_name_real_operators() -> None:
     """Table keys name operators; entries for missing extras are ignored."""
     keys = {_key(c) for c in _CLASSES}
-    tables = [CTOR_KWARGS, UNBUILDABLE, *KNOWN_FAILURES.values()]
+    tables = [
+        CTOR_KWARGS,
+        RUNTIME_CTOR_KWARGS,
+        UNBUILDABLE,
+        INTERMEDIATE_OUTPUTS,
+        ATTRS_KNOWN_FAILURES,
+        FILL_KNOWN_FAILURES,
+        TIME_STACK_KNOWN_FAILURES,
+        *KNOWN_FAILURES.values(),
+    ]
     stale = sorted(k for k in {k for t in tables for k in t} - keys if _importable(k))
     assert stale == []
 
@@ -564,8 +703,12 @@ def _n_inputs(op: Operator) -> int:
 
 @pytest.mark.parametrize("cls", _params("graph_mode"))
 def test_graph_mode(cls: type) -> None:
-    """Calling an operator on ``Input`` nodes returns a ``Node``."""
-    op = build(cls)
+    """Calling an operator on ``Input`` nodes returns a ``Node``.
+
+    Graph construction never serialises the operator, so ``forbid_in_yaml``
+    and ``UNBUILDABLE`` classes are built from ``RUNTIME_CTOR_KWARGS``.
+    """
+    op = build(cls, runtime=True)
     n = _n_inputs(op)
     if n == 0:
         pytest.skip("input-less operator (source)")
@@ -645,6 +788,10 @@ INTERMEDIATE_OUTPUTS: dict[str, str] = {
     "matched_filter._src.operators.EstimateMean": "MF stage",
     "matched_filter._src.operators.GMMClusterBackground": "MF stage",
     "matched_filter._src.operators.StreamingBackground": "MF stage",
+    "matched_filter._src.operators.LinearTargetFromObs": "MF stage: target",
+    "matched_filter._src.operators.NonlinearTargetFromObs": "MF stage: target",
+    "patch_ops.BalancedSampler": "fan-out: list of chips",
+    "patch_ops.StratifiedSample": "fan-out: list of chips",
 }
 
 
@@ -682,7 +829,7 @@ def test_non_carrier_outputs_are_terminal(cls: type) -> None:
     of failing downstream with an unrelated error. Runs the operator on
     a few toy scenes; skips when none is a valid input.
     """
-    op = build(cls)
+    op = build(cls, runtime=True)
     if op._terminal:
         # Already terminal; also keeps sinks from writing files here.
         return
@@ -872,7 +1019,7 @@ def test_output_attrs_are_fresh_and_consistent(cls: type) -> None:
     output, ``out.attrs is not gt.attrs`` and every per-band attrs list has
     one entry per output band.
     """
-    op = build(cls)
+    op = build(cls, runtime=True)
     if op._terminal or _n_inputs(op) != 1:
         pytest.skip("terminal or not a single-input operator")
     ran = False
@@ -909,9 +1056,26 @@ GAP_FILLERS: frozenset[str] = frozenset(
     "geom._src.operators.BowtieCorrection",
 }
 
+#: Reason suffix for contract violations found once the ``forbid_in_yaml``
+#: operators ran through these checks (``RUNTIME_CTOR_KWARGS``).
+_FOUND = "surfaced by #166's runtime-built contract checks"
+
 #: Strict xfails for ``test_output_fill_matches_dtype``, owned by later
 #: branches of the #112 stack.
-FILL_KNOWN_FAILURES: dict[str, Known] = {}
+FILL_KNOWN_FAILURES: dict[str, Known] = {
+    "geom._src.operators.PhaseAlign": (
+        f"apply=True: input fill pixels come out valid ({_FOUND})",
+        AssertionError,
+    ),
+    "geom._src.operators.Rasterize": (
+        f"uint8 burn raster declares a float 0.0 fill ({_FOUND})",
+        AssertionError,
+    ),
+    "geom._src.operators.RasterizeLike": (
+        f"input fill pixels come out valid ({_FOUND})",
+        AssertionError,
+    ),
+}
 
 
 def _fill_params() -> list[Any]:
@@ -997,7 +1161,7 @@ def test_output_fill_matches_dtype(cls: type) -> None:
     pixels hold the input's fill value, and checks each GeoTensor output
     with :func:`assert_fill_matches_dtype`.
     """
-    op = build(cls)
+    op = build(cls, runtime=True)
     if op._terminal or _n_inputs(op) != 1:
         pytest.skip("terminal or not a single-input operator")
     ran = False
@@ -1084,7 +1248,37 @@ STACK_AS_FEATURES: frozenset[str] = frozenset(
 
 #: Strict xfails for the 4-D contract, owned by later branches of the #112
 #: stack.
-TIME_STACK_KNOWN_FAILURES: dict[str, Known] = {}
+TIME_STACK_KNOWN_FAILURES: dict[str, Known] = {
+    **{
+        f"{family}._src.operators.{name}": (
+            f"{name} returns one (H, W) map for a (T, C, H, W) stack instead "
+            f"of a per-frame result or a rank error ({_FOUND})",
+            AssertionError,
+        )
+        for family, name in (
+            ("geom", "Rasterize"),
+            ("geom", "RasterizeLike"),
+            ("mask", "DistanceMask"),
+            ("mask", "PolygonMask"),
+        )
+    },
+    "normalize._src.operators.HistogramMatch": (
+        f"4-D result differs from the restacked per-frame results ({_FOUND})",
+        AssertionError,
+    ),
+    **{
+        f"{family}._src.operators.{name}": (
+            f"{name} fails on a 4-D stack with an error that does not name "
+            f"it ({_FOUND})",
+            AssertionError,
+        )
+        for family, name in (
+            ("restore", "InverseMNF"),
+            ("viz", "AnnotatePoints"),
+            ("viz", "AnnotatePolygons"),
+        )
+    },
+}
 
 
 def _time_stack_params() -> list[Any]:
@@ -1123,7 +1317,7 @@ def _stack_of(scene: Any) -> Any:
 
 def _build_seeded(cls: type) -> Operator:
     """``build(cls)`` with ``seed=0`` for stochastic operators."""
-    op = build(cls)
+    op = build(cls, runtime=True)
     if "seed" in inspect.signature(cls.__init__).parameters:
         op.seed = 0
     return op

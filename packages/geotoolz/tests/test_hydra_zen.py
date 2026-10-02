@@ -1,12 +1,14 @@
-"""Smoke test for hydra-zen ``builds()`` round-trip.
+"""Smoke test for hydra-zen ``builds()`` round-trip of pipekit primitives.
 
-Per `geotoolz.md` §6.6, every YAML-safe Operator's ``get_config()``
-should round-trip through hydra-zen. We test a handful of representative
-ops — full coverage lives in a separate integration suite once domain
-operators land.
+Every YAML-safe Operator's ``get_config()`` should round-trip through
+hydra-zen. This module covers the pipekit building blocks (a toy
+operator, ``Identity``, ``ShapeTrace``, ``Sequential``); the geotoolz
+operator families carry their own ``*_hydra_zen_builds_roundtrip``
+tests, and ``test_operator_contract.py`` checks the extra-free
+``Operator.from_state`` round-trip for every operator.
 
-The whole module is gated by ``importorskip`` so environments without
-the optional ``[hydra]`` extra skip cleanly.
+The ``[hydra]`` extra is in the workspace ``dev`` group, so these run in
+a default checkout; ``importorskip`` keeps a slim install green.
 """
 
 from __future__ import annotations

@@ -9,9 +9,10 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
-from shapely.geometry import MultiPolygon, box
+from shapely.geometry import MultiPolygon, Point, box
 
 from geotoolz.mask import (
     AltitudeMask,
@@ -637,3 +638,60 @@ def test_apply_mask_get_config_is_jsonable_and_has_no_invert() -> None:
     assert ApplyMask.forbid_in_yaml is True
     with pytest.raises(TypeError):
         ApplyMask(mask=np.array([[True]]), invert=True)  # type: ignore[call-arg]
+
+
+# ---------------------------------------------------------------------------
+# Non-default grids (``_helpers.TOY_GRIDS``)
+# ---------------------------------------------------------------------------
+
+
+def test_slope_mask_uses_non_square_pixel_sizes() -> None:
+    """z = 5 (row + col) m: on 10 m x 20 m pixels the slope is
+    atan(hypot(5/10, 5/20)) = 29.2 deg, on the square 10 m grid 35.3 deg.
+    """
+    dem_values = np.add.outer(np.arange(8.0), np.arange(8.0)) * 5.0
+    scene = np.ones((1, 8, 8))
+    for grid, steep in (("utm", True), ("non_square", False)):
+        dem = toy_geotensor(dem_values, grid=grid)
+        out = SlopeMask(dem=dem, max_slope_deg=32.0)(toy_geotensor(scene, grid=grid))
+        assert np.all(np.asarray(out) == steep), grid
+
+
+def _distance_reference(
+    transform: rasterio.Affine, shape: tuple[int, int], distance: float
+) -> np.ndarray:
+    """``True`` beyond ``distance`` of the centre pixel, measured on the ground."""
+    rows, cols = np.mgrid[0 : shape[0], 0 : shape[1]]
+    xs, ys = transform * (cols + 0.5, rows + 0.5)
+    cx, cy = transform * (shape[1] // 2 + 0.5, shape[0] // 2 + 0.5)
+    return np.hypot(xs - cx, ys - cy) > distance
+
+
+def _distance_mask_on(grid: str) -> tuple[np.ndarray, np.ndarray]:
+    scene = toy_geotensor(np.ones((1, 9, 9)), grid=grid)
+    centre = Point(*(scene.transform * (4.5, 4.5)))
+    out = DistanceMask(geometry=centre, distance=25.0)(scene)
+    expected = _distance_reference(scene.transform, (9, 9), 25.0)
+    return np.asarray(out).squeeze(), expected
+
+
+def test_distance_mask_on_non_square_pixels_matches_ground_distance() -> None:
+    out, expected = _distance_mask_on("non_square")
+    np.testing.assert_array_equal(out, expected)
+    # 25 m reaches two 10 m columns but only one 20 m row each way.
+    assert not out[4, 2] and out[4, 1]
+    assert not out[3, 4] and out[2, 4]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason=(
+        "DistanceMask measures distance with |a| / |e| as the pixel size, "
+        "so a rotated grid (|a| = 8.66 for 10 m pixels) keeps pixels beyond "
+        "`distance` (found by #166's rotated grid)"
+    ),
+)
+def test_distance_mask_on_a_rotated_grid_matches_ground_distance() -> None:
+    out, expected = _distance_mask_on("rotated")
+    np.testing.assert_array_equal(out, expected)

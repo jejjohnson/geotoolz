@@ -427,3 +427,37 @@ def test_label_connected_components_min_area_and_background() -> None:
         gz.measure.LabelConnectedComponents(background=1)(mask),
         [[0, 0, 1, 0], [1, 1, 1, 1]],
     )
+
+
+# --- non-default grids (``_helpers.TOY_GRIDS``) ---------------------------------
+
+
+def _rectangle_labels() -> np.ndarray:
+    labels = np.zeros((6, 8), dtype=np.int32)
+    labels[1:4, 1:5] = 1  # 3 x 4 px rectangle
+    return labels
+
+
+def test_region_props_scale_to_crs_on_a_rotated_grid() -> None:
+    """Rotation keeps 10 m square pixels: |a| = 8.66 must not be the scale."""
+    gt = toy_geotensor(_rectangle_labels(), grid="rotated", fill_value_default=0)
+    px = gz.measure.RegionProps()(gt)
+    crs = gz.measure.RegionProps(scale_to_crs=True)(gt)
+    assert crs["area"].iloc[0] == pytest.approx(1200.0)
+    assert crs["perimeter"].iloc[0] == pytest.approx(10.0 * px["perimeter"].iloc[0])
+
+    skeleton = np.zeros((9, 9), dtype=bool)
+    skeleton[4, 1:8] = True
+    line = toy_geotensor(skeleton, grid="rotated", fill_value_default=None)
+    assert gz.measure.SkeletonLength(scale_to_crs=True)(line) == pytest.approx(60.0)
+
+
+def test_region_props_scale_to_crs_on_a_sheared_grid() -> None:
+    """Shear leaves a / e square-looking; areas use |det| and lengths refuse."""
+    gt = toy_geotensor(_rectangle_labels(), grid="sheared", fill_value_default=0)
+    with pytest.raises(ValueError, match="non-square pixels"):
+        gz.measure.RegionProps(scale_to_crs=True)(gt)
+    area_only = gz.measure.RegionProps(properties=("label", "area"), scale_to_crs=True)(
+        gt
+    )
+    assert area_only["area"].iloc[0] == pytest.approx(12 * 100.0)
