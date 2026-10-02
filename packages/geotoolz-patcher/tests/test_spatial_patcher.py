@@ -197,8 +197,11 @@ class TestSplit:
         assert masked.data.shape == (16, 16)
         assert np.isnan(masked.data).all()
         recon = patcher.merge(patches, field.domain)
-        assert not np.isnan(recon).any()
-        np.testing.assert_allclose(recon[0:16, 16:32], 0.0)
+        # The masked tile is a hole (the NaN fill); every other cell is data.
+        hole = np.zeros(recon.shape, dtype=bool)
+        hole[0:16, 16:32] = True
+        assert np.isnan(recon[hole]).all()
+        assert not np.isnan(recon[~hole]).any()
         assert patcher.errors[0].kind == "OSError"
 
     def test_invalid_on_error_policy_raises(self, field: RasterField) -> None:

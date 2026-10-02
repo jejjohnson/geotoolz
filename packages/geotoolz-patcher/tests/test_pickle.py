@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pickle
 
+import numpy as np
 import pytest
 
 from geopatcher import (
@@ -53,7 +54,8 @@ def test_axis_pickle_roundtrip(op) -> None:
     blob = pickle.dumps(op)
     clone = pickle.loads(blob)
     assert type(clone) is type(op)
-    assert clone.get_config() == op.get_config()
+    # assert_equal: aggregation configs carry a NaN default ``fill_value``.
+    np.testing.assert_equal(clone.get_config(), op.get_config())
 
 
 class TestSpatialPatcherPickle:
@@ -65,7 +67,7 @@ class TestSpatialPatcherPickle:
             aggregation=SpatialOverlapAdd(),
         )
         clone = pickle.loads(pickle.dumps(sp))
-        assert clone.get_config() == sp.get_config()
+        np.testing.assert_equal(clone.get_config(), sp.get_config())
 
 
 class TestTemporalPatcherPickle:

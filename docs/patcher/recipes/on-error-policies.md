@@ -89,7 +89,8 @@ for patch in patcher.split(field):
 Aggregations ignore NaNs in the weighted sum (the window-weight
 denominator picks up the zero contribution), so masked patches turn
 into transparent holes in the reconstruction without breaking the
-overlap-add invariant.
+overlap-add invariant. A cell that no other patch covers comes back as
+the aggregation's `fill_value` (NaN by default).
 
 ## 4. `"retry"` — bounded retries for transient I/O
 

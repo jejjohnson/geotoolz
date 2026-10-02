@@ -51,12 +51,17 @@ per axis exactly `scipy.signal.windows.hann(n, sym=False)` /
   the domain's **first row and first column** (the leading border ring)
   get zero accumulated weight, because regular samplers start at anchor 0
   and the only chip covering them puts its zero sample there; those cells
-  are filled with `0.0`. `"pad"` / `"reflect"` only extend the trailing
+  come back as the aggregation's `fill_value` — NaN by default, or e.g.
+  `SpatialOverlapAdd(fill_value=domain.fill_value_default)` for the
+  domain's nodata — never as a value that looks like data (see
+  [Aggregation fill and ties](#aggregation-fill-and-ties)). `"pad"` /
+  `"reflect"` only extend the trailing
   (bottom/right) edge, so they do not remove this ring. If it matters,
   crop the 1-pixel ring, use `SpatialGaussian` (never zero) or
   `SpatialBoxcar`, or supply a `SpatialCustom` taper.
 - **`step == size` with Hann/Tukey** leaves every chip's first row and
-  column at zero weight — tapers need overlapping chips; use
+  column at zero weight (the `fill_value` seams) — tapers need overlapping
+  chips; use
   `SpatialBoxcar` for exact non-overlapping tiling.
 - **Short axes.** An axis shorter than 3 samples cannot carry a taper and
   is boxcar (all ones) on that axis.
@@ -270,6 +275,33 @@ family (`ApproxQuantile`, `ApproxCardinality`, `ApproxMode`,
 `StreamingHistogram`, `Reservoir`) provides global streaming summaries for
 operational-scale jobs that need bounded reducer state rather than a full
 materialised field.
+
+### Aggregation fill and ties
+
+Every dense aggregation honours the same per-cell contract:
+
+- **Valid samples.** A sample counts only where it is not NaN, lies inside
+  the domain (pad / reflect overhang is cropped) and lies inside the
+  interior mask of a masked window (`SpatialPolygonIntersection` on a
+  raster, `SpatialSphericalCap` on a grid). Infinities are values.
+- **Uncovered cells** — no valid sample, or zero accumulated weight (a
+  taper's zero edge) — get the aggregation's `fill_value`: NaN by default
+  for `Sum`, `Mean`, `Max`, `Min`, `WeightedSum`, `OverlapAdd` (in RAM and
+  streaming), `Variance` (which also fills cells with fewer than two
+  samples, as `np.nanvar(ddof=1)`), `InvVarWeightedMean` (both `mu` and
+  `var`), `Median` and `Mode`. `HardVote` / `SoftVote` default to `-1`
+  ("no class"). Pass `fill_value=` to override, e.g. the domain's nodata;
+  the label aggregations (`HardVote`, `SoftVote`, `Mode`) return `int64`
+  for an integral fill and `float64` otherwise.
+- **Ties.** `HardVote` / `SoftVote` pick the lowest class index; `Mode`
+  picks the smallest value.
+- `InvVarWeightedMean` treats `var == 0` as an exact observation: the cell
+  takes that sample's `mu` with `var = 0`.
+- Patch indices that are not a dense placement (a point-index array, a
+  polygon id) raise `TypeError`; use `SpatialByIndex`, which returns the
+  `[(anchor, data), …]` pairs, for ragged geometries.
+- `MeanStd` / `MinMax` (global) skip NaN and, on a raster / grid domain,
+  count only each chip's in-domain, in-mask cells.
 
 For resumable local jobs, create a `PatchJournal(path)` and pass it to
 `patcher.split(field, journal=journal)`. Anchors with successful journal rows

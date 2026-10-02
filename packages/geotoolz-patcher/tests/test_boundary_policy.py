@@ -507,7 +507,8 @@ def test_split_merge_matrix(field_name: str, step: int, boundary: BoundaryMode) 
 
     merged = np.asarray(patcher.merge(patches, field.domain))
     np.testing.assert_array_equal(merged[covered], raw[covered])
-    assert np.all(merged[~covered] == 0)
+    # Cells no chip reached are the NaN fill, not a fake 0.0 (#192).
+    assert np.isnan(merged[~covered]).all()
 
 
 def _pad_patches(step: int = _SIZE) -> tuple[RasterField, list[Patch]]:
@@ -564,7 +565,16 @@ def test_variance_and_categorical_aggregations_crop_pad_chips() -> None:
         for p in patches
     ]
     expected_labels = (_ramp() % 3).astype(np.int64)
-    np.testing.assert_array_equal(SpatialVariance().merge(patches, field.domain), 0.0)
+    # Constant per-cell samples → variance 0 wherever the ddof=1 estimate is
+    # defined (≥ 2 samples); singly-covered cells get the NaN fill.
+    ones = [
+        Patch(data=np.ones(np.shape(p.data)), anchor=p.anchor, indices=p.indices)
+        for p in patches
+    ]
+    twice = SpatialSum().merge(ones, field.domain) >= 2
+    variance = SpatialVariance().merge(patches, field.domain)
+    np.testing.assert_array_equal(variance[twice], 0.0)
+    assert np.isnan(variance[~twice]).all() and (~twice).any()
     np.testing.assert_array_equal(
         SpatialMode().merge(labels, field.domain), expected_labels
     )
@@ -607,7 +617,7 @@ def test_negative_pad_window_does_not_wrap() -> None:
         aggregation=SpatialSum(),
     )
     merged = patcher.merge(patcher.split(field), field.domain)
-    expected = np.zeros(raw.shape, dtype=np.float64)
+    expected = np.full(raw.shape, np.nan)
     expected[:2, :2] = raw[:2, :2]
     np.testing.assert_array_equal(merged, expected)
 

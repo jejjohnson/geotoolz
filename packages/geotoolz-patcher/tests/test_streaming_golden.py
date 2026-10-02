@@ -126,15 +126,15 @@ def test_overlap_add_streaming_matches_in_memory(
     np.testing.assert_allclose(streamed, in_mem, rtol=1e-6, atol=1e-6)
 
 
-def test_overlap_add_streaming_empty_patches_returns_zero_array(
+def test_overlap_add_streaming_empty_patches_returns_fill_array(
     domain: GeoTensor, tmp_path
 ) -> None:
     # The peeked-iterator branch in `_merge_streaming`: no patches at
-    # all should yield a zero-filled zarr of the domain's shape.
+    # all should yield a fill-valued zarr of the domain's shape.
     agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path))
     result = np.asarray(agg.merge([], domain)[:])
     assert result.shape == (64, 64)
-    np.testing.assert_array_equal(result, 0.0)
+    assert np.isnan(result).all()
 
 
 def test_overlap_add_streaming_chunk_size_invariant(

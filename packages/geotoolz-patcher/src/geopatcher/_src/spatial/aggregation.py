@@ -71,9 +71,36 @@ def _domain_array_shape(domain: Any) -> tuple[int, ...]:
     raise TypeError(f"can't infer dense shape from {type(domain).__name__}")
 
 
-def _replace_nan_with_zero(array: np.ndarray) -> np.ndarray:
-    """Replace only NaN with zero; preserve infinities as real values."""
-    return np.where(np.isnan(array), 0.0, array)
+def _not_nan(array: np.ndarray) -> np.ndarray:
+    """``array``-shaped bool: ``True`` where the value is not NaN.
+
+    Infinities are real values — only NaN marks a missing sample (an
+    ``on_error="mask"`` patch, a nodata hole, …). Integer / bool arrays
+    have no NaN.
+    """
+    if np.issubdtype(array.dtype, np.inexact):
+        return ~np.isnan(array)
+    return np.ones(array.shape, dtype=bool)
+
+
+def _as_float(array: Any) -> np.ndarray:
+    return np.asarray(array, dtype=np.float64)
+
+
+def _label_dtype(fill_value: float) -> type[np.generic]:
+    """Output dtype of a label aggregation: ``int64`` iff the fill is integral."""
+    if isinstance(fill_value, bool):
+        raise TypeError("fill_value must be a number, not a bool")
+    if isinstance(fill_value, int | np.integer):
+        return np.int64
+    if math.isfinite(fill_value) and float(fill_value).is_integer():
+        return np.int64
+    return np.float64
+
+
+def _with_fill(out: np.ndarray, covered: np.ndarray, fill_value: float) -> np.ndarray:
+    """``out`` where ``covered``, else ``fill_value`` — always float64."""
+    return np.where(covered, out, np.float64(fill_value))
 
 
 @dataclass(frozen=True)
@@ -85,17 +112,22 @@ class _Placement:
     silently clip a too-long slice — and read a negative start from the
     end. Every dense aggregation therefore writes only the in-domain
     part: ``acc[placement.acc] ⊕= f(placement.crop(data))``, with the
-    weights cropped by the same ``placement.crop``.
+    weights cropped by the same ``placement.crop``, and counts only the
+    cells ``placement.valid(data)`` keeps — not NaN, and inside the
+    interior mask of a `_MaskedWindow`.
 
     Attributes:
         acc: Slicer into the domain-shaped accumulator, clipped to
             ``[0, n)`` on every sliced axis.
         chip: Matching slicer into the patch's own data / weights —
             the offset of the in-domain part within the chip.
+        mask: In-domain part of a `_MaskedWindow`'s interior mask
+            (``True`` = inside), or ``None`` when every cell counts.
     """
 
     acc: tuple[Any, ...]
     chip: tuple[Any, ...]
+    mask: np.ndarray | None = None
 
     def crop(self, array: Any) -> Any:
         """Crop a chip-shaped ``array`` (data or weights) to the in-domain part.
@@ -111,6 +143,17 @@ class _Placement:
         if chip and chip[0] is not Ellipsis and arr.ndim < len(chip):
             chip = chip[len(chip) - arr.ndim :]
         return arr[chip]
+
+    def valid(self, data: np.ndarray) -> np.ndarray:
+        """Cells of the cropped ``data`` that count: not NaN and inside the mask.
+
+        The mask broadcasts against ``data`` on the trailing axes, so a
+        2-D polygon mask covers every band of a ``(band, H, W)`` chip.
+        """
+        ok = _not_nan(data)
+        if self.mask is not None:
+            ok = ok & self.mask
+        return ok
 
 
 def _clip_axis(start: int, stop: int, length: int) -> tuple[slice, slice]:
@@ -132,15 +175,25 @@ def _resolve_indices(indices: Any, shape: tuple[int, ...]) -> _Placement | None:
     - rasterio.windows.Window: ``(..., row_slice, col_slice)``
     - ``dict[str, slice]``: one entry per dim in dict order (no ellipsis);
       non-slice entries (integer / list indexers) pass through unclipped
-    - ``_MaskedWindow``: resolve the underlying rasterio Window
+    - ``_MaskedWindow``: resolve the underlying window and carry its
+      interior mask, cropped like the data, as ``placement.mask``
 
-    Returns ``None`` when the indices are not a dense placement (the
-    caller skips the patch) or when the patch has no in-domain cell.
+    Returns ``None`` when the patch has no in-domain cell (the caller
+    skips it).
+
+    Raises:
+        TypeError: ``indices`` is not a dense placement (a point-index
+            array, a polygon id, …). Dense aggregations refuse it rather
+            than silently merging an empty field.
     """
     from geopatcher._src.spatial.geometry import _MaskedWindow
 
     if isinstance(indices, _MaskedWindow):
-        return _resolve_indices(indices.window, shape)
+        placement = _resolve_indices(indices.window, shape)
+        if placement is None:
+            return None
+        mask = np.asarray(placement.crop(indices.mask), dtype=bool)
+        return _Placement(acc=placement.acc, chip=placement.chip, mask=mask)
     if hasattr(indices, "row_off") and hasattr(indices, "col_off"):
         r0, c0 = int(indices.row_off), int(indices.col_off)
         h, w = int(indices.height), int(indices.width)
@@ -167,7 +220,19 @@ def _resolve_indices(indices: Any, shape: tuple[int, ...]) -> _Placement | None:
             acc.append(acc_s)
             chip.append(chip_s)
         return _Placement(acc=tuple(acc), chip=tuple(chip))
-    return None
+    raise TypeError(
+        "dense aggregations need raster / grid patch indices (a rasterio "
+        "Window, a {dim: slice} dict or a masked window), got "
+        f"{type(indices).__name__}; use SpatialByIndex for ragged geometries"
+    )
+
+
+def _placed(p: Any, shape: tuple[int, ...]) -> tuple[_Placement, np.ndarray] | None:
+    """``(placement, cropped float64 data)`` for one patch, ``None`` if off-domain."""
+    pl = _resolve_indices(p.indices, shape)
+    if pl is None:
+        return None
+    return pl, _as_float(pl.crop(p.data))
 
 
 # ---------------------------------------------------------------------------
@@ -177,60 +242,97 @@ def _resolve_indices(indices: Any, shape: tuple[int, ...]) -> _Placement | None:
 
 @dataclass(eq=False)
 class SpatialSum(SpatialAggregation):
-    """Per-cell sum across patches."""
+    """Per-cell sum across patches (NaN / masked samples skipped).
+
+    Args:
+        fill_value: Written into cells no valid sample reached
+            (uncovered, all-NaN or outside every mask). Default NaN;
+            pass e.g. the domain's nodata to override.
+    """
+
+    fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
         shape = _domain_array_shape(domain)
         acc = np.zeros(shape, dtype=np.float64)
+        covered = np.zeros(shape, dtype=bool)
         for p in patches:
-            pl = _resolve_indices(p.indices, shape)
-            if pl is None:
+            placed = _placed(p, shape)
+            if placed is None:
                 continue
-            sl = pl.acc
-            acc[sl] += _replace_nan_with_zero(
-                np.asarray(pl.crop(p.data), dtype=np.float64)
-            )
-        return acc
+            pl, x = placed
+            valid = pl.valid(x)
+            acc[pl.acc] += np.where(valid, x, 0.0)
+            covered[pl.acc] |= valid
+        return _with_fill(acc, covered, self.fill_value)
+
+    def get_config(self) -> dict[str, Any]:
+        return config_from_fields(self)
 
 
 @dataclass(eq=False)
 class SpatialMax(SpatialAggregation):
-    """Per-cell maximum across patches."""
+    """Per-cell maximum across patches (NaN / masked samples skipped).
+
+    Args:
+        fill_value: Written into cells no valid sample reached. Default
+            NaN; pass e.g. the domain's nodata to override.
+    """
+
+    fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
-        acc = np.full(shape, -np.inf, dtype=np.float64)
-        for p in patches:
-            pl = _resolve_indices(p.indices, shape)
-            if pl is None:
-                continue
-            sl = pl.acc
-            # fmax ignores NaN to support masked patches.
-            acc[sl] = np.fmax(acc[sl], np.asarray(pl.crop(p.data), dtype=np.float64))
-        return acc
+        return _extreme(patches, domain, np.fmax, -np.inf, self.fill_value)
+
+    def get_config(self) -> dict[str, Any]:
+        return config_from_fields(self)
 
 
 @dataclass(eq=False)
 class SpatialMin(SpatialAggregation):
-    """Per-cell minimum across patches."""
+    """Per-cell minimum across patches (NaN / masked samples skipped).
+
+    Args:
+        fill_value: Written into cells no valid sample reached. Default
+            NaN; pass e.g. the domain's nodata to override.
+    """
+
+    fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
-        acc = np.full(shape, np.inf, dtype=np.float64)
-        for p in patches:
-            pl = _resolve_indices(p.indices, shape)
-            if pl is None:
-                continue
-            sl = pl.acc
-            # fmin ignores NaN to support masked patches.
-            acc[sl] = np.fmin(acc[sl], np.asarray(pl.crop(p.data), dtype=np.float64))
-        return acc
+        return _extreme(patches, domain, np.fmin, np.inf, self.fill_value)
+
+    def get_config(self) -> dict[str, Any]:
+        return config_from_fields(self)
+
+
+def _extreme(
+    patches: Iterable[Any],
+    domain: Any,
+    op: Callable[[np.ndarray, np.ndarray], np.ndarray],
+    start: float,
+    fill_value: float,
+) -> np.ndarray:
+    """Shared `SpatialMax` / `SpatialMin` fold (``op`` is ``np.fmax`` / ``np.fmin``)."""
+    shape = _domain_array_shape(domain)
+    acc = np.full(shape, start, dtype=np.float64)
+    covered = np.zeros(shape, dtype=bool)
+    for p in patches:
+        placed = _placed(p, shape)
+        if placed is None:
+            continue
+        pl, x = placed
+        valid = pl.valid(x)
+        block = acc[pl.acc]
+        acc[pl.acc] = np.where(valid, op(block, x), block)
+        covered[pl.acc] |= valid
+    return _with_fill(acc, covered, fill_value)
 
 
 @dataclass(eq=False)
@@ -240,29 +342,35 @@ class SpatialWeightedSum(SpatialAggregation):
     Args:
         weight_fn: Optional callable ``(patch) -> Array`` overriding the
             per-patch weights. ``None`` uses ``patch.weights`` directly.
+        fill_value: Written into cells whose accumulated weight of valid
+            samples is not positive (uncovered, all-NaN, outside every
+            mask, or a taper's zero edge). Default NaN; pass e.g. the
+            domain's nodata to override.
     """
 
     weight_fn: Callable[[Any], np.ndarray] | None = None
+    fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
         shape = _domain_array_shape(domain)
         acc = np.zeros(shape, dtype=np.float64)
+        wsum = np.zeros(shape, dtype=np.float64)
         for p in patches:
-            pl = _resolve_indices(p.indices, shape)
-            if pl is None:
+            placed = _placed(p, shape)
+            if placed is None:
                 continue
-            sl = pl.acc
-            w = pl.crop(self.weight_fn(p) if self.weight_fn else p.weights)
-            data = np.asarray(pl.crop(p.data), dtype=np.float64)
-            if w is None:
-                acc[sl] += _replace_nan_with_zero(data)
-            else:
-                acc[sl] += _replace_nan_with_zero(
-                    data * np.asarray(w, dtype=np.float64)
-                )
-        return acc
+            pl, x = placed
+            raw_w = self.weight_fn(p) if self.weight_fn else p.weights
+            w = np.float64(1.0) if raw_w is None else _as_float(pl.crop(raw_w))
+            valid = pl.valid(x)
+            acc[pl.acc] += np.where(valid, x * w, 0.0)
+            wsum[pl.acc] += np.where(valid, w, 0.0)
+        return _with_fill(acc, wsum > 0, self.fill_value)
+
+    def get_config(self) -> dict[str, Any]:
+        return config_from_fields(self, exclude=("weight_fn",))
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +380,16 @@ class SpatialWeightedSum(SpatialAggregation):
 
 @dataclass(eq=False)
 class SpatialMean(SpatialAggregation):
-    """Per-cell mean — runs `SpatialSum` and a count accumulator in parallel."""
+    """Per-cell mean — runs `SpatialSum` and a count accumulator in parallel.
+
+    NaN samples and cells outside a `_MaskedWindow` mask are not counted.
+
+    Args:
+        fill_value: Written into cells no valid sample reached. Default
+            NaN; pass e.g. the domain's nodata to override.
+    """
+
+    fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = True
 
@@ -281,25 +398,34 @@ class SpatialMean(SpatialAggregation):
         total = np.zeros(shape, dtype=np.float64)
         count = np.zeros(shape, dtype=np.float64)
         for p in patches:
-            pl = _resolve_indices(p.indices, shape)
-            if pl is None:
+            placed = _placed(p, shape)
+            if placed is None:
                 continue
-            sl = pl.acc
-            data = np.asarray(pl.crop(p.data), dtype=np.float64)
-            valid = ~np.isnan(data)
-            total[sl] += _replace_nan_with_zero(data)
-            count[sl] += valid
-        with np.errstate(invalid="ignore"):
-            return np.where(count > 0, total / count, 0.0)
+            pl, x = placed
+            valid = pl.valid(x)
+            total[pl.acc] += np.where(valid, x, 0.0)
+            count[pl.acc] += valid
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return _with_fill(total / count, count > 0, self.fill_value)
+
+    def get_config(self) -> dict[str, Any]:
+        return config_from_fields(self)
 
 
 @dataclass(eq=False)
 class SpatialVariance(SpatialAggregation):
     """Per-cell sample variance via Welford's online algorithm.
 
-    Returns the unbiased estimate (``ddof=1``); cells touched fewer than
-    two patches return ``0.0``.
+    Returns the unbiased estimate (``ddof=1``, as ``np.nanvar``); NaN and
+    masked samples are not counted.
+
+    Args:
+        fill_value: Written into cells with fewer than two valid samples,
+            where the ``ddof=1`` variance is undefined. Default NaN; pass
+            e.g. the domain's nodata to override.
     """
+
+    fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = True
 
@@ -309,35 +435,65 @@ class SpatialVariance(SpatialAggregation):
         m2 = np.zeros(shape, dtype=np.float64)
         count = np.zeros(shape, dtype=np.float64)
         for p in patches:
-            pl = _resolve_indices(p.indices, shape)
-            if pl is None:
+            placed = _placed(p, shape)
+            if placed is None:
                 continue
+            pl, x = placed
             sl = pl.acc
-            x = np.asarray(pl.crop(p.data), dtype=np.float64)
-            valid = ~np.isnan(x)
-            x_clean = _replace_nan_with_zero(x)
+            valid = pl.valid(x)
+            x_clean = np.where(valid, x, 0.0)
             next_count = count[sl] + valid
             delta = np.where(valid, x_clean - mean[sl], 0.0)
             denom = np.where(next_count > 0, next_count, 1.0)
             mean[sl] += np.where(next_count > 0, delta / denom, 0.0)
             m2[sl] += np.where(valid, delta * (x_clean - mean[sl]), 0.0)
             count[sl] = next_count
-        with np.errstate(invalid="ignore"):
-            return np.where(count > 1, m2 / (count - 1), 0.0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return _with_fill(m2 / (count - 1), count > 1, self.fill_value)
+
+    def get_config(self) -> dict[str, Any]:
+        return config_from_fields(self)
+
+
+def _global_values(p: Any, shape: tuple[int, ...] | None) -> np.ndarray:
+    """A patch's valid samples, flattened, for the global reducers.
+
+    On a dense (raster / grid) domain only the chip's in-domain part
+    counts — ``"pad"`` / ``"reflect"`` fill is context, not data — and
+    only inside a `_MaskedWindow` mask. NaN never counts.
+    """
+    if shape is None:
+        x = _as_float(p.data).reshape(-1)
+        return x[_not_nan(x)]
+    placed = _placed(p, shape)
+    if placed is None:
+        return np.empty(0, dtype=np.float64)
+    pl, x = placed
+    return x[np.broadcast_to(pl.valid(x), x.shape)]
+
+
+def _dense_shape_or_none(domain: Any) -> tuple[int, ...] | None:
+    return tuple(domain.shape) if hasattr(domain, "shape") else None
 
 
 @dataclass(eq=False)
 class SpatialMeanStd(SpatialAggregation):
-    """Global mean and sample standard deviation across patch data."""
+    """Global mean and sample standard deviation across patch data.
+
+    NaN samples are skipped. On a dense (raster / grid) domain only each
+    chip's in-domain, in-mask part counts, so pad / reflect fill is not
+    data; on other domains every non-NaN sample counts.
+    """
 
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> dict[str, float]:
+        shape = _dense_shape_or_none(domain)
         count = 0
         mean = 0.0
         m2 = 0.0
         for p in patches:
-            x = np.asarray(p.data, dtype=np.float64).reshape(-1)
+            x = _global_values(p, shape)
             if x.size == 0:
                 continue
             batch_count = int(x.size)
@@ -356,16 +512,21 @@ class SpatialMeanStd(SpatialAggregation):
 
 @dataclass(eq=False)
 class SpatialMinMax(SpatialAggregation):
-    """Global minimum and maximum across patch data."""
+    """Global minimum and maximum across patch data.
+
+    NaN samples are skipped. On a dense (raster / grid) domain only each
+    chip's in-domain, in-mask part counts.
+    """
 
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> dict[str, float]:
+        shape = _dense_shape_or_none(domain)
         min_value = np.inf
         max_value = -np.inf
         seen = False
         for p in patches:
-            x = np.asarray(p.data, dtype=np.float64)
+            x = _global_values(p, shape)
             if x.size == 0:
                 continue
             min_value = min(min_value, float(np.min(x)))
@@ -397,6 +558,11 @@ class SpatialOverlapAdd(SpatialAggregation):
         normalize_by_window: Divide by the accumulated weight at the end
             (default ``True``). Set to ``False`` for the raw weighted
             sum.
+        fill_value: Written into cells whose accumulated weight of valid
+            samples is zero — uncovered, all-NaN, outside every mask, or
+            only reached by a taper's zero edge (the leading row / column
+            under a periodic `SpatialHann`). Default NaN; pass e.g. the
+            domain's nodata to override.
     """
 
     streaming: bool = False
@@ -406,6 +572,7 @@ class SpatialOverlapAdd(SpatialAggregation):
     writer: str = "zarr"
     cog: dict[str, Any] | None = None
     normalize_by_window: bool = True
+    fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = True
 
@@ -425,20 +592,14 @@ class SpatialOverlapAdd(SpatialAggregation):
             pl = _resolve_indices(p.indices, shape)
             if pl is None:
                 continue
-            sl = pl.acc
-            x = np.asarray(pl.crop(p.data), dtype=np.float64)
-            w = (
-                np.asarray(pl.crop(p.weights), dtype=np.float64)
-                if p.weights is not None
-                else np.ones_like(x)
-            )
-            valid = ~np.isnan(x)
-            acc[sl] += _replace_nan_with_zero(x) * w * valid
-            wsum[sl] += w * valid
-        if not self.normalize_by_window:
-            return acc
-        with np.errstate(invalid="ignore"):
-            return np.where(wsum > 0, acc / wsum, 0.0)
+            contrib, weight = _weighted_block(pl, p, np.float64)
+            acc[pl.acc] += contrib
+            wsum[pl.acc] += weight
+        out = acc
+        if self.normalize_by_window:
+            with np.errstate(invalid="ignore", divide="ignore"):
+                out = acc / wsum
+        return _with_fill(out, wsum > 0, self.fill_value)
 
     def _merge_streaming(self, patches: Iterable[Any], domain: Any) -> Any:
         import itertools
@@ -457,7 +618,7 @@ class SpatialOverlapAdd(SpatialAggregation):
                 shape=shape,
                 chunks=shape,
                 dtype="float32",
-                fill_value=0.0,
+                fill_value=self.fill_value,
                 shard_shape=self.shard_shape,
             )
         first_data = np.asarray(first.data)
@@ -492,20 +653,15 @@ class SpatialOverlapAdd(SpatialAggregation):
             if pl is None:
                 continue
             sl = pl.acc
-            x = np.asarray(pl.crop(p.data), dtype=np.float32)
-            w = (
-                np.asarray(pl.crop(p.weights), dtype=np.float32)
-                if p.weights is not None
-                else np.ones_like(x)
-            )
-            valid = ~np.isnan(x)
-            rec[sl] = np.asarray(rec[sl]) + _replace_nan_with_zero(x) * w * valid
-            wsum[sl] = np.asarray(wsum[sl]) + w * valid
+            contrib, weight = _weighted_block(pl, p, np.float32)
+            rec[sl] = np.asarray(rec[sl]) + contrib
+            wsum[sl] = np.asarray(wsum[sl]) + weight
+        arr = np.asarray(rec[:])
+        wt = np.asarray(wsum[:])
         if self.normalize_by_window:
-            arr = np.asarray(rec[:])
-            wt = np.asarray(wsum[:])
-            with np.errstate(invalid="ignore"):
-                rec[:] = np.where(wt > 0, arr / wt, 0.0)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                arr = arr / wt
+        rec[:] = _with_fill(arr, wt > 0, self.fill_value)
         return rec
 
     def get_config(self) -> dict[str, Any]:
@@ -517,7 +673,22 @@ class SpatialOverlapAdd(SpatialAggregation):
             "writer": self.writer,
             "cog": self.cog,
             "normalize_by_window": self.normalize_by_window,
+            "fill_value": self.fill_value,
         }
+
+
+def _weighted_block(
+    pl: _Placement, p: Any, dtype: type[np.floating]
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(Σ-contribution w·x, weight w)`` of one patch, zero where invalid."""
+    x = np.asarray(pl.crop(p.data), dtype=dtype)
+    w = (
+        np.asarray(pl.crop(p.weights), dtype=dtype)
+        if p.weights is not None
+        else np.ones_like(x)
+    )
+    valid = pl.valid(x)
+    return np.where(valid, x * w, 0), np.where(valid, w, 0)
 
 
 def _open_zarr_array(
@@ -608,7 +779,20 @@ class SpatialInvVarWeightedMean(SpatialAggregation):
 
         μ_global = Σ wᵢ μᵢ / σᵢ² / Σ wᵢ / σᵢ²
         σ²_global = 1 / Σ wᵢ / σᵢ²
+
+    A sample with ``var == 0`` is exact: it has infinite precision, so a
+    cell with any such sample takes the (``w``-weighted mean of the) exact
+    ``mu`` and ``var = 0``. Samples with NaN ``mu`` / ``var``, negative
+    ``var``, non-positive weight or outside a `_MaskedWindow` mask are
+    skipped.
+
+    Args:
+        fill_value: Written into both ``mu`` and ``var`` of cells no valid
+            sample reached. Default NaN; pass e.g. the domain's nodata to
+            override.
     """
+
+    fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = True
 
@@ -616,24 +800,40 @@ class SpatialInvVarWeightedMean(SpatialAggregation):
         shape = _domain_array_shape(domain)
         mu_acc = np.zeros(shape, dtype=np.float64)
         prec = np.zeros(shape, dtype=np.float64)
+        exact_mu = np.zeros(shape, dtype=np.float64)
+        exact_w = np.zeros(shape, dtype=np.float64)
         for p in patches:
             pl = _resolve_indices(p.indices, shape)
             if pl is None:
                 continue
-            sl = pl.acc
-            mu, var = (pl.crop(part) for part in _unpack_mu_var(p.data))
+            mu, var = (_as_float(pl.crop(part)) for part in _unpack_mu_var(p.data))
             w = (
-                np.asarray(pl.crop(p.weights), dtype=np.float64)
+                _as_float(pl.crop(p.weights))
                 if p.weights is not None
-                else np.ones_like(np.asarray(mu))
+                else np.ones_like(mu)
             )
-            inv_var = w / np.asarray(var, dtype=np.float64)
-            mu_acc[sl] += inv_var * np.asarray(mu, dtype=np.float64)
-            prec[sl] += inv_var
-        with np.errstate(invalid="ignore"):
-            mu_g = np.where(prec > 0, mu_acc / prec, 0.0)
-            var_g = np.where(prec > 0, 1.0 / prec, np.inf)
-        return {"mu": mu_g, "var": var_g}
+            ok = pl.valid(mu) & _not_nan(var) & (w > 0)
+            exact = ok & (var == 0)
+            regular = ok & (var > 0)
+            inv_var = np.divide(
+                w, var, out=np.zeros(np.broadcast(w, var).shape), where=regular
+            )
+            mu_acc[pl.acc] += np.where(regular, inv_var * mu, 0.0)
+            prec[pl.acc] += inv_var
+            exact_mu[pl.acc] += np.where(exact, w * mu, 0.0)
+            exact_w[pl.acc] += np.where(exact, w, 0.0)
+        is_exact = exact_w > 0
+        with np.errstate(invalid="ignore", divide="ignore"):
+            mu_g = np.where(is_exact, exact_mu / exact_w, mu_acc / prec)
+            var_g = np.where(is_exact, 0.0, 1.0 / prec)
+        covered = is_exact | (prec > 0)
+        return {
+            "mu": _with_fill(mu_g, covered, self.fill_value),
+            "var": _with_fill(var_g, covered, self.fill_value),
+        }
+
+    def get_config(self) -> dict[str, Any]:
+        return config_from_fields(self)
 
 
 def _unpack_mu_var(data: Any) -> tuple[Any, Any]:
@@ -656,12 +856,20 @@ def _unpack_mu_var(data: Any) -> tuple[Any, Any]:
 class SpatialHardVote(SpatialAggregation):
     """Per-cell majority vote — patches carry integer class predictions.
 
+    Values outside ``[0, n_classes)``, NaN and samples outside a
+    `_MaskedWindow` mask cast no vote. **Ties** go to the lowest class
+    index (``np.argmax``).
+
     Args:
         n_classes: Total number of classes ``K``. Accumulator shape is
             ``(K, *domain_shape)``.
+        fill_value: Label of cells that received no vote. Default ``-1``
+            (never a class); the output is ``int64`` for an integral fill
+            and ``float64`` otherwise (e.g. ``fill_value=float("nan")``).
     """
 
     n_classes: int
+    fill_value: int | float = -1
 
     streaming_safe: ClassVar[bool] = True
 
@@ -669,14 +877,16 @@ class SpatialHardVote(SpatialAggregation):
         shape = _domain_array_shape(domain)
         votes = np.zeros((self.n_classes, *shape), dtype=np.int64)
         for p in patches:
-            pl = _resolve_indices(p.indices, shape)
-            if pl is None:
+            placed = _placed(p, shape)
+            if placed is None:
                 continue
-            sl = pl.acc
-            cls = np.asarray(pl.crop(p.data), dtype=np.int64)
+            pl, x = placed
+            valid = pl.valid(x) & np.isfinite(x)
+            cls = np.where(valid, x, -1).astype(np.int64)
             for k in range(self.n_classes):
-                votes[k][sl] += (cls == k).astype(np.int64)
-        return np.argmax(votes, axis=0)
+                votes[k][pl.acc] += cls == k
+        out = _with_fill(np.argmax(votes, axis=0), votes.any(axis=0), self.fill_value)
+        return out.astype(_label_dtype(self.fill_value))
 
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)
@@ -686,28 +896,49 @@ class SpatialHardVote(SpatialAggregation):
 class SpatialSoftVote(SpatialAggregation):
     """Per-cell soft vote — patches carry per-class probabilities.
 
-    Each patch's data has shape ``(n_classes, ...)``; the per-class
-    probabilities accumulate, and the final argmax across the class axis
-    is returned.
+    Each patch's data has shape ``(n_classes, ...)``: the class axis
+    first, then either the chip's full shape or just its trailing cell
+    axes — ``(K, h, w)`` probabilities on a ``(band, H, W)`` domain
+    broadcast over the band axis. The per-class probabilities accumulate
+    and the argmax across the class axis is returned. A cell counts only
+    where none of its class probabilities is NaN and it lies inside a
+    `_MaskedWindow` mask. **Ties** go to the lowest class index.
+
+    Args:
+        n_classes: Total number of classes ``K``.
+        fill_value: Label of cells no valid probability reached. Default
+            ``-1``; the output is ``int64`` for an integral fill and
+            ``float64`` otherwise.
     """
 
     n_classes: int
+    fill_value: int | float = -1
 
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
         shape = _domain_array_shape(domain)
         acc = np.zeros((self.n_classes, *shape), dtype=np.float64)
+        covered = np.zeros(shape, dtype=bool)
         for p in patches:
             pl = _resolve_indices(p.indices, shape)
             if pl is None:
                 continue
-            sl = pl.acc
+            probs = _as_float(p.data)
+            # (K, h, w) on an N-D domain → (K, 1, …, 1, h, w): the class
+            # axis stays first and the cell axes stay trailing.
+            missing = len(shape) - (probs.ndim - 1)
+            if missing > 0:
+                probs = probs.reshape(
+                    (probs.shape[0], *([1] * missing), *probs.shape[1:])
+                )
             # The leading class axis is kept whole on both sides.
-            probs = np.asarray(p.data, dtype=np.float64)[(slice(None), *pl.chip)]
-            full_sl = (slice(None), *sl)
-            acc[full_sl] += probs
-        return np.argmax(acc, axis=0)
+            probs = probs[(slice(None), *pl.chip)]
+            cell_ok = pl.valid(probs).all(axis=0)
+            acc[(slice(None), *pl.acc)] += np.where(cell_ok, probs, 0.0)
+            covered[pl.acc] |= cell_ok
+        out = _with_fill(np.argmax(acc, axis=0), covered, self.fill_value)
+        return out.astype(_label_dtype(self.fill_value))
 
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)
@@ -720,20 +951,21 @@ class SpatialSoftVote(SpatialAggregation):
 
 @dataclass(eq=False)
 class SpatialByIndex(SpatialAggregation):
-    """Don't merge — return a ``{anchor: data}`` mapping.
+    """Don't merge — return the ``[(anchor, data), …]`` pairs in patch order.
 
     The natural choice for ragged geometries (`SpatialRadiusGraph`,
-    `SpatialKNNGraph`, `SpatialPolygonIntersection`) where the per-patch outputs
-    aren't laid out on a regular grid.
+    `SpatialKNNGraph`, `SpatialPolygonIntersection`) where the per-patch
+    outputs aren't laid out on a regular grid. A list of pairs rather
+    than a ``dict``: `GridDomain` anchors are ``dict``s and graph / array
+    anchors are numpy arrays (both unhashable), and two patches may share
+    an anchor — the same convention as `SpatioTemporalPatcher.merge`.
+    Build ``dict(out)`` yourself when the anchors are hashable and unique.
     """
 
     streaming_safe: ClassVar[bool] = True
 
-    def merge(self, patches: Iterable[Any], domain: Any) -> dict[Any, Any]:
-        out: dict[Any, Any] = {}
-        for p in patches:
-            out[p.anchor] = p.data
-        return out
+    def merge(self, patches: Iterable[Any], domain: Any) -> list[tuple[Any, Any]]:
+        return [(p.anchor, p.data) for p in patches]
 
 
 # ---------------------------------------------------------------------------
@@ -741,70 +973,129 @@ class SpatialByIndex(SpatialAggregation):
 # ---------------------------------------------------------------------------
 
 
+def _overlap_stack(
+    patches: Iterable[Any], shape: tuple[int, ...]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-cell stack of every valid sample, as deep as the maximum overlap.
+
+    Returns ``(stack, count)``: ``stack`` is ``(D, *shape)`` float64 where
+    ``D`` is the largest number of valid samples any cell received, NaN
+    past each cell's ``count``. Memory is ``O(D * cells)`` — bounded by
+    the overlap, not by the number of patches. The patches are walked
+    once and their (cropped) data kept until the stack is filled.
+    """
+    placed: list[tuple[_Placement, Any]] = []
+    count = np.zeros(shape, dtype=np.int64)
+    for p in patches:
+        pl = _resolve_indices(p.indices, shape)
+        if pl is None:
+            continue
+        data = pl.crop(p.data)
+        placed.append((pl, data))
+        count[pl.acc] += pl.valid(_as_float(data))
+    depth = int(count.max(initial=0))
+    # One scratch slot past the deepest level absorbs the invalid samples.
+    stack = np.full((depth + 1, *shape), np.nan, dtype=np.float64)
+    level = np.zeros(shape, dtype=np.int64)
+    for pl, data in placed:
+        x = _as_float(data)
+        lvl = level[pl.acc]
+        valid = np.broadcast_to(pl.valid(x), lvl.shape)
+        full = (slice(None), *pl.acc)
+        block = stack[full]
+        np.put_along_axis(
+            block,
+            np.where(valid, lvl, depth)[np.newaxis],
+            np.broadcast_to(x, lvl.shape)[np.newaxis],
+            axis=0,
+        )
+        stack[full] = block
+        level[pl.acc] = lvl + valid
+    return stack[:depth], count
+
+
 @dataclass(eq=False)
 class SpatialMedian(SpatialAggregation):
     """Per-cell median — exact, requires per-cell history.
 
+    NaN and masked samples are skipped. The per-cell history is a stack
+    as deep as the largest overlap (not one full-domain layer per patch).
+
     ``streaming_safe = False`` and there is no streamable per-cell
     substitute. ``SpatialApproxQuantile(q=0.5)`` is *not* one: it is a
     global sketch returning one scalar for the whole field.
+
+    Args:
+        fill_value: Written into cells no valid sample reached. Default
+            NaN; pass e.g. the domain's nodata to override.
     """
+
+    fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = False
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
         shape = _domain_array_shape(domain)
-        bucket: list[np.ndarray] = []
-        for p in patches:
-            pl = _resolve_indices(p.indices, shape)
-            if pl is None:
-                continue
-            sl = pl.acc
-            full = np.full(shape, np.nan, dtype=np.float64)
-            full[sl] = np.asarray(pl.crop(p.data), dtype=np.float64)
-            bucket.append(full)
-        if not bucket:
-            return np.zeros(shape, dtype=np.float64)
-        stack = np.stack(bucket, axis=0)
-        return np.nanmedian(stack, axis=0)
+        stack, count = _overlap_stack(patches, shape)
+        if stack.shape[0] == 0:
+            return np.full(shape, self.fill_value, dtype=np.float64)
+        with warnings.catch_warnings():
+            # Uncovered cells are an all-NaN column; they get the fill below.
+            warnings.simplefilter("ignore", RuntimeWarning)
+            median = np.nanmedian(stack, axis=0)
+        return _with_fill(median, count > 0, self.fill_value)
+
+    def get_config(self) -> dict[str, Any]:
+        return config_from_fields(self)
 
 
 @dataclass(eq=False)
 class SpatialMode(SpatialAggregation):
-    """Per-cell exact mode — not streamable. Use `SpatialHardVote` for streaming."""
+    """Per-cell exact mode — not streamable. Use `SpatialHardVote` for streaming.
+
+    NaN and masked samples are skipped. **Ties** go to the smallest
+    value. The per-cell history is a stack as deep as the largest
+    overlap, and the mode is computed vectorised over it.
+
+    Args:
+        fill_value: Written into cells no valid sample reached. Default
+            NaN, so the output is float64; an integral fill (e.g. ``-1``)
+            makes it ``int64`` — values are then truncated to integers,
+            which suits the class labels a mode is meant for.
+    """
+
+    fill_value: int | float = math.nan
 
     streaming_safe: ClassVar[bool] = False
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
         shape = _domain_array_shape(domain)
-        bucket: list[np.ndarray] = []
-        for p in patches:
-            pl = _resolve_indices(p.indices, shape)
-            if pl is None:
-                continue
-            sl = pl.acc
-            full = np.full(shape, np.iinfo(np.int64).min, dtype=np.int64)
-            full[sl] = np.asarray(pl.crop(p.data), dtype=np.int64)
-            bucket.append(full)
-        if not bucket:
-            return np.zeros(shape, dtype=np.int64)
-        stack = np.stack(bucket, axis=0)
-        return _arraywise_mode(stack)
+        stack, count = _overlap_stack(patches, shape)
+        out = _with_fill(_arraywise_mode(stack), count > 0, self.fill_value)
+        return out.astype(_label_dtype(self.fill_value))
+
+    def get_config(self) -> dict[str, Any]:
+        return config_from_fields(self)
 
 
 def _arraywise_mode(stack: np.ndarray) -> np.ndarray:
-    """SpatialMode along axis 0 of an integer stack, ignoring the sentinel."""
-    sentinel = np.iinfo(np.int64).min
-    out = np.zeros(stack.shape[1:], dtype=np.int64)
-    flat = stack.reshape(stack.shape[0], -1)
-    for i in range(flat.shape[1]):
-        col = flat[:, i]
-        col = col[col != sentinel]
-        if col.size == 0:
-            continue
-        vals, counts = np.unique(col, return_counts=True)
-        out.reshape(-1)[i] = int(vals[np.argmax(counts)])
-    return out
+    """Mode along axis 0 of a NaN-padded float stack; ties → smallest value.
+
+    Sort each column, measure the running length of every run of equal
+    values, and take the value where that length first peaks: the first
+    run to reach the longest length is the smallest of the tied values.
+    All-NaN columns return NaN.
+    """
+    if stack.shape[0] == 0:
+        return np.full(stack.shape[1:], np.nan, dtype=np.float64)
+    ordered = np.sort(stack, axis=0)  # NaN sorts last
+    pos = np.arange(ordered.shape[0]).reshape(-1, *([1] * (ordered.ndim - 1)))
+    new_run = np.ones(ordered.shape, dtype=bool)
+    new_run[1:] = ordered[1:] != ordered[:-1]
+    run_start = np.maximum.accumulate(np.where(new_run, pos, 0), axis=0)
+    run_length = np.where(np.isnan(ordered), 0, pos - run_start + 1)
+    best = np.argmax(run_length, axis=0)[np.newaxis]
+    return np.take_along_axis(ordered, best, axis=0)[0]
 
 
 @dataclass(eq=False)
