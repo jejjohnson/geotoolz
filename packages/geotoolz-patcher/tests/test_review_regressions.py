@@ -111,10 +111,16 @@ class TestPolygonIntersectionUnwrap:
         # `field.select` saw a bare rasterio Window — not the wrapper.
         assert isinstance(seen[0], Window)
         assert not isinstance(seen[0], _MaskedWindow)
+        # ...and it is the polygon's pixel-aligned bounding window: x 4..12
+        # -> cols 4..12, y 4..12 under a north-up origin at y=20 -> rows 8..16.
+        assert seen[0] == Window(col_off=4, row_off=8, width=8, height=8)
         # The wrapper is still on `Patch.indices` so aggregation can
         # recover the polygon mask via `_resolve_indices`.
         assert isinstance(patches[0].indices, _MaskedWindow)
         assert patches[0].weights is not None
+        # Every pixel centre of an aligned box lies inside it.
+        assert patches[0].weights.shape == (8, 8)
+        assert patches[0].weights.all()
 
 
 class TestSpatioTemporalMergeDictAnchor:
