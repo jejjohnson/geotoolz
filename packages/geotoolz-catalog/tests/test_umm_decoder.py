@@ -5,6 +5,7 @@ Shared by the CMR and earthaccess adapters.
 
 from __future__ import annotations
 
+import itertools
 from datetime import UTC, datetime
 from typing import Any
 
@@ -218,3 +219,74 @@ def test_cmr_row_for_an_antimeridian_granule_has_the_split_footprint() -> None:
     assert row is not None
     assert row.geometry.area == pytest.approx(5 * 5)
     assert row.interval.right == TIME_INVARIANT_END.tz_localize("UTC")
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (#357)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("west", "east"), [(180, -170), (170, -180)])
+def test_seam_aligned_rectangle_has_no_zero_width_part(
+    west: float, east: float
+) -> None:
+    geom = granule_geometry(_umm({"BoundingRectangles": [_rect(west, -5, east, 5)]}))
+    assert geom is not None
+    assert geom.is_valid
+    assert geom.geom_type == "Polygon"
+    assert geom.area == pytest.approx(10 * 10)
+
+
+def test_polygon_edge_on_the_seam_stays_a_polygon() -> None:
+    # The first/last edge lies on 180°; the area unwraps to 180°-190°.
+    shell = _ring([(180, -5), (-170, -5), (-170, 5), (180, 5)])
+    geom = granule_geometry(_umm({"GPolygons": [{"Boundary": _points(shell)}]}))
+    assert geom is not None
+    assert geom.geom_type == "Polygon"
+    assert geom.area == pytest.approx(10 * 10)
+
+
+def test_line_crossing_the_antimeridian_twice_keeps_every_segment() -> None:
+    track = [(170, 0), (-170, 1), (-100, 2), (0, 3), (100, 4), (170, 5), (-170, 6)]
+    geom = granule_geometry(_umm({"Lines": [_points(track)]}))
+    assert geom is not None
+    xs = {round(x) for part in geom.geoms for x, _ in part.coords}
+    assert {-170, -100, 0, 100, 170} <= xs
+    assert all(-180 <= x <= 180 for x in xs)
+    # Unwrapped, the track runs 360 + 20 = 380° east, and it stays that long.
+    assert sum(
+        abs(b[0] - a[0])
+        for part in geom.geoms
+        for a, b in itertools.pairwise(part.coords)
+    ) == pytest.approx(380)
+
+
+def test_malformed_end_is_not_read_as_open() -> None:
+    temporal = {
+        "RangeDateTime": {
+            "BeginningDateTime": "2020-01-01T00:00Z",
+            "EndingDateTime": "unknown",
+        }
+    }
+    assert granule_interval({"TemporalExtent": temporal}) is None
+    temporal["SingleDateTime"] = "2020-01-01T06:00Z"
+    interval = granule_interval({"TemporalExtent": temporal})
+    assert interval is not None
+    assert interval.left == interval.right == pd.Timestamp("2020-01-01T06:00", tz="UTC")
+
+
+def test_open_range_beyond_the_sentinel_keeps_its_direction() -> None:
+    late = granule_interval(
+        {
+            "TemporalExtent": {
+                "RangeDateTime": {"BeginningDateTime": "2150-01-01T00:00Z"}
+            }
+        }
+    )
+    assert late is not None
+    assert late.left == late.right == pd.Timestamp("2150-01-01", tz="UTC")
+    early = granule_interval(
+        {"TemporalExtent": {"RangeDateTime": {"EndingDateTime": "1850-01-01T00:00Z"}}}
+    )
+    assert early is not None
+    assert early.left == early.right == pd.Timestamp("1850-01-01", tz="UTC")

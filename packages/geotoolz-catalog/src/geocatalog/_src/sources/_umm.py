@@ -161,7 +161,10 @@ def granule_interval(umm: Mapping[str, Any]) -> pd.Interval | None:
     open-ended range — ``EndingDateTime`` missing (ongoing) or
     ``BeginningDateTime`` missing — is closed with the catalog's
     time-invariant sentinel (`TIME_INVARIANT_END` / `_START`) rather
-    than dropping the granule or producing a ``NaT`` endpoint.
+    than dropping the granule or producing a ``NaT`` endpoint; an
+    endpoint beyond the sentinel keeps the range pointing forward. A
+    *malformed* endpoint (present but unparseable) is not read as open:
+    the range is ignored and ``SingleDateTime`` is used if present.
 
     Args:
         umm: A UMM granule dict.
@@ -177,14 +180,17 @@ def granule_interval(umm: Mapping[str, Any]) -> pd.Interval | None:
     if isinstance(rng, Mapping):
         start = _parse_time(rng.get("BeginningDateTime"))
         end = _parse_time(rng.get("EndingDateTime"))
-        if start is not None or end is not None:
-            start = start if start is not None else _OPEN_START
-            end = end if end is not None else _OPEN_END
-            if end < start:
+        malformed = start is _MALFORMED or end is _MALFORMED
+        if not malformed and (start is not None or end is not None):
+            if start is None:
+                start = min(_OPEN_START, end)
+            elif end is None:
+                end = max(_OPEN_END, start)
+            elif end < start:
                 start, end = end, start
             return pd.Interval(start, end, closed="both")
     single = _parse_time(temporal.get("SingleDateTime"))
-    if single is not None:
+    if isinstance(single, pd.Timestamp):
         return pd.Interval(single, single, closed="both")
     return None
 
@@ -193,15 +199,20 @@ _OPEN_START = TIME_INVARIANT_START.tz_localize("UTC")
 _OPEN_END = TIME_INVARIANT_END.tz_localize("UTC")
 
 
-def _parse_time(value: Any) -> pd.Timestamp | None:
-    """A UTC timestamp, or ``None`` for a missing / empty / unparseable value."""
+# Returned by `_parse_time` for a value that is present but unparseable,
+# so a corrupt endpoint is never mistaken for an open (missing) one.
+_MALFORMED: Any = object()
+
+
+def _parse_time(value: Any) -> Any:
+    """A UTC timestamp; ``None`` if missing / empty; `_MALFORMED` if unparseable."""
     if value is None or value == "":
         return None
     try:
         ts = to_utc(value)
     except (TypeError, ValueError):
-        return None
-    return None if ts is pd.NaT else ts
+        return _MALFORMED
+    return _MALFORMED if ts is pd.NaT else ts
 
 
 def to_utc(value: str | datetime) -> pd.Timestamp:

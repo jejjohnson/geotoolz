@@ -12,6 +12,7 @@ These helpers rebuild such footprints as a `MultiPolygon` split at
 from __future__ import annotations
 
 import itertools
+import math
 from collections.abc import Sequence
 
 import shapely
@@ -31,12 +32,19 @@ def lonlat_box(
     """
     if west <= east:
         return shapely.box(west, south, east, north)
-    return shapely.MultiPolygon(
-        [
+    # `west == 180` / `east == -180` leave a zero-width sliver on one
+    # side of the seam; dropping it keeps the result a valid polygon.
+    parts = [
+        part
+        for part in (
             shapely.box(west, south, 180.0, north),
             shapely.box(-180.0, south, east, north),
-        ]
-    )
+        )
+        if part.area > 0
+    ]
+    if not parts:
+        return shapely.Polygon()
+    return shapely.MultiPolygon(parts) if len(parts) > 1 else parts[0]
 
 
 def unwrap_longitudes(
@@ -70,20 +78,31 @@ def wrap_to_lonlat(
 
     The parts east of 180° (or west of -180°) are cut off and shifted by
     ∓360°, so a continuous antimeridian-crossing footprint becomes a
-    multi-part geometry that touches ±180° from both sides.
+    multi-part geometry that touches ±180° from both sides. A line that
+    crosses several times in one direction can unwrap past ±540°, so the
+    360°-wide windows are generated from the geometry's bounds. Pieces
+    of lower dimension than the input (a polygon edge lying exactly on
+    the seam) are dropped.
     """
     xmin, _, xmax, _ = geom.bounds
     if xmin >= -180.0 and xmax <= 180.0:
         return geom
-    parts = []
-    for shift in (-360.0, 0.0, 360.0):
+    dim = int(shapely.get_dimensions(geom))
+    flat = []
+    for k in range(
+        math.floor((xmin + 180.0) / 360.0), math.ceil((xmax - 180.0) / 360.0) + 1
+    ):
+        shift = 360.0 * k
         window = shapely.box(-180.0 + shift, -90.0, 180.0 + shift, 90.0)
         piece = geom.intersection(window)
-        if not piece.is_empty:
-            parts.append(shapely.affinity.translate(piece, xoff=-shift))
-    flat = []
-    for part in parts:
-        flat.extend(getattr(part, "geoms", [part]))
+        if piece.is_empty:
+            continue
+        piece = shapely.affinity.translate(piece, xoff=-shift)
+        flat.extend(
+            p
+            for p in getattr(piece, "geoms", [piece])
+            if not p.is_empty and int(shapely.get_dimensions(p)) == dim
+        )
     polys = [p for p in flat if isinstance(p, shapely.Polygon)]
     if polys and len(polys) == len(flat):
         return shapely.MultiPolygon(polys) if len(polys) > 1 else polys[0]
