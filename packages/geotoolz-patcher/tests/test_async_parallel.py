@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 import threading
-from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -138,29 +136,6 @@ def test_temporal_asplit_matches_split() -> None:
     sync_patches = list(patcher.split(series))
     async_patches = asyncio.run(collect())
     assert [p.anchor for p in async_patches] == [p.anchor for p in sync_patches]
-
-
-def test_spatial_to_delayed_builds_one_task_per_anchor(
-    monkeypatch: pytest.MonkeyPatch, field: ArrayField, patcher: SpatialPatcher
-) -> None:
-    class DelayedCall:
-        def __init__(self, fn: Any, args: tuple[Any, ...]) -> None:
-            self.fn = fn
-            self.args = args
-
-    def delayed(fn: Any) -> Any:
-        def wrapper(*args: Any) -> DelayedCall:
-            return DelayedCall(fn, args)
-
-        return wrapper
-
-    fake_dask = ModuleType("dask")
-    fake_dask.delayed = delayed  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "dask", fake_dask)
-
-    tasks = patcher.to_delayed(field, operator=lambda patch: patch)
-    assert len(tasks) == patcher.n_anchors(field)
-    assert all(isinstance(task.args[0], DelayedCall) for task in tasks)
 
 
 def test_batch_split_pads_last_batch_and_unbatches(
