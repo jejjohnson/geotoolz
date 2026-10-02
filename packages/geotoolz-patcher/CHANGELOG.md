@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.3.0...geotoolz-patcher-v0.4.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **patcher/fields:** ObstoreCogField.select / select_many return georeader GeoTensor chips instead of bare numpy arrays (use `.values` for the array). Out-of-image pixels are filled with the COG's nodata instead of 0, and fractional windows are snapped outward to whole pixels.
+* **patcher/fields:** RioXarrayField.select and DaskField.select return an xarray.DataArray instead of a RioXarrayField / DaskField; drop the `.da` / `.array` hop on chips (e.g. patch.data.values instead of patch.data.da.values).
+* **objstore:** geotoolz.readers._src.obstore and geocatalog._src.objstore are removed (use geopatcher.objstore; the geotoolz read_byte_range helper is now get_range_bytes). The [obstore] extras of geotoolz and geotoolz-catalog install geotoolz-patcher. Pool keys changed shape, and object_key / get_obstore raise ValueError for malformed Azure URIs and abfs:// URIs without container@account.
+* **patcher/fields:** XvecField(_geometry_dim=...) is now XvecField(geometry_dim=...), with no alias. GeoPandasField.select no longer accepts row labels. GridDomain.bounds values are no longer coerced to float. ReprojectingRasterField.domain.shape includes the source's leading dims.
+
+### Bug Fixes
+
+* **objstore:** one obstore pool in geopatcher with correct Azure and signed-URL handling ([#334](https://github.com/jejjohnson/geotoolz/issues/334)) ([946a514](https://github.com/jejjohnson/geotoolz/commit/946a51466a3a73d71ecc57f984cf44c672585d55)), closes [#180](https://github.com/jejjohnson/geotoolz/issues/180)
+* **patcher/dask:** make from_zarr, to_dask_bag and to_delayed work with real dask ([#336](https://github.com/jejjohnson/geotoolz/issues/336)) ([b24717f](https://github.com/jejjohnson/geotoolz/commit/b24717f2b1882117497ddc31dd6df5c62846521b)), closes [#179](https://github.com/jejjohnson/geotoolz/issues/179)
+* **patcher/fields:** datetime grid bounds, N-D reprojection, cached domains ([#333](https://github.com/jejjohnson/geotoolz/issues/333)) ([a54b9cf](https://github.com/jejjohnson/geotoolz/commit/a54b9cf0528847f94b7744be0d02e60ea20ea30f)), closes [#182](https://github.com/jejjohnson/geotoolz/issues/182)
+* **patcher/fields:** make ObstoreCogField honour the Field contract for real COGs ([#337](https://github.com/jejjohnson/geotoolz/issues/337)) ([a73456e](https://github.com/jejjohnson/geotoolz/commit/a73456ec377ad0112910ecef0b5b557126adaab1)), closes [#181](https://github.com/jejjohnson/geotoolz/issues/181)
+* **patcher/fields:** materialise RasterField chips and keep nodata/attrs in with_data ([#332](https://github.com/jejjohnson/geotoolz/issues/332)) ([edeab87](https://github.com/jejjohnson/geotoolz/commit/edeab877497be0d007f2558a90f9bc2037085b9f))
+* **patcher/fields:** rioxarray and dask chips are georeferenced DataArrays ([#335](https://github.com/jejjohnson/geotoolz/issues/335)) ([f921cae](https://github.com/jejjohnson/geotoolz/commit/f921cae99b3a460d018b559e3ce14148029dd7ef)), closes [#178](https://github.com/jejjohnson/geotoolz/issues/178)
+
 ## [0.3.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.2.0...geotoolz-patcher-v0.3.0) (2026-10-02)
 
 
