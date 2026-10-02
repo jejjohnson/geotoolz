@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.3.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.2.0...geotoolz-patcher-v0.3.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geotoolz:** renamed / removed public API (old -> new), no aliases:
+    - keyword-only constructors: all 15 augment operators (e.g.
+      `Compose([...])` -> `Compose(augmentations=[...])`,
+      `RandomCrop((4, 4))` -> `RandomCrop(size=(4, 4))`);
+      `learn.SklearnOp(est)` -> `SklearnOp(estimator=est)`;
+      `learn.ModelOp(m)` -> `ModelOp(model=m)`;
+      geopatcher `GridSampler(p)` -> `GridSampler(patcher=p)`,
+      `ApplyToChips(op)` -> `ApplyToChips(operator=op)`,
+      `Stitch(agg, domain=d)` / `patch_ops.MergePatches(agg, domain=d)` ->
+      `(aggregation=agg, domain=d)`
+    - learn wrappers (also top-level `gz.*`): PCA -> PixelwisePCA,
+      IPCA -> PixelwiseIPCA, NMF -> PixelwiseNMF, KMeans -> PixelwiseKMeans,
+      MiniBatchKMeans -> PixelwiseMiniBatchKMeans, GMM -> PixelwiseGMM,
+      IsolationForest -> PixelwiseIsolationForest,
+      OneClassSVM -> PixelwiseOneClassSVM,
+      LocalOutlierFactor -> PixelwiseLocalOutlierFactor,
+      KNNImputer -> PixelwiseKNNImputer,
+      IterativeImputer -> PixelwiseIterativeImputer
+    - indices (all 20 operators; ctor and config keys): `a_idx`/`b_idx` -> `a`/`b`
+      (NormalizedDifference, now required); `blue_idx`, `green_idx`, `red_idx`,
+      `red_edge1_idx`, `red_edge2_idx`, `nir_idx`, `swir_idx`, `swir1_idx`,
+      `swir2_idx`, `cirrus_idx` -> `blue`, `green`, `red`, `red_edge1`,
+      `red_edge2`, `nir`, `swir`, `swir1`, `swir2`, `cirrus` (same defaults)
+    - axis -> reduce_axes: radiometry.PercentileClip, viz.StretchToUint8,
+      radiometry.percentile_clip, radiometry.dos1, viz.stretch_to_uint8,
+      normalize.per_band_stats / standard_scale / robust_scale / minmax_scale
+    - axis -> direction: restore.DestripeColumn, restore.destripe_column,
+      geom.SegmentStitch
+    - channel_axis -> axis: segment.Felzenszwalb, Quickshift, SLIC
+    - fill -> fill_value: augment.BandDropout, geom.PadTo, geom.Stitch,
+      geom.Rasterize, geom.RasterizeLike, geom.SegmentStitch
+    - fill -> strategy: restore.ReplaceOutliers, restore.replace_outliers
+    - random_state -> seed: matched_filter.EstimateCovLowRank,
+      GMMClusterBackground, estimate_cov_lowrank, gmm_cluster_background
+    - window_size -> window: matched_filter.AdaptiveWindowBackground,
+      adaptive_window_background
+    - size -> window: restore.MedianDenoise, restore.median_denoise
+    - patch_size / patch_distance -> window / search_radius: restore.NLMeans,
+      restore.nl_means
+    - kernel_size -> window: normalize.CLAHE, normalize.clahe
+    - min_area -> min_area_px: measure.LabelConnectedComponents,
+      plume.PlumeMask, PlumeContours, PlumeShapeFilter, plume.plume_mask,
+      geom.Vectorize
+    - min_size -> min_area_px: mask.RemoveSmallObjects,
+      mask.remove_small_objects, segment.Felzenszwalb
+    - area_threshold -> max_hole_area_px: mask.RemoveSmallHoles,
+      mask.remove_small_holes
+    - min_object_size / max_hole_size -> min_area_px / max_hole_area_px:
+      mask.CleanMask, mask.clean_mask
+    - segment.Watershed `connectivity` 1 | 2 -> 4 | 8 (default 4, the same
+      neighbourhood as the old default 1)
+    - spectral.SelectBands `indexes` -> `bands`
+    - augment.AtmosphericHaze reads only `attrs["wavelengths"]` (nm);
+      `attrs["wavelengths_nm"]` is no longer consulted
+
+### Code Refactoring
+
+* **geotoolz:** keyword-only constructors and one parameter vocabulary ([#324](https://github.com/jejjohnson/geotoolz/issues/324)) ([39626e5](https://github.com/jejjohnson/geotoolz/commit/39626e5266b7e824a2c849f7d34fd384dfbad61f))
+
 ## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.1.0...geotoolz-patcher-v0.2.0) (2026-09-30)
 
 

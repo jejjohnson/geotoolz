@@ -1,5 +1,100 @@
 # Changelog
 
+## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.3.0...geotoolz-v0.4.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **packaging:** the base install no longer pulls in matplotlib, scikit-learn or joblib. Install `geotoolz[viz]` for `ApplyColormap`, and `geotoolz[learn]` for the `learn` imputer NaN strategies, `save_state` / `load_state` / `state_path=`, and plume's DBSCAN clump counting. The HDF / NetCDF reader ImportError message changed wording.
+* **geotoolz:** removed / changed public API (old -> new), no aliases:
+    - `geotoolz.model` module removed -> `geotoolz.learn.ModelOp` (or
+      `gz.ModelOp`)
+    - `geotoolz.plume.otsu_threshold`, `plume.resolve_threshold` ->
+      `geotoolz.segment.otsu_threshold`, `segment.resolve_threshold`
+    - `geotoolz.plume.label_components` -> `geotoolz.measure.label_components`
+    - `SklearnOp.save_state` / `GeoTensorEstimator.save_state` no longer write
+      the `<path>.meta.json` sidecar by default -> pass `write_meta=True`
+    - `mask.CountryMask` with unknown `iso_a3` codes raises `ValueError` on its
+      first call instead of in the constructor; LandMask / OceanMask /
+      CountryMask download or read their source on first call, not at
+      construction
+* **geotoolz:** renamed / removed public API (old -> new), no aliases:
+    - keyword-only constructors: all 15 augment operators (e.g.
+      `Compose([...])` -> `Compose(augmentations=[...])`,
+      `RandomCrop((4, 4))` -> `RandomCrop(size=(4, 4))`);
+      `learn.SklearnOp(est)` -> `SklearnOp(estimator=est)`;
+      `learn.ModelOp(m)` -> `ModelOp(model=m)`;
+      geopatcher `GridSampler(p)` -> `GridSampler(patcher=p)`,
+      `ApplyToChips(op)` -> `ApplyToChips(operator=op)`,
+      `Stitch(agg, domain=d)` / `patch_ops.MergePatches(agg, domain=d)` ->
+      `(aggregation=agg, domain=d)`
+    - learn wrappers (also top-level `gz.*`): PCA -> PixelwisePCA,
+      IPCA -> PixelwiseIPCA, NMF -> PixelwiseNMF, KMeans -> PixelwiseKMeans,
+      MiniBatchKMeans -> PixelwiseMiniBatchKMeans, GMM -> PixelwiseGMM,
+      IsolationForest -> PixelwiseIsolationForest,
+      OneClassSVM -> PixelwiseOneClassSVM,
+      LocalOutlierFactor -> PixelwiseLocalOutlierFactor,
+      KNNImputer -> PixelwiseKNNImputer,
+      IterativeImputer -> PixelwiseIterativeImputer
+    - indices (all 20 operators; ctor and config keys): `a_idx`/`b_idx` -> `a`/`b`
+      (NormalizedDifference, now required); `blue_idx`, `green_idx`, `red_idx`,
+      `red_edge1_idx`, `red_edge2_idx`, `nir_idx`, `swir_idx`, `swir1_idx`,
+      `swir2_idx`, `cirrus_idx` -> `blue`, `green`, `red`, `red_edge1`,
+      `red_edge2`, `nir`, `swir`, `swir1`, `swir2`, `cirrus` (same defaults)
+    - axis -> reduce_axes: radiometry.PercentileClip, viz.StretchToUint8,
+      radiometry.percentile_clip, radiometry.dos1, viz.stretch_to_uint8,
+      normalize.per_band_stats / standard_scale / robust_scale / minmax_scale
+    - axis -> direction: restore.DestripeColumn, restore.destripe_column,
+      geom.SegmentStitch
+    - channel_axis -> axis: segment.Felzenszwalb, Quickshift, SLIC
+    - fill -> fill_value: augment.BandDropout, geom.PadTo, geom.Stitch,
+      geom.Rasterize, geom.RasterizeLike, geom.SegmentStitch
+    - fill -> strategy: restore.ReplaceOutliers, restore.replace_outliers
+    - random_state -> seed: matched_filter.EstimateCovLowRank,
+      GMMClusterBackground, estimate_cov_lowrank, gmm_cluster_background
+    - window_size -> window: matched_filter.AdaptiveWindowBackground,
+      adaptive_window_background
+    - size -> window: restore.MedianDenoise, restore.median_denoise
+    - patch_size / patch_distance -> window / search_radius: restore.NLMeans,
+      restore.nl_means
+    - kernel_size -> window: normalize.CLAHE, normalize.clahe
+    - min_area -> min_area_px: measure.LabelConnectedComponents,
+      plume.PlumeMask, PlumeContours, PlumeShapeFilter, plume.plume_mask,
+      geom.Vectorize
+    - min_size -> min_area_px: mask.RemoveSmallObjects,
+      mask.remove_small_objects, segment.Felzenszwalb
+    - area_threshold -> max_hole_area_px: mask.RemoveSmallHoles,
+      mask.remove_small_holes
+    - min_object_size / max_hole_size -> min_area_px / max_hole_area_px:
+      mask.CleanMask, mask.clean_mask
+    - segment.Watershed `connectivity` 1 | 2 -> 4 | 8 (default 4, the same
+      neighbourhood as the old default 1)
+    - spectral.SelectBands `indexes` -> `bands`
+    - augment.AtmosphericHaze reads only `attrs["wavelengths"]` (nm);
+      `attrs["wavelengths_nm"]` is no longer consulted
+* **geotoolz:** removed public API (no aliases): geotoolz.geom.coregister.SwathToGrid -> removed (always raised NotImplementedError); geotoolz.geom.coregister.GridToSwath -> removed (always raised NotImplementedError); geotoolz.readers.require_optional_dependency -> removed (unused; guard optional imports inline); geotoolz.readers.toy_sensor.ops -> removed (empty module). Private module paths moved: geotoolz.compositing._src.fusion -> geotoolz.compositing._src.operators; geotoolz.learn._src.model -> geotoolz.learn._src.operators; geotoolz.readers._base / ._constants / ._obstore -> geotoolz.readers._src.base / .constants / .obstore.
+* **geotoolz:** DespeckleLee / DespeckleRefinedLee / DespeckleFrost, DestripeColumn(method="moment_matching") / MomentMatching and MNF / InverseMNF produce different (correct) outputs; MNF.snr_ is now λ − 1 of the noise-whitened eigenproblem; fit_pca's "snr" state key is now "explained_variance".
+* **geotoolz:** BAPComposite scores (and hence selected pixels and the returned score) change for raw doy / view_angle / cloud_distance / opacity metadata; mixing raw and precomputed cloud-distance metadata no longer raises. wind_advection_cone / WindAdvectionCone with half_angle_deg > 90 now include pixels behind the crosswind line.
+* **geotoolz:** default "ledoit_wolf" (and "oas") covariances change numerically everywhere (e.g. n=30, p=6 LW intensity 0.089 -> 0.214), so MatchedFilter / ColumnEnhancement / ApplyClusterMF scores, SNRs and thresholds change. shrink_covariance(method="ledoit_wolf") now requires fourth_moment=; WelfordAccumulator has new required fields m3 and m4.
+
+### Bug Fixes
+
+* **geotoolz:** Griffiths BAP scores, full-range wind cone, Otsu nbins threading ([#318](https://github.com/jejjohnson/geotoolz/issues/318)) ([3b3d822](https://github.com/jejjohnson/geotoolz/commit/3b3d82241666e28f87dbf5e9d1bb01c1c0fcaec3)), closes [#161](https://github.com/jejjohnson/geotoolz/issues/161)
+* **geotoolz:** implement Lee, Frost, moment-matching destriping and MNF per their references ([#320](https://github.com/jejjohnson/geotoolz/issues/320)) ([ed6d8ed](https://github.com/jejjohnson/geotoolz/commit/ed6d8ed3ac8e2da9ea971fefaa676f7e20892ef0)), closes [#158](https://github.com/jejjohnson/geotoolz/issues/158)
+* **geotoolz:** match sklearn Ledoit-Wolf/OAS shrinkage, fix GMM restart, add ApplyAdaptiveMF ([#317](https://github.com/jejjohnson/geotoolz/issues/317)) ([3691fc9](https://github.com/jejjohnson/geotoolz/commit/3691fc95ff85a644fa406a800f7370c09bce38e1)), closes [#159](https://github.com/jejjohnson/geotoolz/issues/159)
+
+
+### Code Refactoring
+
+* **geotoolz:** canonical two-tier layout for every family ([#323](https://github.com/jejjohnson/geotoolz/issues/323)) ([36c963c](https://github.com/jejjohnson/geotoolz/commit/36c963ce82c3dd579634b26ba3bae7c42074193f)), closes [#162](https://github.com/jejjohnson/geotoolz/issues/162)
+* **geotoolz:** enforce the export policy, drop the model shim, lazy Natural Earth ([#325](https://github.com/jejjohnson/geotoolz/issues/325)) ([7f95f00](https://github.com/jejjohnson/geotoolz/commit/7f95f0029f4b3929746d1ad3365a255fd79aea87))
+* **geotoolz:** keyword-only constructors and one parameter vocabulary ([#324](https://github.com/jejjohnson/geotoolz/issues/324)) ([39626e5](https://github.com/jejjohnson/geotoolz/commit/39626e5266b7e824a2c849f7d34fd384dfbad61f))
+
+
+### Miscellaneous
+
+* **packaging:** declare rasterio/affine, move matplotlib/sklearn/joblib to extras ([#327](https://github.com/jejjohnson/geotoolz/issues/327)) ([def9896](https://github.com/jejjohnson/geotoolz/commit/def9896fb89af1f5ccbf464e176f2bd56e419413))
+
 ## [0.3.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.2.2...geotoolz-v0.3.0) (2026-09-30)
 
 
