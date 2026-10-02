@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 import numpy as np
@@ -34,6 +35,9 @@ class XarrayField:
         da: The underlying `xarray.DataArray`. Any CRS must be exposed
             via the rioxarray accessor (``da.rio.crs``); ``None`` is
             allowed for non-georeferenced cubes.
+
+    ``domain`` is built on first access and cached; treat ``da`` as
+    immutable once wrapped.
     """
 
     da: Any
@@ -42,7 +46,7 @@ class XarrayField:
         if xr is None:
             raise _missing_extra("XarrayField", "grid", "xarray>=2024.1")
 
-    @property
+    @cached_property
     def domain(self) -> GridDomain:
         coords = {d: np.asarray(self.da[d].values) for d in self.da.dims}
         crs = getattr(self.da, "rio", None)

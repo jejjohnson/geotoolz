@@ -52,3 +52,24 @@ def test_object_dtype_raises_typeerror() -> None:
     )
     with pytest.raises(TypeError, match="cftime"):
         XarrayField(da).time_coord()
+
+
+def test_grid_domain_bounds_datetime() -> None:
+    # Bounds keep the coordinate's own type — no float() coercion.
+    lo, hi = XarrayField(_hourly_da()).domain.bounds["time"]
+    assert lo == np.datetime64("2020-01-01T00", "ns")
+    assert hi == np.datetime64("2020-01-01T23", "ns")
+
+
+def test_grid_domain_bounds_mixed_dims() -> None:
+    da = xr.DataArray(
+        np.zeros((2, 3), dtype=np.float32),
+        dims=("time", "lat"),
+        coords={
+            "time": np.array(["2021-06-01", "2021-06-02"], dtype="datetime64[ns]"),
+            "lat": np.array([10.0, -5.0, 2.5]),
+        },
+    )
+    bounds = XarrayField(da).domain.bounds
+    assert bounds["lat"] == (-5.0, 10.0)
+    assert bounds["time"][0] < bounds["time"][1]

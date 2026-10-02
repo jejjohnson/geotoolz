@@ -118,8 +118,16 @@ is warped from the source:
 ```python
 field = gp.ReprojectingRasterField(reader, dst_crs="EPSG:3857", resolution=30.0)
 field.domain.crs                       # EPSG:3857 — samplers see the dst grid
-patches = list(patcher.split(field))   # chips are (H, W) in dst_crs
+patches = list(patcher.split(field))   # chips are (*bands, H, W) in dst_crs
 ```
+
+The domain keeps the source's leading dims (`(bands, H, W)` for a
+multi-band reader), so chips merge back without a rank mismatch. Each
+chip warps only a crop of the source around its footprint (plus a small
+kernel margin), so per-chip cost scales with the chip, not the scene.
+Chips are warped independently, so a stitched mosaic can differ very
+slightly from one full-scene warp (GDAL's approximate transformer);
+call `georeader.read.read_reproject` once when you need that exactly.
 
 Use Level 1 when the field is already on the grid you want and only the
 anchor coordinates are foreign; reach for Level 2 when you need the whole

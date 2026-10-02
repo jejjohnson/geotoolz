@@ -12,6 +12,7 @@ the destination window back to source pixels per chip.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -62,6 +63,26 @@ class ReprojectingRasterField:
             source.
         resampling: Resampling method — ``"nearest"``, ``"bilinear"``,
             ``"cubic"``, ``"cubic_spline"``, or ``"lanczos"``.
+
+    The domain shape keeps the source's leading (band / time) dims —
+    ``(*reader.shape[:-2], height, width)`` — so chips and the merged
+    output agree on rank.
+
+    Each `select` first crops the source to the chip's footprint (plus a
+    small pixel margin for the resampling kernel, scaled up when the
+    destination is coarser than the source) and warps only that crop, so
+    per-chip cost scales with the chip, not the whole source.
+
+    Note:
+        Chips are warped independently, so a stitched result can differ
+        slightly from one full-image warp of the same source — GDAL's
+        approximate transformer linearises per warp call, which shifts
+        sample positions by a small fraction of a pixel (with bilinear
+        resampling, differences stay below one ramp step on a
+        unit-increment ramp). The source crop itself does not change the
+        result: a chip is identical to warping the uncropped source onto
+        the same chip grid. Use a single ``georeader.read.read_reproject``
+        call when bit-exactness against a full warp matters.
     """
 
     reader: GeoData
@@ -78,7 +99,13 @@ class ReprojectingRasterField:
         # `frozen`-friendly private state on an `eq=False` dataclass.
         object.__setattr__(self, "_transform", dst_transform)
         object.__setattr__(
-            self, "_shape", (int(window_data.height), int(window_data.width))
+            self,
+            "_shape",
+            (
+                *(int(d) for d in self.reader.shape[:-2]),
+                int(window_data.height),
+                int(window_data.width),
+            ),
         )
         object.__setattr__(self, "_resampling", _resampling_enum(self.resampling))
 
@@ -97,15 +124,63 @@ class ReprojectingRasterField:
             col_off=0, row_off=0, width=int(window.width), height=int(window.height)
         )
         return read_reproject(
-            self.reader,
+            self._crop_source(out, chip_transform),
             dst_crs=self.dst_crs,
             dst_transform=chip_transform,
             window_out=out,
             resampling=self._resampling,
         )
 
+    def _crop_source(self, out: Any, chip_transform: Any) -> Any:
+        """Source pixels covering the chip footprint, plus a kernel margin.
+
+        ``read_reproject`` only crops lazy readers (and never a
+        `GeoTensor`), so without this each chip would warp the whole
+        source. The chip polygon is densified before being mapped into
+        the source CRS so curved edges of the reprojected footprint are
+        covered; the margin is `_CROP_MARGIN` source pixels, scaled by
+        the downsampling factor (GDAL widens the kernel when the
+        destination is coarser). Returns the reader unchanged when the
+        chip does not overlap the source — ``read_reproject`` then
+        short-circuits to a nodata chip without reading anything — or
+        when the footprint cannot be mapped into the source CRS.
+        """
+        from georeader import window_utils
+        from georeader.read import read_from_window, window_from_polygon
+
+        footprint = window_utils.window_polygon(out, chip_transform)
+        step = max(footprint.length / 64.0, 1e-12)
+        footprint = footprint.segmentize(step)
+        src_window = window_from_polygon(
+            self.reader, footprint, crs_polygon=self.dst_crs
+        )
+        extent = (src_window.col_off, src_window.row_off)
+        extent += (src_window.width, src_window.height)
+        if not all(math.isfinite(float(v)) for v in extent):
+            # Footprint not representable in the source CRS — let
+            # `read_reproject` handle the full source.
+            return self.reader
+        scale = max(
+            float(src_window.width) / max(float(out.width), 1.0),
+            float(src_window.height) / max(float(out.height), 1.0),
+            1.0,
+        )
+        pad = math.ceil(_CROP_MARGIN * scale)
+        src_window = window_utils.round_outer_window(
+            window_utils.pad_window(src_window, (pad, pad))
+        )
+        cropped = read_from_window(
+            self.reader, src_window, trigger_load=True, boundless=False
+        )
+        return self.reader if cropped is None else cropped
+
     def with_data(self, array: Any) -> GeoTensor:
         return _rewrap(self.reader, array, self._transform, self.dst_crs)
+
+
+# Source pixels kept around each chip footprint before warping — enough
+# for the widest supported kernel (lanczos: 3 px radius) at 1:1 scale.
+_CROP_MARGIN = 3
 
 
 def _resampling_enum(name: str) -> Any:
