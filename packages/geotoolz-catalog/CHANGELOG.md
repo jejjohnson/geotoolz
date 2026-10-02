@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.1.2...geotoolz-catalog-v0.2.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **objstore:** geotoolz.readers._src.obstore and geocatalog._src.objstore are removed (use geopatcher.objstore; the geotoolz read_byte_range helper is now get_range_bytes). The [obstore] extras of geotoolz and geotoolz-catalog install geotoolz-patcher. Pool keys changed shape, and object_key / get_obstore raise ValueError for malformed Azure URIs and abfs:// URIs without container@account.
+
+### Bug Fixes
+
+* **objstore:** one obstore pool in geopatcher with correct Azure and signed-URL handling ([#334](https://github.com/jejjohnson/geotoolz/issues/334)) ([946a514](https://github.com/jejjohnson/geotoolz/commit/946a51466a3a73d71ecc57f984cf44c672585d55)), closes [#180](https://github.com/jejjohnson/geotoolz/issues/180)
+
 ## [0.1.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.1.1...geotoolz-catalog-v0.1.2) (2026-09-26)
 
 
