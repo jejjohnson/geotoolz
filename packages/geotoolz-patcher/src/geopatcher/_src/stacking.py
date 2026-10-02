@@ -39,7 +39,9 @@ def stack_patches(
 
     Raises:
         ValueError: When ``patches`` is empty, when any patch's
-            ``attr`` is ``None``, or when the per-patch shapes don't
+            ``attr`` is ``None``, when a per-patch ``attr`` is not numeric
+            array data (a lazy reader or wrapper that ``np.asarray`` turns
+            into a 0-d / object-dtype array), or when the per-patch shapes don't
             agree. The error message names the first mismatching patch
             so ragged geometries (`SpatialPolygonIntersection`,
             `SpatialRadiusGraph`) surface early rather than producing
@@ -64,6 +66,15 @@ def stack_patches(
                 "every patch must carry the requested attribute."
             )
         arr = np.asarray(value)
+        if arr.dtype == object or arr.ndim == 0:
+            raise ValueError(
+                f"stack_patches: patch {i} has {attr} of type "
+                f"{type(value).__name__!r}, which converts to a "
+                f"{arr.ndim}-d {arr.dtype} array rather than numeric data. "
+                "The field's select() must return a materialised array "
+                "(e.g. a GeoTensor or DataArray), not a lazy reader or a "
+                "Field wrapper — call .load() / .values on it first."
+            )
         if expected_shape is None:
             expected_shape = arr.shape
         elif arr.shape != expected_shape:

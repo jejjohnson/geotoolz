@@ -18,6 +18,8 @@ from typing import Any
 from georeader.abstract_reader import GeoData
 from georeader.geotensor import GeoTensor
 
+from geopatcher._src.fields.raster import _rewrap
+
 
 @dataclass(frozen=True)
 class _ReprojectedDomain:
@@ -103,7 +105,7 @@ class ReprojectingRasterField:
         )
 
     def with_data(self, array: Any) -> GeoTensor:
-        return GeoTensor(values=array, transform=self._transform, crs=self.dst_crs)
+        return _rewrap(self.reader, array, self._transform, self.dst_crs)
 
 
 def _resampling_enum(name: str) -> Any:

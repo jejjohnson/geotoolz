@@ -114,3 +114,56 @@ class ArrayField:
 
     def with_data(self, array: Any) -> ArrayField:
         return ArrayField(np.asarray(array))
+
+
+def write_test_geotiff(
+    path: Any,
+    *,
+    size: tuple[int, int] = (70, 70),
+    bands: int = 2,
+    nodata: float = -1.0,
+    crs: str = "EPSG:32630",
+) -> Any:
+    """Write a small float32 GeoTIFF with a real UTM transform and nodata.
+
+    Pixel ``(b, r, c)`` holds ``b * 10_000 + r * 100 + c`` so every read
+    is easy to check against rasterio. The default 70x70 extent is
+    deliberately misaligned with 16-px chips so edge handling engages.
+
+    Returns:
+        ``path``, for chaining.
+    """
+    height, width = size
+    b, r, c = np.meshgrid(
+        np.arange(bands), np.arange(height), np.arange(width), indexing="ij"
+    )
+    values = (b * 10_000 + r * 100 + c).astype(np.float32)
+    transform = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=bands,
+        dtype="float32",
+        crs=crs,
+        transform=transform,
+        nodata=nodata,
+    ) as dst:
+        dst.write(values)
+    return path
+
+
+def make_rasterio_reader_field(path: Any, **kwargs: Any) -> RasterField:
+    """File-backed `RasterField` over a `RasterioReader` (lazy, real GeoTIFF).
+
+    Writes the GeoTIFF via `write_test_geotiff` (``kwargs`` forwarded) and
+    wraps a `georeader.rasterio_reader.RasterioReader` over it — the
+    quickstart's file-backed case, as opposed to the in-memory
+    `GeoTensor` fixtures above.
+    """
+    from georeader.rasterio_reader import RasterioReader
+
+    write_test_geotiff(path, **kwargs)
+    return RasterField(RasterioReader(str(path)))

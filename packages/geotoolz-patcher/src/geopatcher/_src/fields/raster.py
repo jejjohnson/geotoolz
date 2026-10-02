@@ -52,14 +52,20 @@ class RasterField:
         return self.reader
 
     def select(self, window: Any) -> GeoTensor:
-        return self.reader.read_from_window(window, boundless=True)
+        """Read ``window`` (boundless) as a materialised `GeoTensor`.
+
+        Lazy readers such as `RasterioReader` answer ``read_from_window``
+        with another lazy reader; it is loaded here so every patch carries
+        real pixels (dense aggregation, padding and `stack_patches` all
+        need an ndarray, not a reader).
+        """
+        out = self.reader.read_from_window(window, boundless=True)
+        if isinstance(out, GeoTensor):
+            return out
+        return out.load(boundless=True)
 
     def with_data(self, array: Any) -> GeoTensor:
-        return GeoTensor(
-            values=array,
-            transform=self.reader.transform,
-            crs=self.reader.crs,
-        )
+        return _rewrap(self.reader, array, self.reader.transform, self.reader.crs)
 
 
 @dataclass(eq=False)
@@ -87,3 +93,19 @@ class AsyncRasterField:
             transform=self.reader.transform,
             crs=self.reader.crs,
         )
+
+
+def _rewrap(reader: Any, array: Any, transform: Any, crs: Any) -> GeoTensor:
+    """Wrap ``array`` as a `GeoTensor` carrying ``reader``'s nodata and attrs.
+
+    Used by every sync raster ``with_data`` so merged outputs keep the
+    source's ``fill_value_default`` (instead of georeader's default ``0``)
+    and a copy of its ``attrs``.
+    """
+    return GeoTensor(
+        values=array,
+        transform=transform,
+        crs=crs,
+        fill_value_default=getattr(reader, "fill_value_default", 0),
+        attrs=dict(getattr(reader, "attrs", None) or {}),
+    )

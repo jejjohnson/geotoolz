@@ -320,6 +320,24 @@ class TestStackPatches:
         with pytest.raises(ValueError, match=r"patch 1.*shape"):
             stack_patches([p1, p2])
 
+    def test_stack_patches_rejects_lazy_payload(self) -> None:
+        # A lazy reader / Field wrapper as patch data turns into a 0-d
+        # object array under np.asarray; stacking must refuse it rather
+        # than return the dtype=object array the docstring rules out.
+        from rasterio.windows import Window
+
+        class _LazyReader:
+            pass
+
+        p = Patch(
+            data=_LazyReader(),
+            anchor=(0, 0),
+            indices=Window(col_off=0, row_off=0, width=4, height=4),
+            weights=None,
+        )
+        with pytest.raises(ValueError, match=r"patch 0.*_LazyReader.*materialised"):
+            stack_patches([p])
+
     def test_dataset_round_trip(
         self, spatial_patcher: SpatialPatcher, field: RasterField
     ) -> None:

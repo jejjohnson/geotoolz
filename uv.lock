@@ -1257,7 +1257,7 @@ wheels = [
 
 [[package]]
 name = "geotoolz"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "packages/geotoolz" }
 dependencies = [
     { name = "affine" },
@@ -1644,7 +1644,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-patcher"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "georeader-spaceml" },
