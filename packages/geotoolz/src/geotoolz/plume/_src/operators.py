@@ -56,6 +56,7 @@ from geotoolz._src.labels import (
     regionprops_frame,
     skeleton_length,
 )
+from geotoolz._src.optional import import_optional
 from geotoolz._src.shape import keep_band_axis, over_frames, require_ndim
 from geotoolz._src.valid import (
     carried_fill,
@@ -1265,7 +1266,9 @@ def _dbscan_clump_count(
     DBSCAN cluster into multiple "clumps" whenever its members are within
     ``eps`` but not 4-adjacent.
     """
-    from sklearn.cluster import DBSCAN
+    DBSCAN = import_optional(
+        "sklearn.cluster", "learn", feature="DBSCAN plume clump counting"
+    ).DBSCAN
 
     in_mask = values[mask]
     in_mask = in_mask[np.isfinite(in_mask)]

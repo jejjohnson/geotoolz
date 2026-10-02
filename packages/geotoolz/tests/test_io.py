@@ -112,9 +112,9 @@ def test_read_hdf5_missing_dependency_has_clear_message(
             raise ImportError("missing h5py")
         return real_import_module(name, package)
 
-    monkeypatch.setattr(io_operators.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
 
-    with pytest.raises(ImportError, match=r"Install geotoolz\[hdf5\]"):
+    with pytest.raises(ImportError, match=r"geotoolz\[hdf5\]"):
         io.ReadHDF(path=path, dataset="data")()
 
 
@@ -210,9 +210,9 @@ def test_read_netcdf_missing_dependency_has_clear_message(
             raise ImportError("missing netCDF4")
         return real_import_module(name, package)
 
-    monkeypatch.setattr(io_operators.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
 
-    with pytest.raises(ImportError, match=r"Install geotoolz\[netcdf\]"):
+    with pytest.raises(ImportError, match=r"geotoolz\[netcdf\]"):
         io.ReadNetCDF(path=path, variable="data")()
 
 

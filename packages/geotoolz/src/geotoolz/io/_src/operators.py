@@ -29,7 +29,6 @@ discipline).
 
 from __future__ import annotations
 
-import importlib
 from os import PathLike
 from pathlib import Path
 from typing import Any, ClassVar
@@ -52,6 +51,7 @@ from geotoolz._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
+from geotoolz._src.optional import import_optional
 from geotoolz.io._src.array import (
     affine_from_geotransform,
     fill_value_from_attrs,
@@ -157,15 +157,6 @@ def _load_or_raise(out: Any, src: Source, what: str) -> GeoTensor:
     if out is None:
         raise GeoToolzIOError(f"{what} does not intersect {src!r}.")
     return out.load()
-
-
-def _import_optional(module: str, extra: str) -> Any:
-    try:
-        return importlib.import_module(module)
-    except ImportError as exc:
-        raise ImportError(
-            f"{module!r} is required for this reader. Install geotoolz[{extra}]."
-        ) from exc
 
 
 def _geotensor(
@@ -812,7 +803,7 @@ class ReadHDF(SourceOperator):
         )
 
     def _read_hdf5(self) -> GeoTensor:
-        h5py = _import_optional("h5py", "hdf5")
+        h5py = import_optional("h5py", "hdf5", feature="ReadHDF (HDF5)")
         try:
             with h5py.File(self.path, "r") as file:
                 source = file[self.dataset]
@@ -839,7 +830,7 @@ class ReadHDF(SourceOperator):
         )
 
     def _read_hdf4(self) -> GeoTensor:
-        pyhdf_sd = _import_optional("pyhdf.SD", "hdf4")
+        pyhdf_sd = import_optional("pyhdf.SD", "hdf4", feature="ReadHDF (HDF4)")
         try:
             hdf = pyhdf_sd.SD(str(self.path), pyhdf_sd.SDC.READ)
             try:
@@ -904,7 +895,7 @@ class ReadNetCDF(SourceOperator):
         self.use_cf_grid_mapping = use_cf_grid_mapping
 
     def _apply(self) -> GeoTensor:
-        netcdf4 = _import_optional("netCDF4", "netcdf")
+        netcdf4 = import_optional("netCDF4", "netcdf", feature="ReadNetCDF")
         try:
             with netcdf4.Dataset(self.path, "r") as root:
                 group = _netcdf_group(root, self.group)
@@ -1152,8 +1143,11 @@ class WriteZarr(SinkOperator):
         try:
             import zarr
         except ImportError as exc:
+            # GeoToolzIOError (not ImportError) is WriteZarr's documented
+            # contract; the message still names the extra to install.
             raise GeoToolzIOError(
-                "WriteZarr requires the optional zarr dependency."
+                "WriteZarr requires the optional zarr dependency; install it "
+                "with `pip install 'geotoolz[zarr]'`."
             ) from exc
 
         values = np.asarray(gt.values)

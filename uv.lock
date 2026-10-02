@@ -1257,21 +1257,20 @@ wheels = [
 
 [[package]]
 name = "geotoolz"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/geotoolz" }
 dependencies = [
+    { name = "affine" },
     { name = "einx" },
     { name = "geopandas" },
     { name = "georeader-spaceml" },
     { name = "jaxtyping" },
-    { name = "joblib" },
-    { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pipekit" },
     { name = "pyproj" },
+    { name = "rasterio" },
     { name = "scikit-image" },
-    { name = "scikit-learn" },
     { name = "scipy" },
     { name = "shapely" },
     { name = "typing-extensions" },
@@ -1287,6 +1286,10 @@ hdf5 = [
 hydra = [
     { name = "hydra-zen" },
 ]
+learn = [
+    { name = "joblib" },
+    { name = "scikit-learn" },
+]
 netcdf = [
     { name = "netcdf4" },
 ]
@@ -1298,6 +1301,9 @@ patch = [
 ]
 vector-cube = [
     { name = "xvec" },
+]
+viz = [
+    { name = "matplotlib" },
 ]
 zarr = [
     { name = "zarr" },
@@ -1329,6 +1335,7 @@ typecheck = [
 
 [package.metadata]
 requires-dist = [
+    { name = "affine", specifier = ">=2.4" },
     { name = "einx", specifier = ">=0.4" },
     { name = "geopandas", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
@@ -1336,8 +1343,8 @@ requires-dist = [
     { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.10.0" },
     { name = "hydra-zen", marker = "extra == 'hydra'", specifier = ">=0.14" },
     { name = "jaxtyping", specifier = ">=0.2.36" },
-    { name = "joblib", specifier = ">=1.3" },
-    { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "joblib", marker = "extra == 'learn'", specifier = ">=1.3" },
+    { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.8" },
     { name = "netcdf4", marker = "extra == 'netcdf'", specifier = ">=1.6.5" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "obstore", marker = "extra == 'obstore'", specifier = ">=0.9.5" },
@@ -1345,15 +1352,16 @@ requires-dist = [
     { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" },
     { name = "pyhdf", marker = "extra == 'hdf4'", specifier = ">=0.11.4" },
     { name = "pyproj", specifier = ">=3.6" },
+    { name = "rasterio", specifier = ">=1.3" },
     { name = "scikit-image", specifier = ">=0.25" },
-    { name = "scikit-learn", specifier = ">=1.4" },
+    { name = "scikit-learn", marker = "extra == 'learn'", specifier = ">=1.4" },
     { name = "scipy", specifier = ">=1.11" },
     { name = "shapely", specifier = ">=2.0" },
     { name = "typing-extensions", specifier = ">=4.0" },
     { name = "xvec", marker = "extra == 'vector-cube'", specifier = ">=0.4" },
     { name = "zarr", marker = "extra == 'zarr'", specifier = ">=3" },
 ]
-provides-extras = ["hydra", "patch", "vector-cube", "hdf5", "hdf4", "netcdf", "zarr", "obstore"]
+provides-extras = ["viz", "learn", "hydra", "patch", "vector-cube", "hdf5", "hdf4", "netcdf", "zarr", "obstore"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1634,7 +1642,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-patcher"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "georeader-spaceml" },
