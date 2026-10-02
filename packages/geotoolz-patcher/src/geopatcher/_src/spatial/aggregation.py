@@ -7,7 +7,7 @@ over one or more accumulators; the non-streaming ones (`SpatialMedian`,
 `SpatialMode`, `SpatialLearned`) need a per-cell history and accumulate in memory.
 
 The `streaming_safe` class flag advertises which aggregations support
-the disk-backed path (a target zarr / memmap) — `SpatialOverlapAdd` is the
+the disk-backed path (a target zarr store) — `SpatialOverlapAdd` is the
 canonical streaming-safe member; `SpatialMedian` triggers a warning if the
 caller asks for streaming.
 
@@ -17,9 +17,10 @@ See ``docs/patching.md`` §"Streaming aggregations" for the framing.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import math
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -29,6 +30,7 @@ from geopatcher._src._serialize import config_from_fields
 
 
 COG_WRITER = "cog"
+ZARR_WRITER = "zarr"
 DEFAULT_COG_BLOCKSIZE = 512
 HASH_BITS = 64
 
@@ -546,15 +548,35 @@ class SpatialOverlapAdd(SpatialAggregation):
     field equals the original (modulo the operator's effect) — the
     standard inference-time stitching pattern.
 
+    With ``streaming=True`` and a ``target_path`` the two accumulators
+    live in a chunked on-disk zarr store instead of RAM: each patch is a
+    read-modify-write of the blocks it touches, and the final
+    normalisation runs block by block, so peak memory is one patch plus
+    one block — never the whole field.
+
     Args:
         streaming: If ``True`` and ``target_path`` is set, accumulate
-            into a chunked on-disk zarr store rather than in RAM.
-        target_path: Filesystem path for the disk-backed accumulators.
-        chunks: Zarr chunk shape for the streaming accumulators. When
-            ``None`` (the default), the chunk shape is derived from the
-            first patch's data shape, right-aligned against the domain
-            shape so any leading band/time dims pick up their full extent
-            as a chunk. Provide an explicit value to override.
+            on disk (see ``writer``) rather than in RAM.
+        target_path: With ``writer="zarr"``, the directory holding the
+            ``rec.zarr`` (result) and ``wsum.zarr`` (accumulated weight)
+            arrays; with ``writer="cog"``, the output GeoTIFF path.
+        chunks: Zarr chunk shape of the streaming accumulators — required
+            for ``writer="zarr"``; pass the patch geometry's size (e.g.
+            ``chunks=geometry.size``) so each patch writes whole blocks.
+            Right-aligned against the domain shape: leading band / time
+            dims missing from it get their full extent. With
+            ``writer="cog"`` it defaults to the COG block size.
+        shard_shape: Optional zarr v3 shard shape (right-aligned like
+            ``chunks``).
+        writer: ``"zarr"`` (default) returns the result ``zarr.Array``;
+            ``"cog"`` streams through a temporary zarr store and converts
+            it, block by block, into a Cloud-Optimized GeoTIFF (GDAL
+            ``COG`` driver: tiled, overviews, ``nodata = fill_value``),
+            returning ``target_path``.
+        cog: ``writer="cog"`` options — ``blocksize`` (default 512),
+            ``compress`` (default ``"DEFLATE"``), ``bigtiff`` (default
+            ``"IF_SAFER"``); any other key is forwarded upper-cased as a
+            GDAL COG creation option (e.g. ``overview_resampling``).
         normalize_by_window: Divide by the accumulated weight at the end
             (default ``True``). Set to ``False`` for the raw weighted
             sum.
@@ -562,7 +584,12 @@ class SpatialOverlapAdd(SpatialAggregation):
             samples is zero — uncovered, all-NaN, outside every mask, or
             only reached by a taper's zero edge (the leading row / column
             under a periodic `SpatialHann`). Default NaN; pass e.g. the
-            domain's nodata to override.
+            domain's nodata to override. It is also the COG's nodata.
+        dtype: Floating dtype of the streaming accumulators and output
+            (default ``"float32"``). The in-RAM path is float64.
+        overwrite: Replace an existing store / file at ``target_path``.
+            Default ``False``: a second merge onto the same path raises
+            `FileExistsError` instead of silently destroying the first.
     """
 
     streaming: bool = False
@@ -573,16 +600,33 @@ class SpatialOverlapAdd(SpatialAggregation):
     cog: dict[str, Any] | None = None
     normalize_by_window: bool = True
     fill_value: float = math.nan
+    dtype: str = "float32"
+    overwrite: bool = False
 
     streaming_safe: ClassVar[bool] = True
 
+    def __post_init__(self) -> None:
+        if self.writer not in (ZARR_WRITER, COG_WRITER):
+            raise ValueError(
+                f"writer must be {ZARR_WRITER!r} or {COG_WRITER!r}, got {self.writer!r}"
+            )
+        if not np.issubdtype(np.dtype(self.dtype), np.floating):
+            raise ValueError(
+                f"dtype must be a floating dtype to hold the fill, got {self.dtype!r}"
+            )
+
     def merge(self, patches: Iterable[Any], domain: Any) -> Any:
-        if self.streaming and self.target_path and self.writer == COG_WRITER:
-            result = self._merge_in_memory(patches, domain)
-            return _write_cog(result, domain, self.target_path, self.cog)
-        if self.streaming and self.target_path:
-            return self._merge_streaming(patches, domain)
-        return self._merge_in_memory(patches, domain)
+        if not (self.streaming and self.target_path):
+            return self._merge_in_memory(patches, domain)
+        if self.writer == COG_WRITER:
+            return self._merge_cog(patches, domain, self.target_path)
+        if self.chunks is None:
+            raise ValueError(
+                "SpatialOverlapAdd(streaming=True) needs chunks= — pass the "
+                "patch geometry's size (e.g. chunks=geometry.size) so each "
+                "patch writes whole blocks"
+            )
+        return self._merge_streaming(patches, domain, self.target_path, self.chunks)
 
     def _merge_in_memory(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
         shape = _domain_array_shape(domain)
@@ -592,7 +636,7 @@ class SpatialOverlapAdd(SpatialAggregation):
             pl = _resolve_indices(p.indices, shape)
             if pl is None:
                 continue
-            contrib, weight = _weighted_block(pl, p, np.float64)
+            contrib, weight = _weighted_block(pl, p, np.float64, len(shape))
             acc[pl.acc] += contrib
             wsum[pl.acc] += weight
         out = acc
@@ -601,68 +645,82 @@ class SpatialOverlapAdd(SpatialAggregation):
                 out = acc / wsum
         return _with_fill(out, wsum > 0, self.fill_value)
 
-    def _merge_streaming(self, patches: Iterable[Any], domain: Any) -> Any:
-        import itertools
-
+    def _merge_streaming(
+        self,
+        patches: Iterable[Any],
+        domain: Any,
+        root: str,
+        chunks: tuple[int, ...],
+        *,
+        overwrite: bool | None = None,
+    ) -> Any:
         shape = _domain_array_shape(domain)
-        # Peek the first patch so the default chunk shape matches its data
-        # shape, rather than degenerating to the whole-array chunk that
-        # would defeat the whole point of streaming.
-        patches_iter = iter(patches)
-        try:
-            first = next(patches_iter)
-        except StopIteration:
-            # No patches → return an empty zero-filled zarr array.
-            return _open_zarr_array(
-                f"{self.target_path}/rec.zarr",
+        chunks = _right_align(chunks, shape, "chunks")
+        shards = (
+            None
+            if self.shard_shape is None
+            else _right_align(self.shard_shape, shape, "shard_shape")
+        )
+        replace = self.overwrite if overwrite is None else overwrite
+        dtype = np.dtype(self.dtype)
+        rec, wsum = (
+            _open_zarr_array(
+                f"{root}/{name}.zarr",
                 shape=shape,
-                chunks=shape,
-                dtype="float32",
-                fill_value=self.fill_value,
-                shard_shape=self.shard_shape,
+                chunks=chunks,
+                dtype=dtype,
+                shard_shape=shards,
+                overwrite=replace,
             )
-        first_data = np.asarray(first.data)
-        # Right-align the data shape against the domain shape so leading
-        # band/time dims pick up their full extent as a chunk.
-        if self.chunks is not None:
-            chunks: tuple[int, ...] = tuple(self.chunks)
-        else:
-            chunks = tuple(shape[: -len(first_data.shape)]) + tuple(first_data.shape)
-        # `zarr.open` returns `Array | Group`; with mode="w" and a `shape`/`dtype`
-        # it always returns an Array — but ty can't narrow that, so we cast.
-        rec = _open_zarr_array(
-            f"{self.target_path}/rec.zarr",
-            shape=shape,
-            chunks=chunks,
-            dtype="float32",
-            fill_value=0.0,
-            shard_shape=self.shard_shape,
+            for name in ("rec", "wsum")
         )
-        wsum = _open_zarr_array(
-            f"{self.target_path}/wsum.zarr",
-            shape=shape,
-            chunks=chunks,
-            dtype="float32",
-            fill_value=0.0,
-            shard_shape=self.shard_shape,
-        )
-        # Push the peeked patch back to the front of the iterator.
-        patches = itertools.chain([first], patches_iter)
         for p in patches:
             pl = _resolve_indices(p.indices, shape)
             if pl is None:
                 continue
-            sl = pl.acc
-            contrib, weight = _weighted_block(pl, p, np.float32)
-            rec[sl] = np.asarray(rec[sl]) + contrib
-            wsum[sl] = np.asarray(wsum[sl]) + weight
-        arr = np.asarray(rec[:])
-        wt = np.asarray(wsum[:])
-        if self.normalize_by_window:
-            with np.errstate(invalid="ignore", divide="ignore"):
-                arr = arr / wt
-        rec[:] = _with_fill(arr, wt > 0, self.fill_value)
+            contrib, weight = _weighted_block(pl, p, dtype.type, len(shape))
+            rec[pl.acc] = np.asarray(rec[pl.acc]) + contrib
+            wsum[pl.acc] = np.asarray(wsum[pl.acc]) + weight
+        # Normalise block by block (one shard, or one chunk, at a time) so
+        # the final pass never loads a full-domain accumulator.
+        for blk in _blocks(shape, shards or chunks):
+            weight = np.asarray(wsum[blk])
+            out = np.asarray(rec[blk])
+            if self.normalize_by_window:
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    out = out / weight
+            rec[blk] = _with_fill(out, weight > 0, self.fill_value)
         return rec
+
+    def _merge_cog(self, patches: Iterable[Any], domain: Any, target: str) -> str:
+        import os
+        import tempfile
+
+        if os.path.exists(target) and not self.overwrite:
+            raise FileExistsError(
+                f"{target} already exists; pass overwrite=True to replace it"
+            )
+        options = dict(self.cog or {})
+        blocksize = int(options.pop("blocksize", DEFAULT_COG_BLOCKSIZE))
+        shape = _domain_array_shape(domain)
+        if len(shape) not in (2, 3):
+            raise ValueError(
+                "COG writer expects a 2-D domain or a 3-D band-first domain"
+            )
+        chunks = self.chunks or tuple(min(blocksize, n) for n in shape[-2:])
+        parent = os.path.dirname(os.path.abspath(target))
+        with tempfile.TemporaryDirectory(dir=parent, prefix=".geopatcher-") as tmp:
+            rec = self._merge_streaming(patches, domain, tmp, chunks, overwrite=True)
+            _zarr_to_cog(
+                rec,
+                domain,
+                target,
+                blocksize=blocksize,
+                fill_value=self.fill_value,
+                scratch=os.path.join(tmp, "stage.tif"),
+                options=options,
+            )
+        return target
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -674,14 +732,21 @@ class SpatialOverlapAdd(SpatialAggregation):
             "cog": self.cog,
             "normalize_by_window": self.normalize_by_window,
             "fill_value": self.fill_value,
+            "dtype": self.dtype,
+            "overwrite": self.overwrite,
         }
 
 
 def _weighted_block(
-    pl: _Placement, p: Any, dtype: type[np.floating]
+    pl: _Placement, p: Any, dtype: type[np.floating], ndim: int
 ) -> tuple[np.ndarray, np.ndarray]:
     """``(Σ-contribution w·x, weight w)`` of one patch, zero where invalid."""
     x = np.asarray(pl.crop(p.data), dtype=dtype)
+    if x.ndim > ndim:
+        raise ValueError(
+            f"patch data has {x.ndim} dims but the domain has {ndim}; "
+            "an overlap-add patch cannot carry extra axes"
+        )
     w = (
         np.asarray(pl.crop(p.weights), dtype=dtype)
         if p.weights is not None
@@ -691,82 +756,116 @@ def _weighted_block(
     return np.where(valid, x * w, 0), np.where(valid, w, 0)
 
 
+def _right_align(
+    block: tuple[int, ...], shape: tuple[int, ...], name: str
+) -> tuple[int, ...]:
+    """Right-align a block shape against ``shape``; missing leading dims are whole."""
+    block = tuple(int(b) for b in block)
+    if len(block) > len(shape) or any(b < 1 for b in block):
+        raise ValueError(
+            f"{name}={block} does not fit a {len(shape)}-D domain of shape {shape}"
+        )
+    return tuple(shape[: len(shape) - len(block)]) + block
+
+
+def _blocks(
+    shape: tuple[int, ...], block: tuple[int, ...]
+) -> Iterator[tuple[slice, ...]]:
+    """Every ``block``-shaped slicer tiling ``shape`` (edge blocks partial)."""
+    starts = [range(0, n, b) for n, b in zip(shape, block, strict=True)]
+    for corner in itertools.product(*starts):
+        yield tuple(
+            slice(s, min(s + b, n))
+            for s, b, n in zip(corner, block, shape, strict=True)
+        )
+
+
 def _open_zarr_array(
     path: str,
     *,
     shape: tuple[int, ...],
     chunks: tuple[int, ...],
-    dtype: str,
-    fill_value: float,
+    dtype: np.dtype,
     shard_shape: tuple[int, ...] | None,
+    overwrite: bool,
 ) -> Any:
+    """Create a zero-filled zarr v3 array, refusing to replace one unless asked."""
     import zarr
-
-    if shard_shape is not None:
-        # Sharded creation goes through the zarr v3 `create_array` API —
-        # `zarr.open` has no `shards` parameter on any zarr release, so
-        # routing shards through it silently produced unsharded stores.
-        create_array = getattr(zarr, "create_array", None)
-        if create_array is not None:
-            return create_array(
-                path,
-                shape=shape,
-                chunks=chunks,
-                shards=shard_shape,
-                dtype=dtype,
-                fill_value=fill_value,
-                overwrite=True,
-            )
-        warnings.warn(
-            "installed zarr does not support sharding (requires zarr >= 3); "
-            "writing unsharded output",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-    return zarr.open(
-        path,
-        mode="w",
-        shape=shape,
-        chunks=chunks,
-        dtype=dtype,
-        fill_value=fill_value,
+    from zarr.errors import (
+        ContainsArrayAndGroupError,
+        ContainsArrayError,
+        ContainsGroupError,
     )
 
+    try:
+        return zarr.create_array(
+            path,
+            shape=shape,
+            chunks=chunks,
+            shards=shard_shape,
+            dtype=dtype,
+            fill_value=0.0,
+            overwrite=overwrite,
+        )
+    except (ContainsArrayError, ContainsGroupError, ContainsArrayAndGroupError) as exc:
+        raise FileExistsError(
+            f"{path} already holds a zarr store; pass overwrite=True to replace it"
+        ) from exc
 
-def _write_cog(
-    array: np.ndarray, domain: Any, target_path: str, cog: dict[str, Any] | None
-) -> str:
+
+def _zarr_to_cog(
+    rec: Any,
+    domain: Any,
+    target: str,
+    *,
+    blocksize: int,
+    fill_value: float,
+    scratch: str,
+    options: dict[str, Any],
+) -> None:
+    """Convert a 2-D / band-first 3-D zarr result into a COG, block by block.
+
+    GDAL's ``COG`` driver is copy-only (it lays out overviews and tiles in
+    a single pass over a finished source), so the result is first copied
+    window by window into a tiled scratch GeoTIFF, then converted with
+    ``rasterio.shutil.copy(driver="COG")``. Neither step holds more than
+    one block of the field in Python memory.
+    """
     import rasterio
+    from rasterio.shutil import copy as rio_copy
+    from rasterio.windows import Window
 
-    data = np.asarray(array, dtype=np.float32)
-    if data.ndim == 2:
-        write_data = data[np.newaxis, ...]
-    elif data.ndim == 3:
-        write_data = data
-    else:
+    shape = tuple(rec.shape)
+    if len(shape) not in (2, 3):
         raise ValueError("COG writer expects a 2-D array or a 3-D band-first array")
-
-    options = dict(cog or {})
-    blocksize = options.pop("blocksize", DEFAULT_COG_BLOCKSIZE)
+    height, width = shape[-2:]
     profile: dict[str, Any] = {
         "driver": "GTiff",
-        "height": write_data.shape[-2],
-        "width": write_data.shape[-1],
-        "count": write_data.shape[0],
-        "dtype": "float32",
+        "height": height,
+        "width": width,
+        "count": 1 if len(shape) == 2 else shape[0],
+        "dtype": np.dtype(rec.dtype).name,
         "crs": getattr(domain, "crs", None),
         "transform": getattr(domain, "transform", rasterio.Affine.identity()),
+        "nodata": fill_value,
         "tiled": True,
-        "compress": options.pop("compress", "DEFLATE"),
         "blockxsize": blocksize,
         "blockysize": blocksize,
-        # GDAL creation option casing.
-        "BIGTIFF": options.pop("bigtiff", "IF_SAFER"),
+        "BIGTIFF": "IF_SAFER",
     }
-    profile.update(options)
-    with rasterio.open(target_path, "w", **profile) as dst:
-        dst.write(write_data)
-    return target_path
+    with rasterio.open(scratch, "w", **profile) as dst:
+        for blk in _blocks((height, width), (blocksize, blocksize)):
+            rows, cols = blk
+            data = np.asarray(rec[(Ellipsis, rows, cols)])
+            window = Window.from_slices(rows, cols)
+            dst.write(data[np.newaxis] if data.ndim == 2 else data, window=window)
+    creation = {
+        "BLOCKSIZE": blocksize,
+        "COMPRESS": options.pop("compress", "DEFLATE"),
+        "BIGTIFF": options.pop("bigtiff", "IF_SAFER"),
+        **{key.upper(): value for key, value in options.items()},
+    }
+    rio_copy(scratch, target, driver="COG", **creation)
 
 
 @dataclass(eq=False)

@@ -165,8 +165,9 @@ stitched_zarr = agg.merge(
 )
 ```
 
-The generator expression means at most one patch worth of bytes lives
-in RAM during the merge — bounded regardless of scene size. See
+The generator expression means at most one patch (plus one store
+chunk, during the final normalisation) lives in RAM during the merge —
+bounded regardless of scene size. See
 [`recipes/streaming-overlap-add.md`](recipes/streaming-overlap-add.md)
 for the full pattern.
 

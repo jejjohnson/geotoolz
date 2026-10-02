@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,7 @@ from geopatcher import (
     SpatialApproxMode,
     SpatialApproxQuantile,
     SpatialBoxcar,
+    SpatialHann,
     SpatialOverlapAdd,
     SpatialPatcher,
     SpatialRectangular,
@@ -197,25 +199,84 @@ class TestCogWriter:
             assert src.profile["blockxsize"] == 256
 
     def test_multiband_write(self, tmp_path: Path) -> None:
-        from geopatcher._src.spatial.aggregation import _write_cog
-
         target = str(tmp_path / "rgb.tif")
-
-        class _Domain:
-            crs = "EPSG:32630"
-            transform = rasterio.Affine.identity()
-
         data = np.random.default_rng(0).random((3, 8, 8)).astype(np.float32)
-        _write_cog(data, _Domain(), target, None)
+        domain = GeoTensor(
+            values=data, transform=rasterio.Affine.identity(), crs="EPSG:32630"
+        )
+        patch = Patch(data=data, anchor=(0, 0), indices=Window(0, 0, 8, 8))
+        agg = SpatialOverlapAdd(streaming=True, target_path=target, writer="cog")
+        assert agg.merge([patch], domain) == target
         with rasterio.open(target) as src:
             assert src.count == 3
             np.testing.assert_allclose(src.read(), data, rtol=1e-6)
 
     def test_rejects_bad_rank(self, tmp_path: Path) -> None:
-        from geopatcher._src.spatial.aggregation import _write_cog
+        class _Domain:
+            shape = (2, 2, 2, 2)
 
-        with pytest.raises(ValueError, match="2-D array or a 3-D"):
-            _write_cog(np.zeros((2, 2, 2, 2)), object(), str(tmp_path / "x.tif"), None)
+        agg = SpatialOverlapAdd(
+            streaming=True, target_path=str(tmp_path / "x.tif"), writer="cog"
+        )
+        with pytest.raises(ValueError, match="2-D domain or a 3-D"):
+            agg.merge([], _Domain())
+
+    def test_cog_writer_valid(self, tmp_path: Path) -> None:
+        # #193: `writer="cog"` used to write a plain tiled GTiff (no COG
+        # layout, no overviews, no nodata) from an in-memory merge.
+        values = np.random.default_rng(1).random((64, 64)).astype(np.float32)
+        field = RasterField(
+            GeoTensor(
+                values=values,
+                transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 640.0),
+                crs="EPSG:32630",
+            )
+        )
+        patcher = SpatialPatcher(
+            geometry=SpatialRectangular(size=(16, 16)),
+            sampler=SpatialRegularStride(step=8),
+            window=SpatialHann(),
+            aggregation=SpatialOverlapAdd(),
+        )
+        patches = [p.with_data(np.asarray(p.data.values)) for p in patcher.split(field)]
+        reference = SpatialOverlapAdd().merge(patches, field.domain)
+        target = str(tmp_path / "out.tif")
+        agg = SpatialOverlapAdd(
+            streaming=True, target_path=target, writer="cog", cog={"blocksize": 16}
+        )
+        assert agg.merge(patches, field.domain) == target
+        with rasterio.open(target) as src:
+            assert src.driver == "GTiff"
+            assert src.tags(ns="IMAGE_STRUCTURE").get("LAYOUT") == "COG"
+            assert src.profile["tiled"]
+            assert src.block_shapes == [(16, 16)]
+            assert src.overviews(1), "a COG carries internal overviews"
+            assert np.isnan(src.nodata)
+            assert src.crs == field.domain.crs
+            assert src.transform == field.domain.transform
+            written = src.read(1)
+        # Periodic Hann leaves the leading ring at Σw = 0 → nodata (NaN).
+        np.testing.assert_allclose(written, reference, rtol=1e-6, equal_nan=True)
+        assert np.isnan(written[0]).all()
+        # No scratch files are left beside the output.
+        assert sorted(os.listdir(tmp_path)) == ["out.tif"]
+        try:
+            from rio_cogeo.cogeo import cog_validate
+        except ImportError:
+            return
+        is_valid, errors, _ = cog_validate(target)
+        assert is_valid, errors
+
+    def test_cog_not_overwritten(self, tmp_path: Path) -> None:
+        target = tmp_path / "out.tif"
+        target.write_bytes(b"precious")
+        agg = SpatialOverlapAdd(streaming=True, target_path=str(target), writer="cog")
+        domain = GeoTensor(
+            values=np.zeros((8, 8)), transform=rasterio.Affine.identity(), crs=None
+        )
+        with pytest.raises(FileExistsError, match="overwrite=True"):
+            agg.merge([], domain)
+        assert target.read_bytes() == b"precious"
 
 
 class TestZarrSharding:

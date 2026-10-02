@@ -267,8 +267,9 @@ library, not here; geopatcher itself has no operator-graph dependency.
 
 Every `SpatialAggregation` carries a `streaming_safe: ClassVar[bool]`. The
 canonical streaming-safe member is `SpatialOverlapAdd`, which accepts
-`streaming=True, target_path=...` to accumulate into an on-disk
-[zarr](https://zarr.dev) store instead of RAM. The exact streaming family
+`streaming=True, target_path=..., chunks=...` to accumulate into an
+on-disk [zarr](https://zarr.dev) store instead of RAM (or
+`writer="cog"` to finish as a Cloud-Optimized GeoTIFF). The exact streaming family
 (`Sum`, `Mean`, `Variance`, `OverlapAdd`, `WeightedSum`, `InvVarWeightedMean`,
 `HardVote`, `SoftVote`) is fully implemented. The approximate sketch
 family (`ApproxQuantile`, `ApproxCardinality`, `ApproxMode`,

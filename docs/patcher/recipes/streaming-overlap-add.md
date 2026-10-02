@@ -2,9 +2,9 @@
 
 `SpatialOverlapAdd` is the canonical streaming-safe aggregation. By
 default it accumulates the weighted-sum buffer and the sum-of-weights
-buffer in RAM; flip `streaming=True` and point `target_path` at a fresh
-directory and the same call accumulates into a chunked zarr store on
-disk instead.
+buffer in RAM; flip `streaming=True`, point `target_path` at a fresh
+directory and give the store's `chunks`, and the same call accumulates
+into a chunked zarr store on disk instead.
 
 This recipe walks through:
 
@@ -64,7 +64,7 @@ fine for one scene, not fine for a 1 TB output.
 
 ## 2. Disk-backed accumulator
 
-Same call, two extra kwargs:
+Same call, three extra kwargs:
 
 ```python
 stream_dir = "out/tahoe.zarr"
@@ -72,25 +72,53 @@ stream_dir = "out/tahoe.zarr"
 agg = gp.SpatialOverlapAdd(
     streaming    = True,
     target_path  = stream_dir,
-    chunks       = (64, 64),    # match the patch shape for one-block writes
+    chunks       = (64, 64),    # required: match the patch shape
 )
 on_disk = agg.merge(outputs, field.domain)        # zarr.Array, lazy
 materialised = np.asarray(on_disk[:])             # explicit read
 np.testing.assert_allclose(materialised, np.asarray(stitched), atol=1e-5)
 ```
 
-The accumulator never holds more than one patch in RAM at a time. The
-return value is a `zarr.Array` you can hand straight to `xarray.open_zarr`
-or stream into another stage.
+Each patch is a read-modify-write of the blocks it touches, and the
+final normalisation (`Σ w·x / Σ w`, with `fill_value` — NaN by default —
+where `Σ w = 0`) runs one block (or shard) at a time: peak RAM is one
+patch plus one block, never the field. The return value is the result
+`zarr.Array` (`<target_path>/rec.zarr`; the weights stay in
+`wsum.zarr`), which you can hand straight to `xarray.open_zarr` or
+stream into another stage.
 
-**Tip — chunk alignment:** set `chunks` equal to the patch geometry so
-each patch hits exactly one zarr block on write. Misalignment forces
-read-modify-write of multiple chunks per patch.
+**Tip — chunk alignment:** `chunks` is required. Set it to the patch
+geometry (`chunks=geometry.size`) so each patch hits exactly one zarr
+block on write; misalignment forces read-modify-write of several chunks
+per patch. Leading band / time dims missing from `chunks` get their full
+extent.
 
-**Tip — dtype:** the on-disk store defaults to `float32`. The in-RAM
-path uses `float64`, so disk-backed results may differ in the last few
-ULPs. For bit-exact reconstruction either run everything in `float64`
-or compare with `atol=1e-5`.
+**Tip — dtype:** the on-disk store defaults to `dtype="float32"`; pass
+`dtype="float64"` to match the in-RAM path (always `float64`)
+bit-for-bit, or compare with `atol=1e-5`.
+
+**Tip — re-runs:** a merge onto a `target_path` that already holds a
+store raises `FileExistsError` instead of silently overwriting it; pass
+`overwrite=True` to replace it.
+
+### Cloud-Optimized GeoTIFF output
+
+`writer="cog"` streams through a temporary zarr store beside the output,
+then converts it block by block into a real COG (GDAL `COG` driver:
+tiled, internal overviews, `nodata = fill_value`):
+
+```python
+agg = gp.SpatialOverlapAdd(
+    streaming   = True,
+    target_path = "out/tahoe.tif",
+    writer      = "cog",
+    cog         = {"blocksize": 512, "compress": "DEFLATE"},
+)
+path = agg.merge(outputs, field.domain)   # "out/tahoe.tif"
+```
+
+`chunks` defaults to the COG block size here; other `cog` keys are
+forwarded as GDAL COG creation options (e.g. `overview_resampling`).
 
 ## 3. Patcher-of-Patchers (hierarchical)
 

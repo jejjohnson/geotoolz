@@ -61,9 +61,7 @@ memory.
 **Decision.** Streaming aggregations that need an out-of-RAM target
 (`SpatialOverlapAdd(streaming=True, target_path=...)`, future
 `SpatialInvVarWeightedMean(streaming=True, ...)`, etc.) write to a
-**framework-managed Zarr store** by default. A pre-opened `zarr.Array`
-may be passed in for callers that need Dask / distributed writers to
-share the same store.
+**framework-managed Zarr store** by default.
 
 **Context.** The streaming asymmetry (see §4 of the `scaling.md`
 design note in the planning archive; not shipped with these docs) is on the
@@ -73,25 +71,28 @@ preallocability is the bottleneck. A disk-backed accumulator solves it.
 
 Zarr was picked over memmap, HDF5, and "bring your own store":
 
-- Zarr v2 / v3 are already a hard requirement of the streaming
-  `SpatialOverlapAdd` implementation; users of streaming inference
-  already have it installed.
+- Zarr v3 (`zarr>=3`, the `streaming` extra) is already a hard
+  requirement of the streaming `SpatialOverlapAdd` implementation;
+  users of streaming inference already have it installed.
 - Chunked, append-friendly, parallel-writable, plays well with Dask
-  and downstream COG conversion (#15).
-- The chunk shape can be derived from the first patch's data shape —
-  the patcher knows the natural chunking without the user having to
-  spell it out.
+  and downstream COG conversion (#15) — `writer="cog"` streams through
+  a temporary Zarr store and converts it block by block.
+- Chunk-wise access keeps the final normalisation O(chunk): the store
+  is preallocated and never read back whole.
 
 **Consequences.**
 
 - Default usage is one line: `SpatialOverlapAdd(streaming=True,
-  target_path="out/")`. No `import zarr` in user code.
-- Pre-opened-store path remains supported for power users: pass a
-  `zarr.Array` (or any object satisfying the same write contract) via
-  a future `target_store=` keyword. Both shapes coexist; the managed
-  path is the documented default.
-- Future v3-sharded outputs (#14) and COG aggregation target (#15)
-  layer on top of the Zarr default without changing aggregation APIs.
+  target_path="out/", chunks=geometry.size)`. No `import zarr` in user
+  code. The chunk shape is required rather than guessed from the first
+  patch (a shrunk edge chip would otherwise chunk the whole store).
+- A merge refuses to overwrite an existing store unless
+  `overwrite=True`.
+- A pre-opened-store path (passing a `zarr.Array` for Dask / distributed
+  writers) is not implemented; re-open if a concrete need surfaces.
+- V3-sharded outputs (`shard_shape=`, #14) and the COG target
+  (`writer="cog"`, #15) layer on top of the Zarr default without
+  changing aggregation APIs.
 - Memmap / HDF5 / parquet targets are out of scope for v0.x. Re-open if
   a concrete user need surfaces.
 
