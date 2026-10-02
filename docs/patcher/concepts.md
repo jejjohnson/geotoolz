@@ -146,13 +146,21 @@ geom = SpatialRectangular(size=(256, 256), boundary="pad")
 
 | Mode | Behavior |
 |------|----------|
-| `"drop"` (default) | Sampler clips so overflowing anchors are never emitted. |
-| `"pad"` | Edge anchors are emitted; the raster `Field` reads with `boundless=True` so the patch is the full geometry size, padded in the overflow region with the reader's nodata. **`RasterField` / `AsyncRasterField` only.** |
-| `"shrink"` | Edge anchors are emitted; the geometry clips the returned `Window` so the patch is smaller at the edge and weights crop to match. |
-| `"raise"` | Edge anchors are emitted; `SpatialPatcher.split` raises a `ValueError` on the first overflow. Useful with `SpatialExplicit` for strict edge handling. |
+| `"drop"` (default) | Samplers only place anchors whose patch lies wholly in-domain; the trailing residual is dropped. A patch larger than the domain places **no** anchor (with a `RuntimeWarning`). |
+| `"pad"` | Samplers also place the edge anchor — the first whose patch reaches the edge, never an extra one past it. The patch is the full geometry size, padded in the overflow region with the reader's nodata (or `pad_value`, which must be representable in the field's dtype). |
+| `"reflect"` | As `"pad"`, but the overflow region is mirror-padded from the in-domain interior (numpy `mode="reflect"`, repeated when the overflow exceeds the domain) — the spectrally correct choice for overlap-add stitching with tapered windows (no DC dip at the trailing edge). Needs at least two cells on a padded axis. |
+| `"shrink"` | As `"pad"` for anchor placement, but the window is clipped to the domain on every side — a negative anchor included — so the patch is *smaller* at the edge. Weights crop to the same in-domain part. |
+| `"raise"` | As `"pad"` for anchor placement; `SpatialPatcher.split` raises a `ValueError` on the first overflowing window. Useful with `SpatialExplicit` when the caller wants strict edge handling. |
 
-`"reflect"` and a fully aggregation-aware `"pad"` (zero-weight mask in
-the overflow region for COLA-correct stitching) are planned follow-ups.
+Every mode survives `merge`: each dense aggregation (`SpatialOverlapAdd`
+in memory and streaming, `SpatialSum`, `SpatialMean`, `SpatialMax`, …)
+crops a chip's data and weights to the in-domain part of its window, so
+padded or reflected cells are read for context but never written back.
+`SpatialRegularStride(check_full_scan=True)` only applies under `"drop"`
+— the other modes cover the trailing edge themselves.
+
+See [Patching § Boundary policy](patching.md#boundary-policy) for how
+`"pad"` / `"reflect"` keep chip georeferencing exact on any `Field`.
 
 ## Streaming vs eager
 

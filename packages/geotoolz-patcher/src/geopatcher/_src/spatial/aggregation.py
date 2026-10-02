@@ -76,31 +76,97 @@ def _replace_nan_with_zero(array: np.ndarray) -> np.ndarray:
     return np.where(np.isnan(array), 0.0, array)
 
 
-def _resolve_indices(indices: Any) -> tuple[Any, ...] | None:
-    """Map a patch's indices object to a numpy slicer.
+@dataclass(frozen=True)
+class _Placement:
+    """Where a patch lands in the accumulator, cropped to the domain.
 
-    Returns a tuple that targets the **trailing** axes of the accumulator —
-    leading band/time dims pass through via ``Ellipsis``. So
-    ``acc[_resolve_indices(idx)]`` selects ``(..., row_slice, col_slice)``
-    on a 3-D `(band, H, W)` array, not just `(row, col, :)`.
+    A patch's ``indices`` may overhang the domain (``boundary="pad"`` /
+    ``"reflect"`` chips, or any caller-built window), while numpy would
+    silently clip a too-long slice — and read a negative start from the
+    end. Every dense aggregation therefore writes only the in-domain
+    part: ``acc[placement.acc] ⊕= f(placement.crop(data))``, with the
+    weights cropped by the same ``placement.crop``.
+
+    Attributes:
+        acc: Slicer into the domain-shaped accumulator, clipped to
+            ``[0, n)`` on every sliced axis.
+        chip: Matching slicer into the patch's own data / weights —
+            the offset of the in-domain part within the chip.
+    """
+
+    acc: tuple[Any, ...]
+    chip: tuple[Any, ...]
+
+    def crop(self, array: Any) -> Any:
+        """Crop a chip-shaped ``array`` (data or weights) to the in-domain part.
+
+        ``None`` passes through. An array with fewer axes than the slicer
+        (2-D weights broadcast over a ``(band, H, W)`` chip) is cropped on
+        its trailing axes only.
+        """
+        if array is None:
+            return None
+        arr = np.asarray(array)
+        chip = self.chip
+        if chip and chip[0] is not Ellipsis and arr.ndim < len(chip):
+            chip = chip[len(chip) - arr.ndim :]
+        return arr[chip]
+
+
+def _clip_axis(start: int, stop: int, length: int) -> tuple[slice, slice]:
+    """``(acc_slice, chip_slice)`` for ``[start, stop)`` clipped to ``[0, length)``."""
+    lo = min(max(start, 0), length)
+    hi = min(max(stop, lo), length)
+    return slice(lo, hi), slice(lo - start, hi - start)
+
+
+def _resolve_indices(indices: Any, shape: tuple[int, ...]) -> _Placement | None:
+    """Map a patch's indices to an in-domain `_Placement`.
+
+    The accumulator slicer targets the **trailing** axes for a raster
+    window — leading band/time dims pass through via ``Ellipsis``, so
+    ``acc[placement.acc]`` selects ``(..., row_slice, col_slice)`` on a
+    3-D ``(band, H, W)`` array — and the leading axes, in dict order, for
+    a ``GridDomain`` indexer.
 
     - rasterio.windows.Window: ``(..., row_slice, col_slice)``
-    - ``dict[str, slice]``: ``tuple(values)`` in dict order (no ellipsis)
+    - ``dict[str, slice]``: one entry per dim in dict order (no ellipsis);
+      non-slice entries (integer / list indexers) pass through unclipped
     - ``_MaskedWindow``: resolve the underlying rasterio Window
-    - ``None``: return ``None`` (caller falls back to anchor dispatch)
+
+    Returns ``None`` when the indices are not a dense placement (the
+    caller skips the patch) or when the patch has no in-domain cell.
     """
     from geopatcher._src.spatial.geometry import _MaskedWindow
 
-    if hasattr(indices, "row_off") and hasattr(indices, "col_off"):
-        r0 = int(indices.row_off)
-        c0 = int(indices.col_off)
-        h = int(indices.height)
-        w = int(indices.width)
-        return (Ellipsis, slice(r0, r0 + h), slice(c0, c0 + w))
     if isinstance(indices, _MaskedWindow):
-        return _resolve_indices(indices.window)
+        return _resolve_indices(indices.window, shape)
+    if hasattr(indices, "row_off") and hasattr(indices, "col_off"):
+        r0, c0 = int(indices.row_off), int(indices.col_off)
+        h, w = int(indices.height), int(indices.width)
+        acc_r, chip_r = _clip_axis(r0, r0 + h, int(shape[-2]))
+        acc_c, chip_c = _clip_axis(c0, c0 + w, int(shape[-1]))
+        if acc_r.stop <= acc_r.start or acc_c.stop <= acc_c.start:
+            return None
+        return _Placement(acc=(Ellipsis, acc_r, acc_c), chip=(Ellipsis, chip_r, chip_c))
     if isinstance(indices, dict):
-        return tuple(indices.values())
+        acc: list[Any] = []
+        chip: list[Any] = []
+        for axis, index in enumerate(indices.values()):
+            if not (isinstance(index, slice) and index.step in (None, 1)):
+                acc.append(index)
+                if not isinstance(index, int | np.integer):
+                    chip.append(slice(None))
+                continue
+            length = int(shape[axis])
+            start = 0 if index.start is None else int(index.start)
+            stop = length if index.stop is None else int(index.stop)
+            acc_s, chip_s = _clip_axis(start, stop, length)
+            if acc_s.stop <= acc_s.start:
+                return None
+            acc.append(acc_s)
+            chip.append(chip_s)
+        return _Placement(acc=tuple(acc), chip=tuple(chip))
     return None
 
 
@@ -119,10 +185,13 @@ class SpatialSum(SpatialAggregation):
         shape = _domain_array_shape(domain)
         acc = np.zeros(shape, dtype=np.float64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
-            acc[sl] += _replace_nan_with_zero(np.asarray(p.data, dtype=np.float64))
+            sl = pl.acc
+            acc[sl] += _replace_nan_with_zero(
+                np.asarray(pl.crop(p.data), dtype=np.float64)
+            )
         return acc
 
 
@@ -136,11 +205,12 @@ class SpatialMax(SpatialAggregation):
         shape = _domain_array_shape(domain)
         acc = np.full(shape, -np.inf, dtype=np.float64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
+            sl = pl.acc
             # fmax ignores NaN to support masked patches.
-            acc[sl] = np.fmax(acc[sl], np.asarray(p.data, dtype=np.float64))
+            acc[sl] = np.fmax(acc[sl], np.asarray(pl.crop(p.data), dtype=np.float64))
         return acc
 
 
@@ -154,11 +224,12 @@ class SpatialMin(SpatialAggregation):
         shape = _domain_array_shape(domain)
         acc = np.full(shape, np.inf, dtype=np.float64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
+            sl = pl.acc
             # fmin ignores NaN to support masked patches.
-            acc[sl] = np.fmin(acc[sl], np.asarray(p.data, dtype=np.float64))
+            acc[sl] = np.fmin(acc[sl], np.asarray(pl.crop(p.data), dtype=np.float64))
         return acc
 
 
@@ -179,11 +250,12 @@ class SpatialWeightedSum(SpatialAggregation):
         shape = _domain_array_shape(domain)
         acc = np.zeros(shape, dtype=np.float64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
-            w = self.weight_fn(p) if self.weight_fn else p.weights
-            data = np.asarray(p.data, dtype=np.float64)
+            sl = pl.acc
+            w = pl.crop(self.weight_fn(p) if self.weight_fn else p.weights)
+            data = np.asarray(pl.crop(p.data), dtype=np.float64)
             if w is None:
                 acc[sl] += _replace_nan_with_zero(data)
             else:
@@ -209,10 +281,11 @@ class SpatialMean(SpatialAggregation):
         total = np.zeros(shape, dtype=np.float64)
         count = np.zeros(shape, dtype=np.float64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
-            data = np.asarray(p.data, dtype=np.float64)
+            sl = pl.acc
+            data = np.asarray(pl.crop(p.data), dtype=np.float64)
             valid = ~np.isnan(data)
             total[sl] += _replace_nan_with_zero(data)
             count[sl] += valid
@@ -236,10 +309,11 @@ class SpatialVariance(SpatialAggregation):
         m2 = np.zeros(shape, dtype=np.float64)
         count = np.zeros(shape, dtype=np.float64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
-            x = np.asarray(p.data, dtype=np.float64)
+            sl = pl.acc
+            x = np.asarray(pl.crop(p.data), dtype=np.float64)
             valid = ~np.isnan(x)
             x_clean = _replace_nan_with_zero(x)
             next_count = count[sl] + valid
@@ -348,15 +422,16 @@ class SpatialOverlapAdd(SpatialAggregation):
         acc = np.zeros(shape, dtype=np.float64)
         wsum = np.zeros(shape, dtype=np.float64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
+            sl = pl.acc
+            x = np.asarray(pl.crop(p.data), dtype=np.float64)
             w = (
-                np.asarray(p.weights, dtype=np.float64)
+                np.asarray(pl.crop(p.weights), dtype=np.float64)
                 if p.weights is not None
-                else np.ones_like(np.asarray(p.data))
+                else np.ones_like(x)
             )
-            x = np.asarray(p.data, dtype=np.float64)
             valid = ~np.isnan(x)
             acc[sl] += _replace_nan_with_zero(x) * w * valid
             wsum[sl] += w * valid
@@ -413,15 +488,16 @@ class SpatialOverlapAdd(SpatialAggregation):
         # Push the peeked patch back to the front of the iterator.
         patches = itertools.chain([first], patches_iter)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
+            sl = pl.acc
+            x = np.asarray(pl.crop(p.data), dtype=np.float32)
             w = (
-                np.asarray(p.weights, dtype=np.float32)
+                np.asarray(pl.crop(p.weights), dtype=np.float32)
                 if p.weights is not None
-                else np.ones_like(np.asarray(p.data), dtype=np.float32)
+                else np.ones_like(x)
             )
-            x = np.asarray(p.data, dtype=np.float32)
             valid = ~np.isnan(x)
             rec[sl] = np.asarray(rec[sl]) + _replace_nan_with_zero(x) * w * valid
             wsum[sl] = np.asarray(wsum[sl]) + w * valid
@@ -541,12 +617,13 @@ class SpatialInvVarWeightedMean(SpatialAggregation):
         mu_acc = np.zeros(shape, dtype=np.float64)
         prec = np.zeros(shape, dtype=np.float64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
-            mu, var = _unpack_mu_var(p.data)
+            sl = pl.acc
+            mu, var = (pl.crop(part) for part in _unpack_mu_var(p.data))
             w = (
-                np.asarray(p.weights, dtype=np.float64)
+                np.asarray(pl.crop(p.weights), dtype=np.float64)
                 if p.weights is not None
                 else np.ones_like(np.asarray(mu))
             )
@@ -592,10 +669,11 @@ class SpatialHardVote(SpatialAggregation):
         shape = _domain_array_shape(domain)
         votes = np.zeros((self.n_classes, *shape), dtype=np.int64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
-            cls = np.asarray(p.data, dtype=np.int64)
+            sl = pl.acc
+            cls = np.asarray(pl.crop(p.data), dtype=np.int64)
             for k in range(self.n_classes):
                 votes[k][sl] += (cls == k).astype(np.int64)
         return np.argmax(votes, axis=0)
@@ -621,10 +699,12 @@ class SpatialSoftVote(SpatialAggregation):
         shape = _domain_array_shape(domain)
         acc = np.zeros((self.n_classes, *shape), dtype=np.float64)
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
-            probs = np.asarray(p.data, dtype=np.float64)
+            sl = pl.acc
+            # The leading class axis is kept whole on both sides.
+            probs = np.asarray(p.data, dtype=np.float64)[(slice(None), *pl.chip)]
             full_sl = (slice(None), *sl)
             acc[full_sl] += probs
         return np.argmax(acc, axis=0)
@@ -676,11 +756,12 @@ class SpatialMedian(SpatialAggregation):
         shape = _domain_array_shape(domain)
         bucket: list[np.ndarray] = []
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
+            sl = pl.acc
             full = np.full(shape, np.nan, dtype=np.float64)
-            full[sl] = np.asarray(p.data, dtype=np.float64)
+            full[sl] = np.asarray(pl.crop(p.data), dtype=np.float64)
             bucket.append(full)
         if not bucket:
             return np.zeros(shape, dtype=np.float64)
@@ -698,11 +779,12 @@ class SpatialMode(SpatialAggregation):
         shape = _domain_array_shape(domain)
         bucket: list[np.ndarray] = []
         for p in patches:
-            sl = _resolve_indices(p.indices)
-            if sl is None:
+            pl = _resolve_indices(p.indices, shape)
+            if pl is None:
                 continue
+            sl = pl.acc
             full = np.full(shape, np.iinfo(np.int64).min, dtype=np.int64)
-            full[sl] = np.asarray(p.data, dtype=np.int64)
+            full[sl] = np.asarray(pl.crop(p.data), dtype=np.int64)
             bucket.append(full)
         if not bucket:
             return np.zeros(shape, dtype=np.int64)

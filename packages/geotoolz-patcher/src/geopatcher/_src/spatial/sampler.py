@@ -64,36 +64,39 @@ class SpatialRegularStride(SpatialSampler):
     Args:
         step: Stride. A scalar broadcasts; a sequence is per-axis.
         check_full_scan: If ``True``, raise `IncompleteScanConfiguration`
-            at anchor time when ``(domain_len - patch_size) % step != 0``
-            on any axis — i.e. when the chosen ``(size, step)`` would
-            silently drop a partial tile at the trailing edge. Off by
-            default to preserve the existing "drop the partial" behaviour;
+            at anchor time when ``boundary="drop"`` would silently lose
+            cells on any axis — ``(domain_len - patch_size) % step != 0``
+            (a partial tile at the trailing edge) or a patch larger than
+            the domain. Only checked under ``"drop"``: the other boundary
+            modes cover the trailing edge themselves. Off by default;
             opt in for xrpatcher-style strict-tiling workloads. The
             temporal counterpart is `divide_evenly` in `time/stencils.py`.
+
+    Anchor placement per axis of length ``L``, patch ``P``, step ``S``:
+
+    - ``"drop"``: ``0, S, 2S, …`` while the patch fits (``≤ L - P``);
+      none at all when ``P > L``.
+    - any other mode: ``0, S, 2S, …`` up to and including the first
+      anchor whose patch reaches the edge (``stop = max(L - P, 0) + S``),
+      so the trailing strip is covered without a redundant extra row.
     """
 
     step: int | tuple[int, ...]
     check_full_scan: bool = False
 
     def anchors(self, domain: Any, geometry: SpatialGeometry) -> Iterator[Any]:
-        if self.check_full_scan:
-            self._assert_full_scan(domain, geometry)
         boundary = getattr(geometry, "boundary", "drop")
+        if self.check_full_scan and boundary == "drop":
+            self._assert_full_scan(domain, geometry)
         if _is_raster_domain(domain):
             h, w = int(domain.shape[-2]), int(domain.shape[-1])
             sh, sw = self._broadcast(2)
             size = getattr(geometry, "size", (1, 1))
             ph, pw = int(size[-2]), int(size[-1])
-            # "drop": stop where the full patch still fits in-domain.
-            # "pad"/"shrink"/"raise": extend up to the last anchor that
-            # still falls inside the domain (overflow is the geometry /
-            # patcher's responsibility from here on).
-            if boundary == "drop":
-                stop_h, stop_w = max(h - ph + 1, 1), max(w - pw + 1, 1)
-            else:
-                stop_h, stop_w = h, w
-            for r in range(0, stop_h, sh):
-                for c in range(0, stop_w, sw):
+            if _drop_oversize(type(self).__name__, boundary, (h, w), (ph, pw)):
+                return
+            for r in _lattice(h, ph, sh, boundary):
+                for c in _lattice(w, pw, sw, boundary):
                     yield (r, c)
             return
         if isinstance(domain, GridDomain):
@@ -101,8 +104,10 @@ class SpatialRegularStride(SpatialSampler):
             steps = self._broadcast(len(dims))
             size = _grid_size(domain, geometry)
             lens = [len(domain.coords[d]) for d in dims]
+            if _drop_oversize(type(self).__name__, boundary, lens, size):
+                return
             ranges = [
-                range(0, max(L - int(p) + 1, 1), int(s))
+                _lattice(L, int(p), int(s), boundary)
                 for L, p, s in zip(lens, size, steps, strict=True)
             ]
             for idxs in _ndrange(ranges):
@@ -130,6 +135,13 @@ class SpatialRegularStride(SpatialSampler):
             # check doesn't apply; defer to the per-domain anchor logic.
             return
         for axis, length, size, step in zip(axes, lens, sizes, steps, strict=True):
+            if size > length:
+                raise IncompleteScanConfiguration(
+                    f"Incomplete scan on axis {axis!r}: patch size {size} "
+                    f"exceeds the axis length {length}, so boundary='drop' "
+                    "places no anchor. Use a smaller size, or "
+                    "boundary='pad' / 'reflect' / 'shrink'."
+                )
             remainder = (length - size) % step
             if remainder != 0:
                 raise IncompleteScanConfiguration(
@@ -170,21 +182,16 @@ class SpatialJitteredStride(SpatialSampler):
     def anchors(self, domain: Any, geometry: SpatialGeometry) -> Iterator[Any]:
         rng = np.random.default_rng(self.seed)
         base = SpatialRegularStride(step=self.step)
-        boundary = getattr(geometry, "boundary", "drop")
         if _is_raster_domain(domain):
             sh, sw = base._broadcast(2)
             h, w = int(domain.shape[-2]), int(domain.shape[-1])
             size = getattr(geometry, "size", (1, 1))
             ph, pw = int(size[-2]), int(size[-1])
-            # Clamp jittered anchors so the patch still fits in the
-            # field — except when the geometry's boundary policy invites
-            # overflow (then the patcher handles the edge).
-            if boundary == "drop":
-                rmax = max(h - ph, 0)
-                cmax = max(w - pw, 0)
-            else:
-                rmax = h - 1
-                cmax = w - 1
+            # Clamp jittered anchors to [0, L - P]: the patch fits, or —
+            # when it is larger than the domain under a non-drop mode —
+            # sits at the origin and the boundary policy handles the
+            # overflow. (Under "drop" an oversize patch places nothing.)
+            rmax, cmax = max(h - ph, 0), max(w - pw, 0)
             for r, c in base.anchors(domain, geometry):
                 dr = int(rng.uniform(-self.jitter, self.jitter) * sh)
                 dc = int(rng.uniform(-self.jitter, self.jitter) * sw)
@@ -237,13 +244,12 @@ class SpatialRandom(SpatialSampler):
             h, w = int(domain.shape[-2]), int(domain.shape[-1])
             size = getattr(geometry, "size", (1, 1))
             ph, pw = int(size[-2]), int(size[-1])
-            # "drop": draw only from the fit-only range so the patch is
-            # fully in-domain. Non-"drop": draw across the whole domain
-            # — the patcher / geometry handles edge overflow.
-            if boundary == "drop":
-                rhi, chi = max(h - ph + 1, 1), max(w - pw + 1, 1)
-            else:
-                rhi, chi = h, w
+            # Draw from [0, L - P] so every patch fits; an anchor past
+            # L - P would only add padding. A patch larger than the
+            # domain sits at the origin (non-drop) or places nothing.
+            if _drop_oversize(type(self).__name__, boundary, (h, w), (ph, pw)):
+                return
+            rhi, chi = max(h - ph, 0) + 1, max(w - pw, 0) + 1
             rs = rng.integers(0, rhi, size=self.n_samples)
             cs = rng.integers(0, chi, size=self.n_samples)
             for r, c in zip(rs, cs, strict=True):
@@ -252,10 +258,13 @@ class SpatialRandom(SpatialSampler):
         if isinstance(domain, GridDomain):
             dims = list(domain.coords)
             size = _grid_size(domain, geometry)
+            lens = [len(domain.coords[d]) for d in dims]
+            if _drop_oversize(type(self).__name__, boundary, lens, size):
+                return
             for _ in range(self.n_samples):
                 yield {
-                    d: int(rng.integers(0, max(len(domain.coords[d]) - int(p) + 1, 1)))
-                    for d, p in zip(dims, size, strict=True)
+                    d: int(rng.integers(0, max(L - int(p), 0) + 1))
+                    for d, L, p in zip(dims, lens, size, strict=True)
                 }
             return
         if isinstance(domain, PointDomain | VectorDomain):
@@ -300,12 +309,10 @@ class SpatialPoissonDisk(SpatialSampler):
             h, w = int(domain.shape[-2]), int(domain.shape[-1])
             size = getattr(geometry, "size", (1, 1))
             ph, pw = int(size[-2]), int(size[-1])
-            # See SpatialRandom — "drop" restricts to the fit-only
-            # region, non-"drop" lets Bridson cover the whole domain.
-            if boundary == "drop":
-                region = (max(h - ph + 1, 1), max(w - pw + 1, 1))
-            else:
-                region = (h, w)
+            # See SpatialRandom — anchors are drawn from [0, L - P].
+            if _drop_oversize(type(self).__name__, boundary, (h, w), (ph, pw)):
+                return
+            region = (max(h - ph, 0) + 1, max(w - pw, 0) + 1)
             yield from _bridson_2d(region, self.min_dist, self.max_tries, rng)
             return
         if isinstance(domain, PointDomain):
@@ -516,15 +523,18 @@ def _raster_center_anchors(
     goes through the inverse affine to a pixel, and the yielded anchor is
     the UL corner that centres the geometry's patch on it. Points outside
     the raster are skipped. Only the default ``"drop"`` boundary clamps
-    anchors to keep the patch fully in-domain; the other modes preserve
-    the raw (possibly negative / overflowing) anchor so ``"pad"`` reads
-    boundless context and ``"raise"`` can detect the overflow instead of
-    silently shifting the patch inward.
+    anchors to keep the patch fully in-domain (and places none when the
+    patch is larger than the domain); the other modes preserve the raw
+    (possibly negative / overflowing) anchor so ``"pad"`` reads context
+    past the edge, ``"shrink"`` clips the window, and ``"raise"`` can
+    detect the overflow instead of silently shifting the patch inward.
     """
     h, w = int(domain.shape[-2]), int(domain.shape[-1])
     size = getattr(geometry, "size", (1, 1))
     ph, pw = int(size[-2]), int(size[-1])
     boundary = getattr(geometry, "boundary", "drop")
+    if _drop_oversize("centred-anchor sampler", boundary, (h, w), (ph, pw)):
+        return
     inv = ~domain.transform
     for x, y in points:
         col_f, row_f = inv * (float(x), float(y))
@@ -533,8 +543,8 @@ def _raster_center_anchors(
             continue
         ar, ac = r - ph // 2, c - pw // 2
         if boundary == "drop":
-            ar = min(max(h - ph, 0), max(0, ar))
-            ac = min(max(w - pw, 0), max(0, ac))
+            ar = min(h - ph, max(0, ar))
+            ac = min(w - pw, max(0, ac))
         yield (ar, ac)
 
 
@@ -654,6 +664,48 @@ def _grid_size(domain: GridDomain, geometry: SpatialGeometry) -> tuple[int, ...]
             "whole, e.g. size=(n_time, 32, 32))."
         )
     return size
+
+
+def _lattice(length: int, size: int, step: int, boundary: str) -> range:
+    """Regular-stride anchor offsets along one axis.
+
+    ``"drop"``: every anchor whose patch fits, ``0 … L - P``. Any other
+    mode: up to and including the first anchor whose patch reaches the
+    edge — ``stop = max(L - P, 0) + S`` — so the trailing strip is
+    covered, never by a redundant extra anchor.
+    """
+    if boundary == "drop":
+        return range(0, length - size + 1, step)
+    return range(0, max(length - size, 0) + step, step)
+
+
+def _drop_oversize(
+    sampler: str,
+    boundary: str,
+    lengths: Iterable[int],
+    sizes: Iterable[int],
+) -> bool:
+    """True (with a warning) when ``"drop"`` leaves no room for any anchor.
+
+    Under ``"drop"`` only patches lying wholly in-domain are placed, so a
+    patch larger than the domain on any axis places nothing. That is the
+    mode's literal meaning — and it keeps a loop over mixed-size scenes
+    running — but an empty split is rarely intended, so it warns.
+    """
+    if boundary != "drop":
+        return False
+    for length, size in zip(lengths, sizes, strict=True):
+        if int(size) > int(length):
+            warnings.warn(
+                f"{sampler}: patch size {int(size)} exceeds the domain length "
+                f"{int(length)} under boundary='drop', so no anchors are "
+                "placed; use boundary='pad', 'reflect' or 'shrink' to cover "
+                "a domain smaller than the patch.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            return True
+    return False
 
 
 def _ndrange(ranges: list[range]) -> Iterator[tuple[int, ...]]:

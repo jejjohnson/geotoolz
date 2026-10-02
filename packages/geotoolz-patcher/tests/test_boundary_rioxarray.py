@@ -201,7 +201,7 @@ def test_select_out_of_range_window_padded_with_nodata(coords: bool) -> None:
 
 
 @pytest.mark.parametrize("coords", [False, True], ids=["transform-only", "coords"])
-@pytest.mark.parametrize("boundary", ["drop", "shrink"])
+@pytest.mark.parametrize("boundary", ["drop", "shrink", "pad", "reflect"])
 def test_rioxarray_merge(coords: bool, boundary: str) -> None:
     da = _geo_da(coords=coords)
     field = RioXarrayField(da)
