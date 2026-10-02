@@ -2,7 +2,8 @@
 
 These tests exercise `ObstoreCogField.select_many`'s network deadline
 and the loud-failure tag parsing (`_dtype_from_ifd`,
-`_crs_from_geokeys`) against fake IFD objects, so they need neither the
+`_crs_from_geokeys`, `_parse_nodata`) plus planar-configuration tile
+assembly against fake IFD objects, so they need neither the
 ``obstore`` nor the ``async-tiff`` extra, and touch no network.
 """
 
@@ -13,12 +14,14 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
+from rasterio.transform import Affine
 
 from geopatcher._src.fields.obstore_cog import (
     ObstoreCogDomain,
     ObstoreCogField,
     _crs_from_geokeys,
     _dtype_from_ifd,
+    _parse_nodata,
     _with_timeout,
 )
 
@@ -68,7 +71,7 @@ class _FakeIfd:
 def _field(ifd: _FakeIfd, timeout: float | None) -> ObstoreCogField:
     domain = ObstoreCogDomain(
         crs=None,
-        transform=None,
+        transform=Affine.identity(),
         shape=(1, 32, 32),
         bounds=(0.0, 0.0, 32.0, 32.0),
         res=(1.0, 1.0),
@@ -180,3 +183,62 @@ class TestCrsFromGeokeysWarns:
 
         with pytest.warns(RuntimeWarning, match=r"EPSG:999999"):
             assert _crs_from_geokeys(_Keys()) is None
+
+    def test_user_defined_code_is_treated_as_absent(self) -> None:
+        """32767 = user-defined: never looked up as ``EPSG:32767``."""
+        pytest.importorskip("pyproj")
+
+        class _Keys:
+            projected_type = 32767
+            geographic_type = 4326
+
+        with pytest.warns(RuntimeWarning, match=r"user-defined CRS"):
+            assert _crs_from_geokeys(_Keys()) is None
+
+
+class TestParseNodata:
+    def test_absent_or_blank_is_none(self) -> None:
+        assert _parse_nodata(None, np.dtype("uint8"), url=URL) is None
+        assert _parse_nodata(" \x00", np.dtype("uint8"), url=URL) is None
+
+    def test_values_follow_dtype_kind(self) -> None:
+        assert _parse_nodata("-9999\x00", np.dtype("int16"), url=URL) == -9999
+        assert isinstance(_parse_nodata("255", np.dtype("uint8"), url=URL), int)
+        assert _parse_nodata("-1.5", np.dtype("float32"), url=URL) == -1.5
+        assert np.isnan(_parse_nodata("nan", np.dtype("float64"), url=URL))
+
+    @pytest.mark.parametrize("raw", ["-1", "nan", "256", "1.5"])
+    def test_unrepresentable_integer_nodata_warns(self, raw: str) -> None:
+        with pytest.warns(RuntimeWarning, match=r"not representable as uint8"):
+            assert _parse_nodata(raw, np.dtype("uint8"), url=URL) is None
+
+
+class _PlanarIfd(_FakeIfd):
+    """3-band band-interleaved IFD: async-tiff yields ``(samples, H, W)`` tiles."""
+
+    samples_per_pixel = 3
+    bits_per_sample = (32, 32, 32)
+    sample_format = (3, 3, 3)
+    planar_configuration = 2
+
+    async def fetch_tiles(self, coords: list[tuple[int, int]]) -> list[_FakeTile]:
+        tile = np.stack([np.full((16, 16), b, dtype=np.float32) for b in range(3)])
+        return [_FakeTile(tile) for _ in coords]
+
+
+class TestPlanarConfiguration:
+    def test_band_interleaved_tiles_are_not_transposed(self) -> None:
+        field = _field(_PlanarIfd(), timeout=None)
+        window = _Window(col_off=10, row_off=10, width=12, height=8)
+        out = field.select(window)  # type: ignore[arg-type]
+        assert out.shape == (3, 8, 12)
+        for band in range(3):
+            np.testing.assert_array_equal(np.asarray(out)[band], band)
+
+    def test_band_count_mismatch_fails_loud(self) -> None:
+        class _Wrong(_PlanarIfd):
+            samples_per_pixel = 4
+
+        field = _field(_Wrong(), timeout=None)
+        with pytest.raises(ValueError, match=r"expected 4 band"):
+            field.select(_Window(0, 0, 4, 4))  # type: ignore[arg-type]
