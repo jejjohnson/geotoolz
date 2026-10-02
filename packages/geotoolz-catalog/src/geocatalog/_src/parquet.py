@@ -12,7 +12,10 @@ backends.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import contextlib
+import os
+import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, Literal
 
@@ -56,6 +59,29 @@ _LEGACY_UNVERSIONED: int = 0
 # IntervalIndex is rebuilt — a migration sees plain `start_time` /
 # `end_time` columns, never the interval index.
 _MIGRATIONS: dict[int, Callable[[gpd.GeoDataFrame], gpd.GeoDataFrame]] = {}
+
+
+def _staging_name(path: Path) -> Path:
+    """Hidden sibling temp path for an atomic write of ``path``."""
+    return path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+
+
+@contextlib.contextmanager
+def _staged_path(path: Path) -> Iterator[Path]:
+    """Yield a hidden sibling temp path, then ``os.replace`` it onto ``path``.
+
+    The temp name does not end in ``.parquet``, so a reader globbing the
+    directory never picks up a half-written file. On error the temp file
+    is removed and ``path`` (any existing artifact) is left untouched;
+    on success the swap is a single rename(2), atomic on one filesystem.
+    """
+    tmp = _staging_name(path)
+    try:
+        yield tmp
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.replace(tmp, path)
 
 
 def _read_schema_version(
@@ -166,7 +192,10 @@ def to_geoparquet(
         catalog: An `InMemoryGeoCatalog` to serialise. The catalog's
             ``gdf.crs`` is written into the GeoParquet metadata.
         path: Destination path. The ``.parquet`` extension is
-            conventional. Any parent directory must exist.
+            conventional. Any parent directory must exist. The file is
+            written to a hidden sibling and renamed into place, so a
+            failed write never leaves a partial file or clobbers an
+            existing one.
         schema_version: Value written to the reserved
             ``_schema_version`` column. Defaults to
             `SCHEMA_VERSION_CURRENT` (today: 0).
@@ -178,7 +207,9 @@ def to_geoparquet(
             output. Built-in ``"year"``, ``"month"``, and ``"day"`` are
             derived from ``start_time``. Rows are streamed via
             `gdf.itertuples` (much faster than `iterrows` on large
-            catalogs) and routed through `write_partitioned_rows`.
+            catalogs) and routed through `write_partitioned_rows`; an
+            existing directory keeps every entry the writer does not
+            own (see `write_partitioned_rows`).
     """
     gdf = catalog.gdf.copy()
     if isinstance(gdf.index, pd.IntervalIndex):
@@ -212,10 +243,8 @@ def to_geoparquet(
         return
     gdf["_backend"] = catalog.backend
     gdf["_schema_version"] = schema_version
-    gdf.to_parquet(
-        Path(path),
-        write_covering_bbox=write_covering_bbox,
-    )
+    with _staged_path(Path(path)) as tmp:
+        gdf.to_parquet(tmp, write_covering_bbox=write_covering_bbox)
 
 
 def from_geoparquet(
@@ -323,7 +352,9 @@ def migrate_geoparquet(source: str | Path, *, to_version: int) -> int:
     """Read ``source``, migrate it to ``to_version``, write back in-place.
 
     A thin file-level wrapper over `from_geoparquet` + `to_geoparquet`
-    used by the ``geocatalog migrate`` CLI. The artifact is rewritten
+    used by the ``geocatalog migrate`` CLI. The new version is written
+    to a sibling temp file and renamed over ``source``, so a crash
+    mid-migration leaves the original intact. The artifact is rewritten
     only if the migration actually changed the version, so calling
     twice is idempotent.
 

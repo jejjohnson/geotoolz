@@ -54,7 +54,10 @@ from loguru import logger as log
 
 from geocatalog._src._timeutil import to_naive_utc
 from geocatalog._src.base import INTERNAL_COLUMNS, RESERVED_COLUMNS
-from geocatalog._src.parquet import SCHEMA_VERSION_CURRENT as _SCHEMA_VERSION
+from geocatalog._src.parquet import (
+    SCHEMA_VERSION_CURRENT as _SCHEMA_VERSION,
+    _staging_name,
+)
 
 
 _BACKEND_T = Literal["raster", "xarray", "vector"]
@@ -202,6 +205,11 @@ class StreamingParquetWriter:
     (`xmin`/`ymin`/`xmax`/`ymax` struct) is computed per batch when
     `write_bbox=True`.
 
+    Rows go to a hidden sibling temp file that `close` renames onto
+    ``path``; `abort` (or leaving the ``with`` block on an exception)
+    discards it. ``path`` therefore only ever holds a complete artifact —
+    a failed write leaves any existing file there untouched.
+
     Args:
         path: Destination GeoParquet file. Parent directory must exist.
         crs: CRS of every input geometry. Written into ``geo.columns.geometry.crs``
@@ -251,6 +259,7 @@ class StreamingParquetWriter:
         if batch_size < 1:
             raise ValueError(f"batch_size must be >= 1; got {batch_size}")
         self._path = Path(path)
+        self._tmp_path = _staging_name(self._path)
         self._extras_schema = schema
         self._crs = pyproj.CRS.from_user_input(crs)
         self._backend: _BACKEND_T = backend
@@ -269,18 +278,12 @@ class StreamingParquetWriter:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        # Always close — even on exception — so partial files don't dangle
-        # with an open file handle on Windows / network filesystems.
-        try:
+        # Commit only a clean block; on an exception discard the partial
+        # file so `path` keeps whatever it held before.
+        if exc is None:
             self.close()
-        except Exception:
-            if exc is None:
-                raise
-            # If we're already unwinding from a write error, prefer the
-            # original exception; swallow this one.
-            log.exception(
-                "StreamingParquetWriter: close failed during exception unwind"
-            )
+        else:
+            self.abort()
 
     def write_row(self, row: dict[str, Any]) -> None:
         """Buffer one row; flush when the batch fills."""
@@ -291,21 +294,46 @@ class StreamingParquetWriter:
             self._flush_batch()
 
     def close(self) -> None:
-        """Flush remaining rows and finalise the GeoParquet metadata."""
+        """Flush remaining rows, finalise the metadata, move the file into place."""
         if self._closed:
             return
         self._closed = True
-        if self._buffer:
-            self._flush_batch()
-        if self._writer is None:
-            # No rows were written. Build an empty file so the artifact path
-            # exists with valid metadata — downstream code can still open it.
-            schema = self._seal_schema([])
-            self._writer = pq.ParquetWriter(self._path, schema=schema)
-        self._writer.add_key_value_metadata(
-            {"geo": json.dumps(self._build_geo_metadata())}
-        )
-        self._writer.close()
+        try:
+            if self._buffer:
+                self._flush_batch()
+            if self._writer is None:
+                # No rows were written. Build an empty file so the artifact
+                # path exists with valid metadata — downstream code can still
+                # open it.
+                schema = self._seal_schema([])
+                self._writer = pq.ParquetWriter(self._tmp_path, schema=schema)
+            self._writer.add_key_value_metadata(
+                {"geo": json.dumps(self._build_geo_metadata())}
+            )
+            self._writer.close()
+        except BaseException:
+            self._discard()
+            raise
+        os.replace(self._tmp_path, self._path)
+
+    def abort(self) -> None:
+        """Discard everything written so far; ``path`` is left untouched."""
+        if self._closed:
+            return
+        self._closed = True
+        self._discard()
+
+    def _discard(self) -> None:
+        self._buffer = []
+        if self._writer is not None:
+            try:
+                self._writer.close()
+            except Exception:
+                log.exception(
+                    "StreamingParquetWriter: close failed while discarding "
+                    "a partial file"
+                )
+        self._tmp_path.unlink(missing_ok=True)
 
     # -- internals -----------------------------------------------------------
 
@@ -314,7 +342,7 @@ class StreamingParquetWriter:
         self._buffer = []
         if self._schema is None:
             self._schema = self._seal_schema(rows)
-            self._writer = pq.ParquetWriter(self._path, schema=self._schema)
+            self._writer = pq.ParquetWriter(self._tmp_path, schema=self._schema)
         table = self._rows_to_table(rows, schema=self._schema)
         assert self._writer is not None  # for ty
         self._writer.write_table(table)
@@ -802,7 +830,14 @@ def append_files(
 
     Only the new rows are extracted and written; existing shards are left
     untouched, so append work is ``O(N_new)`` plus the number of new
-    partitions touched. The archive is created if it does not exist.
+    partitions touched (and one read of the archive's ``filepath``
+    column). The archive is created if it does not exist.
+
+    Appending is idempotent: files whose ``filepath`` is already indexed
+    in the archive (or repeated within ``filepaths``) are skipped, so
+    re-running the same call — including after an interruption that left
+    only some of the new shards moved in — never duplicates rows; it
+    completes the append instead.
 
     Before any rows are written, the caller-supplied ``partition_by`` is
     validated against the archive's existing layout (the directory tree
@@ -832,7 +867,8 @@ def append_files(
 
     Raises:
         ValueError: ``partition_by`` differs from the archive's existing
-            layout, or no input files yielded a row.
+            layout, or no input files yielded a row (and none were
+            skipped as already indexed).
     """
     from geocatalog._src.duckdb_backend import DuckDBGeoCatalog, _require_duckdb
 
@@ -854,9 +890,36 @@ def append_files(
             "join cleanly — rebuild the archive at the new layout, or "
             "pass partition_by matching the existing one."
         )
-    rows = _iter_rows_parallel(filepaths, extract_fn, n_workers=n_workers)
+    indexed = _indexed_filepaths(archive)
+    seen = set(indexed)
+    skipped = 0
+
+    def _new_inputs() -> Iterator[str | Path]:
+        nonlocal skipped
+        for fp in filepaths:
+            key = str(fp)
+            if key in seen:
+                skipped += 1
+                continue
+            seen.add(key)
+            yield fp
+
+    def _new_rows() -> Iterator[dict[str, Any]]:
+        # Dedup again on the extracted `filepath`: an extractor may
+        # normalise the path it records (resolve it, add a scheme).
+        nonlocal skipped
+        recorded = set(indexed)
+        for row in _iter_rows_parallel(_new_inputs(), extract_fn, n_workers=n_workers):
+            fp = row.get("filepath")
+            if fp is not None and fp in recorded:
+                skipped += 1
+                continue
+            if fp is not None:
+                recorded.add(fp)
+            yield row
+
     rows_written = _write_partitioned_rows(
-        rows,
+        _new_rows(),
         out_path=archive,
         crs=crs,
         backend=backend,
@@ -867,7 +930,16 @@ def append_files(
         max_open_writers=max_open_writers,
     )
     if rows_written == 0:
+        if skipped and indexed:
+            log.info(
+                "append_files: all {} input file(s) already indexed in {}",
+                skipped,
+                archive,
+            )
+            return DuckDBGeoCatalog.open(archive, backend=backend, crs=crs)
         raise ValueError("append_files: no files yielded a row")
+    if skipped:
+        log.info("append_files: skipped {} already-indexed file(s)", skipped)
     return DuckDBGeoCatalog.open(archive, backend=backend, crs=crs)
 
 
@@ -942,8 +1014,10 @@ def write_partitioned_rows(
         schema_version: Reserved catalog schema version written per row.
         write_bbox: Emit the GeoParquet 1.1 ``bbox`` covering struct.
         batch_size: Rows per Arrow record batch.
-        replace: Replace the whole output directory when True; append only
-            the new shards when False.
+        replace: When True, replace the partitioned dataset at
+            ``out_path``: its ``key=value`` dirs and ``*.parquet`` files are
+            swapped for the new tree, every other entry is kept. When
+            False, append only the new shards.
         max_open_writers: Hard cap on concurrently open shard writers.
             Default 64 — enough headroom under a typical 1024 fd
             ulimit while still amortising open overhead. Set higher on
@@ -1040,7 +1114,7 @@ def _write_partitioned_rows(
             rows_written += 1
     except BaseException:
         for writer in open_writers.values():
-            writer.close()
+            writer.abort()
         shutil.rmtree(staging, ignore_errors=True)
         raise
     for writer in open_writers.values():
@@ -1051,12 +1125,7 @@ def _write_partitioned_rows(
         return 0
 
     if replace:
-        if out_path.exists():
-            if not out_path.is_dir():
-                out_path.unlink()
-            else:
-                shutil.rmtree(out_path)
-        os.replace(staging, out_path)
+        _replace_partition_tree(staging, out_path)
         return rows_written
 
     out_path.mkdir(parents=True, exist_ok=True)
@@ -1067,6 +1136,73 @@ def _write_partitioned_rows(
         os.replace(shard, dest)
     shutil.rmtree(staging, ignore_errors=True)
     return rows_written
+
+
+def _owned_by_writer(entry: Path) -> bool:
+    """True for entries a partitioned write may replace: Hive dirs and shards."""
+    if entry.is_dir():
+        return "=" in entry.name
+    return entry.suffix == ".parquet"
+
+
+def _replace_partition_tree(staging: Path, out_path: Path) -> None:
+    """Swap the freshly written partition tree in ``staging`` into ``out_path``.
+
+    Only the entries the writer owns (top-level ``key=value`` dirs and
+    ``*.parquet`` files) are replaced; anything else in ``out_path`` —
+    a README, sidecars, other artifacts — is kept. The old entries are
+    first renamed into a sibling holding dir, so if installing the new
+    tree fails they are moved back and ``out_path`` reads as before.
+    """
+    if not out_path.exists():
+        os.replace(staging, out_path)
+        return
+    holding = Path(
+        tempfile.mkdtemp(prefix=f".{out_path.name}.replaced.", dir=out_path.parent)
+    )
+    if not out_path.is_dir():
+        # A single-file artifact at the destination is replaced outright.
+        os.replace(out_path, holding / out_path.name)
+        try:
+            os.replace(staging, out_path)
+        except BaseException:
+            os.replace(holding / out_path.name, out_path)
+            raise
+        shutil.rmtree(holding, ignore_errors=True)
+        return
+    retired: list[str] = []
+    installed: list[Path] = []
+    try:
+        for entry in sorted(out_path.iterdir()):
+            if _owned_by_writer(entry):
+                os.replace(entry, holding / entry.name)
+                retired.append(entry.name)
+        for entry in sorted(staging.iterdir()):
+            dest = out_path / entry.name
+            os.replace(entry, dest)
+            installed.append(dest)
+    except BaseException:
+        for dest in installed:
+            if dest.is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
+            else:
+                dest.unlink(missing_ok=True)
+        for name in retired:
+            os.replace(holding / name, out_path / name)
+        raise
+    shutil.rmtree(holding, ignore_errors=True)
+    shutil.rmtree(staging, ignore_errors=True)
+
+
+def _indexed_filepaths(archive: Path) -> set[str]:
+    """Every ``filepath`` already indexed under a partitioned ``archive``."""
+    if not archive.is_dir():
+        return set()
+    found: set[str] = set()
+    for shard in archive.rglob("*.parquet"):
+        table = pq.ParquetFile(shard).read(columns=["filepath"])
+        found.update(v for v in table.column("filepath").to_pylist() if v is not None)
+    return found
 
 
 def _partition_value(row: dict[str, Any], name: str) -> Any:

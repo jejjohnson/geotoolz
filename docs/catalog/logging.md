@@ -63,9 +63,11 @@ cat = gc.build_raster_catalog(paths, ...)
   `geocatalog._src.vector.build_vector_catalog` — `INFO` when the
   `duckdb` backend is asked to canonicalise footprints to EPSG:4326
   because no `target_crs` was passed.
-- `geocatalog._src.streaming.StreamingParquetWriter.__exit__` —
-  `ERROR` (with traceback) when the writer's `close()` itself fails
-  during an unwind.
+- `geocatalog._src.streaming.StreamingParquetWriter` — `ERROR` (with
+  traceback) when closing the parquet handle fails while a partial
+  file is being discarded after an error.
+- `geocatalog._src.streaming.append_files` — `INFO` when input files are
+  skipped because their `filepath` is already indexed in the archive.
 - `geocatalog._src.streaming.sort_geoparquet` — `DEBUG` after a
   Hilbert-sorted rewrite completes.
 
