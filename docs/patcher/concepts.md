@@ -70,7 +70,7 @@ out (denominator for normalised reconstruction).*
 ```mermaid
 flowchart LR
     Geom[geometry.size] --> BC[SpatialBoxcar<br/>flat 1.0]
-    Geom --> HN[SpatialHann<br/>cosine taper to 0]
+    Geom --> HN[SpatialHann<br/>periodic cosine taper]
     Geom --> TK[SpatialTukey<br/>flat-top + cosine flank]
     Geom --> GS[SpatialGaussian<br/>radial Gaussian]
     Geom --> CU[SpatialCustom<br/>any callable]

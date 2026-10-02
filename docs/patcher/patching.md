@@ -34,6 +34,37 @@ stitched = patcher.merge(outputs_as_patches, field.domain)
 `split` is an iterator by design — streaming is the default; materialise
 with `list(...)` when convenient.
 
+## Window convention
+
+`SpatialHann` and `SpatialTukey` are **periodic** (DFT-even) tapers —
+per axis exactly `scipy.signal.windows.hann(n, sym=False)` /
+`tukey(n, alpha, sym=False)`, combined as an outer product:
+
+- **Hann is COLA at hop `N/2`.** `w[k] + w[k + N/2] = 1`, so with an even
+  patch size and `step = size // 2`, every interior seam is covered at
+  full weight — even `SpatialOverlapAdd(normalize_by_window=False)`
+  reproduces a constant there. Other overlapping strides still
+  reconstruct exactly under the default normalisation.
+- **`SpatialTukey(alpha=1.0)` is `SpatialHann`**, `alpha=0.0` is
+  `SpatialBoxcar`; Tukey is COLA at hop `N * (1 - alpha/2)`.
+- **Endpoints.** `w[0] = 0`, `w[-1] > 0`. Merged with `SpatialOverlapAdd`,
+  the domain's **first row and first column** (the leading border ring)
+  get zero accumulated weight, because regular samplers start at anchor 0
+  and the only chip covering them puts its zero sample there; those cells
+  are filled with `0.0`. `"pad"` / `"reflect"` only extend the trailing
+  (bottom/right) edge, so they do not remove this ring. If it matters,
+  crop the 1-pixel ring, use `SpatialGaussian` (never zero) or
+  `SpatialBoxcar`, or supply a `SpatialCustom` taper.
+- **`step == size` with Hann/Tukey** leaves every chip's first row and
+  column at zero weight — tapers need overlapping chips; use
+  `SpatialBoxcar` for exact non-overlapping tiling.
+- **Short axes.** An axis shorter than 3 samples cannot carry a taper and
+  is boxcar (all ones) on that axis.
+
+`SpatialGaussian(sigma=...)` takes `sigma` as a **fraction of the patch
+half-width** (std = `sigma * n / 2` pixels per axis), symmetric about the
+patch centre.
+
 ## Determinism (stochastic samplers)
 
 `SpatialRandom`, `SpatialJitteredStride`, `SpatialPoissonDisk`, and
@@ -64,7 +95,7 @@ geom = SpatialRectangular(size=(256, 256), boundary="pad")
 |------|----------|
 | `"drop"` (default) | Sampler clips so overflowing anchors are never emitted. Edge residual is silently dropped — exactly the pre-issue-19 behavior. |
 | `"pad"` | Edge anchors are emitted; the patch is the full geometry size, padded in the overflow region with the reader's nodata (or `pad_value` when set). |
-| `"reflect"` | Edge anchors are emitted; the overflow region is mirror-padded from the in-domain interior — the spectrally correct choice for overlap-add stitching with tapered windows (no DC dip at the scene boundary). Requires the overflow on each side to be smaller than the in-domain extent, else a clear `ValueError` is raised. |
+| `"reflect"` | Edge anchors are emitted; the overflow region is mirror-padded from the in-domain interior, so a tapered window's trailing (bottom/right) flank lands on mirrored data rather than a constant fill. It does not reach the leading row/column (regular samplers start at anchor 0) — see [Window convention](#window-convention). Requires the overflow on each side to be smaller than the in-domain extent, else a clear `ValueError` is raised. |
 | `"shrink"` | Edge anchors are emitted; the geometry clips the returned Window so the patch is *smaller* at the edge. Weights crop to match. |
 | `"raise"` | Edge anchors are emitted; `SpatialPatcher.split` raises a `ValueError` on the first overflow. Useful with `SpatialExplicit` when the caller wants strict edge handling. |
 
