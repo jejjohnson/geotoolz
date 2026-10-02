@@ -74,7 +74,16 @@ catalog = append_files(
 mismatched layouts raise `ValueError` rather than silently producing
 a mixed-layout archive that downstream readers can't reconstruct.
 The archive must be a local directory; build it locally and sync it to
-object storage. Appending the same files twice writes their rows twice.
+object storage.
+
+Appending is idempotent: files whose `filepath` is already indexed in
+the archive are skipped, so re-running a call — for example after an
+interruption that moved only some of the new shards in — completes the
+append without duplicating rows. Every shard is written to a hidden
+temp file and renamed into place, so a reader never sees a partial
+shard. Rebuilding with `to_geoparquet(..., partition_by=...)` over an
+existing directory replaces only the `key=value` partition dirs and
+`*.parquet` files; anything else kept there (a README, sidecars) stays.
 
 ### Reading a partitioned archive
 
