@@ -291,9 +291,11 @@ class SpatialPolygonIntersection(SpatialGeometry):
     """Patch = pixels (or features) lying inside a given polygon.
 
     On a `RasterDomain`, ``neighborhood`` returns a ``MaskedWindow``: the
-    bounding `rasterio.windows.Window` of the polygon's footprint + the
-    boolean mask of pixels strictly inside it. On a `VectorDomain`, it
-    returns the indices of geometries that intersect.
+    bounding `rasterio.windows.Window` of the polygon's footprint, rounded
+    outward to whole pixels and clipped to the domain, + the boolean mask
+    of the window's pixels whose centre lies inside the polygon. A polygon
+    that does not overlap the raster at all raises ``ValueError``. On a
+    `VectorDomain`, it returns the indices of geometries that intersect.
 
     Args:
         polygons: Sequence (typically a ``geopandas.GeoSeries``) of
@@ -306,18 +308,7 @@ class SpatialPolygonIntersection(SpatialGeometry):
     def neighborhood(self, domain: Any, anchor: Any) -> Any:
         poly = self.polygons.iloc[int(anchor)]
         if _is_raster_domain(domain):
-            from rasterio import features
-            from rasterio.windows import from_bounds
-
-            window = from_bounds(*poly.bounds, transform=domain.transform)
-            mask = features.geometry_mask(
-                [poly],
-                out_shape=(int(window.height), int(window.width)),
-                transform=domain.transform
-                * domain.transform.translation(window.col_off, window.row_off),
-                invert=True,
-            )
-            return _MaskedWindow(window=window, mask=mask)
+            return _polygon_masked_window(domain, poly, int(anchor))
         if isinstance(domain, VectorDomain):
             hits = domain.sindex.query(poly, predicate="intersects")
             return np.asarray(hits, dtype=int)
@@ -341,6 +332,50 @@ class _MaskedWindow:
 
     window: Any
     mask: np.ndarray
+
+
+def _polygon_masked_window(domain: Any, poly: Any, anchor: int) -> _MaskedWindow:
+    """Pixel-aligned bounding window + interior mask of ``poly`` on a raster.
+
+    ``from_bounds`` yields a fractional window for any polygon whose bounds
+    are not on pixel edges, which raster readers cannot slice. The window is
+    therefore rounded *outward* to whole pixels and clipped to the domain
+    (pixels outside the raster do not exist, and the chip must fit the merge
+    accumulator). The mask is rasterised on that exact window's grid, so
+    ``mask[i, j]`` is True iff the centre of raster pixel
+    ``(row_off + i, col_off + j)`` lies inside ``poly``.
+    """
+    from georeader.window_utils import round_outer_window
+    from rasterio import features
+    from rasterio.errors import WindowError
+    from rasterio.windows import Window, from_bounds, transform as window_transform
+
+    height, width = (int(s) for s in domain.shape[-2:])
+    rounded = round_outer_window(from_bounds(*poly.bounds, transform=domain.transform))
+    try:
+        clipped = rounded.intersection(
+            Window(col_off=0, row_off=0, width=width, height=height)
+        )
+    except WindowError:
+        clipped = None
+    if clipped is None or clipped.width <= 0 or clipped.height <= 0:
+        raise ValueError(
+            f"SpatialPolygonIntersection: polygon {anchor} (bounds {poly.bounds}) "
+            "does not overlap the raster domain."
+        )
+    window = Window(
+        col_off=int(clipped.col_off),
+        row_off=int(clipped.row_off),
+        width=int(clipped.width),
+        height=int(clipped.height),
+    )
+    mask = features.geometry_mask(
+        [poly],
+        out_shape=(window.height, window.width),
+        transform=window_transform(window, domain.transform),
+        invert=True,
+    )
+    return _MaskedWindow(window=window, mask=mask)
 
 
 def _to_xy(domain: PointDomain, anchor: Any) -> np.ndarray:
