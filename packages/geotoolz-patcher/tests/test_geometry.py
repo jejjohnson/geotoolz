@@ -328,9 +328,9 @@ class TestSpatialPolygonIntersectionRaster:
         assert merged.shape == source.shape
         # Every pixel whose centre lies in some polygon is reconstructed
         # exactly (overlaps average identical values); every other pixel
-        # carries the aggregation's zero-weight fill.
+        # carries the aggregation's zero-weight fill (NaN by default).
         np.testing.assert_array_equal(merged[covered], source[covered])
-        np.testing.assert_array_equal(merged[~covered], 0.0)
+        assert np.isnan(merged[~covered]).all()
 
     def test_polygon_outside_domain_raises(self) -> None:
         field = _poly_raster_field()

@@ -1553,8 +1553,9 @@ def _unwrap_for_select(indices: Any) -> Any:
     so `_build_weights` can recover the interior mask. But `Field.select`
     expects a plain `Window` (or dict / index list) — the wrapper would
     confuse downstream readers like `RasterField.read_from_window`. Strip
-    it here at the call boundary; keep the wrapper on `Patch.indices` so
-    aggregation still sees the mask via `_resolve_indices`.
+    it here at the call boundary; the wrapper stays on `Patch.indices`,
+    where every dense aggregation's `_resolve_indices` carries the mask
+    into its valid-cell test (cells outside it are never counted).
     """
     if isinstance(indices, _MaskedWindow):
         return indices.window

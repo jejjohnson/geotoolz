@@ -400,8 +400,9 @@ class _MaskedWindow:
     Returned by `SpatialPolygonIntersection.neighborhood` on `RasterDomain`
     (a rasterio `Window`) and by `SpatialSphericalCap.neighborhood` on a
     `GridDomain` (a ``{dim: slice}`` dict). ``Field.select`` reads the
-    rectangular window; the mask is forwarded to the `Patch.weights` so
-    downstream aggregation honours it.
+    rectangular window. The wrapper stays on `Patch.indices`, where every
+    dense aggregation reads the mask (via ``_resolve_indices``) and skips
+    the cells outside it; the mask also becomes the `Patch.weights`.
     """
 
     window: Any

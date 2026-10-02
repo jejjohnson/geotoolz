@@ -99,7 +99,8 @@ zero on each patch's leading edge, and OverlapAdd divides by the summed
 weights, so interior seams are feathered (an identity operator
 reconstructs them exactly). The one exception is the
 scene's first row and column, which no chip weights above zero and which
-come back as `0.0` — see [Window convention](patching.md#window-convention).
+come back as NaN (the aggregation's `fill_value`) — see
+[Window convention](patching.md#window-convention).
 
 ## 5. Per-patch operator — channel normalisation
 

@@ -165,8 +165,9 @@ def test_overlap_add_constant_field_border() -> None:
 
     Every interior seam is the constant exactly. The only defect is the
     leading border ring — row 0 and column 0 — where the sole covering chip
-    has ``w[0] = 0``, so the accumulated weight is zero and OverlapAdd fills
-    ``0.0``. This pins today's anchor behaviour (regular samplers start at
+    has ``w[0] = 0``, so the accumulated weight is zero and OverlapAdd writes
+    its ``fill_value`` (NaN by default, never a value indistinguishable from
+    data). This pins today's anchor behaviour (regular samplers start at
     anchor 0, never negative), not a property of the window alone.
     """
     field = _constant_field(40)
@@ -181,9 +182,9 @@ def test_overlap_add_constant_field_border() -> None:
     # Everything but the leading ring — including all interior seams (rows
     # / cols 8, 16, 24, 32) and the trailing row/col — is exactly C.
     np.testing.assert_allclose(out[1:, 1:], _C, rtol=1e-15, atol=0)
-    # Leading border ring: zero weight -> 0.0 fill.
-    np.testing.assert_array_equal(out[0, :], 0.0)
-    np.testing.assert_array_equal(out[:, 0], 0.0)
+    # Leading border ring: zero weight -> NaN fill.
+    assert np.isnan(out[0, :]).all()
+    assert np.isnan(out[:, 0]).all()
 
     # True COLA: without normalisation the doubly-covered interior is
     # already C (sum of shifted periodic Hann == 1); only the outer band
@@ -197,7 +198,9 @@ def test_overlap_add_constant_field_border() -> None:
     raw = _merge_identity(raw_patcher, field)
     np.testing.assert_allclose(raw[8:32, 8:32], _C, rtol=1e-15, atol=0)
     w1 = hann(16, sym=False)
-    np.testing.assert_allclose(raw[0:8, 20], _C * w1[0:8], rtol=1e-14, atol=1e-15)
+    # Row 0 has zero accumulated weight even un-normalised → NaN fill.
+    assert np.isnan(raw[0, 20])
+    np.testing.assert_allclose(raw[1:8, 20], _C * w1[1:8], rtol=1e-14, atol=1e-15)
     np.testing.assert_allclose(raw[32:40, 20], _C * w1[8:16], rtol=1e-14, atol=0)
 
 
@@ -215,5 +218,5 @@ def test_overlap_add_hann_step_equals_size_zero_seams() -> None:
     seam = np.zeros((32, 32), dtype=bool)
     seam[[0, 16], :] = True
     seam[:, [0, 16]] = True
-    np.testing.assert_array_equal(out[seam], 0.0)
+    assert np.isnan(out[seam]).all()
     np.testing.assert_allclose(out[~seam], _C, rtol=1e-15, atol=0)
