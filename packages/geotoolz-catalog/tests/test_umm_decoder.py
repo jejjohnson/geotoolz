@@ -290,3 +290,32 @@ def test_open_range_beyond_the_sentinel_keeps_its_direction() -> None:
     )
     assert early is not None
     assert early.left == early.right == pd.Timestamp("1850-01-01", tz="UTC")
+
+
+def test_cartesian_polygon_is_not_unwrapped() -> None:
+    shell = _ring([(-170, -5), (170, -5), (170, 5), (-170, 5)])
+    geometry = {
+        "CoordinateSystem": "CARTESIAN",
+        "GPolygons": [{"Boundary": _points(shell)}],
+    }
+    geom = granule_geometry(_umm(geometry))
+    assert geom is not None
+    assert geom.area == pytest.approx(340 * 10)  # the wide planar polygon
+    assert geom.covers(shapely.Point(0, 0))
+
+
+def test_cartesian_line_is_not_split() -> None:
+    geometry = {
+        "CoordinateSystem": "CARTESIAN",
+        "Lines": [_points([(170, 0), (-170, 10)])],
+    }
+    geom = granule_geometry(_umm(geometry))
+    assert geom is not None
+    assert geom.geom_type == "LineString"
+
+
+def test_seam_only_line_is_on_both_edges() -> None:
+    geom = granule_geometry(_umm({"Lines": [_points([(180, -10), (180, 10)])]}))
+    assert geom is not None
+    assert geom.intersects(shapely.box(179, -1, 180, 1))
+    assert geom.intersects(shapely.box(-180, -1, -179, 1))

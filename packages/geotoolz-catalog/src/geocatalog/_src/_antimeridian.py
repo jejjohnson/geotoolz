@@ -148,7 +148,15 @@ def lonlat_polygon(
 def lonlat_line(
     coords: Sequence[tuple[float, float]],
 ) -> shapely.geometry.base.BaseGeometry:
-    """A lon/lat line, split at ±180° when it crosses the antimeridian."""
+    """A lon/lat line, split at ±180° when it crosses the antimeridian.
+
+    A line lying entirely on the seam is returned on both edges
+    (``+180`` and ``-180``), so it intersects queries spelled either way.
+    """
+    if all(abs(lon) == 180.0 for lon, _ in coords):
+        east = shapely.LineString([(180.0, lat) for _, lat in coords])
+        west = shapely.LineString([(-180.0, lat) for _, lat in coords])
+        return shapely.MultiLineString([east, west])
     if not crosses_antimeridian(coords):
         return shapely.LineString(coords)
     return wrap_to_lonlat(shapely.LineString(unwrap_longitudes(coords)))

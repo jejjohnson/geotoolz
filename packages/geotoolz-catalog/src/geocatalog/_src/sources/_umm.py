@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import pandas as pd
+import shapely
 import shapely.geometry
 
 from geocatalog._src._antimeridian import lonlat_box, lonlat_line, lonlat_polygon
@@ -62,6 +63,13 @@ def _flatten(
     return shapely.geometry.GeometryCollection(flat)
 
 
+def _planar_polygon(
+    shell: list[tuple[float, float]], holes: list[list[tuple[float, float]]]
+) -> shapely.geometry.base.BaseGeometry:
+    poly = shapely.geometry.Polygon(shell, holes)
+    return poly if poly.is_valid else shapely.make_valid(poly)
+
+
 def granule_geometry(
     umm: Mapping[str, Any],
 ) -> shapely.geometry.base.BaseGeometry | None:
@@ -74,8 +82,9 @@ def granule_geometry(
     Footprints that cross the antimeridian — a rectangle with
     ``West > East`` or a polygon ring that jumps by more than 180° —
     are split at ±180° into a `MultiPolygon` rather than read as the
-    complement band (#236). A GPolygon's ``ExclusiveZone`` boundaries
-    become holes.
+    complement band (#236) — unless the granule declares a CARTESIAN
+    coordinate system, whose edges are straight in the lon/lat plane.
+    A GPolygon's ``ExclusiveZone`` boundaries become holes.
 
     Args:
         umm: A UMM granule dict (the ``umm`` entry of a CMR item).
@@ -93,6 +102,17 @@ def granule_geometry(
     geom = h.get("Geometry")
     if not isinstance(geom, Mapping):
         return None
+    # A CARTESIAN granule's edges are straight lines in the lon/lat
+    # plane and never cross the antimeridian (CMR polygon support
+    # notes), so a >180° edge is a real wide edge, not a crossing.
+    cartesian = any(
+        str(level.get(key) or "").upper() == "CARTESIAN"
+        for level, key in (
+            (geom, "CoordinateSystem"),
+            (h, "CoordinateSystem"),
+            (spatial, "GranuleSpatialRepresentation"),
+        )
+    )
 
     # GPolygons: list of polygons, each a Boundary with Points and an
     # optional ExclusiveZone of hole boundaries.
@@ -113,7 +133,9 @@ def granule_geometry(
             if isinstance(b, Mapping)
             and len(ring := _lonlat_points(b.get("Points"))) >= 3
         ]
-        polys.append(lonlat_polygon(shell, holes))
+        polys.append(
+            _planar_polygon(shell, holes) if cartesian else lonlat_polygon(shell, holes)
+        )
     if (found := _flatten(polys)) is not None:
         return found
 
@@ -143,7 +165,11 @@ def granule_geometry(
             continue
         coords = _lonlat_points(line.get("Points"))
         if len(coords) >= 2:
-            lines.append(lonlat_line(coords))
+            lines.append(
+                shapely.geometry.LineString(coords)
+                if cartesian
+                else lonlat_line(coords)
+            )
     if (found := _flatten(lines)) is not None:
         return found
 
