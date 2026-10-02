@@ -46,8 +46,49 @@ class DaskField:
         crs = crs.crs if crs is not None else None
         return GridDomain(coords=coords, crs=crs)
 
-    def select(self, indexer: dict[str, slice]) -> DaskField:
-        return DaskField(self.array.isel(**indexer))
+    def select(self, indexer: dict[str, slice]) -> Any:
+        """Read one patch as a materialised `xarray.DataArray`.
+
+        Returns the computed slice (not another `DaskField`), so the
+        payload is `np.asarray`-able and feeds the spatial aggregations
+        directly — mirroring `XarrayField.select`. Coordinates come along
+        with ``isel``; when the source is georeferenced through rioxarray
+        (it carries a grid-mapping coordinate) the chip also gets an
+        explicit window transform, since ``rio.transform()`` on a
+        coordinate-free slice would otherwise report the full-array affine.
+        """
+        sub = _write_window_transform(self.array, self.array.isel(**indexer), indexer)
+        return sub.compute()
 
     def with_data(self, array: Any) -> DaskField:
         return DaskField(self.array.copy(data=array))
+
+
+def _write_window_transform(full: Any, sub: Any, indexer: dict[str, Any]) -> Any:
+    """Write the window affine onto ``sub`` when ``full`` is rioxarray-georeferenced."""
+    try:
+        rio = full.rio  # only registered once rioxarray has been imported
+    except AttributeError:
+        return sub
+    try:
+        y_dim, x_dim = rio.y_dim, rio.x_dim
+        georeferenced = rio.grid_mapping in full.coords
+    except Exception:  # rioxarray's MissingSpatialDimensionError & co.
+        return sub
+    if not georeferenced:
+        return sub
+    offsets = []
+    for dim in (y_dim, x_dim):
+        index = indexer.get(dim, slice(None))
+        if not isinstance(index, slice) or index.step not in (None, 1):
+            return sub
+        offsets.append(index.indices(full.sizes[dim])[0])
+    from rasterio.windows import Window, transform as window_transform
+
+    window = Window(
+        col_off=offsets[1],
+        row_off=offsets[0],
+        width=sub.sizes[x_dim],
+        height=sub.sizes[y_dim],
+    )
+    return sub.rio.write_transform(window_transform(window, rio.transform()))

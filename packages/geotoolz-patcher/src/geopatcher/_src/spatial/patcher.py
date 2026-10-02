@@ -1243,10 +1243,21 @@ def _carrier_nodata(data: Any) -> Any:
     fill = getattr(data, "fill_value_default", None)
     if fill is not None:
         return fill
-    rio = getattr(getattr(data, "da", None), "rio", None)
+    rio = getattr(data, "rio", None) if _is_rio_dataarray(data) else None
     if rio is not None and getattr(rio, "nodata", None) is not None:
         return rio.nodata
     return 0
+
+
+def _is_rio_dataarray(data: Any) -> bool:
+    """True for an `xarray.DataArray` carrying a rioxarray ``.rio`` accessor.
+
+    Checked structurally (``dims`` + ``rio``) so xarray stays an optional
+    import. Tested before the `GeoTensor` branch because xarray exposes
+    ``attrs`` keys as attributes — a DataArray with a ``transform`` attr
+    would otherwise look like a GeoTensor.
+    """
+    return hasattr(data, "dims") and hasattr(data, "coords") and hasattr(data, "rio")
 
 
 def _pad_carrier(
@@ -1254,20 +1265,20 @@ def _pad_carrier(
 ) -> Any:
     """Pad a selected carrier up to full size, preserving georeferencing.
 
-    Handles a georeader `GeoTensor` (whose ``pad`` shifts the transform),
-    an xarray-backed field exposing ``.da``, and a plain ndarray.
+    Handles a rioxarray `DataArray` (coords rebuilt from the shifted
+    affine, transform written), a georeader `GeoTensor` (whose ``pad``
+    shifts the transform), and a plain ndarray.
     """
     pt, pb, pl, pr = pads
     if pt == pb == pl == pr == 0:
         return data
+    if _is_rio_dataarray(data):
+        from geopatcher._src.fields.rio_xarray import pad_dataarray
+
+        return pad_dataarray(data, pads, mode=mode, fill=fill)
     const = {"constant_values": fill} if mode == "constant" else {}
     if hasattr(data, "pad") and hasattr(data, "transform"):
         return data.pad({"y": (pt, pb), "x": (pl, pr)}, mode=mode, **const)
-    da = getattr(data, "da", None)
-    if da is not None:
-        y_dim, x_dim = da.rio.y_dim, da.rio.x_dim
-        padded = da.pad({y_dim: (pt, pb), x_dim: (pl, pr)}, mode=mode, **const)
-        return type(data)(padded)
     arr = np.asarray(data)
     pad_width = [(0, 0)] * (arr.ndim - 2) + [(pt, pb), (pl, pr)]
     if mode == "constant":
