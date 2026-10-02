@@ -8,7 +8,7 @@ scikit-learn integration. Wraps any sklearn-compatible estimator (`fit` / `predi
     (`PixelTable` carrier, type-named wrappers like `PixelwiseClassifier`, `NanPolicy` dataclass)
     will replace this surface in a follow-up (a breaking change, without aliases). Supervised estimators
     (classifiers / regressors) must be pre-fit out-of-graph and loaded via `state_path=` —
-    in-graph supervised fit helpers are tracked for v0.2.
+    in-graph supervised fit helpers are not implemented yet.
 
 - **Universal adapter:** `SklearnOp`, `GeoTensorEstimator`
 - **Convenience wrappers** (named algorithm, sensible defaults). Each is prefixed `Pixelwise` so it

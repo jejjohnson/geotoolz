@@ -12,5 +12,7 @@ atmospheric correction.
 - **Spectral response:** `ApplySRF` — Gaussian SRFs integrated on a 1-nm grid via georeader's
   `transform_to_srf`; source wavelengths from the argument or `attrs["wavelengths"]`, optional
   target `band_names`
+- **Tier-A primitives:** `dn_to_radiance`, `radiance_to_dn`, `dn_to_reflectance`, `bt_from_radiance`,
+  `dos1`, `min_max_normalize`, `percentile_clip`, `gamma_correct`
 
 ::: geotoolz.radiometry

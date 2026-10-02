@@ -66,11 +66,11 @@ explicit — there is no hidden state.
 ## Install
 
 ```bash
-pip install geocatalog                  # base: InMemory + raster + vector
-pip install 'geocatalog[duckdb]'        # DuckDB backend
-pip install 'geocatalog[xarray-raster]' # xarray (NetCDF / Zarr) backend
-pip install 'geocatalog[stac]'          # STAC ingestion
-pip install 'geocatalog[full]'          # everything
+pip install geotoolz-catalog                  # base: InMemory + raster + vector
+pip install 'geotoolz-catalog[duckdb]'        # DuckDB backend
+pip install 'geotoolz-catalog[xarray-raster]' # xarray (NetCDF / Zarr) backend
+pip install 'geotoolz-catalog[stac]'          # STAC ingestion
+pip install 'geotoolz-catalog[full]'          # everything
 ```
 
 Or with `uv`:

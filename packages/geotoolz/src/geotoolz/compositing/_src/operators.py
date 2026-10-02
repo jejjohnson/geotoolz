@@ -806,8 +806,8 @@ class StackMatched(Operator):
         Per-band attrs (``band_names``, ``descriptions``, ``wavelengths``,
         ...) are concatenated in stacking order when every input carries
         them; a key missing from any input is dropped. Other attrs follow
-        the first input. NaN-fill padding on grid mismatch is tracked for
-        a future revision; today the operator requires strict grid
+        the first input. NaN-fill padding on grid mismatch is not
+        implemented; the operator requires strict grid
         equality. Pre-coregister with
         ``geotoolz.geom.coregister.RasterToRasterLike`` if the
         inputs aren't already on the same grid. Nodata pixels of each

@@ -63,12 +63,16 @@ flowchart LR
 ### Typed I/O contract
 
 Operators don't *require* Pydantic models, but they pair well with one
-when you want the input/output contract spelled out — especially when an
-operator takes multi-input dicts. The pattern:
+when you want the constructor contract spelled out and validated. The
+pattern keeps the keyword-only constructor and stores the validated
+values under the argument names, so `get_config()` is still derived
+automatically:
 
 ```python
+import numpy as np
 from pydantic import BaseModel
 from pipekit import Operator
+from geotoolz._src.wrap import wrap_like
 
 
 class ScaleConfig(BaseModel):
@@ -79,18 +83,15 @@ class ScaleConfig(BaseModel):
 class Scale(Operator):
     """Multiply DN by a scale factor, optionally clipping the output."""
 
-    def __init__(self, **cfg) -> None:
-        self.cfg = ScaleConfig(**cfg)
+    def __init__(self, *, scale: float = 1e-4, clip: tuple[float, float] | None = None) -> None:
+        cfg = ScaleConfig(scale=scale, clip=clip)
+        self.scale, self.clip = cfg.scale, cfg.clip
 
     def _apply(self, gt):
-        out = gt.values * self.cfg.scale
-        if self.cfg.clip is not None:
-            lo, hi = self.cfg.clip
-            out = out.clip(lo, hi)
-        return gt.array_as_geotensor(out)
-
-    def get_config(self) -> dict:
-        return self.cfg.model_dump()
+        out = np.asarray(gt, dtype=np.float32) * self.scale
+        if self.clip is not None:
+            out = out.clip(*self.clip)
+        return wrap_like(gt, out)
 ```
 
 `ScaleConfig` validates the constructor args (one-shot, at `__init__`
@@ -247,7 +248,7 @@ eager.
 ```mermaid
 flowchart LR
     subgraph cat["geocatalog"]
-        STAC[(STAC)] --> Loader[CatalogLoader]
+        STAC[(STAC)] --> Loader[load_raster]
     end
     subgraph tools["geotoolz"]
         Op1[Scale] --> Op2[CloudMask] --> Op3[NDVI]
@@ -270,9 +271,9 @@ flowchart LR
 
 For the end-to-end multi-repo walk-through (catalog → patch → operate),
 see the canonical Lake Tahoe notebook:
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+[`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 
-## The v0.1 idiom library
+## The idiom library
 
 Beyond the bare composition primitives, the core ships a small library
 of "operators you reach for constantly" — observers, control flow, and
@@ -323,17 +324,26 @@ them with `_terminal = True`; `Sequential` then rejects them in any
 position except the last:
 
 ```python
-class WriteCOG(Operator):
-    _terminal = True
-    def _apply(self, gt):
-        save_to_disk(gt, self.path)
+from georeader.save import save_cog
 
-Sequential([WriteCOG("/a"), Add(1)])  # TypeError
-Sequential([Add(1), WriteCOG("/a")])  # ok
+
+class SaveCOG(Operator):
+    _terminal = True
+
+    def __init__(self, *, path: str) -> None:
+        self.path = path
+
+    def _apply(self, gt):
+        save_cog(gt, self.path)        # returns None
+
+Sequential([SaveCOG(path="/a.tif"), Scale()])  # TypeError
+Sequential([Scale(), SaveCOG(path="/a.tif")])  # ok
 ```
 
-`Sink` is **not** terminal — it does a side effect *and* returns the
-input. That's why `Sink` composes mid-chain and `WriteCOG` doesn't.
+The built-in writers (`gz.WriteGeoTIFF`, `gz.WriteCOG`, `gz.WriteZarr`)
+are terminal the same way. `Sink` is **not** terminal — it does a side
+effect *and* returns the input. That's why `Sink` composes mid-chain and
+`SaveCOG` doesn't.
 
 ## Georeferencing checks
 

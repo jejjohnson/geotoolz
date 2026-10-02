@@ -12,5 +12,8 @@ identifiers as either integer axis indices or string band names (resolved agains
 - **Burned area (S2):** `BAIS2`
 - **Minerals:** `ClayMinerals`, `IronOxide`
 - **Custom:** `NormalizedDifference`, `AppendIndex`
+- **Tier-A primitives** (integer `*_idx` band positions): `normalized_difference`, `ndvi`, `evi`,
+  `evi2`, `savi`, `gci`, `kndvi`, `arvi`, `ndwi_mcfeeters`, `mndwi`, `ndmi`, `nbr`, `nbr2`, `ndsi`,
+  `ndbi`, `bsi`, `ciri`, `bais2`, `clay_minerals`, `iron_oxide`
 
 ::: geotoolz.indices

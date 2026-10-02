@@ -30,7 +30,7 @@ lives on the view).
 ## Prerequisites
 
 ```bash
-pip install 'geopatcher[grid]'   # xarray
+pip install 'geotoolz-patcher[grid]'   # xarray
 ```
 
 ## Side-by-side
@@ -164,9 +164,8 @@ the flag.
   slice first (`da.isel(time=k)`) or use `TemporalPatcher` for the time
   axis. The time-axis patching path is documented in
   [`recipes/temporal-stencils.md`](temporal-stencils.md).
-- **In-memory cache only.** Content-addressed caching across sessions
-  is tracked at [#24](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher/issues/24);
-  this PR ships only the index-keyed in-memory variant.
+- **In-memory cache only.** Only the index-keyed in-memory cache
+  exists; content-addressed caching across sessions is not implemented.
 - **No xrpatcher `dims_labels` auto-discovery on reconstruct.**
   `merge_to_xarray` uses the field's coord schema; specify it via the
   field's `with_data` rather than letting the reconstruct guess.

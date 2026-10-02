@@ -1,7 +1,6 @@
 """Tier-A primitives — pure-numpy QA / cloud-mask decoding.
 
-The canonical home for QA-band decoding (these functions used to be
-split between here and the removed ``geotoolz.cloud`` module):
+The canonical home for QA-band decoding:
 
 1. **`mask_from_qa_bits`** — single-bit-flag decoding for Landsat-style
    bitmask QA layers (``QA_PIXEL``): True where ANY listed bit is set.

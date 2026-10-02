@@ -43,21 +43,23 @@ the right shape.
 ## Mental model
 
 Every operator is a typed function from inputs to outputs. The contract
-is small enough to fit in two methods:
+is one method plus a keyword-only constructor:
 
 ```python
 from pipekit import Operator
 
 class MyOp(Operator):
     def __init__(self, *, knob: float) -> None:
-        self.knob = knob
+        self.knob = knob            # same name as the argument
 
     def _apply(self, gt):          # the work
         return gt * self.knob
-
-    def get_config(self):           # JSON-serialisable args
-        return {"knob": self.knob}
 ```
+
+`get_config()` — the JSON-serialisable constructor args that make a
+pipeline round-trip to YAML — is derived automatically from the
+`__init__` signature, as long as each argument is stored under its own
+name (`MyOp(knob=2.0).get_config() == {"knob": 2.0}`).
 
 Pipelines compose:
 
@@ -75,8 +77,9 @@ A `Graph` is itself an `Operator`, so you can nest them inside a
 ## A two-operator pipeline
 
 ```python
-import geotoolz as gz
+import numpy as np
 from geotoolz import Operator, Sequential
+from geotoolz._src.wrap import wrap_like
 
 
 class Scale(Operator):
@@ -84,29 +87,27 @@ class Scale(Operator):
         self.scale = scale
 
     def _apply(self, gt):
-        return gt.array_as_geotensor(gt.values * self.scale)
-
-    def get_config(self):
-        return {"scale": self.scale}
+        # wrap_like keeps the input's transform / CRS / attrs.
+        return wrap_like(gt, np.asarray(gt, dtype=np.float32) * self.scale)
 
 
 class NDVI(Operator):
-    def __init__(self, *, nir_idx: int, red_idx: int, eps: float = 1e-10) -> None:
-        self.nir_idx, self.red_idx, self.eps = nir_idx, red_idx, eps
+    def __init__(self, *, nir: int, red: int, eps: float = 1e-10) -> None:
+        self.nir, self.red, self.eps = nir, red, eps
 
     def _apply(self, gt):
-        a = gt.values
-        nir, red = a[self.nir_idx], a[self.red_idx]
-        return gt.array_as_geotensor((nir - red) / (nir + red + self.eps))
-
-    def get_config(self):
-        return {"nir": self.nir_idx, "red": self.red_idx, "eps": self.eps}
+        a = np.asarray(gt, dtype=np.float32)
+        nir, red = a[self.nir], a[self.red]
+        # A new float quantity declares NaN as its nodata fill.
+        return wrap_like(gt, (nir - red) / (nir + red + self.eps), fill_value_default=np.nan)
 
 
 pipe = Sequential([Scale(scale=1e-4), NDVI(nir=7, red=3)])
 ndvi = pipe(sentinel2_geotensor)
 ```
 
+The library ships both steps, with band-name resolution and nodata
+handling: `gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir="B08", red="B04")`.
 For the same shape with real data and a matplotlib plot at the end, see
 the [Quickstart](quickstart.md) or the [operator-composition
 notebook](notebooks/operators_lake_tahoe.ipynb).
@@ -116,7 +117,7 @@ notebook](notebooks/operators_lake_tahoe.ipynb).
 ```mermaid
 flowchart LR
     subgraph cat["geocatalog — discover &amp; load"]
-        STAC[(STAC catalogue)] --> Loader[CatalogLoader]
+        STAC[(STAC catalogue)] --> Loader[load_raster]
     end
     subgraph tools["geotoolz — operate"]
         Op1[Scale] --> Op2[CloudMask] --> Op3[NDVI]
@@ -133,26 +134,27 @@ flowchart LR
 - **`geotoolz`** runs the per-scene transforms.
 - **[`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)** handles
   sliding-window patching for big rasters, exposed as Operator wrappers
-  in [`geotoolz.patch_ops`](api/core.md) (`GridSampler`, `ApplyToChips`,
+  in [`geotoolz.patch_ops`](patch_ops.md) (`GridSampler`, `ApplyToChips`,
   `MergePatches`) so a tiled-inference pipeline composes inside a `Sequential`.
 
 The full multi-repo walk-through lives in **the canonical Lake Tahoe
 notebook**:
-[`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb).
+[`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 The slice of that flow that's about *composition of operators* is
 [`docs/notebooks/operators_lake_tahoe.ipynb`](notebooks/operators_lake_tahoe.ipynb)
 in this repo.
 
-## Pre-alpha status
+## Status
 
-`geotoolz` is `0.0.x`. The composition core has stabilised; the domain
-operator surface (radiometry, indices, cloud, compositing, segmentation,
-…) is landing module-by-module. Several submodules are partially
-implemented — check the source under `src/geotoolz/<module>/_src/` if
-you need to know what works today. Demos and recipes in these docs
-deliberately favour **inline `Operator` subclasses** over named imports,
-so they keep teaching the composition pattern even as the named-op surface
-churns.
+`geotoolz` is pre-1.0 (`0.x`, released per package by release-please):
+every operator family in the API reference is implemented and tested,
+but minor releases can still carry breaking changes — renames and
+removals are outright, with no deprecated aliases — and each one is
+called out in the
+[changelog](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/CHANGELOG.md).
+The quickstart and recipes define small **inline `Operator`
+subclasses** on purpose, to teach the composition pattern; each names
+the built-in operator to reach for in real pipelines.
 
 ## Where next
 
@@ -165,6 +167,6 @@ churns.
   - [Integration with geocatalog & geopatcher](recipes/integration-with-geocatalog-and-geopatcher.md)
 - **Tutorial**: [Composing a Sentinel-2 NDVI pipeline](notebooks/operators_lake_tahoe.ipynb) — the docs' canonical worked example.
 - **Extended examples ↗**: chronological walkthroughs of the whole stack — composition core, pipeline idioms, image processing on real burn-scars, ML patches, deployment shapes — live in [`research_notebook/projects/geostack`](https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack). The notebooks there execute against real MPC / GBIF / Natural Earth data; this repo's docs reference them by name.
-- **Reference**: [Core API](api/core.md) · [Changelog](https://github.com/jejjohnson/geotoolz/blob/main/CHANGELOG.md) · [GitHub](https://github.com/jejjohnson/geotoolz)
+- **Reference**: [Core API](api/core.md) · [Changelog](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/CHANGELOG.md) · [GitHub](https://github.com/jejjohnson/geotoolz)
 
 Related: [Normalization](normalization.md) · [Multi-format readers](io.md) · [Sensor readers](readers.md).

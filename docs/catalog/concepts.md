@@ -156,7 +156,7 @@ contract — anywhere you accept a `GeoCatalog`, either one works.
 
 | | InMemoryGeoCatalog | DuckDBGeoCatalog |
 | --- | --- | --- |
-| Install | base | `pip install 'geocatalog[duckdb]'` |
+| Install | base | `pip install 'geotoolz-catalog[duckdb]'` |
 | Storage | `gpd.GeoDataFrame` in RAM | GeoParquet 1.1 on disk / S3 / HF |
 | Indexing | R-tree + `IntervalIndex` | GeoParquet 1.1 covering bbox column |
 | Scale | up to ~10⁵ rows | 10⁶+ rows |

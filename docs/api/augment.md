@@ -156,3 +156,24 @@ must receive identical spatial transforms (call them in lockstep).
       show_root_heading: true
       show_signature_annotations: true
 
+## Tier-A primitives
+
+::: geotoolz.augment._src.array.rot90_transform
+    options:
+      show_root_heading: true
+      show_signature_annotations: true
+
+::: geotoolz.augment._src.array.sun_angle_scale
+    options:
+      show_root_heading: true
+      show_signature_annotations: true
+
+::: geotoolz.augment._src.array.rayleigh_weights
+    options:
+      show_root_heading: true
+      show_signature_annotations: true
+
+::: geotoolz.augment._src.array.cloud_alpha
+    options:
+      show_root_heading: true
+      show_signature_annotations: true

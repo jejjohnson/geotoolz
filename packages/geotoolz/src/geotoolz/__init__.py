@@ -30,8 +30,9 @@ enforces this; the only exceptions are:
   require geopatcher, so its operators are only reachable as
   ``gz.patch_ops.*``.
 
-The four-axis Patcher framework lives in the standalone
-[`geopatcher`](https://github.com/jejjohnson/geopatcher) package. Install
+The four-axis Patcher framework lives in the
+[`geotoolz-patcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)
+workspace package (import name `geopatcher`). Install
 the optional `[patch]` extra (``pip install 'geotoolz[patch]'``) to pull
 it in and use ``geotoolz.patch_ops`` for the Operator-graph bridge:
 

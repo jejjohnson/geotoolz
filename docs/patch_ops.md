@@ -7,7 +7,7 @@ operator per chip, and stitch the outputs back into a full scene — with
 the train-time and inference-time data flow expressed as the same
 operator graph, just with different endpoints.
 
-Install the optional `[patch]` extra to pull in `geopatcher[pipekit]`:
+Install the optional `[patch]` extra to pull in `geotoolz-patcher[pipekit]`:
 
 ```bash
 pip install 'geotoolz[patch]'
@@ -129,7 +129,7 @@ values = domain.sample(scene)             # (N,) or (bands, N)
 ```
 
 For CRS-aware point extraction into a vector cube, see
-`geotoolz.geom.RasterToPoints`.
+`geotoolz.geom.coregister.RasterToPoints`.
 
 ## Further reading
 

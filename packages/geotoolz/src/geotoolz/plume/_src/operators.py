@@ -710,9 +710,11 @@ class IMEEstimate(Operator):
             or ``"skeleton"``. See :func:`plume_length`; ``"skeleton"``
             raises ``ValueError`` for compact plumes whose skeleton
             collapses to a point.
-        pixel_area_m2: Override the pixel area (m^2); default is taken
-            from the input transform determinant (correct for an
-            equal-area CRS).
+        pixel_area_m2: Override the pixel area (m^2); default is the
+            absolute input transform determinant in the projected CRS's
+            metres (exact on an equal-area projection; on UTM it ignores
+            the projection's scale factor, a < 0.1 % error near the
+            central meridian).
         return_uncertainty: Append ``emission_rate_uncertainty_kg_s``.
         uncertainty_fraction: Fractional 1-sigma uncertainty on Q. The
             default 0.5 follows Varon et al. (2018) Table 3.

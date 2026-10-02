@@ -10,5 +10,7 @@ Display-time helpers: composites, stretches, colormaps, hillshade overlays. Outp
 - **Colormaps:** `ApplyColormap`, `ApplyDiscreteColormap`
 - **Terrain:** `Hillshade`, `ShadedRelief`
 - **Overlays:** `AnnotatePoints`, `AnnotatePolygons`, `Overlay`
+- **Tier-A primitives:** `stretch_to_uint8`, `gamma_correct_display`, `rgba_from_scalar`,
+  `rgba_from_categories`, `ensure_rgba`, `blend_rgba`
 
 ::: geotoolz.viz

@@ -17,7 +17,7 @@ This recipe walks through:
 ## Prerequisites
 
 ```bash
-pip install 'geopatcher[streaming]'   # zarr>=3
+pip install 'geotoolz-patcher[streaming]'   # zarr>=3
 ```
 
 The streaming path uses `zarr >= 3`. The optional extras gate it so the

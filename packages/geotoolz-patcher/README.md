@@ -106,7 +106,7 @@ full mental model.
 - **15-min walkthrough:** [docs/quickstart.md](docs/quickstart.md) — Lake Tahoe Sentinel-2 NDVI inference.
 - **Recipes:** streaming OverlapAdd, on-error policies, PatchJournal resume.
 - **Demo notebook:** [docs/notebooks/patcher_lake_tahoe.ipynb](docs/notebooks/patcher_lake_tahoe.ipynb) — patcher slice of the Lake Tahoe scenario.
-- **See the full end-to-end story:** [`geocatalog/docs/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog/blob/main/docs/notebooks/end_to_end_lake_tahoe.ipynb) — catalog → operators → patcher.
+- **See the full end-to-end story:** [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb) — catalog → operators → patcher.
 - **API reference:** [docs site](https://jejjohnson.github.io/geopatcher/api/reference/).
 
 ## License

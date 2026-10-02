@@ -1,6 +1,6 @@
 # Command-line interface
 
-`pip install geocatalog` puts a `geocatalog` command on your `PATH`. It
+`pip install geotoolz-catalog` puts a `geocatalog` command on your `PATH`. It
 maps thin wrappers over the same functions the Python API exposes —
 nothing in the library is CLI-only — so you can mix it with cron, CI,
 or a shell session without writing a Python script.
