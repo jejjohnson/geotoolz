@@ -1636,3 +1636,60 @@ def test_4d_time_stack() -> None:
     assert flow.shape == (2, 8, 8)
     padded = gz.geom.PadTo(shape=(10, 10))(stack)
     assert padded.shape == (2, 3, 10, 10)
+
+
+# ---------------------------------------------------------------------------
+# Non-default grids (``_helpers.TOY_GRIDS``)
+# ---------------------------------------------------------------------------
+
+
+def _pixel_centres(gt: GeoTensor) -> dict[float, tuple[float, float]]:
+    """World coordinate of every valid pixel centre, keyed by its unique value."""
+    rows, cols = np.mgrid[0 : gt.shape[-2], 0 : gt.shape[-1]]
+    xs, ys = gt.transform * (cols + 0.5, rows + 0.5)
+    values = np.asarray(gt)[0]
+    return {
+        float(v): (float(x), float(y))
+        for v, x, y in zip(values.ravel(), xs.ravel(), ys.ravel(), strict=True)
+        if v != gt.fill_value_default
+    }
+
+
+def _numbered(grid: str) -> GeoTensor:
+    from _helpers import toy_geotensor
+
+    values = np.arange(8 * 8, dtype=np.float64).reshape(1, 8, 8) + 1.0
+    return toy_geotensor(values, grid=grid)
+
+
+@pytest.mark.parametrize("grid", ["non_square", "rotated", "sheared", "geographic"])
+@pytest.mark.parametrize(
+    "op",
+    [gz.geom.CropTo(shape=(4, 6)), gz.geom.PadTo(shape=(10, 12))],
+    ids=["CropTo", "PadTo"],
+)
+def test_crop_and_pad_keep_every_pixel_in_place(grid: str, op: gz.Operator) -> None:
+    """The re-based origin follows the full affine, not just ``a`` / ``e``."""
+    gt = _numbered(grid)
+    out = op(gt)
+    before = _pixel_centres(gt)
+    after = _pixel_centres(out)
+    assert after
+    for value, xy in after.items():
+        np.testing.assert_allclose(xy, before[value], rtol=0, atol=1e-9)
+
+
+@pytest.mark.parametrize("grid", ["non_square", "geographic"])
+def test_tile_then_stitch_round_trips_on_north_up_grids(grid: str) -> None:
+    gt = _numbered(grid)
+    stitched = gz.geom.Stitch()(gz.geom.Tile(size=(3, 4))(gt))
+    np.testing.assert_array_equal(np.asarray(stitched), np.asarray(gt))
+    assert stitched.transform == gt.transform
+    assert str(stitched.crs) == str(gt.crs)
+
+
+@pytest.mark.parametrize("grid", ["rotated", "sheared"])
+def test_stitch_rejects_rotated_and_sheared_grids(grid: str) -> None:
+    tiles = gz.geom.Tile(size=(4, 4))(_numbered(grid))
+    with pytest.raises(ValueError, match="rotated/sheared"):
+        gz.geom.Stitch()(tiles)

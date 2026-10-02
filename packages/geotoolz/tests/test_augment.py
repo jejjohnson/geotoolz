@@ -865,3 +865,48 @@ def test_compose_is_not_a_top_level_export() -> None:
     # `gz.compose`-style names belong to pipekit's right-to-left composer.
     assert not hasattr(gz, "Compose")
     assert gz.augment.Compose is augment.Compose
+
+
+# ---------------------------------------------------------------------------
+# Non-default grids (``_helpers.TOY_GRIDS``)
+# ---------------------------------------------------------------------------
+
+
+def _pixel_centres(gt: GeoTensor) -> dict[float, tuple[float, float]]:
+    """World coordinate of every pixel centre, keyed by its (unique) value."""
+    rows, cols = np.mgrid[0 : gt.shape[-2], 0 : gt.shape[-1]]
+    xs, ys = gt.transform * (cols + 0.5, rows + 0.5)
+    values = np.asarray(gt)[0]
+    return {
+        float(v): (float(x), float(y))
+        for v, x, y in zip(values.ravel(), xs.ravel(), ys.ravel(), strict=True)
+    }
+
+
+@pytest.mark.parametrize("grid", ["non_square", "rotated", "sheared", "geographic"])
+@pytest.mark.parametrize(
+    "make_op",
+    [
+        lambda: augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0),
+        lambda: augment.RandomFlip(p_horizontal=0.0, p_vertical=1.0),
+        # Seeds 0 / 1 / 2 draw k = 2 / 3 / 1 quarter turns.
+        *(
+            (lambda seed=seed: augment.RandomRotate90(p=1.0, seed=seed))
+            for seed in (0, 1, 2)
+        ),
+    ],
+)
+def test_geometric_augments_keep_every_pixel_in_place(
+    grid: str, make_op: Callable[[], Operator]
+) -> None:
+    """Each output pixel sits where its value sat on the input grid (#126).
+
+    A rigid flip / rotation only re-indexes pixels; on anisotropic, rotated,
+    sheared and geographic grids the transform must follow exactly.
+    """
+    values = np.arange(4 * 6, dtype=np.float64).reshape(1, 4, 6) + 1.0
+    patch = toy_geotensor(values, grid=grid)
+    out = make_op()(patch)
+    before = _pixel_centres(patch)
+    for value, xy in _pixel_centres(out).items():
+        np.testing.assert_allclose(xy, before[value], rtol=0, atol=1e-9)

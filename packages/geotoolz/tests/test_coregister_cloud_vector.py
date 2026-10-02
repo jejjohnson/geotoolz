@@ -256,6 +256,8 @@ class TestPointCloudToRasterBinnedStat:
 
 def test_binned_rasters_do_not_inherit_the_like_fill() -> None:
     """Empty cells are NaN (0 for counts), not ``like``'s -9999 (#146)."""
+    # The binned raster is assembled with xarray (the [vector-cube] extra).
+    pytest.importorskip("xarray")
     like = toy_geotensor(np.zeros((4, 4), dtype=np.float32), fill_value_default=-9999)
     xy = np.array([[PX_X(1), PX_Y(1)]])
     values = np.array([5.0])

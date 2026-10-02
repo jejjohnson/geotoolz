@@ -187,7 +187,7 @@ def test_expand_labels_grows_regions() -> None:
     assert (out_arr == 7).sum() > 1
 
 
-def test_mark_boundaries_uses_array_as_geotensor() -> None:
+def test_mark_boundaries_preserves_grid_and_fill() -> None:
     rgb = np.tile(np.linspace(0, 1, 6, dtype=float), (3, 6, 1))
     gt = _gt(rgb)
     label_img = np.zeros((6, 6), dtype=np.int32)
@@ -197,7 +197,7 @@ def test_mark_boundaries_uses_array_as_geotensor() -> None:
     op = gz.segment.MarkBoundaries(label_img=label_img)
     out = op(gt)
 
-    # Metadata propagation comes from array_as_geotensor.
+    # The overlay keeps the input grid and its (NaN) fill via wrap_like.
     assert out.transform == gt.transform
     assert out.crs == gt.crs
     np.testing.assert_equal(out.fill_value_default, gt.fill_value_default)

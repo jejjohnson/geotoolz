@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -407,19 +408,21 @@ def test_load_from_stac_reads_asset_href(tmp_path: Path) -> None:
 
 
 def test_operator_configs_are_serializable_for_common_values() -> None:
+    """Path / bounds / window / asset-ID configs survive a JSON state round-trip.
+
+    A source given as a runtime object is the opposite case; see
+    ``test_io_source_given_as_object_is_refused_by_from_state``.
+    """
     polygon = box(0.0, 0.0, 1.0, 1.0)
-    source_obj = object()
     ops = [
         io.ReadBounds(src="x.tif", bounds=(0.0, 0.0, 1.0, 1.0)),
         io.ReadCenterCoords(src="x.tif", center=(0.5, 0.5), shape=(2, 2)),
         io.ReadTile(src="x.tif", tile=(1, 0, 0)),
         io.ReadPolygon(src="x.tif", polygon=polygon),
-        io.ReadReprojectLike(src="x.tif", like="grid"),
         io.ReadToCRS(src="x.tif", dst_crs="EPSG:4326"),
         io.WriteCOG(path="x.tif"),
         io.WriteGeoTIFF(path="x.tif"),
         io.WriteZarr(store="x.zarr", group="data", chunks={"y": 16, "x": 16}),
-        io.LoadFromSTAC(item="item", asset_key="visual"),
         io.LoadFromEE(
             image_id="LANDSAT/LC08/C02/T1_L2/LC08_001001_20200101",
             bounds=(0.0, 0.0, 1.0, 1.0),
@@ -429,14 +432,11 @@ def test_operator_configs_are_serializable_for_common_values() -> None:
         ),
     ]
 
-    assert (
-        io.ReadBounds(src=source_obj, bounds=(0.0, 0.0, 1.0, 1.0)).get_config()["src"]
-        is source_obj
-    )
     for op in ops:
-        cfg = op.get_config()
-        assert isinstance(cfg, dict)
-        assert cfg
+        state = json.loads(json.dumps(op.state, allow_nan=False))
+        clone = Operator.from_state(state)
+        assert type(clone) is type(op)
+        assert clone.get_config() == op.get_config()
 
 
 def test_write_zarr_reports_missing_optional_dependency(

@@ -43,8 +43,15 @@ dev = [
     "h5netcdf>=1.3",
     "h5py>=3.10",
     "pytest-benchmark>=4.0",
-    # Workspace members are dev-installed so tests can import them.
-    "geotoolz",
+    # Workspace members are dev-installed so tests can import them. The
+    # geotoolz extras the test suite exercises (hydra-zen config
+    # round-trips, xvec point extraction, netCDF4 / zarr I/O, obstore
+    # pooling) come with them, so a plain `uv sync` runs the same fast
+    # tier as CI's `--all-extras`.
+    "geotoolz[hydra,vector-cube,netcdf,zarr,obstore]",
+    # Reference solar geometry for radiometry.ComputeSZA (no geotoolz
+    # extra declares it).
+    "pysolar>=0.11",
     "geotoolz-patcher",
     "geotoolz-catalog",
 ]

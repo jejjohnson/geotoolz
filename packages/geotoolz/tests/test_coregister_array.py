@@ -59,6 +59,8 @@ def test_raster_to_point_cloud_nearest_pinned() -> None:
 
 
 def test_raster_to_point_cloud_bilinear_pinned() -> None:
+    # Bilinear sampling goes through xarray (the [vector-cube] extra).
+    pytest.importorskip("xarray")
     out = RasterToPointCloud(method="bilinear", max_radius=12.0)(_raster(), _XY)
     expected = [
         [_NAN, 15.572436639063424, 7.870828004235092, _NAN, _NAN],
@@ -147,6 +149,8 @@ def test_point_cloud_to_raster_wraps_binned_primitive(stat: str) -> None:
 
 def test_points_to_raster_wraps_binned_primitive() -> None:
     gpd = pytest.importorskip("geopandas")
+    # The binned raster is assembled with xarray (the [vector-cube] extra).
+    pytest.importorskip("xarray")
     from shapely.geometry import Point
 
     gdf = gpd.GeoDataFrame(
@@ -175,6 +179,9 @@ def test_binned_primitive_handles_west_up_and_south_up_grids() -> None:
     ("method", "k"), [("nearest", 1), ("bilinear", 1), ("idw", 1), ("idw", 4)]
 )
 def test_raster_to_point_cloud_wraps_primitive(method: str, k: int) -> None:
+    if method == "bilinear":
+        # Bilinear sampling goes through xarray (the [vector-cube] extra).
+        pytest.importorskip("xarray")
     raster = _raster()
     out = RasterToPointCloud(method=method, k=k, max_radius=12.0, power=1.5)(
         raster, _XY

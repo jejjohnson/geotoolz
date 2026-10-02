@@ -23,32 +23,70 @@ from georeader.geotensor import GeoTensor
 DEFAULT_TRANSFORM = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0)
 DEFAULT_CRS = "EPSG:32629"
 
+#: Named toy grids, ``name -> (transform, crs)``, for the bug classes the
+#: 10 m UTM default cannot catch. All anchor near the default origin.
+#:
+#: * ``"utm"`` -- the default square, north-up 10 m grid.
+#: * ``"non_square"`` -- 10 m wide, 20 m tall pixels: code that reads one
+#:   resolution for both axes, or swaps ``a`` and ``e``, is off by 2x.
+#: * ``"rotated"`` -- the 10 m grid rotated 30 degrees: ``a`` / ``e`` are
+#:   no longer the pixel size and the bounds are not the corner pixels.
+#: * ``"sheared"`` -- a column shear (``b != 0``) with square-looking
+#:   ``a`` / ``e``: catches code that ignores ``b`` / ``d``.
+#: * ``"geographic"`` -- an EPSG:4326 grid of 1e-4 degree pixels: metric
+#:   computations (areas, slopes, distances) must reject or convert it.
+TOY_GRIDS: dict[str, tuple[rasterio.Affine, str]] = {
+    "utm": (DEFAULT_TRANSFORM, DEFAULT_CRS),
+    "non_square": (
+        rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -20.0, 4_000_000.0),
+        DEFAULT_CRS,
+    ),
+    "rotated": (
+        rasterio.Affine.translation(500_000.0, 4_000_000.0)
+        * rasterio.Affine.rotation(30.0)
+        * rasterio.Affine.scale(10.0, -10.0),
+        DEFAULT_CRS,
+    ),
+    "sheared": (
+        rasterio.Affine(10.0, 5.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
+        DEFAULT_CRS,
+    ),
+    "geographic": (
+        rasterio.Affine(1e-4, 0.0, -8.0, 0.0, -1e-4, 53.0),
+        "EPSG:4326",
+    ),
+}
+
 
 def toy_geotensor(
     values: np.ndarray,
     *,
     transform: rasterio.Affine | None = None,
-    crs: Any = DEFAULT_CRS,
+    crs: Any = None,
     fill_value_default: Any = -9999,
     attrs: dict[str, Any] | None = None,
     with_fill_pixels: bool = False,
+    grid: str = "utm",
 ) -> GeoTensor:
     """Wrap an array in a GeoTensor with stable toy georeferencing.
 
     Args:
         values: The pixel array, 2-D ``(H, W)`` up to 4-D ``(T, C, H, W)``.
-        transform: Affine geotransform; defaults to a 10 m UTM grid.
-        crs: Coordinate reference system. Default ``EPSG:32629``.
+        transform: Affine geotransform; defaults to the ``grid``'s.
+        crs: Coordinate reference system; defaults to the ``grid``'s.
         fill_value_default: Fill value stored on the carrier.
         attrs: Optional metadata dict.
         with_fill_pixels: Write ``fill_value_default`` into every band of
             the pixels marked by :func:`fill_pixel_mask` (the first and
             last pixel of the grid). ``values`` is copied first.
+        grid: A :data:`TOY_GRIDS` name supplying the default transform
+            and CRS. Default ``"utm"`` (10 m, EPSG:32629).
 
     Returns:
         A ``GeoTensor`` viewing ``values`` (a copy when
         ``with_fill_pixels`` is set).
     """
+    grid_transform, grid_crs = TOY_GRIDS[grid]
     if with_fill_pixels:
         if fill_value_default is None:
             raise ValueError("with_fill_pixels needs a fill_value_default")
@@ -56,8 +94,8 @@ def toy_geotensor(
         values[..., fill_pixel_mask(values.shape)] = fill_value_default
     return GeoTensor(
         values,
-        transform=DEFAULT_TRANSFORM if transform is None else transform,
-        crs=crs,
+        transform=grid_transform if transform is None else transform,
+        crs=grid_crs if crs is None else crs,
         fill_value_default=fill_value_default,
         attrs=attrs,
     )

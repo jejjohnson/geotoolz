@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from _helpers import fill_pixel_mask
+from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
 from shapely.geometry import Point, Polygon
 
@@ -118,10 +118,14 @@ def test_hillshade_sun_overhead_and_flat_dem_are_constant() -> None:
     overhead = hillshade(sloped, altitude_deg=90.0)
     assert np.unique(overhead).tolist() == [255]
 
+    # A flat DEM has zero slope, so the shading is sin(altitude) everywhere:
+    # 255 * sin(45 deg) = 180.3 -> 180 (GDAL / LightSource reference, #124).
     flat = _toy_geotensor(np.ones((4, 4), dtype=np.float32))
     out = Hillshade()(flat)
-    assert np.unique(np.asarray(out)).size == 1
+    assert np.unique(np.asarray(out)).tolist() == [180]
     assert out.transform == flat.transform
+    low_sun = Hillshade(altitude_deg=30.0)(flat)
+    assert np.unique(np.asarray(low_sun)).tolist() == [round(255 * 0.5)]
 
 
 def _plane(east_rise: float, south_rise: float, n: int = 6) -> np.ndarray:
@@ -766,3 +770,37 @@ def test_annotate_polygons_matches_direct_rasterize() -> None:
     ).astype(bool)
     assert expected.any()
     np.testing.assert_array_equal(out[1] == 255, expected)
+
+
+# ---------------------------------------------------------------------------
+# Non-default grids (``_helpers.TOY_GRIDS``)
+# ---------------------------------------------------------------------------
+
+
+def test_hillshade_reads_non_square_pixel_sizes_from_the_transform() -> None:
+    """10 m x 20 m pixels: each axis gradient uses its own resolution."""
+    dem = _plane(5.0, 2.0, n=8)
+    out = Hillshade()(toy_geotensor(dem, grid="non_square"))
+    expected = hillshade(dem, x_resolution=10.0, y_resolution=20.0)
+    np.testing.assert_array_equal(np.asarray(out), expected)
+    # Swapped or single-resolution handling gives a different picture.
+    assert not np.array_equal(
+        expected, hillshade(dem, x_resolution=20.0, y_resolution=10.0)
+    )
+    assert not np.array_equal(
+        expected, hillshade(dem, x_resolution=10.0, y_resolution=10.0)
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=pytest.fail.Exception,
+    reason=(
+        "Hillshade accepts a geographic CRS: degree pixel sizes against metre "
+        "elevations give meaningless slopes (found by #166's geographic grid)"
+    ),
+)
+def test_hillshade_rejects_a_geographic_crs() -> None:
+    dem = toy_geotensor(_plane(5.0, 5.0, n=8), grid="geographic")
+    with pytest.raises(ValueError, match="projected"):
+        Hillshade()(dem)
