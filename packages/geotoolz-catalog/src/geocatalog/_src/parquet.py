@@ -212,6 +212,10 @@ def to_geoparquet(
             own (see `write_partitioned_rows`).
     """
     gdf = catalog.gdf.copy()
+    if gdf.geometry.name != "geometry":
+        # `geometry` is the catalog schema's reserved name; the DuckDB
+        # backend and every reader look for it.
+        gdf = gdf.rename_geometry("geometry")
     if isinstance(gdf.index, pd.IntervalIndex):
         gdf["start_time"] = gdf.index.left
         gdf["end_time"] = gdf.index.right

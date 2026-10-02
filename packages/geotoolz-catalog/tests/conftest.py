@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,7 @@ import rasterio
 from hypothesis import settings
 from rasterio.transform import from_bounds
 
+from geocatalog._src.base import GeoCatalog
 from geocatalog._src.memory import InMemoryGeoCatalog
 
 
@@ -99,3 +102,85 @@ def utm29_tile_factory(tmp_path: Path):
         return path
 
     return _make
+
+
+# ---------------------------------------------------------------------------
+# Backend parity (#235)
+# ---------------------------------------------------------------------------
+
+needs_duckdb = pytest.mark.skipif(
+    importlib.util.find_spec("duckdb") is None, reason="needs the [duckdb] extra"
+)
+
+#: Every way a catalog reaches a user: built in memory, wrapped in DuckDB,
+#: and written to GeoParquet then opened lazily by DuckDB.
+CATALOG_BACKENDS = [
+    "memory",
+    pytest.param("duckdb", marks=needs_duckdb),
+    pytest.param("duckdb-parquet", marks=needs_duckdb),
+]
+
+
+@pytest.fixture(params=CATALOG_BACKENDS)
+def catalog_backend(request: pytest.FixtureRequest) -> str:
+    """Name of the backend a parametrised behavioural test runs on."""
+    return request.param
+
+
+@pytest.fixture
+def as_backend(
+    catalog_backend: str, tmp_path_factory: pytest.TempPathFactory
+) -> Callable[[InMemoryGeoCatalog], GeoCatalog]:
+    """Convert an `InMemoryGeoCatalog` into the backend under test."""
+
+    def convert(catalog: InMemoryGeoCatalog) -> GeoCatalog:
+        if catalog_backend == "memory":
+            return catalog
+        from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+
+        if catalog_backend == "duckdb":
+            return DuckDBGeoCatalog.from_memory(catalog)
+        from geocatalog._src.parquet import to_geoparquet
+
+        path = tmp_path_factory.mktemp("parity") / "catalog.parquet"
+        to_geoparquet(catalog, path)
+        return DuckDBGeoCatalog.open(path)
+
+    return convert
+
+
+def assert_catalogs_equal(a: GeoCatalog, b: GeoCatalog) -> None:
+    """Assert two catalogs hold the same rows, whatever their backend.
+
+    Compares length, CRS, backend tag, spatial/temporal extent and every
+    row (filepath, interval, normalised geometry, extras), ignoring row
+    order (a SQL relation has none).
+    """
+    import shapely
+
+    assert len(a) == len(b)
+    assert a.crs == b.crs
+    assert a.backend == b.backend
+    if len(a):
+        np.testing.assert_allclose(a.total_bounds, b.total_bounds)
+    assert a.temporal_extent == b.temporal_extent
+
+    def rows(cat: GeoCatalog) -> list[tuple[Any, ...]]:
+        out = []
+        for row in cat.iter_rows():
+            extras = {
+                k: (None if v is None or (np.isscalar(v) and pd.isna(v)) else v)
+                for k, v in row.extras.items()
+            }
+            out.append(
+                (
+                    row.filepath,
+                    row.interval.left,
+                    row.interval.right,
+                    shapely.normalize(row.geometry).wkb,
+                    sorted(extras.items()),
+                )
+            )
+        return sorted(out, key=repr)
+
+    assert rows(a) == rows(b)

@@ -766,14 +766,22 @@ class DuckDBGeoCatalog:
             "THEN 2 ELSE 3 END"
         )
         clip_col = "__geocatalog_clip"
+
+        # Repair invalid (e.g. self-intersecting) footprints before
+        # clipping, like the in-memory engine's `_repair_invalid`: GEOS
+        # raises a TopologyException on them otherwise.
+        def _valid(g: str) -> str:
+            return f"CASE WHEN ST_IsValid({g}) THEN {g} ELSE ST_MakeValid({g}) END"
+
+        lg, rg = _valid("L.geometry"), _valid("R.geometry")
         stage1 = ", ".join(
             [
                 *(f"L.{_quote_ident(c)} AS {_quote_ident(c)}" for c in left_cols),
                 f"""ST_CollectionExtract(
                     CASE
                         WHEN ST_AsWKB(L.geometry) > ST_AsWKB(R.geometry)
-                            THEN ST_Intersection(R.geometry, L.geometry)
-                        ELSE ST_Intersection(L.geometry, R.geometry)
+                            THEN ST_Intersection({rg}, {lg})
+                        ELSE ST_Intersection({lg}, {rg})
                     END,
                     {left_family}
                 ) AS {clip_col}""",
@@ -1132,7 +1140,9 @@ def _gdf_to_arrow_df(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
     explicit and avoids the slow per-row WKT serialise that DuckDB
     falls back to otherwise.
     """
-    df = pd.DataFrame(gdf.drop(columns=["geometry"]))
+    # The active geometry column may have any name (`rename_geometry`);
+    # the relation always calls it `geometry`.
+    df = pd.DataFrame(gdf.drop(columns=[gdf.geometry.name]))
     df["geometry"] = gpd.GeoSeries(gdf.geometry).to_wkb()
     if isinstance(gdf.index, pd.IntervalIndex):
         df["start_time"] = gdf.index.left

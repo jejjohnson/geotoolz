@@ -36,6 +36,14 @@ jobs:
       - name: Test geotoolz-catalog
         run: uv run pytest -v
         working-directory: packages/geotoolz-catalog
+      # Time handling must not depend on the runner's local zone (#235):
+      # rerun the catalog suite once in a zone with a UTC offset and DST.
+      - name: Test geotoolz-catalog (TZ=America/New_York)
+        if: matrix.python-version == '3.13'
+        run: uv run pytest -q --no-cov
+        working-directory: packages/geotoolz-catalog
+        env:
+          TZ: America/New_York
       - name: Upload coverage report
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7

@@ -266,7 +266,7 @@ class InMemoryGeoCatalog:
             raise ValueError(f"Unsupported intersect engine: {engine!r}")
 
         if joined.empty:
-            return self._empty()
+            return self._empty_intersect(right_renamed)
 
         if spatial_only:
             mint = joined["_left_interval"].apply(lambda i: i.left)
@@ -289,7 +289,7 @@ class InMemoryGeoCatalog:
             maxt = maxt[keep_mask.to_numpy()]
 
         if joined.empty:
-            return self._empty()
+            return self._empty_intersect(right_renamed)
 
         idx = pd.IntervalIndex.from_arrays(mint, maxt, closed="both", name="datetime")
         joined = joined.drop(
@@ -310,9 +310,21 @@ class InMemoryGeoCatalog:
             joined["end_time"] = idx.right
         return InMemoryGeoCatalog(joined, backend=self.backend)
 
-    def _empty(self) -> InMemoryGeoCatalog:
-        """Zero-row catalog with this catalog's columns, dtypes, CRS and tag."""
-        return InMemoryGeoCatalog(self.gdf.iloc[:0].copy(), backend=self.backend)
+    def _empty_intersect(self, right_renamed: gpd.GeoDataFrame) -> InMemoryGeoCatalog:
+        """Zero-row intersect result with the same columns as a non-empty one.
+
+        This catalog's columns plus the ``_right_``-prefixed columns of
+        ``other`` (minus its time columns, which the index replaces), so
+        the result schema does not depend on whether any rows matched —
+        the DuckDB backend's join behaves the same way.
+        """
+        gdf = self.gdf.iloc[:0].copy()
+        geom_name = right_renamed.geometry.name
+        for col in right_renamed.columns:
+            if col in (geom_name, "_right_start_time", "_right_end_time"):
+                continue
+            gdf[col] = right_renamed[col].iloc[:0].to_numpy()
+        return InMemoryGeoCatalog(gdf, backend=self.backend)
 
     def union(self, other: InMemoryGeoCatalog) -> InMemoryGeoCatalog:
         """Cross-catalog OR — concatenate rows.
@@ -363,7 +375,10 @@ class InMemoryGeoCatalog:
         # schema column (e.g. `_backend`, `_schema_version`) so they
         # don't leak through `CatalogRow.extras` into downstream
         # consumers (STAC export, matchup, …).
+        # The active geometry column may be named something else
+        # (`rename_geometry`); it is the footprint, never an extra.
         reserved = {"geometry", "filepath", "start_time", "end_time", "bbox"}
+        reserved.add(str(self.gdf.geometry.name))
         extra_cols = [
             c for c in self.gdf.columns if c not in reserved and not c.startswith("_")
         ]
