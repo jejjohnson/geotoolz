@@ -137,6 +137,16 @@ stitched = patcher.merge(outputs, field.domain)
 print(stitched.shape, stitched.dtype)
 ```
 
+`merge` returns the aggregation's raw output — here a bare `np.ndarray`
+on the domain grid, with no transform or CRS. To get a georeferenced
+`GeoTensor` back (the source's transform, CRS, nodata and attrs), use
+`merge_to_field`:
+
+```python
+stitched_gt = patcher.merge_to_field(outputs, field)
+print(stitched_gt.transform, stitched_gt.crs)
+```
+
 For a >1 TB output that won't fit in RAM, swap the in-memory aggregation
 for the disk-backed one **and** stream the patches in — never build the
 full `outputs` list. The `normalise → with_data` step is now done inline

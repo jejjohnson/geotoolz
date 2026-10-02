@@ -44,9 +44,13 @@ class Field(Protocol):
       ``indexer`` is decided by ``domain`` (a ``rasterio.windows.Window``
       for `RasterDomain`, a ``dict[str, slice]`` for `GridDomain`, a list
       of row indices for `PointDomain` / `VectorDomain`).
-    - ``with_data(array)`` reconstructs a field-shaped value from an
-      operator output; used by `Aggregation.merge` to rebuild a global
-      field.
+    - ``with_data(array)`` reconstructs a field-shaped value (the
+      source's georeferencing, nodata and attrs around ``array``) from
+      an array on the domain grid. Aggregations never call it —
+      `SpatialAggregation.merge` and `SpatialPatcher.merge` return the
+      raw output (usually a bare ``np.ndarray``); `SpatialPatcher.merge_to_field`
+      and `SpatialPatcher.merge_to_xarray` call it to rebuild a global
+      field (ADR-007).
     """
 
     @property

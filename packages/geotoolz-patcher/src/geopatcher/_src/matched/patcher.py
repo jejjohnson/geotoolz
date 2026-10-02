@@ -326,12 +326,12 @@ class MatchedSpatialPatcher:
         in ``secondary_aggregators`` but not in
         ``mfield.secondaries`` raise — typo guard.
 
-        The value type is intentionally ``Any`` because the
-        underlying `SpatialAggregation.merge` returns whatever the
-        aggregator produces — typically a `GeoTensor` for stitched
-        rasters, but for ``Sum`` / ``Mean`` / ``Max`` it may be a
-        plain numpy array. Callers that need a `Field` shape can
-        wrap with the source's ``Field.with_data``.
+        Each value is the aggregation's raw output, exactly as
+        `SpatialPatcher.merge` returns it: a bare ``np.ndarray`` on the
+        primary's grid for the dense aggregations (no transform, CRS,
+        nodata or attrs), a ``dict`` for `SpatialMeanStd` /
+        `SpatialInvVarWeightedMean` / `SpatialByIndex`. Use
+        `merge_to_field` to get georeferenced carriers back.
 
         Every source is aggregated against the primary's domain
         because the coregistration callable mapped each secondary
@@ -340,23 +340,81 @@ class MatchedSpatialPatcher:
         re-inverting the coregistration, which is the user's
         problem if they need it.
 
-        Strict-mode streaming-safety: each secondary aggregator is
-        checked via the same ``_warn_if_unsafe_streaming`` helper
-        the primary ``SpatialPatcher`` uses, so a non-streaming
-        secondary aggregation surfaces the same warning/error in
-        strict mode as the primary path.
+        Strict-mode streaming-safety: each secondary aggregator gets
+        the same check as the primary ``SpatialPatcher.merge``, so a
+        non-streaming secondary aggregation surfaces the same
+        warning/error in strict mode as the primary path.
 
         Args:
             patches: Iterable of `MatchedPatch` instances.
             mfield: Original `MatchedField` (used for typo-guard and
                 to recover the primary domain for aggregation).
             hooks: Optional observability hooks forwarded to the
-                primary ``SpatialPatcher.merge``; secondary aggregations
-                are intentionally not double-dispatched so the hook event
-                stream stays linear (one merge_start / merge_end per call).
+                primary merge; secondary aggregations are intentionally
+                not double-dispatched so the hook event stream stays
+                linear (one merge_start / merge_end per call).
+        """
+        return self._merge_sources(patches, mfield, hooks, stacklevel=2)
+
+    def merge_to_field(
+        self,
+        patches: Iterable[MatchedPatch],
+        mfield: MatchedField,
+        hooks: Iterable[PatcherHook] | None = None,
+    ) -> dict[str, Any]:
+        """`merge` + rebuild each source on the primary's grid via ``with_data``.
+
+        Every source was aggregated on the primary's domain, so each
+        value is wrapped with ``mfield.primary.with_data`` — it carries
+        the primary's transform and CRS, and also the primary's nodata
+        and attrs (a secondary's own nodata / attrs are not carried; its
+        values keep that secondary's dtype when they fit, by the
+        `SpatialPatcher.merge_to_xarray` rule).
+
+        Raises:
+            TypeError: As `SpatialPatcher.merge_to_field` — for a ``dict``
+                output, a non-array output, or a shape that is not the
+                primary domain's.
         """
         from geopatcher._src.matched.patch import PRIMARY_KEY
-        from geopatcher._src.spatial.aggregation import _warn_if_unsafe_streaming
+        from geopatcher._src.spatial.patcher import (
+            _domain_shape,
+            _field_values,
+            _require_with_data,
+            _source_dtype,
+        )
+
+        with_data = _require_with_data(mfield.primary, "merge_to_field")
+        merged = self._merge_sources(patches, mfield, hooks, stacklevel=2)
+        shape = _domain_shape(mfield.domain)
+        out: dict[str, Any] = {}
+        for name, value in merged.items():
+            if name == PRIMARY_KEY:
+                agg, source = self.primary.aggregation, mfield.primary
+            else:
+                agg, source = self.secondary_aggregators[name], mfield.secondaries[name]
+            out[name] = with_data(
+                _field_values(
+                    value,
+                    agg,
+                    shape=shape,
+                    dtype=_source_dtype(source),
+                    caller="merge_to_field",
+                )
+            )
+        return out
+
+    def _merge_sources(
+        self,
+        patches: Iterable[MatchedPatch],
+        mfield: MatchedField,
+        hooks: Iterable[PatcherHook] | None,
+        *,
+        stacklevel: int,
+    ) -> dict[str, Any]:
+        """`merge` body; ``stacklevel`` (from the caller) places the warning."""
+        from geopatcher._src.matched.patch import PRIMARY_KEY
+        from geopatcher._src.spatial.patcher import _check_streaming, _merge_with_hooks
 
         _validate_aggregator_names(
             self.secondary_aggregators, mfield, type(self).__name__
@@ -366,15 +424,19 @@ class MatchedSpatialPatcher:
 
         primary_domain = mfield.domain
         result: dict[str, Any] = {
-            PRIMARY_KEY: self.primary.merge(
-                per_source[PRIMARY_KEY], primary_domain, hooks=hooks
+            PRIMARY_KEY: _merge_with_hooks(
+                self.primary.aggregation,
+                per_source[PRIMARY_KEY],
+                primary_domain,
+                hooks,
+                stacklevel=stacklevel + 1,
             ),
         }
         for name, agg in self.secondary_aggregators.items():
             # Mirror the primary path's strict-mode streaming check
             # so a non-streaming secondary aggregator doesn't slip
             # through.
-            _warn_if_unsafe_streaming(agg)
+            _check_streaming(agg, stacklevel=stacklevel + 1)
             result[name] = agg.merge(per_source[name], primary_domain)
         return result
 

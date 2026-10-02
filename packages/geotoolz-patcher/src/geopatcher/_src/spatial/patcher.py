@@ -13,11 +13,19 @@ four-axis framework.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import traceback
 from asyncio import BoundedSemaphore as AsyncBoundedSemaphore, to_thread
-from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator
-from dataclasses import dataclass, field, replace
+from collections.abc import (
+    AsyncIterable,
+    AsyncIterator,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+)
+from dataclasses import dataclass, field
 from threading import BoundedSemaphore, Condition
 from time import perf_counter
 from typing import Any, Literal
@@ -149,10 +157,39 @@ class SpatialPatcher:
         with ``journal`` (which records completion) and ``prefetch``
         (the cache check runs in the producer thread).
         """
+        return self._split_anchors(
+            field,
+            None,
+            hooks=hooks,
+            prefetch=prefetch,
+            journal=journal,
+            cache=cache,
+            max_in_flight=max_in_flight,
+            max_in_flight_bytes=max_in_flight_bytes,
+        )
+
+    def _split_anchors(
+        self,
+        field: Field,
+        anchors: Iterable[Any] | None,
+        *,
+        hooks: Iterable[PatcherHook] | None = None,
+        prefetch: int = 0,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
+    ) -> Iterator[Patch]:
+        """`split` over explicit ``anchors`` (``None`` walks the sampler).
+
+        `two_pass` hands both passes the same materialised anchor list so
+        an unseeded sampler cannot place the second pass differently.
+        """
         _validate_backpressure(max_in_flight, max_in_flight_bytes)
         return prefetch_iterable(
             self._split(
                 field,
+                anchors=anchors,
                 hooks=hooks,
                 journal=journal,
                 cache=cache,
@@ -166,6 +203,7 @@ class SpatialPatcher:
         self,
         field: Field,
         *,
+        anchors: Iterable[Any] | None = None,
         hooks: Iterable[PatcherHook] | None = None,
         journal: Any | None = None,
         cache: Any | None = None,
@@ -173,6 +211,8 @@ class SpatialPatcher:
         max_in_flight_bytes: int | None = None,
     ) -> Iterator[Patch]:
         domain = field.domain
+        if anchors is None:
+            anchors = self.sampler.anchors(domain, self.geometry)
         base_weights = _safe_base_weights(self.window, self.geometry)
         boundary = getattr(self.geometry, "boundary", "drop")
         cache_ctx = self._cache_context(cache, field)
@@ -182,7 +222,7 @@ class SpatialPatcher:
         )
         byte_budget = _ByteBudget(max_in_flight_bytes)
         if not hook_list:
-            for anchor in self.sampler.anchors(domain, self.geometry):
+            for anchor in anchors:
                 if journal is not None and journal.has(anchor):
                     continue
                 patch = self._cached_patch(cache_ctx, domain, anchor)
@@ -209,7 +249,7 @@ class SpatialPatcher:
                         patch._release = release
                     yield patch
             return
-        anchors = list(self.sampler.anchors(domain, self.geometry))
+        anchors = list(anchors)
         _dispatch(hook_list, "on_split_start", len(anchors))
         try:
             for anchor in anchors:
@@ -425,17 +465,17 @@ class SpatialPatcher:
         domain: Any,
         hooks: Iterable[PatcherHook] | None = None,
     ) -> Any:
-        """Hand off to the aggregation; warn on streaming-unsafe types."""
-        hook_list = _as_hooks(hooks)
-        _dispatch(hook_list, "on_merge_start", _len_or_unknown(patches))
-        _warn_if_unsafe_streaming(self.aggregation)
-        try:
-            output = self.aggregation.merge(patches, domain)
-        except Exception as exc:
-            _dispatch(hook_list, "on_error", None, exc)
-            raise
-        _dispatch(hook_list, "on_merge_end", _nbytes(output))
-        return output
+        """Hand the patches to the aggregation and return its raw output.
+
+        The result is whatever ``self.aggregation.merge`` produces — a bare
+        ``np.ndarray`` on the domain grid for the dense aggregations, a
+        ``dict`` for `SpatialMeanStd` / `SpatialInvVarWeightedMean` /
+        `SpatialByIndex`, a zarr array for streaming `SpatialOverlapAdd`.
+        Use `merge_to_field` (or `merge_to_xarray`) to get a georeferenced
+        carrier back. A ``streaming_safe = False`` aggregation warns (or
+        raises under `set_strict`) at the caller's line.
+        """
+        return _merge_with_hooks(self.aggregation, patches, domain, hooks, stacklevel=2)
 
     async def amerge(
         self,
@@ -443,13 +483,76 @@ class SpatialPatcher:
         domain: Any,
         hooks: Iterable[PatcherHook] | None = None,
     ) -> Any:
-        """Async-friendly merge that accepts async or sync patch iterables."""
-        if isinstance(patches, AsyncIterable):
-            materialized = []
-            async for patch in patches:
-                materialized.append(patch)
-            return self.merge(materialized, domain, hooks=hooks)
-        return self.merge(patches, domain, hooks=hooks)
+        """Async-friendly `merge` that accepts async or sync patch iterables.
+
+        An async stream is not materialised: the aggregation runs in a
+        worker thread and pulls one patch at a time from the event loop,
+        so a streaming-safe aggregation holds one patch, not the stream.
+        """
+        return await _amerge_with_hooks(
+            self.aggregation, patches, domain, hooks, stacklevel=2
+        )
+
+    def merge_to_field(
+        self,
+        patches: Iterable[Any],
+        field: Field,
+        hooks: Iterable[PatcherHook] | None = None,
+    ) -> Any:
+        """`merge` + rebuild a georeferenced carrier via ``field.with_data``.
+
+        `merge` returns the aggregation's raw output (see ADR-007 in
+        ``docs/patcher/decisions.md``); this wraps it back onto the
+        field's grid so the transform, CRS, nodata
+        (``fill_value_default`` / ``rio.nodata``) and attrs of the source
+        survive. What comes back is the adapter's ``with_data`` result: a
+        `GeoTensor` for `RasterField`, a `RioXarrayField` / `XarrayField`
+        wrapping the rebuilt ``DataArray`` (``.da``) for the xarray
+        adapters.
+
+        The merged values keep the source dtype when they fit it (the
+        rule in `merge_to_xarray`); otherwise the aggregation's dtype is
+        kept — e.g. float64 carrying a NaN fill on an integer source.
+
+        Args:
+            patches: Iterable of patches to merge.
+            field: The `Field` the patches came from; must expose
+                ``with_data``.
+            hooks: Optional observability hooks forwarded to `merge`.
+
+        Returns:
+            ``field.with_data(merged)``.
+
+        Raises:
+            TypeError: If ``field`` has no ``with_data``, if the aggregation
+                returns a ``dict`` (`SpatialMeanStd`,
+                `SpatialInvVarWeightedMean`, `SpatialByIndex`, …) or
+                anything without an array ``shape``, or if the output shape
+                differs from ``field.domain.shape``.
+
+        Examples:
+            Stitch Hann-weighted chips back into a `GeoTensor`::
+
+                out = patcher.merge_to_field(patcher.split(field), field)
+                out.transform == field.reader.transform  # True
+
+            Keep the raw array instead::
+
+                arr = patcher.merge(patcher.split(field), field.domain)
+        """
+        with_data = _require_with_data(field, "merge_to_field")
+        merged = _merge_with_hooks(
+            self.aggregation, patches, field.domain, hooks, stacklevel=2
+        )
+        return with_data(
+            _field_values(
+                merged,
+                self.aggregation,
+                shape=_domain_shape(field.domain),
+                dtype=_source_dtype(field),
+                caller="merge_to_field",
+            )
+        )
 
     def merge_to_xarray(
         self,
@@ -465,29 +568,45 @@ class SpatialPatcher:
         DataArray with the field's coord metadata intact, and unwraps the
         resulting `XarrayField` to return the underlying `xarray.DataArray`.
 
+        Dtype rule (shared with `merge_to_field`): the merged values are
+        cast back to the source dtype when every value is representable
+        in it. An integer / bool source needs every value finite, integral
+        and in range — otherwise (a fractional mean, a NaN fill) the
+        aggregation's dtype is kept. A floating source is cast whenever no
+        finite value overflows it (precision is rounded, as for the
+        source). Other dtypes are left untouched.
+
         Args:
             patches: Iterable of patches to merge.
             field: The `Field` the patches came from. Must expose
                 `with_data(array) -> Field` returning a wrapper that
                 exposes the rebuilt array via a `.da` attribute — i.e.
                 an `XarrayField` (or equivalent).
+            hooks: Optional observability hooks forwarded to `merge`.
 
         Returns:
             ``xarray.DataArray`` carrying the merged values and the
             original coords.
 
         Raises:
-            TypeError: If ``field`` does not expose `with_data`, or if the
-                wrapper returned by `with_data` has no `.da` attribute.
+            TypeError: If ``field`` does not expose `with_data`, if the
+                aggregation returns a ``dict`` (or anything that is not an
+                array on the domain grid), or if the wrapper returned by
+                `with_data` has no `.da` attribute.
         """
-        with_data = getattr(field, "with_data", None)
-        if with_data is None:
-            raise TypeError(
-                "merge_to_xarray needs a field with `with_data` "
-                f"(e.g. XarrayField); got {type(field).__name__}."
+        with_data = _require_with_data(field, "merge_to_xarray")
+        merged = _merge_with_hooks(
+            self.aggregation, patches, field.domain, hooks, stacklevel=2
+        )
+        rewrapped = with_data(
+            _field_values(
+                merged,
+                self.aggregation,
+                shape=_domain_shape(field.domain),
+                dtype=_source_dtype(field),
+                caller="merge_to_xarray",
             )
-        merged = self.merge(patches, field.domain, hooks=hooks)
-        rewrapped = with_data(merged)
+        )
         if not hasattr(rewrapped, "da"):
             raise TypeError(
                 f"{type(field).__name__}.with_data must return a wrapper "
@@ -517,11 +636,49 @@ class SpatialPatcher:
 
         return to_dask_bag(self, field)
 
-    def reduce(self, field: Field, agg: SpatialAggregation) -> Any:
-        """Run a streaming pass over patches and return ``agg``'s result."""
-        anchors = self.anchors(field)
-        return agg.merge(
-            (self.patch_at(field, anchor) for anchor in anchors), field.domain
+    def reduce(
+        self,
+        field: Field,
+        agg: SpatialAggregation,
+        hooks: Iterable[PatcherHook] | None = None,
+        *,
+        prefetch: int = 0,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
+    ) -> Any:
+        """Run one streaming pass of `split` into ``agg`` and return its result.
+
+        The patches come from `split`, so the patcher's ``on_error`` /
+        retry policy and the ``hooks`` / ``prefetch`` / ``journal`` /
+        ``cache`` / backpressure knobs apply exactly as they do there;
+        each patch is closed (its backpressure slot released) once ``agg``
+        moves on to the next. ``agg`` gets the same streaming-safety check
+        as `merge` (a warning, or `RuntimeError` under `set_strict`).
+
+        Examples:
+            Global statistics for a normalisation pass::
+
+                stats = patcher.reduce(field, SpatialMeanStd())
+
+            Tolerate unreadable tiles while reducing::
+
+                patcher = replace(patcher, on_error="skip")
+                bounds = patcher.reduce(field, SpatialMinMax(), prefetch=2)
+        """
+        patches = self._split_anchors(
+            field,
+            None,
+            hooks=hooks,
+            prefetch=prefetch,
+            journal=journal,
+            cache=cache,
+            max_in_flight=max_in_flight,
+            max_in_flight_bytes=max_in_flight_bytes,
+        )
+        return _merge_with_hooks(
+            agg, _closing(patches), field.domain, hooks, stacklevel=2
         )
 
     def two_pass(
@@ -531,21 +688,60 @@ class SpatialPatcher:
         reduce_with: SpatialAggregation,
         apply: Callable[[Any, Any], Any],
         aggregation: SpatialAggregation | None = None,
+        hooks: Iterable[PatcherHook] | None = None,
+        prefetch: int = 0,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
     ) -> Any:
-        """Run a global-statistics pass, then apply an operator with the result."""
+        """Run a global-statistics pass, then apply an operator with the result.
+
+        Pass one is `reduce` with ``reduce_with``; pass two splits again,
+        maps every patch through ``apply(data, stats)`` (via
+        `Patch.with_data`) and merges with ``aggregation`` (default: the
+        patcher's own). Both passes go through `split` — ``on_error``,
+        hooks, journal, cache, prefetch and backpressure apply to each —
+        over one anchor list materialised up front, so an unseeded random
+        sampler places both passes identically. Each patch is read twice;
+        pass a ``cache`` to serve the second pass without re-reading.
+
+        Examples:
+            Standardise a scene with its global mean / std::
+
+                out = patcher.two_pass(
+                    field,
+                    reduce_with=SpatialMeanStd(),
+                    apply=lambda x, s: (np.asarray(x) - s["mean"]) / s["std"],
+                )
+        """
         anchors = self.anchors(field)
-        stats = reduce_with.merge(
-            (self.patch_at(field, anchor) for anchor in anchors), field.domain
+        split_kwargs: dict[str, Any] = {
+            "hooks": hooks,
+            "prefetch": prefetch,
+            "journal": journal,
+            "cache": cache,
+            "max_in_flight": max_in_flight,
+            "max_in_flight_bytes": max_in_flight_bytes,
+        }
+        stats = _merge_with_hooks(
+            reduce_with,
+            _closing(self._split_anchors(field, anchors, **split_kwargs)),
+            field.domain,
+            hooks,
+            stacklevel=2,
         )
-        merge_with = aggregation or self.aggregation
-        _warn_if_unsafe_streaming(merge_with)
-
-        def _applied_patches() -> Iterator[Patch]:
-            for anchor in anchors:
-                patch = self.patch_at(field, anchor)
-                yield replace(patch, data=apply(patch.data, stats))
-
-        return merge_with.merge(_applied_patches(), field.domain)
+        applied = (
+            patch.with_data(apply(patch.data, stats))
+            for patch in _closing(self._split_anchors(field, anchors, **split_kwargs))
+        )
+        return _merge_with_hooks(
+            aggregation or self.aggregation,
+            applied,
+            field.domain,
+            hooks,
+            stacklevel=2,
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -756,16 +952,8 @@ class AsyncSpatialPatcher:
         domain: Any,
         hooks: Iterable[PatcherHook] | None = None,
     ) -> Any:
-        hook_list = _as_hooks(hooks)
-        _dispatch(hook_list, "on_merge_start", _len_or_unknown(patches))
-        _warn_if_unsafe_streaming(self.aggregation)
-        try:
-            output = self.aggregation.merge(patches, domain)
-        except Exception as exc:
-            _dispatch(hook_list, "on_error", None, exc)
-            raise
-        _dispatch(hook_list, "on_merge_end", _nbytes(output))
-        return output
+        """Hand the patches to the aggregation; see `SpatialPatcher.merge`."""
+        return _merge_with_hooks(self.aggregation, patches, domain, hooks, stacklevel=2)
 
     async def amerge(
         self,
@@ -773,12 +961,215 @@ class AsyncSpatialPatcher:
         domain: Any,
         hooks: Iterable[PatcherHook] | None = None,
     ) -> Any:
-        if isinstance(patches, AsyncIterable):
-            materialized = []
-            async for patch in patches:
-                materialized.append(patch)
-            return self.merge(materialized, domain, hooks=hooks)
-        return self.merge(patches, domain, hooks=hooks)
+        """Merge an async (or sync) patch stream; see `SpatialPatcher.amerge`."""
+        return await _amerge_with_hooks(
+            self.aggregation, patches, domain, hooks, stacklevel=2
+        )
+
+
+_STREAM_END = object()
+
+
+def _check_streaming(aggregation: SpatialAggregation, *, stacklevel: int) -> None:
+    """Run the strict / streaming-safety check, warning at the caller's caller.
+
+    ``stacklevel`` counts like `warnings.warn`'s, from this helper's
+    caller (``1`` = the caller itself), so the warning lands on the
+    user's ``merge`` / ``reduce`` line instead of inside geopatcher.
+    Under `set_strict` the `RuntimeError` propagates unchanged.
+    """
+    # +2: one frame for `_warn_if_unsafe_streaming`, one for this helper.
+    _warn_if_unsafe_streaming(aggregation, stacklevel=stacklevel + 2)
+
+
+def _merge_with_hooks(
+    aggregation: SpatialAggregation,
+    patches: Iterable[Any],
+    domain: Any,
+    hooks: Iterable[PatcherHook] | None,
+    *,
+    stacklevel: int | None,
+) -> Any:
+    """``aggregation.merge`` inside the merge hook events and the streaming check.
+
+    ``stacklevel`` is relative to this helper's caller (see
+    `_check_streaming`); ``None`` skips the check because the caller
+    already ran it on the user's frame.
+    """
+    hook_list = _as_hooks(hooks)
+    _dispatch(hook_list, "on_merge_start", _len_or_unknown(patches))
+    if stacklevel is not None:
+        _check_streaming(aggregation, stacklevel=stacklevel + 1)
+    try:
+        output = aggregation.merge(patches, domain)
+    except Exception as exc:
+        _dispatch(hook_list, "on_error", None, exc)
+        raise
+    _dispatch(hook_list, "on_merge_end", _nbytes(output))
+    return output
+
+
+async def _amerge_with_hooks(
+    aggregation: SpatialAggregation,
+    patches: AsyncIterable[Any] | Iterable[Any],
+    domain: Any,
+    hooks: Iterable[PatcherHook] | None,
+    *,
+    stacklevel: int,
+) -> Any:
+    """Async adapter: feed an async patch stream into a sync ``merge``.
+
+    `SpatialAggregation.merge` takes a plain iterable, so the merge runs
+    in a worker thread over a generator that fetches each patch from the
+    event loop on demand (``run_coroutine_threadsafe(anext(...))``). The
+    stream is consumed as fast as the aggregation folds it — nothing is
+    buffered — and the loop stays free to serve the producer meanwhile.
+    """
+    if not isinstance(patches, AsyncIterable):
+        return _merge_with_hooks(
+            aggregation, patches, domain, hooks, stacklevel=stacklevel + 1
+        )
+    # Check on the event-loop thread: from the worker thread there is no
+    # user frame to attribute the warning to.
+    _check_streaming(aggregation, stacklevel=stacklevel + 1)
+    loop = asyncio.get_running_loop()
+    stream = aiter(patches)
+
+    async def pull_one() -> Any:
+        try:
+            return await anext(stream)
+        except StopAsyncIteration:
+            return _STREAM_END
+
+    def pulled() -> Iterator[Any]:
+        while True:
+            item = asyncio.run_coroutine_threadsafe(pull_one(), loop).result()
+            if item is _STREAM_END:
+                return
+            yield item
+
+    try:
+        result = await to_thread(
+            _merge_with_hooks, aggregation, pulled(), domain, hooks, stacklevel=None
+        )
+    except Exception:
+        await _aclose(stream)
+        raise
+    await _aclose(stream)
+    return result
+
+
+async def _aclose(stream: Any) -> None:
+    """Close an async iterator early (a no-op for exhausted / plain ones)."""
+    aclose = getattr(stream, "aclose", None)
+    if aclose is not None:
+        await aclose()
+
+
+def _closing(patches: Iterable[Patch]) -> Iterator[Patch]:
+    """Yield each patch and close it once the consumer asks for the next.
+
+    Aggregations do not call `Patch.close`, so under ``max_in_flight`` /
+    ``max_in_flight_bytes`` the split producer would block on the slot the
+    previous patch still holds. Closing on advance releases it first.
+    """
+    for patch in patches:
+        with patch:
+            yield patch
+
+
+def _require_with_data(field: Any, caller: str) -> Callable[[Any], Any]:
+    """``field.with_data``, or a `TypeError` naming ``caller``."""
+    with_data = getattr(field, "with_data", None)
+    if with_data is None:
+        raise TypeError(
+            f"{caller} needs a field with `with_data` (e.g. RasterField, "
+            f"XarrayField); got {type(field).__name__}."
+        )
+    return with_data
+
+
+def _domain_shape(domain: Any) -> tuple[int, ...] | None:
+    """The domain's dense array shape, or ``None`` when it has none."""
+    shape = getattr(domain, "shape", None)
+    return None if shape is None else tuple(int(n) for n in shape)
+
+
+def _source_dtype(field: Any) -> np.dtype | None:
+    """The dtype of the field's backing array (field, ``.da`` or ``.reader``)."""
+    for owner in (field, getattr(field, "da", None), getattr(field, "reader", None)):
+        dtype = getattr(owner, "dtype", None)
+        if dtype is None:
+            continue
+        try:
+            return np.dtype(dtype)
+        except TypeError:
+            continue
+    return None
+
+
+def _field_values(
+    output: Any,
+    aggregation: SpatialAggregation,
+    *,
+    shape: tuple[int, ...] | None,
+    dtype: np.dtype | None,
+    caller: str,
+) -> np.ndarray:
+    """Validate a merge output for ``with_data`` and restore the source dtype.
+
+    Raises `TypeError` for a ``dict`` output, a non-array output, or an
+    array whose shape is not the domain's — ``with_data`` can only put
+    values back on the field's own grid.
+    """
+    name = type(aggregation).__name__
+    if isinstance(output, Mapping):
+        keys = ", ".join(repr(k) for k in list(output)[:3])
+        more = ", …" if len(output) > 3 else ""
+        raise TypeError(
+            f"{caller} needs an aggregation that returns one array on the "
+            f"field's grid, but {name} returned a dict (keys: {keys}{more}). "
+            "Call `merge` for the raw output instead."
+        )
+    out_shape = getattr(output, "shape", None)
+    if out_shape is None:
+        raise TypeError(
+            f"{caller} needs an aggregation that returns an array; {name} "
+            f"returned {type(output).__name__}. Call `merge` for the raw "
+            "output instead."
+        )
+    if shape is not None and tuple(out_shape) != shape:
+        raise TypeError(
+            f"{caller}: {name} returned shape {tuple(out_shape)} but the "
+            f"field's domain has shape {shape}; with_data can only rebuild "
+            "a field on the domain grid. Call `merge` for the raw output."
+        )
+    values = np.asarray(output)
+    if dtype is None or values.dtype == dtype or not _fits_dtype(values, dtype):
+        return values
+    return values.astype(dtype)
+
+
+def _fits_dtype(values: np.ndarray, dtype: np.dtype) -> bool:
+    """Whether every value of ``values`` is representable in ``dtype``.
+
+    Integer / bool targets need finite, integral, in-range values (so a
+    NaN fill or a fractional mean keeps the float output); float targets
+    only need no finite value to overflow. Non-numeric dtypes never fit.
+    """
+    if values.dtype.kind not in "biuf" or dtype.kind not in "biuf":
+        return False
+    if values.size == 0:
+        return True
+    if dtype.kind == "f":
+        finite = values[np.isfinite(values)] if values.dtype.kind == "f" else values
+        return finite.size == 0 or float(np.abs(finite).max()) <= np.finfo(dtype).max
+    if values.dtype.kind == "f" and not (
+        np.isfinite(values).all() and (values == np.trunc(values)).all()
+    ):
+        return False
+    lo, hi = (0, 1) if dtype.kind == "b" else (np.iinfo(dtype).min, np.iinfo(dtype).max)
+    return int(values.min()) >= lo and int(values.max()) <= hi
 
 
 def _safe_base_weights(

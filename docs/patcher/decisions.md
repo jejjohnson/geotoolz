@@ -436,6 +436,69 @@ ADR-001 (iterator-first split) and ADR-004 (coordinate-aware temporal).
 
 ---
 
+## ADR-007 — `merge` returns the raw aggregation output; `merge_to_field` rebuilds the Field
+
+**Decision.** `SpatialPatcher.merge(patches, domain)` keeps returning
+whatever the aggregation's `merge` produces — a bare `np.ndarray` on the
+domain grid for the dense aggregations, a `dict` for `SpatialMeanStd` /
+`SpatialInvVarWeightedMean` / `SpatialByIndex`, a zarr array for
+streaming `SpatialOverlapAdd`. A sibling,
+`SpatialPatcher.merge_to_field(patches, field)`, returns
+`field.with_data(merged)`: a `GeoTensor` for `RasterField` (transform,
+CRS, `fill_value_default` and `attrs` of the source), a `RioXarrayField`
+/ `XarrayField` wrapping the rebuilt `DataArray` for the xarray
+adapters. It raises `TypeError` for a `dict` output, a non-array output,
+or an array whose shape is not `field.domain.shape`.
+`MatchedSpatialPatcher.merge_to_field(patches, mfield)` does the same per
+source, wrapping every source through the primary's `with_data` (each
+secondary was coregistered onto the primary's grid). The temporal and
+spatio-temporal patchers have no field-shaped merge output and get no
+`merge_to_field`.
+
+`merge_to_field` and `merge_to_xarray` share one dtype rule: the merged
+values are cast back to the source dtype when every value is
+representable in it — finite, integral and in range for an integer /
+bool source, no finite overflow for a floating one. Otherwise the
+aggregation's dtype is kept (a fractional mean or a NaN fill on a
+`uint16` source stays float64).
+
+**Context.** The `Field` protocol docstring said `with_data` was "used by
+`Aggregation.merge` to rebuild a global field", and the matched-patcher
+docstring said merge returns "typically a `GeoTensor`". Neither was
+true: every aggregation returns a bare float64 array and only
+`merge_to_xarray` called `with_data` (#194). Two fixes were on the
+table — make `merge` wrap its output through `with_data` (option A in
+#194), or keep `merge` raw and fix the docs (option B).
+
+**Consequences.**
+
+- Non-breaking: `merge`'s return type is unchanged, so `patch_ops`,
+  notebooks and anything that `np.asarray`s the result keep working.
+- A georeferenced result is one call away (`merge_to_field`) instead of
+  a manual `field.with_data(...)` that every downstream consumer had to
+  rediscover. The protocol and matched docstrings now say who calls
+  `with_data`.
+- The same change routed `reduce` / `two_pass` through `split` (so
+  `on_error`, hooks, journal, cache, prefetch and backpressure apply and
+  `reduce` runs the strict streaming check), made `amerge` stream an
+  async iterable into the aggregation through a thread adapter instead
+  of materialising it, and attributed the `streaming_safe` warning to
+  the caller's line.
+
+**Alternatives considered.**
+
+- *`merge` wraps through `field.with_data` (option A).* `merge` only
+  receives a `domain`, not the `Field`, so it would need a signature
+  change, and it would change the return type of every existing call
+  site. Pre-1.0 we could break it, but an additive method gives the
+  same capability without the churn.
+- *Docs-only (option B).* Leaves every merged raster ungeoreferenced
+  with no supported way back.
+
+**See also.** #194; ADR-005 (`merge_to_xarray`).
+
+---
+
 ## How to add a decision
 
 1. Open a PR with the proposed addition. The PR description argues the

@@ -165,11 +165,13 @@ class MatchedField:
         return result
 
     def with_data(self, array: Any) -> Any:
-        """Forward to the primary; ``MatchedField.merge`` is per-source.
+        """Forward to the primary — every source is merged on its grid.
 
-        The single-array ``with_data`` signature is for the
-        primary's reconstruction path. Per-source aggregation back
-        to N global fields goes through `MatchedSpatialPatcher.merge`,
-        which uses each secondary's own ``with_data``.
+        The single-array ``with_data`` signature is the primary's
+        reconstruction path. `MatchedSpatialPatcher.merge` returns each
+        source's raw aggregation output on the primary's grid;
+        `MatchedSpatialPatcher.merge_to_field` wraps every one of them
+        through this (the primary's) ``with_data``, since the
+        coregistration already mapped each secondary onto that grid.
         """
         return self.primary.with_data(array)

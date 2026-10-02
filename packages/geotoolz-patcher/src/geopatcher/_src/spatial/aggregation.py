@@ -1241,7 +1241,14 @@ def _python_scalar(value: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _warn_if_unsafe_streaming(aggregation: SpatialAggregation) -> None:
+def _warn_if_unsafe_streaming(
+    aggregation: SpatialAggregation, *, stacklevel: int = 2
+) -> None:
+    """Warn (or raise under `set_strict`) for a non-streaming aggregation.
+
+    ``stacklevel`` is forwarded to `warnings.warn`, so callers can point
+    the warning at the user's line rather than at geopatcher internals.
+    """
     if aggregation.streaming_safe:
         return
     from geopatcher._src.config import get_strict
@@ -1256,4 +1263,4 @@ def _warn_if_unsafe_streaming(aggregation: SpatialAggregation) -> None:
     )
     if get_strict():
         raise RuntimeError(msg)
-    warnings.warn(msg, RuntimeWarning, stacklevel=2)
+    warnings.warn(msg, RuntimeWarning, stacklevel=stacklevel)
