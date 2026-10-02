@@ -39,26 +39,31 @@ dependencies = [
     # here so a slim install (without optional extras that would
     # otherwise drag it in transitively) still works.
     "typing-extensions>=4.0",
-    # pandas is used by `spectral` (band-name resolution) and `radiometry`
-    # (per-band fitted stats); pyproj is used by `plume` (CRS-aware
-    # advection geometry) and `geom` (reprojection ops). geopandas +
-    # shapely are required by `plume`, `mask`, `io`, and `geom` for
-    # vector-shape rasterisation and footprint algebra.
+    # rasterio (windows, transforms, CRS, resampling enums, features) and
+    # affine are imported at module top level by `io`, `geom`, `augment`,
+    # `readers` and `patch_ops`; declared directly rather than relying on
+    # georeader-spaceml pulling them in transitively.
+    "rasterio>=1.3",
+    "affine>=2.4",
+    # pandas: `_src.labels` / `measure` / `feature` / `plume` region tables
+    # and `radiometry` per-band fitted stats. pyproj: `geom` reprojection and
+    # `plume` CRS-aware advection geometry. geopandas: vector inputs in
+    # `feature`, `mask`, `measure` and `plume`. shapely: footprint algebra
+    # and rasterisation in `geom`, `io`, `mask`, `measure` (`io` needs
+    # shapely only, not geopandas).
     "pandas>=2.1",
     "pyproj>=3.6",
     "geopandas>=0.14",
     "shapely>=2.0",
-    "matplotlib>=3.10.8",
-    # `georeader.GeoTensor.resize` imports skimage.transform.resize at runtime;
-    # the geom Resize / Resample operators expose that path in the base API.
+    # skimage: `_src.labels` (connected components / skeletons), `feature`
+    # and `geom` (Resize / Resample) import it at module top level.
     "scikit-image>=0.25",
     # The Operator / Sequential / Graph composition layer lives in pipekit
     # (formerly geotoolz.core). Every per-domain operator subclasses
     # `pipekit.Operator`; the dependency is now load-bearing rather than
-    # optional. See [tool.uv.sources] below for the dev-time source.
+    # optional. The workspace root's [tool.uv.sources] pins the dev-time
+    # git source.
     "pipekit>=0.0.2",
-    "scikit-learn>=1.4",
-    "joblib>=1.3",
     # Universal tensor-notation layer: the `geotoolz.einx` operator
     # family AND the internal linear algebra of the Tier-A primitives
     # (matched_filter covariance/scoring, restore PCA, SRF fill
@@ -67,7 +72,19 @@ dependencies = [
     "einx>=0.4",
 ]
 
+# Every third-party module imported at module top level by anything
+# `import geotoolz` loads must be listed above;
+# tests/test_packaging.py enforces this. Everything below is imported
+# lazily, at call time, and raises an ImportError naming its extra.
 [project.optional-dependencies]
+# `viz.ApplyColormap` resolves named matplotlib colormaps; the rest of
+# `viz` needs no extra.
+viz = ["matplotlib>=3.10.8"]
+# `learn` estimator adapters: scikit-learn for the imputer NaN strategies
+# and state metadata (and `plume`'s DBSCAN clump counting); joblib for
+# `save_state` / `load_state` / `state_path=`. The estimator you pass in
+# usually brings scikit-learn itself.
+learn = ["scikit-learn>=1.4", "joblib>=1.3"]
 # Optional `hydra-zen` integration for declarative pipeline construction
 # (see geotoolz §6.6). The core composition layer round-trips its own
 # get_config() / __repr__ without hydra — this extra is only needed if
@@ -82,17 +99,14 @@ hydra = ["hydra-zen>=0.14"]
 # install e.g. `pip install 'geopatcher[patch-full]'` for the full
 # substrate matrix.
 patch = ["geotoolz-patcher[pipekit]"]
-# Vector-cube backend (`xvec`) needed by the
+# Vector-cube backend (`xvec`, which brings `xarray`) needed by the
 # `geom.coregister.RasterToPoints` / `PointsToRaster` operators that
 # extract raster values onto point geometries (AERONET stations, buoys,
-# in-situ matchups). See `docs/design/query-matchup.md` §5.2.
+# in-situ matchups), and by bilinear `raster_to_point_cloud` sampling.
 vector-cube = ["xvec>=0.4"]
-# Sensor reader format extras land alongside each real sensor reader. The
-# `toy_sensor` reference reader has no third-party dependencies. Per-sensor
-# extras (modis, viirs, goes, mtg, seviri, himawari, tropomi, s3) are tracked
-# under their respective design issues and added as the real readers land.
-# Multi-format reader backends. Each reader guards imports so the base install
-# stays slim and reports the exact extra needed at runtime.
+# File-format backends for `io.ReadHDF` (HDF5 / HDF4) and `io.ReadNetCDF`.
+# The `toy_sensor` reference reader has no third-party dependencies;
+# per-sensor extras land alongside each real sensor reader.
 hdf5 = ["h5py>=3.10.0"]
 hdf4 = ["pyhdf>=0.11.4"]
 netcdf = ["netCDF4>=1.6.5"]

@@ -16,6 +16,7 @@ import rasterio.windows
 from georeader import read
 from georeader.geotensor import GeoTensor
 
+from geotoolz._src.optional import import_optional
 from geotoolz._src.shape import require_ndim
 from geotoolz.geom._src.array import resolve_resampling
 
@@ -83,7 +84,7 @@ def _values_to_dataarray(values: np.ndarray, transform: Any, op_name: str) -> An
     ``band`` dim for 3-D input. Errors (non-axis-aligned affine,
     unsupported rank) name ``op_name``.
     """
-    import xarray as xr
+    xr = import_optional("xarray", "vector-cube", feature=op_name)
 
     _require_axis_aligned(transform, op_name)
     arr = np.asarray(values)

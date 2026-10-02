@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-import joblib
 import numpy as np
 from jaxtyping import Bool, Num, Shaped
 
 from geotoolz._src.dtype import as_float
+from geotoolz._src.optional import import_optional
 from geotoolz._src.samples import SampleLayout, cube_to_samples, samples_to_cube
 from geotoolz._src.valid import invalid_values
 from geotoolz._src.wrap import wrap_like
@@ -320,6 +320,7 @@ class GeoTensorEstimator:
         """
         state_path = Path(path)
         state_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib = import_optional("joblib", "learn", feature="save_state")
         joblib.dump(
             {
                 "estimator": self.estimator,
@@ -349,6 +350,7 @@ class GeoTensorEstimator:
         state_path = Path(path)
         if not state_path.exists():
             raise FileNotFoundError(f"Sklearn state file not found: {state_path}")
+        joblib = import_optional("joblib", "learn", feature="load_state")
         state = joblib.load(state_path)
         self.estimator = state["estimator"]
         self.imputer = state.get("imputer")
@@ -544,21 +546,22 @@ def _make_imputer(
     knn_n_neighbors: int,
     iterative_max_iter: int,
 ) -> Any:
+    impute = import_optional(
+        "sklearn.impute", "learn", feature=f"NaN strategy {strategy!r}"
+    )
     if strategy == "impute_simple":
-        from sklearn.impute import SimpleImputer
-
-        return SimpleImputer(strategy=simple_strategy)
+        return impute.SimpleImputer(strategy=simple_strategy)
     if strategy == "impute_knn":
-        from sklearn.impute import KNNImputer
-
-        return KNNImputer(n_neighbors=knn_n_neighbors)
+        return impute.KNNImputer(n_neighbors=knn_n_neighbors)
     if strategy == "impute_iterative":
         # Importing this module intentionally enables sklearn's experimental
-        # IterativeImputer before importing the estimator class.
-        from sklearn.experimental import enable_iterative_imputer  # noqa: F401
-        from sklearn.impute import IterativeImputer
-
-        return IterativeImputer(max_iter=iterative_max_iter)
+        # IterativeImputer before the estimator class is reachable.
+        import_optional(
+            "sklearn.experimental.enable_iterative_imputer",
+            "learn",
+            feature="IterativeImputer",
+        )
+        return impute.IterativeImputer(max_iter=iterative_max_iter)
     raise ValueError(f"NaN strategy {strategy!r} is not an imputer strategy")
 
 
@@ -568,7 +571,7 @@ def _write_metadata(
     fit_geotensor_shape: tuple[int, ...] | None,
     fit_n_samples: int | None,
 ) -> None:
-    import sklearn
+    sklearn = import_optional("sklearn", "learn", feature="save_state(write_meta=True)")
 
     metadata = {
         "sklearn_version": sklearn.__version__,

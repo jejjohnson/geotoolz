@@ -109,9 +109,29 @@ One-shot from GitHub:
 uv pip install "git+https://github.com/jejjohnson/geotoolz@main"
 ```
 
-Optional extras: `[hydra]` (YAML round-trip via hydra-zen), `[patch]`
-(pulls in [`geopatcher`](https://github.com/jejjohnson/geopatcher) for
-sliding-window inference).
+### Installation / extras
+
+The base install imports every operator family and runs everything built
+on numpy / rasterio / geopandas / scikit-image. Backends that only a few
+operators use are extras: those operators still import on a base install
+and raise an `ImportError` naming the extra when called.
+
+| Extra | Pulls in | Needed for |
+|---|---|---|
+| `viz` | matplotlib | `ApplyColormap` (named matplotlib colormaps) |
+| `learn` | scikit-learn, joblib | `SklearnOp` / `Pixelwise*` imputer NaN strategies and `save_state` / `load_state` / `state_path=`; `plume` DBSCAN clump counting |
+| `zarr` | zarr >= 3 | `WriteZarr` |
+| `hdf5`, `hdf4`, `netcdf` | h5py, pyhdf, netCDF4 | `ReadHDF`, `ReadNetCDF` |
+| `vector-cube` | xvec (+ xarray) | `RasterToPoints`, `PointsToRaster`, bilinear point sampling |
+| `obstore` | obstore | pooled object-store clients for cloud sensor reads |
+| `hydra` | hydra-zen | `builds()` / `instantiate()` from YAML |
+| `patch` | geotoolz-patcher | `geotoolz.patch_ops` (patch-wise / sliding-window inference) |
+
+From a clone (`make install` already installs every extra):
+
+```bash
+uv sync --package geotoolz --extra viz --extra learn
+```
 
 ## Dev
 

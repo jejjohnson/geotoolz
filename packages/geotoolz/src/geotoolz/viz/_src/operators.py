@@ -51,6 +51,7 @@ from geotoolz._src.config import (
     mapping_to_pairs,
 )
 from geotoolz._src.geo import require_geotensor
+from geotoolz._src.optional import import_optional
 from geotoolz._src.shape import over_frames
 from geotoolz._src.valid import (
     carried_fill,
@@ -755,12 +756,14 @@ def _get_colormap(name: str) -> Any:
         try:
             import cmocean.cm as cmocean_cm
         except ImportError as exc:  # pragma: no cover - optional dependency
-            raise ImportError("cmocean colormaps require installing cmocean") from exc
+            raise ImportError(
+                f"Colormap {name!r} requires cmocean: `pip install cmocean`."
+            ) from exc
         return getattr(cmocean_cm, name.split(".", 1)[1])
 
-    from matplotlib import colormaps
+    matplotlib = import_optional("matplotlib", "viz", feature=f"Colormap {name!r}")
 
-    return colormaps[name]
+    return matplotlib.colormaps[name]
 
 
 def _iter_geometries(geometries: Any, *, dst_crs: Any) -> list[Any]:
