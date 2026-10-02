@@ -90,6 +90,7 @@ uv add geocatalog
 | `[xarray-raster]` | `build_xarray_catalog`, `load_xarray` (NetCDF / Zarr) | xarray data |
 | `[stac]` | `STACSource`, `from_stac_search`, `from_stac_items` | STAC API ingestion |
 | `[fsspec]` | `s3://`, `gs://`, `az://`, `https://`, `hf://` URI support | Cloud object storage |
+| `[obstore]` | `geotoolz-patcher[obstore]` — the shared `geopatcher.objstore` client pool | Pooled HTTP/2 range reads |
 | `[patch]` | `geocatalog.staging.field_for` — bridge to `geopatcher` | Patcher / tiling workflows |
 | `[full]` | All of the above | One-shot install |
 

@@ -23,6 +23,8 @@ Public surface re-exports:
   (`Stencil`, `TimeStencil`, `Closed`, ...).
 - Matched multi-source patching: `geopatcher.matched` (kept off the
   root namespace by ADR design).
+- Object-store client pool: `geopatcher.objstore` (the one process-wide
+  ``obstore`` pool, shared with geotoolz and geocatalog; ``[obstore]`` extra).
 
 Operator-graph wrappers (`GridSampler`, `ApplyToChips`, `Stitch`) that bridge
 the patcher into the `pipekit` composition framework live in the optional

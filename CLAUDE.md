@@ -22,7 +22,8 @@ Import names are unchanged from the pre-monorepo repos (`import geopatcher`,
 `import geocatalog`) — only the distribution names carry the `geotoolz-`
 prefix. Cross-package wiring: `geotoolz[patch]` → `geotoolz-patcher[pipekit]`;
 `geotoolz-catalog[patch]` → `geotoolz-patcher` (for `staging.field_for`);
-soft imports (obstore pools) resolve when co-installed. The workspace root
+`geotoolz[obstore]` / `geotoolz-catalog[obstore]` → `geotoolz-patcher[obstore]`
+(the one obstore pool, `geopatcher.objstore`). The workspace root
 ships no code — the top-level `pyproject.toml` only configures
 `[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups.
 

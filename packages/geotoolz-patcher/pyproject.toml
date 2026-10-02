@@ -48,6 +48,9 @@ xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1"]
 streaming = ["zarr>=3.0"]
 dask = ["dask[bag]>=2024.8.3", "xarray>=2024.1"]
 jax = ["jax>=0.4.23"]
+# The process-wide obstore client pool (`geopatcher.objstore`), shared by
+# geotoolz's and geocatalog's `[obstore]` extras.
+obstore = ["obstore>=0.9.5"]
 # Cloud-Optimized GeoTIFF reader with batched range fetches. obstore
 # gives us the pooled HTTP/2 client (one TLS handshake per bucket per
 # process); async-tiff parses the COG header and decodes tile bytes

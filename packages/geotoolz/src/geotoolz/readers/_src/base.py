@@ -15,8 +15,6 @@ from georeader.abstract_reader import GeoData
 from georeader.geotensor import GeoTensor
 from rasterio.windows import Window, transform as window_transform
 
-from geotoolz.readers._src.obstore import _object_key
-
 
 if TYPE_CHECKING:
     from obstore.store import ObjectStore
@@ -222,8 +220,12 @@ class SensorReader(GeoData, ABC):
         ``client=None`` clears the attachment and reverts to the local
         ``open(path, "rb").read()`` fallback. Callers can either pass
         a pre-built ``ObjectStore`` (e.g. for tests using
-        :class:`obstore.store.LocalStore`) or fetch one from
-        :func:`geotoolz.readers._src.obstore.get_obstore`.
+        :class:`obstore.store.LocalStore`) or fetch the process-wide
+        pooled one from ``geopatcher.objstore.get_obstore`` (the
+        ``[obstore]`` extra). A pre-built client must be laid out like
+        the pooled one — rooted at the bucket / Azure container, with
+        no prefix — because reads request
+        ``geopatcher.objstore.object_key(uri)``.
         """
         self._obstore_client = client
 
@@ -264,11 +266,17 @@ class SensorReader(GeoData, ABC):
 # Byte-range helpers for the SensorReader._read_bytes opt-in path.
 # ----------------------------------------------------------------------
 
-# URI schemes the obstore pool can talk to. ``file://`` is intentionally
-# omitted — local files take the fast on-disk path even when a client
-# is attached.
+# URI schemes the obstore pool (``geopatcher.objstore.SUPPORTED_SCHEMES``)
+# can talk to, spelled out so the check needs no optional import.
+# ``file://`` is intentionally omitted — local files take the fast on-disk
+# path even when a client is attached.
 _REMOTE_SCHEMES = frozenset(
-    {"s3", "s3a", "gs", "gcs", "az", "azure", "abfs", "http", "https"}
+    {"s3", "s3a", "gs", "gcs", "az", "azure", "abfs", "abfss", "http", "https"}
+)
+
+_OBSTORE_INSTALL_HINT = (
+    "SensorReader cloud reads need the [obstore] extra (the shared pool lives "
+    "in geopatcher); install via `pip install 'geotoolz[obstore]'`."
 )
 
 
@@ -293,9 +301,14 @@ async def _get_range_async(
     client: ObjectStore, uri: str, start: int, length: int
 ) -> bytes:
     """Fetch ``length`` bytes from ``uri`` via an attached obstore client."""
-    # Same key derivation as the pooled store: for Azure the container is
-    # already bound into ``AzureStore.from_url`` and must be stripped.
-    blob = await client.get_range_async(_object_key(uri), start=start, length=length)
+    try:
+        from geopatcher.objstore import object_key
+    except ImportError as exc:
+        raise ImportError(_OBSTORE_INSTALL_HINT) from exc
+
+    # Same key derivation as the shared pool: for Azure the container is
+    # bound into the store, and an http(s) query lives in the store's URL.
+    blob = await client.get_range_async(object_key(uri), start=start, length=length)
     return bytes(blob)
 
 

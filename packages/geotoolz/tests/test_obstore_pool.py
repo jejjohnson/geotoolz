@@ -1,102 +1,57 @@
-"""Tests for the geotoolz obstore client pool."""
+"""geotoolz has no obstore pool of its own — it uses geopatcher's.
+
+The pool itself (keys, Azure construction, signed URLs, LRU) is tested
+in ``packages/geotoolz-patcher/tests/test_objstore.py``; these smoke
+tests pin that geotoolz's sensor-reader byte path goes through it.
+"""
 
 from __future__ import annotations
+
+import importlib
+import importlib.util
+from typing import Any
 
 import pytest
 
 
 pytest.importorskip("obstore")
 
-from geotoolz.readers._src import obstore as _obstore
+import geopatcher.objstore as shared_pool
+
+from geotoolz.readers._src import base
 
 
-@pytest.fixture(autouse=True)
-def _isolate_pool(monkeypatch):
-    """Hermetic pool state for every test.
-
-    Three things:
-
-    1. Clear the local pool before and after each test so identity
-       tests don't see leakage between test ordering.
-    2. Force ``_try_shared_pool`` to return ``None`` so the local
-       pool is always under test — otherwise ``clear_obstore_pool``
-       is a no-op when geocatalog or geopatcher is installed and
-       owns the shared cache, which would make assertions like
-       ``test_clear_pool_drops_all_entries`` flaky depending on the
-       Python path.
-    3. Strip endpoint env vars that would otherwise contaminate the
-       pool key assertions below.
-    """
-    monkeypatch.setattr(_obstore, "_try_shared_pool", lambda: None)
-    for var in (
-        "AWS_S3_ENDPOINT",
-        "AWS_ENDPOINT_URL",
-        "GOOGLE_SERVICE_ENDPOINT",
-        "AZURE_STORAGE_ENDPOINT",
-    ):
-        monkeypatch.delenv(var, raising=False)
-    _obstore.clear_obstore_pool()
-    yield
-    _obstore.clear_obstore_pool()
+def test_private_pool_module_is_gone():
+    assert importlib.util.find_spec("geotoolz.readers._src.obstore") is None
 
 
-# --- key construction ---------------------------------------------------
+class _RecordingStore:
+    """Stand-in client that records the key each range request asks for."""
+
+    def __init__(self) -> None:
+        self.keys: list[str] = []
+
+    async def get_range_async(self, key: str, *, start: int, length: int) -> Any:
+        self.keys.append(key)
+        return b"x" * length
 
 
-def test_pool_key_s3_basic():
-    key = _obstore._pool_key("s3://my-bucket/path/to/file.tif")
-    assert key[0] == "s3"
-    assert key[1] == "my-bucket"
+def test_reader_byte_path_uses_geopatcher_object_key(monkeypatch):
+    calls: list[str] = []
+    real = shared_pool.object_key
+
+    def spy(uri: str) -> str:
+        calls.append(uri)
+        return real(uri)
+
+    monkeypatch.setattr(shared_pool, "object_key", spy)
+    store = _RecordingStore()
+    uri = "az://acct/container/scene/b04.tif"
+    got = base._run_coroutine_safely(base._get_range_async(store, uri, 0, 3))
+    assert got == b"xxx"
+    assert calls == [uri]
+    assert store.keys == ["scene/b04.tif"]
 
 
-def test_pool_key_gs_basic():
-    key = _obstore._pool_key("gs://my-bucket/path/to/file.tif")
-    assert key == ("gs", "my-bucket", None, None)
-
-
-def test_pool_key_https_basic():
-    key = _obstore._pool_key("https://example.com/data/file.tif")
-    assert key == ("https", "example.com", None, None)
-
-
-def test_pool_key_includes_aws_region_from_env(monkeypatch):
-    monkeypatch.setenv("AWS_REGION", "eu-west-3")
-    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
-    key = _obstore._pool_key("s3://bucket-a/key")
-    assert key[2] == "eu-west-3"
-
-
-def test_pool_key_different_buckets_distinct():
-    a = _obstore._pool_key("s3://bucket-a/key")
-    b = _obstore._pool_key("s3://bucket-b/key")
-    assert a != b
-
-
-# --- pool identity ------------------------------------------------------
-
-
-def test_get_obstore_returns_same_instance_for_same_key():
-    a = _obstore.get_obstore("https://example.com/foo")
-    b = _obstore.get_obstore("https://example.com/bar")
-    assert a is b
-
-
-def test_get_obstore_different_hosts_get_different_instances():
-    a = _obstore.get_obstore("https://example.com/foo")
-    b = _obstore.get_obstore("https://other.example.com/bar")
-    assert a is not b
-
-
-def test_clear_pool_drops_all_entries():
-    a = _obstore.get_obstore("https://example.com/foo")
-    _obstore.clear_obstore_pool()
-    b = _obstore.get_obstore("https://example.com/foo")
-    assert a is not b
-
-
-# --- unsupported scheme -------------------------------------------------
-
-
-def test_get_obstore_rejects_unsupported_scheme():
-    with pytest.raises(ValueError, match="unsupported scheme"):
-        _obstore.get_obstore("ftp://example.com/foo")
+def test_reader_remote_schemes_cover_the_pool():
+    assert shared_pool.SUPPORTED_SCHEMES == base._REMOTE_SCHEMES

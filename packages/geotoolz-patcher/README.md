@@ -53,6 +53,8 @@ pip install 'geotoolz-patcher[vector]'             # GeoPandasField
 pip install 'geotoolz-patcher[point]'              # XvecField
 pip install 'geotoolz-patcher[xarray-raster]'      # RioXarrayField
 pip install 'geotoolz-patcher[streaming]'          # disk-backed OverlapAdd
+pip install 'geotoolz-patcher[obstore]'            # geopatcher.objstore client pool
+pip install 'geotoolz-patcher[obstore-cog]'        # ObstoreCogField (pool + async-tiff)
 pip install 'geotoolz-patcher[patch-full]'         # all of the above
 pip install 'geotoolz-patcher[pipekit]'            # pipekit operator-graph bridge
 ```

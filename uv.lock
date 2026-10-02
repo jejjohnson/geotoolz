@@ -1294,7 +1294,7 @@ netcdf = [
     { name = "netcdf4" },
 ]
 obstore = [
-    { name = "obstore" },
+    { name = "geotoolz-patcher", extra = ["obstore"] },
 ]
 patch = [
     { name = "geotoolz-patcher", extra = ["pipekit"] },
@@ -1339,6 +1339,7 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4" },
     { name = "geopandas", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "geotoolz-patcher", extras = ["obstore"], marker = "extra == 'obstore'", editable = "packages/geotoolz-patcher" },
     { name = "geotoolz-patcher", extras = ["pipekit"], marker = "extra == 'patch'", editable = "packages/geotoolz-patcher" },
     { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.10.0" },
     { name = "hydra-zen", marker = "extra == 'hydra'", specifier = ">=0.14" },
@@ -1347,7 +1348,6 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.8" },
     { name = "netcdf4", marker = "extra == 'netcdf'", specifier = ">=1.6.5" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "obstore", marker = "extra == 'obstore'", specifier = ">=0.9.5" },
     { name = "pandas", specifier = ">=2.1" },
     { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" },
     { name = "pyhdf", marker = "extra == 'hdf4'", specifier = ">=0.11.4" },
@@ -1424,8 +1424,7 @@ full = [
     { name = "earthengine-api" },
     { name = "fsspec" },
     { name = "gcsfs" },
-    { name = "geotoolz-patcher" },
-    { name = "obstore" },
+    { name = "geotoolz-patcher", extra = ["obstore"] },
     { name = "planetary-computer" },
     { name = "pystac" },
     { name = "pystac-client" },
@@ -1438,7 +1437,7 @@ gee = [
     { name = "earthengine-api" },
 ]
 obstore = [
-    { name = "obstore" },
+    { name = "geotoolz-patcher", extra = ["obstore"] },
 ]
 patch = [
     { name = "geotoolz-patcher" },
@@ -1514,10 +1513,10 @@ requires-dist = [
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz-patcher", marker = "extra == 'full'", editable = "packages/geotoolz-patcher" },
     { name = "geotoolz-patcher", marker = "extra == 'patch'", editable = "packages/geotoolz-patcher" },
+    { name = "geotoolz-patcher", extras = ["obstore"], marker = "extra == 'full'", editable = "packages/geotoolz-patcher" },
+    { name = "geotoolz-patcher", extras = ["obstore"], marker = "extra == 'obstore'", editable = "packages/geotoolz-patcher" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "obstore", marker = "extra == 'full'", specifier = ">=0.9.5" },
-    { name = "obstore", marker = "extra == 'obstore'", specifier = ">=0.9.5" },
     { name = "pandas", specifier = ">=2.1" },
     { name = "planetary-computer", marker = "extra == 'full'", specifier = ">=1.0" },
     { name = "planetary-computer", marker = "extra == 'sources-all'", specifier = ">=1.0" },
@@ -1665,6 +1664,9 @@ grid = [
 jax = [
     { name = "jax" },
 ]
+obstore = [
+    { name = "obstore" },
+]
 obstore-cog = [
     { name = "async-tiff" },
     { name = "obstore" },
@@ -1738,6 +1740,7 @@ requires-dist = [
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.23" },
     { name = "jax", marker = "extra == 'patch-full'", specifier = ">=0.4.23" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "obstore", marker = "extra == 'obstore'", specifier = ">=0.9.5" },
     { name = "obstore", marker = "extra == 'obstore-cog'", specifier = ">=0.9.5" },
     { name = "obstore", marker = "extra == 'patch-full'", specifier = ">=0.9.5" },
     { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" },
@@ -1759,7 +1762,7 @@ requires-dist = [
     { name = "zarr", marker = "extra == 'patch-full'", specifier = ">=3.0" },
     { name = "zarr", marker = "extra == 'streaming'", specifier = ">=3.0" },
 ]
-provides-extras = ["grid", "vector", "point", "xarray-raster", "streaming", "dask", "jax", "obstore-cog", "patch-full", "pipekit"]
+provides-extras = ["grid", "vector", "point", "xarray-raster", "streaming", "dask", "jax", "obstore", "obstore-cog", "patch-full", "pipekit"]
 
 [package.metadata.requires-dev]
 dev = [
