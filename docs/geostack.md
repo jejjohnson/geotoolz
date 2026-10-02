@@ -68,7 +68,8 @@ the label-aware `StratifiedSample` / `BalancedSampler` emit the same
 finds the row pairs; the patcher reads them; the operators align them.
 
 **5. One obstore pool per process.**
-All three packages soft-import a shared pooled `obstore` client, so a
+`geopatcher.objstore` owns the pooled `obstore` client and the `[obstore]`
+extras of geotoolz and geocatalog depend on it, so a
 pipeline touching the same bucket through the catalog's staging, the
 patcher's `ObstoreCogField`, and geotoolz's sensor readers reuses one
 HTTP/2 connection pool.

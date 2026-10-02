@@ -155,7 +155,7 @@ a base install and raise an `ImportError` naming the extra when called.
 | `hdf4` | `pyhdf` | `io.ReadHDF` on HDF4 |
 | `netcdf` | `netCDF4` | `io.ReadNetCDF` |
 | `vector-cube` | `xvec` (+ `xarray`) | `geom.coregister.RasterToPoints` / `PointsToRaster`, bilinear point sampling |
-| `obstore` | `obstore` | pooled object-store client for cloud-backed sensor reads |
+| `obstore` | `geotoolz-patcher[obstore]` (`obstore`) | cloud-backed sensor reads through the stack's one pooled client, `geopatcher.objstore` |
 | `hydra` | `hydra-zen` | YAML `builds()` / `instantiate()` round-trips |
 | `patch` | `geotoolz-patcher[pipekit]` | `geotoolz.patch_ops` (tile → map → stitch, label-aware samplers) |
 <!-- /extras-table -->

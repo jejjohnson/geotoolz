@@ -57,8 +57,9 @@ full tour):
 - **Coregistration operators** — `geotoolz.geom.coregister` ops are the
   intended coreg callables for `geopatcher.matched.MatchedField`, aligning
   multi-source patches found by the catalog's matchup engine.
-- **One obstore pool** — all three packages soft-import a shared pooled
-  HTTP/2 client for cloud reads.
+- **One obstore pool** — `geopatcher.objstore` owns the process-wide pooled
+  HTTP/2 client; the `[obstore]` extras of geotoolz and geocatalog install
+  and use it.
 
 ```python
 import geocatalog as gc, geopatcher as gp, geotoolz as gz

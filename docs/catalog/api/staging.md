@@ -11,13 +11,9 @@ clients, and hand staged rows to `geopatcher` as Fields.
 
 ## Object-store pool
 
-Shared `obstore` client pool used by the raster catalog builders for
-remote URIs. Internal-but-stable knobs for tuning long-running
-processes.
-
-::: geocatalog._src.objstore.get_obstore
-::: geocatalog._src.objstore.clear_obstore_pool
-::: geocatalog._src.objstore.set_obstore_pool_maxsize
+The pooled `obstore` client lives in geopatcher — one pool per process
+for the whole stack. `pip install 'geotoolz-catalog[obstore]'` installs it;
+see [`geopatcher.objstore`](../../patcher/api/core.md#object-store-pool).
 
 ## Bridge to a patcher
 

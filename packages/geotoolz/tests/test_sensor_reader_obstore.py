@@ -194,22 +194,32 @@ def test_remote_scheme_routes_through_client(tmp_path: Path):
     assert got == payload[16:26]
 
 
-def test_azure_key_matches_pool(tmp_path: Path):
-    """``az://account/container/blob`` strips the container like the pool.
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "az://account/container/path/blob.bin",
+        "abfss://container@account.dfs.core.windows.net/path/blob.bin",
+        "https://account.blob.core.windows.net/container/path/blob.bin",
+    ],
+)
+def test_azure_key_matches_pool(tmp_path: Path, uri: str):
+    """Azure URIs request the container-stripped key, like the shared pool.
 
-    The pooled ``AzureStore.from_url`` already binds the container, so the
-    attached-client path must request the blob key only — the same key
-    :func:`geotoolz.readers._src.obstore._object_key` derives.
+    The pooled ``AzureStore`` (``geopatcher.objstore``) binds the
+    container, so the attached-client path must request the blob key
+    only — the same key ``geopatcher.objstore.object_key`` derives.
     """
     obstore_store = pytest.importorskip("obstore.store")
-    from geotoolz.readers._src.obstore import _object_key
+    from geopatcher.objstore import get_obstore, object_key
 
     payload = b"the quick brown fox jumps over the lazy dog"
     (tmp_path / "path").mkdir()
     (tmp_path / "path" / "blob.bin").write_bytes(payload)
 
-    uri = "az://account/container/path/blob.bin"
-    assert _object_key(uri) == "path/blob.bin"
+    assert object_key(uri) == "path/blob.bin"
+    pooled = get_obstore(uri)
+    assert pooled.config["container_name"] == "container"
+    assert pooled.prefix is None
 
     # LocalStore rooted at the "container": only the container-stripped
     # key resolves, exactly as with a real container-bound AzureStore.

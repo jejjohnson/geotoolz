@@ -114,14 +114,13 @@ netcdf = ["netCDF4>=1.6.5"]
 # (`Group.create_array`).
 zarr = ["zarr>=3"]
 # Pooled object-store client (``obstore``) for cloud-backed sensor
-# reads. Sensor readers that point at ``s3://`` / ``gs://`` / ``https://``
-# scenes call ``SensorReader.set_obstore_client(...)`` to opt into
-# HTTP/2 connection reuse — every byte-range fetch then funnels
-# through the same pooled client instead of building one per file.
-# Pool is shared with ``geocatalog`` and ``geopatcher`` when they're
-# co-installed (soft-imported), so all three libraries reuse one set
-# of clients per process.
-obstore = ["obstore>=0.9.5"]
+# reads. Sensor readers that point at ``s3://`` / ``gs://`` / ``az://`` /
+# ``https://`` scenes call ``SensorReader.set_obstore_client(...)`` to opt
+# into HTTP/2 connection reuse — every byte-range fetch then funnels
+# through the same pooled client instead of building one per file. The
+# pool is geopatcher's (``geopatcher.objstore``), the one process-wide
+# pool shared with geocatalog, so this extra pulls in geotoolz-patcher.
+obstore = ["geotoolz-patcher[obstore]"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
