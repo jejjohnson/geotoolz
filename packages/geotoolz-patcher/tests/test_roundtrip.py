@@ -257,6 +257,42 @@ def test_edge_covering_lattice_matches_reference(
     assert anchors == [(r, c) for r in rows for c in cols]
 
 
+@st.composite
+def _overlapping_config(draw) -> tuple[int, int, int, int]:
+    """``(h, w, patch, stride)`` with ``1 <= stride < patch`` — overlapping
+    tiles on a domain that need not divide evenly (#187)."""
+    patch = draw(st.integers(min_value=2, max_value=12))
+    stride = draw(st.integers(min_value=1, max_value=patch - 1))
+    h = draw(st.integers(min_value=1, max_value=40))
+    w = draw(st.integers(min_value=1, max_value=40))
+    return h, w, patch, stride
+
+
+@settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    config=_overlapping_config(),
+    boundary=st.sampled_from(["pad", "reflect", "shrink"]),
+)
+def test_overlapping_stride_overlap_add_reconstructs(
+    config: tuple[int, int, int, int], boundary: str
+) -> None:
+    # Any shape, any overlapping stride: the edge-covering modes tile the
+    # whole domain and the merge crops the overhang, so a boxcar
+    # overlap-add is the identity.
+    h, w, patch, stride = config
+    if boundary == "reflect" and min(h, w) < 2:
+        return  # nothing to mirror from; covered by a dedicated test
+    field = _field((h, w))
+    patcher = SpatialPatcher(
+        geometry=SpatialRectangular(size=(patch, patch), boundary=boundary),  # type: ignore[arg-type]
+        sampler=SpatialRegularStride(step=stride),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+    )
+    merged = patcher.merge(patcher.split(field), field.domain)
+    np.testing.assert_allclose(merged, np.asarray(field.reader.values))
+
+
 @settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(seed=st.integers(min_value=0, max_value=2**31 - 1))
 def test_random_sampler_split_is_deterministic_under_seed(seed: int) -> None:

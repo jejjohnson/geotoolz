@@ -6,7 +6,8 @@ into backend-specific indices. Five samplers cover the common cases:
 - `SpatialRegularStride` — the canonical lattice (sliding-window inference).
 - `SpatialJitteredStride` — regular grid with per-anchor uniform jitter.
 - `SpatialRandom` — N uniformly-random anchors (training-time augmentation).
-- `SpatialPoissonDisk` — well-spaced random anchors via Bridson's algorithm.
+- `SpatialPoissonDisk` — well-spaced random anchors (Bridson on rasters,
+  greedy random-order thinning on point clouds).
 - `SpatialExplicit` — caller-supplied anchors (event-triggered, station list, …).
 - `SpatialExplicitCoords` — caller-supplied world coordinates, optionally in a
   foreign CRS, with a chip centred on each (event / plume catalogues, …).
@@ -83,6 +84,9 @@ class SpatialRegularStride(SpatialSampler):
 
     step: int | tuple[int, ...]
     check_full_scan: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_step(self.step)
 
     def anchors(self, domain: Any, geometry: SpatialGeometry) -> Iterator[Any]:
         boundary = getattr(geometry, "boundary", "drop")
@@ -164,9 +168,16 @@ class SpatialRegularStride(SpatialSampler):
 class SpatialJitteredStride(SpatialSampler):
     """`SpatialRegularStride` + per-anchor uniform jitter (training augmentation).
 
+    Each offset is ``floor(u · step)`` with ``u ~ U(-jitter, jitter)``, so
+    with ``jitter=0.5`` and ``step=16`` the offsets are uniform over the 16
+    integers ``-8 … 7`` (truncating toward zero would pile ~2/16 of the
+    mass on ``0`` and never reach ``±8``). Jittered anchors are clamped to
+    ``[0, L - P]``.
+
     Args:
         step: As for `SpatialRegularStride`.
-        jitter: SpatialMax jitter in step-units (0.0 = no jitter, 0.5 = ± half a step).
+        jitter: Maximum jitter in step-units (0.0 = no jitter, 0.5 = ± half
+            a step). Must be finite and non-negative.
         seed: Integer seed for reproducible draws. When set, two
             samplers with the same configuration return bit-identical
             anchors across calls and across instances (the contract
@@ -178,6 +189,11 @@ class SpatialJitteredStride(SpatialSampler):
     step: int | tuple[int, ...]
     jitter: float = 0.5
     seed: int | None = None
+
+    def __post_init__(self) -> None:
+        _validate_step(self.step)
+        if not (np.isfinite(self.jitter) and self.jitter >= 0):
+            raise ValueError(f"jitter must be finite and >= 0, got {self.jitter!r}")
 
     def anchors(self, domain: Any, geometry: SpatialGeometry) -> Iterator[Any]:
         rng = np.random.default_rng(self.seed)
@@ -193,8 +209,8 @@ class SpatialJitteredStride(SpatialSampler):
             # overflow. (Under "drop" an oversize patch places nothing.)
             rmax, cmax = max(h - ph, 0), max(w - pw, 0)
             for r, c in base.anchors(domain, geometry):
-                dr = int(rng.uniform(-self.jitter, self.jitter) * sh)
-                dc = int(rng.uniform(-self.jitter, self.jitter) * sw)
+                dr = _jitter_offset(rng, self.jitter, sh)
+                dc = _jitter_offset(rng, self.jitter, sw)
                 yield (min(rmax, max(0, r + dr)), min(cmax, max(0, c + dc)))
             return
         if isinstance(domain, GridDomain):
@@ -208,8 +224,8 @@ class SpatialJitteredStride(SpatialSampler):
             for anchor in base.anchors(domain, geometry):
                 out: dict[str, int] = {}
                 for d, s in zip(dims, steps, strict=True):
-                    dj = rng.uniform(-self.jitter, self.jitter) * s
-                    out[d] = min(maxes[d], max(0, int(anchor[d] + dj)))
+                    dj = _jitter_offset(rng, self.jitter, s)
+                    out[d] = min(maxes[d], max(0, int(anchor[d]) + dj))
                 yield out
             return
         raise NotImplementedError(
@@ -224,8 +240,12 @@ class SpatialJitteredStride(SpatialSampler):
 class SpatialRandom(SpatialSampler):
     """N uniformly-random anchors over the domain's placement space.
 
+    On a `PointDomain` / `VectorDomain` the anchors are feature indices;
+    the graph geometries resolve them to the point / the feature's
+    centroid.
+
     Args:
-        n_samples: Number of anchors to draw.
+        n_samples: Number of anchors to draw (``>= 0``).
         seed: Integer seed for reproducible draws. When set, two
             samplers with the same configuration return bit-identical
             anchors across calls and across instances (the contract
@@ -236,6 +256,12 @@ class SpatialRandom(SpatialSampler):
 
     n_samples: int
     seed: int | None = None
+
+    def __post_init__(self) -> None:
+        if int(self.n_samples) != self.n_samples or self.n_samples < 0:
+            raise ValueError(
+                f"n_samples must be a non-negative integer, got {self.n_samples!r}"
+            )
 
     def anchors(self, domain: Any, geometry: SpatialGeometry) -> Iterator[Any]:
         rng = np.random.default_rng(self.seed)
@@ -287,20 +313,38 @@ class SpatialRandom(SpatialSampler):
 
 @dataclass(eq=False)
 class SpatialPoissonDisk(SpatialSampler):
-    """Well-spaced random anchors via Bridson's algorithm (raster + point).
+    """Well-spaced random anchors (raster + point).
 
     Anchors are returned in arbitrary order; no two anchors are closer
-    than ``min_dist`` in pixel (raster) or coord (point) units.
+    than ``min_dist`` in pixel (raster) or coord (point) units — exactly,
+    between the integer anchors actually yielded.
+
+    - Raster: Bridson's algorithm on the integer pixel lattice — each
+      annulus candidate is snapped to its pixel *before* the distance
+      test, so the guarantee holds for the yielded integer anchors.
+    - `PointDomain`: greedy random-order thinning (dart throwing) of the
+      existing points — a maximal subset with pairwise distance
+      ``>= min_dist`` — in ``O(N)`` expected time via a background grid.
+      ``max_tries`` does not apply: every point is tried exactly once.
 
     Args:
-        min_dist: Minimum allowed separation between anchors.
-        max_tries: Bridson parameter — attempts per active anchor.
+        min_dist: Minimum allowed separation between anchors (``> 0``).
+        max_tries: Bridson parameter — attempts per active anchor
+            (raster only, ``>= 1``).
         seed: Optional integer seed.
     """
 
     min_dist: float
     max_tries: int = 30
     seed: int | None = None
+
+    def __post_init__(self) -> None:
+        if not (np.isfinite(self.min_dist) and self.min_dist > 0):
+            raise ValueError(f"min_dist must be finite and > 0, got {self.min_dist!r}")
+        if int(self.max_tries) != self.max_tries or self.max_tries < 1:
+            raise ValueError(
+                f"max_tries must be an integer >= 1, got {self.max_tries!r}"
+            )
 
     def anchors(self, domain: Any, geometry: SpatialGeometry) -> Iterator[Any]:
         rng = np.random.default_rng(self.seed)
@@ -316,9 +360,7 @@ class SpatialPoissonDisk(SpatialSampler):
             yield from _bridson_2d(region, self.min_dist, self.max_tries, rng)
             return
         if isinstance(domain, PointDomain):
-            yield from _bridson_subset(
-                domain.coords, self.min_dist, self.max_tries, rng
-            )
+            yield from _poisson_subset(domain.coords, self.min_dist, rng)
             return
         raise NotImplementedError(
             f"SpatialPoissonDisk doesn't support {type(domain).__name__} domains."
@@ -363,8 +405,10 @@ class SpatialAlongTrack(SpatialSampler):
     domain's CRS (an altimetry ground track, a flight line, a ship
     transect, …). With ``spacing`` set, the track is resampled to points
     at a fixed along-track distance (linear interpolation along the
-    cumulative Euclidean arc length, in coordinate units); with
-    ``spacing=None`` the original vertices are used as-is.
+    cumulative Euclidean arc length, in coordinate units), always ending
+    on the final vertex — the last interval is shorter when the track
+    length is not a multiple of ``spacing``; with ``spacing=None`` the
+    original vertices are used as-is.
 
     On a raster domain, each track point maps through the inverse affine
     to a pixel and the yielded anchor is the upper-left corner that
@@ -401,7 +445,9 @@ class SpatialAlongTrack(SpatialSampler):
 
     def __post_init__(self) -> None:
         self.track = _track_coords(self.track)
-        if self.spacing is not None and self.spacing <= 0:
+        if self.spacing is not None and not (
+            np.isfinite(self.spacing) and self.spacing > 0
+        ):
             raise ValueError(f"spacing must be positive, got {self.spacing}")
         _validate_polar_guard(self.polar_guard)
 
@@ -409,7 +455,7 @@ class SpatialAlongTrack(SpatialSampler):
         track = self.track
         if self.crs is not None:
             track = _to_domain_crs(
-                track, self.crs, _domain_crs(domain), self.polar_guard
+                track, self.crs, _domain_crs(domain), self.polar_guard, ordered=True
             )
         points = self._resampled(track)
         if _is_raster_domain(domain):
@@ -442,6 +488,9 @@ class SpatialAlongTrack(SpatialSampler):
         total = float(dist[-1])
         n_steps = int(np.floor(total / self.spacing + 1e-9))
         s = np.arange(n_steps + 1, dtype=float) * self.spacing
+        if total - s[-1] > 1e-9 * max(total, 1.0):
+            # Keep the final vertex: the track's end is a real anchor.
+            s = np.append(s, total)
         return np.column_stack(
             [np.interp(s, dist, pts[:, 0]), np.interp(s, dist, pts[:, 1])]
         )
@@ -466,6 +515,8 @@ class SpatialExplicitCoords(SpatialSampler):
     pixel that coordinate lands in — the same geo→pixel→centred-UL contract
     as `SpatialAlongTrack`. Coordinates outside the raster are skipped.
     On a `PointDomain`, the (reprojected) ``(x, y)`` is yielded directly.
+    The coordinates are an unordered catalogue, so the antimeridian guard
+    (which looks for consecutive steps across ±180°) does not apply.
 
     Args:
         coords: Ordered ``(N, 2)`` array of ``(x, y)`` world coordinates,
@@ -476,9 +527,12 @@ class SpatialExplicitCoords(SpatialSampler):
             the pixel mapping. ``None`` (default) assumes the domain's CRS.
         polar_guard: Same geographic-edge guard as `SpatialAlongTrack`.
 
-    A single centred read without the patcher is also available via
-    `georeader.read.read_from_center_coords(reader, xy, shape,
-    crs_center_coords=...)`.
+    Centring convention: the coordinate's pixel lands at chip index
+    ``(size_h // 2, size_w // 2)``, for odd and even sizes alike.
+    `georeader.read.read_from_center_coords` instead rounds the continuous
+    upper-left corner (``round(px - size / 2)``, banker's rounding), so
+    for an even size it can place the chip one pixel up/left of this
+    one, depending on where in the pixel the coordinate falls.
     """
 
     coords: Any
@@ -493,7 +547,7 @@ class SpatialExplicitCoords(SpatialSampler):
         points = self.coords
         if self.crs is not None:
             points = _to_domain_crs(
-                points, self.crs, _domain_crs(domain), self.polar_guard
+                points, self.crs, _domain_crs(domain), self.polar_guard, ordered=False
             )
         if _is_raster_domain(domain):
             yield from _raster_center_anchors(points, domain, geometry)
@@ -520,11 +574,13 @@ def _raster_center_anchors(
     """Map world coords to centred upper-left anchors on a raster domain.
 
     Shared by `SpatialAlongTrack` and `SpatialExplicitCoords`: each point
-    goes through the inverse affine to a pixel, and the yielded anchor is
-    the UL corner that centres the geometry's patch on it. Points outside
-    the raster are skipped. Only the default ``"drop"`` boundary clamps
-    anchors to keep the patch fully in-domain (and places none when the
-    patch is larger than the domain); the other modes preserve the raw
+    goes through the inverse affine to the pixel containing it
+    (``floor``), and the yielded anchor is that pixel minus
+    ``(size_h // 2, size_w // 2)`` — so the pixel sits at that chip index
+    for odd and even sizes alike. Points outside the raster are skipped.
+    Only the default ``"drop"`` boundary clamps anchors to keep the patch
+    fully in-domain (and places none when the patch is larger than the
+    domain); the other modes preserve the raw
     (possibly negative / overflowing) anchor so ``"pad"`` reads context
     past the edge, ``"shrink"`` clips the window, and ``"raise"`` can
     detect the overflow instead of silently shifting the patch inward.
@@ -573,31 +629,50 @@ def _transformer(src: str, dst: str) -> Any:
 
 
 def _to_domain_crs(
-    coords: Any, src_crs: Any, dst_crs: Any, polar_guard: str
+    coords: Any,
+    src_crs: Any,
+    dst_crs: Any,
+    polar_guard: str,
+    *,
+    ordered: bool,
 ) -> np.ndarray:
     """Reproject ``(N, 2)`` xy from ``src_crs`` to ``dst_crs``.
 
     A no-op (returns the coordinates unchanged) when the two CRSs compare
     equal, so ``crs`` equal to the domain CRS is bit-identical to
-    ``crs=None``.
+    ``crs=None``. ``ordered`` marks a track (consecutive points are
+    neighbours), which is what the antimeridian check needs.
     """
     coords = np.asarray(coords, dtype=float)
     from georeader import compare_crs
 
     if compare_crs(str(src_crs), str(dst_crs)):
         return coords
-    _polar_dateline_check(coords, src_crs, polar_guard)
+    _polar_dateline_check(coords, src_crs, dst_crs, polar_guard, ordered=ordered)
     transformer = _transformer(str(src_crs), str(dst_crs))
     xs, ys = transformer.transform(coords[:, 0], coords[:, 1])
     return np.column_stack([np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)])
 
 
-def _polar_dateline_check(coords: np.ndarray, src_crs: Any, policy: str) -> None:
+def _polar_dateline_check(
+    coords: np.ndarray,
+    src_crs: Any,
+    dst_crs: Any,
+    policy: str,
+    *,
+    ordered: bool,
+) -> None:
     """Warn / raise when a geographic source CRS hits unreliable reprojection.
 
-    Only meaningful for a geographic (lon/lat) source CRS: near the poles
-    (``|lat| > 80``) and across the ±180° antimeridian the planar
-    transform is untrustworthy.
+    Only meaningful for a geographic (lon/lat) source CRS:
+
+    - Poles: a point beyond ``|lat| > 80`` is flagged unless the
+      destination CRS's area of use reaches its latitude (a polar
+      stereographic domain is fine; UTM, valid to 84°N / 80°S, is not
+      past those).
+    - Antimeridian: a step of more than 180° between *consecutive*
+      points — only for an ``ordered`` track; an unordered catalogue
+      holding both 179° and -179° is not a crossing.
     """
     if policy == "ignore":
         return
@@ -608,9 +683,16 @@ def _polar_dateline_check(coords: np.ndarray, src_crs: Any, policy: str) -> None
         return
     lon, lat = coords[:, 0], coords[:, 1]
     problems = []
-    if lat.size and np.any(np.abs(lat) > 80.0):
-        problems.append("a latitude beyond ±80°")
-    if lon.size > 1 and np.any(np.abs(np.diff(lon)) > 180.0):
+    polar = np.abs(lat) > 80.0
+    if lat.size and np.any(polar):
+        area = pyproj.CRS.from_user_input(dst_crs).area_of_use
+        if area is not None:
+            polar &= (lat < area.south) | (lat > area.north)
+        if np.any(polar):
+            problems.append(
+                "a latitude beyond ±80° outside the destination CRS's area of use"
+            )
+    if ordered and lon.size > 1 and np.any(np.abs(np.diff(lon)) > 180.0):
         problems.append("a step across the ±180° antimeridian")
     if not problems:
         return
@@ -632,15 +714,16 @@ def _track_coords(track: Any) -> np.ndarray:
     if hasattr(track, "x") and hasattr(track, "y"):  # GeoSeries of points
         coords = np.column_stack([np.asarray(track.x), np.asarray(track.y)])
     elif hasattr(track, "coords"):  # shapely LineString
-        coords = np.asarray(track.coords, dtype=float)[:, :2]
+        coords = np.asarray(track.coords, dtype=float)
     else:
         coords = np.asarray(track, dtype=float)
-    if coords.ndim != 2 or coords.shape[1] != 2 or len(coords) == 0:
+    if coords.ndim != 2 or coords.shape[1] not in (2, 3) or len(coords) == 0:
         raise ValueError(
-            f"track must be an ordered (N, 2) coordinate array, "
+            f"track must be an ordered (N, 2) or (N, 3) coordinate array, "
             f"got shape {coords.shape}."
         )
-    return coords
+    # A z column (3-D LineString or (N, 3) array) is dropped alike.
+    return coords[:, :2]
 
 
 def _grid_size(domain: GridDomain, geometry: SpatialGeometry) -> tuple[int, ...]:
@@ -664,6 +747,19 @@ def _grid_size(domain: GridDomain, geometry: SpatialGeometry) -> tuple[int, ...]
             "whole, e.g. size=(n_time, 32, 32))."
         )
     return size
+
+
+def _validate_step(step: int | tuple[int, ...]) -> None:
+    """Reject a non-positive or non-integer stride (``range`` would fail late)."""
+    steps: tuple[Any, ...] = (step,) if np.ndim(step) == 0 else tuple(step)
+    for s in steps:
+        if isinstance(s, bool) or int(s) != s or s < 1:
+            raise ValueError(f"step must be a positive integer per axis, got {step!r}")
+
+
+def _jitter_offset(rng: np.random.Generator, jitter: float, step: int) -> int:
+    """``floor(u · step)``, ``u ~ U(-jitter, jitter)`` — uniform over the integers."""
+    return int(np.floor(rng.uniform(-jitter, jitter) * step))
 
 
 def _lattice(length: int, size: int, step: int, boundary: str) -> range:
@@ -727,8 +823,16 @@ def _bridson_2d(
 ) -> Iterator[tuple[int, int]]:
     """Bridson Poisson-disk sampling on a 2-D integer grid.
 
-    Returns integer anchors ``(r, c)`` within ``shape``; pairwise distance
-    is at least ``min_dist`` in Euclidean pixel units.
+    Returns integer anchors ``(r, c)`` within ``shape`` whose pairwise
+    Euclidean distance is at least ``min_dist``. Candidates are drawn in
+    the annulus ``[min_dist, 2·min_dist)`` around an active sample and
+    snapped to their pixel (``floor``) *before* the distance test, so the
+    guarantee holds for the integer anchors themselves — testing the float
+    candidate and casting afterwards could shorten a gap by up to √2.
+
+    The background grid has cell ``min_dist / √2``: two accepted points
+    can never share a cell, and every conflicting point lies within two
+    cells of the candidate.
     """
     H, W = shape
     if H <= 0 or W <= 0:
@@ -737,42 +841,44 @@ def _bridson_2d(
     gh = int(np.ceil(H / cell))
     gw = int(np.ceil(W / cell))
     grid: np.ndarray = np.full((gh, gw), -1, dtype=int)
-    samples: list[tuple[float, float]] = []
+    samples: list[tuple[int, int]] = []
     active: list[int] = []
+    min_d2 = min_dist**2
 
-    def emit(p: tuple[float, float]) -> tuple[int, int]:
+    def fits(p: tuple[int, int]) -> bool:
+        gi, gj = int(p[0] / cell), int(p[1] / cell)
+        for ni in range(max(gi - 2, 0), min(gi + 3, gh)):
+            for nj in range(max(gj - 2, 0), min(gj + 3, gw)):
+                idx = grid[ni, nj]
+                if idx >= 0:
+                    other = samples[idx]
+                    if (p[0] - other[0]) ** 2 + (p[1] - other[1]) ** 2 < min_d2:
+                        return False
+        return True
+
+    def emit(p: tuple[int, int]) -> tuple[int, int]:
         samples.append(p)
         idx = len(samples) - 1
         grid[int(p[0] / cell), int(p[1] / cell)] = idx
         active.append(idx)
-        return int(p[0]), int(p[1])
+        return p
 
-    yield emit((float(rng.uniform(0, H)), float(rng.uniform(0, W))))
+    yield emit((int(rng.integers(0, H)), int(rng.integers(0, W))))
 
     while active:
-        ai = rng.integers(0, len(active))
+        ai = int(rng.integers(0, len(active)))
         anchor = samples[active[ai]]
         found = False
         for _ in range(k):
             theta = rng.uniform(0, 2 * np.pi)
             r = rng.uniform(min_dist, 2 * min_dist)
-            cand = (anchor[0] + r * np.cos(theta), anchor[1] + r * np.sin(theta))
+            cand = (
+                int(np.floor(anchor[0] + r * np.cos(theta))),
+                int(np.floor(anchor[1] + r * np.sin(theta))),
+            )
             if not (0 <= cand[0] < H and 0 <= cand[1] < W):
                 continue
-            gi, gj = int(cand[0] / cell), int(cand[1] / cell)
-            ok = True
-            for di in (-2, -1, 0, 1, 2):
-                for dj in (-2, -1, 0, 1, 2):
-                    ni, nj = gi + di, gj + dj
-                    if 0 <= ni < gh and 0 <= nj < gw and grid[ni, nj] >= 0:
-                        other = samples[grid[ni, nj]]
-                        d2 = (cand[0] - other[0]) ** 2 + (cand[1] - other[1]) ** 2
-                        if d2 < min_dist**2:
-                            ok = False
-                            break
-                if not ok:
-                    break
-            if ok:
+            if fits(cand):
                 yield emit(cand)
                 found = True
                 break
@@ -780,32 +886,37 @@ def _bridson_2d(
             active.pop(ai)
 
 
-def _bridson_subset(
+def _poisson_subset(
     coords: np.ndarray,
     min_dist: float,
-    k: int,
     rng: np.random.Generator,
 ) -> Iterator[int]:
-    """Bridson-flavoured subset selection from an existing point cloud.
+    """Greedy random-order Poisson-disk thinning of an existing point cloud.
 
-    Walks ``coords`` in random order, accepts each candidate if it's at
-    least ``min_dist`` from every previously-accepted point.
+    Walks ``coords`` in random order and accepts each point at least
+    ``min_dist`` from every previously accepted one — a maximal subset
+    (dart throwing, not Bridson: there is no candidate generation over an
+    existing cloud). Accepted points go in a background grid of cell
+    ``min_dist``, so each test inspects the 3x3 neighbouring cells:
+    ``O(N)`` expected instead of a KD-tree rebuild per acceptance.
     """
-    from scipy.spatial import cKDTree
-
-    n = len(coords)
-    if n == 0:
+    pts = np.asarray(coords, dtype=float)
+    if len(pts) == 0:
         return
-    order = rng.permutation(n)
-    accepted: list[int] = []
-    accepted_coords: list[np.ndarray] = []
-    for i in order:
-        cand = coords[i]
-        if accepted_coords:
-            tree = cKDTree(np.asarray(accepted_coords))
-            d, _ = tree.query(cand, k=1)
-            if d < min_dist:
-                continue
-        accepted.append(int(i))
-        accepted_coords.append(cand)
+    origin = pts.min(axis=0)
+    buckets: dict[tuple[int, ...], list[int]] = {}
+    min_d2 = min_dist**2
+    for i in rng.permutation(len(pts)):
+        cand = pts[i]
+        key = tuple(int(v) for v in np.floor((cand - origin) / min_dist))
+        neighbours = (
+            j
+            for offset in np.ndindex(*(3,) * len(key))
+            for j in buckets.get(
+                tuple(k + o - 1 for k, o in zip(key, offset, strict=True)), ()
+            )
+        )
+        if any(np.sum((pts[j] - cand) ** 2) < min_d2 for j in neighbours):
+            continue
+        buckets.setdefault(key, []).append(int(i))
         yield int(i)

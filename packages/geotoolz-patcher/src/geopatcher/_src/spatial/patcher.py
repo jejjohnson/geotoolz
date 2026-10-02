@@ -784,13 +784,18 @@ class AsyncSpatialPatcher:
 def _safe_base_weights(
     window: SpatialWindow, geometry: SpatialGeometry
 ) -> np.ndarray | None:
-    """Compute the geometry-shaped base weights, or `None` for windows
-    that don't expose a static weight grid (e.g. graph-based geometries
-    where weights are anchor-dependent)."""
-    try:
-        return window.weights(geometry)
-    except TypeError:
+    """Compute the geometry-shaped base weights, or `None` for a ragged
+    geometry (graph, polygon, spherical-cap) whose patch shape — and so
+    any weight grid — is anchor-dependent.
+
+    Only the "no fixed size" case is detected, and it is detected up
+    front: a ``TypeError`` raised by the window itself (say, a bug in a
+    `SpatialCustom` ``fn``) propagates instead of silently dropping the
+    weights.
+    """
+    if getattr(geometry, "size", None) is None:
         return None
+    return window.weights(geometry)
 
 
 def _validate_error_policy(on_error: str, max_retries: int) -> None:

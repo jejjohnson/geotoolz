@@ -33,6 +33,7 @@ from geopatcher import (
     SpatialRectangular,
     SpatialSphericalCap,
 )
+from geopatcher._src.spatial.geometry import _haversine_km
 
 
 @pytest.fixture
@@ -104,9 +105,102 @@ class TestSpatialSphericalCap:
             }
         )
         g = SpatialSphericalCap(radius_km=120.0)
-        idx = g.neighborhood(grid, anchor=(0.0, 0.0))
-        # The 0.0,0.0 cell + immediate neighbors should be in the cap
-        assert len(idx) >= 5
+        nb = g.neighborhood(grid, anchor=(0.0, 0.0))
+        # #187: a {dim: slice} box + mask a grid `select` accepts, not an
+        # `argwhere` array. 0.1 deg ~ 11.1 km, so the cap spans +-10 cells.
+        assert nb.window == {"lat": slice(0, 21), "lon": slice(0, 21)}
+        lat, lon = np.meshgrid(grid.coords["lat"], grid.coords["lon"], indexing="ij")
+        expected = _haversine_km(0.0, 0.0, lat, lon) <= 120.0
+        np.testing.assert_array_equal(nb.mask, expected)
+
+    def test_grid_cap_index_anchor_split_merge(self) -> None:
+        xr = pytest.importorskip("xarray")
+        from geopatcher import (
+            SpatialBoxcar,
+            SpatialMax,
+            SpatialPatcher,
+            SpatialRegularStride,
+            XarrayField,
+        )
+
+        # (time, lon, lat) on purpose: the mask must follow the dim order
+        # and broadcast over the non-spatial dim.
+        da = xr.DataArray(
+            np.arange(2 * 15 * 11, dtype=float).reshape(2, 15, 11),
+            dims=("time", "lon", "lat"),
+            coords={
+                "time": [0, 1],
+                "lon": np.linspace(10.0, 11.4, 15),
+                "lat": np.linspace(70.0, 71.0, 11),
+            },
+        )
+        field = XarrayField(da)
+        patcher = SpatialPatcher(
+            geometry=SpatialSphericalCap(radius_km=15.0),
+            sampler=SpatialRegularStride(step=(2, 5, 5)),
+            window=SpatialBoxcar(),
+            aggregation=SpatialMax(),
+        )
+        patches = list(patcher.split(field))
+        assert patches
+        for p in patches:
+            assert p.weights.shape == p.data.shape
+            centre_lat = da["lat"].values[p.anchor["lat"]]
+            centre_lon = da["lon"].values[p.anchor["lon"]]
+            lat = p.data["lat"].values[None, None, :]
+            lon = p.data["lon"].values[None, :, None]
+            inside = _haversine_km(centre_lat, centre_lon, lat, lon) <= 15.0
+            np.testing.assert_array_equal(
+                p.weights, np.broadcast_to(inside, p.data.shape)
+            )
+        merged = patcher.merge(patches, field.domain)
+        assert merged.shape == da.shape
+
+    def test_grid_cap_needs_lat_lon_dims(self) -> None:
+        grid = GridDomain(coords={"y": np.arange(3.0), "x": np.arange(3.0)})
+        with pytest.raises(ValueError, match="lat"):
+            SpatialSphericalCap(radius_km=1.0).neighborhood(grid, {"y": 0, "x": 0})
+
+
+class TestReachableCombos:
+    """#187: geometry x domain combinations a sampler can actually feed."""
+
+    def test_knn_k_greater_than_n(self, point_domain: PointDomain) -> None:
+        # scipy pads k > N with the sentinel index N (= 5 here).
+        idx = SpatialKNNGraph(k=10).neighborhood(point_domain, anchor=0)
+        assert sorted(int(i) for i in idx) == [0, 1, 2, 3, 4]
+
+    def test_knn_rejects_non_positive_k(self) -> None:
+        with pytest.raises(ValueError, match="k must be"):
+            SpatialKNNGraph(k=0)
+
+    @pytest.mark.parametrize(
+        "geometry",
+        [SpatialKNNGraph(k=2), SpatialRadiusGraph(radius=1.5)],
+        ids=["KNNGraph", "RadiusGraph"],
+    )
+    def test_random_on_vector_domain(self, geometry: Any) -> None:
+        gpd = pytest.importorskip("geopandas")
+        shapely = pytest.importorskip("shapely")
+        from geopatcher import SpatialRandom, VectorDomain
+
+        polys = gpd.GeoSeries(
+            [shapely.box(i, 0, i + 1, 1) for i in range(5)], crs="EPSG:3857"
+        )
+        domain = VectorDomain(geometry=polys, sindex=polys.sindex, crs=polys.crs)
+        anchors = list(SpatialRandom(n_samples=4, seed=0).anchors(domain, geometry))
+        assert all(isinstance(a, int) for a in anchors)
+        for a in anchors:
+            idx = geometry.neighborhood(domain, a)
+            # The anchor feature's centroid is at distance 0 from itself.
+            assert a in {int(i) for i in idx}
+
+    def test_rectangular_grid_size_must_match_dims(
+        self, grid_domain: GridDomain
+    ) -> None:
+        geom = SpatialRectangular(size=(4,))
+        with pytest.raises(ValueError, match="every GridDomain dim"):
+            geom.neighborhood(grid_domain, {"lat": 0, "lon": 0})
 
 
 # --- SpatialPolygonIntersection on a real RasterField (#184) -----------------
