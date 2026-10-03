@@ -7,22 +7,25 @@ those URIs into a `LocalCache` and returns a new catalog whose
 ``filepath`` (and asset map, when present) points at the cached
 copies.
 
-Two key design points:
+Design points:
 
-* fsspec handles the URI scheme dispatch. Any URI scheme fsspec
-  knows about works transparently — S3, GCS, HTTPS, Azure Blob,
-  the local filesystem itself (as a no-op clone).
-* Cache key is the SHA-256 of the URI plus the original file
-  extension. Two URIs that resolve to "the same file" by content
-  are intentionally not deduped here — staging is about
-  reproducibility (same URI → same cache slot), not deduplication.
+* Local paths (no scheme, ``file://``) are used in place — no copy and
+  no fsspec, so staging a local catalog works on a base install.
+  fsspec handles every remote scheme (``pip install
+  'geotoolz-catalog[fsspec]'``).
+* The cache key is the SHA-256 of the URI (with expiring signature
+  parameters removed, so a re-signed URL hits the same slot) plus the
+  file extension. It is keyed by *location*, not content: two URIs
+  holding the same bytes get two slots.
+* Downloads are written to a temporary file and renamed into place,
+  so a cache slot only ever holds a complete download; each distinct
+  URI is fetched once per call however many rows share it.
 
-Asset-aware: when a catalog row's ``extras["assets"]`` is the
-JSON-encoded dict produced by `CatalogBundle.ingest`, each named
-asset is staged independently and the row's asset map is
-rewritten to local paths. When ``assets`` is absent (i.e. the
-row came from `build_raster_catalog` or similar), only the
-top-level ``filepath`` is staged.
+Asset-aware: when a catalog row's ``assets`` is an asset map (the
+JSON-encoded dict produced by `CatalogBundle.ingest`, or a dict),
+each named asset is staged independently and the map is rewritten to
+local paths. When ``assets`` is absent (the row came from
+`build_raster_catalog` or similar), only ``filepath`` is staged.
 """
 
 from __future__ import annotations
@@ -32,18 +35,19 @@ import dataclasses
 import hashlib
 import json
 import os
-import warnings
-from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.request import url2pathname
 
 import geopandas as gpd
 from loguru import logger
 
-from geocatalog._src.retry import _is_transient
+from geocatalog._src.retry import retry_transient_io
 
 
 if TYPE_CHECKING:
@@ -57,12 +61,25 @@ if TYPE_CHECKING:
 # calling `stage()` still sees it.
 _DEFAULT_CACHE_SUBDIR = ".cache/geocatalog"
 
+# Suffix of in-progress downloads; `LocalCache.prune` removes leftovers.
+# Their names are `.<slot>.<uuid4 hex>.part`, which no cache slot (a
+# 64-hex digest plus the source extension) can match.
+_PART_SUFFIX = ".part"
+_PART_NAME = re.compile(r"^\..+\.[0-9a-f]{32}\.part$")
+
+#: Column holding each staged row's original URIs (JSON, keyed like
+#: ``assets``; ``{"filepath": uri}`` for rows without an asset map).
+STAGED_FROM_COLUMN = "staged_from"
+
+_CHUNK = 8 * 1024 * 1024  # 8 MB
+
 
 @dataclasses.dataclass
 class LocalCache:
     """fsspec-backed cache for staged remote files.
 
-    Files land at ``{root}/{hash(uri)[:2]}/{hash(uri)}{ext}``. The
+    Files land at ``{root}/{key[:2]}/{key}{ext}``, where ``key`` is the
+    SHA-256 of the URI with expiring signature parameters removed. The
     two-letter prefix keeps any one directory under a few thousand
     entries on a large catalog — friendly to filesystems that
     paginate big directories.
@@ -73,8 +90,8 @@ class LocalCache:
             ``~/.cache/geocatalog``. The resolution is lazy so
             tests can override the env var before each call.
         ttl_days: Optional lifetime. When set, cached files older
-            than this many days are re-downloaded. ``None`` means
-            cache forever.
+            than this many days are re-downloaded on their next use,
+            and `prune` deletes them. ``None`` means cache forever.
         timeout: Per-download timeout in seconds, forwarded to
             ``fsspec.open`` so a stalled remote read cannot hang a
             worker slot forever. ``None`` disables the timeout.
@@ -99,10 +116,8 @@ class LocalCache:
 
     def path_for(self, uri: str) -> Path:
         """Deterministic cache path for a URI."""
-        digest = hashlib.sha256(uri.encode("utf-8")).hexdigest()
-        ext = _ext_for(uri)
-        root = self.resolve_root()
-        return root / digest[:2] / f"{digest}{ext}"
+        digest = hashlib.sha256(cache_key(uri).encode("utf-8")).hexdigest()
+        return self.resolve_root() / digest[:2] / f"{digest}{_ext_for(uri)}"
 
     def is_fresh(self, path: Path) -> bool:
         """Is the cached file present and within TTL?"""
@@ -110,10 +125,33 @@ class LocalCache:
             return False
         if self.ttl_days is None:
             return True
+        return not self._expired(path)
+
+    def prune(self) -> int:
+        """Delete expired files and abandoned partial downloads.
+
+        Returns:
+            The number of files removed. Without ``ttl_days`` only
+            partial downloads (``*.part``) are removed.
+        """
+        removed = 0
+        for path in self.resolve_root().glob("*/*"):
+            if not path.is_file():
+                continue
+            if _PART_NAME.match(path.name) or (
+                self.ttl_days is not None and self._expired(path)
+            ):
+                with contextlib.suppress(OSError):
+                    path.unlink()
+                    removed += 1
+        return removed
+
+    def _expired(self, path: Path) -> bool:
+        assert self.ttl_days is not None
         age = datetime.now(tz=UTC) - datetime.fromtimestamp(
             path.stat().st_mtime, tz=UTC
         )
-        return age < timedelta(days=self.ttl_days)
+        return age >= timedelta(days=self.ttl_days)
 
 
 def stage(
@@ -137,34 +175,40 @@ def stage(
             ``cache.resolve_root()``; if ``cache`` is also None,
             falls back to ``$GEOCATALOG_CACHE`` /
             ``~/.cache/geocatalog``.
-        assets: When the row carries a JSON-encoded asset map (see
+        assets: When rows carry an asset map (see
             `CatalogBundle.ingest`), only fetch these keys. ``None``
-            stages every asset present on each row. Ignored for
-            rows that have no asset map (only ``filepath`` is
-            staged).
+            stages every asset present on each row. Rows that have
+            no asset map stage ``filepath`` regardless.
         parallel: Max concurrent fetches via a
             `ThreadPoolExecutor`. The fsspec backends release the
             GIL on I/O so threads scale well even in pure Python.
         cache: Reuse an existing cache instance. ``None`` builds a
             default one bound to ``dest`` (or the env-var default).
-        retries: Per-asset retry budget for *transient* failures
-            only (network blips, partial reads — the classification
-            in `geocatalog._src.retry`). Fatal errors such as
-            `FileNotFoundError` or `PermissionError` fail the asset
-            immediately without burning the retry budget; either way
-            a failed asset is then subject to ``on_error``.
-        on_error: ``"raise"`` (default) — any failed asset stops
-            the stage and propagates. ``"skip"`` — keep the
-            original URI in the asset map and continue; the row
-            is emitted with whatever did succeed.
+        retries: Per-URI retry budget for *transient* failures only
+            (network blips, partial reads — the shared policy of
+            `geocatalog._src.retry.retry_transient_io`). Fatal errors
+            such as `FileNotFoundError` or `PermissionError` fail the
+            URI immediately; either way a failed URI is then subject
+            to ``on_error``.
+        on_error: ``"raise"`` (default) — the first failure cancels
+            the downloads not yet started and propagates. ``"skip"``
+            — keep the original URI in the asset map and continue;
+            the row is emitted with whatever did succeed.
 
     Returns:
         A new catalog of the same backend type. Each row's
-        ``filepath`` points at the cached primary asset; when the
-        row had an asset map, that map is rewritten to local
-        paths. The original URIs are preserved under
-        ``extras["_staged_from"]`` (a JSON dict mirroring
-        ``assets``).
+        ``filepath`` points at the local copy of its primary asset
+        (the asset whose URI was the row's ``filepath``); it keeps
+        its original URI when that asset was not staged. An asset map
+        is rewritten to local paths. The original URIs are kept in
+        the ``staged_from`` column (``extras["staged_from"]``), a JSON
+        dict keyed like ``assets``.
+
+    Raises:
+        ValueError: If ``assets`` is empty or names a key that no row
+            carries, or an argument is out of range.
+        ModuleNotFoundError: If a remote URI needs fsspec and it is
+            not installed.
     """
     from geocatalog._src.memory import InMemoryGeoCatalog
 
@@ -179,52 +223,57 @@ def stage(
         raise ValueError(f"on_error must be 'raise' or 'skip'; got {on_error!r}")
     if retries < 0:
         raise ValueError(f"retries must be >= 0; got {retries!r}")
+    if assets is not None and not list(assets):
+        raise ValueError("stage(assets=[]) stages nothing; pass assets=None for all")
 
     cache = cache or LocalCache(root=dest)
 
-    # Materialise the work list (one row → many assets) so we can
-    # parallelise the downloads.
-    plans: list[_RowPlan] = []
-    for idx, row in enumerate(catalog.gdf.itertuples()):
-        plan = _plan_row(row, idx, asset_filter=assets)
-        plans.append(plan)
+    plans = [
+        _plan_row(row, idx, asset_filter=assets)
+        for idx, row in enumerate(catalog.gdf.itertuples())
+    ]
+    known = {k for plan in plans for k in plan.all_keys}
+    # Rows without an asset map stage `filepath` whatever `assets` says,
+    # so a filter only has keys to check when some row carries a map.
+    if assets is not None and known:
+        unknown = sorted(set(assets) - known)
+        if unknown:
+            raise ValueError(
+                f"stage(assets=...) names keys no row carries: {unknown}; "
+                f"known keys: {sorted(known)}"
+            )
 
-    # Flatten to a flat list of (row_idx, asset_key, uri) tuples
-    # so the pool sees independent units of work.
-    work: list[tuple[int, str, str]] = []
+    # One unit of work per distinct URI, however many rows share it.
+    users: dict[str, list[tuple[int, str]]] = {}
     for plan in plans:
         for key, uri in plan.assets.items():
-            work.append((plan.row_idx, key, uri))
+            users.setdefault(uri, []).append((plan.row_idx, key))
 
-    # Fetch in parallel. Each future returns (row_idx, key, local_path
-    # or Exception); the main thread sorts results back into the plans.
-    # Catch `Exception` (not `BaseException`) so KeyboardInterrupt /
-    # SystemExit still stop staging immediately.
     failures: dict[tuple[int, str], Exception] = {}
-    with ThreadPoolExecutor(max_workers=max(1, parallel)) as pool:
-        futures = {
-            pool.submit(_fetch_one, uri, cache, retries): (row_idx, key, uri)
-            for row_idx, key, uri in work
+    pool = ThreadPoolExecutor(max_workers=max(1, parallel))
+    try:
+        futures: dict[Future[Path], str] = {
+            pool.submit(_fetch_one, uri, cache, retries): uri for uri in users
         }
         for fut in as_completed(futures):
-            row_idx, key, uri = futures[fut]
+            uri = futures[fut]
             try:
                 local_path = fut.result()
             except Exception as exc:
+                # `Exception`, not `BaseException`: KeyboardInterrupt /
+                # SystemExit still stop staging immediately.
                 if on_error == "raise":
+                    pool.shutdown(wait=True, cancel_futures=True)
                     raise
-                logger.warning(
-                    "stage: skipping {!r} for row {} key {!r}: {}",
-                    uri,
-                    row_idx,
-                    key,
-                    exc,
-                )
-                failures[(row_idx, key)] = exc
+                logger.warning("stage: skipping {!r}: {}", uri, exc)
+                for user in users[uri]:
+                    failures[user] = exc
                 continue
-            plans[row_idx].results[key] = str(local_path)
+            for row_idx, key in users[uri]:
+                plans[row_idx].results[key] = str(local_path)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
-    # Build the new GeoDataFrame from the plans.
     new_gdf = _rewrite_gdf(catalog.gdf, plans, failures=failures)
     return InMemoryGeoCatalog(new_gdf, backend=catalog.backend)
 
@@ -242,42 +291,60 @@ class _RowPlan:
     primary_uri: str
     assets: dict[str, str]  # key -> uri (subset filtered by `assets=...`)
     has_asset_map: bool
+    all_keys: tuple[str, ...] = ()  # every key of the row's map, unfiltered
+    map_is_json: bool = True
     results: dict[str, str] = dataclasses.field(default_factory=dict)
+
+
+def _decode_asset_map(blob: Any) -> tuple[dict[str, str] | None, bool]:
+    """``(map, was_json)`` for an asset-map cell; ``(None, _)`` if none."""
+    if isinstance(blob, dict):
+        decoded: Any = blob
+        was_json = False
+    elif isinstance(blob, str) and blob.lstrip().startswith("{"):
+        try:
+            decoded = json.loads(blob)
+        except json.JSONDecodeError:
+            return None, True
+        was_json = True
+    else:
+        return None, True
+    if not isinstance(decoded, dict) or not decoded:
+        return None, was_json
+    return {str(k): str(v) for k, v in decoded.items()}, was_json
 
 
 def _plan_row(row: Any, idx: int, *, asset_filter: list[str] | None) -> _RowPlan:
     """Build a `_RowPlan` from one `itertuples` row.
 
     Handles both shapes:
-    * Rows with a JSON-encoded ``assets`` column (CatalogBundle
-      ingest output) — stage every named asset (or the filtered
-      subset).
+    * Rows with an asset map (CatalogBundle ingest output) — stage
+      every named asset (or the filtered subset).
     * Rows with only ``filepath`` (legacy / build_raster_catalog) —
-      stage just the filepath under the synthetic key
-      ``"_filepath"``.
+      stage just the filepath under the synthetic key ``"filepath"``.
     """
     fields = row._asdict() if hasattr(row, "_asdict") else dict(row.__dict__)
-    primary = str(fields.get("filepath", ""))
-    asset_blob = fields.get("assets")
-    assets_map: dict[str, str] = {}
-    has_map = False
-    if isinstance(asset_blob, str) and asset_blob.startswith("{"):
-        try:
-            decoded = json.loads(asset_blob)
-        except json.JSONDecodeError:
-            decoded = {}
-        if isinstance(decoded, dict) and decoded:
-            assets_map = {str(k): str(v) for k, v in decoded.items()}
-            has_map = True
-    if not has_map and primary:
-        assets_map = {"_filepath": primary}
-    if asset_filter is not None and has_map:
-        assets_map = {k: v for k, v in assets_map.items() if k in asset_filter}
+    primary = str(fields.get("filepath", "") or "")
+    asset_map, was_json = _decode_asset_map(fields.get("assets"))
+    if asset_map is None:
+        return _RowPlan(
+            row_idx=idx,
+            primary_uri=primary,
+            assets={"filepath": primary} if primary else {},
+            has_asset_map=False,
+        )
+    selected = (
+        asset_map
+        if asset_filter is None
+        else {k: v for k, v in asset_map.items() if k in asset_filter}
+    )
     return _RowPlan(
         row_idx=idx,
         primary_uri=primary,
-        assets=assets_map,
-        has_asset_map=has_map,
+        assets=selected,
+        has_asset_map=True,
+        all_keys=tuple(asset_map),
+        map_is_json=was_json,
     )
 
 
@@ -291,165 +358,183 @@ def _rewrite_gdf(
 
     Under ``on_error="skip"``, failed assets keep their original URI
     in the rewritten asset map (matching the documented contract).
-    ``failures`` is the set of ``(row_idx, key)`` pairs the executor
-    captured; anything else absent from ``plan.results`` is treated
-    as a fetch that simply wasn't attempted.
+    Assets filtered out by ``assets=`` are omitted from the map.
     """
     new_filepaths: list[str] = []
-    new_assets: list[str] = []
+    new_assets: list[Any] = []
     staged_from: list[str] = []
 
     for plan in plans:
-        if plan.has_asset_map:
-            # Preserve the original dict's key order. For each asset:
-            #   - success → local path
-            #   - failure under on_error="skip" → original URI
-            #   - never attempted → omitted from the map
-            local_map: dict[str, str] = {}
-            for key, uri in plan.assets.items():
-                local = plan.results.get(key)
-                if local is not None:
-                    local_map[key] = local
-                elif (plan.row_idx, key) in failures:
-                    local_map[key] = uri
-            # Prefer a real local path for the primary; fall back to
-            # the first surviving entry (which may itself be a URI
-            # under "skip"), then to the row's original primary.
-            primary_local = next(
-                (v for k, v in local_map.items() if k in plan.results),
-                next(iter(local_map.values()), plan.primary_uri),
-            )
-            new_filepaths.append(primary_local)
-            new_assets.append(json.dumps(local_map))
-            staged_from.append(json.dumps(plan.assets))
-        else:
-            # Legacy: just `_filepath` under the synthetic key.
-            local = plan.results.get("_filepath", plan.primary_uri)
-            new_filepaths.append(local)
-            new_assets.append("")
-            staged_from.append(json.dumps({"_filepath": plan.primary_uri}))
+        if not plan.has_asset_map:
+            new_filepaths.append(plan.results.get("filepath", plan.primary_uri))
+            new_assets.append(None)  # keep the row's original cell
+            staged_from.append(json.dumps({"filepath": plan.primary_uri}))
+            continue
+        local_map: dict[str, str] = {}
+        for key, uri in plan.assets.items():
+            local = plan.results.get(key)
+            if local is not None:
+                local_map[key] = local
+            elif (plan.row_idx, key) in failures:
+                local_map[key] = uri
+        # `filepath` follows the primary asset — any staged key holding
+        # the row's `filepath` URI (aliases share one download). When it
+        # was not staged (filtered out, failed) the row keeps its URI.
+        primary_local = next(
+            (
+                plan.results[k]
+                for k, uri in plan.assets.items()
+                if uri == plan.primary_uri and k in plan.results
+            ),
+            None,
+        )
+        new_filepaths.append(primary_local or plan.primary_uri)
+        new_assets.append(json.dumps(local_map) if plan.map_is_json else local_map)
+        staged_from.append(json.dumps(plan.assets))
 
     new_gdf = src.copy()
     new_gdf["filepath"] = new_filepaths
-    # Preserve / overwrite the `assets` column.
-    new_gdf["assets"] = new_assets
-    new_gdf["_staged_from"] = staged_from
+    if "assets" in new_gdf.columns:
+        column = new_gdf["assets"].astype(object).tolist()
+        new_gdf["assets"] = [
+            old if new is None else new
+            for old, new in zip(column, new_assets, strict=True)
+        ]
+    new_gdf[STAGED_FROM_COLUMN] = staged_from
     return new_gdf
 
 
 # ---------------------------------------------------------------------------
-# Per-asset fetch with retry
+# Per-URI fetch
 # ---------------------------------------------------------------------------
 
 
+def _local_path(uri: str) -> Path | None:
+    """The filesystem path a local URI names, ``None`` for remote URIs."""
+    parsed = urlparse(uri)
+    if parsed.scheme == "file":
+        # `file://server/share/x` is a UNC path; `file:///C:/x` a drive
+        # path, which `url2pathname` resolves on Windows.
+        path = parsed.path
+        if parsed.netloc and parsed.netloc != "localhost":
+            path = f"//{parsed.netloc}{path}"
+        return Path(url2pathname(path))
+    # No scheme, or a Windows drive letter (`C:\\...` parses as scheme "c").
+    if parsed.scheme == "" or len(parsed.scheme) == 1:
+        return Path(uri)
+    return None
+
+
 def _fetch_one(uri: str, cache: LocalCache, retries: int) -> Path:
-    """Download a single URI into the cache; return the local path.
+    """Resolve a single URI to a local file; return its path.
 
-    Skips the download when the cached file already exists and is
-    within TTL. For local URIs (no scheme or ``file://``) we
-    avoid the fsspec copy and link / return the existing path.
-
-    Only *transient* failures (per `geocatalog._src.retry`'s
-    classification — network blips, partial reads, non-fatal
-    `OSError`) are retried, up to ``retries`` times with bounded
-    exponential backoff. Fatal errors (`FileNotFoundError`,
-    `PermissionError`, …) propagate immediately without retrying.
-    When ``cache.timeout`` is set it is forwarded to ``fsspec.open``
-    (enforcement is filesystem-dependent — see `LocalCache`).
+    Local URIs (no scheme or ``file://``) are returned in place —
+    nothing is copied and fsspec is not needed; a missing local file
+    raises `FileNotFoundError`. Remote URIs are served from the cache
+    when fresh, else downloaded through fsspec into a temporary file
+    that is renamed into place only once complete. Transient failures
+    are retried with the shared `retry_transient_io` policy.
     """
-    import fsspec
+    local = _local_path(uri)
+    if local is not None:
+        if not local.exists():
+            raise FileNotFoundError(f"stage: local file not found: {uri}")
+        return local
 
     dest = cache.path_for(uri)
     if cache.is_fresh(dest):
         logger.debug("stage: cache hit {!r} → {}", uri, dest)
         return dest
+    try:
+        import fsspec  # noqa: F401
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            f"stage: fetching {uri!r} needs fsspec; install it with "
+            "`pip install 'geotoolz-catalog[fsspec]'`."
+        ) from exc
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    retry_transient_io(_download, uri, dest, cache.timeout, retries=retries)
+    return dest
 
-    # Local-file fast path — already on disk, no network round-trip.
-    parsed = urlparse(uri)
-    if parsed.scheme in {"", "file"}:
-        local = Path(parsed.path or uri)
-        if local.exists():
-            return local
+
+def _download(uri: str, dest: Path, timeout: float | None) -> None:
+    """One download attempt of ``uri`` into ``dest``, atomically."""
+    import fsspec
 
     # Only forward `timeout` when set: fsspec passes unknown kwargs
     # through to the backend, and omitting the key entirely is the
     # safest "disabled" spelling across filesystem implementations.
-    open_kwargs: dict[str, Any] = {}
-    if cache.timeout is not None:
-        open_kwargs["timeout"] = cache.timeout
-
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    for attempt in range(retries + 1):
-        try:
-            with (
-                fsspec.open(uri, mode="rb", **open_kwargs) as src,
-                dest.open("wb") as dst,
-            ):
-                # Stream in chunks so we don't materialise a 5 GB
-                # asset into memory. fsspec's `open` returns a
-                # file-like; `read1`/`readinto` would be marginally
-                # faster but `read(chunk)` is portable across backends.
-                while True:
-                    chunk = src.read(8 * 1024 * 1024)  # 8 MB
-                    if not chunk:
-                        break
-                    dst.write(chunk)
-            return dest
-        except Exception as exc:
-            # On any failure, scrub a partial file so the next
-            # attempt starts clean.
-            if dest.exists():
-                with contextlib.suppress(OSError):
-                    dest.unlink()
-            # Fatal errors (404-style missing objects, auth /
-            # permission problems, …) will not heal on retry —
-            # propagate immediately instead of burning the budget.
-            if not _is_transient(exc) or attempt >= retries:
-                raise
-            # Exponential-ish backoff: 0.5 / 1.0 / 2.0 / ...
-            # Bounded at 16s to keep total retry time predictable.
-            import time
-
-            sleep_for = min(0.5 * (2**attempt), 16.0)
-            logger.debug(
-                "stage: retry {}/{} for {!r} after {}s ({})",
-                attempt + 1,
-                retries,
-                uri,
-                sleep_for,
-                exc,
+    open_kwargs: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
+    tmp = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}{_PART_SUFFIX}")
+    try:
+        written = 0
+        with fsspec.open(uri, mode="rb", **open_kwargs) as src, tmp.open("wb") as dst:
+            expected = getattr(src, "size", None)
+            # Stream in chunks so a 5 GB asset never sits in memory.
+            while chunk := src.read(_CHUNK):
+                dst.write(chunk)
+                written += len(chunk)
+        if isinstance(expected, int) and expected >= 0 and written != expected:
+            # A plain OSError is transient: the retry policy re-fetches.
+            raise OSError(
+                f"stage: short read for {uri!r}: {written} of {expected} bytes"
             )
-            time.sleep(sleep_for)
-    raise AssertionError("unreachable")  # pragma: no cover
+        os.replace(tmp, dest)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Cache keys
+# ---------------------------------------------------------------------------
+
+# Query parameters that sign a URL rather than select content: a
+# re-signed URL for the same object must hit the same cache slot.
+_AZURE_SAS = {
+    "sig", "se", "st", "sp", "sv", "sr", "spr", "si", "srt", "ss", "sdd",
+    "skoid", "sktid", "skt", "ske", "sks", "skv", "saoid", "suoid", "scid",
+}  # fmt: skip
+_CLOUDFRONT = {"expires", "signature", "key-pair-id", "policy"}
+
+
+def cache_key(uri: str) -> str:
+    """``uri`` without the parameters of an expiring signature.
+
+    Azure SAS (when ``sig`` is present), AWS / GCS query signing
+    (``X-Amz-*`` / ``X-Goog-*``) and CloudFront signed-URL parameters
+    are dropped; every other query parameter is kept, so URLs that
+    select different content keep different keys.
+    """
+    parsed = urlparse(uri)
+    if not parsed.query:
+        return uri
+    params = parse_qsl(parsed.query, keep_blank_values=True)
+    names = {k.lower() for k, _ in params}
+
+    def signing(name: str) -> bool:
+        n = name.lower()
+        return (
+            n.startswith(("x-amz-", "x-goog-"))
+            or ("sig" in names and n in _AZURE_SAS)
+            or ({"signature", "key-pair-id"} <= names and n in _CLOUDFRONT)
+        )
+
+    kept = [(k, v) for k, v in params if not signing(k)]
+    if len(kept) == len(params):
+        return uri
+    return urlunparse(parsed._replace(query=urlencode(kept)))
 
 
 def _ext_for(uri: str) -> str:
     """Return the file extension (with dot) for a URI; empty string if none."""
-    leaf = urlparse(uri).path.rsplit("/", 1)[-1]
+    local = _local_path(uri)
+    # A local path is not a URL: `#` and `?` are ordinary characters.
+    path = local.as_posix() if local is not None else urlparse(uri).path
+    leaf = path.rsplit("/", 1)[-1]
     if "." not in leaf:
         return ""
     return "." + leaf.rsplit(".", 1)[-1]
 
 
-# ---------------------------------------------------------------------------
-# Module-level helpers used by tests
-# ---------------------------------------------------------------------------
-
-
-def _normalize_assets_for_filter(
-    assets: Iterable[str] | None,
-) -> list[str] | None:
-    """Coerce ``None`` / iterable to a concrete list-or-None."""
-    if assets is None:
-        return None
-    out = list(assets)
-    if not out:
-        warnings.warn(
-            "stage(assets=[]) requested with no keys; the result will "
-            "have empty asset maps. Pass `assets=None` to stage all.",
-            stacklevel=2,
-        )
-    return out
-
-
-__all__ = ["LocalCache", "stage"]
+__all__ = ["LocalCache", "cache_key", "stage"]

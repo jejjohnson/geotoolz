@@ -11,8 +11,8 @@ Implemented surface (see ``docs/design/query-matchup.md`` §4.7):
 * `stage` — orchestrator entry point: fetches each row's remote
   assets into the cache (parallel, with retry) and returns a catalog
   whose rows point at the local copies.
-* `LocalCache` — cache configuration carrier (root directory, TTL);
-  content is keyed by ``(uri, asset)``.
+* `LocalCache` — cache configuration carrier (root directory, TTL,
+  timeout); files are keyed by URI (signature parameters removed).
 * `field_for` — bridge a staged catalog to a `geopatcher.Field`
   (soft-imports geopatcher; requires the ``[patch]`` extra).
 """

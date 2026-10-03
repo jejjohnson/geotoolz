@@ -354,10 +354,10 @@ def stage(
 ) -> GeoCatalog: ...
 ```
 
-- Returns a new catalog whose `assets` columns have been rewritten to local paths (a `_staged_path` field per asset preserves the original URI).
-- `LocalCache` is fsspec-backed; default location `~/.cache/geocatalog/` or `$GEOCATALOG_CACHE`.
+- Returns a new catalog whose `assets` columns have been rewritten to local paths; `filepath` follows the row's primary asset, and a `staged_from` column (JSON, keyed like `assets`) preserves the original URIs.
+- Local paths are used in place without fsspec; `LocalCache` fetches remote schemes through fsspec (`[fsspec]` extra) into a temp file renamed into place, one download per distinct URI; default location `~/.cache/geocatalog/` or `$GEOCATALOG_CACHE`.
 - GEE-specific path: `staging/gee.py` materializes via `ee.Image.getDownloadURL` or `ee_export_image` — does not bypass EE compute.
-- Reuses the retry/backoff machinery from PR #51 (currently scoped to raster loaders).
+- Reuses the shared retry/backoff policy (`geocatalog._src.retry.retry_transient_io`) for transient failures.
 
 The staged catalog is a normal `GeoCatalog`, so the existing `load_raster` / `load_vector` / `xarray_backend` loaders see it as local files and read them in-place.
 

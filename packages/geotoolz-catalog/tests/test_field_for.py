@@ -230,3 +230,30 @@ class TestFieldForImportGuard:
         monkeypatch.setitem(sys.modules, "geopatcher", None)
         with pytest.raises(ImportError, match=r"geocatalog\[patch\]"):
             field_for(asset_catalog, "red")
+
+
+def test_dict_asset_maps_from_stage_are_readable(
+    tmp_path: Path, utm29_tile_factory
+) -> None:
+    import rasterio
+
+    red = utm29_tile_factory(
+        (500_000, 4_000_000, 500_320, 4_000_320), "20240115", value=10
+    )
+    cat = catalog_from_rows(
+        rows=[
+            {
+                "geometry": box(500_000, 4_000_000, 500_320, 4_000_320),
+                "start_time": pd.Timestamp("2024-01-15"),
+                "end_time": pd.Timestamp("2024-01-15"),
+                "filepath": str(red),
+                "assets": "placeholder",
+            }
+        ],
+        crs="EPSG:32629",
+    )
+    cat.gdf["assets"] = [{"red": str(red)}]
+    staged = stage(cat, dest=tmp_path / "cache")
+    (field,) = field_for(staged, "red")
+    window = rasterio.windows.Window(col_off=0, row_off=0, width=4, height=4)
+    assert int(field.select(window).values[0, 0, 0]) == 10
