@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
 
-from geocatalog._src._schema import crs_config_string
 from geocatalog._src._timeutil import to_utc_ts
 from geocatalog._src.matchup.temporal import _midpoint, _to_timedelta
 
@@ -233,7 +232,11 @@ def matchup(
         "spatial": _params(spatial),
         "temporal": _params(temporal),
         "join": join,
-        "crs": crs_config_string(work_crs),
+        # `to_string()`, not `crs_config_string`: this feeds every
+        # persisted `MatchupRow` id, so changing the serialisation would
+        # re-key existing bundles and `write_matchups` would append
+        # duplicates instead of replacing rows.
+        "crs": work_crs.to_string(),
     }
     strategy_key = json.dumps(tolerance, sort_keys=True)
 
