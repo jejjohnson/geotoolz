@@ -235,7 +235,9 @@ class TestCMRQuery:
 
         monkeypatch.setattr("geocatalog._src.sources.cmr.urllib.request.urlopen", fail)
         assert list(CMRSource().query(bounds=(-10, 35, 5, 45), limit=0)) == []
-        assert list(CMRSource().query(bounds=(-10, 35, 5, 45), limit=-1)) == []
+        # A negative limit is a caller bug on every adapter (#237).
+        with pytest.raises(ValueError, match="limit must be >= 0"):
+            list(CMRSource().query(bounds=(-10, 35, 5, 45), limit=-1))
 
     def test_filters_forwarded_as_url_params(
         self, monkeypatch: pytest.MonkeyPatch

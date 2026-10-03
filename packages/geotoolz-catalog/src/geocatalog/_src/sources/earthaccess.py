@@ -30,7 +30,13 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 from loguru import logger
 
-from geocatalog._src.sources._base import AuthStatus, Bounds, Source, SourceRow
+from geocatalog._src.sources._base import (
+    AuthStatus,
+    Bounds,
+    Source,
+    SourceRow,
+    wants_no_rows,
+)
 from geocatalog._src.sources._extras import _missing_extra
 from geocatalog._src.sources._umm import (
     asset_key_from_url as _asset_key_from_url,
@@ -105,11 +111,16 @@ class EarthAccessSource(Source):
                 ``platform``, ``provider``, ``version``). Unknown
                 keys silently passed through — `earthaccess` itself
                 validates.
-            limit: Cap on the number of granules. ``None`` → all.
+            limit: Cap on the number of granules. ``None`` → all;
+                ``0`` yields nothing without a request; negative raises.
 
         Yields:
             `SourceRow` per matching granule.
         """
+        # earthaccess reads `count=0` as "all"; `limit=0` means nothing
+        # here (#237).
+        if wants_no_rows(limit):
+            return
         query_id = uuid.uuid4().hex
         fetched_at = datetime.now(tz=UTC)
         version = _earthaccess_version()

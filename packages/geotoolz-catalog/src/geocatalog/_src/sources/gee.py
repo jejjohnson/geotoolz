@@ -15,7 +15,13 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
-from geocatalog._src.sources._base import AuthStatus, Bounds, Source, SourceRow
+from geocatalog._src.sources._base import (
+    AuthStatus,
+    Bounds,
+    Source,
+    SourceRow,
+    wants_no_rows,
+)
 from geocatalog._src.sources._extras import _missing_extra
 
 
@@ -60,12 +66,17 @@ class GEESource(Source):
     ) -> Iterator[SourceRow]:
         """Enumerate EE assets intersecting ``bounds`` + ``interval``.
 
-        Scaffolding — not yet implemented (Phase 3, design §8).
+        Scaffolding — not yet implemented (Phase 3, design §8). The
+        shared ``limit`` contract already holds: ``limit=0`` yields
+        nothing and a negative limit raises `ValueError`.
 
         Raises:
-            NotImplementedError: Always, until the staging layer can
-                materialize ``ee.Image`` assets.
+            NotImplementedError: For any query that could return rows,
+                until the staging layer can materialize ``ee.Image``
+                assets.
         """
+        if wants_no_rows(limit):
+            return iter(())
         raise NotImplementedError(
             "GEESource.query is scaffolding — Phase 3 PR (see design §8). "
             "Phase 1 ships earthaccess + STAC + CMR; GEE follows once "
