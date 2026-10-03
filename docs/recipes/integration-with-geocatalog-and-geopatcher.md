@@ -111,13 +111,14 @@ renamed `MergePatches` so it doesn't collide with `geotoolz.geom.Stitch`.
 ## The combined shape
 
 The catalog → patcher seam is `staging`: `stage` caches a catalog's
-assets locally and `field_for` turns each staged row into a `geopatcher`
-`Field`. `MergePatches` needs the output `domain` at construction time,
+assets locally and `field_for` mosaics the staged rows onto a `GeoSlice`
+grid (in the slice CRS, whatever CRS the files are in) as one `geopatcher`
+`RasterField`. `MergePatches` needs the output `domain` at construction time,
 so build the `Field` first; then the whole flow is one `Sequential`:
 
 ```python
 staged = gc.stage(band_catalog("B04").query(aoi), dest="./cache")
-field = gc.field_for(staged)[0]                     # one Field per catalog row
+field = gc.field_for(staged, aoi)                   # one Field on the AOI grid
 
 pipe = gz.Sequential([
     GridSampler(patcher=patcher),                    # geotoolz.patch_ops → geopatcher

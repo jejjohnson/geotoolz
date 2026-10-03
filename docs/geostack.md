@@ -48,8 +48,10 @@ against co-registered products.
 
 **2. `staging.field_for` — catalog rows become patcher Fields.**
 `geocatalog.staging.stage()` resolves remote URIs into a local cache, and
-`field_for()` wraps the staged rows as a `geopatcher` `Field`, so a
-catalog query drops straight into `SpatialPatcher.split` (enabled by the
+`field_for()` mosaics the staged rows onto a `GeoSlice` grid with
+`load_raster` — in the slice CRS, across files in any CRS — and wraps the
+result as one `geopatcher` `RasterField`, so a catalog query drops straight
+into `SpatialPatcher.split` / `merge` (enabled by the
 `geotoolz-catalog[patch]` extra).
 
 **3. `patch_ops` — the patcher joins the operator graph.**
@@ -90,7 +92,7 @@ cat = gc.from_stac_search(
 
 # 2. Stage + bridge to Fields (catalog → patcher seam)
 staged = gc.stage(cat, dest="./cache")
-field = gc.field_for(staged)[0]          # one Field per catalog row
+field = gc.field_for(staged, aoi_slice, asset="B04")  # GeoSlice: bounds, CRS, resolution
 
 # 3. Patch + operate + stitch (patcher → operators seam)
 patcher = gp.SpatialPatcher(
