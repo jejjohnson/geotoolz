@@ -15,9 +15,10 @@ migration, and streaming writes.
 
 ## Errors
 
-Every error `geocatalog` raises on purpose derives from
+Errors about a catalog's state or artifacts derive from
 `GeoCatalogError` and from the builtin callers caught before
-(`ValueError` / `RuntimeError`); see the
+(`ValueError` / `RuntimeError`). Invalid arguments raise the builtin
+`ValueError` / `TypeError`; see the
 [parameter vocabulary](../design/vocabulary.md#errors).
 
 ::: geocatalog.catalog.GeoCatalogError

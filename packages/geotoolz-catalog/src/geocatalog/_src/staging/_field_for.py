@@ -164,7 +164,8 @@ def field_for(
     # `kind` is set by every catalog constructor we ship; tolerate
     # third-party catalogs that omit it by skipping the check rather
     # than crashing with AttributeError.
-    kind = getattr(catalog, "kind", None)
+    # (A catalog written against the old protocol spells it `backend`.)
+    kind = getattr(catalog, "kind", None) or getattr(catalog, "backend", None)
     if kind is not None and kind != "raster":
         raise ValueError(
             f"field_for(mode='raster') requires a raster catalog; "

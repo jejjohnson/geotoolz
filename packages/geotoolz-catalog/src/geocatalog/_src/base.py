@@ -13,6 +13,7 @@ new backends can join without touching consumers.
 from __future__ import annotations
 
 import dataclasses
+import warnings
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -34,11 +35,15 @@ if TYPE_CHECKING:
 
 
 class GeoCatalogError(Exception):
-    """Base class of every error `geocatalog` raises on purpose.
+    """Base class of the errors about a catalog's state or its artifacts.
 
-    Each subclass also derives from the builtin a caller would have
-    caught before the hierarchy existed (`ValueError`, `RuntimeError`),
-    so ``except ValueError`` keeps working.
+    A closed catalog, unreadable metadata, an unsupported schema version.
+    Invalid *arguments* (an unknown ``kind`` or ``engine``, malformed
+    ``bounds``) raise the builtin `ValueError` / `TypeError`, and an
+    unparsable CRS raises ``pyproj.exceptions.CRSError``, so catch those
+    as well when you want every failure. Each subclass also derives from
+    the builtin a caller would have caught before the hierarchy existed
+    (`ValueError`, `RuntimeError`), so ``except ValueError`` keeps working.
     """
 
 
@@ -102,8 +107,34 @@ class CatalogRow:
     extras: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
+class _GeoCatalogMeta(type(Protocol)):  # type: ignore[misc]
+    """Runtime check that still accepts a catalog spelling ``kind`` as ``backend``.
+
+    Third-party catalogs written against the previous protocol expose
+    ``backend``; for one minor release they still pass
+    ``isinstance(obj, GeoCatalog)``, with a `DeprecationWarning`.
+    """
+
+    def __instancecheck__(cls, instance: Any) -> bool:
+        if super().__instancecheck__(instance):
+            return True
+        if cls.__name__ != "GeoCatalog" or not hasattr(instance, "backend"):
+            return False
+        required = set(getattr(cls, "__protocol_attrs__", ())) - {"kind"}
+        if not all(hasattr(instance, name) for name in required):
+            return False
+        warnings.warn(
+            f"{type(instance).__name__}: a GeoCatalog exposing `backend` instead "
+            "of `kind` is deprecated; rename the attribute to `kind`. The old "
+            "name will be removed in the next minor release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return True
+
+
 @runtime_checkable
-class GeoCatalog(Protocol):
+class GeoCatalog(Protocol, metaclass=_GeoCatalogMeta):
     """A queryable spatiotemporal index over geospatial files.
 
     Implementations carry a backend-specific store (in-memory

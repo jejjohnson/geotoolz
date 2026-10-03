@@ -47,8 +47,9 @@ any release stay readable. `get_config()` reports the data kind under
 
 ## Errors
 
-Every error raised on purpose derives from `GeoCatalogError` *and*
-the builtin a caller would have caught before the hierarchy existed:
+Errors about a catalog's *state or artifacts* derive from
+`GeoCatalogError` *and* from the builtin a caller would have caught
+before the hierarchy existed:
 
 | Class | Also a | Raised when |
 |---|---|---|
@@ -56,6 +57,16 @@ the builtin a caller would have caught before the hierarchy existed:
 | `CatalogSchemaError` | `ValueError` | an artifact's `_schema_version` cannot be read by this release |
 | `CatalogClosedError` | `RuntimeError` | a closed `DuckDBGeoCatalog` (or one derived from it) is used; also a `duckdb.ConnectionException` |
 
-Bad arguments are `ValueError` (wrong value) or `TypeError` (wrong
-type), and an unparsable CRS is `pyproj.exceptions.CRSError`, the same
-on both backends (`tests/test_vocabulary.py`).
+Bad *arguments* are not `GeoCatalogError`s: they raise `ValueError`
+(wrong value, such as an unknown `kind` or malformed `bounds`) or
+`TypeError` (wrong type), and an unparsable CRS raises
+`pyproj.exceptions.CRSError`. Each case raises the same type on both
+backends (`tests/test_vocabulary.py`). To catch every failure, catch
+`GeoCatalogError`, `ValueError`, `TypeError` and `CRSError`.
+
+## Third-party catalogs
+
+The `GeoCatalog` protocol names the attribute `kind`. For one minor
+release, a catalog that still exposes `backend` instead passes
+`isinstance(obj, GeoCatalog)` with a `DeprecationWarning`, and
+`field_for` reads its `backend`.

@@ -326,3 +326,37 @@ def test_closed_duckdb_catalog_raises_catalog_closed_error(parquet: Path) -> Non
         len(duck)
     with pytest.raises(GeoCatalogError):
         len(duck)
+
+
+def test_argument_errors_are_builtins_not_catalog_errors() -> None:
+    """The documented split: bad arguments are `ValueError`, not `GeoCatalogError`."""
+    with pytest.raises(ValueError, match="kind must be one of") as info:
+        InMemoryGeoCatalog(_catalog().gdf, kind="bogus")  # type: ignore[arg-type]
+    assert not isinstance(info.value, GeoCatalogError)
+
+
+class _OldStyleCatalog:
+    """A third-party catalog written against the pre-#246 protocol."""
+
+    def __init__(self, inner: InMemoryGeoCatalog) -> None:
+        self._inner = inner
+        self.backend = inner.kind
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "kind":
+            raise AttributeError(name)
+        return getattr(self._inner, name)
+
+    def __len__(self) -> int:
+        return len(self._inner)
+
+
+def test_protocol_still_accepts_a_backend_only_catalog() -> None:
+    from geocatalog import GeoCatalog
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert isinstance(_catalog(), GeoCatalog)  # no warning for `kind`
+    with pytest.warns(DeprecationWarning, match="instead of `kind`"):
+        assert isinstance(_OldStyleCatalog(_catalog()), GeoCatalog)
+    assert not isinstance(object(), GeoCatalog)
