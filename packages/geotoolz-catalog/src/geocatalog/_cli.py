@@ -10,7 +10,7 @@ Exit codes:
 * 0 — success.
 * 1 — user error (bad args, missing extra, no files match glob,
        invalid bbox / time range / CRS, partial ``--start`` / ``--end``,
-       input not a file of the builder's kind).
+       a ``build vector`` input that is not a vector dataset).
 * 2 — catalog error (corrupt artifact, schema mismatch).
 * 3 — I/O error (path not readable / writable, parent dir missing).
 """
@@ -85,7 +85,9 @@ def _crs_error(value: str | None, flag: str) -> str | None:
     try:
         pyproj.CRS.from_user_input(value)
     except pyproj.exceptions.CRSError as exc:
-        return f"invalid {flag} {value!r}: {exc}"
+        # pyproj may echo a multi-line input (WKT); keep the message on
+        # one line.
+        return f"invalid {flag} {value!r}: {' '.join(str(exc).split())}"
     return None
 
 

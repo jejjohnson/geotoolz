@@ -630,3 +630,16 @@ def test_convert_round_trips_through_a_partitioned_directory(
     payload = json.loads(capsys.readouterr().out)
     assert not {"_backend", "_schema_version", "bbox"} & set(payload)
     assert payload["start_time"].startswith("2024-06-01")
+
+
+def test_multiline_crs_error_stays_on_one_line(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    capsys.readouterr()
+    bad = 'GEOGCRS["broken",\n  DATUM["nope",\n    ELLIPSOID["x",1,0]]]'
+    assert _run("query", str(source), "--bbox", "0,0,1,1", "--crs", bad) == 1
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1

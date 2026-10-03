@@ -43,15 +43,17 @@ clear error if the extra isn't installed.
 | ---- | -------- | ------- |
 | `--input-glob` | all | Local glob over input files (`**` recurses). Required. |
 | `--out` | all | Destination GeoParquet path. Required. |
-| `--target-crs` | all | Catalog CRS. `raster` / `vector`: defaults to the first file's CRS. `xarray`: tags the catalog, does not reproject. |
+| `--target-crs` | all | Catalog CRS. `raster` with `--backend memory` and `vector`: defaults to the first file's CRS. `raster` with `--backend duckdb`: defaults to `EPSG:4326` (footprints are reprojected). `xarray`: tags the catalog, does not reproject. |
 | `--regex` | raster, vector | Filename regex with a `(?P<date>...)` group, or `(?P<start>...)` + `(?P<stop>...)`. |
 | `--date-format` | raster, vector | `strptime` format for the regex groups (default `%Y%m%d`). |
 | `--backend` | raster | `memory` (default) builds in RAM; `duckdb` streams rows straight to `--out` (needs the `[duckdb]` extra). |
 | `--layer` | vector | Layer name for multi-layer files (GeoPackage). |
 | `--time-var` | xarray | Name of the time coordinate (default `time`). |
 
-An invalid `--target-crs`, or an input that is not a file of the
-builder's kind, fails with a one-line message and exit code 1.
+An invalid `--target-crs` fails with a one-line message and exit code
+1, as does a `build vector` input that is not a vector dataset. `build
+raster` reports a file it cannot open as a raster as an I/O error
+(exit code 3).
 
 ### `query`
 
@@ -165,7 +167,7 @@ $ geocatalog build raster --input-glob "data/*.tif" \
 | Code | Meaning                                                       |
 | ---- | ------------------------------------------------------------- |
 | 0    | Success.                                                      |
-| 1    | User error — bad or unparseable args (including an invalid `--crs` / `--target-crs`), glob matched nothing, input not a file of the builder's kind, missing extra. |
+| 1    | User error — bad or unparseable args (including an invalid `--crs` / `--target-crs`), glob matched nothing, a `build vector` input that is not a vector dataset, missing extra. |
 | 2    | Catalog error — corrupt artifact or unrecognised schema (e.g. a newer `_schema_version`). |
 | 3    | I/O error — source path doesn't exist or can't be read.       |
 
