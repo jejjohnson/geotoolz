@@ -88,11 +88,12 @@ from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 cat = gc.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     collections=["sentinel-2-l2a"], bbox=aoi_bbox, datetime="2024-06",
+    asset_key="B04",                     # one row per item, filepath = its B04 href
 )
 
 # 2. Stage + bridge to Fields (catalog → patcher seam)
 staged = gc.stage(cat, dest="./cache")
-field = gc.field_for(staged, aoi_slice, asset="B04")  # GeoSlice: bounds, CRS, resolution
+field = gc.field_for(staged, aoi_slice)  # aoi_slice: GeoSlice (bounds, CRS, resolution)
 
 # 3. Patch + operate + stitch (patcher → operators seam)
 patcher = gp.SpatialPatcher(

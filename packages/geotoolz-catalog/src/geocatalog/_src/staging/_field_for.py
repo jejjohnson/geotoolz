@@ -22,6 +22,7 @@ the mosaic and returns one lazy field per row, in each file's own CRS.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, overload
 from urllib.parse import urlparse
@@ -115,8 +116,10 @@ def field_for(
             typically the output of `stage()`.
         slice_: The grid to build the field on: its bounds, CRS and
             resolution. ``None`` covers the whole catalog in the
-            catalog CRS, at the native resolution of the first row's
-            file (which must then be in the catalog CRS).
+            catalog CRS, on the first row's file grid (resolution and
+            pixel alignment; that file must then be in the catalog CRS),
+            with the bounds grown outward to whole pixels. With
+            ``materialize=False`` it selects every row and needs no grid.
         asset: Asset key to read from each row's ``assets`` map.
             ``None`` reads the row's ``filepath`` — the right default
             for `build_raster_catalog` catalogs, which carry no map.
@@ -132,8 +135,10 @@ def field_for(
             ``False`` reads nothing and returns one lazy field per
             selected row (catalog order), each over a
             `georeader.RasterioReader` in its file's own CRS and grid;
-            each ``select`` reads its window on demand. There is no
-            mosaic and no reprojection on this path.
+            each ``select`` reads its window on demand, restricted to
+            ``band_indexes``. There is no mosaic and no reprojection on
+            this path (``resampling``, ``merge_method`` and ``nodata``
+            do not apply).
         mode: Field flavour; only ``"raster"`` is supported.
 
     Returns:
@@ -183,7 +188,8 @@ def field_for(
 
     if slice_ is None:
         selected = _with_asset_paths(catalog, asset=asset)
-        slice_ = _whole_catalog_slice(selected)
+        if materialize:  # the lazy path needs no grid
+            slice_ = _whole_catalog_slice(selected)
     else:
         # Only the rows the slice selects need to carry `asset`.
         selected = catalog.query(slice_)
@@ -194,7 +200,9 @@ def field_for(
     _reject_unstaged_uris(paths, asset=asset)
 
     if not materialize:
-        return [RasterField(RasterioReader(p)) for p in paths]
+        indexes = list(band_indexes) if band_indexes is not None else None
+        return [RasterField(RasterioReader(p, indexes=indexes)) for p in paths]
+    assert slice_ is not None
 
     from geocatalog._src.raster import load_raster
 
@@ -221,6 +229,7 @@ def _whole_catalog_slice(catalog: InMemoryGeoCatalog) -> GeoSlice:
     with rasterio.open(first) as src:
         file_crs = pyproj.CRS.from_user_input(src.crs) if src.crs else None
         res = (abs(src.res[0]), abs(src.res[1]))
+        origin = (src.transform.c, src.transform.f)
     if file_crs is None or not file_crs.equals(catalog.crs):
         raise ValueError(
             f"field_for: cannot infer a grid — {first!r} is in "
@@ -231,10 +240,32 @@ def _whole_catalog_slice(catalog: InMemoryGeoCatalog) -> GeoSlice:
     interval = catalog.temporal_extent
     assert interval is not None  # the catalog is not empty
     return GeoSlice(
-        bounds=tuple(float(v) for v in catalog.total_bounds),  # type: ignore[arg-type]
+        bounds=_snap_outward(catalog.total_bounds, res, origin),
         interval=interval,
         resolution=res,
         crs=catalog.crs,
+    )
+
+
+def _snap_outward(
+    bounds: Any, res: tuple[float, float], origin: tuple[float, float]
+) -> tuple[float, float, float, float]:
+    """Grow ``bounds`` to whole pixels of the grid through ``origin``.
+
+    `rasterio.merge` rounds the output size, so bounds that are not a
+    whole number of pixels would lose the last partial pixel; snapping
+    outward to the first file's grid covers every row and keeps that
+    file's pixels aligned.
+    """
+    xmin, ymin, xmax, ymax = (float(v) for v in bounds)
+    rx, ry = res
+    x0, y0 = origin
+    eps = 1e-9  # absorb float noise in bounds that already sit on the grid
+    return (
+        x0 + math.floor((xmin - x0) / rx + eps) * rx,
+        y0 - math.ceil((y0 - ymin) / ry - eps) * ry,
+        x0 + math.ceil((xmax - x0) / rx - eps) * rx,
+        y0 - math.floor((y0 - ymax) / ry + eps) * ry,
     )
 
 

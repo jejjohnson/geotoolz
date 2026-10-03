@@ -342,3 +342,45 @@ def test_dict_asset_maps_from_stage_are_readable(
     staged = stage(cat, dest=tmp_path / "cache")
     field = field_for(staged, _slice(LEFT), asset="red")
     assert int(field.domain.values[0, 0, 0]) == 10
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (#366)
+# ---------------------------------------------------------------------------
+
+
+def test_lazy_fields_without_a_slice_need_no_grid(
+    cross_crs_catalog: InMemoryGeoCatalog,
+) -> None:
+    gdf = cross_crs_catalog.gdf.iloc[::-1]  # the UTM 30N file first
+    fields = field_for(InMemoryGeoCatalog(gdf, backend="raster"), materialize=False)
+    assert len(fields) == 2
+
+
+def test_lazy_fields_honour_band_indexes(
+    asset_catalog: InMemoryGeoCatalog,
+) -> None:
+    import rasterio
+
+    fields = field_for(asset_catalog, asset="red", band_indexes=[2], materialize=False)
+    window = rasterio.windows.Window(0, 0, 4, 4)
+    assert fields[0].select(window).shape == (1, 4, 4)
+
+
+def test_inferred_grid_covers_a_partial_last_pixel(utm29_tile_factory) -> None:
+    # A second 10 m tile shifted 4 m east: the union is 32.4 pixels wide.
+    first = utm29_tile_factory(LEFT, "20240115", value=5)
+    shifted = (500_004, 4_000_000, 500_324, 4_000_320)
+    second = utm29_tile_factory(shifted, "20240116", value=9)
+    cat = catalog_from_rows(
+        rows=[
+            _row(LEFT, "2024-01-15", filepath=str(first)),
+            _row(shifted, "2024-01-16", filepath=str(second)),
+        ],
+        crs="EPSG:32629",
+    )
+    tensor = field_for(cat).domain
+    xmin, _, xmax, _ = tensor.bounds
+    assert (xmin, xmax) == (500_000, 500_330)  # whole pixels on the first grid
+    assert tensor.shape[-1] == 33
+    assert int(tensor.values[0, 0, -2]) == 9  # the later row wins the overlap
