@@ -232,6 +232,10 @@ def matchup(
         "spatial": _params(spatial),
         "temporal": _params(temporal),
         "join": join,
+        # `to_string()`, not `crs_config_string`: this feeds every
+        # persisted `MatchupRow` id, so changing the serialisation would
+        # re-key existing bundles and `write_matchups` would append
+        # duplicates instead of replacing rows.
         "crs": work_crs.to_string(),
     }
     strategy_key = json.dumps(tolerance, sort_keys=True)

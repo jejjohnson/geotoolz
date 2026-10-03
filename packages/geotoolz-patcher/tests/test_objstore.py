@@ -26,17 +26,28 @@ from geopatcher._src import objstore
 
 
 @pytest.fixture(autouse=True)
-def _isolate_pool(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _isolate_pool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Empty pool and no endpoint / region env vars for every test."""
     for var in (
         "AWS_REGION",
         "AWS_DEFAULT_REGION",
         "AWS_S3_ENDPOINT",
         "AWS_ENDPOINT_URL",
+        "AWS_ENDPOINT",
+        "AWS_ENDPOINT_URL_S3",
+        "AWS_PROFILE",
+        "AZURE_ENDPOINT",
+        "HF_ENDPOINT",
         "GOOGLE_SERVICE_ENDPOINT",
         "AZURE_STORAGE_ENDPOINT",
+        "HF_TOKEN",
+        "HUGGING_FACE_HUB_TOKEN",
+        "HF_HOME",
+        "HF_HUB_DISABLE_IMPLICIT_TOKEN",
     ):
         monkeypatch.delenv(var, raising=False)
+    # Never pick up a real `huggingface-cli login` token.
+    monkeypatch.setenv("HF_TOKEN_PATH", str(tmp_path / "no-token"))
     objstore.clear_obstore_pool()
     yield
     objstore.clear_obstore_pool()
@@ -60,12 +71,18 @@ def test_pool_key_s3_basic():
 
 def test_pool_key_gs_basic():
     key = objstore._pool_key("gs://my-bucket/path/to/file.tif")
-    assert key == ("gcs", "my-bucket", None, None, None, ())
+    assert key == ("gcs", "my-bucket", None, None, None, None, (), None)
 
 
 def test_pool_key_https_basic():
     key = objstore._pool_key("https://example.com/data/file.tif")
-    assert key == ("http", "example.com", None, None, None, ())
+    assert key == ("http", "example.com", None, None, None, None, (), "https")
+
+
+def test_pool_key_separates_http_from_https():
+    assert objstore._pool_key("http://example.com/a") != objstore._pool_key(
+        "https://example.com/a"
+    )
 
 
 def test_pool_key_includes_aws_region_from_env(monkeypatch):
@@ -326,3 +343,242 @@ def test_get_range_bytes_with_explicit_store(tmp_path: Path):
         objstore.get_range_bytes("az://acct/cont/p/b.bin", 1, 3, store=store)
     )
     assert got == b"bcd"
+
+
+# --- review follow-ups (#249) ------------------------------------------
+
+
+@pytest.mark.parametrize("var", ["AWS_ENDPOINT", "AWS_ENDPOINT_URL", "AWS_S3_ENDPOINT"])
+def test_each_s3_endpoint_variable_separates_clients(monkeypatch, var):
+    monkeypatch.setenv(var, "http://minio-a:9000")
+    a = objstore._pool_key("s3://bucket/k")
+    monkeypatch.setenv(var, "http://minio-b:9000")
+    b = objstore._pool_key("s3://bucket/k")
+    assert a != b
+
+
+def test_aws_profile_is_part_of_the_key(monkeypatch):
+    monkeypatch.setenv("AWS_PROFILE", "dev")
+    a = objstore._pool_key("s3://bucket/k")
+    monkeypatch.setenv("AWS_PROFILE", "prod")
+    assert objstore._pool_key("s3://bucket/k") != a
+
+
+@pytest.mark.parametrize(
+    ("uri", "key"),
+    [
+        (
+            "hf://datasets/org/repo/data/train.parquet",
+            "datasets/org/repo/resolve/main/data/train.parquet",
+        ),
+        (
+            "hf://datasets/org/repo@v1.0/train.parquet",
+            "datasets/org/repo/resolve/v1.0/train.parquet",
+        ),
+        ("hf://org/model/weights.bin", "org/model/resolve/main/weights.bin"),
+        ("hf://spaces/org/app/a.json", "spaces/org/app/resolve/main/a.json"),
+        ("hf://models/org/model/w.bin", "org/model/resolve/main/w.bin"),
+    ],
+)
+def test_hf_uris_resolve_through_the_hub(uri, key):
+    assert objstore.object_key(uri) == key
+    assert objstore._pool_key(uri)[:2] == ("hf", "huggingface.co")
+    assert "hf" in objstore.SUPPORTED_SCHEMES
+
+
+def test_hf_endpoint_override(monkeypatch):
+    monkeypatch.setenv("HF_ENDPOINT", "https://hf-mirror.example")
+    assert objstore._pool_key("hf://org/model/w.bin")[:2] == (
+        "hf",
+        "hf-mirror.example",
+    )
+
+
+def test_hf_uri_without_a_path_raises():
+    with pytest.raises(ValueError, match="org/repo/path"):
+        objstore.object_key("hf://datasets/org/repo")
+
+
+def test_hf_endpoint_path_prefix_is_kept(monkeypatch):
+    monkeypatch.setenv("HF_ENDPOINT", "http://localhost:8080/hf/")
+    assert objstore._pool_key("hf://org/model/w.bin")[1] == "localhost:8080/hf"
+    monkeypatch.setenv("HF_ENDPOINT", "http://localhost:8080/other")
+    assert objstore._pool_key("hf://org/model/w.bin")[1] == "localhost:8080/other"
+
+
+@pytest.mark.parametrize("prefix", ["kernels", "buckets"])
+def test_hf_unsupported_repo_types_are_rejected(prefix):
+    with pytest.raises(ValueError, match=f"hf://{prefix}/"):
+        objstore.object_key(f"hf://{prefix}/org/repo/file.bin")
+
+
+def test_hf_empty_revision_is_rejected():
+    with pytest.raises(ValueError, match="empty revision"):
+        objstore.object_key("hf://org/repo@/weights.bin")
+
+
+def test_hf_token_keys_the_pool_without_leaking(monkeypatch, tmp_path):
+    uri = "hf://org/model/w.bin"
+    anonymous = objstore._pool_key(uri)
+    monkeypatch.setenv("HF_TOKEN", "secret-a")
+    with_a = objstore._pool_key(uri)
+    monkeypatch.setenv("HF_TOKEN", "secret-b")
+    with_b = objstore._pool_key(uri)
+    assert len({anonymous, with_a, with_b}) == 3
+    assert "secret" not in repr(with_a)
+    monkeypatch.setenv("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
+    assert objstore._pool_key(uri) == anonymous
+
+
+def test_hf_token_falls_back_to_the_saved_login(monkeypatch, tmp_path):
+    token_file = tmp_path / "token"
+    token_file.write_text("saved\n")
+    monkeypatch.setenv("HF_TOKEN_PATH", str(token_file))
+    assert objstore._hf_token() == "saved"
+    monkeypatch.delenv("HF_TOKEN_PATH")
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    assert objstore._hf_token() == "saved"
+    monkeypatch.setenv("HF_TOKEN", "env")
+    assert objstore._hf_token() == "env"
+
+
+def test_hf_reads_send_the_token_to_the_prefixed_endpoint(monkeypatch):
+    pytest.importorskip("obstore")
+    seen: dict[str, str | None] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen["path"] = self.path
+            seen["auth"] = self.headers.get("Authorization")
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("HF_ENDPOINT", f"http://127.0.0.1:{server.server_port}/hf")
+        monkeypatch.setenv("HF_TOKEN", "secret")
+        uri = "hf://datasets/org/repo@v1/data.bin"
+        store = objstore.get_obstore(
+            uri, storage_options={"client_options": {"allow_http": True}}
+        )
+        assert bytes(store.get(objstore.object_key(uri)).bytes()) == b"ok"
+    finally:
+        server.shutdown()
+    assert seen == {
+        "path": "/hf/datasets/org/repo/resolve/v1/data.bin",
+        "auth": "Bearer secret",
+    }
+
+
+@pytest.mark.parametrize(
+    ("uri", "key"),
+    [
+        (
+            "hf://datasets/org/repo@refs/pr/3/train.json",
+            "datasets/org/repo/resolve/refs%2Fpr%2F3/train.json",
+        ),
+        (
+            "hf://org/repo@refs/convert/parquet/default/train/0.parquet",
+            "org/repo/resolve/refs%2Fconvert%2Fparquet/default/train/0.parquet",
+        ),
+        (
+            "hf://org/repo@refs%2Fpr%2F3/w.bin",
+            "org/repo/resolve/refs%2Fpr%2F3/w.bin",
+        ),
+        ("hf://org/repo@v1.0/w.bin", "org/repo/resolve/v1.0/w.bin"),
+    ],
+)
+def test_hf_special_refs_are_kept_whole(uri, key):
+    assert objstore.object_key(uri) == key
+
+
+def test_hf_ref_without_a_file_raises():
+    with pytest.raises(ValueError, match="org/repo/path"):
+        objstore.object_key("hf://org/repo@refs/pr/3")
+
+
+def test_hf_endpoint_scheme_is_part_of_the_pool_key(monkeypatch):
+    monkeypatch.setenv("HF_ENDPOINT", "http://host/prefix")
+    plain = objstore._pool_key("hf://org/model/w.bin")
+    monkeypatch.setenv("HF_ENDPOINT", "https://host/prefix")
+    assert objstore._pool_key("hf://org/model/w.bin") != plain
+
+
+@pytest.mark.parametrize("prefix", ["model", "dataset", "space", "kernel", "bucket"])
+def test_hf_singular_type_prefixes_are_rejected(prefix):
+    with pytest.raises(ValueError, match=f"use the plural `{prefix}s/`"):
+        objstore.object_key(f"hf://{prefix}/org/repo/file.bin")
+
+
+def test_hf_legacy_token_variable(monkeypatch):
+    monkeypatch.setenv("HUGGING_FACE_HUB_TOKEN", "legacy")
+    assert objstore._hf_token() == "legacy"
+    monkeypatch.setenv("HF_TOKEN", "new")
+    assert objstore._hf_token() == "new"
+
+
+def test_hf_token_paths_expand_user_and_vars(monkeypatch, tmp_path):
+    (tmp_path / "token").write_text("saved")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HF_TOKEN_PATH", "~/token")
+    assert objstore._hf_token() == "saved"
+    monkeypatch.setenv("TOKEN_DIR", str(tmp_path))
+    monkeypatch.setenv("HF_TOKEN_PATH", "$TOKEN_DIR/token")
+    assert objstore._hf_token() == "saved"
+    monkeypatch.delenv("HF_TOKEN_PATH")
+    monkeypatch.setenv("HF_HOME", "$TOKEN_DIR")
+    assert objstore._hf_token() == "saved"
+
+
+@pytest.mark.parametrize(
+    ("uri", "key"),
+    [
+        ("hf://org/repo/data#1.csv", "org/repo/resolve/main/data#1.csv"),
+        ("hf://org/repo/what?.csv", "org/repo/resolve/main/what?.csv"),
+    ],
+)
+def test_hf_filenames_keep_reserved_characters(uri, key):
+    assert objstore.object_key(uri) == key
+
+
+@pytest.mark.parametrize(
+    "uri", ["hf://org/repo/a//b.bin", "hf:///org/repo/a.bin", "hf://org/repo/dir/"]
+)
+def test_hf_empty_segments_are_rejected(uri):
+    with pytest.raises(ValueError, match="empty path segment"):
+        objstore.object_key(uri)
+
+
+def test_hf_reserved_characters_are_encoded_on_the_wire(monkeypatch):
+    pytest.importorskip("obstore")
+    seen: dict[str, str] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen["path"] = self.path
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("HF_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
+        uri = "hf://org/repo/data#1.csv"
+        store = objstore.get_obstore(
+            uri, storage_options={"client_options": {"allow_http": True}}
+        )
+        assert bytes(store.get(objstore.object_key(uri)).bytes()) == b"ok"
+    finally:
+        server.shutdown()
+    assert seen["path"] == "/org/repo/resolve/main/data%231.csv"

@@ -333,6 +333,23 @@ def test_catalog_primary_with_source_row_secondary() -> None:
     assert row.geometry_intersect.bounds[0] > 500_000
 
 
+def test_matchup_ids_keep_the_legacy_crs_serialisation() -> None:
+    """A CRS without an authority keys matchups by its PROJ string, as before.
+
+    The tolerance feeds every persisted `MatchupRow` id; re-serialising it
+    (e.g. as WKT2) would re-key existing bundles and duplicate rows on
+    the next `write_matchups`.
+    """
+    import pyproj
+
+    laea = "+proj=laea +lat_0=0 +lon_0=3 +x_0=0 +y_0=0 +ellps=WGS84 +units=m"
+    scenes = _utm_scenes()
+    gdf = scenes.gdf.to_crs(laea)
+    station = _row("st", source="insitu", bbox=(3.04, 0.04, 3.05, 0.05))
+    (row,) = _run(InMemoryGeoCatalog(gdf, backend="raster"), [station])
+    assert row.tolerance["crs"] == pyproj.CRS(laea).to_string()
+
+
 def test_bundle_items_keep_their_source_ids() -> None:
     bundle = CatalogBundle.empty(target_crs="EPSG:4326", backend="raster")
 

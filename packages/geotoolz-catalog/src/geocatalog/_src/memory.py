@@ -23,7 +23,7 @@ import pandas as pd
 import pyproj
 import shapely
 
-from geocatalog._src._schema import RESERVED_COLUMNS, BackendTag
+from geocatalog._src._schema import RESERVED_COLUMNS, BackendTag, crs_config_string
 from geocatalog._src._timeutil import (
     naive_utc_datetimes,
     naive_utc_interval_index,
@@ -457,14 +457,15 @@ class InMemoryGeoCatalog:
 
         Returns:
             ``{"backend": str, "len": int, "crs": str, "engine": "memory"}``.
-            The CRS is ``pyproj.CRS.to_string()`` (``"EPSG:32629"`` when an
-            authority code exists), the same form `DuckDBGeoCatalog`
-            reports, and round-trips through ``pyproj.CRS.from_user_input``.
+            The CRS is `crs_config_string`: ``"AUTH:CODE"`` (``"EPSG:32629"``)
+            when the CRS carries an authority id, else WKT2 — the same
+            string `DuckDBGeoCatalog` reports for the same artifact, before
+            and after a GeoParquet round trip.
         """
         return {
             "backend": self.backend,
             "len": len(self),
-            "crs": self.crs.to_string(),
+            "crs": crs_config_string(self.crs),
             "engine": "memory",
         }
 

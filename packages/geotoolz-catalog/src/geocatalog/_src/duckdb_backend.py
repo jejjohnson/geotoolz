@@ -47,6 +47,7 @@ from geocatalog._src._schema import (
     LEGACY_UNVERSIONED,
     BackendTag,
     check_schema_versions,
+    crs_config_string,
 )
 from geocatalog._src._timeutil import naive_utc_datetimes, to_naive_utc
 from geocatalog._src.base import (
@@ -1074,7 +1075,7 @@ class DuckDBGeoCatalog:
         return {
             "backend": self.backend,
             "len": len(self),
-            "crs": self.crs.to_string(),
+            "crs": crs_config_string(self.crs),
             "engine": "duckdb",
         }
 

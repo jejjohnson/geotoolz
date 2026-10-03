@@ -272,3 +272,50 @@ def test_streamed_artifact_reads_the_same_on_both_engines(tmp_path: Path) -> Non
     duck = DuckDBGeoCatalog.open(path)
     assert_catalogs_equal(memory, _scenes())
     assert_catalogs_equal(duck, _scenes())
+
+
+# ---------------------------------------------------------------------------
+# get_config()["crs"] is one string everywhere (#249)
+# ---------------------------------------------------------------------------
+
+_LAEA = "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +units=m"
+
+
+@pytest.mark.parametrize("crs", ["EPSG:32629", "epsg:4326", "OGC:CRS84", _LAEA])
+def test_config_crs_is_stable_across_backends_and_round_trips(
+    tmp_path: Path, crs: str
+) -> None:
+    import pyproj
+
+    from geocatalog._src._schema import crs_config_string
+
+    memory = _catalog(_rows_simple(), crs=crs)
+    path = tmp_path / "c.parquet"
+    to_geoparquet(memory, path)
+    configs = [memory.get_config()["crs"], from_geoparquet(path).get_config()["crs"]]
+    try:
+        from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+
+        configs.append(DuckDBGeoCatalog.open(path).get_config()["crs"])
+    except ImportError:
+        pass
+    assert len(set(configs)) == 1
+    # It names the same CRS, and an authority id (not a guess) when there is one.
+    assert pyproj.CRS.from_user_input(configs[0]).equals(
+        pyproj.CRS.from_user_input(crs)
+    )
+    if crs == _LAEA:
+        assert configs[0].startswith("PROJCRS[")
+    else:
+        assert configs[0] == crs_config_string(crs) == crs.upper()
+
+
+def _rows_simple() -> list[dict]:
+    return [
+        {
+            "geometry": shapely.box(0, 0, 1, 1),
+            "start_time": pd.Timestamp("2024-01-01"),
+            "end_time": pd.Timestamp("2024-01-02"),
+            "filepath": "a.tif",
+        }
+    ]

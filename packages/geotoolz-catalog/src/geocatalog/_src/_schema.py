@@ -95,6 +95,25 @@ def check_schema_versions(
         )
 
 
+def crs_config_string(crs: Any) -> str:
+    """The CRS as ``get_config()`` reports it: one string per CRS, stable.
+
+    ``"AUTH:CODE"`` when the CRS carries an authority identifier
+    (``"EPSG:32629"``, ``"OGC:CRS84"``), else its WKT2. The PROJJSON a
+    GeoParquet artifact stores round-trips to the same string, so the
+    in-memory and DuckDB backends, and a catalog before and after a
+    write, report the same value. (``CRS.to_string()`` would print a
+    PROJ string for one and PROJJSON for the other.)
+    """
+    import pyproj
+
+    parsed = pyproj.CRS.from_user_input(crs)
+    ident = parsed.to_json_dict().get("id")
+    if isinstance(ident, dict) and "authority" in ident and "code" in ident:
+        return f"{ident['authority']}:{ident['code']}"
+    return parsed.to_wkt()
+
+
 def empty_frame(crs: Any, columns: Mapping[str, str] | None = None) -> gpd.GeoDataFrame:
     """A zero-row catalog frame: typed ``columns``, geometry, interval index.
 
@@ -129,5 +148,6 @@ __all__ = [
     "BackendTag",
     "StorageEngine",
     "check_schema_versions",
+    "crs_config_string",
     "empty_frame",
 ]
