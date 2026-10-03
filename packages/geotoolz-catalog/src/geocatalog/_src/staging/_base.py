@@ -41,13 +41,13 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
-from urllib.request import url2pathname
 
 import geopandas as gpd
 from loguru import logger
 
+from geocatalog._src._extras import missing_extra
 from geocatalog._src.retry import retry_transient_io
+from geocatalog._src.uri import parse_uri, query_params, with_query
 
 
 if TYPE_CHECKING:
@@ -411,18 +411,7 @@ def _rewrite_gdf(
 
 def _local_path(uri: str) -> Path | None:
     """The filesystem path a local URI names, ``None`` for remote URIs."""
-    parsed = urlparse(uri)
-    if parsed.scheme == "file":
-        # `file://server/share/x` is a UNC path; `file:///C:/x` a drive
-        # path, which `url2pathname` resolves on Windows.
-        path = parsed.path
-        if parsed.netloc and parsed.netloc != "localhost":
-            path = f"//{parsed.netloc}{path}"
-        return Path(url2pathname(path))
-    # No scheme, or a Windows drive letter (`C:\\...` parses as scheme "c").
-    if parsed.scheme == "" or len(parsed.scheme) == 1:
-        return Path(uri)
-    return None
+    return parse_uri(uri).local_path()
 
 
 def _fetch_one(uri: str, cache: LocalCache, retries: int) -> Path:
@@ -448,10 +437,7 @@ def _fetch_one(uri: str, cache: LocalCache, retries: int) -> Path:
     try:
         import fsspec  # noqa: F401
     except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            f"stage: fetching {uri!r} needs fsspec; install it with "
-            "`pip install 'geotoolz-catalog[fsspec]'`."
-        ) from exc
+        raise missing_extra(f"stage: fetching {uri!r}", "fsspec") from exc
     dest.parent.mkdir(parents=True, exist_ok=True)
     retry_transient_io(_download, uri, dest, cache.timeout, retries=retries)
     return dest
@@ -506,10 +492,9 @@ def cache_key(uri: str) -> str:
     are dropped; every other query parameter is kept, so URLs that
     select different content keep different keys.
     """
-    parsed = urlparse(uri)
-    if not parsed.query:
+    params = query_params(uri)
+    if not params:
         return uri
-    params = parse_qsl(parsed.query, keep_blank_values=True)
     names = {k.lower() for k, _ in params}
 
     def signing(name: str) -> bool:
@@ -523,18 +508,16 @@ def cache_key(uri: str) -> str:
     kept = [(k, v) for k, v in params if not signing(k)]
     if len(kept) == len(params):
         return uri
-    return urlunparse(parsed._replace(query=urlencode(kept)))
+    return with_query(uri, kept)
 
 
 def _ext_for(uri: str) -> str:
-    """Return the file extension (with dot) for a URI; empty string if none."""
-    local = _local_path(uri)
-    # A local path is not a URL: `#` and `?` are ordinary characters.
-    path = local.as_posix() if local is not None else urlparse(uri).path
-    leaf = path.rsplit("/", 1)[-1]
-    if "." not in leaf:
-        return ""
-    return "." + leaf.rsplit(".", 1)[-1]
+    """Return the file extension (with dot) for a URI; empty string if none.
+
+    A local path is not a URL: ``#`` and ``?`` in it are ordinary
+    characters (`parse_uri` keeps the whole string as its path).
+    """
+    return parse_uri(uri).suffix
 
 
 __all__ = ["LocalCache", "cache_key", "stage"]

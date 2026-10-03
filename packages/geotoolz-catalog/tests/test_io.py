@@ -53,7 +53,7 @@ def test_is_fsspec_uri_recognises_supported_schemes(uri: str) -> None:
 def test_resolve_uri_requires_fsspec_extra(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "fsspec", None)
 
-    with pytest.raises(ImportError, match=r"geocatalog\[fsspec\]"):
+    with pytest.raises(ImportError, match=r"geotoolz-catalog\[fsspec\]"):
         _resolve_uri("s3://bucket/key.tif")
 
 

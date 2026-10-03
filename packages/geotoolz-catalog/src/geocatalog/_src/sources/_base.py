@@ -118,7 +118,7 @@ class Source(Protocol):
 
     Implementations live in `geocatalog._src.sources.<name>` and are
     extras-gated: ``EarthAccessSource`` requires
-    ``pip install 'geocatalog[earthaccess]'``, etc. Importing this
+    ``pip install 'geotoolz-catalog[earthaccess]'``, etc. Importing this
     Protocol never pulls in any optional dependency.
 
     Two methods. ``query`` returns an iterator (so adapters can

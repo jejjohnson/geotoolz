@@ -25,7 +25,9 @@ import json
 import math
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, overload
-from urllib.parse import urlparse
+
+from geocatalog._src._extras import missing_extra
+from geocatalog._src.uri import parse_uri
 
 
 if TYPE_CHECKING:
@@ -35,36 +37,20 @@ if TYPE_CHECKING:
     from geocatalog._src.memory import InMemoryGeoCatalog
 
 
-_GEOPATCHER_HINT = (
-    "field_for() requires geopatcher. Install with "
-    "`pip install 'geotoolz-catalog[patch]'` (or `pip install geotoolz-patcher`)."
-)
 _GEOREADER_HINT = (
     "field_for() requires georeader, a base dependency of geotoolz-catalog. "
     "Reinstall it with `pip install georeader-spaceml`."
 )
 
 
-# Schemes that resolve to a local file we can read without a network
-# round-trip. Anything else (https://, s3://, gs://, …) means staging
-# didn't actually fetch the bytes — typically a
-# `stage(on_error="skip")` row whose original URI was preserved.
-_LOCAL_URI_SCHEMES = frozenset({"", "file"})
-
-
 def _is_local_path(path: str) -> bool:
     """True if ``path`` is a local filesystem path, not a remote URI.
 
-    `urlparse("C:/data/tile.tif").scheme` returns ``'c'`` on every
-    platform, so a naive scheme-membership check would reject valid
-    Windows local paths. Real URI schemes are always 2+ characters
-    (``http``, ``s3``, ``gs``, …), so a single-character scheme is
-    treated as a drive letter rather than a remote scheme.
+    A remote URI here means staging didn't actually fetch the bytes —
+    typically a `stage(on_error="skip")` row whose original URI was
+    preserved. Windows drive paths and ``file://`` URIs are local.
     """
-    scheme = urlparse(path).scheme
-    if scheme in _LOCAL_URI_SCHEMES:
-        return True
-    return len(scheme) == 1 and scheme.isalpha()
+    return parse_uri(path).is_local
 
 
 @overload
@@ -160,7 +146,9 @@ def field_for(
     try:
         from geopatcher import RasterField
     except ImportError as exc:
-        raise ImportError(_GEOPATCHER_HINT) from exc
+        raise missing_extra(
+            "`field_for()`", "patch", packages="geotoolz-patcher"
+        ) from exc
     try:
         from georeader.rasterio_reader import RasterioReader
     except ImportError as exc:

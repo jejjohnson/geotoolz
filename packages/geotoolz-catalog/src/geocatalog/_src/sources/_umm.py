@@ -14,7 +14,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
 
 import pandas as pd
 import shapely
@@ -28,6 +27,7 @@ from geocatalog._src._timeutil import (
     to_utc_ts,
 )
 from geocatalog._src.sources._base import SourceRow
+from geocatalog._src.uri import parse_uri
 
 
 def _lonlat_points(points: Any) -> list[tuple[float, float]]:
@@ -256,8 +256,7 @@ def asset_key_from_url(url: str) -> str:
     Returns:
         A non-empty key suitable for a STAC-shaped asset map.
     """
-    parsed = urlparse(url)
-    leaf = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    leaf = parse_uri(url).name
     if "." in leaf:
         stem, ext = leaf.rsplit(".", 1)
         # Prefer the extension for keys when the stem is just the

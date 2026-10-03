@@ -223,10 +223,9 @@ def __getattr__(name: str) -> Any:
         except ImportError as exc:
             if extra is None:
                 raise
-            raise ImportError(
-                f"`geocatalog.{name}` requires the [{extra}] extra; "
-                f"install via `pip install 'geocatalog[{extra}]'`."
-            ) from exc
+            from geocatalog._src._extras import missing_extra
+
+            raise missing_extra(f"`geocatalog.{name}`", extra) from exc
         attr = getattr(mod, name)
         globals()[name] = attr
         return attr

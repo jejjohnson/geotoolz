@@ -159,9 +159,10 @@ def test_legacy_unversioned_treated_as_v0(
     gdf = gdf.drop(columns=["_schema_version"])
     gdf.to_parquet(legacy_path)
 
-    from geocatalog._src.parquet import _LEGACY_UNVERSIONED, _read_schema_version
+    from geocatalog._src._schema import LEGACY_UNVERSIONED
+    from geocatalog._src.parquet import _read_schema_version
 
-    assert _read_schema_version(legacy_path) == _LEGACY_UNVERSIONED == 0
+    assert _read_schema_version(legacy_path) == LEGACY_UNVERSIONED == 0
     # Reading still works at v0 (no migration needed today).
     cat = from_geoparquet(legacy_path)
     assert len(cat) == 1

@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 from loguru import logger
 
+from geocatalog._src._extras import missing_extra
 from geocatalog._src.retry import retry_transient_io
 from geocatalog._src.sources._base import (
     AuthStatus,
@@ -38,7 +39,6 @@ from geocatalog._src.sources._base import (
     SourceRow,
     wants_no_rows,
 )
-from geocatalog._src.sources._extras import _missing_extra
 from geocatalog._src.sources._umm import granule_to_source_row
 
 
@@ -80,8 +80,8 @@ class EarthAccessSource(Source):
         retries: int = 3,
     ) -> None:
         if earthaccess is None:
-            raise _missing_extra(
-                "EarthAccessSource", "earthaccess", "earthaccess>=0.10"
+            raise missing_extra(
+                "`EarthAccessSource`", "earthaccess", packages="earthaccess>=0.10"
             )
         self.daac = daac
         self.cloud_hosted = cloud_hosted

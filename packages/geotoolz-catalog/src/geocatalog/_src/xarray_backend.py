@@ -12,8 +12,7 @@ import contextlib
 import functools
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
-from urllib.parse import urlsplit
+from typing import TYPE_CHECKING, Any
 
 import geopandas as gpd
 import pandas as pd
@@ -27,8 +26,11 @@ if TYPE_CHECKING:
     from geocatalog._src.geoslice import GeoSlice
 
 
+from geocatalog._src._extras import missing_extra
+from geocatalog._src._schema import StorageEngine
 from geocatalog._src.io import _close_resolved_uri, _resolve_uri
 from geocatalog._src.memory import InMemoryGeoCatalog, _reproject_bounds
+from geocatalog._src.uri import parse_uri
 
 
 # Only `xarray` is genuinely optional — geopandas + shapely are base deps.
@@ -61,26 +63,18 @@ def _xy_dims(ds: xr.Dataset) -> tuple[str, str]:
 def _xarray_engine(filepath: str | Path) -> str | None:
     """Pick the xarray engine for ``filepath``.
 
-    Directories and ``.zarr`` paths use the zarr engine; everything else
-    falls through to xarray's default (netcdf4 / h5netcdf). Centralised
-    so the build + load paths can't disagree.
-
-    For ``str`` inputs, the scheme is inspected so we don't run ``is_dir()``
-    against a remote URI. Empty schemes (and single-character schemes, which
-    is how ``urlsplit`` parses Windows drive letters like ``C:/...``) are
-    treated as local paths and routed through the ``Path`` branch — this
-    keeps local Zarr directories without a ``.zarr`` suffix working when
-    the caller passes them as strings.
+    Directories and ``.zarr`` stores (trailing slash allowed) use the
+    zarr engine; everything else falls through to xarray's default
+    (netcdf4 / h5netcdf). Centralised so the build + load paths can't
+    disagree. Only local locations are checked with ``is_dir()``, so a
+    local Zarr directory without a ``.zarr`` suffix still works and a
+    remote URI is never touched.
     """
-    if isinstance(filepath, Path):
-        if filepath.suffix == ".zarr" or filepath.is_dir():
-            return "zarr"
-        return None
-    scheme = urlsplit(filepath).scheme
-    if not scheme or len(scheme) == 1:
-        # Local path expressed as str (incl. Windows ``C:/...``).
-        return _xarray_engine(Path(filepath))
-    if Path(urlsplit(filepath).path).suffix == ".zarr":
+    parsed = parse_uri(filepath)
+    if parsed.is_zarr:
+        return "zarr"
+    local = parsed.local_path()
+    if local is not None and local.is_dir():
         return "zarr"
     return None
 
@@ -126,10 +120,7 @@ def _xarray_row(
     storage_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if xr is None:
-        raise ImportError(
-            "build_xarray_catalog requires xarray; install via "
-            "`pip install 'geocatalog[xarray-raster]'`."
-        )
+        raise missing_extra("`build_xarray_catalog`", "xarray-raster")
     _register_rio_accessor()
     engine = _xarray_engine(filepath)
     resolved = _resolve_uri(filepath, storage_options=storage_options)
@@ -185,7 +176,7 @@ def build_xarray_catalog(
     target_crs: Any | None = None,
     data_vars: Sequence[str] | None = None,
     time_var: str = "time",
-    backend: Literal["memory", "duckdb"] = "memory",
+    backend: StorageEngine = "memory",
     out_path: str | Path | None = None,
     write_bbox: bool = True,
     sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),
@@ -403,10 +394,7 @@ def load_xarray(
         ValueError: If no catalog rows match the slice.
     """
     if xr is None:
-        raise ImportError(
-            "load_xarray requires xarray; install via "
-            "`pip install 'geocatalog[xarray-raster]'`."
-        )
+        raise missing_extra("`load_xarray`", "xarray-raster")
     if catalog.backend != "xarray":
         raise TypeError(
             f"load_xarray requires an xarray-backend catalog; got {catalog.backend!r}"

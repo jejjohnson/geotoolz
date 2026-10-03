@@ -13,19 +13,19 @@ import warnings
 from pathlib import Path
 from typing import Any, Literal, get_args
 
+from geocatalog._src._schema import BackendTag
 from geocatalog._src.base import GeoCatalog
 from geocatalog._src.memory import InMemoryGeoCatalog
 from geocatalog._src.parquet import from_geoparquet
 
 
-_BACKEND_T = Literal["raster", "xarray", "vector"]
 _ENGINE_T = Literal["auto", "memory", "duckdb"]
 
 
 def open_catalog(
     source: str | Path,
     *,
-    backend: _BACKEND_T | None = None,
+    backend: BackendTag | None = None,
     engine: _ENGINE_T = "auto",
     crs: Any | None = None,
     storage_options: dict[str, Any] | None = None,
@@ -137,7 +137,7 @@ def open_catalog(
 
 def _memory_engine(
     source: str | Path,
-    backend: _BACKEND_T | None,
+    backend: BackendTag | None,
     *,
     crs: Any | None = None,
     storage_options: dict[str, Any] | None = None,

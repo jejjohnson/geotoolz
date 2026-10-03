@@ -22,6 +22,7 @@ from georeader.geotensor import GeoTensor
 from loguru import logger as log
 from rasterio.features import rasterize
 
+from geocatalog._src._schema import StorageEngine
 from geocatalog._src._timeutil import (
     TIME_INVARIANT_END,
     TIME_INVARIANT_START,
@@ -143,7 +144,7 @@ def build_vector_catalog(
     date_format: str = "%Y%m%d",
     target_crs: Any | None = None,
     layer: str | int | None = None,
-    backend: Literal["memory", "duckdb"] = "memory",
+    backend: StorageEngine = "memory",
     out_path: str | Path | None = None,
     write_bbox: bool = True,
     sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),

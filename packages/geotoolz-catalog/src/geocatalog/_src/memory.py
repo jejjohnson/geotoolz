@@ -23,6 +23,7 @@ import pandas as pd
 import pyproj
 import shapely
 
+from geocatalog._src._schema import RESERVED_COLUMNS, BackendTag
 from geocatalog._src._timeutil import (
     naive_utc_datetimes,
     naive_utc_interval_index,
@@ -32,7 +33,6 @@ from geocatalog._src.base import CatalogRow
 from geocatalog._src.geoslice import GeoSlice
 
 
-_BACKEND_T = Literal["raster", "xarray", "vector"]
 _INTERSECT_ENGINE_T = Literal["sjoin", "overlay"]
 _GEOMETRY_TYPE_FAMILY = {
     "Point": "Point",
@@ -59,13 +59,13 @@ class InMemoryGeoCatalog:
             dispatching choice in `geocatalog.load_*`.
     """
 
-    backend: _BACKEND_T
+    backend: BackendTag
 
     def __init__(
         self,
         gdf: gpd.GeoDataFrame,
         *,
-        backend: _BACKEND_T,
+        backend: BackendTag,
     ) -> None:
         if gdf.crs is None:
             raise ValueError("InMemoryGeoCatalog requires gdf.crs to be set; got None.")
@@ -102,10 +102,10 @@ class InMemoryGeoCatalog:
                 "InMemoryGeoCatalog requires a closed='both' IntervalIndex; "
                 f"got closed={gdf.index.closed!r}."
             )
-        if backend not in get_args(_BACKEND_T):
+        if backend not in get_args(BackendTag):
             raise ValueError(
                 f"InMemoryGeoCatalog backend must be one of "
-                f"{list(get_args(_BACKEND_T))}; got {backend!r}."
+                f"{list(get_args(BackendTag))}; got {backend!r}."
             )
         self.gdf = gdf
         self.backend = backend
@@ -377,8 +377,7 @@ class InMemoryGeoCatalog:
         # consumers (STAC export, matchup, …).
         # The active geometry column may be named something else
         # (`rename_geometry`); it is the footprint, never an extra.
-        reserved = {"geometry", "filepath", "start_time", "end_time", "bbox"}
-        reserved.add(str(self.gdf.geometry.name))
+        reserved = {*RESERVED_COLUMNS, str(self.gdf.geometry.name)}
         extra_cols = [
             c for c in self.gdf.columns if c not in reserved and not c.startswith("_")
         ]
