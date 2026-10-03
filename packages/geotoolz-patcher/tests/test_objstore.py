@@ -41,6 +41,7 @@ def _isolate_pool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[N
         "GOOGLE_SERVICE_ENDPOINT",
         "AZURE_STORAGE_ENDPOINT",
         "HF_TOKEN",
+        "HUGGING_FACE_HUB_TOKEN",
         "HF_HOME",
         "HF_HUB_DISABLE_IMPLICIT_TOKEN",
     ):
@@ -513,3 +514,71 @@ def test_hf_endpoint_scheme_is_part_of_the_pool_key(monkeypatch):
 def test_hf_singular_type_prefixes_are_rejected(prefix):
     with pytest.raises(ValueError, match=f"use the plural `{prefix}s/`"):
         objstore.object_key(f"hf://{prefix}/org/repo/file.bin")
+
+
+def test_hf_legacy_token_variable(monkeypatch):
+    monkeypatch.setenv("HUGGING_FACE_HUB_TOKEN", "legacy")
+    assert objstore._hf_token() == "legacy"
+    monkeypatch.setenv("HF_TOKEN", "new")
+    assert objstore._hf_token() == "new"
+
+
+def test_hf_token_paths_expand_user_and_vars(monkeypatch, tmp_path):
+    (tmp_path / "token").write_text("saved")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HF_TOKEN_PATH", "~/token")
+    assert objstore._hf_token() == "saved"
+    monkeypatch.setenv("TOKEN_DIR", str(tmp_path))
+    monkeypatch.setenv("HF_TOKEN_PATH", "$TOKEN_DIR/token")
+    assert objstore._hf_token() == "saved"
+    monkeypatch.delenv("HF_TOKEN_PATH")
+    monkeypatch.setenv("HF_HOME", "$TOKEN_DIR")
+    assert objstore._hf_token() == "saved"
+
+
+@pytest.mark.parametrize(
+    ("uri", "key"),
+    [
+        ("hf://org/repo/data#1.csv", "org/repo/resolve/main/data#1.csv"),
+        ("hf://org/repo/what?.csv", "org/repo/resolve/main/what?.csv"),
+    ],
+)
+def test_hf_filenames_keep_reserved_characters(uri, key):
+    assert objstore.object_key(uri) == key
+
+
+@pytest.mark.parametrize(
+    "uri", ["hf://org/repo/a//b.bin", "hf:///org/repo/a.bin", "hf://org/repo/dir/"]
+)
+def test_hf_empty_segments_are_rejected(uri):
+    with pytest.raises(ValueError, match="empty path segment"):
+        objstore.object_key(uri)
+
+
+def test_hf_reserved_characters_are_encoded_on_the_wire(monkeypatch):
+    pytest.importorskip("obstore")
+    seen: dict[str, str] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen["path"] = self.path
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("HF_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
+        uri = "hf://org/repo/data#1.csv"
+        store = objstore.get_obstore(
+            uri, storage_options={"client_options": {"allow_http": True}}
+        )
+        assert bytes(store.get(objstore.object_key(uri)).bytes()) == b"ok"
+    finally:
+        server.shutdown()
+    assert seen["path"] == "/org/repo/resolve/main/data%231.csv"

@@ -133,14 +133,22 @@ _HF_UNSUPPORTED = frozenset({"kernels", "buckets"})
 _HF_SINGULAR = frozenset({"model", "dataset", "space", "kernel", "bucket"})
 
 
-def _locate_hf(uri: str, netloc: str, path: str) -> _Location:
+def _locate_hf(uri: str) -> _Location:
     """``hf://`` → the Hub's ``resolve`` URL, served by an `HTTPStore`.
 
-    The store's base URL is ``$HF_ENDPOINT`` with its path prefix
-    (``http://host/hf`` stays ``/hf``), so the prefix is part of the
-    pool key too.
+    The body after ``hf://`` is raw repository syntax, not a URL: a
+    ``?`` or ``#`` belongs to the filename (obstore percent-encodes it
+    in the request). An empty segment (``a//b``) is rejected rather
+    than collapsed. The store's base URL is ``$HF_ENDPOINT`` with its
+    path prefix (``http://host/hf`` stays ``/hf``), so the prefix is
+    part of the pool key too.
     """
-    parts = [p for p in f"{netloc}/{path}".split("/") if p]
+    parts = uri[uri.index("://") + 3 :].split("/")
+    if "" in parts:
+        raise ValueError(
+            f"obstore client pool: {uri!r} has an empty path segment "
+            "(`//`, or a leading / trailing `/`)."
+        )
     if parts and parts[0] in _HF_SINGULAR:
         raise ValueError(
             f"obstore client pool: {uri!r} — `hf://{parts[0]}/` is not a repo "
@@ -184,9 +192,10 @@ def _locate_hf(uri: str, netloc: str, path: str) -> _Location:
 def _hf_token() -> str | None:
     """The Hub token ``huggingface_hub`` would send implicitly, or ``None``.
 
-    ``$HF_TOKEN``, else the token file (``$HF_TOKEN_PATH``, else
-    ``$HF_HOME/token``, else ``~/.cache/huggingface/token``); none when
-    ``$HF_HUB_DISABLE_IMPLICIT_TOKEN`` is set.
+    ``$HF_TOKEN`` (or the legacy ``$HUGGING_FACE_HUB_TOKEN``), else the
+    token file (``$HF_TOKEN_PATH``, else ``$HF_HOME/token``, else
+    ``~/.cache/huggingface/token``; ``~`` and ``$VARS`` expanded); none
+    when ``$HF_HUB_DISABLE_IMPLICIT_TOKEN`` is set.
     """
     if os.environ.get("HF_HUB_DISABLE_IMPLICIT_TOKEN", "").lower() in (
         "1",
@@ -195,18 +204,24 @@ def _hf_token() -> str | None:
         "on",
     ):
         return None
-    if token := os.environ.get("HF_TOKEN", "").strip():
-        return token
+    for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):  # the second is legacy
+        if token := os.environ.get(name, "").strip():
+            return token
     if path := os.environ.get("HF_TOKEN_PATH"):
-        token_file = Path(path)
+        token_file = _expand(path)
     else:
-        cache = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
-        home = os.environ.get("HF_HOME") or Path(cache) / "huggingface"
-        token_file = Path(home) / "token"
+        cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+        home = os.environ.get("HF_HOME") or str(Path(_expand(cache)) / "huggingface")
+        token_file = _expand(home) / "token"
     try:
         return token_file.read_text().strip() or None
     except OSError:
         return None
+
+
+def _expand(path: str) -> Path:
+    """``~`` and ``$VARS`` expanded, as huggingface_hub does for its paths."""
+    return Path(os.path.expandvars(os.path.expanduser(path)))
 
 
 def _locate(uri: str) -> _Location:
@@ -243,7 +258,7 @@ def _locate(uri: str) -> _Location:
         container, key = _split_container(path, uri)
         return _Location("azure", scheme, netloc, container, key)
     if scheme in _HF_SCHEMES:
-        return _locate_hf(uri, netloc, path)
+        return _locate_hf(uri)
     if scheme in _HTTP_SCHEMES:
         host = (parsed.hostname or "").lower()
         if host.endswith(_AZURE_HOST_SUFFIXES) and not parsed.query:
