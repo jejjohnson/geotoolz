@@ -55,9 +55,14 @@ local_catalog = stage(
 tensor = gc.load_raster(local_catalog, aoi, band_indexes=[1])
 ```
 
-`stage()` returns a **new** catalog with rewritten `filepath`s
-(originals preserved under `extras["_staged_from"]`). The input is
-not mutated. Cache hits are detected by sha256(uri); a re-run is a
+`stage()` returns a **new** catalog with rewritten `filepath`s — each
+row's `filepath` follows its primary asset — and the original URIs in
+a `staged_from` column (`extras["staged_from"]`, JSON keyed like
+`assets`). The input is not mutated. Local paths are used in place, so
+staging a local catalog needs no fsspec; remote schemes need the
+`[fsspec]` extra. Downloads land in a temp file and are renamed into
+place only when complete, and a URI shared by several rows is fetched
+once. Cache hits are detected by the cache key (below); a re-run is a
 no-op if the cache is warm.
 
 ### `LocalCache` tuning
@@ -69,9 +74,13 @@ cache = LocalCache(
 )
 ```
 
-The cache layout is `{root}/{sha256(uri)[:2]}/{sha256(uri)}{ext}` —
-the two-letter prefix keeps any one directory under a few thousand
-entries on a large catalog.
+The cache layout is `{root}/{key[:2]}/{key}{ext}`, where `key` is
+the sha256 of the URI with expiring signature parameters (Azure SAS,
+`X-Amz-*`, `X-Goog-*`, CloudFront) removed — a re-signed URL hits the
+same slot. The two-letter prefix keeps any one directory under a few
+thousand entries on a large catalog. With `ttl_days` set, expired files
+are re-fetched on use; `cache.prune()` deletes them (and abandoned
+`*.part` downloads).
 
 ### Asset selection
 
@@ -82,13 +91,16 @@ rows), pass `assets=[...]` to fetch only the bands you need:
 local = stage(remote_catalog, cache=cache, assets=["B04", "B08"])
 ```
 
+A key that no row carries raises `ValueError` (so does `assets=[]`).
+
 ### Error handling
 
 ```python
 local = stage(remote, cache=cache, on_error="skip")
 ```
 
-- `on_error="raise"` (default) — first failure aborts the stage.
+- `on_error="raise"` (default) — first failure aborts the stage and
+  cancels the downloads not yet started.
 - `on_error="skip"` — keep the original URI in the asset map and
   continue. Useful when 1-2% of assets are flaky.
 

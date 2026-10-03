@@ -194,7 +194,7 @@ class TestPlanRow:
         row = self._row_tuple(filepath="/tmp/local.tif")
         plan = _plan_row(row, idx=0, asset_filter=None)
         assert plan.has_asset_map is False
-        assert plan.assets == {"_filepath": "/tmp/local.tif"}
+        assert plan.assets == {"filepath": "/tmp/local.tif"}
 
     def test_asset_filter_narrows_subset(self) -> None:
         row = self._row_tuple(
@@ -296,7 +296,7 @@ class TestStageAssetMap:
     def test_staged_from_preserves_original_uris(self, tmp_path: Path) -> None:
         cat, red, nir = self._make_catalog(tmp_path)
         out = stage(cat, dest=tmp_path / "cache")
-        staged_from = json.loads(out.gdf.iloc[0]["_staged_from"])
+        staged_from = json.loads(out.gdf.iloc[0]["staged_from"])
         assert staged_from == {"red": str(red), "nir": str(nir)}
 
 
