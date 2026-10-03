@@ -307,9 +307,14 @@ but any code that iterates `domain.slices()` works. `CatalogDomain`
 accepts either backend; point and line footprints become one-pixel
 slices, and rows without a footprint are skipped with a warning.
 
-With the `[patch]` extra installed, `geocatalog.staging.field_for`
-hands a catalog directly to `geopatcher.SpatialPatcher` as a
-`RasterField` — no manual construction. See the
+With the `[patch]` extra installed, `geocatalog.staging.field_for(catalog,
+slice_, asset=...)` hands a catalog directly to `geopatcher.SpatialPatcher`:
+it mosaics the rows the slice selects onto the slice grid with `load_raster`
+(in the slice CRS, warping files in other CRSs) and wraps the `GeoTensor`
+as a `RasterField`, which `split` chips and `merge` reassembles. Without a
+slice it covers the whole catalog at the first file's resolution;
+`materialize=False` instead returns one lazy `RasterField` per row, each in
+its file's own CRS (no mosaic, no reprojection). See the
 [end-to-end notebook](notebooks/end_to_end_lake_tahoe.ipynb) for a
 worked example.
 
