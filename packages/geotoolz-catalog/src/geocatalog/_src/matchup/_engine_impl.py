@@ -59,6 +59,7 @@ def run_matchup(
         _new_matchup_id,
         _utcnow,
     )
+    from geocatalog._src.matchup.spatial import search_envelope
 
     # Normalise the secondary argument into a `dict[role, list[row]]`.
     # Pairwise → single role "secondary".
@@ -85,8 +86,12 @@ def run_matchup(
         per_role_survivors: dict[str, list[SourceRow]] = {}
         for role, rows in roles.items():
             tree = trees[role]
-            # 1) Envelope pre-filter.
-            cand_indices = list(tree.query(primary_row.geometry))
+            # 1) Envelope pre-filter, over the strategy's search region —
+            #    a buffered strategy accepts secondaries outside the
+            #    primary footprint itself (#241).
+            cand_indices = list(
+                tree.query(search_envelope(spatial, primary_row.geometry))
+            )
             if not cand_indices:
                 per_role_survivors[role] = []
                 continue

@@ -674,3 +674,63 @@ class TestReexports:
         assert matchup_ns.matchup is matchup
         assert matchup_ns.IouAtLeast is IouAtLeast
         assert matchup_ns.NearestInTime is NearestInTime
+
+
+# ---------------------------------------------------------------------------
+# #241: buffered strategies through the engine
+# ---------------------------------------------------------------------------
+
+
+class TestBufferedSearchEnvelope:
+    T = datetime(2024, 6, 1, tzinfo=UTC)
+
+    def test_centroid_within_buffer_matches_through_the_engine(self) -> None:
+        primary = _row("p", bbox=(0, 0, 1, 1), time=self.T)
+        # Disjoint from the primary; centroid (1.7, 0.5) is inside buffer 1.0.
+        secondary = _row("s", bbox=(1.2, 0, 2.2, 1), time=self.T)
+        rows = list(
+            matchup(
+                [primary],
+                [secondary],
+                spatial=CentroidWithin(buffer=1.0),
+                temporal=WithinWindow(start="-1h", end="1h"),
+            )
+        )
+        assert [r.member_ids for r in rows] == [("p", "s")]
+
+    def test_buffer_zero_still_rejects_it(self) -> None:
+        primary = _row("p", bbox=(0, 0, 1, 1), time=self.T)
+        secondary = _row("s", bbox=(1.2, 0, 2.2, 1), time=self.T)
+        rows = list(
+            matchup(
+                [primary],
+                [secondary],
+                spatial=CentroidWithin(buffer=0.0),
+                temporal=WithinWindow(start="-1h", end="1h"),
+            )
+        )
+        assert rows == []
+
+    def test_engine_and_match_agree_for_every_buffer(self) -> None:
+        primary = _row("p", bbox=(0, 0, 1, 1), time=self.T)
+        secondaries = [
+            _row(f"s{i}", bbox=(1 + d, 0, 2 + d, 1), time=self.T)
+            for i, d in enumerate((0.1, 0.4, 0.9, 1.6))
+        ]
+        for buffer in (0.0, 0.5, 1.0, 2.0):
+            strategy = CentroidWithin(buffer=buffer)
+            got = {
+                r.member_ids[1]
+                for r in matchup(
+                    [primary],
+                    secondaries,
+                    spatial=strategy,
+                    temporal=WithinWindow(start="-1h", end="1h"),
+                )
+            }
+            want = {
+                s.id
+                for s in secondaries
+                if strategy.match(primary.geometry, s.geometry)
+            }
+            assert got == want, buffer

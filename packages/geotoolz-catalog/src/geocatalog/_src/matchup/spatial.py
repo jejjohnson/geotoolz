@@ -26,6 +26,11 @@ class SpatialStrategy(Protocol):
 
     The engine calls ``match(primary, secondary)`` for each candidate
     pair after the STRtree pre-filter narrows by envelope overlap.
+
+    The pre-filter searches the primary footprint itself. A strategy
+    that can accept secondaries *outside* it (a buffered test, say)
+    defines ``envelope(primary)`` returning the region to search; the
+    engine uses it when present (see `search_envelope`).
     """
 
     def match(
@@ -123,14 +128,19 @@ class CentroidWithin:
         primary: shapely.geometry.base.BaseGeometry,
         secondary: shapely.geometry.base.BaseGeometry,
     ) -> bool:
+        return self.envelope(primary).contains(secondary.centroid)
+
+    def envelope(
+        self, primary: shapely.geometry.base.BaseGeometry
+    ) -> shapely.geometry.base.BaseGeometry:
+        """The buffered primary: every centroid ``match`` can accept lies in it."""
         if isinstance(self.buffer, str):
             raise NotImplementedError(
                 "String-with-units buffer (e.g. '5km') is not yet "
                 "supported. Pass a float in CRS units, or reproject "
                 "the inputs into a meter-based CRS upfront."
             )
-        buffered = primary.buffer(self.buffer) if self.buffer > 0 else primary
-        return buffered.contains(secondary.centroid)
+        return primary.buffer(self.buffer) if self.buffer > 0 else primary
 
 
 @dataclasses.dataclass(frozen=True)
@@ -148,3 +158,16 @@ class Contains:
         secondary: shapely.geometry.base.BaseGeometry,
     ) -> bool:
         return primary.contains(secondary)
+
+
+def search_envelope(
+    strategy: SpatialStrategy, primary: shapely.geometry.base.BaseGeometry
+) -> shapely.geometry.base.BaseGeometry:
+    """The region the engine searches for candidates of ``primary``.
+
+    ``strategy.envelope(primary)`` when the strategy defines it, else
+    the primary footprint — enough for every predicate that needs the
+    two footprints to touch.
+    """
+    envelope = getattr(strategy, "envelope", None)
+    return envelope(primary) if callable(envelope) else primary
