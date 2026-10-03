@@ -129,6 +129,8 @@ def _split_container(path: str, uri: str) -> tuple[str, str]:
 _HF_REPO_TYPES = {"models": "", "datasets": "datasets/", "spaces": "spaces/"}
 #: Canonical prefixes whose download route the pool does not build.
 _HF_UNSUPPORTED = frozenset({"kernels", "buckets"})
+#: Singular spellings the HF URI grammar reserves (and forbids).
+_HF_SINGULAR = frozenset({"model", "dataset", "space", "kernel", "bucket"})
 
 
 def _locate_hf(uri: str, netloc: str, path: str) -> _Location:
@@ -139,6 +141,11 @@ def _locate_hf(uri: str, netloc: str, path: str) -> _Location:
     pool key too.
     """
     parts = [p for p in f"{netloc}/{path}".split("/") if p]
+    if parts and parts[0] in _HF_SINGULAR:
+        raise ValueError(
+            f"obstore client pool: {uri!r} — `hf://{parts[0]}/` is not a repo "
+            f"type; use the plural `{parts[0]}s/`."
+        )
     if parts and parts[0] in _HF_UNSUPPORTED:
         raise ValueError(
             f"obstore client pool: {uri!r} — `hf://{parts[0]}/` URIs are not "

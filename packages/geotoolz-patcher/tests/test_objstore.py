@@ -507,3 +507,9 @@ def test_hf_endpoint_scheme_is_part_of_the_pool_key(monkeypatch):
     plain = objstore._pool_key("hf://org/model/w.bin")
     monkeypatch.setenv("HF_ENDPOINT", "https://host/prefix")
     assert objstore._pool_key("hf://org/model/w.bin") != plain
+
+
+@pytest.mark.parametrize("prefix", ["model", "dataset", "space", "kernel", "bucket"])
+def test_hf_singular_type_prefixes_are_rejected(prefix):
+    with pytest.raises(ValueError, match=f"use the plural `{prefix}s/`"):
+        objstore.object_key(f"hf://{prefix}/org/repo/file.bin")
