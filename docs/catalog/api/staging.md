@@ -17,4 +17,4 @@ see [`geopatcher.objstore`](../../patcher/api/core.md#object-store-pool).
 
 ## Bridge to a patcher
 
-::: geocatalog._src.domain.CatalogDomain
+::: geocatalog.catalog.CatalogDomain

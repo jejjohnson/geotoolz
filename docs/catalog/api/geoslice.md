@@ -5,9 +5,9 @@ the exact-grid-alignment helpers.
 
 ## Cross-cutting type
 
-::: geocatalog._src.geoslice.GeoSlice
-::: geocatalog._src.geoslice.slice_to_window
-::: geocatalog._src.geoslice.window_to_slice
+::: geocatalog.types.GeoSlice
+::: geocatalog.types.slice_to_window
+::: geocatalog.types.window_to_slice
 
 ## Grid alignment
 

@@ -26,9 +26,9 @@ The `Source` Protocol and its adapters live under
 
 ## STAC conversion *(extras: `[stac]`)*
 
-::: geocatalog._src.stac.from_stac_items
-::: geocatalog._src.stac.from_stac_search
-::: geocatalog._src.stac.to_stac_collection
+::: geocatalog.catalog.from_stac_items
+::: geocatalog.catalog.from_stac_search
+::: geocatalog.catalog.to_stac_collection
 
 ## Bundle
 

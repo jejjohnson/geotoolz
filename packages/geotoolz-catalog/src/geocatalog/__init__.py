@@ -14,7 +14,12 @@ Surface (every public name is available flat at the top level):
   `load_raster_timeseries` / `load_xarray` / `load_vector` (the
   xarray / vector pairs are extras-gated).
 - **Persistence** — `to_geoparquet` / `from_geoparquet`,
-  `migrate_geoparquet`, `append_files`, `SCHEMA_VERSION_CURRENT`.
+  `migrate_geoparquet`, `append_files`, `StreamingParquetWriter`,
+  `sort_geoparquet`, `SCHEMA_VERSION_CURRENT`, and the
+  `CatalogMetadataError` / `CatalogSchemaError` errors.
+- **I/O helpers** — `parse_uri` / `ParsedURI`, `retry_transient_io` and
+  the UTC time helpers (`to_utc_ts`, `to_naive_utc`, `to_rfc3339`,
+  `is_time_invariant`, `TIME_INVARIANT_START` / `TIME_INVARIANT_END`).
 - **Discovery** — the `Source` Protocol, `SourceRow` carrier,
   `AuthStatus`, and the adapters `STACSource` / `CMRSource` /
   `EarthAccessSource` / `GEESource` (extras-gated), plus the STAC
@@ -30,17 +35,20 @@ Surface (every public name is available flat at the top level):
 - **Domain bridge** — `CatalogDomain`, so a downstream
   `SpatialPatcher` (geopatcher) can iterate a catalog's rows.
 
-The hybrid layout exposes the same surface at three paths: flat top
-level (`geocatalog.GeoSlice`), thematic sub-namespaces
-(`geocatalog.types.GeoSlice`, `geocatalog.sources.STACSource`,
-`geocatalog.matchup.matchup`, ...), and `geocatalog.catalog.*`. Pick
-whichever reads best where you import. Extras-gated names resolve
-lazily — importing `geocatalog` never requires an optional dependency.
+Every public name is at the top level, and each is also exported by
+exactly one thematic sub-namespace — `geocatalog.catalog` (catalogs,
+builders, loaders, persistence), `geocatalog.types`, `geocatalog.sources`,
+`geocatalog.matchup`, `geocatalog.bundle`, `geocatalog.staging` and
+`geocatalog.io` — as the same object. Extras-gated names resolve
+lazily, so importing `geocatalog` (or ``from geocatalog import *``)
+never requires an optional dependency; using one whose extra is missing
+raises its install hint.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import importlib
+from typing import TYPE_CHECKING
 
 from loguru import logger as _logger
 
@@ -49,6 +57,15 @@ from geocatalog._src._align import (
     GridAlignmentWarning,
     divide_evenly,
     is_grid_aligned,
+)
+from geocatalog._src._lazy import lazy_getattr
+from geocatalog._src._timeutil import (
+    TIME_INVARIANT_END,
+    TIME_INVARIANT_START,
+    is_time_invariant,
+    to_naive_utc,
+    to_rfc3339,
+    to_utc_ts,
 )
 from geocatalog._src.base import (
     CatalogMetadataError,
@@ -92,9 +109,15 @@ from geocatalog._src.raster import (
     load_raster,
     load_raster_timeseries,
 )
+from geocatalog._src.retry import retry_transient_io
 from geocatalog._src.sources import AuthStatus, Source, SourceRow
 from geocatalog._src.staging import LocalCache, field_for, stage
-from geocatalog._src.streaming import append_files
+from geocatalog._src.streaming import (
+    StreamingParquetWriter,
+    append_files,
+    sort_geoparquet,
+)
+from geocatalog._src.uri import ParsedURI, parse_uri
 
 
 # Library hygiene: loguru's recommended pattern is to disable the
@@ -126,6 +149,8 @@ __version__ = "0.0.3"
 __all__ = [
     "PIXEL_PRECISION",
     "SCHEMA_VERSION_CURRENT",
+    "TIME_INVARIANT_END",
+    "TIME_INVARIANT_START",
     "Align",
     "AuthStatus",
     "CMRSource",
@@ -148,11 +173,13 @@ __all__ = [
     "LocalCache",
     "MatchupRow",
     "NearestInTime",
+    "ParsedURI",
     "QueryRecord",
     "STACSource",
     "Source",
     "SourceRow",
     "SpatialStrategy",
+    "StreamingParquetWriter",
     "Synchronous",
     "TemporalStrategy",
     "WithinWindow",
@@ -168,6 +195,7 @@ __all__ = [
     "from_stac_search",
     "intersect",
     "is_grid_aligned",
+    "is_time_invariant",
     "load_raster",
     "load_raster_timeseries",
     "load_vector",
@@ -175,58 +203,51 @@ __all__ = [
     "matchup",
     "migrate_geoparquet",
     "open_catalog",
+    "parse_uri",
     "query",
+    "retry_transient_io",
     "slice_to_window",
+    "sort_geoparquet",
     "source_row_to_gdf_row",
     "stage",
     "to_geoparquet",
+    "to_naive_utc",
+    "to_rfc3339",
     "to_stac_collection",
+    "to_utc_ts",
     "union",
     "window_to_slice",
 ]
 
 
-# Extras-gated names resolve lazily: mapping of public name to
-# (module, extra) — `extra` is the install hint used in the error
-# message, or None when the module has no dedicated extra.
-_LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
-    "build_xarray_catalog": ("geocatalog._src.xarray_backend", "xarray-raster"),
-    "load_xarray": ("geocatalog._src.xarray_backend", "xarray-raster"),
-    "build_vector_catalog": ("geocatalog._src.vector", None),
-    "load_vector": ("geocatalog._src.vector", None),
-    "DuckDBGeoCatalog": ("geocatalog._src.duckdb_backend", "duckdb"),
-    "from_stac_items": ("geocatalog._src.stac", "stac"),
-    "from_stac_search": ("geocatalog._src.stac", "stac"),
-    "to_stac_collection": ("geocatalog._src.stac", "stac"),
-    "CMRSource": ("geocatalog._src.sources.cmr", None),
-    "EarthAccessSource": ("geocatalog._src.sources.earthaccess", "earthaccess"),
-    "STACSource": ("geocatalog._src.sources.stac", "stac"),
-    "GEESource": ("geocatalog._src.sources.gee", "gee"),
-}
+# Load the sub-namespaces now and bind them explicitly, so attribute
+# access never depends on import order (or on `importlib.reload`, which
+# re-runs the `matchup` function import above while the cached
+# sub-modules are not re-imported). `geocatalog.matchup` is both a
+# function and a sub-namespace: the module is callable (it forwards to
+# the `matchup` function), so `geocatalog.matchup(...)`,
+# `geocatalog.matchup.MatchupRow` and `import geocatalog.matchup as m`
+# all work.
+for _namespace in ("bundle", "catalog", "io", "matchup", "sources", "staging", "types"):
+    globals()[_namespace] = importlib.import_module(f"geocatalog.{_namespace}")
+del _namespace
 
 
-def __getattr__(name: str) -> Any:
-    """Lazy import for the extras-gated backends and source adapters.
-
-    Importing `geocatalog` at top level should not fail just because an
-    optional dep (`xarray`, `duckdb`, `pystac-client`, ...) is missing.
-    Resolving e.g. `load_xarray` or `STACSource` finally triggers the
-    import and raises a friendly `ImportError` naming the extra to
-    install if the corresponding dependency isn't there.
-    """
-    if name in _LAZY_ATTRS:
-        import importlib
-
-        module_name, extra = _LAZY_ATTRS[name]
-        try:
-            mod = importlib.import_module(module_name)
-        except ImportError as exc:
-            if extra is None:
-                raise
-            from geocatalog._src._extras import missing_extra
-
-            raise missing_extra(f"`geocatalog.{name}`", extra) from exc
-        attr = getattr(mod, name)
-        globals()[name] = attr
-        return attr
-    raise AttributeError(f"module 'geocatalog' has no attribute {name!r}")
+# Extras-gated names resolve lazily (`geocatalog._src._lazy.LAZY`).
+__getattr__ = lazy_getattr(
+    globals(),
+    [
+        "CMRSource",
+        "DuckDBGeoCatalog",
+        "EarthAccessSource",
+        "GEESource",
+        "STACSource",
+        "build_vector_catalog",
+        "build_xarray_catalog",
+        "from_stac_items",
+        "from_stac_search",
+        "load_vector",
+        "load_xarray",
+        "to_stac_collection",
+    ],
+)

@@ -5,16 +5,16 @@ The `GeoCatalog` protocol, the in-memory and DuckDB backends, the
 
 ## Protocol
 
-::: geocatalog._src.base.GeoCatalog
-::: geocatalog._src.base.CatalogRow
+::: geocatalog.catalog.GeoCatalog
+::: geocatalog.catalog.CatalogRow
 
 ## Backends
 
-::: geocatalog._src.memory.InMemoryGeoCatalog
+::: geocatalog.catalog.InMemoryGeoCatalog
 
 ### DuckDB *(extras: `[duckdb]`)*
 
-::: geocatalog._src.duckdb_backend.DuckDBGeoCatalog
+::: geocatalog.catalog.DuckDBGeoCatalog
 
 ## Factory
 
@@ -22,6 +22,6 @@ The `GeoCatalog` protocol, the in-memory and DuckDB backends, the
 
 ## Set algebra
 
-::: geocatalog._src.ops.query
-::: geocatalog._src.ops.intersect
-::: geocatalog._src.ops.union
+::: geocatalog.catalog.query
+::: geocatalog.catalog.intersect
+::: geocatalog.catalog.union

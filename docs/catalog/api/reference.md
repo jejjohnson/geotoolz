@@ -11,3 +11,4 @@ the [Quickstart](../quickstart.md).
 - [Discovery sources & bundle](sources.md)
 - [Matchup engine](matchup.md)
 - [Staging & the patcher bridge](staging.md)
+- [I/O helpers](io.md)

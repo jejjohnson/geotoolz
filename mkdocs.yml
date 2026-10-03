@@ -134,6 +134,7 @@ nav:
           - Discovery sources & bundle: catalog/api/sources.md
           - Matchup engine: catalog/api/matchup.md
           - Staging & the patcher bridge: catalog/api/staging.md
+          - I/O helpers: catalog/api/io.md
       - CLI: catalog/cli.md
       - Schema versions: catalog/schema-versions.md
       - Logging: catalog/logging.md
