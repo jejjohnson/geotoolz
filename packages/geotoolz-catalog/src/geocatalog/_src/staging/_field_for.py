@@ -164,8 +164,7 @@ def field_for(
     # `kind` is set by every catalog constructor we ship; tolerate
     # third-party catalogs that omit it by skipping the check rather
     # than crashing with AttributeError.
-    # (A catalog written against the old protocol spells it `backend`.)
-    kind = getattr(catalog, "kind", None) or getattr(catalog, "backend", None)
+    kind = _catalog_kind(catalog)
     if kind is not None and kind != "raster":
         raise ValueError(
             f"field_for(mode='raster') requires a raster catalog; "
@@ -273,7 +272,12 @@ def _with_asset_paths(
         return catalog
     gdf = catalog.gdf.copy()
     gdf["filepath"] = _asset_paths(catalog, asset=asset)
-    return InMemoryGeoCatalog(gdf, kind=catalog.kind)
+    return InMemoryGeoCatalog(gdf, kind=_catalog_kind(catalog) or "raster")
+
+
+def _catalog_kind(catalog: Any) -> str | None:
+    """``catalog.kind``; ``backend`` for a catalog written against the old protocol."""
+    return getattr(catalog, "kind", None) or getattr(catalog, "backend", None)
 
 
 def _reject_unstaged_uris(paths: list[str], *, asset: str | None) -> None:

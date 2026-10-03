@@ -13,6 +13,7 @@ new backends can join without touching consumers.
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import warnings
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -118,10 +119,20 @@ class _GeoCatalogMeta(type(Protocol)):  # type: ignore[misc]
     def __instancecheck__(cls, instance: Any) -> bool:
         if super().__instancecheck__(instance):
             return True
-        if cls.__name__ != "GeoCatalog" or not hasattr(instance, "backend"):
+
+        # Static lookups, like the protocol check itself: `hasattr` would
+        # run properties (a lazy `gdf` could materialise the catalog).
+        def present(name: str) -> bool:
+            try:
+                inspect.getattr_static(instance, name)
+            except AttributeError:
+                return False
+            return True
+
+        if cls.__name__ != "GeoCatalog" or not present("backend"):
             return False
         required = set(getattr(cls, "__protocol_attrs__", ())) - {"kind"}
-        if not all(hasattr(instance, name) for name in required):
+        if not all(present(name) for name in required):
             return False
         warnings.warn(
             f"{type(instance).__name__}: a GeoCatalog exposing `backend` instead "

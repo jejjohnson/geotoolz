@@ -429,6 +429,8 @@ class DuckDBGeoCatalog:
                 "for fsspec-backed reads (loads the full catalog into memory), "
                 "or configure DuckDB credentials directly."
             )
+        if kind is not None:  # fail before a connection exists
+            check_kind(kind, "DuckDBGeoCatalog")
         dd = _require_duckdb()
         con = dd.connect()
         try:
@@ -495,14 +497,16 @@ class DuckDBGeoCatalog:
                 hive_partitioning=partitioned,
                 retries=retries,
             )
+            # Inside the cleanup block: a stored `_backend` the constructor
+            # rejects must not leak the connection either.
+            catalog = cls(relation, con=con, crs=crs, kind=kind, _owns_con=True)
+            catalog._bbox_covering = _has_bbox_covering(relation)
+            catalog._spatial_available = spatial_ok
         except BaseException:
-            # Setup failed (bad extension load, schema mismatch, IO error);
-            # don't leak the freshly opened connection.
+            # Setup failed (bad extension load, schema mismatch, IO error,
+            # invalid kind); don't leak the freshly opened connection.
             con.close()
             raise
-        catalog = cls(relation, con=con, crs=crs, kind=kind, _owns_con=True)
-        catalog._bbox_covering = _has_bbox_covering(relation)
-        catalog._spatial_available = spatial_ok
         return catalog
 
     @classmethod

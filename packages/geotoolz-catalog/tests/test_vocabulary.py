@@ -341,14 +341,46 @@ class _OldStyleCatalog:
     def __init__(self, inner: InMemoryGeoCatalog) -> None:
         self._inner = inner
         self.backend = inner.kind
+        self.crs = inner.crs
 
-    def __getattr__(self, name: str) -> Any:
-        if name == "kind":
-            raise AttributeError(name)
-        return getattr(self._inner, name)
+    @property
+    def gdf(self) -> gpd.GeoDataFrame:
+        return self._inner.gdf
+
+    @property
+    def total_bounds(self) -> Any:
+        return self._inner.total_bounds
+
+    @property
+    def temporal_extent(self) -> Any:
+        return self._inner.temporal_extent
 
     def __len__(self) -> int:
         return len(self._inner)
+
+    def query(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.query(*args, **kwargs)
+
+    def intersect(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.intersect(*args, **kwargs)
+
+    def union(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.union(*args, **kwargs)
+
+    def iter_rows(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.iter_rows(*args, **kwargs)
+
+    def iter_slices(self, *args: Any, **kwargs: Any) -> Any:
+        return self._inner.iter_slices(*args, **kwargs)
+
+    def get_config(self) -> dict[str, Any]:
+        return self._inner.get_config()
+
+
+class _ExplodingCatalog(_OldStyleCatalog):
+    @property
+    def gdf(self) -> gpd.GeoDataFrame:
+        raise AssertionError("isinstance must not evaluate properties")
 
 
 def test_protocol_still_accepts_a_backend_only_catalog() -> None:
@@ -360,3 +392,60 @@ def test_protocol_still_accepts_a_backend_only_catalog() -> None:
     with pytest.warns(DeprecationWarning, match="instead of `kind`"):
         assert isinstance(_OldStyleCatalog(_catalog()), GeoCatalog)
     assert not isinstance(object(), GeoCatalog)
+
+
+def test_backend_only_instance_check_does_not_run_properties() -> None:
+    from geocatalog import GeoCatalog
+
+    with pytest.warns(DeprecationWarning):
+        assert isinstance(_ExplodingCatalog(_catalog()), GeoCatalog)
+
+
+def test_field_for_accepts_a_backend_only_catalog_with_an_asset() -> None:
+    from geocatalog._src.staging._field_for import _with_asset_paths
+
+    inner = _catalog()
+    inner.gdf["assets"] = ['{"B04": "s3://b/a.tif"}', '{"B04": "s3://b/b.tif"}']
+    out = _with_asset_paths(_OldStyleCatalog(inner), asset="B04")  # type: ignore[arg-type]
+    assert out.kind == "raster"
+    assert list(out.gdf["filepath"]) == ["s3://b/a.tif", "s3://b/b.tif"]
+
+
+def test_duckdb_open_rejects_a_bad_kind_before_connecting(
+    parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("duckdb")
+    from geocatalog import DuckDBGeoCatalog
+    from geocatalog._src import duckdb_backend
+
+    def no_connect() -> None:
+        raise AssertionError("connected before validating `kind`")
+
+    monkeypatch.setattr(duckdb_backend.duckdb, "connect", no_connect)
+    with pytest.raises(ValueError, match="kind must be one of"):
+        DuckDBGeoCatalog.open(parquet, kind="bogus")  # type: ignore[arg-type]
+
+
+def test_duckdb_open_closes_the_connection_on_a_bad_stored_kind(
+    parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    duckdb = pytest.importorskip("duckdb")
+    from geocatalog import DuckDBGeoCatalog
+    from geocatalog._src import duckdb_backend
+
+    opened: list[Any] = []
+    real_connect = duckdb.connect
+
+    def recording_connect(*args: Any, **kwargs: Any) -> Any:
+        opened.append(real_connect(*args, **kwargs))
+        return opened[-1]
+
+    monkeypatch.setattr(duckdb_backend.duckdb, "connect", recording_connect)
+    monkeypatch.setattr(
+        duckdb_backend, "_read_backend_tag", lambda *_a, **_k: "corrupt"
+    )
+    with pytest.raises(ValueError, match="kind must be one of"):
+        DuckDBGeoCatalog.open(parquet)
+    assert len(opened) == 1
+    with pytest.raises(duckdb.ConnectionException):
+        opened[0].execute("SELECT 1")
