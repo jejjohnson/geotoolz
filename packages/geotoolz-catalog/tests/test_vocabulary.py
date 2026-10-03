@@ -449,3 +449,31 @@ def test_duckdb_open_closes_the_connection_on_a_bad_stored_kind(
     assert len(opened) == 1
     with pytest.raises(duckdb.ConnectionException):
         opened[0].execute("SELECT 1")
+
+
+def test_closed_error_pickles(parquet: Path) -> None:
+    import pickle
+
+    pytest.importorskip("duckdb")
+    from geocatalog import DuckDBGeoCatalog
+
+    duck = DuckDBGeoCatalog.open(parquet)
+    duck.close()
+    with pytest.raises(CatalogClosedError) as info:
+        len(duck)
+    restored = pickle.loads(pickle.dumps(info.value))
+    assert type(restored) is type(info.value)
+    assert str(restored) == str(info.value)
+    # A fresh interpreter can resolve the class too.
+    import subprocess
+    import sys
+
+    code = (
+        "import pickle, sys\n"
+        "err = pickle.loads(sys.stdin.buffer.read())\n"
+        "from geocatalog import CatalogClosedError\n"
+        "assert isinstance(err, CatalogClosedError), type(err)\n"
+    )
+    subprocess.run(
+        [sys.executable, "-c", code], input=pickle.dumps(info.value), check=True
+    )

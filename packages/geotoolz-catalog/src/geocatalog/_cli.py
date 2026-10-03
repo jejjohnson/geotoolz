@@ -165,6 +165,26 @@ def _parse_partition_by(value: str | None) -> tuple[str, ...] | None:
 # ---------------------------------------------------------------------------
 
 
+def _retired_flag[T](
+    old_flag: str, new_flag: str, old: T | None, new: T | None
+) -> T | None:
+    """Resolve a renamed flag (#246): the new one, or the old one with a notice.
+
+    The old spelling still works for one minor release; using it prints
+    a deprecation notice on stderr. Passing both raises `ValueError`.
+    """
+    if old is None:
+        return new
+    if new is not None:
+        raise ValueError(f"pass {new_flag} or the deprecated {old_flag}, not both")
+    print(
+        f"warning: {old_flag} is deprecated, use {new_flag}; the old flag will "
+        "be removed in the next minor release.",
+        file=sys.stderr,
+    )
+    return old
+
+
 def _run_build(
     verb: str,
     build: Callable[[list[Path]], Any],
@@ -233,23 +253,31 @@ def raster(
     ] = "%Y%m%d",
     crs: Annotated[
         str | None,
-        Parameter(
-            name=["--crs", "--target-crs"],
-            help="Catalog CRS. None latches onto the first file's native CRS.",
-        ),
+        Parameter(help="Catalog CRS. None latches onto the first file's native CRS."),
     ] = None,
     engine: Annotated[
-        StorageEngine,
+        StorageEngine | None,
         Parameter(
-            name=["--engine", "--backend"],
-            help="`memory` builds in RAM; `duckdb` streams to GeoParquet.",
+            help="`memory` (default) builds in RAM; `duckdb` streams to GeoParquet."
         ),
-    ] = "memory",
+    ] = None,
     json_output: Annotated[
         bool, Parameter(name=["--json"], help="Emit machine-readable JSON.")
     ] = False,
+    target_crs: Annotated[
+        str | None, Parameter(name="--target-crs", show=False)
+    ] = None,  # deprecated spelling of --crs
+    backend: Annotated[
+        StorageEngine | None, Parameter(name="--backend", show=False)
+    ] = None,  # deprecated spelling of --engine
 ) -> int:
     """Build a raster catalog from a glob of GeoTIFFs."""
+    try:
+        crs = _retired_flag("--target-crs", "--crs", target_crs, crs)
+        engine = _retired_flag("--backend", "--engine", backend, engine) or "memory"
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     def build(paths: list[Path]) -> Any:
         from geocatalog import build_raster_catalog
@@ -284,16 +312,21 @@ def xarray(
     ] = "time",
     crs: Annotated[
         str | None,
-        Parameter(
-            name=["--crs", "--target-crs"],
-            help="CRS to tag the catalog with (not used to reproject).",
-        ),
+        Parameter(help="CRS to tag the catalog with (not used to reproject)."),
     ] = None,
     json_output: Annotated[
         bool, Parameter(name=["--json"], help="Emit machine-readable JSON.")
     ] = False,
+    target_crs: Annotated[
+        str | None, Parameter(name="--target-crs", show=False)
+    ] = None,  # deprecated spelling of --crs
 ) -> int:
     """Build an xarray-shaped catalog. Requires the `[xarray-raster]` extra."""
+    try:
+        crs = _retired_flag("--target-crs", "--crs", target_crs, crs)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     def build(paths: list[Path]) -> Any:
         from geocatalog import build_xarray_catalog
@@ -324,15 +357,20 @@ def vector(
     date_format: Annotated[
         str, Parameter(help="strptime fmt for regex date groups.")
     ] = "%Y%m%d",
-    crs: Annotated[
-        str | None,
-        Parameter(name=["--crs", "--target-crs"], help="Catalog CRS."),
-    ] = None,
+    crs: Annotated[str | None, Parameter(help="Catalog CRS.")] = None,
     json_output: Annotated[
         bool, Parameter(name=["--json"], help="Emit machine-readable JSON.")
     ] = False,
+    target_crs: Annotated[
+        str | None, Parameter(name="--target-crs", show=False)
+    ] = None,  # deprecated spelling of --crs
 ) -> int:
     """Build a vector catalog (Shapefile / GeoPackage / GeoJSON)."""
+    try:
+        crs = _retired_flag("--target-crs", "--crs", target_crs, crs)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     def build(paths: list[Path]) -> Any:
         from geocatalog import build_vector_catalog
@@ -430,11 +468,7 @@ def query(
     source: Annotated[Path, Parameter(help="GeoParquet catalog to query.")],
     *,
     bounds: Annotated[
-        str | None,
-        Parameter(
-            name=["--bounds", "--bbox"],
-            help='"xmin,ymin,xmax,ymax" in --crs units.',
-        ),
+        str | None, Parameter(help='"xmin,ymin,xmax,ymax" in --crs units.')
     ] = None,
     crs: Annotated[str, Parameter(help="CRS of --bounds.")] = "EPSG:4326",
     start: Annotated[str | None, Parameter(help="Start of time window (ISO).")] = None,
@@ -442,6 +476,9 @@ def query(
     json_output: Annotated[
         bool, Parameter(name=["--json"], help="Emit machine-readable JSON.")
     ] = False,
+    bbox: Annotated[
+        str | None, Parameter(name="--bbox", show=False)
+    ] = None,  # deprecated spelling of --bounds
 ) -> int:
     """Filter ``source`` by bounds + time and print the matching row count.
 
@@ -450,6 +487,11 @@ def query(
     half of the window would otherwise crash; we fail fast with exit 1
     instead.
     """
+    try:
+        bounds = _retired_flag("--bbox", "--bounds", bbox, bounds)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if (start is None) != (end is None):
         print(
             "--start and --end must be passed together (or both omitted)",

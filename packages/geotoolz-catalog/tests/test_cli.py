@@ -651,7 +651,7 @@ def test_retired_flags_still_parse(
     utm29_tile_factory: Callable[..., Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """``--target-crs`` / ``--backend`` / ``--bbox`` alias the new flags (#246)."""
+    """``--target-crs`` / ``--backend`` / ``--bbox`` still work, with a notice."""
     utm29_tile_factory((500000, 4000000, 510000, 4010000), "20240601")
     out = tmp_path / "old.parquet"
     exit_code = _run(
@@ -670,12 +670,39 @@ def test_retired_flags_still_parse(
         "--json",
     )
     assert exit_code == 0
-    capsys.readouterr()
+    err = capsys.readouterr().err
+    assert "--target-crs is deprecated, use --crs" in err
+    assert "--backend is deprecated, use --engine" in err
     box = "500000,4000000,510000,4010000"
     assert _run("query", str(out), "--bbox", box, "--crs", "EPSG:32629", "--json") == 0
-    payload = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    assert "--bbox is deprecated, use --bounds" in captured.err
+    payload = json.loads(captured.out)
     assert payload["rows"] == 1
     assert payload["bbox"] == payload["bounds"]
     assert _run("stats", str(out), "--json") == 0
     stats = json.loads(capsys.readouterr().out)
     assert stats["backend"] == stats["kind"] == "raster"
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    [
+        ("build", "raster", "--crs", "EPSG:4326", "--target-crs", "EPSG:4326"),
+        ("build", "raster", "--engine", "memory", "--backend", "memory"),
+        ("build", "vector", "--crs", "EPSG:4326", "--target-crs", "EPSG:4326"),
+    ],
+)
+def test_old_and_new_flag_together_is_a_user_error(
+    tmp_path: Path, tokens: tuple[str, ...], capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = (*tokens, "--input-glob", str(tmp_path / "*"), "--out", str(tmp_path / "o"))
+    assert _run(*args) == 1
+    assert "not both" in capsys.readouterr().err
+
+
+def test_retired_flags_are_hidden_from_help(capsys: pytest.CaptureFixture[str]) -> None:
+    _run("build", "raster", "--help")
+    out = capsys.readouterr().out
+    assert "--engine" in out
+    assert "--backend" not in out and "--target-crs" not in out

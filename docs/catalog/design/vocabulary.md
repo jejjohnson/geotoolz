@@ -25,8 +25,10 @@ name and emit a `DeprecationWarning`, and passing both is a `TypeError`.
 | File-open threads | `max_open_workers` | `load_raster`, `aload_raster` | `concurrency=` (`aload_raster`) |
 | Extraction strategy | `concurrency` | `"sequential"` / `"async"` (`build_raster_catalog`) | — |
 
-The CLI follows the same table: `--crs` (alias `--target-crs`),
-`--engine` (alias `--backend`), `--bounds` (alias `--bbox`). `stats
+The CLI follows the same table: `--crs`, `--engine`, `--bounds`. The
+old flags (`--target-crs`, `--backend`, `--bbox`) still work for one
+minor release, print a deprecation notice on stderr, and are hidden
+from `--help`; passing an old and a new flag together is an error. `stats
 --json` reports `kind` (and, for one release, the old `backend` key);
 `query --json` reports `bounds` (and the old `bbox` key).
 

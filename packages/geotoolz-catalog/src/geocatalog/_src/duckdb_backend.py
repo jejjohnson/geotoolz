@@ -97,10 +97,21 @@ def _closed_error() -> type[CatalogClosedError]:
     """
     dd = _require_duckdb()
     return type(
-        "CatalogClosedError",
+        _CLOSED_ERROR_NAME,
         (CatalogClosedError, dd.ConnectionException),
-        {"__module__": CatalogClosedError.__module__},
+        {"__module__": __name__, "__qualname__": _CLOSED_ERROR_NAME},
     )
+
+
+# Importable under its own name, so the error pickles across process
+# boundaries (pickle stores classes by module + qualified name).
+_CLOSED_ERROR_NAME = "DuckDBCatalogClosedError"
+
+
+def __getattr__(name: str) -> Any:
+    if name == _CLOSED_ERROR_NAME:
+        return _closed_error()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _ensure_spatial(con: duckdb_mod.DuckDBPyConnection) -> bool:
