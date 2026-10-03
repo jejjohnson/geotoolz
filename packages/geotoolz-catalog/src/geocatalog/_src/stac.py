@@ -15,8 +15,10 @@ import pandas as pd
 import pyproj
 import shapely.geometry
 import shapely.ops
+from loguru import logger as log
 
 from geocatalog._src._stac_item import (
+    UndecodableItemError,
     asset_crs,
     asset_href,
     is_signed_href,
@@ -72,6 +74,9 @@ def from_stac_items(
         (re-sign them, e.g. with ``planetary_computer.sign``, before
         reading once the token has lapsed). Times are naive UTC.
 
+        An item with neither a geometry nor a bbox, or with no time, is
+        skipped with a warning.
+
     Raises:
         ValueError: ``extra_properties`` names a builder-owned column.
     """
@@ -92,14 +97,19 @@ def from_stac_items(
     )
     rows: list[dict[str, Any]] = []
     for item in items:
-        rows.extend(
-            _item_to_rows(
+        try:
+            item_rows = _item_to_rows(
                 item,
                 asset_key=asset_key,
                 catalog_crs=catalog_crs,
                 extra_properties=extra_properties,
             )
-        )
+        except UndecodableItemError as exc:
+            # No footprint or no time: skip with a warning, the policy
+            # every Source adapter follows too.
+            log.warning("from_stac_items: skipping item {!r}: {}", item.id, exc)
+            continue
+        rows.extend(item_rows)
     # Empty STAC searches are common (overly tight bbox, future date
     # window, collection mismatch); return a typed empty catalog with
     # the same columns rather than raising so callers can branch on `len`.

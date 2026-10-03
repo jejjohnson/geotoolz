@@ -20,6 +20,7 @@ from loguru import logger
 
 from geocatalog._src._stac_item import (
     ASSET_CRS_PROPERTY,
+    UndecodableItemError,
     asset_crs,
     asset_href,
     item_geometry,
@@ -202,13 +203,21 @@ class STACSource(Source):
                 # signed asset hrefs; the rest of the item is
                 # untouched.
                 item = planetary_computer.sign(item)
-            yield _item_to_source_row(
-                item,
-                source_name=self.name,
-                query_id=query_id,
-                fetched_at=fetched_at,
-                source_version=source_version,
-            )
+            try:
+                row = _item_to_source_row(
+                    item,
+                    source_name=self.name,
+                    query_id=query_id,
+                    fetched_at=fetched_at,
+                    source_version=source_version,
+                )
+            except UndecodableItemError as exc:
+                # Same policy as the CMR / earthaccess adapters: an item
+                # with no footprint or time can't become a row; warn and
+                # move on rather than abort the whole search.
+                logger.warning("{}: skipping item {!r}: {}", self.name, item.id, exc)
+                continue
+            yield row
 
     def auth_status(self) -> AuthStatus:
         """Open the client and probe the root catalog.

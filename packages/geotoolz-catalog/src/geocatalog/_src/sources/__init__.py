@@ -22,6 +22,10 @@ from geocatalog._src.sources._base import (
 
 __all__ = [
     "AuthStatus",
+    "CMRSource",
+    "EarthAccessSource",
+    "GEESource",
+    "STACSource",
     "Source",
     "SourceRow",
 ]

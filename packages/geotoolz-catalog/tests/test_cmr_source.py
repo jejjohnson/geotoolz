@@ -310,7 +310,7 @@ class TestCMRGeometryHardening:
         return {"HorizontalSpatialDomain": {"Geometry": geom}}
 
     def test_gpolygon_missing_coordinates_skipped(self) -> None:
-        from geocatalog._src.sources.cmr import _granule_geometry
+        from geocatalog._src.sources._umm import granule_geometry as _granule_geometry
 
         # Two valid points + one missing Latitude → the bad point is
         # dropped silently. With the bad one filtered out, only 2
@@ -336,7 +336,7 @@ class TestCMRGeometryHardening:
         assert _granule_geometry(umm) is None
 
     def test_points_missing_coordinates_skipped(self) -> None:
-        from geocatalog._src.sources.cmr import _granule_geometry
+        from geocatalog._src.sources._umm import granule_geometry as _granule_geometry
 
         umm = {
             "SpatialExtent": self._spatial(

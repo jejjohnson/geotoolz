@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 import pandas as pd
 import shapely
 import shapely.geometry
+from loguru import logger
 
 from geocatalog._src._antimeridian import lonlat_box, lonlat_line, lonlat_polygon
 from geocatalog._src._timeutil import (
@@ -26,6 +27,7 @@ from geocatalog._src._timeutil import (
     TIME_INVARIANT_START,
     to_utc_ts,
 )
+from geocatalog._src.sources._base import SourceRow
 
 
 def _lonlat_points(points: Any) -> list[tuple[float, float]]:
@@ -235,25 +237,10 @@ def _parse_time(value: Any) -> Any:
     if value is None or value == "":
         return None
     try:
-        ts = to_utc(value)
+        ts = to_utc_ts(value)
     except (TypeError, ValueError):
         return _MALFORMED
     return _MALFORMED if ts is pd.NaT else ts
-
-
-def to_utc(value: str | datetime) -> pd.Timestamp:
-    """Coerce any datetime-like to a UTC-aware `pd.Timestamp`.
-
-    Thin re-export of `geocatalog._src._timeutil.to_utc_ts`, kept so
-    UMM decoding reads self-contained at the call sites.
-
-    Args:
-        value: An ISO string or ``datetime`` from a UMM record.
-
-    Returns:
-        A tz-aware ``pd.Timestamp`` in UTC.
-    """
-    return to_utc_ts(value)
 
 
 def asset_key_from_url(url: str) -> str:
@@ -270,7 +257,7 @@ def asset_key_from_url(url: str) -> str:
         A non-empty key suitable for a STAC-shaped asset map.
     """
     parsed = urlparse(url)
-    leaf = (parsed.path.rstrip("/").rsplit("/", 1) or [""])[-1]
+    leaf = parsed.path.rstrip("/").rsplit("/", 1)[-1]
     if "." in leaf:
         stem, ext = leaf.rsplit(".", 1)
         # Prefer the extension for keys when the stem is just the
@@ -340,3 +327,113 @@ def umm_essentials(umm: Mapping[str, Any]) -> dict[str, Any]:
         "MetadataSpecification",
     )
     return {k: umm[k] for k in keep if k in umm}
+
+
+# UMM `RelatedUrls` types that point at granule data. Direct-access
+# (in-region S3) links are kept under their own key so they never
+# collide with — or silently replace — the HTTPS link to the same file.
+_DATA_URL_TYPES = {"GET DATA": "", "GET DATA VIA DIRECT ACCESS": "__s3"}
+
+
+def granule_assets(umm: Mapping[str, Any]) -> dict[str, str]:
+    """Asset map from a UMM granule's ``RelatedUrls``.
+
+    ``GET DATA`` links are keyed by the file stem; ``GET DATA VIA DIRECT
+    ACCESS`` (S3) links by the stem plus ``__s3``. A key that repeats
+    within one type gets ``__1``, ``__2``, … in document order. HTTPS
+    links always come first, so the default (first) asset is reachable
+    from outside the data's AWS region.
+    """
+    links = [
+        link
+        for link in umm.get("RelatedUrls") or ()
+        if isinstance(link, Mapping) and link.get("URL")
+    ]
+    assets: dict[str, str] = {}
+    # HTTPS links first, whatever the document order: the first asset is
+    # the default `filepath`, and an in-region S3 link is unusable for
+    # most callers.
+    for link_type, suffix in _DATA_URL_TYPES.items():
+        for link in links:
+            if str(link.get("Type") or "") != link_type:
+                continue
+            url = str(link["URL"])
+            base = asset_key_from_url(url) + suffix
+            key, n = base, 0
+            while key in assets:
+                n += 1
+                key = f"{base}__{n}"
+            assets[key] = url
+    return assets
+
+
+def granule_to_source_row(
+    granule: Mapping[str, Any],
+    *,
+    source_name: str,
+    query_id: str,
+    fetched_at: datetime,
+    source_version: str,
+) -> SourceRow | None:
+    """Map one CMR UMM-JSON granule (``{"umm": ..., "meta": ...}``) to a `SourceRow`.
+
+    Shared by `CMRSource` and `EarthAccessSource` (an earthaccess
+    ``DataGranule`` is that same dict), so both adapters produce
+    identical rows from the same document. The id is the
+    ``GranuleUR``, falling back to the ``meta`` concept-id.
+
+    A granule without an id, a usable footprint or a temporal extent
+    cannot become a catalog row: it is skipped with a warning (the same
+    policy every adapter follows) rather than aborting the query.
+
+    Returns:
+        The row, or ``None`` for a skipped granule.
+    """
+    umm = granule.get("umm")
+    if not isinstance(umm, Mapping):
+        umm = {}
+    meta = granule.get("meta")
+    granule_id = umm.get("GranuleUR") or (
+        meta.get("concept-id") if isinstance(meta, Mapping) else None
+    )
+    if not granule_id:
+        logger.warning(
+            "{}: skipping granule with no GranuleUR / concept-id", source_name
+        )
+        return None
+    geometry = granule_geometry(umm)
+    if geometry is None or geometry.is_empty:
+        logger.warning(
+            "{}: skipping granule {!r} (no footprint)", source_name, granule_id
+        )
+        return None
+    interval = granule_interval(umm)
+    if interval is None:
+        logger.warning(
+            "{}: skipping granule {!r} (no temporal extent)", source_name, granule_id
+        )
+        return None
+
+    coll_ref = umm.get("CollectionReference")
+    collection = (
+        str(coll_ref.get("ShortName") or "") if isinstance(coll_ref, Mapping) else ""
+    )
+    properties: dict[str, Any] = {"umm": umm_essentials(umm)}
+    cloud_cover = extract_cloud_cover(umm)
+    if cloud_cover is not None:
+        properties["eo:cloud_cover"] = cloud_cover
+
+    return SourceRow(
+        id=str(granule_id),
+        source=source_name,
+        collection=collection,
+        geometry=geometry,
+        interval=interval,
+        assets=granule_assets(umm),
+        properties=properties,
+        provenance={
+            "query_id": query_id,
+            "fetched_at": fetched_at.isoformat(),
+            "source_version": source_version,
+        },
+    )

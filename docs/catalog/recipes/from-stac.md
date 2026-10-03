@@ -118,6 +118,12 @@ Multiple `ingest` calls accumulate into the same bundle. Each call
 appends a `QueryRecord` to `bundle.queries` and merges new items
 into `bundle.catalog`.
 
+`(source, collection, id)` is the items table's primary key (STAC item
+ids are only unique within a collection). Re-ingesting an item that is
+already in the bundle raises by default; pass `on_duplicate="skip"` to
+make a repeated ingest a no-op, or `on_duplicate="replace"` to refresh
+the stored rows.
+
 ### Persisting the bundle
 
 ```python

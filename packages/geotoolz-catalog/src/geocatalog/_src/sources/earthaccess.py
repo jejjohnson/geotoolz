@@ -14,7 +14,7 @@ granule schema. Field paths consulted:
   footprint. Supports the three common shapes: ``GPolygons``,
   ``BoundingRectangles``, ``Points``.
 * ``granule.data_links()`` — asset URLs.
-* ``umm`` — a bounded subset (see ``_umm_essentials``) stored
+* ``umm`` — a bounded subset (see ``_umm.umm_essentials``) stored
   under ``SourceRow.properties["umm"]``. Full UMM dicts can be
   several KB per granule; downstream code wanting the raw record
   should re-query via earthaccess.
@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 from loguru import logger
 
+from geocatalog._src.retry import retry_transient_io
 from geocatalog._src.sources._base import (
     AuthStatus,
     Bounds,
@@ -38,13 +39,7 @@ from geocatalog._src.sources._base import (
     wants_no_rows,
 )
 from geocatalog._src.sources._extras import _missing_extra
-from geocatalog._src.sources._umm import (
-    asset_key_from_url as _asset_key_from_url,
-    extract_cloud_cover as _extract_cloud_cover,
-    granule_geometry as _granule_geometry,
-    granule_interval as _granule_interval,
-    umm_essentials as _umm_essentials,
-)
+from geocatalog._src.sources._umm import granule_to_source_row
 
 
 if TYPE_CHECKING:
@@ -71,6 +66,8 @@ class EarthAccessSource(Source):
         cloud_hosted: When True, restrict to Earthdata-Cloud
             granules. Useful if you want direct S3 reads
             downstream and don't care about on-prem holdings.
+        retries: Retries of the search call on transient failures
+            (network errors, HTTP 408 / 429 / 5xx). ``0`` disables retry.
     """
 
     name = "earthaccess"
@@ -80,6 +77,7 @@ class EarthAccessSource(Source):
         *,
         daac: str | None = None,
         cloud_hosted: bool | None = None,
+        retries: int = 3,
     ) -> None:
         if earthaccess is None:
             raise _missing_extra(
@@ -87,6 +85,7 @@ class EarthAccessSource(Source):
             )
         self.daac = daac
         self.cloud_hosted = cloud_hosted
+        self.retries = retries
 
     def query(
         self,
@@ -146,7 +145,11 @@ class EarthAccessSource(Source):
         count = limit if limit is not None else -1
 
         logger.debug("earthaccess.search_data: {!r} count={!r}", kwargs, count)
-        granules = earthaccess.search_data(count=count, **kwargs)
+        # earthaccess returns the full result list (it has no streaming
+        # search API); retry transient HTTP failures of that one call.
+        granules = retry_transient_io(
+            earthaccess.search_data, count=count, retries=self.retries, **kwargs
+        )
         for granule in granules:
             row = _granule_to_source_row(
                 granule,
@@ -215,84 +218,19 @@ def _granule_to_source_row(
 ) -> SourceRow | None:
     """Map an `earthaccess.results.DataGranule` to a `SourceRow`.
 
-    Returns ``None`` when the granule lacks a usable geometry —
-    the caller (a streaming iterator) silently skips it rather
-    than raising, because CMR occasionally returns granules with
-    only collection-level footprints we can't faithfully bind to
-    an item-level row.
+    A ``DataGranule`` is the CMR UMM-JSON item dict, so this delegates
+    to the mapper `CMRSource` uses
+    (`geocatalog._src.sources._umm.granule_to_source_row`): the same
+    document yields the same row from either adapter. Assets come from
+    the UMM ``RelatedUrls`` (HTTPS and S3 direct-access links under
+    distinct keys) rather than ``data_links()``, which returns only one
+    access type.
     """
-    umm = granule.get("umm") if hasattr(granule, "get") else {}
-    if not isinstance(umm, Mapping):
-        umm = {}
-
-    granule_ur = umm.get("GranuleUR")
-    if not granule_ur:
-        # Fall back to the concept-id if no UR is set. CMR
-        # guarantees one of them; we prefer the human-readable UR.
-        meta = granule.get("meta") if hasattr(granule, "get") else {}
-        granule_ur = meta.get("concept-id", "<no-id>")
-
-    geometry = _granule_geometry(umm)
-    if geometry is None or geometry.is_empty:
-        logger.debug("earthaccess: skipping granule {!r} (no geometry)", granule_ur)
-        return None
-
-    interval = _granule_interval(umm)
-    if interval is None:
-        logger.debug(
-            "earthaccess: skipping granule {!r} (no temporal extent)", granule_ur
-        )
-        return None
-
-    # Asset map: earthaccess's `data_links()` already filters down
-    # to GETDATA-type URLs. We use the trailing path segment as the
-    # key (e.g. ".tif" / ".nc") so the dict-like layout matches
-    # STAC's asset map shape; falling back to the URL itself when
-    # nothing better is available.
-    assets: dict[str, str] = {}
-    try:
-        links = list(granule.data_links())
-    except (AttributeError, KeyError, TypeError, ValueError) as exc:
-        # Malformed granule metadata shouldn't kill the whole query, but
-        # an asset-less row is surprising downstream — say why it happened.
-        logger.warning(
-            "earthaccess: could not extract data links for granule {!r} "
-            "({}); row will carry no assets",
-            granule_ur,
-            exc,
-        )
-        links = []
-    for link in links:
-        key = _asset_key_from_url(link)
-        # Avoid clobbering when two links happen to share a key
-        # (rare — but a numeric suffix keeps both).
-        if key in assets:
-            assets[f"{key}__{len(assets)}"] = link
-        else:
-            assets[key] = link
-
-    collection_short_name = ""
-    coll_ref = umm.get("CollectionReference", {})
-    if isinstance(coll_ref, Mapping):
-        collection_short_name = str(coll_ref.get("ShortName", "")) or ""
-
-    properties: dict[str, Any] = {"umm": _umm_essentials(umm)}
-    # Lift commonly-used fields to the top level for cheap access.
-    cloud_cover = _extract_cloud_cover(umm)
-    if cloud_cover is not None:
-        properties["eo:cloud_cover"] = cloud_cover
-
-    return SourceRow(
-        id=str(granule_ur),
-        source=source_name,
-        collection=collection_short_name,
-        geometry=geometry,
-        interval=interval,
-        assets=assets,
-        properties=properties,
-        provenance={
-            "query_id": query_id,
-            "fetched_at": fetched_at.isoformat(),
-            "source_version": source_version,
-        },
+    item = {"umm": granule.get("umm"), "meta": granule.get("meta")}
+    return granule_to_source_row(
+        item,
+        source_name=source_name,
+        query_id=query_id,
+        fetched_at=fetched_at,
+        source_version=source_version,
     )
