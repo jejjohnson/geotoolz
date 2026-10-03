@@ -258,13 +258,13 @@ Both new sibling tables are first-class — they have `query_id` / `matchup_id` 
 
 | Column | Type |
 |---|---|
-| `matchup_id` | `str` (uuid) |
-| `strategy` | `str` (`"nearest_in_time"`, `"within_window"`, `"synchronous"`) |
-| `tolerance_json` | `str` (e.g. `{"dt": "1h", "spatial": "iou>0.3"}`) |
+| `matchup_id` | `str` (content hash of strategy parameters + members; stable across re-runs) |
+| `strategy` | `str` (label, e.g. `"IouAtLeast(threshold=0.2) & NearestInTime(dt='6h')"`) |
+| `tolerance_json` | `str` (e.g. `{"spatial": {"type": "IouAtLeast", "threshold": 0.3}, "temporal": {"type": "NearestInTime", "dt_sec": 3600.0}, "join": "all", "crs": "EPSG:4326"}`) |
 | `member_ids` | `array<str>` (refs `items.id`) |
 | `member_sources` | `array<str>` (parallel to `member_ids`) |
 | `member_roles` | `array<str>` (`"primary"` / `"secondary"` / etc.) |
-| `geometry_intersect` | `shapely` (the common footprint) |
+| `geometry_intersect` | `shapely` (the common footprint, in the matchup's working CRS) |
 | `time_reference` | `datetime` |
 | `time_offset_sec` | `array<float>` (per member, relative to `time_reference`) |
 | `created_at` | `datetime` |
@@ -310,14 +310,16 @@ geocatalog stage my_catalog/ --matchup-tag modis_s2_pairs_v1 \
 # src/geocatalog/_src/matchup/__init__.py
 
 def matchup(
-    catalog: GeoCatalog,
+    primary: GeoCatalog | CatalogBundle | Iterable[SourceRow],
+    secondary: GeoCatalog | CatalogBundle | Iterable[SourceRow]
+    | Mapping[str, GeoCatalog | CatalogBundle | Iterable[SourceRow]],  # role -> input for N-way
     *,
-    primary: Selector,                 # filter dict, e.g. {"source": "earthaccess", "collection": "MOD09GA"}
-    secondary: Selector | list[Selector],
-    spatial: SpatialStrategy,           # IntersectsAtLeast(iou=0.2), CentroidWithin(buffer="5km")
+    spatial: SpatialStrategy,           # IouAtLeast(0.2), CentroidWithin(buffer=5_000.0)
     temporal: TemporalStrategy,         # NearestInTime(dt="6h"), WithinWindow(start=, end=)
     join: Literal["all", "any"] = "all",
     tag: str | None = None,
+    crs: CRS | None = None,             # working CRS; default: primary catalog's, else EPSG:4326
+    include_self: bool = False,
 ) -> Iterator[MatchupRow]: ...
 ```
 
@@ -332,7 +334,7 @@ def matchup(
 - `WithinWindow(start: timedelta, end: timedelta)` — all secondaries in [t+start, t+end] relative to primary
 - `Synchronous(tolerance: str = "0s")` — overlapping observation intervals
 
-Implementation: emit DuckDB SQL where possible (range joins on time, spatial via DuckDB's `spatial` extension), fall back to shapely + pandas merge_asof for the non-SQL bits. Matchup output is itself a `GeoCatalog` of `MatchupRow`s and supports the same `query(bounds, interval)` calls — patchers downstream don't need to distinguish "items" from "matchups".
+Implementation: an in-memory join — an STRtree per secondary role over footprints in the working CRS, the temporal strategy selecting candidates by position, the spatial strategy as the truth gate. Inputs are filtered with the catalog's own `query` before the call (there is no selector argument). Candidates are ordered by `(source, id)` so tie-breaks and `matchup_id`s are the same on every run; intervals are compared in UTC and rows with no times never match. Distances (`CentroidWithin.buffer`) are in units of the working CRS — pass a projected `crs=` for metres. Persist the output with `CatalogBundle.write_matchups` (`matchups.parquet`).
 
 ### 4.7 Staging layer
 

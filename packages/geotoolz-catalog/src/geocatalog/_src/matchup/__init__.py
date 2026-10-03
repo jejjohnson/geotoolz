@@ -1,14 +1,14 @@
-"""Matchup engine — pair / N-tuple persisted catalog entries.
+"""Matchup engine — pair / N-tuple observations in space and time.
 
-Given a populated `GeoCatalog` (typically grown via
-``catalog.ingest(source, ...)``), find tuples of rows that overlap in
-space and time within explicit tolerances. Output is a *new catalog*
-of `MatchupRow` instances persisted to a sibling Parquet table next
-to ``items.parquet`` — see ``docs/design/query-matchup.md`` §4.4.
+`matchup` joins catalogs, bundles or iterables of `SourceRow` and
+yields `MatchupRow`s whose tolerances are explicit and whose ids are
+content hashes, so re-runs are reproducible. Persist them next to
+``items.parquet`` with `CatalogBundle.write_matchups` — see
+``docs/design/query-matchup.md`` §4.4.
 
 Strategies are first-class objects in ``spatial.py`` and
-``temporal.py``; the engine in ``engine.py`` runs the spatial /
-temporal join (DuckDB SQL where possible).
+``temporal.py``; the in-memory join (shapely STRtree) is in
+``engine.py``.
 """
 
 from __future__ import annotations
