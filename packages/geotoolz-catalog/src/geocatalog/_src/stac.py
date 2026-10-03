@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import itertools
-from collections.abc import Iterable, Sequence
+import math
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import datetime as _PyDatetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import pyproj
 import shapely.geometry
@@ -188,7 +191,34 @@ def to_stac_collection(
     description: str = "",
     asset_key: str = "data",
 ) -> pystac.Collection:
-    """Convert a catalog into a STAC collection with one item per row."""
+    """Convert a catalog into a STAC collection.
+
+    Rows are grouped into one item per scene: rows sharing a source
+    ``stac_collection`` and a ``stac_item_id`` (or, failing that, an
+    ``id`` — the `CatalogBundle` primary key) become one item whose
+    assets are keyed by each row's ``asset_key``. An id that occurs in
+    more than one source collection is exported as
+    ``"<source collection>:<id>"`` so the output ids stay unique. A row
+    with neither id gets its own item, ``"<collection_id>-<row>"``. The
+    item's geometry, time and properties come from its first row.
+
+    Properties are made JSON-safe: numpy scalars become Python numbers,
+    timestamps RFC 3339 strings, and missing values (``None``, ``NaN``,
+    ``NaT``, non-finite floats) are omitted, so
+    ``json.dumps(collection.to_dict())`` always works.
+
+    Args:
+        catalog: Catalog to export.
+        collection_id: The collection id; also stamped on every item.
+        description: Collection description.
+        asset_key: Asset key for rows without an ``asset_key`` column.
+
+    Returns:
+        A `pystac.Collection` holding the items.
+
+    Raises:
+        ValueError: Two rows of the same item carry the same asset key.
+    """
     pystac = _require_pystac()
     extent = _collection_extent(catalog, pystac)
     collection = pystac.Collection(
@@ -197,17 +227,25 @@ def to_stac_collection(
         extent=extent,
     )
 
-    for idx, row in enumerate(catalog.iter_rows()):
-        geom = _geometry_to_stac_crs(row.geometry, row.crs)
+    groups = _group_scenes(catalog, collection_id)
+    for item_id, rows in groups.items():
+        first = rows[0]
+        geom = _geometry_to_stac_crs(first.geometry, first.crs)
         props = {
-            key: value
-            for key, value in row.extras.items()
-            if key
-            not in {"asset_key", "stac_item_id", "stac_collection", "href_signed"}
+            key: value for key, value in first.extras.items() if key not in _EXPORT_SKIP
         }
+        # An item-level CRS is inherited by every asset without its own,
+        # so it is only written when all the item's assets share it.
+        crs_values = [row.extras.get("crs") for row in rows]
+        shared_crs = all(_present(c) for c in crs_values) and len(set(crs_values)) == 1
+        if not shared_crs:
+            props.pop("crs", None)
+            for field in _PROJ_CRS_FIELDS:
+                props.pop(field, None)
         _normalize_crs_property(props)
-        start = _datetime_or_none(row.interval.left)
-        end = _datetime_or_none(row.interval.right)
+        props = _json_safe_mapping(props)
+        start = _datetime_or_none(first.interval.left)
+        end = _datetime_or_none(first.interval.right)
         # STAC / RFC3339 require tz-aware ISO 8601 with `Z` (or offset)
         # for `start_datetime` / `end_datetime` and the item-level
         # `datetime`. Naive timestamps from the catalog time-axis are
@@ -218,19 +256,149 @@ def to_stac_collection(
             props["end_datetime"] = _to_rfc3339(end)
 
         item = pystac.Item(
-            id=str(row.extras.get("stac_item_id", f"{collection_id}-{idx}")),
+            id=item_id,
             geometry=shapely.geometry.mapping(geom),
             bbox=tuple(geom.bounds),
             datetime=item_datetime,
             properties=props,
             collection=collection_id,
         )
-        item.add_asset(
-            str(row.extras.get("asset_key", asset_key)),
-            pystac.Asset(href=row.filepath),
-        )
+        for row in rows:
+            key = row.extras.get("asset_key")
+            key = str(key) if _present(key) else asset_key
+            if key in item.assets:
+                raise ValueError(
+                    f"to_stac_collection: item {item_id!r} has more than one "
+                    f"row for asset {key!r}"
+                )
+            fields: dict[str, Any] = {}
+            crs = row.extras.get("crs")
+            if _present(crs) and not shared_crs:
+                # Per the projection extension, an asset-level CRS
+                # overrides the item's.
+                fields = {"crs": crs}
+                _normalize_crs_property(fields)
+            item.add_asset(key, pystac.Asset(href=row.filepath, extra_fields=fields))
         collection.add_item(item)
     return collection
+
+
+def _group_scenes(catalog: GeoCatalog, collection_id: str) -> dict[str, list[Any]]:
+    """Rows grouped into scenes, keyed by a unique output item id.
+
+    A scene is the rows sharing an upstream id *within its scope* —
+    ``stac_collection``, else the bundle's ``(source, collection)`` —
+    since upstream ids are only unique within a collection. Rows without
+    an id are each their own scene. Output ids: the upstream id; one that
+    occurs in several scopes becomes ``"<scope>:<id>"``; an id-less row
+    gets ``"<collection_id>-<row>"``; any remaining clash (with an
+    explicit id, say) gets a ``~<n>`` suffix. Explicit ids are allocated
+    first, so they keep their spelling.
+    """
+    scenes: dict[tuple[Any, ...], list[Any]] = {}
+    for idx, row in enumerate(catalog.iter_rows()):
+        item_id = next(
+            (
+                str(row.extras[key])
+                for key in ("stac_item_id", "id")
+                if _present(row.extras.get(key))
+            ),
+            None,
+        )
+        if item_id is None:
+            scenes[("row", idx)] = [row]
+            continue
+        scope = row.extras.get("stac_collection")
+        if not _present(scope):
+            parts = [row.extras.get(k) for k in ("source", "collection")]
+            scope = "/".join(str(p) for p in parts if _present(p)) or None
+        scenes.setdefault(("id", scope, item_id), []).append(row)
+
+    scopes_per_id: dict[str, set[Any]] = {}
+    for key in scenes:
+        if key[0] == "id":
+            scopes_per_id.setdefault(key[2], set()).add(key[1])
+
+    def candidate(key: tuple[Any, ...]) -> str:
+        if key[0] == "row":
+            return f"{collection_id}-{key[1]}"
+        _, scope, item_id = key
+        if len(scopes_per_id[item_id]) > 1 and scope is not None:
+            return f"{scope}:{item_id}"
+        return item_id
+
+    used: set[str] = set()
+    names: dict[tuple[Any, ...], str] = {}
+    # Explicit ids first, then id-less rows, each made unique on clash.
+    for key in sorted(scenes, key=lambda k: k[0] != "id"):
+        name = base = candidate(key)
+        n = 1
+        while name in used:
+            n += 1
+            name = f"{base}~{n}"
+        used.add(name)
+        names[key] = name
+    return {names[key]: rows for key, rows in scenes.items()}
+
+
+# Catalog columns that describe the item / asset rather than being item
+# properties.
+_EXPORT_SKIP = frozenset(
+    {"asset_key", "stac_item_id", "stac_collection", "href_signed", "id"}
+)
+
+
+def _present(value: Any) -> bool:
+    """False for ``None`` and pandas / numpy missing scalars."""
+    if value is None:
+        return False
+    try:
+        return not bool(pd.isna(value))
+    except (TypeError, ValueError):  # list-likes: present
+        return True
+
+
+def _json_safe(value: Any) -> tuple[bool, Any]:
+    """``(keep, value)`` with ``value`` made JSON-serialisable.
+
+    Missing values (``None``, ``NaN``, ``NaT``, ``pd.NA``, ±inf) are
+    dropped (``keep=False``); numpy scalars become Python scalars;
+    timestamps become RFC 3339 strings; containers are converted
+    recursively; anything else unknown becomes its ``str``.
+    """
+    # Before the generic numpy branch: `.item()` on a nanosecond
+    # datetime64 returns a raw int, not a datetime.
+    if isinstance(value, np.datetime64):
+        ts = pd.Timestamp(value)
+        return (False, None) if ts is pd.NaT else (True, to_rfc3339(ts))
+    if isinstance(value, np.ndarray) and value.ndim == 0:
+        return _json_safe(value[()])
+    if isinstance(value, np.generic):
+        value = value.item()
+    if value is None or value is pd.NaT or value is pd.NA:
+        return False, None
+    if isinstance(value, bool | int | str):
+        return True, value
+    if isinstance(value, float):
+        return math.isfinite(value), value
+    if isinstance(value, pd.Timestamp | _PyDatetime):
+        ts = pd.Timestamp(value)
+        return (False, None) if ts is pd.NaT else (True, to_rfc3339(ts))
+    if isinstance(value, Mapping):
+        return True, _json_safe_mapping(value)
+    if isinstance(value, list | tuple | np.ndarray):
+        items = [_json_safe(v) for v in value]
+        return True, [v if keep else None for keep, v in items]
+    return True, str(value)
+
+
+def _json_safe_mapping(mapping: Mapping[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in mapping.items():
+        keep, safe = _json_safe(value)
+        if keep:
+            out[str(key)] = safe
+    return out
 
 
 # Columns `_item_to_rows` writes, in order; `start_time` / `end_time`
