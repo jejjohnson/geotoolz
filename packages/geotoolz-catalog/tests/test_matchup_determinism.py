@@ -346,7 +346,7 @@ def test_matchup_ids_keep_the_legacy_crs_serialisation() -> None:
     scenes = _utm_scenes()
     gdf = scenes.gdf.to_crs(laea)
     station = _row("st", source="insitu", bbox=(3.04, 0.04, 3.05, 0.05))
-    (row,) = _run(InMemoryGeoCatalog(gdf, backend="raster"), [station])
+    (row,) = _run(InMemoryGeoCatalog(gdf, kind="raster"), [station])
     assert row.tolerance["crs"] == pyproj.CRS(laea).to_string()
 
 
