@@ -46,6 +46,12 @@ Notes:
   GeoParquet artifact (no in-RAM accumulation).
 - `extra_properties` preserves arbitrary STAC properties as catalog
   columns — `eo:cloud_cover` is the canonical use.
+- Both paths read an item the same way: the footprint is the item's
+  `geometry` (its `bbox` only when the geometry is missing), split at
+  the antimeridian; the `crs` column is the asset's native CRS from the
+  projection extension (`proj:code`, `proj:epsg`, `proj:wkt2` or
+  `proj:projjson`); times are UTC; relative asset hrefs are resolved
+  against the item's self link.
 
 ### Signing Planetary Computer URLs
 
@@ -70,6 +76,12 @@ catalog = gc.from_stac_search(
 
 `STACSource.planetary_computer()` (Path B) handles signing
 automatically — that's its main convenience.
+
+Signed hrefs carry a SAS token that expires after about an hour, so a
+catalog or bundle saved with them stops opening once the token lapses.
+Rows whose `filepath` is signed have `href_signed=True`; re-sign those
+hrefs (for example with `planetary_computer.sign(href)`) before reading
+a persisted catalog.
 
 ## Path B — `STACSource` + `CatalogBundle.ingest`
 

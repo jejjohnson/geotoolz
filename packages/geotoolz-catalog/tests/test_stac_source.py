@@ -29,12 +29,12 @@ pytest.importorskip("pystac_client")
 
 from shapely.geometry import box, mapping
 
+from geocatalog._src._timeutil import to_utc_ts as _to_utc_timestamp
 from geocatalog._src.sources._base import SourceRow
 from geocatalog._src.sources.stac import (
     STACSource,
     _interval_to_stac_datetime,
     _item_to_source_row,
-    _to_utc_timestamp,
 )
 
 
@@ -170,14 +170,27 @@ class TestItemToSourceRow:
         assert row.interval.left == pd.Timestamp(start)
         assert row.interval.right == pd.Timestamp(end)
 
-    def test_missing_geometry_raises(self) -> None:
-        # An item without geometry can't be ingested into the
-        # geo-indexed catalog; we fail loudly rather than emit a
-        # broken row. pystac validates on construction so we mutate
-        # post-hoc.
+    def test_missing_geometry_falls_back_to_bbox(self) -> None:
+        # Same decoder as `from_stac_items` (#238): the bbox stands in
+        # for a missing geometry.
         item = _make_item(datetime_=datetime(2024, 6, 15, tzinfo=UTC))
         item.geometry = None
-        with pytest.raises(ValueError, match="no geometry"):
+        row = _item_to_source_row(
+            item,
+            source_name="stac.pc",
+            query_id="q",
+            fetched_at=datetime(2026, 5, 25, tzinfo=UTC),
+            source_version="v",
+        )
+        assert row.geometry.equals(box(*item.bbox))
+
+    def test_missing_geometry_and_bbox_raises(self) -> None:
+        # Nothing to index; fail loudly rather than emit a broken row.
+        # pystac validates on construction so we mutate post-hoc.
+        item = _make_item(datetime_=datetime(2024, 6, 15, tzinfo=UTC))
+        item.geometry = None
+        item.bbox = None
+        with pytest.raises(ValueError, match="neither geometry nor bbox"):
             _item_to_source_row(
                 item,
                 source_name="stac.pc",
@@ -196,7 +209,7 @@ class TestItemToSourceRow:
         item.datetime = None
         item.properties.pop("start_datetime", None)
         item.properties.pop("end_datetime", None)
-        with pytest.raises(ValueError, match="cannot build interval"):
+        with pytest.raises(ValueError, match="needs datetime"):
             _item_to_source_row(
                 item,
                 source_name="stac.pc",

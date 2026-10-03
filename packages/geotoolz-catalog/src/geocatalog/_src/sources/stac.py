@@ -16,13 +16,16 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
-import shapely.geometry
 from loguru import logger
 
-from geocatalog._src._timeutil import (
-    to_rfc3339 as _to_iso,
-    to_utc_ts as _to_utc_timestamp,
+from geocatalog._src._stac_item import (
+    ASSET_CRS_PROPERTY,
+    asset_crs,
+    asset_href,
+    item_geometry,
+    item_interval,
 )
+from geocatalog._src._timeutil import to_rfc3339 as _to_iso
 from geocatalog._src.sources._base import (
     AuthStatus,
     Bounds,
@@ -247,8 +250,7 @@ def _interval_to_stac_datetime(interval: pd.Interval) -> str:
 
     STAC expects timezone-aware ISO 8601 with ``Z`` for UTC; the
     UTC coercion / ``Z`` serialization live in
-    `geocatalog._src._timeutil` (imported here as ``_to_iso`` /
-    ``_to_utc_timestamp``).
+    `geocatalog._src._timeutil` (imported here as ``_to_iso``).
     """
     return f"{_to_iso(interval.left)}/{_to_iso(interval.right)}"
 
@@ -263,52 +265,28 @@ def _item_to_source_row(
 ) -> SourceRow:
     """Map a `pystac.Item` to a `SourceRow`.
 
-    Geometry is decoded with `shapely.geometry.shape` (handles
-    Polygon, MultiPolygon, etc.). The temporal window prefers
-    ``start_datetime`` / ``end_datetime`` if the item is a range,
-    else a zero-width interval at ``item.datetime``.
+    Uses the decoder `from_stac_items` uses (`geocatalog._src._stac_item`):
+    footprint from ``item.geometry`` (bbox fallback, split at the
+    antimeridian), a UTC-aware interval preferring
+    ``start_datetime`` / ``end_datetime``, and absolute asset hrefs.
     """
-    if item.geometry is None:
-        raise ValueError(
-            f"STAC item {item.id!r} has no geometry; cannot build SourceRow."
-        )
-    geom = shapely.geometry.shape(item.geometry)
-
-    # Interval: STAC items either have a single `datetime` or a
-    # `start_datetime`/`end_datetime` pair (the "datetime range"
-    # convention). Prefer the range when present. Every endpoint is
-    # normalized to UTC because:
-    #   - STAC items can carry any tz (or none) per the spec;
-    #   - pandas refuses to compare tz-aware against tz-naive
-    #     Timestamps, so a mixed-tz dataset would explode in
-    #     downstream IntervalIndex / merge_asof operations;
-    #   - the catalog's stored time-axis contract is UTC.
-    props = dict(item.properties or {})
-    start_dt = props.get("start_datetime")
-    end_dt = props.get("end_datetime")
-    if start_dt is not None and end_dt is not None:
-        left = _to_utc_timestamp(start_dt)
-        right = _to_utc_timestamp(end_dt)
-    elif item.datetime is not None:
-        left = right = _to_utc_timestamp(item.datetime)
-    else:
-        raise ValueError(
-            f"STAC item {item.id!r} has neither `datetime` nor "
-            f"`start_datetime`/`end_datetime`; cannot build interval."
-        )
-    interval = pd.Interval(left, right, closed="both")
-
-    # Assets: STAC native form is `{key: Asset}`; we want `{key: href}`.
-    assets = {key: asset.href for key, asset in (item.assets or {}).items()}
-
     return SourceRow(
         id=item.id,
         source=source_name,
         collection=item.collection_id or "",
-        geometry=geom,
-        interval=interval,
-        assets=assets,
-        properties=props,
+        geometry=item_geometry(item),
+        interval=item_interval(item),
+        # STAC native form is `{key: Asset}`; we want `{key: href}`.
+        assets={key: asset_href(asset) for key, asset in (item.assets or {}).items()},
+        properties={
+            **(item.properties or {}),
+            # Asset-level `proj:*` is lost once assets become bare hrefs;
+            # keep each asset's resolved CRS for the bundle row (#238).
+            ASSET_CRS_PROPERTY: {
+                key: asset_crs(item.properties or {}, asset.extra_fields or {})
+                for key, asset in (item.assets or {}).items()
+            },
+        },
         provenance={
             "query_id": query_id,
             "fetched_at": fetched_at.isoformat(),
