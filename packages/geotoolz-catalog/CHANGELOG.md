@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.2.1...geotoolz-catalog-v0.2.2) (2026-10-03)
+
+
+### Features
+
+* **catalog:** one meaning per parameter name, one error hierarchy ([#373](https://github.com/jejjohnson/geotoolz/issues/373)) ([094dd61](https://github.com/jejjohnson/geotoolz/commit/094dd61638944895528028903b012d37ec678836))
+* **catalog:** one public surface — facades partition the top level; public paths for streaming, I/O and time helpers; one lazy table ([#372](https://github.com/jejjohnson/geotoolz/issues/372)) ([0086e83](https://github.com/jejjohnson/geotoolz/commit/0086e83865a8a15c238df039795198a155a915d1))
+
+
+### Bug Fixes
+
+* **catalog,patcher:** get_config()["crs"] is one string on both backends and across round trips; pool key covers every endpoint variable; hf:// in the pool ([#371](https://github.com/jejjohnson/geotoolz/issues/371)) ([6b8b3ff](https://github.com/jejjohnson/geotoolz/commit/6b8b3ff34489958ed89ff210a3e4abb7961dd501))
+
 ## [0.2.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.2.0...geotoolz-catalog-v0.2.1) (2026-10-03)
 
 
