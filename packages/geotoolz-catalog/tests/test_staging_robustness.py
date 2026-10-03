@@ -332,7 +332,7 @@ def test_prune_evicts_expired_files_and_partials(tmp_path: Path) -> None:
     for p in (old, new):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"x")
-    part = new.with_name(f".{new.name}.abc.part")
+    part = new.with_name(f".{new.name}.{'a' * 32}.part")
     part.write_bytes(b"partial")
     two_days_ago = time.time() - 2 * 86400
     os.utime(old, (two_days_ago, two_days_ago))
@@ -341,3 +341,50 @@ def test_prune_evicts_expired_files_and_partials(tmp_path: Path) -> None:
     assert not old.exists() and not part.exists()
     assert new.exists()
     assert LocalCache(root=tmp_path).prune() == 0  # no TTL: only partials
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (#365)
+# ---------------------------------------------------------------------------
+
+
+def test_primary_follows_a_selected_alias_of_its_uri(
+    tmp_path: Path, remote: _Remote
+) -> None:
+    b04, b08 = "https://x/B04.tif", "https://x/B08.tif"
+    remote.content.update({b04: b"red", b08: b"nir"})
+    assets = {"visual": b04, "B04": b04, "B08": b08}  # `visual` aliases B04
+    cat = _cat({"filepath": b04, "assets": json.dumps(assets)})
+    out = stage(cat, dest=tmp_path / "cache", assets=["B04"])
+    assert Path(out.gdf.iloc[0]["filepath"]).read_bytes() == b"red"
+
+
+def test_asset_filter_on_a_filepath_only_catalog_stages_the_filepath(
+    tmp_path: Path, remote: _Remote
+) -> None:
+    uri = "https://x/a.tif"
+    remote.content[uri] = b"a"
+    out = stage(_cat({"filepath": uri}), dest=tmp_path / "cache", assets=["red"])
+    assert Path(out.gdf.iloc[0]["filepath"]).read_bytes() == b"a"
+
+
+def test_file_uri_authority_is_kept() -> None:
+    from geocatalog._src.staging._base import _local_path
+
+    assert _local_path("file://server/share/x.tif") == Path("//server/share/x.tif")
+    assert _local_path("file://localhost/data/x.tif") == Path("/data/x.tif")
+    assert _local_path("file:///data/a%20b.tif") == Path("/data/a b.tif")
+
+
+def test_prune_keeps_a_complete_download_named_part(
+    tmp_path: Path, remote: _Remote
+) -> None:
+    uri = "https://x/archive.part"
+    remote.content[uri] = b"whole"
+    cache = LocalCache(root=tmp_path / "cache")
+    stage(_cat({"filepath": uri}), cache=cache)
+    slot = cache.path_for(uri)
+    temp = slot.with_name(f".{slot.name}.{'0' * 32}.part")
+    temp.write_bytes(b"partial")
+    assert cache.prune() == 1
+    assert slot.read_bytes() == b"whole" and not temp.exists()

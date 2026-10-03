@@ -35,12 +35,14 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qsl, unquote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.request import url2pathname
 
 import geopandas as gpd
 from loguru import logger
@@ -60,7 +62,10 @@ if TYPE_CHECKING:
 _DEFAULT_CACHE_SUBDIR = ".cache/geocatalog"
 
 # Suffix of in-progress downloads; `LocalCache.prune` removes leftovers.
+# Their names are `.<slot>.<uuid4 hex>.part`, which no cache slot (a
+# 64-hex digest plus the source extension) can match.
 _PART_SUFFIX = ".part"
+_PART_NAME = re.compile(r"^\..+\.[0-9a-f]{32}\.part$")
 
 #: Column holding each staged row's original URIs (JSON, keyed like
 #: ``assets``; ``{"filepath": uri}`` for rows without an asset map).
@@ -133,7 +138,7 @@ class LocalCache:
         for path in self.resolve_root().glob("*/*"):
             if not path.is_file():
                 continue
-            if path.name.endswith(_PART_SUFFIX) or (
+            if _PART_NAME.match(path.name) or (
                 self.ttl_days is not None and self._expired(path)
             ):
                 with contextlib.suppress(OSError):
@@ -227,8 +232,10 @@ def stage(
         _plan_row(row, idx, asset_filter=assets)
         for idx, row in enumerate(catalog.gdf.itertuples())
     ]
-    if assets is not None:
-        known = {k for plan in plans for k in plan.all_keys}
+    known = {k for plan in plans for k in plan.all_keys}
+    # Rows without an asset map stage `filepath` whatever `assets` says,
+    # so a filter only has keys to check when some row carries a map.
+    if assets is not None and known:
         unknown = sorted(set(assets) - known)
         if unknown:
             raise ValueError(
@@ -285,7 +292,6 @@ class _RowPlan:
     assets: dict[str, str]  # key -> uri (subset filtered by `assets=...`)
     has_asset_map: bool
     all_keys: tuple[str, ...] = ()  # every key of the row's map, unfiltered
-    primary_key: str | None = None  # the asset whose URI is `filepath`
     map_is_json: bool = True
     results: dict[str, str] = dataclasses.field(default_factory=dict)
 
@@ -338,7 +344,6 @@ def _plan_row(row: Any, idx: int, *, asset_filter: list[str] | None) -> _RowPlan
         assets=selected,
         has_asset_map=True,
         all_keys=tuple(asset_map),
-        primary_key=next((k for k, v in asset_map.items() if v == primary), None),
         map_is_json=was_json,
     )
 
@@ -372,9 +377,17 @@ def _rewrite_gdf(
                 local_map[key] = local
             elif (plan.row_idx, key) in failures:
                 local_map[key] = uri
-        # `filepath` follows the primary asset; when that asset was not
-        # staged (filtered out, failed) the row keeps its original URI.
-        primary_local = plan.results.get(plan.primary_key) if plan.primary_key else None
+        # `filepath` follows the primary asset — any staged key holding
+        # the row's `filepath` URI (aliases share one download). When it
+        # was not staged (filtered out, failed) the row keeps its URI.
+        primary_local = next(
+            (
+                plan.results[k]
+                for k, uri in plan.assets.items()
+                if uri == plan.primary_uri and k in plan.results
+            ),
+            None,
+        )
         new_filepaths.append(primary_local or plan.primary_uri)
         new_assets.append(json.dumps(local_map) if plan.map_is_json else local_map)
         staged_from.append(json.dumps(plan.assets))
@@ -400,7 +413,12 @@ def _local_path(uri: str) -> Path | None:
     """The filesystem path a local URI names, ``None`` for remote URIs."""
     parsed = urlparse(uri)
     if parsed.scheme == "file":
-        return Path(unquote(parsed.path))
+        # `file://server/share/x` is a UNC path; `file:///C:/x` a drive
+        # path, which `url2pathname` resolves on Windows.
+        path = parsed.path
+        if parsed.netloc and parsed.netloc != "localhost":
+            path = f"//{parsed.netloc}{path}"
+        return Path(url2pathname(path))
     # No scheme, or a Windows drive letter (`C:\\...` parses as scheme "c").
     if parsed.scheme == "" or len(parsed.scheme) == 1:
         return Path(uri)

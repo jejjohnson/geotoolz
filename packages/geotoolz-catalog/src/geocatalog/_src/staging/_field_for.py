@@ -24,7 +24,7 @@ installing geopatcher directly).
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 
@@ -183,18 +183,21 @@ def _resolve_paths(catalog: GeoCatalog, *, asset: str | None) -> list[str]:
 
     out: list[str] = []
     for row_idx, blob in enumerate(gdf["assets"].tolist()):
-        if not isinstance(blob, str) or not blob:
+        if isinstance(blob, dict):
+            decoded: Any = blob  # `stage()` keeps dict maps as dicts
+        elif isinstance(blob, str) and blob:
+            try:
+                decoded = json.loads(blob)
+            except json.JSONDecodeError as exc:
+                raise KeyError(
+                    f"field_for: row {row_idx} asset map is not valid JSON "
+                    f"({exc}); can't resolve asset {asset!r}."
+                ) from exc
+        else:
             raise KeyError(
                 f"field_for: row {row_idx} has no asset map; "
                 f"can't resolve asset {asset!r}."
             )
-        try:
-            decoded = json.loads(blob)
-        except json.JSONDecodeError as exc:
-            raise KeyError(
-                f"field_for: row {row_idx} asset map is not valid JSON "
-                f"({exc}); can't resolve asset {asset!r}."
-            ) from exc
         if not isinstance(decoded, dict) or asset not in decoded:
             available = sorted(decoded) if isinstance(decoded, dict) else []
             raise KeyError(
