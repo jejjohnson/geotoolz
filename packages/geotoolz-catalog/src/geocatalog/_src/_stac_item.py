@@ -33,6 +33,16 @@ from geocatalog._src._timeutil import to_utc_ts
 
 LONLAT = pyproj.CRS.from_epsg(4326)
 
+
+class UndecodableItemError(ValueError):
+    """A STAC item has no usable footprint or no time.
+
+    The one condition every ingest path skips (with a warning) rather
+    than raising; any other decoding error — a malformed ``proj:*``
+    field, say — still surfaces.
+    """
+
+
 #: `SourceRow.properties` key under which `STACSource` records each
 #: asset's native CRS (``{asset_key: crs}``), so the bundle row can
 #: carry the promoted asset's CRS like `from_stac_items` does.
@@ -60,11 +70,11 @@ def item_geometry(item: Any) -> shapely.geometry.base.BaseGeometry:
         elif len(bbox) == 6:
             west, south, east, north = bbox[0], bbox[1], bbox[3], bbox[4]
         else:
-            raise ValueError(
+            raise UndecodableItemError(
                 f"STAC item {item.id!r} bbox must have 4 or 6 values; got {bbox!r}"
             )
         return lonlat_box(west, south, east, north)
-    raise ValueError(f"STAC item {item.id!r} has neither geometry nor bbox")
+    raise UndecodableItemError(f"STAC item {item.id!r} has neither geometry nor bbox")
 
 
 def _fix_antimeridian(
@@ -136,7 +146,7 @@ def item_interval(item: Any) -> pd.Interval:
     if item.datetime is not None:
         ts = to_utc_ts(item.datetime)
         return pd.Interval(ts, ts, closed="both")
-    raise ValueError(
+    raise UndecodableItemError(
         f"STAC item {item.id!r} needs datetime or start_datetime/end_datetime"
     )
 

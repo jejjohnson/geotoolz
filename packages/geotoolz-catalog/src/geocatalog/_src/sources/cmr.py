@@ -26,6 +26,8 @@ from typing import Any
 import pandas as pd
 from loguru import logger
 
+from geocatalog._src._timeutil import to_utc_ts
+from geocatalog._src.retry import retry_transient_io
 from geocatalog._src.sources._base import (
     AuthStatus,
     Bounds,
@@ -33,13 +35,7 @@ from geocatalog._src.sources._base import (
     SourceRow,
     wants_no_rows,
 )
-from geocatalog._src.sources._umm import (
-    asset_key_from_url as _asset_key_from_url,
-    extract_cloud_cover as _extract_cloud_cover,
-    granule_geometry as _granule_geometry,
-    granule_interval as _granule_interval,
-    umm_essentials as _umm_essentials,
-)
+from geocatalog._src.sources._umm import granule_to_source_row
 
 
 # CMR public search root. Granule and collection endpoints branch
@@ -49,6 +45,21 @@ _CMR_ROOT = "https://cmr.earthdata.nasa.gov/search"
 # CMR caps a single request at 2000 results; for `limit=None` we
 # paginate via `search-after` until exhausted.
 _CMR_PAGE_SIZE = 2000
+
+# Query parameters the adapter sets itself; `filters` may not override them.
+_RESERVED_PARAMS = frozenset({"bounding_box", "short_name", "temporal", "page_size"})
+
+
+def _cmr_time(value: Any, *, upper: bool = False) -> str:
+    """``YYYY-MM-DDTHH:MM:SSZ`` in UTC — the form CMR's ``temporal`` takes.
+
+    Sub-second precision is rounded *outward* (the lower bound down, the
+    upper bound up): CMR's range is inclusive, so flooring the upper
+    bound would drop granules inside the requested window.
+    """
+    ts = to_utc_ts(value)
+    ts = ts.ceil("s") if upper else ts.floor("s")
+    return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class CMRSource(Source):
@@ -61,6 +72,8 @@ class CMRSource(Source):
     Args:
         token: Optional EDL bearer token for protected collections.
         endpoint: CMR root URL — override for non-prod environments.
+        retries: Retries per page on transient failures (network
+            errors, HTTP 408 / 429 / 5xx). ``0`` disables retry.
     """
 
     name = "cmr"
@@ -70,9 +83,11 @@ class CMRSource(Source):
         *,
         token: str | None = None,
         endpoint: str = _CMR_ROOT,
+        retries: int = 3,
     ) -> None:
         self.token = token
         self.endpoint = endpoint.rstrip("/")
+        self.retries = retries
 
     def query(
         self,
@@ -107,19 +122,29 @@ class CMRSource(Source):
         query_id = uuid.uuid4().hex
         fetched_at = datetime.now(tz=UTC)
 
+        clashes = sorted(set(filters or ()) & _RESERVED_PARAMS)
+        if clashes:
+            raise ValueError(
+                f"CMRSource.query: filters {clashes} would override the "
+                "parameters the adapter builds from bounds / interval / "
+                "collection; pass those arguments instead."
+            )
         params: dict[str, Any] = {
             "bounding_box": ",".join(str(x) for x in bounds),
         }
         if collection is not None:
             params["short_name"] = collection
         if interval is not None:
+            # CMR wants RFC 3339 instants; aware inputs in other zones are
+            # converted, naive ones are UTC, sub-second noise is dropped.
             params["temporal"] = (
-                f"{pd.Timestamp(interval.left).isoformat()},"
-                f"{pd.Timestamp(interval.right).isoformat()}"
+                f"{_cmr_time(interval.left)},{_cmr_time(interval.right, upper=True)}"
             )
-        if filters:
-            for k, v in filters.items():
-                params[k] = v
+        for k, v in (filters or {}).items():
+            # A list is sent as a repeated key (`provider=A&provider=B`, the
+            # form CMR documents for provider / version); spell the key
+            # `platform[]` yourself where CMR wants bracket syntax.
+            params[k] = list(v) if isinstance(v, list | tuple | set) else v
 
         # Stream pages via the `search-after` header until done or
         # the user's limit is reached.
@@ -136,8 +161,12 @@ class CMRSource(Source):
                 params, doseq=True
             )
             logger.debug("CMR GET: {!r}", url)
-            data, next_search_after = _fetch_page(
-                url, token=self.token, search_after=search_after
+            data, next_search_after = retry_transient_io(
+                _fetch_page,
+                url,
+                token=self.token,
+                search_after=search_after,
+                retries=self.retries,
             )
             items = data.get("items", [])
             for item in items:
@@ -223,61 +252,15 @@ def _cmr_item_to_source_row(
     query_id: str,
     fetched_at: datetime,
 ) -> SourceRow | None:
-    """Map a CMR UMM-JSON `items[...]` entry to a `SourceRow`.
+    """Map a CMR UMM-JSON ``items[...]`` entry to a `SourceRow`.
 
-    Uses the same geometry / interval / asset extraction logic as
-    the `earthaccess` adapter — the UMM schema is the same regardless
-    of which client you use to fetch it, so both adapters share the
-    decoders in `geocatalog._src.sources._umm`.
+    Thin wrapper over the mapper shared with the earthaccess adapter
+    (`geocatalog._src.sources._umm.granule_to_source_row`).
     """
-    umm = item.get("umm")
-    if not isinstance(umm, Mapping):
-        return None
-    granule_ur = str(umm.get("GranuleUR") or "<no-id>")
-    geometry = _granule_geometry(umm)
-    if geometry is None or geometry.is_empty:
-        return None
-    interval = _granule_interval(umm)
-    if interval is None:
-        return None
-
-    # CMR's umm_json keeps download URLs under `RelatedUrls` with
-    # Type == "GET DATA".
-    assets: dict[str, str] = {}
-    for link in umm.get("RelatedUrls", []) or []:
-        if not isinstance(link, Mapping):
-            continue
-        if link.get("Type") != "GET DATA":
-            continue
-        url = link.get("URL")
-        if not url:
-            continue
-        key = _asset_key_from_url(str(url))
-        if key in assets:
-            key = f"{key}__{len(assets)}"
-        assets[key] = url
-
-    collection_short_name = ""
-    coll_ref = umm.get("CollectionReference", {})
-    if isinstance(coll_ref, Mapping):
-        collection_short_name = str(coll_ref.get("ShortName", "")) or ""
-
-    properties: dict[str, Any] = {"umm": _umm_essentials(umm)}
-    cloud_cover = _extract_cloud_cover(umm)
-    if cloud_cover is not None:
-        properties["eo:cloud_cover"] = cloud_cover
-
-    return SourceRow(
-        id=granule_ur,
-        source=source_name,
-        collection=collection_short_name,
-        geometry=geometry,
-        interval=interval,
-        assets=assets,
-        properties=properties,
-        provenance={
-            "query_id": query_id,
-            "fetched_at": fetched_at.isoformat(),
-            "source_version": "cmr/umm_json",
-        },
+    return granule_to_source_row(
+        item,
+        source_name=source_name,
+        query_id=query_id,
+        fetched_at=fetched_at,
+        source_version="cmr/umm_json",
     )

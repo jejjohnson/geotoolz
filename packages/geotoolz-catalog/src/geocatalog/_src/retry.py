@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import urllib.error
 from collections.abc import Callable
 from typing import Any
 
@@ -49,9 +50,24 @@ _DETERMINISTIC_RASTERIO_MESSAGES = (
 )
 
 
+# HTTP statuses worth retrying: timeouts, rate limiting and every 5xx.
+# Any other HTTP error (400, 401, 403, 404, …) will fail the same way again.
+_TRANSIENT_HTTP_STATUS = frozenset({408, 425, 429})
+
+
+def _transient_status(code: int) -> bool:
+    return code in _TRANSIENT_HTTP_STATUS or 500 <= code <= 599
+
+
 def _is_transient(exc: BaseException) -> bool:
     if isinstance(exc, _FATAL_OS_ERRORS):
         return False
+    # `HTTPError` is an `OSError`; only some statuses heal on retry.
+    if isinstance(exc, urllib.error.HTTPError):
+        return _transient_status(exc.code)
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(status, int):  # requests.HTTPError (earthaccess)
+        return _transient_status(status)
     if isinstance(exc, RasterioIOError):
         message = str(exc).lower()
         if any(m in message for m in _DETERMINISTIC_RASTERIO_MESSAGES):
@@ -100,7 +116,9 @@ def retry_transient_io[T](
 
     Notes:
         Only `RasterioIOError`, `urllib3.exceptions.ReadTimeoutError`, and
-        non-fatal `OSError` instances are retried. Fatal `OSError` subclasses
+        non-fatal `OSError` instances are retried; an HTTP error (urllib's
+        `HTTPError` or one carrying a ``response.status_code``) only for
+        408 / 425 / 429 and any 5xx. Fatal `OSError` subclasses
         (`FileNotFoundError`, `PermissionError`, `IsADirectoryError`,
         `NotADirectoryError`, `InterruptedError`) are re-raised on the first
         attempt — there is no benefit to waiting on them.

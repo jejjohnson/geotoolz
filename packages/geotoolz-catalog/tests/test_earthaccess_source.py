@@ -27,12 +27,14 @@ import pytest
 earthaccess = pytest.importorskip("earthaccess")
 
 from geocatalog._src.sources._base import SourceRow
+from geocatalog._src.sources._umm import (
+    asset_key_from_url as _asset_key_from_url,
+    extract_cloud_cover as _extract_cloud_cover,
+    granule_geometry as _granule_geometry,
+    granule_interval as _granule_interval,
+)
 from geocatalog._src.sources.earthaccess import (
     EarthAccessSource,
-    _asset_key_from_url,
-    _extract_cloud_cover,
-    _granule_geometry,
-    _granule_interval,
     _granule_to_source_row,
 )
 
@@ -103,6 +105,12 @@ class _FakeGranule:
     """Minimal `earthaccess.results.DataGranule` stand-in."""
 
     def __init__(self, umm: dict[str, Any], links: list[str] | None = None) -> None:
+        # A real DataGranule's data links are its UMM `RelatedUrls`.
+        if links:
+            umm = {
+                **umm,
+                "RelatedUrls": [{"URL": u, "Type": "GET DATA"} for u in links],
+            }
         self._umm = umm
         self._links = links or []
 
@@ -286,7 +294,7 @@ class TestGranuleToSourceRow:
         assert row.source == "earthaccess"
         assert row.collection == "MOD09GA"
         assert row.id.startswith("MOD09GA.A2024153")
-        # Two assets resolved from data_links().
+        # Two assets resolved from the UMM RelatedUrls.
         assert set(row.assets) == {
             "MOD09GA.A2024.h17v05.061",  # both URLs share this stem
             "MOD09GA.A2024.h17v05.061__1",  # disambiguated
