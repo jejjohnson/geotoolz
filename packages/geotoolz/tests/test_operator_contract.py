@@ -1054,6 +1054,10 @@ GAP_FILLERS: frozenset[str] = frozenset(
     # the overlapping scan that sees the same ground; the toy scene's
     # corner fill pixels sit in that overlap.
     "geom._src.operators.BowtieCorrection",
+    # Pastes a random donor rectangle over the input by design; when the
+    # rectangle covers the toy scene's corner fill pixels, the donor's
+    # valid pixels replace them (a 2-3% chance per unseeded draw).
+    "augment._src.operators.CutMix",
 }
 
 #: Reason suffix for contract violations found once the ``forbid_in_yaml``
