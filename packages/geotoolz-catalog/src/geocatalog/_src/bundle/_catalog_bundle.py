@@ -528,15 +528,25 @@ class CatalogBundle:
                 row. When ``None``, each row keeps its own
                 ``query_set``.
 
+        ``matchup_id`` is the table's key: a row whose id is already in
+        the bundle replaces the stored one in place (so re-running a
+        deterministic matchup does not duplicate it, and a re-run under
+        another ``tag`` moves it to that ``query_set``).
+
         Returns:
-            How many rows were added.
+            How many rows were written (added or replaced).
         """
-        added = 0
+        position = {m.matchup_id: i for i, m in enumerate(self.matchups)}
+        written = 0
         for row in rows:
             mr = dataclasses.replace(row, query_set=tag) if tag is not None else row
-            self.matchups.append(mr)
-            added += 1
-        return added
+            if mr.matchup_id in position:
+                self.matchups[position[mr.matchup_id]] = mr
+            else:
+                position[mr.matchup_id] = len(self.matchups)
+                self.matchups.append(mr)
+            written += 1
+        return written
 
     # ------------------------------------------------------------------
     # Persistence

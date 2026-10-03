@@ -386,3 +386,70 @@ def test_same_id_in_two_collections_are_two_members() -> None:
     rows = _run([_row("p")], [a, b], temporal=Synchronous())
     assert sorted(r.member_collections[1] for r in rows) == ["c1", "c2"]
     assert len({r.matchup_id for r in rows}) == 2
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (#364)
+# ---------------------------------------------------------------------------
+
+
+def test_missing_ids_in_string_columns_fall_back_to_the_filepath() -> None:
+    gdf = gpd.GeoDataFrame(
+        {
+            "filepath": ["a.tif", "b.tif"],
+            "id": pd.array([None, None], dtype="string"),
+            "source": pd.array([None, None], dtype="string"),
+        },
+        geometry=[box(0, 0, 1, 1), box(0, 0, 1, 1)],
+        crs="EPSG:4326",
+        index=pd.IntervalIndex.from_arrays(
+            [pd.Timestamp("2024-06-01T12:00")] * 2,
+            [pd.Timestamp("2024-06-01T12:00")] * 2,
+            closed="both",
+        ),
+    )
+    catalog = InMemoryGeoCatalog(gdf, backend="raster")
+    rows = _run([_row("p")], catalog, temporal=Synchronous())
+    assert sorted(r.member_ids[1] for r in rows) == ["a.tif", "b.tif"]
+    assert {r.member_sources[1] for r in rows} == {"catalog"}
+
+
+class _PlainStrategy:
+    """A custom strategy with no dataclass and no ``__repr__``."""
+
+    def __init__(self, hours: int) -> None:
+        self.hours = hours
+
+    def filter(
+        self, primary: pd.Interval, candidates: pd.IntervalIndex
+    ) -> pd.IntervalIndex:
+        return candidates
+
+
+def test_plain_custom_strategy_ids_do_not_depend_on_the_instance() -> None:
+    one = _run([_row("p")], [_row("s", source="b")], temporal=_PlainStrategy(2))
+    two = _run([_row("p")], [_row("s", source="b")], temporal=_PlainStrategy(2))
+    other = _run([_row("p")], [_row("s", source="b")], temporal=_PlainStrategy(3))
+    assert one[0].matchup_id == two[0].matchup_id != other[0].matchup_id
+    assert "0x" not in one[0].strategy
+
+
+def test_rewriting_a_matchup_replaces_it_in_the_bundle() -> None:
+    bundle = CatalogBundle.empty(target_crs="EPSG:4326", backend="raster")
+    rows = _run(
+        [_row("p")],
+        [_row("s", source="b"), _row("t", source="b")],
+        temporal=Synchronous(),
+    )
+    assert bundle.write_matchups(rows, tag="first") == 2
+    assert (
+        bundle.write_matchups(
+            _run([_row("p")], [_row("s", source="b")], temporal=Synchronous()),
+            tag="second",
+        )
+        == 1
+    )
+    assert [(m.member_ids[1], m.query_set) for m in bundle.matchups] == [
+        ("s", "second"),
+        ("t", "first"),
+    ]

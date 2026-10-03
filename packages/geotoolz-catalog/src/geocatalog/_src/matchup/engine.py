@@ -26,7 +26,6 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
-import math
 import warnings
 from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime
@@ -359,7 +358,13 @@ def _from_catalog_row(row: CatalogRow, to_work: Any) -> _Member | None:
 
 
 def _present(value: Any) -> bool:
-    return value is not None and not (isinstance(value, float) and math.isnan(value))
+    """False for ``None`` and missing scalars (NaN, ``pd.NA``, ``NaT``)."""
+    if value is None:
+        return False
+    try:
+        return not bool(pd.isna(value))
+    except (TypeError, ValueError):  # list-likes: present
+        return True
 
 
 def _utc_interval(interval: Any) -> pd.Interval | None:
@@ -457,10 +462,26 @@ def _common_intersection(
     return result
 
 
-def _summary(strategy: Any) -> str:
-    """``ClassName(field=value, ...)``; ``repr`` for non-dataclasses."""
-    if not dataclasses.is_dataclass(strategy):
+def _stable_repr(strategy: Any) -> str:
+    """``repr`` that is the same in every process.
+
+    A class without its own ``__repr__`` would print its memory address,
+    which would make ``matchup_id`` differ between runs; it is described
+    by its qualified name and instance attributes instead.
+    """
+    cls = type(strategy)
+    if cls.__repr__ is not object.__repr__:
         return repr(strategy)
+    state = ", ".join(
+        f"{k}={v!r}" for k, v in sorted(getattr(strategy, "__dict__", {}).items())
+    )
+    return f"{cls.__module__}.{cls.__qualname__}({state})"
+
+
+def _summary(strategy: Any) -> str:
+    """``ClassName(field=value, ...)``; a stable repr for non-dataclasses."""
+    if not dataclasses.is_dataclass(strategy):
+        return _stable_repr(strategy)
     fields = ", ".join(
         f"{f.name}={getattr(strategy, f.name)!r}" for f in dataclasses.fields(strategy)
     )
@@ -477,7 +498,7 @@ def _params(strategy: Any) -> dict[str, Any]:
 
     out: dict[str, Any] = {"type": type(strategy).__name__}
     if not dataclasses.is_dataclass(strategy):
-        out["repr"] = repr(strategy)
+        out["repr"] = _stable_repr(strategy)
         return out
     durations = isinstance(strategy, NearestInTime | WithinWindow | Synchronous)
     for f in dataclasses.fields(strategy):
