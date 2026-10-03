@@ -417,3 +417,229 @@ def test_query_bad_bbox(
     exit_code = _run("query", str(source), "--bbox", "not,a,bbox")
     assert exit_code == 1
     assert "bbox" in capsys.readouterr().err.lower()
+
+
+# ---------------------------------------------------------------------------
+# #245: every verb, friendly CRS errors, documented exit codes
+# ---------------------------------------------------------------------------
+
+
+def test_query_bad_crs_is_a_one_line_user_error(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    capsys.readouterr()
+    exit_code = _run("query", str(source), "--bbox", "0,0,1,1", "--crs", "nonsense")
+    err = capsys.readouterr().err
+    assert exit_code == 1
+    assert "invalid --crs 'nonsense'" in err
+    assert "Traceback" not in err and len(err.strip().splitlines()) == 1
+
+
+def test_query_with_a_projected_crs(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    capsys.readouterr()
+    bbox = "500000,4000000,505000,4005000"
+    assert (
+        _run("query", str(source), "--bbox", bbox, "--crs", "EPSG:32629", "--json") == 0
+    )
+    assert json.loads(capsys.readouterr().out)["rows"] == 1
+
+
+@pytest.mark.parametrize("verb", ["raster", "vector"])
+def test_build_bad_target_crs_is_a_user_error(
+    tmp_path: Path, verb: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = _run(
+        "build",
+        verb,
+        "--input-glob",
+        str(tmp_path / "*"),
+        "--out",
+        str(tmp_path / "out.parquet"),
+        "--target-crs",
+        "nonsense",
+    )
+    assert exit_code == 1
+    assert "invalid --target-crs" in capsys.readouterr().err
+
+
+def test_build_vector_round_trip(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import geopandas as gpd
+    import shapely
+
+    gpd.GeoDataFrame(
+        {"cls": [1, 2]},
+        geometry=[shapely.box(0, 0, 10, 10), shapely.box(20, 20, 30, 30)],
+        crs="EPSG:32629",
+    ).to_file(tmp_path / "labels_20240601.gpkg")
+    out = tmp_path / "vector.parquet"
+    exit_code = _run(
+        "build",
+        "vector",
+        "--input-glob",
+        str(tmp_path / "*.gpkg"),
+        "--regex",
+        r"labels_(?P<date>\d{8})\.gpkg",
+        "--out",
+        str(out),
+        "--json",
+    )
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == {"out": str(out), "rows": 1}
+    assert _run("stats", str(out), "--json") == 0
+    stats = json.loads(capsys.readouterr().out)
+    assert stats["backend"] == "vector"
+    assert stats["temporal_start"].startswith("2024-06-01")
+
+
+def test_build_vector_on_a_non_vector_file_is_a_user_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "notes.gpkg").write_text("not a geopackage")
+    exit_code = _run(
+        "build",
+        "vector",
+        "--input-glob",
+        str(tmp_path / "*.gpkg"),
+        "--out",
+        str(tmp_path / "vector.parquet"),
+    )
+    err = capsys.readouterr().err
+    assert exit_code == 1
+    assert err.startswith("build vector failed:")
+
+
+def test_build_xarray_round_trip(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    xr = pytest.importorskip("xarray")
+    import numpy as np
+    import pandas as pd
+
+    xr.Dataset(
+        {"ndvi": (("time", "y", "x"), np.zeros((3, 4, 4), dtype=np.float32))},
+        coords={
+            "time": pd.date_range("2024-01-01", periods=3, freq="D"),
+            "y": np.linspace(40.5, 40.0, 4),
+            "x": np.linspace(-3.5, -3.0, 4),
+        },
+    ).to_netcdf(tmp_path / "modis.nc")
+    out = tmp_path / "xarray.parquet"
+    exit_code = _run(
+        "build",
+        "xarray",
+        "--input-glob",
+        str(tmp_path / "*.nc"),
+        "--target-crs",
+        "EPSG:4326",
+        "--out",
+        str(out),
+        "--json",
+    )
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["rows"] == 1
+    assert _run("stats", str(out), "--json") == 0
+    assert json.loads(capsys.readouterr().out)["backend"] == "xarray"
+
+
+def test_stats_on_a_newer_schema_is_exit_2(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from geocatalog import from_geoparquet, to_geoparquet
+
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    newer = tmp_path / "newer.parquet"
+    to_geoparquet(from_geoparquet(source), newer, schema_version=999)
+    capsys.readouterr()
+    assert _run("stats", str(newer)) == 2
+    assert "999" in capsys.readouterr().err
+    assert _run("migrate", str(newer)) == 2
+
+
+def test_migrate_current_and_explicit_version(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from geocatalog import SCHEMA_VERSION_CURRENT
+
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    capsys.readouterr()
+    assert _run("migrate", str(source)) == 0
+    assert (
+        _run("migrate", str(source), "--to-version", str(SCHEMA_VERSION_CURRENT)) == 0
+    )
+    out = capsys.readouterr().out
+    assert out.count(f"already at v{SCHEMA_VERSION_CURRENT}") == 2
+    assert _run("migrate", str(tmp_path / "missing.parquet")) == 3
+
+
+def test_migrate_rejects_a_non_integer_version_as_a_process(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+) -> None:
+    # Argument parsing errors exit through cyclopts, so check the real
+    # process exit code rather than `_run`'s return value.
+    import subprocess
+    import sys
+
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from geocatalog._cli import app; app()",
+            "migrate",
+            str(source),
+            "--to-version",
+            "invalid",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 1
+    assert "--to-version" in proc.stdout + proc.stderr
+
+
+def test_convert_round_trips_through_a_partitioned_directory(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    parts = tmp_path / "parts"
+    back = tmp_path / "back.parquet"
+    assert (
+        _run("convert", str(source), "--out", str(parts), "--partition-by", "year") == 0
+    )
+    assert _run("convert", str(parts), "--out", str(back)) == 0
+    capsys.readouterr()
+    assert _run("info", str(back), "--json") == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert not {"_backend", "_schema_version", "bbox"} & set(payload)
+    assert payload["start_time"].startswith("2024-06-01")
+
+
+def test_multiline_crs_error_stays_on_one_line(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = _build_one_row(tmp_path, utm29_tile_factory)
+    capsys.readouterr()
+    bad = 'GEOGCRS["broken",\n  DATUM["nope",\n    ELLIPSOID["x",1,0]]]'
+    assert _run("query", str(source), "--bbox", "0,0,1,1", "--crs", bad) == 1
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1
