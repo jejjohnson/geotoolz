@@ -138,14 +138,24 @@ def _shares_exact_boundary(
     *non-zero-area* overlaps; we skip exact-touch cases here and track
     the boundary-touch invariance question as a follow-on.
     """
+
+    # "Exact" up to reprojection round-off: an AOI edge at 5e-324° lands
+    # on 0 m in EPSG:3857 and touches a row edge at 0°.
+    def near(a: float, edges: tuple[float, float]) -> bool:
+        return any(abs(a - e) <= _BOUNDARY_TOL_DEG for e in edges)
+
     xmin_a, ymin_a, xmax_a, ymax_a = aoi
     for row in catalog.iter_rows():
         xmin_r, ymin_r, xmax_r, ymax_r = row.geometry.bounds
-        if xmin_a in (xmin_r, xmax_r) or xmax_a in (xmin_r, xmax_r):
+        if near(xmin_a, (xmin_r, xmax_r)) or near(xmax_a, (xmin_r, xmax_r)):
             return True
-        if ymin_a in (ymin_r, ymax_r) or ymax_a in (ymin_r, ymax_r):
+        if near(ymin_a, (ymin_r, ymax_r)) or near(ymax_a, (ymin_r, ymax_r)):
             return True
     return False
+
+
+#: Reprojection round-off, in degrees (~1e-7 m at the equator).
+_BOUNDARY_TOL_DEG = 1e-12
 
 
 @given(
