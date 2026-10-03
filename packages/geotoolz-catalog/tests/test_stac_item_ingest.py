@@ -314,3 +314,39 @@ def test_export_of_an_unlocated_asset_drops_carried_projection() -> None:
 def test_empty_catalog_keeps_the_boolean_signed_flag() -> None:
     assert from_stac_items([]).gdf["href_signed"].dtype == bool
     assert from_stac_items([_item()]).gdf["href_signed"].dtype == bool
+
+
+def test_hole_crossing_the_antimeridian_is_unwrapped() -> None:
+    # Only the hole jumps across ±180°; the shell stays east of it.
+    polygon = shapely.Polygon(
+        [(170, -10), (179.9, -10), (179.9, 10), (170, 10)],
+        [[(179, -1), (-179, -1), (-179, 1), (179, 1)]],
+    )
+    geom = _source_row(_item(geometry=polygon, bbox=[170, -10, 180, 10])).geometry
+    assert not geom.covers(shapely.Point(0, 0))  # not the 358° complement
+    assert not geom.covers(shapely.Point(179.5, 0))  # inside the hole
+
+
+def test_line_on_the_seam_is_on_both_edges() -> None:
+    line = shapely.LineString([(180, -10), (180, 10)])
+    geom = _source_row(_item(geometry=line, bbox=[180, -10, 180, 10])).geometry
+    assert geom.intersects(shapely.box(179, -1, 180, 1))
+    assert geom.intersects(shapely.box(-180, -1, -179, 1))
+
+
+def test_segment_180_degrees_long_goes_over_the_pole() -> None:
+    line = shapely.LineString([(0, 80), (180, 80)])
+    geom = _source_row(_item(geometry=line, bbox=[0, 80, 180, 80])).geometry
+    assert geom.intersects(shapely.Point(0, 89.5))
+    assert not geom.intersects(shapely.box(80, 79, 100, 81))
+
+
+def test_empty_bundle_has_the_ingested_schema() -> None:
+    from geocatalog import CatalogBundle
+
+    empty = CatalogBundle.empty(target_crs="EPSG:4326").catalog.gdf
+    row = source_row_to_gdf_row(
+        _source_row(_item()), target_crs=pyproj.CRS("EPSG:4326")
+    )
+    assert set(row) - {"geometry", "start_time", "end_time"} <= set(empty.columns)
+    assert empty["href_signed"].dtype == bool

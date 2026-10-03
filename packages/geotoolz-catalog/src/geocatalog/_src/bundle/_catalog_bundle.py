@@ -214,6 +214,10 @@ class CatalogBundle:
         empty_gdf = gpd.GeoDataFrame(
             {
                 "filepath": pd.Series(dtype="object"),
+                # The same columns `source_row_to_gdf_row` writes, so an
+                # empty bundle has the schema of an ingested one.
+                "crs": pd.Series(dtype="object"),
+                "href_signed": pd.Series(dtype="bool"),
                 "id": pd.Series(dtype="object"),
                 "source": pd.Series(dtype="object"),
                 "collection": pd.Series(dtype="object"),

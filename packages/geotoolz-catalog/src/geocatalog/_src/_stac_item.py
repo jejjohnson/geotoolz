@@ -101,18 +101,23 @@ def _fix_parts(
             fixed.extend(sub)
             changed = changed or sub_changed
         return fixed, changed
-    out = geom
-    if isinstance(geom, shapely.Polygon) and crosses_antimeridian(
-        list(geom.exterior.coords)
+    if isinstance(geom, shapely.Polygon) and any(
+        crosses_antimeridian(list(ring.coords))
+        for ring in (geom.exterior, *geom.interiors)
     ):
+        # A hole alone may cross: it would otherwise read as the ~358°
+        # complement of the small region it cuts out.
         out = lonlat_polygon(
             list(geom.exterior.coords)[:-1],
             [list(ring.coords)[:-1] for ring in geom.interiors],
         )
-    elif isinstance(geom, shapely.LineString) and crosses_antimeridian(
-        list(geom.coords)
-    ):
+    elif isinstance(geom, shapely.LineString) and len(geom.coords) >= 2:
+        # Every line goes through `lonlat_line`: besides seam crossings it
+        # puts a line lying on ±180° on both edges and routes a segment
+        # 180° of longitude long over the pole.
         out = lonlat_line(list(geom.coords))
+        if out.geom_type == geom.geom_type and out.equals_exact(geom, 0.0):
+            return [geom], False
     else:
         return [geom], False
     return list(getattr(out, "geoms", [out])), True
