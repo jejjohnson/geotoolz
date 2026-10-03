@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import urllib.error
 import urllib.parse
 from collections.abc import Iterator
@@ -534,3 +535,80 @@ def test_replace_keeps_matchups_of_a_same_id_item_in_another_collection(
         on_duplicate="replace",
     )
     assert [m.member_collections[0] for m in bundle.matchups] == ["other"]
+
+
+def test_save_publishes_one_generation_and_keeps_foreign_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from geocatalog._src.bundle import _catalog_bundle as bundle_mod
+
+    dest = tmp_path / "bundle"
+    bundle = _bundle_with("a")
+    bundle.to_directory(dest)
+    (dest / "NOTES.md").write_text("keep me")
+    before = {p.name: p.read_bytes() for p in dest.iterdir()}
+
+    bundle.ingest(_FixedSource([_row("b")]), bounds=(0, 0, 1, 1))
+    real_replace = os.replace
+
+    def fail_swap(src: Any, dst: Any) -> None:
+        if str(src).endswith(".new"):  # the staged generation going live
+            raise OSError("rename failed")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(bundle_mod.os, "replace", fail_swap)
+    with pytest.raises(OSError, match="rename failed"):
+        bundle.to_directory(dest)
+    monkeypatch.undo()
+    # The previous generation is back, whole.
+    assert {p.name: p.read_bytes() for p in dest.iterdir()} == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["bundle"]
+
+    bundle.to_directory(dest)
+    assert (dest / "NOTES.md").read_text() == "keep me"
+    assert len(CatalogBundle.from_directory(dest).catalog) == 2
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["bundle"]
+
+
+def test_failed_write_leaves_no_staging_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from geocatalog._src.bundle import _catalog_bundle as bundle_mod
+
+    def crash(queries: Any, path: Path) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(bundle_mod, "_queries_to_parquet", crash)
+    with pytest.raises(OSError, match="disk full"):
+        _bundle_with("a").to_directory(tmp_path / "bundle")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_bundle_schema_v2_and_v1_bundles_still_load(tmp_path: Path) -> None:
+    from geocatalog._src.matchup.engine import MatchupRow
+
+    bundle = _bundle_with("a")
+    ts = pd.Timestamp("2024-06-01", tz="UTC").to_pydatetime()
+    bundle.matchups = [
+        MatchupRow(
+            matchup_id="m",
+            strategy="test",
+            member_ids=("a",),
+            member_sources=("fixed",),
+            member_roles=("primary",),
+            geometry_intersect=shapely.box(0, 0, 1, 1),
+            time_reference=ts,
+            time_offset_sec=(0.0,),
+        )
+    ]
+    bundle.to_directory(tmp_path)
+    meta = json.loads((tmp_path / "_meta.json").read_text())
+    assert meta["bundle_schema_version"] == 2
+
+    # A v1 bundle: version 1, matchups without `member_collections`.
+    meta["bundle_schema_version"] = 1
+    (tmp_path / "_meta.json").write_text(json.dumps(meta))
+    table = pd.read_parquet(tmp_path / "matchups.parquet")
+    table.drop(columns=["member_collections"]).to_parquet(tmp_path / "matchups.parquet")
+    (m,) = CatalogBundle.from_directory(tmp_path).matchups
+    assert m.member_collections == ()
