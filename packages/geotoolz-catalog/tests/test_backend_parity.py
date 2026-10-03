@@ -28,10 +28,10 @@ Convert = Callable[[InMemoryGeoCatalog], GeoCatalog]
 
 
 def _catalog(
-    rows: list[dict], *, crs: str = "EPSG:32629", backend: str = "raster"
+    rows: list[dict], *, crs: str = "EPSG:32629", kind: str = "raster"
 ) -> InMemoryGeoCatalog:
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
-    return InMemoryGeoCatalog(gdf, backend=backend)  # type: ignore[arg-type]
+    return InMemoryGeoCatalog(gdf, kind=kind)  # type: ignore[arg-type]
 
 
 def _scenes() -> InMemoryGeoCatalog:
@@ -92,7 +92,7 @@ def _labels() -> InMemoryGeoCatalog:
                 "label": "forest",
             },
         ],
-        backend="vector",
+        kind="vector",
     )
 
 
@@ -168,7 +168,7 @@ def test_empty_results_agree(as_backend: Convert) -> None:
 
 def test_geometry_column_under_another_name(as_backend: Convert) -> None:
     gdf = _scenes().gdf.rename_geometry("footprint")
-    renamed = InMemoryGeoCatalog(gdf, backend="raster")
+    renamed = InMemoryGeoCatalog(gdf, kind="raster")
     assert_catalogs_equal(as_backend(renamed), _scenes())
 
 
@@ -255,7 +255,7 @@ def test_streamed_artifact_reads_the_same_on_both_engines(tmp_path: Path) -> Non
     from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
 
     path = tmp_path / "streamed.parquet"
-    with StreamingParquetWriter(path, crs="EPSG:32629", backend="raster") as w:
+    with StreamingParquetWriter(path, crs="EPSG:32629", kind="raster") as w:
         for row in _scenes().iter_rows():
             w.write_row(
                 {

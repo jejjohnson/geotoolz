@@ -47,7 +47,7 @@ Y_DESC = (np.arange(10) + 0.5)[::-1]
 
 def test_descending_y_selection_is_not_empty(tmp_path: Path) -> None:
     path = _write(tmp_path / "a.nc", x=X, y=Y_DESC, times=TIMES)
-    cat = build_xarray_catalog([path], target_crs="EPSG:32629")
+    cat = build_xarray_catalog([path], crs="EPSG:32629")
     out = load_xarray(
         cat,
         GeoSlice(
@@ -64,7 +64,7 @@ def test_descending_y_selection_is_not_empty(tmp_path: Path) -> None:
 
 def test_footprint_covers_pixel_edges(tmp_path: Path) -> None:
     path = _write(tmp_path / "a.nc", x=X, y=Y_DESC, times=TIMES)
-    cat = build_xarray_catalog([path], target_crs="EPSG:32629")
+    cat = build_xarray_catalog([path], crs="EPSG:32629")
     assert cat.gdf.geometry.iloc[0].bounds == (0.0, 0.0, 10.0, 10.0)
 
 
@@ -73,7 +73,7 @@ def test_foreign_crs_slice_selects_same_window(tmp_path: Path) -> None:
     x = x0 + (np.arange(20) + 0.5) * 100
     y = (y0 + (np.arange(20) + 0.5) * 100)[::-1]
     path = _write(tmp_path / "utm.nc", x=x, y=y, times=TIMES)
-    cat = build_xarray_catalog([path], target_crs="EPSG:32629")
+    cat = build_xarray_catalog([path], crs="EPSG:32629")
 
     native = (x0 + 500, y0 + 500, x0 + 1500, y0 + 1500)
     to_ll = pyproj.Transformer.from_crs(32629, 4326, always_xy=True)
@@ -89,7 +89,7 @@ def test_foreign_crs_slice_selects_same_window(tmp_path: Path) -> None:
 
 def test_tz_aware_slice_interval(tmp_path: Path) -> None:
     path = _write(tmp_path / "a.nc", x=X, y=Y_DESC, times=TIMES)
-    cat = build_xarray_catalog([path], target_crs="EPSG:32629")
+    cat = build_xarray_catalog([path], crs="EPSG:32629")
     out = load_xarray(
         cat,
         GeoSlice(
@@ -115,7 +115,7 @@ def test_concat_sorts_time_and_drops_duplicates(tmp_path: Path) -> None:
         y=Y_DESC,
         times=pd.date_range("2024-01-01", periods=2),
     )
-    cat = build_xarray_catalog([late, early], target_crs="EPSG:32629")
+    cat = build_xarray_catalog([late, early], crs="EPSG:32629")
     out = load_xarray(
         cat,
         GeoSlice(

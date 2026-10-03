@@ -27,10 +27,10 @@ import geocatalog as gc
 catalog = gc.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     collections=["sentinel-2-l2a"],
-    bbox=(-120.25, 38.85, -119.85, 39.30),    # Lake Tahoe
+    bounds=(-120.25, 38.85, -119.85, 39.30),    # Lake Tahoe
     datetime="2024-06-01/2024-09-30",
     asset_key="B04",                           # red band
-    max_items=100,
+    limit=100,
     extra_properties=("eo:cloud_cover", "platform"),
 )
 
@@ -42,7 +42,7 @@ Notes:
 
 - `asset_key="*"` emits one row per asset on each item — handy when
   you want every band as a separate row.
-- `backend="duckdb"` + `out_path="..."` streams items straight into a
+- `engine="duckdb"` + `out_path="..."` streams items straight into a
   GeoParquet artifact (no in-RAM accumulation).
 - `extra_properties` preserves arbitrary STAC properties as catalog
   columns — `eo:cloud_cover` is the canonical use.
@@ -69,7 +69,7 @@ client = Client.open(
 catalog = gc.from_stac_search(
     client,
     collections=["sentinel-2-l2a"],
-    bbox=(-120.25, 38.85, -119.85, 39.30),
+    bounds=(-120.25, 38.85, -119.85, 39.30),
     datetime="2024-06-01/2024-09-30",
 )
 ```
@@ -95,7 +95,7 @@ import geocatalog as gc
 from geocatalog.bundle import CatalogBundle
 from geocatalog.sources import STACSource
 
-bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+bundle = CatalogBundle.empty(crs="EPSG:4326")
 
 bundle.ingest(
     STACSource.planetary_computer(),         # signs URLs automatically
@@ -153,18 +153,18 @@ Pass `bundle.catalog` anywhere a `GeoCatalog` is expected.
 - **You're ingesting from multiple sources** (STAC + EarthAccess +
   CMR) into one catalog → Path B. The bundle is the merge point.
 - **You need a single GeoParquet artifact** → Path A with
-  `backend="duckdb"` + `out_path=...`.
+  `engine="duckdb"` + `out_path=...`.
 
 ## Performance tips
 
-- `max_items=None` plus a wide bbox can return tens of thousands of
+- `limit=None` plus wide `bounds` can return tens of thousands of
   items — STAC paging is the bottleneck, not the catalog build. Use
   `limit=...` defensively while exploring. `limit=0` is a dry run on
   every source (no request, no rows); `limit=None` is unbounded.
 - `STACSource` caches the underlying `pystac_client.Client` across
   calls; reuse the same `STACSource` instance for multiple ingests
   to skip the root-catalog fetch.
-- For 10⁵+ STAC items, switch to `backend="duckdb"` so the catalog
+- For 10⁵+ STAC items, switch to `engine="duckdb"` so the catalog
   streams to disk instead of accumulating in RAM.
 
 ## See also

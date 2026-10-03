@@ -34,7 +34,7 @@ def _mem(n: int = 400, seed: int = 0) -> InMemoryGeoCatalog:
         geometry="geometry",
         crs="EPSG:32629",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 @pytest.fixture
@@ -89,7 +89,7 @@ def test_union_rows_without_bbox_are_not_filtered_out(artifact: Path) -> None:
             geometry="geometry",
             crs="EPSG:32629",
         ),
-        backend="raster",
+        kind="raster",
     )
     out = cat.union(extra).query(
         bounds=(19_000.0, 19_000.0, 21_000.0, 21_000.0), crs="EPSG:32629"

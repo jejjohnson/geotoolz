@@ -21,7 +21,7 @@ import pandas as pd
 from geocatalog._src._schema import (
     INTERNAL_COLUMNS as INTERNAL_COLUMNS,
     RESERVED_COLUMNS as RESERVED_COLUMNS,
-    BackendTag,
+    CatalogKind,
 )
 
 
@@ -33,18 +33,37 @@ if TYPE_CHECKING:
     from geocatalog._src.geoslice import GeoSlice
 
 
-class CatalogMetadataError(ValueError):
+class GeoCatalogError(Exception):
+    """Base class of every error `geocatalog` raises on purpose.
+
+    Each subclass also derives from the builtin a caller would have
+    caught before the hierarchy existed (`ValueError`, `RuntimeError`),
+    so ``except ValueError`` keeps working.
+    """
+
+
+class CatalogClosedError(GeoCatalogError, RuntimeError):
+    """A catalog was used after its connection was closed.
+
+    Raised by `DuckDBGeoCatalog` (and every catalog derived from it by
+    ``query`` / ``filter``) after ``close()``. The DuckDB backend raises
+    a subclass that also derives from ``duckdb.ConnectionException``,
+    which is what it raised before this class existed.
+    """
+
+
+class CatalogMetadataError(GeoCatalogError, ValueError):
     """A catalog artifact's metadata could not be read or is missing.
 
     Raised by the `strict=True` mode of the catalog `open` entry points
     when a GeoParquet artifact lacks the reserved ``_backend`` column,
     carries unreadable/malformed ``geo`` metadata, or its CRS cannot be
     parsed — instead of the default behaviour of logging a warning and
-    falling back (``backend="raster"`` / ``crs="EPSG:4326"``).
+    falling back (``kind="raster"`` / ``crs="EPSG:4326"``).
     """
 
 
-class CatalogSchemaError(ValueError):
+class CatalogSchemaError(GeoCatalogError, ValueError):
     """A GeoParquet artifact has a `_schema_version` the reader can't load.
 
     Raised when ``_schema_version`` exceeds `SCHEMA_VERSION_CURRENT` (the
@@ -101,16 +120,16 @@ class GeoCatalog(Protocol):
             most recently queried. Always non-None; may be empty. The
             geometry column is in CRS units; the row index is a
             ``pd.IntervalIndex`` (``closed='both'``) over the time axis.
-        backend: One of ``"raster"``, ``"xarray"``, ``"vector"``.
-            Drives the dispatching choice in the per-backend loaders
-            (`load_raster`, `load_xarray`, `load_vector`).
+        kind: One of ``"raster"``, ``"xarray"``, ``"vector"`` — the
+            kind of data indexed. Drives the dispatching choice in the
+            loaders (`load_raster`, `load_xarray`, `load_vector`).
         crs: The catalog CRS as a ``pyproj.CRS``. Footprints and
             ``total_bounds`` are in its units. Reading it never
             materialises rows.
     """
 
     gdf: gpd.GeoDataFrame
-    backend: BackendTag
+    kind: CatalogKind
     crs: pyproj.CRS
 
     def query(

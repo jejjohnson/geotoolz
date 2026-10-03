@@ -39,7 +39,7 @@ from geocatalog.staging import LocalCache, stage
 remote_catalog = gc.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     collections=["sentinel-2-l2a"],
-    bbox=(-120.25, 38.85, -119.85, 39.30),
+    bounds=(-120.25, 38.85, -119.85, 39.30),
     datetime="2024-06-01/2024-09-30",
 )
 
@@ -125,7 +125,7 @@ import pandas as pd
 from geocatalog.bundle import CatalogBundle
 from geocatalog.sources import STACSource, EarthAccessSource
 
-bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+bundle = CatalogBundle.empty(crs="EPSG:4326")
 
 # Discover Sentinel-2 from STAC...
 bundle.ingest(
@@ -180,7 +180,7 @@ The two patterns compose cleanly. Discover with a bundle (for
 provenance), then stage the catalog locally for fast loader access:
 
 ```python
-bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+bundle = CatalogBundle.empty(crs="EPSG:4326")
 bundle.ingest(STACSource.planetary_computer(), bounds=..., interval=...)
 
 local_catalog = stage(

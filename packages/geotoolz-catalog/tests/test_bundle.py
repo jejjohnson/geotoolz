@@ -107,7 +107,7 @@ class TestSourceRowToGdfRow:
             assets={"red": "s3://red.tif", "nir": "s3://nir.tif"},
             properties={"eo:cloud_cover": 12.4},
         )
-        d = source_row_to_gdf_row(row, target_crs=pyproj.CRS.from_epsg(4326))
+        d = source_row_to_gdf_row(row, crs=pyproj.CRS.from_epsg(4326))
         assert d["id"] == "abc"
         assert d["source"] == "fake"
         assert d["collection"] == "test-collection"
@@ -128,7 +128,7 @@ class TestSourceRowToGdfRow:
             assets={"red": "r", "nir": "n", "scl": "s"},
         )
         d = source_row_to_gdf_row(
-            row, target_crs=pyproj.CRS.from_epsg(4326), primary_asset="nir"
+            row, crs=pyproj.CRS.from_epsg(4326), primary_asset="nir"
         )
         assert d["filepath"] == "n"
 
@@ -142,12 +142,12 @@ class TestSourceRowToGdfRow:
         # index the red band as if it were nir (#240).
         with pytest.raises(KeyError, match="no asset 'nir'"):
             source_row_to_gdf_row(
-                row, target_crs=pyproj.CRS.from_epsg(4326), primary_asset="nir"
+                row, crs=pyproj.CRS.from_epsg(4326), primary_asset="nir"
             )
 
     def test_empty_assets_yields_empty_filepath(self) -> None:
         row = _src_row("x", time=datetime(2024, 6, 15, tzinfo=UTC), assets={})
-        d = source_row_to_gdf_row(row, target_crs=pyproj.CRS.from_epsg(4326))
+        d = source_row_to_gdf_row(row, crs=pyproj.CRS.from_epsg(4326))
         assert d["filepath"] == ""
 
     def test_reprojects_geometry_to_target_crs(self) -> None:
@@ -159,7 +159,7 @@ class TestSourceRowToGdfRow:
             bbox=(-9.0, 38.0, -8.5, 38.5),
             time=datetime(2024, 6, 15, tzinfo=UTC),
         )
-        d = source_row_to_gdf_row(row, target_crs=pyproj.CRS.from_epsg(32629))
+        d = source_row_to_gdf_row(row, crs=pyproj.CRS.from_epsg(32629))
         xmin, ymin, _xmax, _ymax = d["geometry"].bounds
         # Latitude 38 ~ 4.2M N in UTM; reasonable sanity check.
         assert 4_000_000 < ymin < 5_000_000
@@ -174,14 +174,14 @@ class TestSourceRowToGdfRow:
 
 class TestIngest:
     def test_empty_bundle_has_zero_items(self) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         assert bundle.n_items == 0
         assert bundle.queries == []
         assert bundle.matchups == []
-        assert bundle.target_crs == pyproj.CRS.from_epsg(4326)
+        assert bundle.crs == pyproj.CRS.from_epsg(4326)
 
     def test_ingest_appends_rows(self) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         src = _FakeSource(
             [
                 _src_row("a", time=datetime(2024, 6, 14, tzinfo=UTC)),
@@ -205,7 +205,7 @@ class TestIngest:
         assert bundle.queries[0].tag == "iberia_test"
 
     def test_ingest_forwards_kwargs_to_source(self) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         src = _FakeSource([])
         bundle.ingest(
             src,
@@ -221,7 +221,7 @@ class TestIngest:
         assert src.last_query_kwargs["limit"] == 5
 
     def test_ingest_stamps_query_id_on_row_provenance(self) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         src = _FakeSource([_src_row("a", time=datetime(2024, 6, 14, tzinfo=UTC))])
         query_id = bundle.ingest(src, bounds=(-10, 35, 5, 45), tag="run1")
 
@@ -234,7 +234,7 @@ class TestIngest:
     def test_ingest_preserves_existing_provenance(self) -> None:
         # If the adapter already set provenance fields, ingest should
         # not blow them away — only fill in `query_id` if missing.
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         row = _src_row("a", time=datetime(2024, 6, 14, tzinfo=UTC))
         # Mutate one row's provenance via dataclasses.replace.
         import dataclasses
@@ -255,7 +255,7 @@ class TestIngest:
         # If an adapter already stamped `query_tag` on the row's
         # provenance, the user's `tag` argument must not clobber it
         # — same "do not overwrite" contract as `query_id`.
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         import dataclasses as _dc
 
         adapter_tagged = _dc.replace(
@@ -271,7 +271,7 @@ class TestIngest:
         assert bundle.queries[0].tag == "user_tag"
 
     def test_two_ingests_accumulate(self) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         src_a = _FakeSource([_src_row("a", time=datetime(2024, 6, 14, tzinfo=UTC))])
         src_b = _FakeSource(
             [
@@ -285,7 +285,7 @@ class TestIngest:
         assert len(bundle.queries) == 2
 
     def test_ingest_reprojects_to_bundle_crs(self) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:32629")
+        bundle = CatalogBundle.empty(crs="EPSG:32629")
         src = _FakeSource(
             [
                 _src_row(
@@ -312,7 +312,7 @@ class TestWriteMatchups:
         # Build a small matchup against two fake sources and write
         # the rows into the bundle.
 
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         primary = [
             _src_row("p1", time=datetime(2024, 6, 15, 12, tzinfo=UTC)),
             _src_row("p2", time=datetime(2024, 6, 16, 12, tzinfo=UTC)),
@@ -348,7 +348,7 @@ class TestWriteMatchups:
 
 class TestPersistenceRoundTrip:
     def test_roundtrip_items_only(self, tmp_path: Path) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         src = _FakeSource(
             [
                 _src_row("a", time=datetime(2024, 6, 14, tzinfo=UTC)),
@@ -369,10 +369,10 @@ class TestPersistenceRoundTrip:
         assert reloaded.n_items == 2
         assert len(reloaded.queries) == 1
         assert reloaded.queries[0].tag == "t1"
-        assert reloaded.target_crs == pyproj.CRS.from_epsg(4326)
+        assert reloaded.crs == pyproj.CRS.from_epsg(4326)
 
     def test_roundtrip_with_matchups(self, tmp_path: Path) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         primary = [_src_row("p", time=datetime(2024, 6, 15, 12, tzinfo=UTC))]
         secondaries = [
             _src_row(
@@ -419,7 +419,7 @@ class TestPersistenceRoundTrip:
     def test_stale_sidecar_files_cleaned_on_rewrite(self, tmp_path: Path) -> None:
         # First write: bundle has queries + matchups → sibling files
         # present.
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         src_a = _FakeSource([_src_row("a", time=datetime(2024, 6, 14, tzinfo=UTC))])
         bundle.ingest(src_a, bounds=(-10, 35, 5, 45))
         bundle.write_matchups(
@@ -454,7 +454,7 @@ class TestPersistenceRoundTrip:
         # Tamper _meta.json to claim a future version we don't know
         # how to read; the loader must fail fast rather than silently
         # misinterpret the layout.
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         bundle.to_directory(tmp_path / "cat")
         meta_path = tmp_path / "cat" / "_meta.json"
         meta = json.loads(meta_path.read_text())
@@ -468,7 +468,7 @@ class TestPersistenceRoundTrip:
     ) -> None:
         # Pre-versioning bundle (`bundle_schema_version` field absent).
         d = tmp_path / "cat"
-        CatalogBundle.empty(target_crs="EPSG:4326").to_directory(d)
+        CatalogBundle.empty(crs="EPSG:4326").to_directory(d)
         meta_path = d / "_meta.json"
         meta = json.loads(meta_path.read_text())
         meta.pop("bundle_schema_version")
@@ -484,14 +484,14 @@ class TestPersistenceRoundTrip:
 
 class TestDataFrameAccessors:
     def test_empty_returns_dataframe_with_columns(self) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         df = bundle.queries_df()
         assert "query_id" in df.columns
         assert "tag" in df.columns
         assert len(df) == 0
 
     def test_after_ingest_populated(self) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         src = _FakeSource([_src_row("a", time=datetime(2024, 6, 15, tzinfo=UTC))])
         bundle.ingest(src, bounds=(-10, 35, 5, 45), tag="t")
         df = bundle.queries_df()
@@ -499,7 +499,7 @@ class TestDataFrameAccessors:
         assert df["tag"].iloc[0] == "t"
 
     def test_matchups_df_serializes_geometry_to_wkt(self) -> None:
-        bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+        bundle = CatalogBundle.empty(crs="EPSG:4326")
         primary = [_src_row("p", time=datetime(2024, 6, 15, tzinfo=UTC))]
         secondary = [
             _src_row("s", source="o", time=datetime(2024, 6, 15, 1, tzinfo=UTC))

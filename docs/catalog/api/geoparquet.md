@@ -12,8 +12,18 @@ migration, and streaming writes.
 
 ::: geocatalog.catalog.SCHEMA_VERSION_CURRENT
 ::: geocatalog.catalog.migrate_geoparquet
+
+## Errors
+
+Every error `geocatalog` raises on purpose derives from
+`GeoCatalogError` and from the builtin callers caught before
+(`ValueError` / `RuntimeError`); see the
+[parameter vocabulary](../design/vocabulary.md#errors).
+
+::: geocatalog.catalog.GeoCatalogError
 ::: geocatalog.catalog.CatalogSchemaError
 ::: geocatalog.catalog.CatalogMetadataError
+::: geocatalog.catalog.CatalogClosedError
 
 ## Streaming writes
 

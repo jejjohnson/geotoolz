@@ -272,7 +272,7 @@ class TestIterSlicesQuiet:
             ],
             closed="both",
         )
-        cat = InMemoryGeoCatalog(gdf, backend="raster")
+        cat = InMemoryGeoCatalog(gdf, kind="raster")
         with warnings.catch_warnings():
             # Any GridAlignmentWarning emitted during iteration would
             # be a regression — turn it into an error to assert

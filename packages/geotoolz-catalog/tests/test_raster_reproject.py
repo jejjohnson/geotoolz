@@ -66,7 +66,7 @@ def _sample(path: Path, lon: float, lat: float) -> float:
 def test_cross_crs_slice_returns_source_values(tmp_path: Path) -> None:
     lon, lat = -8.5, 38.0
     path = _tile(tmp_path, "A", "EPSG:32629", (lon, lat))
-    cat = build_raster_catalog([path], target_crs="EPSG:4326", filename_regex=REGEX)
+    cat = build_raster_catalog([path], crs="EPSG:4326", filename_regex=REGEX)
     slc = GeoSlice(
         (lon - 0.003, lat - 0.003, lon + 0.003, lat + 0.003),
         IV,
@@ -91,7 +91,7 @@ def test_mixed_crs_sources_mosaic(tmp_path: Path) -> None:
     """Zone 29 and zone 30 tiles either side of the 6°W boundary."""
     a = _tile(tmp_path, "A", "EPSG:32629", (-6.008, 38.0), base=0.0)
     b = _tile(tmp_path, "B", "EPSG:32630", (-5.992, 38.0), base=100_000.0)
-    cat = build_raster_catalog([a, b], target_crs="EPSG:4326", filename_regex=REGEX)
+    cat = build_raster_catalog([a, b], crs="EPSG:4326", filename_regex=REGEX)
     slc = GeoSlice((-6.012, 37.998, -5.988, 38.002), IV, (0.0001, 0.0001), "EPSG:4326")
 
     values = np.asarray(load_raster(cat, slc))[0]

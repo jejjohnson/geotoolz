@@ -72,12 +72,12 @@ from geocatalog.bundle import source_row_to_gdf_row
 
 gdf = gpd.GeoDataFrame(
     [
-        source_row_to_gdf_row(row, target_crs="EPSG:4326", primary_asset="B04")
+        source_row_to_gdf_row(row, crs="EPSG:4326", primary_asset="B04")
         for row in rows
     ],
     crs="EPSG:4326",
 )
-catalog = gc.InMemoryGeoCatalog(gdf, backend="raster")
+catalog = gc.InMemoryGeoCatalog(gdf, kind="raster")
 print(f"len(catalog): {len(catalog)}")
 ```
 
@@ -100,10 +100,10 @@ one call:
 catalog = gc.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     collections=["sentinel-2-l2a"],
-    bbox=TAHOE_BBOX,
+    bounds=TAHOE_BBOX,
     datetime="2024-06-01/2024-09-30",
     asset_key="B04",   # red band
-    max_items=50,
+    limit=50,
     extra_properties=["eo:cloud_cover"],   # keep as a catalog column
 )
 print(f"len(catalog): {len(catalog)}")

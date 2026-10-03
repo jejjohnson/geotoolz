@@ -91,7 +91,7 @@ def test_roundtrip_preserves_rowset(
     to_geoparquet(catalog, out)
     restored = from_geoparquet(out)
 
-    assert restored.backend == catalog.backend
+    assert restored.kind == catalog.kind
     assert restored.gdf.crs == catalog.gdf.crs
     assert _rows_signature(restored) == _rows_signature(catalog)
 

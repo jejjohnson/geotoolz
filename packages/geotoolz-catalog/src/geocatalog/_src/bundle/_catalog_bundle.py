@@ -34,7 +34,8 @@ from loguru import logger
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
-from geocatalog._src._schema import BackendTag, crs_config_string, empty_frame
+from geocatalog._src._deprecation import deprecated_alias, renamed_kwargs
+from geocatalog._src._schema import CatalogKind, crs_config_string, empty_frame
 from geocatalog._src._stac_item import (
     ASSET_CRS_PROPERTY,
     LONLAT,
@@ -100,17 +101,18 @@ class QueryRecord:
     notes: str | None = None
 
 
+@renamed_kwargs(target_crs="crs")
 def source_row_to_gdf_row(
     row: SourceRow,
     *,
-    target_crs: pyproj.CRS,
+    crs: pyproj.CRS,
     primary_asset: str | None = None,
 ) -> dict[str, Any]:
     """Map a `SourceRow` to a flat dict suitable for a `GeoDataFrame` row.
 
     Output keys:
     * ``geometry``: the footprint, reprojected from EPSG:4326 to
-      ``target_crs`` if necessary.
+      ``crs`` if necessary.
     * ``start_time`` / ``end_time``: pulled from the interval.
     * ``filepath``: chosen asset URL (see ``primary_asset`` resolution).
     * ``id``, ``source``, ``collection``: as-is from the SourceRow.
@@ -120,7 +122,7 @@ def source_row_to_gdf_row(
 
     Args:
         row: The source row to convert.
-        target_crs: CRS to reproject the geometry into. SourceRow
+        crs: CRS to reproject the geometry into. SourceRow
             geometries come in EPSG:4326 by convention.
         primary_asset: Asset key to promote to ``filepath``. If
             ``None``, the first key in ``row.assets`` is used (Python
@@ -133,10 +135,10 @@ def source_row_to_gdf_row(
             wrong-data bug, not a fallback.
     """
     # Reproject if needed. The shapely geometry doesn't carry its
-    # CRS — we use `target_crs` as the authoritative target and assume
+    # CRS — we use `crs` as the authoritative target and assume
     # `SourceRow.geometry` is in EPSG:4326 (the `Source` Protocol
     # convention).
-    geometry = reproject_geometry(row.geometry, LONLAT, target_crs)
+    geometry = reproject_geometry(row.geometry, LONLAT, crs)
 
     # Pick a filepath. For STAC items the "first asset" convention
     # is usually a sensible default (it's typically the lowest-res
@@ -250,49 +252,55 @@ class CatalogBundle:
     Attributes:
         catalog: The items table as an `InMemoryGeoCatalog`. Updated
             in place when `ingest()` adds new rows.
-        target_crs: Authoritative CRS for the items table's geometry
-            column. Set at construction; reprojection happens on
-            ingest, never on lookup.
-        backend: Backend tag forwarded to the catalog.
+        crs: Authoritative CRS for the items table's geometry column.
+            Set at construction; reprojection happens on ingest, never
+            on lookup. (``target_crs`` is the deprecated name.)
+        kind: The catalog kind forwarded to the items table.
+            (``backend`` is the deprecated name.)
         queries: In-memory list of `QueryRecord`s. Persisted to
             ``queries.parquet`` on `to_directory`.
         matchups: In-memory list of `MatchupRow`s. Persisted to
             ``matchups.parquet``.
     """
 
+    target_crs = deprecated_alias("crs")
+    backend = deprecated_alias("kind")
+
+    @renamed_kwargs(target_crs="crs", backend="kind")
     def __init__(
         self,
         catalog: InMemoryGeoCatalog,
         *,
-        target_crs: pyproj.CRS,
-        backend: BackendTag = "raster",
+        crs: pyproj.CRS,
+        kind: CatalogKind = "raster",
         queries: list[QueryRecord] | None = None,
         matchups: list[MatchupRow] | None = None,
     ) -> None:
         self.catalog = catalog
-        self.target_crs = pyproj.CRS.from_user_input(target_crs)
-        self.backend = backend
+        self.crs = pyproj.CRS.from_user_input(crs)
+        self.kind = kind
         self.queries: list[QueryRecord] = list(queries) if queries else []
         self.matchups: list[MatchupRow] = list(matchups) if matchups else []
         # When the bundle was first written; kept across re-saves.
         self.created_at: str | None = None
 
     @classmethod
+    @renamed_kwargs(target_crs="crs", backend="kind")
     def empty(
         cls,
         *,
-        target_crs: str | pyproj.CRS = "EPSG:4326",
-        backend: BackendTag = "raster",
+        crs: str | pyproj.CRS = "EPSG:4326",
+        kind: CatalogKind = "raster",
     ) -> CatalogBundle:
         """Create a fresh bundle with an empty items table.
 
         Use this as the starting point when ingesting from a `Source`:
 
-            >>> bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+            >>> bundle = CatalogBundle.empty(crs="EPSG:4326")
             >>> bundle.ingest(STACSource.planetary_computer(), ...)
             >>> bundle.to_directory("my_catalog/")
         """
-        dst_crs = pyproj.CRS.from_user_input(target_crs)
+        dst_crs = pyproj.CRS.from_user_input(crs)
         # The same columns `source_row_to_gdf_row` writes, so an empty
         # bundle has the schema of an ingested one.
         empty_gdf = empty_frame(
@@ -309,15 +317,16 @@ class CatalogBundle:
                 "provenance": "object",
             },
         )
-        catalog = InMemoryGeoCatalog(empty_gdf, backend=backend)
-        return cls(catalog, target_crs=dst_crs, backend=backend)
+        catalog = InMemoryGeoCatalog(empty_gdf, kind=kind)
+        return cls(catalog, crs=dst_crs, kind=kind)
 
     @classmethod
+    @renamed_kwargs(backend="kind")
     def from_catalog(
         cls,
         catalog: InMemoryGeoCatalog,
         *,
-        backend: BackendTag | None = None,
+        kind: CatalogKind | None = None,
     ) -> CatalogBundle:
         """Wrap an already-built `InMemoryGeoCatalog`.
 
@@ -325,11 +334,10 @@ class CatalogBundle:
         ``build_raster_catalog`` / ``build_vector_catalog`` and now
         wants to add queries/matchups state.
         """
-        bk: BackendTag = backend if backend is not None else catalog.backend
         return cls(
             catalog,
-            target_crs=pyproj.CRS.from_user_input(catalog.gdf.crs),
-            backend=bk,
+            crs=pyproj.CRS.from_user_input(catalog.gdf.crs),
+            kind=kind if kind is not None else catalog.kind,
         )
 
     def ingest(
@@ -426,9 +434,7 @@ class CatalogBundle:
         existing = _item_keys(self.catalog.gdf)
         stamped_rows = _resolve_duplicates(stamped_rows, existing, on_duplicate)
         new_rows = [
-            source_row_to_gdf_row(
-                row, target_crs=self.target_crs, primary_asset=primary_asset
-            )
+            source_row_to_gdf_row(row, crs=self.crs, primary_asset=primary_asset)
             for row in stamped_rows
         ]
         base = self.catalog.gdf
@@ -440,7 +446,7 @@ class CatalogBundle:
                 self._drop_matchups_of(replaced)
 
         if new_rows:
-            new_gdf = gpd.GeoDataFrame(new_rows, crs=self.target_crs)
+            new_gdf = gpd.GeoDataFrame(new_rows, crs=self.crs)
             new_gdf.index = pd.IntervalIndex.from_arrays(
                 new_gdf.pop("start_time"),
                 new_gdf.pop("end_time"),
@@ -449,8 +455,8 @@ class CatalogBundle:
             )
             merged = pd.concat([base, new_gdf], axis=0)
             self.catalog = InMemoryGeoCatalog(
-                gpd.GeoDataFrame(merged, crs=self.target_crs),
-                backend=self.backend,
+                gpd.GeoDataFrame(merged, crs=self.crs),
+                kind=self.kind,
             )
 
         self.queries.append(
@@ -583,8 +589,9 @@ class CatalogBundle:
         created_at = self.created_at or _existing_created_at(dest) or now
         meta = {
             "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
-            "target_crs": crs_config_string(self.target_crs),
-            "backend": self.backend,
+            # On-disk keys keep their names (no bundle-schema change).
+            "target_crs": crs_config_string(self.crs),
+            "backend": self.kind,
             "created_at": created_at,
             "updated_at": now,
         }
@@ -659,7 +666,7 @@ class CatalogBundle:
                 f"backend {backend!r}"
             )
 
-        catalog = from_geoparquet(src / "items.parquet", backend=backend)
+        catalog = from_geoparquet(src / "items.parquet", kind=backend)
         # Checked for empty bundles too: a later ingest builds rows in
         # `target_crs` and concatenates them onto this table.
         if catalog.gdf.crs is not None and not pyproj.CRS.from_user_input(
@@ -682,8 +689,8 @@ class CatalogBundle:
         )
         bundle = cls(
             catalog,
-            target_crs=target_crs,
-            backend=backend,
+            crs=target_crs,
+            kind=backend,
             queries=queries,
             matchups=matchups,
         )

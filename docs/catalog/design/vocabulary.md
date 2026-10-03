@@ -1,0 +1,61 @@
+# Parameter vocabulary
+
+**Status:** accepted (#246). **Scope:** every public `geocatalog`
+function, class and CLI flag.
+
+You should be able to guess a keyword from having used any other
+`geocatalog` function, so each concept below has exactly one name. The
+old spellings still work for one minor release: they map to the new
+name and emit a `DeprecationWarning`, and passing both is a `TypeError`.
+
+## Names
+
+| Concept | Name | Values / notes | Was |
+|---|---|---|---|
+| Kind of data indexed | `kind` / `.kind` | `"raster"`, `"xarray"`, `"vector"` (`CatalogKind`) | `backend=`, `.backend` |
+| Where the catalog lives | `engine` | `"memory"`, `"duckdb"` (`StorageEngine`); `open_catalog` adds `"auto"` | `backend=` on the builders, STAC and CLI |
+| Spatial-join method | `join` | `InMemoryGeoCatalog.intersect(join="sjoin")` | `engine=` |
+| Catalog CRS | `crs` | the CRS the footprints are stored in (builders, `CatalogBundle`, `open_catalog`) | `target_crs=`, `CatalogBundle.target_crs` |
+| CRS of a query box | `crs` | `query(bounds=..., crs=...)` — the CRS `bounds` is expressed in | — |
+| Spatial extent | `bounds` | `(minx, miny, maxx, maxy)` | `bbox=` (`from_stac_search`, CLI `--bbox`) |
+| Result cap | `limit` | | `max_items=` (`from_stac_search`) |
+| Artifact read | `source` | path or URI of an existing artifact | `path=` (`from_geoparquet`), `src=` |
+| Artifact written | `out_path` | | `path=` (`to_geoparquet`), `dst=` |
+| Files to index | `filepaths` | the builders' positional input | — |
+| File-open threads | `max_open_workers` | `load_raster`, `aload_raster` | `concurrency=` (`aload_raster`) |
+| Extraction strategy | `concurrency` | `"sequential"` / `"async"` (`build_raster_catalog`) | — |
+
+The CLI follows the same table: `--crs` (alias `--target-crs`),
+`--engine` (alias `--backend`), `--bounds` (alias `--bbox`). `stats
+--json` reports `kind` (and, for one release, the old `backend` key);
+`query --json` reports `bounds` (and the old `bbox` key).
+
+**On-disk names do not change.** The reserved `_backend` column, the
+`get_config()` `"engine"` key and the bundle `_meta.json` keys
+`target_crs` / `backend` keep their spelling, so artifacts written by
+any release stay readable. `get_config()` reports the data kind under
+`"kind"` (and, for one release, the old `"backend"` key).
+
+## Defaults that look different on purpose
+
+| Parameter | Default | Why |
+|---|---|---|
+| `iter_rows(batch_size=)` | `1024` | rows fetched per round trip while *iterating*; small so the first row arrives quickly |
+| builders' / writers' `batch_size` | `10_000` | rows per Parquet row group while *writing*; large so row groups compress well |
+| builders' `n_workers` | `1` | worker *processes* for metadata extraction; parallelism is opt-in because forking has a fixed cost |
+| `load_raster_timeseries(n_workers=)` | `4` | *threads* reading daily mosaics; rasterio releases the GIL, so threads are cheap |
+
+## Errors
+
+Every error raised on purpose derives from `GeoCatalogError` *and*
+the builtin a caller would have caught before the hierarchy existed:
+
+| Class | Also a | Raised when |
+|---|---|---|
+| `CatalogMetadataError` | `ValueError` | `strict=True` and an artifact's metadata is missing or unreadable |
+| `CatalogSchemaError` | `ValueError` | an artifact's `_schema_version` cannot be read by this release |
+| `CatalogClosedError` | `RuntimeError` | a closed `DuckDBGeoCatalog` (or one derived from it) is used; also a `duckdb.ConnectionException` |
+
+Bad arguments are `ValueError` (wrong value) or `TypeError` (wrong
+type), and an unparsable CRS is `pyproj.exceptions.CRSError`, the same
+on both backends (`tests/test_vocabulary.py`).

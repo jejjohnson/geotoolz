@@ -25,7 +25,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
-from functools import cached_property
+from functools import cache, cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from weakref import WeakKeyDictionary
@@ -42,10 +42,12 @@ from loguru import logger as log
 if TYPE_CHECKING:
     import duckdb as duckdb_mod
 
+from geocatalog._src._deprecation import deprecated_alias, renamed_kwargs
 from geocatalog._src._extras import missing_extra
 from geocatalog._src._schema import (
     LEGACY_UNVERSIONED,
-    BackendTag,
+    CatalogKind,
+    check_kind,
     check_schema_versions,
     crs_config_string,
 )
@@ -53,6 +55,7 @@ from geocatalog._src._timeutil import naive_utc_datetimes, to_naive_utc
 from geocatalog._src.base import (
     INTERNAL_COLUMNS,
     RESERVED_COLUMNS,
+    CatalogClosedError,
     CatalogMetadataError,
     CatalogRow,
 )
@@ -82,6 +85,22 @@ def _require_duckdb() -> Any:
     if duckdb is None:
         raise missing_extra("`DuckDBGeoCatalog`", "duckdb")
     return duckdb
+
+
+@cache
+def _closed_error() -> type[CatalogClosedError]:
+    """`CatalogClosedError` that is also a ``duckdb.ConnectionException``.
+
+    Built on first use so the module imports without ``duckdb``; the
+    second base keeps ``except duckdb.ConnectionException`` (what the
+    backend raised before `CatalogClosedError`) working.
+    """
+    dd = _require_duckdb()
+    return type(
+        "CatalogClosedError",
+        (CatalogClosedError, dd.ConnectionException),
+        {"__module__": CatalogClosedError.__module__},
+    )
 
 
 def _ensure_spatial(con: duckdb_mod.DuckDBPyConnection) -> bool:
@@ -201,7 +220,7 @@ class DuckDBGeoCatalog:
         crs: CRS of the ``geometry`` column. The catalog stores it once
             (canonical-CRS convention) — per-row CRS is not supported by
             this backend.
-        backend: ``"raster"`` / ``"xarray"`` / ``"vector"``; drives
+        kind: ``"raster"`` / ``"xarray"`` / ``"vector"``; drives
             loader dispatch.
         _owns_con: Whether this catalog is responsible for closing
             ``con``.
@@ -212,23 +231,27 @@ class DuckDBGeoCatalog:
         con: The associated connection. Set to ``None`` after an owning
             catalog is closed.
         crs: ``pyproj.CRS`` for ``geometry``.
-        backend: Loader dispatch tag.
+        kind: The kind of data indexed (loader dispatch tag).
     """
 
+    backend = deprecated_alias("kind")
+
+    @renamed_kwargs(backend="kind")
     def __init__(
         self,
         relation: duckdb_mod.DuckDBPyRelation,
         *,
         con: duckdb_mod.DuckDBPyConnection,
         crs: Any,
-        backend: BackendTag,
+        kind: CatalogKind,
         _owns_con: bool = False,
     ) -> None:
         _require_duckdb()
+        check_kind(kind, "DuckDBGeoCatalog")
         self.relation = relation
         self.con: duckdb_mod.DuckDBPyConnection | None = con
         self.crs = pyproj.CRS.from_user_input(crs)
-        self.backend = backend
+        self.kind = kind
         self._owns_con = _owns_con
         self._lock = _con_lock(con)
         # True when every row carries a trustworthy GeoParquet 1.1 `bbox`
@@ -253,16 +276,9 @@ class DuckDBGeoCatalog:
         # Derived catalogs share the owner's connection — if the owner
         # was closed, our `self.con` still points at the (now-closed)
         # DuckDBPyConnection object, so check the owner first.
-        if self._owner is not None and self._owner.con is None:
-            dd = _require_duckdb()
-            raise dd.ConnectionException(
-                "DuckDBGeoCatalog connection has already been closed. Open a new "
-                "catalog, or keep the parent catalog open when using derived catalogs."
-            )
         con = self.con
-        if con is None:
-            dd = _require_duckdb()
-            raise dd.ConnectionException(
+        if con is None or (self._owner is not None and self._owner.con is None):
+            raise _closed_error()(
                 "DuckDBGeoCatalog connection has already been closed. Open a new "
                 "catalog, or keep the parent catalog open when using derived catalogs."
             )
@@ -289,7 +305,7 @@ class DuckDBGeoCatalog:
             relation,
             con=self._require_open_con(),
             crs=self.crs,
-            backend=self.backend,
+            kind=self.kind,
         )
         derived._bbox_covering = keeps_rows and self._bbox_covering
         # Anchor the derivation chain at the originating owning catalog.
@@ -341,11 +357,12 @@ class DuckDBGeoCatalog:
     # ── factories ────────────────────────────────────────────────────────
 
     @classmethod
+    @renamed_kwargs(backend="kind")
     def open(
         cls,
         source: str | Path,
         *,
-        backend: BackendTag | None = None,
+        kind: CatalogKind | None = None,
         crs: Any | None = None,
         retries: int = 3,
         storage_options: dict[str, Any] | None = None,
@@ -371,14 +388,14 @@ class DuckDBGeoCatalog:
         fallback. (Remote GeoParquet CRS introspection would need an
         fsspec/pyarrow filesystem hookup and is tracked separately.)
 
-        The backend tag is recovered from the reserved ``_backend``
+        The kind is recovered from the reserved ``_backend``
         column written by `to_geoparquet`; ad-hoc parquet files lacking
         it default to ``"raster"`` unless overridden.
 
         Args:
             source: Path or URI. A directory or glob (``shards/*.parquet``)
                 is read as one virtual table.
-            backend: Loader dispatch tag override. ``None`` reads the
+            kind: Kind override (loader dispatch). ``None`` reads the
                 ``_backend`` column, falling back to ``"raster"``.
             crs: CRS override. ``None`` reads the GeoParquet PROJJSON
                 metadata for local files; falls back to ``EPSG:4326`` if
@@ -395,11 +412,11 @@ class DuckDBGeoCatalog:
                 fsspec-backed reads.
             strict: If ``True``, raise `CatalogMetadataError` instead of
                 falling back when the ``_backend`` column is missing /
-                unreadable (and ``backend=`` was not passed) or the
+                unreadable (and ``kind=`` was not passed) or the
                 GeoParquet ``geo`` metadata is unreadable (and ``crs=``
                 was not passed). Remote URIs cannot be introspected at
                 all, so ``strict=True`` requires an explicit ``crs=``
-                for them. Explicit ``backend=`` / ``crs=`` overrides
+                for them. Explicit ``kind=`` / ``crs=`` overrides
                 bypass the corresponding check.
 
         Returns:
@@ -446,8 +463,8 @@ class DuckDBGeoCatalog:
                     strict=strict,
                     retries=retries,
                 )
-            if backend is None:
-                backend = retry_transient_io(
+            if kind is None:
+                kind = retry_transient_io(
                     _read_backend_tag,
                     con,
                     source_str,
@@ -483,7 +500,7 @@ class DuckDBGeoCatalog:
             # don't leak the freshly opened connection.
             con.close()
             raise
-        catalog = cls(relation, con=con, crs=crs, backend=backend, _owns_con=True)
+        catalog = cls(relation, con=con, crs=crs, kind=kind, _owns_con=True)
         catalog._bbox_covering = _has_bbox_covering(relation)
         catalog._spatial_available = spatial_ok
         return catalog
@@ -539,7 +556,7 @@ class DuckDBGeoCatalog:
             relation,
             con=con,
             crs=catalog.gdf.crs,
-            backend=catalog.backend,
+            kind=catalog.kind,
             _owns_con=owns_con,
         )
 
@@ -567,11 +584,11 @@ class DuckDBGeoCatalog:
 
         Returns:
             An `InMemoryGeoCatalog` over the materialised rows, same
-            CRS, same backend tag.
+            CRS, same kind.
         """
         with self._locked():
             df = self.relation.df()
-        return _df_to_inmemory(df, crs=self.crs, backend=self.backend)
+        return _df_to_inmemory(df, crs=self.crs, kind=self.kind)
 
     # ── Protocol surface ─────────────────────────────────────────────────
 
@@ -807,7 +824,7 @@ class DuckDBGeoCatalog:
     def union(self, other: DuckDBGeoCatalog | InMemoryGeoCatalog) -> DuckDBGeoCatalog:
         """Cross-catalog OR via SQL ``UNION ALL``.
 
-        ``self``'s CRS and backend tag win. ``other`` is reprojected
+        ``self``'s CRS and kind win. ``other`` is reprojected
         into ``self.crs`` if needed before the union. Schemas must be
         compatible for the columns both sides share; extra columns on
         one side become NULL on the other.
@@ -1060,23 +1077,23 @@ class DuckDBGeoCatalog:
         return self._row_count
 
     def __repr__(self) -> str:
-        return (
-            f"DuckDBGeoCatalog(backend={self.backend!r}, crs={self.crs.to_string()!r})"
-        )
+        return f"DuckDBGeoCatalog(kind={self.kind!r}, crs={self.crs.to_string()!r})"
 
     def get_config(self) -> dict[str, Any]:
-        """JSON-serialisable summary — backend tag, row count, CRS.
+        """JSON-serialisable summary — kind, row count, CRS.
 
         Returns:
-            ``{"backend": str, "len": int, "crs": str, "engine": "duckdb"}``.
+            ``{"kind": str, "len": int, "crs": str, "engine": "duckdb"}``
+            (plus ``"backend"``, the deprecated name of ``"kind"``).
             ``len`` triggers a count query — comparable shape to
             `InMemoryGeoCatalog.get_config` but with a SQL hop.
         """
         return {
-            "backend": self.backend,
+            "kind": self.kind,
             "len": len(self),
             "crs": crs_config_string(self.crs),
             "engine": "duckdb",
+            "backend": self.kind,  # deprecated key, kept for one release
         }
 
 
@@ -1110,10 +1127,10 @@ def _coerce_to_duckdb(
         # geopandas (PROJ-bound `ST_Transform` is slow per row).
         mem = other.materialize()
         if mem.gdf.crs != target_crs:
-            mem = InMemoryGeoCatalog(mem.gdf.to_crs(target_crs), backend=mem.backend)
+            mem = InMemoryGeoCatalog(mem.gdf.to_crs(target_crs), kind=mem.kind)
         return DuckDBGeoCatalog.from_memory(mem, con=con)
     if other.gdf.crs != target_crs:
-        other = InMemoryGeoCatalog(other.gdf.to_crs(target_crs), backend=other.backend)
+        other = InMemoryGeoCatalog(other.gdf.to_crs(target_crs), kind=other.kind)
     return DuckDBGeoCatalog.from_memory(other, con=con)
 
 
@@ -1305,10 +1322,10 @@ def _read_backend_tag(
     con: duckdb_mod.DuckDBPyConnection,
     source: str,
     *,
-    default: BackendTag,
+    default: CatalogKind,
     partitioned: bool = False,
     strict: bool = False,
-) -> BackendTag:
+) -> CatalogKind:
     """Recover the ``_backend`` column written by `to_geoparquet`.
 
     Returns the default for ad-hoc parquet files lacking the column;
@@ -1331,12 +1348,12 @@ def _read_backend_tag(
         if strict:
             raise CatalogMetadataError(
                 f"{source} is missing the reserved '_backend' column. "
-                "Pass backend=... explicitly, or write the catalog via "
+                "Pass kind=... explicitly, or write the catalog via "
                 "geocatalog's to_geoparquet first."
             ) from None
         log.warning(
             "opened {!r}: no _backend column found; defaulting to "
-            "backend={!r}. Pass backend=... explicitly to silence.",
+            "kind={!r}. Pass kind=... explicitly to silence.",
             source,
             default,
         )
@@ -1347,11 +1364,11 @@ def _read_backend_tag(
         if strict:
             raise CatalogMetadataError(
                 f"could not read '_backend' column from {source}: {exc}. "
-                "Pass backend=... explicitly, or fix the source."
+                "Pass kind=... explicitly, or fix the source."
             ) from exc
         log.warning(
             "opened {!r}: could not read _backend column ({}); defaulting "
-            "to backend={!r}. Pass backend=... explicitly to silence.",
+            "to kind={!r}. Pass kind=... explicitly to silence.",
             source,
             exc,
             default,
@@ -1361,28 +1378,28 @@ def _read_backend_tag(
         if strict:
             raise CatalogMetadataError(
                 f"{source} has a '_backend' column but no readable value "
-                "(empty artifact or null tag). Pass backend=... explicitly, "
+                "(empty artifact or null tag). Pass kind=... explicitly, "
                 "or fix the source."
             )
         log.warning(
             "opened {!r}: _backend column present but empty/null; defaulting "
-            "to backend={!r}. Pass backend=... explicitly to silence.",
+            "to kind={!r}. Pass kind=... explicitly to silence.",
             source,
             default,
         )
         return default
     tag = str(df["_backend"].iloc[0])
     if tag in ("raster", "xarray", "vector"):
-        return cast(BackendTag, tag)
+        return cast(CatalogKind, tag)
     if strict:
         raise CatalogMetadataError(
             f"{source} carries an unrecognised _backend tag {tag!r}; expected "
-            "'raster', 'xarray', or 'vector'. Pass backend=... explicitly, "
+            "'raster', 'xarray', or 'vector'. Pass kind=... explicitly, "
             "or fix the source."
         )
     log.warning(
         "opened {!r}: unrecognised _backend tag {!r}; defaulting to "
-        "backend={!r}. Pass backend=... explicitly to silence.",
+        "kind={!r}. Pass kind=... explicitly to silence.",
         source,
         tag,
         default,
@@ -1428,7 +1445,7 @@ def _df_to_inmemory(
     df: pd.DataFrame,
     *,
     crs: pyproj.CRS,
-    backend: BackendTag,
+    kind: CatalogKind,
 ) -> InMemoryGeoCatalog:
     """Build an `InMemoryGeoCatalog` from a DuckDB-materialised DataFrame.
 
@@ -1447,7 +1464,7 @@ def _df_to_inmemory(
     gdf = gpd.GeoDataFrame(out, geometry="geometry", crs=crs)
     idx = pd.IntervalIndex.from_arrays(starts, ends, closed="both", name="datetime")
     gdf = gdf.set_index(idx)
-    return InMemoryGeoCatalog(gdf, backend=backend)
+    return InMemoryGeoCatalog(gdf, kind=kind)
 
 
 def _decode_geometry_column(col: pd.Series) -> list[Any]:

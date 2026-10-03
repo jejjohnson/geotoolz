@@ -15,7 +15,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Iterable, Iterator
 from functools import cached_property
-from typing import Any, Literal, get_args
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -23,7 +23,13 @@ import pandas as pd
 import pyproj
 import shapely
 
-from geocatalog._src._schema import RESERVED_COLUMNS, BackendTag, crs_config_string
+from geocatalog._src._deprecation import deprecated_alias, renamed_kwargs
+from geocatalog._src._schema import (
+    RESERVED_COLUMNS,
+    CatalogKind,
+    check_kind,
+    crs_config_string,
+)
 from geocatalog._src._timeutil import (
     naive_utc_datetimes,
     naive_utc_interval_index,
@@ -33,7 +39,7 @@ from geocatalog._src.base import CatalogRow
 from geocatalog._src.geoslice import GeoSlice
 
 
-_INTERSECT_ENGINE_T = Literal["sjoin", "overlay"]
+_JOIN_T = Literal["sjoin", "overlay"]
 _GEOMETRY_TYPE_FAMILY = {
     "Point": "Point",
     "MultiPoint": "Point",
@@ -55,17 +61,20 @@ class InMemoryGeoCatalog:
             or ``start_time`` + ``end_time`` columns that this constructor
             will promote to the index. The ``geometry`` column's CRS is
             authoritative; ``gdf.crs`` must be set.
-        backend: ``"raster"`` / ``"xarray"`` / ``"vector"``. Drives the
-            dispatching choice in `geocatalog.load_*`.
+        kind: ``"raster"`` / ``"xarray"`` / ``"vector"`` — the kind of
+            data the catalog indexes. Drives the dispatching choice in
+            `geocatalog.load_*`. (``backend`` is the deprecated name.)
     """
 
-    backend: BackendTag
+    kind: CatalogKind
+    backend = deprecated_alias("kind")
 
+    @renamed_kwargs(backend="kind")
     def __init__(
         self,
         gdf: gpd.GeoDataFrame,
         *,
-        backend: BackendTag,
+        kind: CatalogKind,
     ) -> None:
         if gdf.crs is None:
             raise ValueError("InMemoryGeoCatalog requires gdf.crs to be set; got None.")
@@ -102,13 +111,9 @@ class InMemoryGeoCatalog:
                 "InMemoryGeoCatalog requires a closed='both' IntervalIndex; "
                 f"got closed={gdf.index.closed!r}."
             )
-        if backend not in get_args(BackendTag):
-            raise ValueError(
-                f"InMemoryGeoCatalog backend must be one of "
-                f"{list(get_args(BackendTag))}; got {backend!r}."
-            )
+        check_kind(kind, "InMemoryGeoCatalog")
         self.gdf = gdf
-        self.backend = backend
+        self.kind = kind
 
     @property
     def crs(self) -> pyproj.CRS:
@@ -150,7 +155,7 @@ class InMemoryGeoCatalog:
 
     def __repr__(self) -> str:
         return (
-            f"InMemoryGeoCatalog(backend={self.backend!r}, "
+            f"InMemoryGeoCatalog(kind={self.kind!r}, "
             f"len={len(self)}, crs={self.gdf.crs!r})"
         )
 
@@ -183,7 +188,7 @@ class InMemoryGeoCatalog:
         else:
             if bounds is None and time is None:
                 # No filter — return a copy view.
-                return InMemoryGeoCatalog(self.gdf.copy(), backend=self.backend)
+                return InMemoryGeoCatalog(self.gdf.copy(), kind=self.kind)
             q_bounds = bounds
             q_crs = crs
             q_interval = _coerce_interval(time) if time is not None else None
@@ -204,26 +209,28 @@ class InMemoryGeoCatalog:
                         shapely.MultiPolygon([shapely.box(*env) for env in envelopes])
                     )
                 ]
-        return InMemoryGeoCatalog(out, backend=self.backend)
+        return InMemoryGeoCatalog(out, kind=self.kind)
 
+    @renamed_kwargs(engine="join")
     def intersect(
         self,
         other: InMemoryGeoCatalog,
         *,
         spatial_only: bool = False,
-        engine: _INTERSECT_ENGINE_T = "sjoin",
+        join: _JOIN_T = "sjoin",
     ) -> InMemoryGeoCatalog:
         """Cross-catalog AND — rows whose footprints and times overlap.
 
         Args:
-            other: Another catalog, possibly a different backend. The
-                returned catalog has ``self``'s backend tag (it indexes
-                the same kind of file as ``self``).
+            other: Another catalog, possibly of another kind. The
+                returned catalog has ``self``'s `kind` (it indexes the
+                same kind of file as ``self``).
             spatial_only: If True, ignore the temporal axis — useful for
                 pairing imagery with static labels.
-            engine: Spatial join engine. ``"sjoin"`` uses the GeoPandas
+            join: Spatial-join method. ``"sjoin"`` uses the GeoPandas
                 spatial index, while ``"overlay"`` preserves the legacy
-                overlay implementation.
+                overlay implementation. (``engine=`` is the deprecated
+                spelling; "engine" means the storage engine elsewhere.)
         """
         if other.gdf.crs != self.gdf.crs:
             right_gdf = other.gdf.to_crs(self.gdf.crs)
@@ -235,9 +242,9 @@ class InMemoryGeoCatalog:
         )
         left = self.gdf.reset_index(names="_left_interval")
         right = right_renamed.reset_index(names="_right_interval")
-        if engine == "overlay":
+        if join == "overlay":
             joined = gpd.overlay(left, right, how="intersection", keep_geom_type=True)
-        elif engine == "sjoin":
+        elif join == "sjoin":
             joined = gpd.sjoin(left, right, how="inner", predicate="intersects")
             if not joined.empty:
                 left_geometry = joined.geometry.reset_index(drop=True)
@@ -263,7 +270,7 @@ class InMemoryGeoCatalog:
                 joined = joined.set_geometry(clipped)
                 joined = joined.drop(columns=["index_right"], errors="ignore")
         else:
-            raise ValueError(f"Unsupported intersect engine: {engine!r}")
+            raise ValueError(f"Unsupported intersect join: {join!r}")
 
         if joined.empty:
             return self._empty_intersect(right_renamed)
@@ -308,7 +315,7 @@ class InMemoryGeoCatalog:
             joined["start_time"] = idx.left
         if "end_time" in joined.columns:
             joined["end_time"] = idx.right
-        return InMemoryGeoCatalog(joined, backend=self.backend)
+        return InMemoryGeoCatalog(joined, kind=self.kind)
 
     def _empty_intersect(self, right_renamed: gpd.GeoDataFrame) -> InMemoryGeoCatalog:
         """Zero-row intersect result with the same columns as a non-empty one.
@@ -324,19 +331,19 @@ class InMemoryGeoCatalog:
             if col in (geom_name, "_right_start_time", "_right_end_time"):
                 continue
             gdf[col] = right_renamed[col].iloc[:0].to_numpy()
-        return InMemoryGeoCatalog(gdf, backend=self.backend)
+        return InMemoryGeoCatalog(gdf, kind=self.kind)
 
     def union(self, other: InMemoryGeoCatalog) -> InMemoryGeoCatalog:
         """Cross-catalog OR — concatenate rows.
 
-        ``self``'s CRS and backend tag win. If ``other`` is in a
+        ``self``'s CRS and kind win. If ``other`` is in a
         different CRS it's reprojected into ``self.crs`` first. The
-        backend tags are *not* required to match: the caller is
+        kinds are *not* required to match: the caller is
         responsible for ensuring it makes sense to treat the merged
         rows uniformly (e.g. unioning two raster catalogs is fine;
         unioning raster + vector would lie about what the result
         indexes, but no exception is raised — the downstream loader
-        will catch it via its own backend-tag check).
+        will catch it via its own kind check).
         """
         if other.gdf.crs != self.gdf.crs:
             right_gdf = other.gdf.to_crs(self.gdf.crs)
@@ -350,7 +357,7 @@ class InMemoryGeoCatalog:
         merged = gpd.GeoDataFrame(
             pd.concat([self.gdf, right_gdf], axis=0), crs=self.gdf.crs
         )
-        return InMemoryGeoCatalog(merged, backend=self.backend)
+        return InMemoryGeoCatalog(merged, kind=self.kind)
 
     def iter_rows(self, *, batch_size: int = 1024) -> Iterator[CatalogRow]:
         """Yield each row as a backend-neutral `CatalogRow`.
@@ -444,29 +451,31 @@ class InMemoryGeoCatalog:
                 the underlying ``GeoDataFrame`` has.
 
         Returns:
-            A new catalog with the matching rows; same backend tag,
+            A new catalog with the matching rows; same kind,
             same CRS.
 
         Example:
             >>> imagery.where("mission == 'S2A' and cloud_pct < 20")
         """
-        return InMemoryGeoCatalog(self.gdf.query(query), backend=self.backend)
+        return InMemoryGeoCatalog(self.gdf.query(query), kind=self.kind)
 
     def get_config(self) -> dict[str, Any]:
-        """JSON-serialisable summary — backend tag, row count, CRS.
+        """JSON-serialisable summary — kind, row count, CRS.
 
         Returns:
-            ``{"backend": str, "len": int, "crs": str, "engine": "memory"}``.
+            ``{"kind": str, "len": int, "crs": str, "engine": "memory"}``
+            (plus ``"backend"``, the deprecated name of ``"kind"``).
             The CRS is `crs_config_string`: ``"AUTH:CODE"`` (``"EPSG:32629"``)
             when the CRS carries an authority id, else WKT2 — the same
             string `DuckDBGeoCatalog` reports for the same artifact, before
             and after a GeoParquet round trip.
         """
         return {
-            "backend": self.backend,
+            "kind": self.kind,
             "len": len(self),
             "crs": crs_config_string(self.crs),
             "engine": "memory",
+            "backend": self.kind,  # deprecated key, kept for one release
         }
 
 

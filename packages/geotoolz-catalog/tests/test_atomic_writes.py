@@ -38,7 +38,7 @@ def _catalog(n: int = 3) -> InMemoryGeoCatalog:
             starts, starts + pd.Timedelta(hours=1), closed="both"
         ),
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 def _toy_extract(filepath: str | Path) -> dict[str, Any]:
@@ -91,7 +91,7 @@ def test_partitioned_replace_swaps_out_old_partitions(tmp_path: Path) -> None:
         iter([_row(400)]),
         out_path=dest,
         crs="EPSG:4326",
-        backend="raster",
+        kind="raster",
         partition_by=("year",),
     )
     (dest / "stray.parquet").write_bytes(b"")  # a top-level shard is owned too
@@ -101,7 +101,7 @@ def test_partitioned_replace_swaps_out_old_partitions(tmp_path: Path) -> None:
         iter([_row(0), _row(1)]),
         out_path=dest,
         crs="EPSG:4326",
-        backend="raster",
+        kind="raster",
         partition_by=("year",),
     )
 
@@ -117,7 +117,7 @@ def test_failed_partition_swap_restores_the_old_tree(
         iter([_row(400)]),
         out_path=dest,
         crs="EPSG:4326",
-        backend="raster",
+        kind="raster",
         partition_by=("year",),
     )
     before = sorted(p.relative_to(dest) for p in dest.rglob("*"))
@@ -135,7 +135,7 @@ def test_failed_partition_swap_restores_the_old_tree(
             iter([_row(0)]),
             out_path=dest,
             crs="EPSG:4326",
-            backend="raster",
+            kind="raster",
             partition_by=("year",),
         )
     monkeypatch.undo()
@@ -151,7 +151,7 @@ def test_partitioned_replace_over_a_single_file(tmp_path: Path) -> None:
         iter([_row(0)]),
         out_path=dest,
         crs="EPSG:4326",
-        backend="raster",
+        kind="raster",
         partition_by=("year",),
     )
     assert (dest / "year=2024").is_dir()
@@ -187,9 +187,7 @@ def test_streaming_writer_error_leaves_destination_untouched(tmp_path: Path) -> 
     dest.write_bytes(b"previous artifact")
     with (
         pytest.raises(RuntimeError, match="extractor"),
-        StreamingParquetWriter(
-            dest, crs="EPSG:4326", backend="raster", batch_size=1
-        ) as w,
+        StreamingParquetWriter(dest, crs="EPSG:4326", kind="raster", batch_size=1) as w,
     ):
         w.write_row(_row(0))
         w.write_row(_row(1))
@@ -205,7 +203,7 @@ def test_streaming_writer_failing_final_flush_leaves_no_artifact(
     dest = tmp_path / "cat.parquet"
     bad = _row(1)
     bad["geometry"] = None
-    w = StreamingParquetWriter(dest, crs="EPSG:4326", backend="raster")
+    w = StreamingParquetWriter(dest, crs="EPSG:4326", kind="raster")
     w.write_row(_row(0))
     w.write_row(bad)
     with pytest.raises(TypeError, match="geometry"):
@@ -216,7 +214,7 @@ def test_streaming_writer_failing_final_flush_leaves_no_artifact(
 
 def test_streaming_writer_only_exposes_complete_files(tmp_path: Path) -> None:
     dest = tmp_path / "cat.parquet"
-    w = StreamingParquetWriter(dest, crs="EPSG:4326", backend="raster", batch_size=1)
+    w = StreamingParquetWriter(dest, crs="EPSG:4326", kind="raster", batch_size=1)
     w.write_row(_row(0))
     w.write_row(_row(1))
     assert not dest.exists()  # rows so far live in a hidden temp file
@@ -239,7 +237,7 @@ def _append(archive: Path, paths: list[Path]) -> Any:
         paths,
         _toy_extract,
         crs="EPSG:4326",
-        backend="raster",
+        kind="raster",
         partition_by=("year", "month"),
     )
 

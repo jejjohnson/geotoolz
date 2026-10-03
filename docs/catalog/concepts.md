@@ -54,11 +54,11 @@ The same flow as a static figure (rendered by
    `DuckDBGeoCatalog` (lazy, SQL over GeoParquet 1.1). The shared
    `GeoCatalog` Protocol surface is `query`, `intersect`, `union`,
    `iter_rows`, `iter_slices`, `total_bounds`, `temporal_extent`,
-   `crs`, `backend`, `len()` and `get_config`. Persist either backend
+   `crs`, `kind`, `len()` and `get_config`. Persist either backend
    with the free function `geocatalog.to_geoparquet(catalog, path)`.
    Backend-specific extras sit outside the Protocol:
    `InMemoryGeoCatalog.where(pandas_query)` and
-   `intersect(engine="sjoin" | "overlay")`;
+   `intersect(join="sjoin" | "overlay")`;
    `DuckDBGeoCatalog.sql(where=...)`, `.to_geoparquet(path)` and
    `.materialize()`.
 3. **Materialise** — loaders (`load_raster`, `load_raster_timeseries`,
@@ -162,7 +162,7 @@ contract — anywhere you accept a `GeoCatalog`, either one works.
 | Scale | up to ~10⁵ rows | 10⁶+ rows |
 | Remote URIs | only via fsspec read | native via DuckDB `httpfs` |
 | Mutation | new instance per op | new instance per op (lazy SQL relation) |
-| Build mode | eager | streaming (`backend="duckdb"`, bounded RAM) |
+| Build mode | eager | streaming (`engine="duckdb"`, bounded RAM) |
 
 ![Backend comparison](assets/backend-comparison.png)
 
@@ -178,7 +178,7 @@ queries flat as row count grows.*
   the underlying GeoDataFrame.
 - **DuckDB** — 10⁶+ rows, remote artifacts, or any flow where you want
   to share a single GeoParquet file as the "source of truth." Build
-  with `backend="duckdb"` to stream rows into Parquet in bounded
+  with `engine="duckdb"` to stream rows into Parquet in bounded
   memory; read with `open_catalog("cat.parquet")` or directly with
   `DuckDBGeoCatalog.open`.
 
@@ -254,7 +254,7 @@ catalog = append_files(
     filepaths=new_scene_paths,
     extract_fn=extract_raster_row,         # picklable
     crs="EPSG:4326",
-    backend="raster",
+    kind="raster",
     partition_by=("year", "month"),        # derived from start_time
 )
 ```
@@ -265,7 +265,7 @@ than silently producing a mixed layout. The archive must be a local
 directory (write locally, then sync to object storage), and appending
 the same files twice writes their rows twice.
 
-### Streaming build (`backend="duckdb"`)
+### Streaming build (`engine="duckdb"`)
 
 Default builders collect every row in RAM. Beyond ~10⁵ files the build
 itself becomes the bottleneck. Switch to streaming:
@@ -274,8 +274,8 @@ itself becomes the bottleneck. Switch to streaming:
 catalog = gc.build_raster_catalog(
     filepaths,                       # 10^6 Sentinel-2 scenes
     filename_regex=r"S2_T\w+_(?P<date>\d{8}).*\.tif",
-    backend="duckdb",
-    out_path="s2_archive.parquet",   # required when backend="duckdb"
+    engine="duckdb",
+    out_path="s2_archive.parquet",   # required when engine="duckdb"
     n_workers=8,                     # parallel rasterio.open
     sort_by=("start_time", "geometry_hilbert"),  # row-group pruning
 )

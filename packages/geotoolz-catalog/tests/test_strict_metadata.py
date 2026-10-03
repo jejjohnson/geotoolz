@@ -2,8 +2,8 @@
 
 External GeoParquet artifacts (written by GDAL / DuckDB / geopandas
 directly) lack the reserved ``_backend`` column. The default behaviour is
-warn-and-fall-back to ``backend="raster"``; ``strict=True`` raises
-`CatalogMetadataError`; an explicit ``backend=`` override bypasses the
+warn-and-fall-back to ``kind="raster"``; ``strict=True`` raises
+`CatalogMetadataError`; an explicit ``kind=`` override bypasses the
 check entirely.
 """
 
@@ -67,7 +67,7 @@ def _geocatalog_parquet(tmp_path: Path) -> Path:
         crs="EPSG:32629",
     )
     path = tmp_path / "native.parquet"
-    to_geoparquet(InMemoryGeoCatalog(gdf, backend="vector"), path)
+    to_geoparquet(InMemoryGeoCatalog(gdf, kind="vector"), path)
     return path
 
 
@@ -76,7 +76,7 @@ class TestFromGeoparquet:
         self, tmp_path: Path, loguru_sink: io.StringIO
     ) -> None:
         cat = from_geoparquet(_external_parquet(tmp_path))
-        assert cat.backend == "raster"
+        assert cat.kind == "raster"
         assert "no _backend column" in loguru_sink.getvalue()
 
     def test_missing_backend_strict_raises(self, tmp_path: Path) -> None:
@@ -86,17 +86,15 @@ class TestFromGeoparquet:
     def test_explicit_backend_bypasses_even_strict(
         self, tmp_path: Path, loguru_sink: io.StringIO
     ) -> None:
-        cat = from_geoparquet(
-            _external_parquet(tmp_path), backend="vector", strict=True
-        )
-        assert cat.backend == "vector"
+        cat = from_geoparquet(_external_parquet(tmp_path), kind="vector", strict=True)
+        assert cat.kind == "vector"
         assert "no _backend column" not in loguru_sink.getvalue()
 
     def test_native_artifact_never_warns(
         self, tmp_path: Path, loguru_sink: io.StringIO
     ) -> None:
         cat = from_geoparquet(_geocatalog_parquet(tmp_path), strict=True)
-        assert cat.backend == "vector"
+        assert cat.kind == "vector"
         assert "no _backend column" not in loguru_sink.getvalue()
 
 
@@ -109,10 +107,10 @@ class TestOpenCatalogFactory:
         cat = open_catalog(
             _external_parquet(tmp_path),
             engine="memory",
-            backend="vector",
+            kind="vector",
             strict=True,
         )
-        assert cat.backend == "vector"
+        assert cat.kind == "vector"
 
 
 class TestDuckDBOpen:
@@ -123,7 +121,7 @@ class TestDuckDBOpen:
         from geocatalog import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(_external_parquet(tmp_path))
-        assert cat.backend == "raster"
+        assert cat.kind == "raster"
         assert "no _backend column" in loguru_sink.getvalue()
 
     def test_missing_backend_strict_raises(self, tmp_path: Path) -> None:
@@ -138,9 +136,9 @@ class TestDuckDBOpen:
         from geocatalog import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(
-            _external_parquet(tmp_path), backend="vector", strict=True
+            _external_parquet(tmp_path), kind="vector", strict=True
         )
-        assert cat.backend == "vector"
+        assert cat.kind == "vector"
 
     def test_native_artifact_no_warning(
         self, tmp_path: Path, loguru_sink: io.StringIO
@@ -149,7 +147,7 @@ class TestDuckDBOpen:
         from geocatalog import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(_geocatalog_parquet(tmp_path), strict=True)
-        assert cat.backend == "vector"
+        assert cat.kind == "vector"
         assert "no _backend column" not in loguru_sink.getvalue()
 
 
@@ -201,7 +199,7 @@ class TestCorruptBackendTag:
         from geocatalog import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(_tagged_parquet(tmp_path, "vecotr"))
-        assert cat.backend == "raster"
+        assert cat.kind == "raster"
         assert "unrecognised _backend tag 'vecotr'" in loguru_sink.getvalue()
 
     def test_unrecognised_tag_strict_raises(self, tmp_path: Path) -> None:
@@ -223,9 +221,9 @@ class TestCorruptBackendTag:
         from geocatalog import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(
-            _tagged_parquet(tmp_path, "vecotr"), backend="vector", strict=True
+            _tagged_parquet(tmp_path, "vecotr"), kind="vector", strict=True
         )
-        assert cat.backend == "vector"
+        assert cat.kind == "vector"
 
 
 class TestMalformedGeoMetadataShapes:

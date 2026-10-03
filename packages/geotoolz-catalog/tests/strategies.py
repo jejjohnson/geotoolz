@@ -99,7 +99,7 @@ def catalog_strategy(
     draw: st.DrawFn,
     n_rows: st.SearchStrategy[int] | None = None,
 ) -> InMemoryGeoCatalog:
-    """An `InMemoryGeoCatalog` over 0-20 rows in EPSG:4326, ``backend="raster"``.
+    """An `InMemoryGeoCatalog` over 0-20 rows in EPSG:4326, ``kind="raster"``.
 
     Each row carries:
 
@@ -134,4 +134,4 @@ def catalog_strategy(
         },
         crs="EPSG:4326",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")

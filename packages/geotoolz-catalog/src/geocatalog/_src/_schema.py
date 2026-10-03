@@ -36,10 +36,19 @@ them out of ``extras`` and rewrite passes drop them before re-encoding
 (the writer re-emits its own).
 """
 
-BackendTag = Literal["raster", "xarray", "vector"]
-"""The kind of data a catalog indexes (stored as the ``_backend`` column)."""
+CatalogKind = Literal["raster", "xarray", "vector"]
+"""The kind of data a catalog indexes: `.kind` (stored as the ``_backend`` column)."""
 
-BACKEND_TAGS: tuple[str, ...] = get_args(BackendTag)
+BACKEND_TAGS: tuple[str, ...] = get_args(CatalogKind)
+
+
+def check_kind(kind: object, where: str) -> None:
+    """Raise `ValueError` unless ``kind`` is a `CatalogKind`."""
+    if kind not in BACKEND_TAGS:
+        raise ValueError(
+            f"{where} kind must be one of {list(BACKEND_TAGS)}; got {kind!r}."
+        )
+
 
 StorageEngine = Literal["memory", "duckdb"]
 """Where a built or opened catalog lives: in RAM, or a DuckDB relation."""
@@ -145,8 +154,9 @@ __all__ = [
     "LEGACY_UNVERSIONED",
     "RESERVED_COLUMNS",
     "SCHEMA_VERSION_CURRENT",
-    "BackendTag",
+    "CatalogKind",
     "StorageEngine",
+    "check_kind",
     "check_schema_versions",
     "crs_config_string",
     "empty_frame",

@@ -44,7 +44,7 @@ def band_catalog(asset_key):
     return gc.from_stac_search(
         "https://planetarycomputer.microsoft.com/api/stac/v1",
         collections=["sentinel-2-l2a"],
-        bbox=TAHOE_BBOX,
+        bounds=TAHOE_BBOX,
         datetime="2024-07-01/2024-07-31",
         asset_key=asset_key,
     )

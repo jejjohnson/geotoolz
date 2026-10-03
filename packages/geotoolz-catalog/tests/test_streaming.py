@@ -1,4 +1,4 @@
-"""Tests for the `backend="duckdb"` streaming builders.
+"""Tests for the `engine="duckdb"` streaming builders.
 
 Covers all three builders (raster / vector / xarray) plus the underlying
 `StreamingParquetWriter`. Skipped wholesale if the ``[duckdb]`` extra is
@@ -100,7 +100,7 @@ class TestIterRowsParallel:
 
         result = build_raster_catalog(
             [tmp_path / "0.tif"],
-            backend="duckdb",
+            engine="duckdb",
             out_path=tmp_path / "cat.parquet",
             n_workers=2,
             ordered=True,
@@ -133,18 +133,18 @@ class TestRasterStreamingRoundtrip:
         catalog = build_raster_catalog(
             paths,
             filename_regex=RASTER_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out,
         )
 
         assert isinstance(catalog, DuckDBGeoCatalog)
         assert len(catalog) == 5
-        assert catalog.backend == "raster"
+        assert catalog.kind == "raster"
         assert catalog.crs == pyproj.CRS("EPSG:4326")
 
         reopened = open_catalog(out, engine="duckdb")
         assert len(reopened) == 5
-        assert reopened.backend == "raster"
+        assert reopened.kind == "raster"
 
     def test_geopandas_can_read_streamed_artifact(
         self, utm29_tile_factory, tmp_path: Path
@@ -156,7 +156,7 @@ class TestRasterStreamingRoundtrip:
         ]
         out = tmp_path / "raster_cat.parquet"
         build_raster_catalog(
-            paths, filename_regex=RASTER_REGEX, backend="duckdb", out_path=out
+            paths, filename_regex=RASTER_REGEX, engine="duckdb", out_path=out
         )
 
         gdf = gpd.read_parquet(out)
@@ -190,18 +190,18 @@ class TestVectorStreamingRoundtrip:
         catalog = build_vector_catalog(
             paths,
             filename_regex=VECTOR_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out,
         )
 
         assert isinstance(catalog, DuckDBGeoCatalog)
         assert len(catalog) == 2
-        assert catalog.backend == "vector"
+        assert catalog.kind == "vector"
         assert catalog.crs == pyproj.CRS("EPSG:4326")
 
         reopened = open_catalog(out, engine="duckdb")
         assert len(reopened) == 2
-        assert reopened.backend == "vector"
+        assert reopened.kind == "vector"
 
 
 class TestXarrayStreamingRoundtrip:
@@ -230,14 +230,14 @@ class TestXarrayStreamingRoundtrip:
 
         catalog = build_xarray_catalog(
             paths,
-            target_crs="EPSG:4326",
+            crs="EPSG:4326",
             data_vars=["ndvi"],
-            backend="duckdb",
+            engine="duckdb",
             out_path=out,
         )
         assert isinstance(catalog, DuckDBGeoCatalog)
         assert len(catalog) == 3
-        assert catalog.backend == "xarray"
+        assert catalog.kind == "xarray"
 
         reopened = open_catalog(out, engine="duckdb")
         assert len(reopened) == 3
@@ -261,7 +261,7 @@ class TestSort:
         build_raster_catalog(
             paths,
             filename_regex=RASTER_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out,
             sort_by=("start_time",),
         )
@@ -286,7 +286,7 @@ class TestSort:
         build_raster_catalog(
             paths,
             filename_regex=RASTER_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out,
             sort_by=("start_time", "geometry_hilbert"),
         )
@@ -330,7 +330,7 @@ class TestSort:
         build_raster_catalog(
             paths,
             filename_regex=RASTER_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out,
             sort_by=None,
         )
@@ -360,14 +360,14 @@ class TestWorkers:
         build_raster_catalog(
             paths,
             filename_regex=RASTER_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out_serial,
             n_workers=1,
         )
         build_raster_catalog(
             paths,
             filename_regex=RASTER_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out_parallel,
             n_workers=2,
         )
@@ -396,7 +396,7 @@ class TestPartitionedArchives:
         catalog = build_raster_catalog(
             paths,
             filename_regex=RASTER_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out,
             partition_by=("year", "month"),
             n_workers=2,
@@ -407,7 +407,7 @@ class TestPartitionedArchives:
         assert (out / "year=2024" / "month=2").is_dir()
         reopened = open_catalog(out, engine="duckdb")
         assert len(reopened) == len(catalog) == 2
-        assert reopened.backend == "raster"
+        assert reopened.kind == "raster"
         assert len(reopened.sql("year = 2024 AND month = 1")) == 1
 
     def test_append_files_leaves_existing_shards_untouched(
@@ -419,7 +419,7 @@ class TestPartitionedArchives:
             [tmp_path / "2024-01-01-a.tif", tmp_path / "2024-01-02-b.tif"],
             _toy_extract,
             crs="EPSG:4326",
-            backend="raster",
+            kind="raster",
             partition_by=("year", "month"),
         )
         before = {path: path.stat().st_mtime_ns for path in archive.rglob("*.parquet")}
@@ -429,7 +429,7 @@ class TestPartitionedArchives:
             [tmp_path / "2024-02-01-c.tif"],
             _toy_extract,
             crs="EPSG:4326",
-            backend="raster",
+            kind="raster",
             partition_by=("year", "month"),
         )
 
@@ -505,7 +505,7 @@ class TestPartitionedArchives:
             iter(rows),
             out_path=out,
             crs="EPSG:4326",
-            backend="raster",
+            kind="raster",
             partition_by=("part",),
             max_open_writers=4,
         )
@@ -545,7 +545,7 @@ class TestPartitionedArchives:
             iter(rows),
             out_path=tmp_path / "partitioned",
             crs="EPSG:4326",
-            backend="raster",
+            kind="raster",
             partition_by=("part",),
             max_open_writers=4,
         )
@@ -567,7 +567,7 @@ class TestPartitionedArchives:
             [tmp_path / "2024-01-01-a.tif"],
             _toy_extract,
             crs="EPSG:4326",
-            backend="raster",
+            kind="raster",
             partition_by=("year", "month"),
         )
         with pytest.raises(
@@ -578,7 +578,7 @@ class TestPartitionedArchives:
                 [tmp_path / "2024-02-01-b.tif"],
                 _toy_extract,
                 crs="EPSG:4326",
-                backend="raster",
+                kind="raster",
                 partition_by=("year",),
             )
         # Error message names both layouts so the user can debug.
@@ -604,7 +604,7 @@ def _build_cat_for_open():
         gdf["start_time"], gdf["end_time"], closed="both", name="datetime"
     )
     gdf = gdf.drop(columns=["start_time", "end_time"]).set_index(idx)
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 def _count_open_fds() -> int:
@@ -631,9 +631,9 @@ class TestCRSDefaults:
         catalog = build_raster_catalog(
             [path],
             filename_regex=RASTER_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out,
-            target_crs=None,  # explicit None
+            crs=None,  # explicit None
         )
         assert catalog.crs == pyproj.CRS("EPSG:4326")
         # Footprint must have been reprojected — UTM coords (~500_000)
@@ -674,7 +674,7 @@ class TestCRSDefaults:
         catalog = build_raster_catalog(
             paths,
             filename_regex=RASTER_REGEX,
-            backend="duckdb",
+            engine="duckdb",
             out_path=out,
         )
         assert catalog.crs == pyproj.CRS("EPSG:4326")
@@ -710,7 +710,7 @@ class TestGeoParquetMetadata:
         path = utm29_tile_factory((500_000, 4_000_000, 500_160, 4_000_160), "20240115")
         out = tmp_path / "cat.parquet"
         build_raster_catalog(
-            [path], filename_regex=RASTER_REGEX, backend="duckdb", out_path=out
+            [path], filename_regex=RASTER_REGEX, engine="duckdb", out_path=out
         )
         meta = pq.read_metadata(out)
         schema = meta.schema.to_arrow_schema()
@@ -723,7 +723,7 @@ class TestGeoParquetMetadata:
         path = utm29_tile_factory((500_000, 4_000_000, 500_160, 4_000_160), "20240115")
         out = tmp_path / "cat.parquet"
         build_raster_catalog(
-            [path], filename_regex=RASTER_REGEX, backend="duckdb", out_path=out
+            [path], filename_regex=RASTER_REGEX, engine="duckdb", out_path=out
         )
         meta = pq.read_metadata(out)
         kv = meta.metadata
@@ -749,13 +749,13 @@ class TestValidation:
         path = utm29_tile_factory((500_000, 4_000_000, 500_160, 4_000_160), "20240115")
         with pytest.raises(ValueError, match="requires out_path"):
             build_raster_catalog(
-                [path], filename_regex=RASTER_REGEX, backend="duckdb", out_path=None
+                [path], filename_regex=RASTER_REGEX, engine="duckdb", out_path=None
             )
 
     def test_empty_filepaths_raises(self, tmp_path: Path) -> None:
         out = tmp_path / "empty.parquet"
         with pytest.raises(ValueError, match="no files yielded"):
-            build_raster_catalog([], backend="duckdb", out_path=out)
+            build_raster_catalog([], engine="duckdb", out_path=out)
 
     def test_invalid_backend_rejected_raster(
         self, utm29_tile_factory, tmp_path: Path
@@ -765,7 +765,7 @@ class TestValidation:
             build_raster_catalog(
                 [path],
                 filename_regex=RASTER_REGEX,
-                backend="duckbd",  # typo
+                engine="duckbd",  # typo
                 out_path=tmp_path / "x.parquet",
             )
 
@@ -778,7 +778,7 @@ class TestValidation:
             build_vector_catalog(
                 [tmp_path / "labels_20240115.gpkg"],
                 filename_regex=VECTOR_REGEX,
-                backend="duckbd",  # typo
+                engine="duckbd",  # typo
                 out_path=tmp_path / "x.parquet",
             )
 
@@ -797,12 +797,12 @@ class TestValidation:
         with pytest.raises(ValueError, match="must be 'memory' or 'duckdb'"):
             build_xarray_catalog(
                 [tmp_path / "x.nc"],
-                target_crs="EPSG:4326",
-                backend="duckbd",  # typo
+                crs="EPSG:4326",
+                engine="duckbd",  # typo
                 out_path=tmp_path / "y.parquet",
             )
 
-    def test_xarray_duckdb_requires_target_crs(self, tmp_path: Path) -> None:
+    def test_xarray_duckdb_requires_crs(self, tmp_path: Path) -> None:
         """The xarray duckdb branch doesn't reproject coordinate bounds —
         a silent EPSG:4326 default would mislabel projected NetCDFs."""
         xr = pytest.importorskip("xarray")
@@ -816,12 +816,12 @@ class TestValidation:
         ds.to_netcdf(tmp_path / "x.nc")
         from geocatalog import build_xarray_catalog
 
-        with pytest.raises(ValueError, match="requires target_crs"):
+        with pytest.raises(ValueError, match="requires crs"):
             build_xarray_catalog(
                 [tmp_path / "x.nc"],
-                backend="duckdb",
+                engine="duckdb",
                 out_path=tmp_path / "y.parquet",
-                # target_crs omitted → ValueError
+                # crs omitted → ValueError
             )
 
     def test_empty_input_leaves_existing_artifact_intact(
@@ -832,7 +832,7 @@ class TestValidation:
         out = tmp_path / "preexisting.parquet"
         good = utm29_tile_factory((500_000, 4_000_000, 500_160, 4_000_160), "20240115")
         build_raster_catalog(
-            [good], filename_regex=RASTER_REGEX, backend="duckdb", out_path=out
+            [good], filename_regex=RASTER_REGEX, engine="duckdb", out_path=out
         )
         before = out.read_bytes()
 
@@ -841,7 +841,7 @@ class TestValidation:
         bad.write_bytes(good.read_bytes())
         with pytest.raises(ValueError, match="no files yielded"):
             build_raster_catalog(
-                [bad], filename_regex=RASTER_REGEX, backend="duckdb", out_path=out
+                [bad], filename_regex=RASTER_REGEX, engine="duckdb", out_path=out
             )
 
         # The pre-existing artifact survived intact.
@@ -857,7 +857,7 @@ class TestStreamingParquetWriterDirect:
     def test_write_then_read(self, tmp_path: Path) -> None:
         path = tmp_path / "direct.parquet"
         with StreamingParquetWriter(
-            path, crs="EPSG:4326", backend="raster", batch_size=2
+            path, crs="EPSG:4326", kind="raster", batch_size=2
         ) as w:
             for i in range(5):
                 w.write_row(
@@ -877,7 +877,7 @@ class TestStreamingParquetWriterDirect:
 
     def test_empty_writer_produces_valid_file(self, tmp_path: Path) -> None:
         path = tmp_path / "empty.parquet"
-        with StreamingParquetWriter(path, crs="EPSG:4326", backend="raster"):
+        with StreamingParquetWriter(path, crs="EPSG:4326", kind="raster"):
             pass
         # File exists with valid GeoParquet metadata; geopandas can open it.
         gdf = gpd.read_parquet(path)
@@ -885,7 +885,7 @@ class TestStreamingParquetWriterDirect:
 
     def test_write_after_close_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "x.parquet"
-        w = StreamingParquetWriter(path, crs="EPSG:4326", backend="raster")
+        w = StreamingParquetWriter(path, crs="EPSG:4326", kind="raster")
         w.write_row(
             {
                 "filepath": "f.tif",

@@ -37,7 +37,7 @@ def _toy_catalog() -> InMemoryGeoCatalog:
         geometry="geometry",
         crs="EPSG:32629",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 class TestParquetRoundtrip:
@@ -48,7 +48,7 @@ class TestParquetRoundtrip:
         assert path.exists()
         recovered = from_geoparquet(path)
         assert len(recovered) == len(cat)
-        assert recovered.backend == "raster"
+        assert recovered.kind == "raster"
         assert isinstance(recovered.gdf.index, pd.IntervalIndex)
         assert recovered.gdf.crs == cat.gdf.crs
 

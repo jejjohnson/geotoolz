@@ -63,7 +63,7 @@ def catalog_from_rows(
         closed="both",
         name="datetime",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 @pytest.fixture
@@ -160,7 +160,7 @@ def assert_catalogs_equal(a: GeoCatalog, b: GeoCatalog) -> None:
 
     assert len(a) == len(b)
     assert a.crs == b.crs
-    assert a.backend == b.backend
+    assert a.kind == b.kind
     if len(a):
         np.testing.assert_allclose(a.total_bounds, b.total_bounds)
     assert a.temporal_extent == b.temporal_extent

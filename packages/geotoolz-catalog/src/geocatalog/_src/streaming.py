@@ -1,6 +1,6 @@
 """Streaming GeoParquet writer + parallel row extraction for catalog builders.
 
-The `backend="duckdb"` branch of the per-format builders
+The `engine="duckdb"` branch of the per-format builders
 (`build_raster_catalog` / `build_vector_catalog` / `build_xarray_catalog`)
 funnels through this module rather than materialising a `gpd.GeoDataFrame`
 in RAM. The flow is:
@@ -52,7 +52,8 @@ if TYPE_CHECKING:
 
 from loguru import logger as log
 
-from geocatalog._src._schema import BackendTag
+from geocatalog._src._deprecation import renamed_kwargs
+from geocatalog._src._schema import CatalogKind
 from geocatalog._src._timeutil import to_naive_utc
 from geocatalog._src.base import INTERNAL_COLUMNS, RESERVED_COLUMNS
 from geocatalog._src.parquet import (
@@ -215,7 +216,7 @@ class StreamingParquetWriter:
         crs: CRS of every input geometry. Written into ``geo.columns.geometry.crs``
             as PROJJSON. Callers must canonicalise *before* writing — this
             class does not reproject.
-        backend: Catalog backend tag, copied to the reserved ``_backend``
+        kind: The catalog kind, copied to the reserved ``_backend``
             column on every row (preserves loader-dispatch on reopen).
         schema_version: Value for the reserved ``_schema_version`` column.
             Bump from 0 on first substantive schema change.
@@ -240,17 +241,18 @@ class StreamingParquetWriter:
 
     Usage::
 
-        with StreamingParquetWriter(path, crs=crs, backend="raster") as w:
+        with StreamingParquetWriter(path, crs=crs, kind="raster") as w:
             for row in row_iter:
                 w.write_row(row)
     """
 
+    @renamed_kwargs(backend="kind")
     def __init__(
         self,
         path: str | Path,
         *,
         crs: Any,
-        backend: BackendTag,
+        kind: CatalogKind,
         schema_version: int = _SCHEMA_VERSION,
         write_bbox: bool = True,
         batch_size: int = 10_000,
@@ -262,7 +264,7 @@ class StreamingParquetWriter:
         self._tmp_path = _staging_name(self._path)
         self._extras_schema = schema
         self._crs = pyproj.CRS.from_user_input(crs)
-        self._backend: BackendTag = backend
+        self._kind: CatalogKind = kind
         self._schema_version = schema_version
         self._write_bbox = write_bbox
         self._batch_size = batch_size
@@ -420,7 +422,7 @@ class StreamingParquetWriter:
             elif name == "bbox":
                 arrays.append(pa.array(boxes, type=field.type))
             elif name == "_backend":
-                arrays.append(pa.array([self._backend] * n, type=field.type))
+                arrays.append(pa.array([self._kind] * n, type=field.type))
             elif name == "_schema_version":
                 arrays.append(pa.array([self._schema_version] * n, type=field.type))
             elif name in ("start_time", "end_time"):
@@ -504,20 +506,21 @@ def _column_array(
 # ---------------------------------------------------------------------------
 
 
+@renamed_kwargs(src="source", dst="out_path", backend="kind")
 def sort_geoparquet(
-    src: str | Path,
-    dst: str | Path,
+    source: str | Path,
+    out_path: str | Path,
     *,
     sort_by: Sequence[str],
     crs: Any,
-    backend: BackendTag,
+    kind: CatalogKind,
     schema_version: int = _SCHEMA_VERSION,
     write_bbox: bool = True,
     batch_size: int = 10_000,
 ) -> None:
     """Rewrite a streamed GeoParquet file in `sort_by` order via DuckDB.
 
-    Opens ``src`` as a DuckDB relation, sorts by the given keys (the
+    Opens ``source`` as a DuckDB relation, sorts by the given keys (the
     literal token ``"geometry_hilbert"`` expands to
     ``ST_Hilbert(ST_Centroid(geometry))``), and streams the sorted
     relation back through `pyarrow.parquet.ParquetWriter` so the final
@@ -525,14 +528,14 @@ def sort_geoparquet(
     struct as the streamed input.
 
     Args:
-        src: Path to the unsorted GeoParquet (written by
+        source: Path to the unsorted GeoParquet (written by
             `StreamingParquetWriter`).
-        dst: Path to write the sorted result. Overwrites if it exists.
+        out_path: Path to write the sorted result. Overwrites if it exists.
         sort_by: Sort keys. Plain column names pass through; the literal
             token ``"geometry_hilbert"`` expands to
             ``ST_Hilbert(ST_Centroid(geometry))``.
         crs: CRS to encode in the destination's GeoParquet metadata.
-        backend: Backend tag for the destination's metadata.
+        kind: Catalog kind for the destination's metadata.
         schema_version: Schema version for the destination.
         write_bbox: Emit the GeoParquet 1.1 covering bbox struct.
         batch_size: Pyarrow batch size for the streamed rewrite.
@@ -543,8 +546,8 @@ def sort_geoparquet(
     from geocatalog._src.duckdb_backend import _require_duckdb
 
     duckdb_mod = _require_duckdb()
-    src_str = str(src)
-    dst_path = Path(dst)
+    src_str = str(source)
+    dst_path = Path(out_path)
 
     # Build the sort SQL. Underlying assumption: `start_time` / `geometry`
     # exist as columns (every streamed builder produces them).
@@ -583,7 +586,7 @@ def sort_geoparquet(
         with StreamingParquetWriter(
             dst_path,
             crs=crs,
-            backend=backend,
+            kind=kind,
             schema_version=schema_version,
             write_bbox=write_bbox,
             batch_size=batch_size,
@@ -594,7 +597,9 @@ def sort_geoparquet(
     finally:
         con.close()
     if needs_hilbert:
-        log.debug("sort_geoparquet: rewrote {} with Hilbert sort -> {}", src, dst_path)
+        log.debug(
+            "sort_geoparquet: rewrote {} with Hilbert sort -> {}", source, dst_path
+        )
 
 
 def _quote_ident(name: str) -> str:
@@ -635,13 +640,14 @@ def _write_arrow_batch(writer: StreamingParquetWriter, batch: pa.RecordBatch) ->
 # ---------------------------------------------------------------------------
 
 
+@renamed_kwargs(backend="kind")
 def stream_build_duckdb(
     filepaths: Sequence[str | Path],
     extract_fn: Callable[[str | Path], dict[str, Any] | None],
     *,
     out_path: str | Path,
     crs: Any,
-    backend: BackendTag,
+    kind: CatalogKind,
     write_bbox: bool = True,
     sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),
     partition_by: Sequence[str] | None = None,
@@ -664,7 +670,7 @@ def stream_build_duckdb(
         out_path: Final GeoParquet destination.
         crs: CRS to record in the artifact (must match the geometries
             ``extract_fn`` produces).
-        backend: Backend tag.
+        kind: Catalog kind.
         write_bbox: Emit GeoParquet 1.1 ``bbox`` covering struct.
         sort_by: Sort keys for the post-write rewrite. ``None`` skips the
             rewrite and leaves rows in extraction order.
@@ -718,7 +724,7 @@ def stream_build_duckdb(
             rows,
             out_path=out_path,
             crs=crs,
-            backend=backend,
+            kind=kind,
             partition_by=partition_by,
             write_bbox=write_bbox,
             batch_size=batch_size,
@@ -731,7 +737,7 @@ def stream_build_duckdb(
                 "skipped or unmatched). Existing artifact at out_path "
                 "(if any) was not modified."
             )
-        return DuckDBGeoCatalog.open(out_path, backend=backend, crs=crs)
+        return DuckDBGeoCatalog.open(out_path, kind=kind, crs=crs)
 
     # Always stream into a sibling temp file, regardless of `sort_by`.
     # Only move/rename to `out_path` after we've confirmed at least one
@@ -754,7 +760,7 @@ def stream_build_duckdb(
         with StreamingParquetWriter(
             staged,
             crs=crs,
-            backend=backend,
+            kind=kind,
             write_bbox=write_bbox,
             batch_size=batch_size,
         ) as writer:
@@ -795,7 +801,7 @@ def stream_build_duckdb(
                 sort_tmp,
                 sort_by=sort_by,
                 crs=crs,
-                backend=backend,
+                kind=kind,
                 write_bbox=write_bbox,
                 batch_size=batch_size,
             )
@@ -810,16 +816,17 @@ def stream_build_duckdb(
             sort_tmp.unlink(missing_ok=True)
         raise
 
-    return DuckDBGeoCatalog.open(out_path, backend=backend, crs=crs)
+    return DuckDBGeoCatalog.open(out_path, kind=kind, crs=crs)
 
 
+@renamed_kwargs(backend="kind")
 def append_files(
     archive: str | Path,
     filepaths: Sequence[str | Path],
     extract_fn: Callable[[str | Path], dict[str, Any] | None],
     *,
     crs: Any,
-    backend: BackendTag,
+    kind: CatalogKind,
     partition_by: Sequence[str],
     write_bbox: bool = True,
     batch_size: int = 10_000,
@@ -852,7 +859,7 @@ def append_files(
         extract_fn: Picklable per-file extractor, same contract as
             `stream_build_duckdb`.
         crs: CRS to encode in the new shard metadata.
-        backend: Backend tag for loader dispatch.
+        kind: Catalog kind (loader dispatch).
         partition_by: Hive partition columns. ``"year"``, ``"month"``,
             and ``"day"`` are derived from each row's ``start_time``.
             Must match the existing archive's layout, if any.
@@ -922,7 +929,7 @@ def append_files(
         _new_rows(),
         out_path=archive,
         crs=crs,
-        backend=backend,
+        kind=kind,
         partition_by=requested,
         write_bbox=write_bbox,
         batch_size=batch_size,
@@ -936,11 +943,11 @@ def append_files(
                 skipped,
                 archive,
             )
-            return DuckDBGeoCatalog.open(archive, backend=backend, crs=crs)
+            return DuckDBGeoCatalog.open(archive, kind=kind, crs=crs)
         raise ValueError("append_files: no files yielded a row")
     if skipped:
         log.info("append_files: skipped {} already-indexed file(s)", skipped)
-    return DuckDBGeoCatalog.open(archive, backend=backend, crs=crs)
+    return DuckDBGeoCatalog.open(archive, kind=kind, crs=crs)
 
 
 def _detect_partition_layout(archive: Path) -> tuple[str, ...] | None:
@@ -975,12 +982,13 @@ def _detect_partition_layout(archive: Path) -> tuple[str, ...] | None:
     return tuple(keys)
 
 
+@renamed_kwargs(backend="kind")
 def write_partitioned_rows(
     rows: Iterator[dict[str, Any]],
     *,
     out_path: str | Path,
     crs: Any,
-    backend: BackendTag,
+    kind: CatalogKind,
     partition_by: Sequence[str],
     schema_version: int = _SCHEMA_VERSION,
     write_bbox: bool = True,
@@ -1008,7 +1016,7 @@ def write_partitioned_rows(
         rows: Iterator of catalog row dictionaries with shapely geometry.
         out_path: Destination partitioned directory.
         crs: CRS to encode in each shard's GeoParquet metadata.
-        backend: Backend tag for loader dispatch.
+        kind: Catalog kind (loader dispatch).
         partition_by: Hive partition columns. ``"year"``, ``"month"``,
             and ``"day"`` are derived from each row's ``start_time``.
         schema_version: Reserved catalog schema version written per row.
@@ -1031,7 +1039,7 @@ def write_partitioned_rows(
         rows,
         out_path=out_path,
         crs=crs,
-        backend=backend,
+        kind=kind,
         partition_by=partition_by,
         schema_version=schema_version,
         write_bbox=write_bbox,
@@ -1046,7 +1054,7 @@ def _write_partitioned_rows(
     *,
     out_path: str | Path,
     crs: Any,
-    backend: BackendTag,
+    kind: CatalogKind,
     partition_by: Sequence[str],
     schema_version: int = _SCHEMA_VERSION,
     write_bbox: bool = True,
@@ -1089,7 +1097,7 @@ def _write_partitioned_rows(
         return StreamingParquetWriter(
             shard,
             crs=crs,
-            backend=backend,
+            kind=kind,
             schema_version=schema_version,
             write_bbox=write_bbox,
             batch_size=batch_size,

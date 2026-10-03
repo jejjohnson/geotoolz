@@ -24,10 +24,11 @@ import pandas as pd
 import pyarrow.parquet as pq
 from loguru import logger as log
 
+from geocatalog._src._deprecation import renamed_kwargs
 from geocatalog._src._schema import (
     LEGACY_UNVERSIONED,
     SCHEMA_VERSION_CURRENT,
-    BackendTag,
+    CatalogKind,
     check_schema_versions,
 )
 from geocatalog._src.base import CatalogMetadataError, CatalogSchemaError
@@ -150,9 +151,10 @@ def _apply_migrations(gdf: gpd.GeoDataFrame, *, from_version: int) -> gpd.GeoDat
     return gdf
 
 
+@renamed_kwargs(path="out_path")
 def to_geoparquet(
     catalog: InMemoryGeoCatalog,
-    path: str | Path,
+    out_path: str | Path,
     *,
     schema_version: int = SCHEMA_VERSION_CURRENT,
     write_covering_bbox: bool = True,
@@ -168,7 +170,7 @@ def to_geoparquet(
 
     Two columns are added on write and stripped on load:
 
-    - ``_backend``: round-trips the backend tag so `from_geoparquet`
+    - ``_backend``: round-trips the catalog `kind` so `from_geoparquet`
       restores the right loader dispatch.
     - ``_schema_version``: reserved for forward-compat (§10.4 of the
       design plan); bump on first substantive schema change.
@@ -180,7 +182,7 @@ def to_geoparquet(
     Args:
         catalog: An `InMemoryGeoCatalog` to serialise. The catalog's
             ``gdf.crs`` is written into the GeoParquet metadata.
-        path: Destination path. The ``.parquet`` extension is
+        out_path: Destination path. The ``.parquet`` extension is
             conventional. Any parent directory must exist. The file is
             written to a hidden sibling and renamed into place, so a
             failed write never leaves a partial file or clobbers an
@@ -225,25 +227,26 @@ def to_geoparquet(
         )
         write_partitioned_rows(
             rows,
-            out_path=path,
+            out_path=out_path,
             crs=gdf.crs,
-            backend=catalog.backend,
+            kind=catalog.kind,
             partition_by=partition_by,
             schema_version=schema_version,
             write_bbox=write_covering_bbox,
             replace=True,
         )
         return
-    gdf["_backend"] = catalog.backend
+    gdf["_backend"] = catalog.kind
     gdf["_schema_version"] = schema_version
-    with _staged_path(Path(path)) as tmp:
+    with _staged_path(Path(out_path)) as tmp:
         gdf.to_parquet(tmp, write_covering_bbox=write_covering_bbox)
 
 
+@renamed_kwargs(path="source", backend="kind")
 def from_geoparquet(
-    path: str | Path,
+    source: str | Path,
     *,
-    backend: BackendTag | None = None,
+    kind: CatalogKind | None = None,
     strict: bool = False,
     retries: int = 3,
     storage_options: dict[str, Any] | None = None,
@@ -251,9 +254,9 @@ def from_geoparquet(
     """Load a GeoParquet file into an `InMemoryGeoCatalog`.
 
     Inverse of `to_geoparquet`: rebuilds the `IntervalIndex` from
-    ``start_time`` / ``end_time`` columns and recovers the backend tag
-    from the reserved ``_backend`` column. Externally produced files
-    (no ``_backend`` column) default to backend ``"raster"`` — adjust
+    ``start_time`` / ``end_time`` columns and recovers the `kind` from
+    the reserved ``_backend`` column. Externally produced files (no
+    ``_backend`` column) default to kind ``"raster"`` — adjust
     on the returned catalog if that's wrong.
 
     The reserved ``_schema_version`` column drives forward migration
@@ -265,12 +268,12 @@ def from_geoparquet(
       reader is older than the writer and needs upgrading.
 
     Args:
-        path: Path to a GeoParquet file produced by `to_geoparquet`,
+        source: Path to a GeoParquet file produced by `to_geoparquet`,
             DuckDB's ``COPY ... TO``, or any GeoParquet 1.x writer.
-        backend: Loader dispatch tag override. ``None`` reads the
+        kind: Kind override (loader dispatch). ``None`` reads the
             reserved ``_backend`` column; an explicit value skips tag
             recovery entirely (no warning, no strict raise).
-        strict: If ``True`` and neither ``backend=`` nor a ``_backend``
+        strict: If ``True`` and neither ``kind=`` nor a ``_backend``
             column is available, raise `CatalogMetadataError` instead of
             defaulting to ``"raster"`` with a warning.
         retries: Number of retries for transient remote I/O failures.
@@ -281,24 +284,24 @@ def from_geoparquet(
 
     Returns:
         An `InMemoryGeoCatalog` with the same rows, CRS, and (where
-        recoverable) backend tag as the source.
+        recoverable) kind as the source.
 
     Raises:
         CatalogSchemaError: If the artifact's `_schema_version` exceeds
             `SCHEMA_VERSION_CURRENT`.
         CatalogMetadataError: ``strict=True`` and the artifact has no
-            ``_backend`` column (and no ``backend=`` override).
+            ``_backend`` column (and no ``kind=`` override).
     """
     # Read the version *first* via a column-selective parquet load so
     # we can reject a v_future / multi-version artifact before paying
     # for the full read.
     v_artifact = retry_transient_io(
         _read_schema_version,
-        path,
+        source,
         storage_options=storage_options,
         retries=retries,
     )
-    resolved = _resolve_uri(path, storage_options=storage_options)
+    resolved = _resolve_uri(source, storage_options=storage_options)
     try:
         gdf = retry_transient_io(gpd.read_parquet, resolved, retries=retries)
     finally:
@@ -307,7 +310,7 @@ def from_geoparquet(
     if "_schema_version" in gdf.columns:
         gdf = gdf.drop(columns=["_schema_version"])
     check_schema_versions(
-        Path(path),
+        Path(source),
         v_artifact,
         v_artifact,
         reader=SCHEMA_VERSION_CURRENT,
@@ -323,23 +326,23 @@ def from_geoparquet(
             name="datetime",
         )
         gdf = gdf.set_index(idx)
-    if backend is None:
+    if kind is None:
         if backend_col is not None and len(backend_col) > 0:
-            backend = backend_col.iloc[0]
+            kind = backend_col.iloc[0]
         elif strict:
             raise CatalogMetadataError(
-                f"{Path(path)} is missing the reserved '_backend' column. "
-                "Pass backend=... explicitly, or write the catalog via "
+                f"{Path(source)} is missing the reserved '_backend' column. "
+                "Pass kind=... explicitly, or write the catalog via "
                 "geocatalog's to_geoparquet first."
             )
         else:
             log.warning(
                 "opened {!r}: no _backend column found; defaulting to "
-                "backend='raster'. Pass backend=... explicitly to silence.",
-                str(path),
+                "kind='raster'. Pass kind=... explicitly to silence.",
+                str(source),
             )
-            backend = "raster"
-    return InMemoryGeoCatalog(gdf, backend=backend)
+            kind = "raster"
+    return InMemoryGeoCatalog(gdf, kind=kind)
 
 
 def migrate_geoparquet(source: str | Path, *, to_version: int) -> int:

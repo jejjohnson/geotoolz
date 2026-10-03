@@ -33,7 +33,7 @@ def _mem() -> InMemoryGeoCatalog:
         geometry="geometry",
         crs="EPSG:4326",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 @pytest.fixture(params=["memory", "duckdb"])
@@ -84,6 +84,6 @@ def test_inverted_x_in_projected_catalog_rejected() -> None:
         geometry="geometry",
         crs="EPSG:32629",
     )
-    cat = InMemoryGeoCatalog(gdf, backend="raster")
+    cat = InMemoryGeoCatalog(gdf, kind="raster")
     with pytest.raises(ValueError, match="xmin > xmax"):
         cat.query(bounds=(10.0, 0.0, 0.0, 10.0), crs="EPSG:32629")

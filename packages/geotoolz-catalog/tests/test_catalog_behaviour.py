@@ -39,7 +39,7 @@ def _bind_backend(
 
 def _build(rows: list[dict], crs: str = "EPSG:32629") -> GeoCatalog:
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
-    return _convert(InMemoryGeoCatalog(gdf, backend="raster"))
+    return _convert(InMemoryGeoCatalog(gdf, kind="raster"))
 
 
 @pytest.fixture
@@ -401,7 +401,7 @@ class TestIterRows:
             geometry="geometry",
             crs="EPSG:32629",
         )
-        catalog = _convert(InMemoryGeoCatalog(gdf, backend="raster"))
+        catalog = _convert(InMemoryGeoCatalog(gdf, kind="raster"))
 
         row = next(catalog.iter_rows())
 
@@ -489,7 +489,7 @@ class TestUnionGeometryName:
             geometry="footprint",
             crs="EPSG:32629",
         )
-        other = _convert(InMemoryGeoCatalog(other_gdf, backend="raster"))
+        other = _convert(InMemoryGeoCatalog(other_gdf, kind="raster"))
         merged = two_tile_catalog.union(other)
         assert len(merged) == 3
         assert merged.gdf.geometry.notna().all()

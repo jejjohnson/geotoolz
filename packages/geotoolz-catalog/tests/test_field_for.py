@@ -179,7 +179,7 @@ class TestFieldOnTheSliceGrid:
     ) -> None:
         gdf = asset_catalog.gdf.copy()
         gdf.iloc[1, gdf.columns.get_loc("assets")] = json.dumps({"other": "x.tif"})
-        cat = InMemoryGeoCatalog(gdf, backend="raster")
+        cat = InMemoryGeoCatalog(gdf, kind="raster")
         # Clear of the shared edge, which `query` counts as intersecting.
         field = field_for(cat, _slice((*LEFT[:2], 500_300, LEFT[3])), asset="red")
         assert int(field.domain.values[0, 0, 0]) == 10
@@ -258,7 +258,7 @@ class TestFieldForErrors:
     ) -> None:
         gdf = cross_crs_catalog.gdf.iloc[::-1]  # the UTM 30N file first
         with pytest.raises(ValueError, match="slice_="):
-            field_for(InMemoryGeoCatalog(gdf, backend="raster"))
+            field_for(InMemoryGeoCatalog(gdf, kind="raster"))
 
     def test_unsupported_mode_rejected(self, asset_catalog: InMemoryGeoCatalog) -> None:
         with pytest.raises(ValueError, match="raster"):
@@ -270,11 +270,9 @@ class TestFieldForErrors:
         with pytest.raises(KeyError, match="assets"):
             field_for(legacy_catalog, asset="red")
 
-    def test_non_raster_backend_rejected(
-        self, legacy_catalog: InMemoryGeoCatalog
-    ) -> None:
-        vector_cat = InMemoryGeoCatalog(legacy_catalog.gdf, backend="vector")
-        with pytest.raises(ValueError, match="backend='vector'"):
+    def test_non_raster_kind_rejected(self, legacy_catalog: InMemoryGeoCatalog) -> None:
+        vector_cat = InMemoryGeoCatalog(legacy_catalog.gdf, kind="vector")
+        with pytest.raises(ValueError, match="kind='vector'"):
             field_for(vector_cat)
 
     def test_windows_drive_path_treated_as_local(self) -> None:
@@ -353,7 +351,7 @@ def test_lazy_fields_without_a_slice_need_no_grid(
     cross_crs_catalog: InMemoryGeoCatalog,
 ) -> None:
     gdf = cross_crs_catalog.gdf.iloc[::-1]  # the UTM 30N file first
-    fields = field_for(InMemoryGeoCatalog(gdf, backend="raster"), materialize=False)
+    fields = field_for(InMemoryGeoCatalog(gdf, kind="raster"), materialize=False)
     assert len(fields) == 2
 
 

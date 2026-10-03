@@ -32,7 +32,7 @@ def _toy_catalog() -> gc.InMemoryGeoCatalog:
         geometry="geometry",
         crs="EPSG:32629",
     )
-    return gc.InMemoryGeoCatalog(gdf, backend="raster")
+    return gc.InMemoryGeoCatalog(gdf, kind="raster")
 
 
 @pytest.fixture
@@ -50,12 +50,12 @@ class TestOpenCatalogMemoryEngine:
         assert len(cat) == 2
 
     def test_backend_override(self, parquet_path: Path) -> None:
-        cat = gc.open_catalog(parquet_path, engine="memory", backend="vector")
-        assert cat.backend == "vector"
+        cat = gc.open_catalog(parquet_path, engine="memory", kind="vector")
+        assert cat.kind == "vector"
 
     def test_backend_default_preserves_tag(self, parquet_path: Path) -> None:
         cat = gc.open_catalog(parquet_path, engine="memory")
-        assert cat.backend == "raster"
+        assert cat.kind == "raster"
 
 
 class TestOpenCatalogAutoEngine:

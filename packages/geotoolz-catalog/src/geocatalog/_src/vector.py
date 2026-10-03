@@ -22,6 +22,7 @@ from georeader.geotensor import GeoTensor
 from loguru import logger as log
 from rasterio.features import rasterize
 
+from geocatalog._src._deprecation import renamed_kwargs
 from geocatalog._src._schema import StorageEngine
 from geocatalog._src._timeutil import (
     TIME_INVARIANT_END,
@@ -137,14 +138,15 @@ def _vector_row_for_stream(
     return row
 
 
+@renamed_kwargs(backend="engine", target_crs="crs")
 def build_vector_catalog(
     filepaths: Sequence[str | Path],
     *,
     filename_regex: str | None = None,
     date_format: str = "%Y%m%d",
-    target_crs: Any | None = None,
+    crs: Any | None = None,
     layer: str | int | None = None,
-    backend: StorageEngine = "memory",
+    engine: StorageEngine = "memory",
     out_path: str | Path | None = None,
     write_bbox: bool = True,
     sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),
@@ -157,7 +159,7 @@ def build_vector_catalog(
     """Build a vector catalog — in-memory (default) or streamed to GeoParquet.
 
     For each input file, opens it with `geopandas.read_file`, optionally
-    reprojects to ``target_crs``, and records the file's
+    reprojects to ``crs``, and records the file's
     ``total_bounds`` polygon as the catalog footprint. Time is parsed
     from the filename via ``filename_regex``, mirroring
     `build_raster_catalog`. Empty files and non-matching filenames are
@@ -165,12 +167,12 @@ def build_vector_catalog(
 
     Backends mirror `build_raster_catalog`:
 
-    - ``backend="memory"`` (default): collects rows into a gdf and
+    - ``engine="memory"`` (default): collects rows into a gdf and
       returns an `InMemoryGeoCatalog`. First-non-empty file's native CRS
-      latches the catalog CRS when ``target_crs=None``.
-    - ``backend="duckdb"``: streams rows to a GeoParquet at ``out_path``
+      latches the catalog CRS when ``crs=None``.
+    - ``engine="duckdb"``: streams rows to a GeoParquet at ``out_path``
       and returns a `DuckDBGeoCatalog`. CRS-latching is disabled — every
-      file is reprojected to ``target_crs`` (EPSG:4326 by default).
+      file is reprojected to ``crs`` (EPSG:4326 by default).
       Requires the ``[duckdb]`` extra.
 
     Args:
@@ -182,29 +184,29 @@ def build_vector_catalog(
             every file as time-invariant (sentinel interval).
         date_format: ``strptime`` format for the named date groups.
             Default ``"%Y%m%d"``.
-        target_crs: CRS for footprint + storage. For ``backend="memory"``,
+        crs: CRS for footprint + storage. For ``engine="memory"``,
             ``None`` latches onto the first non-empty file's native CRS
             and reprojects every subsequent file to match. For
-            ``backend="duckdb"``, ``None`` is upgraded to ``"EPSG:4326"``.
+            ``engine="duckdb"``, ``None`` is upgraded to ``"EPSG:4326"``.
         layer: Layer name or index for multi-layer files (GeoPackage,
             GDB). ``None`` opens the file's default layer.
-        backend: ``"memory"`` for the existing in-RAM path,
+        engine: ``"memory"`` for the existing in-RAM path,
             ``"duckdb"`` for the streamed GeoParquet path.
         out_path: Destination GeoParquet path. Required when
-            ``backend="duckdb"``.
+            ``engine="duckdb"``.
         write_bbox: Emit the GeoParquet 1.1 covering ``bbox`` struct.
-            Only consulted when ``backend="duckdb"``.
+            Only consulted when ``engine="duckdb"``.
         sort_by: Sort keys for the post-write DuckDB rewrite; literal
             ``"geometry_hilbert"`` expands to
             ``ST_Hilbert(ST_Centroid(geometry))``. ``None`` skips the
-            rewrite. Only consulted when ``backend="duckdb"``.
+            rewrite. Only consulted when ``engine="duckdb"``.
         partition_by: Optional Hive partition columns for directory
-            output when ``backend="duckdb"``. ``"year"``, ``"month"``,
+            output when ``engine="duckdb"``. ``"year"``, ``"month"``,
             and ``"day"`` are derived from ``start_time``.
         batch_size: Rows per Arrow record batch. Default 10 000.
         n_workers: Process-pool size for per-file extraction. ``1``
             runs sequentially.
-        ordered: With ``backend="duckdb"`` and ``n_workers>1``, preserve
+        ordered: With ``engine="duckdb"`` and ``n_workers>1``, preserve
             input row order instead of completion order. Useful for
             reproducible artifacts when ``sort_by=None``. A slow input
             earlier in the queue stalls every subsequent yield and can
@@ -214,26 +216,25 @@ def build_vector_catalog(
             layout.
 
     Returns:
-        `InMemoryGeoCatalog` for ``backend="memory"``, otherwise a
+        `InMemoryGeoCatalog` for ``engine="memory"``, otherwise a
         `DuckDBGeoCatalog`.
 
     Raises:
         ValueError: If no files yielded a row, or ``out_path`` missing
             in the duckdb branch.
     """
-    if backend not in ("memory", "duckdb"):
+    if engine not in ("memory", "duckdb"):
         raise ValueError(
-            f"build_vector_catalog: backend must be 'memory' or 'duckdb'; "
-            f"got {backend!r}"
+            f"build_vector_catalog: engine must be 'memory' or 'duckdb'; got {engine!r}"
         )
-    if backend == "duckdb":
+    if engine == "duckdb":
         if out_path is None:
-            raise ValueError("build_vector_catalog(backend='duckdb') requires out_path")
+            raise ValueError("build_vector_catalog(engine='duckdb') requires out_path")
         return _build_vector_catalog_duckdb(
             filepaths,
             filename_regex=filename_regex,
             date_format=date_format,
-            target_crs=target_crs,
+            target_crs=crs,
             layer=layer,
             out_path=out_path,
             write_bbox=write_bbox,
@@ -247,7 +248,7 @@ def build_vector_catalog(
 
     pattern = re.compile(filename_regex) if filename_regex is not None else None
     rows: list[dict[str, Any]] = []
-    # `effective_crs` starts as the user-supplied `target_crs` (possibly
+    # `effective_crs` starts as the user-supplied `crs` (possibly
     # None). On the first non-empty file we latch onto its native CRS,
     # then pass that down to subsequent calls so every later file's
     # footprint is reprojected into the catalog's uniform CRS. This is
@@ -258,7 +259,7 @@ def build_vector_catalog(
     # (we have no row to anchor). Only matched rows seed `effective_crs`.
     # This keeps the catalog's CRS aligned with the rows it actually
     # contains, even when leading files are empty or unmatched.
-    effective_crs = target_crs
+    effective_crs = crs
     for fp in filepaths:
         row, observed_crs = _vector_row(
             fp,
@@ -276,7 +277,7 @@ def build_vector_catalog(
     if not rows:
         raise ValueError("build_vector_catalog: no files yielded a row")
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=effective_crs)
-    return InMemoryGeoCatalog(gdf, backend="vector")
+    return InMemoryGeoCatalog(gdf, kind="vector")
 
 
 def _build_vector_catalog_duckdb(
@@ -306,7 +307,7 @@ def _build_vector_catalog_duckdb(
     if target_crs is None:
         target_crs = "EPSG:4326"
         log.info(
-            "build_vector_catalog(backend='duckdb'): target_crs=None → "
+            "build_vector_catalog(engine='duckdb'): crs=None → "
             "canonicalising footprints to EPSG:4326 (design §sharp-edges)."
         )
     pattern = re.compile(filename_regex) if filename_regex is not None else None
@@ -323,7 +324,7 @@ def _build_vector_catalog_duckdb(
         extract_fn,
         out_path=out_path,
         crs=target_crs,
-        backend="vector",
+        kind="vector",
         write_bbox=write_bbox,
         sort_by=sort_by,
         partition_by=partition_by,
@@ -387,9 +388,9 @@ def load_vector(
         NotImplementedError: For ``task="object_detection"`` (v0.2+).
         ValueError: If no catalog rows match the slice.
     """
-    if catalog.backend != "vector":
+    if catalog.kind != "vector":
         raise TypeError(
-            f"load_vector requires a vector-backend catalog; got {catalog.backend!r}"
+            f"load_vector requires a vector-backend catalog; got {catalog.kind!r}"
         )
     if task == "object_detection":
         raise NotImplementedError(

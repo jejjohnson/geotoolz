@@ -161,14 +161,14 @@ def field_for(
         )
     if mode != "raster":
         raise ValueError(f"field_for(mode={mode!r}): only 'raster' is supported today.")
-    # `backend` is set by every catalog constructor we ship; tolerate
+    # `kind` is set by every catalog constructor we ship; tolerate
     # third-party catalogs that omit it by skipping the check rather
     # than crashing with AttributeError.
-    backend = getattr(catalog, "backend", None)
-    if backend is not None and backend != "raster":
+    kind = getattr(catalog, "kind", None)
+    if kind is not None and kind != "raster":
         raise ValueError(
-            f"field_for(mode='raster') requires a raster-backed catalog; "
-            f"got backend={backend!r}. Pass a catalog produced by "
+            f"field_for(mode='raster') requires a raster catalog; "
+            f"got kind={kind!r}. Pass a catalog produced by "
             "`build_raster_catalog` / `stage()` over raster sources."
         )
     if len(catalog) == 0:
@@ -272,7 +272,7 @@ def _with_asset_paths(
         return catalog
     gdf = catalog.gdf.copy()
     gdf["filepath"] = _asset_paths(catalog, asset=asset)
-    return InMemoryGeoCatalog(gdf, backend=catalog.backend)
+    return InMemoryGeoCatalog(gdf, kind=catalog.kind)
 
 
 def _reject_unstaged_uris(paths: list[str], *, asset: str | None) -> None:

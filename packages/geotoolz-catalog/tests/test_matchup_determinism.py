@@ -58,7 +58,7 @@ def _run(primary: Any, secondary: Any, **kwargs: Any) -> list[MatchupRow]:
 
 def _catalog(rows: list[dict[str, Any]], crs: str = "EPSG:4326") -> InMemoryGeoCatalog:
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
-    return InMemoryGeoCatalog(gdf, backend="raster")  # type: ignore[arg-type]
+    return InMemoryGeoCatalog(gdf, kind="raster")  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +351,7 @@ def test_matchup_ids_keep_the_legacy_crs_serialisation() -> None:
 
 
 def test_bundle_items_keep_their_source_ids() -> None:
-    bundle = CatalogBundle.empty(target_crs="EPSG:4326", backend="raster")
+    bundle = CatalogBundle.empty(crs="EPSG:4326", kind="raster")
 
     class _Fake:
         name = "fake"
@@ -425,7 +425,7 @@ def test_missing_ids_in_string_columns_fall_back_to_the_filepath() -> None:
             closed="both",
         ),
     )
-    catalog = InMemoryGeoCatalog(gdf, backend="raster")
+    catalog = InMemoryGeoCatalog(gdf, kind="raster")
     rows = _run([_row("p")], catalog, temporal=Synchronous())
     assert sorted(r.member_ids[1] for r in rows) == ["a.tif", "b.tif"]
     assert {r.member_sources[1] for r in rows} == {"catalog"}
@@ -452,7 +452,7 @@ def test_plain_custom_strategy_ids_do_not_depend_on_the_instance() -> None:
 
 
 def test_rewriting_a_matchup_replaces_it_in_the_bundle() -> None:
-    bundle = CatalogBundle.empty(target_crs="EPSG:4326", backend="raster")
+    bundle = CatalogBundle.empty(crs="EPSG:4326", kind="raster")
     rows = _run(
         [_row("p")],
         [_row("s", source="b"), _row("t", source="b")],

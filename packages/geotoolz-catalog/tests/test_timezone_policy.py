@@ -61,7 +61,7 @@ def _query_interval(name: str) -> pd.Interval:
 
 
 def _catalog(backend: str, tz: str | None, tmp_path: Path) -> GeoCatalog:
-    mem = InMemoryGeoCatalog(_gdf(tz), backend="raster")
+    mem = InMemoryGeoCatalog(_gdf(tz), kind="raster")
     if backend == "memory":
         return mem
     pytest.importorskip("duckdb")
@@ -89,7 +89,7 @@ def test_query_matches_for_every_zone_combination(
 
 
 def test_inmemory_constructor_stores_naive_utc() -> None:
-    cat = InMemoryGeoCatalog(_gdf("Europe/Madrid"), backend="raster")
+    cat = InMemoryGeoCatalog(_gdf("Europe/Madrid"), kind="raster")
     assert cat.gdf.index.left.tz is None
     assert cat.gdf["start_time"].dt.tz is None
     assert cat.gdf["start_time"].iloc[0] == pd.Timestamp("2024-01-01T11:00")
@@ -111,7 +111,7 @@ def test_inmemory_constructor_accepts_mixed_zone_column() -> None:
         geometry="geometry",
         crs="EPSG:4326",
     )
-    cat = InMemoryGeoCatalog(gdf, backend="raster")
+    cat = InMemoryGeoCatalog(gdf, kind="raster")
     assert list(cat.gdf.index.left) == [
         pd.Timestamp("2024-01-01T12:00"),
         pd.Timestamp("2024-01-01T12:00"),
@@ -119,8 +119,8 @@ def test_inmemory_constructor_accepts_mixed_zone_column() -> None:
 
 
 def test_union_of_naive_and_aware_catalogs() -> None:
-    naive = InMemoryGeoCatalog(_gdf(None), backend="raster")
-    aware = InMemoryGeoCatalog(_gdf("Europe/Madrid"), backend="raster")
+    naive = InMemoryGeoCatalog(_gdf(None), kind="raster")
+    aware = InMemoryGeoCatalog(_gdf("Europe/Madrid"), kind="raster")
     merged = naive.union(aware)
     assert len(merged) == 2
     assert merged.temporal_extent == pd.Interval(
@@ -149,7 +149,7 @@ def test_duckdb_timestamptz_artifact_ignores_session_zone(tmp_path: Path) -> Non
     from geocatalog import open_catalog
 
     path = tmp_path / "cat.parquet"
-    to_geoparquet(InMemoryGeoCatalog(_gdf(None), backend="raster"), path)
+    to_geoparquet(InMemoryGeoCatalog(_gdf(None), kind="raster"), path)
     # Rewrite the time columns as timestamp[us, UTC], as an external tool
     # or an older geocatalog writer would have.
     table = pq.read_table(path)
@@ -197,7 +197,7 @@ def test_bundle_ingest_aware_source_rows_into_naive_catalog() -> None:
 
     naive = InMemoryGeoCatalog(
         _gdf(None).assign(id=["a"], source=["local"], collection=["c"]),
-        backend="raster",
+        kind="raster",
     )
     bundle = CatalogBundle.from_catalog(naive)
     bundle.ingest(_Src(), bounds=(-1, -1, 2, 2))  # type: ignore[arg-type]
