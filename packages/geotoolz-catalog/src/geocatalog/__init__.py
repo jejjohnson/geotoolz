@@ -47,6 +47,7 @@ raises its install hint.
 
 from __future__ import annotations
 
+import importlib
 from typing import TYPE_CHECKING
 
 from loguru import logger as _logger
@@ -219,15 +220,16 @@ __all__ = [
 ]
 
 
-# Load the sub-namespaces now, so attribute access never depends on
-# import order. `geocatalog.matchup` is both a function and a
-# sub-namespace: the import system binds the `geocatalog.matchup` module
-# onto this package, and that module is callable (it forwards to the
-# `matchup` function), so `geocatalog.matchup(...)`,
+# Load the sub-namespaces now and bind them explicitly, so attribute
+# access never depends on import order (or on `importlib.reload`, which
+# re-runs the `matchup` function import above while the cached
+# sub-modules are not re-imported). `geocatalog.matchup` is both a
+# function and a sub-namespace: the module is callable (it forwards to
+# the `matchup` function), so `geocatalog.matchup(...)`,
 # `geocatalog.matchup.MatchupRow` and `import geocatalog.matchup as m`
 # all work.
 for _namespace in ("bundle", "catalog", "io", "matchup", "sources", "staging", "types"):
-    __import__(f"geocatalog.{_namespace}")
+    globals()[_namespace] = importlib.import_module(f"geocatalog.{_namespace}")
 del _namespace
 
 

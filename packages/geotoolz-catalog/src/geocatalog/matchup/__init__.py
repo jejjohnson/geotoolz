@@ -13,6 +13,7 @@ See ``docs/design/query-matchup.md`` §4.4 / §4.6.
 
 from __future__ import annotations
 
+import importlib
 import sys
 import types
 from typing import Any
@@ -52,6 +53,11 @@ class _CallableNamespace(types.ModuleType):
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return matchup(*args, **kwargs)
+
+    def __reduce__(self) -> tuple[Any, tuple[str]]:
+        # Modules don't pickle; this one is a documented callable that
+        # callers hand to process pools, so pickle it by import path.
+        return importlib.import_module, (self.__name__,)
 
 
 # `inspect.signature(geocatalog.matchup)` follows this to the function.

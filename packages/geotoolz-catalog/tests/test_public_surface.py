@@ -132,3 +132,23 @@ def test_calling_the_matchup_namespace_runs_the_engine() -> None:
         )
     )
     assert [r.member_ids for r in rows] == [("p", "s")]
+
+
+def test_matchup_namespace_survives_a_package_reload() -> None:
+    code = (
+        "import importlib, geocatalog\n"
+        "importlib.reload(geocatalog)\n"
+        "import geocatalog.matchup as ns\n"
+        "assert ns is geocatalog.matchup and callable(ns), type(ns)\n"
+        "assert ns.MatchupRow is geocatalog.MatchupRow\n"
+        "assert geocatalog.catalog.open_catalog is geocatalog.open_catalog\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_matchup_namespace_pickles_by_reference() -> None:
+    import pickle
+
+    restored = pickle.loads(pickle.dumps(geocatalog.matchup))
+    assert restored is geocatalog.matchup
+    assert callable(restored)
