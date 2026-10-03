@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import shutil
 import uuid
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
@@ -54,7 +55,13 @@ _BACKEND_T = Literal["raster", "xarray", "vector"]
 # The bundle's own schema version, distinct from the catalog's
 # `_schema_version` column. Bump on changes to the bundle directory
 # layout or the queries/matchups parquet schemas; carried in `_meta.json`.
-BUNDLE_SCHEMA_VERSION: int = 1
+#
+# v2: `matchups.parquet` gains `member_collections`. v1 bundles still
+# load (their matchups read back with no collections).
+BUNDLE_SCHEMA_VERSION: int = 2
+
+#: The files `to_directory` owns; anything else in the directory is kept.
+_BUNDLE_FILES = ("items.parquet", "queries.parquet", "matchups.parquet", "_meta.json")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -556,17 +563,20 @@ class CatalogBundle:
         empty — otherwise `from_directory()` would silently
         resurrect rows that should have been dropped.
 
-        Every component is first written to a hidden temp sibling; only
-        once all of them exist are they renamed into place, ``_meta.json``
-        last. A failure while writing leaves the previous bundle intact
-        (no truncated file, no mix of old and new components).
+        Every component is first written to a hidden staging directory
+        next to ``path``; only once all of them exist is the bundle
+        published, by swapping that directory in for ``path`` (files the
+        bundle does not own are moved across). A reader therefore sees
+        either the previous generation or the new one — never new items
+        beside old queries or metadata — and a failure while writing
+        leaves the previous bundle untouched.
         ``created_at`` records the first save and survives later ones;
         ``updated_at`` is the latest.
         """
-        from geocatalog._src.parquet import _staging_name, to_geoparquet
+        from geocatalog._src.parquet import to_geoparquet
 
         dest = Path(path)
-        dest.mkdir(parents=True, exist_ok=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
         now = datetime.now(tz=UTC).isoformat()
         created_at = self.created_at or _existing_created_at(dest) or now
         meta = {
@@ -576,39 +586,22 @@ class CatalogBundle:
             "created_at": created_at,
             "updated_at": now,
         }
-        # Stage every component first. A failure while writing any of
-        # them removes the temps and leaves the previous bundle whole —
-        # never a new items table beside old queries and metadata.
-        staged: dict[str, Path] = {}
+        token = uuid.uuid4().hex
+        staging = dest.with_name(f".{dest.name}.{token}.new")
+        staging.mkdir()
         try:
-            staged["items.parquet"] = tmp = _staging_name(dest / "items.parquet")
-            to_geoparquet(self.catalog, tmp)
-            # Sidecar tables are written only when non-empty; an empty one
-            # is removed below so the directory matches the in-memory
-            # contract (empty = omitted).
+            to_geoparquet(self.catalog, staging / "items.parquet")
+            # Sidecar tables are written only when non-empty, so the
+            # directory matches the in-memory contract (empty = omitted).
             if self.queries:
-                staged["queries.parquet"] = tmp = _staging_name(
-                    dest / "queries.parquet"
-                )
-                _queries_to_parquet(self.queries, tmp)
+                _queries_to_parquet(self.queries, staging / "queries.parquet")
             if self.matchups:
-                staged["matchups.parquet"] = tmp = _staging_name(
-                    dest / "matchups.parquet"
-                )
-                _matchups_to_parquet(self.matchups, tmp)
-            staged["_meta.json"] = tmp = _staging_name(dest / "_meta.json")
-            tmp.write_text(json.dumps(meta, indent=2))
+                _matchups_to_parquet(self.matchups, staging / "matchups.parquet")
+            (staging / "_meta.json").write_text(json.dumps(meta, indent=2))
         except BaseException:
-            for tmp in staged.values():
-                tmp.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
             raise
-        # Publish: only renames remain, `_meta.json` last.
-        for name in ("items.parquet", "queries.parquet", "matchups.parquet"):
-            if name in staged:
-                os.replace(staged[name], dest / name)
-            else:
-                (dest / name).unlink(missing_ok=True)
-        os.replace(staged["_meta.json"], dest / "_meta.json")
+        _publish_directory(staging, dest, owned=_BUNDLE_FILES, token=token)
         self.created_at = created_at
 
     @classmethod
@@ -781,6 +774,34 @@ def _queries_from_parquet(path: Path) -> list[QueryRecord]:
             )
         )
     return out
+
+
+def _publish_directory(
+    staging: Path, dest: Path, *, owned: tuple[str, ...], token: str
+) -> None:
+    """Make ``staging`` the new ``dest`` in one rename.
+
+    The previous ``dest`` is set aside under a hidden name first and
+    restored if the swap fails; entries in it that the bundle does not
+    own (``owned``) are then moved into the new directory, and the rest
+    of it is deleted. Between the two renames ``dest`` briefly does not
+    exist — a reader gets "not found", never a mix of generations.
+    """
+    if not dest.exists():
+        os.replace(staging, dest)
+        return
+    previous = dest.with_name(f".{dest.name}.{token}.old")
+    os.replace(dest, previous)
+    try:
+        os.replace(staging, dest)
+    except BaseException:
+        os.replace(previous, dest)
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    for entry in previous.iterdir():
+        if entry.name not in owned:
+            os.replace(entry, dest / entry.name)
+    shutil.rmtree(previous, ignore_errors=True)
 
 
 def _matchups_to_parquet(matchups: list[MatchupRow], path: Path) -> None:
