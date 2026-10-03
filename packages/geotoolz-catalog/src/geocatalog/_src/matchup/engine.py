@@ -73,6 +73,10 @@ class MatchupRow:
             member's interval midpoint relative to ``time_reference``.
         tolerance: Serialized strategy parameters, suitable for
             re-running the matchup deterministically.
+        member_collections: Parallel to ``member_ids``; each member's
+            ``SourceRow.collection``. Together with ``member_sources`` and
+            ``member_ids`` it identifies the bundle item a member refers
+            to. Empty for rows written before it was recorded.
         query_set: Optional user label, persisted as the
             ``query_set`` column in ``matchups.parquet`` so
             ``geocatalog stage --matchup-tag <name>`` can select a
@@ -89,6 +93,7 @@ class MatchupRow:
     time_offset_sec: tuple[float, ...]
     tolerance: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     query_set: str | None = None
+    member_collections: tuple[str, ...] = ()
 
 
 def matchup(

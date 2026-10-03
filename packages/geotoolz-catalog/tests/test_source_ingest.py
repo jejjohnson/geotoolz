@@ -492,3 +492,45 @@ def test_every_5xx_is_retried(code: int, retried: bool) -> None:
     from geocatalog._src.retry import _is_transient
 
     assert _is_transient(_http_error(code)) is retried
+
+
+def test_replace_keeps_matchups_of_a_same_id_item_in_another_collection(
+    tmp_path: Path,
+) -> None:
+    from geocatalog._src.matchup import Intersects, Synchronous, matchup
+
+    bundle = _bundle_with("a")
+    bundle.ingest(_FixedSource([_row("a", collection="other")]), bounds=(0, 0, 1, 1))
+    station = SourceRow(
+        id="st",
+        source="insitu",
+        collection="stations",
+        geometry=shapely.box(0.4, 0.4, 0.5, 0.5),
+        interval=pd.Interval(
+            pd.Timestamp("2024-06-01", tz="UTC"),
+            pd.Timestamp("2024-06-01", tz="UTC"),
+            closed="both",
+        ),
+    )
+    rows = list(
+        matchup(
+            [_row("a", collection="c"), _row("a", collection="other")],
+            [station],
+            spatial=Intersects(),
+            temporal=Synchronous(),
+        )
+    )
+    assert [r.member_collections for r in rows] == [
+        ("c", "stations"),
+        ("other", "stations"),
+    ]
+    bundle.write_matchups(rows)
+    bundle.to_directory(tmp_path)
+    bundle = CatalogBundle.from_directory(tmp_path)  # collections persist
+
+    bundle.ingest(
+        _FixedSource([_row("a", collection="c")]),
+        bounds=(0, 0, 1, 1),
+        on_duplicate="replace",
+    )
+    assert [m.member_collections[0] for m in bundle.matchups] == ["other"]
