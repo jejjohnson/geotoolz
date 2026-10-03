@@ -681,6 +681,8 @@ class TestReexports:
 # ---------------------------------------------------------------------------
 
 
+# Buffers here are in degrees on purpose (#242 warns about that).
+@pytest.mark.filterwarnings("ignore:CentroidWithin.*degrees:UserWarning")
 class TestBufferedSearchEnvelope:
     T = datetime(2024, 6, 1, tzinfo=UTC)
 

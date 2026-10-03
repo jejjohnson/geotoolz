@@ -48,6 +48,14 @@ class TemporalStrategy(Protocol):
         ...
 
 
+# The engine prefers a strategy's ``select(primary, candidates) ->
+# list[int]`` (positions of the matching candidates) when it has one:
+# positions identify candidates exactly, whereas mapping the intervals
+# ``filter`` returns back to rows is ambiguous when two candidates share
+# an interval. Every shipped strategy defines both; ``filter`` stays the
+# Protocol so a custom strategy only needs one.
+
+
 def _to_timedelta(value: timedelta | str) -> pd.Timedelta:
     """Coerce ``timedelta`` / ISO-like string to a `pd.Timedelta`."""
     import pandas as pd
@@ -56,12 +64,42 @@ def _to_timedelta(value: timedelta | str) -> pd.Timedelta:
 
 
 def _midpoint(interval: pd.Interval) -> pd.Timestamp:
-    """Interval midpoint as a Timestamp (tz-aware if the input is)."""
+    """Interval midpoint as a UTC-aware Timestamp (naive inputs are UTC).
+
+    The one midpoint helper: strategies and the engine's
+    ``time_offset_sec`` both use it, so naive and aware intervals can be
+    compared without a ``TypeError``.
+    """
     import pandas as pd
 
-    left = pd.Timestamp(interval.left)
-    right = pd.Timestamp(interval.right)
+    from geocatalog._src._timeutil import to_utc_ts
+
+    left = to_utc_ts(pd.Timestamp(interval.left))
+    right = to_utc_ts(pd.Timestamp(interval.right))
     return left + (right - left) / 2
+
+
+def _present(candidates: pd.IntervalIndex) -> list[tuple[int, pd.Interval]]:
+    """``(position, interval)`` of the candidates that have times.
+
+    A missing interval (``NaT`` endpoints) reads back as NaN and never
+    matches.
+    """
+    import pandas as pd
+
+    return [
+        (i, iv)
+        for i, iv in enumerate(candidates)
+        if isinstance(iv, pd.Interval)
+        and not pd.isna(iv.left)
+        and not pd.isna(iv.right)
+    ]
+
+
+def _by_positions(
+    candidates: pd.IntervalIndex, positions: list[int]
+) -> pd.IntervalIndex:
+    return candidates[positions]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -83,24 +121,21 @@ class NearestInTime:
         primary: pd.Interval,
         candidates: pd.IntervalIndex,
     ) -> pd.IntervalIndex:
-        import pandas as pd
+        return _by_positions(candidates, self.select(primary, candidates))
 
-        if len(candidates) == 0:
-            return candidates[:0]
+    def select(self, primary: pd.Interval, candidates: pd.IntervalIndex) -> list[int]:
+        """Position of the nearest candidate within ``dt``; ties → first."""
         dt_limit = _to_timedelta(self.dt)
         primary_mid = _midpoint(primary)
-        # Build a parallel array of midpoints + |delta| seconds.
-        mids = pd.Series(
-            [_midpoint(iv) for iv in candidates], index=range(len(candidates))
-        )
-        deltas = (mids - primary_mid).abs()
-        in_range = deltas <= dt_limit
-        if not in_range.any():
-            return candidates[:0]
-        # `idxmin` over the in-range subset returns the position of
-        # the smallest |delta|; ties broken by first occurrence.
-        best_pos = int(deltas[in_range].astype("int64").idxmin())
-        return candidates[best_pos : best_pos + 1]
+        best: tuple[pd.Timedelta, int] | None = None
+        for i, iv in _present(candidates):
+            delta = abs(_midpoint(iv) - primary_mid)
+            # Strict `<` keeps the first of equally near candidates; the
+            # engine orders candidates stably, so the choice is
+            # deterministic.
+            if delta <= dt_limit and (best is None or delta < best[0]):
+                best = (delta, i)
+        return [] if best is None else [best[1]]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -124,19 +159,14 @@ class WithinWindow:
         primary: pd.Interval,
         candidates: pd.IntervalIndex,
     ) -> pd.IntervalIndex:
-        import pandas as pd
+        return _by_positions(candidates, self.select(primary, candidates))
 
-        if len(candidates) == 0:
-            return candidates[:0]
+    def select(self, primary: pd.Interval, candidates: pd.IntervalIndex) -> list[int]:
+        """Positions of the candidates whose midpoint is in the window."""
         primary_mid = _midpoint(primary)
         lower = primary_mid + _to_timedelta(self.start)
         upper = primary_mid + _to_timedelta(self.end)
-        mids = pd.Series(
-            [_midpoint(iv) for iv in candidates], index=range(len(candidates))
-        )
-        keep = (mids >= lower) & (mids <= upper)
-        positions = [i for i, k in enumerate(keep) if k]
-        return candidates[positions]
+        return [i for i, iv in _present(candidates) if lower <= _midpoint(iv) <= upper]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -160,18 +190,22 @@ class Synchronous:
         primary: pd.Interval,
         candidates: pd.IntervalIndex,
     ) -> pd.IntervalIndex:
+        return _by_positions(candidates, self.select(primary, candidates))
+
+    def select(self, primary: pd.Interval, candidates: pd.IntervalIndex) -> list[int]:
+        """Positions of the candidates overlapping the widened primary."""
         import pandas as pd
 
-        if len(candidates) == 0:
-            return candidates[:0]
+        from geocatalog._src._timeutil import to_utc_ts
+
         tol = _to_timedelta(self.tolerance)
-        primary_left = pd.Timestamp(primary.left) - tol
-        primary_right = pd.Timestamp(primary.right) + tol
+        primary_left = to_utc_ts(pd.Timestamp(primary.left)) - tol
+        primary_right = to_utc_ts(pd.Timestamp(primary.right)) + tol
         positions = []
-        for i, iv in enumerate(candidates):
-            cand_left = pd.Timestamp(iv.left)
-            cand_right = pd.Timestamp(iv.right)
+        for i, iv in _present(candidates):
+            cand_left = to_utc_ts(pd.Timestamp(iv.left))
+            cand_right = to_utc_ts(pd.Timestamp(iv.right))
             # Intervals overlap iff each starts before the other ends.
             if cand_left <= primary_right and cand_right >= primary_left:
                 positions.append(i)
-        return candidates[positions]
+        return positions
