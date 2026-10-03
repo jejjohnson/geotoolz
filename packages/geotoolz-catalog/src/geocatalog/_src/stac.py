@@ -236,9 +236,12 @@ def to_stac_collection(
         }
         # An item-level CRS is inherited by every asset without its own,
         # so it is only written when all the item's assets share it.
+        # Without a resolved `crs` column the carried `proj:*` properties
+        # are the only CRS record, so they are kept as they are.
+        has_crs_column = any("crs" in row.extras for row in rows)
         crs_values = [row.extras.get("crs") for row in rows]
         shared_crs = _same_crs(crs_values)
-        if not shared_crs:
+        if has_crs_column and not shared_crs:
             props.pop("crs", None)
             for field in _PROJ_CRS_FIELDS:
                 props.pop(field, None)
@@ -327,12 +330,13 @@ def _group_scenes(catalog: GeoCatalog, collection_id: str) -> dict[str, list[Any
         if _present(stac_collection):
             scope: tuple[Any, ...] | None = ("stac", str(stac_collection))
         else:
+            # Positional: a missing source or collection stays a `None`
+            # slot, so ("a", None) and (None, "a") remain distinct.
             parts = tuple(
-                str(row.extras[k])
+                str(row.extras[k]) if _present(row.extras.get(k)) else None
                 for k in ("source", "collection")
-                if _present(row.extras.get(k))
             )
-            scope = ("bundle", *parts) if parts else None
+            scope = ("bundle", *parts) if any(parts) else None
         scenes.setdefault(("id", scope, item_id), []).append(row)
 
     scopes_per_id: dict[str, set[Any]] = {}
@@ -346,7 +350,7 @@ def _group_scenes(catalog: GeoCatalog, collection_id: str) -> dict[str, list[Any
         _, scope, item_id = key
         if len(scopes_per_id[item_id]) > 1 and scope is not None:
             # Two scopes may spell the same; the `~<n>` pass separates them.
-            return f"{'/'.join(scope[1:])}:{item_id}"
+            return f"{'/'.join(p for p in scope[1:] if p is not None)}:{item_id}"
         return item_id
 
     used: set[str] = set()
