@@ -12,8 +12,9 @@ Adapters are imported lazily on attribute access so a bare
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from geocatalog._src._lazy import lazy_getattr
 from geocatalog._src.sources import AuthStatus, Source, SourceRow
 
 
@@ -35,10 +36,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> Any:
-    """Lazy-import adapters so optional extras stay opt-in."""
-    if name in {"EarthAccessSource", "STACSource", "CMRSource", "GEESource"}:
-        from geocatalog._src import sources as _sources
-
-        return getattr(_sources, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# Adapters load lazily so optional extras stay opt-in.
+__getattr__ = lazy_getattr(
+    globals(), ["CMRSource", "EarthAccessSource", "GEESource", "STACSource"]
+)

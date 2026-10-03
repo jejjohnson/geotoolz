@@ -1,27 +1,46 @@
-"""`geocatalog.catalog` — backends, builders, loaders, set algebra.
+"""`geocatalog.catalog` — catalogs, builders, loaders and persistence.
 
-Hybrid-layout sub-namespace. Re-exports everything in the flat
-top-level surface except `GeoSlice` (which lives in `geocatalog.types`).
-Both ``from geocatalog import InMemoryGeoCatalog`` and
-``from geocatalog.catalog import InMemoryGeoCatalog`` work.
+Thematic sub-namespace: the catalog backends and their set algebra, the
+builders and loaders, GeoParquet persistence (including the streaming
+writer and the schema-version errors) and the patcher domain bridge.
+Every name here is also at the top level, as the same object —
+``from geocatalog import InMemoryGeoCatalog`` and
+``from geocatalog.catalog import InMemoryGeoCatalog`` are equivalent.
+`GeoSlice` and the grid helpers live in `geocatalog.types`.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from geocatalog import open_catalog
-from geocatalog._src.base import CatalogRow, GeoCatalog
+from geocatalog._src._lazy import lazy_getattr
+from geocatalog._src.base import (
+    CatalogMetadataError,
+    CatalogRow,
+    CatalogSchemaError,
+    GeoCatalog,
+)
 from geocatalog._src.domain import CatalogDomain
+from geocatalog._src.factory import open_catalog
 from geocatalog._src.memory import InMemoryGeoCatalog
 from geocatalog._src.ops import intersect, query, union
-from geocatalog._src.parquet import from_geoparquet, to_geoparquet
+from geocatalog._src.parquet import (
+    SCHEMA_VERSION_CURRENT,
+    from_geoparquet,
+    migrate_geoparquet,
+    to_geoparquet,
+)
 from geocatalog._src.raster import (
+    aload_raster,
     build_raster_catalog,
     load_raster,
     load_raster_timeseries,
 )
-from geocatalog._src.streaming import append_files
+from geocatalog._src.streaming import (
+    StreamingParquetWriter,
+    append_files,
+    sort_geoparquet,
+)
 
 
 if TYPE_CHECKING:
@@ -39,11 +58,16 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "SCHEMA_VERSION_CURRENT",
     "CatalogDomain",
+    "CatalogMetadataError",
     "CatalogRow",
+    "CatalogSchemaError",
     "DuckDBGeoCatalog",
     "GeoCatalog",
     "InMemoryGeoCatalog",
+    "StreamingParquetWriter",
+    "aload_raster",
     "append_files",
     "build_raster_catalog",
     "build_vector_catalog",
@@ -56,16 +80,26 @@ __all__ = [
     "load_raster_timeseries",
     "load_vector",
     "load_xarray",
+    "migrate_geoparquet",
     "open_catalog",
     "query",
+    "sort_geoparquet",
     "to_geoparquet",
     "to_stac_collection",
     "union",
 ]
 
 
-def __getattr__(name: str) -> Any:
-    """Defer to the top-level lazy loader for extras-gated backends."""
-    import geocatalog as _gc
-
-    return getattr(_gc, name)
+__getattr__ = lazy_getattr(
+    globals(),
+    [
+        "DuckDBGeoCatalog",
+        "build_vector_catalog",
+        "build_xarray_catalog",
+        "from_stac_items",
+        "from_stac_search",
+        "load_vector",
+        "load_xarray",
+        "to_stac_collection",
+    ],
+)

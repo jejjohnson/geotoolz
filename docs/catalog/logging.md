@@ -53,22 +53,22 @@ cat = gc.build_raster_catalog(paths, ...)
 
 ## Where logs come from
 
-`geocatalog` emits records from these paths today:
+`geocatalog` emits records from these public entry points today (the
+records' logger names are the internal modules under `geocatalog`, so
+`logger.enable("geocatalog")` covers all of them):
 
-- `geocatalog._src.raster._filepath_to_row` — `WARNING` when a filename
-  doesn't match the date regex (the file is skipped).
-- `geocatalog._src.vector._vector_row_for_stream` — `WARNING` on empty
-  vector files and regex misses.
-- `geocatalog._src.raster.build_raster_catalog` /
-  `geocatalog._src.vector.build_vector_catalog` — `INFO` when the
+- `build_raster_catalog` — `WARNING` when a filename doesn't match the
+  date regex (the file is skipped).
+- `build_vector_catalog` — `WARNING` on empty vector files and regex
+  misses.
+- `build_raster_catalog` / `build_vector_catalog` — `INFO` when the
   `duckdb` backend is asked to canonicalise footprints to EPSG:4326
   because no `target_crs` was passed.
-- `geocatalog._src.streaming.StreamingParquetWriter` — `ERROR` (with
-  traceback) when closing the parquet handle fails while a partial
-  file is being discarded after an error.
-- `geocatalog._src.streaming.append_files` — `INFO` when input files are
-  skipped because their `filepath` is already indexed in the archive.
-- `geocatalog._src.streaming.sort_geoparquet` — `DEBUG` after a
-  Hilbert-sorted rewrite completes.
+- `StreamingParquetWriter` — `ERROR` (with traceback) when closing the
+  parquet handle fails while a partial file is being discarded after an
+  error.
+- `append_files` — `INFO` when input files are skipped because their
+  `filepath` is already indexed in the archive.
+- `sort_geoparquet` — `DEBUG` after a Hilbert-sorted rewrite completes.
 
 All call sites use loguru's `{}` placeholder style, not stdlib's `%s`.

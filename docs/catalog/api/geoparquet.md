@@ -5,11 +5,18 @@ migration, and streaming writes.
 
 ## GeoParquet roundtrip
 
-::: geocatalog._src.parquet.to_geoparquet
-::: geocatalog._src.parquet.from_geoparquet
+::: geocatalog.catalog.to_geoparquet
+::: geocatalog.catalog.from_geoparquet
 
 ## Schema migration
 
-::: geocatalog._src.parquet.SCHEMA_VERSION_CURRENT
-::: geocatalog._src.parquet.migrate_geoparquet
-::: geocatalog._src.base.CatalogSchemaError
+::: geocatalog.catalog.SCHEMA_VERSION_CURRENT
+::: geocatalog.catalog.migrate_geoparquet
+::: geocatalog.catalog.CatalogSchemaError
+::: geocatalog.catalog.CatalogMetadataError
+
+## Streaming writes
+
+::: geocatalog.catalog.StreamingParquetWriter
+::: geocatalog.catalog.append_files
+::: geocatalog.catalog.sort_geoparquet

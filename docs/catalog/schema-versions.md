@@ -15,7 +15,7 @@ The current reader version is
 whenever the on-disk schema changes substantively (new required column,
 renamed reserved column, changed semantics of an existing field).
 Bumping also requires registering a forward migration in
-`geocatalog._src.parquet._MIGRATIONS`.
+the `_MIGRATIONS` table next to the GeoParquet reader.
 
 ## Why bother
 
