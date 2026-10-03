@@ -70,12 +70,18 @@ def test_pool_key_s3_basic():
 
 def test_pool_key_gs_basic():
     key = objstore._pool_key("gs://my-bucket/path/to/file.tif")
-    assert key == ("gcs", "my-bucket", None, None, None, None, ())
+    assert key == ("gcs", "my-bucket", None, None, None, None, (), None)
 
 
 def test_pool_key_https_basic():
     key = objstore._pool_key("https://example.com/data/file.tif")
-    assert key == ("http", "example.com", None, None, None, None, ())
+    assert key == ("http", "example.com", None, None, None, None, (), "https")
+
+
+def test_pool_key_separates_http_from_https():
+    assert objstore._pool_key("http://example.com/a") != objstore._pool_key(
+        "https://example.com/a"
+    )
 
 
 def test_pool_key_includes_aws_region_from_env(monkeypatch):
@@ -467,3 +473,37 @@ def test_hf_reads_send_the_token_to_the_prefixed_endpoint(monkeypatch):
         "path": "/hf/datasets/org/repo/resolve/v1/data.bin",
         "auth": "Bearer secret",
     }
+
+
+@pytest.mark.parametrize(
+    ("uri", "key"),
+    [
+        (
+            "hf://datasets/org/repo@refs/pr/3/train.json",
+            "datasets/org/repo/resolve/refs%2Fpr%2F3/train.json",
+        ),
+        (
+            "hf://org/repo@refs/convert/parquet/default/train/0.parquet",
+            "org/repo/resolve/refs%2Fconvert%2Fparquet/default/train/0.parquet",
+        ),
+        (
+            "hf://org/repo@refs%2Fpr%2F3/w.bin",
+            "org/repo/resolve/refs%2Fpr%2F3/w.bin",
+        ),
+        ("hf://org/repo@v1.0/w.bin", "org/repo/resolve/v1.0/w.bin"),
+    ],
+)
+def test_hf_special_refs_are_kept_whole(uri, key):
+    assert objstore.object_key(uri) == key
+
+
+def test_hf_ref_without_a_file_raises():
+    with pytest.raises(ValueError, match="org/repo/path"):
+        objstore.object_key("hf://org/repo@refs/pr/3")
+
+
+def test_hf_endpoint_scheme_is_part_of_the_pool_key(monkeypatch):
+    monkeypatch.setenv("HF_ENDPOINT", "http://host/prefix")
+    plain = objstore._pool_key("hf://org/model/w.bin")
+    monkeypatch.setenv("HF_ENDPOINT", "https://host/prefix")
+    assert objstore._pool_key("hf://org/model/w.bin") != plain

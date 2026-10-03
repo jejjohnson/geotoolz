@@ -61,7 +61,7 @@ from collections.abc import Hashable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 
 if TYPE_CHECKING:
@@ -145,25 +145,32 @@ def _locate_hf(uri: str, netloc: str, path: str) -> _Location:
             "supported; use `models/`, `datasets/` or `spaces/`."
         )
     kind = _HF_REPO_TYPES[parts.pop(0)] if parts and parts[0] in _HF_REPO_TYPES else ""
-    if len(parts) < 3:
-        raise ValueError(
-            f"obstore client pool: {uri!r} must name `org/repo/path` (after an "
-            "optional `models/`, `datasets/` or `spaces/`)."
-        )
-    org, repo, rest = parts[0], parts[1], "/".join(parts[2:])
-    repo, at, revision = repo.partition("@")
+    repo, at, revision = parts[1].partition("@") if len(parts) > 1 else ("", "", "")
+    files = parts[2:]
     if at and not revision:
         raise ValueError(
             f"obstore client pool: {uri!r} has an empty revision after `@`; "
             "name the revision or drop the `@`."
         )
+    # Special refs carry slashes: `@refs/pr/3/file`, `@refs/convert/parquet/…`.
+    if revision == "refs" and len(files) >= 2 and files[0] in ("pr", "convert"):
+        revision, files = f"refs/{files[0]}/{files[1]}", files[2:]
+    if len(parts) < 2 or not files:
+        raise ValueError(
+            f"obstore client pool: {uri!r} must name `org/repo/path` (after an "
+            "optional `models/`, `datasets/` or `spaces/`)."
+        )
+    org, rest = parts[0], "/".join(files)
+    # Percent-encoded whole, like huggingface_hub's URL builder
+    # (`refs/pr/3` → `refs%2Fpr%2F3`); an already-encoded ref is kept.
+    revision = quote(unquote(revision or "main"), safe="")
     endpoint = urlsplit(os.environ.get("HF_ENDPOINT") or "https://huggingface.co")
     return _Location(
         "hf",
         endpoint.scheme or "https",
         endpoint.netloc + endpoint.path.rstrip("/"),
         None,
-        f"{kind}{org}/{repo}/resolve/{revision or 'main'}/{rest}",
+        f"{kind}{org}/{repo}/resolve/{revision}/{rest}",
     )
 
 
@@ -302,11 +309,13 @@ def _env_region_endpoint(
     return None, endpoint, None
 
 
-_PoolKey = tuple[str, str, str | None, str | None, str | None, str | None, Hashable]
+_PoolKey = tuple[
+    str, str, str | None, str | None, str | None, str | None, Hashable, str | None
+]
 
 
 def _pool_key(uri: str, storage_options: Mapping[str, Any] | None = None) -> _PoolKey:
-    """Return ``(backend, bucket, scope, region, endpoint, profile, options)``.
+    """Return ``(backend, bucket, scope, region, endpoint, profile, options, scheme)``.
 
     ``scope`` is the Azure container (two containers of one account are
     two clients) or the HTTP query string (each signed URL is its own
@@ -315,7 +324,9 @@ def _pool_key(uri: str, storage_options: Mapping[str, Any] | None = None) -> _Po
     S3-compatible endpoints of one bucket name gets two entries. The frozen
     ``storage_options`` are part of the key: asking for the same bucket
     with different options returns a different client instead of
-    silently reusing the first one's configuration.
+    silently reusing the first one's configuration. ``scheme`` is the
+    transport (``http`` / ``https``) of HTTP and Hugging Face stores, so
+    the two never share a client; ``None`` for the bucket stores.
     """
     loc = _locate(uri)
     region, endpoint, profile = _env_region_endpoint(loc.backend)
@@ -327,6 +338,7 @@ def _pool_key(uri: str, storage_options: Mapping[str, Any] | None = None) -> _Po
         endpoint,
         profile,
         _freeze(dict(storage_options or {})),
+        loc.scheme if loc.backend in ("http", "hf") else None,
     )
 
 
