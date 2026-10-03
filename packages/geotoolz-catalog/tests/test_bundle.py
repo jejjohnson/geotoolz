@@ -132,18 +132,18 @@ class TestSourceRowToGdfRow:
         )
         assert d["filepath"] == "n"
 
-    def test_primary_asset_missing_falls_back_to_first(self) -> None:
+    def test_primary_asset_missing_raises(self) -> None:
         row = _src_row(
             "x",
             time=datetime(2024, 6, 15, tzinfo=UTC),
             assets={"red": "r"},
         )
-        # Asking for "nir" but it's not in the assets → falls back
-        # to the first asset, not crashes.
-        d = source_row_to_gdf_row(
-            row, target_crs=pyproj.CRS.from_epsg(4326), primary_asset="nir"
-        )
-        assert d["filepath"] == "r"
+        # Asking for "nir" when only "red" exists must not silently
+        # index the red band as if it were nir (#240).
+        with pytest.raises(KeyError, match="no asset 'nir'"):
+            source_row_to_gdf_row(
+                row, target_crs=pyproj.CRS.from_epsg(4326), primary_asset="nir"
+            )
 
     def test_empty_assets_yields_empty_filepath(self) -> None:
         row = _src_row("x", time=datetime(2024, 6, 15, tzinfo=UTC), assets={})

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
+import shutil
 import uuid
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
@@ -28,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import geopandas as gpd
 import pandas as pd
 import pyproj
+from loguru import logger
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
@@ -52,7 +55,13 @@ _BACKEND_T = Literal["raster", "xarray", "vector"]
 # The bundle's own schema version, distinct from the catalog's
 # `_schema_version` column. Bump on changes to the bundle directory
 # layout or the queries/matchups parquet schemas; carried in `_meta.json`.
-BUNDLE_SCHEMA_VERSION: int = 1
+#
+# v2: `matchups.parquet` gains `member_collections`. v1 bundles still
+# load (their matchups read back with no collections).
+BUNDLE_SCHEMA_VERSION: int = 2
+
+#: The files `to_directory` owns; anything else in the directory is kept.
+_BUNDLE_FILES = ("items.parquet", "queries.parquet", "matchups.parquet", "_meta.json")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -117,8 +126,13 @@ def source_row_to_gdf_row(
             geometries come in EPSG:4326 by convention.
         primary_asset: Asset key to promote to ``filepath``. If
             ``None``, the first key in ``row.assets`` is used (Python
-            dicts preserve insertion order). If the assets dict is
+            dicts preserve insertion order); if the assets dict is
             empty, ``filepath`` is an empty string.
+
+    Raises:
+        KeyError: ``primary_asset`` is given but the row has no such
+            asset — silently indexing another band instead would be a
+            wrong-data bug, not a fallback.
     """
     # Reproject if needed. The shapely geometry doesn't carry its
     # CRS — we use `target_crs` as the authoritative target and assume
@@ -130,12 +144,17 @@ def source_row_to_gdf_row(
     # is usually a sensible default (it's typically the lowest-res
     # overview or the canonical band); users who care can pass
     # `primary_asset` explicitly.
-    key: str | None = None
-    if row.assets:
-        if primary_asset is not None and primary_asset in row.assets:
-            key = primary_asset
-        else:
-            key = next(iter(row.assets))
+    # Strict on an explicit key (#240): silently indexing another band
+    # instead would be a wrong-data bug, not a fallback.
+    if primary_asset is not None:
+        if primary_asset not in row.assets:
+            raise KeyError(
+                f"source row {row.id!r} has no asset {primary_asset!r}; "
+                f"available: {sorted(row.assets)}"
+            )
+        key: str | None = primary_asset
+    else:
+        key = next(iter(row.assets), None)
     filepath = row.assets[key] if key is not None else ""
     # Native CRS of the promoted asset, when the source knows it (STAC
     # `proj:*`); granule sources such as CMR leave it unset.
@@ -160,6 +179,69 @@ def source_row_to_gdf_row(
         "properties": json.dumps(dict(row.properties), default=str),
         "provenance": json.dumps(dict(row.provenance), default=str),
     }
+
+
+# An item's identity in the bundle. Upstream ids are only unique within
+# their source and collection (STAC scopes item ids to a collection), so
+# the primary key is the triple, not the bare id.
+_ItemKey = tuple[str, str, str]
+
+
+def _row_key(row: SourceRow) -> _ItemKey:
+    return (str(row.source), str(row.collection), str(row.id))
+
+
+def _gdf_keys(gdf: gpd.GeoDataFrame) -> list[_ItemKey]:
+    if not {"source", "collection", "id"} <= set(gdf.columns):
+        return []
+    return [
+        (str(s), str(c), str(i))
+        for s, c, i in zip(gdf["source"], gdf["collection"], gdf["id"], strict=True)
+    ]
+
+
+def _item_keys(gdf: gpd.GeoDataFrame) -> set[_ItemKey]:
+    return set(_gdf_keys(gdf))
+
+
+def _resolve_duplicates(
+    rows: list[SourceRow],
+    existing: set[_ItemKey],
+    on_duplicate: str,
+) -> list[SourceRow]:
+    """Apply the ``on_duplicate`` policy to freshly queried rows.
+
+    Rows are keyed by (source, collection, id). Returns the rows to add.
+    ``"skip"`` keeps the first occurrence and drops keys already in the
+    bundle; ``"replace"`` keeps the last occurrence (the caller removes
+    the existing rows it supersedes).
+    """
+    if on_duplicate == "error":
+        seen: set[_ItemKey] = set()
+        dups = []
+        for r in rows:
+            key = _row_key(r)
+            if key in existing or key in seen:
+                dups.append(key)
+            seen.add(key)
+        if dups:
+            raise ValueError(
+                f"ingest: {len(dups)} row(s) already in the bundle or repeated "
+                f"in this ingest (e.g. source/collection/id {dups[0]!r}); pass "
+                "on_duplicate='skip' to keep the existing rows or "
+                "'replace' to overwrite them."
+            )
+        return rows
+    if on_duplicate == "skip":
+        out, seen = [], set(existing)
+        for r in rows:
+            key = _row_key(r)
+            if key not in seen:
+                seen.add(key)
+                out.append(r)
+        return out
+    latest = {_row_key(r): r for r in rows}
+    return list(latest.values())
 
 
 class CatalogBundle:
@@ -194,6 +276,8 @@ class CatalogBundle:
         self.backend = backend
         self.queries: list[QueryRecord] = list(queries) if queries else []
         self.matchups: list[MatchupRow] = list(matchups) if matchups else []
+        # When the bundle was first written; kept across re-saves.
+        self.created_at: str | None = None
 
     @classmethod
     def empty(
@@ -264,6 +348,7 @@ class CatalogBundle:
         primary_asset: str | None = None,
         tag: str | None = None,
         notes: str | None = None,
+        on_duplicate: Literal["error", "skip", "replace"] = "error",
     ) -> str:
         """Query a `Source` and append matching rows to the items table.
 
@@ -287,16 +372,35 @@ class CatalogBundle:
                 propagated to every row via
                 ``provenance['query_tag']``.
             notes: Free-form notes recorded in ``QueryRecord.notes``.
+            on_duplicate: What to do with a row whose
+                ``(source, collection, id)`` — the items table's primary
+                key; upstream ids are only unique within a collection —
+                is already in the bundle or repeats within this ingest.
+                ``"error"`` raises before anything is changed; ``"skip"``
+                keeps the existing row (so re-running an ingest is a
+                no-op) and never inspects the discarded one;
+                ``"replace"`` keeps the newest one and drops the
+                matchups that referenced the replaced item, since they
+                describe the old data.
 
         Returns:
             The query_id (uuid4 hex) of this ingest call.
+
+        Raises:
+            ValueError: A duplicate ``id`` with ``on_duplicate="error"``,
+                or an unknown ``on_duplicate``.
+            KeyError: ``primary_asset`` is missing from a row.
         """
+        if on_duplicate not in ("error", "skip", "replace"):
+            raise ValueError(
+                "on_duplicate must be 'error', 'skip' or 'replace'; "
+                f"got {on_duplicate!r}"
+            )
         from shapely.geometry import box as _shapely_box
 
         query_id = uuid.uuid4().hex
         created_at = datetime.now(tz=UTC)
-        new_rows: list[dict[str, Any]] = []
-        n = 0
+        stamped_rows: list[SourceRow] = []
         for row in source.query(
             bounds,
             interval,
@@ -318,15 +422,26 @@ class CatalogBundle:
             # disagree, prefer the more-specific (adapter-set) one.
             if tag is not None:
                 prov.setdefault("query_tag", tag)
-            stamped = dataclasses.replace(row, provenance=prov)
-            new_rows.append(
-                source_row_to_gdf_row(
-                    stamped,
-                    target_crs=self.target_crs,
-                    primary_asset=primary_asset,
-                )
+            stamped_rows.append(dataclasses.replace(row, provenance=prov))
+        n = len(stamped_rows)
+
+        # Resolve duplicates before mapping, so rows the policy discards
+        # are never validated (a skipped row may lack `primary_asset`).
+        existing = _item_keys(self.catalog.gdf)
+        stamped_rows = _resolve_duplicates(stamped_rows, existing, on_duplicate)
+        new_rows = [
+            source_row_to_gdf_row(
+                row, target_crs=self.target_crs, primary_asset=primary_asset
             )
-            n += 1
+            for row in stamped_rows
+        ]
+        base = self.catalog.gdf
+        if on_duplicate == "replace":
+            replaced = {_row_key(r) for r in stamped_rows} & existing
+            if replaced:
+                keep = [k not in replaced for k in _gdf_keys(base)]
+                base = base[keep]
+                self._drop_matchups_of(replaced)
 
         if new_rows:
             new_gdf = gpd.GeoDataFrame(new_rows, crs=self.target_crs)
@@ -336,7 +451,7 @@ class CatalogBundle:
                 closed="both",
                 name="datetime",
             )
-            merged = pd.concat([self.catalog.gdf, new_gdf], axis=0)
+            merged = pd.concat([base, new_gdf], axis=0)
             self.catalog = InMemoryGeoCatalog(
                 gpd.GeoDataFrame(merged, crs=self.target_crs),
                 backend=self.backend,
@@ -362,6 +477,41 @@ class CatalogBundle:
             )
         )
         return query_id
+
+    def _drop_matchups_of(self, items: set[tuple[str, str, str]]) -> None:
+        """Drop matchups with a member in ``items`` ((source, collection, id)).
+
+        A matchup that records its members' collections is matched on
+        the full key, so replacing one collection's item keeps the
+        matchups of a same-id item in another collection. Older rows
+        without collections can only be matched on ``(source, id)``
+        and are dropped whenever that pair is replaced.
+        """
+        pairs = {(src, rid) for src, _, rid in items}
+
+        def stale(m: MatchupRow) -> bool:
+            if len(m.member_collections) == len(m.member_ids):
+                return any(
+                    (str(s), str(c), str(i)) in items
+                    for s, c, i in zip(
+                        m.member_sources,
+                        m.member_collections,
+                        m.member_ids,
+                        strict=True,
+                    )
+                )
+            return any(
+                (str(s), str(i)) in pairs
+                for s, i in zip(m.member_sources, m.member_ids, strict=True)
+            )
+
+        kept = [m for m in self.matchups if not stale(m)]
+        if len(kept) < len(self.matchups):
+            logger.warning(
+                "ingest: dropped {} matchup(s) referencing replaced items",
+                len(self.matchups) - len(kept),
+            )
+        self.matchups = kept
 
     def write_matchups(
         self,
@@ -408,30 +558,47 @@ class CatalogBundle:
         write are *removed* when the corresponding in-memory list is
         empty — otherwise `from_directory()` would silently
         resurrect rows that should have been dropped.
+
+        Every component is first written to a hidden staging directory
+        next to ``path``; only once all of them exist is the bundle
+        published, by swapping that directory in for ``path`` (files the
+        bundle does not own are moved across). A reader therefore sees
+        either the previous generation or the new one — never new items
+        beside old queries or metadata — and a failure while writing
+        leaves the previous bundle untouched.
+        ``created_at`` records the first save and survives later ones;
+        ``updated_at`` is the latest.
         """
         from geocatalog._src.parquet import to_geoparquet
 
         dest = Path(path)
-        dest.mkdir(parents=True, exist_ok=True)
-        to_geoparquet(self.catalog, dest / "items.parquet")
-        # Sidecar tables: write when non-empty, otherwise delete any
-        # leftover from a previous write so the on-disk state
-        # matches the in-memory contract (empty = omitted).
-        if self.queries:
-            _queries_to_parquet(self.queries, dest / "queries.parquet")
-        else:
-            (dest / "queries.parquet").unlink(missing_ok=True)
-        if self.matchups:
-            _matchups_to_parquet(self.matchups, dest / "matchups.parquet")
-        else:
-            (dest / "matchups.parquet").unlink(missing_ok=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        now = datetime.now(tz=UTC).isoformat()
+        created_at = self.created_at or _existing_created_at(dest) or now
         meta = {
             "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
             "target_crs": self.target_crs.to_string(),
             "backend": self.backend,
-            "created_at": datetime.now(tz=UTC).isoformat(),
+            "created_at": created_at,
+            "updated_at": now,
         }
-        (dest / "_meta.json").write_text(json.dumps(meta, indent=2))
+        token = uuid.uuid4().hex
+        staging = dest.with_name(f".{dest.name}.{token}.new")
+        staging.mkdir()
+        try:
+            to_geoparquet(self.catalog, staging / "items.parquet")
+            # Sidecar tables are written only when non-empty, so the
+            # directory matches the in-memory contract (empty = omitted).
+            if self.queries:
+                _queries_to_parquet(self.queries, staging / "queries.parquet")
+            if self.matchups:
+                _matchups_to_parquet(self.matchups, staging / "matchups.parquet")
+            (staging / "_meta.json").write_text(json.dumps(meta, indent=2))
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        _publish_directory(staging, dest, owned=_BUNDLE_FILES, token=token)
+        self.created_at = created_at
 
     @classmethod
     def from_directory(cls, path: str | Path) -> CatalogBundle:
@@ -472,10 +639,31 @@ class CatalogBundle:
                 f"{artifact_version!r}, exceeds reader v{BUNDLE_SCHEMA_VERSION}. "
                 "Upgrade `geocatalog` to read this bundle."
             )
-        target_crs = pyproj.CRS.from_user_input(meta["target_crs"])
-        backend: _BACKEND_T = meta.get("backend", "raster")
+        try:
+            target_crs = pyproj.CRS.from_user_input(meta["target_crs"])
+        except (KeyError, pyproj.exceptions.CRSError) as exc:
+            raise ValueError(
+                f"CatalogBundle directory {src!r} `_meta.json` has no valid "
+                f"`target_crs`: {exc}"
+            ) from exc
+        backend = meta.get("backend", "raster")
+        if backend not in ("raster", "xarray", "vector"):
+            raise ValueError(
+                f"CatalogBundle directory {src!r} `_meta.json` has unknown "
+                f"backend {backend!r}"
+            )
 
-        catalog = from_geoparquet(src / "items.parquet")
+        catalog = from_geoparquet(src / "items.parquet", backend=backend)
+        # Checked for empty bundles too: a later ingest builds rows in
+        # `target_crs` and concatenates them onto this table.
+        if catalog.gdf.crs is not None and not pyproj.CRS.from_user_input(
+            catalog.gdf.crs
+        ).equals(target_crs):
+            raise ValueError(
+                f"CatalogBundle directory {src!r}: items.parquet CRS "
+                f"{catalog.gdf.crs} does not match `_meta.json` target_crs "
+                f"{target_crs.to_string()}"
+            )
         queries = (
             _queries_from_parquet(src / "queries.parquet")
             if (src / "queries.parquet").exists()
@@ -486,13 +674,15 @@ class CatalogBundle:
             if (src / "matchups.parquet").exists()
             else []
         )
-        return cls(
+        bundle = cls(
             catalog,
             target_crs=target_crs,
             backend=backend,
             queries=queries,
             matchups=matchups,
         )
+        bundle.created_at = meta.get("created_at")
+        return bundle
 
     # ------------------------------------------------------------------
     # Convenience accessors
@@ -534,6 +724,15 @@ class CatalogBundle:
 # ---------------------------------------------------------------------------
 
 
+def _existing_created_at(dest: Path) -> str | None:
+    """``created_at`` from a bundle already saved at ``dest``, if any."""
+    try:
+        value = json.loads((dest / "_meta.json").read_text()).get("created_at")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return value if isinstance(value, str) else None
+
+
 def _queries_to_parquet(queries: list[QueryRecord], path: Path) -> None:
     """Write a `QueryRecord` list as flat parquet (no geometry)."""
     df = pd.DataFrame([dataclasses.asdict(q) for q in queries])
@@ -573,6 +772,34 @@ def _queries_from_parquet(path: Path) -> list[QueryRecord]:
     return out
 
 
+def _publish_directory(
+    staging: Path, dest: Path, *, owned: tuple[str, ...], token: str
+) -> None:
+    """Make ``staging`` the new ``dest`` in one rename.
+
+    The previous ``dest`` is set aside under a hidden name first and
+    restored if the swap fails; entries in it that the bundle does not
+    own (``owned``) are then moved into the new directory, and the rest
+    of it is deleted. Between the two renames ``dest`` briefly does not
+    exist — a reader gets "not found", never a mix of generations.
+    """
+    if not dest.exists():
+        os.replace(staging, dest)
+        return
+    previous = dest.with_name(f".{dest.name}.{token}.old")
+    os.replace(dest, previous)
+    try:
+        os.replace(staging, dest)
+    except BaseException:
+        os.replace(previous, dest)
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    for entry in previous.iterdir():
+        if entry.name not in owned:
+            os.replace(entry, dest / entry.name)
+    shutil.rmtree(previous, ignore_errors=True)
+
+
 def _matchups_to_parquet(matchups: list[MatchupRow], path: Path) -> None:
     """Write a `MatchupRow` list as parquet (geometry → WKT column)."""
     rows = []
@@ -584,6 +811,7 @@ def _matchups_to_parquet(matchups: list[MatchupRow], path: Path) -> None:
         d.pop("geometry_intersect")
         d["member_ids"] = list(m.member_ids)
         d["member_sources"] = list(m.member_sources)
+        d["member_collections"] = list(m.member_collections)
         d["member_roles"] = list(m.member_roles)
         d["time_offset_sec"] = list(m.time_offset_sec)
         d["tolerance_json"] = json.dumps(dict(m.tolerance), default=str)
@@ -620,9 +848,18 @@ def _matchups_from_parquet(path: Path) -> list[MatchupRow]:
                 query_set=(
                     None if pd.isna(row.get("query_set")) else str(row["query_set"])
                 ),
+                member_collections=_member_collections(row),
             )
         )
     return out
+
+
+def _member_collections(row: pd.Series) -> tuple[str, ...]:
+    """``member_collections`` of a persisted row; ``()`` for older tables."""
+    value = row.get("member_collections")
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ()
+    return tuple(str(c) for c in value)
 
 
 def _wkt_to_geometry(wkt: str) -> BaseGeometry:
