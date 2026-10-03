@@ -397,7 +397,7 @@ def _reprojector(src: pyproj.CRS, dst: pyproj.CRS) -> Any:
 
 def _dedup(members: Iterable[_Member]) -> list[_Member]:
     """Drop repeats of a ``(source, collection, id)``; the first read wins."""
-    out: dict[tuple[str, str], _Member] = {}
+    out: dict[tuple[str, str, str], _Member] = {}
     for m in members:
         out.setdefault(m.key, m)
     return list(out.values())
