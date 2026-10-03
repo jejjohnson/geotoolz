@@ -21,11 +21,14 @@ import glob
 import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import pandas as pd
 from cyclopts import App, Parameter
+
+from geocatalog._src._schema import StorageEngine
 
 
 # Sub-app + root. Cyclopts lets us register sub-apps via
@@ -38,9 +41,6 @@ build_app = App(
     name="build", help="Build a catalog from raster / xarray / vector files."
 )
 app.command(build_app)
-
-
-_BackendT = Literal["raster", "xarray", "vector"]
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +163,54 @@ def _parse_partition_by(value: str | None) -> tuple[str, ...] | None:
 # ---------------------------------------------------------------------------
 
 
+def _run_build(
+    verb: str,
+    build: Callable[[list[Path]], Any],
+    *,
+    input_glob: str,
+    out: Path,
+    target_crs: str | None,
+    json_output: bool,
+    write: bool = True,
+    input_errors: tuple[type[Exception], ...] = (),
+) -> int:
+    """The body every ``build`` subcommand shares, with its exit codes.
+
+    Validates ``--target-crs``, expands the glob, runs ``build`` and
+    writes the catalog to ``out`` (unless ``write=False``: the builder
+    already did). ``input_errors`` are reader errors that mean "not a
+    file of this kind" — user errors (exit 1), not crashes.
+    """
+    if (err := _crs_error(target_crs, "--target-crs")) is not None:
+        print(err, file=sys.stderr)
+        return 1
+    try:
+        paths = _expand_glob(input_glob)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if not paths:
+        print(f"no files matched {input_glob!r}", file=sys.stderr)
+        return 1
+    try:
+        cat = build(paths)
+    except ImportError as exc:
+        print(f"build {verb} needs an extra: {exc}", file=sys.stderr)
+        return 1
+    except (ValueError, TypeError, *input_errors) as exc:
+        print(f"build {verb} failed: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"build {verb} I/O error: {exc}", file=sys.stderr)
+        return 3
+    if write:
+        code = _write_catalog(cat, out)
+        if code is not None:
+            return code
+    _emit_build_result(out, len(cat), json_output=json_output)
+    return 0
+
+
 @build_app.command
 def raster(
     *,
@@ -186,7 +234,7 @@ def raster(
         Parameter(help="Catalog CRS. None latches onto the first file's native CRS."),
     ] = None,
     backend: Annotated[
-        Literal["memory", "duckdb"],
+        StorageEngine,
         Parameter(help="`memory` builds in RAM; `duckdb` streams to GeoParquet."),
     ] = "memory",
     json_output: Annotated[
@@ -194,21 +242,11 @@ def raster(
     ] = False,
 ) -> int:
     """Build a raster catalog from a glob of GeoTIFFs."""
-    from geocatalog import build_raster_catalog
 
-    if (err := _crs_error(target_crs, "--target-crs")) is not None:
-        print(err, file=sys.stderr)
-        return 1
-    try:
-        paths = _expand_glob(input_glob)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    if not paths:
-        print(f"no files matched {input_glob!r}", file=sys.stderr)
-        return 1
-    try:
-        cat = build_raster_catalog(
+    def build(paths: list[Path]) -> Any:
+        from geocatalog import build_raster_catalog
+
+        return build_raster_catalog(
             paths,
             filename_regex=regex,
             date_format=date_format,
@@ -216,21 +254,16 @@ def raster(
             backend=backend,
             out_path=out if backend == "duckdb" else None,
         )
-    except ImportError as exc:
-        print(f"build raster needs an extra: {exc}", file=sys.stderr)
-        return 1
-    except (ValueError, TypeError) as exc:
-        print(f"build raster failed: {exc}", file=sys.stderr)
-        return 1
-    except OSError as exc:
-        print(f"build raster I/O error: {exc}", file=sys.stderr)
-        return 3
-    if backend == "memory":
-        code = _write_catalog(cat, out)
-        if code is not None:
-            return code
-    _emit_build_result(out, len(cat), json_output=json_output)
-    return 0
+
+    return _run_build(
+        "raster",
+        build,
+        input_glob=input_glob,
+        out=out,
+        target_crs=target_crs,
+        json_output=json_output,
+        write=backend == "memory",  # the duckdb engine streams straight to `out`
+    )
 
 
 @build_app.command
@@ -250,35 +283,20 @@ def xarray(
     ] = False,
 ) -> int:
     """Build an xarray-shaped catalog. Requires the `[xarray-raster]` extra."""
-    try:
+
+    def build(paths: list[Path]) -> Any:
         from geocatalog import build_xarray_catalog
-    except ImportError as exc:
-        print(f"build xarray needs the [xarray-raster] extra: {exc}", file=sys.stderr)
-        return 1
-    if (err := _crs_error(target_crs, "--target-crs")) is not None:
-        print(err, file=sys.stderr)
-        return 1
-    try:
-        paths = _expand_glob(input_glob)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    if not paths:
-        print(f"no files matched {input_glob!r}", file=sys.stderr)
-        return 1
-    try:
-        cat = build_xarray_catalog(paths, time_var=time_var, target_crs=target_crs)
-    except (ValueError, TypeError) as exc:
-        print(f"build xarray failed: {exc}", file=sys.stderr)
-        return 1
-    except OSError as exc:
-        print(f"build xarray I/O error: {exc}", file=sys.stderr)
-        return 3
-    code = _write_catalog(cat, out)
-    if code is not None:
-        return code
-    _emit_build_result(out, len(cat), json_output=json_output)
-    return 0
+
+        return build_xarray_catalog(paths, time_var=time_var, target_crs=target_crs)
+
+    return _run_build(
+        "xarray",
+        build,
+        input_glob=input_glob,
+        out=out,
+        target_crs=target_crs,
+        json_output=json_output,
+    )
 
 
 @build_app.command
@@ -301,41 +319,27 @@ def vector(
     ] = False,
 ) -> int:
     """Build a vector catalog (Shapefile / GeoPackage / GeoJSON)."""
-    try:
+
+    def build(paths: list[Path]) -> Any:
         from geocatalog import build_vector_catalog
-    except ImportError as exc:
-        print(f"build vector failed: {exc}", file=sys.stderr)
-        return 1
-    if (err := _crs_error(target_crs, "--target-crs")) is not None:
-        print(err, file=sys.stderr)
-        return 1
-    try:
-        paths = _expand_glob(input_glob)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    if not paths:
-        print(f"no files matched {input_glob!r}", file=sys.stderr)
-        return 1
-    try:
-        cat = build_vector_catalog(
+
+        return build_vector_catalog(
             paths,
             filename_regex=regex,
             date_format=date_format,
             target_crs=target_crs,
             layer=layer,
         )
-    except (ValueError, TypeError, *_unreadable_input_errors()) as exc:
-        print(f"build vector failed: {exc}", file=sys.stderr)
-        return 1
-    except OSError as exc:
-        print(f"build vector I/O error: {exc}", file=sys.stderr)
-        return 3
-    code = _write_catalog(cat, out)
-    if code is not None:
-        return code
-    _emit_build_result(out, len(cat), json_output=json_output)
-    return 0
+
+    return _run_build(
+        "vector",
+        build,
+        input_glob=input_glob,
+        out=out,
+        target_crs=target_crs,
+        json_output=json_output,
+        input_errors=_unreadable_input_errors(),
+    )
 
 
 # ---------------------------------------------------------------------------

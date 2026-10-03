@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import parse_qsl, urlparse
 
 import pandas as pd
 import pyproj
@@ -29,6 +28,7 @@ from geocatalog._src._antimeridian import (
     lonlat_polygon,
 )
 from geocatalog._src._timeutil import to_utc_ts
+from geocatalog._src.uri import query_params
 
 
 LONLAT = pyproj.CRS.from_epsg(4326)
@@ -227,8 +227,7 @@ _SAS_KEYS = frozenset({"sig", "se"})
 
 def is_signed_href(href: str) -> bool:
     """True when ``href`` carries an expiring Azure SAS signature."""
-    query = urlparse(href).query
-    return bool(query) and {k for k, _ in parse_qsl(query)} >= _SAS_KEYS
+    return {k for k, _ in query_params(href)} >= _SAS_KEYS
 
 
 def reproject_geometry(

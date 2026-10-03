@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 from loguru import logger
 
+from geocatalog._src._extras import missing_extra
 from geocatalog._src._stac_item import (
     ASSET_CRS_PROPERTY,
     UndecodableItemError,
@@ -34,7 +35,6 @@ from geocatalog._src.sources._base import (
     SourceRow,
     wants_no_rows,
 )
-from geocatalog._src.sources._extras import _missing_extra
 
 
 if TYPE_CHECKING:
@@ -95,14 +95,16 @@ class STACSource(Source):
         name: str = "stac",
     ) -> None:
         if pystac_client is None:
-            raise _missing_extra(
-                "STACSource", "stac", "pystac-client>=0.7 planetary-computer>=1.0"
+            raise missing_extra(
+                "`STACSource`",
+                "stac",
+                packages="pystac-client>=0.7 planetary-computer>=1.0",
             )
         if sign_assets and planetary_computer is None:
-            raise _missing_extra(
-                "STACSource(sign_assets=True)",
+            raise missing_extra(
+                "`STACSource(sign_assets=True)`",
                 "stac",
-                "pystac-client>=0.7 planetary-computer>=1.0",
+                packages="pystac-client>=0.7 planetary-computer>=1.0",
             )
         self.endpoint = endpoint
         self.sign_assets = sign_assets

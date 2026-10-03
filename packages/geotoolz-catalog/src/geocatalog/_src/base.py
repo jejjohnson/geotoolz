@@ -14,9 +14,15 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import pandas as pd
+
+from geocatalog._src._schema import (
+    INTERNAL_COLUMNS as INTERNAL_COLUMNS,
+    RESERVED_COLUMNS as RESERVED_COLUMNS,
+    BackendTag,
+)
 
 
 if TYPE_CHECKING:
@@ -25,28 +31,6 @@ if TYPE_CHECKING:
     import shapely.geometry.base
 
     from geocatalog._src.geoslice import GeoSlice
-
-
-RESERVED_COLUMNS: frozenset[str] = frozenset(
-    {"filepath", "start_time", "end_time", "geometry", "bbox"}
-)
-"""Column names reserved by the catalog schema itself.
-
-Every GeoParquet artifact carries these as its required layout
-(``bbox`` only when the writer emits the GeoParquet 1.1 covering
-struct); backend row iterators and schema builders treat anything
-else as user extras. Spelled once here so the streaming writer and
-the backends can't drift.
-"""
-
-INTERNAL_COLUMNS: frozenset[str] = frozenset({"_backend", "_schema_version"})
-"""Writer-managed metadata columns of the on-disk schema.
-
-Appended by `StreamingParquetWriter` (and `to_geoparquet`) to every
-artifact; they are not user-visible row metadata, so readers filter
-them out of ``extras`` and rewrite passes drop them before re-encoding
-(the writer re-emits its own).
-"""
 
 
 class CatalogMetadataError(ValueError):
@@ -126,7 +110,7 @@ class GeoCatalog(Protocol):
     """
 
     gdf: gpd.GeoDataFrame
-    backend: Literal["raster", "xarray", "vector"]
+    backend: BackendTag
     crs: pyproj.CRS
 
     def query(

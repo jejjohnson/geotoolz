@@ -36,7 +36,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pyarrow as pa
@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 
 from loguru import logger as log
 
+from geocatalog._src._schema import BackendTag
 from geocatalog._src._timeutil import to_naive_utc
 from geocatalog._src.base import INTERNAL_COLUMNS, RESERVED_COLUMNS
 from geocatalog._src.parquet import (
@@ -60,7 +61,6 @@ from geocatalog._src.parquet import (
 )
 
 
-_BACKEND_T = Literal["raster", "xarray", "vector"]
 _GEOPARQUET_VERSION = "1.1.0"
 
 
@@ -250,7 +250,7 @@ class StreamingParquetWriter:
         path: str | Path,
         *,
         crs: Any,
-        backend: _BACKEND_T,
+        backend: BackendTag,
         schema_version: int = _SCHEMA_VERSION,
         write_bbox: bool = True,
         batch_size: int = 10_000,
@@ -262,7 +262,7 @@ class StreamingParquetWriter:
         self._tmp_path = _staging_name(self._path)
         self._extras_schema = schema
         self._crs = pyproj.CRS.from_user_input(crs)
-        self._backend: _BACKEND_T = backend
+        self._backend: BackendTag = backend
         self._schema_version = schema_version
         self._write_bbox = write_bbox
         self._batch_size = batch_size
@@ -510,7 +510,7 @@ def sort_geoparquet(
     *,
     sort_by: Sequence[str],
     crs: Any,
-    backend: _BACKEND_T,
+    backend: BackendTag,
     schema_version: int = _SCHEMA_VERSION,
     write_bbox: bool = True,
     batch_size: int = 10_000,
@@ -641,7 +641,7 @@ def stream_build_duckdb(
     *,
     out_path: str | Path,
     crs: Any,
-    backend: _BACKEND_T,
+    backend: BackendTag,
     write_bbox: bool = True,
     sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),
     partition_by: Sequence[str] | None = None,
@@ -819,7 +819,7 @@ def append_files(
     extract_fn: Callable[[str | Path], dict[str, Any] | None],
     *,
     crs: Any,
-    backend: _BACKEND_T,
+    backend: BackendTag,
     partition_by: Sequence[str],
     write_bbox: bool = True,
     batch_size: int = 10_000,
@@ -980,7 +980,7 @@ def write_partitioned_rows(
     *,
     out_path: str | Path,
     crs: Any,
-    backend: _BACKEND_T,
+    backend: BackendTag,
     partition_by: Sequence[str],
     schema_version: int = _SCHEMA_VERSION,
     write_bbox: bool = True,
@@ -1046,7 +1046,7 @@ def _write_partitioned_rows(
     *,
     out_path: str | Path,
     crs: Any,
-    backend: _BACKEND_T,
+    backend: BackendTag,
     partition_by: Sequence[str],
     schema_version: int = _SCHEMA_VERSION,
     write_bbox: bool = True,

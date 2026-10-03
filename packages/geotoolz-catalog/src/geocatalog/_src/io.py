@@ -4,70 +4,29 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
-
-# URI schemes resolved through fsspec instead of GDAL VSI prefixes.
-_FSSPEC_SCHEMES = frozenset(
-    {
-        "s3",
-        "gs",
-        "gcs",
-        "az",
-        "azure",
-        "http",
-        "https",
-        "hf",
-    }
-)
-
-
-# Cloud/HTTP schemes GDAL reads natively through a virtual file system,
-# with ranged requests (a COG header read fetches kilobytes, not the file).
-_GDAL_VSI_PREFIXES = {
-    "s3": "/vsis3/",
-    "gs": "/vsigs/",
-    "gcs": "/vsigs/",
-    "az": "/vsiaz/",
-    "azure": "/vsiaz/",
-}
+from geocatalog._src._extras import missing_extra
+from geocatalog._src.uri import FSSPEC_SCHEMES, parse_uri
 
 
 def _gdal_vsi_path(path: str | Path) -> str | None:
-    """GDAL ``/vsi*/`` path for a cloud/HTTP URI, or ``None`` if GDAL can't read it.
-
-    ``s3://bucket/key`` -> ``/vsis3/bucket/key``; ``http(s)://…`` ->
-    ``/vsicurl/http(s)://…``. Credentials come from GDAL's usual
-    configuration (``AWS_*``, ``GOOGLE_APPLICATION_CREDENTIALS``,
-    ``AZURE_STORAGE_*`` environment variables, …).
-    """
-    uri = str(path)
-    scheme = _uri_scheme(uri)
-    if scheme in ("http", "https"):
-        return f"/vsicurl/{uri}"
-    prefix = _GDAL_VSI_PREFIXES.get(scheme)
-    if prefix is None:
-        return None
-    parsed = urlsplit(uri)
-    return f"{prefix}{parsed.netloc}{parsed.path}"
+    """GDAL ``/vsi*/`` path for a cloud/HTTP URI, or ``None`` if GDAL can't read it."""
+    return parse_uri(path).gdal_path()
 
 
 def _uri_scheme(path: str | Path) -> str:
-    """Return the lower-case URI scheme for ``path`` if it has one."""
-    return urlsplit(str(path)).scheme.lower()
+    """Return the lower-case URI scheme for ``path`` (``""`` for local paths)."""
+    return parse_uri(path).scheme
 
 
 def _is_fsspec_uri(path: str | Path) -> bool:
     """Return True for cloud/HTTP URI schemes handled through fsspec."""
-    return _uri_scheme(path) in _FSSPEC_SCHEMES
+    return parse_uri(path).scheme in FSSPEC_SCHEMES
 
 
 def _uri_name(path: str | Path) -> str:
     """Return the filename component without mangling URI schemes."""
-    parsed = urlsplit(str(path))
-    if parsed.scheme:
-        return Path(parsed.path).name
-    return Path(path).name
+    return parse_uri(path).name
 
 
 def _resolve_uri(
@@ -105,13 +64,9 @@ def _resolve_uri(
     try:
         import fsspec
     except ImportError as exc:
-        scheme = _uri_scheme(path)
-        raise ImportError(
-            f"Reading {scheme!r} URIs requires the [fsspec] extra; install via "
-            "`pip install 'geocatalog[fsspec]'`."
-        ) from exc
+        raise missing_extra(f"Reading {_uri_scheme(path)!r} URIs", "fsspec") from exc
     uri = str(path)
-    if urlsplit(uri).path.endswith(".zarr"):
+    if parse_uri(uri).is_zarr:
         return fsspec.get_mapper(uri, **(storage_options or {}))
     return fsspec.open(uri, mode="rb", **(storage_options or {})).open()
 

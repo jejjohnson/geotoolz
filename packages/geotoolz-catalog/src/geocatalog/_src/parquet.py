@@ -17,34 +17,23 @@ import os
 import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import geopandas as gpd
 import pandas as pd
 import pyarrow.parquet as pq
 from loguru import logger as log
 
+from geocatalog._src._schema import (
+    LEGACY_UNVERSIONED,
+    SCHEMA_VERSION_CURRENT,
+    BackendTag,
+    check_schema_versions,
+)
 from geocatalog._src.base import CatalogMetadataError, CatalogSchemaError
 from geocatalog._src.io import _close_resolved_uri, _resolve_uri
 from geocatalog._src.memory import InMemoryGeoCatalog
 from geocatalog._src.retry import retry_transient_io
-
-
-_BACKEND_T = Literal["raster", "xarray", "vector"]
-
-
-# The reader's current schema version. Bump on every substantive schema
-# change and add an entry to `_MIGRATIONS` for ``previous → this``.
-SCHEMA_VERSION_CURRENT: int = 0
-
-
-# Artifacts written before `_schema_version` existed as a reserved
-# column are treated as v0 — the schema that was current when the
-# column was introduced. Pinning to a constant (not
-# `SCHEMA_VERSION_CURRENT`) means the next schema bump will still
-# trigger a v0 -> v1 migration on those legacy files, instead of
-# silently skipping it.
-_LEGACY_UNVERSIONED: int = 0
 
 
 # Forward migrations keyed by *source* version. `_MIGRATIONS[k]` takes a
@@ -100,7 +89,7 @@ def _read_schema_version(
     Returns:
         - The unique value in the column when present and consistent
           across all rows.
-        - `_LEGACY_UNVERSIONED` (0) when the column is absent (file
+        - `LEGACY_UNVERSIONED` (0) when the column is absent (file
           predates the column's introduction).
 
     Raises:
@@ -122,23 +111,23 @@ def _read_schema_version(
             _close_resolved_uri(resolved)
         version_series = pd.Series(table.column("_schema_version").to_pandas())
     except (KeyError, pyarrow.lib.ArrowInvalid):
-        return _LEGACY_UNVERSIONED
+        return LEGACY_UNVERSIONED
     if len(version_series) == 0:
-        return _LEGACY_UNVERSIONED
+        return LEGACY_UNVERSIONED
     if version_series.isna().any():
         raise CatalogSchemaError(
             f"artifact {path} has null values in `_schema_version`; "
             "the column must be populated on every row."
         )
-    unique = version_series.unique()
-    if len(unique) > 1:
-        raise CatalogSchemaError(
-            f"artifact {path} has mixed `_schema_version` values "
-            f"{sorted(map(int, unique))}; the reader can't open a "
-            "multi-version source. Migrate each shard separately, "
-            "or rewrite into one file at a single version."
-        )
-    return int(unique[0])
+    versions = [int(v) for v in version_series.unique()]
+    check_schema_versions(
+        path,
+        min(versions),
+        max(versions),
+        reader=SCHEMA_VERSION_CURRENT,
+        can_migrate=True,
+    )
+    return versions[0]
 
 
 def _apply_migrations(gdf: gpd.GeoDataFrame, *, from_version: int) -> gpd.GeoDataFrame:
@@ -254,7 +243,7 @@ def to_geoparquet(
 def from_geoparquet(
     path: str | Path,
     *,
-    backend: _BACKEND_T | None = None,
+    backend: BackendTag | None = None,
     strict: bool = False,
     retries: int = 3,
     storage_options: dict[str, Any] | None = None,
@@ -317,12 +306,13 @@ def from_geoparquet(
     backend_col = gdf.pop("_backend") if "_backend" in gdf.columns else None
     if "_schema_version" in gdf.columns:
         gdf = gdf.drop(columns=["_schema_version"])
-    if v_artifact > SCHEMA_VERSION_CURRENT:
-        raise CatalogSchemaError(
-            f"artifact {Path(path)} has _schema_version={v_artifact}, "
-            f"exceeds reader v{SCHEMA_VERSION_CURRENT}. "
-            "Upgrade `geocatalog` to read this artifact."
-        )
+    check_schema_versions(
+        Path(path),
+        v_artifact,
+        v_artifact,
+        reader=SCHEMA_VERSION_CURRENT,
+        can_migrate=True,
+    )
     if v_artifact < SCHEMA_VERSION_CURRENT:
         gdf = _apply_migrations(gdf, from_version=v_artifact)
     if "start_time" in gdf.columns and "end_time" in gdf.columns:

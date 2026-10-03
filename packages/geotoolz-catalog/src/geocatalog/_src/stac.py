@@ -17,6 +17,8 @@ import shapely.geometry
 import shapely.ops
 from loguru import logger as log
 
+from geocatalog._src._extras import require_extra
+from geocatalog._src._schema import StorageEngine
 from geocatalog._src._stac_item import (
     UndecodableItemError,
     asset_crs,
@@ -36,7 +38,6 @@ if TYPE_CHECKING:
     import pystac
 
 
-_BACKEND_T = Literal["memory", "duckdb"]
 _STAC_CRS = pyproj.CRS.from_epsg(4326)
 
 
@@ -44,7 +45,7 @@ def from_stac_items(
     items: Iterable[pystac.Item],
     *,
     asset_key: str | Literal["*"] = "data",
-    backend: _BACKEND_T = "memory",
+    backend: StorageEngine = "memory",
     target_crs: Any | None = None,
     out_path: Path | None = None,
     extra_properties: Sequence[str] = (),
@@ -147,7 +148,7 @@ def from_stac_search(
     bbox: tuple[float, float, float, float] | None = None,
     datetime: str | None = None,
     asset_key: str | Literal["*"] = "data",
-    backend: _BACKEND_T = "memory",
+    backend: StorageEngine = "memory",
     max_items: int | None = None,
     target_crs: Any | None = None,
     out_path: Path | None = None,
@@ -584,22 +585,8 @@ def _normalize_crs_property(props: dict[str, Any]) -> None:
 
 
 def _require_pystac() -> Any:
-    try:
-        import pystac
-    except ImportError as exc:
-        raise ImportError(
-            "`geocatalog` STAC helpers require the [stac] extra; install via "
-            "`pip install 'geocatalog[stac]'`."
-        ) from exc
-    return pystac
+    return require_extra("pystac", "stac", feature="The STAC helpers")
 
 
 def _require_pystac_client() -> Any:
-    try:
-        import pystac_client
-    except ImportError as exc:
-        raise ImportError(
-            "`from_stac_search` requires the [stac] extra; install via "
-            "`pip install 'geocatalog[stac]'`."
-        ) from exc
-    return pystac_client
+    return require_extra("pystac_client", "stac", feature="`from_stac_search`")

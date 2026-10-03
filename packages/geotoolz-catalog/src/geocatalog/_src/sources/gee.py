@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
+from geocatalog._src._extras import missing_extra
 from geocatalog._src.sources._base import (
     AuthStatus,
     Bounds,
@@ -22,7 +23,6 @@ from geocatalog._src.sources._base import (
     SourceRow,
     wants_no_rows,
 )
-from geocatalog._src.sources._extras import _missing_extra
 
 
 if TYPE_CHECKING:
@@ -52,7 +52,9 @@ class GEESource(Source):
 
     def __init__(self, *, project: str | None = None) -> None:
         if ee is None:
-            raise _missing_extra("GEESource", "gee", "earthengine-api>=0.1.380")
+            raise missing_extra(
+                "`GEESource`", "gee", packages="earthengine-api>=0.1.380"
+            )
         self.project = project
 
     def query(

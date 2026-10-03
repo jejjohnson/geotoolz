@@ -27,8 +27,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
-from urllib.parse import urlsplit
+from typing import TYPE_CHECKING, Any, cast
 from weakref import WeakKeyDictionary
 
 import geopandas as gpd
@@ -43,6 +42,12 @@ from loguru import logger as log
 if TYPE_CHECKING:
     import duckdb as duckdb_mod
 
+from geocatalog._src._extras import missing_extra
+from geocatalog._src._schema import (
+    LEGACY_UNVERSIONED,
+    BackendTag,
+    check_schema_versions,
+)
 from geocatalog._src._timeutil import naive_utc_datetimes, to_naive_utc
 from geocatalog._src.base import (
     INTERNAL_COLUMNS,
@@ -58,6 +63,7 @@ from geocatalog._src.memory import (
     _query_envelopes,
 )
 from geocatalog._src.retry import retry_transient_io
+from geocatalog._src.uri import DUCKDB_EXTENSIONS, parse_uri
 
 
 # DuckDB is the optional dep for this backend. The module loader inside
@@ -70,16 +76,10 @@ except ImportError:  # pragma: no cover - exercised via the [duckdb] extra
     duckdb = None  # type: ignore[assignment]
 
 
-_BACKEND_T = Literal["raster", "xarray", "vector"]
-
-
 def _require_duckdb() -> Any:
     """Return the `duckdb` module or raise a friendly ImportError."""
     if duckdb is None:
-        raise ImportError(
-            "DuckDBGeoCatalog requires the [duckdb] extra; install via "
-            "`pip install 'geocatalog[duckdb]'`."
-        )
+        raise missing_extra("`DuckDBGeoCatalog`", "duckdb")
     return duckdb
 
 
@@ -142,11 +142,9 @@ def _con_lock(con: Any) -> threading.RLock:
 def _scheme(source: str | Path) -> str | None:
     """Return the lowercase URI scheme for ``source``, or ``None`` for paths.
 
-    Only strings containing ``://`` are treated as URIs. Shell-style
-    ``name:foo.parquet`` (e.g. ``s3:catalog.parquet``) is a *local path*
-    in POSIX semantics, not an S3 URI — `urlsplit` would still parse a
-    ``scheme`` out of it, so we gate on the ``://`` separator first to
-    avoid triggering remote-extension installs for local files.
+    Delegates to `parse_uri`: only ``<scheme>://`` strings are URIs, so
+    shell-style ``s3:catalog.parquet`` and Windows ``C:/...`` are local
+    paths and never trigger remote-extension installs.
 
     Examples:
         >>> _scheme("s3://bucket/cat.parquet")
@@ -158,19 +156,7 @@ def _scheme(source: str | Path) -> str | None:
         >>> _scheme("C:/data/cat.parquet")
         None
     """
-    if isinstance(source, Path):
-        return None
-    if "://" not in source:
-        return None
-    if (
-        len(source) >= 3
-        and source[0].isalpha()
-        and source[1] == ":"
-        and source[2] in ("/", "\\")
-    ):
-        return None
-    scheme = urlsplit(source).scheme
-    return scheme.lower() if scheme else None
+    return parse_uri(source).scheme or None
 
 
 class DuckDBGeoCatalog:
@@ -234,7 +220,7 @@ class DuckDBGeoCatalog:
         *,
         con: duckdb_mod.DuckDBPyConnection,
         crs: Any,
-        backend: _BACKEND_T,
+        backend: BackendTag,
         _owns_con: bool = False,
     ) -> None:
         _require_duckdb()
@@ -358,7 +344,7 @@ class DuckDBGeoCatalog:
         cls,
         source: str | Path,
         *,
-        backend: _BACKEND_T | None = None,
+        backend: BackendTag | None = None,
         crs: Any | None = None,
         retries: int = 3,
         storage_options: dict[str, Any] | None = None,
@@ -368,10 +354,11 @@ class DuckDBGeoCatalog:
 
         Reads the source via DuckDB's `read_parquet`; the relation
         carries the schema but no rows are materialised until queried.
-        Local paths are supported directly. URI sources with ``s3://``,
-        ``gs://``, ``gcs://``, ``http://``, ``https://``, ``r2://``, or
-        ``hf://`` auto-load DuckDB's `httpfs` extension; ``az://`` and
-        ``azure://`` auto-load DuckDB's `azure` extension.
+        Local paths are supported directly. URI sources with ``s3://``
+        (``s3a://``, ``s3n://``), ``gs://``, ``gcs://``, ``http://``,
+        ``https://``, ``r2://`` or ``hf://`` auto-load DuckDB's `httpfs`
+        extension; ``az://``, ``azure://`` and ``abfss://`` auto-load
+        DuckDB's `azure` extension.
 
         CRS is recovered from the GeoParquet column metadata (PROJJSON)
         for **local files only** — the metadata reader uses
@@ -431,12 +418,10 @@ class DuckDBGeoCatalog:
             source_str = _read_parquet_source(source)
             partitioned = _is_partitioned_source(source)
             scheme = _scheme(source)
-            if scheme in ("s3", "gs", "gcs", "https", "http", "r2", "hf"):
-                con.execute("INSTALL httpfs")
-                con.execute("LOAD httpfs")
-            elif scheme in ("az", "azure"):
-                con.execute("INSTALL azure")
-                con.execute("LOAD azure")
+            extension = DUCKDB_EXTENSIONS.get(scheme or "")
+            if extension is not None:
+                con.execute(f"INSTALL {extension}")
+                con.execute(f"LOAD {extension}")
             if crs is None:
                 if scheme is not None and strict:
                     raise CatalogMetadataError(
@@ -1283,12 +1268,9 @@ def _check_schema_version(
        shard separately or rewrite into one file.
 
     Files without the column are treated as the legacy unversioned
-    schema (``_LEGACY_UNVERSIONED``), exactly as `from_geoparquet` does,
+    schema (``LEGACY_UNVERSIONED``), exactly as `from_geoparquet` does,
     so both engines agree on when a legacy artifact needs migrating.
     """
-    from geocatalog._src.base import CatalogSchemaError
-    from geocatalog._src.parquet import _LEGACY_UNVERSIONED, SCHEMA_VERSION_CURRENT
-
     dd = _require_duckdb()
     try:
         df = con.sql(
@@ -1305,43 +1287,27 @@ def _check_schema_version(
         # on the next read.
         return
     if df is None:
-        lo = hi = _LEGACY_UNVERSIONED
+        lo = hi = LEGACY_UNVERSIONED
     elif len(df) == 0 or pd.isna(df["lo"].iloc[0]) or pd.isna(df["hi"].iloc[0]):
         return
     else:
         lo = int(df["lo"].iloc[0])
         hi = int(df["hi"].iloc[0])
-    if lo != hi:
-        raise CatalogSchemaError(
-            f"artifact {source} has mixed `_schema_version` values "
-            f"(min={lo}, max={hi}); the DuckDB backend can't open a "
-            "multi-version source. Migrate each shard separately or "
-            "rewrite into one file at a single version."
-        )
-    v_artifact = lo
-    if v_artifact > SCHEMA_VERSION_CURRENT:
-        raise CatalogSchemaError(
-            f"artifact {source} has _schema_version={v_artifact}, "
-            f"exceeds reader v{SCHEMA_VERSION_CURRENT}. "
-            "Upgrade `geocatalog` to read this artifact."
-        )
-    if v_artifact < SCHEMA_VERSION_CURRENT:
-        raise CatalogSchemaError(
-            f"artifact {source} has _schema_version={v_artifact} < reader "
-            f"v{SCHEMA_VERSION_CURRENT}. The DuckDB backend does not run "
-            "forward migrations in-place; bring the artifact up to date with "
-            f"`geocatalog migrate {source} --to-version {SCHEMA_VERSION_CURRENT}`."
-        )
+    from geocatalog._src.parquet import SCHEMA_VERSION_CURRENT
+
+    check_schema_versions(
+        source, lo, hi, reader=SCHEMA_VERSION_CURRENT, can_migrate=False
+    )
 
 
 def _read_backend_tag(
     con: duckdb_mod.DuckDBPyConnection,
     source: str,
     *,
-    default: _BACKEND_T,
+    default: BackendTag,
     partitioned: bool = False,
     strict: bool = False,
-) -> _BACKEND_T:
+) -> BackendTag:
     """Recover the ``_backend`` column written by `to_geoparquet`.
 
     Returns the default for ad-hoc parquet files lacking the column;
@@ -1406,7 +1372,7 @@ def _read_backend_tag(
         return default
     tag = str(df["_backend"].iloc[0])
     if tag in ("raster", "xarray", "vector"):
-        return cast(_BACKEND_T, tag)
+        return cast(BackendTag, tag)
     if strict:
         raise CatalogMetadataError(
             f"{source} carries an unrecognised _backend tag {tag!r}; expected "
@@ -1461,7 +1427,7 @@ def _df_to_inmemory(
     df: pd.DataFrame,
     *,
     crs: pyproj.CRS,
-    backend: _BACKEND_T,
+    backend: BackendTag,
 ) -> InMemoryGeoCatalog:
     """Build an `InMemoryGeoCatalog` from a DuckDB-materialised DataFrame.
 

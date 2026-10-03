@@ -34,6 +34,7 @@ from loguru import logger
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
+from geocatalog._src._schema import BackendTag, empty_frame
 from geocatalog._src._stac_item import (
     ASSET_CRS_PROPERTY,
     LONLAT,
@@ -47,9 +48,6 @@ from geocatalog._src.memory import InMemoryGeoCatalog
 if TYPE_CHECKING:
     from geocatalog._src.matchup.engine import MatchupRow
     from geocatalog._src.sources._base import Source, SourceRow
-
-
-_BACKEND_T = Literal["raster", "xarray", "vector"]
 
 
 # The bundle's own schema version, distinct from the catalog's
@@ -267,7 +265,7 @@ class CatalogBundle:
         catalog: InMemoryGeoCatalog,
         *,
         target_crs: pyproj.CRS,
-        backend: _BACKEND_T = "raster",
+        backend: BackendTag = "raster",
         queries: list[QueryRecord] | None = None,
         matchups: list[MatchupRow] | None = None,
     ) -> None:
@@ -284,7 +282,7 @@ class CatalogBundle:
         cls,
         *,
         target_crs: str | pyproj.CRS = "EPSG:4326",
-        backend: _BACKEND_T = "raster",
+        backend: BackendTag = "raster",
     ) -> CatalogBundle:
         """Create a fresh bundle with an empty items table.
 
@@ -295,27 +293,21 @@ class CatalogBundle:
             >>> bundle.to_directory("my_catalog/")
         """
         dst_crs = pyproj.CRS.from_user_input(target_crs)
-        empty_gdf = gpd.GeoDataFrame(
+        # The same columns `source_row_to_gdf_row` writes, so an empty
+        # bundle has the schema of an ingested one.
+        empty_gdf = empty_frame(
+            dst_crs,
             {
-                "filepath": pd.Series(dtype="object"),
-                # The same columns `source_row_to_gdf_row` writes, so an
-                # empty bundle has the schema of an ingested one.
-                "crs": pd.Series(dtype="object"),
-                "href_signed": pd.Series(dtype="bool"),
-                "id": pd.Series(dtype="object"),
-                "source": pd.Series(dtype="object"),
-                "collection": pd.Series(dtype="object"),
-                "assets": pd.Series(dtype="object"),
-                "properties": pd.Series(dtype="object"),
-                "provenance": pd.Series(dtype="object"),
+                "filepath": "object",
+                "crs": "object",
+                "href_signed": "bool",
+                "id": "object",
+                "source": "object",
+                "collection": "object",
+                "assets": "object",
+                "properties": "object",
+                "provenance": "object",
             },
-            geometry=gpd.GeoSeries([], crs=dst_crs),
-        )
-        empty_gdf.index = pd.IntervalIndex.from_arrays(
-            pd.to_datetime([]),
-            pd.to_datetime([]),
-            closed="both",
-            name="datetime",
         )
         catalog = InMemoryGeoCatalog(empty_gdf, backend=backend)
         return cls(catalog, target_crs=dst_crs, backend=backend)
@@ -325,7 +317,7 @@ class CatalogBundle:
         cls,
         catalog: InMemoryGeoCatalog,
         *,
-        backend: _BACKEND_T | None = None,
+        backend: BackendTag | None = None,
     ) -> CatalogBundle:
         """Wrap an already-built `InMemoryGeoCatalog`.
 
@@ -333,7 +325,7 @@ class CatalogBundle:
         ``build_raster_catalog`` / ``build_vector_catalog`` and now
         wants to add queries/matchups state.
         """
-        bk: _BACKEND_T = backend if backend is not None else catalog.backend
+        bk: BackendTag = backend if backend is not None else catalog.backend
         return cls(
             catalog,
             target_crs=pyproj.CRS.from_user_input(catalog.gdf.crs),
