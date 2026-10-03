@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.4.0...geotoolz-patcher-v0.5.0) (2026-10-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **patcher/aggregation:** `SpatialOverlapAdd(streaming=True, writer="zarr")` now requires `chunks=` and raises FileExistsError when `target_path` already holds a store unless `overwrite=True`; `writer="cog"` raises FileExistsError for an existing file unless `overwrite=True`, and writes a GDAL COG with `nodata = fill_value`. An unknown `writer` or a non-floating `dtype` raises ValueError.
+* **patcher/aggregation:** cells no valid sample reached (uncovered, all-NaN, outside a mask, or zero accumulated weight) are NaN instead of 0.0 / ±inf in every dense aggregation, and -1 instead of class 0 in HardVote / SoftVote; pass `fill_value=` to override. SpatialVariance cells with one sample are NaN instead of 0.0. SpatialMode returns float64 unless an integral `fill_value` is given. SpatialByIndex returns a list of `(anchor, data)` pairs instead of a dict. Dense aggregations raise TypeError on indices that are not a raster / grid placement.
+* **patcher/sampler:** invalid step / jitter / n_samples / min_dist / max_tries / k raise ValueError at construction; SpatialPoissonDisk and SpatialJitteredStride draw different anchors for the same seed; SpatialAlongTrack(spacing=...) may yield one more (final) point; SpatialSphericalCap on a GridDomain returns a masked {dim: slice} window instead of an argwhere array; SpatialGeometry.extent is removed; a TypeError raised by a window's weights now propagates.
+* **patcher/boundary:** non-drop samplers emit fewer anchors (no trailing anchor past the edge-reaching one; random/jittered/Poisson anchors are bounded by L - P); drop with a patch larger than the domain yields no patches; reflect no longer raises when the overflow exceeds the in-domain extent; shrink windows never start at a negative offset; an unrepresentable pad_value raises ValueError and a non-numeric one TypeError.
+* **patcher/window:** SpatialHann weights change from symmetric np.hanning(n) to periodic scipy.signal.windows.hann(n, sym=False) (e.g. n=8 trailing sample 0 -> 0.146); Hann/Tukey axes of length < 3 are now all ones. Merged outputs using SpatialHann change accordingly.
+
+### Features
+
+* **patcher:** add merge_to_field and route reduce/two_pass/amerge through split ([#349](https://github.com/jejjohnson/geotoolz/issues/349)) ([94ddc2b](https://github.com/jejjohnson/geotoolz/commit/94ddc2b03fa1d0dfd5795a31750bcba5cdb9c39f)), closes [#194](https://github.com/jejjohnson/geotoolz/issues/194)
+
+
+### Bug Fixes
+
+* **patcher/aggregation:** dense aggregations honour masks, fill uncovered cells with nan ([#351](https://github.com/jejjohnson/geotoolz/issues/351)) ([6fc8081](https://github.com/jejjohnson/geotoolz/commit/6fc8081899e318b0c27b676a5fcc11436dd8e2e7))
+* **patcher/aggregation:** stream overlap-add normalisation chunk-wise, write real cogs ([#352](https://github.com/jejjohnson/geotoolz/issues/352)) ([34a4f64](https://github.com/jejjohnson/geotoolz/commit/34a4f64c674ad615b9c7a2042fe60491e2c7c0c2))
+* **patcher/boundary:** make every boundary mode survive split and merge ([#343](https://github.com/jejjohnson/geotoolz/issues/343)) ([b0f83cd](https://github.com/jejjohnson/geotoolz/commit/b0f83cdd9d19de1628c860780296e4ae4e420aa1)), closes [#185](https://github.com/jejjohnson/geotoolz/issues/185)
+* **patcher/geometry:** pixel-align polygon intersection windows and masks ([#341](https://github.com/jejjohnson/geotoolz/issues/341)) ([2293849](https://github.com/jejjohnson/geotoolz/commit/2293849233cbb96901a0b06e9a46f2bc3cd5ca2c))
+* **patcher/sampler:** exact poisson-disk spacing, uniform jitter, reachable geometry combos ([#344](https://github.com/jejjohnson/geotoolz/issues/344)) ([8fcc141](https://github.com/jejjohnson/geotoolz/commit/8fcc141b09230727999f569777f17212caf47f95)), closes [#187](https://github.com/jejjohnson/geotoolz/issues/187)
+* **patcher/window:** periodic hann and tukey with one documented taper convention ([#342](https://github.com/jejjohnson/geotoolz/issues/342)) ([e31258c](https://github.com/jejjohnson/geotoolz/commit/e31258cee03363064771bc30b0c5e0e13c4eab11)), closes [#186](https://github.com/jejjohnson/geotoolz/issues/186)
+
 ## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.3.0...geotoolz-patcher-v0.4.0) (2026-10-02)
 
 

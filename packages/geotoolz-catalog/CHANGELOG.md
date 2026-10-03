@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.2.0...geotoolz-catalog-v0.2.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **catalog:** bundle ids are a primary key; one granule mapper; adapter retry and CMR query fixes ([#361](https://github.com/jejjohnson/geotoolz/issues/361)) ([f0e875b](https://github.com/jejjohnson/geotoolz/commit/f0e875ba79d51eaab80e6d0252d407980e916bb4))
+* **catalog:** field_for mosaics a slice into one GeoTensor RasterField in the catalog CRS ([#366](https://github.com/jejjohnson/geotoolz/issues/366)) ([1deffca](https://github.com/jejjohnson/geotoolz/commit/1deffcad1f5b8b58d944c74838e92219c9f3b14e))
+* **catalog:** limit=0 yields nothing on every source; negative limits raise ([#358](https://github.com/jejjohnson/geotoolz/issues/358)) ([76dd06c](https://github.com/jejjohnson/geotoolz/commit/76dd06ca63d2a4364fdac6281798545efe56c160))
+* **catalog:** matchup accepts catalogs and bundles; deterministic ids and tie-breaks; tz/NaT/CRS-safe ([#364](https://github.com/jejjohnson/geotoolz/issues/364)) ([ee46dc5](https://github.com/jejjohnson/geotoolz/commit/ee46dc534a9e4547f928aa6f133c50e81c66c9f6))
+* **catalog:** matchup engine searches each strategy's envelope, so CentroidWithin(buffer&gt;0) matches ([#363](https://github.com/jejjohnson/geotoolz/issues/363)) ([df2f342](https://github.com/jejjohnson/geotoolz/commit/df2f3427acc7509c3f304f283398de41077146ee)), closes [#241](https://github.com/jejjohnson/geotoolz/issues/241)
+* **catalog:** one STAC item decoder — real footprints, proj:* CRS, UTC times, absolute hrefs, densified reprojection ([#359](https://github.com/jejjohnson/geotoolz/issues/359)) ([88f95a9](https://github.com/jejjohnson/geotoolz/commit/88f95a92d3cefdb5d57d50808b8087689b485c26))
+* **catalog:** reject bad --crs / --target-crs and non-vector inputs in the CLI with one line; tests for every verb; cli.md matches ([#367](https://github.com/jejjohnson/geotoolz/issues/367)) ([cf667c6](https://github.com/jejjohnson/geotoolz/commit/cf667c68b50060ec42d3b6c24d85ca1e69f1077c))
+* **catalog:** run behaviour tests on every backend and fix the divergences they found ([#355](https://github.com/jejjohnson/geotoolz/issues/355)) ([9b4cc70](https://github.com/jejjohnson/geotoolz/commit/9b4cc70ab23495af81ec7706883a2459f88aab24)), closes [#235](https://github.com/jejjohnson/geotoolz/issues/235)
+* **catalog:** split UMM-G footprints at the antimeridian; handle ExclusiveZone, Lines, open ranges and null names ([#357](https://github.com/jejjohnson/geotoolz/issues/357)) ([86aa722](https://github.com/jejjohnson/geotoolz/commit/86aa72289f456086880f1fcfc02e09b687666038))
+* **catalog:** stage() works without fsspec for local files, follows the primary asset, downloads atomically once per URI ([#365](https://github.com/jejjohnson/geotoolz/issues/365)) ([5c4c469](https://github.com/jejjohnson/geotoolz/commit/5c4c4690e835d7e0081ede20fc51f5112fa62530))
+* **catalog:** streaming writer infers its schema over the first batch, takes schema=, keeps ns UTC times ([#353](https://github.com/jejjohnson/geotoolz/issues/353)) ([0729c60](https://github.com/jejjohnson/geotoolz/commit/0729c60df38c2139d5365a050047bdbb9cefe329)), closes [#233](https://github.com/jejjohnson/geotoolz/issues/233)
+* **catalog:** unwrap STAC polygons whose hole crosses ±180°, route every line through lonlat_line, give empty bundles the ingested columns ([#369](https://github.com/jejjohnson/geotoolz/issues/369)) ([dd6b5f8](https://github.com/jejjohnson/geotoolz/commit/dd6b5f8705fb334f142f566e39230bc9777e1319))
+* **catalog:** writers are atomic, partitioned replace keeps unrelated files, append_files is idempotent ([#354](https://github.com/jejjohnson/geotoolz/issues/354)) ([635c18d](https://github.com/jejjohnson/geotoolz/commit/635c18dd0b4726b4acc4012d0b1a56fcbce63322)), closes [#234](https://github.com/jejjohnson/geotoolz/issues/234)
+
 ## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.1.2...geotoolz-catalog-v0.2.0) (2026-10-02)
 
 
