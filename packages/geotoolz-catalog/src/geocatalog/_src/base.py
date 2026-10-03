@@ -13,6 +13,8 @@ new backends can join without touching consumers.
 from __future__ import annotations
 
 import dataclasses
+import inspect
+import warnings
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -21,7 +23,7 @@ import pandas as pd
 from geocatalog._src._schema import (
     INTERNAL_COLUMNS as INTERNAL_COLUMNS,
     RESERVED_COLUMNS as RESERVED_COLUMNS,
-    BackendTag,
+    CatalogKind,
 )
 
 
@@ -33,18 +35,41 @@ if TYPE_CHECKING:
     from geocatalog._src.geoslice import GeoSlice
 
 
-class CatalogMetadataError(ValueError):
+class GeoCatalogError(Exception):
+    """Base class of the errors about a catalog's state or its artifacts.
+
+    A closed catalog, unreadable metadata, an unsupported schema version.
+    Invalid *arguments* (an unknown ``kind`` or ``engine``, malformed
+    ``bounds``) raise the builtin `ValueError` / `TypeError`, and an
+    unparsable CRS raises ``pyproj.exceptions.CRSError``, so catch those
+    as well when you want every failure. Each subclass also derives from
+    the builtin a caller would have caught before the hierarchy existed
+    (`ValueError`, `RuntimeError`), so ``except ValueError`` keeps working.
+    """
+
+
+class CatalogClosedError(GeoCatalogError, RuntimeError):
+    """A catalog was used after its connection was closed.
+
+    Raised by `DuckDBGeoCatalog` (and every catalog derived from it by
+    ``query`` / ``filter``) after ``close()``. The DuckDB backend raises
+    a subclass that also derives from ``duckdb.ConnectionException``,
+    which is what it raised before this class existed.
+    """
+
+
+class CatalogMetadataError(GeoCatalogError, ValueError):
     """A catalog artifact's metadata could not be read or is missing.
 
     Raised by the `strict=True` mode of the catalog `open` entry points
     when a GeoParquet artifact lacks the reserved ``_backend`` column,
     carries unreadable/malformed ``geo`` metadata, or its CRS cannot be
     parsed — instead of the default behaviour of logging a warning and
-    falling back (``backend="raster"`` / ``crs="EPSG:4326"``).
+    falling back (``kind="raster"`` / ``crs="EPSG:4326"``).
     """
 
 
-class CatalogSchemaError(ValueError):
+class CatalogSchemaError(GeoCatalogError, ValueError):
     """A GeoParquet artifact has a `_schema_version` the reader can't load.
 
     Raised when ``_schema_version`` exceeds `SCHEMA_VERSION_CURRENT` (the
@@ -83,8 +108,44 @@ class CatalogRow:
     extras: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
+class _GeoCatalogMeta(type(Protocol)):  # type: ignore[misc]
+    """Runtime check that still accepts a catalog spelling ``kind`` as ``backend``.
+
+    Third-party catalogs written against the previous protocol expose
+    ``backend``; for one minor release they still pass
+    ``isinstance(obj, GeoCatalog)``, with a `DeprecationWarning`.
+    """
+
+    def __instancecheck__(cls, instance: Any) -> bool:
+        if super().__instancecheck__(instance):
+            return True
+
+        # Static lookups, like the protocol check itself: `hasattr` would
+        # run properties (a lazy `gdf` could materialise the catalog).
+        def present(name: str) -> bool:
+            try:
+                inspect.getattr_static(instance, name)
+            except AttributeError:
+                return False
+            return True
+
+        if cls.__name__ != "GeoCatalog" or not present("backend"):
+            return False
+        required = set(getattr(cls, "__protocol_attrs__", ())) - {"kind"}
+        if not all(present(name) for name in required):
+            return False
+        warnings.warn(
+            f"{type(instance).__name__}: a GeoCatalog exposing `backend` instead "
+            "of `kind` is deprecated; rename the attribute to `kind`. The old "
+            "name will be removed in the next minor release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return True
+
+
 @runtime_checkable
-class GeoCatalog(Protocol):
+class GeoCatalog(Protocol, metaclass=_GeoCatalogMeta):
     """A queryable spatiotemporal index over geospatial files.
 
     Implementations carry a backend-specific store (in-memory
@@ -101,16 +162,16 @@ class GeoCatalog(Protocol):
             most recently queried. Always non-None; may be empty. The
             geometry column is in CRS units; the row index is a
             ``pd.IntervalIndex`` (``closed='both'``) over the time axis.
-        backend: One of ``"raster"``, ``"xarray"``, ``"vector"``.
-            Drives the dispatching choice in the per-backend loaders
-            (`load_raster`, `load_xarray`, `load_vector`).
+        kind: One of ``"raster"``, ``"xarray"``, ``"vector"`` — the
+            kind of data indexed. Drives the dispatching choice in the
+            loaders (`load_raster`, `load_xarray`, `load_vector`).
         crs: The catalog CRS as a ``pyproj.CRS``. Footprints and
             ``total_bounds`` are in its units. Reading it never
             materialises rows.
     """
 
     gdf: gpd.GeoDataFrame
-    backend: BackendTag
+    kind: CatalogKind
     crs: pyproj.CRS
 
     def query(

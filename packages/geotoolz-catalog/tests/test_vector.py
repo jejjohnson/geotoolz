@@ -38,7 +38,7 @@ class TestBuildVectorCatalog:
     def test_one_file(self, vector_file: Path) -> None:
         catalog = build_vector_catalog([vector_file], filename_regex=REGEX)
         assert len(catalog) == 1
-        assert catalog.backend == "vector"
+        assert catalog.kind == "vector"
 
     def test_no_regex(self, vector_file: Path) -> None:
         catalog = build_vector_catalog([vector_file], filename_regex=None)

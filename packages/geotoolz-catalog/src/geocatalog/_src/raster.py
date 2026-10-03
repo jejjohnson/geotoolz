@@ -32,6 +32,7 @@ from rasterio.enums import Resampling
 from rasterio.merge import merge as rio_merge
 from rasterio.vrt import WarpedVRT
 
+from geocatalog._src._deprecation import renamed_kwargs
 from geocatalog._src._schema import StorageEngine
 from geocatalog._src._timeutil import (
     TIME_INVARIANT_END,
@@ -225,13 +226,14 @@ def _run_coroutine_safely(coro: Any) -> Any:
     return result_box["value"]
 
 
+@renamed_kwargs(backend="engine", target_crs="crs")
 def build_raster_catalog(
     filepaths: Sequence[str | Path],
     *,
     filename_regex: str | None = None,
     date_format: str = "%Y%m%d",
-    target_crs: Any | None = None,
-    backend: StorageEngine = "memory",
+    crs: Any | None = None,
+    engine: StorageEngine = "memory",
     out_path: str | Path | None = None,
     write_bbox: bool = True,
     sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),
@@ -246,7 +248,7 @@ def build_raster_catalog(
     """Build a raster catalog — in-memory (default) or streamed to GeoParquet.
 
     For each input file, opens it with `rasterio`, extracts its bounds
-    (optionally projected through a lazy `WarpedVRT` if ``target_crs``
+    (optionally projected through a lazy `WarpedVRT` if ``crs``
     is set so no pixels are read), and parses the time interval from
     the filename via ``filename_regex``. The result is a catalog
     queryable in milliseconds even over tens of thousands of files —
@@ -258,10 +260,10 @@ def build_raster_catalog(
 
     Two backends:
 
-    - ``backend="memory"`` (default): collects rows into a
+    - ``engine="memory"`` (default): collects rows into a
       `gpd.GeoDataFrame` and returns an `InMemoryGeoCatalog`. Peak RAM is
       ``O(n_rows)``. Good up to ~10⁵ files.
-    - ``backend="duckdb"``: streams rows through a `pyarrow.parquet.ParquetWriter`
+    - ``engine="duckdb"``: streams rows through a `pyarrow.parquet.ParquetWriter`
       directly to ``out_path``, then sorts via DuckDB ``(start_time,
       ST_Hilbert(ST_Centroid(geometry)))`` for row-group pruning. Peak RAM
       is ``O(batch_size)``. Scales to 10⁶+ files. Returns a
@@ -280,35 +282,35 @@ def build_raster_catalog(
             (``1900-01-01`` to ``2100-01-01``) instead.
         date_format: ``strptime`` format for the named date groups.
             Default ``"%Y%m%d"``.
-        target_crs: CRS to project each file's bounds into. ``None``
-            keeps each file's native CRS in the memory backend; for the
-            duckdb backend ``None`` is upgraded to ``"EPSG:4326"`` —
+        crs: CRS to project each file's bounds into. ``None``
+            keeps each file's native CRS in the memory engine; for the
+            duckdb engine ``None`` is upgraded to ``"EPSG:4326"`` —
             the canonical wire format the design prescribes for shared
             GeoParquet artifacts (§sharp-edges of the design plan).
-        backend: ``"memory"`` for the existing in-RAM path,
+        engine: ``"memory"`` for the existing in-RAM path,
             ``"duckdb"`` for the streamed GeoParquet path.
         out_path: Destination GeoParquet path. Required when
-            ``backend="duckdb"``. Ignored when ``backend="memory"``.
+            ``engine="duckdb"``. Ignored when ``engine="memory"``.
         write_bbox: Emit the GeoParquet 1.1 per-row ``bbox`` covering
             struct (used for predicate pushdown). Default True. Only
-            consulted when ``backend="duckdb"``.
+            consulted when ``engine="duckdb"``.
         sort_by: Sort keys for the post-write DuckDB rewrite. Each
             plain column name passes through; the literal token
             ``"geometry_hilbert"`` expands to
             ``ST_Hilbert(ST_Centroid(geometry))``. ``None`` skips the
             rewrite and leaves rows in extraction order. Only consulted
-            when ``backend="duckdb"``.
+            when ``engine="duckdb"``.
         partition_by: Optional Hive partition columns for directory
-            output when ``backend="duckdb"``. ``"year"``, ``"month"``,
+            output when ``engine="duckdb"``. ``"year"``, ``"month"``,
             and ``"day"`` are derived from ``start_time``.
         batch_size: Rows per Arrow record batch in the streaming
             writer. Default 10 000. Only consulted when
-            ``backend="duckdb"``.
+            ``engine="duckdb"``.
         n_workers: Process-pool size for per-file metadata extraction.
             ``1`` runs sequentially in-process. ``>1`` spawns a
             ``ProcessPoolExecutor`` (``spawn`` start method) feeding
             the single in-process writer.
-        ordered: With ``backend="duckdb"`` and ``n_workers>1``, preserve
+        ordered: With ``engine="duckdb"`` and ``n_workers>1``, preserve
             input row order instead of completion order. Useful for
             reproducible artifacts when ``sort_by=None``. A slow input
             earlier in the queue stalls every subsequent yield and can
@@ -316,7 +318,7 @@ def build_raster_catalog(
             on the next-in-line future). Prefer ``ordered=False`` for
             skewed workloads and sort post-hoc if you need a stable byte
             layout.
-        concurrency: Extraction strategy for the ``backend="memory"``
+        concurrency: Extraction strategy for the ``engine="memory"``
             branch. ``"sequential"`` (default) extracts rows one at a
             time on the calling thread — the historical behaviour, no
             changes for existing callers. ``"async"`` fans extraction
@@ -324,7 +326,7 @@ def build_raster_catalog(
             on independent files overlaps; meaningful win when reading
             from a remote bucket (a 30-file build over WAN typically
             drops from O(n_files * RTT) to O((n_files / max_concurrent)
-            * RTT)). Ignored for ``backend="duckdb"``, which already
+            * RTT)). Ignored for ``engine="duckdb"``, which already
             has ``n_workers`` for the same purpose.
         max_concurrent: Maximum in-flight file extractions when
             ``concurrency="async"``. Default 8 — a sweet spot between
@@ -333,26 +335,25 @@ def build_raster_catalog(
             across the process.
 
     Returns:
-        ``InMemoryGeoCatalog`` for ``backend="memory"``, otherwise a
+        ``InMemoryGeoCatalog`` for ``engine="memory"``, otherwise a
         ``DuckDBGeoCatalog`` opened on ``out_path``.
 
     Raises:
         ValueError: No files matched (or `out_path` missing in the
             duckdb branch).
     """
-    if backend not in ("memory", "duckdb"):
+    if engine not in ("memory", "duckdb"):
         raise ValueError(
-            f"build_raster_catalog: backend must be 'memory' or 'duckdb'; "
-            f"got {backend!r}"
+            f"build_raster_catalog: engine must be 'memory' or 'duckdb'; got {engine!r}"
         )
-    if backend == "duckdb":
+    if engine == "duckdb":
         if out_path is None:
-            raise ValueError("build_raster_catalog(backend='duckdb') requires out_path")
+            raise ValueError("build_raster_catalog(engine='duckdb') requires out_path")
         return _build_raster_catalog_duckdb(
             filepaths,
             filename_regex=filename_regex,
             date_format=date_format,
-            target_crs=target_crs,
+            target_crs=crs,
             out_path=out_path,
             write_bbox=write_bbox,
             sort_by=sort_by,
@@ -381,7 +382,7 @@ def build_raster_catalog(
                 filepaths,
                 filename_regex=pattern,
                 date_format=date_format,
-                target_crs=target_crs,
+                target_crs=crs,
                 storage_options=storage_options,
                 max_concurrent=max_concurrent,
             )
@@ -393,7 +394,7 @@ def build_raster_catalog(
                 fp,
                 filename_regex=pattern,
                 date_format=date_format,
-                target_crs=target_crs,
+                target_crs=crs,
                 storage_options=storage_options,
             )
             if row is not None:
@@ -401,15 +402,15 @@ def build_raster_catalog(
     if not rows:
         raise ValueError("build_raster_catalog: no files matched the regex")
 
-    crs_value = target_crs if target_crs is not None else rows[0]["crs"]
-    if target_crs is None:
+    crs_value = crs if crs is not None else rows[0]["crs"]
+    if crs is None:
         # Without a target CRS each footprint is in its file's own CRS.
         # Latch the first row's CRS and reproject the others into it, as
         # `build_vector_catalog` does, so the catalog never mixes CRSs
         # under one label (#217).
         rows = [_reproject_row(row, crs_value) for row in rows]
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs_value)
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 def _reproject_row(row: dict[str, Any], dst_crs: Any) -> dict[str, Any]:
@@ -463,7 +464,7 @@ def _build_raster_catalog_duckdb(
     if target_crs is None:
         target_crs = "EPSG:4326"
         log.info(
-            "build_raster_catalog(backend='duckdb'): target_crs=None → "
+            "build_raster_catalog(engine='duckdb'): crs=None → "
             "canonicalising footprints to EPSG:4326 (design §sharp-edges)."
         )
     pattern = re.compile(filename_regex) if filename_regex is not None else None
@@ -479,7 +480,7 @@ def _build_raster_catalog_duckdb(
         extract_fn,
         out_path=out_path,
         crs=target_crs,
-        backend="raster",
+        kind="raster",
         write_bbox=write_bbox,
         sort_by=sort_by,
         partition_by=partition_by,
@@ -563,9 +564,9 @@ def load_raster(
         raise ValueError(
             f"merge_method must be one of {_VALID_MERGE_METHODS}; got {merge_method!r}"
         )
-    if catalog.backend != "raster":
+    if catalog.kind != "raster":
         raise TypeError(
-            f"load_raster requires a raster-backend catalog; got {catalog.backend!r}"
+            f"load_raster requires a raster-backend catalog; got {catalog.kind!r}"
         )
     filtered = catalog.query(slice_)
     if len(filtered) == 0:
@@ -677,6 +678,7 @@ def load_raster(
     )
 
 
+@renamed_kwargs(concurrency="max_open_workers")
 async def aload_raster(
     catalog: InMemoryGeoCatalog,
     slice_: GeoSlice,
@@ -686,16 +688,17 @@ async def aload_raster(
     merge_method: _RasterMergeMethod = "last",
     nodata: float | None = None,
     retries: int = 3,
-    concurrency: int = 8,
+    max_open_workers: int = 8,
     storage_options: dict[str, Any] | None = None,
 ) -> GeoTensor:
     """Async mirror of `load_raster` for event-loop consumers.
 
     Runs `load_raster` in a worker thread via `asyncio.to_thread` so the
     event loop stays responsive during rasterio I/O (which releases the
-    GIL), with the file-open phase parallelised to ``concurrency``
+    GIL), with the file-open phase parallelised to ``max_open_workers``
     threads inside the worker. Same arguments and return value as
-    `load_raster`; ``concurrency`` maps to ``max_open_workers``.
+    `load_raster`. (``concurrency`` is the deprecated name of
+    ``max_open_workers``; ``concurrency`` names the build strategy.)
     """
     return await asyncio.to_thread(
         functools.partial(
@@ -707,7 +710,7 @@ async def aload_raster(
             merge_method=merge_method,
             nodata=nodata,
             retries=retries,
-            max_open_workers=concurrency,
+            max_open_workers=max_open_workers,
             storage_options=storage_options,
         )
     )

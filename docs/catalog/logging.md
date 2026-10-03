@@ -63,7 +63,7 @@ records' logger names are the internal modules under `geocatalog`, so
   misses.
 - `build_raster_catalog` / `build_vector_catalog` — `INFO` when the
   `duckdb` backend is asked to canonicalise footprints to EPSG:4326
-  because no `target_crs` was passed.
+  because no `crs` was passed.
 - `StreamingParquetWriter` — `ERROR` (with traceback) when closing the
   parquet handle fails while a partial file is being discarded after an
   error.

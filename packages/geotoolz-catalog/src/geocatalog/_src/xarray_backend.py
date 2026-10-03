@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from geocatalog._src.geoslice import GeoSlice
 
 
+from geocatalog._src._deprecation import renamed_kwargs
 from geocatalog._src._extras import missing_extra
 from geocatalog._src._schema import StorageEngine
 from geocatalog._src.io import _close_resolved_uri, _resolve_uri
@@ -170,13 +171,14 @@ def _xarray_row(
     }
 
 
+@renamed_kwargs(backend="engine", target_crs="crs")
 def build_xarray_catalog(
     filepaths: Sequence[str | Path],
     *,
-    target_crs: Any | None = None,
+    crs: Any | None = None,
     data_vars: Sequence[str] | None = None,
     time_var: str = "time",
-    backend: StorageEngine = "memory",
+    engine: StorageEngine = "memory",
     out_path: str | Path | None = None,
     write_bbox: bool = True,
     sort_by: tuple[str, ...] | None = ("start_time", "geometry_hilbert"),
@@ -193,20 +195,20 @@ def build_xarray_catalog(
     (longitude, latitude) coordinates, and reads the time interval from
     the ``time_var`` coordinate. If `rioxarray` is loaded and the
     dataset carries a CRS through its ``rio`` accessor, that wins;
-    otherwise the catalog falls back to ``target_crs``.
+    otherwise the catalog falls back to ``crs``.
 
     Backends mirror `build_raster_catalog`. The streaming branch
-    (`backend="duckdb"`) requires the ``[duckdb]`` extra and an
-    *explicit* ``target_crs`` — unlike the raster builder, xarray
+    (`engine="duckdb"`) requires the ``[duckdb]`` extra and an
+    *explicit* ``crs`` — unlike the raster builder, xarray
     coordinate bounds are *not* reprojected, so the CRS metadata must
-    match the dataset's native coords. Passing ``target_crs=None`` in
+    match the dataset's native coords. Passing ``crs=None`` in
     the duckdb branch raises `ValueError`.
 
     Args:
         filepaths: Files to index. ``.zarr`` paths (and directories)
             are opened with the zarr engine; everything else falls
             back to netcdf4 / h5netcdf.
-        target_crs: CRS to tag the catalog with when files don't carry
+        crs: CRS to tag the catalog with when files don't carry
             their own. Coordinate bounds are *not* reprojected — there's
             no `WarpedVRT` analogue for xarray — so this should match
             the files' native CRS.
@@ -217,22 +219,22 @@ def build_xarray_catalog(
         time_var: Coordinate name for the time axis. Default ``"time"``.
             Files where this coordinate is missing get the sentinel
             interval ``[1900-01-01, 2100-01-01]``.
-        backend: ``"memory"`` for the existing in-RAM path,
+        engine: ``"memory"`` for the existing in-RAM path,
             ``"duckdb"`` for the streamed GeoParquet path.
         out_path: Destination GeoParquet path. Required when
-            ``backend="duckdb"``.
+            ``engine="duckdb"``.
         write_bbox: Emit the GeoParquet 1.1 covering ``bbox`` struct.
-            Only consulted when ``backend="duckdb"``.
+            Only consulted when ``engine="duckdb"``.
         sort_by: Sort keys for the post-write DuckDB rewrite; literal
             ``"geometry_hilbert"`` expands to
             ``ST_Hilbert(ST_Centroid(geometry))``. ``None`` skips the
-            rewrite. Only consulted when ``backend="duckdb"``.
+            rewrite. Only consulted when ``engine="duckdb"``.
         partition_by: Optional Hive partition columns for directory
-            output when ``backend="duckdb"``. ``"year"``, ``"month"``,
+            output when ``engine="duckdb"``. ``"year"``, ``"month"``,
             and ``"day"`` are derived from ``start_time``.
         batch_size: Rows per Arrow record batch. Default 10 000.
         n_workers: Process-pool size for per-file extraction.
-        ordered: With ``backend="duckdb"`` and ``n_workers>1``, preserve
+        ordered: With ``engine="duckdb"`` and ``n_workers>1``, preserve
             input row order instead of completion order. Useful for
             reproducible artifacts when ``sort_by=None``. A slow input
             earlier in the queue stalls every subsequent yield and can
@@ -242,7 +244,7 @@ def build_xarray_catalog(
             layout.
 
     Returns:
-        `InMemoryGeoCatalog` for ``backend="memory"``, otherwise a
+        `InMemoryGeoCatalog` for ``engine="memory"``, otherwise a
         `DuckDBGeoCatalog`.
 
     Raises:
@@ -250,17 +252,16 @@ def build_xarray_catalog(
         ValueError: If no files yielded a row or ``out_path`` missing
             in the duckdb branch.
     """
-    if backend not in ("memory", "duckdb"):
+    if engine not in ("memory", "duckdb"):
         raise ValueError(
-            f"build_xarray_catalog: backend must be 'memory' or 'duckdb'; "
-            f"got {backend!r}"
+            f"build_xarray_catalog: engine must be 'memory' or 'duckdb'; got {engine!r}"
         )
-    if backend == "duckdb":
+    if engine == "duckdb":
         if out_path is None:
-            raise ValueError("build_xarray_catalog(backend='duckdb') requires out_path")
+            raise ValueError("build_xarray_catalog(engine='duckdb') requires out_path")
         return _build_xarray_catalog_duckdb(
             filepaths,
-            target_crs=target_crs,
+            target_crs=crs,
             data_vars=data_vars,
             time_var=time_var,
             out_path=out_path,
@@ -278,22 +279,22 @@ def build_xarray_catalog(
             fp,
             data_vars=data_vars,
             time_var=time_var,
-            target_crs=target_crs,
+            target_crs=crs,
             storage_options=storage_options,
         )
         for fp in filepaths
     ]
     if not rows:
         raise ValueError("build_xarray_catalog: no files yielded a row")
-    crs_value = target_crs if target_crs is not None else rows[0]["crs"]
+    crs_value = crs if crs is not None else rows[0]["crs"]
     if crs_value is None:
         raise ValueError(
             "build_xarray_catalog: cannot determine catalog CRS — pass "
-            "`target_crs=...` explicitly, or load `rioxarray` so the "
+            "`crs=...` explicitly, or load `rioxarray` so the "
             "dataset's `.rio.crs` accessor reports a CRS."
         )
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs_value)
-    return InMemoryGeoCatalog(gdf, backend="xarray")
+    return InMemoryGeoCatalog(gdf, kind="xarray")
 
 
 def _build_xarray_catalog_duckdb(
@@ -324,10 +325,10 @@ def _build_xarray_catalog_duckdb(
 
     if target_crs is None:
         raise ValueError(
-            "build_xarray_catalog(backend='duckdb') requires target_crs. "
+            "build_xarray_catalog(engine='duckdb') requires crs. "
             "Unlike the raster builder, the xarray branch does not "
             "reproject coordinate bounds, so the CRS metadata must match "
-            "the dataset's native coordinate system. Pass target_crs "
+            "the dataset's native coordinate system. Pass crs "
             "explicitly (e.g. 'EPSG:4326' for lon/lat, or your data's "
             "actual projected CRS for UTM/Web-Mercator/etc.)."
         )
@@ -343,7 +344,7 @@ def _build_xarray_catalog_duckdb(
         extract_fn,
         out_path=out_path,
         crs=target_crs,
-        backend="xarray",
+        kind="xarray",
         write_bbox=write_bbox,
         sort_by=sort_by,
         partition_by=partition_by,
@@ -395,9 +396,9 @@ def load_xarray(
     """
     if xr is None:
         raise missing_extra("`load_xarray`", "xarray-raster")
-    if catalog.backend != "xarray":
+    if catalog.kind != "xarray":
         raise TypeError(
-            f"load_xarray requires an xarray-backend catalog; got {catalog.backend!r}"
+            f"load_xarray requires an xarray-backend catalog; got {catalog.kind!r}"
         )
     filtered = catalog.query(slice_)
     if len(filtered) == 0:

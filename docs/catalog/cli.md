@@ -43,35 +43,37 @@ clear error if the extra isn't installed.
 | ---- | -------- | ------- |
 | `--input-glob` | all | Local glob over input files (`**` recurses). Required. |
 | `--out` | all | Destination GeoParquet path. Required. |
-| `--target-crs` | all | Catalog CRS. `raster` with `--backend memory` and `vector`: defaults to the first file's CRS. `raster` with `--backend duckdb`: defaults to `EPSG:4326` (footprints are reprojected). `xarray`: tags the catalog, does not reproject. |
+| `--crs` | all | Catalog CRS (`--target-crs` is the deprecated spelling). `raster` with `--engine memory` and `vector`: defaults to the first file's CRS. `raster` with `--engine duckdb`: defaults to `EPSG:4326` (footprints are reprojected). `xarray`: tags the catalog, does not reproject. |
 | `--regex` | raster, vector | Filename regex with a `(?P<date>...)` group, or `(?P<start>...)` + `(?P<stop>...)`. |
 | `--date-format` | raster, vector | `strptime` format for the regex groups (default `%Y%m%d`). |
-| `--backend` | raster | `memory` (default) builds in RAM; `duckdb` streams rows straight to `--out` (needs the `[duckdb]` extra). |
+| `--engine` | raster | `memory` (default) builds in RAM (`--backend` is the deprecated spelling); `duckdb` streams rows straight to `--out` (needs the `[duckdb]` extra). |
 | `--layer` | vector | Layer name for multi-layer files (GeoPackage). |
 | `--time-var` | xarray | Name of the time coordinate (default `time`). |
 
-An invalid `--target-crs` fails with a one-line message and exit code
+An invalid `--crs` fails with a one-line message and exit code
 1, as does a `build vector` input that is not a vector dataset. `build
 raster` reports a file it cannot open as a raster as an I/O error
 (exit code 3).
 
 ### `query`
 
-Filter a catalog by bbox + time window and print the matching row count.
+Filter a catalog by bounds + time window and print the matching row count.
 
 ```console
 $ geocatalog query catalog.parquet \
-    --bbox "-5.2,36.1,-4.5,36.8" \
+    --bounds "-5.2,36.1,-4.5,36.8" \
     --start 2024-06-01 \
     --end 2024-06-30
 source  catalog.parquet
 rows    42
+bounds  (-5.2, 36.1, -4.5, 36.8)
 bbox    (-5.2, 36.1, -4.5, 36.8)
 time    ['2024-06-01', '2024-06-30']
 ```
 
-Pass `--crs EPSG:32629` (or any other identifier) to interpret `--bbox`
-in a non-default CRS. The library reprojects internally. A `--crs` that
+Pass `--crs EPSG:32629` (or any other identifier) to interpret `--bounds`
+in a non-default CRS. (`--bbox` is the deprecated spelling of
+`--bounds`; the output repeats `bounds` as `bbox` for one release.) The library reprojects internally. A `--crs` that
 pyproj does not recognise fails with a one-line message and exit code 1.
 
 `--start` and `--end` are paired — pass either both or neither.
@@ -80,7 +82,8 @@ Passing only one is rejected with exit code 1.
 ### `stats`
 
 Top-line metadata about an artifact — rows, bounds, temporal extent,
-backend tag, CRS. On an empty catalog the temporal extent prints as
+kind, CRS (`backend` repeats `kind` for one release). On an empty
+catalog the temporal extent prints as
 `None`.
 
 ```console
@@ -89,6 +92,7 @@ rows             1247891
 bounds           [-15.2, 36.1, 4.5, 47.2]
 temporal_start   2021-01-01 00:00:00
 temporal_end     2024-06-29 23:59:59
+kind             raster
 backend          raster
 crs              EPSG:4326
 ```
@@ -167,7 +171,7 @@ $ geocatalog build raster --input-glob "data/*.tif" \
 | Code | Meaning                                                       |
 | ---- | ------------------------------------------------------------- |
 | 0    | Success.                                                      |
-| 1    | User error — bad or unparseable args (including an invalid `--crs` / `--target-crs`), glob matched nothing, a `build vector` input that is not a vector dataset, missing extra. |
+| 1    | User error — bad or unparseable args (including an invalid `--crs`), glob matched nothing, a `build vector` input that is not a vector dataset, missing extra. |
 | 2    | Catalog error — corrupt artifact or unrecognised schema (e.g. a newer `_schema_version`). |
 | 3    | I/O error — source path doesn't exist or can't be read.       |
 

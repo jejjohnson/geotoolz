@@ -33,7 +33,7 @@ def _mem(name: str, geom: shapely.Geometry, **extra: object) -> InMemoryGeoCatal
         geometry="geometry",
         crs="EPSG:32629",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 def _user_views(con: duckdb.DuckDBPyConnection) -> int:

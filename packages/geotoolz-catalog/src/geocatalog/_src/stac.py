@@ -17,6 +17,7 @@ import shapely.geometry
 import shapely.ops
 from loguru import logger as log
 
+from geocatalog._src._deprecation import renamed_kwargs
 from geocatalog._src._extras import require_extra
 from geocatalog._src._schema import StorageEngine
 from geocatalog._src._stac_item import (
@@ -41,12 +42,13 @@ if TYPE_CHECKING:
 _STAC_CRS = pyproj.CRS.from_epsg(4326)
 
 
+@renamed_kwargs(backend="engine", target_crs="crs")
 def from_stac_items(
     items: Iterable[pystac.Item],
     *,
     asset_key: str | Literal["*"] = "data",
-    backend: StorageEngine = "memory",
-    target_crs: Any | None = None,
+    engine: StorageEngine = "memory",
+    crs: Any | None = None,
     out_path: Path | None = None,
     extra_properties: Sequence[str] = (),
 ) -> GeoCatalog:
@@ -56,16 +58,18 @@ def from_stac_items(
         items: STAC items to index.
         asset_key: Asset key to index. Pass ``"*"`` to emit one row for
             every asset on each item.
-        backend: ``"memory"`` or ``"duckdb"``.
-        target_crs: Optional CRS for catalog footprints. Item geometries
-            are lon/lat (EPSG:4326) and are reprojected, with edge
-            densification, when supplied.
-        out_path: GeoParquet destination required by ``backend="duckdb"``.
+        engine: ``"memory"`` or ``"duckdb"``. (``backend`` is the
+            deprecated name.)
+        crs: Optional CRS for catalog footprints. Item geometries are
+            lon/lat (EPSG:4326) and are reprojected, with edge
+            densification, when supplied. (``target_crs`` is the
+            deprecated name.)
+        out_path: GeoParquet destination required by ``engine="duckdb"``.
         extra_properties: STAC property keys to preserve as catalog columns.
             Must not name one of the columns the builder writes itself.
 
     Returns:
-        A raster-backend `GeoCatalog` with one row per selected STAC asset.
+        A raster `GeoCatalog` with one row per selected STAC asset.
         Footprints come from ``item.geometry`` (``item.bbox`` only when
         the geometry is missing), split at the antimeridian; ``crs`` is
         the asset's native CRS from the projection extension
@@ -81,9 +85,9 @@ def from_stac_items(
     Raises:
         ValueError: ``extra_properties`` names a builder-owned column.
     """
-    if backend not in ("memory", "duckdb"):
+    if engine not in ("memory", "duckdb"):
         raise ValueError(
-            f"from_stac_items: backend must be 'memory' or 'duckdb'; got {backend!r}"
+            f"from_stac_items: engine must be 'memory' or 'duckdb'; got {engine!r}"
         )
     _require_pystac()
     clashes = sorted(set(extra_properties) & _STAC_ROW_COLUMNS)
@@ -93,9 +97,7 @@ def from_stac_items(
             "columns the builder writes; drop them from extra_properties."
         )
 
-    catalog_crs = (
-        pyproj.CRS.from_user_input(target_crs) if target_crs is not None else _STAC_CRS
-    )
+    catalog_crs = pyproj.CRS.from_user_input(crs) if crs is not None else _STAC_CRS
     rows: list[dict[str, Any]] = []
     for item in items:
         try:
@@ -130,27 +132,28 @@ def from_stac_items(
     )
     for prop_key in extra_properties:
         gdf[prop_key] = [r.get(prop_key) for r in rows]
-    catalog = InMemoryGeoCatalog(gdf, backend="raster")
-    if backend == "memory":
+    catalog = InMemoryGeoCatalog(gdf, kind="raster")
+    if engine == "memory":
         return catalog
     if out_path is None:
-        raise ValueError("from_stac_items(backend='duckdb') requires out_path")
+        raise ValueError("from_stac_items(engine='duckdb') requires out_path")
     to_geoparquet(catalog, out_path)
     from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
 
-    return DuckDBGeoCatalog.open(out_path, backend="raster", crs=catalog_crs)
+    return DuckDBGeoCatalog.open(out_path, kind="raster", crs=catalog_crs)
 
 
+@renamed_kwargs(bbox="bounds", backend="engine", max_items="limit", target_crs="crs")
 def from_stac_search(
     client: Any | str,
     *,
     collections: Sequence[str],
-    bbox: tuple[float, float, float, float] | None = None,
+    bounds: tuple[float, float, float, float] | None = None,
     datetime: str | None = None,
     asset_key: str | Literal["*"] = "data",
-    backend: StorageEngine = "memory",
-    max_items: int | None = None,
-    target_crs: Any | None = None,
+    engine: StorageEngine = "memory",
+    limit: int | None = None,
+    crs: Any | None = None,
     out_path: Path | None = None,
     extra_properties: Sequence[str] = (),
 ) -> GeoCatalog:
@@ -159,18 +162,22 @@ def from_stac_search(
     Args:
         client: Open `pystac_client.Client` or STAC API URL.
         collections: Collection IDs to search.
-        bbox: Optional lon/lat search bbox.
+        bounds: Optional lon/lat search box ``(minx, miny, maxx, maxy)``.
+            (``bbox`` is the deprecated name.)
         datetime: Optional STAC datetime interval string.
         asset_key: Asset key to index. Pass ``"*"`` to emit one row for
             every asset on each item.
-        backend: ``"memory"`` or ``"duckdb"``.
-        max_items: Optional maximum number of returned search items to index.
-        target_crs: Optional CRS for catalog footprints.
-        out_path: GeoParquet destination required by ``backend="duckdb"``.
+        engine: ``"memory"`` or ``"duckdb"``. (``backend`` is the
+            deprecated name.)
+        limit: Optional maximum number of returned search items to index.
+            (``max_items`` is the deprecated name.)
+        crs: Optional CRS for catalog footprints. (``target_crs`` is the
+            deprecated name.)
+        out_path: GeoParquet destination required by ``engine="duckdb"``.
         extra_properties: STAC property keys to preserve as catalog columns.
 
     Returns:
-        A raster-backend `GeoCatalog` over the matching STAC assets.
+        A raster `GeoCatalog` over the matching STAC assets.
     """
     pystac_client = _require_pystac_client()
     if isinstance(client, str):
@@ -178,18 +185,18 @@ def from_stac_search(
 
     search = client.search(
         collections=collections,
-        bbox=bbox,
+        bbox=bounds,
         datetime=datetime,
-        max_items=max_items,
+        max_items=limit,
     )
     item_iter = search.items()
-    if max_items is not None:
-        item_iter = itertools.islice(item_iter, max_items)
+    if limit is not None:
+        item_iter = itertools.islice(item_iter, limit)
     return from_stac_items(
         item_iter,
         asset_key=asset_key,
-        backend=backend,
-        target_crs=target_crs,
+        engine=engine,
+        crs=crs,
         out_path=out_path,
         extra_properties=extra_properties,
     )

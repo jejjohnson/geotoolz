@@ -39,17 +39,17 @@ def netcdf_file(tmp_path: Path) -> Path:
 class TestBuildXarrayCatalog:
     def test_one_file(self, netcdf_file: Path) -> None:
         catalog = build_xarray_catalog(
-            [netcdf_file], target_crs="EPSG:4326", data_vars=["ndvi"]
+            [netcdf_file], crs="EPSG:4326", data_vars=["ndvi"]
         )
         assert len(catalog) == 1
-        assert catalog.backend == "xarray"
+        assert catalog.kind == "xarray"
         assert catalog.gdf["n_timesteps"].iloc[0] == 5
 
 
 class TestLoadXarray:
     def test_returns_dataset(self, netcdf_file: Path) -> None:
         catalog = build_xarray_catalog(
-            [netcdf_file], target_crs="EPSG:4326", data_vars=["ndvi"]
+            [netcdf_file], crs="EPSG:4326", data_vars=["ndvi"]
         )
         sl = GeoSlice(
             bounds=(-3.4, 40.1, -3.1, 40.4),
@@ -71,7 +71,7 @@ class TestLoadXarray:
         requested window.
         """
         catalog = build_xarray_catalog(
-            [netcdf_file], target_crs="EPSG:4326", data_vars=["ndvi"]
+            [netcdf_file], crs="EPSG:4326", data_vars=["ndvi"]
         )
         # File covers 2024-01-01 through 2024-01-05 (5 timesteps);
         # ask for the middle 2 days only.
@@ -103,8 +103,8 @@ class TestLoadXarray:
         )
         path = tmp_path / "no_crs.nc"
         ds.to_netcdf(path)
-        with pytest.raises(ValueError, match="target_crs"):
-            build_xarray_catalog([path], target_crs=None)
+        with pytest.raises(ValueError, match="crs="):
+            build_xarray_catalog([path], crs=None)
 
 
 class TestXarrayEngineDispatch:

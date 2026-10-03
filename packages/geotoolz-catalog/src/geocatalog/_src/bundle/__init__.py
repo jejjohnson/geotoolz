@@ -8,7 +8,7 @@ items) and ``matchups.parquet`` (matched-row tuples) — plus a
 
 Three entry points:
 
-* `CatalogBundle.empty(target_crs, backend)` — create a fresh bundle.
+* `CatalogBundle.empty(crs, kind)` — create a fresh bundle.
 * `CatalogBundle.from_directory(path)` — load an existing one.
 * `CatalogBundle.from_catalog(catalog)` — wrap an in-memory
   catalog when the user already built one without using the bundle

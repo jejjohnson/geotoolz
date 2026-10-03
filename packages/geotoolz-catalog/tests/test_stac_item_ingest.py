@@ -177,7 +177,7 @@ def test_signed_hrefs_are_flagged() -> None:
     assert bool(_only_row(_item()).extras["href_signed"]) is False
 
     gdf_row = source_row_to_gdf_row(
-        _source_row(_item(href=SIGNED)), target_crs=pyproj.CRS.from_epsg(4326)
+        _source_row(_item(href=SIGNED)), crs=pyproj.CRS.from_epsg(4326)
     )
     assert gdf_row["href_signed"] is True
 
@@ -197,7 +197,7 @@ def test_reprojection_is_densified() -> None:
     assert abs(corners_only.area / reference.area - 1) > 0.005  # the bug
     assert got.area == pytest.approx(reference.area, rel=1e-3)
 
-    row = _only_row(_item(geometry=tile), target_crs="EPSG:3035")
+    row = _only_row(_item(geometry=tile), crs="EPSG:3035")
     assert row.geometry.area == pytest.approx(reference.area, rel=1e-3)
 
 
@@ -235,9 +235,7 @@ def test_bundle_row_carries_the_asset_crs() -> None:
     item = _item(
         properties={"proj:code": "EPSG:32633"}, asset_fields={"proj:code": "EPSG:32601"}
     )
-    gdf_row = source_row_to_gdf_row(
-        _source_row(item), target_crs=pyproj.CRS.from_epsg(4326)
-    )
+    gdf_row = source_row_to_gdf_row(_source_row(item), crs=pyproj.CRS.from_epsg(4326))
     assert gdf_row["crs"] == "EPSG:32601"
 
 
@@ -344,9 +342,7 @@ def test_segment_180_degrees_long_goes_over_the_pole() -> None:
 def test_empty_bundle_has_the_ingested_schema() -> None:
     from geocatalog import CatalogBundle
 
-    empty = CatalogBundle.empty(target_crs="EPSG:4326").catalog.gdf
-    row = source_row_to_gdf_row(
-        _source_row(_item()), target_crs=pyproj.CRS("EPSG:4326")
-    )
+    empty = CatalogBundle.empty(crs="EPSG:4326").catalog.gdf
+    row = source_row_to_gdf_row(_source_row(_item()), crs=pyproj.CRS("EPSG:4326"))
     assert set(row) - {"geometry", "start_time", "end_time"} <= set(empty.columns)
     assert empty["href_signed"].dtype == bool

@@ -76,7 +76,7 @@ def test_ids_come_from_the_bundle_id_column() -> None:
         crs="EPSG:4326",
     )
     collection = to_stac_collection(
-        InMemoryGeoCatalog(gdf, backend="raster"), collection_id="c"
+        InMemoryGeoCatalog(gdf, kind="raster"), collection_id="c"
     )
     (item,) = collection.get_items()
     assert item.id == "granule-123"
@@ -94,7 +94,7 @@ def test_rows_without_an_id_get_distinct_ids() -> None:
         crs="EPSG:4326",
     )
     collection = to_stac_collection(
-        InMemoryGeoCatalog(gdf, backend="raster"), collection_id="c"
+        InMemoryGeoCatalog(gdf, kind="raster"), collection_id="c"
     )
     assert sorted(i.id for i in collection.get_items()) == ["c-0", "c-1"]
 
@@ -112,7 +112,7 @@ def test_duplicate_asset_in_one_item_raises() -> None:
         crs="EPSG:4326",
     )
     with pytest.raises(ValueError, match=r"'same'.*'B04'"):
-        to_stac_collection(InMemoryGeoCatalog(gdf, backend="raster"), collection_id="c")
+        to_stac_collection(InMemoryGeoCatalog(gdf, kind="raster"), collection_id="c")
 
 
 def test_properties_are_json_serialisable() -> None:
@@ -131,7 +131,7 @@ def test_properties_are_json_serialisable() -> None:
         crs="EPSG:4326",
     )
     collection = to_stac_collection(
-        InMemoryGeoCatalog(gdf, backend="raster"), collection_id="c"
+        InMemoryGeoCatalog(gdf, kind="raster"), collection_id="c"
     )
     for item in collection.get_items():
         json.dumps(item.to_dict(), allow_nan=False)
@@ -180,7 +180,7 @@ def test_numpy_datetimes_and_0d_arrays_are_serialised() -> None:
         crs="EPSG:4326",
     )
     (item,) = to_stac_collection(
-        InMemoryGeoCatalog(gdf, backend="raster"), collection_id="c"
+        InMemoryGeoCatalog(gdf, kind="raster"), collection_id="c"
     ).get_items()
     json.dumps(item.to_dict(), allow_nan=False)
     assert item.properties["times"][0].startswith("2024-06-01T10:00:00")
@@ -198,7 +198,7 @@ def _gdf(**columns: Any) -> InMemoryGeoCatalog:
         },
         crs="EPSG:4326",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 def test_bundle_scope_separates_reused_ids() -> None:

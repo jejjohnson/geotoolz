@@ -275,7 +275,7 @@ def stage(
         pool.shutdown(wait=True, cancel_futures=True)
 
     new_gdf = _rewrite_gdf(catalog.gdf, plans, failures=failures)
-    return InMemoryGeoCatalog(new_gdf, backend=catalog.backend)
+    return InMemoryGeoCatalog(new_gdf, kind=catalog.kind)
 
 
 # ---------------------------------------------------------------------------

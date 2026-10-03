@@ -87,7 +87,7 @@ from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 # 1. Discover + index (catalog)
 cat = gc.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
-    collections=["sentinel-2-l2a"], bbox=aoi_bbox, datetime="2024-06",
+    collections=["sentinel-2-l2a"], bounds=aoi_bbox, datetime="2024-06",
     asset_key="B04",                     # one row per item, filepath = its B04 href
 )
 

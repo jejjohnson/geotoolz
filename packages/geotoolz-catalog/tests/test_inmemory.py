@@ -15,7 +15,7 @@ from geocatalog import InMemoryGeoCatalog
 
 def _build(rows: list[dict], crs: str = "EPSG:32629") -> InMemoryGeoCatalog:
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ class TestConstruction:
             geometry="geometry",
         )
         with pytest.raises(ValueError, match=r"gdf\.crs"):
-            InMemoryGeoCatalog(gdf, backend="raster")
+            InMemoryGeoCatalog(gdf, kind="raster")
 
     def test_rejects_missing_time(self) -> None:
         gdf = gpd.GeoDataFrame(
@@ -61,7 +61,7 @@ class TestConstruction:
             crs="EPSG:32629",
         )
         with pytest.raises(ValueError, match="IntervalIndex"):
-            InMemoryGeoCatalog(gdf, backend="raster")
+            InMemoryGeoCatalog(gdf, kind="raster")
 
 
 class TestMemoryOnly:
@@ -79,7 +79,7 @@ class TestMemoryOnly:
             ]
         )
         default = two_tile_catalog.intersect(other)
-        legacy = two_tile_catalog.intersect(other, engine="overlay")
+        legacy = two_tile_catalog.intersect(other, join="overlay")
 
         assert len(default) == len(legacy)
         # ``set`` would mask duplicate-row multiplicity; geometries aren't
@@ -89,11 +89,11 @@ class TestMemoryOnly:
         ) == Counter(shapely.normalize(g).wkb_hex for g in legacy.gdf.geometry)
         assert Counter(default.gdf.index) == Counter(legacy.gdf.index)
 
-    def test_intersect_rejects_unknown_engine(
+    def test_intersect_rejects_unknown_join(
         self, two_tile_catalog: InMemoryGeoCatalog
     ) -> None:
-        with pytest.raises(ValueError, match="Unsupported intersect engine"):
-            two_tile_catalog.intersect(two_tile_catalog, engine="missing")  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="Unsupported intersect join"):
+            two_tile_catalog.intersect(two_tile_catalog, join="missing")  # type: ignore[arg-type]
 
     def test_does_not_leak_bbox_or_schema_metadata_into_extras(self) -> None:
         """Regression for the P2 bug where the GeoParquet 1.1 ``bbox``
@@ -136,7 +136,7 @@ class TestMemoryOnly:
             [shapely.box(1, 0, 3, 2), shapely.box(-1, 0, 0, 2)]
         )
         right = _build([_row(right_geom, "2024-01-01", "2024-01-03", "r")])
-        out = left.intersect(right, engine=engine)  # type: ignore[arg-type]
+        out = left.intersect(right, join=engine)  # type: ignore[arg-type]
         assert len(out) == 1
         geom = out.gdf.geometry.iloc[0]
         assert geom.geom_type == "Polygon"
@@ -170,10 +170,8 @@ class TestConstructorValidation:
             index=idx,
         )
         with pytest.raises(ValueError, match="closed='both'"):
-            InMemoryGeoCatalog(gdf, backend="raster")
+            InMemoryGeoCatalog(gdf, kind="raster")
 
-    def test_rejects_unknown_backend_tag(
-        self, two_tile_catalog: InMemoryGeoCatalog
-    ) -> None:
-        with pytest.raises(ValueError, match="backend must be one of"):
-            InMemoryGeoCatalog(two_tile_catalog.gdf, backend="rastr")  # type: ignore[arg-type]
+    def test_rejects_unknown_kind(self, two_tile_catalog: InMemoryGeoCatalog) -> None:
+        with pytest.raises(ValueError, match="kind must be one of"):
+            InMemoryGeoCatalog(two_tile_catalog.gdf, kind="rastr")  # type: ignore[arg-type]

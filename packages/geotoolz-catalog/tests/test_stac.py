@@ -53,7 +53,7 @@ def test_from_stac_items_preserves_asset_and_extra_properties() -> None:
     )
 
     assert len(cat) == 1
-    assert cat.backend == "raster"
+    assert cat.kind == "raster"
     assert cat.gdf.crs == "EPSG:4326"
     row = next(cat.iter_rows())
     assert row.filepath == "s3://bucket/B04.tif"
@@ -108,7 +108,7 @@ def test_from_stac_items_empty_returns_empty_catalog() -> None:
     cat = gc.from_stac_items([], asset_key="B04")
 
     assert len(cat) == 0
-    assert cat.backend == "raster"
+    assert cat.kind == "raster"
     assert cat.gdf.crs == "EPSG:4326"
 
 
@@ -138,7 +138,7 @@ def test_to_stac_collection_round_trips_with_pystac(tmp_path: Path) -> None:
         geometry="geometry",
         crs="EPSG:4326",
     )
-    catalog = gc.InMemoryGeoCatalog(gdf, backend="raster")
+    catalog = gc.InMemoryGeoCatalog(gdf, kind="raster")
 
     collection = gc.to_stac_collection(
         catalog,
@@ -210,7 +210,7 @@ def test_to_stac_collection_emits_rfc3339_datetimes(tmp_path: Path) -> None:
         geometry="geometry",
         crs="EPSG:4326",
     )
-    catalog = gc.InMemoryGeoCatalog(gdf, backend="raster")
+    catalog = gc.InMemoryGeoCatalog(gdf, kind="raster")
 
     collection = gc.to_stac_collection(
         catalog,

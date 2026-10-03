@@ -62,7 +62,7 @@ def _toy_catalog() -> InMemoryGeoCatalog:
         geometry="geometry",
         crs="EPSG:32629",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 def test_from_geoparquet_retries_then_succeeds(
@@ -226,7 +226,7 @@ def test_duckdb_open_retries_read_parquet_sql(
 
     catalog = duckdb_module.DuckDBGeoCatalog.open(
         "s3://bucket/catalog.parquet",
-        backend="raster",
+        kind="raster",
         crs="EPSG:4326",
         retries=2,
     )

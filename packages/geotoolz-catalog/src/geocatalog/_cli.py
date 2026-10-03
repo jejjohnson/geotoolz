@@ -9,7 +9,7 @@ Exit codes:
 
 * 0 — success.
 * 1 — user error (bad args, missing extra, no files match glob,
-       invalid bbox / time range / CRS, partial ``--start`` / ``--end``,
+       invalid bounds / time range / CRS, partial ``--start`` / ``--end``,
        a ``build vector`` input that is not a vector dataset).
 * 2 — catalog error (corrupt artifact, schema mismatch).
 * 3 — I/O error (path not readable / writable, parent dir missing).
@@ -64,15 +64,17 @@ def _expand_glob(pattern: str) -> list[Path]:
     return [Path(m) for m in matches]
 
 
-def _parse_bbox(s: str) -> tuple[float, float, float, float]:
+def _parse_bounds(s: str) -> tuple[float, float, float, float]:
     """``"xmin,ymin,xmax,ymax"`` → tuple of four floats."""
     parts = [p.strip() for p in s.split(",")]
     if len(parts) != 4:
-        raise ValueError(f"--bbox must be 'xmin,ymin,xmax,ymax' (4 floats); got {s!r}")
+        raise ValueError(
+            f"--bounds must be 'xmin,ymin,xmax,ymax' (4 floats); got {s!r}"
+        )
     try:
         xmin, ymin, xmax, ymax = (float(p) for p in parts)
     except ValueError as exc:
-        raise ValueError(f"--bbox values must be numeric; got {s!r}") from exc
+        raise ValueError(f"--bounds values must be numeric; got {s!r}") from exc
     return (xmin, ymin, xmax, ymax)
 
 
@@ -163,25 +165,45 @@ def _parse_partition_by(value: str | None) -> tuple[str, ...] | None:
 # ---------------------------------------------------------------------------
 
 
+def _retired_flag[T](
+    old_flag: str, new_flag: str, old: T | None, new: T | None
+) -> T | None:
+    """Resolve a renamed flag (#246): the new one, or the old one with a notice.
+
+    The old spelling still works for one minor release; using it prints
+    a deprecation notice on stderr. Passing both raises `ValueError`.
+    """
+    if old is None:
+        return new
+    if new is not None:
+        raise ValueError(f"pass {new_flag} or the deprecated {old_flag}, not both")
+    print(
+        f"warning: {old_flag} is deprecated, use {new_flag}; the old flag will "
+        "be removed in the next minor release.",
+        file=sys.stderr,
+    )
+    return old
+
+
 def _run_build(
     verb: str,
     build: Callable[[list[Path]], Any],
     *,
     input_glob: str,
     out: Path,
-    target_crs: str | None,
+    crs: str | None,
     json_output: bool,
     write: bool = True,
     input_errors: tuple[type[Exception], ...] = (),
 ) -> int:
     """The body every ``build`` subcommand shares, with its exit codes.
 
-    Validates ``--target-crs``, expands the glob, runs ``build`` and
+    Validates ``--crs``, expands the glob, runs ``build`` and
     writes the catalog to ``out`` (unless ``write=False``: the builder
     already did). ``input_errors`` are reader errors that mean "not a
     file of this kind" — user errors (exit 1), not crashes.
     """
-    if (err := _crs_error(target_crs, "--target-crs")) is not None:
+    if (err := _crs_error(crs, "--crs")) is not None:
         print(err, file=sys.stderr)
         return 1
     try:
@@ -229,19 +251,33 @@ def raster(
     date_format: Annotated[
         str, Parameter(help="strptime fmt for regex date groups.")
     ] = "%Y%m%d",
-    target_crs: Annotated[
+    crs: Annotated[
         str | None,
         Parameter(help="Catalog CRS. None latches onto the first file's native CRS."),
     ] = None,
-    backend: Annotated[
-        StorageEngine,
-        Parameter(help="`memory` builds in RAM; `duckdb` streams to GeoParquet."),
-    ] = "memory",
+    engine: Annotated[
+        StorageEngine | None,
+        Parameter(
+            help="`memory` (default) builds in RAM; `duckdb` streams to GeoParquet."
+        ),
+    ] = None,
     json_output: Annotated[
         bool, Parameter(name=["--json"], help="Emit machine-readable JSON.")
     ] = False,
+    target_crs: Annotated[
+        str | None, Parameter(name="--target-crs", show=False)
+    ] = None,  # deprecated spelling of --crs
+    backend: Annotated[
+        StorageEngine | None, Parameter(name="--backend", show=False)
+    ] = None,  # deprecated spelling of --engine
 ) -> int:
     """Build a raster catalog from a glob of GeoTIFFs."""
+    try:
+        crs = _retired_flag("--target-crs", "--crs", target_crs, crs)
+        engine = _retired_flag("--backend", "--engine", backend, engine) or "memory"
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     def build(paths: list[Path]) -> Any:
         from geocatalog import build_raster_catalog
@@ -250,9 +286,9 @@ def raster(
             paths,
             filename_regex=regex,
             date_format=date_format,
-            target_crs=target_crs,
-            backend=backend,
-            out_path=out if backend == "duckdb" else None,
+            crs=crs,
+            engine=engine,
+            out_path=out if engine == "duckdb" else None,
         )
 
     return _run_build(
@@ -260,9 +296,9 @@ def raster(
         build,
         input_glob=input_glob,
         out=out,
-        target_crs=target_crs,
+        crs=crs,
         json_output=json_output,
-        write=backend == "memory",  # the duckdb engine streams straight to `out`
+        write=engine == "memory",  # the duckdb engine streams straight to `out`
     )
 
 
@@ -274,27 +310,35 @@ def xarray(
     time_var: Annotated[
         str, Parameter(help="Coordinate name for the time axis.")
     ] = "time",
-    target_crs: Annotated[
+    crs: Annotated[
         str | None,
         Parameter(help="CRS to tag the catalog with (not used to reproject)."),
     ] = None,
     json_output: Annotated[
         bool, Parameter(name=["--json"], help="Emit machine-readable JSON.")
     ] = False,
+    target_crs: Annotated[
+        str | None, Parameter(name="--target-crs", show=False)
+    ] = None,  # deprecated spelling of --crs
 ) -> int:
     """Build an xarray-shaped catalog. Requires the `[xarray-raster]` extra."""
+    try:
+        crs = _retired_flag("--target-crs", "--crs", target_crs, crs)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     def build(paths: list[Path]) -> Any:
         from geocatalog import build_xarray_catalog
 
-        return build_xarray_catalog(paths, time_var=time_var, target_crs=target_crs)
+        return build_xarray_catalog(paths, time_var=time_var, crs=crs)
 
     return _run_build(
         "xarray",
         build,
         input_glob=input_glob,
         out=out,
-        target_crs=target_crs,
+        crs=crs,
         json_output=json_output,
     )
 
@@ -313,12 +357,20 @@ def vector(
     date_format: Annotated[
         str, Parameter(help="strptime fmt for regex date groups.")
     ] = "%Y%m%d",
-    target_crs: Annotated[str | None, Parameter(help="Catalog CRS.")] = None,
+    crs: Annotated[str | None, Parameter(help="Catalog CRS.")] = None,
     json_output: Annotated[
         bool, Parameter(name=["--json"], help="Emit machine-readable JSON.")
     ] = False,
+    target_crs: Annotated[
+        str | None, Parameter(name="--target-crs", show=False)
+    ] = None,  # deprecated spelling of --crs
 ) -> int:
     """Build a vector catalog (Shapefile / GeoPackage / GeoJSON)."""
+    try:
+        crs = _retired_flag("--target-crs", "--crs", target_crs, crs)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     def build(paths: list[Path]) -> Any:
         from geocatalog import build_vector_catalog
@@ -327,7 +379,7 @@ def vector(
             paths,
             filename_regex=regex,
             date_format=date_format,
-            target_crs=target_crs,
+            crs=crs,
             layer=layer,
         )
 
@@ -336,7 +388,7 @@ def vector(
         build,
         input_glob=input_glob,
         out=out,
-        target_crs=target_crs,
+        crs=crs,
         json_output=json_output,
         input_errors=_unreadable_input_errors(),
     )
@@ -415,23 +467,31 @@ def _catalog_crs(cat: Any) -> str:
 def query(
     source: Annotated[Path, Parameter(help="GeoParquet catalog to query.")],
     *,
-    bbox: Annotated[
+    bounds: Annotated[
         str | None, Parameter(help='"xmin,ymin,xmax,ymax" in --crs units.')
     ] = None,
-    crs: Annotated[str, Parameter(help="CRS of --bbox.")] = "EPSG:4326",
+    crs: Annotated[str, Parameter(help="CRS of --bounds.")] = "EPSG:4326",
     start: Annotated[str | None, Parameter(help="Start of time window (ISO).")] = None,
     end: Annotated[str | None, Parameter(help="End of time window (ISO).")] = None,
     json_output: Annotated[
         bool, Parameter(name=["--json"], help="Emit machine-readable JSON.")
     ] = False,
+    bbox: Annotated[
+        str | None, Parameter(name="--bbox", show=False)
+    ] = None,  # deprecated spelling of --bounds
 ) -> int:
-    """Filter ``source`` by bbox + time and print the matching row count.
+    """Filter ``source`` by bounds + time and print the matching row count.
 
     ``--start`` and ``--end`` are paired — pass either both or neither.
     `_coerce_interval` requires two timestamp-likes, so passing one
     half of the window would otherwise crash; we fail fast with exit 1
     instead.
     """
+    try:
+        bounds = _retired_flag("--bbox", "--bounds", bbox, bounds)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if (start is None) != (end is None):
         print(
             "--start and --end must be passed together (or both omitted)",
@@ -439,7 +499,7 @@ def query(
         )
         return 1
     try:
-        bounds = _parse_bbox(bbox) if bbox else None
+        box = _parse_bounds(bounds) if bounds else None
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -455,7 +515,7 @@ def query(
             return 1
     cat = _open_catalog(source)
     try:
-        result = cat.query(bounds=bounds, crs=crs, time=time)
+        result = cat.query(bounds=box, crs=crs, time=time)
     except (ValueError, TypeError) as exc:
         print(f"query failed: {exc}", file=sys.stderr)
         return 1
@@ -463,7 +523,8 @@ def query(
         {
             "source": str(source),
             "rows": len(result),
-            "bbox": bounds,
+            "bounds": box,
+            "bbox": box,  # deprecated key, kept for one release
             "time": [str(start), str(end)] if time else None,
         },
         as_json=json_output,
@@ -479,10 +540,10 @@ def stats(
         bool, Parameter(name=["--json"], help="Emit machine-readable JSON.")
     ] = False,
 ) -> int:
-    """Print rows / bounds / temporal extent / backend / CRS for ``source``.
+    """Print rows / bounds / temporal extent / kind / CRS for ``source``.
 
     Uses the Protocol-level ``total_bounds`` / ``temporal_extent`` /
-    ``backend`` properties + ``get_config()`` for CRS — none of these
+    ``kind`` properties + ``get_config()`` for CRS — none of these
     materialise the relation through pandas on the DuckDB backend.
     """
     cat = _open_catalog(source)
@@ -493,7 +554,8 @@ def stats(
             "bounds": list(cat.total_bounds),
             "temporal_start": None if extent is None else extent.left,
             "temporal_end": None if extent is None else extent.right,
-            "backend": cat.backend,
+            "kind": cat.kind,
+            "backend": cat.kind,  # deprecated key, kept for one release
             "crs": _catalog_crs(cat),
         },
         as_json=json_output,

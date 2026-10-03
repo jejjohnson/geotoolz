@@ -28,7 +28,7 @@ def _cat(rows: list[dict], crs: str = "EPSG:32629") -> InMemoryGeoCatalog:
         "end_time": pd.Timestamp("2024-01-03"),
     }
     gdf = gpd.GeoDataFrame([{**base, **r} for r in rows], geometry="geometry", crs=crs)
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 def _summary(cat: object) -> list[tuple[str, str, str | None]]:
@@ -129,9 +129,9 @@ def test_unversioned_artifact_needs_migration_on_both_engines(
 
     monkeypatch.setattr(parquet, "SCHEMA_VERSION_CURRENT", 1)
     with pytest.raises(CatalogSchemaError, match="geocatalog migrate"):
-        DuckDBGeoCatalog.open(path, backend="raster")
+        DuckDBGeoCatalog.open(path, kind="raster")
     with pytest.raises(CatalogSchemaError, match="missing migration v0"):
-        open_catalog(path, engine="memory", backend="raster")
+        open_catalog(path, engine="memory", kind="raster")
 
 
 class TestOpenCatalogFactory:

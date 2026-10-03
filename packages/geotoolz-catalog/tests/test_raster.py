@@ -25,7 +25,7 @@ class TestBuildRasterCatalog:
         path = utm29_tile_factory((500_000, 4_000_000, 500_320, 4_000_320), "20240115")
         catalog = build_raster_catalog([path], filename_regex=REGEX)
         assert len(catalog) == 1
-        assert catalog.backend == "raster"
+        assert catalog.kind == "raster"
         bounds = catalog.total_bounds
         np.testing.assert_allclose(bounds, (500_000, 4_000_000, 500_320, 4_000_320))
 
@@ -298,6 +298,6 @@ class TestLoadRasterConcurrentOpen:
 
         catalog, sl = self._four_tile_setup(utm29_tile_factory)
         sync_tensor = load_raster(catalog, sl)
-        async_tensor = asyncio.run(aload_raster(catalog, sl, concurrency=4))
+        async_tensor = asyncio.run(aload_raster(catalog, sl, max_open_workers=4))
         np.testing.assert_array_equal(sync_tensor.values, async_tensor.values)
         assert sync_tensor.transform == async_tensor.transform

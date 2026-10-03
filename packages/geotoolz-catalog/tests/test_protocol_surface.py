@@ -26,7 +26,7 @@ def _mem(geoms: list[shapely.Geometry | None]) -> InMemoryGeoCatalog:
         geometry="geometry",
         crs="EPSG:32629",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 def _as(backend: str, mem: InMemoryGeoCatalog) -> GeoCatalog:

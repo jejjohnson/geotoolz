@@ -310,7 +310,7 @@ def _row(
 
 
 def _bundle_with(*row_ids: str) -> CatalogBundle:
-    bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+    bundle = CatalogBundle.empty(crs="EPSG:4326")
     bundle.ingest(_FixedSource([_row(i) for i in row_ids]), bounds=(0, 0, 1, 1))
     return bundle
 
@@ -344,7 +344,7 @@ def test_reingest_with_replace_keeps_the_new_row() -> None:
 
 
 def test_duplicates_within_one_ingest_are_caught() -> None:
-    bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+    bundle = CatalogBundle.empty(crs="EPSG:4326")
     with pytest.raises(ValueError, match="repeated"):
         bundle.ingest(_FixedSource([_row("a"), _row("a")]), bounds=(0, 0, 1, 1))
 
@@ -425,7 +425,7 @@ def test_same_id_in_another_collection_is_not_a_duplicate() -> None:
 
 
 def test_skipped_duplicates_are_not_validated() -> None:
-    bundle = CatalogBundle.empty(target_crs="EPSG:4326")
+    bundle = CatalogBundle.empty(crs="EPSG:4326")
     src = _FixedSource([_row("a", asset_key="B04")])
     bundle.ingest(src, bounds=(0, 0, 1, 1), primary_asset="B04")
     # The re-ingested row lacks B04, but `skip` discards it unexamined.
@@ -480,7 +480,7 @@ def test_stac_items_with_bad_projection_are_not_silently_skipped() -> None:
 
 
 def test_empty_bundle_crs_is_validated(tmp_path: Path) -> None:
-    CatalogBundle.empty(target_crs="EPSG:4326").to_directory(tmp_path)
+    CatalogBundle.empty(crs="EPSG:4326").to_directory(tmp_path)
     meta_path = tmp_path / "_meta.json"
     meta = json.loads(meta_path.read_text())
     meta_path.write_text(json.dumps({**meta, "target_crs": "EPSG:3857"}))

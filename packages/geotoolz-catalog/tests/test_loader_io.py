@@ -185,7 +185,7 @@ def test_vector_builder_reads_metadata_only(
 
 
 def test_vector_builder_reprojects_bounds(tmp_path: Path) -> None:
-    cat = build_vector_catalog([_vector_file(tmp_path)], target_crs="EPSG:4326")
+    cat = build_vector_catalog([_vector_file(tmp_path)], crs="EPSG:4326")
     xmin, ymin, xmax, ymax = cat.gdf.geometry.iloc[0].bounds
     assert -13.5 < xmin < xmax < -13.4 and 0 <= ymin < ymax < 0.01
 

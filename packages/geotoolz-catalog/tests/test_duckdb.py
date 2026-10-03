@@ -15,6 +15,7 @@ duckdb = pytest.importorskip("duckdb")
 
 import geocatalog._src.duckdb_backend as duckdb_backend
 from geocatalog import (
+    CatalogClosedError,
     DuckDBGeoCatalog,
     GeoSlice,
     InMemoryGeoCatalog,
@@ -57,7 +58,7 @@ def _mem_two_tiles(crs: str = "EPSG:32629") -> InMemoryGeoCatalog:
         geometry="geometry",
         crs=crs,
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 class _AggregateResult:
@@ -145,7 +146,7 @@ class TestFromMemory:
         assert isinstance(duck, DuckDBGeoCatalog)
         assert len(duck) == 2
         assert duck.crs == mem.gdf.crs
-        assert duck.backend == "raster"
+        assert duck.kind == "raster"
 
     def test_materialize_round_trip(self) -> None:
         mem = _mem_two_tiles()
@@ -170,7 +171,7 @@ class TestOpen:
 
     def test_reads_backend_tag(self, parquet_two_tiles: Path) -> None:
         duck = open_catalog(parquet_two_tiles, engine="duckdb")
-        assert duck.backend == "raster"
+        assert duck.kind == "raster"
 
     def test_factory_auto_picks_duckdb(self, parquet_two_tiles: Path) -> None:
         cat = open_catalog(parquet_two_tiles)
@@ -193,12 +194,12 @@ class TestLifecycle:
 
         assert duck.con is None
         with pytest.raises(
-            duckdb.ConnectionException,
+            CatalogClosedError,
             match=CLOSED_CONNECTION_MATCH,
         ):
             len(duck)
         with pytest.raises(
-            duckdb.ConnectionException,
+            CatalogClosedError,
             match=CLOSED_CONNECTION_MATCH,
         ):
             list(duck.iter_rows())
@@ -228,12 +229,12 @@ class TestLifecycle:
 
         assert duck.con is None
         with pytest.raises(
-            duckdb.ConnectionException,
+            CatalogClosedError,
             match=CLOSED_CONNECTION_MATCH,
         ):
             len(duck)
         with pytest.raises(
-            duckdb.ConnectionException,
+            CatalogClosedError,
             match=DUCKDB_CLOSED_CONNECTION_MATCH,
         ):
             len(filtered)
@@ -493,7 +494,7 @@ class TestSetAlgebra:
                 geometry="geometry",
                 crs="EPSG:32629",
             ),
-            backend="vector",
+            kind="vector",
         )
         joint = duck.intersect(labels)
         mat = joint.materialize()
@@ -516,7 +517,7 @@ class TestSetAlgebra:
                 geometry="geometry",
                 crs="EPSG:32629",
             ),
-            backend="vector",
+            kind="vector",
         )
         joint = duck.intersect(labels, spatial_only=True)
         assert len(joint) == 2
@@ -536,7 +537,7 @@ class TestSetAlgebra:
                 geometry="geometry",
                 crs="EPSG:32629",
             ),
-            backend="vector",
+            kind="vector",
         )
         joint = duck.intersect(labels)  # spatial_only=False
         assert len(joint) == 0
@@ -563,7 +564,7 @@ class TestSetAlgebra:
                 geometry="geometry",
                 crs="EPSG:32630",
             ),
-            backend="raster",
+            kind="raster",
         )
         merged = duck.union(other)
         assert len(merged) == 3
@@ -681,7 +682,7 @@ class TestProperties:
         duck = open_catalog(parquet_two_tiles, engine="duckdb")
         cfg = duck.get_config()
         assert cfg["engine"] == "duckdb"
-        assert cfg["backend"] == "raster"
+        assert cfg["kind"] == "raster"
         assert cfg["len"] == 2
 
 
@@ -689,7 +690,7 @@ class TestCaching:
     def test_len_runs_one_query(self) -> None:
         relation = _CountingRelation()
         duck = DuckDBGeoCatalog(
-            relation, con=duckdb.connect(), crs="EPSG:32629", backend="raster"
+            relation, con=duckdb.connect(), crs="EPSG:32629", kind="raster"
         )
 
         for _ in range(10):
@@ -701,7 +702,7 @@ class TestCaching:
     def test_total_bounds_runs_one_query(self) -> None:
         relation = _CountingRelation()
         duck = DuckDBGeoCatalog(
-            relation, con=duckdb.connect(), crs="EPSG:32629", backend="raster"
+            relation, con=duckdb.connect(), crs="EPSG:32629", kind="raster"
         )
 
         for _ in range(10):
@@ -713,7 +714,7 @@ class TestCaching:
     def test_temporal_extent_runs_one_query(self) -> None:
         relation = _CountingRelation()
         duck = DuckDBGeoCatalog(
-            relation, con=duckdb.connect(), crs="EPSG:32629", backend="raster"
+            relation, con=duckdb.connect(), crs="EPSG:32629", kind="raster"
         )
 
         for _ in range(10):
@@ -731,7 +732,7 @@ class TestCaching:
             parent_relation,
             con=duckdb.connect(),
             crs="EPSG:32629",
-            backend="raster",
+            kind="raster",
         )
 
         assert duck.total_bounds == (0.0, 0.0, 300.0, 100.0)
@@ -799,12 +800,12 @@ class TestRegression:
         """
         # Write a vector-tagged catalog…
         mem = _mem_two_tiles()
-        mem.backend = "vector"
+        mem.kind = "vector"
         path = tmp_path / "labels.parquet"
         to_geoparquet(mem, path)
         # …and re-open it. The backend tag should round-trip.
         reopened = open_catalog(path, engine="duckdb")
-        assert reopened.backend == "vector"
+        assert reopened.kind == "vector"
 
     def test_intersect_across_independent_connections(self, tmp_path: Path) -> None:
         """Regression for the P1 bug where `_coerce_to_duckdb`
@@ -827,7 +828,7 @@ class TestRegression:
                 geometry="geometry",
                 crs="EPSG:32629",
             ),
-            backend="vector",
+            kind="vector",
         )
         to_geoparquet(b_mem, b_path)
 
@@ -857,7 +858,7 @@ class TestRegression:
                 geometry="geometry",
                 crs="EPSG:32629",
             ),
-            backend="vector",
+            kind="vector",
         )
         b = InMemoryGeoCatalog(
             gpd.GeoDataFrame(
@@ -871,7 +872,7 @@ class TestRegression:
                 geometry="geometry",
                 crs="EPSG:32629",
             ),
-            backend="vector",
+            kind="vector",
         )
         a_path = tmp_path / "a.parquet"
         b_path = tmp_path / "b.parquet"
@@ -999,9 +1000,7 @@ class TestIntersectSymmetryDuckDB:
                 geometry="geometry",
                 crs="EPSG:4326",
             )
-            return DuckDBGeoCatalog.from_memory(
-                InMemoryGeoCatalog(gdf, backend="raster")
-            )
+            return DuckDBGeoCatalog.from_memory(InMemoryGeoCatalog(gdf, kind="raster"))
 
         left = one(shapely.geometry.box(-1, -6.5, 0, 0), "left.tif")
         right = one(

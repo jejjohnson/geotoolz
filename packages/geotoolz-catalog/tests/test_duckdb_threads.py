@@ -44,7 +44,7 @@ def _mem(offset: float = 0.0) -> InMemoryGeoCatalog:
         geometry="geometry",
         crs="EPSG:32629",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 @pytest.fixture

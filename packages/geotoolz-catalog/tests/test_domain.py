@@ -29,7 +29,7 @@ def _toy_catalog() -> InMemoryGeoCatalog:
         geometry="geometry",
         crs="EPSG:32629",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")
 
 
 class TestCatalogDomain:
@@ -56,4 +56,4 @@ class TestCatalogDomain:
         dom = CatalogDomain(catalog=cat, resolution=(10.0, 10.0))
         config = dom.get_config()
         assert config["resolution"] == (10.0, 10.0)
-        assert config["catalog"]["backend"] == "raster"
+        assert config["catalog"]["kind"] == "raster"

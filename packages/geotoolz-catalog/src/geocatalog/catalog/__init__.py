@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING
 
 from geocatalog._src._lazy import lazy_getattr
 from geocatalog._src.base import (
+    CatalogClosedError,
     CatalogMetadataError,
     CatalogRow,
     CatalogSchemaError,
     GeoCatalog,
+    GeoCatalogError,
 )
 from geocatalog._src.domain import CatalogDomain
 from geocatalog._src.factory import open_catalog
@@ -59,12 +61,14 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SCHEMA_VERSION_CURRENT",
+    "CatalogClosedError",
     "CatalogDomain",
     "CatalogMetadataError",
     "CatalogRow",
     "CatalogSchemaError",
     "DuckDBGeoCatalog",
     "GeoCatalog",
+    "GeoCatalogError",
     "InMemoryGeoCatalog",
     "StreamingParquetWriter",
     "aload_raster",

@@ -67,4 +67,4 @@ def make_inmemory_catalog(
         },
         crs="EPSG:4326",
     )
-    return InMemoryGeoCatalog(gdf, backend="raster")
+    return InMemoryGeoCatalog(gdf, kind="raster")

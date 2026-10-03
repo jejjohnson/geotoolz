@@ -53,7 +53,7 @@ import geocatalog as gc
 catalog = gc.build_raster_catalog(
     filepaths=["scene1.tif", "scene2.tif", "scene3.tif"],
     filename_regex=r"scene(?P<id>\d+)\.tif",
-    target_crs="EPSG:32629",
+    crs="EPSG:32629",
 )
 
 aoi = gc.GeoSlice(
@@ -86,7 +86,7 @@ uv add geocatalog
 | Extra | Adds | When you need it |
 | --- | --- | --- |
 | *(base)* | InMemory backend, raster + vector loaders, GeoParquet roundtrip | Local files, <10⁵ rows |
-| `[duckdb]` | `DuckDBGeoCatalog`, streaming `build_*` (`backend="duckdb"`) | 10⁶+ rows, remote artifacts |
+| `[duckdb]` | `DuckDBGeoCatalog`, streaming `build_*` (`engine="duckdb"`) | 10⁶+ rows, remote artifacts |
 | `[xarray-raster]` | `build_xarray_catalog`, `load_xarray` (NetCDF / Zarr) | xarray data |
 | `[stac]` | `STACSource`, `from_stac_search`, `from_stac_items` | STAC API ingestion |
 | `[fsspec]` | `s3://`, `gs://`, `az://`, `https://`, `hf://` URI support | Cloud object storage |

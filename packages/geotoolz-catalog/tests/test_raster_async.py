@@ -59,10 +59,10 @@ def test_async_with_target_crs(four_tiles):
         four_tiles,
         filename_regex=REGEX,
         concurrency="sequential",
-        target_crs="EPSG:4326",
+        crs="EPSG:4326",
     )
     asn = build_raster_catalog(
-        four_tiles, filename_regex=REGEX, concurrency="async", target_crs="EPSG:4326"
+        four_tiles, filename_regex=REGEX, concurrency="async", crs="EPSG:4326"
     )
     assert len(seq) == len(asn) == 4
 

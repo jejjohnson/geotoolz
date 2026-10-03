@@ -34,7 +34,7 @@ def _row(i: int = 0, **extras: Any) -> dict[str, Any]:
 
 
 def _write(path: Path, rows: list[dict[str, Any]], **kwargs: Any) -> None:
-    with StreamingParquetWriter(path, crs="EPSG:4326", backend="raster", **kwargs) as w:
+    with StreamingParquetWriter(path, crs="EPSG:4326", kind="raster", **kwargs) as w:
         for row in rows:
             w.write_row(row)
 
@@ -142,7 +142,7 @@ def test_streaming_and_geopandas_writers_agree_on_times(tmp_path: Path) -> None:
         crs="EPSG:4326",
         index=pd.IntervalIndex.from_arrays(starts, ends, closed="both"),
     )
-    to_geoparquet(InMemoryGeoCatalog(gdf, backend="raster"), tmp_path / "gpd.parquet")
+    to_geoparquet(InMemoryGeoCatalog(gdf, kind="raster"), tmp_path / "gpd.parquet")
     _write(
         tmp_path / "stream.parquet",
         [
@@ -176,7 +176,7 @@ def test_sort_rewrite_carries_the_input_schema(tmp_path: Path) -> None:
         dst,
         sort_by=["start_time"],
         crs="EPSG:4326",
-        backend="raster",
+        kind="raster",
         batch_size=1,
     )
     assert pq.read_schema(dst).field("cloud").type == pa.float64()

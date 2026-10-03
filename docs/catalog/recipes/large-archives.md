@@ -7,7 +7,7 @@ that keep things sane up to 10⁷+ rows.
 
 ## Pattern 1 — Streaming build into GeoParquet
 
-Use `backend="duckdb"` on any builder. Rows are extracted in parallel
+Use `engine="duckdb"` on any builder. Rows are extracted in parallel
 and streamed straight into the Parquet writer; peak RAM is
 `batch_size × row_size`, not `O(n_rows)`.
 
@@ -17,9 +17,9 @@ import geocatalog as gc
 catalog = gc.build_raster_catalog(
     filepaths=glob("/data/s2/**/*.tif"),     # 1M Sentinel-2 scenes
     filename_regex=r"S2_T\w+_(?P<date>\d{8}).*\.tif",
-    backend="duckdb",
+    engine="duckdb",
     out_path="/data/s2_archive.parquet",     # required
-    target_crs="EPSG:4326",                  # canonical for shared artifacts
+    crs="EPSG:4326",                          # canonical for shared artifacts
     n_workers=16,                             # parallel rasterio.open
     sort_by=("start_time", "geometry_hilbert"),
 )
@@ -31,7 +31,7 @@ and Hilbert-sorted geometry. Both features enable row-group pruning
 at query time — small-AOI queries read kilobytes of metadata instead
 of gigabytes of geometry.
 
-### Why `target_crs="EPSG:4326"`?
+### Why `crs="EPSG:4326"`?
 
 The design's prescribed wire format for shared GeoParquet artifacts.
 The streaming build canonicalises footprints to EPSG:4326 unless you
@@ -54,7 +54,7 @@ catalog = append_files(
     filepaths=initial_paths,
     extract_fn=extract_raster_row,           # picklable function
     crs="EPSG:4326",
-    backend="raster",
+    kind="raster",
     partition_by=("year", "month"),          # derived from start_time
     n_workers=8,
 )
@@ -65,7 +65,7 @@ catalog = append_files(
     filepaths=todays_new_paths,
     extract_fn=extract_raster_row,
     crs="EPSG:4326",
-    backend="raster",
+    kind="raster",
     partition_by=("year", "month"),
 )
 ```

@@ -16,7 +16,8 @@ Surface (every public name is available flat at the top level):
 - **Persistence** — `to_geoparquet` / `from_geoparquet`,
   `migrate_geoparquet`, `append_files`, `StreamingParquetWriter`,
   `sort_geoparquet`, `SCHEMA_VERSION_CURRENT`, and the
-  `CatalogMetadataError` / `CatalogSchemaError` errors.
+  `GeoCatalogError` hierarchy (`CatalogMetadataError`,
+  `CatalogSchemaError`, `CatalogClosedError`).
 - **I/O helpers** — `parse_uri` / `ParsedURI`, `retry_transient_io` and
   the UTC time helpers (`to_utc_ts`, `to_naive_utc`, `to_rfc3339`,
   `is_time_invariant`, `TIME_INVARIANT_START` / `TIME_INVARIANT_END`).
@@ -68,10 +69,12 @@ from geocatalog._src._timeutil import (
     to_utc_ts,
 )
 from geocatalog._src.base import (
+    CatalogClosedError,
     CatalogMetadataError,
     CatalogRow,
     CatalogSchemaError,
     GeoCatalog,
+    GeoCatalogError,
 )
 from geocatalog._src.bundle import CatalogBundle, QueryRecord, source_row_to_gdf_row
 from geocatalog._src.domain import CatalogDomain
@@ -155,6 +158,7 @@ __all__ = [
     "AuthStatus",
     "CMRSource",
     "CatalogBundle",
+    "CatalogClosedError",
     "CatalogDomain",
     "CatalogMetadataError",
     "CatalogRow",
@@ -165,6 +169,7 @@ __all__ = [
     "EarthAccessSource",
     "GEESource",
     "GeoCatalog",
+    "GeoCatalogError",
     "GeoSlice",
     "GridAlignmentWarning",
     "InMemoryGeoCatalog",

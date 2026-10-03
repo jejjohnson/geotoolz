@@ -141,6 +141,7 @@ nav:
       - Design:
           - Exact grid alignment: catalog/design/exact-grid-alignment.md
           - Query & matchup: catalog/design/query-matchup.md
+          - Parameter vocabulary: catalog/design/vocabulary.md
       - Changelog: catalog/changelog.md
   - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
   - Contributing: contributing.md

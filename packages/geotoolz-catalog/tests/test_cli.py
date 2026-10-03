@@ -119,7 +119,7 @@ def test_stats_json(
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["rows"] == 1
-    assert payload["backend"] == "raster"
+    assert payload["kind"] == "raster"
 
 
 def test_stats_json_empty_catalog(
@@ -142,7 +142,7 @@ def test_stats_json_empty_catalog(
         geometry="geometry",
         crs="EPSG:32629",
     )
-    empty = InMemoryGeoCatalog(gdf, backend="raster").query(
+    empty = InMemoryGeoCatalog(gdf, kind="raster").query(
         bounds=(1e6, 1e6, 2e6, 2e6), crs="EPSG:32629"
     )
     out = tmp_path / "empty.parquet"
@@ -294,7 +294,7 @@ def test_query_json(
     exit_code = _run(
         "query",
         str(source),
-        "--bbox",
+        "--bounds",
         "500000,4000000,510000,4010000",
         "--crs",
         "EPSG:32629",
@@ -303,7 +303,7 @@ def test_query_json(
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["rows"] == 1
-    assert payload["bbox"] == [500000, 4000000, 510000, 4010000]
+    assert payload["bounds"] == [500000, 4000000, 510000, 4010000]
 
 
 def test_info_json(
@@ -411,12 +411,12 @@ def test_query_bad_bbox(
     utm29_tile_factory: Callable[..., Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A malformed --bbox triggers exit 1, not a stack trace."""
+    """A malformed --bounds triggers exit 1, not a stack trace."""
     source = _build_one_row(tmp_path, utm29_tile_factory)
     capsys.readouterr()
-    exit_code = _run("query", str(source), "--bbox", "not,a,bbox")
+    exit_code = _run("query", str(source), "--bounds", "not,a,bbox")
     assert exit_code == 1
-    assert "bbox" in capsys.readouterr().err.lower()
+    assert "bounds" in capsys.readouterr().err.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +431,7 @@ def test_query_bad_crs_is_a_one_line_user_error(
 ) -> None:
     source = _build_one_row(tmp_path, utm29_tile_factory)
     capsys.readouterr()
-    exit_code = _run("query", str(source), "--bbox", "0,0,1,1", "--crs", "nonsense")
+    exit_code = _run("query", str(source), "--bounds", "0,0,1,1", "--crs", "nonsense")
     err = capsys.readouterr().err
     assert exit_code == 1
     assert "invalid --crs 'nonsense'" in err
@@ -447,13 +447,14 @@ def test_query_with_a_projected_crs(
     capsys.readouterr()
     bbox = "500000,4000000,505000,4005000"
     assert (
-        _run("query", str(source), "--bbox", bbox, "--crs", "EPSG:32629", "--json") == 0
+        _run("query", str(source), "--bounds", bbox, "--crs", "EPSG:32629", "--json")
+        == 0
     )
     assert json.loads(capsys.readouterr().out)["rows"] == 1
 
 
 @pytest.mark.parametrize("verb", ["raster", "vector"])
-def test_build_bad_target_crs_is_a_user_error(
+def test_build_bad_crs_is_a_user_error(
     tmp_path: Path, verb: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     exit_code = _run(
@@ -463,11 +464,11 @@ def test_build_bad_target_crs_is_a_user_error(
         str(tmp_path / "*"),
         "--out",
         str(tmp_path / "out.parquet"),
-        "--target-crs",
+        "--crs",
         "nonsense",
     )
     assert exit_code == 1
-    assert "invalid --target-crs" in capsys.readouterr().err
+    assert "invalid --crs" in capsys.readouterr().err
 
 
 def test_build_vector_round_trip(
@@ -497,7 +498,7 @@ def test_build_vector_round_trip(
     assert json.loads(capsys.readouterr().out) == {"out": str(out), "rows": 1}
     assert _run("stats", str(out), "--json") == 0
     stats = json.loads(capsys.readouterr().out)
-    assert stats["backend"] == "vector"
+    assert stats["kind"] == "vector"
     assert stats["temporal_start"].startswith("2024-06-01")
 
 
@@ -539,7 +540,7 @@ def test_build_xarray_round_trip(
         "xarray",
         "--input-glob",
         str(tmp_path / "*.nc"),
-        "--target-crs",
+        "--crs",
         "EPSG:4326",
         "--out",
         str(out),
@@ -548,7 +549,7 @@ def test_build_xarray_round_trip(
     assert exit_code == 0
     assert json.loads(capsys.readouterr().out)["rows"] == 1
     assert _run("stats", str(out), "--json") == 0
-    assert json.loads(capsys.readouterr().out)["backend"] == "xarray"
+    assert json.loads(capsys.readouterr().out)["kind"] == "xarray"
 
 
 def test_stats_on_a_newer_schema_is_exit_2(
@@ -640,6 +641,68 @@ def test_multiline_crs_error_stays_on_one_line(
     source = _build_one_row(tmp_path, utm29_tile_factory)
     capsys.readouterr()
     bad = 'GEOGCRS["broken",\n  DATUM["nope",\n    ELLIPSOID["x",1,0]]]'
-    assert _run("query", str(source), "--bbox", "0,0,1,1", "--crs", bad) == 1
+    assert _run("query", str(source), "--bounds", "0,0,1,1", "--crs", bad) == 1
     err = capsys.readouterr().err
     assert len(err.strip().splitlines()) == 1
+
+
+def test_retired_flags_still_parse(
+    tmp_path: Path,
+    utm29_tile_factory: Callable[..., Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--target-crs`` / ``--backend`` / ``--bbox`` still work, with a notice."""
+    utm29_tile_factory((500000, 4000000, 510000, 4010000), "20240601")
+    out = tmp_path / "old.parquet"
+    exit_code = _run(
+        "build",
+        "raster",
+        "--input-glob",
+        str(tmp_path / "*.tif"),
+        "--regex",
+        r"S2_T29SND_(?P<date>\d{8})_.*\.tif",
+        "--out",
+        str(out),
+        "--target-crs",
+        "EPSG:32629",
+        "--backend",
+        "memory",
+        "--json",
+    )
+    assert exit_code == 0
+    err = capsys.readouterr().err
+    assert "--target-crs is deprecated, use --crs" in err
+    assert "--backend is deprecated, use --engine" in err
+    box = "500000,4000000,510000,4010000"
+    assert _run("query", str(out), "--bbox", box, "--crs", "EPSG:32629", "--json") == 0
+    captured = capsys.readouterr()
+    assert "--bbox is deprecated, use --bounds" in captured.err
+    payload = json.loads(captured.out)
+    assert payload["rows"] == 1
+    assert payload["bbox"] == payload["bounds"]
+    assert _run("stats", str(out), "--json") == 0
+    stats = json.loads(capsys.readouterr().out)
+    assert stats["backend"] == stats["kind"] == "raster"
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    [
+        ("build", "raster", "--crs", "EPSG:4326", "--target-crs", "EPSG:4326"),
+        ("build", "raster", "--engine", "memory", "--backend", "memory"),
+        ("build", "vector", "--crs", "EPSG:4326", "--target-crs", "EPSG:4326"),
+    ],
+)
+def test_old_and_new_flag_together_is_a_user_error(
+    tmp_path: Path, tokens: tuple[str, ...], capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = (*tokens, "--input-glob", str(tmp_path / "*"), "--out", str(tmp_path / "o"))
+    assert _run(*args) == 1
+    assert "not both" in capsys.readouterr().err
+
+
+def test_retired_flags_are_hidden_from_help(capsys: pytest.CaptureFixture[str]) -> None:
+    _run("build", "raster", "--help")
+    out = capsys.readouterr().out
+    assert "--engine" in out
+    assert "--backend" not in out and "--target-crs" not in out
