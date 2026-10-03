@@ -16,6 +16,7 @@ local catalog rows and records a ``QueryRecord`` for provenance. See
 from __future__ import annotations
 
 import dataclasses
+import operator
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -90,6 +91,27 @@ class SourceRow:
     provenance: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
 
+def wants_no_rows(limit: int | None) -> bool:
+    """Validate a `Source.query` ``limit``; True when it asks for zero rows.
+
+    Upstream clients disagree on ``0`` — pystac-client's ``max_items=0``
+    and earthaccess's ``count=0`` both mean "no limit" — so adapters
+    check this before calling them and return immediately on ``0``.
+
+    Raises:
+        ValueError: ``limit`` is negative.
+        TypeError: ``limit`` is not an integer.
+    """
+    if limit is None:
+        return False
+    if isinstance(limit, bool):
+        raise TypeError("limit must be an int or None, not bool")
+    n = operator.index(limit)
+    if n < 0:
+        raise ValueError(f"limit must be >= 0 or None; got {limit}")
+    return n == 0
+
+
 @runtime_checkable
 class Source(Protocol):
     """A remote catalog that can be queried by bounds + interval.
@@ -132,7 +154,10 @@ class Source(Protocol):
                 ``cloud_cover``). Adapter-specific; unknown keys are
                 ignored or rejected per the adapter's policy.
             limit: Cap on the number of rows returned. ``None`` means
-                no cap (paginate all results).
+                no cap (paginate all results); ``0`` yields nothing and
+                makes no request (a dry run); a negative value raises
+                `ValueError`. Every adapter follows this — see
+                `wants_no_rows`.
 
         Yields:
             `SourceRow` instances; never opens or downloads data.

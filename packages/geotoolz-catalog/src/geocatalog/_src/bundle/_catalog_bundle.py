@@ -270,7 +270,8 @@ class CatalogBundle:
             collection: Upstream collection id (passed through to
                 ``Source.query``).
             filters: Adapter-specific filter dict.
-            limit: Cap on the number of rows returned.
+            limit: Cap on the number of rows returned. ``0`` ingests
+                nothing (no request); ``None`` means no cap.
             primary_asset: Asset key to promote to the catalog's
                 ``filepath`` column. ``None`` uses the first asset
                 key (dict insertion order).

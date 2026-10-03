@@ -141,7 +141,8 @@ Pass `bundle.catalog` anywhere a `GeoCatalog` is expected.
 
 - `max_items=None` plus a wide bbox can return tens of thousands of
   items — STAC paging is the bottleneck, not the catalog build. Use
-  `limit=...` defensively while exploring.
+  `limit=...` defensively while exploring. `limit=0` is a dry run on
+  every source (no request, no rows); `limit=None` is unbounded.
 - `STACSource` caches the underlying `pystac_client.Client` across
   calls; reuse the same `STACSource` instance for multiple ingests
   to skip the root-catalog fetch.

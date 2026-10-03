@@ -26,7 +26,13 @@ from typing import Any
 import pandas as pd
 from loguru import logger
 
-from geocatalog._src.sources._base import AuthStatus, Bounds, Source, SourceRow
+from geocatalog._src.sources._base import (
+    AuthStatus,
+    Bounds,
+    Source,
+    SourceRow,
+    wants_no_rows,
+)
 from geocatalog._src.sources._umm import (
     asset_key_from_url as _asset_key_from_url,
     extract_cloud_cover as _extract_cloud_cover,
@@ -86,16 +92,16 @@ class CMRSource(Source):
             filters: Forwarded directly as URL parameters. Useful for
                 ``version``, ``provider``, ``platform``,
                 ``cloud_cover[min]`` / ``cloud_cover[max]``, etc.
-            limit: Cap on rows. ``None`` paginates all results.
+            limit: Cap on rows. ``None`` paginates all results; ``0``
+                yields nothing without a request; negative raises.
 
         Yields:
             `SourceRow` per matching granule. Streamed via pagination
             so a large collection doesn't materialise in one chunk.
         """
-        # A caller passing `limit <= 0` is asking for nothing — honour
-        # that explicitly. Without this guard the page-size math below
-        # would clamp to `max(..., 1)` and emit a single row.
-        if limit is not None and limit <= 0:
+        # `limit=0` is a dry run: nothing, and no request. Without this
+        # guard the page-size math below would clamp to `max(..., 1)`.
+        if wants_no_rows(limit):
             return
 
         query_id = uuid.uuid4().hex

@@ -23,7 +23,13 @@ from geocatalog._src._timeutil import (
     to_rfc3339 as _to_iso,
     to_utc_ts as _to_utc_timestamp,
 )
-from geocatalog._src.sources._base import AuthStatus, Bounds, Source, SourceRow
+from geocatalog._src.sources._base import (
+    AuthStatus,
+    Bounds,
+    Source,
+    SourceRow,
+    wants_no_rows,
+)
 from geocatalog._src.sources._extras import _missing_extra
 
 
@@ -145,7 +151,8 @@ class STACSource(Source):
                 — it falls through to pystac-client's ``filter``
                 argument.
             limit: Cap on the number of items. ``None`` = paginate
-                all results.
+                all results; ``0`` yields nothing without a request;
+                negative raises.
 
         Yields:
             `SourceRow` per matching STAC item; never opens or
@@ -156,6 +163,10 @@ class STACSource(Source):
         # single search shares provenance metadata (useful when the
         # rows are persisted side-by-side and a user wants to know
         # "which call produced these?").
+        # pystac-client reads `max_items=0` as "no limit"; `limit=0`
+        # means nothing here (#237).
+        if wants_no_rows(limit):
+            return
         query_id = uuid.uuid4().hex
         fetched_at = datetime.now(tz=UTC)
         source_version = _pystac_client_version()
