@@ -31,6 +31,12 @@ import pyproj
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
+from geocatalog._src._stac_item import (
+    ASSET_CRS_PROPERTY,
+    LONLAT,
+    is_signed_href,
+    reproject_geometry,
+)
 from geocatalog._src._timeutil import to_naive_utc
 from geocatalog._src.memory import InMemoryGeoCatalog
 
@@ -118,25 +124,23 @@ def source_row_to_gdf_row(
     # CRS — we use `target_crs` as the authoritative target and assume
     # `SourceRow.geometry` is in EPSG:4326 (the `Source` Protocol
     # convention).
-    src_crs = pyproj.CRS.from_epsg(4326)
-    dst_crs = pyproj.CRS.from_user_input(target_crs)
-    geometry = row.geometry
-    if not src_crs.equals(dst_crs):
-        from shapely.ops import transform as shapely_transform
-
-        transformer = pyproj.Transformer.from_crs(src_crs, dst_crs, always_xy=True)
-        geometry = shapely_transform(transformer.transform, row.geometry)
+    geometry = reproject_geometry(row.geometry, LONLAT, target_crs)
 
     # Pick a filepath. For STAC items the "first asset" convention
     # is usually a sensible default (it's typically the lowest-res
     # overview or the canonical band); users who care can pass
     # `primary_asset` explicitly.
-    filepath = ""
+    key: str | None = None
     if row.assets:
         if primary_asset is not None and primary_asset in row.assets:
-            filepath = row.assets[primary_asset]
+            key = primary_asset
         else:
-            filepath = next(iter(row.assets.values()))
+            key = next(iter(row.assets))
+    filepath = row.assets[key] if key is not None else ""
+    # Native CRS of the promoted asset, when the source knows it (STAC
+    # `proj:*`); granule sources such as CMR leave it unset.
+    asset_crs = row.properties.get(ASSET_CRS_PROPERTY)
+    crs = asset_crs.get(key) if isinstance(asset_crs, Mapping) else None
 
     return {
         "geometry": geometry,
@@ -145,6 +149,10 @@ def source_row_to_gdf_row(
         "start_time": to_naive_utc(row.interval.left),
         "end_time": to_naive_utc(row.interval.right),
         "filepath": filepath,
+        "crs": crs,
+        # Planetary Computer SAS signatures expire after ~1 h; flag them
+        # so a persisted bundle says which hrefs need re-signing (#238).
+        "href_signed": is_signed_href(filepath),
         "id": row.id,
         "source": row.source,
         "collection": row.collection,
