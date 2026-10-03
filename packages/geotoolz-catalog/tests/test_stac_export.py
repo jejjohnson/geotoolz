@@ -276,3 +276,21 @@ def test_crs_stored_as_a_projjson_mapping_is_exported() -> None:
     (item,) = to_stac_collection(catalog, collection_id="c").get_items()
     assert item.properties["proj:epsg"] == 32633  # equal CRSs are shared
     assert item.assets["B04"].extra_fields == {}
+
+
+def test_carried_projection_survives_without_a_crs_column() -> None:
+    catalog = _gdf(filepath=["https://x/a.tif"], stac_item_id=["S"])
+    catalog.gdf["proj:epsg"] = [32633]
+    (item,) = to_stac_collection(catalog, collection_id="c").get_items()
+    assert item.properties["proj:epsg"] == 32633
+
+
+def test_missing_scope_positions_keep_scenes_apart() -> None:
+    catalog = _gdf(
+        filepath=["https://x/1.tif", "https://x/2.tif"],
+        id=["X", "X"],
+        source=["a", None],
+        collection=[None, "a"],
+    )
+    items = list(to_stac_collection(catalog, collection_id="c").get_items())
+    assert len(items) == 2
