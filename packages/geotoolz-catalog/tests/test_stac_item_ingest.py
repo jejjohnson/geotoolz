@@ -283,3 +283,34 @@ def test_nested_multipart_crossings_are_split() -> None:
     assert geom.length == pytest.approx(2 * (2**2 + 1) ** 0.5 / 2 + 2**0.5, rel=0.01)
     assert geom.bounds[2] - geom.bounds[0] <= 360
     assert not geom.intersects(shapely.box(0, 0.4, 5, 0.6))
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (#359)
+# ---------------------------------------------------------------------------
+
+
+def test_nested_multipart_members_are_densified_per_part() -> None:
+    parts = shapely.MultiPolygon(
+        [shapely.box(170, 40, 180, 55), shapely.box(-180, 40, -170, 55)]
+    )
+    nested = shapely.GeometryCollection([parts])
+    got = reproject_geometry(nested, "EPSG:4326", "EPSG:3995")
+    flat = reproject_geometry(parts, "EPSG:4326", "EPSG:3995")
+    assert got.area == pytest.approx(flat.area, rel=1e-9)
+
+
+def test_export_of_an_unlocated_asset_drops_carried_projection() -> None:
+    from geocatalog import to_stac_collection
+
+    item = _item(
+        properties={"proj:code": "EPSG:32633"}, asset_fields={"proj:code": None}
+    )
+    catalog = from_stac_items([item], extra_properties=("proj:code",))
+    (exported,) = to_stac_collection(catalog, collection_id="c").get_items()
+    assert not [k for k in exported.properties if k.startswith("proj:")]
+
+
+def test_empty_catalog_keeps_the_boolean_signed_flag() -> None:
+    assert from_stac_items([]).gdf["href_signed"].dtype == bool
+    assert from_stac_items([_item()]).gdf["href_signed"].dtype == bool

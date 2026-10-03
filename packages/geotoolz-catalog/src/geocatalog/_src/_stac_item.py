@@ -236,23 +236,31 @@ def reproject_geometry(
     if src.equals(dst):
         return geometry
     if densify_pts > 0:
-        # Per part: a footprint split at ±180° spans ~360° as a whole,
-        # which would leave each narrow part barely densified.
-        parts = getattr(geometry, "geoms", None)
-        if parts is None:
-            geometry = _densify(geometry, densify_pts)
-        else:
-            dense = [_densify(p, densify_pts) for p in parts]
-            if geometry.geom_type == "MultiPolygon":
-                geometry = shapely.MultiPolygon(dense)
-            elif geometry.geom_type == "MultiLineString":
-                geometry = shapely.MultiLineString(dense)
-            elif geometry.geom_type == "MultiPoint":
-                geometry = shapely.MultiPoint(dense)
-            else:
-                geometry = shapely.GeometryCollection(dense)
+        geometry = _densify_parts(geometry, densify_pts)
     transformer = pyproj.Transformer.from_crs(src, dst, always_xy=True)
     return shapely.ops.transform(transformer.transform, geometry)
+
+
+def _densify_parts(
+    geometry: shapely.geometry.base.BaseGeometry, densify_pts: int
+) -> shapely.geometry.base.BaseGeometry:
+    """Densify each simple part against its own span, recursing into nesting.
+
+    Per part: a footprint split at ±180° spans ~360° as a whole, which
+    would leave each narrow part barely densified — and a
+    `GeometryCollection` may nest multi-part members.
+    """
+    parts = getattr(geometry, "geoms", None)
+    if parts is None:
+        return _densify(geometry, densify_pts)
+    dense = [_densify_parts(p, densify_pts) for p in parts]
+    if geometry.geom_type == "MultiPolygon":
+        return shapely.MultiPolygon(dense)
+    if geometry.geom_type == "MultiLineString":
+        return shapely.MultiLineString(dense)
+    if geometry.geom_type == "MultiPoint":
+        return shapely.MultiPoint(dense)
+    return shapely.GeometryCollection(dense)
 
 
 def _densify(

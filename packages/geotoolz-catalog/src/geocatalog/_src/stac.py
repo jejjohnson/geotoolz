@@ -106,6 +106,8 @@ def from_stac_items(
         geometry="geometry",
         crs=catalog_crs,
     )
+    # An empty list infers float64; keep the flag boolean either way.
+    gdf["href_signed"] = gdf["href_signed"].astype(bool)
     gdf.index = pd.IntervalIndex.from_arrays(
         pd.to_datetime(columns["start_time"]),
         pd.to_datetime(columns["end_time"]),
@@ -362,11 +364,13 @@ def _normalize_crs_property(props: dict[str, Any]) -> None:
     ``extra_properties``) is dropped first: keeping it could contradict
     the asset CRS.
     """
-    crs = props.pop("crs", None)
-    if crs is None or (isinstance(crs, float) and pd.isna(crs)):
-        return
+    if "crs" not in props:
+        return  # no resolved CRS column: leave carried properties alone
+    crs = props.pop("crs")
     for field in _PROJ_CRS_FIELDS:
         props.pop(field, None)
+    if crs is None or (isinstance(crs, float) and pd.isna(crs)):
+        return  # explicitly unlocated asset: export no projection
     parsed = pyproj.CRS.from_user_input(crs)
     epsg = parsed.to_epsg()
     if epsg is not None:
