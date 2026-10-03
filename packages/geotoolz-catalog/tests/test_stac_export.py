@@ -244,3 +244,35 @@ def test_item_crs_only_when_every_asset_shares_it() -> None:
     assert not any(k.startswith("proj:") for k in item.properties)
     assert item.assets["B04"].extra_fields == {"proj:epsg": 32633}
     assert item.assets["B08"].extra_fields == {}
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (#360)
+# ---------------------------------------------------------------------------
+
+
+def test_scopes_that_flatten_alike_stay_separate_scenes() -> None:
+    catalog = _gdf(
+        filepath=["https://x/1.tif", "https://x/2.tif"],
+        id=["X", "X"],
+        source=["a", "a/b"],
+        collection=["b/c", "c"],
+    )
+    items = list(to_stac_collection(catalog, collection_id="c").get_items())
+    assert len(items) == 2
+    assert {len(i.assets) for i in items} == {1}
+
+
+def test_crs_stored_as_a_projjson_mapping_is_exported() -> None:
+    import pyproj
+
+    projjson = pyproj.CRS("EPSG:32633").to_json_dict()
+    catalog = _gdf(
+        filepath=["https://x/B04.tif", "https://x/B08.tif"],
+        stac_item_id=["S", "S"],
+        asset_key=["B04", "B08"],
+        crs=[projjson, "EPSG:32633"],
+    )
+    (item,) = to_stac_collection(catalog, collection_id="c").get_items()
+    assert item.properties["proj:epsg"] == 32633  # equal CRSs are shared
+    assert item.assets["B04"].extra_fields == {}

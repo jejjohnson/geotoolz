@@ -237,7 +237,7 @@ def to_stac_collection(
         # An item-level CRS is inherited by every asset without its own,
         # so it is only written when all the item's assets share it.
         crs_values = [row.extras.get("crs") for row in rows]
-        shared_crs = all(_present(c) for c in crs_values) and len(set(crs_values)) == 1
+        shared_crs = _same_crs(crs_values)
         if not shared_crs:
             props.pop("crs", None)
             for field in _PROJ_CRS_FIELDS:
@@ -283,6 +283,19 @@ def to_stac_collection(
     return collection
 
 
+def _same_crs(values: list[Any]) -> bool:
+    """True when every value is a CRS and all denote the same one.
+
+    Compared as parsed `pyproj.CRS` objects: a CRS may be stored in any
+    form `pyproj.CRS.from_user_input` accepts, including unhashable
+    PROJJSON mappings.
+    """
+    if not values or not all(_present(v) for v in values):
+        return False
+    first = pyproj.CRS.from_user_input(values[0])
+    return all(pyproj.CRS.from_user_input(v).equals(first) for v in values[1:])
+
+
 def _group_scenes(catalog: GeoCatalog, collection_id: str) -> dict[str, list[Any]]:
     """Rows grouped into scenes, keyed by a unique output item id.
 
@@ -308,10 +321,18 @@ def _group_scenes(catalog: GeoCatalog, collection_id: str) -> dict[str, list[Any
         if item_id is None:
             scenes[("row", idx)] = [row]
             continue
-        scope = row.extras.get("stac_collection")
-        if not _present(scope):
-            parts = [row.extras.get(k) for k in ("source", "collection")]
-            scope = "/".join(str(p) for p in parts if _present(p)) or None
+        # Tagged tuples keep the scope's components apart: flattening
+        # ("a", "b/c") and ("a/b", "c") to one string would merge scenes.
+        stac_collection = row.extras.get("stac_collection")
+        if _present(stac_collection):
+            scope: tuple[Any, ...] | None = ("stac", str(stac_collection))
+        else:
+            parts = tuple(
+                str(row.extras[k])
+                for k in ("source", "collection")
+                if _present(row.extras.get(k))
+            )
+            scope = ("bundle", *parts) if parts else None
         scenes.setdefault(("id", scope, item_id), []).append(row)
 
     scopes_per_id: dict[str, set[Any]] = {}
@@ -324,7 +345,8 @@ def _group_scenes(catalog: GeoCatalog, collection_id: str) -> dict[str, list[Any
             return f"{collection_id}-{key[1]}"
         _, scope, item_id = key
         if len(scopes_per_id[item_id]) > 1 and scope is not None:
-            return f"{scope}:{item_id}"
+            # Two scopes may spell the same; the `~<n>` pass separates them.
+            return f"{'/'.join(scope[1:])}:{item_id}"
         return item_id
 
     used: set[str] = set()
