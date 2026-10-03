@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
 
+from geocatalog._src._schema import crs_config_string
 from geocatalog._src._timeutil import to_utc_ts
 from geocatalog._src.matchup.temporal import _midpoint, _to_timedelta
 
@@ -232,7 +233,7 @@ def matchup(
         "spatial": _params(spatial),
         "temporal": _params(temporal),
         "join": join,
-        "crs": work_crs.to_string(),
+        "crs": crs_config_string(work_crs),
     }
     strategy_key = json.dumps(tolerance, sort_keys=True)
 

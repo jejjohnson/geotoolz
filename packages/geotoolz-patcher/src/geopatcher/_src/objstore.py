@@ -1,10 +1,11 @@
 """Process-global ``obstore`` client pool — the one pool of the geotoolz stack.
 
-geopatcher owns the pool; ``geotoolz`` (sensor-reader byte path) and
-``geocatalog`` (``[obstore]`` extra) import it from the public
-`geopatcher.objstore` module, so a process that talks to one bucket
-through all three packages builds one client and one HTTP/2 connection
-pool for it.
+geopatcher owns the pool and `ObstoreCogField` reads through it;
+``geotoolz`` (sensor-reader byte path) imports it from the public
+`geopatcher.objstore` module, and ``geotoolz-catalog[obstore]`` installs
+it. A process that talks to one bucket through the whole stack therefore
+builds one client and one HTTP/2 connection pool for it, and
+`clear_obstore_pool` empties it for every package.
 
 Surfaces:
 
@@ -30,6 +31,9 @@ Supported URI forms (store → key):
   ``AzureStore(container_name=container, account_name=account)``, ``key``.
 - ``http[s]://host/path[?query]`` → ``HTTPStore(origin[?query])``,
   ``path``.
+- ``hf://[datasets/|spaces/]org/repo[@revision]/path`` (Hugging Face Hub)
+  → ``HTTPStore`` on ``$HF_ENDPOINT`` (default ``https://huggingface.co``),
+  ``[datasets/|spaces/]org/repo/resolve/<revision or main>/path``.
 
 The query string of an ``http(s)`` URI (pre-signed S3 / GCS URLs, Azure
 SAS tokens) lives in the store's base URL, because obstore
@@ -68,10 +72,16 @@ _GCS_SCHEMES = frozenset({"gs", "gcs"})
 _AZ_SCHEMES = frozenset({"az", "azure"})
 _ABFS_SCHEMES = frozenset({"abfs", "abfss"})
 _HTTP_SCHEMES = frozenset({"http", "https"})
+_HF_SCHEMES = frozenset({"hf"})
 _AZURE_HOST_SUFFIXES = (".blob.core.windows.net", ".dfs.core.windows.net")
 
 SUPPORTED_SCHEMES: frozenset[str] = (
-    _S3_SCHEMES | _GCS_SCHEMES | _AZ_SCHEMES | _ABFS_SCHEMES | _HTTP_SCHEMES
+    _S3_SCHEMES
+    | _GCS_SCHEMES
+    | _AZ_SCHEMES
+    | _ABFS_SCHEMES
+    | _HTTP_SCHEMES
+    | _HF_SCHEMES
 )
 """URI schemes the pool can build a client for."""
 
@@ -109,6 +119,27 @@ def _split_container(path: str, uri: str) -> tuple[str, str]:
     return container, key
 
 
+def _locate_hf(uri: str, netloc: str, path: str) -> _Location:
+    """``hf://`` → the Hub's ``resolve`` URL, served by an `HTTPStore`."""
+    parts = [p for p in f"{netloc}/{path}".split("/") if p]
+    kind = parts.pop(0) + "/" if parts and parts[0] in ("datasets", "spaces") else ""
+    if len(parts) < 3:
+        raise ValueError(
+            f"obstore client pool: {uri!r} must name `org/repo/path` (after an "
+            "optional `datasets/` or `spaces/`)."
+        )
+    org, repo, rest = parts[0], parts[1], "/".join(parts[2:])
+    repo, _, revision = repo.partition("@")
+    endpoint = urlsplit(os.environ.get("HF_ENDPOINT") or "https://huggingface.co")
+    return _Location(
+        "http",
+        endpoint.scheme or "https",
+        endpoint.netloc,
+        None,
+        f"{kind}{org}/{repo}/resolve/{revision or 'main'}/{rest}",
+    )
+
+
 def _locate(uri: str) -> _Location:
     """Resolve ``uri`` to the backend, bucket / container and object key."""
     parsed = urlsplit(uri)
@@ -142,6 +173,8 @@ def _locate(uri: str) -> _Location:
             raise ValueError(f"obstore client pool: no Azure account in {uri!r}.")
         container, key = _split_container(path, uri)
         return _Location("azure", scheme, netloc, container, key)
+    if scheme in _HF_SCHEMES:
+        return _locate_hf(uri, netloc, path)
     if scheme in _HTTP_SCHEMES:
         host = (parsed.hostname or "").lower()
         if host.endswith(_AZURE_HOST_SUFFIXES) and not parsed.query:
@@ -176,43 +209,65 @@ def _freeze(value: Any) -> Hashable:
     return value
 
 
-def _env_region_endpoint(backend: str) -> tuple[str | None, str | None]:
-    """Region / endpoint the backend will pick up from the environment."""
+# Environment variables a backend reads for its endpoint. obstore takes
+# the S3 endpoint from ``AWS_ENDPOINT`` as well as ``AWS_ENDPOINT_URL``;
+# keying on all of them keeps two endpoints from sharing one client.
+_ENDPOINT_VARS: dict[str, tuple[str, ...]] = {
+    "s3": (
+        "AWS_ENDPOINT",
+        "AWS_ENDPOINT_URL",
+        "AWS_ENDPOINT_URL_S3",
+        "AWS_S3_ENDPOINT",
+    ),
+    "gcs": ("GOOGLE_SERVICE_ENDPOINT",),
+    "azure": ("AZURE_STORAGE_ENDPOINT", "AZURE_ENDPOINT"),
+}
+
+
+def _env_region_endpoint(
+    backend: str,
+) -> tuple[str | None, str | None, str | None]:
+    """Region, endpoint and profile the backend picks up from the environment.
+
+    The endpoint is every set endpoint variable, joined (``None`` when
+    none is set), so changing any of them changes the pool key.
+    """
+    endpoints = [
+        f"{name}={value}"
+        for name in _ENDPOINT_VARS.get(backend, ())
+        if (value := os.environ.get(name))
+    ]
+    endpoint = ";".join(endpoints) or None
     if backend == "s3":
         region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
-        endpoint = os.environ.get("AWS_S3_ENDPOINT") or os.environ.get(
-            "AWS_ENDPOINT_URL"
-        )
-        return region, endpoint
-    if backend == "gcs":
-        return None, os.environ.get("GOOGLE_SERVICE_ENDPOINT")
-    if backend == "azure":
-        return None, os.environ.get("AZURE_STORAGE_ENDPOINT")
-    return None, None
+        return region, endpoint, os.environ.get("AWS_PROFILE")
+    return None, endpoint, None
 
 
-_PoolKey = tuple[str, str, str | None, str | None, str | None, Hashable]
+_PoolKey = tuple[str, str, str | None, str | None, str | None, str | None, Hashable]
 
 
 def _pool_key(uri: str, storage_options: Mapping[str, Any] | None = None) -> _PoolKey:
-    """Return ``(backend, bucket, scope, region, endpoint, options)`` for ``uri``.
+    """Return ``(backend, bucket, scope, region, endpoint, profile, options)``.
 
     ``scope`` is the Azure container (two containers of one account are
     two clients) or the HTTP query string (each signed URL is its own
-    client). Region and endpoint come from the environment, so a process
-    talking to two regions of one bucket gets two entries. The frozen
+    client). Region, endpoint and (S3) profile come from the
+    environment, so a process talking to two regions or two
+    S3-compatible endpoints of one bucket name gets two entries. The frozen
     ``storage_options`` are part of the key: asking for the same bucket
     with different options returns a different client instead of
     silently reusing the first one's configuration.
     """
     loc = _locate(uri)
-    region, endpoint = _env_region_endpoint(loc.backend)
+    region, endpoint, profile = _env_region_endpoint(loc.backend)
     return (
         loc.backend,
         loc.bucket,
         loc.scope,
         region,
         endpoint,
+        profile,
         _freeze(dict(storage_options or {})),
     )
 

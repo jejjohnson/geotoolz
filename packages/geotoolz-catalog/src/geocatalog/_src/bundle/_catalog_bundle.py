@@ -34,7 +34,7 @@ from loguru import logger
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
-from geocatalog._src._schema import BackendTag, empty_frame
+from geocatalog._src._schema import BackendTag, crs_config_string, empty_frame
 from geocatalog._src._stac_item import (
     ASSET_CRS_PROPERTY,
     LONLAT,
@@ -583,7 +583,7 @@ class CatalogBundle:
         created_at = self.created_at or _existing_created_at(dest) or now
         meta = {
             "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
-            "target_crs": self.target_crs.to_string(),
+            "target_crs": crs_config_string(self.target_crs),
             "backend": self.backend,
             "created_at": created_at,
             "updated_at": now,

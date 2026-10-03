@@ -33,6 +33,11 @@ def _isolate_pool(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "AWS_DEFAULT_REGION",
         "AWS_S3_ENDPOINT",
         "AWS_ENDPOINT_URL",
+        "AWS_ENDPOINT",
+        "AWS_ENDPOINT_URL_S3",
+        "AWS_PROFILE",
+        "AZURE_ENDPOINT",
+        "HF_ENDPOINT",
         "GOOGLE_SERVICE_ENDPOINT",
         "AZURE_STORAGE_ENDPOINT",
     ):
@@ -60,12 +65,12 @@ def test_pool_key_s3_basic():
 
 def test_pool_key_gs_basic():
     key = objstore._pool_key("gs://my-bucket/path/to/file.tif")
-    assert key == ("gcs", "my-bucket", None, None, None, ())
+    assert key == ("gcs", "my-bucket", None, None, None, None, ())
 
 
 def test_pool_key_https_basic():
     key = objstore._pool_key("https://example.com/data/file.tif")
-    assert key == ("http", "example.com", None, None, None, ())
+    assert key == ("http", "example.com", None, None, None, None, ())
 
 
 def test_pool_key_includes_aws_region_from_env(monkeypatch):
@@ -326,3 +331,56 @@ def test_get_range_bytes_with_explicit_store(tmp_path: Path):
         objstore.get_range_bytes("az://acct/cont/p/b.bin", 1, 3, store=store)
     )
     assert got == b"bcd"
+
+
+# --- review follow-ups (#249) ------------------------------------------
+
+
+@pytest.mark.parametrize("var", ["AWS_ENDPOINT", "AWS_ENDPOINT_URL", "AWS_S3_ENDPOINT"])
+def test_each_s3_endpoint_variable_separates_clients(monkeypatch, var):
+    monkeypatch.setenv(var, "http://minio-a:9000")
+    a = objstore._pool_key("s3://bucket/k")
+    monkeypatch.setenv(var, "http://minio-b:9000")
+    b = objstore._pool_key("s3://bucket/k")
+    assert a != b
+
+
+def test_aws_profile_is_part_of_the_key(monkeypatch):
+    monkeypatch.setenv("AWS_PROFILE", "dev")
+    a = objstore._pool_key("s3://bucket/k")
+    monkeypatch.setenv("AWS_PROFILE", "prod")
+    assert objstore._pool_key("s3://bucket/k") != a
+
+
+@pytest.mark.parametrize(
+    ("uri", "key"),
+    [
+        (
+            "hf://datasets/org/repo/data/train.parquet",
+            "datasets/org/repo/resolve/main/data/train.parquet",
+        ),
+        (
+            "hf://datasets/org/repo@v1.0/train.parquet",
+            "datasets/org/repo/resolve/v1.0/train.parquet",
+        ),
+        ("hf://org/model/weights.bin", "org/model/resolve/main/weights.bin"),
+        ("hf://spaces/org/app/a.json", "spaces/org/app/resolve/main/a.json"),
+    ],
+)
+def test_hf_uris_resolve_through_the_hub(uri, key):
+    assert objstore.object_key(uri) == key
+    assert objstore._pool_key(uri)[:2] == ("http", "huggingface.co")
+    assert "hf" in objstore.SUPPORTED_SCHEMES
+
+
+def test_hf_endpoint_override(monkeypatch):
+    monkeypatch.setenv("HF_ENDPOINT", "https://hf-mirror.example")
+    assert objstore._pool_key("hf://org/model/w.bin")[:2] == (
+        "http",
+        "hf-mirror.example",
+    )
+
+
+def test_hf_uri_without_a_path_raises():
+    with pytest.raises(ValueError, match="org/repo/path"):
+        objstore.object_key("hf://datasets/org/repo")

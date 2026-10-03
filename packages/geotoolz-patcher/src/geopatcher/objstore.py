@@ -1,8 +1,9 @@
 """Public alias for `geopatcher._src.objstore` — the stack's one obstore pool.
 
-``geotoolz`` and ``geocatalog`` import their object-store client from
-here, so every package in the process shares one client (and one
-HTTP/2 connection pool) per bucket / container. Needs ``obstore``:
+``geotoolz`` and geopatcher's ``ObstoreCogField`` take their object-store
+client from here (``geotoolz-catalog[obstore]`` installs it), so every
+package in the process shares one client (and one HTTP/2 connection
+pool) per bucket / container. Needs ``obstore``:
 ``pip install 'geotoolz-patcher[obstore]'``.
 
 ```python

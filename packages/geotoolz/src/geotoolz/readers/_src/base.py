@@ -271,7 +271,7 @@ class SensorReader(GeoData, ABC):
 # ``file://`` is intentionally omitted — local files take the fast on-disk
 # path even when a client is attached.
 _REMOTE_SCHEMES = frozenset(
-    {"s3", "s3a", "gs", "gcs", "az", "azure", "abfs", "abfss", "http", "https"}
+    {"s3", "s3a", "gs", "gcs", "az", "azure", "abfs", "abfss", "http", "https", "hf"}
 )
 
 _OBSTORE_INSTALL_HINT = (
