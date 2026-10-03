@@ -166,6 +166,7 @@ def run_matchup(
                 strategy=strategy_label,
                 member_ids=tuple(row.id for row in members),
                 member_sources=tuple(row.source for row in members),
+                member_collections=tuple(row.collection for row in members),
                 member_roles=tuple(roles_out),
                 geometry_intersect=common_geom,
                 time_reference=ref_time,

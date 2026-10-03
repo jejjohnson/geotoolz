@@ -434,7 +434,7 @@ class CatalogBundle:
             if replaced:
                 keep = [k not in replaced for k in _gdf_keys(base)]
                 base = base[keep]
-                self._drop_matchups_of({(src, rid) for src, _, rid in replaced})
+                self._drop_matchups_of(replaced)
 
         if new_rows:
             new_gdf = gpd.GeoDataFrame(new_rows, crs=self.target_crs)
@@ -471,16 +471,34 @@ class CatalogBundle:
         )
         return query_id
 
-    def _drop_matchups_of(self, items: set[tuple[str, str]]) -> None:
-        """Drop matchups with a member in ``items`` ((source, id) pairs)."""
-        kept = [
-            m
-            for m in self.matchups
-            if not any(
-                (str(src), str(mid)) in items
-                for src, mid in zip(m.member_sources, m.member_ids, strict=True)
+    def _drop_matchups_of(self, items: set[tuple[str, str, str]]) -> None:
+        """Drop matchups with a member in ``items`` ((source, collection, id)).
+
+        A matchup that records its members' collections is matched on
+        the full key, so replacing one collection's item keeps the
+        matchups of a same-id item in another collection. Older rows
+        without collections can only be matched on ``(source, id)``
+        and are dropped whenever that pair is replaced.
+        """
+        pairs = {(src, rid) for src, _, rid in items}
+
+        def stale(m: MatchupRow) -> bool:
+            if len(m.member_collections) == len(m.member_ids):
+                return any(
+                    (str(s), str(c), str(i)) in items
+                    for s, c, i in zip(
+                        m.member_sources,
+                        m.member_collections,
+                        m.member_ids,
+                        strict=True,
+                    )
+                )
+            return any(
+                (str(s), str(i)) in pairs
+                for s, i in zip(m.member_sources, m.member_ids, strict=True)
             )
-        ]
+
+        kept = [m for m in self.matchups if not stale(m)]
         if len(kept) < len(self.matchups):
             logger.warning(
                 "ingest: dropped {} matchup(s) referencing replaced items",
@@ -772,6 +790,7 @@ def _matchups_to_parquet(matchups: list[MatchupRow], path: Path) -> None:
         d.pop("geometry_intersect")
         d["member_ids"] = list(m.member_ids)
         d["member_sources"] = list(m.member_sources)
+        d["member_collections"] = list(m.member_collections)
         d["member_roles"] = list(m.member_roles)
         d["time_offset_sec"] = list(m.time_offset_sec)
         d["tolerance_json"] = json.dumps(dict(m.tolerance), default=str)
@@ -808,9 +827,18 @@ def _matchups_from_parquet(path: Path) -> list[MatchupRow]:
                 query_set=(
                     None if pd.isna(row.get("query_set")) else str(row["query_set"])
                 ),
+                member_collections=_member_collections(row),
             )
         )
     return out
+
+
+def _member_collections(row: pd.Series) -> tuple[str, ...]:
+    """``member_collections`` of a persisted row; ``()`` for older tables."""
+    value = row.get("member_collections")
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ()
+    return tuple(str(c) for c in value)
 
 
 def _wkt_to_geometry(wkt: str) -> BaseGeometry:
