@@ -26,7 +26,7 @@ from geopatcher._src import objstore
 
 
 @pytest.fixture(autouse=True)
-def _isolate_pool(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _isolate_pool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Empty pool and no endpoint / region env vars for every test."""
     for var in (
         "AWS_REGION",
@@ -40,8 +40,13 @@ def _isolate_pool(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "HF_ENDPOINT",
         "GOOGLE_SERVICE_ENDPOINT",
         "AZURE_STORAGE_ENDPOINT",
+        "HF_TOKEN",
+        "HF_HOME",
+        "HF_HUB_DISABLE_IMPLICIT_TOKEN",
     ):
         monkeypatch.delenv(var, raising=False)
+    # Never pick up a real `huggingface-cli login` token.
+    monkeypatch.setenv("HF_TOKEN_PATH", str(tmp_path / "no-token"))
     objstore.clear_obstore_pool()
     yield
     objstore.clear_obstore_pool()
@@ -365,18 +370,19 @@ def test_aws_profile_is_part_of_the_key(monkeypatch):
         ),
         ("hf://org/model/weights.bin", "org/model/resolve/main/weights.bin"),
         ("hf://spaces/org/app/a.json", "spaces/org/app/resolve/main/a.json"),
+        ("hf://models/org/model/w.bin", "org/model/resolve/main/w.bin"),
     ],
 )
 def test_hf_uris_resolve_through_the_hub(uri, key):
     assert objstore.object_key(uri) == key
-    assert objstore._pool_key(uri)[:2] == ("http", "huggingface.co")
+    assert objstore._pool_key(uri)[:2] == ("hf", "huggingface.co")
     assert "hf" in objstore.SUPPORTED_SCHEMES
 
 
 def test_hf_endpoint_override(monkeypatch):
     monkeypatch.setenv("HF_ENDPOINT", "https://hf-mirror.example")
     assert objstore._pool_key("hf://org/model/w.bin")[:2] == (
-        "http",
+        "hf",
         "hf-mirror.example",
     )
 
@@ -384,3 +390,80 @@ def test_hf_endpoint_override(monkeypatch):
 def test_hf_uri_without_a_path_raises():
     with pytest.raises(ValueError, match="org/repo/path"):
         objstore.object_key("hf://datasets/org/repo")
+
+
+def test_hf_endpoint_path_prefix_is_kept(monkeypatch):
+    monkeypatch.setenv("HF_ENDPOINT", "http://localhost:8080/hf/")
+    assert objstore._pool_key("hf://org/model/w.bin")[1] == "localhost:8080/hf"
+    monkeypatch.setenv("HF_ENDPOINT", "http://localhost:8080/other")
+    assert objstore._pool_key("hf://org/model/w.bin")[1] == "localhost:8080/other"
+
+
+@pytest.mark.parametrize("prefix", ["kernels", "buckets"])
+def test_hf_unsupported_repo_types_are_rejected(prefix):
+    with pytest.raises(ValueError, match=f"hf://{prefix}/"):
+        objstore.object_key(f"hf://{prefix}/org/repo/file.bin")
+
+
+def test_hf_empty_revision_is_rejected():
+    with pytest.raises(ValueError, match="empty revision"):
+        objstore.object_key("hf://org/repo@/weights.bin")
+
+
+def test_hf_token_keys_the_pool_without_leaking(monkeypatch, tmp_path):
+    uri = "hf://org/model/w.bin"
+    anonymous = objstore._pool_key(uri)
+    monkeypatch.setenv("HF_TOKEN", "secret-a")
+    with_a = objstore._pool_key(uri)
+    monkeypatch.setenv("HF_TOKEN", "secret-b")
+    with_b = objstore._pool_key(uri)
+    assert len({anonymous, with_a, with_b}) == 3
+    assert "secret" not in repr(with_a)
+    monkeypatch.setenv("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
+    assert objstore._pool_key(uri) == anonymous
+
+
+def test_hf_token_falls_back_to_the_saved_login(monkeypatch, tmp_path):
+    token_file = tmp_path / "token"
+    token_file.write_text("saved\n")
+    monkeypatch.setenv("HF_TOKEN_PATH", str(token_file))
+    assert objstore._hf_token() == "saved"
+    monkeypatch.delenv("HF_TOKEN_PATH")
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    assert objstore._hf_token() == "saved"
+    monkeypatch.setenv("HF_TOKEN", "env")
+    assert objstore._hf_token() == "env"
+
+
+def test_hf_reads_send_the_token_to_the_prefixed_endpoint(monkeypatch):
+    pytest.importorskip("obstore")
+    seen: dict[str, str | None] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen["path"] = self.path
+            seen["auth"] = self.headers.get("Authorization")
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("HF_ENDPOINT", f"http://127.0.0.1:{server.server_port}/hf")
+        monkeypatch.setenv("HF_TOKEN", "secret")
+        uri = "hf://datasets/org/repo@v1/data.bin"
+        store = objstore.get_obstore(
+            uri, storage_options={"client_options": {"allow_http": True}}
+        )
+        assert bytes(store.get(objstore.object_key(uri)).bytes()) == b"ok"
+    finally:
+        server.shutdown()
+    assert seen == {
+        "path": "/hf/datasets/org/repo/resolve/v1/data.bin",
+        "auth": "Bearer secret",
+    }

@@ -31,9 +31,13 @@ Supported URI forms (store → key):
   ``AzureStore(container_name=container, account_name=account)``, ``key``.
 - ``http[s]://host/path[?query]`` → ``HTTPStore(origin[?query])``,
   ``path``.
-- ``hf://[datasets/|spaces/]org/repo[@revision]/path`` (Hugging Face Hub)
-  → ``HTTPStore`` on ``$HF_ENDPOINT`` (default ``https://huggingface.co``),
-  ``[datasets/|spaces/]org/repo/resolve/<revision or main>/path``.
+- ``hf://[models/|datasets/|spaces/]org/repo[@revision]/path`` (Hugging
+  Face Hub) → ``HTTPStore`` on ``$HF_ENDPOINT`` (default
+  ``https://huggingface.co``, path prefix kept),
+  ``[datasets/|spaces/]org/repo/resolve/<revision or main>/path``. The
+  Hub token (``$HF_TOKEN``, else the one ``huggingface-cli login`` saved)
+  is sent as a bearer token unless ``$HF_HUB_DISABLE_IMPLICIT_TOKEN`` is
+  set; each token gets its own pooled client.
 
 The query string of an ``http(s)`` URI (pre-signed S3 / GCS URLs, Azure
 SAS tokens) lives in the store's base URL, because obstore
@@ -49,11 +53,13 @@ Adapted from the ``openEO-RuSTAC`` Rust pattern in
 
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 from collections import OrderedDict
 from collections.abc import Hashable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -95,7 +101,7 @@ class _Location:
     or the HTTP query string (``None`` otherwise).
     """
 
-    backend: str  # "s3" | "gcs" | "azure" | "http"
+    backend: str  # "s3" | "gcs" | "azure" | "http" | "hf"
     scheme: str
     bucket: str
     scope: str | None
@@ -119,25 +125,74 @@ def _split_container(path: str, uri: str) -> tuple[str, str]:
     return container, key
 
 
+#: Hub repo-type prefixes → the prefix of their ``resolve`` URL.
+_HF_REPO_TYPES = {"models": "", "datasets": "datasets/", "spaces": "spaces/"}
+#: Canonical prefixes whose download route the pool does not build.
+_HF_UNSUPPORTED = frozenset({"kernels", "buckets"})
+
+
 def _locate_hf(uri: str, netloc: str, path: str) -> _Location:
-    """``hf://`` → the Hub's ``resolve`` URL, served by an `HTTPStore`."""
+    """``hf://`` → the Hub's ``resolve`` URL, served by an `HTTPStore`.
+
+    The store's base URL is ``$HF_ENDPOINT`` with its path prefix
+    (``http://host/hf`` stays ``/hf``), so the prefix is part of the
+    pool key too.
+    """
     parts = [p for p in f"{netloc}/{path}".split("/") if p]
-    kind = parts.pop(0) + "/" if parts and parts[0] in ("datasets", "spaces") else ""
+    if parts and parts[0] in _HF_UNSUPPORTED:
+        raise ValueError(
+            f"obstore client pool: {uri!r} — `hf://{parts[0]}/` URIs are not "
+            "supported; use `models/`, `datasets/` or `spaces/`."
+        )
+    kind = _HF_REPO_TYPES[parts.pop(0)] if parts and parts[0] in _HF_REPO_TYPES else ""
     if len(parts) < 3:
         raise ValueError(
             f"obstore client pool: {uri!r} must name `org/repo/path` (after an "
-            "optional `datasets/` or `spaces/`)."
+            "optional `models/`, `datasets/` or `spaces/`)."
         )
     org, repo, rest = parts[0], parts[1], "/".join(parts[2:])
-    repo, _, revision = repo.partition("@")
+    repo, at, revision = repo.partition("@")
+    if at and not revision:
+        raise ValueError(
+            f"obstore client pool: {uri!r} has an empty revision after `@`; "
+            "name the revision or drop the `@`."
+        )
     endpoint = urlsplit(os.environ.get("HF_ENDPOINT") or "https://huggingface.co")
     return _Location(
-        "http",
+        "hf",
         endpoint.scheme or "https",
-        endpoint.netloc,
+        endpoint.netloc + endpoint.path.rstrip("/"),
         None,
         f"{kind}{org}/{repo}/resolve/{revision or 'main'}/{rest}",
     )
+
+
+def _hf_token() -> str | None:
+    """The Hub token ``huggingface_hub`` would send implicitly, or ``None``.
+
+    ``$HF_TOKEN``, else the token file (``$HF_TOKEN_PATH``, else
+    ``$HF_HOME/token``, else ``~/.cache/huggingface/token``); none when
+    ``$HF_HUB_DISABLE_IMPLICIT_TOKEN`` is set.
+    """
+    if os.environ.get("HF_HUB_DISABLE_IMPLICIT_TOKEN", "").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return None
+    if token := os.environ.get("HF_TOKEN", "").strip():
+        return token
+    if path := os.environ.get("HF_TOKEN_PATH"):
+        token_file = Path(path)
+    else:
+        cache = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+        home = os.environ.get("HF_HOME") or Path(cache) / "huggingface"
+        token_file = Path(home) / "token"
+    try:
+        return token_file.read_text().strip() or None
+    except OSError:
+        return None
 
 
 def _locate(uri: str) -> _Location:
@@ -241,6 +296,9 @@ def _env_region_endpoint(
     if backend == "s3":
         region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
         return region, endpoint, os.environ.get("AWS_PROFILE")
+    if backend == "hf" and (token := _hf_token()) is not None:
+        # A fingerprint, not the token: pool keys show up in reprs and logs.
+        return None, endpoint, "token:" + hashlib.sha256(token.encode()).hexdigest()
     return None, endpoint, None
 
 
@@ -316,6 +374,11 @@ def _build_store(uri: str, storage_options: Mapping[str, Any] | None) -> ObjectS
     base = f"{loc.scheme}://{loc.bucket}"
     if loc.scope is not None:
         base = f"{base}/?{loc.scope}"
+    if loc.backend == "hf" and (token := _hf_token()) is not None:
+        client = dict(options.pop("client_options", None) or {})
+        headers = dict(client.get("default_headers") or {})
+        headers.setdefault("Authorization", f"Bearer {token}")
+        options["client_options"] = {**client, "default_headers": headers}
     return HTTPStore.from_url(base, **options)
 
 
