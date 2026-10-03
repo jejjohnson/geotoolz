@@ -39,6 +39,20 @@ $ geocatalog build xarray \
 `build xarray` requires the `[xarray-raster]` extra. The CLI surfaces a
 clear error if the extra isn't installed.
 
+| Flag | Builders | Meaning |
+| ---- | -------- | ------- |
+| `--input-glob` | all | Local glob over input files (`**` recurses). Required. |
+| `--out` | all | Destination GeoParquet path. Required. |
+| `--target-crs` | all | Catalog CRS. `raster` / `vector`: defaults to the first file's CRS. `xarray`: tags the catalog, does not reproject. |
+| `--regex` | raster, vector | Filename regex with a `(?P<date>...)` group, or `(?P<start>...)` + `(?P<stop>...)`. |
+| `--date-format` | raster, vector | `strptime` format for the regex groups (default `%Y%m%d`). |
+| `--backend` | raster | `memory` (default) builds in RAM; `duckdb` streams rows straight to `--out` (needs the `[duckdb]` extra). |
+| `--layer` | vector | Layer name for multi-layer files (GeoPackage). |
+| `--time-var` | xarray | Name of the time coordinate (default `time`). |
+
+An invalid `--target-crs`, or an input that is not a file of the
+builder's kind, fails with a one-line message and exit code 1.
+
 ### `query`
 
 Filter a catalog by bbox + time window and print the matching row count.
@@ -55,7 +69,8 @@ time    ['2024-06-01', '2024-06-30']
 ```
 
 Pass `--crs EPSG:32629` (or any other identifier) to interpret `--bbox`
-in a non-default CRS. The library reprojects internally.
+in a non-default CRS. The library reprojects internally. A `--crs` that
+pyproj does not recognise fails with a one-line message and exit code 1.
 
 `--start` and `--end` are paired — pass either both or neither.
 Passing only one is rejected with exit code 1.
@@ -63,7 +78,8 @@ Passing only one is rejected with exit code 1.
 ### `stats`
 
 Top-line metadata about an artifact — rows, bounds, temporal extent,
-backend tag, CRS.
+backend tag, CRS. On an empty catalog the temporal extent prints as
+`None`.
 
 ```console
 $ geocatalog stats catalog.parquet
@@ -77,7 +93,9 @@ crs              EPSG:4326
 
 ### `info`
 
-Inspect a single row.
+Inspect a single row: its user columns and time window. Housekeeping
+columns (`_backend`, `_schema_version`, the GeoParquet `bbox` covering)
+are not shown.
 
 ```console
 $ geocatalog info catalog.parquet --row 0
@@ -122,12 +140,14 @@ the file untouched.
 
 Exit codes follow the shared table below: `3` when the source is
 missing or unreadable, `2` on a corrupt artifact or schema mismatch
-(`CatalogSchemaError`).
+(`CatalogSchemaError` — for example an artifact written by a newer
+reader, or a `--to-version` the artifact cannot migrate to). A
+non-integer `--to-version` is an argument error (exit `1`).
 
 ## Output formats
 
-Every subcommand accepts `--json` to switch from the human-readable
-table to a JSON object. This is the right choice when piping into
+Every subcommand except `migrate` accepts `--json` to switch from the
+human-readable table to a JSON object. This is the right choice when piping into
 `jq`, a workflow scheduler, or another tool.
 
 ```console
@@ -145,8 +165,8 @@ $ geocatalog build raster --input-glob "data/*.tif" \
 | Code | Meaning                                                       |
 | ---- | ------------------------------------------------------------- |
 | 0    | Success.                                                      |
-| 1    | User error — bad args, glob matched nothing, missing extra.   |
-| 2    | Catalog error — corrupt artifact or unrecognised schema.      |
+| 1    | User error — bad or unparseable args (including an invalid `--crs` / `--target-crs`), glob matched nothing, input not a file of the builder's kind, missing extra. |
+| 2    | Catalog error — corrupt artifact or unrecognised schema (e.g. a newer `_schema_version`). |
 | 3    | I/O error — source path doesn't exist or can't be read.       |
 
 ## Coming soon

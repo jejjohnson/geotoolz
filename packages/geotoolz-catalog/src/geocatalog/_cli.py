@@ -9,7 +9,8 @@ Exit codes:
 
 * 0 — success.
 * 1 — user error (bad args, missing extra, no files match glob,
-       invalid bbox / time range, partial ``--start`` / ``--end``).
+       invalid bbox / time range / CRS, partial ``--start`` / ``--end``,
+       input not a file of the builder's kind).
 * 2 — catalog error (corrupt artifact, schema mismatch).
 * 3 — I/O error (path not readable / writable, parent dir missing).
 """
@@ -73,6 +74,41 @@ def _parse_bbox(s: str) -> tuple[float, float, float, float]:
     except ValueError as exc:
         raise ValueError(f"--bbox values must be numeric; got {s!r}") from exc
     return (xmin, ymin, xmax, ymax)
+
+
+def _crs_error(value: str | None, flag: str) -> str | None:
+    """A one-line message when ``value`` is not a CRS pyproj understands."""
+    if value is None:
+        return None
+    import pyproj
+
+    try:
+        pyproj.CRS.from_user_input(value)
+    except pyproj.exceptions.CRSError as exc:
+        return f"invalid {flag} {value!r}: {exc}"
+    return None
+
+
+def _unreadable_input_errors() -> tuple[type[Exception], ...]:
+    """Reader errors for an input that exists but is not a supported file.
+
+    pyogrio / fiona raise `RuntimeError`-family errors for "not a vector
+    file"; they are user errors (exit 1), not crashes.
+    """
+    errors: list[type[Exception]] = []
+    try:
+        from pyogrio.errors import DataSourceError
+
+        errors.append(DataSourceError)
+    except ImportError:  # pragma: no cover - pyogrio ships with geopandas
+        pass
+    try:
+        from fiona.errors import DriverError
+
+        errors.append(DriverError)
+    except ImportError:
+        pass
+    return tuple(errors)
 
 
 def _emit(payload: dict[str, object], *, as_json: bool) -> None:
@@ -158,6 +194,9 @@ def raster(
     """Build a raster catalog from a glob of GeoTIFFs."""
     from geocatalog import build_raster_catalog
 
+    if (err := _crs_error(target_crs, "--target-crs")) is not None:
+        print(err, file=sys.stderr)
+        return 1
     try:
         paths = _expand_glob(input_glob)
     except ValueError as exc:
@@ -214,6 +253,9 @@ def xarray(
     except ImportError as exc:
         print(f"build xarray needs the [xarray-raster] extra: {exc}", file=sys.stderr)
         return 1
+    if (err := _crs_error(target_crs, "--target-crs")) is not None:
+        print(err, file=sys.stderr)
+        return 1
     try:
         paths = _expand_glob(input_glob)
     except ValueError as exc:
@@ -262,6 +304,9 @@ def vector(
     except ImportError as exc:
         print(f"build vector failed: {exc}", file=sys.stderr)
         return 1
+    if (err := _crs_error(target_crs, "--target-crs")) is not None:
+        print(err, file=sys.stderr)
+        return 1
     try:
         paths = _expand_glob(input_glob)
     except ValueError as exc:
@@ -278,7 +323,7 @@ def vector(
             target_crs=target_crs,
             layer=layer,
         )
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, *_unreadable_input_errors()) as exc:
         print(f"build vector failed: {exc}", file=sys.stderr)
         return 1
     except OSError as exc:
@@ -391,6 +436,9 @@ def query(
         bounds = _parse_bbox(bbox) if bbox else None
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
+        return 1
+    if (err := _crs_error(crs, "--crs")) is not None:
+        print(err, file=sys.stderr)
         return 1
     time: tuple[Any, Any] | None = None
     if start is not None and end is not None:
