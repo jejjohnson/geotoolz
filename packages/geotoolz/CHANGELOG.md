@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.5.0...geotoolz-v0.5.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **catalog,patcher:** get_config()["crs"] is one string on both backends and across round trips; pool key covers every endpoint variable; hf:// in the pool ([#371](https://github.com/jejjohnson/geotoolz/issues/371)) ([6b8b3ff](https://github.com/jejjohnson/geotoolz/commit/6b8b3ff34489958ed89ff210a3e4abb7961dd501))
+
 ## [0.5.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.4.0...geotoolz-v0.5.0) (2026-10-02)
 
 
