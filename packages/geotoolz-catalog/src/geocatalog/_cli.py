@@ -28,14 +28,19 @@ from typing import Annotated, Any
 import pandas as pd
 from cyclopts import App, Parameter
 
+from geocatalog import __version__
 from geocatalog._src._schema import StorageEngine
 
 
 # Sub-app + root. Cyclopts lets us register sub-apps via
 # `app.command(sub_app)`; `name=` controls the verb the user types.
+# `version=` is explicit: cyclopts would otherwise look up a distribution
+# named after the module (`geocatalog`), which does not exist — the
+# distribution is `geotoolz-catalog`.
 app = App(
     name="geocatalog",
     help="Spatiotemporal catalog over geospatial files.",
+    version=__version__,
 )
 build_app = App(
     name="build", help="Build a catalog from raster / xarray / vector files."

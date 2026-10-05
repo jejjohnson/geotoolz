@@ -76,5 +76,5 @@ pip install 'geotoolz-catalog[full]'          # everything
 Or with `uv`:
 
 ```bash
-uv add geocatalog
+uv add geotoolz-catalog
 ```

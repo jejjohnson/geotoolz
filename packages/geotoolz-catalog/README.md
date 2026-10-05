@@ -80,7 +80,7 @@ pip install geotoolz-catalog
 Or with `uv`:
 
 ```bash
-uv add geocatalog
+uv add geotoolz-catalog
 ```
 
 | Extra | Adds | When you need it |

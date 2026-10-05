@@ -36,7 +36,7 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(
     not _HAS_DUCKDB,
-    reason="DuckDB extra not installed; install with `geocatalog[duckdb]`.",
+    reason="DuckDB extra not installed: pip install 'geotoolz-catalog[duckdb]'.",
 )
 
 
