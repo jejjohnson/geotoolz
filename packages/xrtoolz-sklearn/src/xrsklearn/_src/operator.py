@@ -7,9 +7,15 @@ from typing import Any, ClassVar, Literal
 
 import numpy as np
 import xarray as xr
+from sklearn.base import clone
 
 from xrcore import Operator
-from xrsklearn._src.wrap import NanPolicy, XarrayEstimator
+from xrsklearn._src.wrap import (
+    NanPolicy,
+    XarrayEstimator,
+    _check_no_conflict,
+    _explicit,
+)
 
 
 SklearnMethod = Literal[
@@ -124,8 +130,8 @@ class SklearnOp(Operator):
         variable: Hashable | None = None,
         output_variable: Hashable | None = None,
         sample_dim: Hashable | None = None,
-        new_feature_dim: str = "component",
-        nan_policy: NanPolicy = "propagate",
+        new_feature_dim: str | None = None,
+        nan_policy: NanPolicy | None = None,
         method: SklearnMethod = "transform",
     ) -> None:
         self.estimator = estimator
@@ -159,7 +165,9 @@ class SklearnOp(Operator):
         if not isinstance(data, xr.Dataset):
             return out
 
-        name = self.output_variable or self.variable
+        name = (
+            self.output_variable if self.output_variable is not None else self.variable
+        )
         return data.assign({name: out})
 
     def _run(self, data: xr.DataArray | xr.Dataset) -> xr.DataArray:
@@ -171,19 +179,20 @@ class SklearnOp(Operator):
         """Return an ``XarrayEstimator`` appropriate for ``self.method``.
 
         Pre-fitted ``XarrayEstimator`` instances are reused as-is so their
-        ``_fitted_meta_`` is preserved (needed for ``inverse_transform`` to
+        fit-time layout is preserved (needed for ``inverse_transform`` to
         recover the original feature grid). Raw sklearn estimators are wrapped
         on each call; for ``method="fit_transform"`` the wrapper fits a fresh
         clone, otherwise the estimator is treated as already fitted.
         """
+        overrides = _explicit(self.sample_dim, self.new_feature_dim, self.nan_policy)
         if isinstance(self.estimator, XarrayEstimator):
+            if self.method == "fit_transform":
+                # Fit a reconfigured clone so the caller's wrapper is never
+                # refitted behind their back on every pipeline call.
+                return clone(self.estimator).set_params(**overrides)
+            _check_no_conflict(self.estimator, overrides)
             return self.estimator
-        wrap = XarrayEstimator(
-            self.estimator,
-            sample_dim=self.sample_dim,
-            new_feature_dim=self.new_feature_dim,
-            nan_policy=self.nan_policy,
-        )
+        wrap = XarrayEstimator(self.estimator, **overrides)
         if self.method != "fit_transform":
             wrap.estimator_ = self.estimator
         return wrap
