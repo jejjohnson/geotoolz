@@ -1072,3 +1072,55 @@ def test_datetime_anchors_do_not_collide_with_strings(tmp_path) -> None:
     cache.put("f", "c", np.datetime64("2024-01-01"), _tiny_patch(1))
     assert cache.get("f", "c", "2024-01-01") is None
     assert cache.get("f", "c", np.datetime64("2024-01-01")) is not None
+
+
+def test_clear_racing_put_leaves_no_phantom_entry(tmp_path, monkeypatch) -> None:
+    """`put` publishes and tracks under one lock, so `clear` can't split them."""
+    cache = PatchCache(tmp_path / "c", max_bytes=1 << 20)
+    real_replace = os.replace
+
+    def replace_then_clear(src: Any, dst: Any) -> None:
+        real_replace(src, dst)
+        # A `clear` from another thread right after publication must wait
+        # for the lock `put` holds, so it sees (and accounts for) the file.
+        t = threading.Thread(target=cache.clear)
+        t.start()
+        t.join(timeout=0.2)
+        assert t.is_alive()  # blocked on the lock, not interleaved
+        clearers.append(t)
+
+    clearers: list[threading.Thread] = []
+    monkeypatch.setattr(cache_module.os, "replace", replace_then_clear)
+    cache.put("f", "c", (0, 0), _tiny_patch(0))
+    monkeypatch.setattr(cache_module.os, "replace", real_replace)
+    for t in clearers:
+        t.join()
+    on_disk = sum(p.stat().st_size for p in (tmp_path / "c").rglob("*.npz"))
+    assert cache.stats()["bytes"] == on_disk
+    assert cache.stats()["entries"] == len(list((tmp_path / "c").rglob("*.npz")))
+
+
+def test_reserved_tag_keys_are_not_ordinary_dict_anchors() -> None:
+    from geopatcher import normalize_anchor
+
+    tagged = normalize_anchor(np.datetime64("2024-01-01"))
+    assert normalize_anchor(tagged) == tagged  # canonical form is idempotent
+    for bad in (
+        {"__datetime64__": "2024-01-01", "x": 1},
+        {"__timedelta64__": 5},
+    ):
+        with pytest.raises(TypeError, match="reserved"):
+            normalize_anchor(bad)
+
+
+def test_unconvertible_numpy_scalars_are_rejected() -> None:
+    from geopatcher import normalize_anchor
+
+    for value in (np.longdouble("1.000000000000000000001"), np.complex128(1 + 2j)):
+        with pytest.raises(TypeError, match="no exact JSON form"):
+            normalize_anchor((value, 0))
+
+
+def test_cache_format_bump_orphans_old_keys(tmp_path) -> None:
+    """Keys changed meaning (anchor tagging), so the format salt moved on."""
+    assert cache_module._FORMAT == "geopatcher.PatchCache/3"

@@ -120,6 +120,11 @@ class PatchJournal:
                 self._rows[_anchor_key(row["anchor"])] = row
 
 
+_DATETIME_TAG = "__datetime64__"
+_TIMEDELTA_TAG = "__timedelta64__"
+_RESERVED_TAGS = frozenset({_DATETIME_TAG, _TIMEDELTA_TAG})
+
+
 def normalize_anchor(anchor: Any) -> Any:
     """Return ``anchor`` as plain JSON-compatible Python values.
 
@@ -130,7 +135,10 @@ def normalize_anchor(anchor: Any) -> Any:
     - numpy scalars → ``.item()``; ``datetime64`` / ``timedelta64`` →
       a tagged ``{"__datetime64__": str}`` / ``{"__timedelta64__": str}``
       dict, so they stay JSON-serialisable without colliding with a
-      string anchor (``"2024-01-01"``) or with each other (``NaT``);
+      string anchor (``"2024-01-01"``) or with each other (``NaT``).
+      Those two keys are reserved: a dict using them is accepted only
+      in exactly that tagged form (it *is* the datetime's canonical
+      spelling, which journal rows are re-keyed from);
     - numpy arrays → nested lists of normalised elements;
     - tuples and lists → lists;
     - dicts → dicts of normalised values (keys must be strings).
@@ -142,8 +150,10 @@ def normalize_anchor(anchor: Any) -> Any:
         The normalised anchor.
 
     Raises:
-        TypeError: ``anchor`` contains a value with no JSON form (an
-            arbitrary object, a non-string dict key). There is no
+        TypeError: ``anchor`` contains a value with no exact JSON form
+            (an arbitrary object, a non-string dict key, a ``longdouble``
+            or ``complex`` numpy scalar, a reserved tag key used any other
+            way). There is no
             ``str()`` fallback: two distinct objects with the same
             ``repr`` would otherwise collide.
 
@@ -160,11 +170,20 @@ def normalize_anchor(anchor: Any) -> Any:
             return normalize_anchor(anchor[()])
         return [normalize_anchor(v) for v in anchor]
     if isinstance(anchor, np.datetime64):
-        return {"__datetime64__": str(anchor)}
+        return {_DATETIME_TAG: str(anchor)}
     if isinstance(anchor, np.timedelta64):
-        return {"__timedelta64__": str(anchor)}
+        return {_TIMEDELTA_TAG: str(anchor)}
     if isinstance(anchor, np.generic):
-        return anchor.item()
+        value = anchor.item()
+        if isinstance(value, (bool, int, float, str)):
+            return value
+        # ``longdouble.item()`` stays a numpy scalar (no exact Python
+        # type); ``complex`` has no JSON form. Rounding would collide.
+        raise TypeError(
+            f"cannot journal / cache an anchor containing a "
+            f"{type(anchor).__qualname__} ({anchor!r}): it has no exact "
+            f"JSON form; cast it to a Python number first."
+        )
     if isinstance(anchor, (tuple, list)):
         return [normalize_anchor(v) for v in anchor]
     if isinstance(anchor, dict):
@@ -172,6 +191,17 @@ def normalize_anchor(anchor: Any) -> Any:
             raise TypeError(
                 f"anchor dict keys must be strings to be journalled / cached; "
                 f"got {anchor!r}"
+            )
+        reserved = _RESERVED_TAGS.intersection(anchor)
+        if reserved:
+            # The tagged form is the canonical spelling of a numpy
+            # datetime / timedelta (journal rows are re-keyed from it), so
+            # accept exactly that and nothing else under those keys.
+            if len(anchor) == 1 and isinstance(next(iter(anchor.values())), str):
+                return dict(anchor)
+            raise TypeError(
+                f"anchor dict keys {sorted(reserved)} are reserved for tagged "
+                f"numpy datetime / timedelta values; got {anchor!r}"
             )
         return {k: normalize_anchor(v) for k, v in anchor.items()}
     if anchor is None or isinstance(anchor, (bool, int, float, str)):

@@ -68,7 +68,7 @@ from geopatcher._src.patch import Patch
 
 # Bumped whenever the key derivation or the entry layout changes, so
 # entries written by an older layout can never be served.
-_FORMAT = "geopatcher.PatchCache/2"
+_FORMAT = "geopatcher.PatchCache/3"
 
 
 @dataclass
@@ -324,15 +324,18 @@ class PatchCache:
                     return
                 with suppress(OSError):
                     os.fsync(f.fileno())
-            os.replace(tmp_name, path)
+            # Publish and account as one step: a `clear` (or a racing
+            # miss) between the two would otherwise track a file it had
+            # already removed.
+            with self._lock:
+                os.replace(tmp_name, path)
+                self._track(path, size)
+                if self.max_bytes is not None and self._bytes > self.max_bytes:
+                    self._evict()
         finally:
             with suppress(OSError):
                 if os.path.exists(tmp_name):
                     os.unlink(tmp_name)
-        with self._lock:
-            self._track(path, size)
-            if self.max_bytes is not None and self._bytes > self.max_bytes:
-                self._evict()
 
     def build_patch(self, payload: dict[str, Any], anchor: Any, indices: Any) -> Patch:
         """Rebuild a `Patch` from a stored ``payload`` at ``anchor``/``indices``."""
