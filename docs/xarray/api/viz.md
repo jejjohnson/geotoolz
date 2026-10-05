@@ -65,6 +65,8 @@ Power-spectrum visualisations consuming `transforms.power_spectrum` and
 
 ::: xrtoolz.viz.validation.SpatialMapPanel
 
+::: xrtoolz.viz.validation.HovmollerPanel
+
 ### Cartesian model output
 
 Idealised f/β-plane runs have `x`/`y` in metres and no lon/lat.

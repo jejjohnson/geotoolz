@@ -19,6 +19,7 @@ Shipped:
   …) over time.
 - :class:`TimeSeriesErrorPanel` — per-timestep skill scores, one line per
   method.
+- :class:`HovmollerPanel` — time × one spatial axis section of a field.
 
 Composable wrappers, which consume any of the above (or a plain
 ``(ds, ax) -> Any`` callable) and multiply it:
@@ -38,6 +39,7 @@ from xrtoolz.viz.validation._src.compare import PairwiseComparePanel
 from xrtoolz.viz.validation._src.diff import SpatialDiffPanel
 from xrtoolz.viz.validation._src.events import EventVerificationPanel
 from xrtoolz.viz.validation._src.facet import FacetPanel, seasonal_groupby
+from xrtoolz.viz.validation._src.hovmoller import HovmollerPanel
 from xrtoolz.viz.validation._src.lagrangian import EulerianLagrangianPanel
 from xrtoolz.viz.validation._src.palette import method_palette
 from xrtoolz.viz.validation._src.psd import (
@@ -67,6 +69,7 @@ __all__ = [
     "EulerianLagrangianPanel",
     "EventVerificationPanel",
     "FacetPanel",
+    "HovmollerPanel",
     "LeadTimeSkillPanel",
     "PSDIsotropicPanel",
     "PSDIsotropicScorePanel",
