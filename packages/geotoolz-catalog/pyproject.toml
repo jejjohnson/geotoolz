@@ -53,33 +53,38 @@ dependencies = [
 
 [project.scripts]
 # CLI entry point — runs the cyclopts App defined in
-# `geocatalog._cli`. `pip install geocatalog` exposes this as
+# `geocatalog._cli`. `pip install geotoolz-catalog` exposes this as
 # `geocatalog ...` on the user's PATH (#23).
 geocatalog = "geocatalog._cli:app"
 
 [project.optional-dependencies]
-# xarray-backed catalog (`build_xarray_catalog`, `load_xarray`).
-xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1"]
-# DuckDB backend (Phase 2). Pinned to >=1.1 because GeoParquet 1.1
-# bbox-column predicate pushdown landed there; older versions silently
-# regress to slow ST_Intersects-per-row scans.
+# xarray-backed catalog (`build_xarray_catalog`, `load_xarray`). `zarr`
+# backs the `.zarr` stores `load_xarray` / `build_xarray_catalog` open
+# with xarray's zarr engine.
+xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1", "zarr>=3.0"]
+# DuckDB backend. Pinned to >=1.1 because GeoParquet 1.1 bbox-column
+# predicate pushdown landed there; older versions silently regress to
+# slow ST_Intersects-per-row scans.
 duckdb = ["duckdb>=1.1"]
-# Cloud/object-storage readers for s3://, gs://, az://, https://, and hf:// URIs.
+# Cloud/object-storage readers for s3://, gs://, az://, https:// and hf://
+# URIs. `fsspec[http]` brings the aiohttp client fsspec's https:// filesystem
+# needs; `huggingface_hub` registers the hf:// filesystem with fsspec.
 fsspec = [
     "adlfs>=2026.5.0",
-    "aiohttp>=3.13.5",
-    "fsspec>=2025.12.0",
+    "fsspec[http]>=2025.12.0",
     "gcsfs>=2025.12.0",
+    "huggingface-hub>=0.25",
     "s3fs>=2025.12.0",
 ]
 # Rust-backed object-store client pool. The pool lives in geopatcher
 # (`geopatcher.objstore`) — one per process for the whole stack.
-obstore = ["geotoolz-patcher[obstore]"]
-# Streaming writer for incremental GeoParquet builds.
-streaming = ["zarr>=3.0"]
+obstore = ["geotoolz-patcher[obstore]>=0.6"]
+# Streaming catalog builds (`engine="duckdb"` on the `build_*` helpers):
+# the writer itself is pyarrow (a base dependency); the sort-rewrite and
+# the resulting catalog are DuckDB.
+streaming = ["duckdb>=1.1"]
 # External data-source adapters. Each gated independently so a user
-# who only needs STAC doesn't get earthaccess. See
-# `docs/design/query-matchup.md` §4.2 for the full design.
+# who only needs STAC doesn't get earthaccess.
 earthaccess = ["earthaccess>=0.10"]
 # `pystac` is needed by the catalog-builder helpers
 # (`from_stac_items`, `to_stac_collection`); `pystac-client` and
@@ -92,45 +97,15 @@ stac = [
 gee = ["earthengine-api>=0.1.380"]
 # `field_for()` bridge — lets `geocatalog.stage()` output flow straight
 # into a `geopatcher.SpatialPatcher` without manual `RasterField`
-# construction. See `docs/design/query-matchup.md` §8 (Phase 4).
-# Pinned to a specific commit so installs are reproducible while
-# geopatcher is pre-PyPI (pinned at the 0.0.5 release commit).
-# Bump intentionally when picking up new
-# features. Once geopatcher publishes, swap to `geopatcher>=X.Y`.
-patch = [
-    "geotoolz-patcher",
-]
-sources-all = [
-    "earthaccess>=0.10",
-    "pystac>=1.10",
-    "pystac-client>=0.7",
-    "planetary-computer>=1.0",
-    "earthengine-api>=0.1.380",
-]
+# construction. Lower bound only: geotoolz-patcher is a workspace sibling
+# released in lockstep, so an upper cap would break `uv lock` on the next
+# release-please bump.
+patch = ["geotoolz-patcher>=0.6"]
+sources-all = ["geotoolz-catalog[earthaccess,stac,gee]"]
+# The one-shot install that lights up every public surface. Composed from
+# the extras above so it cannot drift from them.
 full = [
-    "xarray>=2024.1",
-    "rioxarray>=0.15",
-    "zarr>=3.0",
-    "duckdb>=1.1",
-    # Source-adapter extras roll into `full` so `pip install 'geocatalog[full]'`
-    # is the one-shot install path that lights up every public surface.
-    "earthaccess>=0.10",
-    "pystac>=1.10",
-    "pystac-client>=0.7",
-    "planetary-computer>=1.0",
-    "earthengine-api>=0.1.380",
-    # geopatcher bridge — exposes `geocatalog.staging.field_for`. Pinned
-    # via direct URL until the first PyPI release; see `[patch]` extra.
-    "geotoolz-patcher",
-    # Cloud/object-storage I/O — keeps `[full]` aligned with `[fsspec]`
-    # + `[obstore]` so a single install lights up s3://, gs://, az://,
-    # https://, and hf:// URIs end-to-end.
-    "adlfs>=2026.5.0",
-    "aiohttp>=3.13.5",
-    "fsspec>=2025.12.0",
-    "gcsfs>=2025.12.0",
-    "s3fs>=2025.12.0",
-    "geotoolz-patcher[obstore]",
+    "geotoolz-catalog[xarray-raster,duckdb,fsspec,obstore,streaming,sources-all,patch]",
 ]
 
 [project.urls]
@@ -176,18 +151,12 @@ docs = [
     # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
     # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
     # through as None. Pin until a fixed pymdown-extensions release ships (#38).
-    "pygments>=2.19,<2.20",
+    "pygments>=2.19,<2.21",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-# Required so the `[patch]` extra can pin geopatcher via a PEP 508
-# direct URL (`geopatcher @ git+https://...`) until the first PyPI
-# release lands. Drop this when geopatcher publishes.
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/geocatalog"]

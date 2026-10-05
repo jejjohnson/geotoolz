@@ -87,9 +87,12 @@ uv add geocatalog
 | --- | --- | --- |
 | *(base)* | InMemory backend, raster + vector loaders, GeoParquet roundtrip | Local files, <10⁵ rows |
 | `[duckdb]` | `DuckDBGeoCatalog`, streaming `build_*` (`engine="duckdb"`) | 10⁶+ rows, remote artifacts |
+| `[streaming]` | Same as `[duckdb]` (the streaming writer itself is pyarrow) | Streaming builds |
 | `[xarray-raster]` | `build_xarray_catalog`, `load_xarray` (NetCDF / Zarr) | xarray data |
 | `[stac]` | `STACSource`, `from_stac_search`, `from_stac_items` | STAC API ingestion |
-| `[fsspec]` | `s3://`, `gs://`, `az://`, `https://`, `hf://` URI support | Cloud object storage |
+| `[earthaccess]` / `[gee]` | `EarthAccessSource` / `GEESource` | NASA Earthdata / Earth Engine ingestion |
+| `[sources-all]` | `[earthaccess]` + `[stac]` + `[gee]` | Every source adapter |
+| `[fsspec]` | `s3://`, `gs://`, `az://`, `https://`, `hf://` URI support (fsspec, its cloud filesystems, `huggingface_hub`) | Cloud object storage |
 | `[obstore]` | `geotoolz-patcher[obstore]` — the shared `geopatcher.objstore` client pool | Pooled HTTP/2 range reads |
 | `[patch]` | `geocatalog.staging.field_for` — bridge to `geopatcher` | Patcher / tiling workflows |
 | `[full]` | All of the above | One-shot install |
