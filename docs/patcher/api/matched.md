@@ -2,7 +2,7 @@
 
 Co-located patching across N sources: a `MatchedField` wraps one
 primary `Field` plus named secondaries and per-secondary coregistration
-callables, and drops into the same patchers as any other field. See
+callables, and is split and merged per source by the matched patchers. See
 ADR-003 in [Design decisions](../decisions.md) and the
 [query → matchup → patch design](../design/query-matchup.md). Import
 via the public alias:

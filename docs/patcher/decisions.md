@@ -175,50 +175,81 @@ Three options were on the table:
 
 **Decision.** Co-located patching across N sources lives in
 `geopatcher.matched.MatchedField`, which **satisfies the existing
-`Field` Protocol** via its primary's `domain`. Concretely:
+`Field` Protocol** via its primary's `domain`, plus three matched
+patchers (`MatchedSpatialPatcher`, `MatchedTemporalPatcher`,
+`MatchedSpatioTemporalPatcher`) that split and merge it. Concretely:
 
 - `MatchedField.primary` is a regular `Field`; its CRS / bounds /
   shape define the anchor space.
 - `MatchedField.secondaries: Mapping[str, Field]` carries the
   matched sources keyed by name.
 - `MatchedField.coreg: Mapping[str, Callable]` carries one
-  coregistration callable per secondary. Type is the broad
+  coregistration callable per secondary, called as
+  `coreg[name](raw_secondary, primary_data)`. Type is the broad
   `Callable[[Any, Any], Any]`, but the **recommended** value is a
   `pipekit.Operator` from `geotoolz.geom.coregister.*` so the
   alignment step round-trips through YAML.
-- `MatchedField.select(indexer)` returns a `MatchedPatch`
-  (sibling carrier — not a subclass of `Patch`) holding one patch
-  per source under `members[name]`, plus optional per-source
-  `valid_mask` for partial coverage.
+- `MatchedField.select(indexer)` returns a plain
+  `dict[str, data]` — the primary's read under `"primary"`
+  (`MatchedPatch.PRIMARY_KEY`), each secondary's coregistered data
+  under its name. For raster domains each secondary is read over the
+  primary chip's **geographic footprint** (the primary window's bounds
+  mapped onto the secondary's own grid, reprojected when the CRSs
+  differ, rounded outward), so a secondary on a different resolution,
+  origin or CRS hands the coreg callable a chip covering the whole
+  footprint. Non-raster secondaries are read with the primary's
+  indexer and must share its index space.
+- The matched patchers turn that dict into the sibling carriers
+  `MatchedPatch` / `MatchedTemporalPatch` / `MatchedSpatioTemporalPatch`
+  (not subclasses of `Patch`): one member patch per source under
+  `members[name]`, a per-source `valid_mask` (False where a member
+  equals its carrier's nodata — `fill_value_default` / `rio.nodata` —
+  or, for floats, is NaN / ±inf) and per-source `weights`.
+- `merge` is per source: each patcher returns `dict[str, output]`,
+  every value the source's raw aggregation output on the **primary's**
+  grid (a bare `np.ndarray` for the dense aggregations, ADR-007);
+  `MatchedSpatialPatcher.merge_to_field` wraps each one through the
+  primary's `with_data`.
 
 **Context.** The cross-package query→matchup→patch design
-(`docs/design/query-matchup.md`) introduces matchups between LEO,
-GEO, vector, and point-cloud sources. The patching side has to read
-co-located neighborhoods across these heterogeneous sources without
-duplicating coregistration logic (which lives in `geotoolz`) and
-without forcing geopatcher's framework-free core to depend on
+(`docs/patcher/design/query-matchup.md`) introduces matchups between
+LEO, GEO, vector, and point-cloud sources. The patching side has to
+read co-located neighborhoods across these heterogeneous sources
+without duplicating coregistration logic (which lives in `geotoolz`)
+and without forcing geopatcher's framework-free core to depend on
 `pipekit`.
 
 The composite-Field approach satisfies all three constraints: every
-existing sampler, geometry, window, and aggregation works on a
-`MatchedField` unchanged; the heavy alignment work lives in
-`geotoolz.geom.coregister.*` `pipekit.Operator`s; geopatcher's only
-new typing dependency is the standard-library `Callable` (since
-`pipekit.Operator` IS callable).
+existing sampler, geometry and window places anchors and indexers on
+a `MatchedField` unchanged (they only see the primary's domain); the
+heavy alignment work lives in `geotoolz.geom.coregister.*`
+`pipekit.Operator`s; geopatcher's only new typing dependency is the
+standard-library `Callable` (since `pipekit.Operator` IS callable).
 
 **Consequences.**
 
 - A user with no matchup needs continues to write `SpatialPatcher`
   pipelines against a `Field` — nothing changes.
 - A user with matchups writes `MatchedField(primary, secondaries,
-  coreg)` and **passes that to the same `SpatialPatcher` they
-  already use**. The `split()` iterator yields `MatchedPatch`es
-  instead of `Patch`es; downstream code branches once on
-  `isinstance(p, MatchedPatch)` if it wants per-source access.
-- Per-source merge needs a new wrapper (`MatchedSpatialPatcher`)
-  because the existing `SpatialPatcher.merge` returns one `Field`.
-  This is the *only* API shape change introduced — and it lives in
-  a new class so backwards compatibility is preserved.
+  coreg)` and wraps the `SpatialPatcher` they already use in a
+  `MatchedSpatialPatcher(primary=..., secondary_aggregators=...)`
+  (or the temporal / spatio-temporal mirrors). **The matched patcher
+  is required for both split and merge**: a plain
+  `SpatialPatcher.split(matched_field)` yields `Patch`es whose `data`
+  is the per-source dict (no masks), and `SpatialPatcher.merge` fails
+  on that dict because the aggregations expect one numeric array; a
+  plain `SpatioTemporalPatcher` cannot slice the dict along time.
+- The matched patchers reuse the primary patcher's sampler, geometry,
+  window, aggregation, `on_error` policy (which covers every source's
+  read and coregistration), hooks, prefetch, journal and
+  `max_in_flight`; `MatchedSpatialPatcher.split(cache=...)` caches each
+  source's raw read under its own `PatchCache` identity. The only new
+  configuration is `secondary_aggregators: {name: aggregation}`;
+  omitting a secondary skips it on merge.
+- Per-source outputs live on the primary's grid, because the
+  coregistration mapped each secondary there. Getting a secondary back
+  onto its own grid means inverting the coregistration, which is the
+  caller's job.
 - `MatchedPatch` is intentionally **not** a subclass of `Patch`:
   `Patch[AnchorT, IndicesT, DataT]` is parameterised over a single
   data type, but `MatchedPatch` holds a heterogeneous dict of
@@ -245,9 +276,11 @@ new typing dependency is the standard-library `Callable` (since
   `pipekit.Operator` users are still first-class — they're just
   not the only allowed value.
 - *A separate `MatchedPatcher` family alongside `SpatialPatcher` /
-  `TemporalPatcher`.* Would mean rewriting samplers, geometries,
-  windows, and aggregations to accept matched fields. The composite
-  approach gets the same surface for free.
+  `TemporalPatcher` with its own samplers, geometries, windows and
+  aggregations.* Would mean rewriting every axis to accept matched
+  fields. The shipped matched patchers are thin wrappers instead: they
+  drive the primary patcher over the composite field and only add the
+  per-source unpacking and merge fan-out.
 
 ---
 

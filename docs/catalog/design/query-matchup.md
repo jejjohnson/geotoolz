@@ -79,7 +79,7 @@ This design covers all three packages because the user-facing workflow crosses a
 │   │  vector, pc)  │     └────────────────┬──────────────────────────┘           │
 │   └───────────────┘                      ▼                                      │
 │                       ┌─────────────────────────────────────────┐               │
-│                       │  any existing SpatialPatcher / sampler  │               │
+│                       │  MatchedSpatialPatcher(SpatialPatcher)  │               │
 │                       │  → iter MatchedPatch (members per src)  │               │
 │                       └─────────────────────────────────────────┘               │
 └─────────────────────────────────────────┼───────────────────────────────────────┘
@@ -453,20 +453,23 @@ This is the payoff of putting them in geotoolz rather than burying them inside g
 
 ## 6. GeoPatcher: `MatchedField` and `MatchedPatch`
 
-### 6.1 New file layout
+### 6.1 File layout
 
 ```
 src/geopatcher/_src/
-  matched/                                  # NEW
+  matched/
     __init__.py
-    field.py        # MatchedField composite Field
-    patch.py        # MatchedPatch carrier
-    patcher.py      # MatchedSpatialPatcher (+ Temporal / SpatioTemporal variants)
-    aggregation.py  # MatchedAggregator (per-source dict of aggregators)
+    field.py        # MatchedField composite Field (+ footprint indexer)
+    patch.py        # MatchedPatch / MatchedTemporalPatch / MatchedSpatioTemporalPatch
+    patcher.py      # MatchedSpatialPatcher / MatchedTemporalPatcher /
+                    # MatchedSpatioTemporalPatcher (split, per-source merge)
   spatial/, time/, …                         # unchanged
 ```
 
-Public re-export at `geopatcher.matched`.
+Public re-export at `geopatcher.matched`. There is no separate
+aggregation module: per-source merging is the matched patchers'
+``secondary_aggregators`` mapping (one ordinary aggregation per
+secondary).
 
 ### 6.2 `MatchedField` — a composite Field
 
@@ -478,75 +481,130 @@ class MatchedField:
     """N co-registered Fields presented as one Field.
 
     Satisfies the `Field` Protocol via the primary (anchor space, CRS, domain).
-    On select(), delegates to each secondary and pipes through its coreg callable.
+    On select(), reads each secondary over the primary chip's footprint and
+    pipes it through its coreg callable.
     """
     primary: Field
     secondaries: Mapping[str, Field]
     coreg: Mapping[str, Callable]   # any Callable; pipekit.Operator (e.g. from
                                     # geotoolz.geom.coregister) is the recommended choice
                                     # — see ADR-003 for why the type is the broader Callable.
-    valid_mask: bool = True         # emit per-source nodata masks
+    valid_mask: bool = True         # matched patchers emit per-source nodata masks
 
     @property
     def domain(self) -> Domain:
         return self.primary.domain
 
-    def select(self, indexer: Any) -> MatchedPatch:
-        # `Field.select` takes a single `indexer` (the shape is decided by
-        # the primary's Domain — Window for raster, dict[str, slice] for
-        # grid, etc.). MatchedField forwards the same indexer to every
-        # member.
-        primary_patch = self.primary.select(indexer)
-        members: dict[str, Patch] = {"primary": primary_patch}
-        masks: dict[str, np.ndarray] = {}
+    def select(self, indexer: Any) -> dict[str, Any]:
+        primary_data = self.primary.select(indexer)
+        out = {"primary": primary_data}
         for name, sec in self.secondaries.items():
-            raw = sec.select(indexer)
-            aligned = self.coreg[name](raw, primary_patch)  # any geotoolz op
-            members[name] = aligned
-            if self.valid_mask:
-                masks[name] = _compute_mask(aligned)
-        return MatchedPatch(anchor=primary_patch.anchor, members=members, valid_mask=masks)
+            # Raster domains: the primary window's bounds (primary CRS) →
+            # a window on the secondary's own grid, rounded outward.
+            raw = sec.select(_footprint_indexer(indexer, self.primary.domain, sec.domain))
+            out[name] = self.coreg[name](raw, primary_data)   # any geotoolz op
+        return out
 ```
 
-Three properties this design preserves:
+Properties this design preserves:
 
-1. **Existing samplers, geometries, windows, and aggregations work unchanged.** `MatchedField` *is* a `Field`; `SpatialPatcher(MatchedField(...))` is valid.
-2. **Geopatcher's core stays numpy + scipy.** The `coreg` dict holds opaque callables; geopatcher never imports `geotoolz`.
-3. **Coregistration logic is reusable outside patching.** Same operators serve flat pipelines, validation scripts, and matchup builds.
+1. **Existing samplers, geometries and windows work unchanged.** `MatchedField` *is* a `Field`: they see only the primary's domain, so anchor placement and indexers are the single-source ones.
+2. **Heterogeneous grids are read by footprint.** A secondary on another resolution, origin or CRS is read over the primary chip's geographic footprint, so a reproject-to-like coreg (`RasterToRasterLike`) fills the whole chip. Non-raster secondaries (grid / vector / points) carry no affine transform and are read with the primary's indexer — they must share its index space.
+3. **Geopatcher's core stays numpy + scipy.** The `coreg` dict holds opaque callables; geopatcher never imports `geotoolz`.
+4. **Coregistration logic is reusable outside patching.** Same operators serve flat pipelines, validation scripts, and matchup builds.
+
+`select` returns the per-source **dict**, not a carrier. Splitting and
+merging go through the matched patchers (§6.4): a plain
+`SpatialPatcher.split(matched_field)` yields `Patch(data=dict)` with no
+masks, and a plain `SpatialPatcher.merge` cannot aggregate that dict.
 
 ### 6.3 `MatchedPatch` — the carrier
 
 ```python
 # geopatcher/_src/matched/patch.py
 
-@dataclass
+@dataclass(eq=False)
 class MatchedPatch:
     anchor: Anchor
     members: dict[str, Patch]                    # "primary" + secondaries by name
-    valid_mask: dict[str, np.ndarray] | None     # NaN / out-of-swath per source
-    weights: dict[str, np.ndarray] | None = None # per-source window weights, optional
+    valid_mask: dict[str, np.ndarray] | None     # False = nodata / NaN / off-swath
+    weights: dict[str, np.ndarray] | None = None # each member's window weights
 ```
+
+`MatchedTemporalPatch` (members are `TemporalPatch`es) and
+`MatchedSpatioTemporalPatch` (`SpatioTemporalPatch`es, plus `space` /
+`time` anchors) are the temporal mirrors.
 
 `MatchedPatch` does not subclass `Patch` — it's a sibling carrier. Operators that want to consume one explicitly type against `MatchedPatch`; legacy operators see a single primary `Patch` via `mp.members["primary"]`.
 
-### 6.4 Aggregation back to global field(s)
+`valid_mask[name]` is False where the member equals its carrier's
+declared nodata (`GeoTensor.fill_value_default`, rioxarray `rio.nodata`)
+and, for float data, where it is NaN / ±inf; a bare ndarray declares no
+nodata, so only the float test applies. A matched patch also carries the
+`Patch` release lifecycle (`close()` / `with mp: ...`) for
+`max_in_flight`.
 
-Merge is per-source. `MatchedSpatialPatcher.merge(patches)` returns a `dict[str, Field]`:
+### 6.4 Splitting and merging: the matched patchers
 
 ```python
 class MatchedSpatialPatcher:
-    primary: SpatialPatcher
-    secondary_aggregators: dict[str, Aggregation]  # per-source aggregator
+    primary: SpatialPatcher                                  # sampler / geometry / window /
+                                                             # primary aggregation / on_error
+    secondary_aggregators: Mapping[str, SpatialAggregation]  # one per secondary (opt-in)
 
-    def merge(self, patches: Iterable[MatchedPatch]) -> dict[str, Field]:
-        ...
+    def split(self, mfield, hooks=None, *, prefetch=0, journal=None,
+              cache=None, max_in_flight=None) -> Iterator[MatchedPatch]: ...
+    def merge(self, patches, mfield, hooks=None) -> dict[str, Any]: ...
+    def merge_to_field(self, patches, mfield, hooks=None) -> dict[str, Any]: ...
 ```
 
-This is the only API shape change relative to existing patchers, and it's introduced by a new class so backwards compat is untouched.
+- **Split** drives `primary.split` over the `MatchedField` and unpacks
+  each per-source dict into a `MatchedPatch`. The primary's `on_error`
+  policy covers every source's read and coregistration: `"skip"` drops
+  the anchor, `"mask"` yields a `MatchedPatch` whose members are all-NaN
+  on the primary's grid with an all-False `valid_mask`. Hooks fire once
+  per matched patch with the members' summed bytes. `cache=` caches each
+  source's raw read under its own identity (the coregistration still
+  runs).
+- **Merge** is per source and returns `dict[str, output]` — the primary
+  under `"primary"`, each secondary that has an entry in
+  `secondary_aggregators` under its name. Every value is the
+  aggregation's raw output on the **primary's** grid (a bare
+  `np.ndarray` for the dense aggregations; ADR-007), because the
+  coregistration mapped each secondary there.
+  `MatchedSpatialPatcher.merge_to_field` rebuilds each one through the
+  primary's `with_data` (primary transform / CRS, each source's dtype).
+- `MatchedTemporalPatcher` reads every source's whole series once
+  (an indexer covering the primary's extent — the full `Window` for
+  raster, `{}` for a `GridDomain`, or an explicit `indexer=`), checks
+  every source has the primary's time length (a different cadence must
+  be resampled by the coreg callable), and slices them in lockstep;
+  `n_anchors` / `anchors` touch the primary only.
+  `MatchedSpatioTemporalPatcher` mirrors `SpatioTemporalPatcher`
+  (`coupling`, `coord=` for stencil geometries) and merges to
+  `{name: [(spatial_anchor, temporal_result), …]}`.
+
+The matched patchers are the only API addition relative to the
+single-source patchers, and they are new classes, so existing pipelines
+are untouched.
 
 ### 6.5 Streaming guarantees
 
-`MatchedField.iter_patches` yields one `MatchedPatch` at a time. Memory is bounded by `patch_size × len(secondaries)`. All existing streaming aggregators (e.g. `SpatialOverlapAdd` with Zarr backing) work per-source.
+`MatchedSpatialPatcher.split` (and the temporal mirrors) yield one
+matched patch at a time; with `max_in_flight` each matched patch holds
+the read's backpressure slot until it is closed. The spatial and
+temporal `merge` consume the patches in **one pass** and stream every
+source: each source's aggregation runs on its own worker thread fed
+through a small bounded queue, so only a few patches per source are
+resident and a streaming aggregation (e.g. `SpatialOverlapAdd` with Zarr
+backing) keeps its memory bound on every source. Each aggregation gets
+the usual `streaming_safe` check (a warning, or an error under
+`set_strict`). `MatchedSpatioTemporalPatcher.merge` groups patches by
+spatial anchor and holds those groups until the pass ends.
+
+**Future work.** A per-source `iter_patches` view and a dedicated
+`MatchedAggregator` were sketched in earlier drafts of this section;
+neither exists. The patchers above cover their use cases today.
 
 ## 7. End-to-end walkthrough: MODIS × Sentinel-2 patches over Iberia
 
@@ -603,7 +661,7 @@ matched = MatchedField(
 patcher = MatchedSpatialPatcher(
     primary=gp.SpatialPatcher(
         geometry=gp.spatial.SpatialRectangular(size=(512, 512)),
-        sampler=gp.spatial.SpatialRegularStride(stride=(256, 256)),
+        sampler=gp.spatial.SpatialRegularStride(step=(256, 256)),
         window=gp.spatial.SpatialBoxcar(),
         aggregation=gp.spatial.SpatialMean(),
     ),
@@ -615,6 +673,9 @@ for matched_patch in patcher.split(matched):
     s2_chip    = matched_patch.members["s2"].data          # (bands, H, W) S2 at MODIS grid
     mask       = matched_patch.valid_mask["s2"]            # where S2 is valid
     # → into model / training loop / further geotoolz pipeline
+
+# 6. Merge per source back onto the MODIS grid (georeferenced carriers)
+fields = patcher.merge_to_field(patcher.split(matched), matched)  # {"primary": …, "s2": …}
 ```
 
 Three things to notice:
@@ -658,7 +719,7 @@ A suggested four-phase rollout. Each phase ships independently and is useful on 
 
 ### Phase 4 — `geopatcher` matched field
 
-- `geopatcher.matched` submodule with `MatchedField` / `MatchedPatch` / `MatchedSpatialPatcher`
+- `geopatcher.matched` submodule with `MatchedField` / `MatchedPatch` / `MatchedSpatialPatcher` (+ temporal / spatio-temporal mirrors)
 - Streaming determinism tests (extends existing Hypothesis suite)
 - Notebook recipe: MODIS × S2 matched patches → torch DataLoader
 - `geocatalog.stage().field_for()` helper that returns ready-to-go Fields
