@@ -1647,6 +1647,7 @@ dependencies = [
     { name = "georeader-spaceml" },
     { name = "numpy" },
     { name = "pyproj" },
+    { name = "rasterio" },
     { name = "scipy" },
     { name = "typing-extensions" },
 ]
@@ -1668,7 +1669,6 @@ obstore = [
 obstore-cog = [
     { name = "async-tiff" },
     { name = "obstore" },
-    { name = "pyproj" },
 ]
 patch-full = [
     { name = "async-tiff" },
@@ -1676,7 +1676,6 @@ patch-full = [
     { name = "geopandas" },
     { name = "jax" },
     { name = "obstore" },
-    { name = "pyproj" },
     { name = "rioxarray" },
     { name = "shapely" },
     { name = "xarray" },
@@ -1743,8 +1742,7 @@ requires-dist = [
     { name = "obstore", marker = "extra == 'patch-full'", specifier = ">=0.9.5" },
     { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" },
     { name = "pyproj", specifier = ">=3.6" },
-    { name = "pyproj", marker = "extra == 'obstore-cog'", specifier = ">=3.6" },
-    { name = "pyproj", marker = "extra == 'patch-full'", specifier = ">=3.6" },
+    { name = "rasterio", specifier = ">=1.3" },
     { name = "rioxarray", marker = "extra == 'patch-full'", specifier = ">=0.15" },
     { name = "rioxarray", marker = "extra == 'xarray-raster'", specifier = ">=0.15" },
     { name = "scipy", specifier = ">=1.11" },

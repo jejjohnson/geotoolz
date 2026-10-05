@@ -159,7 +159,7 @@ _INSTALL_HINT = (
 
 def _require_async_tiff() -> Any:
     try:
-        import async_tiff  # ty: ignore[unresolved-import]
+        import async_tiff
     except ImportError as exc:
         raise ImportError(_INSTALL_HINT) from exc
     return async_tiff
