@@ -49,10 +49,12 @@ from xrtoolz.metrics._src.physical import (
     DensityInversionFraction,
     DivergenceError,
     GeostrophicBalanceError,
+    GeostrophicImbalance,
     PVConservationError,
     density_inversion_fraction,
     divergence_error,
     geostrophic_balance_error,
+    geostrophic_imbalance,
     pv_conservation_error,
 )
 from xrtoolz.metrics._src.pixel import (
@@ -143,6 +145,7 @@ __all__ = [
     "EvaluateByRegion",
     "FrequencyBandSkill",
     "GeostrophicBalanceError",
+    "GeostrophicImbalance",
     "GradientDifference",
     "InstanceF1AtIoU",
     "InstanceMatcher",
@@ -179,6 +182,7 @@ __all__ = [
     "find_intercept_1D",
     "find_intercept_2D",
     "geostrophic_balance_error",
+    "geostrophic_imbalance",
     "gradient_difference",
     "instance_f1_at_iou",
     "mae",

@@ -24,6 +24,7 @@ from xrtoolz.metrics._src.physical import (
     DensityInversionFraction,
     DivergenceError,
     GeostrophicBalanceError,
+    GeostrophicImbalance,
     PVConservationError,
 )
 from xrtoolz.metrics._src.pixel import (
@@ -79,6 +80,7 @@ __all__ = [
     "EvaluateByRegion",
     "FrequencyBandSkill",
     "GeostrophicBalanceError",
+    "GeostrophicImbalance",
     "GradientDifference",
     "InstanceF1AtIoU",
     "InstanceMatcher",

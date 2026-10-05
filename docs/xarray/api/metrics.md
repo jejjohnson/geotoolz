@@ -94,7 +94,26 @@ Conservation- and balance-law residuals used as physical evaluation
 diagnostics (geostrophic balance, divergence, potential-vorticity
 conservation, density inversions).
 
+The derivative-based metrics default to lon/lat in degrees with
+latitude-derived Coriolis. Idealised f/β-plane model output in metres
+passes the horizontal dims, the geometry and an explicit Coriolis
+parameter (same `f=` forms as [`xrtoolz.ocn`](ocn.md)):
+
+```python
+from xrtoolz.metrics import divergence_error, geostrophic_imbalance
+
+cart = {"dims": ("x", "y"), "geometry": "cartesian"}
+geostrophic_imbalance(run, ssh_var="eta", **cart, f=(1e-4, 1.6e-11))  # 0 = balanced
+divergence_error(run, **cart, reduce="rms")                           # 1/s
+```
+
+`geostrophic_imbalance` is the scale-invariant ratio
+$\mathrm{rms}(f\,\hat k\times\mathbf u + g\nabla\eta)\,/\,\mathrm{rms}(f\,\hat k\times\mathbf u)$:
+0 for exact geostrophy, 1 for purely inertial flow.
+
 ::: xrtoolz.metrics.operators.GeostrophicBalanceError
+
+::: xrtoolz.metrics.operators.GeostrophicImbalance
 
 ::: xrtoolz.metrics.operators.DivergenceError
 

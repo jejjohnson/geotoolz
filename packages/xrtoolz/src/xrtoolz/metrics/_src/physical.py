@@ -9,15 +9,23 @@ Layer-0 free functions:
 
 - :func:`geostrophic_balance_error` — residual of
   ``f u + g ∂η/∂y`` and ``f v - g ∂η/∂x``.
+- :func:`geostrophic_imbalance` — scale-invariant scalar
+  ``rms(residual) / rms(f k×u)``.
 - :func:`divergence_error` — magnitude of ``∂u/∂x + ∂v/∂y`` (≈ 0 in the
-  geostrophic limit).
+  geostrophic limit), as a field or its RMS.
 - :func:`density_inversion_fraction` — fraction of cells where
   ``∂ρ/∂z < 0``.
 - :func:`pv_conservation_error` — relative drift of potential vorticity
   along V3-style trajectories.
 
-Layer-1 wrappers: :class:`GeostrophicBalanceError`, :class:`DivergenceError`,
+Layer-1 wrappers: :class:`GeostrophicBalanceError`,
+:class:`GeostrophicImbalance`, :class:`DivergenceError`,
 :class:`DensityInversionFraction`, :class:`PVConservationError`.
+
+The derivative-based metrics default to lon/lat in degrees with
+latitude-derived Coriolis. Idealised f/β-plane model output passes
+``dims=("x", "y")``, ``geometry="cartesian"`` and an explicit ``f=``
+(see :mod:`xrtoolz.ocn` for the accepted ``f`` forms).
 
 Notes:
     Derivative-based metrics inherit the bias / noise of the underlying
@@ -28,14 +36,20 @@ Notes:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
 
 import xrgrad
 from xrcore import Operator
-from xrtoolz.ocn._src.kinematics import coriolis_parameter
+from xrtoolz.ocn._src.kinematics import (
+    Coriolis,
+    Geometry,
+    _coriolis_field,
+    _geom_kw,
+    _partial,
+)
 
 
 # ---------- Layer-0: geostrophic balance ---------------------------------
@@ -50,43 +64,111 @@ def geostrophic_balance_error(
     lat: str = "lat",
     lon: str = "lon",
     g: float = xrgrad.GRAVITY,
+    dims: tuple[str, str] | None = None,
+    geometry: Geometry = "spherical",
+    f: Coriolis = None,
 ) -> xr.Dataset:
     """Residual of geostrophic balance for ``(η, u, v)``.
 
-    Returns the two scalar residuals::
+    Returns the two residual fields::
 
         r_u = f * u + g * ∂η/∂y
         r_v = f * v - g * ∂η/∂x
 
-    Both should be ≈ 0 for a geostrophic flow. Differencing uses the
-    spherical-metric :func:`xrgrad.gradient`.
+    Both should be ≈ 0 for a geostrophic flow. Differencing uses
+    :func:`xrgrad.partial` under ``geometry`` (spherical metric by
+    default).
 
     Args:
-        ds: Dataset containing ``ssh_var``, ``u_var``, ``v_var`` on
-            ``(lat, lon)``.
+        ds: Dataset containing ``ssh_var``, ``u_var``, ``v_var``.
         ssh_var, u_var, v_var: Variable names.
         lat, lon: Names of latitude / longitude coordinates (degrees).
+            Used when ``dims`` is ``None``.
         g: Gravitational acceleration (m/s²). Defaults to
             :data:`xrgrad.GRAVITY`.
+        dims: ``(x_dim, y_dim)`` horizontal dims. ``None`` (default)
+            means ``(lon, lat)``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
+        f: Coriolis parameter. ``None`` derives it from latitude
+            (spherical only); otherwise a scalar ``f₀``, an ``(f₀, β)`` /
+            ``(f₀, β, y₀)`` β-plane tuple, or a DataArray.
 
     Returns:
         Dataset with two variables, ``"r_u"`` and ``"r_v"``, on the
         prediction grid.
     """
+    xy = (lon, lat) if dims is None else dims
     eta = ds[ssh_var]
     u = ds[u_var]
     v = ds[v_var]
-    f = coriolis_parameter(ds[lat])
+    f_field = _coriolis_field(eta, xy, geometry, f)
 
-    grads = xrgrad.gradient(
-        eta, dims=(lon, lat), geometry="spherical", lon=lon, lat=lat
-    )
-    deta_dx = grads[f"d{eta.name}_dx"]
-    deta_dy = grads[f"d{eta.name}_dy"]
+    deta_dx = _partial(eta, xy[0], xy, geometry)
+    deta_dy = _partial(eta, xy[1], xy, geometry)
 
-    r_u = (f * u + g * deta_dy).rename("r_u")
-    r_v = (f * v - g * deta_dx).rename("r_v")
+    r_u = (f_field * u + g * deta_dy).rename("r_u")
+    r_v = (f_field * v - g * deta_dx).rename("r_v")
     return xr.Dataset({"r_u": r_u, "r_v": r_v})
+
+
+def geostrophic_imbalance(
+    ds: xr.Dataset,
+    *,
+    ssh_var: str = "ssh",
+    u_var: str = "u",
+    v_var: str = "v",
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
+    f: Coriolis = None,
+    g: float = xrgrad.GRAVITY,
+    eps: float = 1e-30,
+) -> xr.DataArray:
+    """Dimensionless ageostrophic fraction ``rms(r) / rms(f k×u)``.
+
+    Reduces the :func:`geostrophic_balance_error` residual ``r`` over
+    every dim and normalises by the Coriolis acceleration, so the score
+    is scale-invariant: ``0`` for an exactly geostrophic flow, ``O(1)``
+    when ageostrophic accelerations rival Coriolis. NaN cells (land,
+    stencil halo) are skipped.
+
+    Args:
+        ds: Dataset containing ``ssh_var``, ``u_var``, ``v_var``.
+        ssh_var, u_var, v_var: Variable names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
+        f: Coriolis parameter; see :func:`geostrophic_balance_error`.
+        g: Gravitational acceleration (m/s²).
+        eps: Floor on the denominator so a motionless state stays finite.
+
+    Returns:
+        Scalar :class:`xr.DataArray` named ``"geostrophic_imbalance"``.
+
+    Example:
+        Score a β-plane model run in metres::
+
+            geostrophic_imbalance(
+                run, ssh_var="eta", dims=("x", "y"),
+                geometry="cartesian", f=(1e-4, 1.6e-11),
+            )
+    """
+    res = geostrophic_balance_error(
+        ds,
+        ssh_var=ssh_var,
+        u_var=u_var,
+        v_var=v_var,
+        g=g,
+        dims=dims,
+        geometry=geometry,
+        f=f,
+    )
+    f_field = _coriolis_field(ds[ssh_var], dims, geometry, f)
+    cor_u = f_field * ds[v_var]
+    cor_v = f_field * ds[u_var]
+    residual = np.sqrt((res["r_u"] ** 2).mean() + (res["r_v"] ** 2).mean())
+    scale = np.sqrt((cor_u**2).mean() + (cor_v**2).mean())
+    return (residual / (scale + eps)).rename("geostrophic_imbalance")
 
 
 # ---------- Layer-0: divergence ------------------------------------------
@@ -99,23 +181,48 @@ def divergence_error(
     v_var: str = "v",
     lat: str = "lat",
     lon: str = "lon",
+    dims: tuple[str, str] | None = None,
+    geometry: Geometry = "spherical",
+    reduce: Literal["rms"] | None = None,
 ) -> xr.DataArray:
-    """Surface horizontal divergence ``∇·u`` with spherical curvature.
+    """Surface horizontal divergence ``∇·u``.
 
     For a purely geostrophic flow this is ≈ 0; values away from zero
     indicate either ageostrophic flow or numerical noise. Uses
-    :func:`xrgrad.divergence` so the curvature term is included.
+    :func:`xrgrad.divergence`, so the spherical curvature term is
+    included on the default geometry.
+
+    Args:
+        ds: Dataset containing ``u_var`` and ``v_var``.
+        u_var, v_var: Velocity variable names.
+        lat, lon: Latitude / longitude coordinate names, used when
+            ``dims`` is ``None``.
+        dims: ``(x_dim, y_dim)`` horizontal dims. ``None`` (default)
+            means ``(lon, lat)``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
+        reduce: ``None`` (default) returns the divergence field;
+            ``"rms"`` returns the scalar ``sqrt(mean((∇·u)²))`` over every
+            dim, skipping NaN.
+
+    Returns:
+        :class:`xr.DataArray` named ``"divergence"`` (field, 1/s) or
+        ``"rms_divergence"`` (scalar, 1/s).
     """
+    xy = (lon, lat) if dims is None else dims
     flow = ds[[u_var, v_var]]
     div = xrgrad.divergence(
         flow,
         (u_var, v_var),
-        dims=(lon, lat),
-        geometry="spherical",
-        lon=lon,
-        lat=lat,
+        dims=xy,
+        geometry=geometry,
+        **_geom_kw(xy, geometry),
     )
-    return div.rename("divergence")
+    if reduce is None:
+        return div.rename("divergence")
+    if reduce == "rms":
+        return np.sqrt((div**2).mean()).rename("rms_divergence")
+    raise ValueError(f"reduce={reduce!r} must be None or 'rms'.")
 
 
 # ---------- Layer-0: density inversion -----------------------------------
@@ -204,6 +311,9 @@ class GeostrophicBalanceError(Operator):
         lat: str = "lat",
         lon: str = "lon",
         g: float = xrgrad.GRAVITY,
+        dims: tuple[str, str] | None = None,
+        geometry: Geometry = "spherical",
+        f: Coriolis = None,
     ) -> None:
         self.ssh_var = ssh_var
         self.u_var = u_var
@@ -211,17 +321,12 @@ class GeostrophicBalanceError(Operator):
         self.lat = lat
         self.lon = lon
         self.g = g
+        self.dims = dims
+        self.geometry = geometry
+        self.f = f
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
-        return geostrophic_balance_error(
-            ds,
-            ssh_var=self.ssh_var,
-            u_var=self.u_var,
-            v_var=self.v_var,
-            lat=self.lat,
-            lon=self.lon,
-            g=self.g,
-        )
+        return geostrophic_balance_error(ds, **self.get_config())
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -231,6 +336,49 @@ class GeostrophicBalanceError(Operator):
             "lat": self.lat,
             "lon": self.lon,
             "g": self.g,
+            "dims": self.dims,
+            "geometry": self.geometry,
+            "f": self.f,
+        }
+
+
+class GeostrophicImbalance(Operator):
+    """Operator wrapper for :func:`geostrophic_imbalance`."""
+
+    def __init__(
+        self,
+        *,
+        ssh_var: str = "ssh",
+        u_var: str = "u",
+        v_var: str = "v",
+        dims: tuple[str, str] = ("lon", "lat"),
+        geometry: Geometry = "spherical",
+        f: Coriolis = None,
+        g: float = xrgrad.GRAVITY,
+        eps: float = 1e-30,
+    ) -> None:
+        self.ssh_var = ssh_var
+        self.u_var = u_var
+        self.v_var = v_var
+        self.dims = dims
+        self.geometry = geometry
+        self.f = f
+        self.g = g
+        self.eps = eps
+
+    def _apply(self, ds: xr.Dataset) -> xr.DataArray:
+        return geostrophic_imbalance(ds, **self.get_config())
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "ssh_var": self.ssh_var,
+            "u_var": self.u_var,
+            "v_var": self.v_var,
+            "dims": self.dims,
+            "geometry": self.geometry,
+            "f": self.f,
+            "g": self.g,
+            "eps": self.eps,
         }
 
 
@@ -244,16 +392,20 @@ class DivergenceError(Operator):
         v_var: str = "v",
         lat: str = "lat",
         lon: str = "lon",
+        dims: tuple[str, str] | None = None,
+        geometry: Geometry = "spherical",
+        reduce: Literal["rms"] | None = None,
     ) -> None:
         self.u_var = u_var
         self.v_var = v_var
         self.lat = lat
         self.lon = lon
+        self.dims = dims
+        self.geometry = geometry
+        self.reduce = reduce
 
     def _apply(self, ds: xr.Dataset) -> xr.DataArray:
-        return divergence_error(
-            ds, u_var=self.u_var, v_var=self.v_var, lat=self.lat, lon=self.lon
-        )
+        return divergence_error(ds, **self.get_config())
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -261,6 +413,9 @@ class DivergenceError(Operator):
             "v_var": self.v_var,
             "lat": self.lat,
             "lon": self.lon,
+            "dims": self.dims,
+            "geometry": self.geometry,
+            "reduce": self.reduce,
         }
 
 
@@ -314,9 +469,11 @@ __all__ = [
     "DensityInversionFraction",
     "DivergenceError",
     "GeostrophicBalanceError",
+    "GeostrophicImbalance",
     "PVConservationError",
     "density_inversion_fraction",
     "divergence_error",
     "geostrophic_balance_error",
+    "geostrophic_imbalance",
     "pv_conservation_error",
 ]
