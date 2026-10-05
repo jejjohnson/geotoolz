@@ -77,10 +77,11 @@ class TestStencilValidation:
         with pytest.raises(ValueError, match="invalid value for closed"):
             Stencil(0, 1, 0.5, closed="invalid")  # type: ignore[arg-type]
 
-    def test_non_divisible_step_raises_on_points(self) -> None:
-        s = Stencil(0, 1, 0.3, closed="both")
+    def test_non_divisible_step_raises_at_construction(self) -> None:
+        # Construction resolves the points (to reject empty stencils), so an
+        # uneven step now fails there instead of on first `.points` access.
         with pytest.raises(ValueError, match="must evenly divide"):
-            _ = s.points
+            Stencil(0, 1, 0.3, closed="both")
 
 
 class TestTimeStencil:
@@ -386,3 +387,33 @@ class TestGetConfig:
             "closed": "both",
         }
         assert TimeStencil(**cfg) == ts
+
+
+# ---------------------------------------------------------------------------
+# #190 — stencil / divide_evenly edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_empty_stencil_rejected() -> None:
+    # Regression (#190): `points` was empty, so slices raised IndexError and
+    # `valid_origin_points` returned every point.
+    with pytest.raises(ValueError, match="no sample points"):
+        Stencil(-1, 0, 1, closed="neither")
+    assert len(Stencil(-2, 0, 1, closed="neither").points) == 1
+
+
+def test_mixed_type_stencil_rejected() -> None:
+    with pytest.raises(TypeError, match="timedelta64"):
+        Stencil(np.timedelta64(-3, "h"), np.timedelta64(0, "h"), 1)
+
+
+def test_divide_evenly_guards_zero_and_datetimes() -> None:
+    from geopatcher.time import divide_evenly
+
+    with pytest.raises(ValueError, match="must be non-zero"):
+        divide_evenly(4, 0, label="step")
+    with pytest.raises(TypeError, match="datetime64"):
+        divide_evenly(np.datetime64("2020-01-02"), np.timedelta64(1, "D"))
+    with pytest.raises(TypeError, match="both"):
+        divide_evenly(np.timedelta64(4, "h"), 2)
+    assert int(divide_evenly(np.timedelta64(4, "h"), np.timedelta64(1, "h"))) == 4

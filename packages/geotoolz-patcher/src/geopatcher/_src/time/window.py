@@ -1,8 +1,12 @@
 """`TemporalWindow` — boundary treatment for the time window.
 
 Four windows: `TemporalCausalBoxcar` (no taper, hard past cutoff),
-`TemporalExponentialDecay` (recency weighting), `TemporalTaperedTukey` (spectral
-leakage control), `TemporalPeriodic` (cyclic boundary for diurnal / annual).
+`TemporalExponentialDecay` (recency weighting), `TemporalTaperedTukey`
+(cosine fade-in of the oldest steps), `TemporalPeriodic` (boxcar weights
+tagged with a cycle length for diurnal / annual configs).
+
+Every window gives the newest step (the anchor end of a causal window)
+weight 1.0.
 """
 
 from __future__ import annotations
@@ -43,10 +47,14 @@ class TemporalExponentialDecay(TemporalWindow):
     The latest step (largest index) gets weight 1.0; earlier steps decay.
 
     Args:
-        tau: Decay constant in time-axis steps.
+        tau: Decay constant in time-axis steps (``> 0``).
     """
 
     tau: float
+
+    def __post_init__(self) -> None:
+        if not self.tau > 0:
+            raise ValueError(f"tau must be > 0, got {self.tau!r}")
 
     def weights(self, geometry: TemporalGeometry, length: int) -> np.ndarray:
         n = int(length)
@@ -54,7 +62,7 @@ class TemporalExponentialDecay(TemporalWindow):
             return np.array([], dtype=np.float64)
         # ages: n-1 at the oldest step, 0 at the most recent
         ages = np.arange(n - 1, -1, -1, dtype=np.float64)
-        return np.exp(-ages / max(self.tau, 1e-12))
+        return np.exp(-ages / float(self.tau))
 
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)
@@ -62,43 +70,60 @@ class TemporalExponentialDecay(TemporalWindow):
 
 @dataclass(eq=False)
 class TemporalTaperedTukey(TemporalWindow):
-    """Tukey-tapered temporal window.
+    """One-sided (causal) Tukey taper — the oldest steps fade in.
+
+    The first ``alpha`` fraction of the window, counted from the oldest
+    step, rises along a raised cosine; the rest — always including the
+    newest step — is 1.0. With ``n`` steps, step ``k`` (oldest ``k = 0``)
+    sits at ``x = (k + 1) / n`` and weighs
+    ``0.5 * (1 - cos(pi * x / alpha))`` for ``x < alpha``, else 1.0. A
+    symmetric taper would zero the newest observation, which is the one a
+    causal window exists to keep.
 
     Args:
-        alpha: Taper fraction (0 = Boxcar, 1 = Hann).
+        alpha: Taper fraction in ``[0, 1]`` (0 = boxcar, 1 = a raised
+            cosine over the whole window).
     """
 
     alpha: float = 0.5
 
-    def weights(self, geometry: TemporalGeometry, length: int) -> np.ndarray:
-        from scipy.signal.windows import tukey
+    def __post_init__(self) -> None:
+        if not 0.0 <= float(self.alpha) <= 1.0:
+            raise ValueError(f"alpha must be in [0, 1], got {self.alpha!r}")
 
+    def weights(self, geometry: TemporalGeometry, length: int) -> np.ndarray:
         n = int(length)
         if n <= 0:
             return np.array([], dtype=np.float64)
-        return tukey(n, alpha=self.alpha, sym=False).astype(np.float64)
+        alpha = float(self.alpha)
+        x = np.arange(1, n + 1, dtype=np.float64) / n
+        if alpha == 0.0:
+            return np.ones(n, dtype=np.float64)
+        ramp = 0.5 * (1.0 - np.cos(np.pi * np.minimum(x / alpha, 1.0)))
+        return np.where(x < alpha, ramp, 1.0)
 
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)
 
 
 @dataclass(eq=False)
-class TemporalPeriodic(TemporalWindow):
-    """Boxcar weights with a documented periodic boundary semantic.
+class TemporalPeriodic(TemporalCausalBoxcar):
+    """`TemporalCausalBoxcar` weights tagged with a cycle length.
 
-    Behaviourally identical to `TemporalCausalBoxcar` at the weight level — the
-    "periodic" part is structural (the geometry / aggregation must
-    interpret out-of-range steps as wrapping). Carried as a separate
-    class so YAML configs preserve the intent.
+    The weights *are* the boxcar's (it inherits them); the ``period`` only
+    records the cycle the configuration is built around — pair it with a
+    `TemporalPhaseWindow` of the same period — so YAML configs keep the
+    intent.
 
     Args:
-        period: Cycle length in time-axis steps.
+        period: Cycle length in time-axis steps (``>= 1``).
     """
 
     period: int
 
-    def weights(self, geometry: TemporalGeometry, length: int) -> np.ndarray:
-        return np.ones(int(length), dtype=np.float64)
+    def __post_init__(self) -> None:
+        if int(self.period) < 1:
+            raise ValueError(f"period must be >= 1, got {self.period!r}")
 
     def get_config(self) -> dict[str, Any]:
         return config_from_fields(self)

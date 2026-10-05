@@ -21,6 +21,8 @@ geometries' ``"pad"`` / ``"reflect"`` modes have no temporal counterpart.
 
 from __future__ import annotations
 
+import contextlib
+import weakref
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal
@@ -31,9 +33,10 @@ from geopatcher._src._serialize import axis_envelope, config_from_fields
 from geopatcher._src.time.stencils import (
     Stencil,
     _to_timedelta64,
-    build_sampling_slices,
+    coord_step,
     delta_config,
     divide_evenly,
+    stencil_offsets,
 )
 
 
@@ -238,21 +241,36 @@ class TemporalStencilGeometry(TemporalGeometry):
     guard for callers that didn't supply it. See ADR-004 in
     ``docs/decisions.md``.
 
+    The coordinate is validated (1-D, strictly increasing, evenly spaced)
+    once per coordinate array, not per anchor: windows are then resolved
+    arithmetically from the source step (`stencil_offsets`), so a split
+    over a 175 320-step (20-year hourly) axis costs O(N), not O(N²).
+
     Args:
         stencil: The `Stencil` (or `TimeStencil`) describing the window shape
             in coordinate units.
         source_step: Optional cadence of the source grid (same units as
-            ``stencil.step``). If provided, the constructor raises immediately
-            on stride > 1 instead of waiting for `window_coord`. A timedelta
-            may also be given as a string (``"3h"``) or as the
-            ``{"value", "unit"}`` mapping `get_config` emits.
+            ``stencil.step``; a string such as ``"1h"`` is parsed like a
+            `TimeStencil` field, as is the ``{"value", "unit"}`` mapping
+            `get_config` emits). If provided, the constructor raises
+            immediately on stride > 1 or a unit mismatch instead of waiting
+            for `window_coord`.
+        boundary: What to do with an origin whose stencil overflows the
+            coordinate: ``"drop"`` it (default — `TemporalStencilSampler`
+            only places origins that fit anyway), ``"shrink"`` the window
+            to the axis, or ``"raise"``.
     """
 
     stencil: Stencil
     source_step: Any = None
+    boundary: TemporalBoundary = "drop"
     needs_coord: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
+        _check_boundary(self.boundary)
+        # Validated-coord memo: (weakref to the coord array, the stencil's
+        # (lo, hi, stride) index offsets on its step).
+        self._coord_memo: tuple[Any, tuple[int, int, int]] | None = None
         if isinstance(self.source_step, (str, Mapping)):
             self.source_step = _to_timedelta64(self.source_step)
         if self.source_step is not None:
@@ -269,26 +287,50 @@ class TemporalStencilGeometry(TemporalGeometry):
                     f"stride={sigma}. Use a stencil step equal to the source "
                     "cadence, or wait for v0.2."
                 )
+            # Also rejects a source_step that does not divide the bounds.
+            stencil_offsets(self.stencil, self.source_step)
 
-    def window_coord(self, coord: np.ndarray, anchor_idx: int) -> slice:
+    def __getstate__(self) -> dict[str, Any]:
+        state = self.__dict__.copy()
+        state["_coord_memo"] = None  # weakrefs do not pickle
+        return state
+
+    def _offsets_for(self, coord: np.ndarray) -> tuple[int, int, int]:
+        """Stencil offsets on ``coord``, validating each coord array only once."""
+        memo = self._coord_memo
+        if memo is not None and memo[0]() is coord:
+            return memo[1]
+        offsets = stencil_offsets(self.stencil, coord_step(coord))
+        # A non-weak-referenceable coord is simply re-validated every call.
+        with contextlib.suppress(TypeError):
+            self._coord_memo = (weakref.ref(coord), offsets)
+        return offsets
+
+    def window_coord(self, coord: np.ndarray, anchor_idx: int) -> slice | None:
         """Resolve the stencil at the given anchor index → contiguous slice.
 
         Args:
-            coord: 1-D monotonic-ascending coordinate array along the time
-                axis (e.g. ``ds["time"].values``).
+            coord: 1-D, strictly increasing, evenly spaced coordinate array
+                along the time axis (e.g. ``ds["time"].values``).
             anchor_idx: Integer index into ``coord`` marking the origin.
 
         Returns:
             ``slice(start, stop)`` covering the realised stencil window in
-            integer index space.
+            integer index space, or ``None`` when ``boundary="drop"`` drops
+            an overflowing origin.
+
+        Raises:
+            ValueError: For an invalid coordinate, a stride > 1, or (under
+                ``boundary="raise"``) an overflowing origin.
         """
-        origin = coord[int(anchor_idx)]
-        (s,) = build_sampling_slices(coord, np.asarray([origin]), self.stencil)
-        if s.step is not None and s.step != 1:
+        coord = np.asarray(coord)
+        lo, hi, stride = self._offsets_for(coord)
+        if stride != 1:
             raise ValueError(
-                f"v0.1 supports stride-1 stencils only; got stride={s.step}."
+                f"v0.1 supports stride-1 stencils only; got stride={stride}."
             )
-        return slice(s.start, s.stop)
+        i = int(anchor_idx)
+        return _resolve(self, i, i + lo, i + hi, int(coord.shape[0]), self.boundary)
 
     def window(self, time_len: int, anchor: int) -> slice | list[slice] | None:
         raise TypeError(
@@ -301,6 +343,7 @@ class TemporalStencilGeometry(TemporalGeometry):
         return {
             "stencil": axis_envelope(self.stencil),
             "source_step": delta_config(self.source_step),
+            "boundary": self.boundary,
         }
 
 

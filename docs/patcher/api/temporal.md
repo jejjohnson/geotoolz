@@ -17,10 +17,11 @@ coordinate-aware `TimeStencil` machinery.
 
 ::: geopatcher._src.time.sampler.TemporalSampler
 ::: geopatcher._src.time.sampler.TemporalRegularStride
-::: geopatcher._src.time.sampler.TemporalCausalRolling
-::: geopatcher._src.time.sampler.TemporalEventTriggered
 ::: geopatcher._src.time.sampler.TemporalRandom
 ::: geopatcher._src.time.sampler.TemporalExplicit
+
+`TemporalCausalRolling` is an alias of `TemporalRegularStride` and
+`TemporalEventTriggered` an alias of `TemporalExplicit`.
 
 ### Window
 
@@ -48,6 +49,8 @@ stencil endpoints.
 ::: geopatcher._src.time.stencils.Stencil
 ::: geopatcher._src.time.stencils.TimeStencil
 ::: geopatcher._src.time.stencils.build_sampling_slices
+::: geopatcher._src.time.stencils.coord_step
+::: geopatcher._src.time.stencils.stencil_offsets
 ::: geopatcher._src.time.stencils.divide_evenly
 ::: geopatcher._src.time.stencils.valid_origin_points
 

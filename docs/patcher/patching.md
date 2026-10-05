@@ -287,7 +287,7 @@ Mirror of the spatial side, with axes that encode time-specific properties
 | Axis | Controls | Examples |
 |------|----------|----------|
 | **Geometry** | Window shape (lookback, horizon, multi-scale, phase). | `TemporalFixedLookback`, `TemporalLookbackHorizon`, `TemporalMultiScale`, `TemporalPhaseWindow` |
-| **Sampler** | Anchor placement in time. | `TemporalRegularStride`, `TemporalCausalRolling`, `TemporalEventTriggered`, `TemporalRandom`, `TemporalExplicit` |
+| **Sampler** | Anchor placement in time. | `TemporalRegularStride` (alias `TemporalCausalRolling`), `TemporalRandom`, `TemporalExplicit` (alias `TemporalEventTriggered`), `TemporalStencilSampler` |
 | **Window** | Temporal boundary treatment. | `TemporalCausalBoxcar`, `TemporalExponentialDecay`, `TemporalTaperedTukey`, `TemporalPeriodic` |
 | **Aggregation** | Time → time reconstruction. | `TemporalFold` (RNN-like state-passing), `TemporalMean`, `TemporalHierarchicalCombine`, `TemporalForecast` |
 
@@ -320,6 +320,28 @@ all of it.
 !!! warning "Default changed from implicit shrink to drop"
     Temporal geometries used to clamp silently (today's `"shrink"`). Pass
     `boundary="shrink"` to keep shorter edge windows.
+
+### `TemporalPatcher` runner knobs
+
+`TemporalPatcher` takes `SpatialPatcher`'s runner knobs and runs them
+through the same helpers: `on_error` / `max_retries` / `retry_on` /
+`capture_traceback` (failures land in `errors` as `PatchErrorRecord`s,
+`"mask"` yields a NaN window), and `split` / `asplit` / `reduce` /
+`two_pass` take `hooks`, `prefetch`, `journal`, `cache` and
+`max_in_flight` / `max_in_flight_bytes`. `merge` / `amerge` / `reduce`
+run the streaming-safety / `set_strict` check. Journal, cache and
+`errors` key a patch by its `patch_anchors` key — the anchor, or
+`(anchor, k)` for a multi-window geometry. Every method takes
+`time_axis=` and `coord=` as keywords.
+
+The series is read one window at a time: a `GridDomain` field
+(`XarrayField`, `DaskField`) through `select({time_dim: window})` — its
+time coordinate is the default `coord=` for stencil pipelines — and any
+array with a `shape` (numpy, dask, xarray, zarr) by slicing it. `coord=`
+is validated once per call (1-D, strictly increasing; evenly spaced for
+stencil components), so a stencil split is O(N) in the axis length.
+`TemporalRegularStride(check_full_scan=True)` raises
+`IncompleteScanConfiguration` when the windows leave time steps uncovered.
 
 ## Spatiotemporal composition
 

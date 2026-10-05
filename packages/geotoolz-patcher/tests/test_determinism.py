@@ -172,14 +172,14 @@ class TestSpatialPoissonDiskDeterminism:
 
 class TestTemporalRandomDeterminism:
     def test_same_seed_same_anchors_across_calls(self) -> None:
-        s = TemporalRandom(n=5, seed=3)
+        s = TemporalRandom(n_samples=5, seed=3)
         first = list(s.anchors(time_len=100))
         second = list(s.anchors(time_len=100))
         assert first == second
 
     def test_same_seed_same_anchors_across_instances(self) -> None:
-        a = list(TemporalRandom(n=5, seed=3).anchors(time_len=100))
-        b = list(TemporalRandom(n=5, seed=3).anchors(time_len=100))
+        a = list(TemporalRandom(n_samples=5, seed=3).anchors(time_len=100))
+        b = list(TemporalRandom(n_samples=5, seed=3).anchors(time_len=100))
         assert a == b
 
 

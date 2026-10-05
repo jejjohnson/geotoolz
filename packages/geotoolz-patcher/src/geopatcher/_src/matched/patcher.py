@@ -932,11 +932,11 @@ class MatchedTemporalPatcher(_MatchedConfigMixin):
 
         hook_list = _as_hooks(hooks)
         if hook_list:
-            n = len(self.primary.anchors(primary_arr, time_axis, coord=coord))
+            n = len(self.primary.anchors(primary_arr, time_axis=time_axis, coord=coord))
             _dispatch(hook_list, "on_split_start", n)
         try:
             for primary_patch in self.primary.split(
-                primary_arr, time_axis, coord=coord
+                primary_arr, time_axis=time_axis, coord=coord
             ):
                 anchor = primary_patch.anchor
                 coord_value = coord[int(anchor)] if coord is not None else None
@@ -1001,7 +1001,7 @@ class MatchedTemporalPatcher(_MatchedConfigMixin):
         Reads the primary only (no secondary read, no coregistration).
         """
         series = self._primary_series(mfield, indexer)
-        return self.primary.n_anchors(series, time_axis, coord=coord)
+        return self.primary.n_anchors(series, time_axis=time_axis, coord=coord)
 
     def anchors(
         self,
@@ -1016,7 +1016,7 @@ class MatchedTemporalPatcher(_MatchedConfigMixin):
         Reads the primary only (no secondary read, no coregistration).
         """
         series = self._primary_series(mfield, indexer)
-        return self.primary.anchors(series, time_axis, coord=coord)
+        return self.primary.anchors(series, time_axis=time_axis, coord=coord)
 
     def merge(
         self,
