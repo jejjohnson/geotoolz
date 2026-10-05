@@ -281,7 +281,9 @@ def _assert_patches_equal(got: list[Any], ref: list[Any]) -> None:
         assert np.asarray(g.data).dtype == np.asarray(r.data).dtype
 
 
-@pytest.mark.parametrize("damage", ["bad_zip", "zero_byte", "truncated"])
+@pytest.mark.parametrize(
+    "damage", ["bad_zip", "zero_byte", "truncated", "unknown_kind", "bad_meta"]
+)
 def test_corrupt_entry_is_repaired(tmp_path, damage: str) -> None:
     # A torn / empty entry is a miss (never an exception out of split) and
     # is rewritten, so the run after the repair is all hits again.
@@ -295,9 +297,20 @@ def test_corrupt_entry_is_repaired(tmp_path, damage: str) -> None:
             path.write_bytes(b"this is not a zip archive")
         elif damage == "zero_byte":
             path.write_bytes(b"")
-        else:
+        elif damage == "truncated":
             blob = path.read_bytes()
             path.write_bytes(blob[: len(blob) // 2])
+        else:
+            # A well-formed zip with the current format tag whose carrier
+            # cannot be rebuilt: it must be repaired too, not fail later.
+            with np.load(path) as npz:
+                arrays = {k: npz[k] for k in npz.files}
+            if damage == "unknown_kind":
+                arrays["kind"] = np.array("bogus")
+            else:
+                arrays["meta"] = np.array("{}")
+            with path.open("wb") as fh:
+                np.savez(fh, **arrays)
 
     repair = _CountingField(base)
     _assert_patches_equal(list(patcher.split(repair, cache=cache)), reference)
@@ -623,3 +636,32 @@ def test_memory_store_needs_explicit_field_id(tmp_path) -> None:
     got = list(patcher.split(b, cache=cache_b))
     assert cache_b.stats()["hits"] == 0
     _assert_patches_equal(got, list(patcher.split(open_cog(1000))))
+
+
+def test_rioxarray_band_selections_have_distinct_keys(tmp_path) -> None:
+    """``open_rasterio(p).sel(band=1)`` / ``.sel(band=2)`` differ by a coord."""
+    rioxarray = pytest.importorskip("rioxarray")
+    from geopatcher.fields import RioXarrayField
+
+    path = _write_tif(
+        tmp_path / "two_band.tif",
+        np.stack([np.full((16, 16), 1, np.uint16), np.full((16, 16), 2, np.uint16)]),
+    )
+    cache = PatchCache(tmp_path / "cache")
+    with rioxarray.open_rasterio(path) as da:
+        b1, b2 = RioXarrayField(da.sel(band=1)), RioXarrayField(da.sel(band=2))
+        assert cache.field_id_for(b1) != cache.field_id_for(b2)
+        list(_patcher().split(b1, cache=cache))
+        got = list(_patcher().split(b2, cache=cache))
+    assert cache.stats()["hits"] == 0
+    assert all((np.asarray(p.data) == 2).all() for p in got)
+
+
+def test_remote_encoding_source_is_an_identity(tmp_path) -> None:
+    """A URL in ``encoding["source"]`` names the object; no local stat."""
+    from geopatcher.fields import XarrayField
+
+    da = xr.DataArray(np.zeros((4, 4)), dims=("y", "x"), name="v")
+    da.encoding["source"] = "https://example.com/data/scene.nc"
+    field_id = PatchCache(tmp_path).field_id_for(XarrayField(da))
+    assert field_id.startswith("url:https://example.com/data/scene.nc|")

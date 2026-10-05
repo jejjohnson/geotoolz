@@ -197,9 +197,14 @@ class PatchCache:
             return None
         try:
             payload = _load_entry(path)
+            # Rebuild the carrier here, inside the repair guard: an entry
+            # with an unknown kind or inconsistent metadata is as unusable
+            # as a torn zip and must not fail later, on every run.
+            payload["decoded"] = _decode_carrier(payload)
         except Exception:
             # Any decode failure (zipfile.BadZipFile, EOFError, KeyError,
-            # a JSON error, …) means the entry is unusable: repair it.
+            # a JSON error, a carrier that won't rebuild, …) means the
+            # entry is unusable: repair it.
             with suppress(OSError):
                 path.unlink()
             self._misses += 1
@@ -247,7 +252,7 @@ class PatchCache:
 
     def build_patch(self, payload: dict[str, Any], anchor: Any, indices: Any) -> Patch:
         """Rebuild a `Patch` from a stored ``payload`` at ``anchor``/``indices``."""
-        data = _decode_carrier(payload)
+        data = payload["decoded"] if "decoded" in payload else _decode_carrier(payload)
         weights = payload.get("weights")
         return Patch(data=data, anchor=anchor, indices=indices, weights=weights)
 
@@ -349,6 +354,10 @@ def _source_id(obj: Any, _depth: int = 0) -> str | None:
             path = path[0] if path else None
         if not isinstance(path, (str, os.PathLike)):
             continue
+        if _is_remote(path):
+            # ``open_rasterio("s3://…")`` / ``open_dataset("https://…")``:
+            # no local stat, but the URL still names the object.
+            return f"url:{path}"
         with suppress(OSError):
             st = os.stat(path)
             return f"path:{os.path.realpath(path)}:{st.st_mtime_ns}:{st.st_size}"
@@ -359,6 +368,13 @@ def _source_id(obj: Any, _depth: int = 0) -> str | None:
             if found is not None:
                 return found
     return None
+
+
+def _is_remote(path: Any) -> bool:
+    """``True`` for a ``scheme://`` URL other than ``file://``."""
+    text = os.fspath(path)
+    scheme, sep, _ = text.partition("://")
+    return bool(sep) and scheme.isidentifier() and scheme.lower() != "file"
 
 
 def _wraps_unnamed_source(field: Any) -> bool:
@@ -423,6 +439,12 @@ def _read_signature(field: Any) -> dict[str, Any]:
         data = getattr(field, attr, None)
         if data is not None and hasattr(data, "dims") and hasattr(data, "name"):
             sig["variable"] = _to_json(data.name, what="DataArray.name")
+            # ``open_rasterio(p).sel(band=1)`` and ``.sel(band=2)`` differ
+            # only in a (scalar or non-spatial) coordinate.
+            sig["coords"] = {
+                str(name): _array_digest(coord.values)
+                for name, coord in data.coords.items()
+            }
             break
     return sig
 
