@@ -22,7 +22,6 @@ from geotoolz.restore import (
     GapFillLaplacian,
     GapFillNearest,
     GaussianDenoise,
-    InverseMNF,
     MedianDenoise,
     MomentMatching,
     NLMeans,
@@ -101,12 +100,12 @@ def test_mnf_inverse_with_all_components_is_identity() -> None:
     gt = toy_geotensor(arr)
     forward = MNF(n_components=4)
     scores = forward(gt)
-    restored = InverseMNF(forward=forward)(scores)
+    restored = forward.inverse(scores)
     np.testing.assert_allclose(np.asarray(restored), arr, atol=1e-5)
     assert np.all(np.diff(forward.snr_) <= 0)
     reduced_forward = MNF(n_components=2)
     reduced_scores = reduced_forward(gt)
-    reduced = InverseMNF(forward=reduced_forward)(reduced_scores)
+    reduced = reduced_forward.inverse(reduced_scores)
     assert reduced.shape == gt.shape
 
 
@@ -298,9 +297,7 @@ def test_outlier_mask_operator_returns_bool_dtype() -> None:
 
 # ----------------------------------------------------------------------------
 # Tier-B contract: every Operator subclass should report a JSON-safe
-# ``get_config`` and round-trip through that config (except for
-# :class:`InverseMNF`, which holds a runtime reference and is flagged
-# ``forbid_in_yaml=True``).
+# ``get_config`` and round-trip through that config.
 # ----------------------------------------------------------------------------
 def test_operator_configs_are_json_safe() -> None:
     import json
@@ -328,15 +325,6 @@ def test_operator_configs_are_json_safe() -> None:
         rehydrated = json.loads(json.dumps(config))
         clone = type(op)(**rehydrated)
         assert clone.get_config() == config
-
-
-def test_inverse_mnf_is_forbidden_in_yaml() -> None:
-    """``InverseMNF`` holds a runtime reference to a fitted MNF, so it must
-    flag itself as non-serialisable and report an empty config."""
-    forward = MNF(n_components=2)
-    inverse = InverseMNF(forward=forward)
-    assert inverse.forbid_in_yaml is True
-    assert inverse.get_config() == {}
 
 
 # ----------------------------------------------------------------------------
@@ -380,7 +368,7 @@ def test_mnf_round_trip_accepts_plain_ndarray() -> None:
     forward = MNF(n_components=3)
     scores = forward(arr)
     assert type(scores) is np.ndarray
-    restored = InverseMNF(forward=forward)(scores)
+    restored = forward.inverse(scores)
     assert type(restored) is np.ndarray
     np.testing.assert_allclose(restored, arr, atol=1e-10)
 
@@ -489,7 +477,7 @@ def test_fill_pixels_are_excluded_from_masks_and_pca_fit() -> None:
     reference = MNF(n_components=3)
     reference(_nan_at(values, fill))
     np.testing.assert_allclose(forward.snr_, reference.snr_)
-    restored = np.asarray(InverseMNF(forward=forward)(scores))
+    restored = np.asarray(forward.inverse(scores))
     assert np.isnan(restored[:, fill]).all()
     np.testing.assert_allclose(restored[:, ~fill], values[:, ~fill], atol=1e-10)
 
@@ -502,12 +490,10 @@ def test_4d_time_stack() -> None:
     forward = MNF(n_components=2)
     scores = forward(stack)
     assert scores.shape == (2, 2, 6, 6)
-    restored = InverseMNF(forward=forward)(scores)
+    restored = forward.inverse(scores)
     assert restored.shape == stack.shape
     full = MNF()
-    np.testing.assert_allclose(
-        np.asarray(InverseMNF(forward=full)(full(stack))), np.asarray(stack)
-    )
+    np.testing.assert_allclose(np.asarray(full.inverse(full(stack))), np.asarray(stack))
     denoised = DenoisePCA(n_components=4)(stack)
     np.testing.assert_allclose(np.asarray(denoised), np.asarray(stack))
     # Rows of a 2-D map are never treated as bands.
@@ -736,7 +722,7 @@ def test_mnf_matches_generalized_eigenproblem() -> None:
     noisy, _, _, _ = _mnf_scene()
     forward = MNF()
     forward(noisy)
-    state = forward._state
+    state = forward.state_
     assert state is not None
 
     samples = noisy.reshape(noisy.shape[0], -1)
@@ -767,7 +753,7 @@ def test_mnf_recovers_signal_subspace_ordered_by_snr() -> None:
     eigenvalues = np.asarray(forward.eigenvalues_)
     # Shift differences recover the true noise covariance (up to the small
     # leak of the smooth signal's pixel-to-pixel increments).
-    estimated = np.asarray(forward._state["noise_covariance"])
+    estimated = np.asarray(forward.state_["noise_covariance"])
     assert np.abs(estimated - noise_cov).max() < 0.02 * np.trace(noise_cov)
     # Two signal components, three pure-noise components (λ ≈ 1, SNR ≈ 0).
     true_eigs = eigh(np.cov(clean.reshape(5, -1)) + noise_cov, noise_cov)[0][::-1]
@@ -783,7 +769,7 @@ def test_mnf_recovers_signal_subspace_ordered_by_snr() -> None:
         assert 1 - residual.var() / target.var() > 0.9
     # Inverting from the signal components denoises.
     reduced = MNF(n_components=2)
-    denoised = np.asarray(InverseMNF(forward=reduced)(reduced(noisy)))
+    denoised = np.asarray(reduced.inverse(reduced(noisy)))
     rmse_denoised = np.sqrt(np.mean((denoised - clean) ** 2))
     rmse_noisy = np.sqrt(np.mean((noisy - clean) ** 2))
     assert rmse_denoised < 0.5 * rmse_noisy
@@ -829,3 +815,88 @@ def test_gap_fill_laplacian_operator_exposes_iterations() -> None:
     np.testing.assert_array_equal(many, gap_fill_laplacian(arr, iterations=500))
     assert not np.allclose(one, many)
     assert GapFillLaplacian(iterations=7).get_config() == {"iterations": 7}
+
+
+# ----------------------------------------------------------------------------
+# MNF fitted-operator contract (#143): fit / transform / inverse.
+# ----------------------------------------------------------------------------
+def test_mnf_satisfies_fittable_transformer() -> None:
+    from pipekit.protocols import FittableTransformer
+
+    assert isinstance(MNF(n_components=2), FittableTransformer)
+
+
+def test_mnf_inverse_round_trips_a_scene_other_than_the_fit() -> None:
+    """The basis applies to any scene: fit on A, transform + inverse B exactly."""
+    rng = np.random.default_rng(21)
+    fit_scene = rng.normal(size=(4, 9, 9))
+    other = rng.normal(loc=3.0, size=(4, 7, 5))  # different grid, same bands
+    other[:, 2, 3] = np.nan
+    mnf = MNF().fit(fit_scene)
+
+    scores = mnf.transform(other)
+    assert scores.shape == other.shape
+    assert np.isnan(scores[:, 2, 3]).all()
+    restored = mnf.inverse(scores)
+
+    np.testing.assert_allclose(restored, other, atol=1e-10, equal_nan=True)
+    # The call path reuses the fit instead of refitting on the new scene.
+    np.testing.assert_allclose(mnf(other), scores, equal_nan=True)
+
+
+def test_mnf_inverse_round_trips_a_time_stack() -> None:
+    from _helpers import time_stack
+
+    stack = time_stack((2, 4, 6, 6))
+    mnf = MNF().fit(stack)
+    np.testing.assert_allclose(
+        np.asarray(mnf.inverse(mnf.transform(stack))), np.asarray(stack)
+    )
+
+
+def test_mnf_fitted_state_excluded_from_config() -> None:
+    mnf = MNF(n_components=2)
+    config = mnf.get_config()
+    with pytest.raises(ValueError, match="fitted"):
+        mnf.transform(np.ones((3, 4, 4)))
+    with pytest.raises(ValueError, match="fitted"):
+        mnf.inverse(np.ones((2, 4, 4)))
+    mnf(np.random.default_rng(22).normal(size=(3, 6, 6)))
+    assert mnf.state_ is not None
+    assert mnf.get_config() == config == {"n_components": 2, "axis": -3}
+
+
+def test_mnf_rejects_mismatched_bands_and_components() -> None:
+    rng = np.random.default_rng(23)
+    mnf = MNF(n_components=2).fit(rng.normal(size=(3, 6, 6)))
+    with pytest.raises(ValueError, match="3 bands"):
+        mnf.transform(rng.normal(size=(4, 6, 6)))
+    with pytest.raises(ValueError, match="2 components"):
+        mnf.inverse(rng.normal(size=(3, 6, 6)))
+
+
+def test_mnf_first_call_fits_once_under_thread_map() -> None:
+    import threading
+    import time
+
+    from pipekit.parallel import ThreadMap
+
+    rng = np.random.default_rng(24)
+    scenes = [rng.normal(loc=i, scale=i + 1, size=(3, 6, 6)) for i in range(8)]
+    mnf = MNF(n_components=2)
+    calls = []
+    fit = mnf.fit
+    lock = threading.Lock()
+
+    def slow_fit(x):
+        with lock:
+            calls.append(x)
+        time.sleep(0.05)
+        return fit(x)
+
+    mnf.fit = slow_fit
+    outputs = ThreadMap(mnf, n_workers=8)(scenes)
+
+    assert len(calls) == 1
+    for scene, out in zip(scenes, outputs, strict=True):
+        np.testing.assert_allclose(out, mnf.transform(scene))

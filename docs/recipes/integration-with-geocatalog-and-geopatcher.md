@@ -101,6 +101,15 @@ infer = gz.Sequential([
 prediction = infer(field)
 ```
 
+`ModelOp` hands the model a plain array and returns the model's output
+as-is (never rewrapped into a `GeoTensor`); each chip's `Patch` keeps its
+footprint, so `MergePatches` still places the predictions. It checks the
+model at construction: a callable for the default `method="__call__"`, a
+`pipekit.protocols.Predictor` for `method="predict"`. Fit any learned
+preprocessing (`StandardScaler().fit(...)`, `MNF(...).fit(...)`) before
+the pipeline so every chip uses the same statistics — see
+[Fitted operators](../concepts.md#fitted-operators-fit-transform).
+
 Install with the `[patch]` extra: `uv pip install 'geotoolz[patch]'`.
 
 The same wrappers are reachable as

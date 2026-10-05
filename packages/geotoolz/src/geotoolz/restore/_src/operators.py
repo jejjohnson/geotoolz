@@ -8,9 +8,8 @@ its ``transform`` / ``crs`` / ``fill_value_default``, while a plain
 primitives are metadata-independent per-pixel/window math, so every
 operator here supports both carriers transparently. All constructor
 parameters are keyword-only and JSON-safe for hydra-zen ``builds()``
-round-trips, except for :class:`InverseMNF` which holds a runtime
-reference to a fitted :class:`MNF` and is therefore marked
-``forbid_in_yaml = True``.
+round-trips. :class:`MNF` is a fitted operator (``fit`` / ``transform``
+/ ``inverse``); its fitted basis is never part of ``get_config()``.
 
 Nodata: a pixel is invalid when any band is non-finite or equals the
 carrier's ``fill_value_default`` (see :mod:`geotoolz._src.valid`; per
@@ -32,11 +31,12 @@ declares ``fill_value_default=False`` (saturation flags live in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import numpy as np
 from pipekit import Operator
 
+from geotoolz._src.fitted import fit_once
 from geotoolz._src.shape import require_ndim
 from geotoolz._src.valid import (
     carried_fill,
@@ -57,11 +57,12 @@ from geotoolz.restore._src.array import (
     gap_fill_laplacian,
     gap_fill_nearest,
     gaussian_denoise,
-    inverse_pca,
     median_denoise,
     nl_means,
     outlier_mask,
     pca_denoise,
+    project_bands,
+    reconstruct_bands,
     replace_outliers,
 )
 
@@ -321,7 +322,7 @@ class DenoisePCA(Operator):
 
 
 class MNF(Operator):
-    """Forward Minimum Noise Fraction transform (Green et al. 1988).
+    """Minimum Noise Fraction transform (Green et al. 1988), with its inverse.
 
     Wraps :func:`~geotoolz.restore._src.array.fit_mnf`. The noise
     covariance ``Σ_N`` is estimated from horizontal shift differences
@@ -329,19 +330,24 @@ class MNF(Operator):
     :func:`~geotoolz.restore._src.array.shift_difference_noise_covariance`);
     the data are noise-whitened with ``Σ_N^(−1/2)`` (Cholesky) and the
     whitened data are rotated onto their principal components. The
-    output carrier holds the scores, ordered by decreasing SNR, and the
-    fitted state is consumable by :class:`InverseMNF` -- keeping the
-    first ``n_components`` and inverting is the classical MNF noise
-    filter.
+    output carrier holds the scores, ordered by decreasing SNR, and
+    :meth:`inverse` maps scores back to band space with
+    ``x̂ = Σ_N·A_k·y + x̄`` -- keeping the first ``n_components`` and
+    inverting is the classical MNF noise filter.
 
-    Note: this operator is *stateful*. Calling it on a second image
-    will refit the transform and discard the previous state — the
-    forward/inverse pair must be applied to the same image.
+    Fitted operator (see *Fitted operators* in the concepts guide):
+    :meth:`fit` learns the basis, :meth:`transform` projects any cube with
+    the same bands onto it and :meth:`inverse` reconstructs, neither
+    mutating the operator. Calling an unfitted operator fits the basis on
+    that first call (once, even under concurrent calls) and every later
+    call reuses it; call :meth:`fit` explicitly to choose the scene, e.g.
+    before parallel use. The basis is never part of ``get_config()``.
 
     The covariance and noise covariance are estimated from valid pixels
     only (a pixel invalid in any band is excluded, and so is any
     neighbour pair touching it); invalid pixels hold ``NaN`` in the
-    returned scores.
+    returned scores, and pixels with a non-finite score hold the output
+    fill after :meth:`inverse`.
 
     Inputs are ``(C, H, W)`` cubes or ``(T, C, H, W)`` stacks (one fit
     over every frame's pixels; noise pairs never cross frames); the
@@ -354,93 +360,114 @@ class MNF(Operator):
         axis: Position of the band axis. Default ``-3``.
 
     Attributes:
+        state_: The fitted basis (``"components"`` ``A_k``,
+            ``"loadings"`` ``Σ_N·A_k``, ``"mean"``, ``"eigenvalues"``,
+            ``"noise_covariance"``), or ``None`` before :meth:`fit`.
         eigenvalues_: The generalised eigenvalues ``λᵢ`` of
             ``Σ·a = λ·Σ_N·a`` (descending) -- the variance of each MNF
             score in units of its noise variance, i.e. the inverse of the
-            component's noise fraction. Populated after the first call.
+            component's noise fraction. ``None`` before :meth:`fit`.
         snr_: Per-component signal-to-noise ratio ``λᵢ − 1`` (signal
             variance over noise variance for signal uncorrelated with the
-            noise), descending. Populated after the first call.
+            noise), descending. ``None`` before :meth:`fit`.
 
     Examples:
-        >>> forward = gz.restore.MNF(n_components=3)
-        >>> scores = forward(scene)
-        >>> denoised = gz.restore.InverseMNF(forward=forward)(scores)
+        >>> mnf = gz.restore.MNF(n_components=3).fit(scene)
+        >>> scores = mnf(scene)
+        >>> denoised = mnf.inverse(scores)
     """
 
     def __init__(self, *, n_components: int | None = None, axis: int = -3) -> None:
         self.n_components = n_components
         self.axis = axis
-        self._state: dict[str, np.ndarray | int | tuple[int, ...]] | None = None
+        self.state_: dict[str, np.ndarray] | None = None
         self.eigenvalues_: np.ndarray | None = None
         self.snr_: np.ndarray | None = None
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Learn the MNF basis from the valid pixels of ``gt``.
+
+        Returns:
+            This operator, for chaining.
+        """
         require_ndim(gt, (3, 4), type(self).__name__)
-        self._state = fit_mnf(
+        fitted = fit_mnf(
             _band_masked(gt, self.axis),
             n_components=self.n_components,
             axis=self.axis,
         )
-        self.eigenvalues_ = np.asarray(self._state["eigenvalues"])
-        self.snr_ = self.eigenvalues_ - 1.0
-        scores = np.asarray(self._state["scores"])
-        # fit_mnf imputes invalid pixels with the band mean (score 0);
-        # report them as nodata instead.
-        pixel_nan = np.asarray(self._state["nan_mask"]).any(axis=0)
-        valid = ~pixel_nan.reshape(scores.shape[1:])
-        # fit_mnf returns component-first scores; put the component axis
-        # where the band axis was so a (T, C, H, W) stack stays (T, K, H, W).
-        scores = np.moveaxis(scores, 0, self.axis)
-        valid = np.moveaxis(
-            np.broadcast_to(valid, self._state["scores"].shape), 0, self.axis
+        eigenvalues = np.asarray(fitted["eigenvalues"])
+        self.eigenvalues_ = eigenvalues
+        self.snr_ = eigenvalues - 1.0
+        self.state_ = {  # published last: the fit-once check reads ``state_``
+            key: np.asarray(fitted[key])
+            for key in (
+                "components",
+                "loadings",
+                "mean",
+                "eigenvalues",
+                "noise_covariance",
+            )
+        }
+        return self
+
+    def _fitted(self) -> dict[str, np.ndarray]:
+        state = self.state_
+        if state is None:
+            raise ValueError("MNF must be fitted (fit() or a first call) first")
+        return state
+
+    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Project ``gt`` onto the fitted MNF basis.
+
+        Raises:
+            ValueError: If the operator is not fitted, ``gt`` is not 3-D /
+                4-D or has a different band count than the fit.
+        """
+        require_ndim(gt, (3, 4), type(self).__name__)
+        state = self._fitted()
+        scores = project_bands(
+            _band_masked(gt, self.axis),
+            components=state["components"],
+            mean=state["mean"],
+            axis=self.axis,
         )
         # Scores are a new quantity: NaN marks nodata, never the input fill.
-        return wrap_filled(gt, scores, fill_value_default=np.nan, valid=valid)
-
-
-class InverseMNF(Operator):
-    """Reconstruct a raster from a prior :class:`MNF` transform.
-
-    Holds a runtime reference to a fitted :class:`MNF` and maps scores
-    back with ``x̂ = Σ_N·A_k·y + x̄`` (the first ``k`` columns of the
-    inverse transform ``A⁻ᵀ``); with all components this is exact, with
-    fewer it removes the low-SNR components. Because the reference
-    points at a live, stateful object, this operator cannot be faithfully
-    serialised — ``forbid_in_yaml = True`` flags that to future YAML
-    loaders, and ``get_config`` returns an empty config rather than a
-    spurious payload. Pixels that are nodata in the scores (or were
-    nodata in the forward input) hold the output fill.
-
-    Args:
-        forward: A fitted :class:`MNF` whose ``_apply`` has already
-            been invoked. The forward must outlive the inverse.
-
-    Examples:
-        >>> forward = gz.restore.MNF(n_components=3)
-        >>> _ = forward(scene)
-        >>> reconstructed = gz.restore.InverseMNF(forward=forward)(forward(scene))
-    """
-
-    # Holds a stateful forward reference that cannot be serialized faithfully.
-    forbid_in_yaml: ClassVar[bool] = True
-
-    def __init__(self, *, forward: MNF) -> None:
-        self.forward = forward
+        return wrap_filled(
+            gt, scores, fill_value_default=np.nan, valid=np.isfinite(scores)
+        )
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        if self.forward._state is None:
-            raise ValueError("InverseMNF requires a forward MNF that has been applied")
-        axis = int(self.forward._state["axis"])
-        scores = np.moveaxis(_band_masked(gt, axis), axis, 0)
-        out = inverse_pca(scores, self.forward._state)
-        return _rewrap_finite(gt, out)
+        fit_once(self, gt, lambda: self.state_ is not None)
+        return self.transform(gt)
 
-    def get_config(self) -> dict[str, Any]:
-        # The fitted ``forward`` reference is not JSON-safe; report an
-        # empty config and rely on ``forbid_in_yaml`` to block YAML
-        # serialisation.
-        return {}
+    def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Reconstruct band space from MNF scores (``x̂ = Σ_N·A_k·y + x̄``).
+
+        With all components the reconstruction is exact; with fewer it
+        removes the low-SNR components (the MNF noise filter).
+
+        Args:
+            gt: Scores as returned by :meth:`transform` (``(K, H, W)`` or
+                ``(T, K, H, W)``).
+
+        Returns:
+            The reconstructed ``(C, H, W)`` / ``(T, C, H, W)`` carrier;
+            pixels with a non-finite score hold the output fill.
+
+        Raises:
+            ValueError: If the operator is not fitted or ``gt`` has a
+                different component count.
+        """
+        require_ndim(gt, (3, 4), f"{type(self).__name__}.inverse")
+        state = self._fitted()
+        out = reconstruct_bands(
+            _band_masked(gt, self.axis),
+            loadings=state["loadings"],
+            mean=state["mean"],
+            axis=self.axis,
+        )
+        return _rewrap_finite(gt, out)
 
 
 class GaussianDenoise(Operator):

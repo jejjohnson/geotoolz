@@ -595,6 +595,85 @@ def inverse_pca(
     return samples_to_cube(restored.T, sample_layout(shape, band_axis=axis))
 
 
+def project_bands(
+    arr: Num[np.ndarray, "*dims"],
+    *,
+    components: Float[np.ndarray, "c k"],
+    mean: Float[np.ndarray, " c"],
+    axis: int = -3,
+) -> np.ndarray:
+    """Project any cube onto a fitted basis: ``y = Aᵀ·(x − x̄)`` per pixel.
+
+    Applies a basis learned by :func:`fit_pca` / :func:`fit_mnf` to an
+    array that need not be the one it was fitted on. Pixels with a
+    non-finite band score ``NaN`` in every component.
+
+    Args:
+        arr: Array with ``c`` bands at position ``axis``.
+        components: ``(c, k)`` projection (``state["components"]``).
+        mean: ``(c,)`` band mean (``state["mean"]``).
+        axis: Position of the band axis. Defaults to ``-3``.
+
+    Returns:
+        Scores with the band axis replaced by the ``k`` component axis.
+
+    Raises:
+        ValueError: If ``arr`` does not have ``c`` bands.
+    """
+    samples, layout = cube_to_samples(
+        np.asarray(arr, dtype=float), band_axis=axis, dtype=float
+    )
+    components = np.asarray(components, dtype=float)
+    if samples.shape[1] != components.shape[0]:
+        raise ValueError(
+            f"basis was fitted on {components.shape[0]} bands; "
+            f"input has {samples.shape[1]}"
+        )
+    invalid = ~np.isfinite(samples).all(axis=1)
+    scores = einx.dot("n c, c k -> n k", np.nan_to_num(samples - mean), components)
+    scores[invalid] = np.nan
+    return samples_to_cube(scores, layout)
+
+
+def reconstruct_bands(
+    scores: Num[np.ndarray, "*dims"],
+    *,
+    loadings: Float[np.ndarray, "c k"],
+    mean: Float[np.ndarray, " c"],
+    axis: int = -3,
+) -> np.ndarray:
+    """Map scores back to band space: ``x̂ = L·y + x̄`` per pixel.
+
+    Inverse of :func:`project_bands` with the reconstruction loadings
+    ``L`` (``state["loadings"]``); exact when every component is kept.
+    Pixels with a non-finite score are ``NaN`` in every band.
+
+    Args:
+        scores: Array with ``k`` components at position ``axis``.
+        loadings: ``(c, k)`` reconstruction loadings.
+        mean: ``(c,)`` band mean.
+        axis: Position of the component axis. Defaults to ``-3``.
+
+    Returns:
+        Array with the component axis replaced by the ``c`` band axis.
+
+    Raises:
+        ValueError: If ``scores`` does not have ``k`` components.
+    """
+    samples, layout = cube_to_samples(
+        np.asarray(scores, dtype=float), band_axis=axis, dtype=float
+    )
+    loadings = np.asarray(loadings, dtype=float)
+    if samples.shape[1] != loadings.shape[1]:
+        raise ValueError(
+            f"basis has {loadings.shape[1]} components; input has {samples.shape[1]}"
+        )
+    invalid = ~np.isfinite(samples).all(axis=1)
+    restored = einx.dot("n k, c k -> n c", np.nan_to_num(samples), loadings) + mean
+    restored[invalid] = np.nan
+    return samples_to_cube(restored, layout)
+
+
 def shift_difference_noise_covariance(
     arr: Num[np.ndarray, "*dims"], *, axis: int = -3
 ) -> Float[np.ndarray, "c c"]:

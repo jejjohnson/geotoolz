@@ -19,12 +19,14 @@ Module rule for ``learn/_src``:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 import numpy as np
 from pipekit import Carrier, Operator
+from pipekit.protocols import Predictor
 
 from geotoolz._src.config import jsonable
+from geotoolz._src.fitted import fit_lock, fit_once
 from geotoolz.learn._src.estimators import (
     GeoTensorEstimator,
     NanStrategy,
@@ -56,8 +58,17 @@ class SklearnOp(Operator):
         mode: Named reshape mode passed to :class:`GeoTensorEstimator`.
         sample_axes: Explicit sample axes for ``mode="custom"``.
         feature_axes: Explicit feature axes for ``mode="custom"``.
-        fit_mode: Fitting lifecycle: pre-fit, first-call fit, refit,
-            streaming ``partial_fit``, or fit-only.
+        fit_mode: Fitting lifecycle: ``"pre_fit"`` (loaded state, never
+            fitted in-graph), ``"fit_on_call"`` (fit once on the first
+            call -- exactly once even under concurrent calls -- then
+            reuse), ``"refit"`` (fit on every call), ``"fit_streaming"``
+            (``partial_fit`` every call; invalid with
+            ``task="fit_predict"``) or ``"fit_only"`` (fit, return the
+            input). ``refit`` / ``fit_streaming`` / ``fit_only`` and
+            ``task="fit_predict"`` mutate the estimator on every call, so
+            their results depend on call history; each call's fit + apply
+            runs under a per-operator lock, which serialises concurrent
+            calls (``pipekit.ThreadMap``) rather than racing them.
         task: Estimator method used at apply time. ``None`` auto-detects.
         nan_fit: NaN strategy used while fitting.
         nan_transform: NaN strategy used while applying the estimator.
@@ -75,10 +86,20 @@ class SklearnOp(Operator):
             (fill pixels of the input are excluded from fits and come back
             as the output fill).
 
+    Fitted operator (see *Fitted operators* in the concepts guide):
+    :meth:`fit` / :meth:`partial_fit` fit the estimator explicitly and
+    :meth:`transform` / :meth:`predict` apply it without fitting, so the
+    operator satisfies :class:`pipekit.protocols.FittableTransformer` and
+    :class:`pipekit.protocols.Predictor`. The fitted estimator is never
+    part of ``get_config()`` (persist it with :meth:`save_state`).
+
     Examples:
         >>> from sklearn.decomposition import PCA
         >>> op = SklearnOp(estimator=PCA(n_components=3), mode="pixel")
         >>> projected = op(scene)
+        >>> # or fit on one scene, apply to others:
+        >>> op = SklearnOp(estimator=PCA(n_components=3)).fit(train_scene)
+        >>> projected = op.transform(scene)
     """
 
     forbid_in_yaml: ClassVar[bool] = True
@@ -108,8 +129,12 @@ class SklearnOp(Operator):
                 f"{type(estimator).__name__} does not support fit_streaming "
                 "because it has no partial_fit method"
             )
-        if fit_mode == "pre_fit" and resolved_task == "fit_predict":
-            raise ValueError('fit_mode="pre_fit" is not valid with task="fit_predict"')
+        if fit_mode in {"pre_fit", "fit_streaming"} and resolved_task == "fit_predict":
+            # fit_predict refits from scratch on every call, so it can
+            # neither reuse a loaded state nor accumulate partial_fit batches.
+            raise ValueError(
+                f'fit_mode="{fit_mode}" is not valid with task="fit_predict"'
+            )
         if fit_mode == "pre_fit" and state_path is None:
             raise ValueError(
                 'fit_mode="pre_fit" requires state_path to point at a '
@@ -147,22 +172,56 @@ class SklearnOp(Operator):
         if state_path is not None:
             self.load_state(state_path)
 
+    @property
+    def is_fitted(self) -> bool:
+        """Whether the wrapped estimator has been fitted (or loaded)."""
+        return self._geo_estimator.is_fitted
+
+    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Fit the wrapped estimator on ``gt`` (``nan_fit`` strategy applies).
+
+        Returns:
+            This operator, for chaining.
+        """
+        self._geo_estimator.fit(gt)
+        return self
+
+    def partial_fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Update a streaming estimator with one more batch.
+
+        Returns:
+            This operator, for chaining.
+        """
+        self._geo_estimator.partial_fit(gt)
+        return self
+
+    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Apply ``estimator.transform`` without fitting."""
+        return self._geo_estimator.transform(gt)
+
+    def predict(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Apply ``estimator.predict`` without fitting."""
+        return self._geo_estimator.predict(gt)
+
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        if self._task == "fit_predict":
-            return self._geo_estimator.fit_predict(gt)
-
-        should_fit = (
-            self.fit_mode == "fit_on_call" and not self._geo_estimator.is_fitted
-        ) or self.fit_mode == "refit"
-        if should_fit:
-            self._geo_estimator.fit(gt)
-        elif self.fit_mode == "fit_streaming":
-            self._geo_estimator.partial_fit(gt)
-        elif self.fit_mode == "fit_only":
-            self._geo_estimator.fit(gt)
-            return gt
-
-        return getattr(self._geo_estimator, self._task)(gt)
+        geo = self._geo_estimator
+        if self.fit_mode == "pre_fit":
+            return getattr(geo, self._task)(gt)
+        if self.fit_mode == "fit_on_call" and self._task != "fit_predict":
+            fit_once(self, gt, lambda: geo.is_fitted)
+            return getattr(geo, self._task)(gt)
+        # The remaining modes mutate the estimator on every call; the lock
+        # keeps each call's fit + apply atomic under concurrent callers.
+        with fit_lock(self):
+            if self._task == "fit_predict":
+                return geo.fit_predict(gt)
+            if self.fit_mode == "fit_streaming":
+                geo.partial_fit(gt)
+            else:  # "refit" / "fit_only"
+                geo.fit(gt)
+            if self.fit_mode == "fit_only":
+                return gt
+            return getattr(geo, self._task)(gt)
 
     def save_state(self, path: str | Path, *, write_meta: bool = False) -> None:
         """Persist fitted estimator state to ``path`` (a joblib pickle).
@@ -415,17 +474,32 @@ class ModelOp(Operator):
     strip the subclass (torch, JAX, sklearn) don't care, and frameworks
     that preserve it (numpy proper) still see something sensible.
 
+    Output contract: the model's return value is passed through **as-is**
+    and never rewrapped into the input carrier -- a ``GeoTensor`` input
+    yields whatever the model returns (an ``np.ndarray``, a torch tensor,
+    ...) without ``transform`` / ``crs`` / ``fill_value_default``. Rewrap
+    it yourself, or use :class:`SklearnOp`, which restores the grid for
+    per-pixel estimators.
+
     Args:
         model: Any object that can be called as ``model(arr)`` or whose
             ``method`` attribute can be called as
-            ``model.predict(arr)``. No isinstance / framework imports.
+            ``model.predict(arr)``. No framework imports; the shape is
+            checked structurally at construction.
         method: Method name to invoke on ``model``. Default
             ``"__call__"`` — equivalent to ``model(arr)``. Set to
-            ``"predict"`` for sklearn estimators.
+            ``"predict"`` for sklearn estimators; the model must then
+            satisfy :class:`pipekit.protocols.Predictor`.
         batch_size: If set, split the input along axis 0 into chunks of
             this size, call the model once per chunk, concatenate the
             results along axis 0. Useful when the model can't fit the
             whole input in GPU memory.
+
+    Raises:
+        TypeError: At construction, when ``method="predict"`` and
+            ``model`` is not a :class:`pipekit.protocols.Predictor`, when
+            ``method="__call__"`` and ``model`` is not callable, or when
+            ``model`` has no callable ``method`` attribute.
 
     Note:
         ``forbid_in_yaml = True`` — the model is a runtime object and
@@ -459,6 +533,22 @@ class ModelOp(Operator):
         method: str = "__call__",
         batch_size: int | None = None,
     ) -> None:
+        if method == "predict":
+            if not isinstance(model, Predictor):
+                raise TypeError(
+                    f'ModelOp(method="predict") needs a pipekit Predictor (an '
+                    f"object with a predict method); got {type(model).__name__}"
+                )
+        elif method == "__call__":
+            if not callable(model):
+                raise TypeError(
+                    f"ModelOp model must be callable; got {type(model).__name__}"
+                )
+        elif not callable(getattr(model, method, None)):
+            raise TypeError(
+                f"ModelOp model {type(model).__name__} has no callable "
+                f"{method!r} method"
+            )
         self.model = model
         self.method = method
         self.batch_size = batch_size

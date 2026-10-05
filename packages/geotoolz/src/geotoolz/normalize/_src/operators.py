@@ -6,8 +6,10 @@ Each Operator wraps a Tier-A primitive in
 kind (rewrap via :func:`geotoolz._src.wrap.wrap_like`). The
 carrier-aware wrappers handle:
 
-* fitting per-band statistics from the input scene
-  (``fit_on_call=True``),
+* fitting per-band statistics (``fit(x)`` / ``fit_on_call=True``) into
+  fitted ``*_`` attributes that ``get_config()`` never serialises, with a
+  pure ``transform(x)`` -- the scalers satisfy
+  :class:`pipekit.protocols.FittableTransformer`,
 * JSON-safe ``get_config()`` via the shared
   :func:`geotoolz._src.config.jsonable` helper (ndarray leaves become
   plain Python lists for Hydra / YAML round-trip),
@@ -34,12 +36,13 @@ fixed-stats alias ``Normalize``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import jsonable
+from geotoolz._src.fitted import fit_once
 from geotoolz._src.stretch import percentile_stretch
 from geotoolz._src.valid import (
     invalid_values,
@@ -55,6 +58,7 @@ from geotoolz.normalize._src.array import (
     minmax_scale,
     per_band_stats,
     power_scale,
+    reshape_stat,
     robust_scale,
     standard_scale,
     stat_axes,
@@ -198,18 +202,33 @@ class StandardScaler(Operator):
     Statistics reduce over the spatial axes ``(-2, -1)`` so a
     ``(C, H, W)`` carrier yields per-band ``mu`` / ``sigma`` of shape
     ``(C,)``. Pass cached training-set statistics via ``mean`` / ``std``
-    for inference, or set ``fit_on_call=True`` to fit on the first
-    scene seen. When ``sigma == 0`` (a constant band) the divisor falls
-    back to ``1`` so the band collapses to zero instead of producing
-    ``inf`` / ``nan``. Nodata (fill / non-finite) pixels are excluded
-    from the fit and hold the output fill value.
+    for inference, call :meth:`fit` on a training scene, or set
+    ``fit_on_call=True`` to fit on the first scene seen. When
+    ``sigma == 0`` (a constant band) the divisor falls back to ``1`` so
+    the band collapses to zero instead of producing ``inf`` / ``nan``.
+    Nodata (fill / non-finite) pixels are excluded from the fit and hold
+    the output fill value.
+
+    Fitted operator (see *Fitted operators* in the concepts guide):
+    :meth:`fit` learns ``mean_`` / ``std_`` (which then take precedence
+    over the constructor statistics), :meth:`transform` applies them
+    without mutating the operator, and :meth:`inverse` undoes the
+    scaling. Learned statistics are never part of ``get_config()``; to
+    persist them, build ``StandardScaler(mean=op.mean_, std=op.std_)``.
 
     Args:
         mean: Per-band mean (scalar, list, or ndarray) or ``None``.
         std: Per-band std (scalar, list, or ndarray) or ``None``.
-        fit_on_call: If ``True`` and ``mean`` / ``std`` are unset, fit
-            them from the first call using ``np.nanmean`` /
-            ``np.nanstd``.
+        fit_on_call: If ``True`` and the operator is not fitted yet,
+            fit ``mean_`` / ``std_`` on the first call (``np.nanmean`` /
+            ``np.nanstd``) and reuse them for every later call. The fit
+            runs once even under concurrent calls (``pipekit.ThreadMap``),
+            but which scene it sees is then the first to arrive -- call
+            :meth:`fit` before parallel use for a deterministic fit.
+
+    Attributes:
+        mean_: Fitted per-band mean, or ``None`` before :meth:`fit`.
+        std_: Fitted per-band std, or ``None`` before :meth:`fit`.
 
     Examples:
         >>> from geotoolz.normalize import StandardScaler
@@ -217,10 +236,10 @@ class StandardScaler(Operator):
         >>> scaler = StandardScaler(mean=[0.1, 0.2], std=[0.05, 0.07])
         >>> normed = scaler(scene)
         >>>
-        >>> # Training-time fit-and-apply on a single scene:
-        >>> fit = StandardScaler(fit_on_call=True)
-        >>> _ = fit(train_scene)
-        >>> fit.mean  # cached per-band ndarray
+        >>> # Training-time fit, then apply:
+        >>> fit = StandardScaler().fit(train_scene)
+        >>> normed = fit(scene)
+        >>> fit.mean_  # fitted per-band ndarray
     """
 
     def __init__(
@@ -233,18 +252,45 @@ class StandardScaler(Operator):
         self.mean = _array_or_none(mean)
         self.std = _array_or_none(std)
         self.fit_on_call = fit_on_call
+        self.mean_: np.ndarray | None = None
+        self.std_: np.ndarray | None = None
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Learn per-band ``mean_`` / ``std_`` from the valid pixels of ``gt``.
+
+        Returns:
+            This operator, for chaining.
+        """
+        arr, _ = _masked(gt)
+        axis = stat_axes(arr)
+        mean, std = np.nanmean(arr, axis=axis), np.nanstd(arr, axis=axis)
+        self.std_ = std
+        self.mean_ = mean  # published last: fit_once checks ``mean_``
+        return self
+
+    def _stats(self) -> tuple[np.ndarray, np.ndarray]:
+        if self.mean_ is not None and self.std_ is not None:
+            return self.mean_, self.std_
+        if self.mean is not None and self.std is not None:
+            return self.mean, self.std
+        raise ValueError("StandardScaler requires mean/std, fit(), or fit_on_call=True")
+
+    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Z-score ``gt`` with the fitted (or constructor) statistics.
+
+        Raises:
+            ValueError: If the operator has neither fitted nor constructor
+                statistics.
+        """
+        mean, std = self._stats()
         arr, valid = _masked(gt)
         axis = stat_axes(arr)
-        if self.fit_on_call and (self.mean is None or self.std is None):
-            self.mean = np.nanmean(arr, axis=axis)
-            self.std = np.nanstd(arr, axis=axis)
-        if self.mean is None or self.std is None:
-            raise ValueError("StandardScaler requires mean/std or fit_on_call=True")
-        return _rewrap(
-            gt, standard_scale(arr, self.mean, self.std, reduce_axes=axis), valid
-        )
+        return _rewrap(gt, standard_scale(arr, mean, std, reduce_axes=axis), valid)
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        if self.fit_on_call:
+            fit_once(self, gt, lambda: self.mean_ is not None)
+        return self.transform(gt)
 
     def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         """Invert a previously applied standard scaling.
@@ -257,18 +303,15 @@ class StandardScaler(Operator):
             hold the output fill value.
 
         Raises:
-            ValueError: If the scaler has no ``mean`` / ``std`` yet.
+            ValueError: If the scaler has no statistics yet.
         """
-        if self.mean is None or self.std is None:
-            raise ValueError("StandardScaler must be fitted before inverse()")
+        mean, std = self._stats()
         arr, valid = _masked(gt)
         axis = stat_axes(arr)
-        from geotoolz.normalize._src.array import reshape_stat
-
-        mean = reshape_stat(self.mean, arr, axis)
-        std = reshape_stat(self.std, arr, axis)
-        scale = np.where(std != 0, std, 1.0)
-        return _rewrap(gt, arr * scale + mean, valid)
+        mean_b = reshape_stat(mean, arr, axis)
+        std_b = reshape_stat(std, arr, axis)
+        scale = np.where(std_b != 0, std_b, 1.0)
+        return _rewrap(gt, arr * scale + mean_b, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -291,17 +334,25 @@ class RobustScaler(Operator):
     ``iqr == 0`` the divisor falls back to ``1``. Nodata (fill /
     non-finite) pixels are excluded from the fit and hold the output fill.
 
+    Fitted operator with the same ``fit`` / ``transform`` / ``inverse``
+    contract as :class:`StandardScaler` (fitted state ``median_`` /
+    ``iqr_``, never part of ``get_config()``).
+
     Args:
         median: Per-band median (scalar, list, or ndarray) or ``None``.
         iqr: Per-band IQR (``Q3 - Q1``).
-        fit_on_call: If ``True`` and stats are unset, fit from the
-            first call using ``np.nanpercentile`` at ``[25, 50, 75]``.
+        fit_on_call: If ``True`` and the operator is not fitted yet, fit
+            on the first call using ``np.nanpercentile`` at
+            ``[25, 50, 75]`` and reuse the statistics afterwards.
+
+    Attributes:
+        median_: Fitted per-band median, or ``None`` before :meth:`fit`.
+        iqr_: Fitted per-band IQR, or ``None`` before :meth:`fit`.
 
     Examples:
         >>> from geotoolz.normalize import RobustScaler
-        >>> op = RobustScaler(fit_on_call=True)
-        >>> _ = op(scene)
-        >>> op.median, op.iqr
+        >>> op = RobustScaler().fit(scene)
+        >>> op.median_, op.iqr_
     """
 
     def __init__(
@@ -314,19 +365,49 @@ class RobustScaler(Operator):
         self.median = _array_or_none(median)
         self.iqr = _array_or_none(iqr)
         self.fit_on_call = fit_on_call
+        self.median_: np.ndarray | None = None
+        self.iqr_: np.ndarray | None = None
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Learn per-band ``median_`` / ``iqr_`` from the valid pixels of ``gt``.
+
+        Returns:
+            This operator, for chaining.
+        """
+        arr, _ = _masked(gt)
+        q25, q50, q75 = np.nanpercentile(arr, [25.0, 50.0, 75.0], axis=stat_axes(arr))
+        self.iqr_ = q75 - q25
+        self.median_ = q50  # published last: fit_once checks ``median_``
+        return self
+
+    def _stats(self) -> tuple[np.ndarray, np.ndarray]:
+        if self.median_ is not None and self.iqr_ is not None:
+            return self.median_, self.iqr_
+        if self.median is not None and self.iqr is not None:
+            return self.median, self.iqr
+        raise ValueError("RobustScaler requires median/iqr, fit(), or fit_on_call=True")
+
+    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Scale ``gt`` with the fitted (or constructor) median / IQR."""
+        median, iqr = self._stats()
         arr, valid = _masked(gt)
         axis = stat_axes(arr)
-        if self.fit_on_call and (self.median is None or self.iqr is None):
-            q25, q50, q75 = np.nanpercentile(arr, [25.0, 50.0, 75.0], axis=axis)
-            self.median = q50
-            self.iqr = q75 - q25
-        if self.median is None or self.iqr is None:
-            raise ValueError("RobustScaler requires median/iqr or fit_on_call=True")
-        return _rewrap(
-            gt, robust_scale(arr, self.median, self.iqr, reduce_axes=axis), valid
-        )
+        return _rewrap(gt, robust_scale(arr, median, iqr, reduce_axes=axis), valid)
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        if self.fit_on_call:
+            fit_once(self, gt, lambda: self.median_ is not None)
+        return self.transform(gt)
+
+    def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Invert a previously applied robust scaling (``x = y * iqr + median``)."""
+        median, iqr = self._stats()
+        arr, valid = _masked(gt)
+        axis = stat_axes(arr)
+        median_b = reshape_stat(median, arr, axis)
+        iqr_b = reshape_stat(iqr, arr, axis)
+        scale = np.where(iqr_b != 0, iqr_b, 1.0)
+        return _rewrap(gt, arr * scale + median_b, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -353,14 +434,23 @@ class MinMaxScaler(Operator):
     (fill / non-finite) pixels are excluded from the fit and hold the
     output fill value.
 
+    Fitted operator with the same ``fit`` / ``transform`` / ``inverse``
+    contract as :class:`StandardScaler` (fitted state ``vmin_`` /
+    ``vmax_``, never part of ``get_config()``).
+
     Args:
         vmin: Per-band lower bound, scalar / list / ndarray, or
             ``None`` to fit.
         vmax: Per-band upper bound.
         out_range: ``(out_min, out_max)`` range to map into. Default
             ``(0.0, 1.0)``.
-        fit_on_call: If ``True`` and bounds are unset, fit from the
-            first call using ``np.nanmin`` / ``np.nanmax``.
+        fit_on_call: If ``True`` and the operator is not fitted yet, fit
+            the bounds on the first call using ``np.nanmin`` /
+            ``np.nanmax`` and reuse them afterwards.
+
+    Attributes:
+        vmin_: Fitted per-band lower bound, or ``None`` before :meth:`fit`.
+        vmax_: Fitted per-band upper bound, or ``None`` before :meth:`fit`.
 
     Examples:
         >>> from geotoolz.normalize import MinMaxScaler
@@ -369,8 +459,8 @@ class MinMaxScaler(Operator):
         >>> scaled = op(scene)
         >>>
         >>> # Or fit on the scene and emit a uint8-style range:
-        >>> op = MinMaxScaler(fit_on_call=True, out_range=(0.0, 255.0))
-        >>> _ = op(scene)
+        >>> op = MinMaxScaler(out_range=(0.0, 255.0)).fit(scene)
+        >>> display = op(scene)
     """
 
     def __init__(
@@ -385,18 +475,52 @@ class MinMaxScaler(Operator):
         self.vmax = _array_or_none(vmax)
         self.out_range = validate_out_range(tuple(out_range))
         self.fit_on_call = fit_on_call
+        self.vmin_: np.ndarray | None = None
+        self.vmax_: np.ndarray | None = None
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Learn per-band ``vmin_`` / ``vmax_`` from the valid pixels of ``gt``.
+
+        Returns:
+            This operator, for chaining.
+        """
+        arr, _ = _masked(gt)
+        axis = stat_axes(arr)
+        vmin, vmax = np.nanmin(arr, axis=axis), np.nanmax(arr, axis=axis)
+        self.vmax_ = vmax
+        self.vmin_ = vmin  # published last: fit_once checks ``vmin_``
+        return self
+
+    def _stats(self) -> tuple[np.ndarray, np.ndarray]:
+        if self.vmin_ is not None and self.vmax_ is not None:
+            return self.vmin_, self.vmax_
+        if self.vmin is not None and self.vmax is not None:
+            return self.vmin, self.vmax
+        raise ValueError("MinMaxScaler requires vmin/vmax, fit(), or fit_on_call=True")
+
+    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Map ``gt`` from the fitted (or constructor) bounds into ``out_range``."""
+        vmin, vmax = self._stats()
         arr, valid = _masked(gt)
         axis = stat_axes(arr)
-        if self.fit_on_call and (self.vmin is None or self.vmax is None):
-            self.vmin = np.nanmin(arr, axis=axis)
-            self.vmax = np.nanmax(arr, axis=axis)
-        if self.vmin is None or self.vmax is None:
-            raise ValueError("MinMaxScaler requires vmin/vmax or fit_on_call=True")
-        out = minmax_scale(
-            arr, self.vmin, self.vmax, out_range=self.out_range, reduce_axes=axis
-        )
+        out = minmax_scale(arr, vmin, vmax, out_range=self.out_range, reduce_axes=axis)
+        return _rewrap(gt, out, valid)
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        if self.fit_on_call:
+            fit_once(self, gt, lambda: self.vmin_ is not None)
+        return self.transform(gt)
+
+    def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Map ``out_range`` values back to the ``[vmin, vmax]`` input scale."""
+        vmin, vmax = self._stats()
+        arr, valid = _masked(gt)
+        axis = stat_axes(arr)
+        vmin_b = reshape_stat(vmin, arr, axis)
+        vmax_b = reshape_stat(vmax, arr, axis)
+        span = np.where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
+        out_min, out_max = self.out_range
+        out = (arr - out_min) / (out_max - out_min) * span + vmin_b
         return _rewrap(gt, out, valid)
 
     def get_config(self) -> dict[str, Any]:

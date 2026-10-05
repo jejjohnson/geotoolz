@@ -421,8 +421,8 @@ def test_fill_pixels_are_excluded_from_fitted_stats() -> None:
 
     scaler = StandardScaler(fit_on_call=True)
     scaler(gt)
-    np.testing.assert_allclose(scaler.mean, valid.mean(axis=1))
-    np.testing.assert_allclose(scaler.std, valid.std(axis=1))
+    np.testing.assert_allclose(scaler.mean_, valid.mean(axis=1))
+    np.testing.assert_allclose(scaler.std_, valid.std(axis=1))
 
     stats = PerBandStats()
     assert stats(gt) is gt
@@ -430,7 +430,7 @@ def test_fill_pixels_are_excluded_from_fitted_stats() -> None:
 
     minmax = MinMaxScaler(fit_on_call=True)
     minmax(gt)
-    np.testing.assert_allclose(minmax.vmin, valid.min(axis=1))
+    np.testing.assert_allclose(minmax.vmin_, valid.min(axis=1))
 
     # inverse() keeps fill pixels of the scaled carrier as nodata (NaN).
     restored = np.asarray(scaler.inverse(scaler(gt)))
@@ -449,8 +449,8 @@ def test_4d_time_stack() -> None:
     assert stat_axes(values) == (-4, -2, -1)
     scaler = StandardScaler(fit_on_call=True)
     out = scaler(stack)
-    assert np.shape(scaler.mean) == (3,)
-    np.testing.assert_allclose(scaler.mean, values.mean(axis=(0, 2, 3)))
+    assert np.shape(scaler.mean_) == (3,)
+    np.testing.assert_allclose(scaler.mean_, values.mean(axis=(0, 2, 3)))
     np.testing.assert_allclose(np.asarray(out).mean(axis=(0, 2, 3)), 0.0, atol=1e-12)
 
     clahe = CLAHE(window=(4, 4))
@@ -462,3 +462,111 @@ def test_4d_time_stack() -> None:
         reshape_stat(np.zeros(2), values, stat_axes(values))
     with pytest.raises(ValueError, match="does not match the kept axes"):
         Normalize(mean=[0.0, 0.0], std=[1.0, 1.0])(stack)
+
+
+# ----------------------------------------------------------------------------
+# Fitted-operator contract (#143): fit / transform / inverse seams.
+# ----------------------------------------------------------------------------
+_SCALERS = [
+    pytest.param(StandardScaler, ("mean_", "std_"), id="StandardScaler"),
+    pytest.param(RobustScaler, ("median_", "iqr_"), id="RobustScaler"),
+    pytest.param(MinMaxScaler, ("vmin_", "vmax_"), id="MinMaxScaler"),
+]
+
+
+@pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
+def test_scalers_satisfy_fittable_transformer(cls, fitted) -> None:
+    from pipekit.protocols import FittableTransformer
+
+    op = cls()
+    assert isinstance(op, FittableTransformer)
+    assert callable(op.inverse)
+    assert all(getattr(op, name) is None for name in fitted)
+
+
+@pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
+def test_scaler_fit_then_transform_matches_fit_on_call(
+    cls, fitted, scene: GeoTensor
+) -> None:
+    op = cls()
+    with pytest.raises(ValueError, match=r"fit\(\)"):
+        op.transform(scene)
+    assert op.fit(scene) is op
+    assert all(getattr(op, name) is not None for name in fitted)
+    np.testing.assert_allclose(
+        np.asarray(op.transform(scene)),
+        np.asarray(cls(fit_on_call=True)(scene)),
+        equal_nan=True,
+    )
+
+
+@pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
+def test_scaler_fitted_state_excluded_from_config(
+    cls, fitted, scene: GeoTensor
+) -> None:
+    """Statistics learned on call never reach ``get_config()`` / ``state``."""
+    op = cls(fit_on_call=True)
+    before = op.get_config()
+    op(scene)
+    assert all(getattr(op, name) is not None for name in fitted)
+    assert op.get_config() == before
+    # The config still names only constructor parameters, all unset.
+    assert all(op.get_config()[name.rstrip("_")] is None for name in fitted)
+    json.dumps(op.state, allow_nan=False)
+
+
+@pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
+def test_scaler_inverse_round_trips(cls, fitted, scene: GeoTensor) -> None:
+    op = cls().fit(scene)
+    restored = op.inverse(op.transform(scene))
+    np.testing.assert_allclose(
+        np.asarray(restored), mask_invalid_to_nan(scene), equal_nan=True
+    )
+
+
+@pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
+def test_scaler_fit_on_call_fits_once_under_thread_map(cls, fitted) -> None:
+    """Concurrent first calls under ``ThreadMap`` fit exactly once.
+
+    Each scene has different statistics; a slow ``fit`` widens the race
+    window. Every output must equal ``transform`` with the one published
+    fit -- no call may see half-written or another call's statistics.
+    """
+    import threading
+    import time
+
+    from pipekit.parallel import ThreadMap
+
+    rng = np.random.default_rng(0)
+    scenes = [rng.normal(loc=i, scale=i + 1, size=(2, 6, 6)) for i in range(8)]
+    op = cls(fit_on_call=True)
+    calls = []
+    fit = op.fit
+    lock = threading.Lock()
+
+    def slow_fit(x):
+        with lock:
+            calls.append(x)
+        time.sleep(0.05)
+        return fit(x)
+
+    op.fit = slow_fit
+    outputs = ThreadMap(op, n_workers=8)(scenes)
+
+    assert len(calls) == 1
+    for scene, out in zip(scenes, outputs, strict=True):
+        np.testing.assert_allclose(out, op.transform(scene))
+
+
+def test_fitted_scaler_pickles_and_deep_copies_with_its_fit_lock(
+    scene: GeoTensor,
+) -> None:
+    """The per-instance fit lock must not block ``ProcessMap`` / ``deepcopy``."""
+    import copy
+    import pickle
+
+    op = StandardScaler(fit_on_call=True)
+    expected = np.asarray(op(scene))  # first call creates the fit lock
+    for clone in (pickle.loads(pickle.dumps(op)), copy.deepcopy(op)):
+        np.testing.assert_allclose(clone.mean_, op.mean_)
+        np.testing.assert_allclose(np.asarray(clone(scene)), expected, equal_nan=True)

@@ -126,6 +126,16 @@ Override `get_config()` by hand only when the config genuinely differs
 from the constructor arguments (pipekit's `Sequential`, whose config is
 the list of nested operators, is the canonical case).
 
+**Learned state.** An operator that learns from data must not overwrite
+its constructor attributes inside `_apply`. Follow the
+[fitted-operator contract](../concepts.md#fitted-operators-fit-transform):
+a `fit(x) -> self` that writes trailing-underscore attributes (`mean_`),
+a read-only `transform(x)`, and an `_apply` that calls `transform` —
+fitting first, via `geotoolz._src.fitted.fit_once`, if it learns on
+call. The fitted attributes are not constructor parameters, so they stay
+out of `get_config()` without any `__config_exclude__`, and
+`fit_once` keeps concurrent first calls from racing.
+
 ## Step 4 (optional) — validate arguments with Pydantic
 
 When the constructor has more than a few knobs or needs validation,

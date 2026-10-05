@@ -467,3 +467,126 @@ def test_rank_errors_name_mode_and_shape(
     est = gz.GeoTensorEstimator(StandardScaler(), mode=mode)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match=match):
         est.fit(np.ones(shape))
+
+
+# ----------------------------------------------------------------------------
+# Fitted-operator contract (#143)
+# ----------------------------------------------------------------------------
+def test_sklearn_op_satisfies_fittable_transformer_and_predictor() -> None:
+    from pipekit.protocols import FittableTransformer, Predictor
+
+    op = gz.learn.SklearnOp(estimator=PCA(n_components=1))
+    assert isinstance(op, FittableTransformer)
+    assert isinstance(op, Predictor)
+
+
+def test_sklearn_op_fit_then_transform_does_not_refit() -> None:
+    rng = np.random.default_rng(0)
+    train = _gt(rng.normal(size=(3, 5, 5)))
+    scene = _gt(rng.normal(loc=4.0, size=(3, 5, 5)))
+    op = gz.learn.SklearnOp(estimator=StandardScaler())
+    config = op.get_config()
+
+    assert op.fit(train) is op
+    assert op.is_fitted
+    out = np.asarray(op.transform(scene))
+    reference = StandardScaler().fit(np.asarray(train).reshape(3, -1).T)
+    expected = reference.transform(np.asarray(scene).reshape(3, -1).T).T
+    np.testing.assert_allclose(out, expected.reshape(scene.shape))
+    # fit_on_call reuses the explicit fit; the config never carries it.
+    np.testing.assert_allclose(np.asarray(op(scene)), out)
+    assert op.get_config() == config
+
+
+def test_sklearn_op_rejects_fit_streaming_with_fit_predict() -> None:
+    """``fit_predict`` would never route through ``partial_fit``."""
+
+    class _StreamingClusterer:
+        def partial_fit(self, x):
+            return self
+
+        def fit_predict(self, x):
+            return np.zeros(len(x), dtype=int)
+
+    with pytest.raises(ValueError, match=r"fit_streaming.*fit_predict"):
+        gz.learn.SklearnOp(estimator=_StreamingClusterer(), fit_mode="fit_streaming")
+
+
+def test_sklearn_op_streaming_imputer_created_once() -> None:
+    """``fit_streaming`` with ``impute_*`` fits the imputer on the first batch only."""
+    rng = np.random.default_rng(1)
+    first = rng.normal(size=(2, 4, 5))
+    first[0, 0, 0] = np.nan
+    second = rng.normal(loc=100.0, size=(2, 4, 5))
+    second[0, 1, 1] = np.nan
+    op = gz.learn.PixelwiseIPCA(
+        estimator=IncrementalPCA(n_components=1),
+        nan_fit="impute_simple",
+        nan_transform="impute_simple",
+    )
+
+    op(_gt(first))
+    imputer = op._geo_estimator.imputer
+    assert imputer is not None
+    stats = imputer.statistics_.copy()
+    op(_gt(second))
+
+    assert op._geo_estimator.imputer is imputer
+    np.testing.assert_array_equal(imputer.statistics_, stats)
+
+
+class _SlowMeanCentre:
+    """Deterministic estimator whose slow ``fit`` widens any race window."""
+
+    def fit(self, x):
+        import time
+
+        self.mean_ = x.mean(axis=0)
+        # Sleep after publishing: an unsynchronised concurrent call would
+        # overwrite ``mean_`` before this call's transform reads it.
+        time.sleep(0.02)
+        return self
+
+    def transform(self, x):
+        return x - self.mean_
+
+
+def test_sklearn_op_refit_is_atomic_per_call_under_thread_map() -> None:
+    """``refit`` fits + applies under a lock: no call sees another call's fit."""
+    from pipekit.parallel import ThreadMap
+
+    rng = np.random.default_rng(2)
+    scenes = [rng.normal(loc=10.0 * i, size=(2, 4, 4)) for i in range(8)]
+    op = gz.learn.SklearnOp(estimator=_SlowMeanCentre(), fit_mode="refit")
+
+    outputs = ThreadMap(op, n_workers=8)(scenes)
+
+    for scene, out in zip(scenes, outputs, strict=True):
+        # Centred on its own mean, so every band averages to zero.
+        np.testing.assert_allclose(
+            np.asarray(out).reshape(2, -1).mean(axis=1), 0.0, atol=1e-9
+        )
+        assert out.shape == scene.shape
+
+
+def test_sklearn_op_fit_on_call_fits_once_under_thread_map() -> None:
+    from pipekit.parallel import ThreadMap
+
+    rng = np.random.default_rng(3)
+    scenes = [rng.normal(loc=10.0 * i, size=(2, 4, 4)) for i in range(8)]
+    estimator = _SlowMeanCentre()
+    fits = []
+    fit = estimator.fit
+
+    def counting_fit(x):
+        fits.append(x)
+        return fit(x)
+
+    estimator.fit = counting_fit
+    op = gz.learn.SklearnOp(estimator=estimator)
+
+    outputs = ThreadMap(op, n_workers=8)(scenes)
+
+    assert len(fits) == 1
+    for scene, out in zip(scenes, outputs, strict=True):
+        np.testing.assert_allclose(out, op.transform(scene))

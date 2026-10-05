@@ -4,17 +4,21 @@
 
 ## Train-time statistics
 
-Fit statistics once across your training catalogue, persist them as JSON-compatible operator state, and reuse them for inference:
+Fit statistics once on your training data, then freeze them into a fixed-stats operator whose JSON-compatible state round-trips for inference:
 
 ```python
 import geotoolz as gz
 
-scaler = gz.normalize.StandardScaler(fit_on_call=True)
-train_scene_normalized = scaler(train_scene)
-state = scaler.state
-restored = gz.Operator.from_state(state)
+scaler = gz.normalize.StandardScaler().fit(train_scene)
+train_scene_normalized = scaler.transform(train_scene)
+
+frozen = gz.normalize.StandardScaler(mean=scaler.mean_, std=scaler.std_)
+restored = gz.Operator.from_state(frozen.state)
 test_scene_normalized = restored(test_scene)
+original = restored.inverse(test_scene_normalized)
 ```
+
+Learned statistics (`mean_` / `std_`, `median_` / `iqr_`, `vmin_` / `vmax_`) are never part of `get_config()` — only constructor arguments are — so pass them back as constructor arguments to persist them. `fit_on_call=True` fits on the first call instead of an explicit `fit`; in a parallel pipeline (`pipekit.ThreadMap`) call `fit` first so the statistics don't depend on which scene arrives first (see [Fitted operators](concepts.md#fitted-operators-fit-transform)).
 
 ## Inference-time scaling
 

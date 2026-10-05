@@ -28,12 +28,13 @@ quantity, so they hold ``NaN`` at those pixels and declare
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 import numpy as np
 from pipekit import Operator
 
 from geotoolz._src.config import callable_name, jsonable, reject_config_summary
+from geotoolz._src.fitted import fit_once
 from geotoolz._src.samples import cube_to_samples
 from geotoolz._src.shape import keep_band_axis, require_ndim
 from geotoolz._src.valid import invalid_values, restore_fill
@@ -81,29 +82,49 @@ class MatchedFilter(Operator):
     ``GeoTensor`` (georeferencing preserved on the output) or a plain
     ``np.ndarray`` (plain array returned) — the math is metadata-free.
 
-    Missing statistics are fitted on the incoming cube: when ``mean`` or
-    ``cov_op`` is ``None`` (or on every call with ``fit_on_call=True``)
-    they are estimated with ``mean_method`` / ``cov_method`` and stored
-    back on the operator for reuse.
+    Fitted operator (see *Fitted operators* in the concepts guide):
+
+    * :meth:`fit` estimates the background statistics the constructor
+      left unset (``mean`` and / or ``cov_op``) with ``mean_method`` /
+      ``cov_method`` and stores the full background in ``mean_`` /
+      ``cov_op_`` (supplied components are copied through unchanged);
+    * :meth:`transform` scores a cube with that background without
+      mutating the operator;
+    * calling the operator fits the missing statistics once, on the first
+      call (``fit_on_call=False``), or estimates them from each cube
+      without storing anything (``fit_on_call=True``, a per-scene
+      background). Neither path writes fitted arrays into
+      ``get_config()``.
 
     Nodata pixels (non-finite or equal to the input's fill value in any
     band) are left out of the fit and hold ``NaN`` in the score map,
     which declares ``fill_value_default=NaN``.
 
     Args:
-        mean: Background mean spectrum ``(c,)``; fitted from the cube
+        mean: Background mean spectrum ``(c,)``; fitted from the data
             when ``None``.
         cov_op: Background covariance as a `NumpyLinearOperator` or raw
-            ``(c, c)`` matrix; fitted from the cube when ``None``.
+            ``(c, c)`` matrix (a nested list, e.g. from a config reload,
+            is coerced to an ndarray); fitted from the data when ``None``.
         target: Target signature ``(c,)``. Must be set before applying.
-        fit_on_call: Refit mean and covariance on every call instead of
-            only filling in the missing ones.
+        fit_on_call: Estimate mean and covariance from every cube the
+            operator is called on (a per-scene background, ignoring any
+            supplied or fitted statistics) instead of fitting the missing
+            ones once.
         mean_method: Mean estimator used when fitting. Default
             ``"median"``.
         cov_method: Covariance estimator used when fitting —
             ``"empirical"``, ``"ledoit_wolf"``, ``"oas"``, or
             ``"lowrank"``. Default ``"ledoit_wolf"``.
         axis: Position of the spectral axis. Default ``-3``.
+
+    Attributes:
+        mean_: Background mean from :meth:`fit`, or ``None``.
+        cov_op_: Background covariance from :meth:`fit`, or ``None``.
+
+    Examples:
+        >>> mf = MatchedFilter(target=t).fit(background_scene)
+        >>> scores = mf(scene)  # reuses the fitted background
     """
 
     def __init__(
@@ -117,24 +138,33 @@ class MatchedFilter(Operator):
         cov_method: CovMethod = "ledoit_wolf",
         axis: int = -3,
     ) -> None:
-        self.mean = mean
-        self.cov_op = cov_op
-        self.target = target
+        self.mean = None if mean is None else np.asarray(mean, dtype=float)
+        self.cov_op = (
+            cov_op
+            if cov_op is None or isinstance(cov_op, NumpyLinearOperator)
+            else np.asarray(cov_op, dtype=float)
+        )
+        self.target = None if target is None else np.asarray(target, dtype=float)
         self.fit_on_call = fit_on_call
         self.mean_method = mean_method
         self.cov_method = cov_method
         self.axis = axis
+        self.mean_: np.ndarray | None = None
+        self.cov_op_: NumpyLinearOperator | np.ndarray | None = None
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        mean = self.mean
-        cov_op = self.cov_op
-        cube, valid = _mask_invalid(gt, self.axis, type(self).__name__)
-        # Only refit the components that are missing (or all of them when
-        # fit_on_call=True). Preserving an explicitly provided mean while
-        # fitting cov on the incoming cube is a supported workflow.
-        if self.fit_on_call or mean is None:
+    def _estimate(
+        self, cube: np.ndarray, *, keep_supplied: bool
+    ) -> tuple[np.ndarray, NumpyLinearOperator | np.ndarray]:
+        """Background ``(mean, cov_op)`` of ``cube``.
+
+        ``keep_supplied`` keeps the constructor's ``mean`` / ``cov_op``
+        and only estimates the missing ones.
+        """
+        mean = self.mean if keep_supplied else None
+        cov_op = self.cov_op if keep_supplied else None
+        if mean is None:
             mean = estimate_mean(cube, method=self.mean_method, axis=self.axis)
-        if self.fit_on_call or cov_op is None:
+        if cov_op is None:
             if self.cov_method == "empirical":
                 cov_op = estimate_cov_empirical(
                     cube, mean=mean, ridge=1e-8, axis=self.axis
@@ -145,10 +175,53 @@ class MatchedFilter(Operator):
                 cov_op = estimate_cov_shrunk(
                     cube, mean=mean, method=self.cov_method, axis=self.axis
                 )
-        self.mean = mean
-        self.cov_op = cov_op
+        return np.asarray(mean, dtype=float), cov_op
+
+    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Estimate the unset background statistics from the valid pixels of ``gt``.
+
+        Returns:
+            This operator, for chaining.
+        """
+        cube, _ = _mask_invalid(gt, self.axis, type(self).__name__)
+        mean, cov_op = self._estimate(cube, keep_supplied=True)
+        self.cov_op_ = cov_op
+        self.mean_ = mean  # published last: the fit-once check reads ``mean_``
+        return self
+
+    def _background(self) -> tuple[np.ndarray, NumpyLinearOperator | np.ndarray]:
+        if self.mean_ is not None and self.cov_op_ is not None:
+            return self.mean_, self.cov_op_
+        if self.mean is not None and self.cov_op is not None:
+            return self.mean, self.cov_op
+        raise ValueError(
+            "MatchedFilter requires mean and cov_op, fit(), or a call on data"
+        )
+
+    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Score ``gt`` against the fitted (or supplied) background.
+
+        Raises:
+            ValueError: If no background is available yet or ``target``
+                is unset.
+        """
+        mean, cov_op = self._background()
+        return self._score(gt, mean, cov_op)
+
+    def _score(
+        self,
+        gt: GeoTensor | np.ndarray,
+        mean: np.ndarray,
+        cov_op: NumpyLinearOperator | np.ndarray,
+        masked: tuple[np.ndarray, np.ndarray | None] | None = None,
+    ) -> GeoTensor | np.ndarray:
         if self.target is None:
             raise ValueError("target must be supplied before applying MatchedFilter")
+        cube, valid = (
+            _mask_invalid(gt, self.axis, type(self).__name__)
+            if masked is None
+            else masked
+        )
         out = apply_image(
             cube, mean=mean, cov_op=cov_op, target=self.target, axis=self.axis
         )
@@ -157,6 +230,17 @@ class MatchedFilter(Operator):
             keep_band_axis(_restore(gt, out, valid), gt),
             fill_value_default=np.nan,
         )
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        if self.fit_on_call:
+            # Per-scene background: estimated locally, never stored, so
+            # concurrent calls share no mutable state.
+            masked = _mask_invalid(gt, self.axis, type(self).__name__)
+            mean, cov_op = self._estimate(masked[0], keep_supplied=False)
+            return self._score(gt, mean, cov_op, masked)
+        if self.mean is None or self.cov_op is None:
+            fit_once(self, gt, lambda: self.mean_ is not None)
+        return self.transform(gt)
 
     def get_config(self) -> dict[str, Any]:
         return {
