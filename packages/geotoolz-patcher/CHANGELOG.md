@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.7.0...geotoolz-patcher-v0.7.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **patcher:** docs and facades describe the shipped surface; lint docs for retired names ([#411](https://github.com/jejjohnson/geotoolz/issues/411)) ([987495b](https://github.com/jejjohnson/geotoolz/commit/987495b42a57d36a399406e6f171b5182559e703)), closes [#205](https://github.com/jejjohnson/geotoolz/issues/205)
+* **patcher:** extras install exactly what geopatcher uses; report the distribution version ([#409](https://github.com/jejjohnson/geotoolz/issues/409)) ([92ea356](https://github.com/jejjohnson/geotoolz/commit/92ea356d67f793f629a9e8e0bfb12ec628f02d33))
+
 ## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.6.0...geotoolz-patcher-v0.7.0) (2026-10-05)
 
 
