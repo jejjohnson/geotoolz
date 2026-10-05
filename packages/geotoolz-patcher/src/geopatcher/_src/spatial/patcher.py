@@ -103,25 +103,10 @@ class _SpatialPatcherBase:
         return ReadPolicy.of(self)
 
     def _chip_reader(
-        self,
-        field: Any,
-        domain: Any,
-        cache: Any | None,
-        *,
-        aio: bool,
-        field_id: str | None = None,
+        self, field: Any, domain: Any, cache: Any | None, *, aio: bool
     ) -> _ChipReader:
         """The per-split state that reads one anchor's patch from ``field``."""
-        return _ChipReader(
-            geometry=self.geometry,
-            field=field,
-            domain=domain,
-            cache_ctx=self._cache_context(cache, field, field_id=field_id),
-            base_weights=_safe_base_weights(self.window, self.geometry),
-            boundary=getattr(self.geometry, "boundary", "drop"),
-            pad_value=getattr(self.geometry, "pad_value", None),
-            aio=aio,
-        )
+        return _chip_reader(self, field, domain, cache, aio=aio)
 
     async def asplit(
         self,
@@ -818,6 +803,35 @@ class _ChipReader:
     def units(self, anchor: Any) -> list[_Read]:
         """`SpatialPatcher.split`'s units: one leaf per anchor."""
         return [self.unit(anchor)]
+
+
+def _chip_reader(
+    spatial: Any, field: Any, domain: Any, cache: Any | None, *, aio: bool
+) -> _ChipReader:
+    """A `_ChipReader` for ``spatial``'s geometry and window over ``field``.
+
+    ``spatial`` is a spatial patcher — or any object exposing ``geometry``
+    and ``window``, so a `SpatioTemporalPatcher` composed with a
+    duck-typed spatial stand-in reads its chips the same way.
+    """
+    geometry, window = spatial.geometry, spatial.window
+    cache_ctx = None
+    if cache is not None:
+        cache_ctx = (
+            cache,
+            cache.field_id_for(field),
+            cache.config_id_for(geometry, window),
+        )
+    return _ChipReader(
+        geometry=geometry,
+        field=field,
+        domain=domain,
+        cache_ctx=cache_ctx,
+        base_weights=_safe_base_weights(window, geometry),
+        boundary=getattr(geometry, "boundary", "drop"),
+        pad_value=getattr(geometry, "pad_value", None),
+        aio=aio,
+    )
 
 
 def _cached_at(ctx: Any, anchor: Any, indices: Any) -> Patch | None:

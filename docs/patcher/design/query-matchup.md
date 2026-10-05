@@ -580,8 +580,11 @@ class MatchedSpatialPatcher:
   every source has the primary's time length (a different cadence must
   be resampled by the coreg callable), and slices them in lockstep;
   `n_anchors` / `anchors` touch the primary only.
-  `MatchedSpatioTemporalPatcher` mirrors `SpatioTemporalPatcher`
-  (`coupling`, `coord=` for stencil geometries) and merges to
+  `MatchedSpatioTemporalPatcher` drives the primary
+  `SpatioTemporalPatcher` itself — its `coupling`, `coord=`, chip read
+  pipeline, `on_error` policy, hooks, journal and backpressure, plus a
+  per-source `cache` — checks every source of a chip has the primary's
+  time length, slices them in lockstep, and merges to
   `{name: [(spatial_anchor, temporal_result), …]}`.
 
 The matched patchers are the only API addition relative to the
@@ -599,8 +602,9 @@ through a small bounded queue, so only a few patches per source are
 resident and a streaming aggregation (e.g. `SpatialOverlapAdd` with Zarr
 backing) keeps its memory bound on every source. Each aggregation gets
 the usual `streaming_safe` check (a warning, or an error under
-`set_strict`). `MatchedSpatioTemporalPatcher.merge` groups patches by
-spatial anchor and holds those groups until the pass ends.
+`set_strict`). `MatchedSpatioTemporalPatcher.merge` streams every
+source the same way, but each source groups its patches by spatial
+anchor and holds those groups until the pass ends.
 
 **Future work.** A per-source `iter_patches` view and a dedicated
 `MatchedAggregator` were sketched in earlier drafts of this section;
