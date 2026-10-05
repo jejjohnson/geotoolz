@@ -638,7 +638,8 @@ class AnnotatePolygons(Operator):
     ``forbid_in_yaml = True`` because the geometries themselves are
     runtime objects and don't round-trip through YAML. Geo-dependent:
     rasterisation needs the carrier's ``transform`` / ``crs``, so a
-    georeferenced GeoTensor input is required.
+    georeferenced GeoTensor input is required. A ``(T, C, H, W)`` stack
+    is annotated frame by frame.
 
     Args:
         geometries: Iterable of Shapely geometries or a GeoDataFrame.
@@ -665,12 +666,13 @@ class AnnotatePolygons(Operator):
         self.color = color
         self.width = width
 
+    @over_frames
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         import geopandas as gpd
         from georeader.rasterize import rasterize_geopandas_like
 
         require_geotensor(gt, "AnnotatePolygons")
-        rgba = ensure_rgba(np.asarray(gt))
+        rgba = ensure_rgba(np.asarray(gt), name="AnnotatePolygons")
         geometries = _iter_geometries(self.geometries, dst_crs=gt.crs)
         if not geometries or self.width <= 0:
             return wrap_like(gt, rgba, fill_value_default=0)
@@ -708,7 +710,8 @@ class AnnotatePoints(Operator):
     a CRS). Flagged ``forbid_in_yaml = True`` because the points are
     runtime objects. Geo-dependent: locating the markers needs the
     carrier's ``transform`` / ``crs``, so a georeferenced GeoTensor
-    input is required.
+    input is required. A ``(T, C, H, W)`` stack is annotated frame by
+    frame.
 
     Args:
         points: ``(N, 2)`` array of map coords or a GeoDataFrame of
@@ -738,11 +741,12 @@ class AnnotatePoints(Operator):
         self.radius = radius
         self.color = color
 
+    @over_frames
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         from rasterio.transform import rowcol
 
         require_geotensor(gt, "AnnotatePoints")
-        rgba = ensure_rgba(np.asarray(gt))
+        rgba = ensure_rgba(np.asarray(gt), name="AnnotatePoints")
         coords = _point_coords(self.points, dst_crs=gt.crs)
         if coords.size == 0:
             return wrap_like(gt, rgba, fill_value_default=0)

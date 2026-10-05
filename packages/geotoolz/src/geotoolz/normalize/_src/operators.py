@@ -594,6 +594,11 @@ class HistogramMatch(Operator):
     both the input and the reference are excluded from the CDFs; input
     nodata pixels hold the output fill value.
 
+    A ``(T, C, H, W)`` stack is matched per band with one CDF pooled over
+    every frame (like the module's other fitted statistics), so the
+    relative brightness of the frames survives the matching; a 4-D
+    reference likewise pools its frames per band.
+
     The reference is a live GeoTensor — not JSON / YAML serialisable —
     so ``forbid_in_yaml = True``.
 
@@ -617,7 +622,18 @@ class HistogramMatch(Operator):
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         arr, valid = _masked(gt)
         reference, _ = _masked(self.reference)
-        return _rewrap(gt, histogram_match(arr, reference), valid)
+        # The primitive matches along a leading band axis: put the band
+        # axis of a (T, C, H, W) stack (or reference) first, so each band
+        # pools its frames instead of a frame being taken for a band.
+        if reference.ndim == 4:
+            reference = np.moveaxis(reference, 1, 0)
+        if arr.ndim == 4:
+            matched = np.moveaxis(
+                histogram_match(np.moveaxis(arr, 1, 0), reference), 0, 1
+            )
+        else:
+            matched = histogram_match(arr, reference)
+        return _rewrap(gt, matched, valid)
 
     def get_config(self) -> dict[str, Any]:
         # Debug payload: the reference is a runtime raster (forbid_in_yaml).

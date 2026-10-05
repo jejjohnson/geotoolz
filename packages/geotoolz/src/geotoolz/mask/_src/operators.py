@@ -163,7 +163,8 @@ class DistanceMask(PolygonMask):
     ``hypot(a, d)`` / ``hypot(b, e)`` so rotated grids measure true
     distances; sheared grids raise ``ValueError``; see
     :func:`geotoolz.mask.distance_mask`). Geo-dependent: requires a
-    georeferenced ``GeoTensor`` input.
+    georeferenced ``GeoTensor`` input. Like :class:`PolygonMask`, it
+    returns one boolean ``(H, W)`` mask whatever the carrier's rank.
 
     Args:
         geometry: Shapely geometry or ``GeoDataFrame``.

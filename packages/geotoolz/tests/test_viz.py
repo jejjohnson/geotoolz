@@ -297,6 +297,29 @@ def test_annotate_points_draws_marker() -> None:
     np.testing.assert_array_equal(arr[:, 1, 1], [255, 255, 0, 255])
 
 
+def test_annotate_ops_draw_each_frame_of_a_time_stack() -> None:
+    rng = np.random.default_rng(0)
+    stack = _toy_geotensor(rng.integers(0, 200, (2, 3, 4, 4)).astype(np.uint8))
+    polygon = Polygon([(1, 1), (3, 1), (3, 3), (1, 3)])
+    for op in (
+        AnnotatePoints(points=np.array([[1.5, 2.5]]), radius=0),
+        AnnotatePolygons(geometries=[polygon], width=1),
+    ):
+        out = np.asarray(op(stack))
+        assert out.shape == (2, 4, 4, 4)
+        for t in range(2):
+            frame = _toy_geotensor(np.asarray(stack)[t])
+            np.testing.assert_array_equal(out[t], np.asarray(op(frame)))
+
+
+def test_annotate_ops_name_themselves_on_a_non_display_input() -> None:
+    image = _toy_geotensor(np.zeros((2, 4, 4), dtype=np.uint8))
+    with pytest.raises(ValueError, match="AnnotatePoints: display arrays"):
+        AnnotatePoints(points=np.array([[1.5, 2.5]]))(image)
+    with pytest.raises(ValueError, match="AnnotatePolygons: display arrays"):
+        AnnotatePolygons(geometries=[Polygon([(1, 1), (3, 1), (3, 3)])])(image)
+
+
 def test_annotate_points_accepts_geodataframe() -> None:
     import geopandas as gpd
 

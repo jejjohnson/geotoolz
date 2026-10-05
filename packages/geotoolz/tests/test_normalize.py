@@ -24,6 +24,7 @@ from geotoolz.normalize import (
     RobustScaler,
     StandardScaler,
     ZeroOne,
+    histogram_match,
 )
 
 
@@ -202,6 +203,28 @@ def test_histogram_match_approximates_reference_cdf() -> None:
         [12.5, 15.0, 17.5],
         atol=0.1,
     )
+
+
+def test_histogram_match_pools_frames_per_band_on_a_time_stack() -> None:
+    """A (T, C, H, W) stack matches each band to its own reference band,
+    with one CDF over every frame -- never a frame taken for a band.
+    """
+    rng = np.random.default_rng(0)
+    reference = _toy_geotensor(
+        np.stack([rng.uniform(lo, lo + 1.0, (8, 8)) for lo in (0.0, 10.0, 100.0)])
+    )
+    stack = _toy_geotensor(rng.uniform(0.0, 1.0, (2, 3, 8, 8)))
+    stack.values[1] *= 2.0
+    out = np.asarray(HistogramMatch(reference=reference)(stack))
+    for band, lo in enumerate((0.0, 10.0, 100.0)):
+        assert np.all((out[:, band] >= lo) & (out[:, band] <= lo + 1.0))
+        # One CDF over both frames of the band.
+        pooled = histogram_match(
+            np.asarray(stack)[None, :, band], reference.values[band]
+        )[0]
+        np.testing.assert_array_equal(out[:, band], pooled)
+    # The brighter second frame stays brighter after the pooled match.
+    assert np.all(out[1].mean(axis=(-2, -1)) > out[0].mean(axis=(-2, -1)))
 
 
 def test_histogram_match_forbidden_in_yaml() -> None:
