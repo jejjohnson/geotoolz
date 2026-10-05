@@ -17,8 +17,9 @@ Users wrap once at the boundary::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
+import numpy as np
 from georeader.abstract_reader import GeoData
 from georeader.geotensor import GeoTensor
 
@@ -67,6 +68,12 @@ class RasterField:
     def with_data(self, array: Any) -> GeoTensor:
         return _rewrap(self.reader, array, self.reader.transform, self.reader.crs)
 
+    def __getstate__(self) -> dict[str, Any]:
+        return _pack_reader_state(self.__dict__)
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(_unpack_reader_state(state))
+
 
 @dataclass(eq=False)
 class AsyncRasterField:
@@ -109,3 +116,43 @@ def _rewrap(reader: Any, array: Any, transform: Any, crs: Any) -> GeoTensor:
         fill_value_default=getattr(reader, "fill_value_default", 0),
         attrs=dict(getattr(reader, "attrs", None) or {}),
     )
+
+
+class _PickledGeoTensor(NamedTuple):
+    """A `GeoTensor`'s pixels plus the metadata its own pickle drops."""
+
+    values: np.ndarray
+    transform: Any
+    crs: Any
+    fill_value_default: Any
+    attrs: dict[str, Any]
+
+
+def _pack_reader_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Copy of a field's ``__dict__`` whose `GeoTensor` reader pickles intact.
+
+    `GeoTensor` subclasses `numpy.ndarray` without extending its pickle
+    hook, so a pickled `GeoTensor` comes back with no ``transform`` /
+    ``crs`` / ``fill_value_default`` / ``attrs`` — a field wrapping one
+    would be unusable in a spawn / forkserver worker. Lazy readers
+    (`RasterioReader`) pickle by path and pass through unchanged.
+    """
+    state = dict(state)
+    reader = state.get("reader")
+    if isinstance(reader, GeoTensor):
+        state["reader"] = _PickledGeoTensor(
+            values=np.asarray(reader),
+            transform=reader.transform,
+            crs=reader.crs,
+            fill_value_default=reader.fill_value_default,
+            attrs=reader.attrs,
+        )
+    return state
+
+
+def _unpack_reader_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Inverse of `_pack_reader_state`."""
+    reader = state.get("reader")
+    if isinstance(reader, _PickledGeoTensor):
+        state = {**state, "reader": GeoTensor(**reader._asdict())}
+    return state

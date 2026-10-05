@@ -137,6 +137,20 @@ class PatchSource(grain.RandomAccessDataSource):
 Both wrappers benefit from `IndexedPatchView`'s in-memory cache without
 any framework changes.
 
+The view pickles, so `DataLoader(..., num_workers=4)` and Grain's
+multiprocess loaders work under every start method — `spawn` (the
+macOS / Windows default), `forkserver` (the Linux default from Python
+3.14) and `fork`. Each worker receives the anchor list and the
+`PatchCache` binding, and starts with its own empty in-memory
+`cache=True` cache; entries are never shared back to the parent. The
+patcher and the field must pickle too, which every built-in `Field`
+adapter does (a `RasterioReader` / `ObstoreCogField` re-opens its
+source by path / URL in the worker).
+
+`IndexedPatchView(TemporalPatcher(...), series)` works the same way;
+pass `patcher_kwargs={"time_axis": 1, "coord": times}` for a non-default
+time axis or a coordinate-aware geometry.
+
 ## When to use `check_full_scan=True`
 
 Turn it on when:

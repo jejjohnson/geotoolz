@@ -167,3 +167,20 @@ def make_rasterio_reader_field(path: Any, **kwargs: Any) -> RasterField:
 
     write_test_geotiff(path, **kwargs)
     return RasterField(RasterioReader(str(path)))
+
+
+# Spawn-worker entry points for `test_pickle.py`. They live here, not in a
+# test module, so a spawned child imports them without re-collecting tests.
+_WORKER_VIEW: Any = None
+
+
+def init_view_worker(view: Any) -> None:
+    """Pool initializer: the view arrives pickled, once per worker."""
+    global _WORKER_VIEW
+    _WORKER_VIEW = view
+
+
+def read_view_item(i: int) -> tuple[np.ndarray, tuple[float, ...], str]:
+    """Read ``view[i]`` in the worker; return pixels + georeferencing."""
+    data = _WORKER_VIEW[i].data
+    return np.asarray(data), tuple(data.transform)[:6], str(data.crs)

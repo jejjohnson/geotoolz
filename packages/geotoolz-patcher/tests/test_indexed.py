@@ -11,6 +11,13 @@ from geopatcher import (
     SpatialPatcher,
     SpatialRectangular,
     SpatialRegularStride,
+    TemporalCausalBoxcar,
+    TemporalFixedLookback,
+    TemporalLookbackHorizon,
+    TemporalMean,
+    TemporalMultiScale,
+    TemporalPatcher,
+    TemporalRegularStride,
 )
 from geopatcher._src.indexed import IndexedPatchView
 
@@ -136,3 +143,98 @@ class TestPreloadMaterialises:
         patch = view[0]
         # Patch.data was replaced with the .load() return value.
         np.testing.assert_array_equal(np.asarray(patch.data), [42])
+
+
+class TestIndexValidation:
+    def test_float_index_raises(self, patcher, field) -> None:
+        # `int(1.9)` would silently read patch 1.
+        view = IndexedPatchView(patcher, field)
+        with pytest.raises(TypeError, match="integers or slices, not float"):
+            _ = view[1.9]  # type: ignore[call-overload]
+
+    def test_numpy_integer_index(self, patcher, field) -> None:
+        view = IndexedPatchView(patcher, field)
+        np.testing.assert_array_equal(
+            np.asarray(view[np.int64(3)].data), np.asarray(view[3].data)
+        )
+
+    def test_preload_with_patch_cache_names_the_mode(
+        self, patcher, field, tmp_path
+    ) -> None:
+        from geopatcher import PatchCache
+
+        cache = PatchCache(tmp_path, field_id="scene")
+        with pytest.raises(ValueError, match="only to the in-memory cache"):
+            IndexedPatchView(patcher, field, cache=cache, preload=True)
+        with pytest.raises(ValueError, match="only to the in-memory cache"):
+            IndexedPatchView(patcher, field, cache=cache, cache_size=2)
+
+
+def _temporal(geometry) -> TemporalPatcher:
+    return TemporalPatcher(
+        geometry=geometry,
+        sampler=TemporalRegularStride(step=7),
+        window=TemporalCausalBoxcar(),
+        aggregation=TemporalMean(),
+    )
+
+
+def _assert_matches_split(view, expected) -> None:
+    assert len(view) == len(expected)
+    for got, ref in zip(view, expected, strict=True):
+        assert got.anchor == ref.anchor
+        assert got.indices == ref.indices
+        np.testing.assert_array_equal(got.data, ref.data)
+        np.testing.assert_array_equal(got.weights, ref.weights)
+
+
+class TestTemporalPatcher:
+    def test_temporal_patcher_supported(self) -> None:
+        series = np.arange(60.0).reshape(30, 2)
+        tp = _temporal(TemporalFixedLookback(length=5))
+        view = IndexedPatchView(tp, series)
+        _assert_matches_split(view, list(tp.split(series)))
+
+    def test_multi_scale_matches_split(self) -> None:
+        # Several patches per anchor: the view indexes per patch, not per
+        # anchor, so `view[i]` is still the i-th patch of `split`.
+        series = np.arange(40.0)
+        tp = _temporal(TemporalMultiScale(scales=[3, 8]))
+        view = IndexedPatchView(tp, series)
+        assert len(view) == tp.n_anchors(series) == 2 * len(tp.anchors(series))
+        _assert_matches_split(view, list(tp.split(series)))
+
+    def test_patcher_kwargs_forwarded(self) -> None:
+        series = np.arange(60.0).reshape(2, 30)
+        tp = _temporal(TemporalLookbackHorizon(lookback=4, horizon=2))
+        view = IndexedPatchView(tp, series, patcher_kwargs={"time_axis": 1})
+        _assert_matches_split(view, list(tp.split(series, time_axis=1)))
+
+    def test_lazy_series_matches_split(self) -> None:
+        xr = pytest.importorskip("xarray")
+        pytest.importorskip("dask")
+        da = xr.DataArray(np.arange(30.0), dims="time").chunk({"time": 5})
+        tp = _temporal(TemporalFixedLookback(length=5))
+        view = IndexedPatchView(tp, da)
+        _assert_matches_split(view, list(tp.split(da.values)))
+
+    def test_bare_anchor_on_multi_scale_raises(self) -> None:
+        tp = _temporal(TemporalMultiScale(scales=[3, 8]))
+        with pytest.raises(ValueError, match=r"pass \(7, k\)"):
+            tp.patch_at(np.arange(40.0), 7)
+        with pytest.raises(ValueError, match="out of range"):
+            tp.patch_at(np.arange(40.0), (7, 2))
+
+    def test_patch_cache_rejected_without_cache_kwarg(self, tmp_path) -> None:
+        # `TemporalPatcher.patch_at` takes no ``cache=``; the view must not
+        # pass it one (and says so up front rather than on every item).
+        from geopatcher import PatchCache
+
+        tp = _temporal(TemporalFixedLookback(length=5))
+        with pytest.raises(TypeError, match="accepts a cache"):
+            IndexedPatchView(tp, np.arange(30.0), cache=PatchCache(tmp_path))
+
+    def test_in_memory_cache_works(self) -> None:
+        tp = _temporal(TemporalFixedLookback(length=5))
+        view = IndexedPatchView(tp, np.arange(30.0), cache=True)
+        assert view[2] is view[2]

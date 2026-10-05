@@ -20,7 +20,11 @@ from typing import Any
 from georeader.abstract_reader import GeoData
 from georeader.geotensor import GeoTensor
 
-from geopatcher._src.fields.raster import _rewrap
+from geopatcher._src.fields.raster import (
+    _pack_reader_state,
+    _rewrap,
+    _unpack_reader_state,
+)
 
 
 @dataclass(frozen=True)
@@ -109,6 +113,12 @@ class ReprojectingRasterField:
             ),
         )
         object.__setattr__(self, "_resampling", _resampling_enum(self.resampling))
+
+    def __getstate__(self) -> dict[str, Any]:
+        return _pack_reader_state(self.__dict__)
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(_unpack_reader_state(state))
 
     @property
     def domain(self) -> _ReprojectedDomain:
