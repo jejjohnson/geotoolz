@@ -415,3 +415,124 @@ class TestConstructionAndCoupling:
         mf = MatchedField(primary=_ArrField(np.zeros((4, 2, 2))))
         with pytest.raises(ValueError, match="unknown coupling"):
             list(mstp.split(mf))
+
+
+# ---------------------------------------------------------------------------
+# Parity with SpatioTemporalPatcher (#203): coord-aware geometries,
+# coord_value / member-summed hook payloads, cadence check, prefetch
+# ---------------------------------------------------------------------------
+
+
+def _time_raster(n_time: int, scale: float = 1.0) -> Any:
+    import rasterio
+    from georeader.geotensor import GeoTensor
+
+    from geopatcher._src.fields.raster import RasterField
+
+    arr = np.arange(n_time * 16 * 16, dtype=np.float32).reshape(n_time, 16, 16)
+    return RasterField(
+        GeoTensor(
+            values=arr * scale,
+            transform=rasterio.Affine.identity(),
+            crs="EPSG:32630",
+            fill_value_default=np.nan,
+        )
+    )
+
+
+def _stencil_patcher(coupling: str = "product", anchors_: Any = None) -> Any:
+    from geopatcher import (
+        SpatialBoxcar,
+        SpatialExplicit,
+        SpatialOverlapAdd,
+        SpatialPatcher,
+        SpatialRectangular,
+        SpatialRegularStride,
+        TemporalForecast,
+        TemporalStencilGeometry,
+        TemporalStencilSampler,
+        TimeStencil,
+    )
+
+    stencil = TimeStencil("-3h", "3h", "3h", closed="both")
+    sampler: Any = (
+        SpatialRegularStride(step=8)
+        if anchors_ is None
+        else SpatialExplicit(anchors_=anchors_)
+    )
+    return SpatioTemporalPatcher(
+        spatial=SpatialPatcher(
+            geometry=SpatialRectangular(size=(8, 8)),
+            sampler=sampler,
+            window=SpatialBoxcar(),
+            aggregation=SpatialOverlapAdd(),
+        ),
+        temporal=TemporalPatcher(
+            geometry=TemporalStencilGeometry(
+                stencil=stencil, source_step=np.timedelta64(3, "h")
+            ),
+            sampler=TemporalStencilSampler(stencil=stencil),
+            window=TemporalCausalBoxcar(),
+            aggregation=TemporalForecast(horizon=1),
+        ),
+        coupling=coupling,  # type: ignore[arg-type]
+    )
+
+
+def _coord() -> np.ndarray:
+    return np.arange("2020-01-01T00", "2020-01-02T00", 3, dtype="datetime64[h]").astype(
+        "datetime64[ns]"
+    )
+
+
+class _CoordHook:
+    def __init__(self) -> None:
+        self.done: list[tuple[Any, int, Any]] = []
+
+    def on_patch_done(
+        self, anchor: Any, elapsed: float, bytes_: int, coord_value: Any = None
+    ) -> None:
+        self.done.append((anchor, bytes_, coord_value))
+
+
+@pytest.mark.parametrize("coupling", ["product", "coupled"])
+def test_stencil_geometry_matches_single_source(coupling: str) -> None:
+    anchors_ = None if coupling == "product" else [((0, 0), 3), ((8, 8), 5)]
+    stp = _stencil_patcher(coupling, anchors_)
+    mf = MatchedField(
+        primary=_time_raster(8),
+        secondaries={"s": _time_raster(8, scale=2.0)},
+        coreg={"s": lambda raw, prim: raw},
+    )
+    coord = _coord()
+    msp = MatchedSpatioTemporalPatcher(primary=stp)
+    hook = _CoordHook()
+    matched = list(msp.split(mf, hooks=[hook], coord=coord, prefetch=2))
+    single = list(stp.split(mf.primary, coord=coord))
+    assert len(matched) == len(single) > 0
+    for mp, ref, (anchor, nbytes, coord_value) in zip(
+        matched, single, hook.done, strict=True
+    ):
+        assert (mp.space, mp.time) == (ref.space, ref.time) == anchor
+        prim = np.asarray(mp.members[PRIMARY_KEY].data)
+        np.testing.assert_array_equal(prim, np.asarray(ref.data))
+        np.testing.assert_array_equal(np.asarray(mp.members["s"].data), prim * 2)
+        assert nbytes == 2 * prim.nbytes
+        assert coord_value == coord[mp.time]
+
+
+def test_spatiotemporal_cadence_mismatch_raises() -> None:
+    stp = _stencil_patcher()
+    stp.temporal = TemporalPatcher(
+        geometry=TemporalFixedLookback(length=2),
+        sampler=TemporalRegularStride(step=2),
+        window=TemporalCausalBoxcar(),
+        aggregation=TemporalMean(),
+    )
+    mf = MatchedField(
+        primary=_time_raster(8),
+        secondaries={"s": _time_raster(4)},
+        coreg={"s": lambda raw, prim: raw},
+    )
+    with pytest.raises(ValueError, match=r"'s' has 4 steps.*primary has 8"):
+        list(MatchedSpatioTemporalPatcher(primary=stp).split(mf))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from functools import lru_cache
 from typing import Any, Protocol, runtime_checkable
 
@@ -156,7 +156,15 @@ def _nbytes(value: Any) -> int:
     ``data``, and only then ``.values.nbytes`` (e.g. a pandas frame). The
     ``.values`` probe comes last because on a lazy xarray object it would
     compute the chunk graph — those always answer ``.nbytes`` first.
+
+    A mapping (a `MatchedField` read's ``{source: data}``, a per-source
+    merge result) or a list / tuple counts the sum of its values, so the
+    matched patchers report every member's bytes, not ``0``.
     """
+    if isinstance(value, Mapping):
+        return sum(_nbytes(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return sum(_nbytes(v) for v in value)
     for attr in (None, "data", "values"):
         candidate = value if attr is None else getattr(value, attr, None)
         if candidate is None:
