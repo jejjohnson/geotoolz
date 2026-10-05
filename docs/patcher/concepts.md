@@ -59,6 +59,8 @@ flowchart LR
     Field --> RND[SpatialRandom<br/>i.i.d. uniform]
     Field --> PD[SpatialPoissonDisk<br/>min-spacing constraint]
     Field --> EX[SpatialExplicit<br/>caller-supplied anchors]
+    Field --> EC[SpatialExplicitCoords<br/>caller-supplied map coordinates]
+    Field --> AT[SpatialAlongTrack<br/>anchors spaced along a track]
     style Field fill:#bbdefb,stroke:#1565c0
 ```
 
@@ -200,14 +202,22 @@ a per-cell replacement for `Median` / `Mode`.
 ### Async path
 
 `AsyncSpatialPatcher` mirrors `SpatialPatcher` over `AsyncField`
-(currently `AsyncRasterField` over `georeader.AsyncGeoTIFFReader`). The
-async path is concurrent at the I/O boundary, not the compute boundary —
-patches are read concurrently but operators run synchronously on each.
+(`AsyncRasterField` over `georeader.AsyncGeoTIFFReader`, or any field
+with an `aselect` / async `select`). `asplit` walks the same anchors as
+`split` and awaits **one read at a time**: it does not read ahead (there
+is no `prefetch=` on `asplit`), and `max_in_flight` /
+`max_in_flight_bytes` only bound how many yielded patches may be alive
+at once. Overlapping reads with compute — or running operators
+concurrently — is the caller's choice, e.g. with `asyncio.gather` over a
+batch of patches.
 
 ```python
-async for patch in async_patcher.asplit(async_field):
-    ...
+async for patch in async_patcher.asplit(async_field, max_in_flight=8):
+    out = await async_operator(patch.data)
 ```
+
+See [Async and prefetch](patching/async-prefetch.md) for the sync
+`prefetch=` read-ahead and the backpressure contract.
 
 ### Hooks
 

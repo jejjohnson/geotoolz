@@ -1,6 +1,6 @@
 """`ReprojectingRasterField` — on-the-fly reprojection as a `Field` adapter.
 
-Level 2 of CRS-aware patching (issue #20): rather than teaching the
+Level 2 of CRS-aware patching (issue jejjohnson/geopatcher#20): rather than teaching the
 patcher core about CRSs, present the *destination* grid as the field's
 domain. Every existing sampler / geometry / aggregation then works on the
 target grid unchanged, and each `select` warps the source into the chip.

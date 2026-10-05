@@ -19,7 +19,7 @@
 """Coordinate-aware stencils for sampling 1-D grids in physical units.
 
 Ported from `neuralgcm/terrax`'s `terrax.xreader.stencils`. See ADR-004 in
-``docs/decisions.md`` for the design and the v0.1 stride-1 constraint that
+``docs/patcher/decisions.md`` for the design and the v0.1 stride-1 constraint that
 sits *outside* this module (it is enforced by `TemporalStencilGeometry`,
 not by `build_sampling_slices` itself).
 

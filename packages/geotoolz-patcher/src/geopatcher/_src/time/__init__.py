@@ -4,7 +4,7 @@ The shape of the API mirrors `geopatcher.spatial` exactly —
 `TemporalGeometry`, `TemporalSampler`, `TemporalWindow`,
 `TemporalAggregation` bases with concrete axes that drop the
 ``Temporal`` prefix (the submodule path provides the context). See
-``docs/patching.md`` §"The four temporal axes" for the time-axis
+``docs/patcher/patching.md`` §"The four temporal axes" for the time-axis
 framing.
 """
 
@@ -40,7 +40,9 @@ from geopatcher._src.time.stencils import (
     Stencil,
     TimeStencil,
     build_sampling_slices,
+    coord_step,
     divide_evenly,
+    stencil_offsets,
     valid_origin_points,
 )
 from geopatcher._src.time.window import (
@@ -81,6 +83,8 @@ __all__ = [
     "TemporalWindow",
     "TimeStencil",
     "build_sampling_slices",
+    "coord_step",
     "divide_evenly",
+    "stencil_offsets",
     "valid_origin_points",
 ]

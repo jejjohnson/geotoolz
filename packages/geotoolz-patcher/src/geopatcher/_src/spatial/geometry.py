@@ -263,7 +263,7 @@ def _haversine_km(
     lat2: float | np.ndarray,
     lon2: float | np.ndarray,
 ) -> np.ndarray:
-    """Great-circle distance in km on a unit Earth (R = 6371)."""
+    """Great-circle distance in km on a spherical Earth (R = 6371 km)."""
     lat1r, lat2r = np.radians(lat1), np.radians(lat2)
     dlat = lat2r - lat1r
     dlon = np.radians(lon2) - np.radians(lon1)

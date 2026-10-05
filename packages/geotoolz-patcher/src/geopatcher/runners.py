@@ -24,6 +24,7 @@ import numpy as np
 
 from geopatcher._src.hooks import PatcherHook
 from geopatcher._src.patch import Patch
+from geopatcher._src.prefetch import prefetch_iterable
 from geopatcher._src.protocols import Field
 from geopatcher._src.spatial.patcher import (
     SpatialPatcher,
@@ -31,6 +32,9 @@ from geopatcher._src.spatial.patcher import (
     _raise_if_overflows,
     _unwrap_for_select,
 )
+
+
+__all__ = ["Backend", "ErrorPolicy", "parallel_map", "prefetch_iterable"]
 
 
 Backend = Literal["thread", "process"]

@@ -7,37 +7,37 @@ coordinate-aware `TimeStencil` machinery.
 
 ### Geometry
 
-::: geopatcher._src.time.geometry.TemporalGeometry
-::: geopatcher._src.time.geometry.TemporalFixedLookback
-::: geopatcher._src.time.geometry.TemporalLookbackHorizon
-::: geopatcher._src.time.geometry.TemporalMultiScale
-::: geopatcher._src.time.geometry.TemporalPhaseWindow
+::: geopatcher.TemporalGeometry
+::: geopatcher.TemporalFixedLookback
+::: geopatcher.TemporalLookbackHorizon
+::: geopatcher.TemporalMultiScale
+::: geopatcher.TemporalPhaseWindow
 
 ### Sampler
 
-::: geopatcher._src.time.sampler.TemporalSampler
-::: geopatcher._src.time.sampler.TemporalRegularStride
-::: geopatcher._src.time.sampler.TemporalRandom
-::: geopatcher._src.time.sampler.TemporalExplicit
+::: geopatcher.TemporalSampler
+::: geopatcher.TemporalRegularStride
+::: geopatcher.TemporalRandom
+::: geopatcher.TemporalExplicit
 
 `TemporalCausalRolling` is an alias of `TemporalRegularStride` and
 `TemporalEventTriggered` an alias of `TemporalExplicit`.
 
 ### Window
 
-::: geopatcher._src.time.window.TemporalWindow
-::: geopatcher._src.time.window.TemporalCausalBoxcar
-::: geopatcher._src.time.window.TemporalExponentialDecay
-::: geopatcher._src.time.window.TemporalTaperedTukey
-::: geopatcher._src.time.window.TemporalPeriodic
+::: geopatcher.TemporalWindow
+::: geopatcher.TemporalCausalBoxcar
+::: geopatcher.TemporalExponentialDecay
+::: geopatcher.TemporalTaperedTukey
+::: geopatcher.TemporalPeriodic
 
 ### Aggregation
 
-::: geopatcher._src.time.aggregation.TemporalAggregation
-::: geopatcher._src.time.aggregation.TemporalFold
-::: geopatcher._src.time.aggregation.TemporalMean
-::: geopatcher._src.time.aggregation.TemporalHierarchicalCombine
-::: geopatcher._src.time.aggregation.TemporalForecast
+::: geopatcher.TemporalAggregation
+::: geopatcher.TemporalFold
+::: geopatcher.TemporalMean
+::: geopatcher.TemporalHierarchicalCombine
+::: geopatcher.TemporalForecast
 
 ## Temporal stencils
 
@@ -46,16 +46,16 @@ Coordinate-aware time windows (see ADR-004 and the
 is the `Literal["left", "right", "both", "neither"]` alias used by the
 stencil endpoints.
 
-::: geopatcher._src.time.stencils.Stencil
-::: geopatcher._src.time.stencils.TimeStencil
-::: geopatcher._src.time.stencils.build_sampling_slices
-::: geopatcher._src.time.stencils.coord_step
-::: geopatcher._src.time.stencils.stencil_offsets
-::: geopatcher._src.time.stencils.divide_evenly
-::: geopatcher._src.time.stencils.valid_origin_points
+::: geopatcher.Stencil
+::: geopatcher.TimeStencil
+::: geopatcher.build_sampling_slices
+::: geopatcher.time.coord_step
+::: geopatcher.time.stencil_offsets
+::: geopatcher.divide_evenly
+::: geopatcher.valid_origin_points
 
 The four-axis integration points are documented with the other temporal
 axes above:
 
-::: geopatcher._src.time.geometry.TemporalStencilGeometry
-::: geopatcher._src.time.sampler.TemporalStencilSampler
+::: geopatcher.TemporalStencilGeometry
+::: geopatcher.TemporalStencilSampler

@@ -9,7 +9,7 @@ materialised list of anchors and dispatches to `patcher.patch_at`.
 Optional in-memory cache (`cache=True`) mirrors `xrpatcher.XRDAPatcher`'s
 ``cache`` / ``preload`` flags one-for-one — the integer index is the
 cache key, no content hashing. The deeper content-addressed cache is
-tracked separately as gh #24.
+tracked separately as jejjohnson/geopatcher#24.
 
 See ADR-005 for the design choices (Sequence-not-torch-Dataset,
 cache-on-view-not-on-patcher).
@@ -65,7 +65,7 @@ class IndexedPatchView(Sequence[Patch]):
         cache: If ``True``, cache patches in memory by integer index after
             the first access (mirrors xrpatcher's ``cache=True``). A
             `PatchCache` instead routes reads through the cross-run,
-            content-addressed on-disk cache (gh #24); ``preload`` and
+            content-addressed on-disk cache (jejjohnson/geopatcher#24); ``preload`` and
             ``cache_size`` do not apply in that mode, and the patcher's
             ``patch_at`` must accept ``cache=`` (`SpatialPatcher`'s does;
             `TemporalPatcher`'s does not).

@@ -23,7 +23,7 @@ Two new bits of sugar make the side-by-side really one-for-one:
 - `SpatialPatcher.merge_to_xarray(patches, field)` — `merge` + rewrap as
   `xarray.DataArray` with the original coords intact.
 
-See **ADR-005** in `docs/decisions.md` for the design rationale (why
+See **ADR-005** in [Design decisions](../decisions.md) for the design rationale (why
 `Sequence[Patch]` rather than `torch.utils.data.Dataset`, why the cache
 lives on the view).
 
@@ -189,5 +189,5 @@ the flag.
 - [`IndexedPatchView`](../api/reference.md) — the random-access wrapper.
 - [`recipes/temporal-stencils.md`](temporal-stencils.md) — time-axis
   counterpart (when you want `TimeStencil('-9h', '3h', '3h')` semantics).
-- ADR-005 in [`docs/decisions.md`](../decisions.md) — design rationale.
+- ADR-005 in [Design decisions](../decisions.md) — design rationale.
 - `xrpatcher` upstream: https://github.com/jejjohnson/xrpatcher.

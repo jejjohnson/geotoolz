@@ -1,4 +1,4 @@
-"""`PatchCache` — content-addressed, on-disk patch cache (gh #24).
+"""`PatchCache` — content-addressed, on-disk patch cache (jejjohnson/geopatcher#24).
 
 Cross-run sibling of `IndexedPatchView(cache=True)` (which only avoids
 re-reads *within* a process). A `PatchCache` keys each patch by

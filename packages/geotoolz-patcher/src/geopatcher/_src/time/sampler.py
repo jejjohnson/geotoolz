@@ -32,7 +32,7 @@ class TemporalSampler:
     `TemporalStencilSampler`) set ``needs_coord = True`` and accept a
     ``coord=`` keyword in `anchors`. `TemporalPatcher` passes the coord
     vector through when the flag is `True`. See ADR-004 in
-    ``docs/decisions.md``.
+    ``docs/patcher/decisions.md``.
     """
 
     forbid_in_yaml: ClassVar[bool] = False

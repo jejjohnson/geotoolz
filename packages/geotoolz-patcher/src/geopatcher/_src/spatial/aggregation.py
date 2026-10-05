@@ -11,7 +11,7 @@ the disk-backed path (a target zarr store) — `SpatialOverlapAdd` is the
 canonical streaming-safe member; `SpatialMedian` triggers a warning if the
 caller asks for streaming.
 
-See ``docs/patching.md`` §"Streaming aggregations" for the framing.
+See ``docs/patcher/patching.md`` §"Streaming aggregations" for the framing.
 """
 
 from __future__ import annotations

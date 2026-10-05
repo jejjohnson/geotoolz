@@ -7,7 +7,7 @@ caller asks. Split returns an `Iterator[Patch]` so streaming is the
 default; ``list(patcher.split(field))`` materialises eagerly when that's
 what's wanted.
 
-See ``docs/concepts.md`` ("The four-axis abstraction") for the
+See ``docs/patcher/concepts.md`` ("The four-axis abstraction") for the
 four-axis framework.
 """
 
@@ -194,7 +194,7 @@ class _SpatialPatcherBase:
         (``n_samples`` for the first two; a probabilistic estimate for
         the third), but the anchors materialised here are different
         draws from the ones a subsequent `split` will see. See
-        ``docs/decisions.md`` (ADR-001) for why `split` returns an
+        ``docs/patcher/decisions.md`` (ADR-001) for why `split` returns an
         iterator and this helper exists as the ``len`` substitute.
         """
         return sum(1 for _ in self.sampler.anchors(field.domain, self.geometry))

@@ -1,7 +1,7 @@
 """Concrete `Domain` types — one per data geometry.
 
-Each `Domain` carries just enough metadata for `Sampler.anchors` and
-`PatchGeometry.neighborhood` to do their work without touching the
+Each `Domain` carries just enough metadata for `SpatialSampler.anchors` and
+`SpatialGeometry.neighborhood` to do their work without touching the
 underlying data. `RasterDomain` is reused from `georeader.GeoDataBase`
 (every `RasterioReader` / `GeoTensor` already satisfies it); the other
 three are introduced here.

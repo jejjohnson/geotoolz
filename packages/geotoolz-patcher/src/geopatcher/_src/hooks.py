@@ -24,7 +24,7 @@ class PatcherHook(Protocol):
     ``coord_value`` (or ``None`` for integer geometries). `_dispatch` trims
     to the callback's actual arity, so single-arg hooks written for the
     pre-coord protocol still receive only ``anchor`` without warnings.
-    See ADR-004 in ``docs/decisions.md`` ("Hook payload extension").
+    See ADR-004 in ``docs/patcher/decisions.md`` ("Hook payload extension").
 
     `on_patch_skipped` fires (instead of ``on_patch_start`` /
     ``on_patch_done``) for each patch a ``journal`` already holds, so

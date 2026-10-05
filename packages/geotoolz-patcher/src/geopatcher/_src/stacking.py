@@ -8,7 +8,8 @@ loudly on ragged geometries so the failure mode is visible at the
 boundary rather than producing a numpy object array further down the
 JIT trace.
 
-See ``docs/notebooks/recipes_jax_vmap.ipynb`` for the canonical use.
+For fixed-size device batches (with a padded last batch) see
+`geopatcher.jax.batch_split`.
 """
 
 from __future__ import annotations

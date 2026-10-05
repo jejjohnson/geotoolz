@@ -10,7 +10,7 @@ The full end-to-end story (catalog → operators → patcher) lives at
 [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 This page covers only the **patcher** slice — the same code is also
 shipped as a runnable notebook at
-[`docs/notebooks/patcher_lake_tahoe.ipynb`](notebooks/patcher_lake_tahoe.ipynb).
+[`docs/patcher/notebooks/patcher_lake_tahoe.ipynb`](notebooks/patcher_lake_tahoe.ipynb).
 
 ## Setup
 

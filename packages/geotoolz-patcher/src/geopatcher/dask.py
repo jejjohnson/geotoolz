@@ -23,6 +23,9 @@ from typing import Any
 from geopatcher._src._extras import missing_extra
 
 
+__all__ = ["to_dask_bag", "to_delayed"]
+
+
 def _patch_at(patcher: Any, field: Any, anchor: Any, **kwargs: Any) -> Any:
     return patcher.patch_at(field, anchor, **kwargs)
 

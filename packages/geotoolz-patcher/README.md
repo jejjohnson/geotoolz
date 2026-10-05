@@ -53,6 +53,8 @@ pip install 'geotoolz-patcher[vector]'             # GeoPandasField
 pip install 'geotoolz-patcher[point]'              # XvecField
 pip install 'geotoolz-patcher[xarray-raster]'      # RioXarrayField
 pip install 'geotoolz-patcher[streaming]'          # disk-backed OverlapAdd
+pip install 'geotoolz-patcher[dask]'               # DaskField, geopatcher.dask helpers
+pip install 'geotoolz-patcher[jax]'                # geopatcher.jax batched splitting
 pip install 'geotoolz-patcher[obstore]'            # geopatcher.objstore client pool
 pip install 'geotoolz-patcher[obstore-cog]'        # ObstoreCogField (pool + async-tiff)
 pip install 'geotoolz-patcher[patch-full]'         # all of the above
@@ -99,17 +101,17 @@ stitched = patcher.merge(out, field.domain)               # global ndarray
 For independent local jobs, swap the loop for the bundled
 `runners.parallel_map`; for global-context operators, use the codified
 `reduce` / `two_pass` helpers. See the
-[concepts page](https://jejjohnson.github.io/geopatcher/concepts/) for the
+[concepts page](https://jejjohnson.github.io/geotoolz/patcher/concepts/) for the
 full mental model.
 
 ## Next steps
 
-- **Concepts:** [docs/concepts.md](docs/concepts.md) — the four-axis abstraction with diagrams.
-- **15-min walkthrough:** [docs/quickstart.md](docs/quickstart.md) — Lake Tahoe Sentinel-2 NDVI inference.
-- **Recipes:** streaming OverlapAdd, on-error policies, PatchJournal resume.
-- **Demo notebook:** [docs/notebooks/patcher_lake_tahoe.ipynb](docs/notebooks/patcher_lake_tahoe.ipynb) — patcher slice of the Lake Tahoe scenario.
+- **Concepts:** [concepts](https://jejjohnson.github.io/geotoolz/patcher/concepts/) — the four-axis abstraction with diagrams.
+- **15-min walkthrough:** [quickstart](https://jejjohnson.github.io/geotoolz/patcher/quickstart/) — Lake Tahoe Sentinel-2 NDVI inference.
+- **Recipes:** [streaming OverlapAdd](https://jejjohnson.github.io/geotoolz/patcher/recipes/streaming-overlap-add/), [on-error policies](https://jejjohnson.github.io/geotoolz/patcher/recipes/on-error-policies/), [PatchJournal resume](https://jejjohnson.github.io/geotoolz/patcher/recipes/journal-and-resume/).
+- **Demo notebook:** [patcher_lake_tahoe](https://jejjohnson.github.io/geotoolz/patcher/notebooks/patcher_lake_tahoe/) — patcher slice of the Lake Tahoe scenario.
 - **See the full end-to-end story:** [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb) — catalog → operators → patcher.
-- **API reference:** [docs site](https://jejjohnson.github.io/geopatcher/api/reference/).
+- **API reference:** [docs site](https://jejjohnson.github.io/geotoolz/patcher/api/reference/).
 
 ## License
 

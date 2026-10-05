@@ -19,7 +19,7 @@ This recipe shows three layers:
    `TemporalStencilSampler` inside a `TemporalPatcher`.
 3. What the v0.1 constraints are and what they catch.
 
-See **ADR-004** in `docs/decisions.md` for the design rationale and the
+See **ADR-004** in [Design decisions](../decisions.md) for the design rationale and the
 backwards-compatibility story.
 
 ## Prerequisites

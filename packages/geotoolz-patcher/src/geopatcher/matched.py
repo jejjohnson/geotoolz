@@ -10,23 +10,5 @@ See ``docs/patcher/design/query-matchup.md`` §6 and
 
 from __future__ import annotations
 
-from geopatcher._src.matched import (
-    MatchedField,
-    MatchedPatch,
-    MatchedSpatialPatcher,
-    MatchedSpatioTemporalPatch,
-    MatchedSpatioTemporalPatcher,
-    MatchedTemporalPatch,
-    MatchedTemporalPatcher,
-)
-
-
-__all__ = [
-    "MatchedField",
-    "MatchedPatch",
-    "MatchedSpatialPatcher",
-    "MatchedSpatioTemporalPatch",
-    "MatchedSpatioTemporalPatcher",
-    "MatchedTemporalPatch",
-    "MatchedTemporalPatcher",
-]
+from geopatcher._src.matched import *  # noqa: F403
+from geopatcher._src.matched import __all__ as __all__

@@ -33,11 +33,13 @@ Operator-graph wrappers (`GridSampler`, `ApplyToChips`, `Stitch`) that bridge
 the patcher into the `pipekit` composition framework live in the optional
 `geopatcher.integrations.pipekit` submodule, gated behind the `[pipekit]`
 extra. While `pipekit` is pre-PyPI, install with ``uv sync --extra pipekit``
-(or ``uv pip install`` — see the "Pre-PyPI install" section of the README).
+(see the "Install" section of the README).
 The patcher core itself remains framework-free.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from geopatcher import fields, spatial, time
 from geopatcher._src._serialize import (
@@ -58,6 +60,7 @@ from geopatcher._src.domains import (
 )
 from geopatcher._src.exceptions import IncompleteScanConfiguration
 from geopatcher._src.fields import (
+    LAZY_ADAPTERS as _LAZY_ADAPTERS,
     AsyncRasterField,
     RasterField,
     ReprojectingRasterField,
@@ -166,8 +169,10 @@ __all__ = [
     "AsyncRasterField",
     "AsyncSpatialPatcher",
     "Closed",
+    "DaskField",
     "Domain",
     "Field",
+    "GeoPandasField",
     "GridDomain",
     "IncompleteScanConfiguration",
     "IndexedPatchView",
@@ -181,6 +186,7 @@ __all__ = [
     "RasterDomain",
     "RasterField",
     "ReprojectingRasterField",
+    "RioXarrayField",
     "SpatialAggregation",
     "SpatialAlongTrack",
     "SpatialApproxCardinality",
@@ -254,6 +260,8 @@ __all__ = [
     "TemporalWindow",
     "TimeStencil",
     "VectorDomain",
+    "XarrayField",
+    "XvecField",
     "__version__",
     "axis_envelope",
     "build_sampling_slices",
@@ -274,15 +282,8 @@ __all__ = [
 
 # Lazy field adapters keyed off optional extras — defer to the public
 # `geopatcher.fields` submodule's own lazy loader.
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Lazy-load optional Field adapters from `geopatcher.fields`."""
-    if name in {
-        "XarrayField",
-        "GeoPandasField",
-        "XvecField",
-        "RioXarrayField",
-        "DaskField",
-        "ObstoreCogField",
-    }:
+    if name in _LAZY_ADAPTERS:
         return getattr(fields, name)
-    raise AttributeError(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
