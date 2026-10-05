@@ -16,7 +16,7 @@ Install the extras we need:
 ```bash
 pip install 'geotoolz-catalog[full]'
 # or with uv:
-uv add 'geocatalog[full]'
+uv add 'geotoolz-catalog[full]'
 ```
 
 The `[full]` extra is the kitchen-sink combo — it bundles the STAC

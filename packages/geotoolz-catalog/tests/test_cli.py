@@ -58,6 +58,25 @@ def test_help_build(capsys: pytest.CaptureFixture[str]) -> None:
     assert "xarray" in captured
 
 
+def test_version_is_the_distribution_version(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`geocatalog --version` prints the geotoolz-catalog version (#250)."""
+    import tomllib
+
+    import geocatalog
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    version = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    # release-please bumps `__version__` through this annotation.
+    init = Path(geocatalog.__file__).read_text(encoding="utf-8")
+    assert f'__version__ = "{version}"  # x-release-please-version' in init
+    assert geocatalog.__version__ == version
+
+    _run("--version")
+    assert capsys.readouterr().out.strip() == version
+
+
 def test_build_raster_roundtrip(
     tmp_path: Path,
     utm29_tile_factory: Callable[..., Path],
