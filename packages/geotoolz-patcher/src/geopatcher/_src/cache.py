@@ -111,6 +111,11 @@ class PatchCache:
           a digest of the grid coordinates) and the reader's band
           selection (``indexes``) and boundless ``fill_value_default``.
 
+        An xarray-backed field also keys on its variable name (two
+        variables of one file share everything else). An adapter whose
+        ``cache_id()`` raises `UnstableIdentityError` (an in-memory
+        object store) needs an explicit ``field_id``.
+
         In-memory fields with no source identity raise, since caching
         against nothing would silently serve stale data — including a
         field that wraps an unnamed in-memory reader, whatever its
@@ -125,7 +130,16 @@ class PatchCache:
             ... )
             'scene|{"adapter": null, "domain": {...}, "read": {...}}'
         """
-        adapter_id = _adapter_id(field)
+        try:
+            adapter_id = _adapter_id(field)
+        except UnstableIdentityError as exc:
+            if self.field_id is None:
+                raise ValueError(
+                    f"PatchCache cannot derive a stable identity for a "
+                    f"{type(field).__name__}: {exc} Pass field_id=... to "
+                    f"PatchCache, distinct for every object it caches."
+                ) from exc
+            adapter_id = exc.partial
         source = self.field_id if self.field_id is not None else _source_id(field)
         if source is None:
             if adapter_id is None or _wraps_unnamed_source(field):
@@ -291,6 +305,20 @@ class PatchCache:
 _SOURCE_ATTRS = ("reader", "da", "array")
 
 
+class UnstableIdentityError(ValueError):
+    """A field's ``cache_id()`` cannot name what it reads stably.
+
+    Raised by an adapter whose source has no identity that survives the
+    process (an in-memory object store, say). `PatchCache` then requires
+    an explicit ``field_id`` and keys on it plus ``partial`` — the rest
+    of the adapter's identity (IFD, reprojection parameters, …).
+    """
+
+    def __init__(self, message: str, *, partial: str) -> None:
+        super().__init__(message)
+        self.partial = partial
+
+
 def _adapter_id(field: Any) -> str | None:
     """The field's own ``cache_id()``, or ``None`` when it defines none."""
     cache_id = getattr(field, "cache_id", None)
@@ -389,6 +417,13 @@ def _read_signature(field: Any) -> dict[str, Any]:
     fill = getattr(reader, "fill_value_default", None)
     if fill is not None:
         sig["fill"] = _to_json(fill, what="fill_value_default")
+    # Two variables of one file share ``encoding["source"]``, dims, coords,
+    # shape and dtype; only the variable name tells them apart.
+    for attr in ("da", "array"):
+        data = getattr(field, attr, None)
+        if data is not None and hasattr(data, "dims") and hasattr(data, "name"):
+            sig["variable"] = _to_json(data.name, what="DataArray.name")
+            break
     return sig
 
 
@@ -575,6 +610,16 @@ def _check_storable(values: np.ndarray, *, what: str) -> None:
             f"PatchCache cannot store {what} with object dtype: it would "
             f"need pickling and could not be rebuilt bit-identically."
         )
+    _check_plain_dtype(values.dtype, what=what)
+
+
+def _check_plain_dtype(dtype: np.dtype, *, what: str) -> None:
+    """Refuse structured / void dtypes: ``dtype.str`` (``"|V8"``) drops fields."""
+    if dtype.kind == "V":
+        raise TypeError(
+            f"PatchCache cannot store {what} with structured or void dtype "
+            f"{dtype!r}: its field layout would not survive the round trip."
+        )
 
 
 def _encode_crs(crs: Any) -> Any:
@@ -628,11 +673,13 @@ def _to_json(value: Any, *, what: str) -> Any:
     if type(value) in (bool, int, float, str, type(None)):
         return value
     if isinstance(value, np.dtype):
+        _check_plain_dtype(value, what=what)
         return {"__dtype__": value.str}
     if isinstance(value, (np.ndarray, np.generic)):
         arr = np.asarray(value)
         if arr.dtype.hasobject:
             raise TypeError(f"PatchCache cannot store {what}: object-dtype array.")
+        _check_plain_dtype(arr.dtype, what=what)
         return {
             "__np__": base64.b64encode(np.ascontiguousarray(arr).tobytes()).decode(),
             "dtype": arr.dtype.str,

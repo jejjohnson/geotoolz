@@ -545,3 +545,81 @@ def test_unroundtrippable_carrier_is_refused(tmp_path) -> None:
     with pytest.raises(TypeError, match=r"cannot store GeoTensor\.attrs"):
         list(patcher.split(field, cache=cache))
     assert cache.stats()["entries"] == 0
+
+
+def test_variables_of_one_file_have_distinct_keys(tmp_path) -> None:
+    """Two variables of one netCDF share source, dims, coords, shape, dtype."""
+    pytest.importorskip("netCDF4")
+    from geopatcher.fields import XarrayField
+
+    coords = {"y": np.arange(16.0), "x": np.arange(16.0)}
+    base = np.arange(16 * 16, dtype=np.float32).reshape(16, 16)
+    path = tmp_path / "two_vars.nc"
+    xr.Dataset(
+        {
+            "temperature": (("y", "x"), base),
+            "precipitation": (("y", "x"), base + 1000),
+        },
+        coords=coords,
+    ).to_netcdf(path)
+
+    patcher = SpatialPatcher(
+        geometry=SpatialRectangular(size=(8, 8)),
+        sampler=SpatialRegularStride(step=8),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+    )
+    cache = PatchCache(tmp_path / "cache")
+    with xr.open_dataset(path) as ds:
+        temp, prcp = XarrayField(ds["temperature"]), XarrayField(ds["precipitation"])
+        assert cache.field_id_for(temp) != cache.field_id_for(prcp)
+        list(patcher.split(temp, cache=cache))
+        counting = _CountingField(prcp)
+        got = list(patcher.split(counting, cache=cache))
+        assert counting.selects == len(got)  # no hit served temperature
+        np.testing.assert_array_equal(np.asarray(got[0].data), base[:8, :8] + 1000)
+
+
+def test_structured_dtype_metadata_is_refused(tmp_path) -> None:
+    field, cache, patcher = _geotensor_field(tmp_path)
+    record = np.zeros(1, dtype=[("a", "<i4"), ("b", "<f4")])[0]
+    field.reader.attrs["record"] = record
+    with pytest.raises(TypeError, match="structured or void dtype"):
+        list(patcher.split(field, cache=cache))
+    assert cache.stats()["entries"] == 0
+
+
+def test_memory_store_needs_explicit_field_id(tmp_path) -> None:
+    """A MemoryStore's contents live only in that instance: no auto identity."""
+    pytest.importorskip("obstore")
+    pytest.importorskip("async_tiff")
+    from obstore.store import MemoryStore
+
+    from geopatcher.fields import ObstoreCogField
+
+    def open_cog(offset: int) -> Any:
+        path = _write_tif(
+            tmp_path / f"cog{offset}.tif",
+            np.arange(32 * 32, dtype=np.uint16).reshape(1, 32, 32) + offset,
+            tiled=True,
+            blockxsize=16,
+            blockysize=16,
+        )
+        store = MemoryStore()
+        store.put("cog.tif", Path(path).read_bytes())
+        return ObstoreCogField.from_url(
+            "memory:///cog.tif", store=store, path="cog.tif"
+        )
+
+    a, b = open_cog(0), open_cog(1000)
+    with pytest.raises(ValueError, match="Pass field_id"):
+        PatchCache(tmp_path / "auto").field_id_for(a)
+
+    patcher = _patcher(size=16, step=16)
+    cache_a = PatchCache(tmp_path / "shared", field_id="scene-a")
+    cache_b = PatchCache(tmp_path / "shared", field_id="scene-b")
+    assert cache_a.field_id_for(a) != cache_b.field_id_for(b)
+    list(patcher.split(a, cache=cache_a))
+    got = list(patcher.split(b, cache=cache_b))
+    assert cache_b.stats()["hits"] == 0
+    _assert_patches_equal(got, list(patcher.split(open_cog(1000))))

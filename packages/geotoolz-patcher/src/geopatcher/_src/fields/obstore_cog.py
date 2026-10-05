@@ -451,11 +451,15 @@ def _crs_from_geokeys(geo_keys: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _store_identity(store: Any) -> str:
-    """Printable configuration of an obstore store, else its type name."""
+def _store_identity(store: Any) -> str | None:
+    """Printable configuration of an obstore store, else ``None``.
+
+    A store whose ``repr`` is only its type and address (``MemoryStore``)
+    has no configuration that names its contents.
+    """
     text = repr(store)
     if " object at 0x" in text:
-        return type(store).__qualname__
+        return None
     return text
 
 
@@ -628,8 +632,14 @@ class ObstoreCogField:
         With the process pool the object is the ``url``; with an explicit
         ``store`` the ``url`` is only a label, so the identity is the
         store's printable configuration (e.g. ``LocalStore("/data")``)
-        plus ``path``. A store without one (``MemoryStore``) is
-        identified by its type and ``path`` only.
+        plus ``path``. A store without one (``MemoryStore``, whose
+        contents live only in that instance) has no stable identity:
+        `PatchCache` then requires an explicit ``field_id``.
+
+        Raises:
+            UnstableIdentityError: The explicit ``store`` has no printable
+                configuration; ``partial`` carries the rest of the
+                identity (``path``, ``ifd_index``).
 
         Examples:
             >>> ObstoreCogField.from_url("s3://b/k.tif").cache_id()
@@ -640,15 +650,22 @@ class ObstoreCogField:
             '{"ifd_index": 1, "path": "k.tif", "store": "LocalStore(...)", "url": null}'
         """
         explicit = self.store is not None
-        return json.dumps(
-            {
-                "url": None if explicit else self.url,
-                "store": _store_identity(self.store) if explicit else None,
-                "path": self.path if explicit else None,
-                "ifd_index": int(self.ifd_index),
-            },
-            sort_keys=True,
-        )
+        store_id = _store_identity(self.store) if explicit else None
+        identity = {
+            "url": None if explicit else self.url,
+            "store": store_id,
+            "path": self.path if explicit else None,
+            "ifd_index": int(self.ifd_index),
+        }
+        if explicit and store_id is None:
+            from geopatcher._src.cache import UnstableIdentityError
+
+            raise UnstableIdentityError(
+                f"its {type(self.store).__qualname__} has no configuration that "
+                f"names its contents.",
+                partial=json.dumps(identity, sort_keys=True),
+            )
+        return json.dumps(identity, sort_keys=True)
 
     @property
     def fill_value_default(self) -> float | int:
