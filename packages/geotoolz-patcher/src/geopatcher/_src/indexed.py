@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import operator
 import threading
 from collections import OrderedDict
 from collections.abc import Sequence
@@ -30,31 +31,44 @@ from geopatcher._src.patch import Patch
 
 @dataclass
 class IndexedPatchView(Sequence[Patch]):
-    """Integer-indexed view over a `SpatialPatcher`'s anchors.
+    """Integer-indexed view over a patcher's anchors.
 
     Wraps a ``(patcher, field)`` pair as a ``Sequence[Patch]`` —
     supports ``len(view)``, ``view[i]``, ``for p in view``, and negative
-    indexing. The patches are bit-identical to those `patcher.split(field)`
-    yields for the same anchor.
+    indexing. ``view[i]`` is bit-identical to the ``i``-th patch
+    `patcher.split(field)` yields.
 
     Cache accesses are guarded by a `threading.Lock`, so a view shared
     across threads (e.g. a torch DataLoader with ``num_workers=0`` plus
-    background threads) is safe. Note that a torch DataLoader with
-    ``num_workers > 0`` forks worker *processes*: each worker gets its
-    own process-local copy of this view, and therefore its own cache —
-    entries are not shared back to the parent.
+    background threads) is safe.
+
+    The view pickles, so it can be shipped to worker *processes* under
+    any start method — ``spawn`` (the macOS / Windows default),
+    ``forkserver`` (the Linux default from Python 3.14), ``fork``, and
+    Grain's multiprocess ``RandomAccessDataSource``. The anchor list and
+    the bound `PatchCache` identity travel with it; the lock is
+    recreated and the in-memory ``cache=True`` entries are dropped, so
+    each worker starts with its own empty cache (entries are never
+    shared back to the parent). The patcher and the field must pickle
+    too — every built-in `Field` adapter does.
 
     Args:
         patcher: A patcher exposing ``anchors(field) -> list`` and
-            ``patch_at(field, anchor) -> Patch``. `SpatialPatcher`
-            satisfies this; other patchers can opt in by providing the
-            same two methods.
-        field: The `Field` to read from.
+            ``patch_at(field, anchor) -> Patch``. `SpatialPatcher` and
+            `TemporalPatcher` satisfy this; other patchers can opt in by
+            providing the same two methods. A patcher that also has
+            ``patch_anchors(field)`` — one key per patch ``split``
+            yields, as `TemporalPatcher` provides for multi-scale
+            geometries — is indexed by those keys instead.
+        field: The `Field` (or, for `TemporalPatcher`, the series) to
+            read from.
         cache: If ``True``, cache patches in memory by integer index after
             the first access (mirrors xrpatcher's ``cache=True``). A
             `PatchCache` instead routes reads through the cross-run,
             content-addressed on-disk cache (gh #24); ``preload`` and
-            ``cache_size`` do not apply in that mode.
+            ``cache_size`` do not apply in that mode, and the patcher's
+            ``patch_at`` must accept ``cache=`` (`SpatialPatcher`'s does;
+            `TemporalPatcher`'s does not).
         preload: If ``True`` and ``cache=True``, eagerly materialise each
             patch's data (via `xarray.DataArray.load` / `dask.compute` /
             numpy passthrough) before caching, so cached entries are
@@ -63,6 +77,9 @@ class IndexedPatchView(Sequence[Patch]):
         cache_size: Optional LRU bound on the number of cached patches.
             ``None`` (default) keeps the cache unbounded, matching
             xrpatcher's behaviour. Requires ``cache=True``.
+        patcher_kwargs: Extra keyword arguments forwarded to every
+            ``anchors`` / ``patch_anchors`` / ``patch_at`` call — e.g.
+            ``{"time_axis": 1, "coord": times}`` for a `TemporalPatcher`.
     """
 
     patcher: Any
@@ -70,6 +87,7 @@ class IndexedPatchView(Sequence[Patch]):
     cache: bool | Any = False
     preload: bool = False
     cache_size: int | None = None
+    patcher_kwargs: dict[str, Any] = field(default_factory=dict)
     _anchors: list[Any] = field(default_factory=list, init=False, repr=False)
     _cache: OrderedDict[int, Patch] = field(
         default_factory=OrderedDict, init=False, repr=False
@@ -89,14 +107,24 @@ class IndexedPatchView(Sequence[Patch]):
         # only apply to the latter.
         self._disk_cache = None if isinstance(self.cache, bool) else self.cache
         mem_cache = self.cache is True
-        if self.preload and not mem_cache:
-            raise ValueError("preload=True requires cache=True.")
-        if self.cache_size is not None:
-            if not mem_cache:
-                raise ValueError("cache_size requires cache=True.")
-            if self.cache_size < 1:
-                raise ValueError("cache_size must be >= 1 (or None for unbounded).")
-        anchors = getattr(self.patcher, "anchors", None)
+        for name, given in (
+            ("preload=True", self.preload),
+            ("cache_size", self.cache_size is not None),
+        ):
+            if not given or mem_cache:
+                continue
+            if self._disk_cache is not None:
+                raise ValueError(
+                    f"{name} applies only to the in-memory cache (cache=True); "
+                    "a PatchCache already serves materialised patches from "
+                    f"disk. Drop {name}, or pass cache=True instead."
+                )
+            raise ValueError(f"{name} requires cache=True.")
+        if self.cache_size is not None and self.cache_size < 1:
+            raise ValueError("cache_size must be >= 1 (or None for unbounded).")
+        anchors = getattr(self.patcher, "patch_anchors", None) or getattr(
+            self.patcher, "anchors", None
+        )
         patch_at = getattr(self.patcher, "patch_at", None)
         if anchors is None or patch_at is None:
             raise TypeError(
@@ -104,8 +132,28 @@ class IndexedPatchView(Sequence[Patch]):
                 "and `patch_at(field, anchor)`; got "
                 f"{type(self.patcher).__name__}."
             )
-        self._anchors = list(anchors(self.field))
+        if self._disk_cache is not None and not _accepts_kwarg(patch_at, "cache"):
+            raise TypeError(
+                "cache=PatchCache(...) needs a patcher whose "
+                "`patch_at(field, anchor, *, cache=...)` accepts a cache; "
+                f"{type(self.patcher).__name__}.patch_at does not. Use "
+                "cache=True for the in-memory index cache instead."
+            )
+        self._anchors = list(anchors(self.field, **self.patcher_kwargs))
         self._patch_at_takes_field_id = _accepts_kwarg(patch_at, "field_id")
+
+    def __getstate__(self) -> dict[str, Any]:
+        # `threading.Lock` doesn't pickle, and in-memory cache entries are
+        # process-local by design: ship the anchors, the bound PatchCache
+        # identity and the configuration, not the cached patches.
+        state = self.__dict__.copy()
+        del state["_cache_lock"]
+        state["_cache"] = OrderedDict()
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._cache_lock = threading.Lock()
 
     def __len__(self) -> int:
         return len(self._anchors)
@@ -119,33 +167,38 @@ class IndexedPatchView(Sequence[Patch]):
     def __getitem__(self, idx: int | slice) -> Patch | list[Patch]:
         if isinstance(idx, slice):
             return [self[i] for i in range(*idx.indices(len(self._anchors)))]
-        i = int(idx)
+        try:
+            # `operator.index`, not `int`: ``view[1.9]`` must not silently
+            # read patch 1. numpy integers still work.
+            i = operator.index(idx)
+        except TypeError:
+            raise TypeError(
+                "IndexedPatchView indices must be integers or slices, not "
+                f"{type(idx).__name__}."
+            ) from None
         if i < 0:
             i += len(self._anchors)
         if i < 0 or i >= len(self._anchors):
             raise IndexError(
                 f"IndexedPatchView index {idx} out of range [0, {len(self._anchors)})"
             )
+        kwargs = self.patcher_kwargs
         if self._disk_cache is not None:
-            if not self._patch_at_takes_field_id:
-                # A patcher written against the original protocol,
-                # ``patch_at(field, anchor, cache=...)``.
-                return self.patcher.patch_at(
-                    self.field, self._anchors[i], cache=self._disk_cache
-                )
-            return self.patcher.patch_at(
-                self.field,
-                self._anchors[i],
-                cache=self._disk_cache,
-                field_id=self._disk_field_id(),
-            )
+            # Only reached when `patch_at` accepts ``cache=`` (checked at
+            # construction). A patcher written against the original
+            # protocol, ``patch_at(field, anchor, cache=...)``, does not
+            # also get ``field_id=``.
+            kwargs = {**kwargs, "cache": self._disk_cache}
+            if self._patch_at_takes_field_id:
+                kwargs["field_id"] = self._disk_field_id()
+            return self.patcher.patch_at(self.field, self._anchors[i], **kwargs)
         if self.cache:
             with self._cache_lock:
                 cached = self._cache.get(i)
                 if cached is not None:
                     self._cache.move_to_end(i)
                     return cached
-        patch = self.patcher.patch_at(self.field, self._anchors[i])
+        patch = self.patcher.patch_at(self.field, self._anchors[i], **kwargs)
         if self.cache:
             if self.preload:
                 patch = _materialise(patch)
@@ -179,8 +232,9 @@ class IndexedPatchView(Sequence[Patch]):
     def anchors(self) -> list[Any]:
         """The materialised anchor list this view dispatches into.
 
-        Same sequence ``patcher.anchors(field)`` returned at construction
-        time; exposed so callers can correlate ``view[i]`` with the
+        Same sequence ``patcher.anchors(field)`` (or
+        ``patcher.patch_anchors(field)`` when the patcher has it) returned
+        at construction time; exposed so callers can correlate ``view[i]`` with the
         underlying anchor without going through `patch_at`.
         """
         return list(self._anchors)

@@ -189,12 +189,96 @@ class TemporalPatcher:
             time_axis: Which axis is the time axis. Default 0.
             coord: See `split`.
         """
-        arr = np.asarray(series)
+        arr = _sliceable(series)
         time_len = int(arr.shape[time_axis])
         self._require_coord(coord, time_len)
         return list(
             self._patches_for_anchor(arr, time_len, int(anchor), time_axis, coord=coord)
         )
+
+    def patch_at(
+        self,
+        series: Any,
+        anchor: int | tuple[int, int],
+        time_axis: int = 0,
+        *,
+        coord: np.ndarray | None = None,
+    ) -> TemporalPatch:
+        """Return the single patch `split` yields for one patch key.
+
+        The temporal counterpart of `SpatialPatcher.patch_at`, so a
+        `TemporalPatcher` drops into `IndexedPatchView`. Only the selected
+        window is sliced out of ``series`` (then converted with
+        ``np.asarray``), so a lazy series is not materialised whole.
+
+        Args:
+            series: Same input shape as `split`.
+            anchor: A key from `patch_anchors` — a bare anchor for a
+                single-window geometry, or ``(anchor, k)`` for the
+                ``k``-th window of a multi-window geometry such as
+                `TemporalMultiScale` (``(anchor, 0)`` also works for a
+                single-window geometry).
+            time_axis: Which axis is the time axis. Default 0.
+            coord: See `split`.
+
+        Raises:
+            ValueError: If a bare anchor is given for a geometry that
+                yields several windows for it, or ``k`` is out of range.
+        """
+        if isinstance(anchor, tuple):
+            base, k = int(anchor[0]), int(anchor[1])
+        else:
+            base, k = int(anchor), None
+        patches = self.patches_at(series, base, time_axis, coord=coord)
+        if k is None:
+            if len(patches) != 1:
+                raise ValueError(
+                    f"anchor {base} yields {len(patches)} patches with "
+                    f"{type(self.geometry).__name__}; pass ({base}, k) to pick "
+                    "one (see `patch_anchors`) or use `patches_at`."
+                )
+            return patches[0]
+        if not 0 <= k < len(patches):
+            raise ValueError(
+                f"anchor {base} yields {len(patches)} patches; window index "
+                f"{k} is out of range."
+            )
+        return patches[k]
+
+    def patch_anchors(
+        self,
+        series: Any,
+        time_axis: int = 0,
+        *,
+        coord: np.ndarray | None = None,
+    ) -> list[int | tuple[int, int]]:
+        """One `patch_at` key per patch `split` yields, in `split` order.
+
+        A bare anchor where the geometry yields one window for it, and
+        ``(anchor, k)`` for each of the windows a multi-window geometry
+        (`TemporalMultiScale`) yields, so
+        ``len(patch_anchors(series)) == n_anchors(series)``.
+        `IndexedPatchView` indexes by these keys.
+        """
+        shape = getattr(series, "shape", None) or np.shape(series)
+        time_len = int(shape[time_axis])
+        self._require_coord(coord, time_len)
+        keys: list[int | tuple[int, int]] = []
+        for anchor in self._sampler_anchors(time_len, coord):
+            a = int(anchor)
+            window = self._window(time_len, a, coord)
+            if isinstance(window, list):
+                keys.extend((a, k) for k in range(len(window)))
+            else:
+                keys.append(a)
+        return keys
+
+    def _window(
+        self, time_len: int, anchor: int, coord: np.ndarray | None
+    ) -> slice | list[slice]:
+        if getattr(self.geometry, "needs_coord", False):
+            return self.geometry.window_coord(coord, anchor)  # type: ignore[attr-defined]
+        return self.geometry.window(time_len, anchor)
 
     def anchors(
         self,
@@ -225,10 +309,7 @@ class TemporalPatcher:
         coord: np.ndarray | None = None,
     ) -> Iterator[TemporalPatch]:
         try:
-            if getattr(self.geometry, "needs_coord", False):
-                window = self.geometry.window_coord(coord, anchor)  # type: ignore[attr-defined]
-            else:
-                window = self.geometry.window(time_len, anchor)
+            window = self._window(time_len, anchor, coord)
         except Exception as exc:
             _dispatch(hooks, "on_error", anchor, exc)
             raise
@@ -240,7 +321,9 @@ class TemporalPatcher:
             try:
                 idx = [slice(None)] * arr.ndim
                 idx[time_axis] = s
-                data = arr[tuple(idx)]
+                # A no-op for the ndarray `split` passes; slices a lazy
+                # series (`patch_at`) before converting only the window.
+                data = np.asarray(arr[tuple(idx)])
                 weights = self.window.weights(self.geometry, s.stop - s.start)
                 patch = TemporalPatch(
                     data=data, anchor=anchor, indices=s, weights=weights
@@ -274,18 +357,7 @@ class TemporalPatcher:
         ``np.asarray(series)`` so generic / lazy series don't get
         materialised here. See ``docs/decisions.md`` (ADR-001).
         """
-        shape = getattr(series, "shape", None) or np.shape(series)
-        time_len = int(shape[time_axis])
-        self._require_coord(coord, time_len)
-        total = 0
-        coord_aware = getattr(self.geometry, "needs_coord", False)
-        for anchor in self._sampler_anchors(time_len, coord):
-            if coord_aware:
-                window = self.geometry.window_coord(coord, int(anchor))  # type: ignore[attr-defined]
-            else:
-                window = self.geometry.window(time_len, int(anchor))
-            total += len(window) if isinstance(window, list) else 1
-        return total
+        return len(self.patch_anchors(series, time_axis, coord=coord))
 
     def merge(
         self, patches: Iterable[Any], hooks: Iterable[PatcherHook] | None = None
@@ -307,3 +379,14 @@ class TemporalPatcher:
             "window": axis_envelope(self.window),
             "aggregation": axis_envelope(self.aggregation),
         }
+
+
+def _sliceable(series: Any) -> Any:
+    """``series`` itself when it slices like an array, else ``np.asarray``.
+
+    Lets `patches_at` / `patch_at` slice a lazy (dask / xarray) series
+    before converting, instead of materialising the whole of it per call.
+    """
+    if hasattr(series, "shape") and hasattr(series, "ndim"):
+        return series
+    return np.asarray(series)

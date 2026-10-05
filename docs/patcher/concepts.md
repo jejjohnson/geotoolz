@@ -264,6 +264,9 @@ torch `Dataset.__getitem__`, Grain `RandomAccessDataSource`, xrpatcher's
 `patcher[i]` — wrap the (patcher, field) pair in an
 `IndexedPatchView`. It's a stdlib `Sequence[Patch]` with optional
 in-memory `cache=True` / `preload=True` flags mirroring xrpatcher's API.
+It wraps a `SpatialPatcher` or a `TemporalPatcher` (via
+`TemporalPatcher.patch_at`), and it pickles, so spawn / forkserver
+loader workers each get their own copy.
 
 The iterator-first split stays canonical; `IndexedPatchView` is a
 wrapper, not a replacement. No torch/grain/jax dependency in
