@@ -100,7 +100,7 @@ class TestAnchorReprojection:
     def test_config_records_crs(self) -> None:
         cfg = SpatialExplicitCoords(coords=[(0.0, 0.0)], crs="EPSG:4326").get_config()
         assert cfg["crs"] == "EPSG:4326"
-        assert cfg["n_coords"] == 1
+        assert cfg["coords"] == [[0.0, 0.0]]
         assert SpatialAlongTrack([(0.0, 0.0), (1.0, 1.0)]).get_config()["crs"] is None
 
 

@@ -85,8 +85,9 @@ class TestGetConfig:
             source_step=np.timedelta64(1, "h"),
         )
         cfg = g.get_config()
-        assert cfg["stencil"]["start"] == "-9 hours"
-        assert cfg["source_step"] == "1 hours"
+        assert cfg["stencil"]["class"] == "TimeStencil"
+        assert cfg["stencil"]["config"]["start"] == {"value": -9, "unit": "h"}
+        assert cfg["source_step"] == {"value": 1, "unit": "h"}
 
     def test_round_trip_with_numeric_stencil(self) -> None:
         g = TemporalStencilGeometry(
@@ -94,9 +95,7 @@ class TestGetConfig:
         )
         cfg = g.get_config()
         assert cfg["stencil"] == {
-            "start": -2,
-            "stop": 2,
-            "step": 1,
-            "closed": "both",
+            "class": "Stencil",
+            "config": {"start": -2, "stop": 2, "step": 1, "closed": "both"},
         }
         assert cfg["source_step"] is None

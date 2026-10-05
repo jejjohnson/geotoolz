@@ -15,6 +15,8 @@ Public surface re-exports:
 - Axis helpers: `config_from_fields` (dataclass axis → ``get_config``
   dict) and `geom_shape` (a fixed-size geometry's weight-array shape),
   for third-party axes such as custom `SpatialWindow` subclasses.
+- Config round-trip: `axis_envelope` (any axis / stencil / patcher →
+  ``{"class", "config"}``) and its inverse `from_config`.
 - Observability: `PatcherHook` callback protocol, `PatchJournal`
   (+ `normalize_anchor`, its anchor-key normaliser),
   `PatchErrorRecord`, `get_strict` / `set_strict`,
@@ -38,7 +40,11 @@ The patcher core itself remains framework-free.
 from __future__ import annotations
 
 from geopatcher import fields, spatial, time
-from geopatcher._src._serialize import config_from_fields
+from geopatcher._src._serialize import (
+    axis_envelope,
+    config_from_fields,
+    from_config,
+)
 from geopatcher._src.cache import PatchCache
 from geopatcher._src.config import (
     get_strict,
@@ -249,10 +255,12 @@ __all__ = [
     "TimeStencil",
     "VectorDomain",
     "__version__",
+    "axis_envelope",
     "build_sampling_slices",
     "config_from_fields",
     "divide_evenly",
     "fields",
+    "from_config",
     "geom_shape",
     "get_strict",
     "normalize_anchor",

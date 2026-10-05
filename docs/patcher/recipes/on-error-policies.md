@@ -121,6 +121,12 @@ You can pass strings or classes to `retry_on`:
 retry_on = ("rasterio.errors.RasterioIOError", OSError, TimeoutError)
 ```
 
+A string matches any class in the raised exception's MRO, by bare name
+(`"OSError"`) or `module.qualname` (`"rasterio.errors.RasterioIOError"`),
+so `"OSError"` retries a `RasterioIOError` exactly as `OSError` does.
+`get_config()` records classes as qualified names, so a patcher rebuilt
+with `geopatcher.from_config` retries the same exceptions.
+
 ## Pattern — pair with parallel_map and journaling
 
 For production bulk inference, combine `on_error="retry"` with the

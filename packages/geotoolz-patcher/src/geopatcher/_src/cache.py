@@ -220,9 +220,10 @@ class PatchCache:
         for axis in (geometry, window):
             if getattr(axis, "forbid_in_yaml", False):
                 raise ValueError(
-                    f"{type(axis).__name__} carries a Python closure and cannot "
-                    f"be used as a cache key; give it a serialisable config or "
-                    f"drop the cache for this run."
+                    f"{type(axis).__name__} is forbid_in_yaml (it carries a "
+                    f"closure or runtime objects with no faithful config) and "
+                    f"cannot be used as a cache key; give it a serialisable "
+                    f"config or drop the cache for this run."
                 )
         return json.dumps(
             {"geometry": geometry.get_config(), "window": window.get_config()},

@@ -373,9 +373,18 @@ class SpatialPolygonIntersection(SpatialGeometry):
         polygons: Sequence (typically a ``geopandas.GeoSeries``) of
             polygons. The ``anchor`` passed to ``neighborhood`` indexes
             into this sequence.
+
+    Note:
+        ``forbid_in_yaml = True`` — the polygons are runtime geometries
+        with no faithful JSON form, so ``get_config()`` is a debug summary
+        (``{"n_polygons": ...}``), not a rebuild recipe, and `PatchCache`
+        refuses this geometry as a cache key (two polygon sets of equal
+        length would otherwise share keys).
     """
 
     polygons: Any
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def neighborhood(self, domain: Any, anchor: Any) -> Any:
         poly = self.polygons.iloc[int(anchor)]

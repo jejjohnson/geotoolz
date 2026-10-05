@@ -34,6 +34,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from geopatcher._src._serialize import patcher_config, qualified_name
 from geopatcher._src.domains import GridDomain
 from geopatcher._src.hooks import (
     PatcherHook,
@@ -98,6 +99,10 @@ class SpatialPatcher:
         retry_on: Exception classes or class names that should be retried.
             Defaults to I/O-shaped failures (`OSError`, `TimeoutError`) so
             programmer errors are not retried unless explicitly requested.
+            A name matches any class in the exception's MRO, by bare name
+            (``"OSError"``) or ``module.qualname``
+            (``"rasterio.errors.RasterioIOError"``), so it keeps the
+            subclass semantics of the class it names.
         capture_traceback: If ``True`` (default), each `PatchErrorRecord`
             includes a formatted traceback. Set to ``False`` to skip
             formatting — useful for high-volume ``"skip"`` workloads
@@ -130,6 +135,7 @@ class SpatialPatcher:
 
     def __post_init__(self) -> None:
         _validate_error_policy(self.on_error, self.max_retries)
+        self.retry_on = _validate_retry_on(self.retry_on)
 
     def split(
         self,
@@ -762,30 +768,12 @@ class SpatialPatcher:
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {
-            "geometry": {
-                "class": type(self.geometry).__name__,
-                "config": self.geometry.get_config(),
-            },
-            "sampler": {
-                "class": type(self.sampler).__name__,
-                "config": self.sampler.get_config(),
-            },
-            "window": {
-                "class": type(self.window).__name__,
-                "config": self.window.get_config(),
-            },
-            "aggregation": {
-                "class": type(self.aggregation).__name__,
-                "config": self.aggregation.get_config(),
-            },
-            "on_error": self.on_error,
-            "max_retries": self.max_retries,
-            "retry_on": [
-                exc if isinstance(exc, str) else exc.__name__ for exc in self.retry_on
-            ],
-            "capture_traceback": self.capture_traceback,
-        }
+        """Axes as ``{"class", "config"}`` envelopes; ``retry_on`` as qualified names.
+
+        `geopatcher.from_config` rebuilds the patcher from
+        ``axis_envelope(patcher)``.
+        """
+        return patcher_config(self)
 
 
 @dataclass(eq=False)
@@ -813,6 +801,11 @@ class AsyncSpatialPatcher:
 
     def __post_init__(self) -> None:
         _validate_error_policy(self.on_error, self.max_retries)
+        self.retry_on = _validate_retry_on(self.retry_on)
+
+    def get_config(self) -> dict[str, Any]:
+        """Same shape as `SpatialPatcher.get_config`."""
+        return patcher_config(self)
 
     async def split(
         self,
@@ -1334,12 +1327,44 @@ def _record_patch_error(
     )
 
 
+def _validate_retry_on(
+    retry_on: Iterable[type[BaseException] | str],
+) -> tuple[type[BaseException] | str, ...]:
+    """Coerce ``retry_on`` to a tuple, rejecting entries that never match."""
+    out = tuple(retry_on)
+    for candidate in out:
+        if isinstance(candidate, str) or (
+            isinstance(candidate, type) and issubclass(candidate, BaseException)
+        ):
+            continue
+        raise TypeError(
+            "retry_on entries must be exception classes or their names, got "
+            f"{candidate!r}."
+        )
+    return out
+
+
 def _matches_retry_on(
     exc: BaseException, retry_on: tuple[type[BaseException] | str, ...]
 ) -> bool:
+    """Whether ``exc`` should be retried.
+
+    A class matches by ``isinstance``. A string matches any class in the
+    exception's MRO by bare ``__name__`` (``"OSError"``) or by
+    ``module.qualname`` (``"rasterio.errors.RasterioIOError"``) — so a
+    name keeps the subclass semantics of the class it names, and the
+    qualified names `get_config` emits reload with unchanged behaviour.
+    """
+    names: set[str] | None = None
     for candidate in retry_on:
         if isinstance(candidate, str):
-            if type(exc).__name__ == candidate:
+            if names is None:
+                names = {
+                    name
+                    for cls in type(exc).__mro__
+                    for name in (cls.__name__, qualified_name(cls))
+                }
+            if candidate in names:
                 return True
         elif isinstance(exc, candidate):
             return True

@@ -14,15 +14,18 @@ Four geometries:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
 import numpy as np
 
-from geopatcher._src._serialize import config_from_fields, jsonable_scalar
+from geopatcher._src._serialize import axis_envelope, config_from_fields
 from geopatcher._src.time.stencils import (
     Stencil,
+    _to_timedelta64,
     build_sampling_slices,
+    delta_config,
     divide_evenly,
 )
 
@@ -134,7 +137,9 @@ class TemporalStencilGeometry(TemporalGeometry):
             in coordinate units.
         source_step: Optional cadence of the source grid (same units as
             ``stencil.step``). If provided, the constructor raises immediately
-            on stride > 1 instead of waiting for `window_coord`.
+            on stride > 1 instead of waiting for `window_coord`. A timedelta
+            may also be given as a string (``"3h"``) or as the
+            ``{"value", "unit"}`` mapping `get_config` emits.
     """
 
     stencil: Stencil
@@ -142,6 +147,8 @@ class TemporalStencilGeometry(TemporalGeometry):
     needs_coord: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
+        if isinstance(self.source_step, (str, Mapping)):
+            self.source_step = _to_timedelta64(self.source_step)
         if self.source_step is not None:
             sigma = int(
                 divide_evenly(
@@ -186,8 +193,8 @@ class TemporalStencilGeometry(TemporalGeometry):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "stencil": self.stencil.get_config(),
-            "source_step": jsonable_scalar(self.source_step),
+            "stencil": axis_envelope(self.stencil),
+            "source_step": delta_config(self.source_step),
         }
 
 

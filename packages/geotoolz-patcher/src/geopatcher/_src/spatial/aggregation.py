@@ -348,12 +348,31 @@ class SpatialWeightedSum(SpatialAggregation):
             samples is not positive (uncovered, all-NaN, outside every
             mask, or a taper's zero edge). Default NaN; pass e.g. the
             domain's nodata to override.
+
+    Note:
+        With a ``weight_fn`` the instance is ``forbid_in_yaml``: the
+        callable has no JSON form, so ``get_config()`` records only its
+        name, a debug record that `from_config` refuses to rebuild.
+        Without one the config rebuilds the aggregation.
     """
 
     weight_fn: Callable[[Any], np.ndarray] | None = None
     fill_value: float = math.nan
 
     streaming_safe: ClassVar[bool] = True
+
+    def __post_init__(self) -> None:
+        if self.weight_fn is None:
+            return
+        if not callable(self.weight_fn):
+            raise TypeError(
+                "SpatialWeightedSum.weight_fn must be a callable or None, got "
+                f"{self.weight_fn!r} — a config naming a weight_fn cannot be "
+                "rebuilt; construct it in code."
+            )
+        # Per-instance flag (shadowing the ClassVar): only a weight_fn makes
+        # the config unfaithful, so `SpatialWeightedSum()` stays rebuildable.
+        object.__setattr__(self, "forbid_in_yaml", True)
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
         shape = _domain_array_shape(domain)
@@ -372,7 +391,11 @@ class SpatialWeightedSum(SpatialAggregation):
         return _with_fill(acc, wsum > 0, self.fill_value)
 
     def get_config(self) -> dict[str, Any]:
-        return config_from_fields(self, exclude=("weight_fn",))
+        fn = self.weight_fn
+        return {
+            "weight_fn": None if fn is None else getattr(fn, "__name__", repr(fn)),
+            **config_from_fields(self, exclude=("weight_fn",)),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -723,18 +746,7 @@ class SpatialOverlapAdd(SpatialAggregation):
         return target
 
     def get_config(self) -> dict[str, Any]:
-        return {
-            "streaming": self.streaming,
-            "target_path": self.target_path,
-            "chunks": list(self.chunks) if self.chunks else None,
-            "shard_shape": list(self.shard_shape) if self.shard_shape else None,
-            "writer": self.writer,
-            "cog": self.cog,
-            "normalize_by_window": self.normalize_by_window,
-            "fill_value": self.fill_value,
-            "dtype": self.dtype,
-            "overwrite": self.overwrite,
-        }
+        return config_from_fields(self)
 
 
 def _weighted_block(

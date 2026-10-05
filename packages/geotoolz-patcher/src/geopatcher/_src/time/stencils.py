@@ -38,11 +38,12 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from collections.abc import Mapping
 from typing import Any, Literal
 
 import numpy as np
 
-from geopatcher._src._serialize import config_from_fields
+from geopatcher._src._serialize import config_from_fields, jsonable_scalar
 
 
 Closed = Literal["left", "right", "both", "neither"]
@@ -122,6 +123,12 @@ class Stencil:
     closed: Closed = dataclasses.field(default="left", kw_only=True)
 
     def __post_init__(self) -> None:
+        # A `{"value", "unit"}` mapping is the config form of a timedelta64
+        # field (see `get_config`); coerce it so `Stencil(**cfg)` rebuilds.
+        for name in ("start", "stop", "step"):
+            value = getattr(self, name)
+            if isinstance(value, Mapping):
+                object.__setattr__(self, name, _to_timedelta64(value))
         if self.closed not in {"left", "right", "both", "neither"}:
             raise ValueError(f"invalid value for closed: {self.closed!r}")
         if self.start == self.stop:
@@ -175,28 +182,75 @@ class Stencil:
         return result
 
     def get_config(self) -> dict[str, Any]:
-        """YAML-serialisable view of the stencil — geopatcher convention."""
-        return config_from_fields(self)
+        """YAML-serialisable view of the stencil — geopatcher convention.
+
+        Numeric fields dump as-is; `np.timedelta64` fields dump as
+        ``{"value": int, "unit": str}`` (exact at every resolution), which
+        both `Stencil` and `TimeStencil` accept back.
+        """
+        return {
+            "start": delta_config(self.start),
+            "stop": delta_config(self.stop),
+            "step": delta_config(self.step),
+            **config_from_fields(self, exclude=("start", "stop", "step")),
+        }
 
 
-_Td64Unit = Literal["D", "h", "m", "s"]
+_Td64Unit = Literal["Y", "M", "W", "D", "h", "m", "s", "ms", "us", "ns"]
+
+_UNIT_ALIASES: dict[str, _Td64Unit] = {
+    **dict.fromkeys(("Y", "year", "years"), "Y"),
+    **dict.fromkeys(("M", "month", "months"), "M"),
+    **dict.fromkeys(("W", "week", "weeks"), "W"),
+    **dict.fromkeys(("D", "day", "days"), "D"),
+    **dict.fromkeys(("h", "hr", "hour", "hours"), "h"),
+    **dict.fromkeys(("m", "min", "minute", "minutes"), "m"),
+    **dict.fromkeys(("s", "sec", "second", "seconds"), "s"),
+    **dict.fromkeys(("ms", "millisecond", "milliseconds"), "ms"),
+    **dict.fromkeys(("us", "microsecond", "microseconds"), "us"),
+    **dict.fromkeys(("ns", "nanosecond", "nanoseconds"), "ns"),
+}
 
 
 def _normalize_time_unit(unit: str) -> _Td64Unit:
-    if unit in {"D", "day", "days"}:
-        return "D"
-    if unit in {"h", "hr", "hour", "hours"}:
-        return "h"
-    if unit in {"m", "min", "minute", "minutes"}:
-        return "m"
-    if unit in {"s", "sec", "second", "seconds"}:
-        return "s"
-    raise ValueError(f"unsupported time unit: {unit!r}")
+    try:
+        return _UNIT_ALIASES[unit]
+    except KeyError:
+        raise ValueError(f"unsupported time unit: {unit!r}") from None
 
 
-def _to_timedelta64(value: str | np.timedelta64) -> np.timedelta64:
+def delta_config(value: Any) -> Any:
+    """Config form of a stencil offset or cadence.
+
+    `np.timedelta64` becomes ``{"value": int, "unit": str}`` — lossless at
+    every resolution (``ms`` / ``us`` / ``ns`` / ``W`` / ``M`` / ``Y``
+    included); any other value goes through `jsonable_scalar`.
+    `_to_timedelta64` inverts the mapping form.
+
+    Args:
+        value: A `np.timedelta64`, a Python / NumPy number, or ``None``.
+
+    Returns:
+        A JSON-safe value.
+    """
+    if isinstance(value, np.timedelta64):
+        unit, count = np.datetime_data(value.dtype)
+        return {"value": int(value.astype(np.int64)) * int(count), "unit": unit}
+    return jsonable_scalar(value)
+
+
+def _to_timedelta64(value: str | Mapping[str, Any] | np.timedelta64) -> np.timedelta64:
+    """Coerce a timedelta string / ``{"value", "unit"}`` mapping to `np.timedelta64`.
+
+    Strings are ``"<int><unit>"`` with an optional space between — NumPy's
+    own ``str(td)`` form (``"-1000 milliseconds"``, ``"1 weeks"``) included.
+    """
     if isinstance(value, np.timedelta64):
         return value
+    if isinstance(value, Mapping):
+        return np.timedelta64(
+            int(value["value"]), _normalize_time_unit(str(value["unit"]))
+        )
     match = re.match(r"([+-]?\d+) ?([a-zA-Z]+)", value)
     if not match:
         raise ValueError(f"invalid time delta string: {value}")
@@ -209,18 +263,21 @@ class TimeStencil(Stencil):
     """`Stencil` specialised to `np.timedelta64`.
 
     Accepts NumPy timedelta strings (``"-9h"``, ``"3h"``, ``"30min"``,
-    ``"2D"``) or pre-built `np.timedelta64` instances.
+    ``"2D"``, ``"-1000 milliseconds"``), ``{"value", "unit"}`` mappings (the
+    `get_config` form), or pre-built `np.timedelta64` instances.
 
     Examples:
         >>> TimeStencil(start='-9h', stop='3h', step='1h', closed='both')
         TimeStencil(start='-9 hours', stop='3 hours', step='1 hours', closed='both')
+        >>> TimeStencil(**TimeStencil('-9h', '3h', '1h').get_config()).step
+        np.timedelta64(1,'h')
     """
 
     def __init__(
         self,
-        start: str | np.timedelta64,
-        stop: str | np.timedelta64,
-        step: str | np.timedelta64,
+        start: str | Mapping[str, Any] | np.timedelta64,
+        stop: str | Mapping[str, Any] | np.timedelta64,
+        step: str | Mapping[str, Any] | np.timedelta64,
         closed: Closed = "left",
     ) -> None:
         super().__init__(

@@ -107,4 +107,5 @@ class TestGetConfig:
         assert cfg["every"] == 2
         assert cfg["shuffle"] is True
         assert cfg["seed"] == 7
-        assert cfg["stencil"]["start"] == "-1 hours"
+        assert cfg["stencil"]["class"] == "TimeStencil"
+        assert cfg["stencil"]["config"]["start"] == {"value": -1, "unit": "h"}

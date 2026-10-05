@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from rasterio.windows import Window
 
+from geopatcher._src._serialize import patcher_config
 from geopatcher._src.domains import GridDomain, PointDomain, VectorDomain
 from geopatcher._src.hooks import (
     PatcherHook,
@@ -572,7 +573,8 @@ class _MatchedConfigMixin:
     """The ``get_config`` shared by the matched patcher family.
 
     Follows the patcher-family envelope convention: nested components
-    serialize as ``{"class": type(x).__name__, "config": x.get_config()}``.
+    serialize as ``{"class": type(x).__name__, "config": x.get_config()}``
+    via the shared `patcher_config`.
     """
 
     primary: Any
@@ -580,19 +582,7 @@ class _MatchedConfigMixin:
 
     def get_config(self) -> dict[str, Any]:
         """Serialize the inner primary patcher + per-secondary aggregators."""
-        return {
-            "primary": {
-                "class": type(self.primary).__name__,
-                "config": self.primary.get_config(),
-            },
-            "secondary_aggregators": {
-                name: {
-                    "class": type(agg).__name__,
-                    "config": agg.get_config(),
-                }
-                for name, agg in self.secondary_aggregators.items()
-            },
-        }
+        return patcher_config(self)
 
 
 @dataclass(eq=False)

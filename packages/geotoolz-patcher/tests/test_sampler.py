@@ -322,7 +322,7 @@ class TestSpatialAlongTrack:
 
         s = SpatialAlongTrack(track=np.zeros((7, 2)), spacing=2.5)
         assert s.get_config() == {
-            "n_points": 7,
+            "track": [[0.0, 0.0]] * 7,
             "spacing": 2.5,
             "crs": None,
             "polar_guard": "warn",

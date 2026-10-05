@@ -382,9 +382,17 @@ class SpatialExplicit(SpatialSampler):
             both walk it independently (the previous Iterable typing
             meant ``get_config()`` consumed one-shot iterators and
             silently left ``anchors()`` empty afterwards).
+
+    Note:
+        ``forbid_in_yaml = True`` — anchors are backend-native objects
+        (pixel tuples, point indices, shapely geometries, …) with no
+        faithful JSON form, so ``get_config()`` is a debug summary
+        (``{"n_anchors": ...}``), not a rebuild recipe.
     """
 
     anchors_: Iterable[Any] = field(default_factory=list)
+
+    forbid_in_yaml: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.anchors_, list):
@@ -497,10 +505,8 @@ class SpatialAlongTrack(SpatialSampler):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "n_points": len(self.track),
-            "spacing": self.spacing,
+            **config_from_fields(self, exclude=("crs",)),
             "crs": None if self.crs is None else str(self.crs),
-            "polar_guard": self.polar_guard,
         }
 
 
@@ -562,9 +568,8 @@ class SpatialExplicitCoords(SpatialSampler):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "n_coords": len(self.coords),
+            **config_from_fields(self, exclude=("crs",)),
             "crs": None if self.crs is None else str(self.crs),
-            "polar_guard": self.polar_guard,
         }
 
 
