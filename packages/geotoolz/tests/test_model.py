@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from geotoolz.learn import ModelOp
 
@@ -33,6 +34,37 @@ class TestMethodKwarg:
         op = ModelOp(model=_SklearnLike(), method="predict")
         arr = np.array([10, 20, 30])
         np.testing.assert_array_equal(op(arr), np.array([11, 21, 31]))
+
+
+class TestModelValidation:
+    """The model's shape is checked at construction (#143)."""
+
+    def test_predict_rejects_non_predictor(self) -> None:
+        with pytest.raises(TypeError, match="Predictor"):
+            ModelOp(model=_Doubler(), method="predict")
+
+    def test_predict_accepts_predictor(self) -> None:
+        from pipekit.protocols import Predictor
+
+        model = _SklearnLike()
+        assert isinstance(model, Predictor)
+        assert ModelOp(model=model, method="predict").model is model
+
+    def test_call_rejects_non_callable(self) -> None:
+        with pytest.raises(TypeError, match="callable"):
+            ModelOp(model=_SklearnLike())
+
+    def test_named_method_must_exist(self) -> None:
+        with pytest.raises(TypeError, match="'decision_function'"):
+            ModelOp(model=_SklearnLike(), method="decision_function")
+
+    def test_output_is_not_rewrapped(self) -> None:
+        from _helpers import toy_geotensor
+        from georeader.geotensor import GeoTensor
+
+        out = ModelOp(model=_Doubler())(toy_geotensor(np.ones((2, 3, 3))))
+        assert type(out) is np.ndarray
+        assert not isinstance(out, GeoTensor)
 
 
 class TestBatching:

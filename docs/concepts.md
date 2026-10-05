@@ -345,6 +345,69 @@ are terminal the same way. `Sink` is **not** terminal — it does a side
 effect *and* returns the input. That's why `Sink` composes mid-chain and
 `SaveCOG` doesn't.
 
+## Fitted operators (`fit` / `transform`)
+
+Some operators learn state from data: the `normalize` scalers
+(`StandardScaler`, `RobustScaler`, `MinMaxScaler`),
+`matched_filter.MatchedFilter`, `restore.MNF` and `learn.SklearnOp`
+(with its `Pixelwise*` wrappers). They share one contract (decision
+record for [#143](https://github.com/jejjohnson/geotoolz/issues/143)):
+
+| Method | Does |
+|---|---|
+| `fit(x) -> self` | Learns the state from `x` into trailing-underscore attributes (`mean_`, `std_`, `cov_op_`, `state_`, …) and returns the operator. |
+| `transform(x)` | Applies the learned (or constructor-supplied) state. Never fits, never mutates the operator; raises `ValueError` when nothing is fitted. |
+| `inverse(x)` | Undoes `transform` where that is meaningful (the scalers, `MNF`). |
+| `op(x)` / `_apply` | Calls `transform`, after fitting on the first call when the operator is configured to learn on call. |
+
+Every one of them satisfies `pipekit.protocols.FittableTransformer`
+(`SklearnOp` also satisfies `Predictor`), so pipekit's split-object
+tooling treats them like a scikit-learn transformer:
+
+```python
+scaler = gz.normalize.StandardScaler().fit(train_scene)
+normed = scaler(scene)                 # == scaler.transform(scene)
+restored = scaler.inverse(normed)
+
+mnf = gz.restore.MNF(n_components=3).fit(scene)
+denoised = mnf.inverse(mnf(scene))     # classical MNF noise filter
+```
+
+**Fitted state is never configuration.** `get_config()` mirrors the
+constructor, and fitted attributes are not constructor parameters, so a
+statistic learned on call never lands in `get_config()` / `op.state` (the
+effect `__config_exclude__` gives auto-derived configs; these operators
+curate their config). To persist a fit, feed it back as constructor
+arguments — `StandardScaler(mean=s.mean_, std=s.std_)` round-trips
+through YAML — or, for `SklearnOp`, use `save_state` / `state_path=`.
+
+**Learning on call.** `fit_on_call=True` (scalers), an unset
+`mean` / `cov_op` (`MatchedFilter`), an unfitted `MNF` and
+`SklearnOp(fit_mode="fit_on_call")` fit on the **first** call and reuse
+that state for every later call. `MatchedFilter(fit_on_call=True)` is
+the per-scene exception: it estimates the background from each cube
+locally and stores nothing.
+
+**Thread safety.** `transform` is read-only, so a fitted operator can
+be shared freely across `pipekit.ThreadMap` workers. A first-call fit
+runs under a per-instance lock with a double-checked "is it fitted?"
+test: concurrent first calls fit exactly once and every call sees the
+fully published state, never a half-written one. *Which* item that fit
+sees is whichever call takes the lock first, so **call `fit(x)` before
+parallel use** whenever the result must be deterministic. `SklearnOp`'s
+history-dependent modes (`refit`, `fit_streaming`, `fit_only`, and
+`task="fit_predict"`) mutate the estimator on every call; each call's
+fit + apply is atomic under the lock, which serialises those calls
+rather than racing them. The lock pickles (and deep-copies) to a fresh
+one, so the operators still work under `ProcessMap` — each process
+then fits its own copy, another reason to fit up front.
+
+**Pre-fitted models.** `learn.ModelOp` wraps an already-trained model and
+never fits. It checks the model's shape at construction —
+`method="predict"` requires a `pipekit.protocols.Predictor`, the default
+`method="__call__"` a callable — and returns the model's output as-is,
+without rewrapping it into the input carrier.
+
 ## Georeferencing checks
 
 Every operator family uses the same helpers from `geotoolz._src.geo`:

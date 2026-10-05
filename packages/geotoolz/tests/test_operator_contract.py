@@ -13,7 +13,7 @@ extras such as hydra-zen, that:
   naming itself (``test_time_stack_contract``).
 
 Operators that need constructor arguments get them from ``CTOR_KWARGS``;
-runtime objects (GeoTensors, geometries, fitted operators) for the
+runtime objects (GeoTensors, geometries, callables) for the
 ``forbid_in_yaml`` classes come from ``RUNTIME_CTOR_KWARGS`` in the checks
 that never serialise the operator.
 Known contract violations are listed in ``KNOWN_FAILURES`` as strict
@@ -257,7 +257,7 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
 }
 
 #: Operators whose constructor needs a runtime object that cannot come from a
-#: config at all (another operator's fitted state, a patcher, a GeoTensor).
+#: config at all (a patcher, a GeoTensor, an observation model).
 #: Their state round-trip is not checkable; they should be ``forbid_in_yaml``
 #: (see #140) or take a config-able argument instead.
 UNBUILDABLE: dict[str, str] = {
@@ -295,16 +295,8 @@ def _runtime(**kwargs: Callable[[], Any]) -> Callable[[], dict[str, Any]]:
     return lambda: {name: make() for name, make in kwargs.items()}
 
 
-def _fitted_mnf() -> Any:
-    from geotoolz.restore import MNF
-
-    forward = MNF(n_components=2)
-    forward(_grid())
-    return forward
-
-
-#: Runtime constructor objects (GeoTensors, geometries, callables, fitted
-#: operators) for the ``forbid_in_yaml`` / ``UNBUILDABLE`` operators. They
+#: Runtime constructor objects (GeoTensors, geometries, callables) for the
+#: ``forbid_in_yaml`` / ``UNBUILDABLE`` operators. They
 #: cannot come from a config, so only the checks that never serialise the
 #: operator use them (``build(cls, runtime=True)``): graph mode, terminal
 #: outputs, output attrs, output fill and the 4-D time-stack contract.
@@ -377,7 +369,6 @@ RUNTIME_CTOR_KWARGS: dict[str, Callable[[], dict[str, Any]]] = {
     "radiometry._src.operators.IntegratedIrradiance": lambda: {
         "srf": __import__("pandas").DataFrame({"B1": [1.0]}, index=[500.0])
     },
-    "restore._src.operators.InverseMNF": _runtime(forward=_fitted_mnf),
     "segment._src.operators.MarkBoundaries": _runtime(
         label_img=lambda: np.zeros((16, 16), np.int32)
     ),
@@ -1277,7 +1268,6 @@ TIME_STACK_KNOWN_FAILURES: dict[str, Known] = {
             AssertionError,
         )
         for family, name in (
-            ("restore", "InverseMNF"),
             ("viz", "AnnotatePoints"),
             ("viz", "AnnotatePolygons"),
         )

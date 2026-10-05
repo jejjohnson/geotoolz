@@ -83,19 +83,44 @@ def test_snr_threshold_and_validation() -> None:
         gz.matched_filter.ValidateMFInputs(cov_op=np.zeros((2, 2)), target=target)()
 
 
-def test_fit_on_call_populates_reusable_state() -> None:
-    mean = np.array([1.0, 2.0])
+def test_first_call_fit_populates_reusable_state() -> None:
+    """Missing statistics are fitted once (into ``mean_`` / ``cov_op_``) and reused."""
+    rng = np.random.default_rng(0)
     target = np.array([0.5, 1.0])
-    cube = mean[:, None, None] + target[:, None, None] * np.ones((1, 2, 2))
+    first = rng.normal(size=(2, 4, 4))
+    second = rng.normal(loc=5.0, size=(2, 4, 4))
+    op = gz.matched_filter.MatchedFilter(target=target, cov_method="empirical")
+
+    out = op(toy_geotensor(first))
+
+    assert np.asarray(out).shape == (4, 4)
+    fitted_mean, fitted_cov = op.mean_, op.cov_op_
+    assert fitted_mean is not None
+    assert fitted_cov is not None
+    # The second call reuses the first fit instead of refitting.
+    reused = np.asarray(op(second))
+    assert op.mean_ is fitted_mean
+    assert op.cov_op_ is fitted_cov
+    np.testing.assert_allclose(reused, np.asarray(op.transform(second)))
+
+
+def test_fit_on_call_true_estimates_per_call_without_storing() -> None:
+    """``fit_on_call=True`` is a per-scene background: nothing is written back."""
+    rng = np.random.default_rng(1)
+    target = np.array([0.5, 1.0])
+    cube = rng.normal(size=(2, 4, 4))
     op = gz.matched_filter.MatchedFilter(
         target=target, fit_on_call=True, cov_method="empirical"
     )
+    config = op.get_config()
 
-    out = op(toy_geotensor(cube))
+    out = np.asarray(op(cube))
 
-    assert np.asarray(out).shape == (2, 2)
-    assert op.mean is not None
-    assert op.cov_op is not None
+    assert op.mean_ is None
+    assert op.cov_op_ is None
+    assert op.get_config() == config
+    expected = gz.matched_filter.MatchedFilter(target=target, cov_method="empirical")
+    np.testing.assert_allclose(out, np.asarray(expected.fit(cube).transform(cube)))
 
 
 def test_streaming_background_matches_empirical_covariance() -> None:
@@ -424,8 +449,9 @@ def test_fit_on_call_false_preserves_explicit_mean() -> None:
     )
     op(toy_geotensor(cube))
 
-    np.testing.assert_allclose(op.mean, fixed_mean)
-    assert op.cov_op is not None  # cov was fit on the cube
+    np.testing.assert_allclose(op.mean_, fixed_mean)
+    assert op.cov_op_ is not None  # cov was fit on the cube
+    assert op.cov_op is None  # ...into fitted state, not the constructor param
 
 
 def test_linear_target_from_obs_matches_finite_difference() -> None:
@@ -704,7 +730,7 @@ def test_fill_pixels_are_excluded(case: str, fill: float) -> None:
         # Issue reproduction: the fitted mean was [-615.6, -615.6, -615.6].
         op = mf.MatchedFilter(target=target, mean_method="mean")
         out = op(gt)
-        np.testing.assert_allclose(op.mean, clean.reshape(3, -1).mean(axis=1))
+        np.testing.assert_allclose(op.mean_, clean.reshape(3, -1).mean(axis=1))
         ref = mf.MatchedFilter(target=target, mean_method="mean")(clean)
         scores = np.asarray(out)
         np.testing.assert_allclose(scores[valid], np.asarray(ref).ravel())
@@ -766,3 +792,79 @@ def test_target_pattern_on_geotensor_returns_plain_array(
     assert type(out) is np.ndarray
     assert out.shape == (3, 4, 4)
     assert out.sum() == total
+
+
+# ----------------------------------------------------------------------------
+# Fitted-operator contract (#143)
+# ----------------------------------------------------------------------------
+def test_matched_filter_satisfies_fittable_transformer() -> None:
+    from pipekit.protocols import FittableTransformer
+
+    assert isinstance(gz.matched_filter.MatchedFilter(), FittableTransformer)
+
+
+def test_matched_filter_fit_transform_and_config() -> None:
+    """``fit`` learns the background once; it never reaches ``get_config()``."""
+    rng = np.random.default_rng(2)
+    target = np.array([0.5, 1.0, -0.2])
+    background, scene = rng.normal(size=(2, 3, 5, 5))
+    op = gz.matched_filter.MatchedFilter(target=target, cov_method="empirical")
+    config = op.get_config()
+    with pytest.raises(ValueError, match=r"fit\(\)"):
+        op.transform(scene)
+
+    assert op.fit(background) is op
+    scores = np.asarray(op.transform(scene))
+
+    assert op.get_config() == config
+    assert config["mean"] is None
+    assert config["cov_op"] is None
+    expected = gz.matched_filter.apply_image(
+        scene, mean=op.mean_, cov_op=op.cov_op_, target=target
+    )
+    np.testing.assert_allclose(scores, expected)
+    # Calling a fitted operator applies, it does not refit on the new scene.
+    np.testing.assert_allclose(np.asarray(op(scene)), scores)
+
+
+def test_matched_filter_config_reload_restores_arrays() -> None:
+    """A config round-trip gives ndarray statistics, not nested lists."""
+    op = gz.matched_filter.MatchedFilter(
+        mean=np.zeros(2),
+        cov_op=gz.matched_filter.NumpyLinearOperator(np.eye(2)),
+        target=np.ones(2),
+    )
+    clone = gz.Operator.from_state(op.state)
+    assert isinstance(clone.mean, np.ndarray)
+    assert isinstance(clone.cov_op, np.ndarray)
+    assert isinstance(clone.target, np.ndarray)
+    cube = np.random.default_rng(3).normal(size=(2, 3, 3))
+    np.testing.assert_allclose(np.asarray(clone(cube)), np.asarray(op(cube)))
+
+
+def test_matched_filter_first_call_fits_once_under_thread_map() -> None:
+    import threading
+    import time
+
+    from pipekit.parallel import ThreadMap
+
+    rng = np.random.default_rng(4)
+    target = np.array([0.5, 1.0])
+    scenes = [rng.normal(loc=i, size=(2, 5, 5)) for i in range(8)]
+    op = gz.matched_filter.MatchedFilter(target=target, cov_method="empirical")
+    calls = []
+    fit = op.fit
+    lock = threading.Lock()
+
+    def slow_fit(x):
+        with lock:
+            calls.append(x)
+        time.sleep(0.05)
+        return fit(x)
+
+    op.fit = slow_fit
+    outputs = ThreadMap(op, n_workers=8)(scenes)
+
+    assert len(calls) == 1
+    for scene, out in zip(scenes, outputs, strict=True):
+        np.testing.assert_allclose(out, op.transform(scene))
