@@ -17,6 +17,8 @@ Shipped:
   idealised model output.
 - :class:`EnergyTimeSeriesPanel` — model invariants (energy, enstrophy,
   …) over time.
+- :class:`TimeSeriesErrorPanel` — per-timestep skill scores, one line per
+  method.
 
 Composable wrappers, which consume any of the above (or a plain
 ``(ds, ax) -> Any`` callable) and multiply it:
@@ -52,7 +54,10 @@ from xrtoolz.viz.validation._src.scales import (
     SpectralSkillPanel,
 )
 from xrtoolz.viz.validation._src.spatial import SpatialMapPanel
-from xrtoolz.viz.validation._src.timeseries import EnergyTimeSeriesPanel
+from xrtoolz.viz.validation._src.timeseries import (
+    EnergyTimeSeriesPanel,
+    TimeSeriesErrorPanel,
+)
 
 
 __all__ = [
@@ -75,6 +80,7 @@ __all__ = [
     "SpatialDiffPanel",
     "SpatialMapPanel",
     "SpectralSkillPanel",
+    "TimeSeriesErrorPanel",
     "method_palette",
     "save_animation",
     "seasonal_groupby",

@@ -40,6 +40,8 @@ named cartopy extents.
 
 ::: xrtoolz.viz.validation.SpectralSkillPanel
 
+::: xrtoolz.viz.validation.TimeSeriesErrorPanel
+
 ## V1.5 — PSD plots
 
 Power-spectrum visualisations consuming `transforms.power_spectrum` and
