@@ -352,3 +352,31 @@ Option B is cheap to implement because NaN is its own support detector: any sten
 - Three stencil passes instead of one, on requested axes only.
 - `method=` is rejected with `nan_policy="adaptive"` — the fallback chain is method selection.
 - Option A stays available and documented; `interpolate.fillnan_*` remains the right tool for producing a gap-free *field*, just not for derivative accuracy.
+
+---
+
+## D14: Staggered (C-grid) model output — collocate before xrtoolz
+
+**Status:** proposed (2026-10-05, #324) — accepted when the PR recording it merges.
+
+**Context:** Ocean models built on finitevolX (somax first) hold `u`, `v` and `h` on Arakawa C-grid points, but write them to `snapshots.zarr` with the same `(y, x)` dims and no stagger metadata. Every horizontal diagnostic in `ocn`, `metrics.physical` and `viz` assumes all inputs share one grid; `ocn.advection` is the only place that says so ("Staggered grids are not supported"), and the only destaggering code in the workspace is WRF-specific (`atm/_src/wrf.py::destagger`). Mixing u-point and t-point fields silently shifts every derivative by half a cell. We need one rule for where staggering is resolved.
+
+**Options:**
+
+- (A) **Collocate first.** xrtoolz stays A-grid only. The model library interpolates to T-points before writing the dataset it hands to xrtoolz (somax: `state_to_dataset(..., collocate=True)` via finitevolX `Interpolation2D`).
+- (B) **Stagger attribute.** Each variable carries `attrs["stagger"] ∈ {"u", "v", "t", "q"}`; xrtoolz gains `geo.destagger(ds, to="t")` and the kinematics call it when the attribute is present.
+- (C) **xgcm axis metadata.** CF `c_grid_axis_shift` attributes, with xrtoolz consuming `xgcm.Grid` objects.
+
+**Decision:** Option A. xrtoolz consumes collocated fields only; destaggering is the producer's job.
+
+- A needs no xrtoolz code and keeps the seam already set for the basin bundle (#313: "numpy-backed CF Datasets … no ghost cells and no staggering").
+- B makes xrtoolz own a convention plus a `destagger` that needs boundary knowledge (periodic vs wall, ghost rings) it does not have; the model library already knows its boundaries and has the interpolation operators.
+- C brings xgcm in as a dependency, and the xgcm boundary is already deferred in #268.
+- The cost of A is evaluation accuracy at the grid scale. Native C-grid vorticity at q-points is second-order compact; collocating first smooths over one cell. That is acceptable for *evaluation* (skill scores, maps, spectra), and model-side diagnostics (`somax.eval`, finitevolX diagnostics) keep native accuracy where it matters.
+
+**Consequences:**
+
+- `ocn`, `metrics.physical` and `viz` need no stagger-aware path. The projection-free map panel (#325) can proceed without one.
+- Producers write T-point collocated fields for evaluation. For somax this is the IO work tracked in jejjohnson/somax#204 (`snapshots.zarr` collocated, CF units on `x`/`y`).
+- The Cartesian sections of the `ocn` and `metrics` API pages state the rule: destagger C-grid output before calling the diagnostics.
+- If a non-somax consumer later needs native staggered evaluation, B is the fallback. It would arrive as a new issue with its own boundary-handling design, not as an extension of the collocated kernels.
