@@ -19,7 +19,7 @@ keeping the chip's carrier (`GeoTensor`, `DataArray`, …).
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import partial
 from threading import Event
@@ -39,7 +39,11 @@ from geopatcher._src.hooks import (
 from geopatcher._src.patch import SpatioTemporalPatch, TemporalPatch
 from geopatcher._src.prefetch import prefetch_iterable
 from geopatcher._src.spatial import SpatialPatcher
-from geopatcher._src.spatial.patcher import _AsyncBackpressure, _Backpressure
+from geopatcher._src.spatial.patcher import (
+    _AsyncBackpressure,
+    _Backpressure,
+    _chip_reader,
+)
 from geopatcher._src.time.patcher import TemporalPatcher
 from geopatcher._src.walk import (
     ReadPolicy,
@@ -119,8 +123,38 @@ class SpatioTemporalPatcher:
             max_in_flight: Maximum number of unreleased patches.
             max_in_flight_bytes: Maximum total bytes of unreleased patches.
         """
+        return self._split(
+            field,
+            hooks,
+            coord=coord,
+            prefetch=prefetch,
+            journal=journal,
+            cache=cache,
+            max_in_flight=max_in_flight,
+            max_in_flight_bytes=max_in_flight_bytes,
+        )
+
+    def _split(
+        self,
+        field: Any,
+        hooks: Iterable[PatcherHook] | None,
+        *,
+        coord: np.ndarray | None,
+        prefetch: int,
+        journal: Any | None,
+        cache: Any | None,
+        max_in_flight: int | None,
+        max_in_flight_bytes: int | None,
+        unpack: Callable[[Any], Any] | None = None,
+    ) -> Iterator[SpatioTemporalPatch]:
+        """`split`; ``unpack`` maps each chip's data before it is sliced.
+
+        `MatchedSpatioTemporalPatcher` passes one that turns a
+        `MatchedField` read into its checked ``{source: data}`` dict, each
+        member of which is then sliced in lockstep.
+        """
         _validate_backpressure(max_in_flight, max_in_flight_bytes)
-        policy = self.spatial._start_split()
+        policy = _start_split(self.spatial)
         stop = Event()
         return prefetch_iterable(
             self._walk(
@@ -131,6 +165,7 @@ class SpatioTemporalPatcher:
                 journal=journal,
                 cache=cache,
                 backpressure=_Backpressure(max_in_flight, max_in_flight_bytes, stop),
+                unpack=unpack,
             ),
             prefetch,
             stop=stop,
@@ -146,8 +181,9 @@ class SpatioTemporalPatcher:
         journal: Any | None,
         cache: Any | None,
         backpressure: _Backpressure,
+        unpack: Callable[[Any], Any] | None,
     ) -> Iterator[Any]:
-        plan = self._plan(field, coord, cache, aio=False)
+        plan = self._plan(field, coord, cache, aio=False, unpack=unpack)
         yield from walk(
             plan.anchors,
             plan.units,
@@ -176,7 +212,7 @@ class SpatioTemporalPatcher:
         ``prefetch`` has no async counterpart.
         """
         _validate_backpressure(max_in_flight, max_in_flight_bytes)
-        policy = self.spatial._start_split()
+        policy = _start_split(self.spatial)
         plan = self._plan(field, coord, cache, aio=True)
         async for patch in awalk(
             plan.anchors,
@@ -195,7 +231,13 @@ class SpatioTemporalPatcher:
         return self.coupling
 
     def _plan(
-        self, field: Any, coord: Any | None, cache: Any | None, *, aio: bool
+        self,
+        field: Any,
+        coord: Any | None,
+        cache: Any | None,
+        *,
+        aio: bool,
+        unpack: Callable[[Any], Any] | None = None,
     ) -> _STPlan:
         coupling = self._checked_coupling()
         coord = self.temporal._require_coord(coord)
@@ -208,30 +250,39 @@ class SpatioTemporalPatcher:
             anchors = _coupled_pairs(self.spatial)
         return _STPlan(
             stp=self,
-            reader=self.spatial._chip_reader(field, domain, cache, aio=aio),
+            reader=_chip_reader(self.spatial, field, domain, cache, aio=aio),
             coord=coord,
             coupled=coupling == "coupled",
             anchors=anchors,
+            unpack=unpack,
         )
 
     def _time_len(self, data: Any) -> int:
-        """Length of a chip's ``data`` along ``time_axis``."""
-        return int(np.shape(data)[self.time_axis])
+        """Length of a chip's ``data`` along ``time_axis``.
+
+        A ``{source: data}`` mapping (a matched read, already checked to
+        share one time axis) answers with its first member.
+        """
+        member: Any = next(iter(data.values())) if isinstance(data, Mapping) else data
+        return int(np.shape(member)[self.time_axis])
 
     def _slice_time(self, data: Any, s: slice) -> Any:
         """``data`` sliced to ``s`` along ``time_axis``, keeping its carrier.
 
         Positional indexing keeps a `GeoTensor` (``__getitem__`` →
-        ``isel``), an `xarray.DataArray`, a dask or a numpy array as it is.
+        ``isel``), an `xarray.DataArray`, a dask or a numpy array as it is;
+        a mapping is sliced member by member (keeping its type).
         """
+        if isinstance(data, Mapping):
+            return type(data)({k: self._slice_time(v, s) for k, v in data.items()})
         idx: list[Any] = [slice(None)] * len(np.shape(data))
         idx[self.time_axis] = s
         return data[tuple(idx)]
 
-    def _patch(self, chip: Any, time: int, s: slice) -> Any:
-        """The `SpatioTemporalPatch` of window ``s`` of ``chip``."""
+    def _patch(self, chip: Any, data: Any, time: int, s: slice) -> Any:
+        """The `SpatioTemporalPatch` of window ``s`` of ``chip`` (``data``)."""
         return SpatioTemporalPatch(
-            data=self._slice_time(chip.data, s),
+            data=self._slice_time(data, s),
             space=chip.anchor,
             time=time,
             spatial_indices=chip.indices,
@@ -272,50 +323,57 @@ class SpatioTemporalPatcher:
         hook_list = _as_hooks(hooks)
         _dispatch(hook_list, "on_merge_start", _len_or_unknown(patches))
         try:
-            # Group on a hashable surrogate (dict anchors → sorted-item tuples,
-            # arrays → bytes) but keep the original anchor object alongside
-            # the per-group patch list for downstream consumers.
-            by_space: dict[Any, tuple[Any, list[Any]]] = {}
-            for p in patches:
-                key = _hashable(p.space)
-                by_space.setdefault(key, (p.space, []))[1].append(p)
-            # Temporal aggregations read `anchor` + `indices`, but
-            # SpatioTemporalPatch stores them as `time` + `temporal_indices`;
-            # rebox each group as TemporalPatch so TemporalForecast /
-            # TemporalHierarchicalCombine / etc. don't crash on AttributeError.
-            output = [
-                (
-                    anchor,
-                    self.temporal.aggregation.merge(
-                        [
-                            TemporalPatch(
-                                data=p.data,
-                                anchor=p.time,
-                                indices=p.temporal_indices,
-                                weights=p.weights,
-                            )
-                            for p in group
-                        ]
-                    ),
-                )
-                for anchor, group in by_space.values()
-            ]
+            output = _merge_by_space(patches, self.temporal.aggregation)
         except Exception as exc:
             _dispatch(hook_list, "on_error", None, exc)
             raise
         _dispatch(hook_list, "on_merge_end", _nbytes(output))
         return output
 
-    def _split_total_hint(self, field: Any) -> int:
-        """``on_split_start``'s total: the coupled pairs, else unknown."""
-        if self.coupling == "coupled":
-            anchors = getattr(self.spatial.sampler, "anchors_", None)
-            return UNKNOWN_TOTAL if anchors is None else _len_or_unknown(anchors)
-        return UNKNOWN_TOTAL
-
     def get_config(self) -> dict[str, Any]:
         """Inner patchers as ``{"class", "config"}`` envelopes (`patcher_config`)."""
         return patcher_config(self)
+
+
+def _start_split(spatial: Any) -> ReadPolicy:
+    """The spatial patcher's read policy over a fresh ``errors`` list.
+
+    A duck-typed spatial stand-in without the runner knobs reads under
+    the default (``"raise"``) policy.
+    """
+    start = getattr(spatial, "_start_split", None)
+    return ReadPolicy() if start is None else start()
+
+
+def _merge_by_space(patches: Iterable[Any], aggregation: Any) -> list[tuple[Any, Any]]:
+    """``[(spatial_anchor, aggregation.merge(group)), …]`` in first-seen order.
+
+    Groups on a hashable surrogate of each patch's ``space`` (dict anchors
+    → sorted-item tuples, arrays → bytes) but keeps the original anchor
+    object. Temporal aggregations read ``anchor`` + ``indices``, while a
+    `SpatioTemporalPatch` stores ``time`` + ``temporal_indices``, so each
+    member is reboxed as a `TemporalPatch`.
+    """
+    by_space: dict[Any, tuple[Any, list[Any]]] = {}
+    for p in patches:
+        by_space.setdefault(_hashable(p.space), (p.space, []))[1].append(p)
+    return [
+        (
+            anchor,
+            aggregation.merge(
+                [
+                    TemporalPatch(
+                        data=p.data,
+                        anchor=p.time,
+                        indices=p.temporal_indices,
+                        weights=p.weights,
+                    )
+                    for p in group
+                ]
+            ),
+        )
+        for anchor, group in by_space.values()
+    ]
 
 
 def _coupled_pairs(spatial: SpatialPatcher) -> list[Any]:
@@ -348,8 +406,10 @@ class _STPlan:
         coord: np.ndarray | None,
         coupled: bool,
         anchors: Iterable[Any],
+        unpack: Callable[[Any], Any] | None = None,
     ) -> None:
         self.stp = stp
+        self.unpack = unpack
         self.reader = reader
         self.coord = coord
         self.coupled = coupled
@@ -406,7 +466,8 @@ class _STPlan:
         ]
 
     def _windows(self, space: Any, time: int | None, chip: Any) -> list[_Read]:
-        time_len = self.stp._time_len(chip.data)
+        data = chip.data if self.unpack is None else self.unpack(chip.data)
+        time_len = self.stp._time_len(data)
         self.stp.temporal._require_coord(self.coord, time_len)
         self.time_len = time_len
         return [
@@ -414,7 +475,7 @@ class _STPlan:
                 key=key,
                 anchor=anchor,
                 coord_value=coord_value,
-                read=partial(self.stp._patch, chip, t, s),
+                read=partial(self.stp._patch, chip, data, t, s),
                 governed=False,
             )
             for key, anchor, coord_value, t, s in self._slots(space, time, time_len)

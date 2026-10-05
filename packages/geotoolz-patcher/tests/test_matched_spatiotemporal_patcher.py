@@ -537,3 +537,188 @@ def test_spatiotemporal_cadence_mismatch_raises() -> None:
     )
     with pytest.raises(ValueError, match=r"'s' has 4 steps.*primary has 8"):
         list(MatchedSpatioTemporalPatcher(primary=stp).split(mf))
+
+
+# ---------------------------------------------------------------------------
+# The fork is gone (#203 / #175): the matched patcher drives the primary
+# SpatioTemporalPatcher, so its read pipeline and runner knobs apply.
+# ---------------------------------------------------------------------------
+
+
+class _FlakyRaster:
+    """A raster field whose reads fail at the given window origins."""
+
+    def __init__(self, inner: Any, bad: set[tuple[int, int]]) -> None:
+        self.inner = inner
+        self.bad = bad
+        self.reads: list[tuple[int, int]] = []
+
+    @property
+    def domain(self) -> Any:
+        return self.inner.domain
+
+    def select(self, window: Any) -> Any:
+        origin = (int(window.row_off), int(window.col_off))
+        self.reads.append(origin)
+        if origin in self.bad:
+            raise OSError(f"tile {origin} unreadable")
+        return self.inner.select(window)
+
+
+def _real_stp(coupling: str = "product", anchors_: Any = None, **kw: Any) -> Any:
+    from geopatcher import (
+        SpatialBoxcar,
+        SpatialExplicit,
+        SpatialOverlapAdd,
+        SpatialPatcher,
+        SpatialRectangular,
+        SpatialRegularStride,
+    )
+
+    geometry = kw.pop("geometry", SpatialRectangular(size=(8, 8)))
+    sampler: Any = (
+        SpatialRegularStride(step=8)
+        if anchors_ is None
+        else SpatialExplicit(anchors_=anchors_)
+    )
+    return SpatioTemporalPatcher(
+        spatial=SpatialPatcher(
+            geometry=geometry,
+            sampler=sampler,
+            window=SpatialBoxcar(),
+            aggregation=SpatialOverlapAdd(),
+            **kw,
+        ),
+        temporal=TemporalPatcher(
+            geometry=TemporalFixedLookback(length=2),
+            sampler=TemporalRegularStride(step=2),
+            window=TemporalCausalBoxcar(),
+            aggregation=TemporalMean(),
+        ),
+        coupling=coupling,  # type: ignore[arg-type]
+    )
+
+
+def _flaky_mfield(bad: set[tuple[int, int]]) -> Any:
+    return MatchedField(
+        primary=_FlakyRaster(_time_raster(4), bad),
+        secondaries={"s": _time_raster(4, scale=2.0)},
+        coreg={"s": lambda raw, prim: raw},
+    )
+
+
+class _Hook:
+    def __init__(self) -> None:
+        self.errors: list[tuple[Any, Exception]] = []
+        self.skipped: list[Any] = []
+        self.done: list[Any] = []
+
+    def on_error(self, anchor: Any, exc: Exception) -> None:
+        self.errors.append((anchor, exc))
+
+    def on_patch_skipped(self, anchor: Any) -> None:
+        self.skipped.append(anchor)
+
+    def on_patch_done(self, anchor: Any, runtime_s: float, bytes_: int) -> None:
+        self.done.append(anchor)
+
+
+@pytest.mark.parametrize("coupling", ["product", "coupled"])
+def test_on_error_skip_drops_failed_chips(coupling: str) -> None:
+    anchors_ = None if coupling == "product" else [((0, 0), 3), ((8, 8), 3)]
+    stp = _real_stp(coupling, anchors_, on_error="skip")
+    hook = _Hook()
+
+    matched = list(
+        MatchedSpatioTemporalPatcher(primary=stp).split(
+            _flaky_mfield({(8, 8)}), hooks=[hook]
+        )
+    )
+
+    assert matched
+    assert all(mp.space != (8, 8) for mp in matched)
+    key = (8, 8) if coupling == "product" else ((8, 8), 3)
+    assert [e.anchor for e in stp.spatial.errors] == [key]
+    assert [(a, type(e)) for a, e in hook.errors] == [(key, OSError)]
+
+
+@pytest.mark.parametrize("coupling", ["product", "coupled"])
+def test_on_error_mask_yields_invalid_members(coupling: str) -> None:
+    anchors_ = None if coupling == "product" else [((8, 8), 3)]
+    stp = _real_stp(coupling, anchors_, on_error="mask")
+
+    matched = [
+        mp
+        for mp in MatchedSpatioTemporalPatcher(primary=stp).split(
+            _flaky_mfield({(8, 8)})
+        )
+        if mp.space == (8, 8)
+    ]
+
+    assert matched
+    for mp in matched:
+        assert set(mp.members) == {PRIMARY_KEY, "s"}
+        assert mp.valid_mask is not None
+        for name, member in mp.members.items():
+            assert np.isnan(np.asarray(member.data)).all()
+            assert not mp.valid_mask[name].any()
+
+
+def test_journal_and_backpressure_reach_the_primary_walk() -> None:
+    stp = _real_stp()
+    msp = MatchedSpatioTemporalPatcher(primary=stp)
+    mf = _flaky_mfield(set())
+
+    class _Journal:
+        def has(self, key: Any) -> bool:
+            return key == ((0, 8), 2)
+
+    hook = _Hook()
+    matched = list(msp.split(mf, hooks=[hook], journal=_Journal(), max_in_flight=8))
+    assert ((0, 8), 2) not in [(mp.space, mp.time) for mp in matched]
+    assert hook.skipped == [((0, 8), 2)]
+    assert all(mp._release is not None for mp in matched)
+    for mp in matched:
+        mp.close()
+    with pytest.raises(ValueError, match="max_in_flight_bytes"):
+        list(msp.split(mf, max_in_flight_bytes=1))
+
+
+def test_split_cache_is_keyed_per_source(tmp_path: Any) -> None:
+    from geopatcher._src.cache import PatchCache
+
+    mf = _flaky_mfield(set())
+    msp = MatchedSpatioTemporalPatcher(primary=_real_stp())
+    cache = PatchCache(tmp_path / "cache", field_id="scene")
+    first = list(msp.split(mf, cache=cache))
+    mf.primary.reads.clear()
+    second = list(msp.split(mf, cache=cache))
+    assert mf.primary.reads == []
+    for a, b in zip(first, second, strict=True):
+        for name in (PRIMARY_KEY, "s"):
+            np.testing.assert_array_equal(
+                np.asarray(a.members[name].data), np.asarray(b.members[name].data)
+            )
+
+
+def test_coupled_chip_goes_through_the_spatial_pipeline() -> None:
+    from geopatcher import SpatialRectangular
+
+    stp = _real_stp(
+        "coupled",
+        [((-4, -4), 3)],
+        geometry=SpatialRectangular(size=(8, 8), boundary="reflect"),
+    )
+    mf = MatchedField(
+        primary=_time_raster(4),
+        secondaries={"s": _time_raster(4, scale=2.0)},
+        coreg={"s": lambda raw, prim: raw},
+    )
+    (mp,) = list(MatchedSpatioTemporalPatcher(primary=stp).split(mf))
+    (ref,) = list(stp.split(mf.primary))
+    np.testing.assert_array_equal(
+        np.asarray(mp.members[PRIMARY_KEY].data), np.asarray(ref.data)
+    )
+    np.testing.assert_array_equal(
+        np.asarray(mp.members["s"].data), 2 * np.asarray(ref.data)
+    )

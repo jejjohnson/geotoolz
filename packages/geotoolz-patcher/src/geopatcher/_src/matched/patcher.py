@@ -20,12 +20,12 @@ per matched patch whose byte count sums every member, and one
 ``on_merge_start`` / ``on_merge_end`` pair per ``merge`` whose output
 bytes sum every source's result.
 
-The spatial and temporal ``merge`` stream: each source's aggregation
-runs on its own worker thread, fed through a small bounded queue, so a
-single pass over the matched patches drives every aggregation at once
-and only a few patches per source are resident — never the whole patch
-list of every source (`MatchedSpatioTemporalPatcher.merge` groups by
-spatial anchor and still materialises its groups).
+Every ``merge`` streams: each source's aggregation runs on its own
+worker thread, fed through a small bounded queue, so a single pass over
+the matched patches drives every aggregation at once and only a few
+patches per source are resident — never the whole patch list of every
+source (`MatchedSpatioTemporalPatcher.merge` still groups each source's
+patches by spatial anchor, as `SpatioTemporalPatcher.merge` does).
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ import queue
 import threading
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
@@ -57,9 +58,10 @@ from geopatcher._src.matched.patch import (
     MatchedSpatioTemporalPatch,
     MatchedTemporalPatch,
 )
-from geopatcher._src.patch import Patch, SpatioTemporalPatch, TemporalPatch
+from geopatcher._src.patch import Patch, SpatioTemporalPatch
 from geopatcher._src.prefetch import prefetch_iterable
 from geopatcher._src.spatial.geometry import _is_raster_domain
+from geopatcher._src.spatial_time import _merge_by_space
 
 
 if TYPE_CHECKING:
@@ -320,7 +322,7 @@ def _full_indexer(domain: Any) -> Any:
 
 
 def _check_time_lengths(
-    arrays: Mapping[str, np.ndarray], time_axis: int, cls_name: str
+    arrays: Mapping[str, Any], time_axis: int, cls_name: str
 ) -> int:
     """Every source's length along ``time_axis``; must equal the primary's.
 
@@ -334,11 +336,12 @@ def _check_time_lengths(
     Raises:
         ValueError: A secondary's time length differs from the primary's.
     """
-    time_len = int(arrays[PRIMARY_KEY].shape[time_axis])
+    time_len = int(np.shape(arrays[PRIMARY_KEY])[time_axis])
     for name, arr in arrays.items():
         if name == PRIMARY_KEY:
             continue
-        n = int(arr.shape[time_axis]) if arr.ndim > time_axis else None
+        shape = np.shape(arr)
+        n = int(shape[time_axis]) if len(shape) > time_axis else None
         if n != time_len:
             raise ValueError(
                 f"{cls_name}: secondary {name!r} has {n} steps along "
@@ -1069,10 +1072,12 @@ class MatchedTemporalPatcher(_MatchedConfigMixin):
 class MatchedSpatioTemporalPatcher(_MatchedConfigMixin):
     """Spatio-temporal matched patcher — yields `MatchedSpatioTemporalPatch`es.
 
-    Mirror of `MatchedSpatialPatcher` over the spatio-temporal axis.
-    Inherits the coupling mode (``"product"`` or ``"coupled"``) from
-    ``primary.coupling`` — the matched version does not add its own
-    coupling argument so the primary stays the single source of truth.
+    Mirror of `MatchedSpatialPatcher` over the spatio-temporal axis: it
+    drives the primary `SpatioTemporalPatcher` over the `MatchedField`
+    and turns each yielded patch into a matched carrier, so the coupling
+    mode (``"product"`` or ``"coupled"``, from ``primary.coupling``), the
+    chip reads, the ``on_error`` policy, hooks, journal and backpressure
+    are the primary's own.
 
     Args:
         primary: A regular `SpatioTemporalPatcher` configured for the
@@ -1097,223 +1102,108 @@ class MatchedSpatioTemporalPatcher(_MatchedConfigMixin):
         *,
         coord: np.ndarray | None = None,
         prefetch: int = 0,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
     ) -> Iterator[MatchedSpatioTemporalPatch]:
         """Yield `MatchedSpatioTemporalPatch`es lazily.
 
-        Delegates to one of two private methods depending on
-        ``self.primary.coupling`` — ``"product"`` for the Cartesian
-        product of spatial / time anchors, ``"coupled"`` for explicit
-        ``(space, time)`` pairs.
+        Runs ``self.primary.split`` over ``mfield``: each spatial chip is
+        one `MatchedField` read (every source over the primary chip's
+        footprint, coregistered onto it) checked to hold the primary and
+        to share its time length, and every source is sliced to the same
+        time window. Each yielded patch is unpacked into a matched carrier
+        whose ``members`` are per-source `SpatioTemporalPatch`es.
+
+        The spatial patcher's ``on_error`` policy covers every source's
+        read and coregistration; under ``"mask"`` a failed chip yields
+        all-NaN members with an all-False ``valid_mask``. Per-source
+        ``valid_mask`` arrays are otherwise computed when
+        ``mfield.valid_mask`` is True (the default).
 
         Args:
             mfield: A `MatchedField` to walk with the primary
                 spatio-temporal patcher.
-            hooks: Optional observability hooks. The matched layer
-                emits its own ``on_patch_start`` / ``on_patch_done`` /
-                ``on_error`` for each spatio-temporal anchor pair (with
-                ``coord_value``, and bytes summed over every member).
+            hooks: Optional observability hooks, dispatched by the
+                primary's split once per matched patch — ``(space, time)``
+                anchors, ``coord_value``, and ``on_patch_done`` bytes summed
+                over every member.
             coord: 1-D coordinate vector along the time axis, as
                 `SpatioTemporalPatcher.split` takes it — required by
                 coordinate-aware (stencil) temporal geometries / samplers.
             prefetch: If positive, read ahead up to ``prefetch`` matched
                 patches on a background thread.
+            journal: Forwarded to `SpatioTemporalPatcher.split` — the
+                ``(space, time_key)`` keys it holds are skipped.
+            cache: A `PatchCache` consulted per source, as in
+                `MatchedSpatialPatcher.split` (the coregistration still
+                runs).
+            max_in_flight: Forwarded to `SpatioTemporalPatcher.split`;
+                each yielded matched patch owns the slot — release it with
+                ``mp.close()`` or ``with mp: ...``.
+            max_in_flight_bytes: Forwarded; a matched patch is sized as
+                the sum of its members' bytes.
 
         Raises:
             ValueError: A secondary's length along the time axis differs
                 from the primary's.
         """
-        return prefetch_iterable(self._split(mfield, hooks, coord=coord), prefetch)
-
-    def _split(
-        self,
-        mfield: MatchedField,
-        hooks: Iterable[PatcherHook] | None,
-        *,
-        coord: np.ndarray | None,
-    ) -> Iterator[MatchedSpatioTemporalPatch]:
         _validate_aggregator_names(
             self.secondary_aggregators, mfield, type(self).__name__
         )
-        coupling = self.primary.coupling
-        if coupling not in ("product", "coupled"):
-            raise ValueError(f"unknown coupling: {coupling!r}")
-        self.primary.temporal._require_coord(coord)
-        hook_list = _as_hooks(hooks)
-        run = self._split_product if coupling == "product" else self._split_coupled
-        if not hook_list:
-            yield from run(mfield, coord=coord)
-            return
-        _dispatch(hook_list, "on_split_start", self.primary._split_total_hint(mfield))
+        source: Any = mfield if cache is None else _CachedSourceReads(mfield, cache)
+        outers = self.primary._split(
+            source,
+            hooks,
+            coord=coord,
+            prefetch=prefetch,
+            journal=journal,
+            cache=None,
+            max_in_flight=max_in_flight,
+            max_in_flight_bytes=max_in_flight_bytes,
+            unpack=partial(self._unpack, mfield),
+        )
+        return self._matched(outers, mfield)
+
+    def _unpack(self, mfield: MatchedField, data: Any) -> dict[str, Any]:
+        """One chip read → its checked ``{source: data}`` dict.
+
+        A mask placeholder fans out to one all-NaN copy per source, marked
+        `_MaskedMembers` so `_matched` gives it an all-False mask.
+        """
+        cls_name = type(self).__name__
+        data_by_name, masked = _unpack_matched(
+            data,
+            mfield,
+            self.primary.spatial,
+            cls_name,
+            "each spatial Patch.data to be",
+        )
+        _check_time_lengths(data_by_name, self.primary.time_axis, cls_name)
+        return _MaskedMembers(data_by_name) if masked else data_by_name
+
+    def _matched(
+        self, outers: Iterator[SpatioTemporalPatch], mfield: MatchedField
+    ) -> Iterator[MatchedSpatioTemporalPatch]:
         try:
-            yield from run(mfield, hook_list, coord=coord)
-        finally:
-            _dispatch(hook_list, "on_split_end")
-
-    def _slice_members(
-        self,
-        mfield: MatchedField,
-        arrays: Mapping[str, np.ndarray],
-        nodata: Mapping[str, Any],
-        *,
-        space: Any,
-        time: int,
-        spatial_indices: Any,
-        temporal_indices: Any,
-        weights: Any,
-        masked: bool,
-    ) -> MatchedSpatioTemporalPatch:
-        idx: list[Any] = [slice(None)] * arrays[PRIMARY_KEY].ndim
-        idx[self.primary.time_axis] = temporal_indices
-        tup = tuple(idx)
-        members = {
-            name: SpatioTemporalPatch(
-                data=arr[tup],
-                space=space,
-                time=time,
-                spatial_indices=spatial_indices,
-                temporal_indices=temporal_indices,
-                weights=weights,
-            )
-            for name, arr in arrays.items()
-        }
-        return MatchedSpatioTemporalPatch(
-            space=space,
-            time=time,
-            members=members,
-            valid_mask=_compute_member_masks(members, mfield, nodata, masked=masked),
-            weights=_member_weights(members),
-        )
-
-    def _source_arrays(
-        self, data_by_name: Mapping[str, Any]
-    ) -> tuple[dict[str, np.ndarray], dict[str, Any], int]:
-        arrays = {name: np.asarray(d) for name, d in data_by_name.items()}
-        nodata = {name: _declared_nodata(d) for name, d in data_by_name.items()}
-        time_len = _check_time_lengths(
-            arrays, self.primary.time_axis, type(self).__name__
-        )
-        return arrays, nodata, time_len
-
-    def _split_product(
-        self,
-        mfield: MatchedField,
-        hooks: Iterable[PatcherHook] = (),
-        *,
-        coord: np.ndarray | None = None,
-    ) -> Iterator[MatchedSpatioTemporalPatch]:
-        spatial = self.primary.spatial
-        temporal = self.primary.temporal
-        cls_name = type(self).__name__
-        for sp in spatial.split(mfield):
-            data_by_name, masked = _unpack_matched(
-                sp.data, mfield, spatial, cls_name, "each spatial Patch.data to be"
-            )
-            arrays, nodata, time_len = self._source_arrays(data_by_name)
-            temporal._require_coord(coord, time_len)
-            for t_anchor in temporal._sampler_anchors(time_len, coord):
-                t = int(t_anchor)
-                slices = temporal._window_slices(time_len, t, coord)
-                coord_value = coord[t] if coord is not None else None
-                for s in slices:
-                    anchor = (sp.anchor, t)
-                    _dispatch(hooks, "on_patch_start", anchor, coord_value)
-                    start = perf_counter()
-                    try:
-                        matched = self._slice_members(
-                            mfield,
-                            arrays,
-                            nodata,
-                            space=sp.anchor,
-                            time=t,
-                            spatial_indices=sp.indices,
-                            temporal_indices=s,
-                            weights=sp.weights,
-                            masked=masked,
-                        )
-                    except Exception as exc:
-                        _dispatch(hooks, "on_error", anchor, exc)
-                        raise
-                    _dispatch(
-                        hooks,
-                        "on_patch_done",
-                        anchor,
-                        perf_counter() - start,
-                        _members_nbytes(matched.members),
-                        coord_value,
-                    )
-                    yield matched
-
-    def _split_coupled(
-        self,
-        mfield: MatchedField,
-        hooks: Iterable[PatcherHook] = (),
-        *,
-        coord: np.ndarray | None = None,
-    ) -> Iterator[MatchedSpatioTemporalPatch]:
-        spatial = self.primary.spatial
-        temporal = self.primary.temporal
-        cls_name = type(self).__name__
-
-        anchors = getattr(spatial.sampler, "anchors_", None)
-        if anchors is None:
-            raise TypeError(
-                "coupled coupling requires the spatial sampler to expose an "
-                "`anchors_` list of (space_anchor, time_anchor) tuples — i.e. "
-                "use SpatialExplicit(anchors_=[...])."
-            )
-        for pair in anchors:
-            space_anchor, time_anchor = pair
-            t = int(time_anchor)
-            anchor = (space_anchor, t)
-            # Bounded lookup, as in `SpatioTemporalPatcher._split_coupled`:
-            # time_len is unknown until the read, so an out-of-range anchor
-            # reports through `_require_coord` below, not an IndexError.
-            coord_value = (
-                coord[t] if coord is not None and 0 <= t < len(coord) else None
-            )
-            _dispatch(hooks, "on_patch_start", anchor, coord_value)
-            start = perf_counter()
-            try:
-                indices = spatial.geometry.neighborhood(mfield.domain, space_anchor)
-                data_by_name = mfield.select(indices)
-                _check_matched_dict(
-                    data_by_name, cls_name, "each spatial Patch.data to be"
+            for outer in outers:
+                members = {
+                    name: outer.with_data(data) for name, data in outer.data.items()
+                }
+                matched = MatchedSpatioTemporalPatch(
+                    space=outer.space,
+                    time=outer.time,
+                    members=members,
+                    valid_mask=_compute_member_masks(
+                        members, mfield, masked=isinstance(outer.data, _MaskedMembers)
+                    ),
+                    weights=_member_weights(members),
                 )
-                arrays, nodata, time_len = self._source_arrays(data_by_name)
-                temporal._require_coord(coord, time_len)
-                slices = temporal._window_slices(time_len, t, coord)
-                try:
-                    base_weights = spatial.window.weights(spatial.geometry)
-                except TypeError:
-                    base_weights = None
-            except Exception as exc:
-                _dispatch(hooks, "on_error", anchor, exc)
-                raise
-            for s in slices:
-                try:
-                    matched = self._slice_members(
-                        mfield,
-                        arrays,
-                        nodata,
-                        space=space_anchor,
-                        time=t,
-                        spatial_indices=indices,
-                        temporal_indices=s,
-                        weights=base_weights,
-                        masked=False,
-                    )
-                except Exception as exc:
-                    _dispatch(hooks, "on_error", anchor, exc)
-                    raise
-                _dispatch(
-                    hooks,
-                    "on_patch_done",
-                    anchor,
-                    perf_counter() - start,
-                    _members_nbytes(matched.members),
-                    coord_value,
-                )
+                _hand_over_release(outer, matched)
                 yield matched
+        finally:
+            _close(outers)
 
     def merge(
         self,
@@ -1323,13 +1213,14 @@ class MatchedSpatioTemporalPatcher(_MatchedConfigMixin):
     ) -> dict[str, list[tuple[Any, Any]]]:
         """Per-source merge: dict of ``name -> [(spatial_anchor, temporal_merge), …]``.
 
-        Mirrors `SpatioTemporalPatcher.merge`: each source's value is
-        a list of ``(spatial_anchor, temporal_aggregation_result)``
-        pairs grouped by spatial anchor (first-seen order).
-        Aggregations on each secondary use that secondary's
-        `TemporalAggregation`; the primary uses
-        ``self.primary.temporal.aggregation``. Grouping by spatial
-        anchor holds every group in memory until the pass ends.
+        Each source's value is what `SpatioTemporalPatcher.merge` returns
+        for that source's members: ``(spatial_anchor,
+        temporal_aggregation_result)`` pairs grouped by spatial anchor
+        (first-seen order). Secondaries use their `TemporalAggregation`;
+        the primary uses ``self.primary.temporal.aggregation``.
+        ``patches`` is consumed once and fanned out to every source as in
+        `MatchedSpatialPatcher.merge`; each source's grouping still holds
+        its groups until the pass ends.
 
         Args:
             patches: Iterable of `MatchedSpatioTemporalPatch` instances.
@@ -1338,61 +1229,23 @@ class MatchedSpatioTemporalPatcher(_MatchedConfigMixin):
                 matched layer (one ``merge_start`` / ``merge_end`` per
                 call; the output bytes sum every source).
         """
-        from geopatcher._src.spatial_time import _hashable
-
         _validate_aggregator_names(
             self.secondary_aggregators, mfield, type(self).__name__
         )
+        aggregations = {
+            PRIMARY_KEY: self.primary.temporal.aggregation,
+            **self.secondary_aggregators,
+        }
 
-        hook_list = _as_hooks(hooks)
-        _dispatch(hook_list, "on_merge_start", _len_or_unknown(patches))
-        try:
-            per_source_groups: dict[str, dict[Any, tuple[Any, list[Any]]]] = {
-                PRIMARY_KEY: {}
-            }
-            for name in self.secondary_aggregators:
-                per_source_groups[name] = {}
+        def consumer(agg: Any) -> Callable[[Iterator[Any]], Any]:
+            return lambda members: _merge_by_space(members, agg)
 
-            for mp in patches:
-                for name, patch in mp.members.items():
-                    groups = per_source_groups.get(name)
-                    if groups is None:
-                        continue
-                    key = _hashable(patch.space)
-                    groups.setdefault(key, (patch.space, []))[1].append(patch)
+        return _merge_per_source(
+            patches,
+            {name: consumer(agg) for name, agg in aggregations.items()},
+            hooks,
+        )
 
-            def _aggregate(
-                groups: dict[Any, tuple[Any, list[Any]]],
-                agg: TemporalAggregation,
-            ) -> list[tuple[Any, Any]]:
-                return [
-                    (
-                        anchor,
-                        agg.merge(
-                            [
-                                TemporalPatch(
-                                    data=p.data,
-                                    anchor=p.time,
-                                    indices=p.temporal_indices,
-                                    weights=p.weights,
-                                )
-                                for p in group
-                            ]
-                        ),
-                    )
-                    for anchor, group in groups.values()
-                ]
 
-            result: dict[str, list[tuple[Any, Any]]] = {
-                PRIMARY_KEY: _aggregate(
-                    per_source_groups[PRIMARY_KEY],
-                    self.primary.temporal.aggregation,
-                ),
-            }
-            for name, agg in self.secondary_aggregators.items():
-                result[name] = _aggregate(per_source_groups[name], agg)
-        except Exception as exc:
-            _dispatch(hook_list, "on_error", None, exc)
-            raise
-        _dispatch(hook_list, "on_merge_end", _nbytes(result))
-        return result
+class _MaskedMembers(dict):
+    """``{source: data}`` of an ``on_error="mask"`` chip (all-NaN members)."""
