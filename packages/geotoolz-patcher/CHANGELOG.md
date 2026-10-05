@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.6.0...geotoolz-patcher-v0.7.0) (2026-10-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **patcher/matched:** `MatchedSpatioTemporalPatcher` members carry each source's sliced carrier (e.g. `GeoTensor`) instead of an ndarray; chip read failures follow the spatial patcher's `on_error` policy (the coupled mode used to raise); `on_split_start` reports `-1` in product mode (the spatial anchor count before); coupled chips get the spatial pipeline's padded / reflected data and masked / cropped weights.
+* **patcher:** `SpatioTemporalPatcher` patches carry the chip's carrier (e.g. `GeoTensor`) sliced along `time_axis` instead of an ndarray, and the coupled split's weights are the chip's (masked / shrink-cropped) weights; chip reads follow the spatial patcher's `on_error` policy; product mode reports `on_split_start(-1)`; `asplit` accepts `hooks` positionally. `on_error` hooks get the original exception instead of a `RuntimeError` summary for swallowed failures. `patcher.errors` is reset by each split / asplit / reduce / two_pass instead of accumulating across calls. `PatchErrorRecord` lives in `geopatcher._src.walk` (`geopatcher.PatchErrorRecord` is unchanged).
+* **patcher/time:** TemporalPatcher methods take `time_axis` / `hooks` / `coord` as keyword-only arguments; TemporalRandom(n=) is now n_samples=; TemporalEventTriggered(event_times=) is TemporalExplicit(times=) and TemporalCausalRolling is TemporalRegularStride; TemporalTaperedTukey weights change (one-sided causal taper); TemporalStencilGeometry drops overflowing origins by default (boundary="drop") instead of raising; coord= must be strictly increasing; Stencil / divide_evenly reject inputs they used to accept and fail on later; a non-GridDomain Field passed to TemporalPatcher raises TypeError.
+* **patcher/time:** integer temporal geometries default to boundary="drop": anchors whose window overflows the time axis yield no patch (pass boundary="shrink" for the old clamped edge windows). TemporalMean now reconstructs a per-time-step mean instead of averaging stacked patches; TemporalHierarchicalCombine keys inner dicts by scale (or window index), never a (start, stop) tuple; TemporalPhaseWindow yields one patch per cycle; TemporalForecast skips windows without a full horizon.
+* **patcher:** GridSampler.get_config()["patcher"] is now a {"class": "SpatialPatcher", "config": ...} envelope instead of the bare patcher config.
+* **patcher:** get_config payloads changed shape — stencil axes nest {"class", "config"} envelopes with {"value", "unit"} offsets, SpatioTemporalPatcher nests envelopes, retry_on is emitted as qualified names, and the summary keys (n_points, n_coords, n_events, n_times) are replaced by the data. SpatialExplicit and SpatialPolygonIntersection are forbid_in_yaml; PatchCache refuses SpatialPolygonIntersection. A retry_on string now also matches subclasses of the class it names.
+* **patcher/matched:** MatchedTemporalPatcher.split / n_anchors / anchors read the series with an indexer derived from the primary's domain (or the new indexer= argument) instead of slice(None); a secondary whose time length differs from the primary's raises ValueError. The matched merges run each source's aggregation concurrently on a worker thread and close each MatchedPatch as it is consumed. Matched hooks fire once at the matched level: MatchedTemporalPatcher no longer forwards split hooks to the primary TemporalPatcher, on_patch_done / on_merge_end bytes sum every source, and a secondary aggregation failure now reaches on_error. on_error="mask" yields an all-NaN MatchedPatch instead of raising TypeError. MatchedPatch.weights is no longer always None.
+* **patcher/runners:** parallel_map's process backend no longer forks; it uses forkserver (spawn where unavailable), so operators must be picklable module-level callables importable in a fresh interpreter (pass mp_context="fork" to opt back in). Read failures on the select_many path are now governed by SpatialPatcher.on_error, not by parallel_map(on_error=...), which applies to operator errors only. BatchedPatch gains a carriers field and unbatch returns GeoTensor / DataArray patches for carrier chips instead of bare arrays.
+
+### Bug Fixes
+
+* **patcher/backpressure:** lazy byte budget, interruptible prefetch, on-loop async release ([#382](https://github.com/jejjohnson/geotoolz/issues/382)) ([cddeb78](https://github.com/jejjohnson/geotoolz/commit/cddeb78dce9cb3baed7f8026d276f6c3404747dd)), closes [#195](https://github.com/jejjohnson/geotoolz/issues/195)
+* **patcher/matched:** real-field temporal indexer, streaming per-source merge, on_error and hook parity ([#385](https://github.com/jejjohnson/geotoolz/issues/385)) ([d27fafc](https://github.com/jejjohnson/geotoolz/commit/d27fafc09c2318a0c72799861e3756ebb929980d))
+* **patcher/runners:** stream parallel_map through split, explicit mp start method, journal ([#383](https://github.com/jejjohnson/geotoolz/issues/383)) ([a4e63a3](https://github.com/jejjohnson/geotoolz/commit/a4e63a3b79f526194d8cce73a5af25395fb28888)), closes [#196](https://github.com/jejjohnson/geotoolz/issues/196)
+* **patcher/time:** temporal geometries drop overflowing windows instead of clamping ([#394](https://github.com/jejjohnson/geotoolz/issues/394)) ([f8aabf5](https://github.com/jejjohnson/geotoolz/commit/f8aabf506944b8fd73bbe70364d1bdcd6f736e11))
+* **patcher:** envelope GridSampler's patcher and use Patch.with_data in matched split ([#393](https://github.com/jejjohnson/geotoolz/issues/393)) ([21dcc84](https://github.com/jejjohnson/geotoolz/commit/21dcc849e2193cdcd973f9c98811ba51299a3b3c)), closes [#201](https://github.com/jejjohnson/geotoolz/issues/201)
+* **patcher:** make every get_config rebuild its object or flag forbid_in_yaml ([#392](https://github.com/jejjohnson/geotoolz/issues/392)) ([c693752](https://github.com/jejjohnson/geotoolz/commit/c69375297ed8085ce067d7592ea4a6a80ae5a247)), closes [#200](https://github.com/jejjohnson/geotoolz/issues/200)
+
+
+### Code Refactoring
+
+* **patcher/matched:** drive SpatioTemporalPatcher instead of forking it ([#408](https://github.com/jejjohnson/geotoolz/issues/408)) ([c21fdb7](https://github.com/jejjohnson/geotoolz/commit/c21fdb7500960fde976dddc60400423b5d186494))
+* **patcher/time:** TemporalPatcher parity with SpatialPatcher ([#406](https://github.com/jejjohnson/geotoolz/issues/406)) ([f12cdb1](https://github.com/jejjohnson/geotoolz/commit/f12cdb18b8d813c1e09ddc466a9475d270c8daa9))
+* **patcher:** one anchor-walk core for every split path ([#407](https://github.com/jejjohnson/geotoolz/issues/407)) ([57fe7d3](https://github.com/jejjohnson/geotoolz/commit/57fe7d33f83b33a81a06899d50b72c7fa90b9dc6))
+
 ## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.5.1...geotoolz-patcher-v0.6.0) (2026-10-05)
 
 

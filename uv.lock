@@ -1272,7 +1272,7 @@ wheels = [
 
 [[package]]
 name = "geotoolz"
-version = "0.5.1"
+version = "0.6.0"
 source = { editable = "packages/geotoolz" }
 dependencies = [
     { name = "affine" },
@@ -1400,7 +1400,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-catalog"
-version = "0.2.2"
+version = "0.2.3"
 source = { editable = "packages/geotoolz-catalog" }
 dependencies = [
     { name = "cyclopts" },
@@ -1641,7 +1641,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-patcher"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "georeader-spaceml" },

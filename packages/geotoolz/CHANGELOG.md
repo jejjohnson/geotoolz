@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.5.1...geotoolz-v0.6.0) (2026-10-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geotoolz:** the carrier constructor kwargs are removed with no aliases: IMEEstimate / CrossSectionalFlux(plume_mask=), PlumeFootprint(enhancement=), SBMP(reference_scene=), PlumeColumnStats(column=), PlumeQNDFeatures(column=, albedo=), RegionProps(intensity_image=), ApplyMask(mask=<array>), AltitudeMask / SlopeMask(dem=), SLIC / Felzenszwalb / Quickshift / Watershed(mask=), Watershed / RandomWalker(markers=), MarkBoundaries(label_img=), PhaseAlign / OpticalFlow*(reference=), CutMix(pool=) and BlendMatched(..., variances=). Pass the carriers at call time. Multi-input grid errors now read "<Op>: the <x> pixel grid (...) does not match the <y> pixel grid (...)".
+* **patcher:** GridSampler.get_config()["patcher"] is now a {"class": "SpatialPatcher", "config": ...} envelope instead of the bare patcher config.
+* **geotoolz:** PhaseAlign(apply=True) marks edge pixels uncovered by the shift, and pixels interpolated from nodata, as nodata (the fill value, or NaN), where it used to repeat edge pixels and blend fill values in. Its estimated shift ignores nodata pixels. Rasterize / RasterizeLike declare an integer fill on integer burns and write it into the input's nodata pixels. RasterizeLike rejects an input that is not on `like`'s grid. A GeoDataFrame burned without `column` is uint8, not float64. HistogramMatch on a (T, C, H, W) stack matches per band, pooled over frames.
+* **geotoolz:** Hillshade, ShadedRelief and SlopeMask raise ValueError on a geographic-CRS DEM (pass explicit Hillshade resolutions or reproject); DistanceMask, BufferMask(unit="meters"), SlopeMask and Hillshade raise ValueError on a sheared transform; rotated grids now give different (correct) distance and slope results.
+* **geotoolz:** restore.InverseMNF is removed; use MNF.inverse. Calling MNF reuses the basis fitted on the first call instead of refitting on every call (call fit() to refit). Learned statistics are stored in mean_ / std_ / median_ / iqr_ / vmin_ / vmax_ (scalers), mean_ / cov_op_ (MatchedFilter) and MNF.state_ (was the private _state), and are no longer written to the constructor attributes or get_config(); persist a fit by passing it back as constructor arguments. MatchedFilter(fit_on_call=True) no longer stores the per-call background. SklearnOp(fit_mode="fit_streaming") with a fit_predict task raises ValueError. ModelOp raises TypeError at construction for a non-Predictor model with method="predict", a non-callable model with method="__call__", or a missing method.
+
+### Features
+
+* **geotoolz:** fitted operators expose fit/transform seams ([#389](https://github.com/jejjohnson/geotoolz/issues/389)) ([d577a85](https://github.com/jejjohnson/geotoolz/commit/d577a8571e0c0526e66fb74239d91dbb7ca4ae8f)), closes [#143](https://github.com/jejjohnson/geotoolz/issues/143)
+
+
+### Bug Fixes
+
+* **geotoolz:** close the [#166](https://github.com/jejjohnson/geotoolz/issues/166) fill and 4-d contract gaps ([#391](https://github.com/jejjohnson/geotoolz/issues/391)) ([3995060](https://github.com/jejjohnson/geotoolz/commit/399506095e9dc50a2cfb04e4d61f582df8cd8738)), closes [#331](https://github.com/jejjohnson/geotoolz/issues/331)
+* **geotoolz:** ground pixel steps on rotated grids, reject geographic-crs slopes ([#390](https://github.com/jejjohnson/geotoolz/issues/390)) ([3a9e1ee](https://github.com/jejjohnson/geotoolz/commit/3a9e1eed301be71caf4625e34cd307cc30ea0d75)), closes [#331](https://github.com/jejjohnson/geotoolz/issues/331)
+* **geotoolz:** second carriers are positional _apply arguments ([#403](https://github.com/jejjohnson/geotoolz/issues/403)) ([2c347fd](https://github.com/jejjohnson/geotoolz/commit/2c347fd0646eefc106b5a2e28fa3a7080c26d7a5)), closes [#141](https://github.com/jejjohnson/geotoolz/issues/141)
+* **patcher:** envelope GridSampler's patcher and use Patch.with_data in matched split ([#393](https://github.com/jejjohnson/geotoolz/issues/393)) ([21dcc84](https://github.com/jejjohnson/geotoolz/commit/21dcc849e2193cdcd973f9c98811ba51299a3b3c)), closes [#201](https://github.com/jejjohnson/geotoolz/issues/201)
+
 ## [0.5.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.5.0...geotoolz-v0.5.1) (2026-10-03)
 
 
