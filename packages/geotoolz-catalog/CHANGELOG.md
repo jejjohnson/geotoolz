@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.2.2...geotoolz-catalog-v0.2.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* **catalog:** `geocatalog --version` and `__version__` report the distribution version ([#396](https://github.com/jejjohnson/geotoolz/issues/396)) ([6f470b3](https://github.com/jejjohnson/geotoolz/commit/6f470b30c33d5ed63fdf996810d0bf3efb09ee47)), closes [#250](https://github.com/jejjohnson/geotoolz/issues/250)
+* **catalog:** extras install exactly what geocatalog uses ([#395](https://github.com/jejjohnson/geotoolz/issues/395)) ([1b96443](https://github.com/jejjohnson/geotoolz/commit/1b9644387daca6235ced738503c81a8bbc7c9327)), closes [#253](https://github.com/jejjohnson/geotoolz/issues/253)
+
 ## [0.2.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.2.1...geotoolz-catalog-v0.2.2) (2026-10-03)
 
 
