@@ -6,7 +6,7 @@ into a local cache and rewrites a catalog to point at those local
 copies, ready to be opened by `load_raster` / `load_vector` /
 `load_xarray`.
 
-Implemented surface (see ``docs/design/query-matchup.md`` §4.7):
+Implemented surface (see ``docs/catalog/design/query-matchup.md`` §4.7):
 
 * `stage` — orchestrator entry point: fetches each row's remote
   assets into the cache (parallel, with retry) and returns a catalog

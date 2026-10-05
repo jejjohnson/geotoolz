@@ -1,6 +1,6 @@
 """External data-source adapters.
 
-See ``docs/design/query-matchup.md`` §4 for the full design. This
+See ``docs/catalog/design/query-matchup.md`` §4 for the full design. This
 module is the bridge between *remote* catalogs (NASA earthaccess,
 STAC endpoints, Google Earth Engine, CMR) and the local
 ``GeoCatalog``: each adapter knows how to ask its upstream service

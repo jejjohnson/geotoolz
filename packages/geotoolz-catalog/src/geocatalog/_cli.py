@@ -1,4 +1,4 @@
-"""`geocatalog` console command (#23).
+"""`geocatalog` console command.
 
 Thin CLI over the library API — every subcommand maps to a single
 public function and adds nothing more than argument parsing, exit-code
@@ -62,7 +62,7 @@ def _expand_glob(pattern: str) -> list[Path]:
     """
     if "://" in pattern:
         raise ValueError(
-            f"Remote URIs not supported by the CLI yet (#23 follow-on): "
+            f"Remote URIs are not supported by the CLI yet: "
             f"{pattern!r}. Expand the URI list yourself and pass concrete paths."
         )
     matches = sorted(glob.glob(pattern, recursive=True))
@@ -577,7 +577,7 @@ def migrate(
         Parameter(help="Target schema version. Defaults to the reader's current."),
     ] = None,
 ) -> int:
-    """Rewrite ``source`` at the requested schema version (#25).
+    """Rewrite ``source`` at the requested schema version.
 
     Mirrors `_open_catalog`'s exit-code mapping:
 

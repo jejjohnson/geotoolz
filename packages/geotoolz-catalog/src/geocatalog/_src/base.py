@@ -6,8 +6,8 @@ Given a query like "files overlapping AOI X between dates Y and Z," the
 catalog returns the matching rows fast without opening any file.
 
 This Protocol is what downstream callers depend on. Two backends
-implement it (`InMemoryGeoCatalog` in v0.1, `DuckDBGeoCatalog` in v0.2);
-new backends can join without touching consumers.
+implement it (`InMemoryGeoCatalog` and `DuckDBGeoCatalog`); new
+backends can join without touching consumers.
 """
 
 from __future__ import annotations
@@ -187,7 +187,7 @@ class GeoCatalog(Protocol, metaclass=_GeoCatalogMeta):
         Two call shapes are supported: pass a `GeoSlice` (carries bounds,
         time, and CRS together), or pass the parts. Bounds in a non-
         catalog CRS are reprojected internally so an AOI in the wrong
-        CRS doesn't silently match zero rows (§10.1 of the design plan).
+        CRS doesn't silently match zero rows.
 
         Args:
             slice_: A `GeoSlice` whose bbox + interval drive the filter.

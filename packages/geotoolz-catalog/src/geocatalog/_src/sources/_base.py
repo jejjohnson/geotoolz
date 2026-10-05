@@ -10,7 +10,7 @@ persisted in GeoParquet.
 The two come together via ``CatalogBundle.ingest(source, bounds=...)``
 (see `geocatalog._src.bundle`), which materializes a remote query into
 local catalog rows and records a ``QueryRecord`` for provenance. See
-``docs/design/query-matchup.md`` §4 for the full picture.
+``docs/catalog/design/query-matchup.md`` §4 for the full picture.
 """
 
 from __future__ import annotations

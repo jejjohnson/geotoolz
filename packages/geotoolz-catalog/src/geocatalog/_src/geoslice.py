@@ -70,8 +70,8 @@ class GeoSlice:
     crs: pyproj.CRS
     # Construction-time alignment policy. NOT part of identity:
     # two slices with the same bounds/interval/resolution/crs compare
-    # equal and hash equal regardless of ``align`` (see #6.7 of the
-    # design doc / geopatcher#59).
+    # equal and hash equal regardless of ``align`` (see
+    # docs/catalog/design/exact-grid-alignment.md).
     align: Align = field(
         default="off",
         compare=False,

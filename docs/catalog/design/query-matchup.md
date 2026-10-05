@@ -1,10 +1,9 @@
 # Query → Matchup → Patch: A Cross-Package Design
 
-**Status:** Draft, for discussion
+**Status:** Implemented — this document describes the shipped surface; §8 lists what is not built
 **Author:** @jejjohnson + Claude
-**Date:** 2026-05-23
+**Date:** 2026-05-23 (updated to the shipped API)
 **Affects:** `geocatalog`, `geotoolz`, `geopatcher`
-**Branch (all repos):** `claude/geocatalog-query-matchup-design-zHXc4`
 
 ---
 
@@ -47,8 +46,8 @@ This design covers all three packages because the user-facing workflow crosses a
 │                                  GEOCATALOG                                     │
 │                                                                                 │
 │   external source ──┐    ┌──────────────┐         ┌──────────────────────┐      │
-│   (earthaccess,     │    │              │         │  items.parquet       │      │
-│    STAC, GEE, CMR)  ├───►│ Source.query ├────────►│  queries.parquet     │      │
+│   (earthaccess,     │    │ Source.query │ ingest  │  items.parquet       │      │
+│    STAC, CMR)       ├───►│              ├────────►│  queries.parquet     │      │
 │                     │    │              │         │  matchups.parquet    │      │
 │                     │    └──────────────┘         └────────┬─────────────┘      │
 │                                                            │                    │
@@ -56,7 +55,7 @@ This design covers all three packages because the user-facing workflow crosses a
 │                                                   ┌──────────────────┐          │
 │                                                   │ matchup engine   │          │
 │                                                   │ (spatial+temporal│          │
-│                                                   │  join, DuckDB)   │          │
+│                                                   │  STRtree join)   │          │
 │                                                   └────────┬─────────┘          │
 │                                                            ▼                    │
 │                                                   ┌──────────────────┐          │
@@ -91,8 +90,8 @@ This design covers all three packages because the user-facing workflow crosses a
 │   geotoolz.geom.coregister                                                      │
 │   ─────────────────────────                                                     │
 │     RasterToRasterLike        RasterToPoints      PointsToRaster                │
-│     SwathToGrid               GridToSwath         RasterToPointCloud            │
-│     VectorToRasterAgg         PointCloudToRaster                                │
+│     RasterToPointCloud        PointCloudToRaster  VectorToRasterAgg             │
+│     (SwathToGrid / GridToSwath: designed, not built — §8)                       │
 │                                                                                 │
 │   geotoolz.compositing                                                          │
 │   ────────────────────                                                          │
@@ -110,64 +109,56 @@ Three boundary rules that drive the rest of the document:
 
 ## 4. GeoCatalog: Sources, queries, matchups, staging
 
-### 4.1 New file layout
+### 4.1 File layout
 
 ```
 src/geocatalog/_src/
-  base.py                      # GeoCatalog Protocol  [existing]
-  geoslice.py                  # GeoSlice             [existing]
-  memory.py, duckdb_backend.py # backends             [existing]
-  raster.py, vector.py, xarray_backend.py            [existing]
-  parquet.py, streaming.py, ops.py                   [existing]
-  domain.py, _cli.py                                 [existing]
+  base.py                      # GeoCatalog Protocol, CatalogRow, errors
+  geoslice.py                  # GeoSlice
+  memory.py, duckdb_backend.py # backends
+  raster.py, vector.py, xarray_backend.py
+  parquet.py, streaming.py, ops.py, domain.py
+  _extras.py                   # require_extra / install hints ("geotoolz-catalog[...]")
 
-  sources/                     # NEW
-    __init__.py                # Source Protocol, SourceRow dataclass, registry
+  sources/
+    _base.py                   # Source Protocol, SourceRow, AuthStatus
     earthaccess.py             # EarthAccessSource
-    stac.py                    # STACSource (+ planetary_computer() / earth_search() helpers)
-    gee.py                     # GEESource (asset enumeration only in v1)
-    cmr.py                     # CMRSource (lightweight REST fallback)
-    _extras.py                 # friendly ImportError messages
+    stac.py                    # STACSource (+ planetary_computer() / earth_search())
+    cmr.py                     # CMRSource (lightweight REST, no extra needed)
+    gee.py                     # GEESource — scaffolding only (query raises NotImplementedError)
+    _umm.py                    # UMM-G granule decoder shared by earthaccess / CMR
 
-  matchup/                     # NEW
-    __init__.py                # public API: matchup(), MatchupRow
-    spatial.py                 # intersects, iou_threshold, buffer_contains, centroid_within
-    temporal.py                # nearest_in_time, within_window, synchronous
-    engine.py                  # combines strategies; emits MatchupRows; SQL-where-possible
+  bundle/
+    _catalog_bundle.py         # CatalogBundle, QueryRecord, source_row_to_gdf_row
 
-  staging/                     # NEW
-    __init__.py                # public API: stage(), LocalCache
-    cache.py                   # fsspec-backed cache, key = (uri, asset)
-    download.py                # parallel fetch, retry/backoff (shared with PR #51)
-    gee.py                     # GEE materialization (ee.Image.getDownloadURL)
+  matchup/
+    engine.py                  # matchup(), MatchupRow — in-memory STRtree join
+    spatial.py                 # Intersects, IouAtLeast, CentroidWithin, Contains
+    temporal.py                # NearestInTime, WithinWindow, Synchronous
+
+  staging/
+    _base.py                   # stage(), LocalCache
+    _field_for.py              # field_for() — bridge to a geopatcher RasterField
 ```
 
-Top-level re-exports follow the existing pattern:
-
-```python
-# src/geocatalog/sources/__init__.py
-from geocatalog._src.sources import (
-    Source, SourceRow, EarthAccessSource, STACSource, GEESource, CMRSource,
-)
-# src/geocatalog/matchup/__init__.py
-from geocatalog._src.matchup import matchup, MatchupRow
-# src/geocatalog/staging/__init__.py
-from geocatalog._src.staging import stage, LocalCache
-```
+Public namespaces (`geocatalog.sources`, `geocatalog.bundle`,
+`geocatalog.matchup`, `geocatalog.staging`) re-export these; the
+top-level `geocatalog` package re-exports the commonly used names
+(`CatalogBundle`, `matchup`, `stage`, …).
 
 ### 4.2 `Source` Protocol
 
 ```python
-# src/geocatalog/_src/sources/__init__.py
+# geocatalog/_src/sources/_base.py
 
 class Source(Protocol):
     """A remote data catalog that can be queried by bounds + interval + filters."""
 
-    name: str  # stable identifier, e.g. "earthaccess", "stac.pc", "gee"
+    name: str  # stable identifier, e.g. "earthaccess", "stac.pc", "cmr"
 
     def query(
         self,
-        bounds: Bounds,
+        bounds: Bounds,                      # lon/lat (EPSG:4326)
         interval: pd.Interval | None = None,
         *,
         collection: str | None = None,
@@ -178,136 +169,130 @@ class Source(Protocol):
     def auth_status(self) -> AuthStatus: ...
 ```
 
-Adapters live in `_src/sources/<name>.py`. None are required at install time — all guarded by try/except + `_extras.py`, matching the geopatcher pattern. New optional extras in `pyproject.toml`:
+Adapters are imported lazily and gated by optional extras; a missing
+extra raises `ModuleNotFoundError` naming `geotoolz-catalog[<extra>]`
+when the adapter is constructed:
 
 ```toml
 [project.optional-dependencies]
 earthaccess = ["earthaccess>=0.10"]
-stac        = ["pystac-client>=0.7", "planetary-computer>=1.0"]
+stac        = ["pystac>=1.10", "pystac-client>=0.7", "planetary-computer>=1.0"]
 gee         = ["earthengine-api>=0.1.380"]
-# Aggregate extra: expanded explicitly because self-referencing
-# project extras don't resolve reliably in all build backends.
-sources-all = [
-    "earthaccess>=0.10",
-    "pystac-client>=0.7",
-    "planetary-computer>=1.0",
-    "earthengine-api>=0.1.380",
-]
+sources-all = ["geotoolz-catalog[earthaccess,stac,gee]"]
 ```
 
 ### 4.3 `SourceRow` — normalized output of every adapter
 
-> **Naming note.** The scaffolding PR landed this carrier as
-> `SourceRow` (output of `Source.query`) to keep it distinct from the
-> existing in-catalog `CatalogRow` (the row shape persisted in
-> `items.parquet`). Ingestion (`catalog.ingest(...)`) maps the
-> richer `SourceRow` shape into a `CatalogRow` — promoting the
-> primary asset to `filepath`, folding extras into `extras`. The
-> schema below describes `SourceRow`; `CatalogRow` is the existing
-> dataclass in `geocatalog._src.base` and is unchanged.
+`SourceRow` (output of `Source.query`) is distinct from the in-catalog
+`CatalogRow` (yielded by `GeoCatalog.iter_rows`). `CatalogBundle.ingest`
+maps each `SourceRow` to an items-table row with
+`source_row_to_gdf_row`, promoting the primary asset to `filepath`.
 
-A single schema that every adapter must produce. This is the on-wire
-shape returned by `Source.query` and the same shape passed to the
-`v0 → v1` schema migration that lifts an existing local catalog into
-the new bundle layout.
-
-| Column | Type | Notes |
+| Field | Type | Notes |
 |---|---|---|
 | `id` | `str` | granule UR / STAC item id / EE asset path |
-| `source` | `str` | `"earthaccess"`, `"stac.pc"`, `"gee"`, `"cmr"` |
-| `collection` | `str` | e.g. `MOD09GA`, `sentinel-2-l2a`, `COPERNICUS/S2_SR` |
-| `geometry` | `shapely.Geometry` | footprint, in catalog target CRS |
-| `time_start`, `time_end` | `datetime` (UTC) | observation interval |
-| `assets` | `JSON` | `{"red": "s3://...", "nir": "..."}` — STAC-style asset map |
-| `properties` | `JSON` | sensor-specific (cloud_cover, sza, orbit_number, …) |
-| `_provenance` | `JSON` | `{query_id, fetched_at, source_version}` |
-| `_schema_version` | `int` | existing column, reused |
+| `source` | `str` | `"earthaccess"`, `"stac.pc"`, `"stac.es"`, `"cmr"`, … |
+| `collection` | `str` | e.g. `MOD09GA`, `sentinel-2-l2a` |
+| `geometry` | `shapely` geometry | footprint, lon/lat |
+| `interval` | `pd.Interval` | observation interval, UTC, `closed="both"` |
+| `assets` | `Mapping[str, str]` | STAC-style asset map `{"red": "s3://...", …}` |
+| `properties` | `Mapping[str, Any]` | sensor-specific (cloud cover, orbit, …) |
+| `provenance` | `Mapping[str, Any]` | `{query_id, query_tag, …}`, stamped on ingest |
 
-Migration from today's catalog: existing `path: str` becomes `assets: {"default": path}` and `source: "local"`. The existing schema-migrations framework (PR #39) gets its first non-empty registration: `v0 → v1` performs this remapping.
+The items table adds `filepath`, `crs`, `href_signed`, and stores
+`assets` / `properties` / `provenance` as JSON strings; `start_time` /
+`end_time` become the `IntervalIndex`. No GeoParquet schema migration was
+needed: local catalogs and bundle items share the catalog schema, and a
+bundle's extra columns are ordinary extras.
 
-### 4.4 Persistence: a bundle of three Parquet files
+### 4.4 Persistence: a `CatalogBundle` directory
 
-A catalog becomes a *directory* of GeoParquet files (already idiomatic for partitioned writes):
+`CatalogBundle.to_directory(path)` writes a directory of Parquet files;
+`CatalogBundle.from_directory(path)` reads it back:
 
 ```
 my_catalog/
-  items.parquet              # one row per granule (CatalogRow schema)
-  queries.parquet            # one row per Source.query() invocation
-  matchups.parquet           # one row per matched tuple
-  _meta.json                 # schema_version, target_crs, created_at
+  items.parquet              # GeoParquet — one row per granule (the bundle's catalog)
+  queries.parquet            # one row per ingest call (omitted when empty)
+  matchups.parquet           # one row per matched tuple (omitted when empty)
+  _meta.json                 # bundle_schema_version, target_crs, backend,
+                             # created_at, updated_at
 ```
 
-Both new sibling tables are first-class — they have `query_id` / `matchup_id` primary keys, and DuckDB views join them to `items` for everything (lineage, "which items came from query X", "members of matchup Y").
+The write is atomic (staged next to `path`, then swapped in), and files
+the bundle does not own are kept. `bundle.queries_df` and
+`bundle.matchups_df` expose the sidecar tables as DataFrames; the items
+are `bundle.catalog`, an `InMemoryGeoCatalog`. Items are keyed by
+`(source, collection, id)`; matchups by `matchup_id`.
 
-**`queries.parquet` schema:**
+**`queries.parquet`** — one `QueryRecord` per `ingest` call:
 
 | Column | Type |
 |---|---|
-| `query_id` | `str` (uuid) |
+| `query_id` | `str` (uuid4 hex; also stamped into each item's `provenance["query_id"]`) |
 | `source` | `str` |
-| `collection` | `str` |
-| `bounds_wkt` | `str` |
-| `time_start`, `time_end` | `datetime` |
+| `collection` | `str \| null` |
+| `bounds_wkt` | `str` (WGS84) |
+| `time_start`, `time_end` | `datetime \| null` |
 | `filters_json` | `str` (JSON-encoded) |
-| `created_at` | `datetime` |
+| `created_at` | `datetime` (UTC) |
 | `n_returned` | `int` |
 | `tag` | `str \| null` (user label) |
 | `notes` | `str \| null` |
 
-**`matchups.parquet` schema:**
+**`matchups.parquet`** — one `MatchupRow` per matched tuple:
 
 | Column | Type |
 |---|---|
 | `matchup_id` | `str` (content hash of strategy parameters + members; stable across re-runs) |
 | `strategy` | `str` (label, e.g. `"IouAtLeast(threshold=0.2) & NearestInTime(dt='6h')"`) |
-| `tolerance_json` | `str` (e.g. `{"spatial": {"type": "IouAtLeast", "threshold": 0.3}, "temporal": {"type": "NearestInTime", "dt_sec": 3600.0}, "join": "all", "crs": "EPSG:4326"}`) |
-| `member_ids` | `array<str>` (refs `items.id`) |
-| `member_sources` | `array<str>` (parallel to `member_ids`) |
-| `member_roles` | `array<str>` (`"primary"` / `"secondary"` / etc.) |
-| `geometry_intersect` | `shapely` (the common footprint, in the matchup's working CRS) |
+| `tolerance_json` | `str` (JSON-encoded `MatchupRow.tolerance`, e.g. `{"spatial": {"type": "IouAtLeast", "threshold": 0.3}, "temporal": {"type": "NearestInTime", "dt_sec": 3600.0}, "join": "all", "crs": "EPSG:4326"}`) |
+| `member_ids` | `array<str>` (refs the items' `id`) |
+| `member_sources`, `member_collections` | `array<str>` (parallel to `member_ids`) |
+| `member_roles` | `array<str>` (`"primary"` / `"secondary"` / named roles) |
+| `geometry_intersect_wkt` | `str` (WKT of the common footprint, in the matchup's working CRS) |
 | `time_reference` | `datetime` |
 | `time_offset_sec` | `array<float>` (per member, relative to `time_reference`) |
-| `created_at` | `datetime` |
-| `query_set` | `str \| null` (tag) |
+| `query_set` | `str \| null` (the `tag` passed to `matchup` / `write_matchups`) |
 
-### 4.5 Discovery vs. ingest verbs
+### 4.5 Discovery vs. ingest
 
-A deliberate split between "I want to see what's out there" and "I want to persist what's out there":
+A deliberate split between "I want to see what's out there" and "I want
+to persist what's out there":
 
-- `Source.query()` returns an `Iterator[SourceRow]` — for ad-hoc exploration; never writes.
-- `catalog.ingest(source, query) → query_id` materializes results into `items.parquet`, writes a `queries.parquet` row, and stamps each item's `_provenance.query_id`.
+- `Source.query(...)` returns an `Iterator[SourceRow]` — for ad-hoc
+  exploration; never writes.
+- `CatalogBundle.ingest(source, bounds=..., interval=..., collection=...,
+  filters=..., tag=...) -> query_id` appends the results to the items
+  table, records a `QueryRecord`, and stamps each item's
+  `provenance["query_id"]`. `on_duplicate=` decides what a re-ingested
+  `(source, collection, id)` does.
 
-CLI form:
+Discovery, ingest, matchup and staging are Python APIs only. The
+`geocatalog` CLI covers local catalogs (`build`, `query`, `stats`,
+`info`, `convert`, `migrate`); see the [CLI reference](../cli.md).
 
-```bash
-# Discover (one-shot, prints, doesn't persist)
-geocatalog search earthaccess MOD09GA --bbox -10 35 5 45 \
-    --start 2024-06-01 --end 2024-06-30 --limit 50
+```python
+import pandas as pd
+from geocatalog import CatalogBundle
+from geocatalog.sources import EarthAccessSource
 
-geocatalog search stac.pc sentinel-2-l2a --bbox -10 35 5 45 \
-    --start 2024-06-01 --end 2024-06-30 --filter "eo:cloud_cover<20"
-
-# Ingest into catalog (persists items + records the query)
-geocatalog ingest earthaccess MOD09GA --bbox -10 35 5 45 \
-    --start 2024-06-01 --end 2024-06-30 --tag "iberia_summer24" \
-    --out my_catalog/
-
-# Matchup across already-ingested items
-geocatalog matchup my_catalog/ \
-    --primary  "source=earthaccess,collection=MOD09GA" \
-    --secondary "source=stac.pc,collection=sentinel-2-l2a" \
-    --strategy nearest_in_time --dt 6h --spatial iou>0.2 \
-    --tag "modis_s2_pairs_v1"
-
-# Stage / download for a matchup set or query tag
-geocatalog stage my_catalog/ --matchup-tag modis_s2_pairs_v1 \
-    --dest ./staged/ --asset red,nir,scl --parallel 8
+bundle = CatalogBundle.empty(crs="EPSG:4326")
+june = pd.Interval(pd.Timestamp("2024-06-01"), pd.Timestamp("2024-06-30"), closed="both")
+query_id = bundle.ingest(
+    EarthAccessSource(),
+    collection="MOD09GA",
+    bounds=(-10, 35, 5, 45),
+    interval=june,
+    tag="iberia_summer24",
+)
+bundle.to_directory("my_catalog/")
 ```
 
 ### 4.6 Matchup engine
 
 ```python
-# src/geocatalog/_src/matchup/__init__.py
+# geocatalog/_src/matchup/engine.py
 
 def matchup(
     primary: GeoCatalog | CatalogBundle | Iterable[SourceRow],
@@ -325,41 +310,42 @@ def matchup(
 
 **Spatial strategies** (`spatial.py`):
 - `Intersects()` — non-zero intersection
-- `IouAtLeast(t: float)` — IoU ≥ t
-- `CentroidWithin(buffer: str | float)` — secondary centroid within buffer of primary
+- `IouAtLeast(threshold)` — IoU ≥ threshold
+- `CentroidWithin(buffer)` — secondary centroid within `buffer` of the primary footprint
 - `Contains()` — secondary fully contained in primary footprint
 
 **Temporal strategies** (`temporal.py`):
-- `NearestInTime(dt: str)` — pick secondary nearest in time, only if Δt ≤ dt
-- `WithinWindow(start: timedelta, end: timedelta)` — all secondaries in [t+start, t+end] relative to primary
-- `Synchronous(tolerance: str = "0s")` — overlapping observation intervals
+- `NearestInTime(dt)` — pick the secondary nearest in time, only if Δt ≤ dt
+- `WithinWindow(start, end)` — all secondaries in [t+start, t+end] relative to primary
+- `Synchronous(tolerance="0s")` — overlapping observation intervals
 
-Implementation: an in-memory join — an STRtree per secondary role over footprints in the working CRS, the temporal strategy selecting candidates by position, the spatial strategy as the truth gate. Inputs are filtered with the catalog's own `query` before the call (there is no selector argument). Candidates are ordered by `(source, id)` so tie-breaks and `matchup_id`s are the same on every run; intervals are compared in UTC and rows with no times never match. Distances (`CentroidWithin.buffer`) are in units of the working CRS — pass a projected `crs=` for metres. Persist the output with `CatalogBundle.write_matchups` (`matchups.parquet`).
+Implementation: an in-memory join — an STRtree per secondary role over footprints in the working CRS, the temporal strategy selecting candidates by position, the spatial strategy as the truth gate. Inputs are filtered with the catalog's own `query` (or `InMemoryGeoCatalog.where`) before the call; there is no selector argument. Candidates are ordered by `(source, collection, id)` so tie-breaks and `matchup_id`s are the same on every run; intervals are compared in UTC and rows with no times never match. Distances (`CentroidWithin.buffer`) are in units of the working CRS — pass a projected `crs=` for metres. Persist the output with `CatalogBundle.write_matchups` (`matchups.parquet`).
 
 ### 4.7 Staging layer
 
 Explicit, never automatic:
 
 ```python
-# src/geocatalog/_src/staging/__init__.py
+# geocatalog/_src/staging/_base.py
 
 def stage(
-    catalog: GeoCatalog,
+    catalog: InMemoryGeoCatalog,
     *,
-    dest: PathLike,
+    dest: PathLike | str | None = None,      # cache root; default $GEOCATALOG_CACHE or ~/.cache/geocatalog
     assets: list[str] | None = None,         # asset keys; None = all
     parallel: int = 8,
     cache: LocalCache | None = None,
     retries: int = 3,
-) -> GeoCatalog: ...
+    on_error: str = "raise",                 # or "skip": keep the URI, continue
+) -> InMemoryGeoCatalog: ...
 ```
 
-- Returns a new catalog whose `assets` columns have been rewritten to local paths; `filepath` follows the row's primary asset, and a `staged_from` column (JSON, keyed like `assets`) preserves the original URIs.
-- Local paths are used in place without fsspec; `LocalCache` fetches remote schemes through fsspec (`[fsspec]` extra) into a temp file renamed into place, one download per distinct URI; default location `~/.cache/geocatalog/` or `$GEOCATALOG_CACHE`.
-- GEE-specific path: `staging/gee.py` materializes via `ee.Image.getDownloadURL` or `ee_export_image` — does not bypass EE compute.
-- Reuses the shared retry/backoff policy (`geocatalog._src.retry.retry_transient_io`) for transient failures.
+- Returns a new catalog whose asset map has been rewritten to local paths; `filepath` follows the row's primary asset, and a `staged_from` column (JSON, keyed like `assets`) preserves the original URIs.
+- Local paths are used in place without fsspec; `LocalCache` fetches remote schemes through fsspec (`[fsspec]` extra) into a temp file renamed into place, one download per distinct URI. The cache key is the URI (expiring signature parameters removed), not the content.
+- Reuses the shared retry/backoff policy of the catalog readers for transient failures (fatal errors such as `FileNotFoundError` are not retried).
+- Earth Engine assets are not staged (there is no `ee` download path).
 
-The staged catalog is a normal `GeoCatalog`, so the existing `load_raster` / `load_vector` / `xarray_backend` loaders see it as local files and read them in-place.
+The staged catalog is a normal `GeoCatalog`, so the existing `load_raster` / `load_vector` / `load_xarray` loaders read the local files in place. `field_for(staged, slice_, asset=...)` (the `[patch]` extra) mosaics the rows a slice selects into one `geopatcher.RasterField`.
 
 ## 5. GeoToolz: `geom.coregister` and `compositing.matched`
 
@@ -390,8 +376,8 @@ All operators are `pipekit.Operator` subclasses, `__call__(*inputs) → GeoTenso
 | Operator | Inputs → Output | Builds on | Notes |
 |---|---|---|---|
 | `RasterToRasterLike(resampling=…)` | `(src, like) → aligned_src` | `Reproject` + `Resample` | Convenience for the common case; one op instead of two |
-| `SwathToGrid(method="bowtie_aware", target_crs=…, target_res=…)` | `swath → grid` | rasterio + per-pixel lat/lon | Track-B gap; handles MODIS/VIIRS bowtie |
-| `GridToSwath(time_match="nearest", dt_max="15min")` | `(grid_series, swath_like) → grid_at_swath_geom` | rasterio + temporal index | GEO → LEO acquisition geometry |
+| `SwathToGrid(method="bowtie_aware", target_crs=…, target_res=…)` | `swath → grid` | rasterio + per-pixel lat/lon | **Not built.** Track-B gap; handles MODIS/VIIRS bowtie |
+| `GridToSwath(time_match="nearest", dt_max="15min")` | `(grid_series, swath_like) → grid_at_swath_geom` | rasterio + temporal index | **Not built.** GEO → LEO acquisition geometry |
 | `RasterToPoints(extract="nearest" \| "bilinear")` | `(raster, points) → xvec_cube` | xvec | Extract raster at point geometries → vector cube |
 | `PointsToRaster(method="binned_stat", stat="mean", like=…)` | `(points, like) → raster` | scipy.stats.binned_statistic_2d | Bin point cube into grid |
 | `RasterToPointCloud(k=…, max_radius=…)` | `(raster, cloud) → cloud_with_attrs` | scipy.spatial.KDTree | Sample raster onto cloud nodes |
@@ -609,47 +595,53 @@ neither exists. The patchers above cover their use cases today.
 ## 7. End-to-end walkthrough: MODIS × Sentinel-2 patches over Iberia
 
 ```python
+import pandas as pd
+
 import geocatalog as gc
-from geocatalog.sources import EarthAccessSource, STACSource
 from geocatalog.matchup import IouAtLeast, NearestInTime
+from geocatalog.sources import EarthAccessSource, STACSource
 import geopatcher as gp
 from geopatcher.matched import MatchedField, MatchedSpatialPatcher
 from geotoolz.geom.coregister import RasterToRasterLike
 
-# 1. Discover & ingest
-cat = gc.DuckDBGeoCatalog.open("my_catalog/", target_crs="EPSG:32629", create=True)
+june = pd.Interval(pd.Timestamp("2024-06-01"), pd.Timestamp("2024-06-30"), closed="both")
 
-cat.ingest(
+# 1. Discover & ingest into one bundle
+bundle = gc.CatalogBundle.empty(crs="EPSG:32629")
+bundle.ingest(
     EarthAccessSource(),
     collection="MOD09GA",
-    bounds=(-10, 35, 5, 45), interval=("2024-06-01", "2024-06-30"),
+    bounds=(-10, 35, 5, 45), interval=june,
     tag="iberia_summer24",
 )
-
-cat.ingest(
+bundle.ingest(
     STACSource.planetary_computer(),
     collection="sentinel-2-l2a",
-    bounds=(-10, 35, 5, 45), interval=("2024-06-01", "2024-06-30"),
+    bounds=(-10, 35, 5, 45), interval=june,
     filters={"eo:cloud_cover": {"lt": 20}},
     tag="iberia_summer24",
 )
 
-# 2. Build matchups
-matchup_id = cat.matchup(
-    primary={"source": "earthaccess", "collection": "MOD09GA"},
-    secondary={"source": "stac.pc", "collection": "sentinel-2-l2a"},
-    spatial=IouAtLeast(0.2),
-    temporal=NearestInTime(dt="6h"),
+# 2. Build and persist matchups (inputs are filtered before the call)
+modis = bundle.catalog.where("collection == 'MOD09GA'")
+s2 = bundle.catalog.where("collection == 'sentinel-2-l2a'")
+bundle.write_matchups(
+    gc.matchup(modis, s2, spatial=IouAtLeast(0.2), temporal=NearestInTime(dt="6h")),
     tag="modis_s2_pairs_v1",
 )
+bundle.to_directory("my_catalog/")
 
-# 3. Stage bytes for the matched assets only
-staged = cat.stage(matchup_tag="modis_s2_pairs_v1", dest="./staged/",
-                   assets=["red", "nir", "scl"], parallel=8)
+# 3. Stage bytes for the assets we need
+staged_modis = gc.stage(modis, dest="./staged/", assets=["red", "nir"])
+staged_s2 = gc.stage(s2, dest="./staged/", assets=["red", "nir"])
 
-# 4. Build a MatchedField from a matchup row
-modis_field = staged.field_for(matchup_id, role="primary")     # RasterField
-s2_field    = staged.field_for(matchup_id, role="secondary")   # RasterField
+# 4. One RasterField per source over the area of interest
+aoi = gc.GeoSlice(
+    bounds=(-9.5, 38.5, -8.5, 39.5), interval=june,
+    resolution=(0.005, 0.005), crs="EPSG:4326",
+)
+modis_field = gc.field_for(staged_modis, aoi, asset="red")
+s2_field = gc.field_for(staged_s2, aoi, asset="red")
 
 matched = MatchedField(
     primary=modis_field,
@@ -681,70 +673,48 @@ fields = patcher.merge_to_field(patcher.split(matched), matched)  # {"primary": 
 Three things to notice:
 
 - The user never touches a coregistration class — they pick a `geotoolz` operator.
-- The matchup is reproducible: re-running step 2 with the same tag against an updated catalog produces a new `matchup_id` but the same matchup logic, persisted.
+- The matchup is reproducible: `matchup_id`s are content hashes, so re-running step 2 over the same items yields the same ids, and `write_matchups` replaces them in place instead of duplicating them.
 - Every step is independently usable: ingest without matchup, matchup without staging, stage without patching, patch without matchup (just `MatchedField(primary, {}, {})`).
 
-## 8. Phasing
+## 8. Implementation status
 
-A suggested four-phase rollout. Each phase ships independently and is useful on its own.
+Every piece below ships unless marked otherwise.
 
-### Phase 1 — `geocatalog` source adapters (no breaking changes)
-
-- `_src/sources/__init__.py` with `Source` Protocol, `SourceRow`
-- `EarthAccessSource`, `STACSource`, `CMRSource`
-- `catalog.ingest()` + `geocatalog ingest` CLI
-- `queries.parquet` schema + migration v0 → v1
-- GEE deferred to Phase 3
-
-**Exit criteria:** `geocatalog ingest earthaccess MOD09GA …` works end-to-end; round-trip test ingest → query → load_raster passes.
-
-### Phase 2 — `geocatalog` matchup engine
-
-- `_src/matchup/` with spatial + temporal strategy classes
-- `matchups.parquet` schema
-- `catalog.matchup()` + `geocatalog matchup` CLI
-- DuckDB-backed implementation for performance
-
-**Exit criteria:** MODIS × S2 matchup over Iberia completes in < 30s for ~1k granules each.
-
-### Phase 3 — `geotoolz` coregistration operators
-
-- `geotoolz.geom.coregister` submodule, eight new operators
-- `geotoolz.compositing.StackMatched` / `BlendMatched`
-- xvec optional extra
-- YAML round-trip tests for all new operators
-- (Parallel track) `GEESource` in geocatalog
-
-**Exit criteria:** `RasterToRasterLike` parity-tests against existing `Reproject + Resample`; `SwathToGrid` produces a regular-grid MOD09GA tile from raw swath input.
-
-### Phase 4 — `geopatcher` matched field
-
-- `geopatcher.matched` submodule with `MatchedField` / `MatchedPatch` / `MatchedSpatialPatcher` (+ temporal / spatio-temporal mirrors)
-- Streaming determinism tests (extends existing Hypothesis suite)
-- Notebook recipe: MODIS × S2 matched patches → torch DataLoader
-- `geocatalog.stage().field_for()` helper that returns ready-to-go Fields
-
-**Exit criteria:** The end-to-end walkthrough in §7 runs as a notebook.
-
-### Phase 5 (optional / later) — staging polish
-
-- `geocatalog.staging` with cache, parallelism, retry
-- `obstore` / `fsspec` adapter for multi-cloud (lines up with existing branch `copilot/feat-io-fsspec-obstore-path-resolution`)
+- **geocatalog** — `Source` Protocol, `SourceRow`, `EarthAccessSource`,
+  `STACSource`, `CMRSource`; `CatalogBundle` (`ingest`,
+  `write_matchups`, `to_directory` / `from_directory`); the `matchup`
+  engine and its strategies; `stage` / `LocalCache`; `field_for`.
+  Not shipped: `GEESource` is scaffolding (its `query` and
+  `auth_status` raise `NotImplementedError`); there are no `search` /
+  `ingest` / `matchup` / `stage` CLI verbs; the matchup join is
+  in-memory (no DuckDB implementation); Earth Engine assets are not
+  staged.
+- **geotoolz** — `geom.coregister` (`RasterToRasterLike`,
+  `RasterToPoints`, `PointsToRaster`, `RasterToPointCloud`,
+  `PointCloudToRaster`, `VectorToRasterAgg`) and
+  `compositing.StackMatched` / `BlendMatched`; `RasterToPoints` /
+  `PointsToRaster` need the `[vector-cube]` extra (xvec). Not shipped:
+  `SwathToGrid`, `GridToSwath`.
+- **geopatcher** — `geopatcher.matched`: `MatchedField`,
+  `MatchedPatch` (+ temporal / spatio-temporal mirrors) and the three
+  matched patchers (§6).
 
 ## 9. Open questions
 
-| # | Question | Default if undecided |
+Resolved questions keep their decision for the record.
+
+| # | Question | Decision |
 |---|---|---|
 | 1 | Matchup catalog as sibling Parquet vs. separate artifact? | **Sibling** (§4.4) |
-| 2 | GEE scope: enumerate only, or run `ee.Image` recipes in staging? | **Enumerate only in v1**; recipes deferred |
+| 2 | GEE scope: enumerate only, or run `ee.Image` recipes in staging? | **Enumerate only** — and `GEESource` is still scaffolding |
 | 3 | STAC adapter: one generic + named factory helpers, or distinct subclasses per provider? | **Generic `STACSource(endpoint=...)` with class-method factories** |
-| 4 | Auth surface: defer to libraries, or add `geocatalog auth status` aggregator? | **Defer**; add aggregator if users ask |
+| 4 | Auth surface: defer to libraries, or add `geocatalog auth status` aggregator? | **Defer**; `Source.auth_status()` per adapter |
 | 5 | `MatchedPatch` subclasses `Patch` or sibling carrier? | **Sibling** (avoid LSP issues) |
 | 6 | `MatchedField.coreg` typed as `dict[str, Operator]` (pipekit) or untyped `Callable`? | **Resolved (ADR-003):** typed as `Mapping[str, Callable]`; `pipekit.Operator` is the recommended value but not required, so geopatcher's core stays framework-free. |
 | 7 | Should the matchup engine emit a *new catalog* or in-place new rows in `items.parquet`? | **New rows in `matchups.parquet`**; `items` stays atoms |
-| 8 | Cache scope for staging: per-catalog, per-user, or per-host? | **Per-user** (`~/.cache/geocatalog/`), overridable by env var |
-| 9 | Do we want `BlendMatched(method="ivw")` in Phase 3 or defer (uncertainty maps not always present)? | **Defer**; ship `StackMatched` first |
-| 10 | Where does this design doc finally live? | TBD — currently `~/query-matchup-design.md`; candidates: `geocatalog/docs/design/`, a new cross-package `docs/` repo, or split into per-package ADRs |
+| 8 | Cache scope for staging: per-catalog, per-user, or per-host? | **Per-user** (`~/.cache/geocatalog/`), overridable by `$GEOCATALOG_CACHE` |
+| 9 | Ship `BlendMatched(method="ivw")` with the first coregistration operators, or defer (uncertainty maps not always present)? | **Shipped** alongside `StackMatched` |
+| 10 | Where does this design doc live? | `docs/catalog/design/query-matchup.md` in the geotoolz workspace; geopatcher's side is mirrored in its ADR-003 |
 
 ## 10. Appendix A: alternatives considered
 
@@ -786,26 +756,30 @@ geocatalog
   .sources
     .Source                         # Protocol
     .SourceRow                      # normalized output of every Source.query
+    .AuthStatus                     # Source.auth_status() result
     .EarthAccessSource              # adapter
     .STACSource                     # adapter (+ .planetary_computer(), .earth_search())
-    .GEESource                      # adapter (Phase 3)
+    .GEESource                      # scaffolding only (not implemented)
     .CMRSource                      # adapter
+  .bundle
+    .CatalogBundle                  # .empty / .from_catalog / .ingest / .write_matchups /
+                                    # .to_directory / .from_directory
+    .QueryRecord                    # one queries.parquet row
   .matchup
-    .matchup(...)                   # functional
+    .matchup(...)                   # functional; the namespace itself is callable
     .MatchupRow                     # dataclass
     .IouAtLeast, .CentroidWithin, .Intersects, .Contains   # spatial strategies
     .NearestInTime, .WithinWindow, .Synchronous            # temporal strategies
   .staging
     .stage(...)                     # functional
     .LocalCache                     # cache class
-  .GeoCatalog                       # (existing) extended with .ingest, .matchup, .stage
-  .GeoSlice                         # (existing)
-  .DuckDBGeoCatalog, .InMemoryGeoCatalog  # (existing)
+    .field_for(...)                 # staged catalog -> geopatcher RasterField ([patch])
+  .GeoCatalog                       # Protocol (unchanged)
+  .GeoSlice
+  .DuckDBGeoCatalog, .InMemoryGeoCatalog
 
 geotoolz.geom.coregister
   .RasterToRasterLike
-  .SwathToGrid
-  .GridToSwath
   .RasterToPoints                   # requires [vector-cube] extra (xvec)
   .PointsToRaster                   # requires [vector-cube] extra
   .RasterToPointCloud
@@ -813,13 +787,13 @@ geotoolz.geom.coregister
   .VectorToRasterAgg
 
 geotoolz.compositing
-  .StackMatched                     # new
-  .BlendMatched                     # new (Phase 3+, deferred if uncertainty rare)
+  .StackMatched
+  .BlendMatched                     # method="mean" | "weighted_mean" | "ivw"
 
 geopatcher.matched
   .MatchedField
   .MatchedPatch
   .MatchedSpatialPatcher
-  .MatchedTemporalPatcher           # mirror, Phase 4+
-  .MatchedSpatioTemporalPatcher     # mirror, Phase 4+
+  .MatchedTemporalPatcher           # temporal mirror
+  .MatchedSpatioTemporalPatcher     # spatio-temporal mirror
 ```

@@ -8,7 +8,7 @@ The namespace is itself callable — ``geocatalog.matchup(primary,
 secondary, ...)`` forwards to the `matchup` function — because the
 package binds this module over the top-level ``matchup`` name.
 
-See ``docs/design/query-matchup.md`` §4.4 / §4.6.
+See ``docs/catalog/design/query-matchup.md`` §4.4 / §4.6.
 """
 
 from __future__ import annotations

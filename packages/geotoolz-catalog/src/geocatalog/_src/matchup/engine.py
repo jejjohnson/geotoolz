@@ -18,7 +18,7 @@ Joins two (or more) collections of observations on space + time:
 
 The engine runs in memory with shapely; persist its output with
 `CatalogBundle.write_matchups` (``matchups.parquet``). See
-``docs/design/query-matchup.md`` §4.4 / §4.6.
+``docs/catalog/design/query-matchup.md`` §4.4 / §4.6.
 """
 
 from __future__ import annotations
@@ -88,9 +88,10 @@ class MatchupRow:
             bundle item a member refers to. Empty for rows written
             before it was recorded.
         query_set: Optional user label, persisted as the
-            ``query_set`` column in ``matchups.parquet`` so
-            ``geocatalog stage --matchup-tag <name>`` can select a
-            named set. Mirrors the ``tag`` argument of `matchup()`.
+            ``query_set`` column in ``matchups.parquet`` so a named
+            set can be selected later (``bundle.matchups_df`` filtered
+            on ``query_set``). Mirrors the ``tag`` argument of
+            `matchup()`.
     """
 
     matchup_id: str
@@ -158,8 +159,8 @@ def matchup(
             contribute a member; primaries with any empty role are
             skipped. ``"any"`` emits matchups missing some roles —
             handy for opportunistic fusion.
-        tag: Optional user label persisted as ``query_set`` so a
-            CLI user can ``--matchup-tag foo`` later.
+        tag: Optional user label persisted as ``query_set``, so the
+            set can be selected from ``matchups.parquet`` later.
         crs: Working CRS for the join; every footprint is reprojected
             into it and ``geometry_intersect`` is expressed in it.
             Defaults to the primary catalog's CRS, or EPSG:4326 when

@@ -1,11 +1,12 @@
-"""`DuckDBGeoCatalog` — Phase 2 SQL-backed catalog over GeoParquet.
+"""`DuckDBGeoCatalog` — SQL-backed catalog over GeoParquet.
 
-The DuckDB backend swaps Phase 1's in-RAM `GeoDataFrame` for a lazy SQL
-relation on top of a GeoParquet artifact (a single file, a directory of
-shards, or a DuckDB-readable URI). The Phase 1 Protocol surface
-(``query`` / ``intersect`` / ``union`` / ``iter_slices``) is preserved —
-loaders, samplers, and the `geotoolz.patch` bridge work against either
-backend without branching.
+The DuckDB backend swaps `InMemoryGeoCatalog`'s in-RAM `GeoDataFrame`
+for a lazy SQL relation on top of a GeoParquet artifact (a single file,
+a directory of shards, or a DuckDB-readable URI). The `GeoCatalog`
+Protocol surface (``query`` / ``intersect`` / ``union`` /
+``iter_slices``) is the same — loaders, `CatalogDomain` and
+`geocatalog.staging.field_for` work against either backend without
+branching.
 
 Why DuckDB:
 
@@ -746,7 +747,7 @@ class DuckDBGeoCatalog:
             )
         )
         # GEOS intersection is not bit-symmetric under operand order for
-        # near-degenerate sliver overlaps (gh #40) — canonicalise each
+        # near-degenerate sliver overlaps (geocatalog#40) — canonicalise each
         # pair's operand order by WKB bytes, mirroring the in-memory
         # engine's `_symmetric_intersection`, so `a.intersect(b)` and
         # `b.intersect(a)` compute identical geometry per row pair.
@@ -1066,6 +1067,11 @@ class DuckDBGeoCatalog:
         cover (``cloud_pct < 5 AND sensor = 'S2A'``). The result is
         still a `DuckDBGeoCatalog`, so further `query` / `intersect` /
         `union` calls chain off it.
+
+        Warning:
+            ``where`` is spliced into the SQL as written — it is not
+            parameterised or escaped. Pass trusted input only; never
+            build it from user-supplied strings.
 
         Args:
             where: The body of a SQL ``WHERE`` clause, *without* the

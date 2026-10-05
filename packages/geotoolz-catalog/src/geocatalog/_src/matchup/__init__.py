@@ -4,7 +4,7 @@
 yields `MatchupRow`s whose tolerances are explicit and whose ids are
 content hashes, so re-runs are reproducible. Persist them next to
 ``items.parquet`` with `CatalogBundle.write_matchups` — see
-``docs/design/query-matchup.md`` §4.4.
+``docs/catalog/design/query-matchup.md`` §4.4.
 
 Strategies are first-class objects in ``spatial.py`` and
 ``temporal.py``; the in-memory join (shapely STRtree) is in

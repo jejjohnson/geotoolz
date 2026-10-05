@@ -1,15 +1,16 @@
 # Exact grid alignment
 
 `GeoSlice` carries everything a loader needs — bounds, interval,
-resolution, CRS — but the derived `shape` and `transform` use a
-bare `round(length / resolution)`. That hides subpixel
+resolution, CRS — but the derived `shape` and `transform` round
+`length / resolution` half up to a pixel count. That hides subpixel
 misregistration: a bbox 40,000 m wide at 30 m resolution silently
 becomes a 1,333-pixel grid that's 10 m short of the requested
 extent. The error only surfaces later, as an off-by-one against a
 co-registered label tile or in a matchup join.
 
-`geocatalog` exposes three opt-in escape hatches for callers that
-want loud failures instead.
+`geocatalog` exposes opt-in checks for callers that want loud
+failures instead: `divide_evenly`, `GeoSlice.aligned_shape()`,
+the `align=` constructor modes, and `is_grid_aligned`.
 
 ## `divide_evenly`
 

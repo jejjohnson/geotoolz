@@ -44,7 +44,7 @@ dependencies = [
     # Structured logging with library-friendly disable/enable semantics
     # (see `_logger.disable("geocatalog")` in `geocatalog/__init__.py`).
     "loguru>=0.7",
-    # `geocatalog` console command (#23). Cyclopts is type-annotation
+    # `geocatalog` console command. Cyclopts is type-annotation
     # driven, so subcommands compose by adding type-hinted functions to
     # the App — no Click-style decorator boilerplate.
     "cyclopts>=2.0",
@@ -54,7 +54,7 @@ dependencies = [
 [project.scripts]
 # CLI entry point — runs the cyclopts App defined in
 # `geocatalog._cli`. `pip install geotoolz-catalog` exposes this as
-# `geocatalog ...` on the user's PATH (#23).
+# `geocatalog ...` on the user's PATH.
 geocatalog = "geocatalog._cli:app"
 
 [project.optional-dependencies]
@@ -124,7 +124,7 @@ dev = [
     # Property-based testing — fuzzes roundtrip / CRS-invariance /
     # intersect-symmetry invariants over arbitrary valid catalogs.
     "hypothesis>=6.100",
-    # Microbenchmarks + CI regression gate (#21). Stays in [dev] so the
+    # Microbenchmarks + CI regression gate. Stays in [dev] so the
     # base install is unaffected; the bench suite is opt-in via
     # `pytest tests/bench --benchmark-only`.
     "pytest-benchmark>=4.0",
@@ -206,7 +206,7 @@ unresolved-attribute = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `bench_*.py` is the benchmark-suite convention (#21); the default
+# `bench_*.py` is the benchmark-suite convention; the default
 # `test_*.py` discovery doesn't pick them up, so opt them in
 # explicitly. Regular `pytest` runs still skip the suite via
 # `--ignore=tests/bench` in `addopts`.

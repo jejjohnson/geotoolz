@@ -38,8 +38,8 @@ flowchart LR
 ```
 
 The same flow as a static figure (rendered by
-`docs/assets/make_diagrams.py` — re-run with
-`uv run --group docs python docs/assets/make_diagrams.py`):
+`docs/catalog/assets/make_diagrams.py` — re-run with
+`uv run --group docs python docs/catalog/assets/make_diagrams.py`):
 
 ![Catalog architecture](assets/catalog-architecture.png)
 
@@ -52,15 +52,16 @@ The same flow as a static figure (rendered by
 2. **Index** — a `GeoCatalog` Protocol implementation. Two backends
    ship: `InMemoryGeoCatalog` (eager, GeoDataFrame + R-tree) and
    `DuckDBGeoCatalog` (lazy, SQL over GeoParquet 1.1). The shared
-   `GeoCatalog` Protocol surface is `query`, `intersect`, `union`,
-   `iter_rows`, `iter_slices`, `total_bounds`, `temporal_extent`,
-   `crs`, `kind`, `len()` and `get_config`. Persist either backend
+   `GeoCatalog` Protocol surface is the `gdf`, `kind` and `crs`
+   attributes, `query`, `intersect`, `union`, `iter_rows`,
+   `iter_slices`, `total_bounds`, `temporal_extent`, `len()` and
+   `get_config`. Persist either backend
    with the free function `geocatalog.to_geoparquet(catalog, path)`.
    Backend-specific extras sit outside the Protocol:
    `InMemoryGeoCatalog.where(pandas_query)` and
    `intersect(join="sjoin" | "overlay")`;
-   `DuckDBGeoCatalog.sql(where=...)`, `.to_geoparquet(path)` and
-   `.materialize()`.
+   `DuckDBGeoCatalog.sql(where=...)` (raw SQL — trusted input only),
+   `.to_geoparquet(path)` and `.materialize()`.
 3. **Materialise** — loaders (`load_raster`, `load_raster_timeseries`,
    `load_xarray`, `load_vector`) consume a `GeoSlice` plus a catalog
    and return a `GeoTensor` (or `xr.Dataset`).
@@ -122,7 +123,8 @@ which returns `True` iff `a` and `b` share a pixel lattice (same
 resolution + origins congruent mod resolution + same CRS). Pass
 `explain=True` for per-axis residual diagnostics.
 
-See `docs/design/exact-grid-alignment.md` for the full design.
+See [Exact grid alignment](design/exact-grid-alignment.md) for the
+full design.
 
 ## Schema model
 
@@ -301,9 +303,9 @@ for slice_ in domain.slices():
     yield model(chip.values)
 ```
 
-The canonical consumer is
-[`geopatcher.SpatialPatcher`](https://github.com/jejjohnson/geotoolz),
-but any code that iterates `domain.slices()` works. `CatalogDomain`
+Nothing in `geopatcher` consumes a `CatalogDomain` — its patchers
+take a `Field` (see `field_for` below); `CatalogDomain` is for code
+that iterates `domain.slices()` and loads each slice itself. It
 accepts either backend; point and line footprints become one-pixel
 slices, and rows without a footprint are skipped with a warning.
 

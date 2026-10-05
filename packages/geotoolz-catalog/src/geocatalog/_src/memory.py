@@ -501,7 +501,7 @@ def _symmetric_intersection(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     GEOS intersection is not bit-symmetric under operand order for
     near-degenerate overlaps: a sliver a few ULPs wide can come back as
     a `Polygon` for ``intersection(a, b)`` and as empty for
-    ``intersection(b, a)`` (gh #40). Ordering each pair canonically (by
+    ``intersection(b, a)`` (geocatalog#40). Ordering each pair canonically (by
     WKB bytes) makes ``intersect(a, b)`` and ``intersect(b, a)`` compute
     the same geometry for every row pair, so the result cardinality is
     symmetric by construction.
