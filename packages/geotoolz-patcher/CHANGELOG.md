@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.5.1...geotoolz-patcher-v0.6.0) (2026-10-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **patcher/cache+journal:** `PatchCache.stats()` "bytes" / "entries" are now this instance's incremental tally rather than a directory walk (entries written by other processes are counted once hit or on the next construction), and the `max_bytes` cap applies per writer. Entries larger than `max_bytes` are no longer written. Multi-file reader identities and `ObstoreCogField.cache_id()` changed, invalidating their existing cache entries. Journal rows now store normalised anchors (lists, Python scalars); anchors that previously only keyed through `default=str` (arbitrary objects, non-string dict keys) now raise TypeError, and numpy-anchor keys change from their stringified form.
+* **patcher/cache:** the cache key and on-disk entry layout changed, so existing PatchCache directories are never hit again (call `cache.clear()` to reclaim space). `field_id_for` returns a different string. Patches whose carrier cannot be rebuilt bit-identically (GeoPandasField / XvecField patches, object-dtype data, attrs without a lossless encoding) now raise TypeError on `put` instead of being cached as bare ndarrays. A DataArray field opened from a file is now identified by `encoding["source"]` instead of requiring `field_id`.
+
+### Bug Fixes
+
+* **patcher/cache+journal:** incremental LRU eviction, full field identity, numpy anchors ([#378](https://github.com/jejjohnson/geotoolz/issues/378)) ([8e949b4](https://github.com/jejjohnson/geotoolz/commit/8e949b44892eac2c94ceb6cb10de76663f46e917))
+* **patcher/cache:** key covers domain, bands and adapter identity; bit-identical, self-healing entries ([#377](https://github.com/jejjohnson/geotoolz/issues/377)) ([88e3066](https://github.com/jejjohnson/geotoolz/commit/88e306614b17aedfb6f002adb03ec3b8535654bc))
+
 ## [0.5.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.5.0...geotoolz-patcher-v0.5.1) (2026-10-03)
 
 
