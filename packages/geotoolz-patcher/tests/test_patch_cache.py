@@ -604,25 +604,22 @@ class _FsSpy:
 def test_eviction_is_incremental(tmp_path, monkeypatch) -> None:
     # 1024 puts against a cap that keeps ~100 entries cost the same
     # filesystem work as 1024 uncapped puts: no directory walk per put
-    # and O(1) stat calls (the old `_evict` rescanned every entry).
-    import time
-
+    # and O(1) stat calls (the old `_evict` rescanned every entry). Counted
+    # with a filesystem spy, not wall-clock: CI runners are too noisy for a
+    # timing bound.
     n = 1024
     cap = 100 * _entry_size(tmp_path)
     spy = _FsSpy(monkeypatch)
-    work: dict[str, tuple[int, int, float]] = {}
+    work: dict[str, tuple[int, int]] = {}
     for label, max_bytes in (("uncapped", None), ("capped", cap)):
         cache = PatchCache(tmp_path / label, max_bytes=max_bytes, field_id="x")
         spy.reset()
-        start = time.perf_counter()
         for i in range(n):
             cache.put("f", "c", (i, 0), _tiny_patch(i))
-        work[label] = (spy.rglob, spy.stat, time.perf_counter() - start)
+        work[label] = (spy.rglob, spy.stat)
 
     assert work["capped"][0] == work["uncapped"][0] == 0  # no directory walks
     assert work["capped"][1] <= 1.5 * work["uncapped"][1] + 8
-    # Loose wall-clock sanity check only — the spy above is the real guard.
-    assert work["capped"][2] <= 1.5 * work["uncapped"][2] + 1.0
 
     capped = PatchCache(tmp_path / "capped")  # fresh scan of what's on disk
     assert capped.stats()["bytes"] <= cap
