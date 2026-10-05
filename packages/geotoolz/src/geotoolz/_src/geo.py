@@ -1,31 +1,43 @@
 """Shared georeferencing helpers.
 
-The one implementation of three checks every geo-aware operator family
+The one implementation of the checks every geo-aware operator family
 needs:
 
 * :func:`require_geotensor` -- reject a plain array handed to an operator
   that needs an affine ``transform`` (and CRS);
+* :func:`require_projected_crs` -- reject a geographic CRS handed to an
+  operator that measures lengths, areas or slopes;
 * :func:`grid_matches` -- whether two rasters sit on the same pixel grid
   (spatial shape, transform, CRS);
+* :func:`ground_pixel_size` -- the true ground length of one pixel step
+  along each axis, on any rotated (not sheared) grid;
 * :func:`pixel_xy` -- vectorised CRS coordinates of pixel centres.
 
-All three are duck-typed on the ``transform`` / ``crs`` attributes, so any
+All are duck-typed on the ``transform`` / ``crs`` attributes, so any
 GeoTensor-compatible carrier passes.
 """
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from jaxtyping import Float
+from pyproj import CRS
 
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
 
 
-__all__ = ["grid_matches", "pixel_xy", "require_geotensor"]
+__all__ = [
+    "grid_matches",
+    "ground_pixel_size",
+    "pixel_xy",
+    "require_geotensor",
+    "require_projected_crs",
+]
 
 
 def require_geotensor(
@@ -62,6 +74,101 @@ def require_geotensor(
             message = f"{message} {hint}"
         raise TypeError(message)
     return x
+
+
+def require_projected_crs(
+    gt: Any,
+    op_name: str,
+    *,
+    what: str = "areas and distances",
+    metres: bool = True,
+) -> None:
+    """Raise unless ``gt`` is in a projected CRS (with metre units).
+
+    Operators that treat the affine transform as a length (pixel areas,
+    distances, slopes) would silently work in degrees on a geographic CRS,
+    so it is rejected with a hint to reproject first. A carrier without a
+    CRS is accepted as-is: its transform is then assumed to be linear.
+
+    Args:
+        gt: Georeferenced carrier (anything exposing ``.crs``).
+        op_name: Operator name used in the error message.
+        what: What the operator computes, for the message (``"areas and
+            distances"``, ``"slopes"``, ...).
+        metres: Also require metre linear units (default). Pass
+            ``False`` where any linear unit works as long as the data
+            agree with it (e.g. a slope from feet elevations on a
+            US-feet grid).
+
+    Raises:
+        ValueError: If the CRS is geographic (or otherwise not
+            projected), or -- with ``metres=True`` -- projected with
+            non-metre linear units.
+    """
+    crs_input = getattr(gt, "crs", None)
+    if crs_input is None:
+        return
+    crs = CRS.from_user_input(crs_input)
+    hint = (
+        "Reproject to a projected metric CRS (e.g. the local UTM zone) first, "
+        "e.g. with geotoolz.geom.Reproject(dst_crs=...) or "
+        "geotoolz.geom.ReprojectLike."
+    )
+    if not crs.is_projected:
+        kind = "geographic" if crs.is_geographic else "not projected"
+        raise ValueError(
+            f"{op_name} computes {what} from linear pixel sizes and needs a "
+            f"projected CRS; got {crs.name!r} ({kind}). {hint}"
+        )
+    if metres and any(axis.unit_conversion_factor != 1.0 for axis in crs.axis_info):
+        units = sorted({axis.unit_name for axis in crs.axis_info})
+        raise ValueError(
+            f"{op_name} computes {what} in metres; CRS "
+            f"{crs.name!r} has linear units {units}. {hint}"
+        )
+
+
+def ground_pixel_size(transform: Any, op_name: str) -> tuple[float, float]:
+    """Return the ``(row_step, col_step)`` ground length of one pixel step.
+
+    Moving one column shifts the CRS position by ``(a, d)`` and one row by
+    ``(b, e)``, so the step lengths are ``hypot(a, d)`` and
+    ``hypot(b, e)`` -- equal to ``|a|`` / ``|e|`` only on a north-up grid.
+    On a rotated grid the two step vectors stay perpendicular, so per-axis
+    sampling (``scipy.ndimage.distance_transform_edt(sampling=...)``,
+    :func:`numpy.gradient` spacings) measures true ground distances. A
+    sheared grid has non-perpendicular steps, where no per-axis sampling is
+    exact; it is rejected.
+
+    Args:
+        transform: Affine-like geotransform (``a, b, d, e`` attributes).
+        op_name: Operator name used in the error message.
+
+    Returns:
+        ``(row_step, col_step)`` in CRS units, for ``sampling`` /
+        ``pixel_size`` arguments ordered ``(row, col)``.
+
+    Raises:
+        ValueError: If the transform is sheared or degenerate.
+    """
+    a, b, d, e = (
+        float(transform.a),
+        float(transform.b),
+        float(transform.d),
+        float(transform.e),
+    )
+    col_step = math.hypot(a, d)
+    row_step = math.hypot(b, e)
+    if col_step == 0.0 or row_step == 0.0:
+        raise ValueError(f"{op_name}: degenerate transform {tuple(transform)[:6]}")
+    if abs(a * b + d * e) > 1e-9 * col_step * row_step:
+        raise ValueError(
+            f"{op_name} needs perpendicular pixel axes to measure ground "
+            f"distances; the transform is sheared ({tuple(transform)[:6]}). "
+            "Resample to a rotated or north-up grid first, e.g. with "
+            "geotoolz.geom.Reproject."
+        )
+    return row_step, col_step
 
 
 def grid_matches(

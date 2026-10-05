@@ -7,7 +7,8 @@ Per-pixel operators accept a ``georeader.GeoTensor`` or a plain
 georeferenced ``GeoTensor`` and raise ``TypeError`` otherwise. The
 area / distance operators (``PlumeFootprint``, ``WindAdvectionCone``,
 ``IMEEstimate``, ``CrossSectionalFlux``) work in metres and raise
-``ValueError`` on a geographic CRS (see :func:`require_projected_crs`).
+``ValueError`` on a geographic CRS (see
+:func:`geotoolz._src.geo.require_projected_crs`).
 Vector outputs are ``geopandas.GeoDataFrame``. Algorithms follow the literature
 cited in :mod:`geotoolz.plume._src.array`:
 
@@ -50,7 +51,7 @@ from geotoolz._src.config import (
     callable_name,
     reject_config_summary,
 )
-from geotoolz._src.geo import require_geotensor
+from geotoolz._src.geo import require_geotensor, require_projected_crs
 from geotoolz._src.labels import (
     DEFAULT_REGIONPROPS,
     regionprops_frame,
@@ -108,46 +109,6 @@ def _extract_and_clip_band(arr: np.ndarray, index: int, axis: int) -> np.ndarray
 def _single_band_nan(x: GeoTensor | np.ndarray) -> np.ndarray:
     """Single-band ``(H, W)`` float map of ``x`` with nodata pixels set to NaN."""
     return squeeze_single_band(mask_invalid_to_nan(x))
-
-
-def require_projected_crs(gt: GeoTensor, op_name: str) -> None:
-    """Raise unless ``gt`` is in a projected CRS with metre units.
-
-    The area / distance plume operators treat the affine transform as
-    metres (pixel area in m^2, distances and lengths in m). On a
-    geographic CRS those numbers would silently be degrees, so they are
-    rejected with a hint to reproject first. A carrier without a CRS is
-    accepted as-is: its transform is then assumed to be in metres.
-
-    Args:
-        gt: Georeferenced carrier (anything exposing ``.crs``).
-        op_name: Operator name used in the error message.
-
-    Raises:
-        ValueError: If the CRS is geographic (or otherwise not
-            projected), or projected with non-metre linear units.
-    """
-    crs_input = getattr(gt, "crs", None)
-    if crs_input is None:
-        return
-    crs = CRS.from_user_input(crs_input)
-    hint = (
-        "Reproject to a projected metric CRS (e.g. the local UTM zone) first, "
-        "e.g. with geotoolz.geom.Reproject(dst_crs=...) or "
-        "geotoolz.geom.ReprojectLike."
-    )
-    if not crs.is_projected:
-        kind = "geographic" if crs.is_geographic else "not projected"
-        raise ValueError(
-            f"{op_name} computes areas and distances in metres and needs a "
-            f"projected CRS; got {crs.name!r} ({kind}). {hint}"
-        )
-    if any(axis.unit_conversion_factor != 1.0 for axis in crs.axis_info):
-        units = sorted({axis.unit_name for axis in crs.axis_info})
-        raise ValueError(
-            f"{op_name} computes areas and distances in metres; CRS "
-            f"{crs.name!r} has linear units {units}. {hint}"
-        )
 
 
 class SBMP(Operator):

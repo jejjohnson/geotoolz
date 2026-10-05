@@ -8,7 +8,13 @@ import rasterio
 from _helpers import DEFAULT_TRANSFORM, toy_geotensor
 
 import geotoolz as gz
-from geotoolz._src.geo import grid_matches, pixel_xy, require_geotensor
+from geotoolz._src.geo import (
+    grid_matches,
+    ground_pixel_size,
+    pixel_xy,
+    require_geotensor,
+    require_projected_crs,
+)
 
 
 def _shifted(dx: float) -> rasterio.Affine:
@@ -234,3 +240,34 @@ def test_peak_local_max_points_unchanged() -> None:
     assert len(peaks) == 2
     for row, col, geom in zip(peaks["row"], peaks["col"], peaks.geometry, strict=True):
         assert (geom.x, geom.y) == _old_xy(transform, row, col)
+
+
+# --- ground_pixel_size / require_projected_crs ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("grid", "expected"),
+    [("utm", (10.0, 10.0)), ("non_square", (20.0, 10.0)), ("rotated", (10.0, 10.0))],
+)
+def test_ground_pixel_size_is_the_step_length(grid, expected) -> None:
+    """``(hypot(b, e), hypot(a, d))``: on the rotated grid |a| = |e| = 8.66."""
+    transform = toy_geotensor(np.zeros((2, 2)), grid=grid).transform
+    np.testing.assert_allclose(ground_pixel_size(transform, "Op"), expected)
+
+
+def test_ground_pixel_size_rejects_a_sheared_grid() -> None:
+    transform = toy_geotensor(np.zeros((2, 2)), grid="sheared").transform
+    with pytest.raises(ValueError, match=r"^Op needs perpendicular .* sheared"):
+        ground_pixel_size(transform, "Op")
+
+
+def test_require_projected_crs_messages() -> None:
+    geographic = toy_geotensor(np.zeros((2, 2)), grid="geographic")
+    with pytest.raises(ValueError, match=r"^Op computes slopes .*geographic"):
+        require_projected_crs(geographic, "Op", what="slopes")
+    feet = toy_geotensor(np.zeros((2, 2)), crs="EPSG:2263")
+    with pytest.raises(ValueError, match="linear units"):
+        require_projected_crs(feet, "Op")
+    require_projected_crs(feet, "Op", metres=False)
+    require_projected_crs(toy_geotensor(np.zeros((2, 2))), "Op")
+    require_projected_crs(np.zeros((2, 2)), "Op")
