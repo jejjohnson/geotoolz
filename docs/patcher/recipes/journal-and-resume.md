@@ -10,7 +10,9 @@ This recipe walks through:
 1. The journal contract.
 2. A minimal save / resume loop.
 3. Combining a journal with `on_error="retry"`.
-4. Storage notes (durability, format, file layout).
+4. Restart story.
+5. Letting `parallel_map` drive the journal.
+6. Storage notes (durability, format, file layout).
 
 ## When you need it
 
@@ -151,6 +153,32 @@ for patch in patcher.split(field, journal=journal):
 
 `patcher.anchors(field)` materialises the full anchor schedule without
 reading the data — cheap relative to a real `split` walk.
+
+## 5. Let `parallel_map` drive the journal
+
+The reference runner takes the same journal and does the bookkeeping of
+section 2 for you: anchors with an `"ok"` row are skipped before any
+read, and every finished patch is committed from the parent process —
+`"ok"` with the operator's runtime, or `"error"` with
+`"<ExceptionType>: <message>"` — so the journal stays single-writer even
+with `backend="process"`.
+
+```python
+from geopatcher.runners import parallel_map
+
+journal = PatchJournal("out/lake-tahoe-run.jsonl")
+outputs = parallel_map(
+    patcher, field, my_operator,
+    n_workers=8,
+    journal=journal,
+    on_error="skip",     # record operator failures as "error" rows, keep going
+)
+```
+
+Rerun the same call after a crash: only the anchors without an `"ok"`
+row are read and processed. The returned list holds this run's outputs;
+persist each output inside `my_operator` (and pass its URI through your
+own bookkeeping) if a later run needs the earlier results.
 
 ## Storage notes
 

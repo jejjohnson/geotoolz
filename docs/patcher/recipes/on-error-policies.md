@@ -127,6 +127,7 @@ For production bulk inference, combine `on_error="retry"` with the
 reference runner and a `PatchJournal`:
 
 ```python
+from geopatcher import PatchJournal
 from geopatcher.runners import parallel_map
 
 patcher = gp.SpatialPatcher(
@@ -134,22 +135,34 @@ patcher = gp.SpatialPatcher(
     on_error    = "retry",
     max_retries = 3,
 )
+journal = PatchJournal("out/run.jsonl")
 
 outputs = parallel_map(
     patcher, field, my_operator,
     n_workers=8,
     backend="thread",
-    on_error="skip",            # parallel_map-level — failed workers omitted
+    journal=journal,            # skip committed anchors, commit each result
+    on_error="skip",            # parallel_map-level — failed operators omitted
 )
+print(patcher.errors)           # read failures, as with a plain split
 ```
 
 The two `on_error` settings are independent and compose:
 
 - `SpatialPatcher.on_error` governs the **read** path (`Field.select`).
-- `parallel_map(on_error=...)` governs the **operator** path.
+  `parallel_map` reads through `patcher.split` — including the batched
+  `select_many` fast path (e.g. `ObstoreCogField`), which falls back to
+  per-patch reads when a batch fails — so read failures are skipped,
+  masked, retried or raised per the patcher's policy and recorded in
+  `patcher.errors`.
+- `parallel_map(on_error=...)` governs the **operator** path. Under
+  `"raise"` the first operator failure cancels every queued patch.
 
 Set both to `"skip"` for maximally-resilient bulk inference; set both to
-`"raise"` for dev and CI.
+`"raise"` for dev and CI. With a `journal`, every finished patch is
+committed (`"ok"` with its operator runtime, or `"error"` with the
+message), so a rerun with the same journal resumes where the last run
+stopped and retries only the anchors without an `"ok"` row.
 
 ## See also
 
