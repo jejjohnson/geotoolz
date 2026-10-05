@@ -36,11 +36,16 @@ journal = PatchJournal("out/run.jsonl")
 | `journal.has(anchor)` | `True` iff `anchor` has a `status == "ok"` row. |
 | `journal.commit(anchor, status="ok", runtime_s=..., output_uri=..., error=None)` | Append a durable row. `flush()` + `fsync()` before return. |
 | `journal.pending(all_anchors)` | Return the subset of `all_anchors` that don't have an `"ok"` row yet. |
+| `journal.completed()` | Every anchor whose latest row is `"ok"`, in journal (normalised) form. |
 
 The journal stores one JSON record per committed patch, keyed by the
-JSON-serialised anchor. Anchors must be JSON-serialisable — tuples,
-lists, dicts, strings, numbers, booleans all work; numpy scalars are
-coerced via `default=str`.
+anchor after `geopatcher.normalize_anchor`: numpy scalars become Python
+numbers (`datetime64` / `timedelta64` become strings), numpy arrays and
+tuples become lists, dicts keep their string keys. So
+`(np.int64(5), np.int64(10))`, `np.array([5, 10])` and `(5, 10)` are the
+same anchor — `SpatialExplicit(anchors_=np.argwhere(mask))` rows resume
+correctly. Anything else (an arbitrary object, a non-string dict key)
+raises `TypeError`; there is no `str()` fallback.
 
 **Durability.** Each `commit` flushes the Python buffer and calls
 `os.fsync` on the file descriptor before returning. The OS may still
@@ -133,7 +138,7 @@ have an `"ok"` row.
 
 ```python
 journal = PatchJournal("out/lake-tahoe-run.jsonl")
-print(f"already done: {sum(1 for k in journal._rows if journal._rows[k]['status'] == 'ok')}")
+print(f"already done: {len(journal.completed())}")
 
 remaining = journal.pending(patcher.anchors(field))
 print(f"remaining: {len(remaining)}")

@@ -11,5 +11,6 @@ primitives (journal, cache, backpressure) that ML loaders build on.
 ## Operational scale
 
 ::: geopatcher._src.journal.PatchJournal
+::: geopatcher._src.journal.normalize_anchor
 ::: geopatcher.runners.parallel_map
 ::: geopatcher._src.prefetch.prefetch_iterable

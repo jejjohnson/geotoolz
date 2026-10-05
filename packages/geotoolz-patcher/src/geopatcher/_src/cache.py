@@ -15,7 +15,9 @@ metadata.
   band selection (``indexes``) and boundless fill.
 - ``config_id`` — ``json.dumps`` of the geometry + window configs
   (sampler / aggregation excluded: they don't change patch bytes).
-- ``anchor_id`` — `PatchJournal`'s anchor normaliser, reused verbatim.
+- ``anchor_id`` — JSON of `normalize_anchor(anchor)`, the normaliser
+  `PatchJournal` keys by, so numpy-scalar / ndarray / tuple spellings of
+  one anchor share an entry.
 
 Each entry is one ``<hash>.npz`` holding ``values``, the carrier
 ``kind`` (``"geotensor"``, ``"dataarray"`` or ``"ndarray"``), a JSON
@@ -32,8 +34,15 @@ than silently degraded.
 stored. Writes are atomic (unique temp file + ``os.replace``), so a
 reader never sees a torn entry written by this class; an entry that
 fails to load anyway (zero-byte, truncated, foreign) is a miss, is
-deleted, and is rewritten by the next `put`. Eviction is LRU by file
-``st_atime`` when ``max_bytes`` is exceeded, checked on write.
+deleted, and is rewritten by the next `put`.
+
+Size accounting is incremental: the directory is scanned once, at
+construction (seeding the LRU order from each entry's ``st_atime``);
+after that every `get` / `put` updates an in-memory ``(bytes, entries)``
+tally and access order in O(1), and eviction runs only when a `put`
+takes the total over ``max_bytes``. An entry larger than ``max_bytes``
+on its own is not stored at all (with a `RuntimeWarning`) — writing it
+would evict every other entry and then itself.
 """
 
 from __future__ import annotations
@@ -43,6 +52,9 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
+import warnings
+from collections import OrderedDict
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -67,9 +79,15 @@ class PatchCache:
         root: Directory the cache writes entries under (created if
             absent). The layout is fsspec-friendly (two-level shard) but
             v1 is a local filesystem only.
-        max_bytes: Soft cap on the cache size. When exceeded after a
-            write, least-recently-accessed entries are evicted until the
-            total is back under the cap. ``None`` (default) is unbounded.
+        max_bytes: Soft cap on the cache size. When a write takes the
+            total over it, least-recently-used entries (by `get` hit or
+            `put`) are evicted until the total is back under the cap.
+            An entry that alone exceeds the cap is not stored and a
+            `RuntimeWarning` is issued. The tally is this instance's:
+            entries other processes write to the same ``root`` are only
+            counted once this instance hits them (or on the next
+            construction), so with several writers the cap is per
+            writer. ``None`` (default) is unbounded.
         field_id: Explicit source identity for in-memory fields that
             have none (a bare `GeoTensor`-backed `RasterField`). Leave
             ``None`` for path- or URL-backed fields, whose identity is
@@ -83,12 +101,43 @@ class PatchCache:
     field_id: str | None = None
     _hits: int = field(default=0, init=False, repr=False)
     _misses: int = field(default=0, init=False, repr=False)
+    # Entry path → size, least-recently-used first; `_bytes` is its sum.
+    _lru: OrderedDict[Path, int] = field(
+        default_factory=OrderedDict, init=False, repr=False, compare=False
+    )
+    _bytes: int = field(default=0, init=False, repr=False, compare=False)
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)
         self.root.mkdir(parents=True, exist_ok=True)
         if self.max_bytes is not None and self.max_bytes < 1:
             raise ValueError("max_bytes must be >= 1 (or None for unbounded).")
+        self._scan()
+
+    def __getstate__(self) -> dict[str, Any]:
+        # A `threading.Lock` doesn't pickle (`IndexedPatchView` ships the
+        # cache to DataLoader workers); each copy gets a fresh lock.
+        state = self.__dict__.copy()
+        del state["_lock"]
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+
+    def _scan(self) -> None:
+        """Seed the size tally and LRU order from disk (construction only)."""
+        found: list[tuple[int, Path, int]] = []
+        for path in Path(self.root).rglob("*.npz"):
+            with suppress(OSError):
+                st = path.stat()
+                found.append((st.st_atime_ns, path, st.st_size))
+        found.sort(key=lambda item: item[0])  # oldest access first
+        self._lru = OrderedDict((path, size) for _, path, size in found)
+        self._bytes = sum(self._lru.values())
 
     # -- key derivation ---------------------------------------------------
 
@@ -98,18 +147,26 @@ class PatchCache:
         The result is ``"<source>|<json>"``:
 
         - ``source`` — this cache's explicit ``field_id``, else the
-          first of: a ``url``, a reader / field file path
-          (``realpath`` + ``st_mtime_ns`` + ``st_size``), the
-          ``encoding["source"]`` file of an xarray-backed field —
+          first of: a ``url``, the reader / field file paths
+          (``realpath`` + ``st_mtime_ns`` + ``st_size`` of every path),
+          the ``encoding["source"]`` file of an xarray-backed field —
           looked up on the field and then on its ``reader`` / ``da`` /
           ``array``. A field exposing only a ``cache_id()`` uses that as
-          its source.
+          its source. A plain ``url`` has no version, so an object
+          overwritten in place is not detected; adapters that can ask
+          the store cheaply (`ObstoreCogField`: an ETag / size from a
+          HEAD) fold that into ``cache_id()``.
         - ``json`` — the field's ``cache_id()`` (per-adapter identity,
           e.g. `ObstoreCogField`'s store / path / ``ifd_index`` or
           `ReprojectingRasterField`'s ``dst_crs`` / ``resolution`` /
           ``resampling``), the domain (CRS, transform, shape, dtype, or
           a digest of the grid coordinates) and the reader's band
           selection (``indexes``) and boundless ``fill_value_default``.
+
+        ``cache_id()`` is trusted as-is: it must return a non-empty
+        ``str`` (anything else raises `TypeError`) that changes whenever
+        the patches the field reads could change; PatchCache cannot
+        verify that.
 
         An xarray-backed field also keys on its variable name (two
         variables of one file share everything else). An adapter whose
@@ -192,26 +249,40 @@ class PatchCache:
         so the following `put` rewrites it.
         """
         path = self._path(self._key(field_id, config_id, anchor))
-        if not path.exists():
-            self._misses += 1
-            return None
         try:
             payload = _load_entry(path)
             # Rebuild the carrier here, inside the repair guard: an entry
             # with an unknown kind or inconsistent metadata is as unusable
             # as a torn zip and must not fail later, on every run.
             payload["decoded"] = _decode_carrier(payload)
+        except FileNotFoundError:
+            with self._lock:
+                # Another thread may have published this key between our
+                # failed open and taking the lock; only forget a file that
+                # is really gone.
+                if not path.exists():
+                    self._forget(path)
+                self._misses += 1
+            return None
         except Exception:
             # Any decode failure (zipfile.BadZipFile, EOFError, KeyError,
             # a JSON error, a carrier that won't rebuild, …) means the
             # entry is unusable: repair it.
             with suppress(OSError):
                 path.unlink()
-            self._misses += 1
+            with self._lock:
+                self._forget(path)
+                self._misses += 1
             return None
-        self._hits += 1
+        with self._lock:
+            self._hits += 1
+            if path in self._lru:
+                self._lru.move_to_end(path)
+            else:  # written by another process since our construction scan
+                with suppress(OSError):
+                    self._track(path, path.stat().st_size)
         if self.max_bytes is not None:
-            # Refresh the access time so eviction sees true recency even on
+            # Persist the recency for the next construction scan, even on
             # relatime/noatime mounts.
             with suppress(OSError):
                 os.utime(path)
@@ -223,7 +294,8 @@ class PatchCache:
         Always (re)writes the entry — `put` follows a miss, so an
         existing file at the key is one `get` could not use. The write
         is atomic: a unique temp file in the shard directory is
-        published with ``os.replace``.
+        published with ``os.replace``. An entry larger than
+        ``max_bytes`` is discarded with a `RuntimeWarning` instead.
 
         Raises:
             TypeError: The patch carrier cannot be rebuilt bit-identically
@@ -240,6 +312,16 @@ class PatchCache:
             with os.fdopen(fd, "wb") as f:
                 np.savez(f, **arrays)
                 f.flush()
+                size = f.tell()
+                if self.max_bytes is not None and size > self.max_bytes:
+                    warnings.warn(
+                        f"PatchCache: a {size}-byte entry exceeds max_bytes="
+                        f"{self.max_bytes} and is not cached; raise max_bytes "
+                        f"to cache patches of this size.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    return
                 with suppress(OSError):
                     os.fsync(f.fileno())
             os.replace(tmp_name, path)
@@ -247,8 +329,10 @@ class PatchCache:
             with suppress(OSError):
                 if os.path.exists(tmp_name):
                     os.unlink(tmp_name)
-        if self.max_bytes is not None:
-            self._evict()
+        with self._lock:
+            self._track(path, size)
+            if self.max_bytes is not None and self._bytes > self.max_bytes:
+                self._evict()
 
     def build_patch(self, payload: dict[str, Any], anchor: Any, indices: Any) -> Patch:
         """Rebuild a `Patch` from a stored ``payload`` at ``anchor``/``indices``."""
@@ -259,47 +343,54 @@ class PatchCache:
     # -- introspection ----------------------------------------------------
 
     def stats(self) -> dict[str, Any]:
-        """Return ``{"hits", "misses", "bytes", "entries"}`` for the cache."""
-        total = 0
-        entries = 0
-        for path in self.root.rglob("*.npz"):
-            with suppress(OSError):
-                total += path.stat().st_size
-                entries += 1
-        return {
-            "hits": self._hits,
-            "misses": self._misses,
-            "bytes": total,
-            "entries": entries,
-        }
+        """Return ``{"hits", "misses", "bytes", "entries"}`` for the cache.
+
+        ``bytes`` / ``entries`` are the incremental tally (see
+        ``max_bytes``) — O(1), no directory walk.
+        """
+        with self._lock:
+            return {
+                "hits": self._hits,
+                "misses": self._misses,
+                "bytes": self._bytes,
+                "entries": len(self._lru),
+            }
 
     def clear(self) -> None:
         """Delete every cached entry; reset hit / miss counters."""
-        for path in self.root.rglob("*.npz"):
-            with suppress(OSError):
-                path.unlink()
-        self._hits = 0
-        self._misses = 0
+        with self._lock:
+            for path in Path(self.root).rglob("*.npz"):
+                with suppress(OSError):
+                    path.unlink()
+            self._lru.clear()
+            self._bytes = 0
+            self._hits = 0
+            self._misses = 0
+
+    # -- accounting (callers hold `_lock`) ---------------------------------
+
+    def _track(self, path: Path, size: int) -> None:
+        """Record ``path`` as (re)written or found at ``size``, most recent."""
+        self._bytes += size - self._lru.pop(path, 0)
+        self._lru[path] = size
+
+    def _forget(self, path: Path) -> None:
+        self._bytes -= self._lru.pop(path, 0)
 
     def _evict(self) -> None:
-        """Drop least-recently-accessed entries until under ``max_bytes``."""
-        if self.max_bytes is None:
+        """Drop least-recently-used entries until under ``max_bytes``.
+
+        The entry just written is the most recent and fits the cap on
+        its own (oversize entries are never stored), so it survives.
+        """
+        max_bytes = self.max_bytes
+        if max_bytes is None:
             return
-        entries: list[tuple[float, int, Path]] = []
-        for path in self.root.rglob("*.npz"):
-            with suppress(OSError):
-                st = path.stat()
-                entries.append((st.st_atime, st.st_size, path))
-        total = sum(size for _, size, _ in entries)
-        if total <= self.max_bytes:
-            return
-        entries.sort()  # oldest access time first
-        for _atime, size, path in entries:
-            if total <= self.max_bytes:
-                break
+        while self._bytes > max_bytes and self._lru:
+            path, size = self._lru.popitem(last=False)
+            self._bytes -= size
             with suppress(OSError):
                 path.unlink()
-                total -= size
 
 
 # ---------------------------------------------------------------------------
@@ -325,19 +416,38 @@ class UnstableIdentityError(ValueError):
 
 
 def _adapter_id(field: Any) -> str | None:
-    """The field's own ``cache_id()``, or ``None`` when it defines none."""
+    """The field's own ``cache_id()``, or ``None`` when it defines none.
+
+    The hook is trusted, not verified: PatchCache cannot tell whether
+    the string really changes whenever the bytes `select` returns do.
+    It only checks the contract's shape — a non-empty ``str``.
+
+    Raises:
+        TypeError: ``cache_id()`` returned something other than a
+            non-empty string (``None``, bytes, a dict, …).
+    """
     cache_id = getattr(field, "cache_id", None)
     if not callable(cache_id):
         return None
-    return str(cache_id())
+    value = cache_id()
+    if not isinstance(value, str) or not value:
+        raise TypeError(
+            f"{type(field).__name__}.cache_id() must return a non-empty str "
+            f"that changes whenever the patches it reads change; got {value!r}."
+        )
+    return value
 
 
 def _source_id(obj: Any, _depth: int = 0) -> str | None:
     """Stable identity of the data behind ``obj``, or ``None`` if in-memory.
 
-    Checks ``obj`` itself — a ``url``, a file ``paths`` / ``path``, an
+    Checks ``obj`` itself — a ``url``, file ``paths`` / ``path``, an
     xarray ``encoding["source"]`` — then recurses into the object it
-    wraps (``reader`` / ``da`` / ``array``).
+    wraps (``reader`` / ``da`` / ``array``). Files are identified by
+    ``(realpath, st_mtime_ns, st_size)`` of *every* path, so editing any
+    file of a multi-file reader invalidates its entries. A bare ``url``
+    carries no version: a remote object overwritten in place is not
+    detected (`ObstoreCogField.cache_id` adds the object's ETag).
     """
     if obj is None or _depth > 4:
         return None
@@ -345,22 +455,17 @@ def _source_id(obj: Any, _depth: int = 0) -> str | None:
     if isinstance(url, str) and url:
         return f"url:{url}"
     encoding = getattr(obj, "encoding", None)
-    for path in (
+    for paths in (
         getattr(obj, "paths", None),
         getattr(obj, "path", None),
         encoding.get("source") if isinstance(encoding, dict) else None,
     ):
-        if isinstance(path, (list, tuple)):
-            path = path[0] if path else None
-        if not isinstance(path, (str, os.PathLike)):
-            continue
-        if _is_remote(path):
-            # ``open_rasterio("s3://…")`` / ``open_dataset("https://…")``:
-            # no local stat, but the URL still names the object.
-            return f"url:{path}"
-        with suppress(OSError):
-            st = os.stat(path)
-            return f"path:{os.path.realpath(path)}:{st.st_mtime_ns}:{st.st_size}"
+        remote = _remote_id(paths)
+        if remote is not None:
+            return remote
+        found = _files_id(paths)
+        if found is not None:
+            return found
     for attr in _SOURCE_ATTRS:
         inner = getattr(obj, attr, None)
         if inner is not None and inner is not obj:
@@ -370,11 +475,56 @@ def _source_id(obj: Any, _depth: int = 0) -> str | None:
     return None
 
 
+def _remote_id(paths: Any) -> str | None:
+    """``url:`` identity of remote ``scheme://`` sources, else ``None``.
+
+    ``open_rasterio("s3://…")`` / ``open_dataset("https://…")`` expose the
+    URL only as a path or ``encoding["source"]``: there is no local
+    ``stat``, but the URL still names the object (with no version).
+    """
+    if isinstance(paths, (str, os.PathLike)):
+        paths = [paths]
+    if not isinstance(paths, (list, tuple)) or not paths:
+        return None
+    if not all(isinstance(p, (str, os.PathLike)) and _is_remote(p) for p in paths):
+        return None
+    urls = [os.fspath(p) for p in paths]
+    if len(urls) == 1:
+        return f"url:{urls[0]}"
+    digest = hashlib.sha256("\n".join(urls).encode("utf-8")).hexdigest()
+    return f"urls:{len(urls)}:{digest}"
+
+
 def _is_remote(path: Any) -> bool:
     """``True`` for a ``scheme://`` URL other than ``file://``."""
     text = os.fspath(path)
     scheme, sep, _ = text.partition("://")
     return bool(sep) and scheme.isidentifier() and scheme.lower() != "file"
+
+
+def _files_id(paths: Any) -> str | None:
+    """``path:`` identity of one file or ``paths:`` digest of several.
+
+    ``None`` unless every entry is a local file that can be ``stat``-ed
+    (a remote ``s3://`` path, say, has no cheap local version).
+    """
+    if isinstance(paths, (str, os.PathLike)):
+        paths = [paths]
+    if not isinstance(paths, (list, tuple)) or not paths:
+        return None
+    parts = []
+    for path in paths:
+        if not isinstance(path, (str, os.PathLike)):
+            return None
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        parts.append(f"{os.path.realpath(path)}:{st.st_mtime_ns}:{st.st_size}")
+    if len(parts) == 1:
+        return f"path:{parts[0]}"
+    digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+    return f"paths:{len(parts)}:{digest}"
 
 
 def _wraps_unnamed_source(field: Any) -> bool:

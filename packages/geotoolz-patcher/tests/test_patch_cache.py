@@ -23,6 +23,7 @@ from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
 from geopatcher import (
+    Patch,
     PatchCache,
     RasterField,
     SpatialBoxcar,
@@ -558,6 +559,172 @@ def test_unroundtrippable_carrier_is_refused(tmp_path) -> None:
     with pytest.raises(TypeError, match=r"cannot store GeoTensor\.attrs"):
         list(patcher.split(field, cache=cache))
     assert cache.stats()["entries"] == 0
+
+
+# ---------------------------------------------------------------------------
+# gh #199 — incremental eviction, LRU order, field identity, numpy anchors
+# ---------------------------------------------------------------------------
+
+
+def _tiny_patch(i: int) -> Patch:
+    return Patch(data=np.full((4, 4), i, dtype=np.float32), anchor=(i, 0), indices=None)
+
+
+def _entry_size(tmp_path: Path) -> int:
+    probe = PatchCache(tmp_path / "probe")
+    probe.put("f", "c", (0, 0), _tiny_patch(0))
+    return probe.stats()["bytes"]
+
+
+class _FsSpy:
+    """Count directory walks (`Path.rglob`) and `os.stat` calls."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.rglob = 0
+        self.stat = 0
+        real_rglob, real_stat = Path.rglob, os.stat
+
+        def rglob(path: Path, *args: Any, **kwargs: Any) -> Any:
+            self.rglob += 1
+            return real_rglob(path, *args, **kwargs)
+
+        def stat(*args: Any, **kwargs: Any) -> Any:
+            self.stat += 1
+            return real_stat(*args, **kwargs)
+
+        monkeypatch.setattr(Path, "rglob", rglob)
+        monkeypatch.setattr(os, "stat", stat)
+
+    def reset(self) -> None:
+        self.rglob = self.stat = 0
+
+
+def test_eviction_is_incremental(tmp_path, monkeypatch) -> None:
+    # 1024 puts against a cap that keeps ~100 entries cost the same
+    # filesystem work as 1024 uncapped puts: no directory walk per put
+    # and O(1) stat calls (the old `_evict` rescanned every entry).
+    import time
+
+    n = 1024
+    cap = 100 * _entry_size(tmp_path)
+    spy = _FsSpy(monkeypatch)
+    work: dict[str, tuple[int, int, float]] = {}
+    for label, max_bytes in (("uncapped", None), ("capped", cap)):
+        cache = PatchCache(tmp_path / label, max_bytes=max_bytes, field_id="x")
+        spy.reset()
+        start = time.perf_counter()
+        for i in range(n):
+            cache.put("f", "c", (i, 0), _tiny_patch(i))
+        work[label] = (spy.rglob, spy.stat, time.perf_counter() - start)
+
+    assert work["capped"][0] == work["uncapped"][0] == 0  # no directory walks
+    assert work["capped"][1] <= 1.5 * work["uncapped"][1] + 8
+    # Loose wall-clock sanity check only — the spy above is the real guard.
+    assert work["capped"][2] <= 1.5 * work["uncapped"][2] + 1.0
+
+    capped = PatchCache(tmp_path / "capped")  # fresh scan of what's on disk
+    assert capped.stats()["bytes"] <= cap
+    assert capped.stats()["entries"] == len(_entries(tmp_path / "capped")) < n
+    assert capped.stats()["bytes"] == cache.stats()["bytes"]
+
+
+def test_lru_order(tmp_path) -> None:
+    size = _entry_size(tmp_path)
+    cache = PatchCache(tmp_path / "c", max_bytes=3 * size)
+    for i in range(3):
+        cache.put("f", "c", (i, 0), _tiny_patch(i))
+    assert cache.get("f", "c", (0, 0)) is not None  # 0 becomes most recent
+    cache.put("f", "c", (3, 0), _tiny_patch(3))  # evicts 1, the LRU entry
+    present = [i for i in range(4) if cache.get("f", "c", (i, 0)) is not None]
+    assert present == [0, 2, 3]
+    assert cache.stats()["entries"] == 3
+
+
+def test_oversize_entry_is_skipped_with_warning(tmp_path) -> None:
+    size = _entry_size(tmp_path)
+    cache = PatchCache(tmp_path / "c", max_bytes=size + size // 2)
+    cache.put("f", "c", (0, 0), _tiny_patch(0))
+    big = Patch(data=np.zeros((64, 64), np.float32), anchor=(1, 0), indices=None)
+    with pytest.warns(RuntimeWarning, match="exceeds max_bytes"):
+        cache.put("f", "c", (1, 0), big)
+    # The oversize entry is not written, and the existing one survives.
+    assert cache.get("f", "c", (1, 0)) is None
+    assert cache.get("f", "c", (0, 0)) is not None
+    assert len(_entries(tmp_path / "c")) == 1
+    assert not list((tmp_path / "c").rglob("*.tmp"))
+
+
+def test_multi_file_identity_tracks_every_path(tmp_path) -> None:
+    first, second = tmp_path / "b1.dat", tmp_path / "b2.dat"
+    first.write_bytes(b"aaaa")
+    second.write_bytes(b"bbbb")
+    os.utime(second, (1000, 1000))
+    fld = SimpleNamespace(reader=SimpleNamespace(paths=[str(first), str(second)]))
+    cache = PatchCache(tmp_path / "cache")
+    before = cache.field_id_for(fld)
+    second.write_bytes(b"cccccccc")  # edit only the 2nd file of the stack
+    os.utime(second, (2000, 2000))
+    assert cache.field_id_for(fld) != before
+
+
+def test_obstore_object_overwrite_changes_identity(tmp_path) -> None:
+    pytest.importorskip("obstore")
+    pytest.importorskip("async_tiff")
+    from obstore.store import LocalStore
+
+    from geopatcher.fields import ObstoreCogField
+
+    def write(offset: int) -> None:
+        _write_tif(
+            tmp_path / "cog.tif",
+            np.arange(32 * 32, dtype=np.uint16).reshape(1, 32, 32) + offset,
+            tiled=True,
+            blockxsize=16,
+            blockysize=16,
+        )
+
+    def open_cog() -> Any:
+        return ObstoreCogField.from_url(
+            f"file://{tmp_path / 'cog.tif'}",
+            store=LocalStore(prefix=str(tmp_path)),
+            path="cog.tif",
+        )
+
+    write(0)
+    before = open_cog().cache_id()
+    assert '"version": "etag:' in before
+    os.utime(tmp_path / "cog.tif", (1000, 1000))
+    write(7)  # same size, new content and mtime
+    assert open_cog().cache_id() != before
+
+
+def test_cache_id_must_be_a_non_empty_string(tmp_path) -> None:
+    class _BadId:
+        domain = None
+
+        def cache_id(self) -> Any:
+            return None
+
+    with pytest.raises(TypeError, match="cache_id"):
+        PatchCache(tmp_path).field_id_for(_BadId())
+
+
+def test_numpy_anchor_shares_the_cache_key(tmp_path) -> None:
+    cache = PatchCache(tmp_path)
+    cache.put("f", "c", (np.int64(5), np.int64(10)), _tiny_patch(1))
+    for spelling in ((5, 10), [5, 10], np.array([5, 10]), (np.int32(5), 10)):
+        assert cache.get("f", "c", spelling) is not None
+
+
+def test_cache_pickles(tmp_path) -> None:
+    import pickle
+
+    cache = PatchCache(tmp_path, max_bytes=10_000)
+    cache.put("f", "c", (0, 0), _tiny_patch(0))
+    clone = pickle.loads(pickle.dumps(cache))
+    assert clone.get("f", "c", (0, 0)) is not None
+    clone.put("f", "c", (1, 0), _tiny_patch(1))  # its fresh lock works
+    assert clone.stats()["entries"] == 2
 
 
 def test_variables_of_one_file_have_distinct_keys(tmp_path) -> None:
