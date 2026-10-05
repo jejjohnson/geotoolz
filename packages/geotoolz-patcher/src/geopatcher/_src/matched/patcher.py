@@ -47,16 +47,25 @@ if TYPE_CHECKING:
     from geopatcher._src.time.patcher import TemporalPatcher
 
 
-def _compute_valid_mask(data: Any) -> np.ndarray | None:
-    """Best-effort validity mask for ``data``.
+def _compute_valid_mask(data: Any, nodata: Any = None) -> np.ndarray | None:
+    """Best-effort validity mask for ``data`` (True = valid).
 
-    For array-coercible numeric data (the common raster case),
-    returns ``np.isfinite(data)`` — True where the value is real
-    and finite, False on NaN / +-inf (the conventional nodata
-    sentinel for float rasters). For non-array data or non-numeric
-    arrays, returns None so the caller can simply omit that source's
-    mask entry rather than emit a meaningless all-True / all-False
-    array.
+    A cell is invalid when it equals the carrier's declared nodata —
+    a `GeoTensor`'s ``fill_value_default`` (exactly what its
+    ``validmask()`` tests) or a rioxarray `DataArray`'s ``rio.nodata``
+    — and, for floating / complex data, when it is NaN or ±inf. Integer
+    nodata (the norm for L1/L2 products, and what a reproject-like coreg
+    pads with) is therefore masked; a bare ndarray carries no nodata, so
+    only the float NaN / inf test applies to it. For non-array data or
+    non-numeric arrays, returns None so the caller can simply omit that
+    source's mask entry rather than emit a meaningless all-True /
+    all-False array.
+
+    Args:
+        data: The member's data.
+        nodata: Nodata of the carrier ``data`` was sliced from, used when
+            ``data`` itself is a bare array (the temporal paths slice
+            ndarrays out of the per-source carriers).
     """
     try:
         arr = np.asarray(data)
@@ -64,7 +73,27 @@ def _compute_valid_mask(data: Any) -> np.ndarray | None:
         return None
     if not np.issubdtype(arr.dtype, np.number):
         return None
-    return np.isfinite(arr)
+    mask = np.ones(arr.shape, dtype=bool)
+    if np.issubdtype(arr.dtype, np.inexact):
+        mask &= np.isfinite(arr)
+    declared = _declared_nodata(data)
+    nodata = nodata if declared is None else declared
+    if nodata is not None and not (isinstance(nodata, float) and np.isnan(nodata)):
+        mask &= arr != nodata
+    return mask
+
+
+def _declared_nodata(data: Any) -> Any:
+    """The nodata value a patch carrier declares, or None.
+
+    Unlike the padding helper's ``_carrier_nodata`` this never defaults
+    to ``0``: a carrier that declares nothing masks nothing.
+    """
+    from geopatcher._src.spatial.patcher import _is_rio_dataarray
+
+    if _is_rio_dataarray(data):
+        return getattr(data.rio, "nodata", None)
+    return getattr(data, "fill_value_default", None)
 
 
 def _validate_aggregator_names(
@@ -139,7 +168,9 @@ def _check_matched_dict(data_by_name: Any, cls_name: str, expects: str) -> None:
 
 
 def _compute_member_masks(
-    members: Mapping[str, Any], mfield: MatchedField
+    members: Mapping[str, Any],
+    mfield: MatchedField,
+    nodata: Mapping[str, Any] | None = None,
 ) -> dict[str, np.ndarray] | None:
     """Per-source validity masks for a matched patch's ``members``.
 
@@ -147,6 +178,8 @@ def _compute_member_masks(
         members: ``{name: patch}`` whose ``data`` attributes are masked.
         mfield: The originating `MatchedField`; masks are only computed
             when its ``valid_mask`` flag is truthy.
+        nodata: Optional ``{name: nodata}`` from the carriers the
+            members' bare-array data was sliced from.
 
     Returns:
         ``{name: mask}`` for members whose data is numeric and
@@ -158,7 +191,12 @@ def _compute_member_masks(
     mask_dict = {
         name: mask
         for name, patch in members.items()
-        if (mask := _compute_valid_mask(patch.data)) is not None
+        if (
+            mask := _compute_valid_mask(
+                patch.data, None if nodata is None else nodata.get(name)
+            )
+        )
+        is not None
     }
     return mask_dict or None
 
@@ -259,10 +297,11 @@ class MatchedSpatialPatcher:
 
         Per-source ``valid_mask`` arrays are computed when
         ``mfield.valid_mask`` is True (the default): for numeric
-        array-coercible data, ``np.isfinite(data)`` marks the
-        positions of NaN / inf nodata sentinels. Non-array members
-        are simply omitted from the mask dict (and the dict drops
-        to ``None`` if no member produced a mask).
+        array-coercible data a cell is invalid where it equals the
+        carrier's declared nodata (``fill_value_default`` /
+        ``rio.nodata``) or, for float data, is NaN / ±inf. Non-array
+        members are simply omitted from the mask dict (and the dict
+        drops to ``None`` if no member produced a mask).
 
         Args:
             mfield: A `MatchedField` to drive the primary sampler over.
@@ -490,9 +529,9 @@ class MatchedTemporalPatcher:
         ``indices`` and packaged into the matched carrier.
 
         Per-source ``valid_mask`` arrays are computed when
-        ``mfield.valid_mask`` is True (the default): for numeric
-        array-coercible data, ``np.isfinite(data)`` marks the
-        positions of NaN / inf nodata sentinels.
+        ``mfield.valid_mask`` is True (the default): a cell is invalid
+        where it equals the carrier's declared nodata or, for float
+        data, is NaN / ±inf.
 
         Args:
             mfield: A `MatchedField` whose ``select`` returns the
@@ -521,6 +560,7 @@ class MatchedTemporalPatcher:
         )
 
         arrays = {name: np.asarray(data) for name, data in data_by_name.items()}
+        nodata = {name: _declared_nodata(d) for name, d in data_by_name.items()}
         primary_arr = arrays[PRIMARY_KEY]
 
         for primary_patch in self.primary.split(primary_arr, time_axis, hooks=hooks):
@@ -536,7 +576,7 @@ class MatchedTemporalPatcher:
                 )
                 for name, arr in arrays.items()
             }
-            valid_mask = _compute_member_masks(members, mfield)
+            valid_mask = _compute_member_masks(members, mfield, nodata)
             yield MatchedTemporalPatch(
                 anchor=primary_patch.anchor,
                 members=members,
@@ -694,6 +734,7 @@ class MatchedSpatioTemporalPatcher:
                 data_by_name, type(self).__name__, "each spatial Patch.data to be"
             )
             arrays = {name: np.asarray(d) for name, d in data_by_name.items()}
+            nodata = {name: _declared_nodata(d) for name, d in data_by_name.items()}
             primary_arr = arrays[PRIMARY_KEY]
             time_len = int(primary_arr.shape[time_axis])
             for t_anchor in temporal.sampler.anchors(time_len):
@@ -718,7 +759,7 @@ class MatchedSpatioTemporalPatcher:
                             )
                             for name, arr in arrays.items()
                         }
-                        valid_mask = _compute_member_masks(members, mfield)
+                        valid_mask = _compute_member_masks(members, mfield, nodata)
                         matched = MatchedSpatioTemporalPatch(
                             space=sp.anchor,
                             time=int(t_anchor),
@@ -773,6 +814,7 @@ class MatchedSpatioTemporalPatcher:
                     data_by_name, type(self).__name__, "each spatial Patch.data to be"
                 )
                 arrays = {name: np.asarray(d) for name, d in data_by_name.items()}
+                nodata = {name: _declared_nodata(d) for name, d in data_by_name.items()}
                 primary_arr = arrays[PRIMARY_KEY]
                 time_len = int(primary_arr.shape[time_axis])
                 t_window = temporal.geometry.window(time_len, int(time_anchor))
@@ -800,7 +842,7 @@ class MatchedSpatioTemporalPatcher:
                         )
                         for name, arr in arrays.items()
                     }
-                    valid_mask = _compute_member_masks(members, mfield)
+                    valid_mask = _compute_member_masks(members, mfield, nodata)
                     matched = MatchedSpatioTemporalPatch(
                         space=space_anchor,
                         time=int(time_anchor),

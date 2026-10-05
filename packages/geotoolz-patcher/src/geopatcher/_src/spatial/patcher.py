@@ -2090,7 +2090,16 @@ def _finish_padded(
     boundary: str,
     pad_value: float | None,
 ) -> Any:
-    """Grow the in-domain read back to the requested window / slices."""
+    """Grow the in-domain read back to the requested window / slices.
+
+    A ``dict`` is a `MatchedField` read — every member is on the primary's
+    grid (the coregistration mapped it there), so each is padded alike.
+    """
+    if isinstance(data, dict):
+        return {
+            name: _finish_padded(value, request, sources, domain, boundary, pad_value)
+            for name, value in data.items()
+        }
     mode = "reflect" if boundary == "reflect" else "constant"
     if mode == "constant" and pad_value is not None:
         _check_pad_value(pad_value, data)

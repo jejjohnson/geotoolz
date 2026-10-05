@@ -14,10 +14,20 @@ It satisfies the existing `Field` Protocol by exposing the primary's
 ``select(indexer)`` it:
 
 1. reads the primary's data,
-2. reads each secondary's raw data at the same indexer,
+2. reads each secondary's raw data over the primary chip's
+   **geographic footprint** — for raster-shaped domains the primary's
+   pixel ``Window`` is converted to bounds in the primary's CRS and
+   back to a window on the secondary's own grid (reprojecting the
+   bounds when the CRSs differ, rounded outward), so a secondary on a
+   finer, coarser or differently-projected grid covers the whole chip,
 3. pipes the (secondary_raw, primary_data) pair through that
    secondary's coreg callable,
 4. returns a ``dict[str, data]`` keyed by source name (primary first).
+
+Non-raster domains (`GridDomain`, vector, points) have no affine
+transform to map through, so their secondaries are read with the
+primary's indexer unchanged — they must share the primary's index
+space (same grid / same rows).
 
 Because it *is* a `Field`, every existing `SpatialPatcher`
 sampler / geometry / window walks a `MatchedField` unchanged. The
@@ -36,6 +46,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
+
+from georeader import window_utils
+from rasterio.windows import Window
+
+from geopatcher._src.spatial.geometry import _is_raster_domain
 
 
 if TYPE_CHECKING:
@@ -65,10 +80,16 @@ class MatchedField:
             invoked as ``coreg[name](raw_secondary, primary_patch)``
             and its return value lands in
             ``MatchedPatch.members[name].data``.
-        valid_mask: When True, `MatchedField` computes a per-source
-            ``valid_mask`` (True = data present) and packs it on
-            the `MatchedPatch`. Useful when secondaries have
-            partial coverage (LEO swath ↔ GEO grid).
+        valid_mask: When True, the matched patchers
+            (`MatchedSpatialPatcher`, `MatchedTemporalPatcher`,
+            `MatchedSpatioTemporalPatcher`) compute a per-source
+            ``valid_mask`` (True = data present) and pack it on each
+            matched patch: False where a member equals its carrier's
+            declared nodata (``fill_value_default`` / ``rio.nodata``)
+            and, for float data, where it is NaN / ±inf. Useful when
+            secondaries have partial coverage (LEO swath ↔ GEO grid).
+            `MatchedField.select` itself returns data only, so a plain
+            `SpatialPatcher` over a `MatchedField` yields no masks.
 
     Notes:
         The set of keys in ``secondaries`` and ``coreg`` must match
@@ -147,6 +168,11 @@ class MatchedField:
         are whatever the underlying Fields' `select` returns: a
         `GeoTensor` for raster, a sub-`xarray.DataArray` for grid, etc.
 
+        Each secondary is read over the primary chip's geographic
+        footprint (see the module docstring), so the coreg callable
+        receives a raw chip covering the whole primary chip even when
+        the secondary's grid differs in resolution, origin or CRS.
+
         The per-source aligned data flows through `Patch.data` when
         a plain `SpatialPatcher` consumes a `MatchedField`. Consumers
         that want the matched-patch carrier shape go through
@@ -156,8 +182,9 @@ class MatchedField:
 
         primary_data = self.primary.select(indexer)
         result: dict[str, Any] = {PRIMARY_KEY: primary_data}
+        primary_domain = self.primary.domain
         for name, sec in self.secondaries.items():
-            raw = sec.select(indexer)
+            raw = sec.select(_footprint_indexer(indexer, primary_domain, sec.domain))
             # Coreg callable: (secondary_raw, primary_data) -> aligned.
             # The runtime contract is intentionally loose so any
             # callable — pipekit.Operator, partial, lambda — works.
@@ -175,3 +202,41 @@ class MatchedField:
         coregistration already mapped each secondary onto that grid.
         """
         return self.primary.with_data(array)
+
+
+def _footprint_indexer(indexer: Any, primary_domain: Any, secondary_domain: Any) -> Any:
+    """Map a primary indexer onto the secondary's grid by geographic footprint.
+
+    For a raster ``Window`` over two raster-shaped domains, the window's
+    bounds in the primary's CRS are converted to a window on the
+    secondary's own transform (`georeader.read.window_from_bounds`
+    reprojects the bounds when the CRSs differ, densifying the edges),
+    then rounded outward so the read covers the whole footprint. A
+    secondary on the primary's exact grid gets the indexer unchanged —
+    no float round-trip. Anything else (grid / vector / point indexers)
+    passes through: those domains carry no affine transform to map
+    through, so they must share the primary's index space.
+
+    Args:
+        indexer: The primary's indexer, as passed to ``select``.
+        primary_domain: The primary field's domain.
+        secondary_domain: The secondary field's domain.
+
+    Returns:
+        The indexer to pass to the secondary's ``select``.
+    """
+    if not isinstance(indexer, Window):
+        return indexer
+    if not (_is_raster_domain(primary_domain) and _is_raster_domain(secondary_domain)):
+        return indexer
+    if secondary_domain.transform == primary_domain.transform and (
+        window_utils.compare_crs(secondary_domain.crs, primary_domain.crs)
+    ):
+        return indexer
+    # Deferred: `georeader.read` pulls in rasterio.warp, which plain
+    # same-grid matching never needs.
+    from georeader.read import window_from_bounds
+
+    bounds = window_utils.window_bounds(indexer, primary_domain.transform)
+    window = window_from_bounds(secondary_domain, bounds, crs_bounds=primary_domain.crs)
+    return window_utils.round_outer_window(window)

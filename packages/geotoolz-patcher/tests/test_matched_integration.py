@@ -36,6 +36,7 @@ import numpy as np
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
+from rasterio.enums import Resampling
 
 from geopatcher._src.fields.raster import RasterField
 from geopatcher._src.matched import (
@@ -407,3 +408,174 @@ class TestRoundTripIdentity:
         merged = msp.merge(patches, mf)
         reconstructed = np.asarray(merged[PRIMARY_KEY])
         np.testing.assert_array_equal(reconstructed, np.asarray(original))
+
+
+# ---------------------------------------------------------------------------
+# Heterogeneous grids — secondaries read over the primary's footprint (#202)
+# ---------------------------------------------------------------------------
+
+
+def _reproject_like(raw: Any, like: Any) -> Any:
+    """`RasterToRasterLike`-style coreg: warp ``raw`` onto ``like``'s grid."""
+    from georeader.read import read_reproject_like
+
+    return read_reproject_like(raw, like, resampling=Resampling.average)
+
+
+def _tiled_patcher(size: int) -> SpatialPatcher:
+    return SpatialPatcher(
+        geometry=SpatialRectangular(size=(size, size)),
+        sampler=SpatialRegularStride(step=(size, size)),
+        window=SpatialBoxcar(),
+        aggregation=SpatialSum(),
+    )
+
+
+class TestHeterogeneousGrids:
+    def test_secondary_on_finer_grid_is_fully_covered(self) -> None:
+        # Primary: 16x16 @ 10 m. Secondary: 32x32 @ 5 m over the same
+        # extent, constant over each 2x2 block, so averaging onto the
+        # primary grid recovers the block value exactly: the aligned
+        # secondary equals ``primary + 1000`` pixel-for-pixel.
+        primary_values = _checkerboard((16, 16))
+        secondary = GeoTensor(
+            values=np.kron(primary_values + 1000.0, np.ones((2, 2), np.float32)),
+            transform=rasterio.Affine(5.0, 0.0, 500_000.0, 0.0, -5.0, 4_000_000.0),
+            crs="EPSG:32629",
+            fill_value_default=np.nan,
+        )
+        mf = MatchedField(
+            primary=RasterField(_gt(primary_values)),
+            secondaries={"s": RasterField(secondary)},
+            coreg={"s": _reproject_like},
+        )
+        patches = list(MatchedSpatialPatcher(primary=_tiled_patcher(8)).split(mf))
+        assert len(patches) == 4
+        for mp in patches:
+            prim = np.asarray(mp.members[PRIMARY_KEY].data)
+            sec = np.asarray(mp.members["s"].data)
+            assert sec.shape == prim.shape == (8, 8)
+            # No fill: the coreg received a chip over the whole footprint.
+            assert mp.valid_mask is not None
+            assert mp.valid_mask["s"].all()
+            np.testing.assert_array_equal(sec, prim + 1000.0)
+
+    def test_secondary_in_another_crs_matches_full_reprojection(self) -> None:
+        # Secondary in geographic coordinates over a far larger area than
+        # the primary: the primary's pixel window would land on the
+        # secondary's top-left corner, nowhere near the primary footprint.
+        # Reading by footprint must give exactly what reprojecting the
+        # *whole* secondary onto each primary chip gives.
+        primary = _gt(_checkerboard((16, 16)))
+        lon = np.linspace(-12.0, -6.0, 600, dtype=np.float32)
+        lat = np.linspace(39.0, 33.0, 600, dtype=np.float32)
+        secondary = GeoTensor(
+            values=(lon[None, :] * 10.0 + lat[:, None]).astype(np.float32),
+            transform=rasterio.Affine(0.01, 0.0, -12.0, 0.0, -0.01, 39.0),
+            crs="EPSG:4326",
+            fill_value_default=np.nan,
+        )
+        mf = MatchedField(
+            primary=RasterField(primary),
+            secondaries={"s": RasterField(secondary)},
+            coreg={"s": _reproject_like},
+        )
+        patches = list(MatchedSpatialPatcher(primary=_tiled_patcher(8)).split(mf))
+        assert len(patches) == 4
+        for mp in patches:
+            sec = np.asarray(mp.members["s"].data)
+            assert mp.valid_mask is not None
+            assert mp.valid_mask["s"].all()
+            expected = _reproject_like(secondary, mp.members[PRIMARY_KEY].data)
+            np.testing.assert_allclose(sec, np.asarray(expected), rtol=1e-6)
+
+    @pytest.mark.parametrize("boundary", ["pad", "reflect"])
+    def test_padding_boundaries_pad_every_member(self, boundary: str) -> None:
+        # A 6x6 primary tiled 4x4 overflows the edge: every member is
+        # padded to the full chip and the matched merge round-trips.
+        values = _checkerboard((6, 6))
+        mf = MatchedField(
+            primary=RasterField(_gt(values)),
+            secondaries={"s": RasterField(_gt(values + 1000.0))},
+            coreg={"s": lambda raw, prim: raw},
+        )
+        msp = MatchedSpatialPatcher(
+            primary=SpatialPatcher(
+                geometry=SpatialRectangular(size=(4, 4), boundary=boundary),
+                sampler=SpatialRegularStride(step=(4, 4)),
+                window=SpatialBoxcar(),
+                aggregation=SpatialSum(),
+            ),
+            secondary_aggregators={"s": SpatialSum()},
+        )
+        patches = list(msp.split(mf))
+        assert len(patches) == 4
+        for mp in patches:
+            assert np.asarray(mp.members["s"].data).shape == (4, 4)
+        merged = msp.merge(patches, mf)
+        np.testing.assert_array_equal(np.asarray(merged[PRIMARY_KEY]), values)
+        np.testing.assert_array_equal(np.asarray(merged["s"]), values + 1000.0)
+
+    def test_same_grid_secondary_gets_the_primary_window(self) -> None:
+        # Identical grids short-circuit: no float round-trip of the window.
+        seen: list[Any] = []
+
+        class _Recording(RasterField):
+            def select(self, window: Any) -> GeoTensor:
+                seen.append(window)
+                return super().select(window)
+
+        tensor = _gt(_checkerboard((8, 8)))
+        mf = MatchedField(
+            primary=RasterField(tensor),
+            secondaries={"s": _Recording(tensor)},
+            coreg={"s": lambda raw, prim: raw},
+        )
+        msp = MatchedSpatialPatcher(primary=_tiled_patcher(4))
+        windows = [mp.members[PRIMARY_KEY].indices for mp in msp.split(mf)]
+        assert seen == windows
+
+
+class TestValidMaskNodata:
+    def test_valid_mask_uses_fill_value_default(self) -> None:
+        # int16 carriers declaring nodata 0: zero cells are invalid even
+        # though they are finite.
+        values = np.zeros((4, 4), dtype=np.int16)
+        values[0, :] = 7
+        tensor = GeoTensor(
+            values=values,
+            transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
+            crs="EPSG:32629",
+            fill_value_default=0,
+        )
+        mf = MatchedField(
+            primary=RasterField(tensor),
+            secondaries={"s": RasterField(tensor)},
+            coreg={"s": lambda raw, prim: raw},
+        )
+        (mp,) = MatchedSpatialPatcher(primary=_tiled_patcher(4)).split(mf)
+        assert mp.valid_mask is not None
+        expected = np.asarray(tensor.validmask())
+        for name in (PRIMARY_KEY, "s"):
+            np.testing.assert_array_equal(mp.valid_mask[name], expected)
+        assert mp.valid_mask[PRIMARY_KEY].sum() == 4
+
+    def test_bare_array_masks_only_non_finite(self) -> None:
+        # A coreg returning a bare ndarray declares no nodata: zeros stay
+        # valid, NaN does not.
+        tensor = _gt(np.zeros((4, 4), dtype=np.float32))
+
+        def to_array(raw: Any, prim: Any) -> np.ndarray:
+            out = np.asarray(raw).copy()
+            out[0, 0] = np.nan
+            return out
+
+        mf = MatchedField(
+            primary=RasterField(tensor),
+            secondaries={"s": RasterField(tensor)},
+            coreg={"s": to_array},
+        )
+        (mp,) = MatchedSpatialPatcher(primary=_tiled_patcher(4)).split(mf)
+        assert mp.valid_mask is not None
+        assert mp.valid_mask["s"].sum() == 15
+        assert not mp.valid_mask["s"][0, 0]
