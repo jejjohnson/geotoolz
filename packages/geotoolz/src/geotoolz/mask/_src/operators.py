@@ -20,7 +20,7 @@ from georeader import rasterize
 from pipekit import Operator
 
 from geotoolz._src.config import jsonable, nested_config
-from geotoolz._src.geo import grid_matches
+from geotoolz._src.geo import grid_matches, ground_pixel_size, require_projected_crs
 from geotoolz._src.valid import carried_fill, carrier_fill_value, wrap_filled
 from geotoolz._src.wrap import wrap_like
 from geotoolz.mask._src.array import (
@@ -159,7 +159,9 @@ class DistanceMask(PolygonMask):
     """Mask pixels by their distance from a geometry (True = drop).
 
     Rasterizes the geometry onto the carrier grid, then buffers it by
-    ``distance`` (CRS units, using the carrier pixel size; see
+    ``distance`` (CRS units, using the carrier's ground pixel steps
+    ``hypot(a, d)`` / ``hypot(b, e)`` so rotated grids measure true
+    distances; sheared grids raise ``ValueError``; see
     :func:`geotoolz.mask.distance_mask`). Geo-dependent: requires a
     georeferenced ``GeoTensor`` input.
 
@@ -197,7 +199,7 @@ class DistanceMask(PolygonMask):
             burned,
             self.distance,
             keep=self.keep,
-            pixel_size=_pixel_size(gt),
+            pixel_size=ground_pixel_size(gt.transform, type(self).__name__),
         )
         return wrap_like(gt, mask, fill_value_default=False)
 
@@ -406,9 +408,12 @@ class SlopeMask(Operator):
     """Build a boolean mask from DEM slope bounds in degrees.
 
     Slope is computed from the DEM with central differences scaled by
-    the DEM pixel size. Follows the package polarity (True = drop): with
-    the default ``keep="inside"`` the mask is True where the slope
-    (degrees) falls *outside* the requested interval. Geo-dependent on
+    the DEM's ground pixel steps (``hypot(a, d)`` / ``hypot(b, e)``, so
+    rotated grids measure true distances; sheared grids are rejected).
+    The DEM must be in a projected CRS: a geographic DEM's pixel size is
+    in degrees and raises ``ValueError``. Follows the package polarity
+    (True = drop): with the default ``keep="inside"`` the mask is True
+    where the slope (degrees) falls *outside* the requested interval. Geo-dependent on
     the DEM side: the DEM must be a georeferenced ``GeoTensor`` (its
     transform supplies the pixel size). The carrier may be a GeoTensor or
     plain ndarray; when both are georeferenced, their transform/CRS must
@@ -443,9 +448,10 @@ class SlopeMask(Operator):
         self.keep = _check_keep(keep, "SlopeMask")
 
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        require_projected_crs(self.dem, "SlopeMask", what="slopes", metres=False)
         mask = slope_mask(
             np.asarray(self.dem),
-            _pixel_size(self.dem),
+            ground_pixel_size(self.dem.transform, "SlopeMask"),
             min_slope_deg=self.min_slope_deg,
             max_slope_deg=self.max_slope_deg,
             keep=self.keep,
@@ -573,8 +579,9 @@ class BufferMask(Operator):
     (default) the op is metadata-free and accepts a GeoTensor or a
     plain ndarray, returning the same carrier kind. With
     ``unit="meters"`` the op is geo-dependent: the input must be a
-    georeferenced ``GeoTensor`` whose transform supplies the pixel
-    size, and ``radius`` is measured in CRS units.
+    georeferenced ``GeoTensor`` whose transform supplies the ground
+    pixel steps (rotated grids are measured correctly, sheared grids
+    raise ``ValueError``), and ``radius`` is measured in CRS units.
 
     Args:
         radius: Buffer distance, in pixels or CRS units per ``unit``.
@@ -595,7 +602,7 @@ class BufferMask(Operator):
                     "BufferMask(unit='meters') requires a GeoTensor with a "
                     f"transform; got {type(mask).__name__}."
                 )
-            pixel_size = _pixel_size(mask)
+            pixel_size = ground_pixel_size(mask.transform, "BufferMask")
         else:
             pixel_size = (1.0, 1.0)
         out = buffer_mask(
@@ -927,11 +934,6 @@ def _safe_extract_zip(zf: ZipFile, extract_dir: Path) -> None:
                 f"refusing to extract unsafe zip member {member.filename!r}"
             )
     zf.extractall(extract_root)
-
-
-def _pixel_size(gt: Any) -> tuple[float, float]:
-    transform = gt.transform
-    return (abs(float(transform.e)), abs(float(transform.a)))
 
 
 def _check_spatial_match(mask: np.ndarray, gt: GeoTensor, name: str) -> None:

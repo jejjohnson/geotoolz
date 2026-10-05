@@ -491,7 +491,7 @@ def test_dem_masks_reject_mismatched_grid() -> None:
     flat_dem = GeoTensor(
         values=np.ones((4, 4), dtype=np.float32) * 100.0,
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
-        crs="EPSG:4326",
+        crs="EPSG:32629",
         fill_value_default=-9999,
     )
     flat_scene = _toy_geotensor(np.zeros((4, 4), dtype=np.float32))
@@ -683,15 +683,50 @@ def test_distance_mask_on_non_square_pixels_matches_ground_distance() -> None:
     assert not out[3, 4] and out[2, 4]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "DistanceMask measures distance with |a| / |e| as the pixel size, "
-        "so a rotated grid (|a| = 8.66 for 10 m pixels) keeps pixels beyond "
-        "`distance` (found by #166's rotated grid)"
-    ),
-)
 def test_distance_mask_on_a_rotated_grid_matches_ground_distance() -> None:
     out, expected = _distance_mask_on("rotated")
     np.testing.assert_array_equal(out, expected)
+
+
+def test_buffer_mask_meters_on_a_rotated_grid_matches_ground_distance() -> None:
+    """|a| = |e| = 8.66 on the rotated 10 m grid: the old pixel size kept
+    25 pixels within 25 m of the centre where the ground distance keeps 21.
+    """
+    seed = np.zeros((9, 9), dtype=bool)
+    seed[4, 4] = True
+    mask = toy_geotensor(seed, grid="rotated")
+    out = np.asarray(BufferMask(radius=25.0, unit="meters")(mask))
+    expected = ~_distance_reference(mask.transform, (9, 9), 25.0)
+    np.testing.assert_array_equal(out, expected)
+    assert out.sum() == 21
+
+
+def test_slope_mask_on_a_rotated_grid_uses_ground_pixel_steps() -> None:
+    """z = 5 (row + col) m on 10 m pixels is a 35.3 deg slope however the
+    grid is rotated; |a| / |e| (8.66 m) would read 39.2 deg.
+    """
+    dem_values = np.add.outer(np.arange(8.0), np.arange(8.0)) * 5.0
+    dem = toy_geotensor(dem_values, grid="rotated")
+    scene = toy_geotensor(np.ones((1, 8, 8)), grid="rotated")
+    assert not np.any(np.asarray(SlopeMask(dem=dem, max_slope_deg=37.0)(scene)))
+    assert np.all(np.asarray(SlopeMask(dem=dem, max_slope_deg=34.0)(scene)))
+
+
+def test_ground_distance_masks_reject_a_sheared_grid() -> None:
+    scene = toy_geotensor(np.ones((1, 9, 9)), grid="sheared")
+    seed = toy_geotensor(np.ones((9, 9), dtype=bool), grid="sheared")
+    dem = toy_geotensor(np.zeros((9, 9)), grid="sheared")
+    centre = Point(*(scene.transform * (4.5, 4.5)))
+    with pytest.raises(ValueError, match=r"DistanceMask.*sheared"):
+        DistanceMask(geometry=centre, distance=25.0)(scene)
+    with pytest.raises(ValueError, match=r"BufferMask.*sheared"):
+        BufferMask(radius=25.0, unit="meters")(seed)
+    with pytest.raises(ValueError, match=r"SlopeMask.*sheared"):
+        SlopeMask(dem=dem, max_slope_deg=1.0)(scene)
+
+
+def test_slope_mask_rejects_a_geographic_dem() -> None:
+    dem = toy_geotensor(np.zeros((8, 8)), grid="geographic")
+    scene = toy_geotensor(np.ones((1, 8, 8)), grid="geographic")
+    with pytest.raises(ValueError, match=r"SlopeMask.*projected CRS"):
+        SlopeMask(dem=dem, max_slope_deg=10.0)(scene)

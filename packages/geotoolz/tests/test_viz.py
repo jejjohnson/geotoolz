@@ -792,15 +792,29 @@ def test_hillshade_reads_non_square_pixel_sizes_from_the_transform() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason=(
-        "Hillshade accepts a geographic CRS: degree pixel sizes against metre "
-        "elevations give meaningless slopes (found by #166's geographic grid)"
-    ),
-)
 def test_hillshade_rejects_a_geographic_crs() -> None:
     dem = toy_geotensor(_plane(5.0, 5.0, n=8), grid="geographic")
-    with pytest.raises(ValueError, match="projected"):
+    with pytest.raises(ValueError, match=r"Hillshade.*projected"):
         Hillshade()(dem)
+    with pytest.raises(ValueError, match=r"Hillshade.*projected"):
+        ShadedRelief()(dem)
+    # Explicit resolutions are the caller's statement of the units.
+    out = Hillshade(x_resolution=10.0, y_resolution=10.0)(dem)
+    np.testing.assert_array_equal(
+        np.asarray(out),
+        hillshade(np.asarray(dem), x_resolution=10.0, y_resolution=10.0),
+    )
+
+
+def test_hillshade_reads_ground_pixel_steps_on_a_rotated_grid() -> None:
+    """The rotated 10 m grid has |a| = |e| = 8.66; the steps are still 10 m."""
+    dem = _plane(5.0, 2.0, n=8)
+    out = Hillshade()(toy_geotensor(dem, grid="rotated"))
+    np.testing.assert_array_equal(
+        np.asarray(out), hillshade(dem, x_resolution=10.0, y_resolution=10.0)
+    )
+
+
+def test_hillshade_rejects_a_sheared_grid() -> None:
+    with pytest.raises(ValueError, match=r"Hillshade.*sheared"):
+        Hillshade()(toy_geotensor(_plane(5.0, 2.0, n=8), grid="sheared"))

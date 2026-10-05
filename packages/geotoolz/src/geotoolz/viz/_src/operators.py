@@ -50,7 +50,11 @@ from geotoolz._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
-from geotoolz._src.geo import require_geotensor
+from geotoolz._src.geo import (
+    ground_pixel_size,
+    require_geotensor,
+    require_projected_crs,
+)
 from geotoolz._src.optional import import_optional
 from geotoolz._src.shape import over_frames
 from geotoolz._src.valid import (
@@ -440,7 +444,12 @@ class Hillshade(Operator):
     a sun position (azimuth + altitude). The output is a single-band
     ``(H, W)`` ``uint8`` raster, ready to compose with a colour relief
     (see `ShadedRelief`). Pixel sizes come from the carrier's
-    ``transform`` so units are correct in physical projections.
+    ``transform`` as ground step lengths (``hypot(a, d)`` /
+    ``hypot(b, e)``), so units are correct in physical projections and on
+    rotated grids (the azimuth is then relative to the grid's "up"
+    direction); a sheared grid or a geographic CRS (degree pixel sizes
+    against linear elevations) raises ``ValueError`` -- reproject first,
+    or pass both resolutions explicitly.
     Geo-dependent by default: plain ``np.ndarray`` DEMs are accepted
     only when ``x_resolution`` and ``y_resolution`` are given
     explicitly; otherwise a ``TypeError`` is raised. Nodata DEM pixels
@@ -489,10 +498,12 @@ class Hillshade(Operator):
                 hint="Pass x_resolution/y_resolution explicitly to hillshade "
                 "plain arrays.",
             ).transform
+            require_projected_crs(gt, "Hillshade", what="slopes", metres=False)
+            row_step, col_step = ground_pixel_size(transform, "Hillshade")
             if x_resolution is None:
-                x_resolution = float(abs(transform.a))
+                x_resolution = col_step
             if y_resolution is None:
-                y_resolution = float(abs(transform.e))
+                y_resolution = row_step
         out = hillshade(
             np.asarray(gt),
             x_resolution=x_resolution,
@@ -514,7 +525,8 @@ class ShadedRelief(Operator):
     Alpha channel is preserved from the colormap, so nodata DEM pixels
     stay fully transparent (see `ApplyColormap` / `Hillshade`). Geo-dependent: the
     hillshade pixel size comes from the carrier's ``transform``, so a
-    georeferenced GeoTensor input is required.
+    georeferenced GeoTensor input in a projected CRS is required (a
+    geographic CRS raises ``ValueError``; see `Hillshade`).
 
     Args:
         azimuth_deg: Sun azimuth (degrees clockwise from north).
