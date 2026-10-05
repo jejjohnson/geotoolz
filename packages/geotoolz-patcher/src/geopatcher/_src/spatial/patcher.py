@@ -227,7 +227,7 @@ class SpatialPatcher:
                     continue
                 patch = self._cached_patch(cache_ctx, domain, anchor)
                 if patch is None:
-                    patch = _build_patch_with_policy(
+                    patch, read_ok = _build_patch_with_policy(
                         field=field,
                         domain=domain,
                         anchor=anchor,
@@ -240,7 +240,8 @@ class SpatialPatcher:
                         errors=self.errors,
                         capture_traceback=self.capture_traceback,
                     )
-                    self._store_patch(cache_ctx, anchor, patch)
+                    if read_ok:
+                        self._store_patch(cache_ctx, anchor, patch)
                 if patch is not None:
                     release = _acquire_backpressure(patch, slots, byte_budget)
                     if release is not None:
@@ -262,7 +263,7 @@ class SpatialPatcher:
                 try:
                     patch = cached
                     if patch is None:
-                        patch = _build_patch_with_policy(
+                        patch, read_ok = _build_patch_with_policy(
                             field=field,
                             domain=domain,
                             anchor=anchor,
@@ -275,7 +276,8 @@ class SpatialPatcher:
                             errors=self.errors,
                             capture_traceback=self.capture_traceback,
                         )
-                        self._store_patch(cache_ctx, anchor, patch)
+                        if read_ok:
+                            self._store_patch(cache_ctx, anchor, patch)
                 except Exception as exc:
                     _dispatch(hook_list, "on_error", anchor, exc)
                     raise
@@ -1212,15 +1214,23 @@ def _build_patch_with_policy(
     retry_on: tuple[type[BaseException] | str, ...],
     errors: list[PatchErrorRecord],
     capture_traceback: bool = True,
-) -> Patch | None:
+) -> tuple[Patch | None, bool]:
+    """Read one anchor under the ``on_error`` policy.
+
+    Returns ``(patch, read_ok)``: ``read_ok`` is ``True`` only when the
+    patch came from a successful ``field.select``. A ``"mask"``
+    placeholder (or a skipped ``None``) is ``False`` so callers never
+    persist it in a `PatchCache`.
+    """
     retries = max_retries if on_error == "retry" else 0
     indices = geometry.neighborhood(domain, anchor)
     pad_value = getattr(geometry, "pad_value", None)
     for retry_count in range(retries + 1):
         try:
-            return _build_patch_from_indices(
+            patch = _build_patch_from_indices(
                 field, domain, anchor, indices, base_weights, boundary, pad_value
             )
+            return patch, True
         except Exception as exc:
             # Preserve KeyboardInterrupt/SystemExit by handling only Exception.
             if isinstance(exc, StopIteration):
@@ -1229,16 +1239,18 @@ def _build_patch_with_policy(
                 raise
             _record_patch_error(errors, anchor, exc, retry_count, capture_traceback)
             if on_error == "mask":
-                return _build_mask_patch(
+                placeholder = _build_mask_patch(
                     domain, anchor, indices, base_weights, boundary
                 )
+                return placeholder, False
             if on_error == "retry":
                 if not _matches_retry_on(exc, retry_on):
                     raise
                 if retry_count < retries:
                     continue
-                return None
-            return None
+                return None, False
+            return None, False
+    return None, False
 
 
 async def _build_patch_async_with_policy(

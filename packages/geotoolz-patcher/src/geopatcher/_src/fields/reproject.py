@@ -12,6 +12,7 @@ the destination window back to source pixels per chip.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -173,6 +174,38 @@ class ReprojectingRasterField:
             self.reader, src_window, trigger_load=True, boundless=False
         )
         return self.reader if cropped is None else cropped
+
+    def cache_id(self) -> str:
+        """`PatchCache` identity: the source plus the warp parameters.
+
+        Folds in the source reader's identity (``None`` for an in-memory
+        source — `PatchCache` then requires an explicit ``field_id``),
+        ``dst_crs``, ``resolution`` and ``resampling``, so two
+        reprojections of one source never share cache entries.
+
+        Examples:
+            >>> f = ReprojectingRasterField(RasterioReader("a.tif"), "EPSG:3857")
+            >>> f.cache_id()
+            '{"dst_crs": "EPSG:3857", "resampling": "bilinear", ...}'
+            >>> ReprojectingRasterField(geotensor, "EPSG:3857").cache_id()
+            '{"dst_crs": "EPSG:3857", ..., "source": null}'
+        """
+        from geopatcher._src.cache import _crs_text, _source_id
+
+        resolution = self.resolution
+        if isinstance(resolution, (tuple, list)):
+            resolution = [float(r) for r in resolution]
+        elif resolution is not None:
+            resolution = float(resolution)
+        return json.dumps(
+            {
+                "source": _source_id(self.reader),
+                "dst_crs": _crs_text(self.dst_crs),
+                "resolution": resolution,
+                "resampling": self.resampling,
+            },
+            sort_keys=True,
+        )
 
     def with_data(self, array: Any) -> GeoTensor:
         return _rewrap(self.reader, array, self._transform, self.dst_crs)

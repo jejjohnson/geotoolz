@@ -79,6 +79,7 @@ this module unless the name is actually accessed).
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import threading
 import warnings
@@ -450,6 +451,14 @@ def _crs_from_geokeys(geo_keys: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _store_identity(store: Any) -> str:
+    """Printable configuration of an obstore store, else its type name."""
+    text = repr(store)
+    if " object at 0x" in text:
+        return type(store).__qualname__
+    return text
+
+
 def _reopen(url: str, options: dict[str, Any]) -> ObstoreCogField:
     """Unpickle hook: re-open the COG by URL (see `ObstoreCogField.__reduce__`)."""
     return ObstoreCogField.from_url(url, **options)
@@ -612,6 +621,34 @@ class ObstoreCogField:
             options["store"] = self.store
             options["path"] = self.path
         return (_reopen, (self.url, options))
+
+    def cache_id(self) -> str:
+        """`PatchCache` identity: the object read and the IFD.
+
+        With the process pool the object is the ``url``; with an explicit
+        ``store`` the ``url`` is only a label, so the identity is the
+        store's printable configuration (e.g. ``LocalStore("/data")``)
+        plus ``path``. A store without one (``MemoryStore``) is
+        identified by its type and ``path`` only.
+
+        Examples:
+            >>> ObstoreCogField.from_url("s3://b/k.tif").cache_id()
+            '{"ifd_index": 0, "path": null, "store": null, "url": "s3://b/k.tif"}'
+            >>> ObstoreCogField.from_url(
+            ...     "file:///d/k.tif", store=LocalStore("/d"), path="k.tif", ifd_index=1
+            ... ).cache_id()
+            '{"ifd_index": 1, "path": "k.tif", "store": "LocalStore(...)", "url": null}'
+        """
+        explicit = self.store is not None
+        return json.dumps(
+            {
+                "url": None if explicit else self.url,
+                "store": _store_identity(self.store) if explicit else None,
+                "path": self.path if explicit else None,
+                "ifd_index": int(self.ifd_index),
+            },
+            sort_keys=True,
+        )
 
     @property
     def fill_value_default(self) -> float | int:
