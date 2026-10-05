@@ -390,6 +390,7 @@ def generic_from_2d(
     samples: xr.Coordinates,
     *,
     new_feature_dim: Hashable,
+    feature_coord: np.ndarray | None = None,
     name: Hashable | None = None,
     attrs: dict[str, Any] | None = None,
 ) -> xr.DataArray:
@@ -404,6 +405,8 @@ def generic_from_2d(
         sample_dim: The sample dimension.
         samples: Sample-axis coordinates.
         new_feature_dim: Name of the output feature dimension.
+        feature_coord: Labels for ``new_feature_dim``; defaults to
+            ``0 … k-1``.
         name: Output name.
         attrs: Output attrs.
 
@@ -419,7 +422,11 @@ def generic_from_2d(
         out = xr.DataArray(
             arr,
             dims=(sample_dim, new_feature_dim),
-            coords={new_feature_dim: np.arange(arr.shape[1])},
+            coords={
+                new_feature_dim: np.arange(arr.shape[1])
+                if feature_coord is None
+                else feature_coord
+            },
             name=name,
             attrs=attrs or {},
         )
@@ -435,3 +442,88 @@ def generic_from_2d(
         if name == new_feature_dim or new_feature_dim in coord.dims
     ]
     return out.assign_coords(samples.to_dataset().drop_vars(clash).coords)
+
+
+def dataset_from_2d(
+    arr: np.ndarray,
+    layout: DatasetLayout,
+    samples: xr.Coordinates,
+    *,
+    dims: dict[Hashable, tuple[Hashable, ...]] | None = None,
+) -> xr.Dataset:
+    """Rebuild a Dataset on the fit-time grid (inverse of :func:`to_2d`).
+
+    Args:
+        arr: ``(n_samples, layout.n_features)`` array.
+        layout: The Dataset layout to restore; ``layout.bounds`` says which
+            columns belong to which variable.
+        samples: Sample-axis coordinates.
+        dims: Per-variable output dim order; defaults to each variable's
+            fit-time order.
+
+    Returns:
+        A Dataset with one variable per ``layout.variables`` entry, each on
+        its own fit-time grid, and the fit-time Dataset attrs.
+    """
+    dims = dims or {}
+    variables = {
+        name: grid_from_2d(arr[:, lo:hi], sub, samples, dims=dims.get(name))
+        for name, sub, lo, hi in zip(
+            layout.variables,
+            layout.arrays,
+            layout.bounds[:-1],
+            layout.bounds[1:],
+            strict=True,
+        )
+    }
+    return xr.Dataset(variables, attrs=dict(layout.attrs))
+
+
+def matches(obj: xr.DataArray | xr.Dataset, layout: Layout) -> bool:
+    """Whether ``obj`` plausibly lives on ``layout``'s feature grid.
+
+    A cheap structural check (same kind, same feature dims / variables) used
+    to decide whether an input is in the fit-time feature space at all —
+    e.g. ``inverse_transform`` receives either grid-shaped data (from a
+    scaler) or component scores (from PCA). A match is then verified in
+    full by :func:`conform_array` / :func:`conform_dataset`.
+
+    Args:
+        obj: The input.
+        layout: A fit-time layout.
+
+    Returns:
+        ``True`` if ``obj`` has the layout's kind and feature structure.
+    """
+    if isinstance(layout, DatasetLayout):
+        return (
+            isinstance(obj, xr.Dataset)
+            and set(obj.data_vars) == set(layout.variables)
+            and all(
+                _array_matches(obj[name], arr)
+                for name, arr in zip(layout.variables, layout.arrays, strict=True)
+            )
+        )
+    return isinstance(obj, xr.DataArray) and _array_matches(obj, layout)
+
+
+def _array_matches(da: xr.DataArray, layout: ArrayLayout) -> bool:
+    """Dim names *and* sizes match, and so do the labels of shared indexes.
+
+    Names alone are not enough: PCA scores on ``(time, component)`` share
+    their dim names with training data that had a ``component`` feature dim.
+    """
+    if layout.sample_dim not in da.dims:
+        return False
+    if {d for d in da.dims if d != layout.sample_dim} != set(layout.feature_dims):
+        return False
+    fit_indexes = layout.feature_coords.xindexes
+    for dim, size in zip(layout.feature_dims, layout.feature_shape, strict=True):
+        if da.sizes[dim] != size:
+            return False
+        if dim in fit_indexes and dim in da.indexes:
+            got = da.indexes[dim]
+            expected = layout.feature_coords[dim].to_index()
+            if not got.sort_values().equals(expected.sort_values()):
+                return False
+    return True

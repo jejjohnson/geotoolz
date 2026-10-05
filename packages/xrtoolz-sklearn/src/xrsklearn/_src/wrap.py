@@ -28,7 +28,7 @@ from typing import Any, Literal, get_args
 import numpy as np
 import pandas as pd
 import xarray as xr
-from sklearn.base import BaseEstimator, clone
+from sklearn.base import BaseEstimator, clone, is_classifier, is_regressor
 from sklearn.utils.metaestimators import available_if
 
 from xrsklearn._src.layout import (
@@ -38,15 +38,20 @@ from xrsklearn._src.layout import (
     array_layout,
     conform_array,
     conform_dataset,
+    dataset_from_2d,
     dataset_layout,
     generic_from_2d,
     grid_from_2d,
+    matches,
     sample_coords,
     to_2d,
 )
 
 
 NanPolicy = Literal["propagate", "raise", "mask"]
+
+#: Dimension name of ``predict_proba`` outputs, labeled by ``classes_``.
+CLASS_DIM = "class"
 
 # Methods exposed only when the wrapped estimator implements them.
 _GATED_VERBS = frozenset(
@@ -70,7 +75,7 @@ class _Batch:
     sample_dim: Hashable | None = None
     samples: xr.Coordinates | None = None
     sample_index: pd.Index | None = None
-    in_dims: tuple[Hashable, ...] | None = None
+    in_dims: tuple[Hashable, ...] | dict[Hashable, tuple[Hashable, ...]] | None = None
     name: Hashable | None = None
     attrs: dict[str, Any] | None = None
     valid: np.ndarray | None = None
@@ -132,15 +137,46 @@ def _align_y(y: xr.DataArray, batch: _Batch) -> xr.DataArray:
     )
 
 
-def _y_to_numpy(y: xr.DataArray | xr.Dataset, batch: _Batch) -> np.ndarray:
-    """Flatten an aligned xarray target to ``(n_samples,)`` or ``(n_samples, k)``."""
+def _marshal_y(
+    y: xr.DataArray | xr.Dataset, batch: _Batch
+) -> tuple[np.ndarray, Layout]:
+    """Align an xarray target to ``X`` and flatten it.
+
+    Returns:
+        ``(values, layout)`` — ``values`` is ``(n_samples,)`` for a 1-D
+        DataArray target and ``(n_samples, k)`` otherwise; ``layout`` is
+        the target's grid, used to label ``predict`` outputs.
+    """
+    sample_dim = batch.sample_dim
+    assert sample_dim is not None
     if isinstance(y, xr.Dataset):
-        cols = [_y_to_numpy(y[name], batch) for name in y.data_vars]
-        return np.column_stack([c if c.ndim == 2 else c[:, None] for c in cols])
-    y = _align_y(y, batch)
-    extra = [d for d in y.dims if d != batch.sample_dim]
-    values = np.asarray(y.transpose(batch.sample_dim, *extra).values)
-    return values.reshape(values.shape[0], -1) if extra else values
+        aligned = xr.Dataset(
+            {name: _align_y(y[name], batch) for name in y.data_vars}, attrs=y.attrs
+        )
+        layout: Layout = dataset_layout(aligned, sample_dim)
+        return to_2d(conform_dataset(aligned, layout, where="y"), layout), layout
+    aligned = _align_y(y, batch)
+    layout = array_layout(aligned, sample_dim)
+    values = to_2d(aligned.transpose(sample_dim, *layout.feature_dims), layout)
+    return (values if layout.feature_dims else values[:, 0]), layout
+
+
+def _keeps_features(estimator: Any, n_in: int, out: np.ndarray) -> bool:
+    """Whether a ``transform`` output column ``i`` is input feature ``i``.
+
+    sklearn's feature-name API answers this exactly: one-to-one
+    transformers (scalers, imputers that drop nothing, …) report their
+    input names ``x0 … x{n-1}``, while reducers report their own
+    (``pca0``, ``kmeans0``, …) — even when ``n_components == n_features``.
+    Estimators without the API fall back to comparing column counts.
+    """
+    if out.ndim != 2 or out.shape[1] != n_in:
+        return False
+    try:
+        names = estimator.get_feature_names_out()
+    except Exception:  # no feature-name support — best effort by shape
+        return True
+    return [str(n) for n in names] == [f"x{i}" for i in range(n_in)]
 
 
 def _estimator_has(*names: str) -> Callable[[XarrayEstimator], bool]:
@@ -357,8 +393,8 @@ class XarrayEstimator(BaseEstimator):
             x: The input.
             conform: Check ``x`` against (and reorder it to) the fit-time
                 layout. True for inputs in the training feature space;
-                False for ``fit`` itself and for ``inverse_transform``,
-                whose input lives in the estimator's *output* space.
+                False for ``fit`` itself and for ``inverse_transform``
+                inputs that live in the estimator's *output* space.
 
         Returns:
             The marshalled batch. NumPy inputs pass through unlabeled.
@@ -372,9 +408,9 @@ class XarrayEstimator(BaseEstimator):
             )
         sample_dim = self._resolve_sample_dim(x)
         fitted = self.__dict__.get("layout_") if conform else None
-        in_dims = tuple(x.dims) if isinstance(x, xr.DataArray) else None
         layout: Layout
         if isinstance(x, xr.DataArray):
+            in_dims: Any = tuple(x.dims)
             if isinstance(fitted, DatasetLayout):
                 raise TypeError("Estimator was fit on a Dataset; got a DataArray.")
             if isinstance(fitted, ArrayLayout):
@@ -383,6 +419,7 @@ class XarrayEstimator(BaseEstimator):
                 layout = array_layout(x, sample_dim)
                 x = x.transpose(sample_dim, *layout.feature_dims)
         else:
+            in_dims = {name: tuple(var.dims) for name, var in x.data_vars.items()}
             if isinstance(fitted, ArrayLayout):
                 raise TypeError("Estimator was fit on a DataArray; got a Dataset.")
             if isinstance(fitted, DatasetLayout):
@@ -437,8 +474,12 @@ class XarrayEstimator(BaseEstimator):
         self,
         y: xr.DataArray | xr.Dataset | np.ndarray | None,
         batch: _Batch,
-    ) -> np.ndarray | None:
+    ) -> tuple[np.ndarray | None, Layout | None]:
         """Marshal ``y`` to numpy, aligned to and masked like ``X``.
+
+        Returns:
+            ``(values, layout)`` — ``layout`` is the target's grid when
+            ``y`` is an xarray object, else ``None``.
 
         Raises:
             TypeError: If ``X`` was NumPy but ``y`` is an xarray object.
@@ -446,67 +487,147 @@ class XarrayEstimator(BaseEstimator):
                 sample axis.
         """
         if y is None:
-            return None
+            return None, None
+        layout: Layout | None = None
         if isinstance(y, xr.DataArray | xr.Dataset):
             if batch.sample_dim is None:
                 raise TypeError(
                     "When x is a NumPy array, y must also be a NumPy array or "
                     "None; xarray y requires a sample dimension carried on x."
                 )
-            y_np = _y_to_numpy(y, batch)
+            y_np, layout = _marshal_y(y, batch)
         else:
             y_np = np.asarray(y)
         if batch.valid is not None:
             y_np = y_np[batch.valid]
-        return y_np
+        return y_np, layout
 
-    def _label(
+    # ---------- output labeling -------------------------------------------
+    #
+    # Each verb knows which space its output lives in, so the layout is
+    # chosen per method rather than guessed from the column count:
+    #
+    #   transform          input grid if one-to-one (``_keeps_features``),
+    #                      else (sample_dim, new_feature_dim)
+    #   inverse_transform  the fit-time input grid
+    #   predict            the fit-time *target* grid (from an xarray ``y``)
+    #   predict_proba      (sample_dim, "class") labeled by ``classes_``
+
+    def _features(
+        self,
+        out: np.ndarray,
+        batch: _Batch,
+        layout: Layout,
+        dims: Any = None,
+    ) -> xr.DataArray | xr.Dataset:
+        """Label an output that lives on ``layout``'s feature grid."""
+        assert batch.samples is not None
+        if isinstance(layout, DatasetLayout):
+            return dataset_from_2d(
+                out,
+                layout,
+                batch.samples,
+                dims=dims if isinstance(dims, dict) else None,
+            )
+        return grid_from_2d(
+            out, layout, batch.samples, dims=dims if isinstance(dims, tuple) else None
+        )
+
+    def _generic(
         self,
         out: np.ndarray,
         batch: _Batch,
         *,
-        grid: ArrayLayout | None = None,
-        dims: tuple[Hashable, ...] | None = None,
-        input_meta: bool = True,
-    ) -> xr.DataArray | np.ndarray:
-        """Turn an estimator output back into a labeled array.
-
-        Args:
-            out: The raw estimator output.
-            batch: The batch the output was computed from.
-            grid: Feature grid to restore when ``out`` has one column per
-                grid feature. ``None`` always yields the generic layout.
-            dims: Output dim order for the grid path.
-            input_meta: On the grid path, label the output with the input's
-                name and attrs (forward methods). ``False`` keeps the
-                grid's own fit-time metadata (``inverse_transform``).
-        """
-        out = _restore_masked_samples(np.asarray(out), batch.valid)
-        if batch.layout is None:
-            return out
+        feature_dim: Hashable | None = None,
+        feature_coord: np.ndarray | None = None,
+        name: Hashable | None = None,
+        attrs: dict[str, Any] | None = None,
+    ) -> xr.DataArray:
+        """Label an output that left the input feature grid."""
         assert batch.sample_dim is not None and batch.samples is not None
-        if grid is not None and out.ndim == 2 and out.shape[1] == grid.n_features:
-            result = grid_from_2d(out, grid, batch.samples, dims=dims)
-            if input_meta:
-                result = result.rename(batch.name)
-                result.attrs = dict(batch.attrs)
-            return result
         return generic_from_2d(
             out,
             batch.sample_dim,
             batch.samples,
-            new_feature_dim=self.new_feature_dim,
-            name=batch.name,
-            attrs=batch.attrs,
+            new_feature_dim=self.new_feature_dim
+            if feature_dim is None
+            else feature_dim,
+            feature_coord=feature_coord,
+            name=name,
+            attrs=attrs,
         )
 
-    def _same_grid(self, batch: _Batch) -> ArrayLayout | None:
-        """The input's own grid, for outputs that may keep it (DataArray only)."""
-        return batch.layout if isinstance(batch.layout, ArrayLayout) else None
+    def _label_transform(
+        self, out: Any, batch: _Batch
+    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+        out = np.asarray(out)
+        keeps = _keeps_features(self.estimator_, batch.arr.shape[1], out)
+        out = _restore_masked_samples(out, batch.valid)
+        if batch.layout is None:
+            return out
+        if keeps:
+            result = self._features(out, batch, batch.layout, batch.in_dims)
+            if isinstance(result, xr.DataArray):
+                # batch.layout is the fit-time grid; the metadata is the input's.
+                result = result.rename(batch.name)
+                result.attrs = dict(batch.attrs)
+            return result
+        # Reduced output of a DataArray keeps its identity (name, attrs);
+        # for a Dataset there is no single variable to inherit them from.
+        return self._generic(out, batch, name=batch.name, attrs=batch.attrs)
 
-    def _record_fit(self, batch: _Batch) -> None:
+    def _label_inverse(
+        self, out: Any, batch: _Batch
+    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+        out = _restore_masked_samples(np.asarray(out), batch.valid)
+        train = self.__dict__.get("layout_")
+        if batch.layout is None:
+            return out
+        if train is not None and out.ndim == 2 and out.shape[1] == train.n_features:
+            # Feature grid from training, sample axis from the input — which
+            # may cover a different period than the training set.
+            return self._features(out, batch, train)
+        return self._generic(out, batch, name=batch.name, attrs=batch.attrs)
+
+    def _label_target(
+        self, out: Any, batch: _Batch
+    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+        out = _restore_masked_samples(np.asarray(out), batch.valid)
+        if batch.layout is None:
+            return out
+        target = self.__dict__.get("target_layout_")
+        columns = out[:, None] if out.ndim == 1 else out
+        if target is not None and columns.shape[1] == target.n_features:
+            return self._features(columns, batch, target)
+        # No labeled target (unsupervised ``predict``, or NumPy ``y``): the
+        # result is not in the input's units, so it inherits no attrs.
+        return self._generic(out, batch)
+
+    def _label_proba(
+        self, out: Any, batch: _Batch, classes: Any
+    ) -> xr.DataArray | np.ndarray:
+        out = _restore_masked_samples(np.asarray(out), batch.valid)
+        if batch.layout is None:
+            return out
+        coord = None
+        if classes is not None and len(classes) == out.shape[1]:
+            coord = np.asarray(classes)
+        if batch.sample_dim == CLASS_DIM:
+            raise ValueError(
+                f"predict_proba labels classes along a {CLASS_DIM!r} dim, which "
+                f"clashes with sample_dim={CLASS_DIM!r}; rename the sample "
+                "dimension first."
+            )
+        return self._generic(out, batch, feature_dim=CLASS_DIM, feature_coord=coord)
+
+    def _record_fit(self, batch: _Batch, target: Layout | None) -> None:
         self.sample_dim_ = batch.sample_dim
         self.layout_ = batch.layout
+        # Only supervised predictions live in y-space; an unsupervised
+        # estimator (KMeans) accepts and ignores y, so its labels must not
+        # inherit the target's name, attrs or grid.
+        supervised = is_classifier(self.estimator_) or is_regressor(self.estimator_)
+        self.target_layout_ = target if supervised else None
 
     # ---------- sklearn-style verbs ---------------------------------------
 
@@ -519,21 +640,25 @@ class XarrayEstimator(BaseEstimator):
         """Fit the wrapped estimator to ``x`` (and optional ``y``)."""
         self.__dict__.pop("sample_dim_", None)
         batch = self._stack(x, conform=False)
-        y_np = self._prepare_y(y, batch)
+        y_np, target = self._prepare_y(y, batch)
         self.estimator_ = clone(self.estimator)
         self.estimator_.fit(batch.arr, y_np, **kwargs)
-        self._record_fit(batch)
+        self._record_fit(batch, target)
         return self
 
     @available_if(_estimator_has("transform"))
     def transform(
         self, x: xr.DataArray | xr.Dataset | np.ndarray
-    ) -> xr.DataArray | np.ndarray:
-        """Transform ``x`` via the fitted estimator."""
+    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+        """Transform ``x`` via the fitted estimator.
+
+        One-to-one transformers (scalers, …) return data on the input's
+        grid — a Dataset for Dataset input. Anything else (PCA scores,
+        KMeans distances) returns ``(sample_dim, new_feature_dim)``.
+        """
         self._require_fitted()
         batch = self._stack(x, conform=True)
-        out = self.estimator_.transform(batch.arr)
-        return self._label(out, batch, grid=self._same_grid(batch), dims=batch.in_dims)
+        return self._label_transform(self.estimator_.transform(batch.arr), batch)
 
     @available_if(_estimator_has("fit_transform", "transform"))
     def fit_transform(
@@ -541,61 +666,78 @@ class XarrayEstimator(BaseEstimator):
         x: xr.DataArray | xr.Dataset | np.ndarray,
         y: xr.DataArray | xr.Dataset | np.ndarray | None = None,
         **kwargs: Any,
-    ) -> xr.DataArray | np.ndarray:
-        """Fit then transform ``x``."""
+    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+        """Fit then transform ``x`` (output layout as in :meth:`transform`)."""
         self.__dict__.pop("sample_dim_", None)
         batch = self._stack(x, conform=False)
-        y_np = self._prepare_y(y, batch)
+        y_np, target = self._prepare_y(y, batch)
         self.estimator_ = clone(self.estimator)
         if hasattr(self.estimator_, "fit_transform"):
             out = self.estimator_.fit_transform(batch.arr, y_np, **kwargs)
         else:
             self.estimator_.fit(batch.arr, y_np, **kwargs)
             out = self.estimator_.transform(batch.arr)
-        self._record_fit(batch)
-        return self._label(out, batch, grid=self._same_grid(batch), dims=batch.in_dims)
+        self._record_fit(batch, target)
+        return self._label_transform(out, batch)
 
     @available_if(_estimator_has("inverse_transform"))
     def inverse_transform(
         self, x: xr.DataArray | xr.Dataset | np.ndarray
-    ) -> xr.DataArray | np.ndarray:
+    ) -> xr.DataArray | xr.Dataset | np.ndarray:
         """Map back to the original feature space via the fitted estimator.
 
-        When the inverse output's feature count matches the training
-        feature count, the fit-time layout is used to re-grid the result
-        back to the original ``(sample_dim, *feature_dims)`` layout —
-        feature coordinates from training, sample coordinates from ``x``
-        (which may cover a different period than the training set).
+        The result is rebuilt on the fit-time grid — a Dataset if the
+        estimator was fit on one — with feature coordinates from training
+        and sample coordinates from ``x`` (which may cover a different
+        period than the training set). ``x`` may be component scores
+        (PCA) or grid-shaped data (a scaler's output); the latter is
+        checked against the fit-time layout like any other input.
         """
         self._require_fitted()
-        batch = self._stack(x, conform=False)
-        out = self.estimator_.inverse_transform(batch.arr)
         train = self.__dict__.get("layout_")
-        if isinstance(train, ArrayLayout):
-            return self._label(
-                out, batch, grid=train, dims=train.dims, input_meta=False
-            )
-        return self._label(out, batch)
+        in_feature_space = (
+            train is not None
+            and isinstance(x, xr.DataArray | xr.Dataset)
+            and matches(x, train)
+        )
+        batch = self._stack(x, conform=in_feature_space)
+        return self._label_inverse(self.estimator_.inverse_transform(batch.arr), batch)
 
     @available_if(_estimator_has("predict"))
     def predict(
         self, x: xr.DataArray | xr.Dataset | np.ndarray
-    ) -> xr.DataArray | np.ndarray:
-        """Predict via the fitted estimator (regression / classification)."""
+    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+        """Predict via the fitted estimator (regression / classification).
+
+        If ``fit`` received an xarray ``y``, predictions come back on its
+        grid, with its name and attrs (a Dataset for a Dataset target).
+        Otherwise they are ``(sample_dim,)`` or
+        ``(sample_dim, new_feature_dim)`` with no attrs.
+        """
         self._require_fitted()
         batch = self._stack(x, conform=True)
-        out = self.estimator_.predict(batch.arr)
-        return self._label(out, batch, grid=self._same_grid(batch), dims=batch.in_dims)
+        return self._label_target(self.estimator_.predict(batch.arr), batch)
 
     @available_if(_estimator_has("predict_proba"))
     def predict_proba(
         self, x: xr.DataArray | xr.Dataset | np.ndarray
-    ) -> xr.DataArray | np.ndarray:
-        """Class-probability prediction (classifiers only)."""
+    ) -> xr.DataArray | np.ndarray | list[xr.DataArray | np.ndarray]:
+        """Class-probability prediction (classifiers only).
+
+        Returns ``(sample_dim, "class")`` with the ``class`` coordinate set
+        to the estimator's ``classes_``; a list of such arrays for
+        multi-output classifiers.
+        """
         self._require_fitted()
         batch = self._stack(x, conform=True)
         out = self.estimator_.predict_proba(batch.arr)
-        return self._label(out, batch, grid=self._same_grid(batch), dims=batch.in_dims)
+        classes = getattr(self.estimator_, "classes_", None)
+        if isinstance(out, list):
+            return [
+                self._label_proba(o, batch, None if classes is None else classes[i])
+                for i, o in enumerate(out)
+            ]
+        return self._label_proba(out, batch, classes)
 
     @available_if(_estimator_has("score"))
     def score(
@@ -609,7 +751,7 @@ class XarrayEstimator(BaseEstimator):
         """
         self._require_fitted()
         batch = self._stack(x, conform=True)
-        y_np = self._prepare_y(y, batch)
+        y_np, _ = self._prepare_y(y, batch)
         return float(self.estimator_.score(batch.arr, y_np))
 
     # ---------- proxy + dunder --------------------------------------------

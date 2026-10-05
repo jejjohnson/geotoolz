@@ -143,19 +143,6 @@ class SklearnOp(Operator):
         self.method = method
 
     def _apply(self, data: xr.DataArray | xr.Dataset) -> xr.DataArray | xr.Dataset:
-        if (
-            isinstance(data, xr.Dataset)
-            and self.variable is None
-            and self.output_variable is None
-        ):
-            raise ValueError(
-                "SklearnOp received a Dataset input but neither `variable` nor "
-                "`output_variable` is set. The whole-Dataset path produces a "
-                "DataArray, which would break a Sequential chain. Pass "
-                "`variable=...` to select a single variable, or "
-                "`output_variable=...` to name the result when stacking all "
-                "variables together."
-            )
         target = (
             data[self.variable]
             if isinstance(data, xr.Dataset) and self.variable is not None
@@ -164,13 +151,32 @@ class SklearnOp(Operator):
         out = self._run(target)
         if not isinstance(data, xr.Dataset):
             return out
-
+        if isinstance(out, xr.Dataset):
+            # One-to-one transform of the whole Dataset: one result per input
+            # variable, written back in place.
+            if self.output_variable is not None:
+                raise ValueError(
+                    f"SklearnOp: method {self.method!r} returned one variable per "
+                    "input variable, which cannot be stored under the single "
+                    f"output_variable={self.output_variable!r}. Drop "
+                    "`output_variable` to write the results back in place, or "
+                    "pass `variable=...` to transform one variable."
+                )
+            return data.assign(out.data_vars)
         name = (
             self.output_variable if self.output_variable is not None else self.variable
         )
+        if name is None:
+            raise ValueError(
+                "SklearnOp received a Dataset input and the whole-Dataset result "
+                "is a single DataArray, but neither `variable` nor "
+                "`output_variable` is set to name it. Pass `variable=...` to "
+                "select a single variable, or `output_variable=...` to name the "
+                "result."
+            )
         return data.assign({name: out})
 
-    def _run(self, data: xr.DataArray | xr.Dataset) -> xr.DataArray:
+    def _run(self, data: xr.DataArray | xr.Dataset) -> xr.DataArray | xr.Dataset:
         wrap = self._resolve_wrap()
         method = getattr(wrap, self.method)
         return method(data)

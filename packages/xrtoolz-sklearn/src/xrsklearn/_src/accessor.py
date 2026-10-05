@@ -102,8 +102,8 @@ class _SklearnAccessor:
         ```
 
         Score a fitted estimator, and the Dataset variant (data_vars are
-        column-concatenated into one ``(sample, feature)`` matrix, so the
-        transform comes back as a single generic DataArray):
+        column-concatenated into one ``(sample, feature)`` matrix; a
+        one-to-one transformer hands back a Dataset on the same grid):
 
         ```pycon
         >>> from sklearn.linear_model import LinearRegression
@@ -115,8 +115,8 @@ class _SklearnAccessor:
         1.0
         >>> ds = xr.Dataset({"u": da, "v": da})
         >>> scaled = ds.sklearn.fit_transform(StandardScaler(), sample_dim="time")
-        >>> scaled.dims, scaled.shape
-        (('time', 'component'), (8, 24))
+        >>> list(scaled.data_vars), scaled["u"].dims
+        (['u', 'v'], ('time', 'lat', 'lon'))
 
         ```
     """

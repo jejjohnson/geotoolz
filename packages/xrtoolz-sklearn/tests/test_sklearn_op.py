@@ -203,13 +203,16 @@ def test_nan_policy_mask_on_dataset_drops_rows_across_all_variables() -> None:
     expected_input = np.column_stack([da_a.values[valid], da_b.values[valid]])
     expected = StandardScaler().fit_transform(expected_input)
 
-    # Stacked column count (3 + 2) doesn't match either variable's feature
-    # count alone, so the wrap returns the changed-feature-count layout.
-    assert out.dims == ("time", "component")
-    assert out.shape == (len(da_a["time"]), expected.shape[1])
+    # A one-to-one scaler returns the Dataset on its own grid; columns
+    # 0-2 belong to "ssh" and 3-4 to "other".
+    assert isinstance(out, xr.Dataset)
+    assert out["ssh"].dims == da_a.dims
+    assert out["other"].dims == da_b.dims
     np.testing.assert_array_equal(out["time"], ds["time"])
-    np.testing.assert_allclose(out.values[valid], expected)
-    assert np.isnan(out.values[~valid]).all()
+    np.testing.assert_allclose(out["ssh"].values[valid], expected[:, :3])
+    np.testing.assert_allclose(out["other"].values[valid], expected[:, 3:])
+    assert np.isnan(out["ssh"].values[~valid]).all()
+    assert np.isnan(out["other"].values[~valid]).all()
 
 
 def test_nan_policy_mask_all_nan_input_raises() -> None:
@@ -229,10 +232,36 @@ def test_nan_policy_mask_all_nan_input_raises() -> None:
 
 
 def test_sklearn_op_dataset_without_variable_or_output_variable_raises() -> None:
-    ds = xr.Dataset({"ssh": _sample_da()})
-    op = SklearnOp(StandardScaler(), sample_dim="time")
+    # A reducing estimator turns the whole Dataset into one DataArray, which
+    # needs a name to be stored.
+    ds = xr.Dataset({"ssh": _sample_da().fillna(0.0)})
+    op = SklearnOp(PCA(n_components=2), sample_dim="time", method="fit_transform")
 
     with pytest.raises(ValueError, match="neither `variable` nor `output_variable`"):
+        op(ds)
+
+
+def test_sklearn_op_one_to_one_dataset_transform_writes_back_in_place() -> None:
+    ds = xr.Dataset({"ssh": _sample_da(), "sst": _sample_da() * 2.0})
+    op = SklearnOp(StandardScaler(), sample_dim="time", method="fit_transform")
+
+    out = op(ds)
+
+    assert set(out.data_vars) == {"ssh", "sst"}
+    expected = XarrayEstimator(StandardScaler(), sample_dim="time").fit_transform(ds)
+    xr.testing.assert_allclose(out, expected)
+
+
+def test_sklearn_op_dataset_result_rejects_output_variable() -> None:
+    ds = xr.Dataset({"ssh": _sample_da(), "sst": _sample_da() * 2.0})
+    op = SklearnOp(
+        StandardScaler(),
+        sample_dim="time",
+        method="fit_transform",
+        output_variable="scaled",
+    )
+
+    with pytest.raises(ValueError, match="output_variable='scaled'"):
         op(ds)
 
 
@@ -323,8 +352,7 @@ def test_sklearn_accessor_dataset_fit_transform() -> None:
     explicit = XarrayEstimator(StandardScaler(), sample_dim="time").fit_transform(ds)
     via_accessor = ds.sklearn.fit_transform(StandardScaler(), sample_dim="time")
 
-    np.testing.assert_array_equal(via_accessor.values, explicit.values)
-    assert via_accessor.dims == explicit.dims
+    xr.testing.assert_identical(via_accessor, explicit)
 
 
 def test_nan_policy_mask_passes_through_integer_dtype() -> None:

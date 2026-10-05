@@ -24,10 +24,20 @@ sklearn estimators want a 2-D `(n_samples, n_features)` matrix.
    column-concatenate their data_vars into one feature matrix.
 2. **Delegate**: the wrapped estimator's own
    `fit / transform / predict / …` runs on the 2-D view.
-3. **Unstack**: outputs are re-labeled. Same-feature-count outputs
-   rebuild the original feature dims; reduced outputs (PCA scores,
-   cluster labels) come back as `(sample_dim, component)` or
-   `(sample_dim,)`.
+3. **Unstack**: outputs are re-labeled according to the method that
+   produced them:
+
+   | Method | Output layout |
+   |---|---|
+   | `transform` (one-to-one, e.g. scalers) | the input grid — a Dataset for Dataset input |
+   | `transform` (reducing, e.g. PCA, KMeans distances) | `(sample_dim, new_feature_dim)` |
+   | `inverse_transform` | the fit-time input grid (DataArray or Dataset) |
+   | `predict` | the fit-time `y` grid, name and attrs; `(sample_dim,)` without an xarray `y` |
+   | `predict_proba` | `(sample_dim, "class")`, labeled by `classes_` |
+
+   One-to-one is read from sklearn's `get_feature_names_out()`, so
+   `PCA(n_components=n_features)` scores are never mistaken for the
+   input grid.
 
 The fitted wrapper stores the feature-grid metadata, which is what lets
 `inverse_transform` rebuild the original `(sample, *feature_dims)`
