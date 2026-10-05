@@ -31,6 +31,7 @@ from geopatcher._src.hooks import (
 )
 from geopatcher._src.patch import TemporalPatch
 from geopatcher._src.prefetch import prefetch_iterable
+from geopatcher._src.spatial.aggregation import _warn_if_unsafe_streaming
 from geopatcher._src.time.aggregation import TemporalAggregation
 from geopatcher._src.time.geometry import TemporalGeometry
 from geopatcher._src.time.sampler import TemporalSampler
@@ -176,8 +177,9 @@ class TemporalPatcher:
         """Return the patches `split` would yield for a single anchor.
 
         Always a list — length 1 for the common single-slice
-        geometries, length N for `TemporalMultiScale` and any future
-        geometry that returns ``list[slice]`` (one entry per scale).
+        geometries, length N for `TemporalMultiScale` /
+        `TemporalPhaseWindow` (one entry per window), and empty when the
+        geometry's ``boundary="drop"`` drops the anchor.
         The spatial counterpart returns a single `Patch`; the temporal
         side has to flatten the multi-scale case, so the return type
         is a list either way for callers to handle uniformly.
@@ -269,16 +271,32 @@ class TemporalPatcher:
             window = self._window(time_len, a, coord)
             if isinstance(window, list):
                 keys.extend((a, k) for k in range(len(window)))
-            else:
+            elif window is not None:
                 keys.append(a)
         return keys
 
     def _window(
         self, time_len: int, anchor: int, coord: np.ndarray | None
-    ) -> slice | list[slice]:
+    ) -> slice | list[slice] | None:
         if getattr(self.geometry, "needs_coord", False):
             return self.geometry.window_coord(coord, anchor)  # type: ignore[attr-defined]
         return self.geometry.window(time_len, anchor)
+
+    def _window_slices(
+        self, time_len: int, anchor: int, coord: np.ndarray | None
+    ) -> list[slice]:
+        """The windows ``anchor`` yields, as a list (empty when dropped).
+
+        The one place every temporal family (`TemporalPatcher`,
+        `SpatioTemporalPatcher`, the matched patchers) resolves a temporal
+        window: coord-aware geometries go through ``window_coord``, the
+        rest through ``window``, and a ``None`` (dropped by the geometry's
+        ``boundary``) becomes ``[]``.
+        """
+        window = self._window(time_len, anchor, coord)
+        if window is None:
+            return []
+        return window if isinstance(window, list) else [window]
 
     def anchors(
         self,
@@ -287,16 +305,22 @@ class TemporalPatcher:
         *,
         coord: np.ndarray | None = None,
     ) -> list[int]:
-        """Materialise the sampler's anchor sequence for ``series``.
+        """Materialise the anchors `split` yields patches for.
 
-        Returns ``len(anchors) <= len(split(series))`` — multi-scale
-        geometries emit multiple patches per anchor. Same determinism
+        The sampler's sequence minus the anchors the geometry's
+        ``boundary="drop"`` drops, so every returned anchor yields at
+        least one patch. ``len(anchors) <= n_anchors`` — multi-window
+        geometries emit several patches per anchor. Same determinism
         contract as `n_anchors`. See `SpatialPatcher.anchors`.
         """
         shape = getattr(series, "shape", None) or np.shape(series)
         time_len = int(shape[time_axis])
         self._require_coord(coord, time_len)
-        return [int(a) for a in self._sampler_anchors(time_len, coord)]
+        return [
+            int(a)
+            for a in self._sampler_anchors(time_len, coord)
+            if self._window_slices(time_len, int(a), coord)
+        ]
 
     def _patches_for_anchor(
         self,
@@ -309,13 +333,12 @@ class TemporalPatcher:
         coord: np.ndarray | None = None,
     ) -> Iterator[TemporalPatch]:
         try:
-            window = self._window(time_len, anchor, coord)
+            slices = self._window_slices(time_len, anchor, coord)
         except Exception as exc:
             _dispatch(hooks, "on_error", anchor, exc)
             raise
-        slices = window if isinstance(window, list) else [window]
         coord_value = coord[int(anchor)] if coord is not None else None
-        for s in slices:
+        for k, s in enumerate(slices):
             _dispatch(hooks, "on_patch_start", anchor, coord_value)
             start = perf_counter()
             try:
@@ -326,7 +349,11 @@ class TemporalPatcher:
                 data = np.asarray(arr[tuple(idx)])
                 weights = self.window.weights(self.geometry, s.stop - s.start)
                 patch = TemporalPatch(
-                    data=data, anchor=anchor, indices=s, weights=weights
+                    data=data,
+                    anchor=anchor,
+                    indices=s,
+                    weights=weights,
+                    window_index=k,
                 )
             except Exception as exc:
                 _dispatch(hooks, "on_error", anchor, exc)
@@ -362,8 +389,14 @@ class TemporalPatcher:
     def merge(
         self, patches: Iterable[Any], hooks: Iterable[PatcherHook] | None = None
     ) -> Any:
+        """Hand the patches to the aggregation and return its output.
+
+        A ``streaming_safe = False`` aggregation warns (or raises under
+        `set_strict`) at the caller's line, as `SpatialPatcher.merge` does.
+        """
         hook_list = _as_hooks(hooks)
         _dispatch(hook_list, "on_merge_start", _len_or_unknown(patches))
+        _warn_if_unsafe_streaming(self.aggregation, stacklevel=3)
         try:
             output = self.aggregation.merge(patches)
         except Exception as exc:

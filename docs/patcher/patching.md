@@ -295,6 +295,32 @@ Mirror of the spatial side, with axes that encode time-specific properties
 `Sequential` to avoid clashing with operator-graph `Sequential` types in
 downstream composition libraries).
 
+### Temporal boundary policy
+
+Every integer temporal geometry takes `boundary`, deciding what happens to
+a window that overflows the time axis:
+
+| `boundary` | Behaviour |
+|---|---|
+| `"drop"` (default) | The anchor yields no patch, so every emitted window is full length. `anchors()` / `n_anchors()` / `patch_anchors()` skip it too. `TemporalMultiScale` drops an anchor whose *longest* scale overflows; `TemporalPhaseWindow` drops each overflowing cycle slot. |
+| `"shrink"` | The window is clipped to `[0, time_len)`, so edge windows are shorter. |
+| `"raise"` | `ValueError` naming the anchor and the window. |
+
+`TemporalPhaseWindow(period, phase_width)` returns one slot per cycle —
+`[k·period + φ − w, k·period + φ + w + 1)` with `φ = anchor % period` —
+so each anchor yields one patch per cycle. Each `TemporalPatch` records
+its position among its anchor's windows as `window_index` (scale `k` of a
+`TemporalMultiScale`), which `TemporalHierarchicalCombine` keys on.
+`TemporalMean` is a running per-step sum / count over each patch's
+`indices` (NaN not counted, unreached steps get `fill_value`), and
+`TemporalForecast` locates the horizon from the anchor
+(`[anchor + 1, anchor + 1 + horizon)`), skipping windows that do not hold
+all of it.
+
+!!! warning "Default changed from implicit shrink to drop"
+    Temporal geometries used to clamp silently (today's `"shrink"`). Pass
+    `boundary="shrink"` to keep shorter edge windows.
+
 ## Spatiotemporal composition
 
 `SpatioTemporalPatcher` composes a `SpatialPatcher` and a `TemporalPatcher`

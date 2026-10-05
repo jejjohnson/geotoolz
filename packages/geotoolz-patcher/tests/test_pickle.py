@@ -99,7 +99,8 @@ class TestTemporalPatcherPickle:
             aggregation=TemporalMean(),
         )
         clone = pickle.loads(pickle.dumps(tp))
-        assert clone.get_config() == tp.get_config()
+        # assert_equal: TemporalMean's NaN fill_value is not == itself.
+        np.testing.assert_equal(clone.get_config(), tp.get_config())
 
 
 def _patcher(size: int = 16, boundary: str = "drop") -> SpatialPatcher:

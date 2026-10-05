@@ -55,8 +55,10 @@ class _RecordingTemporalAgg(TemporalAggregation):
 def _make_patcher(
     aggregation: TemporalAggregation | None = None,
 ) -> TemporalPatcher:
+    # "shrink" keeps anchor 0's short [0, 1) window, so every stride-10
+    # anchor yields a patch and the counts below stay one per anchor.
     return TemporalPatcher(
-        geometry=TemporalFixedLookback(length=5),
+        geometry=TemporalFixedLookback(length=5, boundary="shrink"),
         sampler=TemporalRegularStride(step=10),
         window=TemporalCausalBoxcar(),
         aggregation=aggregation if aggregation is not None else TemporalMean(),

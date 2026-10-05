@@ -1212,8 +1212,7 @@ class MatchedSpatioTemporalPatcher(_MatchedConfigMixin):
             temporal._require_coord(coord, time_len)
             for t_anchor in temporal._sampler_anchors(time_len, coord):
                 t = int(t_anchor)
-                t_window = self.primary._temporal_window(time_len, t, coord)
-                slices = t_window if isinstance(t_window, list) else [t_window]
+                slices = temporal._window_slices(time_len, t, coord)
                 coord_value = coord[t] if coord is not None else None
                 for s in slices:
                     anchor = (sp.anchor, t)
@@ -1282,8 +1281,7 @@ class MatchedSpatioTemporalPatcher(_MatchedConfigMixin):
                 )
                 arrays, nodata, time_len = self._source_arrays(data_by_name)
                 temporal._require_coord(coord, time_len)
-                t_window = self.primary._temporal_window(time_len, t, coord)
-                slices = t_window if isinstance(t_window, list) else [t_window]
+                slices = temporal._window_slices(time_len, t, coord)
                 try:
                     base_weights = spatial.window.weights(spatial.geometry)
                 except TypeError:

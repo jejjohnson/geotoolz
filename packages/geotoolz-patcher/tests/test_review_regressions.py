@@ -204,7 +204,8 @@ class TestSpatioTemporalMergeDictAnchor:
                 space=(0.0, 0.0),
                 time=7,
                 spatial_indices=None,
-                temporal_indices=slice(0, 3),
+                # lookback 2 + horizon 1 around anchor 7: steps 6, 7 | 8
+                temporal_indices=slice(6, 9),
                 weights=None,
             )
         ]
@@ -212,9 +213,11 @@ class TestSpatioTemporalMergeDictAnchor:
         out = patcher.merge(patches, field=None)
 
         # TemporalForecast returns {anchor: horizon_block}, and the anchor
-        # is read from the rebox'd TemporalPatch.anchor (== p.time == 7).
+        # is read from the rebox'd TemporalPatch.anchor (== p.time == 7);
+        # the horizon is step 8, the patch's last row.
         result = dict(out)[(0.0, 0.0)]
         assert 7 in result
+        np.testing.assert_array_equal(result[7], [[8.0, 9.0, 10.0, 11.0]])
 
 
 class TestSpatialExplicitConfigDoesNotConsumeAnchors:

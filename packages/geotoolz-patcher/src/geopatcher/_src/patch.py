@@ -104,12 +104,20 @@ class TemporalPatch[AnchorT, IndicesT, DataT](_ReleaseLifecycleMixin):
     """A single patch produced by a `TemporalPatcher`.
 
     Mirrors `Patch` but indexes along the time axis only.
+
+    ``window_index`` is the patch's position among the windows its
+    geometry returned for ``anchor`` — ``k`` for scale ``scales[k]`` of a
+    `TemporalMultiScale`, the cycle slot of a `TemporalPhaseWindow`, and
+    ``0`` for single-window geometries. It matches the ``k`` of the
+    ``(anchor, k)`` key `TemporalPatcher.patch_anchors` emits. ``None``
+    (the default for hand-built patches) means "not recorded".
     """
 
     data: DataT
     anchor: AnchorT
     indices: IndicesT
     weights: Any | None = None
+    window_index: int | None = None
     _release: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
     def with_data[NewDataT](

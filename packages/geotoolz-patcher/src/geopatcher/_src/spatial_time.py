@@ -144,20 +144,6 @@ class SpatioTemporalPatcher:
             raise ValueError(f"unknown coupling: {self.coupling!r}")
         return self.coupling
 
-    def _temporal_window(
-        self, time_len: int, t_anchor: int, coord: np.ndarray | None
-    ) -> Any:
-        """Resolve the temporal geometry's window, coord-aware when needed.
-
-        Mirrors `TemporalPatcher._patches_for_anchor`'s dispatch: a
-        geometry with ``needs_coord = True`` resolves through
-        ``window_coord(coord, anchor)``, everything else through the
-        integer ``window(time_len, anchor)`` path.
-        """
-        if getattr(self.temporal.geometry, "needs_coord", False):
-            return self.temporal.geometry.window_coord(coord, t_anchor)  # type: ignore[attr-defined]
-        return self.temporal.geometry.window(time_len, t_anchor)
-
     def _split_product(
         self,
         field: Any,
@@ -170,8 +156,7 @@ class SpatioTemporalPatcher:
             time_len = int(arr.shape[self.time_axis])
             self.temporal._require_coord(coord, time_len)
             for t_anchor in self.temporal._sampler_anchors(time_len, coord):
-                t_window = self._temporal_window(time_len, int(t_anchor), coord)
-                slices = t_window if isinstance(t_window, list) else [t_window]
+                slices = self.temporal._window_slices(time_len, int(t_anchor), coord)
                 coord_value = coord[int(t_anchor)] if coord is not None else None
                 for s in slices:
                     anchor = (sp.anchor, int(t_anchor))
@@ -240,8 +225,7 @@ class SpatioTemporalPatcher:
                 arr = np.asarray(data)
                 time_len = int(arr.shape[self.time_axis])
                 self.temporal._require_coord(coord, time_len)
-                t_window = self._temporal_window(time_len, int(time_anchor), coord)
-                slices = t_window if isinstance(t_window, list) else [t_window]
+                slices = self.temporal._window_slices(time_len, int(time_anchor), coord)
                 try:
                     base_weights = self.spatial.window.weights(self.spatial.geometry)
                 except TypeError:
@@ -287,8 +271,7 @@ class SpatioTemporalPatcher:
             time_len = int(arr.shape[self.time_axis])
             self.temporal._require_coord(coord, time_len)
             for t_anchor in self.temporal._sampler_anchors(time_len, coord):
-                t_window = self._temporal_window(time_len, int(t_anchor), coord)
-                slices = t_window if isinstance(t_window, list) else [t_window]
+                slices = self.temporal._window_slices(time_len, int(t_anchor), coord)
                 coord_value = coord[int(t_anchor)] if coord is not None else None
                 for s in slices:
                     anchor = (sp.anchor, int(t_anchor))
@@ -354,8 +337,7 @@ class SpatioTemporalPatcher:
                 arr = np.asarray(data)
                 time_len = int(arr.shape[self.time_axis])
                 self.temporal._require_coord(coord, time_len)
-                t_window = self._temporal_window(time_len, int(time_anchor), coord)
-                slices = t_window if isinstance(t_window, list) else [t_window]
+                slices = self.temporal._window_slices(time_len, int(time_anchor), coord)
                 try:
                     base_weights = self.spatial.window.weights(self.spatial.geometry)
                 except TypeError:
