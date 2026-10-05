@@ -378,8 +378,11 @@ class TestGetConfig:
     def test_time_stencil_yaml_friendly(self) -> None:
         ts = TimeStencil("-9h", "3h", "1h", closed="both")
         cfg = ts.get_config()
-        # Values must be JSON/YAML-serialisable strings/scalars.
-        for key, value in cfg.items():
-            assert isinstance(value, (str, int, float)), (
-                f"{key!r} -> {value!r} is not YAML-friendly"
-            )
+        # Offsets are lossless {"value", "unit"} mappings of plain scalars.
+        assert cfg == {
+            "start": {"value": -9, "unit": "h"},
+            "stop": {"value": 3, "unit": "h"},
+            "step": {"value": 1, "unit": "h"},
+            "closed": "both",
+        }
+        assert TimeStencil(**cfg) == ts

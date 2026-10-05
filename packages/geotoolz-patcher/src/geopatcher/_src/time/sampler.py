@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 
-from geopatcher._src._serialize import config_from_fields
+from geopatcher._src._serialize import axis_envelope, config_from_fields
 from geopatcher._src.time.stencils import Stencil, valid_origin_points
 
 
@@ -101,7 +101,7 @@ class TemporalEventTriggered(TemporalSampler):
                 yield t
 
     def get_config(self) -> dict[str, Any]:
-        return {"n_events": len(self.event_times)}
+        return config_from_fields(self)
 
 
 @dataclass(eq=False)
@@ -184,7 +184,7 @@ class TemporalStencilSampler(TemporalSampler):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "stencil": self.stencil.get_config(),
+            "stencil": axis_envelope(self.stencil),
             **config_from_fields(self, exclude=("stencil",)),
         }
 
@@ -210,4 +210,4 @@ class TemporalExplicit(TemporalSampler):
                 yield t
 
     def get_config(self) -> dict[str, Any]:
-        return {"n_times": len(self.times)}
+        return config_from_fields(self)

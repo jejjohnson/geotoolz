@@ -23,6 +23,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from geopatcher._src._serialize import patcher_config
 from geopatcher._src.hooks import (
     UNKNOWN_TOTAL,
     PatcherHook,
@@ -477,12 +478,8 @@ class SpatioTemporalPatcher:
             return UNKNOWN_TOTAL
 
     def get_config(self) -> dict[str, Any]:
-        return {
-            "spatial": self.spatial.get_config(),
-            "temporal": self.temporal.get_config(),
-            "coupling": self.coupling,
-            "time_axis": self.time_axis,
-        }
+        """Inner patchers as ``{"class", "config"}`` envelopes (`patcher_config`)."""
+        return patcher_config(self)
 
 
 def _hashable(anchor: Any) -> Any:

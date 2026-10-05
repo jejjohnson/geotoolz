@@ -100,9 +100,10 @@ Three things to notice:
 - The sampler still yields integer indices into `coord`. The patcher
   resolves each anchor to a coordinate value internally for dispatch and
   for the hook payload.
-- `get_config()` round-trips the stencil as YAML-friendly strings, so
-  the same notebook can be replayed by another consumer without
-  re-stating the cadence.
+- `get_config()` nests the stencil as a `{"class": "TimeStencil", "config": ...}`
+  envelope with each offset as `{"value": int, "unit": str}` (lossless at
+  any `timedelta64` resolution), so `geopatcher.from_config(axis_envelope(tp))`
+  replays the same patcher without re-stating the cadence.
 
 Hook authors can opt into the new payload by accepting a trailing
 `coord_value` arg:

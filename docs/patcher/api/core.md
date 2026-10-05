@@ -78,6 +78,18 @@ URLs are requested signed.
 ::: geopatcher._src.time.patcher.TemporalPatcher
 ::: geopatcher._src.spatial_time.SpatioTemporalPatcher
 
+## Config round-trip
+
+Every axis, stencil and patcher exposes `get_config()`. Nested components
+serialise as `{"class": ..., "config": ...}` envelopes, and
+`from_config(axis_envelope(obj))` rebuilds `obj` — unless its type is
+`forbid_in_yaml` (closures, polygons, backend-native anchors), whose
+config is a debug summary that `from_config` refuses.
+
+::: geopatcher._src._serialize.axis_envelope
+::: geopatcher._src._serialize.from_config
+::: geopatcher._src._serialize.config_from_fields
+
 ## Strictness and errors
 
 ::: geopatcher._src.config.get_strict
