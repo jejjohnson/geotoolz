@@ -145,7 +145,7 @@ def test_dnbr_rejects_sub_pixel_drift() -> None:
 def test_median_composite_requires_full_shape_match() -> None:
     a = toy_geotensor(np.zeros((2, 3, 3), dtype=np.float32))
     b = toy_geotensor(np.zeros((3, 3, 3), dtype=np.float32))
-    with pytest.raises(ValueError, match="share shape, transform, and CRS"):
+    with pytest.raises(ValueError, match="MedianComposite: the frame 1 pixel grid"):
         gz.compositing.MedianComposite()([a, b])
 
 

@@ -1407,7 +1407,7 @@ def _registration_pair() -> tuple[GeoTensor, GeoTensor, int, int]:
 
 def test_phase_align_returns_shift_when_apply_false() -> None:
     reference, moving, dy, dx = _registration_pair()
-    result = gz.geom.PhaseAlign(reference=reference, apply=False)(moving)
+    result = gz.geom.PhaseAlign(apply=False)(moving, reference)
     assert isinstance(result, tuple)
     shift_y, shift_x, error = result
     # phase_cross_correlation returns the shift needed to align the moving
@@ -1420,7 +1420,7 @@ def test_phase_align_returns_shift_when_apply_false() -> None:
 def test_phase_align_apply_keeps_transform_and_preserves_metadata() -> None:
     reference, moving, _dy, _dx = _registration_pair()
     moving.attrs = {"sensor": "test"}
-    aligned = gz.geom.PhaseAlign(reference=reference, apply=True)(moving)
+    aligned = gz.geom.PhaseAlign(apply=True)(moving, reference)
     assert isinstance(aligned, GeoTensor)
     assert aligned.shape == moving.shape
     assert str(aligned.crs) == str(moving.crs)
@@ -1432,7 +1432,7 @@ def test_phase_align_apply_keeps_transform_and_preserves_metadata() -> None:
 
 def test_phase_align_world_coordinates_match_reference() -> None:
     reference, moving, _dy, _dx = _registration_pair()
-    aligned = gz.geom.PhaseAlign(reference=reference, apply=True)(moving)
+    aligned = gz.geom.PhaseAlign(apply=True)(moving, reference)
 
     def peak_world(gt: GeoTensor) -> tuple[float, float]:
         row, col = np.unravel_index(np.argmax(np.asarray(gt)[0]), gt.shape[-2:])
@@ -1459,7 +1459,7 @@ def test_phase_align_rejects_unsupported_ndim() -> None:
         ValueError,
         match=r"PhaseAlign accepts 2-D \(H, W\) or 3-D \(C, H, W\) input; got a 4-D",
     ):
-        gz.geom.PhaseAlign(reference=reference)(four_d)
+        gz.geom.PhaseAlign()(four_d, reference)
 
 
 def test_phase_align_rejects_mismatched_shapes() -> None:
@@ -1470,13 +1470,13 @@ def test_phase_align_rejects_mismatched_shapes() -> None:
         crs=moving.crs,
         fill_value_default=0.0,
     )
-    with pytest.raises(ValueError, match="identical spatial shape"):
-        gz.geom.PhaseAlign(reference=reference)(bigger)
+    with pytest.raises(ValueError, match="PhaseAlign: the reference pixel grid"):
+        gz.geom.PhaseAlign()(bigger, reference)
 
 
 def test_optical_flow_tvl1_returns_displacement_field() -> None:
     reference, moving, _dy, _dx = _registration_pair()
-    flow = gz.geom.OpticalFlowTVL1(reference=reference)(moving)
+    flow = gz.geom.OpticalFlowTVL1()(moving, reference)
     arr = np.asarray(flow)
     assert arr.shape == (2, *reference.shape[-2:])
     assert str(flow.crs) == str(moving.crs)
@@ -1491,7 +1491,7 @@ def test_optical_flow_declares_nan_fill(name: str) -> None:
     moving = GeoTensor(
         values, transform=moving.transform, crs=moving.crs, fill_value_default=0.0
     )
-    flow = getattr(gz.geom, name)(reference=reference)(moving)
+    flow = getattr(gz.geom, name)()(moving, reference)
     assert np.isnan(flow.fill_value_default)
     arr = np.asarray(flow)
     assert np.isnan(arr[:, 5, 7]).all()
@@ -1500,7 +1500,7 @@ def test_optical_flow_declares_nan_fill(name: str) -> None:
 
 def test_optical_flow_ilk_returns_displacement_field() -> None:
     reference, moving, _dy, _dx = _registration_pair()
-    flow = gz.geom.OpticalFlowILK(reference=reference)(moving)
+    flow = gz.geom.OpticalFlowILK()(moving, reference)
     arr = np.asarray(flow)
     assert arr.shape == (2, *reference.shape[-2:])
     assert str(flow.crs) == str(moving.crs)
@@ -1527,16 +1527,22 @@ _PLAIN_REFERENCE = np.ascontiguousarray(_PLAIN_VALUES[:, ::-1, :])
             altitude_km=705.0,
             method="linear",
         ),
-        lambda: gz.geom.OpticalFlowTVL1(reference=_gt(_PLAIN_REFERENCE.copy())),
-        lambda: gz.geom.OpticalFlowILK(reference=_gt(_PLAIN_REFERENCE.copy())),
-        lambda: gz.geom.PhaseAlign(reference=_gt(_PLAIN_REFERENCE.copy()), apply=True),
+        lambda: gz.geom.OpticalFlowTVL1(),
+        lambda: gz.geom.OpticalFlowILK(),
+        lambda: gz.geom.PhaseAlign(apply=True),
     ],
 )
 def test_pixel_space_operators_accept_plain_ndarray(make_op) -> None:
     """Plain array in -> plain array out, values equal to the GeoTensor path."""
     op = make_op()
-    out_arr = op(_PLAIN_VALUES.copy())
-    out_gt = op(_gt(_PLAIN_VALUES.copy()))
+    # The registration operators take the reference as a second carrier.
+    extra = (
+        (_gt(_PLAIN_REFERENCE.copy()),)
+        if isinstance(op, gz.geom.OpticalFlowTVL1 | gz.geom.PhaseAlign)
+        else ()
+    )
+    out_arr = op(_PLAIN_VALUES.copy(), *extra)
+    out_gt = op(_gt(_PLAIN_VALUES.copy()), *extra)
     assert type(out_arr) is np.ndarray
     assert isinstance(out_gt, GeoTensor)
     # A plain array has no fill value, so its nodata (e.g. the edge a
@@ -1564,9 +1570,7 @@ def test_tile_accepts_plain_ndarray_and_zero_pads_edges() -> None:
 
 def test_phase_align_plain_ndarray_returns_shift_tuple_when_apply_false() -> None:
     reference, moving, dy, dx = _registration_pair()
-    result = gz.geom.PhaseAlign(reference=reference, apply=False)(
-        np.asarray(moving).copy()
-    )
+    result = gz.geom.PhaseAlign(apply=False)(np.asarray(moving).copy(), reference)
     assert isinstance(result, tuple)
     assert result[0] == pytest.approx(-dy, abs=0.5)
     assert result[1] == pytest.approx(-dx, abs=0.5)
@@ -1634,11 +1638,11 @@ def test_4d_time_stack() -> None:
     reference = stack.isel({"time": 0})
     for cls in (gz.geom.OpticalFlowTVL1, gz.geom.OpticalFlowILK):
         with pytest.raises(ValueError, match=rf"{cls.__name__} accepts 2-D"):
-            cls(reference=reference)(stack)
+            cls()(stack, reference)
         with pytest.raises(ValueError, match=rf"{cls.__name__} reference accepts"):
-            cls(reference=stack)(reference)
+            cls()(reference, stack)
     # Registration reads the band along -3 (band 1, not frame 1).
-    flow = gz.geom.OpticalFlowILK(reference=reference, band=2)(reference)
+    flow = gz.geom.OpticalFlowILK(band=2)(reference, reference)
     assert flow.shape == (2, 8, 8)
     padded = gz.geom.PadTo(shape=(10, 10))(stack)
     assert padded.shape == (2, 3, 10, 10)
@@ -1717,15 +1721,15 @@ def test_phase_align_ignores_and_carries_fill_pixels() -> None:
         crs=reference.crs,
         fill_value_default=-9999.0,
     )
-    shift = gz.geom.PhaseAlign(reference=reference, apply=False)(moving)
+    shift = gz.geom.PhaseAlign(apply=False)(moving, reference)
     assert shift[:2] == (0.0, 0.0)
-    aligned = np.asarray(gz.geom.PhaseAlign(reference=reference)(moving))
+    aligned = np.asarray(gz.geom.PhaseAlign()(moving, reference))
     np.testing.assert_array_equal(aligned, values)
 
 
 def test_phase_align_marks_the_uncovered_edge_as_nodata() -> None:
     reference, moving, dy, dx = _registration_pair()
-    aligned = np.asarray(gz.geom.PhaseAlign(reference=reference)(moving))[0]
+    aligned = np.asarray(gz.geom.PhaseAlign()(moving, reference))[0]
     # Undoing the (3, -2) roll uncovers the last 3 rows and first 2 columns.
     edge = np.zeros(aligned.shape, dtype=bool)
     edge[-dy:, :] = True

@@ -51,7 +51,11 @@ from geotoolz._src.config import (
     callable_name,
     reject_config_summary,
 )
-from geotoolz._src.geo import require_geotensor, require_projected_crs
+from geotoolz._src.geo import (
+    require_geotensor,
+    require_grid_match,
+    require_projected_crs,
+)
 from geotoolz._src.labels import (
     DEFAULT_REGIONPROPS,
     regionprops_frame,
@@ -118,8 +122,9 @@ class SBMP(Operator):
     where SWIR-2 (B12, ~2200 nm — a strong CH4 absorption window) is
     depressed relative to SWIR-1 (B11, ~1600 nm — weakly absorbing).
 
-    With a ``reference_scene`` (a clean-air acquisition over the same
-    geography) the operator computes the log-ratio change
+    With a second positional carrier, the ``reference_scene`` (a clean-air
+    acquisition over the same geography and pixel grid), the operator
+    computes the log-ratio change
 
     .. math::
 
@@ -157,20 +162,22 @@ class SBMP(Operator):
     Args:
         swir1: Index or band name of the SWIR-1 channel. Default ``"B11"``.
         swir2: Index or band name of the SWIR-2 channel. Default ``"B12"``.
-        reference_scene: Optional clean-air ``GeoTensor`` or plain array
-            with the same band layout. A GeoTensor reference resolves the
-            band names against its own ``attrs``; a plain array uses the
-            scene's band positions. When supplied, returns log-ratio
-            change.
         axis: Band axis of the input. Default ``-3``.
         eps: Numerical guard against division by zero. Default ``1e-10``.
+
+    Called as ``op(scene, reference_scene=None)``. The optional
+    ``reference_scene`` is a clean-air ``GeoTensor`` or plain array on the
+    scene's pixel grid (``ValueError`` otherwise) with the same band
+    layout; a GeoTensor reference resolves the band names against its own
+    ``attrs``, a plain array uses the scene's band positions. When
+    supplied, the output is the log-ratio change.
 
     Examples:
         Reference-scene retrieval over a single source::
 
             import geotoolz as gz
 
-            score = gz.plume.SBMP(reference_scene=pre_event_s2)(post_event_s2)
+            score = gz.plume.SBMP()(post_event_s2, pre_event_s2)
             mask = gz.plume.PlumeMask(threshold="percentile:99.5")(score)
     """
 
@@ -179,30 +186,36 @@ class SBMP(Operator):
         *,
         swir1: BandRef = "B11",
         swir2: BandRef = "B12",
-        reference_scene: GeoTensor | np.ndarray | None = None,
         axis: int = -3,
         eps: float = 1e-10,
     ) -> None:
         self.swir1 = swir1
         self.swir2 = swir2
-        self.reference_scene = reject_config_summary(reference_scene, "reference_scene")
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(
+        self,
+        gt: GeoTensor | np.ndarray,
+        reference_scene: GeoTensor | np.ndarray | None = None,
+    ) -> GeoTensor | np.ndarray:
+        if reference_scene is not None:
+            require_grid_match(
+                gt, reference_scene, "SBMP", names=("scene", "reference_scene")
+            )
         arr = np.asarray(gt, dtype=float)
         idx1 = _band_position(gt, self.swir1, self.axis)
         idx2 = _band_position(gt, self.swir2, self.axis)
         swir1 = _extract_and_clip_band(arr, idx1, self.axis)
         swir2 = _extract_and_clip_band(arr, idx2, self.axis)
         ratio = np.log((swir1 + self.eps) / (swir2 + self.eps))
-        if self.reference_scene is not None:
-            ref = np.asarray(self.reference_scene, dtype=float)
+        if reference_scene is not None:
+            ref = np.asarray(reference_scene, dtype=float)
             # A named reference resolves its own bands; an unnamed one is
             # assumed to share the scene's band layout.
-            if getattr(self.reference_scene, "attrs", None) is not None:
-                idx1 = _band_position(self.reference_scene, self.swir1, self.axis)
-                idx2 = _band_position(self.reference_scene, self.swir2, self.axis)
+            if getattr(reference_scene, "attrs", None) is not None:
+                idx1 = _band_position(reference_scene, self.swir1, self.axis)
+                idx2 = _band_position(reference_scene, self.swir2, self.axis)
             ref_swir1 = _extract_and_clip_band(ref, idx1, self.axis)
             ref_swir2 = _extract_and_clip_band(ref, idx2, self.axis)
             ref_ratio = np.log((ref_swir1 + self.eps) / (ref_swir2 + self.eps))
@@ -210,26 +223,11 @@ class SBMP(Operator):
         else:
             out = (swir1 - swir2) / (swir1 + swir2 + self.eps)
         invalid = invalid_values(gt).any(axis=self.axis)
-        if self.reference_scene is not None:
-            invalid = invalid | invalid_values(self.reference_scene).any(axis=self.axis)
+        if reference_scene is not None:
+            invalid = invalid | invalid_values(reference_scene).any(axis=self.axis)
         return wrap_filled(
             gt, keep_band_axis(out, gt), fill_value_default=np.nan, valid=~invalid
         )
-
-    def get_config(self) -> dict[str, Any]:
-        config: dict[str, Any] = {
-            "swir1": self.swir1,
-            "swir2": self.swir2,
-            "reference_scene": None,
-            "axis": self.axis,
-            "eps": self.eps,
-        }
-        if self.reference_scene is not None:
-            config["reference_scene"] = {
-                "shape": list(np.asarray(self.reference_scene).shape),
-                "dtype": str(np.asarray(self.reference_scene).dtype),
-            }
-        return config
 
 
 class PlumeMask(Operator):
@@ -362,17 +360,16 @@ class PlumeFootprint(Operator):
         min_area_m2: Drop polygons smaller than this area (m^2).
         simplify_tolerance: Douglas-Peucker tolerance (m) for polygon
             simplification; ``None`` to skip.
-        enhancement: Optional enhancement ``GeoTensor`` aligned with the
-            mask; enables ``mean_enhancement`` / ``max_enhancement``
-            statistics per polygon.
         properties: Region properties forwarded to ``regionprops_table``.
         extra_properties: User-defined ``regionprops_table`` callables.
 
+    Called as ``op(mask, enhancement=None)``. The optional ``enhancement``
+    carrier must sit on the mask's pixel grid (``ValueError`` otherwise);
+    it enables the ``mean_enhancement`` / ``max_enhancement`` statistics
+    per polygon.
+
     Examples:
-        >>> gdf = gz.plume.PlumeFootprint(
-        ...     min_area_m2=500.0,
-        ...     enhancement=kg_m2,
-        ... )(mask)
+        >>> gdf = gz.plume.PlumeFootprint(min_area_m2=500.0)(mask, kg_m2)
     """
 
     _terminal: ClassVar[bool] = True
@@ -382,13 +379,11 @@ class PlumeFootprint(Operator):
         *,
         min_area_m2: float = 500.0,
         simplify_tolerance: float | None = 15.0,
-        enhancement: GeoTensor | None = None,
         properties: Sequence[str] | None = None,
         extra_properties: Sequence[Callable[..., Any]] | None = None,
     ) -> None:
         self.min_area_m2 = min_area_m2
         self.simplify_tolerance = simplify_tolerance
-        self.enhancement = reject_config_summary(enhancement, "enhancement")
         self.properties = tuple(
             DEFAULT_REGIONPROPS if properties is None else properties
         )
@@ -400,10 +395,16 @@ class PlumeFootprint(Operator):
             )
         )
 
-    def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
+    def _apply(
+        self, gt: GeoTensor, enhancement: GeoTensor | np.ndarray | None = None
+    ) -> gpd.GeoDataFrame:
         require_ndim(gt, (2, 3), "PlumeFootprint")
         require_geotensor(gt, "PlumeFootprint")
         require_projected_crs(gt, "PlumeFootprint")
+        if enhancement is not None:
+            require_grid_match(
+                gt, enhancement, "PlumeFootprint", names=("mask", "enhancement")
+            )
         mask_arr = squeeze_single_band(np.asarray(gt))
         if mask_arr.dtype == bool:
             labels = label_components(
@@ -415,7 +416,7 @@ class PlumeFootprint(Operator):
             # Non-positive labels (background, or a label image's fill
             # value such as -9999) are not plumes.
             labels = np.where(mask_arr > 0, mask_arr, 0).astype(np.int32, copy=False)
-        enh = None if self.enhancement is None else _single_band_nan(self.enhancement)
+        enh = None if enhancement is None else _single_band_nan(enhancement)
         properties = list(self.properties)
         if enh is not None:
             properties.extend(
@@ -533,12 +534,6 @@ class PlumeFootprint(Operator):
         return {
             "min_area_m2": self.min_area_m2,
             "simplify_tolerance": self.simplify_tolerance,
-            "enhancement": None
-            if self.enhancement is None
-            else {
-                "shape": list(np.asarray(self.enhancement).shape),
-                "dtype": str(np.asarray(self.enhancement).dtype),
-            },
             "properties": list(self.properties),
             "extra_properties": None
             if self.extra_properties is None
@@ -664,8 +659,12 @@ class IMEEstimate(Operator):
     with metre units; a geographic CRS raises ``ValueError`` (reproject
     with :class:`geotoolz.geom.Reproject` first).
 
+    Called as ``op(enhancement, plume_mask)``: ``plume_mask`` is a boolean
+    carrier selecting plume pixels on the enhancement's pixel grid (same
+    shape, transform and CRS; ``ValueError`` otherwise -- a mask on another
+    grid would be indexed against the wrong pixels).
+
     Args:
-        plume_mask: Boolean ``GeoTensor`` selecting plume pixels.
         wind_speed: Effective wind speed :math:`U_{\mathrm{eff}}` in m/s.
         length_method: Length estimator: ``"max_axis"``, ``"convex_hull"``,
             or ``"skeleton"``. See :func:`plume_length`; ``"skeleton"``
@@ -693,28 +692,23 @@ class IMEEstimate(Operator):
             kg_m2 = gz.plume.ColumnToMass(units_in="ppm_m")(enhancement)
             mask = gz.plume.PlumeMask(threshold="percentile:99")(kg_m2)
             result = gz.plume.IMEEstimate(
-                plume_mask=mask,
                 wind_speed=3.5,
                 length_method="convex_hull",
-            )(kg_m2)
+            )(kg_m2, mask)
             print(result["emission_rate_kg_s"])
     """
 
     _terminal: ClassVar[bool] = True
 
-    forbid_in_yaml: ClassVar[bool] = True
-
     def __init__(
         self,
         *,
-        plume_mask: GeoTensor,
         wind_speed: float,
         length_method: Literal["max_axis", "convex_hull", "skeleton"] = "max_axis",
         pixel_area_m2: float | None = None,
         return_uncertainty: bool = True,
         uncertainty_fraction: float = 0.5,
     ) -> None:
-        self.plume_mask = plume_mask
         self.wind_speed = wind_speed
         self.length_method = length_method
         self.pixel_area_m2 = pixel_area_m2
@@ -723,11 +717,16 @@ class IMEEstimate(Operator):
             raise ValueError("uncertainty_fraction must be non-negative")
         self.uncertainty_fraction = uncertainty_fraction
 
-    def _apply(self, gt: GeoTensor) -> dict[str, float]:
+    def _apply(
+        self, gt: GeoTensor, plume_mask: GeoTensor | np.ndarray
+    ) -> dict[str, float]:
         require_ndim(gt, (2, 3), "IMEEstimate")
         require_geotensor(gt, "IMEEstimate")
         require_projected_crs(gt, "IMEEstimate")
-        mask = squeeze_single_band(np.asarray(self.plume_mask)).astype(bool)
+        require_grid_match(
+            gt, plume_mask, "IMEEstimate", names=("enhancement", "plume_mask")
+        )
+        mask = squeeze_single_band(np.asarray(plume_mask)).astype(bool)
         enhancement = _single_band_nan(gt)
         area = (
             self.pixel_area_m2
@@ -748,19 +747,6 @@ class IMEEstimate(Operator):
                 abs(rate) * self.uncertainty_fraction
             )
         return out
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "plume_mask": {
-                "shape": list(np.asarray(self.plume_mask).shape),
-                "dtype": str(np.asarray(self.plume_mask).dtype),
-            },
-            "wind_speed": self.wind_speed,
-            "length_method": self.length_method,
-            "pixel_area_m2": self.pixel_area_m2,
-            "return_uncertainty": self.return_uncertainty,
-            "uncertainty_fraction": self.uncertainty_fraction,
-        }
 
 
 class CrossSectionalFlux(Operator):
@@ -795,8 +781,11 @@ class CrossSectionalFlux(Operator):
     with metre units; a geographic CRS raises ``ValueError`` (reproject
     with :class:`geotoolz.geom.Reproject` first).
 
+    Called as ``op(enhancement, plume_mask)``: ``plume_mask`` is a boolean
+    plume carrier on the enhancement's pixel grid (``ValueError``
+    otherwise).
+
     Args:
-        plume_mask: Boolean plume ``GeoTensor``.
         source: ``(x, y)`` source coordinates in the carrier CRS (m).
         wind_u: Eastward wind component (m/s).
         wind_v: Northward wind component (m/s).
@@ -812,41 +801,42 @@ class CrossSectionalFlux(Operator):
         Evaluate fluxes at 100 m, 200 m, 300 m downwind::
 
             gdf = gz.plume.CrossSectionalFlux(
-                plume_mask=mask, source=(x0, y0),
+                source=(x0, y0),
                 wind_u=3.0, wind_v=1.0,
                 n_transects=3, transect_spacing_m=100.0,
-            )(kg_m2)
+            )(kg_m2, mask)
     """
 
     _terminal: ClassVar[bool] = True
 
-    forbid_in_yaml: ClassVar[bool] = True
-
     def __init__(
         self,
         *,
-        plume_mask: GeoTensor,
         source: tuple[float, float],
         wind_u: float,
         wind_v: float,
         n_transects: int = 5,
         transect_spacing_m: float = 100.0,
     ) -> None:
-        self.plume_mask = plume_mask
         self.source = as_tuple(source)
         self.wind_u = wind_u
         self.wind_v = wind_v
         self.n_transects = n_transects
         self.transect_spacing_m = transect_spacing_m
 
-    def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
+    def _apply(
+        self, gt: GeoTensor, plume_mask: GeoTensor | np.ndarray
+    ) -> gpd.GeoDataFrame:
         require_ndim(gt, (2, 3), "CrossSectionalFlux")
         require_geotensor(gt, "CrossSectionalFlux")
         require_projected_crs(gt, "CrossSectionalFlux")
+        require_grid_match(
+            gt, plume_mask, "CrossSectionalFlux", names=("enhancement", "plume_mask")
+        )
         wind_norm = float(np.hypot(self.wind_u, self.wind_v))
         if wind_norm == 0.0:
             raise ValueError("wind vector must be non-zero")
-        mask = squeeze_single_band(np.asarray(self.plume_mask)).astype(bool)
+        mask = squeeze_single_band(np.asarray(plume_mask)).astype(bool)
         enhancement = _single_band_nan(gt)
         area = pixel_area(gt.transform)
         width = float(np.sqrt(area))
@@ -884,19 +874,6 @@ class CrossSectionalFlux(Operator):
                 }
             )
         return gpd.GeoDataFrame(rows, geometry="geometry", crs=gt.crs)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "plume_mask": {
-                "shape": list(np.asarray(self.plume_mask).shape),
-                "dtype": str(np.asarray(self.plume_mask).dtype),
-            },
-            "source": self.source,
-            "wind_u": self.wind_u,
-            "wind_v": self.wind_v,
-            "n_transects": self.n_transects,
-            "transect_spacing_m": self.transect_spacing_m,
-        }
 
 
 class ColumnToMass(Operator):
@@ -1111,22 +1088,20 @@ class PlumeColumnStats(Operator):
     Nodata column pixels (non-finite or equal to the column carrier's
     fill value) are left out of every statistic.
 
-    Args:
-        column: Carrier with the column field (single-band ``GeoTensor``
-            or plain array, same shape as the input label map).
+    Called as ``op(labels, column)``: ``column`` is the column field
+    (single-band ``GeoTensor`` or plain array) on the label map's pixel
+    grid (``ValueError`` otherwise).
     """
 
     _terminal: ClassVar[bool] = True
 
-    forbid_in_yaml: ClassVar[bool] = True
-
-    def __init__(self, *, column: GeoTensor | np.ndarray) -> None:
-        self.column = column
-
-    def _apply(self, gt: GeoTensor | np.ndarray) -> pd.DataFrame:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, column: GeoTensor | np.ndarray
+    ) -> pd.DataFrame:
         require_ndim(gt, (2, 3), "PlumeColumnStats")
+        require_grid_match(gt, column, "PlumeColumnStats", names=("labels", "column"))
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
-        col_arr = _single_band_nan(self.column).astype(float, copy=False)
+        col_arr = _single_band_nan(column).astype(float, copy=False)
         if col_arr.shape != labels.shape:
             raise ValueError(
                 "column shape "
@@ -1166,14 +1141,6 @@ class PlumeColumnStats(Operator):
                 ]
             )
         return pd.DataFrame(rows)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "column": {
-                "shape": list(np.asarray(self.column).shape),
-                "dtype": str(np.asarray(self.column).dtype),
-            },
-        }
 
 
 def _qnd_polynomial(
@@ -1269,10 +1236,12 @@ class PlumeQNDFeatures(Operator):
     Nodata column / albedo pixels (non-finite or equal to the carrier's
     fill value) are left out of every feature.
 
+    Called as ``op(labels, column, albedo=None)``: ``column`` is the
+    column-enhancement carrier and ``albedo`` an optional albedo carrier,
+    both on the label map's pixel grid (``ValueError`` otherwise). Without
+    ``albedo`` the ``qnd_albedo_*`` coefficients are NaN.
+
     Args:
-        column: Column-enhancement carrier (same shape as the label map).
-        albedo: Optional albedo carrier; when omitted the ``qnd_albedo_*``
-            coefficients are filled with NaN.
         degree: Degree of the QND polynomial (paper default: 6).
         eps: DBSCAN ``eps`` (pixels).
         min_samples: DBSCAN ``min_samples``.
@@ -1282,13 +1251,9 @@ class PlumeQNDFeatures(Operator):
 
     _terminal: ClassVar[bool] = True
 
-    forbid_in_yaml: ClassVar[bool] = True
-
     def __init__(
         self,
         *,
-        column: GeoTensor | np.ndarray,
-        albedo: GeoTensor | np.ndarray | None = None,
         degree: int = 6,
         eps: float = 50.0,
         min_samples: int = 50,
@@ -1302,26 +1267,34 @@ class PlumeQNDFeatures(Operator):
             raise ValueError("min_samples must be >= 1")
         if not 0.0 < perc_threshold < 100.0:
             raise ValueError("perc_threshold must be in (0, 100)")
-        self.column = column
-        self.albedo = albedo
         self.degree = int(degree)
         self.eps = float(eps)
         self.min_samples = int(min_samples)
         self.perc_threshold = float(perc_threshold)
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> pd.DataFrame:
+    def _apply(
+        self,
+        gt: GeoTensor | np.ndarray,
+        column: GeoTensor | np.ndarray,
+        albedo: GeoTensor | np.ndarray | None = None,
+    ) -> pd.DataFrame:
         require_ndim(gt, (2, 3), "PlumeQNDFeatures")
+        require_grid_match(gt, column, "PlumeQNDFeatures", names=("labels", "column"))
+        if albedo is not None:
+            require_grid_match(
+                gt, albedo, "PlumeQNDFeatures", names=("labels", "albedo")
+            )
         labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
-        col_arr = _single_band_nan(self.column).astype(float, copy=False)
+        col_arr = _single_band_nan(column).astype(float, copy=False)
         if col_arr.shape != labels.shape:
             raise ValueError(
                 "column shape "
                 f"{col_arr.shape} does not match label shape {labels.shape}"
             )
-        if self.albedo is None:
+        if albedo is None:
             alb_arr = None
         else:
-            alb_arr = _single_band_nan(self.albedo).astype(float, copy=False)
+            alb_arr = _single_band_nan(albedo).astype(float, copy=False)
             if alb_arr.shape != labels.shape:
                 raise ValueError(
                     "albedo shape "
@@ -1376,21 +1349,3 @@ class PlumeQNDFeatures(Operator):
             ]
             return pd.DataFrame(columns=empty_cols)
         return pd.DataFrame(rows)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "column": {
-                "shape": list(np.asarray(self.column).shape),
-                "dtype": str(np.asarray(self.column).dtype),
-            },
-            "albedo": None
-            if self.albedo is None
-            else {
-                "shape": list(np.asarray(self.albedo).shape),
-                "dtype": str(np.asarray(self.albedo).dtype),
-            },
-            "degree": self.degree,
-            "eps": self.eps,
-            "min_samples": self.min_samples,
-            "perc_threshold": self.perc_threshold,
-        }

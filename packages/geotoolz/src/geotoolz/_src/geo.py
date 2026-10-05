@@ -9,6 +9,8 @@ needs:
   operator that measures lengths, areas or slopes;
 * :func:`grid_matches` -- whether two rasters sit on the same pixel grid
   (spatial shape, transform, CRS);
+* :func:`require_grid_match` -- raise a ``ValueError`` naming the operator
+  when the carriers of a multi-input operator sit on different grids;
 * :func:`ground_pixel_size` -- the true ground length of one pixel step
   along each axis, on any rotated (not sheared) grid;
 * :func:`pixel_xy` -- vectorised CRS coordinates of pixel centres.
@@ -36,6 +38,7 @@ __all__ = [
     "ground_pixel_size",
     "pixel_xy",
     "require_geotensor",
+    "require_grid_match",
     "require_projected_crs",
 ]
 
@@ -222,6 +225,53 @@ def grid_matches(
             atol=atol,
         )
     )
+
+
+def _describe_grid(x: Any, spatial_only: bool) -> str:
+    shape = tuple(np.shape(x)[-2:] if spatial_only else np.shape(x))
+    transform = getattr(x, "transform", None)
+    if transform is None:
+        return f"shape {shape}"
+    coeffs = tuple(round(float(c), 6) for c in tuple(transform)[:6])
+    return f"shape {shape}, transform {coeffs}, crs {getattr(x, 'crs', None)}"
+
+
+def require_grid_match(
+    a: Any,
+    b: Any,
+    op_name: str,
+    *,
+    names: tuple[str, str] = ("input", "other"),
+    atol: float = 0.0,
+    spatial_only: bool = True,
+) -> None:
+    """Raise unless two carriers of a multi-input operator share a pixel grid.
+
+    The one guard behind every multi-input operator (#141): the carriers
+    are combined pixel by pixel, so a second carrier on another grid (a
+    20 m mask against a 10 m enhancement, a DEM over a neighbouring
+    tile) would give a silently wrong answer. Semantics are those of
+    :func:`grid_matches`.
+
+    Args:
+        a: The primary carrier.
+        b: The second carrier.
+        op_name: Operator name for the error message.
+        names: How the message refers to ``a`` and ``b``.
+        atol: Absolute tolerance on each transform coefficient.
+        spatial_only: Compare only the trailing ``(H, W)`` axes.
+
+    Raises:
+        ValueError: The grids differ; the message names the operator and
+            both grids.
+    """
+    if not grid_matches(a, b, atol=atol, spatial_only=spatial_only):
+        raise ValueError(
+            f"{op_name}: the {names[1]} pixel grid "
+            f"({_describe_grid(b, spatial_only)}) does not match the "
+            f"{names[0]} pixel grid ({_describe_grid(a, spatial_only)}). Resample one "
+            "onto the other first, e.g. with geotoolz.geom.ResampleLike."
+        )
 
 
 def pixel_xy(

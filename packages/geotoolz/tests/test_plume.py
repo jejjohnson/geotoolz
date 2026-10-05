@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 import numpy as np
@@ -9,6 +10,7 @@ import pytest
 import rasterio
 from _helpers import fill_pixel_mask, toy_geotensor
 from georeader.geotensor import GeoTensor
+from pipekit import Operator
 
 import geotoolz as gz
 from geotoolz.plume import convert_column_units
@@ -67,11 +69,9 @@ def test_plume_footprint_area_and_enhancement_stats() -> None:
     mask[1:3, 1:4] = True
     enhancement = np.arange(16, dtype=float).reshape(4, 4)
 
-    gdf = gz.plume.PlumeFootprint(
-        min_area_m2=1.0,
-        simplify_tolerance=None,
-        enhancement=_gt(enhancement),
-    )(_gt(mask))
+    gdf = gz.plume.PlumeFootprint(min_area_m2=1.0, simplify_tolerance=None)(
+        _gt(mask), _gt(enhancement)
+    )
 
     assert len(gdf) == 1
     row = gdf.iloc[0]
@@ -259,11 +259,9 @@ def test_ime_estimate_uses_integrated_mass_and_max_axis_length() -> None:
     mask = _gt(np.array([[True, True, True]]))
     enhancement = _gt(np.array([[2.0, 2.0, 2.0]]))
 
-    estimate = gz.plume.IMEEstimate(
-        plume_mask=mask,
-        wind_speed=2.0,
-        return_uncertainty=False,
-    )(enhancement)
+    estimate = gz.plume.IMEEstimate(wind_speed=2.0, return_uncertainty=False)(
+        enhancement, mask
+    )
 
     assert estimate["ime_kg"] == pytest.approx(600.0)
     assert estimate["length_m"] == pytest.approx(20.0)
@@ -281,16 +279,11 @@ def test_ime_skeleton_length_and_uncertainty_fraction() -> None:
     enhancement = _gt(np.ones((5, 5), dtype=float))
 
     estimate = gz.plume.IMEEstimate(
-        plume_mask=mask,
-        wind_speed=2.0,
-        length_method="skeleton",
-        uncertainty_fraction=0.2,
-    )(enhancement)
-    max_axis = gz.plume.IMEEstimate(
-        plume_mask=mask,
-        wind_speed=2.0,
-        length_method="max_axis",
-    )(enhancement)
+        wind_speed=2.0, length_method="skeleton", uncertainty_fraction=0.2
+    )(enhancement, mask)
+    max_axis = gz.plume.IMEEstimate(wind_speed=2.0, length_method="max_axis")(
+        enhancement, mask
+    )
 
     # 3 + 3 orthogonal 10 m steps plus one diagonal step at the corner.
     expected_length = 60.0 + 10.0 * np.sqrt(2.0)
@@ -316,9 +309,9 @@ def test_skeleton_length_diagonal_plume() -> None:
     assert plume_length(mask, transform, method="skeleton") == pytest.approx(
         90.0 * np.sqrt(2.0)
     )
-    estimate = gz.plume.IMEEstimate(
-        plume_mask=_gt(mask), wind_speed=1.0, length_method="skeleton"
-    )(_gt(np.ones((10, 10))))
+    estimate = gz.plume.IMEEstimate(wind_speed=1.0, length_method="skeleton")(
+        _gt(np.ones((10, 10))), _gt(mask)
+    )
     assert estimate["length_m"] == pytest.approx(127.279, abs=1e-3)
     assert estimate["emission_rate_kg_s"] > 0.0
 
@@ -368,9 +361,9 @@ def test_skeleton_length_single_pixel_and_compact_blob() -> None:
     with pytest.raises(ValueError, match="skeleton plume length is 0"):
         plume_length(blob, transform, method="skeleton")
     with pytest.raises(ValueError, match="max_axis"):
-        gz.plume.IMEEstimate(
-            plume_mask=_gt(blob), wind_speed=1.0, length_method="skeleton"
-        )(_gt(np.ones((2, 2))))
+        gz.plume.IMEEstimate(wind_speed=1.0, length_method="skeleton")(
+            _gt(np.ones((2, 2))), _gt(blob)
+        )
 
 
 def test_skeleton_plume_length_is_deterministic_for_multi_component_mask() -> None:
@@ -412,24 +405,22 @@ _GEO_OPS = ("PlumeFootprint", "IMEEstimate", "WindAdvectionCone", "CrossSectiona
 
 
 def _geo_case(name: str, make: Callable[[np.ndarray], GeoTensor]) -> tuple:
-    """Build ``(operator, input)`` for a metre-assuming plume operator."""
+    """Build ``(operator, inputs)`` for a metre-assuming plume operator."""
     mask_arr = np.zeros((10, 15), dtype=bool)
     mask_arr[4:6, :] = True
     mask = make(mask_arr)
     enhancement = make(mask_arr.astype(float))
     if name == "PlumeFootprint":
-        return gz.plume.PlumeFootprint(min_area_m2=0.0), mask
+        return gz.plume.PlumeFootprint(min_area_m2=0.0), (mask,)
     if name == "IMEEstimate":
-        return gz.plume.IMEEstimate(plume_mask=mask, wind_speed=2.0), enhancement
+        return gz.plume.IMEEstimate(wind_speed=2.0), (enhancement, mask)
     if name == "WindAdvectionCone":
         op = gz.plume.WindAdvectionCone(
             source=(0.0, 0.0), wind_u=1.0, wind_v=0.0, max_distance=200.0
         )
-        return op, mask
-    op = gz.plume.CrossSectionalFlux(
-        plume_mask=mask, source=(0.0, 0.0), wind_u=1.0, wind_v=0.0
-    )
-    return op, enhancement
+        return op, (mask,)
+    op = gz.plume.CrossSectionalFlux(source=(0.0, 0.0), wind_u=1.0, wind_v=0.0)
+    return op, (enhancement, mask)
 
 
 @pytest.mark.parametrize(
@@ -446,15 +437,15 @@ def test_geo_ops_reject_geographic_crs(crs: str, match: str, name: str) -> None:
             crs=crs,
         )
 
-    op, carrier = _geo_case(name, make)
+    op, inputs = _geo_case(name, make)
     with pytest.raises(ValueError, match=rf"{name}.*{match}.*Reproject"):
-        op(carrier)
+        op(*inputs)
 
 
 @pytest.mark.parametrize("name", _GEO_OPS)
 def test_geo_ops_accept_projected_crs(name: str) -> None:
-    op, carrier = _geo_case(name, _gt)
-    op(carrier)
+    op, inputs = _geo_case(name, _gt)
+    op(*inputs)
 
 
 def test_wind_cone_source_crs_requires_carrier_crs() -> None:
@@ -477,11 +468,7 @@ def test_wind_cone_source_crs_requires_carrier_crs() -> None:
 
 def test_ime_rejects_negative_uncertainty_fraction() -> None:
     with pytest.raises(ValueError, match="uncertainty_fraction"):
-        gz.plume.IMEEstimate(
-            plume_mask=_gt(np.ones((1, 1), dtype=bool)),
-            wind_speed=1.0,
-            uncertainty_fraction=-0.1,
-        )
+        gz.plume.IMEEstimate(wind_speed=1.0, uncertainty_fraction=-0.1)
 
 
 def test_ime_convex_hull_length_agrees_with_max_axis_on_convex_plume() -> None:
@@ -489,17 +476,11 @@ def test_ime_convex_hull_length_agrees_with_max_axis_on_convex_plume() -> None:
     enhancement = _gt(np.ones((2, 2), dtype=float))
 
     convex_hull = gz.plume.IMEEstimate(
-        plume_mask=mask,
-        wind_speed=1.0,
-        length_method="convex_hull",
-        return_uncertainty=False,
-    )(enhancement)
+        wind_speed=1.0, length_method="convex_hull", return_uncertainty=False
+    )(enhancement, mask)
     max_axis = gz.plume.IMEEstimate(
-        plume_mask=mask,
-        wind_speed=1.0,
-        length_method="max_axis",
-        return_uncertainty=False,
-    )(enhancement)
+        wind_speed=1.0, length_method="max_axis", return_uncertainty=False
+    )(enhancement, mask)
 
     assert convex_hull["length_m"] == pytest.approx(max_axis["length_m"])
 
@@ -509,13 +490,12 @@ def test_cross_sectional_flux_returns_transect_geodataframe() -> None:
     enhancement = _gt(np.ones((3, 3), dtype=float))
 
     gdf = gz.plume.CrossSectionalFlux(
-        plume_mask=mask,
         source=(0.0, 100.0),
         wind_u=1.0,
         wind_v=0.0,
         n_transects=2,
         transect_spacing_m=10.0,
-    )(enhancement)
+    )(enhancement, mask)
 
     assert list(gdf["transect_id"]) == [1, 2]
     assert (gdf["flux_kg_s"] >= 0.0).all()
@@ -547,7 +527,7 @@ def test_sbmp_reference_scene_correlates_with_injected_signal() -> None:
     reference = np.stack([np.ones_like(truth), np.ones_like(truth)], axis=0)
     scene = np.stack([np.exp(truth), np.ones_like(truth)], axis=0)
 
-    out = gz.plume.SBMP(swir1=0, swir2=1, reference_scene=_gt(reference))(_gt(scene))
+    out = gz.plume.SBMP(swir1=0, swir2=1)(_gt(scene), _gt(reference))
 
     assert np.allclose(np.asarray(out), truth)
     corr = np.corrcoef(np.asarray(out).ravel(), truth.ravel())[0, 1]
@@ -561,7 +541,7 @@ def test_sbmp_default_sentinel2_swir_band_names_on_plain_l2a_array() -> None:
     scene = reference.copy()
     scene[10] = np.exp(truth)
 
-    out = gz.plume.SBMP(reference_scene=reference)(scene)
+    out = gz.plume.SBMP()(scene, reference)
 
     assert np.allclose(np.asarray(out), truth)
 
@@ -580,7 +560,7 @@ def test_sbmp_resolves_band_names_from_carrier_attrs() -> None:
     scene_gt = _gt(scene)
     scene_gt.attrs["band_names"] = l1c
 
-    out = gz.plume.SBMP(reference_scene=ref_gt)(scene_gt)
+    out = gz.plume.SBMP()(scene_gt, ref_gt)
 
     assert np.allclose(np.asarray(out), truth)
 
@@ -627,11 +607,9 @@ def test_ime_recovers_injected_mass_on_synthetic_plume() -> None:
     expected_length = 9 * 10.0
     wind = 4.0
 
-    result = gz.plume.IMEEstimate(
-        plume_mask=_gt(mask_arr),
-        wind_speed=wind,
-        return_uncertainty=False,
-    )(_gt(enhancement))
+    result = gz.plume.IMEEstimate(wind_speed=wind, return_uncertainty=False)(
+        _gt(enhancement), _gt(mask_arr)
+    )
 
     assert result["ime_kg"] == pytest.approx(expected_ime)
     assert result["length_m"] == pytest.approx(expected_length)
@@ -644,11 +622,9 @@ def test_ime_empty_mask_yields_zero_emission() -> None:
     mask = _gt(np.zeros((4, 4), dtype=bool))
     enhancement = _gt(np.ones((4, 4), dtype=float))
 
-    result = gz.plume.IMEEstimate(
-        plume_mask=mask,
-        wind_speed=5.0,
-        return_uncertainty=False,
-    )(enhancement)
+    result = gz.plume.IMEEstimate(wind_speed=5.0, return_uncertainty=False)(
+        enhancement, mask
+    )
 
     assert result["ime_kg"] == 0.0
     assert result["length_m"] == 0.0
@@ -673,13 +649,12 @@ def test_cross_sectional_flux_matches_uniform_plume_analytical() -> None:
     wind_v = 0.0
 
     gdf = gz.plume.CrossSectionalFlux(
-        plume_mask=_gt(mask_arr),
         source=(source_x, source_y),
         wind_u=wind_u,
         wind_v=wind_v,
         n_transects=3,
         transect_spacing_m=10.0,
-    )(_gt(enhancement))
+    )(_gt(enhancement), _gt(mask_arr))
 
     # Each transect crosses exactly one pixel (1 kg/m^2) of along-wind
     # half-width 5 m. Flux = Omega * |U| * dx_across = 1 * 1 * 10 = 10.
@@ -692,13 +667,12 @@ def test_cross_sectional_flux_rejects_zero_wind() -> None:
     mask = _gt(np.ones((3, 3), dtype=bool))
     enhancement = _gt(np.ones((3, 3), dtype=float))
     op = gz.plume.CrossSectionalFlux(
-        plume_mask=mask,
         source=(0.0, 0.0),
         wind_u=0.0,
         wind_v=0.0,
     )
     with pytest.raises(ValueError, match="wind vector"):
-        op(enhancement)
+        op(enhancement, mask)
 
 
 def test_column_unit_round_trip_through_mol_m2() -> None:
@@ -712,10 +686,6 @@ def test_column_unit_round_trip_through_mol_m2() -> None:
 
 def test_plume_operators_get_config_is_json_safe() -> None:
     """get_config dicts must be JSON-serialisable (no GeoTensors)."""
-    import json
-
-    mask_gt = _gt(np.ones((2, 2), dtype=bool))
-
     ops = [
         gz.plume.PlumeMask(threshold="otsu", min_area_px=10),
         gz.plume.PlumeContours(min_area_px=5),
@@ -726,14 +696,15 @@ def test_plume_operators_get_config_is_json_safe() -> None:
             wind_v=0.0,
         ),
         gz.plume.ColumnToMass(gas="CO2", units_in="ppm_m"),
-        gz.plume.IMEEstimate(plume_mask=mask_gt, wind_speed=3.0),
+        gz.plume.IMEEstimate(wind_speed=3.0),
         gz.plume.CrossSectionalFlux(
-            plume_mask=mask_gt,
             source=(0.0, 0.0),
             wind_u=1.0,
             wind_v=0.0,
         ),
-        gz.plume.SBMP(reference_scene=_gt(np.ones((12, 2, 2)))),
+        gz.plume.SBMP(),
+        gz.plume.PlumeColumnStats(),
+        gz.plume.PlumeQNDFeatures(),
     ]
     for op in ops:
         # Must round-trip through JSON without raising.
@@ -814,7 +785,7 @@ def test_plume_column_stats_in_out_contrast_matches_xch4_metrics() -> None:
     values = np.ones((10, 10), dtype=float)
     values[3:7, 3:7] = 5.0
 
-    df = gz.plume.PlumeColumnStats(column=_gt(values))(_gt(labels))
+    df = gz.plume.PlumeColumnStats()(_gt(labels), _gt(values))
 
     assert len(df) == 1
     row = df.iloc[0]
@@ -829,7 +800,7 @@ def test_plume_column_stats_in_out_contrast_matches_xch4_metrics() -> None:
 
 def test_plume_column_stats_empty_label_map_returns_empty_frame() -> None:
     labels = np.zeros((5, 5), dtype=np.int32)
-    df = gz.plume.PlumeColumnStats(column=_gt(np.zeros((5, 5))))(_gt(labels))
+    df = gz.plume.PlumeColumnStats()(_gt(labels), _gt(np.zeros((5, 5))))
     assert df.empty
     assert "intensity_per_area" in df.columns
 
@@ -842,9 +813,9 @@ def test_plume_qnd_features_emits_polynomial_columns() -> None:
     labels[15:25, 15:25] = 1
 
     op = gz.plume.PlumeQNDFeatures(
-        column=_gt(column), degree=4, eps=5.0, min_samples=3, perc_threshold=90.0
+        degree=4, eps=5.0, min_samples=3, perc_threshold=90.0
     )
-    df = op(_gt(labels))
+    df = op(_gt(labels), _gt(column))
 
     assert len(df) == 1
     row = df.iloc[0]
@@ -877,12 +848,8 @@ def test_plume_qnd_features_n_clumps_uses_dbscan_labels_not_raster_connectivity(
     labels[3:8, 3:8] = 1
 
     df = gz.plume.PlumeQNDFeatures(
-        column=_gt(column),
-        degree=3,
-        eps=2.0,
-        min_samples=2,
-        perc_threshold=80.0,
-    )(_gt(labels))
+        degree=3, eps=2.0, min_samples=2, perc_threshold=80.0
+    )(_gt(labels), _gt(column))
     assert int(df.iloc[0]["n_clumps"]) == 1
 
 
@@ -891,7 +858,7 @@ def test_plume_qnd_features_handles_too_few_samples() -> None:
     labels = np.zeros((20, 20), dtype=np.int32)
     labels[0, 0:5] = 1  # only 5 pixels: below the 10-sample threshold
 
-    df = gz.plume.PlumeQNDFeatures(column=_gt(column), degree=3)(_gt(labels))
+    df = gz.plume.PlumeQNDFeatures(degree=3)(_gt(labels), _gt(column))
 
     row = df.iloc[0]
     # All polynomial coefficients should fall through to NaN when fewer
@@ -956,18 +923,19 @@ def test_plain_ndarray_in_plain_ndarray_out(
 def test_geo_dependent_plume_ops_reject_plain_arrays() -> None:
     """Transform/CRS-dependent ops must fail loudly on plain arrays."""
     arr = np.ones((4, 4), dtype=float)
-    mask_gt = _gt(np.ones((4, 4), dtype=bool))
-    ops = [
-        gz.plume.PlumeFootprint(min_area_m2=1.0),
-        gz.plume.WindAdvectionCone(source=(0.0, 0.0), wind_u=1.0, wind_v=0.0),
-        gz.plume.IMEEstimate(plume_mask=mask_gt, wind_speed=1.0),
-        gz.plume.CrossSectionalFlux(
-            plume_mask=mask_gt, source=(0.0, 0.0), wind_u=1.0, wind_v=0.0
+    mask = np.ones((4, 4), dtype=bool)
+    cases = [
+        (gz.plume.PlumeFootprint(min_area_m2=1.0), ()),
+        (gz.plume.WindAdvectionCone(source=(0.0, 0.0), wind_u=1.0, wind_v=0.0), ()),
+        (gz.plume.IMEEstimate(wind_speed=1.0), (mask,)),
+        (
+            gz.plume.CrossSectionalFlux(source=(0.0, 0.0), wind_u=1.0, wind_v=0.0),
+            (mask,),
         ),
     ]
-    for op in ops:
+    for op, extra in cases:
         with pytest.raises(TypeError, match="georeferenced GeoTensor"):
-            op(arr)
+            op(arr, *extra)
 
 
 def test_plume_column_stats_accepts_plain_arrays() -> None:
@@ -978,8 +946,8 @@ def test_plume_column_stats_accepts_plain_arrays() -> None:
     values = np.ones((6, 6), dtype=float)
     values[2:5, 2:5] = 4.0
 
-    df_arr = gz.plume.PlumeColumnStats(column=values)(labels)
-    df_gt = gz.plume.PlumeColumnStats(column=_gt(values))(_gt(labels))
+    df_arr = gz.plume.PlumeColumnStats()(labels, values)
+    df_gt = gz.plume.PlumeColumnStats()(_gt(labels), _gt(values))
 
     pd.testing.assert_frame_equal(df_arr, df_gt)
 
@@ -990,11 +958,8 @@ def test_ime_convex_hull_handles_collinear_points() -> None:
     enhancement = _gt(np.ones((1, 4), dtype=float))
 
     result = gz.plume.IMEEstimate(
-        plume_mask=mask,
-        wind_speed=1.0,
-        length_method="convex_hull",
-        return_uncertainty=False,
-    )(enhancement)
+        wind_speed=1.0, length_method="convex_hull", return_uncertainty=False
+    )(enhancement, mask)
 
     # Four pixels at 10 m spacing -> length = 3 * 10 = 30 m.
     assert result["length_m"] == pytest.approx(30.0)
@@ -1058,9 +1023,9 @@ def test_fill_pixels_are_excluded(case: str) -> None:
     elif case == "ime":
         enhancement = toy_geotensor(np.ones(shape), with_fill_pixels=True)
         plume = toy_geotensor(np.ones(shape, dtype=bool))
-        result = gz.plume.IMEEstimate(
-            plume_mask=plume, wind_speed=1.0, return_uncertainty=False
-        )(enhancement)
+        result = gz.plume.IMEEstimate(wind_speed=1.0, return_uncertainty=False)(
+            enhancement, plume
+        )
         assert result["ime_kg"] == pytest.approx(valid.sum() * 100.0)
     elif case == "column_to_mass":
         # Issue reproduction (#146): the fill pixel used to be scaled to
@@ -1111,7 +1076,57 @@ def test_ime_mass_scales_with_the_true_pixel_area(grid: str, area_ratio: float) 
 
     def ime(g: str) -> float:
         plume = toy_geotensor(mask, grid=g, fill_value_default=None)
-        op = gz.plume.IMEEstimate(plume_mask=plume, wind_speed=1.0)
-        return op(toy_geotensor(column, grid=g))["ime_kg"]
+        op = gz.plume.IMEEstimate(wind_speed=1.0)
+        return op(toy_geotensor(column, grid=g), plume)["ime_kg"]
 
     assert ime(grid) == pytest.approx(area_ratio * ime("utm"))
+
+
+# ---------------------------------------------------------------------------
+# Multi-input convention (#141)
+# ---------------------------------------------------------------------------
+
+
+def test_ime_rejects_a_plume_mask_on_another_grid() -> None:
+    """A 10 m mask against a 20 m enhancement is an error, not a wrong IME.
+
+    With the mask pinned in the constructor, ``IMEEstimate`` indexed the
+    20 m enhancement with the 10 m mask's pixels and returned an ``ime_kg``
+    computed with the enhancement's pixel area -- a silently wrong answer.
+    """
+    mask = np.zeros((8, 8), dtype=bool)
+    mask[2:6, 2:6] = True
+    mask_10m = _gt(mask)
+    enh_20m = GeoTensor(
+        values=np.ones((8, 8)),
+        transform=rasterio.Affine(20.0, 0.0, 0.0, 0.0, -20.0, 100.0),
+        crs="EPSG:32629",
+        fill_value_default=-9999,
+    )
+    op = gz.plume.IMEEstimate(wind_speed=1.0)
+    with pytest.raises(ValueError, match=r"IMEEstimate: the plume_mask pixel grid"):
+        op(enh_20m, mask_10m)
+    # On the enhancement's own grid the estimate goes through.
+    enh_10m = _gt(np.ones((8, 8)))
+    assert op(enh_10m, mask_10m)["ime_kg"] == pytest.approx(16 * 100.0)
+
+
+def test_plume_carrier_kwargs_are_gone() -> None:
+    """Second carriers are call arguments; the old kwargs raise (#141)."""
+    mask = _gt(np.ones((2, 2), dtype=bool))
+    with pytest.raises(TypeError, match="plume_mask"):
+        gz.plume.IMEEstimate(plume_mask=mask, wind_speed=1.0)  # ty: ignore[unknown-argument]
+    with pytest.raises(TypeError, match="reference_scene"):
+        gz.plume.SBMP(reference_scene=mask)  # ty: ignore[unknown-argument]
+    with pytest.raises(TypeError, match="takes no arguments"):
+        gz.plume.PlumeColumnStats(column=mask)  # ty: ignore[unknown-argument]
+    # Without runtime carriers, the operators round-trip through their state.
+    for op in (
+        gz.plume.IMEEstimate(wind_speed=2.0),
+        gz.plume.CrossSectionalFlux(source=(0.0, 0.0), wind_u=1.0, wind_v=0.0),
+        gz.plume.PlumeColumnStats(),
+        gz.plume.PlumeQNDFeatures(degree=3),
+    ):
+        assert not op.forbid_in_yaml
+        clone = Operator.from_state(json.loads(json.dumps(op.state)))
+        assert clone.get_config() == op.get_config()

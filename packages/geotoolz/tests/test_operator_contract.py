@@ -7,15 +7,19 @@ extras such as hydra-zen, that:
   ``RuntimeError`` for ``forbid_in_yaml`` classes;
 * ``get_config()`` is strict JSON (no NaN / inf) and names only
   constructor parameters;
-* calling the operator on ``Input`` nodes builds a graph ``Node``.
+* calling the operator on ``Input`` nodes builds a graph ``Node``, and
+  every multi-input operator (#141) runs inside a ``pipekit.Graph`` as
+  ``op(Input("a"), Input("b"))`` with the eager result, and rejects a
+  second carrier on another pixel grid with an error naming itself.
 * on a 4-D ``(T, C, H, W)`` time stack the operator returns the per-frame
   results restacked along time, or rejects the rank with a clear error
   naming itself (``test_time_stack_contract``).
 
 Operators that need constructor arguments get them from ``CTOR_KWARGS``;
-runtime objects (GeoTensors, geometries, callables) for the
-``forbid_in_yaml`` classes come from ``RUNTIME_CTOR_KWARGS`` in the checks
-that never serialise the operator.
+runtime objects (geometries, callables) for the ``forbid_in_yaml`` classes
+come from ``RUNTIME_CTOR_KWARGS`` in the checks that never serialise the
+operator. Second carriers are call arguments, never constructor kwargs
+(#141): ``MULTI_INPUTS`` builds them on the primary input's grid.
 Known contract violations are listed in ``KNOWN_FAILURES`` as strict
 xfails pointing at the issue that fixes them; fixing one makes the
 xfail pass, so remove the entry in the same PR.
@@ -125,6 +129,15 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "geom._src.operators.Resize": {"shape": (8, 8)},
     "geom._src.operators.SlidingWindow": {"size": (4, 4)},
     "geom._src.operators.Tile": {"size": (4, 4)},
+    "plume._src.operators.CrossSectionalFlux": {
+        "source": (500_050.0, 3_999_950.0),
+        "wind_u": 1.0,
+        "wind_v": 0.0,
+    },
+    "plume._src.operators.IMEEstimate": {"wind_speed": 1.0},
+    "mask._src.operators.AltitudeMask": {"min_elev": 10.0},
+    "mask._src.operators.SlopeMask": {"max_slope_deg": 30.0},
+    "plume._src.operators.SBMP": {"swir1": 0, "swir2": 1},
     "indices._src.operators.AppendIndex": lambda: {
         "index_op": __import__("geotoolz.indices", fromlist=["NDVI"]).NDVI(red=0, nir=1)
     },
@@ -263,8 +276,6 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
 UNBUILDABLE: dict[str, str] = {
     "matched_filter._src.operators.LinearTargetFromObs": "needs an obs_model",
     "matched_filter._src.operators.NonlinearTargetFromObs": "needs an obs_model",
-    "plume._src.operators.CrossSectionalFlux": "needs a plume_mask GeoTensor",
-    "plume._src.operators.IMEEstimate": "needs a plume_mask GeoTensor",
     "mask._src.operators._NaturalEarthMask": "private base class",
     "qa._src.operators._QAMask": "private base class",
 }
@@ -274,14 +285,6 @@ def _grid() -> Any:
     from _helpers import toy_geotensor
 
     return toy_geotensor(np.random.default_rng(0).uniform(0.01, 1.0, (3, 16, 16)))
-
-
-def _mask_grid() -> Any:
-    from _helpers import toy_geotensor
-
-    mask = np.zeros((16, 16), dtype=bool)
-    mask[4:8, 4:8] = True
-    return toy_geotensor(mask, fill_value_default=None)
 
 
 def _square() -> Any:
@@ -301,14 +304,10 @@ def _runtime(**kwargs: Callable[[], Any]) -> Callable[[], dict[str, Any]]:
 #: operator use them (``build(cls, runtime=True)``): graph mode, terminal
 #: outputs, output attrs, output fill and the 4-D time-stack contract.
 RUNTIME_CTOR_KWARGS: dict[str, Callable[[], dict[str, Any]]] = {
-    "augment._src.operators.CutMix": _runtime(pool=lambda: [_grid()]),
     "geom._src.operators.Georeference": _runtime(glt=_grid),
     "geom._src.operators.GeostationaryParallaxCorrect": lambda: {
         "satellite_lon_deg": 0.0
     },
-    "geom._src.operators.OpticalFlowILK": _runtime(reference=_grid),
-    "geom._src.operators.OpticalFlowTVL1": _runtime(reference=_grid),
-    "geom._src.operators.PhaseAlign": _runtime(reference=_grid),
     "geom._src.operators.Rasterize": _runtime(geometries=lambda: [_square()]),
     "geom._src.operators.RasterizeLike": _runtime(
         like=_grid,
@@ -324,13 +323,10 @@ RUNTIME_CTOR_KWARGS: dict[str, Callable[[], dict[str, Any]]] = {
         "like": _grid(),
     },
     "learn._src.operators.ModelOp": _runtime(model=lambda: np.negative),
-    "mask._src.operators.AltitudeMask": _runtime(dem=_grid),
-    "mask._src.operators.ApplyMask": _runtime(mask=lambda: np.zeros((16, 16), bool)),
     "mask._src.operators.DistanceMask": _runtime(
         geometry=_square, distance=lambda: 10.0
     ),
     "mask._src.operators.PolygonMask": _runtime(geometry=_square),
-    "mask._src.operators.SlopeMask": _runtime(dem=_grid),
     "matched_filter._src.operators.LinearTargetFromObs": _runtime(
         obs_model=lambda: np.exp
     ),
@@ -354,29 +350,113 @@ RUNTIME_CTOR_KWARGS: dict[str, Callable[[], dict[str, Any]]] = {
         "n_samples": 1,
         "size": (4, 4),
     },
-    "plume._src.operators.CrossSectionalFlux": lambda: {
-        "plume_mask": _mask_grid(),
-        "source": (500_050.0, 3_999_950.0),
-        "wind_u": 1.0,
-        "wind_v": 0.0,
-    },
-    "plume._src.operators.IMEEstimate": lambda: {
-        "plume_mask": _mask_grid(),
-        "wind_speed": 1.0,
-    },
-    "plume._src.operators.PlumeColumnStats": _runtime(column=_grid),
-    "plume._src.operators.PlumeQNDFeatures": _runtime(column=_grid),
     "radiometry._src.operators.IntegratedIrradiance": lambda: {
         "srf": __import__("pandas").DataFrame({"B1": [1.0]}, index=[500.0])
     },
-    "segment._src.operators.MarkBoundaries": _runtime(
-        label_img=lambda: np.zeros((16, 16), np.int32)
-    ),
-    "segment._src.operators.RandomWalker": _runtime(
-        markers=lambda: np.zeros((16, 16), np.int32)
-    ),
     "viz._src.operators.AnnotatePoints": _runtime(points=lambda: [(0.0, 0.0)]),
     "viz._src.operators.AnnotatePolygons": _runtime(geometries=lambda: [_square()]),
+}
+
+
+def _on_grid_of(x: Any, values: np.ndarray, fill: Any = None) -> Any:
+    """``values`` on ``x``'s pixel grid (a plain array when ``x`` is one)."""
+    from _helpers import toy_geotensor
+
+    if getattr(x, "transform", None) is None:
+        return values
+    return toy_geotensor(
+        values, transform=x.transform, crs=x.crs, fill_value_default=fill
+    )
+
+
+def _band_like(x: Any, seed: int = 3) -> Any:
+    """A single-band float field (column / DEM / intensity) on ``x``'s grid."""
+    values = np.random.default_rng(seed).uniform(1.0, 100.0, np.shape(x)[-2:])
+    return _on_grid_of(x, values, fill=-9999.0)
+
+
+def _mask_like(x: Any) -> Any:
+    """A boolean mask with a square of ``True`` pixels on ``x``'s grid."""
+    h, w = np.shape(x)[-2:]
+    values = np.zeros((h, w), dtype=bool)
+    values[h // 4 : h // 2, w // 4 : w // 2] = True
+    return _on_grid_of(x, values, fill=False)
+
+
+def _keep_like(x: Any) -> Any:
+    """A boolean keep-mask (``True`` = segment) with one dropped column."""
+    values = np.ones(np.shape(x)[-2:], dtype=bool)
+    values[:, 0] = False
+    return _on_grid_of(x, values, fill=False)
+
+
+def _markers_like(x: Any) -> Any:
+    """Two seed labels in opposite corners on ``x``'s grid."""
+    h, w = np.shape(x)[-2:]
+    values = np.zeros((h, w), dtype=np.int32)
+    values[1, 1] = 1
+    values[h - 2, w - 2] = 2
+    return _on_grid_of(x, values, fill=0)
+
+
+def _labels_like(x: Any) -> Any:
+    """A two-region label image on ``x``'s grid."""
+    h, w = np.shape(x)[-2:]
+    values = np.zeros((h, w), dtype=np.int32)
+    values[: h // 2, : w // 2] = 1
+    values[h // 2 :, w // 2 :] = 2
+    return _on_grid_of(x, values, fill=0)
+
+
+def _perturbed(x: Any) -> Any:
+    """A rescaled copy of ``x`` (same grid, full shape, fill and attrs)."""
+    values = np.asarray(x)
+    if values.dtype.kind == "f":
+        # One (H, W) factor field, so a stack's frames match the per-frame copies.
+        values = values * np.random.default_rng(5).uniform(0.8, 1.2, values.shape[-2:])
+    if getattr(x, "transform", None) is None:
+        return values
+    from georeader.geotensor import GeoTensor
+
+    return GeoTensor(
+        values,
+        transform=x.transform,
+        crs=x.crs,
+        fill_value_default=x.fill_value_default,
+        attrs=dict(x.attrs or {}),
+    )
+
+
+#: The second (and further) positional carriers of every two-carrier operator
+#: (#141), built on the primary input's grid: ``op(x, *MULTI_INPUTS[key](x))``.
+#: Optional carriers are included, so every input is exercised.
+MULTI_INPUTS: dict[str, Callable[[Any], tuple[Any, ...]]] = {
+    "augment._src.operators.CutMix": lambda x: (_perturbed(x),),
+    "geom._src.operators.OpticalFlowILK": lambda x: (_perturbed(x),),
+    "geom._src.operators.OpticalFlowTVL1": lambda x: (_perturbed(x),),
+    "geom._src.operators.PhaseAlign": lambda x: (_perturbed(x),),
+    "mask._src.operators.AltitudeMask": lambda x: (_band_like(x),),
+    "mask._src.operators.ApplyMask": lambda x: (_mask_like(x),),
+    "mask._src.operators.SlopeMask": lambda x: (_band_like(x),),
+    "measure._src.operators.RegionProps": lambda x: (_band_like(x),),
+    "plume._src.operators.CrossSectionalFlux": lambda x: (_mask_like(x),),
+    "plume._src.operators.IMEEstimate": lambda x: (_mask_like(x),),
+    "plume._src.operators.PlumeColumnStats": lambda x: (_band_like(x),),
+    "plume._src.operators.PlumeFootprint": lambda x: (_band_like(x),),
+    "plume._src.operators.PlumeQNDFeatures": lambda x: (
+        _band_like(x),
+        _band_like(x, seed=4),
+    ),
+    "plume._src.operators.SBMP": lambda x: (_perturbed(x),),
+    "segment._src.operators.Felzenszwalb": lambda x: (_keep_like(x),),
+    "segment._src.operators.MarkBoundaries": lambda x: (_labels_like(x),),
+    "segment._src.operators.Quickshift": lambda x: (_keep_like(x),),
+    "segment._src.operators.RandomWalker": lambda x: (_markers_like(x),),
+    "segment._src.operators.SLIC": lambda x: (_keep_like(x),),
+    "segment._src.operators.Watershed": lambda x: (
+        _markers_like(x),
+        _keep_like(x),
+    ),
 }
 
 #: ``{check: {operator key: (issue, expected exception)}}`` — strict xfails
@@ -692,20 +772,234 @@ def _n_inputs(op: Operator) -> int:
     return int(any(p.kind in positional or p.kind is p.VAR_POSITIONAL for p in params))
 
 
+def _graph_arity(op: Operator) -> int:
+    """Graph inputs to wire: every carrier of a multi-input operator (#141)."""
+    key = _key(type(op))
+    if key in MULTI_INPUTS:
+        return 1 + len(MULTI_INPUTS[key](_toy_inputs()[0]))
+    if key in NARY_INPUTS:
+        return len(NARY_INPUTS[key]())
+    return _n_inputs(op)
+
+
 @pytest.mark.parametrize("cls", _params("graph_mode"))
 def test_graph_mode(cls: type) -> None:
     """Calling an operator on ``Input`` nodes returns a ``Node``.
 
+    Multi-input operators are called on one ``Input`` per carrier (#141).
     Graph construction never serialises the operator, so ``forbid_in_yaml``
     and ``UNBUILDABLE`` classes are built from ``RUNTIME_CTOR_KWARGS``.
     """
     op = build(cls, runtime=True)
-    n = _n_inputs(op)
+    n = _graph_arity(op)
     if n == 0:
         pytest.skip("input-less operator (source)")
     node = op(*(Input(f"x{i}") for i in range(n)))
     assert isinstance(node, Node)
     assert node.operator is op
+    assert len(node.parents) == n
+
+
+# ---------------------------------------------------------------------------
+# Multi-input operators (#141)
+# ---------------------------------------------------------------------------
+
+
+def _two_frames() -> list[Any]:
+    scene = _scene()
+    return [scene, _perturbed(scene)]
+
+
+#: Inputs of the N-ary reducers (#141), wired one ``Input`` each in a graph.
+NARY_INPUTS: dict[str, Callable[[], list[Any]]] = {
+    "compositing._src.operators.BAPComposite": lambda: [
+        (frame, {"doy": 170 + t}) for t, frame in enumerate(_two_frames())
+    ],
+    "compositing._src.operators.BlendMatched": _two_frames,
+    "compositing._src.operators.CloudFreeComposite": lambda: [
+        (frame, _mask_like(frame)) for frame in _two_frames()
+    ],
+    "compositing._src.operators.MaxNDVIComposite": _two_frames,
+    "compositing._src.operators.MedianComposite": _two_frames,
+    "compositing._src.operators.MinCloudComposite": lambda: [
+        (frame, _mask_like(frame)) for frame in _two_frames()
+    ],
+    "compositing._src.operators.StackMatched": _two_frames,
+    "mask._src.operators.CombineMasks": lambda: [
+        _mask_like(_scene()),
+        _keep_like(_scene()),
+    ],
+}
+
+
+def _multi_input_classes() -> list[Any]:
+    return [
+        pytest.param(cls, id=_key(cls))
+        for cls in _CLASSES
+        if _key(cls) in MULTI_INPUTS or _key(cls) in NARY_INPUTS
+    ]
+
+
+#: The primary carrier of a two-carrier operator in the graph checks, when
+#: not the 3-band ``_scene()``: label maps for the per-instance tables, a
+#: single-band field for the plume quantifiers and the 1-band segmenters.
+GRAPH_PRIMARY: dict[str, Callable[[], Any]] = {
+    "measure._src.operators.RegionProps": lambda: _labels(),
+    "plume._src.operators.CrossSectionalFlux": lambda: _band_like(_scene()),
+    "plume._src.operators.IMEEstimate": lambda: _band_like(_scene()),
+    "plume._src.operators.PlumeColumnStats": lambda: _labels(),
+    "plume._src.operators.PlumeFootprint": lambda: _labels(),
+    "plume._src.operators.PlumeQNDFeatures": lambda: _labels(),
+    "segment._src.operators.RandomWalker": lambda: _band_like(_scene()),
+    "segment._src.operators.Watershed": lambda: _band_like(_scene()),
+}
+
+
+def _graph_values(cls: type) -> list[Any]:
+    """Real inputs for a multi-input operator: one value per graph ``Input``."""
+    key = _key(cls)
+    if key in NARY_INPUTS:
+        return NARY_INPUTS[key]()
+    primary = GRAPH_PRIMARY.get(key, _scene)()
+    return [primary, *MULTI_INPUTS[key](primary)]
+
+
+def _assert_same_output(got: Any, want: Any) -> None:
+    import pandas as pd
+
+    if isinstance(want, pd.DataFrame):
+        pd.testing.assert_frame_equal(got, want)
+    elif isinstance(want, dict):
+        assert got.keys() == want.keys()
+        for name in want:
+            _assert_same_output(got[name], want[name])
+    elif isinstance(want, tuple | list):
+        assert len(got) == len(want)
+        for g, w in zip(got, want, strict=True):
+            _assert_same_output(g, w)
+    else:
+        np.testing.assert_array_equal(np.asarray(got), np.asarray(want))
+
+
+def test_every_multi_input_operator_is_classified() -> None:
+    """An operator whose ``_apply`` takes several carriers is in a table.
+
+    Several positional ``_apply`` parameters (or ``*frames``) mark a
+    multi-input operator, which must be wired and grid-checked below.
+    """
+    missing = []
+    for cls in _CLASSES:
+        key = _key(cls)
+        if key in MULTI_INPUTS or key in NARY_INPUTS:
+            continue
+        params = list(inspect.signature(cls._apply).parameters.values())[1:]
+        if any(p.kind is p.VAR_KEYWORD for p in params):
+            continue  # generic pass-through (the io source / sink bases)
+        positional = [
+            p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+        ]
+        variadic = any(p.kind is p.VAR_POSITIONAL for p in params)
+        if len(positional) > 1 or (variadic and positional == []):
+            missing.append(key)
+    assert sorted(missing) == sorted(POSITIONAL_PAIR_OPERATORS), (
+        "add the operator to MULTI_INPUTS / NARY_INPUTS"
+    )
+
+
+#: Operators that already took two positional carriers before #141 and are
+#: covered by their own test modules (coregistration, dNBR, overlays, the
+#: matched-filter stages that take a fitted background).
+POSITIONAL_PAIR_OPERATORS: tuple[str, ...] = (
+    "geom._src.coregister.operators.PointCloudToRaster",
+    "geom._src.coregister.operators.PointsToRaster",
+    "geom._src.coregister.operators.RasterToPointCloud",
+    "geom._src.coregister.operators.RasterToPoints",
+    "geom._src.coregister.operators.RasterToRasterLike",
+    "geom._src.coregister.operators.VectorToRasterAgg",
+    "indices._src.operators.dNBR",
+    "matched_filter._src.operators.ApplyAdaptiveMF",
+    "matched_filter._src.operators.ApplyClusterMF",
+    "viz._src.operators.Overlay",
+)
+
+
+@pytest.mark.parametrize("cls", _multi_input_classes())
+def test_multi_input_operator_runs_in_a_graph(cls: type) -> None:
+    """``op(Input("x0"), Input("x1"), ...)`` in a ``Graph`` equals the eager call.
+
+    The multi-input convention (#141): every carrier is a positional
+    argument, so a graph wires each one from its own ``Input``.
+    """
+    from pipekit import Graph
+
+    values = _graph_values(cls)
+    inputs = {f"x{i}": Input(f"x{i}") for i in range(len(values))}
+    graph = Graph(inputs=inputs, outputs={"out": _build_seeded(cls)(*inputs.values())})
+    got = graph(**{name: v for name, v in zip(inputs, values, strict=True)})["out"]
+    _assert_same_output(got, _build_seeded(cls)(*values))
+
+
+def _off_grid(x: Any) -> Any:
+    """``x`` shifted by one pixel: same shape, another grid."""
+    from affine import Affine
+    from georeader.geotensor import GeoTensor
+
+    return GeoTensor(
+        np.asarray(x),
+        transform=x.transform * Affine.translation(1, 0),
+        crs=x.crs,
+        fill_value_default=x.fill_value_default,
+        attrs=dict(x.attrs or {}),
+    )
+
+
+@pytest.mark.parametrize("cls", _multi_input_classes())
+def test_multi_input_operator_rejects_an_off_grid_carrier(cls: type) -> None:
+    """A second carrier on another grid raises a ``ValueError`` naming the op.
+
+    Carriers are combined pixel by pixel, so a mask / DEM / reference /
+    frame shifted by one pixel would silently give a wrong answer (#141).
+    """
+    values = _graph_values(cls)
+    last = values[-1]
+    if isinstance(last, tuple):
+        values[-1] = (_off_grid(last[0]), last[1])
+    else:
+        values[-1] = _off_grid(last)
+    with pytest.raises(ValueError, match=rf"{cls.__name__}: the .* pixel grid"):
+        _build_seeded(cls)(*values)
+
+
+@pytest.mark.parametrize("cls", _multi_input_classes())
+def test_carriers_are_not_constructor_kwargs(cls: type) -> None:
+    """No constructor parameter takes a carrier; the operator round-trips.
+
+    The old carrier kwargs (``plume_mask``, ``dem``, ``pool``, ...) are gone
+    (#141): constructors hold scalars and configuration only.
+    """
+    removed = {
+        "albedo",
+        "column",
+        "dem",
+        "enhancement",
+        "intensity_image",
+        "label_img",
+        "markers",
+        "plume_mask",
+        "pool",
+        "reference",
+        "reference_scene",
+    }
+    from geotoolz.mask import ApplyMask
+
+    params = set(inspect.signature(cls.__init__).parameters)
+    assert not params & removed
+    # ApplyMask(mask=...) takes a mask-producing *operator*, not a carrier.
+    assert "mask" not in params or cls is ApplyMask
+    op = build(cls)
+    if not cls.forbid_in_yaml:
+        clone = Operator.from_state(json.loads(json.dumps(op.state)))
+        assert _same(clone.get_config(), op.get_config())
 
 
 def _scene() -> Any:
@@ -812,6 +1106,18 @@ def _is_carrier(value: Any) -> bool:
     )
 
 
+def _single_carrier_in(op: Operator) -> bool:
+    """One primary input: a single-input operator, or a two-carrier one whose
+    further carriers ``MULTI_INPUTS`` builds on the primary's grid (#141)."""
+    return _n_inputs(op) == 1 or _key(type(op)) in MULTI_INPUTS
+
+
+def _call(op: Operator, x: Any) -> Any:
+    """``op(x)``, plus the further carriers of a two-carrier operator."""
+    extra = MULTI_INPUTS.get(_key(type(op)))
+    return op(x) if extra is None else op(x, *extra(x))
+
+
 @pytest.mark.parametrize("cls", _params("graph_mode"))
 def test_non_carrier_outputs_are_terminal(cls: type) -> None:
     """An operator that returns a non-carrier is ``_terminal`` (#142).
@@ -824,11 +1130,11 @@ def test_non_carrier_outputs_are_terminal(cls: type) -> None:
     if op._terminal:
         # Already terminal; also keeps sinks from writing files here.
         return
-    if _key(cls) in INTERMEDIATE_OUTPUTS or _n_inputs(op) != 1:
+    if _key(cls) in INTERMEDIATE_OUTPUTS or not _single_carrier_in(op):
         pytest.skip("intermediate output or not a single-input operator")
     for scene in _toy_inputs():
         try:
-            out = op(scene)
+            out = _call(op, scene)
         except Exception:
             continue
         if not _is_carrier(out):
@@ -844,11 +1150,11 @@ def test_phase_align_is_terminal_only_without_apply() -> None:
     from geotoolz.geom import PhaseAlign
 
     reference = _toy_inputs()[1]
-    shifted = PhaseAlign(reference=reference)
+    shifted = PhaseAlign()
     assert not shifted._terminal
     Sequential([shifted, Identity()])
-    raw = PhaseAlign(reference=reference, apply=False)
-    assert isinstance(raw(reference), tuple)
+    raw = PhaseAlign(apply=False)
+    assert isinstance(raw(reference, reference), tuple)
     with pytest.raises(TypeError, match="terminal"):
         Sequential([raw, Identity()])
 
@@ -978,8 +1284,13 @@ def assert_fresh_consistent_attrs(inputs: Any, out: Any) -> None:
 
 
 def _takes_sequence(op: Operator) -> bool:
-    """Whether ``op._apply``'s input is a sequence / mapping of carriers."""
+    """Whether ``op`` reduces a sequence / mapping of carriers.
+
+    N-ary reducers (``_apply(self, *frames)``, #141) also take one list.
+    """
     params = list(inspect.signature(op._apply).parameters.values())
+    if params and params[0].kind is inspect.Parameter.VAR_POSITIONAL:
+        return True
     annotation = str(params[0].annotation) if params else ""
     return any(tag in annotation for tag in ("Sequence", "Mapping", "list["))
 
@@ -1011,7 +1322,7 @@ def test_output_attrs_are_fresh_and_consistent(cls: type) -> None:
     one entry per output band.
     """
     op = build(cls, runtime=True)
-    if op._terminal or _n_inputs(op) != 1:
+    if op._terminal or not _single_carrier_in(op):
         pytest.skip("terminal or not a single-input operator")
     ran = False
     takes_sequence = _takes_sequence(op)
@@ -1021,7 +1332,7 @@ def test_output_attrs_are_fresh_and_consistent(cls: type) -> None:
         if isinstance(scene, list) != takes_sequence:
             continue
         try:
-            out = op(scene)
+            out = _call(op, scene)
         except Exception:
             continue
         ran = True
@@ -1139,7 +1450,7 @@ def test_output_fill_matches_dtype(cls: type) -> None:
     with :func:`assert_fill_matches_dtype`.
     """
     op = build(cls, runtime=True)
-    if op._terminal or _n_inputs(op) != 1:
+    if op._terminal or not _single_carrier_in(op):
         pytest.skip("terminal or not a single-input operator")
     ran = False
     takes_sequence = _takes_sequence(op)
@@ -1148,7 +1459,7 @@ def test_output_fill_matches_dtype(cls: type) -> None:
             continue
         scene = _with_fill_pixels(scene)
         try:
-            out = op(scene)
+            out = _call(op, scene)
         except Exception:
             continue
         ran = True
@@ -1191,7 +1502,8 @@ POOLED_STATISTICS: dict[str, str] = {
 }
 
 #: Operators whose output depends only on the carrier's grid (a rasterised
-#: geometry), so one ``(H, W)`` mask serves every frame of a stack.
+#: geometry) or on a static second carrier (a DEM), so one ``(H, W)`` mask
+#: serves every frame of a stack.
 TIME_INVARIANT: frozenset[str] = frozenset(
     f"mask._src.operators.{name}"
     for name in (
@@ -1201,6 +1513,8 @@ TIME_INVARIANT: frozenset[str] = frozenset(
         "LandMask",
         "OceanMask",
         "PolygonMask",
+        "AltitudeMask",
+        "SlopeMask",
     )
 ) | {"geom._src.operators.Rasterize", "geom._src.operators.RasterizeLike"}
 
@@ -1354,7 +1668,7 @@ def test_time_stack_contract(cls: type) -> None:
     from geotoolz.io._src.operators import SinkOperator
 
     op = _build_seeded(cls)
-    if isinstance(op, SinkOperator) or _n_inputs(op) != 1:
+    if isinstance(op, SinkOperator) or not _single_carrier_in(op):
         pytest.skip("sink (see test_io) or not a single-input operator")
     key = _key(cls)
     takes_sequence = _takes_sequence(op)
@@ -1370,7 +1684,7 @@ def test_time_stack_contract(cls: type) -> None:
                 continue
         else:
             try:
-                _build_seeded(cls)(scene)
+                _call(_build_seeded(cls), scene)
             except Exception:
                 continue
             stack = _stack_of(scene)
@@ -1379,7 +1693,7 @@ def test_time_stack_contract(cls: type) -> None:
         try:
             # A fresh operator per stack: stochastic operators then make the
             # same draws as the fresh per-frame references.
-            out = _build_seeded(cls)(stack)
+            out = _call(_build_seeded(cls), stack)
         except Exception as exc:
             _assert_clear_rank_error(cls, exc)
             continue
@@ -1393,7 +1707,7 @@ def test_time_stack_contract(cls: type) -> None:
         if key in STACK_AS_FEATURES:
             assert np.shape(out)[-2:] == np.shape(stack)[-2:]
             continue
-        per_frame = [_build_seeded(cls)(frame) for frame in frames(stack)]
+        per_frame = [_call(_build_seeded(cls), frame) for frame in frames(stack)]
         _assert_matches_frames(key, out, per_frame)
     if not ran:
         pytest.skip("no toy input is valid for this operator")

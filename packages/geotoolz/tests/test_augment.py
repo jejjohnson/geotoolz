@@ -225,8 +225,8 @@ def test_simulated_clouds_changes_pixels_but_preserves_metadata(
 def test_cutmix_probability_shape_and_mismatch(patch: GeoTensor) -> None:
     donor = _toy_geotensor(np.full(patch.shape, 9.0, dtype=np.float32))
 
-    identity = augment.CutMix(pool=[donor], p=0.0, seed=0)(patch)
-    mixed = augment.CutMix(pool=[donor], p=1.0, seed=0)(patch)
+    identity = augment.CutMix(p=0.0, seed=0)(patch, donor)
+    mixed = augment.CutMix(p=1.0, seed=0)(patch, donor)
 
     assert identity is patch
     assert mixed.shape == patch.shape
@@ -234,8 +234,26 @@ def test_cutmix_probability_shape_and_mismatch(patch: GeoTensor) -> None:
     assert np.any(np.asarray(mixed) == 9.0)
 
     bad = _toy_geotensor(np.zeros((4, 2, 2), dtype=np.float32))
-    with pytest.raises(ValueError, match="match"):
-        augment.CutMix(pool=[bad], p=1.0, seed=0)(patch)
+    with pytest.raises(ValueError, match=r"CutMix.*match"):
+        augment.CutMix(p=1.0, seed=0)(patch, bad)
+
+
+def test_cutmix_pool_is_positional(patch: GeoTensor) -> None:
+    """Donors are positional carriers, alone or as one list (#141)."""
+    donors = [
+        _toy_geotensor(np.full(patch.shape, v, dtype=np.float32)) for v in (7.0, 9.0)
+    ]
+    spread = augment.CutMix(p=1.0, seed=0)(patch, *donors)
+    listed = augment.CutMix(p=1.0, seed=0)(patch, donors)
+    np.testing.assert_array_equal(np.asarray(spread), np.asarray(listed))
+    # No donors: the input passes through.
+    assert augment.CutMix(p=1.0, seed=0)(patch) is patch
+    # Every donor is grid-checked, not only the one drawn.
+    bad = _toy_geotensor(np.zeros((4, 2, 2), dtype=np.float32))
+    with pytest.raises(ValueError, match="CutMix: the donor 1 pixel grid"):
+        augment.CutMix(p=0.0, seed=0)(patch, donors[0], bad)
+    with pytest.raises(TypeError, match="pool"):
+        augment.CutMix(pool=donors)  # ty: ignore[unknown-argument]
 
 
 class _AffineTestOp(Operator):
@@ -348,12 +366,11 @@ def test_cutmix_rejects_donors_off_the_input_grid(patch: GeoTensor) -> None:
 
     for donor in (different_crs, different_res, shifted):
         with pytest.raises(ValueError, match="pixel grid"):
-            augment.CutMix(pool=[donor], p=1.0, seed=0)(patch)
+            augment.CutMix(p=1.0, seed=0)(patch, donor)
 
 
 def test_get_config_is_json_safe(patch: GeoTensor) -> None:
     """Every public augmentation's config should serialise to JSON."""
-    donor = _toy_geotensor(np.full(patch.shape, 9.0, dtype=np.float32))
     ops: list[Operator] = [
         augment.RandomFlip(seed=0),
         augment.RandomRotate90(seed=0),
@@ -368,7 +385,7 @@ def test_get_config_is_json_safe(patch: GeoTensor) -> None:
         augment.SunAngleJitter(seed=0),
         augment.AtmosphericHaze(seed=0),
         augment.SimulatedClouds(seed=0),
-        augment.CutMix(pool=[donor], seed=0),
+        augment.CutMix(seed=0),
         augment.Compose(augmentations=[augment.RandomFlip(seed=0)], seed=0),
     ]
     for op in ops:
@@ -376,10 +393,15 @@ def test_get_config_is_json_safe(patch: GeoTensor) -> None:
         json.dumps(op.get_config())
 
 
-def test_cutmix_is_forbid_in_yaml_but_compose_is_a_container() -> None:
-    # CutMix holds runtime rasters; Compose only nests operators, which
-    # pipekit's container rule leaves to the children (#140).
-    assert augment.CutMix(pool=[]).forbid_in_yaml is True
+def test_cutmix_and_compose_round_trip() -> None:
+    # CutMix takes its donors at call time (#141), so it holds no runtime
+    # rasters; Compose only nests operators, which pipekit's container rule
+    # leaves to the children (#140).
+    assert augment.CutMix().forbid_in_yaml is False
+    op = augment.CutMix(p=0.3, seed=1)
+    assert Operator.from_state(json.loads(json.dumps(op.state))).get_config() == (
+        op.get_config()
+    )
     assert augment.Compose(augmentations=[]).forbid_in_yaml is False
 
 
@@ -490,7 +512,7 @@ def test_cutmix_and_compose_support_plain_arrays() -> None:
     arr = np.arange(2 * 4 * 4, dtype=np.float32).reshape(2, 4, 4) / 100.0
     donor = np.full_like(arr, 9.0)
 
-    mixed = augment.CutMix(pool=[donor], p=1.0, seed=0)(arr)
+    mixed = augment.CutMix(p=1.0, seed=0)(arr, donor)
     assert type(mixed) is np.ndarray
     assert np.any(mixed == 9.0)
 
@@ -578,10 +600,7 @@ _SEEDED_OPS: list[Any] = [
     lambda: augment.SunAngleJitter(seed=0),
     lambda: augment.AtmosphericHaze(seed=0),
     lambda: augment.SimulatedClouds(coverage=(0.1, 0.5), feather=1, seed=0),
-    lambda: augment.CutMix(
-        pool=[_toy_geotensor(np.full((4, 5, 6), 9.0, dtype=np.float32))],
-        seed=0,
-    ),
+    lambda: augment.CutMix(seed=0),
     lambda: augment.Compose(
         augmentations=[augment.RandomFlip(), augment.GaussianNoise(sigma=0.01)], seed=0
     ),
@@ -593,8 +612,14 @@ def test_seeded_operator_varies_across_calls_and_is_reproducible(
     patch: GeoTensor, make_op: Callable[[], Operator]
 ) -> None:
     """A seeded op draws a reproducible *sequence*, not one repeated draw (#134)."""
+    # CutMix draws from a positional donor pool (#141).
+    extra = (
+        (_toy_geotensor(np.full((4, 5, 6), 9.0, dtype=np.float32)),)
+        if isinstance(make_op(), augment.CutMix)
+        else ()
+    )
     op = make_op()
-    draws = [np.asarray(op(patch)).copy() for _ in range(8)]
+    draws = [np.asarray(op(patch, *extra)).copy() for _ in range(8)]
     # Successive calls apply different augmentations ...
     assert any(
         a.shape != draws[0].shape or not np.array_equal(a, draws[0]) for a in draws[1:]
@@ -602,11 +627,11 @@ def test_seeded_operator_varies_across_calls_and_is_reproducible(
     # ... and a second instance with the same seed replays the same sequence.
     replay = make_op()
     for expected in draws:
-        np.testing.assert_array_equal(np.asarray(replay(patch)), expected)
+        np.testing.assert_array_equal(np.asarray(replay(patch, *extra)), expected)
     # A reload from config restarts the stream from the constructor seed.
     if not op.forbid_in_yaml and not isinstance(op, augment.Compose):
         clone = Operator.from_state(json.loads(json.dumps(op.state)))
-        np.testing.assert_array_equal(np.asarray(clone(patch)), draws[0])
+        np.testing.assert_array_equal(np.asarray(clone(patch, *extra)), draws[0])
 
 
 def test_per_call_seed_is_one_off_and_leaves_stream_untouched(
@@ -723,7 +748,7 @@ def test_fill_pixels_are_excluded_cutmix_donor_holes() -> None:
     )
     # Draw until the pasted rectangle covers a donor fill pixel.
     for seed in range(100):
-        out = np.asarray(augment.CutMix(pool=[donor], p=1.0)(base, seed=seed))
+        out = np.asarray(augment.CutMix(p=1.0)(base, donor, seed=seed))
         if np.any(out == -1.0) or np.any(out == _FILL):
             break
     else:  # pragma: no cover - the draw space makes this unreachable

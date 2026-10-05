@@ -45,7 +45,7 @@ def test_watershed_separates_marker_basins() -> None:
     image = _gt(np.array([[3.0, 2.0, 3.0], [2.0, 1.0, 2.0], [3.0, 2.0, 3.0]]))
     markers = np.array([[1, 0, 2], [0, 0, 0], [0, 0, 0]], dtype=np.int32)
 
-    labels = gz.segment.Watershed(markers=markers)(image)
+    labels = gz.segment.Watershed()(image, markers)
 
     assert set(np.unique(np.asarray(labels))) >= {1, 2}
 
@@ -62,7 +62,7 @@ def test_watershed_connectivity_is_4_or_8(
     markers = np.zeros((9, 9), dtype=np.int32)
     markers[0, 0], markers[-1, -1], markers[0, -1] = 1, 2, 3
 
-    labels = gz.segment.Watershed(markers=markers, connectivity=connectivity)(image)
+    labels = gz.segment.Watershed(connectivity=connectivity)(image, markers)
 
     expected = watershed(image, markers=markers, connectivity=skimage_connectivity)
     np.testing.assert_array_equal(np.asarray(labels), expected)
@@ -163,14 +163,15 @@ def test_random_walker_round_trips_labels() -> None:
     markers[0, 0] = 1
     markers[0, 5] = 2
 
-    op = gz.segment.RandomWalker(markers=markers, beta=10.0, mode="cg_j")
-    out = op(gt)
+    op = gz.segment.RandomWalker(beta=10.0, mode="cg_j")
+    out = op(gt, markers)
 
     assert out.transform == gt.transform
     assert np.asarray(out).dtype == np.int32
     assert set(np.unique(np.asarray(out))) >= {1, 2}
-    # Carrier with non-serializable markers must be forbidden in YAML.
-    assert gz.segment.RandomWalker.forbid_in_yaml is True
+    # The markers are a call-time carrier, so the operator round-trips (#141).
+    assert gz.segment.RandomWalker.forbid_in_yaml is False
+    assert Operator.from_state(op.state).get_config() == op.get_config()
 
 
 def test_expand_labels_grows_regions() -> None:
@@ -194,16 +195,16 @@ def test_mark_boundaries_preserves_grid_and_fill() -> None:
     label_img[:, :3] = 1
     label_img[:, 3:] = 2
 
-    op = gz.segment.MarkBoundaries(label_img=label_img)
-    out = op(gt)
+    op = gz.segment.MarkBoundaries()
+    out = op(gt, label_img)
 
     # The overlay keeps the input grid and its (NaN) fill via wrap_like.
     assert out.transform == gt.transform
     assert out.crs == gt.crs
     np.testing.assert_equal(out.fill_value_default, gt.fill_value_default)
     assert np.asarray(out).shape[-2:] == gt.shape[-2:]
-    # Non-serializable label_img -> forbid_in_yaml at the class level.
-    assert gz.segment.MarkBoundaries.forbid_in_yaml is True
+    # The label image is a call-time carrier, so the operator round-trips.
+    assert gz.segment.MarkBoundaries.forbid_in_yaml is False
 
 
 def test_mark_boundaries_single_band_input() -> None:
@@ -212,7 +213,7 @@ def test_mark_boundaries_single_band_input() -> None:
     label_img = np.zeros((6, 6), dtype=np.int32)
     label_img[:, 3:] = 1
 
-    out = gz.segment.MarkBoundaries(label_img=label_img, color=(1.0, 0.0, 0.0))(gt)
+    out = gz.segment.MarkBoundaries(color=(1.0, 0.0, 0.0))(gt, label_img)
 
     out_arr = np.asarray(out)
     assert out_arr.shape == (3, 6, 6)
@@ -222,14 +223,14 @@ def test_mark_boundaries_single_band_input() -> None:
     np.testing.assert_allclose(out_arr[:, 0, 3], [1.0, 0.0, 0.0])
     np.testing.assert_allclose(out_arr[:, 0, 0], [0.0, 0.0, 0.0])
     # Plain (H, W) ndarray follows the same single-band path.
-    out_2d = gz.segment.MarkBoundaries(label_img=label_img)(values[0])
+    out_2d = gz.segment.MarkBoundaries()(values[0], label_img)
     assert np.asarray(out_2d).shape == (3, 6, 6)
 
 
 def test_mark_boundaries_rejects_non_rgb_multiband() -> None:
     label_img = np.zeros((6, 6), dtype=np.int32)
     with pytest.raises(ValueError, match=r"\(3, H, W\) RGB"):
-        gz.segment.MarkBoundaries(label_img=label_img)(np.zeros((4, 6, 6)))
+        gz.segment.MarkBoundaries()(np.zeros((4, 6, 6)), label_img)
 
 
 def test_slic_accepts_2d() -> None:
@@ -465,47 +466,53 @@ def _nms_stack() -> np.ndarray:
 
 
 @pytest.mark.parametrize(
-    ("op", "values"),
+    ("op", "values", "extra"),
     [
         pytest.param(
-            gz.segment.SLIC(n_segments=4, compactness=1.0), _step_cube(), id="slic"
+            gz.segment.SLIC(n_segments=4, compactness=1.0),
+            _step_cube(),
+            (),
+            id="slic",
         ),
         pytest.param(
-            gz.segment.Watershed(
-                markers=np.array([[1, 0, 2], [0, 0, 0], [0, 0, 0]], dtype=np.int32)
-            ),
+            gz.segment.Watershed(),
             np.array([[3.0, 2.0, 3.0], [2.0, 1.0, 2.0], [3.0, 2.0, 3.0]]),
+            (np.array([[1, 0, 2], [0, 0, 0], [0, 0, 0]], dtype=np.int32),),
             id="watershed",
         ),
         pytest.param(
             gz.segment.ExpandLabels(distance=1.0),
             np.eye(5, dtype=np.int32)[None],
+            (),
             id="expand-labels",
         ),
         pytest.param(
             gz.segment.MergeNearbyInstances(start_label=3),
             _merge_labels(),
+            (),
             id="merge-nearby-instances",
         ),
         pytest.param(
             gz.segment.MaskNMS(scores=np.array([0.9, 0.5])),
             _nms_stack(),
+            (),
             id="mask-nms",
         ),
         pytest.param(
-            gz.segment.MarkBoundaries(label_img=np.eye(6, dtype=np.int32)),
+            gz.segment.MarkBoundaries(),
             np.tile(np.linspace(0.0, 1.0, 6), (3, 6, 1)),
+            (np.eye(6, dtype=np.int32),),
             id="mark-boundaries",
         ),
     ],
 )
 def test_plain_ndarray_in_plain_ndarray_out(
-    op: gz.Operator, values: np.ndarray
+    op: gz.Operator, values: np.ndarray, extra: tuple[np.ndarray, ...]
 ) -> None:
     """Segment ops are metadata-independent: ndarray in -> ndarray out,
     with values identical to the GeoTensor path."""
-    out_plain = op(values)
-    out_geo = op(_gt(values))
+    out_plain = op(values, *extra)
+    out_geo = op(_gt(values), *extra)
 
     assert type(out_plain) is np.ndarray
     np.testing.assert_array_equal(out_plain, np.asarray(out_geo))
@@ -514,21 +521,32 @@ def test_plain_ndarray_in_plain_ndarray_out(
 @pytest.mark.parametrize(
     "cls", [gz.segment.SLIC, gz.segment.Felzenszwalb, gz.segment.Quickshift]
 )
-def test_segment_mask_config_refuses_reload(cls: type) -> None:
-    """A runtime mask is summarised, so from_state refuses it (#140).
+def test_segment_mask_is_a_call_argument(cls: type) -> None:
+    """The optional mask is a positional carrier, not configuration (#141).
 
-    Without a mask the operator still round-trips.
+    The operator round-trips through its state, the mask zeroes the labels
+    outside it, and a mask on another grid is rejected by name.
     """
-    mask = np.ones((8, 8), dtype=bool)
-    op_with_mask = cls(mask=mask)
-    assert op_with_mask.get_config()["mask"] == {"shape": [8, 8], "dtype": "bool"}
-    with pytest.raises(RuntimeError, match="non-primitive"):
-        Operator.from_state(json.loads(json.dumps(op_with_mask.state)))
-    with pytest.raises(TypeError, match="config summary"):
-        cls(mask=op_with_mask.get_config()["mask"])
-
+    with pytest.raises(TypeError, match="mask"):
+        cls(mask=np.ones((8, 8), dtype=bool))
     op = cls()
-    assert Operator.from_state(op.state).get_config() == op.get_config()
+    assert "mask" not in op.get_config()
+    assert Operator.from_state(json.loads(json.dumps(op.state))).get_config() == (
+        op.get_config()
+    )
+    image = toy_geotensor(_step_cube())
+    mask = np.ones((8, 8), dtype=bool)
+    mask[:, :2] = False
+    labels = np.asarray(op(image, mask))
+    assert (labels[:, :2] == 0).all()
+    assert (labels[:, 2:] >= 1).all()
+    shifted = toy_geotensor(
+        mask,
+        transform=image.transform * rasterio.Affine.translation(1, 0),
+        fill_value_default=None,
+    )
+    with pytest.raises(ValueError, match=cls.__name__):
+        op(image, shifted)
 
 
 def _fill_step_image() -> np.ndarray:
@@ -545,18 +563,18 @@ def _row_markers() -> np.ndarray:
 
 
 @pytest.mark.parametrize(
-    "op",
+    ("op", "extra"),
     [
-        gz.segment.SLIC(n_segments=4, compactness=1.0),
-        gz.segment.Felzenszwalb(scale=1.0, min_area_px=1),
-        gz.segment.Quickshift(kernel_size=2.0, max_dist=4.0),
-        gz.segment.Watershed(markers=_row_markers()),
-        gz.segment.ChanVese(max_num_iter=10),
-        gz.segment.RandomWalker(markers=_row_markers(), beta=10.0),
+        (gz.segment.SLIC(n_segments=4, compactness=1.0), ()),
+        (gz.segment.Felzenszwalb(scale=1.0, min_area_px=1), ()),
+        (gz.segment.Quickshift(kernel_size=2.0, max_dist=4.0), ()),
+        (gz.segment.Watershed(), (_row_markers(),)),
+        (gz.segment.ChanVese(max_num_iter=10), ()),
+        (gz.segment.RandomWalker(beta=10.0), (_row_markers(),)),
     ],
     ids=["slic", "felzenszwalb", "quickshift", "watershed", "chanvese", "rw"],
 )
-def test_fill_pixels_are_excluded(op: Operator) -> None:
+def test_fill_pixels_are_excluded(op: Operator, extra: tuple[np.ndarray, ...]) -> None:
     """#145: a ``fill_value_default`` pixel is nodata, not a region.
 
     It gets the "no segment" label 0, and the labels match those obtained
@@ -567,13 +585,13 @@ def test_fill_pixels_are_excluded(op: Operator) -> None:
     as_nan = _fill_step_image()
     as_nan[:, fill] = np.nan
 
-    labels = op(gt)
+    labels = op(gt, *extra)
 
     out = np.asarray(labels)
     assert out.dtype == np.int32
     assert labels.fill_value_default == 0
     assert (out[fill] == 0).all()
-    np.testing.assert_array_equal(out, np.asarray(op(as_nan)))
+    np.testing.assert_array_equal(out, np.asarray(op(as_nan, *extra)))
     if not isinstance(op, gz.segment.ChanVese):  # ChanVese: 0 = "outside"
         assert (out[~fill] >= 1).all()
 

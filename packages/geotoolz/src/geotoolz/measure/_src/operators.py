@@ -12,7 +12,7 @@ from shapely.geometry import LineString
 from skimage.measure import find_contours, profile_line, ransac, shannon_entropy
 
 from geotoolz._src.config import as_tuple
-from geotoolz._src.geo import pixel_xy, require_geotensor
+from geotoolz._src.geo import pixel_xy, require_geotensor, require_grid_match
 from geotoolz._src.shape import single_band
 from geotoolz._src.valid import valid_pixels
 from geotoolz._src.wrap import wrap_like
@@ -90,9 +90,12 @@ class RegionProps(Operator):
     to CRS units (m^2 / m / m^2 for a projected metric CRS); positions,
     angles and dimensionless ratios are unchanged.
 
+    Called as ``op(labels, intensity_image=None)``. The optional
+    ``intensity_image`` is a single-band carrier on the label map's pixel
+    grid (``ValueError`` otherwise) and enables intensity-based
+    properties.
+
     Args:
-        intensity_image: Optional single-band intensity image aligned
-            with the label map, enabling intensity-based properties.
         properties: Property names passed to ``regionprops_table``;
             defaults to :data:`DEFAULT_REGIONPROPS`.
         extra_properties: Optional callables computing custom per-region
@@ -104,7 +107,8 @@ class RegionProps(Operator):
 
     Raises:
         TypeError: If the input is not a georeferenced GeoTensor.
-        ValueError: If ``scale_to_crs=True`` and a length or moment
+        ValueError: If ``intensity_image`` is on another pixel grid, or
+            if ``scale_to_crs=True`` and a length or moment
             column is requested on non-square (anisotropic or sheared)
             pixels, where no single pixel length exists.
     """
@@ -116,12 +120,10 @@ class RegionProps(Operator):
     def __init__(
         self,
         *,
-        intensity_image: GeoTensor | None = None,
         properties: Sequence[str] | None = None,
         extra_properties: Sequence[Callable[..., Any]] | None = None,
         scale_to_crs: bool = False,
     ) -> None:
-        self.intensity_image = intensity_image
         self.properties = tuple(
             DEFAULT_REGIONPROPS if properties is None else properties
         )
@@ -130,15 +132,21 @@ class RegionProps(Operator):
         )
         self.scale_to_crs = scale_to_crs
 
-    def _apply(self, gt: GeoTensor) -> gpd.GeoDataFrame:
+    def _apply(
+        self, gt: GeoTensor, intensity_image: GeoTensor | np.ndarray | None = None
+    ) -> gpd.GeoDataFrame:
         require_geotensor(gt, "RegionProps")
+        if intensity_image is not None:
+            require_grid_match(
+                gt, intensity_image, "RegionProps", names=("labels", "intensity_image")
+            )
         labels = single_band(np.asarray(gt), name="RegionProps").astype(
             np.int32, copy=False
         )
         intensity = (
             None
-            if self.intensity_image is None
-            else single_band(self.intensity_image, name="RegionProps intensity_image")
+            if intensity_image is None
+            else single_band(intensity_image, name="RegionProps intensity_image")
         )
         frame = regionprops_frame(
             labels,
@@ -161,12 +169,6 @@ class RegionProps(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "intensity_image": None
-            if self.intensity_image is None
-            else {
-                "shape": list(np.asarray(self.intensity_image).shape),
-                "dtype": str(np.asarray(self.intensity_image).dtype),
-            },
             "properties": list(self.properties),
             "extra_properties": None
             if self.extra_properties is None

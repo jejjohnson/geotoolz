@@ -112,7 +112,7 @@ class TestMean:
     def test_shape_mismatch_rejected(self) -> None:
         a = _gt(np.zeros((4, 4), dtype=np.float32))
         b = _gt(np.zeros((8, 8), dtype=np.float32))
-        with pytest.raises(ValueError, match=r"share spatial shape"):
+        with pytest.raises(ValueError, match=r"BlendMatched: the input 1 pixel grid"):
             BlendMatched()([a, b])
 
     def test_band_count_mismatch_rejected(self) -> None:
@@ -173,7 +173,7 @@ class TestInverseVarianceWeighting:
         b = _gt(np.full((4, 4), 20.0, dtype=np.float32))
         var_a = np.ones((4, 4), dtype=np.float32)
         var_b = np.full((4, 4), 100.0, dtype=np.float32)
-        result = BlendMatched(method="ivw")([a, b], variances=[var_a, var_b])
+        result = BlendMatched(method="ivw")((a, var_a), (b, var_b))
         np.testing.assert_allclose(
             np.asarray(result), (10 / 1 + 20 / 100) / (1 / 1 + 1 / 100), rtol=1e-9
         )
@@ -182,7 +182,7 @@ class TestInverseVarianceWeighting:
         a = _gt(np.full((4, 4), 2.0, dtype=np.float32))
         b = _gt(np.full((4, 4), 8.0, dtype=np.float32))
         var_eq = np.full((4, 4), 4.0, dtype=np.float32)
-        result = BlendMatched(method="ivw")([a, b], variances=[var_eq, var_eq])
+        result = BlendMatched(method="ivw")((a, var_eq), (b, var_eq))
         np.testing.assert_allclose(np.asarray(result), 5.0, rtol=1e-9)
 
     def test_per_pixel_varying_variance(self) -> None:
@@ -193,7 +193,7 @@ class TestInverseVarianceWeighting:
         # A reliable in row 0, B reliable in row 1.
         var_a = np.array([[1.0, 1.0], [100.0, 100.0]], dtype=np.float32)
         var_b = np.array([[100.0, 100.0], [1.0, 1.0]], dtype=np.float32)
-        result = BlendMatched(method="ivw")([a, b], variances=[var_a, var_b])
+        result = BlendMatched(method="ivw")((a, var_a), (b, var_b))
         arr = np.asarray(result)
         # Row 0 → A dominates → ~10.
         assert arr[0, 0] < 11.0 and arr[0, 1] < 11.0
@@ -202,22 +202,20 @@ class TestInverseVarianceWeighting:
 
     def test_ivw_requires_variances(self) -> None:
         a = _gt(np.zeros((4, 4), dtype=np.float32))
-        with pytest.raises(ValueError, match=r"requires `variances`"):
+        with pytest.raises(ValueError, match=r"takes \(tensor, variance\) pairs"):
             BlendMatched(method="ivw")([a])
 
-    def test_variance_count_mismatch_rejected(self) -> None:
+    def test_ivw_rejects_a_source_without_variance(self) -> None:
         a = _gt(np.zeros((4, 4), dtype=np.float32))
         b = _gt(np.zeros((4, 4), dtype=np.float32))
-        with pytest.raises(ValueError, match=r"variance arrays"):
-            BlendMatched(method="ivw")([a, b], variances=[np.ones((4, 4))])
+        with pytest.raises(ValueError, match=r"takes \(tensor, variance\) pairs"):
+            BlendMatched(method="ivw")((a, np.ones((4, 4))), b)
 
     def test_variance_shape_mismatch_rejected(self) -> None:
         a = _gt(np.zeros((4, 4), dtype=np.float32))
         b = _gt(np.zeros((4, 4), dtype=np.float32))
         with pytest.raises(ValueError, match=r"variance 1 has shape"):
-            BlendMatched(method="ivw")(
-                [a, b], variances=[np.ones((4, 4)), np.ones((3, 3))]
-            )
+            BlendMatched(method="ivw")((a, np.ones((4, 4))), (b, np.ones((3, 3))))
 
     def test_non_positive_variance_rejected(self) -> None:
         a = _gt(np.zeros((4, 4), dtype=np.float32))
@@ -225,7 +223,7 @@ class TestInverseVarianceWeighting:
         bad = np.ones((4, 4))
         bad[0, 0] = 0.0
         with pytest.raises(ValueError, match=r"non-positive"):
-            BlendMatched(method="ivw")([a, b], variances=[np.ones((4, 4)), bad])
+            BlendMatched(method="ivw")((a, np.ones((4, 4))), (b, bad))
 
     def test_non_finite_variance_rejected(self) -> None:
         a = _gt(np.zeros((4, 4), dtype=np.float32))
@@ -233,18 +231,16 @@ class TestInverseVarianceWeighting:
         bad = np.ones((4, 4))
         bad[0, 0] = np.nan
         with pytest.raises(ValueError, match=r"non-finite"):
-            BlendMatched(method="ivw")([a, b], variances=[np.ones((4, 4)), bad])
+            BlendMatched(method="ivw")((a, np.ones((4, 4))), (b, bad))
 
     def test_variances_rejected_for_non_ivw_method(self) -> None:
         a = _gt(np.zeros((4, 4), dtype=np.float32))
         b = _gt(np.zeros((4, 4), dtype=np.float32))
         with pytest.raises(ValueError, match=r"only accepted when method='ivw'"):
-            BlendMatched(method="mean")(
-                [a, b], variances=[np.ones((4, 4)), np.ones((4, 4))]
-            )
+            BlendMatched(method="mean")((a, np.ones((4, 4))), (b, np.ones((4, 4))))
         with pytest.raises(ValueError, match=r"only accepted when method='ivw'"):
             BlendMatched(method="weighted_mean", weights=[1.0, 1.0])(
-                [a, b], variances=[np.ones((4, 4)), np.ones((4, 4))]
+                (a, np.ones((4, 4))), (b, np.ones((4, 4)))
             )
 
 
@@ -320,7 +316,7 @@ class TestPlainArrayCarrier:
     def test_plain_array_shape_mismatch_still_rejected(self) -> None:
         a = np.zeros((4, 4), dtype=np.float32)
         b = np.zeros((8, 8), dtype=np.float32)
-        with pytest.raises(ValueError, match=r"share spatial shape"):
+        with pytest.raises(ValueError, match=r"BlendMatched: the input 1 pixel grid"):
             BlendMatched()([a, b])
 
 
@@ -343,5 +339,5 @@ class TestGeoMetadata:
             np.zeros((4, 4), dtype=np.float32),
             transform=rasterio.Affine(10.0, 0.0, 600_000.0, 0.0, -10.0, 4_000_000.0),
         )
-        with pytest.raises(ValueError, match=r"share spatial shape, transform"):
+        with pytest.raises(ValueError, match=r"BlendMatched: the input 1 pixel grid"):
             BlendMatched()([a, b])
