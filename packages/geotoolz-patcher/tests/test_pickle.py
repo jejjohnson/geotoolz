@@ -225,8 +225,7 @@ def _point_fields() -> dict[str, Any]:
     gdf = gpd.GeoDataFrame({"v": np.arange(6.0)}, geometry=pts, crs="EPSG:4326")
     fields: dict[str, Any] = {"GeoPandasField": GeoPandasField(gdf, as_points=True)}
     try:
-        import xarray as xr
-
+        xr = pytest.importorskip("xarray")
         pytest.importorskip("xvec")
         from geopatcher._src.fields.xvec import XvecField
 

@@ -353,14 +353,35 @@ class TestReflectAndPadValue:
         assert np.all(corner.data.values[2:, :] == -999.0)
         assert np.all(corner.data.values[:, 2:] == -999.0)
 
-    def test_edge_chip_keeps_exact_georeferencing(self) -> None:
-        # Overflow is bottom/right only → the UL origin is unchanged and,
-        # on an identity transform, equals the anchor.
-        field = _arange_field(10)
-        patcher = _corner_patcher("pad", size=4)
-        corner = {p.anchor: p for p in patcher.split(field)}[(8, 8)]
-        assert corner.data.transform.c == 8
-        assert corner.data.transform.f == 8
+    @pytest.mark.parametrize("boundary", ["pad", "reflect"])
+    @pytest.mark.parametrize(
+        "anchor",
+        [(8, 8), (-2, -1), (-2, 8)],
+        ids=["bottom-right", "top-left", "top-right"],
+    )
+    def test_edge_chip_keeps_exact_georeferencing(
+        self, boundary: BoundaryMode, anchor: tuple[int, int]
+    ) -> None:
+        # A full-size overflowing chip is georeferenced as the window it
+        # covers, overflow included: its UL corner is the anchor's pixel
+        # on the source grid. A projected, north-up, non-unit transform
+        # (not the identity, where `c == col` holds trivially) and
+        # overflow on every side.
+        utm = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
+        arr = np.arange(100, dtype=np.float32).reshape(10, 10)
+        field = RasterField(GeoTensor(values=arr, transform=utm, crs="EPSG:32630"))
+        patcher = SpatialPatcher(
+            geometry=SpatialRectangular(size=(4, 4), boundary=boundary),
+            sampler=SpatialExplicit([anchor]),
+            window=SpatialBoxcar(),
+            aggregation=SpatialOverlapAdd(),
+        )
+        (chip,) = list(patcher.split(field))
+        row, col = anchor
+        assert chip.data.shape == (4, 4)
+        assert chip.data.transform == window_transform(Window(col, row, 4, 4), utm)
+        assert chip.data.transform.c == 500_000.0 + 10.0 * col
+        assert chip.data.transform.f == 4_600_000.0 - 10.0 * row
 
     @pytest.mark.parametrize(("n", "size"), [(10, 4), (70, 16), (5, 16)])
     def test_reflect_overflow_beyond_in_domain_extent(self, n: int, size: int) -> None:
