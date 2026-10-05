@@ -7,17 +7,24 @@ reconstructs each patch bit-identically.
 
 from __future__ import annotations
 
+import datetime
 import os
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import pytest
+import rasterio
+import xarray as xr
 from _helpers import make_raster_field
+from georeader.geotensor import GeoTensor
+from rasterio.transform import from_origin
 
 from geopatcher import (
     PatchCache,
+    RasterField,
     SpatialBoxcar,
     SpatialOverlapAdd,
     SpatialPatcher,
@@ -44,6 +51,13 @@ class _CountingField:
 
     def with_data(self, array: Any) -> Any:
         return self.inner.with_data(array)
+
+    def __getattr__(self, name: str) -> Any:
+        # Transparent wrapper: identity attributes (`reader`, `da`, `url`,
+        # `cache_id`) resolve on the wrapped field.
+        if name == "inner":
+            raise AttributeError(name)
+        return getattr(self.inner, name)
 
 
 def _patcher(size: int = 8, step: int = 8) -> SpatialPatcher:
@@ -224,3 +238,498 @@ class TestIndexedViewIntegration:
         view2 = IndexedPatchView(patcher, second, cache=cache)
         _ = [view2[i] for i in range(len(view2))]
         assert second.selects == 0
+
+
+# ---------------------------------------------------------------------------
+# gh #198 — corruption, key coverage, mask poisoning, carrier fidelity
+# ---------------------------------------------------------------------------
+
+
+def _entries(root: Any) -> list[Path]:
+    return sorted(Path(root).rglob("*.npz"))
+
+
+def _write_tif(
+    path: Path,
+    data: np.ndarray,
+    *,
+    crs: str = "EPSG:32630",
+    nodata: float | None = None,
+    **profile: Any,
+) -> Path:
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=data.shape[-2],
+        width=data.shape[-1],
+        count=data.shape[0],
+        dtype=data.dtype,
+        crs=crs,
+        transform=from_origin(500_000, 4_000_000 + 10 * data.shape[-2], 10, 10),
+        nodata=nodata,
+        **profile,
+    ) as dst:
+        dst.write(data)
+    return path
+
+
+def _assert_patches_equal(got: list[Any], ref: list[Any]) -> None:
+    assert [p.anchor for p in got] == [p.anchor for p in ref]
+    for g, r in zip(got, ref, strict=True):
+        np.testing.assert_array_equal(np.asarray(g.data), np.asarray(r.data))
+        assert np.asarray(g.data).dtype == np.asarray(r.data).dtype
+
+
+@pytest.mark.parametrize(
+    "damage", ["bad_zip", "zero_byte", "truncated", "unknown_kind", "bad_meta"]
+)
+def test_corrupt_entry_is_repaired(tmp_path, damage: str) -> None:
+    # A torn / empty entry is a miss (never an exception out of split) and
+    # is rewritten, so the run after the repair is all hits again.
+    base = make_raster_field(16)
+    cache = PatchCache(tmp_path, field_id="scene")
+    patcher = _patcher()
+    reference = list(patcher.split(base))
+    list(patcher.split(base, cache=cache))
+    for path in _entries(tmp_path):
+        if damage == "bad_zip":
+            path.write_bytes(b"this is not a zip archive")
+        elif damage == "zero_byte":
+            path.write_bytes(b"")
+        elif damage == "truncated":
+            blob = path.read_bytes()
+            path.write_bytes(blob[: len(blob) // 2])
+        else:
+            # A well-formed zip with the current format tag whose carrier
+            # cannot be rebuilt: it must be repaired too, not fail later.
+            with np.load(path) as npz:
+                arrays = {k: npz[k] for k in npz.files}
+            if damage == "unknown_kind":
+                arrays["kind"] = np.array("bogus")
+            else:
+                arrays["meta"] = np.array("{}")
+            with path.open("wb") as fh:
+                np.savez(fh, **arrays)
+
+    repair = _CountingField(base)
+    _assert_patches_equal(list(patcher.split(repair, cache=cache)), reference)
+    assert repair.selects == 4  # every damaged entry was a miss
+
+    warm = _CountingField(base)
+    _assert_patches_equal(list(patcher.split(warm, cache=cache)), reference)
+    assert warm.selects == 0  # the damaged entries were rewritten
+    assert all(path.stat().st_size > 0 for path in _entries(tmp_path))
+    assert not list(tmp_path.rglob("*.tmp"))  # no scratch files left behind
+
+
+def test_band_subset_and_reprojection_keys_differ(tmp_path) -> None:
+    from georeader.rasterio_reader import RasterioReader
+
+    from geopatcher import ReprojectingRasterField
+
+    tif = _write_tif(
+        tmp_path / "scene.tif",
+        np.arange(3 * 16 * 16, dtype=np.int16).reshape(3, 16, 16),
+    )
+    cache = PatchCache(tmp_path / "cache")
+    patcher = _patcher()
+
+    # Band subset: `indexes=[2]` must not be served the 3-band chips.
+    list(patcher.split(RasterField(RasterioReader(str(tif))), cache=cache))
+    hits = cache.stats()["hits"]
+    band2 = RasterField(RasterioReader(str(tif), indexes=[2]))
+    got = list(patcher.split(band2, cache=cache))
+    assert cache.stats()["hits"] == hits  # all misses
+    assert all(p.data.shape == (1, 8, 8) for p in got)
+    _assert_patches_equal(got, list(patcher.split(band2)))
+
+    # Reprojection: dst_crs and resampling are both part of the key.
+    reader = RasterioReader(str(tif))
+    utm = ReprojectingRasterField(reader, dst_crs="EPSG:32630", resampling="nearest")
+    wgs = ReprojectingRasterField(reader, dst_crs="EPSG:4326", resampling="nearest")
+    bil = ReprojectingRasterField(reader, dst_crs="EPSG:32630", resampling="bilinear")
+    assert len({f.cache_id() for f in (utm, wgs, bil)}) == 3
+    assert len({cache.field_id_for(f) for f in (utm, wgs, bil)}) == 3
+    list(patcher.split(utm, cache=cache))
+    for other in (wgs, bil):
+        hits = cache.stats()["hits"]
+        got = list(patcher.split(other, cache=cache))
+        assert cache.stats()["hits"] == hits  # never served utm's chips
+        _assert_patches_equal(got, list(patcher.split(other)))
+
+
+def test_obstore_cog_identity_covers_store_path_and_ifd(tmp_path) -> None:
+    pytest.importorskip("obstore")
+    pytest.importorskip("async_tiff")
+    from obstore.store import LocalStore
+    from rasterio.enums import Resampling
+
+    from geopatcher.fields import ObstoreCogField
+
+    for folder, offset in (("a", 0), ("b", 1000)):
+        (tmp_path / folder).mkdir()
+        path = _write_tif(
+            tmp_path / folder / "cog.tif",
+            np.arange(64 * 64, dtype=np.uint16).reshape(1, 64, 64) + offset,
+            tiled=True,
+            blockxsize=16,
+            blockysize=16,
+            compress="deflate",
+        )
+        with rasterio.open(path, "r+") as dst:
+            dst.build_overviews([2], Resampling.nearest)
+
+    def open_cog(folder: str, ifd_index: int = 0) -> Any:
+        # Same (arbitrary) url label: with an explicit store the url
+        # names nothing, so it must not be the identity.
+        return ObstoreCogField.from_url(
+            "file:///label/cog.tif",
+            store=LocalStore(prefix=str(tmp_path / folder)),
+            path="cog.tif",
+            ifd_index=ifd_index,
+        )
+
+    cache = PatchCache(tmp_path / "cache")
+    a0, b0, a1 = open_cog("a"), open_cog("b"), open_cog("a", ifd_index=1)
+    assert len({a0.cache_id(), b0.cache_id(), a1.cache_id()}) == 3
+    assert len({cache.field_id_for(f) for f in (a0, b0, a1)}) == 3
+
+    patcher = _patcher(size=16, step=16)
+    list(patcher.split(a0, cache=cache))
+    hits = cache.stats()["hits"]
+    got = list(patcher.split(b0, cache=cache))
+    assert cache.stats()["hits"] == hits
+    _assert_patches_equal(got, list(patcher.split(open_cog("b"))))
+
+
+class _FlakyField(_CountingField):
+    """`select` raises while ``broken`` is set (a transient source outage)."""
+
+    def __init__(self, inner: Any, *, broken: bool) -> None:
+        super().__init__(inner)
+        self.broken = broken
+
+    def select(self, window: Any) -> Any:
+        self.selects += 1
+        if self.broken:
+            raise OSError("source unavailable")
+        return self.inner.select(window)
+
+
+def test_mask_patches_not_cached(tmp_path) -> None:
+    base = make_raster_field(16)
+    cache = PatchCache(tmp_path, field_id="scene")
+    patcher = SpatialPatcher(
+        geometry=SpatialRectangular(size=(8, 8)),
+        sampler=SpatialRegularStride(step=8),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+        on_error="mask",
+    )
+    masked = list(patcher.split(_FlakyField(base, broken=True), cache=cache))
+    assert len(masked) == 4
+    assert all(np.isnan(np.asarray(p.data)).all() for p in masked)
+    assert cache.stats()["entries"] == 0  # placeholders are never stored
+
+    recovered = _FlakyField(base, broken=False)
+    got = list(patcher.split(recovered, cache=cache))
+    assert recovered.selects == 4  # the source is read again after recovery
+    _assert_patches_equal(got, list(_patcher().split(base)))
+    assert cache.stats()["entries"] == 4
+
+
+def _assert_same_attrs(got: dict, ref: dict) -> None:
+    assert list(got) == list(ref)
+    for key, value in ref.items():
+        assert type(got[key]) is type(value), key
+        if isinstance(value, np.ndarray):
+            np.testing.assert_array_equal(got[key], value)
+            assert got[key].dtype == value.dtype
+        else:
+            assert got[key] == value, key
+
+
+def _assert_same_carrier(got: Any, ref: Any) -> None:
+    """Patch data equal in type, values, dtype and every piece of metadata."""
+    assert type(got) is type(ref)
+    if isinstance(ref, xr.DataArray):
+        xr.testing.assert_identical(got, ref)
+        assert got.dtype == ref.dtype
+        _assert_same_attrs(got.attrs, ref.attrs)
+        assert got.encoding == ref.encoding
+        for name in ref.coords:
+            _assert_same_attrs(got[name].attrs, ref[name].attrs)
+            assert got[name].dtype == ref[name].dtype
+        if "spatial_ref" in ref.coords:
+            assert got.rio.transform() == ref.rio.transform()
+            assert got.rio.crs == ref.rio.crs
+            assert got.rio.nodata == ref.rio.nodata
+            assert type(got.rio.nodata) is type(ref.rio.nodata)
+        return
+    np.testing.assert_array_equal(np.asarray(got), np.asarray(ref))
+    assert got.dtype == ref.dtype
+    assert got.transform == ref.transform
+    assert got.crs == ref.crs
+    assert str(got.crs) == str(ref.crs)
+    assert got.fill_value_default == ref.fill_value_default
+    assert type(got.fill_value_default) is type(ref.fill_value_default)
+    _assert_same_attrs(got.attrs, ref.attrs)
+
+
+def _geotensor_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
+    gt = GeoTensor(
+        values=np.arange(2 * 16 * 16, dtype=np.int16).reshape(2, 16, 16),
+        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_160.0),
+        crs=rasterio.crs.CRS.from_epsg(32630),
+        fill_value_default=-9999,
+        attrs={
+            "sensor": "toy",
+            "wavelengths": np.array([665.0, 842.0]),
+            "scale": (1, 2.5),
+            "gain": np.float32(0.5),
+        },
+    )
+    return RasterField(gt), PatchCache(tmp_path, field_id="gt"), _patcher()
+
+
+def _rio_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
+    rioxarray = pytest.importorskip("rioxarray")
+    from geopatcher.fields import RioXarrayField
+
+    tif = _write_tif(
+        tmp_path / "rio.tif",
+        np.arange(2 * 16 * 16, dtype=np.int16).reshape(2, 16, 16),
+        nodata=-9999,
+    )
+    # File-backed: identity comes from `encoding["source"]`, no field_id.
+    field = RioXarrayField(rioxarray.open_rasterio(tif))
+    return field, PatchCache(tmp_path / "c"), _patcher()
+
+
+def _xarray_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
+    from geopatcher.fields import XarrayField
+
+    da = xr.DataArray(
+        np.arange(3 * 16 * 16, dtype=np.float32).reshape(3, 16, 16),
+        dims=("time", "y", "x"),
+        coords={
+            "time": np.array(
+                ["2024-01-01", "2024-01-02", "2024-01-03"], dtype="datetime64[ns]"
+            ),
+            "y": ("y", np.linspace(10.0, 0.0, 16), {"units": "m"}),
+            "x": np.arange(16) * 0.5,
+            "label": ("time", np.array(["a", "b", "c"])),
+        },
+        name="tas",
+        attrs={"units": "K", "valid_range": np.array([0.0, 400.0], np.float32)},
+    )
+    patcher = SpatialPatcher(
+        geometry=SpatialRectangular(size=(2, 8, 8)),
+        sampler=SpatialRegularStride(step=(1, 8, 8)),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+    )
+    return XarrayField(da), PatchCache(tmp_path, field_id="cube"), patcher
+
+
+@pytest.mark.parametrize(
+    "make_field",
+    [_geotensor_field, _rio_field, _xarray_field],
+    ids=["geotensor", "rioxarray", "xarray"],
+)
+def test_hit_preserves_fill_and_carrier(tmp_path, make_field) -> None:
+    field, cache, patcher = make_field(tmp_path)
+    uncached = list(patcher.split(field))
+    list(patcher.split(field, cache=cache))  # fill
+    counting = _CountingField(field)
+    hits = list(patcher.split(counting, cache=cache))
+    assert counting.selects == 0  # every patch below is a cache hit
+    assert cache.stats()["hits"] == len(hits) == len(uncached) > 0
+    for got, ref in zip(hits, uncached, strict=True):
+        assert got.anchor == ref.anchor
+        _assert_same_carrier(got.data, ref.data)
+        np.testing.assert_array_equal(np.asarray(got.weights), np.asarray(ref.weights))
+
+
+def test_unroundtrippable_carrier_is_refused(tmp_path) -> None:
+    field, cache, patcher = _geotensor_field(tmp_path)
+    field.reader.attrs["acquired"] = datetime.datetime(2024, 1, 1)
+    with pytest.raises(TypeError, match=r"cannot store GeoTensor\.attrs"):
+        list(patcher.split(field, cache=cache))
+    assert cache.stats()["entries"] == 0
+
+
+def test_variables_of_one_file_have_distinct_keys(tmp_path) -> None:
+    """Two variables of one netCDF share source, dims, coords, shape, dtype."""
+    pytest.importorskip("netCDF4")
+    from geopatcher.fields import XarrayField
+
+    coords = {"y": np.arange(16.0), "x": np.arange(16.0)}
+    base = np.arange(16 * 16, dtype=np.float32).reshape(16, 16)
+    path = tmp_path / "two_vars.nc"
+    xr.Dataset(
+        {
+            "temperature": (("y", "x"), base),
+            "precipitation": (("y", "x"), base + 1000),
+        },
+        coords=coords,
+    ).to_netcdf(path)
+
+    patcher = SpatialPatcher(
+        geometry=SpatialRectangular(size=(8, 8)),
+        sampler=SpatialRegularStride(step=8),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+    )
+    cache = PatchCache(tmp_path / "cache")
+    with xr.open_dataset(path) as ds:
+        temp, prcp = XarrayField(ds["temperature"]), XarrayField(ds["precipitation"])
+        assert cache.field_id_for(temp) != cache.field_id_for(prcp)
+        list(patcher.split(temp, cache=cache))
+        counting = _CountingField(prcp)
+        got = list(patcher.split(counting, cache=cache))
+        assert counting.selects == len(got)  # no hit served temperature
+        np.testing.assert_array_equal(np.asarray(got[0].data), base[:8, :8] + 1000)
+
+
+def test_structured_dtype_metadata_is_refused(tmp_path) -> None:
+    field, cache, patcher = _geotensor_field(tmp_path)
+    record = np.zeros(1, dtype=[("a", "<i4"), ("b", "<f4")])[0]
+    field.reader.attrs["record"] = record
+    with pytest.raises(TypeError, match="structured or void dtype"):
+        list(patcher.split(field, cache=cache))
+    assert cache.stats()["entries"] == 0
+
+
+def test_memory_store_needs_explicit_field_id(tmp_path) -> None:
+    """A MemoryStore's contents live only in that instance: no auto identity."""
+    pytest.importorskip("obstore")
+    pytest.importorskip("async_tiff")
+    from obstore.store import MemoryStore
+
+    from geopatcher.fields import ObstoreCogField
+
+    def open_cog(offset: int) -> Any:
+        path = _write_tif(
+            tmp_path / f"cog{offset}.tif",
+            np.arange(32 * 32, dtype=np.uint16).reshape(1, 32, 32) + offset,
+            tiled=True,
+            blockxsize=16,
+            blockysize=16,
+        )
+        store = MemoryStore()
+        store.put("cog.tif", Path(path).read_bytes())
+        return ObstoreCogField.from_url(
+            "memory:///cog.tif", store=store, path="cog.tif"
+        )
+
+    a, b = open_cog(0), open_cog(1000)
+    with pytest.raises(ValueError, match="Pass field_id"):
+        PatchCache(tmp_path / "auto").field_id_for(a)
+
+    patcher = _patcher(size=16, step=16)
+    cache_a = PatchCache(tmp_path / "shared", field_id="scene-a")
+    cache_b = PatchCache(tmp_path / "shared", field_id="scene-b")
+    assert cache_a.field_id_for(a) != cache_b.field_id_for(b)
+    list(patcher.split(a, cache=cache_a))
+    got = list(patcher.split(b, cache=cache_b))
+    assert cache_b.stats()["hits"] == 0
+    _assert_patches_equal(got, list(patcher.split(open_cog(1000))))
+
+
+def test_rioxarray_band_selections_have_distinct_keys(tmp_path) -> None:
+    """``open_rasterio(p).sel(band=1)`` / ``.sel(band=2)`` differ by a coord."""
+    rioxarray = pytest.importorskip("rioxarray")
+    from geopatcher.fields import RioXarrayField
+
+    path = _write_tif(
+        tmp_path / "two_band.tif",
+        np.stack([np.full((16, 16), 1, np.uint16), np.full((16, 16), 2, np.uint16)]),
+    )
+    cache = PatchCache(tmp_path / "cache")
+    with rioxarray.open_rasterio(path) as da:
+        b1, b2 = RioXarrayField(da.sel(band=1)), RioXarrayField(da.sel(band=2))
+        assert cache.field_id_for(b1) != cache.field_id_for(b2)
+        list(_patcher().split(b1, cache=cache))
+        got = list(_patcher().split(b2, cache=cache))
+    assert cache.stats()["hits"] == 0
+    assert all((np.asarray(p.data) == 2).all() for p in got)
+
+
+def test_remote_encoding_source_is_an_identity(tmp_path) -> None:
+    """A URL in ``encoding["source"]`` names the object; no local stat."""
+    from geopatcher.fields import XarrayField
+
+    da = xr.DataArray(np.zeros((4, 4)), dims=("y", "x"), name="v")
+    da.encoding["source"] = "https://example.com/data/scene.nc"
+    field_id = PatchCache(tmp_path).field_id_for(XarrayField(da))
+    assert field_id.startswith("url:https://example.com/data/scene.nc|")
+
+
+def test_rioxarray_nodata_and_attrs_are_in_the_key(tmp_path) -> None:
+    """Views differing only in ``rio.write_nodata`` / attrs get their own keys."""
+    rioxarray = pytest.importorskip("rioxarray")
+    from geopatcher.fields import RioXarrayField
+
+    path = _write_tif(tmp_path / "one_band.tif", np.ones((1, 16, 16), np.float32))
+    cache = PatchCache(tmp_path / "cache")
+    with rioxarray.open_rasterio(path) as da:
+        base = da.sel(band=1)
+        views = [
+            RioXarrayField(base.rio.write_nodata(-1.0)),
+            RioXarrayField(base.rio.write_nodata(-2.0)),
+            RioXarrayField(base.assign_attrs(source_note="b")),
+        ]
+        assert len({cache.field_id_for(v) for v in views}) == 3
+
+
+def test_tuple_dimension_names_round_trip(tmp_path) -> None:
+    """A hashable (tuple) dim name must come back as a tuple, not a list."""
+    from geopatcher import Patch
+
+    da = xr.DataArray(
+        np.arange(16.0).reshape(4, 4),
+        dims=(("y", 0), "x"),
+        coords={"x": np.arange(4.0)},
+    )
+    cache = PatchCache(tmp_path)
+    cache.put("f", "c", (0, 0), Patch(data=da, anchor=(0, 0), indices=None))
+    payload = cache.get("f", "c", (0, 0))
+    assert payload is not None  # not deleted as an "unusable" entry
+    got = cache.build_patch(payload, (0, 0), None).data
+    assert got.dims == (("y", 0), "x")
+    xr.testing.assert_identical(got, da)
+
+
+def test_pooled_cog_identity_covers_storage_options(tmp_path, monkeypatch) -> None:
+    """Same url, different pooled-store options: different objects, keys."""
+    import dataclasses
+
+    pytest.importorskip("obstore")
+    pytest.importorskip("async_tiff")
+    from obstore.store import LocalStore
+
+    from geopatcher.fields import ObstoreCogField
+
+    _write_tif(
+        tmp_path / "cog.tif",
+        np.zeros((1, 32, 32), np.uint16),
+        tiled=True,
+        blockxsize=16,
+        blockysize=16,
+    )
+    field = ObstoreCogField.from_url(
+        f"file://{tmp_path / 'cog.tif'}",
+        store=LocalStore(prefix=str(tmp_path)),
+        path="cog.tif",
+    )
+    # No HEAD against the made-up endpoints (the version hook arrives in #199).
+    monkeypatch.setattr(
+        ObstoreCogField, "_object_version", lambda self: "v1", raising=False
+    )
+    pooled = dataclasses.replace(field, store=None, path=None)
+    a = dataclasses.replace(pooled, storage_options={"endpoint": "https://a.example"})
+    b = dataclasses.replace(pooled, storage_options={"endpoint": "https://b.example"})
+    assert a.cache_id() != b.cache_id()
+    assert "https://a.example" not in a.cache_id()  # digested, never verbatim

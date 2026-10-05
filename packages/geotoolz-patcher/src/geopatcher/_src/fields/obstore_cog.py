@@ -79,6 +79,7 @@ this module unless the name is actually accessed).
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import threading
 import warnings
@@ -450,6 +451,28 @@ def _crs_from_geokeys(geo_keys: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _store_identity(store: Any) -> str | None:
+    """Printable configuration of an obstore store, else ``None``.
+
+    A store whose ``repr`` is only its type and address (``MemoryStore``)
+    has no configuration that names its contents.
+    """
+    text = repr(store)
+    if " object at 0x" in text:
+        return None
+    return text
+
+
+def _options_digest(options: dict[str, Any] | None) -> str | None:
+    """sha256 of ``storage_options`` (sorted keys, ``repr`` values)."""
+    if not options:
+        return None
+    import hashlib
+
+    text = json.dumps(options, sort_keys=True, default=repr)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _reopen(url: str, options: dict[str, Any]) -> ObstoreCogField:
     """Unpickle hook: re-open the COG by URL (see `ObstoreCogField.__reduce__`)."""
     return ObstoreCogField.from_url(url, **options)
@@ -612,6 +635,51 @@ class ObstoreCogField:
             options["store"] = self.store
             options["path"] = self.path
         return (_reopen, (self.url, options))
+
+    def cache_id(self) -> str:
+        """`PatchCache` identity: the object read and the IFD.
+
+        With the process pool the object is the ``url``; with an explicit
+        ``store`` the ``url`` is only a label, so the identity is the
+        store's printable configuration (e.g. ``LocalStore("/data")``)
+        plus ``path``. A store without one (``MemoryStore``, whose
+        contents live only in that instance) has no stable identity:
+        `PatchCache` then requires an explicit ``field_id``.
+
+        Raises:
+            UnstableIdentityError: The explicit ``store`` has no printable
+                configuration; ``partial`` carries the rest of the
+                identity (``path``, ``ifd_index``).
+
+        Examples:
+            >>> ObstoreCogField.from_url("s3://b/k.tif").cache_id()
+            '{"ifd_index": 0, "path": null, "store": null, "url": "s3://b/k.tif"}'
+            >>> ObstoreCogField.from_url(
+            ...     "file:///d/k.tif", store=LocalStore("/d"), path="k.tif", ifd_index=1
+            ... ).cache_id()
+            '{"ifd_index": 1, "path": "k.tif", "store": "LocalStore(...)", "url": null}'
+        """
+        explicit = self.store is not None
+        store_id = _store_identity(self.store) if explicit else None
+        identity = {
+            "url": None if explicit else self.url,
+            # Pooled stores are keyed on their options (endpoint, region,
+            # …): the same url can name different objects under different
+            # options. A digest, so credentials never reach the key.
+            "options": None if explicit else _options_digest(self.storage_options),
+            "store": store_id,
+            "path": self.path if explicit else None,
+            "ifd_index": int(self.ifd_index),
+        }
+        if explicit and store_id is None:
+            from geopatcher._src.cache import UnstableIdentityError
+
+            raise UnstableIdentityError(
+                f"its {type(self.store).__qualname__} has no configuration that "
+                f"names its contents.",
+                partial=json.dumps(identity, sort_keys=True),
+            )
+        return json.dumps(identity, sort_keys=True)
 
     @property
     def fill_value_default(self) -> float | int:

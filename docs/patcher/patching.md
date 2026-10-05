@@ -200,9 +200,44 @@ cache.stats()   # {"hits": ..., "misses": ..., "bytes": ..., "entries": ...}
 
 It composes with `journal=` (completion tracking) and `prefetch=`, and
 plugs into random access via `IndexedPatchView(patcher, field, cache=cache)`.
-Path- and URL-backed fields derive their identity automatically; pass
-`PatchCache(..., field_id="scene")` for in-memory (`GeoTensor`-backed)
-fields, which have no stable identity of their own.
+
+**What the key covers.** `field_id` is everything the field reads:
+
+- the *source* — a reader's file path (`realpath` + mtime + size), a
+  `url`, or the `encoding["source"]` file of a `rioxarray.open_rasterio` /
+  `xr.open_dataset` array. Pass `PatchCache(..., field_id="scene")` for
+  in-memory (`GeoTensor`- or `DataArray`-backed) fields, which have no
+  stable identity of their own — and also for a file-backed `DataArray`
+  whose values you changed in memory, since its `encoding["source"]` still
+  names the unchanged file;
+- the *domain* — CRS, transform, shape and dtype (or a digest of the grid
+  coordinates for `XarrayField`);
+- the reader's band selection (`indexes`) and boundless fill;
+- the adapter's own `cache_id()`: `ObstoreCogField` folds in its store /
+  `path` (with an explicit `store=` the `url` is only a label) and
+  `ifd_index`, `ReprojectingRasterField` its `dst_crs`, `resolution` and
+  `resampling`. A custom `Field` can define `cache_id() -> str` the same way.
+
+**Hits are bit-identical.** Entries store the carrier, not just the
+pixels: a `GeoTensor` comes back with its transform, CRS,
+`fill_value_default` and `attrs`; an `xarray.DataArray`
+(`RioXarrayField`, `XarrayField`, `DaskField`) with its dims, coords,
+attrs and encoding, so `rio.transform()` / `rio.crs` / `rio.nodata`
+match the uncached chip. A carrier that cannot round-trip exactly — a
+`GeoDataFrame` / `XvecField` patch, an object-dtype array, an attribute
+such as a `datetime` — raises `TypeError` instead of being served back
+degraded; drop `cache=` for that field.
+
+**Only real reads are stored.** `on_error="mask"` placeholders are never
+written, so a run after a transient source outage reads the recovered
+source. A damaged entry (zero-byte, truncated, not a zip) is treated as
+a miss, deleted and rewritten; entries are always published atomically
+(temp file + `os.replace`).
+
+!!! warning "Cache layout changed"
+    The key and entry layout changed in this release: existing cache
+    directories are never hit again. Call `cache.clear()` (or delete the
+    directory) to reclaim the space.
 
 ## Protocols: `Field` and `Domain`
 
