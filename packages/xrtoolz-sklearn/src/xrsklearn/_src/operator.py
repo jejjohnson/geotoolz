@@ -10,8 +10,8 @@ import xarray as xr
 from sklearn.base import clone
 
 from xrcore import Operator
+from xrsklearn._src.nan import MissingKind, NanPolicy
 from xrsklearn._src.wrap import (
-    NanPolicy,
     XarrayEstimator,
     _check_no_conflict,
     _explicit,
@@ -73,9 +73,12 @@ class SklearnOp(Operator):
         sample_dim: xarray dim indexing samples. Defaults to the first dim.
         new_feature_dim: Name for the feature dim when the estimator changes
             feature count (e.g. PCA component count).
-        nan_policy: ``"propagate"`` (default), ``"raise"``, or ``"mask"``. See
-            :class:`XarrayEstimator` for the masking semantics on Dataset
-            input.
+        nan_policy: Missing-value policy, forwarded to
+            :class:`XarrayEstimator` (``"propagate"``, ``"raise"``,
+            ``"mask"``, ``"mask_samples"``, ``"mask_features"``).
+            Defaults to the wrapper's own setting, else ``"propagate"``.
+        missing: What counts as missing (``"nan"`` or ``"nonfinite"``),
+            forwarded to :class:`XarrayEstimator`.
         method: Which sklearn-style method to call on each invocation.
 
     Example:
@@ -117,7 +120,8 @@ class SklearnOp(Operator):
 
             op = SklearnOp(StandardScaler(), variable="ssh", sample_dim="time",
                            method="fit_transform", nan_policy="mask")
-            # Land/NaN rows are dropped pre-fit, then re-inserted as NaN on output.
+            # Land (always-NaN) columns and gappy rows are dropped pre-fit,
+            # then re-inserted as NaN on output.
     """
 
     # Live estimator state (possibly fitted) is not YAML-serializable.
@@ -132,6 +136,7 @@ class SklearnOp(Operator):
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
         method: SklearnMethod = "transform",
     ) -> None:
         self.estimator = estimator
@@ -140,6 +145,7 @@ class SklearnOp(Operator):
         self.sample_dim = sample_dim
         self.new_feature_dim = new_feature_dim
         self.nan_policy = nan_policy
+        self.missing = missing
         self.method = method
 
     def _apply(self, data: xr.DataArray | xr.Dataset) -> xr.DataArray | xr.Dataset:
@@ -190,7 +196,9 @@ class SklearnOp(Operator):
         on each call; for ``method="fit_transform"`` the wrapper fits a fresh
         clone, otherwise the estimator is treated as already fitted.
         """
-        overrides = _explicit(self.sample_dim, self.new_feature_dim, self.nan_policy)
+        overrides = _explicit(
+            self.sample_dim, self.new_feature_dim, self.nan_policy, self.missing
+        )
         if isinstance(self.estimator, XarrayEstimator):
             if self.method == "fit_transform":
                 # Fit a reconfigured clone so the caller's wrapper is never
@@ -212,6 +220,7 @@ class SklearnOp(Operator):
             "sample_dim": self.sample_dim,
             "new_feature_dim": self.new_feature_dim,
             "nan_policy": self.nan_policy,
+            "missing": self.missing,
             "method": self.method,
         }
 

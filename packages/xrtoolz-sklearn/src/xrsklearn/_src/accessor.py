@@ -29,8 +29,8 @@ from typing import Any
 import xarray as xr
 from sklearn.base import clone
 
+from xrsklearn._src.nan import MissingKind, NanPolicy
 from xrsklearn._src.wrap import (
-    NanPolicy,
     XarrayEstimator,
     _check_no_conflict,
     _explicit,
@@ -57,7 +57,7 @@ class _SklearnAccessor:
     through the shortcut path and produces a generic
     ``(sample_dim, component)`` layout instead.
 
-    ``sample_dim`` / ``new_feature_dim`` / ``nan_policy`` configure the
+    ``sample_dim`` / ``new_feature_dim`` / ``nan_policy`` / ``missing`` configure the
     wrapper built around a raw estimator. With an ``XarrayEstimator``
     they may be omitted (the wrapper's own settings apply); ``fit`` /
     ``fit_transform`` fit a reconfigured *clone* of it, and the fitted-
@@ -131,9 +131,10 @@ class _SklearnAccessor:
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
     ) -> XarrayEstimator:
         """An *unfitted* wrapper to fit — a fresh clone if given a wrapper."""
-        overrides = _explicit(sample_dim, new_feature_dim, nan_policy)
+        overrides = _explicit(sample_dim, new_feature_dim, nan_policy, missing)
         if isinstance(estimator, XarrayEstimator):
             # Fit a configured clone: never mutate the caller's wrapper, and
             # never nest an XarrayEstimator inside another.
@@ -147,9 +148,10 @@ class _SklearnAccessor:
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
     ) -> XarrayEstimator:
         """A wrapper around an already-fitted estimator."""
-        overrides = _explicit(sample_dim, new_feature_dim, nan_policy)
+        overrides = _explicit(sample_dim, new_feature_dim, nan_policy, missing)
         # Pre-fitted XarrayEstimator: pass it through. Re-wrapping would
         # construct a fresh wrapper without its fit-time layout, so
         # `inverse_transform` would fall into the generic
@@ -172,6 +174,7 @@ class _SklearnAccessor:
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
         **kwargs: Any,
     ) -> XarrayEstimator:
         """Fit ``estimator`` on this xarray object via ``XarrayEstimator``."""
@@ -180,6 +183,7 @@ class _SklearnAccessor:
             sample_dim=sample_dim,
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
+            missing=missing,
         ).fit(self._obj, y=y, **kwargs)
 
     def fit_transform(
@@ -190,6 +194,7 @@ class _SklearnAccessor:
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
         **kwargs: Any,
     ) -> xr.DataArray | Any:
         """Fit and transform this xarray object via ``XarrayEstimator``."""
@@ -198,6 +203,7 @@ class _SklearnAccessor:
             sample_dim=sample_dim,
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
+            missing=missing,
         ).fit_transform(self._obj, y=y, **kwargs)
 
     def transform(
@@ -207,6 +213,7 @@ class _SklearnAccessor:
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
     ) -> xr.DataArray | Any:
         """Transform this xarray object with a fitted sklearn estimator."""
         return self._wrap_fitted(
@@ -214,6 +221,7 @@ class _SklearnAccessor:
             sample_dim=sample_dim,
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
+            missing=missing,
         ).transform(self._obj)
 
     def inverse_transform(
@@ -223,6 +231,7 @@ class _SklearnAccessor:
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
     ) -> xr.DataArray | Any:
         """Inverse-transform this xarray object with a fitted estimator."""
         return self._wrap_fitted(
@@ -230,6 +239,7 @@ class _SklearnAccessor:
             sample_dim=sample_dim,
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
+            missing=missing,
         ).inverse_transform(self._obj)
 
     def predict(
@@ -239,6 +249,7 @@ class _SklearnAccessor:
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
     ) -> xr.DataArray | Any:
         """Predict from this xarray object with a fitted estimator."""
         return self._wrap_fitted(
@@ -246,6 +257,7 @@ class _SklearnAccessor:
             sample_dim=sample_dim,
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
+            missing=missing,
         ).predict(self._obj)
 
     def predict_proba(
@@ -255,6 +267,7 @@ class _SklearnAccessor:
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
     ) -> xr.DataArray | Any:
         """Predict class probabilities with a fitted estimator."""
         return self._wrap_fitted(
@@ -262,6 +275,7 @@ class _SklearnAccessor:
             sample_dim=sample_dim,
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
+            missing=missing,
         ).predict_proba(self._obj)
 
     def score(
@@ -272,6 +286,7 @@ class _SklearnAccessor:
         sample_dim: Hashable | None = None,
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
+        missing: MissingKind | None = None,
     ) -> float:
         """Score this xarray object with a fitted estimator."""
         return self._wrap_fitted(
@@ -279,6 +294,7 @@ class _SklearnAccessor:
             sample_dim=sample_dim,
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
+            missing=missing,
         ).score(self._obj, y=y)
 
 

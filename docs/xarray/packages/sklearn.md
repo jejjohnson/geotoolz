@@ -55,14 +55,28 @@ recon = wrap.inverse_transform(scores)  # back to (time, lat, lon)
 
 ## NaN policy
 
-Real gridded data has land masks and gaps; sklearn raises on NaN.
-`nan_policy=` decides what happens at the 2-D boundary:
+Real gridded data has land masks and gaps; most sklearn estimators raise
+on NaN. Missing values come in two shapes, and `nan_policy=` handles
+each:
 
 | Policy | Behaviour |
 |---|---|
 | `"propagate"` (default) | hand NaNs to the estimator unchanged — fine for NaN-aware estimators, raises inside sklearn otherwise |
-| `"mask"` | drop sample rows containing any NaN before delegating, re-insert NaN rows in the output |
-| `"raise"` | fail fast with a labeled error before sklearn sees the data |
+| `"raise"` | fail fast, with a count, before sklearn sees `X` or `y` |
+| `"mask_features"` | drop feature columns missing in **every** fit sample (a land mask); the same columns are dropped at transform time and restored as NaN in feature-space outputs |
+| `"mask_samples"` | drop sample rows with any NaN in `X` (or `y`), along with the matching rows of `sample_weight` and other per-sample fit arguments; restore them as NaN rows |
+| `"mask"` | `"mask_features"` then `"mask_samples"` — land-masked fields with gaps |
+
+`missing="nonfinite"` also treats ±inf as missing. Refilled integer
+outputs (cluster labels) are promoted to `float64`, and string labels
+to `object`, so a masked row never reads as a valid class.
+
+```python
+wrap = XarrayEstimator(PCA(n_components=5), sample_dim="time", nan_policy="mask")
+scores = wrap.fit_transform(ssh)          # land cells + gappy days handled
+wrap.feature_mask_                        # which grid cells were used
+recon = wrap.inverse_transform(scores)    # land comes back as NaN
+```
 
 ## The `.sklearn` accessors
 

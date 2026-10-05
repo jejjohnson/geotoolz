@@ -215,7 +215,14 @@ def test_nan_policy_mask_on_dataset_drops_rows_across_all_variables() -> None:
     assert np.isnan(out["other"].values[~valid]).all()
 
 
-def test_nan_policy_mask_all_nan_input_raises() -> None:
+@pytest.mark.parametrize(
+    ("policy", "message"),
+    [
+        ("mask", "Every feature column is missing"),
+        ("mask_samples", "removed all sample rows"),
+    ],
+)
+def test_nan_policy_mask_all_nan_input_raises(policy: str, message: str) -> None:
     bad = xr.DataArray(
         np.full((4, 2), np.nan),
         dims=("time", "feature"),
@@ -224,10 +231,10 @@ def test_nan_policy_mask_all_nan_input_raises() -> None:
     wrap = XarrayEstimator(
         StandardScaler(),
         sample_dim="time",
-        nan_policy="mask",
+        nan_policy=policy,  # type: ignore[arg-type]
     )
 
-    with pytest.raises(ValueError, match="removed all sample rows"):
+    with pytest.raises(ValueError, match=message):
         wrap.fit_transform(bad)
 
 

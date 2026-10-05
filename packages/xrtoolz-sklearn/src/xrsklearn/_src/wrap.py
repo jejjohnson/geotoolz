@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
-from typing import Any, Literal, get_args
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -46,9 +46,22 @@ from xrsklearn._src.layout import (
     sample_coords,
     to_2d,
 )
+from xrsklearn._src.nan import (
+    MissingKind,
+    NanPolicy,
+    _rows,
+    check_no_missing,
+    check_policy,
+    learn_feature_mask,
+    learn_sample_mask,
+    mask_fit_params,
+    masks_features,
+    masks_samples,
+    missing_mask,
+    restore_columns,
+    restore_rows,
+)
 
-
-NanPolicy = Literal["propagate", "raise", "mask"]
 
 #: Dimension name of ``predict_proba`` outputs, labeled by ``classes_``.
 CLASS_DIM = "class"
@@ -79,38 +92,12 @@ class _Batch:
     name: Hashable | None = None
     attrs: dict[str, Any] | None = None
     valid: np.ndarray | None = None
+    features: np.ndarray | None = None
+    full: np.ndarray | None = None  # fit-time X before the feature mask
 
     @property
     def n_samples(self) -> int:
         return self.arr.shape[0] if self.valid is None else self.valid.size
-
-
-def _check_no_nan(arr: np.ndarray, *, label: str) -> None:
-    """Raise if ``arr`` contains any NaN."""
-    if np.isnan(arr).any():
-        raise ValueError(
-            f"{label} contains NaN values; pass nan_policy='propagate' to forward "
-            f"them to the underlying estimator, or impute upstream."
-        )
-
-
-def _restore_masked_samples(
-    arr: np.ndarray,
-    valid_sample_mask: np.ndarray | None,
-) -> np.ndarray:
-    """Re-insert NaN rows removed by ``nan_policy="mask"``."""
-    if valid_sample_mask is None:
-        return arr
-    n_valid = int(valid_sample_mask.sum())
-    if arr.shape[0] != n_valid:
-        raise ValueError(
-            "Cannot restore masked sklearn output: output sample count "
-            f"{arr.shape[0]} does not match valid input sample count {n_valid}."
-        )
-    full_shape = (valid_sample_mask.size, *arr.shape[1:])
-    full = np.full(full_shape, np.nan, dtype=np.result_type(arr.dtype, float))
-    full[valid_sample_mask] = arr
-    return full
 
 
 def _align_y(y: xr.DataArray, batch: _Batch) -> xr.DataArray:
@@ -193,12 +180,14 @@ def _explicit(
     sample_dim: Hashable | None,
     new_feature_dim: str | None,
     nan_policy: NanPolicy | None,
+    missing: MissingKind | None = None,
 ) -> dict[str, Any]:
     """The wrapper settings a caller actually passed (``None`` = not passed)."""
     given = {
         "sample_dim": sample_dim,
         "new_feature_dim": new_feature_dim,
         "nan_policy": nan_policy,
+        "missing": missing,
     }
     return {key: value for key, value in given.items() if value is not None}
 
@@ -250,19 +239,28 @@ class XarrayEstimator(BaseEstimator):
         new_feature_dim: Name of the feature dimension when the
             estimator changes the number of features (e.g. PCA reducing
             150 features to 5 components).
-        nan_policy: ``"propagate"`` (default) hands NaN to the estimator
-            unchanged; ``"raise"`` errors out before delegating; ``"mask"``
-            drops sample rows containing any NaN before delegating, then
-            re-inserts NaN rows in xarray outputs so the input's sample
-            coords and masked locations are preserved.
+        nan_policy: How missing values are handled around the estimator
+            (see :mod:`xrsklearn._src.nan` for the full semantics):
 
-            For Dataset input, the mask is computed across the
-            column-concatenation of all data variables — a NaN in *any*
-            variable drops the whole sample row across *all* variables.
-            Targets ``y`` are aligned to the kept rows automatically.
+            - ``"propagate"`` (default): hand them to the estimator.
+            - ``"raise"``: raise if ``X`` (or ``y``) holds any.
+            - ``"mask_features"``: drop feature columns that are missing in
+              *every* fit sample — a land mask — and reuse that column
+              mask at transform time; feature-space outputs get the
+              columns back as missing.
+            - ``"mask_samples"``: drop sample rows with any missing value
+              in ``X`` (or ``y``, when fitting / scoring), along with the
+              matching rows of per-sample fit arguments such as
+              ``sample_weight``; every output gets the rows back as
+              missing.
+            - ``"mask"``: ``"mask_features"`` then ``"mask_samples"`` —
+              the right choice for land-masked fields that also have gaps.
 
-            ``"mask"`` raises ``ValueError`` if every sample row contains
-            a NaN (no finite rows to fit).
+            For Dataset input the masks span the column-concatenation of
+            all data variables. Refilled integer outputs (cluster labels)
+            are promoted to ``float64``; string labels to ``object``.
+        missing: What counts as missing: ``"nan"`` (default: NaN, NaT,
+            ``None``) or ``"nonfinite"`` (also ±inf).
 
     Attributes:
         estimator_: The fitted clone of ``estimator``.
@@ -270,6 +268,11 @@ class XarrayEstimator(BaseEstimator):
             when fitted on a NumPy array).
         layout_: The fit-time feature layout (``None`` when fitted on a
             NumPy array).
+        target_layout_: The fit-time layout of an xarray ``y`` (``None``
+            otherwise); ``predict`` outputs are rebuilt on it.
+        feature_mask_: Boolean keep-mask over the input feature columns
+            learned by the ``"mask"`` / ``"mask_features"`` policies
+            (``None`` when no column was dropped).
 
     Example:
         Decompose a (time, lat, lon) cube with PCA, recover the original
@@ -323,18 +326,25 @@ class XarrayEstimator(BaseEstimator):
 
         ```
 
-        NaN-tolerant fit — ``nan_policy="mask"`` drops sample rows with
-        any NaN before delegating and re-inserts NaN rows on the way out:
+        Land-masked field with a gap — ``nan_policy="mask"`` drops the
+        always-missing land column and the incomplete sample row, then
+        puts both back as NaN on the way out:
 
         ```pycon
         >>> ssh = da.copy()
-        >>> ssh[0, 0, 0] = np.nan
+        >>> ssh[:, 0, 0] = np.nan  # land, in every sample
+        >>> ssh[3, 1, 1] = np.nan  # a gap in one sample
         >>> wrap = XarrayEstimator(
         ...     PCA(n_components=2), sample_dim="time", nan_policy="mask",
         ... )
         >>> scores = wrap.fit_transform(ssh)
-        >>> bool(np.isnan(scores[0]).all()), bool(np.isfinite(scores[1:]).all())
-        (True, True)
+        >>> int(wrap.feature_mask_.sum())  # 12 cells minus 1 land cell
+        11
+        >>> bool(scores[3].isnull().all()), int(scores.notnull().all("component").sum())
+        (True, 7)
+        >>> recon = wrap.inverse_transform(scores)
+        >>> bool(recon[:, 0, 0].isnull().all())  # land comes back as NaN
+        True
 
         ```
     """
@@ -345,21 +355,19 @@ class XarrayEstimator(BaseEstimator):
         sample_dim: Hashable | None = None,
         new_feature_dim: str = "component",
         nan_policy: NanPolicy = "propagate",
+        missing: MissingKind = "nan",
     ) -> None:
         self.estimator = estimator
         self.sample_dim = sample_dim
         self.new_feature_dim = new_feature_dim
         self.nan_policy = nan_policy
+        self.missing = missing
 
     # ---------- internals -------------------------------------------------
 
     def _check_params(self) -> None:
         """Validate constructor parameters (sklearn defers this to call time)."""
-        allowed = get_args(NanPolicy)
-        if self.nan_policy not in allowed:
-            raise ValueError(
-                f"nan_policy must be one of {allowed}; got {self.nan_policy!r}."
-            )
+        check_policy(self.nan_policy, self.missing)
         if not isinstance(self.new_feature_dim, str):
             raise TypeError(
                 f"new_feature_dim must be a str; got {type(self.new_feature_dim)}."
@@ -385,29 +393,33 @@ class XarrayEstimator(BaseEstimator):
         self,
         x: xr.DataArray | xr.Dataset | np.ndarray,
         *,
-        conform: bool,
+        space: Literal["fit", "features", "output"],
     ) -> _Batch:
-        """Marshal ``x`` into a 2-D array.
+        """Marshal ``x`` into a 2-D array and apply the feature-side NaN policy.
 
         Args:
             x: The input.
-            conform: Check ``x`` against (and reorder it to) the fit-time
-                layout. True for inputs in the training feature space;
-                False for ``fit`` itself and for ``inverse_transform``
-                inputs that live in the estimator's *output* space.
+            space: Which space ``x`` lives in. ``"fit"``: the training
+                input — its layout and feature mask are learned.
+                ``"features"``: the training feature space — ``x`` is
+                conformed to the fit-time layout and the fit-time feature
+                mask is applied. ``"output"``: the estimator's output space
+                (``inverse_transform`` of PCA scores, say) — neither applies.
 
         Returns:
             The marshalled batch. NumPy inputs pass through unlabeled.
         """
         self._check_params()
         if isinstance(x, np.ndarray):
-            return _Batch(arr=x)
+            batch = _Batch(arr=x)
+            self._apply_feature_policy(batch, space)
+            return batch
         if not isinstance(x, xr.DataArray | xr.Dataset):
             raise TypeError(
                 f"X must be xr.DataArray, xr.Dataset, or np.ndarray; got {type(x)}."
             )
         sample_dim = self._resolve_sample_dim(x)
-        fitted = self.__dict__.get("layout_") if conform else None
+        fitted = self.__dict__.get("layout_") if space == "features" else None
         layout: Layout
         if isinstance(x, xr.DataArray):
             in_dims: Any = tuple(x.dims)
@@ -437,38 +449,90 @@ class XarrayEstimator(BaseEstimator):
             name=x.name if isinstance(x, xr.DataArray) else None,
             attrs=dict(x.attrs) if isinstance(x, xr.DataArray) else {},
         )
-        self._apply_nan_policy(batch)
+        self._apply_feature_policy(batch, space)
         return batch
 
-    def _apply_nan_policy(self, batch: _Batch) -> None:
-        arr = batch.arr
+    def _apply_feature_policy(self, batch: _Batch, space: str) -> None:
+        """``raise`` check on X, then drop fit-time all-missing columns."""
         if self.nan_policy == "raise":
-            _check_no_nan(arr, label="X")
+            check_no_missing(batch.arr, label="X", missing=self.missing)
+        if not masks_features(self.nan_policy) or space == "output":
             return
-        if self.nan_policy != "mask":
-            return
-
-        # Integer / bool / object dtypes can't carry NaN at all (np.isnan would
-        # raise TypeError), so masking is a no-op for them. pandas.isna handles
-        # mixed object dtypes (e.g. NaT, None) where the user has marked
-        # missingness via something other than IEEE NaN.
-        if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(
-            arr.dtype, np.complexfloating
-        ):
-            valid = ~np.isnan(arr).any(axis=1)
-        elif arr.dtype == object:
-            valid = ~pd.isna(arr).any(axis=1)
+        if space == "fit":
+            batch.full = batch.arr
+            keep = learn_feature_mask(batch.arr, self.missing)
         else:
+            if "feature_mask_" not in self.__dict__:
+                # A raw fitted estimator (accessor / SklearnOp) never saw the
+                # fit-time columns, so there is no mask to reapply.
+                raise ValueError(
+                    f"nan_policy={self.nan_policy!r} needs the feature mask "
+                    "learned at fit time; fit an XarrayEstimator with this "
+                    "nan_policy and pass it instead of a raw estimator."
+                )
+            keep = self.__dict__.get("feature_mask_")
+            if keep is not None and keep.size != batch.arr.shape[1]:
+                raise ValueError(
+                    f"X has {batch.arr.shape[1]} features but the fit-time "
+                    f"feature mask covers {keep.size}."
+                )
+        if keep is not None:
+            batch.arr = batch.arr[:, keep]
+            batch.features = keep
+
+    def _refine_feature_mask(self, batch: _Batch, y: np.ndarray | None) -> None:
+        """Relearn the fit-time feature mask from rows whose target is present.
+
+        Rows dropped for a missing ``y`` must not keep an otherwise empty
+        column alive, or sample masking would then reject every row.
+        """
+        if y is None or batch.full is None or not masks_samples(self.nan_policy):
             return
-        if valid.all():
+        usable = ~_rows(missing_mask(np.asarray(y), self.missing)).any(axis=1)
+        if usable.all() or not usable.any():
             return
-        if not valid.any():
-            raise ValueError(
-                "nan_policy='mask' removed all sample rows; at least one "
-                "finite sample row is required before delegating to sklearn."
-            )
-        batch.arr = arr[valid]
-        batch.valid = valid
+        keep = learn_feature_mask(batch.full[usable], self.missing)
+        batch.arr = batch.full if keep is None else batch.full[:, keep]
+        batch.features = keep
+
+    def _mask_samples(
+        self,
+        batch: _Batch,
+        y: np.ndarray | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> tuple[np.ndarray | None, dict[str, Any]]:
+        """Sample-side NaN policy: check or drop incomplete rows of X and y.
+
+        Returns:
+            ``y`` and ``params`` subset to the kept rows. ``batch`` is
+            updated in place (``arr`` subset, ``valid`` set).
+        """
+        params = {} if params is None else params
+        if self.nan_policy == "raise" and y is not None:
+            check_no_missing(np.asarray(y), label="y", missing=self.missing)
+        if not masks_samples(self.nan_policy):
+            return y, params
+        keep = learn_sample_mask(batch.arr, y, missing=self.missing)
+        if keep is None:
+            return y, params
+        batch.arr = batch.arr[keep]
+        batch.valid = keep
+        return (None if y is None else y[keep]), mask_fit_params(params, keep)
+
+    def _prepare_fit_params(
+        self, params: dict[str, Any], batch: _Batch
+    ) -> dict[str, Any]:
+        """Align xarray fit arguments (e.g. ``sample_weight``) to X's samples."""
+        out = dict(params)
+        for key, value in params.items():
+            if isinstance(value, xr.DataArray | xr.Dataset):
+                if batch.sample_dim is None:
+                    raise TypeError(
+                        f"Fit argument {key!r} is an xarray object but X is a "
+                        "NumPy array; pass NumPy instead."
+                    )
+                out[key] = _marshal_y(value, batch)[0]
+        return out
 
     def _prepare_y(
         self,
@@ -498,8 +562,6 @@ class XarrayEstimator(BaseEstimator):
             y_np, layout = _marshal_y(y, batch)
         else:
             y_np = np.asarray(y)
-        if batch.valid is not None:
-            y_np = y_np[batch.valid]
         return y_np, layout
 
     # ---------- output labeling -------------------------------------------
@@ -562,7 +624,10 @@ class XarrayEstimator(BaseEstimator):
     ) -> xr.DataArray | xr.Dataset | np.ndarray:
         out = np.asarray(out)
         keeps = _keeps_features(self.estimator_, batch.arr.shape[1], out)
-        out = _restore_masked_samples(out, batch.valid)
+        out = restore_rows(out, batch.valid)
+        if keeps:
+            # Masked-out feature columns come back as missing on the grid.
+            out = restore_columns(out, batch.features)
         if batch.layout is None:
             return out
         if keeps:
@@ -579,7 +644,10 @@ class XarrayEstimator(BaseEstimator):
     def _label_inverse(
         self, out: Any, batch: _Batch
     ) -> xr.DataArray | xr.Dataset | np.ndarray:
-        out = _restore_masked_samples(np.asarray(out), batch.valid)
+        out = restore_rows(np.asarray(out), batch.valid)
+        keep = self.__dict__.get("feature_mask_")
+        if keep is not None and out.ndim == 2 and out.shape[1] == keep.sum():
+            out = restore_columns(out, keep)
         train = self.__dict__.get("layout_")
         if batch.layout is None:
             return out
@@ -592,7 +660,7 @@ class XarrayEstimator(BaseEstimator):
     def _label_target(
         self, out: Any, batch: _Batch
     ) -> xr.DataArray | xr.Dataset | np.ndarray:
-        out = _restore_masked_samples(np.asarray(out), batch.valid)
+        out = restore_rows(np.asarray(out), batch.valid)
         if batch.layout is None:
             return out
         target = self.__dict__.get("target_layout_")
@@ -606,7 +674,7 @@ class XarrayEstimator(BaseEstimator):
     def _label_proba(
         self, out: Any, batch: _Batch, classes: Any
     ) -> xr.DataArray | np.ndarray:
-        out = _restore_masked_samples(np.asarray(out), batch.valid)
+        out = restore_rows(np.asarray(out), batch.valid)
         if batch.layout is None:
             return out
         coord = None
@@ -628,6 +696,7 @@ class XarrayEstimator(BaseEstimator):
         # inherit the target's name, attrs or grid.
         supervised = is_classifier(self.estimator_) or is_regressor(self.estimator_)
         self.target_layout_ = target if supervised else None
+        self.feature_mask_ = batch.features
 
     # ---------- sklearn-style verbs ---------------------------------------
 
@@ -639,10 +708,13 @@ class XarrayEstimator(BaseEstimator):
     ) -> XarrayEstimator:
         """Fit the wrapped estimator to ``x`` (and optional ``y``)."""
         self.__dict__.pop("sample_dim_", None)
-        batch = self._stack(x, conform=False)
+        batch = self._stack(x, space="fit")
         y_np, target = self._prepare_y(y, batch)
+        params = self._prepare_fit_params(kwargs, batch)
+        self._refine_feature_mask(batch, y_np)
+        y_np, params = self._mask_samples(batch, y_np, params)
         self.estimator_ = clone(self.estimator)
-        self.estimator_.fit(batch.arr, y_np, **kwargs)
+        self.estimator_.fit(batch.arr, y_np, **params)
         self._record_fit(batch, target)
         return self
 
@@ -657,7 +729,8 @@ class XarrayEstimator(BaseEstimator):
         KMeans distances) returns ``(sample_dim, new_feature_dim)``.
         """
         self._require_fitted()
-        batch = self._stack(x, conform=True)
+        batch = self._stack(x, space="features")
+        self._mask_samples(batch)
         return self._label_transform(self.estimator_.transform(batch.arr), batch)
 
     @available_if(_estimator_has("fit_transform", "transform"))
@@ -669,13 +742,16 @@ class XarrayEstimator(BaseEstimator):
     ) -> xr.DataArray | xr.Dataset | np.ndarray:
         """Fit then transform ``x`` (output layout as in :meth:`transform`)."""
         self.__dict__.pop("sample_dim_", None)
-        batch = self._stack(x, conform=False)
+        batch = self._stack(x, space="fit")
         y_np, target = self._prepare_y(y, batch)
+        params = self._prepare_fit_params(kwargs, batch)
+        self._refine_feature_mask(batch, y_np)
+        y_np, params = self._mask_samples(batch, y_np, params)
         self.estimator_ = clone(self.estimator)
         if hasattr(self.estimator_, "fit_transform"):
-            out = self.estimator_.fit_transform(batch.arr, y_np, **kwargs)
+            out = self.estimator_.fit_transform(batch.arr, y_np, **params)
         else:
-            self.estimator_.fit(batch.arr, y_np, **kwargs)
+            self.estimator_.fit(batch.arr, y_np, **params)
             out = self.estimator_.transform(batch.arr)
         self._record_fit(batch, target)
         return self._label_transform(out, batch)
@@ -695,12 +771,21 @@ class XarrayEstimator(BaseEstimator):
         """
         self._require_fitted()
         train = self.__dict__.get("layout_")
+        keep = self.__dict__.get("feature_mask_")
         in_feature_space = (
             train is not None
             and isinstance(x, xr.DataArray | xr.Dataset)
             and matches(x, train)
+        ) or (
+            # A full-width NumPy array (e.g. a one-to-one fit_transform output
+            # with the masked columns restored) is in feature space too.
+            isinstance(x, np.ndarray)
+            and keep is not None
+            and x.ndim == 2
+            and x.shape[1] == keep.size
         )
-        batch = self._stack(x, conform=in_feature_space)
+        batch = self._stack(x, space="features" if in_feature_space else "output")
+        self._mask_samples(batch)
         return self._label_inverse(self.estimator_.inverse_transform(batch.arr), batch)
 
     @available_if(_estimator_has("predict"))
@@ -715,7 +800,8 @@ class XarrayEstimator(BaseEstimator):
         ``(sample_dim, new_feature_dim)`` with no attrs.
         """
         self._require_fitted()
-        batch = self._stack(x, conform=True)
+        batch = self._stack(x, space="features")
+        self._mask_samples(batch)
         return self._label_target(self.estimator_.predict(batch.arr), batch)
 
     @available_if(_estimator_has("predict_proba"))
@@ -729,7 +815,8 @@ class XarrayEstimator(BaseEstimator):
         multi-output classifiers.
         """
         self._require_fitted()
-        batch = self._stack(x, conform=True)
+        batch = self._stack(x, space="features")
+        self._mask_samples(batch)
         out = self.estimator_.predict_proba(batch.arr)
         classes = getattr(self.estimator_, "classes_", None)
         if isinstance(out, list):
@@ -750,8 +837,9 @@ class XarrayEstimator(BaseEstimator):
         Not re-wrapped — sklearn ``.score`` returns a Python float.
         """
         self._require_fitted()
-        batch = self._stack(x, conform=True)
+        batch = self._stack(x, space="features")
         y_np, _ = self._prepare_y(y, batch)
+        y_np, _ = self._mask_samples(batch, y_np)
         return float(self.estimator_.score(batch.arr, y_np))
 
     # ---------- proxy + dunder --------------------------------------------
@@ -789,5 +877,6 @@ class XarrayEstimator(BaseEstimator):
             f"XarrayEstimator(estimator={self.estimator!r}, "
             f"sample_dim={self.sample_dim!r}, "
             f"new_feature_dim={self.new_feature_dim!r}, "
-            f"nan_policy={self.nan_policy!r})"
+            f"nan_policy={self.nan_policy!r}, "
+            f"missing={self.missing!r})"
         )
