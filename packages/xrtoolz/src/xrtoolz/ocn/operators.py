@@ -19,6 +19,7 @@ from xrtoolz.ocn._src import (
     ssh as _ssh,
     validation as _validation,
 )
+from xrtoolz.ocn._src.kinematics import Coriolis, Geometry
 
 
 # ---------- validation -----------------------------------------------------
@@ -165,25 +166,52 @@ class Streamfunction(Operator):
 class GeostrophicVelocities(Operator):
     """Geostrophic velocities ``(u_g, v_g)`` from a height field.
 
-    Computes ``u_g = −(g/f) ∂η/∂y`` and ``v_g = (g/f) ∂η/∂x`` on the
-    lon/lat sphere.
+    Computes ``u_g = −(g/f) ∂η/∂y`` and ``v_g = (g/f) ∂η/∂x``, on the
+    lon/lat sphere by default.
 
     Args:
         variable: Name of the sea-surface-height (η) variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
+        f: Coriolis parameter. ``None`` derives it from latitude
+            (spherical only); otherwise a scalar ``f₀``, an ``(f₀, β)`` /
+            ``(f₀, β, y₀)`` β-plane tuple, or a DataArray.
 
     Returns:
         The input dataset with the geostrophic ``u`` and ``v`` velocity
         variables (m s⁻¹).
     """
 
-    def __init__(self, variable: str = "ssh"):
+    def __init__(
+        self,
+        variable: str = "ssh",
+        *,
+        dims: tuple[str, str] = ("lon", "lat"),
+        geometry: Geometry = "spherical",
+        f: Coriolis = None,
+    ):
         self.variable = variable
+        self.dims = dims
+        self.geometry = geometry
+        self.f = f
 
     def _apply(self, ds):
-        return _kinematics.geostrophic_velocities(ds, variable=self.variable)
+        return _kinematics.geostrophic_velocities(
+            ds,
+            variable=self.variable,
+            dims=self.dims,
+            geometry=self.geometry,
+            f=self.f,
+        )
 
     def get_config(self) -> dict[str, Any]:
-        return {"variable": self.variable}
+        return {
+            "variable": self.variable,
+            "dims": self.dims,
+            "geometry": self.geometry,
+            "f": self.f,
+        }
 
 
 class _UVOperator(Operator):
@@ -202,6 +230,36 @@ class _UVOperator(Operator):
         return {"u": self.u, "v": self.v}
 
 
+class _UVGradOperator(_UVOperator):
+    """``(u, v)`` operator that differentiates over the horizontal ``dims``.
+
+    Args:
+        u: Name of the eastward (x) velocity variable.
+        v: Name of the northward (y) velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
+    """
+
+    def __init__(
+        self,
+        u: str = "u",
+        v: str = "v",
+        *,
+        dims: tuple[str, str] = ("lon", "lat"),
+        geometry: Geometry = "spherical",
+    ):
+        super().__init__(u=u, v=v)
+        self.dims = dims
+        self.geometry = geometry
+
+    def _kw(self) -> dict[str, Any]:
+        return {"u": self.u, "v": self.v, "dims": self.dims, "geometry": self.geometry}
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "dims": self.dims, "geometry": self.geometry}
+
+
 class KineticEnergy(_UVOperator):
     """Kinetic energy ``KE = ½ (u² + v²)``.
 
@@ -217,97 +275,133 @@ class KineticEnergy(_UVOperator):
         return _kinematics.kinetic_energy(ds, u=self.u, v=self.v)
 
 
-class RelativeVorticity(_UVOperator):
+class RelativeVorticity(_UVGradOperator):
     """Relative (vertical) vorticity ``ζ = ∂v/∂x − ∂u/∂y``.
 
     Args:
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with a ``vort_r`` variable (s⁻¹).
     """
 
     def _apply(self, ds):
-        return _kinematics.relative_vorticity(ds, u=self.u, v=self.v)
+        return _kinematics.relative_vorticity(ds, **self._kw())
 
 
-class AbsoluteVorticity(_UVOperator):
+class AbsoluteVorticity(_UVGradOperator):
     """Absolute vorticity ``ζ_a = ζ + f`` (relative plus planetary).
 
     Args:
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
+        f: Coriolis parameter. ``None`` derives it from latitude
+            (spherical only); otherwise a scalar ``f₀``, an ``(f₀, β)`` /
+            ``(f₀, β, y₀)`` β-plane tuple, or a DataArray.
 
     Returns:
         The input dataset with a ``vort_a`` variable (s⁻¹).
     """
 
+    def __init__(
+        self,
+        u: str = "u",
+        v: str = "v",
+        *,
+        dims: tuple[str, str] = ("lon", "lat"),
+        geometry: Geometry = "spherical",
+        f: Coriolis = None,
+    ):
+        super().__init__(u=u, v=v, dims=dims, geometry=geometry)
+        self.f = f
+
     def _apply(self, ds):
-        return _kinematics.absolute_vorticity(ds, u=self.u, v=self.v)
+        return _kinematics.absolute_vorticity(ds, **self._kw(), f=self.f)
+
+    def get_config(self) -> dict[str, Any]:
+        return {**super().get_config(), "f": self.f}
 
 
-class Divergence(_UVOperator):
-    """Horizontal divergence ``∇·u = ∂u/∂x + ∂v/∂y`` on the lon/lat sphere.
+class Divergence(_UVGradOperator):
+    """Horizontal divergence ``∇·u = ∂u/∂x + ∂v/∂y``.
 
     Args:
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with a ``div`` variable (s⁻¹).
     """
 
     def _apply(self, ds):
-        return _kinematics.divergence(ds, u=self.u, v=self.v)
+        return _kinematics.divergence(ds, **self._kw())
 
 
-class ShearStrain(_UVOperator):
+class ShearStrain(_UVGradOperator):
     """Shear strain rate ``S_s = ∂v/∂x + ∂u/∂y``.
 
     Args:
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with a ``shear_strain`` variable (s⁻¹).
     """
 
     def _apply(self, ds):
-        return _kinematics.shear_strain(ds, u=self.u, v=self.v)
+        return _kinematics.shear_strain(ds, **self._kw())
 
 
-class TensorStrain(_UVOperator):
+class TensorStrain(_UVGradOperator):
     """Normal (tensor) strain rate ``S_n = ∂u/∂x − ∂v/∂y``.
 
     Args:
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with a ``tensor_strain`` variable (s⁻¹).
     """
 
     def _apply(self, ds):
-        return _kinematics.tensor_strain(ds, u=self.u, v=self.v)
+        return _kinematics.tensor_strain(ds, **self._kw())
 
 
-class StrainMagnitude(_UVOperator):
+class StrainMagnitude(_UVGradOperator):
     """Total strain-rate magnitude ``√(S_n² + S_s²)``.
 
     Args:
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with a ``strain`` variable (s⁻¹).
     """
 
     def _apply(self, ds):
-        return _kinematics.strain_magnitude(ds, u=self.u, v=self.v)
+        return _kinematics.strain_magnitude(ds, **self._kw())
 
 
-class OkuboWeiss(_UVOperator):
+class OkuboWeiss(_UVGradOperator):
     """Okubo–Weiss parameter ``W = S_n² + S_s² − ζ²``.
 
     Negative ``W`` marks vorticity-dominated (eddy-core) regions; positive
@@ -316,13 +410,16 @@ class OkuboWeiss(_UVOperator):
     Args:
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with an ``ow`` variable (s⁻²).
     """
 
     def _apply(self, ds):
-        return _kinematics.okubo_weiss(ds, u=self.u, v=self.v)
+        return _kinematics.okubo_weiss(ds, **self._kw())
 
 
 class Enstrophy(Operator):
@@ -380,28 +477,59 @@ class AgeostrophicVelocities(Operator):
         variable: Name of the sea-surface-height (η) variable.
         u: Name of the total eastward velocity variable.
         v: Name of the total northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
+        f: Coriolis parameter. ``None`` derives it from latitude
+            (spherical only); otherwise a scalar ``f₀``, an ``(f₀, β)`` /
+            ``(f₀, β, y₀)`` β-plane tuple, or a DataArray.
 
     Returns:
         The input dataset with ``u_a`` and ``v_a`` ageostrophic-velocity
         variables (m s⁻¹).
     """
 
-    def __init__(self, variable: str = "ssh", u: str = "u", v: str = "v"):
+    def __init__(
+        self,
+        variable: str = "ssh",
+        u: str = "u",
+        v: str = "v",
+        *,
+        dims: tuple[str, str] = ("lon", "lat"),
+        geometry: Geometry = "spherical",
+        f: Coriolis = None,
+    ):
         self.variable = variable
         self.u = u
         self.v = v
+        self.dims = dims
+        self.geometry = geometry
+        self.f = f
 
     def _apply(self, ds):
         return _kinematics.ageostrophic_velocities(
-            ds, variable=self.variable, u=self.u, v=self.v
+            ds,
+            variable=self.variable,
+            u=self.u,
+            v=self.v,
+            dims=self.dims,
+            geometry=self.geometry,
+            f=self.f,
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"variable": self.variable, "u": self.u, "v": self.v}
+        return {
+            "variable": self.variable,
+            "u": self.u,
+            "v": self.v,
+            "dims": self.dims,
+            "geometry": self.geometry,
+            "f": self.f,
+        }
 
 
 class Advection(Operator):
-    """Tracer advection ``−u·∇c`` on the lon/lat sphere.
+    """Tracer advection ``−u·∇c``, on the lon/lat sphere by default.
 
     Args:
         scalar: Name of the advected tracer variable ``c``.
@@ -411,6 +539,9 @@ class Advection(Operator):
         dim: Spatial dimension names the gradient is taken over:
             ``(lon, lat)``, optionally plus a vertical dim such as
             ``"depth"``, which is differentiated as a rectilinear axis.
+        geometry: Geometry of the horizontal pair — ``"spherical"``
+            (default, requires ``lon``/``lat``), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with a ``<scalar>_advection`` tendency variable
@@ -422,14 +553,21 @@ class Advection(Operator):
         scalar: str,
         components: tuple[str, ...] = ("u", "v"),
         dim: tuple[str, ...] = ("lon", "lat"),
+        *,
+        geometry: Geometry = "spherical",
     ):
         self.scalar = scalar
         self.components = components
         self.dim = dim
+        self.geometry = geometry
 
     def _apply(self, ds):
         return _kinematics.advection(
-            ds, scalar=self.scalar, components=self.components, dims=self.dim
+            ds,
+            scalar=self.scalar,
+            components=self.components,
+            dims=self.dim,
+            geometry=self.geometry,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -437,10 +575,11 @@ class Advection(Operator):
             "scalar": self.scalar,
             "components": self.components,
             "dim": self.dim,
+            "geometry": self.geometry,
         }
 
 
-class ShearVorticity(_UVOperator):
+class ShearVorticity(_UVGradOperator):
     """Along-flow shear component of the relative vorticity.
 
     The part of ``ζ`` due to cross-stream changes in flow speed (as opposed
@@ -449,16 +588,19 @@ class ShearVorticity(_UVOperator):
     Args:
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with a ``vort_shear`` variable (s⁻¹).
     """
 
     def _apply(self, ds):
-        return _kinematics.shear_vorticity(ds, u=self.u, v=self.v)
+        return _kinematics.shear_vorticity(ds, **self._kw())
 
 
-class CurvatureVorticity(_UVOperator):
+class CurvatureVorticity(_UVGradOperator):
     """Cross-flow curvature component of the relative vorticity.
 
     The part of ``ζ`` due to streamline curvature; ``vort_shear`` and
@@ -467,17 +609,20 @@ class CurvatureVorticity(_UVOperator):
     Args:
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with a ``vort_curv`` variable (s⁻¹).
     """
 
     def _apply(self, ds):
-        return _kinematics.curvature_vorticity(ds, u=self.u, v=self.v)
+        return _kinematics.curvature_vorticity(ds, **self._kw())
 
 
 class Frontogenesis(Operator):
-    """Petterssen 2-D kinematic frontogenesis of a scalar on the sphere.
+    """Petterssen 2-D kinematic frontogenesis of a scalar.
 
     The rate of change of the horizontal gradient magnitude of ``scalar``
     following the flow; positive values indicate front sharpening.
@@ -486,21 +631,47 @@ class Frontogenesis(Operator):
         scalar: Name of the tracer variable (e.g. temperature).
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
 
     Returns:
         The input dataset with a ``<scalar>_frontogenesis`` variable.
     """
 
-    def __init__(self, scalar: str, u: str = "u", v: str = "v"):
+    def __init__(
+        self,
+        scalar: str,
+        u: str = "u",
+        v: str = "v",
+        *,
+        dims: tuple[str, str] = ("lon", "lat"),
+        geometry: Geometry = "spherical",
+    ):
         self.scalar = scalar
         self.u = u
         self.v = v
+        self.dims = dims
+        self.geometry = geometry
 
     def _apply(self, ds):
-        return _kinematics.frontogenesis(ds, scalar=self.scalar, u=self.u, v=self.v)
+        return _kinematics.frontogenesis(
+            ds,
+            scalar=self.scalar,
+            u=self.u,
+            v=self.v,
+            dims=self.dims,
+            geometry=self.geometry,
+        )
 
     def get_config(self) -> dict[str, Any]:
-        return {"scalar": self.scalar, "u": self.u, "v": self.v}
+        return {
+            "scalar": self.scalar,
+            "u": self.u,
+            "v": self.v,
+            "dims": self.dims,
+            "geometry": self.geometry,
+        }
 
 
 class PotentialVorticityBarotropic(Operator):
@@ -510,23 +681,54 @@ class PotentialVorticityBarotropic(Operator):
         height: Name of the layer-thickness (h) variable.
         u: Name of the eastward velocity variable.
         v: Name of the northward velocity variable.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default), ``"cartesian"`` or
+            ``"rectilinear"``.
+        f: Coriolis parameter. ``None`` derives it from latitude
+            (spherical only); otherwise a scalar ``f₀``, an ``(f₀, β)`` /
+            ``(f₀, β, y₀)`` β-plane tuple, or a DataArray.
 
     Returns:
         The input dataset with a ``pv_barotropic`` variable (m⁻¹ s⁻¹).
     """
 
-    def __init__(self, height: str = "h", u: str = "u", v: str = "v"):
+    def __init__(
+        self,
+        height: str = "h",
+        u: str = "u",
+        v: str = "v",
+        *,
+        dims: tuple[str, str] = ("lon", "lat"),
+        geometry: Geometry = "spherical",
+        f: Coriolis = None,
+    ):
         self.height = height
         self.u = u
         self.v = v
+        self.dims = dims
+        self.geometry = geometry
+        self.f = f
 
     def _apply(self, ds):
         return _kinematics.potential_vorticity_barotropic(
-            ds, height=self.height, u=self.u, v=self.v
+            ds,
+            height=self.height,
+            u=self.u,
+            v=self.v,
+            dims=self.dims,
+            geometry=self.geometry,
+            f=self.f,
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"height": self.height, "u": self.u, "v": self.v}
+        return {
+            "height": self.height,
+            "u": self.u,
+            "v": self.v,
+            "dims": self.dims,
+            "geometry": self.geometry,
+            "f": self.f,
+        }
 
 
 class VelocityMagnitude(Operator):

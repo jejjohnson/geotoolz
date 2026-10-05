@@ -13,6 +13,31 @@ Vorticity, strain, kinetic energy, the Okubo–Weiss parameter, and
 stratification (Brunt–Väisälä frequency, mixed-layer depth) follow from the
 velocity and density fields.
 
+## Cartesian / β-plane grids
+
+By default every horizontal diagnostic works on a lon/lat grid in degrees
+(`dims=("lon", "lat")`, `geometry="spherical"`) and derives $f$ from
+latitude. Idealised model output on an $f$- or β-plane — `x`/`y` in metres,
+no lon/lat — passes the dims, the geometry and an explicit Coriolis
+parameter instead:
+
+```python
+from xrtoolz.ocn import GeostrophicVelocities, OkuboWeiss, relative_vorticity
+
+cart = {"dims": ("x", "y"), "geometry": "cartesian"}  # or "rectilinear"
+
+zeta = relative_vorticity(ds, "u", "v", **cart)
+ug = GeostrophicVelocities("eta", **cart, f=(1e-4, 1.6e-11))(ds)
+ow = OkuboWeiss("u", "v", **cart)(ds)
+```
+
+`f=` accepts a scalar $f_0$ (f-plane), an `(f0, beta)` tuple for the
+β-plane $f = f_0 + \beta\,(y - y_0)$ with $y_0$ the centre of the `y`
+coordinate, `(f0, beta, y0)` to pin $y_0$, or a DataArray used as-is. It is
+required on non-spherical grids, where there is no latitude to derive it
+from. Fields must be collocated on one grid; destagger C-grid output before
+calling these diagnostics.
+
 ## Rotation & geostrophy
 
 ::: xrtoolz.ocn.operators.CoriolisNormalized

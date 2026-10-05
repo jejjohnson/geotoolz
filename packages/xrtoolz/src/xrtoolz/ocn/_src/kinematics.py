@@ -1,11 +1,18 @@
 """Kinematic and geostrophic quantities for ocean fields.
 
-All operators take an :class:`xr.Dataset` with geographic coordinates
-(``lon``, ``lat``) and return a new Dataset with the computed variable.
-Spherical-metric finite differencing is delegated to :mod:`xrgrad`,
-which converts lon/lat (degrees) to metric ``∂/∂x`` and ``∂/∂y`` via the
-``1/(R cos φ)`` and ``1/R`` factors and applies the curvature corrections
-that ``∇·`` and ``∇×`` require on a sphere.
+All operators take an :class:`xr.Dataset` and return a new Dataset with
+the computed variable. Finite differencing is delegated to :mod:`xrgrad`.
+By default the horizontal axes are geographic (``dims=("lon", "lat")``,
+``geometry="spherical"``): lon/lat in degrees are converted to metric
+``∂/∂x`` and ``∂/∂y`` via the ``1/(R cos φ)`` and ``1/R`` factors, with
+the curvature corrections that ``∇·`` and ``∇×`` require on a sphere,
+and the Coriolis parameter is derived from latitude.
+
+Idealised model output on an f/β-plane passes ``dims=("x", "y")`` with
+``geometry="cartesian"`` (uniform spacing in metres) or
+``"rectilinear"`` (non-uniform), and an explicit Coriolis ``f=`` to the
+functions that need one — a scalar ``f₀``, a ``(f₀, β)`` or
+``(f₀, β, y₀)`` β-plane tuple, or a DataArray used as-is.
 
 Provided quantities:
 
@@ -28,10 +35,18 @@ Conventions:
 
 from __future__ import annotations
 
+from typing import Any, Literal, cast
+
 import numpy as np
 import xarray as xr
 
 import xrgrad
+
+
+type Geometry = Literal["cartesian", "rectilinear", "spherical"]
+type Coriolis = (
+    float | tuple[float, float] | tuple[float, float, float] | xr.DataArray | None
+)
 
 
 def coriolis_parameter(
@@ -46,6 +61,68 @@ def coriolis_parameter(
         Coriolis parameter with the same shape as ``lat``.
     """
     return 2.0 * xrgrad.OMEGA * np.sin(np.deg2rad(lat))
+
+
+def _geom_kw(dims: tuple[str, str], geometry: Geometry) -> dict[str, Any]:
+    """Coordinate-name kwargs xrgrad needs for ``geometry`` on ``dims``."""
+    if geometry == "spherical":
+        return {"lon": dims[0], "lat": dims[1]}
+    return {}
+
+
+def _partial(
+    da: xr.DataArray, dim: str, dims: tuple[str, str], geometry: Geometry
+) -> xr.DataArray:
+    """``∂da/∂dim`` for one of the horizontal ``dims`` under ``geometry``."""
+    return xrgrad.partial(da, dim, geometry=geometry, **_geom_kw(dims, geometry))
+
+
+def _coriolis_field(
+    da: xr.DataArray,
+    dims: tuple[str, str],
+    geometry: Geometry,
+    f: Coriolis,
+) -> xr.DataArray | float:
+    """Resolve the Coriolis parameter for ``da``'s grid.
+
+    Args:
+        da: Field whose grid ``f`` must broadcast against.
+        dims: ``(x_dim, y_dim)`` horizontal dims; ``dims[1]`` is the
+            latitude (spherical) or the β-plane ``y`` axis.
+        geometry: Horizontal geometry of ``dims``.
+        f: ``None`` derives ``2 Ω sin φ`` from the ``dims[1]`` latitude
+            coordinate (spherical only). A scalar is a constant f-plane;
+            ``(f₀, β)`` is the β-plane ``f₀ + β (y − y₀)`` with ``y₀`` the
+            centre of the ``dims[1]`` coordinate, and ``(f₀, β, y₀)``
+            pins ``y₀``. A DataArray is used as-is.
+
+    Returns:
+        Coriolis parameter (s⁻¹), a float or a DataArray on ``dims[1]``.
+
+    Raises:
+        ValueError: ``f`` is ``None`` on a non-spherical grid, or the
+            tuple has the wrong length.
+    """
+    if f is None:
+        if geometry != "spherical":
+            raise ValueError(
+                f"geometry={geometry!r} has no latitude to derive the Coriolis "
+                "parameter from; pass f= as a scalar f0, an (f0, beta) "
+                "β-plane tuple, or a DataArray."
+            )
+        return cast(xr.DataArray, coriolis_parameter(da[dims[1]]))
+    if isinstance(f, xr.DataArray):
+        return f
+    if isinstance(f, tuple):
+        if len(f) not in (2, 3):
+            raise ValueError(
+                f"a β-plane f= is (f0, beta) or (f0, beta, y0); got {f!r}."
+            )
+        f0, beta, *pinned = f
+        y = da[dims[1]]
+        y0 = float(pinned[0]) if pinned else 0.5 * float(y.min() + y.max())
+        return float(f0) + float(beta) * (y - y0)
+    return float(f)
 
 
 def streamfunction(
@@ -83,6 +160,10 @@ def streamfunction(
 def geostrophic_velocities(
     ds: xr.Dataset,
     variable: str = "ssh",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
+    f: Coriolis = None,
 ) -> xr.Dataset:
     """Geostrophic ``u`` and ``v`` from a height field (SSH).
 
@@ -91,20 +172,44 @@ def geostrophic_velocities(
         u = -(g / f) ∂η/∂y
         v =  (g / f) ∂η/∂x
 
-    with ``∂/∂x`` and ``∂/∂y`` taken on the lon/lat sphere via
-    :func:`xrgrad.partial`.
+    with ``∂/∂x`` and ``∂/∂y`` taken by :func:`xrgrad.partial` under
+    ``geometry`` (the lon/lat sphere by default).
 
     Do **not** pass a stream-function field here — applying the same
     formula to ``ψ = (g/f) η`` would double the scaling and give
     unit-inconsistent velocities. :func:`streamfunction` is provided as
     a separate diagnostic.
+
+    Args:
+        ds: Dataset containing the height ``variable``.
+        variable: Name of the SSH (height) variable, in metres.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+        f: Coriolis parameter. ``None`` (default) derives it from the
+            latitude ``dims[1]`` (spherical only); otherwise a scalar
+            ``f₀``, an ``(f₀, β)`` / ``(f₀, β, y₀)`` β-plane tuple, or a
+            DataArray.
+
+    Returns:
+        Dataset with ``u`` and ``v`` (m/s).
+
+    Example:
+        A Gaussian SSH bump on a β-plane in metres::
+
+            x = y = np.linspace(-5e5, 5e5, 101)
+            eta = 0.5 * np.exp(-(x[None, :] ** 2 + y[:, None] ** 2) / 1e10)
+            ds = xr.Dataset({"eta": (("y", "x"), eta)}, coords={"x": x, "y": y})
+            geostrophic_velocities(
+                ds, "eta", dims=("x", "y"), geometry="cartesian", f=(1e-4, 1.6e-11)
+            )
     """
     ssh = ds[variable]
-    f = coriolis_parameter(ssh["lat"])
-    deta_dx = xrgrad.partial(ssh, "lon", geometry="spherical")
-    deta_dy = xrgrad.partial(ssh, "lat", geometry="spherical")
-    u = -(xrgrad.GRAVITY / f) * deta_dy
-    v = (xrgrad.GRAVITY / f) * deta_dx
+    f_field = _coriolis_field(ssh, dims, geometry, f)
+    deta_dx = _partial(ssh, dims[0], dims, geometry)
+    deta_dy = _partial(ssh, dims[1], dims, geometry)
+    u = -(xrgrad.GRAVITY / f_field) * deta_dy
+    v = (xrgrad.GRAVITY / f_field) * deta_dx
     u.attrs.update(long_name="Zonal Velocity", standard_name="zonal_velocity")
     v.attrs.update(long_name="Meridional Velocity", standard_name="meridional_velocity")
     return xr.Dataset({"u": u, "v": v})
@@ -125,9 +230,40 @@ def relative_vorticity(
     ds: xr.Dataset,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
-    """Relative vorticity ``ζ = ∂v/∂x - ∂u/∂y`` with spherical curvature."""
-    zeta = xrgrad.curl(ds, (u, v), dims=("lon", "lat"), geometry="spherical")
+    """Relative vorticity ``ζ = ∂v/∂x - ∂u/∂y``.
+
+    On the default spherical geometry the ``u tan φ / R`` curvature term
+    is included.
+
+    Args:
+        ds: Dataset with the velocity components.
+        u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+
+    Returns:
+        Dataset with a single variable ``"vort_r"`` (s⁻¹).
+
+    Example:
+        Solid-body rotation ``u = −y, v = x`` on a Cartesian grid has
+        ``ζ = 2`` everywhere::
+
+            x = y = np.linspace(0.0, 1e4, 11)
+            X, Y = np.meshgrid(x, y)
+            ds = xr.Dataset(
+                {"u": (("y", "x"), -Y), "v": (("y", "x"), X)},
+                coords={"x": x, "y": y},
+            )
+            relative_vorticity(ds, dims=("x", "y"), geometry="cartesian")
+    """
+    zeta = xrgrad.curl(
+        ds, (u, v), dims=dims, geometry=geometry, **_geom_kw(dims, geometry)
+    )
     zeta.attrs.update(
         long_name="Relative Vorticity", standard_name="relative_vorticity"
     )
@@ -138,10 +274,29 @@ def absolute_vorticity(
     ds: xr.Dataset,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
+    f: Coriolis = None,
 ) -> xr.Dataset:
-    """Absolute vorticity ``η = ζ + f``."""
-    zeta = relative_vorticity(ds, u=u, v=v)["vort_r"]
-    eta = zeta + coriolis_parameter(zeta["lat"])
+    """Absolute vorticity ``η = ζ + f``.
+
+    Args:
+        ds: Dataset with the velocity components.
+        u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+        f: Coriolis parameter. ``None`` (default) derives it from the
+            latitude ``dims[1]`` (spherical only); otherwise a scalar
+            ``f₀``, an ``(f₀, β)`` / ``(f₀, β, y₀)`` β-plane tuple, or a
+            DataArray.
+
+    Returns:
+        Dataset with a single variable ``"vort_a"`` (s⁻¹).
+    """
+    zeta = relative_vorticity(ds, u=u, v=v, dims=dims, geometry=geometry)["vort_r"]
+    eta = zeta + _coriolis_field(zeta, dims, geometry, f)
     eta.attrs.update(long_name="Absolute Vorticity", standard_name="absolute_vorticity")
     return eta.to_dataset(name="vort_a")
 
@@ -150,9 +305,28 @@ def divergence(
     ds: xr.Dataset,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
-    """Horizontal divergence ``∂u/∂x + ∂v/∂y`` with spherical curvature."""
-    div = xrgrad.divergence(ds, (u, v), dims=("lon", "lat"), geometry="spherical")
+    """Horizontal divergence ``∂u/∂x + ∂v/∂y``.
+
+    On the default spherical geometry the ``−v tan φ / R`` curvature term
+    is included.
+
+    Args:
+        ds: Dataset with the velocity components.
+        u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+
+    Returns:
+        Dataset with a single variable ``"div"`` (s⁻¹).
+    """
+    div = xrgrad.divergence(
+        ds, (u, v), dims=dims, geometry=geometry, **_geom_kw(dims, geometry)
+    )
     div.attrs.update(long_name="Divergence", standard_name="divergence")
     return div.to_dataset(name="div")
 
@@ -171,10 +345,24 @@ def shear_strain(
     ds: xr.Dataset,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
-    """Shear strain ``Sₛ = ∂v/∂x + ∂u/∂y``."""
-    dvdx = xrgrad.partial(ds[v], "lon", geometry="spherical")
-    dudy = xrgrad.partial(ds[u], "lat", geometry="spherical")
+    """Shear strain ``Sₛ = ∂v/∂x + ∂u/∂y``.
+
+    Args:
+        ds: Dataset with the velocity components.
+        u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+
+    Returns:
+        Dataset with a single variable ``"shear_strain"`` (s⁻¹).
+    """
+    dvdx = _partial(ds[v], dims[0], dims, geometry)
+    dudy = _partial(ds[u], dims[1], dims, geometry)
     sh = dvdx + dudy
     sh.attrs.update(long_name="Shear Strain", standard_name="shear_strain")
     return sh.to_dataset(name="shear_strain")
@@ -184,10 +372,24 @@ def tensor_strain(
     ds: xr.Dataset,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
-    """Normal / tensor strain ``Sₙ = ∂u/∂x - ∂v/∂y``."""
-    dudx = xrgrad.partial(ds[u], "lon", geometry="spherical")
-    dvdy = xrgrad.partial(ds[v], "lat", geometry="spherical")
+    """Normal / tensor strain ``Sₙ = ∂u/∂x - ∂v/∂y``.
+
+    Args:
+        ds: Dataset with the velocity components.
+        u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+
+    Returns:
+        Dataset with a single variable ``"tensor_strain"`` (s⁻¹).
+    """
+    dudx = _partial(ds[u], dims[0], dims, geometry)
+    dvdy = _partial(ds[v], dims[1], dims, geometry)
     st = dudx - dvdy
     st.attrs.update(long_name="Tensor Strain", standard_name="tensor_strain")
     return st.to_dataset(name="tensor_strain")
@@ -197,10 +399,24 @@ def strain_magnitude(
     ds: xr.Dataset,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
-    """Total strain magnitude ``sqrt(Sₙ² + Sₛ²)``."""
-    sn = tensor_strain(ds, u=u, v=v)["tensor_strain"]
-    ss = shear_strain(ds, u=u, v=v)["shear_strain"]
+    """Total strain magnitude ``sqrt(Sₙ² + Sₛ²)``.
+
+    Args:
+        ds: Dataset with the velocity components.
+        u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+
+    Returns:
+        Dataset with a single variable ``"strain"`` (s⁻¹).
+    """
+    sn = tensor_strain(ds, u=u, v=v, dims=dims, geometry=geometry)["tensor_strain"]
+    ss = shear_strain(ds, u=u, v=v, dims=dims, geometry=geometry)["shear_strain"]
     total = np.sqrt(sn**2 + ss**2)
     total.attrs.update(long_name="Strain Magnitude", standard_name="strain")
     return total.to_dataset(name="strain")
@@ -210,14 +426,28 @@ def okubo_weiss(
     ds: xr.Dataset,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
     """Okubo–Weiss parameter ``Sₙ² + Sₛ² − ζ²``.
 
     Positive in strain-dominated regions, negative in vortical regions.
+
+    Args:
+        ds: Dataset with the velocity components.
+        u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+
+    Returns:
+        Dataset with a single variable ``"ow"`` (s⁻²).
     """
-    sn = tensor_strain(ds, u=u, v=v)["tensor_strain"]
-    ss = shear_strain(ds, u=u, v=v)["shear_strain"]
-    zeta = relative_vorticity(ds, u=u, v=v)["vort_r"]
+    kw: dict[str, Any] = {"u": u, "v": v, "dims": dims, "geometry": geometry}
+    sn = tensor_strain(ds, **kw)["tensor_strain"]
+    ss = shear_strain(ds, **kw)["shear_strain"]
+    zeta = relative_vorticity(ds, **kw)["vort_r"]
     ow = sn**2 + ss**2 - zeta**2
     ow.attrs.update(long_name="Okubo-Weiss Parameter", standard_name="okubo_weiss")
     return ow.to_dataset(name="ow")
@@ -251,6 +481,10 @@ def ageostrophic_velocities(
     variable: str = "ssh",
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
+    f: Coriolis = None,
 ) -> xr.Dataset:
     """Ageostrophic velocity ``(u_a, v_a) = (u, v) − u_g(η)``.
 
@@ -260,11 +494,20 @@ def ageostrophic_velocities(
         variable: Name of the SSH (height) variable from which the
             geostrophic velocities are derived.
         u, v: Names of the total horizontal velocity components.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+        f: Coriolis parameter. ``None`` (default) derives it from the
+            latitude ``dims[1]`` (spherical only); otherwise a scalar
+            ``f₀``, an ``(f₀, β)`` / ``(f₀, β, y₀)`` β-plane tuple, or a
+            DataArray.
 
     Returns:
         Dataset with ``u_a`` and ``v_a`` (ageostrophic components).
     """
-    geo = geostrophic_velocities(ds, variable=variable)
+    geo = geostrophic_velocities(
+        ds, variable=variable, dims=dims, geometry=geometry, f=f
+    )
     u_a = ds[u] - geo["u"]
     v_a = ds[v] - geo["v"]
     u_a.attrs.update(
@@ -283,8 +526,10 @@ def advection(
     scalar: str,
     components: tuple[str, ...] = ("u", "v"),
     dims: tuple[str, ...] = ("lon", "lat"),
+    *,
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
-    """Tracer advection ``−u·∇c`` on the lon/lat sphere.
+    """Tracer advection ``−u·∇c``, on the lon/lat sphere by default.
 
     Sign convention follows :func:`metpy.calc.advection`: a positive
     value means the tracer is being increased at that point by the flow.
@@ -297,12 +542,15 @@ def advection(
         components: Wind/current component variable names paired with
             ``dims`` — ``(u, v)`` for the horizontal form, or
             ``(u, v, w)`` to include vertical advection.
-        dims: Two horizontal coordinate names (the lon and lat dims, so
-            the spherical metric applies), optionally followed by a
-            vertical coordinate name. The vertical axis is differentiated
-            with ``geometry="rectilinear"``, so a stretched depth axis
-            needs no special handling. ``w`` must live on the same grid
-            as ``scalar`` — staggered vertical grids are not supported.
+        dims: Two horizontal coordinate names, optionally followed by a
+            vertical coordinate name. Under the default spherical
+            geometry the horizontal pair must be ``lon``/``lat``. The
+            vertical axis is differentiated with
+            ``geometry="rectilinear"``, so a stretched depth axis needs no
+            special handling. ``w`` must live on the same grid as
+            ``scalar`` — staggered vertical grids are not supported.
+        geometry: Geometry of the horizontal pair — ``"spherical"``
+            (default), ``"cartesian"`` or ``"rectilinear"``.
 
     Returns:
         Dataset with a single variable ``f"{scalar}_advection"``.
@@ -310,7 +558,8 @@ def advection(
     Raises:
         ValueError: if ``components`` and ``dims`` lengths differ, if
             there are not 2 or 3 of each, if the first two dims are not
-            the lon/lat pair, or if the vertical dim repeats one of them.
+            the lon/lat pair under spherical geometry, or if the vertical
+            dim repeats one of them.
     """
     if len(components) != len(dims):
         raise ValueError(
@@ -323,12 +572,12 @@ def advection(
             "advection takes two horizontal dims, optionally plus one "
             f"vertical dim; got dims={dims!r}."
         )
-    if sorted(dims[:2]) != ["lat", "lon"]:
+    if geometry == "spherical" and sorted(dims[:2]) != ["lat", "lon"]:
         raise ValueError(
             f"the first two dims must be the horizontal lon/lat pair so the "
             f"spherical metric applies; got {tuple(dims[:2])!r}."
         )
-    if len(dims) == 3 and dims[2] in ("lon", "lat"):
+    if len(dims) == 3 and dims[2] in dims[:2]:
         raise ValueError(
             f"the vertical dim must differ from the horizontal pair; got dims={dims!r}."
         )
@@ -350,12 +599,16 @@ def advection(
                 f"not supported — interpolate {comp_name!r} onto the {scalar!r} "
                 "grid first."
             )
+    # The spherical pair may arrive in either order; xrgrad needs it by name.
+    horizontal = ("lon", "lat") if geometry == "spherical" else (dims[0], dims[1])
     flux: xr.DataArray | None = None
     for comp_name, dim in zip(components, dims, strict=True):
-        # Horizontal axes carry the lon/lat metric; the vertical axis is a
-        # plain 1-D coordinate, typically stretched, hence rectilinear.
-        geometry = "spherical" if dim in ("lon", "lat") else "rectilinear"
-        partial_c = xrgrad.partial(ds[scalar], dim, geometry=geometry)
+        # Horizontal axes carry ``geometry``'s metric; the vertical axis is
+        # a plain 1-D coordinate, typically stretched, hence rectilinear.
+        if dim in horizontal:
+            partial_c = _partial(ds[scalar], dim, horizontal, geometry)
+        else:
+            partial_c = xrgrad.partial(ds[scalar], dim, geometry="rectilinear")
         term = ds[comp_name] * partial_c
         flux = term if flux is None else flux + term
     assert flux is not None
@@ -368,13 +621,13 @@ def advection(
 
 
 def _vector_derivatives(
-    ds: xr.Dataset, u: str, v: str
+    ds: xr.Dataset, u: str, v: str, dims: tuple[str, str], geometry: Geometry
 ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray, xr.DataArray]:
-    """Return ``(∂u/∂x, ∂u/∂y, ∂v/∂x, ∂v/∂y)`` on the lon/lat sphere."""
-    dudx = xrgrad.partial(ds[u], "lon", geometry="spherical")
-    dudy = xrgrad.partial(ds[u], "lat", geometry="spherical")
-    dvdx = xrgrad.partial(ds[v], "lon", geometry="spherical")
-    dvdy = xrgrad.partial(ds[v], "lat", geometry="spherical")
+    """Return ``(∂u/∂x, ∂u/∂y, ∂v/∂x, ∂v/∂y)`` under ``geometry``."""
+    dudx = _partial(ds[u], dims[0], dims, geometry)
+    dudy = _partial(ds[u], dims[1], dims, geometry)
+    dvdx = _partial(ds[v], dims[0], dims, geometry)
+    dvdy = _partial(ds[v], dims[1], dims, geometry)
     return dudx, dudy, dvdx, dvdy
 
 
@@ -382,6 +635,9 @@ def shear_vorticity(
     ds: xr.Dataset,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
     """Vertical shear vorticity component (along-flow).
 
@@ -394,12 +650,19 @@ def shear_vorticity(
     is undefined where the wind vanishes — calm points
     (``u = v = 0``) are returned as ``0`` rather than NaN/Inf.
 
+    Args:
+        ds: Dataset with the velocity components.
+        u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+
     Returns:
         Dataset with a single variable ``vort_shear``.
     """
     uu = ds[u]
     vv = ds[v]
-    dudx, dudy, dvdx, dvdy = _vector_derivatives(ds, u, v)
+    dudx, dudy, dvdx, dvdy = _vector_derivatives(ds, u, v, dims, geometry)
     speed_sq = uu**2 + vv**2
     numerator = vv * uu * dudx + vv * vv * dvdx - uu * uu * dudy - uu * vv * dvdy
     safe_speed_sq = speed_sq.where(speed_sq != 0.0, 1.0)
@@ -412,6 +675,9 @@ def curvature_vorticity(
     ds: xr.Dataset,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
     """Vertical curvature vorticity component (cross-flow).
 
@@ -422,12 +688,19 @@ def curvature_vorticity(
     Calm points (``u = v = 0``) are returned as ``0``, matching the
     convention in :func:`shear_vorticity`.
 
+    Args:
+        ds: Dataset with the velocity components.
+        u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+
     Returns:
         Dataset with a single variable ``vort_curv``.
     """
     uu = ds[u]
     vv = ds[v]
-    dudx, dudy, dvdx, dvdy = _vector_derivatives(ds, u, v)
+    dudx, dudy, dvdx, dvdy = _vector_derivatives(ds, u, v, dims, geometry)
     speed_sq = uu**2 + vv**2
     numerator = uu * uu * dvdx - vv * vv * dudy - vv * uu * dudx + uu * vv * dvdy
     safe_speed_sq = speed_sq.where(speed_sq != 0.0, 1.0)
@@ -443,8 +716,11 @@ def frontogenesis(
     scalar: str,
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
 ) -> xr.Dataset:
-    """Petterssen 2-D kinematic frontogenesis on the lon/lat sphere.
+    """Petterssen 2-D kinematic frontogenesis, on the lon/lat sphere by default.
 
     Implements the form from [Bluestein1993]_ pp. 248–253::
 
@@ -459,17 +735,21 @@ def frontogenesis(
         ds: Dataset with the scalar and the velocity components.
         scalar: Name of the scalar field (e.g. ``"sst"``, ``"theta"``).
         u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
 
     Returns:
         Dataset with a single variable ``f"{scalar}_frontogenesis"``.
     """
-    dcdx = xrgrad.partial(ds[scalar], "lon", geometry="spherical")
-    dcdy = xrgrad.partial(ds[scalar], "lat", geometry="spherical")
+    dcdx = _partial(ds[scalar], dims[0], dims, geometry)
+    dcdy = _partial(ds[scalar], dims[1], dims, geometry)
     mag = np.sqrt(dcdx**2 + dcdy**2)
-    sh = shear_strain(ds, u=u, v=v)["shear_strain"]
-    st = tensor_strain(ds, u=u, v=v)["tensor_strain"]
-    total = strain_magnitude(ds, u=u, v=v)["strain"]
-    div = divergence(ds, u=u, v=v)["div"]
+    kw: dict[str, Any] = {"u": u, "v": v, "dims": dims, "geometry": geometry}
+    sh = shear_strain(ds, **kw)["shear_strain"]
+    st = tensor_strain(ds, **kw)["tensor_strain"]
+    total = strain_magnitude(ds, **kw)["strain"]
+    div = divergence(ds, **kw)["div"]
     # ψ is the angle of the axis of dilatation; sin β projects the
     # scalar gradient onto that axis.
     psi = 0.5 * np.arctan2(sh, st)
@@ -699,6 +979,10 @@ def potential_vorticity_barotropic(
     height: str = "h",
     u: str = "u",
     v: str = "v",
+    *,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
+    f: Coriolis = None,
 ) -> xr.Dataset:
     """Single-layer barotropic potential vorticity ``(ζ + f) / h``.
 
@@ -710,11 +994,18 @@ def potential_vorticity_barotropic(
         ds: Dataset with ``u``, ``v``, and the layer thickness/height.
         height: Variable name of the layer thickness / height.
         u, v: Velocity component names.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` (uniform metres) or ``"rectilinear"``.
+        f: Coriolis parameter. ``None`` (default) derives it from the
+            latitude ``dims[1]`` (spherical only); otherwise a scalar
+            ``f₀``, an ``(f₀, β)`` / ``(f₀, β, y₀)`` β-plane tuple, or a
+            DataArray.
 
     Returns:
         Dataset with a single variable ``"pv_barotropic"``.
     """
-    eta = absolute_vorticity(ds, u=u, v=v)["vort_a"]
+    eta = absolute_vorticity(ds, u=u, v=v, dims=dims, geometry=geometry, f=f)["vort_a"]
     pv = eta / ds[height]
     pv.attrs.update(
         long_name="Barotropic Potential Vorticity",
