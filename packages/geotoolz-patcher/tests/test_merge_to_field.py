@@ -35,11 +35,18 @@ from geopatcher._src.matched import MatchedField, MatchedSpatialPatcher
 from geopatcher._src.matched.patch import PRIMARY_KEY
 
 
-xr = pytest.importorskip("xarray")
-pytest.importorskip("rioxarray")
+try:
+    import rioxarray  # noqa: F401 - registers the `.rio` accessor
+    import xarray as xr
 
-from geopatcher._src.fields.rio_xarray import RioXarrayField
-from geopatcher._src.fields.xarray import XarrayField
+    from geopatcher._src.fields.rio_xarray import RioXarrayField
+    from geopatcher._src.fields.xarray import XarrayField
+except ImportError:  # the GeoTensor / RasterioReader tests still run
+    xr = None
+
+needs_xarray = pytest.mark.skipif(
+    xr is None, reason="needs the [xarray-raster] extra (xarray, rioxarray)"
+)
 
 
 _T = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
@@ -129,6 +136,7 @@ def test_merge_to_field_rasterio_reader(tmp_path: Path) -> None:
     np.testing.assert_array_equal(out.values, reader.load().values)
 
 
+@needs_xarray
 def test_merge_to_field_rioxarray() -> None:
     da = _rio_da()
     field = RioXarrayField(da)
@@ -145,6 +153,7 @@ def test_merge_to_field_rioxarray() -> None:
     np.testing.assert_array_equal(out.da.values, da.values)
 
 
+@needs_xarray
 def test_merge_to_field_xarray() -> None:
     da = xr.DataArray(
         np.arange(8 * 12, dtype=np.float32).reshape(8, 12),
@@ -252,6 +261,7 @@ def test_merge_still_returns_raw_output() -> None:
 # ---------------------------------------------------------------------------
 
 
+@needs_xarray
 def test_merge_to_xarray_dict_output_raises_clear_typeerror() -> None:
     field = RioXarrayField(_rio_da())
     patcher = _patcher(aggregation=SpatialMeanStd())
@@ -260,6 +270,7 @@ def test_merge_to_xarray_dict_output_raises_clear_typeerror() -> None:
         patcher.merge_to_xarray(patcher.split(field), field)
 
 
+@needs_xarray
 @pytest.mark.parametrize("dtype", [np.float32, np.uint8, np.int16])
 def test_merge_to_xarray_preserves_source_dtype(dtype: Any) -> None:
     da = xr.DataArray(np.arange(8 * 8).reshape(8, 8).astype(dtype), dims=("lat", "lon"))
@@ -272,6 +283,7 @@ def test_merge_to_xarray_preserves_source_dtype(dtype: Any) -> None:
     np.testing.assert_array_equal(out.values, da.values)
 
 
+@needs_xarray
 def test_merge_to_xarray_fractional_values_stay_float() -> None:
     da = xr.DataArray(np.arange(8 * 8, dtype=np.uint8).reshape(8, 8), dims=("y", "x"))
     field = XarrayField(da)

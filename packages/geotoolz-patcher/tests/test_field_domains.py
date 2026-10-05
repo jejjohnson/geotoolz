@@ -6,9 +6,14 @@ import numpy as np
 import pytest
 
 
-xr = pytest.importorskip("xarray")
 gpd = pytest.importorskip("geopandas")
 shapely = pytest.importorskip("shapely")
+try:
+    import xarray as xr
+except ImportError:  # the geopandas-backed tests still run
+    xr = None
+
+needs_xarray = pytest.mark.skipif(xr is None, reason="needs the [grid] extra")
 
 from geopatcher import (
     PointDomain,
@@ -50,10 +55,12 @@ def _grid_da() -> xr.DataArray:
 
 def _fields() -> list:
     out = [
-        XarrayField(_grid_da()),
         GeoPandasField(_points_gdf()),
         GeoPandasField(_points_gdf(), as_points=True),
     ]
+    if xr is None:
+        return out
+    out.append(XarrayField(_grid_da()))
     try:
         from geopatcher._src.fields.xvec import XvecField
 
@@ -138,6 +145,7 @@ class TestXvecField:
             XvecField(_xvec_ds(), _geometry_dim="geometry")  # type: ignore[call-arg]
 
 
+@needs_xarray
 def test_xarray_rectangular_split_merge_with_cached_domain() -> None:
     da = _grid_da()
     field = XarrayField(da)

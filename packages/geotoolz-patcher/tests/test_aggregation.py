@@ -10,7 +10,6 @@ import pandas as pd
 import pytest
 import rasterio
 import shapely
-import xarray as xr
 from georeader.geotensor import GeoTensor
 from rasterio.windows import Window
 
@@ -40,7 +39,6 @@ from geopatcher import (
     SpatialVariance,
     SpatialWeightedSum,
 )
-from geopatcher._src.fields.xarray import XarrayField
 from geopatcher._src.spatial.geometry import _MaskedWindow
 
 
@@ -385,6 +383,9 @@ def test_periodic_hann_leading_ring_is_nodata(cls: type) -> None:
 def test_by_index_grid_anchors() -> None:
     # GridDomain anchors are dicts (unhashable) — the old `{anchor: data}`
     # raised TypeError. Pairs keep every anchor object as-is, in order.
+    xr = pytest.importorskip("xarray")
+    from geopatcher.fields import XarrayField
+
     da = xr.DataArray(
         np.arange(8 * 12, dtype=np.float32).reshape(8, 12),
         dims=("latitude", "longitude"),

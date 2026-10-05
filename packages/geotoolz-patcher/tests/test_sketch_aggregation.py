@@ -96,6 +96,58 @@ def test_reservoir_merge_state_unbiased(cls) -> None:
     assert freq[n_a:].mean() == pytest.approx(expected, rel=0.1)
 
 
+def _fed(make, shards: list[np.ndarray]):
+    sketch = make()
+    for shard in shards:
+        sketch.update(_patch(shard))
+    return sketch
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        pytest.param(lambda: SpatialApproxCardinality(p=8), id="cardinality"),
+        pytest.param(lambda: SpatialApproxMode(k=1024), id="mode"),
+    ],
+)
+def test_repeated_merge_state_equals_one_pass(make) -> None:
+    """Folding three shards in, in any order, equals one sketch over the union.
+
+    HyperLogLog registers merge by max and (un-pruned) mode counters by
+    sum, so repeated merges must be exact, associative and commutative.
+    """
+    rng = np.random.default_rng(0)
+    shards = [rng.integers(0, 200, size=300).astype(np.float64) for _ in range(3)]
+    one_pass = _fed(make, shards).finalize()
+    for order in ([0, 1, 2], [2, 0, 1], [1, 2, 0]):
+        acc = _fed(make, [shards[order[0]]])
+        for i in order[1:]:
+            acc.merge_state(_fed(make, [shards[i]]))
+        assert acc.finalize() == one_pass  # dict equality: tie order is free
+    # Associativity: (a + b) + c == a + (b + c).
+    left = _fed(make, [shards[0]])
+    left.merge_state(_fed(make, [shards[1]]))
+    left.merge_state(_fed(make, [shards[2]]))
+    right_tail = _fed(make, [shards[1]])
+    right_tail.merge_state(_fed(make, [shards[2]]))
+    right = _fed(make, [shards[0]])
+    right.merge_state(right_tail)
+    assert left.finalize() == right.finalize()
+
+
+def test_repeated_reservoir_merges_keep_counts_and_k() -> None:
+    """Three reservoirs folded in: the seen count is the union's, size stays k."""
+    shards = [np.arange(100.0) + 1000 * i for i in range(3)]
+    acc = _filled(SpatialReservoir, shards[0], k=16, seed=0)
+    for i, shard in enumerate(shards[1:], 1):
+        acc.merge_state(_filled(SpatialReservoir, shard, k=16, seed=i))
+    assert acc._seen == 300
+    sample = np.asarray(acc._sample)
+    assert sample.size == 16
+    assert np.unique(sample).size == 16
+    assert np.isin(sample, np.concatenate(shards)).all()
+
+
 def test_reservoir_merge_state_small_streams_keeps_everything() -> None:
     left = _filled(SpatialReservoir, np.arange(3.0), k=10, seed=0)
     right = _filled(SpatialReservoir, np.arange(10.0, 14.0), k=10, seed=1)

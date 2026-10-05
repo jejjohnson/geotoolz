@@ -13,6 +13,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # An explicit `shell: bash` runs steps with `-o pipefail` (the implicit
+    # default is plain `bash -e`), so a failing pytest still fails the
+    # no-skip steps below through their `| tee`.
+    defaults:
+      run:
+        shell: bash
     strategy:
       matrix:
         python-version: ["3.12", "3.13"]
@@ -30,8 +36,17 @@ jobs:
       - name: Test geotoolz
         run: uv run pytest -v -m "not slow and not integration"
         working-directory: packages/geotoolz
-      - name: Test geotoolz-patcher
-        run: uv run pytest -v
+      # The all-extras run of the patcher suite (jax included): every
+      # extras-gated test must actually run here, so a skip (a missing
+      # extra, a broken importorskip) fails the job. base-install.yml
+      # covers the no-extras end.
+      - name: Test geotoolz-patcher (all extras, no skips)
+        run: |
+          uv run pytest -v -rs | tee pytest.log
+          if grep -q "^SKIPPED" pytest.log; then
+            echo "::error::geotoolz-patcher tests skipped in the all-extras run"
+            exit 1
+          fi
         working-directory: packages/geotoolz-patcher
       # The all-extras run of the catalog suite: every extras-gated test must
       # actually run here, so a skip (a missing extra, a broken importorskip)

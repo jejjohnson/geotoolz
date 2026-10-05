@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,7 +19,6 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-import xarray as xr
 from _helpers import make_raster_field
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
@@ -456,7 +456,8 @@ def _assert_same_attrs(got: dict, ref: dict) -> None:
 def _assert_same_carrier(got: Any, ref: Any) -> None:
     """Patch data equal in type, values, dtype and every piece of metadata."""
     assert type(got) is type(ref)
-    if isinstance(ref, xr.DataArray):
+    xr = sys.modules.get("xarray")  # only an xarray field yields a DataArray
+    if xr is not None and isinstance(ref, xr.DataArray):
         xr.testing.assert_identical(got, ref)
         assert got.dtype == ref.dtype
         _assert_same_attrs(got.attrs, ref.attrs)
@@ -511,6 +512,7 @@ def _rio_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
 
 
 def _xarray_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
+    xr = pytest.importorskip("xarray")
     from geopatcher.fields import XarrayField
 
     da = xr.DataArray(
@@ -728,6 +730,7 @@ def test_cache_pickles(tmp_path) -> None:
 
 def test_variables_of_one_file_have_distinct_keys(tmp_path) -> None:
     """Two variables of one netCDF share source, dims, coords, shape, dtype."""
+    xr = pytest.importorskip("xarray")
     pytest.importorskip("netCDF4")
     from geopatcher.fields import XarrayField
 
@@ -825,6 +828,7 @@ def test_rioxarray_band_selections_have_distinct_keys(tmp_path) -> None:
 
 def test_remote_encoding_source_is_an_identity(tmp_path) -> None:
     """A URL in ``encoding["source"]`` names the object; no local stat."""
+    xr = pytest.importorskip("xarray")
     from geopatcher.fields import XarrayField
 
     da = xr.DataArray(np.zeros((4, 4)), dims=("y", "x"), name="v")
@@ -852,6 +856,7 @@ def test_rioxarray_nodata_and_attrs_are_in_the_key(tmp_path) -> None:
 
 def test_tuple_dimension_names_round_trip(tmp_path) -> None:
     """A hashable (tuple) dim name must come back as a tuple, not a list."""
+    xr = pytest.importorskip("xarray")
     from geopatcher import Patch
 
     da = xr.DataArray(

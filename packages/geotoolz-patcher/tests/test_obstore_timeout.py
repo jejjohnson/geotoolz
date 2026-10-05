@@ -48,7 +48,12 @@ class _FakeTile:
 
 
 class _FakeIfd:
-    """Minimal IFD: one band, float32, 16x16 tiles over a 32x32 image."""
+    """Minimal IFD: one band, float32, 16x16 tiles over a 32x32 image.
+
+    Tiles decode to the shape async-tiff really returns for a chunky
+    (``PlanarConfiguration=1``) image — ``(H, W, samples)``, so
+    ``(16, 16, 1)`` here, not a bare 2-D array.
+    """
 
     tile_width = 16
     tile_height = 16
@@ -64,7 +69,7 @@ class _FakeIfd:
     async def fetch_tiles(self, coords: list[tuple[int, int]]) -> list[_FakeTile]:
         if self._delay:
             await asyncio.sleep(self._delay)
-        tile = np.full((16, 16), 7.0, dtype=np.float32)
+        tile = np.full((16, 16, 1), 7.0, dtype=np.float32)
         return [_FakeTile(tile) for _ in coords]
 
 

@@ -141,3 +141,73 @@ jobs:
       - name: Test geotoolz-catalog (base install)
         working-directory: packages/geotoolz-catalog
         run: uv run --no-sync pytest -q --no-cov -m "not live and not slow"
+
+  # `pip install geotoolz-patcher` without extras: every module imports
+  # (bar the [pipekit] bridge, which is itself that extra's entry point),
+  # a RasterField splits and merges, extra-backed features fail only when
+  # used with a hint naming the `geotoolz-patcher[...]` extra, and the test
+  # suite passes with every extras-gated test skipping cleanly. (ci.yml
+  # runs the same suite with every extra installed.)
+  geotoolz-patcher-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      # geotoolz-patcher's base dependencies plus its own `dev` group
+      # (pytest, hypothesis) — no extras, no other workspace members.
+      - name: Install geotoolz-patcher (base, no extras)
+        run: uv sync --locked --package geotoolz-patcher --no-default-groups --group dev
+      - name: Import and smoke test
+        run: |
+          uv run --no-sync python - <<'PY'
+          import importlib
+          import importlib.util
+          import pkgutil
+
+          import numpy as np
+          from georeader.geotensor import GeoTensor
+          from rasterio.transform import from_origin
+
+          import geopatcher as gp
+
+          # The extras really are absent from this environment.
+          for module in (
+              "xarray", "rioxarray", "xvec", "zarr", "dask", "jax",
+              "obstore", "async_tiff", "pipekit",
+          ):
+              assert importlib.util.find_spec(module) is None, f"{module} installed"
+
+          # Every module imports on a base install.
+          for info in pkgutil.walk_packages(gp.__path__, "geopatcher."):
+              if info.name != "geopatcher.integrations.pipekit":
+                  importlib.import_module(info.name)
+
+          values = np.arange(2 * 16 * 16, dtype="float32").reshape(2, 16, 16)
+          field = gp.RasterField(
+              GeoTensor(values, transform=from_origin(0, 160, 10, 10), crs="EPSG:32629")
+          )
+          patcher = gp.SpatialPatcher(
+              geometry=gp.SpatialRectangular(size=(8, 8)),
+              sampler=gp.SpatialRegularStride(step=(8, 8)),
+              window=gp.SpatialBoxcar(),
+              aggregation=gp.SpatialOverlapAdd(),
+          )
+          out = patcher.merge(patcher.split(field), field.domain)
+          np.testing.assert_allclose(out, values)
+
+          # Extra-backed features fail only on use, naming the extra.
+          try:
+              gp.fields.XarrayField(object())
+          except ImportError as exc:
+              assert "geotoolz-patcher[grid]" in str(exc), exc
+          else:
+              raise AssertionError("XarrayField ran without xarray")
+          print("geotoolz-patcher base install OK", gp.__version__)
+          PY
+      # Coverage is off: most extras-gated code is unreachable here, so the
+      # package's fail_under floor is for the all-extras run in ci.yml.
+      - name: Test geotoolz-patcher (base install)
+        working-directory: packages/geotoolz-patcher
+        run: uv run --no-sync pytest -q --no-cov

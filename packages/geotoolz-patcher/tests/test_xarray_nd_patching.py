@@ -197,6 +197,39 @@ class TestNDCube:
         np.testing.assert_allclose(recon.values, da.values)
         np.testing.assert_array_equal(recon["time"].values, da["time"].values)
 
+    @pytest.mark.parametrize("boundary", ["shrink", "pad", "reflect"])
+    def test_4d_cube_split_merge_round_trip(self, boundary: str) -> None:
+        # (band, time, lat, lon) with a ragged lon edge (26 = 4 x 6 + 2):
+        # every axis is patched and stitched back, coordinates included.
+        da = xr.DataArray(
+            np.arange(2 * 3 * 12 * 26, dtype=np.float32).reshape(2, 3, 12, 26),
+            dims=("band", "time", "latitude", "longitude"),
+            coords={
+                "band": ["red", "nir"],
+                "time": np.array(
+                    ["2020-01-01", "2020-01-02", "2020-01-03"], dtype="datetime64[ns]"
+                ),
+                "latitude": np.linspace(-30, 30, 12),
+                "longitude": np.linspace(0, 65, 26),
+            },
+        )
+        field = XarrayField(da)
+        patcher = SpatialPatcher(
+            geometry=SpatialRectangular(size=(1, 3, 6, 6), boundary=boundary),
+            sampler=SpatialRegularStride(step=(1, 3, 6, 6)),
+            window=SpatialBoxcar(),
+            aggregation=SpatialOverlapAdd(),
+        )
+        patches = list(patcher.split(field))
+        # 2 bands x 1 time block x 2 lat blocks x 5 lon blocks (last ragged).
+        assert len(patches) == 2 * 1 * 2 * 5
+        assert all(p.data.ndim == 4 for p in patches)
+        recon = patcher.merge_to_xarray(patches, field)
+        assert recon.dims == da.dims
+        np.testing.assert_allclose(recon.values, da.values)
+        for dim in da.dims:
+            np.testing.assert_array_equal(recon[dim].values, da[dim].values)
+
 
 def _dask_field() -> XarrayField:
     """(y=64, x=64) dask-backed cube in 16x16 chunks — one chunk per patch."""
