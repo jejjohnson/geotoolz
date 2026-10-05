@@ -1539,7 +1539,13 @@ def test_pixel_space_operators_accept_plain_ndarray(make_op) -> None:
     out_gt = op(_gt(_PLAIN_VALUES.copy()))
     assert type(out_arr) is np.ndarray
     assert isinstance(out_gt, GeoTensor)
-    np.testing.assert_allclose(out_arr, np.asarray(out_gt))
+    # A plain array has no fill value, so its nodata (e.g. the edge a
+    # PhaseAlign shift uncovers) is NaN where the GeoTensor holds its fill.
+    got = np.asarray(out_gt, dtype=float).copy()
+    plain_nodata = np.isnan(np.asarray(out_arr, dtype=float)) & ~np.isnan(got)
+    np.testing.assert_array_equal(got[plain_nodata], out_gt.fill_value_default)
+    got[plain_nodata] = np.nan
+    np.testing.assert_allclose(out_arr, got)
 
 
 def test_tile_accepts_plain_ndarray_and_zero_pads_edges() -> None:
@@ -1693,3 +1699,70 @@ def test_stitch_rejects_rotated_and_sheared_grids(grid: str) -> None:
     tiles = gz.geom.Tile(size=(4, 4))(_numbered(grid))
     with pytest.raises(ValueError, match="rotated/sheared"):
         gz.geom.Stitch()(tiles)
+
+
+# ---------------------------------------------------------------------------
+# Output fill contract (#331)
+# ---------------------------------------------------------------------------
+
+
+def test_phase_align_ignores_and_carries_fill_pixels() -> None:
+    """Fill pixels neither drive the registration nor come out valid."""
+    reference, _moving, _dy, _dx = _registration_pair()
+    values = np.asarray(reference).copy()
+    values[0, :2, :2] = -9999.0
+    moving = GeoTensor(
+        values,
+        transform=reference.transform,
+        crs=reference.crs,
+        fill_value_default=-9999.0,
+    )
+    shift = gz.geom.PhaseAlign(reference=reference, apply=False)(moving)
+    assert shift[:2] == (0.0, 0.0)
+    aligned = np.asarray(gz.geom.PhaseAlign(reference=reference)(moving))
+    np.testing.assert_array_equal(aligned, values)
+
+
+def test_phase_align_marks_the_uncovered_edge_as_nodata() -> None:
+    reference, moving, dy, dx = _registration_pair()
+    aligned = np.asarray(gz.geom.PhaseAlign(reference=reference)(moving))[0]
+    # Undoing the (3, -2) roll uncovers the last 3 rows and first 2 columns.
+    edge = np.zeros(aligned.shape, dtype=bool)
+    edge[-dy:, :] = True
+    edge[:, :-dx] = True
+    assert np.all(aligned[edge] == moving.fill_value_default)
+    np.testing.assert_allclose(aligned[~edge], np.asarray(reference)[0][~edge])
+
+
+def test_rasterize_declares_a_dtype_fill_and_carries_input_nodata() -> None:
+    values = np.ones((1, 5, 7), dtype=np.float32)
+    values[0, 2, 1] = -9999.0
+    burned = gz.geom.Rasterize(geometries=[box(10, 15, 17, 20)])(_gt(values))
+    assert np.asarray(burned).dtype == np.uint8
+    assert type(burned.fill_value_default) is int
+    assert burned.fill_value_default == 0
+    expected = np.ones((5, 7), dtype=np.uint8)
+    expected[2, 1] = 0
+    np.testing.assert_array_equal(np.asarray(burned), expected)
+
+
+def test_rasterize_like_carries_input_nodata_and_checks_its_grid() -> None:
+    like = _gt(np.zeros((5, 7), dtype=np.float32))
+    dataframe = gpd.GeoDataFrame(geometry=[box(10, 15, 17, 20)], crs="EPSG:4326")
+    op = gz.geom.RasterizeLike(like=like, geometries=dataframe)
+    values = np.ones((5, 7), dtype=np.float32)
+    values[0, 0] = -9999.0
+    burned = op(_gt(values))
+    assert np.asarray(burned).dtype == np.uint8
+    assert burned.fill_value_default == 0
+    assert np.asarray(burned)[0, 0] == 0
+    assert np.asarray(burned).sum() == 34
+    assert np.asarray(op()).all()
+    shifted = GeoTensor(
+        values,
+        transform=like.transform * Affine.translation(1, 0),
+        crs=like.crs,
+        fill_value_default=-9999,
+    )
+    with pytest.raises(ValueError, match="RasterizeLike: the input is not on"):
+        op(shifted)

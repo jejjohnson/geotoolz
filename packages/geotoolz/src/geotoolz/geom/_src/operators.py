@@ -49,9 +49,14 @@ from geotoolz._src.bands import band_count
 from geotoolz._src.blending import normalize_overlap_add, overlap_add
 from geotoolz._src.config import as_tuple
 from geotoolz._src.dtype import as_float
-from geotoolz._src.geo import require_geotensor
+from geotoolz._src.geo import grid_matches, require_geotensor
 from geotoolz._src.shape import BAND_AXIS, over_frames, require_ndim, single_band
-from geotoolz._src.valid import carried_fill, valid_pixels, wrap_filled
+from geotoolz._src.valid import (
+    carried_fill,
+    mask_invalid_to_nan,
+    valid_pixels,
+    wrap_filled,
+)
 from geotoolz._src.wrap import adopt_attrs, rewrap_attrs, wrap_like
 from geotoolz.geom._src.array import (
     bowtie_detector_positions,
@@ -86,6 +91,18 @@ def _registration_band(values: np.ndarray, band: int, name: str) -> np.ndarray:
     if require_ndim(arr, (2, 3), name) == 2:
         return arr
     return np.take(arr, int(band), axis=BAND_AXIS)
+
+
+def _mean_imputed(band: np.ndarray) -> np.ndarray:
+    """``band`` with its ``NaN`` (nodata) pixels set to the valid mean.
+
+    A fill value such as ``-9999`` dominates a cross-correlation; the mean
+    is neutral in the mean-subtracted spectrum.
+    """
+    finite = np.isfinite(band)
+    if finite.all():
+        return band
+    return np.where(finite, band, band[finite].mean() if finite.any() else 0.0)
 
 
 def _read_window_boundless(
@@ -344,7 +361,9 @@ class PhaseAlign(Operator):
     the selected registration band is taken from the band axis (``-3``).
     A 4-D ``(T, C, H, W)`` stack raises ``ValueError``: register each
     frame separately. The estimated
-    ``(dy, dx)`` shift is applied with linear interpolation
+    ``(dy, dx)`` shift (nodata pixels of either registration band set to
+    that band's valid mean, so a fill value never drives the
+    correlation) is applied with linear interpolation
     (``scipy.ndimage.shift``) when ``apply=True``.
 
     The registration math is pixel-space, so plain ``np.ndarray`` inputs
@@ -352,8 +371,13 @@ class PhaseAlign(Operator):
     ``GeoTensor`` input the shifted array keeps the input's affine
     transform (which must share the reference's grid), so a feature at
     pixel ``(r, c)`` of the output sits at the same world coordinate as
-    pixel ``(r, c)`` of the reference. Edge pixels uncovered by the
-    shift are filled from the nearest valid pixel.
+    pixel ``(r, c)`` of the reference. Nodata pixels (fill or
+    non-finite) are shifted as nodata, and edge pixels the shift uncovers
+    have no data either: every output pixel interpolated from one holds
+    the input's fill value (``NaN`` for a fill-less float input), so a
+    sub-pixel shift grows a nodata region by up to one pixel. An integer
+    input without a ``fill_value_default`` cannot mark nodata; its
+    uncovered edge repeats the nearest edge pixel.
 
     Args:
         reference: The fixed scene the input is registered against.
@@ -391,9 +415,17 @@ class PhaseAlign(Operator):
         self, gt: GeoTensor | np.ndarray
     ) -> GeoTensor | np.ndarray | tuple[float, float, float]:
         arr = np.asarray(gt)
-        mov_band = _registration_band(arr, self.band, "PhaseAlign")
-        ref_band = _registration_band(
-            np.asarray(self.reference), self.band, "PhaseAlign reference"
+        mov_band = _mean_imputed(
+            _registration_band(
+                mask_invalid_to_nan(gt, dtype=np.float64), self.band, "PhaseAlign"
+            )
+        )
+        ref_band = _mean_imputed(
+            _registration_band(
+                mask_invalid_to_nan(self.reference, dtype=np.float64),
+                self.band,
+                "PhaseAlign reference",
+            )
         )
         if ref_band.shape != mov_band.shape:
             raise ValueError(
@@ -410,16 +442,38 @@ class PhaseAlign(Operator):
         shift_x = float(shift[1])
         if not self.apply:
             return shift_y, shift_x, float(error)
+        # Shift the validity alongside the values so the linear
+        # interpolation never blends a fill value into valid data: an
+        # output pixel that draws any weight from a nodata pixel -- or from
+        # beyond the edge -- is nodata. An integer carrier without a fill
+        # value cannot mark nodata, so its uncovered edge repeats the edge
+        # pixels instead.
+        inexact = np.issubdtype(arr.dtype, np.inexact)
+        fill = carried_fill(gt, arr.dtype)
+        in_valid = valid_pixels(gt)
+        values = np.where(in_valid, arr.astype(np.float64), 0.0)
+        spatial_shift = (shift_y, shift_x)
         shifted = ndi_shift(
-            arr,
-            shift=(0.0, shift_y, shift_x) if arr.ndim == 3 else (shift_y, shift_x),
+            values,
+            shift=(0.0, *spatial_shift) if arr.ndim == 3 else spatial_shift,
             order=1,
             mode="nearest",
+        )
+        weight = ndi_shift(
+            in_valid.astype(np.float64),
+            shift=spatial_shift,
+            order=1,
+            mode="constant" if inexact or fill is not None else "nearest",
+            cval=0.0,
+        )
+        valid = weight > 1.0 - 1e-9
+        out = (
+            shifted.astype(arr.dtype) if inexact else np.rint(shifted).astype(arr.dtype)
         )
         # The array shift already moves the content onto the reference
         # grid; keep the original transform (translating it as well would
         # cancel the alignment in world coordinates, #118).
-        return wrap_like(gt, np.asarray(shifted))
+        return wrap_filled(gt, out, fill_value_default=fill, valid=valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1876,8 +1930,8 @@ class Rasterize(Operator):
 
     - a ``list`` of shapely geometries (each gets value ``1``); or
     - a :class:`geopandas.GeoDataFrame` (the ``column`` argument
-      selects which attribute supplies the burn-in value, default
-      ``1.0``).
+      selects which attribute supplies the burn-in value; without one
+      every geometry burns ``1``, as for a list).
 
     Delegates to :func:`georeader.rasterize.rasterize_geopandas_like`
     or :func:`georeader.rasterize.rasterize_geometry_like`.
@@ -1885,6 +1939,12 @@ class Rasterize(Operator):
     Geo-dependent: requires a georeferenced ``GeoTensor`` input (its
     transform + CRS define the burn grid); plain arrays raise
     ``TypeError``.
+
+    The output is one ``(H, W)`` raster whatever the input's rank: every
+    band and every frame of a ``(T, C, H, W)`` stack share the grid, so
+    one burn serves them all. Its ``fill_value_default`` is ``fill_value``
+    in the output dtype (``0`` for the default ``uint8`` burn), and
+    pixels that are nodata in the input (in any band or frame) hold it.
 
     Note:
         Carries Python-level geometry objects (shapely / geopandas),
@@ -1896,9 +1956,10 @@ class Rasterize(Operator):
             values. ``None`` means "burn ``1``".
         all_touched: Whether to mark every pixel the geometry touches
             (vs. only those whose centre is inside).
-        fill_value: Background value. Default ``0``. For a list of geometries
-            the output is ``uint8`` when ``fill_value`` is an integer in
-            ``[0, 255]`` and ``float32`` otherwise (e.g. ``np.nan``).
+        fill_value: Background value. Default ``0``. Without a
+            ``column`` the output is ``uint8`` when ``fill_value`` is an
+            integer in ``[0, 255]`` and ``float32`` otherwise (e.g.
+            ``np.nan``).
 
     Examples:
         >>> import geotoolz as gz
@@ -1923,12 +1984,13 @@ class Rasterize(Operator):
 
     def _apply(self, gt: GeoTensor) -> GeoTensor:
         require_geotensor(gt, "Rasterize")
-        return _rasterize_like(
+        return _burn_onto(
             self.geometries,
             gt,
             column=self.column,
             fill=self.fill_value,
             all_touched=self.all_touched,
+            nodata_from=(gt,),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -1945,9 +2007,12 @@ class RasterizeLike(Operator):
 
     Same as :class:`Rasterize` but the reference grid is pinned at
     construction (``like``) rather than supplied per call. The
-    operator takes *no* positional input (it is a producer), or accepts
-    a `GeoTensor` that is ignored — useful as the head of a `Sequential`
-    pipeline that consumes the burned mask.
+    operator takes *no* positional input (it is a producer) -- useful as
+    the head of a `Sequential` pipeline that consumes the burned mask --
+    or a `GeoTensor` on ``like``'s grid (``ValueError`` otherwise), whose
+    nodata pixels then hold the fill as in :class:`Rasterize` (``like``
+    only supplies the grid). The output is one ``(H, W)`` raster whatever
+    the input's rank.
 
     Note:
         Flagged ``forbid_in_yaml = True``.
@@ -1986,12 +2051,19 @@ class RasterizeLike(Operator):
         self.fill_value = fill_value
 
     def _apply(self, gt: GeoTensor | None = None) -> GeoTensor:
-        return _rasterize_like(
+        if gt is not None and not grid_matches(gt, self.like):
+            raise ValueError(
+                "RasterizeLike: the input is not on `like`'s grid (spatial "
+                "shape, transform, CRS); call it with no input, or use "
+                "Rasterize to burn onto the input's own grid."
+            )
+        return _burn_onto(
             self.geometries,
             self.like,
             column=self.column,
             fill=self.fill_value,
             all_touched=self.all_touched,
+            nodata_from=() if gt is None else (gt,),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -2068,11 +2140,18 @@ def _rasterize_like(
     back to :func:`rasterize_geometry_like` over the union of shapely
     geometries otherwise.
     """
+    # A unit burn is ``uint8``, which cannot hold a NaN / negative /
+    # fractional / >255 background; widen to ``float32`` for those.
+    fill_value = float(fill)
+    fits_uint8 = fill_value.is_integer() and 0 <= fill_value <= 255
+    unit_dtype = np.uint8 if fits_uint8 else np.float32
     if hasattr(geometries, "geometry"):
         dataframe = geometries
         column_name = column or "__geotoolz_value__"
         if column is None:
-            dataframe = geometries.assign(**{column_name: 1.0})
+            dataframe = geometries.assign(
+                **{column_name: np.ones(len(geometries), dtype=unit_dtype)}
+            )
         return rasterize.rasterize_geopandas_like(
             dataframe,
             like,
@@ -2080,19 +2159,44 @@ def _rasterize_like(
             fill=fill,
             all_touched=all_touched,
         )
-    geometry = unary_union(geometries)
-    # georeader defaults to ``uint8``, which cannot hold a NaN / negative /
-    # fractional / >255 background; widen to ``float32`` for those.
-    fill_value = float(fill)
-    fits_uint8 = fill_value.is_integer() and 0 <= fill_value <= 255
     return rasterize.rasterize_geometry_like(
-        geometry,
+        unary_union(geometries),
         like,
         value=1,
-        dtype=np.uint8 if fits_uint8 else np.float32,
+        dtype=unit_dtype,
         fill=fill,
         all_touched=all_touched,
     )
+
+
+def _burn_onto(
+    geometries: list[BaseGeometry] | gpd.GeoDataFrame,
+    like: GeoTensor,
+    *,
+    column: str | None,
+    fill: float,
+    all_touched: bool,
+    nodata_from: Sequence[Any],
+) -> GeoTensor:
+    """Burn ``geometries`` onto ``like``'s grid with a dtype-true background fill.
+
+    The background ``fill`` doubles as the output's nodata, declared in the
+    burn raster's dtype (``0``, not ``0.0``, for a ``uint8`` raster), and
+    every pixel that is nodata in any of ``nodata_from`` (in any band or
+    frame) holds it too: a burn over a scene says nothing where the scene
+    has no data.
+    """
+    burned = _rasterize_like(
+        geometries, like, column=column, fill=fill, all_touched=all_touched
+    )
+    values = np.asarray(burned)
+    fill_value: float | int = float(fill)
+    if not np.issubdtype(values.dtype, np.inexact) and float(fill).is_integer():
+        fill_value = int(fill)
+    valid = np.ones(values.shape[-2:], dtype=bool)
+    for carrier in nodata_from:
+        valid &= valid_pixels(carrier)
+    return wrap_filled(burned, values, fill_value_default=fill_value, valid=valid)
 
 
 def _sample_array(

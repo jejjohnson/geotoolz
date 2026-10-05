@@ -1051,26 +1051,8 @@ GAP_FILLERS: frozenset[str] = frozenset(
     "augment._src.operators.CutMix",
 }
 
-#: Reason suffix for contract violations found once the ``forbid_in_yaml``
-#: operators ran through these checks (``RUNTIME_CTOR_KWARGS``).
-_FOUND = "surfaced by #166's runtime-built contract checks"
-
-#: Strict xfails for ``test_output_fill_matches_dtype``, owned by later
-#: branches of the #112 stack.
-FILL_KNOWN_FAILURES: dict[str, Known] = {
-    "geom._src.operators.PhaseAlign": (
-        f"apply=True: input fill pixels come out valid ({_FOUND})",
-        AssertionError,
-    ),
-    "geom._src.operators.Rasterize": (
-        f"uint8 burn raster declares a float 0.0 fill ({_FOUND})",
-        AssertionError,
-    ),
-    "geom._src.operators.RasterizeLike": (
-        f"input fill pixels come out valid ({_FOUND})",
-        AssertionError,
-    ),
-}
+#: Strict xfails for ``test_output_fill_matches_dtype`` (none open).
+FILL_KNOWN_FAILURES: dict[str, Known] = {}
 
 
 def _fill_params() -> list[Any]:
@@ -1201,6 +1183,7 @@ STOCHASTIC_PER_PIXEL: frozenset[str] = frozenset(
 POOLED_STATISTICS: dict[str, str] = {
     "augment._src.operators.SimulatedClouds": "cloud brightness of the stack",
     "matched_filter._src.operators.ColumnEnhancement": "one background fit",
+    "normalize._src.operators.HistogramMatch": "one source CDF per band",
     "normalize._src.operators.HistogramStretch": "per-band percentiles",
     "normalize._src.operators.ZeroOne": "per-band min / max",
     "restore._src.operators.DenoisePCA": "one PCA basis",
@@ -1211,8 +1194,15 @@ POOLED_STATISTICS: dict[str, str] = {
 #: geometry), so one ``(H, W)`` mask serves every frame of a stack.
 TIME_INVARIANT: frozenset[str] = frozenset(
     f"mask._src.operators.{name}"
-    for name in ("BBoxMask", "CountryMask", "LandMask", "OceanMask")
-)
+    for name in (
+        "BBoxMask",
+        "CountryMask",
+        "DistanceMask",
+        "LandMask",
+        "OceanMask",
+        "PolygonMask",
+    )
+) | {"geom._src.operators.Rasterize", "geom._src.operators.RasterizeLike"}
 
 #: learn estimators in their default ``mode="pixel"`` treat every
 #: non-spatial axis as a feature, so a ``(T, C, H, W)`` stack is fitted on
@@ -1241,38 +1231,8 @@ STACK_AS_FEATURES: frozenset[str] = frozenset(
     }
 )
 
-#: Strict xfails for the 4-D contract, owned by later branches of the #112
-#: stack.
-TIME_STACK_KNOWN_FAILURES: dict[str, Known] = {
-    **{
-        f"{family}._src.operators.{name}": (
-            f"{name} returns one (H, W) map for a (T, C, H, W) stack instead "
-            f"of a per-frame result or a rank error ({_FOUND})",
-            AssertionError,
-        )
-        for family, name in (
-            ("geom", "Rasterize"),
-            ("geom", "RasterizeLike"),
-            ("mask", "DistanceMask"),
-            ("mask", "PolygonMask"),
-        )
-    },
-    "normalize._src.operators.HistogramMatch": (
-        f"4-D result differs from the restacked per-frame results ({_FOUND})",
-        AssertionError,
-    ),
-    **{
-        f"{family}._src.operators.{name}": (
-            f"{name} fails on a 4-D stack with an error that does not name "
-            f"it ({_FOUND})",
-            AssertionError,
-        )
-        for family, name in (
-            ("viz", "AnnotatePoints"),
-            ("viz", "AnnotatePolygons"),
-        )
-    },
-}
+#: Strict xfails for the 4-D contract (none open).
+TIME_STACK_KNOWN_FAILURES: dict[str, Known] = {}
 
 
 def _time_stack_params() -> list[Any]:

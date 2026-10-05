@@ -360,6 +360,8 @@ def blend_rgba(
 
 def ensure_rgba(
     arr: Num[np.ndarray, "h w"] | Num[np.ndarray, "c h w"],
+    *,
+    name: str = "ensure_rgba",
 ) -> UInt8[np.ndarray, "4 h w"]:
     """Return ``arr`` as a four-band uint8 RGBA image.
 
@@ -371,6 +373,11 @@ def ensure_rgba(
     the input values alone; RGB / grayscale inputs then get an opaque
     (255) alpha plane. NaNs map to 0.
 
+    Args:
+        arr: The display array.
+        name: Caller name that prefixes the error message (an operator
+            passes its own).
+
     Raises:
         ValueError: If ``arr`` is not 2-D or a 3-/4-band cube.
     """
@@ -379,11 +386,11 @@ def ensure_rgba(
         values = np.repeat(values[None, ...], 3, axis=0)
     if values.ndim != 3:
         raise ValueError(
-            f"display arrays must be 2D, RGB, or RGBA; got shape {values.shape}"
+            f"{name}: display arrays must be 2D, RGB, or RGBA; got shape {values.shape}"
         )
     if values.shape[0] not in (3, 4):
         raise ValueError(
-            f"display arrays must have 3 or 4 bands; got {values.shape[0]}"
+            f"{name}: display arrays must have 3 or 4 bands; got {values.shape[0]}"
         )
     # Decide byte-vs-fraction scaling from the *input* values, before any
     # opaque alpha plane is added (a 255 alpha would otherwise make every
