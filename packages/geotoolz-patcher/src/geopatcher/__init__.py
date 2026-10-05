@@ -15,7 +15,8 @@ Public surface re-exports:
 - Axis helpers: `config_from_fields` (dataclass axis → ``get_config``
   dict) and `geom_shape` (a fixed-size geometry's weight-array shape),
   for third-party axes such as custom `SpatialWindow` subclasses.
-- Observability: `PatcherHook` callback protocol, `PatchJournal`,
+- Observability: `PatcherHook` callback protocol, `PatchJournal`
+  (+ `normalize_anchor`, its anchor-key normaliser),
   `PatchErrorRecord`, `get_strict` / `set_strict`,
   `IncompleteScanConfiguration`.
 - Spatial axes: re-exported from `geopatcher.spatial`.
@@ -57,7 +58,7 @@ from geopatcher._src.fields import (
 )
 from geopatcher._src.hooks import PatcherHook
 from geopatcher._src.indexed import IndexedPatchView
-from geopatcher._src.journal import PatchJournal
+from geopatcher._src.journal import PatchJournal, normalize_anchor
 from geopatcher._src.patch import (
     Patch,
     SpatioTemporalPatch,
@@ -254,6 +255,7 @@ __all__ = [
     "fields",
     "geom_shape",
     "get_strict",
+    "normalize_anchor",
     "set_strict",
     "spatial",
     "stack_patches",

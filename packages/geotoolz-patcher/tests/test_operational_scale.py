@@ -19,6 +19,7 @@ from geopatcher import (
     SpatialApproxMode,
     SpatialApproxQuantile,
     SpatialBoxcar,
+    SpatialExplicit,
     SpatialHann,
     SpatialOverlapAdd,
     SpatialPatcher,
@@ -26,6 +27,7 @@ from geopatcher import (
     SpatialRegularStride,
     SpatialReservoir,
     SpatialStreamingHistogram,
+    normalize_anchor,
 )
 
 
@@ -102,6 +104,52 @@ def test_patch_journal_persists_and_split_skips_completed(
 
     assert (0, 0) not in anchors
     assert set(anchors) == {(0, 2), (2, 0), (2, 2)}
+
+
+def test_journal_numpy_anchors(tmp_path: Path, field: RasterField) -> None:
+    # numpy scalars / ndarray rows are one anchor with their Python twin:
+    # commit doesn't crash, and has / pending / resume all match.
+    journal_path = tmp_path / "journal.jsonl"
+    journal = PatchJournal(str(journal_path))
+    journal.commit((np.int64(0), np.int64(0)), status="ok", runtime_s=0.1)
+    journal.commit(np.array([0, 2]), status="ok", runtime_s=0.1)
+    journal.commit((np.int64(2), np.int64(2)), status="error", runtime_s=0.1)
+    assert journal.has((0, 0))
+    assert journal.has((np.int32(0), np.int32(2)))
+    assert journal.pending([(0, 0), (0, 2), (2, 0), (2, 2)]) == [(2, 0), (2, 2)]
+    assert journal.completed() == [[0, 0], [0, 2]]
+
+    reopened = PatchJournal(str(journal_path))
+    assert reopened.completed() == [[0, 0], [0, 2]]
+    assert reopened.has(np.array([0, 2]))
+
+    # `SpatialExplicit(anchors_=np.argwhere(...))` yields ndarray rows.
+    patcher = SpatialPatcher(
+        geometry=SpatialRectangular(size=(2, 2)),
+        sampler=SpatialExplicit(anchors_=np.argwhere(np.ones((2, 2), bool)) * 2),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+    )
+    done = []
+    for patch in patcher.split(field, journal=reopened):
+        assert isinstance(patch.anchor, np.ndarray)
+        reopened.commit(patch.anchor, status="ok", runtime_s=0.1)
+        done.append(normalize_anchor(patch.anchor))
+    assert done == [[2, 0], [2, 2]]
+
+    resumed = PatchJournal(str(journal_path))
+    assert list(patcher.split(field, journal=resumed)) == []
+    assert sorted(resumed.completed()) == [[0, 0], [0, 2], [2, 0], [2, 2]]
+
+
+def test_normalize_anchor_rejects_unjsonable_values() -> None:
+    assert normalize_anchor({"t": np.datetime64("2024-01-01")}) == {
+        "t": {"__datetime64__": "2024-01-01"}
+    }
+    with pytest.raises(TypeError, match="cannot journal / cache an anchor"):
+        normalize_anchor((object(), 1))
+    with pytest.raises(TypeError, match="keys must be strings"):
+        normalize_anchor({1: 2})
 
 
 def test_split_rejects_patch_larger_than_byte_budget(field: RasterField) -> None:

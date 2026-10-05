@@ -637,7 +637,7 @@ class ObstoreCogField:
         return (_reopen, (self.url, options))
 
     def cache_id(self) -> str:
-        """`PatchCache` identity: the object read and the IFD.
+        """`PatchCache` identity: the object read, its version and the IFD.
 
         With the process pool the object is the ``url``; with an explicit
         ``store`` the ``url`` is only a label, so the identity is the
@@ -646,6 +646,14 @@ class ObstoreCogField:
         contents live only in that instance) has no stable identity:
         `PatchCache` then requires an explicit ``field_id``.
 
+        The version is one ``HEAD`` of the object (one request per
+        `split`, not per patch): its ETag, else its size and
+        last-modified time, so an object overwritten in place
+        invalidates its cache entries. When the store refuses the
+        ``HEAD``, or answers with neither an ETag nor a last-modified
+        time, a `RuntimeWarning` says remote changes will not be
+        detected and the version is left out.
+
         Raises:
             UnstableIdentityError: The explicit ``store`` has no printable
                 configuration; ``partial`` carries the rest of the
@@ -653,11 +661,11 @@ class ObstoreCogField:
 
         Examples:
             >>> ObstoreCogField.from_url("s3://b/k.tif").cache_id()
-            '{"ifd_index": 0, "path": null, "store": null, "url": "s3://b/k.tif"}'
+            '{"ifd_index": 0, ..., "url": "s3://b/k.tif", "version": "etag:..."}'
             >>> ObstoreCogField.from_url(
             ...     "file:///d/k.tif", store=LocalStore("/d"), path="k.tif", ifd_index=1
             ... ).cache_id()
-            '{"ifd_index": 1, "path": "k.tif", "store": "LocalStore(...)", "url": null}'
+            '{"ifd_index": 1, "path": "k.tif", "store": "LocalStore(...)", ...}'
         """
         explicit = self.store is not None
         store_id = _store_identity(self.store) if explicit else None
@@ -670,6 +678,7 @@ class ObstoreCogField:
             "store": store_id,
             "path": self.path if explicit else None,
             "ifd_index": int(self.ifd_index),
+            "version": self._object_version(),
         }
         if explicit and store_id is None:
             from geopatcher._src.cache import UnstableIdentityError
@@ -680,6 +689,41 @@ class ObstoreCogField:
                 partial=json.dumps(identity, sort_keys=True),
             )
         return json.dumps(identity, sort_keys=True)
+
+    def _object_version(self) -> str | None:
+        """ETag (else ``size:last_modified``) of the object, or ``None``."""
+        if self.store is not None:
+            store, key = self.store, self.path
+        else:
+            from geopatcher._src.objstore import get_obstore
+
+            store = get_obstore(self.url, storage_options=self.storage_options)
+            key = _uri_path(self.url)
+        try:
+            meta = store.head(key)
+        except Exception as exc:
+            warnings.warn(
+                f"ObstoreCogField: HEAD of {self.url!r} failed ({exc}); PatchCache "
+                f"entries for it will not notice the object being overwritten.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            return None
+        e_tag = meta.get("e_tag")
+        if e_tag:
+            return f"etag:{e_tag}"
+        last_modified = meta.get("last_modified")
+        if last_modified is None:
+            # Size alone cannot tell an overwrite of the same length apart.
+            warnings.warn(
+                f"ObstoreCogField: HEAD of {self.url!r} returned neither an ETag "
+                f"nor a Last-Modified time; PatchCache entries for it will not "
+                f"notice the object being overwritten.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            return None
+        return f"size:{meta.get('size')}:{last_modified}"
 
     @property
     def fill_value_default(self) -> float | int:

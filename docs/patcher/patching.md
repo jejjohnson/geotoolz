@@ -203,8 +203,9 @@ plugs into random access via `IndexedPatchView(patcher, field, cache=cache)`.
 
 **What the key covers.** `field_id` is everything the field reads:
 
-- the *source* — a reader's file path (`realpath` + mtime + size), a
-  `url`, or the `encoding["source"]` file of a `rioxarray.open_rasterio` /
+- the *source* — a reader's file paths (`realpath` + mtime + size of
+  *every* path, so editing any file of a multi-file reader invalidates
+  it), a `url`, or the `encoding["source"]` file of a `rioxarray.open_rasterio` /
   `xr.open_dataset` array. Pass `PatchCache(..., field_id="scene")` for
   in-memory (`GeoTensor`- or `DataArray`-backed) fields, which have no
   stable identity of their own — and also for a file-backed `DataArray`
@@ -216,7 +217,15 @@ plugs into random access via `IndexedPatchView(patcher, field, cache=cache)`.
 - the adapter's own `cache_id()`: `ObstoreCogField` folds in its store /
   `path` (with an explicit `store=` the `url` is only a label) and
   `ifd_index`, `ReprojectingRasterField` its `dst_crs`, `resolution` and
-  `resampling`. A custom `Field` can define `cache_id() -> str` the same way.
+  `resampling`. A custom `Field` can define `cache_id() -> str` the same way;
+  it is trusted, not verified, so it must change whenever the patches
+  could (a non-string or empty result raises `TypeError`).
+
+A plain `url` carries no version: an object overwritten in place is not
+detected. `ObstoreCogField` closes that gap with one `HEAD` per `split`
+(the object's ETag, else size + last-modified); for other URL-backed
+fields, give them a `cache_id()` that includes a version, or `clear()`
+the cache after the remote data changes.
 
 **Hits are bit-identical.** Entries store the carrier, not just the
 pixels: a `GeoTensor` comes back with its transform, CRS,
@@ -233,6 +242,15 @@ written, so a run after a transient source outage reads the recovered
 source. A damaged entry (zero-byte, truncated, not a zip) is treated as
 a miss, deleted and rewritten; entries are always published atomically
 (temp file + `os.replace`).
+
+**Eviction is incremental.** With `max_bytes` set, the directory is
+scanned once when the `PatchCache` is built; every `get` / `put` then
+updates an in-memory size tally and least-recently-used order, and
+entries are evicted only when a write takes the total over the cap. An
+entry larger than `max_bytes` on its own is not stored (a
+`RuntimeWarning` says so) rather than flushing the whole cache and then
+itself. The tally is per `PatchCache` instance, so with several
+processes writing one directory the cap applies per writer.
 
 !!! warning "Cache layout changed"
     The key and entry layout changed in this release: existing cache
