@@ -13,6 +13,10 @@ Shipped:
 - :class:`ProcessBudgetPanel` — V4 budget term breakdown.
 - :class:`EventVerificationPanel` — V5 event match overlay +
   contingency stats.
+- :class:`CartesianMapPanel` — projection-free ``(y, x)`` map in km for
+  idealised model output.
+- :class:`EnergyTimeSeriesPanel` — model invariants (energy, enstrophy,
+  …) over time.
 
 Composable wrappers, which consume any of the above (or a plain
 ``(ds, ax) -> Any`` callable) and multiply it:
@@ -25,6 +29,7 @@ Composable wrappers, which consume any of the above (or a plain
 
 from xrtoolz.viz.validation._src.animate import AnimatePanel, save_animation
 from xrtoolz.viz.validation._src.budgets import ProcessBudgetPanel
+from xrtoolz.viz.validation._src.cartesian import CartesianMapPanel
 from xrtoolz.viz.validation._src.compare import PairwiseComparePanel
 from xrtoolz.viz.validation._src.events import EventVerificationPanel
 from xrtoolz.viz.validation._src.facet import FacetPanel, seasonal_groupby
@@ -44,10 +49,13 @@ from xrtoolz.viz.validation._src.scales import (
     SpectralSkillPanel,
 )
 from xrtoolz.viz.validation._src.spatial import SpatialMapPanel
+from xrtoolz.viz.validation._src.timeseries import EnergyTimeSeriesPanel
 
 
 __all__ = [
     "AnimatePanel",
+    "CartesianMapPanel",
+    "EnergyTimeSeriesPanel",
     "EulerianLagrangianPanel",
     "EventVerificationPanel",
     "FacetPanel",

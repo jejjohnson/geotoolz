@@ -63,6 +63,25 @@ Power-spectrum visualisations consuming `transforms.power_spectrum` and
 
 ::: xrtoolz.viz.validation.SpatialMapPanel
 
+### Cartesian model output
+
+Idealised f/β-plane runs have `x`/`y` in metres and no lon/lat.
+`CartesianMapPanel` draws them on equal-aspect km axes with a zero-centred
+1/99 % colour scale and no cartopy; `EnergyTimeSeriesPanel` tracks model
+invariants over time. Both compose with the wrappers below:
+
+```python
+from xrtoolz.viz.validation import AnimatePanel, CartesianMapPanel, EnergyTimeSeriesPanel
+
+CartesianMapPanel(variable="zeta", contour="psi")(snapshots)
+AnimatePanel(CartesianMapPanel(variable="zeta"))(snapshots)  # FuncAnimation
+EnergyTimeSeriesPanel(["kinetic_energy", "enstrophy"], relative=True)(invariants)
+```
+
+::: xrtoolz.viz.validation.CartesianMapPanel
+
+::: xrtoolz.viz.validation.EnergyTimeSeriesPanel
+
 ## V3 — Lagrangian / Eulerian
 
 ::: xrtoolz.viz.validation.EulerianLagrangianPanel
