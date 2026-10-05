@@ -82,13 +82,13 @@ def _apply_preset_extent(panel: InnerPanel, axes: Any) -> None:
     projection = _innermost_projection(panel)
     if not isinstance(projection, str):
         return
-    from xrtoolz.viz._src.projections import PRESETS
+    from xrtoolz.viz._src.projections import PRESETS, _require_cartopy
 
     preset = PRESETS.get(projection)
     if preset is None or preset["extent"] is None:
         return
 
-    import cartopy.crs as ccrs
+    ccrs = _require_cartopy()
 
     for ax in _flatten_axes(axes):
         if hasattr(ax, "set_extent"):

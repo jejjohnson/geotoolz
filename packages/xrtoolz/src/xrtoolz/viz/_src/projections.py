@@ -6,15 +6,18 @@ panel call like ``SpatialMapPanel(projection="gulf_stream")`` applies
 the right ``set_extent`` + projection without the user memorising
 lat/lon bounds.
 
-Cartopy is a hard dependency of ``xrtoolz``; importing this module
-imports cartopy.
+Cartopy ships in the optional ``xrtoolz[maps]`` extra and is imported
+lazily: :data:`PRESETS` and ``make_axes(projection=None)`` work without
+it, and only resolving an actual projection calls
+:func:`_require_cartopy`.
 """
 
 from __future__ import annotations
 
+import importlib
+from types import ModuleType
 from typing import Any
 
-import cartopy.crs as ccrs
 import matplotlib.figure as mpl_figure
 import matplotlib.pyplot as plt
 
@@ -39,9 +42,28 @@ def _build_presets() -> dict[str, dict[str, Any]]:
 PRESETS: dict[str, dict[str, Any]] = _build_presets()
 
 
-def _resolve_projection(spec: str | ccrs.Projection | None) -> ccrs.Projection | None:
-    """Coerce ``spec`` to a cartopy CRS, looking up presets by name."""
-    if spec is None or isinstance(spec, ccrs.Projection):
+def _require_cartopy() -> ModuleType:
+    """Return :mod:`cartopy.crs`, or raise a pointer to the ``[maps]`` extra."""
+    # importlib keeps static checkers from requiring the optional extra.
+    try:
+        ccrs = importlib.import_module("cartopy.crs")
+    except ImportError as e:
+        raise ImportError(
+            "cartopy is required for projected map panels; "
+            'install it with `pip install "xrtoolz[maps]"`.'
+        ) from e
+    return ccrs
+
+
+def _resolve_projection(spec: Any) -> Any:
+    """Coerce ``spec`` to a cartopy CRS, looking up presets by name.
+
+    ``None`` passes through without importing cartopy.
+    """
+    if spec is None:
+        return None
+    ccrs = _require_cartopy()
+    if isinstance(spec, ccrs.Projection):
         return spec
     cls_name = PRESETS[spec]["projection"] if spec in PRESETS else spec
     cls = getattr(ccrs, cls_name, None)
@@ -56,7 +78,7 @@ def _resolve_projection(spec: str | ccrs.Projection | None) -> ccrs.Projection |
 
 
 def make_axes(
-    projection: str | ccrs.Projection | None = None,
+    projection: Any = None,
     *,
     fig: mpl_figure.Figure | None = None,
     figsize: tuple[float, float] = (8, 5),
@@ -67,7 +89,8 @@ def make_axes(
         projection: Preset name (one of :data:`PRESETS`), a cartopy
             class name (``"PlateCarree"``), an instantiated cartopy
             :class:`~cartopy.crs.Projection`, or ``None`` for plain
-            matplotlib axes.
+            matplotlib axes. Anything but ``None`` needs the
+            ``xrtoolz[maps]`` extra (cartopy).
         fig: Optional pre-existing Figure to draw into. When ``None`` a
             new Figure is created with ``figsize``.
         figsize: Figure size when ``fig`` is ``None``.
@@ -76,6 +99,9 @@ def make_axes(
         ``(Figure, Axes)``. With a preset, the Axes is a
         :class:`cartopy.mpl.geoaxes.GeoAxes` with ``set_extent`` already
         applied. With ``projection=None``, plain matplotlib axes.
+
+    Raises:
+        ImportError: ``projection`` is set but cartopy is not installed.
     """
     if fig is None:
         fig = plt.figure(figsize=figsize)
@@ -89,7 +115,8 @@ def make_axes(
         extent = PRESETS[projection]["extent"]
         if extent is not None:
             # ax is a cartopy GeoAxes when a projection is set.
-            ax.set_extent(extent, crs=ccrs.PlateCarree())  # ty: ignore[unresolved-attribute]
+            ccrs = _require_cartopy()
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
     return fig, ax
 
 

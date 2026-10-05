@@ -62,7 +62,6 @@ dependencies = [
     "xrtoolz-einx>=0.0.1",
     "xrtoolz-sklearn>=0.0.1",
     "matplotlib>=3.8",
-    "cartopy>=0.22",
     # The Operator / Sequential / Graph composition layer lives in pipekit
     # (formerly xrtoolz.core). Every per-domain operator subclasses
     # `pipekit.Operator`; the dependency is load-bearing. See
@@ -93,6 +92,15 @@ wavelets = [
 # core interpolation and metrics remain usable without scikit-image.
 image = [
     "scikit-image>=0.21",
+]
+
+# ``pip install xrtoolz[maps]`` — cartopy for projected map panels
+# (``SpatialMapPanel(projection=...)``, ``make_axes(projection=...)``,
+# coastlines in ``EventVerificationPanel``). Imported lazily so
+# ``xrtoolz.viz`` and every projection-free panel import without the
+# GEOS/PROJ binaries cartopy pulls.
+maps = [
+    "cartopy>=0.22",
 ]
 
 # ``pip install xrtoolz[vector]`` — the vector ↔ raster bridge in

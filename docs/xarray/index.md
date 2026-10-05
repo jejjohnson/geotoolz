@@ -45,6 +45,19 @@ which is pre-PyPI and resolved via `[tool.uv.sources]`. A plain
 uv pip install "git+https://github.com/jejjohnson/xrtoolz@main"
 ```
 
+Optional extras pull in heavier backends only where they are used:
+
+| Extra | Pulls in | Needed for |
+|---|---|---|
+| `maps` | cartopy | Projected map panels — `SpatialMapPanel(projection=...)`, `make_axes(projection=...)`, coastlines in `EventVerificationPanel` |
+| `wavelets` | PyWavelets | `transforms.wavelet` (`cwt`, `dwt`) |
+| `image` | scikit-image | Biharmonic inpainting, structural image metrics |
+| `vector` | geopandas, shapely, rasterio | `geo` vector ↔ raster bridge (`vectorize`, `rasterize`, `footprint`, …) |
+
+```bash
+uv add "xrtoolz[maps]"
+```
+
 ## Quickstart
 
 Compute geostrophic surface currents from sea-surface height, then map them

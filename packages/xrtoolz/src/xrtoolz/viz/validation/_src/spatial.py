@@ -13,13 +13,16 @@ from __future__ import annotations
 
 from typing import Any
 
-import cartopy.crs as ccrs
 import matplotlib.figure as mpl_figure
 import numpy as np
 import xarray as xr
 
 from xrtoolz.viz._src.cmaps import cmap_for
-from xrtoolz.viz._src.projections import PRESETS, _resolve_projection
+from xrtoolz.viz._src.projections import (
+    PRESETS,
+    _require_cartopy,
+    _resolve_projection,
+)
 from xrtoolz.viz.validation._src.base import _NullContext, _ValidationPanel
 
 
@@ -43,7 +46,9 @@ class SpatialMapPanel(_ValidationPanel):
         projection: Preset name (``"global"``, ``"north_atlantic"``,
             ``"gulf_stream"``, ``"kuroshio"``, ``"mediterranean"``), a
             cartopy class name, a cartopy CRS instance, or ``None`` for
-            plain matplotlib axes (no cartopy).
+            plain matplotlib axes (no cartopy). A projection needs the
+            ``xrtoolz[maps]`` extra; without it the panel raises
+            :class:`ImportError` when called.
         coastlines: Add :meth:`cartopy.mpl.geoaxes.GeoAxes.coastlines`.
             Ignored when ``projection`` is ``None``. Default ``True``.
         gridlines: Add :meth:`cartopy.mpl.geoaxes.GeoAxes.gridlines`
@@ -65,7 +70,7 @@ class SpatialMapPanel(_ValidationPanel):
         cmap: str | None = None,
         vmin: float | None = None,
         vmax: float | None = None,
-        projection: str | ccrs.Projection | None = None,
+        projection: Any = None,
         coastlines: bool = True,
         gridlines: bool = True,
         cbar_label: str = "",
@@ -103,7 +108,8 @@ class SpatialMapPanel(_ValidationPanel):
             extent = PRESETS[self.projection]["extent"]
             if extent is not None:
                 # ax is a cartopy GeoAxes when a projection is set.
-                ax.set_extent(extent, crs=ccrs.PlateCarree())  # ty: ignore[unresolved-attribute]
+                ccrs = _require_cartopy()
+                ax.set_extent(extent, crs=ccrs.PlateCarree())
         return fig, ax
 
     def _select_var(self, obj: xr.DataArray | xr.Dataset) -> xr.DataArray:
@@ -137,7 +143,7 @@ class SpatialMapPanel(_ValidationPanel):
             "shading": "auto",
         }
         if self.projection is not None:
-            pcm_kw["transform"] = ccrs.PlateCarree()
+            pcm_kw["transform"] = _require_cartopy().PlateCarree()
         im = ax.pcolormesh(lon, lat, vals, **pcm_kw)
         if self.projection is not None:
             if self.coastlines:
