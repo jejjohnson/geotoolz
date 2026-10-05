@@ -232,3 +232,38 @@ def test_partial_empty_multi_input_surfaces_apply_error() -> None:
     op = _Diff("x")
     with pytest.raises(KeyError):
         op(tree_full, tree_empty)
+
+
+# ---------- _apply_tree hook ----------------------------------------------
+
+
+class _WholeTree(Operator):
+    """Sees the whole tree: subtracts the mean of ``x`` over every leaf."""
+
+    def _apply(self, ds: xr.Dataset) -> xr.Dataset:
+        raise AssertionError("_apply must not be called when _apply_tree is overridden")
+
+    def _apply_tree(self, tree: xr.DataTree) -> xr.DataTree:
+        mean = float(np.mean([float(n["x"].mean()) for n in tree.leaves]))
+        return tree.map_over_datasets(lambda d: d - mean if d.data_vars else d)
+
+
+def test_apply_tree_override_receives_whole_tree(dt: xr.DataTree) -> None:
+    out = _WholeTree()(dt)
+
+    leaf_means = [float(dt[p]["x"].mean()) for p in ("a", "b")]
+    expected = dt["a"]["x"] - np.mean(leaf_means)
+    xr.testing.assert_allclose(out["a"]["x"], expected)
+
+
+def test_apply_tree_override_is_used_inside_sequential(dt: xr.DataTree) -> None:
+    out = Sequential([_ScaleVar("x", factor=2.0), _WholeTree()])(dt)
+
+    assert isinstance(out, xr.DataTree)
+    assert float(out["a"]["x"].mean() + out["b"]["x"].mean()) == pytest.approx(0.0)
+
+
+def test_default_apply_tree_is_the_leaf_map(dt: xr.DataTree) -> None:
+    op = _ScaleVar("x", factor=3.0)
+
+    xr.testing.assert_identical(op._apply_tree(dt), op(dt))

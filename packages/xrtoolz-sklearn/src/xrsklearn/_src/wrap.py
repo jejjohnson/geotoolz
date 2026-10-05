@@ -21,9 +21,9 @@ expose PCA / EOF / ICA / NMF / KMeans as thin presets.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TypeGuard, get_args
 
 import numpy as np
 import pandas as pd
@@ -35,9 +35,11 @@ from xrsklearn._src.layout import (
     ArrayLayout,
     DatasetLayout,
     Layout,
+    TreeLayout,
     array_layout,
     conform_array,
     conform_dataset,
+    conform_tree,
     dataset_from_2d,
     dataset_layout,
     generic_from_2d,
@@ -45,6 +47,8 @@ from xrsklearn._src.layout import (
     matches,
     sample_coords,
     to_2d,
+    tree_from_2d,
+    tree_layout,
 )
 from xrsklearn._src.nan import (
     MissingKind,
@@ -61,7 +65,24 @@ from xrsklearn._src.nan import (
     restore_columns,
     restore_rows,
 )
+from xrsklearn._src.tree import (
+    TreeMode,
+    apply_per_node,
+    apply_pooled,
+    fit_per_node,
+    fit_pooled,
+    score_per_node,
+    score_pooled,
+    select_nodes,
+)
 
+
+#: Inputs ``X`` every verb accepts.
+XInput = xr.DataArray | xr.Dataset | xr.DataTree | np.ndarray
+#: Targets ``y`` (a DataTree or ``{path: target}`` mapping for tree inputs).
+YInput = xr.DataArray | xr.Dataset | xr.DataTree | np.ndarray | Mapping[str, Any] | None
+#: What the transform / predict verbs return.
+Output = xr.DataArray | xr.Dataset | xr.DataTree | np.ndarray
 
 #: Dimension name of ``predict_proba`` outputs, labeled by ``classes_``.
 CLASS_DIM = "class"
@@ -88,7 +109,7 @@ class _Batch:
     sample_dim: Hashable | None = None
     samples: xr.Coordinates | None = None
     sample_index: pd.Index | None = None
-    in_dims: tuple[Hashable, ...] | dict[Hashable, tuple[Hashable, ...]] | None = None
+    in_dims: Any = None  # input dim order(s), shaped like the input
     name: Hashable | None = None
     attrs: dict[str, Any] | None = None
     valid: np.ndarray | None = None
@@ -181,6 +202,8 @@ def _explicit(
     new_feature_dim: str | None,
     nan_policy: NanPolicy | None,
     missing: MissingKind | None = None,
+    tree_mode: TreeMode | None = None,
+    tree_paths: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """The wrapper settings a caller actually passed (``None`` = not passed)."""
     given = {
@@ -188,6 +211,8 @@ def _explicit(
         "new_feature_dim": new_feature_dim,
         "nan_policy": nan_policy,
         "missing": missing,
+        "tree_mode": tree_mode,
+        "tree_paths": None if tree_paths is None else list(tree_paths),
     }
     return {key: value for key, value in given.items() if value is not None}
 
@@ -261,6 +286,17 @@ class XarrayEstimator(BaseEstimator):
             are promoted to ``float64``; string labels to ``object``.
         missing: What counts as missing: ``"nan"`` (default: NaN, NaT,
             ``None``) or ``"nonfinite"`` (also ±inf).
+        tree_mode: What fitting on an ``xr.DataTree`` means (see
+            :mod:`xrsklearn._src.tree`):
+
+            - ``"per_node"`` (default): one estimator per data node, stored
+              in ``estimators_``; nodes may have different grids.
+            - ``"pool_samples"``: one estimator fitted on every node's
+              samples stacked along ``sample_dim``; nodes share one grid.
+            - ``"concat_features"``: one estimator whose features are every
+              node's variables side by side; nodes share the sample axis.
+        tree_paths: DataTree nodes to use; by default every node with data
+            variables.
 
     Attributes:
         estimator_: The fitted clone of ``estimator``.
@@ -270,6 +306,10 @@ class XarrayEstimator(BaseEstimator):
             NumPy array).
         target_layout_: The fit-time layout of an xarray ``y`` (``None``
             otherwise); ``predict`` outputs are rebuilt on it.
+        estimators_: ``{path: fitted XarrayEstimator}`` after a
+            ``tree_mode="per_node"`` fit on a DataTree (there is no
+            ``estimator_`` then).
+        tree_paths_: The DataTree node paths used at fit time.
         feature_mask_: Boolean keep-mask over the input feature columns
             learned by the ``"mask"`` / ``"mask_features"`` policies
             (``None`` when no column was dropped).
@@ -349,6 +389,11 @@ class XarrayEstimator(BaseEstimator):
         ```
     """
 
+    # Fitted state, set by ``fit``; declared here for type checkers.
+    estimator_: Any
+    estimators_: dict[str, XarrayEstimator]
+    tree_paths_: tuple[str, ...]
+
     def __init__(
         self,
         estimator: BaseEstimator,
@@ -356,18 +401,27 @@ class XarrayEstimator(BaseEstimator):
         new_feature_dim: str = "component",
         nan_policy: NanPolicy = "propagate",
         missing: MissingKind = "nan",
+        tree_mode: TreeMode = "per_node",
+        tree_paths: Sequence[str] | None = None,
     ) -> None:
         self.estimator = estimator
         self.sample_dim = sample_dim
         self.new_feature_dim = new_feature_dim
         self.nan_policy = nan_policy
         self.missing = missing
+        self.tree_mode = tree_mode
+        self.tree_paths = tree_paths
 
     # ---------- internals -------------------------------------------------
 
     def _check_params(self) -> None:
         """Validate constructor parameters (sklearn defers this to call time)."""
         check_policy(self.nan_policy, self.missing)
+        modes = get_args(TreeMode)
+        if self.tree_mode not in modes:
+            raise ValueError(
+                f"tree_mode must be one of {modes}; got {self.tree_mode!r}."
+            )
         if not isinstance(self.new_feature_dim, str):
             raise TypeError(
                 f"new_feature_dim must be a str; got {type(self.new_feature_dim)}."
@@ -377,12 +431,16 @@ class XarrayEstimator(BaseEstimator):
                 f"estimator must implement fit(); got {type(self.estimator).__name__}."
             )
 
-    def _resolve_sample_dim(self, x: xr.DataArray | xr.Dataset) -> Hashable:
+    def _resolve_sample_dim(
+        self, x: xr.DataArray | xr.Dataset | dict[str, xr.Dataset]
+    ) -> Hashable:
         fitted = self.__dict__.get("sample_dim_")
         if fitted is not None:
             return fitted
         if self.sample_dim is not None:
             return self.sample_dim
+        if isinstance(x, dict):  # DataTree nodes: the first node decides
+            x = next(iter(x.values()))
         if isinstance(x, xr.DataArray):
             return x.dims[0]
         # Dataset: use the first dim of the first variable.
@@ -391,7 +449,7 @@ class XarrayEstimator(BaseEstimator):
 
     def _stack(
         self,
-        x: xr.DataArray | xr.Dataset | np.ndarray,
+        x: XInput,
         *,
         space: Literal["fit", "features", "output"],
     ) -> _Batch:
@@ -410,16 +468,29 @@ class XarrayEstimator(BaseEstimator):
             The marshalled batch. NumPy inputs pass through unlabeled.
         """
         self._check_params()
+        if space != "fit" and "estimators_" in self.__dict__:
+            raise TypeError(
+                f"{type(self).__name__} was fit per DataTree node "
+                f"({', '.join(self.__dict__['estimators_'])}); pass a DataTree, "
+                "or use .estimators_[path] for a single node."
+            )
         if isinstance(x, np.ndarray):
             batch = _Batch(arr=x)
             self._apply_feature_policy(batch, space)
             return batch
+        if isinstance(x, xr.DataTree):
+            batch = self._stack_tree(x, space=space)
+            self._apply_feature_policy(batch, space)
+            return batch
         if not isinstance(x, xr.DataArray | xr.Dataset):
             raise TypeError(
-                f"X must be xr.DataArray, xr.Dataset, or np.ndarray; got {type(x)}."
+                "X must be xr.DataArray, xr.Dataset, xr.DataTree, or np.ndarray; "
+                f"got {type(x)}."
             )
         sample_dim = self._resolve_sample_dim(x)
         fitted = self.__dict__.get("layout_") if space == "features" else None
+        if isinstance(fitted, TreeLayout):
+            raise TypeError("Estimator was fit on a DataTree; got " + type(x).__name__)
         layout: Layout
         if isinstance(x, xr.DataArray):
             in_dims: Any = tuple(x.dims)
@@ -451,6 +522,37 @@ class XarrayEstimator(BaseEstimator):
         )
         self._apply_feature_policy(batch, space)
         return batch
+
+    def _stack_tree(self, tree: xr.DataTree, *, space: str) -> _Batch:
+        """Marshal DataTree nodes side by side (``tree_mode="concat_features"``)."""
+        if self.tree_mode != "concat_features":
+            raise TypeError(  # other modes dispatch before marshalling
+                f"tree_mode={self.tree_mode!r} does not marshal a whole DataTree."
+            )
+        nodes = select_nodes(tree, self.__dict__.get("tree_paths_", self.tree_paths))
+        sample_dim = self._resolve_sample_dim(nodes)
+        fitted = self.__dict__.get("layout_") if space == "features" else None
+        if fitted is not None and not isinstance(fitted, TreeLayout):
+            raise TypeError("Estimator was not fit on a DataTree; got a DataTree.")
+        layout = fitted if fitted is not None else tree_layout(nodes, sample_dim)
+        nodes = conform_tree(nodes, layout)
+        first = nodes[layout.paths[0]]
+        return _Batch(
+            arr=to_2d(nodes, layout),
+            layout=layout,
+            sample_dim=sample_dim,
+            samples=sample_coords(first, sample_dim),
+            sample_index=first.indexes.get(sample_dim),
+            in_dims={
+                path: {name: tuple(var.dims) for name, var in ds.data_vars.items()}
+                for path, ds in nodes.items()
+            },
+            attrs={},
+        )
+
+    def _tree_dispatch(self, x: Any) -> TypeGuard[xr.DataTree]:
+        """Whether ``x`` is a DataTree handled node-wise (not column-joined)."""
+        return isinstance(x, xr.DataTree) and self.tree_mode != "concat_features"
 
     def _apply_feature_policy(self, batch: _Batch, space: str) -> None:
         """``raise`` check on X, then drop fit-time all-missing columns."""
@@ -536,7 +638,7 @@ class XarrayEstimator(BaseEstimator):
 
     def _prepare_y(
         self,
-        y: xr.DataArray | xr.Dataset | np.ndarray | None,
+        y: YInput,
         batch: _Batch,
     ) -> tuple[np.ndarray | None, Layout | None]:
         """Marshal ``y`` to numpy, aligned to and masked like ``X``.
@@ -552,6 +654,13 @@ class XarrayEstimator(BaseEstimator):
         """
         if y is None:
             return None, None
+        if isinstance(y, xr.DataTree) or (
+            isinstance(y, Mapping) and not isinstance(y, xr.Dataset)
+        ):
+            raise TypeError(
+                "A DataTree / mapping y is per node; it needs a DataTree X with "
+                "tree_mode='per_node' or 'pool_samples'."
+            )
         layout: Layout | None = None
         if isinstance(y, xr.DataArray | xr.Dataset):
             if batch.sample_dim is None:
@@ -581,9 +690,16 @@ class XarrayEstimator(BaseEstimator):
         batch: _Batch,
         layout: Layout,
         dims: Any = None,
-    ) -> xr.DataArray | xr.Dataset:
+    ) -> xr.DataArray | xr.Dataset | xr.DataTree:
         """Label an output that lives on ``layout``'s feature grid."""
         assert batch.samples is not None
+        if isinstance(layout, TreeLayout):
+            return tree_from_2d(
+                out,
+                layout,
+                batch.samples,
+                dims=dims if isinstance(dims, dict) else None,
+            )
         if isinstance(layout, DatasetLayout):
             return dataset_from_2d(
                 out,
@@ -619,9 +735,7 @@ class XarrayEstimator(BaseEstimator):
             attrs=attrs,
         )
 
-    def _label_transform(
-        self, out: Any, batch: _Batch
-    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+    def _label_transform(self, out: Any, batch: _Batch) -> Output:
         out = np.asarray(out)
         keeps = _keeps_features(self.estimator_, batch.arr.shape[1], out)
         out = restore_rows(out, batch.valid)
@@ -641,9 +755,7 @@ class XarrayEstimator(BaseEstimator):
         # for a Dataset there is no single variable to inherit them from.
         return self._generic(out, batch, name=batch.name, attrs=batch.attrs)
 
-    def _label_inverse(
-        self, out: Any, batch: _Batch
-    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+    def _label_inverse(self, out: Any, batch: _Batch) -> Output:
         out = restore_rows(np.asarray(out), batch.valid)
         keep = self.__dict__.get("feature_mask_")
         if keep is not None and out.ndim == 2 and out.shape[1] == keep.sum():
@@ -657,9 +769,7 @@ class XarrayEstimator(BaseEstimator):
             return self._features(out, batch, train)
         return self._generic(out, batch, name=batch.name, attrs=batch.attrs)
 
-    def _label_target(
-        self, out: Any, batch: _Batch
-    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+    def _label_target(self, out: Any, batch: _Batch) -> Output:
         out = restore_rows(np.asarray(out), batch.valid)
         if batch.layout is None:
             return out
@@ -697,17 +807,24 @@ class XarrayEstimator(BaseEstimator):
         supervised = is_classifier(self.estimator_) or is_regressor(self.estimator_)
         self.target_layout_ = target if supervised else None
         self.feature_mask_ = batch.features
+        if isinstance(batch.layout, TreeLayout):
+            self.tree_paths_ = batch.layout.paths
 
     # ---------- sklearn-style verbs ---------------------------------------
 
     def fit(
         self,
-        x: xr.DataArray | xr.Dataset | np.ndarray,
-        y: xr.DataArray | xr.Dataset | np.ndarray | None = None,
+        x: XInput,
+        y: YInput = None,
         **kwargs: Any,
     ) -> XarrayEstimator:
         """Fit the wrapped estimator to ``x`` (and optional ``y``)."""
-        self.__dict__.pop("sample_dim_", None)
+        self._reset()
+        if self._tree_dispatch(x):
+            self._check_params()
+            fit_tree = fit_per_node if self.tree_mode == "per_node" else fit_pooled
+            fit_tree(self, x, y, kwargs, transform=False)
+            return self
         batch = self._stack(x, space="fit")
         y_np, target = self._prepare_y(y, batch)
         params = self._prepare_fit_params(kwargs, batch)
@@ -719,9 +836,7 @@ class XarrayEstimator(BaseEstimator):
         return self
 
     @available_if(_estimator_has("transform"))
-    def transform(
-        self, x: xr.DataArray | xr.Dataset | np.ndarray
-    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+    def transform(self, x: XInput) -> Output:
         """Transform ``x`` via the fitted estimator.
 
         One-to-one transformers (scalers, …) return data on the input's
@@ -729,6 +844,8 @@ class XarrayEstimator(BaseEstimator):
         KMeans distances) returns ``(sample_dim, new_feature_dim)``.
         """
         self._require_fitted()
+        if self._tree_dispatch(x):
+            return self._apply_tree("transform", x)
         batch = self._stack(x, space="features")
         self._mask_samples(batch)
         return self._label_transform(self.estimator_.transform(batch.arr), batch)
@@ -736,12 +853,18 @@ class XarrayEstimator(BaseEstimator):
     @available_if(_estimator_has("fit_transform", "transform"))
     def fit_transform(
         self,
-        x: xr.DataArray | xr.Dataset | np.ndarray,
-        y: xr.DataArray | xr.Dataset | np.ndarray | None = None,
+        x: XInput,
+        y: YInput = None,
         **kwargs: Any,
-    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+    ) -> Output:
         """Fit then transform ``x`` (output layout as in :meth:`transform`)."""
-        self.__dict__.pop("sample_dim_", None)
+        self._reset()
+        if self._tree_dispatch(x):
+            self._check_params()
+            fit_tree = fit_per_node if self.tree_mode == "per_node" else fit_pooled
+            result = fit_tree(self, x, y, kwargs, transform=True)
+            assert result is not None  # transform=True always returns the tree
+            return result
         batch = self._stack(x, space="fit")
         y_np, target = self._prepare_y(y, batch)
         params = self._prepare_fit_params(kwargs, batch)
@@ -757,9 +880,7 @@ class XarrayEstimator(BaseEstimator):
         return self._label_transform(out, batch)
 
     @available_if(_estimator_has("inverse_transform"))
-    def inverse_transform(
-        self, x: xr.DataArray | xr.Dataset | np.ndarray
-    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+    def inverse_transform(self, x: XInput) -> Output:
         """Map back to the original feature space via the fitted estimator.
 
         The result is rebuilt on the fit-time grid — a Dataset if the
@@ -770,11 +891,13 @@ class XarrayEstimator(BaseEstimator):
         checked against the fit-time layout like any other input.
         """
         self._require_fitted()
+        if self._tree_dispatch(x):
+            return self._apply_tree("inverse_transform", x)
         train = self.__dict__.get("layout_")
         keep = self.__dict__.get("feature_mask_")
         in_feature_space = (
             train is not None
-            and isinstance(x, xr.DataArray | xr.Dataset)
+            and isinstance(x, xr.DataArray | xr.Dataset | xr.DataTree)
             and matches(x, train)
         ) or (
             # A full-width NumPy array (e.g. a one-to-one fit_transform output
@@ -789,9 +912,7 @@ class XarrayEstimator(BaseEstimator):
         return self._label_inverse(self.estimator_.inverse_transform(batch.arr), batch)
 
     @available_if(_estimator_has("predict"))
-    def predict(
-        self, x: xr.DataArray | xr.Dataset | np.ndarray
-    ) -> xr.DataArray | xr.Dataset | np.ndarray:
+    def predict(self, x: XInput) -> Output:
         """Predict via the fitted estimator (regression / classification).
 
         If ``fit`` received an xarray ``y``, predictions come back on its
@@ -800,14 +921,14 @@ class XarrayEstimator(BaseEstimator):
         ``(sample_dim, new_feature_dim)`` with no attrs.
         """
         self._require_fitted()
+        if self._tree_dispatch(x):
+            return self._apply_tree("predict", x)
         batch = self._stack(x, space="features")
         self._mask_samples(batch)
         return self._label_target(self.estimator_.predict(batch.arr), batch)
 
     @available_if(_estimator_has("predict_proba"))
-    def predict_proba(
-        self, x: xr.DataArray | xr.Dataset | np.ndarray
-    ) -> xr.DataArray | np.ndarray | list[xr.DataArray | np.ndarray]:
+    def predict_proba(self, x: XInput) -> Output | list[xr.DataArray | np.ndarray]:
         """Class-probability prediction (classifiers only).
 
         Returns ``(sample_dim, "class")`` with the ``class`` coordinate set
@@ -815,6 +936,8 @@ class XarrayEstimator(BaseEstimator):
         multi-output classifiers.
         """
         self._require_fitted()
+        if self._tree_dispatch(x):
+            return self._apply_tree("predict_proba", x)
         batch = self._stack(x, space="features")
         self._mask_samples(batch)
         out = self.estimator_.predict_proba(batch.arr)
@@ -829,14 +952,18 @@ class XarrayEstimator(BaseEstimator):
     @available_if(_estimator_has("score"))
     def score(
         self,
-        x: xr.DataArray | xr.Dataset | np.ndarray,
-        y: xr.DataArray | xr.Dataset | np.ndarray | None = None,
-    ) -> float:
+        x: XInput,
+        y: YInput = None,
+    ) -> float | dict[str, float]:
         """Scalar score from the wrapped estimator.
 
         Not re-wrapped — sklearn ``.score`` returns a Python float.
         """
         self._require_fitted()
+        if self._tree_dispatch(x):
+            if self.tree_mode == "per_node":
+                return score_per_node(self, x, y)
+            return score_pooled(self, x, y)
         batch = self._stack(x, space="features")
         y_np, _ = self._prepare_y(y, batch)
         y_np, _ = self._mask_samples(batch, y_np)
@@ -857,6 +984,11 @@ class XarrayEstimator(BaseEstimator):
                 f"{type(est).__name__} does not implement {name}, so neither "
                 f"does this {type(self).__name__}."
             )
+        if "estimators_" in self.__dict__ and not name.endswith("__"):
+            raise AttributeError(
+                f"{type(self).__name__} was fit per DataTree node; use "
+                f".estimators_[path].{name} for a node's fitted attribute."
+            )
         try:
             est = self.__dict__["estimator_"]
         except KeyError as exc:
@@ -866,8 +998,25 @@ class XarrayEstimator(BaseEstimator):
             ) from exc
         return getattr(est, name)
 
+    def _reset(self) -> None:
+        """Forget fitted state so a refit starts clean."""
+        for name in ("sample_dim_", "estimators_", "tree_paths_", "estimator_"):
+            self.__dict__.pop(name, None)
+
+    def _apply_tree(self, method: str, tree: xr.DataTree) -> xr.DataTree:
+        if "estimators_" in self.__dict__:
+            return apply_per_node(self, method, tree)
+        if self.tree_mode == "per_node":
+            raise TypeError(
+                "This estimator was fit on a single DataArray / Dataset; with "
+                "tree_mode='per_node' it can only be applied to a DataTree it was "
+                "fit on. Use tree_mode='pool_samples' to apply one estimator to "
+                "every node."
+            )
+        return apply_pooled(self, method, tree)
+
     def _require_fitted(self) -> None:
-        if "estimator_" not in self.__dict__:
+        if "estimator_" not in self.__dict__ and "estimators_" not in self.__dict__:
             raise RuntimeError(
                 f"{type(self).__name__} has not been fitted; call .fit(...) first."
             )
@@ -878,5 +1027,7 @@ class XarrayEstimator(BaseEstimator):
             f"sample_dim={self.sample_dim!r}, "
             f"new_feature_dim={self.new_feature_dim!r}, "
             f"nan_policy={self.nan_policy!r}, "
-            f"missing={self.missing!r})"
+            f"missing={self.missing!r}, "
+            f"tree_mode={self.tree_mode!r}, "
+            f"tree_paths={self.tree_paths!r})"
         )

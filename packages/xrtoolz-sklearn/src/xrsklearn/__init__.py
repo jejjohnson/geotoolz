@@ -4,10 +4,11 @@ Three surfaces over one marshalling core (stack → delegate → unstack):
 
 - :class:`XarrayEstimator` — wraps any sklearn-style estimator so
   ``fit / transform / fit_transform / inverse_transform`` operate on
-  N-D :class:`xr.DataArray` / :class:`xr.Dataset` inputs, with
+  N-D :class:`xr.DataArray` / :class:`xr.Dataset` / :class:`xr.DataTree`
+  inputs, with
   :class:`NanPolicy` controlling NaN handling around the delegate
   (land-mask columns, gappy rows, ``y`` and ``sample_weight``).
-- ``da.sklearn`` / ``ds.sklearn`` accessors — registered as a side
+- ``da.sklearn`` / ``ds.sklearn`` / ``dt.sklearn`` accessors — registered as a side
   effect of importing this package; thin sugar over
   :class:`XarrayEstimator`.
 - :class:`SklearnOp` — the Layer-1 :class:`xrcore.Operator` wrapper, for
@@ -18,6 +19,7 @@ Three surfaces over one marshalling core (stack → delegate → unstack):
 from xrsklearn._src import accessor as _accessor  # noqa: F401  (registers .sklearn)
 from xrsklearn._src.nan import MissingKind, NanPolicy
 from xrsklearn._src.operator import SklearnOp
+from xrsklearn._src.tree import TreeMode
 from xrsklearn._src.wrap import XarrayEstimator
 
 
@@ -27,6 +29,7 @@ __all__ = [
     "MissingKind",
     "NanPolicy",
     "SklearnOp",
+    "TreeMode",
     "XarrayEstimator",
     "__version__",
 ]

@@ -78,9 +78,32 @@ wrap.feature_mask_                        # which grid cells were used
 recon = wrap.inverse_transform(scores)    # land comes back as NaN
 ```
 
+## DataTree inputs
+
+A DataTree holds several Datasets at once, so `tree_mode=` says what
+fitting on one means:
+
+| `tree_mode` | Fits | Nodes must share | Typical use |
+|---|---|---|---|
+| `"per_node"` (default) | one estimator per node (`estimators_[path]`) | nothing | multi-resolution or multi-region trees |
+| `"pool_samples"` | one estimator on all nodes' samples | the feature grid | ensemble members, years, train groups |
+| `"concat_features"` | one estimator on all nodes' variables side by side | the sample axis | predictors at several resolutions |
+
+Nodes are every node with data variables, or `tree_paths=[...]`; each is
+read with its inherited coordinates. Outputs come back as a DataTree of
+the same structure (a reduced `concat_features` output is one
+DataArray). `tree.sklearn` works like the other accessors, and
+`SklearnOp` writes each node's result back into that node, leaving
+nodes without `variable` untouched.
+
+```python
+wrap = XarrayEstimator(PCA(n_components=3), sample_dim="time", tree_mode="pool_samples")
+scores = wrap.fit_transform(ensemble_tree)   # one EOF basis across members
+```
+
 ## The `.sklearn` accessors
 
-Importing `xrsklearn` registers `da.sklearn` / `ds.sklearn` accessors —
+Importing `xrsklearn` registers `da.sklearn` / `ds.sklearn` / `dt.sklearn` accessors —
 thin sugar that constructs an `XarrayEstimator` and forwards:
 
 ```python

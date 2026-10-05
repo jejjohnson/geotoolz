@@ -23,13 +23,14 @@ Example:
 
 from __future__ import annotations
 
-from collections.abc import Hashable
+from collections.abc import Hashable, Sequence
 from typing import Any
 
 import xarray as xr
 from sklearn.base import clone
 
 from xrsklearn._src.nan import MissingKind, NanPolicy
+from xrsklearn._src.tree import TreeMode
 from xrsklearn._src.wrap import (
     XarrayEstimator,
     _check_no_conflict,
@@ -121,7 +122,7 @@ class _SklearnAccessor:
         ```
     """
 
-    def __init__(self, xarray_obj: xr.DataArray | xr.Dataset) -> None:
+    def __init__(self, xarray_obj: xr.DataArray | xr.Dataset | xr.DataTree) -> None:
         self._obj = xarray_obj
 
     def _wrap(
@@ -132,9 +133,13 @@ class _SklearnAccessor:
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
+        tree_paths: Sequence[str] | None = None,
     ) -> XarrayEstimator:
         """An *unfitted* wrapper to fit — a fresh clone if given a wrapper."""
-        overrides = _explicit(sample_dim, new_feature_dim, nan_policy, missing)
+        overrides = _explicit(
+            sample_dim, new_feature_dim, nan_policy, missing, tree_mode, tree_paths
+        )
         if isinstance(estimator, XarrayEstimator):
             # Fit a configured clone: never mutate the caller's wrapper, and
             # never nest an XarrayEstimator inside another.
@@ -149,9 +154,12 @@ class _SklearnAccessor:
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
     ) -> XarrayEstimator:
         """A wrapper around an already-fitted estimator."""
-        overrides = _explicit(sample_dim, new_feature_dim, nan_policy, missing)
+        overrides = _explicit(
+            sample_dim, new_feature_dim, nan_policy, missing, tree_mode
+        )
         # Pre-fitted XarrayEstimator: pass it through. Re-wrapping would
         # construct a fresh wrapper without its fit-time layout, so
         # `inverse_transform` would fall into the generic
@@ -175,6 +183,8 @@ class _SklearnAccessor:
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
+        tree_paths: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> XarrayEstimator:
         """Fit ``estimator`` on this xarray object via ``XarrayEstimator``."""
@@ -184,6 +194,8 @@ class _SklearnAccessor:
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
             missing=missing,
+            tree_mode=tree_mode,
+            tree_paths=tree_paths,
         ).fit(self._obj, y=y, **kwargs)
 
     def fit_transform(
@@ -195,6 +207,8 @@ class _SklearnAccessor:
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
+        tree_paths: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> xr.DataArray | Any:
         """Fit and transform this xarray object via ``XarrayEstimator``."""
@@ -204,6 +218,8 @@ class _SklearnAccessor:
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
             missing=missing,
+            tree_mode=tree_mode,
+            tree_paths=tree_paths,
         ).fit_transform(self._obj, y=y, **kwargs)
 
     def transform(
@@ -214,6 +230,7 @@ class _SklearnAccessor:
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
     ) -> xr.DataArray | Any:
         """Transform this xarray object with a fitted sklearn estimator."""
         return self._wrap_fitted(
@@ -222,6 +239,7 @@ class _SklearnAccessor:
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
             missing=missing,
+            tree_mode=tree_mode,
         ).transform(self._obj)
 
     def inverse_transform(
@@ -232,6 +250,7 @@ class _SklearnAccessor:
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
     ) -> xr.DataArray | Any:
         """Inverse-transform this xarray object with a fitted estimator."""
         return self._wrap_fitted(
@@ -240,6 +259,7 @@ class _SklearnAccessor:
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
             missing=missing,
+            tree_mode=tree_mode,
         ).inverse_transform(self._obj)
 
     def predict(
@@ -250,6 +270,7 @@ class _SklearnAccessor:
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
     ) -> xr.DataArray | Any:
         """Predict from this xarray object with a fitted estimator."""
         return self._wrap_fitted(
@@ -258,6 +279,7 @@ class _SklearnAccessor:
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
             missing=missing,
+            tree_mode=tree_mode,
         ).predict(self._obj)
 
     def predict_proba(
@@ -268,6 +290,7 @@ class _SklearnAccessor:
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
     ) -> xr.DataArray | Any:
         """Predict class probabilities with a fitted estimator."""
         return self._wrap_fitted(
@@ -276,6 +299,7 @@ class _SklearnAccessor:
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
             missing=missing,
+            tree_mode=tree_mode,
         ).predict_proba(self._obj)
 
     def score(
@@ -287,6 +311,7 @@ class _SklearnAccessor:
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
     ) -> float:
         """Score this xarray object with a fitted estimator."""
         return self._wrap_fitted(
@@ -295,6 +320,7 @@ class _SklearnAccessor:
             new_feature_dim=new_feature_dim,
             nan_policy=nan_policy,
             missing=missing,
+            tree_mode=tree_mode,
         ).score(self._obj, y=y)
 
 
@@ -306,3 +332,30 @@ class SklearnDataArrayAccessor(_SklearnAccessor):
 @xr.register_dataset_accessor("sklearn")
 class SklearnDatasetAccessor(_SklearnAccessor):
     """``Dataset.sklearn`` adapter for :class:`XarrayEstimator`."""
+
+
+@xr.register_datatree_accessor("sklearn")
+class SklearnDataTreeAccessor(_SklearnAccessor):
+    """``DataTree.sklearn`` adapter for :class:`XarrayEstimator`.
+
+    ``tree_mode`` picks what fitting on a tree means (``"per_node"``,
+    ``"pool_samples"`` or ``"concat_features"``; see
+    :class:`XarrayEstimator`).
+
+    Example:
+        ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> from sklearn.preprocessing import StandardScaler
+        >>> import xrsklearn  # registers the .sklearn accessors
+        >>> rng = np.random.default_rng(0)
+        >>> tree = xr.DataTree.from_dict({
+        ...     "coarse": xr.Dataset({"ssh": (("time", "x"), rng.normal(size=(6, 2)))}),
+        ...     "fine": xr.Dataset({"ssh": (("time", "x"), rng.normal(size=(6, 4)))}),
+        ... })
+        >>> scaled = tree.sklearn.fit_transform(StandardScaler(), sample_dim="time")
+        >>> scaled["fine"]["ssh"].dims, scaled["fine"]["ssh"].shape
+        (('time', 'x'), (6, 4))
+
+        ```
+    """

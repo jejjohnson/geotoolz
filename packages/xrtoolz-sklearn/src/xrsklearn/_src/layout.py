@@ -88,7 +88,34 @@ class DatasetLayout:
         return self.bounds[-1]
 
 
-Layout = ArrayLayout | DatasetLayout
+@dataclass(frozen=True)
+class TreeLayout:
+    """Fit-time feature grid of a set of DataTree nodes joined column-wise.
+
+    Used by ``tree_mode="concat_features"``: every node shares the sample
+    axis and contributes its data variables as extra feature columns, in
+    ``paths`` order; node ``paths[i]`` owns columns
+    ``bounds[i]:bounds[i + 1]``.
+
+    Attributes:
+        sample_dim: Dimension indexing samples, shared by every node.
+        paths: Node paths, in column order.
+        datasets: One :class:`DatasetLayout` per node.
+        bounds: Column offsets, ``len(paths) + 1`` long.
+    """
+
+    sample_dim: Hashable
+    paths: tuple[str, ...]
+    datasets: tuple[DatasetLayout, ...]
+    bounds: tuple[int, ...]
+
+    @property
+    def n_features(self) -> int:
+        """Total number of feature columns across all nodes."""
+        return self.bounds[-1]
+
+
+Layout = ArrayLayout | DatasetLayout | TreeLayout
 
 
 def _coords_on(obj: xr.DataArray, dims: set[Hashable]) -> xr.Coordinates:
@@ -327,7 +354,82 @@ def conform_dataset(
     return xr.Dataset(conformed, attrs=ds.attrs)
 
 
-def to_2d(obj: xr.DataArray | xr.Dataset, layout: Layout) -> np.ndarray:
+def tree_layout(nodes: dict[str, xr.Dataset], sample_dim: Hashable) -> TreeLayout:
+    """Record the feature grid of DataTree nodes joined column-wise.
+
+    Args:
+        nodes: ``{path: node Dataset}`` (see :func:`xrsklearn._src.tree.select_nodes`).
+        sample_dim: The shared sample dimension.
+
+    Returns:
+        The nodes' :class:`TreeLayout`.
+    """
+    paths = tuple(nodes)
+    datasets = tuple(dataset_layout(nodes[p], sample_dim) for p in paths)
+    bounds = [0]
+    for lay in datasets:
+        bounds.append(bounds[-1] + lay.n_features)
+    return TreeLayout(
+        sample_dim=sample_dim, paths=paths, datasets=datasets, bounds=tuple(bounds)
+    )
+
+
+def conform_tree(
+    nodes: dict[str, xr.Dataset], layout: TreeLayout
+) -> dict[str, xr.Dataset]:
+    """Check DataTree nodes against a fit-time :class:`TreeLayout`.
+
+    The nodes must be exactly ``layout.paths`` and share one sample axis;
+    a node whose sample labels are a permutation of the first node's is
+    reordered to match.
+
+    Args:
+        nodes: ``{path: node Dataset}``.
+        layout: The layout recorded at fit time.
+
+    Returns:
+        ``{path: conformed Dataset}`` in ``layout.paths`` order.
+
+    Raises:
+        ValueError: If the node paths differ, the sample axes cannot be
+            matched, or any node fails :func:`conform_dataset`.
+    """
+    if set(nodes) != set(layout.paths):
+        raise ValueError(
+            f"DataTree nodes {sorted(nodes)} do not match the fit-time nodes "
+            f"{sorted(layout.paths)}."
+        )
+    sample_dim = layout.sample_dim
+    first = nodes[layout.paths[0]]
+    reference = first.indexes.get(sample_dim)
+    out: dict[str, xr.Dataset] = {}
+    for path, lay in zip(layout.paths, layout.datasets, strict=True):
+        ds = nodes[path]
+        where = f"node {path!r}"
+        if sample_dim not in ds.dims or ds.sizes[sample_dim] != first.sizes[sample_dim]:
+            raise ValueError(
+                f"{where}: all nodes must share the sample axis {sample_dim!r} "
+                "for tree_mode='concat_features'."
+            )
+        if reference is not None and sample_dim in ds.indexes:
+            current = ds.indexes[sample_dim]
+            if not current.equals(reference):
+                if current.is_unique and current.sort_values().equals(
+                    reference.sort_values()
+                ):
+                    ds = ds.reindex({sample_dim: reference})
+                else:
+                    raise ValueError(
+                        f"{where}: sample coordinate {sample_dim!r} differs from "
+                        f"node {layout.paths[0]!r}; align the nodes first."
+                    )
+        out[path] = conform_dataset(ds, lay, where=where)
+    return out
+
+
+def to_2d(
+    obj: xr.DataArray | xr.Dataset | dict[str, xr.Dataset], layout: Layout
+) -> np.ndarray:
     """Flatten a conformed input to ``(n_samples, n_features)``.
 
     Args:
@@ -338,6 +440,15 @@ def to_2d(obj: xr.DataArray | xr.Dataset, layout: Layout) -> np.ndarray:
     Returns:
         A 2-D numpy array. Lazy (dask) inputs are computed here.
     """
+    if isinstance(layout, TreeLayout):
+        assert isinstance(obj, dict)
+        return np.concatenate(
+            [
+                to_2d(obj[p], lay)
+                for p, lay in zip(layout.paths, layout.datasets, strict=True)
+            ],
+            axis=1,
+        )
     if isinstance(layout, DatasetLayout):
         assert isinstance(obj, xr.Dataset)
         blocks = [
@@ -479,7 +590,39 @@ def dataset_from_2d(
     return xr.Dataset(variables, attrs=dict(layout.attrs))
 
 
-def matches(obj: xr.DataArray | xr.Dataset, layout: Layout) -> bool:
+def tree_from_2d(
+    arr: np.ndarray,
+    layout: TreeLayout,
+    samples: xr.Coordinates,
+    *,
+    dims: dict[str, dict[Hashable, tuple[Hashable, ...]]] | None = None,
+) -> xr.DataTree:
+    """Rebuild DataTree nodes on the fit-time grid (inverse of :func:`to_2d`).
+
+    Args:
+        arr: ``(n_samples, layout.n_features)`` array.
+        layout: The tree layout to restore.
+        samples: Sample-axis coordinates.
+        dims: Per-node, per-variable output dim order.
+
+    Returns:
+        A DataTree with one node per ``layout.paths`` entry.
+    """
+    dims = dims or {}
+    nodes = {
+        path: dataset_from_2d(arr[:, lo:hi], lay, samples, dims=dims.get(path))
+        for path, lay, lo, hi in zip(
+            layout.paths,
+            layout.datasets,
+            layout.bounds[:-1],
+            layout.bounds[1:],
+            strict=True,
+        )
+    }
+    return xr.DataTree.from_dict(nodes)
+
+
+def matches(obj: xr.DataArray | xr.Dataset | xr.DataTree, layout: Layout) -> bool:
     """Whether ``obj`` plausibly lives on ``layout``'s feature grid.
 
     A cheap structural check (same kind, same feature dims / variables) used
@@ -495,6 +638,10 @@ def matches(obj: xr.DataArray | xr.Dataset, layout: Layout) -> bool:
     Returns:
         ``True`` if ``obj`` has the layout's kind and feature structure.
     """
+    if isinstance(layout, TreeLayout):
+        return isinstance(obj, xr.DataTree) and {
+            node.path for node in obj.subtree if node.data_vars
+        } >= set(layout.paths)
     if isinstance(layout, DatasetLayout):
         return (
             isinstance(obj, xr.Dataset)

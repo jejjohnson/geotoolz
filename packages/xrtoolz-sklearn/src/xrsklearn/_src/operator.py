@@ -11,6 +11,7 @@ from sklearn.base import clone
 
 from xrcore import Operator
 from xrsklearn._src.nan import MissingKind, NanPolicy
+from xrsklearn._src.tree import TreeMode, to_tree
 from xrsklearn._src.wrap import (
     XarrayEstimator,
     _check_no_conflict,
@@ -79,6 +80,11 @@ class SklearnOp(Operator):
             Defaults to the wrapper's own setting, else ``"propagate"``.
         missing: What counts as missing (``"nan"`` or ``"nonfinite"``),
             forwarded to :class:`XarrayEstimator`.
+        tree_mode: How a DataTree input is fitted when
+            ``method="fit_transform"`` (``"per_node"``, ``"pool_samples"``,
+            ``"concat_features"``), forwarded to :class:`XarrayEstimator`.
+            On a DataTree the op writes each node's result back into that
+            node; nodes without ``variable`` pass through unchanged.
         method: Which sklearn-style method to call on each invocation.
 
     Example:
@@ -137,6 +143,7 @@ class SklearnOp(Operator):
         new_feature_dim: str | None = None,
         nan_policy: NanPolicy | None = None,
         missing: MissingKind | None = None,
+        tree_mode: TreeMode | None = None,
         method: SklearnMethod = "transform",
     ) -> None:
         self.estimator = estimator
@@ -146,6 +153,7 @@ class SklearnOp(Operator):
         self.new_feature_dim = new_feature_dim
         self.nan_policy = nan_policy
         self.missing = missing
+        self.tree_mode = tree_mode
         self.method = method
 
     def _apply(self, data: xr.DataArray | xr.Dataset) -> xr.DataArray | xr.Dataset:
@@ -169,9 +177,7 @@ class SklearnOp(Operator):
                     "pass `variable=...` to transform one variable."
                 )
             return data.assign(out.data_vars)
-        name = (
-            self.output_variable if self.output_variable is not None else self.variable
-        )
+        name = self._output_name()
         if name is None:
             raise ValueError(
                 "SklearnOp received a Dataset input and the whole-Dataset result "
@@ -181,6 +187,104 @@ class SklearnOp(Operator):
                 "result."
             )
         return data.assign({name: out})
+
+    def _apply_tree(self, tree: xr.DataTree) -> xr.DataTree:
+        """Run on a DataTree, writing each node's result back into it.
+
+        Nodes without ``variable`` pass through untouched. When the
+        estimator is fitted on a tree (or ``method="fit_transform"``, which
+        fits one per ``tree_mode``), the selected nodes are handed to the
+        :class:`XarrayEstimator` together; a single-carrier estimator is
+        applied node by node instead.
+        """
+        self._require_target(tree)
+        wrap = self._resolve_wrap()
+        if self.method != "fit_transform" and "tree_paths_" not in wrap.__dict__:
+            return self._map_nodes(tree)
+        selected = self._select_nodes(tree, wrap.__dict__.get("tree_paths_"))
+        result = getattr(wrap, self.method)(selected)
+        if not isinstance(result, xr.DataTree):
+            # concat_features with a reducing estimator: one result for the
+            # whole tree, stored on the root.
+            result = to_tree({"/": result}, self.method)
+        return self._merge(tree, result)
+
+    def _require_target(self, data: xr.Dataset | xr.DataTree) -> None:
+        if self.variable is None and self.output_variable is None:
+            kind = type(data).__name__
+            raise ValueError(
+                f"SklearnOp received a {kind} input but neither `variable` nor "
+                "`output_variable` is set. The whole-Dataset path produces a "
+                "DataArray, which would break a Sequential chain. Pass "
+                "`variable=...` to select a single variable, or "
+                "`output_variable=...` to name the result when stacking all "
+                "variables together."
+            )
+
+    def _select_nodes(
+        self, tree: xr.DataTree, paths: tuple[str, ...] | None
+    ) -> xr.DataTree:
+        """The nodes this op reads, as a tree of (inherited-coord) Datasets."""
+        nodes: dict[str, Any] = {}
+        for node in tree.subtree:
+            if paths is not None and node.path not in paths:
+                continue
+            if not node.data_vars:
+                continue
+            if self.variable is not None and self.variable not in node.data_vars:
+                continue
+            ds = node.to_dataset(inherit=True)
+            nodes[node.path] = ds if self.variable is None else ds[[self.variable]]
+        if not nodes:
+            raise ValueError(
+                f"No DataTree node has variable {self.variable!r}."
+                if self.variable is not None
+                else "DataTree has no node with data variables."
+            )
+        return xr.DataTree.from_dict(nodes)
+
+    def _output_name(self) -> Hashable:
+        return (
+            self.output_variable if self.output_variable is not None else self.variable
+        )
+
+    def _merge(self, tree: xr.DataTree, result: xr.DataTree) -> xr.DataTree:
+        """Assign each result node's output into the matching input node."""
+        out = tree.copy()
+        name = self._output_name()
+        for res_node in result.subtree:
+            if not res_node.data_vars:
+                continue
+            res = res_node.to_dataset(inherit=True)
+            if self.variable is not None and self.variable in res.data_vars:
+                value = res[self.variable]  # one-to-one output of `variable`
+            elif len(res.data_vars) == 1:
+                value = res[next(iter(res.data_vars))]
+            else:
+                value = res  # whole-node one-to-one output: update in place
+            node = out[res_node.path]
+            assert isinstance(node, xr.DataTree)
+            current = node.to_dataset(inherit=False)
+            if isinstance(value, xr.Dataset):
+                node.dataset = current.assign(value.data_vars)
+            else:
+                node.dataset = current.assign({name: value})
+        return out
+
+    def _map_nodes(self, tree: xr.DataTree) -> xr.DataTree:
+        """Apply a single-carrier estimator to every node holding the input."""
+        out = tree.copy()
+        for node in out.subtree:
+            if not node.data_vars:
+                continue
+            if self.variable is not None and self.variable not in node.data_vars:
+                continue
+            res = self._apply(node.to_dataset(inherit=True))
+            assert isinstance(res, xr.Dataset)
+            node.dataset = node.to_dataset(inherit=False).assign(
+                {k: res[k] for k in res.data_vars}
+            )
+        return out
 
     def _run(self, data: xr.DataArray | xr.Dataset) -> xr.DataArray | xr.Dataset:
         wrap = self._resolve_wrap()
@@ -197,7 +301,11 @@ class SklearnOp(Operator):
         clone, otherwise the estimator is treated as already fitted.
         """
         overrides = _explicit(
-            self.sample_dim, self.new_feature_dim, self.nan_policy, self.missing
+            self.sample_dim,
+            self.new_feature_dim,
+            self.nan_policy,
+            self.missing,
+            self.tree_mode,
         )
         if isinstance(self.estimator, XarrayEstimator):
             if self.method == "fit_transform":
@@ -221,6 +329,7 @@ class SklearnOp(Operator):
             "new_feature_dim": self.new_feature_dim,
             "nan_policy": self.nan_policy,
             "missing": self.missing,
+            "tree_mode": self.tree_mode,
             "method": self.method,
         }
 
