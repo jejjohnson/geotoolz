@@ -2,7 +2,7 @@
 
 Two intentionally tiny Protocols. `Field` is "something the Patcher can
 read from"; `Domain` is its I/O-free metadata twin — bounds, CRS, shape
-— consulted by `Sampler.anchors` and `PatchGeometry.neighborhood`
+— consulted by `SpatialSampler.anchors` and `SpatialGeometry.neighborhood`
 without triggering any reads.
 
 For rasters, the raster-side surface already exists in
@@ -23,7 +23,7 @@ class Domain(Protocol):
 
     Concrete subclasses (`RasterDomain`, `GridDomain`, `VectorDomain`,
     `PointDomain`) carry the backend-specific shape that a
-    `PatchGeometry.neighborhood(domain, anchor)` dispatch needs.
+    `SpatialGeometry.neighborhood(domain, anchor)` dispatch needs.
     """
 
     @property
@@ -39,7 +39,7 @@ class Field(Protocol):
 
     Three operations:
     - ``domain`` exposes the I/O-free metadata view used by the
-      `Sampler` and `PatchGeometry`.
+      `SpatialSampler` and `SpatialGeometry`.
     - ``select(indexer)`` reads a slice of the field. The shape of
       ``indexer`` is decided by ``domain`` (a ``rasterio.windows.Window``
       for `RasterDomain`, a ``dict[str, slice]`` for `GridDomain`, a list

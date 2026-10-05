@@ -6,22 +6,23 @@ and strictness / error types.
 
 ## Carriers
 
-::: geopatcher._src.patch.Patch
-::: geopatcher._src.patch.TemporalPatch
-::: geopatcher._src.patch.SpatioTemporalPatch
+::: geopatcher.Patch
+::: geopatcher.TemporalPatch
+::: geopatcher.SpatioTemporalPatch
 
 ## Protocols
 
-::: geopatcher._src.hooks.PatcherHook
-::: geopatcher._src.protocols.Field
-::: geopatcher._src.protocols.AsyncField
-::: geopatcher._src.protocols.Domain
+::: geopatcher.PatcherHook
+::: geopatcher.hooks.UNKNOWN_TOTAL
+::: geopatcher.Field
+::: geopatcher.AsyncField
+::: geopatcher.Domain
 
 ## Domains
 
-::: geopatcher._src.domains.GridDomain
-::: geopatcher._src.domains.VectorDomain
-::: geopatcher._src.domains.PointDomain
+::: geopatcher.GridDomain
+::: geopatcher.VectorDomain
+::: geopatcher.PointDomain
 
 `RasterDomain` is the existing `GeoDataBase` protocol re-exported from
 [`georeader`](https://github.com/IPL-UV/georeader) — import it as
@@ -30,8 +31,9 @@ protocol members.
 
 ## Field adapters
 
-::: geopatcher._src.fields.raster.RasterField
-::: geopatcher._src.fields.raster.AsyncRasterField
+::: geopatcher.RasterField
+::: geopatcher.AsyncRasterField
+::: geopatcher.ReprojectingRasterField
 
 The remaining adapters are extras-gated; import via the public
 submodule path:
@@ -41,9 +43,12 @@ from geopatcher.fields import XarrayField, GeoPandasField, XvecField
 from geopatcher.fields import RioXarrayField, DaskField, ObstoreCogField
 ```
 
-::: geopatcher._src.fields.rio_xarray.RioXarrayField
-::: geopatcher._src.fields.dask.DaskField
-::: geopatcher._src.fields.obstore_cog.ObstoreCogField
+::: geopatcher.fields.XarrayField
+::: geopatcher.fields.GeoPandasField
+::: geopatcher.fields.XvecField
+::: geopatcher.fields.RioXarrayField
+::: geopatcher.fields.DaskField
+::: geopatcher.fields.ObstoreCogField
 
 ## Object-store pool
 
@@ -73,14 +78,14 @@ URLs are requested signed.
 
 ## Top-level patchers
 
-::: geopatcher._src.spatial.patcher.SpatialPatcher
+::: geopatcher.SpatialPatcher
     options:
       inherited_members: true
-::: geopatcher._src.spatial.patcher.AsyncSpatialPatcher
+::: geopatcher.AsyncSpatialPatcher
     options:
       inherited_members: true
-::: geopatcher._src.time.patcher.TemporalPatcher
-::: geopatcher._src.spatial_time.SpatioTemporalPatcher
+::: geopatcher.TemporalPatcher
+::: geopatcher.SpatioTemporalPatcher
 
 ## Config round-trip
 
@@ -90,13 +95,13 @@ serialise as `{"class": ..., "config": ...}` envelopes, and
 `forbid_in_yaml` (closures, polygons, backend-native anchors), whose
 config is a debug summary that `from_config` refuses.
 
-::: geopatcher._src._serialize.axis_envelope
-::: geopatcher._src._serialize.from_config
-::: geopatcher._src._serialize.config_from_fields
+::: geopatcher.axis_envelope
+::: geopatcher.from_config
+::: geopatcher.config_from_fields
 
 ## Strictness and errors
 
-::: geopatcher._src.config.get_strict
-::: geopatcher._src.config.set_strict
-::: geopatcher._src.exceptions.IncompleteScanConfiguration
-::: geopatcher._src.walk.PatchErrorRecord
+::: geopatcher.get_strict
+::: geopatcher.set_strict
+::: geopatcher.IncompleteScanConfiguration
+::: geopatcher.PatchErrorRecord

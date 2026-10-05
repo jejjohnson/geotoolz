@@ -6,7 +6,7 @@ default is permissive — interactive / notebook callers see a warning
 and decide what to do; batch / CI callers can lock down by calling
 `set_strict(True)` (or exporting `GEOPATCHER_STRICT=1`).
 
-See `docs/decisions.md` (ADR-006) for rationale.
+See `docs/patcher/decisions.md` (ADR-006) for rationale.
 """
 
 from __future__ import annotations

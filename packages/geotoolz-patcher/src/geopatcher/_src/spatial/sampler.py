@@ -1,7 +1,7 @@
 """`SpatialSampler` — where in the field to place anchors.
 
 A `SpatialSampler` yields anchors; the `SpatialGeometry` then turns each anchor
-into backend-specific indices. Five samplers cover the common cases:
+into backend-specific indices. Seven samplers cover the common cases:
 
 - `SpatialRegularStride` — the canonical lattice (sliding-window inference).
 - `SpatialJitteredStride` — regular grid with per-anchor uniform jitter.
@@ -181,7 +181,7 @@ class SpatialJitteredStride(SpatialSampler):
         seed: Integer seed for reproducible draws. When set, two
             samplers with the same configuration return bit-identical
             anchors across calls and across instances (the contract
-            tested in ``tests/test_determinism.py`` for issue #18).
+            tested in ``tests/test_determinism.py`` for issue jejjohnson/geopatcher#18).
             ``None`` (the default) re-seeds from OS entropy on every
             call — anchors will differ between calls.
     """
@@ -249,7 +249,7 @@ class SpatialRandom(SpatialSampler):
         seed: Integer seed for reproducible draws. When set, two
             samplers with the same configuration return bit-identical
             anchors across calls and across instances (the contract
-            tested in ``tests/test_determinism.py`` for issue #18).
+            tested in ``tests/test_determinism.py`` for issue jejjohnson/geopatcher#18).
             ``None`` (the default) re-seeds from OS entropy on every
             call — anchors will differ between calls.
     """

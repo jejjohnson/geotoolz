@@ -97,7 +97,7 @@ class TemporalGeometry:
     ``needs_coord = True`` and implement
     ``window_coord(coord, anchor_idx) -> slice``. `TemporalPatcher` dispatches
     on the flag and requires a ``coord=`` argument when it is `True`. See
-    ADR-004 in ``docs/decisions.md``.
+    ADR-004 in ``docs/patcher/decisions.md``.
     """
 
     forbid_in_yaml: ClassVar[bool] = False
@@ -239,7 +239,7 @@ class TemporalStencilGeometry(TemporalGeometry):
     Pass ``source_step`` at construction to catch stride > 1 up front; the
     constructor also re-checks at `window_coord` time as a belt-and-braces
     guard for callers that didn't supply it. See ADR-004 in
-    ``docs/decisions.md``.
+    ``docs/patcher/decisions.md``.
 
     The coordinate is validated (1-D, strictly increasing, evenly spaced)
     once per coordinate array, not per anchor: windows are then resolved

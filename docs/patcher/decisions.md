@@ -14,7 +14,7 @@ entry that supersedes them.
 
 ## ADR-001 — `Patcher.split` returns `Iterator[Patch]`
 
-**Decision.** All three patcher families (`SpatialPatcher`,
+**Decision.** All four patchers (`SpatialPatcher`,
 `AsyncSpatialPatcher`, `TemporalPatcher`, `SpatioTemporalPatcher`)
 expose `split` as an **iterator**, not a list. Eager materialisation is
 one `list(patcher.split(field))` call away when needed.
@@ -30,8 +30,8 @@ memory.
 - Streaming is the default. `Patcher.merge` consumes the iterator
   directly; on-disk accumulators (see [ADR-002](#adr-002-disk-backed-aggregations-use-zarr))
   never need the full patch list in RAM.
-- `prefetch=N` (#9), `asplit()` (#8), and `max_in_flight` backpressure
-  (#16) compose for free — they all wrap the iterator without changing
+- `prefetch=N` (jejjohnson/geopatcher#9), `asplit()` (jejjohnson/geopatcher#8), and `max_in_flight` backpressure
+  (jejjohnson/geopatcher#16) compose for free — they all wrap the iterator without changing
   the patcher contract.
 - The pipekit `GridSampler` operator (`geopatcher.integrations.pipekit`)
   *does* materialise to a list at its operator boundary. That is a
@@ -75,7 +75,7 @@ Zarr was picked over memmap, HDF5, and "bring your own store":
   requirement of the streaming `SpatialOverlapAdd` implementation;
   users of streaming inference already have it installed.
 - Chunked, append-friendly, parallel-writable, plays well with Dask
-  and downstream COG conversion (#15) — `writer="cog"` streams through
+  and downstream COG conversion (jejjohnson/geopatcher#15) — `writer="cog"` streams through
   a temporary Zarr store and converts it block by block.
 - Chunk-wise access keeps the final normalisation O(chunk): the store
   is preallocated and never read back whole.
@@ -90,8 +90,8 @@ Zarr was picked over memmap, HDF5, and "bring your own store":
   `overwrite=True`.
 - A pre-opened-store path (passing a `zarr.Array` for Dask / distributed
   writers) is not implemented; re-open if a concrete need surfaces.
-- V3-sharded outputs (`shard_shape=`, #14) and the COG target
-  (`writer="cog"`, #15) layer on top of the Zarr default without
+- V3-sharded outputs (`shard_shape=`, jejjohnson/geopatcher#14) and the COG target
+  (`writer="cog"`, jejjohnson/geopatcher#15) layer on top of the Zarr default without
   changing aggregation APIs.
 - Memmap / HDF5 / parquet targets are out of scope for v0.x. Re-open if
   a concrete user need surfaces.
@@ -112,7 +112,7 @@ Zarr was picked over memmap, HDF5, and "bring your own store":
 
 > Renumbered from ADR-003 — that number had accidentally been assigned
 > twice. References to "ADR-003" for the `streaming_safe` /
-> `set_strict` decision (e.g. in `geopatcher._src.config`) resolve
+> `set_strict` decision (e.g. in the `get_strict` docstring) resolve
 > here; ADR-003 now refers only to the `MatchedField` decision below.
 
 **Decision.** When a caller passes a `streaming_safe = False`
@@ -365,7 +365,7 @@ callback's positional arity so pre-extension hooks written as
   `aggregation` correctness subtle and dependent on the stencil shape.
   Better to raise loudly and ship a real fix in v0.2.
 
-**See also.** GitHub issue #56 (the design doc and tracking issue for this
+**See also.** GitHub issue jejjohnson/geopatcher#56 (the design doc and tracking issue for this
 work); the upstream `neuralgcm/terrax` `xreader.stencils` module (Apache-2.0,
 © Google LLC) from which the stencil math was ported.
 
@@ -430,12 +430,12 @@ data payload, not another field wrapper) and unblocks
 - **`from geopatcher import IndexedPatchView` works.** Root re-export
   + `__all__` entry, alongside `SpatialPatcher`, `TimeStencil`, etc.
 - **No framework adapter packages.** Following the same stance as
-  ADR-004 and PRs #41 / #57, we ship primitives (the Sequence-shaped
+  ADR-004 and PRs jejjohnson/geopatcher#41 / jejjohnson/geopatcher#57, we ship primitives (the Sequence-shaped
   view) plus recipes (one-line torch / Grain wrappers), not adapter
   classes.
 - **Content-addressed cache is still future work.** This PR's
   index-keyed in-memory cache is the cheap xrpatcher port; the deeper
-  cross-session content-addressed cache is tracked at #24. The
+  cross-session content-addressed cache is tracked at jejjohnson/geopatcher#24. The
   `IndexedPatchView` is the natural home for it.
 - **`xrpatcher` can be archived.** After this PR ships in a tagged
   release, `XRDAPatcher` users can swap one import:
@@ -447,8 +447,8 @@ data payload, not another field wrapper) and unblocks
 
 - *Bundle a torch `Dataset` subclass in `geopatcher`.* Drags torch
   into core deps for every user. Same primitives-not-adapters stance
-  the user took on jax and torch in PRs #11 / #23 (and the temporal
-  stencils work in #57).
+  the user took on jax and torch in PRs jejjohnson/geopatcher#11 / jejjohnson/geopatcher#23 (and the temporal
+  stencils work in jejjohnson/geopatcher#57).
 - *Put the cache on `SpatialPatcher` itself.* Conflates the patcher's
   value-object identity with mutable per-loader state. A user with
   one patcher + two loaders (train, eval) would have to re-construct
@@ -462,10 +462,10 @@ data payload, not another field wrapper) and unblocks
   Opt-in matches the additive-only convention of the rest of the
   framework.
 
-**See also.** GitHub issue #60 (the design doc and tracking issue for
+**See also.** GitHub issue jejjohnson/geopatcher#60 (the design doc and tracking issue for
 this work); the upstream `xrpatcher` (the migration target);
 [`recipes/xarray-nd-patching.md`](recipes/xarray-nd-patching.md) for
-side-by-side migration; #24 for the deeper content-addressed cache;
+side-by-side migration; jejjohnson/geopatcher#24 for the deeper content-addressed cache;
 ADR-001 (iterator-first split) and ADR-004 (coordinate-aware temporal).
 
 ---

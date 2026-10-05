@@ -20,7 +20,7 @@ When either component sets it, every public method that takes ``series``
 also requires a ``coord=`` 1-D coordinate vector along ``time_axis``
 (defaulted from a `GridDomain` field's time coordinate). The integer path
 is unchanged when no component is coord-aware. See ADR-004 in
-``docs/decisions.md``.
+``docs/patcher/decisions.md``.
 """
 
 from __future__ import annotations
@@ -662,7 +662,7 @@ class TemporalPatcher:
         `TemporalMultiScale`), in which case `split` yields one patch
         per slice. Only ``series.shape`` (or a field's domain) is read,
         so lazy series don't get materialised here. See
-        ``docs/decisions.md`` (ADR-001).
+        ``docs/patcher/decisions.md`` (ADR-001).
         """
         return len(self.patch_anchors(series, time_axis=time_axis, coord=coord))
 

@@ -18,7 +18,7 @@ Three Patcher classes compose the four-axis framework:
 | Axis | Controls | Examples |
 |------|----------|----------|
 | **Geometry** | Shape + scale of the neighborhood (and the domain topology). | `SpatialRectangular`, `SpatialSphericalCap`, `SpatialKNNGraph`, `SpatialRadiusGraph`, `SpatialPolygonIntersection` |
-| **Sampler** | Where anchors are placed; overlap is emergent. | `SpatialRegularStride`, `SpatialJitteredStride`, `SpatialRandom`, `SpatialPoissonDisk`, `SpatialExplicit`, `SpatialAlongTrack` |
+| **Sampler** | Where anchors are placed; overlap is emergent. | `SpatialRegularStride`, `SpatialJitteredStride`, `SpatialRandom`, `SpatialPoissonDisk`, `SpatialExplicit`, `SpatialExplicitCoords`, `SpatialAlongTrack` |
 | **Window** | Boundary treatment (spectral leakage, edge artefacts). | `SpatialBoxcar`, `SpatialHann`, `SpatialTukey`, `SpatialGaussian`, `SpatialCustom` |
 | **Aggregation** | Local predictions → global field. | `SpatialOverlapAdd`, `SpatialMean`, `SpatialWeightedSum`, `SpatialInvVarWeightedMean`, `SpatialHardVote`, `SpatialByIndex`, … |
 
@@ -73,7 +73,7 @@ patch centre.
 ## Determinism (stochastic samplers)
 
 `SpatialRandom`, `SpatialJitteredStride`, `SpatialPoissonDisk`, and
-`TemporalRandom` accept a `seed: int | None`. The contract (issue #18,
+`TemporalRandom` accept a `seed: int | None`. The contract (issue jejjohnson/geopatcher#18,
 pinned by `tests/test_determinism.py`):
 
 | `seed` value | Behavior |
@@ -81,7 +81,7 @@ pinned by `tests/test_determinism.py`):
 | `int` | Two samplers with the same config return bit-identical anchors across calls *and* across instances. Use this whenever you need reproducible runs (ML evaluation, CI, journal-resume). |
 | `None` (default) | The sampler re-seeds from OS entropy on every call; anchors will differ. Pick this for casual exploration when reproducibility doesn't matter. |
 
-The Hypothesis round-trip suite (`tests/test_roundtrip.py`, issue #21)
+The Hypothesis round-trip suite (`tests/test_roundtrip.py`, issue jejjohnson/geopatcher#21)
 leans on the `int` contract — given a seed, it shrinks failing
 examples to the minimal `(shape, stride, seed)` triple and replays
 them deterministically.
@@ -90,7 +90,7 @@ them deterministically.
 
 What happens when an anchor sits close enough to the edge that the
 neighborhood would overflow the domain? `SpatialRectangular` exposes
-this as a first-class parameter (issue #19):
+this as a first-class parameter (issue jejjohnson/geopatcher#19):
 
 ```python
 geom = SpatialRectangular(size=(256, 256), boundary="pad")
@@ -132,7 +132,7 @@ spacing. Graph and polygon geometries always behave as if `"drop"`
 
 ## Mixed-CRS patching
 
-Anchors and fields don't have to share a CRS (issue #20). Two
+Anchors and fields don't have to share a CRS (issue jejjohnson/geopatcher#20). Two
 independent levels:
 
 **Level 1 — anchor reprojection (cheap, metadata-only).** The
@@ -182,7 +182,7 @@ pipeline to run on a different grid than the source raster's.
 ## Caching reads across runs
 
 Iterating on an operator means reading the same patches many times.
-`PatchCache` (issue #24) is a cross-run, content-addressed on-disk cache
+`PatchCache` (issue jejjohnson/geopatcher#24) is a cross-run, content-addressed on-disk cache
 keyed by `sha256(field_id ‖ geometry+window config ‖ anchor)`: the second
 *process* skips the source read entirely and only consults the field for
 its `domain` metadata.
@@ -286,7 +286,7 @@ Mirror of the spatial side, with axes that encode time-specific properties
 
 | Axis | Controls | Examples |
 |------|----------|----------|
-| **Geometry** | Window shape (lookback, horizon, multi-scale, phase). | `TemporalFixedLookback`, `TemporalLookbackHorizon`, `TemporalMultiScale`, `TemporalPhaseWindow` |
+| **Geometry** | Window shape (lookback, horizon, multi-scale, phase). | `TemporalFixedLookback`, `TemporalLookbackHorizon`, `TemporalMultiScale`, `TemporalPhaseWindow`, `TemporalStencilGeometry` |
 | **Sampler** | Anchor placement in time. | `TemporalRegularStride` (alias `TemporalCausalRolling`), `TemporalRandom`, `TemporalExplicit` (alias `TemporalEventTriggered`), `TemporalStencilSampler` |
 | **Window** | Temporal boundary treatment. | `TemporalCausalBoxcar`, `TemporalExponentialDecay`, `TemporalTaperedTukey`, `TemporalPeriodic` |
 | **Aggregation** | Time → time reconstruction. | `TemporalFold` (RNN-like state-passing), `TemporalMean`, `TemporalHierarchicalCombine`, `TemporalForecast` |

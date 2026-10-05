@@ -11,6 +11,9 @@ import numpy as np
 from geopatcher._src.patch import Patch
 
 
+__all__ = ["BatchedPatch", "batch_split", "unbatch"]
+
+
 try:
     import jax
     import jax.numpy as jnp

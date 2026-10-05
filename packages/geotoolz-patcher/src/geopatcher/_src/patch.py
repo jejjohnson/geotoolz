@@ -8,7 +8,7 @@ edges or mark interior pixels (e.g. for `PolygonIntersection`).
 The fields are intentionally type-erased (`Any`) at the carrier level -
 the type-narrowing happens per (Geometry x Domain) pairing, captured by
 the `Patch[AnchorT, IndicesT, DataT]` generic parameters in user code.
-See ``docs/patching.md`` (Geometry x Domain dispatch) for the table.
+See ``docs/patcher/patching.md`` (Geometry x Domain dispatch) for the table.
 """
 
 from __future__ import annotations

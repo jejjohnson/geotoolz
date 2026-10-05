@@ -138,7 +138,7 @@ src/geocatalog/_src/
   staging/                     # NEW
     __init__.py                # public API: stage(), LocalCache
     cache.py                   # fsspec-backed cache, key = (uri, asset)
-    download.py                # parallel fetch, retry/backoff (shared with PR #51)
+    download.py                # parallel fetch, retry/backoff (shared with jejjohnson/geocatalog#51)
     gee.py                     # GEE materialization (ee.Image.getDownloadURL)
 ```
 
@@ -223,7 +223,7 @@ the new bundle layout.
 | `_provenance` | `JSON` | `{query_id, fetched_at, source_version}` |
 | `_schema_version` | `int` | existing column, reused |
 
-Migration from today's catalog: existing `path: str` becomes `assets: {"default": path}` and `source: "local"`. The existing schema-migrations framework (PR #39) gets its first non-empty registration: `v0 → v1` performs this remapping.
+Migration from today's catalog: existing `path: str` becomes `assets: {"default": path}` and `source: "local"`. The existing schema-migrations framework (jejjohnson/geocatalog#39) gets its first non-empty registration: `v0 → v1` performs this remapping.
 
 ### 4.4 Persistence: a bundle of three Parquet files
 
