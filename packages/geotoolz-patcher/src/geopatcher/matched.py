@@ -4,8 +4,8 @@ Re-exports the matched-field surface so users can write
 ``from geopatcher.matched import MatchedField`` without reaching
 into the private ``_src`` layer.
 
-See ``docs/design/query-matchup.md`` §6 and
-``docs/decisions.md`` (ADR-003) for the design.
+See ``docs/patcher/design/query-matchup.md`` §6 and
+``docs/patcher/decisions.md`` (ADR-003) for the design.
 """
 
 from __future__ import annotations

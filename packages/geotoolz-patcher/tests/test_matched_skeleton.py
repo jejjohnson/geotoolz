@@ -9,8 +9,9 @@ Locks in:
 * the constructor invariants (key parity between `secondaries` and
   `coreg`) hold.
 
-The actual `select` body is not implemented yet (Phase 4 PR); tests
-that exercise it just assert `NotImplementedError`.
+`select` itself is covered end to end in ``tests/test_matched_e2e.py``
+and ``tests/test_matched_integration.py``; this module only smoke-checks
+its primary-only path.
 """
 
 from __future__ import annotations
