@@ -23,6 +23,8 @@ Composable wrappers, which consume any of the above (or a plain
 
 - :class:`FacetPanel` — one cell per value along a categorical dim.
 - :class:`PairwiseComparePanel` — ``(ref, study, diff)`` triptych.
+- :class:`SpatialDiffPanel` — two-input ``(pred, ref, pred − ref)``
+  snapshot triptych with shared field and zero-centred diff scales.
 - :class:`AnimatePanel` + :func:`save_animation` — frames over a
   time-like dim. Not a panel: it yields a ``FuncAnimation``.
 """
@@ -31,6 +33,7 @@ from xrtoolz.viz.validation._src.animate import AnimatePanel, save_animation
 from xrtoolz.viz.validation._src.budgets import ProcessBudgetPanel
 from xrtoolz.viz.validation._src.cartesian import CartesianMapPanel
 from xrtoolz.viz.validation._src.compare import PairwiseComparePanel
+from xrtoolz.viz.validation._src.diff import SpatialDiffPanel
 from xrtoolz.viz.validation._src.events import EventVerificationPanel
 from xrtoolz.viz.validation._src.facet import FacetPanel, seasonal_groupby
 from xrtoolz.viz.validation._src.lagrangian import EulerianLagrangianPanel
@@ -69,6 +72,7 @@ __all__ = [
     "RegionScoreBarPanel",
     "RotaryPolarizationPanel",
     "ScaleSkillPanel",
+    "SpatialDiffPanel",
     "SpatialMapPanel",
     "SpectralSkillPanel",
     "method_palette",

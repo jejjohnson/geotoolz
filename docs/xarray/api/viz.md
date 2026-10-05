@@ -123,6 +123,8 @@ and the six-panel `scale × (ref, study, diff)` mosaic is
 
 ::: xrtoolz.viz.validation.PairwiseComparePanel
 
+::: xrtoolz.viz.validation.SpatialDiffPanel
+
 ::: xrtoolz.viz.validation.AnimatePanel
 
 ::: xrtoolz.viz.validation.save_animation
