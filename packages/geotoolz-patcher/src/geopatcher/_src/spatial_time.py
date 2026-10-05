@@ -9,16 +9,20 @@ Two coupling modes:
   shape for event-triggered patches (methane plume detections, Argo
   profile (lat, lon, t) records, storm tracks).
 
-The Field is expected to expose a temporal axis as either an integer
-``time_len`` attribute or a ``time`` coordinate. The patcher reads the
-spatial slice, then the temporal slice, then yields a `SpatioTemporalPatch`.
+Both run on the anchor-walk core (`geopatcher._src.walk`): each spatial
+chip is read exactly as `SpatialPatcher.split` reads it — the spatial
+patcher's geometry / boundary / padding / weights, its ``on_error`` policy
+(failures land in ``spatial.errors``) and an optional `PatchCache` — and
+is then sliced along ``time_axis`` into the temporal patcher's windows,
+keeping the chip's carrier (`GeoTensor`, `DataArray`, …).
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable, Iterator
 from dataclasses import dataclass
-from time import perf_counter
+from functools import partial
+from threading import Event
 from typing import Any, Literal
 
 import numpy as np
@@ -35,8 +39,15 @@ from geopatcher._src.hooks import (
 from geopatcher._src.patch import SpatioTemporalPatch, TemporalPatch
 from geopatcher._src.prefetch import prefetch_iterable
 from geopatcher._src.spatial import SpatialPatcher
-from geopatcher._src.spatial.patcher import _select_async
+from geopatcher._src.spatial.patcher import _AsyncBackpressure, _Backpressure
 from geopatcher._src.time.patcher import TemporalPatcher
+from geopatcher._src.walk import (
+    ReadPolicy,
+    _Read,
+    _validate_backpressure,
+    awalk,
+    walk,
+)
 
 
 @dataclass(eq=False)
@@ -44,7 +55,9 @@ class SpatioTemporalPatcher:
     """Composition of a spatial and a temporal Patcher.
 
     Args:
-        spatial: A `SpatialPatcher`.
+        spatial: A `SpatialPatcher`. Its geometry, window and read policy
+            (``on_error`` / ``max_retries`` / ``retry_on``) read every
+            spatial chip; failures are recorded in ``spatial.errors``.
         temporal: A `TemporalPatcher`.
         coupling: ``"product"`` (Cartesian product of anchors) or
             ``"coupled"`` (explicit ``(space, time)`` tuples from the
@@ -65,6 +78,10 @@ class SpatioTemporalPatcher:
         *,
         coord: np.ndarray | None = None,
         prefetch: int = 0,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
     ) -> Iterator[SpatioTemporalPatch]:
         """Yield `SpatioTemporalPatch`es lazily.
 
@@ -72,304 +89,155 @@ class SpatioTemporalPatcher:
         an iterable of ``(space_anchor, time_anchor)`` tuples and is
         only valid with `SpatialExplicit` spatial / time samplers.
 
+        Each spatial chip is read once — through the spatial patcher's
+        read pipeline and ``on_error`` policy — then sliced into its time
+        windows. A patch is keyed (``journal``) by ``(space_anchor,
+        time_key)``, ``time_key`` being the temporal `patch_anchors` key
+        (the time anchor, or ``(anchor, k)`` for a multi-window geometry);
+        hooks receive ``(space_anchor, time_anchor)`` and the time
+        anchor's ``coord_value``. A failed chip read reaches the
+        ``on_error`` hooks with the spatial anchor (product) or the pair
+        (coupled). Product mode reports ``UNKNOWN_TOTAL`` to
+        ``on_split_start`` (the window count needs the chips' time
+        length); coupled mode the number of pairs.
+
         Args:
             field: The field to split.
             hooks: Optional observability hooks for split callbacks.
             coord: 1-D coordinate vector along ``time_axis`` of the
                 spatial patch's data. Required when the temporal
                 geometry or sampler is coordinate-aware
-                (``needs_coord = True``); ignored otherwise.
+                (``needs_coord = True``); otherwise only reported to
+                hooks as ``coord_value``.
             prefetch: If positive, eagerly buffer up to ``prefetch``
                 patches in a background thread for I/O overlap.
+            journal: Optional `PatchJournal`; patch keys it has are
+                skipped (a chip whose every window is journaled is not
+                read once the time length is known).
+            cache: Optional `PatchCache` for the spatial chips, keyed as
+                `SpatialPatcher.split` keys them.
+            max_in_flight: Maximum number of unreleased patches.
+            max_in_flight_bytes: Maximum total bytes of unreleased patches.
         """
-        return prefetch_iterable(self._split(field, coord=coord, hooks=hooks), prefetch)
+        _validate_backpressure(max_in_flight, max_in_flight_bytes)
+        policy = self.spatial._start_split()
+        stop = Event()
+        return prefetch_iterable(
+            self._walk(
+                field,
+                coord=coord,
+                policy=policy,
+                hooks=hooks,
+                journal=journal,
+                cache=cache,
+                backpressure=_Backpressure(max_in_flight, max_in_flight_bytes, stop),
+            ),
+            prefetch,
+            stop=stop,
+        )
 
-    def _split(
+    def _walk(
         self,
         field: Any,
         *,
-        coord: np.ndarray | None = None,
-        hooks: Iterable[PatcherHook] | None = None,
-    ) -> Iterator[SpatioTemporalPatch]:
-        coupling = self._checked_coupling()
-        self.temporal._require_coord(coord)
-        hook_list = _as_hooks(hooks)
-        if not hook_list:
-            if coupling == "product":
-                yield from self._split_product(field, coord=coord)
-            else:
-                yield from self._split_coupled(field, coord=coord)
-            return
-        _dispatch(hook_list, "on_split_start", self._split_total_hint(field))
-        try:
-            if coupling == "product":
-                yield from self._split_product(field, hook_list, coord=coord)
-            else:
-                yield from self._split_coupled(field, hook_list, coord=coord)
-        finally:
-            _dispatch(hook_list, "on_split_end")
+        coord: np.ndarray | None,
+        policy: ReadPolicy,
+        hooks: Iterable[PatcherHook] | None,
+        journal: Any | None,
+        cache: Any | None,
+        backpressure: _Backpressure,
+    ) -> Iterator[Any]:
+        plan = self._plan(field, coord, cache, aio=False)
+        yield from walk(
+            plan.anchors,
+            plan.units,
+            policy=policy,
+            backpressure=backpressure,
+            hooks=hooks,
+            journal=journal,
+            total=plan.total,
+        )
 
     async def asplit(
         self,
         field: Any,
+        hooks: Iterable[PatcherHook] | None = None,
         *,
         coord: np.ndarray | None = None,
-        hooks: Iterable[PatcherHook] | None = None,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
     ) -> AsyncIterator[SpatioTemporalPatch]:
-        """Async iterator mirror of `split` for async spatial fields."""
-        coupling = self._checked_coupling()
-        self.temporal._require_coord(coord)
-        hook_list = _as_hooks(hooks)
-        if not hook_list:
-            if coupling == "product":
-                async for patch in self._asplit_product(field, coord=coord):
-                    yield patch
-            else:
-                async for patch in self._asplit_coupled(field, coord=coord):
-                    yield patch
-            return
-        _dispatch(hook_list, "on_split_start", self._split_total_hint(field))
-        try:
-            if coupling == "product":
-                async for patch in self._asplit_product(field, hook_list, coord=coord):
-                    yield patch
-            else:
-                async for patch in self._asplit_coupled(field, hook_list, coord=coord):
-                    yield patch
-        finally:
-            _dispatch(hook_list, "on_split_end")
+        """Async mirror of `split` for async spatial fields.
+
+        The same walk as `split` (policy, hooks, journal, cache,
+        backpressure); each chip is awaited (``aselect`` / ``select``).
+        ``prefetch`` has no async counterpart.
+        """
+        _validate_backpressure(max_in_flight, max_in_flight_bytes)
+        policy = self.spatial._start_split()
+        plan = self._plan(field, coord, cache, aio=True)
+        async for patch in awalk(
+            plan.anchors,
+            plan.units,
+            policy=policy,
+            backpressure=_AsyncBackpressure(max_in_flight, max_in_flight_bytes),
+            hooks=hooks,
+            journal=journal,
+            total=plan.total,
+        ):
+            yield patch
 
     def _checked_coupling(self) -> Literal["product", "coupled"]:
         if self.coupling not in {"product", "coupled"}:
             raise ValueError(f"unknown coupling: {self.coupling!r}")
         return self.coupling
 
-    def _split_product(
-        self,
-        field: Any,
-        hooks: Iterable[PatcherHook] = (),
-        *,
-        coord: np.ndarray | None = None,
-    ) -> Iterator[SpatioTemporalPatch]:
-        for sp in self.spatial.split(field):
-            arr = np.asarray(sp.data)
-            time_len = int(arr.shape[self.time_axis])
-            self.temporal._require_coord(coord, time_len)
-            for t_anchor in self.temporal._sampler_anchors(time_len, coord):
-                slices = self.temporal._window_slices(time_len, int(t_anchor), coord)
-                coord_value = coord[int(t_anchor)] if coord is not None else None
-                for s in slices:
-                    anchor = (sp.anchor, int(t_anchor))
-                    _dispatch(hooks, "on_patch_start", anchor, coord_value)
-                    start = perf_counter()
-                    try:
-                        idx = [slice(None)] * arr.ndim
-                        idx[self.time_axis] = s
-                        sub = arr[tuple(idx)]
-                        patch = SpatioTemporalPatch(
-                            data=sub,
-                            space=sp.anchor,
-                            time=int(t_anchor),
-                            spatial_indices=sp.indices,
-                            temporal_indices=s,
-                            weights=sp.weights,
-                        )
-                    except Exception as exc:
-                        _dispatch(hooks, "on_error", anchor, exc)
-                        raise
-                    _dispatch(
-                        hooks,
-                        "on_patch_done",
-                        anchor,
-                        perf_counter() - start,
-                        _nbytes(patch.data),
-                        coord_value,
-                    )
-                    yield patch
+    def _plan(
+        self, field: Any, coord: Any | None, cache: Any | None, *, aio: bool
+    ) -> _STPlan:
+        coupling = self._checked_coupling()
+        coord = self.temporal._require_coord(coord)
+        domain = field.domain
+        if coupling == "product":
+            anchors: Iterable[Any] = self.spatial.sampler.anchors(
+                domain, self.spatial.geometry
+            )
+        else:
+            anchors = _coupled_pairs(self.spatial)
+        return _STPlan(
+            stp=self,
+            reader=self.spatial._chip_reader(field, domain, cache, aio=aio),
+            coord=coord,
+            coupled=coupling == "coupled",
+            anchors=anchors,
+        )
 
-    def _split_coupled(
-        self,
-        field: Any,
-        hooks: Iterable[PatcherHook] = (),
-        *,
-        coord: np.ndarray | None = None,
-    ) -> Iterator[SpatioTemporalPatch]:
-        anchors = getattr(self.spatial.sampler, "anchors_", None)
-        if anchors is None:
-            raise TypeError(
-                "coupled coupling requires the spatial sampler to expose an "
-                "`anchors_` list of (space_anchor, time_anchor) tuples — i.e. "
-                "use SpatialExplicit(anchors_=[...])."
-            )
-        # We can't know the time_len without reading a patch; assume the
-        # operator-defined temporal geometry can clip indices itself, and
-        # treat negative-time anchors as the caller's responsibility.
-        for pair in anchors:
-            space_anchor, time_anchor = pair
-            anchor = (space_anchor, int(time_anchor))
-            # Bounded lookup: coord length isn't validated until the patch
-            # is read (time_len is unknown before the read in coupled
-            # mode), so an out-of-range anchor must not raise IndexError
-            # here — _require_coord below reports the documented
-            # ValueError through the on_error dispatch instead.
-            coord_value = (
-                coord[int(time_anchor)]
-                if coord is not None and 0 <= int(time_anchor) < len(coord)
-                else None
-            )
-            _dispatch(hooks, "on_patch_start", anchor, coord_value)
-            start = perf_counter()
-            try:
-                indices = self.spatial.geometry.neighborhood(field.domain, space_anchor)
-                data = field.select(indices)
-                arr = np.asarray(data)
-                time_len = int(arr.shape[self.time_axis])
-                self.temporal._require_coord(coord, time_len)
-                slices = self.temporal._window_slices(time_len, int(time_anchor), coord)
-                try:
-                    base_weights = self.spatial.window.weights(self.spatial.geometry)
-                except TypeError:
-                    base_weights = None
-            except Exception as exc:
-                _dispatch(hooks, "on_error", anchor, exc)
-                raise
-            for s in slices:
-                try:
-                    idx = [slice(None)] * arr.ndim
-                    idx[self.time_axis] = s
-                    sub = arr[tuple(idx)]
-                    patch = SpatioTemporalPatch(
-                        data=sub,
-                        space=space_anchor,
-                        time=int(time_anchor),
-                        spatial_indices=indices,
-                        temporal_indices=s,
-                        weights=base_weights,
-                    )
-                except Exception as exc:
-                    _dispatch(hooks, "on_error", anchor, exc)
-                    raise
-                _dispatch(
-                    hooks,
-                    "on_patch_done",
-                    anchor,
-                    perf_counter() - start,
-                    _nbytes(patch.data),
-                    coord_value,
-                )
-                yield patch
+    def _time_len(self, data: Any) -> int:
+        """Length of a chip's ``data`` along ``time_axis``."""
+        return int(np.shape(data)[self.time_axis])
 
-    async def _asplit_product(
-        self,
-        field: Any,
-        hooks: Iterable[PatcherHook] = (),
-        *,
-        coord: np.ndarray | None = None,
-    ) -> AsyncIterator[SpatioTemporalPatch]:
-        async for sp in self.spatial.asplit(field):
-            arr = np.asarray(sp.data)
-            time_len = int(arr.shape[self.time_axis])
-            self.temporal._require_coord(coord, time_len)
-            for t_anchor in self.temporal._sampler_anchors(time_len, coord):
-                slices = self.temporal._window_slices(time_len, int(t_anchor), coord)
-                coord_value = coord[int(t_anchor)] if coord is not None else None
-                for s in slices:
-                    anchor = (sp.anchor, int(t_anchor))
-                    _dispatch(hooks, "on_patch_start", anchor, coord_value)
-                    start = perf_counter()
-                    try:
-                        idx = [slice(None)] * arr.ndim
-                        idx[self.time_axis] = s
-                        sub = arr[tuple(idx)]
-                        patch = SpatioTemporalPatch(
-                            data=sub,
-                            space=sp.anchor,
-                            time=int(t_anchor),
-                            spatial_indices=sp.indices,
-                            temporal_indices=s,
-                            weights=sp.weights,
-                        )
-                    except Exception as exc:
-                        _dispatch(hooks, "on_error", anchor, exc)
-                        raise
-                    _dispatch(
-                        hooks,
-                        "on_patch_done",
-                        anchor,
-                        perf_counter() - start,
-                        _nbytes(patch.data),
-                        coord_value,
-                    )
-                    yield patch
+    def _slice_time(self, data: Any, s: slice) -> Any:
+        """``data`` sliced to ``s`` along ``time_axis``, keeping its carrier.
 
-    async def _asplit_coupled(
-        self,
-        field: Any,
-        hooks: Iterable[PatcherHook] = (),
-        *,
-        coord: np.ndarray | None = None,
-    ) -> AsyncIterator[SpatioTemporalPatch]:
-        anchors = getattr(self.spatial.sampler, "anchors_", None)
-        if anchors is None:
-            raise TypeError(
-                "coupled coupling requires the spatial sampler to expose an "
-                "`anchors_` list of (space_anchor, time_anchor) tuples — i.e. "
-                "use SpatialExplicit(anchors_=[...])."
-            )
-        for pair in anchors:
-            space_anchor, time_anchor = pair
-            anchor = (space_anchor, int(time_anchor))
-            # Bounded lookup: coord length isn't validated until the patch
-            # is read (time_len is unknown before the read in coupled
-            # mode), so an out-of-range anchor must not raise IndexError
-            # here — _require_coord below reports the documented
-            # ValueError through the on_error dispatch instead.
-            coord_value = (
-                coord[int(time_anchor)]
-                if coord is not None and 0 <= int(time_anchor) < len(coord)
-                else None
-            )
-            _dispatch(hooks, "on_patch_start", anchor, coord_value)
-            start = perf_counter()
-            try:
-                indices = self.spatial.geometry.neighborhood(field.domain, space_anchor)
-                data = await _select_async(field, indices)
-                arr = np.asarray(data)
-                time_len = int(arr.shape[self.time_axis])
-                self.temporal._require_coord(coord, time_len)
-                slices = self.temporal._window_slices(time_len, int(time_anchor), coord)
-                try:
-                    base_weights = self.spatial.window.weights(self.spatial.geometry)
-                except TypeError:
-                    base_weights = None
-            except Exception as exc:
-                _dispatch(hooks, "on_error", anchor, exc)
-                raise
-            for s in slices:
-                try:
-                    idx = [slice(None)] * arr.ndim
-                    idx[self.time_axis] = s
-                    sub = arr[tuple(idx)]
-                    patch = SpatioTemporalPatch(
-                        data=sub,
-                        space=space_anchor,
-                        time=int(time_anchor),
-                        spatial_indices=indices,
-                        temporal_indices=s,
-                        weights=base_weights,
-                    )
-                except Exception as exc:
-                    _dispatch(hooks, "on_error", anchor, exc)
-                    raise
-                _dispatch(
-                    hooks,
-                    "on_patch_done",
-                    anchor,
-                    perf_counter() - start,
-                    _nbytes(patch.data),
-                    coord_value,
-                )
-                yield patch
+        Positional indexing keeps a `GeoTensor` (``__getitem__`` →
+        ``isel``), an `xarray.DataArray`, a dask or a numpy array as it is.
+        """
+        idx: list[Any] = [slice(None)] * len(np.shape(data))
+        idx[self.time_axis] = s
+        return data[tuple(idx)]
+
+    def _patch(self, chip: Any, time: int, s: slice) -> Any:
+        """The `SpatioTemporalPatch` of window ``s`` of ``chip``."""
+        return SpatioTemporalPatch(
+            data=self._slice_time(chip.data, s),
+            space=chip.anchor,
+            time=time,
+            spatial_indices=chip.indices,
+            temporal_indices=s,
+            weights=chip.weights,
+        )
 
     def merge(
         self,
@@ -439,29 +307,129 @@ class SpatioTemporalPatcher:
         return output
 
     def _split_total_hint(self, field: Any) -> int:
+        """``on_split_start``'s total: the coupled pairs, else unknown."""
         if self.coupling == "coupled":
             anchors = getattr(self.spatial.sampler, "anchors_", None)
             return UNKNOWN_TOTAL if anchors is None else _len_or_unknown(anchors)
-        if self.coupling != "product":
-            return UNKNOWN_TOTAL
-        try:
-            return self.spatial.n_anchors(field)
-        except (
-            AttributeError,
-            NotImplementedError,
-            RuntimeError,
-            TypeError,
-            ValueError,
-        ):
-            # Progress totals are best-effort only; if asking the spatial
-            # sampler for a count touches a backend that fails, keep splitting.
-            # These cases cover missing shape metadata, unsupported sampler
-            # counts, and invalid geometry/backend state.
-            return UNKNOWN_TOTAL
+        return UNKNOWN_TOTAL
 
     def get_config(self) -> dict[str, Any]:
         """Inner patchers as ``{"class", "config"}`` envelopes (`patcher_config`)."""
         return patcher_config(self)
+
+
+def _coupled_pairs(spatial: SpatialPatcher) -> list[Any]:
+    """The ``(space_anchor, time_anchor)`` pairs of a coupled split."""
+    anchors = getattr(spatial.sampler, "anchors_", None)
+    if anchors is None:
+        raise TypeError(
+            "coupled coupling requires the spatial sampler to expose an "
+            "`anchors_` list of (space_anchor, time_anchor) tuples — i.e. "
+            "use SpatialExplicit(anchors_=[...])."
+        )
+    return list(anchors)
+
+
+class _STPlan:
+    """One spatio-temporal split as walk units.
+
+    Each anchor (a spatial anchor, or a coupled ``(space, time)`` pair)
+    is one *parent* unit: the spatial chip read by the spatial patcher's
+    `_ChipReader`, which then expands into one leaf per time window.
+    The chips' time length is learned from the first one read, after
+    which a chip whose every window is journaled is skipped unread.
+    """
+
+    def __init__(
+        self,
+        *,
+        stp: SpatioTemporalPatcher,
+        reader: Any,
+        coord: np.ndarray | None,
+        coupled: bool,
+        anchors: Iterable[Any],
+    ) -> None:
+        self.stp = stp
+        self.reader = reader
+        self.coord = coord
+        self.coupled = coupled
+        self.anchors = anchors
+        self.time_len: int | None = None
+
+    def total(self, anchors: list[Any]) -> int:
+        """``on_split_start``'s total: the pairs, or unknown for a product."""
+        return len(anchors) if self.coupled else UNKNOWN_TOTAL
+
+    def units(self, anchor: Any) -> list[_Read]:
+        if not self.coupled:
+            return [
+                self.reader.unit(
+                    anchor,
+                    expand=partial(self._windows, anchor, None),
+                    planned=partial(self._planned, anchor, None),
+                )
+            ]
+        space, time = anchor
+        pair = (space, int(time))
+        return [
+            self.reader.unit(
+                space,
+                key=pair,
+                anchor=pair,
+                coord_value=self._coord_value(int(time)),
+                expand=partial(self._windows, space, int(time)),
+                planned=partial(self._planned, space, int(time)),
+            )
+        ]
+
+    def _coord_value(self, time: int) -> Any:
+        # Bounded lookup: in coupled mode the time anchor is only checked
+        # against the chip's time length once the chip is read, so an
+        # out-of-range anchor must not raise IndexError here.
+        coord = self.coord
+        return coord[time] if coord is not None and 0 <= time < len(coord) else None
+
+    def _slots(
+        self, space: Any, time: int | None, time_len: int
+    ) -> list[tuple[Any, Any, Any, int, slice]]:
+        """``(key, hook anchor, coord_value, time, window)`` per window."""
+        temporal = self.stp.temporal
+        times = (
+            [int(t) for t in temporal._sampler_anchors(time_len, self.coord)]
+            if time is None
+            else [time]
+        )
+        return [
+            ((space, key), (space, t), self._coord_value(t), t, s)
+            for t in times
+            for key, _, s in temporal._keyed_windows(time_len, t, self.coord)
+        ]
+
+    def _windows(self, space: Any, time: int | None, chip: Any) -> list[_Read]:
+        time_len = self.stp._time_len(chip.data)
+        self.stp.temporal._require_coord(self.coord, time_len)
+        self.time_len = time_len
+        return [
+            _Read(
+                key=key,
+                anchor=anchor,
+                coord_value=coord_value,
+                read=partial(self.stp._patch, chip, t, s),
+                governed=False,
+            )
+            for key, anchor, coord_value, t, s in self._slots(space, time, time_len)
+        ]
+
+    def _planned(
+        self, space: Any, time: int | None
+    ) -> list[tuple[Any, Any, Any]] | None:
+        if self.time_len is None:
+            return None
+        try:
+            slots = self._slots(space, time, self.time_len)
+        except Exception:  # surfaces (with hooks) once the chip is read
+            return None
+        return [(key, anchor, coord_value) for key, anchor, coord_value, _, _ in slots]
 
 
 def _hashable(anchor: Any) -> Any:

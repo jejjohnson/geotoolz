@@ -355,6 +355,29 @@ with one of two coupling modes:
   sampler's `anchors_`. The right shape for event-triggered patches
   (methane plume detections, Argo profile locations, storm tracks).
 
+Both modes read each spatial chip exactly as `SpatialPatcher.split` does —
+the spatial patcher's geometry, boundary padding / reflection, window
+weights and `on_error` policy (failures land in `spatial.errors`) — then
+slice it along `time_axis` into the temporal windows, keeping the chip's
+carrier (`GeoTensor`, `DataArray`, …). `split` / `asplit` take `hooks`,
+`journal`, `cache` (for the spatial chips) and `max_in_flight` /
+`max_in_flight_bytes`, plus `prefetch` on `split`. A patch is keyed
+`(space_anchor, time_key)` — `time_key` being the temporal
+`patch_anchors` key — and a chip whose every window is journaled is not
+read again. Product mode reports an unknown total (`-1`) to
+`on_split_start`; coupled mode the number of pairs.
+
+### One anchor walk
+
+`SpatialPatcher.split` / `asplit`, `AsyncSpatialPatcher.asplit`,
+`TemporalPatcher.split` / `asplit` and both `SpatioTemporalPatcher`
+couplings run on one anchor-walk core, so `on_error` / retries, hooks,
+journal, `PatchCache`, prefetch (sync) and backpressure behave the same on
+every path. Each call starts a fresh `errors` list (both passes of a
+`two_pass` share one); a journaled patch is reported to the hooks'
+`on_patch_skipped`, and `on_error` hooks receive the original exception
+whether it is raised or swallowed by the policy.
+
 ## Operator-graph bridge
 
 Operator-graph composition libraries (e.g.

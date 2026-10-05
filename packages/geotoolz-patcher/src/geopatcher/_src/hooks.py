@@ -25,6 +25,12 @@ class PatcherHook(Protocol):
     to the callback's actual arity, so single-arg hooks written for the
     pre-coord protocol still receive only ``anchor`` without warnings.
     See ADR-004 in ``docs/decisions.md`` ("Hook payload extension").
+
+    `on_patch_skipped` fires (instead of ``on_patch_start`` /
+    ``on_patch_done``) for each patch a ``journal`` already holds, so
+    ``on_split_start``'s total is accounted for on a resumed run.
+    `on_error` receives the original exception — whether the patcher
+    re-raises it or its ``on_error`` policy swallows it.
     """
 
     def on_split_start(self, n_anchors: int) -> None: ...
@@ -38,6 +44,8 @@ class PatcherHook(Protocol):
         bytes_: int,
         coord_value: Any = None,
     ) -> None: ...
+
+    def on_patch_skipped(self, anchor: Any, coord_value: Any = None) -> None: ...
 
     def on_split_end(self) -> None: ...
 

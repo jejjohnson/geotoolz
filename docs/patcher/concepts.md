@@ -205,15 +205,15 @@ async path is concurrent at the I/O boundary, not the compute boundary —
 patches are read concurrently but operators run synchronously on each.
 
 ```python
-async for patch in async_patcher.asplit(async_field, prefetch=8):
+async for patch in async_patcher.asplit(async_field):
     ...
 ```
 
 ### Hooks
 
 A `PatcherHook` Protocol exposes `on_split_start`, `on_patch_start`,
-`on_patch_done`, `on_split_end`, `on_merge_start`, `on_merge_end`,
-`on_error`. Hooks may implement only the callbacks they need. Pass a
+`on_patch_done`, `on_patch_skipped`, `on_split_end`, `on_merge_start`,
+`on_merge_end`, `on_error`. Hooks may implement only the callbacks they need. Pass a
 list to `split` / `merge`. Exceptions raised by hooks themselves are
 converted to `RuntimeWarning`s so observability code cannot abort
 patching. See the [observability page](observability.md) for tqdm /

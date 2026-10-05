@@ -13,6 +13,7 @@ For a complete split iteration:
 on_split_start(n_anchors)
   on_patch_start(anchor)
   on_patch_done(anchor, runtime_s, bytes_)
+  on_patch_skipped(anchor)      # instead, for a patch the journal holds
   ...
 on_split_end()
 ```
@@ -25,7 +26,9 @@ on_merge_end(output_bytes)
 ```
 
 If patch construction or merging raises, `on_error(anchor, exc)` is called
-before re-raising the original exception. Exceptions raised by hooks themselves
+before re-raising the original exception. A read failure the `on_error`
+policy swallows (`"skip"`, `"mask"`, each `"retry"` attempt) reaches
+`on_error` too, with the exception that was raised. Exceptions raised by hooks themselves
 are converted to `RuntimeWarning`s so observability code cannot abort patching.
 When a total is not cheaply knowable, patchers pass `-1`.
 

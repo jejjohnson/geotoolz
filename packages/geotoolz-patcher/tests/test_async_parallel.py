@@ -147,3 +147,43 @@ def test_batch_split_pads_last_batch_and_unbatches(
 
     patches = [patch for batch in batches for patch in unbatch(batch)]
     assert [p.anchor for p in patches] == [p.anchor for p in patcher.split(field)]
+
+
+@pytest.mark.parametrize("policy", ["skip", "mask", "retry"])
+@pytest.mark.parametrize("cls", ["SpatialPatcher", "AsyncSpatialPatcher"])
+def test_asplit_on_error_parity(policy: str, cls: str) -> None:
+    """asplit applies the on_error policy exactly as split does (#188)."""
+    import geopatcher
+
+    array = np.arange(16 * 16, dtype=np.float32).reshape(16, 16)
+
+    class FlakyField(AsyncArrayField):
+        def select(self, window: Any) -> np.ndarray:
+            if (window.row_off, window.col_off) == (8, 0):
+                raise OSError("tile unreadable")
+            return super().select(window)
+
+    def make(name: str) -> Any:
+        return getattr(geopatcher, name)(
+            geometry=SpatialRectangular(size=(8, 8)),
+            sampler=SpatialRegularStride(step=8),
+            window=SpatialBoxcar(),
+            aggregation=SpatialOverlapAdd(),
+            on_error=policy,
+            max_retries=1,
+        )
+
+    async_patcher, sync_patcher = make(cls), make("SpatialPatcher")
+    sync_patches = list(sync_patcher.split(FlakyField(array)))
+
+    async def collect() -> list[Any]:
+        return [p async for p in async_patcher.asplit(FlakyField(array))]
+
+    async_patches = asyncio.run(collect())
+    assert [p.anchor for p in async_patches] == [p.anchor for p in sync_patches]
+    for a, s in zip(async_patches, sync_patches, strict=True):
+        np.testing.assert_array_equal(np.asarray(a.data), np.asarray(s.data))
+    assert async_patcher.errors
+    assert [(e.anchor, e.kind, e.retry_count) for e in async_patcher.errors] == [
+        (e.anchor, e.kind, e.retry_count) for e in sync_patcher.errors
+    ]

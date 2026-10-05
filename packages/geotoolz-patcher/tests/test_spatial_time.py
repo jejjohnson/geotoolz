@@ -240,7 +240,7 @@ class TestCoordAwareTemporal:
         for a, b in zip(async_patches, sync_patches, strict=True):
             assert a.space == b.space
             assert a.time == b.time
-            np.testing.assert_array_equal(a.data, b.data)
+            np.testing.assert_array_equal(np.asarray(a.data), np.asarray(b.data))
 
     def test_integer_pipeline_ignores_coord(
         self,
@@ -254,7 +254,7 @@ class TestCoordAwareTemporal:
         without = list(stp.split(time_field))
         assert len(with_coord) == len(without)
         for a, b in zip(with_coord, without, strict=True):
-            np.testing.assert_array_equal(a.data, b.data)
+            np.testing.assert_array_equal(np.asarray(a.data), np.asarray(b.data))
 
     def test_coupled_short_coord_raises_value_error(
         self, time_field: RasterField, tp_coord: TemporalPatcher, coord: np.ndarray
@@ -271,3 +271,50 @@ class TestCoordAwareTemporal:
         stp = SpatioTemporalPatcher(spatial=sp, temporal=tp_coord, coupling="coupled")
         with pytest.raises(ValueError, match="coord length"):
             list(stp.split(time_field, coord=coord[:4]))
+
+
+def test_coupled_polygon_and_reflect(
+    time_field: RasterField, tp: TemporalPatcher
+) -> None:
+    """The coupled split reads each chip through SpatialPatcher's pipeline (#188).
+
+    It used to call ``field.select`` itself: a polygon geometry's masked
+    window crashed the raster read, ``boundary="reflect"`` returned the
+    nodata fill instead of the mirror, and every patch got the unmasked,
+    uncropped base weights.
+    """
+    import geopandas as gpd
+    import shapely
+
+    from geopatcher import SpatialPolygonIntersection
+
+    # North-up grid: polygon footprints need a negative y pixel size.
+    north_up = RasterField(
+        GeoTensor(
+            values=np.asarray(time_field.reader.values),
+            transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 16.0),
+            crs="EPSG:32630",
+        )
+    )
+    tri = shapely.Polygon([(1, 9), (7, 9), (1, 15)])
+    pairs = [(0, 4)]
+    polygon = SpatialPatcher(
+        geometry=SpatialPolygonIntersection(polygons=gpd.GeoSeries([tri])),
+        sampler=SpatialExplicit(anchors_=pairs),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+    )
+    reflect = SpatialPatcher(
+        geometry=SpatialRectangular(size=(8, 8), boundary="reflect"),
+        sampler=SpatialExplicit(anchors_=[((-4, -4), 4)]),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+    )
+    for sp, space in [(polygon, 0), (reflect, (-4, -4))]:
+        stp = SpatioTemporalPatcher(spatial=sp, temporal=tp, coupling="coupled")
+        (patch,) = list(stp.split(north_up))
+        chip = sp.patch_at(north_up, space)
+        np.testing.assert_array_equal(
+            np.asarray(patch.data), np.asarray(chip.data)[1:5]
+        )
+        np.testing.assert_array_equal(patch.weights, chip.weights)

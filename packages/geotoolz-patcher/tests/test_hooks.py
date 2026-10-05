@@ -13,6 +13,7 @@ from geopatcher import (
     PatcherHook,
     RasterField,
     SpatialBoxcar,
+    SpatialExplicit,
     SpatialOverlapAdd,
     SpatialPatcher,
     SpatialRectangular,
@@ -274,3 +275,36 @@ def test_positional_arity_trims_bound_methods_and_callables() -> None:
     assert _positional_arity(Hook().on_patch_done) >= 4
     assert _positional_arity(CallableHook()) == 2
     assert _positional_arity(lambda a, b: None) == 2
+
+
+@pytest.mark.parametrize("policy", ["skip", "mask", "retry"])
+def test_on_error_receives_original_exception(field: RasterField, policy: str) -> None:
+    """A swallowed read failure reaches on_error as the raised exception (#188)."""
+    boom = OSError("tile 0 unreadable")
+
+    class Flaky:
+        domain = field.domain
+
+        def select(self, window: object) -> object:
+            raise boom
+
+    class ErrorHook:
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, Exception]] = []
+
+        def on_error(self, anchor: object, exc: Exception) -> None:
+            self.calls.append((anchor, exc))
+
+    patcher = SpatialPatcher(
+        geometry=SpatialRectangular(size=(32, 32)),
+        sampler=SpatialExplicit(anchors_=[(0, 0)]),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+        on_error=policy,
+        max_retries=1,
+    )
+    hook = ErrorHook()
+    list(patcher.split(Flaky(), hooks=[hook]))
+    assert hook.calls
+    assert all(anchor == (0, 0) and exc is boom for anchor, exc in hook.calls)
+    assert len(hook.calls) == len(patcher.errors)
