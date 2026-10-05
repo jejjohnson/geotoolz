@@ -1,7 +1,7 @@
 """`geocatalog.bundle` — directory-of-Parquet catalog persistence.
 
 Public alias for `geocatalog._src.bundle`. See
-``docs/design/query-matchup.md`` §4.4 for the directory layout and
+``docs/catalog/design/query-matchup.md`` §4.4 for the directory layout and
 §4.5 for the ingest workflow.
 """
 

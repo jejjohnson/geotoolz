@@ -12,6 +12,9 @@ Usage: geocatalog COMMAND
 Spatiotemporal catalog over geospatial files.
 ```
 
+`geocatalog --version` prints the installed `geotoolz-catalog` version
+(the same string as `geocatalog.__version__`).
+
 ## Subcommands
 
 ### `build`
@@ -179,4 +182,4 @@ $ geocatalog build raster --input-glob "data/*.tif" \
 
 Subcommands deferred to follow-on PRs:
 
-- `geocatalog compact catalog.parquet` (#8).
+- `geocatalog compact catalog.parquet`.

@@ -99,20 +99,21 @@ uv add geotoolz-catalog
 
 ## Next steps
 
-- **[Docs site](https://jejjohnson.github.io/geocatalog/)** — concepts, quickstart, API
-- **[Concepts](https://jejjohnson.github.io/geocatalog/concepts/)** — mental model, backend comparison, set algebra
-- **[Quickstart](https://jejjohnson.github.io/geocatalog/quickstart/)** — 15-minute Lake Tahoe Sentinel-2 walkthrough
-- **[Recipes](https://jejjohnson.github.io/geocatalog/recipes/large-archives/)** — large archives, STAC ingestion, staging & bundles
-- **[End-to-end notebook](https://jejjohnson.github.io/geocatalog/notebooks/end_to_end_lake_tahoe/)** — discover → query → load → patch → stitch (cross-repo with [geotoolz](https://github.com/jejjohnson/geotoolz) and [geopatcher](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher))
-- **[API reference](https://jejjohnson.github.io/geocatalog/api/reference/)** — full mkdocstrings-generated reference
+- **[Docs site](https://jejjohnson.github.io/geotoolz/catalog/)** — concepts, quickstart, API
+- **[Concepts](https://jejjohnson.github.io/geotoolz/catalog/concepts/)** — mental model, backend comparison, set algebra
+- **[Quickstart](https://jejjohnson.github.io/geotoolz/catalog/quickstart/)** — 15-minute Lake Tahoe Sentinel-2 walkthrough
+- **[Recipes](https://jejjohnson.github.io/geotoolz/catalog/recipes/large-archives/)** — large archives, STAC ingestion, staging & bundles
+- **[End-to-end notebook](https://jejjohnson.github.io/geotoolz/catalog/notebooks/end_to_end_lake_tahoe/)** — discover → query → load → patch → stitch (cross-repo with [geotoolz](https://github.com/jejjohnson/geotoolz) and [geopatcher](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher))
+- **[API reference](https://jejjohnson.github.io/geotoolz/catalog/api/reference/)** — full mkdocstrings-generated reference
 
 ## Bridging to a patcher
 
-`CatalogDomain` adapts a catalog into a `Domain` shape (bounds + an
-iterable of `GeoSlice`s) so a tiling patcher can walk a multi-file
-archive. The canonical consumer is
-[`geotoolz.patch.SpatialPatcher`](https://github.com/jejjohnson/geotoolz),
-but any code that iterates `domain.slices()` works.
+`geocatalog.staging.field_for` (the `[patch]` extra) mosaics the rows a
+`GeoSlice` selects into one `geopatcher.RasterField`, which
+`geopatcher.SpatialPatcher` chips with `split` and reassembles with
+`merge`. `CatalogDomain` is the lighter option: it walks a catalog as
+one `GeoSlice` per row (`domain.slices()`) for code that loads each
+slice itself.
 
 ## Development
 

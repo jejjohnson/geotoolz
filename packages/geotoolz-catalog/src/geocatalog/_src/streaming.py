@@ -7,7 +7,7 @@ in RAM. The flow is:
 
 1. **Extract** per-file metadata rows with `_iter_rows_parallel`, optionally
    distributing extraction across `n_workers` processes (a single writer
-   thread consumes the pool's output — see `geoduckdb.md` §4.6).
+   thread consumes the pool's output).
 2. **Stream-write** rows to a temp GeoParquet via `StreamingParquetWriter`,
    batching into Arrow record batches of `batch_size` rows (peak RAM is
    `O(batch_size * row_size)`, not `O(n_rows)`).

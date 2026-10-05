@@ -367,7 +367,7 @@ def load_vector(
               feature burns as ``burn_value`` (default 1).
             - ``"instance_segmentation"``: one integer per feature
               (1..N) — distinct values for distinct objects.
-            - ``"object_detection"``: not implemented in v0.1; build
+            - ``"object_detection"``: not implemented; build
               the bbox tensor yourself from the filtered features.
         label_field: Column in the vector file to read class IDs from
             for ``"semantic_segmentation"``. Must be integer-valued.
@@ -385,7 +385,7 @@ def load_vector(
 
     Raises:
         TypeError: If the catalog's backend tag is not ``"vector"``.
-        NotImplementedError: For ``task="object_detection"`` (v0.2+).
+        NotImplementedError: For ``task="object_detection"``.
         ValueError: If no catalog rows match the slice.
     """
     if catalog.kind != "vector":
@@ -394,7 +394,7 @@ def load_vector(
         )
     if task == "object_detection":
         raise NotImplementedError(
-            "load_vector(task='object_detection') is v0.2+; build the "
+            "load_vector(task='object_detection') is not implemented; build the "
             "bounding-box tensor yourself from the matched features for now."
         )
 

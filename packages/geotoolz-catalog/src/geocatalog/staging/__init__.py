@@ -15,7 +15,7 @@ Hybrid-layout sub-namespace over `geocatalog._src.staging`:
 * `field_for` — bridge from a staged catalog to a `geopatcher` Field
   (requires the ``[patch]`` extra).
 
-See ``docs/design/query-matchup.md`` §4.7.
+See ``docs/catalog/design/query-matchup.md`` §4.7.
 """
 
 from __future__ import annotations

@@ -5,7 +5,7 @@ writes the bbox covering struct when ``write_covering_bbox=True``). The
 artifact is then queryable from pandas / DuckDB / GDAL without
 ceremony — no pickle-version fragility.
 
-Phase 2 (DuckDB backend) reads the *same* GeoParquet file, so
+`DuckDBGeoCatalog` reads the *same* GeoParquet file, so
 ``to_geoparquet`` writes the canonical interchange format for both
 backends.
 """
@@ -165,7 +165,7 @@ def to_geoparquet(
     The result is a single Parquet file readable by any GeoParquet-aware
     tool (DuckDB, GDAL, pandas, geopandas) — not a pickle, so it
     survives version bumps and crosses Python / language boundaries.
-    The Phase 2 ``DuckDBGeoCatalog`` reads the *same* artifact, so this
+    ``DuckDBGeoCatalog`` reads the *same* artifact, so this
     is the canonical interchange format for both backends.
 
     Two columns are added on write and stripped on load:

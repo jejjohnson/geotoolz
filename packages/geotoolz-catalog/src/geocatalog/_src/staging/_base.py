@@ -196,7 +196,7 @@ def stage(
             the row is emitted with whatever did succeed.
 
     Returns:
-        A new catalog of the same backend type. Each row's
+        A new `InMemoryGeoCatalog` (the input is not mutated). Each row's
         ``filepath`` points at the local copy of its primary asset
         (the asset whose URI was the row's ``filepath``); it keeps
         its original URI when that asset was not staged. An asset map

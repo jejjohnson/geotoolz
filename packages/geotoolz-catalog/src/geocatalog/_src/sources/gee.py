@@ -1,13 +1,13 @@
-"""Google Earth Engine adapter — asset enumeration in v1.
+"""Google Earth Engine adapter — scaffolding, not implemented.
 
-Phase 1 scope (per ``docs/design/query-matchup.md`` §8): enumerate
-EE ``ImageCollection`` assets that intersect the query bbox + interval,
-returning footprints and asset paths. Materializing pixels via
-``ee.Image.getDownloadURL`` is deferred to the staging layer (§4.7);
-running arbitrary ``ee.Image`` recipes is out of scope until a
-later phase.
+The planned scope (``docs/catalog/design/query-matchup.md`` §8):
+enumerate EE ``ImageCollection`` assets that intersect the query
+bbox + interval, returning footprints and asset paths. The staging
+layer has no ``ee.Image`` download path yet, and running arbitrary
+``ee.Image`` recipes is out of scope.
 
-Scaffolding only.
+Scaffolding only: `GEESource.query` and `GEESource.auth_status`
+raise `NotImplementedError`.
 """
 
 from __future__ import annotations
@@ -68,9 +68,9 @@ class GEESource(Source):
     ) -> Iterator[SourceRow]:
         """Enumerate EE assets intersecting ``bounds`` + ``interval``.
 
-        Scaffolding — not yet implemented (Phase 3, design §8). The
-        shared ``limit`` contract already holds: ``limit=0`` yields
-        nothing and a negative limit raises `ValueError`.
+        Scaffolding — not yet implemented (design §8). The shared
+        ``limit`` contract already holds: ``limit=0`` yields nothing
+        and a negative limit raises `ValueError`.
 
         Raises:
             NotImplementedError: For any query that could return rows,
@@ -80,17 +80,17 @@ class GEESource(Source):
         if wants_no_rows(limit):
             return iter(())
         raise NotImplementedError(
-            "GEESource.query is scaffolding — Phase 3 PR (see design §8). "
-            "Phase 1 ships earthaccess + STAC + CMR; GEE follows once "
-            "the staging layer can materialize ee.Image assets."
+            "GEESource.query is not implemented yet; use STACSource, "
+            "EarthAccessSource or CMRSource. GEE follows once the "
+            "staging layer can materialize ee.Image assets."
         )
 
     def auth_status(self) -> AuthStatus:
         """Report whether the `ee` client can reach Earth Engine.
 
-        Scaffolding — not yet implemented (Phase 3, design §8).
+        Scaffolding — not yet implemented (design §8).
 
         Raises:
-            NotImplementedError: Always, until the Phase 3 PR lands.
+            NotImplementedError: Always, until the adapter is implemented.
         """
-        raise NotImplementedError("GEESource.auth_status is scaffolding — Phase 3 PR.")
+        raise NotImplementedError("GEESource.auth_status is not implemented yet.")

@@ -6,7 +6,7 @@ Hybrid-layout sub-namespace mirroring `geocatalog.catalog` and
 
 Adapters are imported lazily on attribute access so a bare
 ``import geocatalog.sources`` does not pull in `earthaccess`,
-`pystac-client`, or `earthengine-api`. See ``docs/design/query-matchup.md``
+`pystac-client`, or `earthengine-api`. See ``docs/catalog/design/query-matchup.md``
 §4.2.
 """
 
