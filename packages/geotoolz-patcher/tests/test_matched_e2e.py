@@ -884,3 +884,20 @@ def test_matched_patch_weights_populated() -> None:
         assert mp.weights is not None
         assert set(mp.weights) == {PRIMARY_KEY, "sec"}
         np.testing.assert_array_equal(mp.weights["sec"], mp.members["sec"].weights)
+
+
+def test_split_forwards_max_in_flight_bytes_sized_by_members() -> None:
+    """The byte budget sizes a matched patch as the sum of its members."""
+    import pytest
+
+    mf = _raster_mfield()
+    msp = MatchedSpatialPatcher(primary=_real_patcher())
+    member_sum = 2 * 4 * 4 * 4  # two float32 (4, 4) members
+    seen = []
+    for mp in msp.split(mf, max_in_flight_bytes=member_sum):
+        with mp:
+            seen.append(mp.anchor)
+    assert len(seen) == 4
+    # One member alone (64 bytes) would fit; the matched patch does not.
+    with pytest.raises(ValueError, match="max_in_flight_bytes"):
+        next(iter(msp.split(mf, max_in_flight_bytes=member_sum - 1)))

@@ -627,6 +627,7 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
         journal: Any | None = None,
         cache: Any | None = None,
         max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
     ) -> Iterator[MatchedPatch]:
         """Yield `MatchedPatch`es by walking ``mfield`` with the primary's sampler.
 
@@ -670,6 +671,8 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
             max_in_flight: Forwarded to `SpatialPatcher.split`; each
                 yielded `MatchedPatch` owns the slot — release it with
                 ``mp.close()`` or ``with mp: ...``.
+            max_in_flight_bytes: Forwarded to `SpatialPatcher.split`; a
+                matched patch is sized as the sum of its members' bytes.
         """
         _validate_aggregator_names(
             self.secondary_aggregators, mfield, type(self).__name__
@@ -681,6 +684,7 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
             prefetch=prefetch,
             journal=journal,
             max_in_flight=max_in_flight,
+            max_in_flight_bytes=max_in_flight_bytes,
         )
         cls_name = type(self).__name__
         for outer in outers:
