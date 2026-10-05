@@ -33,9 +33,19 @@ jobs:
       - name: Test geotoolz-patcher
         run: uv run pytest -v
         working-directory: packages/geotoolz-patcher
-      - name: Test geotoolz-catalog
-        run: uv run pytest -v
+      # The all-extras run of the catalog suite: every extras-gated test must
+      # actually run here, so a skip (a missing extra, a broken importorskip)
+      # fails the job. base-install.yml covers the no-extras end.
+      - name: Test geotoolz-catalog (all extras, no skips)
+        run: |
+          uv run pytest -v -rs | tee pytest.log
+          if grep -q "^SKIPPED" pytest.log; then
+            echo "::error::geotoolz-catalog tests skipped in the all-extras run"
+            exit 1
+          fi
         working-directory: packages/geotoolz-catalog
+        env:
+          HYPOTHESIS_PROFILE: ci
       # Time handling must not depend on the runner's local zone (#235):
       # rerun the catalog suite once in a zone with a UTC offset and DST.
       - name: Test geotoolz-catalog (TZ=America/New_York)

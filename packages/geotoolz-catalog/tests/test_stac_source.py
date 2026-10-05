@@ -427,8 +427,19 @@ class TestSTACSourceQuery:
         assert signed_marker_asset.href == "signed://red.tif"
 
 
+@pytest.fixture
+def stub_pc_signer(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Stand in for `planetary_computer`, which the `[stac]` extra installs
+    but an environment with only `pystac-client` lacks (#251)."""
+    from geocatalog._src.sources import stac as stac_mod
+
+    signer = MagicMock()
+    monkeypatch.setattr(stac_mod, "planetary_computer", signer)
+    return signer
+
+
 class TestSTACSourceConstruction:
-    def test_factories_set_endpoint_and_name(self) -> None:
+    def test_factories_set_endpoint_and_name(self, stub_pc_signer: MagicMock) -> None:
         pc = STACSource.planetary_computer()
         assert pc.endpoint == "https://planetarycomputer.microsoft.com/api/stac/v1"
         assert pc.name == "stac.pc"
@@ -438,6 +449,17 @@ class TestSTACSourceConstruction:
         assert es.endpoint == "https://earth-search.aws.element84.com/v1"
         assert es.name == "stac.es"
         assert es.sign_assets is False
+
+    def test_signing_without_planetary_computer_names_the_extra(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from geocatalog._src.sources import stac as stac_mod
+
+        monkeypatch.setattr(stac_mod, "planetary_computer", None)
+        with pytest.raises(ImportError, match=r"geotoolz-catalog\[stac\]"):
+            STACSource.planetary_computer()
+        # Unsigned endpoints need only pystac-client.
+        assert STACSource.earth_search().sign_assets is False
 
     def test_auth_status_reachable(self) -> None:
         src = STACSource(endpoint="https://fake", name="stac.fake")
