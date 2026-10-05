@@ -86,11 +86,9 @@ class _Remote:
 
 
 @pytest.fixture
-def remote(monkeypatch: pytest.MonkeyPatch) -> _Remote:
-    import fsspec
-
+def remote(monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any) -> _Remote:
     fake = _Remote({})
-    monkeypatch.setattr(fsspec, "open", fake)
+    monkeypatch.setattr(fsspec_stub, "open", fake, raising=False)
     monkeypatch.setattr(time, "sleep", lambda _s: None)
     return fake
 

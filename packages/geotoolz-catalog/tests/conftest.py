@@ -121,6 +121,23 @@ CATALOG_BACKENDS = [
 ]
 
 
+@pytest.fixture
+def fsspec_stub(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """An empty ``fsspec`` module in ``sys.modules`` for tests to give an ``open``.
+
+    Staging only ever calls ``fsspec.open`` for remote URIs, and the tests
+    that exercise that path fake it anyway; a stub module (rather than
+    patching the real one) keeps them running on a base install, where the
+    ``[fsspec]`` extra is absent.
+    """
+    import sys
+    import types
+
+    stub = types.ModuleType("fsspec")
+    monkeypatch.setitem(sys.modules, "fsspec", stub)
+    return stub
+
+
 @pytest.fixture(params=CATALOG_BACKENDS)
 def catalog_backend(request: pytest.FixtureRequest) -> str:
     """Name of the backend a parametrised behavioural test runs on."""

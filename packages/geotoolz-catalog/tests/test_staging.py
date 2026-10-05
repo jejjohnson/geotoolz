@@ -1,9 +1,10 @@
 """End-to-end tests for `geocatalog.staging.stage` + `LocalCache`.
 
-All tests stage against the local filesystem (no network) using
-real fsspec — the local backend is the same code path that AWS
-S3 / GCS / HTTPS use, so this exercises the cache key + retry +
-asset-rewrite logic without dragging in moto / network mocks.
+All tests stage against the local filesystem (no network). Local
+paths are staged in place without fsspec; the remote-URI paths (retry,
+timeout, on_error) fake ``fsspec.open`` on the ``fsspec_stub`` module,
+so the whole file also runs on a base install without the ``[fsspec]``
+extra.
 """
 
 from __future__ import annotations
@@ -375,7 +376,7 @@ class TestStageRetry:
     """`_fetch_one` retries transient failures up to `retries` times."""
 
     def test_retries_then_succeeds(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
     ) -> None:
         # Build a fake `fsspec.open` that fails twice (with a plain,
         # transient OSError), then succeeds.
@@ -387,19 +388,9 @@ class TestStageRetry:
                 raise OSError("transient")
             return _FakeFile(b"hello")
 
-        monkeypatch.setattr(
-            "geocatalog._src.staging._base.fsspec",  # late attr lookup
-            None,
-            raising=False,
-        )
-        # Patch the import path used inside `_fetch_one`.
-        import sys
         import time
 
-        import fsspec as real_fsspec
-
-        sys.modules["fsspec"] = real_fsspec
-        monkeypatch.setattr(real_fsspec, "open", fake_open)
+        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
         # No need to actually wait out the backoff.
         monkeypatch.setattr(time, "sleep", lambda _s: None)
 
@@ -414,6 +405,7 @@ class TestStageRetry:
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        fsspec_stub: Any,
         exc_type: type[OSError],
     ) -> None:
         # Fatal OSError subclasses (missing object, auth/permission
@@ -425,9 +417,7 @@ class TestStageRetry:
             attempts["n"] += 1
             raise exc_type("fatal")
 
-        import fsspec as real_fsspec
-
-        monkeypatch.setattr(real_fsspec, "open", fake_open)
+        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
 
         cache = LocalCache(root=tmp_path / "cache")
         with pytest.raises(exc_type, match="fatal"):
@@ -435,7 +425,7 @@ class TestStageRetry:
         assert attempts["n"] == 1
 
     def test_transient_budget_exhausted_raises_last_error(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
     ) -> None:
         attempts = {"n": 0}
 
@@ -445,9 +435,7 @@ class TestStageRetry:
 
         import time
 
-        import fsspec as real_fsspec
-
-        monkeypatch.setattr(real_fsspec, "open", fake_open)
+        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
         monkeypatch.setattr(time, "sleep", lambda _s: None)
 
         cache = LocalCache(root=tmp_path / "cache")
@@ -469,7 +457,7 @@ class TestStageTimeout:
         assert cfg["timeout"] == 60.0
 
     def test_timeout_forwarded_to_fsspec_open(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
     ) -> None:
         seen: dict[str, Any] = {}
 
@@ -477,16 +465,14 @@ class TestStageTimeout:
             seen.update(kwargs)
             return _FakeFile(b"x")
 
-        import fsspec as real_fsspec
-
-        monkeypatch.setattr(real_fsspec, "open", fake_open)
+        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
 
         cache = LocalCache(root=tmp_path / "cache", timeout=12.5)
         _fetch_one("https://example.com/x.tif", cache, retries=0)
         assert seen["timeout"] == 12.5
 
     def test_timeout_none_omits_kwarg(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
     ) -> None:
         seen: dict[str, Any] = {"called": False}
 
@@ -495,9 +481,7 @@ class TestStageTimeout:
             seen.update(kwargs)
             return _FakeFile(b"x")
 
-        import fsspec as real_fsspec
-
-        monkeypatch.setattr(real_fsspec, "open", fake_open)
+        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
 
         cache = LocalCache(root=tmp_path / "cache", timeout=None)
         _fetch_one("https://example.com/y.tif", cache, retries=0)
@@ -509,23 +493,20 @@ class TestStageOnError:
     """`on_error="skip"` keeps going past a failed asset."""
 
     def test_skip_keeps_other_assets(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
     ) -> None:
         # Build a catalog with one bad URI and one good local file.
         good = _seed_tif(tmp_path / "good.tif", content=b"good")
         bad = "https://nonexistent/never.tif"
 
-        # Force fsspec.open to fail for the bad URI.
-        import fsspec as real_fsspec
-
-        original_open = real_fsspec.open
-
+        # Force fsspec.open to fail for the bad URI (the good, local asset
+        # is staged in place and never reaches fsspec).
         def fake_open(uri: str, mode: str = "rb", **kwargs: Any) -> Any:
             if uri == bad:
                 raise OSError("nope")
-            return original_open(uri, mode, **kwargs)
+            raise AssertionError(f"local asset {uri!r} must not go through fsspec")
 
-        monkeypatch.setattr(real_fsspec, "open", fake_open)
+        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
 
         cat = catalog_from_rows(
             rows=[
@@ -558,7 +539,7 @@ class TestStageOnError:
         assert out.gdf.iloc[0]["filepath"] == assets_out["good"]
 
     def test_fatal_error_skips_without_retrying(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
     ) -> None:
         # A fatal failure still honours on_error="skip" (the row
         # survives, the bad asset keeps its URI) — it just never
@@ -567,17 +548,13 @@ class TestStageOnError:
         bad = "https://forbidden/secret.tif"
         attempts = {"n": 0}
 
-        import fsspec as real_fsspec
-
-        original_open = real_fsspec.open
-
         def fake_open(uri: str, mode: str = "rb", **kwargs: Any) -> Any:
             if uri == bad:
                 attempts["n"] += 1
                 raise PermissionError("denied")
-            return original_open(uri, mode, **kwargs)
+            raise AssertionError(f"local asset {uri!r} must not go through fsspec")
 
-        monkeypatch.setattr(real_fsspec, "open", fake_open)
+        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
 
         cat = catalog_from_rows(
             rows=[

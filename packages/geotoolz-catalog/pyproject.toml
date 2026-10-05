@@ -222,6 +222,10 @@ markers = [
     # CI is deterministic and offline-friendly. Run on demand with
     # ``uv run pytest -m live --no-cov``.
     "live: requires network access to a real upstream API",
+    # Tests that take tens of seconds (the Hypothesis property suites).
+    # They still run in CI's all-extras job; deselect locally with
+    # ``-m "not slow"`` for a quick loop.
+    "slow: takes tens of seconds; still runs in the all-extras CI job",
 ]
 
 [tool.coverage.run]

@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pyproj
+import pytest
 from hypothesis import HealthCheck, assume, given, settings, strategies as st
 
 from geocatalog import (
@@ -33,6 +34,8 @@ from geocatalog import (
 
 from .strategies import bbox_strategy_4326, catalog_strategy
 
+
+pytestmark = pytest.mark.slow
 
 # Hypothesis flags `function_scoped_fixture` because pytest creates
 # `tmp_path` once per *test*, not once per *example* — every example
