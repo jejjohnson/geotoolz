@@ -42,7 +42,7 @@ except ImportError as _e:  # pragma: no cover - exercised when [pipekit] is miss
         "`pip install` will work once pipekit reaches PyPI."
     ) from _e
 
-from geopatcher import Patch, SpatialAggregation, SpatialPatcher
+from geopatcher import Patch, SpatialAggregation, SpatialPatcher, axis_envelope
 
 
 class GridSampler(Operator):
@@ -57,9 +57,12 @@ class GridSampler(Operator):
 
     Note:
         ``forbid_in_yaml = True`` — `patcher` is a runtime `SpatialPatcher`
-        (not a `pipekit.Operator`), so the constructor cannot be rebuilt
-        from `get_config()`. The config is a debug record, not a replay
-        recipe.
+        (not a `pipekit.Operator`), so pipekit's `from_state` cannot rebuild
+        it and `pipekit.check_pickleable` cannot look inside it; the flag
+        makes the lint report this operator, so a closure-bearing axis
+        (e.g. `SpatialCustom`) is not hidden. `get_config()` nests the
+        patcher as a ``{"class", "config"}`` envelope, which
+        `geopatcher.from_config` rebuilds when the patcher is serialisable.
     """
 
     forbid_in_yaml: ClassVar[bool] = True
@@ -71,7 +74,7 @@ class GridSampler(Operator):
         return list(self.patcher.split(field))
 
     def get_config(self) -> dict[str, Any]:
-        return {"patcher": self.patcher.get_config()}
+        return {"patcher": axis_envelope(self.patcher)}
 
 
 class ApplyToChips(Operator):
@@ -132,10 +135,7 @@ class Stitch(Operator):
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "aggregation": {
-                "class": type(self.aggregation).__name__,
-                "config": self.aggregation.get_config(),
-            },
+            "aggregation": axis_envelope(self.aggregation),
             "domain": {"class": type(self.domain).__name__},
         }
 

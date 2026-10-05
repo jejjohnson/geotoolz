@@ -682,13 +682,7 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
                 outer.data, mfield, self.primary, cls_name, "each Patch.data to be"
             )
             members = {
-                name: Patch(
-                    data=data,
-                    anchor=outer.anchor,
-                    indices=outer.indices,
-                    weights=outer.weights,
-                )
-                for name, data in data_by_name.items()
+                name: outer.with_data(data) for name, data in data_by_name.items()
             }
             matched = MatchedPatch(
                 anchor=outer.anchor,
@@ -953,12 +947,7 @@ class MatchedTemporalPatcher(_MatchedConfigMixin):
                     idx[time_axis] = primary_patch.indices
                     tup = tuple(idx)
                     members = {
-                        name: TemporalPatch(
-                            data=arr[tup],
-                            anchor=anchor,
-                            indices=primary_patch.indices,
-                            weights=primary_patch.weights,
-                        )
+                        name: primary_patch.with_data(arr[tup])
                         for name, arr in arrays.items()
                     }
                     matched = MatchedTemporalPatch(

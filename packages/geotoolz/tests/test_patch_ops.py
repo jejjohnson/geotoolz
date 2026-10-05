@@ -110,7 +110,7 @@ def test_runtime_holders_are_forbid_in_yaml(patcher: SpatialPatcher) -> None:
     ).get_config()
     assert config["domain"] == {"class": type(field.domain).__name__}
     assert GridSampler(patcher=patcher).get_config() == {
-        "patcher": patcher.get_config()
+        "patcher": {"class": "SpatialPatcher", "config": patcher.get_config()}
     }
 
 
