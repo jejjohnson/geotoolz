@@ -63,15 +63,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote, urlsplit
 
+from geopatcher._src._extras import missing_extra
+
 
 if TYPE_CHECKING:
     from obstore.store import ObjectStore
 
-
-_OBSTORE_INSTALL_HINT = (
-    "The obstore client pool requires the `obstore` package; install via "
-    "`pip install 'geotoolz-patcher[obstore]'`."
-)
 
 _S3_SCHEMES = frozenset({"s3", "s3a"})
 _GCS_SCHEMES = frozenset({"gs", "gcs"})
@@ -392,7 +389,7 @@ def _build_store(uri: str, storage_options: Mapping[str, Any] | None) -> ObjectS
             S3Store,
         )
     except ImportError as exc:
-        raise ImportError(_OBSTORE_INSTALL_HINT) from exc
+        raise missing_extra("the obstore client pool", "obstore") from exc
 
     options = dict(storage_options or {})
     if loc.backend == "s3":

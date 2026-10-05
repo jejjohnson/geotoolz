@@ -16,11 +16,10 @@ so a sliding-window inference pipeline composes inside a `Sequential` or
     ])
 
 Optional extra: install the ``[pipekit]`` extra to pull in pipekit.
-While `pipekit` is pre-PyPI, use ``uv sync --extra pipekit`` (or
-``uv pip install "git+https://github.com/jejjohnson/geopatcher@main#egg=geopatcher[pipekit]"``)
-so uv can resolve the git source declared in this repo's
-``pyproject.toml``. Once `pipekit` ships to PyPI, plain
-``pip install 'geopatcher[pipekit]'`` will work too.
+While `pipekit` is pre-PyPI, use ``uv sync --extra pipekit`` from a
+checkout of the geotoolz monorepo so uv can resolve the git source the
+workspace declares. Once `pipekit` ships to PyPI, plain
+``pip install 'geotoolz-patcher[pipekit]'`` will work too.
 
 Importing this module without pipekit installed raises a friendly
 ``ImportError`` pointing at the right extra.
@@ -38,7 +37,7 @@ except ImportError as _e:  # pragma: no cover - exercised when [pipekit] is miss
     raise ImportError(
         "geopatcher.integrations.pipekit requires the `pipekit` package. "
         "Install the [pipekit] extra with `uv sync --extra pipekit` "
-        "(or `uv pip install 'geopatcher[pipekit]'`); plain "
+        "(or `uv pip install 'geotoolz-patcher[pipekit]'`); plain "
         "`pip install` will work once pipekit reaches PyPI."
     ) from _e
 

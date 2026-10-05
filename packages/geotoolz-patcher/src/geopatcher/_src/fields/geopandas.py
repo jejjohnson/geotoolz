@@ -5,7 +5,7 @@ Wraps a `geopandas.GeoDataFrame`. The domain reports either a
 geometry is a `shapely.Point` — useful for KNN/RadiusGraph patching of
 station data).
 
-Optional extra: ``pip install 'geopatcher[vector]'``.
+Optional extra: ``pip install 'geotoolz-patcher[vector]'``.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from typing import Any
 
 import numpy as np
 
+from geopatcher._src._extras import missing_extra
 from geopatcher._src.domains import PointDomain, VectorDomain
-from geopatcher._src.fields._extras import _missing_extra
 
 
 try:
@@ -54,7 +54,7 @@ class GeoPandasField:
 
     def __post_init__(self) -> None:
         if gpd is None:
-            raise _missing_extra(
+            raise missing_extra(
                 "GeoPandasField", "vector", "geopandas>=0.14 shapely>=2"
             )
 

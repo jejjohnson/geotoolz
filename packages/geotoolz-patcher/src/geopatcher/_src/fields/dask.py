@@ -8,8 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from geopatcher._src._extras import missing_extra
 from geopatcher._src.domains import GridDomain
-from geopatcher._src.fields._extras import _missing_extra
 
 
 try:
@@ -28,7 +28,7 @@ class DaskField:
 
     def __post_init__(self) -> None:
         if da is None or xr is None:
-            raise _missing_extra("DaskField", "dask", "dask[bag]>=2024.8.3")
+            raise missing_extra("DaskField", "dask", "dask[bag]>=2024.8.3")
         if not isinstance(self.array.data, da.Array):
             self.array = self.array.chunk()
 
@@ -53,7 +53,7 @@ class DaskField:
                 several data variables.
         """
         if xr is None:
-            raise _missing_extra("DaskField", "dask", "dask[bag]>=2024.8.3")
+            raise missing_extra("DaskField", "dask", "dask[bag]>=2024.8.3")
         ds = xr.open_zarr(store, **kwargs)
         names = list(ds.data_vars)
         if var is None:

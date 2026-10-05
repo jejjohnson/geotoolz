@@ -31,7 +31,7 @@ __all__ = [
 def __getattr__(name: str):
     """Lazy load adapters that depend on optional extras.
 
-    Importing the adapter triggers the `_missing_extra` error path if
+    Importing the adapter triggers the `missing_extra` error path if
     the backend library isn't installed — but importing
     ``geopatcher.fields`` itself shouldn't, hence the lazy hook.
     """

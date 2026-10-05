@@ -88,6 +88,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
+from geopatcher._src._extras import missing_extra
+
 
 if TYPE_CHECKING:
     from georeader.geotensor import GeoTensor
@@ -151,17 +153,11 @@ async def _with_timeout(coro: Any, *, timeout: float | None, message: str) -> An
         ) from None
 
 
-_INSTALL_HINT = (
-    "ObstoreCogField requires the [obstore-cog] extra; install via "
-    "`pip install 'geopatcher[obstore-cog]'`."
-)
-
-
 def _require_async_tiff() -> Any:
     try:
         import async_tiff
     except ImportError as exc:
-        raise ImportError(_INSTALL_HINT) from exc
+        raise missing_extra("ObstoreCogField", "obstore-cog") from exc
     return async_tiff
 
 

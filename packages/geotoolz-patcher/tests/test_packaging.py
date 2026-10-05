@@ -22,6 +22,7 @@ import ast
 import re
 import sys
 import tomllib
+from collections.abc import Callable
 from functools import cache
 from pathlib import Path
 
@@ -250,3 +251,92 @@ def test_version_is_the_distribution_version() -> None:
     init = (SRC / "__init__.py").read_text(encoding="utf-8")
     assert f'__version__ = "{version}"  # x-release-please-version' in init
     assert geopatcher.__version__ == version
+
+
+def test_no_install_hint_names_the_import_package() -> None:
+    # `geopatcher` is the import name; pip only knows `geotoolz-patcher`.
+    stale = [
+        f"{path.relative_to(SRC.parent)}:{lineno}"
+        for path in sorted(SRC.rglob("*.py"))
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if re.search(r"(?<![\w-])geopatcher\[", line)
+    ]
+    assert not stale, f"install hints naming `geopatcher[...]`: {stale}"
+
+
+def _blocked(monkeypatch: pytest.MonkeyPatch, *modules: str) -> None:
+    """Make ``import <module>`` fail, as on an install without the extra."""
+    for name in list(sys.modules):
+        if name.split(".")[0] in modules:
+            monkeypatch.delitem(sys.modules, name)
+    for name in modules:
+        monkeypatch.setitem(sys.modules, name, None)
+
+
+def _xarray_field() -> None:
+    from geopatcher.fields import XarrayField
+
+    XarrayField(object())
+
+
+# Adapters that guard their import at module scope (an import that may
+# have run long before the test blocks the extra): the guarded name to
+# unset alongside blocking the import.
+_MODULE_GUARDS = {"grid": "geopatcher._src.fields.xarray.xr"}
+
+
+def _dask_delayed() -> None:
+    from geopatcher.dask import to_delayed
+
+    to_delayed(None, None)
+
+
+def _obstore_pool() -> None:
+    from geopatcher.objstore import clear_obstore_pool, get_obstore
+
+    clear_obstore_pool()
+    get_obstore("s3://bucket/key")
+
+
+def _streaming_writer() -> None:
+    import numpy as np
+
+    from geopatcher._src.spatial.aggregation import _open_zarr_array
+
+    _open_zarr_array(
+        "unused.zarr",
+        shape=(1,),
+        chunks=(1,),
+        dtype=np.dtype("f4"),
+        shard_shape=None,
+        overwrite=False,
+    )
+
+
+def _obstore_cog() -> None:
+    from geopatcher._src.fields.obstore_cog import _require_async_tiff
+
+    _require_async_tiff()
+
+
+@pytest.mark.parametrize(
+    ("extra", "blocked", "call"),
+    [
+        ("grid", ("xarray",), _xarray_field),
+        ("dask", ("dask",), _dask_delayed),
+        ("obstore", ("obstore",), _obstore_pool),
+        ("streaming", ("zarr",), _streaming_writer),
+        ("obstore-cog", ("async_tiff",), _obstore_cog),
+    ],
+)
+def test_missing_extra_error_names_the_distribution(
+    monkeypatch: pytest.MonkeyPatch,
+    extra: str,
+    blocked: tuple[str, ...],
+    call: Callable[[], None],
+) -> None:
+    _blocked(monkeypatch, *blocked)
+    if extra in _MODULE_GUARDS:
+        monkeypatch.setattr(_MODULE_GUARDS[extra], None)
+    with pytest.raises(ImportError, match=re.escape(f"'geotoolz-patcher[{extra}]'")):
+        call()
