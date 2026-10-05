@@ -463,6 +463,16 @@ def _store_identity(store: Any) -> str | None:
     return text
 
 
+def _options_digest(options: dict[str, Any] | None) -> str | None:
+    """sha256 of ``storage_options`` (sorted keys, ``repr`` values)."""
+    if not options:
+        return None
+    import hashlib
+
+    text = json.dumps(options, sort_keys=True, default=repr)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _reopen(url: str, options: dict[str, Any]) -> ObstoreCogField:
     """Unpickle hook: re-open the COG by URL (see `ObstoreCogField.__reduce__`)."""
     return ObstoreCogField.from_url(url, **options)
@@ -653,6 +663,10 @@ class ObstoreCogField:
         store_id = _store_identity(self.store) if explicit else None
         identity = {
             "url": None if explicit else self.url,
+            # Pooled stores are keyed on their options (endpoint, region,
+            # …): the same url can name different objects under different
+            # options. A digest, so credentials never reach the key.
+            "options": None if explicit else _options_digest(self.storage_options),
             "store": store_id,
             "path": self.path if explicit else None,
             "ifd_index": int(self.ifd_index),

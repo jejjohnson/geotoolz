@@ -665,3 +665,71 @@ def test_remote_encoding_source_is_an_identity(tmp_path) -> None:
     da.encoding["source"] = "https://example.com/data/scene.nc"
     field_id = PatchCache(tmp_path).field_id_for(XarrayField(da))
     assert field_id.startswith("url:https://example.com/data/scene.nc|")
+
+
+def test_rioxarray_nodata_and_attrs_are_in_the_key(tmp_path) -> None:
+    """Views differing only in ``rio.write_nodata`` / attrs get their own keys."""
+    rioxarray = pytest.importorskip("rioxarray")
+    from geopatcher.fields import RioXarrayField
+
+    path = _write_tif(tmp_path / "one_band.tif", np.ones((1, 16, 16), np.float32))
+    cache = PatchCache(tmp_path / "cache")
+    with rioxarray.open_rasterio(path) as da:
+        base = da.sel(band=1)
+        views = [
+            RioXarrayField(base.rio.write_nodata(-1.0)),
+            RioXarrayField(base.rio.write_nodata(-2.0)),
+            RioXarrayField(base.assign_attrs(source_note="b")),
+        ]
+        assert len({cache.field_id_for(v) for v in views}) == 3
+
+
+def test_tuple_dimension_names_round_trip(tmp_path) -> None:
+    """A hashable (tuple) dim name must come back as a tuple, not a list."""
+    from geopatcher import Patch
+
+    da = xr.DataArray(
+        np.arange(16.0).reshape(4, 4),
+        dims=(("y", 0), "x"),
+        coords={"x": np.arange(4.0)},
+    )
+    cache = PatchCache(tmp_path)
+    cache.put("f", "c", (0, 0), Patch(data=da, anchor=(0, 0), indices=None))
+    payload = cache.get("f", "c", (0, 0))
+    assert payload is not None  # not deleted as an "unusable" entry
+    got = cache.build_patch(payload, (0, 0), None).data
+    assert got.dims == (("y", 0), "x")
+    xr.testing.assert_identical(got, da)
+
+
+def test_pooled_cog_identity_covers_storage_options(tmp_path, monkeypatch) -> None:
+    """Same url, different pooled-store options: different objects, keys."""
+    import dataclasses
+
+    pytest.importorskip("obstore")
+    pytest.importorskip("async_tiff")
+    from obstore.store import LocalStore
+
+    from geopatcher.fields import ObstoreCogField
+
+    _write_tif(
+        tmp_path / "cog.tif",
+        np.zeros((1, 32, 32), np.uint16),
+        tiled=True,
+        blockxsize=16,
+        blockysize=16,
+    )
+    field = ObstoreCogField.from_url(
+        f"file://{tmp_path / 'cog.tif'}",
+        store=LocalStore(prefix=str(tmp_path)),
+        path="cog.tif",
+    )
+    # No HEAD against the made-up endpoints (the version hook arrives in #199).
+    monkeypatch.setattr(
+        ObstoreCogField, "_object_version", lambda self: "v1", raising=False
+    )
+    pooled = dataclasses.replace(field, store=None, path=None)
+    a = dataclasses.replace(pooled, storage_options={"endpoint": "https://a.example"})
+    b = dataclasses.replace(pooled, storage_options={"endpoint": "https://b.example"})
+    assert a.cache_id() != b.cache_id()
+    assert "https://a.example" not in a.cache_id()  # digested, never verbatim

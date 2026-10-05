@@ -445,8 +445,30 @@ def _read_signature(field: Any) -> dict[str, Any]:
                 str(name): _array_digest(coord.values)
                 for name, coord in data.coords.items()
             }
+            # Two views of one file can differ only in metadata the chips
+            # carry: ``rio.write_nodata`` (which also pads out-of-range
+            # windows) or other attrs / encoding.
+            rio = getattr(data, "rio", None)
+            if rio is not None:
+                with suppress(Exception):
+                    sig["nodata"] = _to_json(rio.nodata, what="rio.nodata")
+            sig["attrs"] = _metadata_digest(data.attrs, data.encoding)
             break
     return sig
+
+
+def _metadata_digest(*parts: Any) -> str:
+    """sha256 over ``repr`` of mappings, keys sorted (any value type)."""
+    h = hashlib.sha256()
+    for part in parts:
+        for key in sorted(part, key=repr):
+            h.update(repr(key).encode("utf-8"))
+            value = part[key]
+            if isinstance(value, np.ndarray):
+                h.update(_array_digest(value).encode())
+            else:
+                h.update(repr(value).encode("utf-8"))
+    return h.hexdigest()
 
 
 def _array_digest(values: Any) -> str:
@@ -587,7 +609,7 @@ def _dataarray_meta(da: Any, arrays: dict[str, Any]) -> dict[str, Any]:
         coords.append(
             {
                 "name": _to_json(name, what="DataArray coordinate name"),
-                "dims": list(coord.dims),
+                "dims": _to_json(list(coord.dims), what="dimension names"),
                 "attrs": _to_json(coord.attrs, what=f"attrs of coordinate {name!r}"),
                 "encoding": _to_json(
                     coord.encoding, what=f"encoding of coordinate {name!r}"
@@ -596,7 +618,7 @@ def _dataarray_meta(da: Any, arrays: dict[str, Any]) -> dict[str, Any]:
         )
     return {
         "name": _to_json(da.name, what="DataArray.name"),
-        "dims": list(da.dims),
+        "dims": _to_json(list(da.dims), what="dimension names"),
         "coords": coords,
         "attrs": _to_json(da.attrs, what="DataArray.attrs"),
         "encoding": _to_json(da.encoding, what="DataArray.encoding"),
@@ -610,7 +632,7 @@ def _dataarray_from(payload: dict[str, Any]) -> Any:
     coords = {}
     for i, c in enumerate(meta["coords"]):
         coords[_from_json(c["name"])] = xr.Variable(
-            c["dims"],
+            _from_json(c["dims"]),
             payload[f"coord_{i}"],
             attrs=_from_json(c["attrs"]),
             encoding=_from_json(c["encoding"]),
@@ -618,7 +640,7 @@ def _dataarray_from(payload: dict[str, Any]) -> Any:
     da = xr.DataArray(
         payload["values"],
         coords=coords,
-        dims=meta["dims"],
+        dims=_from_json(meta["dims"]),
         name=_from_json(meta["name"]),
         attrs=_from_json(meta["attrs"]),
     )
