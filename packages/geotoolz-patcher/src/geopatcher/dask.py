@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from geopatcher._src._extras import missing_extra
+
 
 def _patch_at(patcher: Any, field: Any, anchor: Any, **kwargs: Any) -> Any:
     return patcher.patch_at(field, anchor, **kwargs)
@@ -39,8 +41,8 @@ def _patch_keys(patcher: Any, field: Any, kwargs: dict[str, Any]) -> list[Any]:
 def _handles(patcher: Any, field: Any) -> tuple[Any, Any, Any]:
     try:
         from dask import delayed
-    except ImportError as exc:  # pragma: no cover
-        raise ImportError("Install geopatcher[dask] to use Dask helpers.") from exc
+    except ImportError as exc:
+        raise missing_extra("geopatcher.dask", "dask") from exc
     return (
         delayed,
         delayed(patcher, pure=True, traverse=False),
@@ -90,8 +92,8 @@ def to_dask_bag(patcher: Any, field: Any, **kwargs: Any) -> Any:
     """
     try:
         import dask.bag as db
-    except ImportError as exc:  # pragma: no cover
-        raise ImportError("Install geopatcher[dask] to use Dask bag helpers.") from exc
+    except ImportError as exc:
+        raise missing_extra("geopatcher.dask.to_dask_bag", "dask") from exc
 
     _, patcher_h, field_h = _handles(patcher, field)
     bag = db.from_sequence(_patch_keys(patcher, field, kwargs), partition_size=1)

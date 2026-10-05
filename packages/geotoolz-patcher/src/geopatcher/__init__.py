@@ -159,7 +159,7 @@ from geopatcher._src.time import (  # re-export of all temporal concretes + base
 )
 
 
-__version__ = "0.0.6"
+__version__ = "0.7.0"  # x-release-please-version
 
 __all__ = [
     "AsyncField",

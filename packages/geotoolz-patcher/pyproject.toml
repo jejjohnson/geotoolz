@@ -34,6 +34,14 @@ dependencies = [
     # so a slim install (without optional extras that would otherwise drag
     # it in transitively) still works.
     "typing-extensions>=4.0",
+    # Windowed reads in the matched-field / matched-patcher path import
+    # `rasterio.windows` at module scope. georeader pulls rasterio in too,
+    # but a module-scope import must not rely on a transitive dependency.
+    "rasterio>=1.3",
+    # CRS transforms in the coordinate samplers (`SpatialExplicitCoords`,
+    # `SpatialAlongTrack`), pyproj CRS round-trips in PatchCache, and the
+    # obstore COG reader's GeoKey decoding. A base dependency, so no extra
+    # repeats it.
     "pyproj>=3.6",
 ]
 
@@ -42,6 +50,10 @@ dependencies = [
 # the base install stays slim and the user only pays for the substrates
 # they actually use.
 grid = ["xarray>=2024.1"]
+# `georeader-spaceml` (a base dependency) already requires geopandas and
+# shapely, so a base install satisfies `[vector]` transitively. Keep the
+# extra and the import guards anyway: they name what the vector adapter
+# needs and stop the adapter silently breaking if georeader drops them.
 vector = ["geopandas>=0.14", "shapely>=2.0"]
 point = ["xvec>=0.4"]
 xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1"]
@@ -58,7 +70,6 @@ obstore = ["obstore>=0.9.5"]
 obstore-cog = [
     "obstore>=0.9.5",
     "async-tiff>=0.7",
-    "pyproj>=3.6",
 ]
 patch-full = [
     "xarray>=2024.1",
@@ -71,7 +82,6 @@ patch-full = [
     "jax>=0.4.23",
     "obstore>=0.9.5",
     "async-tiff>=0.7",
-    "pyproj>=3.6",
 ]
 # Operator-graph bridge: pull in `pipekit` and the ~125-LOC wrappers in
 # `geopatcher.integrations.pipekit` (GridSampler / ApplyToChips / Stitch).

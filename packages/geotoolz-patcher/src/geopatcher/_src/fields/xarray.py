@@ -5,7 +5,7 @@ output) and exposes it under the `Field` Protocol with a `GridDomain`
 view. The natural indexer is ``dict[str, slice]``, consumed by
 `DataArray.isel`.
 
-Optional extra: ``pip install 'geopatcher[grid]'``.
+Optional extra: ``pip install 'geotoolz-patcher[grid]'``.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from typing import Any
 
 import numpy as np
 
+from geopatcher._src._extras import missing_extra
 from geopatcher._src.domains import GridDomain
-from geopatcher._src.fields._extras import _missing_extra
 
 
 try:
@@ -44,7 +44,7 @@ class XarrayField:
 
     def __post_init__(self) -> None:
         if xr is None:
-            raise _missing_extra("XarrayField", "grid", "xarray>=2024.1")
+            raise missing_extra("XarrayField", "grid", "xarray>=2024.1")
 
     @cached_property
     def domain(self) -> GridDomain:

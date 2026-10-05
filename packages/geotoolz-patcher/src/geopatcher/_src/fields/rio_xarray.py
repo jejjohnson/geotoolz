@@ -5,7 +5,7 @@ unified xarray pipelines) instead of `GeoTensor`. The domain is still
 the raster one — affine + CRS + shape — so all `Rectangular` patching
 works the same.
 
-Optional extra: ``pip install 'geopatcher[xarray-raster]'``.
+Optional extra: ``pip install 'geotoolz-patcher[xarray-raster]'``.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 
-from geopatcher._src.fields._extras import _missing_extra
+from geopatcher._src._extras import missing_extra
 
 
 try:
@@ -41,7 +41,7 @@ class RioXarrayField:
 
     def __post_init__(self) -> None:
         if rioxarray is None:  # pragma: no cover
-            raise _missing_extra("RioXarrayField", "xarray-raster", "rioxarray>=0.15")
+            raise missing_extra("RioXarrayField", "xarray-raster", "rioxarray>=0.15")
 
     @property
     def domain(self) -> Any:

@@ -26,6 +26,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from geopatcher._src._extras import missing_extra
 from geopatcher._src._serialize import config_from_fields
 
 
@@ -802,7 +803,10 @@ def _open_zarr_array(
     overwrite: bool,
 ) -> Any:
     """Create a zero-filled zarr v3 array, refusing to replace one unless asked."""
-    import zarr
+    try:
+        import zarr
+    except ImportError as exc:
+        raise missing_extra("SpatialOverlapAdd(streaming=True)", "streaming") from exc
     from zarr.errors import (
         ContainsArrayAndGroupError,
         ContainsArrayError,

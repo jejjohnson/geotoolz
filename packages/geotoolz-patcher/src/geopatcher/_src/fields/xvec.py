@@ -4,7 +4,7 @@ The modern answer for stations / floats / swath samples with multiple
 variables and times. Built on `xvec`, which exposes a `geometry`
 coordinate on an `xarray.Dataset`.
 
-Optional extra: ``pip install 'geopatcher[point]'``.
+Optional extra: ``pip install 'geotoolz-patcher[point]'``.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from typing import Any
 
 import numpy as np
 
+from geopatcher._src._extras import missing_extra
 from geopatcher._src.domains import PointDomain
-from geopatcher._src.fields._extras import _missing_extra
 
 
 try:
@@ -47,7 +47,7 @@ class XvecField:
 
     def __post_init__(self) -> None:
         if xvec is None:
-            raise _missing_extra("XvecField", "point", "xvec>=0.4 scipy")
+            raise missing_extra("XvecField", "point", "xvec>=0.4 scipy")
 
     @cached_property
     def domain(self) -> PointDomain:
