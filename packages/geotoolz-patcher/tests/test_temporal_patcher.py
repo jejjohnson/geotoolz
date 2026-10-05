@@ -546,3 +546,467 @@ def test_merge_checks_streaming_safety() -> None:
             tp.merge([])
     finally:
         set_strict(False)
+
+
+# ---------------------------------------------------------------------------
+# #190 — TemporalPatcher parity with SpatialPatcher
+# ---------------------------------------------------------------------------
+
+
+class _Series:
+    """Array-like that records every read and fails on chosen steps."""
+
+    def __init__(
+        self, values: np.ndarray, fail_at: set[int] = frozenset(), fails: int = -1
+    ) -> None:
+        self.values = values
+        self.shape = values.shape
+        self.ndim = values.ndim
+        self.fail_at = fail_at
+        self.fails = fails  # remaining failures; -1 = always
+        self.reads: list[slice] = []
+
+    def __getitem__(self, idx: Any) -> np.ndarray:
+        s = idx[0] if isinstance(idx, tuple) else idx
+        self.reads.append(s)
+        if any(s.start <= t < s.stop for t in self.fail_at) and self.fails != 0:
+            self.fails -= 1
+            raise OSError(f"bad read {s}")
+        return self.values[idx]
+
+    def __array__(self, *args: Any, **kwargs: Any) -> np.ndarray:
+        raise AssertionError("the whole series must never be materialised")
+
+
+def _lookback(n: int = 3, **kwargs: Any) -> TemporalPatcher:
+    return TemporalPatcher(
+        TemporalFixedLookback(n),
+        TemporalRegularStride(1),
+        TemporalCausalBoxcar(),
+        TemporalMean(),
+        **kwargs,
+    )
+
+
+def test_split_reads_only_windows() -> None:
+    src = _Series(np.arange(10.0))
+    patches = list(_lookback().split(src))
+    assert [p.anchor for p in patches] == list(range(2, 10))
+    assert src.reads == [slice(a - 2, a + 1) for a in range(2, 10)]
+    assert all(isinstance(p.data, np.ndarray) for p in patches)
+
+
+@pytest.mark.parametrize("prefetch", [0, 2])
+def test_on_error_skip(prefetch: int) -> None:
+    # Regression (#190): a failing read aborted the whole split, prefetch or not.
+    tp = _lookback(on_error="skip")
+    src = _Series(np.arange(10.0), fail_at={5})
+    patches = list(tp.split(src, prefetch=prefetch))
+    # Windows [3,6), [4,7), [5,8) touch step 5.
+    assert [p.anchor for p in patches] == [2, 3, 4, 8, 9]
+    assert [r.anchor for r in tp.errors] == [5, 6, 7]
+    assert {r.kind for r in tp.errors} == {"OSError"}
+
+
+def test_on_error_raise_is_default() -> None:
+    with pytest.raises(OSError, match="bad read"):
+        list(_lookback().split(_Series(np.arange(10.0), fail_at={5})))
+
+
+def test_on_error_mask_yields_nan_window() -> None:
+    tp = _lookback(on_error="mask")
+    patches = list(tp.split(_Series(np.arange(12.0).reshape(6, 2), fail_at={4})))
+    by_anchor = {p.anchor: p for p in patches}
+    assert sorted(by_anchor) == [2, 3, 4, 5]
+    assert by_anchor[4].data.shape == (3, 2)
+    assert np.isnan(by_anchor[4].data).all()
+    np.testing.assert_array_equal(by_anchor[3].data, np.arange(2.0, 8.0).reshape(3, 2))
+    assert len(tp.errors) == 2  # anchors 4 and 5
+
+
+def test_on_error_retry_recovers() -> None:
+    tp = _lookback(on_error="retry", max_retries=2)
+    src = _Series(np.arange(6.0), fail_at={3}, fails=1)
+    patches = list(tp.split(src))
+    assert [p.anchor for p in patches] == [2, 3, 4, 5]
+    assert [(r.anchor, r.retry_count) for r in tp.errors] == [(3, 0)]
+
+
+def test_on_error_policy_validated() -> None:
+    with pytest.raises(ValueError, match="on_error"):
+        _lookback(on_error="ignore")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="max_retries"):
+        _lookback(max_retries=-1)
+
+
+def test_hooks_see_skipped_errors() -> None:
+    events: list[tuple[str, Any]] = []
+
+    class Hook:
+        def on_patch_start(self, anchor: Any, coord_value: Any = None) -> None:
+            events.append(("start", (anchor, coord_value)))
+
+        def on_error(self, anchor: Any, exc: Exception) -> None:
+            events.append(("error", anchor))
+
+    tp = _lookback(on_error="skip")
+    coord = np.arange(100, 106)
+    list(tp.split(_Series(np.arange(6.0), fail_at={5}), coord=coord, hooks=[Hook()]))
+    assert ("start", (3, 103)) in events
+    assert [a for kind, a in events if kind == "error"] == [5]
+
+
+def test_journal_skips_completed_keys(tmp_path: Any) -> None:
+    from geopatcher import PatchJournal
+
+    journal = PatchJournal(str(tmp_path / "run.jsonl"))
+    tp = TemporalPatcher(
+        TemporalMultiScale([2, 3]),
+        TemporalExplicit(times=[4, 6]),
+        TemporalCausalBoxcar(),
+        TemporalMean(),
+    )
+    x = np.arange(10.0)
+    keys = tp.patch_anchors(x)
+    assert keys == [(4, 0), (4, 1), (6, 0), (6, 1)]
+    journal.commit((4, 1), status="ok", runtime_s=0.0)
+    got = [(p.anchor, p.window_index) for p in tp.split(x, journal=journal)]
+    assert got == [(4, 0), (6, 0), (6, 1)]
+
+
+def test_cache_serves_second_split_without_reads(tmp_path: Any) -> None:
+    from geopatcher import PatchCache
+
+    cache = PatchCache(tmp_path, field_id="series")
+    tp = _lookback()
+    first = list(tp.split(_Series(np.arange(8.0)), cache=cache))
+    src = _Series(np.arange(8.0))
+    second = list(tp.split(src, cache=cache))
+    assert src.reads == []
+    for a, b in zip(first, second, strict=True):
+        assert (a.anchor, a.indices, a.window_index) == (
+            b.anchor,
+            b.indices,
+            b.window_index,
+        )
+        np.testing.assert_array_equal(a.data, b.data)
+        np.testing.assert_array_equal(a.weights, b.weights)
+    # time_axis is part of the key: a transposed read misses.
+    src_t = _Series(np.arange(16.0).reshape(2, 8))
+    list(tp.split(src_t, time_axis=1, cache=cache))
+    assert len(src_t.reads) == 6
+
+
+def test_backpressure_slots_are_owned_and_released() -> None:
+    tp = _lookback()
+    it = tp.split(np.arange(8.0), max_in_flight=1)
+    first = next(it)
+    assert first._release is not None
+    first.close()
+    second = next(it)
+    second.close()
+    with pytest.raises(ValueError, match="max_in_flight must be >= 1"):
+        tp.split(np.arange(8.0), max_in_flight=0)
+    with pytest.raises(ValueError, match="exceeding max_in_flight_bytes"):
+        list(tp.split(np.arange(8.0), max_in_flight_bytes=8))
+
+
+def test_reduce_closes_patches_under_backpressure() -> None:
+    tp = _lookback()
+    x = np.arange(10.0)
+    out = tp.reduce(x, TemporalMean(time_len=10), max_in_flight=1)
+    np.testing.assert_allclose(out[2:], x[2:])
+
+
+def test_two_pass_standardises() -> None:
+    from geopatcher._src.time.aggregation import TemporalAggregation
+
+    class MeanStd(TemporalAggregation):
+        streaming_safe = True
+
+        def merge(self, patches: Any) -> dict[str, float]:
+            vals = np.concatenate([np.asarray(p.data) for p in patches])
+            return {"mean": float(vals.mean()), "std": float(vals.std())}
+
+    tp = TemporalPatcher(
+        TemporalFixedLookback(2),
+        TemporalRegularStride(step=2, start=1),
+        TemporalCausalBoxcar(),
+        TemporalMean(time_len=8),
+    )
+    x = np.arange(8.0)
+    out = tp.two_pass(
+        x, reduce_with=MeanStd(), apply=lambda d, s: (d - s["mean"]) / s["std"]
+    )
+    np.testing.assert_allclose(out, (x - x.mean()) / x.std())
+
+
+def test_asplit_and_amerge() -> None:
+    import asyncio
+
+    tp = _lookback()
+    x = np.arange(10.0)
+
+    async def run() -> Any:
+        patches = [p async for p in tp.asplit(x, prefetch=2)]
+        assert [p.anchor for p in patches] == list(range(2, 10))
+
+        async def stream() -> Any:
+            async for p in tp.asplit(x):
+                yield p
+
+        return await TemporalPatcher(
+            TemporalFixedLookback(3),
+            TemporalRegularStride(1),
+            TemporalCausalBoxcar(),
+            TemporalMean(time_len=10),
+        ).amerge(stream())
+
+    out = asyncio.run(run())
+    np.testing.assert_allclose(out[2:], x[2:])
+
+
+def test_to_dask_bag_matches_split() -> None:
+    pytest.importorskip("dask.bag")
+    tp = TemporalPatcher(
+        TemporalMultiScale([2, 3]),
+        TemporalRegularStride(3),
+        TemporalCausalBoxcar(),
+        TemporalMean(),
+    )
+    x = np.arange(20.0).reshape(2, 10)
+    got = tp.to_dask_bag(x, time_axis=1).compute()
+    ref = list(tp.split(x, time_axis=1))
+    assert len(got) == len(ref)
+    for a, b in zip(got, ref, strict=True):
+        assert (a.anchor, a.indices) == (b.anchor, b.indices)
+        np.testing.assert_array_equal(a.data, b.data)
+    assert len(tp.to_delayed(x, time_axis=1)) == len(ref)
+
+
+def test_xarray_field_is_read_through_select() -> None:
+    xr = pytest.importorskip("xarray")
+    from geopatcher import XarrayField
+
+    da = xr.DataArray(
+        np.arange(20.0).reshape(10, 2),
+        dims=("time", "band"),
+        coords={"time": np.arange(10) * 6},
+    )
+    field = XarrayField(da)
+    selected: list[Any] = []
+    real = field.select
+
+    def spy(indexer: Any) -> Any:
+        selected.append(indexer)
+        return real(indexer)
+
+    field.select = spy  # type: ignore[method-assign]
+    patches = list(_lookback().split(field))
+    assert selected[0] == {"time": slice(0, 3)}
+    assert len(selected) == len(patches) == 8
+    np.testing.assert_array_equal(patches[0].data, da.values[0:3])
+    assert patches[0].data.dims == ("time", "band")
+
+
+def test_field_supplies_stencil_coord() -> None:
+    xr = pytest.importorskip("xarray")
+    from geopatcher import XarrayField
+    from geopatcher.time import Stencil, TemporalStencilGeometry, TemporalStencilSampler
+
+    stencil = Stencil(-12, 0, 6, closed="both")
+    da = xr.DataArray(
+        np.arange(10.0), dims=("time",), coords={"time": np.arange(10) * 6}
+    )
+    tp = TemporalPatcher(
+        TemporalStencilGeometry(stencil=stencil),
+        TemporalStencilSampler(stencil=stencil),
+        TemporalCausalBoxcar(),
+        TemporalMean(),
+    )
+    patches = list(tp.split(XarrayField(da)))
+    assert [p.indices for p in patches] == [slice(a - 2, a + 1) for a in range(2, 10)]
+
+
+def test_non_grid_field_rejected() -> None:
+    class RasterLike:
+        domain = object()
+
+        def select(self, indexer: Any) -> Any:
+            return None
+
+    with pytest.raises(TypeError, match="GridDomain"):
+        _lookback().n_anchors(RasterLike())
+
+
+@pytest.mark.parametrize(
+    ("coord", "match"),
+    [
+        (np.arange(10)[::-1], "strictly increasing"),
+        (np.zeros((10, 1)), "1-D"),
+        (np.arange(9), "coord length"),
+    ],
+)
+def test_coord_validated_once_up_front(coord: Any, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        _lookback().split(np.arange(10.0), coord=coord)
+
+
+def test_coord_accepts_a_list() -> None:
+    # Regression (#190): `coord=[...]` raised AttributeError on `.ndim`.
+    events: list[Any] = []
+
+    class Hook:
+        def on_patch_start(self, anchor: Any, coord_value: Any = None) -> None:
+            events.append(coord_value)
+
+    list(_lookback().split(np.arange(4.0), coord=[10, 11, 12, 13], hooks=[Hook()]))
+    assert events == [12, 13]
+
+
+def test_stencil_pipeline_rejects_irregular_coord_at_entry() -> None:
+    from geopatcher.time import Stencil, TemporalStencilGeometry, TemporalStencilSampler
+
+    stencil = Stencil(-1, 0, 1, closed="both")
+    tp = TemporalPatcher(
+        TemporalStencilGeometry(stencil=stencil),
+        TemporalStencilSampler(stencil=stencil),
+        TemporalCausalBoxcar(),
+        TemporalMean(),
+    )
+    with pytest.raises(ValueError, match="evenly spaced"):
+        tp.split(np.arange(5.0), coord=np.array([0, 1, 2, 4, 5]))
+
+
+@pytest.mark.parametrize("every", [0, -1, 1.5])
+def test_stencil_sampler_every_validated(every: Any) -> None:
+    from geopatcher.time import Stencil, TemporalStencilSampler
+
+    with pytest.raises(ValueError, match="every"):
+        TemporalStencilSampler(stencil=Stencil(-1, 0, 1, closed="both"), every=every)
+
+
+def test_time_axis_is_keyword_only() -> None:
+    with pytest.raises(TypeError):
+        _lookback().split(np.arange(5.0), 0)  # type: ignore[misc]
+
+
+def test_check_full_scan() -> None:
+    from geopatcher import IncompleteScanConfiguration
+
+    def patcher(step: int, start: int, boundary: str) -> TemporalPatcher:
+        return TemporalPatcher(
+            TemporalFixedLookback(4, boundary=boundary),  # type: ignore[arg-type]
+            TemporalRegularStride(step=step, start=start, check_full_scan=True),
+            TemporalCausalBoxcar(),
+            TemporalMean(),
+        )
+
+    x = np.arange(12.0)
+    # Anchors 3, 7, 11 tile [0, 12) exactly.
+    assert len(list(patcher(4, 3, "drop").split(x))) == 3
+    # Anchors 0, 4, 8: anchor 0's lookback is dropped and nothing ends at
+    # the last step, so steps 0 and 9..11 are never read.
+    with pytest.raises(IncompleteScanConfiguration, match=r"first: \[0, 9, 10, 11\]"):
+        list(patcher(4, 0, "drop").split(x))
+    # On 9 steps the same anchors cover everything once the head shrinks.
+    with pytest.raises(IncompleteScanConfiguration, match=r"first: \[0\]"):
+        list(patcher(4, 0, "drop").split(x[:9]))
+    assert len(list(patcher(4, 0, "shrink").split(x[:9]))) == 3
+    # A stride longer than the window skips steps.
+    with pytest.raises(ValueError, match="uncovered"):
+        list(patcher(5, 3, "drop").split(x))
+
+
+def test_incomplete_scan_is_a_value_error() -> None:
+    from geopatcher import IncompleteScanConfiguration
+
+    assert issubclass(IncompleteScanConfiguration, ValueError)
+
+
+class TestSamplerParity:
+    def test_causal_rolling_is_regular_stride(self) -> None:
+        from geopatcher import TemporalCausalRolling
+
+        assert TemporalCausalRolling is TemporalRegularStride
+        assert list(TemporalCausalRolling(step=3, start=2).anchors(10)) == [2, 5, 8]
+
+    def test_event_triggered_is_explicit(self) -> None:
+        from geopatcher import TemporalEventTriggered
+
+        assert TemporalEventTriggered is TemporalExplicit
+        assert list(TemporalEventTriggered(times=[7, -1, 3, 40]).anchors(10)) == [7, 3]
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda: TemporalRegularStride(step=0),
+            lambda: TemporalRegularStride(step=-1),
+            lambda: TemporalRegularStride(start=-2),
+        ],
+    )
+    def test_regular_stride_validated(self, make: Any) -> None:
+        with pytest.raises(ValueError):
+            make()
+
+    def test_random_n_samples(self) -> None:
+        from geopatcher import TemporalRandom
+
+        draws = list(TemporalRandom(n_samples=50, seed=0).anchors(10))
+        assert len(draws) == 50
+        assert all(0 <= d < 10 for d in draws)
+        assert len(set(draws)) < 50  # with replacement
+        assert draws != sorted(draws)  # draw order, not sorted
+        with pytest.raises(ValueError, match="n_samples"):
+            TemporalRandom(n_samples=-1)
+
+
+class TestWindowParity:
+    def test_exponential_decay_rejects_non_positive_tau(self) -> None:
+        for tau in (0.0, -1.0):
+            with pytest.raises(ValueError, match="tau"):
+                TemporalExponentialDecay(tau=tau)
+
+    def test_tapered_tukey_keeps_newest_step(self) -> None:
+        from geopatcher import TemporalTaperedTukey
+
+        g = TemporalFixedLookback(4)
+        w = TemporalTaperedTukey(alpha=0.5).weights(g, 4)
+        # x = (k + 1) / 4 = .25, .5, .75, 1: only .25 < alpha tapers.
+        np.testing.assert_allclose(w, [0.5, 1.0, 1.0, 1.0])
+        full = TemporalTaperedTukey(alpha=1.0).weights(g, 4)
+        np.testing.assert_allclose(
+            full, 0.5 * (1 - np.cos(np.pi * np.array([0.25, 0.5, 0.75, 1.0])))
+        )
+        assert full[-1] == 1.0
+        np.testing.assert_array_equal(
+            TemporalTaperedTukey(alpha=0.0).weights(g, 3), 1.0
+        )
+        with pytest.raises(ValueError, match="alpha"):
+            TemporalTaperedTukey(alpha=1.5)
+
+    def test_periodic_is_a_tagged_boxcar(self) -> None:
+        from geopatcher import TemporalPeriodic
+
+        w = TemporalPeriodic(period=24)
+        assert isinstance(w, TemporalCausalBoxcar)
+        np.testing.assert_array_equal(w.weights(TemporalFixedLookback(3), 3), 1.0)
+        assert w.get_config() == {"period": 24}
+        with pytest.raises(ValueError, match="period"):
+            TemporalPeriodic(period=0)
+
+
+def test_patches_at_and_patch_at_read_one_anchor() -> None:
+    src = _Series(np.arange(10.0))
+    tp = TemporalPatcher(
+        TemporalMultiScale([2, 4]),
+        TemporalRegularStride(1),
+        TemporalCausalBoxcar(),
+        TemporalMean(),
+    )
+    patches = tp.patches_at(src, 6)
+    assert [p.indices for p in patches] == [slice(5, 7), slice(3, 7)]
+    assert src.reads == [slice(5, 7), slice(3, 7)]
+    assert tp.patch_at(src, (6, 1)).indices == slice(3, 7)
+    with pytest.raises(ValueError, match=r"pass \(6, k\)"):
+        tp.patch_at(src, 6)

@@ -225,14 +225,24 @@ class TestTemporalPatcher:
         with pytest.raises(ValueError, match="out of range"):
             tp.patch_at(np.arange(40.0), (7, 2))
 
-    def test_patch_cache_rejected_without_cache_kwarg(self, tmp_path) -> None:
-        # `TemporalPatcher.patch_at` takes no ``cache=``; the view must not
-        # pass it one (and says so up front rather than on every item).
+    def test_patch_cache_serves_temporal_patches(self, tmp_path) -> None:
+        # `TemporalPatcher.patch_at` takes ``cache=`` / ``field_id=`` (#190),
+        # so the view's on-disk cache mode works for temporal patchers too.
         from geopatcher import PatchCache
 
-        tp = _temporal(TemporalFixedLookback(length=5))
-        with pytest.raises(TypeError, match="accepts a cache"):
-            IndexedPatchView(tp, np.arange(30.0), cache=PatchCache(tmp_path))
+        cache = PatchCache(tmp_path, field_id="series")
+        series = np.arange(30.0)
+        tp = _temporal(TemporalMultiScale(scales=[2, 5]))
+        first = IndexedPatchView(tp, series, cache=cache)
+        expected = list(tp.split(series))
+        _assert_matches_split(first, expected)
+        assert cache.stats()["misses"] == len(expected)
+        again = IndexedPatchView(tp, series, cache=cache)
+        _assert_matches_split(again, expected)
+        assert cache.stats()["hits"] == len(expected)
+        assert [again[i].window_index for i in range(len(again))] == [
+            p.window_index for p in expected
+        ]
 
     def test_in_memory_cache_works(self) -> None:
         tp = _temporal(TemporalFixedLookback(length=5))

@@ -60,13 +60,16 @@ def divide_evenly(
 ) -> np.ndarray:
     """Compute ``round(x / y)`` and verify the result is exact.
 
-    For `timedelta64`/`datetime64` operands the equality is exact (NumPy
+    Operands are numbers or `timedelta64` durations (both of the same
+    kind). For `timedelta64` operands the equality is exact (NumPy
     promotes both sides to a common resolution before the integer
-    comparison). For float operands we allow ``1e-6`` slack.
+    comparison). For float operands we allow ``1e-6`` slack. A
+    `datetime64` is a point in time, not a duration — subtract an origin
+    first.
 
     Args:
         x: Numerator. May be scalar or array-like.
-        y: Denominator. Scalar or broadcastable to ``x``.
+        y: Denominator. Scalar or broadcastable to ``x``; must be non-zero.
         label: Short noun describing what ``y`` represents — used in the
             error message so callers see e.g. ``"step"`` rather than just
             the raw value. Defaults to ``"value"``.
@@ -75,11 +78,26 @@ def divide_evenly(
         The integer quotient as ``np.ndarray`` of dtype ``int``.
 
     Raises:
-        ValueError: If ``y`` does not evenly divide ``x``. The message names
-            both operands so unit mismatches are obvious from the traceback.
+        ValueError: If ``y`` is zero or does not evenly divide ``x``. The
+            message names both operands so unit mismatches are obvious from
+            the traceback.
+        TypeError: If either operand is a `datetime64`, or one is a
+            `timedelta64` and the other is not.
     """
     x = np.asarray(x)
     y = np.asarray(y)
+    if x.dtype.kind == "M" or y.dtype.kind == "M":
+        raise TypeError(
+            f"divide_evenly takes durations, not datetime64 points in time: "
+            f"{x!r} / {y!r}; subtract an origin first."
+        )
+    if (x.dtype.kind == "m") != (y.dtype.kind == "m"):
+        raise TypeError(
+            f"divide_evenly needs both operands to be timedelta64 or both "
+            f"numeric; got {x.dtype} / {y.dtype} ({label})"
+        )
+    if np.any(y == y.dtype.type(0)):
+        raise ValueError(f"{label} must be non-zero; got {y!r}")
     q = np.around(x / y).astype(int)
     if np.issubdtype(x.dtype, np.timedelta64):
         uneven = q * y != x
@@ -108,9 +126,16 @@ class Stencil:
             for the degenerate single-point stencil ``start == stop`` and
             ``step == 0`` with ``closed="both"``.
         step: Spacing between sample points in coordinate units. Must be
-            strictly positive when ``start < stop``.
+            strictly positive and evenly divide ``stop - start`` when
+            ``start < stop``.
         closed: Which endpoints are included. One of ``"left"``, ``"right"``,
             ``"both"``, ``"neither"``. Defaults to ``"left"``.
+
+    Raises:
+        ValueError: On an invalid ``closed``, ``start > stop``, a
+            non-positive or uneven ``step``, or a stencil whose closedness
+            trim leaves no sample point (``Stencil(-1, 0, 1, closed="neither")``).
+        TypeError: If the three fields mix `timedelta64` and plain numbers.
 
     Examples:
         >>> Stencil(start=-2, stop=2, step=0.5, closed='both').points
@@ -131,6 +156,14 @@ class Stencil:
                 object.__setattr__(self, name, _to_timedelta64(value))
         if self.closed not in {"left", "right", "both", "neither"}:
             raise ValueError(f"invalid value for closed: {self.closed!r}")
+        kinds = {
+            np.asarray(v).dtype.kind == "m" for v in (self.start, self.stop, self.step)
+        }
+        if len(kinds) > 1:
+            raise TypeError(
+                "Stencil start / stop / step must all be timedelta64 or all "
+                f"numbers; got {self.start!r}, {self.stop!r}, {self.step!r}"
+            )
         if self.start == self.stop:
             if self.step != self.stop - self.start:
                 raise ValueError(
@@ -155,6 +188,12 @@ class Stencil:
             if self.step <= zero:
                 raise ValueError(
                     f"step must be strictly positive when start < stop: {self.step=}"
+                )
+            if len(self.points) == 0:
+                raise ValueError(
+                    f"Stencil({self.start!r}, {self.stop!r}, {self.step!r}, "
+                    f"closed={self.closed!r}) has no sample points after the "
+                    "closedness trim; widen it or include an endpoint."
                 )
 
     @property
@@ -374,6 +413,62 @@ def build_sampling_slices(
     ]
 
 
+def coord_step(source_points: np.typing.ArrayLike) -> Any:
+    """Validate a 1-D, strictly increasing, evenly spaced coord; return its step.
+
+    The one O(N) pass the stencil path needs per coordinate vector: with
+    the step known, every window is resolved arithmetically by
+    `stencil_offsets` instead of re-validating the coordinate per origin.
+
+    Raises:
+        ValueError: For a non-1-D coordinate, fewer than two points, or
+            points that are not strictly increasing or evenly spaced.
+    """
+    points = np.asarray(source_points)
+    if points.ndim != 1:
+        raise ValueError(f"coord must be 1-D; got shape {points.shape}.")
+    if points.shape[0] < 2:
+        raise ValueError(
+            f"coord needs at least two points to define a step; got {points.shape[0]}."
+        )
+    steps = np.diff(points)
+    if not np.all(steps > steps.dtype.type(0)):
+        raise ValueError(
+            "coord must be strictly increasing (sorted ascending, no "
+            "duplicates); reverse a descending axis first."
+        )
+    step = steps[0]
+    if np.any(steps != step):
+        raise ValueError(
+            f"coord must be evenly spaced; first step {step!r}, found "
+            f"{np.unique(steps)[:5]!r}."
+        )
+    return step
+
+
+def stencil_offsets(stencil: Stencil, source_step: Any) -> tuple[int, int, int]:
+    """``(lo, hi, stride)`` index offsets of ``stencil`` on a ``source_step`` grid.
+
+    The window at origin index ``i`` of an evenly spaced coordinate is
+    ``slice(i + lo, i + hi, stride)`` — exactly what `build_sampling_slices`
+    returns for that origin, computed in O(1).
+
+    Raises:
+        ValueError: If ``source_step`` does not evenly divide the stencil's
+            bounds or step.
+    """
+    lo = int(divide_evenly(stencil.start, source_step, label="source_step").item())
+    hi = int(divide_evenly(stencil.stop, source_step, label="source_step").item())
+    if not stencil.includes_start:
+        lo += 1
+    if stencil.includes_stop:
+        hi += 1
+    stride = max(
+        int(divide_evenly(stencil.step, source_step, label="source_step").item()), 1
+    )
+    return lo, hi, stride
+
+
 def valid_origin_points(
     source_points: np.typing.ArrayLike, stencil: Stencil
 ) -> np.ndarray:
@@ -411,6 +506,8 @@ __all__ = [
     "Stencil",
     "TimeStencil",
     "build_sampling_slices",
+    "coord_step",
     "divide_evenly",
+    "stencil_offsets",
     "valid_origin_points",
 ]

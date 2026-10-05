@@ -214,12 +214,13 @@ EXAMPLES: list[Any] = [
     TemporalMultiScale(scales=[2, 4, 8]),
     TemporalStencilGeometry(stencil=_stencil(), source_step=np.timedelta64(1, "h")),
     TemporalStencilGeometry(stencil=_stencil()),
+    TemporalStencilGeometry(stencil=_stencil(), boundary="shrink"),
     TemporalPhaseWindow(period=24, phase_width=2),
     # -- temporal samplers
     TemporalRegularStride(step=2),
     TemporalCausalRolling(step=1, start=3),
-    TemporalEventTriggered(event_times=[3, 5, 7]),
-    TemporalRandom(n=4, seed=0),
+    TemporalEventTriggered(times=[3, 5, 7]),
+    TemporalRandom(n_samples=4, seed=0),
     TemporalStencilSampler(stencil=_stencil(), every=2, shuffle=True, seed=0),
     TemporalExplicit(times=[0, 4, 8]),
     # -- temporal windows
@@ -248,6 +249,16 @@ EXAMPLES: list[Any] = [
         on_error="skip",
     ),
     _temporal_patcher(),
+    TemporalPatcher(
+        geometry=TemporalFixedLookback(length=4),
+        sampler=TemporalRegularStride(step=2, start=3, check_full_scan=False),
+        window=TemporalCausalBoxcar(),
+        aggregation=TemporalMean(),
+        on_error="retry",
+        max_retries=1,
+        retry_on=(OSError, "TimeoutError"),
+        capture_traceback=False,
+    ),
     TemporalPatcher(
         geometry=TemporalStencilGeometry(stencil=_stencil()),
         sampler=TemporalStencilSampler(stencil=_stencil()),
@@ -516,9 +527,7 @@ class TestSummaryConfigs:
 
     def test_array_backed_axes_dump_their_values(self) -> None:
         assert TemporalExplicit(times=[0, 4]).get_config() == {"times": [0, 4]}
-        assert TemporalEventTriggered(event_times=[3]).get_config() == {
-            "event_times": [3]
-        }
+        assert TemporalEventTriggered(times=[3]).get_config() == {"times": [3]}
         cfg = SpatialExplicitCoords(coords=[(3.0, 4.0)]).get_config()
         assert cfg["coords"] == [[3.0, 4.0]]
 

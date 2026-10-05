@@ -973,8 +973,16 @@ class AsyncSpatialPatcher:
 
 _STREAM_END = object()
 
+_NO_DOMAIN: Any = object()
+"""``domain`` sentinel for aggregations whose ``merge`` takes no domain.
 
-def _check_streaming(aggregation: SpatialAggregation, *, stacklevel: int) -> None:
+`TemporalAggregation.merge(patches)` has no domain argument; passing
+``_NO_DOMAIN`` lets `TemporalPatcher` reuse `_merge_with_hooks` /
+`_amerge_with_hooks` (hooks, streaming check, async adapter) unchanged.
+"""
+
+
+def _check_streaming(aggregation: Any, *, stacklevel: int) -> None:
     """Run the strict / streaming-safety check, warning at the caller's caller.
 
     ``stacklevel`` counts like `warnings.warn`'s, from this helper's
@@ -987,7 +995,7 @@ def _check_streaming(aggregation: SpatialAggregation, *, stacklevel: int) -> Non
 
 
 def _merge_with_hooks(
-    aggregation: SpatialAggregation,
+    aggregation: Any,
     patches: Iterable[Any],
     domain: Any,
     hooks: Iterable[PatcherHook] | None,
@@ -996,6 +1004,7 @@ def _merge_with_hooks(
 ) -> Any:
     """``aggregation.merge`` inside the merge hook events and the streaming check.
 
+    ``domain`` is `_NO_DOMAIN` for a temporal aggregation (``merge(patches)``).
     ``stacklevel`` is relative to this helper's caller (see
     `_check_streaming`); ``None`` skips the check because the caller
     already ran it on the user's frame.
@@ -1005,7 +1014,10 @@ def _merge_with_hooks(
     if stacklevel is not None:
         _check_streaming(aggregation, stacklevel=stacklevel + 1)
     try:
-        output = aggregation.merge(patches, domain)
+        if domain is _NO_DOMAIN:
+            output = aggregation.merge(patches)
+        else:
+            output = aggregation.merge(patches, domain)
     except Exception as exc:
         _dispatch(hook_list, "on_error", None, exc)
         raise
@@ -1014,7 +1026,7 @@ def _merge_with_hooks(
 
 
 async def _amerge_with_hooks(
-    aggregation: SpatialAggregation,
+    aggregation: Any,
     patches: AsyncIterable[Any] | Iterable[Any],
     domain: Any,
     hooks: Iterable[PatcherHook] | None,
@@ -1224,15 +1236,46 @@ def _build_patch_with_policy(
     placeholder (or a skipped ``None``) is ``False`` so callers never
     persist it in a `PatchCache`.
     """
-    retries = max_retries if on_error == "retry" else 0
     indices = geometry.neighborhood(domain, anchor)
     pad_value = getattr(geometry, "pad_value", None)
+    return _read_with_policy(
+        lambda: _build_patch_from_indices(
+            field, domain, anchor, indices, base_weights, boundary, pad_value
+        ),
+        mask=lambda: _build_mask_patch(domain, anchor, indices, base_weights, boundary),
+        anchor=anchor,
+        on_error=on_error,
+        max_retries=max_retries,
+        retry_on=retry_on,
+        errors=errors,
+        capture_traceback=capture_traceback,
+    )
+
+
+def _read_with_policy[T](
+    read: Callable[[], T],
+    *,
+    mask: Callable[[], T],
+    anchor: Any,
+    on_error: OnErrorPolicy,
+    max_retries: int,
+    retry_on: tuple[type[BaseException] | str, ...],
+    errors: list[PatchErrorRecord],
+    capture_traceback: bool = True,
+) -> tuple[T | None, bool]:
+    """Run one patch ``read`` under the ``on_error`` policy.
+
+    The policy loop every sync patcher shares (`SpatialPatcher`,
+    `TemporalPatcher`). Returns ``(patch, read_ok)``: ``read_ok`` is
+    ``True`` only when ``read`` itself succeeded. A ``"mask"``
+    placeholder (from ``mask``) or a skipped ``None`` is ``False`` so
+    callers never persist it in a `PatchCache`. Failures are recorded in
+    ``errors`` keyed by ``anchor``.
+    """
+    retries = max_retries if on_error == "retry" else 0
     for retry_count in range(retries + 1):
         try:
-            patch = _build_patch_from_indices(
-                field, domain, anchor, indices, base_weights, boundary, pad_value
-            )
-            return patch, True
+            return read(), True
         except Exception as exc:
             # Preserve KeyboardInterrupt/SystemExit by handling only Exception.
             if isinstance(exc, StopIteration):
@@ -1241,16 +1284,12 @@ def _build_patch_with_policy(
                 raise
             _record_patch_error(errors, anchor, exc, retry_count, capture_traceback)
             if on_error == "mask":
-                placeholder = _build_mask_patch(
-                    domain, anchor, indices, base_weights, boundary
-                )
-                return placeholder, False
+                return mask(), False
             if on_error == "retry":
                 if not _matches_retry_on(exc, retry_on):
                     raise
                 if retry_count < retries:
                     continue
-                return None, False
             return None, False
     return None, False
 

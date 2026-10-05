@@ -8,14 +8,13 @@ modules and benefits from `except SpecificError:` filtering.
 from __future__ import annotations
 
 
-class IncompleteScanConfiguration(Exception):
+class IncompleteScanConfiguration(ValueError):
     """A sampler's ``(size, step)`` does not exactly tile the domain.
 
-    Raised by `SpatialRegularStride(check_full_scan=True)` (and any
-    follow-up sampler that opts into the same strict-tiling contract).
-    The temporal counterpart raises a plain `ValueError` via
-    `divide_evenly` because the tiling check is part of the math, not a
-    sampler-level config; both serve the same robustness role.
+    Raised by `SpatialRegularStride(check_full_scan=True)` and by
+    `TemporalPatcher` when its `TemporalRegularStride(check_full_scan=True)`
+    windows leave time steps uncovered. A `ValueError`, so a plain
+    ``except ValueError:`` catches it too.
 
     Mirrors `xrpatcher`'s exception of the same name so migration paths
     can keep their existing ``except IncompleteScanConfiguration:``
