@@ -39,7 +39,7 @@ augmented_patch = augment(training_patch, seed=0)
 | RS-specific | `patch` | `SunAngleJitter(delta_sza_deg=(-3, 3))(patch, seed=0)` rescales reflectance for a simulated SZA shift. |
 | RS-specific | `patch` | `AtmosphericHaze(intensity=(0, 0.05))(patch, seed=0)` adds stronger haze to shorter wavelengths. |
 | RS-specific | `patch` | `SimulatedClouds(coverage=(0, 0.2))(patch, seed=0)` blends in a smooth synthetic cloud field. |
-| Mixing | `patch` | `CutMix(pool=[other_patch], p=0.5)(patch, seed=0)` pastes a rectangle from a pool sample on the same pixel grid (shape, CRS and transform). |
+| Mixing | `patch`, `*pool` | `CutMix(p=0.5)(patch, other_patch, seed=0)` pastes a rectangle from a donor drawn from the positional pool, every donor on the same pixel grid (shape, CRS and transform). |
 
 ## Seeding contract
 

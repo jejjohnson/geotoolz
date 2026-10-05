@@ -49,7 +49,7 @@ from geotoolz._src.bands import band_count
 from geotoolz._src.blending import normalize_overlap_add, overlap_add
 from geotoolz._src.config import as_tuple
 from geotoolz._src.dtype import as_float
-from geotoolz._src.geo import grid_matches, require_geotensor
+from geotoolz._src.geo import grid_matches, require_geotensor, require_grid_match
 from geotoolz._src.shape import BAND_AXIS, over_frames, require_ndim, single_band
 from geotoolz._src.valid import (
     carried_fill,
@@ -379,8 +379,11 @@ class PhaseAlign(Operator):
     input without a ``fill_value_default`` cannot mark nodata; its
     uncovered edge repeats the nearest edge pixel.
 
+    Called as ``op(moving, reference)``: ``reference`` is the fixed scene
+    the input is registered against, on the input's pixel grid
+    (``ValueError`` otherwise).
+
     Args:
-        reference: The fixed scene the input is registered against.
         upsample_factor: Sub-pixel upsampling factor passed to
             :func:`skimage.registration.phase_cross_correlation`.
         band: Band index (along the band axis) used for registration on
@@ -391,17 +394,13 @@ class PhaseAlign(Operator):
             only) in a ``Sequential``.
     """
 
-    forbid_in_yaml: ClassVar[bool] = True
-
     def __init__(
         self,
         *,
-        reference: GeoTensor,
         upsample_factor: int = 10,
         band: int = 0,
         apply: bool = True,
     ) -> None:
-        self.reference = reference
         self.upsample_factor = upsample_factor
         self.band = band
         self.apply = apply
@@ -412,8 +411,9 @@ class PhaseAlign(Operator):
         return not self.apply
 
     def _apply(
-        self, gt: GeoTensor | np.ndarray
+        self, gt: GeoTensor | np.ndarray, reference: GeoTensor | np.ndarray
     ) -> GeoTensor | np.ndarray | tuple[float, float, float]:
+        require_grid_match(gt, reference, "PhaseAlign", names=("moving", "reference"))
         arr = np.asarray(gt)
         mov_band = _mean_imputed(
             _registration_band(
@@ -422,17 +422,11 @@ class PhaseAlign(Operator):
         )
         ref_band = _mean_imputed(
             _registration_band(
-                mask_invalid_to_nan(self.reference, dtype=np.float64),
+                mask_invalid_to_nan(reference, dtype=np.float64),
                 self.band,
                 "PhaseAlign reference",
             )
         )
-        if ref_band.shape != mov_band.shape:
-            raise ValueError(
-                "PhaseAlign requires reference and moving bands of identical "
-                f"spatial shape; got reference={ref_band.shape}, "
-                f"moving={mov_band.shape}."
-            )
         shift, error, _phase = phase_cross_correlation(
             ref_band,
             mov_band,
@@ -475,17 +469,6 @@ class PhaseAlign(Operator):
         # cancel the alignment in world coordinates, #118).
         return wrap_filled(gt, out, fill_value_default=fill, valid=valid)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "reference": {
-                "shape": list(np.asarray(self.reference).shape),
-                "dtype": str(np.asarray(self.reference).dtype),
-            },
-            "upsample_factor": self.upsample_factor,
-            "band": self.band,
-            "apply": self.apply,
-        }
-
 
 def _wrap_flow(gt: Any, reference: Any, flow: np.ndarray) -> Any:
     """Rewrap a ``(2, H, W)`` displacement field with ``NaN`` as its nodata.
@@ -510,38 +493,32 @@ class OpticalFlowTVL1(Operator):
     ``(C, H, W)``; a 4-D ``(T, C, H, W)`` stack raises ``ValueError``
     (compute the flow of each frame separately).
 
+    Called as ``op(moving, reference)``: ``reference`` is the fixed scene
+    the input is registered against, on the input's pixel grid
+    (``ValueError`` otherwise).
+
     Args:
-        reference: The fixed scene the input is registered against.
         band: Band index (along the band axis) used for registration on
             3-D inputs.
     """
 
-    forbid_in_yaml: ClassVar[bool] = True
-
-    def __init__(self, *, reference: GeoTensor, band: int = 0) -> None:
-        self.reference = reference
+    def __init__(self, *, band: int = 0) -> None:
         self.band = band
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, reference: GeoTensor | np.ndarray
+    ) -> GeoTensor | np.ndarray:
         name = type(self).__name__
+        require_grid_match(gt, reference, name, names=("moving", "reference"))
         flow = np.asarray(
             optical_flow_tvl1(
                 _registration_band(
-                    np.asarray(self.reference), self.band, f"{name} reference"
+                    np.asarray(reference), self.band, f"{name} reference"
                 ),
                 _registration_band(np.asarray(gt), self.band, name),
             )
         )
-        return _wrap_flow(gt, self.reference, flow)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "reference": {
-                "shape": list(np.asarray(self.reference).shape),
-                "dtype": str(np.asarray(self.reference).dtype),
-            },
-            "band": self.band,
-        }
+        return _wrap_flow(gt, reference, flow)
 
 
 class OpticalFlowILK(OpticalFlowTVL1):
@@ -551,17 +528,20 @@ class OpticalFlowILK(OpticalFlowTVL1):
     delegating to :func:`skimage.registration.optical_flow_ilk`.
     """
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, reference: GeoTensor | np.ndarray
+    ) -> GeoTensor | np.ndarray:
         name = type(self).__name__
+        require_grid_match(gt, reference, name, names=("moving", "reference"))
         flow = np.asarray(
             optical_flow_ilk(
                 _registration_band(
-                    np.asarray(self.reference), self.band, f"{name} reference"
+                    np.asarray(reference), self.band, f"{name} reference"
                 ),
                 _registration_band(np.asarray(gt), self.band, name),
             )
         )
-        return _wrap_flow(gt, self.reference, flow)
+        return _wrap_flow(gt, reference, flow)
 
 
 class Resize(Operator):

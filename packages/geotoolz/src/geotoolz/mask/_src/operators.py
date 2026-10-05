@@ -20,7 +20,13 @@ from georeader import rasterize
 from pipekit import Operator
 
 from geotoolz._src.config import jsonable, nested_config
-from geotoolz._src.geo import grid_matches, ground_pixel_size, require_projected_crs
+from geotoolz._src.geo import (
+    ground_pixel_size,
+    require_geotensor,
+    require_grid_match,
+    require_projected_crs,
+)
+from geotoolz._src.shape import gather_inputs
 from geotoolz._src.valid import carried_fill, carrier_fill_value, wrap_filled
 from geotoolz._src.wrap import wrap_like
 from geotoolz.mask._src.array import (
@@ -355,54 +361,45 @@ class AltitudeMask(Operator):
     ``keep="inside"`` the mask is True where the DEM falls *outside* the
     requested elevation interval. Either bound may be ``None`` for an
     open-ended interval.
-    Accepts a GeoTensor or plain ndarray carrier; when both the DEM and
-    the carrier are georeferenced, their transform/CRS must match.
+
+    Called as ``op(scene, dem)``: the output mask is wrapped like
+    ``scene`` (a GeoTensor or plain ndarray), and ``dem`` is a single-band
+    carrier on the scene's pixel grid -- same spatial shape and, when both
+    are georeferenced, the same transform / CRS (``ValueError``
+    otherwise).
 
     Args:
-        dem: Single-band ``GeoTensor`` whose spatial shape matches the
-            input scene.
         min_elev: Inclusive lower bound (units of the DEM).
         max_elev: Inclusive upper bound.
         keep: ``"inside"`` (default) keeps cells inside the interval;
             ``"outside"`` keeps cells outside it.
 
     Examples:
-        >>> AltitudeMask(dem=dem, min_elev=500.0)(scene)  # doctest: +SKIP
+        >>> AltitudeMask(min_elev=500.0)(scene, dem)  # doctest: +SKIP
     """
-
-    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
         *,
-        dem: GeoTensor,
         min_elev: float | None = None,
         max_elev: float | None = None,
         keep: Keep = "inside",
     ) -> None:
-        self.dem = dem
         self.min_elev = min_elev
         self.max_elev = max_elev
         self.keep = _check_keep(keep, "AltitudeMask")
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, dem: GeoTensor | np.ndarray
+    ) -> GeoTensor | np.ndarray:
+        require_grid_match(gt, dem, "AltitudeMask", names=("scene", "dem"))
         mask = altitude_mask(
-            np.asarray(self.dem),
+            np.asarray(dem),
             min_elev=self.min_elev,
             max_elev=self.max_elev,
             keep=self.keep,
         )
-        _check_spatial_match(mask, gt, "AltitudeMask")
-        _check_dem_grid_alignment(self.dem, gt, "AltitudeMask")
         return wrap_like(gt, mask, fill_value_default=False)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "dem": {"shape": list(self.dem.shape), "dtype": str(self.dem.dtype)},
-            "min_elev": self.min_elev,
-            "max_elev": self.max_elev,
-            "keep": self.keep,
-        }
 
 
 class SlopeMask(Operator):
@@ -414,60 +411,50 @@ class SlopeMask(Operator):
     The DEM must be in a projected CRS: a geographic DEM's pixel size is
     in degrees and raises ``ValueError``. Follows the package polarity
     (True = drop): with the default ``keep="inside"`` the mask is True
-    where the slope (degrees) falls *outside* the requested interval. Geo-dependent on
-    the DEM side: the DEM must be a georeferenced ``GeoTensor`` (its
-    transform supplies the pixel size). The carrier may be a GeoTensor or
-    plain ndarray; when both are georeferenced, their transform/CRS must
-    match.
+    where the slope (degrees) falls *outside* the requested interval.
+
+    Called as ``op(scene, dem)``. Geo-dependent on the DEM side: ``dem``
+    must be a single-band georeferenced ``GeoTensor`` (its transform
+    supplies the pixel size, in the same units as the elevation values)
+    on the scene's pixel grid. The scene may be a GeoTensor or plain
+    ndarray; when both are georeferenced, their transform / CRS must
+    match (``ValueError`` otherwise).
 
     Args:
-        dem: Single-band ``GeoTensor`` whose spatial shape matches the
-            input scene and whose pixel size is in the same units as
-            the elevation values.
         min_slope_deg: Inclusive lower bound, degrees.
         max_slope_deg: Inclusive upper bound, degrees.
         keep: ``"inside"`` (default) keeps cells inside the interval;
             ``"outside"`` keeps cells outside it.
 
     Examples:
-        >>> SlopeMask(dem=dem, max_slope_deg=10.0)(scene)  # doctest: +SKIP
+        >>> SlopeMask(max_slope_deg=10.0)(scene, dem)  # doctest: +SKIP
     """
-
-    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
         *,
-        dem: GeoTensor,
         min_slope_deg: float | None = None,
         max_slope_deg: float | None = None,
         keep: Keep = "inside",
     ) -> None:
-        self.dem = dem
         self.min_slope_deg = min_slope_deg
         self.max_slope_deg = max_slope_deg
         self.keep = _check_keep(keep, "SlopeMask")
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        require_projected_crs(self.dem, "SlopeMask", what="slopes", metres=False)
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, dem: GeoTensor
+    ) -> GeoTensor | np.ndarray:
+        dem = require_geotensor(dem, "SlopeMask", arg="dem")
+        require_projected_crs(dem, "SlopeMask", what="slopes", metres=False)
+        require_grid_match(gt, dem, "SlopeMask", names=("scene", "dem"))
         mask = slope_mask(
-            np.asarray(self.dem),
-            ground_pixel_size(self.dem.transform, "SlopeMask"),
+            np.asarray(dem),
+            ground_pixel_size(dem.transform, "SlopeMask"),
             min_slope_deg=self.min_slope_deg,
             max_slope_deg=self.max_slope_deg,
             keep=self.keep,
         )
-        _check_spatial_match(mask, gt, "SlopeMask")
-        _check_dem_grid_alignment(self.dem, gt, "SlopeMask")
         return wrap_like(gt, mask, fill_value_default=False)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "dem": {"shape": list(self.dem.shape), "dtype": str(self.dem.dtype)},
-            "min_slope_deg": self.min_slope_deg,
-            "max_slope_deg": self.max_slope_deg,
-            "keep": self.keep,
-        }
 
 
 class DilateMask(Operator):
@@ -687,13 +674,19 @@ class CleanMask(Operator):
 
 
 class CombineMasks(Operator):
-    """Combine equally shaped boolean masks with ``or``, ``and`` or ``xor``.
+    """Combine boolean masks on one pixel grid with ``or``, ``and`` or ``xor``.
 
-    Called with a *sequence* of masks (GeoTensors or plain ndarrays);
-    the output takes its carrier kind — and, for GeoTensors, its
-    metadata — from the first mask in the sequence. Every input must
-    use the package polarity (True = drop), so ``op="or"`` drops a pixel
-    that *any* mask drops. Use :class:`InvertMask` for the complement.
+    Called with the masks as positional arguments, ``op(m1, m2, ...)``
+    (GeoTensors or plain ndarrays) -- so it wires straight into a
+    ``pipekit.Graph`` as ``CombineMasks()(Input("a"), Input("b"))`` -- or
+    with one sequence of them, ``op([m1, m2])``, or one ``(T, C, H, W)``
+    stack whose frames are the masks. Every mask must sit on the first
+    mask's pixel grid (``ValueError`` otherwise, see
+    :func:`geotoolz._src.geo.grid_matches`). The output takes its carrier
+    kind -- and, for GeoTensors, its metadata -- from the first mask.
+    Every input must use the package polarity (True = drop), so
+    ``op="or"`` drops a pixel that *any* mask drops. Use :class:`InvertMask`
+    for the complement.
 
     Args:
         op: ``"or"`` (default), ``"and"`` or ``"xor"``.
@@ -702,7 +695,12 @@ class CombineMasks(Operator):
     def __init__(self, *, op: str = "or") -> None:
         self.op = op
 
-    def _apply(self, masks: Sequence[GeoTensor | np.ndarray]) -> GeoTensor | np.ndarray:
+    def _apply(self, *masks: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        masks = gather_inputs(masks, "CombineMasks", split_stack=True)
+        for idx, mask in enumerate(masks[1:], start=1):
+            require_grid_match(
+                masks[0], mask, "CombineMasks", names=("mask 0", f"mask {idx}")
+            )
         out = combine_masks([np.asarray(mask) for mask in masks], self.op)
         return wrap_like(masks[0], out, fill_value_default=False)
 
@@ -736,9 +734,15 @@ class ApplyMask(Operator):
     Flip a keep-polarity mask (e.g. ``validmask()``) with
     :class:`InvertMask` / :func:`~geotoolz.mask.invert_mask` first.
 
+    Called as ``op(gt, mask)`` with the boolean mask carrier (GeoTensor
+    or ndarray) on ``gt``'s pixel grid (``ValueError`` otherwise), so it
+    wires into a ``pipekit.Graph`` as ``ApplyMask()(Input("x"),
+    Input("mask"))``. Alternatively configure a mask *operator* (e.g. a
+    geometry mask) that builds the mask from ``gt`` and call ``op(gt)``.
+
     Args:
-        mask: Boolean array, ``GeoTensor``, or ``Operator`` producing
-            one when called on the input.
+        mask: Optional ``Operator`` producing the mask when called on the
+            input. Mask arrays are passed at call time, not here.
         fill_value: Value substituted where the mask says "drop". The
             default ``None`` uses the carrier's ``fill_value_default``
             when it has one that the carrier's dtype can hold (so an
@@ -754,23 +758,37 @@ class ApplyMask(Operator):
         >>> aoi = gz.mask.BBoxMask(bounds=(1.0, 1.0, 3.0, 3.0))
         >>> keep_aoi = gz.mask.ApplyMask(mask=aoi)  # fills outside the box
         >>> out = keep_aoi(scene)  # doctest: +SKIP
+        >>> out = gz.mask.ApplyMask()(scene, cloud_mask)  # doctest: +SKIP
     """
-
-    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
         *,
-        mask: Operator | np.ndarray | Any,
+        mask: Operator | None = None,
         fill_value: float | None = None,
     ) -> None:
+        if mask is not None and not isinstance(mask, Operator):
+            raise TypeError(
+                "ApplyMask(mask=...) takes a mask-producing Operator; pass a "
+                "mask array or GeoTensor at call time instead: "
+                "ApplyMask()(gt, mask)"
+            )
         self.mask = mask
         self.fill_value = fill_value
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        mask_arr = np.asarray(
-            self.mask(gt) if isinstance(self.mask, Operator) else self.mask
-        )
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, mask: GeoTensor | np.ndarray | None = None
+    ) -> GeoTensor | np.ndarray:
+        if (mask is None) == (self.mask is None):
+            raise ValueError(
+                "ApplyMask needs exactly one mask: a mask carrier at call time, "
+                "ApplyMask()(gt, mask), or a mask operator, ApplyMask(mask=op)(gt)"
+            )
+        if mask is not None:
+            require_grid_match(gt, mask, "ApplyMask", names=("input", "mask"))
+        elif self.mask is not None:
+            mask = self.mask(gt)
+        mask_arr = np.asarray(mask)
         fill = self._resolve_fill(gt)
         out = apply_mask(np.asarray(gt), mask_arr, fill_value=fill)
         if np.ndim(out) < 2:
@@ -791,17 +809,8 @@ class ApplyMask(Operator):
         return fill if usable else np.nan
 
     def get_config(self) -> dict[str, Any]:
-        if isinstance(self.mask, Operator):
-            mask_config: Any = nested_config(self.mask)
-        else:
-            arr = np.asarray(self.mask)
-            mask_config = {
-                "type": "ndarray",
-                "shape": list(arr.shape),
-                "dtype": str(arr.dtype),
-            }
         return {
-            "mask": mask_config,
+            "mask": None if self.mask is None else nested_config(self.mask),
             "fill_value": self.fill_value,
         }
 
@@ -935,23 +944,6 @@ def _safe_extract_zip(zf: ZipFile, extract_dir: Path) -> None:
                 f"refusing to extract unsafe zip member {member.filename!r}"
             )
     zf.extractall(extract_root)
-
-
-def _check_spatial_match(mask: np.ndarray, gt: GeoTensor, name: str) -> None:
-    if mask.shape[-2:] != gt.shape[-2:]:
-        raise ValueError(f"{name}: DEM spatial shape must match the input GeoTensor")
-
-
-def _check_dem_grid_alignment(dem: Any, gt: Any, name: str) -> None:
-    """Reject DEMs whose georeferencing disagrees with the carrier.
-
-    A DEM with the same raster shape but a different ``transform`` or
-    ``crs`` would be silently misapplied to the carrier. When both
-    inputs expose ``transform`` / ``crs`` (i.e. are GeoTensor-like), we
-    require them to match.
-    """
-    if not grid_matches(dem, gt):
-        raise ValueError(f"{name}: DEM grid (transform/crs) doesn't match carrier")
 
 
 def _morph_config(iterations: int, structure: np.ndarray | None) -> dict[str, Any]:

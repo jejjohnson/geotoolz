@@ -1,7 +1,11 @@
 """Carrier-aware compositing operators for co-registered GeoTensors.
 
-All composites are metadata-independent per-pixel reductions, so they
-accept sequences of plain ``np.ndarray`` frames as well as GeoTensors.
+All composites are N-ary reducers: they take their inputs as positional
+arguments, ``op(f1, f2, ...)``, so they wire into a ``pipekit.Graph`` as
+``op(Input("a"), Input("b"))``, or as one sequence, ``op([f1, f2])``
+(the multi-input convention, see ``docs/concepts.md``). They are
+metadata-independent per-pixel reductions, so they accept plain
+``np.ndarray`` frames as well as GeoTensors.
 The frame-sequence composites (:class:`MedianComposite`,
 :class:`MaxNDVIComposite`) also accept a single ``(T, C, H, W)`` time
 stack -- georeader's ``("time", "band", "y", "x")`` GeoTensor -- which is
@@ -49,7 +53,8 @@ from geotoolz._src.bands import (
     resolve_band,
     strip_band_attrs,
 )
-from geotoolz._src.geo import grid_matches
+from geotoolz._src.geo import require_grid_match
+from geotoolz._src.shape import gather_inputs
 from geotoolz._src.valid import (
     carried_fill,
     invalid_values,
@@ -86,53 +91,52 @@ def _validate_nan_policy(nan_policy: str) -> NanPolicy:
     return nan_policy  # type: ignore[return-value]
 
 
-def _as_frames(
-    frames: Sequence[GeoTensor | np.ndarray] | GeoTensor | np.ndarray, name: str
-) -> Sequence[GeoTensor | np.ndarray]:
-    """Accept a sequence of frames or a single ``(T, C, H, W)`` stack.
+def _as_frames(frames: tuple[Any, ...], name: str) -> Sequence[GeoTensor | np.ndarray]:
+    """Accept frames as arguments, one sequence, or one ``(T, C, H, W)`` stack.
 
-    A GeoTensor stack (dims ``time, band, y, x``) is split into its
-    ``gt.isel({"time": t})`` frames, which keep its transform, CRS, fill
+    Several positional frames, or one list / tuple of them, are the
+    frames. A single carrier argument is a time stack: a GeoTensor stack
+    (dims ``time, band, y, x``) is split into its ``gt.isel({"time": t})``
+    frames, which keep its transform, CRS, fill
     value and attrs, so the composite is rewrapped like frame 0. A plain
     ndarray stack (``(T, C, H, W)``, or ``(T, H, W)`` for single-band
     frames) is split along axis 0. A 2-D / 3-D GeoTensor is not a time
     stack (its leading axis is bands) and is rejected.
     """
-    if not isinstance(frames, np.ndarray):
-        return frames
+    if len(frames) != 1 or not isinstance(frames[0], np.ndarray):
+        return gather_inputs(frames, name)
+    frames = frames[0]
     isel = getattr(frames, "isel", None)
     if isel is not None and frames.ndim == 4:
         return [isel({"time": t}) for t in range(frames.shape[0])]
     if isel is None and frames.ndim in (3, 4):
         return list(frames)
     raise ValueError(
-        f"{name} takes a sequence of co-registered frames or a (T, C, H, W) "
-        f"time stack; got a {frames.ndim}-D "
+        f"{name} takes co-registered frames (as arguments or one sequence) or "
+        f"a (T, C, H, W) time stack; got a {frames.ndim}-D "
         f"{'GeoTensor' if isel is not None else 'array'} of shape {frames.shape}"
     )
 
 
 def _require_frames(
-    frames: Sequence[GeoTensor | np.ndarray],
+    frames: Sequence[GeoTensor | np.ndarray], name: str
 ) -> GeoTensor | np.ndarray:
     if not frames:
-        raise ValueError("At least one GeoTensor is required for compositing.")
+        raise ValueError(f"{name}: at least one frame is required for compositing.")
     base = frames[0]
     for idx, frame in enumerate(frames[1:], start=1):
         # Full shape and exact affine: a per-pixel reduction over misaligned
         # grids (or mismatched band counts) silently produces garbage.
-        if not grid_matches(base, frame, spatial_only=False):
-            raise ValueError(
-                "All input GeoTensors must share shape, transform, and CRS; "
-                f"frame 0 has shape {base.shape}, frame {idx} has shape {frame.shape}."
-            )
+        require_grid_match(
+            base, frame, name, names=("frame 0", f"frame {idx}"), spatial_only=False
+        )
     return base
 
 
 def _stack_frames(
-    frames: Sequence[GeoTensor | np.ndarray],
+    frames: Sequence[GeoTensor | np.ndarray], name: str
 ) -> tuple[GeoTensor | np.ndarray, np.ndarray]:
-    base = _require_frames(frames)
+    base = _require_frames(frames, name)
     return base, np.stack([np.asarray(frame) for frame in frames], axis=0)
 
 
@@ -176,12 +180,13 @@ def _mask_array(
 
 
 def _require_pairs(
-    pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]],
+    pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]], name: str
 ) -> tuple[GeoTensor | np.ndarray, np.ndarray, np.ndarray]:
-    if not pairs:
-        raise ValueError("At least one (GeoTensor, mask) pair is required.")
     frames = [scene for scene, _ in pairs]
-    base, stack = _stack_frames(frames)
+    base, stack = _stack_frames(frames, name)
+    for idx, (_, mask) in enumerate(pairs):
+        if getattr(mask, "transform", None) is not None:
+            require_grid_match(base, mask, name, names=("frame 0", f"cloud mask {idx}"))
     masks = np.stack([_mask_array(mask, base.shape) for _, mask in pairs], axis=0)
     return base, stack, masks
 
@@ -213,6 +218,10 @@ def _score_array(
 class MedianComposite(Operator):
     """Per-pixel median across a stack of co-registered GeoTensors.
 
+    Called as ``op(f1, f2, ...)``, ``op([f1, f2, ...])`` or ``op(stack)``
+    with a ``(T, C, H, W)`` time stack; every frame must share the first
+    frame's grid and full shape (``ValueError`` otherwise).
+
     Metadata-independent: frames may also be plain ``np.ndarray`` maps, in
     which case the outputs are plain arrays and the grid check reduces to
     shape equality. Nodata frame-pixels (non-finite or the frame's fill)
@@ -240,10 +249,11 @@ class MedianComposite(Operator):
         return self.return_count
 
     def _apply(
-        self, frames: Sequence[GeoTensor | np.ndarray]
+        self, *frames: GeoTensor | np.ndarray | Sequence[GeoTensor | np.ndarray]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
-        frames = _as_frames(frames, type(self).__name__)
-        base, stack = _stack_frames(frames)
+        name = type(self).__name__
+        frames = _as_frames(frames, name)
+        base, stack = _stack_frames(frames, name)
         valid = _frame_validity(frames)
         masked = mask_frames(stack, valid)
         # All-nodata pixels come out NaN; they get the output fill below.
@@ -260,9 +270,11 @@ class MedianComposite(Operator):
 class MaxNDVIComposite(Operator):
     """Pick the frame with maximum NDVI per pixel and return its band values.
 
-    Inputs must be multi-band (``(C, H, W)``); 2-D GeoTensors raise because
-    NDVI needs distinct red and NIR bands. Nodata frame-pixels (non-finite
-    or the frame's fill in any band) never win the selection. Pixels with
+    Called like :class:`MedianComposite` (frames as arguments, one
+    sequence, or a ``(T, C, H, W)`` stack). Inputs must be multi-band
+    (``(C, H, W)``); 2-D GeoTensors raise because NDVI needs distinct red
+    and NIR bands. Nodata frame-pixels (non-finite or the frame's fill in
+    any band) never win the selection. Pixels with
     no valid NDVI in any frame hold the first frame's
     ``fill_value_default`` (``NaN`` for float inputs without one), so the
     output dtype is the input dtype.
@@ -303,10 +315,11 @@ class MaxNDVIComposite(Operator):
         return self.return_index
 
     def _apply(
-        self, frames: Sequence[GeoTensor | np.ndarray]
+        self, *frames: GeoTensor | np.ndarray | Sequence[GeoTensor | np.ndarray]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
-        frames = _as_frames(frames, type(self).__name__)
-        base, stack = _stack_frames(frames)
+        name = type(self).__name__
+        frames = _as_frames(frames, name)
+        base, stack = _stack_frames(frames, name)
         # NDVI needs distinct red/nir bands; 2-D GeoTensors don't have a
         # band axis and would silently broadcast `:, red_idx, ...` into
         # nonsense. Fail loudly.
@@ -365,8 +378,10 @@ class MaxNDVIComposite(Operator):
 class CloudFreeComposite(Operator):
     """Per-pixel mean over frames where the cloud mask is false.
 
-    Consumes ``(frame, cloud_mask)`` pairs; masks may have spatial shape
-    ``(H, W)``, ``(1, H, W)``, or match the frame shape exactly. Pixels
+    Consumes ``(frame, cloud_mask)`` pairs as positional arguments,
+    ``op((f1, m1), (f2, m2))``, or one sequence of them; masks may have
+    spatial shape ``(H, W)``, ``(1, H, W)``, or match the frame shape
+    exactly, and a georeferenced mask must share the frames' grid. Pixels
     with fewer than ``min_valid`` clear contributors come out as NaN.
     Nodata frame-pixels (non-finite or the frame's fill) never contribute;
     pixels invalid in every frame hold the output fill value.
@@ -406,9 +421,11 @@ class CloudFreeComposite(Operator):
         return self.return_count
 
     def _apply(
-        self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]]
+        self, *pairs: tuple[GeoTensor | np.ndarray, Any]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
-        base, stack, cloudy = _require_pairs(pairs)
+        name = type(self).__name__
+        pairs = gather_inputs(pairs, name, pairs=True)
+        base, stack, cloudy = _require_pairs(pairs, name)
         frame_valid = _frame_validity([scene for scene, _ in pairs])
         values, count = mean_composite(
             mask_frames(stack, frame_valid),
@@ -597,12 +614,12 @@ class BAPComposite(Operator):
         )
 
     def _apply(
-        self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Mapping[str, Any]]]
+        self, *pairs: tuple[GeoTensor | np.ndarray, Mapping[str, Any]]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
-        if not pairs:
-            raise ValueError("At least one (GeoTensor, metadata) pair is required.")
+        name = type(self).__name__
+        pairs = gather_inputs(pairs, name, pairs=True)
         frames = [scene for scene, _ in pairs]
-        base, stack = _stack_frames(frames)
+        base, stack = _stack_frames(frames, name)
         spatial_shape = base.shape[-2:]
         # (T, 4, H, W): view, DOY, cloud-distance, opacity score per frame.
         scores = np.stack(
@@ -666,9 +683,11 @@ class MinCloudComposite(Operator):
         return self.return_count
 
     def _apply(
-        self, pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]]
+        self, *pairs: tuple[GeoTensor | np.ndarray, Any]
     ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
-        base, stack, cloudy = _require_pairs(pairs)
+        name = type(self).__name__
+        pairs = gather_inputs(pairs, name, pairs=True)
+        base, stack, cloudy = _require_pairs(pairs, name)
         valid = broadcast_frame_valid(
             _frame_validity([scene for scene, _ in pairs]), cloudy.shape
         )
@@ -698,10 +717,15 @@ class MinCloudComposite(Operator):
 
 
 def _normalize_to_sequence(
-    tensors: Sequence[GeoTensor | np.ndarray] | Mapping[str, GeoTensor | np.ndarray],
+    tensors: tuple[Any, ...],
     order: list[str] | None,
-) -> tuple[list[GeoTensor | np.ndarray], list[str] | None]:
-    """Accept either a Sequence or a Mapping; return a parallel sequence + names.
+    name: str,
+    *,
+    pairs: bool = False,
+) -> tuple[list[Any], list[str] | None]:
+    """Accept positional tensors, one Sequence, or one Mapping.
+
+    Returns a parallel sequence + names (``None`` unless a Mapping).
 
     When the input is a Mapping, ``order`` (if given) **must cover
     every key** — missing names raise, extra names raise. This is
@@ -713,7 +737,8 @@ def _normalize_to_sequence(
 
     A sequence input ignores ``order`` (no key→pos mapping to apply).
     """
-    if isinstance(tensors, Mapping):
+    if len(tensors) == 1 and isinstance(tensors[0], Mapping):
+        tensors = tensors[0]
         if order is not None:
             order_set = set(order)
             input_set = set(tensors)
@@ -733,7 +758,7 @@ def _normalize_to_sequence(
             ordered = [tensors[k] for k in order]
             return ordered, list(order)
         return list(tensors.values()), list(tensors.keys())
-    return list(tensors), None
+    return gather_inputs(tensors, name, pairs=pairs, split_stack=True), None
 
 
 def _as_band_first(
@@ -779,9 +804,11 @@ def _translate_fills(
 class StackMatched(Operator):
     """Concatenate aligned tensors along the band axis.
 
-    Inputs are either a `Sequence[GeoTensor]` or a
-    ``Mapping[str, GeoTensor]`` — typical when called on
-    `MatchedPatch.members`. All inputs must share spatial shape,
+    Inputs are positional, ``op(a, b, ...)`` -- so the operator wires into
+    a ``pipekit.Graph`` as ``StackMatched()(Input("a"), Input("b"))`` --
+    or one ``Sequence[GeoTensor]`` or ``Mapping[str, GeoTensor]`` --
+    typical when called on `MatchedPatch.members` -- or one ``(T, C, H, W)``
+    stack whose frames are the inputs. All inputs must share spatial shape,
     transform, and CRS; the per-tensor band count may differ. Plain
     ``np.ndarray`` inputs are also accepted (the concatenation itself is
     metadata-free); grid verification then degrades to spatial-shape
@@ -832,10 +859,12 @@ class StackMatched(Operator):
 
     def _apply(
         self,
-        tensors: Sequence[GeoTensor | np.ndarray]
+        *tensors: GeoTensor
+        | np.ndarray
+        | Sequence[GeoTensor | np.ndarray]
         | Mapping[str, GeoTensor | np.ndarray],
     ) -> GeoTensor | np.ndarray:
-        seq, _names = _normalize_to_sequence(tensors, self.order)
+        seq, _names = _normalize_to_sequence(tensors, self.order, "StackMatched")
         if not seq:
             raise ValueError("StackMatched requires at least one input tensor.")
 
@@ -844,15 +873,9 @@ class StackMatched(Operator):
         # than emit subtly misregistered output.
         base = seq[0]
         for idx, frame in enumerate(seq[1:], start=1):
-            if not grid_matches(base, frame):
-                raise ValueError(
-                    "StackMatched inputs must share spatial shape, "
-                    "transform, and CRS; "
-                    f"input 0 has shape {base.shape[-2:]}, "
-                    f"transform {getattr(base, 'transform', None)!r}; "
-                    f"input {idx} has shape {frame.shape[-2:]}, "
-                    f"transform {getattr(frame, 'transform', None)!r}."
-                )
+            require_grid_match(
+                base, frame, "StackMatched", names=("input 0", f"input {idx}")
+            )
 
         arrays = [_as_band_first(np.asarray(t)) for t in seq]
         stacked = np.concatenate(arrays, axis=0)
@@ -879,9 +902,15 @@ class BlendMatched(Operator):
       ``self.weights``. Useful when one source is known to be
       higher-quality (e.g. ground-truth vs satellite).
     * ``"ivw"`` — inverse-variance weighting. Each input is weighted by
-      ``1 / variance``, so noisier sources contribute less. Requires
-      a parallel ``variances`` sequence at call time, one
-      per-source variance array (same spatial shape as the data).
+      ``1 / variance``, so noisier sources contribute less. Each input is
+      then a ``(tensor, variance)`` pair, the variance an array of the
+      tensor's full or spatial shape:
+      ``BlendMatched(method="ivw")((a, var_a), (b, var_b))``.
+
+    Inputs are positional, ``op(a, b, ...)`` -- so the operator wires into
+    a ``pipekit.Graph`` as ``BlendMatched()(Input("a"), Input("b"))`` --
+    or one sequence or mapping of them, or one ``(T, C, H, W)`` stack whose
+    frames are the inputs.
 
     `nan_policy` controls per-pixel NaN handling:
 
@@ -904,11 +933,11 @@ class BlendMatched(Operator):
     verification then degrades to shape equality and the output
     carrier follows the first input.
 
-    When ``tensors`` is a ``Mapping``, the per-source order used by
-    ``weighted_mean`` / ``ivw`` follows the mapping's iteration order
-    (insertion order on dicts). Likewise, ``weights`` and ``variances``
-    are zipped positionally against ``tensors`` — pass an ``OrderedDict``
-    or a plain ``list``/``tuple`` if you need a stable, explicit pairing.
+    When the input is a ``Mapping``, the per-source order used by
+    ``weighted_mean`` follows the mapping's iteration order (insertion
+    order on dicts), and ``weights`` are zipped positionally against it
+    — pass an ``OrderedDict`` or positional inputs if you need a stable,
+    explicit pairing.
 
     Args:
         method: One of ``"mean"`` / ``"weighted_mean"`` / ``"ivw"``.
@@ -942,7 +971,7 @@ class BlendMatched(Operator):
             raise ValueError(
                 "BlendMatched `weights` only applies to "
                 "method='weighted_mean'. For per-pixel variance "
-                "weighting use method='ivw' with a `variances` argument."
+                "weighting use method='ivw' with (tensor, variance) inputs."
             )
         self.method = method
         self.weights = list(weights) if weights is not None else None
@@ -950,33 +979,38 @@ class BlendMatched(Operator):
 
     def _apply(
         self,
-        tensors: Sequence[GeoTensor | np.ndarray]
-        | Mapping[str, GeoTensor | np.ndarray],
-        variances: Sequence[np.ndarray] | None = None,
+        *tensors: Any,
     ) -> GeoTensor | np.ndarray:
-        if variances is not None and self.method != "ivw":
-            raise ValueError(
-                "BlendMatched: `variances` is only accepted when "
-                f"method='ivw'; got method={self.method!r}."
-            )
-        seq, _names = _normalize_to_sequence(tensors, None)
+        seq, _names = _normalize_to_sequence(
+            tensors, None, "BlendMatched", pairs=self.method == "ivw"
+        )
         if not seq:
             raise ValueError("BlendMatched requires at least one input tensor.")
+        is_pair = [isinstance(t, tuple) and len(t) == 2 for t in seq]
+        variances: list[Any] | None = None
+        if self.method == "ivw":
+            if not all(is_pair):
+                raise ValueError(
+                    "BlendMatched(method='ivw') takes (tensor, variance) pairs "
+                    "(one variance array per source, same spatial shape as "
+                    "the data)."
+                )
+            variances = [var for _, var in seq]
+            seq = [tensor for tensor, _ in seq]
+        elif any(is_pair):
+            raise ValueError(
+                "BlendMatched: (tensor, variance) pairs are only accepted when "
+                f"method='ivw'; got method={self.method!r}."
+            )
 
         # Strict grid + band-shape validation. BlendMatched is a
         # per-pixel reduction across inputs, so any shape difference
         # would mean we're averaging different physical quantities.
         base = seq[0]
         for idx, frame in enumerate(seq[1:], start=1):
-            if not grid_matches(base, frame):
-                raise ValueError(
-                    "BlendMatched inputs must share spatial shape, "
-                    "transform, and CRS; "
-                    f"input 0 has shape {base.shape[-2:]}, "
-                    f"transform {getattr(base, 'transform', None)!r}; "
-                    f"input {idx} has shape {frame.shape[-2:]}, "
-                    f"transform {getattr(frame, 'transform', None)!r}."
-                )
+            require_grid_match(
+                base, frame, "BlendMatched", names=("input 0", f"input {idx}")
+            )
             if frame.shape != base.shape:
                 raise ValueError(
                     "BlendMatched inputs must share full shape (including "
@@ -995,18 +1029,8 @@ class BlendMatched(Operator):
             stack[~np.broadcast_to(per_source, stack.shape)] = np.nan
 
         # Build the per-source weight broadcastable to `stack`.
-        if self.method == "ivw":
-            if variances is None:
-                raise ValueError(
-                    "BlendMatched(method='ivw') requires `variances` "
-                    "(one array per source, same spatial shape as the data)."
-                )
-            var_list = list(variances)
-            if len(var_list) != len(seq):
-                raise ValueError(
-                    f"BlendMatched(method='ivw'): got {len(var_list)} "
-                    f"variance arrays for {len(seq)} input tensors."
-                )
+        if variances is not None:
+            var_list = variances
             # Each variance must be either a full-shape array matching
             # the data or a spatial-only (H, W) array that broadcasts
             # against the band axis. Validate shape explicitly so a

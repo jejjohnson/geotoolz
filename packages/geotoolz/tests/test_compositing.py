@@ -195,7 +195,7 @@ def test_composites_raise_on_mismatched_grid(
         "metadata": [(base, {}), (shifted, {})],
     }[payload]
 
-    with pytest.raises(ValueError, match="shape, transform, and CRS"):
+    with pytest.raises(ValueError, match=r"Composite: the frame 1 pixel grid"):
         operator(inputs)  # type: ignore[arg-type]
 
 
@@ -403,7 +403,7 @@ def test_max_ndvi_composite_named_bands_require_geotensor_attrs() -> None:
 
 
 def test_composites_raise_on_mismatched_plain_array_shapes() -> None:
-    with pytest.raises(ValueError, match="shape, transform, and CRS"):
+    with pytest.raises(ValueError, match=r"Composite: the frame 1 pixel grid"):
         MedianComposite()(
             [
                 np.ones((1, 2, 2), dtype=np.float32),
@@ -561,5 +561,62 @@ def test_4d_time_stack() -> None:
         assert out.transform == stack.transform
         assert out.fill_value_default == stack.fill_value_default
         assert out.attrs == stack.attrs and out.attrs is not stack.attrs
-    with pytest.raises(ValueError, match="MedianComposite takes a sequence"):
+    with pytest.raises(ValueError, match="MedianComposite takes co-registered frames"):
         MedianComposite()(stack.isel({"time": 0}))
+
+
+# ---------------------------------------------------------------------------
+# N-ary reducers (#141)
+# ---------------------------------------------------------------------------
+
+
+def test_composites_take_frames_positionally() -> None:
+    """``op(f1, f2)`` equals ``op([f1, f2])`` for every composite (#141)."""
+    from geotoolz.compositing import BlendMatched, StackMatched
+
+    rng = np.random.default_rng(0)
+    frames = [
+        _gt(rng.uniform(0.1, 1.0, (2, 3, 3)).astype(np.float32)) for _ in range(3)
+    ]
+    masks = [np.zeros((3, 3), dtype=bool) for _ in frames]
+    masks[0][0, 0] = True
+    cases: list[tuple[Any, list[Any]]] = [
+        (MedianComposite(), frames),
+        (MaxNDVIComposite(red=0, nir=1), frames),
+        (CloudFreeComposite(), list(zip(frames, masks, strict=True))),
+        (MinCloudComposite(), list(zip(frames, masks, strict=True))),
+        (
+            BAPComposite(target_doy=180),
+            [(frame, {"doy": 170 + t}) for t, frame in enumerate(frames)],
+        ),
+        (StackMatched(), frames),
+        (BlendMatched(), frames),
+    ]
+    for op, inputs in cases:
+        np.testing.assert_array_equal(
+            np.asarray(op(*inputs)), np.asarray(op(inputs)), err_msg=repr(op)
+        )
+
+
+def test_pair_composites_read_a_lone_pair_as_one_frame() -> None:
+    """A single ``(frame, mask)`` argument is one pair, not two inputs."""
+    frame = _gt(np.ones((1, 2, 2), dtype=np.float32))
+    mask = np.zeros((2, 2), dtype=bool)
+    np.testing.assert_array_equal(
+        np.asarray(CloudFreeComposite()((frame, mask))), np.asarray(frame)
+    )
+
+
+def test_blend_matched_ivw_takes_tensor_variance_pairs() -> None:
+    """``BlendMatched(method="ivw")`` pairs each tensor with its variance (#141)."""
+    from geotoolz.compositing import BlendMatched
+
+    a = _gt(np.full((2, 2), 10.0, dtype=np.float32))
+    b = _gt(np.full((2, 2), 20.0, dtype=np.float32))
+    var_a = np.full((2, 2), 1.0)
+    var_b = np.full((2, 2), 3.0)
+    spread = BlendMatched(method="ivw")((a, var_a), (b, var_b))
+    mapping = BlendMatched(method="ivw")({"a": (a, var_a), "b": (b, var_b)})
+    # Inverse-variance weights 1 and 1/3: (10 + 20 / 3) / (1 + 1 / 3) = 12.5.
+    np.testing.assert_allclose(np.asarray(spread), 12.5)
+    np.testing.assert_allclose(np.asarray(mapping), 12.5)

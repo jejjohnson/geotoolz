@@ -168,6 +168,65 @@ A `Graph` is itself an `Operator`, so it composes — drop one inside a
 inputs, multiple outputs, or fan-in (RMSE between a prediction and a
 reference, multi-temporal fusion, …).
 
+## Multi-input operators — carriers are positional
+
+An operator that combines several carriers takes **every carrier as a
+positional `_apply` argument**; constructor kwargs hold only scalars and
+configuration (thresholds, band references, nested operators). That one
+convention is what lets a `Graph` wire the carriers in, because a graph
+passes its parent nodes positionally:
+
+| Kind | Signature | Call | In a `Graph` |
+|---|---|---|---|
+| Two carriers | `_apply(self, gt, other, ...)` | `IMEEstimate(wind_speed=3.5)(kg_m2, plume_mask)` | `IMEEstimate(wind_speed=3.5)(Input("enh"), Input("mask"))` |
+| Optional second carrier | `_apply(self, gt, other=None)` | `SBMP()(scene, reference_scene)` / `SBMP()(scene)` | `SBMP()(Input("scene"), Input("ref"))` |
+| N-ary reducer | `_apply(self, *frames)` | `CombineMasks()(m1, m2)` or `CombineMasks()([m1, m2])` | `CombineMasks()(Input("a"), Input("b"))` |
+
+- **Two-carrier operators** — `plume.IMEEstimate(enh, plume_mask)`,
+  `plume.CrossSectionalFlux(enh, plume_mask)`,
+  `plume.PlumeFootprint(mask, enhancement=None)`,
+  `plume.SBMP(scene, reference_scene=None)`,
+  `plume.PlumeColumnStats(labels, column)`,
+  `plume.PlumeQNDFeatures(labels, column, albedo=None)`,
+  `measure.RegionProps(labels, intensity_image=None)`,
+  `mask.ApplyMask(gt, mask)`, `mask.AltitudeMask(scene, dem)`,
+  `mask.SlopeMask(scene, dem)`, `segment.SLIC` / `Felzenszwalb` /
+  `Quickshift(image, mask=None)`, `segment.Watershed(image, markers=None,
+  mask=None)`, `segment.RandomWalker(image, markers)`,
+  `segment.MarkBoundaries(image, label_img)`,
+  `geom.PhaseAlign` / `OpticalFlowTVL1` / `OpticalFlowILK(moving,
+  reference)`, `indices.dNBR(pre, post)`, `viz.Overlay(background,
+  foreground)` and the `geom.coregister` operators (`RasterToRasterLike(src,
+  like)`, …). The primary carrier — the one the output is wrapped like —
+  always comes first.
+- **N-ary reducers** take any number of positional carriers, or one list /
+  tuple of them: `mask.CombineMasks`, `augment.CutMix(gt, *pool)`, the
+  `compositing` composites (`MedianComposite` / `MaxNDVIComposite` also
+  take one `(T, C, H, W)` stack; `CloudFreeComposite` / `MinCloudComposite`
+  / `BAPComposite` take `(frame, mask_or_metadata)` pairs),
+  `StackMatched` and `BlendMatched` (which also take one `Mapping`;
+  `BlendMatched(method="ivw")` takes `(tensor, variance)` pairs).
+- **Grid check.** The carriers are combined pixel by pixel, so every
+  multi-input operator checks them with `grid_matches` (see
+  [Georeferencing checks](#georeferencing-checks)) and raises a
+  `ValueError` naming the operator and both grids. A 20 m mask handed to
+  `IMEEstimate` with a 10 m enhancement is an error, not a silently wrong
+  `ime_kg`.
+- **Mask / reference operators stay configuration.** `ApplyMask(mask=op)`
+  still takes a mask-*producing* operator (e.g. `BBoxMask`) that runs on
+  the input; mask *carriers* are passed at call time.
+- **Target-grid templates are the exception.** `geom.ReprojectLike` /
+  `ResampleLike` / `RasterizeLike(like=...)`, `geom.Georeference(glt=...)`
+  and `normalize.HistogramMatch(reference=...)` pin a grid template or a
+  reference distribution rather than a second pixel-aligned carrier; use
+  `geom.coregister.RasterToRasterLike()(src, like)` when the target grid is
+  itself a graph input.
+
+The old constructor kwargs (`IMEEstimate(plume_mask=...)`,
+`SlopeMask(dem=...)`, `CutMix(pool=...)`, `BlendMatched(...)(tensors,
+variances)`, …) were removed outright (#141); passing one raises
+`TypeError`.
+
 ## `Branch` — runtime conditional
 
 ```mermaid
@@ -415,9 +474,11 @@ Every operator family uses the same helpers from `geotoolz._src.geo`:
 - **Geo-dependent operators** (reprojection, rasterisation, metre-based
   measurements, …) reject a plain array with one message:
   `"<Op> requires a georeferenced GeoTensor input; got a plain array (ndarray)."`
-- **Multi-input operators** (`dNBR`, the compositors, `StackMatched`,
-  `BlendMatched`, DEM-driven masks) require the inputs to be on the same
-  grid: equal spatial shape `(H, W)` and — when both inputs are
+- **Multi-input operators** (see
+  [Multi-input operators](#multi-input-operators-carriers-are-positional):
+  `dNBR`, the compositors, `StackMatched`, `BlendMatched`, DEM-driven
+  masks, the plume quantifiers, …) require the inputs to be on the same
+  grid (`require_grid_match`, an error naming the operator): equal spatial shape `(H, W)` and — when both inputs are
   georeferenced — equal CRS and an **exactly** equal affine transform.
   Sub-pixel drift is a real bug source, so there is no default tolerance.
   Per-pixel reductions over a stack (the `compositing` operators) also

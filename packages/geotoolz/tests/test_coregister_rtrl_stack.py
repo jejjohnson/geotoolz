@@ -205,13 +205,13 @@ class TestStackMatchedSequence:
             np.zeros((4, 4), dtype=np.float32),
             transform=rasterio.Affine(10.0, 0.0, 600_000.0, 0.0, -10.0, 4_000_000.0),
         )
-        with pytest.raises(ValueError, match="share spatial shape, transform"):
+        with pytest.raises(ValueError, match="StackMatched: the input 1 pixel grid"):
             StackMatched()([a, b])
 
     def test_crs_mismatch_rejected(self) -> None:
         a = _gt(np.zeros((4, 4), dtype=np.float32), crs="EPSG:32629")
         b = _gt(np.zeros((4, 4), dtype=np.float32), crs="EPSG:32630")
-        with pytest.raises(ValueError, match="share spatial shape"):
+        with pytest.raises(ValueError, match="StackMatched: the input 1 pixel grid"):
             StackMatched()([a, b])
 
 

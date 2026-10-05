@@ -16,7 +16,7 @@ the per-frame label maps (or boundary images) stacked as
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import einx
 import numpy as np
@@ -33,11 +33,8 @@ from skimage.segmentation import (
     watershed,
 )
 
-from geotoolz._src.config import (
-    mapping_from_pairs,
-    mapping_to_pairs,
-    reject_config_summary,
-)
+from geotoolz._src.config import as_tuple, mapping_from_pairs, mapping_to_pairs
+from geotoolz._src.geo import require_grid_match
 from geotoolz._src.labels import Connectivity, connectivity_structure
 from geotoolz._src.shape import over_frames, single_band
 from geotoolz._src.valid import (
@@ -74,12 +71,10 @@ def _as_mask(
     return arr.astype(bool)
 
 
-def _array_summary(value: Any) -> dict[str, Any] | None:
-    """Debug-config summary of a runtime array argument (``None`` passes)."""
-    if value is None:
-        return None
-    arr = np.asarray(value)
-    return {"shape": list(arr.shape), "dtype": str(arr.dtype)}
+def _check_input_grid(gt: Any, other: Any, op_name: str, arg: str) -> None:
+    """A second input carrier (mask / markers / labels) must share ``gt``'s grid."""
+    if other is not None:
+        require_grid_match(gt, other, op_name, names=("image", arg))
 
 
 def _labels(
@@ -111,10 +106,12 @@ class SLIC(Operator):
             cubes, ``None`` for 2-D single-band input). Ignored for 2-D
             input, which is always treated as single-band.
         start_label: First label assigned to a superpixel.
-        mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
-            outside it get label ``0``. ``get_config`` summarises a mask
-            as ``{"shape", "dtype"}``, which ``Operator.from_state``
-            refuses to rebuild.
+
+    Called as ``op(image, mask=None)``. The optional ``mask`` is an
+    ``(H, W)`` (or ``(1, H, W)``) boolean carrier on the image's pixel grid
+    (``ValueError`` otherwise); pixels outside it get label ``0``. Pass it
+    positionally to wire it as a graph input,
+    ``SLIC()(Input("image"), Input("mask"))``.
     """
 
     def __init__(
@@ -125,20 +122,23 @@ class SLIC(Operator):
         sigma: float = 0.0,
         axis: int | None = 0,
         start_label: int = 1,
-        mask: Any = None,
     ) -> None:
         self.n_segments = n_segments
         self.compactness = compactness
         self.sigma = sigma
         self.axis = axis
         self.start_label = start_label
-        self.mask = reject_config_summary(mask, "mask")
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(
+        self,
+        gt: GeoTensorType | np.ndarray,
+        mask: GeoTensorType | np.ndarray | None = None,
+    ) -> GeoTensorType | np.ndarray:
+        _check_input_grid(gt, mask, "SLIC", "mask")
         valid = valid_pixels(gt)
         image = fill_invalid(np.asarray(gt), valid)
-        mask = _as_mask(self.mask, gt.shape[-2:], name="SLIC mask")
+        mask = _as_mask(mask, gt.shape[-2:], name="SLIC mask")
         if mask is not None:
             valid &= mask
         # A 2-D image has no channel axis; skimage raises if one is given.
@@ -153,16 +153,6 @@ class SLIC(Operator):
             mask=valid,
         )
         return _labels(gt, labels, valid)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "n_segments": self.n_segments,
-            "compactness": self.compactness,
-            "sigma": self.sigma,
-            "axis": self.axis,
-            "start_label": self.start_label,
-            "mask": _array_summary(self.mask),
-        }
 
 
 class Felzenszwalb(Operator):
@@ -183,10 +173,12 @@ class Felzenszwalb(Operator):
             postprocessing (skimage's ``min_size``).
         axis: Position of the band (channel) axis (``0`` for channel-first
             cubes, ``None`` for 2-D single-band input).
-        mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
-            outside it get label ``0``. ``get_config`` summarises a mask
-            as ``{"shape", "dtype"}``, which ``Operator.from_state``
-            refuses to rebuild.
+
+    Called as ``op(image, mask=None)``. The optional ``mask`` is an
+    ``(H, W)`` (or ``(1, H, W)``) boolean carrier on the image's pixel grid
+    (``ValueError`` otherwise); pixels outside it get label ``0``. Pass it
+    positionally to wire it as a graph input,
+    ``Felzenszwalb()(Input("image"), Input("mask"))``.
     """
 
     def __init__(
@@ -196,19 +188,22 @@ class Felzenszwalb(Operator):
         sigma: float = 0.8,
         min_area_px: int = 20,
         axis: int | None = 0,
-        mask: Any = None,
     ) -> None:
         self.scale = scale
         self.sigma = sigma
         self.min_area_px = min_area_px
         self.axis = axis
-        self.mask = reject_config_summary(mask, "mask")
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(
+        self,
+        gt: GeoTensorType | np.ndarray,
+        mask: GeoTensorType | np.ndarray | None = None,
+    ) -> GeoTensorType | np.ndarray:
+        _check_input_grid(gt, mask, "Felzenszwalb", "mask")
         valid = valid_pixels(gt)
         image = fill_invalid(np.asarray(gt), valid)
-        mask = _as_mask(self.mask, gt.shape[-2:], name="Felzenszwalb mask")
+        mask = _as_mask(mask, gt.shape[-2:], name="Felzenszwalb mask")
         if mask is not None:
             valid &= mask
         labels = felzenszwalb(
@@ -221,15 +216,6 @@ class Felzenszwalb(Operator):
         # skimage numbers segments from 0, which collides with the
         # invalid-pixel label; shift so valid segments start at 1.
         return _labels(gt, labels + 1, valid)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "scale": self.scale,
-            "sigma": self.sigma,
-            "min_area_px": self.min_area_px,
-            "axis": self.axis,
-            "mask": _array_summary(self.mask),
-        }
 
 
 class Quickshift(Operator):
@@ -255,10 +241,12 @@ class Quickshift(Operator):
         convert2lab: Convert the image to LAB space first. Defaults to
             ``False`` (unlike skimage) so non-RGB / multispectral /
             single-band inputs work out of the box.
-        mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
-            outside it get label ``0``. ``get_config`` summarises a mask
-            as ``{"shape", "dtype"}``, which ``Operator.from_state``
-            refuses to rebuild.
+
+    Called as ``op(image, mask=None)``. The optional ``mask`` is an
+    ``(H, W)`` (or ``(1, H, W)``) boolean carrier on the image's pixel grid
+    (``ValueError`` otherwise); pixels outside it get label ``0``. Pass it
+    positionally to wire it as a graph input,
+    ``Quickshift()(Input("image"), Input("mask"))``.
     """
 
     def __init__(
@@ -270,7 +258,6 @@ class Quickshift(Operator):
         sigma: float = 0.0,
         axis: int | None = 0,
         convert2lab: bool = False,
-        mask: Any = None,
     ) -> None:
         self.kernel_size = kernel_size
         self.max_dist = max_dist
@@ -281,13 +268,17 @@ class Quickshift(Operator):
         # work out of the box. skimage's quickshift defaults convert2lab=True,
         # which raises on any input that is not exactly 3-channel RGB.
         self.convert2lab = convert2lab
-        self.mask = reject_config_summary(mask, "mask")
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(
+        self,
+        gt: GeoTensorType | np.ndarray,
+        mask: GeoTensorType | np.ndarray | None = None,
+    ) -> GeoTensorType | np.ndarray:
+        _check_input_grid(gt, mask, "Quickshift", "mask")
         valid = valid_pixels(gt)
         image = fill_invalid(np.asarray(gt), valid)
-        mask = _as_mask(self.mask, gt.shape[-2:], name="Quickshift mask")
+        mask = _as_mask(mask, gt.shape[-2:], name="Quickshift mask")
         if mask is not None:
             valid &= mask
         labels = quickshift(
@@ -303,17 +294,6 @@ class Quickshift(Operator):
         # invalid-pixel label; shift so valid segments start at 1.
         return _labels(gt, labels + 1, valid)
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "kernel_size": self.kernel_size,
-            "max_dist": self.max_dist,
-            "ratio": self.ratio,
-            "sigma": self.sigma,
-            "axis": self.axis,
-            "convert2lab": self.convert2lab,
-            "mask": _array_summary(self.mask),
-        }
-
 
 class Watershed(Operator):
     """Watershed segmentation via :func:`skimage.segmentation.watershed`.
@@ -324,9 +304,14 @@ class Watershed(Operator):
     ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32`` label
     map in the same carrier kind.
 
+    Called as ``op(image, markers=None, mask=None)``, both optional
+    carriers on the image's pixel grid (``ValueError`` otherwise):
+    ``markers`` is a single-band integer array seeding the basins (when
+    omitted, local minima of the image are used) and ``mask`` an
+    ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels outside it get
+    label ``0``.
+
     Args:
-        markers: Optional single-band integer marker array seeding the
-            basins; when None, local minima of the image are used.
         connectivity: ``4`` (edge neighbours, default) or ``8`` (edge +
             diagonal neighbours) used for flooding -- the package-wide
             spelling, converted to a footprint for skimage (whose ``1`` /
@@ -334,39 +319,36 @@ class Watershed(Operator):
         compactness: Compactness parameter; higher values produce more
             regularly-shaped basins.
         watershed_line: Separate basins with a zero-labelled line.
-        mask: Optional ``(H, W)`` (or ``(1, H, W)``) boolean mask; pixels
-            outside it get label ``0``.
     """
-
-    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
         *,
-        markers: Any = None,
         connectivity: Connectivity = 4,
         compactness: float = 0.0,
         watershed_line: bool = False,
-        mask: Any = None,
     ) -> None:
         connectivity_structure(connectivity)  # validate 4 | 8 up front
-        self.markers = markers
         self.connectivity = connectivity
         self.compactness = compactness
         self.watershed_line = watershed_line
-        self.mask = reject_config_summary(mask, "mask")
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(
+        self,
+        gt: GeoTensorType | np.ndarray,
+        markers: GeoTensorType | np.ndarray | None = None,
+        mask: GeoTensorType | np.ndarray | None = None,
+    ) -> GeoTensorType | np.ndarray:
+        _check_input_grid(gt, markers, "Watershed", "markers")
+        _check_input_grid(gt, mask, "Watershed", "mask")
         valid = valid_pixels(gt)
         image = single_band(fill_invalid(np.asarray(gt), valid), name="Watershed")
-        mask = _as_mask(self.mask, gt.shape[-2:], name="Watershed mask")
-        if mask is not None:
-            valid &= mask
+        mask_arr = _as_mask(mask, gt.shape[-2:], name="Watershed mask")
+        if mask_arr is not None:
+            valid &= mask_arr
         markers = (
-            None
-            if self.markers is None
-            else single_band(self.markers, name="Watershed markers")
+            None if markers is None else single_band(markers, name="Watershed markers")
         )
         labels = watershed(
             image,
@@ -377,15 +359,6 @@ class Watershed(Operator):
             watershed_line=self.watershed_line,
         )
         return _labels(gt, labels, valid)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "markers": _array_summary(self.markers),
-            "connectivity": self.connectivity,
-            "compactness": self.compactness,
-            "watershed_line": self.watershed_line,
-            "mask": _array_summary(self.mask),
-        }
 
 
 class ChanVese(Operator):
@@ -445,56 +418,48 @@ class RandomWalker(Operator):
     or a plain ``np.ndarray`` and returns an ``int32`` label map in the
     same carrier kind.
 
+    Called as ``op(image, markers)``: ``markers`` is a single-band integer
+    carrier of seed labels (0 = unseeded) on the image's pixel grid
+    (``ValueError`` otherwise).
+
     Args:
-        markers: Single-band integer array of seed labels (0 = unseeded);
-            required. Not YAML-serialisable, so instances are forbidden
-            in YAML.
         beta: Penalisation coefficient for the random-walk motion;
             higher values make diffusion harder across intensity edges.
         mode: Linear-system solver mode (see skimage docs).
         tol: Solver convergence tolerance.
     """
 
-    forbid_in_yaml: ClassVar[bool] = True
-
     def __init__(
         self,
         *,
-        markers: Any,
         beta: float = 130.0,
         mode: str = "cg_j",
         tol: float = 1e-3,
     ) -> None:
-        self.markers = markers
         self.beta = beta
         self.mode = mode
         self.tol = tol
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(
+        self, gt: GeoTensorType | np.ndarray, markers: GeoTensorType | np.ndarray
+    ) -> GeoTensorType | np.ndarray:
+        _check_input_grid(gt, markers, "RandomWalker", "markers")
         valid = valid_pixels(gt)
-        markers = single_band(self.markers, name="RandomWalker markers").astype(
+        seeds = single_band(markers, name="RandomWalker markers").astype(
             np.int32, copy=True
         )
         # Negative markers are inactive in skimage: nodata pixels are removed
         # from the diffusion graph so no label can spread through them.
-        markers[~valid] = -1
+        seeds[~valid] = -1
         labels = random_walker(
             single_band(fill_invalid(np.asarray(gt), valid), name="RandomWalker"),
-            markers,
+            seeds,
             beta=self.beta,
             mode=self.mode,
             tol=self.tol,
         )
         return _labels(gt, labels, valid)
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "markers": _array_summary(self.markers),
-            "beta": self.beta,
-            "mode": self.mode,
-            "tol": self.tol,
-        }
 
 
 class Threshold(Operator):
@@ -724,30 +689,30 @@ class MarkBoundaries(Operator):
     or a plain ``np.ndarray`` and returns the overlay in the same carrier
     kind.
 
+    Called as ``op(image, label_img)``: ``label_img`` is the single-band
+    integer label map whose region boundaries are drawn, on the image's
+    pixel grid (``ValueError`` otherwise).
+
     Args:
-        label_img: Single-band integer label map whose region boundaries
-            are drawn; required. Not YAML-serialisable, so instances are
-            forbidden in YAML.
         color: RGB color (floats in 0-1) of the boundary lines.
         mode: Boundary style — ``"thick"``, ``"inner"``, ``"outer"`` or
             ``"subpixel"``.
     """
 
-    forbid_in_yaml: ClassVar[bool] = True
-
     def __init__(
         self,
         *,
-        label_img: Any,
         color: tuple[float, float, float] = (1.0, 1.0, 0.0),
         mode: str = "thick",
     ) -> None:
-        self.label_img = label_img
-        self.color = color
+        self.color = as_tuple(color)
         self.mode = mode
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(
+        self, gt: GeoTensorType | np.ndarray, label_img: GeoTensorType | np.ndarray
+    ) -> GeoTensorType | np.ndarray:
+        _check_input_grid(gt, label_img, "MarkBoundaries", "label_img")
         image = np.asarray(gt)
         if image.ndim == 3:
             if image.shape[0] == 1:
@@ -761,7 +726,7 @@ class MarkBoundaries(Operator):
                 )
         marked = mark_boundaries(
             image,
-            single_band(self.label_img, name="MarkBoundaries label_img").astype(
+            single_band(label_img, name="MarkBoundaries label_img").astype(
                 np.int32, copy=False
             ),
             color=self.color,
@@ -772,10 +737,3 @@ class MarkBoundaries(Operator):
         return wrap_filled(
             gt, marked, fill_value_default=carried_fill(gt, np.asarray(marked).dtype)
         )
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "label_img": _array_summary(self.label_img),
-            "color": self.color,
-            "mode": self.mode,
-        }

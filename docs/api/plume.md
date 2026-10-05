@@ -12,4 +12,10 @@ are cited in the operator docstrings (Varon et al., Frankenberg et al., Krings e
 - **Quantification:** `ColumnToMass`, `IMEEstimate`, `CrossSectionalFlux`, `WindAdvectionCone`
 - **Tier-A primitives:** `plume_mask`, `convert_column_units`, `wind_advection_cone`
 
+Second carriers are positional call arguments on the primary carrier's pixel grid, never constructor
+kwargs (see [Multi-input operators](../concepts.md#multi-input-operators-carriers-are-positional)):
+`IMEEstimate(wind_speed=3.5)(kg_m2, plume_mask)`, `CrossSectionalFlux(...)(kg_m2, plume_mask)`,
+`PlumeFootprint()(mask, kg_m2)`, `SBMP()(scene, reference_scene)`,
+`PlumeColumnStats()(labels, column)`, `PlumeQNDFeatures()(labels, column, albedo)`.
+
 ::: geotoolz.plume

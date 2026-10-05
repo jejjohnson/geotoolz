@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from affine import Affine
@@ -51,8 +51,8 @@ from geotoolz._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
-from geotoolz._src.geo import grid_matches, require_geotensor
-from geotoolz._src.shape import BAND_AXIS
+from geotoolz._src.geo import require_geotensor, require_grid_match
+from geotoolz._src.shape import BAND_AXIS, gather_inputs
 from geotoolz._src.valid import carrier_fill_value, restore_fill, valid_pixels
 from geotoolz._src.wrap import adopt_attrs, wrap_like
 from geotoolz.augment._src.array import (
@@ -1059,7 +1059,12 @@ class SimulatedClouds(Operator):
 class CutMix(Operator):
     """Paste a random rectangle from a pool donor on the input's pixel grid.
 
-    Donors must share the input's pixel grid exactly
+    Called as ``op(gt, *pool)`` -- the donors are positional carriers after
+    the input (or one list of them, ``op(gt, [d1, d2])``), so the operator
+    wires into a ``pipekit.Graph`` as ``CutMix()(Input("x"), Input("d1"),
+    Input("d2"))``. With no donors the input passes through unchanged.
+
+    Every donor must share the input's pixel grid exactly
     (:func:`geotoolz._src.geo.grid_matches` with ``spatial_only=False``:
     the full shape, and -- when both carry georeferencing -- the CRS and
     every ``transform`` coefficient, origin included). The paste is
@@ -1074,7 +1079,7 @@ class CutMix(Operator):
     drawn donor carry a ``transform``; plain arrays are compared by shape.
 
     Sampling: with probability ``p`` one donor is drawn uniformly from
-    ``pool``; the rectangle's height and width are drawn independently
+    the pool; the rectangle's height and width are drawn independently
     and uniformly from ``[1, H]`` and ``[1, W]``, and its top-left corner
     uniformly among the positions that keep it inside the raster. This
     is *not* the Beta(alpha, alpha) area-ratio convention of Yun et al.
@@ -1084,56 +1089,53 @@ class CutMix(Operator):
     fill value are written as the input's fill value, so a pasted hole
     stays a hole for the output carrier.
 
-    ``forbid_in_yaml`` is set because ``pool`` holds live ``GeoTensor``
-    objects that cannot be round-tripped through YAML. ``get_config`` emits
-    only the pool length for debug visibility.
-
     Args:
-        pool: Donor rasters sampled uniformly at apply time.
         p: Probability of applying the paste. Default ``0.5``.
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
 
     Raises:
-        ValueError: At apply time, if the drawn donor is not on the
-            input's pixel grid.
+        ValueError: At apply time, if any donor is not on the input's
+            pixel grid.
 
     Examples:
         >>> import geotoolz as gz
-        >>> op = gz.augment.CutMix(pool=[donor], p=1.0, seed=0)
-        >>> out = op(patch)  # doctest: +SKIP
+        >>> op = gz.augment.CutMix(p=1.0, seed=0)
+        >>> out = op(patch, donor)  # doctest: +SKIP
     """
-
-    forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
         *,
-        pool: list[GeoTensor | np.ndarray],
         p: float = 0.5,
         seed: int | None = None,
     ) -> None:
         _check_probability(p, "p")
-        self.pool = list(pool)
         self.p = p
         self.seed = seed
 
     def _apply(
-        self, gt: GeoTensor | np.ndarray, *, seed: int | None = None
+        self,
+        gt: GeoTensor | np.ndarray,
+        *pool: GeoTensor | np.ndarray,
+        seed: int | None = None,
     ) -> GeoTensor | np.ndarray:
+        donors = gather_inputs(pool, "CutMix") if pool else []
+        for idx, candidate in enumerate(donors):
+            require_grid_match(
+                gt,
+                candidate,
+                "CutMix",
+                names=("input", f"donor {idx}"),
+                spatial_only=False,
+            )
         rng = _call_rng(self, seed)
-        if not self.pool or rng.random() >= self.p:
+        if not donors or rng.random() >= self.p:
             return gt
 
-        donor = self.pool[int(rng.integers(0, len(self.pool)))]
+        donor = donors[int(rng.integers(0, len(donors)))]
         arr = np.asarray(gt)
         donor_arr = np.asarray(donor)
-        if not grid_matches(gt, donor, spatial_only=False):
-            raise ValueError(
-                "CutMix donor must match the input's pixel grid (shape, CRS and "
-                f"transform); got donor shape {donor_arr.shape} for input shape "
-                f"{arr.shape}"
-            )
 
         height, width = arr.shape[-2], arr.shape[-1]
         cut_h = int(rng.integers(1, height + 1))
@@ -1152,7 +1154,3 @@ class CutMix(Operator):
             valid = np.ones(donor_valid.shape, dtype=bool)
             valid[..., region[0], region[1]] = donor_valid[..., region[0], region[1]]
         return _cast_and_wrap(gt, out, valid)
-
-    def get_config(self) -> dict[str, Any]:
-        # Debug payload: the pool holds runtime rasters (forbid_in_yaml).
-        return {"pool": {"n": len(self.pool)}, "p": self.p, "seed": self.seed}

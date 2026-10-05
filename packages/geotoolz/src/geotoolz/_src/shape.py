@@ -15,7 +15,9 @@ helpers here are the one implementation of that convention:
 * :func:`map_frames` / :func:`over_frames` -- apply a per-scene function
   (or an operator's ``_apply``) to each frame of a ``(T, C, H, W)`` stack
   and restack the results;
-* :func:`single_band` -- the 2-D view of a single-band map.
+* :func:`single_band` -- the 2-D view of a single-band map;
+* :func:`gather_inputs` -- the positional inputs of an N-ary reducer,
+  ``op(a, b, ...)`` or ``op([a, b, ...])``.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from jaxtyping import Shaped
 __all__ = [
     "BAND_AXIS",
     "band_axis",
+    "gather_inputs",
     "keep_band_axis",
     "map_frames",
     "over_frames",
@@ -268,3 +271,48 @@ def single_band(
         f"{name} expects a single-band map with shape (H, W) or (1, H, W); "
         f"got shape {arr.shape}"
     )
+
+
+def _is_pair(value: Any) -> bool:
+    return isinstance(value, tuple) and len(value) == 2
+
+
+def gather_inputs(
+    inputs: tuple[Any, ...],
+    name: str,
+    *,
+    pairs: bool = False,
+    split_stack: bool = False,
+) -> list[Any]:
+    """The inputs of an N-ary reducer called as ``op(a, b, ...)`` or ``op([a, b])``.
+
+    The multi-input convention (#141): N-ary reducers take their carriers
+    as positional arguments, so they wire into a ``pipekit.Graph`` as
+    ``op(Input("a"), Input("b"))``; a single list / tuple of them is
+    accepted too. With ``pairs=True`` each input is a ``(carrier, extra)``
+    pair, and a lone 2-tuple is one pair, not a sequence of two inputs
+    (unless both of its items are pairs themselves). With
+    ``split_stack=True`` a lone 4-D ``(T, C, H, W)`` carrier is a time
+    stack whose frames are the inputs.
+
+    Args:
+        inputs: The ``*args`` tuple of the operator's ``_apply``.
+        name: Operator name for error messages.
+        pairs: Whether each input is a ``(carrier, extra)`` pair.
+        split_stack: Whether a lone 4-D carrier is split into its frames.
+
+    Returns:
+        The inputs as a list.
+
+    Raises:
+        ValueError: If there are no inputs.
+    """
+    if len(inputs) == 1 and isinstance(inputs[0], list | tuple):
+        only = inputs[0]
+        if not pairs or not _is_pair(only) or all(_is_pair(item) for item in only):
+            inputs = tuple(only)
+    elif split_stack and len(inputs) == 1 and np.ndim(inputs[0]) == 4:
+        inputs = tuple(_frame(inputs[0], t) for t in range(np.shape(inputs[0])[0]))
+    if not inputs:
+        raise ValueError(f"{name} needs at least one input")
+    return list(inputs)
