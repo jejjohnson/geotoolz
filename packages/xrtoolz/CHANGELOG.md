@@ -28,6 +28,18 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.5](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.4...xrtoolz-v0.0.5) (2026-10-05)
+
+
+### Features
+
+* **metrics:** Cartesian + explicit-Coriolis physical-balance metrics ([#339](https://github.com/jejjohnson/xrtoolz/issues/339)) ([c14280b](https://github.com/jejjohnson/xrtoolz/commit/c14280b622f60378fb52157a9417feed94910300)), closes [#323](https://github.com/jejjohnson/xrtoolz/issues/323)
+* **ocn:** thread dims / geometry / explicit Coriolis through kinematics ([#338](https://github.com/jejjohnson/xrtoolz/issues/338)) ([c8429bd](https://github.com/jejjohnson/xrtoolz/commit/c8429bd1e4ffb625b2f8f9ad6f0477f135dba1a0)), closes [#322](https://github.com/jejjohnson/xrtoolz/issues/322)
+* **viz:** HovmollerPanel — time × spatial-axis section ([#344](https://github.com/jejjohnson/xrtoolz/issues/344)) ([802f59e](https://github.com/jejjohnson/xrtoolz/commit/802f59e6d6ae9deea7657ab281374405f59eb22d)), closes [#120](https://github.com/jejjohnson/xrtoolz/issues/120)
+* **viz:** projection-free CartesianMapPanel + EnergyTimeSeriesPanel ([#341](https://github.com/jejjohnson/xrtoolz/issues/341)) ([57dc910](https://github.com/jejjohnson/xrtoolz/commit/57dc9103727d62fb2fdb045b3ac26b1f049d2277)), closes [#325](https://github.com/jejjohnson/xrtoolz/issues/325)
+* **viz:** SpatialDiffPanel — (pred, ref, pred - ref) snapshot triptych ([#342](https://github.com/jejjohnson/xrtoolz/issues/342)) ([b19e725](https://github.com/jejjohnson/xrtoolz/commit/b19e725c7dfbd894fa02d8b33ef16c1cb8c616c2)), closes [#117](https://github.com/jejjohnson/xrtoolz/issues/117)
+* **viz:** TimeSeriesErrorPanel — multi-method skill scores over time ([#343](https://github.com/jejjohnson/xrtoolz/issues/343)) ([5eb4bb4](https://github.com/jejjohnson/xrtoolz/commit/5eb4bb44a9014a2c557bc9d31066668f46a3979e)), closes [#118](https://github.com/jejjohnson/xrtoolz/issues/118)
+
 ## [0.0.4](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.3...xrtoolz-v0.0.4) (2026-09-24)
 
 

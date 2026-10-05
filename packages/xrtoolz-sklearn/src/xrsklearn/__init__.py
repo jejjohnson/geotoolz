@@ -23,7 +23,7 @@ from xrsklearn._src.tree import TreeMode
 from xrsklearn._src.wrap import XarrayEstimator
 
 
-__version__ = "0.0.1"  # x-release-please-version
+__version__ = "0.0.2"  # x-release-please-version
 
 __all__ = [
     "MissingKind",
