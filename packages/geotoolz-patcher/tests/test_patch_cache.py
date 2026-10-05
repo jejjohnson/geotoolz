@@ -8,6 +8,7 @@ reconstructs each patch bit-identically.
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import threading
 from pathlib import Path
@@ -33,6 +34,7 @@ from geopatcher import (
     SpatialRectangular,
     SpatialRegularStride,
 )
+from geopatcher._src import cache as cache_module
 
 
 class _CountingField:
@@ -988,3 +990,85 @@ def test_indexed_view_heads_once(tmp_path, monkeypatch) -> None:
     again = [view[i] for i in range(len(view))]  # all cache hits
     assert len(heads) == 1
     _assert_patches_equal(again, first)
+
+
+def test_failed_clear_keeps_entry_tracked(tmp_path, monkeypatch) -> None:
+    size = _entry_size(tmp_path)
+    cache = PatchCache(tmp_path / "c", max_bytes=10 * size)
+    for i in range(3):
+        cache.put("f", "c", (i, 0), _tiny_patch(i))
+    stuck = cache._path(cache._key("f", "c", (1, 0)))
+    real_unlink = Path.unlink
+
+    def unlink(self: Path, *args: Any, **kwargs: Any) -> None:
+        if self == stuck:
+            raise PermissionError("file is open in another process")
+        real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    cache.clear()
+    assert stuck.exists()
+    assert cache.stats()["entries"] == 1
+    assert cache.stats()["bytes"] == size
+
+
+def test_miss_does_not_forget_a_concurrently_published_entry(tmp_path) -> None:
+    """A miss racing a writer of the same key must not drop its accounting."""
+    cache = PatchCache(tmp_path / "c", max_bytes=1 << 20)
+    path = cache._path(cache._key("f", "c", (0, 0)))
+    real_load = cache_module._load_entry
+
+    def load_then_publish(p: Path) -> Any:
+        try:
+            return real_load(p)
+        except FileNotFoundError:
+            # The writer publishes between our failed open and the lock.
+            cache.put("f", "c", (0, 0), _tiny_patch(0))
+            raise
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(cache_module, "_load_entry", load_then_publish)
+        assert cache.get("f", "c", (0, 0)) is None
+    assert path.exists()
+    assert cache.stats()["entries"] == 1
+    assert cache.stats()["bytes"] == path.stat().st_size
+
+
+def test_indexed_view_supports_patchers_without_field_id(tmp_path) -> None:
+    """Third-party patchers keep the original ``patch_at(..., cache=)`` call."""
+    from geopatcher import IndexedPatchView
+
+    inner = _patcher()
+
+    class _LegacyPatcher:
+        def anchors(self, field: Any) -> list[Any]:
+            return inner.anchors(field)
+
+        def patch_at(self, field: Any, anchor: Any, *, cache: Any = None) -> Any:
+            return inner.patch_at(field, anchor, cache=cache)
+
+    field = make_raster_field(16)
+    view = IndexedPatchView(
+        _LegacyPatcher(), field, cache=PatchCache(tmp_path, field_id="scene")
+    )
+    _assert_patches_equal([view[i] for i in range(len(view))], list(inner.split(field)))
+
+
+def test_datetime_anchors_do_not_collide_with_strings(tmp_path) -> None:
+    from geopatcher import normalize_anchor
+
+    keys = {
+        json.dumps(normalize_anchor(a), sort_keys=True)
+        for a in (
+            np.datetime64("2024-01-01"),
+            "2024-01-01",
+            np.datetime64("NaT"),
+            np.timedelta64("NaT"),
+            "NaT",
+        )
+    }
+    assert len(keys) == 5
+    cache = PatchCache(tmp_path)
+    cache.put("f", "c", np.datetime64("2024-01-01"), _tiny_patch(1))
+    assert cache.get("f", "c", "2024-01-01") is None
+    assert cache.get("f", "c", np.datetime64("2024-01-01")) is not None

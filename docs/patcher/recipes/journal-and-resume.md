@@ -40,7 +40,9 @@ journal = PatchJournal("out/run.jsonl")
 
 The journal stores one JSON record per committed patch, keyed by the
 anchor after `geopatcher.normalize_anchor`: numpy scalars become Python
-numbers (`datetime64` / `timedelta64` become strings), numpy arrays and
+numbers (`datetime64` / `timedelta64` become tagged
+`{"__datetime64__": "…"}` / `{"__timedelta64__": "…"}` dicts, so they never
+collide with a string anchor), numpy arrays and
 tuples become lists, dicts keep their string keys. So
 `(np.int64(5), np.int64(10))`, `np.array([5, 10])` and `(5, 10)` are the
 same anchor — `SpatialExplicit(anchors_=np.argwhere(mask))` rows resume

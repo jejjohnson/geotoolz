@@ -127,8 +127,10 @@ def normalize_anchor(anchor: Any) -> Any:
     and `PatchCache` (entry keys), so an anchor is the same key however
     a sampler spelled it:
 
-    - numpy scalars → ``.item()`` (``datetime64`` / ``timedelta64`` →
-      ``str``, so they stay JSON-serialisable);
+    - numpy scalars → ``.item()``; ``datetime64`` / ``timedelta64`` →
+      a tagged ``{"__datetime64__": str}`` / ``{"__timedelta64__": str}``
+      dict, so they stay JSON-serialisable without colliding with a
+      string anchor (``"2024-01-01"``) or with each other (``NaT``);
     - numpy arrays → nested lists of normalised elements;
     - tuples and lists → lists;
     - dicts → dicts of normalised values (keys must be strings).
@@ -157,8 +159,10 @@ def normalize_anchor(anchor: Any) -> Any:
         if anchor.ndim == 0:
             return normalize_anchor(anchor[()])
         return [normalize_anchor(v) for v in anchor]
-    if isinstance(anchor, (np.datetime64, np.timedelta64)):
-        return str(anchor)
+    if isinstance(anchor, np.datetime64):
+        return {"__datetime64__": str(anchor)}
+    if isinstance(anchor, np.timedelta64):
+        return {"__timedelta64__": str(anchor)}
     if isinstance(anchor, np.generic):
         return anchor.item()
     if isinstance(anchor, (tuple, list)):

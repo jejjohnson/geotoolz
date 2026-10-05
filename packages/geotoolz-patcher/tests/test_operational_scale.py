@@ -143,7 +143,9 @@ def test_journal_numpy_anchors(tmp_path: Path, field: RasterField) -> None:
 
 
 def test_normalize_anchor_rejects_unjsonable_values() -> None:
-    assert normalize_anchor({"t": np.datetime64("2024-01-01")}) == {"t": "2024-01-01"}
+    assert normalize_anchor({"t": np.datetime64("2024-01-01")}) == {
+        "t": {"__datetime64__": "2024-01-01"}
+    }
     with pytest.raises(TypeError, match="cannot journal / cache an anchor"):
         normalize_anchor((object(), 1))
     with pytest.raises(TypeError, match="keys must be strings"):

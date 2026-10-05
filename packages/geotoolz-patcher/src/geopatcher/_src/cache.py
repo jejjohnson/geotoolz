@@ -357,13 +357,26 @@ class PatchCache:
             }
 
     def clear(self) -> None:
-        """Delete every cached entry; reset hit / miss counters."""
+        """Delete every cached entry; reset hit / miss counters.
+
+        An entry whose file cannot be deleted (open in another process
+        on Windows, a flaky network filesystem) stays tracked, so
+        `stats` and eviction keep counting the bytes still on disk.
+        """
         with self._lock:
             for path in Path(self.root).rglob("*.npz"):
-                with suppress(OSError):
+                try:
                     path.unlink()
-            self._lru.clear()
-            self._bytes = 0
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    if path not in self._lru:
+                        self._track(path, _size(path))
+                    continue
+                self._forget(path)
+            # Anything tracked but no longer on disk is gone too.
+            for path in [p for p in self._lru if not p.exists()]:
+                self._forget(path)
             self._hits = 0
             self._misses = 0
 
@@ -401,6 +414,13 @@ class PatchCache:
             except OSError:
                 continue
             self._forget(path)
+
+
+def _size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ cache-on-view-not-on-patcher).
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import threading
 from collections import OrderedDict
 from collections.abc import Sequence
@@ -75,6 +76,9 @@ class IndexedPatchView(Sequence[Patch]):
     )
     _disk_cache: Any = field(default=None, init=False, repr=False, compare=False)
     _field_id: str | None = field(default=None, init=False, repr=False, compare=False)
+    _patch_at_takes_field_id: bool = field(
+        default=False, init=False, repr=False, compare=False
+    )
     _cache_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
     )
@@ -101,6 +105,7 @@ class IndexedPatchView(Sequence[Patch]):
                 f"{type(self.patcher).__name__}."
             )
         self._anchors = list(anchors(self.field))
+        self._patch_at_takes_field_id = _accepts_kwarg(patch_at, "field_id")
 
     def __len__(self) -> int:
         return len(self._anchors)
@@ -122,6 +127,12 @@ class IndexedPatchView(Sequence[Patch]):
                 f"IndexedPatchView index {idx} out of range [0, {len(self._anchors)})"
             )
         if self._disk_cache is not None:
+            if not self._patch_at_takes_field_id:
+                # A patcher written against the original protocol,
+                # ``patch_at(field, anchor, cache=...)``.
+                return self.patcher.patch_at(
+                    self.field, self._anchors[i], cache=self._disk_cache
+                )
             return self.patcher.patch_at(
                 self.field,
                 self._anchors[i],
@@ -178,6 +189,19 @@ class IndexedPatchView(Sequence[Patch]):
         """Drop any cached patches; subsequent reads go back through `patch_at`."""
         with self._cache_lock:
             self._cache.clear()
+
+
+def _accepts_kwarg(fn: Any, name: str) -> bool:
+    """``True`` when ``fn`` takes keyword ``name`` (or ``**kwargs``)."""
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        (p.name == name and p.kind is not inspect.Parameter.POSITIONAL_ONLY)
+        or p.kind is inspect.Parameter.VAR_KEYWORD
+        for p in params
+    )
 
 
 def _materialise(patch: Patch) -> Patch:
