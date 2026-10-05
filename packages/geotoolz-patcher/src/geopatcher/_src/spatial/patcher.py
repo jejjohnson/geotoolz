@@ -369,7 +369,14 @@ class SpatialPatcher:
         finally:
             _dispatch(hook_list, "on_split_end")
 
-    def patch_at(self, field: Field, anchor: Any, *, cache: Any | None = None) -> Patch:
+    def patch_at(
+        self,
+        field: Field,
+        anchor: Any,
+        *,
+        cache: Any | None = None,
+        field_id: str | None = None,
+    ) -> Patch:
         """Read a single `Patch` at a specific anchor.
 
         The same geometry → ``field.select`` → window-weights pipeline
@@ -388,6 +395,10 @@ class SpatialPatcher:
             cache: Optional `PatchCache`. When set, a cache hit returns
                 the stored patch without touching the source; a miss
                 reads then stores it.
+            field_id: ``cache.field_id_for(field)`` resolved once by the
+                caller and reused for every anchor (`IndexedPatchView`
+                does this). Without it each call re-derives the identity,
+                which for `ObstoreCogField` is a ``HEAD`` per patch.
 
         Returns:
             A single `Patch` bit-identical to the one ``split`` would
@@ -396,7 +407,7 @@ class SpatialPatcher:
         domain = field.domain
         base_weights = _safe_base_weights(self.window, self.geometry)
         boundary = getattr(self.geometry, "boundary", "drop")
-        cache_ctx = self._cache_context(cache, field)
+        cache_ctx = self._cache_context(cache, field, field_id=field_id)
         cached = self._cached_patch(cache_ctx, domain, anchor)
         if cached is not None:
             return cached
@@ -406,11 +417,14 @@ class SpatialPatcher:
         self._store_patch(cache_ctx, anchor, patch)
         return patch
 
-    def _cache_context(self, cache: Any | None, field: Field) -> Any | None:
+    def _cache_context(
+        self, cache: Any | None, field: Field, *, field_id: str | None = None
+    ) -> Any | None:
         """Bind ``cache`` to this field + config, or ``None`` when disabled."""
         if cache is None:
             return None
-        field_id = cache.field_id_for(field)
+        if field_id is None:
+            field_id = cache.field_id_for(field)
         config_id = cache.config_id_for(self.geometry, self.window)
         return (cache, field_id, config_id)
 

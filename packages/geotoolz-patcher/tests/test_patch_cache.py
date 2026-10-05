@@ -900,3 +900,91 @@ def test_pooled_cog_identity_covers_storage_options(tmp_path, monkeypatch) -> No
     b = dataclasses.replace(pooled, storage_options={"endpoint": "https://b.example"})
     assert a.cache_id() != b.cache_id()
     assert "https://a.example" not in a.cache_id()  # digested, never verbatim
+
+
+def test_failed_unlink_keeps_entry_tracked(tmp_path, monkeypatch) -> None:
+    """An entry whose file can't be deleted stays counted and is retried."""
+    size = _entry_size(tmp_path)
+    cache = PatchCache(tmp_path / "c", max_bytes=3 * size)
+    for i in range(3):
+        cache.put("f", "c", (i, 0), _tiny_patch(i))
+    stuck = cache._path(cache._key("f", "c", (0, 0)))
+    real_unlink = Path.unlink
+
+    def unlink(self: Path, *args: Any, **kwargs: Any) -> None:
+        if self == stuck:
+            raise PermissionError("file is open in another process")
+        real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    cache.put("f", "c", (3, 0), _tiny_patch(3))  # 0 can't go, so 1 does
+    assert stuck.exists()
+    assert cache.stats()["entries"] == 3
+    assert cache.stats()["bytes"] == 3 * size
+    assert [i for i in range(4) if cache.get("f", "c", (i, 0))] == [0, 2, 3]
+
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    cache.put("f", "c", (4, 0), _tiny_patch(4))  # the retried sweep removes 0
+    assert not stuck.exists()
+    assert cache.stats()["bytes"] <= 3 * size
+
+
+def _local_cog(tmp_path: Path) -> Any:
+    pytest.importorskip("obstore")
+    pytest.importorskip("async_tiff")
+    from obstore.store import LocalStore
+
+    from geopatcher.fields import ObstoreCogField
+
+    _write_tif(
+        tmp_path / "cog.tif",
+        np.arange(32 * 32, dtype=np.uint16).reshape(1, 32, 32),
+        tiled=True,
+        blockxsize=16,
+        blockysize=16,
+    )
+    return ObstoreCogField.from_url(
+        f"file://{tmp_path / 'cog.tif'}",
+        store=LocalStore(prefix=str(tmp_path)),
+        path="cog.tif",
+    )
+
+
+def test_head_without_validators_is_not_a_version(tmp_path) -> None:
+    """Size alone can't detect a same-length overwrite: warn, no version."""
+    field = _local_cog(tmp_path)
+
+    class _BareHead:
+        def __repr__(self) -> str:
+            return "BareHead()"
+
+        def head(self, key: str) -> dict[str, Any]:
+            return {"size": 2048, "e_tag": None, "last_modified": None}
+
+    field.store = _BareHead()
+    with pytest.warns(RuntimeWarning, match="neither an ETag"):
+        identity = field.cache_id()
+    assert '"version": null' in identity
+
+
+def test_indexed_view_heads_once(tmp_path, monkeypatch) -> None:
+    """`IndexedPatchView` binds the identity once, not one HEAD per item."""
+    from geopatcher import IndexedPatchView
+    from geopatcher.fields import ObstoreCogField
+
+    field = _local_cog(tmp_path)
+    heads = []
+    real_version = ObstoreCogField._object_version
+
+    def counting_version(self: Any) -> Any:
+        heads.append(1)
+        return real_version(self)
+
+    monkeypatch.setattr(ObstoreCogField, "_object_version", counting_version)
+    view = IndexedPatchView(
+        _patcher(size=16, step=16), field, cache=PatchCache(tmp_path / "c")
+    )
+    first = [view[i] for i in range(len(view))]
+    again = [view[i] for i in range(len(view))]  # all cache hits
+    assert len(heads) == 1
+    _assert_patches_equal(again, first)

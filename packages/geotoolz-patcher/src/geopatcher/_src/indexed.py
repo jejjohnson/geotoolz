@@ -74,6 +74,7 @@ class IndexedPatchView(Sequence[Patch]):
         default_factory=OrderedDict, init=False, repr=False
     )
     _disk_cache: Any = field(default=None, init=False, repr=False, compare=False)
+    _field_id: str | None = field(default=None, init=False, repr=False, compare=False)
     _cache_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
     )
@@ -122,7 +123,10 @@ class IndexedPatchView(Sequence[Patch]):
             )
         if self._disk_cache is not None:
             return self.patcher.patch_at(
-                self.field, self._anchors[i], cache=self._disk_cache
+                self.field,
+                self._anchors[i],
+                cache=self._disk_cache,
+                field_id=self._disk_field_id(),
             )
         if self.cache:
             with self._cache_lock:
@@ -146,6 +150,19 @@ class IndexedPatchView(Sequence[Patch]):
                     while len(self._cache) > self.cache_size:
                         self._cache.popitem(last=False)
         return patch
+
+    def _disk_field_id(self) -> str:
+        """The field's `PatchCache` identity, resolved once per view.
+
+        Like the anchor list, it is bound when first needed: deriving it
+        per item would stat files — or, for `ObstoreCogField`, send a
+        ``HEAD`` — on every ``view[i]``. A source changed after that is
+        not noticed by this view; build a new one to pick it up.
+        """
+        with self._cache_lock:
+            if self._field_id is None:
+                self._field_id = self._disk_cache.field_id_for(self.field)
+            return self._field_id
 
     @property
     def anchors(self) -> list[Any]:

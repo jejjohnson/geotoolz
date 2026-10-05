@@ -382,15 +382,25 @@ class PatchCache:
 
         The entry just written is the most recent and fits the cap on
         its own (oversize entries are never stored), so it survives.
+
+        An entry is forgotten only once its file is gone: when ``unlink``
+        fails (a file held open on Windows, a flaky network filesystem)
+        it stays tracked, so `stats` still counts it and a later sweep
+        retries it, and the sweep moves on to the next-oldest entry.
         """
         max_bytes = self.max_bytes
         if max_bytes is None:
             return
-        while self._bytes > max_bytes and self._lru:
-            path, size = self._lru.popitem(last=False)
-            self._bytes -= size
-            with suppress(OSError):
+        for path in list(self._lru):
+            if self._bytes <= max_bytes:
+                break
+            try:
                 path.unlink()
+            except FileNotFoundError:
+                pass  # already gone: just stop counting it
+            except OSError:
+                continue
+            self._forget(path)
 
 
 # ---------------------------------------------------------------------------

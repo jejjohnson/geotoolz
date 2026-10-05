@@ -650,7 +650,8 @@ class ObstoreCogField:
         `split`, not per patch): its ETag, else its size and
         last-modified time, so an object overwritten in place
         invalidates its cache entries. When the store refuses the
-        ``HEAD`` a `RuntimeWarning` says remote changes will not be
+        ``HEAD``, or answers with neither an ETag nor a last-modified
+        time, a `RuntimeWarning` says remote changes will not be
         detected and the version is left out.
 
         Raises:
@@ -711,7 +712,18 @@ class ObstoreCogField:
         e_tag = meta.get("e_tag")
         if e_tag:
             return f"etag:{e_tag}"
-        return f"size:{meta.get('size')}:{meta.get('last_modified')}"
+        last_modified = meta.get("last_modified")
+        if last_modified is None:
+            # Size alone cannot tell an overwrite of the same length apart.
+            warnings.warn(
+                f"ObstoreCogField: HEAD of {self.url!r} returned neither an ETag "
+                f"nor a Last-Modified time; PatchCache entries for it will not "
+                f"notice the object being overwritten.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            return None
+        return f"size:{meta.get('size')}:{last_modified}"
 
     @property
     def fill_value_default(self) -> float | int:
