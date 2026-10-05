@@ -291,17 +291,19 @@ def test_merge_to_xarray_fractional_values_stay_float() -> None:
 
 def test_matched_merge_to_field_rebuilds_every_source_on_primary_grid() -> None:
     primary = _geotensor_field(np.float32)
+    # The secondary sits on its own 5 m grid over the primary's extent;
+    # the coreg decimates its footprint chip onto the 10 m primary grid.
     secondary = RasterField(
         GeoTensor(
-            values=np.full((2, 8, 8), 7, dtype=np.int16),
-            transform=rasterio.Affine.identity(),
-            crs="EPSG:4326",
+            values=np.full((2, 16, 16), 7, dtype=np.int16),
+            transform=rasterio.Affine(5.0, 0.0, 500_000.0, 0.0, -5.0, 4_600_000.0),
+            crs="EPSG:32630",
         )
     )
     mfield = MatchedField(
         primary=primary,
         secondaries={"sec": secondary},
-        coreg={"sec": lambda raw, prim: raw},
+        coreg={"sec": lambda raw, prim: np.asarray(raw)[..., ::2, ::2]},
     )
     mpatcher = MatchedSpatialPatcher(
         primary=_patcher(), secondary_aggregators={"sec": SpatialOverlapAdd()}
