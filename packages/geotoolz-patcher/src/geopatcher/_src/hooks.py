@@ -57,7 +57,9 @@ def _as_hooks(hooks: Iterable[PatcherHook] | None) -> tuple[PatcherHook, ...]:
     return () if hooks is None else tuple(hooks)
 
 
-@lru_cache(maxsize=256)
+_UNBOUNDED_ARITY = 1 << 30
+
+
 def _positional_arity(callback: Callable[..., Any]) -> int:
     """Return the number of positional args the callback can accept.
 
@@ -66,15 +68,38 @@ def _positional_arity(callback: Callable[..., Any]) -> int:
     the patcher started passing the optional ``coord_value`` slot. Returns a
     very large value if introspection fails (e.g. builtins) so the dispatcher
     falls back to passing every arg, matching the prior behaviour.
+
+    Bound methods are cached by their underlying function (``__func__``),
+    never by the bound method itself: that would keep ``__self__`` — the
+    hook object (a span, a progress bar, …) — alive in the cache.
     """
+    func = getattr(callback, "__func__", None)
+    if inspect.ismethod(callback) and inspect.isfunction(func):
+        # ``self`` is the first positional parameter of the function.
+        return max(_function_arity(func) - 1, 0)
+    if inspect.isfunction(callback):
+        return _function_arity(callback)
+    # Callable instances, builtins, partials: uncached so we never hold
+    # a strong reference to user objects.
+    return _signature_arity(callback)
+
+
+@lru_cache(maxsize=256)
+def _function_arity(func: Callable[..., Any]) -> int:
+    """`_signature_arity` cached on a plain function (holds no hook object)."""
+    return _signature_arity(func)
+
+
+def _signature_arity(callback: Callable[..., Any]) -> int:
+    """Positional arity of ``callback`` (`_UNBOUNDED_ARITY` for ``*args``)."""
     try:
         sig = inspect.signature(callback)
     except (TypeError, ValueError):
-        return 1 << 30
+        return _UNBOUNDED_ARITY
     n = 0
     for param in sig.parameters.values():
         if param.kind == inspect.Parameter.VAR_POSITIONAL:
-            return 1 << 30
+            return _UNBOUNDED_ARITY
         if param.kind in (
             inspect.Parameter.POSITIONAL_ONLY,
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
@@ -124,15 +149,16 @@ def _len_or_unknown(values: Iterable[Any]) -> int:
 def _nbytes(value: Any) -> int:
     """Best-effort byte count for patch data and aggregation outputs.
 
-    Prefer direct ``.nbytes`` (NumPy arrays and many array-like objects), then
-    ``.values.nbytes`` for xarray / GeoTensor-style wrappers, then
-    ``.data.nbytes`` for backends that expose their array under ``data``.
+    Pure attribute probing — never materialises a lazy carrier: direct
+    ``.nbytes`` first (NumPy, `GeoTensor`, dask arrays and xarray objects,
+    all sized from dtype x shape without computing anything), then
+    ``.data.nbytes`` for wrappers that expose their backing array under
+    ``data``, and only then ``.values.nbytes`` (e.g. a pandas frame). The
+    ``.values`` probe comes last because on a lazy xarray object it would
+    compute the chunk graph — those always answer ``.nbytes`` first.
     """
-    for candidate in (
-        value,
-        getattr(value, "values", None),
-        getattr(value, "data", None),
-    ):
+    for attr in (None, "data", "values"):
+        candidate = value if attr is None else getattr(value, attr, None)
         if candidate is None:
             continue
         nbytes = getattr(candidate, "nbytes", None)

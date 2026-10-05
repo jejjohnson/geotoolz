@@ -196,3 +196,84 @@ class TestNDCube:
         recon = patcher.merge_to_xarray(patches, field)
         np.testing.assert_allclose(recon.values, da.values)
         np.testing.assert_array_equal(recon["time"].values, da["time"].values)
+
+
+def _dask_field() -> XarrayField:
+    """(y=64, x=64) dask-backed cube in 16x16 chunks — one chunk per patch."""
+    dask_array = pytest.importorskip("dask.array")
+    da = xr.DataArray(
+        dask_array.ones((64, 64), chunks=16, dtype=np.float32),
+        dims=("y", "x"),
+        coords={"y": np.arange(64), "x": np.arange(64)},
+    )
+    return XarrayField(da)
+
+
+def _patcher16() -> SpatialPatcher:
+    return SpatialPatcher(
+        geometry=SpatialRectangular(size=(16, 16)),
+        sampler=SpatialRegularStride(step=(16, 16)),
+        window=SpatialBoxcar(),
+        aggregation=SpatialOverlapAdd(),
+    )
+
+
+_CHIP_BYTES = 16 * 16 * 4  # float32
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"max_in_flight_bytes": _CHIP_BYTES},
+        {"max_in_flight": 2, "max_in_flight_bytes": 10**6, "prefetch": 2},
+    ],
+    ids=["no-limit", "byte-limit", "slots+bytes+prefetch"],
+)
+@pytest.mark.parametrize("with_hooks", [False, True], ids=["no-hooks", "hooks"])
+def test_split_does_not_compute_dask(kwargs: dict[str, int], with_hooks: bool) -> None:
+    """`split` keeps a dask-backed field lazy (#195).
+
+    The byte budget used to run ``np.asarray(patch.data)`` on every patch —
+    even with no limit configured — computing each chip in the producer.
+    """
+    from dask.callbacks import Callback
+
+    class CountTasks(Callback):
+        def __init__(self) -> None:
+            super().__init__()
+            self.n = 0
+
+        def _pretask(self, key: object, dask: object, state: object) -> None:
+            self.n += 1
+
+    class BytesHook:
+        def __init__(self) -> None:
+            self.bytes_: list[int] = []
+
+        def on_patch_done(self, anchor: object, runtime_s: float, n: int) -> None:
+            self.bytes_.append(n)
+
+    field = _dask_field()
+    hook = BytesHook()
+    hooks = [hook] if with_hooks else None
+    chips = []
+    with CountTasks() as counter:
+        for patch in _patcher16().split(field, hooks=hooks, **kwargs):
+            with patch:
+                chips.append(patch.data)
+    assert len(chips) == 16
+    assert counter.n == 0, f"split computed {counter.n} dask tasks"
+    # The chip stays lazy and still reports its real (dtype x shape) size.
+    assert chips[0].chunks is not None
+    assert chips[0].nbytes == _CHIP_BYTES
+    if with_hooks:
+        assert hook.bytes_ == [_CHIP_BYTES] * 16
+
+
+def test_byte_budget_counts_real_dataarray_size() -> None:
+    """A DataArray chip counts its dtype x shape bytes against the budget."""
+    with pytest.raises(ValueError, match="exceeding max_in_flight_bytes"):
+        next(_patcher16().split(_dask_field(), max_in_flight_bytes=_CHIP_BYTES - 1))
+    patch = next(_patcher16().split(_dask_field(), max_in_flight_bytes=_CHIP_BYTES))
+    patch.close()

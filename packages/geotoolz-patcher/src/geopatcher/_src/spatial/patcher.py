@@ -14,6 +14,7 @@ four-axis framework.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 import traceback
 from asyncio import BoundedSemaphore as AsyncBoundedSemaphore, to_thread
@@ -26,7 +27,8 @@ from collections.abc import (
     Mapping,
 )
 from dataclasses import dataclass, field
-from threading import BoundedSemaphore, Condition
+from functools import partial
+from threading import BoundedSemaphore, Condition, Event
 from time import perf_counter
 from typing import Any, Literal
 
@@ -41,7 +43,7 @@ from geopatcher._src.hooks import (
     _nbytes,
 )
 from geopatcher._src.patch import Patch
-from geopatcher._src.prefetch import prefetch_iterable
+from geopatcher._src.prefetch import _STOP_POLL_S, prefetch_iterable
 from geopatcher._src.protocols import AsyncField, Field
 from geopatcher._src.spatial.aggregation import (
     SpatialAggregation,
@@ -186,6 +188,10 @@ class SpatialPatcher:
         an unseeded sampler cannot place the second pass differently.
         """
         _validate_backpressure(max_in_flight, max_in_flight_bytes)
+        # Shared with the prefetch iterator: its ``close()`` (or its
+        # collection) sets ``stop``, which interrupts a producer blocked
+        # in a backpressure wait.
+        stop = Event()
         return prefetch_iterable(
             self._split(
                 field,
@@ -193,10 +199,10 @@ class SpatialPatcher:
                 hooks=hooks,
                 journal=journal,
                 cache=cache,
-                max_in_flight=max_in_flight,
-                max_in_flight_bytes=max_in_flight_bytes,
+                backpressure=_Backpressure(max_in_flight, max_in_flight_bytes, stop),
             ),
             prefetch,
+            stop=stop,
         )
 
     def _split(
@@ -207,8 +213,7 @@ class SpatialPatcher:
         hooks: Iterable[PatcherHook] | None = None,
         journal: Any | None = None,
         cache: Any | None = None,
-        max_in_flight: int | None = None,
-        max_in_flight_bytes: int | None = None,
+        backpressure: _Backpressure,
     ) -> Iterator[Patch]:
         domain = field.domain
         if anchors is None:
@@ -217,10 +222,6 @@ class SpatialPatcher:
         boundary = getattr(self.geometry, "boundary", "drop")
         cache_ctx = self._cache_context(cache, field)
         hook_list = _as_hooks(hooks)
-        slots = (
-            BoundedSemaphore(value=max_in_flight) if max_in_flight is not None else None
-        )
-        byte_budget = _ByteBudget(max_in_flight_bytes)
         if not hook_list:
             for anchor in anchors:
                 if journal is not None and journal.has(anchor):
@@ -243,7 +244,10 @@ class SpatialPatcher:
                     if read_ok:
                         self._store_patch(cache_ctx, anchor, patch)
                 if patch is not None:
-                    release = _acquire_backpressure(patch, slots, byte_budget)
+                    try:
+                        release = backpressure.acquire(patch)
+                    except _SplitCancelled:
+                        return
                     if release is not None:
                         # Attach ownership in-place so the yielded patch
                         # releases the exact slot acquired for this read.
@@ -287,7 +291,10 @@ class SpatialPatcher:
                     )
                 if patch is None:
                     continue
-                release = _acquire_backpressure(patch, slots, byte_budget)
+                try:
+                    release = backpressure.acquire(patch)
+                except _SplitCancelled:
+                    return
                 if release is not None:
                     patch._release = release
                 _dispatch(
@@ -322,12 +329,7 @@ class SpatialPatcher:
         base_weights = _safe_base_weights(self.window, self.geometry)
         boundary = getattr(self.geometry, "boundary", "drop")
         hook_list = _as_hooks(hooks)
-        slots = (
-            AsyncBoundedSemaphore(value=max_in_flight)
-            if max_in_flight is not None
-            else None
-        )
-        byte_budget = _ByteBudget(max_in_flight_bytes)
+        backpressure = _AsyncBackpressure(max_in_flight, max_in_flight_bytes)
         if not hook_list:
             for anchor in self.sampler.anchors(domain, self.geometry):
                 if journal is not None and journal.has(anchor):
@@ -335,7 +337,7 @@ class SpatialPatcher:
                 patch = await _build_patch_async(
                     field, domain, anchor, self.geometry, base_weights, boundary
                 )
-                release = await _acquire_backpressure_async(patch, slots, byte_budget)
+                release = await backpressure.acquire(patch)
                 if release is not None:
                     patch._release = release
                 yield patch
@@ -355,7 +357,7 @@ class SpatialPatcher:
                 except Exception as exc:
                     _dispatch(hook_list, "on_error", anchor, exc)
                     raise
-                release = await _acquire_backpressure_async(patch, slots, byte_budget)
+                release = await backpressure.acquire(patch)
                 if release is not None:
                     patch._release = release
                 _dispatch(
@@ -853,12 +855,7 @@ class AsyncSpatialPatcher:
         base_weights = _safe_base_weights(self.window, self.geometry)
         boundary = getattr(self.geometry, "boundary", "drop")
         hook_list = _as_hooks(hooks)
-        slots = (
-            AsyncBoundedSemaphore(value=max_in_flight)
-            if max_in_flight is not None
-            else None
-        )
-        byte_budget = _ByteBudget(max_in_flight_bytes)
+        backpressure = _AsyncBackpressure(max_in_flight, max_in_flight_bytes)
         if not hook_list:
             for anchor in self.sampler.anchors(domain, self.geometry):
                 if journal is not None and journal.has(anchor):
@@ -877,9 +874,7 @@ class AsyncSpatialPatcher:
                     capture_traceback=self.capture_traceback,
                 )
                 if patch is not None:
-                    release = await _acquire_backpressure_async(
-                        patch, slots, byte_budget
-                    )
+                    release = await backpressure.acquire(patch)
                     if release is not None:
                         # Attach ownership in-place so the yielded patch
                         # releases the exact slot acquired for this read.
@@ -918,7 +913,7 @@ class AsyncSpatialPatcher:
                     )
                 if patch is None:
                     continue
-                release = await _acquire_backpressure_async(patch, slots, byte_budget)
+                release = await backpressure.acquire(patch)
                 if release is not None:
                     patch._release = release
                 _dispatch(
@@ -1360,83 +1355,189 @@ def _validate_backpressure(
         raise ValueError("max_in_flight_bytes must be >= 1")
 
 
-class _ByteBudget:
-    def __init__(self, limit: int | None) -> None:
-        self.limit = limit
-        self.used = 0
+class _SplitCancelled(Exception):
+    """Raised by `_Backpressure.acquire` once the consumer abandoned `split`."""
+
+
+def _measure_bytes(patch: Patch, limit: int) -> int:
+    """Byte size of ``patch.data`` checked against ``limit``.
+
+    Uses `_nbytes` attribute probing (``.nbytes`` on NumPy / dask / xarray /
+    GeoTensor payloads, then ``.data.nbytes``) so a lazy carrier is sized
+    from its dtype and shape without computing a single chunk.
+    """
+    nbytes = _nbytes(patch.data)
+    if nbytes > limit:
+        raise ValueError(
+            f"patch uses {nbytes} bytes, exceeding max_in_flight_bytes={limit}"
+        )
+    return nbytes
+
+
+def _swallow_shutdown_errors(release: Callable[[], None]) -> None:
+    """Run ``release``, tolerating only interpreter-shutdown teardown errors.
+
+    A finalizer-driven release during interpreter shutdown can hit
+    already-torn-down synchronisation primitives; swallow only in that case
+    so real bugs still surface.
+    """
+    try:
+        release()
+    except Exception:
+        if not sys.is_finalizing():
+            raise
+
+
+class _Backpressure:
+    """``max_in_flight`` slots plus a ``max_in_flight_bytes`` budget for `split`.
+
+    One instance per `split` call. `acquire` blocks the producer until the
+    patch fits, but never forever: both waits are short-timeout loops that
+    re-check ``stop`` — the prefetch iterator's stop event, set by its
+    ``close()`` or when the iterator is garbage-collected — and raise
+    `_SplitCancelled` once it fires, so an abandoned prefetch producer thread
+    exits instead of pinning the field and its buffered patches.
+
+    With neither limit configured nothing is measured and no release
+    callback (hence no finalizer) is attached to the yielded patches.
+    """
+
+    def __init__(
+        self,
+        max_in_flight: int | None,
+        max_in_flight_bytes: int | None,
+        stop: Event,
+    ) -> None:
+        self._slots = (
+            BoundedSemaphore(value=max_in_flight) if max_in_flight is not None else None
+        )
+        self._limit = max_in_flight_bytes
+        self._used = 0
         self._condition = Condition()
+        self._stop = stop
 
-    def acquire(self, patch: Patch) -> int:
-        nbytes = int(getattr(np.asarray(patch.data), "nbytes", 0))
-        if self.limit is not None and nbytes > self.limit:
-            raise ValueError(
-                f"patch uses {nbytes} bytes, exceeding max_in_flight_bytes={self.limit}"
-            )
-        if self.limit is None:
-            # Still take the lock: `release` runs on consumer threads,
-            # so unbounded budgets must not mutate `used` unlocked.
+    def acquire(self, patch: Patch) -> Callable[[], None] | None:
+        """Wait for room for ``patch``; return the callback that frees it.
+
+        Returns:
+            The release callback the patch must own, or ``None`` when no
+            limit is configured (nothing to release).
+
+        Raises:
+            _SplitCancelled: The consumer stopped iterating while we waited.
+            ValueError: The patch alone exceeds ``max_in_flight_bytes``.
+        """
+        if self._slots is None and self._limit is None:
+            return None
+        nbytes = 0 if self._limit is None else _measure_bytes(patch, self._limit)
+        if self._slots is not None:
+            while not self._slots.acquire(timeout=_STOP_POLL_S):
+                if self._stop.is_set():
+                    raise _SplitCancelled
+        if nbytes:
+            try:
+                self._acquire_bytes(nbytes)
+            except BaseException:
+                if self._slots is not None:
+                    self._slots.release()
+                raise
+        if self._slots is None and nbytes == 0:
+            return None
+        return partial(_swallow_shutdown_errors, partial(self._release, nbytes))
+
+    def _acquire_bytes(self, nbytes: int) -> None:
+        assert self._limit is not None
+        with self._condition:
+            while self._used + nbytes > self._limit:
+                if self._stop.is_set():
+                    raise _SplitCancelled
+                self._condition.wait(timeout=_STOP_POLL_S)
+            self._used += nbytes
+
+    def _release(self, nbytes: int) -> None:
+        if self._slots is not None:
+            self._slots.release()
+        if nbytes:
             with self._condition:
-                self.used += nbytes
-            return nbytes
-        with self._condition:
-            while self.used + nbytes > self.limit:
-                self._condition.wait()
-            self.used += nbytes
-        return nbytes
-
-    def release(self, nbytes: int) -> None:
-        with self._condition:
-            self.used = max(0, self.used - nbytes)
-            self._condition.notify()
+                self._used = max(0, self._used - nbytes)
+                self._condition.notify()
 
 
-def _acquire_backpressure(
-    patch: Patch, slots: BoundedSemaphore | None, byte_budget: _ByteBudget
-) -> Any | None:
-    nbytes = byte_budget.acquire(patch)
-    if slots is not None:
-        slots.acquire()
-    if slots is None and nbytes == 0:
-        return None
+class _AsyncBackpressure:
+    """Async twin of `_Backpressure` for `asplit`, bound to one event loop.
 
-    def release() -> None:
-        try:
-            if slots is not None:
-                slots.release()
-            byte_budget.release(nbytes)
-        except Exception:
-            # A finalizer-driven release during interpreter shutdown can
-            # hit already-torn-down synchronisation primitives; swallow
-            # only in that case so real bugs still surface.
-            if not sys.is_finalizing():
+    `asyncio` primitives are not thread-safe and must be touched only on
+    their own loop, yet a patch's release can run anywhere: `Patch.close`
+    in a worker thread, or the garbage-collection finalizer on whichever
+    thread drops the last reference (e.g. the ``to_thread`` worker of an
+    async ``merge``). The loop is therefore captured at acquire time and
+    every off-loop release is handed back to it with
+    ``loop.call_soon_threadsafe``; a release after the loop closed is
+    dropped (nothing can be waiting on that loop any more).
+    """
+
+    def __init__(
+        self, max_in_flight: int | None, max_in_flight_bytes: int | None
+    ) -> None:
+        self._slots = (
+            AsyncBoundedSemaphore(value=max_in_flight)
+            if max_in_flight is not None
+            else None
+        )
+        self._limit = max_in_flight_bytes
+        self._used = 0
+        # Set whenever bytes are released; the (single) producer re-checks
+        # the budget after each wake-up. Only ever touched on the loop.
+        self._freed = asyncio.Event()
+
+    async def acquire(self, patch: Patch) -> Callable[[], None] | None:
+        """Async `_Backpressure.acquire`: wait on the loop, never in a thread."""
+        if self._slots is None and self._limit is None:
+            return None
+        nbytes = 0 if self._limit is None else _measure_bytes(patch, self._limit)
+        loop = asyncio.get_running_loop()
+        if self._slots is not None:
+            await self._slots.acquire()
+        if nbytes:
+            try:
+                await self._acquire_bytes(nbytes)
+            except BaseException:
+                if self._slots is not None:
+                    self._slots.release()
                 raise
+        if self._slots is None and nbytes == 0:
+            return None
+        return partial(
+            _swallow_shutdown_errors,
+            partial(self._release_threadsafe, loop, nbytes),
+        )
 
-    return release
+    async def _acquire_bytes(self, nbytes: int) -> None:
+        assert self._limit is not None
+        while self._used + nbytes > self._limit:
+            self._freed.clear()
+            await self._freed.wait()
+        self._used += nbytes
 
+    def _release_on_loop(self, nbytes: int) -> None:
+        if self._slots is not None:
+            self._slots.release()
+        if nbytes:
+            self._used = max(0, self._used - nbytes)
+            self._freed.set()
 
-async def _acquire_backpressure_async(
-    patch: Patch,
-    slots: AsyncBoundedSemaphore | None,
-    byte_budget: _ByteBudget,
-) -> Any | None:
-    nbytes = await to_thread(byte_budget.acquire, patch)
-    if slots is not None:
-        await slots.acquire()
-    if slots is None and nbytes == 0:
-        return None
-
-    def release() -> None:
+    def _release_threadsafe(self, loop: asyncio.AbstractEventLoop, nbytes: int) -> None:
         try:
-            if slots is not None:
-                slots.release()
-            byte_budget.release(nbytes)
-        except Exception:
-            # See the sync twin: swallow only shutdown-time teardown
-            # failures from a finalizer-driven release.
-            if not sys.is_finalizing():
-                raise
-
-    return release
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            self._release_on_loop(nbytes)
+            return
+        # A closed loop raises RuntimeError: its split is gone and nobody
+        # can be waiting for this slot any more, so drop the release.
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(self._release_on_loop, nbytes)
 
 
 def _build_patch(

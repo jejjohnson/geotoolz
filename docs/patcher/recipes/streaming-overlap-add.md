@@ -182,6 +182,15 @@ This pairs naturally with the streaming aggregation — the iterator
 throttles itself to the operator's throughput so the upstream reader
 never gets ahead.
 
+A patch's size is read from its payload's `.nbytes` (NumPy, `GeoTensor`,
+dask and xarray all report it from dtype × shape), so a lazy dask-backed
+`XarrayField` chip is budgeted without computing a single chunk. Without
+either limit nothing is measured and patches carry no release callback.
+Combined with `prefetch=N`, abandoning the loop early is safe: call
+`close()` on the iterator (or just drop it) and the background producer
+stops — even while it is waiting for a slot — and the patches it had
+buffered are closed, handing their slots back.
+
 ## 5. `streaming_safe = False` aggregations
 
 `SpatialMedian`, `SpatialMode`, and `SpatialLearned` need per-cell

@@ -6,15 +6,16 @@ import contextlib
 import weakref
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from queue import Full, Queue
+from queue import Empty, Full, Queue
 from threading import Event, Thread
 from typing import Any
 
 
 _SENTINEL = object()
 
-#: How often (seconds) the producer re-checks the stop flag while the
-#: queue is full. Bounds how long an abandoned producer thread lingers.
+#: How often (seconds) a producer re-checks the stop flag while it waits
+#: (a full queue here, a backpressure slot / byte budget in the patcher).
+#: Bounds how long an abandoned producer thread lingers.
 _STOP_POLL_S = 0.05
 
 
@@ -23,13 +24,24 @@ class _Raised:
     exc: BaseException
 
 
-def prefetch_iterable[T](iterable: Iterable[T], prefetch: int) -> Iterator[T]:
-    """Return ``iterable`` with up to ``prefetch`` items read ahead."""
+def prefetch_iterable[T](
+    iterable: Iterable[T], prefetch: int, *, stop: Event | None = None
+) -> Iterator[T]:
+    """Return ``iterable`` with up to ``prefetch`` items read ahead.
+
+    Args:
+        iterable: The upstream items, read on a background thread.
+        prefetch: Read-ahead depth; ``0`` returns ``iter(iterable)``.
+        stop: Optional stop event shared with the upstream iterator. The
+            prefetch iterator sets it on ``close()`` / collection, so an
+            upstream generator blocked in its own interruptible wait (e.g.
+            the patcher's backpressure) can notice and return.
+    """
     if prefetch < 0:
         raise ValueError("prefetch must be >= 0")
     if prefetch == 0:
         return iter(iterable)
-    return _PrefetchIterator(iterable, prefetch)
+    return _PrefetchIterator(iterable, prefetch, stop=stop)
 
 
 class _PrefetchIterator[T](Iterator[T]):
@@ -41,11 +53,19 @@ class _PrefetchIterator[T](Iterator[T]):
     the iterator — a `weakref.finalize` sets the stop event on
     collection — and the producer thread exits promptly instead of
     staying blocked in ``Queue.put`` forever.
+
+    `close` also closes the items still buffered (when they have a
+    ``close()``), so patches holding backpressure slots hand them back
+    instead of waiting for the garbage collector; a dropped iterator's
+    buffered items are released by their own finalizers once the producer
+    thread has exited.
     """
 
-    def __init__(self, iterable: Iterable[T], prefetch: int) -> None:
+    def __init__(
+        self, iterable: Iterable[T], prefetch: int, *, stop: Event | None = None
+    ) -> None:
         self._queue: Queue[T | _Raised | object] = Queue(maxsize=prefetch)
-        self._stop = Event()
+        self._stop = Event() if stop is None else stop
         self._thread = Thread(
             target=_produce,
             args=(iter(iterable), self._queue, self._stop),
@@ -74,19 +94,27 @@ class _PrefetchIterator[T](Iterator[T]):
         return item
 
     def close(self) -> None:
-        """Stop the producer thread and end iteration.
+        """Stop the producer thread, close buffered items, end iteration.
 
         Idempotent. After ``close`` the iterator raises ``StopIteration``
-        on the next ``next()`` call. The join is best-effort (bounded):
-        a producer blocked inside the *upstream* iterator's ``__next__``
-        cannot be interrupted, but it is a daemon thread and will exit
-        as soon as that read returns.
+        on the next ``next()`` call. Items already read ahead are drained
+        from the queue and closed, releasing any backpressure slots they
+        own. The join is best-effort (bounded): a producer blocked inside
+        the *upstream* iterator's ``__next__`` cannot be interrupted
+        unless that iterator watches the shared stop event, but it is a
+        daemon thread and will exit as soon as that read returns (and it
+        closes the item it was holding rather than enqueueing it).
         """
         self._stop.set()
+        self._thread.join(timeout=1.0)
+        while True:
+            try:
+                _close_item(self._queue.get_nowait())
+            except Empty:
+                break
         # Unblock a consumer concurrently waiting in ``Queue.get``.
         with contextlib.suppress(Full):
             self._queue.put_nowait(_SENTINEL)
-        self._thread.join(timeout=1.0)
 
 
 def _produce(iterator: Iterator[Any], queue: Queue[Any], stop: Event) -> None:
@@ -94,11 +122,28 @@ def _produce(iterator: Iterator[Any], queue: Queue[Any], stop: Event) -> None:
     try:
         for item in iterator:
             if not _put_until_stopped(queue, item, stop):
+                _close_item(item)
                 return
     except BaseException as exc:
         _put_until_stopped(queue, _Raised(exc), stop)
     finally:
+        if stop.is_set():
+            # Abandoned: finalise the upstream generator here, on the
+            # thread that owns it, so its ``finally`` blocks run now.
+            close = getattr(iterator, "close", None)
+            if close is not None:
+                with contextlib.suppress(Exception):
+                    close()
         _put_until_stopped(queue, _SENTINEL, stop)
+
+
+def _close_item(item: Any) -> None:
+    """Close a buffered item that will never reach the consumer."""
+    if item is _SENTINEL or isinstance(item, _Raised):
+        return
+    close = getattr(item, "close", None)
+    if close is not None:
+        close()
 
 
 def _put_until_stopped(queue: Queue[Any], item: Any, stop: Event) -> bool:
