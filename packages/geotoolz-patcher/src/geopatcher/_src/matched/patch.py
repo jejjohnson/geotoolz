@@ -24,8 +24,11 @@ correctly to downstream temporal aggregations.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from geopatcher._src.patch import _ReleaseLifecycleMixin
 
 
 if TYPE_CHECKING:
@@ -40,12 +43,15 @@ if TYPE_CHECKING:
 PRIMARY_KEY = "primary"
 
 
-class _MatchedMembersBase[MemberT]:
+class _MatchedMembersBase[MemberT](_ReleaseLifecycleMixin):
     """Shared invariants and accessors for the matched patch carriers.
 
     Not a dataclass itself — each concrete carrier declares its own
     dataclass fields; this base only contributes the ``__post_init__``
-    validation and the ``primary`` / ``secondary_names`` accessors.
+    validation, the ``primary`` / ``secondary_names`` accessors and the
+    `Patch` release lifecycle (``close`` / ``with mp: ...``), so a
+    matched patch holds the ``max_in_flight`` slot of the read it came
+    from.
     """
 
     members: dict[str, MemberT]
@@ -111,14 +117,17 @@ class MatchedPatch(_MatchedMembersBase["Patch"]):
             the mask is the workhorse the downstream operator uses
             to decide what to ignore.
         weights: Optional ``{name: ndarray}`` of per-source window
-            weights. Most callers leave this `None` and rely on the
-            primary's `Window` axis.
+            weights. The matched patchers fill it from each member's
+            ``weights`` (the primary window's weights, since every
+            member is on the primary's grid); `None` when the window
+            has none.
     """
 
     anchor: Any
     members: dict[str, Patch]
     valid_mask: dict[str, np.ndarray] | None = None
     weights: dict[str, np.ndarray] | None = field(default=None)
+    _release: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(eq=False)
@@ -140,14 +149,15 @@ class MatchedTemporalPatch(_MatchedMembersBase["TemporalPatch"]):
             indicating which time steps of each member contain valid
             data (False = nodata / gap / off-edge).
         weights: Optional ``{name: ndarray}`` of per-source time
-            weights. Most callers leave this `None` and rely on the
-            primary's `TemporalWindow` axis.
+            weights, filled by `MatchedTemporalPatcher` from each
+            member's ``weights``.
     """
 
     anchor: Any
     members: dict[str, TemporalPatch]
     valid_mask: dict[str, np.ndarray] | None = None
     weights: dict[str, np.ndarray] | None = field(default=None)
+    _release: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(eq=False)
@@ -167,7 +177,9 @@ class MatchedSpatioTemporalPatch(_MatchedMembersBase["SpatioTemporalPatch"]):
         valid_mask: Optional ``{name: ndarray}`` of per-source masks
             indicating which pixels/time steps of each member contain
             valid data.
-        weights: Optional ``{name: ndarray}`` of per-source weights.
+        weights: Optional ``{name: ndarray}`` of per-source weights,
+            filled by `MatchedSpatioTemporalPatcher` from each member's
+            ``weights``.
     """
 
     space: Any
@@ -175,3 +187,4 @@ class MatchedSpatioTemporalPatch(_MatchedMembersBase["SpatioTemporalPatch"]):
     members: dict[str, SpatioTemporalPatch]
     valid_mask: dict[str, np.ndarray] | None = None
     weights: dict[str, np.ndarray] | None = field(default=None)
+    _release: Callable[[], None] | None = field(default=None, repr=False, compare=False)

@@ -75,7 +75,7 @@ class _RecordingPrimaryPatcher:
         self.aggregation = aggregation
         self.merge_calls: list[tuple[list[Any], Any]] = []
 
-    def split(self, field: Any, hooks: Any = None) -> Iterator[Any]:
+    def split(self, field: Any, hooks: Any = None, **_: Any) -> Iterator[Any]:
         from geopatcher._src.patch import Patch
 
         for anchor in self.anchors_:
@@ -566,3 +566,338 @@ class TestRealSpatialPatcherIntegration:
             np.testing.assert_array_equal(
                 np.asarray(primary_chip), np.asarray(secondary_chip)
             )
+
+
+# ---------------------------------------------------------------------------
+# Runtime parity with SpatialPatcher (#203): on_error, hooks, split
+# passthroughs, per-source cache, streaming merge
+# ---------------------------------------------------------------------------
+
+
+def _raster_mfield(coreg: Any = None, *, values: Any = None) -> MatchedField:
+    import numpy as np
+    import rasterio
+    from georeader.geotensor import GeoTensor
+
+    from geopatcher._src.fields.raster import RasterField
+
+    if values is None:
+        values = np.arange(64, dtype=np.float32).reshape(8, 8)
+    tensor = GeoTensor(
+        values=values,
+        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
+        crs="EPSG:32629",
+        fill_value_default=np.nan,
+    )
+    return MatchedField(
+        primary=RasterField(tensor),
+        secondaries={
+            "sec": RasterField(
+                GeoTensor(
+                    values=values + 1000.0,
+                    transform=tensor.transform,
+                    crs=tensor.crs,
+                    fill_value_default=np.nan,
+                )
+            )
+        },
+        coreg={"sec": coreg or (lambda raw, prim: raw)},
+    )
+
+
+def _real_patcher(**kwargs: Any) -> Any:
+    from geopatcher._src.spatial.aggregation import SpatialSum
+    from geopatcher._src.spatial.geometry import SpatialRectangular
+    from geopatcher._src.spatial.patcher import SpatialPatcher
+    from geopatcher._src.spatial.sampler import SpatialRegularStride
+    from geopatcher._src.spatial.window import SpatialBoxcar
+
+    return SpatialPatcher(
+        geometry=SpatialRectangular(size=(4, 4)),
+        sampler=SpatialRegularStride(step=(4, 4)),
+        window=SpatialBoxcar(),
+        aggregation=SpatialSum(),
+        **kwargs,
+    )
+
+
+def _failing_coreg(raw: Any, prim: Any) -> Any:
+    import numpy as np
+
+    # The (4, 4) anchor's chip holds the field's maximum, 63.
+    if float(np.nanmax(np.asarray(prim))) == 63.0:
+        raise OSError("coreg failed")
+    return raw
+
+
+@pytest.mark.parametrize("on_error", ["raise", "skip", "mask"])
+def test_on_error_matrix(on_error: str) -> None:
+    import numpy as np
+
+    mf = _raster_mfield(_failing_coreg)
+    msp = MatchedSpatialPatcher(
+        primary=_real_patcher(on_error=on_error),
+        secondary_aggregators={"sec": _RecordingAgg("sec")},  # type: ignore[dict-item]
+    )
+    if on_error == "raise":
+        with pytest.raises(OSError, match="coreg failed"):
+            list(msp.split(mf))
+        return
+    patches = list(msp.split(mf))
+    assert [e.anchor for e in msp.primary.errors] == [(4, 4)]
+    if on_error == "skip":
+        assert [mp.anchor for mp in patches] == [(0, 0), (0, 4), (4, 0)]
+        return
+    assert [mp.anchor for mp in patches] == [(0, 0), (0, 4), (4, 0), (4, 4)]
+    masked = patches[-1]
+    assert isinstance(masked, MatchedPatch)
+    assert set(masked.members) == {PRIMARY_KEY, "sec"}
+    assert masked.valid_mask is not None
+    for name, member in masked.members.items():
+        assert np.asarray(member.data).shape == (4, 4)
+        assert np.isnan(member.data).all()
+        assert not masked.valid_mask[name].any()
+    assert masked.members[PRIMARY_KEY].data is not masked.members["sec"].data
+    for mp in patches[:-1]:
+        assert mp.valid_mask is not None and mp.valid_mask["sec"].all()
+
+
+def test_plain_field_under_mask_policy_still_rejected() -> None:
+    # A plain Field's non-dict data is misuse, not a mask placeholder.
+    msp = MatchedSpatialPatcher(primary=_real_patcher(on_error="mask"))
+    with pytest.raises(TypeError, match=r"dict.*MatchedField"):
+        list(msp.split(_raster_mfield().primary))  # type: ignore[arg-type]
+
+
+class _Hook:
+    def __init__(self) -> None:
+        self.events: list[tuple[Any, ...]] = []
+
+    def on_patch_done(self, anchor: Any, elapsed: float, bytes_: int) -> None:
+        self.events.append(("patch_done", anchor, bytes_))
+
+    def on_merge_start(self, n: int) -> None:
+        self.events.append(("merge_start", n))
+
+    def on_merge_end(self, output_bytes: int) -> None:
+        self.events.append(("merge_end", output_bytes))
+
+
+def test_hooks_report_member_summed_bytes_once() -> None:
+    import numpy as np
+
+    from geopatcher._src.spatial.aggregation import SpatialSum
+
+    mf = _raster_mfield()
+    msp = MatchedSpatialPatcher(
+        primary=_real_patcher(), secondary_aggregators={"sec": SpatialSum()}
+    )
+    hook = _Hook()
+    patches = list(msp.split(mf, hooks=[hook]))
+    assert len(hook.events) == len(patches) == 4
+    for (_, anchor, nbytes), mp in zip(hook.events, patches, strict=True):
+        assert anchor == mp.anchor
+        assert nbytes == 2 * 4 * 4 * 4  # two float32 (4, 4) members
+    hook = _Hook()
+    out = msp.merge(patches, mf, hooks=[hook])
+    assert hook.events == [
+        ("merge_start", 4),
+        ("merge_end", sum(np.asarray(v).nbytes for v in out.values())),
+    ]
+
+
+def test_split_forwards_journal_prefetch_and_max_in_flight(tmp_path: Any) -> None:
+    from geopatcher._src.journal import PatchJournal
+
+    mf = _raster_mfield()
+    msp = MatchedSpatialPatcher(primary=_real_patcher())
+    journal = PatchJournal(str(tmp_path / "journal.jsonl"))
+    journal.commit((0, 0), status="ok", runtime_s=0.0)
+    anchors = [mp.anchor for mp in msp.split(mf, journal=journal, prefetch=2)]
+    assert anchors == [(0, 4), (4, 0), (4, 4)]
+
+    seen = []
+    for mp in msp.split(mf, max_in_flight=1):
+        # The matched patch owns the slot; with max_in_flight=1 the next
+        # read only proceeds once it is closed.
+        assert mp._release is not None
+        with mp:
+            seen.append(mp.anchor)
+        assert mp._release is None
+    assert len(seen) == 4
+
+
+def test_split_cache_is_keyed_per_source(tmp_path: Any) -> None:
+    import numpy as np
+
+    from geopatcher._src.cache import PatchCache
+
+    reads: list[str] = []
+    coregs: list[int] = []
+    mf = _raster_mfield(lambda raw, prim: coregs.append(1) or raw)
+    for name, source in (("primary", mf.primary), ("sec", mf.secondaries["sec"])):
+        original = source.select
+
+        def counted(window: Any, _name: str = name, _orig: Any = original) -> Any:
+            reads.append(_name)
+            return _orig(window)
+
+        source.select = counted  # type: ignore[method-assign]
+    # One explicit field_id for the whole matched set: the role name still
+    # keeps the primary's and the secondary's entries apart.
+    cache = PatchCache(tmp_path / "cache", field_id="scene")
+    msp = MatchedSpatialPatcher(primary=_real_patcher())
+    first = list(msp.split(mf, cache=cache))
+    assert sorted(reads) == ["primary"] * 4 + ["sec"] * 4
+    reads.clear()
+    second = list(msp.split(mf, cache=cache))
+    assert reads == []
+    assert len(coregs) == 8  # the coregistration is never cached
+    for a, b in zip(first, second, strict=True):
+        for name in (PRIMARY_KEY, "sec"):
+            np.testing.assert_array_equal(
+                np.asarray(a.members[name].data), np.asarray(b.members[name].data)
+            )
+    np.testing.assert_array_equal(
+        np.asarray(second[0].members["sec"].data),
+        np.asarray(second[0].members[PRIMARY_KEY].data) + 1000.0,
+    )
+
+
+class _LagAgg:
+    """Records how far the patch producer ran ahead of this aggregation."""
+
+    streaming_safe = True
+
+    def __init__(self, name: str, produced: list[int], lags: dict[str, int]) -> None:
+        self.name = name
+        self.produced = produced
+        self.lags = lags
+
+    def merge(self, patches: Any, domain: Any) -> Any:
+        seen = 0
+        for _ in patches:
+            seen += 1
+            lag = self.produced[0] - seen
+            self.lags[self.name] = max(self.lags.get(self.name, 0), lag)
+        return seen
+
+
+def _matched_stream(n: int, produced: list[int]) -> Iterator[MatchedPatch]:
+    from geopatcher._src.patch import Patch
+
+    for i in range(n):
+        produced[0] += 1
+        yield MatchedPatch(
+            anchor=(i, 0),
+            members={
+                name: Patch(data=f"{name}{i}", anchor=(i, 0), indices=None)
+                for name in (PRIMARY_KEY, "s2")
+            },
+        )
+
+
+def test_merge_streams_every_source() -> None:
+    # The old merge collected every source's full patch list before any
+    # aggregation ran (lag == n); each aggregation now trails the single
+    # pass by a bounded queue.
+    produced = [0]
+    lags: dict[str, int] = {}
+    msp = MatchedSpatialPatcher(
+        primary=_RecordingPrimaryPatcher(
+            anchors=[],
+            aggregation=_LagAgg(PRIMARY_KEY, produced, lags),  # type: ignore[arg-type]
+        ),  # type: ignore[arg-type]
+        secondary_aggregators={"s2": _LagAgg("s2", produced, lags)},  # type: ignore[dict-item]
+    )
+    mf = MatchedField(
+        primary=_StubField("p"),
+        secondaries={"s2": _StubField("s2")},
+        coreg={"s2": lambda raw, primary: raw},
+    )
+    out = msp.merge(_matched_stream(100, produced), mf)
+    assert out == {PRIMARY_KEY: 100, "s2": 100}
+    assert set(lags) == {PRIMARY_KEY, "s2"}
+    assert max(lags.values()) <= 4
+
+
+def test_merge_aggregation_failure_propagates() -> None:
+    class _Boom(_RecordingAgg):
+        def merge(self, patches: list[Any], domain: Any) -> Any:
+            next(iter(patches))
+            raise RuntimeError("secondary aggregation failed")
+
+    mf = MatchedField(
+        primary=_StubField("p"),
+        secondaries={"s2": _StubField("s2")},
+        coreg={"s2": lambda raw, primary: raw},
+    )
+    msp = MatchedSpatialPatcher(
+        primary=_RecordingPrimaryPatcher(anchors=[], aggregation=_RecordingAgg("p")),  # type: ignore[arg-type]
+        secondary_aggregators={"s2": _Boom("s2")},  # type: ignore[dict-item]
+    )
+    with pytest.raises(RuntimeError, match="secondary aggregation failed"):
+        msp.merge(_matched_stream(50, [0]), mf)
+
+
+def test_merge_producer_failure_propagates() -> None:
+    def broken() -> Iterator[MatchedPatch]:
+        yield from _matched_stream(3, [0])
+        raise OSError("read failed mid-merge")
+
+    mf = MatchedField(
+        primary=_StubField("p"),
+        secondaries={"s2": _StubField("s2")},
+        coreg={"s2": lambda raw, primary: raw},
+    )
+    msp = MatchedSpatialPatcher(
+        primary=_RecordingPrimaryPatcher(anchors=[], aggregation=_RecordingAgg("p")),  # type: ignore[arg-type]
+        secondary_aggregators={"s2": _RecordingAgg("s2")},  # type: ignore[dict-item]
+    )
+    with pytest.raises(OSError, match="read failed mid-merge"):
+        msp.merge(broken(), mf)
+
+
+def test_unsafe_primary_aggregator_checked_too() -> None:
+    from geopatcher._src.config import set_strict
+
+    class _UnsafeAgg(_RecordingAgg):
+        streaming_safe = False
+
+    mf = MatchedField(primary=_StubField("p"))
+    msp = MatchedSpatialPatcher(
+        primary=_RecordingPrimaryPatcher(anchors=[], aggregation=_UnsafeAgg("p")),  # type: ignore[arg-type]
+    )
+    token = set_strict(True)
+    try:
+        with pytest.raises(RuntimeError, match="streaming_safe = False"):
+            msp.merge([], mf)
+    finally:
+        set_strict(token)
+
+
+def test_matched_patch_weights_populated() -> None:
+    import numpy as np
+
+    mf = _raster_mfield()
+    for mp in MatchedSpatialPatcher(primary=_real_patcher()).split(mf):
+        assert mp.weights is not None
+        assert set(mp.weights) == {PRIMARY_KEY, "sec"}
+        np.testing.assert_array_equal(mp.weights["sec"], mp.members["sec"].weights)
+
+
+def test_split_forwards_max_in_flight_bytes_sized_by_members() -> None:
+    """The byte budget sizes a matched patch as the sum of its members."""
+    import pytest
+
+    mf = _raster_mfield()
+    msp = MatchedSpatialPatcher(primary=_real_patcher())
+    member_sum = 2 * 4 * 4 * 4  # two float32 (4, 4) members
+    seen = []
+    for mp in msp.split(mf, max_in_flight_bytes=member_sum):
+        with mp:
+            seen.append(mp.anchor)
+    assert len(seen) == 4
+    # One member alone (64 bytes) would fit; the matched patch does not.
+    with pytest.raises(ValueError, match="max_in_flight_bytes"):
+        next(iter(msp.split(mf, max_in_flight_bytes=member_sum - 1)))

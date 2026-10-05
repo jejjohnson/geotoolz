@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from georeader import window_utils
 from rasterio.windows import Window
 
+from geopatcher._src.matched.patch import PRIMARY_KEY
 from geopatcher._src.spatial.geometry import _is_raster_domain
 
 
@@ -62,6 +63,14 @@ if TYPE_CHECKING:
 # contract is intentionally loose so any callable — a
 # `pipekit.Operator`, a partial, a plain function — works.
 CoregFn = Callable[[Any, Any], Any]
+
+# ``(source_name, field, indexer) -> data`` — one source's read.
+SourceRead = Callable[[str, Any, Any], Any]
+
+
+def _plain_read(name: str, source: Any, indexer: Any) -> Any:
+    """The uncached read: ``source.select(indexer)``."""
+    return source.select(indexer)
 
 
 @dataclass(eq=False)
@@ -131,10 +140,6 @@ class MatchedField:
         }
 
     def __post_init__(self) -> None:
-        # Avoid late-import cycle: `patch.py` imports from this module
-        # under TYPE_CHECKING and vice versa.
-        from geopatcher._src.matched.patch import PRIMARY_KEY
-
         sec_keys = set(self.secondaries.keys())
         cor_keys = set(self.coreg.keys())
         if sec_keys != cor_keys:
@@ -178,13 +183,22 @@ class MatchedField:
         that want the matched-patch carrier shape go through
         `MatchedSpatialPatcher.split`, which unpacks the dict.
         """
-        from geopatcher._src.matched.patch import PRIMARY_KEY
+        return self._select(indexer, _plain_read)
 
-        primary_data = self.primary.select(indexer)
+    def _select(self, indexer: Any, read: SourceRead) -> dict[str, Any]:
+        """`select` body with each source read routed through ``read``.
+
+        ``read(name, field, indexer)`` performs one source's read;
+        `MatchedSpatialPatcher.split(cache=...)` passes one that consults
+        a `PatchCache` keyed per source, while the coregistration still
+        runs on every call.
+        """
+        primary_data = read(PRIMARY_KEY, self.primary, indexer)
         result: dict[str, Any] = {PRIMARY_KEY: primary_data}
         primary_domain = self.primary.domain
         for name, sec in self.secondaries.items():
-            raw = sec.select(_footprint_indexer(indexer, primary_domain, sec.domain))
+            sec_indexer = _footprint_indexer(indexer, primary_domain, sec.domain)
+            raw = read(name, sec, sec_indexer)
             # Coreg callable: (secondary_raw, primary_data) -> aligned.
             # The runtime contract is intentionally loose so any
             # callable — pipekit.Operator, partial, lambda — works.
