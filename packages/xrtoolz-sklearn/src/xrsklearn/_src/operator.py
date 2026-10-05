@@ -87,47 +87,90 @@ class SklearnOp(Operator):
             node; nodes without ``variable`` pass through unchanged.
         method: Which sklearn-style method to call on each invocation.
 
+    Raises:
+        ValueError: At call time, if a Dataset / DataTree input has
+            neither ``variable`` nor ``output_variable``, or a setting
+            disagrees with a fitted :class:`XarrayEstimator`'s own.
+
     Example:
-        Compose a fitted scaler + a fitted PCA in a Sequential::
+        Fit upstream, then drop the fitted estimators into a
+        :class:`pipekit.Sequential` — every call applies the
+        *training-time* scaling and projection:
 
-            from sklearn.decomposition import PCA
-            from sklearn.preprocessing import StandardScaler
+        ```pycon
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> from pipekit import Sequential
+        >>> from sklearn.decomposition import PCA
+        >>> from sklearn.preprocessing import StandardScaler
+        >>> from xrsklearn import SklearnOp, XarrayEstimator
+        >>> rng = np.random.default_rng(0)
+        >>> ds = xr.Dataset(
+        ...     {"ssh": (("time", "lat", "lon"), rng.normal(size=(20, 3, 4)))}
+        ... )
+        >>> scaler = XarrayEstimator(StandardScaler(), sample_dim="time")
+        >>> scaler = scaler.fit(ds["ssh"])
+        >>> pca = XarrayEstimator(PCA(n_components=2), sample_dim="time")
+        >>> pca = pca.fit(scaler.transform(ds["ssh"]))
+        >>> pipeline = Sequential([
+        ...     SklearnOp(scaler, variable="ssh"),
+        ...     SklearnOp(pca, variable="ssh", output_variable="pcs"),
+        ... ])
+        >>> out = pipeline(ds)
+        >>> out["ssh"].dims, out["pcs"].dims
+        (('time', 'lat', 'lon'), ('time', 'component'))
 
-            from pipekit import Sequential
-            from xrsklearn import SklearnOp
-            from xrsklearn._src.wrap import XarrayEstimator
+        ```
 
-            # Fit upstream, then drop the fitted estimators into the chain.
-            scaler = XarrayEstimator(StandardScaler(), sample_dim="time").fit(ds["ssh"])
-            pca = XarrayEstimator(PCA(n_components=10), sample_dim="time").fit(
-                scaler.transform(ds["ssh"])
-            )
+        Recover the original grid from scores with ``inverse_transform``
+        (pass the fitted :class:`XarrayEstimator`, which remembers it):
 
-            pipeline = Sequential([
-                SklearnOp(scaler, variable="ssh"),
-                SklearnOp(pca, variable="ssh", output_variable="pcs"),
-            ])
-            ds_out = pipeline(ds)            # ds_out has both "ssh" and "pcs"
+        ```pycon
+        >>> recon = SklearnOp(pca, method="inverse_transform")(out["pcs"])
+        >>> recon.dims
+        ('time', 'lat', 'lon')
 
-        One-shot fit-and-transform of a single var (no Sequential reuse)::
+        ```
 
-            op = SklearnOp(StandardScaler(), variable="ssh", sample_dim="time",
-                           method="fit_transform")
-            ds_scaled = op(ds)
+        One-shot fit on a land-masked field — ``nan_policy="mask"`` drops
+        the always-NaN land column before fitting and restores it after:
 
-        Recover the original feature grid via ``inverse_transform``::
+        ```pycon
+        >>> ds["ssh"][:, 0, 0] = np.nan
+        >>> op = SklearnOp(
+        ...     StandardScaler(),
+        ...     variable="ssh",
+        ...     sample_dim="time",
+        ...     method="fit_transform",
+        ...     nan_policy="mask",
+        ... )
+        >>> scaled = op(ds)["ssh"]
+        >>> bool(scaled[:, 0, 0].isnull().all())  # land stays NaN
+        True
+        >>> int(scaled.isnull().sum())  # and nothing else is NaN
+        20
 
-            pca = XarrayEstimator(PCA(n_components=3), sample_dim="time").fit(ssh)
-            inv = SklearnOp(pca, method="inverse_transform")
-            # → (time, lat, lon), not (time, component)
-            ssh_recon = inv(pca.transform(ssh))
+        ```
 
-        NaN-laden ocean grid with the masking policy::
+        On a DataTree, each node gets its own result; ``fit_transform``
+        fits per ``tree_mode``:
 
-            op = SklearnOp(StandardScaler(), variable="ssh", sample_dim="time",
-                           method="fit_transform", nan_policy="mask")
-            # Land (always-NaN) columns and gappy rows are dropped pre-fit,
-            # then re-inserted as NaN on output.
+        ```pycon
+        >>> def node(n):
+        ...     return xr.Dataset({"ssh": (("time", "x"), rng.normal(size=(20, n)))})
+        >>> tree = xr.DataTree.from_dict({"coarse": node(2), "fine": node(5)})
+        >>> op = SklearnOp(
+        ...     PCA(n_components=1),
+        ...     variable="ssh",
+        ...     output_variable="pc",
+        ...     sample_dim="time",
+        ...     method="fit_transform",
+        ... )
+        >>> out = op(tree)
+        >>> out["coarse"]["pc"].dims, out["fine"]["ssh"].shape
+        (('time', 'component'), (20, 5))
+
+        ```
     """
 
     # Live estimator state (possibly fitted) is not YAML-serializable.
@@ -320,6 +363,28 @@ class SklearnOp(Operator):
         return wrap
 
     def get_config(self) -> dict[str, Any]:
+        """JSON-safe description of the op (estimator class + parameters).
+
+        Records the estimator's class name and constructor parameters —
+        primitives as-is, anything else as ``repr`` — plus the op's own
+        settings. Fitted state is never included, so a config cannot
+        rebuild a fitted pipeline (see ``forbid_in_yaml``).
+
+        Returns:
+            A dict that ``json.dumps`` accepts.
+
+        Example:
+            ```pycon
+            >>> import json
+            >>> from sklearn.decomposition import PCA
+            >>> from xrsklearn import SklearnOp
+            >>> config = SklearnOp(PCA(n_components=3), variable="ssh").get_config()
+            >>> config["estimator"], config["estimator_params"]["n_components"]
+            ('PCA', 3)
+            >>> _ = json.dumps(config)
+
+            ```
+        """
         return {
             "estimator": self._estimator_class_name(),
             "estimator_params": self._estimator_params(),

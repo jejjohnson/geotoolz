@@ -19,7 +19,7 @@ sklearn estimators want a 2-D `(n_samples, n_features)` matrix.
 `XarrayEstimator` gets there and back:
 
 1. **Stack**: the input is transposed so `sample_dim` leads, and every
-   other dim is flattened into a feature `MultiIndex`
+   other dim is flattened into feature columns
    (`(time, lat, lon)` → `(time, lat×lon)`). Dataset inputs
    column-concatenate their data_vars into one feature matrix.
 2. **Delegate**: the wrapped estimator's own
@@ -39,10 +39,31 @@ sklearn estimators want a 2-D `(n_samples, n_features)` matrix.
    `PCA(n_components=n_features)` scores are never mistaken for the
    input grid.
 
-The fitted wrapper stores the feature-grid metadata, which is what lets
-`inverse_transform` rebuild the original `(sample, *feature_dims)`
-layout. Fitted-estimator attributes (`components_`,
-`cluster_centers_`, …) pass through untouched.
+The fitted wrapper stores the feature-grid metadata (`layout_`), which
+is what lets `inverse_transform` rebuild the original
+`(sample, *feature_dims)` layout — including coordinate attrs and
+auxiliary coordinates such as curvilinear `nav_lat(y, x)`. Fitted-estimator
+attributes (`components_`, `cluster_centers_`, …) pass through
+untouched, and methods the estimator lacks are absent on the wrapper
+(`hasattr(wrap, "predict_proba")` is `False` for a scaler).
+
+### Inputs are checked against the fit-time grid
+
+sklearn only checks how *many* columns it receives. The wrapper also
+checks what they *are*: after `fit`, every input to `transform`,
+`predict`, `predict_proba` and `score` must carry the same feature
+dims, sizes and coordinate labels.
+
+- Feature dims in a different order, or a permuted coordinate (e.g.
+  descending instead of ascending latitude), are reordered to the
+  fit-time layout — same answer, no silent column shuffle.
+- A different grid — other dims, sizes, or coordinate labels (a
+  same-shape cube from another region) — raises a `ValueError` naming
+  the dim.
+- An xarray `y` (and xarray fit arguments such as `sample_weight`) is
+  aligned to `X`'s sample coordinate, not taken positionally.
+- The sample dim inferred at fit time (`sample_dim=None`) is recorded as
+  `sample_dim_` and reused.
 
 ```python
 from sklearn.decomposition import PCA
@@ -171,5 +192,5 @@ with joblib/pickle instead.
 
 ## API reference
 
-- [Utilities (`XarrayEstimator`)](../api/utils.md)
-- [Transforms (`SklearnOp`)](../api/transforms.md)
+- [scikit-learn bridge (`xrsklearn`)](../api/sklearn.md) — `XarrayEstimator`,
+  `SklearnOp`, the accessors, NaN policies and DataTree modes

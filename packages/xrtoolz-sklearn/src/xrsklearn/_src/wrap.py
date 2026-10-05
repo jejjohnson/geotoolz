@@ -818,7 +818,49 @@ class XarrayEstimator(BaseEstimator):
         y: YInput = None,
         **kwargs: Any,
     ) -> XarrayEstimator:
-        """Fit the wrapped estimator to ``x`` (and optional ``y``)."""
+        """Fit the wrapped estimator on ``x`` (and ``y``).
+
+        Records what later calls are checked against — the feature layout
+        (``layout_``), the sample dim (``sample_dim_``), the layout of an
+        xarray ``y`` (``target_layout_``) and, for the masking NaN policies,
+        the kept feature columns (``feature_mask_``) — then fits a clone of
+        ``estimator`` on the flattened ``(n_samples, n_features)`` matrix. A
+        DataTree ``x`` is fitted according to ``tree_mode``.
+
+        Args:
+            x: Training input: DataArray, Dataset, DataTree or 2-D NumPy array.
+            y: Optional target. An xarray ``y`` is aligned to ``x``'s sample
+                coordinate. For a DataTree ``x`` with ``tree_mode="per_node"`` /
+                ``"pool_samples"`` pass a DataTree or ``{path: target}`` mapping.
+            **kwargs: Extra arguments for the estimator's ``fit``
+                (``sample_weight``, …). xarray values are aligned to ``x``;
+                per-sample arrays are masked together with the samples.
+
+        Returns:
+            ``self``, fitted.
+
+        Raises:
+            TypeError: If ``x`` has an unsupported type or ``y`` does not suit it.
+            ValueError: If ``sample_dim`` is missing, ``y`` cannot be aligned to
+                ``x``, or the NaN policy rejects (or empties) the data.
+
+        Example:
+            ```pycon
+            >>> import numpy as np
+            >>> import xarray as xr
+            >>> from sklearn.linear_model import LinearRegression
+            >>> from xrsklearn import XarrayEstimator
+            >>> rng = np.random.default_rng(0)
+            >>> x = xr.DataArray(rng.normal(size=(20, 3)), dims=("time", "feature"))
+            >>> y = (x * [1.0, 2.0, 3.0]).sum("feature")
+            >>> wrap = XarrayEstimator(LinearRegression(), sample_dim="time").fit(x, y)
+            >>> np.round(wrap.coef_, 6)  # fitted attributes pass through
+            array([1., 2., 3.])
+            >>> wrap.sample_dim_, wrap.layout_.feature_dims
+            ('time', ('feature',))
+
+            ```
+        """
         self._reset()
         if self._tree_dispatch(x):
             self._check_params()
@@ -837,11 +879,47 @@ class XarrayEstimator(BaseEstimator):
 
     @available_if(_estimator_has("transform"))
     def transform(self, x: XInput) -> Output:
-        """Transform ``x`` via the fitted estimator.
+        """Transform ``x`` with the fitted estimator.
 
-        One-to-one transformers (scalers, …) return data on the input's
-        grid — a Dataset for Dataset input. Anything else (PCA scores,
-        KMeans distances) returns ``(sample_dim, new_feature_dim)``.
+        ``x`` must carry the fit-time feature grid. Permuted dims and
+        coordinates are reordered to it; a different grid raises. One-to-one
+        transformers (scalers, …) return data on the input grid — a Dataset
+        for Dataset input, a DataTree for DataTree input — while reducers
+        (PCA scores, KMeans distances) return
+        ``(sample_dim, new_feature_dim)``.
+
+        Args:
+            x: Input on the fit-time feature grid.
+
+        Returns:
+            The transformed data (a NumPy array for NumPy input).
+
+        Raises:
+            RuntimeError: If the wrapper has not been fitted.
+            ValueError: If ``x``'s feature grid differs from the fit-time grid.
+
+        Example:
+            ```pycon
+            >>> import numpy as np
+            >>> import xarray as xr
+            >>> from sklearn.preprocessing import StandardScaler
+            >>> from xrsklearn import XarrayEstimator
+            >>> da = xr.DataArray(
+            ...     np.arange(12.0).reshape(4, 3),
+            ...     dims=("time", "x"),
+            ...     coords={"x": [10, 20, 30]},
+            ... )
+            >>> wrap = XarrayEstimator(StandardScaler(), sample_dim="time").fit(da)
+            >>> shuffled = da.isel(x=[2, 0, 1])  # same grid, columns permuted
+            >>> bool((wrap.transform(shuffled) == wrap.transform(da)).all())
+            True
+            >>> # A different grid with the same shape is rejected:
+            >>> wrap.transform(da.assign_coords(x=[1, 2, 3]))  # doctest: +ELLIPSIS
+            Traceback (most recent call last):
+            ...
+            ValueError: X: coordinate 'x' does not match the one seen at fit time ...
+
+            ```
         """
         self._require_fitted()
         if self._tree_dispatch(x):
@@ -857,7 +935,46 @@ class XarrayEstimator(BaseEstimator):
         y: YInput = None,
         **kwargs: Any,
     ) -> Output:
-        """Fit then transform ``x`` (output layout as in :meth:`transform`)."""
+        """Fit on ``x`` and return its transform in one pass.
+
+        Calls the estimator's own ``fit_transform`` when it has one, else
+        ``fit`` followed by ``transform`` on the same input. These need not
+        agree: an estimator may learn the training representation jointly
+        in ``fit_transform`` (iterative factorizers do) and give different
+        values from a later ``transform``. The output layout follows
+        :meth:`transform`.
+
+        Args:
+            x: Training input: DataArray, Dataset, DataTree or 2-D NumPy array.
+            y: Optional target, as for :meth:`fit`.
+            **kwargs: Extra arguments for the estimator's ``fit``, as for
+                :meth:`fit`.
+
+        Returns:
+            The transformed training data.
+
+        Raises:
+            TypeError: If ``x`` has an unsupported type or ``y`` does not suit it.
+            ValueError: If ``sample_dim`` is missing or the NaN policy rejects
+                the data.
+
+        Example:
+            ```pycon
+            >>> import numpy as np
+            >>> import xarray as xr
+            >>> from sklearn.decomposition import PCA
+            >>> from xrsklearn import XarrayEstimator
+            >>> rng = np.random.default_rng(0)
+            >>> da = xr.DataArray(
+            ...     rng.normal(size=(10, 2, 3)), dims=("time", "lat", "lon")
+            ... )
+            >>> wrap = XarrayEstimator(PCA(n_components=2), sample_dim="time")
+            >>> scores = wrap.fit_transform(da)
+            >>> scores.dims, scores.shape
+            (('time', 'component'), (10, 2))
+
+            ```
+        """
         self._reset()
         if self._tree_dispatch(x):
             self._check_params()
@@ -881,14 +998,45 @@ class XarrayEstimator(BaseEstimator):
 
     @available_if(_estimator_has("inverse_transform"))
     def inverse_transform(self, x: XInput) -> Output:
-        """Map back to the original feature space via the fitted estimator.
+        """Map ``x`` back to the fit-time feature space.
 
-        The result is rebuilt on the fit-time grid — a Dataset if the
-        estimator was fit on one — with feature coordinates from training
-        and sample coordinates from ``x`` (which may cover a different
-        period than the training set). ``x`` may be component scores
-        (PCA) or grid-shaped data (a scaler's output); the latter is
-        checked against the fit-time layout like any other input.
+        The result is rebuilt on the fit-time grid — a Dataset / DataTree if
+        the estimator was fit on one — with feature coordinates from training
+        and sample coordinates from ``x``, which may cover a different period
+        than the training set. ``x`` may be component scores (PCA) or
+        grid-shaped data (a scaler's output); grid-shaped input is checked
+        against the fit-time layout like any other input. Feature columns
+        dropped by a masking NaN policy come back as missing.
+
+        Args:
+            x: Data in the estimator's output space.
+
+        Returns:
+            The reconstruction on the fit-time grid.
+
+        Raises:
+            RuntimeError: If the wrapper has not been fitted.
+            AttributeError: If the wrapped estimator has no ``inverse_transform``.
+
+        Example:
+            ```pycon
+            >>> import numpy as np
+            >>> import xarray as xr
+            >>> from sklearn.decomposition import PCA
+            >>> from xrsklearn import XarrayEstimator
+            >>> rng = np.random.default_rng(0)
+            >>> da = xr.DataArray(
+            ...     rng.normal(size=(10, 2, 3)),
+            ...     dims=("time", "lat", "lon"),
+            ...     coords={"lat": [0.0, 1.0], "lon": [5.0, 6.0, 7.0]},
+            ... )
+            >>> wrap = XarrayEstimator(PCA(n_components=2), sample_dim="time").fit(da)
+            >>> future = xr.DataArray(np.zeros((3, 2)), dims=("time", "component"))
+            >>> recon = wrap.inverse_transform(future)  # new samples, training grid
+            >>> recon.dims, recon.shape, recon["lon"].values.tolist()
+            (('time', 'lat', 'lon'), (3, 2, 3), [5.0, 6.0, 7.0])
+
+            ```
         """
         self._require_fitted()
         if self._tree_dispatch(x):
@@ -913,12 +1061,41 @@ class XarrayEstimator(BaseEstimator):
 
     @available_if(_estimator_has("predict"))
     def predict(self, x: XInput) -> Output:
-        """Predict via the fitted estimator (regression / classification).
+        """Predict with the fitted estimator (regression, classification, clustering).
 
-        If ``fit`` received an xarray ``y``, predictions come back on its
-        grid, with its name and attrs (a Dataset for a Dataset target).
-        Otherwise they are ``(sample_dim,)`` or
-        ``(sample_dim, new_feature_dim)`` with no attrs.
+        If ``fit`` received an xarray ``y``, predictions come back on its grid
+        with its name and attrs (a Dataset for a Dataset target). Otherwise
+        they are ``(sample_dim,)`` or ``(sample_dim, new_feature_dim)`` with no
+        attrs — cluster labels are not in the input's units. Samples dropped by
+        a masking NaN policy come back as missing (integer labels are then
+        promoted to float).
+
+        Args:
+            x: Input on the fit-time feature grid.
+
+        Returns:
+            The predictions.
+
+        Raises:
+            RuntimeError: If the wrapper has not been fitted.
+            ValueError: If ``x``'s feature grid differs from the fit-time grid.
+
+        Example:
+            ```pycon
+            >>> import numpy as np
+            >>> import xarray as xr
+            >>> from sklearn.linear_model import LinearRegression
+            >>> from xrsklearn import XarrayEstimator
+            >>> rng = np.random.default_rng(0)
+            >>> x = xr.DataArray(rng.normal(size=(20, 3)), dims=("time", "feature"))
+            >>> y = (x * [1.0, 2.0, 3.0]).sum("feature").rename("index")
+            >>> y.attrs["units"] = "K"
+            >>> wrap = XarrayEstimator(LinearRegression(), sample_dim="time")
+            >>> pred = wrap.fit(x, y).predict(x)
+            >>> pred.dims, pred.name, pred.attrs
+            (('time',), 'index', {'units': 'K'})
+
+            ```
         """
         self._require_fitted()
         if self._tree_dispatch(x):
@@ -929,11 +1106,36 @@ class XarrayEstimator(BaseEstimator):
 
     @available_if(_estimator_has("predict_proba"))
     def predict_proba(self, x: XInput) -> Output | list[xr.DataArray | np.ndarray]:
-        """Class-probability prediction (classifiers only).
+        """Class probabilities from a fitted classifier.
 
-        Returns ``(sample_dim, "class")`` with the ``class`` coordinate set
-        to the estimator's ``classes_``; a list of such arrays for
-        multi-output classifiers.
+        Args:
+            x: Input on the fit-time feature grid.
+
+        Returns:
+            ``(sample_dim, "class")`` probabilities with the ``class``
+            coordinate set to the estimator's ``classes_``; one such array per
+            output for multi-output classifiers.
+
+        Raises:
+            RuntimeError: If the wrapper has not been fitted.
+            AttributeError: If the wrapped estimator has no ``predict_proba``.
+
+        Example:
+            ```pycon
+            >>> import numpy as np
+            >>> import xarray as xr
+            >>> from sklearn.linear_model import LogisticRegression
+            >>> from xrsklearn import XarrayEstimator
+            >>> rng = np.random.default_rng(0)
+            >>> x = xr.DataArray(rng.normal(size=(30, 2)), dims=("time", "feature"))
+            >>> y = xr.where(x.sum("feature") > 0, "warm", "cold")
+            >>> wrap = XarrayEstimator(LogisticRegression(), sample_dim="time")
+            >>> wrap = wrap.fit(x, y)
+            >>> proba = wrap.predict_proba(x)
+            >>> proba.dims, proba["class"].values.tolist()
+            (('time', 'class'), ['cold', 'warm'])
+
+            ```
         """
         self._require_fitted()
         if self._tree_dispatch(x):
@@ -955,9 +1157,40 @@ class XarrayEstimator(BaseEstimator):
         x: XInput,
         y: YInput = None,
     ) -> float | dict[str, float]:
-        """Scalar score from the wrapped estimator.
+        """Score the fitted estimator on ``x`` (and ``y``).
 
-        Not re-wrapped — sklearn ``.score`` returns a Python float.
+        ``y`` is aligned to ``x`` and masked like it, exactly as in :meth:`fit`.
+
+        Args:
+            x: Input on the fit-time feature grid.
+            y: Target, as for :meth:`fit` (``None`` for unsupervised scores).
+
+        Returns:
+            The estimator's score as a float; ``{path: score}`` for a DataTree
+            with ``tree_mode="per_node"``.
+
+        Raises:
+            RuntimeError: If the wrapper has not been fitted.
+            ValueError: If ``x`` or ``y`` cannot be matched to the fit-time layout.
+
+        Example:
+            ```pycon
+            >>> import numpy as np
+            >>> import xarray as xr
+            >>> from sklearn.linear_model import LinearRegression
+            >>> from xrsklearn import XarrayEstimator
+            >>> rng = np.random.default_rng(0)
+            >>> x = xr.DataArray(
+            ...     rng.normal(size=(20, 3)), dims=("time", "feature"),
+            ...     coords={"time": np.arange(20)},
+            ... )
+            >>> y = (x * [1.0, 2.0, 3.0]).sum("feature")
+            >>> wrap = XarrayEstimator(LinearRegression(), sample_dim="time").fit(x, y)
+            >>> reversed_y = y.sortby("time", ascending=False)
+            >>> round(wrap.score(x, reversed_y), 6)  # y is aligned to x first
+            1.0
+
+            ```
         """
         self._require_fitted()
         if self._tree_dispatch(x):

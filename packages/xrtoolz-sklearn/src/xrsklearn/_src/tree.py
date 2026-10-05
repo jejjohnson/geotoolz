@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from xrsklearn._src.wrap import XarrayEstimator
 
 
+#: What fitting on a DataTree means (see the module docstring).
 TreeMode = Literal["per_node", "pool_samples", "concat_features"]
 
 #: Variable name given to unnamed DataArray results when they become tree nodes.

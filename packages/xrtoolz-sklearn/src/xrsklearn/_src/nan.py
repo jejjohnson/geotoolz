@@ -49,7 +49,9 @@ import pandas as pd
 from sklearn.utils.validation import _check_method_params
 
 
+#: How missing values are handled around the estimator (see the module docstring).
 NanPolicy = Literal["propagate", "raise", "mask", "mask_samples", "mask_features"]
+#: What counts as missing: ``"nan"`` (NaN / NaT / ``None``) or ``"nonfinite"`` (+ ±inf).
 MissingKind = Literal["nan", "nonfinite"]
 
 

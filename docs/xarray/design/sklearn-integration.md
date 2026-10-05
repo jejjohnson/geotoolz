@@ -1,6 +1,12 @@
 # sklearn integration — `SklearnOp`, NaN masking, accessor, patch-wise composition
 
-**Status:** proposed
+**Status:** implemented — see [`docs/packages/sklearn.md`](../packages/sklearn.md)
+for the shipped behaviour. Since this proposal, the bridge moved into
+its own workspace package (`xrtoolz-sklearn`, import `xrsklearn`), and
+`"mask"` (G1) was split into feature masking (land, learned at fit) and
+sample masking (gaps) because a land mask is NaN in *every* sample and
+row-dropping alone removed all of them. DataTree support (`tree_mode`)
+was added on top.
 **Scope:** consolidate the sklearn surface across `xrtoolz.utils`,
 `xrtoolz.transforms`, and `xrtoolz.inference` and close the remaining
 gaps so the bridge becomes a first-class composable layer.
@@ -13,9 +19,9 @@ gaps so the bridge becomes a first-class composable layer.
 
 | Layer | What ships today | Path |
 |-------|------------------|------|
-| 0 | `XarrayEstimator` — stack → delegate → unstack, attribute proxy, NaN `"propagate"`/`"raise"` | [src/xrtoolz/utils/_src/sklearn_wrap.py](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/utils/_src/sklearn_wrap.py) |
-| 1 (presets) | `pca_op`, `eof_op`, `ica_op`, `nmf_op`, `kmeans_op` returning fitted-able `XarrayEstimator`s | [src/xrtoolz/transforms/_src/decompose.py](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/transforms/_src/decompose.py) |
-| 2 (inference) | `SklearnModelOp` — duck-typed wrapper for a *fitted* model, used in `Graph` DAGs | [src/xrtoolz/inference/modelop.py](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/inference/modelop.py) |
+| 0 | `XarrayEstimator` — stack → delegate → unstack, attribute proxy, NaN `"propagate"`/`"raise"` | [packages/xrtoolz-sklearn/src/xrsklearn/_src/wrap.py](https://github.com/jejjohnson/xrtoolz/blob/main/packages/xrtoolz-sklearn/src/xrsklearn/_src/wrap.py) |
+| 1 (presets) | `pca_op`, `eof_op`, `ica_op`, `nmf_op`, `kmeans_op` returning fitted-able `XarrayEstimator`s | [packages/xrtoolz/src/xrtoolz/transforms/_src/decompose.py](https://github.com/jejjohnson/xrtoolz/blob/main/packages/xrtoolz/src/xrtoolz/transforms/_src/decompose.py) |
+| 2 (inference) | `SklearnModelOp` — duck-typed wrapper for a *fitted* model, used in `Graph` DAGs | [packages/xrtoolz/src/xrtoolz/inference/modelop.py](https://github.com/jejjohnson/xrtoolz/blob/main/packages/xrtoolz/src/xrtoolz/inference/modelop.py) |
 
 The gap is on the **composition** side. `XarrayEstimator` is an sklearn
 `BaseEstimator`, not an `xrtoolz.Operator` — so a fitted PCA cannot be
@@ -73,7 +79,7 @@ estimator beyond what already exists, which keeps thread-safety
 identical to today.
 
 **Where:** extend `NanPolicy` literal + `_check_no_nan` site in
-[sklearn_wrap.py](https://github.com/jejjohnson/xrtoolz/blob/main/src/xrtoolz/utils/_src/sklearn_wrap.py); add a
+[wrap.py](https://github.com/jejjohnson/xrtoolz/blob/main/packages/xrtoolz-sklearn/src/xrsklearn/_src/wrap.py) (now [nan.py](https://github.com/jejjohnson/xrtoolz/blob/main/packages/xrtoolz-sklearn/src/xrsklearn/_src/nan.py)); add a
 test matrix in `tests/test_sklearn_wrap.py` covering propagate / raise /
 mask × DataArray / Dataset × transform / predict / inverse_transform.
 
