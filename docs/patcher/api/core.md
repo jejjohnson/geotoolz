@@ -74,7 +74,11 @@ URLs are requested signed.
 ## Top-level patchers
 
 ::: geopatcher._src.spatial.patcher.SpatialPatcher
+    options:
+      inherited_members: true
 ::: geopatcher._src.spatial.patcher.AsyncSpatialPatcher
+    options:
+      inherited_members: true
 ::: geopatcher._src.time.patcher.TemporalPatcher
 ::: geopatcher._src.spatial_time.SpatioTemporalPatcher
 
@@ -95,4 +99,4 @@ config is a debug summary that `from_config` refuses.
 ::: geopatcher._src.config.get_strict
 ::: geopatcher._src.config.set_strict
 ::: geopatcher._src.exceptions.IncompleteScanConfiguration
-::: geopatcher._src.spatial.patcher.PatchErrorRecord
+::: geopatcher._src.walk.PatchErrorRecord

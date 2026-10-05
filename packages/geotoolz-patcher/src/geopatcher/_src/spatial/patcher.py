@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
-import traceback
 from asyncio import BoundedSemaphore as AsyncBoundedSemaphore, to_thread
 from collections.abc import (
     AsyncIterable,
@@ -29,12 +28,11 @@ from collections.abc import (
 from dataclasses import dataclass, field
 from functools import partial
 from threading import BoundedSemaphore, Condition, Event
-from time import perf_counter
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 
-from geopatcher._src._serialize import patcher_config, qualified_name
+from geopatcher._src._serialize import patcher_config
 from geopatcher._src.domains import GridDomain
 from geopatcher._src.hooks import (
     PatcherHook,
@@ -57,70 +55,28 @@ from geopatcher._src.spatial.geometry import (
 )
 from geopatcher._src.spatial.sampler import SpatialSampler
 from geopatcher._src.spatial.window import SpatialWindow
-
-
-OnErrorPolicy = Literal["raise", "skip", "mask", "retry"]
-
-
-@dataclass(eq=False)
-class PatchErrorRecord:
-    """A failed patch read recorded by `SpatialPatcher.split`.
-
-    Args:
-        anchor: Anchor whose patch failed to build.
-        kind: Exception class name.
-        message: Exception message.
-        traceback: Formatted traceback for debugging.
-        retry_count: Number of retries already attempted for this failure.
-    """
-
-    anchor: Any
-    kind: str
-    message: str
-    traceback: str
-    retry_count: int
+from geopatcher._src.walk import (
+    OnErrorPolicy,
+    PatchErrorRecord,
+    ReadPolicy,
+    _matches_retry_on as _matches_retry_on,
+    _Read,
+    _SplitCancelled,
+    _validate_backpressure,
+    _validate_error_policy,
+    _validate_retry_on,
+    awalk,
+    walk,
+)
 
 
 @dataclass(eq=False)
-class SpatialPatcher:
-    """The four-axis spatial Patcher.
+class _SpatialPatcherBase:
+    """Fields, read pipeline and anchor / merge methods of the spatial patchers.
 
-    Args:
-        geometry: How a neighborhood is shaped around an anchor.
-        sampler: Where anchors go.
-        window: Boundary treatment / per-pixel weights.
-        aggregation: Local → global merge strategy.
-        on_error: Patch-read error policy. ``"raise"`` preserves the
-            historical fail-fast behavior, ``"skip"`` logs and omits the
-            failed anchor, ``"mask"`` emits a NaN-valued patch for the
-            failed anchor, and ``"retry"`` retries matching exceptions up to
-            `max_retries` before logging and skipping.
-        max_retries: Number of retries when `on_error` is ``"retry"``.
-        retry_on: Exception classes or class names that should be retried.
-            Defaults to I/O-shaped failures (`OSError`, `TimeoutError`) so
-            programmer errors are not retried unless explicitly requested.
-            A name matches any class in the exception's MRO, by bare name
-            (``"OSError"``) or ``module.qualname``
-            (``"rasterio.errors.RasterioIOError"``), so it keeps the
-            subclass semantics of the class it names.
-        capture_traceback: If ``True`` (default), each `PatchErrorRecord`
-            includes a formatted traceback. Set to ``False`` to skip
-            formatting — useful for high-volume ``"skip"`` workloads
-            where thousands of expected failures would otherwise inflate
-            ``errors`` with megabytes of formatted frames.
-
-    Examples:
-        Sliding-window inference over a raster::
-
-            patcher = SpatialPatcher(
-                geometry    = SpatialRectangular(size=(256, 256)),
-                sampler     = SpatialRegularStride(step=(192, 192)),
-                window      = SpatialHann(),
-                aggregation = SpatialOverlapAdd(),
-            )
-            patches = list(patcher.split(field))
-            outs    = [run_operator(p) for p in patches]
-            stitched = patcher.merge(outs, field.domain)
+    `SpatialPatcher` and `AsyncSpatialPatcher` share everything here; the
+    read of one anchor (`_ChipReader`) also serves both
+    `SpatioTemporalPatcher` couplings.
     """
 
     geometry: SpatialGeometry
@@ -137,296 +93,74 @@ class SpatialPatcher:
         _validate_error_policy(self.on_error, self.max_retries)
         self.retry_on = _validate_retry_on(self.retry_on)
 
-    def split(
-        self,
-        field: Field,
-        hooks: Iterable[PatcherHook] | None = None,
-        *,
-        prefetch: int = 0,
-        journal: Any | None = None,
-        cache: Any | None = None,
-        max_in_flight: int | None = None,
-        max_in_flight_bytes: int | None = None,
-    ) -> Iterator[Patch]:
-        """Yield patches lazily — one per anchor placed by the sampler.
+    def _start_split(self) -> ReadPolicy:
+        """A fresh ``errors`` list for a new split, and the policy recording into it.
 
-        When ``max_in_flight`` / ``max_in_flight_bytes`` bound the number
-        of outstanding patches, each yielded patch owns one backpressure
-        slot until it is released. Consumers must release promptly by
-        calling ``patch.close()`` (or using each patch as a context
-        manager: ``with patch: ...``). A garbage-collection finalizer
-        returns leaked slots eventually, but it is a safety net, not the
-        mechanism — relying on it can stall this iterator until the
-        collector runs.
-
-        A `PatchCache` passed as ``cache`` is consulted before every
-        read: on a hit the source is never touched (only ``field.domain``
-        metadata is), on a miss the patch is read then stored. Composes
-        with ``journal`` (which records completion) and ``prefetch``
-        (the cache check runs in the producer thread).
+        Each split owns its list (``errors`` points at the newest one), so a
+        split still running never appends to a later split's errors.
         """
-        return self._split_anchors(
-            field,
-            None,
-            hooks=hooks,
-            prefetch=prefetch,
-            journal=journal,
-            cache=cache,
-            max_in_flight=max_in_flight,
-            max_in_flight_bytes=max_in_flight_bytes,
-        )
+        self.errors = []
+        return ReadPolicy.of(self)
 
-    def _split_anchors(
+    def _chip_reader(
         self,
-        field: Field,
-        anchors: Iterable[Any] | None,
+        field: Any,
+        domain: Any,
+        cache: Any | None,
         *,
-        hooks: Iterable[PatcherHook] | None = None,
-        prefetch: int = 0,
-        journal: Any | None = None,
-        cache: Any | None = None,
-        max_in_flight: int | None = None,
-        max_in_flight_bytes: int | None = None,
-    ) -> Iterator[Patch]:
-        """`split` over explicit ``anchors`` (``None`` walks the sampler).
-
-        `two_pass` hands both passes the same materialised anchor list so
-        an unseeded sampler cannot place the second pass differently.
-        """
-        _validate_backpressure(max_in_flight, max_in_flight_bytes)
-        # Shared with the prefetch iterator: its ``close()`` (or its
-        # collection) sets ``stop``, which interrupts a producer blocked
-        # in a backpressure wait.
-        stop = Event()
-        return prefetch_iterable(
-            self._split(
-                field,
-                anchors=anchors,
-                hooks=hooks,
-                journal=journal,
-                cache=cache,
-                backpressure=_Backpressure(max_in_flight, max_in_flight_bytes, stop),
-            ),
-            prefetch,
-            stop=stop,
+        aio: bool,
+        field_id: str | None = None,
+    ) -> _ChipReader:
+        """The per-split state that reads one anchor's patch from ``field``."""
+        return _ChipReader(
+            geometry=self.geometry,
+            field=field,
+            domain=domain,
+            cache_ctx=self._cache_context(cache, field, field_id=field_id),
+            base_weights=_safe_base_weights(self.window, self.geometry),
+            boundary=getattr(self.geometry, "boundary", "drop"),
+            pad_value=getattr(self.geometry, "pad_value", None),
+            aio=aio,
         )
-
-    def _split(
-        self,
-        field: Field,
-        *,
-        anchors: Iterable[Any] | None = None,
-        hooks: Iterable[PatcherHook] | None = None,
-        journal: Any | None = None,
-        cache: Any | None = None,
-        backpressure: _Backpressure,
-    ) -> Iterator[Patch]:
-        domain = field.domain
-        if anchors is None:
-            anchors = self.sampler.anchors(domain, self.geometry)
-        base_weights = _safe_base_weights(self.window, self.geometry)
-        boundary = getattr(self.geometry, "boundary", "drop")
-        cache_ctx = self._cache_context(cache, field)
-        hook_list = _as_hooks(hooks)
-        if not hook_list:
-            for anchor in anchors:
-                if journal is not None and journal.has(anchor):
-                    continue
-                patch = self._cached_patch(cache_ctx, domain, anchor)
-                if patch is None:
-                    patch, read_ok = _build_patch_with_policy(
-                        field=field,
-                        domain=domain,
-                        anchor=anchor,
-                        geometry=self.geometry,
-                        base_weights=base_weights,
-                        boundary=boundary,
-                        on_error=self.on_error,
-                        max_retries=self.max_retries,
-                        retry_on=self.retry_on,
-                        errors=self.errors,
-                        capture_traceback=self.capture_traceback,
-                    )
-                    if read_ok:
-                        self._store_patch(cache_ctx, anchor, patch)
-                if patch is not None:
-                    try:
-                        release = backpressure.acquire(patch)
-                    except _SplitCancelled:
-                        return
-                    if release is not None:
-                        # Attach ownership in-place so the yielded patch
-                        # releases the exact slot acquired for this read.
-                        patch._release = release
-                    yield patch
-            return
-        anchors = list(anchors)
-        _dispatch(hook_list, "on_split_start", len(anchors))
-        try:
-            for anchor in anchors:
-                if journal is not None and journal.has(anchor):
-                    continue
-                _dispatch(hook_list, "on_patch_start", anchor)
-                start = perf_counter()
-                errors_before = len(self.errors)
-                cached = self._cached_patch(cache_ctx, domain, anchor)
-                try:
-                    patch = cached
-                    if patch is None:
-                        patch, read_ok = _build_patch_with_policy(
-                            field=field,
-                            domain=domain,
-                            anchor=anchor,
-                            geometry=self.geometry,
-                            base_weights=base_weights,
-                            boundary=boundary,
-                            on_error=self.on_error,
-                            max_retries=self.max_retries,
-                            retry_on=self.retry_on,
-                            errors=self.errors,
-                            capture_traceback=self.capture_traceback,
-                        )
-                        if read_ok:
-                            self._store_patch(cache_ctx, anchor, patch)
-                except Exception as exc:
-                    _dispatch(hook_list, "on_error", anchor, exc)
-                    raise
-                for record in self.errors[errors_before:]:
-                    _dispatch(
-                        hook_list, "on_error", anchor, _exception_from_record(record)
-                    )
-                if patch is None:
-                    continue
-                try:
-                    release = backpressure.acquire(patch)
-                except _SplitCancelled:
-                    return
-                if release is not None:
-                    patch._release = release
-                _dispatch(
-                    hook_list,
-                    "on_patch_done",
-                    anchor,
-                    perf_counter() - start,
-                    _nbytes(patch.data),
-                )
-                yield patch
-        finally:
-            _dispatch(hook_list, "on_split_end")
 
     async def asplit(
         self,
         field: AsyncField,
-        *,
         hooks: Iterable[PatcherHook] | None = None,
+        *,
         journal: Any | None = None,
+        cache: Any | None = None,
         max_in_flight: int | None = None,
         max_in_flight_bytes: int | None = None,
     ) -> AsyncIterator[Patch]:
         """Async mirror of `split` over an `AsyncField`.
 
-        The ``max_in_flight`` / ``max_in_flight_bytes`` slot-ownership
-        contract matches `split`: close each yielded patch promptly
-        (``patch.close()`` or ``with patch: ...``); the finalizer-based
-        release on garbage collection is a safety net, not the mechanism.
+        The same anchor walk as `split` — ``on_error`` / ``max_retries`` /
+        ``retry_on`` (failures in ``errors``), ``hooks``, ``journal``,
+        ``cache`` (looked up and stored in a worker thread) and the
+        ``max_in_flight`` / ``max_in_flight_bytes`` slot-ownership
+        contract: close each yielded patch promptly (``patch.close()`` or
+        ``with patch: ...``); the finalizer-based release on garbage
+        collection is a safety net, not the mechanism. ``prefetch`` has
+        no async counterpart: reads are awaited one at a time, leaving
+        concurrency to the caller.
         """
         _validate_backpressure(max_in_flight, max_in_flight_bytes)
+        policy = self._start_split()
         domain = field.domain
-        base_weights = _safe_base_weights(self.window, self.geometry)
-        boundary = getattr(self.geometry, "boundary", "drop")
-        hook_list = _as_hooks(hooks)
-        backpressure = _AsyncBackpressure(max_in_flight, max_in_flight_bytes)
-        if not hook_list:
-            for anchor in self.sampler.anchors(domain, self.geometry):
-                if journal is not None and journal.has(anchor):
-                    continue
-                patch = await _build_patch_async(
-                    field, domain, anchor, self.geometry, base_weights, boundary
-                )
-                release = await backpressure.acquire(patch)
-                if release is not None:
-                    patch._release = release
-                yield patch
-            return
-        anchors = list(self.sampler.anchors(domain, self.geometry))
-        _dispatch(hook_list, "on_split_start", len(anchors))
-        try:
-            for anchor in anchors:
-                if journal is not None and journal.has(anchor):
-                    continue
-                _dispatch(hook_list, "on_patch_start", anchor)
-                start = perf_counter()
-                try:
-                    patch = await _build_patch_async(
-                        field, domain, anchor, self.geometry, base_weights, boundary
-                    )
-                except Exception as exc:
-                    _dispatch(hook_list, "on_error", anchor, exc)
-                    raise
-                release = await backpressure.acquire(patch)
-                if release is not None:
-                    patch._release = release
-                _dispatch(
-                    hook_list,
-                    "on_patch_done",
-                    anchor,
-                    perf_counter() - start,
-                    _nbytes(patch.data),
-                )
-                yield patch
-        finally:
-            _dispatch(hook_list, "on_split_end")
-
-    def patch_at(
-        self,
-        field: Field,
-        anchor: Any,
-        *,
-        cache: Any | None = None,
-        field_id: str | None = None,
-    ) -> Patch:
-        """Read a single `Patch` at a specific anchor.
-
-        The same geometry → ``field.select`` → window-weights pipeline
-        as `split`, but driven by one explicit anchor instead of
-        walking the sampler. Designed for random-access ML datasets
-        (torch `Dataset.__getitem__`, Grain `RandomAccessDataSource`)
-        that need lazy single-patch reads without materialising the
-        whole iterator first.
-
-        Args:
-            field: The `Field` to read from.
-            anchor: An anchor in the same format the sampler emits
-                (e.g. ``(row, col)`` for raster, ``dict`` for grid).
-                Typically obtained from
-                ``patcher.anchors(field)[index]``.
-            cache: Optional `PatchCache`. When set, a cache hit returns
-                the stored patch without touching the source; a miss
-                reads then stores it.
-            field_id: ``cache.field_id_for(field)`` resolved once by the
-                caller and reused for every anchor (`IndexedPatchView`
-                does this). Without it each call re-derives the identity,
-                which for `ObstoreCogField` is a ``HEAD`` per patch.
-
-        Returns:
-            A single `Patch` bit-identical to the one ``split`` would
-            yield for the same anchor.
-        """
-        domain = field.domain
-        base_weights = _safe_base_weights(self.window, self.geometry)
-        boundary = getattr(self.geometry, "boundary", "drop")
-        cache_ctx = self._cache_context(cache, field, field_id=field_id)
-        cached = self._cached_patch(cache_ctx, domain, anchor)
-        if cached is not None:
-            return cached
-        patch = _build_patch(
-            field, domain, anchor, self.geometry, base_weights, boundary
-        )
-        self._store_patch(cache_ctx, anchor, patch)
-        return patch
+        reader = self._chip_reader(field, domain, cache, aio=True)
+        async for patch in awalk(
+            self.sampler.anchors(domain, self.geometry),
+            reader.units,
+            policy=policy,
+            backpressure=_AsyncBackpressure(max_in_flight, max_in_flight_bytes),
+            hooks=hooks,
+            journal=journal,
+        ):
+            yield patch
 
     def _cache_context(
-        self, cache: Any | None, field: Field, *, field_id: str | None = None
+        self, cache: Any | None, field: Any, *, field_id: str | None = None
     ) -> Any | None:
         """Bind ``cache`` to this field + config, or ``None`` when disabled."""
         if cache is None:
@@ -440,12 +174,7 @@ class SpatialPatcher:
         """Return a cache-hit patch for ``anchor``, or ``None`` on a miss."""
         if ctx is None:
             return None
-        cache, field_id, config_id = ctx
-        payload = cache.get(field_id, config_id, anchor)
-        if payload is None:
-            return None
-        indices = self.geometry.neighborhood(domain, anchor)
-        return cache.build_patch(payload, anchor, indices)
+        return _cached_at(ctx, anchor, self.geometry.neighborhood(domain, anchor))
 
     def _store_patch(self, ctx: Any | None, anchor: Any, patch: Patch | None) -> None:
         """Store a freshly-built ``patch`` under ``anchor`` when caching is on."""
@@ -454,17 +183,19 @@ class SpatialPatcher:
         cache, field_id, config_id = ctx
         cache.put(field_id, config_id, anchor, patch)
 
-    def anchors(self, field: Field) -> list[Any]:
+    def anchors(self, field: Field | AsyncField) -> list[Any]:
         """Materialise the sampler's anchor sequence for ``field``.
 
         Returns the same sequence ``split(field)`` walks, as a list
-        the caller can ``len()`` and index. Same determinism contract
-        as `n_anchors` (deterministic given an int sampler seed,
-        re-drawn when seed is ``None``).
+        the caller can ``len()`` and index. Anchors are placed without
+        touching the field (only its domain), so this is sync on the
+        async patcher too. Same determinism contract as `n_anchors`
+        (deterministic given an int sampler seed, re-drawn when seed is
+        ``None``).
         """
         return list(self.sampler.anchors(field.domain, self.geometry))
 
-    def n_anchors(self, field: Field) -> int:
+    def n_anchors(self, field: Field | AsyncField) -> int:
         """Number of patches `split(field)` will yield.
 
         Enumerates the sampler's anchors without touching the field —
@@ -516,6 +247,213 @@ class SpatialPatcher:
         return await _amerge_with_hooks(
             self.aggregation, patches, domain, hooks, stacklevel=2
         )
+
+    def get_config(self) -> dict[str, Any]:
+        """Axes as ``{"class", "config"}`` envelopes; ``retry_on`` as qualified names.
+
+        `geopatcher.from_config` rebuilds the patcher from
+        ``axis_envelope(patcher)``.
+        """
+        return patcher_config(self)
+
+
+@dataclass(eq=False)
+class SpatialPatcher(_SpatialPatcherBase):
+    """The four-axis spatial Patcher.
+
+    Args:
+        geometry: How a neighborhood is shaped around an anchor.
+        sampler: Where anchors go.
+        window: Boundary treatment / per-pixel weights.
+        aggregation: Local → global merge strategy.
+        on_error: Patch-read error policy. ``"raise"`` preserves the
+            historical fail-fast behavior, ``"skip"`` logs and omits the
+            failed anchor, ``"mask"`` emits a NaN-valued patch for the
+            failed anchor, and ``"retry"`` retries matching exceptions up to
+            `max_retries` before logging and skipping.
+        max_retries: Number of retries when `on_error` is ``"retry"``.
+        retry_on: Exception classes or class names that should be retried.
+            Defaults to I/O-shaped failures (`OSError`, `TimeoutError`) so
+            programmer errors are not retried unless explicitly requested.
+            A name matches any class in the exception's MRO, by bare name
+            (``"OSError"``) or ``module.qualname``
+            (``"rasterio.errors.RasterioIOError"``), so it keeps the
+            subclass semantics of the class it names.
+        capture_traceback: If ``True`` (default), each `PatchErrorRecord`
+            includes a formatted traceback. Set to ``False`` to skip
+            formatting — useful for high-volume ``"skip"`` workloads
+            where thousands of expected failures would otherwise inflate
+            ``errors`` with megabytes of formatted frames.
+
+    ``errors`` holds the failures of the latest ``split`` / ``asplit`` /
+    ``reduce`` / ``two_pass`` call (both passes of a ``two_pass``): each
+    call starts a fresh list.
+
+    Examples:
+        Sliding-window inference over a raster::
+
+            patcher = SpatialPatcher(
+                geometry    = SpatialRectangular(size=(256, 256)),
+                sampler     = SpatialRegularStride(step=(192, 192)),
+                window      = SpatialHann(),
+                aggregation = SpatialOverlapAdd(),
+            )
+            patches = list(patcher.split(field))
+            outs    = [run_operator(p) for p in patches]
+            stitched = patcher.merge(outs, field.domain)
+    """
+
+    def split(
+        self,
+        field: Field,
+        hooks: Iterable[PatcherHook] | None = None,
+        *,
+        prefetch: int = 0,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
+    ) -> Iterator[Patch]:
+        """Yield patches lazily — one per anchor placed by the sampler.
+
+        When ``max_in_flight`` / ``max_in_flight_bytes`` bound the number
+        of outstanding patches, each yielded patch owns one backpressure
+        slot until it is released. Consumers must release promptly by
+        calling ``patch.close()`` (or using each patch as a context
+        manager: ``with patch: ...``). A garbage-collection finalizer
+        returns leaked slots eventually, but it is a safety net, not the
+        mechanism — relying on it can stall this iterator until the
+        collector runs.
+
+        A `PatchCache` passed as ``cache`` is consulted before every
+        read: on a hit the source is never touched (only ``field.domain``
+        metadata is), on a miss the patch is read then stored. Composes
+        with ``journal`` (whose anchors are skipped and reported to the
+        ``on_patch_skipped`` hook) and ``prefetch`` (the cache check runs
+        in the producer thread).
+        """
+        return self._split_anchors(
+            field,
+            None,
+            hooks=hooks,
+            prefetch=prefetch,
+            journal=journal,
+            cache=cache,
+            max_in_flight=max_in_flight,
+            max_in_flight_bytes=max_in_flight_bytes,
+        )
+
+    def _split_anchors(
+        self,
+        field: Field,
+        anchors: Iterable[Any] | None,
+        *,
+        hooks: Iterable[PatcherHook] | None = None,
+        prefetch: int = 0,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
+        policy: ReadPolicy | None = None,
+    ) -> Iterator[Patch]:
+        """`split` over explicit ``anchors`` (``None`` walks the sampler).
+
+        `two_pass` hands both passes the same materialised anchor list so
+        an unseeded sampler cannot place the second pass differently, and
+        the first pass's ``policy`` so both record into one ``errors``.
+        """
+        _validate_backpressure(max_in_flight, max_in_flight_bytes)
+        if policy is None:
+            policy = self._start_split()
+        # Shared with the prefetch iterator: its ``close()`` (or its
+        # collection) sets ``stop``, which interrupts a producer blocked
+        # in a backpressure wait.
+        stop = Event()
+        return prefetch_iterable(
+            self._walk(
+                field,
+                anchors,
+                policy=policy,
+                hooks=hooks,
+                journal=journal,
+                cache=cache,
+                backpressure=_Backpressure(max_in_flight, max_in_flight_bytes, stop),
+            ),
+            prefetch,
+            stop=stop,
+        )
+
+    def _walk(
+        self,
+        field: Field,
+        anchors: Iterable[Any] | None,
+        *,
+        policy: ReadPolicy,
+        hooks: Iterable[PatcherHook] | None,
+        journal: Any | None,
+        cache: Any | None,
+        backpressure: _Backpressure,
+    ) -> Iterator[Patch]:
+        domain = field.domain
+        if anchors is None:
+            anchors = self.sampler.anchors(domain, self.geometry)
+        reader = self._chip_reader(field, domain, cache, aio=False)
+        yield from walk(
+            anchors,
+            reader.units,
+            policy=policy,
+            backpressure=backpressure,
+            hooks=hooks,
+            journal=journal,
+        )
+
+    def patch_at(
+        self,
+        field: Field,
+        anchor: Any,
+        *,
+        cache: Any | None = None,
+        field_id: str | None = None,
+    ) -> Patch:
+        """Read a single `Patch` at a specific anchor.
+
+        The same geometry → ``field.select`` → window-weights pipeline
+        as `split`, but driven by one explicit anchor instead of
+        walking the sampler. Designed for random-access ML datasets
+        (torch `Dataset.__getitem__`, Grain `RandomAccessDataSource`)
+        that need lazy single-patch reads without materialising the
+        whole iterator first.
+
+        Args:
+            field: The `Field` to read from.
+            anchor: An anchor in the same format the sampler emits
+                (e.g. ``(row, col)`` for raster, ``dict`` for grid).
+                Typically obtained from
+                ``patcher.anchors(field)[index]``.
+            cache: Optional `PatchCache`. When set, a cache hit returns
+                the stored patch without touching the source; a miss
+                reads then stores it.
+            field_id: ``cache.field_id_for(field)`` resolved once by the
+                caller and reused for every anchor (`IndexedPatchView`
+                does this). Without it each call re-derives the identity,
+                which for `ObstoreCogField` is a ``HEAD`` per patch.
+
+        Returns:
+            A single `Patch` bit-identical to the one ``split`` would
+            yield for the same anchor.
+        """
+        domain = field.domain
+        base_weights = _safe_base_weights(self.window, self.geometry)
+        boundary = getattr(self.geometry, "boundary", "drop")
+        cache_ctx = self._cache_context(cache, field, field_id=field_id)
+        cached = self._cached_patch(cache_ctx, domain, anchor)
+        if cached is not None:
+            return cached
+        patch = _build_patch(
+            field, domain, anchor, self.geometry, base_weights, boundary
+        )
+        self._store_patch(cache_ctx, anchor, patch)
+        return patch
 
     def merge_to_field(
         self,
@@ -747,6 +685,7 @@ class SpatialPatcher:
             "cache": cache,
             "max_in_flight": max_in_flight,
             "max_in_flight_bytes": max_in_flight_bytes,
+            "policy": self._start_split(),  # both passes record into one list
         }
         stats = _merge_with_hooks(
             reduce_with,
@@ -767,45 +706,19 @@ class SpatialPatcher:
             stacklevel=2,
         )
 
-    def get_config(self) -> dict[str, Any]:
-        """Axes as ``{"class", "config"}`` envelopes; ``retry_on`` as qualified names.
-
-        `geopatcher.from_config` rebuilds the patcher from
-        ``axis_envelope(patcher)``.
-        """
-        return patcher_config(self)
-
 
 @dataclass(eq=False)
-class AsyncSpatialPatcher:
+class AsyncSpatialPatcher(_SpatialPatcherBase):
     """Async mirror of `SpatialPatcher` over an `AsyncField`.
 
-    `split` is an ``async for``-able iterator. Useful with
-    `AsyncGeoTIFFReader` for high-concurrency per-tile fan-out.
-
-    The `on_error` / `max_retries` / `retry_on` / `capture_traceback`
-    knobs mirror `SpatialPatcher`. Iteration is serialized (one
-    ``await`` per anchor), so the `errors` accumulator is safe to read
-    from the same coroutine without external locking.
+    `split` is an ``async for``-able iterator (an alias of `asplit`).
+    Useful with `AsyncGeoTIFFReader` for high-concurrency per-tile
+    fan-out. The fields, the ``on_error`` / ``max_retries`` /
+    ``retry_on`` / ``capture_traceback`` knobs and the anchor walk are
+    `SpatialPatcher`'s. Iteration is serialized (one ``await`` per
+    anchor), so the `errors` accumulator is safe to read from the same
+    coroutine without external locking.
     """
-
-    geometry: SpatialGeometry
-    sampler: SpatialSampler
-    window: SpatialWindow
-    aggregation: SpatialAggregation
-    on_error: OnErrorPolicy = "raise"
-    max_retries: int = 0
-    retry_on: tuple[type[BaseException] | str, ...] = (OSError, TimeoutError)
-    capture_traceback: bool = True
-    errors: list[PatchErrorRecord] = field(default_factory=list, init=False)
-
-    def __post_init__(self) -> None:
-        _validate_error_policy(self.on_error, self.max_retries)
-        self.retry_on = _validate_retry_on(self.retry_on)
-
-    def get_config(self) -> dict[str, Any]:
-        """Same shape as `SpatialPatcher.get_config`."""
-        return patcher_config(self)
 
     async def split(
         self,
@@ -813,112 +726,20 @@ class AsyncSpatialPatcher:
         hooks: Iterable[PatcherHook] | None = None,
         *,
         journal: Any | None = None,
+        cache: Any | None = None,
         max_in_flight: int | None = None,
         max_in_flight_bytes: int | None = None,
     ) -> AsyncIterator[Patch]:
-        """Backward-compatible alias for `asplit`."""
+        """Alias for `asplit`."""
         async for patch in self.asplit(
             field,
-            hooks=hooks,
+            hooks,
             journal=journal,
+            cache=cache,
             max_in_flight=max_in_flight,
             max_in_flight_bytes=max_in_flight_bytes,
         ):
             yield patch
-
-    async def asplit(
-        self,
-        field: AsyncField,
-        *,
-        hooks: Iterable[PatcherHook] | None = None,
-        journal: Any | None = None,
-        max_in_flight: int | None = None,
-        max_in_flight_bytes: int | None = None,
-    ) -> AsyncIterator[Patch]:
-        """Yield patches lazily over an `AsyncField`.
-
-        The ``max_in_flight`` / ``max_in_flight_bytes`` slot-ownership
-        contract matches `SpatialPatcher.split`: close each yielded
-        patch promptly (``patch.close()`` or ``with patch: ...``); the
-        finalizer-based release on garbage collection is a safety net,
-        not the mechanism.
-        """
-        _validate_backpressure(max_in_flight, max_in_flight_bytes)
-        domain = field.domain
-        base_weights = _safe_base_weights(self.window, self.geometry)
-        boundary = getattr(self.geometry, "boundary", "drop")
-        hook_list = _as_hooks(hooks)
-        backpressure = _AsyncBackpressure(max_in_flight, max_in_flight_bytes)
-        if not hook_list:
-            for anchor in self.sampler.anchors(domain, self.geometry):
-                if journal is not None and journal.has(anchor):
-                    continue
-                patch = await _build_patch_async_with_policy(
-                    field=field,
-                    domain=domain,
-                    anchor=anchor,
-                    geometry=self.geometry,
-                    base_weights=base_weights,
-                    boundary=boundary,
-                    on_error=self.on_error,
-                    max_retries=self.max_retries,
-                    retry_on=self.retry_on,
-                    errors=self.errors,
-                    capture_traceback=self.capture_traceback,
-                )
-                if patch is not None:
-                    release = await backpressure.acquire(patch)
-                    if release is not None:
-                        # Attach ownership in-place so the yielded patch
-                        # releases the exact slot acquired for this read.
-                        patch._release = release
-                    yield patch
-            return
-        anchors = list(self.sampler.anchors(domain, self.geometry))
-        _dispatch(hook_list, "on_split_start", len(anchors))
-        try:
-            for anchor in anchors:
-                if journal is not None and journal.has(anchor):
-                    continue
-                _dispatch(hook_list, "on_patch_start", anchor)
-                start = perf_counter()
-                errors_before = len(self.errors)
-                try:
-                    patch = await _build_patch_async_with_policy(
-                        field=field,
-                        domain=domain,
-                        anchor=anchor,
-                        geometry=self.geometry,
-                        base_weights=base_weights,
-                        boundary=boundary,
-                        on_error=self.on_error,
-                        max_retries=self.max_retries,
-                        retry_on=self.retry_on,
-                        errors=self.errors,
-                        capture_traceback=self.capture_traceback,
-                    )
-                except Exception as exc:
-                    _dispatch(hook_list, "on_error", anchor, exc)
-                    raise
-                for record in self.errors[errors_before:]:
-                    _dispatch(
-                        hook_list, "on_error", anchor, _exception_from_record(record)
-                    )
-                if patch is None:
-                    continue
-                release = await backpressure.acquire(patch)
-                if release is not None:
-                    patch._release = release
-                _dispatch(
-                    hook_list,
-                    "on_patch_done",
-                    anchor,
-                    perf_counter() - start,
-                    _nbytes(patch.data),
-                )
-                yield patch
-        finally:
-            _dispatch(hook_list, "on_split_end")
 
     async def patch_at(self, field: AsyncField, anchor: Any) -> Patch:
         """Read a single `Patch` at a specific anchor.
@@ -935,40 +756,83 @@ class AsyncSpatialPatcher:
             field, domain, anchor, self.geometry, base_weights, boundary
         )
 
-    def anchors(self, field: AsyncField) -> list[Any]:
-        """Materialise the sampler's anchor sequence for ``field``.
 
-        Anchors are placed without touching the field, so this is sync
-        even on the async patcher. See `SpatialPatcher.anchors`.
-        """
-        return list(self.sampler.anchors(field.domain, self.geometry))
+@dataclass(frozen=True, eq=False)
+class _ChipReader:
+    """Reads one anchor's patch for a split — the unit every spatial walk runs.
 
-    def n_anchors(self, field: AsyncField) -> int:
-        """Number of patches `split(field)` will yield.
+    Built once per split (`_SpatialPatcherBase._chip_reader`): the window
+    weights, boundary and cache binding are resolved up front, and
+    `unit` turns an anchor into the `_Read` the walk core runs — the
+    geometry's neighborhood, the padded / reflected ``select`` (awaited
+    under ``aio``), the shrink-cropped or mask weights, the ``"mask"``
+    placeholder and the `PatchCache` lookup / store. The spatio-temporal
+    splits reuse it for their spatial chips.
+    """
 
-        See `SpatialPatcher.n_anchors`.
-        """
-        return sum(1 for _ in self.sampler.anchors(field.domain, self.geometry))
+    geometry: SpatialGeometry
+    field: Any
+    domain: Any
+    cache_ctx: Any | None
+    base_weights: np.ndarray | None
+    boundary: str
+    pad_value: float | None
+    aio: bool
 
-    def merge(
-        self,
-        patches: Iterable[Any],
-        domain: Any,
-        hooks: Iterable[PatcherHook] | None = None,
-    ) -> Any:
-        """Hand the patches to the aggregation; see `SpatialPatcher.merge`."""
-        return _merge_with_hooks(self.aggregation, patches, domain, hooks, stacklevel=2)
-
-    async def amerge(
-        self,
-        patches: AsyncIterable[Any] | Iterable[Any],
-        domain: Any,
-        hooks: Iterable[PatcherHook] | None = None,
-    ) -> Any:
-        """Merge an async (or sync) patch stream; see `SpatialPatcher.amerge`."""
-        return await _amerge_with_hooks(
-            self.aggregation, patches, domain, hooks, stacklevel=2
+    def unit(self, anchor: Any, /, **overrides: Any) -> _Read:
+        """The `_Read` of ``anchor``; ``overrides`` set its other `_Read` fields."""
+        indices = self.geometry.neighborhood(self.domain, anchor)
+        build = (
+            _build_patch_async_from_indices if self.aio else _build_patch_from_indices
         )
+        ctx = self.cache_ctx
+        fields: dict[str, Any] = {
+            "key": anchor,
+            "anchor": anchor,
+            "read": partial(
+                build,
+                self.field,
+                self.domain,
+                anchor,
+                indices,
+                self.base_weights,
+                self.boundary,
+                self.pad_value,
+            ),
+            "mask": partial(
+                _build_mask_patch,
+                self.domain,
+                anchor,
+                indices,
+                self.base_weights,
+                self.boundary,
+            ),
+            "cached": None
+            if ctx is None
+            else partial(_cached_at, ctx, anchor, indices),
+            "store": None if ctx is None else partial(_stored_at, ctx, anchor),
+        }
+        fields.update(overrides)
+        return _Read(**fields)
+
+    def units(self, anchor: Any) -> list[_Read]:
+        """`SpatialPatcher.split`'s units: one leaf per anchor."""
+        return [self.unit(anchor)]
+
+
+def _cached_at(ctx: Any, anchor: Any, indices: Any) -> Patch | None:
+    """The `PatchCache` hit for ``anchor`` (read over ``indices``), or ``None``."""
+    cache, field_id, config_id = ctx
+    payload = cache.get(field_id, config_id, anchor)
+    if payload is None:
+        return None
+    return cache.build_patch(payload, anchor, indices)
+
+
+def _stored_at(ctx: Any, anchor: Any, patch: Any) -> None:
+    """Store a freshly read ``patch`` under ``anchor``."""
+    cache, field_id, config_id = ctx
+    cache.put(field_id, config_id, anchor, patch)
 
 
 _STREAM_END = object()
@@ -1205,225 +1069,7 @@ def _safe_base_weights(
     return window.weights(geometry)
 
 
-def _validate_error_policy(on_error: str, max_retries: int) -> None:
-    if on_error not in ("raise", "skip", "mask", "retry"):
-        raise ValueError(
-            "invalid on_error policy "
-            f"{on_error!r}; expected 'raise', 'skip', 'mask', or 'retry'"
-        )
-    if max_retries < 0:
-        raise ValueError("max_retries must be non-negative")
-
-
-def _build_patch_with_policy(
-    *,
-    field: Field,
-    domain: Any,
-    anchor: Any,
-    geometry: SpatialGeometry,
-    base_weights: np.ndarray | None,
-    boundary: str,
-    on_error: OnErrorPolicy,
-    max_retries: int,
-    retry_on: tuple[type[BaseException] | str, ...],
-    errors: list[PatchErrorRecord],
-    capture_traceback: bool = True,
-) -> tuple[Patch | None, bool]:
-    """Read one anchor under the ``on_error`` policy.
-
-    Returns ``(patch, read_ok)``: ``read_ok`` is ``True`` only when the
-    patch came from a successful ``field.select``. A ``"mask"``
-    placeholder (or a skipped ``None``) is ``False`` so callers never
-    persist it in a `PatchCache`.
-    """
-    indices = geometry.neighborhood(domain, anchor)
-    pad_value = getattr(geometry, "pad_value", None)
-    return _read_with_policy(
-        lambda: _build_patch_from_indices(
-            field, domain, anchor, indices, base_weights, boundary, pad_value
-        ),
-        mask=lambda: _build_mask_patch(domain, anchor, indices, base_weights, boundary),
-        anchor=anchor,
-        on_error=on_error,
-        max_retries=max_retries,
-        retry_on=retry_on,
-        errors=errors,
-        capture_traceback=capture_traceback,
-    )
-
-
-def _read_with_policy[T](
-    read: Callable[[], T],
-    *,
-    mask: Callable[[], T],
-    anchor: Any,
-    on_error: OnErrorPolicy,
-    max_retries: int,
-    retry_on: tuple[type[BaseException] | str, ...],
-    errors: list[PatchErrorRecord],
-    capture_traceback: bool = True,
-) -> tuple[T | None, bool]:
-    """Run one patch ``read`` under the ``on_error`` policy.
-
-    The policy loop every sync patcher shares (`SpatialPatcher`,
-    `TemporalPatcher`). Returns ``(patch, read_ok)``: ``read_ok`` is
-    ``True`` only when ``read`` itself succeeded. A ``"mask"``
-    placeholder (from ``mask``) or a skipped ``None`` is ``False`` so
-    callers never persist it in a `PatchCache`. Failures are recorded in
-    ``errors`` keyed by ``anchor``.
-    """
-    retries = max_retries if on_error == "retry" else 0
-    for retry_count in range(retries + 1):
-        try:
-            return read(), True
-        except Exception as exc:
-            # Preserve KeyboardInterrupt/SystemExit by handling only Exception.
-            if isinstance(exc, StopIteration):
-                raise
-            if on_error == "raise":
-                raise
-            _record_patch_error(errors, anchor, exc, retry_count, capture_traceback)
-            if on_error == "mask":
-                return mask(), False
-            if on_error == "retry":
-                if not _matches_retry_on(exc, retry_on):
-                    raise
-                if retry_count < retries:
-                    continue
-            return None, False
-    return None, False
-
-
-async def _build_patch_async_with_policy(
-    *,
-    field: AsyncField,
-    domain: Any,
-    anchor: Any,
-    geometry: SpatialGeometry,
-    base_weights: np.ndarray | None,
-    boundary: str,
-    on_error: OnErrorPolicy,
-    max_retries: int,
-    retry_on: tuple[type[BaseException] | str, ...],
-    errors: list[PatchErrorRecord],
-    capture_traceback: bool = True,
-) -> Patch | None:
-    retries = max_retries if on_error == "retry" else 0
-    indices = geometry.neighborhood(domain, anchor)
-    pad_value = getattr(geometry, "pad_value", None)
-    for retry_count in range(retries + 1):
-        try:
-            return await _build_patch_async_from_indices(
-                field, domain, anchor, indices, base_weights, boundary, pad_value
-            )
-        except Exception as exc:
-            # Preserve KeyboardInterrupt/SystemExit by handling only Exception.
-            if isinstance(exc, StopIteration):
-                raise
-            if on_error == "raise":
-                raise
-            _record_patch_error(errors, anchor, exc, retry_count, capture_traceback)
-            if on_error == "mask":
-                return _build_mask_patch(
-                    domain, anchor, indices, base_weights, boundary
-                )
-            if on_error == "retry":
-                if not _matches_retry_on(exc, retry_on):
-                    raise
-                if retry_count < retries:
-                    continue
-                return None
-            return None
-
-
-def _exception_from_record(record: PatchErrorRecord) -> Exception:
-    """Synthesize an Exception for hook dispatch from a recorded patch failure.
-
-    Used when the patcher swallows an exception under a non-``raise`` policy
-    but still wants to notify observability hooks. The reconstructed instance
-    carries only the message — frames have already been formatted into
-    ``record.traceback``.
-    """
-    return RuntimeError(f"{record.kind}: {record.message}")
-
-
-def _record_patch_error(
-    errors: list[PatchErrorRecord],
-    anchor: Any,
-    exc: Exception,
-    retry_count: int,
-    capture_traceback: bool = True,
-) -> None:
-    tb = "".join(traceback.format_exception(exc)) if capture_traceback else ""
-    errors.append(
-        PatchErrorRecord(
-            anchor=anchor,
-            kind=type(exc).__name__,
-            message=str(exc),
-            traceback=tb,
-            retry_count=retry_count,
-        )
-    )
-
-
-def _validate_retry_on(
-    retry_on: Iterable[type[BaseException] | str],
-) -> tuple[type[BaseException] | str, ...]:
-    """Coerce ``retry_on`` to a tuple, rejecting entries that never match."""
-    out = tuple(retry_on)
-    for candidate in out:
-        if isinstance(candidate, str) or (
-            isinstance(candidate, type) and issubclass(candidate, BaseException)
-        ):
-            continue
-        raise TypeError(
-            "retry_on entries must be exception classes or their names, got "
-            f"{candidate!r}."
-        )
-    return out
-
-
-def _matches_retry_on(
-    exc: BaseException, retry_on: tuple[type[BaseException] | str, ...]
-) -> bool:
-    """Whether ``exc`` should be retried.
-
-    A class matches by ``isinstance``. A string matches any class in the
-    exception's MRO by bare ``__name__`` (``"OSError"``) or by
-    ``module.qualname`` (``"rasterio.errors.RasterioIOError"``) — so a
-    name keeps the subclass semantics of the class it names, and the
-    qualified names `get_config` emits reload with unchanged behaviour.
-    """
-    names: set[str] | None = None
-    for candidate in retry_on:
-        if isinstance(candidate, str):
-            if names is None:
-                names = {
-                    name
-                    for cls in type(exc).__mro__
-                    for name in (cls.__name__, qualified_name(cls))
-                }
-            if candidate in names:
-                return True
-        elif isinstance(exc, candidate):
-            return True
-    return False
-
-
-def _validate_backpressure(
-    max_in_flight: int | None, max_in_flight_bytes: int | None
-) -> None:
-    if max_in_flight is not None and max_in_flight < 1:
-        raise ValueError("max_in_flight must be >= 1")
-    if max_in_flight_bytes is not None and max_in_flight_bytes < 1:
-        raise ValueError("max_in_flight_bytes must be >= 1")
-
-
-class _SplitCancelled(Exception):
-    """Raised by `_Backpressure.acquire` once the consumer abandoned `split`."""
-
-
-def _measure_bytes(patch: Patch, limit: int) -> int:
+def _measure_bytes(patch: Any, limit: int) -> int:
     """Byte size of ``patch.data`` checked against ``limit``.
 
     Uses `_nbytes` attribute probing (``.nbytes`` on NumPy / dask / xarray /
@@ -1480,7 +1126,7 @@ class _Backpressure:
         self._condition = Condition()
         self._stop = stop
 
-    def acquire(self, patch: Patch) -> Callable[[], None] | None:
+    def acquire(self, patch: Any) -> Callable[[], None] | None:
         """Wait for room for ``patch``; return the callback that frees it.
 
         Returns:
@@ -1554,7 +1200,7 @@ class _AsyncBackpressure:
         # the budget after each wake-up. Only ever touched on the loop.
         self._freed = asyncio.Event()
 
-    async def acquire(self, patch: Patch) -> Callable[[], None] | None:
+    async def acquire(self, patch: Any) -> Callable[[], None] | None:
         """Async `_Backpressure.acquire`: wait on the loop, never in a thread."""
         if self._slots is None and self._limit is None:
             return None
@@ -1696,6 +1342,11 @@ def _build_mask_patch(
     if boundary == "raise":
         _raise_if_overflows(indices, domain)
     weights = _build_weights(indices, base_weights, boundary=boundary, anchor=anchor)
+    if isinstance(indices, np.ndarray) and indices.ndim == 1:
+        # Graph / polygon geometries on point and vector domains select
+        # rows: one NaN per selected row.
+        data = np.full(indices.shape, np.nan, dtype=float)
+        return Patch(data=data, anchor=anchor, indices=indices, weights=weights)
     h, w = _indices_hw(indices)
     prefix = tuple(getattr(domain, "shape", ())[:-2])
     if prefix:

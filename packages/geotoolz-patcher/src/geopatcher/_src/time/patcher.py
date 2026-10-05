@@ -31,41 +31,37 @@ from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, It
 from dataclasses import dataclass, field
 from functools import partial
 from threading import Event
-from time import perf_counter
 from typing import Any
 
 import numpy as np
 
 from geopatcher._src._serialize import patcher_config
 from geopatcher._src.exceptions import IncompleteScanConfiguration
-from geopatcher._src.hooks import (
-    PatcherHook,
-    _as_hooks,
-    _dispatch,
-    _nbytes,
-)
+from geopatcher._src.hooks import PatcherHook
 from geopatcher._src.patch import TemporalPatch
 from geopatcher._src.prefetch import prefetch_iterable
 from geopatcher._src.spatial.patcher import (
     _NO_DOMAIN,
-    OnErrorPolicy,
-    PatchErrorRecord,
     _amerge_with_hooks,
     _Backpressure,
     _closing,
-    _exception_from_record,
     _merge_with_hooks,
-    _read_with_policy,
-    _SplitCancelled,
-    _validate_backpressure,
-    _validate_error_policy,
-    _validate_retry_on,
 )
 from geopatcher._src.time.aggregation import TemporalAggregation
 from geopatcher._src.time.geometry import TemporalGeometry
 from geopatcher._src.time.sampler import TemporalSampler
 from geopatcher._src.time.stencils import coord_step
 from geopatcher._src.time.window import TemporalWindow
+from geopatcher._src.walk import (
+    OnErrorPolicy,
+    PatchErrorRecord,
+    ReadPolicy,
+    _Read,
+    _validate_backpressure,
+    _validate_error_policy,
+    _validate_retry_on,
+    walk,
+)
 
 
 @dataclass(eq=False)
@@ -284,38 +280,47 @@ class TemporalPatcher:
             cache, field_id, config_id = ctx
             cache.put(field_id, config_id, key, patch)
 
-    def _build_patch(
+    def _units(
         self,
         src: _TimeSource,
+        coord: np.ndarray | None,
         cache_ctx: Any | None,
-        key: Any,
-        anchor: int,
-        k: int,
-        s: slice,
-        weights: np.ndarray,
-    ) -> TemporalPatch | None:
-        """One window: a cache hit, else a read under the ``on_error`` policy."""
-        if cache_ctx is not None:
-            hit = self._cached_patch(cache_ctx, key, anchor, k, s)
-            if hit is not None:
-                return hit
-        if self.on_error == "raise":  # the policy loop would only re-raise
-            patch: TemporalPatch | None = self._read_patch(src, anchor, k, s, weights)
-            read_ok = True
-        else:
-            patch, read_ok = _read_with_policy(
-                partial(self._read_patch, src, anchor, k, s, weights),
-                mask=partial(self._mask_patch, src, anchor, k, s, weights),
-                anchor=key,
-                on_error=self.on_error,
-                max_retries=self.max_retries,
-                retry_on=self.retry_on,
-                errors=self.errors,
-                capture_traceback=self.capture_traceback,
-            )
-        if read_ok and patch is not None:
-            self._store_patch(cache_ctx, key, patch)
-        return patch
+    ) -> Callable[[int], list[_Read]]:
+        """``anchor -> [_Read per window]`` for the walk core.
+
+        Each window is one leaf keyed by its `patch_anchors` key; window
+        weights depend only on the window length, so each length is
+        computed once per split.
+        """
+        time_len = src.time_len
+        weights_by_len: dict[int, np.ndarray] = {}
+
+        def units(anchor: int) -> list[_Read]:
+            coord_value = None if coord is None else coord[anchor]
+            out = []
+            for key, k, s in self._keyed_windows(time_len, anchor, coord):
+                n = s.stop - s.start
+                weights = weights_by_len.get(n)
+                if weights is None:
+                    weights = weights_by_len[n] = self.window.weights(self.geometry, n)
+                out.append(
+                    _Read(
+                        key=key,
+                        anchor=anchor,
+                        coord_value=coord_value,
+                        read=partial(self._read_patch, src, anchor, k, s, weights),
+                        mask=partial(self._mask_patch, src, anchor, k, s, weights),
+                        cached=None
+                        if cache_ctx is None
+                        else partial(self._cached_patch, cache_ctx, key, anchor, k, s),
+                        store=None
+                        if cache_ctx is None
+                        else partial(self._store_patch, cache_ctx, key),
+                    )
+                )
+            return out
+
+        return units
 
     # -- split -----------------------------------------------------------
 
@@ -392,17 +397,25 @@ class TemporalPatcher:
         cache: Any | None = None,
         max_in_flight: int | None = None,
         max_in_flight_bytes: int | None = None,
+        policy: ReadPolicy | None = None,
     ) -> Iterator[TemporalPatch]:
-        """`split` over explicit ``anchors`` (``None`` walks the sampler)."""
+        """`split` over explicit ``anchors`` (``None`` walks the sampler).
+
+        `two_pass` passes its first pass's ``policy`` so both passes
+        record into one ``errors`` list.
+        """
         _validate_backpressure(max_in_flight, max_in_flight_bytes)
         src = _source(series, time_axis)
         coord = self._resolve_coord(src, coord)
+        if policy is None:
+            policy = self._start_split()
         stop = Event()
         return prefetch_iterable(
-            self._split(
+            self._walk(
                 src,
                 anchors=anchors,
                 coord=coord,
+                policy=policy,
                 hooks=hooks,
                 journal=journal,
                 cache=cache,
@@ -412,12 +425,18 @@ class TemporalPatcher:
             stop=stop,
         )
 
-    def _split(
+    def _start_split(self) -> ReadPolicy:
+        """A fresh ``errors`` list for a new split (see `SpatialPatcher`)."""
+        self.errors = []
+        return ReadPolicy.of(self)
+
+    def _walk(
         self,
         src: _TimeSource,
         *,
         anchors: Iterable[int] | None,
         coord: np.ndarray | None,
+        policy: ReadPolicy,
         hooks: Iterable[PatcherHook] | None,
         journal: Any | None,
         cache: Any | None,
@@ -426,75 +445,18 @@ class TemporalPatcher:
         time_len = src.time_len
         if anchors is None:
             anchors = self._sampler_anchors(time_len, coord)
-        hook_list = _as_hooks(hooks)
-        full_scan = bool(getattr(self.sampler, "check_full_scan", False))
-        if hook_list or full_scan:
-            anchors = [int(a) for a in anchors]
-            if full_scan:
-                self._check_full_scan(anchors, time_len, coord)
-        cache_ctx = self._cache_context(cache, src)
-        # Window weights depend only on the window length: compute each
-        # length once per split (every patch of that length shares it).
-        weights_by_len: dict[int, np.ndarray] = {}
-        start = 0.0  # timed only when hooks listen
-        if hook_list:
-            _dispatch(hook_list, "on_split_start", len(anchors))
-        try:
-            for raw_anchor in anchors:
-                anchor = int(raw_anchor)
-                try:
-                    windows = self._keyed_windows(time_len, anchor, coord)
-                except Exception as exc:
-                    _dispatch(hook_list, "on_error", anchor, exc)
-                    raise
-                coord_value = coord[anchor] if hook_list and coord is not None else None
-                for key, k, s in windows:
-                    if journal is not None and journal.has(key):
-                        continue
-                    if hook_list:
-                        _dispatch(hook_list, "on_patch_start", anchor, coord_value)
-                        start = perf_counter()
-                    errors_before = len(self.errors)
-                    try:
-                        n = s.stop - s.start
-                        weights = weights_by_len.get(n)
-                        if weights is None:
-                            weights = self.window.weights(self.geometry, n)
-                            weights_by_len[n] = weights
-                        patch = self._build_patch(
-                            src, cache_ctx, key, anchor, k, s, weights
-                        )
-                    except Exception as exc:
-                        _dispatch(hook_list, "on_error", anchor, exc)
-                        raise
-                    for record in self.errors[errors_before:] if hook_list else ():
-                        _dispatch(
-                            hook_list,
-                            "on_error",
-                            anchor,
-                            _exception_from_record(record),
-                        )
-                    if patch is None:
-                        continue
-                    try:
-                        release = backpressure.acquire(patch)
-                    except _SplitCancelled:
-                        return
-                    if release is not None:
-                        patch._release = release
-                    if hook_list:
-                        _dispatch(
-                            hook_list,
-                            "on_patch_done",
-                            anchor,
-                            perf_counter() - start,
-                            _nbytes(patch.data),
-                            coord_value,
-                        )
-                    yield patch
-        finally:
-            if hook_list:
-                _dispatch(hook_list, "on_split_end")
+        anchors = (int(a) for a in anchors)
+        if getattr(self.sampler, "check_full_scan", False):
+            anchors = list(anchors)
+            self._check_full_scan(anchors, time_len, coord)
+        yield from walk(
+            anchors,
+            self._units(src, coord, self._cache_context(cache, src)),
+            policy=policy,
+            backpressure=backpressure,
+            hooks=hooks,
+            journal=journal,
+        )
 
     async def asplit(
         self,
@@ -813,6 +775,7 @@ class TemporalPatcher:
             "cache": cache,
             "max_in_flight": max_in_flight,
             "max_in_flight_bytes": max_in_flight_bytes,
+            "policy": self._start_split(),  # both passes record into one list
         }
         stats = _merge_with_hooks(
             reduce_with,

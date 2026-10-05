@@ -67,6 +67,13 @@ for record in patcher.errors[:5]:
 thousands of expected failures would otherwise inflate `patcher.errors`
 with megabytes of frames.
 
+`patcher.errors` holds the failures of the latest `split` / `asplit` /
+`reduce` / `two_pass` call: each call starts a fresh list (a split still
+running keeps appending to its own). A `SpatioTemporalPatcher` reads its
+chips under the spatial patcher's policy, so its failures land in
+`stp.spatial.errors`, keyed by the spatial anchor (product) or the
+`(space, time)` pair (coupled).
+
 ## 3. `"mask"` — NaN-valued patches
 
 Useful when the downstream stage needs a complete grid (a training
