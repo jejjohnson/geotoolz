@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import gc
+import weakref
+
 import numpy as np
 import pytest
 from _helpers import ArrField as _ArrField
@@ -15,6 +18,7 @@ from geopatcher import (
     SpatialRectangular,
     SpatialRegularStride,
 )
+from geopatcher._src.hooks import _positional_arity
 
 
 @pytest.fixture
@@ -236,3 +240,36 @@ def test_hook_error_is_exception_not_baseexception(
 
     with pytest.raises(KeyboardInterrupt):
         list(patcher.split(field, hooks=[InterruptHook()]))
+
+
+def test_hook_objects_are_collectable_after_split(
+    field: RasterField, patcher: SpatialPatcher
+) -> None:
+    """The arity cache must not pin hook objects (spans, progress bars, …).
+
+    Regression for #195: ``_positional_arity`` was an ``lru_cache`` keyed on
+    the *bound* method, so up to 256 hook instances stayed reachable via
+    ``callback.__self__`` long after their split finished.
+    """
+    hook = RecordingHook()
+    ref = weakref.ref(hook)
+    list(patcher.split(field, hooks=[hook]))
+    assert hook.events[0] == ("split_start", 16)
+    del hook
+    gc.collect()
+    assert ref() is None, "hook object retained after split"
+
+
+def test_positional_arity_trims_bound_methods_and_callables() -> None:
+    class Hook:
+        def on_patch_start(self, anchor: object) -> None: ...
+
+        def on_patch_done(self, *args: object) -> None: ...
+
+    class CallableHook:
+        def __call__(self, anchor: object, coord_value: object = None) -> None: ...
+
+    assert _positional_arity(Hook().on_patch_start) == 1
+    assert _positional_arity(Hook().on_patch_done) >= 4
+    assert _positional_arity(CallableHook()) == 2
+    assert _positional_arity(lambda a, b: None) == 2

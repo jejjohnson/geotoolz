@@ -185,6 +185,20 @@ class TestSplitBackpressureIntegration:
         assert not worker.is_alive(), "split(max_in_flight=2) stalled"
         assert len(seen) == 16  # 8x8 field, 2x2 tiles, stride 2
 
+    def test_no_release_or_finalizer_without_limits(self) -> None:
+        """No limit configured → no measurement, release closure or finalizer."""
+        patcher = SpatialPatcher(
+            geometry=SpatialRectangular(size=(2, 2)),
+            sampler=SpatialRegularStride(step=2),
+            window=SpatialBoxcar(),
+            aggregation=SpatialOverlapAdd(),
+        )
+        patches = list(patcher.split(self._field()))
+        assert len(patches) == 16
+        for patch in patches:
+            assert patch._release is None
+            assert "_release_finalizer" not in patch.__dict__
+
     def test_explicit_close_releases_slot_immediately(self) -> None:
         patcher = SpatialPatcher(
             geometry=SpatialRectangular(size=(2, 2)),
