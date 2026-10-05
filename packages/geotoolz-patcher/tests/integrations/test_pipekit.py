@@ -13,19 +13,25 @@ pytest.importorskip(
     reason="geopatcher.integrations.pipekit requires the [pipekit] extra",
 )
 
+import json
+import pickle
+
 import numpy as np
 import rasterio
 from georeader.geotensor import GeoTensor
-from pipekit import Lambda, Sequential
+from pipekit import Graph, Input, Lambda, Operator, Sequential, check_pickleable
 
 from geopatcher import (
     Patch,
     RasterField,
     SpatialBoxcar,
+    SpatialCustom,
     SpatialOverlapAdd,
     SpatialPatcher,
     SpatialRectangular,
     SpatialRegularStride,
+    axis_envelope,
+    from_config,
 )
 from geopatcher.integrations.pipekit import (
     ApplyToChips,
@@ -94,3 +100,71 @@ class TestStitchInSequential:
         )
         result = pipe(field)
         np.testing.assert_allclose(result, 2.0)
+
+
+class TestOperatorContract:
+    def test_grid_sampler_forbid_in_yaml(self, patcher: SpatialPatcher) -> None:
+        op = GridSampler(patcher=patcher)
+        assert GridSampler.forbid_in_yaml is True
+        with pytest.raises(RuntimeError, match="forbid_in_yaml"):
+            Operator.from_state(op.state)
+
+    def test_grid_sampler_config_envelopes_the_patcher(
+        self, field: RasterField, patcher: SpatialPatcher
+    ) -> None:
+        cfg = json.loads(json.dumps(GridSampler(patcher=patcher).get_config()))
+        # String compare: the NaN fill values never compare equal as floats.
+        assert json.dumps(cfg["patcher"]) == json.dumps(axis_envelope(patcher))
+        rebuilt = from_config(cfg["patcher"])
+        assert [p.anchor for p in rebuilt.split(field)] == [
+            p.anchor for p in patcher.split(field)
+        ]
+
+    def test_stitch_config_envelopes_the_aggregation(self, field: RasterField) -> None:
+        op = Stitch(aggregation=SpatialOverlapAdd(), domain=field.domain)
+        assert op.get_config()["aggregation"] == axis_envelope(SpatialOverlapAdd())
+        with pytest.raises(RuntimeError, match="forbid_in_yaml"):
+            Operator.from_state(op.state)
+
+    def test_apply_to_chips_config_nests_the_operator(self) -> None:
+        cfg = ApplyToChips(operator=Lambda(lambda gt: gt, name="id")).get_config()
+        assert cfg["operator"]["class"] == "Lambda"
+
+    def test_apply_to_chips_keeps_carrier_fields(
+        self, field: RasterField, patcher: SpatialPatcher
+    ) -> None:
+        patches = list(patcher.split(field, max_in_flight=8))
+        out = ApplyToChips(operator=Lambda(lambda gt: gt, name="id"))(patches)
+        for src, dst in zip(patches, out, strict=True):
+            assert (dst.anchor, dst.indices) == (src.anchor, src.indices)
+            np.testing.assert_array_equal(dst.weights, src.weights)
+            # The copy never owns the source patch's backpressure slot.
+            assert dst._release is None
+            src.close()
+
+    def test_operators_graph_mode(
+        self, field: RasterField, patcher: SpatialPatcher
+    ) -> None:
+        src = Input("field")
+        patches = GridSampler(patcher=patcher)(src)
+        doubled = ApplyToChips(
+            operator=Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
+        )(patches)
+        merged = Stitch(aggregation=SpatialOverlapAdd(), domain=field.domain)(doubled)
+        graph = Graph(inputs={"field": src}, outputs={"merged": merged})
+        np.testing.assert_allclose(graph(field=field)["merged"], 2.0)
+
+    def test_check_pickleable_surfaces_custom_window(self) -> None:
+        closure_patcher = SpatialPatcher(
+            geometry=SpatialRectangular(size=(8, 8)),
+            sampler=SpatialRegularStride(step=8),
+            window=SpatialCustom(fn=lambda g: np.ones(g.size)),
+            aggregation=SpatialOverlapAdd(),
+        )
+        sampler = GridSampler(patcher=closure_patcher)
+        pipe = Sequential(
+            [sampler, ApplyToChips(operator=Lambda(lambda gt: gt, name="id"))]
+        )
+        assert sampler in check_pickleable(pipe)
+        with pytest.raises((pickle.PicklingError, AttributeError, TypeError)):
+            pickle.dumps(sampler)
