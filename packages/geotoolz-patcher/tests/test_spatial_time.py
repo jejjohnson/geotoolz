@@ -67,14 +67,14 @@ class TestProductCoupling:
     ) -> None:
         stp = SpatioTemporalPatcher(spatial=sp, temporal=tp, coupling="product")
         patches = list(stp.split(time_field))
-        # Spatial: 4 (2x2) ; Temporal: 2 (8/4); Product: 8
-        assert len(patches) == 8
+        # Spatial: 4 (2x2); Temporal: anchors 0, 4 — anchor 0's 4-step
+        # lookback overflows and is dropped, anchor 4 reads [1, 5); Product: 4
+        assert len(patches) == 4
         assert all(isinstance(p, SpatioTemporalPatch) for p in patches)
-        # Each patch's data is a time-slice of the spatial chip; the temporal
-        # axis is <= 4 (early anchors get a shorter lookback at the boundary).
         for p in patches:
-            assert p.data.shape[1:] == (8, 8)
-            assert 1 <= p.data.shape[0] <= 4
+            assert p.time == 4
+            assert p.temporal_indices == slice(1, 5)
+            assert p.data.shape == (4, 8, 8)
 
 
 class TestCoupledCoupling:
@@ -82,7 +82,7 @@ class TestCoupledCoupling:
         # Couple coupling expects spatial.sampler.anchors_ to be (space, time)
         sp_explicit = SpatialPatcher(
             geometry=SpatialRectangular(size=(8, 8)),
-            sampler=SpatialExplicit(anchors_=[((0, 0), 0), ((0, 8), 4)]),
+            sampler=SpatialExplicit(anchors_=[((0, 0), 1), ((0, 8), 4)]),
             window=SpatialBoxcar(),
             aggregation=SpatialOverlapAdd(),
         )

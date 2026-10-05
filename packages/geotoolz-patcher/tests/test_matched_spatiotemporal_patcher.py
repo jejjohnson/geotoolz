@@ -106,8 +106,9 @@ class _StubSpatialPatcher:
 def _make_temporal(
     aggregation: TemporalAggregation | None = None,
 ) -> TemporalPatcher:
+    # "shrink" keeps anchor 0's short [0, 1) window: two temporal anchors.
     return TemporalPatcher(
-        geometry=TemporalFixedLookback(length=2),
+        geometry=TemporalFixedLookback(length=2, boundary="shrink"),
         sampler=TemporalRegularStride(step=2),
         window=TemporalCausalBoxcar(),
         aggregation=aggregation if aggregation is not None else TemporalMean(),

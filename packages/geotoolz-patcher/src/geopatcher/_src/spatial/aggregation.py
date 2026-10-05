@@ -1643,26 +1643,30 @@ def _python_scalar(value: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _warn_if_unsafe_streaming(
-    aggregation: SpatialAggregation, *, stacklevel: int = 2
-) -> None:
+def _warn_if_unsafe_streaming(aggregation: Any, *, stacklevel: int = 2) -> None:
     """Warn (or raise under `set_strict`) for a non-streaming aggregation.
 
-    ``stacklevel`` is forwarded to `warnings.warn`, so callers can point
-    the warning at the user's line rather than at geopatcher internals.
+    Serves every patcher family: ``aggregation`` is anything with a
+    ``streaming_safe`` flag (spatial or temporal). ``stacklevel`` is
+    forwarded to `warnings.warn`, so callers can point the warning at the
+    user's line rather than at geopatcher internals.
     """
-    if aggregation.streaming_safe:
+    if getattr(aggregation, "streaming_safe", False):
         return
     from geopatcher._src.config import get_strict
 
     msg = (
         f"{type(aggregation).__name__} has streaming_safe = False — "
-        "the merge is happening in-RAM. Per-cell streaming alternatives: "
-        "Mode->HardVote, Learned->patcher.two_pass; Median has none (the "
-        "Approx* sketches are global reducers returning one summary for the "
-        "whole field, not an (H, W) field). See docs/patcher/patching.md "
-        "§'Streaming aggregations'."
+        "the merge is happening in-RAM."
     )
+    if isinstance(aggregation, SpatialAggregation):
+        msg += (
+            " Per-cell streaming alternatives: "
+            "Mode->HardVote, Learned->patcher.two_pass; Median has none (the "
+            "Approx* sketches are global reducers returning one summary for "
+            "the whole field, not an (H, W) field)."
+        )
+    msg += " See docs/patcher/patching.md §'Streaming aggregations'."
     if get_strict():
         raise RuntimeError(msg)
     warnings.warn(msg, RuntimeWarning, stacklevel=stacklevel)

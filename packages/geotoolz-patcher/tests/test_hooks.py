@@ -172,10 +172,11 @@ def test_matched_temporal_split_forwards_hooks() -> None:
 
     patches = list(mtp.split(mf, hooks=[hook]))
 
-    assert len(patches) == 10
-    assert hook.events[0] == ("split_start", 10)
+    # Anchors 10..90: anchor 0's 5-step lookback overflows and is dropped.
+    assert len(patches) == 9
+    assert hook.events[0] == ("split_start", 9)
     assert hook.events[-1] == ("split_end", None)
-    assert [name for name, _ in hook.events].count("patch_done") == 10
+    assert [name for name, _ in hook.events].count("patch_done") == 9
 
 
 def test_matched_spatial_split_forwards_hooks(
