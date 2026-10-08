@@ -19,6 +19,7 @@ from geopatcher._src import fields as private_fields
 
 PUBLIC_MODULES = [
     "geopatcher",
+    "geopatcher.cog",
     "geopatcher.dask",
     "geopatcher.fields",
     "geopatcher.hooks",

@@ -50,6 +50,38 @@ from geopatcher.fields import RioXarrayField, DaskField, ObstoreCogField
 ::: geopatcher.fields.DaskField
 ::: geopatcher.fields.ObstoreCogField
 
+## Async COG reading
+
+`geopatcher.cog` is the `await`-native face of `ObstoreCogField`'s engine
+(async-geotiff over the shared obstore pool; shared tiles fetched once, in
+concurrent groups). `AsyncCogReader` carries georeader's `GeoData`
+metadata, lazy window views and async `load` / `load_many`; the `read_*`
+coroutines mirror `georeader.read` and return the same pixels as the sync
+functions, fetching only the source chunk each request needs. Install
+with `pip install 'geotoolz-patcher[obstore-cog]'`.
+
+```python
+from geopatcher.cog import AsyncCogReader, read_from_tile, read_reproject_like
+
+reader = await AsyncCogReader.open("s3://bucket/scene.tif")
+chips = await reader.load_many(windows)          # one batch, shared tiles once
+tile = await read_from_tile(reader, x=2017, y=1622, z=12)
+coarse = reader.reader_overview(2)              # low zooms: read an overview
+```
+
+`ObstoreCogField` itself also exposes `aselect` / `aselect_many` /
+`afrom_url`, so `AsyncSpatialPatcher` reads it directly.
+
+::: geopatcher.cog.AsyncCogReader
+::: geopatcher.cog.read_from_window
+::: geopatcher.cog.read_from_bounds
+::: geopatcher.cog.read_from_polygon
+::: geopatcher.cog.read_from_center_coords
+::: geopatcher.cog.read_reproject
+::: geopatcher.cog.read_reproject_like
+::: geopatcher.cog.read_to_crs
+::: geopatcher.cog.read_from_tile
+
 ## Object-store pool
 
 `geopatcher.objstore` is the process-wide `obstore` client pool for the
