@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.2.0...geotoolz-cloud-v0.2.1) (2026-10-08)
+
+
+### Features
+
+* **agents:** agent rules, contracts, capability index, recipe skills and a downstream plugin ([#436](https://github.com/jejjohnson/geotoolz/issues/436)) ([b11e390](https://github.com/jejjohnson/geotoolz/commit/b11e390c24de0d0c29d1c3ee8c1f9bb6681bbc15))
+
 ## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.1.0...geotoolz-cloud-v0.2.0) (2026-10-08)
 
 
