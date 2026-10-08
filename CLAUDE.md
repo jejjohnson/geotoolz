@@ -85,7 +85,8 @@ packages/
 │                             # DuckDB), GeoSlice, loaders, sources, matchup,
 │                             # staging, cyclopts CLI.
 └── geotoolz-products/        # src/geoproducts — SensorReader ABC + per-sensor /
-                              # per-provider reader subpackages (toy_sensor);
+                              # per-provider reader subpackages (toy_sensor,
+                              # carbonmapper behind its [carbonmapper] extra);
                               # depends on georeader, never on geotoolz.
 ```
 
@@ -140,8 +141,9 @@ is the geotoolz site.
 `packages/geotoolz` tests are markered `slow` / `integration` (fast tier runs
 in CI; extended tiers via the "Extended Tests" workflow_dispatch).
 `packages/geotoolz-catalog` and `packages/geotoolz-products` have a `live`
-marker (real external APIs, always deselected) and an opt-in `tests/bench` suite (`pytest tests/bench
---benchmark-only`). Never add a slow or network-touching test without a marker.
+marker (real external APIs, always deselected); the catalog also has an opt-in
+`tests/bench` suite (`pytest tests/bench --benchmark-only`). Never add a slow or
+network-touching test without a marker.
 
 ## Coding Conventions
 

@@ -139,6 +139,7 @@ nav:
   - Products — geoproducts:
       - Home: products/index.md
       - Adding a sensor reader: products/sensor-readers.md
+      - Carbon Mapper: products/carbonmapper.md
       - API Reference: products/api.md
       - Design:
           - Exact grid alignment: catalog/design/exact-grid-alignment.md

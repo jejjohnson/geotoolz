@@ -9,6 +9,7 @@ catalog loaders (`geocatalog`) consume it unchanged.
 pip install geotoolz-products                  # readers (georeader only)
 pip install 'geotoolz-products[obstore]'       # pooled cloud byte-range reads
 pip install 'geotoolz-products[operators]'     # sensor presets (geotoolz operators)
+pip install 'geotoolz-products[carbonmapper]'  # Carbon Mapper plume catalogue + STAC
 ```
 
 The package depends on georeader, never on `geotoolz`: product readers churn
@@ -16,4 +17,5 @@ with the missions and APIs behind them and carry their own credentials and
 client libraries, so they release independently of the operator library.
 
 - [Adding a new sensor reader](sensor-readers.md) — the per-sensor contract.
+- [Carbon Mapper](carbonmapper.md) — plume catalogue, sources and plume / scene rasters.
 - [API reference](api.md)
