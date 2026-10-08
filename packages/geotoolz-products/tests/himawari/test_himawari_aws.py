@@ -110,6 +110,12 @@ class TestListing:
         only = aws.list_segments(start=start, sector="Japan", area="JP03", segments=1)
         assert [f.area for f in only] == ["JP03"]
 
+    def test_default_window_is_the_start_slot(self, fake_s3) -> None:
+        fake = fake_s3()
+        aws.list_segments(start=datetime(2026, 10, 7, 3, 7))
+        assert len(fake.urls) == 1
+        assert "0300%2F" in fake.urls[0]
+
     def test_listing_skips_foreign_keys(self, fake_s3) -> None:
         prefix = "AHI-L1b-FLDK/2026/10/07/0300/"
         fake_s3(pages={prefix: [listing([f"{prefix}README.txt", f"{prefix}{SEG}"])]})

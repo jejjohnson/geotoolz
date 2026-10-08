@@ -228,3 +228,13 @@ def test_navigation_corrections_warn(hsd) -> None:
     with pytest.warns(UserWarning, match="navigation corrections"):
         reader = himawari.Reader(path)
     assert reader.header.max_shift_px == pytest.approx(1.5)
+
+
+def test_each_segment_uses_its_own_calibration(hsd) -> None:
+    rows = np.full((50, SIZE), 3000, np.uint16)
+    top = hsd(rows, segment=1, total_segments=2, name="t.DAT")
+    bottom = hsd(rows, segment=2, total_segments=2, gain=-0.002, name="b.DAT")
+    radiance = np.asarray(himawari.Reader([top, bottom]).load())[0]
+    offset = IR_CALIBRATION["offset"]
+    assert radiance[49, 50] == pytest.approx(3000 * IR_CALIBRATION["gain"] + offset)
+    assert radiance[50, 50] == pytest.approx(3000 * -0.002 + offset)

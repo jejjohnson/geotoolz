@@ -106,3 +106,14 @@ def test_navigation_correction_is_decoded(hsd) -> None:
     )
     assert header.rotation_urad == pytest.approx(3.5)
     assert header.max_shift_px == pytest.approx(0.75)
+
+
+def test_long_headers_are_read_to_their_declared_length(hsd) -> None:
+    # Per-line error records can push the header past the first read.
+    counts = np.arange(4 * 100, dtype=np.uint16).reshape(4, 100)
+    path = hsd(counts, error_block_length=40_000)
+    header = read_header(path)
+    assert header.header_length == 1523 - 47 + 40_000
+    np.testing.assert_array_equal(
+        read_lines(path, header, slice(None), slice(None)), counts
+    )

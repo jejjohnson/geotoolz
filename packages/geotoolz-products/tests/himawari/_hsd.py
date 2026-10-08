@@ -70,6 +70,8 @@ def write_hsd(
     compression: int = 0,
     rotation_urad: float = 0.0,
     shift_px: float = 0.0,
+    gain: float | None = None,
+    error_block_length: int = 47,
     compress: bool | None = None,
 ) -> Path:
     """Write one segment; ``counts`` is its ``(lines, columns)`` image.
@@ -81,7 +83,7 @@ def write_hsd(
     lines, width = counts.shape
     columns = width if columns is None else columns
     first_line = (segment - 1) * lines + 1
-    header_length = 1523
+    header_length = 1523 - 47 + error_block_length
     b1 = _block(
         1,
         282,
@@ -112,7 +114,7 @@ def write_hsd(
             12,
             65535,
             65534,
-            c["gain"],
+            c["gain"] if gain is None else gain,
             c["offset"],
         ) + struct.pack("<9d", *c["tb"], 0.0, 0.0, 0.0, *c["planck"])
     else:
@@ -125,7 +127,7 @@ def write_hsd(
             11,
             65535,
             65534,
-            c["gain"],
+            c["gain"] if gain is None else gain,
             c["offset"],
         ) + struct.pack("<dddd", c["albedo"], _mjd(start), *updated)
     b5 = _block(5, 147, body5)
@@ -139,7 +141,7 @@ def write_hsd(
         + struct.pack("<Hff", first_line + lines - 1, 0.0, 0.0),
     )
     b9 = _block(9, 85, b"")
-    b10 = _block(10, 47, b"")
+    b10 = _block(10, error_block_length, b"")
     b11 = _block(11, 259, b"")
     header = b1 + b2 + b3 + b4 + b5 + b6 + b7 + b8 + b9 + b10 + b11
     assert len(header) == header_length

@@ -259,13 +259,20 @@ def _navigation_correction(b8: bytes | None) -> tuple[float, float]:
 def read_header(path: Source) -> HSDHeader:
     """Decode the header of an HSD segment (``.DAT`` or ``.DAT.bz2``).
 
-    Only the first few kilobytes are read (and decompressed).
+    Only the header is read (and decompressed): a first probe, extended to
+    the length block 1 declares when the variable-length blocks (per-line
+    navigation and error records) run longer.
 
     Raises:
         ValueError: The file is not a valid little-endian HSD segment.
     """
     with _open(path) as f:
-        return _parse(f.read(_HEADER_PROBE))
+        raw = f.read(_HEADER_PROBE)
+        if len(raw) >= 74 and raw[0] == 1:
+            (declared,) = struct.unpack_from("<I", raw, 70)
+            if declared > len(raw):
+                raw += f.read(declared - len(raw))
+        return _parse(raw)
 
 
 def read_lines(path: Source, header: HSDHeader, rows: slice, cols: slice) -> np.ndarray:

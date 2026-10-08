@@ -63,7 +63,8 @@ class Reader(ProductReader):
     the Earth's disk hold the fill: ``NaN`` for every calibrated output,
     ``65535`` for ``"counts"`` (which are otherwise the stored values).
 
-    Calibration uses the coefficients in each file (block 5 of the header):
+    Calibration uses the coefficients in each file (block 5 of the header),
+    segment by segment:
 
     - ``"counts"`` — the stored counts (``uint16``).
     - ``"radiance"`` — ``counts · gain + offset`` (W m-2 sr-1 µm-1). Bands
@@ -299,10 +300,11 @@ class Reader(ProductReader):
 
     def _read_window(self, window: Window) -> np.ndarray:
         def read(rows: slice, cols: slice) -> np.ndarray:
-            counts = np.full(
+            # Each segment is calibrated with its own header's coefficients.
+            out = np.full(
                 (rows.stop - rows.start, cols.stop - cols.start),
-                self.header.error_count,
-                dtype=np.uint16,
+                self._fill_value,
+                dtype=self._dtype,
             )
             for i, h in enumerate(self._headers):
                 seg_start = h.first_line - 1
@@ -310,19 +312,21 @@ class Reader(ProductReader):
                 hi = min(rows.stop, seg_start + h.lines)
                 if lo >= hi:
                     continue
-                counts[lo - rows.start : hi - rows.start] = self._segment_counts(
+                counts = self._segment_counts(
                     i, slice(lo - seg_start, hi - seg_start), cols
                 )
-            return self._calibrate(counts, rows, cols)[None]
+                out[lo - rows.start : hi - rows.start] = self._calibrate(counts, h)
+            if self.calibration != "counts":
+                out[~self._grid.on_earth(rows, cols)] = np.nan
+            return out[None]
 
         return self._read_boundless(window, read)
 
-    def _calibrate(self, counts: np.ndarray, rows: slice, cols: slice) -> np.ndarray:
-        h = self.header
+    def _calibrate(self, counts: np.ndarray, h: HSDHeader) -> np.ndarray:
+        """One segment's counts → the output quantity, with its coefficients."""
         if self.calibration == "counts":
             return counts
         invalid = (counts == h.error_count) | (counts == h.outside_count)
-        invalid |= ~self._grid.on_earth(rows, cols)
         gain, offset = h.gain, h.offset
         if not h.is_emissive and np.isfinite(h.updated_gain):
             gain, offset = h.updated_gain, h.updated_offset

@@ -339,15 +339,19 @@ def download(
 def _list_slots(
     satellite: str | int, product: str, start: datetime, end: datetime | None
 ) -> list[tuple[str, int]]:
-    """``(key, size)`` of every object in the 10-minute slots of ``[start, end)``."""
+    """``(key, size)`` of every object in the 10-minute slots of ``[start, end)``.
+
+    ``start`` rounds down to its slot; the default ``end`` is one slot later.
+    """
     start = as_utc(start)
-    end = start + _SLOT if end is None else as_utc(end)
+    first = start.replace(
+        minute=start.minute - start.minute % 10, second=0, microsecond=0
+    )
+    end = first + _SLOT if end is None else as_utc(end)
     if end <= start:
         raise ValueError(f"end ({end}) must be after start ({start}).")
     name = bucket(satellite)
-    slot = start.replace(
-        minute=start.minute - start.minute % 10, second=0, microsecond=0
-    )
+    slot = first
     keys: list[tuple[str, int]] = []
     while slot < end:
         prefix = f"{product}/{slot:%Y/%m/%d/%H%M}/"
