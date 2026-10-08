@@ -16,21 +16,15 @@ import shapely.geometry
 from georeader.geotensor import GeoTensor
 
 from geopatcher import (
-    PointDomain,
     RasterField,
-    SpatialBoxcar,
-    SpatialExplicit,
-    SpatialOverlapAdd,
     SpatialPatcher,
-    SpatialPolygonIntersection,
-    SpatialSphericalCap,
     SpatioTemporalPatch,
     SpatioTemporalPatcher,
-    TemporalFixedLookback,
-    TemporalForecast,
     TemporalPatcher,
-    TemporalRegularStride,
+    spatial,
+    temporal,
 )
+from geopatcher.fields import PointDomain
 
 
 def _ones_field(h: int = 32, w: int = 32) -> RasterField:
@@ -46,7 +40,7 @@ def _ones_field(h: int = 32, w: int = 32) -> RasterField:
 
 
 class TestPolygonIntersectionUnwrap:
-    """`SpatialPolygonIntersection.neighborhood` returns a `_MaskedWindow`;
+    """`spatial.geometry.PolygonIntersection.neighborhood` returns a `_MaskedWindow`;
     the previous code path forwarded that wrapper directly to
     `Field.select`, which downstream readers (e.g. `RasterField.read_from_window`)
     can't consume. The fix is in the `_unwrap_for_select` helper inside
@@ -73,7 +67,7 @@ class TestPolygonIntersectionUnwrap:
     def test_split_calls_field_select_with_unwrapped_window(self) -> None:
         # Drive SpatialPatcher.split with a stub Field that records the
         # `indices` it gets; verify the recorded value is a plain Window
-        # (i.e. unwrapped) when geometry is SpatialPolygonIntersection.
+        # (i.e. unwrapped) when geometry is spatial.geometry.PolygonIntersection.
         from rasterio.windows import Window
 
         from geopatcher._src.spatial.geometry import _MaskedWindow
@@ -98,10 +92,10 @@ class TestPolygonIntersectionUnwrap:
 
         poly = shapely.geometry.box(4, 4, 12, 12)
         patcher = SpatialPatcher(
-            geometry=SpatialPolygonIntersection(polygons=pd.Series([poly])),
-            sampler=SpatialExplicit(anchors_=[0]),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.PolygonIntersection(polygons=pd.Series([poly])),
+            sampler=spatial.sampler.Explicit(anchors_=[0]),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
 
         patches = list(patcher.split(_StubField()))
@@ -131,27 +125,27 @@ class TestSpatioTemporalMergeDictAnchor:
     def _build_patcher(self) -> SpatioTemporalPatcher:
         # The patcher's split() is not exercised here; we hand-craft patches.
         # Construction is enough to validate the merge wiring.
-        spatial = SpatialPatcher(
-            geometry=SpatialPolygonIntersection(
+        spatial_patcher = SpatialPatcher(
+            geometry=spatial.geometry.PolygonIntersection(
                 polygons=pd.Series([shapely.geometry.box(0, 0, 1, 1)])
             ),
-            sampler=SpatialExplicit(anchors_=[0]),
-            window=SpatialOverlapAdd(),
-            aggregation=SpatialOverlapAdd(),
+            sampler=spatial.sampler.Explicit(anchors_=[0]),
+            window=spatial.aggregation.OverlapAdd(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
-        temporal = TemporalPatcher(
-            geometry=TemporalFixedLookback(length=2),
-            sampler=TemporalRegularStride(step=1),
+        temporal_patcher = TemporalPatcher(
+            geometry=temporal.geometry.FixedLookback(length=2),
+            sampler=temporal.sampler.RegularStride(step=1),
             window=None,  # type: ignore[arg-type]
-            aggregation=TemporalForecast(horizon=1),
+            aggregation=temporal.aggregation.Forecast(horizon=1),
         )
-        return SpatioTemporalPatcher(spatial=spatial, temporal=temporal)
+        return SpatioTemporalPatcher(spatial=spatial_patcher, temporal=temporal_patcher)
 
     def test_dict_anchors_merge_without_typeerror(self) -> None:
         patcher = self._build_patcher()
         # Two patches share the same dict-shaped spatial anchor; one has a
         # different anchor. The merge should group them by anchor and
-        # apply TemporalForecast per group.
+        # apply temporal.aggregation.Forecast per group.
         anchor_a = {"lat": 0.0, "lon": 0.0}
         anchor_b = {"lat": 1.0, "lon": 0.0}
         patches = [
@@ -192,8 +186,8 @@ class TestSpatioTemporalMergeDictAnchor:
         assert anchor_b in anchors_out
 
     def test_temporal_forecast_reads_anchor_via_rebox(self) -> None:
-        """TemporalForecast reads `p.anchor` / `p.indices`, which don't exist
-        on SpatioTemporalPatch (it has `time` / `temporal_indices`). The
+        """temporal.aggregation.Forecast reads `p.anchor` / `p.indices`, which don't
+        exist on SpatioTemporalPatch (it has `time` / `temporal_indices`). The
         merge should rebox each group as TemporalPatch before passing it
         through.
         """
@@ -212,7 +206,7 @@ class TestSpatioTemporalMergeDictAnchor:
 
         out = patcher.merge(patches, field=None)
 
-        # TemporalForecast returns {anchor: horizon_block}, and the anchor
+        # temporal.aggregation.Forecast returns {anchor: horizon_block}, and the anchor
         # is read from the rebox'd TemporalPatch.anchor (== p.time == 7);
         # the horizon is step 8, the patch's last row.
         result = dict(out)[(0.0, 0.0)]
@@ -221,7 +215,7 @@ class TestSpatioTemporalMergeDictAnchor:
 
 
 class TestSpatialExplicitConfigDoesNotConsumeAnchors:
-    """`SpatialExplicit.get_config()` materialised `anchors_` with
+    """`spatial.sampler.Explicit.get_config()` materialised `anchors_` with
     ``list(...)``, which consumed one-shot iterators and left
     ``anchors()`` empty.
     """
@@ -231,7 +225,7 @@ class TestSpatialExplicitConfigDoesNotConsumeAnchors:
         def gen():
             yield from [(0, 0), (1, 1), (2, 2)]
 
-        sampler = SpatialExplicit(anchors_=gen())
+        sampler = spatial.sampler.Explicit(anchors_=gen())
 
         cfg = sampler.get_config()
         assert cfg == {"n_anchors": 3}
@@ -244,7 +238,7 @@ class TestSpatialExplicitConfigDoesNotConsumeAnchors:
 
 
 class TestSphericalCapPointDomainAnchorConvention:
-    """`SpatialSphericalCap.neighborhood` on a `PointDomain` previously
+    """`spatial.geometry.SphericalCap.neighborhood` on a `PointDomain` previously
     unpacked the anchor as `(lat, lon)`, but `PointDomain.coords` and the
     KNN/radius haversine paths use the `(x, y) = (lon, lat)` convention.
     A spherical cap centred on the natural `(lon, lat)` anchor therefore
@@ -268,7 +262,7 @@ class TestSphericalCapPointDomainAnchorConvention:
         domain = PointDomain(coords=coords, kdtree=cKDTree(coords))
 
         # Anchor in the natural (x, y) = (lon, lat) convention.
-        cap = SpatialSphericalCap(radius_km=200.0)
+        cap = spatial.geometry.SphericalCap(radius_km=200.0)
         idx = cap.neighborhood(domain, anchor=(10.0, 5.0))
 
         # The point at (10, 5) (exactly at anchor) and the near one at

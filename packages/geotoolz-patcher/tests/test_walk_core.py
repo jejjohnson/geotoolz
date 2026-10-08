@@ -19,21 +19,11 @@ from georeader.geotensor import GeoTensor
 from geopatcher import (
     AsyncSpatialPatcher,
     RasterField,
-    SpatialBoxcar,
-    SpatialExplicit,
-    SpatialKNNGraph,
-    SpatialOverlapAdd,
     SpatialPatcher,
-    SpatialRandom,
-    SpatialRectangular,
-    SpatialRegularStride,
     SpatioTemporalPatcher,
-    TemporalCausalBoxcar,
-    TemporalFixedLookback,
-    TemporalMean,
-    TemporalMultiScale,
     TemporalPatcher,
-    TemporalRegularStride,
+    spatial,
+    temporal,
 )
 from geopatcher._src.hooks import UNKNOWN_TOTAL
 
@@ -107,27 +97,29 @@ def _raster(shape: tuple[int, ...]) -> RasterField:
 
 
 def _spatial(cls: type = SpatialPatcher, **kwargs: Any) -> Any:
-    kwargs.setdefault("sampler", SpatialRegularStride(step=8))
+    kwargs.setdefault("sampler", spatial.sampler.RegularStride(step=8))
     return cls(
-        geometry=SpatialRectangular(size=(8, 8)),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
         **kwargs,
     )
 
 
 def _temporal(geometry: Any = None) -> TemporalPatcher:
     return TemporalPatcher(
-        geometry=geometry or TemporalFixedLookback(length=2),
-        sampler=TemporalRegularStride(step=1),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=geometry or temporal.geometry.FixedLookback(length=2),
+        sampler=temporal.sampler.RegularStride(step=1),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
 
 
 def _coupled(pairs: list[Any], **spatial_kwargs: Any) -> SpatioTemporalPatcher:
     return SpatioTemporalPatcher(
-        spatial=_spatial(sampler=SpatialExplicit(anchors_=pairs), **spatial_kwargs),
+        spatial=_spatial(
+            sampler=spatial.sampler.Explicit(anchors_=pairs), **spatial_kwargs
+        ),
         temporal=_temporal(),
         coupling="coupled",
     )
@@ -283,8 +275,8 @@ def test_product_split_skips_fully_journaled_chips() -> None:
 
 def test_product_split_keys_multi_window_patches() -> None:
     stp = SpatioTemporalPatcher(
-        spatial=_spatial(sampler=SpatialExplicit(anchors_=[(0, 0)])),
-        temporal=_temporal(TemporalMultiScale(scales=[1, 2])),
+        spatial=_spatial(sampler=spatial.sampler.Explicit(anchors_=[(0, 0)])),
+        temporal=_temporal(temporal.geometry.MultiScale(scales=[1, 2])),
     )
     field = _raster((4, 16, 16))
     keys = [((0, 0), (3, 0)), ((0, 0), (3, 1))]
@@ -320,10 +312,10 @@ def test_temporal_errors_are_scoped_to_the_latest_split() -> None:
             return np.arange(6.0)[s]
 
     tp = TemporalPatcher(
-        geometry=TemporalFixedLookback(length=1),
-        sampler=TemporalRegularStride(step=1),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=1),
+        sampler=temporal.sampler.RegularStride(step=1),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
         on_error="skip",
     )
     list(tp.split(_Series(bad=1)))
@@ -348,10 +340,10 @@ def test_mask_patch_for_graph_indices() -> None:
             raise OSError("offline")
 
     patcher = SpatialPatcher(
-        geometry=SpatialKNNGraph(k=2),
-        sampler=SpatialRandom(n_samples=2, seed=0),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.KNNGraph(k=2),
+        sampler=spatial.sampler.Random(n_samples=2, seed=0),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
         on_error="mask",
     )
     patches = list(patcher.split(_Broken(gdf, as_points=True)))

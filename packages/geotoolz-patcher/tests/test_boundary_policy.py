@@ -1,4 +1,4 @@
-"""Tests for `SpatialRectangular.boundary` — issue #19.
+"""Tests for `spatial.geometry.Rectangular.boundary` — issue #19.
 
 Four modes on a deliberately misaligned domain (70x70, patch 16,
 stride 16 → 4 full anchors plus a 6-px residual at the right/bottom
@@ -36,34 +36,8 @@ from rasterio.windows import (
     transform as window_transform,
 )
 
-from geopatcher import (
-    IncompleteScanConfiguration,
-    Patch,
-    RasterField,
-    SpatialBoxcar,
-    SpatialExplicit,
-    SpatialExplicitCoords,
-    SpatialHann,
-    SpatialHardVote,
-    SpatialInvVarWeightedMean,
-    SpatialJitteredStride,
-    SpatialMax,
-    SpatialMean,
-    SpatialMedian,
-    SpatialMin,
-    SpatialMode,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialPoissonDisk,
-    SpatialRandom,
-    SpatialRectangular,
-    SpatialRegularStride,
-    SpatialSampler,
-    SpatialSoftVote,
-    SpatialSum,
-    SpatialVariance,
-    SpatialWeightedSum,
-)
+from geopatcher import Patch, RasterField, SpatialPatcher, spatial
+from geopatcher.spatial.sampler import IncompleteScanConfiguration
 
 
 # Match the BoundaryMode literal defined in
@@ -74,10 +48,10 @@ BoundaryMode = Literal["drop", "pad", "shrink", "raise", "reflect"]
 
 def _patcher(boundary: BoundaryMode, step: int = 16) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16), boundary=boundary),
-        sampler=SpatialRegularStride(step=step),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(16, 16), boundary=boundary),
+        sampler=spatial.sampler.RegularStride(step=step),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -140,14 +114,14 @@ class TestRectangularBoundary:
 
     def test_invalid_mode_rejected(self) -> None:
         with pytest.raises(ValueError, match="invalid boundary mode"):
-            SpatialRectangular(size=(16, 16), boundary="wrap")  # type: ignore[arg-type]
+            spatial.geometry.Rectangular(size=(16, 16), boundary="wrap")  # type: ignore[arg-type]
 
     def test_config_round_trips_boundary(self) -> None:
-        geom = SpatialRectangular(size=(16, 16), boundary="pad")
+        geom = spatial.geometry.Rectangular(size=(16, 16), boundary="pad")
         cfg = geom.get_config()
         assert cfg["boundary"] == "pad"
         # Defaults preserved through round-trip too.
-        default = SpatialRectangular(size=(16, 16))
+        default = spatial.geometry.Rectangular(size=(16, 16))
         assert default.get_config()["boundary"] == "drop"
 
 
@@ -193,7 +167,7 @@ class TestAlignedDomainIsUnchanged:
 
 class TestBoundaryHonoredByAllRasterSamplers:
     """Boundary must be wired into every raster sampler, not only
-    `SpatialRegularStride`. The contract: when ``boundary != "drop"``,
+    `spatial.sampler.RegularStride`. The contract: when ``boundary != "drop"``,
     the sampler is allowed to place anchors that overflow the domain,
     and `SpatialPatcher.split(boundary="raise")` raises on the first
     such anchor. When ``boundary == "drop"``, anchors stay in-bounds.
@@ -212,14 +186,16 @@ class TestBoundaryHonoredByAllRasterSamplers:
     @pytest.mark.parametrize(
         "sampler",
         [
-            SpatialRegularStride(step=16),
-            SpatialJitteredStride(step=16, jitter=0.5, seed=0),
-            SpatialRandom(n_samples=200, seed=0),
-            SpatialPoissonDisk(min_dist=4.0, seed=0),
+            spatial.sampler.RegularStride(step=16),
+            spatial.sampler.JitteredStride(step=16, jitter=0.5, seed=0),
+            spatial.sampler.Random(n_samples=200, seed=0),
+            spatial.sampler.PoissonDisk(min_dist=4.0, seed=0),
         ],
         ids=["RegularStride", "JitteredStride", "Random", "PoissonDisk"],
     )
-    def test_raise_mode_fires_for_each_sampler(self, sampler: SpatialSampler) -> None:
+    def test_raise_mode_fires_for_each_sampler(
+        self, sampler: spatial.sampler.Sampler
+    ) -> None:
         # A patch larger than the domain must overflow under every
         # non-drop raster sampler (anchored at the origin), so
         # boundary="raise" fires.
@@ -231,10 +207,10 @@ class TestBoundaryHonoredByAllRasterSamplers:
             )
         )
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16), boundary="raise"),
+            geometry=spatial.geometry.Rectangular(size=(16, 16), boundary="raise"),
             sampler=sampler,
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         with pytest.raises(ValueError, match="overflows the domain"):
             list(patcher.split(small))
@@ -242,9 +218,9 @@ class TestBoundaryHonoredByAllRasterSamplers:
     @pytest.mark.parametrize(
         "sampler",
         [
-            SpatialJitteredStride(step=16, jitter=0.5, seed=0),
-            SpatialRandom(n_samples=200, seed=0),
-            SpatialPoissonDisk(min_dist=4.0, seed=0),
+            spatial.sampler.JitteredStride(step=16, jitter=0.5, seed=0),
+            spatial.sampler.Random(n_samples=200, seed=0),
+            spatial.sampler.PoissonDisk(min_dist=4.0, seed=0),
         ],
         ids=["JitteredStride", "Random", "PoissonDisk"],
     )
@@ -252,17 +228,17 @@ class TestBoundaryHonoredByAllRasterSamplers:
     def test_non_drop_random_anchors_stay_within_last_fitting_anchor(
         self,
         misaligned_field: RasterField,
-        sampler: SpatialSampler,
+        sampler: spatial.sampler.Sampler,
         boundary: BoundaryMode,
     ) -> None:
         # #185: non-drop random/jittered samplers used to draw anchors up
         # to h - 1, emitting chips that are mostly padding (or a 1x1
         # shrink sliver). Anchors are now drawn from [0, h - size].
-        geom = SpatialRectangular(size=(16, 16), boundary=boundary)
+        geom = spatial.geometry.Rectangular(size=(16, 16), boundary=boundary)
         anchors = list(sampler.anchors(misaligned_field.domain, geom))
         assert anchors
         assert all(0 <= r <= 54 and 0 <= c <= 54 for r, c in anchors)
-        if isinstance(sampler, SpatialJitteredStride):
+        if isinstance(sampler, spatial.sampler.JitteredStride):
             # The edge lattice anchor (64) jitters to 56..72 and clamps
             # to 54, so the trailing strip is still covered.
             assert max(r for r, _ in anchors) == 54
@@ -271,22 +247,22 @@ class TestBoundaryHonoredByAllRasterSamplers:
     @pytest.mark.parametrize(
         "sampler",
         [
-            SpatialRandom(n_samples=200, seed=0),
-            SpatialPoissonDisk(min_dist=4.0, seed=0),
+            spatial.sampler.Random(n_samples=200, seed=0),
+            spatial.sampler.PoissonDisk(min_dist=4.0, seed=0),
         ],
         ids=["Random", "PoissonDisk"],
     )
     def test_drop_mode_keeps_anchors_in_bounds(
-        self, misaligned_field: RasterField, sampler: SpatialSampler
+        self, misaligned_field: RasterField, sampler: spatial.sampler.Sampler
     ) -> None:
         # Inverse property: with boundary="drop", no anchor produces an
         # overflowing window. Confirms the wiring is conditioned on
         # boundary rather than being a no-op everywhere.
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16), boundary="drop"),
+            geometry=spatial.geometry.Rectangular(size=(16, 16), boundary="drop"),
             sampler=sampler,
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         for patch in patcher.split(misaligned_field):
             r, c = patch.anchor
@@ -304,12 +280,12 @@ def _corner_patcher(
     boundary: BoundaryMode, size: int = 4, pad_value: float | None = None
 ) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(
+        geometry=spatial.geometry.Rectangular(
             size=(size, size), boundary=boundary, pad_value=pad_value
         ),
-        sampler=SpatialRegularStride(step=size),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        sampler=spatial.sampler.RegularStride(step=size),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -371,10 +347,10 @@ class TestReflectAndPadValue:
         arr = np.arange(100, dtype=np.float32).reshape(10, 10)
         field = RasterField(GeoTensor(values=arr, transform=utm, crs="EPSG:32630"))
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(4, 4), boundary=boundary),
-            sampler=SpatialExplicit([anchor]),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(4, 4), boundary=boundary),
+            sampler=spatial.sampler.Explicit([anchor]),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         (chip,) = list(patcher.split(field))
         row, col = anchor
@@ -419,11 +395,16 @@ class TestReflectAndPadValue:
         np.testing.assert_array_equal(corner.data.values, np.asarray(boundless.values))
 
     def test_config_round_trips_pad_value(self) -> None:
-        geom = SpatialRectangular(size=(16, 16), boundary="pad", pad_value=0.0)
+        geom = spatial.geometry.Rectangular(
+            size=(16, 16), boundary="pad", pad_value=0.0
+        )
         cfg = geom.get_config()
         assert cfg["boundary"] == "pad"
         assert cfg["pad_value"] == 0.0
-        assert SpatialRectangular(size=(16, 16)).get_config()["pad_value"] is None
+        assert (
+            spatial.geometry.Rectangular(size=(16, 16)).get_config()["pad_value"]
+            is None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +429,7 @@ def _raster_case() -> RasterField:
 def _rioxarray_case() -> Any:
     xr = pytest.importorskip("xarray")
     pytest.importorskip("rioxarray")
-    from geopatcher import RioXarrayField
+    from geopatcher.fields import RioXarrayField
 
     da = xr.DataArray(
         _ramp(),
@@ -486,10 +467,10 @@ def test_split_merge_matrix(field_name: str, step: int, boundary: BoundaryMode) 
     field = _MATRIX_FIELDS[field_name]()
     raw = _ramp()
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(_SIZE, _SIZE), boundary=boundary),
-        sampler=SpatialRegularStride(step=step),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(_SIZE, _SIZE), boundary=boundary),
+        sampler=spatial.sampler.RegularStride(step=step),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     reflected = np.pad(raw, ((0, _SIZE), (0, _SIZE)), mode="reflect")
     patches = list(patcher.split(field))
@@ -535,12 +516,12 @@ def test_split_merge_matrix(field_name: str, step: int, boundary: BoundaryMode) 
 def _pad_patches(step: int = _SIZE) -> tuple[RasterField, list[Patch]]:
     field = _raster_case()
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(
+        geometry=spatial.geometry.Rectangular(
             size=(_SIZE, _SIZE), boundary="pad", pad_value=-1.0
         ),
-        sampler=SpatialRegularStride(step=step),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        sampler=spatial.sampler.RegularStride(step=step),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     return field, list(patcher.split(field))
 
@@ -548,13 +529,13 @@ def _pad_patches(step: int = _SIZE) -> tuple[RasterField, list[Patch]]:
 @pytest.mark.parametrize(
     "aggregation",
     [
-        SpatialOverlapAdd(),
-        SpatialSum(),
-        SpatialMean(),
-        SpatialMax(),
-        SpatialMin(),
-        SpatialWeightedSum(),
-        SpatialMedian(),
+        spatial.aggregation.OverlapAdd(),
+        spatial.aggregation.Sum(),
+        spatial.aggregation.Mean(),
+        spatial.aggregation.Max(),
+        spatial.aggregation.Min(),
+        spatial.aggregation.WeightedSum(),
+        spatial.aggregation.Median(),
     ],
     ids=lambda a: type(a).__name__,
 )
@@ -571,7 +552,7 @@ def test_every_dense_aggregation_merges_pad_chips(aggregation: Any) -> None:
 def test_streaming_overlap_add_merges_pad_chips(tmp_path: Path) -> None:
     pytest.importorskip("zarr")
     field, patches = _pad_patches(step=_SIZE // 2)
-    agg = SpatialOverlapAdd(
+    agg = spatial.aggregation.OverlapAdd(
         streaming=True, target_path=str(tmp_path), chunks=(_SIZE, _SIZE)
     )
     np.testing.assert_allclose(np.asarray(agg.merge(patches, field.domain)[:]), _ramp())
@@ -594,15 +575,16 @@ def test_variance_and_categorical_aggregations_crop_pad_chips() -> None:
         Patch(data=np.ones(np.shape(p.data)), anchor=p.anchor, indices=p.indices)
         for p in patches
     ]
-    twice = SpatialSum().merge(ones, field.domain) >= 2
-    variance = SpatialVariance().merge(patches, field.domain)
+    twice = spatial.aggregation.Sum().merge(ones, field.domain) >= 2
+    variance = spatial.aggregation.Variance().merge(patches, field.domain)
     np.testing.assert_array_equal(variance[twice], 0.0)
     assert np.isnan(variance[~twice]).all() and (~twice).any()
     np.testing.assert_array_equal(
-        SpatialMode().merge(labels, field.domain), expected_labels
+        spatial.aggregation.Mode().merge(labels, field.domain), expected_labels
     )
     np.testing.assert_array_equal(
-        SpatialHardVote(n_classes=3).merge(labels, field.domain), expected_labels
+        spatial.aggregation.HardVote(n_classes=3).merge(labels, field.domain),
+        expected_labels,
     )
     one_hot = [
         Patch(
@@ -613,7 +595,8 @@ def test_variance_and_categorical_aggregations_crop_pad_chips() -> None:
         for p in labels
     ]
     np.testing.assert_array_equal(
-        SpatialSoftVote(n_classes=3).merge(one_hot, field.domain), expected_labels
+        spatial.aggregation.SoftVote(n_classes=3).merge(one_hot, field.domain),
+        expected_labels,
     )
     posteriors = [
         Patch(
@@ -624,7 +607,7 @@ def test_variance_and_categorical_aggregations_crop_pad_chips() -> None:
         )
         for p in patches
     ]
-    out = SpatialInvVarWeightedMean().merge(posteriors, field.domain)
+    out = spatial.aggregation.InvVarWeightedMean().merge(posteriors, field.domain)
     np.testing.assert_allclose(out["mu"], _ramp())
 
 
@@ -634,10 +617,12 @@ def test_negative_pad_window_does_not_wrap() -> None:
     field = _arange_field(10)
     raw = np.asarray(field.reader.values)
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4), boundary="pad", pad_value=-1.0),
-        sampler=SpatialExplicit([(-2, -2)]),
-        window=SpatialBoxcar(),
-        aggregation=SpatialSum(),
+        geometry=spatial.geometry.Rectangular(
+            size=(4, 4), boundary="pad", pad_value=-1.0
+        ),
+        sampler=spatial.sampler.Explicit([(-2, -2)]),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.Sum(),
     )
     merged = patcher.merge(patcher.split(field), field.domain)
     expected = np.full(raw.shape, np.nan)
@@ -652,12 +637,12 @@ class TestShrinkClipsNegativeAnchors:
     def test_explicit_negative_anchor(self) -> None:
         field = _arange_field(10)
         raw = np.asarray(field.reader.values)
-        window = SpatialHann()
+        window = spatial.window.Hann()
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(4, 4), boundary="shrink"),
-            sampler=SpatialExplicit([(-2, -1)]),
+            geometry=spatial.geometry.Rectangular(size=(4, 4), boundary="shrink"),
+            sampler=spatial.sampler.Explicit([(-2, -1)]),
             window=window,
-            aggregation=SpatialOverlapAdd(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         (patch,) = list(patcher.split(field))
         assert patch.indices == Window(0, 0, 3, 2)
@@ -672,10 +657,10 @@ class TestShrinkClipsNegativeAnchors:
         field = _arange_field(20)
         raw = np.asarray(field.reader.values)
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(4, 4), boundary="shrink"),
-            sampler=SpatialExplicitCoords([(0.5, 0.5)]),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(4, 4), boundary="shrink"),
+            sampler=spatial.sampler.ExplicitCoords([(0.5, 0.5)]),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         (patch,) = list(patcher.split(field))
         # Centred on pixel (0, 0): anchor (-2, -2) clips to rows/cols 0..1.
@@ -696,11 +681,11 @@ class TestDropPatchLargerThanDomain:
     @pytest.mark.parametrize(
         "sampler",
         [
-            SpatialRegularStride(step=4),
-            SpatialJitteredStride(step=4, seed=0),
-            SpatialRandom(n_samples=5, seed=0),
-            SpatialPoissonDisk(min_dist=2.0, seed=0),
-            SpatialExplicitCoords([(5.5, 5.5)]),
+            spatial.sampler.RegularStride(step=4),
+            spatial.sampler.JitteredStride(step=4, seed=0),
+            spatial.sampler.Random(n_samples=5, seed=0),
+            spatial.sampler.PoissonDisk(min_dist=2.0, seed=0),
+            spatial.sampler.ExplicitCoords([(5.5, 5.5)]),
         ],
         ids=[
             "RegularStride",
@@ -710,28 +695,30 @@ class TestDropPatchLargerThanDomain:
             "ExplicitCoords",
         ],
     )
-    def test_no_anchors_and_a_warning(self, sampler: SpatialSampler) -> None:
+    def test_no_anchors_and_a_warning(self, sampler: spatial.sampler.Sampler) -> None:
         field = _arange_field(10)
-        geom = SpatialRectangular(size=(16, 16))
+        geom = spatial.geometry.Rectangular(size=(16, 16))
         with pytest.warns(RuntimeWarning, match="exceeds the domain length"):
             anchors = list(sampler.anchors(field.domain, geom))
         assert anchors == []
 
     def test_one_axis_oversize_is_enough(self) -> None:
         field = _raster_case()  # 37 x 45
-        geom = SpatialRectangular(size=(40, 16))
+        geom = spatial.geometry.Rectangular(size=(40, 16))
         with pytest.warns(RuntimeWarning, match="exceeds the domain length"):
-            anchors = list(SpatialRegularStride(step=8).anchors(field.domain, geom))
+            anchors = list(
+                spatial.sampler.RegularStride(step=8).anchors(field.domain, geom)
+            )
         assert anchors == []
 
     @pytest.mark.parametrize("boundary", ["pad", "shrink", "reflect"])
     def test_non_drop_modes_cover_a_small_domain(self, boundary: BoundaryMode) -> None:
         field = _arange_field(10)
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16), boundary=boundary),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16), boundary=boundary),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         patches = list(patcher.split(field))
         assert [p.anchor for p in patches] == [(0, 0)]
@@ -746,20 +733,20 @@ class TestCheckFullScanOnlyUnderDrop:
     ) -> None:
         # 70 / 16 / 16 leaves a 6-px residual that drop loses — but the
         # other modes cover it, so the strict-tiling check must not fire.
-        geom = SpatialRectangular(size=(16, 16), boundary=boundary)
-        sampler = SpatialRegularStride(step=16, check_full_scan=True)
+        geom = spatial.geometry.Rectangular(size=(16, 16), boundary=boundary)
+        sampler = spatial.sampler.RegularStride(step=16, check_full_scan=True)
         assert len(list(sampler.anchors(misaligned_field.domain, geom))) == 25
 
     def test_drop_still_raises(self, misaligned_field: RasterField) -> None:
-        sampler = SpatialRegularStride(step=16, check_full_scan=True)
-        geom = SpatialRectangular(size=(16, 16))
+        sampler = spatial.sampler.RegularStride(step=16, check_full_scan=True)
+        geom = spatial.geometry.Rectangular(size=(16, 16))
         with pytest.raises(IncompleteScanConfiguration, match=r"\(70 - 16\) % 16"):
             list(sampler.anchors(misaligned_field.domain, geom))
 
     def test_oversize_message_names_the_size(self) -> None:
         field = _arange_field(10)
-        sampler = SpatialRegularStride(step=4, check_full_scan=True)
-        geom = SpatialRectangular(size=(16, 16))
+        sampler = spatial.sampler.RegularStride(step=4, check_full_scan=True)
+        geom = spatial.geometry.Rectangular(size=(16, 16))
         with pytest.raises(IncompleteScanConfiguration, match="patch size 16 exceeds"):
             list(sampler.anchors(field.domain, geom))
 
@@ -810,7 +797,7 @@ class TestPadValueValidation:
 
     def test_non_numeric_rejected_at_construction(self) -> None:
         with pytest.raises(TypeError, match="pad_value"):
-            SpatialRectangular(size=(4, 4), boundary="pad", pad_value="0")  # type: ignore[arg-type]
+            spatial.geometry.Rectangular(size=(4, 4), boundary="pad", pad_value="0")  # type: ignore[arg-type]
 
 
 class TestGridDomainBoundary:
@@ -819,7 +806,7 @@ class TestGridDomainBoundary:
     @pytest.fixture
     def field(self) -> Any:
         xr = pytest.importorskip("xarray")
-        from geopatcher import XarrayField
+        from geopatcher.fields import XarrayField
 
         da = xr.DataArray(
             _ramp(),
@@ -837,10 +824,12 @@ class TestGridDomainBoundary:
     @pytest.mark.parametrize("boundary", _MATRIX_MODES)
     def test_split_merge(self, field: Any, step: int, boundary: BoundaryMode) -> None:
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(_SIZE, _SIZE), boundary=boundary),
-            sampler=SpatialRegularStride(step=step),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(
+                size=(_SIZE, _SIZE), boundary=boundary
+            ),
+            sampler=spatial.sampler.RegularStride(step=step),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         raw = _ramp()
         reflected = np.pad(raw, ((0, _SIZE), (0, _SIZE)), mode="reflect")
@@ -870,10 +859,12 @@ class TestGridDomainBoundary:
 
     def test_raise_on_grid_overflow(self, field: Any) -> None:
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(_SIZE, _SIZE), boundary="raise"),
-            sampler=SpatialRegularStride(step=_SIZE),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(
+                size=(_SIZE, _SIZE), boundary="raise"
+            ),
+            sampler=spatial.sampler.RegularStride(step=_SIZE),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         with pytest.raises(ValueError, match="overflows the domain"):
             list(patcher.split(field))

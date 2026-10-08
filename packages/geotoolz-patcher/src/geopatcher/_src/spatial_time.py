@@ -38,13 +38,13 @@ from geopatcher._src.hooks import (
 )
 from geopatcher._src.patch import SpatioTemporalPatch, TemporalPatch
 from geopatcher._src.prefetch import prefetch_iterable
-from geopatcher._src.spatial import SpatialPatcher
 from geopatcher._src.spatial.patcher import (
+    SpatialPatcher,
     _AsyncBackpressure,
     _Backpressure,
     _chip_reader,
 )
-from geopatcher._src.time.patcher import TemporalPatcher
+from geopatcher._src.temporal.patcher import TemporalPatcher
 from geopatcher._src.walk import (
     ReadPolicy,
     _Read,
@@ -91,7 +91,7 @@ class SpatioTemporalPatcher:
 
         The coupled mode expects ``self.spatial.sampler.anchors_`` to be
         an iterable of ``(space_anchor, time_anchor)`` tuples and is
-        only valid with `SpatialExplicit` spatial / time samplers.
+        only valid with `spatial.sampler.Explicit` spatial / time samplers.
 
         Each spatial chip is read once — through the spatial patcher's
         read pipeline and ``on_error`` policy — then sliced into its time
@@ -383,7 +383,7 @@ def _coupled_pairs(spatial: SpatialPatcher) -> list[Any]:
         raise TypeError(
             "coupled coupling requires the spatial sampler to expose an "
             "`anchors_` list of (space_anchor, time_anchor) tuples — i.e. "
-            "use SpatialExplicit(anchors_=[...])."
+            "use spatial.sampler.Explicit(anchors_=[...])."
         )
     return list(anchors)
 

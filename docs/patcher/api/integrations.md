@@ -1,21 +1,8 @@
 # Integrations API
 
-Thin bridges from the patcher core into ML and operator-graph
-frameworks. Each lives at the package top level (outside the private
-`_src` core) and is gated behind the matching extra.
-
-## JAX batching (`geopatcher.jax`, `[jax]` extra)
-
-Stack patch payloads on a leading axis for jitted / vmapped models,
-then unpack model outputs back into patches:
-
-```python
-from geopatcher.jax import BatchedPatch, batch_split, unbatch
-```
-
-::: geopatcher.jax.BatchedPatch
-::: geopatcher.jax.batch_split
-::: geopatcher.jax.unbatch
+Thin bridges from the patcher core into operator-graph frameworks, each
+gated behind the matching extra. (JAX batching and the Dask bridge are
+runners: see [Running at scale](run.md).)
 
 ## pipekit operator bridge (`geopatcher.integrations.pipekit`, `[pipekit]` extra)
 

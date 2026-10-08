@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from _helpers import StubDomain as _StubDomain
 
+from geopatcher import spatial, temporal
 from geopatcher._src.matched import (
     MatchedField,
     MatchedSpatioTemporalPatch,
@@ -24,11 +25,7 @@ from geopatcher._src.matched import (
 from geopatcher._src.matched.patch import PRIMARY_KEY
 from geopatcher._src.patch import Patch, SpatioTemporalPatch
 from geopatcher._src.spatial_time import SpatioTemporalPatcher
-from geopatcher._src.time.aggregation import TemporalAggregation, TemporalMean
-from geopatcher._src.time.geometry import TemporalFixedLookback
-from geopatcher._src.time.patcher import TemporalPatcher
-from geopatcher._src.time.sampler import TemporalRegularStride
-from geopatcher._src.time.window import TemporalCausalBoxcar
+from geopatcher._src.temporal.patcher import TemporalPatcher
 
 
 # ---------------------------------------------------------------------------
@@ -104,19 +101,21 @@ class _StubSpatialPatcher:
 
 
 def _make_temporal(
-    aggregation: TemporalAggregation | None = None,
+    aggregation: temporal.aggregation.Aggregation | None = None,
 ) -> TemporalPatcher:
     # "shrink" keeps anchor 0's short [0, 1) window: two temporal anchors.
     return TemporalPatcher(
-        geometry=TemporalFixedLookback(length=2, boundary="shrink"),
-        sampler=TemporalRegularStride(step=2),
-        window=TemporalCausalBoxcar(),
-        aggregation=aggregation if aggregation is not None else TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=2, boundary="shrink"),
+        sampler=temporal.sampler.RegularStride(step=2),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=aggregation
+        if aggregation is not None
+        else temporal.aggregation.Mean(),
     )
 
 
-class _RecordingTemporalAgg(TemporalAggregation):
-    """TemporalAggregation stub — returns ``("merged", name, n)``."""
+class _RecordingTemporalAgg(temporal.aggregation.Aggregation):
+    """temporal.aggregation.Aggregation stub — returns ``("merged", name, n)``."""
 
     streaming_safe = True
 
@@ -301,7 +300,7 @@ class TestMatchedSpatioTemporalPatcherMerge:
             coupling="product",
             time_axis=0,
         )
-        secondary_aggregators: dict[str, TemporalAggregation] = {}
+        secondary_aggregators: dict[str, temporal.aggregation.Aggregation] = {}
         secondary_agg = _RecordingTemporalAgg("s2_agg") if with_secondary_agg else None
         if secondary_agg is not None:
             secondary_aggregators["s2"] = secondary_agg
@@ -442,39 +441,29 @@ def _time_raster(n_time: int, scale: float = 1.0) -> Any:
 
 
 def _stencil_patcher(coupling: str = "product", anchors_: Any = None) -> Any:
-    from geopatcher import (
-        SpatialBoxcar,
-        SpatialExplicit,
-        SpatialOverlapAdd,
-        SpatialPatcher,
-        SpatialRectangular,
-        SpatialRegularStride,
-        TemporalForecast,
-        TemporalStencilGeometry,
-        TemporalStencilSampler,
-        TimeStencil,
-    )
+    from geopatcher import SpatialPatcher
+    from geopatcher.temporal.stencils import TimeStencil
 
     stencil = TimeStencil("-3h", "3h", "3h", closed="both")
     sampler: Any = (
-        SpatialRegularStride(step=8)
+        spatial.sampler.RegularStride(step=8)
         if anchors_ is None
-        else SpatialExplicit(anchors_=anchors_)
+        else spatial.sampler.Explicit(anchors_=anchors_)
     )
     return SpatioTemporalPatcher(
         spatial=SpatialPatcher(
-            geometry=SpatialRectangular(size=(8, 8)),
+            geometry=spatial.geometry.Rectangular(size=(8, 8)),
             sampler=sampler,
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         ),
         temporal=TemporalPatcher(
-            geometry=TemporalStencilGeometry(
+            geometry=temporal.geometry.StencilGeometry(
                 stencil=stencil, source_step=np.timedelta64(3, "h")
             ),
-            sampler=TemporalStencilSampler(stencil=stencil),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalForecast(horizon=1),
+            sampler=temporal.sampler.StencilSampler(stencil=stencil),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Forecast(horizon=1),
         ),
         coupling=coupling,  # type: ignore[arg-type]
     )
@@ -525,10 +514,10 @@ def test_stencil_geometry_matches_single_source(coupling: str) -> None:
 def test_spatiotemporal_cadence_mismatch_raises() -> None:
     stp = _stencil_patcher()
     stp.temporal = TemporalPatcher(
-        geometry=TemporalFixedLookback(length=2),
-        sampler=TemporalRegularStride(step=2),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=2),
+        sampler=temporal.sampler.RegularStride(step=2),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
     mf = MatchedField(
         primary=_time_raster(8),
@@ -566,34 +555,27 @@ class _FlakyRaster:
 
 
 def _real_stp(coupling: str = "product", anchors_: Any = None, **kw: Any) -> Any:
-    from geopatcher import (
-        SpatialBoxcar,
-        SpatialExplicit,
-        SpatialOverlapAdd,
-        SpatialPatcher,
-        SpatialRectangular,
-        SpatialRegularStride,
-    )
+    from geopatcher import SpatialPatcher
 
-    geometry = kw.pop("geometry", SpatialRectangular(size=(8, 8)))
+    geometry = kw.pop("geometry", spatial.geometry.Rectangular(size=(8, 8)))
     sampler: Any = (
-        SpatialRegularStride(step=8)
+        spatial.sampler.RegularStride(step=8)
         if anchors_ is None
-        else SpatialExplicit(anchors_=anchors_)
+        else spatial.sampler.Explicit(anchors_=anchors_)
     )
     return SpatioTemporalPatcher(
         spatial=SpatialPatcher(
             geometry=geometry,
             sampler=sampler,
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
             **kw,
         ),
         temporal=TemporalPatcher(
-            geometry=TemporalFixedLookback(length=2),
-            sampler=TemporalRegularStride(step=2),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalMean(),
+            geometry=temporal.geometry.FixedLookback(length=2),
+            sampler=temporal.sampler.RegularStride(step=2),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Mean(),
         ),
         coupling=coupling,  # type: ignore[arg-type]
     )
@@ -702,12 +684,11 @@ def test_split_cache_is_keyed_per_source(tmp_path: Any) -> None:
 
 
 def test_coupled_chip_goes_through_the_spatial_pipeline() -> None:
-    from geopatcher import SpatialRectangular
 
     stp = _real_stp(
         "coupled",
         [((-4, -4), 3)],
-        geometry=SpatialRectangular(size=(8, 8), boundary="reflect"),
+        geometry=spatial.geometry.Rectangular(size=(8, 8), boundary="reflect"),
     )
     mf = MatchedField(
         primary=_time_raster(4),

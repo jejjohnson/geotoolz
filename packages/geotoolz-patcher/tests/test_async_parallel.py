@@ -10,19 +10,8 @@ import numpy as np
 import pytest
 from _helpers import ArrayField
 
-from geopatcher import (
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-    TemporalCausalBoxcar,
-    TemporalFixedLookback,
-    TemporalMean,
-    TemporalPatcher,
-    TemporalRegularStride,
-)
-from geopatcher.jax import batch_split, unbatch
+from geopatcher import SpatialPatcher, TemporalPatcher, spatial, temporal
+from geopatcher.run import batch_split, unbatch
 
 
 class AsyncArrayField(ArrayField):
@@ -39,10 +28,10 @@ def field() -> ArrayField:
 @pytest.fixture
 def patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -69,10 +58,10 @@ def test_spatial_asplit_matches_split_boundary(
     # asplit must mirror split for the clip-and-pad edge modes (issue #19).
     array = np.arange(n * n, dtype=np.float32).reshape(n, n)
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(size, size), boundary=boundary),
-        sampler=SpatialRegularStride(step=size),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(size, size), boundary=boundary),
+        sampler=spatial.sampler.RegularStride(step=size),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
     async def collect() -> list[Any]:
@@ -123,10 +112,10 @@ def test_prefetch_replays_worker_exception(patcher: SpatialPatcher) -> None:
 
 def test_temporal_asplit_matches_split() -> None:
     patcher = TemporalPatcher(
-        geometry=TemporalFixedLookback(length=4),
-        sampler=TemporalRegularStride(step=4),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=4),
+        sampler=temporal.sampler.RegularStride(step=4),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
     series = np.arange(16)
 
@@ -165,10 +154,10 @@ def test_asplit_on_error_parity(policy: str, cls: str) -> None:
 
     def make(name: str) -> Any:
         return getattr(geopatcher, name)(
-            geometry=SpatialRectangular(size=(8, 8)),
-            sampler=SpatialRegularStride(step=8),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(8, 8)),
+            sampler=spatial.sampler.RegularStride(step=8),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
             on_error=policy,
             max_retries=1,
         )

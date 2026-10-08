@@ -17,15 +17,7 @@ pytest.importorskip(
 
 import numpy as np
 import rasterio
-from geopatcher import (
-    Patch,
-    RasterField,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import Patch, RasterField, SpatialPatcher, spatial
 from georeader.geotensor import GeoTensor
 from pipekit import Lambda
 
@@ -55,10 +47,10 @@ def field() -> RasterField:
 @pytest.fixture
 def patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -106,7 +98,7 @@ def test_runtime_holders_are_forbid_in_yaml(patcher: SpatialPatcher) -> None:
         GeoTensor(np.ones((4, 4)), rasterio.Affine.identity(), "EPSG:32630")
     )
     config = MergePatches(
-        aggregation=SpatialOverlapAdd(), domain=field.domain
+        aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain
     ).get_config()
     assert config["domain"] == {"class": type(field.domain).__name__}
     assert GridSampler(patcher=patcher).get_config() == {
@@ -121,21 +113,27 @@ class TestSpatialTriangular:
         rows = np.array([1, 2, 2, 1]) / 3
         cols = np.array([1, 2, 3, 3, 3, 2, 1]) / 3
         cols = np.minimum(cols, 1.0)
-        weights = SpatialTriangular(width=3).weights(SpatialRectangular(size=(4, 7)))
+        weights = SpatialTriangular(width=3).weights(
+            spatial.geometry.Rectangular(size=(4, 7))
+        )
         assert weights.dtype == np.float64
         np.testing.assert_array_equal(weights, np.outer(rows, cols))
         assert weights[0, 0] == pytest.approx(1 / 9, rel=1e-15)
         assert weights[1, 3] == 2 / 3
 
     def test_small_window_values(self) -> None:
-        weights = SpatialTriangular(width=2).weights(SpatialRectangular(size=(3, 3)))
+        weights = SpatialTriangular(width=2).weights(
+            spatial.geometry.Rectangular(size=(3, 3))
+        )
         np.testing.assert_array_equal(
             weights,
             [[0.25, 0.5, 0.25], [0.5, 1.0, 0.5], [0.25, 0.5, 0.25]],
         )
 
     def test_non_positive_width_is_boxcar(self) -> None:
-        weights = SpatialTriangular(width=0).weights(SpatialRectangular(size=(2, 3)))
+        weights = SpatialTriangular(width=0).weights(
+            spatial.geometry.Rectangular(size=(2, 3))
+        )
         assert weights.dtype == np.float64
         np.testing.assert_array_equal(weights, np.ones((2, 3)))
 
@@ -180,7 +178,9 @@ class TestStitchInSequential:
             [
                 GridSampler(patcher=patcher),
                 ApplyToChips(operator=double),
-                MergePatches(aggregation=SpatialOverlapAdd(), domain=field.reader),
+                MergePatches(
+                    aggregation=spatial.aggregation.OverlapAdd(), domain=field.reader
+                ),
             ]
         )
         result = pipe(field)

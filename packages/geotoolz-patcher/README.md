@@ -27,7 +27,7 @@ COG/zarr streaming — all the same four-axis composition. Pick a
 go), a **Window** (boundary treatment), and an **Aggregation** (local →
 global merge). Plug in any `Field` (raster, xarray grid, GeoPandas
 polygons, xvec points) and any per-patch callable. `patcher.split`
-returns an iterator and `SpatialOverlapAdd` defaults to an in-memory
+returns an iterator and `spatial.aggregation.OverlapAdd` defaults to an in-memory
 accumulator; flip `streaming=True` + `target_path=…` + `chunks=…` to
 back the accumulator with disk-resident zarr for >1 TB outputs.
 
@@ -40,10 +40,9 @@ pip install 'geotoolz-patcher[vector]'             # GeoPandasField
 pip install 'geotoolz-patcher[point]'              # XvecField
 pip install 'geotoolz-patcher[xarray-raster]'      # RioXarrayField
 pip install 'geotoolz-patcher[streaming]'          # disk-backed OverlapAdd
-pip install 'geotoolz-patcher[dask]'               # DaskField, geopatcher.dask helpers
-pip install 'geotoolz-patcher[jax]'                # geopatcher.jax batched splitting
-pip install 'geotoolz-patcher[obstore]'            # geopatcher.objstore client pool
-pip install 'geotoolz-patcher[obstore-cog]'        # ObstoreCogField + geopatcher.cog (pool + async-geotiff)
+pip install 'geotoolz-patcher[dask]'               # DaskField, geopatcher.run Dask bridge
+pip install 'geotoolz-patcher[jax]'                # geopatcher.run batched splitting
+pip install 'geotoolz-patcher[cog]'                # CogField (geotoolz-cloud COG engine)
 pip install 'geotoolz-patcher[patch-full]'         # all of the above
 pip install 'geotoolz-patcher[pipekit]'            # pipekit operator-graph bridge
 ```
@@ -69,10 +68,10 @@ field: gp.RasterField = gp.RasterField(
 
 # 2. Compose the four axes.
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(128, 128)),
-    sampler     = gp.SpatialRegularStride(step=(96, 96)),    # 32 px overlap
-    window      = gp.SpatialHann(),                          # feather the seams
-    aggregation = gp.SpatialOverlapAdd(),
+    geometry    = gp.spatial.geometry.Rectangular(size=(128, 128)),
+    sampler     = gp.spatial.sampler.RegularStride(step=(96, 96)),    # 32 px overlap
+    window      = gp.spatial.window.Hann(),                          # feather the seams
+    aggregation = gp.spatial.aggregation.OverlapAdd(),
 )
 
 # 3. Split → operate per patch → merge.
@@ -86,11 +85,31 @@ stitched: np.ndarray = patcher.merge(out, field.domain)     # (1, 512, 512) floa
 
 `patch.anchor` is the patch origin in pixel coordinates (`(0, 0)`,
 `(0, 96)`, …) and `field.domain` carries the grid the merge writes onto.
-For independent local jobs, swap the loop for the bundled
-`runners.parallel_map`; for global-context operators, use the codified
+For independent local jobs, swap the loop for
+`geopatcher.run.parallel_map`; for global-context operators, use the codified
 `reduce` / `two_pass` helpers. See the
 [concepts page](https://jejjohnson.github.io/geotoolz/patcher/concepts/) for the
 full mental model.
+
+## Where things live
+
+The root holds what every job touches; everything else has one home,
+named for the task:
+
+| Namespace | What's there |
+|---|---|
+| `geopatcher` | `SpatialPatcher`, `AsyncSpatialPatcher`, `TemporalPatcher`, `SpatioTemporalPatcher`; `Patch` carriers; `Field` / `Domain`; `RasterField` |
+| `geopatcher.spatial` | the four axes — `geometry` (`Rectangular`, …), `sampler` (`RegularStride`, …), `window` (`Hann`, …), `aggregation` (`OverlapAdd`, …) |
+| `geopatcher.temporal` | the same four axes along time, plus `stencils` (`TimeStencil`, …) |
+| `geopatcher.fields` | `XarrayField`, `RioXarrayField`, `DaskField`, `GeoPandasField`, `XvecField`, `CogField`, … and the domain types |
+| `geopatcher.matched` | patching co-registered sources together (`MatchedField`, `Matched*Patcher`) |
+| `geopatcher.run` | `parallel_map`, `prefetch_iterable`, Dask (`to_delayed`) and JAX (`batch_split`) bridges, `PatchCache`, `IndexedPatchView` |
+| `geopatcher.observe` | `PatcherHook`, `PatchJournal`, `PatchErrorRecord`, strict mode |
+| `geopatcher.config` | `axis_envelope` / `from_config` round-trips |
+
+Cloud-Optimized GeoTIFF reads and the shared object-store pool live in
+[geotoolz-cloud](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-cloud)
+(`geocloud`); `geopatcher.fields.CogField` is their `Field`.
 
 ## With geotoolz operators
 
@@ -108,7 +127,7 @@ ndvi: gz.Sequential = gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir="nir", red="r
 tiled: gz.Sequential = gz.Sequential([
     GridSampler(patcher=patcher),                            # field → list[Patch], (4, 128, 128) each
     ApplyToChips(operator=ndvi),                             # → list[Patch], (128, 128) each
-    MergePatches(aggregation=gp.SpatialOverlapAdd(),
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(),
                  domain=scene.isel({"band": slice(0, 1)})),  # one-band output grid
 ])
 ndvi_map: np.ndarray = tiled(gp.RasterField(scene))         # (1, H, W) float64

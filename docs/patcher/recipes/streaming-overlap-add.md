@@ -1,6 +1,6 @@
 # Streaming overlap-add — bounded-memory pipelines for >1 TB outputs
 
-`SpatialOverlapAdd` is the canonical streaming-safe aggregation. By
+`spatial.aggregation.OverlapAdd` is the canonical streaming-safe aggregation. By
 default it accumulates the weighted-sum buffer and the sum-of-weights
 buffer in RAM; flip `streaming=True`, point `target_path` at a fresh
 directory and give the store's `chunks`, and the same call accumulates
@@ -45,10 +45,10 @@ field = gp.RasterField(
 )
 
 patcher = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(64, 64)),
-    sampler     = gp.SpatialRegularStride(step=(32, 32)),
-    window      = gp.SpatialHann(),
-    aggregation = gp.SpatialOverlapAdd(),
+    geometry    = gp.spatial.geometry.Rectangular(size=(64, 64)),
+    sampler     = gp.spatial.sampler.RegularStride(step=(32, 32)),
+    window      = gp.spatial.window.Hann(),
+    aggregation = gp.spatial.aggregation.OverlapAdd(),
 )
 
 outputs = [
@@ -69,7 +69,7 @@ Same call, three extra kwargs:
 ```python
 stream_dir = "out/tahoe.zarr"
 
-agg = gp.SpatialOverlapAdd(
+agg = gp.spatial.aggregation.OverlapAdd(
     streaming    = True,
     target_path  = stream_dir,
     chunks       = (64, 64),    # required: match the patch shape
@@ -108,7 +108,7 @@ then converts it block by block into a real COG (GDAL `COG` driver:
 tiled, internal overviews, `nodata = fill_value`):
 
 ```python
-agg = gp.SpatialOverlapAdd(
+agg = gp.spatial.aggregation.OverlapAdd(
     streaming   = True,
     target_path = "out/tahoe.tif",
     writer      = "cog",
@@ -129,17 +129,17 @@ outer writes super-tile-shaped blocks into a global zarr store.
 
 ```python
 outer = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(1024, 1024)),
-    sampler     = gp.SpatialRegularStride(step=(1024, 1024)),
-    window      = gp.SpatialBoxcar(),
-    aggregation = gp.SpatialOverlapAdd(streaming=True, target_path="out.zarr",
+    geometry    = gp.spatial.geometry.Rectangular(size=(1024, 1024)),
+    sampler     = gp.spatial.sampler.RegularStride(step=(1024, 1024)),
+    window      = gp.spatial.window.Boxcar(),
+    aggregation = gp.spatial.aggregation.OverlapAdd(streaming=True, target_path="out.zarr",
                                        chunks=(1024, 1024)),
 )
 inner = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(64, 64)),
-    sampler     = gp.SpatialRegularStride(step=(32, 32)),
-    window      = gp.SpatialHann(),
-    aggregation = gp.SpatialOverlapAdd(),
+    geometry    = gp.spatial.geometry.Rectangular(size=(64, 64)),
+    sampler     = gp.spatial.sampler.RegularStride(step=(32, 32)),
+    window      = gp.spatial.window.Hann(),
+    aggregation = gp.spatial.aggregation.OverlapAdd(),
 )
 
 
@@ -193,16 +193,16 @@ buffered are closed, handing their slots back.
 
 ## 5. `streaming_safe = False` aggregations
 
-`SpatialMedian`, `SpatialMode`, and `SpatialLearned` need per-cell
+`spatial.aggregation.Median`, `spatial.aggregation.Mode`, and `spatial.aggregation.Learned` need per-cell
 history that doesn't fit in a monoidal fold. Calling `merge` on them
 emits a `RuntimeWarning` pointing at the streamable per-cell substitute,
 where one exists:
 
 | Non-streaming | Per-cell streaming substitute |
 |---|---|
-| `SpatialMedian` | none — stays in-RAM |
-| `SpatialMode` | `SpatialHardVote` |
-| `SpatialLearned` | codified two-pass via `patcher.two_pass` |
+| `spatial.aggregation.Median` | none — stays in-RAM |
+| `spatial.aggregation.Mode` | `spatial.aggregation.HardVote` |
+| `spatial.aggregation.Learned` | codified two-pass via `patcher.two_pass` |
 
 For the approximate sketch family (`ApproxQuantile`, `ApproxCardinality`,
 `ApproxMode`, `StreamingHistogram`, `Reservoir`), the streaming reducer

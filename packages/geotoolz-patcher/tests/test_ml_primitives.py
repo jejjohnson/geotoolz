@@ -8,7 +8,7 @@ vmap pipeline without reaching into the patcher's internals:
   list (``__len__`` + ``__getitem__`` on the dataset side).
 - ``patcher.patch_at(field, anchor) -> Patch`` is the lazy single-read
   the dataset's ``__getitem__`` calls per index.
-- ``geopatcher.stack_patches(patches)`` returns
+- ``geopatcher.run.stack_patches(patches)`` returns
   ``(N, *patch_shape)`` for `vmap`-style batched models.
 
 The contract that ties them together: **the patch returned by
@@ -25,30 +25,21 @@ import pytest
 from geopatcher import (
     Patch,
     RasterField,
-    SpatialBoxcar,
-    SpatialMean,
-    SpatialOverlapAdd,
     SpatialPatcher,
-    SpatialRandom,
-    SpatialRectangular,
-    SpatialRegularStride,
-    TemporalCausalBoxcar,
-    TemporalFixedLookback,
-    TemporalMean,
-    TemporalMultiScale,
     TemporalPatcher,
-    TemporalRegularStride,
-    stack_patches,
+    spatial,
+    temporal,
 )
+from geopatcher.run import stack_patches
 
 
 @pytest.fixture
 def spatial_patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16)),
-        sampler=SpatialRegularStride(step=16),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(16, 16)),
+        sampler=spatial.sampler.RegularStride(step=16),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -60,10 +51,10 @@ def series() -> np.ndarray:
 @pytest.fixture
 def temporal_patcher() -> TemporalPatcher:
     return TemporalPatcher(
-        geometry=TemporalFixedLookback(length=5),
-        sampler=TemporalRegularStride(step=10),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=5),
+        sampler=temporal.sampler.RegularStride(step=10),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
 
 
@@ -130,10 +121,10 @@ class TestSpatialPatchAt:
         # SpatialPatcher.n_anchors: with a fixed int seed, patch_at
         # at the i-th anchor still matches the i-th patch from split.
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRandom(n_samples=8, seed=42),
-            window=SpatialBoxcar(),
-            aggregation=SpatialMean(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.Random(n_samples=8, seed=42),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.Mean(),
         )
         anchors = patcher.anchors(field)
         from_split = list(patcher.split(field))
@@ -180,10 +171,10 @@ def test_async_patch_at_matches_async_split(field: RasterField) -> None:
     # dispatch.
     async_field = _SyncAsyncField(field)
     patcher = AsyncSpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16)),
-        sampler=SpatialRegularStride(step=16),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(16, 16)),
+        sampler=spatial.sampler.RegularStride(step=16),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
     async def _run() -> None:
@@ -225,14 +216,14 @@ class TestTemporalPatchesAt:
         assert len(patches) == 1
 
     def test_multi_scale_returns_one_per_scale(self, series: np.ndarray) -> None:
-        # Regression for the multi-scale fix in #37: TemporalMultiScale
+        # Regression for the multi-scale fix in #37: temporal.geometry.MultiScale
         # emits len(scales) patches per anchor, and patches_at must
         # return the full list — not just the first slice.
         tp = TemporalPatcher(
-            geometry=TemporalMultiScale(scales=[5, 20, 50]),
-            sampler=TemporalRegularStride(step=10),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalMean(),
+            geometry=temporal.geometry.MultiScale(scales=[5, 20, 50]),
+            sampler=temporal.sampler.RegularStride(step=10),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Mean(),
         )
         anchors = tp.anchors(series)
         patches = tp.patches_at(series, anchors[0])
@@ -277,7 +268,7 @@ class TestStackPatches:
         patches = list(spatial_patcher.split(field))
         stacked = stack_patches(patches, attr="weights")
         assert stacked.shape == (16, 16, 16)
-        # SpatialBoxcar yields all-ones weights.
+        # spatial.window.Boxcar yields all-ones weights.
         np.testing.assert_array_equal(stacked, 1.0)
 
     def test_empty_input_raises(self) -> None:
@@ -301,8 +292,8 @@ class TestStackPatches:
 
     def test_shape_mismatch_raises_with_helpful_message(self) -> None:
         # Surfaces ragged geometries early. The error should name the
-        # first mismatching patch and gesture at SpatialRadiusGraph /
-        # SpatialPolygonIntersection as the typical culprits.
+        # first mismatching patch and gesture at spatial.geometry.RadiusGraph /
+        # spatial.geometry.PolygonIntersection as the typical culprits.
         from rasterio.windows import Window
 
         p1 = Patch(

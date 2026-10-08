@@ -1,20 +1,22 @@
-"""`SpatialSampler` — where in the field to place anchors.
+"""`spatial.sampler.Sampler` — where in the field to place anchors.
 
-A `SpatialSampler` yields anchors; the `SpatialGeometry` then turns each anchor
-into backend-specific indices. Seven samplers cover the common cases:
+A `spatial.sampler.Sampler` yields anchors; the `spatial.geometry.Geometry` then turns
+each anchor into backend-specific indices. Seven samplers cover the common cases:
 
-- `SpatialRegularStride` — the canonical lattice (sliding-window inference).
-- `SpatialJitteredStride` — regular grid with per-anchor uniform jitter.
-- `SpatialRandom` — N uniformly-random anchors (training-time augmentation).
-- `SpatialPoissonDisk` — well-spaced random anchors (Bridson on rasters,
+- `spatial.sampler.RegularStride` — the canonical lattice (sliding-window inference).
+- `spatial.sampler.JitteredStride` — regular grid with per-anchor uniform jitter.
+- `spatial.sampler.Random` — N uniformly-random anchors (training-time augmentation).
+- `spatial.sampler.PoissonDisk` — well-spaced random anchors (Bridson on rasters,
   greedy random-order thinning on point clouds).
-- `SpatialExplicit` — caller-supplied anchors (event-triggered, station list, …).
-- `SpatialExplicitCoords` — caller-supplied world coordinates, optionally in a
+- `spatial.sampler.Explicit` — caller-supplied anchors (event-triggered, station list,
+  …).
+- `spatial.sampler.ExplicitCoords` — caller-supplied world coordinates, optionally in a
   foreign CRS, with a chip centred on each (event / plume catalogues, …).
-- `SpatialAlongTrack` — anchors along an ordered track, optionally resampled
+- `spatial.sampler.AlongTrack` — anchors along an ordered track, optionally resampled
   to a fixed along-track spacing (altimetry ground tracks, flight lines, …).
 
-Coordinate-consuming samplers (`SpatialAlongTrack`, `SpatialExplicitCoords`)
+Coordinate-consuming samplers (`spatial.sampler.AlongTrack`,
+`spatial.sampler.ExplicitCoords`)
 accept a ``crs=`` for anchors expressed in a CRS other than the domain's —
 the coordinates are reprojected to the domain CRS before the pixel mapping.
 """
@@ -33,17 +35,17 @@ from geopatcher._src._serialize import config_from_fields
 from geopatcher._src.domains import GridDomain, PointDomain, VectorDomain
 from geopatcher._src.exceptions import IncompleteScanConfiguration
 from geopatcher._src.spatial.geometry import (
-    SpatialGeometry,
+    Geometry as SpatialGeometry,
     _is_raster_domain,
 )
 
 
-class SpatialSampler:
+class Sampler:
     """Base for anchor-placement strategies.
 
     Subclasses implement `anchors(domain, geometry) -> Iterable[Anchor]`.
-    The geometry is passed so size-dependent samplers (`SpatialRegularStride`,
-    `SpatialJitteredStride`) can compute valid anchor ranges.
+    The geometry is passed so size-dependent samplers (`spatial.sampler.RegularStride`,
+    `spatial.sampler.JitteredStride`) can compute valid anchor ranges.
     """
 
     forbid_in_yaml: ClassVar[bool] = False
@@ -56,7 +58,7 @@ class SpatialSampler:
 
 
 @dataclass(eq=False)
-class SpatialRegularStride(SpatialSampler):
+class RegularStride(Sampler):
     """Regular lattice — step along each axis.
 
     On a raster, ``step`` is in pixels; the anchors are upper-left
@@ -118,7 +120,8 @@ class SpatialRegularStride(SpatialSampler):
                 yield dict(zip(dims, idxs, strict=True))
             return
         raise NotImplementedError(
-            f"SpatialRegularStride doesn't support {type(domain).__name__} domains."
+            f"spatial.sampler.RegularStride doesn't support {type(domain).__name__} "
+            "domains."
         )
 
     def _assert_full_scan(self, domain: Any, geometry: SpatialGeometry) -> None:
@@ -165,8 +168,9 @@ class SpatialRegularStride(SpatialSampler):
 
 
 @dataclass(eq=False)
-class SpatialJitteredStride(SpatialSampler):
-    """`SpatialRegularStride` + per-anchor uniform jitter (training augmentation).
+class JitteredStride(Sampler):
+    """`spatial.sampler.RegularStride` + per-anchor uniform jitter (training
+    augmentation).
 
     Each offset is ``floor(u · step)`` with ``u ~ U(-jitter, jitter)``, so
     with ``jitter=0.5`` and ``step=16`` the offsets are uniform over the 16
@@ -175,7 +179,7 @@ class SpatialJitteredStride(SpatialSampler):
     ``[0, L - P]``.
 
     Args:
-        step: As for `SpatialRegularStride`.
+        step: As for `spatial.sampler.RegularStride`.
         jitter: Maximum jitter in step-units (0.0 = no jitter, 0.5 = ± half
             a step). Must be finite and non-negative.
         seed: Integer seed for reproducible draws. When set, two
@@ -197,7 +201,7 @@ class SpatialJitteredStride(SpatialSampler):
 
     def anchors(self, domain: Any, geometry: SpatialGeometry) -> Iterator[Any]:
         rng = np.random.default_rng(self.seed)
-        base = SpatialRegularStride(step=self.step)
+        base = RegularStride(step=self.step)
         if _is_raster_domain(domain):
             sh, sw = base._broadcast(2)
             h, w = int(domain.shape[-2]), int(domain.shape[-1])
@@ -229,7 +233,8 @@ class SpatialJitteredStride(SpatialSampler):
                 yield out
             return
         raise NotImplementedError(
-            f"SpatialJitteredStride doesn't support {type(domain).__name__} domains."
+            f"spatial.sampler.JitteredStride doesn't support {type(domain).__name__} "
+            "domains."
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -237,7 +242,7 @@ class SpatialJitteredStride(SpatialSampler):
 
 
 @dataclass(eq=False)
-class SpatialRandom(SpatialSampler):
+class Random(Sampler):
     """N uniformly-random anchors over the domain's placement space.
 
     On a `PointDomain` / `VectorDomain` the anchors are feature indices;
@@ -304,7 +309,7 @@ class SpatialRandom(SpatialSampler):
                 yield int(i)
             return
         raise NotImplementedError(
-            f"SpatialRandom doesn't support {type(domain).__name__} domains."
+            f"spatial.sampler.Random doesn't support {type(domain).__name__} domains."
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -312,7 +317,7 @@ class SpatialRandom(SpatialSampler):
 
 
 @dataclass(eq=False)
-class SpatialPoissonDisk(SpatialSampler):
+class PoissonDisk(Sampler):
     """Well-spaced random anchors (raster + point).
 
     Anchors are returned in arbitrary order; no two anchors are closer
@@ -353,7 +358,7 @@ class SpatialPoissonDisk(SpatialSampler):
             h, w = int(domain.shape[-2]), int(domain.shape[-1])
             size = getattr(geometry, "size", (1, 1))
             ph, pw = int(size[-2]), int(size[-1])
-            # See SpatialRandom — anchors are drawn from [0, L - P].
+            # See spatial.sampler.Random — anchors are drawn from [0, L - P].
             if _drop_oversize(type(self).__name__, boundary, (h, w), (ph, pw)):
                 return
             region = (max(h - ph, 0) + 1, max(w - pw, 0) + 1)
@@ -363,7 +368,8 @@ class SpatialPoissonDisk(SpatialSampler):
             yield from _poisson_subset(domain.coords, self.min_dist, rng)
             return
         raise NotImplementedError(
-            f"SpatialPoissonDisk doesn't support {type(domain).__name__} domains."
+            f"spatial.sampler.PoissonDisk doesn't support {type(domain).__name__} "
+            "domains."
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -371,12 +377,12 @@ class SpatialPoissonDisk(SpatialSampler):
 
 
 @dataclass(eq=False)
-class SpatialExplicit(SpatialSampler):
+class Explicit(Sampler):
     """Caller-supplied anchors — the universal escape hatch.
 
     Args:
         anchors_: Sequence of anchors. Type must match what the
-            `SpatialGeometry` expects on the target domain. Accepts any
+            `spatial.geometry.Geometry` expects on the target domain. Accepts any
             iterable at construction time; materialised to a list in
             ``__post_init__`` so ``anchors()`` and ``get_config()`` can
             both walk it independently (the previous Iterable typing
@@ -406,7 +412,7 @@ class SpatialExplicit(SpatialSampler):
 
 
 @dataclass(eq=False)
-class SpatialAlongTrack(SpatialSampler):
+class AlongTrack(Sampler):
     """Anchors along an ordered track, optionally resampled to fixed spacing.
 
     The track is an ordered polyline of ``(x, y)`` coordinates in the
@@ -424,7 +430,8 @@ class SpatialAlongTrack(SpatialSampler):
     outside the raster are skipped, and (under the default ``"drop"``
     boundary) anchors are clamped so the patch stays in-domain. On a
     `PointDomain`, the ``(x, y)`` coordinates themselves are yielded —
-    ready for `SpatialKNNGraph` / `SpatialRadiusGraph` neighborhoods.
+    ready for `spatial.geometry.KNNGraph` / `spatial.geometry.RadiusGraph`
+    neighborhoods.
 
     Args:
         track: Ordered ``(N, 2)`` array of ``(x, y)`` coordinates. Also
@@ -474,7 +481,8 @@ class SpatialAlongTrack(SpatialSampler):
                 yield (float(x), float(y))
             return
         raise NotImplementedError(
-            f"SpatialAlongTrack doesn't support {type(domain).__name__} domains."
+            f"spatial.sampler.AlongTrack doesn't support {type(domain).__name__} "
+            "domains."
         )
 
     def _resampled(self, track: np.ndarray | None = None) -> np.ndarray:
@@ -489,7 +497,7 @@ class SpatialAlongTrack(SpatialSampler):
         pts = np.concatenate([pts[:1], pts[1:][keep]])
         if len(pts) < 2:
             raise ValueError(
-                "SpatialAlongTrack with spacing needs at least two distinct "
+                "spatial.sampler.AlongTrack with spacing needs at least two distinct "
                 "track vertices."
             )
         dist = np.concatenate([[0.0], np.cumsum(seg[keep])])
@@ -511,15 +519,15 @@ class SpatialAlongTrack(SpatialSampler):
 
 
 @dataclass(eq=False)
-class SpatialExplicitCoords(SpatialSampler):
+class ExplicitCoords(Sampler):
     """Caller-supplied world coordinates, one centred chip per coordinate.
 
-    The coordinate analogue of `SpatialExplicit` (which passes
+    The coordinate analogue of `spatial.sampler.Explicit` (which passes
     backend-native anchors through untouched): each ``(x, y)`` is a world
     coordinate, optionally in a foreign ``crs``, and the yielded anchor is
     the upper-left corner that **centres** the geometry's patch on the
     pixel that coordinate lands in — the same geo→pixel→centred-UL contract
-    as `SpatialAlongTrack`. Coordinates outside the raster are skipped.
+    as `spatial.sampler.AlongTrack`. Coordinates outside the raster are skipped.
     On a `PointDomain`, the (reprojected) ``(x, y)`` is yielded directly.
     The coordinates are an unordered catalogue, so the antimeridian guard
     (which looks for consecutive steps across ±180°) does not apply.
@@ -527,11 +535,11 @@ class SpatialExplicitCoords(SpatialSampler):
     Args:
         coords: Ordered ``(N, 2)`` array of ``(x, y)`` world coordinates,
             or any track-like object (`GeoDataFrame` / `GeoSeries` /
-            `LineString`) `SpatialAlongTrack` accepts.
+            `LineString`) `spatial.sampler.AlongTrack` accepts.
         crs: CRS the coordinates are in. When set and different from
             ``domain.crs`` they are reprojected to the domain CRS before
             the pixel mapping. ``None`` (default) assumes the domain's CRS.
-        polar_guard: Same geographic-edge guard as `SpatialAlongTrack`.
+        polar_guard: Same geographic-edge guard as `spatial.sampler.AlongTrack`.
 
     Centring convention: the coordinate's pixel lands at chip index
     ``(size_h // 2, size_w // 2)``, for odd and even sizes alike.
@@ -563,7 +571,8 @@ class SpatialExplicitCoords(SpatialSampler):
                 yield (float(x), float(y))
             return
         raise NotImplementedError(
-            f"SpatialExplicitCoords doesn't support {type(domain).__name__} domains."
+            f"spatial.sampler.ExplicitCoords doesn't support {type(domain).__name__} "
+            "domains."
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -578,7 +587,8 @@ def _raster_center_anchors(
 ) -> Iterator[tuple[int, int]]:
     """Map world coords to centred upper-left anchors on a raster domain.
 
-    Shared by `SpatialAlongTrack` and `SpatialExplicitCoords`: each point
+    Shared by `spatial.sampler.AlongTrack` and `spatial.sampler.ExplicitCoords`: each
+    point
     goes through the inverse affine to the pixel containing it
     (``floor``), and the yielded anchor is that pixel minus
     ``(size_h // 2, size_w // 2)`` — so the pixel sits at that chip index

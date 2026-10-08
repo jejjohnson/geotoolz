@@ -23,18 +23,9 @@ from _helpers import make_raster_field
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
-from geopatcher import (
-    Patch,
-    PatchCache,
-    RasterField,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRandom,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import Patch, RasterField, SpatialPatcher, spatial
 from geopatcher._src import cache as cache_module
+from geopatcher.run import PatchCache
 
 
 class _CountingField:
@@ -65,10 +56,10 @@ class _CountingField:
 
 def _patcher(size: int = 8, step: int = 8) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(size, size)),
-        sampler=SpatialRegularStride(step=step),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(size, size)),
+        sampler=spatial.sampler.RegularStride(step=step),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -161,10 +152,10 @@ class TestStochasticSamplers:
         base = make_raster_field(32)
         cache = PatchCache(tmp_path, field_id="scene")
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(8, 8)),
-            sampler=SpatialRandom(n_samples=12, seed=42),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(8, 8)),
+            sampler=spatial.sampler.Random(n_samples=12, seed=42),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         first = _CountingField(base)
         list(patcher.split(first, cache=cache))
@@ -226,7 +217,7 @@ class TestConcurrency:
 
 class TestIndexedViewIntegration:
     def test_indexed_view_uses_disk_cache(self, tmp_path) -> None:
-        from geopatcher import IndexedPatchView
+        from geopatcher.run import IndexedPatchView
 
         base = make_raster_field(16)
         cache = PatchCache(tmp_path, field_id="scene")
@@ -329,7 +320,7 @@ def test_corrupt_entry_is_repaired(tmp_path, damage: str) -> None:
 def test_band_subset_and_reprojection_keys_differ(tmp_path) -> None:
     from georeader.rasterio_reader import RasterioReader
 
-    from geopatcher import ReprojectingRasterField
+    from geopatcher.fields import ReprojectingRasterField
 
     tif = _write_tif(
         tmp_path / "scene.tif",
@@ -362,13 +353,13 @@ def test_band_subset_and_reprojection_keys_differ(tmp_path) -> None:
         _assert_patches_equal(got, list(patcher.split(other)))
 
 
-def test_obstore_cog_identity_covers_store_path_and_ifd(tmp_path) -> None:
+def test_cog_identity_covers_store_path_and_ifd(tmp_path) -> None:
     pytest.importorskip("obstore")
     pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
     from rasterio.enums import Resampling
 
-    from geopatcher.fields import ObstoreCogField
+    from geopatcher.fields import CogField
 
     for folder, offset in (("a", 0), ("b", 1000)):
         (tmp_path / folder).mkdir()
@@ -386,7 +377,7 @@ def test_obstore_cog_identity_covers_store_path_and_ifd(tmp_path) -> None:
     def open_cog(folder: str, ifd_index: int = 0) -> Any:
         # Same (arbitrary) url label: with an explicit store the url
         # names nothing, so it must not be the identity.
-        return ObstoreCogField.from_url(
+        return CogField.open(
             "file:///label/cog.tif",
             store=LocalStore(prefix=str(tmp_path / folder)),
             path="cog.tif",
@@ -424,10 +415,10 @@ def test_mask_patches_not_cached(tmp_path) -> None:
     base = make_raster_field(16)
     cache = PatchCache(tmp_path, field_id="scene")
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
         on_error="mask",
     )
     masked = list(patcher.split(_FlakyField(base, broken=True), cache=cache))
@@ -530,10 +521,10 @@ def _xarray_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
         attrs={"units": "K", "valid_range": np.array([0.0, 400.0], np.float32)},
     )
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(2, 8, 8)),
-        sampler=SpatialRegularStride(step=(1, 8, 8)),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(2, 8, 8)),
+        sampler=spatial.sampler.RegularStride(step=(1, 8, 8)),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     return XarrayField(da), PatchCache(tmp_path, field_id="cube"), patcher
 
@@ -673,7 +664,7 @@ def test_obstore_object_overwrite_changes_identity(tmp_path) -> None:
     pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
 
-    from geopatcher.fields import ObstoreCogField
+    from geopatcher.fields import CogField
 
     def write(offset: int) -> None:
         _write_tif(
@@ -685,7 +676,7 @@ def test_obstore_object_overwrite_changes_identity(tmp_path) -> None:
         )
 
     def open_cog() -> Any:
-        return ObstoreCogField.from_url(
+        return CogField.open(
             f"file://{tmp_path / 'cog.tif'}",
             store=LocalStore(prefix=str(tmp_path)),
             path="cog.tif",
@@ -746,10 +737,10 @@ def test_variables_of_one_file_have_distinct_keys(tmp_path) -> None:
     ).to_netcdf(path)
 
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     cache = PatchCache(tmp_path / "cache")
     with xr.open_dataset(path) as ds:
@@ -777,7 +768,7 @@ def test_memory_store_needs_explicit_field_id(tmp_path) -> None:
     pytest.importorskip("async_geotiff")
     from obstore.store import MemoryStore
 
-    from geopatcher.fields import ObstoreCogField
+    from geopatcher.fields import CogField
 
     def open_cog(offset: int) -> Any:
         path = _write_tif(
@@ -789,9 +780,7 @@ def test_memory_store_needs_explicit_field_id(tmp_path) -> None:
         )
         store = MemoryStore()
         store.put("cog.tif", Path(path).read_bytes())
-        return ObstoreCogField.from_url(
-            "memory:///cog.tif", store=store, path="cog.tif"
-        )
+        return CogField.open("memory:///cog.tif", store=store, path="cog.tif")
 
     a, b = open_cog(0), open_cog(1000)
     with pytest.raises(ValueError, match="Pass field_id"):
@@ -881,7 +870,7 @@ def test_pooled_cog_identity_covers_storage_options(tmp_path, monkeypatch) -> No
     pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
 
-    from geopatcher.fields import ObstoreCogField
+    from geopatcher.fields import CogField
 
     _write_tif(
         tmp_path / "cog.tif",
@@ -890,15 +879,13 @@ def test_pooled_cog_identity_covers_storage_options(tmp_path, monkeypatch) -> No
         blockxsize=16,
         blockysize=16,
     )
-    field = ObstoreCogField.from_url(
+    field = CogField.open(
         f"file://{tmp_path / 'cog.tif'}",
         store=LocalStore(prefix=str(tmp_path)),
         path="cog.tif",
     )
     # No HEAD against the made-up endpoints (the version hook arrives in #199).
-    monkeypatch.setattr(
-        ObstoreCogField, "_object_version", lambda self: "v1", raising=False
-    )
+    monkeypatch.setattr(CogField, "object_version", lambda self: "v1", raising=False)
     pooled = dataclasses.replace(field, store=None, path=None)
     a = dataclasses.replace(pooled, storage_options={"endpoint": "https://a.example"})
     b = dataclasses.replace(pooled, storage_options={"endpoint": "https://b.example"})
@@ -938,7 +925,7 @@ def _local_cog(tmp_path: Path) -> Any:
     pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
 
-    from geopatcher.fields import ObstoreCogField
+    from geopatcher.fields import CogField
 
     _write_tif(
         tmp_path / "cog.tif",
@@ -947,7 +934,7 @@ def _local_cog(tmp_path: Path) -> Any:
         blockxsize=16,
         blockysize=16,
     )
-    return ObstoreCogField.from_url(
+    return CogField.open(
         f"file://{tmp_path / 'cog.tif'}",
         store=LocalStore(prefix=str(tmp_path)),
         path="cog.tif",
@@ -973,18 +960,18 @@ def test_head_without_validators_is_not_a_version(tmp_path) -> None:
 
 def test_indexed_view_heads_once(tmp_path, monkeypatch) -> None:
     """`IndexedPatchView` binds the identity once, not one HEAD per item."""
-    from geopatcher import IndexedPatchView
-    from geopatcher.fields import ObstoreCogField
+    from geopatcher.fields import CogField
+    from geopatcher.run import IndexedPatchView
 
     field = _local_cog(tmp_path)
     heads = []
-    real_version = ObstoreCogField._object_version
+    real_version = CogField.object_version
 
     def counting_version(self: Any) -> Any:
         heads.append(1)
         return real_version(self)
 
-    monkeypatch.setattr(ObstoreCogField, "_object_version", counting_version)
+    monkeypatch.setattr(CogField, "object_version", counting_version)
     view = IndexedPatchView(
         _patcher(size=16, step=16), field, cache=PatchCache(tmp_path / "c")
     )
@@ -1038,7 +1025,7 @@ def test_miss_does_not_forget_a_concurrently_published_entry(tmp_path) -> None:
 
 def test_indexed_view_supports_patchers_without_field_id(tmp_path) -> None:
     """Third-party patchers keep the original ``patch_at(..., cache=)`` call."""
-    from geopatcher import IndexedPatchView
+    from geopatcher.run import IndexedPatchView
 
     inner = _patcher()
 
@@ -1057,7 +1044,7 @@ def test_indexed_view_supports_patchers_without_field_id(tmp_path) -> None:
 
 
 def test_datetime_anchors_do_not_collide_with_strings(tmp_path) -> None:
-    from geopatcher import normalize_anchor
+    from geopatcher.observe import normalize_anchor
 
     keys = {
         json.dumps(normalize_anchor(a), sort_keys=True)
@@ -1103,7 +1090,7 @@ def test_clear_racing_put_leaves_no_phantom_entry(tmp_path, monkeypatch) -> None
 
 
 def test_reserved_tag_keys_are_not_ordinary_dict_anchors() -> None:
-    from geopatcher import normalize_anchor
+    from geopatcher.observe import normalize_anchor
 
     tagged = normalize_anchor(np.datetime64("2024-01-01"))
     assert normalize_anchor(tagged) == tagged  # canonical form is idempotent
@@ -1116,7 +1103,7 @@ def test_reserved_tag_keys_are_not_ordinary_dict_anchors() -> None:
 
 
 def test_unconvertible_numpy_scalars_are_rejected() -> None:
-    from geopatcher import normalize_anchor
+    from geopatcher.observe import normalize_anchor
 
     for value in (np.longdouble("1.000000000000000000001"), np.complex128(1 + 2j)):
         with pytest.raises(TypeError, match="no exact JSON form"):

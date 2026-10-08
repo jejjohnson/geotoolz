@@ -14,23 +14,16 @@ from typing import Any
 
 import pytest
 
+from geopatcher import spatial, temporal
 from geopatcher._src.matched import (
     MatchedField,
     MatchedSpatialPatcher,
     MatchedSpatioTemporalPatcher,
     MatchedTemporalPatcher,
 )
-from geopatcher._src.spatial.aggregation import SpatialMean, SpatialSum
-from geopatcher._src.spatial.geometry import SpatialRectangular
 from geopatcher._src.spatial.patcher import SpatialPatcher
-from geopatcher._src.spatial.sampler import SpatialRegularStride
-from geopatcher._src.spatial.window import SpatialBoxcar
 from geopatcher._src.spatial_time import SpatioTemporalPatcher
-from geopatcher._src.time.aggregation import TemporalMean
-from geopatcher._src.time.geometry import TemporalFixedLookback
-from geopatcher._src.time.patcher import TemporalPatcher
-from geopatcher._src.time.sampler import TemporalRegularStride
-from geopatcher._src.time.window import TemporalCausalBoxcar
+from geopatcher._src.temporal.patcher import TemporalPatcher
 
 
 @dataclass
@@ -52,19 +45,19 @@ class _StubField:
 
 def _spatial_patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialSum(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.Sum(),
     )
 
 
 def _temporal_patcher() -> TemporalPatcher:
     return TemporalPatcher(
-        geometry=TemporalFixedLookback(length=4),
-        sampler=TemporalRegularStride(step=4),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=4),
+        sampler=temporal.sampler.RegularStride(step=4),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
 
 
@@ -77,26 +70,32 @@ class TestMatchedPatcherGetConfig:
     def test_spatial(self) -> None:
         patcher = MatchedSpatialPatcher(
             primary=_spatial_patcher(),
-            secondary_aggregators={"s2": SpatialMean()},
+            secondary_aggregators={"s2": spatial.aggregation.Mean()},
         )
         cfg = patcher.get_config()
         assert isinstance(cfg, dict)
         _assert_envelope(cfg["primary"], "SpatialPatcher")
         # The inner patcher's own envelope shape flows through.
-        _assert_envelope(cfg["primary"]["config"]["geometry"], "SpatialRectangular")
-        _assert_envelope(cfg["secondary_aggregators"]["s2"], "SpatialMean")
+        _assert_envelope(
+            cfg["primary"]["config"]["geometry"], "spatial.geometry.Rectangular"
+        )
+        _assert_envelope(cfg["secondary_aggregators"]["s2"], "spatial.aggregation.Mean")
         json.dumps(cfg)  # must be JSON-serializable
 
     def test_temporal(self) -> None:
         patcher = MatchedTemporalPatcher(
             primary=_temporal_patcher(),
-            secondary_aggregators={"s2": TemporalMean()},
+            secondary_aggregators={"s2": temporal.aggregation.Mean()},
         )
         cfg = patcher.get_config()
         assert isinstance(cfg, dict)
         _assert_envelope(cfg["primary"], "TemporalPatcher")
-        _assert_envelope(cfg["primary"]["config"]["aggregation"], "TemporalMean")
-        _assert_envelope(cfg["secondary_aggregators"]["s2"], "TemporalMean")
+        _assert_envelope(
+            cfg["primary"]["config"]["aggregation"], "temporal.aggregation.Mean"
+        )
+        _assert_envelope(
+            cfg["secondary_aggregators"]["s2"], "temporal.aggregation.Mean"
+        )
         json.dumps(cfg)
 
     def test_spatiotemporal(self) -> None:
@@ -106,13 +105,15 @@ class TestMatchedPatcherGetConfig:
                 temporal=_temporal_patcher(),
                 coupling="product",
             ),
-            secondary_aggregators={"s2": TemporalMean()},
+            secondary_aggregators={"s2": temporal.aggregation.Mean()},
         )
         cfg = patcher.get_config()
         assert isinstance(cfg, dict)
         _assert_envelope(cfg["primary"], "SpatioTemporalPatcher")
         assert cfg["primary"]["config"]["coupling"] == "product"
-        _assert_envelope(cfg["secondary_aggregators"]["s2"], "TemporalMean")
+        _assert_envelope(
+            cfg["secondary_aggregators"]["s2"], "temporal.aggregation.Mean"
+        )
         json.dumps(cfg)
 
     def test_empty_secondaries(self) -> None:

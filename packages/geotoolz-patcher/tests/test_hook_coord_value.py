@@ -7,16 +7,8 @@ import warnings
 
 import numpy as np
 
-from geopatcher.time import (
-    TemporalCausalBoxcar,
-    TemporalFixedLookback,
-    TemporalForecast,
-    TemporalPatcher,
-    TemporalRegularStride,
-    TemporalStencilGeometry,
-    TemporalStencilSampler,
-    TimeStencil,
-)
+from geopatcher import TemporalPatcher, temporal
+from geopatcher.temporal.stencils import TimeStencil
 
 
 class _LegacyHook:
@@ -41,24 +33,24 @@ class _CoordHook:
 
 def _stencil_patcher() -> TemporalPatcher:
     return TemporalPatcher(
-        geometry=TemporalStencilGeometry(
+        geometry=temporal.geometry.StencilGeometry(
             stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
             source_step=np.timedelta64(1, "h"),
         ),
-        sampler=TemporalStencilSampler(
+        sampler=temporal.sampler.StencilSampler(
             stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
         ),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalForecast(horizon=1),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Forecast(horizon=1),
     )
 
 
 def _integer_patcher() -> TemporalPatcher:
     return TemporalPatcher(
-        geometry=TemporalFixedLookback(length=3),
-        sampler=TemporalRegularStride(step=4),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalForecast(horizon=1),
+        geometry=temporal.geometry.FixedLookback(length=3),
+        sampler=temporal.sampler.RegularStride(step=4),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Forecast(horizon=1),
     )
 
 

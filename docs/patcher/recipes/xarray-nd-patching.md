@@ -9,7 +9,7 @@ The three pieces you need are already in `geopatcher`:
 
 - `XarrayField` — wraps an `xarray.DataArray` as a Field with a
   `GridDomain` view.
-- `SpatialPatcher` + `SpatialRectangular` + `SpatialRegularStride` —
+- `SpatialPatcher` + `spatial.geometry.Rectangular` + `spatial.sampler.RegularStride` —
   the four-axis composition produces patches indistinguishable from
   `xrpatcher`'s slices.
 - `IndexedPatchView` — random-access wrapper exposing
@@ -17,7 +17,7 @@ The three pieces you need are already in `geopatcher`:
 
 Two new bits of sugar make the side-by-side really one-for-one:
 
-- `SpatialRegularStride(check_full_scan=True)` — raises
+- `spatial.sampler.RegularStride(check_full_scan=True)` — raises
   `IncompleteScanConfiguration` when the stride doesn't exactly tile
   the domain. Same robustness win as `xrpatcher`'s eponymous flag.
 - `SpatialPatcher.merge_to_xarray(patches, field)` — `merge` + rewrap as
@@ -59,24 +59,18 @@ recon = patcher.reconstruct(outs)   # → DataArray with restored coords
 ```python
 # After — geopatcher
 import xarray as xr
-from geopatcher import (
-    IndexedPatchView,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import SpatialPatcher, spatial
+from geopatcher.run import IndexedPatchView
 from geopatcher.fields import XarrayField
 
 da = xr.tutorial.load_dataset("eraint_uvz").u[..., :240, :360]
 field = XarrayField(da)
 
 patcher = SpatialPatcher(
-    geometry    = SpatialRectangular(size=(30, 30)),
-    sampler     = SpatialRegularStride(step=(30, 30), check_full_scan=True),
-    window      = SpatialBoxcar(),
-    aggregation = SpatialOverlapAdd(),
+    geometry    = spatial.geometry.Rectangular(size=(30, 30)),
+    sampler     = spatial.sampler.RegularStride(step=(30, 30), check_full_scan=True),
+    window      = spatial.window.Boxcar(),
+    aggregation = spatial.aggregation.OverlapAdd(),
 )
 
 view = IndexedPatchView(patcher, field, cache=True, preload=True)
@@ -144,7 +138,7 @@ macOS / Windows default), `forkserver` (the Linux default from Python
 `PatchCache` binding, and starts with its own empty in-memory
 `cache=True` cache; entries are never shared back to the parent. The
 patcher and the field must pickle too, which every built-in `Field`
-adapter does (a `RasterioReader` / `ObstoreCogField` re-opens its
+adapter does (a `RasterioReader` / `CogField` re-opens its
 source by path / URL in the worker).
 
 `IndexedPatchView(TemporalPatcher(...), series)` works the same way;
@@ -172,7 +166,7 @@ the flag.
 
 ## v0.1 limitations
 
-- **2-D and N-D where every dim gets tiled.** `SpatialRegularStride`
+- **2-D and N-D where every dim gets tiled.** `spatial.sampler.RegularStride`
   over a `GridDomain` walks every coord dim with `(size, step)`. If your
   cube includes a time axis you don't want to tile, take the spatial
   slice first (`da.isel(time=k)`) or use `TemporalPatcher` for the time

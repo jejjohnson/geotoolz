@@ -219,7 +219,7 @@ class IndexedPatchView(Sequence[Patch]):
         """The field's `PatchCache` identity, resolved once per view.
 
         Like the anchor list, it is bound when first needed: deriving it
-        per item would stat files — or, for `ObstoreCogField`, send a
+        per item would stat files — or, for `CogField`, send a
         ``HEAD`` — on every ``view[i]``. A source changed after that is
         not noticed by this view; build a new one to pick it up.
         """

@@ -1,7 +1,7 @@
 """Per-merge determinism for the reservoir-backed sketch aggregations.
 
-`SpatialReservoir` and `SpatialApproxQuantile` rebuild their reservoir
-state and RNG from ``seed`` at each ``merge(patches)`` entry, so reusing
+`spatial.aggregation.Reservoir` and `spatial.aggregation.ApproxQuantile` rebuild their
+reservoir state and RNG from ``seed`` at each ``merge(patches)`` entry, so reusing
 one instance across multiple ``merge()`` / ``reduce()`` calls is
 reproducible — the same convention as the samplers, which rebuild
 ``default_rng(seed)`` per call.
@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from geopatcher import SpatialApproxQuantile, SpatialReservoir
+from geopatcher import spatial
 
 
 def _patches() -> list[SimpleNamespace]:
@@ -24,13 +24,13 @@ def _patches() -> list[SimpleNamespace]:
 
 class TestReservoirDeterminism:
     def test_reservoir_same_instance_repeated_merge(self) -> None:
-        agg = SpatialReservoir(k=16, seed=0)
+        agg = spatial.aggregation.Reservoir(k=16, seed=0)
         first = agg.merge(_patches(), None)
         second = agg.merge(_patches(), None)
         np.testing.assert_array_equal(first, second)
 
     def test_approx_quantile_same_instance_repeated_merge(self) -> None:
-        agg = SpatialApproxQuantile(q=[0.1, 0.5, 0.9], k=32, seed=0)
+        agg = spatial.aggregation.ApproxQuantile(q=[0.1, 0.5, 0.9], k=32, seed=0)
         first = agg.merge(_patches(), None)
         second = agg.merge(_patches(), None)
         assert first == second

@@ -21,16 +21,7 @@ import rasterio
 from _helpers import make_rasterio_reader_field
 from georeader.geotensor import GeoTensor
 
-from geopatcher import (
-    RasterField,
-    SpatialAggregation,
-    SpatialBoxcar,
-    SpatialMeanStd,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import RasterField, SpatialPatcher, spatial
 from geopatcher._src.matched import MatchedField, MatchedSpatialPatcher
 from geopatcher._src.matched.patch import PRIMARY_KEY
 
@@ -52,12 +43,14 @@ needs_xarray = pytest.mark.skipif(
 _T = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
 
 
-def _patcher(size: int = 4, aggregation: SpatialAggregation | None = None) -> Any:
+def _patcher(
+    size: int = 4, aggregation: spatial.aggregation.Aggregation | None = None
+) -> Any:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(size, size)),
-        sampler=SpatialRegularStride(step=(size, size)),
-        window=SpatialBoxcar(),
-        aggregation=aggregation or SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(size, size)),
+        sampler=spatial.sampler.RegularStride(step=(size, size)),
+        window=spatial.window.Boxcar(),
+        aggregation=aggregation or spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -85,7 +78,7 @@ def _rio_da() -> Any:
     return da.rio.write_nodata(-9999.0)
 
 
-class _FixedOutput(SpatialAggregation):
+class _FixedOutput(spatial.aggregation.Aggregation):
     """Aggregation returning a canned output — for the type / shape guards."""
 
     streaming_safe: ClassVar[bool] = True
@@ -217,9 +210,9 @@ def test_merge_to_field_out_of_range_keeps_aggregation_dtype() -> None:
 
 def test_merge_to_field_dict_output_raises() -> None:
     field = _geotensor_field(np.float32)
-    patcher = _patcher(aggregation=SpatialMeanStd())
+    patcher = _patcher(aggregation=spatial.aggregation.MeanStd())
 
-    with pytest.raises(TypeError, match=r"SpatialMeanStd returned a dict"):
+    with pytest.raises(TypeError, match="MeanStd returned a dict"):
         patcher.merge_to_field(patcher.split(field), field)
 
 
@@ -264,7 +257,7 @@ def test_merge_still_returns_raw_output() -> None:
 @needs_xarray
 def test_merge_to_xarray_dict_output_raises_clear_typeerror() -> None:
     field = RioXarrayField(_rio_da())
-    patcher = _patcher(aggregation=SpatialMeanStd())
+    patcher = _patcher(aggregation=spatial.aggregation.MeanStd())
 
     with pytest.raises(TypeError, match=r"merge_to_xarray .*returned a dict"):
         patcher.merge_to_xarray(patcher.split(field), field)
@@ -318,7 +311,8 @@ def test_matched_merge_to_field_rebuilds_every_source_on_primary_grid() -> None:
         coreg={"sec": lambda raw, prim: np.asarray(raw)[..., ::2, ::2]},
     )
     mpatcher = MatchedSpatialPatcher(
-        primary=_patcher(), secondary_aggregators={"sec": SpatialOverlapAdd()}
+        primary=_patcher(),
+        secondary_aggregators={"sec": spatial.aggregation.OverlapAdd()},
     )
 
     out = mpatcher.merge_to_field(mpatcher.split(mfield), mfield)
@@ -342,8 +336,8 @@ def test_matched_merge_to_field_dict_output_raises() -> None:
         coreg={"sec": lambda raw, prim: raw},
     )
     mpatcher = MatchedSpatialPatcher(
-        primary=_patcher(), secondary_aggregators={"sec": SpatialMeanStd()}
+        primary=_patcher(), secondary_aggregators={"sec": spatial.aggregation.MeanStd()}
     )
 
-    with pytest.raises(TypeError, match="SpatialMeanStd returned a dict"):
+    with pytest.raises(TypeError, match="MeanStd returned a dict"):
         mpatcher.merge_to_field(mpatcher.split(mfield), mfield)

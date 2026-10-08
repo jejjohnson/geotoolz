@@ -536,7 +536,7 @@ nodata, so only the float test applies. A matched patch also carries the
 class MatchedSpatialPatcher:
     primary: SpatialPatcher                                  # sampler / geometry / window /
                                                              # primary aggregation / on_error
-    secondary_aggregators: Mapping[str, SpatialAggregation]  # one per secondary (opt-in)
+    secondary_aggregators: Mapping[str, spatial.aggregation.Aggregation]  # one per secondary (opt-in)
 
     def split(self, mfield, hooks=None, *, prefetch=0, journal=None,
               cache=None, max_in_flight=None) -> Iterator[MatchedPatch]: ...
@@ -585,7 +585,7 @@ the read's backpressure slot until it is closed. The spatial and
 temporal `merge` consume the patches in **one pass** and stream every
 source: each source's aggregation runs on its own worker thread fed
 through a small bounded queue, so only a few patches per source are
-resident and a streaming aggregation (e.g. `SpatialOverlapAdd` with Zarr
+resident and a streaming aggregation (e.g. `spatial.aggregation.OverlapAdd` with Zarr
 backing) keeps its memory bound on every source. Each aggregation gets
 the usual `streaming_safe` check (a warning, or an error under
 `set_strict`). `MatchedSpatioTemporalPatcher.merge` streams every
@@ -656,12 +656,12 @@ matched = MatchedField(
 # 5. Patch with any existing geopatcher sampler
 patcher = MatchedSpatialPatcher(
     primary=gp.SpatialPatcher(
-        geometry=gp.spatial.SpatialRectangular(size=(512, 512)),
-        sampler=gp.spatial.SpatialRegularStride(step=(256, 256)),
-        window=gp.spatial.SpatialBoxcar(),
-        aggregation=gp.spatial.SpatialMean(),
+        geometry=gp.spatial.geometry.Rectangular(size=(512, 512)),
+        sampler=gp.spatial.sampler.RegularStride(step=(256, 256)),
+        window=gp.spatial.window.Boxcar(),
+        aggregation=gp.spatial.aggregation.Mean(),
     ),
-    secondary_aggregators={"s2": gp.spatial.SpatialMean()},
+    secondary_aggregators={"s2": gp.spatial.aggregation.Mean()},
 )
 
 for matched_patch in patcher.split(matched):

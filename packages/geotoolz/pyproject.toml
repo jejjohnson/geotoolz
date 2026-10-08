@@ -97,8 +97,10 @@ hydra = ["hydra-zen>=0.14"]
 # the Operator-graph bridge. The substrate extras (grid, vector, point,
 # xarray-raster, streaming) are exposed through `geopatcher` directly —
 # install e.g. `pip install 'geotoolz-patcher[patch-full]'` for the full
-# substrate matrix.
-patch = ["geotoolz-patcher[pipekit]"]
+# substrate matrix. Lower bound only (workspace sibling released in
+# lockstep): 0.9 is the first release with the task-organised layout
+# (`geopatcher.config`, `geopatcher.spatial.*`) that patch_ops imports.
+patch = ["geotoolz-patcher[pipekit]>=0.9"]
 # Vector-cube backend (`xvec`, which brings `xarray`) needed by the
 # `geom.coregister.RasterToPoints` / `PointsToRaster` operators that
 # extract raster values onto point geometries (AERONET stations, buoys,

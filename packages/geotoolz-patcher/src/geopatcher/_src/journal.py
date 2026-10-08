@@ -19,7 +19,7 @@ class PatchJournal:
 
     Anchors may be tuples, lists, dictionaries (string keys), strings,
     numbers, booleans, numpy scalars or numpy arrays — everything the
-    samplers emit, including ``SpatialExplicit(anchors_=np.argwhere(...))``
+    samplers emit, including ``spatial.sampler.Explicit(anchors_=np.argwhere(...))``
     rows. Every anchor goes through `normalize_anchor` before it is keyed
     or written, so ``(np.int64(5), np.int64(10))``, ``np.array([5, 10])``
     and ``(5, 10)`` are one anchor. The journal stores one JSON record per

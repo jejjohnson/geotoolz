@@ -1,32 +1,30 @@
-"""Tests for `TemporalStencilGeometry` — coordinate-aware time geometry."""
+"""Tests for `temporal.geometry.StencilGeometry` — coordinate-aware time geometry."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from geopatcher._src.time.stencils import Stencil
-from geopatcher.time import (
-    TemporalStencilGeometry,
-    TimeStencil,
-)
+from geopatcher import temporal
+from geopatcher._src.temporal.stencils import Stencil
+from geopatcher.temporal.stencils import TimeStencil
 
 
 class TestNeedsCoordFlag:
     def test_flag_is_true_on_class(self) -> None:
-        assert TemporalStencilGeometry.needs_coord is True
+        assert temporal.geometry.StencilGeometry.needs_coord is True
 
 
 class TestStrideGuard:
     def test_stride_one_constructs_cleanly(self) -> None:
-        TemporalStencilGeometry(
+        temporal.geometry.StencilGeometry(
             stencil=TimeStencil("-9h", "3h", "1h", closed="both"),
             source_step=np.timedelta64(1, "h"),
         )
 
     def test_stride_greater_than_one_raises_at_construction(self) -> None:
         with pytest.raises(ValueError, match="stride-1 stencils only"):
-            TemporalStencilGeometry(
+            temporal.geometry.StencilGeometry(
                 stencil=TimeStencil("-6h", "6h", "3h", closed="both"),
                 source_step=np.timedelta64(1, "h"),
             )
@@ -34,7 +32,7 @@ class TestStrideGuard:
     def test_no_source_step_defers_stride_check_to_resolve(self) -> None:
         # No source_step supplied → construction succeeds, but window_coord
         # raises if the stencil step exceeds the actual source step.
-        g = TemporalStencilGeometry(
+        g = temporal.geometry.StencilGeometry(
             stencil=Stencil(start=-4, stop=4, step=2, closed="both"),
         )
         # Source step is 1 here → stride would be 2 → raise.
@@ -45,7 +43,7 @@ class TestStrideGuard:
 
 class TestWindowCoord:
     def test_resolves_to_expected_slice(self) -> None:
-        g = TemporalStencilGeometry(
+        g = temporal.geometry.StencilGeometry(
             stencil=TimeStencil("-3h", "3h", "1h", closed="both"),
             source_step=np.timedelta64(1, "h"),
         )
@@ -61,7 +59,7 @@ class TestWindowCoord:
     def test_returned_slice_has_step_none(self) -> None:
         # The patcher path relies on `s.stop - s.start` being the realised
         # window length; ensure we strip the explicit step=1.
-        g = TemporalStencilGeometry(
+        g = temporal.geometry.StencilGeometry(
             stencil=Stencil(start=-1, stop=1, step=1, closed="both"),
         )
         coord = np.arange(10)
@@ -71,7 +69,7 @@ class TestWindowCoord:
 
 class TestIntegerWindowGuard:
     def test_calling_window_raises_typeerror(self) -> None:
-        g = TemporalStencilGeometry(
+        g = temporal.geometry.StencilGeometry(
             stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
         )
         with pytest.raises(TypeError, match="coordinate-aware"):
@@ -80,22 +78,22 @@ class TestIntegerWindowGuard:
 
 class TestGetConfig:
     def test_round_trip_friendly_payload(self) -> None:
-        g = TemporalStencilGeometry(
+        g = temporal.geometry.StencilGeometry(
             stencil=TimeStencil("-9h", "3h", "1h", closed="both"),
             source_step=np.timedelta64(1, "h"),
         )
         cfg = g.get_config()
-        assert cfg["stencil"]["class"] == "TimeStencil"
+        assert cfg["stencil"]["class"] == "temporal.stencils.TimeStencil"
         assert cfg["stencil"]["config"]["start"] == {"value": -9, "unit": "h"}
         assert cfg["source_step"] == {"value": 1, "unit": "h"}
 
     def test_round_trip_with_numeric_stencil(self) -> None:
-        g = TemporalStencilGeometry(
+        g = temporal.geometry.StencilGeometry(
             stencil=Stencil(start=-2, stop=2, step=1, closed="both"),
         )
         cfg = g.get_config()
         assert cfg["stencil"] == {
-            "class": "Stencil",
+            "class": "temporal.stencils.Stencil",
             "config": {"start": -2, "stop": 2, "step": 1, "closed": "both"},
         }
         assert cfg["source_step"] is None
@@ -113,14 +111,9 @@ def test_no_quadratic_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     # each window is O(1) arithmetic.
     from time import perf_counter
 
-    import geopatcher._src.time.geometry as geometry_mod
-    import geopatcher._src.time.patcher as patcher_mod
-    from geopatcher.time import (
-        TemporalCausalBoxcar,
-        TemporalFold,
-        TemporalPatcher,
-        TemporalStencilSampler,
-    )
+    import geopatcher._src.temporal.geometry as geometry_mod
+    import geopatcher._src.temporal.patcher as patcher_mod
+    from geopatcher import TemporalPatcher
 
     calls: list[int] = []
     real = geometry_mod.coord_step
@@ -135,12 +128,12 @@ def test_no_quadratic_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     t0 = np.datetime64("2000-01-01T00")
     coord = np.arange(t0, t0 + np.timedelta64(175_320, "h"), np.timedelta64(1, "h"))
     stencil = TimeStencil("-9h", "3h", "1h", closed="both")
-    geometry = TemporalStencilGeometry(stencil=stencil)
+    geometry = temporal.geometry.StencilGeometry(stencil=stencil)
     tp = TemporalPatcher(
         geometry,
-        TemporalStencilSampler(stencil=stencil),
-        TemporalCausalBoxcar(),
-        TemporalFold(fold_fn=lambda n, _: n + 1, initial_state=0),
+        temporal.sampler.StencilSampler(stencil=stencil),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Fold(fold_fn=lambda n, _: n + 1, initial_state=0),
     )
     series = np.zeros(coord.shape[0], dtype=np.float32)
     start = perf_counter()
@@ -158,7 +151,7 @@ def test_no_quadratic_validation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_window_coord_matches_build_sampling_slices() -> None:
-    from geopatcher.time import build_sampling_slices
+    from geopatcher.temporal.stencils import build_sampling_slices
 
     coord = np.arange(0.0, 30.0, 0.5)
     for stencil in (
@@ -168,14 +161,14 @@ def test_window_coord_matches_build_sampling_slices() -> None:
         Stencil(-2.0, 1.0, 0.5, closed="neither"),
         Stencil(0.0, 0.0, 0.0, closed="both"),
     ):
-        g = TemporalStencilGeometry(stencil=stencil)
+        g = temporal.geometry.StencilGeometry(stencil=stencil)
         for i in (4, 10, 57):
             (ref,) = build_sampling_slices(coord, coord[[i]], stencil)
             assert g.window_coord(coord, i) == slice(ref.start, ref.stop)
 
 
 def test_window_coord_rejects_bad_coords() -> None:
-    g = TemporalStencilGeometry(stencil=Stencil(-1, 1, 1, closed="both"))
+    g = temporal.geometry.StencilGeometry(stencil=Stencil(-1, 1, 1, closed="both"))
     with pytest.raises(ValueError, match="strictly increasing"):
         g.window_coord(np.arange(10)[::-1], 5)
     with pytest.raises(ValueError, match="evenly spaced"):
@@ -189,7 +182,7 @@ def test_window_coord_rejects_bad_coords() -> None:
     [("drop", None), ("shrink", slice(0, 3))],
 )
 def test_boundary_at_axis_start(boundary: str, expected: slice | None) -> None:
-    g = TemporalStencilGeometry(
+    g = temporal.geometry.StencilGeometry(
         stencil=Stencil(-2, 2, 1, closed="both"),
         boundary=boundary,  # type: ignore[arg-type]
     )
@@ -197,7 +190,7 @@ def test_boundary_at_axis_start(boundary: str, expected: slice | None) -> None:
 
 
 def test_boundary_raise() -> None:
-    g = TemporalStencilGeometry(
+    g = temporal.geometry.StencilGeometry(
         stencil=Stencil(-2, 2, 1, closed="both"), boundary="raise"
     )
     assert g.window_coord(np.arange(10), 5) == slice(3, 8)
@@ -207,12 +200,12 @@ def test_boundary_raise() -> None:
 
 def test_source_step_string_is_parsed() -> None:
     # Regression (#190): "1h" was accepted, then failed on first use.
-    g = TemporalStencilGeometry(
+    g = temporal.geometry.StencilGeometry(
         stencil=TimeStencil("-3h", "3h", "1h", closed="both"), source_step="1h"
     )
     assert g.source_step == np.timedelta64(1, "h")
     with pytest.raises(TypeError, match="timedelta64"):
-        TemporalStencilGeometry(
+        temporal.geometry.StencilGeometry(
             stencil=TimeStencil("-3h", "3h", "1h", closed="both"), source_step=1
         )
 
@@ -220,7 +213,7 @@ def test_source_step_string_is_parsed() -> None:
 def test_pickles_after_use() -> None:
     import pickle
 
-    g = TemporalStencilGeometry(stencil=Stencil(-1, 1, 1, closed="both"))
+    g = temporal.geometry.StencilGeometry(stencil=Stencil(-1, 1, 1, closed="both"))
     coord = np.arange(10)
     assert g.window_coord(coord, 4) == slice(3, 6)
     clone = pickle.loads(pickle.dumps(g))

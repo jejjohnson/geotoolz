@@ -17,8 +17,8 @@ def install_hint(extra: str) -> str:
     Examples:
         >>> install_hint("grid")
         "pip install 'geotoolz-patcher[grid]'"
-        >>> install_hint("obstore-cog")
-        "pip install 'geotoolz-patcher[obstore-cog]'"
+        >>> install_hint("cog")
+        "pip install 'geotoolz-patcher[cog]'"
     """
     return f"pip install '{DISTRIBUTION}[{extra}]'"
 

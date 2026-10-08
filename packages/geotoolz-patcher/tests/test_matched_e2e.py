@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 from _helpers import StubDomain as _StubDomain
 
+from geopatcher import spatial
 from geopatcher._src.matched import (
     MatchedField,
     MatchedPatch,
@@ -452,8 +453,8 @@ class TestStreamingSafetyWarnedOnSecondaries:
 
         class _UnsafeAgg(_RecordingAgg):
             # Same as _RecordingAgg but with the streaming flag flipped,
-            # matching aggregations like SpatialMedian / SpatialLearned
-            # that materialise the full patch set in RAM.
+            # matching aggregations like spatial.aggregation.Median /
+            # spatial.aggregation.Learned that materialise the full patch set in RAM.
             streaming_safe = False
 
         mf = MatchedField(
@@ -539,17 +540,14 @@ class TestRealSpatialPatcherIntegration:
     def test_real_patcher_yields_matched_patches(self) -> None:
         import numpy as np
 
-        from geopatcher._src.spatial.geometry import SpatialRectangular
         from geopatcher._src.spatial.patcher import SpatialPatcher
-        from geopatcher._src.spatial.sampler import SpatialRegularStride
-        from geopatcher._src.spatial.window import SpatialBoxcar
 
         # Reuse a `SpatialPatcher` (the real one) inside the matched
         # patcher; aggregator unused for this test.
         primary = SpatialPatcher(
-            geometry=SpatialRectangular(size=(4, 4)),
-            sampler=SpatialRegularStride(step=(4, 4)),
-            window=SpatialBoxcar(),
+            geometry=spatial.geometry.Rectangular(size=(4, 4)),
+            sampler=spatial.sampler.RegularStride(step=(4, 4)),
+            window=spatial.window.Boxcar(),
             aggregation=None,  # type: ignore[arg-type] — split only
         )
         mf = self._build_mfield()
@@ -606,17 +604,14 @@ def _raster_mfield(coreg: Any = None, *, values: Any = None) -> MatchedField:
 
 
 def _real_patcher(**kwargs: Any) -> Any:
-    from geopatcher._src.spatial.aggregation import SpatialSum
-    from geopatcher._src.spatial.geometry import SpatialRectangular
+
     from geopatcher._src.spatial.patcher import SpatialPatcher
-    from geopatcher._src.spatial.sampler import SpatialRegularStride
-    from geopatcher._src.spatial.window import SpatialBoxcar
 
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4)),
-        sampler=SpatialRegularStride(step=(4, 4)),
-        window=SpatialBoxcar(),
-        aggregation=SpatialSum(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4)),
+        sampler=spatial.sampler.RegularStride(step=(4, 4)),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.Sum(),
         **kwargs,
     )
 
@@ -686,11 +681,10 @@ class _Hook:
 def test_hooks_report_member_summed_bytes_once() -> None:
     import numpy as np
 
-    from geopatcher._src.spatial.aggregation import SpatialSum
-
     mf = _raster_mfield()
     msp = MatchedSpatialPatcher(
-        primary=_real_patcher(), secondary_aggregators={"sec": SpatialSum()}
+        primary=_real_patcher(),
+        secondary_aggregators={"sec": spatial.aggregation.Sum()},
     )
     hook = _Hook()
     patches = list(msp.split(mf, hooks=[hook]))

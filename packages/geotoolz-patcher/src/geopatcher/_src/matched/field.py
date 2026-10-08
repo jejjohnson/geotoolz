@@ -112,7 +112,7 @@ class MatchedField:
 
     # Carries live Field handles and coregistration callables, which
     # are not reconstructable from config — mirror the
-    # `SpatialLearned` convention and forbid YAML round-trips.
+    # `spatial.aggregation.Learned` convention and forbid YAML round-trips.
     forbid_in_yaml: ClassVar[bool] = True
 
     def get_config(self) -> dict[str, Any]:

@@ -16,15 +16,7 @@ pytest.importorskip(
 
 import numpy as np
 import rasterio
-from geopatcher import (
-    RasterField,
-    SpatialBoxcar,
-    SpatialHann,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import RasterField, SpatialPatcher, spatial
 from georeader.geotensor import GeoTensor
 from pipekit import Lambda
 
@@ -46,17 +38,19 @@ def test_sliding_window_inference_boxcar() -> None:
     """Tile -> double -> stitch with non-overlapping Boxcar windows."""
     field = _ones_field()
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
     pipe = Sequential(
         [
             GridSampler(patcher=patcher),
             ApplyToChips(operator=double),
-            MergePatches(aggregation=SpatialOverlapAdd(), domain=field.reader),
+            MergePatches(
+                aggregation=spatial.aggregation.OverlapAdd(), domain=field.reader
+            ),
         ]
     )
     result = pipe(field)
@@ -69,17 +63,19 @@ def test_sliding_window_inference_hann_overlap() -> None:
     """Hann window with stride < patch size to ensure overlap fills boundaries."""
     field = _ones_field()
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=4),
-        window=SpatialHann(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=4),
+        window=spatial.window.Hann(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
     pipe = Sequential(
         [
             GridSampler(patcher=patcher),
             ApplyToChips(operator=double),
-            MergePatches(aggregation=SpatialOverlapAdd(), domain=field.reader),
+            MergePatches(
+                aggregation=spatial.aggregation.OverlapAdd(), domain=field.reader
+            ),
         ]
     )
     result = pipe(field)

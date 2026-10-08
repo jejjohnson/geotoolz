@@ -1,12 +1,13 @@
-"""Tests for `TemporalStencilSampler` — coordinate-aware anchor placement."""
+"""Tests for `temporal.sampler.StencilSampler` — coordinate-aware anchor placement."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from geopatcher._src.time.stencils import Stencil
-from geopatcher.time import TemporalStencilSampler, TimeStencil
+from geopatcher import temporal
+from geopatcher._src.temporal.stencils import Stencil
+from geopatcher.temporal.stencils import TimeStencil
 
 
 def _hourly_day() -> np.ndarray:
@@ -15,24 +16,24 @@ def _hourly_day() -> np.ndarray:
 
 class TestNeedsCoordFlag:
     def test_flag_is_true_on_class(self) -> None:
-        assert TemporalStencilSampler.needs_coord is True
+        assert temporal.sampler.StencilSampler.needs_coord is True
 
 
 class TestAnchors:
     def test_requires_coord(self) -> None:
-        s = TemporalStencilSampler(stencil=Stencil(-1, 1, 1, closed="both"))
+        s = temporal.sampler.StencilSampler(stencil=Stencil(-1, 1, 1, closed="both"))
         with pytest.raises(ValueError, match="requires coord="):
             list(s.anchors(time_len=10, coord=None))
 
     def test_coord_length_must_match_time_len(self) -> None:
-        s = TemporalStencilSampler(stencil=Stencil(-1, 1, 1, closed="both"))
+        s = temporal.sampler.StencilSampler(stencil=Stencil(-1, 1, 1, closed="both"))
         coord = np.arange(10)
         with pytest.raises(ValueError, match="coord length must equal time_len"):
             list(s.anchors(time_len=11, coord=coord))
 
     def test_returns_integer_indices(self) -> None:
         coord = _hourly_day()
-        s = TemporalStencilSampler(
+        s = temporal.sampler.StencilSampler(
             stencil=TimeStencil("-1h", "1h", "1h", closed="both")
         )
         result = list(s.anchors(time_len=coord.shape[0], coord=coord))
@@ -45,13 +46,13 @@ class TestAnchors:
     def test_every_thins_valid_set(self) -> None:
         coord = _hourly_day()
         full = list(
-            TemporalStencilSampler(
+            temporal.sampler.StencilSampler(
                 stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
                 every=1,
             ).anchors(time_len=coord.shape[0], coord=coord)
         )
         thinned = list(
-            TemporalStencilSampler(
+            temporal.sampler.StencilSampler(
                 stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
                 every=4,
             ).anchors(time_len=coord.shape[0], coord=coord)
@@ -61,14 +62,14 @@ class TestAnchors:
     def test_shuffle_is_deterministic_under_seed(self) -> None:
         coord = _hourly_day()
         a = list(
-            TemporalStencilSampler(
+            temporal.sampler.StencilSampler(
                 stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
                 shuffle=True,
                 seed=42,
             ).anchors(time_len=coord.shape[0], coord=coord)
         )
         b = list(
-            TemporalStencilSampler(
+            temporal.sampler.StencilSampler(
                 stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
                 shuffle=True,
                 seed=42,
@@ -79,12 +80,12 @@ class TestAnchors:
     def test_shuffle_differs_from_sorted(self) -> None:
         coord = _hourly_day()
         sorted_anchors = list(
-            TemporalStencilSampler(
+            temporal.sampler.StencilSampler(
                 stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
             ).anchors(time_len=coord.shape[0], coord=coord)
         )
         shuffled = list(
-            TemporalStencilSampler(
+            temporal.sampler.StencilSampler(
                 stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
                 shuffle=True,
                 seed=0,
@@ -97,7 +98,7 @@ class TestAnchors:
 
 class TestGetConfig:
     def test_round_trip(self) -> None:
-        s = TemporalStencilSampler(
+        s = temporal.sampler.StencilSampler(
             stencil=TimeStencil("-1h", "1h", "1h", closed="both"),
             every=2,
             shuffle=True,
@@ -107,5 +108,5 @@ class TestGetConfig:
         assert cfg["every"] == 2
         assert cfg["shuffle"] is True
         assert cfg["seed"] == 7
-        assert cfg["stencil"]["class"] == "TimeStencil"
+        assert cfg["stencil"]["class"] == "temporal.stencils.TimeStencil"
         assert cfg["stencil"]["config"]["start"] == {"value": -1, "unit": "h"}

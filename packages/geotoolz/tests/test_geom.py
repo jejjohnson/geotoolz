@@ -17,6 +17,7 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from affine import Affine
+from geopatcher import spatial
 from georeader.geotensor import GeoTensor
 from rasterio.enums import Resampling
 from rasterio.windows import WindowError
@@ -376,13 +377,7 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
         "geopatcher",
         reason="geotoolz.patch_ops bridge requires the [patch] extra (geopatcher)",
     )
-    from geopatcher import (
-        RasterField,
-        SpatialOverlapAdd,
-        SpatialPatcher,
-        SpatialRectangular,
-        SpatialRegularStride,
-    )
+    from geopatcher import RasterField, SpatialPatcher
 
     from geotoolz.patch_ops import SpatialTriangular
 
@@ -392,14 +387,14 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
     stitched = gz.geom.Stitch(blend="feather", feather_width=2)(tiles)
     field = RasterField(gt)
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(3, 4)),
-        sampler=SpatialRegularStride(step=(2, 3)),
+        geometry=spatial.geometry.Rectangular(size=(3, 4)),
+        sampler=spatial.sampler.RegularStride(step=(2, 3)),
         window=SpatialTriangular(width=2),
-        aggregation=SpatialOverlapAdd(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
     patches = list(patcher.split(field))
-    patch_stitched = SpatialOverlapAdd().merge(patches, field.reader)
+    patch_stitched = spatial.aggregation.OverlapAdd().merge(patches, field.reader)
 
     assert patch_stitched.shape == gt.shape
     np.testing.assert_allclose(patch_stitched, np.asarray(gt), rtol=1e-6)

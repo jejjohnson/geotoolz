@@ -35,7 +35,7 @@ SRC = PACKAGE_ROOT / "src" / "geopatcher"
 PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
 
 IMPORT_TO_DIST = {
-    "async_geotiff": "async-geotiff",
+    "geocloud": "geotoolz-cloud",
     "georeader": "georeader-spaceml",
     "typing_extensions": "typing-extensions",
 }
@@ -167,7 +167,7 @@ def test_scanner_sees_known_imports() -> None:
     for expected in ("numpy", "georeader", "rasterio"):
         assert expected in module_scope, expected
     used = _used_distributions()
-    for lazy in ("xarray", "zarr", "jax", "async-geotiff", "pipekit", "pyproj"):
+    for lazy in ("xarray", "zarr", "jax", "geotoolz-cloud", "pipekit", "pyproj"):
         assert lazy in used, lazy
         assert lazy not in {_dist(r) for r in module_scope}, lazy
 
@@ -283,19 +283,15 @@ def _xarray_field() -> None:
 # have run long before the test blocks the extra): the guarded name to
 # unset alongside blocking the import.
 _MODULE_GUARDS = {"grid": "geopatcher._src.fields.xarray.xr"}
+# Adapter modules whose guard fails the import itself: dropped from
+# ``sys.modules`` (restored afterwards) so the import re-runs.
+_REIMPORT = {"cog": "geopatcher._src.fields.cog"}
 
 
 def _dask_delayed() -> None:
-    from geopatcher.dask import to_delayed
+    from geopatcher.run import to_delayed
 
     to_delayed(None, None)
-
-
-def _obstore_pool() -> None:
-    from geopatcher.objstore import clear_obstore_pool, get_obstore
-
-    clear_obstore_pool()
-    get_obstore("s3://bucket/key")
 
 
 def _streaming_writer() -> None:
@@ -313,10 +309,11 @@ def _streaming_writer() -> None:
     )
 
 
-def _obstore_cog() -> None:
-    from geopatcher._src.fields.obstore_cog import _require_async_geotiff
+def _cog_field() -> None:
+    import importlib
 
-    _require_async_geotiff()
+    module = importlib.import_module("geopatcher._src.fields.cog")
+    module.CogField.open("s3://bucket/scene.tif")
 
 
 @pytest.mark.parametrize(
@@ -324,9 +321,8 @@ def _obstore_cog() -> None:
     [
         ("grid", ("xarray",), _xarray_field),
         ("dask", ("dask",), _dask_delayed),
-        ("obstore", ("obstore",), _obstore_pool),
         ("streaming", ("zarr",), _streaming_writer),
-        ("obstore-cog", ("async_geotiff",), _obstore_cog),
+        ("cog", ("geocloud",), _cog_field),
     ],
 )
 def test_missing_extra_error_names_the_distribution(
@@ -338,5 +334,7 @@ def test_missing_extra_error_names_the_distribution(
     _blocked(monkeypatch, *blocked)
     if extra in _MODULE_GUARDS:
         monkeypatch.setattr(_MODULE_GUARDS[extra], None)
+    if extra in _REIMPORT:
+        monkeypatch.delitem(sys.modules, _REIMPORT[extra], raising=False)
     with pytest.raises(ImportError, match=re.escape(f"'geotoolz-patcher[{extra}]'")):
         call()

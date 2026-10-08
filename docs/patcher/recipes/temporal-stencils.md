@@ -1,7 +1,7 @@
 # Temporal stencils — coordinate-aware time windows
 
-The integer-index temporal samplers (`TemporalRegularStride`,
-`TemporalLookbackHorizon`, …) work in *array steps*. That is fine when
+The integer-index temporal samplers (`temporal.sampler.RegularStride`,
+`temporal.geometry.LookbackHorizon`, …) work in *array steps*. That is fine when
 you know the source cadence up front, but it couples your notebook to a
 specific store. Re-point a `lookback=3` window from a 3-hourly ARCO-ERA5
 store to a 1-hourly one and you silently get a 3-hour window instead of
@@ -15,8 +15,8 @@ unchanged or raises a clear error; it never silently truncates.
 This recipe shows three layers:
 
 1. The pure-function path — `Stencil` + `xarray.isel`.
-2. The four-axis path — `TemporalStencilGeometry` +
-   `TemporalStencilSampler` inside a `TemporalPatcher`.
+2. The four-axis path — `temporal.geometry.StencilGeometry` +
+   `temporal.sampler.StencilSampler` inside a `TemporalPatcher`.
 3. What the v0.1 constraints are and what they catch.
 
 See **ADR-004** in [Design decisions](../decisions.md) for the design rationale and the
@@ -42,7 +42,7 @@ primitives directly:
 ```python
 import xarray as xr
 import numpy as np
-from geopatcher.time import (
+from geopatcher.temporal import (
     TimeStencil, valid_origin_points, build_sampling_slices,
 )
 
@@ -70,10 +70,10 @@ as a Geometry + Sampler pair:
 
 ```python
 from geopatcher.fields import XarrayField
-from geopatcher.time import (
+from geopatcher.temporal import (
     TimeStencil, TemporalPatcher,
-    TemporalStencilGeometry, TemporalStencilSampler,
-    TemporalCausalBoxcar, TemporalForecast,
+    temporal.geometry.StencilGeometry, temporal.sampler.StencilSampler,
+    temporal.window.CausalBoxcar, temporal.aggregation.Forecast,
 )
 
 field = XarrayField(ds["t2m"])
@@ -82,10 +82,10 @@ coord = field.time_coord()                              # 1-D datetime64
 stencil = TimeStencil(start="-9h", stop="3h", step="3h", closed="both")
 
 tp = TemporalPatcher(
-    geometry    = TemporalStencilGeometry(stencil, source_step=np.timedelta64(3, "h")),
-    sampler     = TemporalStencilSampler(stencil, every=2, shuffle=True, seed=0),
-    window      = TemporalCausalBoxcar(),
-    aggregation = TemporalForecast(horizon=1),
+    geometry    = temporal.geometry.StencilGeometry(stencil, source_step=np.timedelta64(3, "h")),
+    sampler     = temporal.sampler.StencilSampler(stencil, every=2, shuffle=True, seed=0),
+    window      = temporal.window.CausalBoxcar(),
+    aggregation = temporal.aggregation.Forecast(horizon=1),
 )
 
 for patch in tp.split(field.da.values, coord=coord, prefetch=4):
@@ -102,7 +102,7 @@ Three things to notice:
   for the hook payload.
 - `get_config()` nests the stencil as a `{"class": "TimeStencil", "config": ...}`
   envelope with each offset as `{"value": int, "unit": str}` (lossless at
-  any `timedelta64` resolution), so `geopatcher.from_config(axis_envelope(tp))`
+  any `timedelta64` resolution), so `geopatcher.config.from_config(axis_envelope(tp))`
   replays the same patcher without re-stating the cadence.
 
 Hook authors can opt into the new payload by accepting a trailing
@@ -121,15 +121,15 @@ exact number of positionals the callback declares.
 
 - **Stride-1 only.** A stencil whose `step` is greater than the source
   cadence (`step=2h` against a 1-hourly source) would yield strided
-  slices, which `TemporalWindow.weights` and
-  `TemporalAggregation.merge` don't yet support. The geometry raises at
+  slices, which `temporal.window.Window.weights` and
+  `temporal.aggregation.Aggregation.merge` don't yet support. The geometry raises at
   construction when `source_step` is supplied, and re-checks at resolve
   time when it isn't.
 - **`cftime` coords.** Not yet supported. `XarrayField.time_coord`
   raises a typed `TypeError` with a pointer at
   `DataArray.indexes['time'].to_datetimeindex()`.
 - **Spatial stencils.** This work covers the time axis only; the
-  symmetric `SpatialStencilGeometry` is tracked as future work in the
+  symmetric `spatial.geometry.StencilGeometry` is tracked as future work in the
   same issue.
 - **`amerge` for stencil-driven async aggregations.** Out of scope for
   v0.1; tracked alongside the async `asplit`/`amerge` thread.
@@ -138,7 +138,7 @@ exact number of positionals the callback declares.
 
 - `TimeStencil` / `Stencil` / `divide_evenly` /
   `build_sampling_slices` / `valid_origin_points` — primitives.
-- `TemporalStencilGeometry` / `TemporalStencilSampler` — four-axis
+- `temporal.geometry.StencilGeometry` / `temporal.sampler.StencilSampler` — four-axis
   integration.
 - `XarrayField.time_coord` — helper to extract the coordinate vector.
 - ADR-004 — design rationale.

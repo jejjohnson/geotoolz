@@ -35,11 +35,11 @@ topology it lives on).*
 
 ```mermaid
 flowchart LR
-    A[anchor] --> R[SpatialRectangular<br/>size=h×w]
-    A --> D[SpatialSphericalCap<br/>radius θ on the sphere]
-    A --> K[SpatialKNNGraph<br/>k nearest neighbours]
-    A --> RG[SpatialRadiusGraph<br/>radius r in metric space]
-    A --> P[SpatialPolygonIntersection<br/>arbitrary geometry]
+    A[anchor] --> R[spatial.geometry.Rectangular<br/>size=h×w]
+    A --> D[spatial.geometry.SphericalCap<br/>radius θ on the sphere]
+    A --> K[spatial.geometry.KNNGraph<br/>k nearest neighbours]
+    A --> RG[spatial.geometry.RadiusGraph<br/>radius r in metric space]
+    A --> P[spatial.geometry.PolygonIntersection<br/>arbitrary geometry]
     style A fill:#fff59d,stroke:#f9a825
 ```
 
@@ -54,13 +54,13 @@ sampler stride relative to the geometry size.*
 
 ```mermaid
 flowchart LR
-    Field[domain] --> RS[SpatialRegularStride<br/>deterministic grid]
-    Field --> JS[SpatialJitteredStride<br/>grid + bounded noise]
-    Field --> RND[SpatialRandom<br/>i.i.d. uniform]
-    Field --> PD[SpatialPoissonDisk<br/>min-spacing constraint]
-    Field --> EX[SpatialExplicit<br/>caller-supplied anchors]
-    Field --> EC[SpatialExplicitCoords<br/>caller-supplied map coordinates]
-    Field --> AT[SpatialAlongTrack<br/>anchors spaced along a track]
+    Field[domain] --> RS[spatial.sampler.RegularStride<br/>deterministic grid]
+    Field --> JS[spatial.sampler.JitteredStride<br/>grid + bounded noise]
+    Field --> RND[spatial.sampler.Random<br/>i.i.d. uniform]
+    Field --> PD[spatial.sampler.PoissonDisk<br/>min-spacing constraint]
+    Field --> EX[spatial.sampler.Explicit<br/>caller-supplied anchors]
+    Field --> EC[spatial.sampler.ExplicitCoords<br/>caller-supplied map coordinates]
+    Field --> AT[spatial.sampler.AlongTrack<br/>anchors spaced along a track]
     style Field fill:#bbdefb,stroke:#1565c0
 ```
 
@@ -71,11 +71,11 @@ out (denominator for normalised reconstruction).*
 
 ```mermaid
 flowchart LR
-    Geom[geometry.size] --> BC[SpatialBoxcar<br/>flat 1.0]
-    Geom --> HN[SpatialHann<br/>periodic cosine taper]
-    Geom --> TK[SpatialTukey<br/>flat-top + cosine flank]
-    Geom --> GS[SpatialGaussian<br/>radial Gaussian]
-    Geom --> CU[SpatialCustom<br/>any callable]
+    Geom[geometry.size] --> BC[spatial.window.Boxcar<br/>flat 1.0]
+    Geom --> HN[spatial.window.Hann<br/>periodic cosine taper]
+    Geom --> TK[spatial.window.Tukey<br/>flat-top + cosine flank]
+    Geom --> GS[spatial.window.Gaussian<br/>radial Gaussian]
+    Geom --> CU[spatial.window.Custom<br/>any callable]
     style Geom fill:#bbdefb,stroke:#1565c0
 ```
 
@@ -86,11 +86,11 @@ a time; non-streaming members need the whole list.*
 
 ```mermaid
 flowchart LR
-    P[patches] --> OA[SpatialOverlapAdd<br/>weighted sum / Σw]
-    P --> MN[SpatialMean / WeightedSum / InvVarWMean]
-    P --> HV[SpatialHardVote / SoftVote]
-    P --> MD[SpatialMedian / Mode<br/>non-streaming]
-    P --> AX[SpatialApproxQuantile / ApproxMode / …<br/>global sketch → one summary]
+    P[patches] --> OA[spatial.aggregation.OverlapAdd<br/>weighted sum / Σw]
+    P --> MN[spatial.aggregation.Mean / WeightedSum / InvVarWMean]
+    P --> HV[spatial.aggregation.HardVote / SoftVote]
+    P --> MD[spatial.aggregation.Median / Mode<br/>non-streaming]
+    P --> AX[spatial.aggregation.ApproxQuantile / ApproxMode / …<br/>global sketch → one summary]
     style P fill:#c8e6c9,stroke:#2e7d32
 ```
 
@@ -122,8 +122,8 @@ want the eager case.
 
 ## Determinism contracts
 
-Stochastic samplers — `SpatialRandom`, `SpatialJitteredStride`,
-`SpatialPoissonDisk`, `TemporalRandom` — accept a `seed: int | None`.
+Stochastic samplers — `spatial.sampler.Random`, `spatial.sampler.JitteredStride`,
+`spatial.sampler.PoissonDisk`, `temporal.sampler.Random` — accept a `seed: int | None`.
 
 | `seed` | Behavior |
 |---|---|
@@ -137,11 +137,11 @@ The Hypothesis round-trip suite (`tests/test_roundtrip.py`) leans on the
 ## Boundary policies
 
 What happens when an anchor sits close enough to the edge that the
-neighborhood would overflow the domain? `SpatialRectangular` exposes
+neighborhood would overflow the domain? `spatial.geometry.Rectangular` exposes
 this as a first-class parameter:
 
 ```python
-geom = SpatialRectangular(size=(256, 256), boundary="pad")
+geom = spatial.geometry.Rectangular(size=(256, 256), boundary="pad")
 ```
 
 ![shrink / pad / drop boundary behaviors](assets/boundary-modes.png)
@@ -152,13 +152,13 @@ geom = SpatialRectangular(size=(256, 256), boundary="pad")
 | `"pad"` | Samplers also place the edge anchor — the first whose patch reaches the edge, never an extra one past it. The patch is the full geometry size, padded in the overflow region with the reader's nodata (or `pad_value`, which must be representable in the field's dtype). |
 | `"reflect"` | As `"pad"`, but the overflow region is mirror-padded from the in-domain interior (numpy `mode="reflect"`, repeated when the overflow exceeds the domain) — the spectrally correct choice for overlap-add stitching with tapered windows (no DC dip at the trailing edge). Needs at least two cells on a padded axis. |
 | `"shrink"` | As `"pad"` for anchor placement, but the window is clipped to the domain on every side — a negative anchor included — so the patch is *smaller* at the edge. Weights crop to the same in-domain part. |
-| `"raise"` | As `"pad"` for anchor placement; `SpatialPatcher.split` raises a `ValueError` on the first overflowing window. Useful with `SpatialExplicit` when the caller wants strict edge handling. |
+| `"raise"` | As `"pad"` for anchor placement; `SpatialPatcher.split` raises a `ValueError` on the first overflowing window. Useful with `spatial.sampler.Explicit` when the caller wants strict edge handling. |
 
-Every mode survives `merge`: each dense aggregation (`SpatialOverlapAdd`
-in memory and streaming, `SpatialSum`, `SpatialMean`, `SpatialMax`, …)
+Every mode survives `merge`: each dense aggregation (`spatial.aggregation.OverlapAdd`
+in memory and streaming, `spatial.aggregation.Sum`, `spatial.aggregation.Mean`, `spatial.aggregation.Max`, …)
 crops a chip's data and weights to the in-domain part of its window, so
 padded or reflected cells are read for context but never written back.
-`SpatialRegularStride(check_full_scan=True)` only applies under `"drop"`
+`spatial.sampler.RegularStride(check_full_scan=True)` only applies under `"drop"`
 — the other modes cover the trailing edge themselves.
 
 See [Patching § Boundary policy](patching.md#boundary-policy) for how
@@ -172,17 +172,17 @@ one is materialised.
 
 ```python
 # Streaming — bounded memory regardless of field size.
-patcher = SpatialPatcher(..., aggregation=SpatialOverlapAdd())
+patcher = SpatialPatcher(..., aggregation=spatial.aggregation.OverlapAdd())
 stitched = patcher.merge(patcher.split(field), field.domain)
 
 # Bounded-memory accumulator on disk (zarr) instead of RAM.
 # Route the merge call through `agg` (not the patcher's default agg)
 # so the streaming code path is the one that actually runs.
-agg = SpatialOverlapAdd(streaming=True, target_path="out/", chunks=(256, 256))
+agg = spatial.aggregation.OverlapAdd(streaming=True, target_path="out/", chunks=(256, 256))
 stitched_zarr = agg.merge(patcher.split(field), field.domain)
 ```
 
-Every `SpatialAggregation` carries a `streaming_safe: ClassVar[bool]`
+Every `spatial.aggregation.Aggregation` carries a `streaming_safe: ClassVar[bool]`
 flag. The fully-streaming family (`Sum`, `Mean`, `Variance`,
 `OverlapAdd`, `WeightedSum`, `InvVarWeightedMean`, `HardVote`,
 `SoftVote`) folds one patch at a time; the non-streaming members
@@ -247,16 +247,16 @@ for the `PatchJournal` restart story.
 ## Index space vs coordinate space (temporal stencils)
 
 By default the temporal samplers and geometries work in **integer index
-space**: `TemporalRegularStride(step=3)` skips three array elements,
-`TemporalLookbackHorizon(lookback=12)` counts twelve array elements
+space**: `temporal.sampler.RegularStride(step=3)` skips three array elements,
+`temporal.geometry.LookbackHorizon(lookback=12)` counts twelve array elements
 backwards. This is fast and unambiguous when the source cadence is fixed
 and known.
 
 For workloads where the cadence is a property of the *store* (ARCO-ERA5
 Zarrs, multi-resolution archives) you also want **coordinate space** —
 "9 hours of context, regardless of whether that's 9 array steps or 3 or
-something else." `TimeStencil` plus `TemporalStencilGeometry` /
-`TemporalStencilSampler` express the window in physical units against a
+something else." `TimeStencil` plus `temporal.geometry.StencilGeometry` /
+`temporal.sampler.StencilSampler` express the window in physical units against a
 1-D coordinate vector you pass via `TemporalPatcher.split(..., coord=)`
 (or `SpatioTemporalPatcher.split(..., coord=)`, which threads it into
 the temporal half of both couplings).

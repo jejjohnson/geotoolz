@@ -1,8 +1,9 @@
-"""Public alias for `geopatcher._src.matched`.
+"""`geopatcher.matched` — patching several co-registered sources at once.
 
-Re-exports the matched-field surface so users can write
-``from geopatcher.matched import MatchedField`` without reaching
-into the private ``_src`` layer.
+`MatchedField` pairs fields (a scene and its labels, two sensors over one
+area) through a co-registration function; the `Matched*Patcher` family
+splits them together, yielding one `MatchedPatch` (spatial, temporal or
+spatio-temporal) holding every source's chip for the same anchor.
 
 See ``docs/patcher/design/query-matchup.md`` §6 and
 ``docs/patcher/decisions.md`` (ADR-003) for the design.

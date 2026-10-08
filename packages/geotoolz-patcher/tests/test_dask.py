@@ -22,13 +22,7 @@ pytest.importorskip("dask.array")
 pytest.importorskip("dask.bag")
 xr = pytest.importorskip("xarray")
 
-from geopatcher import (
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import SpatialPatcher, spatial
 from geopatcher._src.fields.dask import DaskField
 
 
@@ -43,10 +37,10 @@ def _cube(n: int = 12) -> xr.DataArray:
 
 def _patcher(step: int = 4) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4)),
-        sampler=SpatialRegularStride(step=step),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4)),
+        sampler=spatial.sampler.RegularStride(step=step),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 

@@ -7,22 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from geopatcher import (
-    TemporalCausalBoxcar,
-    TemporalExplicit,
-    TemporalExponentialDecay,
-    TemporalFixedLookback,
-    TemporalFold,
-    TemporalForecast,
-    TemporalHierarchicalCombine,
-    TemporalLookbackHorizon,
-    TemporalMean,
-    TemporalMultiScale,
-    TemporalPatch,
-    TemporalPatcher,
-    TemporalPhaseWindow,
-    TemporalRegularStride,
-)
+from geopatcher import TemporalPatch, TemporalPatcher, temporal
 
 
 @pytest.fixture
@@ -33,14 +18,14 @@ def series() -> np.ndarray:
 
 class TestTemporalFixedLookback:
     def test_window_shape(self) -> None:
-        g = TemporalFixedLookback(length=5)
+        g = temporal.geometry.FixedLookback(length=5)
         w = g.window(time_len=10, anchor=8)
         assert w == slice(4, 9)
 
 
 class TestTemporalLookbackHorizon:
     def test_window_shape(self) -> None:
-        g = TemporalLookbackHorizon(lookback=3, horizon=2)
+        g = temporal.geometry.LookbackHorizon(lookback=3, horizon=2)
         w = g.window(time_len=20, anchor=10)
         # lookback ends at anchor+1, horizon extends from there
         assert w == slice(8, 13)
@@ -48,8 +33,8 @@ class TestTemporalLookbackHorizon:
 
 class TestTemporalExponentialDecay:
     def test_recent_step_has_weight_one(self) -> None:
-        w = TemporalExponentialDecay(tau=1.0).weights(
-            TemporalFixedLookback(length=4), length=4
+        w = temporal.window.ExponentialDecay(tau=1.0).weights(
+            temporal.geometry.FixedLookback(length=4), length=4
         )
         assert w[-1] == pytest.approx(1.0)
         assert w[0] < w[-1]
@@ -57,17 +42,19 @@ class TestTemporalExponentialDecay:
 
 class TestTemporalCausalBoxcar:
     def test_uniform(self) -> None:
-        w = TemporalCausalBoxcar().weights(TemporalFixedLookback(length=5), length=5)
+        w = temporal.window.CausalBoxcar().weights(
+            temporal.geometry.FixedLookback(length=5), length=5
+        )
         np.testing.assert_array_equal(w, 1.0)
 
 
 class TestTemporalPatcherSplit:
     def test_yields_lookback_windows(self, series: np.ndarray) -> None:
         tp = TemporalPatcher(
-            geometry=TemporalFixedLookback(length=5),
-            sampler=TemporalRegularStride(step=10),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalMean(),
+            geometry=temporal.geometry.FixedLookback(length=5),
+            sampler=temporal.sampler.RegularStride(step=10),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Mean(),
         )
         patches = list(tp.split(series))
         # Anchors 0, 10, …, 90; anchor 0's 5-step lookback overflows the
@@ -80,26 +67,25 @@ class TestTemporalPatcherSplit:
     def test_n_anchors_matches_split_length(self, series: np.ndarray) -> None:
         # ADR-001: `n_anchors` is the cheap len() substitute.
         tp = TemporalPatcher(
-            geometry=TemporalFixedLookback(length=5),
-            sampler=TemporalRegularStride(step=10),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalMean(),
+            geometry=temporal.geometry.FixedLookback(length=5),
+            sampler=temporal.sampler.RegularStride(step=10),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Mean(),
         )
         n = tp.n_anchors(series)
         assert n == 9  # anchor 0 dropped
         assert n == sum(1 for _ in tp.split(series))
 
     def test_n_anchors_counts_multi_scale_windows(self, series: np.ndarray) -> None:
-        # Regression: TemporalMultiScale.window returns a list[slice], so
+        # Regression: temporal.geometry.MultiScale.window returns a list[slice], so
         # split yields N anchors * len(scales) patches. n_anchors must
         # count the list, not just the anchors.
-        from geopatcher import TemporalMultiScale
 
         tp = TemporalPatcher(
-            geometry=TemporalMultiScale(scales=[5, 20, 50]),
-            sampler=TemporalRegularStride(step=10),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalMean(),
+            geometry=temporal.geometry.MultiScale(scales=[5, 20, 50]),
+            sampler=temporal.sampler.RegularStride(step=10),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Mean(),
         )
         n = tp.n_anchors(series)
         # Anchors 50..90 fit the longest (50-step) scale; 0..40 are dropped.
@@ -114,10 +100,10 @@ class TestTemporalPatcherSplit:
             shape = (100,)
 
         tp = TemporalPatcher(
-            geometry=TemporalFixedLookback(length=5),
-            sampler=TemporalRegularStride(step=10),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalMean(),
+            geometry=temporal.geometry.FixedLookback(length=5),
+            sampler=temporal.sampler.RegularStride(step=10),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Mean(),
         )
         assert tp.n_anchors(ShapeOnly()) == 9
 
@@ -125,10 +111,10 @@ class TestTemporalPatcherSplit:
 class TestTemporalFold:
     def test_state_passing(self, series: np.ndarray) -> None:
         tp = TemporalPatcher(
-            geometry=TemporalFixedLookback(length=1),
-            sampler=TemporalRegularStride(step=1),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalFold(
+            geometry=temporal.geometry.FixedLookback(length=1),
+            sampler=temporal.sampler.RegularStride(step=1),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Fold(
                 fold_fn=lambda s, p: (s or 0) + int(p.data[0]),
                 initial_state=0,
             ),
@@ -144,10 +130,10 @@ class TestTemporalMean:
         # Every patch is an unmodified slice, so the per-step mean of the
         # overlapping patches is the series itself wherever a patch landed.
         tp = TemporalPatcher(
-            geometry=TemporalFixedLookback(length=10),
-            sampler=TemporalRegularStride(step=3),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalMean(time_len=100),
+            geometry=temporal.geometry.FixedLookback(length=10),
+            sampler=temporal.sampler.RegularStride(step=3),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Mean(time_len=100),
         )
         result = tp.merge(list(tp.split(series)))
         # Anchors 9, 12, …, 99 cover [0, 100).
@@ -157,10 +143,10 @@ class TestTemporalMean:
         # Regression (#189): the TemporalPatcher docstring setup crashed in
         # np.stack because the first length-1 windows were shorter.
         tp = TemporalPatcher(
-            TemporalFixedLookback(5, boundary="shrink"),
-            TemporalRegularStride(1),
-            TemporalCausalBoxcar(),
-            TemporalMean(),
+            temporal.geometry.FixedLookback(5, boundary="shrink"),
+            temporal.sampler.RegularStride(1),
+            temporal.window.CausalBoxcar(),
+            temporal.aggregation.Mean(),
         )
         x = np.arange(24.0)
         np.testing.assert_allclose(tp.merge(list(tp.split(x))), x)
@@ -170,37 +156,37 @@ class TestTemporalMean:
             TemporalPatch(data=np.array([1.0, 3.0]), anchor=1, indices=slice(0, 2)),
             TemporalPatch(data=np.array([5.0, np.nan]), anchor=2, indices=slice(1, 3)),
         ]
-        out = TemporalMean(time_len=4).merge(patches)
+        out = temporal.aggregation.Mean(time_len=4).merge(patches)
         # step 0: 1; step 1: mean(3, 5); step 2: only NaN -> fill; step 3: none
         np.testing.assert_allclose(out, [1.0, 4.0, np.nan, np.nan])
 
     def test_time_axis_and_feature_dims(self) -> None:
         data = np.arange(6.0).reshape(2, 3)  # (feature, time)
         patch = TemporalPatch(data=data, anchor=4, indices=slice(2, 5))
-        out = TemporalMean(time_axis=1).merge([patch])
+        out = temporal.aggregation.Mean(time_axis=1).merge([patch])
         assert out.shape == (2, 5)
         np.testing.assert_allclose(out[:, 2:], data)
         assert np.isnan(out[:, :2]).all()
 
     def test_empty_stream(self) -> None:
         with pytest.raises(ValueError, match="no patches"):
-            TemporalMean().merge([])
-        out = TemporalMean(time_len=3, fill_value=-1.0).merge([])
+            temporal.aggregation.Mean().merge([])
+        out = temporal.aggregation.Mean(time_len=3, fill_value=-1.0).merge([])
         np.testing.assert_array_equal(out, [-1.0, -1.0, -1.0])
 
     def test_indices_must_match_data(self) -> None:
         patch = TemporalPatch(data=np.ones(3), anchor=0, indices=slice(0, 2))
         with pytest.raises(ValueError, match="indices"):
-            TemporalMean().merge([patch])
+            temporal.aggregation.Mean().merge([patch])
 
 
 class TestTemporalForecast:
     def test_keeps_horizon_tail(self) -> None:
         tp = TemporalPatcher(
-            geometry=TemporalLookbackHorizon(lookback=3, horizon=2),
-            sampler=TemporalRegularStride(step=5),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalForecast(horizon=2),
+            geometry=temporal.geometry.LookbackHorizon(lookback=3, horizon=2),
+            sampler=temporal.sampler.RegularStride(step=5),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Forecast(horizon=2),
         )
         series = np.arange(20, dtype=np.float64)
         patches = list(tp.split(series))
@@ -232,7 +218,7 @@ class TestTemporalForecast:
                     weights=None,
                 )
             )
-        forecast = TemporalForecast(horizon=h, time_axis=1)
+        forecast = temporal.aggregation.Forecast(horizon=h, time_axis=1)
         result = forecast.merge(patches)
         for anchor, horizon_arr in result.items():
             assert horizon_arr.shape == (feats, h)
@@ -247,9 +233,6 @@ class TestTemporalHierarchicalCombine:
         regression for the bug where the second scale overwrote the first.
         """
         from geopatcher._src.patch import TemporalPatch
-        from geopatcher._src.time.aggregation import (
-            TemporalHierarchicalCombine,
-        )
 
         # Anchor 5, two scales (length 2 and length 4)
         p_short = TemporalPatch(
@@ -264,7 +247,7 @@ class TestTemporalHierarchicalCombine:
             indices=slice(2, 6),
             weights=None,
         )
-        agg = TemporalHierarchicalCombine(scales=[2, 4])
+        agg = temporal.aggregation.HierarchicalCombine(scales=[2, 4])
         out = agg.merge([p_short, p_long])
         # Outer dict keyed by anchor, inner dict keyed by scale length
         assert set(out.keys()) == {5}
@@ -280,15 +263,15 @@ class TestTemporalHierarchicalCombine:
 _EDGE_ANCHORS = (0, 1, 4, 21, 22, 23)
 
 
-def _phase(b: str) -> TemporalPhaseWindow:
-    return TemporalPhaseWindow(period=6, phase_width=1, boundary=b)  # type: ignore[arg-type]
+def _phase(b: str) -> temporal.geometry.PhaseWindow:
+    return temporal.geometry.PhaseWindow(period=6, phase_width=1, boundary=b)  # type: ignore[arg-type]
 
 
 # Hand-computed windows on a 24-step axis. ``None`` = the anchor yields no
 # patch; a tuple is ``(start, stop)``; a list is one entry per window.
 _WINDOW_TABLES: dict[str, tuple[Any, dict[str, dict[int, Any]]]] = {
     "fixed_lookback_5": (
-        lambda b: TemporalFixedLookback(5, boundary=b),
+        lambda b: temporal.geometry.FixedLookback(5, boundary=b),
         {
             "drop": {
                 0: None,
@@ -309,7 +292,7 @@ _WINDOW_TABLES: dict[str, tuple[Any, dict[str, dict[int, Any]]]] = {
         },
     ),
     "lookback_3_horizon_2": (
-        lambda b: TemporalLookbackHorizon(3, 2, boundary=b),
+        lambda b: temporal.geometry.LookbackHorizon(3, 2, boundary=b),
         {
             "drop": {0: None, 1: None, 4: (2, 7), 21: (19, 24), 22: None, 23: None},
             "shrink": {
@@ -323,7 +306,7 @@ _WINDOW_TABLES: dict[str, tuple[Any, dict[str, dict[int, Any]]]] = {
         },
     ),
     "multi_scale_2_4": (
-        lambda b: TemporalMultiScale([2, 4], boundary=b),
+        lambda b: temporal.geometry.MultiScale([2, 4], boundary=b),
         {
             "drop": {
                 0: None,
@@ -404,10 +387,10 @@ def test_window_tables_raise_on_overflow(name: str) -> None:
 
 def test_split_follows_window_table() -> None:
     tp = TemporalPatcher(
-        TemporalMultiScale([2, 4]),
-        TemporalExplicit(times=list(_EDGE_ANCHORS)),
-        TemporalCausalBoxcar(),
-        TemporalMean(),
+        temporal.geometry.MultiScale([2, 4]),
+        temporal.sampler.Explicit(times=list(_EDGE_ANCHORS)),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Mean(),
     )
     x = np.arange(24.0)
     patches = list(tp.split(x))
@@ -423,12 +406,12 @@ def test_split_follows_window_table() -> None:
 @pytest.mark.parametrize(
     "make",
     [
-        lambda: TemporalFixedLookback(3, boundary="pad"),  # type: ignore[arg-type]
-        lambda: TemporalFixedLookback(0),
-        lambda: TemporalLookbackHorizon(0, 1),
-        lambda: TemporalLookbackHorizon(1, -1),
-        lambda: TemporalMultiScale([]),
-        lambda: TemporalPhaseWindow(period=4, phase_width=2),
+        lambda: temporal.geometry.FixedLookback(3, boundary="pad"),  # type: ignore[arg-type]
+        lambda: temporal.geometry.FixedLookback(0),
+        lambda: temporal.geometry.LookbackHorizon(0, 1),
+        lambda: temporal.geometry.LookbackHorizon(1, -1),
+        lambda: temporal.geometry.MultiScale([]),
+        lambda: temporal.geometry.PhaseWindow(period=4, phase_width=2),
     ],
 )
 def test_geometry_validation(make: Any) -> None:
@@ -441,10 +424,10 @@ def test_forecast_horizon_at_axis_end() -> None:
     # horizon was the window's tail — lookback data labelled as future.
     x = np.arange(24.0)
     shrink = TemporalPatcher(
-        TemporalLookbackHorizon(lookback=3, horizon=2, boundary="shrink"),
-        TemporalExplicit(times=[20, 21, 22, 23]),
-        TemporalCausalBoxcar(),
-        TemporalForecast(horizon=2),
+        temporal.geometry.LookbackHorizon(lookback=3, horizon=2, boundary="shrink"),
+        temporal.sampler.Explicit(times=[20, 21, 22, 23]),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Forecast(horizon=2),
     )
     result = shrink.merge(list(shrink.split(x)))
     # 22's true horizon [23, 24] is half off-axis, 23's does not exist.
@@ -452,10 +435,10 @@ def test_forecast_horizon_at_axis_end() -> None:
     np.testing.assert_array_equal(result[20], [21.0, 22.0])
     np.testing.assert_array_equal(result[21], [22.0, 23.0])
     drop = TemporalPatcher(
-        TemporalLookbackHorizon(lookback=3, horizon=2),
-        TemporalExplicit(times=[20, 21, 22, 23]),
-        TemporalCausalBoxcar(),
-        TemporalForecast(horizon=2),
+        temporal.geometry.LookbackHorizon(lookback=3, horizon=2),
+        temporal.sampler.Explicit(times=[20, 21, 22, 23]),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Forecast(horizon=2),
     )
     assert sorted(drop.merge(list(drop.split(x)))) == [20, 21]
 
@@ -463,10 +446,10 @@ def test_forecast_horizon_at_axis_end() -> None:
 def test_forecast_accepts_horizon_only_predictions() -> None:
     x = np.arange(24.0)
     tp = TemporalPatcher(
-        TemporalLookbackHorizon(lookback=3, horizon=2),
-        TemporalExplicit(times=[5, 10]),
-        TemporalCausalBoxcar(),
-        TemporalForecast(horizon=2),
+        temporal.geometry.LookbackHorizon(lookback=3, horizon=2),
+        temporal.sampler.Explicit(times=[5, 10]),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Forecast(horizon=2),
     )
     preds = [p.with_data(np.asarray(p.data)[-2:] * 10) for p in tp.split(x)]
     result = tp.merge(preds)
@@ -474,7 +457,7 @@ def test_forecast_accepts_horizon_only_predictions() -> None:
     np.testing.assert_array_equal(result[10], [110.0, 120.0])
     bad = TemporalPatch(data=np.ones(3), anchor=5, indices=slice(3, 8))
     with pytest.raises(ValueError, match="expected the window's 5 or horizon=2"):
-        TemporalForecast(horizon=2).merge([bad])
+        temporal.aggregation.Forecast(horizon=2).merge([bad])
 
 
 def test_hierarchical_combine_keeps_all_scales() -> None:
@@ -482,10 +465,10 @@ def test_hierarchical_combine_keeps_all_scales() -> None:
     # keying by the realised slice let scale 4 overwrite scale 2.
     x = np.arange(24.0)
     tp = TemporalPatcher(
-        TemporalMultiScale([2, 4], boundary="shrink"),
-        TemporalExplicit(times=[1, 10]),
-        TemporalCausalBoxcar(),
-        TemporalHierarchicalCombine(scales=[2, 4]),
+        temporal.geometry.MultiScale([2, 4], boundary="shrink"),
+        temporal.sampler.Explicit(times=[1, 10]),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.HierarchicalCombine(scales=[2, 4]),
     )
     out = tp.merge(list(tp.split(x)))
     assert {a: set(v) for a, v in out.items()} == {1: {2, 4}, 10: {2, 4}}
@@ -493,7 +476,7 @@ def test_hierarchical_combine_keeps_all_scales() -> None:
     np.testing.assert_array_equal(out[1][4], [0.0, 1.0])
     np.testing.assert_array_equal(out[10][4], [7.0, 8.0, 9.0, 10.0])
     # Without `scales` the inner key is the window index, never a tuple.
-    plain = TemporalHierarchicalCombine().merge(tp.split(x))
+    plain = temporal.aggregation.HierarchicalCombine().merge(tp.split(x))
     assert set(plain[1]) == {0, 1}
 
 
@@ -502,7 +485,7 @@ def test_hierarchical_combine_rejects_unknown_scale_index() -> None:
         data=np.ones(2), anchor=3, indices=slice(2, 4), window_index=2
     )
     with pytest.raises(ValueError, match="no entry in scales"):
-        TemporalHierarchicalCombine(scales=[2, 4]).merge([patch])
+        temporal.aggregation.HierarchicalCombine(scales=[2, 4]).merge([patch])
 
 
 def test_phase_window_uses_period() -> None:
@@ -510,31 +493,30 @@ def test_phase_window_uses_period() -> None:
     # the single local slot ``[anchor - w, anchor + w + 1)``.
     x = np.arange(48.0)
     tp = TemporalPatcher(
-        TemporalPhaseWindow(period=24, phase_width=1),
-        TemporalExplicit(times=[14]),
-        TemporalCausalBoxcar(),
-        TemporalHierarchicalCombine(),
+        temporal.geometry.PhaseWindow(period=24, phase_width=1),
+        temporal.sampler.Explicit(times=[14]),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.HierarchicalCombine(),
     )
     patches = list(tp.split(x))
     assert [_as_table_entry(p.indices) for p in patches] == [(13, 16), (37, 40)]
     np.testing.assert_array_equal(patches[1].data, [37.0, 38.0, 39.0])
     assert tp.patch_anchors(x) == [(14, 0), (14, 1)]
-    geometry = TemporalPhaseWindow(24, 1)
+    geometry = temporal.geometry.PhaseWindow(24, 1)
     assert geometry.window(48, 38) == geometry.window(48, 14)
 
 
 def test_merge_checks_streaming_safety() -> None:
-    from geopatcher import set_strict
-    from geopatcher._src.time.aggregation import TemporalAggregation
+    from geopatcher.observe import set_strict
 
-    class Buffering(TemporalAggregation):
+    class Buffering(temporal.aggregation.Aggregation):
         def merge(self, patches: Any) -> Any:
             return list(patches)
 
     tp = TemporalPatcher(
-        TemporalFixedLookback(2),
-        TemporalRegularStride(1),
-        TemporalCausalBoxcar(),
+        temporal.geometry.FixedLookback(2),
+        temporal.sampler.RegularStride(1),
+        temporal.window.CausalBoxcar(),
         Buffering(),
     )
     with pytest.warns(RuntimeWarning, match="streaming_safe = False") as rec:
@@ -580,10 +562,10 @@ class _Series:
 
 def _lookback(n: int = 3, **kwargs: Any) -> TemporalPatcher:
     return TemporalPatcher(
-        TemporalFixedLookback(n),
-        TemporalRegularStride(1),
-        TemporalCausalBoxcar(),
-        TemporalMean(),
+        temporal.geometry.FixedLookback(n),
+        temporal.sampler.RegularStride(1),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Mean(),
         **kwargs,
     )
 
@@ -657,14 +639,14 @@ def test_hooks_see_skipped_errors() -> None:
 
 
 def test_journal_skips_completed_keys(tmp_path: Any) -> None:
-    from geopatcher import PatchJournal
+    from geopatcher.observe import PatchJournal
 
     journal = PatchJournal(str(tmp_path / "run.jsonl"))
     tp = TemporalPatcher(
-        TemporalMultiScale([2, 3]),
-        TemporalExplicit(times=[4, 6]),
-        TemporalCausalBoxcar(),
-        TemporalMean(),
+        temporal.geometry.MultiScale([2, 3]),
+        temporal.sampler.Explicit(times=[4, 6]),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Mean(),
     )
     x = np.arange(10.0)
     keys = tp.patch_anchors(x)
@@ -675,7 +657,7 @@ def test_journal_skips_completed_keys(tmp_path: Any) -> None:
 
 
 def test_cache_serves_second_split_without_reads(tmp_path: Any) -> None:
-    from geopatcher import PatchCache
+    from geopatcher.run import PatchCache
 
     cache = PatchCache(tmp_path, field_id="series")
     tp = _lookback()
@@ -714,14 +696,13 @@ def test_backpressure_slots_are_owned_and_released() -> None:
 def test_reduce_closes_patches_under_backpressure() -> None:
     tp = _lookback()
     x = np.arange(10.0)
-    out = tp.reduce(x, TemporalMean(time_len=10), max_in_flight=1)
+    out = tp.reduce(x, temporal.aggregation.Mean(time_len=10), max_in_flight=1)
     np.testing.assert_allclose(out[2:], x[2:])
 
 
 def test_two_pass_standardises() -> None:
-    from geopatcher._src.time.aggregation import TemporalAggregation
 
-    class MeanStd(TemporalAggregation):
+    class MeanStd(temporal.aggregation.Aggregation):
         streaming_safe = True
 
         def merge(self, patches: Any) -> dict[str, float]:
@@ -729,10 +710,10 @@ def test_two_pass_standardises() -> None:
             return {"mean": float(vals.mean()), "std": float(vals.std())}
 
     tp = TemporalPatcher(
-        TemporalFixedLookback(2),
-        TemporalRegularStride(step=2, start=1),
-        TemporalCausalBoxcar(),
-        TemporalMean(time_len=8),
+        temporal.geometry.FixedLookback(2),
+        temporal.sampler.RegularStride(step=2, start=1),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Mean(time_len=8),
     )
     x = np.arange(8.0)
     out = tp.two_pass(
@@ -756,10 +737,10 @@ def test_asplit_and_amerge() -> None:
                 yield p
 
         return await TemporalPatcher(
-            TemporalFixedLookback(3),
-            TemporalRegularStride(1),
-            TemporalCausalBoxcar(),
-            TemporalMean(time_len=10),
+            temporal.geometry.FixedLookback(3),
+            temporal.sampler.RegularStride(1),
+            temporal.window.CausalBoxcar(),
+            temporal.aggregation.Mean(time_len=10),
         ).amerge(stream())
 
     out = asyncio.run(run())
@@ -769,10 +750,10 @@ def test_asplit_and_amerge() -> None:
 def test_to_dask_bag_matches_split() -> None:
     pytest.importorskip("dask.bag")
     tp = TemporalPatcher(
-        TemporalMultiScale([2, 3]),
-        TemporalRegularStride(3),
-        TemporalCausalBoxcar(),
-        TemporalMean(),
+        temporal.geometry.MultiScale([2, 3]),
+        temporal.sampler.RegularStride(3),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Mean(),
     )
     x = np.arange(20.0).reshape(2, 10)
     got = tp.to_dask_bag(x, time_axis=1).compute()
@@ -786,7 +767,7 @@ def test_to_dask_bag_matches_split() -> None:
 
 def test_xarray_field_is_read_through_select() -> None:
     xr = pytest.importorskip("xarray")
-    from geopatcher import XarrayField
+    from geopatcher.fields import XarrayField
 
     da = xr.DataArray(
         np.arange(20.0).reshape(10, 2),
@@ -811,18 +792,18 @@ def test_xarray_field_is_read_through_select() -> None:
 
 def test_field_supplies_stencil_coord() -> None:
     xr = pytest.importorskip("xarray")
-    from geopatcher import XarrayField
-    from geopatcher.time import Stencil, TemporalStencilGeometry, TemporalStencilSampler
+    from geopatcher.fields import XarrayField
+    from geopatcher.temporal.stencils import Stencil
 
     stencil = Stencil(-12, 0, 6, closed="both")
     da = xr.DataArray(
         np.arange(10.0), dims=("time",), coords={"time": np.arange(10) * 6}
     )
     tp = TemporalPatcher(
-        TemporalStencilGeometry(stencil=stencil),
-        TemporalStencilSampler(stencil=stencil),
-        TemporalCausalBoxcar(),
-        TemporalMean(),
+        temporal.geometry.StencilGeometry(stencil=stencil),
+        temporal.sampler.StencilSampler(stencil=stencil),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Mean(),
     )
     patches = list(tp.split(XarrayField(da)))
     assert [p.indices for p in patches] == [slice(a - 2, a + 1) for a in range(2, 10)]
@@ -865,14 +846,14 @@ def test_coord_accepts_a_list() -> None:
 
 
 def test_stencil_pipeline_rejects_irregular_coord_at_entry() -> None:
-    from geopatcher.time import Stencil, TemporalStencilGeometry, TemporalStencilSampler
+    from geopatcher.temporal.stencils import Stencil
 
     stencil = Stencil(-1, 0, 1, closed="both")
     tp = TemporalPatcher(
-        TemporalStencilGeometry(stencil=stencil),
-        TemporalStencilSampler(stencil=stencil),
-        TemporalCausalBoxcar(),
-        TemporalMean(),
+        temporal.geometry.StencilGeometry(stencil=stencil),
+        temporal.sampler.StencilSampler(stencil=stencil),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Mean(),
     )
     with pytest.raises(ValueError, match="evenly spaced"):
         tp.split(np.arange(5.0), coord=np.array([0, 1, 2, 4, 5]))
@@ -880,10 +861,12 @@ def test_stencil_pipeline_rejects_irregular_coord_at_entry() -> None:
 
 @pytest.mark.parametrize("every", [0, -1, 1.5])
 def test_stencil_sampler_every_validated(every: Any) -> None:
-    from geopatcher.time import Stencil, TemporalStencilSampler
+    from geopatcher.temporal.stencils import Stencil
 
     with pytest.raises(ValueError, match="every"):
-        TemporalStencilSampler(stencil=Stencil(-1, 0, 1, closed="both"), every=every)
+        temporal.sampler.StencilSampler(
+            stencil=Stencil(-1, 0, 1, closed="both"), every=every
+        )
 
 
 def test_time_axis_is_keyword_only() -> None:
@@ -892,14 +875,16 @@ def test_time_axis_is_keyword_only() -> None:
 
 
 def test_check_full_scan() -> None:
-    from geopatcher import IncompleteScanConfiguration
+    from geopatcher.spatial.sampler import IncompleteScanConfiguration
 
     def patcher(step: int, start: int, boundary: str) -> TemporalPatcher:
         return TemporalPatcher(
-            TemporalFixedLookback(4, boundary=boundary),  # type: ignore[arg-type]
-            TemporalRegularStride(step=step, start=start, check_full_scan=True),
-            TemporalCausalBoxcar(),
-            TemporalMean(),
+            temporal.geometry.FixedLookback(4, boundary=boundary),  # type: ignore[arg-type]
+            temporal.sampler.RegularStride(
+                step=step, start=start, check_full_scan=True
+            ),
+            temporal.window.CausalBoxcar(),
+            temporal.aggregation.Mean(),
         )
 
     x = np.arange(12.0)
@@ -919,30 +904,35 @@ def test_check_full_scan() -> None:
 
 
 def test_incomplete_scan_is_a_value_error() -> None:
-    from geopatcher import IncompleteScanConfiguration
+    from geopatcher.spatial.sampler import IncompleteScanConfiguration
 
     assert issubclass(IncompleteScanConfiguration, ValueError)
 
 
 class TestSamplerParity:
     def test_causal_rolling_is_regular_stride(self) -> None:
-        from geopatcher import TemporalCausalRolling
 
-        assert TemporalCausalRolling is TemporalRegularStride
-        assert list(TemporalCausalRolling(step=3, start=2).anchors(10)) == [2, 5, 8]
+        assert temporal.sampler.RegularStride is temporal.sampler.RegularStride
+        assert list(temporal.sampler.RegularStride(step=3, start=2).anchors(10)) == [
+            2,
+            5,
+            8,
+        ]
 
     def test_event_triggered_is_explicit(self) -> None:
-        from geopatcher import TemporalEventTriggered
 
-        assert TemporalEventTriggered is TemporalExplicit
-        assert list(TemporalEventTriggered(times=[7, -1, 3, 40]).anchors(10)) == [7, 3]
+        assert temporal.sampler.Explicit is temporal.sampler.Explicit
+        assert list(temporal.sampler.Explicit(times=[7, -1, 3, 40]).anchors(10)) == [
+            7,
+            3,
+        ]
 
     @pytest.mark.parametrize(
         "make",
         [
-            lambda: TemporalRegularStride(step=0),
-            lambda: TemporalRegularStride(step=-1),
-            lambda: TemporalRegularStride(start=-2),
+            lambda: temporal.sampler.RegularStride(step=0),
+            lambda: temporal.sampler.RegularStride(step=-1),
+            lambda: temporal.sampler.RegularStride(start=-2),
         ],
     )
     def test_regular_stride_validated(self, make: Any) -> None:
@@ -950,59 +940,58 @@ class TestSamplerParity:
             make()
 
     def test_random_n_samples(self) -> None:
-        from geopatcher import TemporalRandom
 
-        draws = list(TemporalRandom(n_samples=50, seed=0).anchors(10))
+        draws = list(temporal.sampler.Random(n_samples=50, seed=0).anchors(10))
         assert len(draws) == 50
         assert all(0 <= d < 10 for d in draws)
         assert len(set(draws)) < 50  # with replacement
         assert draws != sorted(draws)  # draw order, not sorted
         with pytest.raises(ValueError, match="n_samples"):
-            TemporalRandom(n_samples=-1)
+            temporal.sampler.Random(n_samples=-1)
 
 
 class TestWindowParity:
     def test_exponential_decay_rejects_non_positive_tau(self) -> None:
         for tau in (0.0, -1.0):
             with pytest.raises(ValueError, match="tau"):
-                TemporalExponentialDecay(tau=tau)
+                temporal.window.ExponentialDecay(tau=tau)
 
     def test_tapered_tukey_keeps_newest_step(self) -> None:
-        from geopatcher import TemporalTaperedTukey
 
-        g = TemporalFixedLookback(4)
-        w = TemporalTaperedTukey(alpha=0.5).weights(g, 4)
+        g = temporal.geometry.FixedLookback(4)
+        w = temporal.window.TaperedTukey(alpha=0.5).weights(g, 4)
         # x = (k + 1) / 4 = .25, .5, .75, 1: only .25 < alpha tapers.
         np.testing.assert_allclose(w, [0.5, 1.0, 1.0, 1.0])
-        full = TemporalTaperedTukey(alpha=1.0).weights(g, 4)
+        full = temporal.window.TaperedTukey(alpha=1.0).weights(g, 4)
         np.testing.assert_allclose(
             full, 0.5 * (1 - np.cos(np.pi * np.array([0.25, 0.5, 0.75, 1.0])))
         )
         assert full[-1] == 1.0
         np.testing.assert_array_equal(
-            TemporalTaperedTukey(alpha=0.0).weights(g, 3), 1.0
+            temporal.window.TaperedTukey(alpha=0.0).weights(g, 3), 1.0
         )
         with pytest.raises(ValueError, match="alpha"):
-            TemporalTaperedTukey(alpha=1.5)
+            temporal.window.TaperedTukey(alpha=1.5)
 
     def test_periodic_is_a_tagged_boxcar(self) -> None:
-        from geopatcher import TemporalPeriodic
 
-        w = TemporalPeriodic(period=24)
-        assert isinstance(w, TemporalCausalBoxcar)
-        np.testing.assert_array_equal(w.weights(TemporalFixedLookback(3), 3), 1.0)
+        w = temporal.window.Periodic(period=24)
+        assert isinstance(w, temporal.window.CausalBoxcar)
+        np.testing.assert_array_equal(
+            w.weights(temporal.geometry.FixedLookback(3), 3), 1.0
+        )
         assert w.get_config() == {"period": 24}
         with pytest.raises(ValueError, match="period"):
-            TemporalPeriodic(period=0)
+            temporal.window.Periodic(period=0)
 
 
 def test_patches_at_and_patch_at_read_one_anchor() -> None:
     src = _Series(np.arange(10.0))
     tp = TemporalPatcher(
-        TemporalMultiScale([2, 4]),
-        TemporalRegularStride(1),
-        TemporalCausalBoxcar(),
-        TemporalMean(),
+        temporal.geometry.MultiScale([2, 4]),
+        temporal.sampler.RegularStride(1),
+        temporal.window.CausalBoxcar(),
+        temporal.aggregation.Mean(),
     )
     patches = tp.patches_at(src, 6)
     assert [p.indices for p in patches] == [slice(5, 7), slice(3, 7)]

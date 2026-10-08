@@ -11,8 +11,8 @@ from __future__ import annotations
 class IncompleteScanConfiguration(ValueError):
     """A sampler's ``(size, step)`` does not exactly tile the domain.
 
-    Raised by `SpatialRegularStride(check_full_scan=True)` and by
-    `TemporalPatcher` when its `TemporalRegularStride(check_full_scan=True)`
+    Raised by `spatial.sampler.RegularStride(check_full_scan=True)` and by
+    `TemporalPatcher` when its `temporal.sampler.RegularStride(check_full_scan=True)`
     windows leave time steps uncovered. A `ValueError`, so a plain
     ``except ValueError:`` catches it too.
 

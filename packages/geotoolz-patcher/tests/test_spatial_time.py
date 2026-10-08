@@ -9,24 +9,14 @@ from georeader.geotensor import GeoTensor
 
 from geopatcher import (
     RasterField,
-    SpatialBoxcar,
-    SpatialExplicit,
-    SpatialOverlapAdd,
     SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
     SpatioTemporalPatch,
     SpatioTemporalPatcher,
-    TemporalCausalBoxcar,
-    TemporalFixedLookback,
-    TemporalForecast,
-    TemporalMean,
     TemporalPatcher,
-    TemporalRegularStride,
-    TemporalStencilGeometry,
-    TemporalStencilSampler,
-    TimeStencil,
+    spatial,
+    temporal,
 )
+from geopatcher.temporal.stencils import TimeStencil
 
 
 @pytest.fixture
@@ -44,20 +34,20 @@ def time_field() -> RasterField:
 @pytest.fixture
 def sp() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
 @pytest.fixture
 def tp() -> TemporalPatcher:
     return TemporalPatcher(
-        geometry=TemporalFixedLookback(length=4),
-        sampler=TemporalRegularStride(step=4),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=4),
+        sampler=temporal.sampler.RegularStride(step=4),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
 
 
@@ -81,16 +71,16 @@ class TestCoupledCoupling:
     def test_requires_paired_anchors(self) -> None:
         # Couple coupling expects spatial.sampler.anchors_ to be (space, time)
         sp_explicit = SpatialPatcher(
-            geometry=SpatialRectangular(size=(8, 8)),
-            sampler=SpatialExplicit(anchors_=[((0, 0), 1), ((0, 8), 4)]),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(8, 8)),
+            sampler=spatial.sampler.Explicit(anchors_=[((0, 0), 1), ((0, 8), 4)]),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         tp = TemporalPatcher(
-            geometry=TemporalFixedLookback(length=2),
-            sampler=TemporalRegularStride(step=1),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalMean(),
+            geometry=temporal.geometry.FixedLookback(length=2),
+            sampler=temporal.sampler.RegularStride(step=1),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Mean(),
         )
         stp = SpatioTemporalPatcher(
             spatial=sp_explicit, temporal=tp, coupling="coupled"
@@ -143,12 +133,12 @@ class TestCoordAwareTemporal:
         # -3h..+3h at 3-hourly cadence: 3-point windows, origins 1..6.
         stencil = TimeStencil("-3h", "3h", "3h", closed="both")
         return TemporalPatcher(
-            geometry=TemporalStencilGeometry(
+            geometry=temporal.geometry.StencilGeometry(
                 stencil=stencil, source_step=np.timedelta64(3, "h")
             ),
-            sampler=TemporalStencilSampler(stencil=stencil),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalForecast(horizon=1),
+            sampler=temporal.sampler.StencilSampler(stencil=stencil),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Forecast(horizon=1),
         )
 
     def test_missing_coord_raises(
@@ -176,7 +166,7 @@ class TestCoordAwareTemporal:
         tp_coord: TemporalPatcher,
         coord: np.ndarray,
     ) -> None:
-        from geopatcher._src.time.stencils import valid_origin_points
+        from geopatcher._src.temporal.stencils import valid_origin_points
 
         stencil = TimeStencil("-3h", "3h", "3h", closed="both")
         origins = valid_origin_points(coord, stencil)
@@ -195,10 +185,10 @@ class TestCoordAwareTemporal:
         self, time_field: RasterField, tp_coord: TemporalPatcher, coord: np.ndarray
     ) -> None:
         sp = SpatialPatcher(
-            geometry=SpatialRectangular(size=(8, 8)),
-            sampler=SpatialExplicit(anchors_=[((0, 0), 3), ((8, 8), 5)]),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(8, 8)),
+            sampler=spatial.sampler.Explicit(anchors_=[((0, 0), 3), ((8, 8), 5)]),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         stp = SpatioTemporalPatcher(spatial=sp, temporal=tp_coord, coupling="coupled")
         patches = list(stp.split(time_field, coord=coord))
@@ -263,10 +253,10 @@ class TestCoordAwareTemporal:
         # the documented ValueError, not an IndexError from the hook
         # payload lookup.
         sp = SpatialPatcher(
-            geometry=SpatialRectangular(size=(8, 8)),
-            sampler=SpatialExplicit(anchors_=[((0, 0), 5)]),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(8, 8)),
+            sampler=spatial.sampler.Explicit(anchors_=[((0, 0), 5)]),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         stp = SpatioTemporalPatcher(spatial=sp, temporal=tp_coord, coupling="coupled")
         with pytest.raises(ValueError, match="coord length"):
@@ -286,8 +276,6 @@ def test_coupled_polygon_and_reflect(
     import geopandas as gpd
     import shapely
 
-    from geopatcher import SpatialPolygonIntersection
-
     # North-up grid: polygon footprints need a negative y pixel size.
     north_up = RasterField(
         GeoTensor(
@@ -299,16 +287,16 @@ def test_coupled_polygon_and_reflect(
     tri = shapely.Polygon([(1, 9), (7, 9), (1, 15)])
     pairs = [(0, 4)]
     polygon = SpatialPatcher(
-        geometry=SpatialPolygonIntersection(polygons=gpd.GeoSeries([tri])),
-        sampler=SpatialExplicit(anchors_=pairs),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.PolygonIntersection(polygons=gpd.GeoSeries([tri])),
+        sampler=spatial.sampler.Explicit(anchors_=pairs),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     reflect = SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8), boundary="reflect"),
-        sampler=SpatialExplicit(anchors_=[((-4, -4), 4)]),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8), boundary="reflect"),
+        sampler=spatial.sampler.Explicit(anchors_=[((-4, -4), 4)]),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     for sp, space in [(polygon, 0), (reflect, (-4, -4))]:
         stp = SpatioTemporalPatcher(spatial=sp, temporal=tp, coupling="coupled")

@@ -15,18 +15,10 @@ except ImportError:  # the geopandas-backed tests still run
 
 needs_xarray = pytest.mark.skipif(xr is None, reason="needs the [grid] extra")
 
-from geopatcher import (
-    PointDomain,
-    SpatialBoxcar,
-    SpatialKNNGraph,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRandom,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import SpatialPatcher, spatial
 from geopatcher._src.fields.geopandas import GeoPandasField
 from geopatcher._src.fields.xarray import XarrayField
+from geopatcher.fields import PointDomain
 
 
 def _points_gdf(index: list[int] | None = None) -> gpd.GeoDataFrame:
@@ -116,10 +108,10 @@ class TestGeoPandasField:
         field = GeoPandasField(_points_gdf(), as_points=True)
         assert isinstance(field.domain, PointDomain)
         patcher = SpatialPatcher(
-            geometry=SpatialKNNGraph(k=2),
-            sampler=SpatialRandom(n_samples=3, seed=0),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.KNNGraph(k=2),
+            sampler=spatial.sampler.Random(n_samples=3, seed=0),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         patches = list(patcher.split(field))
         assert patches
@@ -150,10 +142,10 @@ def test_xarray_rectangular_split_merge_with_cached_domain() -> None:
     da = _grid_da()
     field = XarrayField(da)
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(2, 3)),
-        sampler=SpatialRegularStride(step=(2, 3)),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(2, 3)),
+        sampler=spatial.sampler.RegularStride(step=(2, 3)),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     recon = patcher.merge_to_xarray(list(patcher.split(field)), field)
     np.testing.assert_allclose(recon.values, da.values)

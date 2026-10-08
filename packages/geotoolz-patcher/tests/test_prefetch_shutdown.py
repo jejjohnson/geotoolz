@@ -17,13 +17,7 @@ import numpy as np
 import pytest
 from _helpers import ArrayField
 
-from geopatcher import (
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import SpatialPatcher, spatial
 from geopatcher._src.prefetch import (
     _SENTINEL,
     _STOP_POLL_S,
@@ -158,10 +152,10 @@ def counting_slots(monkeypatch: pytest.MonkeyPatch) -> list[_CountingSemaphore]:
 
 def _patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4)),
-        sampler=SpatialRegularStride(step=4),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4)),
+        sampler=spatial.sampler.RegularStride(step=4),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 

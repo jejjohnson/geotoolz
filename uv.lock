@@ -20,6 +20,7 @@ resolution-markers = [
 members = [
     "geotoolz",
     "geotoolz-catalog",
+    "geotoolz-cloud",
     "geotoolz-monorepo",
     "geotoolz-patcher",
     "geotoolz-products",
@@ -1451,7 +1452,7 @@ full = [
     { name = "earthengine-api" },
     { name = "fsspec", extra = ["http"] },
     { name = "gcsfs" },
-    { name = "geotoolz-patcher", extra = ["obstore"] },
+    { name = "geotoolz-patcher" },
     { name = "huggingface-hub" },
     { name = "planetary-computer" },
     { name = "pystac" },
@@ -1463,9 +1464,6 @@ full = [
 ]
 gee = [
     { name = "earthengine-api" },
-]
-obstore = [
-    { name = "geotoolz-patcher", extra = ["obstore"] },
 ]
 patch = [
     { name = "geotoolz-patcher" },
@@ -1532,9 +1530,8 @@ requires-dist = [
     { name = "geopandas", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz-catalog", extras = ["earthaccess", "stac", "gee"], marker = "extra == 'sources-all'", editable = "packages/geotoolz-catalog" },
-    { name = "geotoolz-catalog", extras = ["xarray-raster", "duckdb", "fsspec", "obstore", "streaming", "sources-all", "patch"], marker = "extra == 'full'", editable = "packages/geotoolz-catalog" },
+    { name = "geotoolz-catalog", extras = ["xarray-raster", "duckdb", "fsspec", "streaming", "sources-all", "patch"], marker = "extra == 'full'", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-patcher", marker = "extra == 'patch'", editable = "packages/geotoolz-patcher" },
-    { name = "geotoolz-patcher", extras = ["obstore"], marker = "extra == 'obstore'", editable = "packages/geotoolz-patcher" },
     { name = "huggingface-hub", marker = "extra == 'fsspec'", specifier = ">=0.25" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "numpy", specifier = ">=1.26" },
@@ -1553,7 +1550,7 @@ requires-dist = [
     { name = "xarray", marker = "extra == 'xarray-raster'", specifier = ">=2024.1" },
     { name = "zarr", marker = "extra == 'xarray-raster'", specifier = ">=3.0" },
 ]
-provides-extras = ["xarray-raster", "duckdb", "fsspec", "obstore", "streaming", "earthaccess", "stac", "gee", "patch", "sources-all", "full"]
+provides-extras = ["xarray-raster", "duckdb", "fsspec", "streaming", "earthaccess", "stac", "gee", "patch", "sources-all", "full"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1580,6 +1577,54 @@ lint = [{ name = "ruff", specifier = ">=0.15.11" }]
 typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
+name = "geotoolz-cloud"
+version = "0.1.0"
+source = { editable = "packages/geotoolz-cloud" }
+dependencies = [
+    { name = "georeader-spaceml" },
+    { name = "numpy" },
+    { name = "obstore" },
+    { name = "rasterio" },
+    { name = "typing-extensions" },
+]
+
+[package.optional-dependencies]
+cog = [
+    { name = "async-geotiff" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+lint = [
+    { name = "ruff" },
+]
+typecheck = [
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "async-geotiff", marker = "extra == 'cog'", specifier = ">=0.5,<0.6" },
+    { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "obstore", specifier = ">=0.9.5" },
+    { name = "rasterio", specifier = ">=1.3" },
+    { name = "typing-extensions", specifier = ">=4.0" },
+]
+provides-extras = ["cog"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+]
+lint = [{ name = "ruff", specifier = ">=0.15.11" }]
+typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
+
+[[package]]
 name = "geotoolz-monorepo"
 version = "0.0.0"
 source = { editable = "." }
@@ -1588,6 +1633,7 @@ source = { editable = "." }
 dev = [
     { name = "geotoolz", extra = ["hydra", "netcdf", "vector-cube", "zarr"] },
     { name = "geotoolz-catalog" },
+    { name = "geotoolz-cloud", extra = ["cog"] },
     { name = "geotoolz-patcher" },
     { name = "geotoolz-products", extra = ["obstore", "operators"] },
     { name = "h5netcdf" },
@@ -1602,6 +1648,7 @@ dev = [
 docs = [
     { name = "geotoolz" },
     { name = "geotoolz-catalog" },
+    { name = "geotoolz-cloud" },
     { name = "geotoolz-patcher" },
     { name = "geotoolz-products" },
     { name = "ipykernel" },
@@ -1627,6 +1674,7 @@ typecheck = [
 dev = [
     { name = "geotoolz", extras = ["hydra", "vector-cube", "netcdf", "zarr"], editable = "packages/geotoolz" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
+    { name = "geotoolz-cloud", extras = ["cog"], editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-patcher", editable = "packages/geotoolz-patcher" },
     { name = "geotoolz-products", extras = ["obstore", "operators"], editable = "packages/geotoolz-products" },
     { name = "h5netcdf", specifier = ">=1.3" },
@@ -1641,6 +1689,7 @@ dev = [
 docs = [
     { name = "geotoolz", editable = "packages/geotoolz" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
+    { name = "geotoolz-cloud", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-patcher", editable = "packages/geotoolz-patcher" },
     { name = "geotoolz-products", editable = "packages/geotoolz-products" },
     { name = "ipykernel", specifier = ">=7.2.0" },
@@ -1670,6 +1719,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cog = [
+    { name = "geotoolz-cloud", extra = ["cog"] },
+]
 dask = [
     { name = "dask" },
     { name = "xarray" },
@@ -1680,19 +1732,11 @@ grid = [
 jax = [
     { name = "jax" },
 ]
-obstore = [
-    { name = "obstore" },
-]
-obstore-cog = [
-    { name = "async-geotiff" },
-    { name = "obstore" },
-]
 patch-full = [
-    { name = "async-geotiff" },
     { name = "dask" },
     { name = "geopandas" },
+    { name = "geotoolz-cloud", extra = ["cog"] },
     { name = "jax" },
-    { name = "obstore" },
     { name = "rioxarray" },
     { name = "shapely" },
     { name = "xarray" },
@@ -1744,19 +1788,16 @@ typecheck = [
 
 [package.metadata]
 requires-dist = [
-    { name = "async-geotiff", marker = "extra == 'obstore-cog'", specifier = ">=0.5,<0.6" },
-    { name = "async-geotiff", marker = "extra == 'patch-full'", specifier = ">=0.5,<0.6" },
     { name = "dask", extras = ["bag"], marker = "extra == 'dask'", specifier = ">=2024.8.3" },
     { name = "dask", extras = ["bag"], marker = "extra == 'patch-full'", specifier = ">=2024.8.3" },
     { name = "geopandas", marker = "extra == 'patch-full'", specifier = ">=0.14" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'cog'", editable = "packages/geotoolz-cloud" },
+    { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'patch-full'", editable = "packages/geotoolz-cloud" },
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.23" },
     { name = "jax", marker = "extra == 'patch-full'", specifier = ">=0.4.23" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "obstore", marker = "extra == 'obstore'", specifier = ">=0.9.5" },
-    { name = "obstore", marker = "extra == 'obstore-cog'", specifier = ">=0.9.5" },
-    { name = "obstore", marker = "extra == 'patch-full'", specifier = ">=0.9.5" },
     { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "rasterio", specifier = ">=1.3" },
@@ -1775,7 +1816,7 @@ requires-dist = [
     { name = "zarr", marker = "extra == 'patch-full'", specifier = ">=3.0" },
     { name = "zarr", marker = "extra == 'streaming'", specifier = ">=3.0" },
 ]
-provides-extras = ["grid", "vector", "point", "xarray-raster", "streaming", "dask", "jax", "obstore", "obstore-cog", "patch-full", "pipekit"]
+provides-extras = ["grid", "vector", "point", "xarray-raster", "streaming", "dask", "jax", "cog", "patch-full", "pipekit"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1825,7 +1866,7 @@ himawari = [
     { name = "h5py" },
 ]
 obstore = [
-    { name = "geotoolz-patcher", extra = ["obstore"] },
+    { name = "geotoolz-cloud" },
 ]
 operators = [
     { name = "geotoolz" },
@@ -1849,7 +1890,7 @@ requires-dist = [
     { name = "geopandas", marker = "extra == 'carbonmapper'", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz", marker = "extra == 'operators'", editable = "packages/geotoolz" },
-    { name = "geotoolz-patcher", extras = ["obstore"], marker = "extra == 'obstore'", editable = "packages/geotoolz-patcher" },
+    { name = "geotoolz-cloud", marker = "extra == 'obstore'", editable = "packages/geotoolz-cloud" },
     { name = "h5py", marker = "extra == 'goes'", specifier = ">=3.10" },
     { name = "h5py", marker = "extra == 'himawari'", specifier = ">=3.10" },
     { name = "numpy", specifier = ">=1.26" },

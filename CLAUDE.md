@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`geotoolz` is a uv workspace of four packages that together provide a
+`geotoolz` is a uv workspace of five packages that together provide a
 composable remote-sensing stack on top of `georeader.GeoTensor`, with the
 Operator / Sequential / Graph composition core supplied by the external
 [`pipekit`](https://github.com/jejjohnson/pipekit) framework. Built with
@@ -17,14 +17,16 @@ The packages (distribution name → import name):
 | `geotoolz`         | `geotoolz`   | RS operator families (radiometry, indices, qa/mask, geom, io, einx, patch_ops bridge, …) |
 | `geotoolz-patcher` | `geopatcher` | Four-axis Patcher framework (Geometry × Sampler × Window × Aggregation over a `Field` protocol) |
 | `geotoolz-catalog` | `geocatalog` | Queryable spatiotemporal index (GeoSlice contract, in-memory + DuckDB backends, GeoParquet interchange, sources/matchup/staging) |
+| `geotoolz-cloud`   | `geocloud`   | Cloud object storage: the one process-wide obstore client pool (`geocloud.store`) and batched, async COG reads (`geocloud.cog`) |
 | `geotoolz-products` | `geoproducts` | Readers for EO data products (`ProductReader` ABC, per-sensor / per-provider subpackages) → georeader `GeoData` / `GeoTensor` |
 
 Import names are unchanged from the pre-monorepo repos (`import geopatcher`,
-`import geocatalog`; `geoproducts` is new) — only the distribution names carry
+`import geocatalog`; `geoproducts` and `geocloud` are new) — only the distribution names carry
 the `geotoolz-` prefix. Cross-package wiring: `geotoolz[patch]` → `geotoolz-patcher[pipekit]`;
 `geotoolz-catalog[patch]` → `geotoolz-patcher` (for `staging.field_for`);
-`geotoolz-products[obstore]` / `geotoolz-catalog[obstore]` → `geotoolz-patcher[obstore]`
-(the one obstore pool, `geopatcher.objstore`); `geotoolz-products[operators]`
+`geotoolz-patcher[cog]` → `geotoolz-cloud[cog]` (for `fields.CogField`);
+`geotoolz-products[obstore]` → `geotoolz-cloud`
+(the one obstore pool, `geocloud.store`); `geotoolz-products[operators]`
 → `geotoolz` (sensor presets only — geotoolz never depends on geoproducts). The workspace root
 ships no code — the top-level `pyproject.toml` only configures
 `[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups.
@@ -33,7 +35,7 @@ ships no code — the top-level `pyproject.toml` only configures
 
 ```bash
 make install              # uv sync --all-packages --all-groups --all-extras + hooks
-make test                 # Fast tier across all four packages
+make test                 # Fast tier across all five packages
 make test-all             # Everything incl. geotoolz slow/integration tiers
 make format               # ruff format . && ruff check --fix .
 make lint                 # ruff check .   (entire repo)
@@ -78,9 +80,14 @@ packages/
 │   │                         # module, carrier-aware pipekit.Operator classes in
 │   │                         # _src/operators.py). Carrier-preserving via
 │   │                         # geotoolz._src.wrap.wrap_like.
-├── geotoolz-patcher/         # src/geopatcher — SpatialPatcher / TemporalPatcher /
-│   │                         # SpatioTemporalPatcher, Field adapters, hooks,
-│   │                         # journal, PatchCache, pipekit integration.
+├── geotoolz-patcher/         # src/geopatcher — root: the patchers, Patch
+│   │                         # carriers, Field/Domain, RasterField; one home per
+│   │                         # name in spatial/ temporal/ (one module per axis),
+│   │                         # fields, matched, run, observe, config,
+│   │                         # integrations.pipekit.
+├── geotoolz-cloud/           # src/geocloud — store (the one obstore client pool)
+│   │                         # and cog (CogSource / AsyncCogReader); I/O shared
+│   │                         # by every package, depends on georeader only.
 ├── geotoolz-catalog/         # src/geocatalog — GeoCatalog Protocol (InMemory +
 │                             # DuckDB), GeoSlice, loaders, sources, matchup,
 │                             # staging, cyclopts CLI.
@@ -153,7 +160,7 @@ network-touching test without a marker.
 - Surgical changes only — don't refactor adjacent code or add docstrings to
   unchanged code.
 - Releases via release-please with per-package components (`geotoolz-vX.Y.Z`,
-  `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`,
+  `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`, `geotoolz-cloud-vX.Y.Z`,
   `geotoolz-products-vX.Y.Z`); conventional-commit
   titles are enforced.
 

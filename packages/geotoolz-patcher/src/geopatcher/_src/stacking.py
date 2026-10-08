@@ -9,7 +9,7 @@ boundary rather than producing a numpy object array further down the
 JIT trace.
 
 For fixed-size device batches (with a padded last batch) see
-`geopatcher.jax.batch_split`.
+`geopatcher.run.batch_split`.
 """
 
 from __future__ import annotations
@@ -44,8 +44,8 @@ def stack_patches(
             array data (a lazy reader or wrapper that ``np.asarray`` turns
             into a 0-d / object-dtype array), or when the per-patch shapes don't
             agree. The error message names the first mismatching patch
-            so ragged geometries (`SpatialPolygonIntersection`,
-            `SpatialRadiusGraph`) surface early rather than producing
+            so ragged geometries (`spatial.geometry.PolygonIntersection`,
+            `spatial.geometry.RadiusGraph`) surface early rather than producing
             numpy object arrays.
     """
     patches_list = list(patches)
@@ -82,9 +82,10 @@ def stack_patches(
             raise ValueError(
                 f"stack_patches: patch {i} has {attr}.shape={arr.shape}, "
                 f"expected {expected_shape}. Stacking only works for "
-                "uniform-shape geometries (e.g. SpatialRectangular, "
-                "SpatialKNNGraph). For ragged geometries "
-                "(SpatialRadiusGraph, SpatialPolygonIntersection) keep "
+                "uniform-shape geometries (e.g. spatial.geometry.Rectangular, "
+                "spatial.geometry.KNNGraph). For ragged geometries "
+                "(spatial.geometry.RadiusGraph, "
+                "spatial.geometry.PolygonIntersection) keep "
                 "the per-patch list and feed your model one patch at a "
                 "time, or pad to a common shape first."
             )

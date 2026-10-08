@@ -6,27 +6,20 @@ import numpy as np
 import pytest
 from georeader.geotensor import GeoTensor
 
-from geopatcher import (
-    RasterField,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import RasterField, SpatialPatcher, spatial
 
 
 jax = pytest.importorskip("jax")
 
-from geopatcher.jax import BatchedPatch, batch_split, unbatch
+from geopatcher.run import BatchedPatch, batch_split, unbatch
 
 
 def _patcher(boundary: str = "drop", size: int = 8) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(size, size), boundary=boundary),
-        sampler=SpatialRegularStride(step=size),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(size, size), boundary=boundary),
+        sampler=spatial.sampler.RegularStride(step=size),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 

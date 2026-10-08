@@ -1,0 +1,25 @@
+"""`geocloud` — cloud object storage for the geotoolz stack.
+
+Two modules, each the one home of its names:
+
+- `geocloud.store` — the process-wide ``obstore`` client pool:
+  `get_obstore` / `object_key` for ``s3://``, ``gs://``, ``az://``,
+  ``http(s)://`` and ``hf://`` URIs, one client (and HTTP/2 connection
+  pool) per bucket shared by every package in the process.
+- `geocloud.cog` — Cloud-Optimized GeoTIFF reads on that pool:
+  `CogSource` (batched window reads, each tile fetched once) and
+  `AsyncCogReader` with the async ``read_*`` mirrors of
+  ``georeader.read`` (``[cog]`` extra).
+
+geopatcher's `CogField` and geoproducts' cloud byte reads (its
+``[obstore]`` extra) both build on it.
+"""
+
+from __future__ import annotations
+
+from geocloud import cog, store
+
+
+__version__ = "0.1.0"  # x-release-please-version
+
+__all__ = ["__version__", "cog", "store"]

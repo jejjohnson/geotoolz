@@ -27,15 +27,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from geopatcher import (
-    RasterField,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
-from geopatcher.runners import parallel_map
+from geopatcher import RasterField, SpatialPatcher, spatial
+from geopatcher.run import parallel_map
 
 
 def _double(data) -> np.ndarray:
@@ -78,10 +71,10 @@ def field(raster_field_factory) -> RasterField:
 @pytest.fixture
 def patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -148,7 +141,7 @@ def test_batched_path_unwraps_masked_window(
 ) -> None:
     """Regression: ``_MaskedWindow`` indices must be unwrapped before select_many.
 
-    ``SpatialPolygonIntersection`` wraps the rasterio ``Window`` in a
+    ``spatial.geometry.PolygonIntersection`` wraps the rasterio ``Window`` in a
     ``_MaskedWindow`` so aggregation can recover the interior mask.
     The non-batched path calls ``_unwrap_for_select`` before
     ``Field.select``; the batched path must do the same before
@@ -183,7 +176,7 @@ def test_batched_path_unwraps_masked_window(
             return self.inner.with_data(array)
 
     # Run the runner via the stub. The existing fixture patcher uses
-    # SpatialRectangular geometry, which doesn't wrap. But the helper
+    # spatial.geometry.Rectangular geometry, which doesn't wrap. But the helper
     # in _planned_indexer calls _unwrap_for_select unconditionally,
     # so the asserts pass for ALL geometries — that's the contract this
     # test pins. (A separate end-to-end test in the polygon-intersection
@@ -247,10 +240,10 @@ def test_select_many_with_pad(raster_field_factory, boundary: str) -> None:
     """
     field = raster_field_factory(10)
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4), boundary=boundary),
-        sampler=SpatialRegularStride(step=4),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4), boundary=boundary),
+        sampler=spatial.sampler.RegularStride(step=4),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     batched = _CountingBatchedField(inner=field)
 

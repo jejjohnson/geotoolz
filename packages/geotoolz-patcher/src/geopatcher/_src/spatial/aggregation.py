@@ -1,14 +1,15 @@
-"""`SpatialAggregation` — local patch results → global field.
+"""`spatial.aggregation.Aggregation` — local patch results → global field.
 
 The aggregation step is the inverse of `split`: take an iterable of
 patches (each annotated with its indices and weights) and reconstruct a
 single global field. The streaming-safe families are monoidal folds
-over one or more accumulators; the non-streaming ones (`SpatialMedian`,
-`SpatialMode`, `SpatialLearned`) need a per-cell history and accumulate in memory.
+over one or more accumulators; the non-streaming ones (`spatial.aggregation.Median`,
+`spatial.aggregation.Mode`, `spatial.aggregation.Learned`) need a per-cell history and
+accumulate in memory.
 
 The `streaming_safe` class flag advertises which aggregations support
-the disk-backed path (a target zarr store) — `SpatialOverlapAdd` is the
-canonical streaming-safe member; `SpatialMedian` triggers a warning if the
+the disk-backed path (a target zarr store) — `spatial.aggregation.OverlapAdd` is the
+canonical streaming-safe member; `spatial.aggregation.Median` triggers a warning if the
 caller asks for streaming.
 
 See ``docs/patcher/patching.md`` §"Streaming aggregations" for the framing.
@@ -41,14 +42,14 @@ HASH_BITS = 64
 # ---------------------------------------------------------------------------
 
 
-class SpatialAggregation:
+class Aggregation:
     """Base for local → global merging strategies.
 
     Subclasses implement ``merge(patches, domain) -> field-like``.
 
     ``streaming_safe = True`` means the aggregation can be reduced one
     patch at a time without keeping per-cell history; the disk-backed
-    `SpatialOverlapAdd(streaming=True, target_path=...)` path lights up
+    `spatial.aggregation.OverlapAdd(streaming=True, target_path=...)` path lights up
     automatically for these.
     """
 
@@ -67,7 +68,7 @@ def _domain_array_shape(domain: Any) -> tuple[int, ...]:
 
     For raster: ``domain.shape``. For grid: ``tuple(domain.shape)``.
     Other domains don't have a natural dense shape — those aggregations
-    don't apply, and the caller will land in `SpatialByIndex` instead.
+    don't apply, and the caller will land in `spatial.aggregation.ByIndex` instead.
     """
     if hasattr(domain, "shape"):
         return tuple(domain.shape)
@@ -226,7 +227,8 @@ def _resolve_indices(indices: Any, shape: tuple[int, ...]) -> _Placement | None:
     raise TypeError(
         "dense aggregations need raster / grid patch indices (a rasterio "
         "Window, a {dim: slice} dict or a masked window), got "
-        f"{type(indices).__name__}; use SpatialByIndex for ragged geometries"
+        f"{type(indices).__name__}; use spatial.aggregation.ByIndex for ragged "
+        "geometries"
     )
 
 
@@ -244,7 +246,7 @@ def _placed(p: Any, shape: tuple[int, ...]) -> tuple[_Placement, np.ndarray] | N
 
 
 @dataclass(eq=False)
-class SpatialSum(SpatialAggregation):
+class Sum(Aggregation):
     """Per-cell sum across patches (NaN / masked samples skipped).
 
     Args:
@@ -276,7 +278,7 @@ class SpatialSum(SpatialAggregation):
 
 
 @dataclass(eq=False)
-class SpatialMax(SpatialAggregation):
+class Max(Aggregation):
     """Per-cell maximum across patches (NaN / masked samples skipped).
 
     Args:
@@ -296,7 +298,7 @@ class SpatialMax(SpatialAggregation):
 
 
 @dataclass(eq=False)
-class SpatialMin(SpatialAggregation):
+class Min(Aggregation):
     """Per-cell minimum across patches (NaN / masked samples skipped).
 
     Args:
@@ -322,7 +324,8 @@ def _extreme(
     start: float,
     fill_value: float,
 ) -> np.ndarray:
-    """Shared `SpatialMax` / `SpatialMin` fold (``op`` is ``np.fmax`` / ``np.fmin``)."""
+    """Shared `spatial.aggregation.Max` / `spatial.aggregation.Min` fold (``op`` is
+    ``np.fmax`` / ``np.fmin``)."""
     shape = _domain_array_shape(domain)
     acc = np.full(shape, start, dtype=np.float64)
     covered = np.zeros(shape, dtype=bool)
@@ -339,7 +342,7 @@ def _extreme(
 
 
 @dataclass(eq=False)
-class SpatialWeightedSum(SpatialAggregation):
+class WeightedSum(Aggregation):
     """Per-cell weighted sum — each patch's window weights multiply in.
 
     Args:
@@ -367,12 +370,14 @@ class SpatialWeightedSum(SpatialAggregation):
             return
         if not callable(self.weight_fn):
             raise TypeError(
-                "SpatialWeightedSum.weight_fn must be a callable or None, got "
+                "spatial.aggregation.WeightedSum.weight_fn must be a callable or "
+                "None, got "
                 f"{self.weight_fn!r} — a config naming a weight_fn cannot be "
                 "rebuilt; construct it in code."
             )
         # Per-instance flag (shadowing the ClassVar): only a weight_fn makes
-        # the config unfaithful, so `SpatialWeightedSum()` stays rebuildable.
+        # the config unfaithful, so `spatial.aggregation.WeightedSum()` stays
+        # rebuildable.
         object.__setattr__(self, "forbid_in_yaml", True)
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
@@ -405,8 +410,9 @@ class SpatialWeightedSum(SpatialAggregation):
 
 
 @dataclass(eq=False)
-class SpatialMean(SpatialAggregation):
-    """Per-cell mean — runs `SpatialSum` and a count accumulator in parallel.
+class Mean(Aggregation):
+    """Per-cell mean — runs `spatial.aggregation.Sum` and a count accumulator in
+    parallel.
 
     NaN samples and cells outside a `_MaskedWindow` mask are not counted.
 
@@ -439,7 +445,7 @@ class SpatialMean(SpatialAggregation):
 
 
 @dataclass(eq=False)
-class SpatialVariance(SpatialAggregation):
+class Variance(Aggregation):
     """Per-cell sample variance via Welford's online algorithm.
 
     Returns the unbiased estimate (``ddof=1``, as ``np.nanvar``); NaN and
@@ -503,7 +509,7 @@ def _dense_shape_or_none(domain: Any) -> tuple[int, ...] | None:
 
 
 @dataclass(eq=False)
-class SpatialMeanStd(SpatialAggregation):
+class MeanStd(Aggregation):
     """Global mean and sample standard deviation across patch data.
 
     NaN samples are skipped. On a dense (raster / grid) domain only each
@@ -531,13 +537,13 @@ class SpatialMeanStd(SpatialAggregation):
             mean += delta * batch_count / next_count
             count = next_count
         if count == 0:
-            raise ValueError("SpatialMeanStd requires at least one value")
+            raise ValueError("spatial.aggregation.MeanStd requires at least one value")
         var = m2 / (count - 1) if count > 1 else 0.0
         return {"mean": mean, "std": float(np.sqrt(var))}
 
 
 @dataclass(eq=False)
-class SpatialMinMax(SpatialAggregation):
+class MinMax(Aggregation):
     """Global minimum and maximum across patch data.
 
     NaN samples are skipped. On a dense (raster / grid) domain only each
@@ -559,16 +565,17 @@ class SpatialMinMax(SpatialAggregation):
             max_value = max(max_value, float(np.max(x)))
             seen = True
         if not seen:
-            raise ValueError("SpatialMinMax requires at least one value")
+            raise ValueError("spatial.aggregation.MinMax requires at least one value")
         return {"min": min_value, "max": max_value}
 
 
 @dataclass(eq=False)
-class SpatialOverlapAdd(SpatialAggregation):
-    """SpatialWindow-weighted overlap-add — the canonical chip-stitching aggregator.
+class OverlapAdd(Aggregation):
+    """spatial.window.Window-weighted overlap-add — the canonical chip-stitching
+    aggregator.
 
     Computes ``Σ wᵢ xᵢ / Σ wᵢ`` per cell. When stride < patch size and a
-    `SpatialHann` (or similar partition-of-unity) window is used, the resulting
+    `spatial.window.Hann` (or similar partition-of-unity) window is used, the resulting
     field equals the original (modulo the operator's effect) — the
     standard inference-time stitching pattern.
 
@@ -607,7 +614,7 @@ class SpatialOverlapAdd(SpatialAggregation):
         fill_value: Written into cells whose accumulated weight of valid
             samples is zero — uncovered, all-NaN, outside every mask, or
             only reached by a taper's zero edge (the leading row / column
-            under a periodic `SpatialHann`). Default NaN; pass e.g. the
+            under a periodic `spatial.window.Hann`). Default NaN; pass e.g. the
             domain's nodata to override. It is also the COG's nodata.
         dtype: Floating dtype of the streaming accumulators and output
             (default ``"float32"``). The in-RAM path is float64.
@@ -646,7 +653,8 @@ class SpatialOverlapAdd(SpatialAggregation):
             return self._merge_cog(patches, domain, self.target_path)
         if self.chunks is None:
             raise ValueError(
-                "SpatialOverlapAdd(streaming=True) needs chunks= — pass the "
+                "spatial.aggregation.OverlapAdd(streaming=True) needs chunks= — pass "
+                "the "
                 "patch geometry's size (e.g. chunks=geometry.size) so each "
                 "patch writes whole blocks"
             )
@@ -806,7 +814,9 @@ def _open_zarr_array(
     try:
         import zarr
     except ImportError as exc:
-        raise missing_extra("SpatialOverlapAdd(streaming=True)", "streaming") from exc
+        raise missing_extra(
+            "spatial.aggregation.OverlapAdd(streaming=True)", "streaming"
+        ) from exc
     from zarr.errors import (
         ContainsArrayAndGroupError,
         ContainsArrayError,
@@ -885,7 +895,7 @@ def _zarr_to_cog(
 
 
 @dataclass(eq=False)
-class SpatialInvVarWeightedMean(SpatialAggregation):
+class InvVarWeightedMean(Aggregation):
     """Bayesian inverse-variance weighting for overlapping local posteriors.
 
     Each patch produces ``(mu, var)`` — i.e. ``patch.data`` is a tuple or
@@ -957,7 +967,8 @@ def _unpack_mu_var(data: Any) -> tuple[Any, Any]:
     if isinstance(data, dict):
         return data["mu"], data["var"]
     raise TypeError(
-        "SpatialInvVarWeightedMean expects each patch's data to be a (mu, var) "
+        "spatial.aggregation.InvVarWeightedMean expects each patch's data to be a "
+        "(mu, var) "
         "tuple or a {'mu': ..., 'var': ...} mapping."
     )
 
@@ -968,7 +979,7 @@ def _unpack_mu_var(data: Any) -> tuple[Any, Any]:
 
 
 @dataclass(eq=False)
-class SpatialHardVote(SpatialAggregation):
+class HardVote(Aggregation):
     """Per-cell majority vote — patches carry integer class predictions.
 
     Values outside ``[0, n_classes)``, NaN and samples outside a
@@ -1008,7 +1019,7 @@ class SpatialHardVote(SpatialAggregation):
 
 
 @dataclass(eq=False)
-class SpatialSoftVote(SpatialAggregation):
+class SoftVote(Aggregation):
     """Per-cell soft vote — patches carry per-class probabilities.
 
     Each patch's data has shape ``(n_classes, ...)``: the class axis
@@ -1065,11 +1076,12 @@ class SpatialSoftVote(SpatialAggregation):
 
 
 @dataclass(eq=False)
-class SpatialByIndex(SpatialAggregation):
+class ByIndex(Aggregation):
     """Don't merge — return the ``[(anchor, data), …]`` pairs in patch order.
 
-    The natural choice for ragged geometries (`SpatialRadiusGraph`,
-    `SpatialKNNGraph`, `SpatialPolygonIntersection`) where the per-patch
+    The natural choice for ragged geometries (`spatial.geometry.RadiusGraph`,
+    `spatial.geometry.KNNGraph`, `spatial.geometry.PolygonIntersection`) where the
+    per-patch
     outputs aren't laid out on a regular grid. A list of pairs rather
     than a ``dict``: `GridDomain` anchors are ``dict``s and graph / array
     anchors are numpy arrays (both unhashable), and two patches may share
@@ -1130,14 +1142,14 @@ def _overlap_stack(
 
 
 @dataclass(eq=False)
-class SpatialMedian(SpatialAggregation):
+class Median(Aggregation):
     """Per-cell median — exact, requires per-cell history.
 
     NaN and masked samples are skipped. The per-cell history is a stack
     as deep as the largest overlap (not one full-domain layer per patch).
 
     ``streaming_safe = False`` and there is no streamable per-cell
-    substitute. ``SpatialApproxQuantile(q=0.5)`` is *not* one: it is a
+    substitute. ``spatial.aggregation.ApproxQuantile(q=0.5)`` is *not* one: it is a
     global sketch returning one scalar for the whole field.
 
     Args:
@@ -1165,8 +1177,9 @@ class SpatialMedian(SpatialAggregation):
 
 
 @dataclass(eq=False)
-class SpatialMode(SpatialAggregation):
-    """Per-cell exact mode — not streamable. Use `SpatialHardVote` for streaming.
+class Mode(Aggregation):
+    """Per-cell exact mode — not streamable. Use `spatial.aggregation.HardVote` for
+    streaming.
 
     NaN and masked samples are skipped. **Ties** go to the smallest
     value. The per-cell history is a stack as deep as the largest
@@ -1214,7 +1227,7 @@ def _arraywise_mode(stack: np.ndarray) -> np.ndarray:
 
 
 @dataclass(eq=False)
-class SpatialLearned(SpatialAggregation):
+class Learned(Aggregation):
     """Caller-supplied merge — ``model(patches, domain) -> field``.
 
     Carries closures, so ``forbid_in_yaml = True``. Streaming behaviour is
@@ -1235,14 +1248,15 @@ class SpatialLearned(SpatialAggregation):
 # ---------------------------------------------------------------------------
 
 
-class _SketchAggregation(SpatialAggregation):
+class _SketchAggregation(Aggregation):
     """Shared ``merge(patches, domain)`` loop for global sketch reducers.
 
     Sketches are **global** reducers: ``merge`` folds every finite value of
     every patch into one bounded summary and returns a scalar / dict / small
     array describing the whole field — never an ``(H, W)`` field. They are
-    not per-cell substitutes for `SpatialMedian` / `SpatialMode`; for a
-    streamable per-cell majority use `SpatialHardVote`.
+    not per-cell substitutes for `spatial.aggregation.Median` /
+    `spatial.aggregation.Mode`; for a
+    streamable per-cell majority use `spatial.aggregation.HardVote`.
 
     Every ``merge(patches)`` call starts from fresh state (``_reset``), so
     reusing one instance across ``merge()`` / ``reduce()`` calls never
@@ -1371,12 +1385,12 @@ class _ReservoirSketch(_SketchAggregation):
 
 
 @dataclass(eq=False)
-class SpatialApproxQuantile(_ReservoirSketch):
+class ApproxQuantile(_ReservoirSketch):
     """Global approximate quantile(s) from a uniform reservoir of ``k`` values.
 
     A **global** reducer: ``merge`` returns ``{str(float(q)): value}`` for
     the whole field, not a per-cell quantile field. There is no streamable
-    per-cell median; `SpatialMedian` stays the exact in-RAM option.
+    per-cell median; `spatial.aggregation.Median` stays the exact in-RAM option.
 
     Args:
         q: Quantile or list of quantiles in ``[0, 1]`` (int or float).
@@ -1431,7 +1445,7 @@ def _hll_alpha(m: int) -> float:
 
 
 @dataclass(eq=False)
-class SpatialApproxCardinality(_SketchAggregation):
+class ApproxCardinality(_SketchAggregation):
     """Global approximate unique-value count via HyperLogLog.
 
     A **global** reducer: ``merge`` returns one float for the whole field.
@@ -1470,7 +1484,7 @@ class SpatialApproxCardinality(_SketchAggregation):
             estimate = m * math.log(m / zeros)
         return float(estimate)
 
-    def merge_state(self, other: SpatialApproxCardinality) -> None:
+    def merge_state(self, other: ApproxCardinality) -> None:
         self._check_mergeable(other, "p")
         self._registers = np.maximum(self._registers, other._registers)
 
@@ -1479,12 +1493,12 @@ class SpatialApproxCardinality(_SketchAggregation):
 
 
 @dataclass(eq=False)
-class SpatialApproxMode(_SketchAggregation):
+class ApproxMode(_SketchAggregation):
     """Global approximate heavy hitters via Misra-Gries counters.
 
     A **global** reducer: ``merge`` returns ``{value: count}`` for the
     whole field, not a per-cell mode. For a streamable per-cell majority
-    use `SpatialHardVote`.
+    use `spatial.aggregation.HardVote`.
     """
 
     k: int = 16
@@ -1518,7 +1532,7 @@ class SpatialApproxMode(_SketchAggregation):
             sorted(self._counts.items(), key=lambda item: item[1], reverse=True)
         )
 
-    def merge_state(self, other: SpatialApproxMode) -> None:
+    def merge_state(self, other: ApproxMode) -> None:
         """Mergeable Misra-Gries union (Agarwal et al. 2012).
 
         Sum the counters; if more than ``k`` survive, subtract the
@@ -1538,7 +1552,7 @@ class SpatialApproxMode(_SketchAggregation):
 
 
 @dataclass(eq=False)
-class SpatialStreamingHistogram(_SketchAggregation):
+class StreamingHistogram(_SketchAggregation):
     """Global online histogram with at most ``bins`` centroids.
 
     A **global** reducer: ``merge`` returns ``{"centers", "counts"}`` for
@@ -1571,7 +1585,7 @@ class SpatialStreamingHistogram(_SketchAggregation):
             "counts": np.asarray(self._counts, dtype=np.int64)[order],
         }
 
-    def merge_state(self, other: SpatialStreamingHistogram) -> None:
+    def merge_state(self, other: StreamingHistogram) -> None:
         """Add ``other``'s weighted centroids, then re-compress to ``bins``."""
         self._check_mergeable(other, "bins")
         self._centers = [*self._centers, *other._centers]
@@ -1601,7 +1615,7 @@ class SpatialStreamingHistogram(_SketchAggregation):
 
 
 @dataclass(eq=False)
-class SpatialReservoir(_ReservoirSketch):
+class Reservoir(_ReservoirSketch):
     """Uniform global reservoir sample of ``k`` values (Vitter's Algorithm R).
 
     A **global** reducer: ``merge`` returns a 1-D array of at most ``k``
@@ -1663,7 +1677,7 @@ def _warn_if_unsafe_streaming(aggregation: Any, *, stacklevel: int = 2) -> None:
         f"{type(aggregation).__name__} has streaming_safe = False — "
         "the merge is happening in-RAM."
     )
-    if isinstance(aggregation, SpatialAggregation):
+    if isinstance(aggregation, Aggregation):
         msg += (
             " Per-cell streaming alternatives: "
             "Mode->HardVote, Learned->patcher.two_pass; Median has none (the "

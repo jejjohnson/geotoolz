@@ -76,9 +76,6 @@ fsspec = [
     "huggingface-hub>=0.25",
     "s3fs>=2025.12.0",
 ]
-# Rust-backed object-store client pool. The pool lives in geopatcher
-# (`geopatcher.objstore`) — one per process for the whole stack.
-obstore = ["geotoolz-patcher[obstore]>=0.6"]
 # Streaming catalog builds (`engine="duckdb"` on the `build_*` helpers):
 # the writer itself is pyarrow (a base dependency); the sort-rewrite and
 # the resulting catalog are DuckDB.
@@ -105,7 +102,7 @@ sources-all = ["geotoolz-catalog[earthaccess,stac,gee]"]
 # The one-shot install that lights up every public surface. Composed from
 # the extras above so it cannot drift from them.
 full = [
-    "geotoolz-catalog[xarray-raster,duckdb,fsspec,obstore,streaming,sources-all,patch]",
+    "geotoolz-catalog[xarray-raster,duckdb,fsspec,streaming,sources-all,patch]",
 ]
 
 [project.urls]

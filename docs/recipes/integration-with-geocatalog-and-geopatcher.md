@@ -86,16 +86,16 @@ import geopatcher as gp
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 patcher = gp.SpatialPatcher(
-    geometry=gp.SpatialRectangular(size=(512, 512)),
-    sampler=gp.SpatialRegularStride(step=(256, 256)),
-    window=gp.SpatialHann(),
-    aggregation=gp.SpatialOverlapAdd(),
+    geometry=gp.spatial.geometry.Rectangular(size=(512, 512)),
+    sampler=gp.spatial.sampler.RegularStride(step=(256, 256)),
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
 
 infer = gz.Sequential([
     GridSampler(patcher=patcher),
     ApplyToChips(operator=gz.ModelOp(model=my_torch_unet, batch_size=8)),
-    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=field.domain),
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
 
 prediction = infer(field)
@@ -132,7 +132,7 @@ field = gc.field_for(staged, aoi)                   # one Field on the AOI grid
 pipe = gz.Sequential([
     GridSampler(patcher=patcher),                    # geotoolz.patch_ops → geopatcher
     ApplyToChips(operator=gz.DNToReflectance(scale=1e-4)),  # geotoolz, per chip
-    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=field.domain),
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
 reflectance = pipe(field)
 ```

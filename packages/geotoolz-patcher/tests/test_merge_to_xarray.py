@@ -8,15 +8,9 @@ import pytest
 
 xr = pytest.importorskip("xarray")
 
-from geopatcher import (
-    GridDomain,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import SpatialPatcher, spatial
 from geopatcher._src.fields.xarray import XarrayField
+from geopatcher.fields import GridDomain
 
 
 def _da() -> xr.DataArray:
@@ -32,10 +26,10 @@ def _da() -> xr.DataArray:
 
 def _patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(6, 6)),
-        sampler=SpatialRegularStride(step=(6, 6)),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(6, 6)),
+        sampler=spatial.sampler.RegularStride(step=(6, 6)),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -51,7 +45,7 @@ def test_returns_dataarray_with_original_coords() -> None:
 
 
 def test_round_trip_identity_with_boxcar_no_overlap() -> None:
-    # SpatialBoxcar + non-overlapping stride → recon == original (modulo dtype).
+    # spatial.window.Boxcar + non-overlapping stride → recon == original (modulo dtype).
     da = _da()
     field = XarrayField(da)
     patcher = _patcher()

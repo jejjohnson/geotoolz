@@ -1,15 +1,15 @@
-"""`SpatialWindow` — boundary treatment for the patch.
+"""`spatial.window.Window` — boundary treatment for the patch.
 
-A `SpatialWindow` returns a weight array shaped like the geometry's patch. The
-weights multiply into the patch data on the way in (for `SpatialOverlapAdd`-
-style aggregations) and form the denominator on the way out so the
-overlap-add reconstruction recovers the unweighted field.
+A `spatial.window.Window` returns a weight array shaped like the geometry's patch. The
+weights multiply into the patch data on the way in (for
+`spatial.aggregation.OverlapAdd`- style aggregations) and form the denominator on the
+way out so the overlap-add reconstruction recovers the unweighted field.
 
-Five windows: `SpatialBoxcar` (no taper), `SpatialHann`, `SpatialTukey`,
-`SpatialGaussian`, and a `SpatialCustom` escape hatch for caller-supplied
-weight functions.
+Five windows: `spatial.window.Boxcar` (no taper), `spatial.window.Hann`,
+`spatial.window.Tukey`, `spatial.window.Gaussian`, and a `spatial.window.Custom` escape
+hatch for caller-supplied weight functions.
 
-Taper convention: `SpatialHann` and `SpatialTukey` are **periodic**
+Taper convention: `spatial.window.Hann` and `spatial.window.Tukey` are **periodic**
 (DFT-even, ``scipy.signal.windows.*(n, sym=False)``), applied separably
 along each axis. A periodic length-``N`` Hann sums to exactly ``1`` when
 shifted by ``N / 2`` (constant overlap-add), so with even ``N`` and
@@ -30,14 +30,17 @@ from typing import Any, ClassVar
 import numpy as np
 
 from geopatcher._src._serialize import config_from_fields
-from geopatcher._src.spatial.geometry import SpatialGeometry, SpatialRectangular
+from geopatcher._src.spatial.geometry import (
+    Geometry as SpatialGeometry,
+    Rectangular as SpatialRectangular,
+)
 
 
-class SpatialWindow:
+class Window:
     """Base for window functions.
 
     Subclasses implement `weights(geometry) -> Array`. The base class
-    handles the trivial `SpatialBoxcar` default.
+    handles the trivial `spatial.window.Boxcar` default.
     """
 
     forbid_in_yaml: ClassVar[bool] = False
@@ -50,7 +53,7 @@ class SpatialWindow:
 
 
 @dataclass(eq=False)
-class SpatialBoxcar(SpatialWindow):
+class Boxcar(Window):
     """Constant 1.0 — no edge taper."""
 
     def weights(self, geometry: SpatialGeometry) -> np.ndarray:
@@ -59,7 +62,7 @@ class SpatialBoxcar(SpatialWindow):
 
 
 @dataclass(eq=False)
-class SpatialHann(SpatialWindow):
+class Hann(Window):
     """Periodic Hann (raised-cosine) window — the standard overlap-add taper.
 
     Each axis of length ``n`` is ``scipy.signal.windows.hann(n, sym=False)``,
@@ -70,11 +73,11 @@ class SpatialHann(SpatialWindow):
     interior seams.
 
     Endpoints: ``w[0] = 0`` and ``w[-1] > 0``. Merged with
-    `SpatialOverlapAdd`, the domain's first row and column therefore get
+    `spatial.aggregation.OverlapAdd`, the domain's first row and column therefore get
     zero accumulated weight (filled with ``0.0``); see the "Window
     convention" section of the patching docs. With ``step == size`` every
     chip's first row/column is a zero-weight seam — overlap the chips or
-    use `SpatialBoxcar` for exact tiling.
+    use `spatial.window.Boxcar` for exact tiling.
 
     Axes shorter than 3 samples fall back to boxcar (all ones): a 1- or
     2-sample taper is ``[1]`` / ``[0, 1]``, which only zeroes data.
@@ -88,25 +91,25 @@ class SpatialHann(SpatialWindow):
 
 
 @dataclass(eq=False)
-class SpatialTukey(SpatialWindow):
+class Tukey(Window):
     """Periodic Tukey (tapered-cosine) window.
 
     Each axis of length ``n`` is
     ``scipy.signal.windows.tukey(n, alpha, sym=False)`` — the same periodic
-    (DFT-even) convention as `SpatialHann`, so ``alpha = 1.0`` is exactly
-    `SpatialHann` and ``alpha = 0.0`` is exactly `SpatialBoxcar`. A periodic
-    Tukey is COLA at hop ``n * (1 - alpha / 2)`` (``0.75 * n`` for the
+    (DFT-even) convention as `spatial.window.Hann`, so ``alpha = 1.0`` is exactly
+    `spatial.window.Hann` and ``alpha = 0.0`` is exactly `spatial.window.Boxcar`. A
+    periodic Tukey is COLA at hop ``n * (1 - alpha / 2)`` (``0.75 * n`` for the
     default ``alpha = 0.5``); other hops still reconstruct correctly under
-    `SpatialOverlapAdd`'s normalisation, just not as a partition of unity.
+    `spatial.aggregation.OverlapAdd`'s normalisation, just not as a partition of unity.
 
-    Like `SpatialHann`, ``w[0] = 0`` for ``alpha > 0`` (the leading
+    Like `spatial.window.Hann`, ``w[0] = 0`` for ``alpha > 0`` (the leading
     border-ring caveat applies), and axes shorter than 3 samples fall back
     to boxcar.
 
     Args:
         alpha: Fraction of the window occupied by the cosine taper
-            (``0.0`` is `SpatialBoxcar`, ``1.0`` is `SpatialHann`). Defaults
-            to ``0.5``.
+            (``0.0`` is `spatial.window.Boxcar`, ``1.0`` is `spatial.window.Hann`).
+            Defaults to ``0.5``.
     """
 
     alpha: float = 0.5
@@ -125,7 +128,7 @@ class SpatialTukey(SpatialWindow):
 
 
 @dataclass(eq=False)
-class SpatialGaussian(SpatialWindow):
+class Gaussian(Window):
     """Separable Gaussian envelope centred on the patch.
 
     ``sigma`` is a **fraction of the patch half-width**, not a pixel
@@ -136,7 +139,7 @@ class SpatialGaussian(SpatialWindow):
     standard deviations (edge weight ``≈ exp(-2) ≈ 0.14`` for large patches).
     The weights never reach zero, so a Gaussian has no zero-weight border
     ring, but it is not a partition of unity — rely on
-    `SpatialOverlapAdd`'s normalisation.
+    `spatial.aggregation.OverlapAdd`'s normalisation.
 
     Args:
         sigma: Standard deviation as a fraction of the half-width.
@@ -154,7 +157,7 @@ class SpatialGaussian(SpatialWindow):
 
 
 @dataclass(eq=False)
-class SpatialCustom(SpatialWindow):
+class Custom(Window):
     """Caller-supplied weight function — the escape hatch.
 
     Args:
@@ -171,13 +174,13 @@ class SpatialCustom(SpatialWindow):
 
 
 def geom_shape(geometry: SpatialGeometry) -> tuple[int, ...]:
-    """Shape of the weight array a `SpatialWindow` returns for ``geometry``.
+    """Shape of the weight array a `spatial.window.Window` returns for ``geometry``.
 
     Public so third-party windows (e.g. ``geotoolz.patch_ops.SpatialTriangular``)
     size their weights exactly like the built-in ones.
 
     Args:
-        geometry: A fixed-size geometry — `SpatialRectangular`, or any
+        geometry: A fixed-size geometry — `spatial.geometry.Rectangular`, or any
             object exposing a ``size`` sequence.
 
     Returns:
@@ -192,10 +195,11 @@ def geom_shape(geometry: SpatialGeometry) -> tuple[int, ...]:
     if size is not None:
         return tuple(int(s) for s in size)
     raise TypeError(
-        f"SpatialWindow weights aren't defined for {type(geometry).__name__} - "
-        "only fixed-shape geometries (e.g. SpatialRectangular). Use "
-        "SpatialBoxcar for ragged geometries like SpatialRadiusGraph / "
-        "SpatialKNNGraph / SpatialPolygonIntersection."
+        f"spatial.window.Window weights aren't defined for {type(geometry).__name__} - "
+        "only fixed-shape geometries (e.g. spatial.geometry.Rectangular). Use "
+        "spatial.window.Boxcar for ragged geometries like "
+        "spatial.geometry.RadiusGraph / spatial.geometry.KNNGraph / "
+        "spatial.geometry.PolygonIntersection."
     )
 
 

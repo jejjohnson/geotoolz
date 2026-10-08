@@ -32,3 +32,6 @@ jobs:
       - name: Typecheck geotoolz-products
         run: uv run --group typecheck ty check src/geoproducts
         working-directory: packages/geotoolz-products
+      - name: Typecheck geotoolz-cloud
+        run: uv run --group typecheck ty check src/geocloud
+        working-directory: packages/geotoolz-cloud
