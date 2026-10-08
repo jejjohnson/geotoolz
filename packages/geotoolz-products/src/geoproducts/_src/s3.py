@@ -29,8 +29,14 @@ from geoproducts._src.net import backoff_seconds, retrying
 
 __all__ = ["download_object", "list_objects", "object_url", "s3_wait"]
 
-#: Unsigned requests to the buckets' home region.
-_ANONYMOUS = {"skip_signature": True, "region": "us-east-1"}
+#: Unsigned requests to AWS itself in the buckets' home region. The endpoint
+#: is explicit so ``$AWS_ENDPOINT_URL`` (pointing at MinIO or LocalStack for
+#: the user's own work) never redirects these public reads.
+_ANONYMOUS = {
+    "skip_signature": True,
+    "region": "us-east-1",
+    "endpoint": "https://s3.us-east-1.amazonaws.com",
+}
 
 
 def _files(extra: str) -> ModuleType:
@@ -53,8 +59,8 @@ def s3_wait(outcome: Any, attempt: int, *, base_s: float = 1.0) -> float | None:
     S3 occasionally answers ``NoSuchBucket`` for a bucket that exists (and
     that the previous request listed); that error is retried with
     exponential backoff. obstore already retries 5xx answers and dropped
-    connections, so everything else — a missing key included — fails at
-    once.
+    connections (and paces 429 / 503 throttling with its own backoff), so
+    everything else — a missing key included — fails at once.
 
     Examples:
         >>> s3_wait(OSError("<Code>NoSuchBucket</Code>"), 0)
@@ -125,6 +131,24 @@ def download_object(
         Exception: The download failed (obstore's error, after its retries).
     """
     files = _files(extra)
+    parent = key.rsplit("/", 1)[0] if "/" in key else ""
+
+    def wait(outcome: Any, attempt: int) -> float | None:
+        # A download starts with a HEAD, whose 404 has no body: a missing
+        # key and S3's spurious ``NoSuchBucket`` look alike. Listing the
+        # key's directory tells them apart (a LIST 404 names its code).
+        if isinstance(outcome, FileNotFoundError):
+            try:
+                files.ls(
+                    f"s3://{bucket}/{parent}",
+                    recursive=False,
+                    storage_options=_ANONYMOUS,
+                )
+            except Exception as probe:
+                return s3_wait(probe, attempt, base_s=backoff_s)
+            return None
+        return s3_wait(outcome, attempt, base_s=backoff_s)
+
     return retrying(
         partial(
             files.download,
@@ -132,7 +156,7 @@ def download_object(
             Path(dest),
             storage_options=_ANONYMOUS,
         ),
-        wait=partial(s3_wait, base_s=backoff_s),
+        wait=wait,
         attempts=attempts,
         sleep=sleep,
     )

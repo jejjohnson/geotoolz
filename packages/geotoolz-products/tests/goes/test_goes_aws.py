@@ -185,15 +185,26 @@ class TestRetries:
 
     def test_spurious_no_such_bucket_is_retried(self, flaky, tmp_path) -> None:
         target = tmp_path / RADC
-        calls = flaky([OSError("<Code>NoSuchBucket</Code>"), target])
-        assert aws.download(RADC, tmp_path) == target
+        calls = flaky([OSError("<Code>NoSuchBucket</Code>"), []])
+        assert aws.list_files(satellite="G19", start=datetime(2026, 10, 7, 12)) == []
         assert len(calls) == 2
+        # A download's 404 has no body: the directory listing probe tells a
+        # spurious NoSuchBucket (retry) from a missing key (stop).
+        calls = flaky(
+            [
+                FileNotFoundError(""),
+                OSError("<Code>NoSuchBucket</Code>"),
+                target,
+            ]
+        )
+        assert aws.download(RADC, tmp_path) == target
+        assert len(calls) == 3  # download, probe listing, download
 
     def test_missing_key_fails_at_once(self, flaky, tmp_path) -> None:
-        calls = flaky([FileNotFoundError("NoSuchKey")])
+        calls = flaky([FileNotFoundError(""), []])
         with pytest.raises(FileNotFoundError):
             aws.download(RADC, tmp_path)
-        assert len(calls) == 1
+        assert len(calls) == 2  # the download and one probe listing
 
     def test_retries_are_bounded(self, flaky) -> None:
         calls = flaky([OSError("NoSuchBucket")])

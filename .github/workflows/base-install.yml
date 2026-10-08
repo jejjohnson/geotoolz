@@ -103,7 +103,7 @@ jobs:
           # The extras really are absent from this environment.
           for module in (
               "fsspec", "duckdb", "xarray", "zarr", "pystac", "pystac_client",
-              "planetary_computer", "earthaccess", "ee", "geopatcher",
+              "planetary_computer", "earthaccess", "ee", "geopatcher", "geocloud",
           ):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 

@@ -183,7 +183,8 @@ def stage(
         cache: Reuse an existing cache instance. ``None`` builds a
             default one bound to ``dest`` (or the env-var default).
         retries: Per-URI retry budget for *transient* failures only
-            (network blips, partial reads — the shared policy of
+            (network failures left after the object-store client's own
+            retries, short reads — the shared policy of
             `geocatalog._src.utils.retry.retry_transient_io`). Fatal errors
             such as `FileNotFoundError` or `PermissionError` fail the
             URI immediately; either way a failed URI is then subject

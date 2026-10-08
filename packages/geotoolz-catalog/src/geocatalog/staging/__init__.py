@@ -1,6 +1,6 @@
 """`geocatalog.staging` — copy a catalog's remote assets to local disk.
 
-`stage` downloads (through fsspec) every asset a catalog points at,
+`stage` downloads (through `geocloud.files`) every asset a catalog points at,
 skipping files a `LocalCache` already holds, and returns the same
 catalog with its paths rewritten to the local copies. Hand the result to
 `geocatalog.patch.field_for` or the `geocatalog.load` loaders.
