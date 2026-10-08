@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from geoproducts._src.extras import require
+from geoproducts._src.presets import geotoolz_module, parallax_correct, rgb_recipe
 from geoproducts.goes import constants, recipes
 
 
@@ -38,7 +38,7 @@ __all__ = [
 
 
 def _geotoolz(module: str, preset: str) -> Any:
-    return require(f"geotoolz.{module}", f"goes.presets.{preset}", "operators")
+    return geotoolz_module(module, f"goes.presets.{preset}")
 
 
 def NDVI() -> Operator:
@@ -116,7 +116,8 @@ def ParallaxCorrect(
     Raises:
         ImportError: geotoolz is not installed (the ``[operators]`` extra).
     """
-    return _geotoolz("geom", "ParallaxCorrect").GeostationaryParallaxCorrect(
+    return parallax_correct(
+        "goes.presets.ParallaxCorrect",
         satellite_lon_deg=satellite_lon_deg,
         satellite_height_m=constants.SATELLITE_HEIGHT_M,
         target_height_m=target_height_m,
@@ -145,14 +146,7 @@ def Recipe(recipe: recipes.Recipe | str) -> Operator:
 
 
 def _rgb_recipe(spec: recipes.Recipe, preset: str) -> Operator:
-    return _geotoolz("viz", preset).RGBRecipe(
-        red=spec.red,
-        green=spec.green,
-        blue=spec.blue,
-        vmin=spec.vmin,
-        vmax=spec.vmax,
-        gamma=spec.gamma,
-    )
+    return rgb_recipe(spec, f"goes.presets.{preset}")
 
 
 def TrueColor() -> Operator:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from geoproducts._src.hdf import attr, scalar
+from geoproducts._src.hdf import attr, scalar, time_attr
 
 
 # ABI scalar variables use -999 as their fill (PUG Vol. 3), not always
@@ -17,10 +17,6 @@ SCALAR_FILL = -999.0
 def abi_scalar(f: Any, name: str) -> float:
     """An ABI scalar variable as ``float``; ``NaN`` when absent or ``-999``."""
     return scalar(f, name, fill=SCALAR_FILL)
-
-
-def _parse_time(value: str | None) -> datetime | None:
-    return None if value is None else datetime.fromisoformat(value)
 
 
 @dataclass(frozen=True)
@@ -48,8 +44,8 @@ class FileInfo:
             scene=str(attr(f, "scene_id", "")),
             dataset_name=str(attr(f, "dataset_name", "")),
             title=str(attr(f, "title", "")),
-            start_time=_parse_time(attr(f, "time_coverage_start")),
-            end_time=_parse_time(attr(f, "time_coverage_end")),
+            start_time=time_attr(f, "time_coverage_start"),
+            end_time=time_attr(f, "time_coverage_end"),
             satellite_lon_deg=round(abi_scalar(f, "nominal_satellite_subpoint_lon"), 4),
             satellite_height_m=sat_height,
         )

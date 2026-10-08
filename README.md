@@ -52,7 +52,7 @@ itself becomes an operator: *tile → predict → stitch* is one more
 | [`geotoolz`](packages/geotoolz) | `geotoolz` | Carrier-preserving `pipekit.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/) |
 | [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/patcher/) |
 | [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/catalog/) |
-| [`geotoolz-products`](packages/geotoolz-products) | `geoproducts` | Readers for Earth-observation data products — the `ProductReader` ABC, mission readers such as GOES-R ABI, and provider clients such as Carbon Mapper — each returning a georeader `GeoTensor` | [Products →](https://jejjohnson.github.io/geotoolz/products/) |
+| [`geotoolz-products`](packages/geotoolz-products) | `geoproducts` | Readers for Earth-observation data products — the `ProductReader` ABC, mission readers such as GOES-R ABI and Himawari AHI, and provider clients such as Carbon Mapper — each returning a georeader `GeoTensor` | [Products →](https://jejjohnson.github.io/geotoolz/products/) |
 
 Import names are unchanged from the pre-monorepo repos — only the
 distribution names carry the `geotoolz-` prefix. The dependency graph is
@@ -253,6 +253,7 @@ pip install geotoolz-catalog                      # catalog only
 pip install 'geotoolz-catalog[patch]'             # catalog + patcher bridge
 pip install geotoolz-products                     # product readers (geoproducts)
 pip install 'geotoolz-products[goes]'             # + the GOES-R ABI reader
+pip install 'geotoolz-products[himawari]'         # + Himawari L2 cloud products (HSD needs no extra)
 pip install 'geotoolz-products[carbonmapper]'     # + the Carbon Mapper client
 ```
 

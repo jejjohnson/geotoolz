@@ -277,6 +277,12 @@ jobs:
               assert "geotoolz-products[goes]" in str(exc), exc
           else:
               raise AssertionError("goes.Reader ran without h5py")
+          try:
+              geoproducts.himawari.L2Reader("cmsk.nc")
+          except ImportError as exc:
+              assert "geotoolz-products[himawari]" in str(exc), exc
+          else:
+              raise AssertionError("himawari.L2Reader ran without h5py")
           print("geotoolz-products base install OK", geoproducts.__version__)
           PY
       # Coverage is off: extras-gated paths are unreachable here, so the

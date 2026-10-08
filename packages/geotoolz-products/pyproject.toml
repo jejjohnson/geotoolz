@@ -55,6 +55,10 @@ operators = ["geotoolz"]
 # i.e. HDF5, read chunk-by-chunk through h5py. The NOAA bucket helpers
 # (``goes.aws``) are standard library and need no extra.
 goes = ["h5py>=3.10"]
+# Himawari AHI (``geoproducts.himawari``): the HSD L1b reader and the bucket
+# helpers are numpy + standard library; h5py is only for the NOAA L2 cloud
+# products (NetCDF-4).
+himawari = ["h5py>=3.10"]
 carbonmapper = [
     "requests>=2",
     "pydantic>=2",

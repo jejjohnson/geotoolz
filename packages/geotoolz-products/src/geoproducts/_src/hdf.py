@@ -23,6 +23,7 @@ import os
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import IO, Any, ClassVar
 
@@ -41,6 +42,7 @@ __all__ = [
     "grid_variables",
     "h5py_module",
     "scalar",
+    "time_attr",
     "unpacked",
 ]
 
@@ -65,6 +67,18 @@ def attr(obj: Any, name: str, default: Any = None) -> Any:
     elif isinstance(value, np.generic):
         value = value.item()
     return value
+
+
+def time_attr(obj: Any, name: str) -> datetime | None:
+    """An ISO-8601 attribute (``time_coverage_start``, …) as a ``datetime``.
+
+    Returns ``None`` when the attribute is absent or not a timestamp.
+    """
+    value = attr(obj, name)
+    try:
+        return None if value is None else datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
 
 
 def scalar(f: Any, name: str, *, fill: float | None = None) -> float:
