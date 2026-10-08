@@ -136,16 +136,16 @@ nav:
       - CLI: catalog/cli.md
       - Schema versions: catalog/schema-versions.md
       - Logging: catalog/logging.md
-  - Products — geoproducts:
-      - Home: products/index.md
-      - Adding a product reader: products/product-readers.md
-      - Carbon Mapper: products/carbonmapper.md
-      - API Reference: products/api.md
       - Design:
           - Exact grid alignment: catalog/design/exact-grid-alignment.md
           - Query & matchup: catalog/design/query-matchup.md
           - Parameter vocabulary: catalog/design/vocabulary.md
       - Changelog: catalog/changelog.md
+  - Products — geoproducts:
+      - Home: products/index.md
+      - Adding a product reader: products/product-readers.md
+      - Carbon Mapper: products/carbonmapper.md
+      - API Reference: products/api.md
   - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
   - Contributing: contributing.md
 
