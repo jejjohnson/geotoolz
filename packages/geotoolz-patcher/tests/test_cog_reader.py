@@ -281,6 +281,38 @@ def test_read_reproject_like_matches_sync(cog_path: Path):
     _assert_same(got, read.read_reproject_like(sync, like))
 
 
+def test_read_reproject_like_anisotropic_resolution_keeps_extent(cog_path: Path):
+    """``resolution_dst`` is ``(x, y)``: rows come from y, columns from x."""
+    reader = _open(cog_path)
+    (lon,), (lat,) = transform_points(
+        "EPSG:32630", "EPSG:4326", [500_600.0], [3_999_500.0]
+    )
+    like = GeoTensor(
+        np.zeros((1, 40, 50), dtype="float32"),
+        transform=Affine(0.0003, 0.0, lon, 0.0, -0.0003, lat),
+        crs="EPSG:4326",
+        fill_value_default=0,
+    )
+    got = asyncio.run(
+        cog.read_reproject_like(reader, like, resolution_dst=(0.0006, 0.0002))
+    )
+    assert got.res == pytest.approx((0.0006, 0.0002))
+    assert got.shape[-2:] == (60, 25)  # 40 * 3 / 2 rows, 50 / 2 columns
+    assert got.bounds == pytest.approx(like.bounds)
+
+
+def test_bounded_read_that_misses_the_image_returns_none(cog_path: Path):
+    """``boundless=False`` off the image: ``None``, like georeader (no fetch)."""
+    reader = _open(cog_path)
+    sync = RasterioReader(str(cog_path))
+    off = Window(_W + 5, 0, 4, 4)
+    assert asyncio.run(cog.read_from_window(reader, off, boundless=False)) is None
+    assert read.read_from_window(sync, off, boundless=False) is None
+    far = (600_000.0, 3_000_000.0, 600_300.0, 3_000_300.0)
+    assert asyncio.run(cog.read_from_bounds(reader, far, boundless=False)) is None
+    assert read.read_from_bounds(sync, far, boundless=False) is None
+
+
 def test_read_to_crs_matches_sync(cog_path: Path):
     reader = _open(cog_path)
     got = asyncio.run(cog.read_to_crs(reader, "EPSG:4326"))

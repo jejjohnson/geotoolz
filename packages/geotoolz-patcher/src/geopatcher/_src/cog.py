@@ -291,8 +291,16 @@ class AsyncCogReader:
 # ----------------------------------------------------------------- read_*
 async def read_from_window(
     reader: AsyncCogReader, window: Window, boundless: bool = True
-) -> GeoTensor:
-    """Read ``window`` of ``reader`` (see `AsyncCogReader.read_from_window`)."""
+) -> GeoTensor | None:
+    """Read ``window`` of ``reader`` (see `AsyncCogReader.read_from_window`).
+
+    Like `georeader.read.read_from_window`, ``boundless=False`` on a
+    window that misses the image returns ``None`` (no fetch).
+    """
+    if not boundless and not rasterio.windows.intersect(
+        [_window(*_snap_window(window)), reader._raster_window]
+    ):
+        return None
     return await reader.read_from_window(window, boundless=boundless).load(
         boundless=boundless
     )
@@ -304,7 +312,7 @@ async def read_from_bounds(
     crs_bounds: Any = None,
     pad_add: tuple[int, int] = (0, 0),
     boundless: bool = True,
-) -> GeoTensor:
+) -> GeoTensor | None:
     """Async `georeader.read.read_from_bounds`: the pixels covering ``bounds``."""
     window = _read.window_from_bounds(reader, bounds, crs_bounds)
     if any(p > 0 for p in pad_add):
@@ -321,7 +329,7 @@ async def read_from_polygon(
     pad_add: tuple[int, int] = (0, 0),
     boundless: bool = True,
     window_surrounding: bool = False,
-) -> GeoTensor:
+) -> GeoTensor | None:
     """Async `georeader.read.read_from_polygon`: the pixels covering ``polygon``."""
     window = _read.window_from_polygon(
         reader, polygon, crs_polygon, window_surrounding=window_surrounding
@@ -339,7 +347,7 @@ async def read_from_center_coords(
     shape: tuple[int, int],
     crs_center_coords: Any = None,
     boundless: bool = True,
-) -> GeoTensor:
+) -> GeoTensor | None:
     """Async `georeader.read.read_from_center_coords`: a ``shape`` chip at a point."""
     window = _read.window_from_center_coords(
         reader, center_coords, shape, crs_center_coords
@@ -424,17 +432,19 @@ async def read_reproject_like(
 ) -> GeoTensor:
     """Async `georeader.read.read_reproject_like`: onto ``data_like``'s grid.
 
-    With ``resolution_dst`` the grid keeps ``data_like``'s extent at the
-    new pixel size.
+    With ``resolution_dst`` (a number, or ``(x, y)`` like ``.res``) the
+    grid keeps ``data_like``'s extent at the new pixel size. Unlike
+    georeader 2.2, whose output shape takes the x resolution for the
+    height, anisotropic tuples size rows from y and columns from x.
     """
     height, width = data_like.shape[-2:]
     if resolution_dst is not None:
-        res_y, res_x = (
+        res_x, res_y = (
             (resolution_dst, resolution_dst)
             if isinstance(resolution_dst, int | float)
             else resolution_dst
         )
-        like_y, like_x = data_like.res
+        like_x, like_y = data_like.res
         height = round(height * like_y / res_y)
         width = round(width * like_x / res_x)
     return await read_reproject(
