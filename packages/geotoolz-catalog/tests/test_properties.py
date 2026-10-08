@@ -24,13 +24,9 @@ import pyproj
 import pytest
 from hypothesis import HealthCheck, assume, given, settings, strategies as st
 
-from geocatalog import (
-    InMemoryGeoCatalog,
-    from_geoparquet,
-    intersect,
-    query,
-    to_geoparquet,
-)
+from geocatalog import intersect, query
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.storage import from_geoparquet, to_geoparquet
 
 from .strategies import bbox_strategy_4326, catalog_strategy
 

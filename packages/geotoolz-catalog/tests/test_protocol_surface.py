@@ -10,8 +10,10 @@ import pyproj
 import pytest
 import shapely
 
-from geocatalog import CatalogDomain, GeoCatalog, InMemoryGeoCatalog
+from geocatalog import GeoCatalog
 from geocatalog._src.base import GeoCatalog as _ProtocolCls
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.patch import CatalogDomain
 
 
 def _mem(geoms: list[shapely.Geometry | None]) -> InMemoryGeoCatalog:
@@ -33,7 +35,7 @@ def _as(backend: str, mem: InMemoryGeoCatalog) -> GeoCatalog:
     if backend == "memory":
         return mem
     pytest.importorskip("duckdb")
-    from geocatalog import DuckDBGeoCatalog
+    from geocatalog.backends import DuckDBGeoCatalog
 
     return DuckDBGeoCatalog.from_memory(mem)
 
@@ -114,7 +116,7 @@ def test_catalog_domain_crs_does_not_materialise_duckdb(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("duckdb")
-    from geocatalog import DuckDBGeoCatalog
+    from geocatalog.backends import DuckDBGeoCatalog
 
     duck = DuckDBGeoCatalog.from_memory(_mem([shapely.box(0, 0, 10, 10)]))
 

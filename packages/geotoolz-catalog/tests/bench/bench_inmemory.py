@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from geocatalog import InMemoryGeoCatalog, intersect, query, union
+from geocatalog import intersect, query, union
+from geocatalog.backends import InMemoryGeoCatalog
 
 from .conftest import make_inmemory_catalog
 

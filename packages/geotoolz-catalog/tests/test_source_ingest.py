@@ -465,7 +465,7 @@ def test_replace_drops_matchups_of_replaced_items() -> None:
 
 def test_stac_items_with_bad_projection_are_not_silently_skipped() -> None:
     pystac = pytest.importorskip("pystac")
-    from geocatalog import from_stac_items
+    from geocatalog.sources import from_stac_items
 
     item = pystac.Item(
         id="x",

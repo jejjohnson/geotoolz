@@ -17,18 +17,16 @@ import pytest
 import shapely
 
 import geocatalog
-from geocatalog import (
-    CatalogBundle,
+from geocatalog import open_catalog
+from geocatalog._src._deprecation import deprecated_alias, renamed_kwargs
+from geocatalog.backends import (
     CatalogClosedError,
     CatalogMetadataError,
     CatalogSchemaError,
     GeoCatalogError,
     InMemoryGeoCatalog,
-    from_geoparquet,
-    open_catalog,
-    to_geoparquet,
 )
-from geocatalog._src._deprecation import deprecated_alias, renamed_kwargs
+from geocatalog.storage import CatalogBundle, from_geoparquet, to_geoparquet
 
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "geocatalog"
@@ -129,7 +127,7 @@ def test_kind_shims(parquet: Path) -> None:
 
 def test_kind_shims_on_duckdb(parquet: Path) -> None:
     pytest.importorskip("duckdb")
-    from geocatalog import DuckDBGeoCatalog
+    from geocatalog.backends import DuckDBGeoCatalog
 
     with pytest.warns(DeprecationWarning, match="`backend`"):
         duck = DuckDBGeoCatalog.open(parquet, backend="vector")  # type: ignore[call-arg]
@@ -173,7 +171,9 @@ def test_builder_shims(tmp_path: Path) -> None:
         pytest.warns(DeprecationWarning, match="`target_crs` is deprecated, use `crs`"),
         pytest.raises(ValueError, match="engine must be 'memory' or 'duckdb'"),
     ):
-        geocatalog.build_raster_catalog([], backend="bogus", target_crs="EPSG:4326")  # type: ignore[call-arg]
+        geocatalog.build.build_raster_catalog(
+            [], backend="bogus", target_crs="EPSG:4326"
+        )  # type: ignore[call-arg]
 
 
 def test_stac_search_shims() -> None:
@@ -190,7 +190,7 @@ def test_stac_search_shims() -> None:
             return _Search()
 
     with pytest.warns(DeprecationWarning) as record:
-        cat = geocatalog.from_stac_search(
+        cat = geocatalog.sources.from_stac_search(
             _Client(),
             collections=["c"],
             bbox=(0, 0, 1, 1),  # type: ignore[call-arg]
@@ -313,7 +313,7 @@ def test_bad_engine_is_a_value_error(parquet: Path) -> None:
 
 def test_closed_duckdb_catalog_raises_catalog_closed_error(parquet: Path) -> None:
     duckdb = pytest.importorskip("duckdb")
-    from geocatalog import DuckDBGeoCatalog
+    from geocatalog.backends import DuckDBGeoCatalog
 
     duck = DuckDBGeoCatalog.open(parquet)
     derived = duck.query(bounds=(0, 0, 50, 50), crs="EPSG:32629")
@@ -415,8 +415,8 @@ def test_duckdb_open_rejects_a_bad_kind_before_connecting(
     parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("duckdb")
-    from geocatalog import DuckDBGeoCatalog
     from geocatalog._src import duckdb_backend
+    from geocatalog.backends import DuckDBGeoCatalog
 
     def no_connect() -> None:
         raise AssertionError("connected before validating `kind`")
@@ -430,8 +430,8 @@ def test_duckdb_open_closes_the_connection_on_a_bad_stored_kind(
     parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     duckdb = pytest.importorskip("duckdb")
-    from geocatalog import DuckDBGeoCatalog
     from geocatalog._src import duckdb_backend
+    from geocatalog.backends import DuckDBGeoCatalog
 
     opened: list[Any] = []
     real_connect = duckdb.connect
@@ -455,7 +455,7 @@ def test_closed_error_pickles(parquet: Path) -> None:
     import pickle
 
     pytest.importorskip("duckdb")
-    from geocatalog import DuckDBGeoCatalog
+    from geocatalog.backends import DuckDBGeoCatalog
 
     duck = DuckDBGeoCatalog.open(parquet)
     duck.close()
@@ -471,7 +471,7 @@ def test_closed_error_pickles(parquet: Path) -> None:
     code = (
         "import pickle, sys\n"
         "err = pickle.loads(sys.stdin.buffer.read())\n"
-        "from geocatalog import CatalogClosedError\n"
+        "from geocatalog.backends import CatalogClosedError\n"
         "assert isinstance(err, CatalogClosedError), type(err)\n"
     )
     subprocess.run(

@@ -24,7 +24,7 @@ the items into `from_stac_items`.
 ```python
 import geocatalog as gc
 
-catalog = gc.from_stac_search(
+catalog = gc.sources.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     collections=["sentinel-2-l2a"],
     bounds=(-120.25, 38.85, -119.85, 39.30),    # Lake Tahoe
@@ -66,7 +66,7 @@ client = Client.open(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     modifier=pc.sign_inplace,    # signs every Item and Asset
 )
-catalog = gc.from_stac_search(
+catalog = gc.sources.from_stac_search(
     client,
     collections=["sentinel-2-l2a"],
     bounds=(-120.25, 38.85, -119.85, 39.30),
@@ -92,7 +92,7 @@ ingest periodically, or when downstream consumers need to know
 ```python
 import pandas as pd
 import geocatalog as gc
-from geocatalog.bundle import CatalogBundle
+from geocatalog.storage import CatalogBundle
 from geocatalog.sources import STACSource
 
 bundle = CatalogBundle.empty(crs="EPSG:4326")
@@ -174,5 +174,5 @@ Pass `bundle.catalog` anywhere a `GeoCatalog` is expected.
   `bundle.ingest` actually does
 - [Recipes: large archives](large-archives.md) — when the STAC query
   itself returns 10⁶+ items
-- [API: `STACSource`](../api/reference.md)
+- [API: `STACSource`](../api/sources.md)
 - [Catalog intro walkthrough ↗](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/catalog/01_intro.ipynb) — build → query → load against a real eight-scene Sentinel-2 archive on MPC.

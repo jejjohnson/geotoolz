@@ -141,10 +141,10 @@ src/geocatalog/_src/
     _field_for.py              # field_for() — bridge to a geopatcher RasterField
 ```
 
-Public namespaces (`geocatalog.sources`, `geocatalog.bundle`,
-`geocatalog.matchup`, `geocatalog.staging`) re-export these; the
-top-level `geocatalog` package re-exports the commonly used names
-(`CatalogBundle`, `matchup`, `stage`, …).
+Public namespaces (`geocatalog.sources`, `geocatalog.storage`,
+`geocatalog.matchup`, `geocatalog.staging`, `geocatalog.patch`)
+re-export these, each name from exactly one of them (see the
+[API reference](../api/reference.md)).
 
 ### 4.2 `Source` Protocol
 
@@ -274,7 +274,7 @@ Discovery, ingest, matchup and staging are Python APIs only. The
 
 ```python
 import pandas as pd
-from geocatalog import CatalogBundle
+from geocatalog.storage import CatalogBundle
 from geocatalog.sources import EarthAccessSource
 
 bundle = CatalogBundle.empty(crs="EPSG:4326")
@@ -611,7 +611,7 @@ from geotoolz.geom.coregister import RasterToRasterLike
 june = pd.Interval(pd.Timestamp("2024-06-01"), pd.Timestamp("2024-06-30"), closed="both")
 
 # 1. Discover & ingest into one bundle
-bundle = gc.CatalogBundle.empty(crs="EPSG:32629")
+bundle = gc.storage.CatalogBundle.empty(crs="EPSG:32629")
 bundle.ingest(
     EarthAccessSource(),
     collection="MOD09GA",
@@ -630,22 +630,22 @@ bundle.ingest(
 modis = bundle.catalog.where("collection == 'MOD09GA'")
 s2 = bundle.catalog.where("collection == 'sentinel-2-l2a'")
 bundle.write_matchups(
-    gc.matchup(modis, s2, spatial=IouAtLeast(0.2), temporal=NearestInTime(dt="6h")),
+    gc.matchup.matchup(modis, s2, spatial=IouAtLeast(0.2), temporal=NearestInTime(dt="6h")),
     tag="modis_s2_pairs_v1",
 )
 bundle.to_directory("my_catalog/")
 
 # 3. Stage bytes for the assets we need
-staged_modis = gc.stage(modis, dest="./staged/", assets=["red", "nir"])
-staged_s2 = gc.stage(s2, dest="./staged/", assets=["red", "nir"])
+staged_modis = gc.staging.stage(modis, dest="./staged/", assets=["red", "nir"])
+staged_s2 = gc.staging.stage(s2, dest="./staged/", assets=["red", "nir"])
 
 # 4. One RasterField per source over the area of interest
 aoi = gc.GeoSlice(
     bounds=(-9.5, 38.5, -8.5, 39.5), interval=june,
     resolution=(0.005, 0.005), crs="EPSG:4326",
 )
-modis_field = gc.field_for(staged_modis, aoi, asset="red")
-s2_field = gc.field_for(staged_s2, aoi, asset="red")
+modis_field = gc.patch.field_for(staged_modis, aoi, asset="red")
+s2_field = gc.patch.field_for(staged_s2, aoi, asset="red")
 
 matched = MatchedField(
     primary=modis_field,

@@ -15,7 +15,9 @@ import shapely
 
 pystac = pytest.importorskip("pystac")
 
-from geocatalog import InMemoryGeoCatalog, from_stac_items, to_stac_collection
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.sources import from_stac_items
+from geocatalog.storage import to_stac_collection
 from tests.conftest import assert_catalogs_equal
 
 

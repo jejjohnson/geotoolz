@@ -10,9 +10,11 @@ import pytest
 import rasterio
 from rasterio.transform import from_bounds
 
-from geocatalog import GeoSlice, build_raster_catalog, load_raster_timeseries
+from geocatalog import GeoSlice
 from geocatalog._src._timeutil import filename_interval
 from geocatalog._src.raster import _timeseries_days
+from geocatalog.build import build_raster_catalog
+from geocatalog.load import load_raster_timeseries
 
 
 BOUNDS = (500_000.0, 4_000_000.0, 500_200.0, 4_000_200.0)

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from geocatalog import build_raster_catalog
+from geocatalog.build import build_raster_catalog
 
 
 REGEX = r"S2_T29SND_(?P<date>\d{8})"

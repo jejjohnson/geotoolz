@@ -30,14 +30,9 @@ import pandas as pd
 import pytest
 from shapely.geometry import box
 
-from geocatalog import (
-    Align,
-    GeoSlice,
-    GridAlignmentWarning,
-    InMemoryGeoCatalog,
-    divide_evenly,
-    is_grid_aligned,
-)
+from geocatalog import GeoSlice
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.grid import Align, GridAlignmentWarning, divide_evenly, is_grid_aligned
 
 
 # ---------------------------------------------------------------------------
@@ -422,19 +417,3 @@ class TestDegreeAlignError:
             _make_slice(
                 (0.0, 0.0, 1.0005, 1.0), (0.001, 0.001), crs="EPSG:4326", align="error"
             )
-
-
-# ---------------------------------------------------------------------------
-# Hybrid layout: new symbols available via geocatalog.types
-# ---------------------------------------------------------------------------
-
-
-class TestHybridLayoutExports:
-    def test_types_subnamespace_reexports(self) -> None:
-        import geocatalog
-        from geocatalog import types as types_ns
-
-        assert types_ns.divide_evenly is geocatalog.divide_evenly
-        assert types_ns.is_grid_aligned is geocatalog.is_grid_aligned
-        assert types_ns.Align is geocatalog.Align
-        assert types_ns.GridAlignmentWarning is geocatalog.GridAlignmentWarning

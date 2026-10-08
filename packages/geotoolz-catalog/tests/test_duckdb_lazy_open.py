@@ -13,12 +13,9 @@ import shapely
 
 pytest.importorskip("duckdb")
 
-from geocatalog import (
-    DuckDBGeoCatalog,
-    InMemoryGeoCatalog,
-    open_catalog,
-    to_geoparquet,
-)
+from geocatalog import open_catalog
+from geocatalog.backends import DuckDBGeoCatalog, InMemoryGeoCatalog
+from geocatalog.storage import to_geoparquet
 
 
 def _mem(n: int = 400, seed: int = 0) -> InMemoryGeoCatalog:

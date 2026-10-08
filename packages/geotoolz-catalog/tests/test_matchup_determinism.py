@@ -12,7 +12,6 @@ import pytest
 import shapely
 from shapely.geometry import box
 
-from geocatalog import InMemoryGeoCatalog
 from geocatalog._src.bundle import CatalogBundle
 from geocatalog._src.matchup import (
     CentroidWithin,
@@ -26,6 +25,7 @@ from geocatalog._src.matchup import (
 )
 from geocatalog._src.matchup.engine import MatchupRow
 from geocatalog._src.sources._base import SourceRow
+from geocatalog.backends import InMemoryGeoCatalog
 
 
 T0 = datetime(2024, 6, 1, 12, tzinfo=UTC)

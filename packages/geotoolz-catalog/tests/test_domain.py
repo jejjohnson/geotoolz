@@ -6,7 +6,9 @@ import geopandas as gpd
 import pandas as pd
 import shapely.geometry
 
-from geocatalog import CatalogDomain, GeoSlice, InMemoryGeoCatalog
+from geocatalog import GeoSlice
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.patch import CatalogDomain
 
 
 def _toy_catalog() -> InMemoryGeoCatalog:

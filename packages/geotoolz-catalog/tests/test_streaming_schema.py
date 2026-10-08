@@ -19,8 +19,9 @@ import pyarrow.parquet as pq
 import pytest
 import shapely.geometry
 
-from geocatalog import InMemoryGeoCatalog, to_geoparquet
 from geocatalog._src.streaming import StreamingParquetWriter
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.storage import to_geoparquet
 
 
 def _row(i: int = 0, **extras: Any) -> dict[str, Any]:

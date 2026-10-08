@@ -12,7 +12,7 @@ import shapely.geometry
 import geocatalog as gc
 
 
-def _toy_catalog() -> gc.InMemoryGeoCatalog:
+def _toy_catalog() -> gc.backends.InMemoryGeoCatalog:
     gdf = gpd.GeoDataFrame(
         {
             "filepath": ["a.tif", "b.tif"],
@@ -32,21 +32,21 @@ def _toy_catalog() -> gc.InMemoryGeoCatalog:
         geometry="geometry",
         crs="EPSG:32629",
     )
-    return gc.InMemoryGeoCatalog(gdf, kind="raster")
+    return gc.backends.InMemoryGeoCatalog(gdf, kind="raster")
 
 
 @pytest.fixture
 def parquet_path(tmp_path: Path) -> Path:
     cat = _toy_catalog()
     path = tmp_path / "cat.parquet"
-    gc.to_geoparquet(cat, path)
+    gc.storage.to_geoparquet(cat, path)
     return path
 
 
 class TestOpenCatalogMemoryEngine:
     def test_returns_in_memory_catalog(self, parquet_path: Path) -> None:
         cat = gc.open_catalog(parquet_path, engine="memory")
-        assert isinstance(cat, gc.InMemoryGeoCatalog)
+        assert isinstance(cat, gc.backends.InMemoryGeoCatalog)
         assert len(cat) == 2
 
     def test_backend_override(self, parquet_path: Path) -> None:

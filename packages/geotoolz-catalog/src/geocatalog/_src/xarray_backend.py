@@ -36,9 +36,9 @@ from geocatalog._src.uri import parse_uri
 
 # Only `xarray` is genuinely optional — geopandas + shapely are base deps.
 # Importing this module without the [xarray-raster] extra is allowed (it's
-# how `geocatalog.__getattr__` raises the friendly ImportError); the
-# `build_xarray_catalog` / `load_xarray` functions assert presence at call
-# time.
+# how the lazy facade loader, `geocatalog._src._lazy`, raises the friendly
+# ImportError); the `build_xarray_catalog` / `load_xarray` functions
+# assert presence at call time.
 try:
     import xarray as xr
 except ImportError:  # pragma: no cover - exercised via the [xarray-raster] extra

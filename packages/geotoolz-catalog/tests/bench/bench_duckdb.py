@@ -13,20 +13,20 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from geocatalog import to_geoparquet
+from geocatalog.storage import to_geoparquet
 
 from .conftest import make_inmemory_catalog
 
 
 if TYPE_CHECKING:
-    from geocatalog import DuckDBGeoCatalog as _DuckDBGeoCatalog
+    from geocatalog.backends import DuckDBGeoCatalog as _DuckDBGeoCatalog
 
 
 # Probe the extra eagerly so we can `skipif` cleanly; resolving the
 # public-surface attribute triggers the same friendly ImportError path
 # the library exposes to library consumers (`geocatalog.__getattr__`).
 try:
-    from geocatalog import DuckDBGeoCatalog
+    from geocatalog.backends import DuckDBGeoCatalog
 
     _HAS_DUCKDB = True
 except ImportError:

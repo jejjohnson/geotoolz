@@ -1,12 +1,11 @@
-# Discovery sources & bundle
+# Sources — `geocatalog.sources`
 
-STAC / earthaccess / CMR discovery adapters, STAC conversion, and
-the provenance-recording `CatalogBundle`.
+Discover scenes in external archives: the `Source` protocol, the
+STAC / CMR / earthaccess / Earth Engine adapters, and building a
+catalog straight from STAC. Adapters are extras-gated and imported
+lazily.
 
-## Discovery sources
-
-The `Source` Protocol and its adapters live under
-`geocatalog.sources`. Adapters are extras-gated and imported lazily.
+## Protocol
 
 ::: geocatalog.sources.Source
 ::: geocatalog.sources.SourceRow
@@ -24,14 +23,18 @@ The `Source` Protocol and its adapters live under
 
 ::: geocatalog.sources.CMRSource
 
-## STAC conversion *(extras: `[stac]`)*
+### Earth Engine *(extras: `[gee]`)*
 
-::: geocatalog.catalog.from_stac_items
-::: geocatalog.catalog.from_stac_search
-::: geocatalog.catalog.to_stac_collection
+::: geocatalog.sources.GEESource
 
-## Bundle
+## Catalogs from STAC *(extras: `[stac]`)*
 
-::: geocatalog.bundle.CatalogBundle
-::: geocatalog.bundle.QueryRecord
-::: geocatalog.bundle.source_row_to_gdf_row
+::: geocatalog.sources.from_stac_items
+::: geocatalog.sources.from_stac_search
+
+To export a catalog as a STAC collection, see
+[`to_stac_collection`](storage.md#stac-export-extras-stac).
+
+## Source rows to catalog rows
+
+::: geocatalog.sources.source_row_to_gdf_row

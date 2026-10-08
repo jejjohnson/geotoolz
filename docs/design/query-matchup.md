@@ -621,7 +621,7 @@ from geopatcher.matched import MatchedField, MatchedSpatialPatcher
 from geotoolz.geom.coregister import RasterToRasterLike
 
 # 1. Discover & ingest
-cat = gc.DuckDBGeoCatalog.open("my_catalog/", target_crs="EPSG:32629", create=True)
+cat = gc.backends.DuckDBGeoCatalog.open("my_catalog/", target_crs="EPSG:32629", create=True)
 
 cat.ingest(
     EarthAccessSource(),
@@ -726,7 +726,7 @@ A suggested four-phase rollout. Each phase ships independently and is useful on 
 - `geopatcher.matched` submodule with `MatchedField` / `MatchedPatch` / `MatchedSpatialPatcher` (+ temporal / spatio-temporal mirrors)
 - Streaming determinism tests (extends existing Hypothesis suite)
 - Notebook recipe: MODIS × S2 matched patches → torch DataLoader
-- `geocatalog.stage().field_for()` helper that returns ready-to-go Fields
+- `geocatalog.staging.stage().field_for()` helper that returns ready-to-go Fields
 
 **Exit criteria:** The end-to-end walkthrough in §7 runs as a notebook.
 

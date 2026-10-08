@@ -37,33 +37,55 @@ and queryable straight from `s3://` URIs).
 import pandas as pd
 from georeader.geotensor import GeoTensor
 
-import geocatalog as gc
+from geocatalog import GeoSlice
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.build import build_raster_catalog
+from geocatalog.load import load_raster
 
-catalog: gc.InMemoryGeoCatalog = gc.build_raster_catalog(
+catalog: InMemoryGeoCatalog = build_raster_catalog(
     filepaths=["s2_20240605.tif", "s2_20240612.tif", "s2_20240801.tif"],  # 4-band uint16, EPSG:32611
     filename_regex=r"s2_(?P<date>\d{8})\.tif",                          # time from the file name
     crs="EPSG:32611",
 )                                                                        # 3 rows · footprints, times, paths
 
-aoi: gc.GeoSlice = gc.GeoSlice(
+aoi = GeoSlice(
     bounds=(502_000, 4_302_000, 507_000, 4_307_000),                     # 5 km × 5 km, UTM 11N metres
     interval=pd.Interval(pd.Timestamp("2024-06-01"), pd.Timestamp("2024-06-30"), closed="both"),
     resolution=(10.0, 10.0),                                             # → grid (H, W) = (500, 500)
     crs="EPSG:32611",
 )
 
-hits: gc.InMemoryGeoCatalog = catalog.query(aoi)                         # 2 rows — no file opened
-tensor: GeoTensor = gc.load_raster(hits, aoi, band_indexes=[1, 2, 3])    # (3, 500, 500) uint16, mosaicked
+hits: InMemoryGeoCatalog = catalog.query(aoi)                            # 2 rows — no file opened
+tensor: GeoTensor = load_raster(hits, aoi, band_indexes=[1, 2, 3])       # (3, 500, 500) uint16, mosaicked
 ```
 
 `hits` is itself a catalog, so queries chain and set-combine; only
 `load_raster` (or `load_vector`) opens files, and only the ones that
 overlap. From STAC, the same flow starts with
-`gc.from_stac_search(client, collections=["sentinel-2-l2a"], bounds=..., datetime="2024-06", asset_key="B04")`.
+`geocatalog.sources.from_stac_search(client, collections=["sentinel-2-l2a"], bounds=..., datetime="2024-06", asset_key="B04")`.
+
+## Where things live
+
+The root holds `GeoCatalog`, `GeoSlice`, `open_catalog` and
+`query` / `intersect` / `union`; everything else has exactly one home,
+named for the step it serves:
+
+| Step | Namespace | Main names |
+|---|---|---|
+| discover | `geocatalog.sources` | `STACSource`, `CMRSource`, `EarthAccessSource`, `GEESource`, `from_stac_search` |
+| index | `geocatalog.build` | `build_raster_catalog`, `build_xarray_catalog`, `build_vector_catalog`, `append_files` |
+| hold | `geocatalog.backends` | `InMemoryGeoCatalog`, `DuckDBGeoCatalog`, `CatalogRow`, the errors |
+| join | `geocatalog.matchup` | `matchup`, `MatchupRow`, the spatial / temporal strategies |
+| read | `geocatalog.load` | `load_raster`, `aload_raster`, `load_raster_timeseries`, `load_xarray`, `load_vector` |
+| save / share | `geocatalog.storage` | `to_geoparquet` / `from_geoparquet`, `StreamingParquetWriter`, `to_stac_collection`, `CatalogBundle` |
+| stage | `geocatalog.staging` | `stage`, `LocalCache` |
+| patch | `geocatalog.patch` | `field_for`, `CatalogDomain` |
+| grids | `geocatalog.grid` | `slice_to_window`, `is_grid_aligned`, `divide_evenly` |
+| helpers | `geocatalog.utils` | `parse_uri`, `retry_transient_io`, UTC time helpers |
 
 ## Bridging to a patcher
 
-`geocatalog.staging.field_for` (the `[patch]` extra) mosaics the rows a
+`geocatalog.patch.field_for` (the `[patch]` extra) mosaics the rows a
 `GeoSlice` selects into one `geopatcher.RasterField`, which
 `geopatcher.SpatialPatcher` chips with `split` and reassembles with
 `merge`:
@@ -71,7 +93,7 @@ overlap. From STAC, the same flow starts with
 ```python
 import geopatcher as gp
 
-field: gp.RasterField = gc.field_for(hits, aoi)            # domain (4, 500, 500) uint16, the slice grid
+field: gp.RasterField = gc.patch.field_for(hits, aoi)      # domain (4, 500, 500) uint16, the slice grid
 patches: list[gp.Patch] = list(patcher.split(field))       # see the geopatcher quickstart
 ```
 
@@ -101,7 +123,7 @@ uv add geotoolz-catalog
 | `[earthaccess]` / `[gee]` | `EarthAccessSource` / `GEESource` | NASA Earthdata / Earth Engine ingestion |
 | `[sources-all]` | `[earthaccess]` + `[stac]` + `[gee]` | Every source adapter |
 | `[fsspec]` | `s3://`, `gs://`, `az://`, `https://`, `hf://` URI support (fsspec, its cloud filesystems, `huggingface_hub`) | Cloud object storage |
-| `[patch]` | `geocatalog.staging.field_for` — bridge to `geopatcher` | Patcher / tiling workflows |
+| `[patch]` | `geocatalog.patch.field_for` — bridge to `geopatcher` | Patcher / tiling workflows |
 | `[full]` | All of the above | One-shot install |
 
 ## Next steps

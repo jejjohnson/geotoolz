@@ -1,4 +1,4 @@
-# Matchup engine
+# Matchup — `geocatalog.matchup`
 
 Cross-source row joins with pluggable spatial and temporal
 strategies.

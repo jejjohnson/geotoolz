@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import geocatalog._src.duckdb_backend as duckdb_backend
-from geocatalog import DuckDBGeoCatalog
+from geocatalog.backends import DuckDBGeoCatalog
 
 
 class _FakeRelation:
@@ -162,7 +162,7 @@ def test_open_loads_extension_for_supported_uri_schemes(
 
 def test_strict_remote_uri_without_crs_raises(fake_duckdb: _FakeConnection) -> None:
     """strict=True can't silently default CRS for URIs it can't introspect."""
-    from geocatalog import CatalogMetadataError
+    from geocatalog.backends import CatalogMetadataError
 
     with pytest.raises(CatalogMetadataError, match="Pass crs="):
         DuckDBGeoCatalog.open("s3://bucket/cat.parquet", strict=True)

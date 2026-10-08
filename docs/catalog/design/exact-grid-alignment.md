@@ -15,7 +15,7 @@ the `align=` constructor modes, and `is_grid_aligned`.
 ## `divide_evenly`
 
 ```python
-from geocatalog import divide_evenly
+from geocatalog.grid import divide_evenly
 
 n = divide_evenly(length=100.0, step=10.0, label="x-extent")  # → 10
 divide_evenly(length=100.5, step=10.0, label="x-extent")
@@ -73,7 +73,7 @@ user has opted in to be told about misaligned bounds. Filter on
 
 ```python
 import warnings
-from geocatalog import GridAlignmentWarning
+from geocatalog.grid import GridAlignmentWarning
 
 warnings.simplefilter("error", GridAlignmentWarning)  # CI / tests
 warnings.simplefilter("ignore", GridAlignmentWarning) # audited pipelines
@@ -117,7 +117,7 @@ dataclass's hash contract.
 For matchup co-registration: predicate, not exception.
 
 ```python
-from geocatalog import is_grid_aligned
+from geocatalog.grid import is_grid_aligned
 
 if not is_grid_aligned(chip_slice, label_slice):
     report = is_grid_aligned(chip_slice, label_slice, explain=True)

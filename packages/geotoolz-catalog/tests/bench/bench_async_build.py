@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import time
 
-from geocatalog import build_raster_catalog
+from geocatalog.build import build_raster_catalog
 
 
 # Public Sentinel-2 L2A COGs (no auth). One scene per file; 30 scenes

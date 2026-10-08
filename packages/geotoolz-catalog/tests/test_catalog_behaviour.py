@@ -19,8 +19,9 @@ import pytest
 import shapely
 import shapely.geometry
 
-from geocatalog import GeoSlice, InMemoryGeoCatalog, intersect, query, union
+from geocatalog import GeoSlice, intersect, query, union
 from geocatalog._src.base import GeoCatalog
+from geocatalog.backends import InMemoryGeoCatalog
 
 
 _convert: Callable[[InMemoryGeoCatalog], GeoCatalog] = lambda cat: cat

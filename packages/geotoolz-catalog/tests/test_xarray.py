@@ -12,7 +12,9 @@ xr = pytest.importorskip("xarray")
 
 import numpy as np
 
-from geocatalog import GeoSlice, build_xarray_catalog, load_xarray
+from geocatalog import GeoSlice
+from geocatalog.build import build_xarray_catalog
+from geocatalog.load import load_xarray
 
 
 @pytest.fixture

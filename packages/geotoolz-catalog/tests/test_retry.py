@@ -15,20 +15,17 @@ import shapely.geometry
 from loguru import logger
 from tenacity import wait_none
 
-from geocatalog import (
-    GeoSlice,
-    InMemoryGeoCatalog,
-    build_raster_catalog,
-    from_geoparquet,
-    load_raster,
-    to_geoparquet,
-)
+from geocatalog import GeoSlice
 from geocatalog._src import (
     duckdb_backend as duckdb_module,
     parquet as parquet_module,
     raster as raster_module,
     retry as retry_module,
 )
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.build import build_raster_catalog
+from geocatalog.load import load_raster
+from geocatalog.storage import from_geoparquet, to_geoparquet
 
 
 REGEX = r"S2_T29SND_(?P<date>\d{8}).*\.tif"

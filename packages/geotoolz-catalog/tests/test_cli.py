@@ -150,7 +150,8 @@ def test_stats_json_empty_catalog(
     import pandas as pd
     import shapely.geometry
 
-    from geocatalog import InMemoryGeoCatalog, to_geoparquet
+    from geocatalog.backends import InMemoryGeoCatalog
+    from geocatalog.storage import to_geoparquet
 
     gdf = gpd.GeoDataFrame(
         {
@@ -577,7 +578,7 @@ def test_stats_on_a_newer_schema_is_exit_2(
     utm29_tile_factory: Callable[..., Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from geocatalog import from_geoparquet, to_geoparquet
+    from geocatalog.storage import from_geoparquet, to_geoparquet
 
     source = _build_one_row(tmp_path, utm29_tile_factory)
     newer = tmp_path / "newer.parquet"
@@ -593,7 +594,7 @@ def test_migrate_current_and_explicit_version(
     utm29_tile_factory: Callable[..., Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from geocatalog import SCHEMA_VERSION_CURRENT
+    from geocatalog.storage import SCHEMA_VERSION_CURRENT
 
     source = _build_one_row(tmp_path, utm29_tile_factory)
     capsys.readouterr()

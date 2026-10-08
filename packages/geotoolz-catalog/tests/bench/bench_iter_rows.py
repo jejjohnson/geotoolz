@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from geocatalog import InMemoryGeoCatalog
+from geocatalog.backends import InMemoryGeoCatalog
 
 from .conftest import make_inmemory_catalog
 
