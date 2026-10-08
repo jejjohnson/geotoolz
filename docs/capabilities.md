@@ -433,7 +433,7 @@ current).
 | `EarthSunDistanceCorrection` | class | Compute the Earth–Sun distance ``d`` (in AU) for an acquisition date. |
 | `Gamma` | class | Power-law gamma correction. |
 | `IntegratedIrradiance` | class | Compute band-integrated TOA solar irradiance from an SRF table. |
-| `MinMax` | class | Linear contrast stretch into ``[0, 1]``. |
+| `MinMaxStretch` | class | Linear contrast stretch into ``[0, 1]``. |
 | `PercentileClip` | class | Per-band robust contrast stretch using percentile thresholds. |
 | `RadianceToDN` | class | Convert at-sensor radiance back to raw DN — inverse of `DNToRadiance`. |
 | `RadianceToReflectance` | class | Convert at-sensor radiance to TOA reflectance with solar geometry. |
@@ -606,7 +606,7 @@ current).
 |---|---|---|
 | `ApplyToChips` | class | Operator: ``list[Patch] → list[Patch]`` — map ``operator`` over each patch. |
 | `GridSampler` | class | Operator: ``Field → list[Patch]`` — yields the Patcher's patches. |
-| `Stitch` | class | Operator: ``list[Patch] → field`` — wraps a `spatial.aggregation.Aggregation`. |
+| `MergePatches` | class | Operator: ``list[Patch] → field`` — wraps a `spatial.aggregation.Aggregation`. |
 
 ### `geopatcher.matched`
 
