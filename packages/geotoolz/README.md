@@ -7,43 +7,34 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Compose remote-sensing pipelines like you compose functions.**
-> Sentinel-2 to NDVI in a couple of small operators, the same code shape as your unit tests.
+> Sentinel-2 to cloud-free NDVI in a handful of small operators, the same code shape as your unit tests.
 
-`geotoolz` is one of the three packages of the
-[geotoolz monorepo](https://github.com/jejjohnson/geotoolz) — the
-*operate* slice, next to
-[`geotoolz-patcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)
-(`import geopatcher`) and
+`geotoolz` is the *compute* package of the
+[geotoolz monorepo](https://github.com/jejjohnson/geotoolz), next to
 [`geotoolz-catalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog)
-(`import geocatalog`). Docs: <https://jejjohnson.github.io/geotoolz/>.
+(*find*, `import geocatalog`),
+[`geotoolz-products`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-products)
+(*read*, `import geoproducts`) and
+[`geotoolz-patcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)
+(*cut*, `import geopatcher`). Docs: <https://jejjohnson.github.io/geotoolz/>.
 
-```mermaid
-flowchart LR
-    subgraph S["Sequential — linear chain"]
-        A[DNToReflectance] --> B[S2SCL] --> C[NDVI]
-    end
-    subgraph G["Graph — named DAG, fan-out, fan-in"]
-        I([scene]) --> S1[DNToReflectance]
-        S1 --> M[CloudMask]
-        S1 --> N[NDVI]
-        M --> AP[ApplyMask]
-        N --> AP
-        AP --> O([clean_ndvi])
-    end
-```
+<p align="center"><img src="../../docs/assets/diagrams/geotoolz-composition.png" alt="Sequential and Graph composition of geotoolz operators with the output shape of every step" width="100%"></p>
 
-## What is it
+## 30-second pitch
 
-`geotoolz` is a library of **Operators** for remote-sensing rasters.
-Each operator is a typed function from one carrier (a
-`georeader.GeoTensor`, or a plain `np.ndarray`) to another; pipelines
-are `Sequential` chains or `Graph` DAGs of those operators. The
-composition core lives in [`pipekit`](https://github.com/jejjohnson/pipekit);
-`geotoolz` adds the RS operator families on top: `radiometry`,
-`indices`, `qa`, `mask`, `spectral`, `geom` (incl. `geom.coregister`),
-`compositing`, `restore`, `segment`, `measure`, `feature`, `plume`,
-`matched_filter`, `augment`, `normalize`, `learn`, `einx`, `viz`, `io`
-and the sensor `readers`.
+Remote-sensing code tends to grow into long functions that mix band
+indexing, nodata handling, rescaling and georeferencing, so nothing can
+be reused or tested on its own. `geotoolz` cuts each step into an
+**Operator** — a typed callable with a keyword-only constructor — that
+takes a georeader `GeoTensor` (or a plain `ndarray`) and returns the same
+kind of carrier with its CRS, transform, band names and fill value
+intact. Chain operators with `|` into a `Sequential`, or wire them into a
+named `Graph` when the pipeline branches. Both are operators themselves,
+so pipelines nest; and `get_config()` round-trips every pipeline to YAML.
+About 275 operators ship across `radiometry`, `indices`, `qa`,
+`mask`, `spectral`, `geom` (incl. `geom.coregister`), `compositing`,
+`restore`, `segment`, `measure`, `feature`, `plume`, `matched_filter`,
+`augment`, `normalize`, `learn`, `einx`, `viz` and `io`.
 
 - **One protocol.** Every step — a band-math index, a cloud mask, a write
   to COG — is an `Operator`: a keyword-only constructor plus `_apply`.
@@ -64,23 +55,56 @@ still carry breaking changes — renames and removals are outright, with
 no deprecated aliases — and each one is called out in the changelog.
 Not yet on PyPI.
 
-## A working snippet
+## Quickstart
 
-With the built-in operators:
+A Sentinel-2 L2A scene with its 12 reflectance bands plus the SCL
+classification layer, named through `attrs["band_names"]` (what the
+geoproducts readers and the geocatalog loaders write). Bands are
+referenced by name, so the pipeline does not care about band order.
 
 ```python
 import geotoolz as gz
+from georeader.geotensor import GeoTensor
 
-pipeline = gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir="B08", red="B04")
-ndvi = pipeline(sentinel2_geotensor)  # GeoTensor in, GeoTensor out
+scene: GeoTensor = ...   # (13, H, W) uint16 — band_names = B1 … B12 (no B10), SCL
+
+L2A: list[str] = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12"]
+
+# Sequential — a linear chain, built with |
+ndvi_pipeline: gz.Sequential = (
+    gz.SelectBands(bands=L2A)                 # (13, H, W) uint16 → (12, H, W) uint16
+    | gz.DNToReflectance(scale=1e-4)          # (12, H, W) uint16 → (12, H, W) float64
+    | gz.NDVI(nir="B8", red="B4")             # (12, H, W)        → (H, W) float64
+)
+ndvi: GeoTensor = ndvi_pipeline(scene)        # (H, W) float64 · NaN fill · scene's CRS and transform
 ```
 
-Writing your own operator takes a keyword-only constructor that stores
-each argument under its own name (so `get_config()` comes for free) and
-an `_apply` that rewraps its result with `wrap_like`:
+The same steps as a `Graph`, with a cloud mask built from the SCL band
+on a second branch and fanned back in by `ApplyMask`:
+
+```python
+x: gz.Input = gz.Input("scene")
+reflectance: gz.Node = gz.DNToReflectance(scale=1e-4)(gz.SelectBands(bands=L2A)(x))  # (12, H, W) float64
+ndvi_node: gz.Node = gz.NDVI(nir="B8", red="B4")(reflectance)                        # (H, W) float64
+cloud: gz.Node = gz.S2SCL(targets=["cloud_shadow", "cloud", "cirrus"])(x)          # (H, W) bool, True = drop
+clean: gz.Node = gz.ApplyMask()(ndvi_node, cloud)                                   # (H, W) float64, NaN under cloud
+
+graph: gz.Graph = gz.Graph(inputs={"scene": x}, outputs={"ndvi": clean, "cloud": cloud})
+out: dict[str, GeoTensor] = graph(scene=scene)  # {"ndvi": (H, W) float64, "cloud": (H, W) bool}
+
+config: dict = ndvi_pipeline.get_config()       # {"operators": [{"class": "SelectBands", "config": {...}}, ...]}
+```
+
+## Write your own operator
+
+A keyword-only constructor that stores each argument under its own name
+(so `get_config()` comes for free) and an `_apply` that rewraps its
+result with `wrap_like`:
 
 ```python
 import numpy as np
+from georeader.geotensor import GeoTensor
+
 from geotoolz import Operator, Sequential
 from geotoolz._src.wrap import wrap_like
 
@@ -91,33 +115,60 @@ class Scale(Operator):
     def __init__(self, *, scale: float = 1e-4) -> None:
         self.scale = scale
 
-    def _apply(self, gt):
+    def _apply(self, gt: GeoTensor) -> GeoTensor:                  # (C, H, W) → (C, H, W) float32
         # wrap_like keeps the input's transform / CRS / attrs / fill.
         return wrap_like(gt, np.asarray(gt, dtype=np.float32) * self.scale)
 
 
-class NDVI(Operator):
-    """(NIR - Red) / (NIR + Red + eps); collapses the band axis."""
+class NormalizedDifference(Operator):
+    """(a - b) / (a + b + eps); collapses the band axis."""
 
-    def __init__(self, *, nir: int = 3, red: int = 2, eps: float = 1e-10) -> None:
-        self.nir, self.red, self.eps = nir, red, eps
+    def __init__(self, *, a: int = 3, b: int = 2, eps: float = 1e-10) -> None:
+        self.a, self.b, self.eps = a, b, eps
 
-    def _apply(self, gt):
-        a = np.asarray(gt, dtype=np.float32)
-        nir, red = a[self.nir], a[self.red]
+    def _apply(self, gt: GeoTensor) -> GeoTensor:                  # (C, H, W) → (H, W) float32
+        arr: np.ndarray = np.asarray(gt, dtype=np.float32)
+        a, b = arr[self.a], arr[self.b]                            # (H, W) each
         # A new float quantity declares NaN as its nodata fill.
-        return wrap_like(gt, (nir - red) / (nir + red + self.eps), fill_value_default=np.nan)
+        return wrap_like(gt, (a - b) / (a + b + self.eps), fill_value_default=np.nan)
 
 
-pipeline = Sequential([Scale(scale=1e-4), NDVI(nir=7, red=3)])
-ndvi = pipeline(sentinel2_geotensor)
-pipeline.get_config()  # {"operators": [{"class": "Scale", "config": {"scale": 0.0001}}, ...]}
+pipeline: Sequential = Sequential([Scale(scale=1e-4), NormalizedDifference(a=7, b=3)])
+index: GeoTensor = pipeline(scene)            # (H, W) float32
+pipeline.get_config()                         # {"operators": [{"class": "Scale", "config": {"scale": 0.0001}}, ...]}
 ```
 
-The same shape with the `|` pipe operator: `Scale(scale=1e-4) | NDVI(nir=7, red=3)`.
+The same shape with the `|` pipe operator: `Scale(scale=1e-4) | NormalizedDifference(a=7, b=3)`.
 See [Define an operator](https://jejjohnson.github.io/geotoolz/recipes/define-an-operator/)
 for the full conventions (parameter vocabulary, fill values, terminal
 operators).
+
+## Tile → operate → stitch
+
+`geotoolz.patch_ops` (the `[patch]` extra) runs any operator patch by
+patch through a `geopatcher.SpatialPatcher`, as one more `Sequential`:
+
+```python
+import geopatcher as gp
+from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.SpatialRectangular(size=(256, 256)),
+    sampler=gp.SpatialRegularStride(step=(192, 192)),
+    window=gp.SpatialHann(),
+    aggregation=gp.SpatialOverlapAdd(),
+)
+tiled: gz.Sequential = gz.Sequential([
+    GridSampler(patcher=patcher),                                  # field → list[Patch], (13, 256, 256) each
+    ApplyToChips(operator=ndvi_pipeline),                          # → list[Patch], (256, 256) each
+    MergePatches(aggregation=gp.SpatialOverlapAdd(),
+                 domain=scene.isel({"band": slice(0, 1)})),        # one-band grid for a one-band output
+])
+stitched: np.ndarray = tiled(gp.RasterField(scene))                # (1, H, W) float64
+```
+
+`MergePatches` sizes its output from `domain`, so pass a one-band
+domain when the operator collapses the band axis.
 
 ## Installation / extras
 
@@ -155,10 +206,13 @@ a base install and raise an `ImportError` naming the extra when called.
 | `hdf4` | `pyhdf` | `io.ReadHDF` on HDF4 |
 | `netcdf` | `netCDF4` | `io.ReadNetCDF` |
 | `vector-cube` | `xvec` (+ `xarray`) | `geom.coregister.RasterToPoints` / `PointsToRaster`, bilinear point sampling |
-| `obstore` | `geotoolz-patcher[obstore]` (`obstore`) | cloud-backed sensor reads through the stack's one pooled client, `geopatcher.objstore` |
 | `hydra` | `hydra-zen` | YAML `builds()` / `instantiate()` round-trips |
 | `patch` | `geotoolz-patcher[pipekit]` | `geotoolz.patch_ops` (tile → map → stitch, label-aware samplers) |
 <!-- /extras-table -->
+
+Product readers (`ProductReader`, `toy_sensor`, `carbonmapper`) and their
+cloud byte-range `[obstore]` extra live in
+[`geotoolz-products`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-products).
 
 From a clone (`make install` already installs every extra):
 
@@ -172,7 +226,7 @@ Run from the repository root (see the root [`Makefile`](../../Makefile)):
 
 ```bash
 make install     # uv sync --all-packages --all-groups --all-extras + pre-commit hooks
-make test        # fast tier of all three packages (geotoolz: -m "not slow and not integration")
+make test        # fast tier of all four packages (geotoolz: -m "not slow and not integration")
 make test-all    # + geotoolz slow / integration tiers
 make lint        # ruff check .   (entire repo)
 make format      # ruff format . && ruff check --fix .

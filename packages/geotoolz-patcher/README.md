@@ -11,26 +11,13 @@
 > **Split a geospatial field into local patches, run an operator per patch, and stitch the outputs back into a global result — along four independently composable axes.**
 
 `geopatcher` is the *locality layer* between **catalogs**
-([geocatalog](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog)) and **operators**
-([geotoolz](https://github.com/jejjohnson/geotoolz)). It answers a single
+([geocatalog](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog)),
+**readers** ([geoproducts](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-products))
+and **operators** ([geotoolz](https://github.com/jejjohnson/geotoolz)). It answers a single
 question: *what slice of the data does my operator see at once, and how do
 local outputs become a global field?*
 
-```mermaid
-flowchart LR
-    F[Field<br/><i>raster · grid · vector · point</i>] --> P((SpatialPatcher))
-    P --> G[Geometry<br/><i>rect · disk · graph · polygon</i>]
-    P --> S[Sampler<br/><i>stride · jitter · random · Poisson</i>]
-    P --> W[Window<br/><i>boxcar · Hann · Tukey · Gaussian</i>]
-    P --> A[Aggregation<br/><i>OverlapAdd · Mean · WeightedSum · …</i>]
-    G --> O[/operator/]
-    S --> O
-    W --> O
-    A --> O
-    O --> R[Reconstructed field]
-    style P fill:#bbdefb,stroke:#1565c0,stroke-width:2px
-    style O fill:#fff59d,stroke:#f9a825,stroke-width:2px
-```
+<p align="center"><img src="../../docs/assets/diagrams/patcher-axes.png" alt="SpatialPatcher: a Field is split along Geometry, Sampler, Window and Aggregation axes, an operator runs per patch, and the aggregation stitches the result" width="100%"></p>
 
 ## 30-second elevator pitch
 
@@ -68,41 +55,68 @@ pip install 'geotoolz-patcher[pipekit]'            # pipekit operator-graph brid
 ## Quickstart
 
 ```python
-import dataclasses
 import numpy as np
 import rasterio
 from georeader.geotensor import GeoTensor
 
 import geopatcher as gp
 
-# 1. Wrap any array as a Field.
-arr = np.outer(np.linspace(0, 1, 64), np.linspace(0, 1, 64)).astype(np.float32)
-field = gp.RasterField(
-    GeoTensor(values=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+# 1. Wrap any GeoTensor (or GeoData reader) as a Field.
+arr: np.ndarray = np.outer(np.linspace(0, 1, 512), np.linspace(0, 1, 512)).astype(np.float32)[None]  # (1, 512, 512)
+field: gp.RasterField = gp.RasterField(
+    GeoTensor(arr, transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000), crs="EPSG:32611")
 )
 
 # 2. Compose the four axes.
-patcher = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(16, 16)),
-    sampler     = gp.SpatialRegularStride(step=(8, 8)),  # 50 % overlap
-    window      = gp.SpatialHann(),                       # feather the seams
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry    = gp.SpatialRectangular(size=(128, 128)),
+    sampler     = gp.SpatialRegularStride(step=(96, 96)),    # 32 px overlap
+    window      = gp.SpatialHann(),                          # feather the seams
     aggregation = gp.SpatialOverlapAdd(),
 )
 
 # 3. Split → operate per patch → merge.
-out = []
-for patch in patcher.split(field):                        # Iterator[Patch]
-    new_data = np.asarray(patch.data) * 2.0               # your operator here
-    out.append(patch.with_data(new_data))
-
-stitched = patcher.merge(out, field.domain)               # global ndarray
+patches: list[gp.Patch] = list(patcher.split(field))         # 25 patches, data (1, 128, 128) each
+out: list[gp.Patch] = [
+    p.with_data(np.asarray(p.data) * 2.0)                   # your operator here
+    for p in patches
+]
+stitched: np.ndarray = patcher.merge(out, field.domain)     # (1, 512, 512) float64
 ```
 
+`patch.anchor` is the patch origin in pixel coordinates (`(0, 0)`,
+`(0, 96)`, …) and `field.domain` carries the grid the merge writes onto.
 For independent local jobs, swap the loop for the bundled
 `runners.parallel_map`; for global-context operators, use the codified
 `reduce` / `two_pass` helpers. See the
 [concepts page](https://jejjohnson.github.io/geotoolz/patcher/concepts/) for the
 full mental model.
+
+## With geotoolz operators
+
+The `[pipekit]` bridge (`geopatcher.integrations.pipekit`, re-exported as
+`geotoolz.patch_ops`) makes *split → operate → merge* one more operator
+pipeline:
+
+```python
+import geotoolz as gz
+from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+
+scene: GeoTensor = ...   # (4, H, W) uint16 — band_names = blue, green, red, nir
+
+ndvi: gz.Sequential = gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir="nir", red="red")  # (4, h, w) → (h, w)
+tiled: gz.Sequential = gz.Sequential([
+    GridSampler(patcher=patcher),                            # field → list[Patch], (4, 128, 128) each
+    ApplyToChips(operator=ndvi),                             # → list[Patch], (128, 128) each
+    MergePatches(aggregation=gp.SpatialOverlapAdd(),
+                 domain=scene.isel({"band": slice(0, 1)})),  # one-band output grid
+])
+ndvi_map: np.ndarray = tiled(gp.RasterField(scene))         # (1, H, W) float64
+```
+
+The merge's output shape follows `domain`, so give a band-collapsing
+operator a one-band domain; the four-band `scene` itself would broadcast
+the NDVI onto all four bands.
 
 ## Next steps
 
