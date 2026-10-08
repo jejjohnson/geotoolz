@@ -239,12 +239,25 @@ jobs:
           import geoproducts
 
           # The extras (and geotoolz itself) really are absent.
-          for module in ("geotoolz", "geopatcher", "obstore", "pipekit"):
+          absent = ("geotoolz", "geopatcher", "obstore", "pipekit", "requests", "pydantic")
+          for module in absent:
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 
-          # Every module imports on a base install.
-          for info in pkgutil.walk_packages(geoproducts.__path__, "geoproducts."):
-              importlib.import_module(info.name)
+          # Every module imports on a base install, except the extra-gated
+          # carbonmapper subpackage, which must name its extra instead.
+          try:
+              importlib.import_module("geoproducts.carbonmapper")
+          except ImportError as exc:
+              assert "geotoolz-products[carbonmapper]" in str(exc), exc
+          else:
+              raise AssertionError("carbonmapper imported without its extra")
+          for info in pkgutil.walk_packages(
+              geoproducts.__path__,
+              "geoproducts.",
+              onerror=lambda name: None,
+          ):
+              if not info.name.startswith("geoproducts.carbonmapper"):
+                  importlib.import_module(info.name)
 
           data = np.arange(4 * 8 * 8, dtype="float32").reshape(4, 8, 8)
           reader = geoproducts.toy_sensor.Reader("toy", data=data)

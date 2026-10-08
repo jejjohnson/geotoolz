@@ -1811,6 +1811,13 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+carbonmapper = [
+    { name = "geopandas" },
+    { name = "pandas" },
+    { name = "pydantic" },
+    { name = "requests" },
+    { name = "shapely" },
+]
 obstore = [
     { name = "geotoolz-patcher", extra = ["obstore"] },
 ]
@@ -1833,14 +1840,19 @@ typecheck = [
 [package.metadata]
 requires-dist = [
     { name = "affine", specifier = ">=2.4" },
+    { name = "geopandas", marker = "extra == 'carbonmapper'", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz", marker = "extra == 'operators'", editable = "packages/geotoolz" },
     { name = "geotoolz-patcher", extras = ["obstore"], marker = "extra == 'obstore'", editable = "packages/geotoolz-patcher" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "pandas", marker = "extra == 'carbonmapper'", specifier = ">=2.1" },
+    { name = "pydantic", marker = "extra == 'carbonmapper'", specifier = ">=2" },
     { name = "rasterio", specifier = ">=1.3" },
+    { name = "requests", marker = "extra == 'carbonmapper'", specifier = ">=2" },
+    { name = "shapely", marker = "extra == 'carbonmapper'", specifier = ">=2" },
     { name = "typing-extensions", specifier = ">=4.0" },
 ]
-provides-extras = ["obstore", "operators"]
+provides-extras = ["obstore", "operators", "carbonmapper"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -1,0 +1,317 @@
+"""Tests for ``geoproducts.carbonmapper.sources_raster``."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+import rasterio
+from shapely.geometry import Point
+
+from geoproducts.carbonmapper.source import CMSource
+from geoproducts.carbonmapper.sources_raster import (
+    CMSourceRaster,
+    rasterize_sources,
+)
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────
+
+
+def _utm_grid(
+    *,
+    origin_xy: tuple[float, float] = (500_000.0, 4_000_000.0),
+    res: float = 30.0,
+    shape: tuple[int, int] = (100, 100),
+    crs: str = "EPSG:32613",  # UTM 13N — Permian basin
+) -> dict:
+    """A small UTM grid spec for tests."""
+    transform = rasterio.Affine(res, 0, origin_xy[0], 0, -res, origin_xy[1])
+    return {"transform": transform, "shape": shape, "crs": crs}
+
+
+def _make_source(lon: float, lat: float, name: str = "S") -> CMSource:
+    return CMSource(
+        source_name=name,
+        gas="CH4",
+        sector="1B2",
+        point=Point(lon, lat),
+        plume_count=1,
+        persistence=0.5,
+    )
+
+
+def _grid_lonlat_at(grid: dict, row: int, col: int) -> tuple[float, float]:
+    """Lon/Lat of pixel-centre at (row, col) on a UTM grid."""
+    t = grid["transform"]
+    x = t.c + (col + 0.5) * t.a
+    y = t.f + (row + 0.5) * t.e
+    from pyproj import Transformer
+
+    tr = Transformer.from_crs(grid["crs"], "EPSG:4326", always_xy=True)
+    lon, lat = tr.transform(x, y)
+    return float(lon), float(lat)
+
+
+# ─── rasterize_sources — happy paths ─────────────────────────────────
+
+
+def test_empty_sources_returns_zero_mask():
+    g = _utm_grid()
+    out = rasterize_sources([], **g)
+    assert out.shape == g["shape"]
+    assert out.dtype == np.uint8
+    assert int(out.sum()) == 0
+
+
+def test_single_source_no_buffer_stamps_one_pixel():
+    g = _utm_grid()
+    lon, lat = _grid_lonlat_at(g, row=42, col=17)
+    out = rasterize_sources([_make_source(lon, lat)], **g)
+    assert int(out.sum()) == 1
+    assert int(np.asarray(out)[42, 17]) == 1
+
+
+def test_multiple_sources_stamp_distinct_pixels():
+    g = _utm_grid()
+    pts = [_grid_lonlat_at(g, r, c) for r, c in [(10, 10), (50, 50), (80, 20)]]
+    out = rasterize_sources([_make_source(lo, la) for lo, la in pts], **g)
+    assert int(out.sum()) == 3
+    for r, c in [(10, 10), (50, 50), (80, 20)]:
+        assert int(np.asarray(out)[r, c]) == 1
+
+
+def test_source_outside_grid_is_dropped():
+    g = _utm_grid()
+    # Way outside (different hemisphere)
+    out = rasterize_sources([_make_source(0.0, -45.0)], **g)
+    assert int(out.sum()) == 0
+
+
+def test_accepts_shapely_point():
+    g = _utm_grid()
+    lon, lat = _grid_lonlat_at(g, row=5, col=5)
+    out = rasterize_sources([Point(lon, lat)], **g)
+    assert int(np.asarray(out)[5, 5]) == 1
+
+
+def test_accepts_lonlat_tuple():
+    g = _utm_grid()
+    lon, lat = _grid_lonlat_at(g, row=5, col=5)
+    out = rasterize_sources([(lon, lat)], **g)
+    assert int(np.asarray(out)[5, 5]) == 1
+
+
+# ─── rasterize_sources — buffer ───────────────────────────────────────
+
+
+def test_buffer_in_metres_paints_disk():
+    g = _utm_grid(res=30.0, shape=(100, 100))
+    lon, lat = _grid_lonlat_at(g, row=50, col=50)
+    out = rasterize_sources([_make_source(lon, lat)], buffer_m=120.0, **g)
+    # 120 m disk on 30 m grid: diameter ~8 px, area ~ pi*4^2 ≈ 50 px.
+    n_set = int(out.sum())
+    assert 30 <= n_set <= 90, f"unexpected pixel count {n_set}"
+    # Centre is set, far corner is not.
+    assert int(np.asarray(out)[50, 50]) == 1
+    assert int(np.asarray(out)[0, 0]) == 0
+
+
+def test_buffer_converts_metres_for_feet_crs():
+    # Texas Central (US survey feet): 30 m pixels, 120 m buffer — the same
+    # disk as the UTM test, not a 120 ft one.
+    ft = 0.3048006096012192
+    g = _utm_grid(origin_xy=(2_296_583.0, 10_000_000.0), res=30.0 / ft, crs="EPSG:2277")
+    lon, lat = _grid_lonlat_at(g, row=50, col=50)
+    out = rasterize_sources([_make_source(lon, lat)], buffer_m=120.0, **g)
+    n_set = int(out.sum())
+    assert 30 <= n_set <= 90, f"unexpected pixel count {n_set}"
+
+
+def test_buffer_requires_projected_crs():
+    transform = rasterio.Affine(0.001, 0, -100, 0, -0.001, 30)
+    with pytest.raises(ValueError, match="projected CRS"):
+        rasterize_sources(
+            [_make_source(-100.0, 30.0)],
+            transform=transform,
+            shape=(100, 100),
+            crs="EPSG:4326",
+            buffer_m=100.0,
+        )
+
+
+def test_zero_buffer_allows_geographic_crs():
+    """buffer_m=0 should work in lon/lat too."""
+    transform = rasterio.Affine(0.001, 0, -100.0, 0, -0.001, 30.1)
+    out = rasterize_sources(
+        [(-99.95, 30.05)],
+        transform=transform,
+        shape=(100, 100),
+        crs="EPSG:4326",
+        buffer_m=0.0,
+    )
+    assert int(out.sum()) == 1
+
+
+# ─── rasterize_sources — output type ─────────────────────────────────
+
+
+def test_output_is_geotensor_with_crs_and_transform():
+    g = _utm_grid()
+    out = rasterize_sources([], **g)
+    assert out.transform == g["transform"]
+    # CRS may be stored as rasterio.CRS — compare via to_epsg.
+    assert rasterio.crs.CRS.from_user_input(out.crs).to_epsg() == 32613
+    assert out.fill_value_default == 0
+
+
+def test_invalid_shape_raises():
+    g = _utm_grid()
+    with pytest.raises(ValueError, match=r"\(H, W\)"):
+        rasterize_sources(
+            [],
+            transform=g["transform"],
+            shape=(1, 100, 100),  # type: ignore[arg-type]
+            crs=g["crs"],
+        )
+
+
+# ─── CMSourceRaster ──────────────────────────────────────────────────
+
+
+def test_cmsourceraster_load_matches_function():
+    g = _utm_grid()
+    lon, lat = _grid_lonlat_at(g, row=10, col=20)
+    sources = [_make_source(lon, lat)]
+    raster = CMSourceRaster(
+        sources=sources,
+        transform=g["transform"],
+        shape=g["shape"],
+        crs=rasterio.crs.CRS.from_user_input(g["crs"]),
+    )
+    out = raster.load()
+    assert int(np.asarray(out)[10, 20]) == 1
+    assert int(out.sum()) == 1
+
+
+def test_cmsourceraster_repr_mentions_count():
+    g = _utm_grid()
+    raster = CMSourceRaster(
+        sources=[_make_source(-100.0, 30.0)],
+        transform=g["transform"],
+        shape=g["shape"],
+        crs=rasterio.crs.CRS.from_user_input(g["crs"]),
+        buffer_m=50.0,
+    )
+    s = repr(raster)
+    assert "n_sources=1" in s
+    assert "buffer_m=50" in s
+
+
+def test_cmsourceraster_from_geodata_inherits_grid():
+    """``from_geodata`` should copy transform/shape/crs from a template."""
+    g = _utm_grid()
+    template = rasterize_sources([], **g)  # zero GeoTensor as a template
+    raster = CMSourceRaster.from_geodata(
+        sources=[_make_source(-100.0, 30.0)],
+        template=template,
+        buffer_m=15.0,
+    )
+    assert raster.transform == g["transform"]
+    assert raster.shape == g["shape"]
+    assert rasterio.crs.CRS.from_user_input(raster.crs).to_epsg() == 32613
+    assert raster.buffer_m == 15.0
+
+
+def test_cmsourceraster_from_cmtileitem_aligns_to_cmf(tmp_path):
+    """Used to read `tile.assets` (which doesn't exist) and always crash;
+    STAC keys the asset as `cmf.tif`."""
+    from geoproducts.carbonmapper.api_queries import CMTileItem
+
+    grid = _utm_grid(shape=(20, 30))
+    cmf = tmp_path / "cmf.tif"
+    with rasterio.open(
+        str(cmf),
+        "w",
+        driver="GTiff",
+        count=1,
+        dtype="float32",
+        width=30,
+        height=20,
+        transform=grid["transform"],
+        crs=grid["crs"],
+    ) as dst:
+        dst.write(np.zeros((1, 20, 30), dtype="float32"))
+    tile = CMTileItem.from_stac_item(
+        {
+            "id": "tan20260824t065735c39s4001",
+            "collection": "l2b-ch4-mfa-v3e",
+            "properties": {"datetime": "2026-08-24T06:57:35Z"},
+            "bbox": [-104, 31, -103, 32],
+            "geometry": {"type": "Point", "coordinates": [-103.5, 31.5]},
+            "assets": {"cmf.tif": {"href": str(cmf)}},
+        }
+    )
+    sr = CMSourceRaster.from_cmtileitem([_make_source(-103.5, 31.5)], tile)
+    assert sr.shape == (20, 30)
+    assert sr.transform == grid["transform"]
+
+
+def test_cmsourceraster_from_cmtileitem_scopes_bearer_token(monkeypatch):
+    """A remote cmf href is opened with the Bearer header in its Env."""
+    from geoproducts.carbonmapper import sources_raster as _sr
+    from geoproducts.carbonmapper.api_queries import CMTileItem
+
+    seen: dict = {}
+
+    class _Env:
+        def __init__(self, **options):
+            seen.update(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _DS:
+        transform = rasterio.Affine(30, 0, 0, 0, -30, 0)
+        height, width = 4, 5
+        crs = "EPSG:32613"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(_sr.rasterio, "Env", _Env)
+    monkeypatch.setattr(_sr.rasterio, "open", lambda url: _DS())
+    tile = CMTileItem.from_stac_item(
+        {
+            "id": "tan20260824t065735c39s4001",
+            "collection": "l2b-ch4-mfa-v3e",
+            "properties": {"datetime": "2026-08-24T06:57:35Z"},
+            "bbox": [-104, 31, -103, 32],
+            "geometry": {"type": "Point", "coordinates": [-103.5, 31.5]},
+            "assets": {
+                "cmf.tif": {
+                    "href": "https://api.carbonmapper.org/api/v1/catalog/asset/cmf.tif"
+                }
+            },
+        }
+    )
+    sr = CMSourceRaster.from_cmtileitem([], tile, token="abc")
+    assert sr.shape == (4, 5)
+    assert seen["GDAL_HTTP_HEADERS"] == "Authorization: Bearer abc"
+
+
+def test_cmsourceraster_read_window_rejects_antimeridian_bbox():
+    g = _utm_grid()
+    raster = CMSourceRaster(
+        sources=[],
+        transform=g["transform"],
+        shape=g["shape"],
+        crs=rasterio.crs.CRS.from_user_input(g["crs"]),
+    )
+    with pytest.raises(ValueError, match="antimeridian"):
+        raster.read_window((179.0, -1.0, -179.0, 1.0))

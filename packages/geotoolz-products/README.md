@@ -10,6 +10,7 @@ or provider's product into a [georeader](https://github.com/spaceml-org/georeade
 pip install geotoolz-products                  # readers (georeader only)
 pip install 'geotoolz-products[obstore]'       # pooled cloud byte-range reads
 pip install 'geotoolz-products[operators]'     # sensor presets (geotoolz operators)
+pip install 'geotoolz-products[carbonmapper]'  # Carbon Mapper plume catalogue + STAC
 ```
 
 ```python
