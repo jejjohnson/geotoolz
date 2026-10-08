@@ -14,7 +14,7 @@ local = stage(catalog, cache=LocalCache("./.cache", ttl_days=7))
 
 from __future__ import annotations
 
-from geocatalog._src.staging import (
+from geocatalog._src.staging.stage import (
     LocalCache,
     stage,
 )

@@ -20,8 +20,8 @@ from rasterio.errors import RasterioIOError
 from rasterio.transform import from_bounds
 
 from geocatalog import GeoSlice
-from geocatalog._src import io as catalog_io
-from geocatalog._src.retry import _is_transient, retry_transient_io
+from geocatalog._src.utils import paths as catalog_io
+from geocatalog._src.utils.retry import _is_transient, retry_transient_io
 from geocatalog.build import build_raster_catalog, build_vector_catalog
 from geocatalog.load import load_vector
 

@@ -20,12 +20,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from geocatalog._src._lazy import lazy_getattr
-from geocatalog._src.bundle import source_row_to_gdf_row
 from geocatalog._src.sources import (
     AuthStatus,
     Source,
     SourceRow,
 )
+from geocatalog._src.storage.bundle import source_row_to_gdf_row
 
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from geocatalog._src.sources.earthaccess import EarthAccessSource
     from geocatalog._src.sources.gee import GEESource
     from geocatalog._src.sources.stac import STACSource
-    from geocatalog._src.stac import from_stac_items, from_stac_search
+    from geocatalog._src.storage.stac import from_stac_items, from_stac_search
 
 
 __all__ = [

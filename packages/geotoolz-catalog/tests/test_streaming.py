@@ -24,8 +24,11 @@ import shapely.geometry
 duckdb = pytest.importorskip("duckdb")
 
 from geocatalog import open_catalog
-from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
-from geocatalog._src.streaming import StreamingParquetWriter, _iter_rows_parallel
+from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
+from geocatalog._src.storage.streaming import (
+    StreamingParquetWriter,
+    _iter_rows_parallel,
+)
 from geocatalog.build import append_files, build_raster_catalog, build_vector_catalog
 
 
@@ -90,7 +93,7 @@ class TestIterRowsParallel:
             return sentinel
 
         monkeypatch.setattr(
-            "geocatalog._src.streaming.stream_build_duckdb",
+            "geocatalog._src.storage.streaming.stream_build_duckdb",
             fake_stream_build_duckdb,
         )
 
@@ -440,7 +443,7 @@ class TestPartitionedArchives:
 
     def test_partition_value_rejects_nat_start_time(self) -> None:
         """NaT start_time must raise, not silently produce year=nan shards."""
-        from geocatalog._src.streaming import _partition_value
+        from geocatalog._src.storage.streaming import _partition_value
 
         row = {
             "start_time": pd.NaT,
@@ -451,7 +454,7 @@ class TestPartitionedArchives:
 
     def test_partition_value_rejects_missing_start_time(self) -> None:
         """year/month/day with no start_time field must raise a clear error."""
-        from geocatalog._src.streaming import _partition_value
+        from geocatalog._src.storage.streaming import _partition_value
 
         row = {"geometry": shapely.geometry.box(0, 0, 1, 1)}
         with pytest.raises(ValueError, match="requires a 'start_time' field"):
@@ -467,7 +470,7 @@ class TestPartitionedArchives:
         backend-tag probe. For a file sitting under a `key=value` directory
         that always added a synthetic partition column to the catalog schema.
         """
-        from geocatalog._src.parquet import to_geoparquet
+        from geocatalog._src.storage.parquet import to_geoparquet
 
         partition_dir = tmp_path / "year=2024"
         partition_dir.mkdir()
@@ -483,7 +486,7 @@ class TestPartitionedArchives:
 
     def test_max_open_writers_correctness(self, tmp_path: Path) -> None:
         """LRU eviction must preserve all rows across many partitions."""
-        from geocatalog._src.streaming import write_partitioned_rows
+        from geocatalog._src.storage.streaming import write_partitioned_rows
 
         rows = []
         for i in range(100):
@@ -520,7 +523,7 @@ class TestPartitionedArchives:
         """The FD count after writing 100 partitions with cap=4 must be stable."""
         import gc
 
-        from geocatalog._src.streaming import write_partitioned_rows
+        from geocatalog._src.storage.streaming import write_partitioned_rows
 
         # Some FDs come and go during DuckDB init; settle first.
         gc.collect()

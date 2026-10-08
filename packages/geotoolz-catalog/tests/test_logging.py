@@ -23,14 +23,14 @@ def loguru_sink():
 def _trigger_regex_miss_warning(
     tile_factory: Callable[..., Path], tmp_path: Path
 ) -> None:
-    """Hit a real WARNING path inside `geocatalog._src.raster`.
+    """Hit a real WARNING path inside `geocatalog._src.formats.raster`.
 
     `_filepath_to_row` logs ``Skipping {filepath}: filename does not match
     regex`` when a filename doesn't match the supplied pattern. The call
     site is inside the geocatalog package, so loguru's
     `disable("geocatalog")` filter applies to it.
     """
-    from geocatalog._src.raster import _filepath_to_row
+    from geocatalog._src.formats.raster import _filepath_to_row
 
     # Build a valid raster, then rename it so the regex misses.
     src = tile_factory((500000, 4000000, 510000, 4010000), "20240601")
@@ -75,4 +75,4 @@ def test_enable_routes_records_to_sink(
 
     output = loguru_sink.getvalue()
     assert "does not match regex" in output
-    assert "geocatalog._src.raster" in output
+    assert "geocatalog._src.formats.raster" in output

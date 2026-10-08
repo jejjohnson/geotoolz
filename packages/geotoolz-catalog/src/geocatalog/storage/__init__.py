@@ -20,24 +20,24 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from geocatalog._src._lazy import lazy_getattr
-from geocatalog._src.bundle import (
+from geocatalog._src.storage.bundle import (
     CatalogBundle,
     QueryRecord,
 )
-from geocatalog._src.parquet import (
+from geocatalog._src.storage.parquet import (
     SCHEMA_VERSION_CURRENT,
     from_geoparquet,
     migrate_geoparquet,
     to_geoparquet,
 )
-from geocatalog._src.streaming import (
+from geocatalog._src.storage.streaming import (
     StreamingParquetWriter,
     sort_geoparquet,
 )
 
 
 if TYPE_CHECKING:
-    from geocatalog._src.stac import to_stac_collection
+    from geocatalog._src.storage.stac import to_stac_collection
 
 
 __all__ = [

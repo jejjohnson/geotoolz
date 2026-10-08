@@ -21,13 +21,13 @@ import shapely.geometry
 from loguru import logger
 
 from geocatalog._src._antimeridian import lonlat_box, lonlat_line, lonlat_polygon
-from geocatalog._src._timeutil import (
+from geocatalog._src.sources._base import SourceRow
+from geocatalog._src.utils.timeutil import (
     TIME_INVARIANT_END,
     TIME_INVARIANT_START,
     to_utc_ts,
 )
-from geocatalog._src.sources._base import SourceRow
-from geocatalog._src.uri import parse_uri
+from geocatalog._src.utils.uri import parse_uri
 
 
 def _lonlat_points(points: Any) -> list[tuple[float, float]]:

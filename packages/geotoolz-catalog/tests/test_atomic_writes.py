@@ -12,8 +12,11 @@ import pyarrow.parquet as pq
 import pytest
 import shapely.geometry
 
-from geocatalog._src import streaming
-from geocatalog._src.streaming import StreamingParquetWriter, write_partitioned_rows
+from geocatalog._src.storage import streaming
+from geocatalog._src.storage.streaming import (
+    StreamingParquetWriter,
+    write_partitioned_rows,
+)
 from geocatalog.backends import InMemoryGeoCatalog
 from geocatalog.storage import to_geoparquet
 

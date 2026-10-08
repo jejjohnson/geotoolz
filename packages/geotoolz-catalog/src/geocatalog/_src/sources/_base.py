@@ -8,7 +8,7 @@ endpoint, Google Earth Engine, CMR). It is distinct from a
 persisted in GeoParquet.
 
 The two come together via ``CatalogBundle.ingest(source, bounds=...)``
-(see `geocatalog._src.bundle`), which materializes a remote query into
+(see `geocatalog._src.storage.bundle`), which materializes a remote query into
 local catalog rows and records a ``QueryRecord`` for provenance. See
 ``docs/catalog/design/query-matchup.md`` §4 for the full picture.
 """

@@ -34,7 +34,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from geocatalog._src._lazy import lazy_getattr
-from geocatalog._src.raster import (
+from geocatalog._src.formats.raster import (
     aload_raster,
     load_raster,
     load_raster_timeseries,
@@ -42,8 +42,8 @@ from geocatalog._src.raster import (
 
 
 if TYPE_CHECKING:
-    from geocatalog._src.vector import load_vector
-    from geocatalog._src.xarray_backend import load_xarray
+    from geocatalog._src.formats.vector import load_vector
+    from geocatalog._src.formats.xarray_backend import load_xarray
 
 
 __all__ = [

@@ -99,7 +99,7 @@ def test_opposite_direction_joins_do_not_deadlock() -> None:
 
 def test_connection_without_weakref_support_gets_fallback_lock() -> None:
     """DuckDB releases before weakref support must not raise (#224)."""
-    from geocatalog._src import duckdb_backend
+    from geocatalog._src.backends import duckdb_backend
 
     class _NoWeakref:
         __slots__ = ()

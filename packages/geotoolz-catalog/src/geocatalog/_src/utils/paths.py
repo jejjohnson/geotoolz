@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from geocatalog._src._extras import missing_extra
-from geocatalog._src.uri import FSSPEC_SCHEMES, parse_uri
+from geocatalog._src.utils.uri import FSSPEC_SCHEMES, parse_uri
 
 
 def _gdal_vsi_path(path: str | Path) -> str | None:

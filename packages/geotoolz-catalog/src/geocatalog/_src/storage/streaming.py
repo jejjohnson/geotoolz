@@ -47,19 +47,19 @@ import shapely.wkb
 
 
 if TYPE_CHECKING:
-    from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+    from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
 
 
 from loguru import logger as log
 
 from geocatalog._src._deprecation import renamed_kwargs
 from geocatalog._src._schema import CatalogKind
-from geocatalog._src._timeutil import to_naive_utc
 from geocatalog._src.base import INTERNAL_COLUMNS, RESERVED_COLUMNS
-from geocatalog._src.parquet import (
+from geocatalog._src.storage.parquet import (
     SCHEMA_VERSION_CURRENT as _SCHEMA_VERSION,
     _staging_name,
 )
+from geocatalog._src.utils.timeutil import to_naive_utc
 
 
 _GEOPARQUET_VERSION = "1.1.0"
@@ -543,7 +543,7 @@ def sort_geoparquet(
     Raises:
         ImportError: ``[duckdb]`` extra missing.
     """
-    from geocatalog._src.duckdb_backend import _require_duckdb
+    from geocatalog._src.backends.duckdb_backend import _require_duckdb
 
     duckdb_mod = _require_duckdb()
     src_str = str(source)
@@ -705,7 +705,7 @@ def stream_build_duckdb(
     # `DuckDBGeoCatalog.open` (and the optional sort-rewrite) both need
     # the extra, so dying here saves us from writing a temp file we
     # can't open anyway.
-    from geocatalog._src.duckdb_backend import (
+    from geocatalog._src.backends.duckdb_backend import (
         DuckDBGeoCatalog,
         _require_duckdb,
     )
@@ -877,7 +877,10 @@ def append_files(
             layout, or no input files yielded a row (and none were
             skipped as already indexed).
     """
-    from geocatalog._src.duckdb_backend import DuckDBGeoCatalog, _require_duckdb
+    from geocatalog._src.backends.duckdb_backend import (
+        DuckDBGeoCatalog,
+        _require_duckdb,
+    )
 
     _require_duckdb()
     archive = Path(archive)

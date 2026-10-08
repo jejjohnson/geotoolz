@@ -19,7 +19,7 @@ import pyarrow.parquet as pq
 import pytest
 import shapely.geometry
 
-from geocatalog._src.streaming import StreamingParquetWriter
+from geocatalog._src.storage.streaming import StreamingParquetWriter
 from geocatalog.backends import InMemoryGeoCatalog
 from geocatalog.storage import to_geoparquet
 
@@ -165,7 +165,7 @@ def test_streaming_and_geopandas_writers_agree_on_times(tmp_path: Path) -> None:
 
 def test_sort_rewrite_carries_the_input_schema(tmp_path: Path) -> None:
     pytest.importorskip("duckdb")
-    from geocatalog._src.streaming import sort_geoparquet
+    from geocatalog._src.storage.streaming import sort_geoparquet
 
     src = tmp_path / "src.parquet"
     # The row that sorts first has no `cloud`; re-inferring from the first

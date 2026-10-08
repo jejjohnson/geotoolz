@@ -15,9 +15,9 @@ from typing import Any, Literal, get_args
 
 from geocatalog._src._deprecation import renamed_kwargs
 from geocatalog._src._schema import CatalogKind
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.base import GeoCatalog
-from geocatalog._src.memory import InMemoryGeoCatalog
-from geocatalog._src.parquet import from_geoparquet
+from geocatalog._src.storage.parquet import from_geoparquet
 
 
 _ENGINE_T = Literal["auto", "memory", "duckdb"]
@@ -96,7 +96,7 @@ def open_catalog(
             source, kind, crs=crs, storage_options=storage_options, strict=strict
         )
     if engine == "duckdb":
-        from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+        from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
 
         return DuckDBGeoCatalog.open(
             source,
@@ -111,7 +111,7 @@ def open_catalog(
             source, kind, crs=crs, storage_options=storage_options, strict=strict
         )
     try:
-        from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+        from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
     except ImportError:
         return _memory_engine(source, kind, crs=crs, strict=strict)
     try:

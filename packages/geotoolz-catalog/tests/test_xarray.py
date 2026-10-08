@@ -120,31 +120,31 @@ class TestXarrayEngineDispatch:
     """
 
     def test_local_zarr_directory_as_str(self, tmp_path: Path) -> None:
-        from geocatalog._src.xarray_backend import _xarray_engine
+        from geocatalog._src.formats.xarray_backend import _xarray_engine
 
         store = tmp_path / "store.zarr"
         store.mkdir()
         assert _xarray_engine(str(store)) == "zarr"
 
     def test_local_directory_without_zarr_suffix_as_str(self, tmp_path: Path) -> None:
-        from geocatalog._src.xarray_backend import _xarray_engine
+        from geocatalog._src.formats.xarray_backend import _xarray_engine
 
         store = tmp_path / "store"
         store.mkdir()
         assert _xarray_engine(str(store)) == "zarr"
 
     def test_local_netcdf_as_str(self, netcdf_file: Path) -> None:
-        from geocatalog._src.xarray_backend import _xarray_engine
+        from geocatalog._src.formats.xarray_backend import _xarray_engine
 
         assert _xarray_engine(str(netcdf_file)) is None
 
     def test_remote_zarr_uri(self) -> None:
-        from geocatalog._src.xarray_backend import _xarray_engine
+        from geocatalog._src.formats.xarray_backend import _xarray_engine
 
         assert _xarray_engine("s3://bucket/store.zarr") == "zarr"
 
     def test_remote_netcdf_uri(self) -> None:
-        from geocatalog._src.xarray_backend import _xarray_engine
+        from geocatalog._src.formats.xarray_backend import _xarray_engine
 
         # Remote non-zarr URIs must NOT trigger `Path.is_dir()` against a
         # non-existent local path; they fall through to the default engine.

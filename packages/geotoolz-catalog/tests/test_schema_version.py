@@ -19,7 +19,7 @@ import geopandas as gpd
 import pytest
 
 from geocatalog._cli import app
-from geocatalog._src import parquet as parquet_module
+from geocatalog._src.storage import parquet as parquet_module
 from geocatalog.backends import CatalogSchemaError
 from geocatalog.storage import (
     SCHEMA_VERSION_CURRENT,
@@ -160,7 +160,7 @@ def test_legacy_unversioned_treated_as_v0(
     gdf.to_parquet(legacy_path)
 
     from geocatalog._src._schema import LEGACY_UNVERSIONED
-    from geocatalog._src.parquet import _read_schema_version
+    from geocatalog._src.storage.parquet import _read_schema_version
 
     assert _read_schema_version(legacy_path) == LEGACY_UNVERSIONED == 0
     # Reading still works at v0 (no migration needed today).
@@ -373,7 +373,7 @@ def test_read_schema_version_cheap_for_migrate(
         tmp_path, utm29_tile_factory, schema_version=SCHEMA_VERSION_CURRENT
     )
 
-    from geocatalog._src import parquet as parquet_module
+    from geocatalog._src.storage import parquet as parquet_module
     from geocatalog.storage import migrate_geoparquet
 
     read_calls = []

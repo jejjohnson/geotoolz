@@ -28,9 +28,10 @@ geopatcher = pytest.importorskip("geopatcher")
 
 from georeader.geotensor import GeoTensor
 
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.geoslice import GeoSlice
-from geocatalog._src.memory import InMemoryGeoCatalog
-from geocatalog._src.staging import field_for, stage
+from geocatalog._src.patch.field_for import field_for
+from geocatalog._src.staging.stage import stage
 
 
 LEFT = (500_000, 4_000_000, 500_320, 4_000_320)
@@ -276,7 +277,7 @@ class TestFieldForErrors:
             field_for(vector_cat)
 
     def test_windows_drive_path_treated_as_local(self) -> None:
-        from geocatalog._src.staging._field_for import _is_local_path
+        from geocatalog._src.patch.field_for import _is_local_path
 
         assert _is_local_path("C:/data/tile.tif") is True
         assert _is_local_path("c:/data/tile.tif") is True

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import geocatalog._src.duckdb_backend as duckdb_backend
+import geocatalog._src.backends.duckdb_backend as duckdb_backend
 from geocatalog.backends import DuckDBGeoCatalog
 
 

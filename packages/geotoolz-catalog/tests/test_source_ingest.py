@@ -17,13 +17,13 @@ import pytest
 import shapely
 from tenacity import wait_none
 
-from geocatalog._src import retry as retry_module
-from geocatalog._src.bundle import CatalogBundle
 from geocatalog._src.sources import cmr as cmr_mod
 from geocatalog._src.sources._base import AuthStatus, Source, SourceRow
 from geocatalog._src.sources._umm import granule_assets, granule_to_source_row
 from geocatalog._src.sources.cmr import CMRSource, _cmr_item_to_source_row
 from geocatalog._src.sources.earthaccess import _granule_to_source_row
+from geocatalog._src.storage.bundle import CatalogBundle
+from geocatalog._src.utils import retry as retry_module
 
 
 FETCHED = datetime(2026, 1, 1, tzinfo=UTC)
@@ -365,7 +365,7 @@ def test_created_at_survives_resaves(tmp_path: Path) -> None:
 def test_failed_save_keeps_the_previous_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from geocatalog._src.bundle import _catalog_bundle as bundle_mod
+    from geocatalog._src.storage import bundle as bundle_mod
 
     bundle = _bundle_with("a")
     bundle.to_directory(tmp_path)
@@ -490,7 +490,7 @@ def test_empty_bundle_crs_is_validated(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(("code", "retried"), [(507, True), (520, True), (404, False)])
 def test_every_5xx_is_retried(code: int, retried: bool) -> None:
-    from geocatalog._src.retry import _is_transient
+    from geocatalog._src.utils.retry import _is_transient
 
     assert _is_transient(_http_error(code)) is retried
 
@@ -540,7 +540,7 @@ def test_replace_keeps_matchups_of_a_same_id_item_in_another_collection(
 def test_save_publishes_one_generation_and_keeps_foreign_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from geocatalog._src.bundle import _catalog_bundle as bundle_mod
+    from geocatalog._src.storage import bundle as bundle_mod
 
     dest = tmp_path / "bundle"
     bundle = _bundle_with("a")
@@ -573,7 +573,7 @@ def test_save_publishes_one_generation_and_keeps_foreign_files(
 def test_failed_write_leaves_no_staging_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from geocatalog._src.bundle import _catalog_bundle as bundle_mod
+    from geocatalog._src.storage import bundle as bundle_mod
 
     def crash(queries: Any, path: Path) -> None:
         raise OSError("disk full")

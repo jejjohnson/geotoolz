@@ -11,8 +11,8 @@ import rasterio
 from rasterio.transform import from_bounds
 
 from geocatalog import GeoSlice
-from geocatalog._src._timeutil import filename_interval
-from geocatalog._src.raster import _timeseries_days
+from geocatalog._src.formats.raster import _timeseries_days
+from geocatalog._src.utils.timeutil import filename_interval
 from geocatalog.build import build_raster_catalog
 from geocatalog.load import load_raster_timeseries
 

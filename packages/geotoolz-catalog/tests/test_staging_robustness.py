@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import box
 
-from geocatalog._src.staging._base import (
+from geocatalog._src.staging.stage import (
     LocalCache,
     _ext_for,
     cache_key,
@@ -367,7 +367,7 @@ def test_asset_filter_on_a_filepath_only_catalog_stages_the_filepath(
 
 
 def test_file_uri_authority_is_kept() -> None:
-    from geocatalog._src.staging._base import _local_path
+    from geocatalog._src.staging.stage import _local_path
 
     assert _local_path("file://server/share/x.tif") == Path("//server/share/x.tif")
     assert _local_path("file://localhost/data/x.tif") == Path("/data/x.tif")

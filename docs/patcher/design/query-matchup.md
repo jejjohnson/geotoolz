@@ -152,7 +152,7 @@ from geocatalog._src.sources import (
 # src/geocatalog/matchup/__init__.py
 from geocatalog._src.matchup import matchup, MatchupRow
 # src/geocatalog/staging/__init__.py
-from geocatalog._src.staging import stage, LocalCache
+from geocatalog._src.staging.stage import stage, LocalCache
 ```
 
 ### 4.2 `Source` Protocol
@@ -357,7 +357,7 @@ def stage(
 - Returns a new catalog whose `assets` columns have been rewritten to local paths; `filepath` follows the row's primary asset, and a `staged_from` column (JSON, keyed like `assets`) preserves the original URIs.
 - Local paths are used in place without fsspec; `LocalCache` fetches remote schemes through fsspec (`[fsspec]` extra) into a temp file renamed into place, one download per distinct URI; default location `~/.cache/geocatalog/` or `$GEOCATALOG_CACHE`.
 - GEE-specific path: `staging/gee.py` materializes via `ee.Image.getDownloadURL` or `ee_export_image` — does not bypass EE compute.
-- Reuses the shared retry/backoff policy (`geocatalog._src.retry.retry_transient_io`) for transient failures.
+- Reuses the shared retry/backoff policy (`geocatalog._src.utils.retry.retry_transient_io`) for transient failures.
 
 The staged catalog is a normal `GeoCatalog`, so the existing `load_raster` / `load_vector` / `xarray_backend` loaders see it as local files and read them in-place.
 

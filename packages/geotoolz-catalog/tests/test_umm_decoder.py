@@ -13,13 +13,13 @@ import pandas as pd
 import pytest
 import shapely
 
-from geocatalog._src._timeutil import TIME_INVARIANT_END, TIME_INVARIANT_START
 from geocatalog._src.sources._umm import (
     extract_cloud_cover,
     granule_geometry,
     granule_interval,
 )
 from geocatalog._src.sources.cmr import _cmr_item_to_source_row
+from geocatalog._src.utils.timeutil import TIME_INVARIANT_END, TIME_INVARIANT_START
 
 
 def _umm(geometry: dict[str, Any]) -> dict[str, Any]:

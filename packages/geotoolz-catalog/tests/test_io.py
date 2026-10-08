@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from geocatalog._src.io import (
+from geocatalog._src.utils.paths import (
     _close_resolved_uri,
     _is_fsspec_uri,
     _resolve_uri,

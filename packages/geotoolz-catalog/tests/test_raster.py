@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import geocatalog._src.raster as raster_module
+import geocatalog._src.formats.raster as raster_module
 from geocatalog import GeoSlice
 from geocatalog.build import build_raster_catalog
 from geocatalog.load import load_raster, load_raster_timeseries

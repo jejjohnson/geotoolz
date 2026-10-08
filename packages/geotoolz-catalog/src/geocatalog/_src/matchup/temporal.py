@@ -72,7 +72,7 @@ def _midpoint(interval: pd.Interval) -> pd.Timestamp:
     """
     import pandas as pd
 
-    from geocatalog._src._timeutil import to_utc_ts
+    from geocatalog._src.utils.timeutil import to_utc_ts
 
     left = to_utc_ts(pd.Timestamp(interval.left))
     right = to_utc_ts(pd.Timestamp(interval.right))
@@ -196,7 +196,7 @@ class Synchronous:
         """Positions of the candidates overlapping the widened primary."""
         import pandas as pd
 
-        from geocatalog._src._timeutil import to_utc_ts
+        from geocatalog._src.utils.timeutil import to_utc_ts
 
         tol = _to_timedelta(self.tolerance)
         primary_left = to_utc_ts(pd.Timestamp(primary.left)) - tol

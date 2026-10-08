@@ -16,17 +16,17 @@ from typing import Any
 
 LAZY: dict[str, str] = {
     "CMRSource": "geocatalog._src.sources.cmr",
-    "DuckDBGeoCatalog": "geocatalog._src.duckdb_backend",
+    "DuckDBGeoCatalog": "geocatalog._src.backends.duckdb_backend",
     "EarthAccessSource": "geocatalog._src.sources.earthaccess",
     "GEESource": "geocatalog._src.sources.gee",
     "STACSource": "geocatalog._src.sources.stac",
-    "build_vector_catalog": "geocatalog._src.vector",
-    "build_xarray_catalog": "geocatalog._src.xarray_backend",
-    "from_stac_items": "geocatalog._src.stac",
-    "from_stac_search": "geocatalog._src.stac",
-    "load_vector": "geocatalog._src.vector",
-    "load_xarray": "geocatalog._src.xarray_backend",
-    "to_stac_collection": "geocatalog._src.stac",
+    "build_vector_catalog": "geocatalog._src.formats.vector",
+    "build_xarray_catalog": "geocatalog._src.formats.xarray_backend",
+    "from_stac_items": "geocatalog._src.storage.stac",
+    "from_stac_search": "geocatalog._src.storage.stac",
+    "load_vector": "geocatalog._src.formats.vector",
+    "load_xarray": "geocatalog._src.formats.xarray_backend",
+    "to_stac_collection": "geocatalog._src.storage.stac",
 }
 """Public name → module that defines it."""
 

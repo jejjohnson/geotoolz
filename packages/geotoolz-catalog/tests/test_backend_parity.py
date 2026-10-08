@@ -19,7 +19,7 @@ import pytest
 import shapely
 
 from geocatalog._src.base import GeoCatalog
-from geocatalog._src.streaming import StreamingParquetWriter
+from geocatalog._src.storage.streaming import StreamingParquetWriter
 from geocatalog.backends import InMemoryGeoCatalog
 from geocatalog.storage import from_geoparquet, to_geoparquet
 from tests.conftest import assert_catalogs_equal, needs_duckdb
@@ -253,7 +253,7 @@ def test_write_open_query_write_open(tmp_path: Path, engine: str) -> None:
 
 @needs_duckdb
 def test_streamed_artifact_reads_the_same_on_both_engines(tmp_path: Path) -> None:
-    from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+    from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
 
     path = tmp_path / "streamed.parquet"
     with StreamingParquetWriter(path, crs="EPSG:32629", kind="raster") as w:
@@ -295,7 +295,7 @@ def test_config_crs_is_stable_across_backends_and_round_trips(
     to_geoparquet(memory, path)
     configs = [memory.get_config()["crs"], from_geoparquet(path).get_config()["crs"]]
     try:
-        from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+        from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
 
         configs.append(DuckDBGeoCatalog.open(path).get_config()["crs"])
     except ImportError:
