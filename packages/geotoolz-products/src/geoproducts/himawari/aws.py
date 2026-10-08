@@ -254,7 +254,7 @@ def list_l2(
     lo = as_utc(start)
     hi = lo + _SLOT if end is None else as_utc(end)
     out: list[L2File] = []
-    for key, size in _list_slots(satellite, f"AHI-L2-FLDK-{group}", start, end):
+    for key, size in _list_slots(satellite, f"AHI-L2-FLDK-{group}", lo, hi):
         try:
             item = parse_key(key, size=size)
         except ValueError:

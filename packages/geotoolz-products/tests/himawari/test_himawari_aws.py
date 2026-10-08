@@ -137,6 +137,19 @@ class TestListing:
         assert [f.product for f in heights] == ["CHGT"]
         assert aws.list_l2(start=datetime(2026, 10, 7, 3, 1)) == []
 
+    def test_l2_default_window_spans_into_the_next_slot(self, fake_s3) -> None:
+        later = CMSK.replace("s202610070300214", "s202610070310214")
+        fake = fake_s3(
+            pages={
+                "AHI-L2-FLDK-Clouds/2026/10/07/0310/": [
+                    listing([f"AHI-L2-FLDK-Clouds/2026/10/07/0310/{later}"])
+                ]
+            }
+        )
+        out = aws.list_l2(start=datetime(2026, 10, 7, 3, 7))
+        assert [f.start.minute for f in out] == [10]
+        assert len(fake.urls) == 2  # the 03:00 and 03:10 slots
+
     @pytest.mark.parametrize(
         ("kwargs", "match"),
         [
