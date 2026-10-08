@@ -68,14 +68,14 @@ gt = GeoTensor(
 
 The `GeoTensor` carries the array plus `transform` and `crs`. Operators
 preserve those by rewrapping their result with
-`geotoolz._src.wrap.wrap_like(gt, new_array)`.
+`geotoolz.carrier.wrap_like(gt, new_array)`.
 
 ## 2. Define three operators inline
 
 ```python
 import numpy as np
 from pipekit import Operator
-from geotoolz._src.wrap import wrap_like
+from geotoolz.carrier import wrap_like
 
 
 class Scale(Operator):

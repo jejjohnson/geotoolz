@@ -106,7 +106,7 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 
 from geotoolz import Operator, Sequential
-from geotoolz._src.wrap import wrap_like
+from geotoolz.carrier import wrap_like
 
 
 class Scale(Operator):

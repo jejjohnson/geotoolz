@@ -7,7 +7,7 @@ Five packages, installed separately: `geotoolz`, `geotoolz-catalog`, `geotoolz-p
 - **pipekit `Operator`:** implement `_apply`, with a keyword-only constructor that holds configuration only and an auto-derived JSON `get_config()`.
 - **`GeoTensor`:** bands on axis -3; a GeoTensor in returns a GeoTensor on the same grid; a fresh `attrs` dict; `fill_value_default` is nodata.
 
-See "Concepts" below. Claude Code users can install the `geotoolz` plugin: `/plugin marketplace add jejjohnson/geotoolz`, then `/plugin install geotoolz@geotoolz`.
+Keep both with the public helpers in `geotoolz.carrier`, and test a new step with `geotoolz.testing.check_operator`. See "Concepts" below. Claude Code users can install the `geotoolz` plugin: `/plugin marketplace add jejjohnson/geotoolz`, then `/plugin install geotoolz@geotoolz`.
 
 ## Start here
 
@@ -36,6 +36,7 @@ See "Concepts" below. Claude Code users can install the `geotoolz` plugin: `/plu
 
 ## Contracts
 
+- [Carrier helpers and contract checks](https://jejjohnson.github.io/geotoolz/api/carrier/): `geotoolz.carrier` and `geotoolz.testing.check_operator`
 - [Concepts](https://jejjohnson.github.io/geotoolz/concepts/): the pipekit Operator, Sequential and Graph; multi-input operators; georeferencing checks; band names; mask polarity; fitted operators
 
 ## Optional

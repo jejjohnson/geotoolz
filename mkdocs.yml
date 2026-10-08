@@ -67,6 +67,7 @@ nav:
           - Multi-format readers: io.md
       - API Reference:
           - Core: api/core.md
+          - Carrier & contract checks: api/carrier.md
           - Augment: api/augment.md
           - Compositing: api/compositing.md
           - Einx: api/einx.md

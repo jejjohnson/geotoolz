@@ -64,6 +64,7 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 | Band lookup by index or name, wavelengths | `geotoolz._src.bands` (`resolve_band`, `resolve_bands`) |
 | Nodata handling | `geotoolz._src.valid` |
 | Wrapping a result back into a `GeoTensor` | `geotoolz._src.wrap.wrap_like` |
+| The carrier helpers above from another package or a downstream project | `geotoolz.carrier` (the same objects, public); check an operator with `geotoolz.testing.check_operator` |
 | A spatial index of files, a `GeoSlice` query, loading a mosaic | `geocatalog` (`build`, `query`, `load`) |
 | Tiling, overlap-blending, stitching | `geopatcher` (`SpatialPatcher` + `spatial.*` axes) |
 | Optional-dependency imports with an install hint | the package's `_src` extras helper (`geotoolz._src.optional`, `geoproducts._src.extras`, `geopatcher._src._extras`, `geocatalog._src._extras`, `geocloud._src.extras`) |
@@ -177,6 +178,11 @@ class automatically and checks:
 A new operator is covered as soon as it exists. If it can't be built with no
 arguments, add it to `CTOR_KWARGS` (or `RUNTIME_CTOR_KWARGS` when it needs
 live objects).
+
+Outside geotoolz — another package of this repo, or a project built on the
+stack — the same helpers are public in `geotoolz.carrier`, and
+`geotoolz.testing.check_operator(op, scene)` runs the same checks (they share
+`geotoolz._src.contract`) on one operator.
 
 The other contracts each belong to one package, and their rules live in
 that package's `AGENTS.md`:

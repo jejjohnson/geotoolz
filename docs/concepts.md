@@ -72,7 +72,7 @@ automatically:
 import numpy as np
 from pydantic import BaseModel
 from pipekit import Operator
-from geotoolz._src.wrap import wrap_like
+from geotoolz.carrier import wrap_like
 
 
 class ScaleConfig(BaseModel):
@@ -469,7 +469,7 @@ without rewrapping it into the input carrier.
 
 ## Georeferencing checks
 
-Every operator family uses the same helpers from `geotoolz._src.geo`:
+Every operator family uses the same helpers from `geotoolz.carrier`:
 
 - **Geo-dependent operators** (reprojection, rasterisation, metre-based
   measurements, …) reject a plain array with one message:
@@ -490,7 +490,7 @@ Every operator family uses the same helpers from `geotoolz._src.geo`:
 Every operator that takes a band reference (`indices.NDVI(red="B04")`,
 `spectral.SelectBands`, `viz.Composite`/`TrueColor`, `qa.MaskClouds(qa_band=...)`,
 `augment.BandJitter`, `compositing`, `plume.SBMP`, …) resolves it with the one
-shared resolver, `geotoolz._src.bands.resolve_band`, so `"B04"` means the same
+shared resolver, `geotoolz.carrier.resolve_band`, so `"B04"` means the same
 band in every family:
 
 - **Integers** (any integral type, `np.int64` included) are band-axis positions
@@ -535,7 +535,7 @@ to `ApplyMask` directly to drop it, or through `InvertMask` to keep it.)
   `InvertMask` / `invert_mask`.
 - **Invalid pixels.** `qa.MaskInvalid` is georeader's `invalidmask()`
   reduced over bands with the package's nodata rule (a `NaN` fill matches
-  `NaN`; non-finite values are invalid; see `geotoolz._src.valid`).
+  `NaN`; non-finite values are invalid; see `geotoolz.carrier`).
 - **Morphology is polarity-neutral.** `DilateMask`, `BufferMask`,
   `RemoveSmallObjects`, … grow / shrink / clean the `True` pixels,
   whatever they mean.

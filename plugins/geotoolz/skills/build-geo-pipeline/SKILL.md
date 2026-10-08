@@ -173,10 +173,14 @@ pipeline.
 - **Masks.** `True` means drop the pixel; this is what `gz.ApplyMask`
   expects.
 
+`geotoolz.carrier` holds the helpers the built-in operators use to keep these
+rules, so your step keeps them the same way:
+
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
 from pipekit import Operator
+
+from geotoolz.carrier import mask_invalid_to_nan, over_frames, wrap_like
 
 
 class ZScore(Operator):
@@ -186,35 +190,23 @@ class ZScore(Operator):
         self.mean = mean  # stored under its own name → get_config() for free
         self.std = std
 
-    def _apply(self, gt):  # (C, H, W) or (T, C, H, W); bands on axis -3
-        out = (np.asarray(gt, dtype=np.float32) - self.mean) / self.std  # never mutate gt
-        if not isinstance(gt, GeoTensor):
-            return out  # plain array in → plain array out
-        invalid = ~np.asarray(gt.validmask()) | ~np.isfinite(out)
-        if out.ndim >= 3:  # a pixel is invalid when any of its bands is
-            invalid = invalid.any(axis=-3, keepdims=True)
-        out = np.where(invalid, np.float32(np.nan), out)  # nodata stays nodata
-        return GeoTensor(
-            out,
-            transform=gt.transform,  # same grid as the input
-            crs=gt.crs,
-            fill_value_default=np.nan,  # a new float quantity → NaN fill
-            attrs=dict(gt.attrs),  # a fresh dict; band count unchanged, so keep band keys
-        )
+    @over_frames  # a (T, C, H, W) stack runs frame by frame
+    def _apply(self, gt):  # (C, H, W) → (C, H, W) float
+        values = mask_invalid_to_nan(gt)  # a float copy; an invalid pixel is NaN in every band
+        out = (values - self.mean) / self.std
+        return wrap_like(gt, out, fill_value_default=np.nan)  # same carrier, fresh attrs, NaN fill
 ```
 
-Check a new step before you rely on it:
+Check a new step with the same checks geotoolz runs on its own operators. It
+fails naming the first broken rule:
 
 ```python
-import json
-from pipekit import Input, Node, Operator
+from geotoolz.testing import check_operator
 
-op = ZScore(mean=0.3, std=0.1)
-assert Operator.from_state(json.loads(json.dumps(op.state))).get_config() == op.get_config()
-assert isinstance(op(Input("scene")), Node)      # usable in a pipekit.Graph
-out = op(scene)                                  # scene: GeoTensor (4, H, W)
-assert out.attrs is not scene.attrs and out.transform == scene.transform
-pipe = gz.NDVI(nir="B08", red="B04") | ZScore(mean=0.0, std=0.5)   # (H, W)
+
+def test_zscore(scene):  # scene: GeoTensor (4, H, W) with band_names and a few nodata pixels
+    out = check_operator(ZScore(mean=0.3, std=0.1), scene)
+    assert out.shape == scene.shape
 ```
 
 ## Anti-patterns — use the stack instead
@@ -226,7 +218,7 @@ pipe = gz.NDVI(nir="B08", red="B04") | ZScore(mean=0.0, std=0.5)   # (H, W)
 | a STAC / CMR search client | `geocatalog.sources` |
 | boto3 / s3fs / obstore client code | `geocloud.store.get_obstore` (pooled) or `geocatalog.staging.stage` |
 | band arithmetic on raw arrays (`(nir - red) / (nir + red)`) | the operator (`gz.NDVI`, `gz.spectral.BandRatio`, …) — it handles nodata, dtype and georeferencing |
-| manual nodata masks or rebuilding a `GeoTensor` by hand | the operators carry `fill_value_default` through |
+| manual nodata masks or rebuilding a `GeoTensor` by hand | the operators carry `fill_value_default` through; in your own step, `geotoolz.carrier` (`wrap_like`, `mask_invalid_to_nan`, `resolve_band`, `require_grid_match`) |
 | retry loops, `try` / `except` fallbacks, memo dicts or thread pools around steps | `pipekit` `Retry`, `Try` / `Coalesce`, `Cache`, `ThreadMap` / `BatchedMap` |
 | a parser for GOES / Himawari files | `geoproducts.goes`, `geoproducts.himawari` |
 
