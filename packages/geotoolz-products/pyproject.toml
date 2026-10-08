@@ -1,6 +1,6 @@
 [project]
 name = "geotoolz-products"
-version = "0.2.0"
+version = "0.2.1"
 description = "Readers for Earth-observation data products — each mission or provider product as a georeader GeoData / GeoTensor."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

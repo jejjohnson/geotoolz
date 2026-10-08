@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.9.0...geotoolz-patcher-v0.10.0) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* `geopatcher.integrations.pipekit.Stitch` is now `MergePatches`, and `geotoolz.MinMax` / `geotoolz.radiometry.MinMax` is now `MinMaxStretch`. No aliases are kept.
+
+### Features
+
+* **agents:** agent rules, contracts, capability index, recipe skills and a downstream plugin ([#436](https://github.com/jejjohnson/geotoolz/issues/436)) ([b11e390](https://github.com/jejjohnson/geotoolz/commit/b11e390c24de0d0c29d1c3ee8c1f9bb6681bbc15))
+
+
+### Bug Fixes
+
+* **patcher:** merge patches into the band axes they carry, as a georeferenced GeoTensor ([#437](https://github.com/jejjohnson/geotoolz/issues/437)) ([f6f83d3](https://github.com/jejjohnson/geotoolz/commit/f6f83d36399f30372e3f40d5c49d07cfc38a33a9))
+
+
+### Code Refactoring
+
+* one meaning per name — MergePatches and MinMaxStretch ([#439](https://github.com/jejjohnson/geotoolz/issues/439)) ([38df28a](https://github.com/jejjohnson/geotoolz/commit/38df28a6fcc85fa72b0a493e7cd1bcd61c37fe53))
+
 ## [0.9.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.8.0...geotoolz-patcher-v0.9.0) (2026-10-08)
 
 
