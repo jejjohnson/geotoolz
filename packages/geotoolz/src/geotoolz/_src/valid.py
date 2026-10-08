@@ -265,13 +265,12 @@ def carried_fill(ref: Any, dtype: Any) -> Any:
         dtype: The output dtype.
 
     Returns:
-        * ``False`` for a boolean output;
-        * for a floating-point output: ``NaN`` when ``ref`` is an integer
-          / boolean carrier with a fill (the integer fill would collide
-          with promoted real data, e.g. ``0``), otherwise ``ref``'s fill
-          (``None`` stays ``None``);
-        * for an integer output: ``ref``'s fill when it is representable
-          in ``dtype``, otherwise ``None``.
+        ``False`` for a boolean output. For a floating-point output,
+        ``NaN`` when ``ref`` is an integer / boolean carrier with a fill
+        (the integer fill would collide with promoted real data, e.g.
+        ``0``), otherwise ``ref``'s fill (``None`` stays ``None``). For an
+        integer output, ``ref``'s fill when it is representable in
+        ``dtype``, otherwise ``None``.
 
     Examples:
         >>> carried_fill(np.zeros(2, dtype=np.uint16), np.float32) is None

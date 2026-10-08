@@ -1303,7 +1303,7 @@ helper is added here, not inline in one caller.
 | `geotoolz._src.bands` | Shared utilities for resolving band references against GeoTensor metadata. | `band_count`, `per_band_values`, `strip_band_attrs`, `take_band_attrs`, `concat_band_attrs`, `band_names`, `resolve_band`, `resolve_bands`, `resolve_wavelengths` |
 | `geotoolz._src.blending` | Shared overlap-add blending primitives. | `triangular_weights`, `overlap_add`, `normalize_overlap_add` |
 | `geotoolz._src.config` | Shared ``get_config()`` coercion helpers. | `jsonable`, `as_tuple`, `mapping_to_pairs`, `mapping_from_pairs`, `reject_config_summary` |
-| `geotoolz._src.contract` | The pipekit `Operator` and `GeoTensor` carrier contracts, as assertions. | `geotensors`, `is_nan`, `assert_keyword_only`, `assert_config_round_trips`, `assert_graph_mode`, `assert_same_carrier`, `assert_fresh_consistent_attrs`, `assert_fill_matches_dtype`, `assert_clear_rank_error`, `assert_time_stack` |
+| `geotoolz._src.contract` | The pipekit `Operator` and `GeoTensor` carrier contracts, as assertions. | `geotensors`, `is_nested_operator`, `same`, `assert_keyword_only`, `assert_config_round_trips`, `assert_graph_mode`, `assert_same_carrier`, `assert_fresh_consistent_attrs`, `assert_fill_matches_dtype`, `assert_clear_rank_error`, `time_stack_of`, `frames`, `assert_time_stack` |
 | `geotoolz._src.dtype` | Shared dtype-promotion primitive. | `as_float` |
 | `geotoolz._src.fitted` | Shared plumbing for fitted operators (the ``fit`` / ``transform`` seam). | `PicklableLock`, `fit_lock`, `fit_once` |
 | `geotoolz._src.geo` | Shared georeferencing helpers. | `require_geotensor`, `require_projected_crs`, `ground_pixel_size`, `grid_matches`, `require_grid_match`, `pixel_xy` |

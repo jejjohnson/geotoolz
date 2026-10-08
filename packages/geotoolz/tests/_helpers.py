@@ -17,6 +17,8 @@ import numpy as np
 import rasterio
 from georeader.geotensor import GeoTensor
 
+from geotoolz._src.contract import frames  # noqa: F401 - re-exported for the tests
+
 
 #: 10 m UTM grid anchored in zone 29N — arbitrary but stable, so tests
 #: can assert on exact transform round-trips.
@@ -164,26 +166,6 @@ def time_stack(
         attrs=attrs,
         with_fill_pixels=with_fill_pixels,
     )
-
-
-def frames(stack: Any) -> list[Any]:
-    """The ``(C, H, W)`` frames of a 4-D stack (GeoTensors keep their grid).
-
-    Args:
-        stack: A ``(T, C, H, W)`` GeoTensor or ndarray.
-
-    Returns:
-        One carrier per time step (``stack.isel({"time": t})`` for a
-        GeoTensor, with a copy of its attrs).
-    """
-    if isinstance(stack, GeoTensor):
-        out = []
-        for t in range(stack.shape[0]):
-            frame = stack.isel({"time": t})
-            frame.attrs = dict(stack.attrs or {})
-            out.append(frame)
-        return out
-    return [np.asarray(stack)[t] for t in range(np.shape(stack)[0])]
 
 
 def uint16_dn_cube(n_bands: int = 2, *, size: int = 4, seed: int = 0) -> np.ndarray:

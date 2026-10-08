@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-import rasterio
+from _helpers import toy_geotensor
 from georeader.geotensor import GeoTensor
 from pipekit import Operator
 
@@ -17,13 +17,11 @@ from geotoolz.testing import check_operator
 
 def _scene(dtype: Any = np.float32, fill: Any = 0) -> GeoTensor:
     values = np.random.default_rng(0).uniform(1, 100, (3, 6, 6)).astype(dtype)
-    values[:, 0, 0] = fill
-    return GeoTensor(
+    return toy_geotensor(
         values,
-        transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
-        crs="EPSG:32630",
         fill_value_default=fill,
         attrs={"band_names": ["B02", "B04", "B08"]},
+        with_fill_pixels=True,
     )
 
 
@@ -111,6 +109,16 @@ class _HoldsAModel(ZScore):
 def test_broken_operators_fail_naming_the_rule(op: Any, dtype: Any, match: str) -> None:
     with pytest.raises((AssertionError, TypeError), match=match):
         check_operator(op, _scene(dtype))
+
+
+def test_containers_of_operators_round_trip_as_pipekit_refuses_them() -> None:
+    # A config holding a *list* of nested operators is refused by pipekit's
+    # from_state; that refusal is the expected outcome, not a crash.
+    from pipekit import Identity, Sequential
+
+    from geotoolz._src.contract import assert_config_round_trips
+
+    assert_config_round_trips(Sequential([Identity(), Identity()]))
 
 
 def test_carrier_is_the_shared_toolkit() -> None:

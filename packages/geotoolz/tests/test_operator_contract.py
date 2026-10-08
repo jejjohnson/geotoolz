@@ -37,13 +37,19 @@ from typing import Any
 import numpy as np
 import pytest
 from _helpers import all_operator_classes, fill_pixel_mask
-from pipekit import Input, Node, Operator
+from pipekit import Input, Operator
 
 from geotoolz._src.contract import (
     assert_clear_rank_error,
+    assert_config_round_trips,
     assert_fill_matches_dtype,
     assert_fresh_consistent_attrs,
+    assert_graph_mode,
+    assert_keyword_only,
+    frames,
     geotensors,
+    same,
+    time_stack_of,
 )
 
 
@@ -567,13 +573,7 @@ def test_constructors_are_keyword_only(cls: type) -> None:
     safely. ``*args`` / ``**kwargs`` pass-throughs (inherited base
     constructors) are allowed.
     """
-    params = list(inspect.signature(cls.__init__).parameters.values())[1:]
-    positional = [
-        p.name for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
-    ]
-    assert positional == [], (
-        f"{cls.__qualname__}.__init__ takes {positional} positionally"
-    )
+    assert_keyword_only(cls)
 
 
 #: Retired constructor spellings -> the package-wide name (see the
@@ -655,24 +655,6 @@ def test_tables_name_real_operators() -> None:
     assert stale == []
 
 
-def _is_nested_operator(value: Any) -> bool:
-    if isinstance(value, list):
-        return bool(value) and all(map(_is_nested_operator, value))
-    return isinstance(value, dict) and set(value) == {"class", "config"}
-
-
-def _same(a: Any, b: Any) -> bool:
-    """Equality that treats NaN as equal to NaN."""
-    if isinstance(a, float) and isinstance(b, float) and np.isnan(a):
-        return bool(np.isnan(b))
-    if isinstance(a, dict) and isinstance(b, dict):
-        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
-    if isinstance(a, list | tuple) and isinstance(b, list | tuple):
-        same_kind = type(a) is type(b)
-        return same_kind and len(a) == len(b) and all(map(_same, a, b))
-    return a == b
-
-
 @pytest.mark.parametrize("cls", _params("round_trip"))
 def test_state_round_trip(cls: type) -> None:
     """``Operator.from_state(op.state)`` rebuilds an equal operator."""
@@ -681,17 +663,7 @@ def test_state_round_trip(cls: type) -> None:
         with pytest.raises(RuntimeError, match="forbid_in_yaml"):
             Operator.from_state(state)
         return
-    op = build(cls)
-    state = json.loads(json.dumps(op.state))
-    if any(_is_nested_operator(v) for v in op.get_config().values()):
-        # Containers emit nested debug payloads; pipekit refuses to rebuild
-        # them through from_state (use a YAML / Hydra loader instead).
-        with pytest.raises(RuntimeError, match="non-primitive"):
-            Operator.from_state(state)
-        return
-    clone = Operator.from_state(state)
-    assert type(clone) is cls
-    assert _same(clone.get_config(), op.get_config())
+    assert_config_round_trips(build(cls))
 
 
 @pytest.mark.parametrize("cls", _params("config_is_json"))
@@ -802,10 +774,7 @@ def test_graph_mode(cls: type) -> None:
     n = _graph_arity(op)
     if n == 0:
         pytest.skip("input-less operator (source)")
-    node = op(*(Input(f"x{i}") for i in range(n)))
-    assert isinstance(node, Node)
-    assert node.operator is op
-    assert len(node.parents) == n
+    assert_graph_mode(op, n)
 
 
 # ---------------------------------------------------------------------------
@@ -1007,7 +976,7 @@ def test_carriers_are_not_constructor_kwargs(cls: type) -> None:
     op = build(cls)
     if not cls.forbid_in_yaml:
         clone = Operator.from_state(json.loads(json.dumps(op.state)))
-        assert _same(clone.get_config(), op.get_config())
+        assert same(clone.get_config(), op.get_config())
 
 
 def _scene() -> Any:
@@ -1489,28 +1458,6 @@ def _time_stack_params() -> list[Any]:
     return out
 
 
-def _stack_of(scene: Any) -> Any:
-    """A 2-frame ``(T, C, H, W)`` stack whose second frame is a perturbed copy.
-
-    Float scenes are rescaled per pixel so the frames differ; integer (label
-    / QA) scenes repeat. A 2-D scene becomes ``(T, 1, H, W)``.
-    """
-    from _helpers import toy_geotensor
-
-    values = np.asarray(scene)
-    if values.ndim == 2:
-        values = values[None]
-    second = values.copy()
-    if values.dtype.kind == "f":
-        rng = np.random.default_rng(1)
-        second = values * rng.uniform(0.8, 1.2, values.shape)
-    return toy_geotensor(
-        np.stack([values, second]),
-        fill_value_default=scene.fill_value_default,
-        attrs=dict(scene.attrs),
-    )
-
-
 def _build_seeded(cls: type) -> Operator:
     """``build(cls)`` with ``seed=0`` for stochastic operators."""
     op = build(cls, runtime=True)
@@ -1579,8 +1526,6 @@ def test_time_stack_contract(cls: type) -> None:
     Sequence operators (composites, mosaics) given a stack must match the
     same operator on the list of its frames.
     """
-    from _helpers import frames
-
     from geotoolz.io._src.operators import SinkOperator
 
     op = _build_seeded(cls)
@@ -1593,7 +1538,7 @@ def test_time_stack_contract(cls: type) -> None:
         if isinstance(scene, list) != takes_sequence:
             continue
         if takes_sequence:
-            stack = _stack_of(scene[0])
+            stack = time_stack_of(scene[0])
             try:
                 expected = _build_seeded(cls)(frames(stack))
             except Exception:
@@ -1603,7 +1548,7 @@ def test_time_stack_contract(cls: type) -> None:
                 _call(_build_seeded(cls), scene)
             except Exception:
                 continue
-            stack = _stack_of(scene)
+            stack = time_stack_of(scene)
             expected = None
         ran = True
         try:

@@ -28,9 +28,23 @@ def geotensors(value: Any) -> list[Any]:
     return []
 
 
-def is_nan(value: Any) -> bool:
-    """Whether ``value`` is a float NaN (``None`` and non-floats are not)."""
-    return isinstance(value, float | np.floating) and bool(np.isnan(value))
+def is_nested_operator(value: Any) -> bool:
+    """Whether a config value is a nested-operator payload (or a list of them)."""
+    if isinstance(value, list):
+        return bool(value) and all(map(is_nested_operator, value))
+    return isinstance(value, dict) and set(value) == {"class", "config"}
+
+
+def same(a: Any, b: Any) -> bool:
+    """Config equality: NaN equals NaN, and a tuple never equals a list."""
+    if isinstance(a, float) and isinstance(b, float) and np.isnan(a):
+        return bool(np.isnan(b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(same(a[k], b[k]) for k in a)
+    if isinstance(a, list | tuple) and isinstance(b, list | tuple):
+        same_kind = type(a) is type(b)
+        return same_kind and len(a) == len(b) and all(map(same, a, b))
+    return a == b
 
 
 def assert_keyword_only(cls: type) -> None:
@@ -50,44 +64,39 @@ def assert_keyword_only(cls: type) -> None:
 
 
 def assert_config_round_trips(op: Any) -> None:
-    """``get_config()`` is strict JSON and ``from_state`` rebuilds ``op``.
+    """``get_config()`` is strict JSON and ``loads(dumps(op))`` rebuilds ``op``.
 
-    A ``forbid_in_yaml`` operator must instead be refused by ``from_state``;
-    a container whose config nests other operators is refused too (pipekit
-    rebuilds those through a YAML / Hydra loader).
+    pipekit refuses to rebuild a ``forbid_in_yaml`` operator and a
+    container whose config nests other operators (those are rebuilt in
+    code, or by a YAML / Hydra loader); that refusal is the expected
+    outcome for them. A config that is not JSON is a debug repr, allowed
+    only on a ``forbid_in_yaml`` operator.
     """
-    from pipekit import Operator
+    from pipekit import dumps, loads
 
     cls = type(op)
+    config = op.get_config()
     try:
-        json.dumps(op.get_config(), allow_nan=False)
+        json.dumps(config, allow_nan=False)
     except (TypeError, ValueError) as exc:
         if cls.forbid_in_yaml:
-            return  # a debug repr of live objects; never rebuilt from config
+            return
         raise AssertionError(
             f"{cls.__name__}.get_config() is not strict JSON ({exc}); hold "
             "only configuration, or set forbid_in_yaml = True for live objects"
         ) from exc
-    state = json.loads(json.dumps(op.state))
-    nested = any(
-        isinstance(v, dict) and set(v) == {"class", "config"}
-        for v in op.get_config().values()
-    )
-    if cls.forbid_in_yaml or nested:
-        try:
-            Operator.from_state(state)
-        except RuntimeError:
+    refused = cls.forbid_in_yaml or any(map(is_nested_operator, config.values()))
+    try:
+        clone = loads(dumps(op))
+    except RuntimeError:
+        if refused:
             return
-        raise AssertionError(
-            f"from_state rebuilt {cls.__name__}, which holds live objects; "
-            "set forbid_in_yaml = True"
-        )
-    clone = Operator.from_state(state)
-    assert type(clone) is cls, f"from_state built {type(clone).__name__}"
-    assert json.dumps(clone.get_config()) == json.dumps(op.get_config()), (
-        f"{cls.__name__} does not round-trip: {op.get_config()} -> "
-        f"{clone.get_config()}; store each constructor argument under its "
-        "own name"
+        raise
+    assert not refused, f"pipekit rebuilt {cls.__name__}, which it should refuse"
+    assert type(clone) is cls, f"loads built {type(clone).__name__}"
+    assert same(clone.get_config(), config), (
+        f"{cls.__name__} does not round-trip: {config} -> {clone.get_config()}; "
+        "store each constructor argument under its own name"
     )
 
 
@@ -100,6 +109,8 @@ def assert_graph_mode(op: Any, n_inputs: int = 1) -> None:
         f"{type(op).__name__} on Input nodes returned {type(node).__name__}; "
         "implement _apply, never __call__"
     )
+    assert node.operator is op
+    assert len(node.parents) == n_inputs
 
 
 def assert_same_carrier(src: Any, out: Any) -> None:
@@ -109,6 +120,8 @@ def assert_same_carrier(src: Any, out: Any) -> None:
     the input's pixel grid also keeps its transform.
     """
     from georeader.geotensor import GeoTensor
+
+    from geotoolz._src.geo import grid_matches
 
     pieces = out if isinstance(out, list | tuple) else [out]
     for piece in pieces:
@@ -125,7 +138,7 @@ def assert_same_carrier(src: Any, out: Any) -> None:
         )
         assert piece.crs == src.crs, f"output CRS {piece.crs} is not {src.crs}"
         if piece.shape[-2:] == src.shape[-2:]:
-            assert piece.transform == src.transform, (
+            assert grid_matches(piece, src), (
                 "output on the input's grid has another transform"
             )
 
@@ -174,7 +187,7 @@ def assert_fill_matches_dtype(
     ``nodata`` is the ``(H, W)`` mask of the input pixels that must stay
     invalid; it defaults to every invalid pixel of ``src``.
     """
-    from geotoolz._src.valid import valid_pixels
+    from geotoolz._src.valid import _is_nan_scalar, valid_pixels
 
     fill = gt.fill_value_default
     kind = gt.dtype.kind
@@ -193,7 +206,7 @@ def assert_fill_matches_dtype(
     elif kind == "f":
         assert fill is not None, "float output declares no fill"
         if np.asarray(src).dtype.kind in "biu":
-            assert is_nan(fill), (
+            assert _is_nan_scalar(fill), (
                 f"float output of a {np.asarray(src).dtype} input declares fill "
                 f"{fill!r}, expected NaN"
             )
@@ -219,49 +232,68 @@ def assert_clear_rank_error(name: str, exc: BaseException) -> None:
     )
 
 
-def assert_time_stack(op: Any, frame: Any) -> None:
-    """``op`` on a ``(T, C, H, W)`` stack of ``frame`` matches it per frame.
+def time_stack_of(scene: Any) -> Any:
+    """A 2-frame ``(T, C, H, W)`` stack: ``scene`` and a perturbed copy.
 
-    The stack holds ``frame`` and a rescaled copy. The output must equal
-    the per-frame results restacked along time (a band-collapsing result
-    keeps a singleton band axis, ``(T, 1, H, W)``), or ``op`` must reject
-    the rank with an error naming itself. Each call uses a fresh copy of
-    ``op``, so a seeded stochastic operator makes the same draws.
+    Float scenes are rescaled per pixel (a fixed seed) so the frames
+    differ; integer (label / QA) scenes repeat. A 2-D scene becomes
+    ``(T, 1, H, W)``. The stack is on ``scene``'s carrier and grid.
+    """
+    from geotoolz._src.wrap import wrap_like
+
+    values = np.asarray(scene)
+    if values.ndim == 2:
+        values = values[None]
+    second = values.copy()
+    if values.dtype.kind == "f":
+        second = values * np.random.default_rng(1).uniform(0.8, 1.2, values.shape)
+    return wrap_like(scene, np.stack([values, second]))
+
+
+def frames(stack: Any) -> list[Any]:
+    """The ``(C, H, W)`` frames of a 4-D stack (GeoTensors keep their grid).
+
+    Args:
+        stack: A ``(T, C, H, W)`` GeoTensor or ndarray.
+
+    Returns:
+        One carrier per time step (``stack.isel({"time": t})`` for a
+        GeoTensor, with a copy of its attrs).
     """
     from georeader.geotensor import GeoTensor
 
-    values = np.asarray(frame)
-    if values.ndim == 2:
-        values = values[None]
-    second = values * 1.1 if values.dtype.kind == "f" else values.copy()
-    if isinstance(frame, GeoTensor):
-        stack = GeoTensor(
-            np.stack([values, second]),
-            transform=frame.transform,
-            crs=frame.crs,
-            fill_value_default=frame.fill_value_default,
-            attrs=dict(frame.attrs),
-        )
-        frames = [
-            GeoTensor(
-                v,
-                transform=frame.transform,
-                crs=frame.crs,
-                fill_value_default=frame.fill_value_default,
-                attrs=dict(frame.attrs),
-            )
-            for v in (values, second)
-        ]
-    else:
-        stack, frames = np.stack([values, second]), [values, second]
+    if isinstance(stack, GeoTensor):
+        out = []
+        for t in range(stack.shape[0]):
+            frame = stack.isel({"time": t})
+            frame.attrs = dict(stack.attrs or {})
+            out.append(frame)
+        return out
+    return [np.asarray(stack)[t] for t in range(np.shape(stack)[0])]
+
+
+def assert_time_stack(op: Any, frame: Any) -> None:
+    """``op`` on a ``(T, C, H, W)`` stack of ``frame`` matches it per frame.
+
+    The output must equal the per-frame results restacked along time (a
+    band-collapsing result keeps a singleton band axis, ``(T, 1, H, W)``),
+    or ``op`` must reject the rank with an error naming itself. Each call
+    uses a fresh copy of ``op``, so a seeded stochastic operator makes the
+    same draws.
+    """
+    from geotoolz._src.shape import map_frames
+
+    stack = time_stack_of(frame)
     try:
         out = copy.deepcopy(op)(stack)
     except Exception as exc:
         assert_clear_rank_error(type(op).__name__, exc)
         return
-    per_frame = [np.asarray(copy.deepcopy(op)(f)) for f in frames]
-    want = np.stack([p[None] if p.ndim == 2 else p for p in per_frame])
-    got = np.asarray(out)
+    try:
+        want = map_frames(lambda f: copy.deepcopy(op)(f), stack, name=type(op).__name__)
+    except ValueError:
+        return  # per-frame results are not carriers (fan-outs, statistics)
+    got, want = np.asarray(out), np.asarray(want)
     assert got.shape == want.shape, (
         f"4-D output shape {got.shape}; per-frame results restack to {want.shape}"
     )
