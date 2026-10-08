@@ -35,6 +35,8 @@ __all__ = [
     "url",
 ]
 
+# L1b radiances; L2 products follow ``ABI-L2-<code><sector letter>``
+# (``ABI-L2-ACMC``, ``ABI-L2-MCMIPF``, ...).
 PRODUCTS: tuple[str, ...] = ("ABI-L1b-RadF", "ABI-L1b-RadC", "ABI-L1b-RadM")
 _SATELLITES = (16, 17, 18, 19)
 _S3_NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
@@ -45,8 +47,8 @@ _TIMEOUT_S = 60.0
 _ATTEMPTS = 4
 _BACKOFF_S = 1.0
 _KEY_RE = re.compile(
-    r"OR_(?P<product>ABI-L\w+-\w+?)(?P<sector>[12])?-M(?P<mode>\d)"
-    r"C(?P<channel>\d{2})_G(?P<satellite>\d{2})"
+    r"OR_(?P<product>ABI-L(?:1b|2)-[A-Za-z0-9]+?)(?P<sector>[12])?-M(?P<mode>\d)"
+    r"(?:C(?P<channel>\d{2}))?_G(?P<satellite>\d{2})"
     r"_s(?P<start>\d{14})_e(?P<end>\d{14})_c(?P<created>\d{14})\.nc$"
 )
 
@@ -60,7 +62,7 @@ class ABIFile:
     product: str
     sector: str | None
     mode: int
-    channel: str
+    channel: str | None
     start: datetime
     end: datetime
     created: datetime
@@ -106,7 +108,7 @@ def parse_key(key: str, *, size: int | None = None) -> ABIFile:
         product=match["product"],
         sector=f"M{match['sector']}" if match["sector"] else None,
         mode=int(match["mode"]),
-        channel=f"C{match['channel']}",
+        channel=f"C{match['channel']}" if match["channel"] else None,
         start=_parse_stamp(match["start"]),
         end=_parse_stamp(match["end"]),
         created=_parse_stamp(match["created"]),
@@ -130,9 +132,12 @@ def list_files(
         start: Window start. Naive datetimes are taken as UTC.
         end: Window end (exclusive). Default: ``start`` plus one hour.
         product: Bucket product prefix, e.g. ``"ABI-L1b-RadF"`` (full disk),
-            ``"ABI-L1b-RadC"`` (CONUS / PACUS) or ``"ABI-L1b-RadM"``
-            (mesoscale). Default ``"ABI-L1b-RadC"``.
-        channel: Keep one channel (``13`` or ``"C13"``). Default: all.
+            ``"ABI-L1b-RadC"`` (CONUS / PACUS), ``"ABI-L1b-RadM"``
+            (mesoscale), or an L2 product such as ``"ABI-L2-ACMC"`` (clear
+            sky mask) or ``"ABI-L2-MCMIPF"`` (all 16 channels on one grid).
+            Default ``"ABI-L1b-RadC"``.
+        channel: Keep one channel (``13`` or ``"C13"``); L2 files without
+            a channel are then skipped. Default: all.
         sector: Mesoscale sector, ``"M1"`` or ``"M2"``. Default: both.
 
     Returns:
@@ -166,7 +171,7 @@ def list_files(
                 continue
             files.append(item)
         hour += timedelta(hours=1)
-    return sorted(files, key=lambda item: (item.start, item.channel, item.key))
+    return sorted(files, key=lambda item: (item.start, item.channel or "", item.key))
 
 
 def download(

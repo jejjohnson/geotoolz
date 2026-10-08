@@ -16,7 +16,12 @@ import pytest
 
 
 collect_ignore_glob = (
-    ["test_goes_reader.py", "test_goes_integration.py"]
+    [
+        "test_goes_reader.py",
+        "test_goes_l2.py",
+        "test_goes_stack.py",
+        "test_goes_integration.py",
+    ]
     if importlib.util.find_spec("h5py") is None
     else []
 )
@@ -31,5 +36,18 @@ def abi_file(tmp_path: Path) -> Callable[..., Path]:
         from _goes_abi import write_abi
 
         return write_abi(tmp_path / f"abi_{next(counter)}.nc", **kwargs)
+
+    return make
+
+
+@pytest.fixture
+def l2_file(tmp_path: Path) -> Callable[..., Path]:
+    """Factory: ``l2_file(variables, **write_l2_kwargs)`` → path."""
+    counter = iter(range(1_000))
+
+    def make(variables: dict[str, Any], **kwargs: Any) -> Path:
+        from _goes_abi import write_l2
+
+        return write_l2(tmp_path / f"l2_{next(counter)}.nc", variables, **kwargs)
 
     return make

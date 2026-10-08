@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from pipekit import Operator
 
-from geotoolz._src.bands import BandRef
+from geotoolz._src.bands import BandRef, band_names
 from geotoolz._src.config import (
     as_tuple,
     mapping_from_pairs,
@@ -66,6 +66,7 @@ from geotoolz._src.valid import (
 )
 from geotoolz._src.wrap import wrap_like
 from geotoolz.radiometry._src.operators import PercentileClip
+from geotoolz.spectral._src.array import evaluate_band_math
 from geotoolz.spectral._src.operators import SelectBands
 from geotoolz.viz._src.array import (
     Color,
@@ -74,6 +75,7 @@ from geotoolz.viz._src.array import (
     ensure_rgba,
     gamma_correct_display,
     hillshade,
+    rgb_recipe,
     rgba_from_categories,
     rgba_from_scalar,
 )
@@ -326,6 +328,141 @@ class GammaCorrect(Operator):
         valid = ~invalid_values(gt)
         fill = carried_fill(gt, np.asarray(out).dtype)
         return wrap_like(gt, restore_fill(out, valid, fill), fill_value_default=fill)
+
+
+class RGBRecipe(Operator):
+    """Build a display RGB from three band expressions with fixed stretches.
+
+    The operational satellite RGB products (the CIRA / EUMETSAT "quick
+    guide" composites: day cloud phase, fire temperature, natural colour,
+    dust, air mass, ...) are all one recipe: each colour channel is a band
+    or a small band expression, linearly stretched between a fixed
+    ``vmin`` and ``vmax``, clipped to ``[0, 1]`` and raised to
+    ``1 / gamma``. This operator is that recipe; see
+    :func:`geotoolz.viz.rgb_recipe` for the maths.
+
+    ``red`` / ``green`` / ``blue`` are each an integer band position, a band
+    name resolved against the carrier's ``attrs`` (``band_names``, then
+    ``descriptions``, then ``bands``), or an arithmetic expression over band
+    names in :class:`geotoolz.spectral.BandMath` grammar
+    (``"0.45 * C02 + 0.10 * C03 + 0.45 * C01"``). Invalid input pixels
+    (non-finite or equal to the fill) become ``NaN`` per band, so a channel
+    is ``NaN`` wherever one of its bands is. Output is ``(3, H, W)``
+    ``float32`` in ``[0, 1]`` with ``band_names=("red", "green", "blue")``
+    and ``NaN`` fill; follow with ``StretchToUint8`` or multiply by 255 for
+    bytes.
+
+    Args:
+        red: Red channel: band position, band name or expression.
+        green: Green channel.
+        blue: Blue channel.
+        vmin: Value mapped to 0 — one for all channels or one per channel.
+            Set above ``vmax`` to invert a channel. Default ``0.0``.
+        vmax: Value mapped to 1. Default ``1.0``.
+        gamma: Display gamma (``> 0``), one or per channel. Default ``1.0``.
+        axis: Band axis of the input. Default ``-3``.
+
+    Raises:
+        ValueError: A ``vmin`` equals its ``vmax``, a gamma is not
+            positive, or a per-channel sequence does not have 3 entries.
+
+    Examples:
+        >>> import geotoolz as gz
+        >>> # CIRA day cloud phase distinction from ABI channels.
+        >>> dcp = gz.viz.RGBRecipe(
+        ...     red="C13", green="C02", blue="C05",
+        ...     vmin=(280.65, 0.0, 0.01), vmax=(219.65, 0.78, 0.59),
+        ... )
+        >>> rgb = dcp(abi_stack)  # (3, H, W) float32 in [0, 1]
+    """
+
+    def __init__(
+        self,
+        *,
+        red: BandRef,
+        green: BandRef,
+        blue: BandRef,
+        vmin: float | Sequence[float] = 0.0,
+        vmax: float | Sequence[float] = 1.0,
+        gamma: float | Sequence[float] = 1.0,
+        axis: int = -3,
+    ) -> None:
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.vmin = _per_channel(vmin, "vmin")
+        self.vmax = _per_channel(vmax, "vmax")
+        self.gamma = _per_channel(gamma, "gamma")
+        self.axis = axis
+        if any(lo == hi for lo, hi in zip(self.vmin, self.vmax, strict=True)):
+            raise ValueError(
+                f"vmin and vmax must differ per channel; got {self.vmin}, {self.vmax}."
+            )
+        if any(g <= 0 for g in self.gamma):
+            raise ValueError(f"gamma must be positive; got {self.gamma}.")
+
+    @over_frames
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        arr = np.asarray(gt)
+        work = np.where(invalid_values(gt), np.nan, arr.astype(np.float32))
+        names = band_names(gt) or []
+        bands = {
+            name: np.take(work, idx, axis=self.axis)
+            for idx, name in enumerate(names)
+            if name is not None
+        }
+        channels = np.stack(
+            [
+                self._channel(ref, work, names, bands)
+                for ref in (self.red, self.green, self.blue)
+            ]
+        )
+        out = rgb_recipe(channels, vmin=self.vmin, vmax=self.vmax, gamma=self.gamma)
+        return wrap_like(
+            gt,
+            np.moveaxis(out, 0, self.axis) if arr.ndim > 2 else out,
+            fill_value_default=np.nan,
+            attrs={"band_names": ("red", "green", "blue")},
+        )
+
+    def _channel(
+        self,
+        ref: BandRef,
+        work: np.ndarray,
+        names: list[str | None],
+        bands: Mapping[str, np.ndarray],
+    ) -> np.ndarray:
+        if isinstance(ref, int | np.integer):
+            return np.take(work, int(ref), axis=self.axis)
+        if ref in bands:
+            return bands[ref]
+        if not bands:
+            raise ValueError(
+                f"RGBRecipe: {ref!r} needs band names in the carrier's attrs."
+            )
+        value = np.asarray(evaluate_band_math(ref, bands), dtype=np.float32)
+        return np.broadcast_to(value, next(iter(bands.values())).shape)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "red": self.red,
+            "green": self.green,
+            "blue": self.blue,
+            "vmin": list(self.vmin),
+            "vmax": list(self.vmax),
+            "gamma": list(self.gamma),
+            "axis": self.axis,
+        }
+
+
+def _per_channel(value: float | Sequence[float], name: str) -> tuple[float, ...]:
+    """A scalar or a 3-sequence as a 3-tuple of floats."""
+    if np.ndim(value) > 0:
+        values = tuple(float(v) for v in np.asarray(value, dtype=float).ravel())
+        if len(values) != 3:
+            raise ValueError(f"{name} needs 1 or 3 values; got {len(values)}.")
+        return values
+    return (float(np.asarray(value)),) * 3
 
 
 class ApplyColormap(Operator):

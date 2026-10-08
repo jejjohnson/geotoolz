@@ -7,8 +7,9 @@ namespace contract (`Reader`, `BANDS`, `CONSTANTS`, `presets`) and the package-d
   `_bands`, lazy `_read_window`, …)
 - **Reference reader:** `geoproducts.toy_sensor` — in-memory worked example exercising the
   full contract end-to-end
-- **GOES-R ABI:** `geoproducts.goes` — L1b `Reader` / `QualityReader` on the `+proj=geos`
-  fixed grid, `goes.aws` bucket helpers, `presets` (see [GOES-R ABI](goes.md))
+- **GOES-R ABI:** `geoproducts.goes` — L1b `Reader`, L2 `L2Reader` and `QualityReader` on
+  the `+proj=geos` fixed grid, `stack`, `goes.aws` bucket helpers, `recipes` and `presets`
+  (see [GOES-R ABI](goes.md))
 - Further per-sensor readers (MTG, Himawari, TROPOMI, VIIRS, Sentinel-3, SEVIRI, MODIS) land
   alongside their design issues.
 
@@ -16,7 +17,13 @@ namespace contract (`Reader`, `BANDS`, `CONSTANTS`, `presets`) and the package-d
 
 ## GOES-R ABI
 
-::: geoproducts.goes.reader
+::: geoproducts.goes.l1b
+
+::: geoproducts.goes.l2
+
+::: geoproducts.goes.scene
+
+::: geoproducts.goes.recipes
 
 ::: geoproducts.goes.aws
 

@@ -18,6 +18,6 @@ with the missions and APIs behind them and carry their own credentials and
 client libraries, so they release independently of the operator library.
 
 - [Adding a new product reader](product-readers.md) — the per-product namespace contract.
-- [GOES-R ABI](goes.md) — L1b radiance / reflectance / brightness temperature, NOAA's public buckets.
+- [GOES-R ABI](goes.md) — L1b radiances and every L2 product from NOAA's public buckets, one-grid stacking, and the standard RGB recipes.
 - [Carbon Mapper](carbonmapper.md) — plume catalogue, sources and plume / scene rasters.
 - [API reference](api.md)

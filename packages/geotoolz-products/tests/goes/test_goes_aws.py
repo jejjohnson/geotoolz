@@ -103,6 +103,20 @@ class TestNames:
         assert item.satellite == "G18"
         assert item.channel == "C01"
 
+    @pytest.mark.parametrize(
+        ("name", "product", "sector", "channel"),
+        [
+            ("OR_ABI-L2-ACMM1-M6_G19", "ABI-L2-ACMM", "M1", None),
+            ("OR_ABI-L2-ACHA2KMC-M6_G19", "ABI-L2-ACHA2KMC", None, None),
+            ("OR_ABI-L2-MCMIPF-M6_G18", "ABI-L2-MCMIPF", None, None),
+            ("OR_ABI-L2-CMIPM2-M6C13_G19", "ABI-L2-CMIPM", "M2", "C13"),
+        ],
+    )
+    def test_parse_l2_keys(self, name, product, sector, channel) -> None:
+        stamps = "_s20262801800286_e20262801800343_c20262801800445.nc"
+        item = aws.parse_key(name + stamps)
+        assert (item.product, item.sector, item.channel) == (product, sector, channel)
+
     def test_non_abi_name_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="not an ABI file name"):
             aws.parse_key("index.html")
@@ -153,6 +167,19 @@ class TestListFiles:
         )
         files = aws.list_files(satellite=19, start=datetime(2026, 10, 7, 12))
         assert [f.start.minute for f in files] == [1, 6]
+
+    def test_channel_filter_skips_l2_files(self, fake_s3) -> None:
+        prefix = "ABI-L2-ACMC/2026/280/12/"
+        key = (
+            f"{prefix}OR_ABI-L2-ACMC-M6_G19_s20262801201178_e20262801203551"
+            "_c20262801203578.nc"
+        )
+        fake_s3(pages={prefix: [_listing([key])]})
+        start = datetime(2026, 10, 7, 12)
+        assert aws.list_files(satellite="G19", product="ABI-L2-ACMC", start=start)
+        assert not aws.list_files(
+            satellite="G19", product="ABI-L2-ACMC", start=start, channel=13
+        )
 
     def test_mesoscale_sector_filter(self, fake_s3) -> None:
         prefix = "ABI-L1b-RadM/2026/280/12/"

@@ -69,8 +69,8 @@ Because `chip` names its bands, geotoolz operators resolve them by name
 
 ## GOES-R ABI
 
-GOES-16 … GOES-19 L1b radiances, straight from NOAA's public, anonymous
-AWS buckets. One file is one channel of one scan on the `+proj=geos` fixed
+GOES-16 … GOES-19, L1b radiances and every L2 product, straight from NOAA's
+public, anonymous AWS buckets. Every file sits on the `+proj=geos` fixed
 grid; windows decompress only the chunks they touch:
 
 ```python
@@ -87,19 +87,26 @@ files: list[aws.ABIFile] = aws.list_files(
     start=datetime(2026, 10, 7, 18), end=datetime(2026, 10, 7, 18, 10),
     channel=13,                                               # 10.3 µm clean IR window
 )                                                             # 2 scans · ~4 MB each
-path: Path = aws.download(files[0], "data/goes")
-
-reader: goes.Reader = goes.Reader(path, calibration="brightness_temperature")  # (1, 1500, 2500) · 2 km
+reader: goes.Reader = goes.Reader(
+    aws.download(files[0], "data/goes"), calibration="brightness_temperature"
+)                                                             # (1, 1500, 2500) · 2 km
 bt: GeoTensor = reader.read_from_bounds(
     (-100.0, 30.0, -95.0, 35.0), crs_bounds="EPSG:4326"
 )                                                             # (1, 219, 266) float32 K
-flags: GeoTensor = reader.quality.load()                      # (1, 1500, 2500) uint8 DQF
+
+cmi: goes.L2Reader = goes.L2Reader(mcmip_path)                # (16, 500, 500) C01 … C16, calibrated
+acm: goes.L2Reader = goes.L2Reader(acm_path)                  # (2, 500, 500) uint8 BCM, ACM
+acha: goes.L2Reader = goes.L2Reader(acha_path)                # (1, 250, 250) cloud-top height, 4 km
+scene: GeoTensor = goes.stack([cmi, acm, acha])               # (19, 500, 500) on one grid
+rgb: GeoTensor = goes.DayCloudPhase()(scene)                  # (3, 500, 500) float32 in [0, 1]
 ```
 
-Calibration uses the coefficients in each file (`kappa0` for C01–C06
-reflectance, the Planck set for C07–C16 brightness temperature); the
-`[operators]` presets add `goes.NDVI()`, `goes.SyntheticGreen()` and
-`goes.ParallaxCorrect()`.
+<p align="center"><img src="../../docs/assets/figures/goes-recipes.jpg" alt="True colour, natural colour, day cloud phase and fire temperature RGBs of one GOES-19 mesoscale scan" width="100%"></p>
+
+Calibration uses the coefficients in each file. The `[operators]` presets
+add `goes.TrueColor()`, `NaturalColor()`, `DayCloudPhase()`,
+`FireTemperature()` (on the generic `gz.viz.RGBRecipe`), `MaskClouds()`,
+`NDVI()`, `SyntheticGreen()` and `ParallaxCorrect()`.
 
 ## Carbon Mapper
 

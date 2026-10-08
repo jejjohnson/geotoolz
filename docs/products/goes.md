@@ -1,40 +1,48 @@
 # GOES-R ABI
 
-`geoproducts.goes` reads GOES-R Advanced Baseline Imager (ABI) L1b radiances —
-GOES-16, -17, -18 and -19 — and finds them in NOAA's public AWS buckets.
+`geoproducts.goes` reads the GOES-R Advanced Baseline Imager (ABI) — GOES-16,
+-17, -18 and -19 — at both product levels: L1b radiances and every L2
+product (clear sky mask, cloud-top height, land surface temperature, fire
+detection, stability indices, cloud and moisture imagery, …). It finds them
+in NOAA's public AWS buckets, puts them on one grid, and turns them into the
+standard RGB composites.
+
+<p align="center"><img src="../../assets/figures/goes-recipes.jpg" alt="Four RGB recipes from one GOES-19 mesoscale MCMIP file: true colour, natural colour, day cloud phase and fire temperature of a hurricane near the Yucatán" width="100%"></p>
 
 ```bash
-pip install 'geotoolz-products[goes]'        # h5py: ABI files are NetCDF-4 / HDF5
-pip install 'geotoolz-products[goes,operators]'  # + geotoolz presets (NDVI, synthetic green, parallax)
+pip install 'geotoolz-products[goes]'            # h5py: ABI files are NetCDF-4 / HDF5
+pip install 'geotoolz-products[goes,operators]'  # + geotoolz presets and RGB recipes
 ```
 
-Without the extra, `goes.Reader` raises an `ImportError` naming it; the
-bucket helpers in `goes.aws` are standard library and always work.
+Without the extra, the readers raise an `ImportError` naming it; the bucket
+helpers in `goes.aws` and the recipe table in `goes.recipes` are standard
+library and always work.
 
 ## What a file is
 
-One L1b file (`OR_ABI-L1b-Rad{F,C,M1,M2}-M6Cnn_Gnn_s…_e…_c….nc`) is **one
-channel of one scan** on the ABI fixed grid: `x` / `y` are scan angles in
-radians, so scaling them by the perspective-point height gives a clean
-`+proj=geos` affine grid. Each channel ships at its native resolution:
+Every ABI file — L1b or L2 — lays its variables on the **ABI fixed grid**:
+`x` / `y` are scan angles in radians, so scaling them by the
+perspective-point height gives a clean `+proj=geos` affine grid. The
+readers recover it from the file's own projection variable and read pixel
+windows lazily: only the HDF5 chunks under a window are decompressed.
 
-| Channels | Resolution | Calibrations |
-|---|---|---|
-| C02 (red, 0.64 µm) | 0.5 km | counts · radiance · reflectance |
-| C01, C03, C05 | 1 km | counts · radiance · reflectance |
-| C04, C06 | 2 km | counts · radiance · reflectance |
-| C07–C16 (3.9–13.3 µm) | 2 km | counts · radiance · brightness temperature |
-
-| Sector | `product` | Size (2 km channel) | Cadence |
+| Level | File | Reader | Bands |
 |---|---|---|---|
-| Full disk | `ABI-L1b-RadF` | 5424 × 5424 | 10 min |
-| CONUS / PACUS | `ABI-L1b-RadC` | 1500 × 2500 | 5 min |
-| Mesoscale (M1, M2) | `ABI-L1b-RadM` | 500 × 500 | 1 min |
+| L1b | `OR_ABI-L1b-Rad{F,C,M1,M2}-M6Cnn_…` — one channel of one scan | `goes.Reader` | the channel (`"C13"`), calibrated |
+| L2 | `OR_ABI-L2-<code>{F,C,M1,M2}-M6_…` — one product of one scan | `goes.L2Reader` | the product's variables (`"HT"`, `"BCM"`, …) |
+| L2 imagery | `MCMIP` (all 16 channels) / `CMIP` (one) | `goes.L2Reader` | channels (`"C01"` … `"C16"`), already calibrated |
 
-The full table is `goes.BANDS` (name, wavelength, resolution, reflective /
-emissive).
+| Sector | `product` suffix | Size (2 km grid) | Cadence |
+|---|---|---|---|
+| Full disk | `F` (`ABI-L1b-RadF`, `ABI-L2-ACMF`) | 5424 × 5424 | 10 min |
+| CONUS / PACUS | `C` | 1500 × 2500 | 5 min |
+| Mesoscale | `M` (sectors `M1`, `M2`) | 500 × 500 | 1 min |
 
-## Find, fetch, read
+L1b channels keep their native resolution — C02 at 0.5 km; C01, C03 and C05
+at 1 km; the rest at 2 km — and L2 products have their own (cloud-top height
+at 4 km, stability indices at 10 km). `goes.BANDS` is the 16-channel table.
+
+## L1b radiances
 
 ```python
 from datetime import datetime
@@ -62,19 +70,7 @@ bt: GeoTensor = reader.read_from_bounds(aoi, crs_bounds="EPSG:4326")      # (1, 
 flags: GeoTensor = reader.quality.read_from_bounds(aoi, crs_bounds="EPSG:4326")  # (1, 219, 266) uint8 DQF
 ```
 
-Only the HDF5 chunks under the window are decompressed, so a small AOI out
-of a full-disk file stays cheap. `bt.attrs` carries `band_names=("C13",)`,
-`wavelengths=(10300.0,)` (nm), `units="K"` and `calibration`; off-disk and
-missing pixels are `NaN`.
-
-`list_files` and `download` talk to `https://noaa-goes{16..19}.s3.amazonaws.com`
-anonymously and retry transient failures. To skip the download, pass any
-binary file object instead of a path, e.g.
-`goes.Reader(fsspec.open("s3://noaa-goes19/…", anon=True).open())`.
-
-## Calibration
-
-Every coefficient comes from the file being read:
+Every calibration coefficient comes from the file being read:
 
 | `calibration=` | Output | Formula |
 |---|---|---|
@@ -84,59 +80,119 @@ Every coefficient comes from the file being read:
 | `"brightness_temperature"` | `float32`, K | `(fk2 / ln(fk1 / L + 1) − bc1) / bc2` (C07–C16) |
 
 `reflectance` is NOAA's reflectance factor: it folds in the Earth–Sun
-distance and band solar irradiance, not the solar zenith angle. Asking for a
-calibration a channel does not support raises `ValueError`.
+distance and band solar irradiance, not the solar zenith angle. Outputs
+carry `band_names=("C13",)`, `wavelengths` (nm), per-band `units` and
+`calibration` in `attrs`; off-disk and missing pixels are `NaN`.
+`reader.quality.flags()` maps the `DQF` values to their meanings.
 
-`reader.quality` reads the `DQF` layer on the same grid:
-`goes.constants.DQF_FLAGS` maps `0` good, `1` conditionally usable, `2` out
-of range, `3` no value, `4` focal-plane temperature exceeded; `255` is the
-fill outside the file.
+## L2 products
 
-## Multi-channel products
+`goes.L2Reader` reads any L2 product: each band is one variable of the file.
+Masks and class codes stay integer; packed or floating variables decode to
+`float32` with `NaN` fill.
 
-ABI ships one channel per file at its own resolution, so put channels on one
-grid before combining them. With the `[operators]` extra:
+```python
+def first(product: str) -> Path:
+    item: aws.ABIFile = aws.list_files(
+        satellite="G19", product=product, sector="M1",
+        start=datetime(2026, 10, 7, 18, 0), end=datetime(2026, 10, 7, 18, 2),
+    )[0]
+    return aws.download(item, "data/goes")
+
+cmi: goes.L2Reader = goes.L2Reader(first("ABI-L2-MCMIPM"))   # (16, 500, 500) C01 … C16 · 4.8 MB
+acm: goes.L2Reader = goes.L2Reader(first("ABI-L2-ACMM"))     # (2, 500, 500) uint8 · BCM, ACM
+acha: goes.L2Reader = goes.L2Reader(first("ABI-L2-ACHAM"))   # (1, 250, 250) float32 · HT (m), 4 km
+
+acm.flags("ACM")   # {0: 'clear', 1: 'probably_clear', 2: 'probably_cloudy', 3: 'cloudy'}
+acm.quality        # QualityReader(variables=('DQF',)) — on the same grid
+```
+
+| Product | Default bands | Notes |
+|---|---|---|
+| `ACM` clear sky mask | `BCM`, `ACM` | `uint8`; binary and four-level cloud mask |
+| `ACHA` / `ACHA2KM` cloud-top height | `HT` | metres |
+| `LST` land surface temperature | `LST` | K |
+| `FDC` fire detection | `Mask` | `int16` classes; `variables="Power"` for MW |
+| `DSI` stability indices | `LI`, `CAPE`, `TT`, `SI`, `KI` | 10 km; quality in `DQF_Overall` |
+| `MCMIP` / `CMIP` imagery | `C01` … `C16` / one channel | reflectance factor (C01–C06), K (C07–C16) |
+| anything else (`TPW`, `AOD`, …) | every non-`DQF` variable | `available_variables` lists them |
+
+Pass `variables=` to choose: `goes.L2Reader(path, variables=["HT"])`.
+
+## One grid: `goes.stack`
+
+`stack` reads every reader only where it overlaps a reference grid and warps
+it there with georeader — no operator library needed. Finer float grids are
+averaged, coarser ones interpolated bilinearly, masks resampled with
+`mode` / `nearest`.
+
+```python
+scene: GeoTensor = goes.stack([cmi, acm, acha])   # (19, 500, 500) float32
+scene.attrs["band_names"][-3:]                    # ('BCM', 'ACM', 'HT') — on the 2 km grid
+
+c01, c02, c03 = (goes.Reader(p, calibration="reflectance") for p in l1b_paths)
+rgb_in: GeoTensor = goes.stack([c01, c02, c03], bounds=aoi, crs_bounds="EPSG:4326")
+                                                  # (3, 437, 530) — C02 averaged to 1 km
+```
+
+An integer-only stack (masks) stays integer; mixing in float bands decodes
+integer fills to `NaN`.
+
+## RGB recipes
+
+The operational RGBs are recipes — each channel a band or band expression,
+stretched between fixed bounds and gamma-corrected. `goes.recipes` holds them
+as data; with the `[operators]` extra each preset is a
+[`gz.viz.RGBRecipe`](../api/viz.md) operator:
 
 ```python
 import geotoolz as gz
 
-def reflectance(channel: int) -> GeoTensor:
-    item: aws.ABIFile = aws.list_files(satellite="G19", start=datetime(2026, 10, 7, 18),
-                                       end=datetime(2026, 10, 7, 18, 5), channel=channel)[0]
-    reader = goes.Reader(aws.download(item, "data/goes"), calibration="reflectance")
-    return reader.read_from_bounds(aoi, crs_bounds="EPSG:4326")
-
-blue: GeoTensor = reflectance(1)                     # (1, 437, 530)  1 km
-red: GeoTensor = reflectance(2)                      # (1, 874, 1059) 0.5 km
-veggie: GeoTensor = reflectance(3)                   # (1, 437, 530)  1 km
-
-red_1km: GeoTensor = gz.geom.ReprojectLike(like=blue, resampling="average")(red)  # (1, 437, 530)
-stack: GeoTensor = gz.spectral.StackBands()([blue, red_1km, veggie])  # (3, 437, 530) C01, C02, C03
-
-ndvi: GeoTensor = goes.NDVI()(stack)                 # (437, 530) float32
-green: GeoTensor = goes.SyntheticGreen()(stack)      # (437, 530) — 0.45·C02 + 0.10·C03 + 0.45·C01
-rgb: GeoTensor = gz.spectral.StackBands()([red_1km, green, blue])  # (3, 437, 530) true colour
+true_color: GeoTensor = goes.TrueColor()(scene)        # (3, 500, 500) float32 in [0, 1]
+cloud_phase: GeoTensor = goes.DayCloudPhase()(scene)   # ice red/orange · liquid cyan · snow green
 ```
 
-`goes.ParallaxCorrect` binds `gz.geom.GeostationaryParallaxCorrect` to the
-GOES geometry. It works on lat/lon grids, so reproject first:
+| Preset | Channels | Recipe |
+|---|---|---|
+| `goes.TrueColor()` | C01, C02, C03 | red C02 · CIMSS synthetic green · blue C01, γ 2.2 |
+| `goes.NaturalColor()` | C02, C03, C05 | CIRA day land cloud |
+| `goes.DayCloudPhase()` | C02, C05, C13 | CIRA day cloud phase distinction |
+| `goes.FireTemperature()` | C05, C06, C07 | CIRA fire temperature |
+
+`goes.presets.Recipe("…")` builds any entry of `goes.recipes.RECIPES`, and a
+custom `goes.recipes.Recipe` works the same way.
+
+## Clouds and parallax
 
 ```python
-bt_ll: GeoTensor = gz.geom.Reproject(dst_crs="EPSG:4326", resolution=(0.01, 0.01))(bt)  # (1, 552, 834)
-cloud_tops: GeoTensor = goes.ParallaxCorrect(
-    satellite_lon_deg=reader.satellite_lon_deg,      # -75.2 for GOES-East
-    target_height_m=10_000.0,                        # or a cloud-top-height field
-)(bt_ll)                                             # (1, 552, 834), features moved to nadir
+cloudy: GeoTensor = goes.MaskClouds()(scene)          # (500, 500) bool — BCM cloudy
+strict: GeoTensor = goes.MaskClouds(conservative=True)(scene)  # + probably clear
+clear_sky: GeoTensor = gz.mask.ApplyMask(mask=goes.MaskClouds())(scene)  # (19, 500, 500), clouds → NaN
+```
+
+Geostationary pixels see cloud tops displaced away from the sub-satellite
+point. `goes.ParallaxCorrect` binds `gz.geom.GeostationaryParallaxCorrect`
+to the GOES geometry; feed it the ACHA cloud-top height on the same lat/lon
+grid:
+
+```python
+lonlat: GeoTensor = gz.geom.Reproject(dst_crs="EPSG:4326", resolution=(0.02, 0.02))(scene)  # (19, 535, 624)
+bt: GeoTensor = gz.spectral.SelectBands(bands=["C13"])(lonlat)        # (1, 535, 624)
+height: GeoTensor = gz.spectral.SelectBands(bands=["HT"])(lonlat)     # (1, 535, 624) m, NaN = clear
+moved: GeoTensor = goes.ParallaxCorrect(
+    satellite_lon_deg=cmi.satellite_lon_deg,                          # -75.2 for GOES-East
+    target_height_m=np.nan_to_num(np.asarray(height)[0]),             # clear sky → height 0
+)(bt)                                                                 # (1, 535, 624)
 ```
 
 ## Module layout
 
 | Module | Contents |
 |---|---|
-| `goes.reader` | `Reader` (radiance / reflectance / BT), `QualityReader` (DQF) |
+| `goes.l1b` | `Reader` (counts / radiance / reflectance / BT), `QualityReader` (DQF) |
+| `goes.l2` | `L2Reader`, `product_code` |
+| `goes.scene` | `stack` |
 | `goes.aws` | `list_files`, `download`, `parse_key`, `ABIFile`, `bucket`, `url` |
-| `goes.constants` | `BANDS`, `CHANNELS`, `DQF_FLAGS`, satellite positions, synthetic-green weights |
-| `goes.presets` | `NDVI`, `SyntheticGreen`, `ParallaxCorrect` (`[operators]` extra) |
-
-L2 products (clear-sky mask, cloud-top height) and the remaining RGB
-composites are not covered yet.
+| `goes.recipes` | `Recipe`, `TRUE_COLOR`, `NATURAL_COLOR`, `DAY_CLOUD_PHASE`, `FIRE_TEMPERATURE` |
+| `goes.presets` | `NDVI`, `SyntheticGreen`, `MaskClouds`, `ParallaxCorrect`, `Recipe` and the four named recipes (`[operators]`) |
+| `goes.constants` | `BANDS`, `CHANNELS`, `DQF_FLAGS`, clear-sky codes, satellite positions |

@@ -36,6 +36,23 @@ GOES_WEST_LON_DEG = -137.0
 # Nominal geostationary height above the equator (metres).
 SATELLITE_HEIGHT_M = 35_786_023.0
 
+# Default variables of the multi-variable L2 products, by product code;
+# every other product defaults to all its non-DQF 2-D variables.
+L2_DEFAULT_VARIABLES: dict[str, tuple[str, ...]] = {
+    "ACM": ("BCM", "ACM"),  # binary + four-level clear sky mask
+    "FDC": ("Mask",),  # fire detection classes
+    "LST": ("LST",),
+    "LST2KM": ("LST",),
+}
+
+# Clear sky mask codes: ``BCM`` (binary) and ``ACM`` (four-level).
+BCM_CLEAR = 0
+BCM_CLOUDY = 1
+ACM_CLEAR = 0
+ACM_PROBABLY_CLEAR = 1
+ACM_PROBABLY_CLOUDY = 2
+ACM_CLOUDY = 3
+
 # CIMSS synthetic-green recipe for ABI true colour (ABI has no green band).
 SYNTHETIC_GREEN_WEIGHTS: dict[str, float] = {"C02": 0.45, "C03": 0.10, "C01": 0.45}
 
@@ -54,7 +71,13 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "ACM_CLEAR",
+    "ACM_CLOUDY",
+    "ACM_PROBABLY_CLEAR",
+    "ACM_PROBABLY_CLOUDY",
     "BANDS",
+    "BCM_CLEAR",
+    "BCM_CLOUDY",
     "CHANNELS",
     "DQF_CONDITIONALLY_USABLE",
     "DQF_FILL",
@@ -66,6 +89,7 @@ __all__ = [
     "EMISSIVE_CHANNELS",
     "GOES_EAST_LON_DEG",
     "GOES_WEST_LON_DEG",
+    "L2_DEFAULT_VARIABLES",
     "REFLECTIVE_CHANNELS",
     "SATELLITE_HEIGHT_M",
     "SYNTHETIC_GREEN_WEIGHTS",

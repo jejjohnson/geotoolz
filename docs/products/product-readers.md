@@ -43,8 +43,11 @@ in-memory reader (no external file format) used to exercise the framework in
 tests and to demonstrate the layout for real sensors.
 
 `geoproducts.goes` is the first file-format reader built on the same
-contract: an h5py-backed `_read_window` over ABI L1b NetCDF-4 files behind
-the `[goes]` extra, calibration from in-file coefficients, a packaged
-`data/bands.csv`, and presets over `geotoolz` operators. The remaining
+contract, and a template for a mission with several product levels: a
+private `_src/` core (HDF5 access and CF decoding, the fixed grid, one
+`ProductReader` base with h5py-backed windowed reads) under thin public
+modules per level (`l1b`, `l2`), plus `scene.stack`, the `aws` bucket
+helpers, recipe data in `recipes.py` and presets over `geotoolz`
+operators, all behind the `[goes]` extra. The remaining
 sensors (MTG, Himawari, TROPOMI, VIIRS, Sentinel-3, SEVIRI, MODIS) are
 tracked under their per-sensor design issues.

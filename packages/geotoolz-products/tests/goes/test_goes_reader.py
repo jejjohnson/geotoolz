@@ -174,7 +174,7 @@ class TestWindows:
         )
         assert attrs["band_names"] == ("C13",)
         assert attrs["wavelengths"] == (pytest.approx(10300.0),)
-        assert attrs["units"] == "K"
+        assert attrs["units"] == ("K",)
         assert attrs["calibration"] == "brightness_temperature"
 
 
@@ -248,7 +248,7 @@ class TestSources:
         path = tmp_path / "other.nc"
         with h5py.File(path, "w") as f:
             f.create_dataset("temperature", data=np.zeros((2, 2)))
-        with pytest.raises(ValueError, match="not a GOES-R ABI L1b radiance file"):
+        with pytest.raises(ValueError, match="not a GOES-R ABI"):
             goes.Reader(path)
 
     def test_missing_h5py_names_the_extra(self, abi_file, monkeypatch) -> None:
