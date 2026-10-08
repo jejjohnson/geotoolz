@@ -9,7 +9,8 @@
   height, cloud phase) on the same 2 km grid (``[himawari]`` extra, h5py).
 - ``HSDHeader`` / ``read_header`` — the decoded segment header.
 - ``aws`` — list and download files from NOAA's public buckets
-  (standard library only, no credentials).
+  (unsigned, through ``geocloud.files``; geotoolz-cloud ships with the
+  extra).
 - ``recipes`` — the standard RGB recipes (true colour, natural colour,
   day cloud phase, fire temperature) on AHI bands, as data.
 - ``BANDS`` / ``constants`` — the 16-band table, fixed grids, cloud-mask

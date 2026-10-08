@@ -30,10 +30,10 @@ drops straight into the operators, the patcher and the catalog loaders.
 
 ```bash
 pip install geotoolz-products                    # readers (georeader only)
-pip install 'geotoolz-products[obstore]'         # pooled cloud byte-range reads
+pip install 'geotoolz-products[obstore]'         # pooled cloud byte-range reads + NOAA bucket helpers
 pip install 'geotoolz-products[operators]'       # sensor presets (geotoolz operators)
-pip install 'geotoolz-products[goes]'            # GOES-R ABI L1b reader (h5py)
-pip install 'geotoolz-products[himawari]'        # Himawari L2 cloud products (h5py)
+pip install 'geotoolz-products[goes]'            # GOES-R ABI reader (h5py) + goes.aws (geotoolz-cloud)
+pip install 'geotoolz-products[himawari]'        # Himawari L2 products (h5py) + himawari.aws (geotoolz-cloud)
 pip install 'geotoolz-products[carbonmapper]'    # Carbon Mapper plume catalogue + STAC
 ```
 
@@ -113,7 +113,8 @@ add `goes.TrueColor()`, `NaturalColor()`, `DayCloudPhase()`,
 ## Himawari AHI
 
 Himawari-8 / -9 at 140.7°E. JMA's binary HSD segments are decoded natively
-(numpy + standard library), straight from NOAA's public buckets; the
+(numpy + standard library), straight from NOAA's public buckets (the
+`[himawari]` extra brings the bucket helpers); the
 segments of a band assemble onto the `+proj=geos` grid, and a window
 decodes only the segments it overlaps:
 

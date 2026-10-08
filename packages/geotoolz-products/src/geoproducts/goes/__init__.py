@@ -7,7 +7,8 @@
   fire, stability indices, MCMIP with all 16 channels, …) on the same grid.
 - ``QualityReader`` — the ``DQF`` quality flags (``reader.quality``).
 - ``aws`` — list and download files from NOAA's public buckets
-  (standard library only, no credentials).
+  (unsigned, through ``geocloud.files``; geotoolz-cloud ships with the
+  extra).
 - ``recipes`` — the standard ABI RGB recipes (true colour, natural
   colour, day cloud phase, fire temperature) as data.
 - ``BANDS`` / ``constants`` — the 16-channel table, flag codes and

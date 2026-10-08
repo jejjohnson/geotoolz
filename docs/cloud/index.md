@@ -14,7 +14,9 @@ pip install 'geotoolz-cloud[cog]'     # + COG reads (async-geotiff)
 Every package that reads from a bucket takes its client from
 `geocloud.store`:
 - geopatcher's `CogField`;
-- geoproducts' cloud byte reads (its `[obstore]` extra).
+- geoproducts' cloud byte reads (its `[obstore]` extra) and its NOAA
+  bucket helpers (`goes.aws`, `himawari.aws`, through `geocloud.files`);
+- geocatalog's `stage()` (its `[cloud]` extra, through `geocloud.files`).
 
 A process talking to one bucket therefore builds **one** client and
 **one** HTTP/2 connection pool for it.
@@ -23,6 +25,7 @@ A process talking to one bucket therefore builds **one** client and
 flowchart LR
     P["geopatcher.fields.CogField"] --> C
     R["geoproducts readers<br/>(cloud byte reads)"] --> S
+    A["geoproducts goes.aws · himawari.aws<br/>geocatalog stage()"] --> F
     F["geocloud.files<br/>ls · download · upload · copy · sync · sign"] --> S
     K["geocloud.credentials<br/>one grant per bucket / container / host"] -.-> S
     C["geocloud.cog<br/>CogSource · AsyncCogReader"] --> S["geocloud.store<br/>one client per bucket"]

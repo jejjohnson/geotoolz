@@ -7,9 +7,9 @@ product and scan-start hour::
     <product>/<year>/<day-of-year>/<hour>/OR_<product>-M6C<nn>_G<nn>_s<start>_e<end>_c<created>.nc
 
 This module maps ABI file names, satellites and time windows onto those
-objects; the anonymous listing, retries and atomic downloads come from
-the package's shared public-S3 client (standard library only: no
-credentials, no AWS SDK).
+objects. Listing and atomic downloads go unsigned through
+``geocloud.files`` on the shared obstore pool (no credentials, no AWS SDK;
+geotoolz-cloud comes with the ``[goes]`` and ``[obstore]`` extras).
 """
 
 from __future__ import annotations
@@ -141,8 +141,9 @@ def list_files(
     Raises:
         ValueError: ``end`` is not after ``start``, or ``channel`` /
             ``satellite`` is out of range.
-        urllib.error.URLError: The bucket listing failed (transient errors
-            are retried first).
+        ImportError: geotoolz-cloud is not installed (``[goes]`` extra).
+        Exception: The bucket listing failed (obstore's error; transient
+            errors are retried first).
     """
     start = as_utc(start)
     end = start + timedelta(hours=1) if end is None else as_utc(end)
@@ -154,7 +155,11 @@ def list_files(
     while hour < end:
         prefix = f"{product}/{hour:%Y}/{hour:%j}/{hour:%H}/"
         for key, size in s3.list_objects(
-            bucket(satellite), prefix, attempts=_ATTEMPTS, backoff_s=_BACKOFF_S
+            bucket(satellite),
+            prefix,
+            attempts=_ATTEMPTS,
+            backoff_s=_BACKOFF_S,
+            extra="goes",
         ):
             try:
                 item = parse_key(key, size=size)
@@ -195,8 +200,10 @@ def download(
         Path of the downloaded file.
 
     Raises:
-        urllib.error.URLError: The download failed (transient errors are
-            retried first).
+        ImportError: geotoolz-cloud is not installed (``[goes]`` extra).
+        FileNotFoundError: No such object.
+        Exception: The download failed (obstore's error; transient errors
+            are retried first).
     """
     item = parse_key(file) if isinstance(file, str) else file
     target = Path(dest) / item.name
@@ -208,6 +215,7 @@ def download(
         target,
         attempts=_ATTEMPTS,
         backoff_s=_BACKOFF_S,
+        extra="goes",
     )
 
 

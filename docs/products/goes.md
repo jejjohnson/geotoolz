@@ -10,13 +10,15 @@ standard RGB composites.
 <p align="center"><img src="../../assets/figures/goes-recipes.jpg" alt="Four RGB recipes from one GOES-19 mesoscale MCMIP file: true colour, natural colour, day cloud phase and fire temperature of a hurricane near the Yucatán" width="100%"></p>
 
 ```bash
-pip install 'geotoolz-products[goes]'            # h5py: ABI files are NetCDF-4 / HDF5
+pip install 'geotoolz-products[goes]'            # h5py (NetCDF-4 / HDF5) + geotoolz-cloud (buckets)
 pip install 'geotoolz-products[goes,operators]'  # + geotoolz presets and RGB recipes
 ```
 
-Without the extra, the readers raise an `ImportError` naming it; the bucket
-helpers in `goes.aws` and the recipe table in `goes.recipes` are standard
-library and always work.
+Without the extra, the readers and the bucket helpers in `goes.aws` raise
+an `ImportError` naming it; the recipe table in `goes.recipes` always
+works. `goes.aws` lists and downloads unsigned through
+[`geocloud.files`](../cloud/index.md#moving-files-geocloudfiles), so it shares the stack's
+connection pool.
 
 ## What a file is
 
@@ -61,7 +63,7 @@ files: list[aws.ABIFile] = aws.list_files(
     end=datetime(2026, 10, 7, 18, 10),
     channel=13,                           # clean longwave window
 )                                         # 2 scans, 5 min apart, ~4 MB each
-path: Path = aws.download(files[0], "data/goes")  # streamed to .part, then renamed
+path: Path = aws.download(files[0], "data/goes")  # ranged reads to .part, then renamed
 
 reader: goes.Reader = goes.Reader(path, calibration="brightness_temperature")
 reader.shape                              # (1, 1500, 2500) · +proj=geos · 2004 m pixels

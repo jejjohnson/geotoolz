@@ -56,9 +56,11 @@ dependencies are actually imported).
 - **Persisted catalogs**: GeoParquet carries `SCHEMA_VERSION_CURRENT`; a
   schema change needs a migration in `migrate_geoparquet` and a
   `docs/catalog/schema-versions.md` entry.
-- **Object storage**: the catalog does not use the obstore pool — staging
-  downloads through fsspec, builders read through rasterio / GDAL. Readers of
-  staged objects take their client from `geocloud.store`.
+- **Object storage**: `stage()` downloads remote URIs with
+  `geocloud.files.download` (the `[cloud]` extra; credentials from
+  `geocloud.credentials`) — never a copy loop of its own. Builders and
+  loaders read through rasterio / GDAL and fsspec (`[fsspec]`). Tests fake
+  the download with the `cloud_stub` fixture so they run on a base install.
 
 ## Tests
 

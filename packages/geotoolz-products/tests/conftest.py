@@ -1,20 +1,30 @@
-"""Shared fixtures: ``fake_s3`` installs :class:`_s3_fake.FakeS3`."""
+"""Shared fixtures: ``fake_s3`` serves public buckets from memory."""
 
 from __future__ import annotations
 
-import urllib.request
+from collections.abc import Iterable, Iterator, Mapping
 
 import pytest
-from _s3_fake import FakeS3
 
 
 @pytest.fixture
-def fake_s3(monkeypatch: pytest.MonkeyPatch):
-    """Factory: ``fake_s3(pages=..., bodies=...)`` patches ``urlopen``."""
+def fake_s3(monkeypatch: pytest.MonkeyPatch) -> Iterator:
+    """Factory: ``fake_s3(objects, bucket=...)`` → a `FakeS3` with them in it.
 
-    def install(pages=None, bodies=None) -> FakeS3:
-        fake = FakeS3(pages or {}, bodies or {})
-        monkeypatch.setattr(urllib.request, "urlopen", fake.urlopen)
+    Skips without geotoolz-cloud (a base install of this package).
+    """
+    pytest.importorskip("geocloud")
+    from _s3_fake import FakeS3
+
+    fake = FakeS3(monkeypatch)
+
+    def install(
+        objects: Mapping[str, bytes] | Iterable[str] = (),
+        *,
+        bucket: str = "noaa-goes19",
+    ) -> FakeS3:
+        fake.put(bucket, objects)
         return fake
 
-    return install
+    yield install
+    fake.close()

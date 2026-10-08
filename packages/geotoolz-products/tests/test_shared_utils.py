@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import base64
-import io
 import json
 import stat
-import urllib.error
-import urllib.request
+import sys
 from datetime import UTC, datetime, timedelta, timezone
 from email.utils import format_datetime
 from pathlib import Path
@@ -94,28 +92,13 @@ class TestRetrying:
             net.retrying(lambda: None, wait=lambda o, a: None, attempts=0)
 
 
-def _http_error(code: int, body: bytes = b"", headers=None) -> urllib.error.HTTPError:
-    return urllib.error.HTTPError("u", code, "x", headers or {}, io.BytesIO(body))  # type: ignore[arg-type]
-
-
-class TestUrllibWait:
-    def test_rate_limit_honours_retry_after(self) -> None:
-        assert net.urllib_wait(_http_error(429, headers={"Retry-After": "7"}), 0) == 7.0
-
-    def test_server_errors_and_dropped_connections_back_off(self) -> None:
-        assert net.urllib_wait(_http_error(503), 1, base_s=2.0) == 4.0
-        assert net.urllib_wait(urllib.error.URLError("timed out"), 0) == 1.0
-        assert net.urllib_wait(TimeoutError(), 0) == 1.0
-
-    def test_client_errors_and_values_stop(self) -> None:
-        assert net.urllib_wait(_http_error(403), 0) is None
-        assert net.urllib_wait(_http_error(404), 0) is None
-        assert net.urllib_wait(b"payload", 0) is None
-
+class TestS3Wait:
     def test_s3_retries_only_the_spurious_no_such_bucket(self) -> None:
-        assert s3.s3_wait(_http_error(404, b"<Code>NoSuchBucket</Code>"), 0) == 1.0
-        assert s3.s3_wait(_http_error(404, b"<Code>NoSuchKey</Code>"), 0) is None
-        assert s3.s3_wait(_http_error(500), 0) == 1.0
+        assert s3.s3_wait(OSError("<Code>NoSuchBucket</Code>"), 0) == 1.0
+        assert s3.s3_wait(FileNotFoundError("<Code>NoSuchKey</Code>"), 0) is None
+        # obstore retries 5xx and dropped connections itself.
+        assert s3.s3_wait(OSError("500 Internal Server Error"), 0) is None
+        assert s3.s3_wait(["a listing"], 0) is None
 
 
 # -- downloads ----------------------------------------------------------------
@@ -135,20 +118,6 @@ def test_stream_to_file_is_atomic(tmp_path: Path) -> None:
     assert sorted(p.name for p in tmp_path.iterdir()) == ["sub"]
 
 
-def test_download_url_retries_then_writes(tmp_path, monkeypatch) -> None:
-    failures = [_http_error(503), urllib.error.URLError("reset")]
-
-    def fake_urlopen(url, timeout=None):
-        if failures:
-            raise failures.pop(0)
-        return io.BytesIO(b"x" * 3_000_000)  # several 1 MiB reads
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    dest = net.download_url("https://h/x", tmp_path / "x.bin", sleep=lambda s: None)
-    assert dest.stat().st_size == 3_000_000
-    assert [p.name for p in tmp_path.iterdir()] == ["x.bin"]
-
-
 def test_bearer_header_is_scoped_to_one_https_host() -> None:
     host = "api.example.org"
     assert net.bearer_headers_for(f"https://{host}/a", "t", host=host) == {
@@ -159,23 +128,20 @@ def test_bearer_header_is_scoped_to_one_https_host() -> None:
     assert net.bearer_headers_for(f"https://{host}/a", None, host=host) == {}
 
 
-def test_list_objects_pages_through_the_bucket(monkeypatch) -> None:
-    ns = "http://s3.amazonaws.com/doc/2006-03-01/"
-    pages = {
-        None: f'<ListBucketResult xmlns="{ns}"><Contents><Key>a</Key><Size>1</Size>'
-        "</Contents><IsTruncated>true</IsTruncated>"
-        "<NextContinuationToken>T</NextContinuationToken></ListBucketResult>",
-        "T": f'<ListBucketResult xmlns="{ns}"><Contents><Key>b</Key><Size>2</Size>'
-        "</Contents><IsTruncated>false</IsTruncated></ListBucketResult>",
-    }
-
-    def fake_urlopen(url, timeout=None):
-        token = "T" if "continuation-token=T" in url else None
-        return io.BytesIO(pages[token].encode())
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    assert s3.list_objects("bucket", "p/") == [("a", 1), ("b", 2)]
+def test_list_objects_and_download_object(fake_s3, tmp_path) -> None:
+    fake_s3({"p/a": b"1", "p/sub/b": b"22", "q/c": b"333"}, bucket="bucket")
+    assert s3.list_objects("bucket", "p/") == [("p/a", 1), ("p/sub/b", 2)]
+    dest = s3.download_object("bucket", "p/sub/b", tmp_path / "b")
+    assert dest.read_bytes() == b"22"
     assert s3.object_url("b", "dir/a b.nc") == "https://b.s3.amazonaws.com/dir/a%20b.nc"
+
+
+def test_bucket_helpers_name_their_extra(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "geocloud.files", None)  # as if not installed
+    with pytest.raises(ImportError, match=r"geotoolz-products\[obstore\]"):
+        s3.list_objects("bucket", "p/")
+    with pytest.raises(ImportError, match=r"geotoolz-products\[goes\]"):
+        s3.download_object("bucket", "p/a", "a", extra="goes")
 
 
 # -- files --------------------------------------------------------------------

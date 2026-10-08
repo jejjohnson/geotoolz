@@ -9,17 +9,19 @@ copies.
 
 Design points:
 
-* Local paths (no scheme, ``file://``) are used in place — no copy and
-  no fsspec, so staging a local catalog works on a base install.
-  fsspec handles every remote scheme (``pip install
-  'geotoolz-catalog[fsspec]'``).
+* Local paths (no scheme, ``file://``) are used in place — no copy, so
+  staging a local catalog works on a base install. Remote URIs
+  (``s3://``, ``gs://``, ``az://`` / ``abfs[s]://``, ``http(s)://``,
+  ``hf://``) download through `geocloud.files` on the stack's shared
+  obstore client pool (``pip install 'geotoolz-catalog[cloud]'``), with
+  the credentials registered in `geocloud.credentials`.
 * The cache key is the SHA-256 of the URI (with expiring signature
   parameters removed, so a re-signed URL hits the same slot) plus the
   file extension. It is keyed by *location*, not content: two URIs
   holding the same bytes get two slots.
-* Downloads are written to a temporary file and renamed into place,
-  so a cache slot only ever holds a complete download; each distinct
-  URI is fetched once per call however many rows share it.
+* Downloads are written to a temporary ``.part`` file and renamed into
+  place, so a cache slot only ever holds a complete download; each
+  distinct URI is fetched once per call however many rows share it.
 
 Asset-aware: when a catalog row's ``assets`` is an asset map (the
 JSON-encoded dict produced by `CatalogBundle.ingest`, or a dict),
@@ -36,10 +38,10 @@ import hashlib
 import json
 import os
 import re
-import uuid
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 import geopandas as gpd
@@ -61,22 +63,19 @@ if TYPE_CHECKING:
 # calling `stage()` still sees it.
 _DEFAULT_CACHE_SUBDIR = ".cache/geocatalog"
 
-# Suffix of in-progress downloads; `LocalCache.prune` removes leftovers.
-# Their names are `.<slot>.<uuid4 hex>.part`, which no cache slot (a
-# 64-hex digest plus the source extension) can match.
-_PART_SUFFIX = ".part"
+# In-progress downloads (`geocloud.files.download`) are named
+# `.<slot>.<uuid4 hex>.part`, which no cache slot (a 64-hex digest plus
+# the source extension) can match; `LocalCache.prune` removes leftovers.
 _PART_NAME = re.compile(r"^\..+\.[0-9a-f]{32}\.part$")
 
 #: Column holding each staged row's original URIs (JSON, keyed like
 #: ``assets``; ``{"filepath": uri}`` for rows without an asset map).
 STAGED_FROM_COLUMN = "staged_from"
 
-_CHUNK = 8 * 1024 * 1024  # 8 MB
-
 
 @dataclasses.dataclass
 class LocalCache:
-    """fsspec-backed cache for staged remote files.
+    """Local cache for staged remote files.
 
     Files land at ``{root}/{key[:2]}/{key}{ext}``, where ``key`` is the
     SHA-256 of the URI with expiring signature parameters removed. The
@@ -92,12 +91,11 @@ class LocalCache:
         ttl_days: Optional lifetime. When set, cached files older
             than this many days are re-downloaded on their next use,
             and `prune` deletes them. ``None`` means cache forever.
-        timeout: Per-download timeout in seconds, forwarded to
-            ``fsspec.open`` so a stalled remote read cannot hang a
-            worker slot forever. ``None`` disables the timeout.
-            Enforcement is filesystem-dependent: the keyword is
-            passed through to the fsspec backend, and backends that
-            do not understand it typically ignore it.
+        timeout: Per-request timeout in seconds for the object-store
+            client, so a stalled read cannot hang a worker slot
+            forever. Downloads move in 16 MiB byte ranges, one request
+            each, so this bounds a range, not a whole file. ``None``
+            keeps the client's default (30 s).
     """
 
     root: PathLike[str] | str | None = None
@@ -180,8 +178,8 @@ def stage(
             stages every asset present on each row. Rows that have
             no asset map stage ``filepath`` regardless.
         parallel: Max concurrent fetches via a
-            `ThreadPoolExecutor`. The fsspec backends release the
-            GIL on I/O so threads scale well even in pure Python.
+            `ThreadPoolExecutor`. obstore releases the GIL on I/O, so
+            threads scale well.
         cache: Reuse an existing cache instance. ``None`` builds a
             default one bound to ``dest`` (or the env-var default).
         retries: Per-URI retry budget for *transient* failures only
@@ -207,8 +205,8 @@ def stage(
     Raises:
         ValueError: If ``assets`` is empty or names a key that no row
             carries, or an argument is out of range.
-        ModuleNotFoundError: If a remote URI needs fsspec and it is
-            not installed.
+        ModuleNotFoundError: If a remote URI needs geotoolz-cloud (the
+            ``[cloud]`` extra) and it is not installed.
     """
     from geocatalog._src.backends.memory import InMemoryGeoCatalog
 
@@ -414,15 +412,27 @@ def _local_path(uri: str) -> Path | None:
     return parse_uri(uri).local_path()
 
 
+def _cloud_files() -> ModuleType:
+    """`geocloud.files`, or an error naming the ``[cloud]`` extra."""
+    try:
+        from geocloud import files
+    except ImportError as exc:
+        raise missing_extra(
+            "stage: fetching remote URIs", "cloud", packages="geotoolz-cloud"
+        ) from exc
+    return files
+
+
 def _fetch_one(uri: str, cache: LocalCache, retries: int) -> Path:
     """Resolve a single URI to a local file; return its path.
 
     Local URIs (no scheme or ``file://``) are returned in place —
-    nothing is copied and fsspec is not needed; a missing local file
-    raises `FileNotFoundError`. Remote URIs are served from the cache
-    when fresh, else downloaded through fsspec into a temporary file
-    that is renamed into place only once complete. Transient failures
-    are retried with the shared `retry_transient_io` policy.
+    nothing is copied and geotoolz-cloud is not needed; a missing local
+    file raises `FileNotFoundError`. Remote URIs are served from the
+    cache when fresh, else downloaded with `geocloud.files.download`
+    (ranged reads into a ``.part`` file renamed into place once
+    complete). Transient failures are retried with the shared
+    `retry_transient_io` policy.
     """
     local = _local_path(uri)
     if local is not None:
@@ -434,41 +444,16 @@ def _fetch_one(uri: str, cache: LocalCache, retries: int) -> Path:
     if cache.is_fresh(dest):
         logger.debug("stage: cache hit {!r} → {}", uri, dest)
         return dest
-    try:
-        import fsspec  # noqa: F401
-    except ModuleNotFoundError as exc:
-        raise missing_extra(f"stage: fetching {uri!r}", "fsspec") from exc
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    retry_transient_io(_download, uri, dest, cache.timeout, retries=retries)
+    files = _cloud_files()
+    options = (
+        None
+        if cache.timeout is None
+        else {"client_options": {"timeout": timedelta(seconds=cache.timeout)}}
+    )
+    retry_transient_io(
+        files.download, uri, dest, storage_options=options, retries=retries
+    )
     return dest
-
-
-def _download(uri: str, dest: Path, timeout: float | None) -> None:
-    """One download attempt of ``uri`` into ``dest``, atomically."""
-    import fsspec
-
-    # Only forward `timeout` when set: fsspec passes unknown kwargs
-    # through to the backend, and omitting the key entirely is the
-    # safest "disabled" spelling across filesystem implementations.
-    open_kwargs: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
-    tmp = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}{_PART_SUFFIX}")
-    try:
-        written = 0
-        with fsspec.open(uri, mode="rb", **open_kwargs) as src, tmp.open("wb") as dst:
-            expected = getattr(src, "size", None)
-            # Stream in chunks so a 5 GB asset never sits in memory.
-            while chunk := src.read(_CHUNK):
-                dst.write(chunk)
-                written += len(chunk)
-        if isinstance(expected, int) and expected >= 0 and written != expected:
-            # A plain OSError is transient: the retry policy re-fetches.
-            raise OSError(
-                f"stage: short read for {uri!r}: {written} of {expected} bytes"
-            )
-        os.replace(tmp, dest)
-    finally:
-        with contextlib.suppress(OSError):
-            tmp.unlink()
 
 
 # ---------------------------------------------------------------------------

@@ -5,15 +5,16 @@ Himawari-8 (2015–2022) and Himawari-9 (2022–), the 140.7°E geostationary
 view of East Asia, the Western Pacific and Australia. It decodes JMA's
 binary **Himawari Standard Data** (HSD) segments directly, with numpy and
 the standard library. It also reads NOAA's L2 cloud products on the same
-grid, finds both kinds of file in NOAA's public AWS buckets, and builds the
+grid, finds both kinds of file in NOAA's public AWS buckets (through
+[`geocloud.files`](../cloud/index.md#moving-files-geocloudfiles)), and builds the
 standard RGB composites. AHI has the same 16-band design as GOES-R ABI, so
 GOES workflows port over with band-name renaming.
 
 <p align="center"><img src="../../assets/figures/himawari-japan.jpg" alt="Himawari-9 Japan area at 03:00 UTC: true colour, day cloud phase and the NOAA L2 cloud mask on one 2 km grid" width="100%"></p>
 
 ```bash
-pip install geotoolz-products                          # HSD reader + bucket helpers: no extra
-pip install 'geotoolz-products[himawari]'              # + L2 cloud products (h5py)
+pip install geotoolz-products                          # HSD reader: no extra
+pip install 'geotoolz-products[himawari]'              # + bucket helpers (geotoolz-cloud), L2 cloud products (h5py)
 pip install 'geotoolz-products[himawari,operators]'    # + geotoolz presets and RGB recipes
 ```
 

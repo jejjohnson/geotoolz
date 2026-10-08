@@ -289,6 +289,14 @@ jobs:
               assert "geotoolz-products[himawari]" in str(exc), exc
           else:
               raise AssertionError("himawari.L2Reader ran without h5py")
+          from datetime import datetime
+
+          try:
+              geoproducts.goes.aws.list_files(satellite="G19", start=datetime(2026, 1, 1))
+          except ImportError as exc:
+              assert "geotoolz-products[goes]" in str(exc), exc
+          else:
+              raise AssertionError("goes.aws listed a bucket without geotoolz-cloud")
           print("geotoolz-products base install OK", geoproducts.__version__)
           PY
       # Coverage is off: extras-gated paths are unreachable here, so the

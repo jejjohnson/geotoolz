@@ -7,24 +7,21 @@
 - :func:`retry_after_seconds` / :func:`backoff_seconds` — how long to
   wait: the server's ``Retry-After`` when it sends one (API rate limits),
   exponential backoff otherwise, always clamped.
-- :func:`urllib_wait` — the retry policy for anonymous ``urllib``
-  downloads: rate limits and 5xx honour ``Retry-After``, dropped
-  connections back off, client errors fail at once.
-- :func:`stream_to_file` / :func:`download_url` — atomic downloads through
-  a sibling ``.part`` file, so a failed transfer never leaves a truncated
-  file under the final name.
+- :func:`stream_to_file` — write an API client's response chunks
+  atomically through a sibling ``.part`` file, so a failed transfer never
+  leaves a truncated file under the final name.
 - :func:`bearer_headers_for` — attach a token only to the one API host it
   belongs to.
 
 Standard library only: readers whose own client needs ``requests`` (or a
-provider SDK) plug their transport into these helpers.
+provider SDK) plug their transport into these helpers. Plain object and
+URL downloads (``s3://``, ``https://``, …) go through ``geocloud.files``
+instead (see ``_src/s3.py``).
 """
 
 from __future__ import annotations
 
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -39,19 +36,13 @@ __all__ = [
     "MAX_RETRY_WAIT_S",
     "backoff_seconds",
     "bearer_headers_for",
-    "download_url",
-    "fetch_bytes",
     "retry_after_seconds",
     "retrying",
     "stream_to_file",
-    "urllib_wait",
 ]
 
 #: Upper bound on any single retry sleep, whatever a server asks for.
 MAX_RETRY_WAIT_S = 300.0
-
-#: HTTP statuses worth retrying: rate limits and server-side failures.
-RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
 def backoff_seconds(
@@ -175,38 +166,6 @@ def retrying[T](
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def urllib_wait(outcome: Any, attempt: int, *, base_s: float = 1.0) -> float | None:
-    """Retry policy for ``urllib`` requests.
-
-    - An HTTP 429 / 5xx: wait per its ``Retry-After`` (else backoff).
-    - Any other HTTP error (4xx): stop — it will not change on retry.
-    - A dropped connection, timeout or other ``OSError``: back off.
-    - Anything else (a successful value): stop.
-
-    Args:
-        outcome: The value returned or exception raised by one attempt.
-        attempt: Zero-based attempt number.
-        base_s: First backoff wait.
-
-    Returns:
-        Seconds to sleep before retrying, or ``None`` to stop.
-    """
-    if isinstance(outcome, urllib.error.HTTPError):
-        if outcome.code in RETRYABLE_STATUS:
-            header = outcome.headers.get("Retry-After") if outcome.headers else None
-            return retry_after_seconds(header, attempt, base_s=base_s)
-        return None
-    if isinstance(outcome, OSError):
-        return backoff_seconds(attempt, base_s=base_s)
-    return None
-
-
-def fetch_bytes(url: str, *, timeout: float = 60.0) -> bytes:
-    """GET ``url`` anonymously and return the body (one attempt)."""
-    with urllib.request.urlopen(url, timeout=timeout) as response:
-        return response.read()
-
-
 def stream_to_file(chunks: Iterable[bytes], dest: Path | str) -> Path:
     """Write ``chunks`` to ``dest`` atomically through a sibling ``.part``.
 
@@ -225,39 +184,6 @@ def stream_to_file(chunks: Iterable[bytes], dest: Path | str) -> Path:
         for chunk in chunks:
             out.write(chunk)
     return dest
-
-
-def download_url(
-    url: str,
-    dest: Path | str,
-    *,
-    timeout: float = 60.0,
-    attempts: int = 4,
-    wait: Callable[[Any, int], float | None] = urllib_wait,
-    sleep: Callable[[float], None] = time.sleep,
-) -> Path:
-    """Download ``url`` anonymously to ``dest``, atomically and with retries.
-
-    Args:
-        url: Source URL.
-        dest: Destination file.
-        timeout: Socket timeout per attempt (seconds).
-        attempts: Total attempts.
-        wait: Retry policy (see :func:`retrying`); default :func:`urllib_wait`.
-        sleep: Sleep function (injectable for tests).
-
-    Returns:
-        ``dest`` as a ``Path``.
-
-    Raises:
-        urllib.error.URLError: The download failed after its retries.
-    """
-
-    def once() -> Path:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
-            return stream_to_file(iter(lambda: response.read(1 << 20), b""), dest)
-
-    return retrying(once, wait=wait, attempts=attempts, sleep=sleep)
 
 
 def bearer_headers_for(url: str, token: str | None, *, host: str) -> dict[str, str]:
