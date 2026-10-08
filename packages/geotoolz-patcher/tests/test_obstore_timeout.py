@@ -1,27 +1,33 @@
-"""Timeout + strict-tag behaviour of the obstore COG reader.
+"""Timeout + strict-metadata behaviour of the obstore COG reader.
 
-These tests exercise `ObstoreCogField.select_many`'s network deadline
-and the loud-failure tag parsing (`_dtype_from_ifd`,
-`_crs_from_geokeys`, `_parse_nodata`) plus planar-configuration tile
-assembly against fake IFD objects, so they need neither the
-``obstore`` nor the ``async-tiff`` extra, and touch no network.
+These tests exercise `ObstoreCogField.select_many`'s network deadline,
+its concurrent tile grouping and internal-mask fill, and the thin
+metadata guards over async-geotiff (`_dtype`, `_crs_or_none`,
+`_tiepoint_offset`, `_parse_nodata`) against fake async-geotiff
+objects, so they need neither the ``obstore`` nor the
+``async-geotiff`` extra, and touch no network.
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from rasterio.transform import Affine
 
 from geopatcher._src.fields.obstore_cog import (
+    _TILES_PER_FETCH,
     ObstoreCogDomain,
     ObstoreCogField,
-    _crs_from_geokeys,
-    _dtype_from_ifd,
+    _crs_or_none,
+    _dtype,
+    _fetch_and_decode_tiles,
     _parse_nodata,
+    _tiepoint_offset,
     _with_timeout,
 )
 
@@ -39,73 +45,86 @@ class _Window:
     height: int
 
 
-class _FakeTile:
-    def __init__(self, arr: np.ndarray) -> None:
-        self._arr = arr
-
-    async def decode(self) -> np.ndarray:
-        return self._arr
-
-
 class _FakeIfd:
-    """Minimal IFD: one band, float32, 16x16 tiles over a 32x32 image.
-
-    Tiles decode to the shape async-tiff really returns for a chunky
-    (``PlanarConfiguration=1``) image — ``(H, W, samples)``, so
-    ``(16, 16, 1)`` here, not a bare 2-D array.
-    """
+    """Tile grid of the fake level: 16x16 tiles over a 32x32 image."""
 
     tile_width = 16
     tile_height = 16
     image_width = 32
     image_height = 32
-    samples_per_pixel = 1
-    bits_per_sample = (32,)
-    sample_format = (3,)
 
-    def __init__(self, delay: float = 0.0) -> None:
+
+def _tile(x: int, y: int, data: np.ndarray, mask: np.ndarray | None = None):
+    """An ``async_geotiff.Tile`` look-alike (``mask`` is True where valid)."""
+    return SimpleNamespace(x=x, y=y, array=SimpleNamespace(data=data, mask=mask))
+
+
+class _FakeLevel:
+    """Minimal async-geotiff level: one float32 band of 7.0 per tile.
+
+    Records every ``fetch_tiles`` call (its coords and start time) so
+    tests can check grouping and concurrency.
+    """
+
+    def __init__(self, delay: float = 0.0, mask: np.ndarray | None = None) -> None:
+        self.ifd = _FakeIfd()
         self._delay = delay
+        self._mask = mask
+        self.calls: list[list[tuple[int, int]]] = []
+        self.starts: list[float] = []
 
-    async def fetch_tiles(self, coords: list[tuple[int, int]]) -> list[_FakeTile]:
+    async def fetch_tiles(self, coords: list[tuple[int, int]]) -> list[SimpleNamespace]:
+        self.calls.append(list(coords))
+        self.starts.append(time.perf_counter())
         if self._delay:
             await asyncio.sleep(self._delay)
-        tile = np.full((16, 16, 1), 7.0, dtype=np.float32)
-        return [_FakeTile(tile) for _ in coords]
+        data = np.full((1, 16, 16), 7.0, dtype=np.float32)
+        return [_tile(x, y, data, self._mask) for x, y in coords]
 
 
-def _field(ifd: _FakeIfd, timeout: float | None) -> ObstoreCogField:
+def _field(
+    level: _FakeLevel, timeout: float | None, nodata: float | None = None
+) -> ObstoreCogField:
     domain = ObstoreCogDomain(
         crs=None,
         transform=Affine.identity(),
         shape=(1, 32, 32),
         bounds=(0.0, 0.0, 32.0, 32.0),
         res=(1.0, 1.0),
+        nodata=nodata,
     )
-    return ObstoreCogField(url=URL, tiff=None, ifd=ifd, domain=domain, timeout=timeout)
+    return ObstoreCogField(
+        url=URL,
+        level=level,
+        ifd=level.ifd,
+        domain=domain,
+        timeout=timeout,
+        dtype=np.dtype("float32"),
+    )
 
 
 class TestSelectManyTimeout:
     def test_stalled_fetch_raises_timeouterror_naming_url_and_batch(self) -> None:
-        field = _field(_FakeIfd(delay=30.0), timeout=0.05)
+        field = _field(_FakeLevel(delay=30.0), timeout=0.05)
         window = _Window(col_off=0, row_off=0, width=8, height=8)
         with pytest.raises(TimeoutError, match=r"1 tiles.*s3://bucket/scene\.tif"):
             field.select_many([window])  # type: ignore[list-item]
 
     def test_fast_fetch_completes_within_deadline(self) -> None:
-        field = _field(_FakeIfd(), timeout=30.0)
+        field = _field(_FakeLevel(), timeout=30.0)
         window = _Window(col_off=0, row_off=0, width=8, height=8)
         out = field.select_many([window])  # type: ignore[list-item]
         assert out[0].shape == (1, 8, 8)
         np.testing.assert_array_equal(out[0], 7.0)
 
     def test_timeout_none_disables_the_deadline(self) -> None:
-        field = _field(_FakeIfd(delay=0.1), timeout=None)
+        field = _field(_FakeLevel(delay=0.1), timeout=None)
         window = _Window(col_off=0, row_off=0, width=4, height=4)
         out = field.select_many([window])  # type: ignore[list-item]
         assert out[0].shape == (1, 4, 4)
 
     def test_default_timeout_is_two_minutes(self) -> None:
-        field = _field(_FakeIfd(), timeout=120.0)
+        field = _field(_FakeLevel(), timeout=120.0)
         assert field.timeout == 120.0
         assert ObstoreCogField.__dataclass_fields__["timeout"].default == 120.0
 
@@ -127,78 +146,77 @@ class TestWithTimeoutHelper:
         assert asyncio.run(_with_timeout(_value(), timeout=None, message="x")) == 42
 
 
-class TestDtypeFromIfdFailsLoud:
-    def test_valid_tags_map_to_dtype(self) -> None:
-        assert _dtype_from_ifd(_FakeIfd(), url=URL) == np.dtype("float32")
+class TestConcurrentTileGroups:
+    def test_tiles_fetched_once_in_row_major_groups(self) -> None:
+        level = _FakeLevel()
+        coords = [(x, y) for x in range(5) for y in range(4)]  # column-major
+        out = asyncio.run(_fetch_and_decode_tiles(level, coords))
+        assert len(out) == len(coords)
+        fetched = [xy for call in level.calls for xy in call]
+        assert sorted(fetched) == sorted(coords)  # each tile exactly once
+        assert all(len(call) <= _TILES_PER_FETCH for call in level.calls)
+        assert fetched == sorted(coords, key=lambda xy: (xy[1], xy[0]))
 
-    def test_uint_and_int_formats(self) -> None:
-        class _U(_FakeIfd):
-            bits_per_sample = (16,)
-            sample_format = (1,)
+    def test_groups_run_concurrently(self) -> None:
+        level = _FakeLevel(delay=0.2)
+        coords = [(x, 0) for x in range(3 * _TILES_PER_FETCH)]
+        start = time.perf_counter()
+        asyncio.run(_fetch_and_decode_tiles(level, coords))
+        assert len(level.calls) == 3
+        # Sequential groups would take >= 0.6 s.
+        assert time.perf_counter() - start < 0.5
 
-        class _I(_FakeIfd):
-            bits_per_sample = (16,)
-            sample_format = (2,)
+    def test_internal_mask_fills_invalid_pixels(self) -> None:
+        valid = np.ones((16, 16), dtype=bool)
+        valid[:4, :4] = False
+        field = _field(_FakeLevel(mask=valid), timeout=None, nodata=-1.0)
+        out = np.asarray(field.select(_Window(0, 0, 8, 8)))  # type: ignore[arg-type]
+        np.testing.assert_array_equal(out[0, :4, :4], -1.0)
+        np.testing.assert_array_equal(out[0, 4:, 4:], 7.0)
 
-        assert _dtype_from_ifd(_U(), url=URL) == np.dtype("uint16")
-        assert _dtype_from_ifd(_I(), url=URL) == np.dtype("int16")
 
-    def test_missing_tags_raise_valueerror_naming_file(self) -> None:
-        class _NoTags:
-            pass
+class TestDtypeFailsLoud:
+    def test_upstream_dtype_passes_through(self) -> None:
+        geotiff = SimpleNamespace(dtype=np.dtype("uint16"), ifd=_FakeIfd())
+        assert _dtype(geotiff, url=URL) == np.dtype("uint16")
 
+    def test_unsupported_tags_raise_valueerror_naming_file(self) -> None:
+        geotiff = SimpleNamespace(dtype=None, ifd=_FakeIfd())
         with pytest.raises(ValueError, match=r"cannot derive a dtype.*scene\.tif"):
-            _dtype_from_ifd(_NoTags(), url=URL)
-
-    def test_unknown_sample_format_raises(self) -> None:
-        class _Weird(_FakeIfd):
-            sample_format = (4,)  # complex — unsupported
-
-        with pytest.raises(ValueError, match=r"unsupported SampleFormat 4.*scene"):
-            _dtype_from_ifd(_Weird(), url=URL)
-
-    def test_unsupported_bit_depth_raises(self) -> None:
-        class _Odd(_FakeIfd):
-            bits_per_sample = (24,)  # no numpy float24
-
-        with pytest.raises(ValueError, match=r"unsupported BitsPerSample 24"):
-            _dtype_from_ifd(_Odd(), url=URL)
+            _dtype(geotiff, url=URL)
 
 
-class TestCrsFromGeokeysWarns:
-    def test_none_geokeys_return_none_silently(self) -> None:
-        assert _crs_from_geokeys(None) is None
+class TestCrsOrNone:
+    def test_upstream_crs_passes_through(self) -> None:
+        level = SimpleNamespace(crs="EPSG:32629")
+        assert _crs_or_none(level, url=URL) == "EPSG:32629"
 
-    def test_valid_epsg_builds_crs(self) -> None:
-        pytest.importorskip("pyproj")
+    def test_unbuildable_crs_warns_and_returns_none(self) -> None:
+        class _Level:
+            @property
+            def crs(self) -> None:
+                raise ValueError("Missing ellipsoid")
 
-        class _Keys:
-            projected_type = 32629
-            geographic_type = None
+        with pytest.warns(RuntimeWarning, match=r"could not build the CRS.*scene"):
+            assert _crs_or_none(_Level(), url=URL) is None
 
-        crs = _crs_from_geokeys(_Keys())
-        assert "32629" in str(crs)
 
-    def test_bogus_epsg_warns_and_returns_none(self) -> None:
-        pytest.importorskip("pyproj")
+class TestTiepointOffset:
+    def _geotiff(self, tiepoint, scale=(10.0, 10.0, 0.0)):
+        return SimpleNamespace(
+            ifd=SimpleNamespace(model_tiepoint=tiepoint, model_pixel_scale=scale)
+        )
 
-        class _Keys:
-            projected_type = 999999  # not a real EPSG code
-            geographic_type = None
+    def test_origin_tiepoint_is_zero(self) -> None:
+        tie = (0.0, 0.0, 0.0, 5.0, 10.0, 0.0)
+        assert _tiepoint_offset(self._geotiff(tie)) == (0.0, 0.0)
 
-        with pytest.warns(RuntimeWarning, match=r"EPSG:999999"):
-            assert _crs_from_geokeys(_Keys()) is None
+    def test_raster_tiepoint_is_returned(self) -> None:
+        tie = (2.0, 3.0, 0.0, 5.0, 10.0, 0.0)
+        assert _tiepoint_offset(self._geotiff(tie)) == (2.0, 3.0)
 
-    def test_user_defined_code_is_treated_as_absent(self) -> None:
-        """32767 = user-defined: never looked up as ``EPSG:32767``."""
-        pytest.importorskip("pyproj")
-
-        class _Keys:
-            projected_type = 32767
-            geographic_type = 4326
-
-        with pytest.warns(RuntimeWarning, match=r"user-defined CRS"):
-            assert _crs_from_geokeys(_Keys()) is None
+    def test_model_transformation_has_no_offset(self) -> None:
+        assert _tiepoint_offset(self._geotiff(None, scale=None)) == (0.0, 0.0)
 
 
 class TestParseNodata:
@@ -216,34 +234,3 @@ class TestParseNodata:
     def test_unrepresentable_integer_nodata_warns(self, raw: str) -> None:
         with pytest.warns(RuntimeWarning, match=r"not representable as uint8"):
             assert _parse_nodata(raw, np.dtype("uint8"), url=URL) is None
-
-
-class _PlanarIfd(_FakeIfd):
-    """3-band band-interleaved IFD: async-tiff yields ``(samples, H, W)`` tiles."""
-
-    samples_per_pixel = 3
-    bits_per_sample = (32, 32, 32)
-    sample_format = (3, 3, 3)
-    planar_configuration = 2
-
-    async def fetch_tiles(self, coords: list[tuple[int, int]]) -> list[_FakeTile]:
-        tile = np.stack([np.full((16, 16), b, dtype=np.float32) for b in range(3)])
-        return [_FakeTile(tile) for _ in coords]
-
-
-class TestPlanarConfiguration:
-    def test_band_interleaved_tiles_are_not_transposed(self) -> None:
-        field = _field(_PlanarIfd(), timeout=None)
-        window = _Window(col_off=10, row_off=10, width=12, height=8)
-        out = field.select(window)  # type: ignore[arg-type]
-        assert out.shape == (3, 8, 12)
-        for band in range(3):
-            np.testing.assert_array_equal(np.asarray(out)[band], band)
-
-    def test_band_count_mismatch_fails_loud(self) -> None:
-        class _Wrong(_PlanarIfd):
-            samples_per_pixel = 4
-
-        field = _field(_Wrong(), timeout=None)
-        with pytest.raises(ValueError, match=r"expected 4 band"):
-            field.select(_Window(0, 0, 4, 4))  # type: ignore[arg-type]

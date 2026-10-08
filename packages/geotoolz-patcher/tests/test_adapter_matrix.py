@@ -134,7 +134,7 @@ def _dask(tmp_path: Path) -> Case:
 
 def _obstore_cog(tmp_path: Path) -> Case:
     pytest.importorskip("obstore")
-    pytest.importorskip("async_tiff")
+    pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
 
     from geopatcher._src.fields.obstore_cog import ObstoreCogField

@@ -175,7 +175,7 @@ jobs:
           # The extras really are absent from this environment.
           for module in (
               "xarray", "rioxarray", "xvec", "zarr", "dask", "jax",
-              "obstore", "async_tiff", "pipekit",
+              "obstore", "async_tiff", "async_geotiff", "pipekit",
           ):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 
