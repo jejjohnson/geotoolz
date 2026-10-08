@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.7.1...geotoolz-patcher-v0.8.0) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **patcher:** the [obstore-cog] extra now installs async-geotiff>=0.5,<0.6 (which requires numpy>=2) instead of async-tiff directly, and the ObstoreCogField dataclass holds the async-geotiff level (`level`) and the pixel `dtype` instead of the raw async-tiff `tiff` handle. Fields opened through from_url are unaffected.
+
+### Features
+
+* **patcher:** async COG reading — AsyncCogReader and geopatcher.cog read_* coroutines ([#417](https://github.com/jejjohnson/geotoolz/issues/417)) ([ac66772](https://github.com/jejjohnson/geotoolz/commit/ac66772cc40be3f3fb05205b1cf2c8c1c64214e2))
+* **patcher:** ObstoreCogField reads through async-geotiff with concurrent tile groups ([#416](https://github.com/jejjohnson/geotoolz/issues/416)) ([4fa4da0](https://github.com/jejjohnson/geotoolz/commit/4fa4da0bb315bee4497b946bbe5d47500952ddfb))
+
 ## [0.7.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.7.0...geotoolz-patcher-v0.7.1) (2026-10-05)
 
 
