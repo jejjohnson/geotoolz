@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.3.1...geotoolz-catalog-v0.4.0) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* geocatalog.staging.stage() needs the [cloud] extra (geotoolz-cloud) for remote URIs instead of [fsspec]. goes.aws / himawari.aws need geotoolz-cloud (the [goes] / [himawari] / [obstore] extras) and raise obstore errors (FileNotFoundError for a missing key) instead of urllib.error.URLError.
+
+### Code Refactoring
+
+* download through geocloud.files in catalog staging and the NOAA bucket helpers ([#443](https://github.com/jejjohnson/geotoolz/issues/443)) ([1450117](https://github.com/jejjohnson/geotoolz/commit/14501176866ff3003405cebffc45b99d7758f9a7))
+
 ## [0.3.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.3.0...geotoolz-catalog-v0.3.1) (2026-10-08)
 
 
