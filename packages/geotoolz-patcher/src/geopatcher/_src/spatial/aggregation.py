@@ -751,8 +751,9 @@ class OverlapAdd(Aggregation):
         chunks: tuple[int, ...],
         *,
         overwrite: bool | None = None,
+        layout: tuple[tuple[int, ...], Iterator[Any]] | None = None,
     ) -> Any:
-        shape, patches = _dense_layout(patches, domain)
+        shape, patches = layout or _dense_layout(patches, domain)
         chunks = _right_align(chunks, shape, "chunks")
         shards = (
             None
@@ -800,15 +801,19 @@ class OverlapAdd(Aggregation):
             )
         options = dict(self.cog or {})
         blocksize = int(options.pop("blocksize", DEFAULT_COG_BLOCKSIZE))
-        shape = _domain_array_shape(domain)
+        layout = _dense_layout(patches, domain)
+        shape = layout[0]
         if len(shape) not in (2, 3):
             raise ValueError(
-                "COG writer expects a 2-D domain or a 3-D band-first domain"
+                "COG writer expects a 2-D or a 3-D band-first output; the "
+                f"patches merge into shape {shape}"
             )
         chunks = self.chunks or tuple(min(blocksize, n) for n in shape[-2:])
         parent = os.path.dirname(os.path.abspath(target))
         with tempfile.TemporaryDirectory(dir=parent, prefix=".geopatcher-") as tmp:
-            rec = self._merge_streaming(patches, domain, tmp, chunks, overwrite=True)
+            rec = self._merge_streaming(
+                patches, domain, tmp, chunks, overwrite=True, layout=layout
+            )
             _zarr_to_cog(
                 rec,
                 domain,

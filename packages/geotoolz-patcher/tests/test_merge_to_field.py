@@ -361,6 +361,71 @@ def test_matched_merge_to_field_rebuilds_every_source_on_primary_grid() -> None:
     np.testing.assert_array_equal(out["sec"].values, 7)
 
 
+@pytest.mark.parametrize(
+    ("aggregation", "fill"),
+    [
+        (spatial.aggregation.HardVote(n_classes=3), -1),
+        (spatial.aggregation.OverlapAdd(fill_value=-9999.0), -9999.0),
+    ],
+    ids=["HardVote", "OverlapAdd-sentinel"],
+)
+def test_merge_to_field_declares_the_aggregation_gap_fill(aggregation, fill) -> None:
+    # Cells no patch reached hold the aggregation's fill, so that is the
+    # output's nodata — not the source's 999 or a NaN no cell holds.
+    field = _geotensor_field()
+    patcher = _patcher(aggregation=aggregation)
+    first = next(iter(patcher.split(field)))
+    labels = replace(first, data=np.ones(np.shape(first.data)[-2:]))
+
+    out = patcher.merge_to_field([labels], field)
+
+    assert out.fill_value_default == fill
+    assert (np.asarray(out) == fill).sum() == 8 * 8 - 4 * 4
+
+
+def test_merge_to_field_without_gaps_keeps_the_source_fill() -> None:
+    field = _geotensor_field()
+    patcher = _patcher(aggregation=spatial.aggregation.OverlapAdd(fill_value=-1.0))
+
+    out = patcher.merge_to_field(patcher.split(field), field)
+
+    assert out.fill_value_default == 999
+
+
+def test_matched_merge_to_field_band_reducing_operator() -> None:
+    # The matched patcher rebuilds a band-collapsed source on the primary's
+    # grid, as `SpatialPatcher.merge_to_field` does.
+    primary = _geotensor_field(np.float32)
+    mfield = MatchedField(
+        primary=primary,
+        secondaries={"sec": _geotensor_field(np.float32)},
+        coreg={"sec": lambda raw, prim: raw},
+    )
+    mpatcher = MatchedSpatialPatcher(
+        primary=_patcher(),
+        secondary_aggregators={"sec": spatial.aggregation.OverlapAdd()},
+    )
+    patches = [
+        replace(
+            p,
+            members={
+                name: replace(
+                    m, data=np.asarray(m.data, dtype=np.float64).mean(axis=-3)
+                )
+                for name, m in p.members.items()
+            },
+        )
+        for p in mpatcher.split(mfield)
+    ]
+
+    out = mpatcher.merge_to_field(patches, mfield)
+
+    for value in out.values():
+        assert isinstance(value, GeoTensor)
+        assert value.shape == (8, 8)
+        assert value.transform == _T
+
+
 def test_matched_merge_to_field_dict_output_raises() -> None:
     primary = _geotensor_field(np.float32)
     mfield = MatchedField(

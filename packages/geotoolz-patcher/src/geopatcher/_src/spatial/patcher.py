@@ -503,16 +503,15 @@ class SpatialPatcher(_SpatialPatcherBase):
         merged = _merge_with_hooks(
             self.aggregation, patches, field.domain, hooks, stacklevel=2
         )
-        return with_data(
-            _field_values(
-                merged,
-                self.aggregation,
-                shape=_domain_shape(field.domain),
-                dtype=_source_dtype(field),
-                caller="merge_to_field",
-                bands_may_change=_is_raster_field(field),
-            )
+        values = _field_values(
+            merged,
+            self.aggregation,
+            shape=_domain_shape(field.domain),
+            dtype=_source_dtype(field),
+            caller="merge_to_field",
+            bands_may_change=_is_raster_field(field),
         )
+        return _declare_gap_fill(with_data(values), values, self.aggregation)
 
     def merge_to_xarray(
         self,
@@ -1039,7 +1038,34 @@ def on_domain_grid(merged: Any, aggregation: SpatialAggregation, domain: Any) ->
         caller="Stitch",
         bands_may_change=True,
     )
-    return _rewrap(domain, values, domain.transform, domain.crs)
+    return _declare_gap_fill(
+        _rewrap(domain, values, domain.transform, domain.crs), values, aggregation
+    )
+
+
+def _declare_gap_fill(out: Any, values: np.ndarray, aggregation: Any) -> Any:
+    """Declare the aggregation's fill as ``out``'s nodata when the merge left gaps.
+
+    A dense aggregation writes its ``fill_value`` (NaN, ``-1`` for the
+    votes, or the caller's sentinel) into every cell no valid sample
+    reached. When such cells exist, that value is the output's nodata —
+    not the source's fill, which no cell of the gap holds. Without gaps
+    the rewrap's choice stands. Only `GeoTensor` outputs carry the
+    attribute; other carriers are returned unchanged.
+    """
+    from georeader.geotensor import GeoTensor
+
+    fill = getattr(aggregation, "fill_value", None)
+    if fill is None or not isinstance(out, GeoTensor):
+        return out
+    is_nan = isinstance(fill, float) and np.isnan(fill)
+    if np.issubdtype(values.dtype, np.inexact) and is_nan:
+        gaps = bool(np.isnan(values).any())
+    else:
+        gaps = not is_nan and bool((values == fill).any())
+    if gaps:
+        out.fill_value_default = fill
+    return out
 
 
 def _is_raster_field(field: Any) -> bool:

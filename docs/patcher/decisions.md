@@ -615,6 +615,9 @@ its input chips were `GeoTensor`s.
   - the fill stays the source's nodata while the output carries the
     source's values, and becomes NaN for a new float quantity (a float
     output on an integer source or on a different band count);
+  - when the merge left gaps — cells no valid sample reached — the
+    aggregation's `fill_value` written there (NaN, `-1` for the votes, a
+    caller's sentinel) is the declared nodata instead;
   - the source dtype is restored only for an output of the domain's own
     shape.
 - The pipekit `Stitch` returns a `GeoTensor` on a georeferenced domain
