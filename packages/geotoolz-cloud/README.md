@@ -4,10 +4,11 @@ Cloud object storage for the geotoolz stack (import name `geocloud`): one
 process-wide [obstore](https://developmentseed.org/obstore/) client pool, and
 batched, async Cloud-Optimized GeoTIFF reads on top of it.
 
-Every package that reads from a bucket — geopatcher's `CogField`,
-geoproducts' cloud byte reads, the catalog loaders — takes its client from
-`geocloud.store`, so a process talking to one bucket builds **one** client and
-**one** HTTP/2 connection pool for it. `geocloud.cog` reads COG tiles straight
+geopatcher's `CogField` and geoproducts' cloud byte reads take their client
+from `geocloud.store`, so a process talking to one bucket through them builds
+**one** client and **one** HTTP/2 connection pool for it. (geocatalog does not
+use the pool: staging downloads through fsspec and the builders read through
+rasterio / GDAL.) `geocloud.cog` reads COG tiles straight
 from that pool with async-geotiff: no GDAL, every tile a batch of windows
 touches fetched once, groups of tiles fetched concurrently.
 

@@ -2,9 +2,9 @@
 
 `geocloud.cog` reads through it, geopatcher's `CogField` and geoproducts'
 cloud byte reads take their clients from the public `geocloud.store`
-module, and the ``[obstore]`` extras of geotoolz-catalog / geotoolz-products
-install it. A process that talks to one bucket through the whole stack
-therefore builds one client and one HTTP/2 connection pool for it, and
+module, and geotoolz-products' ``[obstore]`` extra installs it. A process
+that talks to one bucket through them therefore builds one client and one
+HTTP/2 connection pool for it, and
 `clear_obstore_pool` empties it for every package.
 
 Surfaces:
