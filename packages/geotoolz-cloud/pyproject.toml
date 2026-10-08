@@ -1,6 +1,6 @@
 [project]
 name = "geotoolz-cloud"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cloud object storage for the geotoolz stack — one process-wide obstore client pool and batched, async Cloud-Optimized GeoTIFF reads."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

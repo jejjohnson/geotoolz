@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.2.3...geotoolz-catalog-v0.3.0) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* geopatcher.temporal.stencils.divide_evenly is now exact_quotient, geocatalog.grid.divide_evenly is now count_steps, and geotoolz.patch_ops.SpatialTriangular is now TriangularWindow. No aliases; saved patcher configs naming geotoolz.patch_ops.SpatialTriangular must be regenerated.
+* **catalog:** the flat root re-exports and the geocatalog.catalog / .types / .io / .bundle modules are gone, with no aliases. Import each name from its namespace (e.g. geocatalog.load.load_raster, geocatalog.backends.InMemoryGeoCatalog, geocatalog.storage.to_geoparquet, geocatalog.patch.field_for, geocatalog.grid.slice_to_window, geocatalog.utils.parse_uri). geocatalog.matchup is no longer callable: use geocatalog.matchup.matchup(...).
+* **patcher:** no aliases are kept. The prefixed axis names (SpatialHann, TemporalMean, ...) and the root re-exports of axes, runners, hooks and caches are gone; geopatcher.time is geopatcher.temporal; geopatcher.objstore / geopatcher.cog become geocloud.store / geocloud.cog; geopatcher.runners / dask / jax / hooks fold into geopatcher.run and geopatcher.observe; ObstoreCogField becomes geopatcher.fields.CogField; the patcher extras obstore / obstore-cog are replaced by [cog]; and geotoolz-catalog[obstore] is removed (install geotoolz-cloud). Saved config envelopes that use the old class names must be regenerated.
+
+### Code Refactoring
+
+* **catalog:** organise geocatalog by workflow step, one home per name ([#433](https://github.com/jejjohnson/geotoolz/issues/433)) ([94621fd](https://github.com/jejjohnson/geotoolz/commit/94621fd2ae2f007627b7443caa29925f7cea58a8))
+* give the divide-evenly helpers distinct names and drop the last Spatial* prefix ([#434](https://github.com/jejjohnson/geotoolz/issues/434)) ([d8155d2](https://github.com/jejjohnson/geotoolz/commit/d8155d2f96439c3339d93fae219b82103ea6ed75))
+* **patcher:** organise geopatcher by task and split object storage into geotoolz-cloud ([#431](https://github.com/jejjohnson/geotoolz/issues/431)) ([a7a4d6e](https://github.com/jejjohnson/geotoolz/commit/a7a4d6e4fbec075260f8f4a9fd371a791ff13b30))
+
 ## [0.2.3](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.2.2...geotoolz-catalog-v0.2.3) (2026-10-05)
 
 
