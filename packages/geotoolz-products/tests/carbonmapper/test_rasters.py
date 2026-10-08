@@ -1026,7 +1026,9 @@ class TestTokenScoping:
         )
         ir = CMImageRaster(
             scene_id="s",
-            asset_paths={"cmf": "https://cm/x/cmf.tif"},
+            asset_paths={
+                "cmf": "https://api.carbonmapper.org/api/v1/catalog/asset/x/cmf.tif"
+            },
             token="abc",
         )
         _ = ir.cmf
@@ -1072,7 +1074,7 @@ class TestTokenScoping:
             "GDAL_HTTP_HEADERS",
             "X-Other: 1\r\nAuthorization: Bearer env-tok",
         )
-        url = {"uas": "https://cm/x/uas.txt"}
+        url = {"uas": "https://api.carbonmapper.org/api/v1/catalog/asset/x/uas.txt"}
         assert CMImageRaster(scene_id="s", asset_paths=url, token="t").uas == "uas"
         assert CMImageRaster(scene_id="s", asset_paths=url).uas == "uas"
         assert sent == [

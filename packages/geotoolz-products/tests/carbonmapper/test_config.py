@@ -382,6 +382,22 @@ class TestSave:
         mode = dest.stat().st_mode & 0o777
         assert mode == 0o600
 
+    def test_save_never_creates_a_world_readable_file(self, tmp_path, monkeypatch):
+        # Under a permissive umask the old write-then-chmod left a 0644
+        # window; the file must be 0600 from creation, and overwriting an
+        # existing 0644 file must tighten it too.
+        dest = tmp_path / "config.json"
+        dest.write_text("{}")
+        dest.chmod(0o644)
+        old_umask = os.umask(0o022)
+        try:
+            CarbonMapperConfig(token="tok").save(path=dest)
+        finally:
+            os.umask(old_umask)
+        assert dest.stat().st_mode & 0o777 == 0o600
+        assert json.loads(dest.read_text()) == {"token": "tok"}
+        assert list(tmp_path.iterdir()) == [dest]
+
 
 # --- reset ---
 

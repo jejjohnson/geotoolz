@@ -293,9 +293,25 @@ def test_cmsourceraster_from_cmtileitem_scopes_bearer_token(monkeypatch):
             "properties": {"datetime": "2026-08-24T06:57:35Z"},
             "bbox": [-104, 31, -103, 32],
             "geometry": {"type": "Point", "coordinates": [-103.5, 31.5]},
-            "assets": {"cmf.tif": {"href": "https://api.example/cmf.tif"}},
+            "assets": {
+                "cmf.tif": {
+                    "href": "https://api.carbonmapper.org/api/v1/catalog/asset/cmf.tif"
+                }
+            },
         }
     )
     sr = CMSourceRaster.from_cmtileitem([], tile, token="abc")
     assert sr.shape == (4, 5)
     assert seen["GDAL_HTTP_HEADERS"] == "Authorization: Bearer abc"
+
+
+def test_cmsourceraster_read_window_rejects_antimeridian_bbox():
+    g = _utm_grid()
+    raster = CMSourceRaster(
+        sources=[],
+        transform=g["transform"],
+        shape=g["shape"],
+        crs=rasterio.crs.CRS.from_user_input(g["crs"]),
+    )
+    with pytest.raises(ValueError, match="antimeridian"):
+        raster.read_window((179.0, -1.0, -179.0, 1.0))

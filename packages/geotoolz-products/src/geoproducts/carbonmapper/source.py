@@ -200,7 +200,13 @@ class CMSource:
             persistence=float(props.get("persistence") or 0.0),
             emission_auto=_to_float(props.get("emission_auto")),
             emission_uncertainty_auto=_to_float(props.get("emission_uncertainty_auto")),
-            first_observation=_parse_iso_datetime(props.get("first_observation")),
-            last_observation=_parse_iso_datetime(props.get("last_observation")),
+            # `sources.geojson` publishes the bounds as `timestamp_min` /
+            # `timestamp_max`; the older names are kept as fallbacks.
+            first_observation=_parse_iso_datetime(
+                props.get("timestamp_min") or props.get("first_observation")
+            ),
+            last_observation=_parse_iso_datetime(
+                props.get("timestamp_max") or props.get("last_observation")
+            ),
             raw=props,
         )

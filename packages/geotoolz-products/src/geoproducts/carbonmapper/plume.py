@@ -31,10 +31,7 @@ STAC now registers every version through ``v3e``. The
 assets from the plume record for any version.
 
 This module is the **API-side** typed view of a Carbon Mapper plume
-record. Downstream consumers may persist the record into their own
-tables / views; field-level docstrings below mirror the column comments
-of one such downstream staging view, so the upstream API and that
-schema share a single source of truth.
+record; downstream consumers may persist it into their own tables.
 """
 
 from __future__ import annotations
@@ -42,6 +39,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -327,39 +325,8 @@ class CMRawPlume(BaseModel):
     Note that ``geometry`` here is **not** the retrieved plume mask
     polygon — it's just the API's reported point/bounds. For the
     authoritative plume polygon, use
-    :meth:`~geoproducts.carbonmapper.rasters.CMPlumeRaster.polygon`,
-    which extracts it from the L3A ``plume_tif`` band-4 alpha mask.
-
-    Downstream staging-view counterpart
-    -----------------------------------
-    Field-level docstrings below mirror the ``COMMENT ON COLUMN``
-    statements of a downstream staging view built from this record.
-
-    Mapping reference (CMRawPlume field → SQL view column):
-
-    ============================  =====================================
-    ``CMRawPlume`` field          ``src_carbon_mapper_plumes`` column
-    ============================  =====================================
-    ``plume_id``                  ``source_id``
-    ``datetime_str`` /            ``tile_date``
-      ``scene_timestamp``
-    ``published_at_str``          ``published_at``
-    ``modified_str``              ``modified``
-    ``plume_latitude``            ``lat``
-    ``plume_longitude``           ``lon``
-    ``plume_bounds_raw``          ``plume_bounds``
-    ``wind_source_auto``          ``wind_source``
-    ``wind_speed_avg_auto``       ``wind_speed_m_s``
-    ``wind_speed_std_auto``       ``wind_speed_std_m_s``
-    ``wind_direction_avg_auto``   ``wind_direction_deg``
-    ``wind_direction_std_auto``   ``wind_direction_std_deg``
-    ``emission_auto``             ``emission_rate_kg_h``
-    ``emission_uncertainty_auto`` ``emission_rate_uncertainty_kg_h``
-    ``ipcc_sector``               ``sector``
-    ``con_tif``                   ``concentration_tif``
-    ``rgb_tif``, ``rgb_png``      same names
-    ``plume_tif``, ``plume_png``  same names
-    ============================  =====================================
+    :attr:`~geoproducts.carbonmapper.image.CMPlumeImage.outline`
+    (or the band-4 alpha mask of the L3A ``plume_tif``).
     """
 
     model_config = ConfigDict(
@@ -407,8 +374,8 @@ class CMRawPlume(BaseModel):
         default=None,
         alias="datetime",
         description=(
-            "Acquisition time (UTC ISO 8601). Maps to the SQL view's "
-            "``tile_date`` column. Set on CSV-format payloads; the "
+            "Acquisition time (UTC ISO 8601). "
+            "Set on CSV-format payloads; the "
             "annotated-JSON endpoint uses ``scene_timestamp`` instead."
         ),
     )
@@ -598,8 +565,8 @@ class CMRawPlume(BaseModel):
     has_phme: bool | None = Field(
         default=None,
         description=(
-            "Whether the plume has been Plume Height + Mass Estimated. "
-            "Annotated JSON only."
+            "Whether the plume is flagged as a Potentially Harmful Methane "
+            "Event (PHME). Annotated JSON only."
         ),
     )
     detection_institution: str | None = Field(
@@ -629,9 +596,9 @@ class CMRawPlume(BaseModel):
         description=(
             "HTTPS link to a GeoTIFF of the delineated plume (L3A "
             "alpha-banded mask). "
-            ":meth:`~geoproducts.carbonmapper.rasters.CMPlumeRaster.polygon`"
-            " extracts the polygon from band 4 of this file — the "
-            "authoritative source for the retrieved plume shape."
+            "Band 4 of this file is the plume mask — the authoritative "
+            "source for the retrieved plume shape (see "
+            ":attr:`~geoproducts.carbonmapper.image.CMPlumeImage.outline`)."
         ),
     )
     plume_png: str | None = Field(
@@ -671,8 +638,8 @@ class CMRawPlume(BaseModel):
         description=(
             "Raw GeoJSON geometry dict from the CM payload — typically "
             "a Point or coarse Polygon. **Not** the retrieved plume "
-            "polygon; for that, use ``CMPlumeRaster.polygon()`` against "
-            "``plume_tif``."
+            "polygon; for that, use ``CMPlumeImage.outline`` or the "
+            "``plume_tif`` mask."
         ),
     )
     plume_bounds_raw: str | list[float] | tuple[float, float, float, float] | None = (
@@ -696,6 +663,22 @@ class CMRawPlume(BaseModel):
     # ------------------------------------------------------------------ #
     # Field validators                                                     #
     # ------------------------------------------------------------------ #
+
+    @model_validator(mode="before")
+    @classmethod
+    def _nan_cells_to_none(cls, data: Any) -> Any:
+        """Map float ``NaN`` (an empty pandas CSV cell) to ``None``.
+
+        Runs before field validation, so every optional field — strings
+        and URLs included, not just the numeric ones — treats an empty
+        bulk-export cell as missing instead of rejecting the row.
+        """
+        if isinstance(data, Mapping):
+            return {
+                k: None if isinstance(v, float) and math.isnan(v) else v
+                for k, v in data.items()
+            }
+        return data
 
     @field_validator(
         "plume_latitude",

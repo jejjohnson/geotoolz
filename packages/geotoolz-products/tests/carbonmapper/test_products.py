@@ -332,7 +332,9 @@ class TestIMECmfType:
 
 class TestRasterAuthScoping:
     def test_rio_env_options_for_remote_with_token(self):
-        env = P.rio_env_options_for("https://cm/x.tif", "tok")
+        env = P.rio_env_options_for(
+            "https://api.carbonmapper.org/api/v1/catalog/asset/x.tif", "tok"
+        )
         assert env["GDAL_HTTP_HEADERS"] == "Authorization: Bearer tok"
 
     @pytest.mark.parametrize(
@@ -340,10 +342,27 @@ class TestRasterAuthScoping:
         [
             ("/local/x.tif", "tok"),
             ("https://cm/x.tif", None),
+            # The token never leaves Carbon Mapper's API host.
+            ("https://attacker.example/x.tif", "tok"),
+            ("https://api.carbonmapper.org.attacker.example/x.tif", "tok"),
+            ("http://api.carbonmapper.org/api/v1/catalog/asset/x.tif", "tok"),
         ],
     )
     def test_rio_env_options_for_defaults(self, path, token):
         assert P.rio_env_options_for(path, token) is None
+
+    def test_quicklook_open_sends_no_token_to_other_hosts(self, monkeypatch):
+        seen: dict = {}
+
+        def fake_request(method, url, *, headers, timeout):
+            seen.update(headers)
+            return type(
+                "R", (), {"raise_for_status": lambda self: None, "content": b"png"}
+            )()
+
+        monkeypatch.setattr(P, "_request", fake_request)
+        P.PLUME_PNG.open("https://cdn.example/plume.png", token="tok")
+        assert "Authorization" not in seen
 
     def test_raster_product_open_passes_token(self, monkeypatch):
         """`token=` used to be discarded (`del token`), so bundle reads
@@ -357,7 +376,9 @@ class TestRasterAuthScoping:
             return object()
 
         monkeypatch.setattr(rr, "RasterioReader", fake_reader)
-        P.PLUME_TIF.open("https://cm/x_plume.tif", token="tok")
+        P.PLUME_TIF.open(
+            "https://api.carbonmapper.org/api/v1/catalog/asset/x_plume.tif", token="tok"
+        )
         assert (
             seen["rio_env_options"]["GDAL_HTTP_HEADERS"] == "Authorization: Bearer tok"
         )

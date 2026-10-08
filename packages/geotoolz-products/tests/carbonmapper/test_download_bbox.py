@@ -267,3 +267,30 @@ def test_paginate_forwards_all_filters(monkeypatch):
     assert calls[0]["published_at_range"] == "2026-03-01T00:00:00Z/.."
     assert calls[0]["sectors"] == ["1B2"]
     assert calls[0]["instruments"] == ["tan"]
+
+
+class _BrokenStream:
+    """A response whose body dies after the first chunk."""
+
+    def raise_for_status(self):
+        return None
+
+    def iter_content(self, chunk_size=8192):
+        yield b"partial"
+        raise dl.requests.ConnectionError("connection reset")
+
+
+def test_download_plume_assets_leaves_no_partial_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(dl, "_request", lambda *a, **kw: _BrokenStream())
+    got = dl.download_plume_assets(
+        {"plume_id": "p-A", "plume_tif": "https://cdn.example/p.tif"}, tmp_path
+    )
+    assert got == {}
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_download_asset_leaves_no_partial_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(dl, "_request", lambda *a, **kw: _BrokenStream())
+    with pytest.raises(dl.requests.ConnectionError):
+        dl.download_asset("a/b/cmf.tif", dest=tmp_path / "cmf.tif")
+    assert list(tmp_path.iterdir()) == []

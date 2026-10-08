@@ -44,6 +44,7 @@ import base64
 import json
 import logging
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -414,22 +415,17 @@ class CarbonMapperConfig:
             data["email"] = self.email
         if self.password is not None:
             data["password"] = self.password
-        dest.write_text(json.dumps(data, indent=2))
+        # Write through a temp file that `mkstemp` creates with mode 0600,
+        # then rename it over `dest`: the credentials are never readable by
+        # other users, not even briefly, and a crash leaves no torn file.
+        fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.")
         try:
-            os.chmod(dest, 0o600)
-        except PermissionError:
-            logger.warning(
-                "Carbon Mapper config saved to %s but restrictive permissions "
-                "(0o600) could not be set due to insufficient permissions.",
-                dest,
-            )
-        except OSError as exc:
-            logger.warning(
-                "Carbon Mapper config saved to %s but setting restrictive "
-                "permissions (0o600) failed: %s",
-                dest,
-                exc,
-            )
+            with os.fdopen(fd, "w") as fh:
+                fh.write(json.dumps(data, indent=2))
+            os.replace(tmp, dest)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
         logger.info("Carbon Mapper config saved to %s", dest)
         return dest
 

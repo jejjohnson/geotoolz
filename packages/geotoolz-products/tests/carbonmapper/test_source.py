@@ -74,3 +74,17 @@ def test_cmsource_is_hashable():
         }
     )
     assert src in {src}
+
+
+def test_from_geojson_feature_reads_published_timestamp_keys():
+    feature = {
+        "properties": {
+            "source_name": "CH4_1B2_100m_-100.0_30.0",
+            "timestamp_min": "2024-01-02T03:04:05Z",
+            "timestamp_max": "2025-06-07T08:09:10Z",
+        },
+        "geometry": {"type": "Point", "coordinates": [-100.0, 30.0]},
+    }
+    src = CMSource.from_geojson_feature(feature)
+    assert src.first_observation == datetime(2024, 1, 2, 3, 4, 5, tzinfo=UTC)
+    assert src.last_observation == datetime(2025, 6, 7, 8, 9, 10, tzinfo=UTC)

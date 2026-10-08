@@ -40,6 +40,7 @@ from shapely.geometry import Point, box
 from shapely.geometry.base import BaseGeometry
 
 from geoproducts.carbonmapper.api_queries import CMTileItem
+from geoproducts.carbonmapper.download import _validate_bbox
 from geoproducts.carbonmapper.products import rio_env_options_for
 from geoproducts.carbonmapper.source import CMSource
 
@@ -329,7 +330,13 @@ class CMSourceRaster:
         )
 
     def read_window(self, bounds_4326: BBox) -> GeoTensor:
-        """Read a WGS-84 bbox window of the source mask."""
+        """Read a WGS-84 bbox window of the source mask.
+
+        Raises:
+            ValueError: If the bbox is malformed or crosses the
+                antimeridian (``W > E``) — split such windows in two.
+        """
+        _validate_bbox(bounds_4326)
         return self.read_polygon(box(*bounds_4326))
 
     def read_window_to_crs(

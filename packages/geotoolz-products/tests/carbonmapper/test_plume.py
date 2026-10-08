@@ -249,6 +249,15 @@ class TestValidators:
         plume = CMRawPlume.from_raw(_json_raw(emission_auto="N/A"))
         assert plume.emission_auto is None
 
+    def test_nan_string_cells_are_missing(self):
+        # A sparse CSV row read with pandas carries NaN for blank text
+        # columns too; the row must still validate.
+        plume = CMRawPlume.from_raw(
+            _json_raw(sensitivity_mode=float("nan"), plume_tif=float("nan"))
+        )
+        assert plume.sensitivity_mode is None
+        assert plume.plume_tif is None
+
     def test_nan_flags_are_missing(self):
         # Empty CSV cells come back from pandas as NaN (truthy).
         plume = CMRawPlume.from_raw(

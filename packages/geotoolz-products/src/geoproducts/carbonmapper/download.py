@@ -809,11 +809,27 @@ def download_asset(asset_key: str, dest: Path | str, token: str | None = None) -
     resp = _request("GET", url, headers=_headers(token), timeout=120, stream=True)
     resp.raise_for_status()
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            f.write(chunk)
+    _stream_to_file(resp, dest)
     logger.info("Downloaded %s → %s (%d bytes)", asset_key, dest, dest.stat().st_size)
     return dest
+
+
+def _stream_to_file(resp: requests.Response, dest: Path) -> None:
+    """Stream ``resp`` into ``dest`` via a sibling ``.part`` file.
+
+    The final name only appears once every byte arrived; an interrupted
+    transfer removes the partial file instead of leaving a truncated
+    asset under the name a later run would trust.
+    """
+    part = dest.with_name(dest.name + ".part")
+    try:
+        with open(part, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+        part.replace(dest)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
 
 
 def download_plume_assets(plume: dict, dest_dir: Path | str) -> dict[str, Path]:
@@ -882,9 +898,7 @@ def download_plume_assets(plume: dict, dest_dir: Path | str) -> dict[str, Path]:
         try:
             resp = _request("GET", url, timeout=120, stream=True)
             resp.raise_for_status()
-            with open(local, "wb") as f:
-                for chunk in resp.iter_content(8192):
-                    f.write(chunk)
+            _stream_to_file(resp, local)
             downloaded[key] = local
             logger.info("  %s → %s", key, local)
         except requests.RequestException as exc:
@@ -1111,16 +1125,17 @@ def get_source_for_plume_name(
     return cast(dict, _get(f"{CATALOG_URL}/source/plume/name/{plume_id}", token=token))
 
 
-def get_source_plumes_csv(
+def get_source_plumes(
     source_name: str,
     *,
     token: str | None = None,
-) -> str:
-    """List all plumes attributed to a Carbon Mapper source, as CSV text.
+) -> dict:
+    """Fetch a Carbon Mapper source with its attributed plumes.
 
-    Wraps ``GET /catalog/source-plumes-csv/{source_name}``. The CSV
-    schema matches :func:`get_plumes_csv` — each row can be passed
-    directly to :class:`geoproducts.carbonmapper.plume.CMRawPlume`.
+    Wraps ``GET /catalog/source-plumes-csv/{source_name}``. Despite the
+    route's name it returns JSON: a ``PlumeSource`` object whose
+    ``plumes`` array holds annotated plume records, each of which can be
+    passed to :class:`geoproducts.carbonmapper.plume.CMRawPlume`.
 
     Parameters
     ----------
@@ -1131,20 +1146,20 @@ def get_source_plumes_csv(
 
     Returns
     -------
-    str
-        Raw CSV text (header + one row per plume). Empty string is
-        possible for sources with no published plumes.
+    dict
+        The ``PlumeSource`` payload (``plumes``, ``scenes``, ``point``,
+        ``source_name``, ``observation_dates``, ...).
 
     Examples
     --------
-    Load straight into pandas:
-
-    >>> import io, pandas as pd
-    >>> csv_text = get_source_plumes_csv("CH4_1B2_100m_-104.17525_32.49125")
-    >>> df = pd.read_csv(io.StringIO(csv_text))
+    >>> payload = get_source_plumes(  # doctest: +SKIP
+    ...     "CH4_1B2_100m_-104.17525_32.49125"
+    ... )
+    >>> len(payload["plumes"])  # doctest: +SKIP
+    47
     """
     return cast(
-        str, _get(f"{CATALOG_URL}/source-plumes-csv/{source_name}", token=token)
+        dict, _get(f"{CATALOG_URL}/source-plumes-csv/{source_name}", token=token)
     )
 
 

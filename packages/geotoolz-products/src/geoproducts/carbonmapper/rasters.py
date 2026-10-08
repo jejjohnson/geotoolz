@@ -53,6 +53,7 @@ from geoproducts.carbonmapper.products import (
     CMCollectionSpec,
     CMProduct,
     CMProductFamily,
+    bearer_headers_for,
     rio_env_options_for,
 )
 
@@ -712,7 +713,7 @@ class CMImageRaster:
         if sp.startswith(("http://", "https://")):
             headers: dict[str, str] = {}
             if self.token:
-                headers["Authorization"] = f"Bearer {self.token}"
+                headers = bearer_headers_for(sp, self.token)
             else:
                 for line in os.environ.get("GDAL_HTTP_HEADERS", "").splitlines():
                     name, _, value = line.partition(":")

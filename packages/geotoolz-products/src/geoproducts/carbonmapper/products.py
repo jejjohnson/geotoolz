@@ -61,6 +61,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from geoproducts.carbonmapper.download import _request
 
@@ -489,7 +490,7 @@ class CMTextProduct(CMProduct):
         del overview_level
         sp = str(path_or_url)
         if sp.startswith(("http://", "https://")):
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            headers = bearer_headers_for(sp, token)
             r = _request("GET", sp, headers=headers, timeout=http_timeout)
             r.raise_for_status()
             return r.text
@@ -510,7 +511,7 @@ class CMQuicklookProduct(CMProduct):
         del overview_level
         sp = str(path_or_url)
         if sp.startswith(("http://", "https://")):
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            headers = bearer_headers_for(sp, token)
             r = _request("GET", sp, headers=headers, timeout=http_timeout)
             r.raise_for_status()
             return r.content
@@ -522,7 +523,7 @@ def _fetch_json_or_file(
 ) -> Any:
     sp = str(path_or_url)
     if sp.startswith(("http://", "https://")):
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        headers = bearer_headers_for(sp, token)
         r = _request("GET", sp, headers=headers, timeout=http_timeout)
         r.raise_for_status()
         return r.json()
@@ -530,16 +531,42 @@ def _fetch_json_or_file(
         return json.load(fh)
 
 
+#: The only host the Bearer token is ever sent to (Carbon Mapper's API,
+#: which serves the asset proxy). Hrefs from STAC items or plume records
+#: can point anywhere, so every authenticated request checks this.
+_BEARER_HOST = urlsplit(CM_API_ASSET_BASE).hostname
+
+
+def bearer_headers_for(url: str, token: str | None) -> dict[str, str]:
+    """The ``Authorization`` header for one request, or ``{}``.
+
+    The token is attached only for ``https://`` URLs on Carbon Mapper's
+    API host, never for other hosts (signed-CDN URLs need no token).
+
+    Args:
+        url: The URL about to be requested.
+        token: Carbon Mapper Bearer token, or ``None``.
+
+    Returns:
+        ``{"Authorization": "Bearer …"}`` or an empty dict.
+    """
+    parts = urlsplit(str(url))
+    if not token or parts.scheme != "https" or parts.hostname != _BEARER_HOST:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
+
+
 def rio_env_options_for(path: str, token: str | None) -> dict[str, Any] | None:
     """GDAL env options that authenticate one remote raster read.
 
-    Returns ``None`` (use georeader's defaults) for local paths or when
-    no token is given. Otherwise returns the defaults plus a
+    Returns ``None`` (use georeader's defaults) for local paths, when no
+    token is given, or for hosts other than Carbon Mapper's API (see
+    :func:`bearer_headers_for`). Otherwise returns the defaults plus a
     ``GDAL_HTTP_HEADERS`` Bearer header, which ``RasterioReader``
     applies only inside its own ``rasterio.Env`` — the token is never
-    exported process-wide, so it is not sent to unrelated hosts.
+    exported process-wide.
     """
-    if not token or not str(path).startswith(("http://", "https://")):
+    if not bearer_headers_for(path, token):
         return None
     from georeader.rasterio_reader import RIO_ENV_OPTIONS_DEFAULT
 

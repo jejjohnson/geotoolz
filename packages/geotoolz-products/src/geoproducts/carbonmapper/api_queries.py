@@ -288,6 +288,8 @@ class CMTileItem:
                 f"STAC item {item.get('id')!r} has no datetime, "
                 "start_datetime or end_datetime."
             )
+        # Always UTC-aware: naive values are taken as UTC, offsets converted.
+        dt = dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
         geom_dict = item.get("geometry") or {}
         if not geom_dict:
@@ -1257,9 +1259,9 @@ def list_plumes_for_source(
     Wraps ``/catalog/source/{source_name}`` and reads the **embedded**
     ``plumes`` records (full annotated-shape dicts; verified complete
     against the source's ``plume_count`` in the 2026-07 audit). The
-    old ``/catalog/source-plumes-csv/{source_name}`` route now 400s
-    for name keys upstream and is kept only as a fallback for
-    pre-drift API deployments that don't embed ``plumes``.
+    ``/catalog/source-plumes-csv/{source_name}`` route (JSON, despite
+    its name) is kept only as a fallback for API deployments that don't
+    embed ``plumes``.
 
     Strips the ``?...`` query suffix from ``source_name`` automatically.
 
@@ -1303,25 +1305,9 @@ def list_plumes_for_source(
 
     records = raw.get("plumes")
     if records is None:
-        # Pre-drift API shape — fall back to the CSV endpoint.
-        import io
-
-        import pandas as pd
-
-        csv_text = _dl.get_source_plumes_csv(cleaned, token=token)
-        if not csv_text:
-            return []
-        df = pd.read_csv(io.StringIO(csv_text))
-        # CSV -> dict gives `float('nan')` for empty cells. Pydantic
-        # str-typed fields like `sensitivity_mode` reject NaN; coerce
-        # NaNs to None so optional fields fall back to their defaults.
-        records = [
-            {
-                k: (None if isinstance(v, float) and v != v else v)
-                for k, v in row.items()
-            }
-            for row in df.to_dict(orient="records")
-        ]
+        # Older API shape without embedded plumes — the source-plumes
+        # route returns the same records as JSON.
+        records = _dl.get_source_plumes(cleaned, token=token).get("plumes") or []
 
     if limit and len(records) > limit:
         records = records[:limit]

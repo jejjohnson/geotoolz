@@ -312,6 +312,19 @@ def test_get_source_for_plume_returns_none_on_404(monkeypatch):
 # ─────────────────────────────────────────────────────────────────────
 
 
+def test_tile_item_datetime_is_utc_aware():
+    from datetime import timedelta
+
+    naive = _stac_item()
+    naive["properties"]["datetime"] = datetime(2025, 12, 12, 18, 50, 57)
+    offset = _stac_item()
+    offset["properties"]["datetime"] = "2025-12-12T19:50:57+01:00"
+    for item in (naive, offset):
+        dt = aq.CMTileItem.from_stac_item(item).datetime
+        assert dt == datetime(2025, 12, 12, 18, 50, 57, tzinfo=UTC)
+        assert dt.utcoffset() == timedelta(0)
+
+
 def test_tile_item_is_hashable():
     tile = aq.CMTileItem.from_stac_item(_stac_item())
     same = aq.CMTileItem.from_stac_item(_stac_item())
@@ -832,10 +845,10 @@ class TestSourceDetailDrift:
             lambda name, token=None: dict(self.NESTED),
         )
 
-        def no_csv(*a, **kw):
-            raise AssertionError("CSV route must not be used when plumes are embedded")
+        def no_fallback(*a, **kw):
+            raise AssertionError("fallback must not be used when plumes are embedded")
 
-        monkeypatch.setattr(aq._dl, "get_source_plumes_csv", no_csv)
+        monkeypatch.setattr(aq._dl, "get_source_plumes", no_fallback)
 
         plumes = aq.list_plumes_for_source("tok", self.NESTED["source_name"])
         assert [p.plume_id for p in plumes] == [
@@ -843,8 +856,8 @@ class TestSourceDetailDrift:
             "tan20260311t190317c10s4001-D",
         ]
 
-    def test_list_plumes_for_source_csv_fallback(self, monkeypatch):
-        """Pre-drift shape (no embedded `plumes`) falls back to CSV."""
+    def test_list_plumes_for_source_fallback(self, monkeypatch):
+        """Older shape (no embedded `plumes`) falls back to the JSON route."""
         monkeypatch.setattr(
             aq._dl,
             "get_source_by_name",
@@ -852,8 +865,11 @@ class TestSourceDetailDrift:
         )
         monkeypatch.setattr(
             aq._dl,
-            "get_source_plumes_csv",
-            lambda name, token=None: "plume_id,gas\ntan20260101t000000c00s4001-A,CH4\n",
+            "get_source_plumes",
+            lambda name, token=None: {
+                "source_name": name,
+                "plumes": [{"plume_id": "tan20260101t000000c00s4001-A", "gas": "CH4"}],
+            },
         )
         plumes = aq.list_plumes_for_source("tok", "CH4_1B2_100m_0_0")
         assert len(plumes) == 1
