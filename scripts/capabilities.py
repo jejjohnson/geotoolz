@@ -158,9 +158,7 @@ def collect() -> tuple[dict[str, dict[str, list[tuple[str, str, str]]]], list[st
                 # capability per (package, name, value): a facade re-exporting
                 # its submodule's constant collapses to one home.
                 scalar = isinstance(obj, int | float | str | bytes) or obj is None
-                key = (
-                    hash((package, name, _stable_repr(obj))) if scalar else id(obj)
-                )
+                key = hash((package, name, _stable_repr(obj))) if scalar else id(obj)
                 spellings[key].add(name)
                 if key not in homes or _rank(module.__name__, obj) < _rank(
                     homes[key][0], homes[key][2]
