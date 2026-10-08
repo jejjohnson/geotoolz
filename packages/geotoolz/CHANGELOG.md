@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.7.0...geotoolz-v0.7.1) (2026-10-08)
+
+
+### Features
+
+* **products:** add the GOES-R ABI reader — L1b, L2 products, channel stacking and RGB recipes ([#426](https://github.com/jejjohnson/geotoolz/issues/426)) ([d54bbbf](https://github.com/jejjohnson/geotoolz/commit/d54bbbf616b74d0b26c26209c98e80cd4a022580))
+
 ## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.6.0...geotoolz-v0.7.0) (2026-10-08)
 
 
