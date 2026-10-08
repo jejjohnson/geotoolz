@@ -58,7 +58,12 @@ TOOLKITS = {
 
 # Bare names two packages may both export, and why. Everything else that
 # collides across packages fails ``--check``.
-ALLOWED_SHARED_NAMES: dict[str, str] = {}
+ALLOWED_SHARED_NAMES: dict[str, str] = {
+    "download": (
+        "one verb at two levels: geocloud.files.download fetches any URI; each "
+        "sensor's `aws.download` takes that sensor's file records"
+    ),
+}
 
 
 # Objects exported under more than one name (aliases), allowed for now.

@@ -10,10 +10,18 @@ workspace package.
 - **`geocloud.store`** — the one process-wide obstore client pool:
   `get_obstore(uri)` (one client per bucket / container / host, LRU-bounded),
   `object_key`, `get_range_bytes`, `clear_obstore_pool`,
-  `set_obstore_pool_maxsize`, `SUPPORTED_SCHEMES`. Every package that reads
+  `set_obstore_pool_maxsize`, `SUPPORTED_SCHEMES`, and `mount` / `unmount`
+  (serve one root from a store the caller built). Every package that reads
   from a bucket takes its client from here, so a process talking to one
   bucket opens one HTTP/2 connection pool. **Never construct an obstore store
   anywhere else in the workspace.**
+- **`geocloud.files`** — whole-object verbs by URI or local path, on the
+  pool: `ls`, `info`, `exists`, `read_bytes`, `write_bytes`, `open`,
+  `download`, `upload`, `copy`, `sync`, `rm`, `sign`, `ObjectInfo`. A
+  package that moves files (staging, product downloads) calls these rather
+  than streaming bytes itself. Local paths go through an obstore
+  `LocalStore` built in `_src/files.py`, the one other place a store is
+  constructed.
 - **`geocloud.cog`** (`[cog]` extra, async-geotiff) — `CogSource`
   (`open` / `aopen`, `read_window(s)` / `aread_window(s)`, `identity()`,
   `object_version()`; pickles by URL so it ships to process pools),
@@ -35,7 +43,10 @@ same change.
 ## Tests
 
 - Run from this directory: `uv run pytest tests/test_store.py -v`; tests use
-  `obstore.store.LocalStore`, no network.
+  `obstore.store.LocalStore` / `MemoryStore` (`mount` one at an `s3://` or
+  `az://` root to exercise remote URIs), no network.
+- Sync code that needs an async obstore call (a streamed cross-store copy)
+  drives it with `_src/aio.py`, which also works under a running loop.
 - Coverage gate: 80 %.
 - CI's `geotoolz-cloud-base` job installs the package without extras: the
   pool must work, and anything needing async-geotiff must fail at use with

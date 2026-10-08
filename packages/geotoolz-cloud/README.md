@@ -1,8 +1,9 @@
 # geotoolz-cloud
 
 Cloud object storage for the geotoolz stack (import name `geocloud`): one
-process-wide [obstore](https://developmentseed.org/obstore/) client pool, and
-batched, async Cloud-Optimized GeoTIFF reads on top of it.
+process-wide [obstore](https://developmentseed.org/obstore/) client pool,
+file verbs on top of it (list, download, upload, copy, sync, sign), and
+batched, async Cloud-Optimized GeoTIFF reads.
 
 geopatcher's `CogField` and geoproducts' cloud byte reads take their client
 from `geocloud.store`, so a process talking to one bucket through them builds
@@ -21,7 +22,7 @@ pip install 'geotoolz-cloud[cog]'     # + COG reads (async-geotiff)
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
-| *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store` |
+| *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files` |
 | `[cog]` | async-geotiff | `geocloud.cog` (`CogSource`, `AsyncCogReader`, `read_*`) |
 
 ## The client pool — `geocloud.store`
@@ -40,6 +41,24 @@ head: bytes = bytes(store.get_range(object_key(uri), start=0, length=16_384))
 SAS tokens included) and `hf://` (Hugging Face Hub) URIs are supported.
 `storage_options` are part of the pool key; `clear_obstore_pool()` drops every
 client (it also runs automatically in a forked child).
+
+## Moving files — `geocloud.files`
+
+```python
+from pathlib import Path
+
+from geocloud import files
+
+scenes: list[files.ObjectInfo] = files.ls("s3://bucket/scenes/2026/10/")
+local: Path = files.download(scenes[0].uri, "data/")         # streamed, atomic
+files.upload("out/ndvi.tif", "az://account/results/ndvi/")   # multipart
+files.copy("s3://bucket/a.tif", "gs://other/a.tif")          # across clouds
+files.sync("s3://bucket/scenes/", "data/scenes/")            # resumable mirror
+url: str = files.sign("s3://bucket/a.tif")                   # pre-signed HTTPS
+```
+
+Any URI the pool understands or a local path works on either side; a copy
+inside one bucket is server-side, and remote ends share the pooled clients.
 
 ## COG reads — `geocloud.cog`
 

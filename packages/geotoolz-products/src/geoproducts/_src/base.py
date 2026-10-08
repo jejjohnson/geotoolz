@@ -405,7 +405,7 @@ def _run_coroutine_safely(coro: Any) -> Any:
     """Drive ``coro`` to completion regardless of running-loop state.
 
     Same pattern as ``geocatalog._src.formats.raster._run_coroutine_safely`` and
-    ``geocloud._src.cog_source._run_coroutine_safely``:
+    ``geocloud._src.aio._run_coroutine_safely``:
     ``asyncio.run`` raises ``RuntimeError`` when nested under a running
     loop (Jupyter, FastAPI handler, ``pytest-asyncio``). Detect that
     case and run on a worker thread with its own loop so the calling
