@@ -16,7 +16,7 @@ they keep its fill when the input is floating point -- as georeader's
 own radiance / reflectance conversions do -- and switch to ``NaN`` when
 integer DN are promoted to float, where an integer fill such as ``0``
 would collide with real data (:func:`geotoolz._src.valid.carried_fill`).
-The display stretches (:class:`MinMax`, :class:`PercentileClip`,
+The display stretches (:class:`MinMaxStretch`, :class:`PercentileClip`,
 :class:`Gamma`) map onto ``[0, 1]``, so they always use ``NaN``.
 """
 
@@ -1122,7 +1122,7 @@ class SimpleAtmosphericCorrection(Operator):
         return DOS1(dark_percentile=self.dark_percentile)(gt)
 
 
-class MinMax(Operator):
+class MinMaxStretch(Operator):
     r"""Linear contrast stretch into ``[0, 1]``.
 
     .. math::
@@ -1139,9 +1139,9 @@ class MinMax(Operator):
         clip: Whether to clamp output to ``[0, 1]``. Default ``True``.
 
     Examples:
-        >>> from geotoolz.radiometry import MinMax
+        >>> from geotoolz.radiometry import MinMaxStretch
         >>> # Stretch reflectance in [0, 0.3] to display range.
-        >>> op = MinMax(vmin=0.0, vmax=0.3)
+        >>> op = MinMaxStretch(vmin=0.0, vmax=0.3)
         >>> display_ready = op(reflectance_geotensor)
     """
 

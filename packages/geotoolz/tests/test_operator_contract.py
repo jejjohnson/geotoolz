@@ -239,7 +239,7 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "radiometry._src.operators.DNToRadiance": {"gain": 0.1},
     "radiometry._src.operators.DNToReflectance": {"scale": 1e-4},
     "radiometry._src.operators.EarthSunDistanceCorrection": {"acquisition_date": _DATE},
-    "radiometry._src.operators.MinMax": {"vmin": 0.0, "vmax": 1.0},
+    "radiometry._src.operators.MinMaxStretch": {"vmin": 0.0, "vmax": 1.0},
     "radiometry._src.operators.RadianceToDN": {"gain": 0.1},
     "radiometry._src.operators.RadianceToReflectance": {
         "solar_irradiance": [1900.0, 1800.0],

@@ -15,9 +15,9 @@ pip install 'geotoolz[patch]'
 
 `GridSampler`, `ApplyToChips` and `MergePatches` are re-exported from
 `geopatcher.integrations.pipekit` — the two module paths return the same
-class objects. `MergePatches` is geopatcher's `Stitch` operator, renamed
-here so it does not collide with `geotoolz.geom.Stitch` (the GeoTensor
-tile mosaicker, also exported as top-level `geotoolz.Stitch`).
+class objects. `MergePatches` merges patches into a field;
+`geotoolz.geom.Stitch` (also top-level `geotoolz.Stitch`) mosaics
+georeferenced GeoTensor tiles.
 `GridSampler` and `MergePatches` hold runtime objects (a patcher, a
 domain), so both are `forbid_in_yaml`; their `get_config()` is a debug
 record, not a replay recipe.

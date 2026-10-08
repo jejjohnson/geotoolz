@@ -76,7 +76,7 @@ patch-full = [
     "geotoolz-cloud[cog]",
 ]
 # Operator-graph bridge: pull in `pipekit` and the ~125-LOC wrappers in
-# `geopatcher.integrations.pipekit` (GridSampler / ApplyToChips / Stitch).
+# `geopatcher.integrations.pipekit` (GridSampler / ApplyToChips / MergePatches).
 # The patcher core stays framework-free; only this integration module
 # imports `pipekit.Operator`.
 pipekit = ["pipekit>=0.0.2"]

@@ -24,7 +24,7 @@ from geotoolz.radiometry import (
     EarthSunDistanceCorrection,
     Gamma,
     IntegratedIrradiance,
-    MinMax,
+    MinMaxStretch,
     PercentileClip,
     RadianceToDN,
     RadianceToReflectance,
@@ -142,7 +142,7 @@ def test_min_max_uint16_int_bounds() -> None:
     np.testing.assert_allclose(out_unclipped, [-0.5, 0.0, 1.0])
 
     cube = uint16_dn_cube(2)
-    via_op = MinMax(vmin=1500, vmax=2500, clip=False)(toy_geotensor(cube))
+    via_op = MinMaxStretch(vmin=1500, vmax=2500, clip=False)(toy_geotensor(cube))
     np.testing.assert_allclose(
         np.asarray(via_op), (cube.astype(np.float64) - 1500) / 1000
     )
@@ -315,7 +315,7 @@ def test_dn_to_radiance_rejects_wrong_band_count(dn_4band: GeoTensor) -> None:
 
 def test_min_max_operator(dn_4band: GeoTensor) -> None:
     rho = DNToReflectance(scale=1e-4)(dn_4band)
-    out = MinMax(vmin=0.0, vmax=1.0)(rho)
+    out = MinMaxStretch(vmin=0.0, vmax=1.0)(rho)
     assert np.all(np.asarray(out) <= 1.0)
     assert np.all(np.asarray(out) >= 0.0)
     assert out.transform == rho.transform
@@ -387,7 +387,7 @@ def test_display_stretches_declare_nan_fill() -> None:
     values = np.random.default_rng(0).uniform(0.1, 0.9, (2, 4, 4))
     gt = toy_geotensor(values, fill_value_default=0.0, with_fill_pixels=True)
     fill = fill_pixel_mask(gt.shape)
-    for op in (MinMax(vmin=0.0, vmax=1.0), PercentileClip(), Gamma()):
+    for op in (MinMaxStretch(vmin=0.0, vmax=1.0), PercentileClip(), Gamma()):
         out = op(gt)
         assert np.isnan(out.fill_value_default)
         assert np.isnan(np.asarray(out)[:, fill]).all()
@@ -827,7 +827,7 @@ def test_dn_to_reflectance_parity_with_georeader_scalar_path() -> None:
         DNToRadiance(gain=0.01, offset=-1.0),
         RadianceToDN(gain=0.01, offset=-1.0),
         DNToReflectance(scale=1e-4),
-        MinMax(vmin=0.0, vmax=1.0),
+        MinMaxStretch(vmin=0.0, vmax=1.0),
         PercentileClip(lower=2.0, upper=98.0),
         Gamma(gamma=1.2),
         BTFromRadiance(K1=774.8853, K2=1321.0789),
@@ -905,7 +905,7 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
         DNToReflectance(scale=1e-4),
         DNToReflectance(scale=1e-4, offset=-0.1),  # S2 L1C post-2022
         DNToReflectance(scale=2.75e-5, offset=-0.2),  # Landsat-8/9 C2 SR
-        MinMax(vmin=0.0, vmax=0.3),
+        MinMaxStretch(vmin=0.0, vmax=0.3),
         PercentileClip(lower=2.0, upper=98.0),
         BTFromRadiance(K1=774.8853, K2=1321.0789),
         DOS1(dark_percentile=1.0),

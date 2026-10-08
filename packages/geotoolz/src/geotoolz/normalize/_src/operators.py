@@ -27,7 +27,7 @@ live on a new scale where the input's fill value (``0`` especially) can be
 a real value, so outputs always declare ``fill_value_default=NaN``.
 
 The display-prep min-max stretch with **scalar** bounds lives in
-:class:`geotoolz.radiometry.MinMax`; the per-scene robust percentile
+:class:`geotoolz.radiometry.MinMaxStretch`; the per-scene robust percentile
 stretch lives in :class:`geotoolz.radiometry.PercentileClip`. This
 module is the per-band normaliser shop used by ML pipelines:
 ``StandardScaler``, ``RobustScaler``, ``MinMaxScaler``, and the
@@ -425,7 +425,7 @@ class MinMaxScaler(Operator):
         y \;=\; \frac{x - v_{\min}}{v_{\max} - v_{\min}}
                 \cdot (o_{\max} - o_{\min}) + o_{\min}
 
-    Per-band variant of :class:`geotoolz.radiometry.MinMax`. The
+    Per-band variant of :class:`geotoolz.radiometry.MinMaxStretch`. The
     radiometry version takes **scalar** bounds and is the display-prep
     pick when you already know fixed reflectance limits; this version
     fits **per-band** bounds (one ``vmin`` / ``vmax`` per channel) or

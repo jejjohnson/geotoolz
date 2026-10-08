@@ -325,7 +325,7 @@ flowchart LR
   transforms.
 - **[`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)** handles
   sliding-window patching for big rasters. `geotoolz.patch_ops` wraps
-  its `GridSampler`, `ApplyToChips`, and `Stitch` (as `MergePatches`) so a tiled-inference
+  its `GridSampler`, `ApplyToChips`, and `MergePatches` so a tiled-inference
   flow composes inside a `Sequential` like any other operator.
 
 For the end-to-end multi-repo walk-through (catalog → patch → operate),
