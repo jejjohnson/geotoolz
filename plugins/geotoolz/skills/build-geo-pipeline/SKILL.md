@@ -71,6 +71,7 @@ import geotoolz as gz
 from geocatalog import GeoSlice
 from geocatalog.build import build_raster_catalog
 from geocatalog.patch import field_for
+from geocatalog.staging import stage
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 # 1. Index once — local paths or s3:// / gs:// / https:// URIs.
@@ -85,7 +86,9 @@ aoi = GeoSlice(
     resolution=(10.0, 10.0),
     crs="EPSG:32630",
 )
-field = field_for(catalog.query(aoi), aoi)           # RasterField, domain (4, 600, 600)
+# field_for reads local files: stage copies remote URIs into ./cache
+# (local paths pass through), then the rows mosaic onto the AOI grid.
+field = field_for(stage(catalog.query(aoi), dest="cache"), aoi)  # RasterField, (4, 600, 600)
 
 # 3. Tile → compute → stitch as one pipekit pipeline.
 patcher = gp.SpatialPatcher(

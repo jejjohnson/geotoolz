@@ -41,9 +41,14 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 3. **If it is missing, add it to the shared home** — the package's `_src/`
    toolkit, or the lowest package every caller already depends on — not inline
    in the one module that needs it today.
-4. **One name, one home.** A public name is exported from exactly one module;
-   two packages never export the same name for different things. Renames and
-   removals are outright: no aliases, no shim modules.
+4. **One object, one home.** Each public object is exported from exactly one
+   canonical module, under one name. Two packages never export the same name
+   for different things.
+   - Qualified namespaces may reuse a name for parallel things:
+     `geopatcher.spatial.aggregation.Mean` and
+     `geopatcher.temporal.aggregation.Mean`, or each sensor's `Reader` and
+     `BANDS`.
+   - Renames and removals are outright: no aliases, no shim modules.
 
 | You need… | Use |
 |---|---|
@@ -153,8 +158,10 @@ hard rules. The long form, with examples, is
   metres requires a projected CRS (`require_projected_crs`).
 - **Readers.** A reader returns a `GeoTensor`, or a lazy georeader
   `GeoData` (`transform`, `crs`, `shape`, `load()`, `read_from_window()`).
-  georeader, the patcher's `RasterField` and every operator then accept it
-  unchanged.
+  - georeader's read helpers and the patcher's `RasterField` accept a lazy
+    reader as it is.
+  - A geotoolz operator needs pixels: call `.load()` (or use an `io`
+    operator) first.
 
 `packages/geotoolz/tests/test_operator_contract.py` walks every operator
 class automatically and checks:

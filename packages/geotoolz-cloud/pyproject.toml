@@ -80,6 +80,15 @@ ignore = ["E402", "E721", "E731", "E741"]
 "geopatcher._src".msg = "private to geopatcher: import its public API (docs/capabilities.md), or make the helper public there first"
 "geocatalog._src".msg = "private to geocatalog: import its public API (docs/capabilities.md), or make the helper public there first"
 "geoproducts._src".msg = "private to geoproducts: import its public API (docs/capabilities.md), or make the helper public there first"
+"obstore.store.S3Store".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
+"obstore.store.GCSStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
+"obstore.store.AzureStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
+"obstore.store.HTTPStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
+"obstore.store.from_url".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
+
+[tool.ruff.lint.per-file-ignores]
+# The pool itself is the one place that builds obstore clients.
+"src/geocloud/_src/store.py" = ["TID251"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
