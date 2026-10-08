@@ -1,4 +1,4 @@
-# Adding a new sensor reader
+# Adding a new product reader
 
 Sensor and product integrations live under `geoproducts.<sensor>` and keep
 the same small surface so each one can be audited in isolation.
@@ -6,13 +6,13 @@ the same small surface so each one can be audited in isolation.
 ```text
 geoproducts/<sensor>/
   __init__.py      # Reader, BANDS, CONSTANTS, presets
-  reader.py        # SensorReader subclass
+  reader.py        # ProductReader subclass
   constants.py     # lazy calibration table accessors
   presets.py       # zero-argument geotoolz operators bound to the band names
   data/            # packaged calibration files
 ```
 
-A reader should subclass `geoproducts.SensorReader`, implement the
+A reader should subclass `geoproducts.ProductReader`, implement the
 metadata properties (`_crs`, `_transform`, `_shape`, `_dtype`, `_bands`,
 `_fill_value`, `_track`), and provide `_read_window(window)`. Track `"A"`
 means a clean affine grid; track `"B"` is reserved for sensors with irregular
@@ -40,6 +40,6 @@ belongs in a geotoolz family, not in the reader package.
 
 `geoproducts.toy_sensor` is the worked example of the contract. It is an
 in-memory reader (no external file format) used to exercise the framework in
-tests and to demonstrate the layout for real sensors. Real sensor readers
+tests and to demonstrate the layout for real sensors. Real product readers
 (MODIS HDF4, VIIRS HDF5, GOES NetCDF, etc.) are tracked separately under
 the per-sensor design issues.

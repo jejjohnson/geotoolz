@@ -1,4 +1,4 @@
-"""Tests for sensor reader framework."""
+"""Tests for product reader framework."""
 
 from __future__ import annotations
 
@@ -12,21 +12,21 @@ from georeader.geotensor import GeoTensor
 from rasterio.windows import Window
 
 import geoproducts
-from geoproducts import SensorReader, toy_sensor
+from geoproducts import ProductReader, toy_sensor
 from geoproducts.toy_sensor import constants as toy_constants
 
 
-class MissingReader(SensorReader):
+class MissingReader(ProductReader):
     """Incomplete reader used to verify ABC enforcement."""
 
 
 def test_public_surface() -> None:
-    assert set(geoproducts.__all__) == {"SensorReader", "__version__", "toy_sensor"}
-    assert geoproducts.SensorReader is SensorReader
+    assert set(geoproducts.__all__) == {"ProductReader", "__version__", "toy_sensor"}
+    assert geoproducts.ProductReader is ProductReader
     assert toy_sensor.Reader is not None
 
 
-def test_sensor_reader_abc_enforces_required_surface() -> None:
+def test_product_reader_abc_enforces_required_surface() -> None:
     with pytest.raises(TypeError):
         MissingReader()  # type: ignore[abstract]
 
@@ -41,7 +41,7 @@ def test_toy_sensor_reader_passes_geodata_conformance() -> None:
         fill_value_default=-9999.0,
     )
 
-    assert isinstance(reader, SensorReader)
+    assert isinstance(reader, ProductReader)
     assert reader.track == "A"
     assert reader.shape == data.shape
     assert reader.bands == ("blue", "green", "red", "nir")
@@ -80,7 +80,7 @@ def test_center_coords_matches_georeader() -> None:
     np.testing.assert_array_equal(ours_b.values, ref_b.values)
 
 
-class _FourDReader(SensorReader):
+class _FourDReader(ProductReader):
     """Minimal ``(time, band, y, x)`` reader for dims checks."""
 
     def __init__(self, shape: tuple[int, ...] = (2, 3, 4, 5)) -> None:

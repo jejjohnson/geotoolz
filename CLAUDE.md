@@ -17,7 +17,7 @@ The packages (distribution name → import name):
 | `geotoolz`         | `geotoolz`   | RS operator families (radiometry, indices, qa/mask, geom, io, einx, patch_ops bridge, …) |
 | `geotoolz-patcher` | `geopatcher` | Four-axis Patcher framework (Geometry × Sampler × Window × Aggregation over a `Field` protocol) |
 | `geotoolz-catalog` | `geocatalog` | Queryable spatiotemporal index (GeoSlice contract, in-memory + DuckDB backends, GeoParquet interchange, sources/matchup/staging) |
-| `geotoolz-products` | `geoproducts` | Readers for EO data products (`SensorReader` ABC, per-sensor / per-provider subpackages) → georeader `GeoData` / `GeoTensor` |
+| `geotoolz-products` | `geoproducts` | Readers for EO data products (`ProductReader` ABC, per-sensor / per-provider subpackages) → georeader `GeoData` / `GeoTensor` |
 
 Import names are unchanged from the pre-monorepo repos (`import geopatcher`,
 `import geocatalog`; `geoproducts` is new) — only the distribution names carry
@@ -84,7 +84,7 @@ packages/
 ├── geotoolz-catalog/         # src/geocatalog — GeoCatalog Protocol (InMemory +
 │                             # DuckDB), GeoSlice, loaders, sources, matchup,
 │                             # staging, cyclopts CLI.
-└── geotoolz-products/        # src/geoproducts — SensorReader ABC + per-sensor /
+└── geotoolz-products/        # src/geoproducts — ProductReader ABC + per-sensor /
                               # per-provider reader subpackages (toy_sensor);
                               # depends on georeader, never on geotoolz.
 ```
@@ -125,7 +125,7 @@ geotoolz/<family>/
   non-Operator `GeoTensorEstimator` adapter, `operators.py` every Operator
   (`SklearnOp`, the `Pixelwise*` wrappers, `ModelOp`).
 - Not a family: the top-level `patch_ops.py` geopatcher bridge (optional
-  `[patch]` extra). Sensor readers live in `geotoolz-products` (`geoproducts`).
+  `[patch]` extra). Product readers live in `geotoolz-products` (`geoproducts`).
 - Removals and renames are outright — no deprecated aliases or shim modules
   (`tests/test_geotoolz.py::test_removed_modules_are_gone`).
 - Constructors do no network I/O: downloads (e.g. the Natural Earth

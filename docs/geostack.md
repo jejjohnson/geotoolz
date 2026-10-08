@@ -74,7 +74,7 @@ finds the row pairs; the patcher reads them; the operators align them.
 `geopatcher.objstore` owns the pooled `obstore` client and the `[obstore]`
 extras of geotoolz-products and geocatalog depend on it, so a
 pipeline touching the same bucket through the catalog's staging, the
-patcher's `ObstoreCogField`, and geoproducts' sensor readers reuses one
+patcher's `ObstoreCogField`, and geoproducts' product readers reuses one
 HTTP/2 connection pool.
 
 ## End to end in one screen

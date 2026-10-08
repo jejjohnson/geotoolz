@@ -38,7 +38,7 @@ dependencies = [
 [project.optional-dependencies]
 # Pooled object-store client (``obstore``) for cloud-backed sensor reads:
 # readers pointing at ``s3://`` / ``gs://`` / ``az://`` / ``https://``
-# scenes call ``SensorReader.set_obstore_client(...)`` so every byte-range
+# scenes call ``ProductReader.set_obstore_client(...)`` so every byte-range
 # fetch goes through geopatcher's process-wide pool (shared with geotoolz
 # and geocatalog).
 obstore = ["geotoolz-patcher[obstore]"]

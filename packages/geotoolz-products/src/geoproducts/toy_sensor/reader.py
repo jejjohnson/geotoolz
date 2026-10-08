@@ -9,7 +9,7 @@ import numpy as np
 from affine import Affine
 from rasterio.windows import Window
 
-from geoproducts._src.base import SensorReader, Track
+from geoproducts._src.base import ProductReader, Track
 from geoproducts.toy_sensor import constants
 
 
@@ -18,7 +18,7 @@ __all__ = ["Reader"]
 _DEFAULT_NUM_BANDS = 4
 
 
-class Reader(SensorReader):
+class Reader(ProductReader):
     """Toy reference reader implementing the sensor-reader contract.
 
     Args:
