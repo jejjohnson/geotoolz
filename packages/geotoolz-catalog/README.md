@@ -80,7 +80,7 @@ named for the step it serves:
 | save / share | `geocatalog.storage` | `to_geoparquet` / `from_geoparquet`, `StreamingParquetWriter`, `to_stac_collection`, `CatalogBundle` |
 | stage | `geocatalog.staging` | `stage`, `LocalCache` |
 | patch | `geocatalog.patch` | `field_for`, `CatalogDomain` |
-| grids | `geocatalog.grid` | `slice_to_window`, `is_grid_aligned`, `divide_evenly` |
+| grids | `geocatalog.grid` | `slice_to_window`, `is_grid_aligned`, `count_steps` |
 | helpers | `geocatalog.utils` | `parse_uri`, `retry_transient_io`, UTC time helpers |
 
 ## Bridging to a patcher

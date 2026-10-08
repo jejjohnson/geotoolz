@@ -2,7 +2,7 @@
 
 Covers:
 
-- `divide_evenly`: aligned passes, misaligned raises with the
+- `count_steps`: aligned passes, misaligned raises with the
   residual surfaced, custom ``tol`` honoured.
 - `GeoSlice.align` modes: ``"off"`` is silent, ``"warn"`` emits a
   `GridAlignmentWarning`, ``"error"`` raises, ``"snap"`` rounds
@@ -32,7 +32,7 @@ from shapely.geometry import box
 
 from geocatalog import GeoSlice
 from geocatalog.backends import InMemoryGeoCatalog
-from geocatalog.grid import Align, GridAlignmentWarning, divide_evenly, is_grid_aligned
+from geocatalog.grid import Align, GridAlignmentWarning, count_steps, is_grid_aligned
 
 
 # ---------------------------------------------------------------------------
@@ -61,38 +61,38 @@ def _make_slice(
 
 
 # ---------------------------------------------------------------------------
-# divide_evenly
+# count_steps
 # ---------------------------------------------------------------------------
 
 
 class TestDivideEvenly:
     def test_exact_returns_quotient(self) -> None:
-        assert divide_evenly(100.0, 10.0) == 10
+        assert count_steps(100.0, 10.0) == 10
 
     def test_subpixel_misalignment_raises(self) -> None:
         with pytest.raises(ValueError, match="residual"):
-            divide_evenly(100.5, 10.0, label="x-extent")
+            count_steps(100.5, 10.0, label="x-extent")
 
     def test_error_message_carries_label_and_step(self) -> None:
         with pytest.raises(ValueError, match=r"x-extent.*step=10\.0"):
-            divide_evenly(100.5, 10.0, label="x-extent")
+            count_steps(100.5, 10.0, label="x-extent")
 
     def test_within_default_tol_passes(self) -> None:
         # PIXEL_PRECISION=3 → default tol = step * 1e-3 = 1e-2 at 10 m,
         # so a non-zero residual of 5e-3 passes.
-        assert divide_evenly(100.005, 10.0) == 10
+        assert count_steps(100.005, 10.0) == 10
 
     def test_just_outside_default_tol_raises(self) -> None:
         # Residual 2e-2 at 10 m is 2/1000 of a pixel → outside tol.
         with pytest.raises(ValueError, match="residual"):
-            divide_evenly(100.02, 10.0)
+            count_steps(100.02, 10.0)
 
     def test_custom_tol_tightens(self) -> None:
         # 100.0005 / 10 = 10.00005 → round = 10; residual = -5e-4.
         # The default tol (1e-2 at 10 m) accepts it; a tight tol must reject.
-        assert divide_evenly(100.0005, 10.0) == 10
+        assert count_steps(100.0005, 10.0) == 10
         with pytest.raises(ValueError):
-            divide_evenly(100.0005, 10.0, tol=1e-9)
+            count_steps(100.0005, 10.0, tol=1e-9)
 
     def test_default_tol_scales_with_degree_resolution(self) -> None:
         """Half a pixel at 0.001° must fail (#226).
@@ -101,8 +101,8 @@ class TestDivideEvenly:
         this resolution, so every degree-resolution extent passed.
         """
         with pytest.raises(ValueError, match="residual"):
-            divide_evenly(1.0005, 0.001, label="x-extent")
-        assert divide_evenly(1.0, 0.001) == 1000
+            count_steps(1.0005, 0.001, label="x-extent")
+        assert count_steps(1.0, 0.001) == 1000
 
 
 # ---------------------------------------------------------------------------

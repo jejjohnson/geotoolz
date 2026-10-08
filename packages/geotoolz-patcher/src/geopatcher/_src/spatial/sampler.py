@@ -73,7 +73,7 @@ class RegularStride(Sampler):
             the domain. Only checked under ``"drop"``: the other boundary
             modes cover the trailing edge themselves. Off by default;
             opt in for xrpatcher-style strict-tiling workloads. The
-            temporal counterpart is `divide_evenly` in `time/stencils.py`.
+            temporal counterpart is `exact_quotient` in `temporal/stencils.py`.
 
     Anchor placement per axis of length ``L``, patch ``P``, step ``S``:
 

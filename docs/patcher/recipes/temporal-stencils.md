@@ -136,7 +136,7 @@ exact number of positionals the callback declares.
 
 ## See also
 
-- `TimeStencil` / `Stencil` / `divide_evenly` /
+- `TimeStencil` / `Stencil` / `exact_quotient` /
   `build_sampling_slices` / `valid_origin_points` — primitives.
 - `temporal.geometry.StencilGeometry` / `temporal.sampler.StencilSampler` — four-axis
   integration.

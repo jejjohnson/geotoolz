@@ -9,16 +9,16 @@ extent. The error only surfaces later, as an off-by-one against a
 co-registered label tile or in a matchup join.
 
 `geocatalog` exposes opt-in checks for callers that want loud
-failures instead: `divide_evenly`, `GeoSlice.aligned_shape()`,
+failures instead: `count_steps`, `GeoSlice.aligned_shape()`,
 the `align=` constructor modes, and `is_grid_aligned`.
 
-## `divide_evenly`
+## `count_steps`
 
 ```python
-from geocatalog.grid import divide_evenly
+from geocatalog.grid import count_steps
 
-n = divide_evenly(length=100.0, step=10.0, label="x-extent")  # → 10
-divide_evenly(length=100.5, step=10.0, label="x-extent")
+n = count_steps(length=100.0, step=10.0, label="x-extent")  # → 10
+count_steps(length=100.5, step=10.0, label="x-extent")
 # ValueError: x-extent=100.5 is not an integer multiple of step=10.0
 # (nearest is 10 -> residual -0.5). Use align='snap' to round
 # outward, or fix the bounds/resolution.
@@ -152,7 +152,7 @@ same CRS. CRS mismatch returns `False` — reproject one side via
 
 ## Attribution
 
-`divide_evenly` is derived from
+`count_steps` is derived from
 [`terrax.xreader.stencils._divide_evenly`](https://github.com/neuralgcm/terrax)
 (Apache-2.0, © Google LLC; original author Stephan Hoyer).
 Modifications © 2026 J. Emmanuel Johnson, licensed MIT under

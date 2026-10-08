@@ -96,6 +96,8 @@ def test_old_flat_names_are_gone() -> None:
         "MatchupRow",
     ):
         assert not hasattr(geocatalog, old), old
+    # Renamed so it no longer collides with geopatcher's stencil helper.
+    assert not hasattr(geocatalog.grid, "divide_evenly")
 
 
 def test_lazy_names_resolve_from_their_home() -> None:

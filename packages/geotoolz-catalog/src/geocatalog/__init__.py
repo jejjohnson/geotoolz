@@ -27,7 +27,7 @@ Everything else lives in one sub-namespace per step of the workflow:
 - patch — `geocatalog.patch`: `field_for`, `CatalogDomain` (the geopatcher
   bridge).
 - grids — `geocatalog.grid`: `slice_to_window`, `is_grid_aligned`,
-  `divide_evenly`.
+  `count_steps`.
 - helpers — `geocatalog.utils`: `parse_uri`, `retry_transient_io`, UTC
   time helpers.
 

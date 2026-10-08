@@ -26,7 +26,7 @@ not by `build_sampling_slices` itself).
 The public surface is four pure functions / dataclasses:
 
 - `Stencil` / `TimeStencil` — the stencil (start, stop, step, closed).
-- `divide_evenly` — exact-quotient check; raises with both operands named.
+- `exact_quotient` — exact-quotient check; raises with both operands named.
 - `build_sampling_slices` — coordinates → `list[slice]`.
 - `valid_origin_points` — the trimmed origin set so every window fits.
 
@@ -52,7 +52,7 @@ _INCLUDE_START = {"left", "both"}
 _INCLUDE_STOP = {"right", "both"}
 
 
-def divide_evenly(
+def exact_quotient(
     x: np.typing.ArrayLike,
     y: np.typing.ArrayLike,
     *,
@@ -88,12 +88,12 @@ def divide_evenly(
     y = np.asarray(y)
     if x.dtype.kind == "M" or y.dtype.kind == "M":
         raise TypeError(
-            f"divide_evenly takes durations, not datetime64 points in time: "
+            f"exact_quotient takes durations, not datetime64 points in time: "
             f"{x!r} / {y!r}; subtract an origin first."
         )
     if (x.dtype.kind == "m") != (y.dtype.kind == "m"):
         raise TypeError(
-            f"divide_evenly needs both operands to be timedelta64 or both "
+            f"exact_quotient needs both operands to be timedelta64 or both "
             f"numeric; got {x.dtype} / {y.dtype} ({label})"
         )
     if np.any(y == y.dtype.type(0)):
@@ -209,7 +209,7 @@ class Stencil:
         """Realised sample points after the closedness trim."""
         if self.step:
             num = int(
-                divide_evenly(self.stop - self.start, self.step, label="step").item()
+                exact_quotient(self.stop - self.start, self.step, label="step").item()
             )
         else:
             num = 0
@@ -378,7 +378,7 @@ def build_sampling_slices(
         raise ValueError(f"sample_origins must be sorted: {sample_origins=}")
 
     start_points = sample_origins + stencil.start
-    starts = divide_evenly(
+    starts = exact_quotient(
         start_points - source_points[0], source_step, label="source_step"
     )
     if sample_origins[0] + stencil.points[0] < source_points[0]:
@@ -391,7 +391,7 @@ def build_sampling_slices(
         starts += 1
 
     stop_points = sample_origins + stencil.stop
-    stops = divide_evenly(
+    stops = exact_quotient(
         stop_points - source_points[0], source_step, label="source_step"
     )
     if sample_origins[-1] + stencil.points[-1] > source_points[-1]:
@@ -404,7 +404,7 @@ def build_sampling_slices(
         stops += 1
 
     stride = max(
-        divide_evenly(stencil.step, source_step, label="source_step").item(), 1
+        exact_quotient(stencil.step, source_step, label="source_step").item(), 1
     )
 
     return [
@@ -457,14 +457,14 @@ def stencil_offsets(stencil: Stencil, source_step: Any) -> tuple[int, int, int]:
         ValueError: If ``source_step`` does not evenly divide the stencil's
             bounds or step.
     """
-    lo = int(divide_evenly(stencil.start, source_step, label="source_step").item())
-    hi = int(divide_evenly(stencil.stop, source_step, label="source_step").item())
+    lo = int(exact_quotient(stencil.start, source_step, label="source_step").item())
+    hi = int(exact_quotient(stencil.stop, source_step, label="source_step").item())
     if not stencil.includes_start:
         lo += 1
     if stencil.includes_stop:
         hi += 1
     stride = max(
-        int(divide_evenly(stencil.step, source_step, label="source_step").item()), 1
+        int(exact_quotient(stencil.step, source_step, label="source_step").item()), 1
     )
     return lo, hi, stride
 
@@ -507,7 +507,7 @@ __all__ = [
     "TimeStencil",
     "build_sampling_slices",
     "coord_step",
-    "divide_evenly",
+    "exact_quotient",
     "stencil_offsets",
     "valid_origin_points",
 ]

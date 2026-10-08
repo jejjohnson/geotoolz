@@ -1,7 +1,7 @@
 # Grid — `geocatalog.grid`
 
 Pixel grids: convert between a `GeoSlice` and a pixel window, check and
-snap slices to a raster's grid, and split a slice into equal tiles.
+snap slices to a raster's grid, and count the whole pixels in a length.
 
 ## Windows
 
@@ -14,4 +14,4 @@ snap slices to a raster's grid, and split a slice into equal tiles.
 ::: geocatalog.grid.Align
 ::: geocatalog.grid.is_grid_aligned
 ::: geocatalog.grid.GridAlignmentWarning
-::: geocatalog.grid.divide_evenly
+::: geocatalog.grid.count_steps

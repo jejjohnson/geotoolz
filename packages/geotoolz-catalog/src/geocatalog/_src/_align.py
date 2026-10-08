@@ -1,6 +1,6 @@
 """Exact-division and grid-alignment helpers.
 
-`divide_evenly` is derived from
+`count_steps` is derived from
 ``terrax.xreader.stencils._divide_evenly``
 (Apache-2.0, © Google LLC; original author Stephan Hoyer).
 Modifications © 2026 J. Emmanuel Johnson, licensed MIT under the
@@ -74,7 +74,7 @@ def _default_tol(step: float) -> float:
     return abs(step) * 10**-PIXEL_PRECISION
 
 
-def divide_evenly(
+def count_steps(
     length: float,
     step: float,
     *,

@@ -29,7 +29,7 @@ record, not a replay recipe.
 | `GridSampler(patcher=patcher)` | `Field → list[Patch]` | Drive a `SpatialPatcher` and materialise its chips |
 | `ApplyToChips(operator=op)` | `list[Patch] → list[Patch]` | Map any operator over each chip's data |
 | `MergePatches(aggregation=aggregation, domain)` | `list[Patch] → field` | Merge chips back into a global field |
-| `SpatialTriangular(width)` | window axis | Linear feather ramp (`float64`) matching `geom.Stitch(blend="feather")` |
+| `TriangularWindow(width)` | window axis | Linear feather ramp (`float64`) matching `geom.Stitch(blend="feather")` |
 | `StratifiedSample(...)` | `scene → list[Patch]` | Chips with class proportions matching a target distribution |
 | `BalancedSampler(...)` | `scene → list[Patch]` | Exactly N chips per class label |
 
@@ -45,14 +45,14 @@ give seam-free full-scene predictions:
 ```python
 import geopatcher as gp
 from geotoolz import Sequential
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches, SpatialTriangular
+from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches, TriangularWindow
 
 field = gp.RasterField(scene)          # scene: GeoTensor or RasterioReader
 
 patcher = gp.SpatialPatcher(
     geometry    = gp.spatial.geometry.Rectangular(size=(256, 256)),
     sampler     = gp.spatial.sampler.RegularStride(step=(192, 192)),   # 64 px overlap
-    window      = SpatialTriangular(width=32),                # feather ramp
+    window      = TriangularWindow(width=32),                 # feather ramp
     aggregation = gp.spatial.aggregation.OverlapAdd(),
 )
 
@@ -64,7 +64,7 @@ pipe = Sequential([
 prediction = pipe(field)
 ```
 
-Swap `SpatialTriangular` for `gp.spatial.window.Hann` / `gp.spatial.window.Tukey` for
+Swap `TriangularWindow` for `gp.spatial.window.Hann` / `gp.spatial.window.Tukey` for
 smoother tapers, or use `gp.spatial.window.Boxcar` with non-overlapping strides
 for exact tiling.
 

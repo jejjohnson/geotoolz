@@ -28,7 +28,7 @@ from geotoolz.patch_ops import (
     ApplyToChips,
     GridSampler,
     MergePatches,
-    SpatialTriangular,
+    TriangularWindow,
 )
 
 
@@ -83,11 +83,12 @@ def test_all_lists_public_surface() -> None:
         "BalancedSampler",
         "GridSampler",
         "MergePatches",
-        "SpatialTriangular",
         "StratifiedSample",
+        "TriangularWindow",
     ]
     for name in patch_ops.__all__:
         assert hasattr(patch_ops, name)
+    assert not hasattr(patch_ops, "SpatialTriangular")  # renamed, no alias
 
 
 def test_runtime_holders_are_forbid_in_yaml(patcher: SpatialPatcher) -> None:
@@ -106,14 +107,14 @@ def test_runtime_holders_are_forbid_in_yaml(patcher: SpatialPatcher) -> None:
     }
 
 
-class TestSpatialTriangular:
+class TestTriangularWindow:
     def test_numeric_ramp(self) -> None:
         # Per-axis ramp: min(i + 1, n - i) / width, clipped to [0, 1].
         # n=7, width=3 -> [1/3, 2/3, 1, 1, 1, 2/3, 1/3]; n=4 -> [1/3, 2/3, 2/3, 1/3].
         rows = np.array([1, 2, 2, 1]) / 3
         cols = np.array([1, 2, 3, 3, 3, 2, 1]) / 3
         cols = np.minimum(cols, 1.0)
-        weights = SpatialTriangular(width=3).weights(
+        weights = TriangularWindow(width=3).weights(
             spatial.geometry.Rectangular(size=(4, 7))
         )
         assert weights.dtype == np.float64
@@ -122,7 +123,7 @@ class TestSpatialTriangular:
         assert weights[1, 3] == 2 / 3
 
     def test_small_window_values(self) -> None:
-        weights = SpatialTriangular(width=2).weights(
+        weights = TriangularWindow(width=2).weights(
             spatial.geometry.Rectangular(size=(3, 3))
         )
         np.testing.assert_array_equal(
@@ -131,7 +132,7 @@ class TestSpatialTriangular:
         )
 
     def test_non_positive_width_is_boxcar(self) -> None:
-        weights = SpatialTriangular(width=0).weights(
+        weights = TriangularWindow(width=0).weights(
             spatial.geometry.Rectangular(size=(2, 3))
         )
         assert weights.dtype == np.float64
@@ -139,12 +140,12 @@ class TestSpatialTriangular:
 
     def test_ragged_geometry_raises(self) -> None:
         with pytest.raises(TypeError, match="fixed-shape"):
-            SpatialTriangular(width=2).weights(object())  # ty: ignore[invalid-argument-type]
+            TriangularWindow(width=2).weights(object())  # ty: ignore[invalid-argument-type]
 
     def test_config_roundtrip(self) -> None:
-        window = SpatialTriangular(width=5)
+        window = TriangularWindow(width=5)
         assert window.get_config() == {"width": 5}
-        assert SpatialTriangular(**window.get_config()).width == 5
+        assert TriangularWindow(**window.get_config()).width == 5
 
 
 class TestApplyToChips:

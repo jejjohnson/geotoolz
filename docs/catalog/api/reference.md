@@ -18,7 +18,7 @@ in one namespace per step, and each public name has exactly one home.
 | save / share | `geocatalog.storage` — GeoParquet, STAC export, bundles | [Storage](storage.md) |
 | stage | `geocatalog.staging` — remote assets to a local cache | [Staging](staging.md) |
 | patch | `geocatalog.patch` — the geopatcher bridge | [Patch](patch.md) |
-| grids | `geocatalog.grid` — windows, alignment, even division | [Grid](grid.md) |
+| grids | `geocatalog.grid` — windows, alignment, exact pixel counts | [Grid](grid.md) |
 | helpers | `geocatalog.utils` — URIs, retries, UTC time | [Utils](utils.md) |
 
 ```python

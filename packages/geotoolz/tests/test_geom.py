@@ -379,7 +379,7 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
     )
     from geopatcher import RasterField, SpatialPatcher
 
-    from geotoolz.patch_ops import SpatialTriangular
+    from geotoolz.patch_ops import TriangularWindow
 
     gt = _gt()
     tiles = gz.geom.Tile(size=(3, 4), stride=(2, 3))(gt)
@@ -389,7 +389,7 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
     patcher = SpatialPatcher(
         geometry=spatial.geometry.Rectangular(size=(3, 4)),
         sampler=spatial.sampler.RegularStride(step=(2, 3)),
-        window=SpatialTriangular(width=2),
+        window=TriangularWindow(width=2),
         aggregation=spatial.aggregation.OverlapAdd(),
     )
 
