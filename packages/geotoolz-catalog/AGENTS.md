@@ -50,8 +50,9 @@ dependencies are actually imported).
 - **Extras-gated names** (DuckDB, xarray, vector, STAC, the source adapters)
   are registered in `_src/_lazy.py` `LAZY` and resolved lazily by the
   facades; a missing extra raises via `require_extra` / `missing_extra`
-  (`_src/_extras.py`). Never import an optional dependency at module top
-  level.
+  (`_src/_extras.py`). Import an optional dependency softly
+  (`try: import duckdb` / `except ImportError: duckdb = None`) or inside the
+  function that needs it, so every module imports on a base install.
 - **Persisted catalogs**: GeoParquet carries `SCHEMA_VERSION_CURRENT`; a
   schema change needs a migration in `migrate_geoparquet` and a
   `docs/catalog/schema-versions.md` entry.

@@ -1,3 +1,8 @@
+---
+name: link-gh-issues
+description: Apply native GitHub issue relationships (sub-issues, blocked-by) via the GraphQL API. Use when asked to link issues as parent/child, mark one blocked by another, or inspect an issue's relationships.
+---
+
 Apply native GitHub issue relationships (sub-issues and blocked-by) via the GraphQL API.
 
 Use this skill when the user asks to link issues as parent/child (sub-issue hierarchy) or to mark one issue as blocked by another. Works on top of the prose `## Relationships` block convention documented in `docs/contributing.md` — the prose stays as a human-readable record, and this skill applies the matching native link so GitHub's UI and automation pick up the hierarchy.

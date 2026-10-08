@@ -204,6 +204,22 @@ Conventions shared by all five:
   runs in CI.
 - Satpy is never a dependency.
 
+## Recipes
+
+Step-by-step recipes for the common jobs live as plain Markdown in
+`.claude/skills/<name>/SKILL.md` (Claude Code loads them automatically; any
+agent can read and follow them):
+
+| Job | Recipe |
+|---|---|
+| Add an operator / primitive to geotoolz | `add-operator` |
+| Add a reader for a new EO product | `add-product-reader` |
+| Add a catalog discovery source | `add-catalog-source` |
+| Add a patcher field adapter or axis | `add-field-adapter` |
+| Draw or update a docs diagram | `docs-diagram` |
+| Verify before a PR | `pre-pr-check` |
+| Review a change | `geotoolz-review` (+ the read-only `.claude/agents/reuse-reviewer.md`) |
+
 ## Working in the repo
 
 Always run Python tools through `uv run` (never the system Python).
