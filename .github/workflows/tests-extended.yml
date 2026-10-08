@@ -38,8 +38,21 @@ jobs:
       # Coverage is disabled: a marker-filtered subset can't meet the
       # repo-wide fail_under floor. pytest exit code 5 (nothing collected
       # for the marker) is treated as success so an empty tier stays green.
-      - name: Run extended tests
+      - name: Run extended tests (geotoolz)
         working-directory: packages/geotoolz
+        run: |
+          set +e
+          uv run pytest -v --no-cov -m "${{ inputs.marker }}"
+          rc=$?
+          if [ "$rc" -eq 5 ]; then
+            echo "No tests collected for marker '${{ inputs.marker }}' — OK"
+            exit 0
+          fi
+          exit $rc
+      # geotoolz-products: `slow` builds its wheel; `integration` reads
+      # real ABI files from NOAA's public (anonymous) GOES buckets.
+      - name: Run extended tests (geotoolz-products)
+        working-directory: packages/geotoolz-products
         run: |
           set +e
           uv run pytest -v --no-cov -m "${{ inputs.marker }}"

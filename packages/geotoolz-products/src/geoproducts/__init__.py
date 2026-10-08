@@ -13,15 +13,17 @@ Public surface:
 - Per-sensor / per-provider subpackages, each exposing ``Reader``,
   ``BANDS`` / ``CONSTANTS`` and, with the ``[operators]`` extra,
   ``presets`` (geotoolz operators bound to the product's band names):
-  ``toy_sensor`` is the in-memory reference reader.
+  ``toy_sensor`` is the in-memory reference reader; ``goes`` reads
+  GOES-R ABI L1b radiances (``[goes]`` extra) and finds them in NOAA's
+  public buckets.
 """
 
 from __future__ import annotations
 
-from geoproducts import toy_sensor
+from geoproducts import goes, toy_sensor
 from geoproducts._src.base import ProductReader
 
 
 __version__ = "0.1.0"  # x-release-please-version
 
-__all__ = ["ProductReader", "__version__", "toy_sensor"]
+__all__ = ["ProductReader", "__version__", "goes", "toy_sensor"]

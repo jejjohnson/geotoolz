@@ -40,6 +40,11 @@ belongs in a geotoolz family, not in the reader package.
 
 `geoproducts.toy_sensor` is the worked example of the contract. It is an
 in-memory reader (no external file format) used to exercise the framework in
-tests and to demonstrate the layout for real sensors. Real product readers
-(MODIS HDF4, VIIRS HDF5, GOES NetCDF, etc.) are tracked separately under
-the per-sensor design issues.
+tests and to demonstrate the layout for real sensors.
+
+`geoproducts.goes` is the first file-format reader built on the same
+contract: an h5py-backed `_read_window` over ABI L1b NetCDF-4 files behind
+the `[goes]` extra, calibration from in-file coefficients, a packaged
+`data/bands.csv`, and presets over `geotoolz` operators. The remaining
+sensors (MTG, Himawari, TROPOMI, VIIRS, Sentinel-3, SEVIRI, MODIS) are
+tracked under their per-sensor design issues.

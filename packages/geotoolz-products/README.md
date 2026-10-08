@@ -19,9 +19,10 @@ churn belongs in one place, not scattered across analysis code.
 `geoproducts` gives each product a reader that hides it: `ProductReader`
 is a georeader `GeoData` with a lazy windowed read, named bands and an
 optional pooled cloud byte-range path, and each sensor ships as a small
-namespace (`Reader`, `BANDS`, `CONSTANTS`, `presets`). Provider clients
-such as **Carbon Mapper** turn REST and STAC responses into typed records
-and lazy rasters. The package depends on georeader only — never on
+namespace (`Reader`, `BANDS`, `CONSTANTS`, `presets`). Mission readers
+such as **GOES-R ABI** recover the native grid and calibrate from the
+file's own coefficients; provider clients such as **Carbon Mapper** turn
+REST and STAC responses into typed records and lazy rasters. The package depends on georeader only — never on
 geotoolz — so readers release on their own schedule while their output
 drops straight into the operators, the patcher and the catalog loaders.
 
@@ -31,6 +32,7 @@ drops straight into the operators, the patcher and the catalog loaders.
 pip install geotoolz-products                    # readers (georeader only)
 pip install 'geotoolz-products[obstore]'         # pooled cloud byte-range reads
 pip install 'geotoolz-products[operators]'       # sensor presets (geotoolz operators)
+pip install 'geotoolz-products[goes]'            # GOES-R ABI L1b reader (h5py)
 pip install 'geotoolz-products[carbonmapper]'    # Carbon Mapper plume catalogue + STAC
 ```
 
@@ -39,6 +41,7 @@ pip install 'geotoolz-products[carbonmapper]'    # Carbon Mapper plume catalogue
 | *(base)* | georeader, numpy, rasterio | `ProductReader`, `toy_sensor` |
 | `[obstore]` | `geotoolz-patcher[obstore]` | `ProductReader._read_bytes` over `s3://` / `gs://` / `az://` through the shared `geopatcher.objstore` pool |
 | `[operators]` | `geotoolz` | per-sensor `presets` (e.g. `toy_sensor.presets.NDVI`) |
+| `[goes]` | h5py | `geoproducts.goes.Reader` (the `goes.aws` bucket helpers need no extra) |
 | `[carbonmapper]` | requests, pydantic, shapely, geopandas, pandas | `geoproducts.carbonmapper` |
 
 ## Quickstart — a sensor reader
@@ -63,6 +66,40 @@ chip.attrs["band_names"]                                         # ('blue', 'gre
 Because `chip` names its bands, geotoolz operators resolve them by name
 (`gz.NDVI(nir="nir", red="red")(chip)` → `(64, 64)`), and because
 `reader` is a `GeoData`, `geopatcher.RasterField(reader)` tiles it.
+
+## GOES-R ABI
+
+GOES-16 … GOES-19 L1b radiances, straight from NOAA's public, anonymous
+AWS buckets. One file is one channel of one scan on the `+proj=geos` fixed
+grid; windows decompress only the chunks they touch:
+
+```python
+from datetime import datetime
+from pathlib import Path
+
+from georeader.geotensor import GeoTensor
+
+from geoproducts import goes
+from geoproducts.goes import aws
+
+files: list[aws.ABIFile] = aws.list_files(
+    satellite="G19", product="ABI-L1b-RadC",                  # GOES-East, CONUS sector
+    start=datetime(2026, 10, 7, 18), end=datetime(2026, 10, 7, 18, 10),
+    channel=13,                                               # 10.3 µm clean IR window
+)                                                             # 2 scans · ~4 MB each
+path: Path = aws.download(files[0], "data/goes")
+
+reader: goes.Reader = goes.Reader(path, calibration="brightness_temperature")  # (1, 1500, 2500) · 2 km
+bt: GeoTensor = reader.read_from_bounds(
+    (-100.0, 30.0, -95.0, 35.0), crs_bounds="EPSG:4326"
+)                                                             # (1, 219, 266) float32 K
+flags: GeoTensor = reader.quality.load()                      # (1, 1500, 2500) uint8 DQF
+```
+
+Calibration uses the coefficients in each file (`kappa0` for C01–C06
+reflectance, the Planck set for C07–C16 brightness temperature); the
+`[operators]` presets add `goes.NDVI()`, `goes.SyntheticGreen()` and
+`goes.ParallaxCorrect()`.
 
 ## Carbon Mapper
 
@@ -93,6 +130,7 @@ it.
 
 - **Products docs:** [home](https://jejjohnson.github.io/geotoolz/products/) ·
   [adding a product reader](https://jejjohnson.github.io/geotoolz/products/product-readers/) ·
+  [GOES-R ABI](https://jejjohnson.github.io/geotoolz/products/goes/) ·
   [Carbon Mapper](https://jejjohnson.github.io/geotoolz/products/carbonmapper/) ·
   [API reference](https://jejjohnson.github.io/geotoolz/products/api/).
 - **The whole stack:** the root [README](https://github.com/jejjohnson/geotoolz#readme)

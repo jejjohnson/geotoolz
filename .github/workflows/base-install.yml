@@ -239,7 +239,7 @@ jobs:
           import geoproducts
 
           # The extras (and geotoolz itself) really are absent.
-          absent = ("geotoolz", "geopatcher", "obstore", "pipekit", "requests", "pydantic")
+          absent = ("geotoolz", "geopatcher", "obstore", "pipekit", "requests", "pydantic", "h5py")
           for module in absent:
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 
@@ -271,10 +271,16 @@ jobs:
               assert "geotoolz-products[operators]" in str(exc), exc
           else:
               raise AssertionError("NDVI preset ran without geotoolz")
+          try:
+              geoproducts.goes.Reader("scene.nc")
+          except ImportError as exc:
+              assert "geotoolz-products[goes]" in str(exc), exc
+          else:
+              raise AssertionError("goes.Reader ran without h5py")
           print("geotoolz-products base install OK", geoproducts.__version__)
           PY
       # Coverage is off: extras-gated paths are unreachable here, so the
       # package's fail_under floor is for the all-extras run in ci.yml.
       - name: Test geotoolz-products (base install)
         working-directory: packages/geotoolz-products
-        run: uv run --no-sync pytest -q --no-cov -m "not slow and not live"
+        run: uv run --no-sync pytest -q --no-cov -m "not slow and not live and not integration"

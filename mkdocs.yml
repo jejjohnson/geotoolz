@@ -144,6 +144,7 @@ nav:
   - Products — geoproducts:
       - Home: products/index.md
       - Adding a product reader: products/product-readers.md
+      - GOES-R ABI: products/goes.md
       - Carbon Mapper: products/carbonmapper.md
       - API Reference: products/api.md
   - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack

@@ -1,0 +1,18 @@
+# Source: NOAA GOES-R Series ABI band reference (Product Definition and Users' Guide, Vol. 3). Public domain (US Government work).
+name,band,wavelength_um,resolution_km,kind,description
+C01,1,0.47,1.0,reflective,Blue
+C02,2,0.64,0.5,reflective,Red
+C03,3,0.86,1.0,reflective,Veggie
+C04,4,1.37,2.0,reflective,Cirrus
+C05,5,1.6,1.0,reflective,Snow/Ice
+C06,6,2.2,2.0,reflective,Cloud particle size
+C07,7,3.9,2.0,emissive,Shortwave window
+C08,8,6.2,2.0,emissive,Upper-level water vapour
+C09,9,6.9,2.0,emissive,Mid-level water vapour
+C10,10,7.3,2.0,emissive,Lower-level water vapour
+C11,11,8.4,2.0,emissive,Cloud-top phase
+C12,12,9.6,2.0,emissive,Ozone
+C13,13,10.3,2.0,emissive,Clean longwave window
+C14,14,11.2,2.0,emissive,Longwave window
+C15,15,12.3,2.0,emissive,Dirty longwave window
+C16,16,13.3,2.0,emissive,CO2 longwave
