@@ -94,8 +94,8 @@ aoi: gc.GeoSlice = gc.GeoSlice(
 
 # 1 · find — one catalog per band, staged to local disk
 bands: dict[str, gc.GeoCatalog] = {
-    band: gc.stage(
-        gc.from_stac_search(client, collections=["sentinel-2-l2a"], bounds=aoi.bounds,
+    band: gc.staging.stage(
+        gc.sources.from_stac_search(client, collections=["sentinel-2-l2a"], bounds=aoi.bounds,
                             datetime="2024-06-01/2024-09-30", asset_key=band),
         dest="./cache",
     )
@@ -103,8 +103,8 @@ bands: dict[str, gc.GeoCatalog] = {
 }
 
 # 2 · read — mosaic each band onto the AOI grid, stack red + NIR
-red: gp.RasterField = gc.field_for(bands["B04"].query(aoi), aoi)   # (1, 4500, 4000) uint16
-nir: gp.RasterField = gc.field_for(bands["B08"].query(aoi), aoi)   # (1, 4500, 4000) uint16
+red: gp.RasterField = gc.patch.field_for(bands["B04"].query(aoi), aoi)   # (1, 4500, 4000) uint16
+nir: gp.RasterField = gc.patch.field_for(bands["B08"].query(aoi), aoi)   # (1, 4500, 4000) uint16
 scene: GeoTensor = gz.StackBands()([red.reader, nir.reader])         # (2, 4500, 4000) uint16
 
 # 3 · cut + compute — 256² tiles, 64 px overlap, Hann-feathered seams
@@ -179,9 +179,9 @@ client: pystac_client.Client = pystac_client.Client.open(
     modifier=planetary_computer.sign_inplace,
 )
 swir: dict[str, gp.RasterField] = {
-    band: gc.field_for(
-        gc.stage(
-            gc.from_stac_search(client, collections=["sentinel-2-l2a"], bounds=bbox_lonlat,
+    band: gc.patch.field_for(
+        gc.staging.stage(
+            gc.sources.from_stac_search(client, collections=["sentinel-2-l2a"], bounds=bbox_lonlat,
                                 datetime="2025-06", asset_key=band),
             dest="./cache",
         ).query(aoi),

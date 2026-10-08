@@ -34,6 +34,9 @@ DOCS = REPO_ROOT / "docs" / "catalog"
 # not a glob (``geocatalog.load_*``).
 _DOTTED = re.compile(r"(?<![\w./\-])geocatalog((?:\.[A-Za-z_]\w*)+)(?![\w*])")
 
+# ``from geocatalog[.ns] import a, b as c`` on one line (code and prose).
+_FROM_IMPORT = re.compile(r"\bfrom (geocatalog(?:\.\w+)*) import ([\w, ]+)")
+
 # Paths that are *meant* not to resolve, keyed by (file relative to the
 # repo root, path as written). Keep this small and say why.
 ALLOWED_UNRESOLVED: dict[tuple[str, str], str] = {}
@@ -135,12 +138,12 @@ def _resolves(dotted: str) -> bool:
 def test_scanner_finds_paths() -> None:
     """Guard the scanner itself: an empty scan would pass vacuously."""
     paths = {dotted for _, _, dotted in _dotted_paths()}
-    assert "geocatalog.staging.field_for" in paths
+    assert "geocatalog.patch.field_for" in paths
     assert len(paths) > 30
 
 
 def test_resolver_rejects_missing_names() -> None:
-    assert _resolves("geocatalog.CatalogBundle.ingest")
+    assert _resolves("geocatalog.storage.CatalogBundle.ingest")
     assert _resolves("geocatalog._src.retry.retry_transient_io")
     assert not _resolves("geocatalog.GeoCatalog.ingest")
     assert not _resolves("geocatalog._src.objstore")
@@ -158,6 +161,25 @@ def test_all_dotted_paths_resolve() -> None:
         if not ok:
             unresolved.append(f"{rel}:{lineno}: {dotted}")
     assert not unresolved, "unresolvable dotted paths:\n" + "\n".join(unresolved)
+
+
+def test_from_imports_resolve() -> None:
+    """``from geocatalog.x import y`` names a public home that holds ``y``."""
+    unresolved = []
+    for _, rel, lineno, line in _lines():
+        for match in _FROM_IMPORT.finditer(line):
+            for item in match.group(2).split(","):
+                name = item.split(" as ")[0].strip()
+                if not name:
+                    continue
+                dotted = f"{match.group(1)}.{name}"
+                try:
+                    ok = _resolves(dotted)
+                except _OptionalDependencyMissing:
+                    continue
+                if not ok:
+                    unresolved.append(f"{rel}:{lineno}: {dotted}")
+    assert not unresolved, "unresolvable imports:\n" + "\n".join(unresolved)
 
 
 def test_allowlist_entries_are_still_needed() -> None:

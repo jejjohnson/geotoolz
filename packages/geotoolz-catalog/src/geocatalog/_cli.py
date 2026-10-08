@@ -137,7 +137,7 @@ def _write_catalog(cat: Any, out: Path) -> int | None:
     into a helper so each `build` subcommand maps OSError to exit 3
     consistently.
     """
-    from geocatalog import to_geoparquet
+    from geocatalog.storage import to_geoparquet
 
     try:
         to_geoparquet(cat, out)
@@ -285,7 +285,7 @@ def raster(
         return 1
 
     def build(paths: list[Path]) -> Any:
-        from geocatalog import build_raster_catalog
+        from geocatalog.build import build_raster_catalog
 
         return build_raster_catalog(
             paths,
@@ -334,7 +334,7 @@ def xarray(
         return 1
 
     def build(paths: list[Path]) -> Any:
-        from geocatalog import build_xarray_catalog
+        from geocatalog.build import build_xarray_catalog
 
         return build_xarray_catalog(paths, time_var=time_var, crs=crs)
 
@@ -378,7 +378,7 @@ def vector(
         return 1
 
     def build(paths: list[Path]) -> Any:
-        from geocatalog import build_vector_catalog
+        from geocatalog.build import build_vector_catalog
 
         return build_vector_catalog(
             paths,
@@ -586,8 +586,8 @@ def migrate(
     """
     import os
 
-    from geocatalog import SCHEMA_VERSION_CURRENT, migrate_geoparquet
     from geocatalog._src.base import CatalogSchemaError
+    from geocatalog.storage import SCHEMA_VERSION_CURRENT, migrate_geoparquet
 
     if not source.exists():
         print(f"catalog not found: {source}", file=sys.stderr)
@@ -631,7 +631,7 @@ def convert(
     ] = False,
 ) -> int:
     """Convert a catalog artifact, optionally to Hive-partitioned layout."""
-    from geocatalog import to_geoparquet
+    from geocatalog.storage import to_geoparquet
 
     try:
         partitions = _parse_partition_by(partition_by)

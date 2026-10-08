@@ -86,15 +86,15 @@ import geotoolz as gz
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 # 1. Discover + index (catalog)
-cat = gc.from_stac_search(
+cat = gc.sources.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     collections=["sentinel-2-l2a"], bounds=aoi_bbox, datetime="2024-06",
     asset_key="B04",                     # one row per item, filepath = its B04 href
 )
 
 # 2. Stage + bridge to Fields (catalog → patcher seam)
-staged = gc.stage(cat, dest="./cache")
-field = gc.field_for(staged, aoi_slice)  # aoi_slice: GeoSlice (bounds, CRS, resolution)
+staged = gc.staging.stage(cat, dest="./cache")
+field = gc.patch.field_for(staged, aoi_slice)  # aoi_slice: GeoSlice (bounds, CRS, resolution)
 
 # 3. Patch + operate + stitch (patcher → operators seam)
 patcher = gp.SpatialPatcher(

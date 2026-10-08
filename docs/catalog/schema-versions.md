@@ -8,10 +8,10 @@ check it on load and dispatch on three cases:
 | ---------------------------- | ------------------------------------------------------ |
 | `v_artifact == v_current`    | Load directly.                                         |
 | `v_artifact <  v_current`    | Chain forward migrations (in-memory backend only).     |
-| `v_artifact >  v_current`    | Raise [`CatalogSchemaError`][geocatalog.CatalogSchemaError]. |
+| `v_artifact >  v_current`    | Raise [`CatalogSchemaError`][geocatalog.backends.CatalogSchemaError]. |
 
 The current reader version is
-[`SCHEMA_VERSION_CURRENT`][geocatalog.SCHEMA_VERSION_CURRENT]. Bump it
+[`SCHEMA_VERSION_CURRENT`][geocatalog.storage.SCHEMA_VERSION_CURRENT]. Bump it
 whenever the on-disk schema changes substantively (new required column,
 renamed reserved column, changed semantics of an existing field).
 Bumping also requires registering a forward migration in

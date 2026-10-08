@@ -23,7 +23,8 @@ from geocatalog._src.sources._base import (
     Source,
     SourceRow,
 )
-from geocatalog.bundle import CatalogBundle, source_row_to_gdf_row
+from geocatalog.sources import source_row_to_gdf_row
+from geocatalog.storage import CatalogBundle
 
 
 # ---------------------------------------------------------------------------

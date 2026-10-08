@@ -9,12 +9,9 @@ import pandas as pd
 import pytest
 
 import geocatalog._src.raster as raster_module
-from geocatalog import (
-    GeoSlice,
-    build_raster_catalog,
-    load_raster,
-    load_raster_timeseries,
-)
+from geocatalog import GeoSlice
+from geocatalog.build import build_raster_catalog
+from geocatalog.load import load_raster, load_raster_timeseries
 
 
 REGEX = r"S2_T29SND_(?P<date>\d{8}).*\.tif"
@@ -294,7 +291,7 @@ class TestLoadRasterConcurrentOpen:
     def test_aload_raster_parity(self, utm29_tile_factory) -> None:
         import asyncio
 
-        from geocatalog import aload_raster
+        from geocatalog.load import aload_raster
 
         catalog, sl = self._four_tile_setup(utm29_tile_factory)
         sync_tensor = load_raster(catalog, sl)

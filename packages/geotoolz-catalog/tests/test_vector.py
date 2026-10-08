@@ -10,7 +10,9 @@ import pandas as pd
 import pytest
 import shapely.geometry
 
-from geocatalog import GeoSlice, build_vector_catalog, load_vector
+from geocatalog import GeoSlice
+from geocatalog.build import build_vector_catalog
+from geocatalog.load import load_vector
 
 
 @pytest.fixture

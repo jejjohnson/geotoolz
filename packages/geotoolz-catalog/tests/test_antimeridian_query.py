@@ -14,7 +14,8 @@ import pyproj
 import pytest
 import shapely
 
-from geocatalog import GeoCatalog, InMemoryGeoCatalog
+from geocatalog import GeoCatalog
+from geocatalog.backends import InMemoryGeoCatalog
 
 
 A_EAST = shapely.box(179.2, -20.0, 179.8, -15.0)
@@ -42,7 +43,7 @@ def catalog(request: pytest.FixtureRequest) -> GeoCatalog:
     if request.param == "memory":
         return mem
     pytest.importorskip("duckdb")
-    from geocatalog import DuckDBGeoCatalog
+    from geocatalog.backends import DuckDBGeoCatalog
 
     return DuckDBGeoCatalog.from_memory(mem)
 

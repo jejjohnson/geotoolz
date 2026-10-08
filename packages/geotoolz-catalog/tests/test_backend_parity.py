@@ -18,9 +18,10 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 
-from geocatalog import InMemoryGeoCatalog, from_geoparquet, to_geoparquet
 from geocatalog._src.base import GeoCatalog
 from geocatalog._src.streaming import StreamingParquetWriter
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.storage import from_geoparquet, to_geoparquet
 from tests.conftest import assert_catalogs_equal, needs_duckdb
 
 

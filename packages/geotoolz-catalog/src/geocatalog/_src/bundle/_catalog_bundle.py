@@ -623,7 +623,7 @@ class CatalogBundle:
             raise NotADirectoryError(
                 f"CatalogBundle.from_directory expects a directory; got {src!r}. "
                 "If the path is a single GeoParquet file, use "
-                "`geocatalog.from_geoparquet(path)` to get an "
+                "`geocatalog.storage.from_geoparquet(path)` to get an "
                 "`InMemoryGeoCatalog`, then wrap it with "
                 "`CatalogBundle.from_catalog`."
             )

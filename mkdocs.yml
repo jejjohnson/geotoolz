@@ -128,14 +128,17 @@ nav:
           - End-to-end (Lake Tahoe): catalog/notebooks/end_to_end_lake_tahoe.ipynb
       - API Reference:
           - Overview: catalog/api/reference.md
-          - Catalogs & backends: catalog/api/catalogs.md
-          - GeoSlice & grid alignment: catalog/api/geoslice.md
-          - Loaders: catalog/api/loaders.md
-          - GeoParquet interchange: catalog/api/geoparquet.md
-          - Discovery sources & bundle: catalog/api/sources.md
-          - Matchup engine: catalog/api/matchup.md
-          - Staging & the patcher bridge: catalog/api/staging.md
-          - I/O helpers: catalog/api/io.md
+          - Core: catalog/api/core.md
+          - Sources: catalog/api/sources.md
+          - Build: catalog/api/build.md
+          - Backends: catalog/api/backends.md
+          - Matchup: catalog/api/matchup.md
+          - Load: catalog/api/load.md
+          - Storage: catalog/api/storage.md
+          - Staging: catalog/api/staging.md
+          - Patch: catalog/api/patch.md
+          - Grid: catalog/api/grid.md
+          - Utils: catalog/api/utils.md
       - CLI: catalog/cli.md
       - Schema versions: catalog/schema-versions.md
       - Logging: catalog/logging.md

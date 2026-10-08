@@ -12,9 +12,10 @@ import pyarrow.parquet as pq
 import pytest
 import shapely.geometry
 
-from geocatalog import InMemoryGeoCatalog, to_geoparquet
 from geocatalog._src import streaming
 from geocatalog._src.streaming import StreamingParquetWriter, write_partitioned_rows
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.storage import to_geoparquet
 
 
 def _row(day: int, **extras: Any) -> dict[str, Any]:
@@ -230,7 +231,7 @@ def test_streaming_writer_only_exposes_complete_files(tmp_path: Path) -> None:
 
 def _append(archive: Path, paths: list[Path]) -> Any:
     pytest.importorskip("duckdb")
-    from geocatalog import append_files
+    from geocatalog.build import append_files
 
     return append_files(
         archive,

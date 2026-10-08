@@ -12,14 +12,10 @@ import shapely
 
 pytest.importorskip("duckdb")
 
-from geocatalog import (
-    CatalogSchemaError,
-    DuckDBGeoCatalog,
-    InMemoryGeoCatalog,
-    open_catalog,
-    to_geoparquet,
-)
+from geocatalog import open_catalog
 from geocatalog._src import duckdb_backend
+from geocatalog.backends import CatalogSchemaError, DuckDBGeoCatalog, InMemoryGeoCatalog
+from geocatalog.storage import to_geoparquet
 
 
 def _cat(rows: list[dict], crs: str = "EPSG:32629") -> InMemoryGeoCatalog:

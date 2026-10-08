@@ -1,13 +1,18 @@
-"""`geocatalog.sources` — external data-source adapters.
+"""`geocatalog.sources` — discover scenes in external archives.
 
-Hybrid-layout sub-namespace mirroring `geocatalog.catalog` and
-`geocatalog.types`. Re-exports the `Source` Protocol, the
-`SourceRow` carrier, and the concrete adapters (each extras-gated).
+Every adapter satisfies the `Source` protocol and yields `SourceRow`
+records (`source_row_to_gdf_row` flattens one into a catalog row):
 
-Adapters are imported lazily on attribute access so a bare
-``import geocatalog.sources`` does not pull in `earthaccess`,
-`pystac-client`, or `earthengine-api`. See ``docs/catalog/design/query-matchup.md``
-§4.2.
+- `STACSource` — any STAC API (``[stac]`` extra).
+- `CMRSource` — NASA's Common Metadata Repository.
+- `EarthAccessSource` — NASA Earthdata via earthaccess
+  (``[earthaccess]`` extra).
+- `GEESource` — Google Earth Engine (``[gee]`` extra).
+
+`AuthStatus` reports whether an adapter's credentials work.
+`from_stac_items` / `from_stac_search` build a catalog straight from
+STAC. Adapters load lazily, so a bare ``import geocatalog.sources``
+needs no extra.
 """
 
 from __future__ import annotations
@@ -15,7 +20,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from geocatalog._src._lazy import lazy_getattr
-from geocatalog._src.sources import AuthStatus, Source, SourceRow
+from geocatalog._src.bundle import source_row_to_gdf_row
+from geocatalog._src.sources import (
+    AuthStatus,
+    Source,
+    SourceRow,
+)
 
 
 if TYPE_CHECKING:
@@ -23,6 +33,7 @@ if TYPE_CHECKING:
     from geocatalog._src.sources.earthaccess import EarthAccessSource
     from geocatalog._src.sources.gee import GEESource
     from geocatalog._src.sources.stac import STACSource
+    from geocatalog._src.stac import from_stac_items, from_stac_search
 
 
 __all__ = [
@@ -33,10 +44,21 @@ __all__ = [
     "STACSource",
     "Source",
     "SourceRow",
+    "from_stac_items",
+    "from_stac_search",
+    "source_row_to_gdf_row",
 ]
 
 
-# Adapters load lazily so optional extras stay opt-in.
+# Extras-gated names resolve lazily (`geocatalog._src._lazy.LAZY`).
 __getattr__ = lazy_getattr(
-    globals(), ["CMRSource", "EarthAccessSource", "GEESource", "STACSource"]
+    globals(),
+    [
+        "CMRSource",
+        "EarthAccessSource",
+        "GEESource",
+        "STACSource",
+        "from_stac_items",
+        "from_stac_search",
+    ],
 )

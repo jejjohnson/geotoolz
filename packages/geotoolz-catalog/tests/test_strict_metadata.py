@@ -18,13 +18,10 @@ import pytest
 import shapely.geometry
 from loguru import logger
 
-from geocatalog import (
-    CatalogMetadataError,
-    from_geoparquet,
-    open_catalog,
-    to_geoparquet,
-)
+from geocatalog import open_catalog
 from geocatalog._src.memory import InMemoryGeoCatalog
+from geocatalog.backends import CatalogMetadataError
+from geocatalog.storage import from_geoparquet, to_geoparquet
 
 
 @pytest.fixture
@@ -118,7 +115,7 @@ class TestDuckDBOpen:
         self, tmp_path: Path, loguru_sink: io.StringIO
     ) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog import DuckDBGeoCatalog
+        from geocatalog.backends import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(_external_parquet(tmp_path))
         assert cat.kind == "raster"
@@ -126,14 +123,14 @@ class TestDuckDBOpen:
 
     def test_missing_backend_strict_raises(self, tmp_path: Path) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog import DuckDBGeoCatalog
+        from geocatalog.backends import DuckDBGeoCatalog
 
         with pytest.raises(CatalogMetadataError, match="_backend"):
             DuckDBGeoCatalog.open(_external_parquet(tmp_path), strict=True)
 
     def test_explicit_backend_bypasses_even_strict(self, tmp_path: Path) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog import DuckDBGeoCatalog
+        from geocatalog.backends import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(
             _external_parquet(tmp_path), kind="vector", strict=True
@@ -144,7 +141,7 @@ class TestDuckDBOpen:
         self, tmp_path: Path, loguru_sink: io.StringIO
     ) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog import DuckDBGeoCatalog
+        from geocatalog.backends import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(_geocatalog_parquet(tmp_path), strict=True)
         assert cat.kind == "vector"
@@ -196,7 +193,7 @@ class TestCorruptBackendTag:
         self, tmp_path: Path, loguru_sink: io.StringIO
     ) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog import DuckDBGeoCatalog
+        from geocatalog.backends import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(_tagged_parquet(tmp_path, "vecotr"))
         assert cat.kind == "raster"
@@ -204,21 +201,21 @@ class TestCorruptBackendTag:
 
     def test_unrecognised_tag_strict_raises(self, tmp_path: Path) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog import DuckDBGeoCatalog
+        from geocatalog.backends import DuckDBGeoCatalog
 
         with pytest.raises(CatalogMetadataError, match="unrecognised _backend tag"):
             DuckDBGeoCatalog.open(_tagged_parquet(tmp_path, "vecotr"), strict=True)
 
     def test_null_tag_strict_raises(self, tmp_path: Path) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog import DuckDBGeoCatalog
+        from geocatalog.backends import DuckDBGeoCatalog
 
         with pytest.raises(CatalogMetadataError, match="no readable value"):
             DuckDBGeoCatalog.open(_tagged_parquet(tmp_path, None), strict=True)
 
     def test_bad_tag_with_explicit_backend_bypasses(self, tmp_path: Path) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog import DuckDBGeoCatalog
+        from geocatalog.backends import DuckDBGeoCatalog
 
         cat = DuckDBGeoCatalog.open(
             _tagged_parquet(tmp_path, "vecotr"), kind="vector", strict=True

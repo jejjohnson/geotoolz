@@ -56,7 +56,7 @@ The same flow as a static figure (rendered by
    attributes, `query`, `intersect`, `union`, `iter_rows`,
    `iter_slices`, `total_bounds`, `temporal_extent`, `len()` and
    `get_config`. Persist either backend
-   with the free function `geocatalog.to_geoparquet(catalog, path)`.
+   with the free function `geocatalog.storage.to_geoparquet(catalog, path)`.
    Backend-specific extras sit outside the Protocol:
    `InMemoryGeoCatalog.where(pandas_query)` and
    `intersect(join="sjoin" | "overlay")`;
@@ -212,8 +212,8 @@ originals are untouched, which makes them safe to compose and cache.
 ```python
 import geocatalog as gc
 
-imagery = gc.build_raster_catalog(...)
-labels  = gc.build_vector_catalog(...)
+imagery = gc.build.build_raster_catalog(...)
+labels  = gc.build.build_vector_catalog(...)
 
 # Rows from imagery whose footprint AND time interval overlap labels.
 paired = gc.intersect(imagery, labels)
@@ -234,9 +234,9 @@ construction).
 ### GeoParquet roundtrip
 
 ```python
-gc.to_geoparquet(catalog, "cat.parquet")
+gc.storage.to_geoparquet(catalog, "cat.parquet")
 # ... share the file ...
-catalog = gc.from_geoparquet("cat.parquet")
+catalog = gc.storage.from_geoparquet("cat.parquet")
 ```
 
 The artifact is **GeoParquet 1.1**, with a per-row covering `bbox`
@@ -249,7 +249,7 @@ For archives that grow over time, write to a directory of
 Hive-partitioned shards and append new rows incrementally:
 
 ```python
-from geocatalog import append_files
+from geocatalog.build import append_files
 
 catalog = append_files(
     archive="data/s2_archive/",              # a local directory
@@ -273,7 +273,7 @@ Default builders collect every row in RAM. Beyond ~10⁵ files the build
 itself becomes the bottleneck. Switch to streaming:
 
 ```python
-catalog = gc.build_raster_catalog(
+catalog = gc.build.build_raster_catalog(
     filepaths,                       # 10^6 Sentinel-2 scenes
     filename_regex=r"S2_T\w+_(?P<date>\d{8}).*\.tif",
     engine="duckdb",
@@ -295,11 +295,11 @@ efficient predicate pushdown at query time.
 ```python
 import geocatalog as gc
 
-catalog = gc.build_raster_catalog(...)
-domain = gc.CatalogDomain(catalog=catalog, resolution=(10.0, 10.0))
+catalog = gc.build.build_raster_catalog(...)
+domain = gc.patch.CatalogDomain(catalog=catalog, resolution=(10.0, 10.0))
 
 for slice_ in domain.slices():
-    chip = gc.load_raster(catalog, slice_, band_indexes=[2, 3, 4, 8])
+    chip = gc.load.load_raster(catalog, slice_, band_indexes=[2, 3, 4, 8])
     yield model(chip.values)
 ```
 
@@ -309,7 +309,7 @@ that iterates `domain.slices()` and loads each slice itself. It
 accepts either backend; point and line footprints become one-pixel
 slices, and rows without a footprint are skipped with a warning.
 
-With the `[patch]` extra installed, `geocatalog.staging.field_for(catalog,
+With the `[patch]` extra installed, `geocatalog.patch.field_for(catalog,
 slice_, asset=...)` hands a catalog directly to `geopatcher.SpatialPatcher`:
 it mosaics the rows the slice selects onto the slice grid with `load_raster`
 (in the slice CRS, warping files in other CRSs) and wraps the `GeoTensor`

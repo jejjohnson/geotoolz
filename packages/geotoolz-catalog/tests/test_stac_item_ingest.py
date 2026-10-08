@@ -21,10 +21,10 @@ import shapely.ops
 
 pystac = pytest.importorskip("pystac")
 
-from geocatalog import from_stac_items
 from geocatalog._src._stac_item import is_signed_href, reproject_geometry
 from geocatalog._src.bundle._catalog_bundle import source_row_to_gdf_row
 from geocatalog._src.sources.stac import _item_to_source_row
+from geocatalog.sources import from_stac_items
 
 
 NOTCHED = shapely.Polygon([(0, 0), (4, 0), (4, 4), (2, 2), (0, 4)])
@@ -255,7 +255,7 @@ def test_split_footprints_are_densified_per_part() -> None:
 
 
 def test_export_projection_fields_follow_the_asset_crs() -> None:
-    from geocatalog import to_stac_collection
+    from geocatalog.storage import to_stac_collection
 
     item = _item(
         properties={"proj:code": "EPSG:32633"}, asset_fields={"proj:epsg": 32634}
@@ -299,7 +299,7 @@ def test_nested_multipart_members_are_densified_per_part() -> None:
 
 
 def test_export_of_an_unlocated_asset_drops_carried_projection() -> None:
-    from geocatalog import to_stac_collection
+    from geocatalog.storage import to_stac_collection
 
     item = _item(
         properties={"proj:code": "EPSG:32633"}, asset_fields={"proj:code": None}
@@ -340,7 +340,7 @@ def test_segment_180_degrees_long_goes_over_the_pole() -> None:
 
 
 def test_empty_bundle_has_the_ingested_schema() -> None:
-    from geocatalog import CatalogBundle
+    from geocatalog.storage import CatalogBundle
 
     empty = CatalogBundle.empty(crs="EPSG:4326").catalog.gdf
     row = source_row_to_gdf_row(_source_row(_item()), crs=pyproj.CRS("EPSG:4326"))

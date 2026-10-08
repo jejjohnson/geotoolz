@@ -41,7 +41,7 @@ TAHOE_BBOX = (-120.25, 38.85, -119.85, 39.30)
 
 
 def band_catalog(asset_key):
-    return gc.from_stac_search(
+    return gc.sources.from_stac_search(
         "https://planetarycomputer.microsoft.com/api/stac/v1",
         collections=["sentinel-2-l2a"],
         bounds=TAHOE_BBOX,
@@ -58,8 +58,8 @@ aoi = gc.GeoSlice(
     resolution=(0.0001, 0.0001),
     crs="EPSG:4326",
 )
-red = gc.load_raster(band_catalog("B04").query(aoi), aoi)   # (1, H, W) GeoTensor
-nir = gc.load_raster(band_catalog("B08").query(aoi), aoi)
+red = gc.load.load_raster(band_catalog("B04").query(aoi), aoi)   # (1, H, W) GeoTensor
+nir = gc.load.load_raster(band_catalog("B08").query(aoi), aoi)
 scene = gz.StackBands()([red, nir])                          # (2, H, W)
 
 ndvi = (gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir=1, red=0))(scene)
@@ -126,8 +126,8 @@ grid (in the slice CRS, whatever CRS the files are in) as one `geopatcher`
 so build the `Field` first; then the whole flow is one `Sequential`:
 
 ```python
-staged = gc.stage(band_catalog("B04").query(aoi), dest="./cache")
-field = gc.field_for(staged, aoi)                   # one Field on the AOI grid
+staged = gc.staging.stage(band_catalog("B04").query(aoi), dest="./cache")
+field = gc.patch.field_for(staged, aoi)                   # one Field on the AOI grid
 
 pipe = gz.Sequential([
     GridSampler(patcher=patcher),                    # geotoolz.patch_ops → geopatcher

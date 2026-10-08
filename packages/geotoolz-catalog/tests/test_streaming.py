@@ -23,14 +23,10 @@ import shapely.geometry
 
 duckdb = pytest.importorskip("duckdb")
 
-from geocatalog import (
-    append_files,
-    build_raster_catalog,
-    build_vector_catalog,
-    open_catalog,
-)
+from geocatalog import open_catalog
 from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
 from geocatalog._src.streaming import StreamingParquetWriter, _iter_rows_parallel
+from geocatalog.build import append_files, build_raster_catalog, build_vector_catalog
 
 
 RASTER_REGEX = r"S2_T29SND_(?P<date>\d{8})_\d+_\d+\.tif"
@@ -226,7 +222,7 @@ class TestXarrayStreamingRoundtrip:
         paths = sorted(tmp_path.glob("modis_*.nc"))
 
         out = tmp_path / "xarray_cat.parquet"
-        from geocatalog import build_xarray_catalog
+        from geocatalog.build import build_xarray_catalog
 
         catalog = build_xarray_catalog(
             paths,
@@ -588,7 +584,7 @@ class TestPartitionedArchives:
 
 def _build_cat_for_open():
     """Build a tiny `InMemoryGeoCatalog` for `DuckDBGeoCatalog.open` tests."""
-    from geocatalog import InMemoryGeoCatalog
+    from geocatalog.backends import InMemoryGeoCatalog
 
     gdf = gpd.GeoDataFrame(
         {
@@ -792,7 +788,7 @@ class TestValidation:
             },
         )
         ds.to_netcdf(tmp_path / "x.nc")
-        from geocatalog import build_xarray_catalog
+        from geocatalog.build import build_xarray_catalog
 
         with pytest.raises(ValueError, match="must be 'memory' or 'duckdb'"):
             build_xarray_catalog(
@@ -814,7 +810,7 @@ class TestValidation:
             },
         )
         ds.to_netcdf(tmp_path / "x.nc")
-        from geocatalog import build_xarray_catalog
+        from geocatalog.build import build_xarray_catalog
 
         with pytest.raises(ValueError, match="requires crs"):
             build_xarray_catalog(

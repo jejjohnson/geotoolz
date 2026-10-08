@@ -5,7 +5,7 @@ for a lazy SQL relation on top of a GeoParquet artifact (a single file,
 a directory of shards, or a DuckDB-readable URI). The `GeoCatalog`
 Protocol surface (``query`` / ``intersect`` / ``union`` /
 ``iter_slices``) is the same — loaders, `CatalogDomain` and
-`geocatalog.staging.field_for` work against either backend without
+`geocatalog.patch.field_for` work against either backend without
 branching.
 
 Why DuckDB:
@@ -71,8 +71,8 @@ from geocatalog._src.retry import retry_transient_io
 from geocatalog._src.uri import DUCKDB_EXTENSIONS, parse_uri
 
 
-# DuckDB is the optional dep for this backend. The module loader inside
-# `geocatalog.__getattr__` raises a friendly ImportError if the
+# DuckDB is the optional dep for this backend. The lazy facade loader
+# (`geocatalog._src._lazy`) raises a friendly ImportError if the
 # `[duckdb]` extra is missing, so we don't need to repeat that message in
 # every public function.
 try:

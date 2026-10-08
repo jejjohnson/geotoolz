@@ -9,7 +9,8 @@ import pandas as pd
 import pyproj
 import pytest
 
-from geocatalog import GeoSlice, slice_to_window, window_to_slice
+from geocatalog import GeoSlice
+from geocatalog.grid import slice_to_window, window_to_slice
 
 
 @pytest.fixture

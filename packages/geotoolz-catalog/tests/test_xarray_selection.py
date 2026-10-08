@@ -15,7 +15,9 @@ xr = pytest.importorskip("xarray")
 
 import numpy as np
 
-from geocatalog import GeoSlice, build_xarray_catalog, load_xarray
+from geocatalog import GeoSlice
+from geocatalog.build import build_xarray_catalog
+from geocatalog.load import load_xarray
 
 
 def _write(
@@ -142,7 +144,7 @@ def test_crs_recovered_without_caller_importing_rioxarray(tmp_path: Path) -> Non
     ds.to_netcdf(path)
     # Fresh interpreter: rioxarray is not imported unless geocatalog does it.
     code = (
-        "import sys; from geocatalog import build_xarray_catalog; "
+        "import sys; from geocatalog.build import build_xarray_catalog; "
         f"c = build_xarray_catalog([{str(path)!r}]); "
         "print('rioxarray' in sys.modules, c.gdf['crs'].iloc[0])"
     )

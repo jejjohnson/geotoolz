@@ -68,7 +68,7 @@ print(f"discovered {len(rows)} scenes from MPC")
 # `catalog` is the unit Step 2 below expects; the next section's
 # `from_stac_search` is the same flow in one line.
 import geopandas as gpd
-from geocatalog.bundle import source_row_to_gdf_row
+from geocatalog.sources import source_row_to_gdf_row
 
 gdf = gpd.GeoDataFrame(
     [
@@ -77,12 +77,12 @@ gdf = gpd.GeoDataFrame(
     ],
     crs="EPSG:4326",
 )
-catalog = gc.InMemoryGeoCatalog(gdf, kind="raster")
+catalog = gc.backends.InMemoryGeoCatalog(gdf, kind="raster")
 print(f"len(catalog): {len(catalog)}")
 ```
 
 If you want provenance (which query produced which rows), use
-[`CatalogBundle`](api/sources.md#bundle) instead —
+[`CatalogBundle`](api/storage.md#provenance-bundles) instead —
 `CatalogBundle.empty().ingest(src, bounds=..., interval=..., ...)`
 runs the same `Source.query` internally and records a `QueryRecord`
 per call.
@@ -97,7 +97,7 @@ If you don't need provenance, `from_stac_search` builds the catalog in
 one call:
 
 ```python
-catalog = gc.from_stac_search(
+catalog = gc.sources.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     collections=["sentinel-2-l2a"],
     bounds=TAHOE_BBOX,
@@ -155,7 +155,7 @@ scene_slice = gc.GeoSlice(
 )
 
 # Materialise — this is the first time we actually open a raster file.
-tensor = gc.load_raster(
+tensor = gc.load.load_raster(
     hits,
     scene_slice,
     band_indexes=[1],   # B04 alone, since asset_key="B04" above
@@ -176,7 +176,7 @@ You'll want to reuse this catalog without re-querying STAC every
 time. Write it to GeoParquet:
 
 ```python
-gc.to_geoparquet(catalog, "tahoe_s2_summer_2024.parquet")
+gc.storage.to_geoparquet(catalog, "tahoe_s2_summer_2024.parquet")
 
 # Later, reopen — prefers DuckDB if installed.
 catalog = gc.open_catalog("tahoe_s2_summer_2024.parquet")

@@ -10,11 +10,8 @@ import pandas as pd
 import pyarrow.parquet as pq
 import shapely.geometry
 
-from geocatalog import (
-    InMemoryGeoCatalog,
-    from_geoparquet,
-    to_geoparquet,
-)
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.storage import from_geoparquet, to_geoparquet
 
 
 def _toy_catalog() -> InMemoryGeoCatalog:

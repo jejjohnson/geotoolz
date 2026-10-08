@@ -12,7 +12,9 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.transform import from_bounds
 
-from geocatalog import GeoSlice, build_raster_catalog, load_raster
+from geocatalog import GeoSlice
+from geocatalog.build import build_raster_catalog
+from geocatalog.load import load_raster
 
 
 REGEX = r"S2_(?P<name>[A-Za-z0-9]+)_(?P<date>\d{8})_.*\.tif"

@@ -8,7 +8,10 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-build/
+# Build output at the repo and package roots (not the geocatalog.build
+# source package).
+/build/
+/packages/*/build/
 develop-eggs/
 dist/
 downloads/

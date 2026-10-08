@@ -14,7 +14,7 @@ and streamed straight into the Parquet writer; peak RAM is
 ```python
 import geocatalog as gc
 
-catalog = gc.build_raster_catalog(
+catalog = gc.build.build_raster_catalog(
     filepaths=glob("/data/s2/**/*.tif"),     # 1M Sentinel-2 scenes
     filename_regex=r"S2_T\w+_(?P<date>\d{8}).*\.tif",
     engine="duckdb",
@@ -46,7 +46,7 @@ Hive-partitioned shards. Each new batch of files writes only the new
 rows, into the right partitions, without rewriting existing shards.
 
 ```python
-from geocatalog import append_files
+from geocatalog.build import append_files
 
 # Initial build — write to a directory, partition by year/month.
 catalog = append_files(
@@ -158,5 +158,5 @@ InMemory and swap to DuckDB when the row count grows.
 - [Concepts: persistence](../concepts.md#persistence) — schema and bbox-column details
 - [Recipes: STAC ingestion](from-stac.md) — populating an archive from STAC
 - [Recipes: staging & bundles](staging-and-bundles.md) — when to materialise to local disk
-- [API: `append_files`](../api/reference.md) — full signature
+- [API: `append_files`](../api/build.md) — full signature
 - [DuckDB scale-out walkthrough ↗](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/catalog/04_duckdb.ipynb) — `DuckDBGeoCatalog` against a real S2 GeoParquet artifact, plus the Overture buildings recipe (billions of rows).

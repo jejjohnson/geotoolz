@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import shapely.geometry
 
-from geocatalog import InMemoryGeoCatalog
+from geocatalog.backends import InMemoryGeoCatalog
 
 
 def make_inmemory_catalog(

@@ -88,9 +88,11 @@ packages/
 ├── geotoolz-cloud/           # src/geocloud — store (the one obstore client pool)
 │   │                         # and cog (CogSource / AsyncCogReader); I/O shared
 │   │                         # by every package, depends on georeader only.
-├── geotoolz-catalog/         # src/geocatalog — GeoCatalog Protocol (InMemory +
-│                             # DuckDB), GeoSlice, loaders, sources, matchup,
-│                             # staging, cyclopts CLI.
+├── geotoolz-catalog/         # src/geocatalog — root: GeoCatalog, GeoSlice,
+│                             # open_catalog, query/intersect/union; one home
+│                             # per name in sources, build, backends, matchup,
+│                             # load, storage, staging, patch, grid, utils;
+│                             # cyclopts CLI.
 └── geotoolz-products/        # src/geoproducts — ProductReader ABC + per-sensor /
                               # per-provider reader subpackages (toy_sensor,
                               # carbonmapper behind its [carbonmapper] extra);

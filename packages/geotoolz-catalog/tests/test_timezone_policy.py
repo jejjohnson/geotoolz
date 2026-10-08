@@ -20,7 +20,9 @@ import pyarrow.parquet as pq
 import pytest
 import shapely
 
-from geocatalog import GeoCatalog, GeoSlice, InMemoryGeoCatalog, to_geoparquet
+from geocatalog import GeoCatalog, GeoSlice
+from geocatalog.backends import InMemoryGeoCatalog
+from geocatalog.storage import to_geoparquet
 
 
 # Row: 12:00-14:00 in the catalog's zone. Madrid is UTC+1 in January,
@@ -173,7 +175,7 @@ def test_duckdb_timestamptz_artifact_ignores_session_zone(tmp_path: Path) -> Non
 
 def test_bundle_ingest_aware_source_rows_into_naive_catalog() -> None:
     from geocatalog._src.sources._base import SourceRow
-    from geocatalog.bundle import CatalogBundle
+    from geocatalog.storage import CatalogBundle
 
     class _Src:
         name = "fake"

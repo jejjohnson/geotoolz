@@ -10,7 +10,7 @@ import pytest
 import shapely
 import shapely.geometry
 
-from geocatalog import InMemoryGeoCatalog
+from geocatalog.backends import InMemoryGeoCatalog
 
 
 def _build(rows: list[dict], crs: str = "EPSG:32629") -> InMemoryGeoCatalog:

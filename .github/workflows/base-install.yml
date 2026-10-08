@@ -119,12 +119,12 @@ jobs:
                   transform=from_origin(500000, 4000080, 10, 10),
               ) as dst:
                   dst.write(np.ones((1, 8, 8), dtype="uint8"))
-              cat = geocatalog.build_raster_catalog(
+              cat = geocatalog.build.build_raster_catalog(
                   [tif], filename_regex=r"(?P<date>\d{8})"
               )
               assert len(cat) == 1, len(cat)
               out = Path(tmp) / "catalog.parquet"
-              geocatalog.to_geoparquet(cat, out)
+              geocatalog.storage.to_geoparquet(cat, out)
               assert len(geocatalog.open_catalog(out)) == 1
 
               # Extra-backed features fail only on use, naming the extra.

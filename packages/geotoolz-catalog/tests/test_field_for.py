@@ -1,4 +1,4 @@
-"""Tests for `geocatalog.staging.field_for` — the geopatcher bridge (#244).
+"""Tests for `geocatalog.patch.field_for` — the geopatcher bridge (#244).
 
 The whole module is skipped when geopatcher isn't installed so a
 plain install (without the `[patch]` extra) still passes CI. With

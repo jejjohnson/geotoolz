@@ -48,7 +48,7 @@ logger.add(
     diagnose=True,
 )
 
-cat = gc.build_raster_catalog(paths, ...)
+cat = gc.build.build_raster_catalog(paths, ...)
 ```
 
 ## Where logs come from

@@ -36,7 +36,7 @@ Skip `stage()` when:
 import geocatalog as gc
 from geocatalog.staging import LocalCache, stage
 
-remote_catalog = gc.from_stac_search(
+remote_catalog = gc.sources.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     collections=["sentinel-2-l2a"],
     bounds=(-120.25, 38.85, -119.85, 39.30),
@@ -52,7 +52,7 @@ local_catalog = stage(
 )
 
 # local_catalog.gdf['filepath'] now points to local paths.
-tensor = gc.load_raster(local_catalog, aoi, band_indexes=[1])
+tensor = gc.load.load_raster(local_catalog, aoi, band_indexes=[1])
 ```
 
 `stage()` returns a **new** catalog with rewritten `filepath`s — each
@@ -122,7 +122,7 @@ Skip bundles when:
 
 ```python
 import pandas as pd
-from geocatalog.bundle import CatalogBundle
+from geocatalog.storage import CatalogBundle
 from geocatalog.sources import STACSource, EarthAccessSource
 
 bundle = CatalogBundle.empty(crs="EPSG:4326")
@@ -197,6 +197,6 @@ bundle.to_directory("./bundle/")
 
 - [Recipes: STAC ingestion](from-stac.md) — `from_stac_search` vs `STACSource`
 - [Recipes: large archives](large-archives.md) — when the catalog itself is too big to stage everything
-- [API: `stage`](../api/reference.md)
-- [API: `CatalogBundle`](../api/reference.md)
+- [API: `stage`](../api/staging.md)
+- [API: `CatalogBundle`](../api/storage.md#provenance-bundles)
 - [Catalog backends walkthrough ↗](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/catalog/02_backends.ipynb) — raster (Sentinel-2) + xarray (Copernicus DEM) + vector (Natural Earth) backends end-to-end.

@@ -14,14 +14,9 @@ import shapely.geometry
 duckdb = pytest.importorskip("duckdb")
 
 import geocatalog._src.duckdb_backend as duckdb_backend
-from geocatalog import (
-    CatalogClosedError,
-    DuckDBGeoCatalog,
-    GeoSlice,
-    InMemoryGeoCatalog,
-    open_catalog,
-    to_geoparquet,
-)
+from geocatalog import GeoSlice, open_catalog
+from geocatalog.backends import CatalogClosedError, DuckDBGeoCatalog, InMemoryGeoCatalog
+from geocatalog.storage import to_geoparquet
 
 
 CLOSED_CONNECTION_MESSAGE = (

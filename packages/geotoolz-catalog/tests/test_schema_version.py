@@ -18,15 +18,15 @@ from pathlib import Path
 import geopandas as gpd
 import pytest
 
-from geocatalog import (
+from geocatalog._cli import app
+from geocatalog._src import parquet as parquet_module
+from geocatalog.backends import CatalogSchemaError
+from geocatalog.storage import (
     SCHEMA_VERSION_CURRENT,
-    CatalogSchemaError,
     from_geoparquet,
     migrate_geoparquet,
     to_geoparquet,
 )
-from geocatalog._cli import app
-from geocatalog._src import parquet as parquet_module
 
 
 def _build_artifact(
@@ -37,7 +37,7 @@ def _build_artifact(
 ) -> Path:
     """Write a 1-row catalog at the given `schema_version`."""
     src = factory((500000, 4000000, 510000, 4010000), "20240601")
-    from geocatalog import build_raster_catalog
+    from geocatalog.build import build_raster_catalog
 
     cat = build_raster_catalog(
         [src],
@@ -373,8 +373,8 @@ def test_read_schema_version_cheap_for_migrate(
         tmp_path, utm29_tile_factory, schema_version=SCHEMA_VERSION_CURRENT
     )
 
-    from geocatalog import migrate_geoparquet
     from geocatalog._src import parquet as parquet_module
+    from geocatalog.storage import migrate_geoparquet
 
     read_calls = []
     original = parquet_module.gpd.read_parquet

@@ -1,13 +1,14 @@
-# Staging & the patcher bridge
+# Staging — `geocatalog.staging`
 
-Resolve remote URIs into a local cache and hand staged rows to
-`geopatcher` as Fields.
+Copy the remote assets a catalog points at into a local cache, and get
+back the same catalog with its paths rewritten to the local copies.
+Hand the result to the [loaders](load.md) or to
+[`field_for`](patch.md).
 
 ## Staging
 
 ::: geocatalog.staging.stage
 ::: geocatalog.staging.LocalCache
-::: geocatalog.staging.field_for
 
 ## Object-store pool
 
@@ -17,7 +18,3 @@ staged or catalogued objects with range requests, install
 `geotoolz-cloud` and take the client from
 [`geocloud.store`](../../cloud/api.md) — one pool per process for the
 whole stack.
-
-## Bridge to a patcher
-
-::: geocatalog.catalog.CatalogDomain
