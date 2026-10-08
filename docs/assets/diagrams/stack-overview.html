@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The geostack</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1560px; }
+  .grid {
+    display: grid;
+    grid-template-columns: 300px 250px 300px 250px;
+    column-gap: 118px;
+    align-items: center;
+  }
+  .stack { display: flex; flex-direction: column; gap: 26px; }
+  .lane .node + .node { margin-top: 24px; }
+  .base-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 34px;
+  }
+  .slab {
+    display: flex; align-items: center; gap: 14px;
+    border-radius: 14px; padding: 12px 16px;
+    background: var(--base-bg); border: 1.5px solid #cbd5e1;
+  }
+  .slab .lib { font-weight: 700; font-size: 15px; white-space: nowrap; }
+  .slab .what { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+  .slab code { font-family: var(--mono); font-size: 12px; color: var(--ink); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">The geostack — find · read · cut · compute · stitch</div>
+  <div class="subtitle">Four packages, one carrier. Every arrow is a typed object you can hold in a variable.</div>
+
+  <div class="grid">
+    <!-- column 1: find + read -->
+    <div class="stack">
+      <div class="lane find" id="lane-find">
+        <div class="lane-head"><span class="verb">find</span><span class="pkg">geotoolz-catalog</span></div>
+        <div class="node" id="slice">
+          <div class="name"><code>GeoSlice</code></div>
+          <div class="desc">bounds × time × resolution × CRS — the one request every catalog answers</div>
+        </div>
+        <div class="node" id="catalog">
+          <div class="name"><code>GeoCatalog</code></div>
+          <div class="desc">STAC · CMR · local files → InMemory or DuckDB index; <code>query()</code> opens no file</div>
+        </div>
+      </div>
+      <div class="lane read" id="lane-read">
+        <div class="lane-head"><span class="verb">read</span><span class="pkg">geotoolz-products</span></div>
+        <div class="node" id="reader">
+          <div class="name"><code>ProductReader</code></div>
+          <div class="desc">one reader per mission or provider — <code>toy_sensor</code>, <code>carbonmapper</code> — each a georeader <code>GeoData</code></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- column 2: cut -->
+    <div class="lane cut" id="lane-cut">
+      <div class="lane-head"><span class="verb">cut</span><span class="pkg">geotoolz-patcher</span></div>
+      <div class="node" id="field">
+        <div class="name"><code>Field</code></div>
+        <div class="desc">raster · grid · vector · point</div>
+      </div>
+      <div class="node" id="split">
+        <div class="name"><code>SpatialPatcher.split</code></div>
+        <div class="desc">Geometry × Sampler × Window decide what each patch sees</div>
+      </div>
+    </div>
+
+    <!-- column 3: compute -->
+    <div class="lane compute" id="lane-compute">
+      <div class="lane-head"><span class="verb">compute</span><span class="pkg">geotoolz</span></div>
+      <div class="node" id="ops">
+        <div class="name"><code>Operator</code> · <code>Sequential</code> · <code>Graph</code></div>
+        <div class="desc">radiometry · indices · qa · mask · geom · compositing · plume · matched_filter · learn · viz · …</div>
+        <div class="chips"><span class="chip">GeoTensor in → GeoTensor out</span></div>
+      </div>
+    </div>
+
+    <!-- column 4: stitch -->
+    <div class="lane cut" id="lane-stitch">
+      <div class="lane-head"><span class="verb">stitch</span><span class="pkg">geotoolz-patcher</span></div>
+      <div class="node" id="merge">
+        <div class="name"><code>SpatialPatcher.merge</code></div>
+        <div class="desc">Aggregation blends overlaps — OverlapAdd · Mean · WeightedSum; in memory or streamed to zarr</div>
+      </div>
+      <div class="node solid" id="result">
+        <div class="name">result on the AOI grid</div>
+        <div class="desc">same CRS · transform · fill as the request</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="base-row">
+    <div class="slab">
+      <div class="lib">georeader</div>
+      <div class="what"><code>GeoTensor</code> — the array every reader returns and every operator takes; it carries CRS, transform, band names and fill value end to end.</div>
+    </div>
+    <div class="slab">
+      <div class="lib">pipekit</div>
+      <div class="what"><code>Operator</code> · <code>Sequential</code> · <code>Graph</code> — every step composes and serialises the same way; <code>patch_ops</code> turns split → operate → merge into one more <code>Sequential</code>.</div>
+    </div>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  wire("slice", "catalog", { from: "bottom", to: "top", bend: 14, color: "#7b6bb5" });
+  wire("lane-find", "lane-cut", { toShift: -30, at: 0.42, label: "<span class='t'>stage · field_for</span>", color: "#7b6bb5" });
+  wire("lane-read", "lane-cut", { toShift: 70, at: 0.5, label: "<span class='t'>GeoTensor</span>", color: "#23978a" });
+  wire("field", "split", { from: "bottom", to: "top", bend: 14, color: "#3f6fb5" });
+  wire("lane-cut", "lane-compute", { fromShift: 50, label: "<span class='t'>Patch</span><span class='s'>× N</span>", color: "#3f6fb5" });
+  wire("lane-compute", "lane-stitch", { label: "<span class='t'>Patch</span><span class='s'>× N</span>", color: "#cf9418" });
+  wire("merge", "result", { from: "bottom", to: "top", bend: 14, color: "#3f6fb5" });
+  ready();
+</script>
+</body>
+</html>

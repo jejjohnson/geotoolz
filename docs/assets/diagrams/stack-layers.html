@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Geostack dependency layers</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1480px; }
+  .pkgs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    column-gap: 96px;
+    margin-top: 160px;
+  }
+  .pkg-card { border-radius: 16px; border: 1.5px solid var(--accent); background: var(--tint); padding: 16px; }
+  .pkg-card .verb { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .pkg-card .dist { font-size: 17px; font-weight: 700; margin-top: 4px; color: var(--ink-accent); }
+  .pkg-card .imp { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .pkg-card .one { font-size: 12.5px; line-height: 1.45; color: var(--ink); margin-top: 10px; }
+  .slabs { display: grid; grid-template-columns: repeat(4, 1fr); column-gap: 96px; row-gap: 14px; margin-top: 44px; }
+  .slab { border-radius: 14px; padding: 12px 16px; background: var(--base-bg); border: 1.5px solid #cbd5e1;
+          display: flex; align-items: baseline; gap: 12px; }
+  .slab .lib { font-weight: 700; font-size: 15px; }
+  .slab .what { font-size: 12.5px; color: var(--muted); }
+  .slab code { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+  #georeader { grid-column: 1 / -1; }
+  #pipekit { grid-column: 3 / -1; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">Dependency layers</div>
+  <div class="subtitle">A strict layering: every package stands on georeader, nothing depends back up, and every cross-package link is an opt-in extra.</div>
+
+  <div class="pkgs">
+    <div class="pkg-card read" id="p-products">
+      <div class="verb">read</div>
+      <div class="dist">geotoolz-products</div>
+      <div class="imp">import geoproducts</div>
+      <div class="one">ProductReader ABC + per-provider readers (toy_sensor, carbonmapper)</div>
+    </div>
+    <div class="pkg-card find" id="p-catalog">
+      <div class="verb">find</div>
+      <div class="dist">geotoolz-catalog</div>
+      <div class="imp">import geocatalog</div>
+      <div class="one">GeoSlice queries over InMemory / DuckDB catalogs; STAC · CMR sources; loaders</div>
+    </div>
+    <div class="pkg-card cut" id="p-patcher">
+      <div class="verb">cut</div>
+      <div class="dist">geotoolz-patcher</div>
+      <div class="imp">import geopatcher</div>
+      <div class="one">Four-axis SpatialPatcher, Field adapters, the shared obstore pool</div>
+    </div>
+    <div class="pkg-card compute" id="p-geotoolz">
+      <div class="verb">compute</div>
+      <div class="dist">geotoolz</div>
+      <div class="imp">import geotoolz</div>
+      <div class="one">Carrier-preserving Operator families; patch_ops bridges the patcher</div>
+    </div>
+  </div>
+
+  <div class="slabs">
+    <div class="slab" id="pipekit"><span class="lib">pipekit</span><span class="what"><code>Operator</code> · <code>Sequential</code> · <code>Graph</code> — geotoolz always, geopatcher via <code>[pipekit]</code></span></div>
+    <div class="slab" id="georeader"><span class="lib">georeader</span><span class="what"><code>GeoTensor</code> · <code>GeoData</code> · <code>RasterioReader</code> — the carrier under all four packages</span></div>
+  </div>
+
+  <div class="legend">
+    <span><i></i> hard dependency</span>
+    <span><i class="dash"></i> opt-in extra, labelled <code>[name]</code></span>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const X = "#64748b";
+  wire("p-products", "p-patcher", { from: "top", to: "top", bend: 80, dashed: true, color: X, fromShift: 40, toShift: -40,
+        label: "<span class='t'>[obstore]</span>" });
+  wire("p-products", "p-geotoolz", { from: "top", to: "top", bend: 140, dashed: true, color: X, fromShift: -40, toShift: 30,
+        label: "<span class='t'>[operators]</span><span class='s'>sensor presets</span>" });
+  wire("p-catalog", "p-patcher", { from: "right", to: "left", dashed: true, color: X, fromShift: -30, toShift: -30,
+        label: "<span class='t'>[patch]</span>", dy: -18 });
+  wire("p-catalog", "p-patcher", { from: "right", to: "left", dashed: true, color: X, fromShift: 30, toShift: 30,
+        label: "<span class='t'>[obstore]</span>", dy: 18 });
+  wire("p-geotoolz", "p-patcher", { from: "left", to: "right", dashed: true, color: X,
+        label: "<span class='t'>[patch]</span>", dy: -18 });
+  wire("p-patcher", "pipekit", { from: "bottom", to: "top", dashed: true, color: X, fromShift: 40, toShift: -150, bend: 18 });
+  wire("p-geotoolz", "pipekit", { from: "bottom", to: "top", color: "#475569", toShift: 150, bend: 18 });
+  ready();
+</script>
+</body>
+</html>

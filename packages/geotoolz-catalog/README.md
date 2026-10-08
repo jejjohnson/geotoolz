@@ -14,20 +14,7 @@
 
 > **A spatiotemporal index over geospatial files.** Ask *"what overlaps this AOI between these dates?"* and get an answer in milliseconds — without opening a single file.
 
-```mermaid
-flowchart LR
-    A[Source<br/><sub>STAC / CMR /<br/>EarthAccess</sub>] --> B[Bundle<br/><sub>queries +<br/>matchups</sub>]
-    B --> C[Catalog<br/><sub>InMemory or<br/>DuckDB</sub>]
-    C --> D[GeoSlice<br/><sub>bbox + interval<br/>+ CRS + res</sub>]
-    D --> E[Loader<br/><sub>load_raster /<br/>load_vector</sub>]
-    E --> F[(GeoTensor)]
-    style A fill:#e8f0fb,stroke:#4C72B0
-    style B fill:#e9f5ec,stroke:#55A868
-    style C fill:#fbe8e9,stroke:#C44E52
-    style D fill:#efeaf6,stroke:#8172B2
-    style E fill:#fbf6e3,stroke:#CCB974
-    style F fill:#eee,stroke:#888
-```
+<p align="center"><img src="../../docs/assets/diagrams/catalog-flow.png" alt="geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoTensor, GeoDataFrame or RasterField" width="100%"></p>
 
 ## 30-second pitch
 
@@ -44,32 +31,53 @@ R-tree, sub-millisecond queries up to ~10⁵ rows) and `DuckDBGeoCatalog`
 (GeoParquet 1.1 with bbox-column predicate pushdown, scales to 10⁶+ rows
 and queryable straight from `s3://` URIs).
 
-## One working snippet
+## Quickstart
 
 ```python
 import pandas as pd
+from georeader.geotensor import GeoTensor
+
 import geocatalog as gc
 
-catalog = gc.build_raster_catalog(
-    filepaths=["scene1.tif", "scene2.tif", "scene3.tif"],
-    filename_regex=r"scene(?P<id>\d+)\.tif",
-    crs="EPSG:32629",
+catalog: gc.InMemoryGeoCatalog = gc.build_raster_catalog(
+    filepaths=["s2_20240605.tif", "s2_20240612.tif", "s2_20240801.tif"],  # 4-band uint16, EPSG:32611
+    filename_regex=r"s2_(?P<date>\d{8})\.tif",                          # time from the file name
+    crs="EPSG:32611",
+)                                                                        # 3 rows · footprints, times, paths
+
+aoi: gc.GeoSlice = gc.GeoSlice(
+    bounds=(502_000, 4_302_000, 507_000, 4_307_000),                     # 5 km × 5 km, UTM 11N metres
+    interval=pd.Interval(pd.Timestamp("2024-06-01"), pd.Timestamp("2024-06-30"), closed="both"),
+    resolution=(10.0, 10.0),                                             # → grid (H, W) = (500, 500)
+    crs="EPSG:32611",
 )
 
-aoi = gc.GeoSlice(
-    bounds=(500_000, 4_000_000, 540_000, 4_040_000),
-    interval=pd.Interval(
-        pd.Timestamp("2024-06-01"),
-        pd.Timestamp("2024-06-30"),
-        closed="both",
-    ),
-    resolution=(10.0, 10.0),
-    crs="EPSG:32629",
-)
-
-hits = catalog.query(aoi)            # which files? (no I/O on the files themselves)
-tensor = gc.load_raster(hits, aoi, band_indexes=[1, 2, 3])     # materialise the hits
+hits: gc.InMemoryGeoCatalog = catalog.query(aoi)                         # 2 rows — no file opened
+tensor: GeoTensor = gc.load_raster(hits, aoi, band_indexes=[1, 2, 3])    # (3, 500, 500) uint16, mosaicked
 ```
+
+`hits` is itself a catalog, so queries chain and set-combine; only
+`load_raster` (or `load_vector`) opens files, and only the ones that
+overlap. From STAC, the same flow starts with
+`gc.from_stac_search(client, collections=["sentinel-2-l2a"], bounds=..., datetime="2024-06", asset_key="B04")`.
+
+## Bridging to a patcher
+
+`geocatalog.staging.field_for` (the `[patch]` extra) mosaics the rows a
+`GeoSlice` selects into one `geopatcher.RasterField`, which
+`geopatcher.SpatialPatcher` chips with `split` and reassembles with
+`merge`:
+
+```python
+import geopatcher as gp
+
+field: gp.RasterField = gc.field_for(hits, aoi)            # domain (4, 500, 500) uint16, the slice grid
+patches: list[gp.Patch] = list(patcher.split(field))       # see the geopatcher quickstart
+```
+
+`CatalogDomain` is the lighter option: it walks a catalog as one
+`GeoSlice` per row (`domain.slices()`) for code that loads each slice
+itself.
 
 ## Install
 
@@ -105,15 +113,6 @@ uv add geotoolz-catalog
 - **[Recipes](https://jejjohnson.github.io/geotoolz/catalog/recipes/large-archives/)** — large archives, STAC ingestion, staging & bundles
 - **[End-to-end notebook](https://jejjohnson.github.io/geotoolz/catalog/notebooks/end_to_end_lake_tahoe/)** — discover → query → load → patch → stitch (cross-repo with [geotoolz](https://github.com/jejjohnson/geotoolz) and [geopatcher](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher))
 - **[API reference](https://jejjohnson.github.io/geotoolz/catalog/api/reference/)** — full mkdocstrings-generated reference
-
-## Bridging to a patcher
-
-`geocatalog.staging.field_for` (the `[patch]` extra) mosaics the rows a
-`GeoSlice` selects into one `geopatcher.RasterField`, which
-`geopatcher.SpatialPatcher` chips with `split` and reassembles with
-`merge`. `CatalogDomain` is the lighter option: it walks a catalog as
-one `GeoSlice` per row (`domain.slices()`) for code that loads each
-slice itself.
 
 ## Development
 

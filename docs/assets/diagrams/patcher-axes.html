@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>geopatcher four axes</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1620px; }
+  .flow { display: grid; grid-template-columns: 250px 620px 200px 230px; column-gap: 70px; align-items: center; }
+  .scene svg { display: block; margin-top: 8px; border-radius: 8px; }
+  .axes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+  .axis { background: #fff; border: 1.5px solid var(--cut); border-radius: 12px; padding: 10px 12px; display: flex; gap: 12px; align-items: center; }
+  .axis svg { flex: none; }
+  .axis .k { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--cut); }
+  .axis .n { font-family: var(--mono); font-size: 12.5px; font-weight: 600; margin-top: 2px; }
+  .axis .o { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+  .node.compute { --accent: var(--compute); background: var(--compute-bg); }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">SpatialPatcher — four independent axes</div>
+  <div class="subtitle">Pick each axis on its own; any Field goes in, any per-patch callable runs, the aggregation stitches a global result back.</div>
+
+  <div class="flow">
+    <div class="lane cut scene" id="field">
+      <div class="lane-head"><span class="verb">input</span><span class="pkg">Field</span></div>
+      <div class="desc" style="font-size:12px;color:var(--muted)">RasterField · XarrayField · GeoPandasField · XvecField · ObstoreCogField</div>
+      <svg width="214" height="150" viewBox="0 0 214 150">
+        <defs>
+          <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#cfe3c4"/><stop offset=".55" stop-color="#8fb98a"/><stop offset="1" stop-color="#4f7f6a"/>
+          </linearGradient>
+        </defs>
+        <rect width="214" height="150" fill="url(#g)"/>
+        <g fill="none" stroke="#1b2f50" stroke-width="1.5" opacity=".85">
+          <rect x="6" y="6" width="80" height="80"/><rect x="66" y="6" width="80" height="80" stroke-dasharray="4 3"/>
+          <rect x="126" y="6" width="80" height="80"/><rect x="6" y="64" width="80" height="80" stroke-dasharray="4 3"/>
+          <rect x="66" y="64" width="80" height="80"/><rect x="126" y="64" width="80" height="80" stroke-dasharray="4 3"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="lane cut" id="patcher">
+      <div class="lane-head"><span class="verb">compose</span><span class="pkg">SpatialPatcher(geometry, sampler, window, aggregation)</span></div>
+      <div class="axes">
+        <div class="axis">
+          <svg width="46" height="46" viewBox="0 0 46 46"><rect x="4" y="4" width="22" height="22" rx="2" fill="#e7effb" stroke="#3f6fb5" stroke-width="2"/><circle cx="32" cy="32" r="11" fill="#e7effb" stroke="#3f6fb5" stroke-width="2"/></svg>
+          <div><div class="k">Geometry</div><div class="n">SpatialRectangular(<br>size=(256, 256))</div><div class="o">shape of the neighbourhood — rectangle · disk · graph · polygon</div></div>
+        </div>
+        <div class="axis">
+          <svg width="46" height="46" viewBox="0 0 46 46"><g fill="#3f6fb5"><circle cx="9" cy="9" r="3"/><circle cx="23" cy="9" r="3"/><circle cx="37" cy="9" r="3"/><circle cx="9" cy="23" r="3"/><circle cx="23" cy="23" r="3"/><circle cx="37" cy="23" r="3"/><circle cx="9" cy="37" r="3"/><circle cx="23" cy="37" r="3"/><circle cx="37" cy="37" r="3"/></g></svg>
+          <div><div class="k">Sampler</div><div class="n">SpatialRegularStride(<br>step=(192, 192))</div><div class="o">where anchors go — stride · jitter · random · Poisson disk</div></div>
+        </div>
+        <div class="axis">
+          <svg width="46" height="46" viewBox="0 0 46 46"><path d="M3 40 C 12 40, 14 6, 23 6 S 34 40, 43 40" fill="#e7effb" stroke="#3f6fb5" stroke-width="2"/><line x1="3" y1="40.5" x2="43" y2="40.5" stroke="#94a3b8"/></svg>
+          <div><div class="k">Window</div><div class="n">SpatialHann()</div><div class="o">boundary treatment — boxcar · Hann · Tukey · Gaussian</div></div>
+        </div>
+        <div class="axis">
+          <svg width="46" height="46" viewBox="0 0 46 46"><path d="M3 38 C 9 38, 10 12, 16 12 S 24 38, 29 38" fill="none" stroke="#94a3b8" stroke-width="1.5"/><path d="M17 38 C 23 38, 24 12, 30 12 S 38 38, 43 38" fill="none" stroke="#94a3b8" stroke-width="1.5"/><line x1="3" y1="20" x2="43" y2="20" stroke="#3f6fb5" stroke-width="2.5"/></svg>
+          <div><div class="k">Aggregation</div><div class="n">SpatialOverlapAdd()</div><div class="o">local → global merge — OverlapAdd · Mean · WeightedSum; streaming=True writes zarr</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="node compute" id="op">
+      <div class="name">your operator</div>
+      <div class="desc">any callable on <code class="op" style="font-size:12px">patch.data</code> — numpy, a geotoolz <code class="op" style="font-size:12px">Sequential</code>, a model</div>
+    </div>
+
+    <div class="node solid" id="out" style="--accent: var(--cut);">
+      <div class="name">stitched field</div>
+      <div class="desc">the domain's shape, CRS and transform — seams feathered by the window</div>
+    </div>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const B = "#3f6fb5";
+  wire("field", "patcher", { color: B, label: "<span class='t'>split(field)</span>" });
+  wire("patcher", "op", { color: B, label: "<span class='t'>Patch</span><span class='s'>× N</span>" });
+  wire("op", "out", { color: "#cf9418", label: "<span class='t'>merge</span>" });
+  ready();
+</script>
+</body>
+</html>
