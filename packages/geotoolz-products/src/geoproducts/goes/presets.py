@@ -9,15 +9,14 @@ is called, so the readers install without the operator library.
 
 The multi-channel presets expect the channels on one grid: an MCMIP file
 (all 16 channels at 2 km), or L1b readers put together with
-:func:`geoproducts.goes.stack`.
+:func:`geoproducts.stack`.
 """
 
 from __future__ import annotations
 
-from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-from geoproducts._src.extras import missing_extra
+from geoproducts._src.extras import require
 from geoproducts.goes import constants, recipes
 
 
@@ -39,10 +38,7 @@ __all__ = [
 
 
 def _geotoolz(module: str, preset: str) -> Any:
-    try:
-        return import_module(f"geotoolz.{module}")
-    except ImportError as exc:
-        raise missing_extra(f"goes.presets.{preset}", "operators") from exc
+    return require(f"geotoolz.{module}", f"goes.presets.{preset}", "operators")
 
 
 def NDVI() -> Operator:
@@ -78,7 +74,7 @@ def MaskClouds(*, conservative: bool = False) -> Operator:
     probably cloudy). ``conservative=True`` reads the four-level ``ACM``
     band instead and also flags *probably clear* pixels, for analyses that
     need confidently clear sky. Pair with ``gz.mask.ApplyMask`` once the
-    mask is on the data's grid (``goes.stack`` resamples it with ``mode``).
+    mask is on the data's grid (``geoproducts.stack`` resamples it with ``mode``).
 
     Args:
         conservative: Flag probably-clear pixels as well.

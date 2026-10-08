@@ -50,6 +50,7 @@ from pathlib import Path
 
 from georeader.geotensor import GeoTensor
 
+import geoproducts
 from geoproducts import goes
 from geoproducts.goes import aws
 
@@ -119,19 +120,19 @@ acm.quality        # QualityReader(variables=('DQF',)) — on the same grid
 
 Pass `variables=` to choose: `goes.L2Reader(path, variables=["HT"])`.
 
-## One grid: `goes.stack`
+## One grid: `geoproducts.stack`
 
-`stack` reads every reader only where it overlaps a reference grid and warps
+`geoproducts.stack` works for any reader. It reads every reader only where it overlaps a reference grid and warps
 it there with georeader — no operator library needed. Finer float grids are
 averaged, coarser ones interpolated bilinearly, masks resampled with
 `mode` / `nearest`.
 
 ```python
-scene: GeoTensor = goes.stack([cmi, acm, acha])   # (19, 500, 500) float32
+scene: GeoTensor = geoproducts.stack([cmi, acm, acha])   # (19, 500, 500) float32
 scene.attrs["band_names"][-3:]                    # ('BCM', 'ACM', 'HT') — on the 2 km grid
 
 c01, c02, c03 = (goes.Reader(p, calibration="reflectance") for p in l1b_paths)
-rgb_in: GeoTensor = goes.stack([c01, c02, c03], bounds=aoi, crs_bounds="EPSG:4326")
+rgb_in: GeoTensor = geoproducts.stack([c01, c02, c03], bounds=aoi, crs_bounds="EPSG:4326")
                                                   # (3, 437, 530) — C02 averaged to 1 km
 ```
 
@@ -191,7 +192,6 @@ moved: GeoTensor = goes.ParallaxCorrect(
 |---|---|
 | `goes.l1b` | `Reader` (counts / radiance / reflectance / BT), `QualityReader` (DQF) |
 | `goes.l2` | `L2Reader`, `product_code` |
-| `goes.scene` | `stack` |
 | `goes.aws` | `list_files`, `download`, `parse_key`, `ABIFile`, `bucket`, `url` |
 | `goes.recipes` | `Recipe`, `TRUE_COLOR`, `NATURAL_COLOR`, `DAY_CLOUD_PHASE`, `FIRE_TEMPERATURE` |
 | `goes.presets` | `NDVI`, `SyntheticGreen`, `MaskClouds`, `ParallaxCorrect`, `Recipe` and the four named recipes (`[operators]`) |

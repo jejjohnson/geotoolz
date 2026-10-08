@@ -30,12 +30,13 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, cast
 
 import requests
+
+from geoproducts._src.net import retry_after_seconds, retrying, stream_to_file
+from geoproducts._src.query import BBox, validate_lonlat_bbox
 
 
 logger = logging.getLogger(__name__)
@@ -47,33 +48,6 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.carbonmapper.org/api/v1"
 CATALOG_URL = f"{BASE_URL}/catalog"
 STAC_URL = f"{BASE_URL}/stac"
-
-BBox = tuple[float, float, float, float]  # (W, S, E, N) WGS-84
-
-
-def _validate_bbox(bbox: BBox) -> None:
-    """Reject malformed ``(W, S, E, N)`` boxes before they reach the API.
-
-    Raises
-    ------
-    ValueError
-        If ``bbox`` is not length 4, a latitude is outside ``[-90, 90]``,
-        ``S > N``, or ``W > E``. Antimeridian-crossing boxes (``W > E``)
-        are rejected rather than silently misread — split them into two
-        boxes, one on each side of ±180°.
-    """
-    if len(bbox) != 4:
-        raise ValueError(f"bbox must be (W, S, E, N); got {bbox!r}")
-    w, s, e, n = (float(v) for v in bbox)
-    if not (-90.0 <= s <= 90.0 and -90.0 <= n <= 90.0):
-        raise ValueError(f"bbox latitudes must lie in [-90, 90]; got {bbox!r}")
-    if s > n:
-        raise ValueError(f"bbox south > north; got {bbox!r}")
-    if w > e:
-        raise ValueError(
-            f"bbox west > east ({bbox!r}) — antimeridian-crossing boxes are "
-            "not supported; split into two boxes on either side of ±180°."
-        )
 
 
 def _rest_bbox_params(bbox: BBox | None) -> dict[str, list[str]]:
@@ -100,7 +74,8 @@ def _rest_bbox_params(bbox: BBox | None) -> dict[str, list[str]]:
     Raises
     ------
     ValueError
-        If ``bbox`` is malformed — see :func:`_validate_bbox`.
+        If ``bbox`` is malformed — see
+        :func:`~geoproducts._src.query.validate_lonlat_bbox`.
 
     Examples
     --------
@@ -117,7 +92,7 @@ def _rest_bbox_params(bbox: BBox | None) -> dict[str, list[str]]:
     """
     if bbox is None:
         return {}
-    _validate_bbox(bbox)
+    validate_lonlat_bbox(bbox)
     return {"bbox": [str(v) for v in bbox]}
 
 
@@ -145,7 +120,8 @@ def _stac_bbox_param(bbox: BBox | None) -> dict[str, str]:
     Raises
     ------
     ValueError
-        If ``bbox`` is malformed — see :func:`_validate_bbox`.
+        If ``bbox`` is malformed — see
+        :func:`~geoproducts._src.query.validate_lonlat_bbox`.
 
     Examples
     --------
@@ -156,7 +132,7 @@ def _stac_bbox_param(bbox: BBox | None) -> dict[str, str]:
     """
     if bbox is None:
         return {}
-    _validate_bbox(bbox)
+    validate_lonlat_bbox(bbox)
     return {"bbox": ",".join(str(v) for v in bbox)}
 
 
@@ -177,28 +153,16 @@ MAX_RATE_LIMIT_WAIT_S = 300.0
 
 
 def _retry_after_seconds(resp: requests.Response, attempt: int) -> float:
-    """Seconds to wait before retrying a 429 response.
-
-    1. Honour ``Retry-After`` as delta-seconds (int or float).
-    2. Else honour ``Retry-After`` as an HTTP-date.
-    3. Else back off exponentially: 5 s, 10 s, 20 s, ...
-
-    The result is clamped to ``[0, MAX_RATE_LIMIT_WAIT_S]``.
-    """
-    header = (resp.headers.get("Retry-After") or "").strip()
-    wait: float | None = None
-    if header:
-        try:
-            wait = float(header)
-        except ValueError:
-            try:
-                when = parsedate_to_datetime(header)
-                wait = (when - datetime.now(UTC)).total_seconds()
-            except (TypeError, ValueError):
-                wait = None
-    if wait is None:
-        wait = 5.0 * (2**attempt)
-    return max(0.0, min(wait, MAX_RATE_LIMIT_WAIT_S))
+    """Seconds to wait before retrying a 429 response: its ``Retry-After``
+    (delta-seconds or HTTP-date), else 5 s, 10 s, 20 s, …, clamped to
+    :data:`MAX_RATE_LIMIT_WAIT_S` (see
+    :func:`geoproducts._src.net.retry_after_seconds`)."""
+    return retry_after_seconds(
+        resp.headers.get("Retry-After"),
+        attempt,
+        base_s=5.0,
+        cap_s=MAX_RATE_LIMIT_WAIT_S,
+    )
 
 
 def _request(method: str, url: str, **kwargs: Any) -> requests.Response:
@@ -215,21 +179,30 @@ def _request(method: str, url: str, **kwargs: Any) -> requests.Response:
     throttling is handled the same way everywhere.
     """
     send = getattr(requests, method.lower())
-    for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
-        resp = send(url, **kwargs)
-        if resp.status_code != 429 or attempt == MAX_RATE_LIMIT_RETRIES:
-            return resp
-        wait = _retry_after_seconds(resp, attempt)
+
+    def wait(outcome: Any, attempt: int) -> float | None:
+        # Only throttled responses are retried; transport errors propagate.
+        if getattr(outcome, "status_code", None) == 429:
+            return _retry_after_seconds(outcome, attempt)
+        return None
+
+    def on_retry(resp: Any, attempt: int, seconds: float) -> None:
         logger.warning(
             "Rate-limited by %s; sleeping %.1f s (retry %d/%d)",
             url,
-            wait,
+            seconds,
             attempt + 1,
             MAX_RATE_LIMIT_RETRIES,
         )
         resp.close()
-        _sleep(wait)
-    raise AssertionError("unreachable")  # pragma: no cover
+
+    return retrying(
+        lambda: send(url, **kwargs),
+        wait=wait,
+        attempts=MAX_RATE_LIMIT_RETRIES + 1,
+        sleep=lambda seconds: _sleep(seconds),
+        on_retry=on_retry,
+    )
 
 
 def _sleep(seconds: float) -> None:
@@ -815,21 +788,8 @@ def download_asset(asset_key: str, dest: Path | str, token: str | None = None) -
 
 
 def _stream_to_file(resp: requests.Response, dest: Path) -> None:
-    """Stream ``resp`` into ``dest`` via a sibling ``.part`` file.
-
-    The final name only appears once every byte arrived; an interrupted
-    transfer removes the partial file instead of leaving a truncated
-    asset under the name a later run would trust.
-    """
-    part = dest.with_name(dest.name + ".part")
-    try:
-        with open(part, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
-        part.replace(dest)
-    except BaseException:
-        part.unlink(missing_ok=True)
-        raise
+    """Stream ``resp`` into ``dest`` atomically (via a sibling ``.part``)."""
+    stream_to_file(resp.iter_content(chunk_size=8192), dest)
 
 
 def download_plume_assets(plume: dict, dest_dir: Path | str) -> dict[str, Path]:

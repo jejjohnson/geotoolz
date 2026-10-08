@@ -6,24 +6,21 @@ product and scan-start hour::
 
     <product>/<year>/<day-of-year>/<hour>/OR_<product>-M6C<nn>_G<nn>_s<start>_e<end>_c<created>.nc
 
-This module lists and downloads those objects over plain HTTPS with the
-standard library only: no credentials, no AWS SDK.
+This module maps ABI file names, satellites and time windows onto those
+objects; the anonymous listing, retries and atomic downloads come from
+the package's shared public-S3 client (standard library only: no
+credentials, no AWS SDK).
 """
 
 from __future__ import annotations
 
 import re
-import shutil
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
-import xml.etree.ElementTree as ET
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from pathlib import Path
+
+from geoproducts._src import s3
+from geoproducts._src.query import as_utc
 
 
 __all__ = [
@@ -39,8 +36,6 @@ __all__ = [
 # (``ABI-L2-ACMC``, ``ABI-L2-MCMIPF``, ...).
 PRODUCTS: tuple[str, ...] = ("ABI-L1b-RadF", "ABI-L1b-RadC", "ABI-L1b-RadM")
 _SATELLITES = (16, 17, 18, 19)
-_S3_NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
-_TIMEOUT_S = 60.0
 # Transient failures (5xx, dropped connections, a spurious ``NoSuchBucket``
 # for a bucket that answered the listing) are retried with exponential
 # backoff; a missing key or a refused request fails at once.
@@ -90,7 +85,7 @@ def bucket(satellite: str | int) -> str:
 
 def url(satellite: str | int, key: str) -> str:
     """Public HTTPS URL of ``key`` in ``satellite``'s bucket."""
-    return f"https://{bucket(satellite)}.s3.amazonaws.com/{urllib.parse.quote(key)}"
+    return s3.object_url(bucket(satellite), key)
 
 
 def parse_key(key: str, *, size: int | None = None) -> ABIFile:
@@ -149,8 +144,8 @@ def list_files(
         urllib.error.URLError: The bucket listing failed (transient errors
             are retried first).
     """
-    start = _as_utc(start)
-    end = start + timedelta(hours=1) if end is None else _as_utc(end)
+    start = as_utc(start)
+    end = start + timedelta(hours=1) if end is None else as_utc(end)
     if end <= start:
         raise ValueError(f"end ({end}) must be after start ({start}).")
     wanted_channel = None if channel is None else _channel_name(channel)
@@ -158,7 +153,9 @@ def list_files(
     hour = start.replace(minute=0, second=0, microsecond=0)
     while hour < end:
         prefix = f"{product}/{hour:%Y}/{hour:%j}/{hour:%H}/"
-        for key, size in _list_objects(bucket(satellite), prefix):
+        for key, size in s3.list_objects(
+            bucket(satellite), prefix, attempts=_ATTEMPTS, backoff_s=_BACKOFF_S
+        ):
             try:
                 item = parse_key(key, size=size)
             except ValueError:
@@ -202,74 +199,16 @@ def download(
             retried first).
     """
     item = parse_key(file) if isinstance(file, str) else file
-    source = url(satellite or item.satellite, item.key)
     target = Path(dest) / item.name
     if target.exists() and not overwrite:
         return target
-    target.parent.mkdir(parents=True, exist_ok=True)
-    part_path = target.with_name(target.name + ".part")
-    try:
-        _with_retries(lambda: _stream_to(source, part_path))
-        part_path.replace(target)
-    finally:
-        part_path.unlink(missing_ok=True)
-    return target
-
-
-def _list_objects(bucket_name: str, prefix: str) -> list[tuple[str, int]]:
-    """``(key, size)`` of every object under ``prefix`` (ListObjectsV2)."""
-    out: list[tuple[str, int]] = []
-    token: str | None = None
-    while True:
-        params = {"list-type": "2", "prefix": prefix}
-        if token:
-            params["continuation-token"] = token
-        query = urllib.parse.urlencode(params)
-        listing = f"https://{bucket_name}.s3.amazonaws.com/?{query}"
-        root = ET.fromstring(_with_retries(partial(_fetch, listing)))
-        for item in root.iter(f"{_S3_NS}Contents"):
-            key = item.findtext(f"{_S3_NS}Key")
-            size = item.findtext(f"{_S3_NS}Size")
-            if key:
-                out.append((key, int(size or 0)))
-        if root.findtext(f"{_S3_NS}IsTruncated") != "true":
-            return out
-        token = root.findtext(f"{_S3_NS}NextContinuationToken")
-
-
-def _fetch(source: str) -> bytes:
-    with urllib.request.urlopen(source, timeout=_TIMEOUT_S) as response:
-        return response.read()
-
-
-def _stream_to(source: str, path: Path) -> None:
-    with (
-        urllib.request.urlopen(source, timeout=_TIMEOUT_S) as response,
-        path.open("wb") as out,
-    ):
-        shutil.copyfileobj(response, out, length=1 << 20)
-
-
-def _is_transient(exc: Exception) -> bool:
-    if isinstance(exc, urllib.error.HTTPError):
-        if exc.code >= 500 or exc.code == 429:
-            return True
-        if exc.code == 404:
-            body = exc.read() if exc.fp is not None else b""
-            return b"NoSuchBucket" in body
-        return False
-    return isinstance(exc, OSError)  # URLError, timeouts, connection resets
-
-
-def _with_retries[T](call: Callable[[], T]) -> T:
-    for attempt in range(_ATTEMPTS):
-        try:
-            return call()
-        except OSError as exc:
-            if attempt == _ATTEMPTS - 1 or not _is_transient(exc):
-                raise
-            time.sleep(_BACKOFF_S * 2**attempt)
-    raise AssertionError("unreachable")
+    return s3.download_object(
+        bucket(satellite or item.satellite),
+        item.key,
+        target,
+        attempts=_ATTEMPTS,
+        backoff_s=_BACKOFF_S,
+    )
 
 
 def _satellite_number(satellite: str | int) -> int:
@@ -293,7 +232,3 @@ def _parse_stamp(stamp: str) -> datetime:
     """``YYYYJJJHHMMSSt`` (day-of-year, tenths of a second) → UTC datetime."""
     base = datetime.strptime(stamp[:13], "%Y%j%H%M%S").replace(tzinfo=UTC)
     return base + timedelta(milliseconds=100 * int(stamp[13]))
-
-
-def _as_utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)

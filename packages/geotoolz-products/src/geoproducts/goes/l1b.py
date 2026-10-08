@@ -14,7 +14,7 @@ import numpy as np
 
 from geoproducts.goes import constants
 from geoproducts.goes._src.base import ABIFile, Source
-from geoproducts.goes._src.hdf import scalar
+from geoproducts.goes._src.metadata import abi_scalar
 
 
 __all__ = ["Calibration", "QualityReader", "Reader"]
@@ -83,7 +83,7 @@ class Reader(ABIFile):
                 float(np.asarray(f["band_wavelength"][()]).reshape(-1)[0]), 6
             )
             self._coefficients = {
-                name: scalar(f, name)
+                name: abi_scalar(f, name)
                 for name in (
                     "kappa0",
                     "planck_fk1",
@@ -109,7 +109,7 @@ class Reader(ABIFile):
 
     def __repr__(self) -> str:
         return (
-            f"goes.Reader({self._repr_name()!r}, channel={self.channel!r}, "
+            f"goes.Reader({self._describe()!r}, channel={self.channel!r}, "
             f"calibration={self.calibration!r}, shape={self.shape})"
         )
 
@@ -221,7 +221,7 @@ class QualityReader(ABIFile):
         return out
 
     def __repr__(self) -> str:
-        return f"goes.QualityReader({self._repr_name()!r}, variables={self.variables})"
+        return f"goes.QualityReader({self._describe()!r}, variables={self.variables})"
 
     @property
     def _bands(self) -> tuple[str, ...]:

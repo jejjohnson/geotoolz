@@ -26,7 +26,9 @@ When nothing is configured, `load()` writes a placeholder file at
 `~/.geoproducts/auth_carbonmapper.json` to edit (pass
 `create_placeholder=False` to keep the filesystem untouched). `get_token()`
 renews an expired access token from the stored refresh token or the
-email / password pair.
+email / password pair. `save()` writes the email and tokens (owner-only)
+but never the password: log in once with `refresh_access_token()`, save,
+and later sessions renew from the refresh token.
 
 ## Usage
 

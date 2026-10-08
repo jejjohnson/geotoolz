@@ -76,6 +76,7 @@ import requests
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
+from geoproducts._src.query import as_utc, time_interval
 from geoproducts.carbonmapper import download as _dl
 from geoproducts.carbonmapper.plume import CMRawPlume, Gas
 from geoproducts.carbonmapper.products import (
@@ -289,7 +290,7 @@ class CMTileItem:
                 "start_datetime or end_datetime."
             )
         # Always UTC-aware: naive values are taken as UTC, offsets converted.
-        dt = dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+        dt = as_utc(dt)
 
         geom_dict = item.get("geometry") or {}
         if not geom_dict:
@@ -649,8 +650,8 @@ def list_plumes(
     >>> sum(p.emission_auto or 0 for p in plumes)  # doctest: +SKIP
     412350.0
     """
-    dt_range = _build_datetime_range(datetime_min, datetime_max)
-    pub_range = _build_datetime_range(published_at_min, published_at_max)
+    dt_range = time_interval(datetime_min, datetime_max)
+    pub_range = time_interval(published_at_min, published_at_max)
     rows: list[Mapping[str, Any]] = []
     while len(rows) < limit:
         page_size = min(_ANNOTATED_PAGE_SIZE, limit - len(rows))
@@ -726,7 +727,7 @@ def list_tiles(
         collections = [collection]
     else:
         collections = list(collection)
-    dt_range = _build_datetime_range(datetime_min, datetime_max)
+    dt_range = time_interval(datetime_min, datetime_max)
     result = _dl.stac_search(
         collections=collections,
         bbox=bbox,
@@ -1400,26 +1401,6 @@ def list_tiles_for_source(
 # ─────────────────────────────────────────────────────────────────────
 #  Helpers (private)
 # ─────────────────────────────────────────────────────────────────────
-
-
-def _rfc3339_utc(dt: datetime) -> str:
-    """Format ``dt`` as RFC 3339 UTC with a ``Z`` suffix. Naive datetimes
-    are taken to be UTC; aware ones are converted to UTC."""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _build_datetime_range(
-    dt_min: datetime | None,
-    dt_max: datetime | None,
-) -> str | None:
-    """Build an RFC 3339 datetime-range string from optional bounds."""
-    if dt_min is None and dt_max is None:
-        return None
-    lo = _rfc3339_utc(dt_min) if dt_min else ".."
-    hi = _rfc3339_utc(dt_max) if dt_max else ".."
-    return f"{lo}/{hi}"
 
 
 def _rgb_collection_for(collection: str) -> str:

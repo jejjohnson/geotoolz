@@ -84,7 +84,7 @@ class L2Reader(ABIFile):
         self._product = product_code(self._info.dataset_name)
         with self._open() as f:
             names = self._resolve(f, variables)
-            self._vars = tuple(self._variable(f, name) for name in names)
+            self._load_variables(f, names)
             self._channel_of_cmi = (
                 f"C{int(np.asarray(f['band_id'][()]).reshape(-1)[0]):02d}"
                 if "CMI" in names and "band_id" in f
@@ -107,7 +107,7 @@ class L2Reader(ABIFile):
         names = [n for n in grid_variables(f) if not n.startswith("DQF")]
         if not names:
             raise ValueError(
-                f"{self._repr_name()} has no 2-D data variables on its grid."
+                f"{self._describe()} has no 2-D data variables on its grid."
             )
         return names
 
@@ -126,7 +126,7 @@ class L2Reader(ABIFile):
 
     def __repr__(self) -> str:
         return (
-            f"goes.L2Reader({self._repr_name()!r}, product={self.product!r}, "
+            f"goes.L2Reader({self._describe()!r}, product={self.product!r}, "
             f"bands={self.bands}, shape={self.shape})"
         )
 
@@ -157,7 +157,7 @@ class L2Reader(ABIFile):
             elif "DQF_Overall" in self._available:
                 name = "DQF_Overall"
             else:
-                raise ValueError(f"{self._repr_name()} has no quality flags.")
+                raise ValueError(f"{self._describe()} has no quality flags.")
             if name not in names:
                 names.append(name)
         return QualityReader._sharing(self, tuple(names))

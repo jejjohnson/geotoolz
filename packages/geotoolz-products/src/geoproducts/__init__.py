@@ -10,6 +10,7 @@ Public surface:
 - `ProductReader` — the ABC for product readers (lazy ``_read_window``,
   band names, track, optional pooled object-store byte reads via the
   ``[obstore]`` extra).
+- `stack` — several readers' bands on one reference grid.
 - Per-sensor / per-provider subpackages, each exposing ``Reader``,
   ``BANDS`` / ``CONSTANTS`` and, with the ``[operators]`` extra,
   ``presets`` (geotoolz operators bound to the product's band names):
@@ -22,8 +23,9 @@ from __future__ import annotations
 
 from geoproducts import goes, toy_sensor
 from geoproducts._src.base import ProductReader
+from geoproducts._src.stack import stack
 
 
 __version__ = "0.1.0"  # x-release-please-version
 
-__all__ = ["ProductReader", "__version__", "goes", "toy_sensor"]
+__all__ = ["ProductReader", "__version__", "goes", "stack", "toy_sensor"]

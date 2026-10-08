@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import builtins
 import io
 import pickle
+import sys
 from datetime import UTC, datetime
 
 import h5py
@@ -253,13 +253,6 @@ class TestSources:
 
     def test_missing_h5py_names_the_extra(self, abi_file, monkeypatch) -> None:
         path = abi_file()
-        real_import = builtins.__import__
-
-        def no_h5py(name, *args, **kwargs):
-            if name == "h5py":
-                raise ImportError("No module named 'h5py'")
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", no_h5py)
+        monkeypatch.setitem(sys.modules, "h5py", None)  # import now raises
         with pytest.raises(ImportError, match=r"geotoolz-products\[goes\]"):
             goes.Reader(path)

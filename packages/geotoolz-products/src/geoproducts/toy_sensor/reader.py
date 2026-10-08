@@ -9,7 +9,7 @@ import numpy as np
 from affine import Affine
 from rasterio.windows import Window
 
-from geoproducts._src.base import ProductReader, Track
+from geoproducts._src.base import ProductReader, Track, resolve_fill_value
 from geoproducts.toy_sensor import constants
 
 
@@ -71,8 +71,8 @@ class Reader(ProductReader):
             )
         self._reader_transform = Affine.identity() if transform is None else transform
         self._reader_crs = crs
-        self._fill_value_default = _resolve_fill_value(
-            fill_value_default, self._data.dtype
+        self._fill_value_default = resolve_fill_value(
+            fill_value_default, self._data.dtype, owner="toy_sensor.Reader"
         )
 
     @property
@@ -109,58 +109,6 @@ class Reader(ProductReader):
         return "A"
 
     def _read_window(self, window: Window) -> np.ndarray:
-        col_start = int(window.col_off)
-        row_start = int(window.row_off)
-        width = int(window.width)
-        height = int(window.height)
-        out = np.full(
-            (*self._data.shape[:-2], height, width),
-            self._fill_value_default,
-            dtype=self._data.dtype,
+        return self._read_boundless(
+            window, lambda rows, cols: self._data[..., rows, cols]
         )
-
-        src_col_start = max(col_start, 0)
-        src_row_start = max(row_start, 0)
-        src_col_stop = min(col_start + width, self.width)
-        src_row_stop = min(row_start + height, self.height)
-        if src_col_start >= src_col_stop or src_row_start >= src_row_stop:
-            return out
-
-        dst_col_start = src_col_start - col_start
-        dst_row_start = src_row_start - row_start
-        dst_col_stop = dst_col_start + (src_col_stop - src_col_start)
-        dst_row_stop = dst_row_start + (src_row_stop - src_row_start)
-        out[..., dst_row_start:dst_row_stop, dst_col_start:dst_col_stop] = self._data[
-            ..., src_row_start:src_row_stop, src_col_start:src_col_stop
-        ]
-        return out
-
-
-def _resolve_fill_value(
-    fill_value: float | None, dtype: np.dtype
-) -> float | int | bool:
-    """Return a fill value exactly representable in ``dtype``.
-
-    ``None`` defaults to ``NaN`` for inexact dtypes and ``0`` otherwise.
-    An explicit value that would change when cast to ``dtype`` (``NaN``,
-    fractional or out-of-range values for integer data) raises instead of
-    silently padding with a different value than
-    ``fill_value_default`` reports.
-    """
-    if fill_value is None:
-        return np.nan if np.issubdtype(dtype, np.inexact) else dtype.type(0).item()
-    if np.issubdtype(dtype, np.inexact):
-        return fill_value
-    try:
-        with np.errstate(invalid="ignore", over="ignore"):
-            cast = dtype.type(fill_value)
-        ok = bool(np.isfinite(fill_value)) and cast == fill_value
-    except (OverflowError, TypeError, ValueError):
-        ok = False
-    if not ok:
-        raise ValueError(
-            f"toy_sensor.Reader: fill_value_default={fill_value!r} is not "
-            f"representable in data dtype {dtype}; pass a value that "
-            "survives the cast (e.g. 0) or use floating-point data."
-        )
-    return cast.item()

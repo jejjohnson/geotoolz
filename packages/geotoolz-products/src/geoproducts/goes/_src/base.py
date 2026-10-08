@@ -1,62 +1,57 @@
-"""The shared ``ProductReader`` for one ABI file: grid, metadata, windowed I/O."""
+"""The shared reader for one ABI file: the fixed grid plus ABI metadata.
+
+Everything generic — windowed HDF5 reads of CF-packed variables, mask-vs-
+value decoding, flag tables — lives in :class:`geoproducts._src.hdf.PackedGridReader`
+and the grid in :class:`geoproducts._src.geostationary.FixedGrid`; this
+layer only adds what is ABI-specific: the ``goes_imager_projection`` grid
+mapping and the file's global metadata.
+"""
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Sequence
 from datetime import datetime
-from pathlib import Path
-from typing import IO, Any
+from typing import Any
 
-import numpy as np
 from affine import Affine
-from georeader.geotensor import GeoTensor
 from rasterio.crs import CRS
-from rasterio.windows import Window
 
-from geoproducts._src.base import ProductReader, Track
-from geoproducts.goes._src.grid import FileInfo, FixedGrid
-from geoproducts.goes._src.hdf import PackedVariable, attr, h5py_module
+from geoproducts._src.base import Track
+from geoproducts._src.geostationary import FixedGrid
+from geoproducts._src.hdf import (
+    PackedGridReader,
+    Source,
+    grid_variables as _grid_variables,
+)
+from geoproducts.goes._src.metadata import FileInfo
 
 
-Source = str | os.PathLike[str] | IO[bytes]
+__all__ = ["ABIFile", "Source", "grid_variables"]
+
+#: The CF grid-mapping variable of every ABI file.
+GRID_MAPPING = "goes_imager_projection"
 
 
-class ABIFile(ProductReader):
+class ABIFile(PackedGridReader):
     """One ABI product file read as a ``(bands, H, W)`` ``GeoTensor``.
 
     Each band is one 2-D variable of the file, all on the file's fixed
-    grid. Subclasses choose the variables and how raw values decode
-    (``_decode``); this class owns the grid, the metadata, and the windowed
-    HDF5 reads (only the chunks under a window are decompressed).
+    grid. Subclasses choose the variables and, where needed, how raw
+    values decode (``_decode``).
     """
 
-    _source: Source
+    extra = "goes"
+    feature = "geoproducts.goes"
+
     _grid: FixedGrid
     _info: FileInfo
-    _vars: tuple[PackedVariable, ...]
 
     def _init_file(self, source: Source, variables: Sequence[str]) -> None:
         self._source = source
         with self._open() as f:
-            self._grid = FixedGrid.from_file(f)
+            self._grid = FixedGrid.from_cf(f, GRID_MAPPING)
             self._info = FileInfo.from_file(f)
-            self._vars = tuple(self._variable(f, name) for name in variables)
-
-    def _variable(self, f: Any, name: str) -> PackedVariable:
-        if name not in f:
-            raise ValueError(
-                f"{self._info.dataset_name or 'file'} has no variable {name!r}; "
-                f"2-D variables: {list(grid_variables(f))}."
-            )
-        shape = tuple(f[name].shape)
-        if shape != (self._grid.height, self._grid.width):
-            raise ValueError(
-                f"variable {name!r} has shape {shape}, not the fixed grid "
-                f"{(self._grid.height, self._grid.width)}."
-            )
-        return PackedVariable.from_file(f, name)
+            self._load_variables(f, variables)
 
     def _share(self, other: ABIFile, variables: Sequence[str]) -> None:
         """Point at ``other``'s file, reusing its parsed grid and metadata."""
@@ -64,16 +59,16 @@ class ABIFile(ProductReader):
         self._grid = other._grid
         self._info = other._info
         with self._open() as f:
-            self._vars = tuple(self._variable(f, name) for name in variables)
+            self._load_variables(f, variables)
 
-    @contextmanager
-    def _open(self) -> Iterator[Any]:
-        # Re-opened per read: no handle outlives a call, so path-backed
-        # readers pickle (process pools) and never leak file descriptors.
-        with h5py_module().File(self._source, "r") as f:
-            yield f
+    def _describe(self) -> str:
+        return self._info.dataset_name or super()._describe()
 
     # -- georeferencing ---------------------------------------------------
+
+    @property
+    def _grid_shape(self) -> tuple[int, int]:
+        return (self._grid.height, self._grid.width)
 
     @property
     def _crs(self) -> CRS:
@@ -84,21 +79,10 @@ class ABIFile(ProductReader):
         return self._grid.transform
 
     @property
-    def _shape(self) -> tuple[int, ...]:
-        return (len(self._vars), self._grid.height, self._grid.width)
-
-    @property
     def _track(self) -> Track:
         return "A"
 
     # -- file metadata ----------------------------------------------------
-
-    @property
-    def path(self) -> Path | None:
-        """The file path, or ``None`` for a file-like source."""
-        if isinstance(self._source, str | os.PathLike):
-            return Path(self._source)
-        return None
 
     @property
     def dataset_name(self) -> str:
@@ -135,108 +119,7 @@ class ABIFile(ProductReader):
         """Nominal satellite height above the equator (metres)."""
         return self._info.satellite_height_m
 
-    @property
-    def variables(self) -> tuple[str, ...]:
-        """The file variables read, one per band, in band order."""
-        return tuple(v.name for v in self._vars)
-
-    def flags(self, variable: str | None = None) -> dict[int, str]:
-        """A flag variable's ``{value: meaning}`` table, from its CF attributes.
-
-        Args:
-            variable: Any variable of the file (default: the first band's).
-
-        Returns:
-            ``flag_values`` zipped with ``flag_meanings``; empty when the
-            variable declares none.
-
-        Raises:
-            ValueError: The variable pairs its values and meanings unevenly
-                (bit fields declared through ``flag_masks``).
-        """
-        name = variable or self._vars[0].name
-        with self._open() as f:
-            var = f[name]
-            values = attr(var, "flag_values")
-            meanings = attr(var, "flag_meanings")
-        if values is None or meanings is None:
-            return {}
-        values = np.atleast_1d(values).tolist()
-        names = str(meanings).split()
-        if len(values) != len(names):
-            raise ValueError(
-                f"{name!r} declares {len(values)} flag values but {len(names)} "
-                "meanings (a bit field?); decode it from its flag_masks."
-            )
-        return dict(zip((int(v) for v in values), names, strict=True))
-
-    # -- windowed I/O -----------------------------------------------------
-
-    @property
-    def _categorical(self) -> bool:
-        """Whether every band is an unpacked integer sharing dtype and fill."""
-        return all(v.is_categorical for v in self._vars) and (
-            len({(v.storage, v.fill) for v in self._vars}) == 1
-        )
-
-    @property
-    def _dtype(self) -> Any:
-        return self._vars[0].storage if self._categorical else np.dtype(np.float32)
-
-    @property
-    def _fill_value(self) -> Any:
-        if not self._categorical:
-            return np.nan
-        fill = self._vars[0].fill
-        return np.iinfo(self._vars[0].storage).max if fill is None else fill
-
-    def _decode(self, raw: list[np.ndarray]) -> np.ndarray:
-        """Decode one window's raw variable slices into ``(bands, h, w)``."""
-        if self._categorical:
-            return np.stack([v.raw(r) for v, r in zip(self._vars, raw, strict=True)])
-        return np.stack([v.decode(r) for v, r in zip(self._vars, raw, strict=True)])
-
-    def _band_attrs(self) -> dict[str, Any]:
-        """Extra per-read ``attrs`` (``band_names`` is set by the base class)."""
-        return {"units": tuple(v.units for v in self._vars)}
-
-    def _read_window(self, window: Window) -> np.ndarray:
-        row0, col0 = int(window.row_off), int(window.col_off)
-        n_rows, n_cols = int(window.height), int(window.width)
-        out = np.full(
-            (len(self._vars), n_rows, n_cols), self._fill_value, dtype=self._dtype
-        )
-        r_start, r_stop = max(row0, 0), min(row0 + n_rows, self._grid.height)
-        c_start, c_stop = max(col0, 0), min(col0 + n_cols, self._grid.width)
-        if r_start >= r_stop or c_start >= c_stop:
-            return out
-        with self._open() as f:
-            raw = [f[v.name][r_start:r_stop, c_start:c_stop] for v in self._vars]
-        out[:, r_start - row0 : r_stop - row0, c_start - col0 : c_stop - col0] = (
-            self._decode(raw)
-        )
-        return out
-
-    def read_from_window(self, window: Window, boundless: bool = True) -> GeoTensor:
-        """Read a pixel window as a ``(bands, h, w)`` ``GeoTensor``.
-
-        Besides ``band_names``, the output's ``attrs`` carry per-band
-        ``units`` (and, for L1b, ``wavelengths`` in nm and ``calibration``).
-        """
-        out = super().read_from_window(window, boundless=boundless)
-        out.attrs = {**(out.attrs or {}), **self._band_attrs()}
-        return out
-
-    def _repr_name(self) -> str:
-        return self._info.dataset_name or type(self._source).__name__
-
 
 def grid_variables(f: Any) -> tuple[str, ...]:
-    """Names of the file's 2-D variables on the fixed grid."""
-    h5py = h5py_module()
-    n_rows, n_cols = len(f["y"]), len(f["x"])
-    return tuple(
-        name
-        for name, var in f.items()
-        if isinstance(var, h5py.Dataset) and var.shape == (n_rows, n_cols)
-    )
+    """Names of an open ABI file's 2-D variables on its fixed grid."""
+    return _grid_variables(f, (len(f["y"]), len(f["x"])))

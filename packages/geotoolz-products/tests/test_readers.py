@@ -25,6 +25,7 @@ def test_public_surface() -> None:
         "ProductReader",
         "__version__",
         "goes",
+        "stack",
         "toy_sensor",
     }
     assert geoproducts.ProductReader is ProductReader
@@ -207,16 +208,12 @@ def test_toy_sensor_ndvi_preset_matches_generic_operator() -> None:
 def test_ndvi_preset_without_geotoolz_names_the_extra(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import builtins
+    import sys
 
-    real_import = builtins.__import__
-
-    def no_geotoolz(name, *args, **kwargs):
-        if name.split(".")[0] == "geotoolz":
-            raise ImportError(f"simulated missing {name}")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", no_geotoolz)
+    # ``None`` in sys.modules makes any import of the name raise.
+    for name in [m for m in sys.modules if m.split(".")[0] == "geotoolz"]:
+        monkeypatch.setitem(sys.modules, name, None)
+    monkeypatch.setitem(sys.modules, "geotoolz", None)
     with pytest.raises(ImportError, match=r"geotoolz-products\[operators\]"):
         toy_sensor.NDVI()
 

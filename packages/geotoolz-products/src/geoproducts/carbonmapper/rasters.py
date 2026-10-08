@@ -40,13 +40,15 @@ from rasterio.errors import RasterioIOError
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 
+from geoproducts._src.query import validate_lonlat_bbox
+
 # Lazy reads return a windowed `GeoData` (georeader's protocol — covers
 # both ``RasterioReader`` and ``GeoTensor``).
 from geoproducts.carbonmapper.api_queries import (
     CMSceneNotPublished,
     CMTileItem,
 )
-from geoproducts.carbonmapper.download import _request, _validate_bbox
+from geoproducts.carbonmapper.download import _request
 from geoproducts.carbonmapper.products import (
     CM_API_ASSET_BASE,
     DEFAULT_SCENE_PRODUCTS,
@@ -818,7 +820,7 @@ class CMImageRaster:
             ValueError: If ``bounds_4326`` is malformed or crosses the
                 antimeridian (``W > E``) — split such windows in two.
         """
-        _validate_bbox(bounds_4326)
+        validate_lonlat_bbox(bounds_4326)
         return self.read_polygon(box(*bounds_4326), bands=bands)
 
     def read_window_to_crs(

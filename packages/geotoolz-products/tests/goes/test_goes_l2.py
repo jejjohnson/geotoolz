@@ -247,7 +247,7 @@ class TestErrors:
             {"HT": _packed(np.ones(SHAPE), scale=1.0, offset=0.0, units="m")},
             extra={"profile": np.ones((3, 3), dtype=np.float32)},
         )
-        with pytest.raises(ValueError, match="not the fixed grid"):
+        with pytest.raises(ValueError, match="not the grid"):
             goes.L2Reader(path, variables="profile")
 
     def test_l1b_reader_points_l2_files_to_l2reader(self, l2_file) -> None:

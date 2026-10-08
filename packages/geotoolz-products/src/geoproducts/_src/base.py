@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -147,14 +147,25 @@ class ProductReader(GeoData, ABC):
         window = Window(col_off=0, row_off=0, width=self.width, height=self.height)
         return self.read_from_window(window, boundless=boundless)
 
+    def _band_attrs(self) -> dict[str, Any]:
+        """Extra ``attrs`` every read carries (per-band ``units``, ``wavelengths``, …).
+
+        ``band_names`` is always set; readers override this to add more.
+        """
+        return {}
+
     def read_from_window(self, window: Window, boundless: bool = True) -> GeoTensor:
-        """Read a pixel window as a ``GeoTensor``."""
+        """Read a pixel window as a ``GeoTensor``.
+
+        ``attrs`` carry ``band_names`` plus whatever :meth:`_band_attrs`
+        adds.
+        """
         if not boundless:
             window = self._clip_window(window)
         values = self._read_window(window)
         # The canonical key every band resolver reads first (see
         # geotoolz._src.bands.DEFAULT_BAND_KEYS).
-        attrs = {"band_names": self.bands}
+        attrs = {"band_names": self.bands, **self._band_attrs()}
         return GeoTensor(
             values,
             transform=window_transform(window, self.transform),
@@ -200,6 +211,40 @@ class ProductReader(GeoData, ABC):
             crs_center_coords=crs_center_coords,
             boundless=boundless,
         )
+
+    def _read_boundless(
+        self, window: Window, read: Callable[[slice, slice], np.ndarray]
+    ) -> np.ndarray:
+        """Read ``window`` through ``read``, padding outside the grid with the fill.
+
+        The shared body of a ``_read_window``: allocates the output filled
+        with ``fill_value_default``, asks ``read(rows, cols)`` only for the
+        part of the window inside the grid (returning ``(..., h, w)``), and
+        pastes it in place. Windows partly or wholly outside the grid
+        (boundless reads) are handled here once for every reader.
+
+        Args:
+            window: Pixel window, possibly extending past the grid.
+            read: Reads the in-grid ``rows`` / ``cols`` slices of every band.
+
+        Returns:
+            ``(..., window.height, window.width)`` array of ``self.dtype``.
+        """
+        row0, col0 = int(window.row_off), int(window.col_off)
+        n_rows, n_cols = int(window.height), int(window.width)
+        out = np.full(
+            (*self.shape[:-2], n_rows, n_cols),
+            self.fill_value_default,
+            dtype=self.dtype,
+        )
+        r_start, r_stop = max(row0, 0), min(row0 + n_rows, self.height)
+        c_start, c_stop = max(col0, 0), min(col0 + n_cols, self.width)
+        if r_start >= r_stop or c_start >= c_stop:
+            return out
+        out[..., r_start - row0 : r_stop - row0, c_start - col0 : c_stop - col0] = read(
+            slice(r_start, r_stop), slice(c_start, c_stop)
+        )
+        return out
 
     def _clip_window(self, window: Window) -> Window:
         base = Window(col_off=0, row_off=0, width=self.width, height=self.height)
@@ -260,6 +305,50 @@ class ProductReader(GeoData, ABC):
         if client is not None and _has_remote_scheme(uri):
             return _run_coroutine_safely(_get_range_async(client, uri, start, length))
         return _read_bytes_local(uri, start, length)
+
+
+def resolve_fill_value(
+    fill_value: float | None, dtype: np.dtype, *, owner: str = "reader"
+) -> float | int | bool:
+    """A fill value exactly representable in ``dtype``.
+
+    ``None`` defaults to ``NaN`` for inexact dtypes and ``0`` otherwise.
+    An explicit value that would change when cast to ``dtype`` (``NaN``,
+    fractional or out-of-range values for integer data) raises instead of
+    silently padding with a different value than ``fill_value_default``
+    reports.
+
+    Args:
+        fill_value: Requested fill, or ``None`` for the default.
+        dtype: The reader's data dtype.
+        owner: Name used in the error message.
+
+    Raises:
+        ValueError: ``fill_value`` is not representable in ``dtype``.
+
+    Examples:
+        >>> resolve_fill_value(None, np.dtype("uint8"))
+        0
+        >>> resolve_fill_value(255, np.dtype("uint8"))
+        255
+    """
+    if fill_value is None:
+        return np.nan if np.issubdtype(dtype, np.inexact) else dtype.type(0).item()
+    if np.issubdtype(dtype, np.inexact):
+        return fill_value
+    try:
+        with np.errstate(invalid="ignore", over="ignore"):
+            cast = dtype.type(fill_value)
+        ok = bool(np.isfinite(fill_value)) and cast == fill_value
+    except (OverflowError, TypeError, ValueError):
+        ok = False
+    if not ok:
+        raise ValueError(
+            f"{owner}: fill_value_default={fill_value!r} is not "
+            f"representable in data dtype {dtype}; pass a value that "
+            "survives the cast (e.g. 0) or use floating-point data."
+        )
+    return cast.item()
 
 
 # ----------------------------------------------------------------------
