@@ -1,10 +1,10 @@
 """End-to-end tests for `geocatalog.staging.stage` + `LocalCache`.
 
-All tests stage against the local filesystem (no network). Local
-paths are staged in place without fsspec; the remote-URI paths (retry,
-timeout, on_error) fake ``fsspec.open`` on the ``fsspec_stub`` module,
-so the whole file also runs on a base install without the ``[fsspec]``
-extra.
+No network. Local paths are staged in place; the remote-URI paths
+(retry, timeout, on_error) fake ``geocloud.files.download`` on the
+``cloud_stub`` module, so they also run on a base install without the
+``[cloud]`` extra. One end-to-end test downloads through the real
+`geocloud.files` from an in-memory bucket (`geocloud.store.mount`).
 """
 
 from __future__ import annotations
@@ -36,30 +36,17 @@ from tests.conftest import catalog_from_rows
 
 
 def _seed_tif(path: Path, *, content: bytes = b"fake-tif-bytes") -> Path:
-    """Write a fake TIF to disk so fsspec has something to copy."""
+    """Write a fake TIF to disk."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return path
 
 
-class _FakeFile:
-    """Minimal file-like context manager standing in for an fsspec handle."""
-
-    def __init__(self, content: bytes) -> None:
-        self._content = content
-        self._read = False
-
-    def read(self, _n: int = -1) -> bytes:
-        if not self._read:
-            self._read = True
-            return self._content
-        return b""
-
-    def __enter__(self) -> _FakeFile:
-        return self
-
-    def __exit__(self, *a: Any) -> None:
-        return None
+def _write(dest: Path, content: bytes) -> Path:
+    """What a successful `geocloud.files.download` leaves behind."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(content)
+    return dest
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +196,7 @@ class TestPlanRow:
 
 
 # ---------------------------------------------------------------------------
-# stage() — end-to-end against the local fsspec backend
+# stage() — end-to-end on local files
 # ---------------------------------------------------------------------------
 
 
@@ -263,8 +250,7 @@ class TestStageAssetMap:
     def _make_catalog(self, tmp_path: Path) -> tuple[InMemoryGeoCatalog, Path, Path]:
         red = _seed_tif(tmp_path / "src" / "red.tif", content=b"red")
         nir = _seed_tif(tmp_path / "src" / "nir.tif", content=b"nir")
-        # Use the URIs string-as-stored; resolve to local paths
-        # via fsspec's local backend (no scheme = local).
+        # Plain paths (no scheme) are local and staged in place.
         cat = catalog_from_rows(
             rows=[
                 {
@@ -302,18 +288,9 @@ class TestStageAssetMap:
 
 
 class TestStageRemoteFetch:
-    """fsspec local backend acts as a stand-in for remote URIs.
+    """Remote URIs download into the cache; local ones are used in place."""
 
-    We give the cache a different `root` from where the "source"
-    files live so the path-equality assertions distinguish
-    "fetched to cache" from "used as-is."
-    """
-
-    def test_https_like_uri_fetched_into_cache(self, tmp_path: Path) -> None:
-        # Build a source file under one tree; pretend it's at a
-        # remote URI (no scheme so fsspec treats it as local but
-        # the file-scheme fast path doesn't trigger). The cache
-        # root is a different tree.
+    def test_local_path_is_used_in_place(self, tmp_path: Path) -> None:
         src_file = _seed_tif(tmp_path / "remote" / "data.nc", content=b"abc")
         cat = catalog_from_rows(
             rows=[
@@ -321,33 +298,50 @@ class TestStageRemoteFetch:
                     "geometry": box(0, 0, 1, 1),
                     "start_time": pd.Timestamp("2024-06-01"),
                     "end_time": pd.Timestamp("2024-06-02"),
-                    # Use the path without a scheme — fsspec's
-                    # local-file backend handles it without our
-                    # `file://` fast path triggering.
                     "filepath": str(src_file),
                 }
             ],
             crs="EPSG:4326",
         )
-        # The local-URI fast path returns the original path, so
-        # the cached file is not created. To exercise the actual
-        # copy, force the URI through fsspec by simulating a
-        # scheme that bypasses the fast path. The local backend
-        # does the work either way.
-        cache = LocalCache(root=tmp_path / "cache")
-        out = stage(cat, cache=cache)
-        # When the input is a plain local path that exists, we
-        # return it unchanged (no unnecessary copy). The cache
-        # round-trip is exercised below.
+        out = stage(cat, cache=LocalCache(root=tmp_path / "cache"))
         assert out.gdf.iloc[0]["filepath"] == str(src_file)
+
+    def test_s3_uri_downloads_through_geocloud(self, tmp_path: Path) -> None:
+        pytest.importorskip("geocloud")
+        import obstore
+        from geocloud.store import mount, unmount
+        from obstore.store import MemoryStore
+
+        bucket = MemoryStore()
+        obstore.put(bucket, "scenes/a.tif", b"remote-bytes")
+        mount("s3://stage-test", bucket)
+        try:
+            cat = catalog_from_rows(
+                rows=[
+                    {
+                        "geometry": box(0, 0, 1, 1),
+                        "start_time": pd.Timestamp("2024-06-01"),
+                        "end_time": pd.Timestamp("2024-06-02"),
+                        "filepath": "s3://stage-test/scenes/a.tif",
+                    }
+                ],
+                crs="EPSG:4326",
+            )
+            cache = LocalCache(root=tmp_path / "cache")
+            out = stage(cat, cache=cache)
+        finally:
+            unmount("s3://stage-test")
+        local = Path(out.gdf.iloc[0]["filepath"])
+        assert local == cache.path_for("s3://stage-test/scenes/a.tif")
+        assert local.read_bytes() == b"remote-bytes"
+        assert not list((tmp_path / "cache").rglob("*.part"))
 
 
 class TestStageCacheHit:
     """Second stage() of the same URI should not re-fetch."""
 
     def test_cache_hit_skips_download(self, tmp_path: Path) -> None:
-        # Use an https-like URI that fsspec doesn't have a fast
-        # path for — we'll stub the actual fetch.
+        # A remote URI whose cache slot is already filled.
         cache = LocalCache(root=tmp_path / "cache")
         uri = "https://example.com/data.tif"
         # Pre-populate the cache to simulate "already fetched".
@@ -376,21 +370,21 @@ class TestStageRetry:
     """`_fetch_one` retries transient failures up to `retries` times."""
 
     def test_retries_then_succeeds(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cloud_stub: Any
     ) -> None:
-        # Build a fake `fsspec.open` that fails twice (with a plain,
+        # Build a fake `geocloud.files.download` that fails twice (with a plain,
         # transient OSError), then succeeds.
         attempts = {"n": 0}
 
-        def fake_open(uri: str, mode: str = "rb", **kwargs: Any) -> _FakeFile:
+        def fake_download(uri: str, dest: Path, **kwargs: Any) -> Path:
             attempts["n"] += 1
             if attempts["n"] < 3:
                 raise OSError("transient")
-            return _FakeFile(b"hello")
+            return _write(dest, b"hello")
 
         import time
 
-        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
+        monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
         # No need to actually wait out the backoff.
         monkeypatch.setattr(time, "sleep", lambda _s: None)
 
@@ -405,7 +399,7 @@ class TestStageRetry:
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
-        fsspec_stub: Any,
+        cloud_stub: Any,
         exc_type: type[OSError],
     ) -> None:
         # Fatal OSError subclasses (missing object, auth/permission
@@ -413,11 +407,11 @@ class TestStageRetry:
         # the first attempt instead of burning the retry budget.
         attempts = {"n": 0}
 
-        def fake_open(uri: str, mode: str = "rb", **kwargs: Any) -> _FakeFile:
+        def fake_download(uri: str, dest: Path, **kwargs: Any) -> Path:
             attempts["n"] += 1
             raise exc_type("fatal")
 
-        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
+        monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
 
         cache = LocalCache(root=tmp_path / "cache")
         with pytest.raises(exc_type, match="fatal"):
@@ -425,17 +419,17 @@ class TestStageRetry:
         assert attempts["n"] == 1
 
     def test_transient_budget_exhausted_raises_last_error(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cloud_stub: Any
     ) -> None:
         attempts = {"n": 0}
 
-        def fake_open(uri: str, mode: str = "rb", **kwargs: Any) -> _FakeFile:
+        def fake_download(uri: str, dest: Path, **kwargs: Any) -> Path:
             attempts["n"] += 1
             raise OSError("still down")
 
         import time
 
-        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
+        monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
         monkeypatch.setattr(time, "sleep", lambda _s: None)
 
         cache = LocalCache(root=tmp_path / "cache")
@@ -445,7 +439,7 @@ class TestStageRetry:
 
 
 class TestStageTimeout:
-    """`LocalCache.timeout` is threaded into the fsspec open call."""
+    """`LocalCache.timeout` becomes the object-store client's request timeout."""
 
     def test_default_timeout_is_60s(self) -> None:
         assert LocalCache().timeout == 60.0
@@ -456,57 +450,57 @@ class TestStageTimeout:
         cfg = dataclasses.asdict(LocalCache(root="/x"))
         assert cfg["timeout"] == 60.0
 
-    def test_timeout_forwarded_to_fsspec_open(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
+    def test_timeout_forwarded_to_the_client(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cloud_stub: Any
     ) -> None:
         seen: dict[str, Any] = {}
 
-        def fake_open(uri: str, mode: str = "rb", **kwargs: Any) -> _FakeFile:
+        def fake_download(uri: str, dest: Path, **kwargs: Any) -> Path:
             seen.update(kwargs)
-            return _FakeFile(b"x")
+            return _write(dest, b"x")
 
-        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
+        monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
 
         cache = LocalCache(root=tmp_path / "cache", timeout=12.5)
         _fetch_one("https://example.com/x.tif", cache, retries=0)
-        assert seen["timeout"] == 12.5
+        assert seen["storage_options"] == {
+            "client_options": {"timeout": timedelta(seconds=12.5)}
+        }
 
-    def test_timeout_none_omits_kwarg(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
+    def test_timeout_none_keeps_the_client_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cloud_stub: Any
     ) -> None:
-        seen: dict[str, Any] = {"called": False}
+        seen: dict[str, Any] = {}
 
-        def fake_open(uri: str, mode: str = "rb", **kwargs: Any) -> _FakeFile:
-            seen["called"] = True
+        def fake_download(uri: str, dest: Path, **kwargs: Any) -> Path:
             seen.update(kwargs)
-            return _FakeFile(b"x")
+            return _write(dest, b"x")
 
-        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
+        monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
 
         cache = LocalCache(root=tmp_path / "cache", timeout=None)
         _fetch_one("https://example.com/y.tif", cache, retries=0)
-        assert seen["called"] is True
-        assert "timeout" not in seen
+        assert seen["storage_options"] is None
 
 
 class TestStageOnError:
     """`on_error="skip"` keeps going past a failed asset."""
 
     def test_skip_keeps_other_assets(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cloud_stub: Any
     ) -> None:
         # Build a catalog with one bad URI and one good local file.
         good = _seed_tif(tmp_path / "good.tif", content=b"good")
         bad = "https://nonexistent/never.tif"
 
-        # Force fsspec.open to fail for the bad URI (the good, local asset
-        # is staged in place and never reaches fsspec).
-        def fake_open(uri: str, mode: str = "rb", **kwargs: Any) -> Any:
+        # Force the download to fail for the bad URI (the good, local asset
+        # is staged in place and never downloaded).
+        def fake_download(uri: str, dest: Path, **kwargs: Any) -> Path:
             if uri == bad:
                 raise OSError("nope")
-            raise AssertionError(f"local asset {uri!r} must not go through fsspec")
+            raise AssertionError(f"local asset {uri!r} must not be downloaded")
 
-        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
+        monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
 
         cat = catalog_from_rows(
             rows=[
@@ -539,7 +533,7 @@ class TestStageOnError:
         assert out.gdf.iloc[0]["filepath"] == assets_out["good"]
 
     def test_fatal_error_skips_without_retrying(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cloud_stub: Any
     ) -> None:
         # A fatal failure still honours on_error="skip" (the row
         # survives, the bad asset keeps its URI) — it just never
@@ -548,13 +542,13 @@ class TestStageOnError:
         bad = "https://forbidden/secret.tif"
         attempts = {"n": 0}
 
-        def fake_open(uri: str, mode: str = "rb", **kwargs: Any) -> Any:
+        def fake_download(uri: str, dest: Path, **kwargs: Any) -> Path:
             if uri == bad:
                 attempts["n"] += 1
                 raise PermissionError("denied")
-            raise AssertionError(f"local asset {uri!r} must not go through fsspec")
+            raise AssertionError(f"local asset {uri!r} must not be downloaded")
 
-        monkeypatch.setattr(fsspec_stub, "open", fake_open, raising=False)
+        monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
 
         cat = catalog_from_rows(
             rows=[

@@ -11,9 +11,10 @@ by product and 10-minute observation slot::
 
 L1b files are one HSD segment of one band (the full disk in 10 segments;
 the Japan and target areas in one, scanned four times per slot as
-``JP01`` … ``JP04`` / ``R301`` … ``R304``). The anonymous listing, retries
-and atomic downloads come from the package's shared public-S3 client
-(standard library only: no credentials, no AWS SDK).
+``JP01`` … ``JP04`` / ``R301`` … ``R304``). Listing and atomic downloads
+go unsigned through ``geocloud.files`` on the shared obstore pool (no
+credentials, no AWS SDK; geotoolz-cloud comes with the ``[himawari]`` and
+``[obstore]`` extras).
 """
 
 from __future__ import annotations
@@ -199,8 +200,9 @@ def list_segments(
     Raises:
         ValueError: ``end`` is not after ``start``, or ``satellite`` /
             ``sector`` / ``band`` is out of range.
-        urllib.error.URLError: The bucket listing failed (transient errors
-            are retried first).
+        ImportError: geotoolz-cloud is not installed (``[himawari]`` extra).
+        Exception: The bucket listing failed (obstore's error; transient
+            errors are retried first).
     """
     if sector not in get_args(Sector):
         raise ValueError(f"sector must be one of {get_args(Sector)}; got {sector!r}.")
@@ -249,7 +251,8 @@ def list_l2(
     Raises:
         ValueError: ``end`` is not after ``start``, or ``satellite`` is out
             of range.
-        urllib.error.URLError: The bucket listing failed.
+        ImportError: geotoolz-cloud is not installed (``[himawari]`` extra).
+        Exception: The bucket listing failed (obstore's error).
     """
     lo = as_utc(start)
     hi = lo + _SLOT if end is None else as_utc(end)
@@ -299,8 +302,10 @@ def download(
         Path of the downloaded (or decompressed) file.
 
     Raises:
-        urllib.error.URLError: The download failed (transient errors are
-            retried first).
+        ImportError: geotoolz-cloud is not installed (``[himawari]`` extra).
+        FileNotFoundError: No such object.
+        Exception: The download failed (obstore's error; transient errors
+            are retried first).
     """
     item = parse_key(file) if isinstance(file, str) else file
     name = item.name
@@ -320,6 +325,7 @@ def download(
             compressed,
             attempts=_ATTEMPTS,
             backoff_s=_BACKOFF_S,
+            extra="himawari",
         )
     if not unpack:
         return target
@@ -356,7 +362,9 @@ def _list_slots(
     while slot < end:
         prefix = f"{product}/{slot:%Y/%m/%d/%H%M}/"
         keys.extend(
-            s3.list_objects(name, prefix, attempts=_ATTEMPTS, backoff_s=_BACKOFF_S)
+            s3.list_objects(
+                name, prefix, attempts=_ATTEMPTS, backoff_s=_BACKOFF_S, extra="himawari"
+            )
         )
         slot += _SLOT
     return keys

@@ -341,7 +341,7 @@ def stage(
 ```
 
 - Returns a new catalog whose asset map has been rewritten to local paths; `filepath` follows the row's primary asset, and a `staged_from` column (JSON, keyed like `assets`) preserves the original URIs.
-- Local paths are used in place without fsspec; `LocalCache` fetches remote schemes through fsspec (`[fsspec]` extra) into a temp file renamed into place, one download per distinct URI. The cache key is the URI (expiring signature parameters removed), not the content.
+- Local paths are used in place; remote schemes download through `geocloud.files` (`[cloud]` extra) into a temp file renamed into place, one download per distinct URI. The cache key is the URI (expiring signature parameters removed), not the content.
 - Reuses the shared retry/backoff policy of the catalog readers for transient failures (fatal errors such as `FileNotFoundError` are not retried).
 - Earth Engine assets are not staged (there is no `ee` download path).
 

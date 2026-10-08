@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,13 @@ def _cat(*rows: dict[str, Any]) -> Any:
 
 
 class _Remote:
-    """Stand-in for `fsspec.open` serving bytes per URI and counting opens."""
+    """Stand-in for `geocloud.files.download` serving bytes per URI.
+
+    It keeps the real function's contract: the bytes go to a hidden
+    ``.part`` sibling renamed into place, and a failed or short transfer
+    removes the ``.part`` and raises (a short one as a transient
+    `OSError`).
+    """
 
     def __init__(
         self, content: dict[str, bytes], *, size: dict[str, int] | None = None
@@ -53,42 +60,34 @@ class _Remote:
         self.lock = threading.Lock()
         self.fail: dict[str, BaseException] = {}
         self.fail_after_write: dict[str, BaseException] = {}
-        self.delay = 0.0  # seconds each successful open takes
+        self.delay = 0.0  # seconds each successful download takes
 
-    def __call__(self, uri: str, mode: str = "rb", **kwargs: Any) -> Any:
+    def __call__(self, uri: str, dest: Path, **kwargs: Any) -> Path:
         with self.lock:
             self.opens.append(uri)
         if uri in self.fail:
             raise self.fail[uri]
         if self.delay:
             threading.Event().wait(self.delay)  # `time.sleep` is patched out
-        remote = self
-
-        class _File:
-            size = remote.size.get(uri, len(remote.content[uri]))
-            done = False
-
-            def read(self, _n: int = -1) -> bytes:
-                if self.done:
-                    if uri in remote.fail_after_write:
-                        raise remote.fail_after_write[uri]
-                    return b""
-                self.done = True
-                return remote.content[uri]
-
-            def __enter__(self) -> Any:
-                return self
-
-            def __exit__(self, *a: Any) -> None:
-                return None
-
-        return _File()
+        part = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.part")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            part.write_bytes(self.content[uri])
+            if uri in self.fail_after_write:
+                raise self.fail_after_write[uri]
+            expected = self.size.get(uri, len(self.content[uri]))
+            if expected != len(self.content[uri]):
+                raise OSError(f"short read of {uri!r}")
+            os.replace(part, dest)
+        finally:
+            part.unlink(missing_ok=True)
+        return dest
 
 
 @pytest.fixture
-def remote(monkeypatch: pytest.MonkeyPatch, fsspec_stub: Any) -> _Remote:
+def remote(monkeypatch: pytest.MonkeyPatch, cloud_stub: Any) -> _Remote:
     fake = _Remote({})
-    monkeypatch.setattr(fsspec_stub, "open", fake, raising=False)
+    monkeypatch.setattr(cloud_stub, "download", fake, raising=False)
     monkeypatch.setattr(time, "sleep", lambda _s: None)
     return fake
 
@@ -102,23 +101,23 @@ def _leftovers(root: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_local_catalog_stages_without_fsspec(
+def test_local_catalog_stages_without_geocloud(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src = tmp_path / "a.tif"
     src.write_bytes(b"a")
-    monkeypatch.setitem(sys.modules, "fsspec", None)  # `import fsspec` fails
+    monkeypatch.setitem(sys.modules, "geocloud", None)  # import fails
     out = stage(_cat({"filepath": str(src)}), dest=tmp_path / "cache")
     assert out.gdf.iloc[0]["filepath"] == str(src)
     out = stage(_cat({"filepath": src.as_uri()}), dest=tmp_path / "cache")
     assert out.gdf.iloc[0]["filepath"] == str(src)
 
 
-def test_remote_uri_without_fsspec_names_the_extra(
+def test_remote_uri_without_geocloud_names_the_extra(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setitem(sys.modules, "fsspec", None)
-    with pytest.raises(ModuleNotFoundError, match=r"geotoolz-catalog\[fsspec\]"):
+    monkeypatch.setitem(sys.modules, "geocloud", None)
+    with pytest.raises(ModuleNotFoundError, match=r"geotoolz-catalog\[cloud\]"):
         stage(_cat({"filepath": "s3://b/x.tif"}), dest=tmp_path / "cache")
 
 

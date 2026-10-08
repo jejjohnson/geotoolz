@@ -1432,6 +1432,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cloud = [
+    { name = "geotoolz-cloud" },
+]
 duckdb = [
     { name = "duckdb" },
 ]
@@ -1452,6 +1455,7 @@ full = [
     { name = "earthengine-api" },
     { name = "fsspec", extra = ["http"] },
     { name = "gcsfs" },
+    { name = "geotoolz-cloud" },
     { name = "geotoolz-patcher" },
     { name = "huggingface-hub" },
     { name = "planetary-computer" },
@@ -1530,7 +1534,8 @@ requires-dist = [
     { name = "geopandas", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz-catalog", extras = ["earthaccess", "stac", "gee"], marker = "extra == 'sources-all'", editable = "packages/geotoolz-catalog" },
-    { name = "geotoolz-catalog", extras = ["xarray-raster", "duckdb", "fsspec", "streaming", "sources-all", "patch"], marker = "extra == 'full'", editable = "packages/geotoolz-catalog" },
+    { name = "geotoolz-catalog", extras = ["xarray-raster", "duckdb", "fsspec", "cloud", "streaming", "sources-all", "patch"], marker = "extra == 'full'", editable = "packages/geotoolz-catalog" },
+    { name = "geotoolz-cloud", marker = "extra == 'cloud'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-patcher", marker = "extra == 'patch'", editable = "packages/geotoolz-patcher" },
     { name = "huggingface-hub", marker = "extra == 'fsspec'", specifier = ">=0.25" },
     { name = "loguru", specifier = ">=0.7" },
@@ -1550,7 +1555,7 @@ requires-dist = [
     { name = "xarray", marker = "extra == 'xarray-raster'", specifier = ">=2024.1" },
     { name = "zarr", marker = "extra == 'xarray-raster'", specifier = ">=3.0" },
 ]
-provides-extras = ["xarray-raster", "duckdb", "fsspec", "streaming", "earthaccess", "stac", "gee", "patch", "sources-all", "full"]
+provides-extras = ["xarray-raster", "duckdb", "fsspec", "cloud", "streaming", "earthaccess", "stac", "gee", "patch", "sources-all", "full"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1860,9 +1865,11 @@ carbonmapper = [
     { name = "shapely" },
 ]
 goes = [
+    { name = "geotoolz-cloud" },
     { name = "h5py" },
 ]
 himawari = [
+    { name = "geotoolz-cloud" },
     { name = "h5py" },
 ]
 obstore = [
@@ -1890,6 +1897,8 @@ requires-dist = [
     { name = "geopandas", marker = "extra == 'carbonmapper'", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz", marker = "extra == 'operators'", editable = "packages/geotoolz" },
+    { name = "geotoolz-cloud", marker = "extra == 'goes'", editable = "packages/geotoolz-cloud" },
+    { name = "geotoolz-cloud", marker = "extra == 'himawari'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", marker = "extra == 'obstore'", editable = "packages/geotoolz-cloud" },
     { name = "h5py", marker = "extra == 'goes'", specifier = ">=3.10" },
     { name = "h5py", marker = "extra == 'himawari'", specifier = ">=3.10" },

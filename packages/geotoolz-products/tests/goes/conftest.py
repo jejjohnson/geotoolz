@@ -1,8 +1,8 @@
 """Fixtures for the GOES-R ABI tests.
 
 The reader tests need the ``[goes]`` extra (h5py); on a slim install they
-are left uncollected and only the standard-library ``aws`` and the preset
-tests run.
+are left uncollected and only the ``aws`` tests (which skip without
+geotoolz-cloud) and the preset tests run.
 """
 
 from __future__ import annotations

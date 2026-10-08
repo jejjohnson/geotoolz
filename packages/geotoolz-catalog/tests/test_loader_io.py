@@ -157,6 +157,16 @@ class TestRetryClassification:
     def test_generic_rasterio_io_error_still_transient(self) -> None:
         assert _is_transient(RasterioIOError("HTTP response code: 503"))
 
+    def test_obstore_network_errors_are_transient(self) -> None:
+        # Named like obstore's, without importing obstore (base install).
+        generic = type(
+            "GenericError", (Exception,), {"__module__": "obstore.exceptions"}
+        )
+        assert _is_transient(generic("Error performing GET: timed out"))
+        other = type("GenericError", (Exception,), {"__module__": "elsewhere"})
+        assert not _is_transient(other("not obstore"))
+        assert not _is_transient(FileNotFoundError("object not found"))
+
     def test_async_build_reraises_original_error(self, tmp_path: Path) -> None:
         with pytest.raises(RasterioIOError):
             build_raster_catalog([tmp_path / "missing.tif"], concurrency="async")

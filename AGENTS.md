@@ -18,9 +18,9 @@ person will find and reuse it.
 |---|---|---|---|
 | `geotoolz` | `geotoolz` | Operator families on `GeoTensor` (radiometry, indices, mask, geom, viz, learn, …) and the `patch_ops` bridge | georeader, pipekit; `[patch]` → geotoolz-patcher |
 | `geotoolz-patcher` | `geopatcher` | Split a field into patches, process, stitch back (geometry × sampler × window × aggregation) | georeader; `[cog]` → geotoolz-cloud; `[pipekit]` |
-| `geotoolz-catalog` | `geocatalog` | Find, index, join, load and stage files (`GeoSlice` queries, GeoParquet) | geopandas / pyarrow; `[patch]` → geotoolz-patcher |
-| `geotoolz-cloud` | `geocloud` | Object storage: the one obstore client pool, async COG reads | georeader, obstore |
-| `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …) → `GeoData` / `GeoTensor` | georeader; `[obstore]` → geotoolz-cloud; `[operators]` → geotoolz |
+| `geotoolz-catalog` | `geocatalog` | Find, index, join, load and stage files (`GeoSlice` queries, GeoParquet) | geopandas / pyarrow; `[patch]` → geotoolz-patcher; `[cloud]` → geotoolz-cloud |
+| `geotoolz-cloud` | `geocloud` | Object storage: the one obstore client pool, file verbs, credentials, async COG reads | georeader, obstore |
+| `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …) → `GeoData` / `GeoTensor` | georeader; `[obstore]` / `[goes]` / `[himawari]` → geotoolz-cloud; `[operators]` → geotoolz |
 
 Dependencies point one way and every cross-package link is an optional extra:
 `geotoolz` never depends on `geoproducts`, the patcher never on `geotoolz`,
@@ -56,8 +56,8 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 | Credentials for a bucket / container / host (anonymous, SAS, keys, a TOML file), the GDAL options for them, masking secrets in messages | `geocloud.credentials` (`set_credentials`, `load_credentials`, `gdal_access`, `redact`) — never set credentials in `os.environ` |
 | Listing, reading, writing, downloading, uploading, copying, syncing or pre-signing objects (cloud or local) | `geocloud.files` (`ls`, `read_bytes`, `download`, `upload`, `copy`, `sync`, `rm`, `sign`); a stand-in store for tests, `geocloud.store.mount` |
 | Windowed or async reads from a Cloud-Optimized GeoTIFF | `geocloud.cog.CogSource`; as a patcher field, `geopatcher.fields.CogField` |
-| HTTP with retries, `Retry-After`, streaming downloads (in a reader) | `geoproducts._src.net` (`retrying`, `fetch_bytes`, `download_url`) |
-| Listing / downloading public S3 buckets without credentials | `geoproducts._src.s3` |
+| HTTP API calls with retries, `Retry-After`, atomic writes of response chunks (in a reader) | `geoproducts._src.net` (`retrying`, `retry_after_seconds`, `stream_to_file`); a plain URL or object download is `geocloud.files.download` |
+| Listing / downloading public S3 buckets without credentials (in a reader) | `geoproducts._src.s3` (unsigned `geocloud.files` calls) |
 | Atomic file writes, owner-only credential files | `geoproducts._src.files`, `geoproducts._src.credentials` |
 | Lon/lat bbox validation, UTC times for an API query | `geoproducts._src.query` |
 | NetCDF-4 / HDF5 variables with CF scale/offset/fill | `geoproducts._src.hdf` (`PackedGridReader`, `unpacked`) |

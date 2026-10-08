@@ -51,8 +51,8 @@ the package (readers import them; users don't).
 | `_src.hdf` | `PackedGridReader` — bands that are CF-packed 2-D variables of one HDF5 / NetCDF-4 file (`_Unsigned`, `_FillValue`, `scale_factor` / `add_offset`, masks kept integer, CF flag tables, windowed chunk reads); `PackedVariable`, `attr`, `scalar`, `unpacked` | `goes` |
 | `_src.geostationary` | `FixedGrid.from_cf(f, grid_mapping)` — the affine `+proj=geos` grid from a CF `geostationary` grid mapping and scan angles; `geos_crs`, `scan_angle_transform` | `goes` (MTG, Himawari next) |
 | `_src.stack` | `geoproducts.stack` — any readers onto one reference grid | public |
-| `_src.net` | `retrying` (one retry loop for raising *and* response-returning clients), `retry_after_seconds` (API rate limits: `Retry-After` or backoff, clamped), `urllib_wait`, `download_url` / `stream_to_file` (atomic `.part` downloads), `bearer_headers_for` (a token only ever sent to its own API host) | `carbonmapper`, `goes.aws` |
-| `_src.s3` | Anonymous public buckets over HTTPS: `list_objects` (paged), `download_object`, `object_url`, `s3_wait` | `goes.aws` |
+| `_src.net` | `retrying` (one retry loop for raising *and* response-returning clients), `retry_after_seconds` (API rate limits: `Retry-After` or backoff, clamped), `stream_to_file` (atomic `.part` writes), `bearer_headers_for` (a token only ever sent to its own API host) | `carbonmapper`, `_src.s3` |
+| `_src.s3` | Anonymous public buckets, unsigned through `geocloud.files`: `list_objects`, `download_object`, `object_url`, `s3_wait` (S3's spurious `NoSuchBucket`) | `goes.aws`, `himawari.aws` |
 | `_src.files` | `atomic_path` / `atomic_write_text` / `write_private_json` — complete-or-absent writes; `private=True` is owner-only (`0600`) from the first byte | downloads, credentials |
 | `_src.credentials` | `auth_path(provider)` (`~/.geoproducts/auth_<provider>.json`), `read_json_config`, `write_private_json`, `jwt_expiry` | `carbonmapper` |
 | `_src.query` | `validate_lonlat_bbox`, `as_utc`, `rfc3339_utc`, `time_interval` (STAC / OGC ranges) | `carbonmapper`, `goes.aws` |

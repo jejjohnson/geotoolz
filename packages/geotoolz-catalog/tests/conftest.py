@@ -122,19 +122,22 @@ CATALOG_BACKENDS = [
 
 
 @pytest.fixture
-def fsspec_stub(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """An empty ``fsspec`` module in ``sys.modules`` for tests to give an ``open``.
+def cloud_stub(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """An empty ``geocloud.files`` module for tests to give a ``download``.
 
-    Staging only ever calls ``fsspec.open`` for remote URIs, and the tests
-    that exercise that path fake it anyway; a stub module (rather than
-    patching the real one) keeps them running on a base install, where the
-    ``[fsspec]`` extra is absent.
+    Staging only ever calls ``geocloud.files.download`` for remote URIs,
+    and the tests that exercise that path fake it anyway; a stub module
+    (rather than patching the real one) keeps them running on a base
+    install, where the ``[cloud]`` extra is absent.
     """
     import sys
     import types
 
-    stub = types.ModuleType("fsspec")
-    monkeypatch.setitem(sys.modules, "fsspec", stub)
+    package = types.ModuleType("geocloud")
+    stub = types.ModuleType("geocloud.files")
+    package.files = stub  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "geocloud", package)
+    monkeypatch.setitem(sys.modules, "geocloud.files", stub)
     return stub
 
 

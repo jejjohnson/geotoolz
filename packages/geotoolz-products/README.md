@@ -30,20 +30,20 @@ drops straight into the operators, the patcher and the catalog loaders.
 
 ```bash
 pip install geotoolz-products                    # readers (georeader only)
-pip install 'geotoolz-products[obstore]'         # pooled cloud byte-range reads
+pip install 'geotoolz-products[obstore]'         # pooled cloud byte-range reads + NOAA bucket helpers
 pip install 'geotoolz-products[operators]'       # sensor presets (geotoolz operators)
-pip install 'geotoolz-products[goes]'            # GOES-R ABI L1b reader (h5py)
-pip install 'geotoolz-products[himawari]'        # Himawari L2 cloud products (h5py)
+pip install 'geotoolz-products[goes]'            # GOES-R ABI reader (h5py) + goes.aws (geotoolz-cloud)
+pip install 'geotoolz-products[himawari]'        # Himawari L2 products (h5py) + himawari.aws (geotoolz-cloud)
 pip install 'geotoolz-products[carbonmapper]'    # Carbon Mapper plume catalogue + STAC
 ```
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
 | *(base)* | georeader, numpy, rasterio | `ProductReader`, `toy_sensor` |
-| `[obstore]` | `geotoolz-cloud` | `ProductReader._read_bytes` over `s3://` / `gs://` / `az://` through the shared `geocloud.store` pool |
+| `[obstore]` | `geotoolz-cloud` | `ProductReader._read_bytes` over `s3://` / `gs://` / `az://` through the shared `geocloud.store` pool; the `aws` bucket helpers |
 | `[operators]` | `geotoolz` | per-sensor `presets` (e.g. `toy_sensor.presets.NDVI`) |
-| `[goes]` | h5py | `geoproducts.goes.Reader` (the `goes.aws` bucket helpers need no extra) |
-| `[himawari]` | h5py | `geoproducts.himawari.L2Reader` (the HSD `Reader` and `himawari.aws` need no extra) |
+| `[goes]` | h5py, geotoolz-cloud | `geoproducts.goes.Reader`, the `goes.aws` bucket helpers |
+| `[himawari]` | h5py, geotoolz-cloud | `geoproducts.himawari.L2Reader`, the `himawari.aws` bucket helpers (the HSD `Reader` needs no extra) |
 | `[carbonmapper]` | requests, pydantic, shapely, geopandas, pandas | `geoproducts.carbonmapper` |
 
 ## Quickstart — a sensor reader
@@ -113,7 +113,8 @@ add `goes.TrueColor()`, `NaturalColor()`, `DayCloudPhase()`,
 ## Himawari AHI
 
 Himawari-8 / -9 at 140.7°E. JMA's binary HSD segments are decoded natively
-(numpy + standard library), straight from NOAA's public buckets; the
+(numpy + standard library), straight from NOAA's public buckets (the
+`[himawari]` extra brings the bucket helpers); the
 segments of a band assemble onto the `+proj=geos` grid, and a window
 decodes only the segments it overlaps:
 

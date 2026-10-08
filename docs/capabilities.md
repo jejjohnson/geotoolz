@@ -900,7 +900,7 @@ current).
 
 | Name | Kind | What it does |
 |---|---|---|
-| `LocalCache` | class | fsspec-backed cache for staged remote files. |
+| `LocalCache` | class | Local cache for staged remote files. |
 | `stage` | function | Resolve every URI in ``catalog`` into a local file. |
 
 ### `geocatalog.storage`
@@ -1368,8 +1368,8 @@ helper is added here, not inline in one caller.
 | `geoproducts._src.files` | Atomic file writes shared by the product readers. | `atomic_path`, `atomic_write_text`, `write_private_json` |
 | `geoproducts._src.geostationary` | The geostationary fixed grid shared by geostationary imagers. | `geos_crs`, `scan_angle_transform`, `on_earth`, `FixedGrid` |
 | `geoproducts._src.hdf` | HDF5 / NetCDF-4 access and CF-packed decoding for file-format readers. | `h5py_module`, `attr`, `time_attr`, `scalar`, `unpacked`, `PackedVariable`, `grid_variables`, `PackedGridReader` |
-| `geoproducts._src.net` | HTTP plumbing shared by every product reader. | `backoff_seconds`, `retry_after_seconds`, `retrying`, `urllib_wait`, `fetch_bytes`, `stream_to_file`, `download_url`, `bearer_headers_for` |
+| `geoproducts._src.net` | HTTP plumbing shared by every product reader. | `backoff_seconds`, `retry_after_seconds`, `retrying`, `stream_to_file`, `bearer_headers_for` |
 | `geoproducts._src.presets` | Shared building blocks of the per-product geotoolz presets. | `Recipe`, `geotoolz_module`, `rgb_recipe`, `parallax_correct` |
 | `geoproducts._src.query` | Query-parameter helpers shared by provider clients: bounding boxes and times. | `validate_lonlat_bbox`, `as_utc`, `rfc3339_utc`, `time_interval` |
-| `geoproducts._src.s3` | Anonymous access to public S3 buckets over plain HTTPS. | `object_url`, `s3_wait`, `list_objects`, `download_object` |
+| `geoproducts._src.s3` | Anonymous access to public S3 buckets, through `geocloud.files`. | `object_url`, `s3_wait`, `list_objects`, `download_object` |
 | `geoproducts._src.stack` | Put several readers on one grid. | `stack` |

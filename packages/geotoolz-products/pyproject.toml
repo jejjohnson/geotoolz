@@ -40,8 +40,9 @@ dependencies = [
 # readers pointing at ``s3://`` / ``gs://`` / ``az://`` / ``https://``
 # scenes call ``ProductReader.set_obstore_client(...)`` so every byte-range
 # fetch goes through geotoolz-cloud's process-wide pool (`geocloud.store`,
-# shared with geopatcher and geocatalog).
-obstore = ["geotoolz-cloud"]
+# shared with geopatcher and geocatalog). The public-bucket helpers
+# (``<sensor>.aws``) list and download through `geocloud.files`.
+obstore = ["geotoolz-cloud>=0.2.2"]
 # Sensor presets (``<sensor>.presets``): geotoolz operators bound to a
 # product's band names. geotoolz never depends on this package, so the
 # extra adds no cycle.
@@ -53,12 +54,12 @@ operators = ["geotoolz"]
 # directly).
 # GOES-R ABI L1b reader (``geoproducts.goes``): ABI files are NetCDF-4,
 # i.e. HDF5, read chunk-by-chunk through h5py. The NOAA bucket helpers
-# (``goes.aws``) are standard library and need no extra.
-goes = ["h5py>=3.10"]
-# Himawari AHI (``geoproducts.himawari``): the HSD L1b reader and the bucket
-# helpers are numpy + standard library; h5py is only for the NOAA L2 cloud
-# products (NetCDF-4).
-himawari = ["h5py>=3.10"]
+# (``goes.aws``) list and download through geotoolz-cloud.
+goes = ["h5py>=3.10", "geotoolz-cloud>=0.2.2"]
+# Himawari AHI (``geoproducts.himawari``): the HSD L1b reader is numpy +
+# standard library; h5py is for the NOAA L2 cloud products (NetCDF-4) and
+# geotoolz-cloud for the bucket helpers (``himawari.aws``).
+himawari = ["h5py>=3.10", "geotoolz-cloud>=0.2.2"]
 carbonmapper = [
     "requests>=2",
     "pydantic>=2",

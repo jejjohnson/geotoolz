@@ -43,8 +43,8 @@ if something is missing, add it there so the next reader gets it:
 
 | Module | Use it for |
 |---|---|
-| `net.py` | HTTP with retries, `Retry-After`, backoff, streaming downloads (`retrying`, `fetch_bytes`, `download_url`, `bearer_headers_for`) |
-| `s3.py` | public buckets without credentials (`list_objects`, `download_object`, `object_url`) |
+| `net.py` | HTTP API clients: retries, `Retry-After`, backoff, atomic writes of response chunks (`retrying`, `retry_after_seconds`, `stream_to_file`, `bearer_headers_for`); plain URL / object downloads go through `geocloud.files` |
+| `s3.py` | public buckets without credentials (`list_objects`, `download_object`, `object_url`), unsigned through `geocloud.files` |
 | `files.py` | atomic writes (`atomic_path`, `atomic_write_text`, `write_private_json`) |
 | `credentials.py` | `~/.geoproducts/auth_<provider>.json` + env vars (`auth_path`, `read_json_config`, `jwt_expiry`) |
 | `query.py` | lon/lat bbox validation and UTC time windows for API queries |

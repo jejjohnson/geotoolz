@@ -26,6 +26,7 @@ SELF = "geotoolz-catalog"
 
 IMPORT_TO_DIST = {
     "ee": "earthengine-api",
+    "geocloud": "geotoolz-cloud",
     "geopatcher": "geotoolz-patcher",
     "planetary_computer": "planetary-computer",
     "pystac_client": "pystac-client",

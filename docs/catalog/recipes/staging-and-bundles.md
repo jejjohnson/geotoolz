@@ -47,7 +47,7 @@ cache = LocalCache(root="/scratch/geocatalog-cache", ttl_days=30)
 local_catalog = stage(
     remote_catalog,
     cache=cache,
-    parallel=8,            # threads — fsspec releases the GIL on I/O
+    parallel=8,            # threads — obstore releases the GIL on I/O
     retries=3,
 )
 
@@ -59,10 +59,14 @@ tensor = gc.load.load_raster(local_catalog, aoi, band_indexes=[1])
 row's `filepath` follows its primary asset — and the original URIs in
 a `staged_from` column (`extras["staged_from"]`, JSON keyed like
 `assets`). The input is not mutated. Local paths are used in place, so
-staging a local catalog needs no fsspec; remote schemes need the
-`[fsspec]` extra. Downloads land in a temp file and are renamed into
-place only when complete, and a URI shared by several rows is fetched
-once. Cache hits are detected by the cache key (below); a re-run is a
+staging a local catalog needs no extra. Remote URIs (`s3://`, `gs://`,
+`az://` / `abfs[s]://`, `http(s)://`, `hf://`) download through
+[`geocloud.files`](../../cloud/index.md#moving-files-geocloudfiles) on the stack's shared
+obstore client pool and need the `[cloud]` extra. Credentials come from
+[`geocloud.credentials`](../../cloud/index.md#credentials-geocloudcredentials): register a
+bucket or container once, or keep it in the credentials file. Downloads
+move in byte ranges into a temp file that is renamed into place only
+when complete, and a URI shared by several rows is fetched once. Cache hits are detected by the cache key (below); a re-run is a
 no-op if the cache is warm.
 
 ### `LocalCache` tuning
@@ -71,6 +75,7 @@ no-op if the cache is warm.
 cache = LocalCache(
     root="/scratch/geocatalog-cache",   # default: $GEOCATALOG_CACHE or ~/.cache/geocatalog
     ttl_days=30,                         # None = forever
+    timeout=60.0,                        # seconds per request (one 16 MiB range)
 )
 ```
 

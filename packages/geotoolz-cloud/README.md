@@ -8,9 +8,11 @@ Cloud-Optimized GeoTIFF reads.
 
 geopatcher's `CogField` and geoproducts' cloud byte reads take their client
 from `geocloud.store`, so a process talking to one bucket through them builds
-**one** client and **one** HTTP/2 connection pool for it. (geocatalog does not
-use the pool: staging downloads through fsspec and the builders read through
-rasterio / GDAL.) `geocloud.cog` reads COG tiles straight
+**one** client and **one** HTTP/2 connection pool for it. geocatalog's
+`stage()` and geoproducts' NOAA bucket helpers download through
+`geocloud.files` on the same pool; geocatalog's builders read through
+rasterio / GDAL (`geocloud.credentials.gdal_access` hands them the same
+credentials). `geocloud.cog` reads COG tiles straight
 from that pool with async-geotiff: no GDAL, every tile a batch of windows
 touches fetched once, groups of tiles fetched concurrently.
 

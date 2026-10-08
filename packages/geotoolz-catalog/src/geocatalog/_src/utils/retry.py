@@ -72,7 +72,22 @@ def _is_transient(exc: BaseException) -> bool:
         message = str(exc).lower()
         if any(m in message for m in _DETERMINISTIC_RASTERIO_MESSAGES):
             return False
+    if _is_obstore_generic(exc):
+        return True
     return isinstance(exc, _TRANSIENT_IO_ERRORS)
+
+
+def _is_obstore_generic(exc: BaseException) -> bool:
+    """An obstore network / server failure, after obstore's own retries.
+
+    `geocloud.files` raises ``obstore.exceptions.GenericError`` (not an
+    `OSError`) for timeouts, dropped connections and 5xx answers; a
+    missing object or a refused request arrive as the builtin
+    `FileNotFoundError` / `PermissionError` and stay fatal. Matched by
+    name so obstore is not imported here.
+    """
+    kind = type(exc)
+    return kind.__name__ == "GenericError" and kind.__module__.startswith("obstore")
 
 
 # Exponential backoff capped at 30s per wait so a long-tail outage doesn't
