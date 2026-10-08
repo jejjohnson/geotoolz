@@ -26,9 +26,9 @@ from geopatcher._src.fields.reproject import ReprojectingRasterField
 # one list `geopatcher.fields` and the root `geopatcher` namespace resolve
 # lazily from, so the three never drift apart.
 LAZY_ADAPTERS: dict[str, str] = {
+    "CogField": "geopatcher._src.fields.cog",
     "DaskField": "geopatcher._src.fields.dask",
     "GeoPandasField": "geopatcher._src.fields.geopandas",
-    "ObstoreCogField": "geopatcher._src.fields.obstore_cog",
     "RioXarrayField": "geopatcher._src.fields.rio_xarray",
     "XarrayField": "geopatcher._src.fields.xarray",
     "XvecField": "geopatcher._src.fields.xvec",
@@ -36,9 +36,9 @@ LAZY_ADAPTERS: dict[str, str] = {
 
 __all__ = [
     "AsyncRasterField",
+    "CogField",
     "DaskField",
     "GeoPandasField",
-    "ObstoreCogField",
     "RasterField",
     "ReprojectingRasterField",
     "RioXarrayField",

@@ -266,11 +266,11 @@ class ProductReader(GeoData, ABC):
         ``open(path, "rb").read()`` fallback. Callers can either pass
         a pre-built ``ObjectStore`` (e.g. for tests using
         :class:`obstore.store.LocalStore`) or fetch the process-wide
-        pooled one from ``geopatcher.objstore.get_obstore`` (the
+        pooled one from ``geocloud.store.get_obstore`` (the
         ``[obstore]`` extra). A pre-built client must be laid out like
         the pooled one — rooted at the bucket / Azure container, with
         no prefix — because reads request
-        ``geopatcher.objstore.object_key(uri)``.
+        ``geocloud.store.object_key(uri)``.
         """
         self._obstore_client = client
 
@@ -355,7 +355,7 @@ def resolve_fill_value(
 # Byte-range helpers for the ProductReader._read_bytes opt-in path.
 # ----------------------------------------------------------------------
 
-# URI schemes the obstore pool (``geopatcher.objstore.SUPPORTED_SCHEMES``)
+# URI schemes the obstore pool (``geocloud.store.SUPPORTED_SCHEMES``)
 # can talk to, spelled out so the check needs no optional import.
 # ``file://`` is intentionally omitted — local files take the fast on-disk
 # path even when a client is attached.
@@ -365,7 +365,7 @@ _REMOTE_SCHEMES = frozenset(
 
 _OBSTORE_INSTALL_HINT = (
     "ProductReader cloud reads need the [obstore] extra (the shared pool lives "
-    "in geopatcher); install via `pip install 'geotoolz-products[obstore]'`."
+    "in geotoolz-cloud); install via `pip install 'geotoolz-products[obstore]'`."
 )
 
 
@@ -391,7 +391,7 @@ async def _get_range_async(
 ) -> bytes:
     """Fetch ``length`` bytes from ``uri`` via an attached obstore client."""
     try:
-        from geopatcher.objstore import object_key
+        from geocloud.store import object_key
     except ImportError as exc:
         raise ImportError(_OBSTORE_INSTALL_HINT) from exc
 
@@ -405,7 +405,7 @@ def _run_coroutine_safely(coro: Any) -> Any:
     """Drive ``coro`` to completion regardless of running-loop state.
 
     Same pattern as ``geocatalog._src.raster._run_coroutine_safely`` and
-    ``geopatcher._src.fields.obstore_cog._run_coroutine_safely``:
+    ``geocloud._src.cog_source._run_coroutine_safely``:
     ``asyncio.run`` raises ``RuntimeError`` when nested under a running
     loop (Jupyter, FastAPI handler, ``pytest-asyncio``). Detect that
     case and run on a worker thread with its own loop so the calling

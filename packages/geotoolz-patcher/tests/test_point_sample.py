@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import rasterio
 
-from geopatcher import PointDomain
+from geopatcher.fields import PointDomain
 
 
 @pytest.fixture

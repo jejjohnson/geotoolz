@@ -1,6 +1,6 @@
-"""`SpatialGeometry` — shape + scale of the neighborhood the operator sees.
+"""`spatial.geometry.Geometry` — shape + scale of the neighborhood the operator sees.
 
-Each `SpatialGeometry` subclass knows how to translate an anchor into
+Each `spatial.geometry.Geometry` subclass knows how to translate an anchor into
 backend-specific indices on each `Domain` it supports. The dispatch is
 explicit ``isinstance`` rather than `functools.singledispatchmethod`
 because the raster path matches a Protocol-like surface (``transform`` +
@@ -9,11 +9,11 @@ nominal-typing is unreliable in `singledispatch` registries.
 
 Five geometries:
 
-- `SpatialRectangular`     — Raster + Grid
-- `SpatialSphericalCap`    — Grid + Point
-- `SpatialKNNGraph`        — Point + Vector
-- `SpatialRadiusGraph`     — Point + Vector
-- `SpatialPolygonIntersection` — Raster + Vector
+- `spatial.geometry.Rectangular`     — Raster + Grid
+- `spatial.geometry.SphericalCap`    — Grid + Point
+- `spatial.geometry.KNNGraph`        — Point + Vector
+- `spatial.geometry.RadiusGraph`     — Point + Vector
+- `spatial.geometry.PolygonIntersection` — Raster + Vector
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def _is_raster_domain(domain: Any) -> bool:
     )
 
 
-class SpatialGeometry:
+class Geometry:
     """Base for spatial neighborhood definitions.
 
     Subclasses override `neighborhood` (anchor → backend-specific
@@ -66,7 +66,7 @@ class SpatialGeometry:
 
 
 @dataclass(eq=False)
-class SpatialRectangular(SpatialGeometry):
+class Rectangular(Geometry):
     """Axis-aligned box — the bread-and-butter raster / grid geometry.
 
     Args:
@@ -150,7 +150,8 @@ class SpatialRectangular(SpatialGeometry):
                 out[d] = slice(start, start + length)
             return out
         raise NotImplementedError(
-            f"SpatialRectangular doesn't support {type(domain).__name__} domains."
+            f"spatial.geometry.Rectangular doesn't support "
+            f"{type(domain).__name__} domains."
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -158,7 +159,7 @@ class SpatialRectangular(SpatialGeometry):
 
 
 @dataclass(eq=False)
-class SpatialSphericalCap(SpatialGeometry):
+class SphericalCap(Geometry):
     """Geodesic cap of radius ``radius_km`` — for lat/lon fields near the poles.
 
     On a `GridDomain` the latitude / longitude dims are found by name
@@ -194,7 +195,8 @@ class SpatialSphericalCap(SpatialGeometry):
             d = _haversine_km(lat_a, lon_a, lat_pts, lon_pts)
             return np.flatnonzero(d <= self.radius_km)
         raise NotImplementedError(
-            f"SpatialSphericalCap doesn't support {type(domain).__name__} domains."
+            f"spatial.geometry.SphericalCap doesn't support {type(domain).__name__} "
+            "domains."
         )
 
     def _grid_neighborhood(self, domain: GridDomain, anchor: Any) -> _MaskedWindow:
@@ -214,7 +216,7 @@ class SpatialSphericalCap(SpatialGeometry):
         )
         if rows.size == 0:
             raise ValueError(
-                f"SpatialSphericalCap of {self.radius_km} km around "
+                f"spatial.geometry.SphericalCap of {self.radius_km} km around "
                 f"({lat_a}, {lon_a}) contains no grid cell."
             )
         box = {
@@ -245,7 +247,8 @@ def _find_dim(domain: GridDomain, names: tuple[str, ...]) -> str:
         if name in domain.coords:
             return name
     raise ValueError(
-        f"SpatialSphericalCap needs one of the dims {names} on the GridDomain; "
+        f"spatial.geometry.SphericalCap needs one of the dims {names} on the "
+        "GridDomain; "
         f"got {tuple(domain.coords)}."
     )
 
@@ -268,11 +271,11 @@ def _haversine_km(
     dlat = lat2r - lat1r
     dlon = np.radians(lon2) - np.radians(lon1)
     a = np.sin(dlat / 2) ** 2 + np.cos(lat1r) * np.cos(lat2r) * np.sin(dlon / 2) ** 2
-    return 2.0 * SpatialSphericalCap._EARTH_RADIUS_KM * np.arcsin(np.sqrt(a))
+    return 2.0 * SphericalCap._EARTH_RADIUS_KM * np.arcsin(np.sqrt(a))
 
 
 @dataclass(eq=False)
-class SpatialKNNGraph(SpatialGeometry):
+class KNNGraph(Geometry):
     """Fixed-k nearest-neighbor neighborhood.
 
     Args:
@@ -281,7 +284,7 @@ class SpatialKNNGraph(SpatialGeometry):
         metric: ``"euclidean"`` (planar; uses the domain's kdtree) or
             ``"haversine"`` (great-circle; requires lat/lon coords).
 
-    An integer anchor (e.g. from `SpatialRandom`) is the index of a point,
+    An integer anchor (e.g. from `spatial.sampler.Random`) is the index of a point,
     or of a vector feature whose centroid is used.
     """
 
@@ -312,7 +315,8 @@ class SpatialKNNGraph(SpatialGeometry):
             d = centroids.distance(anchor_geom).values
             return np.argsort(d)[: self.k]
         raise NotImplementedError(
-            f"SpatialKNNGraph doesn't support {type(domain).__name__} domains."
+            f"spatial.geometry.KNNGraph doesn't support {type(domain).__name__} "
+            "domains."
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -320,7 +324,7 @@ class SpatialKNNGraph(SpatialGeometry):
 
 
 @dataclass(eq=False)
-class SpatialRadiusGraph(SpatialGeometry):
+class RadiusGraph(Geometry):
     """All neighbors within a fixed radius — variable patch size.
 
     Args:
@@ -351,7 +355,8 @@ class SpatialRadiusGraph(SpatialGeometry):
             hits = tree.query(buf, predicate="intersects")
             return np.asarray(hits, dtype=int)
         raise NotImplementedError(
-            f"SpatialRadiusGraph doesn't support {type(domain).__name__} domains."
+            f"spatial.geometry.RadiusGraph doesn't support {type(domain).__name__} "
+            "domains."
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -359,7 +364,7 @@ class SpatialRadiusGraph(SpatialGeometry):
 
 
 @dataclass(eq=False)
-class SpatialPolygonIntersection(SpatialGeometry):
+class PolygonIntersection(Geometry):
     """Patch = pixels (or features) lying inside a given polygon.
 
     On a `RasterDomain`, ``neighborhood`` returns a ``MaskedWindow``: the
@@ -394,7 +399,7 @@ class SpatialPolygonIntersection(SpatialGeometry):
             hits = domain.sindex.query(poly, predicate="intersects")
             return np.asarray(hits, dtype=int)
         raise NotImplementedError(
-            "SpatialPolygonIntersection doesn't support "
+            "spatial.geometry.PolygonIntersection doesn't support "
             f"{type(domain).__name__} domains."
         )
 
@@ -406,8 +411,8 @@ class SpatialPolygonIntersection(SpatialGeometry):
 class _MaskedWindow:
     """A bounding window + an interior boolean mask.
 
-    Returned by `SpatialPolygonIntersection.neighborhood` on `RasterDomain`
-    (a rasterio `Window`) and by `SpatialSphericalCap.neighborhood` on a
+    Returned by `spatial.geometry.PolygonIntersection.neighborhood` on `RasterDomain`
+    (a rasterio `Window`) and by `spatial.geometry.SphericalCap.neighborhood` on a
     `GridDomain` (a ``{dim: slice}`` dict). ``Field.select`` reads the
     rectangular window. The wrapper stays on `Patch.indices`, where every
     dense aggregation reads the mask (via ``_resolve_indices``) and skips
@@ -444,7 +449,8 @@ def _polygon_masked_window(domain: Any, poly: Any, anchor: int) -> _MaskedWindow
         clipped = None
     if clipped is None or clipped.width <= 0 or clipped.height <= 0:
         raise ValueError(
-            f"SpatialPolygonIntersection: polygon {anchor} (bounds {poly.bounds}) "
+            f"spatial.geometry.PolygonIntersection: polygon {anchor} (bounds "
+            f"{poly.bounds}) "
             "does not overlap the raster domain."
         )
     window = Window(
@@ -472,7 +478,7 @@ def _to_xy(domain: PointDomain, anchor: Any) -> np.ndarray:
 def _to_shapely_point(anchor: Any, domain: VectorDomain) -> Any:
     """Coerce an anchor into a `shapely.Point`.
 
-    An integer anchor (what `SpatialRandom` yields on a `VectorDomain`) is
+    An integer anchor (what `spatial.sampler.Random` yields on a `VectorDomain`) is
     a feature index and maps to that feature's centroid.
     """
     import shapely

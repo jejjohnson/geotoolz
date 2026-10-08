@@ -60,19 +60,10 @@ xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1"]
 streaming = ["zarr>=3.0"]
 dask = ["dask[bag]>=2024.8.3", "xarray>=2024.1"]
 jax = ["jax>=0.4.23"]
-# The process-wide obstore client pool (`geopatcher.objstore`), shared by
-# geotoolz's and geocatalog's `[obstore]` extras.
-obstore = ["obstore>=0.9.5"]
-# Cloud-Optimized GeoTIFF reader with batched range fetches. obstore
-# gives us the pooled HTTP/2 client (one TLS handshake per bucket per
-# process); async-geotiff (over async-tiff) parses the COG header,
-# georeferencing, CRS, overviews and masks and decodes tile bytes
-# without GDAL involvement. Pre-1.0, so capped to the tested minor;
-# it requires numpy>=2.
-obstore-cog = [
-    "obstore>=0.9.5",
-    "async-geotiff>=0.5,<0.6",
-]
+# Cloud-Optimized GeoTIFF field (`geopatcher.fields.CogField`) on the
+# geotoolz-cloud COG engine (obstore pool + async-geotiff, batched range
+# fetches).
+cog = ["geotoolz-cloud[cog]"]
 patch-full = [
     "xarray>=2024.1",
     "geopandas>=0.14",
@@ -82,8 +73,7 @@ patch-full = [
     "zarr>=3.0",
     "dask[bag]>=2024.8.3",
     "jax>=0.4.23",
-    "obstore>=0.9.5",
-    "async-geotiff>=0.5,<0.6",
+    "geotoolz-cloud[cog]",
 ]
 # Operator-graph bridge: pull in `pipekit` and the ~125-LOC wrappers in
 # `geopatcher.integrations.pipekit` (GridSampler / ApplyToChips / Stitch).

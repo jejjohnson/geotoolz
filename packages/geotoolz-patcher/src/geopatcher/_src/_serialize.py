@@ -28,6 +28,8 @@ summary and `from_config` refuses them.
 from __future__ import annotations
 
 import dataclasses
+import functools
+import importlib
 from collections.abc import Mapping
 from typing import Any
 
@@ -92,8 +94,54 @@ def config_from_fields(obj: Any, *, exclude: tuple[str, ...] = ()) -> dict[str, 
     }
 
 
+# Public modules whose classes envelopes name by their public path.
+_PUBLIC_MODULES = (
+    "geopatcher",
+    "geopatcher.spatial.geometry",
+    "geopatcher.spatial.sampler",
+    "geopatcher.spatial.window",
+    "geopatcher.spatial.aggregation",
+    "geopatcher.temporal.geometry",
+    "geopatcher.temporal.sampler",
+    "geopatcher.temporal.window",
+    "geopatcher.temporal.aggregation",
+    "geopatcher.temporal.stencils",
+    "geopatcher.matched",
+)
+
+
+@functools.cache
+def _public_paths() -> dict[type, str]:
+    """``{class: public path}`` for every class geopatcher exports."""
+    paths: dict[type, str] = {}
+    for module_name in _PUBLIC_MODULES:
+        module = importlib.import_module(module_name)
+        prefix = module_name.removeprefix("geopatcher").lstrip(".")
+        for name in module.__all__:
+            obj = getattr(module, name)
+            if isinstance(obj, type):
+                paths.setdefault(obj, f"{prefix}.{name}" if prefix else name)
+    return paths
+
+
+def config_name(cls: type) -> str:
+    """The name an envelope records for ``cls``.
+
+    geopatcher's own classes are named by their public path, relative to
+    the package (``"spatial.window.Hann"``, ``"temporal.aggregation.Mean"``,
+    ``"SpatialPatcher"``); any other class — a user-defined axis — by its
+    ``module.qualname``.
+
+    Examples:
+        >>> from geopatcher import spatial
+        >>> config_name(spatial.window.Hann)
+        'spatial.window.Hann'
+    """
+    return _public_paths().get(cls) or f"{cls.__module__}.{cls.__qualname__}"
+
+
 def axis_envelope(obj: Any) -> dict[str, Any]:
-    """Wrap one component as ``{"class": <type name>, "config": <get_config()>}``.
+    """Wrap one component as ``{"class": <config_name>, "config": <get_config()>}``.
 
     Args:
         obj: An axis, stencil or patcher instance exposing ``get_config()``.
@@ -101,7 +149,7 @@ def axis_envelope(obj: Any) -> dict[str, Any]:
     Returns:
         The class-name + config envelope used by every nested config.
     """
-    return {"class": type(obj).__name__, "config": obj.get_config()}
+    return {"class": config_name(type(obj)), "config": obj.get_config()}
 
 
 def qualified_name(cls: type) -> str:
@@ -169,7 +217,7 @@ def _subclasses(cls: type) -> list[type]:
 
 
 def _registry() -> dict[str, list[type]]:
-    """Every loaded geopatcher component class, keyed by ``__name__``.
+    """Every loaded geopatcher component class, keyed by `config_name`.
 
     Built from the axis / stencil / patcher roots plus all their loaded
     subclasses, so a user-defined axis subclass resolves once imported.
@@ -179,18 +227,34 @@ def _registry() -> dict[str, list[type]]:
         MatchedSpatioTemporalPatcher,
         MatchedTemporalPatcher,
     )
-    from geopatcher._src.spatial.aggregation import SpatialAggregation
-    from geopatcher._src.spatial.geometry import SpatialGeometry
+    from geopatcher._src.spatial.aggregation import (
+        Aggregation as SpatialAggregation,
+    )
+    from geopatcher._src.spatial.geometry import (
+        Geometry as SpatialGeometry,
+    )
     from geopatcher._src.spatial.patcher import AsyncSpatialPatcher, SpatialPatcher
-    from geopatcher._src.spatial.sampler import SpatialSampler
-    from geopatcher._src.spatial.window import SpatialWindow
+    from geopatcher._src.spatial.sampler import (
+        Sampler as SpatialSampler,
+    )
+    from geopatcher._src.spatial.window import (
+        Window as SpatialWindow,
+    )
     from geopatcher._src.spatial_time import SpatioTemporalPatcher
-    from geopatcher._src.time.aggregation import TemporalAggregation
-    from geopatcher._src.time.geometry import TemporalGeometry
-    from geopatcher._src.time.patcher import TemporalPatcher
-    from geopatcher._src.time.sampler import TemporalSampler
-    from geopatcher._src.time.stencils import Stencil
-    from geopatcher._src.time.window import TemporalWindow
+    from geopatcher._src.temporal.aggregation import (
+        Aggregation as TemporalAggregation,
+    )
+    from geopatcher._src.temporal.geometry import (
+        Geometry as TemporalGeometry,
+    )
+    from geopatcher._src.temporal.patcher import TemporalPatcher
+    from geopatcher._src.temporal.sampler import (
+        Sampler as TemporalSampler,
+    )
+    from geopatcher._src.temporal.stencils import Stencil
+    from geopatcher._src.temporal.window import (
+        Window as TemporalWindow,
+    )
 
     roots: tuple[type, ...] = (
         SpatialGeometry,
@@ -213,7 +277,7 @@ def _registry() -> dict[str, list[type]]:
     registry: dict[str, list[type]] = {}
     for root in roots:
         for cls in _subclasses(root):
-            entries = registry.setdefault(cls.__name__, [])
+            entries = registry.setdefault(config_name(cls), [])
             if cls not in entries:
                 entries.append(cls)
     return registry
@@ -274,15 +338,15 @@ def from_config(envelope: Mapping[str, Any]) -> Any:
         RuntimeError: if the class is marked ``forbid_in_yaml``.
 
     Examples:
-        >>> geom = SpatialRectangular(size=(64, 64), boundary="pad")
+        >>> geom = spatial.geometry.Rectangular(size=(64, 64), boundary="pad")
         >>> from_config(axis_envelope(geom)).get_config() == geom.get_config()
         True
         >>> stencil = TimeStencil("-9h", "3h", "1h", closed="both")
         >>> from_config(json.loads(json.dumps(axis_envelope(stencil)))) == stencil
         True
-        >>> from_config({"class": "SpatialCustom", "config": {}})
+        >>> from_config({"class": "spatial.window.Custom", "config": {}})
         Traceback (most recent call last):
-        RuntimeError: from_config cannot rebuild SpatialCustom: ...
+        RuntimeError: from_config cannot rebuild spatial.window.Custom: ...
     """
     if not _is_envelope(envelope):
         raise TypeError(

@@ -19,14 +19,14 @@
 #     error-message string (we changed the message to name operands);
 #   - add geopatcher-specific tests covering get_config round-trip,
 #     labelled-error messages, and the valid_origin_points contract.
-"""Tests for `geopatcher._src.time.stencils`."""
+"""Tests for `geopatcher._src.temporal.stencils`."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from geopatcher._src.time.stencils import (
+from geopatcher._src.temporal.stencils import (
     Stencil,
     TimeStencil,
     _to_timedelta64,
@@ -408,7 +408,7 @@ def test_mixed_type_stencil_rejected() -> None:
 
 
 def test_divide_evenly_guards_zero_and_datetimes() -> None:
-    from geopatcher.time import divide_evenly
+    from geopatcher.temporal.stencils import divide_evenly
 
     with pytest.raises(ValueError, match="must be non-zero"):
         divide_evenly(4, 0, label="step")

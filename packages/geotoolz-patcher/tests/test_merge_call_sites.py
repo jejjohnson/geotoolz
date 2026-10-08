@@ -15,26 +15,17 @@ from typing import Any, ClassVar
 import numpy as np
 import pytest
 
-from geopatcher import (
-    AsyncSpatialPatcher,
-    RasterField,
-    SpatialAggregation,
-    SpatialBoxcar,
-    SpatialMedian,
-    SpatialMinMax,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import AsyncSpatialPatcher, RasterField, SpatialPatcher, spatial
 from geopatcher._src.matched import MatchedField, MatchedSpatialPatcher
 
 
-def _patcher(aggregation: SpatialAggregation, cls: type = SpatialPatcher) -> Any:
+def _patcher(
+    aggregation: spatial.aggregation.Aggregation, cls: type = SpatialPatcher
+) -> Any:
     return cls(
-        geometry=SpatialRectangular(size=(4, 4)),
-        sampler=SpatialRegularStride(step=4),
-        window=SpatialBoxcar(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4)),
+        sampler=spatial.sampler.RegularStride(step=4),
+        window=spatial.window.Boxcar(),
         aggregation=aggregation,
     )
 
@@ -46,7 +37,7 @@ async def _astream(patches: Iterable[Any]) -> AsyncIterator[Any]:
 
 async def _amerge(field: RasterField) -> Any:
     # The user's coroutine is the frame the warning must name.
-    patcher = _patcher(SpatialMedian())
+    patcher = _patcher(spatial.aggregation.Median())
     return await patcher.amerge(_astream(patcher.split(field)), field.domain)
 
 
@@ -57,30 +48,32 @@ def _matched_merge(field: RasterField) -> Any:
         coreg={"sec": lambda raw, prim: raw},
     )
     mpatcher = MatchedSpatialPatcher(
-        primary=_patcher(SpatialOverlapAdd()),
-        secondary_aggregators={"sec": SpatialMedian()},
+        primary=_patcher(spatial.aggregation.OverlapAdd()),
+        secondary_aggregators={"sec": spatial.aggregation.Median()},
     )
     return mpatcher.merge(mpatcher.split(mfield), mfield)
 
 
 _CALL_SITES: dict[str, Callable[[RasterField], Any]] = {
-    "merge": lambda f: _patcher(SpatialMedian()).merge(
-        _patcher(SpatialMedian()).split(f), f.domain
+    "merge": lambda f: _patcher(spatial.aggregation.Median()).merge(
+        _patcher(spatial.aggregation.Median()).split(f), f.domain
     ),
-    "merge_to_field": lambda f: _patcher(SpatialMedian()).merge_to_field(
-        _patcher(SpatialMedian()).split(f), f
+    "merge_to_field": lambda f: _patcher(spatial.aggregation.Median()).merge_to_field(
+        _patcher(spatial.aggregation.Median()).split(f), f
     ),
-    "reduce": lambda f: _patcher(SpatialOverlapAdd()).reduce(f, SpatialMedian()),
-    "two_pass": lambda f: _patcher(SpatialOverlapAdd()).two_pass(
+    "reduce": lambda f: _patcher(spatial.aggregation.OverlapAdd()).reduce(
+        f, spatial.aggregation.Median()
+    ),
+    "two_pass": lambda f: _patcher(spatial.aggregation.OverlapAdd()).two_pass(
         f,
-        reduce_with=SpatialMinMax(),
+        reduce_with=spatial.aggregation.MinMax(),
         apply=lambda data, stats: data,
-        aggregation=SpatialMedian(),
+        aggregation=spatial.aggregation.Median(),
     ),
     "amerge": lambda f: asyncio.run(_amerge(f)),
     "async_patcher.merge": lambda f: _patcher(
-        SpatialMedian(), AsyncSpatialPatcher
-    ).merge(_patcher(SpatialMedian()).split(f), f.domain),
+        spatial.aggregation.Median(), AsyncSpatialPatcher
+    ).merge(_patcher(spatial.aggregation.Median()).split(f), f.domain),
     "matched.merge": _matched_merge,
 }
 
@@ -103,7 +96,7 @@ def test_streaming_warning_points_at_the_caller(
 # ---------------------------------------------------------------------------
 
 
-class _Counting(SpatialAggregation):
+class _Counting(spatial.aggregation.Aggregation):
     """Streaming aggregation that logs how many patches had been produced
     each time it consumed one."""
 
@@ -124,7 +117,7 @@ def test_amerge_consumes_async_stream_incrementally(
     cls: type, raster_field_factory: Any
 ) -> None:
     field = raster_field_factory(8)
-    patches = list(_patcher(SpatialOverlapAdd()).split(field))
+    patches = list(_patcher(spatial.aggregation.OverlapAdd()).split(field))
     produced = [0]
 
     async def counting() -> AsyncIterator[Any]:
@@ -144,7 +137,7 @@ def test_amerge_consumes_async_stream_incrementally(
 
 def test_amerge_streamed_result_matches_merge(raster_field_factory: Any) -> None:
     field = raster_field_factory(8)
-    patcher = _patcher(SpatialOverlapAdd())
+    patcher = _patcher(spatial.aggregation.OverlapAdd())
 
     streamed = asyncio.run(patcher.amerge(_astream(patcher.split(field)), field.domain))
 
@@ -155,7 +148,7 @@ def test_amerge_streamed_result_matches_merge(raster_field_factory: Any) -> None
 
 def test_amerge_propagates_stream_errors(raster_field_factory: Any) -> None:
     field = raster_field_factory(8)
-    patcher = _patcher(SpatialOverlapAdd())
+    patcher = _patcher(spatial.aggregation.OverlapAdd())
 
     async def broken() -> AsyncIterator[Any]:
         for i, patch in enumerate(patcher.split(field)):
@@ -173,7 +166,7 @@ def test_amerge_closes_stream_when_aggregation_fails(
     field = raster_field_factory(8)
     closed: list[bool] = []
 
-    class _Boom(SpatialAggregation):
+    class _Boom(spatial.aggregation.Aggregation):
         streaming_safe: ClassVar[bool] = True
 
         def merge(self, patches: Iterable[Any], domain: Any) -> Any:
@@ -182,7 +175,7 @@ def test_amerge_closes_stream_when_aggregation_fails(
 
     async def stream() -> AsyncIterator[Any]:
         try:
-            for patch in _patcher(SpatialOverlapAdd()).split(field):
+            for patch in _patcher(spatial.aggregation.OverlapAdd()).split(field):
                 yield patch
         finally:
             closed.append(True)

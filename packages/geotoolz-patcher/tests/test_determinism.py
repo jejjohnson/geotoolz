@@ -8,10 +8,10 @@ example and the round-trip properties can't be verified.
 
 The four stochastic samplers covered here:
 
-- `SpatialJitteredStride`
-- `SpatialRandom`
-- `SpatialPoissonDisk`
-- `TemporalRandom`
+- `spatial.sampler.JitteredStride`
+- `spatial.sampler.Random`
+- `spatial.sampler.PoissonDisk`
+- `temporal.sampler.Random`
 
 The contract:
 
@@ -20,7 +20,7 @@ The contract:
 | ``int``                 | Bit-identical anchors across calls and across instances.   |
 | ``None`` (default)      | Re-seeded from OS entropy each call — anchors will differ. |
 
-(`SpatialExplicit` and `SpatialRegularStride` are deterministic by
+(`spatial.sampler.Explicit` and `spatial.sampler.RegularStride` are deterministic by
 construction; not exercised here.)
 """
 
@@ -34,14 +34,7 @@ import rasterio
 from georeader.geotensor import GeoTensor
 from hypothesis import given, settings, strategies as st
 
-from geopatcher import (
-    RasterField,
-    SpatialJitteredStride,
-    SpatialPoissonDisk,
-    SpatialRandom,
-    SpatialRectangular,
-    TemporalRandom,
-)
+from geopatcher import RasterField, spatial, temporal
 
 
 @pytest.fixture
@@ -57,8 +50,8 @@ def domain() -> RasterField:
 
 
 @pytest.fixture
-def rect() -> SpatialRectangular:
-    return SpatialRectangular(size=(16, 16))
+def rect() -> spatial.geometry.Rectangular:
+    return spatial.geometry.Rectangular(size=(16, 16))
 
 
 # ---------------------------------------------------------------------------
@@ -68,38 +61,38 @@ def rect() -> SpatialRectangular:
 
 class TestSpatialJitteredStrideDeterminism:
     def test_same_seed_same_anchors_across_calls(
-        self, domain: RasterField, rect: SpatialRectangular
+        self, domain: RasterField, rect: spatial.geometry.Rectangular
     ) -> None:
-        s = SpatialJitteredStride(step=16, jitter=0.5, seed=42)
+        s = spatial.sampler.JitteredStride(step=16, jitter=0.5, seed=42)
         first = list(s.anchors(domain.domain, rect))
         second = list(s.anchors(domain.domain, rect))
         assert first == second
 
     def test_same_seed_same_anchors_across_instances(
-        self, domain: RasterField, rect: SpatialRectangular
+        self, domain: RasterField, rect: spatial.geometry.Rectangular
     ) -> None:
         a = list(
-            SpatialJitteredStride(step=16, jitter=0.5, seed=42).anchors(
+            spatial.sampler.JitteredStride(step=16, jitter=0.5, seed=42).anchors(
                 domain.domain, rect
             )
         )
         b = list(
-            SpatialJitteredStride(step=16, jitter=0.5, seed=42).anchors(
+            spatial.sampler.JitteredStride(step=16, jitter=0.5, seed=42).anchors(
                 domain.domain, rect
             )
         )
         assert a == b
 
     def test_different_seeds_differ(
-        self, domain: RasterField, rect: SpatialRectangular
+        self, domain: RasterField, rect: spatial.geometry.Rectangular
     ) -> None:
         a = list(
-            SpatialJitteredStride(step=16, jitter=0.5, seed=0).anchors(
+            spatial.sampler.JitteredStride(step=16, jitter=0.5, seed=0).anchors(
                 domain.domain, rect
             )
         )
         b = list(
-            SpatialJitteredStride(step=16, jitter=0.5, seed=1).anchors(
+            spatial.sampler.JitteredStride(step=16, jitter=0.5, seed=1).anchors(
                 domain.domain, rect
             )
         )
@@ -108,25 +101,29 @@ class TestSpatialJitteredStrideDeterminism:
 
 class TestSpatialRandomDeterminism:
     def test_same_seed_same_anchors_across_calls(
-        self, domain: RasterField, rect: SpatialRectangular
+        self, domain: RasterField, rect: spatial.geometry.Rectangular
     ) -> None:
-        s = SpatialRandom(n_samples=20, seed=7)
+        s = spatial.sampler.Random(n_samples=20, seed=7)
         assert list(s.anchors(domain.domain, rect)) == list(
             s.anchors(domain.domain, rect)
         )
 
     def test_same_seed_same_anchors_across_instances(
-        self, domain: RasterField, rect: SpatialRectangular
+        self, domain: RasterField, rect: spatial.geometry.Rectangular
     ) -> None:
-        a = list(SpatialRandom(n_samples=20, seed=7).anchors(domain.domain, rect))
-        b = list(SpatialRandom(n_samples=20, seed=7).anchors(domain.domain, rect))
+        a = list(
+            spatial.sampler.Random(n_samples=20, seed=7).anchors(domain.domain, rect)
+        )
+        b = list(
+            spatial.sampler.Random(n_samples=20, seed=7).anchors(domain.domain, rect)
+        )
         assert a == b
 
     def test_seed_none_constructs_a_fresh_rng_each_call(
         self,
         monkeypatch: pytest.MonkeyPatch,
         domain: RasterField,
-        rect: SpatialRectangular,
+        rect: spatial.geometry.Rectangular,
     ) -> None:
         # Behavioral proxy for "seed=None is non-deterministic": prove
         # that each `anchors()` call reaches for `np.random.default_rng`
@@ -143,7 +140,7 @@ class TestSpatialRandomDeterminism:
 
         monkeypatch.setattr(np.random, "default_rng", tracking_default_rng)
 
-        s = SpatialRandom(n_samples=20, seed=None)
+        s = spatial.sampler.Random(n_samples=20, seed=None)
         list(s.anchors(domain.domain, rect))
         list(s.anchors(domain.domain, rect))
 
@@ -155,31 +152,39 @@ class TestSpatialRandomDeterminism:
 
 class TestSpatialPoissonDiskDeterminism:
     def test_same_seed_same_anchors_across_calls(
-        self, domain: RasterField, rect: SpatialRectangular
+        self, domain: RasterField, rect: spatial.geometry.Rectangular
     ) -> None:
-        s = SpatialPoissonDisk(min_dist=6.0, seed=11)
+        s = spatial.sampler.PoissonDisk(min_dist=6.0, seed=11)
         assert list(s.anchors(domain.domain, rect)) == list(
             s.anchors(domain.domain, rect)
         )
 
     def test_same_seed_same_anchors_across_instances(
-        self, domain: RasterField, rect: SpatialRectangular
+        self, domain: RasterField, rect: spatial.geometry.Rectangular
     ) -> None:
-        a = list(SpatialPoissonDisk(min_dist=6.0, seed=11).anchors(domain.domain, rect))
-        b = list(SpatialPoissonDisk(min_dist=6.0, seed=11).anchors(domain.domain, rect))
+        a = list(
+            spatial.sampler.PoissonDisk(min_dist=6.0, seed=11).anchors(
+                domain.domain, rect
+            )
+        )
+        b = list(
+            spatial.sampler.PoissonDisk(min_dist=6.0, seed=11).anchors(
+                domain.domain, rect
+            )
+        )
         assert a == b
 
 
 class TestTemporalRandomDeterminism:
     def test_same_seed_same_anchors_across_calls(self) -> None:
-        s = TemporalRandom(n_samples=5, seed=3)
+        s = temporal.sampler.Random(n_samples=5, seed=3)
         first = list(s.anchors(time_len=100))
         second = list(s.anchors(time_len=100))
         assert first == second
 
     def test_same_seed_same_anchors_across_instances(self) -> None:
-        a = list(TemporalRandom(n_samples=5, seed=3).anchors(time_len=100))
-        b = list(TemporalRandom(n_samples=5, seed=3).anchors(time_len=100))
+        a = list(temporal.sampler.Random(n_samples=5, seed=3).anchors(time_len=100))
+        b = list(temporal.sampler.Random(n_samples=5, seed=3).anchors(time_len=100))
         assert a == b
 
 
@@ -202,8 +207,8 @@ def test_spatial_random_bit_identical_for_any_int_seed(seed: int) -> None:
             crs="EPSG:32630",
         )
     )
-    geom = SpatialRectangular(size=(8, 8))
-    s = SpatialRandom(n_samples=10, seed=seed)
+    geom = spatial.geometry.Rectangular(size=(8, 8))
+    s = spatial.sampler.Random(n_samples=10, seed=seed)
     assert list(s.anchors(field.domain, geom)) == list(s.anchors(field.domain, geom))
 
 
@@ -218,6 +223,6 @@ def test_jittered_stride_bit_identical_for_any_int_seed(seed: int) -> None:
             crs="EPSG:32630",
         )
     )
-    geom = SpatialRectangular(size=(8, 8))
-    s = SpatialJitteredStride(step=8, jitter=0.5, seed=seed)
+    geom = spatial.geometry.Rectangular(size=(8, 8))
+    s = spatial.sampler.JitteredStride(step=8, jitter=0.5, seed=seed)
     assert list(s.anchors(field.domain, geom)) == list(s.anchors(field.domain, geom))

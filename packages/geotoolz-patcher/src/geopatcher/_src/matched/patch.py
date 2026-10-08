@@ -138,7 +138,7 @@ class MatchedTemporalPatch(_MatchedMembersBase["TemporalPatch"]):
     `TemporalPatch` values rather than `Patch` so the temporal
     ``anchor`` (an ``int`` time index) and ``indices`` (a ``slice``
     along the time axis) flow through to downstream
-    `TemporalAggregation` consumers.
+    `temporal.aggregation.Aggregation` consumers.
 
     Args:
         anchor: The time-index anchor in the primary's time axis.

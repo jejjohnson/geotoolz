@@ -21,18 +21,8 @@ import rasterio
 from georeader.geotensor import GeoTensor
 from pipekit import Graph, Input, Lambda, Operator, Sequential, check_pickleable
 
-from geopatcher import (
-    Patch,
-    RasterField,
-    SpatialBoxcar,
-    SpatialCustom,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-    axis_envelope,
-    from_config,
-)
+from geopatcher import Patch, RasterField, SpatialPatcher, spatial
+from geopatcher.config import axis_envelope, from_config
 from geopatcher.integrations.pipekit import (
     ApplyToChips,
     GridSampler,
@@ -55,10 +45,10 @@ def field() -> RasterField:
 @pytest.fixture
 def patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -95,7 +85,9 @@ class TestStitchInSequential:
             [
                 GridSampler(patcher=patcher),
                 ApplyToChips(operator=double),
-                Stitch(aggregation=SpatialOverlapAdd(), domain=field.domain),
+                Stitch(
+                    aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain
+                ),
             ]
         )
         result = pipe(field)
@@ -121,8 +113,10 @@ class TestOperatorContract:
         ]
 
     def test_stitch_config_envelopes_the_aggregation(self, field: RasterField) -> None:
-        op = Stitch(aggregation=SpatialOverlapAdd(), domain=field.domain)
-        assert op.get_config()["aggregation"] == axis_envelope(SpatialOverlapAdd())
+        op = Stitch(aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain)
+        assert op.get_config()["aggregation"] == axis_envelope(
+            spatial.aggregation.OverlapAdd()
+        )
         with pytest.raises(RuntimeError, match="forbid_in_yaml"):
             Operator.from_state(op.state)
 
@@ -150,16 +144,18 @@ class TestOperatorContract:
         doubled = ApplyToChips(
             operator=Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
         )(patches)
-        merged = Stitch(aggregation=SpatialOverlapAdd(), domain=field.domain)(doubled)
+        merged = Stitch(
+            aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain
+        )(doubled)
         graph = Graph(inputs={"field": src}, outputs={"merged": merged})
         np.testing.assert_allclose(graph(field=field)["merged"], 2.0)
 
     def test_check_pickleable_surfaces_custom_window(self) -> None:
         closure_patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(8, 8)),
-            sampler=SpatialRegularStride(step=8),
-            window=SpatialCustom(fn=lambda g: np.ones(g.size)),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(8, 8)),
+            sampler=spatial.sampler.RegularStride(step=8),
+            window=spatial.window.Custom(fn=lambda g: np.ones(g.size)),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         sampler = GridSampler(patcher=closure_patcher)
         pipe = Sequential(

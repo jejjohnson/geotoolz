@@ -9,16 +9,8 @@ import numpy as np
 import pytest
 from _helpers import make_rasterio_reader_field
 
-from geopatcher import (
-    Patch,
-    PatchErrorRecord,
-    RasterField,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import Patch, RasterField, SpatialPatcher, spatial
+from geopatcher.observe import PatchErrorRecord
 
 
 class FlakyRasterField:
@@ -60,10 +52,10 @@ class FlakyRasterField:
 class TestSplit:
     def test_returns_iterator(self, field: RasterField) -> None:
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         result = patcher.split(field)
         assert isinstance(result, Iterator)
@@ -73,10 +65,10 @@ class TestSplit:
 
     def test_data_matches_indices(self, field: RasterField) -> None:
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         for patch in patcher.split(field):
             assert patch.data.shape[-2:] == (16, 16)
@@ -85,10 +77,10 @@ class TestSplit:
         # ADR-001: `split` is an iterator (no len()); `n_anchors` is the
         # cheap substitute that walks the sampler without touching the field.
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         n = patcher.n_anchors(field)
         assert n == 16  # 4x4 lattice
@@ -97,10 +89,10 @@ class TestSplit:
     def test_on_error_skip_omits_failed_patch(self, field: RasterField) -> None:
         flaky = FlakyRasterField(field, failures_by_anchor={(0, 16): 1})
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
             on_error="skip",
         )
 
@@ -118,10 +110,10 @@ class TestSplit:
     ) -> None:
         flaky = FlakyRasterField(field, failures_by_anchor={(0, 16): 2})
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
             on_error="retry",
             max_retries=2,
             # Cover class-name config; the exhausted-retry test covers classes.
@@ -140,10 +132,10 @@ class TestSplit:
     ) -> None:
         flaky = FlakyRasterField(field, failures_by_anchor={(0, 16): 3})
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
             on_error="retry",
             max_retries=1,
             # Cover class objects; the transient-success test covers names.
@@ -165,10 +157,10 @@ class TestSplit:
             exception_type=ValueError,
         )
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
             on_error="retry",
             max_retries=2,
             retry_on=(OSError,),
@@ -183,10 +175,10 @@ class TestSplit:
     def test_on_error_mask_emits_nan_patch(self, field: RasterField) -> None:
         flaky = FlakyRasterField(field, failures_by_anchor={(0, 16): 1})
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
             on_error="mask",
         )
 
@@ -207,10 +199,10 @@ class TestSplit:
     def test_invalid_on_error_policy_raises(self, field: RasterField) -> None:
         with pytest.raises(ValueError, match="invalid on_error policy"):
             SpatialPatcher(
-                geometry=SpatialRectangular(size=(16, 16)),
-                sampler=SpatialRegularStride(step=16),
-                window=SpatialBoxcar(),
-                aggregation=SpatialOverlapAdd(),
+                geometry=spatial.geometry.Rectangular(size=(16, 16)),
+                sampler=spatial.sampler.RegularStride(step=16),
+                window=spatial.window.Boxcar(),
+                aggregation=spatial.aggregation.OverlapAdd(),
                 on_error="ignore",  # type: ignore[arg-type]
             )
 
@@ -220,10 +212,10 @@ class TestSplit:
         """`capture_traceback=False` keeps `errors` lean for bulk skip workloads."""
         flaky = FlakyRasterField(field, failures_by_anchor={(0, 16): 1})
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
             on_error="skip",
             capture_traceback=False,
         )
@@ -240,10 +232,10 @@ class TestSplit:
 class TestSplitMergeRoundtrip:
     def test_identity_with_boxcar_no_overlap(self, field: RasterField) -> None:
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         patches = list(patcher.split(field))
         recon = patcher.aggregation.merge(patches, field.reader)
@@ -253,16 +245,16 @@ class TestSplitMergeRoundtrip:
 class TestGetConfig:
     def test_records_each_axis(self, field: RasterField) -> None:
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(8, 8)),
-            sampler=SpatialRegularStride(step=8),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(8, 8)),
+            sampler=spatial.sampler.RegularStride(step=8),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         cfg = patcher.get_config()
-        assert cfg["geometry"]["class"] == "SpatialRectangular"
-        assert cfg["sampler"]["class"] == "SpatialRegularStride"
-        assert cfg["window"]["class"] == "SpatialBoxcar"
-        assert cfg["aggregation"]["class"] == "SpatialOverlapAdd"
+        assert cfg["geometry"]["class"] == "spatial.geometry.Rectangular"
+        assert cfg["sampler"]["class"] == "spatial.sampler.RegularStride"
+        assert cfg["window"]["class"] == "spatial.window.Boxcar"
+        assert cfg["aggregation"]["class"] == "spatial.aggregation.OverlapAdd"
 
 
 def test_rasterio_reader_field_split_merge_pad(tmp_path: Any) -> None:
@@ -284,10 +276,10 @@ def test_rasterio_reader_field_split_merge_pad(tmp_path: Any) -> None:
 
         # split → merge: 14 px chips tile the 70x70 scene exactly.
         tiler = SpatialPatcher(
-            geometry=SpatialRectangular(size=(14, 14)),
-            sampler=SpatialRegularStride(step=14),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(14, 14)),
+            sampler=spatial.sampler.RegularStride(step=14),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         tiles = list(tiler.split(field))
         assert len(tiles) == 25
@@ -298,10 +290,10 @@ def test_rasterio_reader_field_split_merge_pad(tmp_path: Any) -> None:
         # pad: 16 px chips, the 64 anchors overflow the edge by 10 px and
         # must be filled with the file's nodata, exactly as rasterio does.
         padder = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16), boundary="pad"),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16), boundary="pad"),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         chips = list(padder.split(field))
         assert len(chips) == 25
@@ -324,7 +316,7 @@ def test_with_data_preserves_nodata_and_attrs(adapter: str) -> None:
     import rasterio
     from georeader.geotensor import GeoTensor
 
-    from geopatcher import ReprojectingRasterField
+    from geopatcher.fields import ReprojectingRasterField
 
     source = GeoTensor(
         values=np.ones((8, 8), dtype=np.float32),
@@ -348,26 +340,27 @@ def test_with_data_preserves_nodata_and_attrs(adapter: str) -> None:
 
 def test_window_type_error_is_not_swallowed() -> None:
     # #187: `_safe_base_weights` caught every TypeError, so a bug inside
-    # a `SpatialCustom` fn silently turned into "no weights".
+    # a `spatial.window.Custom` fn silently turned into "no weights".
     from _helpers import make_raster_field
-
-    from geopatcher import SpatialCustom
 
     def broken(geometry: Any) -> np.ndarray:
         raise TypeError("bug in user code")
 
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialCustom(fn=broken),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Custom(fn=broken),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     with pytest.raises(TypeError, match="bug in user code"):
         list(patcher.split(make_raster_field(16)))
 
 
 def test_ragged_geometry_gets_no_base_weights() -> None:
-    from geopatcher import SpatialKNNGraph
+
     from geopatcher._src.spatial.patcher import _safe_base_weights
 
-    assert _safe_base_weights(SpatialBoxcar(), SpatialKNNGraph(k=2)) is None
+    assert (
+        _safe_base_weights(spatial.window.Boxcar(), spatial.geometry.KNNGraph(k=2))
+        is None
+    )

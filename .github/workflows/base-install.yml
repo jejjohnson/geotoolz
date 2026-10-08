@@ -175,7 +175,7 @@ jobs:
           # The extras really are absent from this environment.
           for module in (
               "xarray", "rioxarray", "xvec", "zarr", "dask", "jax",
-              "obstore", "async_tiff", "async_geotiff", "pipekit",
+              "geocloud", "obstore", "async_tiff", "async_geotiff", "pipekit",
           ):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 
@@ -189,10 +189,10 @@ jobs:
               GeoTensor(values, transform=from_origin(0, 160, 10, 10), crs="EPSG:32629")
           )
           patcher = gp.SpatialPatcher(
-              geometry=gp.SpatialRectangular(size=(8, 8)),
-              sampler=gp.SpatialRegularStride(step=(8, 8)),
-              window=gp.SpatialBoxcar(),
-              aggregation=gp.SpatialOverlapAdd(),
+              geometry=gp.spatial.geometry.Rectangular(size=(8, 8)),
+              sampler=gp.spatial.sampler.RegularStride(step=(8, 8)),
+              window=gp.spatial.window.Boxcar(),
+              aggregation=gp.spatial.aggregation.OverlapAdd(),
           )
           out = patcher.merge(patcher.split(field), field.domain)
           np.testing.assert_allclose(out, values)
@@ -204,6 +204,12 @@ jobs:
               assert "geotoolz-patcher[grid]" in str(exc), exc
           else:
               raise AssertionError("XarrayField ran without xarray")
+          try:
+              gp.fields.CogField.open("s3://bucket/scene.tif")
+          except ImportError as exc:
+              assert "geotoolz-patcher[cog]" in str(exc), exc
+          else:
+              raise AssertionError("CogField opened without geotoolz-cloud")
           print("geotoolz-patcher base install OK", gp.__version__)
           PY
       # Coverage is off: most extras-gated code is unreachable here, so the
@@ -290,3 +296,43 @@ jobs:
       - name: Test geotoolz-products (base install)
         working-directory: packages/geotoolz-products
         run: uv run --no-sync pytest -q --no-cov -m "not slow and not live and not integration"
+
+  # `pip install geotoolz-cloud` without extras: the client pool works,
+  # every module imports, and COG reads fail only when used, naming the
+  # `[cog]` extra; the test suite passes with the COG tests skipping.
+  geotoolz-cloud-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Install geotoolz-cloud (base, no extras)
+        run: uv sync --locked --package geotoolz-cloud --no-default-groups --group dev
+      - name: Import and smoke test
+        run: |
+          uv run --no-sync python - <<'PY'
+          import importlib.util
+
+          import geocloud
+          from geocloud.cog import CogSource
+          from geocloud.store import clear_obstore_pool, get_obstore, object_key
+
+          for module in ("async_geotiff", "geopatcher", "geotoolz"):
+              assert importlib.util.find_spec(module) is None, f"{module} installed"
+
+          store = get_obstore("s3://bucket/a/b.tif")
+          assert get_obstore("s3://bucket/c.tif") is store
+          assert object_key("s3://bucket/a/b.tif") == "a/b.tif"
+          clear_obstore_pool()
+          try:
+              CogSource.open("s3://bucket/a/b.tif")
+          except ImportError as exc:
+              assert "geotoolz-cloud[cog]" in str(exc), exc
+          else:
+              raise AssertionError("CogSource opened without async-geotiff")
+          print("geotoolz-cloud base install OK", geocloud.__version__)
+          PY
+      - name: Test geotoolz-cloud (base install)
+        working-directory: packages/geotoolz-cloud
+        run: uv run --no-sync pytest -q --no-cov

@@ -4,7 +4,7 @@ form — issue #22.
 Concrete content of #22 for the v0.x aggregation family:
 
 - The only aggregation with two distinct code paths is
-  `SpatialOverlapAdd`: `_merge_in_memory` (numpy accumulators) vs
+  `spatial.aggregation.OverlapAdd`: `_merge_in_memory` (numpy accumulators) vs
   `_merge_streaming` (zarr-backed accumulators on disk). The bulk of
   this file is the equality contract between those two paths under
   varied zarr chunk shapes (1, 7 prime, 16 block-aligned, full).
@@ -16,7 +16,7 @@ Concrete content of #22 for the v0.x aggregation family:
   must yield the same result. That catches the same class of
   bookkeeping bugs the streaming/in-memory comparison would.
 
-- `SpatialVariance` uses Welford specifically because it's more
+- `spatial.aggregation.Variance` uses Welford specifically because it's more
   accurate than a naive two-pass on ill-conditioned data (large mean,
   small variance, near-cancellation in `E[x²] - E[x]²`). One test pins
   that claim down — Welford error must not exceed naive error on a
@@ -34,16 +34,7 @@ import rasterio
 from georeader.geotensor import GeoTensor
 from rasterio.windows import Window
 
-from geopatcher import (
-    Patch,
-    SpatialMax,
-    SpatialMean,
-    SpatialMin,
-    SpatialOverlapAdd,
-    SpatialSum,
-    SpatialVariance,
-    SpatialWeightedSum,
-)
+from geopatcher import Patch, spatial
 
 
 def _needs_zarr() -> None:
@@ -114,9 +105,9 @@ def test_overlap_add_streaming_matches_in_memory(
     chunks: tuple[int, int],
 ) -> None:
     _needs_zarr()
-    in_mem = SpatialOverlapAdd().merge(overlapping_patches, domain)
+    in_mem = spatial.aggregation.OverlapAdd().merge(overlapping_patches, domain)
 
-    streamed_agg = SpatialOverlapAdd(
+    streamed_agg = spatial.aggregation.OverlapAdd(
         streaming=True,
         target_path=str(tmp_path),
         chunks=chunks,
@@ -134,7 +125,9 @@ def test_overlap_add_streaming_empty_patches_returns_fill_array(
 ) -> None:
     # No patches at all should yield a fill-valued zarr of the domain's shape.
     _needs_zarr()
-    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path), chunks=(16, 16))
+    agg = spatial.aggregation.OverlapAdd(
+        streaming=True, target_path=str(tmp_path), chunks=(16, 16)
+    )
     result = np.asarray(agg.merge([], domain)[:])
     assert result.shape == (64, 64)
     assert np.isnan(result).all()
@@ -152,7 +145,7 @@ def test_overlap_add_streaming_chunk_size_invariant(
     _needs_zarr()
     results = []
     for i, chunks in enumerate([(7, 7), (8, 8), (16, 16), (64, 64)]):
-        agg = SpatialOverlapAdd(
+        agg = spatial.aggregation.OverlapAdd(
             streaming=True,
             target_path=str(tmp_path / f"run_{i}"),
             chunks=chunks,
@@ -169,8 +162,8 @@ def test_overlap_add_streaming_chunk_size_invariant(
 # The permutation tests share the `overlapping_patches` fixture
 # (12-pixel stride on 16x16 patches). Earlier drafts used a disjoint
 # tiling that touched every cell exactly once, which made the tests
-# vacuous: `SpatialSum/Max/Min/Mean/WeightedSum` collapse to a single
-# write per cell and the shuffle is a no-op, and `SpatialVariance`
+# vacuous: `spatial.aggregation.Sum/Max/Min/Mean/WeightedSum` collapse to a single
+# write per cell and the shuffle is a no-op, and `spatial.aggregation.Variance`
 # returns 0 everywhere because Welford's count never exceeds 1.
 # Overlap is the only regime where ordering can matter (Welford's
 # intermediate `mean` updates differ; fp summation has ULP drift).
@@ -180,8 +173,8 @@ def test_overlap_add_streaming_chunk_size_invariant(
 @pytest.mark.parametrize(
     "agg",
     [
-        SpatialMax(),
-        SpatialMin(),
+        spatial.aggregation.Max(),
+        spatial.aggregation.Min(),
     ],
     ids=lambda a: type(a).__name__,
 )
@@ -204,9 +197,9 @@ def test_exactly_commutative_aggregations_are_bit_identical_under_permutation(
 @pytest.mark.parametrize(
     "agg",
     [
-        SpatialSum(),
-        SpatialMean(),
-        SpatialWeightedSum(),
+        spatial.aggregation.Sum(),
+        spatial.aggregation.Mean(),
+        spatial.aggregation.WeightedSum(),
     ],
     ids=lambda a: type(a).__name__,
 )
@@ -237,11 +230,11 @@ def test_variance_permutation_invariant_under_overlap(
     # actually exercises the update path. The looser tolerance
     # reflects that — the final result is mathematically order-
     # invariant; ULP drift is expected.
-    forward = SpatialVariance().merge(overlapping_patches, domain)
+    forward = spatial.aggregation.Variance().merge(overlapping_patches, domain)
     rng = np.random.default_rng(seed=3)
     shuffled = list(overlapping_patches)
     rng.shuffle(shuffled)
-    permuted = SpatialVariance().merge(shuffled, domain)
+    permuted = spatial.aggregation.Variance().merge(shuffled, domain)
     # Sanity check the fixture: at least some cells must be touched
     # more than once for the Welford code path to run at all.
     assert (forward > 0.0).any(), (
@@ -263,7 +256,7 @@ def test_welford_variance_no_worse_than_naive_on_ill_conditioned_data(
     # spread. `Sum(x^2)/N - (Sum(x)/N)^2` (the naive two-pass form, in
     # float32 to surface the cancellation problem) loses precision in
     # the subtraction. Welford's running update is robust to this. The
-    # framework's `SpatialVariance` runs in float64 internally, so we
+    # framework's `spatial.aggregation.Variance` runs in float64 internally, so we
     # compare it against a deliberately-stressed float32 naive
     # reference to make the accuracy gap visible.
     rng = np.random.default_rng(seed=7)
@@ -286,7 +279,7 @@ def test_welford_variance_no_worse_than_naive_on_ill_conditioned_data(
             )
         )
 
-    welford = SpatialVariance().merge(patches, domain)
+    welford = spatial.aggregation.Variance().merge(patches, domain)
 
     # Naive two-pass in float32 — explicit cancellation regime.
     stacked32 = np.stack([np.asarray(p.data, dtype=np.float32) for p in patches])
@@ -304,7 +297,7 @@ def test_welford_variance_no_worse_than_naive_on_ill_conditioned_data(
     assert welford_err <= naive_err, (
         f"Welford error {welford_err:.3e} exceeded naive float32 "
         f"two-pass error {naive_err:.3e} on ill-conditioned input — "
-        "the whole reason SpatialVariance uses Welford is that this "
+        "the whole reason spatial.aggregation.Variance uses Welford is that this "
         "inequality should hold."
     )
 
@@ -327,9 +320,10 @@ def _hann_patches(n: int, size: int = 16, step: int = 8) -> Iterator[Patch]:
     ``n`` is deliberately not a multiple of the zarr chunk, and the last
     anchor overhangs the domain (pad-style), so edge chunks are partial.
     """
-    from geopatcher import SpatialHann, SpatialRectangular
 
-    weights = SpatialHann().weights(SpatialRectangular(size=(size, size)))
+    weights = spatial.window.Hann().weights(
+        spatial.geometry.Rectangular(size=(size, size))
+    )
     for r in range(0, n, step):
         for c in range(0, n, step):
             rows = np.arange(r, r + size, dtype=np.float64)[:, None]
@@ -345,8 +339,10 @@ def _hann_patches(n: int, size: int = 16, step: int = 8) -> Iterator[Patch]:
 def test_streaming_matches_in_memory_on_partial_chunks(tmp_path) -> None:
     _needs_zarr()
     domain = _ShapeDomain((70, 60))  # chunk 32 → partial edge chunks
-    in_mem = SpatialOverlapAdd().merge(_hann_patches(70), domain)
-    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path), chunks=(32, 32))
+    in_mem = spatial.aggregation.OverlapAdd().merge(_hann_patches(70), domain)
+    agg = spatial.aggregation.OverlapAdd(
+        streaming=True, target_path=str(tmp_path), chunks=(32, 32)
+    )
     streamed = np.asarray(agg.merge(_hann_patches(70), domain)[:])
     # Same NaN fill (the Σw = 0 leading ring) and the same values.
     np.testing.assert_array_equal(np.isnan(streamed), np.isnan(in_mem))
@@ -369,10 +365,10 @@ def test_streaming_peak_memory(tmp_path) -> None:
         return _hann_patches(n, size=128, step=128)
 
     # Warm zarr's lazy imports / codec registry outside the measurement.
-    SpatialOverlapAdd(
+    spatial.aggregation.OverlapAdd(
         streaming=True, target_path=str(tmp_path / "warm"), chunks=(8, 8)
     ).merge(_hann_patches(16, size=8, step=8), _ShapeDomain((16, 16)))
-    agg = SpatialOverlapAdd(
+    agg = spatial.aggregation.OverlapAdd(
         streaming=True, target_path=str(tmp_path / "run"), chunks=(128, 128)
     )
     tracemalloc.start()
@@ -382,7 +378,7 @@ def test_streaming_peak_memory(tmp_path) -> None:
     finally:
         tracemalloc.stop()
     assert peak < domain_bytes / 2, f"peak {peak} B vs domain {domain_bytes} B"
-    in_mem = SpatialOverlapAdd().merge(patches(), domain)
+    in_mem = spatial.aggregation.OverlapAdd().merge(patches(), domain)
     streamed = np.asarray(out[:])
     np.testing.assert_array_equal(np.isnan(streamed), np.isnan(in_mem))
     np.testing.assert_allclose(streamed, in_mem, rtol=1e-5, atol=1e-6, equal_nan=True)
@@ -395,7 +391,9 @@ def test_store_not_overwritten(tmp_path) -> None:
     second = [
         Patch(data=np.full((16, 16), 2.0), anchor=(0, 0), indices=Window(0, 0, 16, 16))
     ]
-    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path), chunks=(16, 16))
+    agg = spatial.aggregation.OverlapAdd(
+        streaming=True, target_path=str(tmp_path), chunks=(16, 16)
+    )
     agg.merge(first, domain)
     with pytest.raises(FileExistsError, match="overwrite=True"):
         agg.merge(second, domain)
@@ -403,7 +401,7 @@ def test_store_not_overwritten(tmp_path) -> None:
 
     kept = np.asarray(zarr.open_array(str(tmp_path / "rec.zarr"), mode="r")[:])
     assert kept[0, 0] == 1.0
-    replaced = SpatialOverlapAdd(
+    replaced = spatial.aggregation.OverlapAdd(
         streaming=True, target_path=str(tmp_path), chunks=(16, 16), overwrite=True
     ).merge(second, domain)
     assert np.asarray(replaced[:])[0, 0] == 2.0
@@ -412,7 +410,7 @@ def test_store_not_overwritten(tmp_path) -> None:
 def test_streaming_requires_chunks(tmp_path) -> None:
     # The chunk shape used to come from the first patch — a shrunk 2x2
     # edge chip made the whole store 2x2-chunked.
-    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path))
+    agg = spatial.aggregation.OverlapAdd(streaming=True, target_path=str(tmp_path))
     with pytest.raises(ValueError, match="needs chunks="):
         agg.merge([], _ShapeDomain((8, 8)))
 
@@ -425,7 +423,7 @@ def test_streaming_dtype_knob(tmp_path) -> None:
         anchor=(0, 0),
         indices=Window(0, 0, 16, 16),
     )
-    agg = SpatialOverlapAdd(
+    agg = spatial.aggregation.OverlapAdd(
         streaming=True, target_path=str(tmp_path), chunks=(8, 8), dtype="float64"
     )
     out = agg.merge([patch], domain)
@@ -433,7 +431,7 @@ def test_streaming_dtype_knob(tmp_path) -> None:
     assert out.chunks == (3, 8, 8)
     assert np.asarray(out[:])[0, 0, 0] == 1.0 / 3.0
     with pytest.raises(ValueError, match="floating dtype"):
-        SpatialOverlapAdd(dtype="int16")
+        spatial.aggregation.OverlapAdd(dtype="int16")
 
 
 def test_streaming_rejects_extra_patch_dims(tmp_path) -> None:
@@ -441,8 +439,10 @@ def test_streaming_rejects_extra_patch_dims(tmp_path) -> None:
     # a different error than the in-RAM path; both now raise the same one.
     patch = Patch(data=np.ones((2, 4, 4)), anchor=(0, 0), indices=Window(0, 0, 4, 4))
     with pytest.raises(ValueError, match="patch data has 3 dims"):
-        SpatialOverlapAdd().merge([patch], _ShapeDomain((8, 8)))
+        spatial.aggregation.OverlapAdd().merge([patch], _ShapeDomain((8, 8)))
     _needs_zarr()
-    agg = SpatialOverlapAdd(streaming=True, target_path=str(tmp_path), chunks=(4, 4))
+    agg = spatial.aggregation.OverlapAdd(
+        streaming=True, target_path=str(tmp_path), chunks=(4, 4)
+    )
     with pytest.raises(ValueError, match="patch data has 3 dims"):
         agg.merge([patch], _ShapeDomain((8, 8)))

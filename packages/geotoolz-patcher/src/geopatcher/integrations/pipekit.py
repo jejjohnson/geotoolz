@@ -12,7 +12,7 @@ so a sliding-window inference pipeline composes inside a `Sequential` or
     pipe = Sequential([
         GridSampler(patcher=patcher),
         ApplyToChips(operator=model_op),
-        Stitch(aggregation=SpatialOverlapAdd(), domain=field.domain),
+        Stitch(aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain),
     ])
 
 Optional extra: install the ``[pipekit]`` extra to pull in pipekit.
@@ -41,7 +41,9 @@ except ImportError as _e:  # pragma: no cover - exercised when [pipekit] is miss
         "`pip install` will work once pipekit reaches PyPI."
     ) from _e
 
-from geopatcher import Patch, SpatialAggregation, SpatialPatcher, axis_envelope
+from geopatcher import Patch, SpatialPatcher
+from geopatcher.config import axis_envelope
+from geopatcher.spatial.aggregation import Aggregation as SpatialAggregation
 
 
 class GridSampler(Operator):
@@ -59,9 +61,9 @@ class GridSampler(Operator):
         (not a `pipekit.Operator`), so pipekit's `from_state` cannot rebuild
         it and `pipekit.check_pickleable` cannot look inside it; the flag
         makes the lint report this operator, so a closure-bearing axis
-        (e.g. `SpatialCustom`) is not hidden. `get_config()` nests the
+        (e.g. `spatial.window.Custom`) is not hidden. `get_config()` nests the
         patcher as a ``{"class", "config"}`` envelope, which
-        `geopatcher.from_config` rebuilds when the patcher is serialisable.
+        `geopatcher.config.from_config` rebuilds when the patcher is serialisable.
     """
 
     forbid_in_yaml: ClassVar[bool] = True
@@ -100,7 +102,7 @@ class ApplyToChips(Operator):
 
 
 class Stitch(Operator):
-    """Operator: ``list[Patch] → field`` — wraps a `SpatialAggregation`.
+    """Operator: ``list[Patch] → field`` — wraps a `spatial.aggregation.Aggregation`.
 
     Pairs with `GridSampler` + `ApplyToChips` to express ``split →
     operator → merge`` as a three-step `Sequential`. The ``domain``
@@ -109,7 +111,7 @@ class Stitch(Operator):
     patches) and slots into the linear pipeline.
 
     Args:
-        aggregation: The `SpatialAggregation` to apply.
+        aggregation: The `spatial.aggregation.Aggregation` to apply.
         domain: The `Domain` the patches were drawn from. Required
             because the aggregation's output shape is fixed by the
             domain.

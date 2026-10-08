@@ -38,10 +38,10 @@ flowchart TD
 import geopatcher as gp
 
 patcher = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(256, 256)),
-    sampler     = gp.SpatialRegularStride(step=(256, 256)),
-    window      = gp.SpatialBoxcar(),
-    aggregation = gp.SpatialOverlapAdd(),
+    geometry    = gp.spatial.geometry.Rectangular(size=(256, 256)),
+    sampler     = gp.spatial.sampler.RegularStride(step=(256, 256)),
+    window      = gp.spatial.window.Boxcar(),
+    aggregation = gp.spatial.aggregation.OverlapAdd(),
     on_error    = "raise",     # default
 )
 
@@ -132,7 +132,7 @@ A string matches any class in the raised exception's MRO, by bare name
 (`"OSError"`) or `module.qualname` (`"rasterio.errors.RasterioIOError"`),
 so `"OSError"` retries a `RasterioIOError` exactly as `OSError` does.
 `get_config()` records classes as qualified names, so a patcher rebuilt
-with `geopatcher.from_config` retries the same exceptions.
+with `geopatcher.config.from_config` retries the same exceptions.
 
 ## Pattern — pair with parallel_map and journaling
 
@@ -140,8 +140,8 @@ For production bulk inference, combine `on_error="retry"` with the
 reference runner and a `PatchJournal`:
 
 ```python
-from geopatcher import PatchJournal
-from geopatcher.runners import parallel_map
+from geopatcher.observe import PatchJournal
+from geopatcher.run import parallel_map
 
 patcher = gp.SpatialPatcher(
     ...,
@@ -164,7 +164,7 @@ The two `on_error` settings are independent and compose:
 
 - `SpatialPatcher.on_error` governs the **read** path (`Field.select`).
   `parallel_map` reads through `patcher.split` — including the batched
-  `select_many` fast path (e.g. `ObstoreCogField`), which falls back to
+  `select_many` fast path (e.g. `CogField`), which falls back to
   per-patch reads when a batch fails — so read failures are skipped,
   masked, retried or raised per the patcher's policy and recorded in
   `patcher.errors`.

@@ -32,88 +32,23 @@ import geopatcher
 from geopatcher import (
     AsyncSpatialPatcher,
     Patch,
-    PatchCache,
-    PointDomain,
-    SpatialAggregation,
-    SpatialAlongTrack,
-    SpatialApproxCardinality,
-    SpatialApproxMode,
-    SpatialApproxQuantile,
-    SpatialBoxcar,
-    SpatialByIndex,
-    SpatialCustom,
-    SpatialExplicit,
-    SpatialExplicitCoords,
-    SpatialGaussian,
-    SpatialGeometry,
-    SpatialHann,
-    SpatialHardVote,
-    SpatialInvVarWeightedMean,
-    SpatialJitteredStride,
-    SpatialKNNGraph,
-    SpatialLearned,
-    SpatialMax,
-    SpatialMean,
-    SpatialMeanStd,
-    SpatialMedian,
-    SpatialMin,
-    SpatialMinMax,
-    SpatialMode,
-    SpatialOverlapAdd,
     SpatialPatcher,
-    SpatialPoissonDisk,
-    SpatialPolygonIntersection,
-    SpatialRadiusGraph,
-    SpatialRandom,
-    SpatialRectangular,
-    SpatialRegularStride,
-    SpatialReservoir,
-    SpatialSampler,
-    SpatialSoftVote,
-    SpatialSphericalCap,
-    SpatialStreamingHistogram,
-    SpatialSum,
-    SpatialTukey,
-    SpatialVariance,
-    SpatialWeightedSum,
-    SpatialWindow,
     SpatioTemporalPatcher,
-    Stencil,
-    TemporalAggregation,
-    TemporalCausalBoxcar,
-    TemporalCausalRolling,
-    TemporalEventTriggered,
-    TemporalExplicit,
-    TemporalExponentialDecay,
-    TemporalFixedLookback,
-    TemporalFold,
-    TemporalForecast,
-    TemporalGeometry,
-    TemporalHierarchicalCombine,
-    TemporalLookbackHorizon,
-    TemporalMean,
-    TemporalMultiScale,
     TemporalPatch,
     TemporalPatcher,
-    TemporalPeriodic,
-    TemporalPhaseWindow,
-    TemporalRandom,
-    TemporalRegularStride,
-    TemporalSampler,
-    TemporalStencilGeometry,
-    TemporalStencilSampler,
-    TemporalTaperedTukey,
-    TemporalWindow,
-    TimeStencil,
-    axis_envelope,
-    from_config,
+    spatial,
+    temporal,
 )
 from geopatcher._src.spatial.patcher import _matches_retry_on
+from geopatcher.config import axis_envelope, from_config
+from geopatcher.fields import PointDomain
 from geopatcher.matched import (
     MatchedSpatialPatcher,
     MatchedSpatioTemporalPatcher,
     MatchedTemporalPatcher,
 )
+from geopatcher.run import PatchCache
+from geopatcher.temporal.stencils import Stencil, TimeStencil
 
 
 def _hourly(n: int = 24) -> np.ndarray:
@@ -126,20 +61,20 @@ def _stencil() -> TimeStencil:
 
 def _spatial_patcher(**kwargs: Any) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8), boundary="pad"),
-        sampler=SpatialRegularStride(step=4),
-        window=SpatialHann(),
-        aggregation=SpatialOverlapAdd(chunks=(4, 4)),
+        geometry=spatial.geometry.Rectangular(size=(8, 8), boundary="pad"),
+        sampler=spatial.sampler.RegularStride(step=4),
+        window=spatial.window.Hann(),
+        aggregation=spatial.aggregation.OverlapAdd(chunks=(4, 4)),
         **kwargs,
     )
 
 
 def _temporal_patcher() -> TemporalPatcher:
     return TemporalPatcher(
-        geometry=TemporalFixedLookback(length=4),
-        sampler=TemporalRegularStride(step=2),
-        window=TemporalExponentialDecay(tau=2.0),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=4),
+        sampler=temporal.sampler.RegularStride(step=2),
+        window=temporal.window.ExponentialDecay(tau=2.0),
+        aggregation=temporal.aggregation.Mean(),
     )
 
 
@@ -152,50 +87,54 @@ def _polygons() -> Any:
 
 EXAMPLES: list[Any] = [
     # -- spatial geometries
-    SpatialRectangular(size=(8, 8)),
-    SpatialRectangular(size=(4, 6), boundary="pad", pad_value=-1.0),
-    SpatialSphericalCap(radius_km=500.0),
-    SpatialKNNGraph(k=4, metric="haversine"),
-    SpatialRadiusGraph(radius=10.0),
-    SpatialPolygonIntersection(polygons=_polygons()),
+    spatial.geometry.Rectangular(size=(8, 8)),
+    spatial.geometry.Rectangular(size=(4, 6), boundary="pad", pad_value=-1.0),
+    spatial.geometry.SphericalCap(radius_km=500.0),
+    spatial.geometry.KNNGraph(k=4, metric="haversine"),
+    spatial.geometry.RadiusGraph(radius=10.0),
+    spatial.geometry.PolygonIntersection(polygons=_polygons()),
     # -- spatial samplers
-    SpatialRegularStride(step=(4, 6)),
-    SpatialJitteredStride(step=8, jitter=0.5, seed=0),
-    SpatialRandom(n_samples=4, seed=0),
-    SpatialPoissonDisk(min_dist=4.0, seed=0),
-    SpatialExplicit(anchors_=[(0, 0), (8, 8)]),
-    SpatialAlongTrack(track=[(1.5, 2.5), (20.25, 9.0), (30.0, 30.0)], spacing=3.0),
-    SpatialExplicitCoords(coords=[(3.0, 4.0), (17.5, 2.0)], crs="EPSG:32630"),
+    spatial.sampler.RegularStride(step=(4, 6)),
+    spatial.sampler.JitteredStride(step=8, jitter=0.5, seed=0),
+    spatial.sampler.Random(n_samples=4, seed=0),
+    spatial.sampler.PoissonDisk(min_dist=4.0, seed=0),
+    spatial.sampler.Explicit(anchors_=[(0, 0), (8, 8)]),
+    spatial.sampler.AlongTrack(
+        track=[(1.5, 2.5), (20.25, 9.0), (30.0, 30.0)], spacing=3.0
+    ),
+    spatial.sampler.ExplicitCoords(coords=[(3.0, 4.0), (17.5, 2.0)], crs="EPSG:32630"),
     # -- spatial windows
-    SpatialBoxcar(),
-    SpatialHann(),
-    SpatialTukey(alpha=0.4),
-    SpatialGaussian(sigma=0.4),
-    SpatialCustom(fn=lambda g: np.ones(g.size)),
+    spatial.window.Boxcar(),
+    spatial.window.Hann(),
+    spatial.window.Tukey(alpha=0.4),
+    spatial.window.Gaussian(sigma=0.4),
+    spatial.window.Custom(fn=lambda g: np.ones(g.size)),
     # -- spatial aggregations
-    SpatialSum(),
-    SpatialMax(fill_value=-1.0),
-    SpatialMin(),
-    SpatialWeightedSum(),
-    SpatialWeightedSum(weight_fn=lambda p: np.ones(np.shape(p.data))),
-    SpatialMean(),
-    SpatialVariance(),
-    SpatialMeanStd(),
-    SpatialMinMax(),
-    SpatialOverlapAdd(),
-    SpatialOverlapAdd(chunks=(4, 4), cog={"blocksize": 256}, dtype="float64"),
-    SpatialInvVarWeightedMean(),
-    SpatialHardVote(n_classes=3),
-    SpatialSoftVote(n_classes=3),
-    SpatialByIndex(),
-    SpatialMedian(),
-    SpatialMode(),
-    SpatialLearned(model=lambda chips: chips[0]),
-    SpatialApproxQuantile(),
-    SpatialReservoir(k=10, seed=0),
-    SpatialApproxCardinality(),
-    SpatialApproxMode(),
-    SpatialStreamingHistogram(),
+    spatial.aggregation.Sum(),
+    spatial.aggregation.Max(fill_value=-1.0),
+    spatial.aggregation.Min(),
+    spatial.aggregation.WeightedSum(),
+    spatial.aggregation.WeightedSum(weight_fn=lambda p: np.ones(np.shape(p.data))),
+    spatial.aggregation.Mean(),
+    spatial.aggregation.Variance(),
+    spatial.aggregation.MeanStd(),
+    spatial.aggregation.MinMax(),
+    spatial.aggregation.OverlapAdd(),
+    spatial.aggregation.OverlapAdd(
+        chunks=(4, 4), cog={"blocksize": 256}, dtype="float64"
+    ),
+    spatial.aggregation.InvVarWeightedMean(),
+    spatial.aggregation.HardVote(n_classes=3),
+    spatial.aggregation.SoftVote(n_classes=3),
+    spatial.aggregation.ByIndex(),
+    spatial.aggregation.Median(),
+    spatial.aggregation.Mode(),
+    spatial.aggregation.Learned(model=lambda chips: chips[0]),
+    spatial.aggregation.ApproxQuantile(),
+    spatial.aggregation.Reservoir(k=10, seed=0),
+    spatial.aggregation.ApproxCardinality(),
+    spatial.aggregation.ApproxMode(),
+    spatial.aggregation.StreamingHistogram(),
     # -- stencils
     Stencil(start=-2, stop=2, step=0.5, closed="both"),
     Stencil(
@@ -209,30 +148,32 @@ EXAMPLES: list[Any] = [
     ),
     TimeStencil("-2W", "0W", "1W", closed="both"),
     # -- temporal geometries
-    TemporalFixedLookback(length=5),
-    TemporalLookbackHorizon(lookback=4, horizon=2),
-    TemporalMultiScale(scales=[2, 4, 8]),
-    TemporalStencilGeometry(stencil=_stencil(), source_step=np.timedelta64(1, "h")),
-    TemporalStencilGeometry(stencil=_stencil()),
-    TemporalStencilGeometry(stencil=_stencil(), boundary="shrink"),
-    TemporalPhaseWindow(period=24, phase_width=2),
+    temporal.geometry.FixedLookback(length=5),
+    temporal.geometry.LookbackHorizon(lookback=4, horizon=2),
+    temporal.geometry.MultiScale(scales=[2, 4, 8]),
+    temporal.geometry.StencilGeometry(
+        stencil=_stencil(), source_step=np.timedelta64(1, "h")
+    ),
+    temporal.geometry.StencilGeometry(stencil=_stencil()),
+    temporal.geometry.StencilGeometry(stencil=_stencil(), boundary="shrink"),
+    temporal.geometry.PhaseWindow(period=24, phase_width=2),
     # -- temporal samplers
-    TemporalRegularStride(step=2),
-    TemporalCausalRolling(step=1, start=3),
-    TemporalEventTriggered(times=[3, 5, 7]),
-    TemporalRandom(n_samples=4, seed=0),
-    TemporalStencilSampler(stencil=_stencil(), every=2, shuffle=True, seed=0),
-    TemporalExplicit(times=[0, 4, 8]),
+    temporal.sampler.RegularStride(step=2),
+    temporal.sampler.RegularStride(step=1, start=3),
+    temporal.sampler.Explicit(times=[3, 5, 7]),
+    temporal.sampler.Random(n_samples=4, seed=0),
+    temporal.sampler.StencilSampler(stencil=_stencil(), every=2, shuffle=True, seed=0),
+    temporal.sampler.Explicit(times=[0, 4, 8]),
     # -- temporal windows
-    TemporalCausalBoxcar(),
-    TemporalExponentialDecay(tau=2.0),
-    TemporalTaperedTukey(alpha=0.4),
-    TemporalPeriodic(period=24),
+    temporal.window.CausalBoxcar(),
+    temporal.window.ExponentialDecay(tau=2.0),
+    temporal.window.TaperedTukey(alpha=0.4),
+    temporal.window.Periodic(period=24),
     # -- temporal aggregations
-    TemporalFold(fold_fn=lambda acc, x: x),
-    TemporalMean(),
-    TemporalHierarchicalCombine(scales=[2, 4]),
-    TemporalForecast(horizon=2),
+    temporal.aggregation.Fold(fold_fn=lambda acc, x: x),
+    temporal.aggregation.Mean(),
+    temporal.aggregation.HierarchicalCombine(scales=[2, 4]),
+    temporal.aggregation.Forecast(horizon=2),
     # -- patchers
     _spatial_patcher(),
     _spatial_patcher(
@@ -242,28 +183,28 @@ EXAMPLES: list[Any] = [
         capture_traceback=False,
     ),
     AsyncSpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialMean(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.Mean(),
         on_error="skip",
     ),
     _temporal_patcher(),
     TemporalPatcher(
-        geometry=TemporalFixedLookback(length=4),
-        sampler=TemporalRegularStride(step=2, start=3, check_full_scan=False),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=4),
+        sampler=temporal.sampler.RegularStride(step=2, start=3, check_full_scan=False),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
         on_error="retry",
         max_retries=1,
         retry_on=(OSError, "TimeoutError"),
         capture_traceback=False,
     ),
     TemporalPatcher(
-        geometry=TemporalStencilGeometry(stencil=_stencil()),
-        sampler=TemporalStencilSampler(stencil=_stencil()),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.StencilGeometry(stencil=_stencil()),
+        sampler=temporal.sampler.StencilSampler(stencil=_stencil()),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     ),
     SpatioTemporalPatcher(
         spatial=_spatial_patcher(),
@@ -272,16 +213,18 @@ EXAMPLES: list[Any] = [
         time_axis=1,
     ),
     MatchedSpatialPatcher(
-        primary=_spatial_patcher(), secondary_aggregators={"s2": SpatialMean()}
+        primary=_spatial_patcher(),
+        secondary_aggregators={"s2": spatial.aggregation.Mean()},
     ),
     MatchedTemporalPatcher(
-        primary=_temporal_patcher(), secondary_aggregators={"era5": TemporalMean()}
+        primary=_temporal_patcher(),
+        secondary_aggregators={"era5": temporal.aggregation.Mean()},
     ),
     MatchedSpatioTemporalPatcher(
         primary=SpatioTemporalPatcher(
             spatial=_spatial_patcher(), temporal=_temporal_patcher()
         ),
-        secondary_aggregators={"era5": TemporalMean()},
+        secondary_aggregators={"era5": temporal.aggregation.Mean()},
     ),
 ]
 
@@ -329,13 +272,13 @@ def _point_domain() -> PointDomain:
     return PointDomain(coords=coords, kdtree=cKDTree(coords))
 
 
-def _spatial_patches(agg: SpatialAggregation) -> list[Patch]:
+def _spatial_patches(agg: spatial.aggregation.Aggregation) -> list[Patch]:
     rng = np.random.default_rng(0)
 
     def data() -> Any:
-        if isinstance(agg, SpatialInvVarWeightedMean):
+        if isinstance(agg, spatial.aggregation.InvVarWeightedMean):
             return rng.normal(size=(8, 8)), rng.uniform(0.5, 2.0, size=(8, 8))
-        if isinstance(agg, SpatialSoftVote):
+        if isinstance(agg, spatial.aggregation.SoftVote):
             return rng.dirichlet(np.ones(3), size=(8, 8)).transpose(2, 0, 1)
         return rng.integers(0, 3, size=(8, 8)).astype(float)
 
@@ -347,29 +290,29 @@ def _spatial_patches(agg: SpatialAggregation) -> list[Patch]:
 
 def _behaviour(obj: Any) -> Any:
     """What the object *does* — compared between original and rebuild."""
-    if isinstance(obj, SpatialGeometry):
-        if isinstance(obj, SpatialRectangular):
+    if isinstance(obj, spatial.geometry.Geometry):
+        if isinstance(obj, spatial.geometry.Rectangular):
             return obj.neighborhood(_RASTER, (2, 3))
         return obj.neighborhood(_point_domain(), (1.0, 1.0))
-    if isinstance(obj, SpatialSampler):
-        return list(obj.anchors(_RASTER, SpatialRectangular(size=(4, 4))))
-    if isinstance(obj, SpatialWindow):
-        return obj.weights(SpatialRectangular(size=(5, 6)))
-    if isinstance(obj, SpatialAggregation):
+    if isinstance(obj, spatial.sampler.Sampler):
+        return list(obj.anchors(_RASTER, spatial.geometry.Rectangular(size=(4, 4))))
+    if isinstance(obj, spatial.window.Window):
+        return obj.weights(spatial.geometry.Rectangular(size=(5, 6)))
+    if isinstance(obj, spatial.aggregation.Aggregation):
         return obj.merge(_spatial_patches(obj), SimpleNamespace(shape=(16, 16)))
     if isinstance(obj, Stencil):
         return obj.points
-    if isinstance(obj, TemporalStencilGeometry):
+    if isinstance(obj, temporal.geometry.StencilGeometry):
         return obj.window_coord(_hourly(), 10)
-    if isinstance(obj, TemporalGeometry):
+    if isinstance(obj, temporal.geometry.Geometry):
         return obj.window(24, 10)
-    if isinstance(obj, TemporalSampler):
+    if isinstance(obj, temporal.sampler.Sampler):
         if obj.needs_coord:
             return list(obj.anchors(24, coord=_hourly()))
         return list(obj.anchors(24))
-    if isinstance(obj, TemporalWindow):
-        return obj.weights(TemporalFixedLookback(length=6), 6)
-    if isinstance(obj, TemporalAggregation):
+    if isinstance(obj, temporal.window.Window):
+        return obj.weights(temporal.geometry.FixedLookback(length=6), 6)
+    if isinstance(obj, temporal.aggregation.Aggregation):
         patches = [
             TemporalPatch(
                 data=np.full(4, float(t)), anchor=t, indices=slice(t - 3, t + 1)
@@ -408,14 +351,14 @@ def _assert_same(a: Any, b: Any) -> None:
 
 def test_every_component_class_has_an_example() -> None:
     bases = (
-        SpatialGeometry,
-        SpatialSampler,
-        SpatialWindow,
-        SpatialAggregation,
-        TemporalGeometry,
-        TemporalSampler,
-        TemporalWindow,
-        TemporalAggregation,
+        spatial.geometry.Geometry,
+        spatial.sampler.Sampler,
+        spatial.window.Window,
+        spatial.aggregation.Aggregation,
+        temporal.geometry.Geometry,
+        temporal.sampler.Sampler,
+        temporal.window.Window,
+        temporal.aggregation.Aggregation,
     )
     public = {
         obj
@@ -463,8 +406,8 @@ def test_patcher_configs_nest_via_axis_envelope(obj: Any) -> None:
 
 
 def test_stencil_axes_nest_the_stencil_class() -> None:
-    cfg = TemporalStencilGeometry(stencil=_stencil()).get_config()
-    assert cfg["stencil"]["class"] == "TimeStencil"
+    cfg = temporal.geometry.StencilGeometry(stencil=_stencil()).get_config()
+    assert cfg["stencil"]["class"] == "temporal.stencils.TimeStencil"
     # A TimeStencil config fed to the generic Stencil still builds timedeltas.
     plain = Stencil(**cfg["stencil"]["config"])
     np.testing.assert_equal(plain.points, _stencil().points)
@@ -485,14 +428,14 @@ def test_time_stencil_reloads_every_timedelta_unit(unit: str) -> None:
 
 
 def test_source_step_reloads() -> None:
-    geom = TemporalStencilGeometry(
+    geom = temporal.geometry.StencilGeometry(
         stencil=_stencil(), source_step=np.timedelta64(1, "h")
     )
     assert geom.get_config()["source_step"] == {"value": 1, "unit": "h"}
     rebuilt = from_config(json.loads(json.dumps(axis_envelope(geom))))
     assert rebuilt.source_step == np.timedelta64(1, "h")
     with pytest.raises(ValueError, match="stride-1"):
-        TemporalStencilGeometry(stencil=_stencil(), source_step="30m")
+        temporal.geometry.StencilGeometry(stencil=_stencil(), source_step="30m")
 
 
 class TestRetryOn:
@@ -526,24 +469,26 @@ class TestSummaryConfigs:
     """The axes whose configs used to be ``{"n_...": len(...)}`` summaries."""
 
     def test_array_backed_axes_dump_their_values(self) -> None:
-        assert TemporalExplicit(times=[0, 4]).get_config() == {"times": [0, 4]}
-        assert TemporalEventTriggered(times=[3]).get_config() == {"times": [3]}
-        cfg = SpatialExplicitCoords(coords=[(3.0, 4.0)]).get_config()
+        assert temporal.sampler.Explicit(times=[0, 4]).get_config() == {"times": [0, 4]}
+        assert temporal.sampler.Explicit(times=[3]).get_config() == {"times": [3]}
+        cfg = spatial.sampler.ExplicitCoords(coords=[(3.0, 4.0)]).get_config()
         assert cfg["coords"] == [[3.0, 4.0]]
 
     def test_runtime_object_axes_are_flagged(self) -> None:
-        assert SpatialExplicit.forbid_in_yaml is True
-        assert SpatialPolygonIntersection.forbid_in_yaml is True
-        assert SpatialWeightedSum().forbid_in_yaml is False
-        assert SpatialWeightedSum(weight_fn=lambda p: p.weights).forbid_in_yaml
+        assert spatial.sampler.Explicit.forbid_in_yaml is True
+        assert spatial.geometry.PolygonIntersection.forbid_in_yaml is True
+        assert spatial.aggregation.WeightedSum().forbid_in_yaml is False
+        assert spatial.aggregation.WeightedSum(
+            weight_fn=lambda p: p.weights
+        ).forbid_in_yaml
 
     def test_polygon_geometry_is_not_a_cache_key(self) -> None:
-        geom = SpatialPolygonIntersection(polygons=_polygons())
+        geom = spatial.geometry.PolygonIntersection(polygons=_polygons())
         with pytest.raises(ValueError, match="forbid_in_yaml"):
-            PatchCache.config_id_for(geom, SpatialBoxcar())
+            PatchCache.config_id_for(geom, spatial.window.Boxcar())
 
     def test_weight_fn_config_does_not_rebuild(self) -> None:
-        agg = SpatialWeightedSum(weight_fn=math.sqrt)
+        agg = spatial.aggregation.WeightedSum(weight_fn=math.sqrt)
         assert agg.get_config()["weight_fn"] == "sqrt"
         with pytest.raises(TypeError, match="weight_fn"):
             from_config(axis_envelope(agg))
@@ -551,16 +496,16 @@ class TestSummaryConfigs:
 
 def test_async_spatial_patcher_get_config() -> None:
     patcher = AsyncSpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialMean(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.Mean(),
     )
     sync = SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialMean(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.Mean(),
     )
     assert patcher.get_config() == sync.get_config()
 

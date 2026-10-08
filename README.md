@@ -52,6 +52,7 @@ itself becomes an operator: *tile → predict → stitch* is one more
 | [`geotoolz`](packages/geotoolz) | `geotoolz` | Carrier-preserving `pipekit.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/) |
 | [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/patcher/) |
 | [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/catalog/) |
+| [`geotoolz-cloud`](packages/geotoolz-cloud) | `geocloud` | Cloud object storage for the stack: one process-wide obstore client pool and batched, async Cloud-Optimized GeoTIFF reads | [Cloud →](https://jejjohnson.github.io/geotoolz/cloud/) |
 | [`geotoolz-products`](packages/geotoolz-products) | `geoproducts` | Readers for Earth-observation data products — the `ProductReader` ABC, mission readers such as GOES-R ABI and Himawari AHI, and provider clients such as Carbon Mapper — each returning a georeader `GeoTensor` | [Products →](https://jejjohnson.github.io/geotoolz/products/) |
 
 Import names are unchanged from the pre-monorepo repos — only the
@@ -59,7 +60,7 @@ distribution names carry the `geotoolz-` prefix. The dependency graph is
 a strict layering: solid arrows are hard dependencies, dotted arrows are
 opt-in extras, and nothing points back up.
 
-<p align="center"><img src="docs/assets/diagrams/stack-layers.png" alt="Dependency layers: the four packages stand on georeader; geotoolz on pipekit; cross-package links are opt-in extras" width="100%"></p>
+<p align="center"><img src="docs/assets/diagrams/stack-layers.png" alt="Dependency layers: the five packages stand on georeader; object storage in geotoolz-cloud; geotoolz on pipekit; cross-package links are opt-in extras" width="100%"></p>
 
 ## Quickstart — catalog → patcher → operators
 
@@ -108,16 +109,16 @@ scene: GeoTensor = gz.StackBands()([red.reader, nir.reader])         # (2, 4500,
 
 # 3 · cut + compute — 256² tiles, 64 px overlap, Hann-feathered seams
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry=gp.SpatialRectangular(size=(256, 256)),
-    sampler=gp.SpatialRegularStride(step=(192, 192)),
-    window=gp.SpatialHann(),
-    aggregation=gp.SpatialOverlapAdd(),
+    geometry=gp.spatial.geometry.Rectangular(size=(256, 256)),
+    sampler=gp.spatial.sampler.RegularStride(step=(192, 192)),
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
 ndvi: gz.Sequential = gz.DNToReflectance(scale=1e-4) | gz.NDVI(red=0, nir=1)  # (2, h, w) → (h, w)
 tiled: gz.Sequential = gz.Sequential([
     GridSampler(patcher=patcher),                        # field → list[Patch]       (2, 256, 256) each
     ApplyToChips(operator=ndvi),                         # list[Patch] → list[Patch] (256, 256) each
-    MergePatches(aggregation=gp.SpatialOverlapAdd(),
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(),
                  domain=scene.isel({"band": slice(0, 1)})),  # one-band output grid
 ])
 result: np.ndarray = tiled(gp.RasterField(scene))       # (1, 4500, 4000) float64 · NaN = no data
@@ -192,10 +193,10 @@ scene: GeoTensor = gz.StackBands()([swir["B11"].reader, swir["B12"].reader])  # 
 
 # 3 · patcher + operators — SWIR-ratio methane score, tile by tile
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry=gp.SpatialRectangular(size=(128, 128)),
-    sampler=gp.SpatialRegularStride(step=(96, 96)),
-    window=gp.SpatialHann(),
-    aggregation=gp.SpatialOverlapAdd(),
+    geometry=gp.spatial.geometry.Rectangular(size=(128, 128)),
+    sampler=gp.spatial.sampler.RegularStride(step=(96, 96)),
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
 grid: GeoTensor = scene.isel({"band": slice(0, 1)})     # (1, 1675, 1430) — the one-band output grid
 enhancement: gz.Sequential = (
@@ -205,7 +206,7 @@ enhancement: gz.Sequential = (
 screen: gz.Sequential = gz.Sequential([
     GridSampler(patcher=patcher),                        # field → list[Patch]       (2, 128, 128) each
     ApplyToChips(operator=enhancement),                  # list[Patch] → list[Patch] (128, 128) each
-    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=grid),
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=grid),
 ])
 score: np.ndarray = screen(gp.RasterField(scene))       # (1, 1675, 1430) float64
 
@@ -217,7 +218,7 @@ pair: tuple[np.ndarray, np.ndarray] = (score[0], np.asarray(labels))          # 
 
 Swap any one stage without touching the others: a DuckDB catalog for
 10⁶+ scenes, a `MatchedFilter` instead of `SBMP`, `streaming=True` on
-`SpatialOverlapAdd` for continent-scale outputs, or `cm.list_plumes`
+`spatial.aggregation.OverlapAdd` for continent-scale outputs, or `cm.list_plumes`
 instead of sources for event-level labels.
 
 ## How they interlock
@@ -240,7 +241,7 @@ full tour):
 - **Coregistration operators** — `geotoolz.geom.coregister` ops are the
   intended coreg callables for `geopatcher.matched.MatchedField`, aligning
   multi-source patches found by the catalog's matchup engine.
-- **One obstore pool** — `geopatcher.objstore` owns the process-wide pooled
+- **One obstore pool** — `geocloud.store` owns the process-wide pooled
   HTTP/2 client; the `[obstore]` extras of geotoolz-products and geocatalog
   install and use it.
 
@@ -251,6 +252,7 @@ pip install geotoolz                              # operators only
 pip install 'geotoolz[patch]'                     # + patcher (geopatcher)
 pip install geotoolz-catalog                      # catalog only
 pip install 'geotoolz-catalog[patch]'             # catalog + patcher bridge
+pip install 'geotoolz-cloud[cog]'                # object-store pool + COG reads (geocloud)
 pip install geotoolz-products                     # product readers (geoproducts)
 pip install 'geotoolz-products[goes]'             # + the GOES-R ABI reader
 pip install 'geotoolz-products[himawari]'         # + Himawari L2 cloud products (HSD needs no extra)

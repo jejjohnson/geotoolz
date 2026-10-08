@@ -1,4 +1,4 @@
-"""Tests for `SpatialGeometry` subclasses.
+"""Tests for `spatial.geometry.Geometry` subclasses.
 
 We use georeader's `GeoTensor` as the concrete raster domain (it
 satisfies `GeoDataBase`), and synthetic Grid/Point/Vector domains for
@@ -19,21 +19,9 @@ from rasterio import features
 from rasterio.windows import Window, transform as window_transform
 from scipy.spatial import cKDTree
 
-from geopatcher import (
-    GridDomain,
-    PointDomain,
-    RasterField,
-    SpatialBoxcar,
-    SpatialExplicit,
-    SpatialKNNGraph,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialPolygonIntersection,
-    SpatialRadiusGraph,
-    SpatialRectangular,
-    SpatialSphericalCap,
-)
+from geopatcher import RasterField, SpatialPatcher, spatial
 from geopatcher._src.spatial.geometry import _haversine_km
+from geopatcher.fields import GridDomain, PointDomain
 
 
 @pytest.fixture
@@ -60,7 +48,7 @@ def point_domain() -> PointDomain:
 
 class TestSpatialRectangular:
     def test_raster_neighborhood(self, raster_domain: GeoTensor) -> None:
-        g = SpatialRectangular(size=(8, 8))
+        g = spatial.geometry.Rectangular(size=(8, 8))
         win = g.neighborhood(raster_domain, anchor=(10, 20))
         assert int(win.row_off) == 10
         assert int(win.col_off) == 20
@@ -68,19 +56,19 @@ class TestSpatialRectangular:
         assert int(win.height) == 8
 
     def test_grid_neighborhood(self, grid_domain: GridDomain) -> None:
-        g = SpatialRectangular(size=(16, 16))
+        g = spatial.geometry.Rectangular(size=(16, 16))
         idx = g.neighborhood(grid_domain, anchor={"lat": 10, "lon": 20})
         assert idx == {"lat": slice(10, 26), "lon": slice(20, 36)}
 
     def test_unsupported_domain_raises(self, point_domain: PointDomain) -> None:
-        g = SpatialRectangular(size=(8, 8))
+        g = spatial.geometry.Rectangular(size=(8, 8))
         with pytest.raises(NotImplementedError):
             g.neighborhood(point_domain, anchor=0)
 
 
 class TestSpatialKNNGraph:
     def test_returns_k_neighbors(self, point_domain: PointDomain) -> None:
-        g = SpatialKNNGraph(k=3)
+        g = spatial.geometry.KNNGraph(k=3)
         idx = g.neighborhood(point_domain, anchor=np.array([0.5, 0.5]))
         assert len(idx) == 3
         # 0.5,0.5 should hit (0,0), (1,0), (0,1), (1,1) — closest three of those
@@ -89,7 +77,7 @@ class TestSpatialKNNGraph:
 
 class TestSpatialRadiusGraph:
     def test_radius_query(self, point_domain: PointDomain) -> None:
-        g = SpatialRadiusGraph(radius=1.5)
+        g = spatial.geometry.RadiusGraph(radius=1.5)
         idx = g.neighborhood(point_domain, anchor=np.array([0.0, 0.0]))
         # Within radius 1.5 of (0,0): (0,0), (1,0), (0,1), (1,1)
         assert sorted(int(i) for i in idx) == [0, 1, 2, 3]
@@ -104,7 +92,7 @@ class TestSpatialSphericalCap:
                 "lon": np.linspace(-1, 1, 21),
             }
         )
-        g = SpatialSphericalCap(radius_km=120.0)
+        g = spatial.geometry.SphericalCap(radius_km=120.0)
         nb = g.neighborhood(grid, anchor=(0.0, 0.0))
         # #187: a {dim: slice} box + mask a grid `select` accepts, not an
         # `argwhere` array. 0.1 deg ~ 11.1 km, so the cap spans +-10 cells.
@@ -115,13 +103,8 @@ class TestSpatialSphericalCap:
 
     def test_grid_cap_index_anchor_split_merge(self) -> None:
         xr = pytest.importorskip("xarray")
-        from geopatcher import (
-            SpatialBoxcar,
-            SpatialMax,
-            SpatialPatcher,
-            SpatialRegularStride,
-            XarrayField,
-        )
+        from geopatcher import SpatialPatcher
+        from geopatcher.fields import XarrayField
 
         # (time, lon, lat) on purpose: the mask must follow the dim order
         # and broadcast over the non-spatial dim.
@@ -136,10 +119,10 @@ class TestSpatialSphericalCap:
         )
         field = XarrayField(da)
         patcher = SpatialPatcher(
-            geometry=SpatialSphericalCap(radius_km=15.0),
-            sampler=SpatialRegularStride(step=(2, 5, 5)),
-            window=SpatialBoxcar(),
-            aggregation=SpatialMax(),
+            geometry=spatial.geometry.SphericalCap(radius_km=15.0),
+            sampler=spatial.sampler.RegularStride(step=(2, 5, 5)),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.Max(),
         )
         patches = list(patcher.split(field))
         assert patches
@@ -159,7 +142,9 @@ class TestSpatialSphericalCap:
     def test_grid_cap_needs_lat_lon_dims(self) -> None:
         grid = GridDomain(coords={"y": np.arange(3.0), "x": np.arange(3.0)})
         with pytest.raises(ValueError, match="lat"):
-            SpatialSphericalCap(radius_km=1.0).neighborhood(grid, {"y": 0, "x": 0})
+            spatial.geometry.SphericalCap(radius_km=1.0).neighborhood(
+                grid, {"y": 0, "x": 0}
+            )
 
 
 class TestReachableCombos:
@@ -167,28 +152,30 @@ class TestReachableCombos:
 
     def test_knn_k_greater_than_n(self, point_domain: PointDomain) -> None:
         # scipy pads k > N with the sentinel index N (= 5 here).
-        idx = SpatialKNNGraph(k=10).neighborhood(point_domain, anchor=0)
+        idx = spatial.geometry.KNNGraph(k=10).neighborhood(point_domain, anchor=0)
         assert sorted(int(i) for i in idx) == [0, 1, 2, 3, 4]
 
     def test_knn_rejects_non_positive_k(self) -> None:
         with pytest.raises(ValueError, match="k must be"):
-            SpatialKNNGraph(k=0)
+            spatial.geometry.KNNGraph(k=0)
 
     @pytest.mark.parametrize(
         "geometry",
-        [SpatialKNNGraph(k=2), SpatialRadiusGraph(radius=1.5)],
+        [spatial.geometry.KNNGraph(k=2), spatial.geometry.RadiusGraph(radius=1.5)],
         ids=["KNNGraph", "RadiusGraph"],
     )
     def test_random_on_vector_domain(self, geometry: Any) -> None:
         gpd = pytest.importorskip("geopandas")
         shapely = pytest.importorskip("shapely")
-        from geopatcher import SpatialRandom, VectorDomain
+        from geopatcher.fields import VectorDomain
 
         polys = gpd.GeoSeries(
             [shapely.box(i, 0, i + 1, 1) for i in range(5)], crs="EPSG:3857"
         )
         domain = VectorDomain(geometry=polys, sindex=polys.sindex, crs=polys.crs)
-        anchors = list(SpatialRandom(n_samples=4, seed=0).anchors(domain, geometry))
+        anchors = list(
+            spatial.sampler.Random(n_samples=4, seed=0).anchors(domain, geometry)
+        )
         assert all(isinstance(a, int) for a in anchors)
         for a in anchors:
             idx = geometry.neighborhood(domain, a)
@@ -198,13 +185,13 @@ class TestReachableCombos:
     def test_rectangular_grid_size_must_match_dims(
         self, grid_domain: GridDomain
     ) -> None:
-        geom = SpatialRectangular(size=(4,))
+        geom = spatial.geometry.Rectangular(size=(4,))
         with pytest.raises(ValueError, match="every GridDomain dim"):
             geom.neighborhood(grid_domain, {"lat": 0, "lon": 0})
 
 
-# --- SpatialPolygonIntersection on a real RasterField (#184) -----------------
-#
+# --- spatial.geometry.PolygonIntersection on a real RasterField (#184)
+# -----------------
 # A 40x50 UTM raster with non-square 10 m x 20 m pixels and a non-zero
 # origin, so window maths that silently assume an identity transform fail.
 # Polygons are written in fractional *pixel* coordinates (col, row) and
@@ -257,10 +244,10 @@ def _poly_raster_field() -> RasterField:
 
 def _poly_patcher(polys: list[Any]) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialPolygonIntersection(polygons=pd.Series(polys)),
-        sampler=SpatialExplicit(anchors_=list(range(len(polys)))),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.PolygonIntersection(polygons=pd.Series(polys)),
+        sampler=spatial.sampler.Explicit(anchors_=list(range(len(polys)))),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -309,7 +296,7 @@ class TestSpatialPolygonIntersectionRaster:
         # with rasterio, then slice by the returned window.
         field = _poly_raster_field()
         polys = pd.Series([p for _, p, _ in _NON_ALIGNED_POLYGONS])
-        geom = SpatialPolygonIntersection(polygons=polys)
+        geom = spatial.geometry.PolygonIntersection(polygons=polys)
         for i, poly in enumerate(polys):
             mw = geom.neighborhood(field.domain, i)
             full = features.geometry_mask(
@@ -334,7 +321,7 @@ class TestSpatialPolygonIntersectionRaster:
 
     def test_polygon_outside_domain_raises(self) -> None:
         field = _poly_raster_field()
-        geom = SpatialPolygonIntersection(
+        geom = spatial.geometry.PolygonIntersection(
             polygons=pd.Series([_px_box(60.5, 10.2, 70.3, 20.8)])
         )
         with pytest.raises(ValueError, match="does not overlap the raster"):

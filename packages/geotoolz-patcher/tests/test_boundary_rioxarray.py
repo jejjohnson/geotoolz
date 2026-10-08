@@ -23,13 +23,7 @@ from rasterio.windows import (
     transform as window_transform,
 )
 
-from geopatcher import (
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import SpatialPatcher, spatial
 
 
 xr = pytest.importorskip("xarray")
@@ -86,14 +80,14 @@ def _assert_georef(chip: xr.DataArray, window: Window) -> None:
 
 def _patcher(pad_value: float | None, boundary: str = "pad") -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(
+        geometry=spatial.geometry.Rectangular(
             size=(4, 4),
             boundary=boundary,  # type: ignore[arg-type]
             pad_value=pad_value,
         ),
-        sampler=SpatialRegularStride(step=4),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        sampler=spatial.sampler.RegularStride(step=4),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -206,10 +200,10 @@ def test_rioxarray_merge(coords: bool, boundary: str) -> None:
     da = _geo_da(coords=coords)
     field = RioXarrayField(da)
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4), boundary=boundary),  # type: ignore[arg-type]
-        sampler=SpatialRegularStride(step=3),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4), boundary=boundary),  # type: ignore[arg-type]
+        sampler=spatial.sampler.RegularStride(step=3),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     merged = patcher.merge(patcher.split(field), field.domain)
     np.testing.assert_allclose(np.asarray(merged), da.values)

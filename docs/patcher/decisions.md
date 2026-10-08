@@ -59,8 +59,8 @@ memory.
 ## ADR-002 — Disk-backed aggregations use Zarr
 
 **Decision.** Streaming aggregations that need an out-of-RAM target
-(`SpatialOverlapAdd(streaming=True, target_path=...)`, future
-`SpatialInvVarWeightedMean(streaming=True, ...)`, etc.) write to a
+(`spatial.aggregation.OverlapAdd(streaming=True, target_path=...)`, future
+`spatial.aggregation.InvVarWeightedMean(streaming=True, ...)`, etc.) write to a
 **framework-managed Zarr store** by default.
 
 **Context.** The streaming asymmetry (see §4 of the `scaling.md`
@@ -72,7 +72,7 @@ preallocability is the bottleneck. A disk-backed accumulator solves it.
 Zarr was picked over memmap, HDF5, and "bring your own store":
 
 - Zarr v3 (`zarr>=3`, the `streaming` extra) is already a hard
-  requirement of the streaming `SpatialOverlapAdd` implementation;
+  requirement of the streaming `spatial.aggregation.OverlapAdd` implementation;
   users of streaming inference already have it installed.
 - Chunked, append-friendly, parallel-writable, plays well with Dask
   and downstream COG conversion (jejjohnson/geopatcher#15) — `writer="cog"` streams through
@@ -82,7 +82,7 @@ Zarr was picked over memmap, HDF5, and "bring your own store":
 
 **Consequences.**
 
-- Default usage is one line: `SpatialOverlapAdd(streaming=True,
+- Default usage is one line: `spatial.aggregation.OverlapAdd(streaming=True,
   target_path="out/", chunks=geometry.size)`. No `import zarr` in user
   code. The chunk shape is required rather than guessed from the first
   patch (a shrunk edge chip would otherwise chunk the whole store).
@@ -127,9 +127,9 @@ Toggle API:
 ```python
 import geopatcher as gp
 
-gp.set_strict(True)      # promotes streaming_safe warnings to errors
-gp.set_strict(False)     # back to warn-only (default)
-gp.get_strict()          # bool
+gp.observe.set_strict(True)      # promotes streaming_safe warnings to errors
+gp.observe.set_strict(False)     # back to warn-only (default)
+gp.observe.get_strict()          # bool
 ```
 
 Environment variable equivalent: `GEOPATCHER_STRICT=1` (read once at
@@ -145,14 +145,14 @@ called the job into existence.
 Three options were on the table:
 
 1. **Hard error.** Loud, but breaks every quick-iteration use of
-   `SpatialMedian` / `SpatialLearned` in a notebook.
+   `spatial.aggregation.Median` / `spatial.aggregation.Learned` in a notebook.
 2. **Warning only.** What we have. Quiet failures in batch jobs.
 3. **Configurable.** Best of both — default-permissive, opt-in strict.
 
 **Consequences.**
 
 - Casual / notebook users see no behavior change.
-- Batch / CI users can lock down with `gp.set_strict(True)` (or the env
+- Batch / CI users can lock down with `gp.observe.set_strict(True)` (or the env
   var in their orchestration layer).
 - Tests that intentionally exercise the warn path continue to work; the
   `_warn_if_unsafe_streaming` helper checks the strict flag first and
@@ -287,7 +287,7 @@ standard-library `Callable` (since `pipekit.Operator` IS callable).
 ## ADR-004 — Coordinate-aware temporal patching is opt-in; stride-1 only in v0.1
 
 **Context.** The temporal stack works in integer index space:
-`TemporalSampler.anchors(time_len) → Iterable[int]`, `TemporalGeometry.window(
+`temporal.sampler.Sampler.anchors(time_len) → Iterable[int]`, `temporal.geometry.Geometry.window(
 time_len, anchor) → slice`. This is correct and fast for in-memory arrays at a
 known cadence. It breaks down for ARCO-ERA5-style workloads where the natural
 specification is *physical* — "a 9-hour lookback at the source cadence,
@@ -298,11 +298,11 @@ exactly tiles the source grid.
 
 **Decision.** Extend the temporal protocol via two ClassVar capability flags:
 
-- `TemporalGeometry.needs_coord: ClassVar[bool] = False` (default).
-- `TemporalSampler.needs_coord: ClassVar[bool] = False` (default).
+- `temporal.geometry.Geometry.needs_coord: ClassVar[bool] = False` (default).
+- `temporal.sampler.Sampler.needs_coord: ClassVar[bool] = False` (default).
 
-Coordinate-aware subclasses (`TemporalStencilGeometry`,
-`TemporalStencilSampler`) set the flag to `True`. `TemporalPatcher` reads the
+Coordinate-aware subclasses (`temporal.geometry.StencilGeometry`,
+`temporal.sampler.StencilSampler`) set the flag to `True`. `TemporalPatcher` reads the
 flag from both components; when either is `True`, every public method that
 takes `series` (`split`, `asplit`, `patches_at`, `anchors`, `n_anchors`) also
 requires a `coord=` keyword: a 1-D monotonic-ascending coordinate array along
@@ -319,15 +319,15 @@ The sampler always returns `int` anchors (indices into `coord`, not coordinate
 values), so the rest of `_patches_for_anchor`, the patch carrier, and the hook
 contract are byte-identical to the integer path.
 
-**v0.1 stride-1 constraint.** `TemporalWindow.weights(geometry, length)` and
-`TemporalAggregation.merge(patches)` both assume contiguous integer index
+**v0.1 stride-1 constraint.** `temporal.window.Window.weights(geometry, length)` and
+`temporal.aggregation.Aggregation.merge(patches)` both assume contiguous integer index
 ranges (`s.stop - s.start` is the realised window length). A stencil with
 `step > source_step` would yield a strided slice, silently breaking both.
-`TemporalStencilGeometry.__post_init__` raises when `source_step` is supplied
+`temporal.geometry.StencilGeometry.__post_init__` raises when `source_step` is supplied
 and `stencil.step / source_step != 1`; `window_coord` re-checks the resolved
 slice's stride at resolve time as a belt-and-braces guard for callers that
 omit `source_step`. Strided reads are deferred to v0.2 — they need
-`TemporalWindow.weights` and `TemporalAggregation.merge` to take a
+`temporal.window.Window.weights` and `temporal.aggregation.Aggregation.merge` to take a
 realised-length argument.
 
 **Hook payload extension.** `PatcherHook.on_patch_start` and `on_patch_done`
@@ -342,7 +342,7 @@ callback's positional arity so pre-extension hooks written as
   windows, and aggregations inherit `needs_coord = False`; their patcher
   dispatch path is byte-identical.
 - Coordinate-aware pipelines are explicit and discoverable: the
-  `TemporalStencilGeometry`/`TemporalStencilSampler` classes carry the flag,
+  `temporal.geometry.StencilGeometry`/`temporal.sampler.StencilSampler` classes carry the flag,
   and the patcher's error message names `coord=` as the required argument.
 - Cadence-independence: the same `TimeStencil('-9h', '3h', '3h')` against
   any 3-hourly source produces the same 5-point window. Re-pointing the
@@ -373,6 +373,9 @@ work); the upstream `neuralgcm/terrax` `xreader.stencils` module (Apache-2.0,
 
 ## ADR-005 — Random access is a Sequence wrapper, cache lives on the view
 
+> Superseded in part by ADR-008: `IndexedPatchView` now lives in
+> `geopatcher.run`, not at the root.
+
 **Context.** The patcher's canonical surface is
 `SpatialPatcher.split → Iterator[Patch]` (ADR-001). xrpatcher's
 `XRDAPatcher[i]` API gives random-access by integer index, and `xrpatcher`
@@ -381,7 +384,7 @@ loaders that re-read the same anchors per epoch. Migrants want the same
 ergonomics without losing the iterator-first contract; the question is
 *where* the random-access surface lives and *what protocol* it speaks.
 
-**Decision.** Add `geopatcher.IndexedPatchView`:
+**Decision.** Add `geopatcher.run.IndexedPatchView`:
 
 - A stdlib `collections.abc.Sequence[Patch]` over a `(patcher, field)`
   pair. Supports `len(view)`, `view[i]`, slicing, negative indexing,
@@ -404,7 +407,7 @@ ergonomics without losing the iterator-first contract; the question is
 
 Alongside the view, the PR ships three sympathetic conveniences:
 
-- `SpatialRegularStride(check_full_scan=True)` raises
+- `spatial.sampler.RegularStride(check_full_scan=True)` raises
   `IncompleteScanConfiguration` at anchor time when `(length - size) %
   step` is nonzero on any axis. Off by default to preserve existing
   silent-truncation semantics; opt in for the xrpatcher
@@ -420,7 +423,7 @@ Precursor change: `XarrayField.select` now returns the bare
 `xarray.DataArray` rather than another `XarrayField`. This brings it in
 line with `RasterField.select → GeoTensor` (select returns the natural
 data payload, not another field wrapper) and unblocks
-`SpatialOverlapAdd.merge`, which `np.asarray`'s every patch's data.
+`spatial.aggregation.OverlapAdd.merge`, which `np.asarray`'s every patch's data.
 
 **Consequences.**
 
@@ -474,9 +477,9 @@ ADR-001 (iterator-first split) and ADR-004 (coordinate-aware temporal).
 
 **Decision.** `SpatialPatcher.merge(patches, domain)` keeps returning
 whatever the aggregation's `merge` produces — a bare `np.ndarray` on the
-domain grid for the dense aggregations, a `dict` for `SpatialMeanStd` /
-`SpatialInvVarWeightedMean` / `SpatialByIndex`, a zarr array for
-streaming `SpatialOverlapAdd`. A sibling,
+domain grid for the dense aggregations, a `dict` for `spatial.aggregation.MeanStd` /
+`spatial.aggregation.InvVarWeightedMean` / `spatial.aggregation.ByIndex`, a zarr array for
+streaming `spatial.aggregation.OverlapAdd`. A sibling,
 `SpatialPatcher.merge_to_field(patches, field)`, returns
 `field.with_data(merged)`: a `GeoTensor` for `RasterField` (transform,
 CRS, `fill_value_default` and `attrs` of the source), a `RioXarrayField`
@@ -530,6 +533,45 @@ table — make `merge` wrap its output through `with_data` (option A in
   with no supported way back.
 
 **See also.** #194; ADR-005 (`merge_to_xarray`).
+
+---
+
+## ADR-008 — Public namespaces are organised by task, one home per name
+
+**Status.** Accepted.
+
+**Context.** The root namespace had grown to 112 names, mostly every
+axis twice — once at the root and again in its family module, both with
+a `Spatial` / `Temporal` name prefix — and the public modules mixed concepts (`spatial`, `time`, `fields`,
+`matched`) with plumbing (`runners`, `dask`, `jax`, `hooks`, `objstore`,
+`cog`). Users had no map from "what am I trying to do" to "where is it".
+
+**Decision.**
+
+- The root keeps only what every job touches: the patchers, the patch
+  carriers, `Field` / `AsyncField` / `Domain` and `RasterField`.
+- Everything else has exactly one public home, grouped by task:
+  `spatial` / `temporal` (one module per axis — `geometry`, `sampler`,
+  `window`, `aggregation`, plus temporal `stencils`), `fields`,
+  `matched`, `run` (runners, Dask / JAX, `PatchCache`, random access),
+  `observe` (hooks, journal, error records, strict mode) and `config`.
+  `tests/test_exports.py::test_one_home_per_public_name` enforces it.
+- Axes drop their family prefix — the namespace carries it:
+  `spatial.window.Hann`, `temporal.aggregation.Mean`. The `time` module
+  becomes `geopatcher.temporal` (no shadowing of the standard library).
+- Config envelopes name classes by public path (`"spatial.window.Hann"`)
+  so the unprefixed names never collide.
+- The object-store pool and the COG engine move to their own package,
+  geotoolz-cloud (`geocloud.store`, `geocloud.cog`): they are I/O shared
+  by the whole stack, not patching. `ObstoreCogField` becomes
+  `geopatcher.fields.CogField`, a thin `Field` over `geocloud.cog.CogSource`.
+- Clean break: no aliases for the old spellings (0.x, called out in the
+  release notes).
+
+**Consequences.** Every import of an axis changes
+(`from geopatcher import spatial` then `spatial.window.Hann()`), and
+configs saved with the old bare class names must be re-saved. In return
+each name is findable from its task, and the root is short enough to read.
 
 ---
 

@@ -32,14 +32,7 @@ from georeader.geotensor import GeoTensor
 from rasterio import Affine
 from rasterio.windows import Window, transform as window_transform
 
-from geopatcher import (
-    RasterField,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import RasterField, SpatialPatcher, spatial
 from geopatcher._src.fields.reproject import ReprojectingRasterField
 
 
@@ -111,14 +104,14 @@ def _raster_rasterio_reader(tmp_path: Path) -> Case:
 
 
 def _xarray(tmp_path: Path) -> Case:
-    from geopatcher import XarrayField
+    from geopatcher.fields import XarrayField
 
     da = _dataarray(coords=True)
     return Case(XarrayField(da), da.values, None)
 
 
 def _rioxarray(tmp_path: Path) -> Case:
-    from geopatcher import RioXarrayField
+    from geopatcher.fields import RioXarrayField
 
     da = _dataarray(coords=True)
     return Case(RioXarrayField(da), da.values, _T)
@@ -132,15 +125,15 @@ def _dask(tmp_path: Path) -> Case:
     return Case(DaskField(da), da.values, _T)
 
 
-def _obstore_cog(tmp_path: Path) -> Case:
+def _cog_field(tmp_path: Path) -> Case:
     pytest.importorskip("obstore")
     pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
 
-    from geopatcher._src.fields.obstore_cog import ObstoreCogField
+    from geopatcher.fields import CogField
 
     path = _write_tif(tmp_path / "cog.tif", tiled=True)
-    field = ObstoreCogField.from_url(
+    field = CogField.open(
         url=f"file://{path}", store=LocalStore(prefix=str(tmp_path)), path=path.name
     )
     return Case(field, _values(), _T)
@@ -164,17 +157,17 @@ ADAPTERS: dict[str, Callable[[Path], Case]] = {
     "XarrayField": _xarray,
     "RioXarrayField-coords": _rioxarray,
     "DaskField": _dask,
-    "ObstoreCogField": _obstore_cog,
+    "CogField": _cog_field,
     "ReprojectingRasterField-3d": _reprojecting_3d,
 }
 
 
 def _patcher(boundary: str) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16), boundary=boundary),  # type: ignore[arg-type]
-        sampler=SpatialRegularStride(step=16),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(16, 16), boundary=boundary),  # type: ignore[arg-type]
+        sampler=spatial.sampler.RegularStride(step=16),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 

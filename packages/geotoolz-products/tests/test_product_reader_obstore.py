@@ -205,12 +205,12 @@ def test_remote_scheme_routes_through_client(tmp_path: Path):
 def test_azure_key_matches_pool(tmp_path: Path, uri: str):
     """Azure URIs request the container-stripped key, like the shared pool.
 
-    The pooled ``AzureStore`` (``geopatcher.objstore``) binds the
+    The pooled ``AzureStore`` (``geocloud.store``) binds the
     container, so the attached-client path must request the blob key
-    only — the same key ``geopatcher.objstore.object_key`` derives.
+    only — the same key ``geocloud.store.object_key`` derives.
     """
     obstore_store = pytest.importorskip("obstore.store")
-    from geopatcher.objstore import get_obstore, object_key
+    from geocloud.store import get_obstore, object_key
 
     payload = b"the quick brown fox jumps over the lazy dog"
     (tmp_path / "path").mkdir()

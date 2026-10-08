@@ -43,6 +43,11 @@ ALLOWED_UNRESOLVED: dict[tuple[str, str], str] = {
     ("docs/patcher/observability.md", f"geopatcher.{name}"): _OTEL
     for name in ("patch", "anchor", "runtime_s", "bytes")
 }
+# The PatchCache on-disk format id: a versioned key string, not an import
+# path; changing it would orphan every existing cache.
+ALLOWED_UNRESOLVED[
+    ("packages/geotoolz-patcher/src/geopatcher/_src/cache.py", "geopatcher.PatchCache")
+] = "the cache format id string"
 
 # Retired names and locations: (pattern, why, scope). Scope "all" covers
 # docs, README and sources; "docs" only the user-facing docs and README
@@ -91,6 +96,18 @@ RETIRED: list[tuple[re.Pattern[str], str, str]] = [
         "all",
     ),
     (re.compile(r"\bgeopatcher\._src\b"), "private path in user docs", "docs"),
+    (
+        re.compile(
+            r"\b(?:Spatial|Temporal)(?!Patch(?:er)?\b)(?!Strategy\b)[A-Z][A-Za-z]+\b"
+        ),
+        "the axes are namespaced: spatial.window.Hann, not SpatialHann",
+        "docs",
+    ),
+    (
+        re.compile(r"\bgeopatcher\.(?:objstore|cog|runners|dask|jax|hooks|time)\b"),
+        "moved: geocloud.store / geocloud.cog / geopatcher.run / .observe / .temporal",
+        "all",
+    ),
 ]
 
 

@@ -5,30 +5,17 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from geopatcher import (
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-    TemporalCausalBoxcar,
-    TemporalFixedLookback,
-    TemporalLookbackHorizon,
-    TemporalMean,
-    TemporalMultiScale,
-    TemporalPatcher,
-    TemporalRegularStride,
-)
+from geopatcher import SpatialPatcher, TemporalPatcher, spatial, temporal
 from geopatcher._src.indexed import IndexedPatchView
 
 
 @pytest.fixture
 def patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16)),
-        sampler=SpatialRegularStride(step=16),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(16, 16)),
+        sampler=spatial.sampler.RegularStride(step=16),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -161,7 +148,7 @@ class TestIndexValidation:
     def test_preload_with_patch_cache_names_the_mode(
         self, patcher, field, tmp_path
     ) -> None:
-        from geopatcher import PatchCache
+        from geopatcher.run import PatchCache
 
         cache = PatchCache(tmp_path, field_id="scene")
         with pytest.raises(ValueError, match="only to the in-memory cache"):
@@ -173,9 +160,9 @@ class TestIndexValidation:
 def _temporal(geometry) -> TemporalPatcher:
     return TemporalPatcher(
         geometry=geometry,
-        sampler=TemporalRegularStride(step=7),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        sampler=temporal.sampler.RegularStride(step=7),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
 
 
@@ -191,7 +178,7 @@ def _assert_matches_split(view, expected) -> None:
 class TestTemporalPatcher:
     def test_temporal_patcher_supported(self) -> None:
         series = np.arange(60.0).reshape(30, 2)
-        tp = _temporal(TemporalFixedLookback(length=5))
+        tp = _temporal(temporal.geometry.FixedLookback(length=5))
         view = IndexedPatchView(tp, series)
         _assert_matches_split(view, list(tp.split(series)))
 
@@ -199,14 +186,14 @@ class TestTemporalPatcher:
         # Several patches per anchor: the view indexes per patch, not per
         # anchor, so `view[i]` is still the i-th patch of `split`.
         series = np.arange(40.0)
-        tp = _temporal(TemporalMultiScale(scales=[3, 8]))
+        tp = _temporal(temporal.geometry.MultiScale(scales=[3, 8]))
         view = IndexedPatchView(tp, series)
         assert len(view) == tp.n_anchors(series) == 2 * len(tp.anchors(series))
         _assert_matches_split(view, list(tp.split(series)))
 
     def test_patcher_kwargs_forwarded(self) -> None:
         series = np.arange(60.0).reshape(2, 30)
-        tp = _temporal(TemporalLookbackHorizon(lookback=4, horizon=2))
+        tp = _temporal(temporal.geometry.LookbackHorizon(lookback=4, horizon=2))
         view = IndexedPatchView(tp, series, patcher_kwargs={"time_axis": 1})
         _assert_matches_split(view, list(tp.split(series, time_axis=1)))
 
@@ -214,12 +201,12 @@ class TestTemporalPatcher:
         xr = pytest.importorskip("xarray")
         pytest.importorskip("dask")
         da = xr.DataArray(np.arange(30.0), dims="time").chunk({"time": 5})
-        tp = _temporal(TemporalFixedLookback(length=5))
+        tp = _temporal(temporal.geometry.FixedLookback(length=5))
         view = IndexedPatchView(tp, da)
         _assert_matches_split(view, list(tp.split(da.values)))
 
     def test_bare_anchor_on_multi_scale_raises(self) -> None:
-        tp = _temporal(TemporalMultiScale(scales=[3, 8]))
+        tp = _temporal(temporal.geometry.MultiScale(scales=[3, 8]))
         with pytest.raises(ValueError, match=r"pass \(7, k\)"):
             tp.patch_at(np.arange(40.0), 7)
         with pytest.raises(ValueError, match="out of range"):
@@ -228,11 +215,11 @@ class TestTemporalPatcher:
     def test_patch_cache_serves_temporal_patches(self, tmp_path) -> None:
         # `TemporalPatcher.patch_at` takes ``cache=`` / ``field_id=`` (#190),
         # so the view's on-disk cache mode works for temporal patchers too.
-        from geopatcher import PatchCache
+        from geopatcher.run import PatchCache
 
         cache = PatchCache(tmp_path, field_id="series")
         series = np.arange(30.0)
-        tp = _temporal(TemporalMultiScale(scales=[2, 5]))
+        tp = _temporal(temporal.geometry.MultiScale(scales=[2, 5]))
         first = IndexedPatchView(tp, series, cache=cache)
         expected = list(tp.split(series))
         _assert_matches_split(first, expected)
@@ -245,6 +232,6 @@ class TestTemporalPatcher:
         ]
 
     def test_in_memory_cache_works(self) -> None:
-        tp = _temporal(TemporalFixedLookback(length=5))
+        tp = _temporal(temporal.geometry.FixedLookback(length=5))
         view = IndexedPatchView(tp, np.arange(30.0), cache=True)
         assert view[2] is view[2]

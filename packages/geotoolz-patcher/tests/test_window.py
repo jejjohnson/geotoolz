@@ -8,38 +8,27 @@ import rasterio
 from georeader.geotensor import GeoTensor
 from scipy.signal.windows import hann, tukey
 
-from geopatcher import (
-    RasterField,
-    SpatialBoxcar,
-    SpatialCustom,
-    SpatialGaussian,
-    SpatialHann,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-    SpatialTukey,
-)
+from geopatcher import RasterField, SpatialPatcher, spatial
 
 
 @pytest.fixture
-def geom() -> SpatialRectangular:
-    return SpatialRectangular(size=(8, 8))
+def geom() -> spatial.geometry.Rectangular:
+    return spatial.geometry.Rectangular(size=(8, 8))
 
 
 class TestSpatialBoxcar:
-    def test_uniform(self, geom: SpatialRectangular) -> None:
-        w = SpatialBoxcar().weights(geom)
+    def test_uniform(self, geom: spatial.geometry.Rectangular) -> None:
+        w = spatial.window.Boxcar().weights(geom)
         assert w.shape == (8, 8)
         np.testing.assert_array_equal(w, 1.0)
 
 
 class TestSpatialHann:
-    def test_periodic_values_pinned(self, geom: SpatialRectangular) -> None:
+    def test_periodic_values_pinned(self, geom: spatial.geometry.Rectangular) -> None:
         # Periodic (DFT-even) Hann, n = 8: 0.5 - 0.5 cos(2 pi k / 8).
         s = np.sqrt(2.0) / 4.0
         ref_1d = np.array([0.0, 0.5 - s, 0.5, 0.5 + s, 1.0, 0.5 + s, 0.5, 0.5 - s])
-        w = SpatialHann().weights(geom)
+        w = spatial.window.Hann().weights(geom)
         assert w.shape == (8, 8)
         np.testing.assert_allclose(w, np.outer(ref_1d, ref_1d), rtol=0, atol=1e-15)
         # Leading endpoint is zero, trailing endpoint is not (periodic).
@@ -49,7 +38,9 @@ class TestSpatialHann:
     def test_cola_at_half_hop(self) -> None:
         # w[k] + w[k + N/2] == 1 exactly for every k: true COLA at hop N/2.
         for n in (4, 8, 16, 256):
-            w = SpatialHann().weights(SpatialRectangular(size=(n, n)))[n // 2]
+            w = spatial.window.Hann().weights(
+                spatial.geometry.Rectangular(size=(n, n))
+            )[n // 2]
             np.testing.assert_allclose(
                 w[: n // 2] + w[n // 2 :], 1.0, rtol=0, atol=1e-15
             )
@@ -67,41 +58,46 @@ def _ref(n: int, alpha: float | None) -> np.ndarray:
 @pytest.mark.parametrize("alpha", [None, 0.0, 0.25, 0.5, 0.75, 1.0])
 def test_hann_tukey_convention(size: tuple[int, int], alpha: float | None) -> None:
     """Both tapers are scipy's periodic (sym=False) windows, outer-producted."""
-    geom = SpatialRectangular(size=size)
-    window = SpatialHann() if alpha is None else SpatialTukey(alpha=alpha)
+    geom = spatial.geometry.Rectangular(size=size)
+    window = (
+        spatial.window.Hann() if alpha is None else spatial.window.Tukey(alpha=alpha)
+    )
     expected = np.outer(_ref(size[0], alpha), _ref(size[1], alpha))
     np.testing.assert_allclose(window.weights(geom), expected, rtol=0, atol=1e-15)
 
 
 @pytest.mark.parametrize("size", [(8, 8), (16, 12), (5, 7)])
 def test_tukey_alpha_one_is_hann(size: tuple[int, int]) -> None:
-    geom = SpatialRectangular(size=size)
+    geom = spatial.geometry.Rectangular(size=size)
     np.testing.assert_array_equal(
-        SpatialTukey(alpha=1.0).weights(geom), SpatialHann().weights(geom)
+        spatial.window.Tukey(alpha=1.0).weights(geom),
+        spatial.window.Hann().weights(geom),
     )
 
 
-@pytest.mark.parametrize("window", [SpatialHann(), SpatialTukey(alpha=0.5)])
+@pytest.mark.parametrize(
+    "window", [spatial.window.Hann(), spatial.window.Tukey(alpha=0.5)]
+)
 @pytest.mark.parametrize("n", [1, 2])
 def test_short_axis_falls_back_to_boxcar(window, n: int) -> None:
     # A 1- or 2-sample axis cannot carry a taper (np.hanning(2) was all
     # zeros); it is boxcar, while the long axis keeps its taper.
-    w = window.weights(SpatialRectangular(size=(n, 8)))
+    w = window.weights(spatial.geometry.Rectangular(size=(n, 8)))
     assert w.shape == (n, 8)
-    long_axis = _ref(8, None if isinstance(window, SpatialHann) else 0.5)
+    long_axis = _ref(8, None if isinstance(window, spatial.window.Hann) else 0.5)
     np.testing.assert_allclose(w, np.tile(long_axis, (n, 1)), rtol=0, atol=1e-15)
     assert (w.sum(axis=1) > 0).all()
 
 
 class TestSpatialTukey:
-    def test_alpha_zero_is_boxcar(self, geom: SpatialRectangular) -> None:
-        w = SpatialTukey(alpha=0.0).weights(geom)
+    def test_alpha_zero_is_boxcar(self, geom: spatial.geometry.Rectangular) -> None:
+        w = spatial.window.Tukey(alpha=0.0).weights(geom)
         np.testing.assert_allclose(w, 1.0)
 
 
 class TestSpatialGaussian:
-    def test_peak_centre(self, geom: SpatialRectangular) -> None:
-        w = SpatialGaussian(sigma=0.5).weights(geom)
+    def test_peak_centre(self, geom: spatial.geometry.Rectangular) -> None:
+        w = spatial.window.Gaussian(sigma=0.5).weights(geom)
         ctr = w[w.shape[0] // 2, w.shape[1] // 2]
         edge = w[0, 0]
         assert ctr > edge
@@ -113,19 +109,21 @@ class TestSpatialGaussian:
         # centred at (n - 1) / 2.
         x = np.arange(n) - (n - 1) / 2.0
         ref = np.exp(-0.5 * (x / (sigma * n / 2.0)) ** 2)
-        w = SpatialGaussian(sigma=sigma).weights(SpatialRectangular(size=(n, n)))
+        w = spatial.window.Gaussian(sigma=sigma).weights(
+            spatial.geometry.Rectangular(size=(n, n))
+        )
         np.testing.assert_allclose(w, np.outer(ref, ref), rtol=1e-14, atol=0)
 
 
 class TestSpatialCustom:
-    def test_calls_user_fn(self, geom: SpatialRectangular) -> None:
+    def test_calls_user_fn(self, geom: spatial.geometry.Rectangular) -> None:
         called: list[bool] = []
 
         def fn(g):
             called.append(True)
             return np.full(g.size, 0.5)
 
-        w = SpatialCustom(fn=fn).weights(geom)
+        w = spatial.window.Custom(fn=fn).weights(geom)
         assert called == [True]
         np.testing.assert_array_equal(w, 0.5)
 
@@ -172,10 +170,10 @@ def test_overlap_add_constant_field_border() -> None:
     """
     field = _constant_field(40)
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16)),
-        sampler=SpatialRegularStride(step=(8, 8)),
-        window=SpatialHann(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(16, 16)),
+        sampler=spatial.sampler.RegularStride(step=(8, 8)),
+        window=spatial.window.Hann(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     out = _merge_identity(patcher, field)
     assert out.shape == (40, 40)
@@ -193,7 +191,7 @@ def test_overlap_add_constant_field_border() -> None:
         geometry=patcher.geometry,
         sampler=patcher.sampler,
         window=patcher.window,
-        aggregation=SpatialOverlapAdd(normalize_by_window=False),
+        aggregation=spatial.aggregation.OverlapAdd(normalize_by_window=False),
     )
     raw = _merge_identity(raw_patcher, field)
     np.testing.assert_allclose(raw[8:32, 8:32], _C, rtol=1e-15, atol=0)
@@ -209,10 +207,10 @@ def test_overlap_add_hann_step_equals_size_zero_seams() -> None:
     weight — documented reason to overlap chips (or use Boxcar)."""
     field = _constant_field(32)
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16)),
-        sampler=SpatialRegularStride(step=(16, 16)),
-        window=SpatialHann(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(16, 16)),
+        sampler=spatial.sampler.RegularStride(step=(16, 16)),
+        window=spatial.window.Hann(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     out = _merge_identity(patcher, field)
     seam = np.zeros((32, 32), dtype=bool)

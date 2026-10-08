@@ -9,26 +9,18 @@ import numpy as np
 import pytest
 from _helpers import ArrField as _ArrField
 
-from geopatcher import (
-    PatcherHook,
-    RasterField,
-    SpatialBoxcar,
-    SpatialExplicit,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import RasterField, SpatialPatcher, spatial, temporal
 from geopatcher._src.hooks import _positional_arity
+from geopatcher.observe import PatcherHook
 
 
 @pytest.fixture
 def patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16)),
-        sampler=SpatialRegularStride(step=16),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(16, 16)),
+        sampler=spatial.sampler.RegularStride(step=16),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -151,11 +143,7 @@ def test_protocol_is_public() -> None:
 def test_matched_temporal_split_forwards_hooks() -> None:
     """`MatchedTemporalPatcher.split` should forward hooks to the primary."""
     from geopatcher._src.matched import MatchedField, MatchedTemporalPatcher
-    from geopatcher._src.time.aggregation import TemporalMean
-    from geopatcher._src.time.geometry import TemporalFixedLookback
-    from geopatcher._src.time.patcher import TemporalPatcher
-    from geopatcher._src.time.sampler import TemporalRegularStride
-    from geopatcher._src.time.window import TemporalCausalBoxcar
+    from geopatcher._src.temporal.patcher import TemporalPatcher
 
     mf = MatchedField(
         primary=_ArrField(np.arange(100, dtype=np.float64)),
@@ -163,10 +151,10 @@ def test_matched_temporal_split_forwards_hooks() -> None:
         coreg={"s2": lambda raw, prim: raw},
     )
     primary = TemporalPatcher(
-        geometry=TemporalFixedLookback(length=5),
-        sampler=TemporalRegularStride(step=10),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=5),
+        sampler=temporal.sampler.RegularStride(step=10),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
     mtp = MatchedTemporalPatcher(primary=primary)
     hook = RecordingHook()
@@ -206,20 +194,16 @@ def test_matched_spatiotemporal_split_dispatches_hooks(
         MatchedSpatioTemporalPatcher,
     )
     from geopatcher._src.spatial_time import SpatioTemporalPatcher
-    from geopatcher._src.time.aggregation import TemporalMean
-    from geopatcher._src.time.geometry import TemporalFixedLookback
-    from geopatcher._src.time.patcher import TemporalPatcher
-    from geopatcher._src.time.sampler import TemporalRegularStride
-    from geopatcher._src.time.window import TemporalCausalBoxcar
+    from geopatcher._src.temporal.patcher import TemporalPatcher
 
     mf = MatchedField(primary=field)
-    temporal = TemporalPatcher(
-        geometry=TemporalFixedLookback(length=2),
-        sampler=TemporalRegularStride(step=4),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+    temporal_patcher = TemporalPatcher(
+        geometry=temporal.geometry.FixedLookback(length=2),
+        sampler=temporal.sampler.RegularStride(step=4),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
-    stp = SpatioTemporalPatcher(spatial=patcher, temporal=temporal, time_axis=0)
+    stp = SpatioTemporalPatcher(spatial=patcher, temporal=temporal_patcher, time_axis=0)
     mstp = MatchedSpatioTemporalPatcher(primary=stp)
     hook = RecordingHook()
 
@@ -296,10 +280,10 @@ def test_on_error_receives_original_exception(field: RasterField, policy: str) -
             self.calls.append((anchor, exc))
 
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(32, 32)),
-        sampler=SpatialExplicit(anchors_=[(0, 0)]),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(32, 32)),
+        sampler=spatial.sampler.Explicit(anchors_=[(0, 0)]),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
         on_error=policy,
         max_retries=1,
     )

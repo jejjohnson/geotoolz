@@ -83,18 +83,18 @@ Patcher's `Field` Protocol.
 ## 4. Compose a `SpatialPatcher`
 
 256×256 patches with 32-pixel overlap on each side, Hann-tapered for
-clean seams, accumulated with `SpatialOverlapAdd`:
+clean seams, accumulated with `spatial.aggregation.OverlapAdd`:
 
 ```python
 patcher = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(256, 256)),
-    sampler     = gp.SpatialRegularStride(step=(224, 224)),  # 32-px overlap
-    window      = gp.SpatialHann(),
-    aggregation = gp.SpatialOverlapAdd(),
+    geometry    = gp.spatial.geometry.Rectangular(size=(256, 256)),
+    sampler     = gp.spatial.sampler.RegularStride(step=(224, 224)),  # 32-px overlap
+    window      = gp.spatial.window.Hann(),
+    aggregation = gp.spatial.aggregation.OverlapAdd(),
 )
 ```
 
-`step = size - overlap`. `SpatialHann` is a periodic taper that falls to
+`step = size - overlap`. `spatial.window.Hann` is a periodic taper that falls to
 zero on each patch's leading edge, and OverlapAdd divides by the summed
 weights, so interior seams are feathered (an identity operator
 reconstructs them exactly). The one exception is the
@@ -131,7 +131,7 @@ Streaming is the default — `patcher.split` returns an `Iterator[Patch]`
 so memory stays bounded regardless of scene size. Call
 `list(patcher.split(field))` for the eager case.
 
-## 6. Stitch with `SpatialOverlapAdd`
+## 6. Stitch with `spatial.aggregation.OverlapAdd`
 
 ```python
 stitched = patcher.merge(outputs, field.domain)
@@ -154,7 +154,7 @@ full `outputs` list. The `normalise → with_data` step is now done inline
 so only one patch is alive at a time:
 
 ```python
-agg = gp.SpatialOverlapAdd(
+agg = gp.spatial.aggregation.OverlapAdd(
     streaming=True,
     target_path="out/tahoe.zarr",
     chunks=(256, 256),
@@ -189,8 +189,8 @@ plt.show()
 - A bounded-memory pipeline that splits a Sentinel-2 scene into 256×256
   patches with 32-pixel overlap.
 - A per-patch operator that runs independently on each chip.
-- A `SpatialOverlapAdd` reconstruction whose interior seams are
-  feathered by the `SpatialHann` window (all but the scene's leading
+- A `spatial.aggregation.OverlapAdd` reconstruction whose interior seams are
+  feathered by the `spatial.window.Hann` window (all but the scene's leading
   row and column).
 - The same code swaps to disk-backed streaming by changing two lines of
   the aggregation config.

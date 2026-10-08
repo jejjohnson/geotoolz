@@ -15,16 +15,10 @@ import numpy as np
 import pytest
 from georeader.geotensor import GeoTensor
 
-from geopatcher import (
-    PatchJournal,
-    RasterField,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
-from geopatcher.runners import _resolve_mp_context, parallel_map
+from geopatcher import RasterField, SpatialPatcher, spatial
+from geopatcher._src.runners import _resolve_mp_context
+from geopatcher.observe import PatchJournal
+from geopatcher.run import parallel_map
 
 
 def _double(data) -> np.ndarray:
@@ -39,10 +33,10 @@ def field(raster_field_factory) -> RasterField:
 @pytest.fixture
 def patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 

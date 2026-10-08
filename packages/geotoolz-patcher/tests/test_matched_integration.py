@@ -38,6 +38,7 @@ import rasterio
 from georeader.geotensor import GeoTensor
 from rasterio.enums import Resampling
 
+from geopatcher import spatial
 from geopatcher._src.fields.raster import RasterField
 from geopatcher._src.matched import (
     MatchedField,
@@ -45,11 +46,7 @@ from geopatcher._src.matched import (
     MatchedSpatialPatcher,
 )
 from geopatcher._src.matched.patch import PRIMARY_KEY
-from geopatcher._src.spatial.aggregation import SpatialMean, SpatialSum
-from geopatcher._src.spatial.geometry import SpatialRectangular
 from geopatcher._src.spatial.patcher import SpatialPatcher
-from geopatcher._src.spatial.sampler import SpatialRegularStride
-from geopatcher._src.spatial.window import SpatialBoxcar
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +95,14 @@ class TestIdentityCoregFullPipeline:
             coreg={"sec": lambda raw, prim: raw},
         )
         primary_patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(4, 4)),
-            sampler=SpatialRegularStride(step=(4, 4)),
-            window=SpatialBoxcar(),
-            aggregation=SpatialSum(),
+            geometry=spatial.geometry.Rectangular(size=(4, 4)),
+            sampler=spatial.sampler.RegularStride(step=(4, 4)),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.Sum(),
         )
         msp = MatchedSpatialPatcher(
             primary=primary_patcher,
-            secondary_aggregators={"sec": SpatialSum()},
+            secondary_aggregators={"sec": spatial.aggregation.Sum()},
         )
         return msp, mf, primary_tensor
 
@@ -172,10 +169,10 @@ class TestNonIdentityCoreg:
         )
         msp = MatchedSpatialPatcher(
             primary=SpatialPatcher(
-                geometry=SpatialRectangular(size=(4, 4)),
-                sampler=SpatialRegularStride(step=(4, 4)),
-                window=SpatialBoxcar(),
-                aggregation=SpatialSum(),
+                geometry=spatial.geometry.Rectangular(size=(4, 4)),
+                sampler=spatial.sampler.RegularStride(step=(4, 4)),
+                window=spatial.window.Boxcar(),
+                aggregation=spatial.aggregation.Sum(),
             )
         )
         # Expected per-patch primary means:
@@ -213,10 +210,10 @@ class TestNonIdentityCoreg:
         )
         msp = MatchedSpatialPatcher(
             primary=SpatialPatcher(
-                geometry=SpatialRectangular(size=(4, 4)),
-                sampler=SpatialRegularStride(step=(4, 4)),
-                window=SpatialBoxcar(),
-                aggregation=SpatialSum(),
+                geometry=spatial.geometry.Rectangular(size=(4, 4)),
+                sampler=spatial.sampler.RegularStride(step=(4, 4)),
+                window=spatial.window.Boxcar(),
+                aggregation=spatial.aggregation.Sum(),
             )
         )
         list(msp.split(mf))
@@ -245,10 +242,10 @@ class TestValidMaskOnRealData:
         )
         msp = MatchedSpatialPatcher(
             primary=SpatialPatcher(
-                geometry=SpatialRectangular(size=(4, 4)),
-                sampler=SpatialRegularStride(step=(4, 4)),
-                window=SpatialBoxcar(),
-                aggregation=SpatialSum(),
+                geometry=spatial.geometry.Rectangular(size=(4, 4)),
+                sampler=spatial.sampler.RegularStride(step=(4, 4)),
+                window=spatial.window.Boxcar(),
+                aggregation=spatial.aggregation.Sum(),
             )
         )
         patches = list(msp.split(mf))
@@ -285,10 +282,10 @@ class TestValidMaskOnRealData:
         )
         msp = MatchedSpatialPatcher(
             primary=SpatialPatcher(
-                geometry=SpatialRectangular(size=(4, 4)),
-                sampler=SpatialRegularStride(step=(4, 4)),
-                window=SpatialBoxcar(),
-                aggregation=SpatialSum(),
+                geometry=spatial.geometry.Rectangular(size=(4, 4)),
+                sampler=spatial.sampler.RegularStride(step=(4, 4)),
+                window=spatial.window.Boxcar(),
+                aggregation=spatial.aggregation.Sum(),
             )
         )
         patches = list(msp.split(mf))
@@ -304,7 +301,7 @@ class TestValidMaskOnRealData:
 class TestMultiSecondaryFanOut:
     def test_three_member_pipeline(self) -> None:
         # Primary is zeros, s2 is 2s, landsat is 3s. Identity coreg
-        # for both secondaries. After split/merge with SpatialSum,
+        # for both secondaries. After split/merge with spatial.aggregation.Sum,
         # each role's reconstructed array reflects the role's
         # constant value x patch count.
         primary = _gt(np.zeros((8, 8), dtype=np.float32))
@@ -323,19 +320,19 @@ class TestMultiSecondaryFanOut:
             },
         )
 
-        # Non-overlapping 4x4 patches → SpatialSum reduces to one
+        # Non-overlapping 4x4 patches → spatial.aggregation.Sum reduces to one
         # value per pixel (no accumulation across patches at the
         # global field level).
         msp = MatchedSpatialPatcher(
             primary=SpatialPatcher(
-                geometry=SpatialRectangular(size=(4, 4)),
-                sampler=SpatialRegularStride(step=(4, 4)),
-                window=SpatialBoxcar(),
-                aggregation=SpatialSum(),
+                geometry=spatial.geometry.Rectangular(size=(4, 4)),
+                sampler=spatial.sampler.RegularStride(step=(4, 4)),
+                window=spatial.window.Boxcar(),
+                aggregation=spatial.aggregation.Sum(),
             ),
             secondary_aggregators={
-                "s2": SpatialSum(),
-                "landsat": SpatialSum(),
+                "s2": spatial.aggregation.Sum(),
+                "landsat": spatial.aggregation.Sum(),
             },
         )
 
@@ -346,7 +343,7 @@ class TestMultiSecondaryFanOut:
 
         # The merged primary is all zeros; s2 is all 2s; landsat
         # is all 3s — because we used non-overlapping patches with
-        # boxcar windows + SpatialSum, every pixel is touched once.
+        # boxcar windows + spatial.aggregation.Sum, every pixel is touched once.
         primary_merged = np.asarray(merged[PRIMARY_KEY])
         s2_merged = np.asarray(merged["s2"])
         landsat_merged = np.asarray(merged["landsat"])
@@ -366,12 +363,12 @@ class TestMultiSecondaryFanOut:
         )
         msp = MatchedSpatialPatcher(
             primary=SpatialPatcher(
-                geometry=SpatialRectangular(size=(4, 4)),
-                sampler=SpatialRegularStride(step=(4, 4)),
-                window=SpatialBoxcar(),
-                aggregation=SpatialSum(),
+                geometry=spatial.geometry.Rectangular(size=(4, 4)),
+                sampler=spatial.sampler.RegularStride(step=(4, 4)),
+                window=spatial.window.Boxcar(),
+                aggregation=spatial.aggregation.Sum(),
             ),
-            secondary_aggregators={"sec": SpatialMean()},
+            secondary_aggregators={"sec": spatial.aggregation.Mean()},
         )
         patches = list(msp.split(mf))
         merged = msp.merge(patches, mf)
@@ -390,7 +387,7 @@ class TestMultiSecondaryFanOut:
 
 class TestRoundTripIdentity:
     def test_non_overlapping_tiles_reconstruct_exactly(self) -> None:
-        # With non-overlapping patches and SpatialSum on a primary
+        # With non-overlapping patches and spatial.aggregation.Sum on a primary
         # with arbitrary content, the reconstructed field equals
         # the original (each pixel is read once and accumulated
         # once with no overlap).
@@ -398,10 +395,10 @@ class TestRoundTripIdentity:
         mf = MatchedField(primary=RasterField(original))
         msp = MatchedSpatialPatcher(
             primary=SpatialPatcher(
-                geometry=SpatialRectangular(size=(4, 4)),
-                sampler=SpatialRegularStride(step=(4, 4)),
-                window=SpatialBoxcar(),
-                aggregation=SpatialSum(),
+                geometry=spatial.geometry.Rectangular(size=(4, 4)),
+                sampler=spatial.sampler.RegularStride(step=(4, 4)),
+                window=spatial.window.Boxcar(),
+                aggregation=spatial.aggregation.Sum(),
             )
         )
         patches = list(msp.split(mf))
@@ -424,10 +421,10 @@ def _reproject_like(raw: Any, like: Any) -> Any:
 
 def _tiled_patcher(size: int) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(size, size)),
-        sampler=SpatialRegularStride(step=(size, size)),
-        window=SpatialBoxcar(),
-        aggregation=SpatialSum(),
+        geometry=spatial.geometry.Rectangular(size=(size, size)),
+        sampler=spatial.sampler.RegularStride(step=(size, size)),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.Sum(),
     )
 
 
@@ -501,12 +498,12 @@ class TestHeterogeneousGrids:
         )
         msp = MatchedSpatialPatcher(
             primary=SpatialPatcher(
-                geometry=SpatialRectangular(size=(4, 4), boundary=boundary),
-                sampler=SpatialRegularStride(step=(4, 4)),
-                window=SpatialBoxcar(),
-                aggregation=SpatialSum(),
+                geometry=spatial.geometry.Rectangular(size=(4, 4), boundary=boundary),
+                sampler=spatial.sampler.RegularStride(step=(4, 4)),
+                window=spatial.window.Boxcar(),
+                aggregation=spatial.aggregation.Sum(),
             ),
-            secondary_aggregators={"s": SpatialSum()},
+            secondary_aggregators={"s": spatial.aggregation.Sum()},
         )
         patches = list(msp.split(mf))
         assert len(patches) == 4

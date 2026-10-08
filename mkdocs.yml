@@ -104,11 +104,14 @@ nav:
           - Async and prefetch: patcher/patching/async-prefetch.md
       - API Reference:
           - Overview: patcher/api/reference.md
-          - Core framework: patcher/api/core.md
+          - Core: patcher/api/core.md
           - Spatial axes: patcher/api/spatial.md
           - Temporal axes: patcher/api/temporal.md
-          - ML utilities: patcher/api/ml.md
+          - Fields: patcher/api/fields.md
           - Matched multi-source: patcher/api/matched.md
+          - Running at scale: patcher/api/run.md
+          - Observing: patcher/api/observe.md
+          - Config: patcher/api/config.md
           - Integrations: patcher/api/integrations.md
       - Design:
           - Design decisions: patcher/decisions.md
@@ -141,6 +144,9 @@ nav:
           - Query & matchup: catalog/design/query-matchup.md
           - Parameter vocabulary: catalog/design/vocabulary.md
       - Changelog: catalog/changelog.md
+  - Cloud — geocloud:
+      - Home: cloud/index.md
+      - API Reference: cloud/api.md
   - Products — geoproducts:
       - Home: products/index.md
       - Adding a product reader: products/product-readers.md

@@ -101,7 +101,6 @@ uv add geotoolz-catalog
 | `[earthaccess]` / `[gee]` | `EarthAccessSource` / `GEESource` | NASA Earthdata / Earth Engine ingestion |
 | `[sources-all]` | `[earthaccess]` + `[stac]` + `[gee]` | Every source adapter |
 | `[fsspec]` | `s3://`, `gs://`, `az://`, `https://`, `hf://` URI support (fsspec, its cloud filesystems, `huggingface_hub`) | Cloud object storage |
-| `[obstore]` | `geotoolz-patcher[obstore]` — the shared `geopatcher.objstore` client pool | Pooled HTTP/2 range reads |
 | `[patch]` | `geocatalog.staging.field_for` — bridge to `geopatcher` | Patcher / tiling workflows |
 | `[full]` | All of the above | One-shot install |
 

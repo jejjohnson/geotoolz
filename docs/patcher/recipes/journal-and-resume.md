@@ -28,7 +28,7 @@ For one-shot exploratory work, skip the journal.
 ## 1. The contract
 
 ```python
-from geopatcher import PatchJournal
+from geopatcher.observe import PatchJournal
 
 journal = PatchJournal("out/run.jsonl")
 ```
@@ -41,13 +41,13 @@ journal = PatchJournal("out/run.jsonl")
 | `journal.completed()` | Every anchor whose latest row is `"ok"`, in journal (normalised) form. |
 
 The journal stores one JSON record per committed patch, keyed by the
-anchor after `geopatcher.normalize_anchor`: numpy scalars become Python
+anchor after `geopatcher.observe.normalize_anchor`: numpy scalars become Python
 numbers (`datetime64` / `timedelta64` become tagged
 `{"__datetime64__": "…"}` / `{"__timedelta64__": "…"}` dicts, so they never
 collide with a string anchor), numpy arrays and
 tuples become lists, dicts keep their string keys. So
 `(np.int64(5), np.int64(10))`, `np.array([5, 10])` and `(5, 10)` are the
-same anchor — `SpatialExplicit(anchors_=np.argwhere(mask))` rows resume
+same anchor — `spatial.sampler.Explicit(anchors_=np.argwhere(mask))` rows resume
 correctly. Anything else (an arbitrary object, a non-string dict key)
 raises `TypeError`; there is no `str()` fallback.
 
@@ -67,15 +67,15 @@ import time
 
 import numpy as np
 
-from geopatcher import PatchJournal
+from geopatcher.observe import PatchJournal
 import geopatcher as gp
 
 journal = PatchJournal("out/lake-tahoe-run.jsonl")
 patcher = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(256, 256)),
-    sampler     = gp.SpatialRegularStride(step=(224, 224)),
-    window      = gp.SpatialHann(),
-    aggregation = gp.SpatialOverlapAdd(streaming=True, target_path="out/tahoe.zarr",
+    geometry    = gp.spatial.geometry.Rectangular(size=(256, 256)),
+    sampler     = gp.spatial.sampler.RegularStride(step=(224, 224)),
+    window      = gp.spatial.window.Hann(),
+    aggregation = gp.spatial.aggregation.OverlapAdd(streaming=True, target_path="out/tahoe.zarr",
                                        chunks=(256, 256)),
 )
 
@@ -164,7 +164,7 @@ read, and every finished patch is committed from the parent process —
 with `backend="process"`.
 
 ```python
-from geopatcher.runners import parallel_map
+from geopatcher.run import parallel_map
 
 journal = PatchJournal("out/lake-tahoe-run.jsonl")
 outputs = parallel_map(

@@ -154,10 +154,10 @@ class PatchCache:
           ``array``. A field exposing only a ``cache_id()`` uses that as
           its source. A plain ``url`` has no version, so an object
           overwritten in place is not detected; adapters that can ask
-          the store cheaply (`ObstoreCogField`: an ETag / size from a
+          the store cheaply (`CogField`: an ETag / size from a
           HEAD) fold that into ``cache_id()``.
         - ``json`` — the field's ``cache_id()`` (per-adapter identity,
-          e.g. `ObstoreCogField`'s store / path / ``ifd_index`` or
+          e.g. `CogField`'s store / path / ``ifd_index`` or
           `ReprojectingRasterField`'s ``dst_crs`` / ``resolution`` /
           ``resampling``), the domain (CRS, transform, shape, dtype, or
           a digest of the grid coordinates) and the reader's band
@@ -481,7 +481,7 @@ def _source_id(obj: Any, _depth: int = 0) -> str | None:
     ``(realpath, st_mtime_ns, st_size)`` of *every* path, so editing any
     file of a multi-file reader invalidates its entries. A bare ``url``
     carries no version: a remote object overwritten in place is not
-    detected (`ObstoreCogField.cache_id` adds the object's ETag).
+    detected (`CogField.cache_id` adds the object's ETag).
     """
     if obj is None or _depth > 4:
         return None

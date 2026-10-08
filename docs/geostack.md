@@ -71,10 +71,10 @@ the label-aware `StratifiedSample` / `BalancedSampler` emit the same
 finds the row pairs; the patcher reads them; the operators align them.
 
 **5. One obstore pool per process.**
-`geopatcher.objstore` owns the pooled `obstore` client and the `[obstore]`
+`geocloud.store` owns the pooled `obstore` client and the `[obstore]`
 extras of geotoolz-products and geocatalog depend on it, so a
 pipeline touching the same bucket through the catalog's staging, the
-patcher's `ObstoreCogField`, and geoproducts' product readers reuses one
+patcher's `CogField`, and geoproducts' product readers reuses one
 HTTP/2 connection pool.
 
 ## End to end in one screen
@@ -98,10 +98,10 @@ field = gc.field_for(staged, aoi_slice)  # aoi_slice: GeoSlice (bounds, CRS, res
 
 # 3. Patch + operate + stitch (patcher → operators seam)
 patcher = gp.SpatialPatcher(
-    geometry=gp.SpatialRectangular(size=(256, 256)),
-    sampler=gp.SpatialRegularStride(step=(192, 192)),
-    window=gp.SpatialHann(),
-    aggregation=gp.SpatialOverlapAdd(),
+    geometry=gp.spatial.geometry.Rectangular(size=(256, 256)),
+    sampler=gp.spatial.sampler.RegularStride(step=(192, 192)),
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
 ndvi = gz.Sequential([
     gz.DNToReflectance(scale=1e-4),        # geotoolz radiometry
@@ -110,7 +110,7 @@ ndvi = gz.Sequential([
 pipe = gz.Sequential([
     GridSampler(patcher=patcher),
     ApplyToChips(operator=ndvi),
-    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=field.domain),
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
 ndvi_scene = pipe(field)
 ```

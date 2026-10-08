@@ -153,15 +153,15 @@ import geopatcher as gp
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry=gp.SpatialRectangular(size=(256, 256)),
-    sampler=gp.SpatialRegularStride(step=(192, 192)),
-    window=gp.SpatialHann(),
-    aggregation=gp.SpatialOverlapAdd(),
+    geometry=gp.spatial.geometry.Rectangular(size=(256, 256)),
+    sampler=gp.spatial.sampler.RegularStride(step=(192, 192)),
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
 tiled: gz.Sequential = gz.Sequential([
     GridSampler(patcher=patcher),                                  # field → list[Patch], (13, 256, 256) each
     ApplyToChips(operator=ndvi_pipeline),                          # → list[Patch], (256, 256) each
-    MergePatches(aggregation=gp.SpatialOverlapAdd(),
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(),
                  domain=scene.isel({"band": slice(0, 1)})),        # one-band grid for a one-band output
 ])
 stitched: np.ndarray = tiled(gp.RasterField(scene))                # (1, H, W) float64

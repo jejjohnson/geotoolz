@@ -1,11 +1,11 @@
 """`SpatialPatcher` — composes the four spatial axes.
 
 The Patcher is intentionally tiny — it just orchestrates
-``SpatialSampler.anchors → Geometry.neighborhood → SpatialWindow.weights →
-Field.select`` and hands the result to `SpatialAggregation.merge` when the
-caller asks. Split returns an `Iterator[Patch]` so streaming is the
-default; ``list(patcher.split(field))`` materialises eagerly when that's
-what's wanted.
+``spatial.sampler.Sampler.anchors → Geometry.neighborhood →
+spatial.window.Window.weights → Field.select`` and hands the result to
+`spatial.aggregation.Aggregation.merge` when the caller asks. Split returns an
+`Iterator[Patch]` so streaming is the default; ``list(patcher.split(field))``
+materialises eagerly when that's what's wanted.
 
 See ``docs/patcher/concepts.md`` ("The four-axis abstraction") for the
 four-axis framework.
@@ -45,16 +45,20 @@ from geopatcher._src.patch import Patch
 from geopatcher._src.prefetch import _STOP_POLL_S, prefetch_iterable
 from geopatcher._src.protocols import AsyncField, Field
 from geopatcher._src.spatial.aggregation import (
-    SpatialAggregation,
+    Aggregation as SpatialAggregation,
     _warn_if_unsafe_streaming,
 )
 from geopatcher._src.spatial.geometry import (
-    SpatialGeometry,
+    Geometry as SpatialGeometry,
     _is_raster_domain,
     _MaskedWindow,
 )
-from geopatcher._src.spatial.sampler import SpatialSampler
-from geopatcher._src.spatial.window import SpatialWindow
+from geopatcher._src.spatial.sampler import (
+    Sampler as SpatialSampler,
+)
+from geopatcher._src.spatial.window import (
+    Window as SpatialWindow,
+)
 from geopatcher._src.walk import (
     OnErrorPolicy,
     PatchErrorRecord,
@@ -189,8 +193,8 @@ class _SpatialPatcherBase:
         Determinism contract: holds exactly for samplers that return the
         same anchor set on every call given the same ``(domain,
         geometry)``. That covers all five samplers when a seed is set;
-        for unseeded `SpatialRandom` / `SpatialJitteredStride` /
-        `SpatialPoissonDisk` the count is still well-defined
+        for unseeded `spatial.sampler.Random` / `spatial.sampler.JitteredStride` /
+        `spatial.sampler.PoissonDisk` the count is still well-defined
         (``n_samples`` for the first two; a probabilistic estimate for
         the third), but the anchors materialised here are different
         draws from the ones a subsequent `split` will see. See
@@ -209,11 +213,11 @@ class _SpatialPatcherBase:
 
         The result is whatever ``self.aggregation.merge`` produces — a bare
         ``np.ndarray`` on the domain grid for the dense aggregations, a
-        ``dict`` for `SpatialMeanStd` / `SpatialInvVarWeightedMean` /
-        `SpatialByIndex`, a zarr array for streaming `SpatialOverlapAdd`.
-        Use `merge_to_field` (or `merge_to_xarray`) to get a georeferenced
-        carrier back. A ``streaming_safe = False`` aggregation warns (or
-        raises under `set_strict`) at the caller's line.
+        ``dict`` for `spatial.aggregation.MeanStd` /
+        `spatial.aggregation.InvVarWeightedMean` / `spatial.aggregation.ByIndex`, a zarr
+        array for streaming `spatial.aggregation.OverlapAdd`. Use `merge_to_field` (or
+        `merge_to_xarray`) to get a georeferenced carrier back. A ``streaming_safe =
+        False`` aggregation warns (or raises under `set_strict`) at the caller's line.
         """
         return _merge_with_hooks(self.aggregation, patches, domain, hooks, stacklevel=2)
 
@@ -236,7 +240,7 @@ class _SpatialPatcherBase:
     def get_config(self) -> dict[str, Any]:
         """Axes as ``{"class", "config"}`` envelopes; ``retry_on`` as qualified names.
 
-        `geopatcher.from_config` rebuilds the patcher from
+        `geopatcher.config.from_config` rebuilds the patcher from
         ``axis_envelope(patcher)``.
         """
         return patcher_config(self)
@@ -278,10 +282,10 @@ class SpatialPatcher(_SpatialPatcherBase):
         Sliding-window inference over a raster::
 
             patcher = SpatialPatcher(
-                geometry    = SpatialRectangular(size=(256, 256)),
-                sampler     = SpatialRegularStride(step=(192, 192)),
-                window      = SpatialHann(),
-                aggregation = SpatialOverlapAdd(),
+                geometry    = spatial.geometry.Rectangular(size=(256, 256)),
+                sampler     = spatial.sampler.RegularStride(step=(192, 192)),
+                window      = spatial.window.Hann(),
+                aggregation = spatial.aggregation.OverlapAdd(),
             )
             patches = list(patcher.split(field))
             outs    = [run_operator(p) for p in patches]
@@ -421,7 +425,7 @@ class SpatialPatcher(_SpatialPatcherBase):
             field_id: ``cache.field_id_for(field)`` resolved once by the
                 caller and reused for every anchor (`IndexedPatchView`
                 does this). Without it each call re-derives the identity,
-                which for `ObstoreCogField` is a ``HEAD`` per patch.
+                which for `CogField` is a ``HEAD`` per patch.
 
         Returns:
             A single `Patch` bit-identical to the one ``split`` would
@@ -472,9 +476,9 @@ class SpatialPatcher(_SpatialPatcherBase):
 
         Raises:
             TypeError: If ``field`` has no ``with_data``, if the aggregation
-                returns a ``dict`` (`SpatialMeanStd`,
-                `SpatialInvVarWeightedMean`, `SpatialByIndex`, …) or
-                anything without an array ``shape``, or if the output shape
+                returns a ``dict`` (`spatial.aggregation.MeanStd`,
+                `spatial.aggregation.InvVarWeightedMean`, `spatial.aggregation.ByIndex`,
+                …) or anything without an array ``shape``, or if the output shape
                 differs from ``field.domain.shape``.
 
         Examples:
@@ -568,9 +572,9 @@ class SpatialPatcher(_SpatialPatcherBase):
 
         One ``patch_at`` task per anchor; the field enters the graph once.
         Runner-level policies (``on_error``, hooks, journal, cache,
-        prefetch) do not apply — see `geopatcher.dask`.
+        prefetch) do not apply — see `geopatcher.run`.
         """
-        from geopatcher.dask import to_delayed
+        from geopatcher._src.dask import to_delayed
 
         return to_delayed(self, field, operator)
 
@@ -579,7 +583,7 @@ class SpatialPatcher(_SpatialPatcherBase):
 
         Same per-patch tasks and policy caveats as `to_delayed`.
         """
-        from geopatcher.dask import to_dask_bag
+        from geopatcher._src.dask import to_dask_bag
 
         return to_dask_bag(self, field)
 
@@ -607,12 +611,12 @@ class SpatialPatcher(_SpatialPatcherBase):
         Examples:
             Global statistics for a normalisation pass::
 
-                stats = patcher.reduce(field, SpatialMeanStd())
+                stats = patcher.reduce(field, spatial.aggregation.MeanStd())
 
             Tolerate unreadable tiles while reducing::
 
                 patcher = replace(patcher, on_error="skip")
-                bounds = patcher.reduce(field, SpatialMinMax(), prefetch=2)
+                bounds = patcher.reduce(field, spatial.aggregation.MinMax(), prefetch=2)
         """
         patches = self._split_anchors(
             field,
@@ -658,7 +662,7 @@ class SpatialPatcher(_SpatialPatcherBase):
 
                 out = patcher.two_pass(
                     field,
-                    reduce_with=SpatialMeanStd(),
+                    reduce_with=spatial.aggregation.MeanStd(),
                     apply=lambda x, s: (np.asarray(x) - s["mean"]) / s["std"],
                 )
         """
@@ -854,7 +858,7 @@ _STREAM_END = object()
 _NO_DOMAIN: Any = object()
 """``domain`` sentinel for aggregations whose ``merge`` takes no domain.
 
-`TemporalAggregation.merge(patches)` has no domain argument; passing
+`temporal.aggregation.Aggregation.merge(patches)` has no domain argument; passing
 ``_NO_DOMAIN`` lets `TemporalPatcher` reuse `_merge_with_hooks` /
 `_amerge_with_hooks` (hooks, streaming check, async adapter) unchanged.
 """
@@ -913,7 +917,7 @@ async def _amerge_with_hooks(
 ) -> Any:
     """Async adapter: feed an async patch stream into a sync ``merge``.
 
-    `SpatialAggregation.merge` takes a plain iterable, so the merge runs
+    `spatial.aggregation.Aggregation.merge` takes a plain iterable, so the merge runs
     in a worker thread over a generator that fetches each patch from the
     event loop on demand (``run_coroutine_threadsafe(anext(...))``). The
     stream is consumed as fast as the aggregation folds it — nothing is
@@ -1075,7 +1079,7 @@ def _safe_base_weights(
 
     Only the "no fixed size" case is detected, and it is detected up
     front: a ``TypeError`` raised by the window itself (say, a bug in a
-    `SpatialCustom` ``fn``) propagates instead of silently dropping the
+    `spatial.window.Custom` ``fn``) propagates instead of silently dropping the
     weights.
     """
     if getattr(geometry, "size", None) is None:
@@ -1405,7 +1409,7 @@ async def _select_async(field: AsyncField, indexer: Any) -> Any:
 def _unwrap_for_select(indices: Any) -> Any:
     """Unwrap a `_MaskedWindow` to the underlying rasterio `Window` for `Field.select`.
 
-    `SpatialPolygonIntersection.neighborhood` returns a `_MaskedWindow`
+    `spatial.geometry.PolygonIntersection.neighborhood` returns a `_MaskedWindow`
     so `_build_weights` can recover the interior mask. But `Field.select`
     expects a plain `Window` (or dict / index list) — the wrapper would
     confuse downstream readers like `RasterField.read_from_window`. Strip
@@ -1427,10 +1431,10 @@ def _build_weights(
 ) -> Any:
     """Resolve a patch's weight array.
 
-    If the indices is a `_MaskedWindow` (SpatialPolygonIntersection on a raster),
-    return the interior mask — the window controls *which pixels count*,
+    If the indices is a `_MaskedWindow` (spatial.geometry.PolygonIntersection on a
+    raster), return the interior mask — the window controls *which pixels count*,
     not how heavily they're tapered. Otherwise return the geometry-shaped
-    base weights from `SpatialWindow.weights`. Under ``boundary="shrink"``
+    base weights from `spatial.window.Window.weights`. Under ``boundary="shrink"``
     the geometry clipped the window to the domain on every side (top/left
     too, for a negative anchor), so the weights are cropped to the same
     in-domain part of the full patch: rows

@@ -1,7 +1,7 @@
-"""geoproducts has no obstore pool of its own — it uses geopatcher's.
+"""geoproducts has no obstore pool of its own — it uses geotoolz-cloud's.
 
 The pool itself (keys, Azure construction, signed URLs, LRU) is tested
-in ``packages/geotoolz-patcher/tests/test_objstore.py``; these smoke
+in ``packages/geotoolz-cloud/tests/test_store.py``; these smoke
 tests pin that the sensor-reader byte path goes through it.
 """
 
@@ -16,7 +16,7 @@ import pytest
 
 pytest.importorskip("obstore")
 
-import geopatcher.objstore as shared_pool
+import geocloud.store as shared_pool
 
 from geoproducts._src import base
 
@@ -36,7 +36,7 @@ class _RecordingStore:
         return b"x" * length
 
 
-def test_reader_byte_path_uses_geopatcher_object_key(monkeypatch):
+def test_reader_byte_path_uses_the_shared_object_key(monkeypatch):
     calls: list[str] = []
     real = shared_pool.object_key
 

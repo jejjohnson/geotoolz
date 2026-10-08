@@ -18,14 +18,7 @@ import numpy as np
 import pytest
 from _helpers import ArrayField
 
-from geopatcher import (
-    AsyncSpatialPatcher,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import AsyncSpatialPatcher, SpatialPatcher, spatial
 from geopatcher._src.spatial import patcher as patcher_module
 
 
@@ -60,10 +53,10 @@ def _field() -> _AsyncArrayField:
 
 
 _PATCHER_KW: dict[str, Any] = {
-    "geometry": SpatialRectangular(size=(8, 8)),
-    "sampler": SpatialRegularStride(step=8),
-    "window": SpatialBoxcar(),
-    "aggregation": SpatialOverlapAdd(),
+    "geometry": spatial.geometry.Rectangular(size=(8, 8)),
+    "sampler": spatial.sampler.RegularStride(step=8),
+    "window": spatial.window.Boxcar(),
+    "aggregation": spatial.aggregation.OverlapAdd(),
 }
 
 PATCHERS = pytest.mark.parametrize(

@@ -50,22 +50,22 @@ from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches, SpatialT
 field = gp.RasterField(scene)          # scene: GeoTensor or RasterioReader
 
 patcher = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(256, 256)),
-    sampler     = gp.SpatialRegularStride(step=(192, 192)),   # 64 px overlap
+    geometry    = gp.spatial.geometry.Rectangular(size=(256, 256)),
+    sampler     = gp.spatial.sampler.RegularStride(step=(192, 192)),   # 64 px overlap
     window      = SpatialTriangular(width=32),                # feather ramp
-    aggregation = gp.SpatialOverlapAdd(),
+    aggregation = gp.spatial.aggregation.OverlapAdd(),
 )
 
 pipe = Sequential([
     GridSampler(patcher=patcher),
     ApplyToChips(operator=cloud_segmentation_model),   # any Operator, e.g. gz.learn.ModelOp
-    MergePatches(aggregation=gp.SpatialOverlapAdd(), domain=field.domain),
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
 prediction = pipe(field)
 ```
 
-Swap `SpatialTriangular` for `gp.SpatialHann` / `gp.SpatialTukey` for
-smoother tapers, or use `gp.SpatialBoxcar` with non-overlapping strides
+Swap `SpatialTriangular` for `gp.spatial.window.Hann` / `gp.spatial.window.Tukey` for
+smoother tapers, or use `gp.spatial.window.Boxcar` with non-overlapping strides
 for exact tiling.
 
 ## Training: label-aware chip sampling
@@ -116,15 +116,15 @@ sampling axes live upstream in `geopatcher`:
 ```python
 # Chips centred along a track, resampled to a fixed along-track spacing.
 patcher = gp.SpatialPatcher(
-    geometry    = gp.SpatialRectangular(size=(64, 64)),
-    sampler     = gp.SpatialAlongTrack(track=track_xy, spacing=5_000.0),
-    window      = gp.SpatialBoxcar(),
-    aggregation = gp.SpatialMean(),
+    geometry    = gp.spatial.geometry.Rectangular(size=(64, 64)),
+    sampler     = gp.spatial.sampler.AlongTrack(track=track_xy, spacing=5_000.0),
+    window      = gp.spatial.window.Boxcar(),
+    aggregation = gp.spatial.aggregation.Mean(),
 )
 chips = list(patcher.split(field))
 
 # Raster values at scattered points — nearest or bilinear.
-domain = gp.PointDomain(coords=points_xy, kdtree=tree, interp="bilinear")
+domain = gp.fields.PointDomain(coords=points_xy, kdtree=tree, interp="bilinear")
 values = domain.sample(scene)             # (N,) or (bands, N)
 ```
 

@@ -8,21 +8,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from geopatcher import (
-    Patch,
-    RasterField,
-    SpatialBoxcar,
-    SpatialMeanStd,
-    SpatialMedian,
-    SpatialMinMax,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRandom,
-    SpatialRectangular,
-    SpatialRegularStride,
-    get_strict,
-    set_strict,
-)
+from geopatcher import Patch, RasterField, SpatialPatcher, spatial
+from geopatcher.observe import get_strict, set_strict
 
 
 @pytest.fixture
@@ -33,17 +20,17 @@ def field(raster_field_factory) -> RasterField:
 @pytest.fixture
 def patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4)),
-        sampler=SpatialRegularStride(step=4),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4)),
+        sampler=spatial.sampler.RegularStride(step=4),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
 def test_reduce_mean_std_matches_numpy(
     patcher: SpatialPatcher, field: RasterField
 ) -> None:
-    stats = patcher.reduce(field, agg=SpatialMeanStd())
+    stats = patcher.reduce(field, agg=spatial.aggregation.MeanStd())
     data = np.asarray(field.reader)
 
     assert stats["mean"] == pytest.approx(float(np.mean(data)))
@@ -53,7 +40,7 @@ def test_reduce_mean_std_matches_numpy(
 def test_reduce_min_max_matches_numpy(
     patcher: SpatialPatcher, field: RasterField
 ) -> None:
-    stats = patcher.reduce(field, agg=SpatialMinMax())
+    stats = patcher.reduce(field, agg=spatial.aggregation.MinMax())
     data = np.asarray(field.reader)
 
     assert stats == {"min": float(np.min(data)), "max": float(np.max(data))}
@@ -64,7 +51,7 @@ def test_two_pass_applies_global_stats(
 ) -> None:
     out = patcher.two_pass(
         field,
-        reduce_with=SpatialMeanStd(),
+        reduce_with=spatial.aggregation.MeanStd(),
         apply=lambda data, stats: (np.asarray(data) - stats["mean"]) / stats["std"],
     )
 
@@ -121,7 +108,7 @@ def test_reduce_dispatches_hooks_for_every_patch(
 ) -> None:
     hook = _Recorder()
 
-    patcher.reduce(field, SpatialMinMax(), hooks=[hook])
+    patcher.reduce(field, spatial.aggregation.MinMax(), hooks=[hook])
 
     done = [anchor for kind, anchor in hook.events if kind == "patch_done"]
     assert done == patcher.anchors(field)
@@ -133,15 +120,15 @@ def test_reduce_dispatches_hooks_for_every_patch(
 
 def test_reduce_applies_on_error_skip(field: RasterField) -> None:
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4)),
-        sampler=SpatialRegularStride(step=4),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4)),
+        sampler=spatial.sampler.RegularStride(step=4),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
         on_error="skip",
     )
     flaky = _FailingField(field, bad=(12, 12))  # holds the global max
 
-    stats = patcher.reduce(flaky, SpatialMinMax())
+    stats = patcher.reduce(flaky, spatial.aggregation.MinMax())
 
     data = np.asarray(field.reader).copy()
     data[12:, 12:] = np.nan  # the skipped tile
@@ -157,7 +144,9 @@ def test_reduce_honours_journal(patcher: SpatialPatcher, field: RasterField) -> 
             return anchor in done
 
     hook = _Recorder()
-    patcher.reduce(field, SpatialMinMax(), hooks=[hook], journal=_Journal())
+    patcher.reduce(
+        field, spatial.aggregation.MinMax(), hooks=[hook], journal=_Journal()
+    )
 
     seen = {anchor for kind, anchor in hook.events if kind == "patch_done"}
     assert seen == set(patcher.anchors(field)) - done
@@ -171,10 +160,12 @@ def test_reduce_and_two_pass_release_backpressure(
     results: dict[str, Any] = {}
 
     def run() -> None:
-        results["reduce"] = patcher.reduce(field, SpatialMinMax(), max_in_flight=1)
+        results["reduce"] = patcher.reduce(
+            field, spatial.aggregation.MinMax(), max_in_flight=1
+        )
         results["two_pass"] = patcher.two_pass(
             field,
-            reduce_with=SpatialMeanStd(),
+            reduce_with=spatial.aggregation.MeanStd(),
             apply=lambda data, stats: np.asarray(data) - stats["mean"],
             max_in_flight=1,
             prefetch=2,
@@ -203,7 +194,7 @@ def test_two_pass_maps_patches_with_patch_with_data(
 
     patcher.two_pass(
         field,
-        reduce_with=SpatialMeanStd(),
+        reduce_with=spatial.aggregation.MeanStd(),
         apply=lambda data, stats: np.asarray(data) - stats["mean"],
     )
 
@@ -214,16 +205,16 @@ def test_two_pass_places_both_passes_on_one_anchor_draw(field: RasterField) -> N
     # An unseeded sampler re-draws on every `anchors()` call; both passes
     # must still see the same anchors (drawn once).
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4)),
-        sampler=SpatialRandom(n_samples=6),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4)),
+        sampler=spatial.sampler.Random(n_samples=6),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     hook = _Recorder()
 
     patcher.two_pass(
         field,
-        reduce_with=SpatialMinMax(),
+        reduce_with=spatial.aggregation.MinMax(),
         apply=lambda data, stats: data,
         hooks=[hook],
     )
@@ -239,7 +230,7 @@ def test_reduce_runs_the_strict_streaming_check(
     original = get_strict()
     set_strict(True)
     try:
-        with pytest.raises(RuntimeError, match="SpatialMedian"):
-            patcher.reduce(field, SpatialMedian())
+        with pytest.raises(RuntimeError, match="Median has streaming_safe"):
+            patcher.reduce(field, spatial.aggregation.Median())
     finally:
         set_strict(original)

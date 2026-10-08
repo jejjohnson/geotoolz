@@ -129,10 +129,10 @@ def cross_crs_catalog(tmp_path: Path, utm29_tile_factory) -> InMemoryGeoCatalog:
 
 def _patcher() -> geopatcher.SpatialPatcher:
     return geopatcher.SpatialPatcher(
-        geometry=geopatcher.SpatialRectangular(size=(8, 8), boundary="pad"),
-        sampler=geopatcher.SpatialRegularStride(step=8),
-        window=geopatcher.SpatialBoxcar(),
-        aggregation=geopatcher.SpatialOverlapAdd(),
+        geometry=geopatcher.spatial.geometry.Rectangular(size=(8, 8), boundary="pad"),
+        sampler=geopatcher.spatial.sampler.RegularStride(step=8),
+        window=geopatcher.spatial.window.Boxcar(),
+        aggregation=geopatcher.spatial.aggregation.OverlapAdd(),
     )
 
 

@@ -11,24 +11,8 @@ import rasterio
 from georeader.geotensor import GeoTensor
 from rasterio.windows import Window
 
-from geopatcher import (
-    Patch,
-    PatchJournal,
-    RasterField,
-    SpatialApproxCardinality,
-    SpatialApproxMode,
-    SpatialApproxQuantile,
-    SpatialBoxcar,
-    SpatialExplicit,
-    SpatialHann,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-    SpatialReservoir,
-    SpatialStreamingHistogram,
-    normalize_anchor,
-)
+from geopatcher import Patch, RasterField, SpatialPatcher, spatial
+from geopatcher.observe import PatchJournal, normalize_anchor
 
 
 def _patch(values: np.ndarray) -> Patch:
@@ -90,10 +74,10 @@ def test_patch_journal_persists_and_split_skips_completed(
     tmp_path: Path, field: RasterField
 ) -> None:
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(2, 2)),
-        sampler=SpatialRegularStride(step=2),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(2, 2)),
+        sampler=spatial.sampler.RegularStride(step=2),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     journal_path = tmp_path / "journal.jsonl"
     journal = PatchJournal(str(journal_path))
@@ -123,12 +107,14 @@ def test_journal_numpy_anchors(tmp_path: Path, field: RasterField) -> None:
     assert reopened.completed() == [[0, 0], [0, 2]]
     assert reopened.has(np.array([0, 2]))
 
-    # `SpatialExplicit(anchors_=np.argwhere(...))` yields ndarray rows.
+    # `spatial.sampler.Explicit(anchors_=np.argwhere(...))` yields ndarray rows.
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(2, 2)),
-        sampler=SpatialExplicit(anchors_=np.argwhere(np.ones((2, 2), bool)) * 2),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(2, 2)),
+        sampler=spatial.sampler.Explicit(
+            anchors_=np.argwhere(np.ones((2, 2), bool)) * 2
+        ),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     done = []
     for patch in patcher.split(field, journal=reopened):
@@ -154,10 +140,10 @@ def test_normalize_anchor_rejects_unjsonable_values() -> None:
 
 def test_split_rejects_patch_larger_than_byte_budget(field: RasterField) -> None:
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(2, 2)),
-        sampler=SpatialRegularStride(step=2),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(2, 2)),
+        sampler=spatial.sampler.RegularStride(step=2),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
     with pytest.raises(ValueError, match="exceeding max_in_flight_bytes"):
         next(patcher.split(field, max_in_flight_bytes=1))
@@ -166,11 +152,11 @@ def test_split_rejects_patch_larger_than_byte_budget(field: RasterField) -> None
 def test_sketch_aggregations_finalize_streaming_summaries() -> None:
     patch = _patch(np.array([[1, 2, 2, 3, 4, 5, 100]], dtype=np.float64))
 
-    quantile = SpatialApproxQuantile(q=[0.5], k=32).merge([patch], None)
-    cardinality = SpatialApproxCardinality(p=8).merge([patch], None)
-    mode = SpatialApproxMode(k=3).merge([patch], None)
-    histogram = SpatialStreamingHistogram(bins=3).merge([patch], None)
-    reservoir = SpatialReservoir(k=4, seed=0).merge([patch], None)
+    quantile = spatial.aggregation.ApproxQuantile(q=[0.5], k=32).merge([patch], None)
+    cardinality = spatial.aggregation.ApproxCardinality(p=8).merge([patch], None)
+    mode = spatial.aggregation.ApproxMode(k=3).merge([patch], None)
+    histogram = spatial.aggregation.StreamingHistogram(bins=3).merge([patch], None)
+    reservoir = spatial.aggregation.Reservoir(k=4, seed=0).merge([patch], None)
 
     assert quantile["0.5"] == pytest.approx(3.0)
     assert cardinality == pytest.approx(6, rel=0.2)
@@ -180,8 +166,8 @@ def test_sketch_aggregations_finalize_streaming_summaries() -> None:
 
 
 def test_hyperloglog_sketches_merge_disjoint_sets() -> None:
-    left = SpatialApproxCardinality(p=8)
-    right = SpatialApproxCardinality(p=8)
+    left = spatial.aggregation.ApproxCardinality(p=8)
+    right = spatial.aggregation.ApproxCardinality(p=8)
     left.update(_patch(np.arange(50)))
     right.update(_patch(np.arange(50, 100)))
 
@@ -200,30 +186,33 @@ def stitch_field() -> RasterField:
     return RasterField(gt)
 
 
-def _stitch_patcher(aggregation: SpatialOverlapAdd) -> SpatialPatcher:
+def _stitch_patcher(aggregation: spatial.aggregation.OverlapAdd) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=8),
-        window=SpatialBoxcar(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=8),
+        window=spatial.window.Boxcar(),
         aggregation=aggregation,
     )
 
 
 class TestCogWriter:
-    """`SpatialOverlapAdd(writer="cog")` — the COG aggregation target (gh #15)."""
+    """`spatial.aggregation.OverlapAdd(writer="cog")` — the COG aggregation target (gh
+    #15)."""
 
     def test_roundtrip_matches_in_memory_merge(
         self, stitch_field: RasterField, tmp_path: Path
     ) -> None:
         pytest.importorskip("zarr")  # streams via a scratch zarr store
         target = str(tmp_path / "out.tif")
-        agg = SpatialOverlapAdd(streaming=True, target_path=target, writer="cog")
+        agg = spatial.aggregation.OverlapAdd(
+            streaming=True, target_path=target, writer="cog"
+        )
         patcher = _stitch_patcher(agg)
         patches = list(patcher.split(stitch_field))
         out_path = patcher.merge(patches, stitch_field.domain)
         assert out_path == target
 
-        reference = SpatialOverlapAdd().merge(patches, stitch_field.domain)
+        reference = spatial.aggregation.OverlapAdd().merge(patches, stitch_field.domain)
         with rasterio.open(target) as src:
             assert src.count == 1
             assert src.profile["tiled"]
@@ -236,7 +225,7 @@ class TestCogWriter:
     ) -> None:
         pytest.importorskip("zarr")  # streams via a scratch zarr store
         target = str(tmp_path / "out.tif")
-        agg = SpatialOverlapAdd(
+        agg = spatial.aggregation.OverlapAdd(
             streaming=True,
             target_path=target,
             writer="cog",
@@ -256,7 +245,9 @@ class TestCogWriter:
             values=data, transform=rasterio.Affine.identity(), crs="EPSG:32630"
         )
         patch = Patch(data=data, anchor=(0, 0), indices=Window(0, 0, 8, 8))
-        agg = SpatialOverlapAdd(streaming=True, target_path=target, writer="cog")
+        agg = spatial.aggregation.OverlapAdd(
+            streaming=True, target_path=target, writer="cog"
+        )
         assert agg.merge([patch], domain) == target
         with rasterio.open(target) as src:
             assert src.count == 3
@@ -266,7 +257,7 @@ class TestCogWriter:
         class _Domain:
             shape = (2, 2, 2, 2)
 
-        agg = SpatialOverlapAdd(
+        agg = spatial.aggregation.OverlapAdd(
             streaming=True, target_path=str(tmp_path / "x.tif"), writer="cog"
         )
         with pytest.raises(ValueError, match="2-D domain or a 3-D"):
@@ -285,15 +276,15 @@ class TestCogWriter:
             )
         )
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=8),
-            window=SpatialHann(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=8),
+            window=spatial.window.Hann(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         patches = [p.with_data(np.asarray(p.data.values)) for p in patcher.split(field)]
-        reference = SpatialOverlapAdd().merge(patches, field.domain)
+        reference = spatial.aggregation.OverlapAdd().merge(patches, field.domain)
         target = str(tmp_path / "out.tif")
-        agg = SpatialOverlapAdd(
+        agg = spatial.aggregation.OverlapAdd(
             streaming=True, target_path=target, writer="cog", cog={"blocksize": 16}
         )
         assert agg.merge(patches, field.domain) == target
@@ -316,7 +307,9 @@ class TestCogWriter:
     def test_cog_not_overwritten(self, tmp_path: Path) -> None:
         target = tmp_path / "out.tif"
         target.write_bytes(b"precious")
-        agg = SpatialOverlapAdd(streaming=True, target_path=str(target), writer="cog")
+        agg = spatial.aggregation.OverlapAdd(
+            streaming=True, target_path=str(target), writer="cog"
+        )
         domain = GeoTensor(
             values=np.zeros((8, 8)), transform=rasterio.Affine.identity(), crs=None
         )
@@ -326,13 +319,13 @@ class TestCogWriter:
 
 
 class TestZarrSharding:
-    """`SpatialOverlapAdd(shard_shape=...)` — zarr v3 sharding (gh #14)."""
+    """`spatial.aggregation.OverlapAdd(shard_shape=...)` — zarr v3 sharding (gh #14)."""
 
     def test_sharded_output_matches_in_memory_merge(
         self, stitch_field: RasterField, tmp_path: Path
     ) -> None:
         zarr = pytest.importorskip("zarr")
-        agg = SpatialOverlapAdd(
+        agg = spatial.aggregation.OverlapAdd(
             streaming=True,
             target_path=str(tmp_path),
             chunks=(8, 8),
@@ -342,7 +335,7 @@ class TestZarrSharding:
         patches = list(patcher.split(stitch_field))
         result = patcher.merge(patches, stitch_field.domain)
 
-        reference = SpatialOverlapAdd().merge(patches, stitch_field.domain)
+        reference = spatial.aggregation.OverlapAdd().merge(patches, stitch_field.domain)
         np.testing.assert_allclose(np.asarray(result[:]), reference, rtol=1e-6)
 
         # Fresh-process read: the store on disk is valid sharded zarr.
@@ -355,14 +348,16 @@ class TestZarrSharding:
         self, stitch_field: RasterField, tmp_path: Path
     ) -> None:
         pytest.importorskip("zarr")
-        patches = list(_stitch_patcher(SpatialOverlapAdd()).split(stitch_field))
-        sharded = SpatialOverlapAdd(
+        patches = list(
+            _stitch_patcher(spatial.aggregation.OverlapAdd()).split(stitch_field)
+        )
+        sharded = spatial.aggregation.OverlapAdd(
             streaming=True,
             target_path=str(tmp_path / "sharded"),
             chunks=(8, 8),
             shard_shape=(16, 16),
         ).merge(patches, stitch_field.domain)
-        plain = SpatialOverlapAdd(
+        plain = spatial.aggregation.OverlapAdd(
             streaming=True,
             target_path=str(tmp_path / "plain"),
             chunks=(8, 8),

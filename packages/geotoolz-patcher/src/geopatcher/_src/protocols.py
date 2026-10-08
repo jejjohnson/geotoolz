@@ -2,8 +2,8 @@
 
 Two intentionally tiny Protocols. `Field` is "something the Patcher can
 read from"; `Domain` is its I/O-free metadata twin — bounds, CRS, shape
-— consulted by `SpatialSampler.anchors` and `SpatialGeometry.neighborhood`
-without triggering any reads.
+— consulted by `spatial.sampler.Sampler.anchors` and
+`spatial.geometry.Geometry.neighborhood` without triggering any reads.
 
 For rasters, the raster-side surface already exists in
 `georeader.abstract_reader` as `GeoData` / `AsyncGeoData` / `GeoDataBase`.
@@ -23,7 +23,7 @@ class Domain(Protocol):
 
     Concrete subclasses (`RasterDomain`, `GridDomain`, `VectorDomain`,
     `PointDomain`) carry the backend-specific shape that a
-    `SpatialGeometry.neighborhood(domain, anchor)` dispatch needs.
+    `spatial.geometry.Geometry.neighborhood(domain, anchor)` dispatch needs.
     """
 
     @property
@@ -39,7 +39,7 @@ class Field(Protocol):
 
     Three operations:
     - ``domain`` exposes the I/O-free metadata view used by the
-      `SpatialSampler` and `SpatialGeometry`.
+      `spatial.sampler.Sampler` and `spatial.geometry.Geometry`.
     - ``select(indexer)`` reads a slice of the field. The shape of
       ``indexer`` is decided by ``domain`` (a ``rasterio.windows.Window``
       for `RasterDomain`, a ``dict[str, slice]`` for `GridDomain`, a list
@@ -47,7 +47,7 @@ class Field(Protocol):
     - ``with_data(array)`` reconstructs a field-shaped value (the
       source's georeferencing, nodata and attrs around ``array``) from
       an array on the domain grid. Aggregations never call it —
-      `SpatialAggregation.merge` and `SpatialPatcher.merge` return the
+      `spatial.aggregation.Aggregation.merge` and `SpatialPatcher.merge` return the
       raw output (usually a bare ``np.ndarray``); `SpatialPatcher.merge_to_field`
       and `SpatialPatcher.merge_to_xarray` call it to rebuild a global
       field (ADR-007).

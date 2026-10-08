@@ -3,7 +3,7 @@
 Two independent levels:
 
 - Level 1: ``crs=`` on the coordinate-consuming samplers
-  (`SpatialAlongTrack`, `SpatialExplicitCoords`) reprojects anchors to
+  (`spatial.sampler.AlongTrack`, `spatial.sampler.ExplicitCoords`) reprojects anchors to
   the domain CRS before the pixel mapping.
 - Level 2: `ReprojectingRasterField` presents the destination grid as
   its domain, so every axis works on the reprojected grid unchanged.
@@ -18,17 +18,8 @@ import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
 
-from geopatcher import (
-    RasterField,
-    ReprojectingRasterField,
-    SpatialAlongTrack,
-    SpatialBoxcar,
-    SpatialExplicitCoords,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import RasterField, SpatialPatcher, spatial
+from geopatcher.fields import ReprojectingRasterField
 
 
 pyproj = pytest.importorskip("pyproj")
@@ -55,21 +46,23 @@ def _pixel_center_lonlat(row: int, col: int) -> tuple[float, float]:
 class TestAnchorReprojection:
     def test_lonlat_coord_lands_on_hand_computed_pixel(self) -> None:
         field = _utm_field()
-        geom = SpatialRectangular(size=(8, 8))
+        geom = spatial.geometry.Rectangular(size=(8, 8))
         # A lon/lat that is exactly the centre of pixel (50, 50).
         lon, lat = _pixel_center_lonlat(50, 50)
-        sampler = SpatialExplicitCoords(coords=[(lon, lat)], crs="EPSG:4326")
+        sampler = spatial.sampler.ExplicitCoords(coords=[(lon, lat)], crs="EPSG:4326")
         anchors = list(sampler.anchors(field.domain, geom))
         # Centred UL for a pixel at (50, 50) with an 8x8 patch → (46, 46).
         assert anchors == [(46, 46)]
 
     def test_crs_none_and_equal_are_noops(self) -> None:
         field = _utm_field()
-        geom = SpatialRectangular(size=(8, 8))
+        geom = spatial.geometry.Rectangular(size=(8, 8))
         coords = [(500_505.0, 4_599_495.0), (500_105.0, 4_599_895.0)]  # UTM already
-        none = list(SpatialExplicitCoords(coords=coords).anchors(field.domain, geom))
+        none = list(
+            spatial.sampler.ExplicitCoords(coords=coords).anchors(field.domain, geom)
+        )
         same = list(
-            SpatialExplicitCoords(coords=coords, crs=_UTM_CRS).anchors(
+            spatial.sampler.ExplicitCoords(coords=coords, crs=_UTM_CRS).anchors(
                 field.domain, geom
             )
         )
@@ -78,19 +71,21 @@ class TestAnchorReprojection:
 
     def test_alongtrack_crs_matches_manual_transform(self) -> None:
         field = _utm_field()
-        geom = SpatialRectangular(size=(8, 8))
+        geom = spatial.geometry.Rectangular(size=(8, 8))
         # A short lon/lat track over the UTM field.
         track_lonlat = [_pixel_center_lonlat(r, r) for r in (20, 40, 60)]
         to_utm = pyproj.Transformer.from_crs("EPSG:4326", _UTM_CRS, always_xy=True)
         track_utm = [tuple(to_utm.transform(lon, lat)) for lon, lat in track_lonlat]
 
         with_crs = list(
-            SpatialAlongTrack(track_lonlat, spacing=50.0, crs="EPSG:4326").anchors(
-                field.domain, geom
-            )
+            spatial.sampler.AlongTrack(
+                track_lonlat, spacing=50.0, crs="EPSG:4326"
+            ).anchors(field.domain, geom)
         )
         manual = list(
-            SpatialAlongTrack(track_utm, spacing=50.0).anchors(field.domain, geom)
+            spatial.sampler.AlongTrack(track_utm, spacing=50.0).anchors(
+                field.domain, geom
+            )
         )
         # Spacing (50 m) is applied in domain units *after* the transform,
         # so both paths place identical anchors.
@@ -98,44 +93,49 @@ class TestAnchorReprojection:
         assert with_crs
 
     def test_config_records_crs(self) -> None:
-        cfg = SpatialExplicitCoords(coords=[(0.0, 0.0)], crs="EPSG:4326").get_config()
+        cfg = spatial.sampler.ExplicitCoords(
+            coords=[(0.0, 0.0)], crs="EPSG:4326"
+        ).get_config()
         assert cfg["crs"] == "EPSG:4326"
         assert cfg["coords"] == [[0.0, 0.0]]
-        assert SpatialAlongTrack([(0.0, 0.0), (1.0, 1.0)]).get_config()["crs"] is None
+        assert (
+            spatial.sampler.AlongTrack([(0.0, 0.0), (1.0, 1.0)]).get_config()["crs"]
+            is None
+        )
 
 
 class TestPolarDatelineGuard:
-    def _sampler(self, guard: str) -> SpatialExplicitCoords:
+    def _sampler(self, guard: str) -> spatial.sampler.ExplicitCoords:
         # Geographic coords near the pole, over a UTM (non-geographic) domain
         # so the reprojection path — and its guard — actually runs.
-        return SpatialExplicitCoords(
+        return spatial.sampler.ExplicitCoords(
             coords=[(0.0, 85.0)], crs="EPSG:4326", polar_guard=guard
         )
 
     def test_warns_beyond_80_degrees(self) -> None:
         field = _utm_field()
-        geom = SpatialRectangular(size=(8, 8))
+        geom = spatial.geometry.Rectangular(size=(8, 8))
         with pytest.warns(RuntimeWarning, match="latitude beyond"):
             list(self._sampler("warn").anchors(field.domain, geom))
 
     def test_raise_mode_errors(self) -> None:
         field = _utm_field()
-        geom = SpatialRectangular(size=(8, 8))
+        geom = spatial.geometry.Rectangular(size=(8, 8))
         with pytest.raises(ValueError, match="±80"):
             list(self._sampler("raise").anchors(field.domain, geom))
 
     def test_ignore_mode_is_silent(self) -> None:
         field = _utm_field()
-        geom = SpatialRectangular(size=(8, 8))
+        geom = spatial.geometry.Rectangular(size=(8, 8))
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             list(self._sampler("ignore").anchors(field.domain, geom))
 
     def test_antimeridian_track_warns(self) -> None:
         field = _utm_field()
-        geom = SpatialRectangular(size=(8, 8))
+        geom = spatial.geometry.Rectangular(size=(8, 8))
         track = [(179.5, 0.5), (-179.5, 0.5)]  # a step across ±180°
-        sampler = SpatialAlongTrack(track, crs="EPSG:4326")
+        sampler = spatial.sampler.AlongTrack(track, crs="EPSG:4326")
         with pytest.warns(RuntimeWarning, match="antimeridian"):
             list(sampler.anchors(field.domain, geom))
 
@@ -143,8 +143,8 @@ class TestPolarDatelineGuard:
         # #187: an event catalogue holding 179.5 and -179.5 is not a track
         # crossing the dateline; consecutive differences mean nothing.
         field = _utm_field()
-        geom = SpatialRectangular(size=(8, 8))
-        sampler = SpatialExplicitCoords(
+        geom = spatial.geometry.Rectangular(size=(8, 8))
+        sampler = spatial.sampler.ExplicitCoords(
             coords=[(179.5, 0.5), (-179.5, 0.5)], crs="EPSG:4326"
         )
         with warnings.catch_warnings():
@@ -163,14 +163,14 @@ class TestPolarDatelineGuard:
                 crs="EPSG:3413",
             )
         )
-        geom = SpatialRectangular(size=(2, 2))
+        geom = spatial.geometry.Rectangular(size=(2, 2))
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             list(self._sampler("warn").anchors(polar.domain, geom))
 
     def test_invalid_guard_rejected(self) -> None:
         with pytest.raises(ValueError, match="invalid polar_guard"):
-            SpatialExplicitCoords(coords=[(0.0, 0.0)], polar_guard="mirror")
+            spatial.sampler.ExplicitCoords(coords=[(0.0, 0.0)], polar_guard="mirror")
 
 
 class TestReprojectingRasterField:
@@ -197,10 +197,10 @@ class TestReprojectingRasterField:
         reader = _utm_field().reader
         field = ReprojectingRasterField(reader, dst_crs="EPSG:3857")
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         chips = list(patcher.split(field))
         assert chips
@@ -212,10 +212,10 @@ class TestReprojectingRasterField:
         reader = _utm_field().reader
         field = ReprojectingRasterField(reader, dst_crs="EPSG:3857")
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(16, 16)),
-            sampler=SpatialRegularStride(step=16),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(16, 16)),
+            sampler=spatial.sampler.RegularStride(step=16),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         merged = patcher.merge((p for p in patcher.split(field)), field.domain)
         assert np.asarray(merged).shape[-2:] == field.domain.shape
@@ -238,10 +238,10 @@ def _utm_3d_geotensor(n: int = 100, bands: int = 2) -> GeoTensor:
 
 def _stride_patcher(size: int = 16) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(size, size)),
-        sampler=SpatialRegularStride(step=size),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(size, size)),
+        sampler=spatial.sampler.RegularStride(step=size),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 

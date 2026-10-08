@@ -16,14 +16,7 @@ import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
 
-from geopatcher import (
-    RasterField,
-    SpatialBoxcar,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import RasterField, SpatialPatcher, spatial
 from geopatcher._src.patch import Patch, SpatioTemporalPatch, TemporalPatch
 
 
@@ -167,10 +160,10 @@ class TestSplitBackpressureIntegration:
         of hanging the suite.
         """
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(2, 2)),
-            sampler=SpatialRegularStride(step=2),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(2, 2)),
+            sampler=spatial.sampler.RegularStride(step=2),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         field = self._field()
         seen: list[int] = []
@@ -188,10 +181,10 @@ class TestSplitBackpressureIntegration:
     def test_no_release_or_finalizer_without_limits(self) -> None:
         """No limit configured → no measurement, release closure or finalizer."""
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(2, 2)),
-            sampler=SpatialRegularStride(step=2),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(2, 2)),
+            sampler=spatial.sampler.RegularStride(step=2),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         patches = list(patcher.split(self._field()))
         assert len(patches) == 16
@@ -201,10 +194,10 @@ class TestSplitBackpressureIntegration:
 
     def test_explicit_close_releases_slot_immediately(self) -> None:
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(2, 2)),
-            sampler=SpatialRegularStride(step=2),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(2, 2)),
+            sampler=spatial.sampler.RegularStride(step=2),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         field = self._field()
         count = 0

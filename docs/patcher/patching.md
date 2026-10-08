@@ -17,10 +17,10 @@ Three Patcher classes compose the four-axis framework:
 
 | Axis | Controls | Examples |
 |------|----------|----------|
-| **Geometry** | Shape + scale of the neighborhood (and the domain topology). | `SpatialRectangular`, `SpatialSphericalCap`, `SpatialKNNGraph`, `SpatialRadiusGraph`, `SpatialPolygonIntersection` |
-| **Sampler** | Where anchors are placed; overlap is emergent. | `SpatialRegularStride`, `SpatialJitteredStride`, `SpatialRandom`, `SpatialPoissonDisk`, `SpatialExplicit`, `SpatialExplicitCoords`, `SpatialAlongTrack` |
-| **Window** | Boundary treatment (spectral leakage, edge artefacts). | `SpatialBoxcar`, `SpatialHann`, `SpatialTukey`, `SpatialGaussian`, `SpatialCustom` |
-| **Aggregation** | Local predictions → global field. | `SpatialOverlapAdd`, `SpatialMean`, `SpatialWeightedSum`, `SpatialInvVarWeightedMean`, `SpatialHardVote`, `SpatialByIndex`, … |
+| **Geometry** | Shape + scale of the neighborhood (and the domain topology). | `spatial.geometry.Rectangular`, `spatial.geometry.SphericalCap`, `spatial.geometry.KNNGraph`, `spatial.geometry.RadiusGraph`, `spatial.geometry.PolygonIntersection` |
+| **Sampler** | Where anchors are placed; overlap is emergent. | `spatial.sampler.RegularStride`, `spatial.sampler.JitteredStride`, `spatial.sampler.Random`, `spatial.sampler.PoissonDisk`, `spatial.sampler.Explicit`, `spatial.sampler.ExplicitCoords`, `spatial.sampler.AlongTrack` |
+| **Window** | Boundary treatment (spectral leakage, edge artefacts). | `spatial.window.Boxcar`, `spatial.window.Hann`, `spatial.window.Tukey`, `spatial.window.Gaussian`, `spatial.window.Custom` |
+| **Aggregation** | Local predictions → global field. | `spatial.aggregation.OverlapAdd`, `spatial.aggregation.Mean`, `spatial.aggregation.WeightedSum`, `spatial.aggregation.InvVarWeightedMean`, `spatial.aggregation.HardVote`, `spatial.aggregation.ByIndex`, … |
 
 The Patcher composes them and exposes a tiny surface:
 
@@ -36,44 +36,44 @@ with `list(...)` when convenient.
 
 ## Window convention
 
-`SpatialHann` and `SpatialTukey` are **periodic** (DFT-even) tapers —
+`spatial.window.Hann` and `spatial.window.Tukey` are **periodic** (DFT-even) tapers —
 per axis exactly `scipy.signal.windows.hann(n, sym=False)` /
 `tukey(n, alpha, sym=False)`, combined as an outer product:
 
 - **Hann is COLA at hop `N/2`.** `w[k] + w[k + N/2] = 1`, so with an even
   patch size and `step = size // 2`, every interior seam is covered at
-  full weight — even `SpatialOverlapAdd(normalize_by_window=False)`
+  full weight — even `spatial.aggregation.OverlapAdd(normalize_by_window=False)`
   reproduces a constant there. Other overlapping strides still
   reconstruct exactly under the default normalisation.
-- **`SpatialTukey(alpha=1.0)` is `SpatialHann`**, `alpha=0.0` is
-  `SpatialBoxcar`; Tukey is COLA at hop `N * (1 - alpha/2)`.
-- **Endpoints.** `w[0] = 0`, `w[-1] > 0`. Merged with `SpatialOverlapAdd`,
+- **`spatial.window.Tukey(alpha=1.0)` is `spatial.window.Hann`**, `alpha=0.0` is
+  `spatial.window.Boxcar`; Tukey is COLA at hop `N * (1 - alpha/2)`.
+- **Endpoints.** `w[0] = 0`, `w[-1] > 0`. Merged with `spatial.aggregation.OverlapAdd`,
   the domain's **first row and first column** (the leading border ring)
   get zero accumulated weight, because regular samplers start at anchor 0
   and the only chip covering them puts its zero sample there; those cells
   come back as the aggregation's `fill_value` — NaN by default, or e.g.
-  `SpatialOverlapAdd(fill_value=domain.fill_value_default)` for the
+  `spatial.aggregation.OverlapAdd(fill_value=domain.fill_value_default)` for the
   domain's nodata — never as a value that looks like data (see
   [Aggregation fill and ties](#aggregation-fill-and-ties)). `"pad"` /
   `"reflect"` only extend the trailing
   (bottom/right) edge, so they do not remove this ring. If it matters,
-  crop the 1-pixel ring, use `SpatialGaussian` (never zero) or
-  `SpatialBoxcar`, or supply a `SpatialCustom` taper.
+  crop the 1-pixel ring, use `spatial.window.Gaussian` (never zero) or
+  `spatial.window.Boxcar`, or supply a `spatial.window.Custom` taper.
 - **`step == size` with Hann/Tukey** leaves every chip's first row and
   column at zero weight (the `fill_value` seams) — tapers need overlapping
   chips; use
-  `SpatialBoxcar` for exact non-overlapping tiling.
+  `spatial.window.Boxcar` for exact non-overlapping tiling.
 - **Short axes.** An axis shorter than 3 samples cannot carry a taper and
   is boxcar (all ones) on that axis.
 
-`SpatialGaussian(sigma=...)` takes `sigma` as a **fraction of the patch
+`spatial.window.Gaussian(sigma=...)` takes `sigma` as a **fraction of the patch
 half-width** (std = `sigma * n / 2` pixels per axis), symmetric about the
 patch centre.
 
 ## Determinism (stochastic samplers)
 
-`SpatialRandom`, `SpatialJitteredStride`, `SpatialPoissonDisk`, and
-`TemporalRandom` accept a `seed: int | None`. The contract (issue jejjohnson/geopatcher#18,
+`spatial.sampler.Random`, `spatial.sampler.JitteredStride`, `spatial.sampler.PoissonDisk`, and
+`temporal.sampler.Random` accept a `seed: int | None`. The contract (issue jejjohnson/geopatcher#18,
 pinned by `tests/test_determinism.py`):
 
 | `seed` value | Behavior |
@@ -89,11 +89,11 @@ them deterministically.
 ## Boundary policy
 
 What happens when an anchor sits close enough to the edge that the
-neighborhood would overflow the domain? `SpatialRectangular` exposes
+neighborhood would overflow the domain? `spatial.geometry.Rectangular` exposes
 this as a first-class parameter (issue jejjohnson/geopatcher#19):
 
 ```python
-geom = SpatialRectangular(size=(256, 256), boundary="pad")
+geom = spatial.geometry.Rectangular(size=(256, 256), boundary="pad")
 ```
 
 | Mode | Behavior |
@@ -102,13 +102,13 @@ geom = SpatialRectangular(size=(256, 256), boundary="pad")
 | `"pad"` | Samplers also place the edge anchor — the first whose patch reaches the edge, never an extra one past it. The patch is the full geometry size, padded in the overflow region with the reader's nodata (or `pad_value`, which must be representable in the field's dtype). |
 | `"reflect"` | As `"pad"`, but the overflow region is mirror-padded from the in-domain interior (numpy `mode="reflect"`, repeated when the overflow exceeds the domain) — so a tapered window's trailing (bottom/right) flank lands on mirrored data rather than a constant fill. It does not reach the leading row/column (regular samplers start at anchor 0) — see [Window convention](#window-convention). Needs at least two cells on a padded axis. |
 | `"shrink"` | As `"pad"` for anchor placement, but the window is clipped to the domain on every side — a negative anchor included — so the patch is *smaller* at the edge. Weights crop to the same in-domain part. |
-| `"raise"` | As `"pad"` for anchor placement; `SpatialPatcher.split` raises a `ValueError` on the first overflowing window. Useful with `SpatialExplicit` when the caller wants strict edge handling. |
+| `"raise"` | As `"pad"` for anchor placement; `SpatialPatcher.split` raises a `ValueError` on the first overflowing window. Useful with `spatial.sampler.Explicit` when the caller wants strict edge handling. |
 
-Every mode survives `merge`: each dense aggregation (`SpatialOverlapAdd`
-in memory and streaming, `SpatialSum`, `SpatialMean`, `SpatialMax`, …)
+Every mode survives `merge`: each dense aggregation (`spatial.aggregation.OverlapAdd`
+in memory and streaming, `spatial.aggregation.Sum`, `spatial.aggregation.Mean`, `spatial.aggregation.Max`, …)
 crops a chip's data and weights to the in-domain part of its window, so
 padded or reflected cells are read for context but never written back.
-`SpatialRegularStride(check_full_scan=True)` only applies under `"drop"`
+`spatial.sampler.RegularStride(check_full_scan=True)` only applies under `"drop"`
 — the other modes cover the trailing edge themselves.
 
 `"pad"` and `"reflect"` are guaranteed by the patcher itself — the
@@ -121,10 +121,10 @@ This is **field-independent**: it works identically for `RasterField`, `RioXarra
 Set a specific constant fill with `pad_value`:
 
 ```python
-geom = SpatialRectangular(size=(256, 256), boundary="pad", pad_value=0.0)
+geom = spatial.geometry.Rectangular(size=(256, 256), boundary="pad", pad_value=0.0)
 ```
 
-`SpatialRectangular` honours the parameter on raster domains and on
+`spatial.geometry.Rectangular` honours the parameter on raster domains and on
 `GridDomain` (`XarrayField`, `DaskField`): grid chips are padded by dim
 name, with their coordinates continued past the edge at the edge
 spacing. Graph and polygon geometries always behave as if `"drop"`
@@ -138,18 +138,18 @@ independent levels:
 **Level 1 — anchor reprojection (cheap, metadata-only).** The
 coordinate-consuming samplers take a `crs=` for coordinates expressed in
 a CRS other than the domain's; they are reprojected to the domain CRS
-before the pixel mapping. `SpatialAlongTrack` resamples by `spacing` in
-*domain* units after the transform, and the new `SpatialExplicitCoords`
+before the pixel mapping. `spatial.sampler.AlongTrack` resamples by `spacing` in
+*domain* units after the transform, and the new `spatial.sampler.ExplicitCoords`
 centres a chip on each world coordinate:
 
 ```python
 # Event catalogue in lon/lat, imagery in UTM.
-sampler = gp.SpatialExplicitCoords(
+sampler = gp.spatial.sampler.ExplicitCoords(
     coords=list(zip(catalog.lon, catalog.lat)),
     crs="EPSG:4326",            # None ⇒ coords already in the domain CRS
 )
 # Ground track in lon/lat over a UTM field.
-sampler = gp.SpatialAlongTrack(track_lonlat, spacing=5_000.0, crs="EPSG:4326")
+sampler = gp.spatial.sampler.AlongTrack(track_lonlat, spacing=5_000.0, crs="EPSG:4326")
 ```
 
 A `polar_guard` (`"warn"` / `"raise"` / `"ignore"`) flags unreliable
@@ -162,7 +162,7 @@ geometry / aggregation works on the target grid unchanged and each chip
 is warped from the source:
 
 ```python
-field = gp.ReprojectingRasterField(reader, dst_crs="EPSG:3857", resolution=30.0)
+field = gp.fields.ReprojectingRasterField(reader, dst_crs="EPSG:3857", resolution=30.0)
 field.domain.crs                       # EPSG:3857 — samplers see the dst grid
 patches = list(patcher.split(field))   # chips are (*bands, H, W) in dst_crs
 ```
@@ -188,7 +188,7 @@ keyed by `sha256(field_id ‖ geometry+window config ‖ anchor)`: the second
 its `domain` metadata.
 
 ```python
-cache = gp.PatchCache("./.geopatcher_cache", max_bytes=20 * 2**30)
+cache = gp.run.PatchCache("./.geopatcher_cache", max_bytes=20 * 2**30)
 
 for patch in patcher.split(field, cache=cache):   # run 1: reads + cache fill
     out = my_op_v1(patch.data)
@@ -214,7 +214,7 @@ plugs into random access via `IndexedPatchView(patcher, field, cache=cache)`.
 - the *domain* — CRS, transform, shape and dtype (or a digest of the grid
   coordinates for `XarrayField`);
 - the reader's band selection (`indexes`) and boundless fill;
-- the adapter's own `cache_id()`: `ObstoreCogField` folds in its store /
+- the adapter's own `cache_id()`: `CogField` folds in its store /
   `path` (with an explicit `store=` the `url` is only a label) and
   `ifd_index`, `ReprojectingRasterField` its `dst_crs`, `resolution` and
   `resampling`. A custom `Field` can define `cache_id() -> str` the same way;
@@ -222,7 +222,7 @@ plugs into random access via `IndexedPatchView(patcher, field, cache=cache)`.
   could (a non-string or empty result raises `TypeError`).
 
 A plain `url` carries no version: an object overwritten in place is not
-detected. `ObstoreCogField` closes that gap with one `HEAD` per `split`
+detected. `CogField` closes that gap with one `HEAD` per `split`
 (the object's ETag, else size + last-modified); for other URL-backed
 fields, give them a `cache_id()` that includes a version, or `clear()`
 the cache after the remote data changes.
@@ -286,12 +286,12 @@ Mirror of the spatial side, with axes that encode time-specific properties
 
 | Axis | Controls | Examples |
 |------|----------|----------|
-| **Geometry** | Window shape (lookback, horizon, multi-scale, phase). | `TemporalFixedLookback`, `TemporalLookbackHorizon`, `TemporalMultiScale`, `TemporalPhaseWindow`, `TemporalStencilGeometry` |
-| **Sampler** | Anchor placement in time. | `TemporalRegularStride` (alias `TemporalCausalRolling`), `TemporalRandom`, `TemporalExplicit` (alias `TemporalEventTriggered`), `TemporalStencilSampler` |
-| **Window** | Temporal boundary treatment. | `TemporalCausalBoxcar`, `TemporalExponentialDecay`, `TemporalTaperedTukey`, `TemporalPeriodic` |
-| **Aggregation** | Time → time reconstruction. | `TemporalFold` (RNN-like state-passing), `TemporalMean`, `TemporalHierarchicalCombine`, `TemporalForecast` |
+| **Geometry** | Window shape (lookback, horizon, multi-scale, phase). | `temporal.geometry.FixedLookback`, `temporal.geometry.LookbackHorizon`, `temporal.geometry.MultiScale`, `temporal.geometry.PhaseWindow`, `temporal.geometry.StencilGeometry` |
+| **Sampler** | Anchor placement in time. | `temporal.sampler.RegularStride` (alias `temporal.sampler.RegularStride`), `temporal.sampler.Random`, `temporal.sampler.Explicit` (alias `temporal.sampler.Explicit`), `temporal.sampler.StencilSampler` |
+| **Window** | Temporal boundary treatment. | `temporal.window.CausalBoxcar`, `temporal.window.ExponentialDecay`, `temporal.window.TaperedTukey`, `temporal.window.Periodic` |
+| **Aggregation** | Time → time reconstruction. | `temporal.aggregation.Fold` (RNN-like state-passing), `temporal.aggregation.Mean`, `temporal.aggregation.HierarchicalCombine`, `temporal.aggregation.Forecast` |
 
-`TemporalFold` is the name for the RNN-like fold (renamed from the design's
+`temporal.aggregation.Fold` is the name for the RNN-like fold (renamed from the design's
 `Sequential` to avoid clashing with operator-graph `Sequential` types in
 downstream composition libraries).
 
@@ -302,18 +302,18 @@ a window that overflows the time axis:
 
 | `boundary` | Behaviour |
 |---|---|
-| `"drop"` (default) | The anchor yields no patch, so every emitted window is full length. `anchors()` / `n_anchors()` / `patch_anchors()` skip it too. `TemporalMultiScale` drops an anchor whose *longest* scale overflows; `TemporalPhaseWindow` drops each overflowing cycle slot. |
+| `"drop"` (default) | The anchor yields no patch, so every emitted window is full length. `anchors()` / `n_anchors()` / `patch_anchors()` skip it too. `temporal.geometry.MultiScale` drops an anchor whose *longest* scale overflows; `temporal.geometry.PhaseWindow` drops each overflowing cycle slot. |
 | `"shrink"` | The window is clipped to `[0, time_len)`, so edge windows are shorter. |
 | `"raise"` | `ValueError` naming the anchor and the window. |
 
-`TemporalPhaseWindow(period, phase_width)` returns one slot per cycle —
+`temporal.geometry.PhaseWindow(period, phase_width)` returns one slot per cycle —
 `[k·period + φ − w, k·period + φ + w + 1)` with `φ = anchor % period` —
 so each anchor yields one patch per cycle. Each `TemporalPatch` records
 its position among its anchor's windows as `window_index` (scale `k` of a
-`TemporalMultiScale`), which `TemporalHierarchicalCombine` keys on.
-`TemporalMean` is a running per-step sum / count over each patch's
+`temporal.geometry.MultiScale`), which `temporal.aggregation.HierarchicalCombine` keys on.
+`temporal.aggregation.Mean` is a running per-step sum / count over each patch's
 `indices` (NaN not counted, unreached steps get `fill_value`), and
-`TemporalForecast` locates the horizon from the anchor
+`temporal.aggregation.Forecast` locates the horizon from the anchor
 (`[anchor + 1, anchor + 1 + horizon)`), skipping windows that do not hold
 all of it.
 
@@ -340,7 +340,7 @@ time coordinate is the default `coord=` for stencil pipelines — and any
 array with a `shape` (numpy, dask, xarray, zarr) by slicing it. `coord=`
 is validated once per call (1-D, strictly increasing; evenly spaced for
 stencil components), so a stencil split is O(N) in the axis length.
-`TemporalRegularStride(check_full_scan=True)` raises
+`temporal.sampler.RegularStride(check_full_scan=True)` raises
 `IncompleteScanConfiguration` when the windows leave time steps uncovered.
 
 ## Spatiotemporal composition
@@ -389,8 +389,8 @@ library, not here; geopatcher itself has no operator-graph dependency.
 
 ## Streaming aggregations
 
-Every `SpatialAggregation` carries a `streaming_safe: ClassVar[bool]`. The
-canonical streaming-safe member is `SpatialOverlapAdd`, which accepts
+Every `spatial.aggregation.Aggregation` carries a `streaming_safe: ClassVar[bool]`. The
+canonical streaming-safe member is `spatial.aggregation.OverlapAdd`, which accepts
 `streaming=True, target_path=..., chunks=...` to accumulate into an
 on-disk [zarr](https://zarr.dev) store instead of RAM (or
 `writer="cog"` to finish as a Cloud-Optimized GeoTIFF). The exact streaming family
@@ -407,8 +407,8 @@ Every dense aggregation honours the same per-cell contract:
 
 - **Valid samples.** A sample counts only where it is not NaN, lies inside
   the domain (pad / reflect overhang is cropped) and lies inside the
-  interior mask of a masked window (`SpatialPolygonIntersection` on a
-  raster, `SpatialSphericalCap` on a grid). Infinities are values.
+  interior mask of a masked window (`spatial.geometry.PolygonIntersection` on a
+  raster, `spatial.geometry.SphericalCap` on a grid). Infinities are values.
 - **Uncovered cells** — no valid sample, or zero accumulated weight (a
   taper's zero edge) — get the aggregation's `fill_value`: NaN by default
   for `Sum`, `Mean`, `Max`, `Min`, `WeightedSum`, `OverlapAdd` (in RAM and
@@ -423,7 +423,7 @@ Every dense aggregation honours the same per-cell contract:
 - `InvVarWeightedMean` treats `var == 0` as an exact observation: the cell
   takes that sample's `mu` with `var = 0`.
 - Patch indices that are not a dense placement (a point-index array, a
-  polygon id) raise `TypeError`; use `SpatialByIndex`, which returns the
+  polygon id) raise `TypeError`; use `spatial.aggregation.ByIndex`, which returns the
   `[(anchor, data), …]` pairs, for ragged geometries.
 - `MeanStd` / `MinMax` (global) skip NaN and, on a raster / grid domain,
   count only each chip's in-domain, in-mask cells.

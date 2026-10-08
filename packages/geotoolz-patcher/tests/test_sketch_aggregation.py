@@ -8,13 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from geopatcher import (
-    SpatialApproxCardinality,
-    SpatialApproxMode,
-    SpatialApproxQuantile,
-    SpatialReservoir,
-    SpatialStreamingHistogram,
-)
+from geopatcher import spatial
 from geopatcher._src.spatial.aggregation import _hll_alpha
 
 
@@ -45,12 +39,15 @@ def _assert_same(a: Any, b: Any) -> None:
 
 SKETCHES = [
     pytest.param(
-        lambda: SpatialApproxQuantile(q=[0.1, 0.5, 0.9], k=32, seed=0), id="quantile"
+        lambda: spatial.aggregation.ApproxQuantile(q=[0.1, 0.5, 0.9], k=32, seed=0),
+        id="quantile",
     ),
-    pytest.param(lambda: SpatialApproxCardinality(p=6), id="cardinality"),
-    pytest.param(lambda: SpatialApproxMode(k=64), id="mode"),
-    pytest.param(lambda: SpatialStreamingHistogram(bins=8), id="histogram"),
-    pytest.param(lambda: SpatialReservoir(k=16, seed=0), id="reservoir"),
+    pytest.param(lambda: spatial.aggregation.ApproxCardinality(p=6), id="cardinality"),
+    pytest.param(lambda: spatial.aggregation.ApproxMode(k=64), id="mode"),
+    pytest.param(
+        lambda: spatial.aggregation.StreamingHistogram(bins=8), id="histogram"
+    ),
+    pytest.param(lambda: spatial.aggregation.Reservoir(k=16, seed=0), id="reservoir"),
 ]
 
 
@@ -70,7 +67,9 @@ def _filled(cls, items: np.ndarray, k: int, seed: int):
     return sketch
 
 
-@pytest.mark.parametrize("cls", [SpatialReservoir, SpatialApproxQuantile])
+@pytest.mark.parametrize(
+    "cls", [spatial.aggregation.Reservoir, spatial.aggregation.ApproxQuantile]
+)
 def test_reservoir_merge_state_unbiased(cls) -> None:
     """Merged reservoir is a uniform sample of the union of two unequal streams."""
     n_a, n_b, k, trials = 300, 100, 20, 400
@@ -106,8 +105,10 @@ def _fed(make, shards: list[np.ndarray]):
 @pytest.mark.parametrize(
     "make",
     [
-        pytest.param(lambda: SpatialApproxCardinality(p=8), id="cardinality"),
-        pytest.param(lambda: SpatialApproxMode(k=1024), id="mode"),
+        pytest.param(
+            lambda: spatial.aggregation.ApproxCardinality(p=8), id="cardinality"
+        ),
+        pytest.param(lambda: spatial.aggregation.ApproxMode(k=1024), id="mode"),
     ],
 )
 def test_repeated_merge_state_equals_one_pass(make) -> None:
@@ -138,9 +139,9 @@ def test_repeated_merge_state_equals_one_pass(make) -> None:
 def test_repeated_reservoir_merges_keep_counts_and_k() -> None:
     """Three reservoirs folded in: the seen count is the union's, size stays k."""
     shards = [np.arange(100.0) + 1000 * i for i in range(3)]
-    acc = _filled(SpatialReservoir, shards[0], k=16, seed=0)
+    acc = _filled(spatial.aggregation.Reservoir, shards[0], k=16, seed=0)
     for i, shard in enumerate(shards[1:], 1):
-        acc.merge_state(_filled(SpatialReservoir, shard, k=16, seed=i))
+        acc.merge_state(_filled(spatial.aggregation.Reservoir, shard, k=16, seed=i))
     assert acc._seen == 300
     sample = np.asarray(acc._sample)
     assert sample.size == 16
@@ -149,8 +150,8 @@ def test_repeated_reservoir_merges_keep_counts_and_k() -> None:
 
 
 def test_reservoir_merge_state_small_streams_keeps_everything() -> None:
-    left = _filled(SpatialReservoir, np.arange(3.0), k=10, seed=0)
-    right = _filled(SpatialReservoir, np.arange(10.0, 14.0), k=10, seed=1)
+    left = _filled(spatial.aggregation.Reservoir, np.arange(3.0), k=10, seed=0)
+    right = _filled(spatial.aggregation.Reservoir, np.arange(10.0, 14.0), k=10, seed=1)
     left.merge(right)
     assert left._seen == 7
     assert sorted(left.finalize().tolist()) == [0, 1, 2, 10, 11, 12, 13]
@@ -158,16 +159,20 @@ def test_reservoir_merge_state_small_streams_keeps_everything() -> None:
 
 def test_reservoir_merge_state_rejects_mismatched_k() -> None:
     with pytest.raises(ValueError, match="different k"):
-        SpatialReservoir(k=4).merge_state(SpatialReservoir(k=5))
+        spatial.aggregation.Reservoir(k=4).merge_state(
+            spatial.aggregation.Reservoir(k=5)
+        )
     with pytest.raises(TypeError, match="cannot merge"):
-        SpatialReservoir(k=4).merge_state(SpatialApproxQuantile(k=4))
+        spatial.aggregation.Reservoir(k=4).merge_state(
+            spatial.aggregation.ApproxQuantile(k=4)
+        )
 
 
 @pytest.mark.parametrize(
     ("q", "key"), [(1, "1.0"), (0, "0.0"), ([0, 1], None), (0.5, "0.5")]
 )
 def test_approx_quantile_accepts_integer_q(q, key) -> None:
-    out = SpatialApproxQuantile(q=q, k=64, seed=0).merge(
+    out = spatial.aggregation.ApproxQuantile(q=q, k=64, seed=0).merge(
         [_patch(np.arange(11.0))], None
     )
     if key is None:
@@ -178,18 +183,20 @@ def test_approx_quantile_accepts_integer_q(q, key) -> None:
 
 def test_approx_quantile_rejects_out_of_range_q() -> None:
     with pytest.raises(ValueError, match=r"q must be in \[0, 1\]"):
-        SpatialApproxQuantile(q=2)
+        spatial.aggregation.ApproxQuantile(q=2)
 
 
 def test_approx_quantile_compression_renamed_to_k() -> None:
     with pytest.raises(TypeError):
-        SpatialApproxQuantile(compression=32)  # type: ignore[call-arg]
-    cfg = SpatialApproxQuantile(k=32).get_config()
+        spatial.aggregation.ApproxQuantile(compression=32)  # type: ignore[call-arg]
+    cfg = spatial.aggregation.ApproxQuantile(k=32).get_config()
     assert cfg["k"] == 32
     assert "compression" not in cfg
 
 
-@pytest.mark.parametrize("cls", [SpatialApproxQuantile, SpatialReservoir])
+@pytest.mark.parametrize(
+    "cls", [spatial.aggregation.ApproxQuantile, spatial.aggregation.Reservoir]
+)
 def test_stochastic_sketch_seed_defaults_to_none(cls) -> None:
     assert cls().seed is None
 
@@ -211,7 +218,7 @@ def test_hll_alpha_standard_constants(m, alpha) -> None:
 @pytest.mark.parametrize("p", [4, 5, 6, 7, 10])
 def test_hll_finalize_uses_alpha_for_p(p) -> None:
     """All registers at rank 1 → estimate ``2 * alpha_m * m`` (no linear counting)."""
-    sketch = SpatialApproxCardinality(p=p)
+    sketch = spatial.aggregation.ApproxCardinality(p=p)
     m = 1 << p
     sketch._registers[:] = 1
     expected = {16: 0.673, 32: 0.697, 64: 0.709}.get(m, 0.7213 / (1 + 1.079 / m))
@@ -219,7 +226,10 @@ def test_hll_finalize_uses_alpha_for_p(p) -> None:
 
 
 def test_approx_mode_merge_state_sums_counters() -> None:
-    left, right = SpatialApproxMode(k=2), SpatialApproxMode(k=2)
+    left, right = (
+        spatial.aggregation.ApproxMode(k=2),
+        spatial.aggregation.ApproxMode(k=2),
+    )
     left.update(_patch([1] * 10))
     right.update(_patch([1] * 5 + [2] * 3))
     left.merge(right)
@@ -227,7 +237,10 @@ def test_approx_mode_merge_state_sums_counters() -> None:
 
 
 def test_approx_mode_merge_state_prunes_to_k() -> None:
-    left, right = SpatialApproxMode(k=1), SpatialApproxMode(k=1)
+    left, right = (
+        spatial.aggregation.ApproxMode(k=1),
+        spatial.aggregation.ApproxMode(k=1),
+    )
     left.update(_patch([1] * 10))
     right.update(_patch([2] * 3))
     left.merge(right)
@@ -235,7 +248,10 @@ def test_approx_mode_merge_state_prunes_to_k() -> None:
 
 
 def test_streaming_histogram_merge_state_keeps_total_count() -> None:
-    left, right = SpatialStreamingHistogram(bins=4), SpatialStreamingHistogram(bins=4)
+    left, right = (
+        spatial.aggregation.StreamingHistogram(bins=4),
+        spatial.aggregation.StreamingHistogram(bins=4),
+    )
     left.update(_patch(np.arange(20.0)))
     right.update(_patch(np.arange(100.0, 130.0)))
     left.merge(right)

@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from _helpers import ArrField as _ArrField
 
+from geopatcher import temporal
 from geopatcher._src.matched import (
     MatchedField,
     MatchedSpatioTemporalPatch,  # noqa: F401 — module-level export sanity
@@ -22,11 +23,7 @@ from geopatcher._src.matched import (
 )
 from geopatcher._src.matched.patch import PRIMARY_KEY
 from geopatcher._src.patch import TemporalPatch
-from geopatcher._src.time.aggregation import TemporalAggregation, TemporalMean
-from geopatcher._src.time.geometry import TemporalFixedLookback
-from geopatcher._src.time.patcher import TemporalPatcher
-from geopatcher._src.time.sampler import TemporalRegularStride
-from geopatcher._src.time.window import TemporalCausalBoxcar
+from geopatcher._src.temporal.patcher import TemporalPatcher
 
 
 # ---------------------------------------------------------------------------
@@ -37,8 +34,9 @@ from geopatcher._src.time.window import TemporalCausalBoxcar
 # ---------------------------------------------------------------------------
 
 
-class _RecordingTemporalAgg(TemporalAggregation):
-    """TemporalAggregation stub — returns ``("merged", name, n_patches)``."""
+class _RecordingTemporalAgg(temporal.aggregation.Aggregation):
+    """temporal.aggregation.Aggregation stub — returns ``("merged", name,
+    n_patches)``."""
 
     streaming_safe = True
 
@@ -53,15 +51,17 @@ class _RecordingTemporalAgg(TemporalAggregation):
 
 
 def _make_patcher(
-    aggregation: TemporalAggregation | None = None,
+    aggregation: temporal.aggregation.Aggregation | None = None,
 ) -> TemporalPatcher:
     # "shrink" keeps anchor 0's short [0, 1) window, so every stride-10
     # anchor yields a patch and the counts below stay one per anchor.
     return TemporalPatcher(
-        geometry=TemporalFixedLookback(length=5, boundary="shrink"),
-        sampler=TemporalRegularStride(step=10),
-        window=TemporalCausalBoxcar(),
-        aggregation=aggregation if aggregation is not None else TemporalMean(),
+        geometry=temporal.geometry.FixedLookback(length=5, boundary="shrink"),
+        sampler=temporal.sampler.RegularStride(step=10),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=aggregation
+        if aggregation is not None
+        else temporal.aggregation.Mean(),
     )
 
 
@@ -172,7 +172,7 @@ class TestMatchedTemporalPatcherMerge:
             secondaries={"s2": _ArrField(np.arange(100, dtype=np.float64) * 2)},
             coreg={"s2": lambda raw, prim: raw},
         )
-        secondary_aggregators: dict[str, TemporalAggregation] = {}
+        secondary_aggregators: dict[str, temporal.aggregation.Aggregation] = {}
         secondary_agg = _RecordingTemporalAgg("s2_agg") if with_secondary_agg else None
         if secondary_agg is not None:
             secondary_aggregators["s2"] = secondary_agg
@@ -457,7 +457,7 @@ def test_hooks_sum_member_bytes_at_one_level() -> None:
         coreg={"s": lambda raw, prim: raw},
     )
 
-    class _OnesAgg(TemporalAggregation):
+    class _OnesAgg(temporal.aggregation.Aggregation):
         streaming_safe = True
 
         def merge(self, patches: Any) -> Any:
@@ -488,7 +488,7 @@ def test_merge_streams_every_source() -> None:
     produced = 0
     lags: dict[str, int] = {}
 
-    class _LagAgg(TemporalAggregation):
+    class _LagAgg(temporal.aggregation.Aggregation):
         streaming_safe = True
 
         def __init__(self, name: str) -> None:

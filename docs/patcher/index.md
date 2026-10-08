@@ -40,10 +40,10 @@ flowchart TD
     Start -->|yes| Q1{Does the operator need<br/>global context<br/>e.g. global mean/std?}
     Q1 -->|yes| TwoPass[Use patcher.two_pass<br/>codified two-pass]
     Q1 -->|no| Q2{Is the output bigger<br/>than RAM?}
-    Q2 -->|yes| Stream[SpatialOverlapAdd<br/>streaming=True → zarr]
+    Q2 -->|yes| Stream[spatial.aggregation.OverlapAdd<br/>streaming=True → zarr]
     Q2 -->|no| Q3{Do patches overlap?}
-    Q3 -->|yes| OLA[SpatialOverlapAdd<br/>with Hann/Tukey window]
-    Q3 -->|no| Simple[Any aggregation —<br/>SpatialMean / Sum / OverlapAdd]
+    Q3 -->|yes| OLA[spatial.aggregation.OverlapAdd<br/>with Hann/Tukey window]
+    Q3 -->|no| Simple[Any aggregation —<br/>spatial.aggregation.Mean / Sum / OverlapAdd]
     style Start fill:#fff59d,stroke:#f9a825
     style Stream fill:#bbdefb,stroke:#1565c0
     style OLA fill:#bbdefb,stroke:#1565c0

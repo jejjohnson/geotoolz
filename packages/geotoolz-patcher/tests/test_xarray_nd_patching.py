@@ -7,7 +7,7 @@ The xrpatcher migration story in one place:
 3. Random-access via `IndexedPatchView`.
 4. Reconstruct with `merge_to_xarray` and assert round-trip identity.
 
-Most cases keep the cube 2-D — `SpatialRegularStride` over a `GridDomain`
+Most cases keep the cube 2-D — `spatial.sampler.RegularStride` over a `GridDomain`
 tiles every coord dim, so a `time` axis must be named in ``size`` (use the
 full time length to keep it whole). `TestNDCube` covers that 3-D path and
 the error raised when ``size`` omits a dim. xrpatcher's quickstart is
@@ -22,18 +22,10 @@ import pytest
 
 xr = pytest.importorskip("xarray")
 
-from geopatcher import (
-    IncompleteScanConfiguration,
-    IndexedPatchView,
-    SpatialBoxcar,
-    SpatialJitteredStride,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRandom,
-    SpatialRectangular,
-    SpatialRegularStride,
-)
+from geopatcher import SpatialPatcher, spatial
 from geopatcher._src.fields.xarray import XarrayField
+from geopatcher.run import IndexedPatchView
+from geopatcher.spatial.sampler import IncompleteScanConfiguration
 
 
 def _cube() -> xr.DataArray:
@@ -50,10 +42,12 @@ def _cube() -> xr.DataArray:
 
 def _patcher(check_full_scan: bool = True) -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(6, 6)),
-        sampler=SpatialRegularStride(step=(6, 6), check_full_scan=check_full_scan),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(6, 6)),
+        sampler=spatial.sampler.RegularStride(
+            step=(6, 6), check_full_scan=check_full_scan
+        ),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -171,14 +165,16 @@ class TestNDCube:
         # A 2-D size on a 3-D cube is ambiguous — the sampler must say so
         # instead of failing with a bare zip() length mismatch.
         field = XarrayField(_time_cube())
-        geom = SpatialRectangular(size=(6, 6))
-        stride = SpatialRegularStride(step=(1, 6, 6), check_full_scan=check_full_scan)
+        geom = spatial.geometry.Rectangular(size=(6, 6))
+        stride = spatial.sampler.RegularStride(
+            step=(1, 6, 6), check_full_scan=check_full_scan
+        )
         with pytest.raises(ValueError, match="size must name every GridDomain dim"):
             list(stride.anchors(field.domain, geom))
-        jittered = SpatialJitteredStride(step=(1, 6, 6), seed=0)
+        jittered = spatial.sampler.JitteredStride(step=(1, 6, 6), seed=0)
         with pytest.raises(ValueError, match="size must name every GridDomain dim"):
             list(jittered.anchors(field.domain, geom))
-        rand = SpatialRandom(n_samples=2, seed=0)
+        rand = spatial.sampler.Random(n_samples=2, seed=0)
         with pytest.raises(ValueError, match="size must name every GridDomain dim"):
             list(rand.anchors(field.domain, geom))
 
@@ -186,10 +182,10 @@ class TestNDCube:
         da = _time_cube()
         field = XarrayField(da)
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(3, 6, 6)),
-            sampler=SpatialRegularStride(step=(3, 6, 6), check_full_scan=True),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(3, 6, 6)),
+            sampler=spatial.sampler.RegularStride(step=(3, 6, 6), check_full_scan=True),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         patches = list(patcher.split(field))
         assert len(patches) == 8
@@ -215,10 +211,10 @@ class TestNDCube:
         )
         field = XarrayField(da)
         patcher = SpatialPatcher(
-            geometry=SpatialRectangular(size=(1, 3, 6, 6), boundary=boundary),
-            sampler=SpatialRegularStride(step=(1, 3, 6, 6)),
-            window=SpatialBoxcar(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(1, 3, 6, 6), boundary=boundary),
+            sampler=spatial.sampler.RegularStride(step=(1, 3, 6, 6)),
+            window=spatial.window.Boxcar(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         patches = list(patcher.split(field))
         # 2 bands x 1 time block x 2 lat blocks x 5 lon blocks (last ragged).
@@ -244,10 +240,10 @@ def _dask_field() -> XarrayField:
 
 def _patcher16() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(16, 16)),
-        sampler=SpatialRegularStride(step=(16, 16)),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(16, 16)),
+        sampler=spatial.sampler.RegularStride(step=(16, 16)),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 

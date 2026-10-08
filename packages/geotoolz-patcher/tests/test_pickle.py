@@ -1,8 +1,8 @@
 """Pickle round trips: the YAML-safe axes and patchers, and everything the
 ML recipes hand to worker processes.
 
-`SpatialCustom`, `TemporalFold`, and `SpatialLearned` carry closures and
-are intentionally excluded.
+`spatial.window.Custom`, `temporal.aggregation.Fold`, and `spatial.aggregation.Learned`
+carry closures and are intentionally excluded.
 
 `IndexedPatchView` (every cache mode), `PatchCache` and every `Field`
 adapter must survive ``pickle`` — spawn / forkserver DataLoader workers
@@ -27,47 +27,27 @@ from _helpers import (
 )
 from test_adapter_matrix import ADAPTERS, _chip_transform
 
-from geopatcher import (
-    IndexedPatchView,
-    PatchCache,
-    SpatialBoxcar,
-    SpatialHann,
-    SpatialKNNGraph,
-    SpatialMean,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialRandom,
-    SpatialRectangular,
-    SpatialRegularStride,
-    SpatialSum,
-    SpatialTukey,
-    TemporalCausalBoxcar,
-    TemporalExponentialDecay,
-    TemporalFixedLookback,
-    TemporalLookbackHorizon,
-    TemporalMean,
-    TemporalPatcher,
-    TemporalRegularStride,
-)
+from geopatcher import SpatialPatcher, TemporalPatcher, spatial, temporal
+from geopatcher.run import IndexedPatchView, PatchCache
 
 
 @pytest.mark.parametrize(
     "op",
     [
-        SpatialRectangular(size=(8, 8)),
-        SpatialRegularStride(step=8),
-        SpatialBoxcar(),
-        SpatialHann(),
-        SpatialTukey(alpha=0.5),
-        SpatialSum(),
-        SpatialMean(),
-        SpatialOverlapAdd(),
-        TemporalFixedLookback(length=5),
-        TemporalLookbackHorizon(lookback=3, horizon=2),
-        TemporalRegularStride(step=2),
-        TemporalCausalBoxcar(),
-        TemporalExponentialDecay(tau=2.0),
-        TemporalMean(),
+        spatial.geometry.Rectangular(size=(8, 8)),
+        spatial.sampler.RegularStride(step=8),
+        spatial.window.Boxcar(),
+        spatial.window.Hann(),
+        spatial.window.Tukey(alpha=0.5),
+        spatial.aggregation.Sum(),
+        spatial.aggregation.Mean(),
+        spatial.aggregation.OverlapAdd(),
+        temporal.geometry.FixedLookback(length=5),
+        temporal.geometry.LookbackHorizon(lookback=3, horizon=2),
+        temporal.sampler.RegularStride(step=2),
+        temporal.window.CausalBoxcar(),
+        temporal.window.ExponentialDecay(tau=2.0),
+        temporal.aggregation.Mean(),
     ],
 )
 def test_axis_pickle_roundtrip(op) -> None:
@@ -81,10 +61,10 @@ def test_axis_pickle_roundtrip(op) -> None:
 class TestSpatialPatcherPickle:
     def test_roundtrip(self) -> None:
         sp = SpatialPatcher(
-            geometry=SpatialRectangular(size=(8, 8)),
-            sampler=SpatialRegularStride(step=8),
-            window=SpatialHann(),
-            aggregation=SpatialOverlapAdd(),
+            geometry=spatial.geometry.Rectangular(size=(8, 8)),
+            sampler=spatial.sampler.RegularStride(step=8),
+            window=spatial.window.Hann(),
+            aggregation=spatial.aggregation.OverlapAdd(),
         )
         clone = pickle.loads(pickle.dumps(sp))
         np.testing.assert_equal(clone.get_config(), sp.get_config())
@@ -93,22 +73,22 @@ class TestSpatialPatcherPickle:
 class TestTemporalPatcherPickle:
     def test_roundtrip(self) -> None:
         tp = TemporalPatcher(
-            geometry=TemporalFixedLookback(length=4),
-            sampler=TemporalRegularStride(step=2),
-            window=TemporalCausalBoxcar(),
-            aggregation=TemporalMean(),
+            geometry=temporal.geometry.FixedLookback(length=4),
+            sampler=temporal.sampler.RegularStride(step=2),
+            window=temporal.window.CausalBoxcar(),
+            aggregation=temporal.aggregation.Mean(),
         )
         clone = pickle.loads(pickle.dumps(tp))
-        # assert_equal: TemporalMean's NaN fill_value is not == itself.
+        # assert_equal: temporal.aggregation.Mean's NaN fill_value is not == itself.
         np.testing.assert_equal(clone.get_config(), tp.get_config())
 
 
 def _patcher(size: int = 16, boundary: str = "drop") -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialRectangular(size=(size, size), boundary=boundary),  # type: ignore[arg-type]
-        sampler=SpatialRegularStride(step=size),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.Rectangular(size=(size, size), boundary=boundary),  # type: ignore[arg-type]
+        sampler=spatial.sampler.RegularStride(step=size),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 
@@ -155,19 +135,13 @@ def test_indexed_patch_view_roundtrip(mode: str, tmp_path: Path) -> None:
 
 
 def test_indexed_patch_view_over_temporal_patcher_pickles() -> None:
-    from geopatcher import (
-        TemporalCausalBoxcar,
-        TemporalMean,
-        TemporalMultiScale,
-        TemporalPatcher,
-        TemporalRegularStride,
-    )
+    from geopatcher import TemporalPatcher
 
     tp = TemporalPatcher(
-        geometry=TemporalMultiScale(scales=[3, 8]),
-        sampler=TemporalRegularStride(step=5),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalMean(),
+        geometry=temporal.geometry.MultiScale(scales=[3, 8]),
+        sampler=temporal.sampler.RegularStride(step=5),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Mean(),
     )
     series = np.arange(40.0)
     clone = pickle.loads(pickle.dumps(IndexedPatchView(tp, series, cache=True)))
@@ -209,10 +183,10 @@ def test_field_adapter_roundtrip(adapter: str, tmp_path: Path) -> None:
 
 def _knn_patcher() -> SpatialPatcher:
     return SpatialPatcher(
-        geometry=SpatialKNNGraph(k=2),
-        sampler=SpatialRandom(n_samples=3, seed=0),
-        window=SpatialBoxcar(),
-        aggregation=SpatialOverlapAdd(),
+        geometry=spatial.geometry.KNNGraph(k=2),
+        sampler=spatial.sampler.Random(n_samples=3, seed=0),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.OverlapAdd(),
     )
 
 

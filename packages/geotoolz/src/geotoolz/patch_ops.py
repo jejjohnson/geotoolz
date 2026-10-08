@@ -9,7 +9,7 @@ import paths. They put the four-axis Patcher framework inside a
     pipe = Sequential([
         GridSampler(patcher=patcher),
         ApplyToChips(operator=model_op),
-        MergePatches(aggregation=SpatialOverlapAdd(), domain=field.domain),
+        MergePatches(aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain),
     ])
 
 ``MergePatches`` is geopatcher's ``Stitch`` operator under a name that
@@ -19,7 +19,7 @@ mosaicker also exported as top-level ``geotoolz.Stitch``). Its class
 
 geotoolz's own additions:
 
-- `SpatialTriangular` — a linear-ramp `geopatcher.SpatialWindow` whose
+- `SpatialTriangular` — a linear-ramp `geopatcher.spatial.window.Window` whose
   overlap-add blend matches ``geom.Stitch(blend="feather")``.
 - `StratifiedSample` (class proportions matching a target distribution,
   largest-remainder allocation) and `BalancedSampler` (N chips per
@@ -49,18 +49,14 @@ from geotoolz._src.blending import triangular_weights
 
 
 try:
-    from geopatcher import (
-        Patch,
-        SpatialGeometry,
-        SpatialWindow,
-        config_from_fields,
-        geom_shape,
-    )
+    from geopatcher import Patch, spatial
+    from geopatcher.config import config_from_fields
     from geopatcher.integrations.pipekit import (
         ApplyToChips,
         GridSampler,
         Stitch as MergePatches,
     )
+    from geopatcher.spatial.window import geom_shape
 except ImportError as _e:  # pragma: no cover - exercised when [patch] is missing
     raise ImportError(
         "geotoolz.patch_ops requires the `geopatcher` package (distribution "
@@ -79,13 +75,13 @@ __all__ = [
 
 
 @dataclass(eq=False)
-class SpatialTriangular(SpatialWindow):
+class SpatialTriangular(spatial.window.Window):
     """Linear-ramp triangular spatial window for overlap-add blending.
 
     Each axis ramps linearly from the edge up to a plateau of 1.0 over
     ``width`` pixels (edge pixel ``= 1 / width``); axes combine by
     product. This is the kernel ``geom.Stitch(blend="feather")`` uses,
-    returned as ``float64`` like every other `SpatialWindow`.
+    returned as ``float64`` like every other `spatial.window.Window`.
 
     Args:
         width: Ramp width in pixels. ``width <= 0`` gives a boxcar.
@@ -93,12 +89,12 @@ class SpatialTriangular(SpatialWindow):
 
     width: int = 16
 
-    def weights(self, geometry: SpatialGeometry) -> np.ndarray:
+    def weights(self, geometry: spatial.geometry.Geometry) -> np.ndarray:
         """Return triangular weights for a fixed-size spatial geometry.
 
         Args:
             geometry: A fixed-size geometry such as
-                ``SpatialRectangular(size=(height, width))``.
+                ``spatial.geometry.Rectangular(size=(height, width))``.
 
         Returns:
             ``float64`` array of shape ``geom_shape(geometry)``.
@@ -107,9 +103,9 @@ class SpatialTriangular(SpatialWindow):
             TypeError: if the geometry has no fixed size.
 
         Examples:
-            >>> from geopatcher import SpatialRectangular
+            >>> from geopatcher import spatial
             >>> SpatialTriangular(width=2).weights(
-            ...     SpatialRectangular(size=(5, 7))
+            ...     spatial.geometry.Rectangular(size=(5, 7))
             ... ).shape
             (5, 7)
         """

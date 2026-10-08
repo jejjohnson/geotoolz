@@ -107,8 +107,8 @@ class TemporalPatch[AnchorT, IndicesT, DataT](_ReleaseLifecycleMixin):
 
     ``window_index`` is the patch's position among the windows its
     geometry returned for ``anchor`` — ``k`` for scale ``scales[k]`` of a
-    `TemporalMultiScale`, the cycle slot of a `TemporalPhaseWindow`, and
-    ``0`` for single-window geometries. It matches the ``k`` of the
+    `temporal.geometry.MultiScale`, the cycle slot of a `temporal.geometry.PhaseWindow`,
+    and ``0`` for single-window geometries. It matches the ``k`` of the
     ``(anchor, k)`` key `TemporalPatcher.patch_anchors` emits. ``None``
     (the default for hand-built patches) means "not recorded".
     """

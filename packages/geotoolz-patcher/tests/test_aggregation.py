@@ -13,32 +13,7 @@ import shapely
 from georeader.geotensor import GeoTensor
 from rasterio.windows import Window
 
-from geopatcher import (
-    Patch,
-    RasterField,
-    SpatialBoxcar,
-    SpatialByIndex,
-    SpatialExplicit,
-    SpatialHann,
-    SpatialHardVote,
-    SpatialInvVarWeightedMean,
-    SpatialMax,
-    SpatialMean,
-    SpatialMeanStd,
-    SpatialMedian,
-    SpatialMin,
-    SpatialMinMax,
-    SpatialMode,
-    SpatialOverlapAdd,
-    SpatialPatcher,
-    SpatialPolygonIntersection,
-    SpatialRectangular,
-    SpatialRegularStride,
-    SpatialSoftVote,
-    SpatialSum,
-    SpatialVariance,
-    SpatialWeightedSum,
-)
+from geopatcher import Patch, RasterField, SpatialPatcher, spatial
 from geopatcher._src.spatial.geometry import _MaskedWindow
 
 
@@ -63,7 +38,7 @@ class TestSpatialSum:
     def test_disjoint_patches(self, empty_field: GeoTensor) -> None:
         p1 = _patch(np.ones((2, 2)), 0, 0)
         p2 = _patch(np.full((2, 2), 3.0), 2, 2)
-        out = SpatialSum().merge([p1, p2], empty_field)
+        out = spatial.aggregation.Sum().merge([p1, p2], empty_field)
         assert np.nansum(out) == 4 * 1 + 4 * 3
         assert out[0, 0] == 1.0
         assert out[3, 3] == 3.0
@@ -75,7 +50,7 @@ class TestSpatialMean:
     def test_overlap_mean(self, empty_field: GeoTensor) -> None:
         p1 = _patch(np.full((2, 2), 2.0), 0, 0)
         p2 = _patch(np.full((2, 2), 6.0), 1, 1)  # overlaps p1 at (1,1)
-        out = SpatialMean().merge([p1, p2], empty_field)
+        out = spatial.aggregation.Mean().merge([p1, p2], empty_field)
         assert out[1, 1] == pytest.approx(4.0)
 
 
@@ -83,7 +58,7 @@ class TestSpatialVariance:
     def test_variance_zero_for_constant_patches(self, empty_field: GeoTensor) -> None:
         p1 = _patch(np.full((2, 2), 5.0), 0, 0)
         p2 = _patch(np.full((2, 2), 5.0), 0, 0)
-        out = SpatialVariance().merge([p1, p2], empty_field)
+        out = spatial.aggregation.Variance().merge([p1, p2], empty_field)
         assert out[0, 0] == pytest.approx(0.0)
 
 
@@ -92,7 +67,7 @@ class TestSpatialOverlapAdd:
         # Two patches, no overlap, boxcar weights -> exact reconstruction
         p1 = _patch(np.ones((2, 2)), 0, 0, weights=np.ones((2, 2)))
         p2 = _patch(np.full((2, 2), 5.0), 2, 2, weights=np.ones((2, 2)))
-        out = SpatialOverlapAdd().merge([p1, p2], empty_field)
+        out = spatial.aggregation.OverlapAdd().merge([p1, p2], empty_field)
         assert out[0, 0] == 1.0
         assert out[3, 3] == 5.0
 
@@ -109,7 +84,7 @@ class TestSpatialOverlapAdd:
         # Two non-overlapping (3-band, 2x2) patches at (0,0) and (2,2).
         p1 = _patch(np.full((3, 2, 2), 1.0), 0, 0, weights=np.ones((2, 2)))
         p2 = _patch(np.full((3, 2, 2), 5.0), 2, 2, weights=np.ones((2, 2)))
-        out = SpatialOverlapAdd().merge([p1, p2], domain)
+        out = spatial.aggregation.OverlapAdd().merge([p1, p2], domain)
         assert out.shape == (3, 4, 4)
         np.testing.assert_array_equal(out[:, :2, :2], 1.0)
         np.testing.assert_array_equal(out[:, 2:, 2:], 5.0)
@@ -121,7 +96,7 @@ class TestSpatialOverlapAdd:
         w = np.array([[0.5, 1.0], [1.0, 0.5]])
         p1 = _patch(np.full((2, 2), 3.0), 0, 0, weights=w)
         p2 = _patch(np.full((2, 2), 3.0), 0, 0, weights=w)
-        out = SpatialOverlapAdd().merge([p1, p2], empty_field)
+        out = spatial.aggregation.OverlapAdd().merge([p1, p2], empty_field)
         np.testing.assert_allclose(out[:2, :2], 3.0)
 
 
@@ -134,7 +109,7 @@ class TestSpatialInvVarWeightedMean:
         var2 = np.full((2, 2), 1.0)
         p1 = _patch((mu, var1), 0, 0, shape=(2, 2))
         p2 = _patch((mu, var2), 0, 0, shape=(2, 2))
-        out = SpatialInvVarWeightedMean().merge([p1, p2], empty_field)
+        out = spatial.aggregation.InvVarWeightedMean().merge([p1, p2], empty_field)
         np.testing.assert_allclose(out["mu"][0, 0], 3.0)
         np.testing.assert_allclose(out["var"][0, 0], 1.0 / (1 / 4 + 1 / 1))
 
@@ -143,7 +118,7 @@ class TestSpatialByIndex:
     def test_returns_anchor_data_pairs(self, empty_field: GeoTensor) -> None:
         p1 = _patch(np.array([[1.0]]), 0, 0)
         p2 = _patch(np.array([[2.0]]), 1, 1)
-        out = SpatialByIndex().merge([p1, p2], empty_field)
+        out = spatial.aggregation.ByIndex().merge([p1, p2], empty_field)
         assert [anchor for anchor, _ in out] == [(0, 0), (1, 1)]
         assert dict(out)[(1, 1)][0, 0] == 2.0
 
@@ -154,23 +129,24 @@ class TestSpatialHardVote:
         p1 = _patch(np.zeros((2, 2), dtype=int), 0, 0)
         p2 = _patch(np.ones((2, 2), dtype=int), 0, 0)
         p3 = _patch(np.ones((2, 2), dtype=int), 0, 0)
-        out = SpatialHardVote(n_classes=2).merge([p1, p2, p3], empty_field)
+        out = spatial.aggregation.HardVote(n_classes=2).merge([p1, p2, p3], empty_field)
         assert (out[:2, :2] == 1).all()
 
 
 class TestSpatialMedian:
     def test_warns_when_streaming(self, empty_field: GeoTensor) -> None:
-        # SpatialMedian.streaming_safe == False — `_warn_if_unsafe_streaming`
-        # is called from SpatialPatcher.merge, not from Median.merge itself.
+        # spatial.aggregation.Median.streaming_safe == False —
+        # `_warn_if_unsafe_streaming` is called from SpatialPatcher.merge, not from
+        # Median.merge itself.
         from geopatcher._src.spatial.aggregation import (
             _warn_if_unsafe_streaming,
         )
 
         with pytest.warns(RuntimeWarning, match="streaming_safe = False"):
-            _warn_if_unsafe_streaming(SpatialMedian())
+            _warn_if_unsafe_streaming(spatial.aggregation.Median())
 
     def test_strict_raises_on_streaming_unsafe(self, empty_field: GeoTensor) -> None:
-        # ADR-003: gp.set_strict(True) promotes the streaming_safe
+        # ADR-003: gp.observe.set_strict(True) promotes the streaming_safe
         # warning to a hard RuntimeError so batch / CI callers fail fast.
         # Capture and restore the initial value so we don't leak state
         # if the caller has GEOPATCHER_STRICT=1 set or another test left
@@ -180,15 +156,15 @@ class TestSpatialMedian:
             _warn_if_unsafe_streaming,
         )
 
-        original = gp.get_strict()
-        gp.set_strict(True)
+        original = gp.observe.get_strict()
+        gp.observe.set_strict(True)
         try:
-            assert gp.get_strict() is True
+            assert gp.observe.get_strict() is True
             with pytest.raises(RuntimeError, match="streaming_safe = False"):
-                _warn_if_unsafe_streaming(SpatialMedian())
+                _warn_if_unsafe_streaming(spatial.aggregation.Median())
         finally:
-            gp.set_strict(original)
-        assert gp.get_strict() is original
+            gp.observe.set_strict(original)
+        assert gp.observe.get_strict() is original
 
     def test_median_value(self, empty_field: GeoTensor) -> None:
         p1 = _patch(np.full((2, 2), 1.0), 0, 0)
@@ -196,7 +172,7 @@ class TestSpatialMedian:
         p3 = _patch(np.full((2, 2), 3.0), 0, 0)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            out = SpatialMedian().merge([p1, p2, p3], empty_field)
+            out = spatial.aggregation.Median().merge([p1, p2, p3], empty_field)
         assert out[0, 0] == 3.0
 
 
@@ -216,14 +192,14 @@ _MASK = np.array([[True, False], [False, False]])
 _DATA = np.array([[7.0, 100.0], [100.0, 100.0]])
 
 _DENSE = [
-    SpatialSum,
-    SpatialMean,
-    SpatialMax,
-    SpatialMin,
-    SpatialWeightedSum,
-    SpatialOverlapAdd,
-    SpatialMedian,
-    SpatialMode,
+    spatial.aggregation.Sum,
+    spatial.aggregation.Mean,
+    spatial.aggregation.Max,
+    spatial.aggregation.Min,
+    spatial.aggregation.WeightedSum,
+    spatial.aggregation.OverlapAdd,
+    spatial.aggregation.Median,
+    spatial.aggregation.Mode,
 ]
 
 
@@ -241,31 +217,35 @@ def test_masked_window_respected_by_variance_votes_and_posteriors(
     empty_field: GeoTensor,
 ) -> None:
     twice = [_masked_patch(_DATA, _MASK), _masked_patch(_DATA + 2, _MASK)]
-    var = SpatialVariance().merge(twice, empty_field)
+    var = spatial.aggregation.Variance().merge(twice, empty_field)
     assert var[0, 0] == pytest.approx(2.0)
     assert np.isnan(var.reshape(-1)[1:]).all()
 
     labels = _masked_patch(np.array([[1, 0], [0, 0]]), _MASK)
-    hard = SpatialHardVote(n_classes=2).merge([labels], empty_field)
+    hard = spatial.aggregation.HardVote(n_classes=2).merge([labels], empty_field)
     assert hard[0, 0] == 1
     assert (hard.reshape(-1)[1:] == -1).all()
 
     probs = np.stack([1.0 - _MASK, _MASK.astype(float)])  # class 1 only at (0,0)
-    soft = SpatialSoftVote(n_classes=2).merge(
+    soft = spatial.aggregation.SoftVote(n_classes=2).merge(
         [_masked_patch(probs, _MASK)], empty_field
     )
     assert soft[0, 0] == 1
     assert (soft.reshape(-1)[1:] == -1).all()
 
     post = _masked_patch((_DATA, np.ones((2, 2))), _MASK)
-    out = SpatialInvVarWeightedMean().merge([post], empty_field)
+    out = spatial.aggregation.InvVarWeightedMean().merge([post], empty_field)
     assert out["mu"][0, 0] == 7.0
     assert out["var"][0, 0] == 1.0
     assert np.isnan(out["mu"].reshape(-1)[1:]).all()
 
-    minmax = SpatialMinMax().merge([_masked_patch(_DATA, _MASK)], empty_field)
+    minmax = spatial.aggregation.MinMax().merge(
+        [_masked_patch(_DATA, _MASK)], empty_field
+    )
     assert minmax == {"min": 7.0, "max": 7.0}
-    assert SpatialMeanStd().merge(twice, empty_field)["mean"] == pytest.approx(8.0)
+    assert spatial.aggregation.MeanStd().merge(twice, empty_field)[
+        "mean"
+    ] == pytest.approx(8.0)
 
 
 def test_masked_mean_through_polygon_patcher() -> None:
@@ -278,10 +258,10 @@ def test_masked_mean_through_polygon_patcher() -> None:
     # The hypotenuse passes through no pixel centre (no edge ambiguity).
     tri = shapely.Polygon([(0.0, 8.0), (8.0, 8.0), (0.0, 0.5)])
     patcher = SpatialPatcher(
-        geometry=SpatialPolygonIntersection(polygons=pd.Series([tri])),
-        sampler=SpatialExplicit(anchors_=[0]),
-        window=SpatialBoxcar(),
-        aggregation=SpatialMean(),
+        geometry=spatial.geometry.PolygonIntersection(polygons=pd.Series([tri])),
+        sampler=spatial.sampler.Explicit(anchors_=[0]),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.Mean(),
     )
     patches = [p.with_data(np.asarray(p.data.values)) for p in patcher.split(field)]
     merged = patcher.merge(patches, field.domain)
@@ -311,10 +291,10 @@ def test_zero_weight_cells_are_nodata(cls: type, empty_field: GeoTensor) -> None
 
 def test_zero_weight_fill_on_votes_and_posteriors(empty_field: GeoTensor) -> None:
     labels = _patch(np.ones((2, 2), dtype=int), 0, 0)
-    hard = SpatialHardVote(n_classes=2).merge([labels], empty_field)
+    hard = spatial.aggregation.HardVote(n_classes=2).merge([labels], empty_field)
     assert hard.dtype == np.int64
     assert (hard[2:, :] == -1).all()
-    nan_hard = SpatialHardVote(n_classes=2, fill_value=np.nan).merge(
+    nan_hard = spatial.aggregation.HardVote(n_classes=2, fill_value=np.nan).merge(
         [labels], empty_field
     )
     assert nan_hard.dtype == np.float64
@@ -322,18 +302,24 @@ def test_zero_weight_fill_on_votes_and_posteriors(empty_field: GeoTensor) -> Non
     assert (nan_hard[:2, :2] == 1).all()
 
     probs = _patch(np.stack([np.zeros((2, 2)), np.ones((2, 2))]), 0, 0, shape=(2, 2))
-    soft = SpatialSoftVote(n_classes=2, fill_value=255).merge([probs], empty_field)
+    soft = spatial.aggregation.SoftVote(n_classes=2, fill_value=255).merge(
+        [probs], empty_field
+    )
     assert soft.dtype == np.int64
     assert (soft[:2, :2] == 1).all()
     assert (soft[2:, :] == 255).all()
 
     post = _patch((np.full((2, 2), 3.0), np.ones((2, 2))), 0, 0, shape=(2, 2))
-    out = SpatialInvVarWeightedMean(fill_value=-1.0).merge([post], empty_field)
+    out = spatial.aggregation.InvVarWeightedMean(fill_value=-1.0).merge(
+        [post], empty_field
+    )
     assert (out["mu"][2:, :] == -1.0).all()
     assert (out["var"][2:, :] == -1.0).all()
 
     # One sample: the ddof=1 variance is undefined (as np.nanvar) → fill.
-    var = SpatialVariance().merge([_patch(np.ones((2, 2)), 0, 0)], empty_field)
+    var = spatial.aggregation.Variance().merge(
+        [_patch(np.ones((2, 2)), 0, 0)], empty_field
+    )
     assert np.isnan(var).all()
 
 
@@ -351,16 +337,18 @@ def _hann_constant_field(fill: float | None = None) -> RasterField:
 
 def _hann_merge(field: RasterField, aggregation: Any) -> np.ndarray:
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(8, 8)),
-        sampler=SpatialRegularStride(step=(4, 4)),
-        window=SpatialHann(),
+        geometry=spatial.geometry.Rectangular(size=(8, 8)),
+        sampler=spatial.sampler.RegularStride(step=(4, 4)),
+        window=spatial.window.Hann(),
         aggregation=aggregation,
     )
     patches = [p.with_data(np.asarray(p.data.values)) for p in patcher.split(field)]
     return np.asarray(patcher.merge(patches, field.domain))
 
 
-@pytest.mark.parametrize("cls", [SpatialOverlapAdd, SpatialWeightedSum])
+@pytest.mark.parametrize(
+    "cls", [spatial.aggregation.OverlapAdd, spatial.aggregation.WeightedSum]
+)
 def test_periodic_hann_leading_ring_is_nodata(cls: type) -> None:
     # Periodic Hann + drop: the sole chip covering row 0 / col 0 puts its
     # w[0] = 0 sample there, so Σw = 0 — the leading ring used to be 0.0,
@@ -369,7 +357,7 @@ def test_periodic_hann_leading_ring_is_nodata(cls: type) -> None:
     assert np.isnan(out[0, :]).all()
     assert np.isnan(out[:, 0]).all()
     assert not np.isnan(out[1:, 1:]).any()
-    if cls is SpatialOverlapAdd:
+    if cls is spatial.aggregation.OverlapAdd:
         np.testing.assert_allclose(out[1:, 1:], 2.5, rtol=1e-14)
 
     # The domain's nodata as the override.
@@ -393,10 +381,10 @@ def test_by_index_grid_anchors() -> None:
     )
     field = XarrayField(da)
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4)),
-        sampler=SpatialRegularStride(step=(4, 4)),
-        window=SpatialBoxcar(),
-        aggregation=SpatialByIndex(),
+        geometry=spatial.geometry.Rectangular(size=(4, 4)),
+        sampler=spatial.sampler.RegularStride(step=(4, 4)),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.ByIndex(),
     )
     patches = list(patcher.split(field))
     out = patcher.merge(patches, field.domain)
@@ -407,7 +395,7 @@ def test_by_index_grid_anchors() -> None:
         assert data is p.data
     # Array anchors (graph geometries) and repeated anchors survive too.
     arr = Patch(data=1.0, anchor=np.array([3, 4]), indices=np.array([3, 4]))
-    pairs = SpatialByIndex().merge([arr, arr], None)
+    pairs = spatial.aggregation.ByIndex().merge([arr, arr], None)
     assert len(pairs) == 2
     assert pairs[0][0] is arr.anchor
 
@@ -423,14 +411,14 @@ def test_soft_vote_band_domain() -> None:
     probs = np.stack([np.full((4, 4), 0.2), np.full((4, 4), 0.8)])
     p1 = _patch(probs, 0, 0)
     p2 = _patch(probs[::-1], 4, 4)
-    out = SpatialSoftVote(n_classes=2).merge([p1, p2], domain)
+    out = spatial.aggregation.SoftVote(n_classes=2).merge([p1, p2], domain)
     assert out.shape == (3, 8, 8)
     assert (out[:, :4, :4] == 1).all()
     assert (out[:, 4:, 4:] == 0).all()
     assert (out[:, :4, 4:] == -1).all()
     # A full (K, band, h, w) chip still works.
     full = np.broadcast_to(probs[:, None], (2, 3, 4, 4))
-    out = SpatialSoftVote(n_classes=2).merge([_patch(full, 0, 0)], domain)
+    out = spatial.aggregation.SoftVote(n_classes=2).merge([_patch(full, 0, 0)], domain)
     assert (out[:, :4, :4] == 1).all()
 
 
@@ -438,19 +426,19 @@ def test_soft_vote_band_domain() -> None:
     "aggregation",
     [
         *(cls() for cls in _DENSE),
-        SpatialVariance(),
-        SpatialHardVote(n_classes=2),
-        SpatialSoftVote(n_classes=2),
-        SpatialInvVarWeightedMean(),
-        SpatialMeanStd(),
-        SpatialMinMax(),
+        spatial.aggregation.Variance(),
+        spatial.aggregation.HardVote(n_classes=2),
+        spatial.aggregation.SoftVote(n_classes=2),
+        spatial.aggregation.InvVarWeightedMean(),
+        spatial.aggregation.MeanStd(),
+        spatial.aggregation.MinMax(),
     ],
     ids=lambda a: type(a).__name__,
 )
 def test_unknown_indices_raise(aggregation: Any, empty_field: GeoTensor) -> None:
     # A point-index array is not a dense placement: every dense aggregation
     # used to skip it silently and return an empty field.
-    if isinstance(aggregation, SpatialInvVarWeightedMean):
+    if isinstance(aggregation, spatial.aggregation.InvVarWeightedMean):
         data: Any = (np.ones(2), np.ones(2))
     else:
         data = np.ones((2, 2))
@@ -471,21 +459,26 @@ def test_mean_std_and_min_max_are_nan_aware_and_crop_pad_fill() -> None:
         )
     )
     patcher = SpatialPatcher(
-        geometry=SpatialRectangular(size=(4, 4), boundary="pad", pad_value=-1.0),
-        sampler=SpatialRegularStride(step=(4, 4)),
-        window=SpatialBoxcar(),
-        aggregation=SpatialMinMax(),
+        geometry=spatial.geometry.Rectangular(
+            size=(4, 4), boundary="pad", pad_value=-1.0
+        ),
+        sampler=spatial.sampler.RegularStride(step=(4, 4)),
+        window=spatial.window.Boxcar(),
+        aggregation=spatial.aggregation.MinMax(),
     )
     patches = [p.with_data(np.asarray(p.data.values)) for p in patcher.split(field)]
     patches.append(patches[0].with_data(np.full((4, 4), np.nan)))
-    assert SpatialMinMax().merge(patches, field.domain) == {"min": 1.0, "max": 36.0}
-    stats = SpatialMeanStd().merge(patches, field.domain)
+    assert spatial.aggregation.MinMax().merge(patches, field.domain) == {
+        "min": 1.0,
+        "max": 36.0,
+    }
+    stats = spatial.aggregation.MeanStd().merge(patches, field.domain)
     values = np.arange(36) + 1.0
     assert stats["mean"] == pytest.approx(values.mean())
     assert stats["std"] == pytest.approx(values.std(ddof=1))
     # Non-dense domains (no shape) still reduce every non-NaN sample.
     loose = [Patch(data=np.array([1.0, np.nan, 3.0]), anchor=0, indices=None)]
-    assert SpatialMinMax().merge(loose, None) == {"min": 1.0, "max": 3.0}
+    assert spatial.aggregation.MinMax().merge(loose, None) == {"min": 1.0, "max": 3.0}
 
 
 def test_inv_var_zero_variance_is_exact(empty_field: GeoTensor) -> None:
@@ -493,7 +486,9 @@ def test_inv_var_zero_variance_is_exact(empty_field: GeoTensor) -> None:
     noisy = _patch((np.full((2, 2), 1.0), np.full((2, 2), 2.0)), 0, 0, shape=(2, 2))
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        out = SpatialInvVarWeightedMean().merge([exact, noisy], empty_field)
+        out = spatial.aggregation.InvVarWeightedMean().merge(
+            [exact, noisy], empty_field
+        )
     np.testing.assert_array_equal(out["mu"][:2, :2], 5.0)
     np.testing.assert_array_equal(out["var"][:2, :2], 0.0)
 
@@ -531,15 +526,19 @@ def test_median_and_mode_match_reference(seed: int) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         ref_median = np.nanmedian(ref, axis=0)
-    np.testing.assert_array_equal(SpatialMedian().merge(patches, domain), ref_median)
+    np.testing.assert_array_equal(
+        spatial.aggregation.Median().merge(patches, domain), ref_median
+    )
 
     ref_mode = np.full((8, 8), np.nan)
     for i, j in zip(*np.nonzero(covered), strict=True):
         cell = ref[:, i, j]
         vals, counts = np.unique(cell[~np.isnan(cell)], return_counts=True)
         ref_mode[i, j] = vals[np.argmax(counts)]  # ties → smallest value
-    np.testing.assert_array_equal(SpatialMode().merge(patches, domain), ref_mode)
-    labels = SpatialMode(fill_value=-1).merge(patches, domain)
+    np.testing.assert_array_equal(
+        spatial.aggregation.Mode().merge(patches, domain), ref_mode
+    )
+    labels = spatial.aggregation.Mode(fill_value=-1).merge(patches, domain)
     assert labels.dtype == np.int64
     np.testing.assert_array_equal(labels, np.where(covered, ref_mode, -1))
 
@@ -557,7 +556,7 @@ def test_median_buffer_bounded_by_overlap() -> None:
 def test_vote_ties_go_to_lowest_class(empty_field: GeoTensor) -> None:
     zero = _patch(np.zeros((2, 2), dtype=int), 0, 0)
     one = _patch(np.ones((2, 2), dtype=int), 0, 0)
-    hard = SpatialHardVote(n_classes=2).merge([one, zero], empty_field)
+    hard = spatial.aggregation.HardVote(n_classes=2).merge([one, zero], empty_field)
     assert (hard[:2, :2] == 0).all()
-    mode = SpatialMode().merge([one, zero], empty_field)
+    mode = spatial.aggregation.Mode().merge([one, zero], empty_field)
     assert (mode[:2, :2] == 0).all()

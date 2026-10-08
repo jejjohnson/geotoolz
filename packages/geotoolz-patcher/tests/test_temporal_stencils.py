@@ -8,19 +8,13 @@ import pytest
 
 xr = pytest.importorskip("xarray")
 
+from geopatcher import TemporalPatcher, temporal
 from geopatcher._src.fields.xarray import XarrayField
-from geopatcher._src.time.stencils import (
+from geopatcher._src.temporal.stencils import (
     build_sampling_slices,
     valid_origin_points,
 )
-from geopatcher.time import (
-    TemporalCausalBoxcar,
-    TemporalForecast,
-    TemporalPatcher,
-    TemporalStencilGeometry,
-    TemporalStencilSampler,
-    TimeStencil,
-)
+from geopatcher.temporal.stencils import TimeStencil
 
 
 def _three_hourly_series(start: str = "2020-01-01", end: str = "2020-01-05"):
@@ -37,13 +31,13 @@ def _stencil() -> TimeStencil:
 
 def _patcher(stencil: TimeStencil) -> TemporalPatcher:
     return TemporalPatcher(
-        geometry=TemporalStencilGeometry(
+        geometry=temporal.geometry.StencilGeometry(
             stencil=stencil,
             source_step=np.timedelta64(3, "h"),
         ),
-        sampler=TemporalStencilSampler(stencil=stencil),
-        window=TemporalCausalBoxcar(),
-        aggregation=TemporalForecast(horizon=1),
+        sampler=temporal.sampler.StencilSampler(stencil=stencil),
+        window=temporal.window.CausalBoxcar(),
+        aggregation=temporal.aggregation.Forecast(horizon=1),
     )
 
 
@@ -125,4 +119,6 @@ def test_cadence_swap_does_not_change_stencil_length() -> None:
     # source cadence.
     stencil = _stencil()
     with pytest.raises(ValueError, match="stride-1 stencils only"):
-        TemporalStencilGeometry(stencil=stencil, source_step=np.timedelta64(1, "h"))
+        temporal.geometry.StencilGeometry(
+            stencil=stencil, source_step=np.timedelta64(1, "h")
+        )

@@ -65,11 +65,15 @@ from geopatcher._src.spatial_time import _merge_by_space
 
 
 if TYPE_CHECKING:
-    from geopatcher._src.spatial.aggregation import SpatialAggregation
+    from geopatcher._src.spatial.aggregation import (
+        Aggregation as SpatialAggregation,
+    )
     from geopatcher._src.spatial.patcher import SpatialPatcher
     from geopatcher._src.spatial_time import SpatioTemporalPatcher
-    from geopatcher._src.time.aggregation import TemporalAggregation
-    from geopatcher._src.time.patcher import TemporalPatcher
+    from geopatcher._src.temporal.aggregation import (
+        Aggregation as TemporalAggregation,
+    )
+    from geopatcher._src.temporal.patcher import TemporalPatcher
 
 
 def _compute_valid_mask(data: Any, nodata: Any = None) -> np.ndarray | None:
@@ -300,7 +304,7 @@ def _full_indexer(domain: Any) -> Any:
     """An indexer reading a field's whole extent, from its domain.
 
     A raster domain gets the full pixel ``Window`` (what `RasterField`,
-    `RioXarrayField` and `ObstoreCogField` read), a `GridDomain` the empty
+    `RioXarrayField` and `CogField` read), a `GridDomain` the empty
     ``isel`` dict (`XarrayField`, `DaskField`). Vector / point domains
     hold rows, not a time series, and raise. Anything else — duck-typed
     array fields — gets ``slice(None)``.
@@ -597,7 +601,7 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
             primary `Field`. Drives anchor placement, geometry,
             window, primary aggregation and the ``on_error`` policy
             (which covers every source's read and coregistration).
-        secondary_aggregators: ``{name: SpatialAggregation}`` — one
+        secondary_aggregators: ``{name: spatial.aggregation.Aggregation}`` — one
             aggregator per secondary. Names that don't match any
             entry in ``mfield.secondaries`` raise on ``split`` /
             ``merge`` rather than silently skipping (catches config
@@ -723,8 +727,8 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
         Each value is the aggregation's raw output, exactly as
         `SpatialPatcher.merge` returns it: a bare ``np.ndarray`` on the
         primary's grid for the dense aggregations (no transform, CRS,
-        nodata or attrs), a ``dict`` for `SpatialMeanStd` /
-        `SpatialInvVarWeightedMean` / `SpatialByIndex`. Use
+        nodata or attrs), a ``dict`` for `spatial.aggregation.MeanStd` /
+        `spatial.aggregation.InvVarWeightedMean` / `spatial.aggregation.ByIndex`. Use
         `merge_to_field` to get georeferenced carriers back.
 
         Every source is aggregated against the primary's domain
@@ -737,7 +741,7 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
         Streaming: ``patches`` is consumed once and each source's
         aggregation runs on its own thread over a bounded queue, so only
         a few patches per source are resident at a time — a streaming
-        aggregation (e.g. zarr-backed `SpatialOverlapAdd`) keeps its
+        aggregation (e.g. zarr-backed `spatial.aggregation.OverlapAdd`) keeps its
         bound on every source. Every aggregation (primary and secondary)
         gets the strict-mode streaming-safety check, which warns (or
         raises under `set_strict`) for a ``streaming_safe = False`` one.
@@ -848,7 +852,7 @@ class MatchedTemporalPatcher(_MatchedConfigMixin):
         primary: A regular `TemporalPatcher` configured for the
             primary series. Drives anchor placement, geometry,
             window, and primary aggregation.
-        secondary_aggregators: ``{name: TemporalAggregation}`` — one
+        secondary_aggregators: ``{name: temporal.aggregation.Aggregation}`` — one
             aggregator per secondary. Names that don't match any
             entry in ``mfield.secondaries`` raise on ``split`` /
             ``merge`` rather than silently skipping (typo guard).
@@ -1037,7 +1041,7 @@ class MatchedTemporalPatcher(_MatchedConfigMixin):
         ``secondary_aggregators`` but not in ``mfield.secondaries``
         raise — typo guard.
 
-        Unlike the spatial path, `TemporalAggregation.merge` takes
+        Unlike the spatial path, `temporal.aggregation.Aggregation.merge` takes
         only the patches (no domain argument), so ``mfield`` is used
         solely for the typo-guard check. ``patches`` is consumed once,
         streamed to every source's aggregation as in
@@ -1083,7 +1087,7 @@ class MatchedSpatioTemporalPatcher(_MatchedConfigMixin):
         primary: A regular `SpatioTemporalPatcher` configured for the
             primary field. Drives both spatial anchor placement and
             temporal windowing.
-        secondary_aggregators: ``{name: TemporalAggregation}`` — one
+        secondary_aggregators: ``{name: temporal.aggregation.Aggregation}`` — one
             temporal aggregator per secondary, matching the per-anchor
             temporal merge shape of `SpatioTemporalPatcher.merge`.
             Names that don't match any entry in ``mfield.secondaries``
@@ -1216,7 +1220,7 @@ class MatchedSpatioTemporalPatcher(_MatchedConfigMixin):
         Each source's value is what `SpatioTemporalPatcher.merge` returns
         for that source's members: ``(spatial_anchor,
         temporal_aggregation_result)`` pairs grouped by spatial anchor
-        (first-seen order). Secondaries use their `TemporalAggregation`;
+        (first-seen order). Secondaries use their `temporal.aggregation.Aggregation`;
         the primary uses ``self.primary.temporal.aggregation``.
         ``patches`` is consumed once and fanned out to every source as in
         `MatchedSpatialPatcher.merge`; each source's grouping still holds
