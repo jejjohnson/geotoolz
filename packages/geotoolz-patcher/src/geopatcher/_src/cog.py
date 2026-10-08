@@ -70,7 +70,11 @@ class AsyncCogReader:
         chips = await reader.load_many(windows)  # shared tiles fetched once
 
     A view shares the parsed header with its parent and only carries a
-    different ``window_focus``. Out-of-image pixels, and pixels the
+    different ``window_focus``. As with georeader's `RasterioReader`, a
+    view is an offset into the image, not a crop: a window read from a
+    view is placed relative to the view's origin but may reach past the
+    view's edges (it is clipped or filled only at the image's edges).
+    Out-of-image pixels, and pixels the
     COG's internal mask marks invalid, read as ``fill_value_default``.
     The reader pickles (by URL, through the field).
 
@@ -196,9 +200,11 @@ class AsyncCogReader:
     def read_from_window(
         self, window: Window, boundless: bool = True
     ) -> AsyncCogReader:
-        """A view of ``window`` (relative to this view). **Sync, no I/O.**
+        """A view of ``window``, offset from this view's origin. **Sync, no I/O.**
 
-        ``boundless=False`` clips the window to the image and raises
+        Like `RasterioReader.read_from_window`, the window is not clipped
+        to this view, only to the image: ``boundless=False`` clips it to
+        the image and raises
         ``rasterio.windows.WindowError`` when they are disjoint;
         ``boundless=True`` lets it extend past the image (filled on load).
         """
@@ -228,7 +234,7 @@ class AsyncCogReader:
         return await self.field.aselect(focus)
 
     async def load_many(self, windows: list[Window]) -> list[GeoTensor]:
-        """Read many windows (relative to this view) in one batch.
+        """Read many windows (offset from this view's origin) in one batch.
 
         Tiles shared between windows are fetched and decoded once (see
         `ObstoreCogField.aselect_many`); windows may extend past the image.

@@ -133,6 +133,22 @@ def test_views_do_no_io_and_compose(cog_path: Path, monkeypatch):
     assert inner.shape == (3, 8, 8)
 
 
+@pytest.mark.parametrize("boundless", [True, False])
+def test_nested_views_are_offsets_like_rasterio_reader(cog_path: Path, boundless: bool):
+    """A view is an offset, not a crop: child windows may reach past it."""
+    reader = _open(cog_path)
+    sync = RasterioReader(str(cog_path))
+    parent, child = Window(10, 0, 40, _H), Window(35, 0, 20, _H)
+    got = reader.read_from_window(parent, boundless=boundless).read_from_window(
+        child, boundless=boundless
+    )
+    expected = sync.read_from_window(parent, boundless=boundless).read_from_window(
+        child, boundless=boundless
+    )
+    assert got.window_focus == expected.window_focus == Window(45, 0, 20, _H)
+    _assert_same(asyncio.run(got.load()), expected.load())
+
+
 # ---------------------------------------------------------------- windows
 _WINDOWS = [
     Window(0, 0, _W, _H),
