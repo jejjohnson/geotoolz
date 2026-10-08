@@ -57,7 +57,7 @@ def _write(path: Path, *, title: str = "AHI-CMSK", link: str = NAME) -> Path:
         prob[2750:2760, 2750:2760] = 0.75
         prob.attrs["_FillValue"] = np.float32(-999.0)
         prob.attrs["units"] = np.bytes_(b"1")
-        for geo in ("Latitude", "Longitude"):
+        for geo in ("Latitude", "Longitude", "Latitude_Pc", "Longitude_Pc"):
             f.create_dataset(geo, shape=GRID, dtype="f4", chunks=(500, 500))
     return path
 

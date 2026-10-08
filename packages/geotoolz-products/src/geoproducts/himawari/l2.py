@@ -33,8 +33,9 @@ from geoproducts.himawari import constants
 __all__ = ["L2Reader", "full_disk_grid", "product_code"]
 
 _PRODUCT_RE = re.compile(r"AHI-(?P<code>[A-Z0-9]+)_v\d+r\d+_h\d{2}_s\d+")
-# Geolocation and the duplicated AWIPS copies are not data bands.
-_NOT_DATA = ("Latitude", "Longitude")
+# Geolocation (``Latitude``, parallax-corrected ``Latitude_Pc``, …) and the
+# duplicated AWIPS copies are not data bands.
+_GEOLOCATION = ("Latitude", "Longitude")
 
 
 def product_code(name: str) -> str:
@@ -119,7 +120,7 @@ class L2Reader(PackedGridReader):
             self._available = tuple(
                 n
                 for n in grid_variables(f, self._grid_shape)
-                if n not in _NOT_DATA and not n.endswith("AWIPS")
+                if not n.startswith(_GEOLOCATION) and not n.endswith("AWIPS")
             )
             self._load_variables(f, self._resolve(variables))
 

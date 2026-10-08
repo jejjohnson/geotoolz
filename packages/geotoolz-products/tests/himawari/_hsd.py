@@ -66,6 +66,10 @@ def write_hsd(
     start: datetime = START,
     updated_vis: bool = True,
     byte_order: int = 0,
+    timeline: int = 300,
+    compression: int = 0,
+    rotation_urad: float = 0.0,
+    shift_px: float = 0.0,
     compress: bool | None = None,
 ) -> Path:
     """Write one segment; ``counts`` is its ``(lines, columns)`` image.
@@ -86,11 +90,11 @@ def write_hsd(
         + b"MSC".ljust(16, b"\0")
         + area.encode().ljust(4, b"\0")
         + bytes(2)
-        + struct.pack("<H", 300)
+        + struct.pack("<H", timeline)
         + struct.pack("<ddd", _mjd(start), _mjd(start) + 0.0005, _mjd(start) + 0.003)
         + struct.pack("<II", header_length, counts.nbytes),
     )
-    b2 = _block(2, 50, struct.pack("<HHHB", 16, columns, lines, 0))
+    b2 = _block(2, 50, struct.pack("<HHHB", 16, columns, lines, compression))
     b3 = _block(
         3,
         127,
@@ -127,7 +131,13 @@ def write_hsd(
     b5 = _block(5, 147, body5)
     b6 = _block(6, 259, b"")
     b7 = _block(7, 47, struct.pack("<BBH", total_segments, segment, first_line))
-    b8 = _block(8, 81, b"")
+    b8 = _block(
+        8,
+        81,
+        struct.pack("<ffdH", 1.0, 1.0, rotation_urad, 2)
+        + struct.pack("<Hff", first_line, shift_px, 0.0)
+        + struct.pack("<Hff", first_line + lines - 1, 0.0, 0.0),
+    )
     b9 = _block(9, 85, b"")
     b10 = _block(10, 47, b"")
     b11 = _block(11, 259, b"")

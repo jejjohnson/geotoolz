@@ -33,6 +33,8 @@ def test_header_fields(hsd) -> None:
     assert header.end_time > header.start_time
     assert header.tb_coefficients == pytest.approx((-0.1385, 1.0006, -2.2e-6))
     assert np.isnan(header.albedo_coefficient)
+    assert header.timeline == 300
+    assert header.rotation_urad == 0.0 and header.max_shift_px == 0.0
 
 
 def test_visible_header_carries_the_updated_calibration(hsd) -> None:
@@ -91,3 +93,16 @@ def test_missing_blocks(hsd, tmp_path) -> None:
     path.write_bytes(bytes(raw))
     with pytest.raises(ValueError, match=r"lacks blocks \[7\]"):
         read_header(path)
+
+
+def test_in_file_compressed_data_blocks_are_refused(hsd) -> None:
+    with pytest.raises(ValueError, match="compressed in-file"):
+        read_header(hsd(np.zeros((2, 100), np.uint16), compression=2))
+
+
+def test_navigation_correction_is_decoded(hsd) -> None:
+    header = read_header(
+        hsd(np.zeros((2, 100), np.uint16), rotation_urad=3.5, shift_px=-0.75)
+    )
+    assert header.rotation_urad == pytest.approx(3.5)
+    assert header.max_shift_px == pytest.approx(0.75)

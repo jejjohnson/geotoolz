@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pickle
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -203,3 +204,27 @@ def test_segments_of_different_bands_or_scans_are_refused(hsd, full_disk) -> Non
         himawari.Reader([b13[0], b13[0]])
     with pytest.raises(ValueError, match="at least one"):
         himawari.Reader([])
+
+
+def test_segments_of_different_scans_are_refused(hsd) -> None:
+    rows = np.zeros((50, SIZE), np.uint16)
+    first = hsd(rows, segment=1, total_segments=2, name="s1.DAT")
+    later = hsd(rows, segment=2, total_segments=2, timeline=310, name="s2.DAT")
+    with pytest.raises(ValueError, match="'timeline'"):
+        himawari.Reader([first, later])
+    next_day = hsd(
+        rows,
+        segment=2,
+        total_segments=2,
+        start=datetime(2026, 10, 8, 3, 4, tzinfo=UTC),
+        name="s2b.DAT",
+    )
+    with pytest.raises(ValueError, match="different days"):
+        himawari.Reader([first, next_day])
+
+
+def test_navigation_corrections_warn(hsd) -> None:
+    path = hsd(np.zeros((SIZE, SIZE), np.uint16), shift_px=1.5)
+    with pytest.warns(UserWarning, match="navigation corrections"):
+        reader = himawari.Reader(path)
+    assert reader.header.max_shift_px == pytest.approx(1.5)

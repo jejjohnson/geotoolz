@@ -15,6 +15,7 @@ metres, ``sweep=y``; see
 from __future__ import annotations
 
 import os
+import warnings
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -48,6 +49,7 @@ _SHARED = (
     "coff",
     "loff",
     "sub_lon",
+    "timeline",
 )
 
 
@@ -119,6 +121,11 @@ class Reader(ProductReader):
                         f"{Path(path).name} differs from the first segment in "
                         f"{name!r}: segments must be one band of one scan."
                     )
+        if len({h.start_time.date() for h in headers}) > 1:
+            raise ValueError(
+                "segments come from different days: segments must be one band "
+                "of one scan."
+            )
         numbers = [h.segment for h in headers]
         if len(set(numbers)) != len(numbers):
             raise ValueError(f"duplicated segments: {sorted(numbers)}.")
@@ -130,6 +137,15 @@ class Reader(ProductReader):
             raise ValueError(
                 f"brightness_temperature applies to bands 7-16; "
                 f"{self._name(first)} is reflective."
+            )
+        if any(h.rotation_urad or h.max_shift_px for h in headers):
+            warnings.warn(
+                "HSD navigation corrections (block 8) are not applied: the grid "
+                "is the nominal projection, off by up to "
+                f"{max(h.max_shift_px for h in headers):.2f} px plus a "
+                f"{max(abs(h.rotation_urad) for h in headers):.3g} µrad rotation.",
+                UserWarning,
+                stacklevel=2,
             )
         order = np.argsort(numbers)
         self._paths: tuple[Path, ...] = tuple(Path(paths[i]) for i in order)

@@ -16,6 +16,8 @@ Only the blocks a reader needs are decoded:
 5. calibration — count → radiance, plus radiance → albedo (bands 1-6) or
    radiance → brightness temperature (bands 7-16)
 7. segment — total segments, sequence number, first line
+8. navigation correction — image rotation and per-line shifts (zero in
+   JMA's operational files, which are navigated on the ground)
 """
 
 from __future__ import annotations
@@ -88,6 +90,10 @@ class HSDHeader:
             Boltzmann constants as written in the file (bands 7-16).
         total_segments / segment: Segment count and 1-based sequence number.
         first_line: 1-based line of the area image this segment starts at.
+        timeline: Observation timeline ``HHMM`` of the scan (block 1): the
+            nominal 10-minute slot every segment of one scan shares.
+        rotation_urad: Navigation rotation correction (block 8, µrad).
+        max_shift_px: Largest per-line column / line shift (block 8, pixels).
     """
 
     satellite: str
@@ -121,6 +127,9 @@ class HSDHeader:
     total_segments: int
     segment: int
     first_line: int
+    timeline: int = 0
+    rotation_urad: float = 0.0
+    max_shift_px: float = 0.0
 
     @property
     def area_lines(self) -> int:
@@ -164,7 +173,14 @@ def _parse(raw: bytes) -> HSDHeader:
     b1, b2, b3, b5, b7 = (blocks[n] for n in (1, 2, 3, 5, 7))
     start, end, _created = struct.unpack_from("<ddd", b1, 46)
     (header_length,) = struct.unpack_from("<I", b1, 70)
-    bits, columns, lines = struct.unpack_from("<HHH", b2, 3)
+    bits, columns, lines, compression = struct.unpack_from("<HHHB", b2, 3)
+    if compression != 0:
+        raise ValueError(
+            f"HSD data blocks compressed in-file (flag {compression}) are not "
+            "supported; JMA / NOAA distribute uncompressed blocks (whole-file "
+            ".bz2 is fine)."
+        )
+    (timeline,) = struct.unpack_from("<H", b1, 44)
     sub_lon, cfac, lfac, coff, loff, distance, re_km, rp_km = struct.unpack_from(
         "<dIIffddd", b3, 3
     )
@@ -184,6 +200,7 @@ def _parse(raw: bytes) -> HSDHeader:
             "<dddd", b5, tail
         )
     total_segments, segment, first_line = struct.unpack_from("<BBH", b7, 3)
+    rotation, max_shift = _navigation_correction(blocks.get(8))
     return HSDHeader(
         satellite=_text(b1[6:22]),
         area=_text(b1[38:42]),
@@ -216,7 +233,27 @@ def _parse(raw: bytes) -> HSDHeader:
         total_segments=total_segments,
         segment=segment,
         first_line=first_line,
+        timeline=timeline,
+        rotation_urad=rotation,
+        max_shift_px=max_shift,
     )
+
+
+def _navigation_correction(b8: bytes | None) -> tuple[float, float]:
+    """Block 8: ``(rotation µrad, largest per-line shift in pixels)``."""
+    if b8 is None or len(b8) < 21:
+        return 0.0, 0.0
+    (rotation,) = struct.unpack_from("<d", b8, 11)
+    (count,) = struct.unpack_from("<H", b8, 19)
+    shifts = [
+        max(abs(col), abs(line))
+        for _, col, line in (
+            struct.unpack_from("<Hff", b8, 21 + 10 * i)
+            for i in range(count)
+            if 21 + 10 * (i + 1) <= len(b8)
+        )
+    ]
+    return float(rotation), float(max(shifts, default=0.0))
 
 
 def read_header(path: Source) -> HSDHeader:
