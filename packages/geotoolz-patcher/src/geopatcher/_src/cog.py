@@ -301,10 +301,12 @@ async def read_from_window(
     """Read ``window`` of ``reader`` (see `AsyncCogReader.read_from_window`).
 
     Like `georeader.read.read_from_window`, ``boundless=False`` on a
-    window that misses the image returns ``None`` (no fetch).
+    window that misses the reader's own extent (the view, for a view)
+    returns ``None`` (no fetch).
     """
+    extent = _window(0, 0, reader.width, reader.height)
     if not boundless and not rasterio.windows.intersect(
-        [_window(*_snap_window(window)), reader._raster_window]
+        [_window(*_snap_window(window)), extent]
     ):
         return None
     return await reader.read_from_window(window, boundless=boundless).load(
@@ -371,12 +373,14 @@ async def _load_footprint(
     ``georeader.read.read_reproject`` reads from a lazy reader. GDAL
     derives its resampling scale from the source extent, so a different
     chunk (even one only trimmed of fill) changes interpolated values.
-    Like georeader, a polygon that misses the image fetches nothing: a
-    1x1 fill chunk just off the image carries the metadata for the
-    all-nodata result.
+    Like georeader, a polygon that misses the reader (the view, for a
+    view) fetches nothing: a 1x1 fill chunk just off the *image* — placed
+    in image coordinates, so it never lands on real pixels next to a view
+    — carries the metadata for the all-nodata result.
     """
     if not reader.footprint(crs=crs_polygon).intersects(polygon):
-        return await reader.read_from_window(_window(-1, -1, 1, 1)).load()
+        off_image = dataclasses.replace(reader, window_focus=_window(-1, -1, 1, 1))
+        return await off_image.load()
     window = _read.window_from_polygon(reader, polygon, crs_polygon)
     window = window_utils.round_outer_window(
         window_utils.pad_window(window, (_REPROJECT_PAD, _REPROJECT_PAD))

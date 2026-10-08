@@ -329,6 +329,32 @@ def test_bounded_read_that_misses_the_image_returns_none(cog_path: Path):
     assert read.read_from_bounds(sync, far, boundless=False) is None
 
 
+def test_bounded_read_beyond_a_view_returns_none(cog_path: Path):
+    """The disjoint check uses the view's own extent, like georeader."""
+    view = _open(cog_path).read_from_window(Window(80, 0, 20, _H))
+    sync_view = RasterioReader(str(cog_path)).read_from_window(Window(80, 0, 20, _H))
+    child = Window(30, 0, 5, 5)  # inside the image, outside the 20-px view
+    assert read.read_from_window(sync_view, child, boundless=False) is None
+    assert asyncio.run(cog.read_from_window(view, child, boundless=False)) is None
+
+
+def test_reprojection_missing_a_view_reads_no_neighbouring_pixel(cog_path: Path):
+    """A destination off a view, touching the pixel before it, is all nodata."""
+    view = _open(cog_path).read_from_window(Window(40, 40, 20, 20))
+    sync_view = RasterioReader(str(cog_path)).read_from_window(Window(40, 40, 20, 20))
+    kwargs = {
+        "dst_crs": "EPSG:32630",
+        "dst_transform": _TRANSFORM
+        * Affine.translation(38.2, 38.2)
+        * Affine.scale(0.4),
+        "window_out": Window(0, 0, 4, 4),
+        "resampling": Resampling.nearest,
+    }
+    got = asyncio.run(cog.read_reproject(view, **kwargs))
+    _assert_same(got, read.read_reproject(sync_view, **kwargs))
+    assert (np.asarray(got) == _NODATA).all()
+
+
 def test_read_to_crs_matches_sync(cog_path: Path):
     reader = _open(cog_path)
     got = asyncio.run(cog.read_to_crs(reader, "EPSG:4326"))
