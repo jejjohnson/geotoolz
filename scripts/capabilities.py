@@ -64,6 +64,11 @@ ALLOWED_SHARED_NAMES: dict[str, str] = {
         "geopatcher.integrations.pipekit.Stitch (merge patches) — pending a "
         "rename decision"
     ),
+    "MinMax": (
+        "geotoolz.radiometry.MinMax (linear stretch into [0, 1]) vs "
+        "geopatcher.spatial.aggregation.MinMax (global min / max of the "
+        "patches) — pending a rename decision"
+    ),
 }
 
 
@@ -74,13 +79,6 @@ ALLOWED_ALIASES: set[str] = {"MergePatches", "Stitch"}  # geotoolz.patch_ops bri
 def _allowed_by_layout(owners: dict[str, object]) -> bool:
     """Collisions the package layout makes on purpose."""
     modules = {getattr(obj, "__module__", "") for obj in owners.values()}
-    # geopatcher's axes are unprefixed and always used qualified
-    # (spatial.aggregation.MinMax).
-    if any(
-        m.startswith(("geopatcher._src.spatial", "geopatcher._src.temporal"))
-        for m in modules
-    ):
-        return True
     # A sensor's presets bind a geotoolz operator to its band names under the
     # operator's own name (geoproducts.goes.presets.NDVI).
     if any(m.endswith(".presets") for m in modules):

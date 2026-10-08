@@ -190,5 +190,5 @@ When the user has a `.plans/<wave>-backlog.md` file drafted from `docs/templates
 
 ## Related skills
 
-- [`link-gh-issues`](./link-gh-issues.md) — Apply native sub-issue and blocked-by links after issues are created. Invoke after this skill finishes creating issues.
-- [`squash-commit`](./squash-commit.md) — Generate a squash commit message when merging an issue's PR.
+- [`link-gh-issues`](../link-gh-issues/SKILL.md) — Apply native sub-issue and blocked-by links after issues are created. Invoke after this skill finishes creating issues.
+- [`squash-commit`](../squash-commit/SKILL.md) — Generate a squash commit message when merging an issue's PR.
