@@ -66,9 +66,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote, urlsplit
 
+from geocloud._src.redact import redact
+
 
 if TYPE_CHECKING:
     from obstore.store import ObjectStore
+
+
+def _r(location: object) -> str:
+    """``repr`` of a URI with any signature or token masked."""
+    return repr(redact(str(location)))
 
 
 _S3_SCHEMES = frozenset({"s3", "s3a"})
@@ -109,7 +116,7 @@ class _Location:
 def _azure_account_from_host(host: str, uri: str) -> str:
     account = host.split(".", 1)[0]
     if not account:
-        raise ValueError(f"obstore client pool: no Azure account in {uri!r}.")
+        raise ValueError(f"obstore client pool: no Azure account in {_r(uri)}.")
     return account
 
 
@@ -117,7 +124,7 @@ def _split_container(path: str, uri: str) -> tuple[str, str]:
     container, _, key = path.partition("/")
     if not container:
         raise ValueError(
-            f"obstore client pool: no Azure container in {uri!r}; expected "
+            f"obstore client pool: no Azure container in {_r(uri)}; expected "
             "the container as the first path segment."
         )
     return container, key
@@ -144,17 +151,17 @@ def _locate_hf(uri: str) -> _Location:
     parts = uri[uri.index("://") + 3 :].split("/")
     if "" in parts:
         raise ValueError(
-            f"obstore client pool: {uri!r} has an empty path segment "
+            f"obstore client pool: {_r(uri)} has an empty path segment "
             "(`//`, or a leading / trailing `/`)."
         )
     if parts and parts[0] in _HF_SINGULAR:
         raise ValueError(
-            f"obstore client pool: {uri!r} — `hf://{parts[0]}/` is not a repo "
+            f"obstore client pool: {_r(uri)} — `hf://{parts[0]}/` is not a repo "
             f"type; use the plural `{parts[0]}s/`."
         )
     if parts and parts[0] in _HF_UNSUPPORTED:
         raise ValueError(
-            f"obstore client pool: {uri!r} — `hf://{parts[0]}/` URIs are not "
+            f"obstore client pool: {_r(uri)} — `hf://{parts[0]}/` URIs are not "
             "supported; use `models/`, `datasets/` or `spaces/`."
         )
     kind = _HF_REPO_TYPES[parts.pop(0)] if parts and parts[0] in _HF_REPO_TYPES else ""
@@ -162,7 +169,7 @@ def _locate_hf(uri: str) -> _Location:
     files = parts[2:]
     if at and not revision:
         raise ValueError(
-            f"obstore client pool: {uri!r} has an empty revision after `@`; "
+            f"obstore client pool: {_r(uri)} has an empty revision after `@`; "
             "name the revision or drop the `@`."
         )
     # Special refs carry slashes: `@refs/pr/3/file`, `@refs/convert/parquet/…`.
@@ -170,7 +177,7 @@ def _locate_hf(uri: str) -> _Location:
         revision, files = f"refs/{files[0]}/{files[1]}", files[2:]
     if len(parts) < 2 or not files:
         raise ValueError(
-            f"obstore client pool: {uri!r} must name `org/repo/path` (after an "
+            f"obstore client pool: {_r(uri)} must name `org/repo/path` (after an "
             "optional `models/`, `datasets/` or `spaces/`)."
         )
     org, rest = parts[0], "/".join(files)
@@ -239,7 +246,7 @@ def _locate(uri: str) -> _Location:
             container, _, host = netloc.partition("@")
             if not container:
                 raise ValueError(
-                    f"obstore client pool: empty Azure container in {uri!r}."
+                    f"obstore client pool: empty Azure container in {_r(uri)}."
                 )
             return _Location(
                 "azure", scheme, _azure_account_from_host(host, uri), container, path
@@ -248,11 +255,11 @@ def _locate(uri: str) -> _Location:
             raise ValueError(
                 f"obstore client pool: {scheme}:// URIs must name the container "
                 "and account as `container@account.dfs.core.windows.net`; got "
-                f"{uri!r}."
+                f"{_r(uri)}."
             )
         # ``az://account/container/key``
         if not netloc:
-            raise ValueError(f"obstore client pool: no Azure account in {uri!r}.")
+            raise ValueError(f"obstore client pool: no Azure account in {_r(uri)}.")
         container, key = _split_container(path, uri)
         return _Location("azure", scheme, netloc, container, key)
     if scheme in _HF_SCHEMES:
@@ -268,7 +275,7 @@ def _locate(uri: str) -> _Location:
             )
         return _Location("http", scheme, netloc, parsed.query or None, path)
     raise ValueError(
-        f"obstore client pool: unsupported scheme {scheme!r} for URI {uri!r}. "
+        f"obstore client pool: unsupported scheme {scheme!r} for URI {_r(uri)}. "
         f"Supported: {', '.join(sorted(SUPPORTED_SCHEMES))}."
     )
 
@@ -472,7 +479,7 @@ def mount(uri: str, store: ObjectStore) -> None:
     loc = _locate(uri)
     if loc.key:
         raise ValueError(
-            f"mount: {uri!r} names an object ({loc.key!r}); mount the bucket, "
+            f"mount: {_r(uri)} names an object ({loc.key!r}); mount the bucket, "
             "container or host it lives under."
         )
     with _POOL_LOCK:
@@ -504,11 +511,17 @@ def get_obstore(
     and TLS sessions survive across files. Request objects from it with
     `object_key`. A store `mount`-ed at the URI's root wins over the pool.
 
+    Credentials registered for the URI's root with
+    `geocloud.credentials.set_credentials` (or the credentials file) are merged
+    under ``storage_options``: an option passed here wins over the
+    registered one.
+
     Args:
         uri: A cloud URI (see the module docstring for the forms).
         storage_options: Keyword arguments for the obstore store
             constructor (``client_options``, ``retry_config``,
-            credentials, ...). They are part of the pool key, so
+            credentials, ...), over the registered ones. They are part of
+            the pool key, so
             different options give a different client. ``prefix`` is
             rejected, and Azure ``account_name`` / ``container_name``
             must agree with the URI.
@@ -517,6 +530,11 @@ def get_obstore(
         ValueError: unsupported scheme, malformed URI, or conflicting
             ``storage_options``.
     """
+    from geocloud._src.credentials import registered_options
+
+    registered = registered_options(uri)
+    if registered:
+        storage_options = {**registered, **(storage_options or {})}
     key = _pool_key(uri, storage_options)
     with _POOL_LOCK:
         mounted = _MOUNTS.get(_mount_key(uri))
