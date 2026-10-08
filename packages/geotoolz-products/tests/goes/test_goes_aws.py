@@ -9,30 +9,13 @@ import urllib.request
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+from _s3_fake import http_error, listing
 
 from geoproducts.goes import aws
 
 
 RADC = "OR_ABI-L1b-RadC-M6C13_G19_s20262801201178_e20262801203551_c20262801203578.nc"
 RADM = "OR_ABI-L1b-RadM2-M6C01_G18_s20262801200556_e20262801201025_c20262801201053.nc"
-
-
-def _listing(keys: list[str], *, token: str | None = None) -> bytes:
-    contents = "".join(
-        f"<Contents><Key>{key}</Key><Size>{100 + i}</Size></Contents>"
-        for i, key in enumerate(keys)
-    )
-    tail = (
-        f"<IsTruncated>true</IsTruncated>"
-        f"<NextContinuationToken>{token}</NextContinuationToken>"
-        if token
-        else "<IsTruncated>false</IsTruncated>"
-    )
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
-        f"{contents}{tail}</ListBucketResult>"
-    ).encode()
 
 
 def _key(hour: int, minute: int, channel: int, *, product: str = "RadC") -> str:
@@ -43,42 +26,9 @@ def _key(hour: int, minute: int, channel: int, *, product: str = "RadC") -> str:
     )
 
 
-class FakeS3:
-    """Serves ListObjectsV2 pages and object bodies; records every URL."""
-
-    def __init__(self, pages: dict[str, list[bytes]], bodies: dict[str, bytes]):
-        self.pages = pages
-        self.bodies = bodies
-        self.urls: list[str] = []
-
-    def urlopen(self, url: str, timeout: float | None = None) -> io.BytesIO:
-        self.urls.append(url)
-        parsed = urllib.parse.urlsplit(url)
-        if parsed.path in {"", "/"}:
-            query = urllib.parse.parse_qs(parsed.query)
-            pages = self.pages.get(query["prefix"][0], [_listing([])])
-            index = int(query.get("continuation-token", ["0"])[0])
-            return io.BytesIO(pages[index])
-        return io.BytesIO(self.bodies[urllib.parse.unquote(parsed.path[1:])])
-
-
 @pytest.fixture(autouse=True)
 def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(aws, "_BACKOFF_S", 0.0)
-
-
-def _http_error(url: str, code: int, body: bytes = b"") -> urllib.error.HTTPError:
-    return urllib.error.HTTPError(url, code, "error", {}, io.BytesIO(body))  # type: ignore[arg-type]
-
-
-@pytest.fixture
-def fake_s3(monkeypatch: pytest.MonkeyPatch):
-    def install(pages=None, bodies=None) -> FakeS3:
-        fake = FakeS3(pages or {}, bodies or {})
-        monkeypatch.setattr(urllib.request, "urlopen", fake.urlopen)
-        return fake
-
-    return install
 
 
 class TestNames:
@@ -138,8 +88,8 @@ class TestListFiles:
         h13 = [_key(13, 1, 13), _key(13, 31, 13)]
         fake = fake_s3(
             pages={
-                "ABI-L1b-RadC/2026/280/12/": [_listing(h12)],
-                "ABI-L1b-RadC/2026/280/13/": [_listing(h13)],
+                "ABI-L1b-RadC/2026/280/12/": [listing(h12)],
+                "ABI-L1b-RadC/2026/280/13/": [listing(h13)],
             }
         )
         files = aws.list_files(
@@ -161,8 +111,8 @@ class TestListFiles:
         fake_s3(
             pages={
                 prefix: [
-                    _listing([_key(12, 1, 1)], token="1"),
-                    _listing([_key(12, 6, 1)]),
+                    listing([_key(12, 1, 1)], token="1"),
+                    listing([_key(12, 6, 1)]),
                 ]
             }
         )
@@ -175,7 +125,7 @@ class TestListFiles:
             f"{prefix}OR_ABI-L2-ACMC-M6_G19_s20262801201178_e20262801203551"
             "_c20262801203578.nc"
         )
-        fake_s3(pages={prefix: [_listing([key])]})
+        fake_s3(pages={prefix: [listing([key])]})
         start = datetime(2026, 10, 7, 12)
         assert aws.list_files(satellite="G19", product="ABI-L2-ACMC", start=start)
         assert not aws.list_files(
@@ -185,7 +135,7 @@ class TestListFiles:
     def test_mesoscale_sector_filter(self, fake_s3) -> None:
         prefix = "ABI-L1b-RadM/2026/280/12/"
         keys = [_key(12, 1, 2, product="RadM1"), _key(12, 2, 2, product="RadM2")]
-        fake_s3(pages={prefix: [_listing(keys)]})
+        fake_s3(pages={prefix: [listing(keys)]})
         files = aws.list_files(
             satellite="G19",
             product="ABI-L1b-RadM",
@@ -245,8 +195,8 @@ class TestDownload:
 class TestRetries:
     def test_transient_errors_are_retried(self, monkeypatch, tmp_path) -> None:
         failures = [
-            _http_error("u", 404, b"<Code>NoSuchBucket</Code>"),
-            _http_error("u", 503),
+            http_error("u", 404, b"<Code>NoSuchBucket</Code>"),
+            http_error("u", 503),
             urllib.error.URLError("timed out"),
         ]
         calls: list[str] = []
@@ -266,7 +216,7 @@ class TestRetries:
 
         def missing(url, timeout=None):
             calls.append(url)
-            raise _http_error(url, 404, b"<Code>NoSuchKey</Code>")
+            raise http_error(url, 404, b"<Code>NoSuchKey</Code>")
 
         monkeypatch.setattr(urllib.request, "urlopen", missing)
         with pytest.raises(urllib.error.HTTPError):
@@ -279,7 +229,7 @@ class TestRetries:
 
         def down(url, timeout=None):
             calls.append(url)
-            raise _http_error(url, 500)
+            raise http_error(url, 500)
 
         monkeypatch.setattr(urllib.request, "urlopen", down)
         with pytest.raises(urllib.error.HTTPError):

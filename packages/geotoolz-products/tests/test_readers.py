@@ -25,6 +25,7 @@ def test_public_surface() -> None:
         "ProductReader",
         "__version__",
         "goes",
+        "himawari",
         "stack",
         "toy_sensor",
     }

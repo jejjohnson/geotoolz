@@ -14,7 +14,7 @@ operator; the recipes themselves need no extra.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from geoproducts._src.presets import Recipe
 
 
 __all__ = [
@@ -25,33 +25,6 @@ __all__ = [
     "TRUE_COLOR",
     "Recipe",
 ]
-
-
-@dataclass(frozen=True)
-class Recipe:
-    """One RGB recipe: per-channel expression, stretch and gamma.
-
-    Attributes:
-        name: Short identifier.
-        red: Red-channel band name or band-math expression.
-        green: Green-channel band name or expression.
-        blue: Blue-channel band name or expression.
-        vmin: Per-channel value mapped to 0 (above ``vmax`` inverts).
-        vmax: Per-channel value mapped to 1.
-        gamma: Per-channel display gamma.
-        channels: ABI channels the expressions read.
-        description: What the composite shows.
-    """
-
-    name: str
-    red: str
-    green: str
-    blue: str
-    vmin: tuple[float, float, float]
-    vmax: tuple[float, float, float]
-    gamma: tuple[float, float, float]
-    channels: tuple[str, ...]
-    description: str
 
 
 TRUE_COLOR = Recipe(

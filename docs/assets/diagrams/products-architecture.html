@@ -6,17 +6,16 @@
 <link rel="stylesheet" href="_base.css">
 <style>
   #diagram { width: 1600px; }
-  .top { display: grid; grid-template-columns: 520px 1fr; column-gap: 60px; align-items: stretch; }
   .node.read { --accent: var(--read); }
   .node.cut { --accent: var(--cut); background: var(--cut-bg); }
   .node.compute { --accent: var(--compute); background: var(--compute-bg); }
-  .surface { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; margin-top: 8px; }
+  .row { display: grid; grid-template-columns: 1fr 1.25fr 1fr; column-gap: 80px; align-items: stretch; }
+  .surface { display: grid; grid-template-columns: 1fr; gap: 5px; margin-top: 10px; }
   .surface code { font-family: var(--mono); font-size: 11.5px; color: var(--read-ink); }
-  .ns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .cm { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px 46px; }
+  .ns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .abc { border-style: dashed; }
-  .impls { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 40px; align-items: stretch; }
-  .impls .desc { margin-top: 4px; }
+  .examples { margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .examples code { font-family: var(--mono); color: var(--read-ink); }
   .bottom { display: grid; grid-template-columns: 1fr 300px 300px; column-gap: 60px; margin-top: 70px; align-items: center; }
 </style>
 </head>
@@ -25,64 +24,61 @@
   <div class="title">geoproducts — every product becomes a GeoTensor</div>
   <div class="subtitle">Readers depend on georeader, never on geotoolz; what they return is what every operator and patcher takes.</div>
 
-  <div class="top">
-    <div class="lane read" id="lane-readers">
-      <div class="lane-head"><span class="verb">sensor readers</span><span class="pkg">ProductReader</span></div>
+  <div class="lane read" id="lane-products">
+    <div class="lane-head"><span class="verb">products</span><span class="pkg">geoproducts.&lt;product&gt;</span></div>
+    <div class="row">
+      <div class="node read" id="toolkit">
+        <div class="name">shared toolkit <span style="font-weight:500;color:var(--muted)">(geoproducts._src)</span></div>
+        <div class="desc">what every product reuses instead of repeating</div>
+        <div class="surface">
+          <code>net · s3 — retries · rate limits · anonymous buckets</code>
+          <code>files · credentials — atomic writes · tokens</code>
+          <code>hdf — CF-packed variables · flag tables</code>
+          <code>geostationary — fixed grids · Earth-disk mask</code>
+          <code>presets — Recipe · RGB / operator builders</code>
+        </div>
+      </div>
+
+      <div class="node read" id="ns">
+        <div class="name">one namespace per product</div>
+        <div class="desc">the same small surface, whatever the mission, format or API</div>
+        <div class="ns">
+          <span class="chip"><span class="t">Reader</span><span class="s">· L2Reader — lazy, calibrated</span></span>
+          <span class="chip"><span class="t">aws · api</span><span class="s">list · download</span></span>
+          <span class="chip"><span class="t">BANDS · constants</span></span>
+          <span class="chip"><span class="t">recipes</span><span class="s">RGBs as data</span></span>
+          <span class="chip"><span class="t">presets</span><span class="s">[operators]</span></span>
+          <span class="chip"><span class="t">stack</span><span class="s">any readers → one grid</span></span>
+        </div>
+        <div class="examples">e.g. <code>goes</code> · <code>himawari</code> · <code>carbonmapper</code> · <code>toy_sensor</code> — each behind its own extra</div>
+      </div>
+
       <div class="node read abc" id="abc">
         <div class="name"><code>ProductReader</code> <span style="font-weight:500;color:var(--muted)">(georeader GeoData, ABC)</span></div>
         <div class="surface">
-          <code>crs · transform · shape</code><code>read_from_window(window)</code>
-          <code>band_names · dtype</code><code>_read_window()  — lazy</code>
-          <code>bounds · footprint</code><code>_read_bytes()  — obstore</code>
+          <code>crs · transform · shape · bounds</code>
+          <code>band_names · dtype · fill value</code>
+          <code>read_from_window / read_from_bounds</code>
+          <code>_read_window() — lazy, boundless</code>
+          <code>_read_bytes() — pooled obstore</code>
         </div>
-      </div>
-      <div class="impls">
-        <div class="node read" id="toy">
-          <div class="name"><code>toy_sensor</code></div>
-          <div class="desc">the in-memory reference namespace</div>
-          <div class="ns"><span class="chip"><span class="t">Reader</span></span><span class="chip"><span class="t">BANDS</span></span><span class="chip"><span class="t">CONSTANTS</span></span><span class="chip"><span class="t">presets.NDVI</span><span class="s">[operators]</span></span></div>
-        </div>
-        <div class="node read" id="goes">
-          <div class="name"><code>goes</code> <span style="font-weight:500;color:var(--muted)">[goes]</span></div>
-          <div class="desc">GOES-R ABI · +proj=geos grid · L1b + every L2 product</div>
-          <div class="ns"><span class="chip"><span class="t">Reader</span><span class="s">L1b · rad · refl · BT</span></span><span class="chip"><span class="t">L2Reader</span><span class="s">ACM · ACHA · MCMIP …</span></span><span class="chip"><span class="t">quality</span><span class="s">DQF</span></span><span class="chip"><span class="t">stack</span><span class="s">one grid</span></span><span class="chip"><span class="t">aws</span><span class="s">NOAA buckets</span></span><span class="chip"><span class="t">recipes · presets</span><span class="s">[operators]</span></span></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="lane read" id="lane-cm">
-      <div class="lane-head"><span class="verb">provider client</span><span class="pkg">carbonmapper</span><span class="imp">[carbonmapper]</span></div>
-      <div class="cm">
-        <div class="node read" id="cfg"><div class="name"><code>config</code></div><div class="desc">CarbonMapperConfig — file · env · JWT renewal</div></div>
-        <div class="node read" id="dl"><div class="name"><code>download</code></div><div class="desc">REST + STAC primitives; Bearer only to the API host</div></div>
-        <div class="node read" id="aq"><div class="name"><code>api_queries</code></div><div class="desc">get_plume · list_plumes · list_sources · …</div></div>
-        <div class="node read" id="rec"><div class="name">records</div><div class="desc">CMRawPlume · CMSource · CMTileItem</div></div>
-        <div class="node read" id="img" style="grid-column: 1 / 4;"><div class="name"><code>image</code> · <code>rasters</code></div><div class="desc">CMPlumeImage (L3A per-plume bundle) · CMImageRaster (L2B scene) — lazy RasterioReader bands; <code class="op" style="font-size:11.5px">tile_cmf()</code> crops the scene at native resolution</div></div>
-        <div class="node read" id="lab"><div class="name"><code>sources_raster</code></div><div class="desc">rasterize_sources_like → label masks</div></div>
       </div>
     </div>
   </div>
 
   <div class="bottom">
     <div class="node solid" id="gt" style="--accent: var(--read);"><div class="name">GeoTensor</div><div class="desc">CRS · transform · band_names · fill value — the one carrier the rest of the stack takes</div></div>
-    <div class="node compute" id="to-gz"><div class="name">geotoolz operators</div><div class="desc">indices · plume · matched_filter · …</div></div>
+    <div class="node compute" id="to-gz"><div class="name">geotoolz operators</div><div class="desc">indices · viz.RGBRecipe · plume · …</div></div>
     <div class="node cut" id="to-gp"><div class="name">geopatcher fields</div><div class="desc">RasterField(reader) → split / merge</div></div>
   </div>
 </div>
 <script src="_connect.js"></script>
 <script>
   const R = "#23978a";
-  wire("toy", "abc", { from: "top", to: "bottom", color: R, toShift: -130, bend: 16, label: "<span class='t'>subclass</span>" });
-  wire("goes", "abc", { from: "top", to: "bottom", color: R, toShift: 130, bend: 16, label: "<span class='t'>subclass</span>" });
-  wire("cfg", "dl", { color: R, label: "<span class='t'>token</span>" });
-  wire("dl", "aq", { color: R });
-  wire("aq", "rec", { color: R });
-  wire("aq", "img", { from: "bottom", to: "top", color: R, fromShift: -20, toShift: 180, bend: 18 });
-  wire("rec", "lab", { from: "bottom", to: "top", color: R, bend: 18 });
-  wire("lane-readers", "gt", { from: "bottom", to: "top", color: R, toShift: -180, bend: 40,
-        label: "<span class='t'>read_from_window(…)</span>" });
-  wire("lane-cm", "gt", { from: "bottom", to: "top", color: R, fromShift: -200, toShift: 180, bend: 40,
-        label: "<span class='t'>tile_cmf()</span><span class='s'>· labels</span>" });
+  wire("toolkit", "ns", { color: R, label: "<span class='t'>built on</span>" });
+  wire("ns", "abc", { color: R, label: "<span class='t'>subclass</span>" });
+  wire("lane-products", "gt", { from: "bottom", to: "top", color: R, bend: 40,
+        label: "<span class='t'>read_from_window(…)</span><span class='s'>· stack(…)</span>" });
   wire("gt", "to-gz", { color: "#cf9418" });
   wire("to-gz", "to-gp", { color: "#3f6fb5", dashed: true, label: "<span class='t'>patch_ops</span>" });
   ready();

@@ -10,6 +10,7 @@ pip install geotoolz-products                  # readers (georeader only)
 pip install 'geotoolz-products[obstore]'       # pooled cloud byte-range reads
 pip install 'geotoolz-products[operators]'     # sensor presets (geotoolz operators)
 pip install 'geotoolz-products[goes]'          # GOES-R ABI L1b reader (h5py)
+pip install 'geotoolz-products[himawari]'      # Himawari L2 cloud products (h5py; HSD needs nothing)
 pip install 'geotoolz-products[carbonmapper]'  # Carbon Mapper plume catalogue + STAC
 ```
 
@@ -19,5 +20,6 @@ client libraries, so they release independently of the operator library.
 
 - [Adding a new product reader](product-readers.md) — the per-product namespace contract.
 - [GOES-R ABI](goes.md) — L1b radiances and every L2 product from NOAA's public buckets, one-grid stacking, and the standard RGB recipes.
+- [Himawari AHI](himawari.md) — HSD segments decoded natively, NOAA's L2 cloud products, bucket helpers and RGB recipes.
 - [Carbon Mapper](carbonmapper.md) — plume catalogue, sources and plume / scene rasters.
 - [API reference](api.md)

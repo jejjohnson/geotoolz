@@ -15,17 +15,25 @@ Public surface:
   ``BANDS`` / ``CONSTANTS`` and, with the ``[operators]`` extra,
   ``presets`` (geotoolz operators bound to the product's band names):
   ``toy_sensor`` is the in-memory reference reader; ``goes`` reads
-  GOES-R ABI L1b radiances (``[goes]`` extra) and finds them in NOAA's
-  public buckets.
+  GOES-R ABI L1b radiances and L2 products (``[goes]`` extra) and
+  ``himawari`` Himawari-8 / -9 AHI HSD segments and L2 cloud products,
+  both finding them in NOAA's public buckets.
 """
 
 from __future__ import annotations
 
-from geoproducts import goes, toy_sensor
+from geoproducts import goes, himawari, toy_sensor
 from geoproducts._src.base import ProductReader
 from geoproducts._src.stack import stack
 
 
 __version__ = "0.1.0"  # x-release-please-version
 
-__all__ = ["ProductReader", "__version__", "goes", "stack", "toy_sensor"]
+__all__ = [
+    "ProductReader",
+    "__version__",
+    "goes",
+    "himawari",
+    "stack",
+    "toy_sensor",
+]

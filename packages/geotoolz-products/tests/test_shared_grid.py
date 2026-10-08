@@ -125,3 +125,64 @@ def test_geostationary_helpers() -> None:
     assert "+sweep=x" in crs("x").to_wkt()
     assert "+sweep" not in crs("y").to_wkt()
     assert crs("x") != crs("y")
+
+
+def test_on_earth_is_the_limb_for_both_sweeps() -> None:
+    from pyproj import Transformer
+
+    from geoproducts._src.geostationary import FixedGrid, on_earth
+
+    height, a, b = 35_786_023.0, 6_378_137.0, 6_356_752.31414
+    # The limb along the equator sits at asin(a / (a + h)) ≈ 8.7°.
+    limb = np.arcsin(a / (a + height))
+    for sweep in ("x", "y"):
+        inside = on_earth(
+            np.array([0.0, limb - 1e-4, limb + 1e-4]),
+            np.zeros(3),
+            height_m=height,
+            semi_major_m=a,
+            semi_minor_m=b,
+            sweep=sweep,
+        )
+        assert inside.tolist() == [True, True, False]
+    # Pixel by pixel, the mask agrees with PROJ's own inverse.
+    grid = FixedGrid(
+        height=60,
+        width=60,
+        transform=scan_angle_transform(
+            np.linspace(-0.16, 0.16, 60), np.linspace(0.16, -0.16, 60), height
+        ),
+        lon_0=0.0,
+        height_m=height,
+        semi_major_m=a,
+        semi_minor_m=b,
+        sweep="x",
+    )
+    mask = grid.on_earth(slice(0, 60), slice(0, 60))
+    rows, cols = np.mgrid[0:60, 0:60]
+    x, y = grid.transform * (cols + 0.5, rows + 0.5)
+    lon, _ = Transformer.from_crs(grid.crs, "EPSG:4326", always_xy=True).transform(x, y)
+    np.testing.assert_array_equal(mask, np.isfinite(lon))
+    assert 0 < mask.sum() < mask.size
+
+
+def test_cgms_grid() -> None:
+    from geoproducts._src.geostationary import FixedGrid
+
+    grid = FixedGrid.from_cgms(
+        columns=1500,
+        lines=1200,
+        cfac=20466275,
+        lfac=20466275,
+        coff=1075.5,
+        loff=2300.5,
+        lon_0=140.7,
+        height_m=35_785_863.0,
+        semi_major_m=6_378_137.0,
+        semi_minor_m=6_356_752.3,
+    )
+    # A Japan area: offsets move the grid off the disk centre.
+    assert (grid.height, grid.width) == (1200, 1500)
+    assert grid.transform.c == pytest.approx(-2_150_000.0, abs=1.0)
+    assert grid.transform.f == pytest.approx(4_600_000.0, abs=1.0)
+    assert grid.sweep == "y" and "+sweep" not in grid.crs.to_wkt()

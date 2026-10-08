@@ -1,0 +1,18 @@
+# Source: JMA Himawari-8/9 AHI band reference (Bessho et al. 2016, Himawari Standard Data User's Guide). Public JMA documentation.
+name,band,wavelength_um,resolution_km,kind,description
+B01,1,0.47,1.0,reflective,Blue
+B02,2,0.51,1.0,reflective,Green
+B03,3,0.64,0.5,reflective,Red
+B04,4,0.86,1.0,reflective,Near-infrared (vegetation)
+B05,5,1.6,2.0,reflective,Snow/Ice
+B06,6,2.3,2.0,reflective,Cloud particle size
+B07,7,3.9,2.0,emissive,Shortwave window
+B08,8,6.2,2.0,emissive,Upper-level water vapour
+B09,9,6.9,2.0,emissive,Mid-level water vapour
+B10,10,7.3,2.0,emissive,Lower-level water vapour
+B11,11,8.6,2.0,emissive,Cloud-top phase / SO2
+B12,12,9.6,2.0,emissive,Ozone
+B13,13,10.4,2.0,emissive,Clean longwave window
+B14,14,11.2,2.0,emissive,Longwave window
+B15,15,12.4,2.0,emissive,Dirty longwave window
+B16,16,13.3,2.0,emissive,CO2 longwave
