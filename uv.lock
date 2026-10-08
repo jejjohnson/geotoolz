@@ -218,8 +218,8 @@ name = "anyio"
 version = "4.14.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "idna", marker = "sys_platform != 'emscripten'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13' and sys_platform != 'emscripten'" },
+    { name = "idna" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/61/cc/a381afa6efea9f496eff839d4a6a1aed3bfafc7b3ab4b0d1b243a12573dd/anyio-4.14.2.tar.gz", hash = "sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f", size = 260176, upload-time = "2026-07-12T20:29:07.082Z" }
 wheels = [
@@ -1818,6 +1818,9 @@ carbonmapper = [
     { name = "requests" },
     { name = "shapely" },
 ]
+goes = [
+    { name = "h5py" },
+]
 obstore = [
     { name = "geotoolz-patcher", extra = ["obstore"] },
 ]
@@ -1844,6 +1847,7 @@ requires-dist = [
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz", marker = "extra == 'operators'", editable = "packages/geotoolz" },
     { name = "geotoolz-patcher", extras = ["obstore"], marker = "extra == 'obstore'", editable = "packages/geotoolz-patcher" },
+    { name = "h5py", marker = "extra == 'goes'", specifier = ">=3.10" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", marker = "extra == 'carbonmapper'", specifier = ">=2.1" },
     { name = "pydantic", marker = "extra == 'carbonmapper'", specifier = ">=2" },
@@ -1852,7 +1856,7 @@ requires-dist = [
     { name = "shapely", marker = "extra == 'carbonmapper'", specifier = ">=2" },
     { name = "typing-extensions", specifier = ">=4.0" },
 ]
-provides-extras = ["obstore", "operators", "carbonmapper"]
+provides-extras = ["obstore", "operators", "goes", "carbonmapper"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2222,8 +2226,8 @@ name = "httpcore2"
 version = "2.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103", size = 68071, upload-time = "2026-09-23T07:47:22.372Z" }
 wheels = [
@@ -3712,7 +3716,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "ptyprocess" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [

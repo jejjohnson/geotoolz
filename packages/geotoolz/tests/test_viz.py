@@ -841,3 +841,111 @@ def test_hillshade_reads_ground_pixel_steps_on_a_rotated_grid() -> None:
 def test_hillshade_rejects_a_sheared_grid() -> None:
     with pytest.raises(ValueError, match=r"Hillshade.*sheared"):
         Hillshade()(toy_geotensor(_plane(5.0, 2.0, n=8), grid="sheared"))
+
+
+# ---------------------------------------------------------------------------
+# RGBRecipe / rgb_recipe
+# ---------------------------------------------------------------------------
+
+
+def _named(values: dict[str, np.ndarray]) -> GeoTensor:
+    return GeoTensor(
+        np.stack([np.asarray(v, dtype=np.float32) for v in values.values()]),
+        transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 0.0),
+        crs="EPSG:32633",
+        fill_value_default=np.nan,
+        attrs={"band_names": tuple(values)},
+    )
+
+
+def test_rgb_recipe_stretches_clips_and_gammas() -> None:
+    from geotoolz.viz import rgb_recipe
+
+    channels = np.array([[0.0, 0.5, 2.0], [10.0, 15.0, 20.0], [0.25, 0.25, 0.25]])
+    out = rgb_recipe(
+        channels[:, None, :],
+        vmin=(0.0, 10.0, 0.0),
+        vmax=(1.0, 20.0, 1.0),
+        gamma=(1.0, 1.0, 2.0),
+    )
+    assert out.dtype == np.float32
+    np.testing.assert_allclose(out[0, 0], [0.0, 0.5, 1.0])  # clipped above 1
+    np.testing.assert_allclose(out[1, 0], [0.0, 0.5, 1.0])
+    np.testing.assert_allclose(out[2, 0], 0.5)  # 0.25 ** (1 / 2)
+
+
+def test_rgb_recipe_inverts_when_vmin_exceeds_vmax() -> None:
+    from geotoolz.viz import rgb_recipe
+
+    out = rgb_recipe(np.array([[[200.0, 300.0]]] * 3), vmin=300.0, vmax=200.0)
+    np.testing.assert_allclose(out[:, 0], [[1.0, 0.0]] * 3)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [({"vmin": 1.0, "vmax": 1.0}, "differ"), ({"gamma": 0.0}, "positive")],
+)
+def test_rgb_recipe_rejects_bad_parameters(kwargs, match) -> None:
+    from geotoolz.viz import rgb_recipe
+
+    with pytest.raises(ValueError, match=match):
+        rgb_recipe(np.zeros((3, 2, 2)), **kwargs)
+    with pytest.raises(ValueError, match=match):
+        gz.viz.RGBRecipe(red=0, green=1, blue=2, **kwargs)
+
+
+def test_rgb_recipe_needs_three_channels() -> None:
+    from geotoolz.viz import rgb_recipe
+
+    with pytest.raises(ValueError, match="3 channels"):
+        rgb_recipe(np.zeros((2, 2, 2)))
+    with pytest.raises(ValueError, match="1 or 3"):
+        gz.viz.RGBRecipe(red=0, green=1, blue=2, vmin=(0.0, 1.0))
+
+
+def test_rgb_recipe_operator_evaluates_band_expressions() -> None:
+    gt = _named({"a": np.full((2, 3), 0.2), "b": np.full((2, 3), 0.6)})
+    op = gz.viz.RGBRecipe(red="b", green="0.5 * a + 0.5 * b", blue=0, gamma=1.0)
+    out = op(gt)
+    assert isinstance(out, GeoTensor)
+    assert out.shape == (3, 2, 3)
+    assert out.attrs["band_names"] == ("red", "green", "blue")
+    assert out.transform == gt.transform
+    assert np.isnan(out.fill_value_default)
+    np.testing.assert_allclose(np.asarray(out)[:, 0, 0], [0.6, 0.4, 0.2], rtol=1e-6)
+
+
+def test_rgb_recipe_operator_propagates_invalid_pixels() -> None:
+    a = np.full((2, 2), 0.5)
+    a[0, 0] = np.nan
+    out = np.asarray(
+        gz.viz.RGBRecipe(red="a", green="a + b", blue="b")(
+            _named({"a": a, "b": np.full((2, 2), 0.25)})
+        )
+    )
+    assert np.isnan(out[0, 0, 0]) and np.isnan(out[1, 0, 0])
+    assert out[2, 0, 0] == pytest.approx(0.25)
+
+
+def test_rgb_recipe_operator_constant_expression_and_plain_arrays() -> None:
+    gt = _named({"a": np.full((2, 2), 0.5)})
+    out = np.asarray(gz.viz.RGBRecipe(red="a", green="0.25", blue="a")(gt))
+    np.testing.assert_allclose(out[1], 0.25)
+    plain = gz.viz.RGBRecipe(red=0, green=0, blue=0)(np.full((1, 2, 2), 0.5))
+    assert isinstance(plain, np.ndarray)
+    with pytest.raises(ValueError, match="band names"):
+        gz.viz.RGBRecipe(red="a", green=0, blue=0)(np.full((1, 2, 2), 0.5))
+
+
+def test_rgb_recipe_operator_runs_per_frame_and_round_trips_config() -> None:
+    frames = np.stack([np.full((3, 2, 2), 0.5, dtype=np.float32)] * 2)
+    out = gz.viz.RGBRecipe(red=0, green=1, blue=2)(frames)
+    assert out.shape == (2, 3, 2, 2)
+    op = gz.viz.RGBRecipe(red="x", green=1, blue="y + 1", vmin=(0, 2, 3), gamma=2.2)
+    config = op.get_config()
+    assert json.loads(json.dumps(config)) == config
+    assert config["vmin"] == [0.0, 2.0, 3.0]
+    assert config["gamma"] == [2.2, 2.2, 2.2]
+    assert gz.viz.RGBRecipe(**config).get_config() == config
+    arrays = gz.viz.RGBRecipe(red=0, green=1, blue=2, vmax=np.array([1.0, 2.0, 3.0]))
+    assert arrays.get_config()["vmax"] == [1.0, 2.0, 3.0]

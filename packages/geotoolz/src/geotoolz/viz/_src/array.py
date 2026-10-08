@@ -110,6 +110,59 @@ def gamma_correct_display(
     return np.rint(np.clip(corrected * dtype_max, 0.0, dtype_max)).astype(arr.dtype)
 
 
+def rgb_recipe(
+    channels: Float[np.ndarray, "3 h w"],
+    *,
+    vmin: float | tuple[float, float, float] = 0.0,
+    vmax: float | tuple[float, float, float] = 1.0,
+    gamma: float | tuple[float, float, float] = 1.0,
+) -> Float[np.ndarray, "3 h w"]:
+    r"""Stretch and gamma-correct three channels into a display RGB.
+
+    Each channel ``c`` is mapped through a fixed linear stretch and a power
+    law — the "RGB recipe" form of the operational satellite RGB guides:
+
+    .. math::
+
+        y_c \;=\; \operatorname{clip}\!\Bigl(
+            \frac{x_c - v_{\min,c}}{v_{\max,c} - v_{\min,c}}, 0, 1
+        \Bigr)^{1/\gamma_c}
+
+    A ``vmin`` above ``vmax`` inverts the channel (colder brightness
+    temperatures brighter, for instance). ``NaN`` inputs stay ``NaN``.
+
+    Args:
+        channels: The red, green and blue inputs stacked on the first axis.
+        vmin: Value mapped to 0, per channel or one for all.
+        vmax: Value mapped to 1, per channel or one for all.
+        gamma: Gamma per channel or one for all (``> 0``; ``> 1``
+            brightens midtones).
+
+    Returns:
+        ``float32`` array of the same shape, in ``[0, 1]`` (``NaN`` kept).
+
+    Raises:
+        ValueError: ``channels`` does not have 3 entries on its first axis,
+            a ``vmin`` equals its ``vmax``, or a gamma is not positive.
+    """
+    arr = np.asarray(channels, dtype=np.float32)
+    if arr.shape[0] != 3:
+        raise ValueError(f"rgb_recipe needs 3 channels; got shape {arr.shape}.")
+    lo, hi, g = (
+        np.broadcast_to(np.asarray(v, dtype=np.float64), (3,))
+        for v in (vmin, vmax, gamma)
+    )
+    if np.any(lo == hi):
+        raise ValueError(f"vmin and vmax must differ per channel; got {lo}, {hi}.")
+    if np.any(g <= 0):
+        raise ValueError(f"gamma must be positive; got {g}.")
+    out = np.empty_like(arr)
+    for c in range(3):
+        unit = np.clip((arr[c] - lo[c]) / (hi[c] - lo[c]), 0.0, 1.0)
+        out[c] = unit ** (1.0 / g[c])
+    return out
+
+
 def rgba_from_scalar(
     arr: Num[np.ndarray, "h w"] | Num[np.ndarray, "1 h w"],
     cmap: Callable[[np.ndarray], np.ndarray],

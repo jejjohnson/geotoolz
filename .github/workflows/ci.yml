@@ -71,10 +71,11 @@ jobs:
           TZ: America/New_York
       # The all-extras run of the products suite: every extras-gated test
       # (obstore pool, geotoolz presets) must run, so a skip fails the job.
-      # `slow` (wheel build) and `live` (real APIs) stay out of the fast tier.
+      # `slow` (wheel build), `live` (real APIs) and `integration` (real
+      # public downloads) stay out of the fast tier.
       - name: Test geotoolz-products (all extras, no skips)
         run: |
-          uv run pytest -v -rs -m "not slow and not live" | tee pytest.log
+          uv run pytest -v -rs -m "not slow and not live and not integration" | tee pytest.log
           if grep -q "^SKIPPED" pytest.log; then
             echo "::error::geotoolz-products tests skipped in the all-extras run"
             exit 1

@@ -264,6 +264,7 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
         "mapping": {0: (0.0, 0.0, 0.0, 0.0), 1: (1.0, 0.0, 0.0, 1.0)}
     },
     "viz._src.operators.Composite": {"bands": [0, 1, 2]},
+    "viz._src.operators.RGBRecipe": {"red": 0, "green": 1, "blue": 2},
     "viz._src.operators.FalseColor": {"nir": 0, "red": 1, "green": 2},
     "viz._src.operators.SWIRComposite": {"swir2": 0, "nir": 1, "red": 2},
     "viz._src.operators.TrueColor": {"red": 0, "green": 1, "blue": 2},

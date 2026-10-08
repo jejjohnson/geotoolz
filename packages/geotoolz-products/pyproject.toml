@@ -51,6 +51,10 @@ operators = ["geotoolz"]
 # the plume / source vector geometry (shapely, geopandas, pandas — also
 # georeader dependencies, declared because the reader imports them
 # directly).
+# GOES-R ABI L1b reader (``geoproducts.goes``): ABI files are NetCDF-4,
+# i.e. HDF5, read chunk-by-chunk through h5py. The NOAA bucket helpers
+# (``goes.aws``) are standard library and need no extra.
+goes = ["h5py>=3.10"]
 carbonmapper = [
     "requests>=2",
     "pydantic>=2",
@@ -125,6 +129,7 @@ addopts = "--cov=src/geoproducts --cov-report=term-missing --cov-report=xml:cove
 markers = [
     "slow: builds artifacts or otherwise takes long; deselected in CI's fast tier",
     "live: calls a real external API (needs credentials / network); always deselected in CI",
+    "integration: downloads real public data (no credentials); run manually via the Extended Tests workflow",
 ]
 
 [tool.coverage.run]

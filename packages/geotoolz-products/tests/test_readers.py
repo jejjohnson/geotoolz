@@ -21,7 +21,12 @@ class MissingReader(ProductReader):
 
 
 def test_public_surface() -> None:
-    assert set(geoproducts.__all__) == {"ProductReader", "__version__", "toy_sensor"}
+    assert set(geoproducts.__all__) == {
+        "ProductReader",
+        "__version__",
+        "goes",
+        "toy_sensor",
+    }
     assert geoproducts.ProductReader is ProductReader
     assert toy_sensor.Reader is not None
 

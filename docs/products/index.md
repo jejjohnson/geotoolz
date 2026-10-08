@@ -9,6 +9,7 @@ catalog loaders (`geocatalog`) consume it unchanged.
 pip install geotoolz-products                  # readers (georeader only)
 pip install 'geotoolz-products[obstore]'       # pooled cloud byte-range reads
 pip install 'geotoolz-products[operators]'     # sensor presets (geotoolz operators)
+pip install 'geotoolz-products[goes]'          # GOES-R ABI L1b reader (h5py)
 pip install 'geotoolz-products[carbonmapper]'  # Carbon Mapper plume catalogue + STAC
 ```
 
@@ -17,5 +18,6 @@ with the missions and APIs behind them and carry their own credentials and
 client libraries, so they release independently of the operator library.
 
 - [Adding a new product reader](product-readers.md) — the per-product namespace contract.
+- [GOES-R ABI](goes.md) — L1b radiances and every L2 product from NOAA's public buckets, one-grid stacking, and the standard RGB recipes.
 - [Carbon Mapper](carbonmapper.md) — plume catalogue, sources and plume / scene rasters.
 - [API reference](api.md)

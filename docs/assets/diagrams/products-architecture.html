@@ -15,6 +15,8 @@
   .ns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .cm { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px 46px; }
   .abc { border-style: dashed; }
+  .impls { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 40px; align-items: stretch; }
+  .impls .desc { margin-top: 4px; }
   .bottom { display: grid; grid-template-columns: 1fr 300px 300px; column-gap: 60px; margin-top: 70px; align-items: center; }
 </style>
 </head>
@@ -34,9 +36,17 @@
           <code>bounds · footprint</code><code>_read_bytes()  — obstore</code>
         </div>
       </div>
-      <div class="node read" id="toy" style="margin-top: 40px;">
-        <div class="name"><code>toy_sensor</code> — the reference namespace</div>
-        <div class="ns"><span class="chip"><span class="t">Reader</span></span><span class="chip"><span class="t">BANDS</span></span><span class="chip"><span class="t">CONSTANTS</span></span><span class="chip"><span class="t">presets.NDVI</span><span class="s">[operators]</span></span></div>
+      <div class="impls">
+        <div class="node read" id="toy">
+          <div class="name"><code>toy_sensor</code></div>
+          <div class="desc">the in-memory reference namespace</div>
+          <div class="ns"><span class="chip"><span class="t">Reader</span></span><span class="chip"><span class="t">BANDS</span></span><span class="chip"><span class="t">CONSTANTS</span></span><span class="chip"><span class="t">presets.NDVI</span><span class="s">[operators]</span></span></div>
+        </div>
+        <div class="node read" id="goes">
+          <div class="name"><code>goes</code> <span style="font-weight:500;color:var(--muted)">[goes]</span></div>
+          <div class="desc">GOES-R ABI · +proj=geos grid · L1b + every L2 product</div>
+          <div class="ns"><span class="chip"><span class="t">Reader</span><span class="s">L1b · rad · refl · BT</span></span><span class="chip"><span class="t">L2Reader</span><span class="s">ACM · ACHA · MCMIP …</span></span><span class="chip"><span class="t">quality</span><span class="s">DQF</span></span><span class="chip"><span class="t">stack</span><span class="s">one grid</span></span><span class="chip"><span class="t">aws</span><span class="s">NOAA buckets</span></span><span class="chip"><span class="t">recipes · presets</span><span class="s">[operators]</span></span></div>
+        </div>
       </div>
     </div>
 
@@ -62,7 +72,8 @@
 <script src="_connect.js"></script>
 <script>
   const R = "#23978a";
-  wire("toy", "abc", { from: "top", to: "bottom", color: R, bend: 16, label: "<span class='t'>subclass</span>" });
+  wire("toy", "abc", { from: "top", to: "bottom", color: R, toShift: -130, bend: 16, label: "<span class='t'>subclass</span>" });
+  wire("goes", "abc", { from: "top", to: "bottom", color: R, toShift: 130, bend: 16, label: "<span class='t'>subclass</span>" });
   wire("cfg", "dl", { color: R, label: "<span class='t'>token</span>" });
   wire("dl", "aq", { color: R });
   wire("aq", "rec", { color: R });
