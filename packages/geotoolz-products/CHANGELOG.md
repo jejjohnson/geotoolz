@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.1.0...geotoolz-products-v0.1.1) (2026-10-08)
+
+
+### Features
+
+* **products:** add the GOES-R ABI reader — L1b, L2 products, channel stacking and RGB recipes ([#426](https://github.com/jejjohnson/geotoolz/issues/426)) ([d54bbbf](https://github.com/jejjohnson/geotoolz/commit/d54bbbf616b74d0b26c26209c98e80cd4a022580))
+* **products:** add the Himawari AHI reader — native HSD decoding, L2 cloud products, NOAA buckets and RGB recipes ([#430](https://github.com/jejjohnson/geotoolz/issues/430)) ([6153c98](https://github.com/jejjohnson/geotoolz/commit/6153c98f37d53b7e00b92f378bfa8d472ea327de))
+
 ## 0.1.0 (2026-10-08)
 
 
