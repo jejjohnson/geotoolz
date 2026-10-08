@@ -204,7 +204,7 @@ def test_object_replaced_mid_download_fails(stores, tmp_path, monkeypatch):
         return result
 
     monkeypatch.setattr(impl.obstore, "get", get)
-    with pytest.raises(Exception, match="(?i)precondition"):
+    with pytest.raises(Exception, match=r"(?i)precondition"):
         files.download(f"{S3}/a.bin", tmp_path / "a.bin")
     assert list(tmp_path.iterdir()) == []
 
