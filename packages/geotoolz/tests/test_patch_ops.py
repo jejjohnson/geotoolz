@@ -70,9 +70,11 @@ def test_reexports_are_geopatcher_classes() -> None:
 
     assert GridSampler is gp_pipekit.GridSampler
     assert ApplyToChips is gp_pipekit.ApplyToChips
-    assert MergePatches is gp_pipekit.Stitch
-    # No shadowing `Stitch` here: the name belongs to `geotoolz.geom.Stitch`.
+    assert MergePatches is gp_pipekit.MergePatches
+    assert MergePatches.__name__ == "MergePatches"
+    # `Stitch` means one thing: `geotoolz.geom.Stitch`, the tile mosaicker.
     assert not hasattr(patch_ops, "Stitch")
+    assert not hasattr(gp_pipekit, "Stitch")
     assert geotoolz.Stitch is geotoolz.geom.Stitch
     assert MergePatches is not geotoolz.Stitch
 

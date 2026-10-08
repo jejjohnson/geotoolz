@@ -26,7 +26,7 @@ from geopatcher.config import axis_envelope, from_config
 from geopatcher.integrations.pipekit import (
     ApplyToChips,
     GridSampler,
-    Stitch,
+    MergePatches,
 )
 
 
@@ -85,7 +85,7 @@ class TestStitchInSequential:
             [
                 GridSampler(patcher=patcher),
                 ApplyToChips(operator=double),
-                Stitch(
+                MergePatches(
                     aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain
                 ),
             ]
@@ -113,7 +113,9 @@ class TestOperatorContract:
         ]
 
     def test_stitch_config_envelopes_the_aggregation(self, field: RasterField) -> None:
-        op = Stitch(aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain)
+        op = MergePatches(
+            aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain
+        )
         assert op.get_config()["aggregation"] == axis_envelope(
             spatial.aggregation.OverlapAdd()
         )
@@ -144,7 +146,7 @@ class TestOperatorContract:
         doubled = ApplyToChips(
             operator=Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
         )(patches)
-        merged = Stitch(
+        merged = MergePatches(
             aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain
         )(doubled)
         graph = Graph(inputs={"field": src}, outputs={"merged": merged})

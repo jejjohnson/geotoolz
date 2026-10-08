@@ -58,22 +58,11 @@ TOOLKITS = {
 
 # Bare names two packages may both export, and why. Everything else that
 # collides across packages fails ``--check``.
-ALLOWED_SHARED_NAMES: dict[str, str] = {
-    "Stitch": (
-        "geotoolz.geom.Stitch (stitch GeoTensor tiles) vs "
-        "geopatcher.integrations.pipekit.Stitch (merge patches) — pending a "
-        "rename decision"
-    ),
-    "MinMax": (
-        "geotoolz.radiometry.MinMax (linear stretch into [0, 1]) vs "
-        "geopatcher.spatial.aggregation.MinMax (global min / max of the "
-        "patches) — pending a rename decision"
-    ),
-}
+ALLOWED_SHARED_NAMES: dict[str, str] = {}
 
 
 # Objects exported under more than one name (aliases), allowed for now.
-ALLOWED_ALIASES: set[str] = {"MergePatches", "Stitch"}  # geotoolz.patch_ops bridge
+ALLOWED_ALIASES: set[str] = set()
 
 
 def _allowed_by_layout(owners: dict[str, object]) -> bool:

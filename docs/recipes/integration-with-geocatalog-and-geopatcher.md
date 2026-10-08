@@ -113,9 +113,8 @@ the pipeline so every chip uses the same statistics — see
 Install with the `[patch]` extra: `uv pip install 'geotoolz[patch]'`.
 
 The same wrappers are reachable as
-`geopatcher.integrations.pipekit.{GridSampler, ApplyToChips, Stitch}` —
-`geotoolz.patch_ops` re-exports the same class objects, with `Stitch`
-renamed `MergePatches` so it doesn't collide with `geotoolz.geom.Stitch`.
+`geopatcher.integrations.pipekit.{GridSampler, ApplyToChips, MergePatches}` —
+`geotoolz.patch_ops` re-exports the same class objects.
 
 ## The combined shape
 
@@ -150,7 +149,7 @@ by the aggregation.
 |---|---|---|
 | STAC discovery, asset loading, AOI windowing | [`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog) | `from_stac_search`, `GeoSlice`, `load_raster`, `stage`, `field_for`, … |
 | Per-scene radiometry, indices, masking, compositing | `geotoolz` | `radiometry`, `indices`, `qa`, `mask`, `compositing`, … |
-| Sliding-window tiling, chunked inference, stitching | [`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher) | `SpatialPatcher`, `Stitch` (exposed as `geotoolz.patch_ops.MergePatches`) |
+| Sliding-window tiling, chunked inference, stitching | [`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher) | `SpatialPatcher`, `MergePatches` (also `geotoolz.patch_ops.MergePatches`) |
 | The composition algebra itself | [`pipekit`](https://github.com/jejjohnson/pipekit) | `Operator`, `Sequential`, `Graph`, `Branch`, `Switch`, … |
 
 ## See also

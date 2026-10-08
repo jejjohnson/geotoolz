@@ -1024,7 +1024,7 @@ def _source_dtype(field: Any) -> np.dtype | None:
 def on_domain_grid(merged: Any, aggregation: SpatialAggregation, domain: Any) -> Any:
     """A dense merge result as a `GeoTensor` on a georeferenced domain's grid.
 
-    The pipekit ``Stitch`` operator's counterpart of `merge_to_field` when
+    The pipekit ``MergePatches`` operator's counterpart of `merge_to_field` when
     only the domain is at hand: a ``numpy`` array merged onto a domain
     with a ``transform`` and a ``crs`` is rewrapped like a raster field's
     ``with_data`` (`_rewrap`), any band count included. Anything else —
@@ -1042,7 +1042,7 @@ def on_domain_grid(merged: Any, aggregation: SpatialAggregation, domain: Any) ->
         aggregation,
         shape=_domain_shape(domain),
         dtype=_source_dtype(domain),
-        caller="Stitch",
+        caller="MergePatches",
         bands_may_change=True,
     )
     values, fill = _merge_nodata(

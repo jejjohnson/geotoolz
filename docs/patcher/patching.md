@@ -384,8 +384,9 @@ Operator-graph composition libraries (e.g.
 [`geotoolz`](https://github.com/jejjohnson/geotoolz)) ship thin wrappers
 that adapt the Patcher into their `Operator` world — typically a triple
 of `GridSampler(patcher=patcher)`, `ApplyToChips(operator=operator)`, and
-`Stitch(aggregation=aggregation, domain=domain)`. Those wrappers live in the consuming
-library, not here; geopatcher itself has no operator-graph dependency.
+`MergePatches(aggregation=aggregation, domain=domain)`. geopatcher ships
+them for pipekit in `geopatcher.integrations.pipekit` (the `[pipekit]`
+extra); the core has no operator-graph dependency.
 
 ## Streaming aggregations
 

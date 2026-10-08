@@ -10,9 +10,9 @@ Operator wrappers that plug a `SpatialPatcher` into a `pipekit`
 `Sequential` / `Graph` pipeline:
 
 ```python
-from geopatcher.integrations.pipekit import GridSampler, ApplyToChips, Stitch
+from geopatcher.integrations.pipekit import GridSampler, ApplyToChips, MergePatches
 ```
 
 ::: geopatcher.integrations.pipekit.GridSampler
 ::: geopatcher.integrations.pipekit.ApplyToChips
-::: geopatcher.integrations.pipekit.Stitch
+::: geopatcher.integrations.pipekit.MergePatches

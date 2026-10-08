@@ -12,10 +12,8 @@ import paths. They put the four-axis Patcher framework inside a
         MergePatches(aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain),
     ])
 
-``MergePatches`` is geopatcher's ``Stitch`` operator under a name that
-does not collide with `geotoolz.geom.Stitch` (the GeoTensor tile
-mosaicker also exported as top-level ``geotoolz.Stitch``). Its class
-``__name__`` is still ``"Stitch"``.
+``MergePatches`` merges patches into a field; `geotoolz.geom.Stitch` (also
+top-level ``geotoolz.Stitch``) mosaics georeferenced GeoTensor tiles.
 
 geotoolz's own additions:
 
@@ -54,7 +52,7 @@ try:
     from geopatcher.integrations.pipekit import (
         ApplyToChips,
         GridSampler,
-        Stitch as MergePatches,
+        MergePatches,
     )
     from geopatcher.spatial.window import geom_shape
 except ImportError as _e:  # pragma: no cover - exercised when [patch] is missing

@@ -1,4 +1,4 @@
-"""Operator wrappers around `geopatcher` — `GridSampler`, `ApplyToChips`, `Stitch`.
+"""pipekit operators around `geopatcher`: `GridSampler`, `ApplyToChips`, `MergePatches`.
 
 Thin glue between the four-axis Patcher framework and `pipekit.Operator`,
 so a sliding-window inference pipeline composes inside a `Sequential` or
@@ -6,13 +6,13 @@ so a sliding-window inference pipeline composes inside a `Sequential` or
 
     from pipekit import Sequential
     from geopatcher.integrations.pipekit import (
-        GridSampler, ApplyToChips, Stitch,
+        GridSampler, ApplyToChips, MergePatches,
     )
 
     pipe = Sequential([
         GridSampler(patcher=patcher),
         ApplyToChips(operator=model_op),
-        Stitch(aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain),
+        MergePatches(aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain),
     ])
 
 Optional extra: install the ``[pipekit]`` extra to pull in pipekit.
@@ -84,7 +84,7 @@ class ApplyToChips(Operator):
 
     The inner operator runs against each ``patch.data`` and the result
     replaces ``patch.data``; ``anchor`` / ``indices`` / ``weights`` are
-    preserved so downstream `Stitch` can reconstruct the field.
+    preserved so downstream `MergePatches` can reconstruct the field.
 
     Args:
         operator: The per-chip operator (any `pipekit.Operator`).
@@ -102,7 +102,7 @@ class ApplyToChips(Operator):
         return {"operator": nested_config(self.operator)}
 
 
-class Stitch(Operator):
+class MergePatches(Operator):
     """Operator: ``list[Patch] → field`` — wraps a `spatial.aggregation.Aggregation`.
 
     Pairs with `GridSampler` + `ApplyToChips` to express ``split →
@@ -151,4 +151,4 @@ class Stitch(Operator):
         }
 
 
-__all__ = ["ApplyToChips", "GridSampler", "Stitch"]
+__all__ = ["ApplyToChips", "GridSampler", "MergePatches"]

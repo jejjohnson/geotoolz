@@ -590,7 +590,7 @@ class scores — was then numpy-broadcast into the domain's bands: merging
 NDVI onto a 4-band domain returned four identical copies of the index,
 silently. `merge_to_field` refused the honest shape, so the documented
 workaround was a hand-built one-band "output grid" domain, and the pipekit
-`Stitch` (`geotoolz.patch_ops.MergePatches`) returned a bare array where
+`MergePatches` (then named `Stitch`) returned a bare array where
 its input chips were `GeoTensor`s.
 
 **Decision.**
@@ -608,7 +608,7 @@ its input chips were `GeoTensor`s.
 - `merge_to_field` accepts any band count on a raster field: the output
   needs the domain's trailing `(H, W)`. The xarray adapters keep their
   dims and coords, so they still need the domain's own shape.
-- A raster `with_data` (and `Stitch`) follows the `GeoTensor` carrier
+- A raster `with_data` (and `MergePatches`) follows the `GeoTensor` carrier
   contract:
   - `attrs` is a fresh copy of the source's, without the per-band keys
     once the band count changed;
@@ -622,7 +622,7 @@ its input chips were `GeoTensor`s.
     included, gets the same nodata;
   - the source dtype is restored only for an output of the domain's own
     shape.
-- The pipekit `Stitch` returns a `GeoTensor` on a georeferenced domain
+- The pipekit `MergePatches` returns a `GeoTensor` on a georeferenced domain
   (one with `transform` and `crs`), through the same rewrap; `dict`,
   streaming and non-georeferenced outputs are unchanged.
 

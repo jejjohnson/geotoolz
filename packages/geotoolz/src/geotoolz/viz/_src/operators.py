@@ -12,7 +12,7 @@ carrier's ``transform`` / ``crs`` (the spatial footprint is the same
 pre- and post-render) but typically change the band axis from
 N-band reflectance to 3-band RGB or 4-band RGBA ``uint8``. They sit
 downstream of :mod:`geotoolz.radiometry` (``PercentileClip``,
-``MinMax``, ``Gamma``) which already does the float contrast stretch
+``MinMaxStretch``, ``Gamma``) which already does the float contrast stretch
 — the composites are :class:`geotoolz.spectral.SelectBands` presets and
 ``StretchToUint8`` / ``GammaCorrect`` reuse radiometry's stretch / gamma
 and add the (rounded) byte cast.
