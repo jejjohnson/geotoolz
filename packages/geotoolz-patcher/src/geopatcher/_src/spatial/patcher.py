@@ -511,7 +511,14 @@ class SpatialPatcher(_SpatialPatcherBase):
             caller="merge_to_field",
             bands_may_change=_is_raster_field(field),
         )
-        return _declare_gap_fill(with_data(values), values, self.aggregation)
+        values, fill = _merge_nodata(
+            values,
+            self.aggregation,
+            shape=_domain_shape(field.domain),
+            dtype=_source_dtype(field),
+            source_fill=_source_fill(field),
+        )
+        return _with_nodata(with_data(values), fill)
 
     def merge_to_xarray(
         self,
@@ -1038,34 +1045,78 @@ def on_domain_grid(merged: Any, aggregation: SpatialAggregation, domain: Any) ->
         caller="Stitch",
         bands_may_change=True,
     )
-    return _declare_gap_fill(
-        _rewrap(domain, values, domain.transform, domain.crs), values, aggregation
+    values, fill = _merge_nodata(
+        values,
+        aggregation,
+        shape=_domain_shape(domain),
+        dtype=_source_dtype(domain),
+        source_fill=_source_fill(domain),
     )
+    return _with_nodata(_rewrap(domain, values, domain.transform, domain.crs), fill)
 
 
-def _declare_gap_fill(out: Any, values: np.ndarray, aggregation: Any) -> Any:
-    """Declare the aggregation's fill as ``out``'s nodata when the merge left gaps.
+def _merge_nodata(
+    values: np.ndarray,
+    aggregation: Any,
+    *,
+    shape: tuple[int, ...] | None,
+    dtype: np.dtype | None,
+    source_fill: Any,
+) -> tuple[np.ndarray, Any]:
+    """The nodata a merged raster declares, and its values made to agree.
 
-    A dense aggregation writes its ``fill_value`` (NaN, ``-1`` for the
-    votes, or the caller's sentinel) into every cell no valid sample
-    reached. When such cells exist, that value is the output's nodata —
-    not the source's fill, which no cell of the gap holds. Without gaps
-    the rewrap's choice stands. Only `GeoTensor` outputs carry the
-    attribute; other carriers are returned unchanged.
+    One rule, from what the merge knows — never from the data's values:
+
+    * An aggregation with a finite ``fill_value`` (``-1`` for the votes, a
+      caller's sentinel) writes it into every cell no valid sample
+      reached, so it is the nodata, whether or not such cells exist.
+    * An output that carries the source's values — the domain's shape,
+      the source dtype restored — keeps the source's nodata; the NaN the
+      aggregation left in its gaps is rewritten to it (NaN only ever
+      marks a missing cell).
+    * Anything else is a new quantity, NaN-filled. Its per-patch operator
+      marks nodata as NaN (the `GeoTensor` contract), so NaN is the one
+      missing value it holds.
+
+    Returns:
+        ``(values, fill)``: ``values`` (a copy when its gaps were
+        rewritten) and the nodata to declare.
     """
+    fill = getattr(aggregation, "fill_value", None)
+    if fill is not None and not (isinstance(fill, float) and np.isnan(fill)):
+        return values, fill
+    carried = shape is not None and values.shape == shape and values.dtype == dtype
+    usable = source_fill is not None and not (
+        isinstance(source_fill, float) and np.isnan(source_fill)
+    )
+    if carried and usable:
+        if np.issubdtype(values.dtype, np.inexact):
+            values = np.where(np.isnan(values), values.dtype.type(source_fill), values)
+        return values, source_fill
+    if np.issubdtype(values.dtype, np.inexact):
+        return values, np.nan
+    return values, source_fill
+
+
+def _with_nodata(out: Any, fill: Any) -> Any:
+    """Declare ``fill`` as the nodata of a `GeoTensor` ``out`` (others unchanged)."""
     from georeader.geotensor import GeoTensor
 
-    fill = getattr(aggregation, "fill_value", None)
-    if fill is None or not isinstance(out, GeoTensor):
-        return out
-    is_nan = isinstance(fill, float) and np.isnan(fill)
-    if np.issubdtype(values.dtype, np.inexact) and is_nan:
-        gaps = bool(np.isnan(values).any())
-    else:
-        gaps = not is_nan and bool((values == fill).any())
-    if gaps:
+    if isinstance(out, GeoTensor):
         out.fill_value_default = fill
     return out
+
+
+def _source_fill(field: Any) -> Any:
+    """The source's nodata: ``fill_value_default`` of the field, reader or domain."""
+    for owner in (
+        field,
+        getattr(field, "reader", None),
+        getattr(field, "domain", None),
+    ):
+        if owner is not None and hasattr(owner, "fill_value_default"):
+            return owner.fill_value_default
+    return None
 
 
 def _is_raster_field(field: Any) -> bool:

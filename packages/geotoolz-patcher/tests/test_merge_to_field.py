@@ -383,13 +383,65 @@ def test_merge_to_field_declares_the_aggregation_gap_fill(aggregation, fill) -> 
     assert (np.asarray(out) == fill).sum() == 8 * 8 - 4 * 4
 
 
-def test_merge_to_field_without_gaps_keeps_the_source_fill() -> None:
+def test_merge_to_field_carried_values_keep_the_source_fill() -> None:
     field = _geotensor_field()
-    patcher = _patcher(aggregation=spatial.aggregation.OverlapAdd(fill_value=-1.0))
+    patcher = _patcher()
 
     out = patcher.merge_to_field(patcher.split(field), field)
 
     assert out.fill_value_default == 999
+
+
+def test_merge_to_field_carried_float_gaps_take_the_source_fill() -> None:
+    # A float source, partly covered: the NaN gaps become the source's
+    # nodata, so the output has one missing-value marker, not two.
+    field = RasterField(
+        GeoTensor(
+            values=np.ones((2, 8, 8), dtype=np.float32),
+            transform=_T,
+            crs="EPSG:32630",
+            fill_value_default=-1.0,
+        )
+    )
+    patcher = _patcher()
+
+    out = patcher.merge_to_field([next(iter(patcher.split(field)))], field)
+
+    assert out.fill_value_default == -1.0
+    assert not np.isnan(np.asarray(out)).any()
+    assert (np.asarray(out) == -1.0).sum() == 2 * (8 * 8 - 4 * 4)
+
+
+def test_merge_to_field_sentinel_never_depends_on_the_data() -> None:
+    # Fully covered, and a real value equals the sentinel: the sentinel is
+    # still the declared nodata (decided by the aggregation, not by
+    # scanning values), and no value is rewritten.
+    field = _geotensor_field(np.float32)
+    patcher = _patcher(aggregation=spatial.aggregation.OverlapAdd(fill_value=0.0))
+
+    out = patcher.merge_to_field(patcher.split(field), field)
+
+    assert out.fill_value_default == 0.0
+    np.testing.assert_array_equal(np.asarray(out), field.reader.values)
+
+
+def test_merge_to_field_fully_covered_votes_declare_their_fill() -> None:
+    # A label map from a source whose nodata is 0: class 0 is a real
+    # class, so the declared nodata is the vote's -1, not the source's 0.
+    field = RasterField(
+        GeoTensor(
+            values=np.zeros((1, 8, 8), dtype=np.uint8),
+            transform=_T,
+            crs="EPSG:32630",
+            fill_value_default=0,
+        )
+    )
+    patcher = _patcher(aggregation=spatial.aggregation.HardVote(n_classes=2))
+
+    out = patcher.merge_to_field(patcher.split(field), field)
+
+    assert out.fill_value_default == -1
+    assert (np.asarray(out) == 0).all()
 
 
 def test_matched_merge_to_field_band_reducing_operator() -> None:

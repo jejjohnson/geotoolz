@@ -612,12 +612,14 @@ its input chips were `GeoTensor`s.
   contract:
   - `attrs` is a fresh copy of the source's, without the per-band keys
     once the band count changed;
-  - the fill stays the source's nodata while the output carries the
-    source's values, and becomes NaN for a new float quantity (a float
-    output on an integer source or on a different band count);
-  - when the merge left gaps — cells no valid sample reached — the
-    aggregation's `fill_value` written there (NaN, `-1` for the votes, a
-    caller's sentinel) is the declared nodata instead;
+  - the declared nodata follows one rule, decided by the merge and never
+    by scanning values: an aggregation's finite `fill_value` (`-1` for the
+    votes, a caller's sentinel) is the nodata; an output that carries the
+    source's values (domain shape, source dtype restored) keeps the
+    source's nodata, with its NaN gaps rewritten to it; anything else is a
+    new quantity with a NaN fill (its per-patch operator marks nodata as
+    NaN, per the `GeoTensor` contract). Every raster wrapper, `CogField`
+    included, gets the same nodata;
   - the source dtype is restored only for an output of the domain's own
     shape.
 - The pipekit `Stitch` returns a `GeoTensor` on a georeferenced domain

@@ -778,12 +778,14 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
                 primary domain's.
         """
         from geopatcher._src.spatial.patcher import (
-            _declare_gap_fill,
             _domain_shape,
             _field_values,
             _is_raster_field,
+            _merge_nodata,
             _require_with_data,
             _source_dtype,
+            _source_fill,
+            _with_nodata,
         )
 
         with_data = _require_with_data(mfield.primary, "merge_to_field")
@@ -803,7 +805,14 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
                 caller="merge_to_field",
                 bands_may_change=_is_raster_field(mfield.primary),
             )
-            out[name] = _declare_gap_fill(with_data(values), values, agg)
+            values, fill = _merge_nodata(
+                values,
+                agg,
+                shape=shape,
+                dtype=_source_dtype(source),
+                source_fill=_source_fill(source),
+            )
+            out[name] = _with_nodata(with_data(values), fill)
         return out
 
     def _merge_sources(
