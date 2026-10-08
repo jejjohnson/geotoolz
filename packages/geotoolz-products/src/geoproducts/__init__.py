@@ -7,7 +7,7 @@ depends on georeader only: it installs without the operator library.
 
 Public surface:
 
-- `SensorReader` — the ABC for sensor readers (lazy ``_read_window``,
+- `ProductReader` — the ABC for product readers (lazy ``_read_window``,
   band names, track, optional pooled object-store byte reads via the
   ``[obstore]`` extra).
 - Per-sensor / per-provider subpackages, each exposing ``Reader``,
@@ -19,9 +19,9 @@ Public surface:
 from __future__ import annotations
 
 from geoproducts import toy_sensor
-from geoproducts._src.base import SensorReader
+from geoproducts._src.base import ProductReader
 
 
 __version__ = "0.0.0"  # x-release-please-version
 
-__all__ = ["SensorReader", "__version__", "toy_sensor"]
+__all__ = ["ProductReader", "__version__", "toy_sensor"]

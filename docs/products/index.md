@@ -16,6 +16,6 @@ The package depends on georeader, never on `geotoolz`: product readers churn
 with the missions and APIs behind them and carry their own credentials and
 client libraries, so they release independently of the operator library.
 
-- [Adding a new sensor reader](sensor-readers.md) — the per-sensor contract.
+- [Adding a new product reader](product-readers.md) — the per-product namespace contract.
 - [Carbon Mapper](carbonmapper.md) — plume catalogue, sources and plume / scene rasters.
 - [API reference](api.md)

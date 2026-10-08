@@ -1,9 +1,9 @@
 # API reference
 
-Sensor reader framework. See [Adding a new sensor reader](sensor-readers.md) for the
+Product reader framework. See [Adding a new product reader](product-readers.md) for the
 namespace contract (`Reader`, `BANDS`, `CONSTANTS`, `presets`) and the package-data layout.
 
-- **Base class:** `SensorReader` — extends `georeader.GeoData` with the sensor surface (`_track`,
+- **Base class:** `ProductReader` — extends `georeader.GeoData` with the sensor surface (`_track`,
   `_bands`, lazy `_read_window`, …)
 - **Reference reader:** `geoproducts.toy_sensor` — in-memory worked example exercising the
   full contract end-to-end

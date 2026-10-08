@@ -40,7 +40,7 @@ it in and use ``geotoolz.patch_ops`` for the Operator-graph bridge:
     from geotoolz import Sequential
     from geotoolz.patch_ops import GridSampler, ApplyToChips, MergePatches
 
-Sensor and product readers (``SensorReader`` and the per-sensor
+Product readers (``ProductReader`` and the per-sensor / per-provider
 subpackages) live in the
 [`geotoolz-products`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-products)
 workspace package (import name `geoproducts`); their output is a

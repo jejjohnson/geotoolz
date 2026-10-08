@@ -138,7 +138,7 @@ nav:
       - Logging: catalog/logging.md
   - Products — geoproducts:
       - Home: products/index.md
-      - Adding a sensor reader: products/sensor-readers.md
+      - Adding a product reader: products/product-readers.md
       - Carbon Mapper: products/carbonmapper.md
       - API Reference: products/api.md
       - Design:
