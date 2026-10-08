@@ -27,8 +27,8 @@ from geocatalog._src._antimeridian import (
     lonlat_line,
     lonlat_polygon,
 )
-from geocatalog._src._timeutil import to_utc_ts
-from geocatalog._src.uri import query_params
+from geocatalog._src.utils.timeutil import to_utc_ts
+from geocatalog._src.utils.uri import query_params
 
 
 LONLAT = pyproj.CRS.from_epsg(4326)

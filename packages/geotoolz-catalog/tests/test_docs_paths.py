@@ -144,7 +144,7 @@ def test_scanner_finds_paths() -> None:
 
 def test_resolver_rejects_missing_names() -> None:
     assert _resolves("geocatalog.storage.CatalogBundle.ingest")
-    assert _resolves("geocatalog._src.retry.retry_transient_io")
+    assert _resolves("geocatalog._src.utils.retry.retry_transient_io")
     assert not _resolves("geocatalog.GeoCatalog.ingest")
     assert not _resolves("geocatalog._src.objstore")
 

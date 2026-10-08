@@ -30,13 +30,13 @@ from geocatalog._src._schema import (
     check_kind,
     crs_config_string,
 )
-from geocatalog._src._timeutil import (
+from geocatalog._src.base import CatalogRow
+from geocatalog._src.geoslice import GeoSlice
+from geocatalog._src.utils.timeutil import (
     naive_utc_datetimes,
     naive_utc_interval_index,
     to_naive_utc,
 )
-from geocatalog._src.base import CatalogRow
-from geocatalog._src.geoslice import GeoSlice
 
 
 _JOIN_T = Literal["sjoin", "overlay"]

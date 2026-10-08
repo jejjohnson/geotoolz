@@ -34,8 +34,8 @@ from rasterio.windows import (
     from_bounds,
 )
 
-from geocatalog._src._align import Align, GridAlignmentWarning, count_steps
-from geocatalog._src._timeutil import naive_utc_interval
+from geocatalog._src.grid import Align, GridAlignmentWarning, count_steps
+from geocatalog._src.utils.timeutil import naive_utc_interval
 
 
 _VALID_ALIGN_MODES: frozenset[str] = frozenset(get_args(Align))

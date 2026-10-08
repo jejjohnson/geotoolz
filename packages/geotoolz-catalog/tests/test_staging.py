@@ -19,8 +19,8 @@ import pandas as pd
 import pytest
 from shapely.geometry import box
 
-from geocatalog._src.memory import InMemoryGeoCatalog
-from geocatalog._src.staging._base import (
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
+from geocatalog._src.staging.stage import (
     LocalCache,
     _ext_for,
     _fetch_one,

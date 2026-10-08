@@ -12,7 +12,6 @@ import pytest
 import shapely
 from shapely.geometry import box
 
-from geocatalog._src.bundle import CatalogBundle
 from geocatalog._src.matchup import (
     CentroidWithin,
     Contains,
@@ -25,6 +24,7 @@ from geocatalog._src.matchup import (
 )
 from geocatalog._src.matchup.engine import MatchupRow
 from geocatalog._src.sources._base import SourceRow
+from geocatalog._src.storage.bundle import CatalogBundle
 from geocatalog.backends import InMemoryGeoCatalog
 
 

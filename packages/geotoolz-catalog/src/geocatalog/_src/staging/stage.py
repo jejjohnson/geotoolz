@@ -46,8 +46,8 @@ import geopandas as gpd
 from loguru import logger
 
 from geocatalog._src._extras import missing_extra
-from geocatalog._src.retry import retry_transient_io
-from geocatalog._src.uri import parse_uri, query_params, with_query
+from geocatalog._src.utils.retry import retry_transient_io
+from geocatalog._src.utils.uri import parse_uri, query_params, with_query
 
 
 if TYPE_CHECKING:
@@ -186,7 +186,7 @@ def stage(
             default one bound to ``dest`` (or the env-var default).
         retries: Per-URI retry budget for *transient* failures only
             (network blips, partial reads — the shared policy of
-            `geocatalog._src.retry.retry_transient_io`). Fatal errors
+            `geocatalog._src.utils.retry.retry_transient_io`). Fatal errors
             such as `FileNotFoundError` or `PermissionError` fail the
             URI immediately; either way a failed URI is then subject
             to ``on_error``.
@@ -210,7 +210,7 @@ def stage(
         ModuleNotFoundError: If a remote URI needs fsspec and it is
             not installed.
     """
-    from geocatalog._src.memory import InMemoryGeoCatalog
+    from geocatalog._src.backends.memory import InMemoryGeoCatalog
 
     if not isinstance(catalog, InMemoryGeoCatalog):
         raise TypeError(

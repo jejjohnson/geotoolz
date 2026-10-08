@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from geocatalog._src._lazy import lazy_getattr
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.base import (
     CatalogClosedError,
     CatalogMetadataError,
@@ -34,11 +35,10 @@ from geocatalog._src.base import (
     CatalogSchemaError,
     GeoCatalogError,
 )
-from geocatalog._src.memory import InMemoryGeoCatalog
 
 
 if TYPE_CHECKING:
-    from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+    from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
 
 
 __all__ = [

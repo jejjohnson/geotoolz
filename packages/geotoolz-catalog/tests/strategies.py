@@ -29,8 +29,8 @@ import hypothesis.strategies as st
 import pandas as pd
 import shapely.geometry
 
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.geoslice import GeoSlice
-from geocatalog._src.memory import InMemoryGeoCatalog
 
 
 # Use a narrow time window so generated intervals stay parseable and

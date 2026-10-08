@@ -13,7 +13,7 @@ import shapely
 pytest.importorskip("duckdb")
 
 from geocatalog import open_catalog
-from geocatalog._src import duckdb_backend
+from geocatalog._src.backends import duckdb_backend
 from geocatalog.backends import CatalogSchemaError, DuckDBGeoCatalog, InMemoryGeoCatalog
 from geocatalog.storage import to_geoparquet
 
@@ -121,7 +121,7 @@ def test_unversioned_artifact_needs_migration_on_both_engines(
     """No `_schema_version` column means legacy v0 for both engines."""
     path = tmp_path / "legacy.parquet"
     _cat(LEFT).gdf.reset_index(drop=True).to_parquet(path)
-    from geocatalog._src import parquet
+    from geocatalog._src.storage import parquet
 
     monkeypatch.setattr(parquet, "SCHEMA_VERSION_CURRENT", 1)
     with pytest.raises(CatalogSchemaError, match="geocatalog migrate"):

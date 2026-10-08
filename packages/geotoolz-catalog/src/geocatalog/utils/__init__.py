@@ -10,7 +10,8 @@
 
 from __future__ import annotations
 
-from geocatalog._src._timeutil import (
+from geocatalog._src.utils.retry import retry_transient_io
+from geocatalog._src.utils.timeutil import (
     TIME_INVARIANT_END,
     TIME_INVARIANT_START,
     is_time_invariant,
@@ -18,8 +19,7 @@ from geocatalog._src._timeutil import (
     to_rfc3339,
     to_utc_ts,
 )
-from geocatalog._src.retry import retry_transient_io
-from geocatalog._src.uri import (
+from geocatalog._src.utils.uri import (
     ParsedURI,
     parse_uri,
 )

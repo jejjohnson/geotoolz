@@ -17,8 +17,8 @@ patches = list(patcher.split(field))
 
 from __future__ import annotations
 
-from geocatalog._src.domain import CatalogDomain
-from geocatalog._src.staging import field_for
+from geocatalog._src.patch.domain import CatalogDomain
+from geocatalog._src.patch.field_for import field_for
 
 
 __all__ = [

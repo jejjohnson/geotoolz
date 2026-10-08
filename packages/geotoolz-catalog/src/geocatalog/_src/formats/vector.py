@@ -24,19 +24,19 @@ from rasterio.features import rasterize
 
 from geocatalog._src._deprecation import renamed_kwargs
 from geocatalog._src._schema import StorageEngine
-from geocatalog._src._timeutil import (
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
+from geocatalog._src.geoslice import GeoSlice
+from geocatalog._src.utils.paths import _close_resolved_uri, _resolve_uri, _uri_name
+from geocatalog._src.utils.retry import retry_transient_io
+from geocatalog._src.utils.timeutil import (
     TIME_INVARIANT_END,
     TIME_INVARIANT_START,
     filename_interval,
 )
-from geocatalog._src.geoslice import GeoSlice
-from geocatalog._src.io import _close_resolved_uri, _resolve_uri, _uri_name
-from geocatalog._src.memory import InMemoryGeoCatalog
-from geocatalog._src.retry import retry_transient_io
 
 
 if TYPE_CHECKING:
-    from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+    from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
 
 
 _VectorTask = Literal[
@@ -302,7 +302,7 @@ def _build_vector_catalog_duckdb(
     in the streaming branch — the writer needs a single fixed CRS up
     front).
     """
-    from geocatalog._src.streaming import stream_build_duckdb
+    from geocatalog._src.storage.streaming import stream_build_duckdb
 
     if target_crs is None:
         target_crs = "EPSG:4326"

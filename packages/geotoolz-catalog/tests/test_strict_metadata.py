@@ -19,7 +19,7 @@ import shapely.geometry
 from loguru import logger
 
 from geocatalog import open_catalog
-from geocatalog._src.memory import InMemoryGeoCatalog
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog.backends import CatalogMetadataError
 from geocatalog.storage import from_geoparquet, to_geoparquet
 
@@ -153,7 +153,7 @@ class TestCrsMetadataReader:
         self, tmp_path: Path, loguru_sink: io.StringIO
     ) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog._src.duckdb_backend import _read_geoparquet_crs
+        from geocatalog._src.backends.duckdb_backend import _read_geoparquet_crs
 
         bad = tmp_path / "corrupt.parquet"
         bad.write_bytes(b"this is not parquet")
@@ -162,7 +162,7 @@ class TestCrsMetadataReader:
 
     def test_corrupt_file_strict_raises(self, tmp_path: Path) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog._src.duckdb_backend import _read_geoparquet_crs
+        from geocatalog._src.backends.duckdb_backend import _read_geoparquet_crs
 
         bad = tmp_path / "corrupt.parquet"
         bad.write_bytes(b"this is not parquet")
@@ -239,7 +239,7 @@ class TestMalformedGeoMetadataShapes:
         self, tmp_path: Path, loguru_sink: io.StringIO
     ) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog._src.duckdb_backend import _read_geoparquet_crs
+        from geocatalog._src.backends.duckdb_backend import _read_geoparquet_crs
 
         path = self._parquet_with_geo(tmp_path, b"[1, 2, 3]")
         assert _read_geoparquet_crs(path, default="EPSG:4326") == "EPSG:4326"
@@ -247,7 +247,7 @@ class TestMalformedGeoMetadataShapes:
 
     def test_non_mapping_columns_entry_strict_raises(self, tmp_path: Path) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog._src.duckdb_backend import _read_geoparquet_crs
+        from geocatalog._src.backends.duckdb_backend import _read_geoparquet_crs
 
         path = self._parquet_with_geo(
             tmp_path, b'{"primary_column": "geometry", "columns": ["geometry"]}'
@@ -259,7 +259,7 @@ class TestMalformedGeoMetadataShapes:
         self, tmp_path: Path, loguru_sink: io.StringIO
     ) -> None:
         pytest.importorskip("duckdb")
-        from geocatalog._src.duckdb_backend import _read_geoparquet_crs
+        from geocatalog._src.backends.duckdb_backend import _read_geoparquet_crs
 
         path = self._parquet_with_geo(tmp_path, b"\xff\xfe{not json}")
         assert _read_geoparquet_crs(path, default="EPSG:4326") == "EPSG:4326"

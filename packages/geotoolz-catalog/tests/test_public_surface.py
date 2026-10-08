@@ -148,7 +148,7 @@ def test_helpers_have_public_paths() -> None:
     from geocatalog.storage import StreamingParquetWriter, sort_geoparquet
     from geocatalog.utils import parse_uri, retry_transient_io, to_utc_ts
 
-    assert StreamingParquetWriter.__module__ == "geocatalog._src.streaming"
+    assert StreamingParquetWriter.__module__ == "geocatalog._src.storage.streaming"
     assert callable(sort_geoparquet) and callable(retry_transient_io)
     assert parse_uri("s3://b/k").is_remote
     assert to_utc_ts("2024-01-01").tzinfo is not None

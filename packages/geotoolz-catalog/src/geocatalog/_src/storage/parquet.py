@@ -31,10 +31,10 @@ from geocatalog._src._schema import (
     CatalogKind,
     check_schema_versions,
 )
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.base import CatalogMetadataError, CatalogSchemaError
-from geocatalog._src.io import _close_resolved_uri, _resolve_uri
-from geocatalog._src.memory import InMemoryGeoCatalog
-from geocatalog._src.retry import retry_transient_io
+from geocatalog._src.utils.paths import _close_resolved_uri, _resolve_uri
+from geocatalog._src.utils.retry import retry_transient_io
 
 
 # Forward migrations keyed by *source* version. `_MIGRATIONS[k]` takes a
@@ -212,7 +212,7 @@ def to_geoparquet(
         gdf["end_time"] = gdf.index.right
         gdf = gdf.reset_index(drop=True)
     if partition_by is not None:
-        from geocatalog._src.streaming import write_partitioned_rows
+        from geocatalog._src.storage.streaming import write_partitioned_rows
 
         # `itertuples(index=False)` is ~10-50x faster than `iterrows()` on
         # wide catalogs (`iterrows` materialises a `pd.Series` per row).

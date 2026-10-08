@@ -13,7 +13,7 @@ import shapely.geometry
 
 duckdb = pytest.importorskip("duckdb")
 
-import geocatalog._src.duckdb_backend as duckdb_backend
+import geocatalog._src.backends.duckdb_backend as duckdb_backend
 from geocatalog import GeoSlice, open_catalog
 from geocatalog.backends import CatalogClosedError, DuckDBGeoCatalog, InMemoryGeoCatalog
 from geocatalog.storage import to_geoparquet
@@ -273,7 +273,7 @@ class TestLifecycle:
         before the exception propagates — otherwise long-lived processes
         leak a DuckDB handle per failed open.
         """
-        from geocatalog._src import duckdb_backend as backend
+        from geocatalog._src.backends import duckdb_backend as backend
 
         opened: list[duckdb.DuckDBPyConnection] = []
         real_connect = backend.duckdb.connect
@@ -310,7 +310,7 @@ class TestLifecycle:
         Externally-supplied connections stay untouched (covered by
         `test_from_memory_does_not_own_external_connection`).
         """
-        from geocatalog._src import duckdb_backend as backend
+        from geocatalog._src.backends import duckdb_backend as backend
 
         opened: list[duckdb.DuckDBPyConnection] = []
         real_connect = backend.duckdb.connect
@@ -357,7 +357,7 @@ class TestLifecycle:
         network-fetched `spatial` extension also keeps it green in
         sandboxed CI.
         """
-        from geocatalog._src import duckdb_backend as backend
+        from geocatalog._src.backends import duckdb_backend as backend
 
         monkeypatch.setattr(backend, "_ensure_spatial", lambda _con: None)
 
@@ -390,7 +390,7 @@ class TestLifecycle:
         at the same root owner so a multi-step fluent expression doesn't
         leak the connection either.
         """
-        from geocatalog._src import duckdb_backend as backend
+        from geocatalog._src.backends import duckdb_backend as backend
 
         monkeypatch.setattr(backend, "_ensure_spatial", lambda _con: None)
 
@@ -411,7 +411,7 @@ class TestLifecycle:
         this guards against accidentally repurposing `close()` as the
         chain-tear-down hook now that `__exit__` does that job.
         """
-        from geocatalog._src import duckdb_backend as backend
+        from geocatalog._src.backends import duckdb_backend as backend
 
         monkeypatch.setattr(backend, "_ensure_spatial", lambda _con: None)
 

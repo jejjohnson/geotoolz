@@ -10,7 +10,7 @@ import pytest
 from geocatalog._src._extras import install_hint, missing_extra, require_extra
 from geocatalog._src._schema import BACKEND_TAGS, check_schema_versions, empty_frame
 from geocatalog._src.base import CatalogSchemaError
-from geocatalog._src.uri import (
+from geocatalog._src.utils.uri import (
     DUCKDB_EXTENSIONS,
     FSSPEC_SCHEMES,
     parse_uri,

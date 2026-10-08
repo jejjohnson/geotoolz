@@ -34,8 +34,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
 
-from geocatalog._src._timeutil import to_utc_ts
 from geocatalog._src.matchup.temporal import _midpoint, _to_timedelta
+from geocatalog._src.utils.timeutil import to_utc_ts
 
 
 if TYPE_CHECKING:
@@ -43,10 +43,10 @@ if TYPE_CHECKING:
     import shapely.geometry.base
 
     from geocatalog._src.base import CatalogRow, GeoCatalog
-    from geocatalog._src.bundle import CatalogBundle
     from geocatalog._src.matchup.spatial import SpatialStrategy
     from geocatalog._src.matchup.temporal import TemporalStrategy
     from geocatalog._src.sources._base import SourceRow
+    from geocatalog._src.storage.bundle import CatalogBundle
 
 
 #: Role reserved for the primary member of every `MatchupRow`.
@@ -306,7 +306,7 @@ def matchup(
 
 def _unwrap_bundle(obj: Any) -> Any:
     """A `CatalogBundle` stands for its items catalog."""
-    from geocatalog._src.bundle import CatalogBundle
+    from geocatalog._src.storage.bundle import CatalogBundle
 
     return obj.catalog if isinstance(obj, CatalogBundle) else obj
 

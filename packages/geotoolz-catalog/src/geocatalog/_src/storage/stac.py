@@ -29,10 +29,10 @@ from geocatalog._src._stac_item import (
     item_interval,
     reproject_geometry,
 )
-from geocatalog._src._timeutil import to_naive_utc, to_rfc3339, to_utc_ts
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.base import GeoCatalog
-from geocatalog._src.memory import InMemoryGeoCatalog
-from geocatalog._src.parquet import to_geoparquet
+from geocatalog._src.storage.parquet import to_geoparquet
+from geocatalog._src.utils.timeutil import to_naive_utc, to_rfc3339, to_utc_ts
 
 
 if TYPE_CHECKING:
@@ -138,7 +138,7 @@ def from_stac_items(
     if out_path is None:
         raise ValueError("from_stac_items(engine='duckdb') requires out_path")
     to_geoparquet(catalog, out_path)
-    from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+    from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
 
     return DuckDBGeoCatalog.open(out_path, kind="raster", crs=catalog_crs)
 
@@ -540,7 +540,7 @@ def _datetime_or_none(value: Any) -> Any | None:
 def _to_utc_datetime(value: Any | None) -> Any | None:
     """Coerce a Python datetime to tz-aware UTC; naive inputs assumed UTC.
 
-    None-passing wrapper over `geocatalog._src._timeutil.to_utc_ts`.
+    None-passing wrapper over `geocatalog._src.utils.timeutil.to_utc_ts`.
     pystac requires tz-aware datetimes for RFC3339-canonical output,
     hence the ``.to_pydatetime()`` conversion.
     """
@@ -552,7 +552,7 @@ def _to_utc_datetime(value: Any | None) -> Any | None:
 def _to_rfc3339(value: Any | None) -> str | None:
     """Serialize a datetime as STAC-canonical RFC3339 (UTC, ``Z`` suffix).
 
-    None-passing wrapper over `geocatalog._src._timeutil.to_rfc3339`.
+    None-passing wrapper over `geocatalog._src.utils.timeutil.to_rfc3339`.
     """
     if value is None:
         return None

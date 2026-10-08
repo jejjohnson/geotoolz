@@ -22,16 +22,16 @@ import shapely.geometry
 if TYPE_CHECKING:
     import xarray as xr
 
-    from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+    from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
     from geocatalog._src.geoslice import GeoSlice
 
 
 from geocatalog._src._deprecation import renamed_kwargs
 from geocatalog._src._extras import missing_extra
 from geocatalog._src._schema import StorageEngine
-from geocatalog._src.io import _close_resolved_uri, _resolve_uri
-from geocatalog._src.memory import InMemoryGeoCatalog, _reproject_bounds
-from geocatalog._src.uri import parse_uri
+from geocatalog._src.backends.memory import InMemoryGeoCatalog, _reproject_bounds
+from geocatalog._src.utils.paths import _close_resolved_uri, _resolve_uri
+from geocatalog._src.utils.uri import parse_uri
 
 
 # Only `xarray` is genuinely optional — geopandas + shapely are base deps.
@@ -321,7 +321,7 @@ def _build_xarray_catalog_duckdb(
     etc., so the duckdb branch instead requires an explicit
     ``target_crs`` matching the data's native CRS.
     """
-    from geocatalog._src.streaming import stream_build_duckdb
+    from geocatalog._src.storage.streaming import stream_build_duckdb
 
     if target_crs is None:
         raise ValueError(

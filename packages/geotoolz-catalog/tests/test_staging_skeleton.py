@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 import geocatalog.staging as staging_ns
-from geocatalog._src.staging import LocalCache, stage
+from geocatalog._src.staging.stage import LocalCache, stage
 
 
 class TestReexports:

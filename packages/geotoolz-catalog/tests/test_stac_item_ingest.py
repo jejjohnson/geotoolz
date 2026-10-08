@@ -22,8 +22,8 @@ import shapely.ops
 pystac = pytest.importorskip("pystac")
 
 from geocatalog._src._stac_item import is_signed_href, reproject_geometry
-from geocatalog._src.bundle._catalog_bundle import source_row_to_gdf_row
 from geocatalog._src.sources.stac import _item_to_source_row
+from geocatalog._src.storage.bundle import source_row_to_gdf_row
 from geocatalog.sources import from_stac_items
 
 

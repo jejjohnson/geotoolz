@@ -29,13 +29,13 @@ pytest.importorskip("pystac_client")
 
 from shapely.geometry import box, mapping
 
-from geocatalog._src._timeutil import to_utc_ts as _to_utc_timestamp
 from geocatalog._src.sources._base import SourceRow
 from geocatalog._src.sources.stac import (
     STACSource,
     _interval_to_stac_datetime,
     _item_to_source_row,
 )
+from geocatalog._src.utils.timeutil import to_utc_ts as _to_utc_timestamp
 
 
 # ---------------------------------------------------------------------------

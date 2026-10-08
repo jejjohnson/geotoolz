@@ -16,8 +16,8 @@ import rasterio
 from hypothesis import settings
 from rasterio.transform import from_bounds
 
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.base import GeoCatalog
-from geocatalog._src.memory import InMemoryGeoCatalog
 
 
 # Hypothesis profiles. Two are registered:
@@ -153,11 +153,11 @@ def as_backend(
     def convert(catalog: InMemoryGeoCatalog) -> GeoCatalog:
         if catalog_backend == "memory":
             return catalog
-        from geocatalog._src.duckdb_backend import DuckDBGeoCatalog
+        from geocatalog._src.backends.duckdb_backend import DuckDBGeoCatalog
 
         if catalog_backend == "duckdb":
             return DuckDBGeoCatalog.from_memory(catalog)
-        from geocatalog._src.parquet import to_geoparquet
+        from geocatalog._src.storage.parquet import to_geoparquet
 
         path = tmp_path_factory.mktemp("parity") / "catalog.parquet"
         to_geoparquet(catalog, path)

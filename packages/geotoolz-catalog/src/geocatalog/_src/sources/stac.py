@@ -27,7 +27,6 @@ from geocatalog._src._stac_item import (
     item_geometry,
     item_interval,
 )
-from geocatalog._src._timeutil import to_rfc3339 as _to_iso
 from geocatalog._src.sources._base import (
     AuthStatus,
     Bounds,
@@ -35,6 +34,7 @@ from geocatalog._src.sources._base import (
     SourceRow,
     wants_no_rows,
 )
+from geocatalog._src.utils.timeutil import to_rfc3339 as _to_iso
 
 
 if TYPE_CHECKING:
@@ -261,7 +261,7 @@ def _interval_to_stac_datetime(interval: pd.Interval) -> str:
 
     STAC expects timezone-aware ISO 8601 with ``Z`` for UTC; the
     UTC coercion / ``Z`` serialization live in
-    `geocatalog._src._timeutil` (imported here as ``_to_iso``).
+    `geocatalog._src.utils.timeutil` (imported here as ``_to_iso``).
     """
     return f"{_to_iso(interval.left)}/{_to_iso(interval.right)}"
 

@@ -16,12 +16,10 @@ from loguru import logger
 from tenacity import wait_none
 
 from geocatalog import GeoSlice
-from geocatalog._src import (
-    duckdb_backend as duckdb_module,
-    parquet as parquet_module,
-    raster as raster_module,
-    retry as retry_module,
-)
+from geocatalog._src.backends import duckdb_backend as duckdb_module
+from geocatalog._src.formats import raster as raster_module
+from geocatalog._src.storage import parquet as parquet_module
+from geocatalog._src.utils import retry as retry_module
 from geocatalog.backends import InMemoryGeoCatalog
 from geocatalog.build import build_raster_catalog
 from geocatalog.load import load_raster

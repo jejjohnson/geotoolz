@@ -42,8 +42,8 @@ from geocatalog._src._stac_item import (
     is_signed_href,
     reproject_geometry,
 )
-from geocatalog._src._timeutil import to_naive_utc
-from geocatalog._src.memory import InMemoryGeoCatalog
+from geocatalog._src.backends.memory import InMemoryGeoCatalog
+from geocatalog._src.utils.timeutil import to_naive_utc
 
 
 if TYPE_CHECKING:
@@ -581,7 +581,7 @@ class CatalogBundle:
         ``created_at`` records the first save and survives later ones;
         ``updated_at`` is the latest.
         """
-        from geocatalog._src.parquet import to_geoparquet
+        from geocatalog._src.storage.parquet import to_geoparquet
 
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -616,7 +616,7 @@ class CatalogBundle:
     @classmethod
     def from_directory(cls, path: str | Path) -> CatalogBundle:
         """Load a bundle from disk. Inverse of `to_directory`."""
-        from geocatalog._src.parquet import from_geoparquet
+        from geocatalog._src.storage.parquet import from_geoparquet
 
         src = Path(path)
         if not src.is_dir():

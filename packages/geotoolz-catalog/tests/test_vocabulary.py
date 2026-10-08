@@ -204,7 +204,7 @@ def test_stac_search_shims() -> None:
 
 
 def test_aload_raster_concurrency_shim() -> None:
-    from geocatalog._src.raster import aload_raster
+    from geocatalog._src.formats.raster import aload_raster
 
     assert "max_open_workers" in inspect.signature(aload_raster).parameters
     assert inspect.iscoroutinefunction(aload_raster)
@@ -402,7 +402,7 @@ def test_backend_only_instance_check_does_not_run_properties() -> None:
 
 
 def test_field_for_accepts_a_backend_only_catalog_with_an_asset() -> None:
-    from geocatalog._src.staging._field_for import _with_asset_paths
+    from geocatalog._src.patch.field_for import _with_asset_paths
 
     inner = _catalog()
     inner.gdf["assets"] = ['{"B04": "s3://b/a.tif"}', '{"B04": "s3://b/b.tif"}']
@@ -415,7 +415,7 @@ def test_duckdb_open_rejects_a_bad_kind_before_connecting(
     parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("duckdb")
-    from geocatalog._src import duckdb_backend
+    from geocatalog._src.backends import duckdb_backend
     from geocatalog.backends import DuckDBGeoCatalog
 
     def no_connect() -> None:
@@ -430,7 +430,7 @@ def test_duckdb_open_closes_the_connection_on_a_bad_stored_kind(
     parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     duckdb = pytest.importorskip("duckdb")
-    from geocatalog._src import duckdb_backend
+    from geocatalog._src.backends import duckdb_backend
     from geocatalog.backends import DuckDBGeoCatalog
 
     opened: list[Any] = []

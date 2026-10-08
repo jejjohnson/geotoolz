@@ -404,7 +404,7 @@ async def _get_range_async(
 def _run_coroutine_safely(coro: Any) -> Any:
     """Drive ``coro`` to completion regardless of running-loop state.
 
-    Same pattern as ``geocatalog._src.raster._run_coroutine_safely`` and
+    Same pattern as ``geocatalog._src.formats.raster._run_coroutine_safely`` and
     ``geocloud._src.cog_source._run_coroutine_safely``:
     ``asyncio.run`` raises ``RuntimeError`` when nested under a running
     loop (Jupyter, FastAPI handler, ``pytest-asyncio``). Detect that

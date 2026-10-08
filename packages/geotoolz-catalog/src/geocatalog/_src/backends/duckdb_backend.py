@@ -52,7 +52,12 @@ from geocatalog._src._schema import (
     check_schema_versions,
     crs_config_string,
 )
-from geocatalog._src._timeutil import naive_utc_datetimes, to_naive_utc
+from geocatalog._src.backends.memory import (
+    InMemoryGeoCatalog,
+    _coerce_interval,
+    _footprint_slices,
+    _query_envelopes,
+)
 from geocatalog._src.base import (
     INTERNAL_COLUMNS,
     RESERVED_COLUMNS,
@@ -61,14 +66,9 @@ from geocatalog._src.base import (
     CatalogRow,
 )
 from geocatalog._src.geoslice import GeoSlice
-from geocatalog._src.memory import (
-    InMemoryGeoCatalog,
-    _coerce_interval,
-    _footprint_slices,
-    _query_envelopes,
-)
-from geocatalog._src.retry import retry_transient_io
-from geocatalog._src.uri import DUCKDB_EXTENSIONS, parse_uri
+from geocatalog._src.utils.retry import retry_transient_io
+from geocatalog._src.utils.timeutil import naive_utc_datetimes, to_naive_utc
+from geocatalog._src.utils.uri import DUCKDB_EXTENSIONS, parse_uri
 
 
 # DuckDB is the optional dep for this backend. The lazy facade loader
@@ -1052,7 +1052,7 @@ class DuckDBGeoCatalog:
                 that GeoParquet 1.1 readers (DuckDB, geopandas) use for
                 predicate pushdown. Default True.
         """
-        from geocatalog._src.parquet import to_geoparquet as _write
+        from geocatalog._src.storage.parquet import to_geoparquet as _write
 
         _write(
             self.materialize(),
@@ -1332,7 +1332,7 @@ def _check_schema_version(
     else:
         lo = int(df["lo"].iloc[0])
         hi = int(df["hi"].iloc[0])
-    from geocatalog._src.parquet import SCHEMA_VERSION_CURRENT
+    from geocatalog._src.storage.parquet import SCHEMA_VERSION_CURRENT
 
     check_schema_versions(
         source, lo, hi, reader=SCHEMA_VERSION_CURRENT, can_migrate=False

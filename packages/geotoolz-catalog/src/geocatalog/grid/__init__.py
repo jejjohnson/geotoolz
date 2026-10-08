@@ -12,16 +12,16 @@
 
 from __future__ import annotations
 
-from geocatalog._src._align import (
-    Align,
-    GridAlignmentWarning,
-    count_steps,
-    is_grid_aligned,
-)
 from geocatalog._src.geoslice import (
     PIXEL_PRECISION,
     slice_to_window,
     window_to_slice,
+)
+from geocatalog._src.grid import (
+    Align,
+    GridAlignmentWarning,
+    count_steps,
+    is_grid_aligned,
 )
 
 

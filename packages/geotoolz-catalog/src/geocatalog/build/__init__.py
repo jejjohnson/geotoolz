@@ -28,13 +28,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from geocatalog._src._lazy import lazy_getattr
-from geocatalog._src.raster import build_raster_catalog
-from geocatalog._src.streaming import append_files
+from geocatalog._src.formats.raster import build_raster_catalog
+from geocatalog._src.storage.streaming import append_files
 
 
 if TYPE_CHECKING:
-    from geocatalog._src.vector import build_vector_catalog
-    from geocatalog._src.xarray_backend import build_xarray_catalog
+    from geocatalog._src.formats.vector import build_vector_catalog
+    from geocatalog._src.formats.xarray_backend import build_xarray_catalog
 
 
 __all__ = [

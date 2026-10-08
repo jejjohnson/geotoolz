@@ -27,14 +27,14 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 from geocatalog._src._extras import missing_extra
-from geocatalog._src.uri import parse_uri
+from geocatalog._src.utils.uri import parse_uri
 
 
 if TYPE_CHECKING:
     from geopatcher import RasterField
 
+    from geocatalog._src.backends.memory import InMemoryGeoCatalog
     from geocatalog._src.geoslice import GeoSlice
-    from geocatalog._src.memory import InMemoryGeoCatalog
 
 
 _GEOREADER_HINT = (
@@ -192,7 +192,7 @@ def field_for(
         return [RasterField(RasterioReader(p, indexes=indexes)) for p in paths]
     assert slice_ is not None
 
-    from geocatalog._src.raster import load_raster
+    from geocatalog._src.formats.raster import load_raster
 
     tensor = load_raster(
         selected,
@@ -261,7 +261,7 @@ def _with_asset_paths(
     catalog: InMemoryGeoCatalog, *, asset: str | None
 ) -> InMemoryGeoCatalog:
     """``catalog`` with ``filepath`` pointing at ``asset`` on every row."""
-    from geocatalog._src.memory import InMemoryGeoCatalog
+    from geocatalog._src.backends.memory import InMemoryGeoCatalog
 
     if asset is None:
         if "filepath" not in catalog.gdf.columns:
