@@ -28,6 +28,9 @@ Public surface re-exports:
   root namespace by ADR design).
 - Object-store client pool: `geopatcher.objstore` (the one process-wide
   ``obstore`` pool, shared with geotoolz and geocatalog; ``[obstore]`` extra).
+- Async COG reading: `geopatcher.cog` (`AsyncCogReader` and async
+  ``read_*`` mirrors of ``georeader.read`` on `ObstoreCogField`'s engine;
+  ``[obstore-cog]`` extra).
 
 Operator-graph wrappers (`GridSampler`, `ApplyToChips`, `Stitch`) that bridge
 the patcher into the `pipekit` composition framework live in the optional

@@ -517,6 +517,34 @@ class ObstoreCogField:
             TimeoutError: Opening the COG took longer than ``timeout``
                 seconds.
         """
+        return _run_coroutine_safely(
+            cls.afrom_url(
+                url,
+                storage_options=storage_options,
+                ifd_index=ifd_index,
+                store=store,
+                path=path,
+                timeout=timeout,
+            )
+        )
+
+    @classmethod
+    async def afrom_url(
+        cls,
+        url: str,
+        *,
+        storage_options: dict[str, Any] | None = None,
+        ifd_index: int = 0,
+        store: Any = None,
+        path: str | None = None,
+        timeout: float | None = 120.0,
+    ) -> ObstoreCogField:
+        """Async twin of :meth:`from_url` — same arguments, same field.
+
+        For callers already inside an event loop (tile servers, async
+        inference): awaits the header fetch instead of driving it on a
+        helper thread.
+        """
         async_geotiff = _require_async_geotiff()
 
         explicit_store = store
@@ -533,18 +561,12 @@ class ObstoreCogField:
                 )
             object_path = path
 
-        async def _open() -> Any:
-            return await _with_timeout(
-                async_geotiff.GeoTIFF.open(object_path, store=store),
-                timeout=timeout,
-                message=f"opening COG {url!r}",
-            )
-
-        with warnings.catch_warnings():
-            # Upstream only warns on striped TIFFs; the tiled check below
-            # raises with a clearer message.
-            warnings.filterwarnings("ignore", "Striped GeoTIFFs", UserWarning)
-            geotiff = _run_coroutine_safely(_open())
+        # Upstream only warns on striped TIFFs; the tiled check below raises.
+        geotiff = await _with_timeout(
+            async_geotiff.GeoTIFF.open(object_path, store=store),
+            timeout=timeout,
+            message=f"opening COG {url!r}",
+        )
         ifd = geotiff.tiff.ifd(ifd_index)
         if ifd.tile_width is None or ifd.tile_height is None:
             raise ValueError(
@@ -694,8 +716,29 @@ class ObstoreCogField:
         """
         return self.select_many([window])[0]
 
+    async def aselect(self, window: Window) -> GeoTensor:
+        """Async twin of :meth:`select` (the `AsyncField` spelling).
+
+        `AsyncSpatialPatcher` awaits this, so the field plugs into the
+        async patcher with no wrapper.
+        """
+        return (await self.aselect_many([window]))[0]
+
     def select_many(self, windows: list[Window]) -> list[GeoTensor]:
         """Bulk-read every window, fetching each overlapping tile once.
+
+        Sync facade over :meth:`aselect_many` (safe inside a running
+        event loop — the coroutine then runs on a helper thread); see
+        there for the read semantics.
+
+        Raises:
+            TimeoutError: The tile fetch + decode did not finish within
+                ``self.timeout`` seconds.
+        """
+        return _run_coroutine_safely(self.aselect_many(windows))
+
+    async def aselect_many(self, windows: list[Window]) -> list[GeoTensor]:
+        """Async bulk read: every window, each overlapping tile fetched once.
 
         The headline path: collect every unique tile coordinate
         across all windows, fetch + decode them in concurrent groups
@@ -749,15 +792,13 @@ class ObstoreCogField:
                     tile_coords[(tx, ty)] = None
 
         coord_list = list(tile_coords.keys())
-        decoded = _run_coroutine_safely(
-            _with_timeout(
-                _fetch_and_decode_tiles(self.level, coord_list),
-                timeout=self.timeout,
-                message=(
-                    f"fetching/decoding a batch of {len(coord_list)} tiles "
-                    f"from {self.url!r}"
-                ),
-            )
+        decoded = await _with_timeout(
+            _fetch_and_decode_tiles(self.level, coord_list),
+            timeout=self.timeout,
+            message=(
+                f"fetching/decoding a batch of {len(coord_list)} tiles "
+                f"from {self.url!r}"
+            ),
         )
         # Map decoded tiles by coord for the assembly loop.
         tile_data: dict[tuple[int, int], np.ndarray] = dict(
