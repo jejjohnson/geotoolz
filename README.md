@@ -242,8 +242,8 @@ full tour):
   intended coreg callables for `geopatcher.matched.MatchedField`, aligning
   multi-source patches found by the catalog's matchup engine.
 - **One obstore pool** — `geocloud.store` owns the process-wide pooled
-  HTTP/2 client; the `[obstore]` extras of geotoolz-products and geocatalog
-  install and use it.
+  HTTP/2 client; geopatcher's `CogField` (`[cog]` extra) and geoproducts'
+  cloud byte reads (`[obstore]` extra) take their clients from it.
 
 ## Install
 
