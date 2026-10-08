@@ -1,8 +1,13 @@
 ---
-applyTo: "src/**/*.py,tests/**/*.py,scripts/**/*.py"
+applyTo: "packages/*/src/**/*.py,packages/*/tests/**/*.py"
 ---
 
 # Python Coding Standards
+
+Read the root `AGENTS.md` ("Reuse before you write") and the package's own
+`packages/<package>/AGENTS.md` first: compose the shared `_src/` helpers
+instead of writing new ones, and keep "The two contracts" there (pipekit
+`Operator`, `GeoTensor` carrier).
 
 ## Modern Python (3.12+)
 
@@ -28,7 +33,7 @@ applyTo: "src/**/*.py,tests/**/*.py,scripts/**/*.py"
 | Data containers | `dataclasses` (stdlib) or `attrs` |
 | Configuration | `hydra-core` / `omegaconf` |
 | Path handling | `pathlib` (stdlib) |
-| HTTP | `httpx` |
+| HTTP | the shared helpers in `geoproducts._src.net` (readers); no new client per module |
 | Testing | `pytest` |
 
 ## Documentation

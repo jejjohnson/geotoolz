@@ -1,0 +1,14 @@
+{
+  "name": "geotoolz",
+  "owner": {
+    "name": "jejjohnson"
+  },
+  "description": "Claude Code plugins for building geospatial pipelines on the geotoolz stack.",
+  "plugins": [
+    {
+      "name": "geotoolz",
+      "source": "./plugins/geotoolz",
+      "description": "Build geospatial pipelines on the geotoolz stack (geocatalog, geoproducts, geopatcher, geotoolz, geocloud) instead of re-implementing them: a pipeline-building skill and a reuse reviewer."
+    }
+  ]
+}

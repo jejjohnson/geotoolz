@@ -1,3 +1,8 @@
+---
+name: create-gh-issue
+description: Open GitHub issues on this repo from the templates in .github/ISSUE_TEMPLATE/, with labels, milestone and relationships. Use when asked to file / open an issue (feature, design, bug, research, epic) or to publish drafted backlog issues.
+---
+
 Open GitHub issues using this project's issue templates, with correct labels, milestone, and relationships applied.
 
 Use this skill when the user asks to file an issue, open an issue, create a feature / design / bug / research / epic, or when publishing draft issues from a wave-backlog file into real GitHub issues. It pairs with `link-gh-issues` for applying native sub-issue and blocked-by links after creation.
@@ -185,5 +190,5 @@ When the user has a `.plans/<wave>-backlog.md` file drafted from `docs/templates
 
 ## Related skills
 
-- [`link-gh-issues`](./link-gh-issues.md) — Apply native sub-issue and blocked-by links after issues are created. Invoke after this skill finishes creating issues.
-- [`squash-commit`](./squash-commit.md) — Generate a squash commit message when merging an issue's PR.
+- [`link-gh-issues`](../link-gh-issues/SKILL.md) — Apply native sub-issue and blocked-by links after issues are created. Invoke after this skill finishes creating issues.
+- [`squash-commit`](../squash-commit/SKILL.md) — Generate a squash commit message when merging an issue's PR.

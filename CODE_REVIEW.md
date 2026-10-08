@@ -39,7 +39,7 @@ git --no-pager diff --no-prefix --unified=100000 --minimal "$BASE_BRANCH"...HEAD
 - Logical code organization and flow
 - Avoidance of deeply nested structures
 - Linting via **ruff** (`uv run --group lint ruff check .`) — lint the **entire repo**, not just the package
-- Type-hint checking via **ty** (`uv run --group typecheck ty check src/geotoolz`)
+- Type-hint checking via **ty** (`make typecheck`, which runs `ty check` from each package directory)
 
 > **Rule of thumb**: Sacrifice *cleverness* for *clarity*. Sacrifice *brevity* for *explicitness*.
 > Don't worry about formatting — our CI pipeline (ruff format, pre-commit) handles that automatically.
@@ -67,7 +67,19 @@ git --no-pager diff --no-prefix --unified=100000 --minimal "$BASE_BRANCH"...HEAD
 - Clear module boundaries and dependencies
 - Correct use of relative vs absolute imports
 - Entry points defined properly for CLI tools
-- `src/` layout enforced
+- Each package's `src/<import name>/` layout: public names re-exported from
+  the facades, implementation in `_src/`, one public home per name
+- **Reuse**: the change composes existing primitives and shared `_src/`
+  helpers rather than re-implementing them (see "Reuse before you write" in
+  `AGENTS.md`); a genuinely new helper lands in the shared toolkit, not
+  inline in one caller
+- **Contracts** (see "The two contracts" in `AGENTS.md`):
+  - pipekit `Operator`: a keyword-only constructor that holds no carrier; an
+    auto-derived JSON `get_config()`; `forbid_in_yaml` on live objects;
+    `_terminal` on non-carrier outputs;
+  - `GeoTensor`: rewrap via `wrap_like`; fresh `attrs`; a fill that
+    matches the output; the band axis at `-3`; a grid check on every
+    second carrier.
 
 ### 4. Documentation
 
@@ -121,7 +133,7 @@ When reviewing dependency choices or suggesting alternatives, prefer these libra
 | Data containers | `dataclasses` (stdlib) or `attrs` |
 | Configuration | `hydra-core` / `omegaconf` |
 | Path handling | `pathlib` (stdlib) |
-| HTTP | `httpx` |
+| HTTP | the shared helpers in `geoproducts._src.net` (readers); no new client per module |
 | Testing | `pytest` |
 
 ---

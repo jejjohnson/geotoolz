@@ -1,3 +1,8 @@
+---
+name: squash-commit
+description: Write a Conventional-Commits squash commit message for a pull request from its commits and description. Use when asked for a squash / merge commit message.
+---
+
 Generate a squash commit message for a GitHub PR.
 
 ## Instructions

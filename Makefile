@@ -198,6 +198,9 @@ clean: ## 🗑️  Remove build artefacts and cache directories
 docs: ## 📖 Build documentation with mkdocs
 	uv run --group docs mkdocs build
 
+capabilities: ## 🗂️  Regenerate docs/capabilities.md (every public name in the stack)
+	uv run python scripts/capabilities.py
+
 docs-serve: ## 🌐 Serve documentation locally
 	uv run --group docs mkdocs serve
 

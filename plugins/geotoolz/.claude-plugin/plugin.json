@@ -1,0 +1,11 @@
+{
+  "name": "geotoolz",
+  "description": "Build geospatial pipelines on the geotoolz stack — find and index files (geocatalog), read EO products (geoproducts), tile and stitch (geopatcher), compute (geotoolz), object storage (geocloud) — instead of re-implementing them.",
+  "author": {
+    "name": "jejjohnson"
+  },
+  "homepage": "https://jejjohnson.github.io/geotoolz/agents/",
+  "repository": "https://github.com/jejjohnson/geotoolz",
+  "license": "MIT",
+  "keywords": ["geospatial", "remote-sensing", "earth-observation", "xarray", "rasterio", "pipelines"]
+}

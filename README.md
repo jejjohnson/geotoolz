@@ -267,6 +267,17 @@ git clone https://github.com/jejjohnson/geotoolz && cd geotoolz
 uv sync --all-packages --all-groups --all-extras
 ```
 
+## Building with an AI agent
+
+Every public name in the stack is listed, with a one-line summary, in the
+[capability index](https://jejjohnson.github.io/geotoolz/capabilities/).
+Claude Code users can install the stack's plugin — a pipeline-building skill
+and a reuse reviewer — with `/plugin marketplace add jejjohnson/geotoolz`
+then `/plugin install geotoolz@geotoolz`; other agents can read
+[`llms.txt`](https://jejjohnson.github.io/geotoolz/llms.txt). See
+[Building with agents](https://jejjohnson.github.io/geotoolz/agents/).
+Contributors start from [`AGENTS.md`](AGENTS.md).
+
 ## Development
 
 ```bash
