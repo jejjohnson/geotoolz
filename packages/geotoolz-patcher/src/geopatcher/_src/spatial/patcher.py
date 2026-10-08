@@ -465,6 +465,13 @@ class SpatialPatcher(_SpatialPatcherBase):
         rule in `merge_to_xarray`); otherwise the aggregation's dtype is
         kept — e.g. float64 carrying a NaN fill on an integer source.
 
+        On a raster field the patches may carry a different band count
+        than the source — a per-patch operator that turns four bands into
+        one index merges into a ``(1, H, W)`` `GeoTensor` on the source
+        grid, with the stale per-band ``attrs`` dropped and a NaN fill for
+        the new float quantity. The xarray adapters keep their dims and
+        coords, so they need the domain's own shape.
+
         Args:
             patches: Iterable of patches to merge.
             field: The `Field` the patches came from; must expose
@@ -478,8 +485,9 @@ class SpatialPatcher(_SpatialPatcherBase):
             TypeError: If ``field`` has no ``with_data``, if the aggregation
                 returns a ``dict`` (`spatial.aggregation.MeanStd`,
                 `spatial.aggregation.InvVarWeightedMean`, `spatial.aggregation.ByIndex`,
-                …) or anything without an array ``shape``, or if the output shape
-                differs from ``field.domain.shape``.
+                …) or anything without an array ``shape``, or if the output is
+                not on the field's grid (its trailing ``(H, W)`` differs from
+                the domain's, or — on an xarray field — any axis does).
 
         Examples:
             Stitch Hann-weighted chips back into a `GeoTensor`::
@@ -502,6 +510,7 @@ class SpatialPatcher(_SpatialPatcherBase):
                 shape=_domain_shape(field.domain),
                 dtype=_source_dtype(field),
                 caller="merge_to_field",
+                bands_may_change=_is_raster_field(field),
             )
         )
 
@@ -1006,6 +1015,42 @@ def _source_dtype(field: Any) -> np.dtype | None:
     return None
 
 
+def on_domain_grid(merged: Any, aggregation: SpatialAggregation, domain: Any) -> Any:
+    """A dense merge result as a `GeoTensor` on a georeferenced domain's grid.
+
+    The pipekit ``Stitch`` operator's counterpart of `merge_to_field` when
+    only the domain is at hand: a ``numpy`` array merged onto a domain
+    with a ``transform`` and a ``crs`` is rewrapped like a raster field's
+    ``with_data`` (`_rewrap`), any band count included. Anything else —
+    a ``dict``, a streaming zarr array, a domain without georeferencing —
+    is returned unchanged.
+    """
+    from geopatcher._src.fields.raster import _rewrap
+
+    if not isinstance(merged, np.ndarray) or not all(
+        hasattr(domain, attr) for attr in ("transform", "crs")
+    ):
+        return merged
+    values = _field_values(
+        merged,
+        aggregation,
+        shape=_domain_shape(domain),
+        dtype=_source_dtype(domain),
+        caller="Stitch",
+        bands_may_change=True,
+    )
+    return _rewrap(domain, values, domain.transform, domain.crs)
+
+
+def _is_raster_field(field: Any) -> bool:
+    """Whether ``field.with_data`` rebuilds a `GeoTensor`, of any band count.
+
+    The xarray-backed adapters (``.da`` / ``.array``) keep their dims and
+    coords, so they can only take values of the domain's own shape.
+    """
+    return getattr(field, "da", None) is None and getattr(field, "array", None) is None
+
+
 def _field_values(
     output: Any,
     aggregation: SpatialAggregation,
@@ -1013,12 +1058,19 @@ def _field_values(
     shape: tuple[int, ...] | None,
     dtype: np.dtype | None,
     caller: str,
+    bands_may_change: bool = False,
 ) -> np.ndarray:
     """Validate a merge output for ``with_data`` and restore the source dtype.
 
+    The output must lie on the field's grid: the domain's shape, or —
+    with ``bands_may_change`` (raster fields) — the domain's trailing
+    ``(H, W)`` with other leading (band / time) axes, as when an operator
+    turns four bands into one index. The source dtype is restored only
+    for an output of the domain's own shape; a changed band axis is a new
+    quantity and keeps the aggregation's dtype.
+
     Raises `TypeError` for a ``dict`` output, a non-array output, or an
-    array whose shape is not the domain's — ``with_data`` can only put
-    values back on the field's own grid.
+    array that is not on the field's grid.
     """
     name = type(aggregation).__name__
     if isinstance(output, Mapping):
@@ -1036,14 +1088,25 @@ def _field_values(
             f"returned {type(output).__name__}. Call `merge` for the raw "
             "output instead."
         )
-    if shape is not None and tuple(out_shape) != shape:
+    out_shape = tuple(out_shape)
+    on_grid = (
+        shape is None
+        or out_shape == shape
+        or (bands_may_change and len(out_shape) >= 2 and out_shape[-2:] == shape[-2:])
+    )
+    if not on_grid:
         raise TypeError(
             f"{caller}: {name} returned shape {tuple(out_shape)} but the "
             f"field's domain has shape {shape}; with_data can only rebuild "
             "a field on the domain grid. Call `merge` for the raw output."
         )
     values = np.asarray(output)
-    if dtype is None or values.dtype == dtype or not _fits_dtype(values, dtype):
+    if (
+        dtype is None
+        or out_shape != shape
+        or values.dtype == dtype
+        or not _fits_dtype(values, dtype)
+    ):
         return values
     return values.astype(dtype)
 

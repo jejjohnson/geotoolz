@@ -75,6 +75,72 @@ def _domain_array_shape(domain: Any) -> tuple[int, ...]:
     raise TypeError(f"can't infer dense shape from {type(domain).__name__}")
 
 
+def _is_window(indices: Any) -> bool:
+    """Whether ``indices`` place a patch by raster window (the trailing ``(H, W)``)."""
+    from geopatcher._src.spatial.geometry import _MaskedWindow
+
+    if isinstance(indices, _MaskedWindow):
+        indices = indices.window
+    return hasattr(indices, "row_off") and hasattr(indices, "col_off")
+
+
+def _dense_layout(
+    patches: Iterable[Any],
+    domain: Any,
+    cells: Callable[[Any], tuple[int, ...]] = np.shape,
+) -> tuple[tuple[int, ...], Iterator[Any]]:
+    """Accumulator shape of a dense merge, and the patches to fold into it.
+
+    The domain fixes the grid, the trailing ``(H, W)``; the patches fix
+    what each grid cell holds. Raster-window patches set the leading
+    (band / time) axes from their own data, so an operator that turns
+    four bands into one index merges into ``(1, H, W)`` (or ``(H, W)``
+    for a 2-D map) instead of being broadcast across the domain's four
+    bands. The first patch decides, and a later window patch whose
+    leading axes differ raises `ValueError`. ``{dim: slice}`` (grid)
+    patches index the domain's own axes and keep its shape.
+
+    Args:
+        patches: The patches to merge (any iterable; consumed once).
+        domain: The domain they were drawn from.
+        cells: The per-cell array shape of a patch's ``data`` — without the
+            class axis of `spatial.aggregation.SoftVote` or the
+            ``(mu, var)`` pair of `spatial.aggregation.InvVarWeightedMean`.
+
+    Returns:
+        ``(shape, patches)``: the accumulator shape and an iterator over
+        every patch, the inspected first one included.
+    """
+    shape = _domain_array_shape(domain)
+    stream = iter(patches)
+    first = next(stream, None)
+    if first is None:
+        return shape, iter(())
+    rest = itertools.chain([first], stream)
+    first_cells = tuple(cells(first.data))
+    if not _is_window(first.indices) or len(first_cells) < 2:
+        return shape, rest
+    shape = first_cells[:-2] + shape[-2:]
+    return shape, _same_leading(rest, shape[:-2], cells)
+
+
+def _same_leading(
+    patches: Iterator[Any],
+    leading: tuple[int, ...],
+    cells: Callable[[Any], tuple[int, ...]],
+) -> Iterator[Any]:
+    """Yield ``patches``; raise if a window patch's leading axes are not ``leading``."""
+    for p in patches:
+        found = tuple(cells(p.data))[:-2]
+        if _is_window(p.indices) and found != leading:
+            raise ValueError(
+                f"patches disagree on their leading (band / time) axes: {found} "
+                f"after {leading}; every patch merged together must have the "
+                "same shape apart from its window"
+            )
+        yield p
+
+
 def _not_nan(array: np.ndarray) -> np.ndarray:
     """``array``-shaped bool: ``True`` where the value is not NaN.
 
@@ -260,7 +326,7 @@ class Sum(Aggregation):
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain)
         acc = np.zeros(shape, dtype=np.float64)
         covered = np.zeros(shape, dtype=bool)
         for p in patches:
@@ -326,7 +392,7 @@ def _extreme(
 ) -> np.ndarray:
     """Shared `spatial.aggregation.Max` / `spatial.aggregation.Min` fold (``op`` is
     ``np.fmax`` / ``np.fmin``)."""
-    shape = _domain_array_shape(domain)
+    shape, patches = _dense_layout(patches, domain)
     acc = np.full(shape, start, dtype=np.float64)
     covered = np.zeros(shape, dtype=bool)
     for p in patches:
@@ -381,7 +447,7 @@ class WeightedSum(Aggregation):
         object.__setattr__(self, "forbid_in_yaml", True)
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain)
         acc = np.zeros(shape, dtype=np.float64)
         wsum = np.zeros(shape, dtype=np.float64)
         for p in patches:
@@ -426,7 +492,7 @@ class Mean(Aggregation):
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain)
         total = np.zeros(shape, dtype=np.float64)
         count = np.zeros(shape, dtype=np.float64)
         for p in patches:
@@ -462,7 +528,7 @@ class Variance(Aggregation):
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain)
         mean = np.zeros(shape, dtype=np.float64)
         m2 = np.zeros(shape, dtype=np.float64)
         count = np.zeros(shape, dtype=np.float64)
@@ -661,7 +727,7 @@ class OverlapAdd(Aggregation):
         return self._merge_streaming(patches, domain, self.target_path, self.chunks)
 
     def _merge_in_memory(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain)
         acc = np.zeros(shape, dtype=np.float64)
         wsum = np.zeros(shape, dtype=np.float64)
         for p in patches:
@@ -686,7 +752,7 @@ class OverlapAdd(Aggregation):
         *,
         overwrite: bool | None = None,
     ) -> Any:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain)
         chunks = _right_align(chunks, shape, "chunks")
         shards = (
             None
@@ -922,7 +988,9 @@ class InvVarWeightedMean(Aggregation):
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> dict[str, np.ndarray]:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(
+            patches, domain, lambda data: np.shape(_unpack_mu_var(data)[0])
+        )
         mu_acc = np.zeros(shape, dtype=np.float64)
         prec = np.zeros(shape, dtype=np.float64)
         exact_mu = np.zeros(shape, dtype=np.float64)
@@ -1000,7 +1068,7 @@ class HardVote(Aggregation):
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain)
         votes = np.zeros((self.n_classes, *shape), dtype=np.int64)
         for p in patches:
             placed = _placed(p, shape)
@@ -1023,10 +1091,10 @@ class SoftVote(Aggregation):
     """Per-cell soft vote — patches carry per-class probabilities.
 
     Each patch's data has shape ``(n_classes, ...)``: the class axis
-    first, then either the chip's full shape or just its trailing cell
-    axes — ``(K, h, w)`` probabilities on a ``(band, H, W)`` domain
-    broadcast over the band axis. The per-class probabilities accumulate
-    and the argmax across the class axis is returned. A cell counts only
+    first, then the cell axes. The per-class probabilities accumulate and
+    the argmax across the class axis is returned, on the cell axes the
+    patches carry — ``(K, h, w)`` probabilities on a ``(band, H, W)``
+    domain give an ``(H, W)`` label map. A cell counts only
     where none of its class probabilities is NaN and it lies inside a
     `_MaskedWindow` mask. **Ties** go to the lowest class index.
 
@@ -1043,7 +1111,7 @@ class SoftVote(Aggregation):
     streaming_safe: ClassVar[bool] = True
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain, lambda data: np.shape(data)[1:])
         acc = np.zeros((self.n_classes, *shape), dtype=np.float64)
         covered = np.zeros(shape, dtype=bool)
         for p in patches:
@@ -1162,7 +1230,7 @@ class Median(Aggregation):
     streaming_safe: ClassVar[bool] = False
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain)
         stack, count = _overlap_stack(patches, shape)
         if stack.shape[0] == 0:
             return np.full(shape, self.fill_value, dtype=np.float64)
@@ -1197,7 +1265,7 @@ class Mode(Aggregation):
     streaming_safe: ClassVar[bool] = False
 
     def merge(self, patches: Iterable[Any], domain: Any) -> np.ndarray:
-        shape = _domain_array_shape(domain)
+        shape, patches = _dense_layout(patches, domain)
         stack, count = _overlap_stack(patches, shape)
         out = _with_fill(_arraywise_mode(stack), count > 0, self.fill_value)
         return out.astype(_label_dtype(self.fill_value))

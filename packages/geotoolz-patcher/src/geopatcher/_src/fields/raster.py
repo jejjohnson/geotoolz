@@ -95,26 +95,63 @@ class AsyncRasterField:
         return await self.select(window)
 
     def with_data(self, array: Any) -> GeoTensor:
-        return GeoTensor(
-            values=array,
-            transform=self.reader.transform,
-            crs=self.reader.crs,
-        )
+        return _rewrap(self.reader, array, self.reader.transform, self.reader.crs)
+
+
+#: ``attrs`` keys that hold one entry per band (band-name aliases and
+#: per-band spectral metadata, as geotoolz reads and writes them). They go
+#: stale when the band axis changes size, so `_rewrap` drops them then.
+PER_BAND_KEYS: tuple[str, ...] = (
+    "band_names",
+    "descriptions",
+    "bands",
+    "band_descriptions",
+    "wavelengths",
+    "wavelengths_nm",
+)
+
+
+def _band_count(shape: tuple[int, ...]) -> int:
+    """Size of the band axis (``-3``) of a carrier of ``shape``; 1 when absent."""
+    return int(shape[-3]) if len(shape) >= 3 else 1
 
 
 def _rewrap(reader: Any, array: Any, transform: Any, crs: Any) -> GeoTensor:
-    """Wrap ``array`` as a `GeoTensor` carrying ``reader``'s nodata and attrs.
+    """Wrap ``array`` as a `GeoTensor` on ``reader``'s grid.
 
-    Used by every sync raster ``with_data`` so merged outputs keep the
-    source's ``fill_value_default`` (instead of georeader's default ``0``)
-    and a copy of its ``attrs``.
+    Used by every raster ``with_data`` and by the pipekit ``Stitch``
+    operator, so a merged output keeps the source's georeferencing and
+    follows the carrier contract:
+
+    * ``attrs`` is a fresh copy of the source's; when the band axis
+      changed size (four bands merged into one index), the per-band keys
+      (`PER_BAND_KEYS`) are dropped instead of describing bands that are
+      gone.
+    * ``fill_value_default`` is the source's nodata while the output
+      still carries the source's values. A float output on an integer
+      source, or on a different band count, is a new quantity whose
+      missing cells are NaN, so its fill is NaN.
     """
+    values = np.asarray(array)
+    source_shape = tuple(getattr(reader, "shape", None) or values.shape)
+    same_bands = _band_count(source_shape) == _band_count(values.shape)
+    attrs = dict(getattr(reader, "attrs", None) or {})
+    if not same_bands:
+        for key in PER_BAND_KEYS:
+            attrs.pop(key, None)
+    fill = getattr(reader, "fill_value_default", 0)
+    source_dtype = getattr(reader, "dtype", None)
+    source_float = source_dtype is not None and np.issubdtype(
+        np.dtype(source_dtype), np.floating
+    )
+    if np.issubdtype(values.dtype, np.floating) and not (source_float and same_bands):
+        fill = np.nan
     return GeoTensor(
         values=array,
         transform=transform,
         crs=crs,
-        fill_value_default=getattr(reader, "fill_value_default", 0),
-        attrs=dict(getattr(reader, "attrs", None) or {}),
+        fill_value_default=fill,
+        attrs=attrs,
     )
 
 

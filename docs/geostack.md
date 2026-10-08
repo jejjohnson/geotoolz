@@ -112,7 +112,7 @@ pipe = gz.Sequential([
     ApplyToChips(operator=ndvi),
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-ndvi_scene = pipe(field)
+ndvi_scene = pipe(field)        # GeoTensor (H, W) on the AOI grid · NaN = no data
 ```
 
 The [catalog → patch → operate recipe](recipes/integration-with-geocatalog-and-geopatcher.md)

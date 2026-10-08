@@ -61,7 +61,7 @@ pipe = Sequential([
     ApplyToChips(operator=cloud_segmentation_model),   # any Operator, e.g. gz.learn.ModelOp
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-prediction = pipe(field)
+prediction = pipe(field)       # GeoTensor on the scene's grid, with the model's band axes
 ```
 
 Swap `TriangularWindow` for `gp.spatial.window.Hann` / `gp.spatial.window.Tukey` for

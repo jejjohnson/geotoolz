@@ -401,8 +401,9 @@ def test_by_index_grid_anchors() -> None:
 
 
 def test_soft_vote_band_domain() -> None:
-    # (K=2, 4, 4) probability chips on a (band=3, 8, 8) domain broadcast
-    # over the band axis — used to raise a broadcast error.
+    # (K=2, 4, 4) probability chips on a (band=3, 8, 8) domain give one
+    # (8, 8) label map: the cells hold what the patches carry, not three
+    # copies of it.
     domain = GeoTensor(
         values=np.zeros((3, 8, 8), dtype=np.float32),
         transform=rasterio.Affine.identity(),
@@ -412,21 +413,69 @@ def test_soft_vote_band_domain() -> None:
     p1 = _patch(probs, 0, 0)
     p2 = _patch(probs[::-1], 4, 4)
     out = spatial.aggregation.SoftVote(n_classes=2).merge([p1, p2], domain)
-    assert out.shape == (3, 8, 8)
-    assert (out[:, :4, :4] == 1).all()
-    assert (out[:, 4:, 4:] == 0).all()
-    assert (out[:, :4, 4:] == -1).all()
-    # A full (K, band, h, w) chip still works.
+    assert out.shape == (8, 8)
+    assert (out[:4, :4] == 1).all()
+    assert (out[4:, 4:] == 0).all()
+    assert (out[:4, 4:] == -1).all()
+    # A full (K, band, h, w) chip keeps the band axis.
     full = np.broadcast_to(probs[:, None], (2, 3, 4, 4))
     out = spatial.aggregation.SoftVote(n_classes=2).merge([_patch(full, 0, 0)], domain)
+    assert out.shape == (3, 8, 8)
     assert (out[:, :4, :4] == 1).all()
 
 
 @pytest.mark.parametrize(
     "aggregation",
     [
+        spatial.aggregation.Sum(),
+        spatial.aggregation.Max(),
+        spatial.aggregation.Min(),
+        spatial.aggregation.Mean(),
+        spatial.aggregation.WeightedSum(),
+        spatial.aggregation.OverlapAdd(),
+        spatial.aggregation.Median(),
+        spatial.aggregation.Mode(),
+        spatial.aggregation.HardVote(n_classes=4),
+    ],
+    ids=lambda agg: type(agg).__name__,
+)
+@pytest.mark.parametrize("cells", [(1, 4, 4), (4, 4), (2, 4, 4)], ids=str)
+def test_dense_merge_takes_band_axes_from_patches(aggregation, cells) -> None:
+    # A per-patch operator that changes the band count (4 bands → 1 index,
+    # a 2-D map, 2 features) merges into the patches' band axes on the
+    # domain grid instead of being broadcast into the domain's 4 bands.
+    domain = GeoTensor(
+        values=np.zeros((4, 8, 8), dtype=np.float32),
+        transform=rasterio.Affine.identity(),
+        crs="EPSG:32630",
+    )
+    patches = [
+        _patch(np.full(cells, float(r // 4 + c // 4)), r, c)
+        for r in (0, 4)
+        for c in (0, 4)
+    ]
+    out = aggregation.merge(patches, domain)
+    assert out.shape == (*cells[:-2], 8, 8)
+    np.testing.assert_array_equal(np.asarray(out)[..., 4:, 4:], 2)
+
+
+def test_dense_merge_rejects_patches_with_different_band_axes() -> None:
+    domain = GeoTensor(
+        values=np.zeros((4, 8, 8), dtype=np.float32),
+        transform=rasterio.Affine.identity(),
+        crs="EPSG:32630",
+    )
+    patches = [_patch(np.ones((1, 4, 4)), 0, 0), _patch(np.ones((2, 4, 4)), 0, 4)]
+    with pytest.raises(
+        ValueError, match=r"leading \(band / time\) axes: \(2,\) after \(1,\)"
+    ):
+        spatial.aggregation.Mean().merge(patches, domain)
+
+
+@pytest.mark.parametrize(
+    "aggregation",
+    [
         *(cls() for cls in _DENSE),
-        spatial.aggregation.Variance(),
         spatial.aggregation.HardVote(n_classes=2),
         spatial.aggregation.SoftVote(n_classes=2),
         spatial.aggregation.InvVarWeightedMean(),

@@ -115,18 +115,18 @@ patcher: gp.SpatialPatcher = gp.SpatialPatcher(
     aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
 ndvi: gz.Sequential = gz.DNToReflectance(scale=1e-4) | gz.NDVI(red=0, nir=1)  # (2, h, w) → (h, w)
+field: gp.RasterField = gp.RasterField(scene)
 tiled: gz.Sequential = gz.Sequential([
     GridSampler(patcher=patcher),                        # field → list[Patch]       (2, 256, 256) each
     ApplyToChips(operator=ndvi),                         # list[Patch] → list[Patch] (256, 256) each
-    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(),
-                 domain=scene.isel({"band": slice(0, 1)})),  # one-band output grid
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-result: np.ndarray = tiled(gp.RasterField(scene))       # (1, 4500, 4000) float64 · NaN = no data
+result: GeoTensor = tiled(field)                        # (4500, 4000) float64 · NaN = no data
 ```
 
-> **Note.** `MergePatches` sizes its output from `domain`, so a
-> band-collapsing operator (NDVI: 2 bands → 1) needs a one-band domain;
-> passing the two-band `scene` would broadcast NDVI onto both bands.
+`MergePatches` places the chips on the domain's grid and keeps the band
+axes the chips carry, so NDVI's `(h, w)` chips merge into one `(H, W)`
+`GeoTensor` on the scene's transform and CRS.
 
 The end-to-end Lake Tahoe tutorial runs this flow for real:
 [catalog notebook](https://jejjohnson.github.io/geotoolz/catalog/notebooks/end_to_end_lake_tahoe/) ·
@@ -198,22 +198,22 @@ patcher: gp.SpatialPatcher = gp.SpatialPatcher(
     window=gp.spatial.window.Hann(),
     aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
-grid: GeoTensor = scene.isel({"band": slice(0, 1)})     # (1, 1675, 1430) — the one-band output grid
 enhancement: gz.Sequential = (
     gz.DNToReflectance(scale=1e-4)                       # (2, h, w) uint16 → float64 reflectance
     | gz.SBMP(swir1=0, swir2=1)                          # (2, h, w) → (h, w) CH4 enhancement score
 )
+field: gp.RasterField = gp.RasterField(scene)
 screen: gz.Sequential = gz.Sequential([
     GridSampler(patcher=patcher),                        # field → list[Patch]       (2, 128, 128) each
     ApplyToChips(operator=enhancement),                  # list[Patch] → list[Patch] (128, 128) each
-    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=grid),
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-score: np.ndarray = screen(gp.RasterField(scene))       # (1, 1675, 1430) float64
+score: GeoTensor = screen(field)                        # (1675, 1430) float64, on the scene's grid
 
 # 4 · products again — known sources rasterized onto the same grid as labels
-labels: GeoTensor = cm.rasterize_sources_like(sources, grid, buffer_m=150.0)  # (1675, 1430) uint8 {0, 1}
+labels: GeoTensor = cm.rasterize_sources_like(sources, score, buffer_m=150.0)  # (1675, 1430) uint8 {0, 1}
 
-pair: tuple[np.ndarray, np.ndarray] = (score[0], np.asarray(labels))          # aligned pixel-for-pixel
+pair: tuple[np.ndarray, np.ndarray] = (np.asarray(score), np.asarray(labels))  # aligned pixel-for-pixel
 ```
 
 Swap any one stage without touching the others: a DuckDB catalog for

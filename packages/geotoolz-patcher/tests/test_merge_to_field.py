@@ -12,6 +12,7 @@ merged values keep the source dtype when they fit it.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -216,11 +217,43 @@ def test_merge_to_field_dict_output_raises() -> None:
         patcher.merge_to_field(patcher.split(field), field)
 
 
-def test_merge_to_field_shape_mismatch_raises() -> None:
+def test_merge_to_field_off_grid_raises() -> None:
     field = _geotensor_field()
-    patcher = _patcher(aggregation=_FixedOutput(np.zeros((8, 8))))
+    patcher = _patcher(aggregation=_FixedOutput(np.zeros((2, 4, 4))))
 
-    with pytest.raises(TypeError, match=r"returned shape \(8, 8\).*\(2, 8, 8\)"):
+    with pytest.raises(TypeError, match=r"returned shape \(2, 4, 4\).*\(2, 8, 8\)"):
+        patcher.merge_to_field([], field)
+
+
+def test_merge_to_field_band_reducing_operator() -> None:
+    # Two bands in, one index out: the merge is (1, 8, 8) on the source
+    # grid, not the index copied into both bands; the source's per-band
+    # names no longer describe it and the new float quantity is NaN-filled.
+    field = _geotensor_field()
+    patcher = _patcher()
+    patches = [
+        replace(
+            p, data=np.asarray(p.data, dtype=np.float64).mean(axis=0, keepdims=True)
+        )
+        for p in patcher.split(field)
+    ]
+
+    out = patcher.merge_to_field(patches, field)
+
+    assert isinstance(out, GeoTensor)
+    assert out.shape == (1, 8, 8)
+    assert out.transform == _T
+    assert "band_names" not in out.attrs
+    assert np.isnan(out.fill_value_default)
+    np.testing.assert_allclose(out.values[0], field.reader.values.mean(axis=0))
+
+
+@needs_xarray
+def test_merge_to_field_xarray_keeps_its_dims() -> None:
+    field = RioXarrayField(_rio_da())
+    patcher = _patcher(aggregation=_FixedOutput(np.zeros((3, 8, 8))))
+
+    with pytest.raises(TypeError, match=r"returned shape \(3, 8, 8\).*\(8, 8\)"):
         patcher.merge_to_field([], field)
 
 
