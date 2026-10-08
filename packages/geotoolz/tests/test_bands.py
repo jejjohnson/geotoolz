@@ -177,11 +177,3 @@ def test_sparse_mapping_keeps_declared_positions() -> None:
 
     aliases = toy_geotensor(values, attrs={"band_names": {"red": 1, "B04": 1}})
     assert band_names(aliases) == [None, "red", None, None]
-
-
-def test_readers_write_only_band_names() -> None:
-    from geotoolz.readers.toy_sensor import Reader
-
-    gt = Reader("toy.tif").load()
-    assert set(gt.attrs or {}) >= {"band_names"}
-    assert "bands" not in (gt.attrs or {})

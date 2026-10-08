@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`geotoolz` is a uv workspace of three packages that together provide a
+`geotoolz` is a uv workspace of four packages that together provide a
 composable remote-sensing stack on top of `georeader.GeoTensor`, with the
 Operator / Sequential / Graph composition core supplied by the external
 [`pipekit`](https://github.com/jejjohnson/pipekit) framework. Built with
@@ -14,16 +14,18 @@ The packages (distribution name → import name):
 
 | Package            | Import       | Purpose                                                                 |
 |--------------------|--------------|-------------------------------------------------------------------------|
-| `geotoolz`         | `geotoolz`   | RS operator families (radiometry, indices, qa/mask, geom, readers, einx, patch_ops bridge, …) |
+| `geotoolz`         | `geotoolz`   | RS operator families (radiometry, indices, qa/mask, geom, io, einx, patch_ops bridge, …) |
 | `geotoolz-patcher` | `geopatcher` | Four-axis Patcher framework (Geometry × Sampler × Window × Aggregation over a `Field` protocol) |
 | `geotoolz-catalog` | `geocatalog` | Queryable spatiotemporal index (GeoSlice contract, in-memory + DuckDB backends, GeoParquet interchange, sources/matchup/staging) |
+| `geotoolz-products` | `geoproducts` | Readers for EO data products (`ProductReader` ABC, per-sensor / per-provider subpackages) → georeader `GeoData` / `GeoTensor` |
 
 Import names are unchanged from the pre-monorepo repos (`import geopatcher`,
-`import geocatalog`) — only the distribution names carry the `geotoolz-`
-prefix. Cross-package wiring: `geotoolz[patch]` → `geotoolz-patcher[pipekit]`;
+`import geocatalog`; `geoproducts` is new) — only the distribution names carry
+the `geotoolz-` prefix. Cross-package wiring: `geotoolz[patch]` → `geotoolz-patcher[pipekit]`;
 `geotoolz-catalog[patch]` → `geotoolz-patcher` (for `staging.field_for`);
-`geotoolz[obstore]` / `geotoolz-catalog[obstore]` → `geotoolz-patcher[obstore]`
-(the one obstore pool, `geopatcher.objstore`). The workspace root
+`geotoolz-products[obstore]` / `geotoolz-catalog[obstore]` → `geotoolz-patcher[obstore]`
+(the one obstore pool, `geopatcher.objstore`); `geotoolz-products[operators]`
+→ `geotoolz` (sensor presets only — geotoolz never depends on geoproducts). The workspace root
 ships no code — the top-level `pyproject.toml` only configures
 `[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups.
 
@@ -31,7 +33,7 @@ ships no code — the top-level `pyproject.toml` only configures
 
 ```bash
 make install              # uv sync --all-packages --all-groups --all-extras + hooks
-make test                 # Fast tier across all three packages
+make test                 # Fast tier across all four packages
 make test-all             # Everything incl. geotoolz slow/integration tiers
 make format               # ruff format . && ruff check --fix .
 make lint                 # ruff check .   (entire repo)
@@ -79,9 +81,12 @@ packages/
 ├── geotoolz-patcher/         # src/geopatcher — SpatialPatcher / TemporalPatcher /
 │   │                         # SpatioTemporalPatcher, Field adapters, hooks,
 │   │                         # journal, PatchCache, pipekit integration.
-└── geotoolz-catalog/         # src/geocatalog — GeoCatalog Protocol (InMemory +
-                              # DuckDB), GeoSlice, loaders, sources, matchup,
-                              # staging, cyclopts CLI.
+├── geotoolz-catalog/         # src/geocatalog — GeoCatalog Protocol (InMemory +
+│                             # DuckDB), GeoSlice, loaders, sources, matchup,
+│                             # staging, cyclopts CLI.
+└── geotoolz-products/        # src/geoproducts — ProductReader ABC + per-sensor /
+                              # per-provider reader subpackages (toy_sensor);
+                              # depends on georeader, never on geotoolz.
 ```
 
 ### geotoolz family layout
@@ -119,9 +124,8 @@ geotoolz/<family>/
 - `learn/_src`: `array.py` axis bookkeeping, `estimators.py` the
   non-Operator `GeoTensorEstimator` adapter, `operators.py` every Operator
   (`SklearnOp`, the `Pixelwise*` wrappers, `ModelOp`).
-- Not families: `readers/` (sensor-reader framework — `_src/` plus public
-  per-sensor subpackages such as `readers.toy_sensor`), the top-level
-  `patch_ops.py` geopatcher bridge (optional `[patch]` extra).
+- Not a family: the top-level `patch_ops.py` geopatcher bridge (optional
+  `[patch]` extra). Product readers live in `geotoolz-products` (`geoproducts`).
 - Removals and renames are outright — no deprecated aliases or shim modules
   (`tests/test_geotoolz.py::test_removed_modules_are_gone`).
 - Constructors do no network I/O: downloads (e.g. the Natural Earth
@@ -135,8 +139,8 @@ is the geotoolz site.
 
 `packages/geotoolz` tests are markered `slow` / `integration` (fast tier runs
 in CI; extended tiers via the "Extended Tests" workflow_dispatch).
-`packages/geotoolz-catalog` has a `live` marker (real external APIs, always
-deselected) and an opt-in `tests/bench` suite (`pytest tests/bench
+`packages/geotoolz-catalog` and `packages/geotoolz-products` have a `live`
+marker (real external APIs, always deselected) and an opt-in `tests/bench` suite (`pytest tests/bench
 --benchmark-only`). Never add a slow or network-touching test without a marker.
 
 ## Coding Conventions
@@ -147,7 +151,8 @@ deselected) and an opt-in `tests/bench` suite (`pytest tests/bench
 - Surgical changes only — don't refactor adjacent code or add docstrings to
   unchanged code.
 - Releases via release-please with per-package components (`geotoolz-vX.Y.Z`,
-  `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`); conventional-commit
+  `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`,
+  `geotoolz-products-vX.Y.Z`); conventional-commit
   titles are enforced.
 
 ### Operator parameter vocabulary

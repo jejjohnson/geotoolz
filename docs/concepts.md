@@ -552,7 +552,7 @@ consumer.
 - [Quickstart](quickstart.md) — 15-min real-data walk-through.
 - [Recipes](recipes/define-an-operator.md) — short focused how-tos.
 - [Normalization](normalization.md), [Multi-format readers](io.md),
-  [Sensor readers](readers.md) — module-specific deep-dives.
+  [Product readers](products/product-readers.md) — module-specific deep-dives.
 - [Core API reference](api/core.md).
 
 ## Extended examples

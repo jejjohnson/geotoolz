@@ -213,8 +213,6 @@ def test_heavy_optional_backends_are_extras_not_base() -> None:
         ("scikit-learn", "learn"),
         ("joblib", "learn"),
         ("zarr", "zarr"),
-        # The obstore pool is geopatcher's (`geopatcher.objstore`).
-        ("geotoolz-patcher", "obstore"),
     ]:
         assert dist not in base, dist
         assert dist in extras.get(extra, set()), (dist, extra)

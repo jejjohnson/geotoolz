@@ -40,8 +40,8 @@ dependencies = [
     # otherwise drag it in transitively) still works.
     "typing-extensions>=4.0",
     # rasterio (windows, transforms, CRS, resampling enums, features) and
-    # affine are imported at module top level by `io`, `geom`, `augment`,
-    # `readers` and `patch_ops`; declared directly rather than relying on
+    # affine are imported at module top level by `io`, `geom`, `augment`
+    # and `patch_ops`; declared directly rather than relying on
     # georeader-spaceml pulling them in transitively.
     "rasterio>=1.3",
     "affine>=2.4",
@@ -105,22 +105,12 @@ patch = ["geotoolz-patcher[pipekit]"]
 # in-situ matchups), and by bilinear `raster_to_point_cloud` sampling.
 vector-cube = ["xvec>=0.4"]
 # File-format backends for `io.ReadHDF` (HDF5 / HDF4) and `io.ReadNetCDF`.
-# The `toy_sensor` reference reader has no third-party dependencies;
-# per-sensor extras land alongside each real sensor reader.
 hdf5 = ["h5py>=3.10.0"]
 hdf4 = ["pyhdf>=0.11.4"]
 netcdf = ["netCDF4>=1.6.5"]
 # Zarr sink (`io.WriteZarr`); targets the zarr-python 3 API
 # (`Group.create_array`).
 zarr = ["zarr>=3"]
-# Pooled object-store client (``obstore``) for cloud-backed sensor
-# reads. Sensor readers that point at ``s3://`` / ``gs://`` / ``az://`` /
-# ``https://`` scenes call ``SensorReader.set_obstore_client(...)`` to opt
-# into HTTP/2 connection reuse — every byte-range fetch then funnels
-# through the same pooled client instead of building one per file. The
-# pool is geopatcher's (``geopatcher.objstore``), the one process-wide
-# pool shared with geocatalog, so this extra pulls in geotoolz-patcher.
-obstore = ["geotoolz-patcher[obstore]"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
@@ -162,7 +152,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/geotoolz"]
-artifacts = ["src/geotoolz/readers/*/data/**"]
 
 [tool.ruff]
 target-version = "py312"

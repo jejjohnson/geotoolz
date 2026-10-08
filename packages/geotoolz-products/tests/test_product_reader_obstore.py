@@ -1,4 +1,4 @@
-"""Tests for ``SensorReader``'s optional obstore byte path.
+"""Tests for ``ProductReader``'s optional obstore byte path.
 
 Three things to pin:
 
@@ -20,13 +20,13 @@ import pytest
 from affine import Affine
 from rasterio.windows import Window
 
-from geotoolz.readers._src.base import SensorReader, Track
+from geoproducts._src.base import ProductReader, Track
 
 
 # --- minimal concrete reader for the test surface -----------------------
 
 
-class _MinimalReader(SensorReader):
+class _MinimalReader(ProductReader):
     """Bare-minimum concrete reader — keeps the abstract surface satisfied.
 
     No file I/O; just enough state to exercise the obstore hook from a
@@ -136,12 +136,12 @@ def test_read_bytes_windows_drive_letter_path_treated_as_local():
     ``open()`` will of course raise ``FileNotFoundError``, which is
     the *correct* failure mode for a non-existent local path).
     """
-    from geotoolz.readers._src.base import _has_remote_scheme
+    from geoproducts._src.base import _has_remote_scheme
 
     # The classifier must NOT mark this as remote (no "://" in URI).
     assert not _has_remote_scheme("C:/scene.bin")
     assert not _has_remote_scheme(r"C:\scene.bin")
-    # End-to-end: the SensorReader path must surface FileNotFoundError
+    # End-to-end: the ProductReader path must surface FileNotFoundError
     # (correct local-path failure), not RuntimeError (wrong-path bug).
     r = _MinimalReader()
     with pytest.raises(FileNotFoundError):

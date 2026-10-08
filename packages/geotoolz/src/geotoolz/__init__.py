@@ -39,6 +39,12 @@ it in and use ``geotoolz.patch_ops`` for the Operator-graph bridge:
     import geopatcher as gp
     from geotoolz import Sequential
     from geotoolz.patch_ops import GridSampler, ApplyToChips, MergePatches
+
+Product readers (``ProductReader`` and the per-sensor / per-provider
+subpackages) live in the
+[`geotoolz-products`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-products)
+workspace package (import name `geoproducts`); their output is a
+`GeoTensor` every operator here accepts.
 """
 
 from __future__ import annotations
@@ -78,7 +84,6 @@ from geotoolz import (
     plume,
     qa,
     radiometry,
-    readers,
     restore,
     segment,
     spectral,
@@ -337,7 +342,6 @@ from geotoolz.radiometry import (
     SimpleAtmosphericCorrection,
     ToFloat32,
 )
-from geotoolz.readers import SensorReader
 from geotoolz.restore import (
     MNF,
     BilateralDenoise,
@@ -646,7 +650,6 @@ __all__ = [
     "SWIRComposite",
     "SegmentStitch",
     "SelectBands",
-    "SensorReader",
     "Sequential",
     "ShadedRelief",
     "ShannonEntropy",
@@ -705,7 +708,6 @@ __all__ = [
     "plume",
     "qa",
     "radiometry",
-    "readers",
     "restore",
     "segment",
     "spectral",

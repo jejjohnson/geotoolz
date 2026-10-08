@@ -85,7 +85,7 @@ coarse = reader.reader_overview(2)              # low zooms: read an overview
 ## Object-store pool
 
 `geopatcher.objstore` is the process-wide `obstore` client pool for the
-whole stack: `ObstoreCogField`, geotoolz's sensor readers and geocatalog
+whole stack: `ObstoreCogField`, geoproducts' product readers and geocatalog
 all go through it, so one bucket / Azure container gets one client and
 one HTTP/2 connection pool. Install with
 `pip install 'geotoolz-patcher[obstore]'`.

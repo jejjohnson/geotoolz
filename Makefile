@@ -124,6 +124,7 @@ typecheck: ## 🔬 Type-check with ty (all packages)
 	cd packages/geotoolz && uv run --group typecheck ty check src/geotoolz
 	cd packages/geotoolz-patcher && uv run --group typecheck ty check src/geopatcher
 	cd packages/geotoolz-catalog && uv run --group typecheck ty check src/geocatalog
+	cd packages/geotoolz-products && uv run --group typecheck ty check src/geoproducts
 	@printf "$(GREEN)>>> ✅ Type check passed!$(RESET)\n"
 
 # ===========================================================================
@@ -135,6 +136,7 @@ test: ## 🧪 Run fast tests across all packages (no coverage)
 	cd packages/geotoolz && uv run pytest -v -o addopts=--strict-markers -m "not slow and not integration"
 	cd packages/geotoolz-patcher && uv run pytest -v -o addopts=--strict-markers
 	cd packages/geotoolz-catalog && uv run pytest -v -o addopts="--strict-markers --ignore=tests/bench -m 'not live'"
+	cd packages/geotoolz-products && uv run pytest -v -o addopts=--strict-markers -m "not slow and not live"
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
 test-all: ## 🧪 Run ALL tests including slow/integration (no coverage)
@@ -142,11 +144,13 @@ test-all: ## 🧪 Run ALL tests including slow/integration (no coverage)
 	cd packages/geotoolz && uv run pytest -v -o addopts=--strict-markers
 	cd packages/geotoolz-patcher && uv run pytest -v -o addopts=--strict-markers
 	cd packages/geotoolz-catalog && uv run pytest -v -o addopts="--strict-markers --ignore=tests/bench -m 'not live'"
+	cd packages/geotoolz-products && uv run pytest -v -o addopts=--strict-markers -m "not live"
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
-test-slow: ## 🐢 Run only the slow/integration tiers (geotoolz; no coverage)
+test-slow: ## 🐢 Run only the slow/integration tiers (geotoolz, geotoolz-products; no coverage)
 	@printf "$(YELLOW)>>> Running slow/integration tests (no coverage)...$(RESET)\n"
 	cd packages/geotoolz && uv run pytest -v -o addopts=--strict-markers -m "slow or integration"
+	cd packages/geotoolz-products && uv run pytest -v -o addopts=--strict-markers -m "slow"
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
 test-cov: ## 📊 Run fast tests with coverage reports (same tier as CI)
@@ -154,6 +158,7 @@ test-cov: ## 📊 Run fast tests with coverage reports (same tier as CI)
 	cd packages/geotoolz && uv run pytest -v -m "not slow and not integration"
 	cd packages/geotoolz-patcher && uv run pytest -v
 	cd packages/geotoolz-catalog && uv run pytest -v
+	cd packages/geotoolz-products && uv run pytest -v -m "not slow and not live"
 	@printf "$(GREEN)>>> ✅ Coverage reports generated!$(RESET)\n"
 
 # ===========================================================================

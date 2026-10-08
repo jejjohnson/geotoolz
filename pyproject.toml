@@ -18,6 +18,7 @@ members = ["packages/*"]
 geotoolz = { workspace = true }
 geotoolz-patcher = { workspace = true }
 geotoolz-catalog = { workspace = true }
+geotoolz-products = { workspace = true }
 # The Operator / Sequential / Graph composition core lives in the pipekit
 # monorepo. Pull it from GitHub until the first PyPI release lands; the
 # published wheel metadata still carries the PyPI-flavoured `pipekit>=…`
@@ -48,12 +49,13 @@ dev = [
     # round-trips, xvec point extraction, netCDF4 / zarr I/O, obstore
     # pooling) come with them, so a plain `uv sync` runs the same fast
     # tier as CI's `--all-extras`.
-    "geotoolz[hydra,vector-cube,netcdf,zarr,obstore]",
+    "geotoolz[hydra,vector-cube,netcdf,zarr]",
     # Reference solar geometry for radiometry.ComputeSZA (no geotoolz
     # extra declares it).
     "pysolar>=0.11",
     "geotoolz-patcher",
     "geotoolz-catalog",
+    "geotoolz-products[obstore,operators]",
 ]
 lint = [
     "ruff>=0.15.11",
@@ -66,6 +68,7 @@ docs = [
     "geotoolz",
     "geotoolz-patcher",
     "geotoolz-catalog",
+    "geotoolz-products",
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.4",

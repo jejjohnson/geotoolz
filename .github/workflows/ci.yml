@@ -69,6 +69,17 @@ jobs:
         working-directory: packages/geotoolz-catalog
         env:
           TZ: America/New_York
+      # The all-extras run of the products suite: every extras-gated test
+      # (obstore pool, geotoolz presets) must run, so a skip fails the job.
+      # `slow` (wheel build) and `live` (real APIs) stay out of the fast tier.
+      - name: Test geotoolz-products (all extras, no skips)
+        run: |
+          uv run pytest -v -rs -m "not slow and not live" | tee pytest.log
+          if grep -q "^SKIPPED" pytest.log; then
+            echo "::error::geotoolz-products tests skipped in the all-extras run"
+            exit 1
+          fi
+        working-directory: packages/geotoolz-products
       - name: Upload coverage report
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7
@@ -79,5 +90,5 @@ jobs:
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v7
         with:
-          files: packages/geotoolz/coverage.xml,packages/geotoolz-patcher/coverage.xml,packages/geotoolz-catalog/coverage.xml
+          files: packages/geotoolz/coverage.xml,packages/geotoolz-patcher/coverage.xml,packages/geotoolz-catalog/coverage.xml,packages/geotoolz-products/coverage.xml
           fail_ci_if_error: false

@@ -211,3 +211,57 @@ jobs:
       - name: Test geotoolz-patcher (base install)
         working-directory: packages/geotoolz-patcher
         run: uv run --no-sync pytest -q --no-cov
+
+  # `pip install geotoolz-products` without extras: every module imports,
+  # the reference reader loads a GeoTensor, extra-backed features fail only
+  # when used with a hint naming the `geotoolz-products[...]` extra, and the
+  # test suite passes with every extras-gated test skipping cleanly.
+  # Crucially, geotoolz itself is absent: readers never depend on it.
+  geotoolz-products-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Install geotoolz-products (base, no extras)
+        run: uv sync --locked --package geotoolz-products --no-default-groups --group dev
+      - name: Import and smoke test
+        run: |
+          uv run --no-sync python - <<'PY'
+          import importlib
+          import importlib.util
+          import pkgutil
+
+          import numpy as np
+          from rasterio.windows import Window
+
+          import geoproducts
+
+          # The extras (and geotoolz itself) really are absent.
+          for module in ("geotoolz", "geopatcher", "obstore", "pipekit"):
+              assert importlib.util.find_spec(module) is None, f"{module} installed"
+
+          # Every module imports on a base install.
+          for info in pkgutil.walk_packages(geoproducts.__path__, "geoproducts."):
+              importlib.import_module(info.name)
+
+          data = np.arange(4 * 8 * 8, dtype="float32").reshape(4, 8, 8)
+          reader = geoproducts.toy_sensor.Reader("toy", data=data)
+          chip = reader.read_from_window(Window(0, 0, 4, 4)).load()
+          assert chip.shape == (4, 4, 4), chip.shape
+
+          # Extra-backed features fail only on use, naming the extra.
+          try:
+              geoproducts.toy_sensor.NDVI()
+          except ImportError as exc:
+              assert "geotoolz-products[operators]" in str(exc), exc
+          else:
+              raise AssertionError("NDVI preset ran without geotoolz")
+          print("geotoolz-products base install OK", geoproducts.__version__)
+          PY
+      # Coverage is off: extras-gated paths are unreachable here, so the
+      # package's fail_under floor is for the all-extras run in ci.yml.
+      - name: Test geotoolz-products (base install)
+        working-directory: packages/geotoolz-products
+        run: uv run --no-sync pytest -q --no-cov -m "not slow and not live"

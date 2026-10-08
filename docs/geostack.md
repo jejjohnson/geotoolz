@@ -1,8 +1,8 @@
 # The geostack
 
-This repository ships **three packages that are designed as one stack**:
-find data (`geocatalog`), cut it into model-sized pieces (`geopatcher`),
-and compute on it (`geotoolz`) — with the operator-graph composition core
+This repository ships **four packages that are designed as one stack**:
+read products (`geoproducts`), find data (`geocatalog`), cut it into
+model-sized pieces (`geopatcher`), and compute on it (`geotoolz`) — with the operator-graph composition core
 supplied by the external [pipekit](https://github.com/jejjohnson/pipekit)
 framework. Each package works standalone, but the seams between them are
 first-class API.
@@ -33,6 +33,7 @@ flowchart LR
 | `geotoolz-catalog` | `geocatalog` | *Which files cover my bbox + time window?* Queryable spatiotemporal index with GeoParquet interchange, in-memory + DuckDB backends, discovery sources, matchup, staging. |
 | `geotoolz-patcher` | `geopatcher` | *How do I turn a huge field into model-sized patches and back?* Four-axis Patcher (Geometry × Sampler × Window × Aggregation) over a substrate-agnostic `Field` protocol. |
 | `geotoolz` | `geotoolz` | *What do I compute on each piece?* Carrier-preserving `pipekit.Operator` families for remote sensing, from radiometry to spectral indices to matched filters. |
+| `geotoolz-products` | `geoproducts` | *How do I open this mission's or provider's product?* Readers that turn EO data products into georeader `GeoData` / `GeoTensor`s; independent of the operator library. |
 
 ## The seams
 
@@ -71,9 +72,9 @@ finds the row pairs; the patcher reads them; the operators align them.
 
 **5. One obstore pool per process.**
 `geopatcher.objstore` owns the pooled `obstore` client and the `[obstore]`
-extras of geotoolz and geocatalog depend on it, so a
+extras of geotoolz-products and geocatalog depend on it, so a
 pipeline touching the same bucket through the catalog's staging, the
-patcher's `ObstoreCogField`, and geotoolz's sensor readers reuses one
+patcher's `ObstoreCogField`, and geoproducts' product readers reuses one
 HTTP/2 connection pool.
 
 ## End to end in one screen

@@ -23,17 +23,17 @@ if TYPE_CHECKING:
 Track = Literal["A", "B"]
 
 
-class SensorReader(GeoData, ABC):
-    """ABC for georeader-compatible sensor readers.
+class ProductReader(GeoData, ABC):
+    """ABC for georeader-compatible product readers.
 
     Subclasses provide sensor-specific metadata and implement
     :meth:`_read_window`; the base class supplies the small GeoData surface
     needed by geotoolz operators.
 
     Examples:
-        Implement a file-backed sensor reader::
+        Implement a file-backed product reader::
 
-            class Reader(SensorReader):
+            class Reader(ProductReader):
                 def __init__(self, path): ...
                 def _read_window(self, window): ...
 
@@ -123,7 +123,7 @@ class SensorReader(GeoData, ABC):
         ndim = len(self.shape)
         if ndim not in (2, 3, 4):
             raise ValueError(
-                f"SensorReader expects a 2d-4d array shape; got {self.shape}."
+                f"ProductReader expects a 2d-4d array shape; got {self.shape}."
             )
         return ("time", "band", "y", "x")[-ndim:]
 
@@ -139,7 +139,7 @@ class SensorReader(GeoData, ABC):
 
     @property
     def track(self) -> Track:
-        """Sensor reader track classification."""
+        """Reader track classification."""
         return self._track
 
     def load(self, boundless: bool = True) -> GeoTensor:
@@ -247,7 +247,7 @@ class SensorReader(GeoData, ABC):
         2. **Local fallback** — for plain filesystem paths (no
            scheme, or ``file://``) the method does a one-shot
            ``open(path, "rb").seek(start) + read(length)`` so
-           existing on-disk sensor readers (the ``toy_sensor``
+           existing on-disk product readers (the ``toy_sensor``
            reference, future MODIS HDF readers, …) keep working
            without an obstore install.
 
@@ -263,7 +263,7 @@ class SensorReader(GeoData, ABC):
 
 
 # ----------------------------------------------------------------------
-# Byte-range helpers for the SensorReader._read_bytes opt-in path.
+# Byte-range helpers for the ProductReader._read_bytes opt-in path.
 # ----------------------------------------------------------------------
 
 # URI schemes the obstore pool (``geopatcher.objstore.SUPPORTED_SCHEMES``)
@@ -275,8 +275,8 @@ _REMOTE_SCHEMES = frozenset(
 )
 
 _OBSTORE_INSTALL_HINT = (
-    "SensorReader cloud reads need the [obstore] extra (the shared pool lives "
-    "in geopatcher); install via `pip install 'geotoolz[obstore]'`."
+    "ProductReader cloud reads need the [obstore] extra (the shared pool lives "
+    "in geopatcher); install via `pip install 'geotoolz-products[obstore]'`."
 )
 
 
@@ -375,7 +375,7 @@ def _read_bytes_local(uri: str, start: int, length: int) -> bytes:
             # surface it with a clear message rather than silently fall
             # through to local open() which would fail cryptically.
             raise RuntimeError(
-                f"SensorReader._read_bytes: URI {uri!r} has a remote scheme "
+                f"ProductReader._read_bytes: URI {uri!r} has a remote scheme "
                 "but no obstore client is attached. Call "
                 "`set_obstore_client(...)` first, or pass a local path "
                 "instead."

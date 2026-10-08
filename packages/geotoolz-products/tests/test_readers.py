@@ -1,4 +1,4 @@
-"""Tests for sensor reader framework."""
+"""Tests for product reader framework."""
 
 from __future__ import annotations
 
@@ -11,22 +11,22 @@ from affine import Affine
 from georeader.geotensor import GeoTensor
 from rasterio.windows import Window
 
-import geotoolz as gz
-from geotoolz.readers import SensorReader, toy_sensor
-from geotoolz.readers.toy_sensor import constants as toy_constants
+import geoproducts
+from geoproducts import ProductReader, toy_sensor
+from geoproducts.toy_sensor import constants as toy_constants
 
 
-class MissingReader(SensorReader):
+class MissingReader(ProductReader):
     """Incomplete reader used to verify ABC enforcement."""
 
 
-def test_readers_module_is_exported() -> None:
-    assert gz.readers is not None
-    assert gz.SensorReader is SensorReader
+def test_public_surface() -> None:
+    assert set(geoproducts.__all__) == {"ProductReader", "__version__", "toy_sensor"}
+    assert geoproducts.ProductReader is ProductReader
     assert toy_sensor.Reader is not None
 
 
-def test_sensor_reader_abc_enforces_required_surface() -> None:
+def test_product_reader_abc_enforces_required_surface() -> None:
     with pytest.raises(TypeError):
         MissingReader()  # type: ignore[abstract]
 
@@ -41,7 +41,7 @@ def test_toy_sensor_reader_passes_geodata_conformance() -> None:
         fill_value_default=-9999.0,
     )
 
-    assert isinstance(reader, SensorReader)
+    assert isinstance(reader, ProductReader)
     assert reader.track == "A"
     assert reader.shape == data.shape
     assert reader.bands == ("blue", "green", "red", "nir")
@@ -80,7 +80,7 @@ def test_center_coords_matches_georeader() -> None:
     np.testing.assert_array_equal(ours_b.values, ref_b.values)
 
 
-class _FourDReader(SensorReader):
+class _FourDReader(ProductReader):
     """Minimal ``(time, band, y, x)`` reader for dims checks."""
 
     def __init__(self, shape: tuple[int, ...] = (2, 3, 4, 5)) -> None:
@@ -162,21 +162,22 @@ def test_toy_sensor_constants_are_lazy_and_cached(
     assert toy_constants.CONSTANTS == {"solar_irradiance": ({"name": "red"},)}
     assert toy_constants.CONSTANTS == {"solar_irradiance": ({"name": "red"},)}
     assert calls == [
-        "geotoolz.readers.toy_sensor:data/bands.csv",
-        "geotoolz.readers.toy_sensor:data/solar_irradiance.csv",
+        "geoproducts.toy_sensor:data/bands.csv",
+        "geoproducts.toy_sensor:data/solar_irradiance.csv",
     ]
 
 
 def test_shared_csv_loader_caches_package_data() -> None:
-    from geotoolz.readers._src.constants import load_csv
+    from geoproducts._src.constants import load_csv
 
     load_csv.cache_clear()
-    bands = load_csv("geotoolz.readers.toy_sensor", "data/bands.csv")
+    bands = load_csv("geoproducts.toy_sensor", "data/bands.csv")
     assert bands[2]["name"] == "red"
-    assert bands is load_csv("geotoolz.readers.toy_sensor", "data/bands.csv")
+    assert bands is load_csv("geoproducts.toy_sensor", "data/bands.csv")
 
 
 def test_toy_sensor_ndvi_preset_matches_generic_operator() -> None:
+    gz = pytest.importorskip("geotoolz")
     op = toy_sensor.NDVI()
     expected = gz.indices.NDVI(red="red", nir="nir")
 
@@ -198,15 +199,47 @@ def test_toy_sensor_ndvi_preset_matches_generic_operator() -> None:
     np.testing.assert_allclose(op(gt).values, 0.5)
 
 
-@pytest.mark.slow
-def test_toy_sensor_package_data_is_in_wheel() -> None:
-    wheelhouse = Path("dist")
-    wheels = sorted(wheelhouse.glob("geotoolz-*.whl"))
-    if not wheels:
-        pytest.skip("wheel has not been built")
+def test_ndvi_preset_without_geotoolz_names_the_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
 
-    with ZipFile(wheels[-1]) as zf:
+    real_import = builtins.__import__
+
+    def no_geotoolz(name, *args, **kwargs):
+        if name.split(".")[0] == "geotoolz":
+            raise ImportError(f"simulated missing {name}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_geotoolz)
+    with pytest.raises(ImportError, match=r"geotoolz-products\[operators\]"):
+        toy_sensor.NDVI()
+
+
+@pytest.mark.slow
+def test_toy_sensor_package_data_is_in_wheel(tmp_path: Path) -> None:
+    import shutil
+    import subprocess
+
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.fail("building the wheel needs uv on PATH")
+    package_dir = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [uv, "build", "--wheel", "--out-dir", str(tmp_path), str(package_dir)],
+        check=True,
+        capture_output=True,
+    )
+    (wheel,) = tmp_path.glob("geotoolz_products-*.whl")
+    with ZipFile(wheel) as zf:
         names = set(zf.namelist())
 
-    assert "geotoolz/readers/toy_sensor/data/bands.csv" in names
-    assert "geotoolz/readers/toy_sensor/data/solar_irradiance.csv" in names
+    assert "geoproducts/toy_sensor/data/bands.csv" in names
+    assert "geoproducts/toy_sensor/data/solar_irradiance.csv" in names
+
+
+def test_readers_write_only_band_names() -> None:
+    """Readers label bands under ``band_names`` only (the key geotoolz reads)."""
+    gt = toy_sensor.Reader("toy.tif").load()
+    assert set(gt.attrs or {}) >= {"band_names"}
+    assert "bands" not in (gt.attrs or {})
