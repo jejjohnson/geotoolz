@@ -582,3 +582,52 @@ def test_hf_reserved_characters_are_encoded_on_the_wire(monkeypatch):
     finally:
         server.shutdown()
     assert seen["path"] == "/org/repo/resolve/main/data%231.csv"
+
+
+# --- mount ---------------------------------------------------------------
+
+
+def test_mount_serves_every_uri_under_the_root():
+    from obstore.store import MemoryStore
+
+    store = MemoryStore()
+    public.mount("s3://mounted", store)
+    try:
+        assert public.get_obstore("s3://mounted/a/b.tif") is store
+        assert (
+            public.get_obstore(
+                "s3://mounted/c.tif", storage_options={"region": "eu-west-1"}
+            )
+            is store
+        )
+        assert public.get_obstore("s3://other/a.tif") is not store
+        public.clear_obstore_pool()
+        assert public.get_obstore("s3://mounted/a.tif") is store
+    finally:
+        public.unmount("s3://mounted")
+    assert public.get_obstore("s3://mounted/a.tif") is not store
+    public.unmount("s3://mounted")  # no-op when nothing is mounted
+
+
+def test_mount_keys_azure_by_container_and_http_by_scheme():
+    from obstore.store import MemoryStore
+
+    store = MemoryStore()
+    public.mount("az://acct/one", store)
+    public.mount("https://example.com", store)
+    try:
+        assert public.get_obstore("az://acct/one/k") is store
+        assert public.get_obstore("az://acct/two/k") is not store
+        assert public.get_obstore("https://example.com/a") is store
+        assert public.get_obstore("https://example.com/a?sig=x") is store
+        assert public.get_obstore("http://example.com/a") is not store
+    finally:
+        public.unmount("az://acct/one")
+        public.unmount("https://example.com")
+
+
+def test_mount_rejects_an_object_uri():
+    from obstore.store import MemoryStore
+
+    with pytest.raises(ValueError, match="names an object"):
+        public.mount("s3://bucket/key.tif", MemoryStore())

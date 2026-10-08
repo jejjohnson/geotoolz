@@ -2,7 +2,8 @@
 
 Cloud object storage for the stack (import name `geocloud`): one
 process-wide [obstore](https://developmentseed.org/obstore/) client pool,
-and batched, async Cloud-Optimized GeoTIFF reads on top of it.
+file verbs on it (list, download, upload, copy, sync, sign), and batched,
+async Cloud-Optimized GeoTIFF reads.
 
 ```bash
 pip install geotoolz-cloud            # the client pool
@@ -21,6 +22,7 @@ A process talking to one bucket therefore builds **one** client and
 flowchart LR
     P["geopatcher.fields.CogField"] --> C
     R["geoproducts readers<br/>(cloud byte reads)"] --> S
+    F["geocloud.files<br/>ls · download · upload · copy · sync · sign"] --> S
     C["geocloud.cog<br/>CogSource · AsyncCogReader"] --> S["geocloud.store<br/>one client per bucket"]
     S --> B[("s3:// · gs:// · az:// · https:// · hf://")]
 ```
@@ -50,6 +52,74 @@ Pooled stores never carry a prefix, `storage_options` are part of the pool
 key, and an `http(s)` query string stays on the store, so signed URLs are
 requested signed. `clear_obstore_pool()` drops every client after you
 rotate credentials; it also runs automatically in a forked child.
+
+## Moving files — `geocloud.files`
+
+One set of verbs for every location: any URI the pool understands, or a
+local path (`str`, `Path`, `file://`). The same call covers cloud → local,
+local → cloud and cloud → cloud, and remote ends share the pooled clients.
+
+```python
+from datetime import timedelta
+from pathlib import Path
+
+from geocloud import files
+
+# Inspect
+scenes: list[files.ObjectInfo] = files.ls("s3://bucket/scenes/2026/10/")
+top: list[files.ObjectInfo] = files.ls("s3://bucket/scenes/", recursive=False)  # + sub-"dirs"
+files.exists("s3://bucket/scenes/2026/10/07/B04.tif")      # True
+files.info("s3://bucket/scenes/2026/10/07/B04.tif").size   # 123_456_789
+
+# Move
+local: Path = files.download(scenes[0].uri, "data/")        # → data/B04.tif
+files.upload("out/ndvi.tif", "az://account/results/ndvi/")  # keeps the name
+files.copy("s3://bucket/a.tif", "s3://bucket/archive/")     # server-side
+files.copy("s3://bucket/a.tif", "gs://other/a.tif")         # streamed across clouds
+files.sync("s3://bucket/scenes/", "data/scenes/")           # resumable mirror
+files.rm("s3://bucket/tmp/", recursive=True)
+
+# Small objects and file handles
+meta: bytes = files.read_bytes("gs://bucket/scene/MTL.json")
+files.write_bytes("az://account/results/run.json", b"{}")
+with files.open("s3://bucket/results/log.txt", "wb") as fh:
+    fh.write(b"done")
+
+# Share without credentials
+url: str = files.sign("s3://bucket/a.tif", expires=timedelta(hours=6))
+```
+
+| Verb | Does | Notes |
+| --- | --- | --- |
+| `ls(prefix, recursive=True)` | list objects (sorted `ObjectInfo`) | prefixes match whole segments: `2026` ≠ `2026-old` |
+| `info` / `exists` | one object's size, mtime, etag | a prefix alone does not "exist" |
+| `read_bytes` / `write_bytes` | whole object in memory | writes are atomic in the store |
+| `open(uri, "rb" \| "wb")` | seekable reader (range requests) / buffered writer | hand the reader to h5py, `zipfile`, … |
+| `download(uri, dest)` | object → local file | streamed to a hidden `.part`, size-checked, renamed |
+| `upload(path, uri)` | local file → object | multipart for large files |
+| `copy(src, dst)` | any → any | server-side in one bucket / container; streamed between stores |
+| `sync(src, dst)` | mirror a prefix / directory | skips same-size objects already there; never deletes |
+| `rm(uri, recursive=False)` | delete | batched bulk deletes |
+| `sign(uri, expires=…)` | pre-signed HTTPS URL | S3, GCS, Azure; computed locally, no request |
+
+A trailing `/` on a destination (or an existing local directory) keeps
+the source's file name. `overwrite=False` on `copy` / `download` /
+`upload` leaves an existing destination alone and returns it.
+`storage_options` on every verb is forwarded to `get_obstore`.
+
+**Testing code that moves files.** `geocloud.store.mount` serves one
+bucket, container or host from a store you built, so the code under test
+keeps its real URIs:
+
+```python
+from obstore.store import MemoryStore
+
+from geocloud.store import mount, unmount
+
+mount("s3://bucket", MemoryStore())   # every s3://bucket/... URI now hits memory
+...
+unmount("s3://bucket")
+```
 
 ## COG reads — `geocloud.cog`
 

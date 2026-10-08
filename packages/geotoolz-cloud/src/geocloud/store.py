@@ -4,7 +4,9 @@
 take their object-store client from here, so every package in the
 process shares one client (and one HTTP/2 connection pool) per bucket /
 container. ``s3://``, ``gs://``, ``az://`` / ``abfs[s]://``,
-``http(s)://`` (signed URLs included) and ``hf://`` URIs are supported.
+``http(s)://`` (signed URLs included) and ``hf://`` URIs are supported;
+`mount` serves one bucket from a store you built (a ``MemoryStore`` in
+tests).
 
 ```python
 from geocloud.store import get_obstore, object_key
@@ -22,8 +24,10 @@ from geocloud._src.store import (
     clear_obstore_pool,
     get_obstore,
     get_range_bytes,
+    mount,
     object_key,
     set_obstore_pool_maxsize,
+    unmount,
 )
 
 
@@ -32,6 +36,8 @@ __all__ = [
     "clear_obstore_pool",
     "get_obstore",
     "get_range_bytes",
+    "mount",
     "object_key",
     "set_obstore_pool_maxsize",
+    "unmount",
 ]

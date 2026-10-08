@@ -7,6 +7,24 @@
 ::: geocloud.store.get_range_bytes
 ::: geocloud.store.clear_obstore_pool
 ::: geocloud.store.set_obstore_pool_maxsize
+::: geocloud.store.mount
+::: geocloud.store.unmount
+
+## `geocloud.files`
+
+::: geocloud.files.ObjectInfo
+::: geocloud.files.ls
+::: geocloud.files.info
+::: geocloud.files.exists
+::: geocloud.files.read_bytes
+::: geocloud.files.write_bytes
+::: geocloud.files.open
+::: geocloud.files.download
+::: geocloud.files.upload
+::: geocloud.files.copy
+::: geocloud.files.sync
+::: geocloud.files.rm
+::: geocloud.files.sign
 
 ## `geocloud.cog`
 

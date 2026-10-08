@@ -14,6 +14,9 @@ Surfaces:
 - `get_range_bytes` — async byte-range fetch through the pool.
 - `clear_obstore_pool` — drop every pooled client (also runs after fork).
 - `set_obstore_pool_maxsize` — LRU cap (default 64).
+- `mount` / `unmount` — serve one bucket / container / host from a store
+  you built (a ``MemoryStore`` in tests, a store with a custom credential
+  provider); `get_obstore` returns it for every URI under that root.
 
 Every pooled store is built **without a prefix**: a client is shared by
 every object under its bucket / container, so baking the first object's
@@ -419,6 +422,69 @@ def object_key(uri: str) -> str:
     return _locate(uri).key
 
 
+_MountKey = tuple[str, str, str | None, str | None]
+
+
+def _mount_key(uri: str) -> _MountKey:
+    """``(backend, bucket, scope, scheme)`` of the root ``uri`` lives under."""
+    loc = _locate(uri)
+    if loc.backend in ("http", "hf"):
+        # An origin, whatever query (signature) a URL under it carries.
+        return (loc.backend, loc.bucket, None, loc.scheme)
+    return (loc.backend, loc.bucket, loc.scope, None)
+
+
+# Stores the caller built and mounted; consulted before the pool and never
+# evicted, cleared or rebuilt by it.
+_MOUNTS: dict[_MountKey, Any] = {}
+
+
+def mount(uri: str, store: ObjectStore) -> None:
+    """Serve every URI under the root ``uri`` from ``store``.
+
+    `get_obstore` (and so `get_range_bytes`, `geocloud.files` and every
+    package on the pool) returns ``store`` for any URI in the same bucket,
+    Azure container or HTTP origin, whatever ``storage_options`` it is
+    given. Use it for a ``MemoryStore`` / ``LocalStore`` stand-in in tests,
+    or a store whose configuration the pool cannot express. ``store``
+    must be laid out like the pooled one: rooted at the bucket /
+    container, without a prefix. `clear_obstore_pool` leaves mounts in
+    place, including in a forked child (where the pool is emptied because
+    network clients are not fork-safe): mount network stores after
+    forking. `unmount` removes one.
+
+    Args:
+        uri: The root to mount, with no object key: ``s3://bucket``,
+            ``az://account/container``, ``https://host``.
+        store: Any obstore ``ObjectStore``.
+
+    Raises:
+        ValueError: ``uri`` names an object rather than a root, or is
+            not a supported URI.
+
+    Examples:
+        >>> from obstore.store import MemoryStore
+        >>> mount("s3://test-bucket", MemoryStore())
+        >>> type(get_obstore("s3://test-bucket/a/b.tif")).__name__
+        'MemoryStore'
+        >>> unmount("s3://test-bucket")
+    """
+    loc = _locate(uri)
+    if loc.key:
+        raise ValueError(
+            f"mount: {uri!r} names an object ({loc.key!r}); mount the bucket, "
+            "container or host it lives under."
+        )
+    with _POOL_LOCK:
+        _MOUNTS[_mount_key(uri)] = store
+
+
+def unmount(uri: str) -> None:
+    """Remove the store `mount` put at ``uri``'s root (no-op if none)."""
+    with _POOL_LOCK:
+        _MOUNTS.pop(_mount_key(uri), None)
+
+
 # ``OrderedDict`` so LRU eviction needs no second structure — long-lived
 # notebook sessions would otherwise leak one client per bucket they touch.
 _POOL: OrderedDict[_PoolKey, Any] = OrderedDict()
@@ -436,7 +502,7 @@ def get_obstore(
     The first call for a pool key builds the client; later calls with
     the same key return the same instance, so HTTP/2 connection pooling
     and TLS sessions survive across files. Request objects from it with
-    `object_key`.
+    `object_key`. A store `mount`-ed at the URI's root wins over the pool.
 
     Args:
         uri: A cloud URI (see the module docstring for the forms).
@@ -453,6 +519,9 @@ def get_obstore(
     """
     key = _pool_key(uri, storage_options)
     with _POOL_LOCK:
+        mounted = _MOUNTS.get(_mount_key(uri))
+        if mounted is not None:
+            return mounted
         existing = _POOL.get(key)
         if existing is not None:
             _POOL.move_to_end(key)
@@ -494,7 +563,7 @@ async def get_range_bytes(
 
 
 def clear_obstore_pool() -> None:
-    """Drop every pooled client.
+    """Drop every pooled client (stores put there by `mount` stay).
 
     Use after rotating credentials in a long-running process. Runs
     automatically in a forked child (reqwest connection pools are not
