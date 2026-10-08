@@ -1,14 +1,18 @@
-"""`ObstoreCogField` — Cloud-Optimized GeoTIFF reads via obstore + async-tiff.
+"""`ObstoreCogField` — Cloud-Optimized GeoTIFF reads via obstore + async-geotiff.
 
 A `Field` adapter for tiled COGs hosted on object storage. The
-substrate is async-tiff's `TIFF` parser running over an obstore-pooled
-HTTP/2 client. The whole point of this class — and the reason the
-plain `RasterField` isn't enough — is the **batched** read path:
-``select_many(windows)`` collects every unique COG tile that overlaps
-any of the requested windows and fetches them in *one* batched range
-request, instead of one HTTP round trip per window. For a
-``parallel_map`` over hundreds of patches on a single COG this is the
->=5x wall-clock win the integration plan promised.
+substrate is async-geotiff's `GeoTIFF` (over async-tiff) running on an
+obstore-pooled HTTP/2 client: upstream parses the header, the
+georeferencing, the CRS, overviews and internal masks, and fetches /
+decodes tiles. This module adds what upstream leaves to the caller —
+the **batched** read path. ``select_many(windows)`` collects every
+unique COG tile that overlaps any of the requested windows, so a tile
+shared by many windows is fetched and decoded once, then fetches them
+in concurrent groups of ``_TILES_PER_FETCH`` row-major-adjacent tiles
+(upstream coalesces each group's contiguous byte ranges). Dedup cuts
+requests and bytes when windows overlap; the concurrent groups keep
+scattered windows from serialising behind one request on high-latency
+stores.
 
 Adapted from ``openEO-RuSTAC/crates/orbit-geo/src/async_download.rs:1073-1091``
 — the upstream Rust pattern that motivated this PR.
@@ -40,20 +44,22 @@ The field pickles by URL: unpickling re-opens the COG through
 ``storage_options``, ``timeout`` (and ``store`` / ``path`` when one
 was supplied), so it can be shipped to process-pool workers.
 
-Georeferencing follows GDAL / rasterio:
+Georeferencing follows GDAL / rasterio. async-geotiff supplies the
+transform (``ModelTransformationTag`` for rotated / sheared grids,
+*PixelIsPoint* half-pixel shift, overviews scaled from IFD 0) and the
+CRS (EPSG codes and user-defined CRSs spelled out in geokeys). Two
+upstream gaps are covered here:
 
-- the raster tiepoint ``(I, J)`` is honoured (``x0 = X - I·sx``,
-  ``y0 = Y + J·sy``), as is a ``ModelTransformationTag`` (rotated or
-  sheared grids);
-- ``GTRasterTypeGeoKey = 2`` (*PixelIsPoint*) shifts the origin by half
-  a pixel up-left, matching GDAL's default (``GTIFF_POINT_GEO_IGNORE``
-  unset);
-- overview IFDs (``ifd_index >= 1``) take the CRS and origin from
-  IFD 0 with the pixel size scaled by the full-res / overview size
-  ratio per axis;
-- ``GDAL_NODATA`` becomes ``domain.nodata`` / ``fill_value_default``,
-  and out-of-image parts of a window are filled with it (``0`` when
-  the COG declares no nodata).
+- a raster tiepoint ``(I, J) != (0, 0)`` is honoured
+  (``x0 = X - I·sx``, ``y0 = Y + J·sy``); upstream assumes ``(0, 0)``;
+- a CRS upstream cannot build (it raises for some user-defined
+  datums) becomes ``domain.crs = None`` with a ``RuntimeWarning``
+  instead of failing the open.
+
+``GDAL_NODATA`` becomes ``domain.nodata`` / ``fill_value_default``;
+out-of-image parts of a window, and pixels the COG's internal mask
+marks invalid, are filled with it (``0`` when the COG declares no
+nodata) — the same values as a masked GDAL read.
 
 Windows are snapped outward to whole pixels (offsets floored, far
 edges ceiled — georeader's ``round_outer_window`` convention) and the
@@ -66,10 +72,10 @@ own JPEG decoder rather than GDAL's libjpeg, so values can differ from
 YCbCr→RGB conversion differs) and ±1 for plain-RGB JPEG in our checks.
 Compare JPEG reads with a tolerance.
 
-Both extras (``obstore`` and ``async-tiff``) are required at *call*
+Both extras (``obstore`` and ``async-geotiff``) are required at *call*
 time — importing this module is fine without them, but
 :meth:`ObstoreCogField.from_url` invokes the internal
-``_require_async_tiff`` guard which raises :class:`ImportError` with
+``_require_async_geotiff`` guard which raises :class:`ImportError` with
 the install hint if either is missing. The lazy check keeps
 ``from geopatcher.fields import ObstoreCogField`` cheap on a slim
 install (the lazy export in ``_src.fields.__init__`` doesn't import
@@ -153,12 +159,12 @@ async def _with_timeout(coro: Any, *, timeout: float | None, message: str) -> An
         ) from None
 
 
-def _require_async_tiff() -> Any:
+def _require_async_geotiff() -> Any:
     try:
-        import async_tiff
+        import async_geotiff
     except ImportError as exc:
         raise missing_extra("ObstoreCogField", "obstore-cog") from exc
-    return async_tiff
+    return async_geotiff
 
 
 def _uri_path(uri: str) -> str:
@@ -176,12 +182,10 @@ def _uri_path(uri: str) -> str:
 # Domain
 # ---------------------------------------------------------------------------
 
-# GeoTIFF "user-defined" sentinel for CRS geokeys (ProjectedCSTypeGeoKey,
-# GeographicTypeGeoKey): the CRS is spelled out by other keys rather than
-# named by an EPSG code, so it must not be looked up as ``EPSG:32767``.
-_GEOKEY_USER_DEFINED = 32767
-# GTRasterTypeGeoKey values: 1 = PixelIsArea (default), 2 = PixelIsPoint.
-_RASTER_PIXEL_IS_POINT = 2
+# Tiles per concurrent ``fetch_tiles`` call in `select_many`: small enough
+# that scattered windows fan out over parallel requests, large enough that
+# a cluster of adjacent tiles still coalesces into few range reads.
+_TILES_PER_FETCH = 8
 # Decimal places used to absorb float noise before snapping window edges
 # to whole pixels (same as georeader's ``PIXEL_PRECISION``).
 _PIXEL_PRECISION = 3
@@ -213,51 +217,114 @@ class ObstoreCogDomain:
         return 0 if self.nodata is None else self.nodata
 
 
-def _dtype_from_ifd(ifd: Any, *, url: str) -> np.dtype:
-    """Derive a numpy dtype from the IFD's sample-format + bit-depth tags.
+def _dtype(geotiff: Any, *, url: str) -> np.dtype:
+    """The pixel dtype async-geotiff derives from IFD 0's tags.
 
-    Args:
-        ifd: The async-tiff ImageFileDirectory.
-        url: The COG's URL — used to name the file in errors.
+    Overviews share it (upstream exposes ``dtype`` on the `GeoTIFF` only).
 
     Raises:
-        ValueError: The BitsPerSample / SampleFormat tags are missing,
-            unparseable, or describe an unsupported combination.
-            Failing loud beats silently reinterpreting pixel bytes
-            under a guessed dtype.
+        ValueError: The SampleFormat / BitsPerSample combination has no
+            numpy dtype (upstream reports ``None``). Failing loud beats
+            silently reinterpreting pixel bytes under a guessed dtype.
     """
-    try:
-        bps_raw = ifd.bits_per_sample
-        sf_raw = ifd.sample_format
-        # Both come back as lists (one entry per sample); we use the
-        # first sample's spec because COGs uniformly type all samples.
-        bps = int(bps_raw[0]) if hasattr(bps_raw, "__getitem__") else int(bps_raw)
-        sf = sf_raw[0] if hasattr(sf_raw, "__getitem__") else sf_raw
-        # ``async_tiff.enums.SampleFormat`` exposes a ``.value`` int.
-        sf_int = int(getattr(sf, "value", sf))
-    except (TypeError, ValueError, AttributeError, IndexError) as exc:
+    dtype = geotiff.dtype
+    if dtype is None:
         raise ValueError(
             f"ObstoreCogField: cannot derive a dtype for {url!r}: "
-            f"BitsPerSample={getattr(ifd, 'bits_per_sample', None)!r} / "
-            f"SampleFormat={getattr(ifd, 'sample_format', None)!r} "
-            f"could not be interpreted ({exc})."
-        ) from exc
-
-    # SampleFormat: 1 = unsigned int, 2 = signed int, 3 = float.
-    prefix = {1: "uint", 2: "int", 3: "float"}.get(sf_int)
-    if prefix is None:
-        raise ValueError(
-            f"ObstoreCogField: unsupported SampleFormat {sf_int!r} in {url!r} "
-            "(expected 1=unsigned int, 2=signed int, 3=float)."
+            f"BitsPerSample={getattr(geotiff.ifd, 'bits_per_sample', None)!r} / "
+            f"SampleFormat={getattr(geotiff.ifd, 'sample_format', None)!r} "
+            "is not a supported combination."
         )
+    return np.dtype(dtype)
+
+
+def _tiepoint_offset(geotiff: Any) -> tuple[float, float]:
+    """Raster-space tiepoint ``(I, J)`` of IFD 0, or ``(0, 0)``.
+
+    async-geotiff anchors the transform at the tiepoint's model
+    coordinates as if they belonged to pixel ``(0, 0)``; GDAL honours a
+    non-zero ``(I, J)``. Only relevant when the transform comes from a
+    tiepoint + pixel scale (a ``ModelTransformationTag`` carries no
+    tiepoint).
+    """
+    ifd = geotiff.ifd
+    tiepoint = getattr(ifd, "model_tiepoint", None)
+    if tiepoint is None or getattr(ifd, "model_pixel_scale", None) is None:
+        return (0.0, 0.0)
+    i, j = (float(v) for v in list(tiepoint)[:2])
+    return (i, j)
+
+
+def _crs_or_none(level: Any, *, url: str) -> Any:
+    """The COG's CRS from async-geotiff, or ``None`` with a warning.
+
+    Upstream builds EPSG and user-defined CRSs from the geokeys, but
+    raises for some user-defined datums it cannot express; that
+    must not fail the open — the pixels and transform are still valid.
+    """
     try:
-        return np.dtype(f"{prefix}{bps}")
-    except TypeError as exc:
-        raise ValueError(
-            f"ObstoreCogField: unsupported BitsPerSample {bps!r} for "
-            f"SampleFormat {sf_int!r} in {url!r} (no numpy dtype "
-            f"'{prefix}{bps}')."
-        ) from exc
+        return level.crs
+    except Exception as exc:
+        # pyproj errors embed the whole PROJJSON; keep the tail (the reason).
+        reason = str(exc)
+        if len(reason) > 160:
+            reason = "…" + reason[-160:]
+        warnings.warn(
+            f"ObstoreCogField: could not build the CRS of {url!r} ({reason}); "
+            "domain.crs will be None. Use RasterField (rasterio) to read it "
+            "with its full CRS.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return None
+
+
+def _build_domain(level: Any, geotiff: Any, *, url: str) -> ObstoreCogDomain:
+    """Read transform, CRS and nodata for ``level`` from async-geotiff.
+
+    Args:
+        level: The `async_geotiff.GeoTIFF` (full resolution) or
+            `async_geotiff.Overview` being read.
+        geotiff: The parent `async_geotiff.GeoTIFF` (IFD 0 carries the
+            GeoTIFF tags).
+        url: The COG's URL, for error / warning messages.
+    """
+    from rasterio.transform import Affine
+
+    width = int(level.width)
+    height = int(level.height)
+    transform = level.transform
+    i, j = _tiepoint_offset(geotiff)
+    if i or j:
+        # Shift the origin back from pixel (I, J) to pixel (0, 0), in this
+        # level's pixel units (overviews are IFD 0 scaled by the size ratio).
+        transform = transform * Affine.translation(
+            -i * width / int(geotiff.width), -j * height / int(geotiff.height)
+        )
+
+    dtype = _dtype(geotiff, url=url)
+    raw_nodata = getattr(level.ifd, "gdal_nodata", None)
+    if raw_nodata is None:
+        raw_nodata = getattr(geotiff.ifd, "gdal_nodata", None)
+    nodata = _parse_nodata(raw_nodata, dtype, url=url)
+
+    corners = [transform * (c, r) for c in (0, width) for r in (0, height)]
+    xs = [p[0] for p in corners]
+    ys = [p[1] for p in corners]
+    a, b, _c, d, e, _f = transform[:6]
+    if b == 0 and d == 0:
+        res = (abs(a), abs(e))
+    else:
+        res = (math.hypot(a, d), math.hypot(b, e))
+
+    return ObstoreCogDomain(
+        crs=_crs_or_none(level, url=url),
+        transform=transform,
+        shape=(int(level.count), height, width),
+        bounds=(min(xs), min(ys), max(xs), max(ys)),
+        res=res,
+        nodata=nodata,
+    )
 
 
 def _parse_nodata(raw: Any, dtype: np.dtype, *, url: str) -> float | int | None:
@@ -300,151 +367,30 @@ def _parse_nodata(raw: Any, dtype: np.dtype, *, url: str) -> float | int | None:
     return value
 
 
-def _geo_transform(geo_ifd: Any) -> Any:
-    """Full-resolution affine transform from an IFD's GeoTIFF tags.
-
-    Mirrors GDAL's ``GTiffDataset`` logic: a ``ModelTransformationTag``
-    wins when present; otherwise the first ``ModelTiepointTag`` +
-    ``ModelPixelScaleTag`` pair, honouring the raster-space tiepoint
-    ``(I, J)``. ``GTRasterTypeGeoKey = PixelIsPoint`` shifts the origin
-    by half a pixel up-left (GDAL default).
-
-    Raises:
-        ValueError: Neither a ModelTransformationTag nor a
-            ModelTiepointTag + ModelPixelScaleTag pair is present.
-    """
-    from rasterio.transform import Affine
-
-    matrix = getattr(geo_ifd, "model_transformation", None)
-    tiepoint = getattr(geo_ifd, "model_tiepoint", None)
-    pixel_scale = getattr(geo_ifd, "model_pixel_scale", None)
-    if matrix is not None and len(matrix) >= 8:
-        # Row-major 4x4: [a b 0 c; d e 0 f; 0 0 0 0; 0 0 0 1].
-        m = [float(v) for v in matrix]
-        transform = Affine(m[0], m[1], m[3], m[4], m[5], m[7])
-    elif tiepoint is not None and pixel_scale is not None:
-        i, j, _k, x, y, _z = (float(v) for v in list(tiepoint)[:6])
-        sx, sy = (float(v) for v in list(pixel_scale)[:2])
-        transform = Affine(sx, 0.0, x - i * sx, 0.0, -sy, y + j * sy)
-    else:
-        raise ValueError(
-            "ObstoreCogField: COG IFD lacks ModelTransformationTag and "
-            "ModelTiepointTag + ModelPixelScaleTag; cannot derive an affine "
-            "transform. Use RasterField (rasterio) for GCP-only or "
-            "non-georeferenced TIFFs."
-        )
-
-    raster_type = getattr(
-        getattr(geo_ifd, "geo_key_directory", None), "raster_type", None
-    )
-    if raster_type is not None and int(raster_type) == _RASTER_PIXEL_IS_POINT:
-        transform = transform * Affine.translation(-0.5, -0.5)
-    return transform
-
-
-def _build_domain(
-    ifd: Any, *, geo_ifd: Any = None, url: str = "<unknown>"
-) -> ObstoreCogDomain:
-    """Read transform, CRS and nodata for ``ifd``.
-
-    Args:
-        ifd: The IFD being read (full resolution or an overview).
-        geo_ifd: The IFD that carries the GeoTIFF tags — IFD 0 when
-            ``ifd`` is an overview (GDAL writes geo tags only on the
-            first IFD). Defaults to ``ifd`` itself.
-        url: The COG's URL, for error / warning messages.
-    """
-    from rasterio.transform import Affine
-
-    geo = ifd if geo_ifd is None else geo_ifd
-    width = int(ifd.image_width)
-    height = int(ifd.image_height)
-    samples = int(ifd.samples_per_pixel)
-
-    crs = _crs_from_geokeys(getattr(geo, "geo_key_directory", None))
-    transform = _geo_transform(geo)
-    if geo is not ifd:
-        # Overview: same footprint, coarser pixels (GDAL scales each axis
-        # by its own full-res / overview size ratio).
-        transform = transform * Affine.scale(
-            int(geo.image_width) / width, int(geo.image_height) / height
-        )
-
-    dtype = _dtype_from_ifd(ifd, url=url)
-    raw_nodata = getattr(ifd, "gdal_nodata", None)
-    if raw_nodata is None and geo is not ifd:
-        raw_nodata = getattr(geo, "gdal_nodata", None)
-    nodata = _parse_nodata(raw_nodata, dtype, url=url)
-
-    corners = [transform * (c, r) for c in (0, width) for r in (0, height)]
-    xs = [p[0] for p in corners]
-    ys = [p[1] for p in corners]
-    a, b, _c, d, e, _f = transform[:6]
-    if b == 0 and d == 0:
-        res = (abs(a), abs(e))
-    else:
-        res = (math.hypot(a, d), math.hypot(b, e))
-
-    return ObstoreCogDomain(
-        crs=crs,
-        transform=transform,
-        shape=(samples, height, width),
-        bounds=(min(xs), min(ys), max(xs), max(ys)),
-        res=res,
-        nodata=nodata,
-    )
-
-
-def _crs_from_geokeys(geo_keys: Any) -> Any:
-    """Best-effort CRS extraction from an async-tiff GeoKeyDirectory.
-
-    Handles the common cases: an EPSG ProjectedCSTypeGeoKey
-    (``projected_type``) or GeographicTypeGeoKey (``geographic_type``).
-    Falls back to ``None`` for exotic GeoTIFFs — with a
-    ``RuntimeWarning`` when an EPSG code was present but unusable, or
-    when the CRS is user-defined (code ``32767``: spelled out by
-    individual geokeys, which this reader does not reassemble) — so
-    the user can re-wrap with ``RasterField`` if needed.
-    """
-    from pyproj import CRS
-    from pyproj.exceptions import CRSError
-
-    if geo_keys is None:
-        return None
-    epsg = getattr(geo_keys, "projected_type", None) or getattr(
-        geo_keys, "geographic_type", None
-    )
-    if epsg is None:
-        return None
-    try:
-        code = int(epsg)
-    except (TypeError, ValueError):
-        code = None
-    if code == _GEOKEY_USER_DEFINED:
-        warnings.warn(
-            "ObstoreCogField: the COG declares a user-defined CRS "
-            f"(geokey {_GEOKEY_USER_DEFINED}); building it from the individual "
-            "geokeys is not supported, so domain.crs will be None. Use "
-            "RasterField (rasterio) to read it with its full CRS.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return None
-    try:
-        return CRS.from_epsg(int(epsg))
-    except (TypeError, ValueError, CRSError) as exc:
-        warnings.warn(
-            f"ObstoreCogField: could not build a CRS from GeoTIFF key "
-            f"EPSG:{epsg!r} ({exc}); domain.crs will be None.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return None
-
-
 # ---------------------------------------------------------------------------
 # Field
 # ---------------------------------------------------------------------------
+
+
+def _level_for_ifd(geotiff: Any, ifd_index: int, ifd: Any, *, url: str) -> Any:
+    """The async-geotiff level (`GeoTIFF` or `Overview`) for raw IFD ``ifd_index``.
+
+    ``ifd_index`` keeps counting raw TIFF IFDs (masks included), so
+    pickled fields and `PatchCache` identities stay stable; upstream
+    keys overviews by their pixel size.
+
+    Raises:
+        ValueError: ``ifd`` is not IFD 0 and matches no overview.
+    """
+    if ifd_index == 0:
+        return geotiff
+    size = (int(ifd.image_width), int(ifd.image_height))
+    for overview in geotiff.overviews:
+        if (int(overview.width), int(overview.height)) == size:
+            return overview
+    raise ValueError(
+        f"ObstoreCogField: IFD {ifd_index} of {url!r} is not an overview of IFD 0."
+    )
 
 
 def _store_identity(store: Any) -> str | None:
@@ -481,8 +427,9 @@ class ObstoreCogField:
     Open via :meth:`from_url`; constructor takes the parsed handles.
     ``select`` / ``select_many`` return `georeader.GeoTensor` chips with
     the window's transform, the CRS and the COG's nodata as
-    ``fill_value_default``; out-of-image pixels are filled with it.
-    The field pickles by URL (see ``__reduce__``).
+    ``fill_value_default``; out-of-image pixels, and pixels the COG's
+    internal mask marks invalid, are filled with it. The field pickles
+    by URL (see ``__reduce__``).
 
     Note:
         Lossless codecs match ``rasterio.read`` exactly. JPEG tiles are
@@ -491,8 +438,10 @@ class ObstoreCogField:
 
     Args:
         url: Cloud URI the COG was opened from.
-        tiff: Parsed ``async_tiff.TIFF`` handle.
-        ifd: The selected ``async_tiff.ImageFileDirectory``.
+        level: The ``async_geotiff.GeoTIFF`` (``ifd_index`` 0) or
+            ``async_geotiff.Overview`` being read.
+        ifd: The selected ``async_tiff.ImageFileDirectory``
+            (``level.ifd``).
         domain: I/O-free metadata twin (see `ObstoreCogDomain`).
         timeout: Per-network-operation deadline in seconds for tile
             fetch + decode batches (`select` / `select_many`). ``None``
@@ -507,10 +456,12 @@ class ObstoreCogField:
             if any (``None`` = the process-global pool). Recorded for
             pickling; obstore stores pickle by configuration.
         path: Object key inside ``store`` (only with an explicit store).
+        dtype: Pixel dtype (``None`` = derived from ``level``'s parent
+            GeoTIFF by :meth:`from_url`).
     """
 
     url: str
-    tiff: Any  # async_tiff.TIFF
+    level: Any  # async_geotiff.GeoTIFF | async_geotiff.Overview
     ifd: Any  # async_tiff.ImageFileDirectory
     domain: ObstoreCogDomain
     timeout: float | None = 120.0
@@ -518,6 +469,7 @@ class ObstoreCogField:
     storage_options: dict[str, Any] | None = None
     store: Any = None
     path: str | None = None
+    dtype: Any = None
 
     @classmethod
     def from_url(
@@ -559,12 +511,13 @@ class ObstoreCogField:
         Raises:
             ImportError: ``[obstore-cog]`` extra missing.
             ValueError: COG is striped (not tiled), ``ifd_index`` names
-                a mask IFD, or the GeoTIFF tags needed to derive an
-                affine transform are missing.
+                a mask IFD or no IFD, the file carries no GeoTIFF keys,
+                or the tags needed to derive an affine transform or a
+                dtype are missing.
             TimeoutError: Opening the COG took longer than ``timeout``
                 seconds.
         """
-        async_tiff = _require_async_tiff()
+        async_geotiff = _require_async_geotiff()
 
         explicit_store = store
         if store is None:
@@ -582,13 +535,17 @@ class ObstoreCogField:
 
         async def _open() -> Any:
             return await _with_timeout(
-                async_tiff.TIFF.open(object_path, store=store),
+                async_geotiff.GeoTIFF.open(object_path, store=store),
                 timeout=timeout,
                 message=f"opening COG {url!r}",
             )
 
-        tiff = _run_coroutine_safely(_open())
-        ifd = tiff.ifd(ifd_index)
+        with warnings.catch_warnings():
+            # Upstream only warns on striped TIFFs; the tiled check below
+            # raises with a clearer message.
+            warnings.filterwarnings("ignore", "Striped GeoTIFFs", UserWarning)
+            geotiff = _run_coroutine_safely(_open())
+        ifd = geotiff.tiff.ifd(ifd_index)
         if ifd.tile_width is None or ifd.tile_height is None:
             raise ValueError(
                 "ObstoreCogField: COG must be tiled (TileWidth + TileLength); "
@@ -600,18 +557,19 @@ class ObstoreCogField:
                 f"ObstoreCogField: IFD {ifd_index} of {url!r} is a "
                 "transparency mask, not image data."
             )
-        geo_ifd = tiff.ifd(0) if ifd_index != 0 else None
-        domain = _build_domain(ifd, geo_ifd=geo_ifd, url=url)
+        level = _level_for_ifd(geotiff, ifd_index, ifd, url=url)
+        domain = _build_domain(level, geotiff, url=url)
         return cls(
             url=url,
-            tiff=tiff,
-            ifd=ifd,
+            level=level,
+            ifd=level.ifd,
             domain=domain,
             timeout=timeout,
             ifd_index=ifd_index,
             storage_options=storage_options,
             store=explicit_store,
             path=path if explicit_store is not None else None,
+            dtype=_dtype(geotiff, url=url),
         )
 
     def __reduce__(self) -> tuple[Any, tuple[Any, ...]]:
@@ -737,12 +695,13 @@ class ObstoreCogField:
         return self.select_many([window])[0]
 
     def select_many(self, windows: list[Window]) -> list[GeoTensor]:
-        """Bulk-read every window via one batched tile fetch.
+        """Bulk-read every window, fetching each overlapping tile once.
 
         The headline path: collect every unique tile coordinate
-        across all windows, dispatch a single ``ifd.fetch_tiles``
-        call, then assemble per-window arrays by cropping each
-        decoded tile to its window's intersection.
+        across all windows, fetch + decode them in concurrent groups
+        (see `_fetch_and_decode_tiles`), then assemble per-window
+        arrays by cropping each decoded tile to its window's
+        intersection.
 
         Args:
             windows: Sequence of ``rasterio.windows.Window`` to read.
@@ -790,12 +749,9 @@ class ObstoreCogField:
                     tile_coords[(tx, ty)] = None
 
         coord_list = list(tile_coords.keys())
-        # Reference the IFD attribute via a local so a monkeypatched
-        # ``ifd.fetch_tiles`` (test hook) is picked up correctly.
-        ifd = self.ifd
         decoded = _run_coroutine_safely(
             _with_timeout(
-                _fetch_and_decode_tiles(ifd, coord_list),
+                _fetch_and_decode_tiles(self.level, coord_list),
                 timeout=self.timeout,
                 message=(
                     f"fetching/decoding a batch of {len(coord_list)} tiles "
@@ -808,11 +764,11 @@ class ObstoreCogField:
             zip(coord_list, decoded, strict=True)
         )
 
-        # Derive (bands, dtype) from the IFD so the empty-tile-range
+        # Derive (bands, dtype) from the metadata so the empty-tile-range
         # path (window entirely outside the image) returns an array of
         # the right shape/dtype even when no tile was fetched.
-        bands = int(self.ifd.samples_per_pixel)
-        dtype = _dtype_from_ifd(self.ifd, url=self.url)
+        bands = int(self.domain.shape[0])
+        dtype = np.dtype(self.dtype)
         fill = self.fill_value_default
 
         results: list[GeoTensor] = []
@@ -930,45 +886,39 @@ def _tile_range_for_window(
 
 
 async def _fetch_and_decode_tiles(
-    ifd: Any, coords: list[tuple[int, int]]
+    level: Any, coords: list[tuple[int, int]]
 ) -> list[np.ndarray]:
-    """One batched fetch + per-tile async decode.
+    """Fetch + decode ``coords`` in concurrent groups of adjacent tiles.
 
-    ``ifd.fetch_tiles(xy)`` pipelines all tile range requests over the
-    pooled HTTP/2 connection — this is where the wall-clock win lives.
-    Decode is per-tile because async-tiff's decoder API takes one tile
-    at a time; we ``asyncio.gather`` the decodes so they overlap.
+    The (already de-duplicated) tiles are sorted row-major — the order
+    COGs store them in — and split into groups of ``_TILES_PER_FETCH``.
+    Each group is one upstream ``fetch_tiles`` call, which coalesces
+    the group's contiguous byte ranges and decodes on async-tiff's
+    thread pool; the groups run concurrently. Tiles come back
+    band-first ``(bands, H, W)`` whatever the planar configuration.
 
-    async-tiff returns pixel-interleaved tiles (``PlanarConfiguration``
-    1) as ``(H, W, samples)`` and band-interleaved ones (2) already
-    band-first as ``(samples, H, W)``; only the former is transposed,
-    so every tile lands band-first for the assembly step.
-
-    Raises:
-        ValueError: A decoded tile's band count disagrees with the
-            IFD's ``SamplesPerPixel``.
+    Returns:
+        One array per entry of ``coords``, in ``coords`` order. Where the
+        COG has an internal mask the array is a `numpy.ma.MaskedArray`
+        whose masked pixels the assembly step fills.
     """
     if not coords:
         return []
-    planar = int(getattr(ifd, "planar_configuration", None) or 1)
-    samples = int(getattr(ifd, "samples_per_pixel", 1) or 1)
-    tiles = await ifd.fetch_tiles(coords)
-    decoded = await asyncio.gather(*(t.decode() for t in tiles))
-    out: list[np.ndarray] = []
-    for d in decoded:
-        arr = np.asarray(d)
-        if arr.ndim == 2:
-            arr = arr[np.newaxis]
-        elif arr.ndim == 3 and planar == 1:
-            # Chunky: (H, W, samples) → (samples, H, W).
-            arr = np.transpose(arr, (2, 0, 1))
-        if arr.ndim != 3 or arr.shape[0] != samples:
-            raise ValueError(
-                f"ObstoreCogField: decoded tile has shape {arr.shape}, expected "
-                f"{samples} band(s) (PlanarConfiguration={planar})."
-            )
-        out.append(arr)
-    return out
+    ordered = sorted(coords, key=lambda xy: (xy[1], xy[0]))
+    groups = [
+        ordered[i : i + _TILES_PER_FETCH]
+        for i in range(0, len(ordered), _TILES_PER_FETCH)
+    ]
+    batches = await asyncio.gather(*(level.fetch_tiles(group) for group in groups))
+    by_coord: dict[tuple[int, int], np.ndarray] = {}
+    for tile in (t for batch in batches for t in batch):
+        data = np.asarray(tile.array.data)
+        valid = tile.array.mask
+        if valid is not None:
+            # async-geotiff masks are True where valid.
+            data = np.ma.MaskedArray(data, mask=np.broadcast_to(~valid, data.shape))
+        by_coord[(tile.x, tile.y)] = data
+    return [by_coord[xy] for xy in coords]
 
 
 def _assemble_window(
@@ -989,15 +939,16 @@ def _assemble_window(
 ) -> np.ndarray:
     """Crop the relevant tiles into a single window-shaped array.
 
-    ``bands`` and ``dtype`` come from the IFD via :func:`_dtype_from_ifd`
-    + ``samples_per_pixel``, so the empty-tile-range fallback (window
+    ``bands`` and ``dtype`` come from the domain and :func:`_dtype`,
+    so the empty-tile-range fallback (window
     entirely outside the image) returns an array of the right shape
     even when no tile was decoded — preserving the documented
     ``(bands, h, w)`` contract regardless of batch composition.
 
     Copies are clamped to the image extent: edge tiles are stored at
     full tile size, and their padding past the image edge must not leak
-    into the window — those pixels keep ``fill`` (the nodata value).
+    into the window — those pixels keep ``fill`` (the nodata value), as
+    do pixels masked invalid in a `numpy.ma.MaskedArray` tile.
     """
     col_off, row_off, w, h = window
     out = np.full((bands, h, w), fill, dtype=dtype)
@@ -1032,7 +983,8 @@ def _assemble_window(
             dst_r0 = inter_row_start - row_off
             dst_c1 = inter_col_end - col_off
             dst_r1 = inter_row_end - row_off
-            out[..., dst_r0:dst_r1, dst_c0:dst_c1] = tile[
-                ..., src_r0:src_r1, src_c0:src_c1
-            ]
+            block = tile[..., src_r0:src_r1, src_c0:src_c1]
+            if isinstance(block, np.ma.MaskedArray):
+                block = block.filled(fill)
+            out[..., dst_r0:dst_r1, dst_c0:dst_c1] = block
     return out

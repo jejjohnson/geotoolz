@@ -244,6 +244,22 @@ wheels = [
 ]
 
 [[package]]
+name = "async-geotiff"
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "affine" },
+    { name = "async-tiff" },
+    { name = "defusedxml" },
+    { name = "numpy" },
+    { name = "pyproj" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5b/51/3ccc7adc768b2e704917c06382ef013401b87e0e0433033580e781d3d647/async_geotiff-0.5.1.tar.gz", hash = "sha256:673e7694a6d8a39a863215e9b1b1761b2b54e2555217c65f53d0042e8eda3e30", size = 26691, upload-time = "2026-05-18T18:13:54.711Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/b9/c348b19ab3845e177f08f51965db4b70ecd0563b114dbc5dcc4971b20cf9/async_geotiff-0.5.1-py3-none-any.whl", hash = "sha256:68a30a2f131f2dca95fb256c497afd25a8238098be37e068dfa96150a10a381c", size = 34031, upload-time = "2026-05-18T18:13:52.172Z" },
+]
+
+[[package]]
 name = "async-tiff"
 version = "0.7.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1667,11 +1683,11 @@ obstore = [
     { name = "obstore" },
 ]
 obstore-cog = [
-    { name = "async-tiff" },
+    { name = "async-geotiff" },
     { name = "obstore" },
 ]
 patch-full = [
-    { name = "async-tiff" },
+    { name = "async-geotiff" },
     { name = "dask" },
     { name = "geopandas" },
     { name = "jax" },
@@ -1727,8 +1743,8 @@ typecheck = [
 
 [package.metadata]
 requires-dist = [
-    { name = "async-tiff", marker = "extra == 'obstore-cog'", specifier = ">=0.7" },
-    { name = "async-tiff", marker = "extra == 'patch-full'", specifier = ">=0.7" },
+    { name = "async-geotiff", marker = "extra == 'obstore-cog'", specifier = ">=0.5,<0.6" },
+    { name = "async-geotiff", marker = "extra == 'patch-full'", specifier = ">=0.5,<0.6" },
     { name = "dask", extras = ["bag"], marker = "extra == 'dask'", specifier = ">=2024.8.3" },
     { name = "dask", extras = ["bag"], marker = "extra == 'patch-full'", specifier = ">=2024.8.3" },
     { name = "geopandas", marker = "extra == 'patch-full'", specifier = ">=0.14" },

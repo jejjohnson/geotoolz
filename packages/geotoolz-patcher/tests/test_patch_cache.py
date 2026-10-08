@@ -364,7 +364,7 @@ def test_band_subset_and_reprojection_keys_differ(tmp_path) -> None:
 
 def test_obstore_cog_identity_covers_store_path_and_ifd(tmp_path) -> None:
     pytest.importorskip("obstore")
-    pytest.importorskip("async_tiff")
+    pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
     from rasterio.enums import Resampling
 
@@ -670,7 +670,7 @@ def test_multi_file_identity_tracks_every_path(tmp_path) -> None:
 
 def test_obstore_object_overwrite_changes_identity(tmp_path) -> None:
     pytest.importorskip("obstore")
-    pytest.importorskip("async_tiff")
+    pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
 
     from geopatcher.fields import ObstoreCogField
@@ -774,7 +774,7 @@ def test_structured_dtype_metadata_is_refused(tmp_path) -> None:
 def test_memory_store_needs_explicit_field_id(tmp_path) -> None:
     """A MemoryStore's contents live only in that instance: no auto identity."""
     pytest.importorskip("obstore")
-    pytest.importorskip("async_tiff")
+    pytest.importorskip("async_geotiff")
     from obstore.store import MemoryStore
 
     from geopatcher.fields import ObstoreCogField
@@ -878,7 +878,7 @@ def test_pooled_cog_identity_covers_storage_options(tmp_path, monkeypatch) -> No
     import dataclasses
 
     pytest.importorskip("obstore")
-    pytest.importorskip("async_tiff")
+    pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
 
     from geopatcher.fields import ObstoreCogField
@@ -935,7 +935,7 @@ def test_failed_unlink_keeps_entry_tracked(tmp_path, monkeypatch) -> None:
 
 def _local_cog(tmp_path: Path) -> Any:
     pytest.importorskip("obstore")
-    pytest.importorskip("async_tiff")
+    pytest.importorskip("async_geotiff")
     from obstore.store import LocalStore
 
     from geopatcher.fields import ObstoreCogField

@@ -56,7 +56,7 @@ pip install 'geotoolz-patcher[streaming]'          # disk-backed OverlapAdd
 pip install 'geotoolz-patcher[dask]'               # DaskField, geopatcher.dask helpers
 pip install 'geotoolz-patcher[jax]'                # geopatcher.jax batched splitting
 pip install 'geotoolz-patcher[obstore]'            # geopatcher.objstore client pool
-pip install 'geotoolz-patcher[obstore-cog]'        # ObstoreCogField (pool + async-tiff)
+pip install 'geotoolz-patcher[obstore-cog]'        # ObstoreCogField (pool + async-geotiff)
 pip install 'geotoolz-patcher[patch-full]'         # all of the above
 pip install 'geotoolz-patcher[pipekit]'            # pipekit operator-graph bridge
 ```

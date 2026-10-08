@@ -1,6 +1,6 @@
-"""Tests for ``ObstoreCogField`` — COG reads via obstore + async-tiff.
+"""Tests for ``ObstoreCogField`` — COG reads via obstore + async-geotiff.
 
-Skipped unless both the ``obstore`` and ``async-tiff`` extras are
+Skipped unless both the ``obstore`` and ``async-geotiff`` extras are
 installed (the ``[obstore-cog]`` extra). The tests write a small
 tiled GeoTIFF to a tempdir, point an obstore ``LocalStore`` at it,
 and exercise the full read path — including the batched
@@ -17,6 +17,7 @@ import functools
 import http.server
 import pickle
 import threading
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +31,7 @@ from rasterio.windows import Window
 
 
 pytest.importorskip("obstore")
-pytest.importorskip("async_tiff")
+pytest.importorskip("async_geotiff")
 
 from georeader.geotensor import GeoTensor
 from obstore.store import LocalStore
@@ -514,6 +515,68 @@ def test_model_transformation(tmp_path: Path):
         assert field.domain.res == pytest.approx(src.res)
         assert field.domain.bounds == pytest.approx(tuple(src.bounds))
     _assert_matches_rasterio(field, path, Window(3, 5, 20, 17))
+
+
+def test_internal_mask_matches_masked_rasterio_read(tmp_path: Path):
+    """Pixels the internal mask marks invalid read as nodata, like GDAL."""
+    path = tmp_path / "mask.tif"
+    valid = np.full((_H, _W), 255, dtype=np.uint8)
+    valid[:20, :25] = 0
+    with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True):
+        _write_cog(path, _ramp(2), nodata=None)
+        with rasterio.open(path, "r+") as dst:
+            dst.write_mask(valid)
+    field = _open(path)
+    chip = field.select(Window(0, 0, _W, _H))
+    with rasterio.open(path) as src:
+        masked = src.read(masked=True)
+    np.testing.assert_array_equal(chip.values, masked.filled(0))
+    assert (chip.values[:, :20, :25] == 0).all()
+
+
+@pytest.mark.parametrize(
+    "crs",
+    [
+        "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +R=6371007.181 +units=m +no_defs",
+        "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80",
+    ],
+    ids=["sinusoidal", "laea"],
+)
+def test_user_defined_crs(tmp_path: Path, crs: str):
+    """A CRS spelled out in geokeys (no EPSG code) is reconstructed."""
+    path = _write_cog(tmp_path / "udef.tif", _ramp(1), crs=crs)
+    field = _open(path)
+    with rasterio.open(path) as src:
+        assert src.crs.to_epsg() is None
+        assert rasterio.crs.CRS.from_user_input(field.domain.crs) == src.crs
+    _assert_matches_rasterio(field, path, Window(3, 5, 20, 17))
+
+
+def test_unbuildable_crs_warns_instead_of_failing(tmp_path: Path):
+    """A user-defined datum upstream cannot express must not fail the open."""
+    wkt = (
+        'PROJCS["custom_lcc",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",'
+        '6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",'
+        '0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic_2SP"],'
+        'PARAMETER["standard_parallel_1",33],PARAMETER["standard_parallel_2",45],'
+        'PARAMETER["latitude_of_origin",39],PARAMETER["central_meridian",-96],'
+        'PARAMETER["false_easting",0],PARAMETER["false_northing",0],'
+        'UNIT["metre",1]]'
+    )
+    path = _write_cog(tmp_path / "lcc.tif", _ramp(1), crs=wkt)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        field = _open(path)
+    if field.domain.crs is None:
+        assert any("could not build the CRS" in str(w.message) for w in caught)
+    else:
+        with rasterio.open(path) as src:
+            assert rasterio.crs.CRS.from_user_input(field.domain.crs) == src.crs
+    with rasterio.open(path) as src:
+        assert field.domain.transform.almost_equals(src.transform, precision=1e-9)
+        np.testing.assert_array_equal(
+            field.select(Window(0, 0, _W, _H)).values, src.read()
+        )
 
 
 @pytest.mark.parametrize("interleave", ["pixel", "band"])

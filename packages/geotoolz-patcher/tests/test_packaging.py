@@ -35,7 +35,7 @@ SRC = PACKAGE_ROOT / "src" / "geopatcher"
 PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
 
 IMPORT_TO_DIST = {
-    "async_tiff": "async-tiff",
+    "async_geotiff": "async-geotiff",
     "georeader": "georeader-spaceml",
     "typing_extensions": "typing-extensions",
 }
@@ -167,7 +167,7 @@ def test_scanner_sees_known_imports() -> None:
     for expected in ("numpy", "georeader", "rasterio"):
         assert expected in module_scope, expected
     used = _used_distributions()
-    for lazy in ("xarray", "zarr", "jax", "async-tiff", "pipekit", "pyproj"):
+    for lazy in ("xarray", "zarr", "jax", "async-geotiff", "pipekit", "pyproj"):
         assert lazy in used, lazy
         assert lazy not in {_dist(r) for r in module_scope}, lazy
 
@@ -314,9 +314,9 @@ def _streaming_writer() -> None:
 
 
 def _obstore_cog() -> None:
-    from geopatcher._src.fields.obstore_cog import _require_async_tiff
+    from geopatcher._src.fields.obstore_cog import _require_async_geotiff
 
-    _require_async_tiff()
+    _require_async_geotiff()
 
 
 @pytest.mark.parametrize(
@@ -326,7 +326,7 @@ def _obstore_cog() -> None:
         ("dask", ("dask",), _dask_delayed),
         ("obstore", ("obstore",), _obstore_pool),
         ("streaming", ("zarr",), _streaming_writer),
-        ("obstore-cog", ("async_tiff",), _obstore_cog),
+        ("obstore-cog", ("async_geotiff",), _obstore_cog),
     ],
 )
 def test_missing_extra_error_names_the_distribution(
