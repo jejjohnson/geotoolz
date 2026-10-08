@@ -39,8 +39,8 @@ from georeader.rasterize import rasterize_from_geopandas, rasterize_geopandas_li
 from shapely.geometry import Point, box
 from shapely.geometry.base import BaseGeometry
 
+from geoproducts._src.query import validate_lonlat_bbox
 from geoproducts.carbonmapper.api_queries import CMTileItem
-from geoproducts.carbonmapper.download import _validate_bbox
 from geoproducts.carbonmapper.products import rio_env_options_for
 from geoproducts.carbonmapper.source import CMSource
 
@@ -336,7 +336,7 @@ class CMSourceRaster:
             ValueError: If the bbox is malformed or crosses the
                 antimeridian (``W > E``) — split such windows in two.
         """
-        _validate_bbox(bounds_4326)
+        validate_lonlat_bbox(bounds_4326)
         return self.read_polygon(box(*bounds_4326))
 
     def read_window_to_crs(

@@ -63,6 +63,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
+from geoproducts._src.net import bearer_headers_for as _bearer_headers_for
 from geoproducts.carbonmapper.download import _request
 
 
@@ -550,10 +551,7 @@ def bearer_headers_for(url: str, token: str | None) -> dict[str, str]:
     Returns:
         ``{"Authorization": "Bearer …"}`` or an empty dict.
     """
-    parts = urlsplit(str(url))
-    if not token or parts.scheme != "https" or parts.hostname != _BEARER_HOST:
-        return {}
-    return {"Authorization": f"Bearer {token}"}
+    return _bearer_headers_for(url, token, host=_BEARER_HOST)
 
 
 def rio_env_options_for(path: str, token: str | None) -> dict[str, Any] | None:

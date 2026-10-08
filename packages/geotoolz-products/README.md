@@ -79,7 +79,7 @@ from pathlib import Path
 
 from georeader.geotensor import GeoTensor
 
-from geoproducts import goes
+from geoproducts import goes, stack
 from geoproducts.goes import aws
 
 files: list[aws.ABIFile] = aws.list_files(
@@ -97,7 +97,7 @@ bt: GeoTensor = reader.read_from_bounds(
 cmi: goes.L2Reader = goes.L2Reader(mcmip_path)                # (16, 500, 500) C01 … C16, calibrated
 acm: goes.L2Reader = goes.L2Reader(acm_path)                  # (2, 500, 500) uint8 BCM, ACM
 acha: goes.L2Reader = goes.L2Reader(acha_path)                # (1, 250, 250) cloud-top height, 4 km
-scene: GeoTensor = goes.stack([cmi, acm, acha])               # (19, 500, 500) on one grid
+scene: GeoTensor = stack([cmi, acm, acha])               # (19, 500, 500) on one grid
 rgb: GeoTensor = goes.DayCloudPhase()(scene)                  # (3, 500, 500) float32 in [0, 1]
 ```
 

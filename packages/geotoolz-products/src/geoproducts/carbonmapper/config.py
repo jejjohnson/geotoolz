@@ -40,14 +40,18 @@ References
 
 from __future__ import annotations
 
-import base64
-import json
 import logging
 import os
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
+
+from geoproducts._src.credentials import (
+    auth_path,
+    jwt_expiry,
+    read_json_config,
+    write_private_json,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -60,7 +64,7 @@ logger = logging.getLogger(__name__)
 #: per provider.
 #: Used by :meth:`CarbonMapperConfig.save` and :meth:`CarbonMapperConfig.reset`,
 #: and is the first entry in :data:`CONFIG_SEARCH_PATHS`.
-DEFAULT_SAVE_PATH: Path = Path.home() / ".geoproducts" / "auth_carbonmapper.json"
+DEFAULT_SAVE_PATH: Path = auth_path("carbonmapper")
 
 #: Search order, first-match-wins. The canonical path is checked first;
 #: legacy paths are kept so users who already configured them continue
@@ -89,22 +93,6 @@ _PLACEHOLDER_PASSWORD = "SET-PASSWORD"
 TOKEN_EXPIRY_MARGIN_S = 60.0
 
 
-def _jwt_expiry(token: str) -> float | None:
-    """The ``exp`` claim (Unix seconds) of a JWT, or ``None`` if ``token``
-    isn't a JWT with a numeric ``exp``. Decodes the payload only — no
-    signature check; the API validates the token itself."""
-    parts = token.split(".")
-    if len(parts) != 3:
-        return None
-    payload = parts[1] + "=" * (-len(parts[1]) % 4)
-    try:
-        claims = json.loads(base64.urlsafe_b64decode(payload))
-    except (ValueError, TypeError):
-        return None
-    exp = claims.get("exp") if isinstance(claims, dict) else None
-    return float(exp) if isinstance(exp, (int, float)) else None
-
-
 def _create_placeholder_config() -> Path:
     """Write a stub config file to :data:`DEFAULT_SAVE_PATH` if missing.
 
@@ -115,21 +103,13 @@ def _create_placeholder_config() -> Path:
     dest = DEFAULT_SAVE_PATH.expanduser().resolve()
     if dest.exists():
         return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
     placeholder = {
         "email": _PLACEHOLDER_EMAIL,
         "password": _PLACEHOLDER_PASSWORD,
         "token": None,
     }
-    dest.write_text(json.dumps(placeholder, indent=2))
-    try:
-        os.chmod(dest, 0o600)
-    except (PermissionError, OSError) as exc:
-        logger.warning(
-            "Created placeholder config at %s but couldn't set 0o600 perms: %s",
-            dest,
-            exc,
-        )
+    # Owner-only from the first byte, like every saved credentials file.
+    write_private_json(dest, placeholder)
     logger.warning(
         "Carbon Mapper credentials not configured. Created placeholder "
         "at %s — edit it with your Carbon Mapper email + password "
@@ -252,9 +232,7 @@ class CarbonMapperConfig:
         --------
         >>> cfg = CarbonMapperConfig.from_file("~/.geoproducts/auth_carbonmapper.json")
         """
-        path = Path(path).expanduser().resolve()
-        with path.open() as fh:
-            data: dict[str, Any] = json.load(fh)
+        data = read_json_config(Path(path).expanduser().resolve())
         token = data.pop("token", None)
         email = data.pop("email", None) or data.pop("username", None)
         password = data.pop("password", None)
@@ -407,7 +385,6 @@ class CarbonMapperConfig:
             dest = Path(path).expanduser().resolve()
         else:
             dest = DEFAULT_SAVE_PATH.expanduser().resolve()
-        dest.parent.mkdir(parents=True, exist_ok=True)
         data: dict[str, Any] = {**self.extra}
         if self.token is not None:
             data["token"] = self.token
@@ -415,17 +392,10 @@ class CarbonMapperConfig:
             data["email"] = self.email
         if self.password is not None:
             data["password"] = self.password
-        # Write through a temp file that `mkstemp` creates with mode 0600,
-        # then rename it over `dest`: the credentials are never readable by
-        # other users, not even briefly, and a crash leaves no torn file.
-        fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.")
-        try:
-            with os.fdopen(fd, "w") as fh:
-                fh.write(json.dumps(data, indent=2))
-            os.replace(tmp, dest)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        # Owner-only (0600) from the first byte, renamed into place: the
+        # credentials are never readable by other users, not even briefly,
+        # and a crash leaves no torn file.
+        write_private_json(dest, data)
         logger.info("Carbon Mapper config saved to %s", dest)
         return dest
 
@@ -489,7 +459,7 @@ class CarbonMapperConfig:
         """
         if not self.token:
             return None
-        expiry = _jwt_expiry(self.token)
+        expiry = jwt_expiry(self.token)
         if expiry is None or expiry - time.time() > TOKEN_EXPIRY_MARGIN_S:
             return self.token
 

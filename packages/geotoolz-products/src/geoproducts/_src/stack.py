@@ -1,10 +1,10 @@
-"""Put several ABI readers on one grid.
+"""Put several readers on one grid.
 
-ABI ships one channel per L1b file, each at its own native resolution
-(0.5, 1 or 2 km), and L2 products at their own (2, 4 or 10 km). Most
-analyses want them stacked on a single grid; :func:`stack` reads each
-reader only over the target area and warps it onto the reference grid
-with georeader, without the operator library.
+Sensors ship bands at different resolutions (GOES ABI: one channel per
+file at 0.5, 1 or 2 km, L2 products at 2, 4 or 10 km), and analyses mix
+products from several readers. :func:`stack` reads each reader only over
+the target area and warps it onto a reference grid with georeader, without
+the operator library.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from georeader.abstract_reader import GeoData
 from georeader.geotensor import GeoTensor
 from rasterio.enums import Resampling
 
-from geoproducts.goes._src.base import ABIFile
+from geoproducts._src.base import ProductReader
 
 
 __all__ = ["stack"]
@@ -41,8 +41,8 @@ def stack(
     carries them).
 
     Args:
-        readers: Readers to stack (``goes.Reader``, ``goes.L2Reader`` or
-            any georeader ``GeoData``).
+        readers: Readers to stack (any ``ProductReader`` — ``goes.Reader``,
+            ``goes.L2Reader``, … — or any georeader ``GeoData``).
         bounds: ``(minx, miny, maxx, maxy)`` area to read. Default: the
             reference reader's whole extent.
         crs_bounds: CRS of ``bounds``, e.g. ``"EPSG:4326"``. Default: the
@@ -67,8 +67,8 @@ def stack(
 
             blue, red, veggie = (goes.Reader(p, calibration="reflectance")
                                  for p in (c01_path, c02_path, c03_path))
-            rgb_in = goes.stack([blue, red, veggie], bounds=aoi,
-                                crs_bounds="EPSG:4326")  # (3, h, w) C01 C02 C03
+            rgb_in = geoproducts.stack([blue, red, veggie], bounds=aoi,
+                                       crs_bounds="EPSG:4326")  # (3, h, w)
     """
     if not readers:
         raise ValueError("stack needs at least one reader.")
@@ -105,7 +105,7 @@ def _auto_resampling(reader: GeoData, ref_res: float) -> str:
 
 def _reader_attrs(reader: GeoData) -> dict[str, Any]:
     """Per-band attrs of a reader (georeader's warp drops ``attrs``)."""
-    if isinstance(reader, ABIFile):
+    if isinstance(reader, ProductReader):
         return {"band_names": reader.bands, **reader._band_attrs()}
     bands = getattr(reader, "bands", None)
     return {"band_names": tuple(bands)} if bands else {}

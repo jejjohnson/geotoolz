@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from geoproducts._src.extras import missing_extra
+from geoproducts._src.extras import require
 from geoproducts.toy_sensor import constants
 
 
@@ -24,11 +24,8 @@ def NDVI() -> Operator:
     Raises:
         ImportError: geotoolz is not installed (the ``[operators]`` extra).
     """
-    try:
-        from geotoolz.indices import NDVI as _NDVI
-    except ImportError as exc:
-        raise missing_extra("toy_sensor.presets.NDVI", "operators") from exc
-    return _NDVI(red=constants.BAND_RED, nir=constants.BAND_NIR)
+    indices = require("geotoolz.indices", "toy_sensor.presets.NDVI", "operators")
+    return indices.NDVI(red=constants.BAND_RED, nir=constants.BAND_NIR)
 
 
 __all__ = ["NDVI"]

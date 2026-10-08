@@ -6,7 +6,6 @@
 - ``L2Reader`` — any L2 product (clear sky mask, cloud-top height, LST,
   fire, stability indices, MCMIP with all 16 channels, …) on the same grid.
 - ``QualityReader`` — the ``DQF`` quality flags (``reader.quality``).
-- ``stack`` — several readers on one grid, without the operator library.
 - ``aws`` — list and download files from NOAA's public buckets
   (standard library only, no credentials).
 - ``recipes`` — the standard ABI RGB recipes (true colour, natural
@@ -35,7 +34,6 @@ from geoproducts.goes.presets import (
     SyntheticGreen,
     TrueColor,
 )
-from geoproducts.goes.scene import stack
 
 
 def __getattr__(name: str) -> Any:
@@ -62,5 +60,4 @@ __all__ = [
     "constants",
     "presets",
     "recipes",
-    "stack",
 ]

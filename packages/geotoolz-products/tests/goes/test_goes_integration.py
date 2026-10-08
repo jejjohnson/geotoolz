@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from rasterio.warp import transform as warp_transform
 
-from geoproducts import goes
+from geoproducts import goes, stack
 from geoproducts.goes import aws, constants
 
 
@@ -196,7 +196,7 @@ def test_cloud_top_height_stacks_onto_the_imagery_grid(
     height = goes.L2Reader(l2_downloads["ACHA"])
     assert height.shape == (1, 250, 250)  # 4 km product
     mask = goes.L2Reader(l2_downloads["ACM"], variables="BCM")
-    scene = goes.stack([imagery, mask, height])
+    scene = stack([imagery, mask, height])
     assert scene.shape == (18, 500, 500)
     assert scene.attrs["band_names"][-2:] == ("BCM", "HT")
     ht = np.asarray(scene)[-1]

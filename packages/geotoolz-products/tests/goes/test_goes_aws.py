@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import urllib.error
 import urllib.parse
+import urllib.request
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -74,7 +75,7 @@ def _http_error(url: str, code: int, body: bytes = b"") -> urllib.error.HTTPErro
 def fake_s3(monkeypatch: pytest.MonkeyPatch):
     def install(pages=None, bodies=None) -> FakeS3:
         fake = FakeS3(pages or {}, bodies or {})
-        monkeypatch.setattr(aws.urllib.request, "urlopen", fake.urlopen)
+        monkeypatch.setattr(urllib.request, "urlopen", fake.urlopen)
         return fake
 
     return install
@@ -235,7 +236,7 @@ class TestDownload:
             def read(self, *args):
                 raise OSError("connection reset")
 
-        monkeypatch.setattr(aws.urllib.request, "urlopen", lambda *a, **k: Broken())
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: Broken())
         with pytest.raises(OSError, match="connection reset"):
             aws.download(RADC, tmp_path)
         assert list(tmp_path.iterdir()) == []
@@ -256,7 +257,7 @@ class TestRetries:
                 raise failures.pop(0)
             return io.BytesIO(b"payload")
 
-        monkeypatch.setattr(aws.urllib.request, "urlopen", flaky)
+        monkeypatch.setattr(urllib.request, "urlopen", flaky)
         assert aws.download(RADC, tmp_path).read_bytes() == b"payload"
         assert len(calls) == 4
 
@@ -267,7 +268,7 @@ class TestRetries:
             calls.append(url)
             raise _http_error(url, 404, b"<Code>NoSuchKey</Code>")
 
-        monkeypatch.setattr(aws.urllib.request, "urlopen", missing)
+        monkeypatch.setattr(urllib.request, "urlopen", missing)
         with pytest.raises(urllib.error.HTTPError):
             aws.download(RADC, tmp_path)
         assert len(calls) == 1
@@ -280,7 +281,7 @@ class TestRetries:
             calls.append(url)
             raise _http_error(url, 500)
 
-        monkeypatch.setattr(aws.urllib.request, "urlopen", down)
+        monkeypatch.setattr(urllib.request, "urlopen", down)
         with pytest.raises(urllib.error.HTTPError):
             aws.list_files(satellite="G19", start=datetime(2026, 10, 7, 12))
         assert len(calls) == aws._ATTEMPTS

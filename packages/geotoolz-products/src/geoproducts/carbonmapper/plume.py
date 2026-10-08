@@ -40,13 +40,15 @@ import json
 import math
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from shapely.geometry import box, shape
 from shapely.geometry.base import BaseGeometry
+
+from geoproducts._src.query import as_utc
 
 
 if TYPE_CHECKING:
@@ -242,10 +244,7 @@ def _parse_iso_datetime(val: str | None) -> datetime | None:
     if m:
         s = s + ":00"
     try:
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt.astimezone(UTC)
+        return as_utc(datetime.fromisoformat(s))
     except (ValueError, AttributeError):
         return None
 
