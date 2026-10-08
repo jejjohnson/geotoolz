@@ -1,4 +1,4 @@
-"""`geocloud.cog` — Cloud-Optimized GeoTIFF reads straight from object storage.
+"""`geocloud.cog` — Cloud-Optimized GeoTIFFs: reads from object storage, and writes.
 
 - `CogSource` — an opened, tiled COG (async-geotiff over the shared
   obstore pool): ``read_windows`` fetches every tile the windows touch
@@ -11,7 +11,14 @@
   fetch only the source pixels a request needs, asynchronously, then
   reuse the sync georeader function on that chunk.
 
-Needs the ``[cog]`` extra: ``pip install 'geotoolz-cloud[cog]'``.
+- `write_cog` — write a `GeoTensor` (or a lazy reader, strip by strip) as
+  a validated COG to a local path or any object store: explicit
+  compression / predictor / tiling / overview / nodata choices, built in
+  a temporary directory and only then renamed or uploaded into place.
+
+The readers need the ``[cog]`` extra (``pip install
+'geotoolz-cloud[cog]'``); `write_cog` runs on the base install (GDAL's
+``COG`` driver through rasterio).
 
 ```python
 from geocloud.cog import AsyncCogReader, CogSource, read_from_tile
@@ -21,6 +28,8 @@ chips = src.read_windows(windows)          # shared tiles fetched once
 
 reader = await AsyncCogReader.open("s3://bucket/scene.tif")
 tile = await read_from_tile(reader, x=163, y=395, z=10)
+
+write_cog(ndvi, "s3://bucket/products/ndvi.tif", compress="zstd")
 ```
 """
 
@@ -38,6 +47,7 @@ from geocloud._src.cog_reader import (
     read_to_crs,
 )
 from geocloud._src.cog_source import CogDomain, CogSource
+from geocloud._src.cog_write import write_cog
 
 
 __all__ = [
@@ -52,4 +62,5 @@ __all__ = [
     "read_reproject",
     "read_reproject_like",
     "read_to_crs",
+    "write_cog",
 ]

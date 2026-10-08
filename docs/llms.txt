@@ -23,7 +23,7 @@ Keep both with the public helpers in `geotoolz.carrier`, and test a new step wit
 - [geopatcher](https://jejjohnson.github.io/geotoolz/patcher/): split a field into patches, process, stitch back (geometry × sampler × window × aggregation)
 - [geopatcher quickstart](https://jejjohnson.github.io/geotoolz/patcher/quickstart/): tile and stitch a raster
 - [geoproducts](https://jejjohnson.github.io/geotoolz/products/): readers for GOES-R ABI, Himawari AHI, Carbon Mapper
-- [geocloud](https://jejjohnson.github.io/geotoolz/cloud/): the pooled obstore client, file verbs (list / download / upload / copy / sync / sign), per-bucket credentials (also for GDAL) and async COG reads
+- [geocloud](https://jejjohnson.github.io/geotoolz/cloud/): the pooled obstore client, file verbs (list / download / upload / copy / sync / sign), per-bucket credentials (also for GDAL), async COG reads and validated COG writes
 - [patch_ops](https://jejjohnson.github.io/geotoolz/patch_ops/): geotoolz ↔ geopatcher bridge operators (`GridSampler`, `ApplyToChips`, `MergePatches`)
 
 ## API reference

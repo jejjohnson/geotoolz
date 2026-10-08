@@ -50,3 +50,4 @@
 ::: geocloud.cog.read_reproject_like
 ::: geocloud.cog.read_to_crs
 ::: geocloud.cog.read_from_tile
+::: geocloud.cog.write_cog
