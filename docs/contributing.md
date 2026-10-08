@@ -224,34 +224,17 @@ Issue node IDs are resolved via `gh api repos/:owner/:repo/issues/<N> --jq .node
 
 ## Operator parameter vocabulary
 
-Every `pipekit.Operator` constructor is **keyword-only** — `__init__(self, *, ...)`,
-with no exception for a wrapped estimator / model / patcher
-(`PixelwisePCA(estimator=PCA())`, `ModelOp(model=net)`, `GridSampler(patcher=p)`).
-One concept has one parameter name across every family:
-
-| Concept | Name | Notes |
-|---|---|---|
-| Band axis position | `axis: int` (default `-3`) | Only ever the band axis — never a reduction or an orientation (`segment`'s skimage wrappers, formerly `channel_axis`, default to `0` of their per-frame `(C, H, W)` input). |
-| Reduction axes | `reduce_axes` | Tuple of axes (or `None` = global): `radiometry.PercentileClip`, `viz.StretchToUint8`, the `normalize` primitives, `radiometry.dos1`. |
-| Orientation | `direction` | `"column"` / `"row"` (`restore.DestripeColumn`), `"scan"` / `"sample"` (`geom.SegmentStitch`). |
-| One band | one `BandRef` name per band (`red`, `nir`, `swir1`, `qa_band`, `band`, …) | Integer position *or* band name; no `*_idx` twins. Tier-A primitives take integer `*_idx` positions. |
-| Several bands | `bands` | List of `BandRef` (`spectral.SelectBands`, `viz.Composite`). `io` readers keep rasterio's 1-based file `indexes`. |
-| Value written into pixels | `fill_value` | The carrier attribute stays georeader's `fill_value_default`; a strategy string is `strategy` (`restore.ReplaceOutliers`). |
-| RNG seed | `seed` | |
-| Neighbourhood side length | `window` | Pixels (odd int, or `(h, w)`): despeckle, destripe, `MedianDenoise`, `NLMeans`, `CLAHE`, `AdaptiveWindowBackground`, `SpectralSmoothing`. |
-| Neighbourhood half-width / distance | `radius`, `search_radius` | Not a window (radius `r` ≈ window `2r + 1`): `mask.BufferMask` (with `unit`), `restore.GapFillIDW`, `restore.NLMeans`, `viz.AnnotatePoints`. |
-| Output size | `size` | Crop / tile / chip size (`augment.RandomCrop`, `geom.Tile`, `geom.SlidingWindow`, `patch_ops` samplers) — not a window. `io.ReadWindow(window=...)` is a rasterio pixel window, not a size. |
-| Gaussian scale | `sigma` | `segment.Quickshift(kernel_size=...)` keeps skimage's name: a kernel *width*, not a window. |
-| Areas | `min_area_px`, `max_hole_area_px`, `min_area_m2` | Unit suffix is mandatory. |
-| Connectivity | `connectivity: 4 \| 8` | Converted internally for skimage / scipy (`1` / `2` is rejected). |
-| Wavelengths | `wavelengths` (nm) | Also the `attrs["wavelengths"]` key; qualified variants `source_wavelengths` / `target_wavelengths`. |
-| Percentile stretch bounds | `lower` / `upper` | |
-| QA selection | `qa_band`, `bits`, `values`, `targets` | `targets` = `SENSOR_QA_REGISTRY` names. |
-| Denominator stabiliser | `eps` (default `1e-10`) | |
-| scikit-learn wrappers | `Pixelwise*` | `PixelwisePCA`, `PixelwiseKMeans`, … never shadow the sklearn class they wrap. |
-
+Every `pipekit.Operator` constructor is keyword-only, and one concept has one
+parameter name across every family (`axis`, `bands`, `window`, `size`,
+`fill_value`, `seed`, …). The full table lives with the rest of the geotoolz
+package rules in
+[`packages/geotoolz/AGENTS.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/AGENTS.md#operator-parameter-vocabulary);
 `tests/test_operator_contract.py::test_constructors_are_keyword_only` and
-`::test_constructor_vocabulary` enforce the style and reject the retired spellings.
+`::test_constructor_vocabulary` enforce it.
+
+Agents (and people) start from the root
+[`AGENTS.md`](https://github.com/jejjohnson/geotoolz/blob/main/AGENTS.md):
+the package map, "reuse before you write", and the checklist below.
 
 ---
 

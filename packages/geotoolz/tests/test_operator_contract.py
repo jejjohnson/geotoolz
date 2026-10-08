@@ -570,7 +570,7 @@ def test_constructors_are_keyword_only(cls: type) -> None:
 
 
 #: Retired constructor spellings -> the package-wide name (see the
-#: vocabulary table in CLAUDE.md "Coding Conventions").
+#: vocabulary table in packages/geotoolz/AGENTS.md).
 RETIRED_PARAMS: dict[str, str] = {
     "fill": "fill_value",
     "random_state": "seed",
