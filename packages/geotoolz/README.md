@@ -158,17 +158,18 @@ patcher: gp.SpatialPatcher = gp.SpatialPatcher(
     window=gp.spatial.window.Hann(),
     aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
+field: gp.RasterField = gp.RasterField(scene)
 tiled: gz.Sequential = gz.Sequential([
     GridSampler(patcher=patcher),                                  # field → list[Patch], (13, 256, 256) each
     ApplyToChips(operator=ndvi_pipeline),                          # → list[Patch], (256, 256) each
-    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(),
-                 domain=scene.isel({"band": slice(0, 1)})),        # one-band grid for a one-band output
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-stitched: np.ndarray = tiled(gp.RasterField(scene))                # (1, H, W) float64
+stitched: GeoTensor = tiled(field)                                 # (H, W) float64, on the scene's grid
 ```
 
-`MergePatches` sizes its output from `domain`, so pass a one-band
-domain when the operator collapses the band axis.
+`MergePatches` places the chips on the domain's grid and keeps the band
+axes the chips carry, so a band-collapsing operator such as NDVI merges
+into a one-band result.
 
 ## Installation / extras
 

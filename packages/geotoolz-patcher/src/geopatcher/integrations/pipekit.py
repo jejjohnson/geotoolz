@@ -42,6 +42,7 @@ except ImportError as _e:  # pragma: no cover - exercised when [pipekit] is miss
     ) from _e
 
 from geopatcher import Patch, SpatialPatcher
+from geopatcher._src.spatial.patcher import on_domain_grid
 from geopatcher.config import axis_envelope
 from geopatcher.spatial.aggregation import Aggregation as SpatialAggregation
 
@@ -110,11 +111,19 @@ class Stitch(Operator):
     the resulting `Operator` has a single positional input (the list of
     patches) and slots into the linear pipeline.
 
+    On a georeferenced domain (one with a ``transform`` and a ``crs``,
+    such as a `RasterField`'s) the merged array comes back as a
+    `georeader.GeoTensor` on the domain's grid — the carrier the patches
+    went in as — with the band count the patches carry: a per-patch
+    operator that turns four bands into one index gives ``(1, H, W)``,
+    with the source's stale per-band ``attrs`` dropped and a NaN fill.
+    Other outputs (a ``dict``, a streaming zarr array, a non-georeferenced
+    domain) are returned as the aggregation produced them.
+
     Args:
         aggregation: The `spatial.aggregation.Aggregation` to apply.
         domain: The `Domain` the patches were drawn from. Required
-            because the aggregation's output shape is fixed by the
-            domain.
+            because it fixes the output grid.
 
     Note:
         ``forbid_in_yaml = True`` — `domain` is a runtime `Domain`
@@ -132,7 +141,8 @@ class Stitch(Operator):
         self.domain = domain
 
     def _apply(self, patches: list[Patch]) -> Any:
-        return self.aggregation.merge(patches, self.domain)
+        merged = self.aggregation.merge(patches, self.domain)
+        return on_domain_grid(merged, self.aggregation, self.domain)
 
     def get_config(self) -> dict[str, Any]:
         return {

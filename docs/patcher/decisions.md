@@ -475,6 +475,10 @@ ADR-001 (iterator-first split) and ADR-004 (coordinate-aware temporal).
 
 ## ADR-007 — `merge` returns the raw aggregation output; `merge_to_field` rebuilds the Field
 
+> Partly superseded by ADR-009: the output's band axes come from the
+> patches, and `merge_to_field` accepts a changed band count on raster
+> fields.
+
 **Decision.** `SpatialPatcher.merge(patches, domain)` keeps returning
 whatever the aggregation's `merge` produces — a bare `np.ndarray` on the
 domain grid for the dense aggregations, a `dict` for `spatial.aggregation.MeanStd` /
@@ -572,6 +576,63 @@ a `Spatial` / `Temporal` name prefix — and the public modules mixed concepts (
 (`from geopatcher import spatial` then `spatial.window.Hann()`), and
 configs saved with the old bare class names must be re-saved. In return
 each name is findable from its task, and the root is short enough to read.
+
+## ADR-009 — The domain fixes the grid, the patches fix the bands
+
+> Supersedes the shape rule of ADR-007.
+
+**Status.** Accepted.
+
+**Context.** Every dense aggregation sized its accumulator from
+`domain.shape`. A per-patch operator that changes the band count — NDVI
+turns a `(4, 256, 256)` chip into a `(256, 256)` map, a model returns `K`
+class scores — was then numpy-broadcast into the domain's bands: merging
+NDVI onto a 4-band domain returned four identical copies of the index,
+silently. `merge_to_field` refused the honest shape, so the documented
+workaround was a hand-built one-band "output grid" domain, and the pipekit
+`Stitch` (`geotoolz.patch_ops.MergePatches`) returned a bare array where
+its input chips were `GeoTensor`s.
+
+**Decision.**
+
+- The domain fixes the grid, the trailing `(H, W)`; the patches fix what
+  each cell holds. For raster-window patches the accumulator is
+  `(*patch.data.shape[:-2], H, W)`: four bands in and one index out
+  merges into `(1, H, W)`, and a 2-D map into `(H, W)`. The first patch
+  decides, and a patch with different leading axes raises `ValueError`.
+  `{dim: slice}` (grid) patches index the domain's own axes and keep its
+  shape. One helper (`_dense_layout`) applies this to every dense
+  aggregation, the streaming `OverlapAdd` included. `SoftVote` and
+  `InvVarWeightedMean` read the cell axes past their class axis and
+  `(mu, var)` pair.
+- `merge_to_field` accepts any band count on a raster field: the output
+  needs the domain's trailing `(H, W)`. The xarray adapters keep their
+  dims and coords, so they still need the domain's own shape.
+- A raster `with_data` (and `Stitch`) follows the `GeoTensor` carrier
+  contract:
+  - `attrs` is a fresh copy of the source's, without the per-band keys
+    once the band count changed;
+  - the declared nodata follows one rule, decided by the merge and never
+    by scanning values: an aggregation's finite `fill_value` (`-1` for the
+    votes, a caller's sentinel) is the nodata; an output that carries the
+    source's values (domain shape, source dtype restored) keeps the
+    source's nodata, with its NaN gaps rewritten to it; anything else is a
+    new quantity with a NaN fill (its per-patch operator marks nodata as
+    NaN, per the `GeoTensor` contract). Every raster wrapper, `CogField`
+    included, gets the same nodata;
+  - the source dtype is restored only for an output of the domain's own
+    shape.
+- The pipekit `Stitch` returns a `GeoTensor` on a georeferenced domain
+  (one with `transform` and `crs`), through the same rewrap; `dict`,
+  streaming and non-georeferenced outputs are unchanged.
+
+**Consequences.** `MergePatches(domain=field.domain)` is right for every
+operator, band-collapsing or not, and its output is a georeferenced
+`GeoTensor` that writes straight to a COG. Code that relied on the
+broadcast (`SoftVote` `(K, h, w)` chips on a `(band, H, W)` domain gave
+`(band, H, W)` copies; it now gives one `(H, W)` map) sees the patches'
+shape instead. A patch with more axes than the domain no longer raises
+in `OverlapAdd`: its leading axes are kept.
 
 ---
 

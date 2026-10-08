@@ -434,15 +434,19 @@ def test_streaming_dtype_knob(tmp_path) -> None:
         spatial.aggregation.OverlapAdd(dtype="int16")
 
 
-def test_streaming_rejects_extra_patch_dims(tmp_path) -> None:
-    # A patch with more dims than the domain used to fail inside zarr with
-    # a different error than the in-RAM path; both now raise the same one.
-    patch = Patch(data=np.ones((2, 4, 4)), anchor=(0, 0), indices=Window(0, 0, 4, 4))
-    with pytest.raises(ValueError, match="patch data has 3 dims"):
-        spatial.aggregation.OverlapAdd().merge([patch], _ShapeDomain((8, 8)))
+def test_streaming_takes_band_axes_from_patches(tmp_path) -> None:
+    # Two features per pixel on a single-band domain merge into (2, 8, 8),
+    # in RAM and on disk alike.
+    patches = [
+        Patch(data=np.ones((2, 4, 4)), anchor=(r, c), indices=Window(c, r, 4, 4))
+        for r in (0, 4)
+        for c in (0, 4)
+    ]
+    in_ram = spatial.aggregation.OverlapAdd().merge(patches, _ShapeDomain((8, 8)))
+    assert in_ram.shape == (2, 8, 8)
     _needs_zarr()
     agg = spatial.aggregation.OverlapAdd(
         streaming=True, target_path=str(tmp_path), chunks=(4, 4)
     )
-    with pytest.raises(ValueError, match="patch data has 3 dims"):
-        agg.merge([patch], _ShapeDomain((8, 8)))
+    on_disk = agg.merge(patches, _ShapeDomain((8, 8)))
+    np.testing.assert_array_equal(np.asarray(on_disk[:]), in_ram)

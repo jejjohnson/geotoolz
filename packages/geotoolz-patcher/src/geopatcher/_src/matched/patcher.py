@@ -780,8 +780,12 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
         from geopatcher._src.spatial.patcher import (
             _domain_shape,
             _field_values,
+            _is_raster_field,
+            _merge_nodata,
             _require_with_data,
             _source_dtype,
+            _source_fill,
+            _with_nodata,
         )
 
         with_data = _require_with_data(mfield.primary, "merge_to_field")
@@ -793,15 +797,22 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
                 agg, source = self.primary.aggregation, mfield.primary
             else:
                 agg, source = self.secondary_aggregators[name], mfield.secondaries[name]
-            out[name] = with_data(
-                _field_values(
-                    value,
-                    agg,
-                    shape=shape,
-                    dtype=_source_dtype(source),
-                    caller="merge_to_field",
-                )
+            values = _field_values(
+                value,
+                agg,
+                shape=shape,
+                dtype=_source_dtype(source),
+                caller="merge_to_field",
+                bands_may_change=_is_raster_field(mfield.primary),
             )
+            values, fill = _merge_nodata(
+                values,
+                agg,
+                shape=shape,
+                dtype=_source_dtype(source),
+                source_fill=_source_fill(source),
+            )
+            out[name] = _with_nodata(with_data(values), fill)
         return out
 
     def _merge_sources(

@@ -260,8 +260,36 @@ class TestCogWriter:
         agg = spatial.aggregation.OverlapAdd(
             streaming=True, target_path=str(tmp_path / "x.tif"), writer="cog"
         )
-        with pytest.raises(ValueError, match="2-D domain or a 3-D"):
+        with pytest.raises(ValueError, match=r"merge into shape \(2, 2, 2, 2\)"):
             agg.merge([], _Domain())
+
+    def test_rank_follows_the_patches(self, tmp_path: Path) -> None:
+        # A 4-D (T, C, H, W) domain whose per-patch operator collapses to a
+        # 2-D map is a valid COG; patches that add axes past 3-D are
+        # rejected before any merge work.
+        pytest.importorskip("zarr")  # streams via a scratch zarr store
+
+        class _Domain:
+            shape = (2, 3, 8, 8)
+            transform = rasterio.Affine.identity()
+            crs = "EPSG:32630"
+
+        flat = Patch(data=np.ones((8, 8)), anchor=(0, 0), indices=Window(0, 0, 8, 8))
+        target = str(tmp_path / "map.tif")
+        agg = spatial.aggregation.OverlapAdd(
+            streaming=True, target_path=target, writer="cog"
+        )
+        assert agg.merge([flat], _Domain()) == target
+        with rasterio.open(target) as src:
+            assert src.count == 1
+        deep = Patch(
+            data=np.ones((2, 2, 8, 8)), anchor=(0, 0), indices=Window(0, 0, 8, 8)
+        )
+        agg = spatial.aggregation.OverlapAdd(
+            streaming=True, target_path=str(tmp_path / "deep.tif"), writer="cog"
+        )
+        with pytest.raises(ValueError, match=r"merge into shape \(2, 2, 8, 8\)"):
+            agg.merge([deep], _Domain())
 
     def test_cog_writer_valid(self, tmp_path: Path) -> None:
         # #193: `writer="cog"` used to write a plain tiled GTiff (no COG
