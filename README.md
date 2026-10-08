@@ -11,7 +11,20 @@
 > packages that interlock end-to-end, with the Operator / Sequential / Graph
 > composition core supplied by [pipekit](https://github.com/jejjohnson/pipekit).
 
-<p align="center"><img src="docs/assets/diagrams/stack-overview.png" alt="The geostack: find with geotoolz-catalog, read with geotoolz-products, cut with geotoolz-patcher, compute with geotoolz, stitch back with geotoolz-patcher" width="100%"></p>
+<p align="center"><img src="docs/assets/diagrams/geostack-intro.png" alt="The geostack stage by stage: search an archive, catalog it, save what you need, stream windows lazily, split into overlapping patches, apply an operator per patch, combine with a window-weighted merge, write a COG or zarr" width="100%"></p>
+
+## Where it comes from
+
+If you have used xarray, you know **split → apply → combine**: group the
+data, run a function on each group, glue the results back together. A
+geospatial pipeline is the same idea with more steps on either side.
+Before you can split a scene you have to **search** an archive for it,
+**catalog** what you found so the next question is a query rather than a
+crawl, **save** (stage) only the files that matter, and **stream** them as
+lazy windows because the scene does not fit in memory. After you combine,
+you **write** a georeferenced result. Every step belongs to one package
+(the band under the figure), and neighbouring steps hand one another
+typed objects rather than file paths.
 
 ## 30-second pitch
 
@@ -29,6 +42,8 @@ names through the whole pipeline. A `Patch` is what the patcher hands an
 operator. Because operators are plain `pipekit` objects, the patcher
 itself becomes an operator: *tile → predict → stitch* is one more
 `Sequential`, typed and YAML-serialisable like the rest.
+
+<p align="center"><img src="docs/assets/diagrams/stack-overview.png" alt="The geostack: find with geotoolz-catalog, read with geotoolz-products, cut with geotoolz-patcher, compute with geotoolz, stitch back with geotoolz-patcher" width="100%"></p>
 
 ## The packages
 
