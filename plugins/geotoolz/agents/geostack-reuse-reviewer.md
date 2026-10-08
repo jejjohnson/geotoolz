@@ -35,7 +35,11 @@ for pkg in ("geocatalog", "geoproducts", "geopatcher", "geotoolz", "geocloud"):
         except ImportError:
             continue
         for attr in getattr(mod, "__all__", []):
-            doc = (inspect.getdoc(getattr(mod, attr, None)) or "").split("\n")[0]
+            try:
+                obj = getattr(mod, attr)
+            except (AttributeError, ImportError):
+                continue  # a lazy name behind an extra that is not installed
+            doc = (inspect.getdoc(obj) or "").split("\n")[0]
             print(f"{name}.{attr}: {doc}")
 PY
 ```

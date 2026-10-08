@@ -16,14 +16,24 @@ an object-store client — look it up:
    ```python
    import importlib, inspect, pkgutil
    for pkg in ("geocatalog", "geoproducts", "geopatcher", "geotoolz", "geocloud"):
-       root = importlib.import_module(pkg)
+       try:
+           root = importlib.import_module(pkg)
+       except ImportError:
+           continue  # that part of the stack is not installed
        for info in [None, *pkgutil.walk_packages(root.__path__, pkg + ".")]:
            name = pkg if info is None else info.name
            if "._" in name:
                continue
-           mod = importlib.import_module(name)
+           try:
+               mod = importlib.import_module(name)
+           except ImportError:
+               continue  # a module behind an extra that is not installed
            for attr in getattr(mod, "__all__", []):
-               doc = (inspect.getdoc(getattr(mod, attr, None)) or "").split("\n")[0]
+               try:
+                   obj = getattr(mod, attr)
+               except (AttributeError, ImportError):
+                   continue  # a lazy name behind an extra that is not installed
+               doc = (inspect.getdoc(obj) or "").split("\n")[0]
                print(f"{name}.{attr}: {doc}")
    ```
 
@@ -100,8 +110,11 @@ pipeline = gz.Sequential([
 ])
 ndvi_scene = pipeline(field)                          # (1, 600, 600) float, NaN nodata
 
-# 4. Write. The merge returns a plain array, so put it back on the merge grid.
-gz.WriteCOG(path="ndvi.tif")(GeoTensor(ndvi_scene, transform=out_grid.transform, crs=out_grid.crs))
+# 4. Write. The merge returns a plain array: put it back on the merge grid,
+# declaring its NaN gaps (invalid or uncovered cells) as the nodata.
+gz.WriteCOG(path="ndvi.tif")(
+    GeoTensor(ndvi_scene, transform=out_grid.transform, crs=out_grid.crs, fill_value_default=np.nan)
+)
 ```
 
 When the per-patch operator keeps the band count, merging into
@@ -174,7 +187,10 @@ class ZScore(Operator):
         out = (np.asarray(gt, dtype=np.float32) - self.mean) / self.std  # never mutate gt
         if not isinstance(gt, GeoTensor):
             return out  # plain array in → plain array out
-        out[~np.asarray(gt.validmask()) | ~np.isfinite(out)] = np.nan  # nodata stays nodata
+        invalid = ~np.asarray(gt.validmask()) | ~np.isfinite(out)
+        if out.ndim >= 3:  # a pixel is invalid when any of its bands is
+            invalid = invalid.any(axis=-3, keepdims=True)
+        out = np.where(invalid, np.float32(np.nan), out)  # nodata stays nodata
         return GeoTensor(
             out,
             transform=gt.transform,  # same grid as the input

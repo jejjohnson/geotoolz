@@ -14,16 +14,13 @@ honestly: what ran, what passed, what was skipped.
 uv run --group lint ruff check .          # entire repo, incl. every tests/
 uv run --group lint ruff format --check .
 make typecheck                            # ty, from each package directory
+make test                                 # fast tier, all five packages (what CI runs)
 ```
 
-Tests, with coverage, from each package directory you touched (and any
-package that imports it):
-
-```bash
-cd packages/<package> && uv run pytest -q
-```
-
-geotoolz's fast tier: `uv run pytest -q -m "not slow and not integration"`.
+While iterating, run the tests (with coverage) of the package you touched
+from its directory — `cd packages/<package> && uv run pytest -q`; geotoolz's
+fast tier is `uv run pytest -q -m "not slow and not integration"` — but
+`make test` must pass before the commit.
 
 ## When the public API changed
 
@@ -53,9 +50,11 @@ The notebook plugin can stall locally; if it does, build with a copy of
   script and the package's tests.
 - **Everything is tracked** — `git status --ignored` must not list a new
   source file as ignored (a bare `build/` rule once swallowed
-  `geocatalog/build/`). Then check a clean checkout of the commit:
+  `geocatalog/build/`). Then, **after committing** (the check reads the
+  commit, not your working tree), check a clean checkout of it:
   `git worktree add --detach <scratch> HEAD`, run ruff and an import of
-  every module there, and remove the worktree.
+  every module there, and remove the worktree. Amend or add a commit for
+  anything it finds.
 
 ## Before pushing
 
