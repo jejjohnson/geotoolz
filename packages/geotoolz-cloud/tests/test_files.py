@@ -10,7 +10,6 @@ import asyncio
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, ClassVar
 
 import obstore
 import pytest
@@ -159,13 +158,53 @@ def test_download_short_read_leaves_nothing(stores, tmp_path, monkeypatch):
     put(stores[S3], "a.bin", b"abcdef")
 
     class Truncated:
-        meta: ClassVar[dict[str, Any]] = {"size": 6}
+        def bytes(self) -> bytes:
+            return b"abc"
 
-        def stream(self, min_chunk_size: int) -> Iterator[bytes]:
-            yield b"abc"
-
-    monkeypatch.setattr(impl.obstore, "get", lambda store, key: Truncated())
+    monkeypatch.setattr(impl.obstore, "get", lambda *a, **k: Truncated())
     with pytest.raises(OSError, match="short read"):
+        files.download(f"{S3}/a.bin", tmp_path / "a.bin")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_large_objects_move_in_ranges(stores, tmp_path, monkeypatch):
+    """Each GET covers one bounded range, so no request outlives its timeout."""
+    monkeypatch.setattr(impl, "_CHUNK", 4)
+    payload = b"0123456789"
+    put(stores[S3], "a.bin", payload)
+    seen: list[tuple[int, int]] = []
+    real_get, real_get_async = impl.obstore.get, impl.obstore.get_async
+
+    def get(store, key, *, options=None):
+        seen.append((options or {}).get("range"))
+        return real_get(store, key, options=options)
+
+    async def get_async(store, key, *, options=None):
+        seen.append((options or {}).get("range"))
+        return await real_get_async(store, key, options=options)
+
+    monkeypatch.setattr(impl.obstore, "get", get)
+    monkeypatch.setattr(impl.obstore, "get_async", get_async)
+    assert files.download(f"{S3}/a.bin", tmp_path / "a.bin").read_bytes() == payload
+    assert seen == [(0, 4), (4, 8), (8, 10)]
+    seen.clear()
+    files.copy(f"{S3}/a.bin", f"{AZ}/a.bin")
+    assert seen == [(0, 4), (4, 8), (8, 10)]
+    assert files.read_bytes(f"{AZ}/a.bin") == payload
+
+
+def test_object_replaced_mid_download_fails(stores, tmp_path, monkeypatch):
+    monkeypatch.setattr(impl, "_CHUNK", 4)
+    put(stores[S3], "a.bin", b"0123456789")
+    real_get = impl.obstore.get
+
+    def get(store, key, *, options=None):
+        result = real_get(store, key, options=options)
+        put(stores[S3], "a.bin", b"replaced!!")  # a writer races the download
+        return result
+
+    monkeypatch.setattr(impl.obstore, "get", get)
+    with pytest.raises(Exception, match=r"(?i)precondition"):
         files.download(f"{S3}/a.bin", tmp_path / "a.bin")
     assert list(tmp_path.iterdir()) == []
 

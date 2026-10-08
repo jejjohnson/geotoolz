@@ -13,11 +13,16 @@ How a transfer runs:
 - same store (two keys of one bucket / container) → a server-side copy,
   no bytes through this process;
 - local file → remote → a multipart upload straight from the file;
-- remote → local → streamed in chunks to a hidden ``.part`` sibling, size
-  checked, then renamed into place (a cut-off download never leaves a
-  truncated file under the final name);
-- remote → another remote store → streamed through memory chunk by chunk
-  (obstore's async ``get`` feeding its async multipart ``put``).
+- remote → local → fetched in 16 MiB byte ranges into a hidden ``.part``
+  sibling, size checked, then renamed into place (a cut-off download never
+  leaves a truncated file under the final name);
+- remote → another remote store → the same ranged reads feeding one
+  multipart upload, one chunk in memory at a time.
+
+Ranged reads keep every request short, so obstore's per-request timeout
+and retries apply to one range, never to a whole multi-gigabyte object,
+and each range is pinned to the object's entity tag: an object replaced
+mid-transfer fails rather than arriving mixed.
 
 Listing (`ls`, `sync`, recursive `rm`) needs a store that can list: S3,
 GCS, Azure or a local directory. Plain ``http(s)://`` and ``hf://`` URLs
@@ -29,7 +34,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -74,9 +79,12 @@ __all__ = [
 #: A URI string, a local path string, or a ``Path``.
 Location = str | os.PathLike[str]
 
-# Streaming chunk size: big enough for S3's 5 MiB multipart minimum, small
-# enough that a copy never holds more than a few chunks in memory.
-_CHUNK = 8 * 1024 * 1024
+# Bytes per GET when an object is moved: each range is its own request, so
+# obstore's per-request timeout (30 s by default, with a capped number of
+# resumes) bounds one range rather than the whole object — a single GET of
+# a large object fails once the transfer outlasts ~11 timeouts. 16 MiB
+# also clears S3's 5 MiB multipart minimum and keeps memory to one chunk.
+_CHUNK = 16 * 1024 * 1024
 # Keys per bulk delete request (S3's DeleteObjects limit).
 _DELETE_BATCH = 1000
 
@@ -402,17 +410,45 @@ def open(  # `geocloud.files.open`, like `fsspec.open`
 # --- move --------------------------------------------------------------------
 
 
+def _ranges(meta: Mapping[str, Any]) -> tuple[list[tuple[int, int]], dict[str, Any]]:
+    """``(start, end)`` byte ranges covering an object, and its GET options.
+
+    The options pin every range to the version first seen (``if_match`` on
+    the entity tag), so an object replaced mid-transfer fails instead of
+    arriving half old, half new.
+    """
+    size = int(meta["size"])
+    pinned = {"if_match": meta["e_tag"]} if meta.get("e_tag") else {}
+    spans = [(start, min(start + _CHUNK, size)) for start in range(0, size, _CHUNK)]
+    return spans, pinned
+
+
+def _range_options(
+    spans: list[tuple[int, int]], span: tuple[int, int], pinned: dict[str, Any]
+) -> dict[str, Any]:
+    """GET options for one span; an object in one span is fetched whole.
+
+    A single plain GET also serves hosts that ignore ``Range`` headers.
+    """
+    return pinned if len(spans) == 1 else {"range": span, **pinned}
+
+
 def _stream_to_file(source: _Target, dest: Path) -> None:
-    """Stream ``source`` into ``dest`` through a size-checked ``.part`` file."""
+    """Fetch ``source`` range by range into ``dest`` through a ``.part`` file."""
+    spans, pinned = _ranges(obstore.head(source.store, source.key))
+    expected = spans[-1][1] if spans else 0
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.part")
     try:
-        result = obstore.get(source.store, source.key)
-        expected = int(result.meta["size"])
         written = 0
         with part.open("wb") as fh:
-            for chunk in result.stream(min_chunk_size=_CHUNK):
-                written += fh.write(chunk)
+            for start, end in spans:
+                result = obstore.get(
+                    source.store,
+                    source.key,
+                    options=_range_options(spans, (start, end), pinned),
+                )
+                written += fh.write(result.bytes())
         if written != expected:
             raise OSError(
                 f"short read of {source.child(source.key)!r}: "
@@ -424,8 +460,19 @@ def _stream_to_file(source: _Target, dest: Path) -> None:
 
 
 async def _stream_between(source: _Target, dest: _Target) -> None:
-    result = await obstore.get_async(source.store, source.key)
-    await obstore.put_async(dest.store, dest.key, result.stream(min_chunk_size=_CHUNK))
+    """Copy across stores: ranged GETs feeding one multipart upload."""
+    spans, pinned = _ranges(await obstore.head_async(source.store, source.key))
+
+    async def chunks() -> AsyncIterator[bytes]:
+        for start, end in spans:
+            result = await obstore.get_async(
+                source.store,
+                source.key,
+                options=_range_options(spans, (start, end), pinned),
+            )
+            yield bytes(await result.bytes_async())
+
+    await obstore.put_async(dest.store, dest.key, chunks())
 
 
 def copy(
@@ -438,8 +485,9 @@ def copy(
     """Copy one object, between any two locations.
 
     Server-side within one bucket / container; a multipart upload from a
-    local file; a streamed, atomic download to a local file; streamed
-    chunk by chunk between two stores (see the module docstring).
+    local file; a ranged, atomic download to a local file; ranged reads
+    feeding a multipart upload between two stores (see the module
+    docstring).
 
     Args:
         src: The object to copy (URI or local path).
@@ -491,7 +539,8 @@ def download(
 ) -> Path:
     """Download the object at ``uri`` to the local file ``dest``.
 
-    Streamed in chunks to a hidden ``.part`` sibling, checked against the
+    Fetched in 16 MiB byte ranges into a hidden ``.part`` sibling, each
+    range pinned to the object's entity tag, checked against the
     object's size, then renamed into place; parent directories are made.
 
     Args:

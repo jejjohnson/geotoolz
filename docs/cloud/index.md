@@ -97,9 +97,9 @@ url: str = files.sign("s3://bucket/a.tif", expires=timedelta(hours=6))
 | `info` / `exists` | one object's size, mtime, etag | a prefix alone does not "exist" |
 | `read_bytes` / `write_bytes` | whole object in memory | writes are atomic in the store |
 | `open(uri, "rb" \| "wb")` | seekable reader (range requests) / buffered writer | hand the reader to h5py, `zipfile`, … |
-| `download(uri, dest)` | object → local file | streamed to a hidden `.part`, size-checked, renamed |
+| `download(uri, dest)` | object → local file | 16 MiB ranged reads into a hidden `.part`, size-checked, renamed |
 | `upload(path, uri)` | local file → object | multipart for large files |
-| `copy(src, dst)` | any → any | server-side in one bucket / container; streamed between stores |
+| `copy(src, dst)` | any → any | server-side in one bucket / container; ranged reads into a multipart upload between stores |
 | `sync(src, dst)` | mirror a prefix / directory | skips same-size objects already there; never deletes |
 | `rm(uri, recursive=False)` | delete | batched bulk deletes |
 | `sign(uri, expires=…)` | pre-signed HTTPS URL | S3, GCS, Azure; computed locally, no request |
@@ -110,6 +110,12 @@ the source's file name. `overwrite=False` on `copy` / `download` /
 `storage_options` on every verb is forwarded to `get_obstore`. When the two
 ends of a `copy` or `sync` need different credentials, register each root
 with `geocloud.credentials` (below) instead.
+
+Large objects move in 16 MiB byte ranges, one request each. obstore's
+client timeout (30 s per request by default, with a capped number of
+resumes) therefore bounds a range, not a whole multi-gigabyte object.
+Every range is pinned to the entity tag seen first, so an object replaced
+mid-transfer raises instead of arriving half old, half new.
 
 **Testing code that moves files.** `geocloud.store.mount` serves one
 bucket, container or host from a store you built, so the code under test
