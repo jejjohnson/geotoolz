@@ -1,0 +1,46 @@
+# geotoolz
+
+> A composable remote-sensing stack in Python on georeader's GeoTensor: find and index files (geocatalog), read Earth-observation products (geoproducts), tile and stitch large scenes (geopatcher), compute with carrier-preserving pipekit operators (geotoolz), and read object storage (geocloud). Build on these primitives instead of re-implementing them.
+
+Five packages, installed separately: `geotoolz`, `geotoolz-catalog`, `geotoolz-products`, `geotoolz-patcher`, `geotoolz-cloud` (import names `geotoolz`, `geocatalog`, `geoproducts`, `geopatcher`, `geocloud`). Every step takes and returns `georeader.GeoTensor`; every operator is a `pipekit.Operator`, so steps chain with `geotoolz.Sequential`. Before writing a helper, search the capability index — it lists every public name with a one-line summary, including pipekit's control-flow, caching, QC and parallel-map blocks. A step you add must keep two contracts.
+
+- **pipekit `Operator`:** implement `_apply`, with a keyword-only constructor that holds configuration only and an auto-derived JSON `get_config()`.
+- **`GeoTensor`:** bands on axis -3; a GeoTensor in returns a GeoTensor on the same grid; a fresh `attrs` dict; `fill_value_default` is nodata.
+
+See "Concepts" below. Claude Code users can install the `geotoolz` plugin: `/plugin marketplace add jejjohnson/geotoolz`, then `/plugin install geotoolz@geotoolz`.
+
+## Start here
+
+- [The geostack](https://jejjohnson.github.io/geotoolz/geostack/): how the five packages fit together, end to end in one screen
+- [Capability index](https://jejjohnson.github.io/geotoolz/capabilities/): every public name in the stack, once, with a summary
+- [Building with agents](https://jejjohnson.github.io/geotoolz/agents/): the Claude Code plugin, this file, and rules to paste into your project's AGENTS.md
+- [Quickstart (operators)](https://jejjohnson.github.io/geotoolz/quickstart/): Sentinel-2 to NDVI with geotoolz operators
+
+## Packages
+
+- [geocatalog](https://jejjohnson.github.io/geotoolz/catalog/): spatiotemporal index over files — STAC / CMR discovery, GeoParquet catalogs, `GeoSlice` queries, loaders, staging
+- [geocatalog quickstart](https://jejjohnson.github.io/geotoolz/catalog/quickstart/): build, query and load a catalog
+- [geopatcher](https://jejjohnson.github.io/geotoolz/patcher/): split a field into patches, process, stitch back (geometry × sampler × window × aggregation)
+- [geopatcher quickstart](https://jejjohnson.github.io/geotoolz/patcher/quickstart/): tile and stitch a raster
+- [geoproducts](https://jejjohnson.github.io/geotoolz/products/): readers for GOES-R ABI, Himawari AHI, Carbon Mapper
+- [geocloud](https://jejjohnson.github.io/geotoolz/cloud/): the pooled obstore client and async COG reads
+- [patch_ops](https://jejjohnson.github.io/geotoolz/patch_ops/): geotoolz ↔ geopatcher bridge operators (`GridSampler`, `ApplyToChips`, `MergePatches`)
+
+## API reference
+
+- [geotoolz operators](https://jejjohnson.github.io/geotoolz/api/core/): the operator families
+- [geocatalog API](https://jejjohnson.github.io/geotoolz/catalog/api/reference/)
+- [geopatcher API](https://jejjohnson.github.io/geotoolz/patcher/api/reference/)
+- [geoproducts API](https://jejjohnson.github.io/geotoolz/products/api/)
+- [geocloud API](https://jejjohnson.github.io/geotoolz/cloud/api/)
+
+## Contracts
+
+- [Concepts](https://jejjohnson.github.io/geotoolz/concepts/): the pipekit Operator, Sequential and Graph; multi-input operators; georeferencing checks; band names; mask polarity; fitted operators
+
+## Optional
+
+- [Integration recipe](https://jejjohnson.github.io/geotoolz/recipes/integration-with-geocatalog-and-geopatcher/): catalog → patcher → operators in one pipeline
+- [Define an operator](https://jejjohnson.github.io/geotoolz/recipes/define-an-operator/): write your own pipekit operator that composes with the stack
+- [Adding a product reader](https://jejjohnson.github.io/geotoolz/products/product-readers/)
+- [Source code](https://github.com/jejjohnson/geotoolz)

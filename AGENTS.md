@@ -220,6 +220,11 @@ agent can read and follow them):
 | Verify before a PR | `pre-pr-check` |
 | Review a change | `geotoolz-review` (+ the read-only `.claude/agents/reuse-reviewer.md`) |
 
+Downstream users get the stack's guidance through the Claude Code plugin in
+`plugins/geotoolz/` (published by `.claude-plugin/marketplace.json`) and
+`docs/llms.txt`; see `docs/agents.md`. When the public API or the canonical
+pipeline changes, update `plugins/geotoolz/skills/build-geo-pipeline/` too.
+
 ## Working in the repo
 
 Always run Python tools through `uv run` (never the system Python).
