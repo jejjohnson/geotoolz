@@ -1289,7 +1289,7 @@ wheels = [
 
 [[package]]
 name = "geotoolz"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "packages/geotoolz" }
 dependencies = [
     { name = "affine" },
@@ -1800,7 +1800,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.31" }]
 
 [[package]]
 name = "geotoolz-products"
-version = "0.0.0"
+version = "0.1.0"
 source = { editable = "packages/geotoolz-products" }
 dependencies = [
     { name = "affine" },

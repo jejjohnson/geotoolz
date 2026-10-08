@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.6.0...geotoolz-v0.7.0) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **products:** geotoolz no longer ships `geotoolz.readers`, the top-level `geotoolz.SensorReader` / `geotoolz.readers` names, or the `[obstore]` extra (it only served the readers). Install `geotoolz-products` and import from `geoproducts`; use `geotoolz-products[obstore]` for pooled cloud reads. No compatibility shims, per the repo's removal policy.
+
+### Features
+
+* **products:** add geotoolz-products (geoproducts) and move the readers out of geotoolz ([#420](https://github.com/jejjohnson/geotoolz/issues/420)) ([c5e1a10](https://github.com/jejjohnson/geotoolz/commit/c5e1a1017ac410dcd08dee3e699e3a3d198b9e52))
+
 ## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.5.1...geotoolz-v0.6.0) (2026-10-05)
 
 
