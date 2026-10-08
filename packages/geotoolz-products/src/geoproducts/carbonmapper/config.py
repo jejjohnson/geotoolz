@@ -27,10 +27,10 @@ Quick start
 >>> from geoproducts.carbonmapper.config import CarbonMapperConfig
 >>> cfg = CarbonMapperConfig.load()
 >>> token = cfg.get_token()  # resolves from env var or file
->>> # — or — store credentials in the default config file:
->>> cfg.email = "user@example.com"
->>> cfg.password = "s3cret"
->>> cfg.save()                # writes to ~/.geoproducts/auth_carbonmapper.json
+>>> # — or — log in once and keep the tokens for later sessions:
+>>> cfg = CarbonMapperConfig(email="user@example.com", password="s3cret")
+>>> token = cfg.refresh_access_token()
+>>> cfg.save()  # ~/.geoproducts/auth_carbonmapper.json: email + tokens, no password
 
 References
 ----------
@@ -103,18 +103,15 @@ def _create_placeholder_config() -> Path:
     dest = DEFAULT_SAVE_PATH.expanduser().resolve()
     if dest.exists():
         return dest
-    placeholder = {
-        "email": _PLACEHOLDER_EMAIL,
-        "password": _PLACEHOLDER_PASSWORD,
-        "token": None,
-    }
+    # No password slot: the package never writes passwords to disk.
+    placeholder = {"email": _PLACEHOLDER_EMAIL, "token": None}
     # Owner-only from the first byte, like every saved credentials file.
     write_private_json(dest, placeholder)
     logger.warning(
         "Carbon Mapper credentials not configured. Created placeholder "
-        "at %s — edit it with your Carbon Mapper email + password "
-        "(or set CARBONMAPPER_TOKEN / CARBONMAPPER_EMAIL / "
-        "CARBONMAPPER_PASSWORD env vars).",
+        "at %s — set your Carbon Mapper email there and CARBONMAPPER_PASSWORD "
+        "in the environment (or set CARBONMAPPER_TOKEN), then call "
+        "refresh_access_token() and save() to keep the tokens.",
         dest,
     )
     return dest
@@ -136,8 +133,9 @@ class CarbonMapperConfig:
     email:
         Registered Carbon Mapper account e-mail address.
     password:
-        Account password.  Stored only in memory or in the config file on
-        disk — never sent anywhere except the token endpoint.
+        Account password.  Held in memory only: :meth:`save` never writes
+        it, and it is never sent anywhere except the token endpoint. A
+        ``"password"`` a user put in the config file by hand is still read.
     extra:
         Any additional key/value pairs loaded from or saved to the config
         file (for forward compatibility).
@@ -151,9 +149,10 @@ class CarbonMapperConfig:
     >>> if token:
     ...     data = get_plumes_annotated(plume_gas="CH4", token=token)
 
-    Persist credentials to the default config file:
+    Log in once and keep the tokens (not the password) for later sessions:
 
     >>> cfg = CarbonMapperConfig(email="user@example.com", password="s3cret")
+    >>> cfg.refresh_access_token()
     >>> cfg.save()
 
     Reset (delete) the stored config file:
@@ -358,7 +357,12 @@ class CarbonMapperConfig:
     # ------------------------------------------------------------------ #
 
     def save(self, path: Path | str | None = None) -> Path:
-        """Persist the config to a JSON file.
+        """Persist the config — email, tokens, extras — to a JSON file.
+
+        The password is never written: the stored refresh token renews the
+        access token (see :meth:`get_token`), and the password, when
+        renewal needs it again, comes from ``CARBONMAPPER_PASSWORD`` or the
+        constructor.
 
         Parameters
         ----------
@@ -377,6 +381,7 @@ class CarbonMapperConfig:
         Examples
         --------
         >>> cfg = CarbonMapperConfig(email="user@example.com", password="s3cret")
+        >>> cfg.refresh_access_token()
         >>> saved_path = cfg.save()
         >>> print(saved_path)
         /home/user/.geoproducts/auth_carbonmapper.json
@@ -390,8 +395,6 @@ class CarbonMapperConfig:
             data["token"] = self.token
         if self.email is not None:
             data["email"] = self.email
-        if self.password is not None:
-            data["password"] = self.password
         # Owner-only (0600) from the first byte, renamed into place: the
         # credentials are never readable by other users, not even briefly,
         # and a crash leaves no torn file.

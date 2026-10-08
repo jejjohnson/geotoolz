@@ -249,11 +249,7 @@ class TestPlaceholderCreation:
             cfg = CarbonMapperConfig.load()
         assert canonical.exists(), "placeholder file should have been created"
         body = json.loads(canonical.read_text())
-        assert body == {
-            "email": "SET-EMAIL",
-            "password": "SET-PASSWORD",
-            "token": None,
-        }
+        assert body == {"email": "SET-EMAIL", "token": None}  # no password slot
         # On the first run the returned cfg is empty — the placeholder
         # is just a UX target on disk; `cfg` itself doesn't pretend to
         # have credentials.
@@ -356,6 +352,18 @@ class TestSave:
         data = json.loads(dest.read_text())
         assert data["token"] == "save-test"
         assert data["email"] == "s@e.com"
+
+    def test_save_never_writes_the_password(self, tmp_path):
+        dest = tmp_path / "config.json"
+        cfg = CarbonMapperConfig(
+            email="a@b.com", password="pw", token="tok", refresh="ref"
+        )
+        cfg.save(path=dest)
+        data = json.loads(dest.read_text())
+        assert data == {"refresh": "ref", "token": "tok", "email": "a@b.com"}
+        assert "pw" not in dest.read_text()
+        # The in-memory config still has it for this session's renewals.
+        assert cfg.password == "pw"
 
     def test_save_omits_none_fields(self, tmp_path):
         dest = tmp_path / "config.json"
