@@ -116,6 +116,17 @@ def test_buffer_in_metres_paints_disk():
     assert int(np.asarray(out)[0, 0]) == 0
 
 
+def test_buffer_converts_metres_for_feet_crs():
+    # Texas Central (US survey feet): 30 m pixels, 120 m buffer — the same
+    # disk as the UTM test, not a 120 ft one.
+    ft = 0.3048006096012192
+    g = _utm_grid(origin_xy=(2_296_583.0, 10_000_000.0), res=30.0 / ft, crs="EPSG:2277")
+    lon, lat = _grid_lonlat_at(g, row=50, col=50)
+    out = rasterize_sources([_make_source(lon, lat)], buffer_m=120.0, **g)
+    n_set = int(out.sum())
+    assert 30 <= n_set <= 90, f"unexpected pixel count {n_set}"
+
+
 def test_buffer_requires_projected_crs():
     transform = rasterio.Affine(0.001, 0, -100, 0, -0.001, 30)
     with pytest.raises(ValueError, match="projected CRS"):
@@ -243,3 +254,48 @@ def test_cmsourceraster_from_cmtileitem_aligns_to_cmf(tmp_path):
     sr = CMSourceRaster.from_cmtileitem([_make_source(-103.5, 31.5)], tile)
     assert sr.shape == (20, 30)
     assert sr.transform == grid["transform"]
+
+
+def test_cmsourceraster_from_cmtileitem_scopes_bearer_token(monkeypatch):
+    """A remote cmf href is opened with the Bearer header in its Env."""
+    from geoproducts.carbonmapper import sources_raster as _sr
+    from geoproducts.carbonmapper.api_queries import CMTileItem
+
+    seen: dict = {}
+
+    class _Env:
+        def __init__(self, **options):
+            seen.update(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _DS:
+        transform = rasterio.Affine(30, 0, 0, 0, -30, 0)
+        height, width = 4, 5
+        crs = "EPSG:32613"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(_sr.rasterio, "Env", _Env)
+    monkeypatch.setattr(_sr.rasterio, "open", lambda url: _DS())
+    tile = CMTileItem.from_stac_item(
+        {
+            "id": "tan20260824t065735c39s4001",
+            "collection": "l2b-ch4-mfa-v3e",
+            "properties": {"datetime": "2026-08-24T06:57:35Z"},
+            "bbox": [-104, 31, -103, 32],
+            "geometry": {"type": "Point", "coordinates": [-103.5, 31.5]},
+            "assets": {"cmf.tif": {"href": "https://api.example/cmf.tif"}},
+        }
+    )
+    sr = CMSourceRaster.from_cmtileitem([], tile, token="abc")
+    assert sr.shape == (4, 5)
+    assert seen["GDAL_HTTP_HEADERS"] == "Authorization: Bearer abc"

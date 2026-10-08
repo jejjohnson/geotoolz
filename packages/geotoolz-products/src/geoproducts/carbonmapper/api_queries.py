@@ -2,8 +2,7 @@
 
 This module is the typed, cross-resolution layer that sits between the
 raw HTTP wrappers in :mod:`geoproducts.carbonmapper.download` and consumers
-(the Phase 2 ``DailyMonitoringCM`` ETL, analyst notebooks, future
-Partner-feed backfills).
+(monitoring pipelines, analyst notebooks, backfills).
 
 Why this exists
 ---------------
@@ -23,8 +22,8 @@ This module lifts those patterns into:
 - One function per **logical question** (not per HTTP endpoint).
 - Typed return values (:class:`CMRawPlume`, :class:`CMTileItem`,
   :class:`CMSource`) — never raw dicts.
-- Owned knowledge of the bbox-encoding (``data_model §2.1``) and
-  ``source_name`` query-suffix (``data_model §2.2``) quirks.
+- Owned knowledge of the bbox-encoding and ``source_name``
+  query-suffix quirks.
 
 Failure modes
 -------------
@@ -33,7 +32,7 @@ The exception hierarchy is part of the contract:
 - :class:`CMPlumeNotFound`     — ``get_plume`` 404.
 - :class:`CMSourceNotFound`    — ``get_source`` 404.
 - :class:`CMSceneNotPublished` — ``get_tile`` / ``get_tile_for_plume``
-  404 (CM publishes L2B selectively — ``data_model §5.2``). The
+  404 (CM publishes L2B selectively). The
   cross-resolution helper :func:`get_tile_for_plume` *catches* this and
   returns ``None``; the single-resource :func:`get_tile` *re-raises*
   so callers can choose to defer.
@@ -69,7 +68,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -159,10 +158,9 @@ class CMSourceNotFound(CMAPIError):
 class CMSceneNotPublished(CMAPIError):
     """Raised when STAC has no L2B item for a given ``scene_id``.
 
-    Carbon Mapper publishes L2B selectively (``data_model.md §5.2``):
-    plumes can exist for scenes whose L2B raster has not been (or never
-    will be) released. The Phase 2 promotion path defers such plumes
-    rather than failing hard.
+    Carbon Mapper publishes L2B selectively: plumes can exist for scenes
+    whose L2B raster has not been (or never will be) released, so
+    callers may want to defer such plumes rather than fail hard.
 
     The :func:`get_tile` single-resource fetcher *raises* this so
     callers can pick a strategy; the cross-resolution
@@ -181,15 +179,11 @@ class CMSceneNotPublished(CMAPIError):
 
 @dataclass(frozen=True)
 class CMTileItem:
-    """Lightweight Carbon Mapper L2B STAC item — API-only, no DB binding.
-
-    The DB-bound counterpart is ``CarbonMapperTile`` (Phase 1). The
-    promotion direction (API → DB) lives on the *DB* side via
-    ``CarbonMapperTile.from_cm_tile_item(item, cm_provider=...)``; this
-    keeps :mod:`api_queries` free of any database imports.
+    """Lightweight Carbon Mapper L2B STAC item.
 
     Frozen so instances are hashable and safe to use as dict keys when
-    deduplicating ``scene_ids`` in cross-resolution queries.
+    deduplicating ``scene_ids`` in cross-resolution queries; the mapping
+    fields take part in equality but not in the hash.
 
     Attributes
     ----------
@@ -244,9 +238,9 @@ class CMTileItem:
     platform: str
     bbox: tuple[float, float, float, float]
     geometry: BaseGeometry
-    asset_urls: Mapping[str, str]
-    properties: Mapping[str, Any]
-    raw: Mapping[str, Any]
+    asset_urls: Mapping[str, str] = field(hash=False)
+    properties: Mapping[str, Any] = field(hash=False)
+    raw: Mapping[str, Any] = field(hash=False)
 
     @classmethod
     def from_stac_item(cls, item: Mapping[str, Any]) -> CMTileItem:
@@ -511,7 +505,7 @@ def get_source(token: str, source_name: str) -> CMSource:
     """Fetch a single Carbon Mapper source by its canonical name.
 
     Strips the source-name query-string suffix (``?plume_gas=...``)
-    automatically (``data_model §2.2``) — pass either the dirty or
+    automatically — pass either the dirty or
     clean form.
 
     Parameters
@@ -784,10 +778,8 @@ def list_sources(
     >>> sorted(sources, key=lambda s: -(s.emission_auto or 0))[:3]  # doctest: +SKIP
     [<CMSource ...>, <CMSource ...>, <CMSource ...>]
     """
-    # The `download.get_sources` wrapper actually targets
-    # `/plumes/annotated` (see its docstring) — the true source listing
-    # lives at `/catalog/sources.geojson` and returns a GeoJSON
-    # FeatureCollection. Hit it directly with REST repeated-keys bbox.
+    # The source listing lives at `/catalog/sources.geojson` and returns a
+    # GeoJSON FeatureCollection. Query it with REST repeated-keys bbox.
     params: list[tuple[str, str]] = []
     if gas is not None:
         params.append(("plume_gas", str(gas)))
@@ -833,7 +825,7 @@ def get_tile_for_plume(
 
     Unlike :func:`get_tile`, this helper **catches**
     :class:`CMSceneNotPublished` and returns ``None`` — appropriate for
-    consumers (Phase 2 ETL) that want to defer rather than error.
+    consumers that want to defer rather than error.
 
     Parameters
     ----------
@@ -880,7 +872,7 @@ def get_image_raster_for_scene(
     token: str,
     scene_id: str,
     *,
-    collection: str = DEFAULT_L2B_COLLECTION,
+    collection: str | None = None,
     prefer_url_pattern_fallback: bool = True,
     with_rgb: bool = True,
 ) -> CMImageRaster | None:
@@ -897,11 +889,8 @@ def get_image_raster_for_scene(
     2. If STAC returns 404 AND ``prefer_url_pattern_fallback`` is
        ``True`` (default), fall back to
        :meth:`CMImageRaster.from_scene_id` which probes the verified
-       L2B asset-proxy URL pattern (see design doc §4.7).
+       L2B asset-proxy URL pattern.
     3. Return ``None`` only if both paths fail.
-
-    This is the helper :class:`CMPlumeImage` will use (Phase 2) to
-    expose ``.tile`` as a lazy property.
 
     Parameters
     ----------
@@ -910,8 +899,12 @@ def get_image_raster_for_scene(
     scene_id:
         L2B scene id (e.g. ``"tan20260331t181625c77s4001"``).
     collection:
-        STAC collection probed first. Defaults to
-        :data:`DEFAULT_L2B_COLLECTION` (``l2b-ch4-mfa-v3a``).
+        STAC collection probed first. ``None`` (default) means
+        :data:`DEFAULT_L2B_COLLECTION` (``l2b-ch4-mfa-v3a``) for STAC and
+        the default CH4 candidates for the URL-pattern fallback. A
+        pinned collection is the only one either path probes, so a
+        non-default gas or version never resolves to another
+        collection's scene.
     prefer_url_pattern_fallback:
         When ``True`` (default), fall back to URL-pattern derivation
         on STAC 404. Set to ``False`` to keep the v3a-only behaviour
@@ -936,9 +929,11 @@ def get_image_raster_for_scene(
     # Lazy import to avoid the rasters → api_queries circular import.
     from geoproducts.carbonmapper.rasters import CMImageRaster
 
+    stac_collection = collection or DEFAULT_L2B_COLLECTION
+
     # ── 1. STAC path (cheap when it works) ──────────────────────────
     try:
-        ch4_item = get_tile(token, scene_id, collection=collection)
+        ch4_item = get_tile(token, scene_id, collection=stac_collection)
         ir = CMImageRaster.from_cm_tile_item(ch4_item, token=token)
         if with_rgb:
             try:
@@ -947,7 +942,7 @@ def get_image_raster_for_scene(
                 rgb_item = get_tile(
                     token,
                     scene_id,
-                    collection=_rgb_collection_for(collection),
+                    collection=_rgb_collection_for(stac_collection),
                 )
                 ir = ir.with_rgb(rgb_item)
             except CMSceneNotPublished:
@@ -961,11 +956,20 @@ def get_image_raster_for_scene(
     # Fall through to URL-pattern path.
 
     # ── 2. URL-pattern fallback (for v3c/v3d scenes not in STAC) ────
+    # A pinned collection is still probed (so an unpublished scene stays
+    # ``None``), but it is the only candidate.
+    pinned: dict[str, Any] = {}
+    if collection is not None:
+        pinned = {
+            "l2b_collection_candidates": (collection,),
+            "rgb_collection_candidates": (_rgb_collection_for(collection),),
+        }
     try:
         return CMImageRaster.from_scene_id(
             scene_id,
             token=token,
             with_rgb=with_rgb,
+            **pinned,
         )
     except CMSceneNotPublished:
         return None
@@ -1050,7 +1054,7 @@ def get_image_raster_for_plume(
     return get_image_raster_for_scene(
         token,
         scene_id,
-        collection=collection or DEFAULT_L2B_COLLECTION,
+        collection=collection,
         prefer_url_pattern_fallback=prefer_url_pattern_fallback,
         with_rgb=with_rgb,
     )
@@ -1257,8 +1261,7 @@ def list_plumes_for_source(
     for name keys upstream and is kept only as a fallback for
     pre-drift API deployments that don't embed ``plumes``.
 
-    Strips the ``?...`` query suffix from ``source_name`` automatically
-    (``data_model §2.2``).
+    Strips the ``?...`` query suffix from ``source_name`` automatically.
 
     Parameters
     ----------

@@ -18,9 +18,7 @@ Intentionally NOT wrapped:
 - Per-plume ``con_tif`` from the catalog REST surface — duplicates
   the column-density crop already provided by ``CMPlumeImage``.
 
-Pure raster wrappers — no DB binding, no blob upload. The DB-bound
-classes (``CarbonMapperTile``, ``CarbonMapperLocationImage``) and the
-analyst notebooks consume them.
+Pure raster wrappers: no persistence, no uploads.
 """
 
 from __future__ import annotations
@@ -385,7 +383,7 @@ class CMImageRaster:
         *,
         token: str | None = None,
     ) -> CMImageRaster:
-        """Build from the lightweight STAC item (Phase 0.2).
+        """Build from the lightweight STAC item.
 
         STAC asset keys carry file extensions (``cmf.tif``,
         ``uncertainty.tif``, ``artifact-mask.tif``, ``uas.txt``,
@@ -474,7 +472,7 @@ class CMImageRaster:
            spec's composed collection id is probed **first**. Usually
            one probe suffices (same-version pairing), but the L3A side
            can be re-versioned ahead of the L2B parent (observed: a v3d
-           L3A plume whose L2B still serves at v3c — audit §4), so
+           L3A plume whose L2B still serves at v3c), so
            :func:`l2b_collection_candidates_for_spec` backs it up with
            older versions (then newer ones) **of the same gas** — a CO2
            plume never resolves to a CH4 scene. Because the spec always

@@ -473,6 +473,15 @@ class TestFromStacItem:
         img = CMPlumeImage.from_stac_item(vis, ime_item=ime)
         assert "ime-cmf-concentrations.tif" in img.urls
 
+    @pytest.mark.parametrize("ime_id", ["other-plume-B", None])
+    def test_rejects_mismatched_ime_sibling(self, ime_id):
+        vis = self._stac_item(PID_V3A)
+        ime = {"assets": {"ime-cmf-concentrations.tif": {"href": "https://x/i.tif"}}}
+        if ime_id is not None:
+            ime["id"] = ime_id
+        with pytest.raises(ValueError, match="does not match"):
+            CMPlumeImage.from_stac_item(vis, ime_item=ime)
+
 
 # ─── Lazy property opens (with on-disk fixture rasters) ────────────
 
@@ -749,7 +758,7 @@ class TestCollectionUsage:
         assert ime_coll.value in urls["ime-cmf-concentrations.tif"]
 
 
-# ─── Tile bridge (Phase 2) ────────────────────────────────────────
+# ─── Tile bridge ──────────────────────────────────────────────────
 
 
 class TestSceneIdDerivation:
@@ -773,7 +782,7 @@ class TestSceneIdDerivation:
 class TestTileBridge:
     """`CMPlumeImage.tile` is the lazy L2B parent raster.
 
-    Wraps ``api_queries.get_image_raster_for_plume`` (Phase 1) so
+    Wraps ``api_queries.get_image_raster_for_plume`` so
     the v3a STAC path and the v3c URL-pattern fallback are both
     transparent here.
     """

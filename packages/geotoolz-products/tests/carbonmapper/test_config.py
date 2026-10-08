@@ -157,6 +157,18 @@ class TestLoad:
             cfg = CarbonMapperConfig.load(path=fake_path)
         assert cfg.token is None
 
+    def test_explicit_path_never_falls_back_to_search_paths(
+        self, tmp_path, monkeypatch
+    ):
+        other = tmp_path / "other_account.json"
+        other.write_text(json.dumps({"token": "other-account-token"}))
+        monkeypatch.setattr(
+            "geoproducts.carbonmapper.config.CONFIG_SEARCH_PATHS", [other]
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = CarbonMapperConfig.load(path=tmp_path / "missing.json")
+        assert cfg.token is None
+
 
 # --- canonical path + placeholder behaviour ---
 

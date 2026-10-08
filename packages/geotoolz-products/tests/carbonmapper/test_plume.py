@@ -249,6 +249,14 @@ class TestValidators:
         plume = CMRawPlume.from_raw(_json_raw(emission_auto="N/A"))
         assert plume.emission_auto is None
 
+    def test_nan_flags_are_missing(self):
+        # Empty CSV cells come back from pandas as NaN (truthy).
+        plume = CMRawPlume.from_raw(
+            _json_raw(validated=float("nan"), has_phme=float("nan"))
+        )
+        assert plume.validated is None
+        assert plume.has_phme is None
+
     def test_validated_string_true(self):
         plume = CMRawPlume.from_raw(_json_raw(validated="true"))
         assert plume.validated is True
@@ -314,13 +322,6 @@ class TestProperties:
             }
         )
         assert plume.observation_datetime.year == 2024
-
-
-# ---------------------------------------------------------------------------
-# Note: database-coupled constructors (``from_source_id``,
-# ``from_plume_staging_record``) live in downstream applications and are
-# intentionally not exposed here.
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -443,16 +444,6 @@ class TestInstrumentEnum:
 
 
 class TestCollectionEnum:
-    def test_v3a_is_stac_resident(self):
-        assert Collection.L3A_VIS_V3A.is_stac_resident
-        assert Collection.L3A_IME_V3A.is_stac_resident
-        assert Collection.L2B_V3A.is_stac_resident
-        assert Collection.L2B_RGB_V3A.is_stac_resident
-
-    def test_v3c_is_not_stac_resident(self):
-        assert not Collection.L3A_VIS_V3C.is_stac_resident
-        assert not Collection.L3A_IME_V3C.is_stac_resident
-
     def test_version_property(self):
         assert Collection.L3A_VIS_V3A.version == "v3a"
         assert Collection.L3A_VIS_V3C.version == "v3c"

@@ -69,7 +69,7 @@ from geoproducts.carbonmapper.products import (
 
 if TYPE_CHECKING:
     # The tile-bridge methods (:meth:`CMPlumeImage.tile` and the
-    # ``tile_*`` cropping methods, Phase 2) need :class:`CMImageRaster`
+    # ``tile_*`` cropping methods) need :class:`CMImageRaster`
     # for typing. Imported under ``TYPE_CHECKING`` to keep the module
     # importable without dragging in the L2B raster machinery for
     # callers who only use the L3A products.
@@ -245,7 +245,7 @@ class CMPlumeImage:
     Each property opens its asset on first access and caches the
     result.
 
-    Recommended workflow (Phase 2 one-liner)::
+    Recommended workflow::
 
         img = CMPlumeImage.from_plume_id(plume_id, token=token)
         outline = img.outline                        # MultiPolygon in EPSG:4326
@@ -434,8 +434,17 @@ class CMPlumeImage:
         Pass both the vis and ime items if you have them (recommended);
         the ime sibling provides the ``ime-*`` product URLs. Asset keys
         are accepted with or without their file extension.
+
+        Raises:
+            ValueError: If ``ime_item``'s ``id`` is absent or differs from
+                ``item``'s (the two must describe the same plume).
         """
         plume_id = str(item.get("id", ""))
+        if ime_item is not None and str(ime_item.get("id", "")) != plume_id:
+            raise ValueError(
+                f"ime_item id {ime_item.get('id')!r} does not match the vis "
+                f"item id {plume_id!r}"
+            )
         urls: dict[str, str] = {}
         for product in products:
             source = item if product.family == CMProductFamily.L3A_VIS else ime_item
@@ -600,7 +609,7 @@ class CMPlumeImage:
             )
             return None
 
-    # ---- Tile bridge (Phase 2) ----------------------------------------
+    # ---- Tile bridge --------------------------------------------------
 
     @cached_property
     def scene_id(self) -> str:

@@ -40,6 +40,12 @@ AUDIT_CON_TIF = (
 # ─── CMCollectionSpec ────────────────────────────────────────────────
 
 
+def test_product_identity_ignores_description():
+    custom = P.CMRasterProduct(P.PLUME_TIF.key, P.PLUME_TIF.family, "custom")
+    assert custom == P.PLUME_TIF
+    assert hash(custom) == hash(P.PLUME_TIF)
+
+
 class TestCollectionSpec:
     def test_composes_all_families_same_version(self):
         spec = CMCollectionSpec(version="v3d")
@@ -47,6 +53,12 @@ class TestCollectionSpec:
         assert spec.collection_id(CMProductFamily.L3A_IME) == "l3a-ime-ch4-mfa-v3d"
         assert spec.collection_id(CMProductFamily.L2B) == "l2b-ch4-mfa-v3d"
         assert spec.collection_id(CMProductFamily.L2B_RGB) == "l2b-rgb-v3d"
+
+    def test_co2_ime_id_keeps_vis_and_l2b_on_mfa(self):
+        spec = CMCollectionSpec.from_collection_id("l3a-ime-co2-mfal-v3e")
+        assert spec.collection_id(CMProductFamily.L3A_IME) == "l3a-ime-co2-mfal-v3e"
+        assert spec.collection_id(CMProductFamily.L3A_VIS) == "l3a-vis-co2-mfa-v3e"
+        assert spec.collection_id(CMProductFamily.L2B) == "l2b-co2-mfa-v3e"
 
     def test_co2_and_cmf_type_variants(self):
         spec = CMCollectionSpec(version="v3a", gas="co2", cmf_type="mfal")
@@ -58,7 +70,10 @@ class TestCollectionSpec:
         "cid, expected",
         [
             ("l3a-vis-ch4-mfa-v3d", CMCollectionSpec("v3d", "ch4", "mfa")),
-            ("l3a-ime-co2-mfal-v3a", CMCollectionSpec("v3a", "co2", "mfal")),
+            (
+                "l3a-ime-co2-mfal-v3a",
+                CMCollectionSpec("v3a", "co2", "mfa", ime_cmf_type="mfal"),
+            ),
             ("l2b-ch4-mfm-v1", CMCollectionSpec("v1", "ch4", "mfm")),
             ("l2b-rgb-v3a", CMCollectionSpec("v3a")),
             ("l3a-vis-ch4-mf-v002", CMCollectionSpec("v002", "ch4", "mf")),
@@ -187,13 +202,13 @@ class TestRegistry:
 class TestAssetUrl:
     def test_ime_concentrations_matches_record_con_tif(self):
         """The composed IME URL must be byte-identical to what the
-        record's own con_tif field pointed at (audit §1)."""
+        record's own con_tif field pointed at."""
         spec = CMCollectionSpec(version="v3d")
         url = P.IME_CONCENTRATIONS.asset_url(spec, PID_V3D)
         assert url == AUDIT_CON_TIF
 
     def test_l2b_cmf_same_version_pairing(self):
-        """Audit §4: the v3d plume's L2B parent serves at v3d."""
+        """The v3d plume's L2B parent serves at v3d."""
         spec = CMCollectionSpec(version="v3d")
         scene = PID_V3D.rsplit("-", 1)[0]
         url = P.CMF.asset_url(spec, scene)

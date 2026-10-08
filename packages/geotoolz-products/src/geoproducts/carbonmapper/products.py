@@ -57,7 +57,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -187,6 +187,12 @@ class CMCollectionSpec:
         >>> CMCollectionSpec.from_collection_id("l2b-rgb-v3a")
         CMCollectionSpec(version='v3a', gas='ch4', cmf_type='mfa')
 
+        A CO2 IME id names only the IME cmf_type; the vis / L2B one
+        keeps the CO2 default (``mfa``):
+
+        >>> CMCollectionSpec.from_collection_id("l3a-ime-co2-mfal-v3e")
+        CMCollectionSpec(version='v3e', gas='co2', cmf_type='mfa', ime_cmf_type='mfal')
+
         Raises:
             ValueError: If ``collection_id`` doesn't match any known
                 family pattern.
@@ -198,11 +204,18 @@ class CMCollectionSpec:
                 f"{collection_id!r} — expected one of the "
                 f"{[f.value for f in CMProductFamily]} families."
             )
-        return cls(
-            version=m.group("version"),
-            gas=m.group("gas") or "ch4",
-            cmf_type=m.group("cmf_type") or "mfa",
-        )
+        gas = m.group("gas") or "ch4"
+        cmf_type = m.group("cmf_type") or "mfa"
+        is_ime = m.group("family") == CMProductFamily.L3A_IME.value
+        if is_ime and gas == "co2" and cmf_type != "mfa":
+            # CO2 splits its cmf_type: IME is `mfal`, vis / L2B are `mfa`.
+            return cls(
+                version=m.group("version"),
+                gas=gas,
+                cmf_type="mfa",
+                ime_cmf_type=cmf_type,
+            )
+        return cls(version=m.group("version"), gas=gas, cmf_type=cmf_type)
 
     @classmethod
     def from_plume_record(cls, record: Mapping[str, Any]) -> CMCollectionSpec:
@@ -234,7 +247,9 @@ class CMCollectionSpec:
         gas = url_spec.gas if url_spec else field_gas
         cmf_type = vis.cmf_type if vis else (ime.cmf_type if ime else field_cmf)
         ime_cmf_type = (
-            ime.cmf_type if ime else (field_cmf if vis and field_cmf else None)
+            (ime.ime_cmf_type or ime.cmf_type)
+            if ime
+            else (field_cmf if vis and field_cmf else None)
         )
         if not (version and gas and cmf_type):
             raise ValueError(
@@ -352,7 +367,7 @@ class CMProduct:
 
     key: str
     family: CMProductFamily
-    description: str = ""
+    description: str = field(default="", compare=False)
 
     @property
     def name(self) -> str:
@@ -536,7 +551,7 @@ def rio_env_options_for(path: str, token: str | None) -> dict[str, Any] | None:
 
 # ─────────────────────────────────────────────────────────────────────
 #  The registry — one instance per product Carbon Mapper publishes
-#  (verified against the live API, 2026-07 audit §3–§4)
+#  (verified against the live API, 2026-07)
 # ─────────────────────────────────────────────────────────────────────
 
 # L3A vis — per-plume crops keyed by plume_id

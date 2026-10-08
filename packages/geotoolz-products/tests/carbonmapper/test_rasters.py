@@ -482,9 +482,8 @@ def _make_probe_response(status_code: int) -> MagicMock:
 
 class TestFromSceneIdProbe:
     """`CMImageRaster.from_scene_id` probes candidate collections in
-    order, taking the first 200/206. Verified URL-pattern from
-    design doc §4.7 — works for v3a (STAC-resident) AND v3c
-    (REST-only, the 2026 L2B version)."""
+    order, taking the first 200/206. The URL pattern works for v3a
+    AND v3c (the 2026 L2B version)."""
 
     def test_newest_candidate_picked_first(self, monkeypatch):
         """The newest candidate is probed first — single probe + success.

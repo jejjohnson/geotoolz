@@ -22,14 +22,13 @@ its cmf_type across collection families — see
 :class:`~geoproducts.carbonmapper.products.CMCollectionSpec`.
 
 **Version timeline.** Carbon Mapper bumps ``emission_version`` per
-processing-software release. ``v3a`` is the canonical STAC-exposed
-version family (in ``/stac/collections``); ``v3c`` is the live
-processing version of newer plumes — reachable via direct asset
-URLs from ``/catalog/plume/{id}`` but **not** registered in STAC.
-The :attr:`CMRawPlume.version` property exposes this so callers can
-branch between STAC-item lookup (v3a) and URL-pattern derivation
-(v3c) — see :class:`~geoproducts.carbonmapper.image.CMPlumeImage`,
-which handles both transparently.
+processing-software release. ``v3a`` was the first STAC-exposed
+version family; newer versions (``v3c`` onwards) were reachable only
+via direct asset URLs from ``/catalog/plume/{id}`` until 2026, and
+STAC now registers every version through ``v3e``. The
+:attr:`CMRawPlume.version` property exposes the version;
+:class:`~geoproducts.carbonmapper.image.CMPlumeImage` resolves the
+assets from the plume record for any version.
 
 This module is the **API-side** typed view of a Carbon Mapper plume
 record. Downstream consumers may persist the record into their own
@@ -183,24 +182,14 @@ class Collection(StrEnum):
     ``/stac/collections/<id>`` paths and embedded in the asset URLs
     returned by ``/catalog/plume/{id}``.
 
-    Two version families currently relevant to this reader:
+    Two version families named here:
 
-    - ``*_V3A`` — STAC-registered. Plumes from 2023-10 to 2025-12.
-      The canonical "current" for STAC consumers.
-    - ``*_V3C`` — newest data (post 2026-01) but **not** registered
-      in ``/stac/collections``. Assets are reachable only via
-      URL-pattern derivation from the REST catalog (see
-      :class:`~geoproducts.carbonmapper.image.CMPlumeImage`).
-
-    Use :attr:`is_stac_resident` to branch between STAC-item lookup
-    (v3a) and URL-pattern derivation (v3c) at runtime.
+    - ``*_V3A`` — plumes from 2023-10 to 2025-12.
+    - ``*_V3C`` — newer data (post 2026-01); REST-only until 2026, and
+      registered in ``/stac/collections`` since.
 
     >>> Collection.L3A_VIS_V3A.value
     'l3a-vis-ch4-mfa-v3a'
-    >>> Collection.L3A_VIS_V3A.is_stac_resident
-    True
-    >>> Collection.L3A_VIS_V3C.is_stac_resident
-    False
     >>> Collection.L3A_VIS_V3A.version
     'v3a'
     """
@@ -217,15 +206,6 @@ class Collection(StrEnum):
     L3A_VIS_V3C = "l3a-vis-ch4-mfa-v3c"
     #: L3A IME v3c — REST-only until 2026; STAC registers it since
     L3A_IME_V3C = "l3a-ime-ch4-mfa-v3c"
-
-    @property
-    def is_stac_resident(self) -> bool:
-        """``True`` if the collection is registered in ``/stac/collections``.
-
-        ``False`` for v3c collections — assets reachable only via the
-        URL-pattern fallback in :class:`CMPlumeImage`.
-        """
-        return not self.value.endswith("-v3c")
 
     @property
     def version(self) -> str:
@@ -743,6 +723,9 @@ class CMRawPlume(BaseModel):
             return v
         if isinstance(v, str):
             return v.lower() in ("true", "1", "yes")
+        # An empty CSV cell arrives from pandas as NaN, which is truthy.
+        if isinstance(v, float) and math.isnan(v):
+            return None
         return bool(v)
 
     # ------------------------------------------------------------------ #
@@ -866,10 +849,7 @@ class CMRawPlume(BaseModel):
     def version(self) -> str | None:
         """Processing version (``"v3a"`` / ``"v3b"`` / ``"v3c"`` / ...).
 
-        Re-exposes :attr:`emission_version` as a more obvious branch
-        point for STAC-vs-CDN access: ``v3a`` plumes are STAC-resident,
-        ``v3c`` plumes are reachable only via the URL-pattern derivation
-        in :class:`~geoproducts.carbonmapper.image.CMPlumeImage`.
+        Re-exposes :attr:`emission_version` under a shorter name.
         Returns ``None`` if the upstream payload didn't include
         ``emission_version`` (older CSV exports).
         """

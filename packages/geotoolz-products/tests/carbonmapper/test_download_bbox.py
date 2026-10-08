@@ -72,6 +72,7 @@ def test_get_plumes_csv_uses_repeated_bbox_keys(monkeypatch):
 def test_get_sources_uses_repeated_bbox_keys(monkeypatch):
     cap = _capture_get_url(monkeypatch)
     dl.get_sources(bbox=(-104.5, 31.0, -101.5, 33.5))
+    assert urlsplit(cap["url"]).path.endswith("/catalog/sources.geojson")
     qs = parse_qs(urlsplit(cap["url"]).query)
     assert qs["bbox"] == ["-104.5", "31.0", "-101.5", "33.5"]
 

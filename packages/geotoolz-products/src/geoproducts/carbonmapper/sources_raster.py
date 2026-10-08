@@ -40,6 +40,7 @@ from shapely.geometry import Point, box
 from shapely.geometry.base import BaseGeometry
 
 from geoproducts.carbonmapper.api_queries import CMTileItem
+from geoproducts.carbonmapper.products import rio_env_options_for
 from geoproducts.carbonmapper.source import CMSource
 
 
@@ -73,16 +74,17 @@ def _apply_buffer(
 ) -> gpd.GeoDataFrame:
     """Reproject to ``target_crs`` and buffer each point by ``buffer_m`` metres.
 
-    Requires ``target_crs`` to be projected so ``buffer_m`` is in the
-    same units as the geometries.
+    Requires ``target_crs`` to be projected; ``buffer_m`` is converted to
+    its linear unit (e.g. US survey feet for State Plane grids).
     """
     if not target_crs.is_projected:
         raise ValueError(
             "buffer_m > 0 requires a projected CRS (metres). Got geographic "
             f"CRS {target_crs}. Reproject your grid first or use buffer_m=0."
         )
+    _, metres_per_unit = target_crs.linear_units_factor
     gdf = gdf.to_crs(target_crs)
-    gdf = gdf.assign(geometry=gdf.geometry.buffer(buffer_m))  # ty: ignore[invalid-assignment]
+    gdf = gdf.assign(geometry=gdf.geometry.buffer(buffer_m / metres_per_unit))  # ty: ignore[invalid-assignment]
     return gdf
 
 
@@ -265,13 +267,16 @@ class CMSourceRaster:
         tile: CMTileItem,
         *,
         buffer_m: float = 0.0,
+        token: str | None = None,
     ) -> CMSourceRaster:
         """Build a source raster aligned to an L2B :class:`CMTileItem`.
 
         Resolves the tile's ``cmf`` GeoTIFF header to inherit
         ``(transform, shape, crs)``. Issues one HEAD/GET-range read.
         STAC items key the asset with its extension (``cmf.tif``); the
-        extension-less form is accepted too.
+        extension-less form is accepted too. Pass ``token`` for an href
+        on Carbon Mapper's Bearer-gated asset proxy; it is sent only
+        inside this read's ``rasterio.Env``.
         """
         assets = tile.asset_urls
         cmf_url = assets.get("cmf.tif") or assets.get("cmf") or assets.get("ch4-mfa")
@@ -279,7 +284,8 @@ class CMSourceRaster:
             raise ValueError(
                 f"CMTileItem {tile.scene_id!r} has no 'cmf' asset to align to."
             )
-        with rasterio.open(cmf_url) as ds:
+        env_options = rio_env_options_for(str(cmf_url), token) or {}
+        with rasterio.Env(**env_options), rasterio.open(cmf_url) as ds:
             return cls(
                 sources=sources,
                 transform=ds.transform,

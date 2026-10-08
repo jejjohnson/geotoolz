@@ -327,8 +327,10 @@ class CarbonMapperConfig:
             else:
                 logger.warning("Config path %s does not exist; ignoring.", resolved)
 
-        # 2. Search well-known paths
-        if cfg is None:
+        # 2. Search well-known paths (only without an explicit path: a
+        # missing or broken one must not silently pick up another
+        # account's credentials).
+        if cfg is None and path is None:
             for candidate in CONFIG_SEARCH_PATHS:
                 resolved_candidate = candidate.expanduser().resolve()
                 if resolved_candidate.exists():

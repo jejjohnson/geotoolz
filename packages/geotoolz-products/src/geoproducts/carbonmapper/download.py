@@ -642,9 +642,6 @@ def get_sources(
     source_gas: str | None = None,
     bbox: tuple[float, float, float, float] | None = None,
     sectors: list[str] | None = None,
-    plume_count_min: int | None = None,
-    limit: int = 25,
-    offset: int = 0,
     token: str | None = None,
 ) -> dict:
     """
@@ -663,47 +660,32 @@ def get_sources(
         ``(west_lon, south_lat, east_lon, north_lat)`` in WGS 84.
     sectors:
         IPCC sector codes to include, e.g. ``["1B2"]`` for Oil & Gas.
-    plume_count_min:
-        Return only sources with at least this many associated plumes.
-    limit:
-        Maximum number of sources to return per page (max 1 000).
-    offset:
-        Zero-based pagination offset.
     token:
         Optional Bearer token for authenticated requests.
 
     Returns
     -------
     dict
-        Same structure as :func:`get_plumes_annotated`.  Each item
-        includes: ``source_name``, lat/lon, ``sector``, ``plume_count``,
-        persistence, ``emission_auto`` (persistence-weighted average), and
-        first/last detection date ranges.
-
-    Notes
-    -----
-    The sources endpoint shares ``/catalog/plumes/annotated`` filtered by
-    ``source_name``.  For a full source listing use the STAC search or the
-    CSV endpoint grouped by source.
+        The ``/catalog/sources.geojson`` GeoJSON FeatureCollection. Each
+        feature carries the source centroid and properties such as
+        ``source_name``, ``sector``, ``plume_count``, persistence and
+        ``emission_auto``. :func:`~geoproducts.carbonmapper.list_sources`
+        parses the features into :class:`CMSource` records.
 
     Examples
     --------
-    >>> sources = get_sources(source_gas="CH4", sectors=["1B2"], limit=10)
-    >>> for s in sources["items"]:
-    ...     print(s["source_name"], s.get("plume_count"), "plumes")
+    >>> sources = get_sources(source_gas="CH4", sectors=["1B2"])  # doctest: +SKIP
+    >>> for f in sources["features"]:  # doctest: +SKIP
+    ...     print(f["properties"]["source_name"])
     """
-    # The catalog API surfaces sources through plume queries filtered by
-    # source_name.  A dedicated /sources endpoint may be available with auth.
-    params: dict[str, Any] = {"limit": limit, "offset": offset}
+    params: dict[str, Any] = {}
     if source_gas:
         params["plume_gas"] = source_gas
     params.update(_rest_bbox_params(bbox))
     if sectors:
         params["sectors"] = sectors
-    if plume_count_min is not None:
-        params["plume_count_min"] = plume_count_min
     return cast(
-        dict, _get(f"{CATALOG_URL}/plumes/annotated", params=params, token=token)
+        dict, _get(f"{CATALOG_URL}/sources.geojson", params=params, token=token)
     )
 
 

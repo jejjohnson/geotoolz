@@ -312,8 +312,15 @@ def test_get_source_for_plume_returns_none_on_404(monkeypatch):
 # ─────────────────────────────────────────────────────────────────────
 
 
+def test_tile_item_is_hashable():
+    tile = aq.CMTileItem.from_stac_item(_stac_item())
+    same = aq.CMTileItem.from_stac_item(_stac_item())
+    assert hash(tile) == hash(same)
+    assert {tile, same} == {tile}
+
+
 class TestGetImageRasterForScene:
-    """STAC-first, URL-pattern fallback for 2026 plumes (Phase 1)."""
+    """STAC-first, URL-pattern fallback for 2026 plumes."""
 
     def test_stac_path_wins_when_available(self, monkeypatch):
         """v3a STAC items resolve cleanly — no URL-pattern probe."""
@@ -718,6 +725,31 @@ def test_get_image_raster_for_scene_rgb_follows_collection_version(monkeypatch):
         collection="l2b-ch4-mfa-v3e",
     )
     assert seen == ["l2b-ch4-mfa-v3e", "l2b-rgb-v3e"]
+
+
+def test_get_image_raster_for_scene_fallback_keeps_pinned_collection(monkeypatch):
+    """A pinned non-default collection is the only one the fallback probes."""
+    from geoproducts.carbonmapper.rasters import CMImageRaster
+
+    seen: dict = {}
+
+    def stac_404(token, scene_id, *, collection):
+        raise aq.CMSceneNotPublished(scene_id)
+
+    def fake_from_scene_id(scene_id, *, token, **kw):
+        seen.update(kw)
+        raise aq.CMSceneNotPublished(scene_id)
+
+    monkeypatch.setattr(aq, "get_tile", stac_404)
+    monkeypatch.setattr(CMImageRaster, "from_scene_id", fake_from_scene_id)
+    assert (
+        aq.get_image_raster_for_scene(
+            "tok", "tan20260824t065735c39s4001", collection="l2b-co2-mfa-v3e"
+        )
+        is None
+    )
+    assert seen["l2b_collection_candidates"] == ("l2b-co2-mfa-v3e",)
+    assert seen["rgb_collection_candidates"] == ("l2b-rgb-v3e",)
 
 
 def test_list_tiles_for_source_empty_when_no_plumes(monkeypatch):
