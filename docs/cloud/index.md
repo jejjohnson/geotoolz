@@ -4,7 +4,7 @@ Cloud object storage for the stack (import name `geocloud`): one
 process-wide [obstore](https://developmentseed.org/obstore/) client pool,
 file verbs on it (list, download, upload, copy, sync, sign), credentials
 registered once per bucket (also handed to GDAL), and batched, async
-Cloud-Optimized GeoTIFF reads.
+Cloud-Optimized GeoTIFF reads and validated COG writes.
 
 ```bash
 pip install geotoolz-cloud            # the client pool
@@ -224,6 +224,68 @@ pre-sign the object with `files.sign` and read `/vsicurl/<url>`.
 `redact(text)` masks SAS signatures, S3 / GCS query signatures and
 credentials, `token=` / `key=` parameters and `Bearer` headers. Every
 error geocloud raises about a URI already goes through it.
+
+## Writing COGs — `geocloud.cog.write_cog`
+
+`write_cog` writes a `GeoTensor`, or a lazy georeader reader, as a
+validated COG to a local path or any bucket. It runs on the base install
+(GDAL's `COG` driver through rasterio).
+
+```python
+import numpy as np
+from georeader.geotensor import GeoTensor
+
+from geocloud.cog import write_cog
+
+ndvi: GeoTensor                                              # (1, 10980, 10980) float32, NaN fill
+write_cog(ndvi, "s3://bucket/products/ndvi.tif")             # deflate + float predictor, average overviews
+write_cog(classes, "landcover.tif", compress="zstd")         # uint8: nearest overviews keep class values
+write_cog(mask, "az://account/qa/cloud-mask.tif")            # bool → uint8 0 / 1, no nodata
+write_cog(reader, "gs://bucket/mosaic.tif")                  # lazy GeoData: staged strip by strip
+```
+
+How a write runs:
+
+1. **Stage.** The pixels go to a tiled GeoTIFF in a private temporary
+   directory, together with nodata, band descriptions and tags. A
+   `GeoTensor` is written in one call. A lazy reader is read strip by
+   strip, so a scene larger than memory never loads whole.
+2. **Translate.** GDAL's `COG` driver lays out the tiles, builds the
+   overviews and puts the header first.
+3. **Check.** With `validate=True` (the default), the result must read
+   back as `LAYOUT=COG` with the expected shape, dtype, tiles and
+   overviews.
+4. **Place.** A local file is renamed into place, so a failed write
+   never leaves a truncated file and an existing file survives a failed
+   overwrite. A cloud `dest` is uploaded through
+   [`geocloud.files`](#moving-files-geocloudfiles), using the
+   credentials registered for that bucket.
+
+| Keyword | Default | Notes |
+| --- | --- | --- |
+| `compress` | `"deflate"` | also `zstd`, `lzw`, `lerc*`, `webp` / `jpeg` (8-bit), `none` |
+| `level` | GDAL's | DEFLATE 1–12, ZSTD 1–22 |
+| `predictor` | `True` | GDAL picks horizontal (ints) or floating-point (floats) for DEFLATE / LZW / ZSTD |
+| `blocksize` | `512` | a power of two |
+| `overviews` | `True` | down to one tile |
+| `resampling` | auto | `nearest` for integer / bool data, `average` for floats |
+| `nodata` | `"auto"` | the data's `fill_value_default` if the dtype can hold it; never for a bool mask |
+| `descriptions` | auto | from `attrs["band_names"]` (or `descriptions`) when it has one entry per band |
+| `tags`, `creation_options` | — | dataset tags; raw GDAL `COG` options that win over the keywords |
+| `overwrite`, `validate` | `True` | `overwrite=False` raises `FileExistsError` |
+
+Compared with `georeader.save.save_cog`:
+
+| | `save_cog` | `write_cog` |
+| --- | --- | --- |
+| Options | a free-form profile dict, which it modifies in place | explicit keywords with checked values |
+| Defaults | LZW, no predictor, cubic-spline overviews for every dtype | values that suit the dtype |
+| Validation | none | the output must be a COG |
+| Local write | non-atomic | atomic |
+| Cloud write | fsspec, via a temp file in the current directory | the shared obstore pool and the credentials registry |
+| Lazy readers | no | yes |
+| Unsupported dtypes (bool, float16) | fail | converted (uint8, float32) |
+| A nodata the dtype cannot hold | written as is | dropped (`"auto"`) or rejected (explicit value) |
 
 ## COG reads — `geocloud.cog`
 

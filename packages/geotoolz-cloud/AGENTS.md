@@ -34,7 +34,10 @@ workspace package.
   `object_version()`; pickles by URL so it ships to process pools),
   `CogDomain`, `AsyncCogReader` and the async `read_*` mirrors of
   `georeader.read`. Batched reads fetch every tile a set of windows touches
-  exactly once.
+  exactly once. `write_cog` (base install, GDAL's COG driver) is the one
+  COG writer: staged GTiff → `COG` driver → `LAYOUT=COG` check → atomic
+  rename or `files.upload`; extend it rather than calling
+  `georeader.save.save_cog` or rasterio's COG driver elsewhere.
 
 `geopatcher.fields.CogField` subclasses `CogSource`; extend `CogSource` here
 rather than adding read logic to the patcher.

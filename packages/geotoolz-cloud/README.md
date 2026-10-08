@@ -25,7 +25,7 @@ pip install 'geotoolz-cloud[cog]'     # + COG reads (async-geotiff)
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
-| *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials` |
+| *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials`, `geocloud.cog.write_cog` |
 | `[cog]` | async-geotiff | `geocloud.cog` (`CogSource`, `AsyncCogReader`, `read_*`) |
 
 ## The client pool — `geocloud.store`
@@ -101,6 +101,22 @@ tile: GeoTensor = await read_from_tile(reader, x=163, y=395, z=10)  # (1, 256, 2
 `CogSource` pickles by URL, so it ships to process-pool workers;
 `AsyncCogReader`'s `read_*` coroutines mirror `georeader.read` pixel for
 pixel. Lossless codecs decode bit-for-bit identical to GDAL.
+
+## COG writes — `geocloud.cog.write_cog`
+
+```python
+from geocloud.cog import write_cog
+
+write_cog(ndvi, "s3://bucket/products/ndvi.tif")         # validated COG, uploaded
+write_cog(classes, "landcover.tif", compress="zstd")     # atomic local write
+```
+
+Staged in a temporary directory, translated by GDAL's `COG` driver, checked
+(`LAYOUT=COG`, shape, dtype, tiles, overviews), then renamed or uploaded into
+place. The defaults follow the dtype: a predictor, `nearest` overviews for
+classes and masks, `average` for floats, and a nodata only when the dtype
+can hold it. Lazy georeader readers are staged strip by strip. It needs no
+extra.
 
 ## Next steps
 

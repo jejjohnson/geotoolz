@@ -52,6 +52,7 @@ an object-store client — look it up:
 | tile, process, stitch with overlap blending | `geotoolz-patcher` | `geopatcher.SpatialPatcher` + `spatial.geometry/sampler/window/aggregation` |
 | band math, masks, radiometry, ML on rasters | `geotoolz` | operator families (`gz.NDVI`, `gz.DNToReflectance`, `gz.qa.*`, `gz.learn.*`, …) |
 | write COG / GeoTIFF / Zarr | `geotoolz` | `gz.WriteCOG`, `gz.WriteGeoTIFF`, `gz.WriteZarr` |
+| write a validated COG to disk or a bucket from code | `geotoolz-cloud` | `geocloud.cog.write_cog` |
 | s3:// gs:// az:// https:// reads, COG windows | `geotoolz-cloud` | `geocloud.store.get_obstore`, `geocloud.cog.CogSource` |
 | list, download, upload, copy, sync, sign objects | `geotoolz-cloud` | `geocloud.files` (`ls`, `download`, `upload`, `copy`, `sync`, `sign`) |
 | credentials per bucket / container (SAS, keys, anonymous), GDAL options for them | `geotoolz-cloud` | `geocloud.credentials` (`set_credentials`, `load_credentials`, `gdal_access`) |
