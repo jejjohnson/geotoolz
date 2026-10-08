@@ -29,6 +29,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: uv sync --all-packages --all-groups --all-extras
+      # docs/capabilities.md lists every public name; it must match the code,
+      # and no two packages may export one bare name for different objects.
+      # Needs every extra (geoproducts.carbonmapper refuses to import without
+      # its own), so it runs here rather than in the docs job.
+      - name: Capability index is current
+        if: matrix.python-version == '3.12'
+        run: uv run python scripts/capabilities.py --check
       # Fast tier only — `slow` / `integration` tests run manually via the
       # "Extended Tests" workflow (workflow_dispatch), never automatically.
       # Each package runs from its own directory so its pytest + coverage

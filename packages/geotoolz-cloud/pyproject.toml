@@ -69,8 +69,17 @@ target-version = "py312"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "TID251"]
 ignore = ["E402", "E721", "E731", "E741"]
+
+# Reuse guard rails (see AGENTS.md, "Reuse before you write"): other
+# packages are used through their public API, and object-store clients
+# come from the one pool in geocloud.store.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"geotoolz._src".msg = "private to geotoolz: import its public API (docs/capabilities.md), or make the helper public there first"
+"geopatcher._src".msg = "private to geopatcher: import its public API (docs/capabilities.md), or make the helper public there first"
+"geocatalog._src".msg = "private to geocatalog: import its public API (docs/capabilities.md), or make the helper public there first"
+"geoproducts._src".msg = "private to geoproducts: import its public API (docs/capabilities.md), or make the helper public there first"
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

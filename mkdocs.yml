@@ -50,6 +50,7 @@ plugins:
 nav:
   - Home: index.md
   - The geostack: geostack.md
+  - Capability index: capabilities.md
   - Operators — geotoolz:
       - Concepts: concepts.md
       - Quickstart: quickstart.md

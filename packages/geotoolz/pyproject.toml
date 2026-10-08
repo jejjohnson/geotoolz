@@ -160,7 +160,7 @@ target-version = "py312"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "TID251"]
 # F722 is disabled per jaxtyping's documented guidance: shape-annotated
 # aliases like `Float[np.ndarray, "c h w"]` parse as forward references.
 ignore = ["E402", "E721", "E731", "E741", "F722"]
@@ -185,6 +185,20 @@ ignore = ["E402", "E721", "E731", "E741", "F722"]
 "src/geotoolz/plume/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "src/geotoolz/restore/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "tests/test_restore.py" = ["RUF001", "RUF002", "RUF003"]
+
+# Reuse guard rails (see AGENTS.md, "Reuse before you write"): other
+# packages are used through their public API, and object-store clients
+# come from the one pool in geocloud.store.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"geopatcher._src".msg = "private to geopatcher: import its public API (docs/capabilities.md), or make the helper public there first"
+"geocatalog._src".msg = "private to geocatalog: import its public API (docs/capabilities.md), or make the helper public there first"
+"geocloud._src".msg = "private to geocloud: import its public API (docs/capabilities.md), or make the helper public there first"
+"geoproducts._src".msg = "private to geoproducts: import its public API (docs/capabilities.md), or make the helper public there first"
+"obstore.store.S3Store".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
+"obstore.store.GCSStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
+"obstore.store.AzureStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
+"obstore.store.HTTPStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
+"obstore.store.from_url".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

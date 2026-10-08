@@ -30,12 +30,14 @@ and no package depends on `geotoolz-catalog`.
 
 Before writing a helper, an adapter or a reader, find out whether it exists:
 
-1. **Search the public API.** Each package's `__init__.py` docstring maps its
-   namespaces; `__all__` lists every public name; the docs API pages
-   (`docs/*/api/`) render them.
+1. **Search the capability index.**
+   [`docs/capabilities.md`](docs/capabilities.md) lists every public name in
+   the five packages, once, at its home, with a one-line summary; each
+   package's `__init__.py` docstring maps its namespaces.
 2. **Search the private toolkits.** Shared plumbing lives in `_src/` modules
-   that every family or reader of that package uses (table below, and each
-   package's `AGENTS.md`).
+   that every family or reader of that package uses (the table below, the
+   end of the capability index, and each package's `AGENTS.md`). A package
+   never imports another package's `_src` — ruff's `TID251` rejects it.
 3. **If it is missing, add it to the shared home** — the package's `_src/`
    toolkit, or the lowest package every caller already depends on — not inline
    in the one module that needs it today.
@@ -45,7 +47,7 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 
 | You need… | Use |
 |---|---|
-| An obstore client / byte-range read on `s3://` `gs://` `az://` `https://` | `geocloud.store` (`get_obstore`, `get_range_bytes`) — never build obstore stores elsewhere |
+| An obstore client / byte-range read on `s3://` `gs://` `az://` `https://` | `geocloud.store` (`get_obstore`, `get_range_bytes`) — building obstore stores elsewhere fails lint (`TID251`) |
 | Windowed or async reads from a Cloud-Optimized GeoTIFF | `geocloud.cog.CogSource`; as a patcher field, `geopatcher.fields.CogField` |
 | HTTP with retries, `Retry-After`, streaming downloads (in a reader) | `geoproducts._src.net` (`retrying`, `fetch_bytes`, `download_url`) |
 | Listing / downloading public S3 buckets without credentials | `geoproducts._src.s3` |
@@ -232,6 +234,8 @@ All of these must pass, from the repo root:
    directory (CI lints every package's `tests/`).
 3. `uv run --group lint ruff format --check .`
 4. `make typecheck` — ty runs from each package directory.
+5. After changing a public API: `make capabilities` (CI checks
+   `docs/capabilities.md` is current).
 
 When a change touches packaging, extras or imports, also check what CI's
 `base-install.yml` checks (the package with no extras installed), and make
