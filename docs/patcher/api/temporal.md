@@ -48,7 +48,7 @@ stencil endpoints.
 ::: geopatcher.temporal.stencils.build_sampling_slices
 ::: geopatcher.temporal.stencils.coord_step
 ::: geopatcher.temporal.stencils.stencil_offsets
-::: geopatcher.temporal.stencils.divide_evenly
+::: geopatcher.temporal.stencils.exact_quotient
 ::: geopatcher.temporal.stencils.valid_origin_points
 
 The four-axis integration points are documented with the other temporal

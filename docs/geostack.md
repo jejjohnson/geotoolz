@@ -44,7 +44,7 @@ documented contract rather than an import tangle:
 A frozen `(bounds, interval, resolution, crs)` request for data.
 Catalogs produce them, loaders consume them, and
 [exact grid alignment](catalog/design/exact-grid-alignment.md)
-(`align=`, `divide_evenly`, `is_grid_aligned`) keeps slice shapes honest
+(`align=`, `count_steps`, `is_grid_aligned`) keeps slice shapes honest
 against co-registered products.
 
 **2. `staging.field_for` — catalog rows become patcher Fields.**

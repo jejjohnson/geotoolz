@@ -31,7 +31,7 @@ from geopatcher._src.temporal.stencils import (
     TimeStencil,
     _to_timedelta64,
     build_sampling_slices,
-    divide_evenly,
+    exact_quotient,
     valid_origin_points,
 )
 
@@ -347,23 +347,23 @@ class TestValidOriginPoints:
 
 class TestDivideEvenly:
     def test_exact_division_returns_quotient(self) -> None:
-        assert divide_evenly(12, 3) == 4
+        assert exact_quotient(12, 3) == 4
 
     def test_uneven_division_raises_with_label(self) -> None:
         # The labelled error names what `y` represents — geopatcher-specific.
         with pytest.raises(ValueError, match="step"):
-            divide_evenly(10, 3, label="step")
+            exact_quotient(10, 3, label="step")
 
     def test_timedelta_inputs(self) -> None:
         # 9h / 3h = 3 exactly; auto-unit-promotion is fine.
-        result = divide_evenly(
+        result = exact_quotient(
             np.timedelta64(9, "h"), np.timedelta64(3, "h"), label="source_step"
         )
         assert int(result) == 3
 
     def test_float_inputs_within_epsilon(self) -> None:
         # 1.0 / 0.5 = 2 within float fuzz.
-        assert int(divide_evenly(1.0, 0.5)) == 2
+        assert int(exact_quotient(1.0, 0.5)) == 2
 
 
 class TestGetConfig:
@@ -390,7 +390,7 @@ class TestGetConfig:
 
 
 # ---------------------------------------------------------------------------
-# #190 — stencil / divide_evenly edge cases
+# #190 — stencil / exact_quotient edge cases
 # ---------------------------------------------------------------------------
 
 
@@ -407,13 +407,13 @@ def test_mixed_type_stencil_rejected() -> None:
         Stencil(np.timedelta64(-3, "h"), np.timedelta64(0, "h"), 1)
 
 
-def test_divide_evenly_guards_zero_and_datetimes() -> None:
-    from geopatcher.temporal.stencils import divide_evenly
+def test_exact_quotient_guards_zero_and_datetimes() -> None:
+    from geopatcher.temporal.stencils import exact_quotient
 
     with pytest.raises(ValueError, match="must be non-zero"):
-        divide_evenly(4, 0, label="step")
+        exact_quotient(4, 0, label="step")
     with pytest.raises(TypeError, match="datetime64"):
-        divide_evenly(np.datetime64("2020-01-02"), np.timedelta64(1, "D"))
+        exact_quotient(np.datetime64("2020-01-02"), np.timedelta64(1, "D"))
     with pytest.raises(TypeError, match="both"):
-        divide_evenly(np.timedelta64(4, "h"), 2)
-    assert int(divide_evenly(np.timedelta64(4, "h"), np.timedelta64(1, "h"))) == 4
+        exact_quotient(np.timedelta64(4, "h"), 2)
+    assert int(exact_quotient(np.timedelta64(4, "h"), np.timedelta64(1, "h"))) == 4

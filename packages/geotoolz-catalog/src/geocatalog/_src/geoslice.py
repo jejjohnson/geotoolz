@@ -34,7 +34,7 @@ from rasterio.windows import (
     from_bounds,
 )
 
-from geocatalog._src._align import Align, GridAlignmentWarning, divide_evenly
+from geocatalog._src._align import Align, GridAlignmentWarning, count_steps
 from geocatalog._src._timeutil import naive_utc_interval
 
 
@@ -44,7 +44,7 @@ _VALID_ALIGN_MODES: frozenset[str] = frozenset(get_args(Align))
 # Alignment precision in decimal digits of a *pixel*: extents and origins
 # within ``resolution * 10 ** -PIXEL_PRECISION`` of the lattice count as
 # aligned. Only enforced when a slice opts in via ``align=`` or when
-# callers use `aligned_shape` / `divide_evenly` / `is_grid_aligned`.
+# callers use `aligned_shape` / `count_steps` / `is_grid_aligned`.
 PIXEL_PRECISION: int = 3
 
 
@@ -161,7 +161,7 @@ class GeoSlice:
         )
         for length, step, axis in axes:
             try:
-                divide_evenly(length, step, label=f"{axis}-extent")
+                count_steps(length, step, label=f"{axis}-extent")
             except ValueError as exc:
                 if self.align == "error":
                     raise
@@ -232,8 +232,8 @@ class GeoSlice:
         rx, ry = self.resolution
         xmin, ymin, xmax, ymax = self.bounds
         return (
-            divide_evenly(ymax - ymin, ry, label="y-extent"),
-            divide_evenly(xmax - xmin, rx, label="x-extent"),
+            count_steps(ymax - ymin, ry, label="y-extent"),
+            count_steps(xmax - xmin, rx, label="x-extent"),
         )
 
     @property

@@ -128,6 +128,8 @@ def test_moved_modules_are_gone(name: str) -> None:
 def test_old_root_names_are_gone() -> None:
     for old in ("SpatialHann", "TemporalMean", "PatchCache", "ObstoreCogField"):
         assert not hasattr(geopatcher, old), old
+    # Renamed so it no longer collides with geocatalog's grid helper.
+    assert not hasattr(geopatcher.temporal.stencils, "divide_evenly")
 
 
 def test_lazy_adapters_resolve_from_fields() -> None:

@@ -15,7 +15,7 @@ from geopatcher._src.temporal.stencils import (
     TimeStencil,
     build_sampling_slices,
     coord_step,
-    divide_evenly,
+    exact_quotient,
     stencil_offsets,
     valid_origin_points,
 )
@@ -27,7 +27,7 @@ __all__ = [
     "TimeStencil",
     "build_sampling_slices",
     "coord_step",
-    "divide_evenly",
+    "exact_quotient",
     "stencil_offsets",
     "valid_origin_points",
 ]

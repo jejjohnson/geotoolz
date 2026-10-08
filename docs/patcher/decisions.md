@@ -411,7 +411,7 @@ Alongside the view, the PR ships three sympathetic conveniences:
   `IncompleteScanConfiguration` at anchor time when `(length - size) %
   step` is nonzero on any axis. Off by default to preserve existing
   silent-truncation semantics; opt in for the xrpatcher
-  strict-tiling story. Spatial analogue of `divide_evenly` (ADR-004).
+  strict-tiling story. Spatial analogue of `exact_quotient` (ADR-004).
 - `XarrayField.coords_per_patch(patches)` returns one coord-only
   `xr.Dataset` per patch (xrpatcher's `get_coords()` equivalent).
 - `SpatialPatcher.merge_to_xarray(patches, field)` returns a

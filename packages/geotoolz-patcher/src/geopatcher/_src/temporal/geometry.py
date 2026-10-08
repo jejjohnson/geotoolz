@@ -38,7 +38,7 @@ from geopatcher._src.temporal.stencils import (
     _to_timedelta64,
     coord_step,
     delta_config,
-    divide_evenly,
+    exact_quotient,
     stencil_offsets,
 )
 
@@ -278,7 +278,7 @@ class StencilGeometry(Geometry):
             self.source_step = _to_timedelta64(self.source_step)
         if self.source_step is not None:
             sigma = int(
-                divide_evenly(
+                exact_quotient(
                     self.stencil.step,
                     self.source_step,
                     label="stencil step / source step",

@@ -19,7 +19,7 @@ mosaicker also exported as top-level ``geotoolz.Stitch``). Its class
 
 geotoolz's own additions:
 
-- `SpatialTriangular` — a linear-ramp `geopatcher.spatial.window.Window` whose
+- `TriangularWindow` — a linear-ramp `geopatcher.spatial.window.Window` whose
   overlap-add blend matches ``geom.Stitch(blend="feather")``.
 - `StratifiedSample` (class proportions matching a target distribution,
   largest-remainder allocation) and `BalancedSampler` (N chips per
@@ -69,13 +69,13 @@ __all__ = [
     "BalancedSampler",
     "GridSampler",
     "MergePatches",
-    "SpatialTriangular",
     "StratifiedSample",
+    "TriangularWindow",
 ]
 
 
 @dataclass(eq=False)
-class SpatialTriangular(spatial.window.Window):
+class TriangularWindow(spatial.window.Window):
     """Linear-ramp triangular spatial window for overlap-add blending.
 
     Each axis ramps linearly from the edge up to a plateau of 1.0 over
@@ -104,7 +104,7 @@ class SpatialTriangular(spatial.window.Window):
 
         Examples:
             >>> from geopatcher import spatial
-            >>> SpatialTriangular(width=2).weights(
+            >>> TriangularWindow(width=2).weights(
             ...     spatial.geometry.Rectangular(size=(5, 7))
             ... ).shape
             (5, 7)
