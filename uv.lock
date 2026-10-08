@@ -22,6 +22,7 @@ members = [
     "geotoolz-catalog",
     "geotoolz-monorepo",
     "geotoolz-patcher",
+    "geotoolz-products",
 ]
 
 [[package]]
@@ -1324,9 +1325,6 @@ learn = [
 netcdf = [
     { name = "netcdf4" },
 ]
-obstore = [
-    { name = "geotoolz-patcher", extra = ["obstore"] },
-]
 patch = [
     { name = "geotoolz-patcher", extra = ["pipekit"] },
 ]
@@ -1370,7 +1368,6 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4" },
     { name = "geopandas", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
-    { name = "geotoolz-patcher", extras = ["obstore"], marker = "extra == 'obstore'", editable = "packages/geotoolz-patcher" },
     { name = "geotoolz-patcher", extras = ["pipekit"], marker = "extra == 'patch'", editable = "packages/geotoolz-patcher" },
     { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.10.0" },
     { name = "hydra-zen", marker = "extra == 'hydra'", specifier = ">=0.14" },
@@ -1392,7 +1389,7 @@ requires-dist = [
     { name = "xvec", marker = "extra == 'vector-cube'", specifier = ">=0.4" },
     { name = "zarr", marker = "extra == 'zarr'", specifier = ">=3" },
 ]
-provides-extras = ["viz", "learn", "hydra", "patch", "vector-cube", "hdf5", "hdf4", "netcdf", "zarr", "obstore"]
+provides-extras = ["viz", "learn", "hydra", "patch", "vector-cube", "hdf5", "hdf4", "netcdf", "zarr"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1589,9 +1586,10 @@ source = { editable = "." }
 
 [package.dev-dependencies]
 dev = [
-    { name = "geotoolz", extra = ["hydra", "netcdf", "obstore", "vector-cube", "zarr"] },
+    { name = "geotoolz", extra = ["hydra", "netcdf", "vector-cube", "zarr"] },
     { name = "geotoolz-catalog" },
     { name = "geotoolz-patcher" },
+    { name = "geotoolz-products", extra = ["obstore", "operators"] },
     { name = "h5netcdf" },
     { name = "h5py" },
     { name = "hypothesis" },
@@ -1605,6 +1603,7 @@ docs = [
     { name = "geotoolz" },
     { name = "geotoolz-catalog" },
     { name = "geotoolz-patcher" },
+    { name = "geotoolz-products" },
     { name = "ipykernel" },
     { name = "jupytext" },
     { name = "matplotlib" },
@@ -1626,9 +1625,10 @@ typecheck = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "geotoolz", extras = ["hydra", "vector-cube", "netcdf", "zarr", "obstore"], editable = "packages/geotoolz" },
+    { name = "geotoolz", extras = ["hydra", "vector-cube", "netcdf", "zarr"], editable = "packages/geotoolz" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-patcher", editable = "packages/geotoolz-patcher" },
+    { name = "geotoolz-products", extras = ["obstore", "operators"], editable = "packages/geotoolz-products" },
     { name = "h5netcdf", specifier = ">=1.3" },
     { name = "h5py", specifier = ">=3.10" },
     { name = "hypothesis", specifier = ">=6.152.9" },
@@ -1642,6 +1642,7 @@ docs = [
     { name = "geotoolz", editable = "packages/geotoolz" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-patcher", editable = "packages/geotoolz-patcher" },
+    { name = "geotoolz-products", editable = "packages/geotoolz-products" },
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "jupytext", specifier = ">=1.19.2" },
     { name = "matplotlib", specifier = ">=3.10.8" },
@@ -1796,6 +1797,58 @@ docs = [
 ]
 lint = [{ name = "ruff", specifier = ">=0.15.11" }]
 typecheck = [{ name = "ty", specifier = ">=0.0.31" }]
+
+[[package]]
+name = "geotoolz-products"
+version = "0.0.0"
+source = { editable = "packages/geotoolz-products" }
+dependencies = [
+    { name = "affine" },
+    { name = "georeader-spaceml" },
+    { name = "numpy" },
+    { name = "rasterio" },
+    { name = "typing-extensions" },
+]
+
+[package.optional-dependencies]
+obstore = [
+    { name = "geotoolz-patcher", extra = ["obstore"] },
+]
+operators = [
+    { name = "geotoolz" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+lint = [
+    { name = "ruff" },
+]
+typecheck = [
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "affine", specifier = ">=2.4" },
+    { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "geotoolz", marker = "extra == 'operators'", editable = "packages/geotoolz" },
+    { name = "geotoolz-patcher", extras = ["obstore"], marker = "extra == 'obstore'", editable = "packages/geotoolz-patcher" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "rasterio", specifier = ">=1.3" },
+    { name = "typing-extensions", specifier = ">=4.0" },
+]
+provides-extras = ["obstore", "operators"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+]
+lint = [{ name = "ruff", specifier = ">=0.15.11" }]
+typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "ghp-import"

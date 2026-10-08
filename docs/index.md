@@ -169,4 +169,4 @@ the built-in operator to reach for in real pipelines.
 - **Extended examples ↗**: chronological walkthroughs of the whole stack — composition core, pipeline idioms, image processing on real burn-scars, ML patches, deployment shapes — live in [`research_notebook/projects/geostack`](https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack). The notebooks there execute against real MPC / GBIF / Natural Earth data; this repo's docs reference them by name.
 - **Reference**: [Core API](api/core.md) · [Changelog](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/CHANGELOG.md) · [GitHub](https://github.com/jejjohnson/geotoolz)
 
-Related: [Normalization](normalization.md) · [Multi-format readers](io.md) · [Sensor readers](readers.md).
+Related: [Normalization](normalization.md) · [Multi-format readers](io.md) · [Sensor readers](products/sensor-readers.md).

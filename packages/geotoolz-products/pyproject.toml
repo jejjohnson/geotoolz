@@ -1,0 +1,113 @@
+[project]
+name = "geotoolz-products"
+version = "0.0.0"
+description = "Readers for Earth-observation data products — each mission or provider product as a georeader GeoData / GeoTensor."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = { file = "../../LICENSE" }
+readme = "README.md"
+keywords = ["remote-sensing", "geospatial", "readers", "earth-observation", "georeader"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+dependencies = [
+    # GeoTensor and the GeoData protocol every reader implements; >=2.1 for
+    # the numpy-subclass GeoTensor.
+    "georeader-spaceml>=2.1",
+    "numpy>=1.26",
+    # `georeader.geotensor` imports `Self` from typing_extensions without
+    # declaring it (upstream packaging bug in >=2.1).
+    "typing-extensions>=4.0",
+    # rasterio windows / transforms and affine are imported at module top
+    # level by the reader base class; declared directly rather than relying
+    # on georeader-spaceml pulling them in.
+    "rasterio>=1.3",
+    "affine>=2.4",
+]
+
+[project.optional-dependencies]
+# Pooled object-store client (``obstore``) for cloud-backed sensor reads:
+# readers pointing at ``s3://`` / ``gs://`` / ``az://`` / ``https://``
+# scenes call ``SensorReader.set_obstore_client(...)`` so every byte-range
+# fetch goes through geopatcher's process-wide pool (shared with geotoolz
+# and geocatalog).
+obstore = ["geotoolz-patcher[obstore]"]
+# Sensor presets (``<sensor>.presets``): geotoolz operators bound to a
+# product's band names. geotoolz never depends on this package, so the
+# extra adds no cycle.
+operators = ["geotoolz"]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/geotoolz"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
+lint = [
+    "ruff>=0.15.11",
+]
+typecheck = [
+    "ty>=0.0.35",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/geoproducts"]
+artifacts = ["src/geoproducts/*/data/**"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E402", "E721", "E731", "E741"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+# Optional extras (obstore, geotoolz) are imported lazily inside functions;
+# without them in the typecheck env ty cannot resolve them.
+unresolved-import = "ignore"
+# rasterio.windows.Window doesn't carry parameter names in its stub.
+unknown-argument = "ignore"
+# georeader's `read.read_from_*` helpers are annotated `GeoData | ndarray`
+# although they return a GeoTensor for an in-memory or loaded read (same
+# rule as geotoolz, where this code lived before).
+invalid-return-type = "ignore"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/geoproducts --cov-report=term-missing --cov-report=xml:coverage.xml --strict-markers"
+markers = [
+    "slow: builds artifacts or otherwise takes long; deselected in CI's fast tier",
+    "live: calls a real external API (needs credentials / network); always deselected in CI",
+]
+
+[tool.coverage.run]
+source = ["src/geoproducts"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80

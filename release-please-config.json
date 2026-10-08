@@ -51,6 +51,18 @@
         "src/geocatalog/__init__.py",
         {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='geotoolz-catalog')].version"}
       ]
+    },
+    "packages/geotoolz-products": {
+      "release-type": "python",
+      "package-name": "geotoolz-products",
+      "component": "geotoolz-products",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/geoproducts/__init__.py",
+        {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='geotoolz-products')].version"}
+      ]
     }
   }
 }

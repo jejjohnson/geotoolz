@@ -1,8 +1,8 @@
-"""geotoolz has no obstore pool of its own — it uses geopatcher's.
+"""geoproducts has no obstore pool of its own — it uses geopatcher's.
 
 The pool itself (keys, Azure construction, signed URLs, LRU) is tested
 in ``packages/geotoolz-patcher/tests/test_objstore.py``; these smoke
-tests pin that geotoolz's sensor-reader byte path goes through it.
+tests pin that the sensor-reader byte path goes through it.
 """
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ pytest.importorskip("obstore")
 
 import geopatcher.objstore as shared_pool
 
-from geotoolz.readers._src import base
+from geoproducts._src import base
 
 
 def test_private_pool_module_is_gone():
-    assert importlib.util.find_spec("geotoolz.readers._src.obstore") is None
+    assert importlib.util.find_spec("geoproducts._src.obstore") is None
 
 
 class _RecordingStore:

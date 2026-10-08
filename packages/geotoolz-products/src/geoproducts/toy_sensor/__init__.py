@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from geotoolz.readers.toy_sensor import constants, presets
-from geotoolz.readers.toy_sensor.presets import NDVI
-from geotoolz.readers.toy_sensor.reader import Reader
+from geoproducts.toy_sensor import constants, presets
+from geoproducts.toy_sensor.presets import NDVI
+from geoproducts.toy_sensor.reader import Reader
 
 
 def __getattr__(name: str) -> Any:

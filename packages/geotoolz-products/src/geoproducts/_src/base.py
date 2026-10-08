@@ -276,7 +276,7 @@ _REMOTE_SCHEMES = frozenset(
 
 _OBSTORE_INSTALL_HINT = (
     "SensorReader cloud reads need the [obstore] extra (the shared pool lives "
-    "in geopatcher); install via `pip install 'geotoolz[obstore]'`."
+    "in geopatcher); install via `pip install 'geotoolz-products[obstore]'`."
 )
 
 

@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Find the data, cut it to size, compute on it — one composable stack.**
-> A [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) of three
+> A [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) of four
 > packages that interlock end-to-end, with the Operator / Sequential / Graph
 > composition core supplied by [pipekit](https://github.com/jejjohnson/pipekit).
 
@@ -36,6 +36,7 @@ flowchart LR
 | [`geotoolz`](packages/geotoolz) | `geotoolz` | Carrier-preserving `pipekit.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/) |
 | [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/patcher/) |
 | [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/catalog/) |
+| [`geotoolz-products`](packages/geotoolz-products) | `geoproducts` | Readers for Earth-observation data products: each mission or provider product as a georeader `GeoData` / `GeoTensor` (depends on georeader, never on geotoolz) | [Products →](https://jejjohnson.github.io/geotoolz/products/) |
 
 Import names are unchanged from the pre-monorepo repos — only the
 distribution names carry the `geotoolz-` prefix.
@@ -58,8 +59,8 @@ full tour):
   intended coreg callables for `geopatcher.matched.MatchedField`, aligning
   multi-source patches found by the catalog's matchup engine.
 - **One obstore pool** — `geopatcher.objstore` owns the process-wide pooled
-  HTTP/2 client; the `[obstore]` extras of geotoolz and geocatalog install
-  and use it.
+  HTTP/2 client; the `[obstore]` extras of geotoolz-products and geocatalog
+  install and use it.
 
 ```python
 import geocatalog as gc, geopatcher as gp, geotoolz as gz
@@ -90,6 +91,7 @@ pip install geotoolz                      # operators only
 pip install 'geotoolz[patch]'             # + patcher (geopatcher)
 pip install geotoolz-catalog              # catalog only
 pip install 'geotoolz-catalog[patch]'     # catalog + patcher bridge
+pip install geotoolz-products             # product readers (geoproducts)
 ```
 
 Pre-PyPI, install from a clone or via git URLs with
@@ -104,7 +106,7 @@ uv sync --all-packages --all-groups --all-extras
 
 ```bash
 make install              # uv sync (all packages, groups, extras) + hooks
-make test                 # fast tier across all three packages
+make test                 # fast tier across all four packages
 make lint                 # ruff check .  (entire repo)
 make format               # ruff format + ruff check --fix
 make typecheck            # ty per package
@@ -114,7 +116,8 @@ make docs-serve           # the unified docs site, locally
 Each package keeps its own tests, pytest markers, and coverage gates —
 run from the package directory (`cd packages/geotoolz-patcher && uv run
 pytest`). Releases are cut per package by release-please
-(`geotoolz-vX.Y.Z`, `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`).
+(`geotoolz-vX.Y.Z`, `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`,
+`geotoolz-products-vX.Y.Z`).
 
 ## License
 

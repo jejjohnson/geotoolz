@@ -63,7 +63,6 @@ nav:
           - Normalization: normalization.md
           - Patching (tile / stitch / sample): patch_ops.md
           - Multi-format readers: io.md
-          - Adding a sensor reader: readers.md
       - API Reference:
           - Core: api/core.md
           - Augment: api/augment.md
@@ -81,7 +80,6 @@ nav:
           - Plume: api/plume.md
           - QA: api/qa.md
           - Radiometry: api/radiometry.md
-          - Readers: api/readers.md
           - Restore: api/restore.md
           - Segment: api/segment.md
           - Spectral: api/spectral.md
@@ -138,6 +136,10 @@ nav:
       - CLI: catalog/cli.md
       - Schema versions: catalog/schema-versions.md
       - Logging: catalog/logging.md
+  - Products — geoproducts:
+      - Home: products/index.md
+      - Adding a sensor reader: products/sensor-readers.md
+      - API Reference: products/api.md
       - Design:
           - Exact grid alignment: catalog/design/exact-grid-alignment.md
           - Query & matchup: catalog/design/query-matchup.md

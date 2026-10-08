@@ -20,7 +20,7 @@ import pytest
 from affine import Affine
 from rasterio.windows import Window
 
-from geotoolz.readers._src.base import SensorReader, Track
+from geoproducts._src.base import SensorReader, Track
 
 
 # --- minimal concrete reader for the test surface -----------------------
@@ -136,7 +136,7 @@ def test_read_bytes_windows_drive_letter_path_treated_as_local():
     ``open()`` will of course raise ``FileNotFoundError``, which is
     the *correct* failure mode for a non-existent local path).
     """
-    from geotoolz.readers._src.base import _has_remote_scheme
+    from geoproducts._src.base import _has_remote_scheme
 
     # The classifier must NOT mark this as remote (no "://" in URI).
     assert not _has_remote_scheme("C:/scene.bin")

@@ -9,8 +9,8 @@ import numpy as np
 from affine import Affine
 from rasterio.windows import Window
 
-from geotoolz.readers._src.base import SensorReader, Track
-from geotoolz.readers.toy_sensor import constants
+from geoproducts._src.base import SensorReader, Track
+from geoproducts.toy_sensor import constants
 
 
 __all__ = ["Reader"]
@@ -37,7 +37,7 @@ class Reader(SensorReader):
 
     Examples:
         >>> import numpy as np
-        >>> from geotoolz.readers.toy_sensor import Reader
+        >>> from geoproducts.toy_sensor import Reader
         >>> reader = Reader("scene", data=np.zeros((4, 8, 8), dtype="float32"))
         >>> reader.load().shape
         (4, 8, 8)

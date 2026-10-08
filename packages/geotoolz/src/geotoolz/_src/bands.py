@@ -6,7 +6,7 @@ here translate names to integer positions using metadata carried on the
 ``GeoTensor`` — looked up under a configurable list of attribute keys.
 
 The lookup order (:data:`DEFAULT_BAND_KEYS`) is ``band_names`` (what
-geotoolz readers and operators write), then ``descriptions`` (rasterio),
+geoproducts readers and geotoolz operators write), then ``descriptions`` (rasterio),
 then ``bands`` (assorted DataArray pipelines), so common upstream readers
 Just Work without per-key wiring.
 

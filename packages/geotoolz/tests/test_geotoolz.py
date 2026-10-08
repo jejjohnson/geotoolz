@@ -106,12 +106,6 @@ def test_formerly_call_overriding_operators_support_graph_mode() -> None:
         assert node.operator is op
 
 
-#: Subpackages exempt from the operator-family file pair: ``readers`` holds
-#: the sensor-reader framework (``_src/`` plus public per-sensor
-#: subpackages), not Tier-A / Tier-B operators.
-_NON_OPERATOR_PACKAGES = frozenset({"readers"})
-
-
 def _families() -> list[Any]:
     from pathlib import Path
 
@@ -132,16 +126,15 @@ def test_family_layout() -> None:
     import ast
 
     families = _families()
-    assert len(families) >= 20
+    assert len(families) >= 19
     problems: list[str] = []
     for family in families:
         name = family.name
         if not (family / "_src" / "__init__.py").is_file():
             problems.append(f"{name}: missing _src/")
-        if name not in _NON_OPERATOR_PACKAGES:
-            for module in ("array.py", "operators.py"):
-                if not (family / "_src" / module).is_file():
-                    problems.append(f"{name}: missing _src/{module}")
+        for module in ("array.py", "operators.py"):
+            if not (family / "_src" / module).is_file():
+                problems.append(f"{name}: missing _src/{module}")
         tree = ast.parse((family / "__init__.py").read_text(encoding="utf-8"))
         problems.extend(
             f"{name}/__init__.py defines {node.name!r}"
@@ -213,9 +206,8 @@ def test_public_operators_exported() -> None:
 def test_one_home_per_public_name() -> None:
     """No object is exported from two geotoolz families (#164).
 
-    A package re-exporting its own submodules' names (``readers.toy_sensor``
-    re-exporting ``toy_sensor.reader.Reader``) is one home; ``plume``
-    re-exporting ``segment.otsu_threshold`` is two.
+    A package re-exporting its own submodules' names is one home;
+    ``plume`` re-exporting ``segment.otsu_threshold`` is two.
     """
     import types
 
@@ -239,10 +231,11 @@ def test_removed_modules_are_gone() -> None:
 
     import pytest
 
-    for module in ("geotoolz.cloud", "geotoolz.model"):
+    for module in ("geotoolz.cloud", "geotoolz.model", "geotoolz.readers"):
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(module)
-    for name in ("cloud", "model"):
+    # Readers moved to geotoolz-products (`geoproducts`).
+    for name in ("cloud", "model", "readers", "SensorReader"):
         assert not hasattr(geotoolz, name)
         assert name not in geotoolz.__all__
     assert not hasattr(geotoolz.viz, "ToDisplayRange")
