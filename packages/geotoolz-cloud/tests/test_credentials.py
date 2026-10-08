@@ -74,6 +74,18 @@ def test_registered_options_reach_the_pool():
     credentials.remove_credentials("s3://pub")  # no-op
 
 
+def test_client_options_merge_one_level_deep():
+    headers = {"Authorization": "Bearer t"}
+    credentials.set_credentials(
+        "s3://hdr", client_options={"default_headers": headers, "timeout": "10s"}
+    )
+    store = get_obstore(
+        "s3://hdr/a.tif", storage_options={"client_options": {"timeout": "99s"}}
+    )
+    assert store.client_options["default_headers"] == {"authorization": b"Bearer t"}
+    assert store.client_options["timeout"] == "99s"
+
+
 def test_azure_container_wins_over_account():
     credentials.set_credentials("az://acct", account_key="a2V5")
     credentials.set_credentials("az://acct/raw", sas_token=CONTAINER_SAS)

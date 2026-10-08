@@ -451,7 +451,7 @@ def _stream_to_file(source: _Target, dest: Path) -> None:
                 written += fh.write(result.bytes())
         if written != expected:
             raise OSError(
-                f"short read of {source.child(source.key)!r}: "
+                f"short read of {_r(source.child(source.key))}: "
                 f"{written} of {expected} bytes"
             )
         os.replace(part, dest)

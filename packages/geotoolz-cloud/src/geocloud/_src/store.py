@@ -534,7 +534,18 @@ def get_obstore(
 
     registered = registered_options(uri)
     if registered:
-        storage_options = {**registered, **(storage_options or {})}
+        given = dict(storage_options or {})
+        merged = {**registered, **given}
+        # One level deeper for the HTTP client settings, so a call's
+        # `timeout` keeps the registered `default_headers` (and vice versa).
+        if isinstance(registered.get("client_options"), Mapping) and isinstance(
+            given.get("client_options"), Mapping
+        ):
+            merged["client_options"] = {
+                **registered["client_options"],
+                **given["client_options"],
+            }
+        storage_options = merged
     key = _pool_key(uri, storage_options)
     with _POOL_LOCK:
         mounted = _MOUNTS.get(_mount_key(uri))
