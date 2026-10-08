@@ -83,7 +83,7 @@ from geocatalog._src.ops import intersect, query, union
 _logger.disable("geocatalog")
 
 
-__version__ = "0.2.3"  # x-release-please-version
+__version__ = "0.3.0"  # x-release-please-version
 
 __all__ = [
     "GeoCatalog",

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.7.1...geotoolz-v0.8.0) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* geopatcher.temporal.stencils.divide_evenly is now exact_quotient, geocatalog.grid.divide_evenly is now count_steps, and geotoolz.patch_ops.SpatialTriangular is now TriangularWindow. No aliases; saved patcher configs naming geotoolz.patch_ops.SpatialTriangular must be regenerated.
+* **patcher:** no aliases are kept. The prefixed axis names (SpatialHann, TemporalMean, ...) and the root re-exports of axes, runners, hooks and caches are gone; geopatcher.time is geopatcher.temporal; geopatcher.objstore / geopatcher.cog become geocloud.store / geocloud.cog; geopatcher.runners / dask / jax / hooks fold into geopatcher.run and geopatcher.observe; ObstoreCogField becomes geopatcher.fields.CogField; the patcher extras obstore / obstore-cog are replaced by [cog]; and geotoolz-catalog[obstore] is removed (install geotoolz-cloud). Saved config envelopes that use the old class names must be regenerated.
+
+### Code Refactoring
+
+* give the divide-evenly helpers distinct names and drop the last Spatial* prefix ([#434](https://github.com/jejjohnson/geotoolz/issues/434)) ([d8155d2](https://github.com/jejjohnson/geotoolz/commit/d8155d2f96439c3339d93fae219b82103ea6ed75))
+* **patcher:** organise geopatcher by task and split object storage into geotoolz-cloud ([#431](https://github.com/jejjohnson/geotoolz/issues/431)) ([a7a4d6e](https://github.com/jejjohnson/geotoolz/commit/a7a4d6e4fbec075260f8f4a9fd371a791ff13b30))
+
 ## [0.7.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.7.0...geotoolz-v0.7.1) (2026-10-08)
 
 
