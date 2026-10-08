@@ -84,6 +84,9 @@ PY
      - it reuses the input's `attrs` dict, or mutates its input;
      - it keeps an inherited fill value that no longer means nodata;
      - it combines rasters without checking they share a grid;
+     → rebuild it on `geotoolz.carrier` (`wrap_like`, `mask_invalid_to_nan`,
+       `over_frames`, `require_grid_match`) and test it with
+       `geotoolz.testing.check_operator`;
    - merging patch outputs into `field.domain` when the per-patch operator
      changes the band count (the result is broadcast to the input's band
      count) → merge into a grid shaped like the output.

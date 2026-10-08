@@ -36,8 +36,15 @@ from typing import Any
 
 import numpy as np
 import pytest
-from _helpers import all_operator_classes
+from _helpers import all_operator_classes, fill_pixel_mask
 from pipekit import Input, Node, Operator
+
+from geotoolz._src.contract import (
+    assert_clear_rank_error,
+    assert_fill_matches_dtype,
+    assert_fresh_consistent_attrs,
+    geotensors,
+)
 
 
 def _key(cls: type) -> str:
@@ -1248,42 +1255,6 @@ def _attributed_inputs() -> list[Any]:
     ]
 
 
-def _geotensors(value: Any) -> list[Any]:
-    """Every GeoTensor in an operator output (a carrier, list or tuple)."""
-    from georeader.geotensor import GeoTensor
-
-    if isinstance(value, GeoTensor):
-        return [value]
-    if isinstance(value, list | tuple):
-        return [gt for item in value for gt in _geotensors(item)]
-    return []
-
-
-def assert_fresh_consistent_attrs(inputs: Any, out: Any) -> None:
-    """``out``'s attrs are new dicts whose per-band lists match the band count.
-
-    ``inputs`` is the operator's input (a carrier or a list of carriers).
-    Returning an input object itself is allowed (a pass-through).
-    """
-    from geotoolz._src.bands import PER_BAND_KEYS, band_count
-
-    sources = _geotensors(inputs)
-    for gt in _geotensors(out):
-        if any(gt is src for src in sources):
-            continue
-        assert all(gt.attrs is not src.attrs for src in sources), (
-            "output shares an input's attrs dict"
-        )
-        n_bands = band_count(gt.shape)
-        for key in PER_BAND_KEYS:
-            value = gt.attrs.get(key)
-            if value is None or isinstance(value, str | dict):
-                continue
-            assert len(value) == n_bands, (
-                f"attrs[{key!r}] has {len(value)} entries for {n_bands} band(s)"
-            )
-
-
 def _takes_sequence(op: Operator) -> bool:
     """Whether ``op`` reduces a sequence / mapping of carriers.
 
@@ -1393,62 +1364,13 @@ def _with_fill_pixels(scene: Any) -> Any:
     )
 
 
-def _is_nan(value: Any) -> bool:
-    return isinstance(value, float | np.floating) and bool(np.isnan(value))
-
-
-def assert_fill_matches_dtype(src: Any, gt: Any, *, gap_filler: bool = False) -> None:
-    """``gt.fill_value_default`` suits ``gt``'s dtype and marks ``src``'s nodata.
-
-    * boolean outputs declare ``False``;
-    * integer outputs declare an integer their dtype can hold;
-    * float outputs declare a fill, and ``NaN`` when ``src`` is an integer
-      carrier (an integer fill such as ``0`` collides with promoted data);
-    * every nodata pixel of ``src`` is still invalid in an output on the
-      same grid (unless the operator fills gaps by design).
-    """
-    from _helpers import fill_pixel_mask
-
-    from geotoolz._src.valid import valid_pixels
-
-    fill = gt.fill_value_default
-    kind = gt.dtype.kind
-    if kind == "b":
-        assert isinstance(fill, bool | np.bool_) and not fill, (
-            f"bool output declares fill {fill!r}, expected False"
-        )
-        return
-    if kind in "iu":
-        assert isinstance(fill, int | np.integer) and not isinstance(fill, bool), (
-            f"{gt.dtype} output declares fill {fill!r}, expected an integer"
-        )
-        assert np.asarray(fill).astype(gt.dtype).item() == fill, (
-            f"fill {fill!r} does not fit in {gt.dtype}"
-        )
-    elif kind == "f":
-        assert fill is not None, "float output declares no fill"
-        if np.asarray(src).dtype.kind in "biu":
-            assert _is_nan(fill), (
-                f"float output of a {np.asarray(src).dtype} input declares fill "
-                f"{fill!r}, expected NaN"
-            )
-    if gap_filler or gt.shape[-2:] != src.shape[-2:]:
-        return
-    n_fill = int(fill_pixel_mask(src.shape).sum())
-    n_invalid = int((~valid_pixels(gt)).sum())
-    assert n_invalid >= n_fill, (
-        f"input nodata pixels are valid in the output (fill {fill!r}): "
-        f"{n_invalid} invalid pixels, expected >= {n_fill}"
-    )
-
-
 @pytest.mark.parametrize("cls", _fill_params())
 def test_output_fill_matches_dtype(cls: type) -> None:
     """Output fill values follow the output's dtype and meaning (#146).
 
     Runs every buildable single-input operator on toy scenes whose corner
     pixels hold the input's fill value, and checks each GeoTensor output
-    with :func:`assert_fill_matches_dtype`.
+    with `geotoolz._src.contract.assert_fill_matches_dtype`.
     """
     op = build(cls, runtime=True)
     if op._terminal or not _single_carrier_in(op):
@@ -1465,11 +1387,16 @@ def test_output_fill_matches_dtype(cls: type) -> None:
             continue
         ran = True
         src = scene[0] if isinstance(scene, list) else scene
-        sources = _geotensors(scene)
-        for gt in _geotensors(out):
+        sources = geotensors(scene)
+        for gt in geotensors(out):
             if any(gt is s for s in sources):
                 continue
-            assert_fill_matches_dtype(src, gt, gap_filler=_key(cls) in GAP_FILLERS)
+            assert_fill_matches_dtype(
+                src,
+                gt,
+                gap_filler=_key(cls) in GAP_FILLERS,
+                nodata=fill_pixel_mask(src.shape),
+            )
     if not ran:
         pytest.skip("no toy input is valid for this operator")
 
@@ -1602,18 +1529,6 @@ def _is_frame_carrier(value: Any) -> bool:
     return isinstance(value, np.ndarray) and value.ndim in (2, 3)
 
 
-def _assert_clear_rank_error(cls: type, exc: BaseException) -> None:
-    """A 4-D rejection is a ValueError / TypeError / GeoToolzIOError naming the op."""
-    from geotoolz.io import GeoToolzIOError
-
-    assert isinstance(exc, ValueError | TypeError | GeoToolzIOError), (
-        f"library-internal {type(exc).__name__} on a 4-D input: {exc}"
-    )
-    assert cls.__name__ in str(exc), (
-        f"4-D rejection does not name the operator: {type(exc).__name__}: {exc}"
-    )
-
-
 def _assert_matches_frames(key: str, out: Any, expected: list[Any]) -> None:
     """``out`` equals the per-frame results restacked along time."""
     if key in TIME_INVARIANT:
@@ -1696,7 +1611,7 @@ def test_time_stack_contract(cls: type) -> None:
             # same draws as the fresh per-frame references.
             out = _call(_build_seeded(cls), stack)
         except Exception as exc:
-            _assert_clear_rank_error(cls, exc)
+            assert_clear_rank_error(cls.__name__, exc)
             continue
         if takes_sequence:
             np.testing.assert_allclose(

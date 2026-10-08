@@ -52,7 +52,7 @@ readable and lets your operator sit next to the built-ins.
 
 ```python
 import numpy as np
-from geotoolz._src.wrap import wrap_like
+from geotoolz.carrier import wrap_like
 
 
 def _apply(self, gt):
@@ -68,7 +68,7 @@ def _apply(self, gt):
 - **Accept `GeoTensor` and plain arrays.** Read the values with
   `np.asarray(gt)`; `GeoTensor` is an `np.ndarray` subclass, so the same
   code runs on both carriers.
-- **Rewrap the result with `geotoolz._src.wrap.wrap_like(gt, out)`** so
+- **Rewrap the result with `geotoolz.carrier.wrap_like(gt, out)`** so
   `transform`, `crs`, `attrs` and `fill_value_default` propagate from the
   input (a plain-array input comes back as a plain array). Don't
   construct a new `GeoTensor` by hand unless you really need to.
@@ -77,10 +77,10 @@ def _apply(self, gt):
   even when it is `0`, so an inherited fill is wrong once the output's
   dtype or meaning changes. Pass it explicitly —
   `wrap_like(gt, out, fill_value_default=...)` (or
-  `geotoolz._src.valid.wrap_filled`, which also writes the fill into the
+  `geotoolz.carrier.wrap_filled`, which also writes the fill into the
   input's nodata pixels): `False` for boolean masks, `0` for label /
   count maps, `NaN` for new float quantities (indices, scores, features),
-  and `geotoolz._src.valid.carried_fill(gt, out.dtype)` for outputs that
+  and `geotoolz.carrier.carried_fill(gt, out.dtype)` for outputs that
   carry the input's values. If `0` is real data in your input, give it
   `fill_value_default=None` (or `NaN`) rather than georeader's default `0`.
 - **Preserve trailing spatial dims.** If your op collapses the channel
@@ -131,7 +131,7 @@ its constructor attributes inside `_apply`. Follow the
 [fitted-operator contract](../concepts.md#fitted-operators-fit-transform):
 a `fit(x) -> self` that writes trailing-underscore attributes (`mean_`),
 a read-only `transform(x)`, and an `_apply` that calls `transform` —
-fitting first, via `geotoolz._src.fitted.fit_once`, if it learns on
+fitting first, via `geotoolz.carrier.fit_once`, if it learns on
 call. The fitted attributes are not constructor parameters, so they stay
 out of `get_config()` without any `__config_exclude__`, and
 `fit_once` keeps concurrent first calls from racing.
@@ -222,7 +222,7 @@ just get faster fixtures.
 ```python
 import numpy as np
 from pipekit import Operator
-from geotoolz._src.wrap import wrap_like
+from geotoolz.carrier import over_frames, wrap_like
 
 
 class NDVI(Operator):
@@ -231,7 +231,8 @@ class NDVI(Operator):
     def __init__(self, *, nir: int = 3, red: int = 2, eps: float = 1e-10) -> None:
         self.nir, self.red, self.eps = nir, red, eps
 
-    def _apply(self, gt):
+    @over_frames                  # a (T, C, H, W) stack runs frame by frame
+    def _apply(self, gt):          # (C, H, W) -> (H, W)
         a = np.asarray(gt, dtype=np.float32)
         nir, red = a[self.nir], a[self.red]
         return wrap_like(gt, (nir - red) / (nir + red + self.eps), fill_value_default=np.nan)
@@ -239,8 +240,33 @@ class NDVI(Operator):
 
 That's a complete, round-trippable operator in ~10 lines. The built-in
 `gz.NDVI` has the same shape, plus band-name resolution
-(`gz.NDVI(nir="B08", red="B04")`), nodata judging and `(T, C, H, W)`
-stacks.
+(`gz.NDVI(nir="B08", red="B04")`) and nodata judging.
+
+## Check the contracts
+
+`geotoolz.testing.check_operator` runs, on your operator and one sample
+scene, the checks geotoolz runs on every built-in operator, and fails
+naming the first broken rule:
+
+- the constructor is keyword-only, and `get_config()` is JSON that
+  round-trips (or the operator is `forbid_in_yaml`);
+- it works on graph `Input` nodes;
+- a GeoTensor in gives a GeoTensor out on the same grid, and a plain array
+  gives a plain array;
+- `attrs` is fresh, with per-band keys that match the output;
+- the fill suits the output dtype and the input's nodata stays nodata;
+- the input is left untouched;
+- a `(T, C, H, W)` stack matches the per-frame results, or is rejected
+  with an error naming the operator.
+
+```python
+from geotoolz.testing import check_operator
+
+
+def test_ndvi(scene):            # GeoTensor (4, H, W), a few nodata pixels
+    out = check_operator(NDVI(nir=3, red=2), scene)
+    assert out.shape == scene.shape[-2:]
+```
 
 ## See also
 

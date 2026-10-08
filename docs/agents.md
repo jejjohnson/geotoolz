@@ -72,6 +72,9 @@ packages' `__all__`, and compose what exists. New processing steps are
   - `fill_value_default` is nodata: `False` for masks, `0` for labels,
     `NaN` for new floats.
   - Several rasters must share a grid; mask `True` means drop.
+- Keep them with the helpers in `geotoolz.carrier` (`wrap_like`,
+  `mask_invalid_to_nan`, `over_frames`, `resolve_band`, `require_grid_match`),
+  and test every new step with `geotoolz.testing.check_operator(op, scene)`.
 ```
 
 The `build-geo-pipeline` skill in the plugin below spells the contracts out,
