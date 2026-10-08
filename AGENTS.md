@@ -53,6 +53,7 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 | You need… | Use |
 |---|---|
 | An obstore client / byte-range read on `s3://` `gs://` `az://` `https://` | `geocloud.store` (`get_obstore`, `get_range_bytes`) — building obstore stores elsewhere fails lint (`TID251`) |
+| Credentials for a bucket / container / host (anonymous, SAS, keys, a TOML file), the GDAL options for them, masking secrets in messages | `geocloud.credentials` (`set_credentials`, `load_credentials`, `gdal_access`, `redact`) — never set credentials in `os.environ` |
 | Listing, reading, writing, downloading, uploading, copying, syncing or pre-signing objects (cloud or local) | `geocloud.files` (`ls`, `read_bytes`, `download`, `upload`, `copy`, `sync`, `rm`, `sign`); a stand-in store for tests, `geocloud.store.mount` |
 | Windowed or async reads from a Cloud-Optimized GeoTIFF | `geocloud.cog.CogSource`; as a patcher field, `geopatcher.fields.CogField` |
 | HTTP with retries, `Retry-After`, streaming downloads (in a reader) | `geoproducts._src.net` (`retrying`, `fetch_bytes`, `download_url`) |

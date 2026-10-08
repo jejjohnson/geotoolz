@@ -26,6 +26,17 @@
 ::: geocloud.files.rm
 ::: geocloud.files.sign
 
+## `geocloud.credentials`
+
+::: geocloud.credentials.set_credentials
+::: geocloud.credentials.remove_credentials
+::: geocloud.credentials.credential_roots
+::: geocloud.credentials.load_credentials
+::: geocloud.credentials.credentials_path
+::: geocloud.credentials.gdal_access
+::: geocloud.credentials.GdalAccess
+::: geocloud.credentials.redact
+
 ## `geocloud.cog`
 
 ::: geocloud.cog.CogSource

@@ -54,6 +54,7 @@ an object-store client — look it up:
 | write COG / GeoTIFF / Zarr | `geotoolz` | `gz.WriteCOG`, `gz.WriteGeoTIFF`, `gz.WriteZarr` |
 | s3:// gs:// az:// https:// reads, COG windows | `geotoolz-cloud` | `geocloud.store.get_obstore`, `geocloud.cog.CogSource` |
 | list, download, upload, copy, sync, sign objects | `geotoolz-cloud` | `geocloud.files` (`ls`, `download`, `upload`, `copy`, `sync`, `sign`) |
+| credentials per bucket / container (SAS, keys, anonymous), GDAL options for them | `geotoolz-cloud` | `geocloud.credentials` (`set_credentials`, `load_credentials`, `gdal_access`) |
 
 Everything is `georeader.GeoTensor` in and out, and every operator is a
 `pipekit.Operator`, so steps chain with `gz.Sequential([...])` or `|`.
@@ -217,6 +218,7 @@ def test_zscore(scene):  # scene: GeoTensor (4, H, W) with band_names and a few 
 | a `for` loop over windows with manual overlap handling | `geopatcher.SpatialPatcher` + a `spatial.window` + `OverlapAdd` |
 | `rasterio.open` / `merge` over many files to build a mosaic | `geocatalog` (`build_raster_catalog` → `query` → `load_raster`) |
 | a STAC / CMR search client | `geocatalog.sources` |
+| `os.environ[...] = ` credentials, SAS-in-URL helpers, per-cloud config factories | `geocloud.credentials.set_credentials` / `load_credentials`, then plain URIs; `gdal_access` for rasterio |
 | boto3 / s3fs / obstore client code, upload / download / copy loops | `geocloud.files` (URI verbs on the pooled client), `geocloud.store.get_obstore`, or `geocatalog.staging.stage` |
 | band arithmetic on raw arrays (`(nir - red) / (nir + red)`) | the operator (`gz.NDVI`, `gz.spectral.BandRatio`, …) — it handles nodata, dtype and georeferencing |
 | manual nodata masks or rebuilding a `GeoTensor` by hand | the operators carry `fill_value_default` through; in your own step, `geotoolz.carrier` (`wrap_like`, `mask_invalid_to_nan`, `resolve_band`, `require_grid_match`) |

@@ -2,8 +2,9 @@
 
 Cloud object storage for the stack (import name `geocloud`): one
 process-wide [obstore](https://developmentseed.org/obstore/) client pool,
-file verbs on it (list, download, upload, copy, sync, sign), and batched,
-async Cloud-Optimized GeoTIFF reads.
+file verbs on it (list, download, upload, copy, sync, sign), credentials
+registered once per bucket (also handed to GDAL), and batched, async
+Cloud-Optimized GeoTIFF reads.
 
 ```bash
 pip install geotoolz-cloud            # the client pool
@@ -23,6 +24,7 @@ flowchart LR
     P["geopatcher.fields.CogField"] --> C
     R["geoproducts readers<br/>(cloud byte reads)"] --> S
     F["geocloud.files<br/>ls · download · upload · copy · sync · sign"] --> S
+    K["geocloud.credentials<br/>one grant per bucket / container / host"] -.-> S
     C["geocloud.cog<br/>CogSource · AsyncCogReader"] --> S["geocloud.store<br/>one client per bucket"]
     S --> B[("s3:// · gs:// · az:// · https:// · hf://")]
 ```
@@ -105,7 +107,9 @@ url: str = files.sign("s3://bucket/a.tif", expires=timedelta(hours=6))
 A trailing `/` on a destination (or an existing local directory) keeps
 the source's file name. `overwrite=False` on `copy` / `download` /
 `upload` leaves an existing destination alone and returns it.
-`storage_options` on every verb is forwarded to `get_obstore`.
+`storage_options` on every verb is forwarded to `get_obstore`. When the two
+ends of a `copy` or `sync` need different credentials, register each root
+with `geocloud.credentials` (below) instead.
 
 Large objects move in 16 MiB byte ranges, one request each. obstore's
 client timeout (30 s per request by default, with a capped number of
@@ -126,6 +130,97 @@ mount("s3://bucket", MemoryStore())   # every s3://bucket/... URI now hits memor
 ...
 unmount("s3://bucket")
 ```
+
+## Credentials — `geocloud.credentials`
+
+Register credentials once per **store root** (a bucket, an Azure account
+or container, an HTTP host); every call on the pool then picks them up,
+so the code that moves or reads data only ever handles URIs.
+
+```python
+from geocloud import credentials, files
+
+credentials.set_credentials("s3://noaa-goes19", anonymous=True, region="us-east-1")
+credentials.set_credentials("az://myaccount/raw", sas_token=sas)     # one container
+credentials.set_credentials("az://myaccount", use_azure_cli=True)    # its other containers
+credentials.set_credentials("s3://private", aws_access_key_id=key, aws_secret_access_key=secret)
+credentials.set_credentials("https://data.example.com",
+                     client_options={"default_headers": {"Authorization": f"Bearer {token}"}})
+
+files.copy("az://myaccount/raw/scene.tif", "s3://private/scenes/")  # each end its own grant
+credentials.credential_roots()   # ['az://myaccount', 'az://myaccount/raw', 's3://noaa-goes19', …]
+```
+
+- **Spelled-out keywords.** `anonymous=True` sends unsigned requests,
+  with no credential lookup and no instance-metadata probe. `sas_token=`
+  is checked when it is registered: an expired token, a token without
+  `sig=`, or a container-scoped token registered for a whole account is
+  rejected right there.
+- **Everything else is an obstore store option.** Examples are keys,
+  `region`, `endpoint`, `use_azure_cli`, `service_account`,
+  `credential_provider` (from `obstore.auth`) and `client_options`. They
+  are validated by building a store, so a typo fails at `set_credentials`.
+- **Precedence.** An Azure container's entry wins over its account's.
+  `storage_options` passed to a call win over registered ones.
+- **No registration needed** for Azure managed or workload identity, or
+  S3 / GCS instance credentials: obstore's default chains find them.
+  Nothing here writes `os.environ`.
+
+### A credentials file
+
+`load_credentials(path)` registers every table of a TOML file. The file at
+`$GEOCLOUD_CREDENTIALS` (default `~/.config/geocloud/credentials.toml`)
+loads by itself on first use; set `GEOCLOUD_CREDENTIALS=` (empty) to turn
+that off. A value can reference the environment instead of holding the
+secret. A file other users can read triggers a warning.
+
+```toml
+["s3://noaa-goes19"]
+anonymous = true
+region = "us-east-1"
+
+["az://myaccount/raw"]
+sas_token = "${RAW_SAS}"
+
+["s3://private"]
+aws_access_key_id = "${AWS_KEY}"
+aws_secret_access_key = "${AWS_SECRET}"
+region = "eu-west-1"
+```
+
+### GDAL, rasterio and georeader
+
+`gdal_access(uri)` turns the same registry into a GDAL path plus config
+options. A root registered once therefore reads through obstore and
+GDAL alike:
+
+```python
+import rasterio
+from georeader.rasterio_reader import RasterioReader
+
+path, env = credentials.gdal_access("az://myaccount/raw/scene.tif")
+reader = RasterioReader(path, rio_env_options=env)
+with rasterio.Env(**env), rasterio.open(path) as src:
+    ...
+```
+
+| Registered | GDAL path | Options |
+| --- | --- | --- |
+| S3 keys / anonymous / endpoint | `/vsis3/bucket/key` | `AWS_*` (`AWS_NO_SIGN_REQUEST`, `AWS_S3_ENDPOINT`, …) |
+| GCS service-account file / anonymous | `/vsigs/bucket/key` | `GOOGLE_APPLICATION_CREDENTIALS`, `GS_NO_SIGN_REQUEST` |
+| Azure account key / account SAS / anonymous | `/vsiaz/container/key` | `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_ACCESS_KEY` / `_SAS_TOKEN` |
+| Azure **container** SAS | `/vsicurl/https://account.blob.core.windows.net/container/key?<sas>` | none |
+| signed `http(s)://` URL | `/vsicurl/<url>` | none |
+
+Two kinds of credentials can't be passed to GDAL and raise an error:
+credential-provider objects, and inline service-account keys. For those,
+pre-sign the object with `files.sign` and read `/vsicurl/<url>`.
+
+### Keeping secrets out of logs
+
+`redact(text)` masks SAS signatures, S3 / GCS query signatures and
+credentials, `token=` / `key=` parameters and `Bearer` headers. Every
+error geocloud raises about a URI already goes through it.
 
 ## COG reads — `geocloud.cog`
 

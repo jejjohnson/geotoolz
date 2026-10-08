@@ -2,8 +2,9 @@
 
 Cloud object storage for the geotoolz stack (import name `geocloud`): one
 process-wide [obstore](https://developmentseed.org/obstore/) client pool,
-file verbs on top of it (list, download, upload, copy, sync, sign), and
-batched, async Cloud-Optimized GeoTIFF reads.
+file verbs on top of it (list, download, upload, copy, sync, sign),
+credentials registered once per bucket, and batched, async
+Cloud-Optimized GeoTIFF reads.
 
 geopatcher's `CogField` and geoproducts' cloud byte reads take their client
 from `geocloud.store`, so a process talking to one bucket through them builds
@@ -22,7 +23,7 @@ pip install 'geotoolz-cloud[cog]'     # + COG reads (async-geotiff)
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
-| *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files` |
+| *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials` |
 | `[cog]` | async-geotiff | `geocloud.cog` (`CogSource`, `AsyncCogReader`, `read_*`) |
 
 ## The client pool — `geocloud.store`
@@ -59,6 +60,23 @@ url: str = files.sign("s3://bucket/a.tif")                   # pre-signed HTTPS
 
 Any URI the pool understands or a local path works on either side; a copy
 inside one bucket is server-side, and remote ends share the pooled clients.
+
+## Credentials — `geocloud.credentials`
+
+```python
+from geocloud import credentials
+
+credentials.set_credentials("s3://noaa-goes19", anonymous=True, region="us-east-1")
+credentials.set_credentials("az://myaccount/raw", sas_token=sas)   # expiry + scope checked
+credentials.load_credentials("team-credentials.toml")                   # `${VAR}` reads the env
+
+path, env = credentials.gdal_access("az://myaccount/raw/scene.tif")  # for rasterio
+```
+
+Registered once per bucket / container / host, picked up by every call on
+the pool (and by GDAL through `gdal_access`); nothing is written to
+`os.environ`. `~/.config/geocloud/credentials.toml` (or
+`$GEOCLOUD_CREDENTIALS`) loads by itself on first use.
 
 ## COG reads — `geocloud.cog`
 

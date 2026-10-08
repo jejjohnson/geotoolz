@@ -46,12 +46,18 @@ import obstore
 from obstore.store import LocalStore
 
 from geocloud._src.aio import _run_coroutine_safely
+from geocloud._src.redact import redact
 from geocloud._src.store import _locate, get_obstore, object_key
 
 
 if TYPE_CHECKING:
     from obstore import ReadableFile, WritableFile
     from obstore.store import ObjectStore
+
+
+def _r(location: object) -> str:
+    """``repr`` of a location with any signature or token masked."""
+    return repr(redact(str(location)))
 
 
 __all__ = [
@@ -200,7 +206,7 @@ def _prefix(target: _Target) -> str | None:
 def _require_listable(target: _Target, location: Location) -> None:
     if not target.listable:
         raise ValueError(
-            f"{location!r} cannot be listed: listing needs an s3://, gs://, "
+            f"{_r(location)} cannot be listed: listing needs an s3://, gs://, "
             "az:// / abfs[s]:// URI or a local directory."
         )
 
@@ -209,7 +215,7 @@ def _require_object(target: _Target, location: Location, role: str) -> None:
     """Reject a bucket / container root or a ``.../`` prefix as one object."""
     if not target.key or target.key.endswith("/"):
         raise ValueError(
-            f"copy: {role} {location!r} names a prefix, not an object; use "
+            f"copy: {role} {_r(location)} names a prefix, not an object; use "
             "`sync` for prefixes, or end the destination with `/` to keep the "
             "source's name."
         )
@@ -445,7 +451,7 @@ def _stream_to_file(source: _Target, dest: Path) -> None:
                 written += fh.write(result.bytes())
         if written != expected:
             raise OSError(
-                f"short read of {source.child(source.key)!r}: "
+                f"short read of {_r(source.child(source.key))}: "
                 f"{written} of {expected} bytes"
             )
         os.replace(part, dest)
@@ -554,7 +560,7 @@ def download(
         OSError: The transfer ended short of the object's size.
     """
     if _local_path(dest) is None:
-        raise ValueError(f"download: dest must be a local path; got {dest!r}.")
+        raise ValueError(f"download: dest must be a local path; got {_r(dest)}.")
     return Path(copy(uri, dest, overwrite=overwrite, storage_options=storage_options))
 
 
@@ -582,7 +588,7 @@ def upload(
         FileNotFoundError: ``path`` does not exist.
     """
     if _local_path(path) is None:
-        raise ValueError(f"upload: path must be a local file; got {path!r}.")
+        raise ValueError(f"upload: path must be a local file; got {_r(path)}.")
     return copy(path, uri, overwrite=overwrite, storage_options=storage_options)
 
 
@@ -721,12 +727,12 @@ def sign(
             ``http(s)://``, ``hf://``), or has no credentials to sign with.
     """
     if _local_path(uri) is not None:
-        raise ValueError(f"sign: {uri!r} is a local path; only cloud objects sign.")
+        raise ValueError(f"sign: {_r(uri)} is a local path; only cloud objects sign.")
     target = _resolve(uri, storage_options)
     try:
         return obstore.sign(target.store, method, target.key, expires)
     except (ValueError, TypeError) as exc:
         raise ValueError(
-            f"sign: cannot pre-sign {uri.split('?', 1)[0]!r} — only s3://, gs:// "
+            f"sign: cannot pre-sign {_r(uri)} — only s3://, gs:// "
             f"and Azure stores with credentials sign URLs ({exc})."
         ) from exc
