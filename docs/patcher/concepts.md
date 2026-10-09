@@ -1,302 +1,173 @@
 # Concepts
 
-`geopatcher` answers a single question — *what slice of the data does my
-operator see at once, and how do local outputs become a global field?* —
-by composing **four orthogonal axes** over a `Field` Protocol.
-
-This page walks through each axis, the patch lifecycle, determinism
-contracts, boundary policies, streaming vs eager modes, and the async /
-hooks / on-error machinery that surrounds them.
+`geopatcher` answers one question: *what slice of the data does my
+operator see at once, and how do local outputs become a global field?*
+It answers it with four independent axes over a `Field`. This page is the
+mental model; exact edge, fill and determinism rules live in the
+[Behaviour reference](patching.md).
 
 ## The four-axis abstraction
 
-![Four orthogonal axes — Geometry, Sampler, Window, Aggregation](assets/four-axes.png)
+Each axis is a small strategy object you pick on its own. Swapping one
+never forces a change in the other three.
 
-```mermaid
-flowchart LR
-    subgraph Spatial[" SpatialPatcher "]
-        direction LR
-        G[Geometry] --> S[Sampler] --> W[Window] --> A[Aggregation]
-    end
-    style G fill:#bbdefb,stroke:#1565c0
-    style S fill:#c8e6c9,stroke:#2e7d32
-    style W fill:#ffe0b2,stroke:#ef6c00
-    style A fill:#f8bbd0,stroke:#c2185b
-```
+![SpatialPatcher: a Field is split along the Geometry, Sampler, Window and Aggregation axes, your operator runs on each Patch, and the aggregation merges the patches into a stitched field](../assets/diagrams/patcher-axes.png)
 
-Each axis is a strategy object — a small dataclass with a single method —
-that the patcher composes at construction time. Anything you can swap
-without touching the other three is on its own axis.
+### Geometry — the shape of a patch
 
-### Axis 1 — Geometry
+The geometry turns an anchor into the cells a patch covers.
 
-*Shape and scale of the neighborhood around an anchor (and the domain
-topology it lives on).*
+| `spatial.geometry.` | Patch shape | Domain |
+|---|---|---|
+| `Rectangular(size=(h, w))` | an `h × w` window; takes `boundary=` for the edges | raster, grid |
+| `SphericalCap(radius_km)` | a cap of great-circle radius on the sphere | grid |
+| `KNNGraph(k)` | the `k` nearest neighbours | points |
+| `RadiusGraph(radius)` | every neighbour within a metric radius | points |
+| `PolygonIntersection(polygons)` | an arbitrary polygon | raster, vector |
 
-```mermaid
-flowchart LR
-    A[anchor] --> R[spatial.geometry.Rectangular<br/>size=h×w]
-    A --> D[spatial.geometry.SphericalCap<br/>radius θ on the sphere]
-    A --> K[spatial.geometry.KNNGraph<br/>k nearest neighbours]
-    A --> RG[spatial.geometry.RadiusGraph<br/>radius r in metric space]
-    A --> P[spatial.geometry.PolygonIntersection<br/>arbitrary geometry]
-    style A fill:#fff59d,stroke:#f9a825
-```
+### Sampler — where patches go
 
-The geometry produces a *window* of indices into the field — a raster
-`Window`, a list of neighbour ids, a polygon, … — that the field uses to
-`select` the patch payload.
+The sampler places anchors. Overlap is not a parameter: it follows from
+the stride relative to the geometry size (`overlap = size − step`).
 
-### Axis 2 — Sampler
+| `spatial.sampler.` | Anchors |
+|---|---|
+| `RegularStride(step)` | a regular grid |
+| `JitteredStride(step, jitter, seed)` | a grid plus bounded noise |
+| `Random(n_samples, seed)` | uniform random |
+| `PoissonDisk(min_dist, seed)` | random with a minimum spacing |
+| `Explicit(anchors_)` | pixel anchors you supply |
+| `ExplicitCoords(coords, crs)` | map coordinates you supply, centred |
+| `AlongTrack(track, spacing, crs)` | evenly spaced along a track |
 
-*Where anchors are placed. Overlap is emergent — it falls out of the
-sampler stride relative to the geometry size.*
+### Window — how each cell is weighted
 
-```mermaid
-flowchart LR
-    Field[domain] --> RS[spatial.sampler.RegularStride<br/>deterministic grid]
-    Field --> JS[spatial.sampler.JitteredStride<br/>grid + bounded noise]
-    Field --> RND[spatial.sampler.Random<br/>i.i.d. uniform]
-    Field --> PD[spatial.sampler.PoissonDisk<br/>min-spacing constraint]
-    Field --> EX[spatial.sampler.Explicit<br/>caller-supplied anchors]
-    Field --> EC[spatial.sampler.ExplicitCoords<br/>caller-supplied map coordinates]
-    Field --> AT[spatial.sampler.AlongTrack<br/>anchors spaced along a track]
-    style Field fill:#bbdefb,stroke:#1565c0
-```
+The window weights each cell of a patch. Overlap-add divides by the
+summed weights, so a taper feathers the seams.
 
-### Axis 3 — Window
+| `spatial.window.` | Weights |
+|---|---|
+| `Boxcar()` | flat 1.0 — exact for non-overlapping tiles |
+| `Hann()` | periodic cosine taper |
+| `Tukey(alpha)` | flat top with cosine flanks |
+| `Gaussian(sigma)` | radial Gaussian, never zero |
+| `Custom(fn)` | any callable of the geometry |
 
-*Per-cell weights applied on the way in (signal taper) and on the way
-out (denominator for normalised reconstruction).*
+### Aggregation — how local outputs merge
 
-```mermaid
-flowchart LR
-    Geom[geometry.size] --> BC[spatial.window.Boxcar<br/>flat 1.0]
-    Geom --> HN[spatial.window.Hann<br/>periodic cosine taper]
-    Geom --> TK[spatial.window.Tukey<br/>flat-top + cosine flank]
-    Geom --> GS[spatial.window.Gaussian<br/>radial Gaussian]
-    Geom --> CU[spatial.window.Custom<br/>any callable]
-    style Geom fill:#bbdefb,stroke:#1565c0
-```
+The aggregation folds patches into a result on the domain's grid.
 
-### Axis 4 — Aggregation
-
-*Local outputs → global field. Streaming-safe members fold one patch at
-a time; non-streaming members need the whole list.*
-
-```mermaid
-flowchart LR
-    P[patches] --> OA[spatial.aggregation.OverlapAdd<br/>weighted sum / Σw]
-    P --> MN[spatial.aggregation.Mean / WeightedSum / InvVarWMean]
-    P --> HV[spatial.aggregation.HardVote / SoftVote]
-    P --> MD[spatial.aggregation.Median / Mode<br/>non-streaming]
-    P --> AX[spatial.aggregation.ApproxQuantile / ApproxMode / …<br/>global sketch → one summary]
-    style P fill:#c8e6c9,stroke:#2e7d32
-```
+| `spatial.aggregation.` | Result |
+|---|---|
+| `OverlapAdd` | weighted sum ÷ summed weights; `streaming=True` writes zarr or a COG |
+| `Sum`, `Mean`, `Max`, `Min`, `WeightedSum`, `Variance`, `InvVarWeightedMean` | per-cell statistics |
+| `HardVote`, `SoftVote` | per-cell class votes |
+| `Median`, `Mode`, `Learned` | per-cell, but need every patch in memory |
+| `MeanStd`, `MinMax`, `ApproxQuantile`, `ApproxMode`, … | one summary for the whole field |
+| `ByIndex` | the `[(anchor, data), …]` pairs, for ragged geometries |
 
 ## Patch lifecycle
 
-A single end-to-end run touches each axis in turn:
-
-![Field → split → patches → operator → merge → output](assets/patch-lifecycle.png)
-
-```python
-patcher = SpatialPatcher(geometry=..., sampler=..., window=..., aggregation=...)
-
-for patch in patcher.split(field):     # Iterator[Patch] — streaming default
-    out = operator(patch.data)
-    yield patch.with_data(out)
-
-stitched = patcher.merge(out_patches, field.domain)
-```
-
-A `Patch` carries:
-
-- `data`  — the payload selected from the field (usually an ndarray / `GeoTensor`).
-- `anchor` — the sampler-emitted coordinate (`(row, col)` for raster, …).
-- `indices` — the geometry-emitted index window (`rasterio.windows.Window`, neighbour ids, …).
-- `weights` — the window-emitted per-cell weights.
-
-`split` is an iterator by design — materialise with `list(...)` when you
-want the eager case.
-
-## Determinism contracts
-
-Stochastic samplers — `spatial.sampler.Random`, `spatial.sampler.JitteredStride`,
-`spatial.sampler.PoissonDisk`, `temporal.sampler.Random` — accept a `seed: int | None`.
-
-| `seed` | Behavior |
-|---|---|
-| `int` | **Anchor → patch is deterministic.** Two samplers with the same config return bit-identical anchors across calls *and* across instances. Required for reproducible ML eval, CI, and journal-resume. |
-| `None` (default) | Re-seeds from OS entropy on each call. Anchors will differ across calls. Pick this only for casual exploration. |
-
-The Hypothesis round-trip suite (`tests/test_roundtrip.py`) leans on the
-`int` contract — given a seed, it shrinks failing examples to the minimal
-`(shape, stride, seed)` triple and replays them deterministically.
-
-## Boundary policies
-
-What happens when an anchor sits close enough to the edge that the
-neighborhood would overflow the domain? `spatial.geometry.Rectangular` exposes
-this as a first-class parameter:
+A run reads each anchor once, hands you a `Patch`, and merges what you
+hand back. `split` is an iterator, so only the patches you hold are in
+memory.
 
 ```python
-geom = spatial.geometry.Rectangular(size=(256, 256), boundary="pad")
+import numpy as np
+import rasterio
+from georeader.geotensor import GeoTensor
+
+import geopatcher as gp
+
+field: gp.RasterField = gp.RasterField(
+    GeoTensor(
+        np.ones((1, 256, 256), dtype=np.float32),                   # (1, 256, 256) float32
+        transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
+        crs="EPSG:32611",
+    )
+)
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(64, 64)),
+    sampler=gp.spatial.sampler.RegularStride(step=(48, 48)),
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+)
+
+patch: gp.Patch = next(patcher.split(field))
+print(patch.anchor, patch.indices)                  # (0, 0) Window(col_off=0, row_off=0, width=64, height=64)
+weights: np.ndarray = patch.weights                 # (64, 64) float64
+
+doubled: list[gp.Patch] = [
+    p.with_data(np.asarray(p.data) * 2.0)           # (1, 64, 64) float32 → (1, 64, 64) float32
+    for p in patcher.split(field)
+]
+merged: np.ndarray = patcher.merge(doubled, field.domain)          # (1, 256, 256) float64
+stitched: GeoTensor = patcher.merge_to_field(doubled, field)       # (1, 256, 256) float32, georeferenced
 ```
 
-![shrink / pad / drop boundary behaviors](assets/boundary-modes.png)
+| `Patch` attribute | Set by | Holds |
+|---|---|---|
+| `data` | the field's `select` | the payload — a `GeoTensor`, `DataArray`, `GeoDataFrame`, … |
+| `anchor` | the sampler | the patch origin (`(row, col)` on a raster) |
+| `indices` | the geometry | what was read: a rasterio `Window`, neighbour ids, a polygon |
+| `weights` | the window | per-cell weights for the merge |
 
-| Mode | Behavior |
-|------|----------|
-| `"drop"` (default) | Samplers only place anchors whose patch lies wholly in-domain; the trailing residual is dropped. A patch larger than the domain places **no** anchor (with a `RuntimeWarning`). |
-| `"pad"` | Samplers also place the edge anchor — the first whose patch reaches the edge, never an extra one past it. The patch is the full geometry size, padded in the overflow region with the reader's nodata (or `pad_value`, which must be representable in the field's dtype). |
-| `"reflect"` | As `"pad"`, but the overflow region is mirror-padded from the in-domain interior (numpy `mode="reflect"`, repeated when the overflow exceeds the domain) — the spectrally correct choice for overlap-add stitching with tapered windows (no DC dip at the trailing edge). Needs at least two cells on a padded axis. |
-| `"shrink"` | As `"pad"` for anchor placement, but the window is clipped to the domain on every side — a negative anchor included — so the patch is *smaller* at the edge. Weights crop to the same in-domain part. |
-| `"raise"` | As `"pad"` for anchor placement; `SpatialPatcher.split` raises a `ValueError` on the first overflowing window. Useful with `spatial.sampler.Explicit` when the caller wants strict edge handling. |
+`patch.with_data(new)` keeps the anchor, indices and weights, so your
+operator only touches the payload. `merge` returns the aggregation's raw
+output; `merge_to_field` rebuilds the field's carrier around it.
 
-Every mode survives `merge`: each dense aggregation (`spatial.aggregation.OverlapAdd`
-in memory and streaming, `spatial.aggregation.Sum`, `spatial.aggregation.Mean`, `spatial.aggregation.Max`, …)
-crops a chip's data and weights to the in-domain part of its window, so
-padded or reflected cells are read for context but never written back.
-`spatial.sampler.RegularStride(check_full_scan=True)` only applies under `"drop"`
-— the other modes cover the trailing edge themselves.
+## Fields and domains
 
-See [Patching § Boundary policy](patching.md#boundary-policy) for how
-`"pad"` / `"reflect"` keep chip georeferencing exact on any `Field`.
+A `Field` is anything with three members: `domain` (I/O-free metadata
+such as shape, CRS and transform), `select(indexer)` (read one patch) and
+`with_data(array)` (rebuild the carrier). The raster path wraps a
+georeader `GeoTensor` or lazy reader in `geopatcher.RasterField`; the
+other adapters live in `geopatcher.fields` behind extras. The
+[Fields and domains table](patching.md#fields-and-domains) lists each
+adapter and its domain.
 
-## Streaming vs eager
+Samplers and geometries only read the domain. Patches read pixels, one
+window at a time, so a lazy reader never loads the whole scene.
 
-`split` is an iterator. The default mode is **streaming** — each patch is
-yielded, consumed, and (with `max_in_flight`) released before the next
-one is materialised.
+## Streaming and eager
 
-```python
-# Streaming — bounded memory regardless of field size.
-patcher = SpatialPatcher(..., aggregation=spatial.aggregation.OverlapAdd())
-stitched = patcher.merge(patcher.split(field), field.domain)
+Streaming is the default: `split` yields one patch at a time and a
+streaming-safe aggregation folds it in and drops it. Materialise with
+`list(patcher.split(field))` when the field is small. For outputs bigger
+than RAM, `OverlapAdd(streaming=True)` keeps its accumulators on disk —
+see [Stream to disk](recipes/streaming-overlap-add.md); which
+aggregations can stream is in
+[Streaming aggregations](patching.md#streaming-aggregations).
 
-# Bounded-memory accumulator on disk (zarr) instead of RAM.
-# Route the merge call through `agg` (not the patcher's default agg)
-# so the streaming code path is the one that actually runs.
-agg = spatial.aggregation.OverlapAdd(streaming=True, target_path="out/", chunks=(256, 256))
-stitched_zarr = agg.merge(patcher.split(field), field.domain)
-```
+## Patcher families
 
-Every `spatial.aggregation.Aggregation` carries a `streaming_safe: ClassVar[bool]`
-flag. The fully-streaming family (`Sum`, `Mean`, `Variance`,
-`OverlapAdd`, `WeightedSum`, `InvVarWeightedMean`, `HardVote`,
-`SoftVote`) folds one patch at a time; the non-streaming members
-(`Median`, `Mode`, `Learned`) need the full patch list. Streaming the
-non-streaming ones emits a `RuntimeWarning` pointing at the streamable
-per-cell substitute where one exists (`Mode` → `HardVote`; `Median` has
-none and stays in-RAM). The approximate sketch family (`ApproxQuantile`,
-`ApproxCardinality`, `ApproxMode`, `StreamingHistogram`, `Reservoir`) is
-streaming-safe but **global**: each `merge` returns one summary for the
-whole field (e.g. `{"0.5": 12.3}`), never an `(H, W)` field, so it is not
-a per-cell replacement for `Median` / `Mode`.
+| Patcher | Splits | Typical use |
+|---|---|---|
+| `SpatialPatcher` | space — raster, grid, points, polygons | sliding-window inference, tiling, training chips |
+| `AsyncSpatialPatcher` | space, over an `AsyncField` | high-latency cloud reads — [Async and prefetch](patching/async-prefetch.md) |
+| `TemporalPatcher` | a time axis | lookback / horizon windows, forecasts |
+| `SpatioTemporalPatcher` | space × time | dense cubes, event-triggered patches |
+| `geopatcher.matched.MatchedSpatialPatcher` (and temporal siblings) | several co-registered sources | multi-sensor matchups — [API](api/matched.md) |
 
-**Eager** is opt-in: `list(patcher.split(field))`.
+The temporal side mirrors the four axes and adds coordinate-aware
+`TimeStencil` windows: see [Temporal patching](recipes/temporal-patching.md)
+and [Temporal stencils](recipes/temporal-stencils.md).
 
-## Async, hooks, on-error policies
+## Random access
 
-### Async path
-
-`AsyncSpatialPatcher` mirrors `SpatialPatcher` over `AsyncField`
-(`AsyncRasterField` over `georeader.AsyncGeoTIFFReader`, or any field
-with an `aselect` / async `select`). `asplit` walks the same anchors as
-`split` and awaits **one read at a time**: it does not read ahead (there
-is no `prefetch=` on `asplit`), and `max_in_flight` /
-`max_in_flight_bytes` only bound how many yielded patches may be alive
-at once. Overlapping reads with compute — or running operators
-concurrently — is the caller's choice, e.g. with `asyncio.gather` over a
-batch of patches.
-
-```python
-async for patch in async_patcher.asplit(async_field, max_in_flight=8):
-    out = await async_operator(patch.data)
-```
-
-See [Async and prefetch](patching/async-prefetch.md) for the sync
-`prefetch=` read-ahead and the backpressure contract.
-
-### Hooks
-
-A `PatcherHook` Protocol exposes `on_split_start`, `on_patch_start`,
-`on_patch_done`, `on_patch_skipped`, `on_split_end`, `on_merge_start`,
-`on_merge_end`, `on_error`. Hooks may implement only the callbacks they need. Pass a
-list to `split` / `merge`. Exceptions raised by hooks themselves are
-converted to `RuntimeWarning`s so observability code cannot abort
-patching. See the [observability page](observability.md) for tqdm /
-OpenTelemetry examples.
-
-### `on_error` policies
-
-Each patch-read is independently isolated through one of four policies:
-
-| Policy | Behavior |
-|---|---|
-| `"raise"` (default) | Fail fast — preserves historical behavior. |
-| `"skip"` | Log to `patcher.errors`, omit the failed anchor from the stream. |
-| `"mask"` | Emit a NaN-valued patch the same shape as the geometry. |
-| `"retry"` | Retry matching exceptions up to `max_retries` before logging and skipping. `retry_on` defaults to `(OSError, TimeoutError)` so programmer errors are never silently retried. |
-
-See [`recipes/on-error-policies.md`](recipes/on-error-policies.md) for
-the full pattern, and [`recipes/journal-and-resume.md`](recipes/journal-and-resume.md)
-for the `PatchJournal` restart story.
-
-## Index space vs coordinate space (temporal stencils)
-
-By default the temporal samplers and geometries work in **integer index
-space**: `temporal.sampler.RegularStride(step=3)` skips three array elements,
-`temporal.geometry.LookbackHorizon(lookback=12)` counts twelve array elements
-backwards. This is fast and unambiguous when the source cadence is fixed
-and known.
-
-For workloads where the cadence is a property of the *store* (ARCO-ERA5
-Zarrs, multi-resolution archives) you also want **coordinate space** —
-"9 hours of context, regardless of whether that's 9 array steps or 3 or
-something else." `TimeStencil` plus `temporal.geometry.StencilGeometry` /
-`temporal.sampler.StencilSampler` express the window in physical units against a
-1-D coordinate vector you pass via `TemporalPatcher.split(..., coord=)`
-(or `SpatioTemporalPatcher.split(..., coord=)`, which threads it into
-the temporal half of both couplings).
-The patcher requires `coord=` when either component opts in via
-`needs_coord = True`; the integer path is unchanged when it doesn't.
-The recipe in [`recipes/temporal-stencils.md`](recipes/temporal-stencils.md)
-walks through both layers; ADR-004 in
-[`decisions.md`](decisions.md) records the design.
-
-## Random access via `IndexedPatchView`
-
-`SpatialPatcher.split` returns an iterator (ADR-001 — laziness is
-the default). For ML loaders that need integer-indexed random access —
-torch `Dataset.__getitem__`, Grain `RandomAccessDataSource`, xrpatcher's
-`patcher[i]` — wrap the (patcher, field) pair in an
-`IndexedPatchView`. It's a stdlib `Sequence[Patch]` with optional
-in-memory `cache=True` / `preload=True` flags mirroring xrpatcher's API.
-It wraps a `SpatialPatcher` or a `TemporalPatcher` (via
-`TemporalPatcher.patch_at`), and it pickles, so spawn / forkserver
-loader workers each get their own copy.
-
-The iterator-first split stays canonical; `IndexedPatchView` is a
-wrapper, not a replacement. No torch/grain/jax dependency in
-`geopatcher` core — frameworks wrap the Sequence themselves in one line.
-The recipe in [`recipes/xarray-nd-patching.md`](recipes/xarray-nd-patching.md)
-walks through the migration story; ADR-005 in
-[`decisions.md`](decisions.md) records the design.
+`split` is the canonical, lazy path. ML loaders that need `dataset[i]`
+wrap the patcher and field in `geopatcher.run.IndexedPatchView`, a
+picklable `Sequence[Patch]` — see
+[xarray N-D patching](recipes/xarray-nd-patching.md).
 
 ## Where the framework draws the line
 
-- **Mesh / `uxarray`** (`UXarrayField`) is deferred to v0.2.
-- **Hierarchical Patcher-of-Patchers** is a *recipe* on top of the
-  framework rather than a dedicated class. See
-  [`recipes/streaming-overlap-add.md`](recipes/streaming-overlap-add.md).
-- **Two-pass / global-context operators** are explicitly out of scope as
-  framework primitives; users compose the two passes themselves with
-  the codified `patcher.reduce` and `patcher.two_pass` helpers.
+- **Unstructured meshes** (`uxarray`) have no `Field` adapter yet.
+- **Hierarchical patching** (patches of patches) is a recipe, not a class:
+  see [Stream to disk](recipes/streaming-overlap-add.md#patcher-of-patchers).
+- **Global context** (normalising by the scene's mean) runs as two passes
+  through `patcher.reduce` and `patcher.two_pass`: see
+  [Global statistics](recipes/global-statistics.md).
 
-## Cross-stack links
-
-- **Catalogs:** [`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog) — which scenes / time range / AOI to read.
-- **Operators:** [`geotoolz`](https://github.com/jejjohnson/geotoolz) — how to chain per-patch and global ops.
-- **End-to-end:** [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb) — the canonical cross-repo Sentinel-2 / Lake Tahoe notebook.
+The [design decisions](decisions.md) record why each of these choices
+was made.

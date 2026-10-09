@@ -1,211 +1,110 @@
-# Quickstart — Lake Tahoe Sentinel-2 in 15 minutes
+# Quickstart — patch a Sentinel-2 scene
 
-This walkthrough applies a per-patch operator to a real Sentinel-2 scene
-over Lake Tahoe and stitches the result back into a global field. It is
-the patcher-focused slice of the canonical cross-repo scenario:
+Run a per-patch operator over a real Sentinel-2 band and stitch it back
+with feathered seams. The [landing-page quickstart](index.md#quickstart)
+does the same on a synthetic array; the
+[tutorial notebook](notebooks/patcher_lake_tahoe.ipynb) adds plots.
 
-> **Cloud-free Sentinel-2 NDVI over Lake Tahoe, summer 2024.**
-
-The full end-to-end story (catalog → operators → patcher) lives at
-[`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
-This page covers only the **patcher** slice — the same code is also
-shipped as a runnable notebook at
-[`docs/patcher/notebooks/patcher_lake_tahoe.ipynb`](notebooks/patcher_lake_tahoe.ipynb).
-
-## Setup
+## Install
 
 ```bash
-pip install 'geotoolz-patcher[xarray-raster,streaming]'
+pip install 'geotoolz-patcher[xarray-raster]' pystac-client planetary-computer
 ```
 
-You also need `rioxarray`, `pystac-client`, and `planetary-computer` on
-the path to resolve a real Sentinel-2 asset URL. If you already have a
-local GeoTIFF, skip straight to the [`RasterField` step](#3-wrap-as-a-rasterfield).
+## Find a scene
 
-## The canonical scenario
-
-| Parameter | Value |
-|---|---|
-| AOI bbox (EPSG:4326) | `(-120.25, 38.85, -119.85, 39.30)` |
-| Date range | `2024-06-01` / `2024-09-30` |
-| STAC root | `https://planetarycomputer.microsoft.com/api/stac/v1` |
-| Collection | `sentinel-2-l2a` |
-| Cloud cover | `< 20 %` |
-| Asset | `B04` (Red) — for the patcher demo we use a single band |
-
-## 1. Resolve a Sentinel-2 asset
+Search the Planetary Computer for the clearest summer-2024 Sentinel-2 L2A
+scene over Lake Tahoe that is fully inside the swath.
+`planetary_computer.sign_inplace` signs each asset
+URL so you can read it.
 
 ```python
 import planetary_computer
+import pystac
 import pystac_client
 
-STAC = "https://planetarycomputer.microsoft.com/api/stac/v1"
-BBOX = (-120.25, 38.85, -119.85, 39.30)
-
-catalog = pystac_client.Client.open(STAC, modifier=planetary_computer.sign_inplace)
-search = catalog.search(
-    collections=["sentinel-2-l2a"],
-    bbox=BBOX,
-    datetime="2024-06-01/2024-09-30",
-    query={"eo:cloud_cover": {"lt": 20}},
+catalog: pystac_client.Client = pystac_client.Client.open(
+    "https://planetarycomputer.microsoft.com/api/stac/v1",
+    modifier=planetary_computer.sign_inplace,
 )
-items = sorted(search.items(), key=lambda it: it.properties["eo:cloud_cover"])
-item = items[0]
-red_href = item.assets["B04"].href
-print(item.id, "cloud cover:", item.properties["eo:cloud_cover"])
-```
-
-## 2. Open the COG lazily
-
-```python
-import rioxarray
-
-red = rioxarray.open_rasterio(red_href, masked=True)
-print(red.shape, red.rio.crs)
-```
-
-## 3. Wrap as a `RasterField`
-
-```python
-from georeader.rio_xarray_reader import RioXarrayReader
-
-import geopatcher as gp
-
-reader = RioXarrayReader(red)
-field = gp.RasterField(reader)
-```
-
-`geopatcher.RasterField` is a one-attribute dataclass that adapts
-anything satisfying the `georeader.GeoData` Protocol — `RasterioReader`,
-`AsyncGeoTIFFReader`, `RioXarrayReader`, in-memory `GeoTensor` — to the
-Patcher's `Field` Protocol.
-
-## 4. Compose a `SpatialPatcher`
-
-256×256 patches with 32-pixel overlap on each side, Hann-tapered for
-clean seams, accumulated with `spatial.aggregation.OverlapAdd`:
-
-```python
-import geopatcher as gp
-
-patcher = gp.SpatialPatcher(
-    geometry    = gp.spatial.geometry.Rectangular(size=(256, 256)),
-    sampler     = gp.spatial.sampler.RegularStride(step=(224, 224)),  # 32-px overlap
-    window      = gp.spatial.window.Hann(),
-    aggregation = gp.spatial.aggregation.OverlapAdd(),
+items: list[pystac.Item] = list(
+    catalog.search(
+        collections=["sentinel-2-l2a"],
+        bbox=(-120.25, 38.85, -119.85, 39.30),             # Lake Tahoe, lon/lat
+        datetime="2024-06-01/2024-09-30",
+        query={"eo:cloud_cover": {"lt": 20}, "s2:nodata_pixel_percentage": {"lt": 1}},
+    ).items()
 )
+item: pystac.Item = min(items, key=lambda it: it.properties["eo:cloud_cover"])
+red_href: str = item.assets["B04"].href                    # signed COG URL
 ```
 
-`step = size - overlap`. `spatial.window.Hann` is a periodic taper that falls to
-zero on each patch's leading edge, and OverlapAdd divides by the summed
-weights, so interior seams are feathered (an identity operator
-reconstructs them exactly). The one exception is the
-scene's first row and column, which no chip weights above zero and which
-come back as NaN (the aggregation's `fill_value`) — see
-[Window convention](patching.md#window-convention).
+## Patch, operate, stitch
 
-## 5. Per-patch operator — channel normalisation
-
-A toy operator that z-score normalises each patch (subtract mean,
-divide by stddev) — enough to show the shape-preserving plumbing
-without depending on a trained model:
+Open the red band lazily, wrap it as a `geopatcher.fields.RioXarrayField`
+and run a z-score per 256-pixel patch. Each patch reads only its own
+window of the COG.
 
 ```python
-import dataclasses
 import numpy as np
+import planetary_computer
+import pystac_client
+import rioxarray
+import xarray as xr
 
-
-def normalise(arr: np.ndarray) -> np.ndarray:
-    """Center and scale each patch to unit variance."""
-    a = np.asarray(arr, dtype=np.float32)
-    mu = np.nanmean(a)
-    sigma = np.nanstd(a) + 1e-6
-    return (a - mu) / sigma
-
-
-outputs = []
-for patch in patcher.split(field):
-    new_data = normalise(patch.data)
-    outputs.append(patch.with_data(new_data))
-```
-
-Streaming is the default — `patcher.split` returns an `Iterator[Patch]`
-so memory stays bounded regardless of scene size. Call
-`list(patcher.split(field))` for the eager case.
-
-## 6. Stitch with `spatial.aggregation.OverlapAdd`
-
-```python
-stitched = patcher.merge(outputs, field.domain)
-print(stitched.shape, stitched.dtype)
-```
-
-`merge` returns the aggregation's raw output — here a bare `np.ndarray`
-on the domain grid, with no transform or CRS. To get a georeferenced
-`GeoTensor` back (the source's transform, CRS, nodata and attrs), use
-`merge_to_field`:
-
-```python
-stitched_gt = patcher.merge_to_field(outputs, field)
-print(stitched_gt.transform, stitched_gt.crs)
-```
-
-For a >1 TB output that won't fit in RAM, swap the in-memory aggregation
-for the disk-backed one **and** stream the patches in — never build the
-full `outputs` list. The `normalise → with_data` step is now done inline
-so only one patch is alive at a time:
-
-```python
 import geopatcher as gp
 
-agg = gp.spatial.aggregation.OverlapAdd(
-    streaming=True,
-    target_path="out/tahoe.zarr",
-    chunks=(256, 256),
+catalog: pystac_client.Client = pystac_client.Client.open(
+    "https://planetarycomputer.microsoft.com/api/stac/v1",
+    modifier=planetary_computer.sign_inplace,
 )
-stitched_zarr = agg.merge(
-    (patch.with_data(normalise(patch.data)) for patch in patcher.split(field)),
-    field.domain,
+item = min(
+    catalog.search(
+        collections=["sentinel-2-l2a"],
+        bbox=(-120.25, 38.85, -119.85, 39.30),
+        datetime="2024-06-01/2024-09-30",
+        query={"eo:cloud_cover": {"lt": 20}, "s2:nodata_pixel_percentage": {"lt": 1}},
+    ).items(),
+    key=lambda it: it.properties["eo:cloud_cover"],
 )
+
+# Shapes: the full tile is (1, 10980, 10980); keep a 2048-pixel corner to stay quick.
+red: xr.DataArray = rioxarray.open_rasterio(item.assets["B04"].href, masked=True, chunks={"x": 1024, "y": 1024})
+red = red.isel(x=slice(0, 2048), y=slice(0, 2048))         # (1, 2048, 2048) float32, lazy
+field: gp.fields.RioXarrayField = gp.fields.RioXarrayField(red)
+
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(256, 256)),
+    sampler=gp.spatial.sampler.RegularStride(step=(224, 224)),  # 32 px overlap
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+)
+
+
+def zscore(chip: xr.DataArray) -> np.ndarray:
+    """Centre and scale one patch."""
+    a: np.ndarray = np.asarray(chip, dtype=np.float32)    # (1, 256, 256) float32
+    return (a - np.nanmean(a)) / (np.nanstd(a) + 1e-6)     # (1, 256, 256) float32
+
+
+outputs: list[gp.Patch] = [p.with_data(zscore(p.data)) for p in patcher.split(field)]  # 81 patches
+stitched: xr.DataArray = patcher.merge_to_xarray(outputs, field)  # (1, 2048, 2048) float32, coords kept · NaN = no data
 ```
 
-The generator expression means at most one patch (plus one store
-chunk, during the final normalisation) lives in RAM during the merge —
-bounded regardless of scene size. See
-[`recipes/streaming-overlap-add.md`](recipes/streaming-overlap-add.md)
-for the full pattern.
-
-## 7. Inspect the result
-
-```python
-import matplotlib.pyplot as plt
-
-fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-axes[0].imshow(np.asarray(field.domain)[0], cmap="viridis")
-axes[0].set_title(f"Input — Sentinel-2 B04\n{field.domain.shape}")
-axes[1].imshow(np.asarray(stitched), cmap="viridis")
-axes[1].set_title(f"Per-patch normalised\n{stitched.shape}")
-plt.show()
-```
-
-## What you've just built
-
-- A bounded-memory pipeline that splits a Sentinel-2 scene into 256×256
-  patches with 32-pixel overlap.
-- A per-patch operator that runs independently on each chip.
-- A `spatial.aggregation.OverlapAdd` reconstruction whose interior seams are
-  feathered by the `spatial.window.Hann` window (all but the scene's leading
-  row and column).
-- The same code swaps to disk-backed streaming by changing two lines of
-  the aggregation config.
+- **Overlap** is `size − step` = 32 pixels. The Hann window feathers each
+  seam, and `OverlapAdd` divides by the summed weights.
+- **No data.** Pixels outside the swath stay NaN, and so do the first row
+  and column, which the Hann taper weights at zero — see
+  [Window convention](patching.md#window-convention). Eight 224-pixel
+  steps plus one patch cover 2048 pixels exactly; on other sizes, pick a
+  [boundary policy](patching.md#boundary-policy) for the trailing edge.
+- **Carriers.** `merge` returns a bare array; `merge_to_xarray` puts it
+  back in a `DataArray` with the source's coords.
 
 ## Next steps
 
-- **Concepts** — read [`concepts.md`](concepts.md) for the full four-axis
-  abstraction, boundary policies, and determinism contracts.
-- **Recipes:**
-    - [Streaming overlap-add](recipes/streaming-overlap-add.md) — bounded-memory pipelines for >1 TB outputs.
-    - [On-error policies](recipes/on-error-policies.md) — raise / skip / mask / retry.
-    - [Journal & resume](recipes/journal-and-resume.md) — `PatchJournal` for restartable jobs.
-- **Notebook:** [`notebooks/patcher_lake_tahoe.ipynb`](notebooks/patcher_lake_tahoe.ipynb) — runnable mirror of this walkthrough.
-- **Full end-to-end:** [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb) — catalog → operators → patcher.
+- Keep memory flat on the full tile: [Stream to disk](recipes/streaming-overlap-add.md).
+- Run patches in parallel and survive bad reads: [Handle read failures](recipes/on-error-policies.md).
+- Restart a long job where it stopped: [Journal and resume](recipes/journal-and-resume.md).
+- Combine with catalog search and geotoolz operators: the
+  [stack quickstart](../index.md#quickstart-catalog-patcher-operators).

@@ -1,187 +1,114 @@
-# xarray N-D patching — the xrpatcher migration path
+# xarray N-D patching
 
-If you're coming from `xrpatcher` (or `xbatcher`), `geopatcher` already
-covers the same indexed-access + reconstruct workflow — just through the
-four-axis Patcher abstraction. This recipe walks through the migration in
-side-by-side form.
+Patch an `xarray.DataArray` by dimension name, index the patches like a
+list for an ML loader, and rebuild a `DataArray` with its coords. This
+covers what `xrpatcher` and `xbatcher` do, with the four axes.
 
-The three pieces you need are already in `geopatcher`:
+| xrpatcher | geopatcher |
+|---|---|
+| `XRDAPatcher(da, patches=..., strides=...)` | `SpatialPatcher(geometry=Rectangular(size), sampler=RegularStride(step))` over `geopatcher.fields.XarrayField(da)` |
+| `check_full_scan=True` | `spatial.sampler.RegularStride(step, check_full_scan=True)` |
+| `patcher[i]`, `len(patcher)`, `cache=` / `preload=` | `geopatcher.run.IndexedPatchView(patcher, field, cache=True, preload=True)` |
+| `patcher.reconstruct(outputs)` | `patcher.merge_to_xarray(patches, field)` |
 
-- `XarrayField` — wraps an `xarray.DataArray` as a Field with a
-  `GridDomain` view.
-- `SpatialPatcher` + `spatial.geometry.Rectangular` + `spatial.sampler.RegularStride` —
-  the four-axis composition produces patches indistinguishable from
-  `xrpatcher`'s slices.
-- `IndexedPatchView` — random-access wrapper exposing
-  `len(view)` / `view[i]` / `for p in view` over the patcher's anchors.
+Needs the `[grid]` extra. ADR-005 in the
+[design decisions](../decisions.md) explains why the view is a
+`Sequence[Patch]` and why its cache lives on the view.
 
-Two new bits of sugar make the side-by-side really one-for-one:
-
-- `spatial.sampler.RegularStride(check_full_scan=True)` — raises
-  `IncompleteScanConfiguration` when the stride doesn't exactly tile
-  the domain. Same robustness win as `xrpatcher`'s eponymous flag.
-- `SpatialPatcher.merge_to_xarray(patches, field)` — `merge` + rewrap as
-  `xarray.DataArray` with the original coords intact.
-
-See **ADR-005** in [Design decisions](../decisions.md) for the design rationale (why
-`Sequence[Patch]` rather than `torch.utils.data.Dataset`, why the cache
-lives on the view).
-
-## Prerequisites
-
-```bash
-pip install 'geotoolz-patcher[grid]'   # xarray
-```
-
-## Side-by-side
+## Index, process and rebuild
 
 ```python
-# Before — xrpatcher
+import numpy as np
 import xarray as xr
-from xrpatcher import XRDAPatcher
 
-da = xr.tutorial.load_dataset("eraint_uvz").u[..., :240, :360]
-patcher = XRDAPatcher(
-    da,
-    patches={"latitude": 30, "longitude": 30},
-    strides={"latitude": 30, "longitude": 30},
-    check_full_scan=True,
-    cache=True,
-    preload=True,
-)
-
-print(len(patcher))             # number of patches
-patch = patcher[0]              # one DataArray, cached
-outs = [model(patcher[i]) for i in range(len(patcher))]
-recon = patcher.reconstruct(outs)   # → DataArray with restored coords
-```
-
-```python
-# After — geopatcher
-import xarray as xr
-from geopatcher import SpatialPatcher, spatial
-from geopatcher.run import IndexedPatchView
+import geopatcher as gp
 from geopatcher.fields import XarrayField
+from geopatcher.run import IndexedPatchView
 
-da = xr.tutorial.load_dataset("eraint_uvz").u[..., :240, :360]
-field = XarrayField(da)
+# Shapes: a 240 × 360 lat/lon grid cut into 30 × 30 patches.
+u: xr.DataArray = xr.DataArray(
+    np.random.default_rng(0).random((240, 360), dtype=np.float32),  # (240, 360) float32
+    dims=("latitude", "longitude"),
+    coords={"latitude": np.linspace(89.5, -89.5, 240), "longitude": np.linspace(0, 359, 360)},
+)
+field: XarrayField = XarrayField(u)
 
-patcher = SpatialPatcher(
-    geometry    = spatial.geometry.Rectangular(size=(30, 30)),
-    sampler     = spatial.sampler.RegularStride(step=(30, 30), check_full_scan=True),
-    window      = spatial.window.Boxcar(),
-    aggregation = spatial.aggregation.OverlapAdd(),
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(30, 30)),
+    sampler=gp.spatial.sampler.RegularStride(step=(30, 30), check_full_scan=True),
+    window=gp.spatial.window.Boxcar(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
 
-view = IndexedPatchView(patcher, field, cache=True, preload=True)
-print(len(view))                # number of patches
-patch = view[0]                 # one Patch, cached
-outs = [model(view[i].data) for i in range(len(view))]
-recon = patcher.merge_to_xarray(outs_as_patches, field)
-                                # → DataArray with restored coords
+view: IndexedPatchView = IndexedPatchView(patcher, field, cache=True, preload=True)
+n: int = len(view)                                    # 96 = 8 × 12 patches
+chip: xr.DataArray = view[0].data                     # (30, 30) float32, dims (latitude, longitude)
+
+outputs: list[gp.Patch] = [view[i].with_data(view[i].data * 2.0) for i in range(n)]  # (30, 30) float32 each
+rebuilt: xr.DataArray = patcher.merge_to_xarray(outputs, field)  # (240, 360) float32, coords restored
 ```
 
-The key differences:
+- `view[i]` is a `Patch`: `.data` is the slice and `anchor`, `indices`
+  and `weights` come with it.
+- `merge_to_xarray` casts back to the source dtype when every value fits;
+  call `patcher.merge` for the raw `np.ndarray`.
 
-- **`view[i].data`** is the slice (a `DataArray`); the `Patch` carrier
-  also holds `anchor`, `indices`, and `weights`. xrpatcher exposed the
-  raw slice; geopatcher gives you the metadata alongside.
-- **Patch size is on the geometry, stride on the sampler.** The
-  four-axis split is what unlocks the rest of `geopatcher`'s surface
-  (windows, aggregations, hooks, on_error, journal, prefetch) — the
-  patcher is still a value object you can swap pieces of.
-- **`merge_to_xarray`** wraps `field.with_data(patcher.merge(...))`
-  internally; if you want the raw `np.ndarray`, call `patcher.merge`
-  directly.
+## Wrap the view for an ML loader
 
-## Random access for torch / Grain
-
-`IndexedPatchView` is a stdlib `Sequence[Patch]` — zero ML-framework
-dependencies in `geopatcher` core. Wrap in one line where you need
-framework-specific shapes:
+`IndexedPatchView` is a stdlib `Sequence`, so a torch `Dataset` or Grain
+`RandomAccessDataSource` is a three-method wrapper.
 
 ```python
-import torch
+import numpy as np
+import xarray as xr
 
-class PatchDataset(torch.utils.data.Dataset):
-    def __init__(self, view: "IndexedPatchView") -> None:
+import geopatcher as gp
+from geopatcher.fields import XarrayField
+from geopatcher.run import IndexedPatchView
+
+
+class PatchDataset:
+    """Same shape as torch.utils.data.Dataset / grain.RandomAccessDataSource."""
+
+    def __init__(self, view: IndexedPatchView) -> None:
         self.view = view
 
     def __len__(self) -> int:
         return len(self.view)
 
-    def __getitem__(self, i: int) -> torch.Tensor:
-        return torch.as_tensor(self.view[i].data.values)
+    def __getitem__(self, i: int) -> np.ndarray:
+        return self.view[i].data.values               # (30, 30) float32
+
+
+field: XarrayField = XarrayField(
+    xr.DataArray(np.zeros((240, 360), dtype=np.float32), dims=("latitude", "longitude"))  # (240, 360) float32
+)
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(30, 30)),
+    sampler=gp.spatial.sampler.RegularStride(step=(30, 30)),
+    window=gp.spatial.window.Boxcar(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+)
+dataset: PatchDataset = PatchDataset(IndexedPatchView(patcher, field, cache=True))
+batch: np.ndarray = np.stack([dataset[i] for i in range(4)])  # (4, 30, 30) float32
 ```
 
-```python
-import grain.python as grain
+The view pickles, so multi-worker loaders work under `spawn`,
+`forkserver` and `fork`. Each worker gets the anchor list and the
+`PatchCache` binding, and starts its own empty in-memory cache. The
+patcher and field must pickle too; every built-in `Field` does.
 
-class PatchSource(grain.RandomAccessDataSource):
-    def __init__(self, view: "IndexedPatchView") -> None:
-        self.view = view
+`IndexedPatchView(TemporalPatcher(...), series)` works the same way; pass
+`patcher_kwargs={"time_axis": 1, "coord": times}` for a non-default time
+axis or a stencil geometry.
 
-    def __len__(self) -> int:
-        return len(self.view)
+## Pitfalls
 
-    def __getitem__(self, i: int):
-        return self.view[i].data.values
-```
-
-Both wrappers benefit from `IndexedPatchView`'s in-memory cache without
-any framework changes.
-
-The view pickles, so `DataLoader(..., num_workers=4)` and Grain's
-multiprocess loaders work under every start method — `spawn` (the
-macOS / Windows default), `forkserver` (the Linux default from Python
-3.14) and `fork`. Each worker receives the anchor list and the
-`PatchCache` binding, and starts with its own empty in-memory
-`cache=True` cache; entries are never shared back to the parent. The
-patcher and the field must pickle too, which every built-in `Field`
-adapter does (a `RasterioReader` / `CogField` re-opens its
-source by path / URL in the worker).
-
-`IndexedPatchView(TemporalPatcher(...), series)` works the same way;
-pass `patcher_kwargs={"time_axis": 1, "coord": times}` for a non-default
-time axis or a coordinate-aware geometry.
-
-## When to use `check_full_scan=True`
-
-Turn it on when:
-
-- You're training over a region of fixed size and silent truncation
-  would change your epoch length without warning.
-- You're round-tripping through `merge` and a partial trailing tile
-  would shift the reconstruction boundary.
-
-Leave it off when:
-
-- You explicitly want the "stride past the edge, drop the leftover"
-  behaviour — sliding-window inference where the last under-full
-  position is acceptable.
-
-The default is `False` (matches the existing geopatcher behaviour);
-xrpatcher migrators who relied on `check_full_scan=True` should flip
-the flag.
-
-## v0.1 limitations
-
-- **2-D and N-D where every dim gets tiled.** `spatial.sampler.RegularStride`
-  over a `GridDomain` walks every coord dim with `(size, step)`. If your
-  cube includes a time axis you don't want to tile, take the spatial
-  slice first (`da.isel(time=k)`) or use `TemporalPatcher` for the time
-  axis. The time-axis patching path is documented in
-  [`recipes/temporal-stencils.md`](temporal-stencils.md).
-- **In-memory cache only.** Only the index-keyed in-memory cache
-  exists; content-addressed caching across sessions is not implemented.
-- **No xrpatcher `dims_labels` auto-discovery on reconstruct.**
-  `merge_to_xarray` uses the field's coord schema; specify it via the
-  field's `with_data` rather than letting the reconstruct guess.
-
-## See also
-
-- [`IndexedPatchView`](../api/reference.md) — the random-access wrapper.
-- [`recipes/temporal-stencils.md`](temporal-stencils.md) — time-axis
-  counterpart (when you want `TimeStencil('-9h', '3h', '3h')` semantics).
-- ADR-005 in [Design decisions](../decisions.md) — design rationale.
-- `xrpatcher` upstream: https://github.com/jejjohnson/xrpatcher.
+- **`check_full_scan=True`** raises `IncompleteScanConfiguration` when the
+  stride leaves a trailing partial tile — turn it on when silent
+  truncation would change your epoch length. It defaults to `False`.
+- **Every dim is tiled.** `RegularStride` over a `GridDomain` walks every
+  coord dim. For a cube with a time axis, slice time first
+  (`da.isel(time=k)`) or use a [SpatioTemporalPatcher](temporal-patching.md#space-time-cubes).
+- **The in-memory cache is per process.** For a cache that survives runs,
+  pass a [PatchCache](patch-cache.md).

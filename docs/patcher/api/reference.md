@@ -1,7 +1,8 @@
 # `geopatcher` — API reference
 
 One page per namespace; each public name has exactly one home. For the
-conceptual walkthrough see [Patching](../patching.md).
+mental model see [Concepts](../concepts.md); for edge, fill and failure
+rules, the [Behaviour reference](../patching.md).
 
 | Namespace | Holds | Page |
 |---|---|---|

@@ -1,207 +1,116 @@
-# Journal & resume — restartable patcher jobs
+# Journal and resume
 
-`PatchJournal` is a small append-only file that records `(anchor, status,
-runtime, output_uri, error)` for each completed patch. Pass it to
-`patcher.split(..., journal=journal)` and on restart the patcher skips
-anchors that already have a successful row.
+Restart a long patch job where it stopped. A
+`geopatcher.observe.PatchJournal` is an append-only JSONL file with one
+row per finished patch; pass it to `split(journal=...)` and anchors with
+an `"ok"` row are skipped on the next run.
 
-This recipe walks through:
+Use it for jobs over thousands of patches, on preemptible workers, or
+when each patch writes an output you must not write twice. Skip it for
+one-off exploration.
 
-1. The journal contract.
-2. A minimal save / resume loop.
-3. Combining a journal with `on_error="retry"`.
-4. Restart story.
-5. Letting `parallel_map` drive the journal.
-6. Storage notes (durability, format, file layout).
+## Record progress and resume
 
-## When you need it
-
-- Bulk inference on **thousands or millions of patches** where a single
-  failure shouldn't restart the whole job.
-- Multi-day jobs on spot instances / preemptible workers.
-- Pipelines that write per-patch outputs to S3 / GCS as side-effects —
-  the journal records *which writes already succeeded* so the rerun
-  doesn't re-emit them.
-
-For one-shot exploratory work, skip the journal.
-
-## 1. The contract
+Commit a row after each patch. A rerun with the same journal reads only
+the anchors without an `"ok"` row.
 
 ```python
-from geopatcher.observe import PatchJournal
-
-journal = PatchJournal("out/run.jsonl")
-```
-
-| Method | Behavior |
-|---|---|
-| `journal.has(anchor)` | `True` iff `anchor` has a `status == "ok"` row. |
-| `journal.commit(anchor, status="ok", runtime_s=..., output_uri=..., error=None)` | Append a durable row. `flush()` + `fsync()` before return. |
-| `journal.pending(all_anchors)` | Return the subset of `all_anchors` that don't have an `"ok"` row yet. |
-| `journal.completed()` | Every anchor whose latest row is `"ok"`, in journal (normalised) form. |
-
-The journal stores one JSON record per committed patch, keyed by the
-anchor after `geopatcher.observe.normalize_anchor`: numpy scalars become Python
-numbers (`datetime64` / `timedelta64` become tagged
-`{"__datetime64__": "…"}` / `{"__timedelta64__": "…"}` dicts, so they never
-collide with a string anchor), numpy arrays and
-tuples become lists, dicts keep their string keys. So
-`(np.int64(5), np.int64(10))`, `np.array([5, 10])` and `(5, 10)` are the
-same anchor — `spatial.sampler.Explicit(anchors_=np.argwhere(mask))` rows resume
-correctly. Anything else (an arbitrary object, a non-string dict key)
-raises `TypeError`; there is no `str()` fallback.
-
-**Durability.** Each `commit` flushes the Python buffer and calls
-`os.fsync` on the file descriptor before returning. The OS may still
-reorder the directory entry on power-loss, so treat the guarantee as
-"best-effort durable per row" rather than transactional. Re-running a
-job after a crash skips anchors with `status == "ok"`;
-partially-written trailing rows are dropped by the JSON-decode guard
-with a warning.
-
-## 2. Minimal save / resume loop
-
-```python
-import dataclasses
 import time
+from pathlib import Path
 
 import numpy as np
+import rasterio
+from georeader.geotensor import GeoTensor
 
+import geopatcher as gp
 from geopatcher.observe import PatchJournal
-import geopatcher as gp
 
-journal = PatchJournal("out/lake-tahoe-run.jsonl")
-patcher = gp.SpatialPatcher(
-    geometry    = gp.spatial.geometry.Rectangular(size=(256, 256)),
-    sampler     = gp.spatial.sampler.RegularStride(step=(224, 224)),
-    window      = gp.spatial.window.Hann(),
-    aggregation = gp.spatial.aggregation.OverlapAdd(streaming=True, target_path="out/tahoe.zarr",
-                                       chunks=(256, 256)),
+Path("out/chips").mkdir(parents=True, exist_ok=True)
+field: gp.RasterField = gp.RasterField(
+    GeoTensor(
+        np.ones((1, 256, 256), dtype=np.float32),       # (1, 256, 256) float32
+        transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
+        crs="EPSG:32611",
+    )
+)
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(64, 64)),
+    sampler=gp.spatial.sampler.RegularStride(step=(64, 64)),
+    window=gp.spatial.window.Boxcar(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
 
-for patch in patcher.split(field, journal=journal):
-    # Skipped automatically if `journal.has(patch.anchor)` is True.
-    t0 = time.perf_counter()
-    try:
-        out = my_operator(patch.data)
-        out_uri = f"out/chips/{patch.anchor}.npy"
-        np.save(out_uri, out)
-        journal.commit(
-            patch.anchor,
-            status="ok",
-            runtime_s=time.perf_counter() - t0,
-            output_uri=out_uri,
-        )
-    except Exception as exc:
-        journal.commit(
-            patch.anchor,
-            status="error",
-            runtime_s=time.perf_counter() - t0,
-            error=f"{type(exc).__name__}: {exc}",
-        )
-        raise
+
+def run(journal: PatchJournal, crash_after: int | None = None) -> int:
+    """Process every pending patch; optionally 'crash' after a few."""
+    done: int = 0
+    for patch in patcher.split(field, journal=journal):  # skips anchors with an "ok" row
+        t0: float = time.perf_counter()
+        out: np.ndarray = np.asarray(patch.data) * 2.0  # (1, 64, 64) float32
+        uri: str = f"out/chips/{patch.anchor[0]}_{patch.anchor[1]}.npy"
+        np.save(uri, out)
+        journal.commit(patch.anchor, status="ok", runtime_s=time.perf_counter() - t0, output_uri=uri)
+        done += 1
+        if crash_after is not None and done == crash_after:
+            break                                       # stand-in for a crash
+    return done
+
+
+first: int = run(PatchJournal("out/run.jsonl"), crash_after=5)  # 5 patches
+journal: PatchJournal = PatchJournal("out/run.jsonl")            # reload after the "crash"
+remaining: list[tuple[int, int]] = journal.pending(patcher.anchors(field))  # 11 anchors
+second: int = run(journal)                                       # 11 patches, none repeated
 ```
 
-Kill the process at any point and rerun the same script — anchors with
-an `"ok"` row are skipped on the next `patcher.split` call.
+`patcher.anchors(field)` lists the full anchor schedule without reading
+any data. Record failures too, with `status="error"` and `error=...`;
+they are retried on the next run because only `"ok"` rows count.
 
-## 3. Combine with `on_error="retry"`
+`geopatcher.run.parallel_map(..., journal=journal)` does this bookkeeping
+for you, committing from the parent process — see
+[Run in parallel with a journal](on-error-policies.md#run-in-parallel-with-a-journal).
 
-The journal and the `on_error` policy compose naturally. Use the journal
-to record durable progress across restarts; use the policy to handle
-transient I/O within a single run:
+## Journal methods
 
-```python
-import geopatcher as gp
+| Method | Behaviour |
+|---|---|
+| `journal.has(anchor)` | `True` if `anchor` has a `status == "ok"` row |
+| `journal.commit(anchor, status=..., runtime_s=..., output_uri=None, error=None)` | append a row, then `flush()` and `fsync()` |
+| `journal.pending(all_anchors)` | the anchors without an `"ok"` row |
+| `journal.completed()` | every anchor whose latest row is `"ok"`, normalised |
 
-patcher = gp.SpatialPatcher(
-    ...,
-    on_error    = "retry",
-    max_retries = 3,
-)
+## Anchor keys
 
-for patch in patcher.split(field, journal=journal):
-    t0 = time.perf_counter()
-    out = my_operator(patch.data)
-    journal.commit(patch.anchor, status="ok", runtime_s=time.perf_counter() - t0)
-```
+Anchors are normalised by `geopatcher.observe.normalize_anchor` before
+they are stored:
 
-If the read fails three times in a row, the retry policy logs to
-`patcher.errors` and omits the anchor — the journal therefore never gets
-an `"ok"` row, so the next restart re-tries the same anchor (perhaps
-with the transient outage resolved).
+- numpy scalars become Python numbers; arrays and tuples become lists;
+- `datetime64` / `timedelta64` become tagged dicts, so they never collide
+  with a string anchor;
+- anything else (an arbitrary object, a non-string dict key) raises
+  `TypeError`.
 
-If you instead want to mark exhausted-retry anchors as permanently
-failed, walk `patcher.errors` after the loop and call
-`journal.commit(anchor, status="error", ...)` explicitly so the next
-restart skips them.
+So `(np.int64(5), np.int64(10))`, `np.array([5, 10])` and `(5, 10)` are the
+same anchor, and `spatial.sampler.Explicit(anchors_=np.argwhere(mask))`
+resumes correctly.
 
-## 4. Restart story
+## Retries and the journal
 
-On restart, the journal reloads its rows from the JSONL file. The
-patcher walks the full anchor schedule and silently skips anchors that
-have an `"ok"` row.
+The `on_error` policy handles transient errors within one run; the
+journal carries progress across runs. A read that exhausts its retries
+yields no patch, so it gets no `"ok"` row and the next run tries it
+again. To give up on an anchor for good, commit an `"error"` row and
+filter it out of your own schedule.
 
-```python
-journal = PatchJournal("out/lake-tahoe-run.jsonl")
-print(f"already done: {len(journal.completed())}")
+## Storage
 
-remaining = journal.pending(patcher.anchors(field))
-print(f"remaining: {len(remaining)}")
-
-for patch in patcher.split(field, journal=journal):
-    ...
-```
-
-`patcher.anchors(field)` materialises the full anchor schedule without
-reading the data — cheap relative to a real `split` walk.
-
-## 5. Let `parallel_map` drive the journal
-
-The reference runner takes the same journal and does the bookkeeping of
-section 2 for you: anchors with an `"ok"` row are skipped before any
-read, and every finished patch is committed from the parent process —
-`"ok"` with the operator's runtime, or `"error"` with
-`"<ExceptionType>: <message>"` — so the journal stays single-writer even
-with `backend="process"`.
-
-```python
-from geopatcher.run import parallel_map
-
-journal = PatchJournal("out/lake-tahoe-run.jsonl")
-outputs = parallel_map(
-    patcher, field, my_operator,
-    n_workers=8,
-    journal=journal,
-    on_error="skip",     # record operator failures as "error" rows, keep going
-)
-```
-
-Rerun the same call after a crash: only the anchors without an `"ok"`
-row are read and processed. The returned list holds this run's outputs;
-persist each output inside `my_operator` (and pass its URI through your
-own bookkeeping) if a later run needs the earlier results.
-
-## Storage notes
-
-- **Format:** one JSON object per line (JSONL). Trivially diffable,
-  grep-able, and consumable by `pandas.read_json(..., lines=True)` for
-  ex-post analysis.
-- **Location:** local filesystem. The journal does not write to S3 / GCS
-  directly — wrap with `s3fs` or sync periodically if you need remote
-  durability.
-- **Concurrency:** the journal is *not* multi-writer safe. One process
-  per journal file. For parallel runners, partition by journal file
-  (one per worker) and post-process / merge.
-- **Schema:**
-
-  ```json
-  {"anchor": [0, 0], "status": "ok", "runtime_s": 0.31,
-   "output_uri": "out/chips/0_0.npy", "error": null}
-  ```
-
-## See also
-
-- [`recipes/on-error-policies.md`](on-error-policies.md) — how transient I/O is retried inside a run.
-- [`recipes/streaming-overlap-add.md`](streaming-overlap-add.md) — combine with disk-backed accumulation for resumable >1 TB outputs.
-- [`observability.md`](../observability.md) — hook `on_patch_done` into the journal commit for tracing.
+- **Format.** One JSON object per line:
+  `{"anchor": [0, 0], "status": "ok", "runtime_s": 0.31, "output_uri": "out/chips/0_0.npy", "error": null}`.
+  `pandas.read_json(path, lines=True)` loads it for analysis.
+- **Durability.** Each `commit` calls `fsync` before returning. Treat it
+  as durable per row, not transactional: a truncated trailing row is
+  dropped with a warning.
+- **Location.** Local files only. Sync the file to object storage yourself
+  if you need remote durability.
+- **One writer per file.** The journal is not safe for several writers;
+  give each worker its own file and merge them afterwards.

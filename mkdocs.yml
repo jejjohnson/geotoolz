@@ -135,13 +135,17 @@ nav:
       - Concepts: patcher/concepts.md
       - Quickstart: patcher/quickstart.md
       - How-to:
-          - Streaming overlap-add: patcher/recipes/streaming-overlap-add.md
-          - On-error policies: patcher/recipes/on-error-policies.md
-          - Journal & resume: patcher/recipes/journal-and-resume.md
+          - Stream to disk: patcher/recipes/streaming-overlap-add.md
+          - Handle read failures: patcher/recipes/on-error-policies.md
+          - Journal and resume: patcher/recipes/journal-and-resume.md
+          - Cache patch reads: patcher/recipes/patch-cache.md
+          - Patch across CRSs: patcher/recipes/mixed-crs.md
+          - Global statistics: patcher/recipes/global-statistics.md
+          - Async and prefetch: patcher/patching/async-prefetch.md
+          - Observability hooks: patcher/observability.md
+          - Temporal patching: patcher/recipes/temporal-patching.md
           - Temporal stencils: patcher/recipes/temporal-stencils.md
           - xarray N-D patching: patcher/recipes/xarray-nd-patching.md
-          - Observability hooks: patcher/observability.md
-          - Async and prefetch: patcher/patching/async-prefetch.md
       - Tutorials:
           - Patching Sentinel-2 (Lake Tahoe): patcher/notebooks/patcher_lake_tahoe.ipynb
       - Reference:
