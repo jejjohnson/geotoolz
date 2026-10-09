@@ -53,13 +53,15 @@ plugins:
   - redirects:
       redirect_maps:
         concepts.md: operators/concepts.md
-        quickstart.md: operators/quickstart.md
+        quickstart.md: operators/index.md
+        operators/quickstart.md: operators/index.md
         normalization.md: operators/normalization.md
         patch_ops.md: operators/patch_ops.md
         io.md: operators/io.md
         recipes/define-an-operator.md: operators/how-to/define-an-operator.md
         recipes/branching-pipelines.md: operators/how-to/branching-pipelines.md
-        recipes/integration-with-geocatalog-and-geopatcher.md: operators/how-to/integration-with-geocatalog-and-geopatcher.md
+        recipes/integration-with-geocatalog-and-geopatcher.md: operators/patch_ops.md
+        operators/how-to/integration-with-geocatalog-and-geopatcher.md: operators/patch_ops.md
         api/augment.md: operators/api/augment.md
         api/carrier.md: operators/api/carrier.md
         api/compositing.md: operators/api/compositing.md
@@ -97,14 +99,12 @@ nav:
   - Operators — geotoolz:
       - Overview: operators/index.md
       - Concepts: operators/concepts.md
-      - Quickstart: operators/quickstart.md
       - How-to:
           - Define an operator: operators/how-to/define-an-operator.md
           - Branching pipelines: operators/how-to/branching-pipelines.md
-          - Catalog → patch → operate: operators/how-to/integration-with-geocatalog-and-geopatcher.md
           - Tile → operate → stitch: operators/patch_ops.md
-          - Normalization: operators/normalization.md
-          - Multi-format readers: operators/io.md
+          - Normalise for training and inference: operators/normalization.md
+          - Read HDF and NetCDF files: operators/io.md
       - Tutorials:
           - Operators on Sentinel-2 (Lake Tahoe): operators/notebooks/operators_lake_tahoe.ipynb
       - Reference:

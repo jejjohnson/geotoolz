@@ -1,279 +1,215 @@
 # Define an operator
 
-The minimal viable `Operator` is a keyword-only constructor plus one
-method. This recipe walks through writing one from scratch — what each
-piece is for, the conventions geotoolz follows, and the small
-disciplines that keep operators composable.
+Write your own step and it composes with every built-in: in a
+`Sequential`, in a `Graph`, and in `get_config()`. This page is the one
+walkthrough; the model behind it is in [Concepts](../concepts.md#the-operator).
 
-## The contract
+## Write the operator
 
-```python
-from pipekit import Operator
-
-
-class MyOp(Operator):
-    def __init__(self, *, knob: float = 1.0) -> None:
-        self.knob = knob            # stored under the argument's own name
-
-    def _apply(self, gt):           # the work
-        ...
-```
-
-That's it. Subclassing `Operator` gives you for free:
-
-- `__call__` with dual-mode dispatch (eager on a value, graph-mode on
-  an `Input` / `Node`).
-- `__or__` so `op_a | op_b` builds a `Sequential`.
-- `get_config()`, derived from the `__init__` signature (see Step 3),
-  and a `__repr__` built from it.
-
-## Step 1 — keyword-only constructor
-
-```python
-def __init__(self, *, scale: float = 1e-4, clip: tuple[float, float] | None = None) -> None:
-    self.scale = scale
-    self.clip = clip
-```
-
-**Why keyword-only.** YAML / Hydra-zen configs serialise by name, and a
-keyword-only signature makes the mapping from config to constructor
-unambiguous. Every geotoolz operator follows this rule — including the
-ones that wrap an estimator or model (`ModelOp(model=net)`).
-
-**Use the shared vocabulary.** One concept has one parameter name across
-the library: a single band is named for what it is (`red`, `nir`,
-`qa_band`, … — an integer position or a band name, never `nir_idx`),
-several bands are `bands`, a value written into pixels is `fill_value`,
-a neighbourhood side length is `window`, an RNG seed is `seed`, a
-denominator stabiliser is `eps`. Reusing the names keeps configs
-readable and lets your operator sit next to the built-ins.
-
-## Step 2 — `_apply` does the work
+Subclass `geotoolz.Operator` (pipekit's), store each keyword-only argument
+under its own name, and do the work in `_apply`. Rewrap the result with
+`geotoolz.carrier.wrap_like`, or `wrap_filled` when nodata pixels need the
+output's fill, then run `geotoolz.testing.check_operator`.
 
 ```python
 import numpy as np
+from georeader.geotensor import GeoTensor
+from rasterio.transform import from_origin
+
+import geotoolz as gz
+from geotoolz.carrier import carried_fill, wrap_filled
+from geotoolz.testing import check_operator
+
+
+class Scale(gz.Operator):
+    """Multiply digital numbers by a scale factor."""
+
+    def __init__(self, *, scale: float = 1e-4) -> None:
+        self.scale = scale                                          # same name as the argument
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        out: np.ndarray = np.asarray(gt, dtype=np.float32) * self.scale  # (C, H, W) any → (C, H, W) float32
+        # Rewrap like the input and write the output's fill into its nodata pixels.
+        return wrap_filled(gt, out, fill_value_default=carried_fill(gt, out.dtype))
+
+
+rng: np.random.Generator = np.random.default_rng(0)
+dn: np.ndarray = rng.integers(1, 4000, size=(4, 32, 32), dtype=np.uint16)  # (4, 32, 32) uint16
+dn[:, :2, :2] = 0                                                         # a few nodata pixels
+scene: GeoTensor = GeoTensor(
+    dn, transform=from_origin(750_000, 4_350_000, 10, 10), crs="EPSG:32610",
+    fill_value_default=0, attrs={"band_names": ["B2", "B3", "B4", "B8"]},
+)
+
+op: Scale = Scale(scale=1e-4)
+reflectance: GeoTensor = check_operator(op, scene)                        # (4, 32, 32) uint16 → (4, 32, 32) float32
+assert op.get_config() == {"scale": 1e-4}
+assert gz.Operator.from_state(op.state).get_config() == op.get_config()
+```
+
+`check_operator` fails naming the first broken rule. It checks:
+
+- the constructor is keyword-only, and `get_config()` is JSON that
+  rebuilds an equal operator (or the operator is `forbid_in_yaml`);
+- the operator works on graph `Input` nodes;
+- a GeoTensor in gives a GeoTensor out on the same grid, and a plain array
+  gives a plain array;
+- `attrs` is a fresh dict whose per-band keys match the output bands;
+- the fill suits the output dtype, the input's nodata stays nodata, and
+  the input is left untouched;
+- a `(T, C, H, W)` stack matches the per-frame results, or is rejected
+  with an error naming the operator.
+
+## Follow the rules
+
+| Rule | Why |
+|---|---|
+| Keyword-only `__init__(self, *, ...)`, each argument stored under its own name | `get_config()` is derived from it; configs map to arguments by name. |
+| Hold configuration only, never a carrier | A second raster is a positional `_apply` argument, so a `Graph` can wire it in. |
+| Implement `_apply`, never `__call__` | `__call__` switches between eager runs and graph recording. |
+| Read with `np.asarray(gt)`, rewrap with `wrap_like` | Plain arrays and GeoTensors both work; CRS, transform and attrs carry over. |
+| Never mutate the input | The same scene may feed other branches. |
+| Declare the output fill | `False` for masks, `0` for labels and counts, `NaN` for new float quantities, `carried_fill(gt, dtype)` for carried values. |
+| Use the shared parameter names | `red` / `nir` / `qa_band` for one band, `bands`, `fill_value`, `window`, `seed`, `eps`. |
+
+The full parameter vocabulary is in
+[`packages/geotoolz/AGENTS.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/AGENTS.md#operator-parameter-vocabulary).
+
+## Collapse bands and judge nodata
+
+An index reads two bands and returns one value per pixel. Resolve band
+references by name or position, leave invalid pixels as `NaN`, and
+decorate `_apply` with `over_frames` so a `(T, C, H, W)` stack runs frame
+by frame.
+
+```python
+import numpy as np
+from georeader.geotensor import GeoTensor
+from rasterio.transform import from_origin
+
+import geotoolz as gz
+from geotoolz.carrier import mask_invalid_to_nan, over_frames, resolve_band, wrap_like
+from geotoolz.testing import check_operator
+
+
+class NormalizedDifference(gz.Operator):
+    """(a - b) / (a + b + eps) for two bands; NaN where either is nodata."""
+
+    def __init__(self, *, a: int | str = 3, b: int | str = 2, eps: float = 1e-10) -> None:
+        self.a, self.b, self.eps = a, b, eps
+
+    @over_frames
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        x: np.ndarray = mask_invalid_to_nan(gt)                       # (C, H, W) any → (C, H, W) float · NaN = nodata
+        a: np.ndarray = x[resolve_band(gt, self.a)]                   # (H, W) float
+        b: np.ndarray = x[resolve_band(gt, self.b)]                   # (H, W) float
+        return wrap_like(gt, (a - b) / (a + b + self.eps), fill_value_default=np.nan)
+
+
+rng: np.random.Generator = np.random.default_rng(0)
+dn: np.ndarray = rng.integers(1, 4000, size=(4, 32, 32), dtype=np.uint16)  # (4, 32, 32) uint16
+dn[:, :2, :2] = 0                                                         # a few nodata pixels
+scene: GeoTensor = GeoTensor(
+    dn, transform=from_origin(750_000, 4_350_000, 10, 10), crs="EPSG:32610",
+    fill_value_default=0, attrs={"band_names": ["B2", "B3", "B4", "B8"]},
+)
+
+ndvi: GeoTensor = check_operator(NormalizedDifference(a="B8", b="B4"), scene)  # (4, 32, 32) uint16 → (32, 32) float · NaN = nodata
+assert np.isnan(ndvi.values[:2, :2]).all()
+```
+
+The built-in `gz.NDVI` has the same shape. Before writing a step, search
+the [capability index](../../capabilities.md): it may already exist.
+
+## Hold a live object
+
+An operator that holds a callable, model or open handle cannot rebuild
+from JSON. Set `forbid_in_yaml = True`: its config becomes a debug repr,
+and `from_state` refuses to rebuild it.
+
+```python
+from collections.abc import Callable
+
+import numpy as np
+
+import geotoolz as gz
 from geotoolz.carrier import wrap_like
 
 
-def _apply(self, gt):
-    out = np.asarray(gt, dtype=np.float32) * self.scale
-    if self.clip is not None:
-        lo, hi = self.clip
-        out = np.clip(out, lo, hi)
-    return wrap_like(gt, out)
-```
+class ApplyFunction(gz.Operator):
+    """Apply an elementwise function to every pixel."""
 
-**Conventions.**
-
-- **Accept `GeoTensor` and plain arrays.** Read the values with
-  `np.asarray(gt)`; `GeoTensor` is an `np.ndarray` subclass, so the same
-  code runs on both carriers.
-- **Rewrap the result with `geotoolz.carrier.wrap_like(gt, out)`** so
-  `transform`, `crs`, `attrs` and `fill_value_default` propagate from the
-  input (a plain-array input comes back as a plain array). Don't
-  construct a new `GeoTensor` by hand unless you really need to.
-- **Declare a fill value that matches the output.** georeader treats
-  `fill_value_default` as nodata (`validmask()` is `values != fill`),
-  even when it is `0`, so an inherited fill is wrong once the output's
-  dtype or meaning changes. Pass it explicitly —
-  `wrap_like(gt, out, fill_value_default=...)` (or
-  `geotoolz.carrier.wrap_filled`, which also writes the fill into the
-  input's nodata pixels): `False` for boolean masks, `0` for label /
-  count maps, `NaN` for new float quantities (indices, scores, features),
-  and `geotoolz.carrier.carried_fill(gt, out.dtype)` for outputs that
-  carry the input's values. If `0` is real data in your input, give it
-  `fill_value_default=None` (or `NaN`) rather than georeader's default `0`.
-- **Preserve trailing spatial dims.** If your op collapses the channel
-  axis (e.g. NDVI), make sure the output's last two dims still agree
-  with the input's `(H, W)` so `wrap_like` accepts it (pass
-  `transform=` for outputs on a new grid).
-- **Pure function inside.** Don't mutate the input array. If you need a
-  scratch buffer, copy first.
-
-## Step 3 — `get_config()` comes for free
-
-`Operator` inherits pipekit's `ConfigMixin`, which derives `get_config()`
-from the `__init__` signature: for every parameter it reads the instance
-attribute of the same name. Storing each argument under its own name
-(Step 1) is therefore all it takes:
-
-```python
-op = Scale(scale=2e-4, clip=(0.0, 1.0))
-op.get_config()                  # {"scale": 0.0002, "clip": (0.0, 1.0)}
-Scale(**op.get_config())         # an equivalent operator
-```
-
-**The discipline.** `MyOp(**op.get_config())` must produce an
-equivalent operator. Keep runtime-only state out of it with
-`__config_exclude__ = ("cache",)`. If your constructor accepts a
-callable, an open file handle, or anything else that can't survive
-JSON, set `forbid_in_yaml = True`: YAML loaders and `from_state` then
-refuse to rebuild the operator, and its config is a debug repr only.
-
-```python
-class Tap(Operator):
     forbid_in_yaml = True
 
-    def __init__(self, *, fn) -> None:
+    def __init__(self, *, fn: Callable[[np.ndarray], np.ndarray]) -> None:
         self.fn = fn
 
-    def _apply(self, x):
-        self.fn(x)
-        return x
+    def _apply(self, gt: np.ndarray) -> np.ndarray:
+        return wrap_like(gt, self.fn(np.asarray(gt)))
+
+
+x: np.ndarray = np.random.default_rng(0).random((3, 8, 8))  # (3, 8, 8) float64
+y: np.ndarray = ApplyFunction(fn=np.sqrt)(x)                  # (3, 8, 8) float64 → (3, 8, 8) float64
 ```
 
-Override `get_config()` by hand only when the config genuinely differs
-from the constructor arguments (pipekit's `Sequential`, whose config is
-the list of nested operators, is the canonical case).
+For a one-off function, pipekit's `gz.Lambda(fn)` does the same without a
+class.
 
-**Learned state.** An operator that learns from data must not overwrite
-its constructor attributes inside `_apply`. Follow the
-[fitted-operator contract](../concepts.md#fitted-operators-fit-transform):
-a `fit(x) -> self` that writes trailing-underscore attributes (`mean_`),
-a read-only `transform(x)`, and an `_apply` that calls `transform` —
-fitting first, via `geotoolz.carrier.fit_once`, if it learns on
-call. The fitted attributes are not constructor parameters, so they stay
-out of `get_config()` without any `__config_exclude__`, and
-`fit_once` keeps concurrent first calls from racing.
+## Write a terminal operator
 
-## Step 4 (optional) — validate arguments with Pydantic
-
-When the constructor has more than a few knobs or needs validation,
-validate them with a Pydantic model at construction time — and still
-store the validated values under the argument names, so `get_config()`
-stays automatic:
+An operator that returns something other than a carrier, such as `None`
+after a write, sets `_terminal = True`. `Sequential` then accepts it only
+as the last step.
 
 ```python
-from pydantic import BaseModel, Field
+import tempfile
+from pathlib import Path
+
+import numpy as np
+
+import geotoolz as gz
 
 
-class ScaleCfg(BaseModel):
-    scale: float = Field(1e-4, gt=0, description="Multiplicative scale")
-    clip: tuple[float, float] | None = None
+class SaveNpy(gz.Operator):
+    """Write the array to a .npy file; returns None."""
 
-
-class Scale(Operator):
-    def __init__(self, *, scale: float = 1e-4, clip: tuple[float, float] | None = None) -> None:
-        cfg = ScaleCfg(scale=scale, clip=clip)
-        self.scale, self.clip = cfg.scale, cfg.clip
-
-    def _apply(self, gt):
-        out = np.asarray(gt, dtype=np.float32) * self.scale
-        if self.clip is not None:
-            out = out.clip(*self.clip)
-        return wrap_like(gt, out)
-```
-
-The typed model lives at the *config* boundary, not the carrier
-boundary — inputs/outputs are still `GeoTensor`s. Validation runs once
-at `__init__`, not on every `_apply`.
-
-## Terminal operators
-
-If your op returns `None` (writes to disk, displays, etc.), mark it
-terminal so `Sequential` rejects it in any position except the last:
-
-```python
-from georeader.save import save_cog
-
-
-class SaveCOG(Operator):
     _terminal = True
 
     def __init__(self, *, path: str) -> None:
         self.path = path
 
-    def _apply(self, gt):
-        save_cog(gt, self.path)     # returns None
+    def _apply(self, gt: np.ndarray) -> None:
+        np.save(self.path, np.asarray(gt))
+
+
+path: str = str(Path(tempfile.mkdtemp()) / "ndvi.npy")
+x: np.ndarray = np.random.default_rng(0).random((4, 8, 8))                  # (4, 8, 8) float64
+pipeline: gz.Sequential = gz.NDVI(red=2, nir=3) | SaveNpy(path=path)        # (4, 8, 8) float64 → None
+pipeline(x)
+saved: np.ndarray = np.load(path)                                          # (8, 8) float64
 ```
 
-(The library's own writers — `gz.WriteGeoTIFF`, `gz.WriteCOG`,
-`gz.WriteZarr` — subclass `geotoolz.io.SinkOperator`, which sets
-`_terminal = True` for you.)
+The built-in writers (`gz.WriteGeoTIFF`, `gz.WriteCOG`, `gz.WriteZarr`)
+are terminal the same way. To write mid-chain and keep the carrier
+flowing, use `gz.Sink(write_fn)`, which returns its input.
 
-If you want side effects mid-chain *and* to keep the carrier flowing,
-use `Sink(fn)` instead — it runs `fn(gt)` and returns the input
-unchanged.
+## Learn state with fit and transform
 
-## Test it on scalars first
+An operator that learns from data never overwrites its constructor
+attributes in `_apply`. It follows the
+[fitted-operator contract](../concepts.md#fitted-operators):
 
-The core algebra is carrier-agnostic. You can write the dispatch /
-composition tests against scalars and only swap in `GeoTensor`s once
-the math is right:
+- `fit(x) -> self` writes trailing-underscore attributes (`mean_`);
+- `transform(x)` only reads them;
+- `_apply` calls `transform`, after `geotoolz.carrier.fit_once` when it
+  learns on the first call, so concurrent first calls fit once.
 
-```python
-class Add(Operator):
-    def __init__(self, *, n: int) -> None:
-        self.n = n
+Fitted attributes are not constructor arguments, so they stay out of
+`get_config()` with no extra code.
 
-    def _apply(self, x):
-        return x + self.n
+## Further reading
 
-
-assert (Add(n=1) | Add(n=2))(0) == 3
-assert Add(n=1).get_config() == {"n": 1}
-```
-
-That's the same shape your `GeoTensor`-typed operator will use; you
-just get faster fixtures.
-
-## Worked example — `NDVI`
-
-```python
-import numpy as np
-from pipekit import Operator
-from geotoolz.carrier import over_frames, wrap_like
-
-
-class NDVI(Operator):
-    """(NIR - Red) / (NIR + Red + eps); collapses the band axis, keeps (H, W)."""
-
-    def __init__(self, *, nir: int = 3, red: int = 2, eps: float = 1e-10) -> None:
-        self.nir, self.red, self.eps = nir, red, eps
-
-    @over_frames                  # a (T, C, H, W) stack runs frame by frame
-    def _apply(self, gt):          # (C, H, W) -> (H, W)
-        a = np.asarray(gt, dtype=np.float32)
-        nir, red = a[self.nir], a[self.red]
-        return wrap_like(gt, (nir - red) / (nir + red + self.eps), fill_value_default=np.nan)
-```
-
-That's a complete, round-trippable operator in ~10 lines. The built-in
-`gz.NDVI` has the same shape, plus band-name resolution
-(`gz.NDVI(nir="B08", red="B04")`) and nodata judging.
-
-## Check the contracts
-
-`geotoolz.testing.check_operator` runs, on your operator and one sample
-scene, the checks geotoolz runs on every built-in operator, and fails
-naming the first broken rule:
-
-- the constructor is keyword-only, and `get_config()` is JSON that
-  round-trips (or the operator is `forbid_in_yaml`);
-- it works on graph `Input` nodes;
-- a GeoTensor in gives a GeoTensor out on the same grid, and a plain array
-  gives a plain array;
-- `attrs` is fresh, with per-band keys that match the output;
-- the fill suits the output dtype and the input's nodata stays nodata;
-- the input is left untouched;
-- a `(T, C, H, W)` stack matches the per-frame results, or is rejected
-  with an error naming the operator.
-
-```python
-from geotoolz.testing import check_operator
-
-
-def test_ndvi(scene):            # GeoTensor (4, H, W), a few nodata pixels
-    out = check_operator(NDVI(nir=3, red=2), scene)
-    assert out.shape == scene.shape[-2:]
-```
-
-## See also
-
-- [Concepts](../concepts.md) — the model behind the `Operator` base
-  class.
-- [Composition core notebook](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/01_composition_core.ipynb) —
-  every primitive against scalars, end-to-end (lives in the
-  research_notebook geostack project).
-- [Branching pipelines](branching-pipelines.md) — when one operator
-  isn't enough.
+- [Branching pipelines](branching-pipelines.md): combine your operator
+  with others in a `Graph`, `Branch` or `Switch`.
+- [Carrier helpers](../api/carrier.md): every helper in
+  `geotoolz.carrier` and `geotoolz.testing`.

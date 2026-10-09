@@ -1,174 +1,160 @@
-# Branching pipelines — Graph vs Branch vs Switch
+# Branching pipelines
 
-`Sequential` covers most linear flows. When you need branching, fan-out,
-fan-in, or runtime conditionals, reach for one of three primitives:
-**`Graph`** (structural branching at build time), **`Branch`** (two-way
-runtime fork), or **`Switch`** (N-way runtime dispatch).
+Branch a pipeline when one chain is not enough: two scenes in, several
+products out, a fork on the input's type, or one recipe per sensor. Which
+shape to pick is in [Concepts](../concepts.md#choose-a-composition-shape);
+this page builds each one.
 
-## At-a-glance decision tree
+![Branch forks on a predicate, Switch dispatches on a key, Fanout returns one named output per branch](../../assets/diagrams/control-flow.png)
 
-```mermaid
-flowchart TD
-    Q{Where does the branching live?}
-    Q -->|"In the pipeline shape<br/>(known when you write it)"| G[Use Graph]
-    Q -->|"Decided at runtime,<br/>two-way fork on the carrier"| B[Use Branch]
-    Q -->|"Decided at runtime,<br/>N-way dispatch by key"| S[Use Switch]
-    Q -->|"One-input, many<br/>named outputs"| F[Use Fanout]
-```
+## Combine two scenes in a Graph
 
-## `Graph` — structural branching at build time
-
-Reach for `Graph` when the *shape* of the pipeline has branches you
-know about up-front: split a scene into reflectance and a mask, run
-them through different ops, then fuse the results.
-
-```mermaid
-flowchart LR
-    Img([image]) --> Scale --> Apply[ApplyMask]
-    Img --> Cloud[CloudMask] --> Apply
-    Apply --> NDVI --> Out([ndvi])
-```
-
-`Scale`, `CloudMask`, `ApplyMask`, and `NDVI` are the inline operators
-from the [quickstart](../quickstart.md#2-define-three-operators-inline);
-substitute the real `geotoolz.radiometry` / `geotoolz.qa` /
-`geotoolz.indices` operators once you have them.
+A `Graph` takes several `Input`s and wires them into multi-input
+operators. Here pre- and post-fire scenes meet at `dNBR`, and a threshold
+on the result marks the burn scar.
 
 ```python
+import numpy as np
+from georeader.geotensor import GeoTensor
+from rasterio.transform import from_origin
+
 import geotoolz as gz
 
-img = gz.Input("image")
-scaled = Scale(scale=1e-4)(img)
-drop = CloudMask()(img)
-clean = ApplyMask()(scaled, drop)        # Graph supplies args positionally
-ndvi = NDVI(nir=1, red=0)(clean)
+rng: np.random.Generator = np.random.default_rng(0)
+grid: dict = {"transform": from_origin(750_000, 4_350_000, 10, 10), "crs": "EPSG:32610"}
+names: dict = {"band_names": ["B4", "B8", "B12"]}
+pre: GeoTensor = GeoTensor(rng.uniform(0.05, 0.4, (3, 32, 32)), **grid, fill_value_default=np.nan, attrs=names)   # (3, 32, 32) float64
+post: GeoTensor = GeoTensor(rng.uniform(0.05, 0.4, (3, 32, 32)), **grid, fill_value_default=np.nan, attrs=names)  # (3, 32, 32) float64
 
-g = gz.Graph(inputs={"image": img}, outputs={"ndvi": ndvi})
-result = g(image=gt)        # {"ndvi": GeoTensor}
+before: gz.Input = gz.Input("pre")
+after: gz.Input = gz.Input("post")
+nbr_pre: gz.Node = gz.NBR(nir="B8", swir2="B12")(before)       # (3, H, W) → (H, W) float64
+nbr_post: gz.Node = gz.NBR(nir="B8", swir2="B12")(after)       # (3, H, W) → (H, W) float64
+dnbr: gz.Node = gz.dNBR()(nbr_pre, nbr_post)                   # (H, W), (H, W) → (H, W) float64
+burn: gz.Node = gz.Threshold(threshold=0.27)(dnbr)             # (H, W) float64 → (H, W) bool
+
+graph: gz.Graph = gz.Graph(inputs={"pre": before, "post": after}, outputs={"dnbr": dnbr, "burn": burn})
+out: dict[str, GeoTensor] = graph(pre=pre, post=post)          # {"dnbr": (32, 32) float64, "burn": (32, 32) bool}
 ```
 
-**Construction-time guarantees.** `Graph` topologically sorts at
-construction. Cycles, unreachable inputs, and unused nodes are caught
-before you run any `_apply`. Each node evaluates exactly once even if
-multiple downstream nodes consume it.
+The graph checks for cycles and unreachable inputs when you build it.
+Each node runs once, even when several nodes read it. `dNBR` checks that
+both inputs share one pixel grid.
 
-**Multiple inputs / outputs.** Pass more than one `Input` to handle
-multi-scene fusion, and more than one node to `outputs` to return a
-dict of named results.
+## Fork on the input with Branch
 
-**Nests.** A `Graph` is itself an `Operator`. Drop one into a
-`Sequential` or wrap one in `Fanout` — it composes like any leaf op.
-
-## `Branch` — runtime two-way fork
-
-Use `Branch` when the predicate is decided *at runtime* from the
-carrier itself, and there are only two paths.
+`Branch(predicate, if_true, if_false)` picks one of two operators per
+call. Here digital numbers are scaled to reflectance, and an input that
+is already reflectance passes through.
 
 ```python
-gz.Branch(
-    predicate=lambda gt: gt.crs.is_geographic,
-    if_true=ReprojectToUTM(),
+import numpy as np
+
+import geotoolz as gz
+
+to_reflectance: gz.Branch = gz.Branch(
+    predicate=lambda x: np.issubdtype(np.asarray(x).dtype, np.integer),
+    if_true=gz.DNToReflectance(scale=1e-4),
     if_false=gz.Identity(),
 )
+pipeline: gz.Sequential = to_reflectance | gz.NDVI(red=0, nir=1)
+
+rng: np.random.Generator = np.random.default_rng(0)
+dn: np.ndarray = rng.integers(200, 4000, size=(2, 16, 16), dtype=np.uint16)  # (2, 16, 16) uint16
+refl: np.ndarray = dn * 1e-4                                                # (2, 16, 16) float64
+a: np.ndarray = pipeline(dn)                                                # (2, 16, 16) uint16 → (16, 16) float64
+b: np.ndarray = pipeline(refl)                                              # (2, 16, 16) float64 → (16, 16) float64
+assert np.allclose(a, b)
 ```
 
-**Anti-pattern.** Don't use `Branch` for per-pixel masking — the
-predicate operates on the *whole carrier*, not per-element. For
-per-pixel logic use `ApplyMask`, `numpy.where`, or a `_apply` that
-does the masking directly.
+The predicate sees the whole carrier, not each pixel. For per-pixel
+choices, build a mask and use `gz.ApplyMask`.
 
-**Round-trip.** `Branch` carries `forbid_in_yaml = True` because its
-predicate is a closure. Use it freely in code; if you need a YAML
-artefact, swap the closure for a named operator that returns a boolean.
+## Dispatch by sensor with Switch
 
-## `Switch` — runtime N-way dispatch
-
-When you have a finite, *named* set of sub-pipelines keyed off a scene
-attribute (sensor, product level, season, …), reach for `Switch`.
-
-```mermaid
-flowchart LR
-    In([gt]) --> K[key fn]
-    K -->|"S2"| S2[s2_pipe]
-    K -->|"L8"| L8[l8_pipe]
-    K -->|other| D[default]
-    S2 --> Out([y])
-    L8 --> Out
-    D --> Out
-```
+`Switch(key, cases, default)` picks a pipeline by name. Here the band
+that holds near-infrared depends on the platform written in `attrs`.
 
 ```python
-gz.Switch(
+import numpy as np
+from georeader.geotensor import GeoTensor
+from rasterio.transform import from_origin
+
+import geotoolz as gz
+
+ndvi_by_sensor: gz.Switch = gz.Switch(
     key=lambda gt: gt.attrs["platform"],
     cases={
-        "S2": Sequential([scale_s2, ndvi_s2]),
-        "L8": Sequential([scale_l8, ndvi_l8]),
+        "sentinel-2": gz.NDVI(red="B4", nir="B8"),
+        "landsat-8": gz.NDVI(red="B4", nir="B5"),
     },
-    default=gz.Identity(),
 )
+
+rng: np.random.Generator = np.random.default_rng(0)
+grid: dict = {"transform": from_origin(750_000, 4_350_000, 30, 30), "crs": "EPSG:32610", "fill_value_default": np.nan}
+s2: GeoTensor = GeoTensor(rng.random((2, 16, 16)), **grid, attrs={"platform": "sentinel-2", "band_names": ["B4", "B8"]})  # (2, 16, 16) float64
+l8: GeoTensor = GeoTensor(rng.random((2, 16, 16)), **grid, attrs={"platform": "landsat-8", "band_names": ["B4", "B5"]})   # (2, 16, 16) float64
+
+ndvi_s2: GeoTensor = ndvi_by_sensor(s2)                       # (2, 16, 16) float64 → (16, 16) float64
+ndvi_l8: GeoTensor = ndvi_by_sensor(l8)                       # (2, 16, 16) float64 → (16, 16) float64
 ```
 
-**Pick this over `Branch` when** you have three or more named paths, or
-when the matching key is a clean string. `Switch.default` defaults to
-`Identity()` so unknown keys are no-ops; pass something else to fail
-loud.
+An unknown key runs `default`, which is `Identity()` when omitted. Pass
+an operator that raises if unknown sensors must fail.
 
-## `Fanout` — one input, many named outputs
+## Compute several products with Fanout
 
-Sugar over a single-input `Graph`. Use when you want to compute a few
-derived products from a single scene and return them as a dict:
-
-```mermaid
-flowchart LR
-    In([gt]) --> S{fanout}
-    S --> A[NDVI] --> O1([ndvi])
-    S --> B[NDWI] --> O2([ndwi])
-    S --> C[NBR] --> O3([nbr])
-```
+`Fanout` runs one input through several operators and returns a dict.
+It is shorthand for a single-input `Graph`.
 
 ```python
-gz.Fanout({
-    "ndvi": NDVI(nir=7, red=3),
-    "ndwi": NDWI(green=2, nir=7),
-    "nbr":  NBR(nir=7, swir2=11),
-})(gt)
-# {"ndvi": GeoTensor, "ndwi": GeoTensor, "nbr": GeoTensor}
+import numpy as np
+from georeader.geotensor import GeoTensor
+from rasterio.transform import from_origin
+
+import geotoolz as gz
+
+rng: np.random.Generator = np.random.default_rng(0)
+scene: GeoTensor = GeoTensor(
+    rng.uniform(0.02, 0.5, (4, 16, 16)),                       # (4, 16, 16) float64
+    transform=from_origin(750_000, 4_350_000, 10, 10), crs="EPSG:32610",
+    fill_value_default=np.nan, attrs={"band_names": ["B3", "B4", "B8", "B12"]},
+)
+
+products: gz.Fanout = gz.Fanout({
+    "ndvi": gz.NDVI(red="B4", nir="B8"),
+    "ndwi": gz.NDWI(green="B3", nir="B8"),
+    "nbr": gz.NBR(nir="B8", swir2="B12"),
+})
+out: dict[str, GeoTensor] = products(scene)                   # {"ndvi", "ndwi", "nbr"}: (16, 16) float64 each
 ```
 
-## Combining shapes
+## Nest a Graph in a Sequential
 
-A `Graph` is an `Operator`. A `Sequential` is an `Operator`. They
-nest freely:
+A `Graph` with one input is an operator like any other. Put it after a
+preprocessing chain; the `Sequential` then returns the graph's dict.
 
 ```python
-preprocess = Sequential([Scale(scale=1e-4), DropBadPixels()])
-postprocess = Sequential([SmoothNDVI(), WriteCOG(path="/tmp/ndvi.tif")])
+import numpy as np
 
-img = gz.Input("image")
-clean = preprocess(img)
-ndvi = NDVI()(clean)
+import geotoolz as gz
 
-inner = gz.Graph(inputs={"image": img}, outputs={"ndvi": ndvi})
+x: gz.Input = gz.Input("reflectance")
+indices: gz.Graph = gz.Graph(
+    inputs={"reflectance": x},
+    outputs={"ndvi": gz.NDVI(red=0, nir=1)(x), "ndwi": gz.NDWI(green=2, nir=1)(x)},
+)
+pipeline: gz.Sequential = gz.DNToReflectance(scale=1e-4) | indices
 
-full = Sequential([inner, postprocess])
-full(image=gt)
+dn: np.ndarray = np.random.default_rng(0).integers(200, 4000, size=(3, 16, 16), dtype=np.uint16)  # (3, 16, 16) uint16
+out: dict[str, np.ndarray] = pipeline(dn)                     # {"ndvi", "ndwi"}: (16, 16) float64 each
 ```
 
-The same composition algebra all the way down.
+## Pitfalls
 
-## Quick reference
-
-| Primitive | Branching decided | Inputs | Outputs |
-|---|---|---|---|
-| `Sequential` | n/a (linear) | 1 | 1 |
-| `Graph` | At construction time | 1+ | 1+ (dict) |
-| `Branch` | At runtime (2-way) | 1 | 1 |
-| `Switch` | At runtime (N-way by key) | 1 | 1 |
-| `Fanout` | At construction (1→N) | 1 | N (dict) |
-
-## See also
-
-- [Concepts — Graph](../concepts.md#graph-symbolic-multi-input-multi-output)
-- [Composition core notebook](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/01_composition_core.ipynb) — every primitive against scalars.
-- [Pipeline idioms notebook](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/02_pipeline_idioms.ipynb) — the full recipe gallery (observers, control flow, QC, caching).
-- [Define an operator](define-an-operator.md)
+- **Closures do not serialise.** `Branch` and `Switch` hold callables, so
+  they are `forbid_in_yaml`. Rebuild such pipelines in code.
+- **A terminal step ends a chain.** Writers return `None`, so they go
+  last; use `Sink` to write mid-chain.
+- **Inputs must share a grid.** Multi-input operators reject carriers on
+  different grids; resample first with `geom.coregister.RasterToRasterLike`.
