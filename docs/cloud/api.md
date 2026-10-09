@@ -2,6 +2,9 @@
 
 ## `geocloud.store`
 
+The process-wide client pool and test mounts.
+
+::: geocloud.store.SUPPORTED_SCHEMES
 ::: geocloud.store.get_obstore
 ::: geocloud.store.object_key
 ::: geocloud.store.get_range_bytes
@@ -11,6 +14,8 @@
 ::: geocloud.store.unmount
 
 ## `geocloud.files`
+
+Whole-object verbs on the pool, cloud or local.
 
 ::: geocloud.files.ObjectInfo
 ::: geocloud.files.ls
@@ -28,6 +33,8 @@
 
 ## `geocloud.credentials`
 
+Credentials per store root, for the pool and GDAL.
+
 ::: geocloud.credentials.set_credentials
 ::: geocloud.credentials.remove_credentials
 ::: geocloud.credentials.credential_roots
@@ -38,6 +45,8 @@
 ::: geocloud.credentials.redact
 
 ## `geocloud.cog`
+
+COG reads (`[cog]` extra) and the validated COG writer.
 
 ::: geocloud.cog.CogSource
 ::: geocloud.cog.CogDomain
