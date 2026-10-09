@@ -46,6 +46,12 @@ cog = ["async-geotiff>=0.5,<0.6"]
 # the bytes come through obstore. 2024.12 brings the sync→async wrapper
 # zarr 3 uses for a sync filesystem.
 fsspec = ["fsspec>=2024.12"]
+# `geocloud.hdf`: HDF5 / NetCDF-4 through h5py (ranged reads on the pool),
+# NetCDF-3 through netCDF4 and HDF4 / HDF-EOS through pyhdf (on a
+# `geocloud.cache` copy, since those libraries need a real file).
+hdf5 = ["h5py>=3.10"]
+netcdf = ["netCDF4>=1.6.5"]
+hdf4 = ["pyhdf>=0.11.4"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"

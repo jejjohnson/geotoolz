@@ -61,7 +61,9 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 | Listing / downloading public S3 buckets without credentials (in a reader) | `geoproducts._src.s3` (unsigned `geocloud.files` calls) |
 | Atomic file writes, owner-only credential files | `geoproducts._src.files`, `geoproducts._src.credentials` |
 | Lon/lat bbox validation, UTC times for an API query | `geoproducts._src.query` |
-| NetCDF-4 / HDF5 variables with CF scale/offset/fill | `geoproducts._src.hdf` (`PackedGridReader`, `unpacked`) |
+| HDF5 / NetCDF / HDF4 reads from any location, CF scale/offset/fill decoding | `geocloud.hdf` (`read_netcdf`, `read_hdf`, `open_hdf5`, `PackedVariable`); a product reader on one grid, `geoproducts._src.hdf.PackedGridReader` |
+| A local file for a remote URI (HDF4, memory-mapped binaries) | `geocloud.cache.localize` |
+| fsspec for xarray / zarr / pyarrow / geopandas | `geocloud.fs.filesystem` — never s3fs / gcsfs / adlfs |
 | A geostationary fixed grid (GOES, Himawari, MTG, SEVIRI) | `geoproducts._src.geostationary` (`FixedGrid`, `geos_crs`) |
 | Several readers on one grid | `geoproducts._src.stack.stack` |
 | Band lookup by index or name, wavelengths | `geotoolz._src.bands` (`resolve_band`, `resolve_bands`) |

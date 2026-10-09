@@ -30,6 +30,7 @@ pip install 'geotoolz-cloud[cog]'     # + COG reads (async-geotiff)
 | *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials`, `geocloud.cog.write_cog` |
 | `[cog]` | async-geotiff | `geocloud.cog` (`CogSource`, `AsyncCogReader`, `read_*`) |
 | `[fsspec]` | fsspec (no s3fs / gcsfs / adlfs) | `geocloud.fs`, the fsspec filesystem on the pool |
+| `[hdf5]` / `[netcdf]` / `[hdf4]` | h5py / netCDF4 / pyhdf | `geocloud.hdf` readers for HDF5 + NetCDF-4 / NetCDF-3 / HDF4 |
 
 ## Quickstart
 
@@ -144,6 +145,22 @@ place. The defaults follow the dtype: a predictor, `nearest` overviews for
 classes and masks, `average` for floats, and a nodata only when the dtype
 can hold it. Lazy georeader readers are staged strip by strip. It needs no
 extra.
+
+## HDF and NetCDF — `geocloud.hdf`
+
+```python
+from georeader.geotensor import GeoTensor
+
+from geocloud.hdf import open_hdf5, read_netcdf
+
+ch4: GeoTensor = read_netcdf("s3://bucket/L2.nc", "methane", group="PRODUCT")  # (H, W) float · NaN = fill
+with open_hdf5("s3://noaa-goes19/ABI-L1b-RadC/2024/245/18/scene.nc") as f:
+    radiance = f["Rad"][:500, :500]                       # only these chunks are fetched
+```
+
+HDF5 and NetCDF-4 are read with ranged requests; NetCDF-3 and HDF4 from a
+cached local copy. The CF decoders (`PackedVariable`, `attr`, `scalar`, …)
+are the ones geoproducts' GOES and Himawari readers use.
 
 ## Local copies — `geocloud.cache`
 

@@ -533,32 +533,34 @@ def test_write_operators_are_terminal() -> None:
     assert io.WriteZarr._terminal is True
 
 
-def test_write_cog_passes_descriptions_and_tags(
+def test_write_cog_passes_its_options_to_geocloud(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`WriteCOG.descriptions` and `tags` should reach `save.save_cog`."""
+    """`WriteCOG` forwards every option to `geocloud.cog.write_cog`."""
+    import geocloud.cog
+
     captured: dict[str, object] = {}
 
-    def fake_save_cog(data, path, *, profile, descriptions, tags):  # type: ignore[no-untyped-def]
-        captured["descriptions"] = descriptions
-        captured["tags"] = tags
-        captured["profile"] = profile
-        captured["path"] = path
+    def fake_write_cog(data, dest, **kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs, dest=dest)
 
-    monkeypatch.setattr(io_operators.save, "save_cog", fake_save_cog)
+    monkeypatch.setattr(geocloud.cog, "write_cog", fake_write_cog)
 
-    gt = _sample_geotensor()
     io.WriteCOG(
-        path=tmp_path / "out.tif",
+        path="s3://bucket/out.tif",
         compress="zstd",
         descriptions=["b1", "b2"],
         tags={"source": "test"},
-    )(gt)
+        creation_options={"NUM_THREADS": "2"},
+    )(_sample_geotensor())
 
+    assert captured["dest"] == "s3://bucket/out.tif"  # a URI is not mangled
+    assert captured["compress"] == "zstd"
     assert captured["descriptions"] == ["b1", "b2"]
     assert captured["tags"] == {"source": "test"}
-    assert captured["profile"] == {"compress": "zstd"}
+    assert captured["creation_options"] == {"NUM_THREADS": "2"}
+    assert captured["nodata"] == "auto"
 
 
 def test_write_geotiff_passes_blocksize_and_metadata(
@@ -642,11 +644,13 @@ def test_io_hydra_zen_builds_roundtrip(op: gz.Operator) -> None:
 
 
 def test_sink_mapping_options_round_trip() -> None:
-    """``profile`` / ``tags`` / ``chunks`` are emitted as pairs (#140 review)."""
+    """Mapping options are emitted as pairs (#140 review)."""
     import json
 
     ops = [
-        io.WriteCOG(path="out.tif", profile={"blocksize": 512}, tags={"a": "1"}),
+        io.WriteCOG(
+            path="out.tif", creation_options={"BIGTIFF": "YES"}, tags={"a": "1"}
+        ),
         io.WriteGeoTIFF(path="out.tif", profile={"nodata": 0}, tags={"a": "1"}),
         io.WriteZarr(store="out.zarr", chunks={"y": 256, "x": 256}),
     ]
@@ -654,7 +658,7 @@ def test_sink_mapping_options_round_trip() -> None:
         clone = Operator.from_state(json.loads(json.dumps(op.state)))
         assert clone.get_config() == op.get_config()
     assert ops[2].get_config()["chunks"] == [["y", 256], ["x", 256]]
-    assert Operator.from_state(ops[0].state).profile == {"blocksize": 512}
+    assert Operator.from_state(ops[0].state).creation_options == {"BIGTIFF": "YES"}
 
 
 # ---------------------------------------------------------------------------

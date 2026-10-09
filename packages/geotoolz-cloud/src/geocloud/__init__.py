@@ -1,6 +1,6 @@
 """`geocloud` — cloud object storage for the geotoolz stack.
 
-Six modules, each the one home of its names:
+Seven modules, each the one home of its names:
 
 - `geocloud.store` — the process-wide ``obstore`` client pool:
   `get_obstore` / `object_key` for ``s3://``, ``gs://``, ``az://``,
@@ -15,6 +15,9 @@ Six modules, each the one home of its names:
   (`localize`, `LocalCache`), for readers that need a real file.
 - `geocloud.fs` — an fsspec filesystem on that pool, for libraries that
   only speak fsspec (xarray, zarr, pyarrow, geopandas; ``[fsspec]``).
+- `geocloud.hdf` — HDF5 / NetCDF / HDF4 reads from any location and the
+  CF decoders the product readers share (``[hdf5]``, ``[netcdf]``,
+  ``[hdf4]``).
 - `geocloud.cog` — Cloud-Optimized GeoTIFF reads on that pool:
   `CogSource` (batched window reads, each tile fetched once) and
   `AsyncCogReader` with the async ``read_*`` mirrors of
@@ -26,9 +29,9 @@ geopatcher's `CogField` and geoproducts' cloud byte reads (its
 
 from __future__ import annotations
 
-from geocloud import cache, cog, credentials, files, fs, store
+from geocloud import cache, cog, credentials, files, fs, hdf, store
 
 
 __version__ = "0.3.0"  # x-release-please-version
 
-__all__ = ["__version__", "cache", "cog", "credentials", "files", "fs", "store"]
+__all__ = ["__version__", "cache", "cog", "credentials", "files", "fs", "hdf", "store"]

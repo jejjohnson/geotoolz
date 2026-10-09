@@ -9,7 +9,10 @@ reads and their extras, see [Read HDF and NetCDF files](../io.md).
 - **Cloud / catalog source:** `LoadFromEE`, `LoadFromSTAC`
 - **Writers:** `WriteGeoTIFF`, `WriteCOG`, `WriteZarr`
 - **Base classes:** `SourceOperator`, `SinkOperator`, `GeoToolzIOError`
-- **Tier-A primitives:** `select_indexes` / `read_indexes` (1-based band selection),
-  `fill_value_from_attrs` (CF / HDF fill lookup), `affine_from_geotransform` (GDAL `GeoTransform`)
+
+`ReadHDF`, `ReadNetCDF` and `WriteCOG` are operators over geotoolz-cloud's
+readers and writer ([`geocloud.hdf`](../../cloud/how-to/hdf.md),
+[`geocloud.cog.write_cog`](../../cloud/how-to/write-cogs.md)), so they read
+and write local paths and bucket URIs alike.
 
 ::: geotoolz.io

@@ -42,9 +42,10 @@ without them and raise an `ImportError` naming the extra when called.
 | `viz` | `matplotlib` | `viz.ApplyColormap` (named matplotlib colormaps) |
 | `learn` | `scikit-learn`, `joblib` | `learn.SklearnOp` / `Pixelwise*` imputer NaN strategies and `save_state` / `load_state` / `state_path=`; `plume` DBSCAN clump counting |
 | `zarr` | `zarr>=3` | `io.WriteZarr` |
-| `hdf5` | `h5py` | `io.ReadHDF` on HDF5 |
-| `hdf4` | `pyhdf` | `io.ReadHDF` on HDF4 |
-| `netcdf` | `netCDF4` | `io.ReadNetCDF` |
+| `cloud` | geotoolz-cloud | `io.WriteCOG` (validated COGs, local or to a bucket) |
+| `hdf5` | geotoolz-cloud with `h5py` | `io.ReadHDF` on HDF5, local or remote |
+| `hdf4` | geotoolz-cloud with `pyhdf` | `io.ReadHDF` on HDF4 |
+| `netcdf` | geotoolz-cloud with `netCDF4` | `io.ReadNetCDF` |
 | `vector-cube` | `xvec` (+ `xarray`) | `geom.coregister.RasterToPoints` / `PointsToRaster`, bilinear point sampling |
 | `hydra` | `hydra-zen` | YAML `builds()` / `instantiate()` round-trips |
 | `patch` | `geotoolz-patcher[pipekit]` | `geotoolz.patch_ops` (tile → map → stitch, label-aware samplers) |

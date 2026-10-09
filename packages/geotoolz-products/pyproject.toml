@@ -52,14 +52,16 @@ operators = ["geotoolz"]
 # the plume / source vector geometry (shapely, geopandas, pandas — also
 # georeader dependencies, declared because the reader imports them
 # directly).
-# GOES-R ABI L1b reader (``geoproducts.goes``): ABI files are NetCDF-4,
-# i.e. HDF5, read chunk-by-chunk through h5py. The NOAA bucket helpers
-# (``goes.aws``) list and download through geotoolz-cloud.
-goes = ["h5py>=3.10", "geotoolz-cloud>=0.2.2"]
+# GOES-R ABI readers (``geoproducts.goes``): ABI files are NetCDF-4, i.e.
+# HDF5, read chunk-by-chunk through geotoolz-cloud's `geocloud.hdf` (h5py
+# over ranged reads, so an ``s3://`` file is never copied whole); the NOAA
+# bucket helpers (``goes.aws``) list and download through geotoolz-cloud.
+goes = ["geotoolz-cloud[hdf5]>=0.2.2"]
 # Himawari AHI (``geoproducts.himawari``): the HSD L1b reader is numpy +
-# standard library; h5py is for the NOAA L2 cloud products (NetCDF-4) and
-# geotoolz-cloud for the bucket helpers (``himawari.aws``).
-himawari = ["h5py>=3.10", "geotoolz-cloud>=0.2.2"]
+# standard library; `geocloud.hdf` (h5py) reads the NOAA L2 cloud products
+# (NetCDF-4), and geotoolz-cloud serves the bucket helpers
+# (``himawari.aws``).
+himawari = ["geotoolz-cloud[hdf5]>=0.2.2"]
 carbonmapper = [
     "requests>=2",
     "pydantic>=2",

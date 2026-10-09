@@ -210,6 +210,7 @@ nav:
           - Write COGs: cloud/how-to/write-cogs.md
           - Use fsspec libraries: cloud/how-to/fsspec.md
           - Cache remote files: cloud/how-to/cache.md
+          - Read HDF and NetCDF: cloud/how-to/hdf.md
       - Tutorials:
           - A tour of geocloud: cloud/notebooks/geocloud_tour.ipynb
       - Reference: cloud/api.md

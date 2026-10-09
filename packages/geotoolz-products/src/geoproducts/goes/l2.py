@@ -52,7 +52,8 @@ class L2Reader(ABIFile):
     directly.
 
     Args:
-        source: Path to an L2 ``.nc`` file, or a binary file-like object.
+        source: An L2 ``.nc`` file: a local path, any URI geotoolz-cloud
+            reads (read with ranged requests), or a binary file-like object.
         variables: Variable name(s) to read. Default: the product's primary
             variables — ``BCM`` + ``ACM`` for ACM, ``Mask`` for FDC, ``LST``
             for LST, otherwise every 2-D variable that is not a quality

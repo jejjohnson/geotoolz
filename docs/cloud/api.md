@@ -32,6 +32,24 @@ Whole-object verbs on the pool, cloud or local.
 ::: geocloud.files.rm
 ::: geocloud.files.sign
 
+## `geocloud.hdf`
+
+HDF5 / NetCDF / HDF4 from any location, and CF decoding.
+
+::: geocloud.hdf.read_netcdf
+::: geocloud.hdf.read_hdf
+::: geocloud.hdf.open_hdf5
+::: geocloud.hdf.PackedVariable
+::: geocloud.hdf.attr
+::: geocloud.hdf.scalar
+::: geocloud.hdf.unpacked
+::: geocloud.hdf.time_attr
+::: geocloud.hdf.grid_variables
+::: geocloud.hdf.fill_value_from_attrs
+::: geocloud.hdf.affine_from_geotransform
+::: geocloud.hdf.select_indexes
+::: geocloud.hdf.read_indexes
+
 ## `geocloud.cache`
 
 Complete local copies of remote objects.

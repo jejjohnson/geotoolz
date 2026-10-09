@@ -18,15 +18,10 @@ from datetime import datetime
 from affine import Affine
 from rasterio.crs import CRS
 
+from geoproducts._src import hdf
 from geoproducts._src.base import Track
 from geoproducts._src.geostationary import FixedGrid
-from geoproducts._src.hdf import (
-    PackedGridReader,
-    Source,
-    attr,
-    grid_variables,
-    time_attr,
-)
+from geoproducts._src.hdf import PackedGridReader, Source
 from geoproducts.himawari import constants
 
 
@@ -85,7 +80,8 @@ class L2Reader(PackedGridReader):
     (cloud probability, cloud-top height) is ``float32`` with ``NaN``.
 
     Args:
-        source: Path to an L2 ``.nc`` file, or a binary file-like object.
+        source: An L2 ``.nc`` file: a local path, any URI geotoolz-cloud
+            reads (read with ranged requests), or a binary file-like object.
         variables: Variable name(s) to read. Default: ``CloudMaskBinary`` +
             ``CloudMask`` for ``CMSK``, otherwise every data variable on
             the grid. ``available_variables`` lists them all.
@@ -111,15 +107,15 @@ class L2Reader(PackedGridReader):
         self._source = source
         self._grid = full_disk_grid(2.0)
         with self._open() as f:
-            self._product = product_code(str(attr(f, "Metadata_Link", ""))) or str(
-                attr(f, "title", "")
+            self._product = product_code(str(hdf.attr(f, "Metadata_Link", ""))) or str(
+                hdf.attr(f, "title", "")
             ).removeprefix("AHI-")
-            self._satellite = str(attr(f, "satellite_name", ""))
-            self._start = time_attr(f, "time_coverage_start")
-            self._end = time_attr(f, "time_coverage_end")
+            self._satellite = str(hdf.attr(f, "satellite_name", ""))
+            self._start = hdf.time_attr(f, "time_coverage_start")
+            self._end = hdf.time_attr(f, "time_coverage_end")
             self._available = tuple(
                 n
-                for n in grid_variables(f, self._grid_shape)
+                for n in hdf.grid_variables(f, self._grid_shape)
                 if not n.startswith(_GEOLOCATION) and not n.endswith("AWIPS")
             )
             self._load_variables(f, self._resolve(variables))
