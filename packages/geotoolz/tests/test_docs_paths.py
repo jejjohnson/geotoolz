@@ -29,7 +29,7 @@ _DOTTED = re.compile(r"(?<![\w./\-])(geotoolz|gz)((?:\.[A-Za-z_]\w*)+)")
 # root, path as written). Keep this small and say why.
 ALLOWED_UNRESOLVED: dict[tuple[str, str], str] = {
     # Explains that augment.Compose is deliberately *not* top-level.
-    ("docs/api/augment.md", "gz.Compose"): "negative example",
+    ("docs/operators/api/augment.md", "gz.Compose"): "negative example",
 }
 
 
