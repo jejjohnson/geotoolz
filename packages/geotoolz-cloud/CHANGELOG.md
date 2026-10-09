@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.2.1...geotoolz-cloud-v0.3.0) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* geocatalog.staging.stage() needs the [cloud] extra (geotoolz-cloud) for remote URIs instead of [fsspec]. goes.aws / himawari.aws need geotoolz-cloud (the [goes] / [himawari] / [obstore] extras) and raise obstore errors (FileNotFoundError for a missing key) instead of urllib.error.URLError.
+
+### Features
+
+* **cloud:** add geocloud.cog.write_cog — validated COG writes, local or to a bucket ([#445](https://github.com/jejjohnson/geotoolz/issues/445)) ([562e00b](https://github.com/jejjohnson/geotoolz/commit/562e00b553acb64214343971b4c3c3e9f2b434ad))
+* **cloud:** add geocloud.credentials — register credentials once per store root ([#442](https://github.com/jejjohnson/geotoolz/issues/442)) ([0bfe99a](https://github.com/jejjohnson/geotoolz/commit/0bfe99ac8fb924e195c54010c22f9c18609689f7))
+* **cloud:** add geocloud.files — list, read, write, move and sign objects by uri ([#441](https://github.com/jejjohnson/geotoolz/issues/441)) ([a6a4371](https://github.com/jejjohnson/geotoolz/commit/a6a437110e30b6f5c66abcdaeffe6abbf4afd57f))
+
+
+### Code Refactoring
+
+* download through geocloud.files in catalog staging and the NOAA bucket helpers ([#443](https://github.com/jejjohnson/geotoolz/issues/443)) ([1450117](https://github.com/jejjohnson/geotoolz/commit/14501176866ff3003405cebffc45b99d7758f9a7))
+
 ## [0.2.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.2.0...geotoolz-cloud-v0.2.1) (2026-10-08)
 
 
