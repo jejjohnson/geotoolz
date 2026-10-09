@@ -153,7 +153,7 @@ import geopatcher as gp
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry=gp.spatial.geometry.Rectangular(size=(256, 256)),
+    geometry=gp.spatial.geometry.Rectangular(size=(256, 256), boundary="pad"),
     sampler=gp.spatial.sampler.RegularStride(step=(192, 192)),
     window=gp.spatial.window.Hann(),
     aggregation=gp.spatial.aggregation.OverlapAdd(),
