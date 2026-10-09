@@ -4,9 +4,9 @@ Every function takes URIs in any form `get_obstore` accepts (``s3://``,
 ``gs://``, ``az://`` / ``abfs[s]://``, Azure ``https://``, signed
 ``http(s)://``, ``hf://``) or a **local path** (``str`` / ``Path`` /
 ``file://``), so one call covers cloud → local, local → cloud and cloud →
-cloud. Remote objects go through the shared client pool; local paths go
-through an obstore ``LocalStore`` rooted at the filesystem anchor, so every
-transfer runs on the same engine.
+cloud. Both go through the shared client pool (local paths through its
+``LocalStore`` at the filesystem anchor), so every transfer runs on the
+same engine.
 
 How a transfer runs:
 
@@ -32,7 +32,6 @@ can be read, downloaded and copied from, not listed.
 from __future__ import annotations
 
 import os
-import threading
 import uuid
 from collections.abc import AsyncIterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -40,14 +39,19 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
-from urllib.parse import unquote, urlsplit
 
 import obstore
-from obstore.store import LocalStore
 
 from geocloud._src.aio import _run_coroutine_safely
 from geocloud._src.redact import redact
-from geocloud._src.store import _locate, get_obstore, object_key
+from geocloud._src.store import (
+    Location,
+    _absolute,
+    _locate,
+    get_obstore,
+    local_path,
+    object_key,
+)
 
 
 if TYPE_CHECKING:
@@ -75,9 +79,6 @@ __all__ = [
     "upload",
     "write_bytes",
 ]
-
-#: A URI string, a local path string, or a ``Path``.
-Location = str | os.PathLike[str]
 
 # Bytes per GET when an object is moved: each range is its own request, so
 # obstore's per-request timeout (30 s by default, with a capped number of
@@ -145,42 +146,14 @@ class _Target:
         )
 
 
-_LOCAL_STORES: dict[str, LocalStore] = {}
-_LOCAL_LOCK = threading.Lock()
-
-
-def _local_path(location: Location) -> Path | None:
-    """The filesystem path ``location`` names; ``None`` for a remote URI."""
-    if isinstance(location, os.PathLike):
-        return Path(location)
-    text = str(location)
-    if text.startswith("file://"):
-        return Path(unquote(urlsplit(text).path))
-    if "://" in text:
-        return None
-    return Path(text)
-
-
-def _local_store(anchor: str) -> LocalStore:
-    """One ``LocalStore`` per filesystem anchor (``/``, ``C:\\``)."""
-    with _LOCAL_LOCK:
-        store = _LOCAL_STORES.get(anchor)
-        if store is None:
-            store = _LOCAL_STORES[anchor] = LocalStore(anchor)
-        return store
-
-
 def _resolve(location: Location, storage_options: Mapping[str, Any] | None) -> _Target:
     """Resolve ``location`` to its store, key and child-naming root."""
-    local = _local_path(location)
+    local = local_path(location)
     if local is not None:
-        # `abspath` also folds `..`, which a LocalStore key may not hold.
-        path = Path(os.path.abspath(local.expanduser()))
-        key = path.relative_to(path.anchor).as_posix()
         return _Target(
-            _local_store(path.anchor),
-            "" if key == "." else key,
-            path.anchor,
+            get_obstore(location),
+            object_key(location),
+            _absolute(local).anchor,
             local=True,
             listable=True,
         )
@@ -225,7 +198,7 @@ def _into(dst: Location, name: str) -> Location:
     """``dst``, or ``dst/name`` when ``dst`` is a directory (trailing ``/``)."""
     if not name:
         return dst
-    local = _local_path(dst)
+    local = local_path(dst)
     if local is not None:
         text = os.fspath(dst)
         if local.is_dir() or text.endswith(("/", os.sep)):
@@ -237,7 +210,7 @@ def _into(dst: Location, name: str) -> Location:
 
 def _join(prefix: Location, rel: str) -> Location:
     """The location ``rel`` below the directory-like ``prefix``."""
-    local = _local_path(prefix)
+    local = local_path(prefix)
     if local is not None:
         return local / rel
     return str(prefix).rstrip("/") + "/" + rel
@@ -559,7 +532,7 @@ def download(
         FileNotFoundError: No object at ``uri``.
         OSError: The transfer ended short of the object's size.
     """
-    if _local_path(dest) is None:
+    if local_path(dest) is None:
         raise ValueError(f"download: dest must be a local path; got {_r(dest)}.")
     return Path(copy(uri, dest, overwrite=overwrite, storage_options=storage_options))
 
@@ -587,7 +560,7 @@ def upload(
         ValueError: ``path`` is not a local path (use `copy`).
         FileNotFoundError: ``path`` does not exist.
     """
-    if _local_path(path) is None:
+    if local_path(path) is None:
         raise ValueError(f"upload: path must be a local file; got {_r(path)}.")
     return copy(path, uri, overwrite=overwrite, storage_options=storage_options)
 
@@ -726,7 +699,7 @@ def sign(
         ValueError: The store cannot sign (local paths, plain
             ``http(s)://``, ``hf://``), or has no credentials to sign with.
     """
-    if _local_path(uri) is not None:
+    if local_path(uri) is not None:
         raise ValueError(f"sign: {_r(uri)} is a local path; only cloud objects sign.")
     target = _resolve(uri, storage_options)
     try:

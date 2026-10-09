@@ -4,7 +4,10 @@
 take their object-store client from here, so every package in the
 process shares one client (and one HTTP/2 connection pool) per bucket /
 container. ``s3://``, ``gs://``, ``az://`` / ``abfs[s]://``,
-``http(s)://`` (signed URLs included) and ``hf://`` URIs are supported;
+``http(s)://`` (signed URLs included) and ``hf://`` URIs are supported,
+and so are local paths and ``file://`` URIs (an obstore ``LocalStore`` per
+filesystem anchor), so code on the pool reads local files and buckets the
+same way. `local_path` is the stack's one rule for telling the two apart;
 `mount` serves one bucket from a store you built (a ``MemoryStore`` in
 tests).
 
@@ -24,6 +27,7 @@ from geocloud._src.store import (
     clear_obstore_pool,
     get_obstore,
     get_range_bytes,
+    local_path,
     mount,
     object_key,
     set_obstore_pool_maxsize,
@@ -36,6 +40,7 @@ __all__ = [
     "clear_obstore_pool",
     "get_obstore",
     "get_range_bytes",
+    "local_path",
     "mount",
     "object_key",
     "set_obstore_pool_maxsize",

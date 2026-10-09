@@ -8,20 +8,22 @@ workspace package.
 ## What lives here
 
 - **`geocloud.store`** — the one process-wide obstore client pool:
-  `get_obstore(uri)` (one client per bucket / container / host, LRU-bounded),
+  `get_obstore(uri)` (one client per bucket / container / host, LRU-bounded;
+  one `LocalStore` per filesystem anchor for local paths and `file://`),
   `object_key`, `get_range_bytes`, `clear_obstore_pool`,
-  `set_obstore_pool_maxsize`, `SUPPORTED_SCHEMES`, and `mount` / `unmount`
-  (serve one root from a store the caller built). Every package that reads
-  from a bucket takes its client from here, so a process talking to one
-  bucket opens one HTTP/2 connection pool. **Never construct an obstore store
-  anywhere else in the workspace.**
+  `set_obstore_pool_maxsize`, `SUPPORTED_SCHEMES` (the remote schemes),
+  `local_path` (the one local-vs-remote rule: drive letters, UNC, `file://`
+  percent-decoding) and `mount` / `unmount` (serve one root from a store
+  the caller built). Every package that reads bytes takes its client from
+  here, so a process talking to one bucket opens one HTTP/2 connection pool.
+  **Never construct an obstore store anywhere else in the workspace**
+  (tests aside).
 - **`geocloud.files`** — whole-object verbs by URI or local path, on the
   pool: `ls`, `info`, `exists`, `read_bytes`, `write_bytes`, `open`,
   `download`, `upload`, `copy`, `sync`, `rm`, `sign`, `ObjectInfo`. A
   package that moves files (staging, product downloads) calls these rather
-  than streaming bytes itself. Local paths go through an obstore
-  `LocalStore` built in `_src/files.py`, the one other place a store is
-  constructed.
+  than streaming bytes itself. Local paths take the pool's `LocalStore`
+  like any other location.
 - **`geocloud.credentials`** — the per-root registry `get_obstore` merges
   under `storage_options` (`set_credentials`, `remove_credentials`,
   `credential_roots`, `load_credentials` of a TOML file, auto-loaded from

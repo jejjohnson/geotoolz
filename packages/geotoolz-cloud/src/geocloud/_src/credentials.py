@@ -45,6 +45,7 @@ from geocloud._src.store import (
     _HTTP_SCHEMES,
     _build_store,
     _locate,
+    local_path,
 )
 
 
@@ -75,6 +76,11 @@ _SAS_KEYS = ("sas_token", "sas_key", "azure_storage_sas_key", "azure_storage_sas
 
 def _scope(uri: str) -> _Scope:
     """The store root ``uri`` names; rejects a URI that names an object."""
+    if local_path(uri) is not None:
+        raise ValueError(
+            f"credentials: {redact(uri)!r} is a local path; local files need no "
+            "credentials."
+        )
     parsed = urlsplit(uri)
     scheme = parsed.scheme.lower()
     host = (parsed.hostname or "").lower()
@@ -254,9 +260,9 @@ def _clear() -> None:
         _AUTOLOADED = False
 
 
-def registered_options(uri: str) -> dict[str, Any]:
+def registered_options(uri: str | os.PathLike[str]) -> dict[str, Any]:
     """The registered options that apply to ``uri`` (a copy; ``{}`` if none)."""
-    if urlsplit(uri).scheme.lower() == "hf":
+    if local_path(uri) is not None or urlsplit(str(uri)).scheme.lower() == "hf":
         return {}
     loc = _locate(uri)
     container = loc.scope if loc.backend == "azure" else None
@@ -428,9 +434,10 @@ def gdal_access(uri: str) -> GdalAccess:
         {'AWS_NO_SIGN_REQUEST': 'YES', 'AWS_REGION': 'us-west-2'}
         >>> remove_credentials("s3://open-data")
     """
+    local = local_path(uri)
+    if local is not None:
+        return GdalAccess(str(local), {})
     scheme = urlsplit(uri).scheme.lower()
-    if "://" not in uri or scheme == "file":
-        return GdalAccess(urlsplit(uri).path if scheme == "file" else uri, {})
     if scheme == "hf":
         raise ValueError(
             "gdal_access: hf:// is not a GDAL path; read it with geocloud.cog."

@@ -680,3 +680,14 @@ def test_jpeg_within_documented_tolerance(tmp_path: Path, photometric: str, atol
     with rasterio.open(path) as src:
         expected = src.read().astype(int)
     assert np.abs(got - expected).max() <= atol
+
+
+def test_open_reads_a_local_path_without_a_store(cog_path: Path, cog_source: CogSource):
+    """The pool serves local paths, so a path alone is enough."""
+    for url in (cog_path, str(cog_path), f"file://{cog_path}"):
+        src = CogSource.open(url)
+        window = Window(col_off=3, row_off=5, width=10, height=7)
+        np.testing.assert_array_equal(
+            np.asarray(src.read_window(window)),
+            np.asarray(cog_source.read_window(window)),
+        )

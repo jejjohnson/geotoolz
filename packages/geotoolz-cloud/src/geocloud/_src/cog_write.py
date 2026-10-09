@@ -35,8 +35,9 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
-from geocloud._src.files import _local_path, exists, upload
+from geocloud._src.files import exists, upload
 from geocloud._src.redact import redact
+from geocloud._src.store import local_path
 
 
 if TYPE_CHECKING:
@@ -390,7 +391,7 @@ def write_cog(
         descriptions, getattr(data, "attrs", None) or {}, count
     )
 
-    local = _local_path(dest)
+    local = local_path(dest)
     if not overwrite and exists(dest, storage_options=storage_options):
         raise FileExistsError(
             f"write_cog: {redact(str(dest))!r} exists (overwrite=False)."

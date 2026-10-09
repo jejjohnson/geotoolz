@@ -301,3 +301,11 @@ def test_gdal_refuses_what_it_cannot_express():
     credentials.set_credentials("s3://prov", credential_provider=provider)
     with pytest.raises(ValueError, match="credential provider"):
         credentials.gdal_access("s3://prov/x.tif")
+
+
+def test_local_paths_take_no_credentials(tmp_path: Path):
+    with pytest.raises(ValueError, match="local path"):
+        credentials.set_credentials(str(tmp_path), anonymous=True)
+    path, options = credentials.gdal_access(f"file://{tmp_path}/a%20b.tif")
+    assert path == str(tmp_path / "a b.tif")
+    assert options == {}
