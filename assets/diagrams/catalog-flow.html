@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>geocatalog flow</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1560px; }
+  .flow { display: grid; grid-template-columns: 230px 270px 300px 330px; column-gap: 80px; align-items: center; }
+  .stack { display: flex; flex-direction: column; gap: 10px; }
+  .node.find { --accent: var(--find); }
+  .node.cut { --accent: var(--cut); }
+  .node.compute { --accent: var(--compute); }
+  .backends { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .slice { margin-top: 30px; display: grid; grid-template-columns: 210px repeat(5, 1fr); gap: 12px; align-items: stretch; }
+  .slice .label { display: flex; flex-direction: column; justify-content: center; }
+  .slice .label .k { font-size: 15px; font-weight: 700; }
+  .slice .label .d { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .field { background: #fff; border: 1.5px dashed var(--find); border-radius: 12px; padding: 10px 12px; }
+  .field .n { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--find-ink); }
+  .field .v { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">geocatalog — index once, query in milliseconds, load only what overlaps</div>
+  <div class="subtitle">A catalog holds footprints, times and paths — never pixels. <code class="op">query()</code> touches no file; a loader opens just the hits.</div>
+
+  <div class="flow">
+    <div class="lane find" id="sources">
+      <div class="lane-head"><span class="verb">sources</span></div>
+      <div class="stack">
+        <div class="node find"><div class="name">STAC</div><div class="desc">Planetary Computer · Earth Search · any API</div></div>
+        <div class="node find"><div class="name">EarthAccess · GEE</div><div class="desc">NASA CMR · Earth Engine</div></div>
+        <div class="node find"><div class="name">local · s3:// · gs://</div><div class="desc">GeoTIFF · NetCDF · Zarr · vectors</div></div>
+      </div>
+    </div>
+
+    <div class="lane find" id="build">
+      <div class="lane-head"><span class="verb">build</span></div>
+      <div class="node find"><div class="name"><code>from_stac_search</code> · <code>build_raster_catalog</code></div><div class="desc">one row per file or STAC asset: footprint, time, CRS, path</div></div>
+      <div class="node find" style="margin-top:10px"><div class="name"><code>CatalogBundle</code></div><div class="desc">several queries + matchups, GeoParquet interchange</div></div>
+    </div>
+
+    <div class="lane find" id="catalog">
+      <div class="lane-head"><span class="verb">index</span><span class="pkg">GeoCatalog</span></div>
+      <div class="backends">
+        <div class="node find"><div class="name">InMemory</div><div class="desc">GeoDataFrame + R-tree · sub-ms to ~10⁵ rows</div></div>
+        <div class="node find"><div class="name">DuckDB</div><div class="desc">GeoParquet 1.1 · bbox pushdown · 10⁶+ rows, straight from s3://</div></div>
+      </div>
+      <div class="chips"><span class="chip"><span class="t">query(GeoSlice)</span><span class="s">→ GeoCatalog of hits</span></span></div>
+    </div>
+
+    <div class="lane find" id="load">
+      <div class="lane-head"><span class="verb">load</span><span class="pkg">the hits only</span></div>
+      <div class="stack">
+        <div class="node compute"><div class="name"><code>load_raster</code></div><div class="desc">mosaic onto the slice grid</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(C, H, W)</span></span></div></div>
+        <div class="node compute"><div class="name"><code>load_vector</code></div><div class="desc">rasterise features onto the slice grid</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(1, H, W)</span></span></div></div>
+        <div class="node cut"><div class="name"><code>patch.field_for</code></div><div class="desc">bridge to geopatcher · [patch] extra</div><div class="chips"><span class="chip"><span class="t">RasterField</span><span class="s">(C, H, W)</span></span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slice">
+    <div class="label"><div class="k">GeoSlice</div><div class="d">the frozen request every catalog answers and every loader honours</div></div>
+    <div class="field"><div class="n">bounds</div><div class="v">(xmin, ymin, xmax, ymax)</div></div>
+    <div class="field"><div class="n">interval</div><div class="v">pd.Interval(start, end)</div></div>
+    <div class="field"><div class="n">resolution</div><div class="v">(10.0, 10.0)</div></div>
+    <div class="field"><div class="n">crs</div><div class="v">"EPSG:32611"</div></div>
+    <div class="field"><div class="n">align</div><div class="v">"off" · exact grid snap</div></div>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const F = "#7b6bb5";
+  wire("sources", "build", { color: F });
+  wire("build", "catalog", { color: F, label: "<span class='t'>rows</span>" });
+  wire("catalog", "load", { color: F, label: "<span class='t'>hits</span>" });
+  ready();
+</script>
+</body>
+</html>

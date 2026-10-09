@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>geoproducts architecture</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1600px; }
+  .node.read { --accent: var(--read); }
+  .node.cut { --accent: var(--cut); background: var(--cut-bg); }
+  .node.compute { --accent: var(--compute); background: var(--compute-bg); }
+  .row { display: grid; grid-template-columns: 1fr 1.25fr 1fr; column-gap: 80px; align-items: stretch; }
+  .surface { display: grid; grid-template-columns: 1fr; gap: 5px; margin-top: 10px; }
+  .surface code { font-family: var(--mono); font-size: 11.5px; color: var(--read-ink); }
+  .ns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .abc { border-style: dashed; }
+  .examples { margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .examples code { font-family: var(--mono); color: var(--read-ink); }
+  .bottom { display: grid; grid-template-columns: 1fr 300px 300px; column-gap: 60px; margin-top: 70px; align-items: center; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">geoproducts — every product becomes a GeoTensor</div>
+  <div class="subtitle">Readers depend on georeader, never on geotoolz; what they return is what every operator and patcher takes.</div>
+
+  <div class="lane read" id="lane-products">
+    <div class="lane-head"><span class="verb">products</span><span class="pkg">geoproducts.&lt;product&gt;</span></div>
+    <div class="row">
+      <div class="node read" id="toolkit">
+        <div class="name">shared toolkit <span style="font-weight:500;color:var(--muted)">(geoproducts._src)</span></div>
+        <div class="desc">what every product reuses instead of repeating</div>
+        <div class="surface">
+          <code>net · s3 — retries · rate limits · anonymous buckets</code>
+          <code>files · credentials — atomic writes · tokens</code>
+          <code>hdf — CF-packed variables · flag tables</code>
+          <code>geostationary — fixed grids · Earth-disk mask</code>
+          <code>presets — Recipe · RGB / operator builders</code>
+        </div>
+      </div>
+
+      <div class="node read" id="ns">
+        <div class="name">one namespace per product</div>
+        <div class="desc">the same small surface, whatever the mission, format or API</div>
+        <div class="ns">
+          <span class="chip"><span class="t">Reader</span><span class="s">· L2Reader — lazy, calibrated</span></span>
+          <span class="chip"><span class="t">aws · api</span><span class="s">list · download</span></span>
+          <span class="chip"><span class="t">BANDS · constants</span></span>
+          <span class="chip"><span class="t">recipes</span><span class="s">RGBs as data</span></span>
+          <span class="chip"><span class="t">presets</span><span class="s">[operators]</span></span>
+          <span class="chip"><span class="t">stack</span><span class="s">any readers → one grid</span></span>
+        </div>
+        <div class="examples">e.g. <code>goes</code> · <code>himawari</code> · <code>carbonmapper</code> · <code>toy_sensor</code> — each behind its own extra</div>
+      </div>
+
+      <div class="node read abc" id="abc">
+        <div class="name"><code>ProductReader</code> <span style="font-weight:500;color:var(--muted)">(georeader GeoData, ABC)</span></div>
+        <div class="surface">
+          <code>crs · transform · shape · bounds</code>
+          <code>band_names · dtype · fill value</code>
+          <code>read_from_window / read_from_bounds</code>
+          <code>_read_window() — lazy, boundless</code>
+          <code>files via geocloud — local or s3://</code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="node solid" id="gt" style="--accent: var(--read);"><div class="name">GeoTensor</div><div class="desc">CRS · transform · band_names · fill value — the one carrier the rest of the stack takes</div></div>
+    <div class="node compute" id="to-gz"><div class="name">geotoolz operators</div><div class="desc">indices · viz.RGBRecipe · plume · …</div></div>
+    <div class="node cut" id="to-gp"><div class="name">geopatcher fields</div><div class="desc">RasterField(reader) → split / merge</div></div>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const R = "#23978a";
+  wire("toolkit", "ns", { color: R, label: "<span class='t'>built on</span>" });
+  wire("ns", "abc", { color: R, label: "<span class='t'>subclass</span>" });
+  wire("lane-products", "gt", { from: "bottom", to: "top", color: R, bend: 40,
+        label: "<span class='t'>read_from_window(…)</span><span class='s'>· stack(…)</span>" });
+  wire("gt", "to-gz", { color: "#cf9418" });
+  wire("to-gz", "to-gp", { color: "#3f6fb5", dashed: true, label: "<span class='t'>patch_ops</span>" });
+  ready();
+</script>
+</body>
+</html>

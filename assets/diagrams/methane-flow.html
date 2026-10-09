@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Methane screening across the stack</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1880px; }
+  .rows { display: flex; flex-direction: column; gap: 14px; }
+  .row {
+    display: grid;
+    grid-template-columns: 150px repeat(7, 1fr);
+    column-gap: 46px;
+    align-items: center;
+    min-height: 116px;
+    border-radius: 16px;
+    border: 1.5px solid var(--accent);
+    background: var(--tint);
+    padding: 12px 18px 12px 0;
+  }
+  .row-label { padding-left: 18px; }
+  .row-label .verb { font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .row-label .pkg { font-size: 15px; font-weight: 700; color: var(--ink-accent); margin-top: 2px; }
+  .node .name code { font-size: 12.5px; }
+  .c2 { grid-column: 2; } .c3 { grid-column: 3; } .c4 { grid-column: 4; } .c5 { grid-column: 5; }
+  .c6 { grid-column: 6; } .c7 { grid-column: 7; } .c8 { grid-column: 8; }
+  .c7-8 { grid-column: 7 / 9; }
+  .pair .chips { flex-direction: column; align-items: flex-start; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">Advanced: methane screening with labels, across all four packages</div>
+  <div class="subtitle">Permian Basin, June 2025 · Sentinel-2 SWIR on a 20 m UTM 13N grid of (H, W) = (1675, 1430) · shapes as returned at each step</div>
+
+  <div class="rows">
+    <div class="row read">
+      <div class="row-label"><div class="verb">read</div><div class="pkg">geoproducts</div></div>
+      <div class="node c2" id="sources"><span class="step">1</span>
+        <div class="name"><code>list_sources</code></div>
+        <div class="desc">token · bbox · sectors=["1B2"]</div>
+        <div class="chips"><span class="chip"><span class="t">list[CMSource]</span></span></div>
+      </div>
+      <div class="node c8" id="rasterize"><span class="step">8</span>
+        <div class="name"><code>rasterize_sources_like</code></div>
+        <div class="desc">sources onto <i>grid</i>, buffer_m=150</div>
+        <div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(1675, 1430) uint8</span></span></div>
+      </div>
+    </div>
+
+    <div class="row find">
+      <div class="row-label"><div class="verb">find</div><div class="pkg">geocatalog</div></div>
+      <div class="node c2" id="search"><span class="step">2</span>
+        <div class="name"><code>from_stac_search</code></div>
+        <div class="desc">sentinel-2-l2a · asset_key = B11 / B12</div>
+        <div class="chips"><span class="chip"><span class="t">GeoCatalog</span><span class="s">× 2</span></span></div>
+      </div>
+      <div class="node c3" id="fieldfor"><span class="step">3</span>
+        <div class="name"><code>stage</code> · <code>query</code> · <code>field_for</code></div>
+        <div class="desc">mosaic onto the AOI GeoSlice</div>
+        <div class="chips"><span class="chip"><span class="t">RasterField</span><span class="s">(1, 1675, 1430) uint16 × 2</span></span></div>
+      </div>
+    </div>
+
+    <div class="row compute">
+      <div class="row-label"><div class="verb">compute</div><div class="pkg">geotoolz</div></div>
+      <div class="node c4" id="stack"><span class="step">4</span>
+        <div class="name"><code>StackBands</code></div>
+        <div class="desc">[B11, B12] → one carrier</div>
+        <div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(2, 1675, 1430) uint16</span></span></div>
+      </div>
+      <div class="node c6" id="sbmp"><span class="step">6</span>
+        <div class="name"><code>DNToReflectance | SBMP</code></div>
+        <div class="desc">SWIR-ratio CH₄ enhancement, per tile</div>
+        <div class="chips"><span class="chip"><span class="t">Patch</span><span class="s">(128, 128) float64</span></span></div>
+      </div>
+    </div>
+
+    <div class="row cut">
+      <div class="row-label"><div class="verb">cut · stitch</div><div class="pkg">geopatcher</div></div>
+      <div class="node c5" id="grid"><span class="step">5</span>
+        <div class="name"><code>GridSampler</code></div>
+        <div class="desc">128² tiles, 96 px stride, Hann window</div>
+        <div class="chips"><span class="chip"><span class="t">Patch</span><span class="s">(2, 128, 128) × N</span></span></div>
+      </div>
+      <div class="node c7" id="merge"><span class="step">7</span>
+        <div class="name"><code>MergePatches</code></div>
+        <div class="desc">OverlapAdd onto the one-band <i>grid</i></div>
+        <div class="chips"><span class="chip"><span class="t">ndarray</span><span class="s">(1, 1675, 1430) float64</span></span></div>
+      </div>
+    </div>
+
+    <div class="row out">
+      <div class="row-label"><div class="verb">result</div><div class="pkg">aligned pair</div></div>
+      <div class="node solid c7-8 pair" id="pair">
+        <div class="name">(score, labels) — same grid, pixel for pixel</div>
+        <div class="desc">threshold · evaluate · train</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const R = "#23978a", F = "#7b6bb5", C = "#cf9418", B = "#3f6fb5", O = "#c2474f";
+  wire("search", "fieldfor", { color: F });
+  wire("fieldfor", "stack", { from: "right", to: "top", bend: 60, toShift: -40, color: F });
+  wire("stack", "grid", { from: "right", to: "top", bend: 60, toShift: -40, color: C });
+  wire("grid", "sbmp", { from: "right", to: "bottom", bend: 60, toShift: -40, color: B, label: "<span class='t'>ApplyToChips</span>", at: 0.35 });
+  wire("sbmp", "merge", { from: "right", to: "top", bend: 60, toShift: -40, color: C });
+  wire("sources", "rasterize", { color: R, label: "<span class='t'>sources</span>", at: 0.5 });
+  wire("stack", "rasterize", { from: "top", to: "left", dashed: true, color: "#64748b", fromShift: 60, toShift: 18, bend: 120,
+        label: "<span class='t'>grid</span><span class='s'>= isel(band=0:1)</span>", at: 0.42 });
+  wire("merge", "pair", { from: "bottom", to: "top", color: O, toShift: -110, bend: 40, label: "<span class='t'>score</span>" });
+  wire("rasterize", "pair", { from: "bottom", to: "top", color: O, toShift: 110, bend: 160, label: "<span class='t'>labels</span>", at: 0.78 });
+  ready();
+</script>
+</body>
+</html>

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The geostack, stage by stage</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { padding: 28px 28px 22px; background: #ffffff; }
+  svg text { font-family: var(--sans); }
+  .mono { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <svg id="art" width="1840" height="790" viewBox="0 0 1840 790" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+<script>
+"use strict";
+// The xarray "split · apply · combine" figure, extended with the steps a
+// geospatial pipeline needs before and after it: search an archive,
+// index it, save what matters, stream it lazily — then split, apply,
+// combine, and write. Everything is drawn here so the PNG is reproducible.
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("art");
+function el(tag, attrs, parent = svg) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  parent.appendChild(e);
+  return e;
+}
+function text(x, y, s, attrs = {}) {
+  const t = el("text", { x, y, "text-anchor": "middle", ...attrs });
+  t.textContent = s;
+  return t;
+}
+
+const INK = "#111827", MUTED = "#64748b";
+const KEY = {
+  A: { stroke: "#4b5563", fill: "#e5e7eb", solid: "#9ca3af" },
+  B: { stroke: "#c2474f", fill: "#fbe4e6", solid: "#e8a2a8" },
+  C: { stroke: "#3f6fb5", fill: "#e3edfb", solid: "#9dbbe6" },
+};
+const PKG = {
+  find: ["#7b6bb5", "#f1edf9", "#2d2545"],
+  read: ["#23978a", "#e2f4f1", "#12403a"],
+  cut: ["#3f6fb5", "#e7effb", "#1b2f50"],
+  compute: ["#cf9418", "#fdf3da", "#4a3506"],
+};
+
+// ---- layout ---------------------------------------------------------
+const X0 = 20, CW = 225, NCOL = 8;
+const cx = (i) => X0 + CW * (i + 0.5);
+const edge = (i) => X0 + CW * i;               // left edge of column i
+const ROW = [292, 412, 532];                   // patch rows (split → combine)
+const MID = ROW[1];
+const STAGES = [
+  ["Search", "STAC · CMR · s3://"],
+  ["Catalog", "index once, query fast"],
+  ["Save", "stage what you need"],
+  ["Stream", "lazy windows"],
+  ["Split", "overlapping patches"],
+  ["Apply", "operator per patch"],
+  ["Combine", "window-weighted merge"],
+  ["Write", "COG · zarr"],
+];
+
+// defs: arrowheads + window shading
+const defs = el("defs", {});
+function marker(id, color) {
+  const m = el("marker", { id, viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto" }, defs);
+  el("path", { d: "M0 0 L10 5 L0 10 z", fill: color }, m);
+}
+marker("ah-ink", INK);
+for (const k of Object.keys(KEY)) marker("ah-" + k, KEY[k].stroke);
+const rg = el("radialGradient", { id: "hann" }, defs);
+el("stop", { offset: "0", "stop-color": "#ffffff", "stop-opacity": "0" }, rg);
+el("stop", { offset: "1", "stop-color": "#ffffff", "stop-opacity": ".6" }, rg);
+const lg = el("linearGradient", { id: "terrain", x1: 0, y1: 0, x2: 1, y2: 1 }, defs);
+el("stop", { offset: "0", "stop-color": "#d9e8c9" }, lg);
+el("stop", { offset: ".5", "stop-color": "#9cc48e" }, lg);
+el("stop", { offset: "1", "stop-color": "#5d8c74" }, lg);
+const lg2 = el("linearGradient", { id: "result", x1: 0, y1: 0, x2: 1, y2: 1 }, defs);
+el("stop", { offset: "0", "stop-color": "#fef3c7" }, lg2);
+el("stop", { offset: "1", "stop-color": "#f4b740" }, lg2);
+
+// ---- title ----------------------------------------------------------
+text(920, 44, "The geostack: search · catalog · save · stream · split · apply · combine · write",
+     { "font-size": 30, "font-weight": 800, fill: INK });
+text(920, 76, "xarray's split → apply → combine, with the steps a geospatial pipeline needs before and after it",
+     { "font-size": 16, fill: MUTED });
+
+// ---- column headings ------------------------------------------------
+STAGES.forEach(([h, sub], i) => {
+  text(cx(i), 142, h, { "font-size": 27, "font-weight": 700, fill: INK });
+  text(cx(i), 168, sub, { "font-size": 14, fill: MUTED });
+});
+
+// ---- dividers: thick strokes broken where arrows cross --------------
+function divider(i, gaps) {
+  const x = edge(i);
+  let y = 104;
+  const ys = [...gaps].sort((a, b) => a - b);
+  for (const g of ys) {
+    el("line", { x1: x, y1: y, x2: x, y2: g - 22, stroke: INK, "stroke-width": 6, "stroke-linecap": "round" });
+    y = g + 22;
+  }
+  el("line", { x1: x, y1: y, x2: x, y2: 612, stroke: INK, "stroke-width": 6, "stroke-linecap": "round" });
+}
+for (let i = 1; i < NCOL; i++) divider(i, i >= 4 && i <= 6 ? ROW : [MID]);
+
+function arrow(x1, y1, x2, y2, key) {
+  const color = key ? KEY[key].stroke : INK;
+  el("line", { x1, y1, x2, y2, stroke: color, "stroke-width": 2.5, "marker-end": `url(#ah-${key || "ink"})` });
+}
+
+// ---- 1 · Search: an archive of footprints, three inside the AOI ----
+(() => {
+  const n = 5, s = 24, g = 7;
+  const x0 = cx(0) - (n * s + (n - 1) * g) / 2, y0 = MID - 108;
+  for (let r = 0; r < 7; r++) for (let c = 0; c < n; c++) {
+    const hit = (r === 3 && c >= 1 && c <= 3);
+    el("rect", { x: x0 + c * (s + g), y: y0 + r * (s + g), width: s, height: s, rx: 3,
+                 fill: hit ? PKG.find[1] : "#f3f4f6", stroke: hit ? PKG.find[0] : "#9ca3af", "stroke-width": hit ? 2.2 : 1.2 });
+  }
+  el("rect", { x: x0 + 1 * (s + g) - 6, y: y0 + 3 * (s + g) - 6, width: 3 * s + 2 * g + 12, height: s + 12, rx: 6,
+               fill: "none", stroke: PKG.find[0], "stroke-width": 2, "stroke-dasharray": "5 4" });
+  text(cx(0), y0 + 7 * (s + g) + 18, "AOI × dates → 3 of millions", { "font-size": 13, fill: MUTED });
+})();
+
+// ---- 2 · Catalog: an index table, three rows hit --------------------
+(() => {
+  const w = 160, h = 25, x0 = cx(1) - w / 2, y0 = MID - 100;
+  el("rect", { x: x0, y: y0, width: w, height: h, rx: 4, fill: "#f3f4f6", stroke: "#9ca3af" });
+  text(x0 + w / 2, y0 + 17, "time · footprint · path", { "font-size": 11.5, fill: MUTED });
+  const rows = ["2024-06-05", "2024-06-08", "2024-06-12", "2024-06-15", "2024-06-21", "2024-07-02"];
+  rows.forEach((d, k) => {
+    const hit = k === 0 || k === 2 || k === 4;
+    const y = y0 + (k + 1) * (h + 3);
+    el("rect", { x: x0, y, width: w, height: h, rx: 4, fill: hit ? PKG.find[1] : "#ffffff",
+                 stroke: hit ? PKG.find[0] : "#d1d5db", "stroke-width": hit ? 2 : 1 });
+    text(x0 + 10, y + 17, d, { "font-size": 11.5, "text-anchor": "start", class: "mono", fill: hit ? PKG.find[2] : MUTED });
+    el("rect", { x: x0 + 98, y: y + 6, width: 13, height: 13, rx: 2, fill: "none", stroke: hit ? PKG.find[0] : "#cbd5e1" });
+    text(x0 + 118, y + 17, ".tif", { "font-size": 11.5, "text-anchor": "start", class: "mono", fill: hit ? PKG.find[2] : MUTED });
+  });
+  text(cx(1), y0 + 7 * (h + 3) + 22, "query(GeoSlice) — no file opened", { "font-size": 13, fill: MUTED });
+})();
+
+// ---- 3 · Save: staged to local disk ---------------------------------
+(() => {
+  const x = cx(2), top = MID - 52, w = 128, h = 104, ry = 16;
+  el("path", { d: `M${x - w / 2} ${top} v${h} a${w / 2} ${ry} 0 0 0 ${w} 0 v${-h}`, fill: "#f3f4f6", stroke: "#6b7280", "stroke-width": 2 });
+  el("ellipse", { cx: x, cy: top, rx: w / 2, ry, fill: "#ffffff", stroke: "#6b7280", "stroke-width": 2 });
+  [-34, 0, 34].forEach((dx, k) => {
+    const fx = x + dx - 13, fy = top + 30 + (k % 2) * 8;
+    el("path", { d: `M${fx} ${fy} h18 l8 8 v26 h-26 z`, fill: PKG.find[1], stroke: PKG.find[0], "stroke-width": 1.8 });
+  });
+  text(x, top + h + ry + 34, "stage(dest=…) · GeoParquet", { "font-size": 13, fill: MUTED });
+})();
+
+// ---- 4 · Stream: one scene, read lazily through windows -------------
+const SC = { x: cx(3) - 82, y: MID - 82, s: 164 };
+(() => {
+  el("rect", { x: SC.x, y: SC.y, width: SC.s, height: SC.s, rx: 4, fill: "url(#terrain)", stroke: "#4b5563", "stroke-width": 1.5 });
+  // three overlapping windows, diagonal like xarray's input column
+  [["A", 86, 8], ["B", 46, 46], ["C", 8, 86]].forEach(([k, dx, dy]) => {
+    el("rect", { x: SC.x + dx, y: SC.y + dy, width: 70, height: 70, fill: KEY[k].fill, "fill-opacity": .45,
+                 stroke: KEY[k].stroke, "stroke-width": 2.4 });
+  });
+  text(cx(3), SC.y + SC.s + 30, "field_for · CogField", { "font-size": 13, fill: MUTED });
+})();
+
+// ---- 5 · Split: one patch per row, window-shaded --------------------
+function patch(x, y, s, k, mode) {
+  const kk = KEY[k];
+  if (mode === "split") {
+    el("rect", { x, y, width: s, height: s, fill: "url(#terrain)", stroke: kk.stroke, "stroke-width": 2.4 });
+    el("rect", { x, y, width: s, height: s, fill: kk.fill, "fill-opacity": .35 });
+    el("rect", { x, y, width: s, height: s, fill: "url(#hann)", stroke: kk.stroke, "stroke-width": 2.4 });
+  } else if (mode === "apply") {
+    el("rect", { x, y, width: s, height: s, fill: "url(#result)", stroke: kk.stroke, "stroke-width": 2.4 });
+  }
+}
+["A", "B", "C"].forEach((k, r) => patch(cx(4) - 40, ROW[r] - 40, 80, k, "split"));
+["A", "B", "C"].forEach((k, r) => {
+  patch(cx(5) - 40, ROW[r] - 40, 80, k, "apply");
+  text(cx(5), ROW[r] + 6, "f( · )", { "font-size": 17, "font-weight": 700, class: "mono", fill: "#4a3506" });
+});
+
+// ---- 7 · Combine: back onto the grid, overlaps blended --------------
+(() => {
+  const x = cx(6) - 62, y = MID - 62;
+  el("rect", { x: x - 6, y: y - 6, width: 136, height: 136, rx: 4, fill: "none", stroke: "#d1d5db", "stroke-dasharray": "4 4" });
+  [["A", 0, 54], ["B", 27, 27], ["C", 54, 0]].forEach(([k, dx, dy]) => {
+    el("rect", { x: x + dx, y: y + dy, width: 70, height: 70, fill: "url(#result)", "fill-opacity": .85,
+                 stroke: KEY[k].stroke, "stroke-width": 2.4 });
+  });
+  text(cx(6), y + 162, "OverlapAdd · Mean · …", { "font-size": 13, fill: MUTED });
+})();
+
+// ---- 8 · Write: a georeferenced file -------------------------------
+(() => {
+  const x = cx(7) - 62, y = MID - 78, w = 124, h = 156;
+  el("path", { d: `M${x} ${y} h${w - 26} l26 26 v${h - 26} h${-w} z`, fill: "#ffffff", stroke: "#4b5563", "stroke-width": 2 });
+  el("path", { d: `M${x + w - 26} ${y} v26 h26`, fill: "none", stroke: "#4b5563", "stroke-width": 2 });
+  el("rect", { x: x + 16, y: y + 38, width: w - 32, height: w - 32, fill: "url(#result)", stroke: "#cf9418" });
+  text(cx(7), y + h - 10, ".tif · .zarr", { "font-size": 12.5, class: "mono", fill: MUTED });
+  text(cx(7), y + h + 30, "CRS · transform · fill kept", { "font-size": 13, fill: MUTED });
+})();
+
+// ---- arrows ---------------------------------------------------------
+for (let i = 1; i <= 3; i++) arrow(edge(i) - 24, MID, edge(i) + 26, MID);
+// stream → split: one per window/patch, fanning out
+["A", "B", "C"].forEach((k, r) => {
+  const ys = SC.y + [8, 46, 86][r] + 35, xs = SC.x + SC.s + 4;
+  el("path", { d: `M${xs} ${ys} C ${xs + 40} ${ys}, ${edge(4) - 10} ${ROW[r]}, ${edge(4) + 30} ${ROW[r]}`,
+                         fill: "none", stroke: KEY[k].stroke, "stroke-width": 2.5, "marker-end": `url(#ah-${k})` });
+});
+["A", "B", "C"].forEach((k, r) => arrow(edge(5) - 34, ROW[r], edge(5) + 34, ROW[r], k));
+// apply → combine: three curves meeting at the divider, as in xarray
+["A", "B", "C"].forEach((k, r) => {
+  const x1 = cx(5) + 40, y1 = ROW[r], x2 = edge(6) + 30;
+  el("path", { d: `M${x1} ${y1} C ${x1 + 40} ${y1}, ${edge(6) - 20} ${MID}, ${x2} ${MID}`, fill: "none",
+               stroke: KEY[k].stroke, "stroke-width": 2.5, "marker-end": `url(#ah-${k})` });
+});
+arrow(edge(7) - 26, MID, edge(7) + 30, MID);
+
+// ---- package band ---------------------------------------------------
+function band(i0, i1, key, label) {
+  const [stroke, fill, ink] = PKG[key];
+  const x = edge(i0) + 8, w = CW * (i1 - i0 + 1) - 16;
+  el("rect", { x, y: 638, width: w, height: 46, rx: 12, fill, stroke, "stroke-width": 1.8 });
+  text(x + w / 2, 667, label, { "font-size": 15, "font-weight": 700, fill: ink });
+}
+band(0, 2, "find", "geotoolz-catalog  ·  geocatalog");
+band(3, 3, "read", "products · Field");
+band(4, 4, "cut", "geopatcher");
+band(5, 5, "compute", "geotoolz");
+band(6, 6, "cut", "geopatcher");
+band(7, 7, "compute", "geotoolz.io");
+
+// ---- legend ---------------------------------------------------------
+(() => {
+  const y = 735;
+  el("rect", { x: 330, y: y - 26, width: 1180, height: 54, rx: 10, fill: "#ffffff", stroke: "#d1d5db", "stroke-width": 1.5 });
+  text(400, y + 6, "Legend", { "font-size": 18, "font-weight": 700, fill: INK });
+  [["A", "Patch A"], ["B", "Patch B"], ["C", "Patch C"]].forEach(([k, lab], j) => {
+    const x = 480 + j * 165;
+    el("rect", { x, y: y - 15, width: 138, height: 32, rx: 8, fill: KEY[k].fill, stroke: KEY[k].stroke, "stroke-width": 1.5 });
+    text(x + 69, y + 6, lab, { "font-size": 15, fill: KEY[k].stroke, "font-weight": 600 });
+  });
+  el("rect", { x: 990, y: y - 13, width: 28, height: 26, rx: 4, fill: "none", stroke: PKG.find[0], "stroke-width": 2, "stroke-dasharray": "5 4" });
+  text(1030, y + 6, "AOI · catalog hit", { "font-size": 14, "text-anchor": "start", fill: MUTED });
+  el("rect", { x: 1190, y: y - 13, width: 28, height: 26, fill: "url(#result)", stroke: "#cf9418" });
+  text(1230, y + 6, "operator output", { "font-size": 14, "text-anchor": "start", fill: MUTED });
+})();
+
+document.body.dataset.ready = "1";
+</script>
+</body>
+</html>
