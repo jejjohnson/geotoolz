@@ -120,7 +120,7 @@ scene: GeoTensor = gz.StackBands()([swir["B11"].reader, swir["B12"].reader])  # 
 
 # 3 · patcher + operators — SWIR-ratio methane score, tile by tile
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry=gp.spatial.geometry.Rectangular(size=(128, 128)),
+    geometry=gp.spatial.geometry.Rectangular(size=(128, 128), boundary="pad"),
     sampler=gp.spatial.sampler.RegularStride(step=(96, 96)),
     window=gp.spatial.window.Hann(),
     aggregation=gp.spatial.aggregation.OverlapAdd(),
