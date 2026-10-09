@@ -52,9 +52,15 @@ parse, and every name it takes from the stack must exist.
   `ndvi: GeoTensor = gz.NDVI(red=0, nir=1)(scene)`. Operators and
   pipelines get their class (`pipe: gz.Sequential = …`).
 - **Shapes and dtypes.** Every array-valued line ends with a comment
-  giving its shape and dtype: `# (2, 4500, 4000) uint16`. Use symbolic
-  sizes (`(C, H, W)`, `(T, 1, h, w)`) when they vary, and say what the
+  giving its shape and dtype: `# (2, 4500, 4000) uint16`. A line that
+  transforms an array gives the transition instead:
+  `# (2, h, w) uint16 → (h, w) float32`. Keep these comments in one
+  aligned column per fence. Use symbolic sizes (`(C, H, W)`,
+  `(T, 1, h, w)`) when they vary — name them once in a `# Shapes: C bands,
+  H × W pixels` first comment when a fence uses several — and say what the
   fill is when it matters (`· NaN = no data`).
+- **Real names only.** Call the public API as it is on `main` (the checker
+  enforces it). A planned feature is never shown as working code.
 - **Self-contained.** A fence runs on its own after its imports: no
   names from an earlier fence, no undefined `scene` / `sas` / `token`.
   Build tiny synthetic inputs (`np.random.default_rng(0)…`) or name the
@@ -81,6 +87,42 @@ parse, and every name it takes from the stack must exist.
 - Mermaid is kept only for small decision trees ("is this the right
   tool?") that change with the code.
 
+## One home per fact
+
+Redundancy is the main way docs rot: two copies drift, and the reader
+cannot tell which is right.
+
+- **Each fact, table and example has one home.** The extras table lives on
+  the landing page; the boundary-policy table on the reference page; the
+  "define an operator" walkthrough in its how-to. Everywhere else links to
+  it in one sentence ("see [Boundary policy](…)").
+- **The README and the landing page are the same story**, not two drafts:
+  the landing page may go deeper, but its pitch, diagram, quickstart and
+  extras table match the README's. Change both in one PR.
+- **The stack-level facts** (the five packages, how they depend on each
+  other, the seams) live on the site home and "How the packages interlock";
+  package pages link there rather than re-explaining the stack.
+- **Concepts explain, how-tos do.** A how-to links to the concept it relies
+  on instead of re-teaching it; a concepts page shows a small example and
+  links to the how-to for the full recipe.
+- **A page that only repeats another is removed** (with a redirect), not
+  kept "for completeness".
+
+## Readability
+
+- **Lead with the point.** The first sentence of a page and of each
+  section says what the reader gets or can do — never "This page
+  describes…".
+- **Short.** Sentences under 25 words, paragraphs of at most 3 sentences,
+  pages that fit their one job. Split a page that needs a table of
+  contents to navigate.
+- **Scannable.** Headings are tasks or nouns the reader searches for
+  (`Download a file`, `Boundary policy`), not "Overview of the X
+  subsystem". Bullets for parallel items, numbered lists for steps,
+  tables for options and comparisons.
+- **Plain words.** No "robust", "seamless", "leverage", "powerful",
+  "simply" or "just". Numbers carry units.
+
 ## Words
 
 - Short sentences, active voice, the reader as "you".
@@ -96,6 +138,8 @@ parse, and every name it takes from the stack must exist.
 
 - [ ] One kind; the landing / how-to shape above
 - [ ] Every fence typed, shape-annotated and self-contained
+- [ ] No fact, table or example repeated from another page — link instead
+- [ ] Leads with the point; sentences < 25 words, paragraphs ≤ 3 sentences
 - [ ] `uv run python scripts/check_docs.py` passes
 - [ ] Diagrams are rendered PNGs with alt text
 - [ ] `uv run --group docs mkdocs build --strict` passes
