@@ -118,24 +118,42 @@ The `[pipekit]` bridge (`geopatcher.integrations.pipekit`, re-exported as
 pipeline:
 
 ```python
+import numpy as np
+import rasterio
+from georeader.geotensor import GeoTensor
+
+import geopatcher as gp
 import geotoolz as gz
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
-scene: GeoTensor = ...   # (4, H, W) uint16 — band_names = blue, green, red, nir
+rng: np.random.Generator = np.random.default_rng(0)
+scene: GeoTensor = GeoTensor(
+    rng.integers(1, 10_000, size=(4, 512, 512), dtype=np.uint16),  # (4, 512, 512) uint16
+    transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
+    crs="EPSG:32611",
+    fill_value_default=0,
+    attrs={"band_names": ["blue", "green", "red", "nir"]},
+)
+field: gp.RasterField = gp.RasterField(scene)
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(128, 128)),
+    sampler=gp.spatial.sampler.RegularStride(step=(96, 96)),
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+)
 
-ndvi: gz.Sequential = gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir="nir", red="red")  # (4, h, w) → (h, w)
+ndvi: gz.Sequential = gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir="nir", red="red")
 tiled: gz.Sequential = gz.Sequential([
-    GridSampler(patcher=patcher),                            # field → list[Patch], (4, 128, 128) each
-    ApplyToChips(operator=ndvi),                             # → list[Patch], (128, 128) each
-    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(),
-                 domain=scene.isel({"band": slice(0, 1)})),  # one-band output grid
+    GridSampler(patcher=patcher),          # field → 25 Patches     (4, 128, 128) uint16
+    ApplyToChips(operator=ndvi),           # (4, 128, 128) uint16 → (128, 128) float64
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-ndvi_map: np.ndarray = tiled(gp.RasterField(scene))         # (1, H, W) float64
+ndvi_map: GeoTensor = tiled(field)         # (512, 512) float64 · NaN = no data
 ```
 
-The merge's output shape follows `domain`, so give a band-collapsing
-operator a one-band domain; the four-band `scene` itself would broadcast
-the NDVI onto all four bands.
+The domain fixes the grid and the patches fix the bands, so NDVI's
+one-band chips merge into one `(H, W)` map on the scene's transform and
+CRS.
 
 ## Next steps
 
