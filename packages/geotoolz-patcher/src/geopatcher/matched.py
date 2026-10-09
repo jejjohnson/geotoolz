@@ -5,7 +5,7 @@ area) through a co-registration function; the `Matched*Patcher` family
 splits them together, yielding one `MatchedPatch` (spatial, temporal or
 spatio-temporal) holding every source's chip for the same anchor.
 
-See ``docs/patcher/design/query-matchup.md`` §6 and
+See ``docs/catalog/design/query-matchup.md`` §6 and
 ``docs/patcher/decisions.md`` (ADR-003) for the design.
 """
 

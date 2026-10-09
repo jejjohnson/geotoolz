@@ -143,6 +143,8 @@ before the pixel mapping. `spatial.sampler.AlongTrack` resamples by `spacing` in
 centres a chip on each world coordinate:
 
 ```python
+import geopatcher as gp
+
 # Event catalogue in lon/lat, imagery in UTM.
 sampler = gp.spatial.sampler.ExplicitCoords(
     coords=list(zip(catalog.lon, catalog.lat)),
@@ -162,6 +164,8 @@ geometry / aggregation works on the target grid unchanged and each chip
 is warped from the source:
 
 ```python
+import geopatcher as gp
+
 field = gp.fields.ReprojectingRasterField(reader, dst_crs="EPSG:3857", resolution=30.0)
 field.domain.crs                       # EPSG:3857 — samplers see the dst grid
 patches = list(patcher.split(field))   # chips are (*bands, H, W) in dst_crs
@@ -188,6 +192,8 @@ keyed by `sha256(field_id ‖ geometry+window config ‖ anchor)`: the second
 its `domain` metadata.
 
 ```python
+import geopatcher as gp
+
 cache = gp.run.PatchCache("./.geopatcher_cache", max_bytes=20 * 2**30)
 
 for patch in patcher.split(field, cache=cache):   # run 1: reads + cache fill
