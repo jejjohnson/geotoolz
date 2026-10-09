@@ -997,8 +997,8 @@ current).
 |---|---|---|
 | `HDF4_SIGNATURE` | constant | `b'\x0e\x03\x13\x01'` |
 | `HDF5_SIGNATURE` | constant | `b'\x89HDF\r\n\x1a\n'` |
+| `HdfSource` | function | Re-exported from `typing`. |
 | `PackedVariable` | class | How to decode one CF-packed variable. |
-| `Source` | function | Re-exported from `typing`. |
 | `affine_from_geotransform` | function | Parse a GDAL ``GeoTransform`` attribute into an ``Affine``. |
 | `attr` | function | An HDF5 attribute as a plain Python scalar / ``str`` (arrays kept). |
 | `fill_value_from_attrs` | function | The scalar fill value declared in ``attrs`` (default ``0``). |
