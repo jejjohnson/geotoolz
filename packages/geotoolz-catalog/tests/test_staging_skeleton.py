@@ -5,25 +5,13 @@ from __future__ import annotations
 import pytest
 
 import geocatalog.staging as staging_ns
-from geocatalog._src.staging.stage import LocalCache, stage
+from geocatalog._src.staging.stage import stage
 
 
 class TestReexports:
     def test_subnamespace_reexports(self) -> None:
         assert staging_ns.stage is stage
-        assert staging_ns.LocalCache is LocalCache
-
-
-class TestLocalCache:
-    def test_default_construction(self) -> None:
-        c = LocalCache()
-        assert c.root is None
-        assert c.ttl_days is None
-
-    def test_custom_construction(self) -> None:
-        c = LocalCache(root="/tmp/cat", ttl_days=30)
-        assert c.root == "/tmp/cat"
-        assert c.ttl_days == 30
+        assert staging_ns.__all__ == ["stage"]
 
 
 class TestStage:

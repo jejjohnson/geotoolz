@@ -18,13 +18,8 @@ import pandas as pd
 import pytest
 from shapely.geometry import box
 
-from geocatalog._src.staging.stage import (
-    LocalCache,
-    _ext_for,
-    cache_key,
-    stage,
-)
-from tests.conftest import catalog_from_rows
+from geocatalog._src.staging.stage import stage
+from tests.conftest import catalog_from_rows, local_cache
 
 
 def _cat(*rows: dict[str, Any]) -> Any:
@@ -162,7 +157,7 @@ def test_interrupted_download_is_not_a_cache_hit(
     uri = "https://x/a.tif"
     remote.content[uri] = b"payload"
     remote.fail_after_write[uri] = PermissionError("connection dropped")
-    cache = LocalCache(root=tmp_path / "cache")
+    cache = local_cache(root=tmp_path / "cache")
     with pytest.raises(PermissionError):
         stage(_cat({"filepath": uri}), cache=cache)
     assert not cache.path_for(uri).exists()
@@ -178,7 +173,7 @@ def test_short_read_is_retried_then_fails(tmp_path: Path, remote: _Remote) -> No
     uri = "https://x/a.tif"
     remote.content[uri] = b"abc"
     remote.size[uri] = 10
-    cache = LocalCache(root=tmp_path / "cache")
+    cache = local_cache(root=tmp_path / "cache")
     with pytest.raises(OSError, match="short read"):
         stage(_cat({"filepath": uri}), cache=cache, retries=2)
     assert len(remote.opens) == 3
@@ -290,61 +285,6 @@ def test_dict_asset_map_is_an_asset_map(tmp_path: Path, remote: _Remote) -> None
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("a", "b"),
-    [
-        (
-            "https://acct.blob.core.windows.net/c/a.tif?st=1&se=2&sp=r&sv=3&sr=b&sig=AAA",
-            "https://acct.blob.core.windows.net/c/a.tif?st=4&se=5&sp=r&sv=3&sr=b&sig=BBB",
-        ),
-        (
-            "https://b.s3.amazonaws.com/a.tif?X-Amz-Signature=1&X-Amz-Date=2",
-            "https://b.s3.amazonaws.com/a.tif?X-Amz-Signature=3&X-Amz-Date=4",
-        ),
-    ],
-    ids=["azure-sas", "aws"],
-)
-def test_resigned_urls_share_a_cache_slot(a: str, b: str, tmp_path: Path) -> None:
-    cache = LocalCache(root=tmp_path)
-    assert cache.path_for(a) == cache.path_for(b)
-    assert cache.path_for(a).suffix == ".tif"
-
-
-def test_content_selecting_query_keeps_its_own_slot(tmp_path: Path) -> None:
-    cache = LocalCache(root=tmp_path)
-    assert cache.path_for("https://x/a?band=1") != cache.path_for("https://x/a?band=2")
-    # `sp` only signs when an Azure `sig` is present.
-    assert cache_key("https://x/a?sp=3") == "https://x/a?sp=3"
-
-
-def test_local_path_with_hash_keeps_its_extension() -> None:
-    assert _ext_for("/data/run#3/scene.tif") == ".tif"
-    assert _ext_for("/data/scene#1.nc") == ".nc"
-
-
-def test_prune_evicts_expired_files_and_partials(tmp_path: Path) -> None:
-    cache = LocalCache(root=tmp_path, ttl_days=1)
-    old = cache.path_for("https://x/old.tif")
-    new = cache.path_for("https://x/new.tif")
-    for p in (old, new):
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(b"x")
-    part = new.with_name(f".{new.name}.{'a' * 32}.part")
-    part.write_bytes(b"partial")
-    two_days_ago = time.time() - 2 * 86400
-    os.utime(old, (two_days_ago, two_days_ago))
-
-    assert cache.prune() == 2
-    assert not old.exists() and not part.exists()
-    assert new.exists()
-    assert LocalCache(root=tmp_path).prune() == 0  # no TTL: only partials
-
-
-# ---------------------------------------------------------------------------
-# Review follow-ups (#365)
-# ---------------------------------------------------------------------------
-
-
 def test_primary_follows_a_selected_alias_of_its_uri(
     tmp_path: Path, remote: _Remote
 ) -> None:
@@ -378,7 +318,7 @@ def test_prune_keeps_a_complete_download_named_part(
 ) -> None:
     uri = "https://x/archive.part"
     remote.content[uri] = b"whole"
-    cache = LocalCache(root=tmp_path / "cache")
+    cache = local_cache(root=tmp_path / "cache")
     stage(_cat({"filepath": uri}), cache=cache)
     slot = cache.path_for(uri)
     temp = slot.with_name(f".{slot.name}.{'0' * 32}.part")

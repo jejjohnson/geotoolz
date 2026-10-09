@@ -8,7 +8,8 @@ Hand the result to the [loaders](load.md) or to
 ## Staging
 
 ::: geocatalog.staging.stage
-::: geocatalog.staging.LocalCache
+
+The cache it fetches into is [`geocloud.cache.LocalCache`](../../cloud/api.md).
 
 ## Object-store pool
 

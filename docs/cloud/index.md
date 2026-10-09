@@ -69,6 +69,7 @@ chips: list[GeoTensor] = src.read_windows(
 | `geocloud.store` | get the pooled client for a URI or local path (`get_obstore`, `object_key`), tell local from remote (`local_path`), mount a test store | [Concepts](concepts.md) |
 | `geocloud.files` | list, read, download, upload, copy, sync, delete and pre-sign objects | [Move files](how-to/move-files.md) |
 | `geocloud.credentials` | register credentials per bucket / container / host, load a TOML file, hand them to GDAL, redact logs | [Credentials](how-to/credentials.md) |
+| `geocloud.cache` | get a local file for any URI, downloaded once (`localize`, `LocalCache`) | [Cache remote files](how-to/cache.md) |
 | `geocloud.fs` | hand xarray, zarr, pyarrow or geopandas an fsspec filesystem on the pool | [Use fsspec libraries](how-to/fsspec.md) |
 | `geocloud.cog` | read COG windows in batches, sync or async (`CogSource`, `AsyncCogReader`) | [Read COGs](how-to/read-cogs.md) |
 | `geocloud.cog.write_cog` | write a validated COG locally or to a bucket | [Write COGs](how-to/write-cogs.md) |

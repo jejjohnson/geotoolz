@@ -19,11 +19,12 @@ import tempfile
 import pandas as pd
 import planetary_computer
 import pystac_client
+from geocloud.cache import LocalCache
 from georeader.geotensor import GeoTensor
 
 import geocatalog as gc
 from geocatalog.backends import InMemoryGeoCatalog
-from geocatalog.staging import LocalCache, stage
+from geocatalog.staging import stage
 
 client: pystac_client.Client = pystac_client.Client.open(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
@@ -56,23 +57,18 @@ What `stage` does:
   asset, and a JSON `staged_from` column keeps the original URIs. The
   input is not changed.
 - **Leaves local paths in place.** Staging a local catalog needs no extra.
-- **Downloads once per URI** through
-  [`geocloud.files`](../../cloud/index.md#moving-files-geocloudfiles), into
-  a temp file renamed into place when complete. Credentials come from
-  [`geocloud.credentials`](../../cloud/index.md#credentials-geocloudcredentials).
+- **Downloads once per URI** into a
+  [`geocloud.cache.LocalCache`](../../cloud/how-to/cache.md), through
+  `geocloud.files` into a temp file renamed into place when complete.
+  Credentials come from `geocloud.credentials`.
 - **Skips cache hits,** so a second run with a warm cache downloads
   nothing.
 
 ## Tune the cache
 
-`LocalCache(root=, ttl_days=, timeout=)` sets the directory, the lifetime
-and the per-request timeout. The defaults are `$GEOCATALOG_CACHE` or
-`~/.cache/geocatalog`, no expiry, and 60 s per 16 MiB range.
-
-Files land at `{root}/{key[:2]}/{key}{ext}`. The `key` is the sha256 of
-the URI without its expiring signature (Azure SAS, `X-Amz-*`, `X-Goog-*`,
-CloudFront), so a re-signed URL hits the same file. `cache.prune()`
-deletes expired files and abandoned `*.part` downloads.
+Pass `cache=LocalCache(root=, ttl_days=, timeout=)`, or just `dest=` for
+the root. The cache is geotoolz-cloud's; its layout, signature-free keys,
+expiry and `prune()` are on [Cache remote files](../../cloud/how-to/cache.md).
 
 ## Pick assets and handle errors
 
