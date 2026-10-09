@@ -22,7 +22,7 @@ Errors about a catalog's state or artifacts derive from
 `GeoCatalogError` and from the builtin callers caught before
 (`ValueError` / `RuntimeError`). Invalid arguments raise the builtin
 `ValueError` / `TypeError`; see the
-[parameter vocabulary](../design/vocabulary.md#errors).
+[parameter vocabulary](../vocabulary.md#errors).
 
 ::: geocatalog.backends.GeoCatalogError
 ::: geocatalog.backends.CatalogSchemaError

@@ -52,11 +52,13 @@ class CatalogDomain:
     Example:
         Tiled per-row inference across a multi-file S2 archive::
 
-            catalog = gz.build_raster_catalog(paths, ...)
-            domain  = gz.CatalogDomain(catalog, resolution=(10.0, 10.0))
+            import geocatalog as gc
+
+            catalog = gc.build.build_raster_catalog(paths)
+            domain = gc.patch.CatalogDomain(catalog, resolution=(10.0, 10.0))
             for slice_ in domain.slices():
-                chip = gz.load_raster(catalog, slice_)
-                yield model(chip.values)
+                chip = gc.load.load_raster(catalog, slice_)
+                predictions.append(model(chip.values))
     """
 
     catalog: GeoCatalog

@@ -1,80 +1,122 @@
-# geocatalog
+# geotoolz-catalog
 
-> A queryable spatiotemporal index over geospatial files. Two backends,
-> one Protocol, one `GeoSlice` contract.
+> **A spatiotemporal index over geospatial files.** Ask *"what overlaps
+> this AOI between these dates?"* and get an answer in milliseconds,
+> without opening a single file.
 
-## What is a Catalog?
+## Where it comes from
 
-A **catalog** is an *index over geospatial files*. Each row holds a
-single file's footprint (bbox), time interval, CRS, and path/URI.
-Given a query like *"files overlapping AOI X between dates Y and Z,"*
-the catalog answers in milliseconds — **without opening any file.**
+You have thousands of GeoTIFFs, NetCDFs, Zarrs or shapefiles on local disk,
+in a bucket or behind a STAC API. You want the few that touch one area in
+one season, and opening every file to find out takes hours.
 
-That's the whole idea. Everything else (DuckDB pushdown, GeoParquet
-artifacts, staging caches, STAC ingestion, patcher bridges) is
-plumbing in service of that one operation.
+`geocatalog` indexes each file once: its footprint, time interval, CRS and
+path. Queries then touch only that index, and a loader opens only the
+files that overlap. The import name is `geocatalog`; how it fits with the
+other packages is on [How the packages interlock](../geostack.md).
 
-The unit of work is `GeoSlice` — a `(bounds, interval, crs,
-resolution)` 4-tuple. Catalogs **produce** slices; loaders **consume**
-them. Anywhere a slice flows through your pipeline, it carries
-everything the next stage needs to fetch a chip without consulting the
-catalog again.
-
-## Is this the right tool for me?
-
-```mermaid
-flowchart TD
-    Q[I have a bunch of<br/>geospatial files] --> A{Do I need to<br/>query by bbox<br/>and time?}
-    A -- No, I just<br/>read one file --> NO1[Use rasterio /<br/>xarray / fiona<br/>directly]
-    A -- Yes --> B{How many files?}
-    B -- &lt; 10^5 --> IM[InMemoryGeoCatalog<br/><sub>base install</sub>]
-    B -- 10^5 to 10^6+ --> C{Remote storage<br/>S3 / GCS / HF?}
-    C -- No, local --> DD[DuckDBGeoCatalog<br/><sub>[duckdb] extra</sub>]
-    C -- Yes --> DD2[DuckDBGeoCatalog<br/>over remote<br/>GeoParquet<br/><sub>[duckdb] + [fsspec]</sub>]
-    B -- I don't know yet --> BUILD[Start with<br/>InMemory, swap to<br/>DuckDB later<br/><sub>same Protocol</sub>]
-    style IM fill:#fbe8e9,stroke:#C44E52
-    style DD fill:#e8f0fb,stroke:#4C72B0
-    style DD2 fill:#e8f0fb,stroke:#4C72B0
-    style BUILD fill:#fbf6e3,stroke:#CCB974
-    style NO1 fill:#eee,stroke:#888
-```
-
-## Mental model — one paragraph
-
-You build a `GeoCatalog` once (from a directory of files, a STAC
-search, an EarthAccess CMR call, or a hand-rolled list). You hand it
-`GeoSlice`s to query. The catalog hands you back smaller catalogs
-(the matching rows). When you're ready to materialise pixels you pass
-the slice + matching catalog to a loader (`load_raster`, `load_vector`,
-`load_xarray`). The loader returns a `GeoTensor` (raster, vector) or
-`xr.Dataset` (xarray). At every step the geometry, time, and CRS are
-explicit — there is no hidden state.
-
-## Quick links
-
-- **[Concepts](concepts.md)** — architecture, schema, backends, set algebra, persistence
-- **[Quickstart](quickstart.md)** — 15-minute Lake Tahoe Sentinel-2 walkthrough
-- **Recipes**
-    - [Large archives](recipes/large-archives.md) — partitioned Parquet + S3
-    - [STAC ingestion](recipes/from-stac.md) — `STACSource` vs `from_stac_search`
-    - [Staging & bundles](recipes/staging-and-bundles.md) — when to `stage()`, when to use `CatalogBundle.ingest()`
-- **[End-to-end notebook](notebooks/end_to_end_lake_tahoe.ipynb)** — discover → query → load → patch → stitch (cross-repo with `geotoolz` and `geopatcher`); this PR's canonical worked example.
-- **Extended examples ↗** — the deep dives on build/query/load, raster + xarray + vector backends, query/intersect/union set algebra, the DuckDB scale-out backend, and the catalog↔patcher bridge live in [`research_notebook/projects/geostack/notebooks/catalog`](https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack/notebooks/catalog). They execute against a real Sentinel-2 archive on MPC + Natural Earth admin-1 polygons; this repo's docs reference them by name.
-- **[API Reference](api/reference.md)** — full mkdocstrings reference
-- **[CLI](cli.md)**, **[Logging](logging.md)**, **[Schema versions](schema-versions.md)**
+![geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoTensor or a geopatcher RasterField](../assets/diagrams/catalog-flow.png)
 
 ## Install
 
 ```bash
-pip install geotoolz-catalog                  # base: InMemory + raster + vector
-pip install 'geotoolz-catalog[duckdb]'        # DuckDB backend
-pip install 'geotoolz-catalog[xarray-raster]' # xarray (NetCDF / Zarr) backend
-pip install 'geotoolz-catalog[stac]'          # STAC ingestion
-pip install 'geotoolz-catalog[full]'          # everything
+pip install geotoolz-catalog
+pip install 'geotoolz-catalog[duckdb,stac]'   # add extras as needed
 ```
 
-Or with `uv`:
+| Extra | Pulls in | Needed for |
+| --- | --- | --- |
+| *(base)* | InMemory backend, raster + vector builders and loaders, GeoParquet round-trip | Local files, under 10⁵ rows |
+| `[duckdb]` | `DuckDBGeoCatalog`, streaming builds (`engine="duckdb"`) | 10⁶+ rows, remote artifacts |
+| `[streaming]` | Same as `[duckdb]` (the streaming writer itself is pyarrow) | Streaming builds |
+| `[xarray-raster]` | `build_xarray_catalog`, `load_xarray` | NetCDF / Zarr |
+| `[stac]` | `STACSource`, `from_stac_search`, `from_stac_items`, `to_stac_collection` | STAC API ingestion |
+| `[earthaccess]` / `[gee]` | `EarthAccessSource` / `GEESource` | NASA Earthdata / Earth Engine discovery |
+| `[sources-all]` | `[earthaccess]` + `[stac]` + `[gee]` | Every source adapter |
+| `[fsspec]` | fsspec, its cloud filesystems, `huggingface_hub` | `s3://` `gs://` `az://` `https://` `hf://` reads in builders and loaders |
+| `[cloud]` | geotoolz-cloud (`geocloud.files`, `geocloud.credentials`) | `stage()` of remote URIs |
+| `[patch]` | geotoolz-patcher | `geocatalog.patch.field_for` |
+| `[full]` | All of the above | One-shot install |
 
-```bash
-uv add geotoolz-catalog
+## Quickstart
+
+Index three scenes, ask which ones touch a 5 km box in June, and load only
+those onto the box's grid:
+
+```python
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import rasterio
+from georeader.geotensor import GeoTensor
+from rasterio.transform import from_origin
+
+import geocatalog as gc
+from geocatalog.backends import InMemoryGeoCatalog
+
+# Three 4-band scenes, 6 km × 6 km at 10 m in UTM 11N, dated by file name.
+root: Path = Path(tempfile.mkdtemp())
+for date in ("20240605", "20240612", "20240801"):
+    with rasterio.open(
+        root / f"s2_{date}.tif", "w", driver="GTiff", width=600, height=600, count=4,
+        dtype="uint16", crs="EPSG:32611", transform=from_origin(501_000, 4_308_000, 10, 10),
+    ) as dst:
+        dst.write(np.full((4, 600, 600), 1_000, dtype=np.uint16))     # (4, 600, 600) uint16
+
+catalog: InMemoryGeoCatalog = gc.build.build_raster_catalog(
+    sorted(root.glob("*.tif")),
+    filename_regex=r"s2_(?P<date>\d{8})\.tif",                        # time from the file name
+    crs="EPSG:32611",
+)                                                                     # 3 rows · footprints, times, paths
+
+aoi: gc.GeoSlice = gc.GeoSlice(
+    bounds=(502_000, 4_302_000, 507_000, 4_307_000),                  # 5 km × 5 km, UTM 11N metres
+    interval=pd.Interval(pd.Timestamp("2024-06-01"), pd.Timestamp("2024-06-30"), closed="both"),
+    resolution=(10.0, 10.0),                                          # → grid (H, W) = (500, 500)
+    crs="EPSG:32611",
+)
+
+hits: InMemoryGeoCatalog = catalog.query(aoi)                         # 2 rows — no file opened
+tensor: GeoTensor = gc.load.load_raster(hits, aoi, band_indexes=[1, 2, 3])  # (3, 500, 500) uint16
 ```
+
+`hits` is itself a catalog, so queries chain and set-combine. Only the
+loader opens files, and only the ones that overlap. The
+[Quickstart](quickstart.md) adds STAC discovery and saving the catalog.
+
+## What's inside
+
+The root holds `GeoCatalog`, `GeoSlice`, `open_catalog` and
+`query` / `intersect` / `union`. Every other name has one home, named for
+the step it serves:
+
+| Step | Namespace | Main names | Guide |
+|---|---|---|---|
+| discover | `geocatalog.sources` | `STACSource`, `CMRSource`, `EarthAccessSource`, `GEESource`, `from_stac_search` | [STAC ingestion](how-to/stac-ingestion.md) |
+| index | `geocatalog.build` | `build_raster_catalog`, `build_xarray_catalog`, `build_vector_catalog`, `append_files` | [Large archives](how-to/large-archives.md) |
+| hold | `geocatalog.backends` | `InMemoryGeoCatalog`, `DuckDBGeoCatalog`, `CatalogRow`, the errors | [Backends](concepts.md#backends) |
+| join | `geocatalog.matchup` | `matchup`, `MatchupRow`, the spatial and temporal strategies | [Match sources](how-to/matchup.md) |
+| read | `geocatalog.load` | `load_raster`, `aload_raster`, `load_raster_timeseries`, `load_xarray`, `load_vector` | [Load API](api/load.md) |
+| save / share | `geocatalog.storage` | `to_geoparquet`, `from_geoparquet`, `StreamingParquetWriter`, `to_stac_collection`, `CatalogBundle` | [Provenance bundles](how-to/stac-ingestion.md#record-provenance-with-a-bundle) |
+| stage | `geocatalog.staging` | `stage`, `LocalCache` | [Staging](how-to/staging.md) |
+| patch | `geocatalog.patch` | `field_for`, `CatalogDomain` | [Catalog → patcher](how-to/catalog-to-patcher.md) |
+| grids | `geocatalog.grid` | `slice_to_window`, `is_grid_aligned`, `count_steps` | [Grid alignment](how-to/grid-alignment.md) |
+| helpers | `geocatalog.utils` | `parse_uri`, `retry_transient_io`, UTC time helpers | [Utils API](api/utils.md) |
+
+## Next steps
+
+- [Concepts](concepts.md): `GeoSlice`, the row schema, the two backends,
+  set algebra and provenance.
+- [Quickstart](quickstart.md): local files, then Sentinel-2 from STAC.
+- How-tos: [STAC ingestion](how-to/stac-ingestion.md),
+  [staging](how-to/staging.md), [large archives](how-to/large-archives.md),
+  [matching sources](how-to/matchup.md),
+  [catalog → patcher](how-to/catalog-to-patcher.md),
+  [grid alignment](how-to/grid-alignment.md).
+- [Lake Tahoe tutorial](notebooks/end_to_end_lake_tahoe.ipynb): discover
+  Sentinel-2 on Planetary Computer, filter, load, then an NDVI pipeline
+  with geotoolz.
+- [API reference](api/reference.md), [CLI](cli.md) and the
+  [parameter vocabulary](vocabulary.md).

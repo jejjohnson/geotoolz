@@ -14,7 +14,7 @@
 
 > **A spatiotemporal index over geospatial files.** Ask *"what overlaps this AOI between these dates?"* and get an answer in milliseconds — without opening a single file.
 
-<p align="center"><img src="../../docs/assets/diagrams/catalog-flow.png" alt="geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoTensor, GeoDataFrame or RasterField" width="100%"></p>
+<p align="center"><img src="../../docs/assets/diagrams/catalog-flow.png" alt="geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoTensor or a patcher RasterField" width="100%"></p>
 
 ## 30-second pitch
 
@@ -134,7 +134,7 @@ uv add geotoolz-catalog
 - **[Concepts](https://jejjohnson.github.io/geotoolz/catalog/concepts/)** — mental model, backend comparison, set algebra
 - **[Quickstart](https://jejjohnson.github.io/geotoolz/catalog/quickstart/)** — 15-minute Lake Tahoe Sentinel-2 walkthrough
 - **[Recipes](https://jejjohnson.github.io/geotoolz/catalog/recipes/large-archives/)** — large archives, STAC ingestion, staging & bundles
-- **[End-to-end notebook](https://jejjohnson.github.io/geotoolz/catalog/notebooks/end_to_end_lake_tahoe/)** — discover → query → load → patch → stitch (cross-repo with [geotoolz](https://github.com/jejjohnson/geotoolz) and [geopatcher](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher))
+- **[End-to-end notebook](https://jejjohnson.github.io/geotoolz/catalog/notebooks/end_to_end_lake_tahoe/)** — discover Sentinel-2 over Lake Tahoe, query it and load it onto one grid (with [geotoolz](https://github.com/jejjohnson/geotoolz) and [geopatcher](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher))
 - **[API reference](https://jejjohnson.github.io/geotoolz/catalog/api/reference/)** — full mkdocstrings-generated reference
 
 ## Development

@@ -1,12 +1,9 @@
 # Parameter vocabulary
 
-**Status:** accepted (#246). **Scope:** every public `geocatalog`
-function, class and CLI flag.
-
-You should be able to guess a keyword from having used any other
-`geocatalog` function, so each concept below has exactly one name. The
-old spellings still work for one minor release: they map to the new
-name and emit a `DeprecationWarning`, and passing both is a `TypeError`.
+Each concept has one keyword across every public `geocatalog` function,
+class and CLI flag, so you can guess a name from any other call. Old
+spellings still work for one minor release with a `DeprecationWarning`;
+passing both the old and the new name is a `TypeError`.
 
 ## Names
 
@@ -25,17 +22,17 @@ name and emit a `DeprecationWarning`, and passing both is a `TypeError`.
 | File-open threads | `max_open_workers` | `load_raster`, `aload_raster` | `concurrency=` (`aload_raster`) |
 | Extraction strategy | `concurrency` | `"sequential"` / `"async"` (`build_raster_catalog`) | — |
 
-The CLI follows the same table: `--crs`, `--engine`, `--bounds`. The
-old flags (`--target-crs`, `--backend`, `--bbox`) still work for one
-minor release, print a deprecation notice on stderr, and are hidden
-from `--help`; passing an old and a new flag together is an error. `stats
---json` reports `kind` (and, for one release, the old `backend` key);
-`query --json` reports `bounds` (and the old `bbox` key).
+The CLI follows the same table: `--crs`, `--engine`, `--bounds`. The old
+flags (`--target-crs`, `--backend`, `--bbox`) work for one minor release,
+print a deprecation notice and are hidden from `--help`. Passing an old and
+a new flag together is an error.
 
-**On-disk names do not change.** The reserved `_backend` column, the
-`get_config()` `"engine"` key and the bundle `_meta.json` keys
-`target_crs` / `backend` keep their spelling, so artifacts written by
-any release stay readable. `get_config()` reports the data kind under
+`stats --json` reports `kind`, and `query --json` reports `bounds`. For one
+release they also report the old `backend` and `bbox` keys.
+
+**On-disk names do not change,** so artifacts written by any release stay
+readable. That covers the reserved `_backend` column, the `get_config()`
+`"engine"` key, and the bundle `_meta.json` keys `target_crs` / `backend`. `get_config()` reports the data kind under
 `"kind"` (and, for one release, the old `"backend"` key).
 
 ## Defaults that look different on purpose
@@ -59,10 +56,9 @@ before the hierarchy existed:
 | `CatalogSchemaError` | `ValueError` | an artifact's `_schema_version` cannot be read by this release |
 | `CatalogClosedError` | `RuntimeError` | a closed `DuckDBGeoCatalog` (or one derived from it) is used; also a `duckdb.ConnectionException` |
 
-Bad *arguments* are not `GeoCatalogError`s: they raise `ValueError`
-(wrong value, such as an unknown `kind` or malformed `bounds`) or
-`TypeError` (wrong type), and an unparsable CRS raises
-`pyproj.exceptions.CRSError`. Each case raises the same type on both
+Bad *arguments* are not `GeoCatalogError`s. A wrong value (an unknown
+`kind`, malformed `bounds`) raises `ValueError`, a wrong type raises
+`TypeError`, and an unparsable CRS raises `pyproj.exceptions.CRSError`. Each case raises the same type on both
 backends (`tests/test_vocabulary.py`). To catch every failure, catch
 `GeoCatalogError`, `ValueError`, `TypeError` and `CRSError`.
 

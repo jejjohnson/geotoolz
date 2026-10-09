@@ -1,74 +1,55 @@
 # Logging
 
-`geocatalog` uses [`loguru`](https://loguru.readthedocs.io/) for all
-internal logging. Following loguru's [library
-recipe](https://loguru.readthedocs.io/en/stable/resources/recipes.html#configuring-loguru-to-be-used-by-a-library-or-an-application),
-the package disables its own logger at import time:
+Turn on `geocatalog`'s logs with `logger.enable("geocatalog")` to see which
+files a build skipped and why. The package logs through
+[loguru](https://loguru.readthedocs.io/) and, following loguru's
+[library recipe](https://loguru.readthedocs.io/en/stable/resources/recipes.html#configuring-loguru-to-be-used-by-a-library-or-an-application),
+disables its logger at import, so importing it prints nothing.
+
+## Log a build to a file
 
 ```python
-# src/geocatalog/__init__.py
-from loguru import logger as _logger
-_logger.disable("geocatalog")
-```
+import tempfile
+from pathlib import Path
 
-so just importing the library produces no output. This is the default
-because most consumers don't want a third-party package writing to
-stderr unprompted.
-
-## Opting in
-
-A consumer app turns the package's logs back on with one call:
-
-```python
+import numpy as np
+import rasterio
 from loguru import logger
-logger.enable("geocatalog")
-```
+from rasterio.transform import from_origin
 
-After this, every `INFO` / `WARNING` / `ERROR` / `DEBUG` record emitted
-from inside `geocatalog.*` reaches loguru's default stderr sink (or any
-sink the consumer added with `logger.add(...)`).
-
-## Routing logs to a file
-
-`loguru.logger.add(...)` is the entry point for all sink configuration —
-files, rotation, formatting, structured (JSON) output. A typical
-catalog-build setup that wants to keep a record of every skipped or
-fallback file looks like:
-
-```python
-from loguru import logger
 import geocatalog as gc
+from geocatalog.backends import InMemoryGeoCatalog
+
+root: Path = Path(tempfile.mkdtemp())
+for name in ("s2_20240605.tif", "notes.tif"):                        # the second has no date
+    with rasterio.open(
+        root / name, "w", driver="GTiff", width=10, height=10, count=1, dtype="uint8",
+        crs="EPSG:32611", transform=from_origin(500_000, 4_300_000, 10, 10),
+    ) as dst:
+        dst.write(np.zeros((1, 10, 10), dtype=np.uint8))            # (1, 10, 10) uint8
 
 logger.enable("geocatalog")
-logger.add(
-    "catalog-build.log",
-    rotation="50 MB",          # roll the file when it crosses 50 MB
-    retention=10,              # keep the 10 most recent rolled files
-    backtrace=True,            # include locals on exception
-    diagnose=True,
-)
-
-cat = gc.build.build_raster_catalog(paths, ...)
+sink: int = logger.add(root / "catalog-build.log", rotation="50 MB", retention=10)
+catalog: InMemoryGeoCatalog = gc.build.build_raster_catalog(
+    sorted(root.glob("*.tif")), filename_regex=r"s2_(?P<date>\d{8})\.tif"
+)                                                                    # 1 row; WARNING: skipping notes.tif
+logger.remove(sink)
 ```
 
-## Where logs come from
+`logger.add` takes any loguru sink: a file with rotation, a JSON
+serializer or your own function.
 
-`geocatalog` emits records from these public entry points today (the
-records' logger names are the internal modules under `geocatalog`, so
-`logger.enable("geocatalog")` covers all of them):
+## What gets logged
 
-- `build_raster_catalog` — `WARNING` when a filename doesn't match the
-  date regex (the file is skipped).
-- `build_vector_catalog` — `WARNING` on empty vector files and regex
-  misses.
-- `build_raster_catalog` / `build_vector_catalog` — `INFO` when the
-  `duckdb` backend is asked to canonicalise footprints to EPSG:4326
-  because no `crs` was passed.
-- `StreamingParquetWriter` — `ERROR` (with traceback) when closing the
-  parquet handle fails while a partial file is being discarded after an
-  error.
-- `append_files` — `INFO` when input files are skipped because their
-  `filepath` is already indexed in the archive.
-- `sort_geoparquet` — `DEBUG` after a Hilbert-sorted rewrite completes.
+| Where | Level | When |
+| --- | --- | --- |
+| `build_raster_catalog` | `WARNING` | a file name does not match `filename_regex`; the file is skipped |
+| `build_vector_catalog` | `WARNING` | an empty vector file or a regex miss |
+| `build_raster_catalog` / `build_vector_catalog` | `INFO` | `engine="duckdb"` without `crs=` falls back to EPSG:4326 |
+| `append_files` | `INFO` | files already indexed in the archive are skipped |
+| `StreamingParquetWriter` | `ERROR` | closing the file fails while a partial write is discarded |
+| `sort_geoparquet` | `DEBUG` | a Hilbert-sorted rewrite finished |
 
-All call sites use loguru's `{}` placeholder style, not stdlib's `%s`.
+Grid-alignment notices are Python `warnings`, not log records, so they
+show without `logger.enable`; see
+[Grid alignment](how-to/grid-alignment.md).

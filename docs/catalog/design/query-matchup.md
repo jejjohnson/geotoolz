@@ -36,7 +36,7 @@ This design covers all three packages because the user-facing workflow crosses a
 - Scheduling, background workers, or distributed orchestration. That stays in `pipekit` or downstream tooling.
 - Auth UI. Defer to each library's native flow (`earthaccess.login`, `ee.Authenticate`).
 - Replacing rasterio / pyproj / odc-geo. Geotoolz keeps wrapping them.
-- Cross-cloud abstraction. `fsspec` + the libraries' native URI handling is enough.
+- Cross-cloud abstraction inside geocatalog. Object storage belongs to `geocloud` (staging downloads through `geocloud.files`); the readers keep their native URI handling (rasterio / GDAL, fsspec).
 - Bayesian / probabilistic patches. Weights stay deterministic.
 
 ## 3. High-level architecture
@@ -60,7 +60,7 @@ This design covers all three packages because the user-facing workflow crosses a
 │                                                            ▼                    │
 │                                                   ┌──────────────────┐          │
 │                                                   │  staging layer   │          │
-│                                                   │  (fsspec cache)  │          │
+│                                                   │ (geocloud.files) │          │
 │                                                   └────────┬─────────┘          │
 └────────────────────────────────────────────────────────────┼────────────────────┘
                                                              │ resolved URIs
@@ -115,10 +115,19 @@ Three boundary rules that drive the rest of the document:
 src/geocatalog/_src/
   base.py                      # GeoCatalog Protocol, CatalogRow, errors
   geoslice.py                  # GeoSlice
-  memory.py, duckdb_backend.py # backends
-  raster.py, vector.py, xarray_backend.py
-  parquet.py, streaming.py, ops.py, domain.py
+  grid.py                      # slice_to_window, is_grid_aligned, count_steps
+  factory.py, ops.py           # open_catalog; query / intersect / union
+  _schema.py, _lazy.py         # row schema; lazily resolved extras-gated names
   _extras.py                   # require_extra / install hints ("geotoolz-catalog[...]")
+
+  backends/
+    memory.py                  # InMemoryGeoCatalog
+    duckdb_backend.py          # DuckDBGeoCatalog
+
+  formats/                     # each format's builder and loader, side by side
+    raster.py                  # build_raster_catalog, load_raster, load_raster_timeseries
+    vector.py                  # build_vector_catalog, load_vector
+    xarray_backend.py          # build_xarray_catalog, load_xarray
 
   sources/
     _base.py                   # Source Protocol, SourceRow, AuthStatus
@@ -128,8 +137,11 @@ src/geocatalog/_src/
     gee.py                     # GEESource — scaffolding only (query raises NotImplementedError)
     _umm.py                    # UMM-G granule decoder shared by earthaccess / CMR
 
-  bundle/
-    _catalog_bundle.py         # CatalogBundle, QueryRecord, source_row_to_gdf_row
+  storage/
+    bundle.py                  # CatalogBundle, QueryRecord, source_row_to_gdf_row
+    parquet.py                 # to_geoparquet / from_geoparquet, migrations
+    streaming.py               # StreamingParquetWriter, append_files
+    stac.py                    # from_stac_items / from_stac_search, to_stac_collection
 
   matchup/
     engine.py                  # matchup(), MatchupRow — in-memory STRtree join
@@ -137,8 +149,11 @@ src/geocatalog/_src/
     temporal.py                # NearestInTime, WithinWindow, Synchronous
 
   staging/
-    _base.py                   # stage(), LocalCache
-    _field_for.py              # field_for() — bridge to a geopatcher RasterField
+    stage.py                   # stage(), LocalCache
+
+  patch/
+    field_for.py               # field_for() — bridge to a geopatcher RasterField
+    domain.py                  # CatalogDomain
 ```
 
 Public namespaces (`geocatalog.sources`, `geocatalog.storage`,
@@ -326,7 +341,7 @@ Implementation: an in-memory join — an STRtree per secondary role over footpri
 Explicit, never automatic:
 
 ```python
-# geocatalog/_src/staging/_base.py
+# geocatalog/_src/staging/stage.py
 
 def stage(
     catalog: InMemoryGeoCatalog,
@@ -765,22 +780,25 @@ geocatalog
     .STACSource                     # adapter (+ .planetary_computer(), .earth_search())
     .GEESource                      # scaffolding only (not implemented)
     .CMRSource                      # adapter
-  .bundle
+  .storage
     .CatalogBundle                  # .empty / .from_catalog / .ingest / .write_matchups /
                                     # .to_directory / .from_directory
     .QueryRecord                    # one queries.parquet row
   .matchup
-    .matchup(...)                   # functional; the namespace itself is callable
+    .matchup(...)                   # functional; `geocatalog.matchup` is an ordinary module
     .MatchupRow                     # dataclass
     .IouAtLeast, .CentroidWithin, .Intersects, .Contains   # spatial strategies
     .NearestInTime, .WithinWindow, .Synchronous            # temporal strategies
   .staging
     .stage(...)                     # functional
     .LocalCache                     # cache class
+  .patch
     .field_for(...)                 # staged catalog -> geopatcher RasterField ([patch])
+    .CatalogDomain                  # one GeoSlice per catalog row
   .GeoCatalog                       # Protocol (unchanged)
   .GeoSlice
-  .DuckDBGeoCatalog, .InMemoryGeoCatalog
+  .backends
+    .DuckDBGeoCatalog, .InMemoryGeoCatalog
 
 geotoolz.geom.coregister
   .RasterToRasterLike
