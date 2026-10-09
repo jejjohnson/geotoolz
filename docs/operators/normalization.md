@@ -25,6 +25,8 @@ Learned statistics (`mean_` / `std_`, `median_` / `iqr_`, `vmin_` / `vmax_`) are
 For deployed pipelines, pass cached per-band arrays directly:
 
 ```python
+import geotoolz as gz
+
 scaler = gz.normalize.StandardScaler(mean=mean, std=std)
 normalized = scaler(scene)
 ```
@@ -34,6 +36,8 @@ normalized = scaler(scene)
 For per-scene display, percentile stretching is usually more robust than raw min/max scaling:
 
 ```python
+import geotoolz as gz
+
 rgb = gz.normalize.HistogramStretch(lower=2, upper=98, out_range=(0, 255))(scene)
 ```
 

@@ -91,6 +91,8 @@ existing directory replaces only the `key=value` partition dirs and
 as one virtual table:
 
 ```python
+import geocatalog as gc
+
 catalog = gc.open_catalog("/data/s2_archive/")
 hits = catalog.query(aoi)   # bbox statistics prune row groups
 hits_2024 = catalog.sql("year = 2024")   # partition columns prune directories
@@ -103,6 +105,8 @@ upload it, and let readers query it lazily over HTTP-range. DuckDB's
 `httpfs` extension fetches only the row-groups your query touches:
 
 ```python
+import geocatalog as gc
+
 # Remote files can't have their CRS read from metadata yet; pass it.
 catalog = gc.open_catalog("s3://my-bucket/s2_archive.parquet", crs="EPSG:4326")
 
@@ -124,6 +128,8 @@ For directory-of-shards archives on S3, pass a glob; a bare remote
 directory is not expanded:
 
 ```python
+import geocatalog as gc
+
 catalog = gc.open_catalog(
     "s3://my-bucket/s2_archive/**/*.parquet", crs="EPSG:4326"
 )

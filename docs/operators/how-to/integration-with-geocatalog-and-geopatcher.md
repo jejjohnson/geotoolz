@@ -83,6 +83,7 @@ tiled-inference flow composes inside a `Sequential`:
 
 ```python
 import geopatcher as gp
+import geotoolz as gz
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 patcher = gp.SpatialPatcher(
@@ -125,6 +126,10 @@ grid (in the slice CRS, whatever CRS the files are in) as one `geopatcher`
 so build the `Field` first; then the whole flow is one `Sequential`:
 
 ```python
+import geocatalog as gc
+import geopatcher as gp
+import geotoolz as gz
+
 staged = gc.staging.stage(band_catalog("B04").query(aoi), dest="./cache")
 field = gc.patch.field_for(staged, aoi)                   # one Field on the AOI grid
 
