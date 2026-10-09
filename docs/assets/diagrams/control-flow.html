@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>geotoolz control flow</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1860px; }
+  .row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+  .panel { position: relative; border-radius: 16px; border: 1.5px solid #e2e8f0; background: #fff; padding: 18px 22px 22px; }
+  .panel-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 22px; }
+  .panel-head .k { font-size: 15px; font-weight: 700; }
+  .panel-head .d { font-size: 13px; color: var(--muted); }
+  .panel-head code { font-family: var(--mono); font-size: 12.5px; background: var(--compute-bg); padding: 2px 6px; border-radius: 6px; }
+  .flow { display: grid; grid-template-columns: 140px minmax(0, 1fr) 130px; column-gap: 34px; row-gap: 22px; align-items: center; }
+  .node.compute { --accent: var(--compute); }
+  .node.io { --accent: #475569; background: var(--base-bg); }
+  .node.out { --accent: var(--out); background: var(--out-bg); }
+  .node.dim { --accent: #94a3b8; }
+  .c1 { grid-column: 1; } .c2 { grid-column: 2; } .c3 { grid-column: 3; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">Runtime control flow — Branch, Switch, Fanout</div>
+  <div class="subtitle">Each is an <b>Operator</b> holding other operators. <b>Branch</b> and <b>Switch</b> run one path per call; <b>Fanout</b> runs every path and returns a dict.</div>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-head"><span class="k">Branch</span><span class="d"><code>predicate(x)</code> picks one of two operators</span></div>
+      <div class="flow">
+        <div class="node io c1" id="b-in" style="grid-row: 1 / 3;"><div class="name">x</div><div class="desc">(C, H, W)</div></div>
+        <div class="node compute c2" id="b-t" style="grid-row: 1;"><div class="name"><code>DNToReflectance</code></div><div class="desc">if_true — integer DNs</div></div>
+        <div class="node dim c2" id="b-f" style="grid-row: 2;"><div class="name"><code>Identity</code></div><div class="desc">if_false — already float</div></div>
+        <div class="node out c3" id="b-out" style="grid-row: 1 / 3;"><div class="name">y</div><div class="desc">(C, H, W) float</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span class="k">Switch</span><span class="d"><code>key(x)</code> picks a case by name, else <code>default</code></span></div>
+      <div class="flow">
+        <div class="node io c1" id="w-in" style="grid-row: 1 / 4;"><div class="name">x</div><div class="desc">attrs["platform"]</div></div>
+        <div class="node compute c2" id="w-a" style="grid-row: 1;"><div class="name">"sentinel-2"</div><div class="desc">NDVI(nir="B8")</div></div>
+        <div class="node compute c2" id="w-b" style="grid-row: 2;"><div class="name">"landsat-8"</div><div class="desc">NDVI(nir="B5")</div></div>
+        <div class="node dim c2" id="w-d" style="grid-row: 3;"><div class="name">default</div><div class="desc">Identity() · x as is</div></div>
+        <div class="node out c3" id="w-out" style="grid-row: 1 / 4;"><div class="name">y</div><div class="desc">per case: (H, W) NDVI, or x</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span class="k">Fanout</span><span class="d">every branch runs; outputs keyed by name</span></div>
+      <div class="flow">
+        <div class="node io c1" id="f-in" style="grid-row: 1 / 4;"><div class="name">x</div><div class="desc">(C, H, W)</div></div>
+        <div class="node compute c2" id="f-a" style="grid-row: 1;"><div class="name"><code>NDVI</code></div></div>
+        <div class="node compute c2" id="f-b" style="grid-row: 2;"><div class="name"><code>NDWI</code></div></div>
+        <div class="node compute c2" id="f-c" style="grid-row: 3;"><div class="name"><code>NBR</code></div></div>
+        <div class="node out c3" id="f-out" style="grid-row: 1 / 4;"><div class="name">dict</div><div class="desc">"ndvi" · "ndwi" · "nbr"</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const C = "#cf9418", G = "#64748b", D = "#94a3b8", R = "#c2474f";
+  wire("b-in", "b-t", { color: G, fromShift: -14, bend: 30 });
+  wire("b-in", "b-f", { color: D, fromShift: 14, bend: 30, dashed: true });
+  wire("b-t", "b-out", { color: R, toShift: -14, bend: 30 });
+  wire("b-f", "b-out", { color: D, toShift: 14, bend: 30, dashed: true });
+
+  wire("w-in", "w-a", { color: G, fromShift: -18, bend: 30 });
+  wire("w-in", "w-b", { color: D, dashed: true });
+  wire("w-in", "w-d", { color: D, fromShift: 18, bend: 30, dashed: true });
+  wire("w-a", "w-out", { color: R, toShift: -18, bend: 30 });
+  wire("w-b", "w-out", { color: D, dashed: true });
+  wire("w-d", "w-out", { color: D, toShift: 18, bend: 30, dashed: true });
+
+  wire("f-in", "f-a", { color: G, fromShift: -18, bend: 30 });
+  wire("f-in", "f-b", { color: G });
+  wire("f-in", "f-c", { color: G, fromShift: 18, bend: 30 });
+  wire("f-a", "f-out", { color: R, toShift: -18, bend: 30 });
+  wire("f-b", "f-out", { color: R });
+  wire("f-c", "f-out", { color: R, toShift: 18, bend: 30 });
+  ready();
+</script>
+</body>
+</html>

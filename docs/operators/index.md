@@ -1,171 +1,157 @@
 # geotoolz
 
-> Composable operators for remote sensing — small typed functions you
-> compose into linear chains or named DAGs, running on `GeoTensor`s.
+> **Compose remote-sensing pipelines like you compose functions.**
+> Sentinel-2 to cloud-free NDVI in a handful of small operators, with the
+> same code shape as your unit tests.
 
-!!! tip "This site covers the whole geostack"
-    This is the documentation for the **geotoolz monorepo** — five
-    packages designed as one stack. This page introduces the operator
-    library; the [site home](../index.md) lists all five, and
-    [How the packages interlock](../geostack.md) shows how they fit.
+## Where it comes from
 
-`geotoolz` is built around one idea: **every step of a remote-sensing
-pipeline is an `Operator`** — a typed function from one carrier to
-another — and pipelines are just compositions of those operators. The
-composition core (`Operator`, `Sequential`, `Graph`, `Branch`, `Switch`,
-…) lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit)
-framework. `geotoolz` adds the RS-specific operator families on top.
+Remote-sensing code tends to grow into long functions that mix band
+indexing, nodata handling, rescaling and georeferencing. Nothing in them
+can be reused or tested alone.
 
-```mermaid
-flowchart LR
-    Scene([GeoTensor scene]) --> Scale --> Mask[CloudMask] --> NDVI --> Out([NDVI map])
+`geotoolz` cuts each step into an **Operator**: a typed callable with a
+keyword-only constructor. It takes a georeader `GeoTensor` (or a plain
+`ndarray`) and returns the same kind of carrier on the same CRS and
+transform, with band names and a fill value that match the output.
+
+Chain operators with `|` into a `Sequential`, or wire them into a named
+`Graph` when the pipeline branches. Both are operators too, so pipelines
+nest, and `get_config()` turns any pipeline into JSON. The composition
+core comes from [pipekit](https://github.com/jejjohnson/pipekit); about
+275 remote-sensing operators sit on top. How geotoolz meets the other
+packages is on [How the packages interlock](../geostack.md).
+
+![Sequential and Graph composition of geotoolz operators, with the output shape and dtype of every step](../assets/diagrams/geotoolz-composition.png)
+
+## Install
+
+Until the first PyPI release, install from a clone (see the
+[stack install](../index.md#install)); after it:
+
+```bash
+pip install geotoolz                 # every operator family
+pip install 'geotoolz[patch]'        # + tile → operate → stitch with geopatcher
 ```
 
-## Is this the right tool?
+Backends that only a few operators use are extras. Those operators import
+without them and raise an `ImportError` naming the extra when called.
 
-```mermaid
-flowchart TD
-    Q{What are you doing?}
-    Q -->|"Single ad-hoc array op<br/>(one scene, one transform)"| A1[Use rasterio + numpy directly]
-    Q -->|"Reusable RS step you'll<br/>run on many scenes"| A2[Write an Operator]
-    Q -->|"Multi-step pipeline with<br/>branches, fusion, or QA"| A3[Compose with Graph]
-    Q -->|"Linear chain of 2-6 steps"| A4[Compose with Sequential]
-    Q -->|"Sliding-window inference<br/>over a big raster"| A5["Use <code>geopatcher</code> + <code>patch_ops</code>"]
-    Q -->|"Discover &amp; load scenes<br/>from a STAC catalogue"| A6["Use <code>geocatalog</code>, then feed into geotoolz"]
-```
+| Extra | Pulls in | Needed for |
+|---|---|---|
+| `viz` | `matplotlib` | `viz.ApplyColormap` (named matplotlib colormaps) |
+| `learn` | `scikit-learn`, `joblib` | `learn.SklearnOp` / `Pixelwise*` imputer NaN strategies and `save_state` / `load_state` / `state_path=`; `plume` DBSCAN clump counting |
+| `zarr` | `zarr>=3` | `io.WriteZarr` |
+| `hdf5` | `h5py` | `io.ReadHDF` on HDF5 |
+| `hdf4` | `pyhdf` | `io.ReadHDF` on HDF4 |
+| `netcdf` | `netCDF4` | `io.ReadNetCDF` |
+| `vector-cube` | `xvec` (+ `xarray`) | `geom.coregister.RasterToPoints` / `PointsToRaster`, bilinear point sampling |
+| `hydra` | `hydra-zen` | YAML `builds()` / `instantiate()` round-trips |
+| `patch` | `geotoolz-patcher[pipekit]` | `geotoolz.patch_ops` (tile → map → stitch, label-aware samplers) |
 
-If you find yourself wanting to (a) reuse the same RS step across
-scripts, (b) round-trip a pipeline to YAML, (c) compose branching /
-fan-in flows, or (d) plug into a tiled-inference setup — `geotoolz` is
-the right shape.
+## Quickstart
 
-## Mental model
-
-Every operator is a typed function from inputs to outputs. The contract
-is one method plus a keyword-only constructor:
-
-```python
-from pipekit import Operator
-
-class MyOp(Operator):
-    def __init__(self, *, knob: float) -> None:
-        self.knob = knob            # same name as the argument
-
-    def _apply(self, gt):          # the work
-        return gt * self.knob
-```
-
-`get_config()` — the JSON-serialisable constructor args that make a
-pipeline round-trip to YAML — is derived automatically from the
-`__init__` signature, as long as each argument is stored under its own
-name (`MyOp(knob=2.0).get_config() == {"knob": 2.0}`).
-
-Pipelines compose:
-
-- **`Sequential([a, b, c])`** threads output → input down a linear list.
-- **`Graph(inputs=..., outputs=...)`** builds a named DAG by calling
-  operators on `Input` placeholders. Use it when you need branching,
-  fan-in, or multi-output flows.
-- **`Branch(predicate, if_true, if_false)`** and **`Switch(key, cases)`**
-  are explicit control-flow operators that round-trip the same as any
-  transform.
-
-A `Graph` is itself an `Operator`, so you can nest them inside a
-`Sequential` and vice-versa.
-
-## A two-operator pipeline
+Cloud-free NDVI from a Sentinel-2 L2A scene, first as a chain, then as a
+graph that masks clouds with the SCL band. The scene here is synthetic: 12
+reflectance bands plus SCL on a real UTM grid, named through
+`attrs["band_names"]` as the geoproducts readers and geocatalog loaders do.
 
 ```python
 import numpy as np
-from geotoolz import Operator, Sequential
-from geotoolz.carrier import wrap_like
+from georeader.geotensor import GeoTensor
+from rasterio.transform import from_origin
 
+import geotoolz as gz
 
-class Scale(Operator):
-    def __init__(self, *, scale: float = 1e-4) -> None:
-        self.scale = scale
+L2A: list[str] = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12"]
+rng: np.random.Generator = np.random.default_rng(0)
+dn: np.ndarray = rng.integers(200, 4000, size=(12, 64, 64), dtype=np.uint16)  # (12, 64, 64) uint16
+scl: np.ndarray = rng.choice([4, 5, 8, 9], size=(1, 64, 64)).astype(np.uint16) # (1, 64, 64) uint16 · 8, 9 = cloud
+scene: GeoTensor = GeoTensor(
+    np.concatenate([dn, scl]),                                                 # (13, 64, 64) uint16
+    transform=from_origin(750_000, 4_350_000, 10, 10),                         # 10 m pixels
+    crs="EPSG:32610",                                                          # UTM zone 10N
+    fill_value_default=0,
+    attrs={"band_names": [*L2A, "SCL"]},
+)
 
-    def _apply(self, gt):
-        # wrap_like keeps the input's transform / CRS / attrs.
-        return wrap_like(gt, np.asarray(gt, dtype=np.float32) * self.scale)
+# Sequential — a linear chain, built with |
+ndvi_pipeline: gz.Sequential = (
+    gz.SelectBands(bands=L2A)                                                  # (13, 64, 64) uint16 → (12, 64, 64) uint16
+    | gz.DNToReflectance(scale=1e-4)                                           # (12, 64, 64) uint16 → (12, 64, 64) float64
+    | gz.NDVI(red="B4", nir="B8")                                              # (12, 64, 64) float64 → (64, 64) float64
+)
+ndvi: GeoTensor = ndvi_pipeline(scene)                                         # (13, 64, 64) uint16 → (64, 64) float64 · NaN = no data
+config: dict = ndvi_pipeline.get_config()  # {"operators": [{"class": "SelectBands", "config": {...}}, ...]}
 
+# Graph — the same steps, plus a cloud mask on a second branch
+x: gz.Input = gz.Input("scene")
+reflectance: gz.Node = gz.DNToReflectance(scale=1e-4)(gz.SelectBands(bands=L2A)(x))  # (12, 64, 64) float64
+ndvi_node: gz.Node = gz.NDVI(red="B4", nir="B8")(reflectance)                        # (64, 64) float64
+cloud: gz.Node = gz.S2SCL(targets=["cloud_shadow", "cloud", "cirrus"])(x)           # (64, 64) bool · True = drop
+clean: gz.Node = gz.ApplyMask()(ndvi_node, cloud)                                   # (64, 64) float64 · NaN under cloud
 
-class NDVI(Operator):
-    def __init__(self, *, nir: int, red: int, eps: float = 1e-10) -> None:
-        self.nir, self.red, self.eps = nir, red, eps
-
-    def _apply(self, gt):
-        a = np.asarray(gt, dtype=np.float32)
-        nir, red = a[self.nir], a[self.red]
-        # A new float quantity declares NaN as its nodata fill.
-        return wrap_like(gt, (nir - red) / (nir + red + self.eps), fill_value_default=np.nan)
-
-
-pipe = Sequential([Scale(scale=1e-4), NDVI(nir=7, red=3)])
-ndvi = pipe(sentinel2_geotensor)
+graph: gz.Graph = gz.Graph(inputs={"scene": x}, outputs={"ndvi": clean, "cloud": cloud})
+out: dict[str, GeoTensor] = graph(scene=scene)  # {"ndvi": (64, 64) float64, "cloud": (64, 64) bool}
+assert out["ndvi"].crs == scene.crs and out["ndvi"].transform == scene.transform
 ```
 
-The library ships both steps, with band-name resolution and nodata
-handling: `gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir="B08", red="B04")`.
-For the same shape with real data and a matplotlib plot at the end, see
-the [Quickstart](quickstart.md) or the [operator-composition
-notebook](notebooks/operators_lake_tahoe.ipynb).
+Both results keep the scene's CRS and transform. NDVI declares `NaN` as
+its fill because it is a new float quantity; the mask uses `False`.
 
-## Where geotoolz fits
+## Is this the right tool?
 
-```mermaid
-flowchart LR
-    subgraph cat["geocatalog — discover &amp; load"]
-        STAC[(STAC catalogue)] --> Loader[load_raster]
-    end
-    subgraph tools["geotoolz — operate"]
-        Op1[Scale] --> Op2[CloudMask] --> Op3[NDVI]
-    end
-    subgraph patch["geopatcher — tile &amp; stitch"]
-        Sampler[GridSampler] --> Apply[ApplyToChips] --> Merge[MergePatches]
-    end
-    Loader --> Op1
-    Op3 --> Sampler
-```
+| You want to… | Use |
+|---|---|
+| run one array operation on one scene | rasterio + numpy directly |
+| reuse a remote-sensing step across scenes and scripts | an `Operator` ([define one](how-to/define-an-operator.md)) |
+| chain two to six steps | `Sequential` (`a \| b \| c`) |
+| branch, fan in, or return several named outputs | `Graph` ([branching pipelines](how-to/branching-pipelines.md)) |
+| run a model tile by tile over a large raster | `geotoolz.patch_ops` ([tile → operate → stitch](patch_ops.md)) |
+| find and load scenes from STAC or local files | [geocatalog](../catalog/index.md), then pass the `GeoTensor` in |
 
-- **[`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog)** discovers
-  and loads scenes from STAC.
-- **`geotoolz`** runs the per-scene transforms.
-- **[`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)** handles
-  sliding-window patching for big rasters, exposed as Operator wrappers
-  in [`geotoolz.patch_ops`](patch_ops.md) (`GridSampler`, `ApplyToChips`,
-  `MergePatches`) so a tiled-inference pipeline composes inside a `Sequential`.
+## What's inside
 
-The full multi-repo walk-through lives in **the canonical Lake Tahoe
-notebook**:
-[`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
-The slice of that flow that's about *composition of operators* is
-[`docs/notebooks/operators_lake_tahoe.ipynb`](notebooks/operators_lake_tahoe.ipynb)
-in this repo.
+Every public operator is importable from the top level (`gz.NDVI`) and
+from its family (`gz.indices.NDVI`). Each family also exports its pure
+numpy primitives (`gz.indices.ndvi`).
 
-## Status
+| Namespace | What it does | Reference |
+|---|---|---|
+| core | `Operator`, `Sequential`, `Graph`, `Input`, `Branch`, `Switch`, `Fanout`, `Tap`, `Snapshot`, … (from pipekit) and `ModelOp` | [Core](api/core.md) |
+| `geotoolz.carrier`, `geotoolz.testing` | helpers that keep the `GeoTensor` contract, and `check_operator` | [Carrier](api/carrier.md) |
+| `radiometry` | DN ↔ radiance ↔ reflectance, sun geometry, brightness temperature, DOS1, stretches | [Radiometry](api/radiometry.md) |
+| `indices` | spectral indices: NDVI, EVI, NDWI, NBR, NDSI, … | [Indices](api/indices.md) |
+| `qa` | cloud and quality masks from QA bits, SCL classes and sensor presets | [QA](api/qa.md) |
+| `mask` | geometry and DEM masks, mask morphology and algebra, `ApplyMask` | [Mask](api/mask.md) |
+| `spectral` | band selection, stacking, band math, spectral resampling | [Spectral](api/spectral.md) |
+| `geom` (+ `geom.coregister`) | reproject, resample, crop, tile, rasterise, swath geometry, registration | [Geometry](api/geom.md) |
+| `compositing` | temporal composites and multi-source fusion | [Compositing](api/compositing.md) |
+| `restore` | denoising, despeckling, destriping, gap filling, MNF | [Restore](api/restore.md) |
+| `segment` | thresholds, superpixels, watershed and other skimage segmentations | [Segment](api/segment.md) |
+| `measure` | connected components, region properties, contours | [Measure](api/measure.md) |
+| `feature` | edges, blobs, corners, Hough transforms, local features | [Feature](api/feature.md) |
+| `plume` | methane and CO₂ plume retrieval, masks, footprints, mass and flux | [Plume](api/plume.md) |
+| `matched_filter` | hyperspectral matched filters and background statistics | [Matched filter](api/matched_filter.md) |
+| `augment` | augmentations that respect georeferencing and physical bands | [Augment](api/augment.md) |
+| `normalize` | per-band scalers, non-linear scaling, histogram stretch and matching | [Normalize](api/normalize.md) · [how-to](normalization.md) |
+| `learn` | scikit-learn estimators as pixel-wise operators | [Learn](api/learn.md) |
+| `einx` | einstein-notation tensor operations that keep georeferencing | [Einx](api/einx.md) |
+| `viz` | composites, display stretches, colormaps, hillshade, overlays | [Viz](api/viz.md) |
+| `io` | window readers, HDF and NetCDF readers, GeoTIFF / COG / Zarr writers | [IO](api/io.md) · [how-to](io.md) |
+| `patch_ops` | geopatcher as operators: `GridSampler`, `ApplyToChips`, `MergePatches`, label-aware samplers | [Tile → operate → stitch](patch_ops.md) |
 
-`geotoolz` is pre-1.0 (`0.x`, released per package by release-please):
-every operator family in the API reference is implemented and tested,
-but minor releases can still carry breaking changes — renames and
-removals are outright, with no deprecated aliases — and each one is
-called out in the
-[changelog](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/CHANGELOG.md).
-The quickstart and recipes define small **inline `Operator`
-subclasses** on purpose, to teach the composition pattern; each names
-the built-in operator to reach for in real pipelines.
+## Next steps
 
-## Where next
-
-- **[Quickstart](quickstart.md)** — a 15-minute walk-through over one
-  Sentinel-2 Lake Tahoe scene.
-- **[Concepts](concepts.md)** — the composition algebra, with diagrams.
-- **Recipes**:
-  - [Define an operator](how-to/define-an-operator.md)
-  - [Branching pipelines](how-to/branching-pipelines.md)
-  - [Integration with geocatalog & geopatcher](how-to/integration-with-geocatalog-and-geopatcher.md)
-- **Tutorial**: [Composing a Sentinel-2 NDVI pipeline](notebooks/operators_lake_tahoe.ipynb) — the docs' canonical worked example.
-- **Extended examples ↗**: chronological walkthroughs of the whole stack — composition core, pipeline idioms, image processing on real burn-scars, ML patches, deployment shapes — live in [`research_notebook/projects/geostack`](https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack). The notebooks there execute against real MPC / GBIF / Natural Earth data; this repo's docs reference them by name.
-- **Reference**: [Core API](api/core.md) · [Changelog](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/CHANGELOG.md) · [GitHub](https://github.com/jejjohnson/geotoolz)
-
-Related: [Normalization](normalization.md) · [Multi-format readers](io.md) · [Product readers](../products/product-readers.md).
+- **[Concepts](concepts.md)**: the Operator contract, `Sequential` and
+  `Graph`, control flow, observers, fitted operators, band names, mask
+  polarity.
+- **How-to guides**: [define an operator](how-to/define-an-operator.md) ·
+  [branching pipelines](how-to/branching-pipelines.md) ·
+  [tile → operate → stitch](patch_ops.md) ·
+  [normalise for training and inference](normalization.md) ·
+  [read HDF and NetCDF](io.md).
+- **Tutorial**: [operators on Sentinel-2 over Lake Tahoe](notebooks/operators_lake_tahoe.ipynb).
+- **Reference**: start at [Core](api/core.md); the
+  [capability index](../capabilities.md) lists every public name once.
+- **Changelog**: [`packages/geotoolz/CHANGELOG.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/CHANGELOG.md).
