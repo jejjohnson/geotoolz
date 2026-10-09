@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.3.0...geotoolz-cloud-v0.4.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cloud:** geotoolz.io no longer exports select_indexes, read_indexes, fill_value_from_attrs or affine_from_geotransform (they are geocloud.hdf's, and raise ValueError rather than GeoToolzIOError). gz.io.WriteCOG takes write_cog's options (compress, level, predictor, blocksize, overviews, resampling, nodata, descriptions, tags, creation_options) instead of a rasterio profile, and needs the new geotoolz [cloud] extra; geotoolz's [hdf5] / [hdf4] / [netcdf] extras now install geotoolz-cloud with that backend. geoproducts' [goes] / [himawari] extras install geotoolz-cloud[hdf5] in place of h5py.
+* **cloud:** geocatalog.staging.LocalCache and cache_key move to geocloud.cache (no alias). The default cache directory is $GEOCLOUD_CACHE, else ~/.cache/geocloud (was $GEOCATALOG_CACHE / ~/.cache/geocatalog).
+* **cloud:** geotoolz-catalog drops its [fsspec] extra; remote reads need [cloud] (now geotoolz-cloud[fsspec]). Catalog storage_options are obstore store options forwarded to geocloud.store.get_obstore ({"skip_signature": True} for a public bucket), not s3fs / gcsfs options ({"anon": True}).
+* **cloud:** SUPPORTED_SCHEMES still lists only remote schemes, but get_obstore no longer raises for a local path or file:// URI - it returns the pooled LocalStore.
+
+### Features
+
+* **cloud:** geocloud.cache — local copies of remote objects; catalog staging fetches into it ([#457](https://github.com/jejjohnson/geotoolz/issues/457)) ([f605f9b](https://github.com/jejjohnson/geotoolz/commit/f605f9be383229f4394e0f3320eb1658e6c37af1))
+* **cloud:** geocloud.fs, an fsspec filesystem on the pool; the catalog reads through it ([#455](https://github.com/jejjohnson/geotoolz/issues/455)) ([951b85a](https://github.com/jejjohnson/geotoolz/commit/951b85a7938adec28d4fbc29b3923573cb0db317))
+* **cloud:** geocloud.hdf — the stack's HDF5 / NetCDF / HDF4 readers; gz.io and the product readers build on it ([#458](https://github.com/jejjohnson/geotoolz/issues/458)) ([5396274](https://github.com/jejjohnson/geotoolz/commit/539627449a3901c3c17e9ace74ba1ea09d529359))
+* **cloud:** serve local paths from the pool, and one public local-vs-remote rule ([#454](https://github.com/jejjohnson/geotoolz/issues/454)) ([eb994cb](https://github.com/jejjohnson/geotoolz/commit/eb994cba402ec2bb3ba30ffb70ac62850eca3ba7))
+
 ## [0.3.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.2.1...geotoolz-cloud-v0.3.0) (2026-10-08)
 
 

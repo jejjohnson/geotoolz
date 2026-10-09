@@ -1,7 +1,7 @@
 {
-  "packages/geotoolz": "0.9.0",
+  "packages/geotoolz": "0.10.0",
   "packages/geotoolz-patcher": "0.10.0",
-  "packages/geotoolz-catalog": "0.4.0",
-  "packages/geotoolz-products": "0.3.0",
-  "packages/geotoolz-cloud": "0.3.0"
+  "packages/geotoolz-catalog": "0.5.0",
+  "packages/geotoolz-products": "0.4.0",
+  "packages/geotoolz-cloud": "0.4.0"
 }

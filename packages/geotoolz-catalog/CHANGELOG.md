@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.4.0...geotoolz-catalog-v0.5.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **products:** geotoolz-products drops ProductReader.set_obstore_client, obstore_client and _read_bytes, and its [obstore] extra.
+* **cloud:** geocatalog.staging.LocalCache and cache_key move to geocloud.cache (no alias). The default cache directory is $GEOCLOUD_CACHE, else ~/.cache/geocloud (was $GEOCATALOG_CACHE / ~/.cache/geocatalog).
+* **cloud:** geotoolz-catalog drops its [fsspec] extra; remote reads need [cloud] (now geotoolz-cloud[fsspec]). Catalog storage_options are obstore store options forwarded to geocloud.store.get_obstore ({"skip_signature": True} for a public bucket), not s3fs / gcsfs options ({"anon": True}).
+
+### Features
+
+* **cloud:** geocloud.cache — local copies of remote objects; catalog staging fetches into it ([#457](https://github.com/jejjohnson/geotoolz/issues/457)) ([f605f9b](https://github.com/jejjohnson/geotoolz/commit/f605f9be383229f4394e0f3320eb1658e6c37af1))
+* **cloud:** geocloud.fs, an fsspec filesystem on the pool; the catalog reads through it ([#455](https://github.com/jejjohnson/geotoolz/issues/455)) ([951b85a](https://github.com/jejjohnson/geotoolz/commit/951b85a7938adec28d4fbc29b3923573cb0db317))
+
+
+### Code Refactoring
+
+* **products:** drop the dead ProductReader byte path; cloud writes and atomic downloads ([#459](https://github.com/jejjohnson/geotoolz/issues/459)) ([903ced0](https://github.com/jejjohnson/geotoolz/commit/903ced0adaa68078d3a207dfe9c8ba2d5086467f))
+
 ## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.3.1...geotoolz-catalog-v0.4.0) (2026-10-08)
 
 
