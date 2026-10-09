@@ -16,13 +16,10 @@ from typing import Any
 from affine import Affine
 from rasterio.crs import CRS
 
+from geoproducts._src import hdf
 from geoproducts._src.base import Track
 from geoproducts._src.geostationary import FixedGrid
-from geoproducts._src.hdf import (
-    PackedGridReader,
-    Source,
-    grid_variables as _grid_variables,
-)
+from geoproducts._src.hdf import PackedGridReader, Source
 from geoproducts.goes._src.metadata import FileInfo
 
 
@@ -122,4 +119,4 @@ class ABIFile(PackedGridReader):
 
 def grid_variables(f: Any) -> tuple[str, ...]:
     """Names of an open ABI file's 2-D variables on its fixed grid."""
-    return _grid_variables(f, (len(f["y"]), len(f["x"])))
+    return hdf.grid_variables(f, (len(f["y"]), len(f["x"])))

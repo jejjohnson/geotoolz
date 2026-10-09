@@ -24,6 +24,13 @@ workspace package.
   package that moves files (staging, product downloads) calls these rather
   than streaming bytes itself. Local paths take the pool's `LocalStore`
   like any other location.
+- **`geocloud.hdf`** (`[hdf5]` / `[netcdf]` / `[hdf4]`) — the stack's HDF5 /
+  NetCDF / HDF4 readers: `read_netcdf`, `read_hdf` (GeoTensors), `open_hdf5`
+  (h5py over ranged reads) and the CF decoders every product reader uses
+  (`PackedVariable`, `attr`, `scalar`, `unpacked`, `time_attr`,
+  `grid_variables`, `fill_value_from_attrs`, `affine_from_geotransform`,
+  `select_indexes` / `read_indexes`). `gz.io.ReadHDF` / `ReadNetCDF` and
+  geoproducts' `PackedGridReader` wrap it; add format support here.
 - **`geocloud.cache`** — complete local copies of remote objects:
   `localize(uri)` / `LocalCache.fetch` (a local path in place, else one
   download into the cache, served from there afterwards), `cache_key`

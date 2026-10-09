@@ -20,7 +20,7 @@ import numpy as np
 from affine import Affine
 from rasterio.crs import CRS
 
-from geoproducts._src.hdf import attr, unpacked
+from geoproducts._src import hdf
 
 
 __all__ = ["FixedGrid", "geos_crs", "on_earth", "scan_angle_transform"]
@@ -264,15 +264,15 @@ class FixedGrid:
                 f"scan angles and the {grid_mapping!r} grid mapping."
             )
         proj = f[grid_mapping]
-        height_m = float(attr(proj, "perspective_point_height"))
-        x_rad, y_rad = unpacked(f, x), unpacked(f, y)
+        height_m = float(hdf.attr(proj, "perspective_point_height"))
+        x_rad, y_rad = hdf.unpacked(f, x), hdf.unpacked(f, y)
         return cls(
             height=len(y_rad),
             width=len(x_rad),
             transform=scan_angle_transform(x_rad, y_rad, height_m),
-            lon_0=float(attr(proj, "longitude_of_projection_origin")),
+            lon_0=float(hdf.attr(proj, "longitude_of_projection_origin")),
             height_m=height_m,
-            semi_major_m=float(attr(proj, "semi_major_axis")),
-            semi_minor_m=float(attr(proj, "semi_minor_axis")),
-            sweep=str(attr(proj, "sweep_angle_axis", "x")),
+            semi_major_m=float(hdf.attr(proj, "semi_major_axis")),
+            semi_minor_m=float(hdf.attr(proj, "semi_minor_axis")),
+            sweep=str(hdf.attr(proj, "sweep_angle_axis", "x")),
         )

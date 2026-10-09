@@ -29,6 +29,8 @@ See the docs' Concepts page ("Round-trip discipline") for the
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 from typing import Any, ClassVar
@@ -51,21 +53,37 @@ from geotoolz._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
-from geotoolz._src.optional import import_optional
-from geotoolz.io._src.array import (
-    affine_from_geotransform,
-    fill_value_from_attrs,
-    read_indexes,
-    select_indexes,
-)
 from geotoolz.io._src.errors import GeoToolzIOError
 
 
 Source = str | PathLike[str] | Any
 Bounds = tuple[float, float, float, float]
 Resolution = float | tuple[float, float]
-HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
-HDF4_SIGNATURE = b"\x0e\x03\x13\x01"
+
+#: The backend module a geotoolz-cloud reader needs → the geotoolz extra.
+_BACKEND_EXTRAS = {
+    "h5py": "hdf5",
+    "pyhdf": "hdf4",
+    "pyhdf.SD": "hdf4",
+    "netCDF4": "netcdf",
+}
+
+
+def _cloud_call(extra: str, feature: str, call: Callable[[], Any]) -> Any:
+    """Run ``call`` (which uses geotoolz-cloud), naming our extras on failure.
+
+    ``extra`` is the geotoolz extra that installs geotoolz-cloud with the
+    backend ``feature`` needs; a backend geotoolz-cloud reports missing is
+    mapped to its own geotoolz extra (``h5py`` → ``hdf5``, …).
+    """
+    try:
+        return call()
+    except ImportError as exc:
+        missing = _BACKEND_EXTRAS.get(getattr(exc, "name", None) or "", extra)
+        raise ImportError(
+            f"{feature} requires an optional dependency that is not installed. "
+            f"Install it with `pip install 'geotoolz[{missing}]'`."
+        ) from exc
 
 
 class SourceOperator(Operator):
@@ -165,68 +183,6 @@ def _load_or_raise(out: Any, src: Source, what: str) -> GeoTensor:
     if out is None:
         raise GeoToolzIOError(f"{what} does not intersect {src!r}.")
     return out.load()
-
-
-def _geotensor(
-    values: Any,
-    *,
-    crs: Any = None,
-    fill_value: Any = 0,
-    attrs: dict[str, Any] | None = None,
-    transform: Affine | None = None,
-) -> GeoTensor:
-    return GeoTensor(
-        np.asarray(values),
-        transform=Affine.identity() if transform is None else transform,
-        crs=crs,
-        fill_value_default=fill_value,
-        attrs=attrs,
-    )
-
-
-def _netcdf_group(root: Any, group: str | None) -> Any:
-    current = root
-    if group is None:
-        return current
-    for part in group.strip("/").split("/"):
-        if not part:
-            continue
-        current = current.groups[part]
-    return current
-
-
-def _netcdf_grid_mapping(group: Any, variable: Any) -> Any:
-    """Return the CF ``grid_mapping`` variable of ``variable``, or ``None``."""
-    grid_mapping = getattr(variable, "grid_mapping", None)
-    if not isinstance(grid_mapping, str):
-        return None
-    return group.variables.get(grid_mapping)
-
-
-def _netcdf_crs(mapping: Any, use_cf_grid_mapping: bool) -> Any:
-    if not use_cf_grid_mapping or mapping is None:
-        return None
-    try:
-        from pyproj import CRS
-
-        return CRS.from_cf(jsonable(dict(mapping.__dict__)))
-    except (KeyError, RuntimeError, ValueError):
-        return None
-
-
-def _netcdf_transform(variable: Any, mapping: Any) -> Affine:
-    """Read the GDAL ``GeoTransform`` attribute.
-
-    The GDAL netCDF driver writes it on the ``grid_mapping`` variable; the
-    data variable is checked as a fallback for non-GDAL writers.
-    """
-    geotransform = None
-    for source in (mapping, variable):
-        if source is not None:
-            geotransform = getattr(source, "GeoTransform", None)
-        if geotransform is not None:
-            break
-    return affine_from_geotransform(geotransform)
 
 
 class ReadWindow(SourceOperator):
@@ -763,15 +719,17 @@ class ReadToCRS(SourceOperator):
 
 
 class ReadHDF(SourceOperator):
-    """Read a dataset from an HDF4/HDF-EOS or HDF5 file.
+    """Read a dataset from an HDF4/HDF-EOS or HDF5 file, local or remote.
 
-    HDF5 is handled through the optional ``h5py`` backend. HDF4/HDF-EOS is
-    dispatched by file signature and requires the optional ``pyhdf`` backend.
-    Both backends return the requested dataset as a :class:`GeoTensor` with an
-    identity transform unless sensor-specific georeferencing is applied later.
+    Delegates to `geocloud.hdf.read_hdf`: HDF5 is read with h5py over
+    ranged requests (only the selected bands), HDF4 / HDF-EOS with pyhdf
+    on a local copy; the format is told by the file signature. The result
+    has an identity transform unless sensor-specific georeferencing is
+    applied later.
 
     Args:
-        path: HDF file path.
+        path: HDF file path, or any URI geotoolz-cloud reads (``s3://``,
+            ``gs://``, ``az://``, signed ``https://``, ``hf://``).
         dataset: Dataset path inside the file.
         indexes: Optional 1-based band indexes along the leading dataset axis.
         geolocation: Optional ``(latitude_dataset, longitude_dataset)`` names
@@ -789,94 +747,40 @@ class ReadHDF(SourceOperator):
         geolocation: tuple[str, str] | None = None,
         metadata_groups: list[str] | None = None,
     ) -> None:
-        self.path = Path(path)
+        self.path = os.fspath(path)
         self.dataset = dataset
         self.indexes = indexes
         self.geolocation = as_tuple(geolocation)
         self.metadata_groups = metadata_groups
 
     def _apply(self) -> GeoTensor:
-        try:
-            with self.path.open("rb") as file:
-                signature = file.read(8)
-        except OSError as exc:
-            raise _read_error(self.path, exc) from exc
-        if signature.startswith(HDF5_SIGNATURE):
-            return self._read_hdf5()
-        if signature.startswith(HDF4_SIGNATURE):
-            return self._read_hdf4()
-        raise GeoToolzIOError(
-            f"Unable to determine HDF backend for {self.path!s}: "
-            "unrecognised file signature."
-        )
+        def call() -> GeoTensor:
+            from geocloud.hdf import read_hdf
 
-    def _read_hdf5(self) -> GeoTensor:
-        h5py = import_optional("h5py", "hdf5", feature="ReadHDF (HDF5)")
+            return read_hdf(
+                self.path,
+                self.dataset,
+                indexes=self.indexes,
+                geolocation=self.geolocation,
+                metadata_groups=self.metadata_groups,
+            )
+
         try:
-            with h5py.File(self.path, "r") as file:
-                source = file[self.dataset]
-                attrs = jsonable(dict(source.attrs))
-                values = read_indexes(source, self.indexes)
-                out_attrs: dict[str, Any] = {"attrs": attrs}
-                if self.geolocation is not None:
-                    lat_name, lon_name = self.geolocation
-                    out_attrs["geolocation"] = {
-                        "latitude": np.asarray(file[lat_name][...]),
-                        "longitude": np.asarray(file[lon_name][...]),
-                    }
-                if self.metadata_groups is not None:
-                    out_attrs["metadata"] = {
-                        group: jsonable(dict(file[group].attrs))
-                        for group in self.metadata_groups
-                    }
+            return _cloud_call("hdf5", "ReadHDF", call)
         except (KeyError, OSError, ValueError) as exc:
             raise _read_error(self.path, exc) from exc
-        return _geotensor(
-            values,
-            fill_value=fill_value_from_attrs(attrs),
-            attrs=out_attrs,
-        )
-
-    def _read_hdf4(self) -> GeoTensor:
-        pyhdf_sd = import_optional("pyhdf.SD", "hdf4", feature="ReadHDF (HDF4)")
-        try:
-            hdf = pyhdf_sd.SD(str(self.path), pyhdf_sd.SDC.READ)
-            try:
-                source = hdf.select(self.dataset)
-                attrs = jsonable(dict(source.attributes()))
-                values = select_indexes(source.get(), self.indexes)
-                out_attrs: dict[str, Any] = {"attrs": attrs}
-                if self.geolocation is not None:
-                    lat_name, lon_name = self.geolocation
-                    out_attrs["geolocation"] = {
-                        "latitude": np.asarray(hdf.select(lat_name).get()),
-                        "longitude": np.asarray(hdf.select(lon_name).get()),
-                    }
-            finally:
-                hdf.end()
-        except (AttributeError, KeyError, OSError, ValueError) as exc:
-            raise _read_error(self.path, exc) from exc
-        return _geotensor(
-            values,
-            fill_value=fill_value_from_attrs(attrs),
-            attrs=out_attrs,
-        )
-
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "path": str(self.path),
-            "dataset": self.dataset,
-            "indexes": self.indexes,
-            "geolocation": self.geolocation,
-            "metadata_groups": self.metadata_groups,
-        }
 
 
 class ReadNetCDF(SourceOperator):
-    """Read a variable from a NetCDF-CF file using the ``netCDF4`` backend.
+    """Read a variable from a NetCDF-3 / NetCDF-4 file, local or remote.
+
+    Delegates to `geocloud.hdf.read_netcdf` (netCDF4 on a local copy of a
+    remote file): CF masking and scale / offset, the CRS from the
+    variable's CF ``grid_mapping`` and the transform from GDAL's
+    ``GeoTransform`` attribute.
 
     Args:
-        path: NetCDF file path.
+        path: NetCDF file path, or any URI geotoolz-cloud reads.
         variable: Variable name within ``group``.
         group: Optional slash-separated NetCDF group path.
         indexes: Optional 1-based band indexes along the leading variable axis.
@@ -895,7 +799,7 @@ class ReadNetCDF(SourceOperator):
         decode_cf: bool = True,
         use_cf_grid_mapping: bool = True,
     ) -> None:
-        self.path = Path(path)
+        self.path = os.fspath(path)
         self.variable = variable
         self.group = group
         self.indexes = indexes
@@ -903,61 +807,49 @@ class ReadNetCDF(SourceOperator):
         self.use_cf_grid_mapping = use_cf_grid_mapping
 
     def _apply(self) -> GeoTensor:
-        netcdf4 = import_optional("netCDF4", "netcdf", feature="ReadNetCDF")
+        def call() -> GeoTensor:
+            from geocloud.hdf import read_netcdf
+
+            return read_netcdf(
+                self.path,
+                self.variable,
+                group=self.group,
+                indexes=self.indexes,
+                decode_cf=self.decode_cf,
+                use_cf_grid_mapping=self.use_cf_grid_mapping,
+            )
+
         try:
-            with netcdf4.Dataset(self.path, "r") as root:
-                group = _netcdf_group(root, self.group)
-                variable = group.variables[self.variable]
-                variable.set_auto_maskandscale(self.decode_cf)
-                attrs = jsonable(dict(variable.__dict__))
-                values = select_indexes(variable[:], self.indexes)
-                fill_value = fill_value_from_attrs(attrs)
-                if np.ma.isMaskedArray(values):
-                    # Decoded (scaled) floats are NaN-filled, so NaN is the
-                    # sentinel the returned tensor actually carries.
-                    if values.dtype.kind == "f":
-                        fill_value = np.nan
-                    values = values.filled(fill_value)
-                mapping = _netcdf_grid_mapping(group, variable)
-                return _geotensor(
-                    values,
-                    crs=_netcdf_crs(mapping, self.use_cf_grid_mapping),
-                    fill_value=fill_value,
-                    attrs={"attrs": attrs},
-                    transform=_netcdf_transform(variable, mapping),
-                )
+            return _cloud_call("netcdf", "ReadNetCDF", call)
         except (KeyError, OSError, RuntimeError, ValueError) as exc:
             raise _read_error(self.path, exc) from exc
 
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "path": str(self.path),
-            "variable": self.variable,
-            "group": self.group,
-            "indexes": self.indexes,
-            "decode_cf": self.decode_cf,
-            "use_cf_grid_mapping": self.use_cf_grid_mapping,
-        }
-
 
 class WriteCOG(SinkOperator):
-    """Write a :class:`GeoTensor` as a Cloud Optimized GeoTIFF.
+    """Write a :class:`GeoTensor` as a validated Cloud-Optimized GeoTIFF.
 
-    Delegates to :func:`georeader.save.save_cog`, which generates
-    internal tiling and overviews automatically. Supports local paths and
-    cloud storage URIs (``gs://``, ``s3://``, ``az://``, ``abfs://``,
-    ``oss://``).
+    Delegates to `geocloud.cog.write_cog` (the ``[cloud]`` extra): staged
+    in a temporary directory, translated by GDAL's ``COG`` driver, checked,
+    then renamed into place or uploaded — so a local path or a bucket URI
+    (``s3://``, ``gs://``, ``az://``) only ever holds a complete COG.
 
     Args:
         path: Output path or cloud URI.
-        profile: Extra rasterio profile entries (e.g. ``{"compress":
-            "zstd", "RESAMPLING": "NEAREST"}`` for categorical data).
-            Merged on top of ``{"compress": compress}``.
-        compress: Default compression algorithm. ``"deflate"`` is a
-            good general default; use ``"zstd"`` for archival, ``"lzw"``
-            for compatibility.
-        descriptions: Optional band names (length must equal band count).
-        tags: Optional rasterio tags stored as TIFF metadata.
+        compress: ``"deflate"`` (default), ``"zstd"``, ``"lzw"``,
+            ``"lerc"`` / ``"lerc_deflate"`` / ``"lerc_zstd"``, ``"webp"``,
+            ``"jpeg"`` or ``"none"``.
+        level: Compression level; ``None`` keeps GDAL's default.
+        predictor: Apply the dtype's predictor (DEFLATE / LZW / ZSTD).
+        blocksize: Tile size in pixels (a power of two).
+        overviews: Build overviews down to a single tile.
+        resampling: Overview resampling; ``None`` picks ``"nearest"`` for
+            integers and ``"average"`` for floats.
+        nodata: The nodata value; ``"auto"`` takes the tensor's fill when
+            the dtype can hold it, ``None`` writes none.
+        descriptions: Band names (length must equal band count); ``None``
+            takes the tensor's ``band_names``.
+        tags: Rasterio tags stored as TIFF metadata.
+        creation_options: Extra GDAL ``COG`` driver options, passed as is.
 
     Raises:
         GeoToolzIOError: If ``gt`` is not 2D or 3D (a 4-D ``(T, C, H, W)``
@@ -968,23 +860,35 @@ class WriteCOG(SinkOperator):
 
             from geotoolz import io
 
-            io.WriteCOG(path="/out/ndvi.tif", compress="zstd")(ndvi_geotensor)
+            io.WriteCOG(path="s3://bucket/ndvi.tif", compress="zstd")(ndvi_geotensor)
     """
 
     def __init__(
         self,
         *,
         path: str | PathLike[str],
-        profile: dict[str, Any] | list[list[Any]] | None = None,
         compress: str = "deflate",
+        level: int | None = None,
+        predictor: bool = True,
+        blocksize: int = 512,
+        overviews: bool = True,
+        resampling: str | None = None,
+        nodata: float | int | str | None = "auto",
         descriptions: list[str] | None = None,
         tags: dict[str, Any] | list[list[Any]] | None = None,
+        creation_options: dict[str, Any] | list[list[Any]] | None = None,
     ) -> None:
-        self.path = Path(path)
-        self.profile = mapping_from_pairs(profile)
+        self.path = os.fspath(path)
         self.compress = compress
+        self.level = level
+        self.predictor = predictor
+        self.blocksize = blocksize
+        self.overviews = overviews
+        self.resampling = resampling
+        self.nodata = nodata
         self.descriptions = descriptions
         self.tags = mapping_from_pairs(tags)
+        self.creation_options = mapping_from_pairs(creation_options)
 
     def _apply(self, gt: GeoTensor) -> None:
         if np.ndim(gt.values) not in (2, 3):
@@ -993,28 +897,44 @@ class WriteCOG(SinkOperator):
                 f"{np.shape(gt.values)!r}; write each frame of a (T, C, H, W) "
                 "stack separately or use WriteZarr."
             )
-        merged_profile: dict[str, Any] = {"compress": self.compress}
-        if self.profile is not None:
-            merged_profile.update(self.profile)
-        try:
-            save.save_cog(
+
+        def call() -> None:
+            from geocloud.cog import write_cog
+
+            write_cog(
                 gt,
-                str(self.path),
-                profile=merged_profile,
+                self.path,
+                compress=self.compress,
+                level=self.level,
+                predictor=self.predictor,
+                blocksize=self.blocksize,
+                overviews=self.overviews,
+                resampling=self.resampling,
+                nodata=self.nodata,  # type: ignore[arg-type]
                 descriptions=self.descriptions,
                 tags=self.tags,
+                creation_options=self.creation_options,
             )
-        except (FileNotFoundError, OSError, RasterioIOError) as exc:
+
+        try:
+            _cloud_call("cloud", "WriteCOG", call)
+        except (OSError, RasterioIOError, RuntimeError, ValueError) as exc:
             raise GeoToolzIOError(f"Unable to write COG {self.path!s}: {exc}") from exc
         return None
 
     def get_config(self) -> dict[str, Any]:
         return {
-            "path": str(self.path),
-            "profile": mapping_to_pairs(self.profile),
+            "path": self.path,
             "compress": self.compress,
+            "level": self.level,
+            "predictor": self.predictor,
+            "blocksize": self.blocksize,
+            "overviews": self.overviews,
+            "resampling": self.resampling,
+            "nodata": self.nodata,
             "descriptions": self.descriptions,
             "tags": mapping_to_pairs(self.tags),
+            "creation_options": mapping_to_pairs(self.creation_options),
         }
 
 

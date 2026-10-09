@@ -2,8 +2,10 @@
 
 Read one dataset or variable from an HDF5, HDF4 / HDF-EOS or NetCDF-CF
 file as a `GeoTensor`, ready for any operator. `gz.io.ReadHDF` and
-`gz.io.ReadNetCDF` are source operators: build them with a path, then
-call them with no input.
+`gz.io.ReadNetCDF` are source operators: build them with a path or any URI
+geotoolz-cloud reads (`s3://`, `gs://`, `az://`, signed `https://`), then
+call them with no input. They wrap [`geocloud.hdf`](../cloud/how-to/hdf.md):
+HDF5 is read with ranged requests, NetCDF and HDF4 from a cached local copy.
 
 Install the backend you need; the extras are listed on the
 [landing page](index.md#install):

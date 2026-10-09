@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from geoproducts._src.hdf import attr, scalar, time_attr
+from geoproducts._src import hdf
 
 
 # ABI scalar variables use -999 as their fill (PUG Vol. 3), not always
@@ -16,7 +16,7 @@ SCALAR_FILL = -999.0
 
 def abi_scalar(f: Any, name: str) -> float:
     """An ABI scalar variable as ``float``; ``NaN`` when absent or ``-999``."""
-    return scalar(f, name, fill=SCALAR_FILL)
+    return hdf.scalar(f, name, fill=SCALAR_FILL)
 
 
 @dataclass(frozen=True)
@@ -35,17 +35,17 @@ class FileInfo:
     @classmethod
     def from_file(cls, f: Any) -> FileInfo:
         sat_height = abi_scalar(f, "nominal_satellite_height")
-        if "nominal_satellite_height" in f and attr(
+        if "nominal_satellite_height" in f and hdf.attr(
             f["nominal_satellite_height"], "units"
         ) in {"km", "kilometers"}:
             sat_height *= 1000.0
         return cls(
-            platform=str(attr(f, "platform_ID", "")),
-            scene=str(attr(f, "scene_id", "")),
-            dataset_name=str(attr(f, "dataset_name", "")),
-            title=str(attr(f, "title", "")),
-            start_time=time_attr(f, "time_coverage_start"),
-            end_time=time_attr(f, "time_coverage_end"),
+            platform=str(hdf.attr(f, "platform_ID", "")),
+            scene=str(hdf.attr(f, "scene_id", "")),
+            dataset_name=str(hdf.attr(f, "dataset_name", "")),
+            title=str(hdf.attr(f, "title", "")),
+            start_time=hdf.time_attr(f, "time_coverage_start"),
+            end_time=hdf.time_attr(f, "time_coverage_end"),
             satellite_lon_deg=round(abi_scalar(f, "nominal_satellite_subpoint_lon"), 4),
             satellite_height_m=sat_height,
         )

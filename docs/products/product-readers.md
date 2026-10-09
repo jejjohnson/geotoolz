@@ -71,7 +71,7 @@ add it here first.
 | Module | Use it for | Used by |
 |---|---|---|
 | `_src.base` | `ProductReader`, `Track`, `_read_boundless`, `_band_attrs`, `resolve_fill_value` | every reader |
-| `_src.hdf` | `PackedGridReader` — bands that are CF-packed 2-D variables of one HDF5 / NetCDF-4 file (`_Unsigned`, `_FillValue`, `scale_factor` / `add_offset`, integer masks, CF flag tables, chunked window reads); `PackedVariable`, `attr`, `scalar`, `time_attr`, `unpacked`, `grid_variables` | `goes`, `himawari.l2` |
+| `_src.hdf` | `PackedGridReader` — bands that are CF-packed 2-D variables of one HDF5 / NetCDF-4 file (integer masks, CF flag tables, chunked window reads), from a local path or any URI with ranged reads. The decoding (`PackedVariable`, `attr`, `scalar`, `time_attr`, `unpacked`, `grid_variables`, `open_hdf5`) is geotoolz-cloud's [`geocloud.hdf`](../cloud/how-to/hdf.md); call it as `hdf.attr(...)` so a reader still imports on a base install | `goes`, `himawari.l2` |
 | `_src.geostationary` | `FixedGrid` — the affine `+proj=geos` grid from a CF grid mapping and scan angles; `geos_crs`, `scan_angle_transform`, `on_earth` | `goes`, `himawari` (MTG, SEVIRI next) |
 | `_src.stack` | `geoproducts.stack` — any readers onto one reference grid | public |
 | `_src.presets` | `Recipe`, `rgb_recipe`, `geotoolz_module` (the lazy geotoolz import), `parallax_correct` | `goes`, `himawari` recipes and presets |

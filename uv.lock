@@ -1204,11 +1204,14 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cloud = [
+    { name = "geotoolz-cloud" },
+]
 hdf4 = [
-    { name = "pyhdf" },
+    { name = "geotoolz-cloud", extra = ["hdf4"] },
 ]
 hdf5 = [
-    { name = "h5py" },
+    { name = "geotoolz-cloud", extra = ["hdf5"] },
 ]
 hydra = [
     { name = "hydra-zen" },
@@ -1218,7 +1221,7 @@ learn = [
     { name = "scikit-learn" },
 ]
 netcdf = [
-    { name = "netcdf4" },
+    { name = "geotoolz-cloud", extra = ["netcdf"] },
 ]
 patch = [
     { name = "geotoolz-patcher", extra = ["pipekit"] },
@@ -1263,17 +1266,18 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4" },
     { name = "geopandas", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "geotoolz-cloud", marker = "extra == 'cloud'", editable = "packages/geotoolz-cloud" },
+    { name = "geotoolz-cloud", extras = ["hdf4"], marker = "extra == 'hdf4'", editable = "packages/geotoolz-cloud" },
+    { name = "geotoolz-cloud", extras = ["hdf5"], marker = "extra == 'hdf5'", editable = "packages/geotoolz-cloud" },
+    { name = "geotoolz-cloud", extras = ["netcdf"], marker = "extra == 'netcdf'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-patcher", extras = ["pipekit"], marker = "extra == 'patch'", editable = "packages/geotoolz-patcher" },
-    { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.10.0" },
     { name = "hydra-zen", marker = "extra == 'hydra'", specifier = ">=0.14" },
     { name = "jaxtyping", specifier = ">=0.2.36" },
     { name = "joblib", marker = "extra == 'learn'", specifier = ">=1.3" },
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.8" },
-    { name = "netcdf4", marker = "extra == 'netcdf'", specifier = ">=1.6.5" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.1" },
     { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=ef3c17f85678dbcdd739f27ef75a0eaab6d5163f" },
-    { name = "pyhdf", marker = "extra == 'hdf4'", specifier = ">=0.11.4" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "rasterio", specifier = ">=1.3" },
     { name = "scikit-image", specifier = ">=0.25" },
@@ -1284,7 +1288,7 @@ requires-dist = [
     { name = "xvec", marker = "extra == 'vector-cube'", specifier = ">=0.4" },
     { name = "zarr", marker = "extra == 'zarr'", specifier = ">=3" },
 ]
-provides-extras = ["viz", "learn", "hydra", "patch", "vector-cube", "hdf5", "hdf4", "netcdf", "zarr"]
+provides-extras = ["viz", "learn", "hydra", "patch", "vector-cube", "cloud", "hdf5", "hdf4", "netcdf", "zarr"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1477,6 +1481,15 @@ cog = [
 fsspec = [
     { name = "fsspec" },
 ]
+hdf4 = [
+    { name = "pyhdf" },
+]
+hdf5 = [
+    { name = "h5py" },
+]
+netcdf = [
+    { name = "netcdf4" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1495,12 +1508,15 @@ requires-dist = [
     { name = "async-geotiff", marker = "extra == 'cog'", specifier = ">=0.5,<0.6" },
     { name = "fsspec", marker = "extra == 'fsspec'", specifier = ">=2024.12" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.10" },
+    { name = "netcdf4", marker = "extra == 'netcdf'", specifier = ">=1.6.5" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "obstore", specifier = ">=0.9.5" },
+    { name = "pyhdf", marker = "extra == 'hdf4'", specifier = ">=0.11.4" },
     { name = "rasterio", specifier = ">=1.3" },
     { name = "typing-extensions", specifier = ">=4.0" },
 ]
-provides-extras = ["cog", "fsspec"]
+provides-extras = ["cog", "fsspec", "hdf5", "netcdf", "hdf4"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1748,12 +1764,10 @@ carbonmapper = [
     { name = "shapely" },
 ]
 goes = [
-    { name = "geotoolz-cloud" },
-    { name = "h5py" },
+    { name = "geotoolz-cloud", extra = ["hdf5"] },
 ]
 himawari = [
-    { name = "geotoolz-cloud" },
-    { name = "h5py" },
+    { name = "geotoolz-cloud", extra = ["hdf5"] },
 ]
 obstore = [
     { name = "geotoolz-cloud" },
@@ -1780,11 +1794,9 @@ requires-dist = [
     { name = "geopandas", marker = "extra == 'carbonmapper'", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz", marker = "extra == 'operators'", editable = "packages/geotoolz" },
-    { name = "geotoolz-cloud", marker = "extra == 'goes'", editable = "packages/geotoolz-cloud" },
-    { name = "geotoolz-cloud", marker = "extra == 'himawari'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", marker = "extra == 'obstore'", editable = "packages/geotoolz-cloud" },
-    { name = "h5py", marker = "extra == 'goes'", specifier = ">=3.10" },
-    { name = "h5py", marker = "extra == 'himawari'", specifier = ">=3.10" },
+    { name = "geotoolz-cloud", extras = ["hdf5"], marker = "extra == 'goes'", editable = "packages/geotoolz-cloud" },
+    { name = "geotoolz-cloud", extras = ["hdf5"], marker = "extra == 'himawari'", editable = "packages/geotoolz-cloud" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", marker = "extra == 'carbonmapper'", specifier = ">=2.1" },
     { name = "pydantic", marker = "extra == 'carbonmapper'", specifier = ">=2" },

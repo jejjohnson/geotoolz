@@ -43,9 +43,11 @@ class Reader(ABIFile):
       in Kelvin (C07-C16 only).
 
     Args:
-        source: Path to an L1b ``.nc`` file, or a binary file-like object
-            (e.g. ``fsspec.open("s3://noaa-goes19/...", anon=True).open()``).
-            A file-like source is not safe to read from several threads.
+        source: An L1b ``.nc`` file: a local path, any URI geotoolz-cloud
+            reads (``s3://noaa-goes19/...``; register anonymous access with
+            ``geocloud.credentials.set_credentials``), read with ranged
+            requests, or an open binary file-like object (not safe to read
+            from several threads).
         calibration: Output quantity; see above. Default ``"radiance"``.
 
     Raises:

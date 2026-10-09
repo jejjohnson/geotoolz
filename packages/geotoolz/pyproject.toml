@@ -106,10 +106,14 @@ patch = ["geotoolz-patcher[pipekit]>=0.9"]
 # extract raster values onto point geometries (AERONET stations, buoys,
 # in-situ matchups), and by bilinear `raster_to_point_cloud` sampling.
 vector-cube = ["xvec>=0.4"]
-# File-format backends for `io.ReadHDF` (HDF5 / HDF4) and `io.ReadNetCDF`.
-hdf5 = ["h5py>=3.10.0"]
-hdf4 = ["pyhdf>=0.11.4"]
-netcdf = ["netCDF4>=1.6.5"]
+# `io.WriteCOG` writes through geotoolz-cloud's validated `write_cog`.
+# Lower bound only: a workspace sibling released in lockstep.
+cloud = ["geotoolz-cloud>=0.2.2"]
+# File formats for `io.ReadHDF` (HDF5 / HDF4) and `io.ReadNetCDF`: the
+# readers are geotoolz-cloud's (`geocloud.hdf`), local or remote.
+hdf5 = ["geotoolz-cloud[hdf5]>=0.2.2"]
+hdf4 = ["geotoolz-cloud[hdf4]>=0.2.2"]
+netcdf = ["geotoolz-cloud[netcdf]>=0.2.2"]
 # Zarr sink (`io.WriteZarr`); targets the zarr-python 3 API
 # (`Group.create_array`).
 zarr = ["zarr>=3"]

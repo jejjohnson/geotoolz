@@ -1,193 +1,74 @@
-"""HDF5 / NetCDF-4 access and CF-packed decoding for file-format readers.
+"""CF-packed NetCDF-4 / HDF5 product readers, on geotoolz-cloud's decoders.
 
-Most EO products ship as NetCDF-4 (GOES ABI, MTG FCI, TROPOMI, VIIRS,
-Sentinel-3) — HDF5 files following the CF conventions. h5py reads them
-directly but leaves the conventions to the caller: integers flagged
-``_Unsigned``, a ``_FillValue`` and the ``scale_factor`` / ``add_offset``
-packing. This module handles them once:
+The decoding itself — ``_Unsigned``, ``_FillValue``, ``scale_factor`` /
+``add_offset`` (`PackedVariable`), attribute helpers (`attr`, `scalar`,
+`unpacked`, `time_attr`, `grid_variables`) and opening a file from any
+location with ranged reads (`open_hdf5`) — lives in `geocloud.hdf`. This
+module adds `PackedGridReader`, the ``ProductReader`` whose bands are the
+2-D variables of one file on one grid (windowed chunk reads, mask-vs-value
+decoding, CF flag tables); a sensor subclass supplies the grid (CRS,
+transform) and chooses the variables.
 
-- :class:`PackedVariable` captures one variable's packing and decodes any
-  slice of it (``float32`` with ``NaN`` fill, or raw integers for masks).
-- :class:`PackedGridReader` is a ``ProductReader`` whose bands are 2-D
-  variables of one file on one grid — windowed chunk reads, mask-vs-value
-  decoding, CF flag tables. A sensor subclass supplies the grid (CRS,
-  transform) and chooses the variables.
-
-h5py is imported at use time; each reader names the extra that provides
-it (``[goes]``, …).
+geotoolz-cloud (and h5py) come with each reader's extra (``[goes]``,
+``[himawari]``). The `geocloud.hdf` names are resolved on first use
+(``hdf.attr(...)``), so this module — and every reader — imports on a
+base install and fails only when a file is read, naming the extra.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import IO, Any, ClassVar
+from types import ModuleType
+from typing import IO, TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from rasterio.windows import Window
 
 from geoproducts._src.base import ProductReader
-from geoproducts._src.extras import require
+from geoproducts._src.extras import missing_extra, require
 
 
-__all__ = [
-    "PackedGridReader",
-    "PackedVariable",
-    "Source",
-    "attr",
-    "grid_variables",
-    "h5py_module",
-    "scalar",
-    "time_attr",
-    "unpacked",
-]
+if TYPE_CHECKING:
+    from geocloud.hdf import (
+        PackedVariable,
+    )
 
-#: A file path or an open binary file object (e.g. from ``fsspec``).
+
+__all__ = ["PackedGridReader", "Source"]
+
+#: A URI (any location geotoolz-cloud reads), a local path, or an open
+#: binary file object.
 Source = str | os.PathLike[str] | IO[bytes]
 
-
-def h5py_module(feature: str, extra: str) -> Any:
-    """Import h5py, or raise an ``ImportError`` naming ``extra``."""
-    return require("h5py", feature, extra)
-
-
-def attr(obj: Any, name: str, default: Any = None) -> Any:
-    """An HDF5 attribute as a plain Python scalar / ``str`` (arrays kept)."""
-    if name not in obj.attrs:
-        return default
-    value = obj.attrs[name]
-    if isinstance(value, np.ndarray):
-        value = value.item() if value.size == 1 else value
-    if isinstance(value, bytes | np.bytes_):
-        value = value.decode("utf-8")
-    elif isinstance(value, np.generic):
-        value = value.item()
-    return value
+#: The `geocloud.hdf` names this module hands out, resolved on first use.
+_CLOUD_NAMES = frozenset(
+    {
+        "PackedVariable",
+        "attr",
+        "grid_variables",
+        "open_hdf5",
+        "scalar",
+        "time_attr",
+        "unpacked",
+    }
+)
 
 
-def time_attr(obj: Any, name: str) -> datetime | None:
-    """An ISO-8601 attribute (``time_coverage_start``, …) as a ``datetime``.
-
-    Returns ``None`` when the attribute is absent or not a timestamp.
-    """
-    value = attr(obj, name)
-    try:
-        return None if value is None else datetime.fromisoformat(str(value))
-    except ValueError:
-        return None
+def _cloud_hdf(
+    feature: str = "geoproducts HDF readers", extra: str = "goes"
+) -> ModuleType:
+    """`geocloud.hdf`, or an ``ImportError`` naming the reader's extra."""
+    return require("geocloud.hdf", feature, extra)
 
 
-def scalar(f: Any, name: str, *, fill: float | None = None) -> float:
-    """A scalar variable as ``float``; ``NaN`` when absent or filled.
-
-    The fill is the variable's own ``_FillValue``, or ``fill`` when the
-    product documents one the file does not declare.
-    """
-    if name not in f:
-        return float("nan")
-    var = f[name]
-    value = float(np.asarray(var[()]).reshape(-1)[0])
-    declared = attr(var, "_FillValue")
-    fills = {v for v in (declared, fill) if v is not None}
-    return float("nan") if value in fills else value
-
-
-def unpacked(f: Any, name: str) -> np.ndarray:
-    """A packed variable (typically a coordinate) decoded to ``float64``."""
-    var = f[name]
-    raw = np.asarray(var[()], dtype=np.float64)
-    scale = float(attr(var, "scale_factor", 1.0))
-    return raw * scale + float(attr(var, "add_offset", 0.0))
-
-
-@dataclass(frozen=True)
-class PackedVariable:
-    """How to decode one CF-packed 2-D variable.
-
-    Attributes:
-        name: Variable name in the file.
-        storage: The integer / float dtype pixels are *interpreted* as
-            (the unsigned twin of the stored dtype when ``_Unsigned``).
-        fill: ``_FillValue`` in ``storage`` terms, or ``None``.
-        scale: ``scale_factor`` (``None`` when unpacked).
-        offset: ``add_offset`` (``None`` when unpacked).
-        units: CF ``units`` (``""`` when absent).
-        long_name: CF ``long_name`` (``""`` when absent).
-    """
-
-    name: str
-    storage: np.dtype
-    fill: int | float | None
-    scale: float | None
-    offset: float | None
-    units: str
-    long_name: str
-
-    @classmethod
-    def from_file(cls, f: Any, name: str) -> PackedVariable:
-        """Read the packing attributes of ``name``."""
-        var = f[name]
-        storage = np.dtype(var.dtype)
-        if attr(var, "_Unsigned") == "true" and storage.kind == "i":
-            storage = np.dtype(f"u{storage.itemsize}")
-        fill = None
-        if "_FillValue" in var.attrs:
-            raw_fill = np.asarray(var.attrs["_FillValue"]).reshape(-1)[:1]
-            fill = raw_fill.astype(var.dtype).view(storage).item()
-        scale = attr(var, "scale_factor")
-        offset = attr(var, "add_offset")
-        return cls(
-            name=name,
-            storage=storage,
-            fill=fill,
-            scale=None if scale is None else float(scale),
-            offset=None if offset is None else float(offset),
-            units=str(attr(var, "units", "")),
-            long_name=str(attr(var, "long_name", "")),
-        )
-
-    @property
-    def is_packed(self) -> bool:
-        """Whether decoding changes values (scale / offset applied)."""
-        return self.scale is not None or self.offset is not None
-
-    @property
-    def is_categorical(self) -> bool:
-        """An unpacked integer variable: masks, flags, class codes."""
-        return not self.is_packed and self.storage.kind in "iub"
-
-    def raw(self, values: np.ndarray) -> np.ndarray:
-        """Stored values reinterpreted in ``storage`` (``_Unsigned`` view)."""
-        values = np.asarray(values)
-        if values.dtype == self.storage:
-            return values
-        return np.ascontiguousarray(values).view(self.storage)
-
-    def decode(self, values: np.ndarray) -> np.ndarray:
-        """Physical values as ``float32``; fill pixels become ``NaN``."""
-        raw = self.raw(values)
-        out = raw.astype(np.float32)
-        if self.scale is not None:
-            out *= np.float32(self.scale)
-        if self.offset is not None:
-            out += np.float32(self.offset)
-        if self.fill is not None:
-            out[raw == self.fill] = np.nan
-        return out
-
-
-def grid_variables(f: Any, shape: tuple[int, int]) -> tuple[str, ...]:
-    """Names of the file's top-level variables of shape ``shape``."""
-    # Groups carry no ``shape``; datasets do.
-    return tuple(
-        name
-        for name, var in f.items()
-        if tuple(getattr(var, "shape", ()) or ()) == shape
-    )
+def __getattr__(name: str) -> Any:
+    if name in _CLOUD_NAMES:
+        return getattr(_cloud_hdf(), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class PackedGridReader(ProductReader):
@@ -221,13 +102,19 @@ class PackedGridReader(ProductReader):
 
     @contextmanager
     def _open(self) -> Iterator[Any]:
-        with h5py_module(self.feature, self.extra).File(self._source, "r") as f:
+        hdf = _cloud_hdf(self.feature, self.extra)
+        with contextlib.ExitStack() as stack:
+            try:
+                f = stack.enter_context(hdf.open_hdf5(self._source))
+            except ImportError as exc:  # geotoolz-cloud is there, h5py is not
+                raise missing_extra(self.feature, self.extra) from exc
             yield f
 
     def _describe(self) -> str:
         """How messages and ``repr`` name the file."""
-        path = self.path
-        return path.name if path is not None else type(self._source).__name__
+        if isinstance(self._source, str | os.PathLike):
+            return os.fspath(self._source).rstrip("/").rsplit("/", 1)[-1]
+        return type(self._source).__name__
 
     def _load_variables(self, f: Any, names: Sequence[str]) -> None:
         """Validate ``names`` against the grid and record their packing."""
@@ -235,8 +122,8 @@ class PackedGridReader(ProductReader):
         for name in names:
             if name not in f:
                 raise ValueError(
-                    f"{self._describe()} has no variable {name!r}; 2-D "
-                    f"variables: {list(grid_variables(f, self._grid_shape))}."
+                    f"{self._describe()} has no variable {name!r}; 2-D variables: "
+                    f"{list(_cloud_hdf().grid_variables(f, self._grid_shape))}."
                 )
             shape = tuple(f[name].shape)
             if shape != self._grid_shape:
@@ -244,14 +131,18 @@ class PackedGridReader(ProductReader):
                     f"variable {name!r} has shape {shape}, not the grid "
                     f"{self._grid_shape}."
                 )
-            loaded.append(PackedVariable.from_file(f, name))
+            loaded.append(_cloud_hdf().PackedVariable.from_file(f, name))
         self._vars = tuple(loaded)
 
     @property
     def path(self) -> Path | None:
-        """The file path, or ``None`` for a file-like source."""
-        if isinstance(self._source, str | os.PathLike):
+        """The local file path; ``None`` for a remote URI or a file-like source."""
+        if isinstance(self._source, os.PathLike) or (
+            isinstance(self._source, str) and "://" not in self._source
+        ):
             return Path(self._source)
+        if isinstance(self._source, str) and self._source.startswith("file://"):
+            return Path(self._source[len("file://") :])
         return None
 
     @property
@@ -274,10 +165,11 @@ class PackedGridReader(ProductReader):
                 (bit fields declared through ``flag_masks``).
         """
         name = variable or self._vars[0].name
+        hdf = _cloud_hdf(self.feature, self.extra)
         with self._open() as f:
             var = f[name]
-            values = attr(var, "flag_values")
-            meanings = attr(var, "flag_meanings")
+            values = hdf.attr(var, "flag_values")
+            meanings = hdf.attr(var, "flag_meanings")
         if values is None or meanings is None:
             return {}
         values = np.atleast_1d(values).tolist()

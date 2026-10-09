@@ -48,7 +48,7 @@ if something is missing, add it there so the next reader gets it:
 | `files.py` | atomic writes (`atomic_path`, `atomic_write_text`, `write_private_json`) |
 | `credentials.py` | `~/.geoproducts/auth_<provider>.json` + env vars (`auth_path`, `read_json_config`, `jwt_expiry`) |
 | `query.py` | lon/lat bbox validation and UTC time windows for API queries |
-| `hdf.py` | NetCDF-4 / HDF5 with CF scale / offset / fill (`PackedGridReader`, `unpacked`, `grid_variables`) |
+| `hdf.py` | `PackedGridReader` (NetCDF-4 / HDF5 bands on one grid, local or remote); the CF decoders are `geocloud.hdf`'s, reached lazily as `hdf.attr(...)` so readers import on a base install |
 | `geostationary.py` | the geostationary fixed grid (`FixedGrid`, `geos_crs`, `scan_angle_transform`, `on_earth`) |
 | `stack.py` | several readers on one reference grid (`geoproducts.stack`) |
 | `presets.py` | `Recipe`, `rgb_recipe`, `geotoolz_module` (the lazy geotoolz import), `parallax_correct` |

@@ -256,3 +256,23 @@ class TestSources:
         monkeypatch.setitem(sys.modules, "h5py", None)  # import now raises
         with pytest.raises(ImportError, match=r"geotoolz-products\[goes\]"):
             goes.Reader(path)
+
+
+def test_reads_an_object_store_uri_with_ranged_reads(abi_file) -> None:
+    """A URI goes through geotoolz-cloud: no download, same pixels."""
+    from geocloud import files
+    from geocloud.store import mount, unmount
+    from obstore.store import MemoryStore
+
+    path = abi_file()
+    mount("s3://goes-test", MemoryStore())
+    try:
+        files.upload(path, "s3://goes-test/abi.nc")
+        remote = goes.Reader("s3://goes-test/abi.nc")
+        local = goes.Reader(path)
+        np.testing.assert_array_equal(
+            np.asarray(remote.load()), np.asarray(local.load())
+        )
+        assert remote.path is None and remote.channel == local.channel
+    finally:
+        unmount("s3://goes-test")

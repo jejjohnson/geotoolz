@@ -34,6 +34,7 @@ pip install 'geotoolz-cloud[fsspec]'  # + geocloud.fs, for xarray / zarr / pyarr
 | *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials`, `geocloud.cog.write_cog` |
 | `[cog]` | async-geotiff | `geocloud.cog.CogSource`, `AsyncCogReader` and the async `read_*` functions |
 | `[fsspec]` | fsspec (no s3fs / gcsfs / adlfs) | `geocloud.fs`, the fsspec filesystem on the pool |
+| `[hdf5]` / `[netcdf]` / `[hdf4]` | h5py / netCDF4 / pyhdf | `geocloud.hdf` readers for HDF5 + NetCDF-4 / NetCDF-3 / HDF4 |
 
 The other packages reach geocloud through their own extras; see
 [How the packages interlock](../geostack.md).
@@ -69,6 +70,7 @@ chips: list[GeoTensor] = src.read_windows(
 | `geocloud.store` | get the pooled client for a URI or local path (`get_obstore`, `object_key`), tell local from remote (`local_path`), mount a test store | [Concepts](concepts.md) |
 | `geocloud.files` | list, read, download, upload, copy, sync, delete and pre-sign objects | [Move files](how-to/move-files.md) |
 | `geocloud.credentials` | register credentials per bucket / container / host, load a TOML file, hand them to GDAL, redact logs | [Credentials](how-to/credentials.md) |
+| `geocloud.hdf` | read HDF5, NetCDF and HDF4 from any location; decode CF packing | [Read HDF and NetCDF](how-to/hdf.md) |
 | `geocloud.cache` | get a local file for any URI, downloaded once (`localize`, `LocalCache`) | [Cache remote files](how-to/cache.md) |
 | `geocloud.fs` | hand xarray, zarr, pyarrow or geopandas an fsspec filesystem on the pool | [Use fsspec libraries](how-to/fsspec.md) |
 | `geocloud.cog` | read COG windows in batches, sync or async (`CogSource`, `AsyncCogReader`) | [Read COGs](how-to/read-cogs.md) |
