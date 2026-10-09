@@ -11,7 +11,7 @@ catalog, and append new files to a saved one.
 
 ::: geocatalog.build.build_xarray_catalog
 
-## Vector *(extras: `[vector]`)*
+## Vector
 
 ::: geocatalog.build.build_vector_catalog
 

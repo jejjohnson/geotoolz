@@ -177,9 +177,3 @@ $ geocatalog build raster --input-glob "data/*.tif" \
 | 1    | User error — bad or unparseable args (including an invalid `--crs`), glob matched nothing, a `build vector` input that is not a vector dataset, missing extra. |
 | 2    | Catalog error — corrupt artifact or unrecognised schema (e.g. a newer `_schema_version`). |
 | 3    | I/O error — source path doesn't exist or can't be read.       |
-
-## Coming soon
-
-Subcommands deferred to follow-on PRs:
-
-- `geocatalog compact catalog.parquet`.

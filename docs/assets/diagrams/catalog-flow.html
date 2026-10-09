@@ -55,7 +55,7 @@
       <div class="lane-head"><span class="verb">load</span><span class="pkg">the hits only</span></div>
       <div class="stack">
         <div class="node compute"><div class="name"><code>load_raster</code></div><div class="desc">mosaic onto the slice grid</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(C, H, W)</span></span></div></div>
-        <div class="node compute"><div class="name"><code>load_vector</code></div><div class="desc">clip to the slice bounds</div><div class="chips"><span class="chip"><span class="t">GeoDataFrame</span></span></div></div>
+        <div class="node compute"><div class="name"><code>load_vector</code></div><div class="desc">rasterise features onto the slice grid</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(1, H, W)</span></span></div></div>
         <div class="node cut"><div class="name"><code>patch.field_for</code></div><div class="desc">bridge to geopatcher · [patch] extra</div><div class="chips"><span class="chip"><span class="t">RasterField</span><span class="s">(C, H, W)</span></span></div></div>
       </div>
     </div>

@@ -83,6 +83,10 @@ plugins:
         api/viz.md: operators/api/viz.md
         design/query-matchup.md: catalog/design/query-matchup.md
         patcher/design/query-matchup.md: catalog/design/query-matchup.md
+        catalog/recipes/large-archives.md: catalog/how-to/large-archives.md
+        catalog/recipes/from-stac.md: catalog/how-to/stac-ingestion.md
+        catalog/recipes/staging-and-bundles.md: catalog/how-to/staging.md
+        catalog/design/vocabulary.md: catalog/vocabulary.md
 
 # Contributor tooling, not site pages.
 exclude_docs: |
@@ -162,9 +166,12 @@ nav:
       - Concepts: catalog/concepts.md
       - Quickstart: catalog/quickstart.md
       - How-to:
-          - Large archives: catalog/recipes/large-archives.md
-          - STAC ingestion: catalog/recipes/from-stac.md
-          - Staging & bundles: catalog/recipes/staging-and-bundles.md
+          - Ingest from STAC: catalog/how-to/stac-ingestion.md
+          - Stage remote files: catalog/how-to/staging.md
+          - Index large archives: catalog/how-to/large-archives.md
+          - Match across sources: catalog/how-to/matchup.md
+          - Catalog → patcher: catalog/how-to/catalog-to-patcher.md
+          - Grid alignment: catalog/how-to/grid-alignment.md
       - Tutorials:
           - End-to-end (Lake Tahoe): catalog/notebooks/end_to_end_lake_tahoe.ipynb
       - Reference:
@@ -181,13 +188,13 @@ nav:
           - Grid: catalog/api/grid.md
           - Utils: catalog/api/utils.md
           - CLI: catalog/cli.md
+          - Parameter vocabulary: catalog/vocabulary.md
           - Schema versions: catalog/schema-versions.md
           - Logging: catalog/logging.md
           - Changelog: catalog/changelog.md
       - Design:
           - Query → matchup → patch: catalog/design/query-matchup.md
           - Exact grid alignment: catalog/design/exact-grid-alignment.md
-          - Parameter vocabulary: catalog/design/vocabulary.md
   - Cloud — geocloud:
       - Overview: cloud/index.md
       - Reference: cloud/api.md
