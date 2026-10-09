@@ -66,21 +66,13 @@ xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1", "zarr>=3.0"]
 # predicate pushdown landed there; older versions silently regress to
 # slow ST_Intersects-per-row scans.
 duckdb = ["duckdb>=1.1"]
-# Cloud/object-storage readers for s3://, gs://, az://, https:// and hf://
-# URIs. `fsspec[http]` brings the aiohttp client fsspec's https:// filesystem
-# needs; `huggingface_hub` registers the hf:// filesystem with fsspec.
-fsspec = [
-    "adlfs>=2026.5.0",
-    "fsspec[http]>=2025.12.0",
-    "gcsfs>=2025.12.0",
-    "huggingface-hub>=0.25",
-    "s3fs>=2025.12.0",
-]
-# Staging remote URIs (`geocatalog.staging.stage`): downloads go through
-# geotoolz-cloud's file verbs on the stack's shared obstore client pool, with
-# the credentials registered in `geocloud.credentials`. Lower bound only, as
-# for `patch` below: a workspace sibling released in lockstep.
-cloud = ["geotoolz-cloud>=0.2.2"]
+# Remote URIs (s3://, gs://, az://, https://, hf://): the builders' and
+# loaders' reads go through `geocloud.fs` (geotoolz-cloud's fsspec
+# filesystem on the stack's shared obstore pool) and `stage` downloads
+# through `geocloud.files` — one client pool and the credentials registered
+# in `geocloud.credentials` for both. Lower bound only, as for `patch`
+# below: a workspace sibling released in lockstep.
+cloud = ["geotoolz-cloud[fsspec]>=0.2.2"]
 # Streaming catalog builds (`engine="duckdb"` on the `build_*` helpers):
 # the writer itself is pyarrow (a base dependency); the sort-rewrite and
 # the resulting catalog are DuckDB.
@@ -107,7 +99,7 @@ sources-all = ["geotoolz-catalog[earthaccess,stac,gee]"]
 # The one-shot install that lights up every public surface. Composed from
 # the extras above so it cannot drift from them.
 full = [
-    "geotoolz-catalog[xarray-raster,duckdb,fsspec,cloud,streaming,sources-all,patch]",
+    "geotoolz-catalog[xarray-raster,duckdb,cloud,streaming,sources-all,patch]",
 ]
 
 [project.urls]

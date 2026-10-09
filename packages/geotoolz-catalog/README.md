@@ -123,8 +123,7 @@ uv add geotoolz-catalog
 | `[stac]` | `STACSource`, `from_stac_search`, `from_stac_items` | STAC API ingestion |
 | `[earthaccess]` / `[gee]` | `EarthAccessSource` / `GEESource` | NASA Earthdata / Earth Engine ingestion |
 | `[sources-all]` | `[earthaccess]` + `[stac]` + `[gee]` | Every source adapter |
-| `[fsspec]` | `s3://`, `gs://`, `az://`, `https://`, `hf://` reads in the builders and loaders (fsspec, its cloud filesystems, `huggingface_hub`) | Cloud object storage |
-| `[cloud]` | `stage()` of remote URIs, through `geocloud.files` and `geocloud.credentials` (geotoolz-cloud) | Local caches of cloud assets |
+| `[cloud]` | `s3://`, `gs://`, `az://`, `https://`, `hf://` reads in the builders and loaders (`geocloud.fs`) and `stage()` of remote URIs (`geocloud.files`): one client pool and the credentials in `geocloud.credentials` (geotoolz-cloud) | Cloud object storage, local caches of cloud assets |
 | `[patch]` | `geocatalog.patch.field_for` — bridge to `geopatcher` | Patcher / tiling workflows |
 | `[full]` | All of the above | One-shot install |
 

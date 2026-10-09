@@ -33,8 +33,7 @@ pip install 'geotoolz-catalog[duckdb,stac]'   # add extras as needed
 | `[stac]` | `STACSource`, `from_stac_search`, `from_stac_items`, `to_stac_collection` | STAC API ingestion |
 | `[earthaccess]` / `[gee]` | `EarthAccessSource` / `GEESource` | NASA Earthdata / Earth Engine discovery |
 | `[sources-all]` | `[earthaccess]` + `[stac]` + `[gee]` | Every source adapter |
-| `[fsspec]` | fsspec, its cloud filesystems, `huggingface_hub` | `s3://` `gs://` `az://` `https://` `hf://` reads in builders and loaders |
-| `[cloud]` | geotoolz-cloud (`geocloud.files`, `geocloud.credentials`) | `stage()` of remote URIs |
+| `[cloud]` | geotoolz-cloud with its `[fsspec]` extra | `s3://` `gs://` `az://` `https://` `hf://` reads in builders and loaders (`geocloud.fs`) and `stage()` of remote URIs (`geocloud.files`), on one client pool and credential registry |
 | `[patch]` | geotoolz-patcher | `geocatalog.patch.field_for` |
 | `[full]` | All of the above | One-shot install |
 

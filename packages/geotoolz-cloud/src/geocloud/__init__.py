@@ -1,6 +1,6 @@
 """`geocloud` — cloud object storage for the geotoolz stack.
 
-Four modules, each the one home of its names:
+Five modules, each the one home of its names:
 
 - `geocloud.store` — the process-wide ``obstore`` client pool:
   `get_obstore` / `object_key` for ``s3://``, ``gs://``, ``az://``,
@@ -11,6 +11,8 @@ Four modules, each the one home of its names:
 - `geocloud.credentials` — credentials registered once per bucket /
   container / host (anonymous, SAS, keys, providers; a TOML file), used by
   the pool and handed to GDAL by `gdal_access`; `redact` for logs.
+- `geocloud.fs` — an fsspec filesystem on that pool, for libraries that
+  only speak fsspec (xarray, zarr, pyarrow, geopandas; ``[fsspec]``).
 - `geocloud.cog` — Cloud-Optimized GeoTIFF reads on that pool:
   `CogSource` (batched window reads, each tile fetched once) and
   `AsyncCogReader` with the async ``read_*`` mirrors of
@@ -22,9 +24,9 @@ geopatcher's `CogField` and geoproducts' cloud byte reads (its
 
 from __future__ import annotations
 
-from geocloud import cog, credentials, files, store
+from geocloud import cog, credentials, files, fs, store
 
 
 __version__ = "0.3.0"  # x-release-please-version
 
-__all__ = ["__version__", "cog", "credentials", "files", "store"]
+__all__ = ["__version__", "cog", "credentials", "files", "fs", "store"]

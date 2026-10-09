@@ -208,6 +208,7 @@ nav:
           - Register credentials: cloud/how-to/credentials.md
           - Read COGs: cloud/how-to/read-cogs.md
           - Write COGs: cloud/how-to/write-cogs.md
+          - Use fsspec libraries: cloud/how-to/fsspec.md
       - Tutorials:
           - A tour of geocloud: cloud/notebooks/geocloud_tour.ipynb
       - Reference: cloud/api.md

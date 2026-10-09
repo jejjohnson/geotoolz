@@ -56,11 +56,15 @@ dependencies are actually imported).
 - **Persisted catalogs**: GeoParquet carries `SCHEMA_VERSION_CURRENT`; a
   schema change needs a migration in `migrate_geoparquet` and a
   `docs/catalog/schema-versions.md` entry.
-- **Object storage**: `stage()` downloads remote URIs with
-  `geocloud.files.download` (the `[cloud]` extra; credentials from
-  `geocloud.credentials`) — never a copy loop of its own. Builders and
-  loaders read through rasterio / GDAL and fsspec (`[fsspec]`). Tests fake
-  the download with the `cloud_stub` fixture so they run on a base install.
+- **Object storage** (the `[cloud]` extra; credentials from
+  `geocloud.credentials`): `stage()` downloads remote URIs with
+  `geocloud.files.download` — never a copy loop of its own — and builders
+  and loaders read remote files through rasterio / GDAL (`/vsi*/`) or
+  `geocloud.fs` (`_resolve_uri`), geotoolz-cloud's fsspec filesystem on the
+  shared pool. Never import s3fs / gcsfs / adlfs or build an fsspec
+  filesystem of our own. Tests fake the download with the `cloud_stub`
+  fixture, and mount a `MemoryStore` (`geocloud.store.mount`) for remote
+  reads.
 
 ## Tests
 

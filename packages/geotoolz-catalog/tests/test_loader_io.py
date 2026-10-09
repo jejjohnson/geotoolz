@@ -47,24 +47,28 @@ class TestGdalVsiPaths:
             == "/vsis3/bucket/b.tif"
         )
 
-    def test_storage_options_keep_fsspec(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        fsspec = pytest.importorskip("fsspec")
-        calls: list[tuple[str, dict[str, Any]]] = []
+    def test_storage_options_keep_the_pool_route(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        geocloud_fs = pytest.importorskip("geocloud.fs")
+        calls: list[dict[str, Any] | None] = []
 
-        class _Handle:
-            def open(self) -> str:
-                return "fsspec-handle"
+        class _FS:
+            def open(self, uri: str, mode: str) -> str:
+                return f"handle:{uri}"
 
-        def fake_open(uri: str, mode: str, **kw: Any) -> _Handle:
-            calls.append((uri, kw))
-            return _Handle()
+        def fake_filesystem(storage_options: dict[str, Any] | None = None) -> _FS:
+            calls.append(storage_options)
+            return _FS()
 
-        monkeypatch.setattr(fsspec, "open", fake_open)
+        monkeypatch.setattr(geocloud_fs, "filesystem", fake_filesystem)
         out = catalog_io._resolve_uri(
-            "s3://bucket/b.tif", storage_options={"anon": True}, prefer_gdal=True
+            "s3://bucket/b.tif",
+            storage_options={"skip_signature": True},
+            prefer_gdal=True,
         )
-        assert out == "fsspec-handle"
-        assert calls == [("s3://bucket/b.tif", {"anon": True})]
+        assert out == "handle:s3://bucket/b.tif"
+        assert calls == [{"skip_signature": True}]
 
 
 class _RangeHandler(http.server.SimpleHTTPRequestHandler):

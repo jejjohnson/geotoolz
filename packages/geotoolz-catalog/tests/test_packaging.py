@@ -2,8 +2,8 @@
 
 Each distribution an extra installs must be imported somewhere under
 ``src/geocatalog`` (lazily is fine — that is what extras are for) or be a
-runtime plug-in a library we import loads by name (fsspec filesystems,
-xarray engines). ``[full]`` must cover every other extra, and the
+runtime plug-in a library we import loads by name (zarr for
+xarray). ``[full]`` must cover every other extra, and the
 ``geotoolz-patcher`` bridge is version-bounded rather than an unpinned or
 direct-URL reference.
 """
@@ -35,10 +35,6 @@ IMPORT_TO_DIST = {
 # Distributions no geocatalog module imports by name, but that a library it
 # does import loads at runtime. Keep this small and say why.
 RUNTIME_PLUGINS = {
-    "adlfs": "fsspec az:// / abfs:// filesystem",
-    "gcsfs": "fsspec gs:// filesystem",
-    "s3fs": "fsspec s3:// filesystem",
-    "huggingface-hub": "fsspec hf:// filesystem",
     "zarr": "xarray's zarr engine for .zarr stores",
 }
 

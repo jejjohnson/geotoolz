@@ -543,9 +543,10 @@ def load_raster(
             ``ceil(N / workers) x latency``. The effective width is
             ``min(max_open_workers, n_files)``; ``1`` (or ``0``) keeps
             the serial behaviour. The merge phase is unchanged.
-        storage_options: Options forwarded to fsspec for cloud/HTTP URIs
-            (e.g. ``{"anon": True}`` for public S3). ``None`` uses fsspec
-            defaults / GDAL's native VSI handling for ``s3://``-style paths.
+        storage_options: obstore store options for cloud/HTTP URIs
+            (e.g. ``{"skip_signature": True}`` for a public bucket),
+            read through `geocloud.fs` (the ``[cloud]`` extra). ``None``
+            uses GDAL's native VSI handling for ``s3://``-style paths.
 
     Returns:
         A `GeoTensor` of shape ``(bands, H, W)`` with ``transform`` and

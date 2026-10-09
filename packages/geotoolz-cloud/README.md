@@ -29,6 +29,7 @@ pip install 'geotoolz-cloud[cog]'     # + COG reads (async-geotiff)
 |---|---|---|
 | *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials`, `geocloud.cog.write_cog` |
 | `[cog]` | async-geotiff | `geocloud.cog` (`CogSource`, `AsyncCogReader`, `read_*`) |
+| `[fsspec]` | fsspec (no s3fs / gcsfs / adlfs) | `geocloud.fs`, the fsspec filesystem on the pool |
 
 ## Quickstart
 
@@ -143,6 +144,24 @@ place. The defaults follow the dtype: a predictor, `nearest` overviews for
 classes and masks, `average` for floats, and a nodata only when the dtype
 can hold it. Lazy georeader readers are staged strip by strip. It needs no
 extra.
+
+## fsspec libraries — `geocloud.fs`
+
+```python
+import pyarrow.parquet as pq
+import xarray as xr
+
+from geocloud.fs import GeoCloudFileSystem, filesystem
+
+fs: GeoCloudFileSystem = filesystem()                    # every path through the pool
+with fs.open("s3://bucket/catalog.parquet") as fh:       # ranged reads, pooled client
+    table = pq.read_table(fh)
+cube: xr.Dataset = xr.open_zarr(fs.get_mapper("gs://bucket/cube.zarr"))
+```
+
+Libraries that only speak fsspec get the same clients and registered
+credentials as everything else — no s3fs, gcsfs or adlfs, and no second
+set of credentials. Local paths work too. It needs the `[fsspec]` extra.
 
 ## Next steps
 

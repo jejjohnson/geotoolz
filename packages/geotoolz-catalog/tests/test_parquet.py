@@ -71,3 +71,26 @@ class TestParquetRoundtrip:
         assert len(recovered) == len(cat)
         # The covering column is storage, not a catalog extra.
         assert all("bbox" not in row.extras for row in recovered.iter_rows())
+
+
+def test_from_geoparquet_reads_a_bucket_through_the_pool(tmp_path: Path) -> None:
+    """A remote GeoParquet catalog is read through `geocloud.fs` on the pool."""
+    import pytest
+
+    pytest.importorskip("geocloud.fs")
+    from geocloud import files
+    from geocloud.store import mount, unmount
+    from obstore.store import MemoryStore
+
+    cat = _toy_catalog()
+    local = tmp_path / "cat.parquet"
+    to_geoparquet(cat, local)
+    mount("s3://catalog-remote", MemoryStore())
+    try:
+        files.upload(local, "s3://catalog-remote/cats/cat.parquet")
+        recovered = from_geoparquet("s3://catalog-remote/cats/cat.parquet")
+    finally:
+        unmount("s3://catalog-remote")
+    assert len(recovered) == len(cat)
+    assert recovered.kind == "raster"
+    assert recovered.gdf.crs == cat.gdf.crs
