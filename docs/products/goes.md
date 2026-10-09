@@ -146,7 +146,7 @@ integer fills to `NaN`.
 The operational RGBs are recipes — each channel a band or band expression,
 stretched between fixed bounds and gamma-corrected. `goes.recipes` holds them
 as data; with the `[operators]` extra each preset is a
-[`gz.viz.RGBRecipe`](../api/viz.md) operator:
+[`gz.viz.RGBRecipe`](../operators/api/viz.md) operator:
 
 ```python
 import geotoolz as gz

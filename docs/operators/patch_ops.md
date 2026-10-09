@@ -136,5 +136,5 @@ For CRS-aware point extraction into a vector cube, see
 - [geopatcher's docs](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher) — the
   four axes (Geometry × Sampler × Window × Aggregation), boundary
   policies, streaming aggregation, async splits.
-- [Integration with geocatalog & geopatcher](recipes/integration-with-geocatalog-and-geopatcher.md)
+- [Integration with geocatalog & geopatcher](how-to/integration-with-geocatalog-and-geopatcher.md)
   — wiring catalog queries into patched pipelines.

@@ -139,7 +139,7 @@ pipeline.get_config()                         # {"operators": [{"class": "Scale"
 ```
 
 The same shape with the `|` pipe operator: `Scale(scale=1e-4) | NormalizedDifference(a=7, b=3)`.
-See [Define an operator](https://jejjohnson.github.io/geotoolz/recipes/define-an-operator/)
+See [Define an operator](https://jejjohnson.github.io/geotoolz/operators/how-to/define-an-operator/)
 for the full conventions (parameter vocabulary, fill values, terminal
 operators).
 
@@ -256,9 +256,9 @@ uv run --group docs mkdocs build --strict
 
 ## Next steps
 
-- **Docs site:** [concepts](https://jejjohnson.github.io/geotoolz/concepts/),
-  [quickstart](https://jejjohnson.github.io/geotoolz/quickstart/),
-  [API reference](https://jejjohnson.github.io/geotoolz/api/core/).
+- **Docs site:** [concepts](https://jejjohnson.github.io/geotoolz/operators/concepts/),
+  [quickstart](https://jejjohnson.github.io/geotoolz/operators/quickstart/),
+  [API reference](https://jejjohnson.github.io/geotoolz/operators/api/core/).
 - **End-to-end Lake Tahoe notebook (catalog → patch → operate):**
   [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 - **Operator-composition slice:**

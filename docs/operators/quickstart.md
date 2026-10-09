@@ -217,6 +217,6 @@ A researcher's typical loop:
   [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 - Concept overview: [Concepts](concepts.md).
 - Recipes:
-  - [Define an operator](recipes/define-an-operator.md)
-  - [Branching pipelines](recipes/branching-pipelines.md)
-  - [Integration with geocatalog & geopatcher](recipes/integration-with-geocatalog-and-geopatcher.md)
+  - [Define an operator](how-to/define-an-operator.md)
+  - [Branching pipelines](how-to/branching-pipelines.md)
+  - [Integration with geocatalog & geopatcher](how-to/integration-with-geocatalog-and-geopatcher.md)

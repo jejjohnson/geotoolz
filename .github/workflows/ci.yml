@@ -36,6 +36,11 @@ jobs:
       - name: Capability index is current
         if: matrix.python-version == '3.12'
         run: uv run python scripts/capabilities.py --check
+      # Every Python example in the docs, notebooks and READMEs parses and
+      # names only stack objects that exist (scripts/check_docs.py).
+      - name: Docs examples are current
+        if: matrix.python-version == '3.12'
+        run: uv run python scripts/check_docs.py
       # Fast tier only — `slow` / `integration` tests run manually via the
       # "Extended Tests" workflow (workflow_dispatch), never automatically.
       # Each package runs from its own directory so its pytest + coverage

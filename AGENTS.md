@@ -311,7 +311,15 @@ sure every new file is tracked: `git status` must not show it as ignored.
 ## Documentation
 
 MkDocs + Material + mkdocstrings; the root `mkdocs.yml` builds one site with a
-section per package. Example notebooks are committed executed (`.ipynb`, see
-`.github/instructions/docs-examples.instructions.md`). Diagrams are HTML files
-in `docs/assets/diagrams/` rendered to PNG with `render.py` — edit the HTML,
-re-render, commit both.
+section per package. The READMEs set the bar and the docs follow it:
+
+- **Pages** follow `.github/instructions/docs-pages.instructions.md`: one
+  kind per page (landing / concepts / how-to / tutorial / reference), a
+  landing page shaped like the package README, and code examples that are
+  typed, shape-annotated (`# (C, H, W) dtype`) and self-contained.
+  `make docs-check` (CI) parses every example and resolves every stack name
+  it uses.
+- **Notebooks** are committed executed (`.ipynb`, see
+  `.github/instructions/docs-examples.instructions.md`).
+- **Diagrams** are HTML files in `docs/assets/diagrams/` rendered to PNG with
+  `render.py` — edit the HTML, re-render, commit both.

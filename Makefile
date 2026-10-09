@@ -62,7 +62,7 @@ check-env-%:
 # Phony declarations
 # ---------------------------------------------------------------------------
 .PHONY: help install lint format typecheck test test-all test-slow test-cov \
-        precommit build clean version docs docs-serve docs-deploy \
+        precommit build clean version docs docs-check docs-serve docs-deploy \
         gh-labels gh-sub gh-block gh-show
 
 .DEFAULT_GOAL := help
@@ -200,6 +200,9 @@ docs: ## 📖 Build documentation with mkdocs
 
 capabilities: ## 🗂️  Regenerate docs/capabilities.md (every public name in the stack)
 	uv run python scripts/capabilities.py
+
+docs-check: ## 🔎 Check every docs / README example parses and its stack names exist
+	uv run python scripts/check_docs.py
 
 docs-serve: ## 🌐 Serve documentation locally
 	uv run --group docs mkdocs serve

@@ -158,5 +158,5 @@ by the aggregation.
   [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 - This repo's operator-composition slice:
   [`notebooks/operators_lake_tahoe.ipynb`](../notebooks/operators_lake_tahoe.ipynb).
-- [The geostack](../geostack.md), [Quickstart](../quickstart.md) and
+- [The geostack](../../geostack.md), [Quickstart](../quickstart.md) and
   [Concepts](../concepts.md).
