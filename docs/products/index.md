@@ -87,5 +87,6 @@ Because `chip` names its bands, geotoolz operators resolve them by name:
 - [Concepts](concepts.md) — the `ProductReader` contract, `stack`, recipes and presets.
 - Sensors: [GOES-R ABI](goes.md) · [Himawari AHI](himawari.md) · [Carbon Mapper](carbonmapper.md).
 - [Add a product reader](product-readers.md) — the subpackage layout and the shared toolkit.
+- Tutorials: [GOES-19 mesoscale](notebooks/goes_mesoscale.ipynb) · [Himawari over Japan](notebooks/himawari_japan.ipynb).
 - [API reference](api.md).
 - The whole stack: [How the packages interlock](../geostack.md).

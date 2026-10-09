@@ -197,6 +197,8 @@ nav:
           - Register credentials: cloud/how-to/credentials.md
           - Read COGs: cloud/how-to/read-cogs.md
           - Write COGs: cloud/how-to/write-cogs.md
+      - Tutorials:
+          - A tour of geocloud: cloud/notebooks/geocloud_tour.ipynb
       - Reference: cloud/api.md
   - Products — geoproducts:
       - Overview: products/index.md
@@ -207,6 +209,9 @@ nav:
           - Carbon Mapper: products/carbonmapper.md
       - How-to:
           - Add a product reader: products/product-readers.md
+      - Tutorials:
+          - GOES-19 mesoscale: products/notebooks/goes_mesoscale.ipynb
+          - Himawari over Japan: products/notebooks/himawari_japan.ipynb
       - Reference: products/api.md
   - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
   - Contributing: contributing.md
