@@ -198,13 +198,27 @@ nav:
           - Exact grid alignment: catalog/design/exact-grid-alignment.md
   - Cloud — geocloud:
       - Overview: cloud/index.md
+      - Concepts: cloud/concepts.md
+      - How-to:
+          - Move files: cloud/how-to/move-files.md
+          - Register credentials: cloud/how-to/credentials.md
+          - Read COGs: cloud/how-to/read-cogs.md
+          - Write COGs: cloud/how-to/write-cogs.md
+      - Tutorials:
+          - A tour of geocloud: cloud/notebooks/geocloud_tour.ipynb
       - Reference: cloud/api.md
   - Products — geoproducts:
       - Overview: products/index.md
-      - GOES-R ABI: products/goes.md
-      - Himawari AHI: products/himawari.md
-      - Carbon Mapper: products/carbonmapper.md
-      - Adding a product reader: products/product-readers.md
+      - Concepts: products/concepts.md
+      - Sensors:
+          - GOES-R ABI: products/goes.md
+          - Himawari AHI: products/himawari.md
+          - Carbon Mapper: products/carbonmapper.md
+      - How-to:
+          - Add a product reader: products/product-readers.md
+      - Tutorials:
+          - GOES-19 mesoscale: products/notebooks/goes_mesoscale.ipynb
+          - Himawari over Japan: products/notebooks/himawari_japan.ipynb
       - Reference: products/api.md
   - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
   - Contributing: contributing.md

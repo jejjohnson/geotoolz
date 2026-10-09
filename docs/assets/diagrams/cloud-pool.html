@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>geocloud client pool</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1690px; }
+  .cols { display: grid; grid-template-columns: 300px 330px 330px 310px; column-gap: 90px; align-items: center; }
+  .stackcol { display: flex; flex-direction: column; gap: 18px; }
+  .node.read { --accent: var(--read); }
+  .node.cut { --accent: var(--cut); }
+  .node.find { --accent: var(--find); }
+  .node.you { --accent: var(--line); }
+  .lane.base { padding-bottom: 18px; }
+  .lane .stackcol { gap: 16px; }
+  .verbs { font-family: var(--mono); font-size: 11.5px; color: var(--base-ink); margin-top: 6px; line-height: 1.5; }
+  .bucket { border-radius: 12px; border: 1.5px solid #cbd5e1; background: #fff; padding: 9px 12px;
+            font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+  .bucket .s { color: var(--muted); font-family: var(--sans); font-size: 11.5px; margin-left: 6px; }
+  .pool { padding: 14px 14px; }
+  .pool .clients { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .pool .clients span { font-family: var(--mono); font-size: 11.5px; background: var(--base-bg); border: 1px solid #cbd5e1;
+                        border-radius: 8px; padding: 5px 8px; color: var(--base-ink); }
+  .gdal { --accent: var(--line); background: #fff; }
+  .colhead { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">geocloud — one client per bucket, shared by the whole process</div>
+  <div class="subtitle">Every package that touches object storage goes through the same pool, with credentials registered once per store root.</div>
+
+  <div class="cols">
+    <div>
+      <div class="colhead">callers</div>
+      <div class="stackcol">
+        <div class="node cut" id="c-patcher"><div class="name"><code>geopatcher.fields.CogField</code></div><div class="desc">patch a COG in a bucket</div></div>
+        <div class="node read" id="c-products"><div class="name"><code>geoproducts</code></div><div class="desc">cloud byte reads · <code>goes.aws</code> · <code>himawari.aws</code></div></div>
+        <div class="node find" id="c-catalog"><div class="name"><code>geocatalog.staging.stage</code></div><div class="desc">copy the files a query needs</div></div>
+        <div class="node you" id="c-you"><div class="name">your code</div><div class="desc">URIs only — no clients, no secrets</div></div>
+      </div>
+    </div>
+
+    <div class="lane base" id="lane-verbs">
+      <div class="lane-head"><span class="verb">geocloud</span><span class="pkg">verbs</span></div>
+      <div class="stackcol">
+        <div class="node" id="files"><div class="name"><code>geocloud.files</code></div><div class="desc">whole objects, cloud or local</div>
+          <div class="verbs">ls · info · read_bytes · open<br>download · upload · copy · sync<br>rm · sign</div></div>
+        <div class="node" id="cog"><div class="name"><code>geocloud.cog</code></div><div class="desc">Cloud-Optimized GeoTIFFs</div>
+          <div class="verbs">CogSource · AsyncCogReader <span style="color:var(--muted)">[cog]</span><br>write_cog <span style="color:var(--muted)">(base install)</span></div></div>
+      </div>
+    </div>
+
+    <div class="lane base" id="lane-pool">
+      <div class="lane-head"><span class="verb">geocloud</span><span class="pkg">pool</span></div>
+      <div class="stackcol">
+        <div class="node" id="creds"><div class="name"><code>geocloud.credentials</code></div><div class="desc">one grant per bucket / container / host · TOML file · <code>redact</code></div></div>
+        <div class="node pool" id="store"><div class="name"><code>geocloud.store.get_obstore</code></div><div class="desc">built once per root, then reused (LRU); <code>mount</code> swaps in a test store; geoproducts readers take byte ranges here directly</div>
+          <div class="clients"><span>s3://sentinel-cogs → S3Store</span><span>s3://noaa-goes19 → S3Store</span><span>az://account/raw → AzureStore</span></div></div>
+        <div class="node gdal" id="gdal"><div class="name"><code>gdal_access(uri)</code></div><div class="desc">the same grant as a GDAL path + options, for rasterio / georeader</div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="colhead">storage · one HTTP/2 pool per root</div>
+      <div class="stackcol" id="buckets" style="gap:10px">
+        <div class="bucket" id="b-s3">s3://<span class="s">AWS · MinIO · R2</span></div>
+        <div class="bucket" id="b-gs">gs://<span class="s">Google Cloud</span></div>
+        <div class="bucket" id="b-az">az:// · abfs[s]://<span class="s">Azure</span></div>
+        <div class="bucket" id="b-http">https://<span class="s">signed URLs · SAS</span></div>
+        <div class="bucket" id="b-hf">hf://<span class="s">Hugging Face Hub</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i></i> calls</span>
+    <span><i class="dash"></i> configures</span>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const S = "#475569";
+  wire("c-patcher", "cog", { from: "right", to: "left", color: "#3f6fb5", toShift: -10 });
+  wire("c-products", "files", { from: "right", to: "left", color: "#23978a", toShift: 18 });
+  wire("c-catalog", "files", { from: "right", to: "left", color: "#7b6bb5", toShift: 34 });
+  wire("c-you", "cog", { from: "right", to: "left", color: "#94a3b8", toShift: 20 });
+  wire("files", "store", { from: "right", to: "left", color: S, toShift: -20 });
+  wire("cog", "store", { from: "right", to: "left", color: S, toShift: 10 });
+  wire("creds", "store", { from: "bottom", to: "top", color: S, dashed: true });
+  wire("creds", "gdal", { from: "right", to: "right", color: S, dashed: true, bend: 50 });
+  wire("store", "buckets", { from: "right", to: "left", color: S });
+  ready();
+</script>
+</body>
+</html>

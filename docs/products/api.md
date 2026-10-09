@@ -1,43 +1,58 @@
 # API reference
 
-Product reader framework. See [Adding a new product reader](product-readers.md) for the
-namespace contract (`Reader`, `BANDS`, `CONSTANTS`, `presets`) and the package-data layout.
+## `geoproducts`
 
-- **Base class:** `ProductReader` — extends `georeader.GeoData` with the sensor surface (`_track`,
-  `_bands`, lazy `_read_window`, …)
-- **Reference reader:** `geoproducts.toy_sensor` — in-memory worked example exercising the
-  full contract end-to-end
-- **Stacking:** `geoproducts.stack` — any readers' bands on one reference grid
-- **GOES-R ABI:** `geoproducts.goes` — L1b `Reader`, L2 `L2Reader` and `QualityReader` on
-  the `+proj=geos` fixed grid, `goes.aws` bucket helpers, `recipes` and `presets`
-  (see [GOES-R ABI](goes.md))
-- **Himawari AHI:** `geoproducts.himawari` — HSD `Reader`, L2 `L2Reader`, `himawari.aws`
-  bucket helpers, `recipes` and `presets` (see [Himawari AHI](himawari.md))
-- Further per-sensor readers (MTG, TROPOMI, VIIRS, Sentinel-3, SEVIRI, MODIS) land
-  alongside their design issues.
+The reader base class and `stack`. The contract is in
+[Concepts](concepts.md).
 
-::: geoproducts
+::: geoproducts.ProductReader
+::: geoproducts.stack
 
-## GOES-R ABI
+## `geoproducts.toy_sensor`
+
+The in-memory reference reader.
+
+::: geoproducts.toy_sensor.Reader
+::: geoproducts.toy_sensor.NDVI
+
+## `geoproducts.goes`
+
+GOES-R ABI L1b and L2 readers, NOAA bucket helpers, recipes and presets
+([guide](goes.md)).
 
 ::: geoproducts.goes.l1b
-
 ::: geoproducts.goes.l2
-
-::: geoproducts.goes.recipes
-
 ::: geoproducts.goes.aws
-
+::: geoproducts.goes.recipes
 ::: geoproducts.goes.presets
+::: geoproducts.goes.constants
 
-## Himawari AHI
+## `geoproducts.himawari`
+
+Himawari AHI HSD and L2 readers, NOAA bucket helpers, recipes and presets
+([guide](himawari.md)).
 
 ::: geoproducts.himawari.reader
-
 ::: geoproducts.himawari.l2
-
-::: geoproducts.himawari.recipes
-
 ::: geoproducts.himawari.aws
-
+::: geoproducts.himawari.recipes
 ::: geoproducts.himawari.presets
+::: geoproducts.himawari.constants
+
+## `geoproducts.carbonmapper`
+
+The Carbon Mapper plume catalogue and STAC client, typed records and
+rasters ([guide](carbonmapper.md); `[carbonmapper]` extra).
+
+::: geoproducts.carbonmapper.config
+::: geoproducts.carbonmapper.api_queries
+::: geoproducts.carbonmapper.download
+::: geoproducts.carbonmapper.plume
+::: geoproducts.carbonmapper.source
+::: geoproducts.carbonmapper.products
+::: geoproducts.carbonmapper.image
+::: geoproducts.carbonmapper.rasters
+::: geoproducts.carbonmapper.sources_raster
+
+until their docstrings render cleanly; see their source for the
+arguments.
