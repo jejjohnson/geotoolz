@@ -47,9 +47,25 @@ lists the schemes.
 | `https://account.blob.core.windows.net/container/key` | `AzureStore(container, account)` | `key` |
 | `http[s]://host/path?query` (pre-signed / SAS) | `HTTPStore(origin?query)` | `path` |
 | `hf://[datasets/]org/repo[@rev]/path` | `HTTPStore` on the Hub (token from `$HF_TOKEN`) | `…/resolve/<rev>/path` |
+| a local path, `C:\data\x.tif`, `file:///data/x.tif` | `LocalStore` at the filesystem anchor (`/`, `C:\`) | the absolute path below it |
 
 An `http(s)` query string stays on the store, so signed URLs are
 requested signed. Each distinct signature therefore gets its own client.
+
+Local paths go through the pool too, so `geocloud.files`, `CogSource` and
+`get_range_bytes` read a local file and a bucket the same way.
+`geocloud.store.local_path` is the one rule that tells them apart: a
+`Path`, a string without `scheme://` and a `file://` URI are local.
+`SUPPORTED_SCHEMES` lists only the remote schemes.
+
+```python
+from pathlib import Path
+
+from geocloud.store import local_path
+
+path: Path | None = local_path("file:///data/a%20b.tif")  # Path('/data/a b.tif')
+remote: Path | None = local_path("s3://bucket/a.tif")       # None
+```
 
 ## Mounts
 

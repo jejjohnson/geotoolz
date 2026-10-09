@@ -17,6 +17,8 @@ Surfaces:
 - `mount` / `unmount` — serve one bucket / container / host from a store
   you built (a ``MemoryStore`` in tests, a store with a custom credential
   provider); `get_obstore` returns it for every URI under that root.
+- `local_path` — the filesystem path a location names, or ``None`` for a
+  remote URI: the one rule the stack uses to tell the two apart.
 
 Every pooled store is built **without a prefix**: a client is shared by
 every object under its bucket / container, so baking the first object's
@@ -26,6 +28,11 @@ always returns the full key within the bucket / container, and
 
 Supported URI forms (store → key):
 
+- a local path (``str`` / ``Path``, ``C:\\data``, ``\\\\server\\share``) or a
+  ``file://`` URI → ``LocalStore`` at the filesystem anchor (``/``,
+  ``C:\\``), the absolute path below it. So every function on the pool
+  (`geocloud.files`, `geocloud.cog`, `get_range_bytes`) reads local files
+  the same way it reads buckets.
 - ``s3://bucket/key`` (``s3a``), ``gs://bucket/key`` (``gcs``) →
   ``S3Store(bucket)`` / ``GCSStore(bucket)``, ``key``.
 - ``az://account/container/key`` (``azure``),
@@ -58,6 +65,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import threading
 from collections import OrderedDict
 from collections.abc import Hashable, Mapping
@@ -65,6 +73,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote, urlsplit
+from urllib.request import url2pathname
 
 from geocloud._src.redact import redact
 
@@ -94,7 +103,60 @@ SUPPORTED_SCHEMES: frozenset[str] = (
     | _HTTP_SCHEMES
     | _HF_SCHEMES
 )
-"""URI schemes the pool can build a client for."""
+"""Remote URI schemes the pool can build a client for.
+
+Local paths and ``file://`` URIs are served too (see `local_path`); they
+are not in this set, which names what counts as *remote*.
+"""
+
+#: A URI string, a local path string, or a ``Path``.
+Location = str | os.PathLike[str]
+
+_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*$")
+
+
+def local_path(location: Location) -> Path | None:
+    """The filesystem path ``location`` names; ``None`` for a remote URI.
+
+    A ``Path``, a string without ``scheme://`` (``data/a.tif``,
+    ``C:\\data\\a.tif``, ``\\\\server\\share\\a.tif``) and a ``file://``
+    URI are local. A ``file://`` URI is percent-decoded
+    (``file:///data/a%20b.tif`` → ``/data/a b.tif``), and a host other than
+    ``localhost`` names a UNC share (``file://server/share/a.tif`` →
+    ``//server/share/a.tif``). The path is returned as written (relative
+    paths stay relative). Every other ``scheme://`` URI is remote.
+
+    Args:
+        location: A URI, a local path string, or a ``Path``.
+
+    Returns:
+        The ``Path``, or ``None`` when ``location`` is a remote URI.
+
+    Examples:
+        >>> local_path("file:///data/a%20b.tif").as_posix()
+        '/data/a b.tif'
+        >>> local_path("s3://bucket/a.tif") is None
+        True
+    """
+    if isinstance(location, os.PathLike):
+        return Path(location)
+    text = str(location)
+    head, sep, _ = text.partition("://")
+    if not sep or _DRIVE.match(text) or not _SCHEME.match(head):
+        return Path(text)
+    if head.lower() != "file":
+        return None
+    parts = urlsplit(text)
+    path = parts.path
+    if parts.netloc and parts.netloc.lower() != "localhost":
+        path = f"//{parts.netloc}{path}"  # a UNC share
+    return Path(url2pathname(path))
+
+
+def _absolute(path: Path) -> Path:
+    """``path`` absolute, ``~`` expanded and ``..`` folded (a store key has none)."""
+    return Path(os.path.abspath(path.expanduser()))
 
 
 @dataclass(frozen=True)
@@ -106,7 +168,7 @@ class _Location:
     or the HTTP query string (``None`` otherwise).
     """
 
-    backend: str  # "s3" | "gcs" | "azure" | "http" | "hf"
+    backend: str  # "s3" | "gcs" | "azure" | "http" | "hf" | "local"
     scheme: str
     bucket: str
     scope: str | None
@@ -229,8 +291,18 @@ def _expand(path: str) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(path)))
 
 
-def _locate(uri: str) -> _Location:
-    """Resolve ``uri`` to the backend, bucket / container and object key."""
+def _locate(uri: Location) -> _Location:
+    """Resolve ``uri`` to the backend, bucket / container and object key.
+
+    A local path resolves to ``("local", anchor, key)``: the filesystem
+    anchor (``/``, ``C:\\``) and the absolute path below it, ``/``-separated.
+    """
+    local = local_path(uri)
+    if local is not None:
+        path = _absolute(local)
+        key = path.relative_to(path.anchor).as_posix()
+        return _Location("local", "file", path.anchor, None, "" if key == "." else key)
+    uri = str(uri)
     parsed = urlsplit(uri)
     scheme = parsed.scheme.lower()
     netloc = parsed.netloc
@@ -276,7 +348,7 @@ def _locate(uri: str) -> _Location:
         return _Location("http", scheme, netloc, parsed.query or None, path)
     raise ValueError(
         f"obstore client pool: unsupported scheme {scheme!r} for URI {_r(uri)}. "
-        f"Supported: {', '.join(sorted(SUPPORTED_SCHEMES))}."
+        f"Supported: {', '.join(sorted(SUPPORTED_SCHEMES))}, or a local path."
     )
 
 
@@ -341,7 +413,9 @@ _PoolKey = tuple[
 ]
 
 
-def _pool_key(uri: str, storage_options: Mapping[str, Any] | None = None) -> _PoolKey:
+def _pool_key(
+    uri: Location, storage_options: Mapping[str, Any] | None = None
+) -> _PoolKey:
     """Return ``(backend, bucket, scope, region, endpoint, profile, options, scheme)``.
 
     ``scope`` is the Azure container (two containers of one account are
@@ -386,13 +460,17 @@ def _azure_options(loc: _Location, options: dict[str, Any]) -> dict[str, Any]:
     return options
 
 
-def _build_store(uri: str, storage_options: Mapping[str, Any] | None) -> ObjectStore:
+def _build_store(
+    uri: Location, storage_options: Mapping[str, Any] | None
+) -> ObjectStore:
     """Construct a fresh, prefix-free ``ObjectStore`` for ``uri``."""
-    from obstore.store import AzureStore, GCSStore, HTTPStore, S3Store
+    from obstore.store import AzureStore, GCSStore, HTTPStore, LocalStore, S3Store
 
     loc = _locate(uri)
 
     options = dict(storage_options or {})
+    if loc.backend == "local":
+        return LocalStore(loc.bucket, **options)
     if loc.backend == "s3":
         return S3Store(loc.bucket, **options)
     if loc.backend == "gcs":
@@ -414,10 +492,11 @@ def _build_store(uri: str, storage_options: Mapping[str, Any] | None) -> ObjectS
     return HTTPStore.from_url(base, **options)
 
 
-def object_key(uri: str) -> str:
+def object_key(uri: Location) -> str:
     """Return the key to request from ``get_obstore(uri)`` for ``uri``.
 
-    The path inside the bucket / container, without a leading ``/``.
+    The path inside the bucket / container, without a leading ``/``; for a
+    local path, the absolute path below its filesystem anchor.
     For Azure the container is bound into the pooled store, so it is
     not part of the key (``az://acct/cont/a/b.tif`` → ``a/b.tif``). For
     ``http(s)`` the query string is carried by the pooled store, not the
@@ -432,7 +511,7 @@ def object_key(uri: str) -> str:
 _MountKey = tuple[str, str, str | None, str | None]
 
 
-def _mount_key(uri: str) -> _MountKey:
+def _mount_key(uri: Location) -> _MountKey:
     """``(backend, bucket, scope, scheme)`` of the root ``uri`` lives under."""
     loc = _locate(uri)
     if loc.backend in ("http", "hf"):
@@ -446,7 +525,7 @@ def _mount_key(uri: str) -> _MountKey:
 _MOUNTS: dict[_MountKey, Any] = {}
 
 
-def mount(uri: str, store: ObjectStore) -> None:
+def mount(uri: Location, store: ObjectStore) -> None:
     """Serve every URI under the root ``uri`` from ``store``.
 
     `get_obstore` (and so `get_range_bytes`, `geocloud.files` and every
@@ -486,7 +565,7 @@ def mount(uri: str, store: ObjectStore) -> None:
         _MOUNTS[_mount_key(uri)] = store
 
 
-def unmount(uri: str) -> None:
+def unmount(uri: Location) -> None:
     """Remove the store `mount` put at ``uri``'s root (no-op if none)."""
     with _POOL_LOCK:
         _MOUNTS.pop(_mount_key(uri), None)
@@ -500,7 +579,7 @@ _POOL_LOCK = threading.Lock()
 
 
 def get_obstore(
-    uri: str,
+    uri: Location,
     *,
     storage_options: Mapping[str, Any] | None = None,
 ) -> ObjectStore:
@@ -517,7 +596,8 @@ def get_obstore(
     registered one.
 
     Args:
-        uri: A cloud URI (see the module docstring for the forms).
+        uri: A cloud URI or a local path (see the module docstring for the
+            forms).
         storage_options: Keyword arguments for the obstore store
             constructor (``client_options``, ``retry_config``,
             credentials, ...), over the registered ones. They are part of
@@ -563,7 +643,7 @@ def get_obstore(
 
 
 async def get_range_bytes(
-    uri: str,
+    uri: Location,
     start: int,
     length: int,
     *,
@@ -573,7 +653,7 @@ async def get_range_bytes(
     """Fetch ``length`` bytes starting at ``start`` from ``uri``.
 
     Args:
-        uri: Cloud URI of the object.
+        uri: Cloud URI or local path of the object.
         start: Byte offset of the read.
         length: Number of bytes.
         storage_options: Forwarded to `get_obstore`.

@@ -631,3 +631,58 @@ def test_mount_rejects_an_object_uri():
 
     with pytest.raises(ValueError, match="names an object"):
         public.mount("s3://bucket/key.tif", MemoryStore())
+
+
+# --- local paths --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("location", "expected"),
+    [
+        ("data/a.tif", "data/a.tif"),
+        ("/data/a.tif", "/data/a.tif"),
+        (Path("/data/a.tif"), "/data/a.tif"),
+        ("file:///data/a%20b.tif", "/data/a b.tif"),
+        ("file://localhost/data/a.tif", "/data/a.tif"),
+        ("file://server/share/a.tif", "//server/share/a.tif"),
+        ("C:/data/a.tif", "C:/data/a.tif"),
+        ("C:\\data\\a.tif", "C:\\data\\a.tif"),
+        ("a:b/c.tif", "a:b/c.tif"),  # no `://`: a path, not a URI
+    ],
+)
+def test_local_path_names_the_file(location, expected):
+    path = public.local_path(location)
+    assert path is not None
+    assert str(path) == str(Path(expected))
+
+
+@pytest.mark.parametrize(
+    "uri", ["s3://b/a.tif", "gs://b/a.tif", "https://h/a.tif", "hf://o/r/a"]
+)
+def test_local_path_is_none_for_remote_uris(uri):
+    assert public.local_path(uri) is None
+
+
+def test_local_paths_share_one_pooled_local_store(tmp_path: Path):
+    from obstore.store import LocalStore
+
+    a = objstore.get_obstore(tmp_path / "a.tif")
+    b = objstore.get_obstore(f"file://{tmp_path}/b.tif")
+    assert isinstance(a, LocalStore)
+    assert a is b
+    assert (
+        objstore.object_key(tmp_path / "a.tif")
+        == (tmp_path / "a.tif").relative_to(tmp_path.anchor).as_posix()
+    )
+
+
+def test_object_key_of_a_local_path_is_absolute_and_folded(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    expected = (tmp_path / "b.bin").relative_to(tmp_path.anchor).as_posix()
+    assert objstore.object_key("sub/../b.bin") == expected
+
+
+def test_get_range_bytes_reads_a_local_file(tmp_path: Path):
+    path = tmp_path / "x.bin"
+    path.write_bytes(b"0123456789")
+    assert asyncio.run(objstore.get_range_bytes(str(path), 2, 4)) == b"2345"
