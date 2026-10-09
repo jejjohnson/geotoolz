@@ -47,17 +47,12 @@ rasters ([guide](carbonmapper.md); `[carbonmapper]` extra).
 ::: geoproducts.carbonmapper.config
 ::: geoproducts.carbonmapper.api_queries
 ::: geoproducts.carbonmapper.download
-    options:
-      filters: ["!^_", "!^get_sources$"]
 ::: geoproducts.carbonmapper.plume
 ::: geoproducts.carbonmapper.source
 ::: geoproducts.carbonmapper.products
 ::: geoproducts.carbonmapper.image
-    options:
-      filters: ["!^_", "!^from_plume_id$"]
 ::: geoproducts.carbonmapper.rasters
 ::: geoproducts.carbonmapper.sources_raster
 
-`download.get_sources` and `CMPlumeImage.from_plume_id` are left out above
 until their docstrings render cleanly; see their source for the
 arguments.

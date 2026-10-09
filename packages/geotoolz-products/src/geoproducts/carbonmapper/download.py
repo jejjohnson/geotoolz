@@ -617,39 +617,30 @@ def get_sources(
     sectors: list[str] | None = None,
     token: str | None = None,
 ) -> dict:
-    """
-    Fetch emission sources (clusters of plumes at a location).
+    """Fetch emission sources (clusters of plumes at a location).
 
     An *emission source* groups all plumes detected at the same geographic
     location into a persistent point source record.  Each source includes
     aggregated statistics across all associated plumes.
 
-    Parameters
-    ----------
-    source_gas:
-        Gas species to filter by — ``"CH4"`` or ``"CO2"``.
-    bbox:
-        Bounding-box spatial filter as
-        ``(west_lon, south_lat, east_lon, north_lat)`` in WGS 84.
-    sectors:
-        IPCC sector codes to include, e.g. ``["1B2"]`` for Oil & Gas.
-    token:
-        Optional Bearer token for authenticated requests.
+    Args:
+        source_gas: Gas species to filter by — ``"CH4"`` or ``"CO2"``.
+        bbox: Bounding-box spatial filter as
+            ``(west_lon, south_lat, east_lon, north_lat)`` in WGS 84.
+        sectors: IPCC sector codes to include, e.g. ``["1B2"]`` for Oil & Gas.
+        token: Optional Bearer token for authenticated requests.
 
-    Returns
-    -------
-    dict
+    Returns:
         The ``/catalog/sources.geojson`` GeoJSON FeatureCollection. Each
         feature carries the source centroid and properties such as
         ``source_name``, ``sector``, ``plume_count``, persistence and
         ``emission_auto``. :func:`~geoproducts.carbonmapper.list_sources`
-        parses the features into :class:`CMSource` records.
+        parses the features into ``CMSource`` records.
 
-    Examples
-    --------
-    >>> sources = get_sources(source_gas="CH4", sectors=["1B2"])  # doctest: +SKIP
-    >>> for f in sources["features"]:  # doctest: +SKIP
-    ...     print(f["properties"]["source_name"])
+    Examples:
+        >>> sources = get_sources(source_gas="CH4", sectors=["1B2"])  # doctest: +SKIP
+        >>> features = sources["features"]  # doctest: +SKIP
+        >>> names = [f["properties"]["source_name"] for f in features]  # doctest: +SKIP
     """
     params: dict[str, Any] = {}
     if source_gas:

@@ -16,6 +16,8 @@ credentials). `geocloud.cog` reads COG tiles straight
 from that pool with async-geotiff: no GDAL, every tile a batch of windows
 touches fetched once, groups of tiles fetched concurrently.
 
+<p align="center"><img src="../../docs/assets/diagrams/cloud-pool.png" alt="geocloud's layers: geopatcher's CogField, geoproducts' readers and bucket helpers, geocatalog's stage and your code call geocloud.files and geocloud.cog; both take their client from the geocloud.store pool, which merges the grants in geocloud.credentials and keeps one client per bucket root" width="100%"></p>
+
 ## Install
 
 ```bash
@@ -27,6 +29,30 @@ pip install 'geotoolz-cloud[cog]'     # + COG reads (async-geotiff)
 |---|---|---|
 | *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials`, `geocloud.cog.write_cog` |
 | `[cog]` | async-geotiff | `geocloud.cog` (`CogSource`, `AsyncCogReader`, `read_*`) |
+
+## Quickstart
+
+List a Sentinel-2 scene in the public `sentinel-cogs` bucket, then read
+two overlapping windows of its red band. Their shared tiles are fetched
+once.
+
+```python
+from georeader.geotensor import GeoTensor
+from rasterio.windows import Window
+
+from geocloud import credentials, files
+from geocloud.cog import CogSource
+
+credentials.set_credentials("s3://sentinel-cogs", anonymous=True, region="us-west-2")
+
+scene: str = "s3://sentinel-cogs/sentinel-s2-l2a-cogs/10/S/DG/2024/7/S2A_10SDG_20240702_0_L2A/"
+objects: list[files.ObjectInfo] = files.ls(scene)        # B01.tif … TCI.tif, metadata
+src: CogSource = CogSource.open(scene + "B04.tif")       # one header fetch
+src.domain.shape                                          # (1, 10980, 10980) · EPSG:32610, 10 m
+chips: list[GeoTensor] = src.read_windows(
+    [Window(0, 0, 512, 512), Window(256, 0, 512, 512)]
+)                                                         # 2 × (1, 512, 512) uint16
+```
 
 ## The client pool — `geocloud.store`
 

@@ -352,7 +352,8 @@ class CMPlumeImage:
             token: Bearer token.
             products: Explicit product selection (see
                 :mod:`~geoproducts.carbonmapper.products`).
-            overview_level, http_timeout: See class attributes.
+            overview_level: See the class attribute.
+            http_timeout: See the class attribute.
 
         Raises:
             requests.HTTPError: On REST failure (404 etc.; 429 is
