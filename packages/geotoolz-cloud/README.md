@@ -145,6 +145,21 @@ classes and masks, `average` for floats, and a nodata only when the dtype
 can hold it. Lazy georeader readers are staged strip by strip. It needs no
 extra.
 
+## Local copies — `geocloud.cache`
+
+```python
+from pathlib import Path
+
+from geocloud.cache import LocalCache, localize
+
+path: Path = localize("s3://bucket/MOD021KM.A2024001.hdf")   # downloaded once, then cached
+cache: LocalCache = LocalCache(root="/scratch/cache", ttl_days=7)
+same: Path = cache.fetch("s3://bucket/MOD021KM.A2024001.hdf")
+```
+
+For readers that need a real file (HDF4, memory-mapped binaries). A local
+path comes back in place; a re-signed URL hits the same cache slot.
+
 ## fsspec libraries — `geocloud.fs`
 
 ```python

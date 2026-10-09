@@ -32,6 +32,14 @@ Whole-object verbs on the pool, cloud or local.
 ::: geocloud.files.rm
 ::: geocloud.files.sign
 
+## `geocloud.cache`
+
+Complete local copies of remote objects.
+
+::: geocloud.cache.localize
+::: geocloud.cache.LocalCache
+::: geocloud.cache.cache_key
+
 ## `geocloud.fs`
 
 An fsspec filesystem on the pool (``[fsspec]`` extra).

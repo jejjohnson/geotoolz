@@ -1,10 +1,10 @@
-"""`stage()` + `LocalCache` — resolve remote URIs into a local cache.
+"""`stage()` — resolve a catalog's remote URIs into a local cache.
 
 The staging layer is the bytes-on-disk side of the
 discovery/matchup/staging trio. Catalog ingestion records URIs
 (``s3://``, ``gs://``, ``https://``, …); ``stage()`` materialises
-those URIs into a `LocalCache` and returns a new catalog whose
-``filepath`` (and asset map, when present) points at the cached
+those URIs into a `geocloud.cache.LocalCache` and returns a new catalog
+whose ``filepath`` (and asset map, when present) points at the cached
 copies.
 
 Design points:
@@ -12,16 +12,13 @@ Design points:
 * Local paths (no scheme, ``file://``) are used in place — no copy, so
   staging a local catalog works on a base install. Remote URIs
   (``s3://``, ``gs://``, ``az://`` / ``abfs[s]://``, ``http(s)://``,
-  ``hf://``) download through `geocloud.files` on the stack's shared
-  obstore client pool (``pip install 'geotoolz-catalog[cloud]'``), with
-  the credentials registered in `geocloud.credentials`.
-* The cache key is the SHA-256 of the URI (with expiring signature
-  parameters removed, so a re-signed URL hits the same slot) plus the
-  file extension. It is keyed by *location*, not content: two URIs
-  holding the same bytes get two slots.
-* Downloads are written to a temporary ``.part`` file and renamed into
-  place, so a cache slot only ever holds a complete download; each
-  distinct URI is fetched once per call however many rows share it.
+  ``hf://``) go through `geocloud.cache.LocalCache.fetch` — a download
+  with `geocloud.files` on the stack's shared obstore client pool, with
+  the credentials registered in `geocloud.credentials` (``pip install
+  'geotoolz-catalog[cloud]'``).
+* The cache (slot layout, signature-stripped keys, TTL, ``.part``
+  downloads renamed into place) is geotoolz-cloud's; each distinct URI is
+  fetched once per call however many rows share it.
 
 Asset-aware: when a catalog row's ``assets`` is an asset map (the
 JSON-encoded dict produced by `CatalogBundle.ingest`, or a dict),
@@ -32,14 +29,9 @@ local paths. When ``assets`` is absent (the row came from
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
-import hashlib
 import json
-import os
-import re
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
@@ -49,107 +41,20 @@ from loguru import logger
 
 from geocatalog._src._extras import missing_extra
 from geocatalog._src.utils.retry import retry_transient_io
-from geocatalog._src.utils.uri import parse_uri, query_params, with_query
+from geocatalog._src.utils.uri import parse_uri
 
 
 if TYPE_CHECKING:
     from os import PathLike
 
+    from geocloud.cache import LocalCache
+
     from geocatalog._src.base import GeoCatalog
 
-
-# Default cache root resolved at first use rather than import
-# time, so a process that overrides $GEOCATALOG_CACHE just before
-# calling `stage()` still sees it.
-_DEFAULT_CACHE_SUBDIR = ".cache/geocatalog"
-
-# In-progress downloads (`geocloud.files.download`) are named
-# `.<slot>.<uuid4 hex>.part`, which no cache slot (a 64-hex digest plus
-# the source extension) can match; `LocalCache.prune` removes leftovers.
-_PART_NAME = re.compile(r"^\..+\.[0-9a-f]{32}\.part$")
 
 #: Column holding each staged row's original URIs (JSON, keyed like
 #: ``assets``; ``{"filepath": uri}`` for rows without an asset map).
 STAGED_FROM_COLUMN = "staged_from"
-
-
-@dataclasses.dataclass
-class LocalCache:
-    """Local cache for staged remote files.
-
-    Files land at ``{root}/{key[:2]}/{key}{ext}``, where ``key`` is the
-    SHA-256 of the URI with expiring signature parameters removed. The
-    two-letter prefix keeps any one directory under a few thousand
-    entries on a large catalog — friendly to filesystems that
-    paginate big directories.
-
-    Args:
-        root: Directory the cache lives under. ``None`` resolves
-            ``$GEOCATALOG_CACHE`` (when set) or
-            ``~/.cache/geocatalog``. The resolution is lazy so
-            tests can override the env var before each call.
-        ttl_days: Optional lifetime. When set, cached files older
-            than this many days are re-downloaded on their next use,
-            and `prune` deletes them. ``None`` means cache forever.
-        timeout: Per-request timeout in seconds for the object-store
-            client, so a stalled read cannot hang a worker slot
-            forever. Downloads move in 16 MiB byte ranges, one request
-            each, so this bounds a range, not a whole file. ``None``
-            keeps the client's default (30 s).
-    """
-
-    root: PathLike[str] | str | None = None
-    ttl_days: int | None = None
-    timeout: float | None = 60.0
-
-    def resolve_root(self) -> Path:
-        """Return the resolved cache root (creates it on first call)."""
-        if self.root is not None:
-            r = Path(self.root)
-        else:
-            env_root = os.environ.get("GEOCATALOG_CACHE")
-            r = Path(env_root) if env_root else Path.home() / _DEFAULT_CACHE_SUBDIR
-        r.mkdir(parents=True, exist_ok=True)
-        return r
-
-    def path_for(self, uri: str) -> Path:
-        """Deterministic cache path for a URI."""
-        digest = hashlib.sha256(cache_key(uri).encode("utf-8")).hexdigest()
-        return self.resolve_root() / digest[:2] / f"{digest}{_ext_for(uri)}"
-
-    def is_fresh(self, path: Path) -> bool:
-        """Is the cached file present and within TTL?"""
-        if not path.exists():
-            return False
-        if self.ttl_days is None:
-            return True
-        return not self._expired(path)
-
-    def prune(self) -> int:
-        """Delete expired files and abandoned partial downloads.
-
-        Returns:
-            The number of files removed. Without ``ttl_days`` only
-            partial downloads (``*.part``) are removed.
-        """
-        removed = 0
-        for path in self.resolve_root().glob("*/*"):
-            if not path.is_file():
-                continue
-            if _PART_NAME.match(path.name) or (
-                self.ttl_days is not None and self._expired(path)
-            ):
-                with contextlib.suppress(OSError):
-                    path.unlink()
-                    removed += 1
-        return removed
-
-    def _expired(self, path: Path) -> bool:
-        assert self.ttl_days is not None
-        age = datetime.now(tz=UTC) - datetime.fromtimestamp(
-            path.stat().st_mtime, tz=UTC
-        )
-        return age >= timedelta(days=self.ttl_days)
 
 
 def stage(
@@ -169,10 +74,9 @@ def stage(
             only `InMemoryGeoCatalog` is supported — the function
             returns a fresh in-memory catalog rather than mutating
             the input.
-        dest: Override for the cache root. ``None`` defers to
-            ``cache.resolve_root()``; if ``cache`` is also None,
-            falls back to ``$GEOCATALOG_CACHE`` /
-            ``~/.cache/geocatalog``.
+        dest: The cache root when ``cache`` is ``None``. ``None`` uses
+            `geocloud.cache.LocalCache`'s default (``$GEOCLOUD_CACHE``,
+            else ``~/.cache/geocloud``).
         assets: When rows carry an asset map (see
             `CatalogBundle.ingest`), only fetch these keys. ``None``
             stages every asset present on each row. Rows that have
@@ -180,8 +84,8 @@ def stage(
         parallel: Max concurrent fetches via a
             `ThreadPoolExecutor`. obstore releases the GIL on I/O, so
             threads scale well.
-        cache: Reuse an existing cache instance. ``None`` builds a
-            default one bound to ``dest`` (or the env-var default).
+        cache: The `geocloud.cache.LocalCache` to fetch into. ``None``
+            builds one bound to ``dest`` when a remote URI needs it.
         retries: Per-URI retry budget for *transient* failures only
             (network failures left after the object-store client's own
             retries, short reads — the shared policy of
@@ -225,8 +129,6 @@ def stage(
     if assets is not None and not list(assets):
         raise ValueError("stage(assets=[]) stages nothing; pass assets=None for all")
 
-    cache = cache or LocalCache(root=dest)
-
     plans = [
         _plan_row(row, idx, asset_filter=assets)
         for idx, row in enumerate(catalog.gdf.itertuples())
@@ -247,6 +149,9 @@ def stage(
     for plan in plans:
         for key, uri in plan.assets.items():
             users.setdefault(uri, []).append((plan.row_idx, key))
+
+    if cache is None and any(_local_path(uri) is None for uri in users):
+        cache = _cloud_cache().LocalCache(root=dest)
 
     failures: dict[tuple[int, str], Exception] = {}
     pool = ThreadPoolExecutor(max_workers=max(1, parallel))
@@ -413,26 +318,25 @@ def _local_path(uri: str) -> Path | None:
     return parse_uri(uri).local_path()
 
 
-def _cloud_files() -> ModuleType:
-    """`geocloud.files`, or an error naming the ``[cloud]`` extra."""
+def _cloud_cache() -> ModuleType:
+    """`geocloud.cache`, or an error naming the ``[cloud]`` extra."""
     try:
-        from geocloud import files
+        from geocloud import cache
     except ImportError as exc:
         raise missing_extra(
             "stage: fetching remote URIs", "cloud", packages="geotoolz-cloud"
         ) from exc
-    return files
+    return cache
 
 
-def _fetch_one(uri: str, cache: LocalCache, retries: int) -> Path:
+def _fetch_one(uri: str, cache: LocalCache | None, retries: int) -> Path:
     """Resolve a single URI to a local file; return its path.
 
     Local URIs (no scheme or ``file://``) are returned in place —
     nothing is copied and geotoolz-cloud is not needed; a missing local
-    file raises `FileNotFoundError`. Remote URIs are served from the
-    cache when fresh, else downloaded with `geocloud.files.download`
-    (ranged reads into a ``.part`` file renamed into place once
-    complete). Transient failures are retried with the shared
+    file raises `FileNotFoundError`. Remote URIs go through
+    `geocloud.cache.LocalCache.fetch` (a cache hit, or a download into the
+    cache), with transient failures retried by the shared
     `retry_transient_io` policy.
     """
     local = _local_path(uri)
@@ -440,70 +344,8 @@ def _fetch_one(uri: str, cache: LocalCache, retries: int) -> Path:
         if not local.exists():
             raise FileNotFoundError(f"stage: local file not found: {uri}")
         return local
-
-    dest = cache.path_for(uri)
-    if cache.is_fresh(dest):
-        logger.debug("stage: cache hit {!r} → {}", uri, dest)
-        return dest
-    files = _cloud_files()
-    options = (
-        None
-        if cache.timeout is None
-        else {"client_options": {"timeout": timedelta(seconds=cache.timeout)}}
-    )
-    retry_transient_io(
-        files.download, uri, dest, storage_options=options, retries=retries
-    )
-    return dest
+    assert cache is not None  # `stage` builds one when a URI is remote
+    return retry_transient_io(cache.fetch, uri, retries=retries)
 
 
-# ---------------------------------------------------------------------------
-# Cache keys
-# ---------------------------------------------------------------------------
-
-# Query parameters that sign a URL rather than select content: a
-# re-signed URL for the same object must hit the same cache slot.
-_AZURE_SAS = {
-    "sig", "se", "st", "sp", "sv", "sr", "spr", "si", "srt", "ss", "sdd",
-    "skoid", "sktid", "skt", "ske", "sks", "skv", "saoid", "suoid", "scid",
-}  # fmt: skip
-_CLOUDFRONT = {"expires", "signature", "key-pair-id", "policy"}
-
-
-def cache_key(uri: str) -> str:
-    """``uri`` without the parameters of an expiring signature.
-
-    Azure SAS (when ``sig`` is present), AWS / GCS query signing
-    (``X-Amz-*`` / ``X-Goog-*``) and CloudFront signed-URL parameters
-    are dropped; every other query parameter is kept, so URLs that
-    select different content keep different keys.
-    """
-    params = query_params(uri)
-    if not params:
-        return uri
-    names = {k.lower() for k, _ in params}
-
-    def signing(name: str) -> bool:
-        n = name.lower()
-        return (
-            n.startswith(("x-amz-", "x-goog-"))
-            or ("sig" in names and n in _AZURE_SAS)
-            or ({"signature", "key-pair-id"} <= names and n in _CLOUDFRONT)
-        )
-
-    kept = [(k, v) for k, v in params if not signing(k)]
-    if len(kept) == len(params):
-        return uri
-    return with_query(uri, kept)
-
-
-def _ext_for(uri: str) -> str:
-    """Return the file extension (with dot) for a URI; empty string if none.
-
-    A local path is not a URL: ``#`` and ``?`` in it are ordinary
-    characters (`parse_uri` keeps the whole string as its path).
-    """
-    return parse_uri(uri).suffix
-
-
-__all__ = ["LocalCache", "cache_key", "stage"]
+__all__ = ["stage"]

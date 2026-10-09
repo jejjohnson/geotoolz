@@ -24,6 +24,15 @@ workspace package.
   package that moves files (staging, product downloads) calls these rather
   than streaming bytes itself. Local paths take the pool's `LocalStore`
   like any other location.
+- **`geocloud.cache`** — complete local copies of remote objects:
+  `localize(uri)` / `LocalCache.fetch` (a local path in place, else one
+  download into the cache, served from there afterwards), `cache_key`
+  (expiring signatures stripped), TTL and `prune`. For readers that need a
+  real file (HDF4, memory-mapped binaries) and for catalog staging; never
+  write another download cache.
+- **`geocloud.fs`** (`[fsspec]` extra) — `GeoCloudFileSystem` /
+  `filesystem()`: fsspec on the pool for libraries that only speak fsspec
+  (xarray, zarr, pyarrow, geopandas). Never pull in s3fs / gcsfs / adlfs.
 - **`geocloud.credentials`** — the per-root registry `get_obstore` merges
   under `storage_options` (`set_credentials`, `remove_credentials`,
   `credential_roots`, `load_credentials` of a TOML file, auto-loaded from

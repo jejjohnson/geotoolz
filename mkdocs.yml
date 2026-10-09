@@ -209,6 +209,7 @@ nav:
           - Read COGs: cloud/how-to/read-cogs.md
           - Write COGs: cloud/how-to/write-cogs.md
           - Use fsspec libraries: cloud/how-to/fsspec.md
+          - Cache remote files: cloud/how-to/cache.md
       - Tutorials:
           - A tour of geocloud: cloud/notebooks/geocloud_tour.ipynb
       - Reference: cloud/api.md

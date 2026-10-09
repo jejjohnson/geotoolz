@@ -78,7 +78,7 @@ named for the step it serves:
 | join | `geocatalog.matchup` | `matchup`, `MatchupRow`, the spatial / temporal strategies |
 | read | `geocatalog.load` | `load_raster`, `aload_raster`, `load_raster_timeseries`, `load_xarray`, `load_vector` |
 | save / share | `geocatalog.storage` | `to_geoparquet` / `from_geoparquet`, `StreamingParquetWriter`, `to_stac_collection`, `CatalogBundle` |
-| stage | `geocatalog.staging` | `stage`, `LocalCache` |
+| stage | `geocatalog.staging` | `stage` (into a `geocloud.cache.LocalCache`) |
 | patch | `geocatalog.patch` | `field_for`, `CatalogDomain` |
 | grids | `geocatalog.grid` | `slice_to_window`, `is_grid_aligned`, `count_steps` |
 | helpers | `geocatalog.utils` | `parse_uri`, `retry_transient_io`, UTC time helpers |

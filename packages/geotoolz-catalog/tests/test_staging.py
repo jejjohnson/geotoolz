@@ -1,17 +1,16 @@
-"""End-to-end tests for `geocatalog.staging.stage` + `LocalCache`.
+"""End-to-end tests for `geocatalog.staging.stage` over `geocloud.cache`.
 
 No network. Local paths are staged in place; the remote-URI paths
 (retry, timeout, on_error) fake ``geocloud.files.download`` on the
-``cloud_stub`` module, so they also run on a base install without the
-``[cloud]`` extra. One end-to-end test downloads through the real
+``cloud_stub`` module (skipped on a base install). The cache itself is
+tested in geotoolz-cloud. One end-to-end test downloads through the real
 `geocloud.files` from an in-memory bucket (`geocloud.store.mount`).
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +20,11 @@ from shapely.geometry import box
 
 from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.staging.stage import (
-    LocalCache,
-    _ext_for,
     _fetch_one,
     _plan_row,
     stage,
 )
-from tests.conftest import catalog_from_rows
+from tests.conftest import catalog_from_rows, local_cache
 
 
 # ---------------------------------------------------------------------------
@@ -47,113 +44,6 @@ def _write(dest: Path, content: bytes) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(content)
     return dest
-
-
-# ---------------------------------------------------------------------------
-# LocalCache
-# ---------------------------------------------------------------------------
-
-
-class TestLocalCacheRootResolution:
-    def test_explicit_root_used_when_set(self, tmp_path: Path) -> None:
-        cache = LocalCache(root=tmp_path / "explicit")
-        resolved = cache.resolve_root()
-        assert resolved == tmp_path / "explicit"
-        assert resolved.is_dir()  # auto-created
-
-    def test_env_var_takes_precedence_when_root_none(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        env_root = tmp_path / "env"
-        monkeypatch.setenv("GEOCATALOG_CACHE", str(env_root))
-        cache = LocalCache()
-        assert cache.resolve_root() == env_root
-
-    def test_falls_back_to_home_cache(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        monkeypatch.delenv("GEOCATALOG_CACHE", raising=False)
-        monkeypatch.setenv("HOME", str(tmp_path))
-        cache = LocalCache()
-        resolved = cache.resolve_root()
-        assert resolved == tmp_path / ".cache" / "geocatalog"
-
-
-class TestLocalCachePathFor:
-    def test_deterministic_per_uri(self, tmp_path: Path) -> None:
-        cache = LocalCache(root=tmp_path)
-        a1 = cache.path_for("s3://bucket/data.tif")
-        a2 = cache.path_for("s3://bucket/data.tif")
-        b = cache.path_for("s3://bucket/other.tif")
-        assert a1 == a2
-        assert a1 != b
-
-    def test_path_carries_extension(self, tmp_path: Path) -> None:
-        cache = LocalCache(root=tmp_path)
-        path = cache.path_for("https://example.com/foo/bar.nc")
-        assert path.suffix == ".nc"
-
-    def test_two_letter_directory_prefix(self, tmp_path: Path) -> None:
-        # Two-level layout keeps any one directory small on large
-        # catalogs. The prefix is the first 2 chars of the sha256.
-        cache = LocalCache(root=tmp_path)
-        uri = "s3://bucket/x.tif"
-        path = cache.path_for(uri)
-        digest = hashlib.sha256(uri.encode()).hexdigest()
-        assert path.parent.name == digest[:2]
-
-
-class TestLocalCacheTTL:
-    def test_fresh_when_no_ttl(self, tmp_path: Path) -> None:
-        cache = LocalCache(root=tmp_path)
-        target = cache.path_for("s3://x.tif")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"x")
-        assert cache.is_fresh(target)
-
-    def test_fresh_within_ttl(self, tmp_path: Path) -> None:
-        cache = LocalCache(root=tmp_path, ttl_days=7)
-        target = cache.path_for("s3://x.tif")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"x")
-        assert cache.is_fresh(target)
-
-    def test_stale_past_ttl(self, tmp_path: Path) -> None:
-        cache = LocalCache(root=tmp_path, ttl_days=1)
-        target = cache.path_for("s3://x.tif")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"x")
-        # Backdate the mtime to 2 days ago.
-        two_days_ago = (datetime.now(tz=UTC) - timedelta(days=2)).timestamp()
-        Path(target).touch()
-        import os
-
-        os.utime(target, (two_days_ago, two_days_ago))
-        assert not cache.is_fresh(target)
-
-    def test_missing_path_is_not_fresh(self, tmp_path: Path) -> None:
-        cache = LocalCache(root=tmp_path)
-        assert not cache.is_fresh(tmp_path / "nope.tif")
-
-
-# ---------------------------------------------------------------------------
-# _ext_for
-# ---------------------------------------------------------------------------
-
-
-class TestExtFor:
-    @pytest.mark.parametrize(
-        ("uri", "expected"),
-        [
-            ("s3://bucket/foo.tif", ".tif"),
-            ("https://x/path/to/bar.nc?token=abc", ".nc"),
-            ("/local/file.geojson", ".geojson"),
-            ("https://x/no-extension", ""),
-            ("file:///local/data.tar.gz", ".gz"),
-        ],
-    )
-    def test_extension_extraction(self, uri: str, expected: str) -> None:
-        assert _ext_for(uri) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +193,7 @@ class TestStageRemoteFetch:
             ],
             crs="EPSG:4326",
         )
-        out = stage(cat, cache=LocalCache(root=tmp_path / "cache"))
+        out = stage(cat, cache=local_cache(root=tmp_path / "cache"))
         assert out.gdf.iloc[0]["filepath"] == str(src_file)
 
     def test_s3_uri_downloads_through_geocloud(self, tmp_path: Path) -> None:
@@ -327,7 +217,7 @@ class TestStageRemoteFetch:
                 ],
                 crs="EPSG:4326",
             )
-            cache = LocalCache(root=tmp_path / "cache")
+            cache = local_cache(root=tmp_path / "cache")
             out = stage(cat, cache=cache)
         finally:
             unmount("s3://stage-test")
@@ -342,7 +232,7 @@ class TestStageCacheHit:
 
     def test_cache_hit_skips_download(self, tmp_path: Path) -> None:
         # A remote URI whose cache slot is already filled.
-        cache = LocalCache(root=tmp_path / "cache")
+        cache = local_cache(root=tmp_path / "cache")
         uri = "https://example.com/data.tif"
         # Pre-populate the cache to simulate "already fetched".
         target = cache.path_for(uri)
@@ -388,7 +278,7 @@ class TestStageRetry:
         # No need to actually wait out the backoff.
         monkeypatch.setattr(time, "sleep", lambda _s: None)
 
-        cache = LocalCache(root=tmp_path / "cache")
+        cache = local_cache(root=tmp_path / "cache")
 
         path = _fetch_one("https://example.com/x.tif", cache, retries=3)
         assert attempts["n"] == 3
@@ -413,7 +303,7 @@ class TestStageRetry:
 
         monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
 
-        cache = LocalCache(root=tmp_path / "cache")
+        cache = local_cache(root=tmp_path / "cache")
         with pytest.raises(exc_type, match="fatal"):
             _fetch_one("https://example.com/x.tif", cache, retries=3)
         assert attempts["n"] == 1
@@ -432,7 +322,7 @@ class TestStageRetry:
         monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
         monkeypatch.setattr(time, "sleep", lambda _s: None)
 
-        cache = LocalCache(root=tmp_path / "cache")
+        cache = local_cache(root=tmp_path / "cache")
         with pytest.raises(OSError, match="still down"):
             _fetch_one("https://example.com/x.tif", cache, retries=2)
         assert attempts["n"] == 3  # initial attempt + 2 retries
@@ -440,15 +330,6 @@ class TestStageRetry:
 
 class TestStageTimeout:
     """`LocalCache.timeout` becomes the object-store client's request timeout."""
-
-    def test_default_timeout_is_60s(self) -> None:
-        assert LocalCache().timeout == 60.0
-
-    def test_timeout_survives_dataclass_serialization(self) -> None:
-        import dataclasses
-
-        cfg = dataclasses.asdict(LocalCache(root="/x"))
-        assert cfg["timeout"] == 60.0
 
     def test_timeout_forwarded_to_the_client(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cloud_stub: Any
@@ -461,7 +342,7 @@ class TestStageTimeout:
 
         monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
 
-        cache = LocalCache(root=tmp_path / "cache", timeout=12.5)
+        cache = local_cache(root=tmp_path / "cache", timeout=12.5)
         _fetch_one("https://example.com/x.tif", cache, retries=0)
         assert seen["storage_options"] == {
             "client_options": {"timeout": timedelta(seconds=12.5)}
@@ -478,7 +359,7 @@ class TestStageTimeout:
 
         monkeypatch.setattr(cloud_stub, "download", fake_download, raising=False)
 
-        cache = LocalCache(root=tmp_path / "cache", timeout=None)
+        cache = local_cache(root=tmp_path / "cache", timeout=None)
         _fetch_one("https://example.com/y.tif", cache, retries=0)
         assert seen["storage_options"] is None
 

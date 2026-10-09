@@ -23,7 +23,7 @@ Everything else lives in one sub-namespace per step of the workflow:
   `load_xarray`.
 - save / share — `geocatalog.storage`: GeoParquet, STAC export,
   `CatalogBundle`.
-- stage — `geocatalog.staging`: `stage`, `LocalCache`.
+- stage — `geocatalog.staging`: `stage` (into a `geocloud.cache.LocalCache`).
 - patch — `geocatalog.patch`: `field_for`, `CatalogDomain` (the geopatcher
   bridge).
 - grids — `geocatalog.grid`: `slice_to_window`, `is_grid_aligned`,
