@@ -20,7 +20,7 @@ person will find and reuse it.
 | `geotoolz-patcher` | `geopatcher` | Split a field into patches, process, stitch back (geometry × sampler × window × aggregation) | georeader; `[cog]` → geotoolz-cloud; `[pipekit]` |
 | `geotoolz-catalog` | `geocatalog` | Find, index, join, load and stage files (`GeoSlice` queries, GeoParquet) | geopandas / pyarrow; `[patch]` → geotoolz-patcher; `[cloud]` → geotoolz-cloud |
 | `geotoolz-cloud` | `geocloud` | Object storage: the one obstore client pool, file verbs, credentials, async COG reads | georeader, obstore |
-| `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …) → `GeoData` / `GeoTensor` | georeader; `[obstore]` / `[goes]` / `[himawari]` → geotoolz-cloud; `[operators]` → geotoolz |
+| `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …) → `GeoData` / `GeoTensor` | georeader; `[goes]` / `[himawari]` → geotoolz-cloud; `[operators]` → geotoolz |
 
 Dependencies point one way and every cross-package link is an optional extra:
 `geotoolz` never depends on `geoproducts`, the patcher never on `geotoolz`,

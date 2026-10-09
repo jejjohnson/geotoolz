@@ -30,19 +30,17 @@ drops straight into the operators, the patcher and the catalog loaders.
 
 ```bash
 pip install geotoolz-products                    # readers (georeader only)
-pip install 'geotoolz-products[obstore]'         # pooled cloud byte-range reads + NOAA bucket helpers
 pip install 'geotoolz-products[operators]'       # sensor presets (geotoolz operators)
-pip install 'geotoolz-products[goes]'            # GOES-R ABI reader (h5py) + goes.aws (geotoolz-cloud)
-pip install 'geotoolz-products[himawari]'        # Himawari L2 products (h5py) + himawari.aws (geotoolz-cloud)
+pip install 'geotoolz-products[goes]'            # GOES-R ABI readers + goes.aws (geotoolz-cloud[hdf5])
+pip install 'geotoolz-products[himawari]'        # Himawari L2 products + himawari.aws (geotoolz-cloud[hdf5])
 pip install 'geotoolz-products[carbonmapper]'    # Carbon Mapper plume catalogue + STAC
 ```
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
 | *(base)* | georeader, numpy, rasterio | `ProductReader`, `toy_sensor` |
-| `[obstore]` | `geotoolz-cloud` | `ProductReader._read_bytes` over `s3://` / `gs://` / `az://` through the shared `geocloud.store` pool; the `aws` bucket helpers |
 | `[operators]` | `geotoolz` | per-sensor `presets` (e.g. `toy_sensor.presets.NDVI`) |
-| `[goes]` | h5py, geotoolz-cloud | `geoproducts.goes.Reader`, the `goes.aws` bucket helpers |
+| `[goes]` | geotoolz-cloud with h5py | `geoproducts.goes.Reader` (local or `s3://`, ranged reads), the `goes.aws` bucket helpers |
 | `[himawari]` | h5py, geotoolz-cloud | `geoproducts.himawari.L2Reader`, the `himawari.aws` bucket helpers (the HSD `Reader` needs no extra) |
 | `[carbonmapper]` | requests, pydantic, shapely, geopandas, pandas | `geoproducts.carbonmapper` |
 

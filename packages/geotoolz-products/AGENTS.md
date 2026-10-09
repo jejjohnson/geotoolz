@@ -14,7 +14,8 @@ georeader `GeoData`. Implement `_read_window(window)` and the metadata
 properties `_crs`, `_transform`, `_shape`, `_dtype`, `_bands`,
 `_fill_value`, `_track` (Track A: a clean affine grid; Track B: irregular
 geolocation). The base class supplies `load()`, `read_from_window()`,
-boundless reads and optional pooled object-store byte reads (`[obstore]`).
+boundless reads. File formats (`geocloud.hdf`) and object storage come from
+geotoolz-cloud, through each sensor's extra.
 
 ## A sensor subpackage
 
@@ -56,8 +57,8 @@ if something is missing, add it there so the next reader gets it:
 | `extras.py` | `require` / `missing_extra` / `install_hint` for optional dependencies |
 | `base.py` | `ProductReader`, `resolve_fill_value` |
 
-Object-store reads go through `geocloud.store` (the `[obstore]` extra), never
-a client of your own.
+Object-store reads go through geotoolz-cloud (`geocloud.hdf.open_hdf5`,
+`geocloud.files`, `geocloud.cog`), never a client of your own.
 
 ## Tests
 

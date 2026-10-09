@@ -13,8 +13,8 @@ L1b files are one HSD segment of one band (the full disk in 10 segments;
 the Japan and target areas in one, scanned four times per slot as
 ``JP01`` … ``JP04`` / ``R301`` … ``R304``). Listing and atomic downloads
 go unsigned through ``geocloud.files`` on the shared obstore pool (no
-credentials, no AWS SDK; geotoolz-cloud comes with the ``[himawari]`` and
-``[obstore]`` extras).
+credentials, no AWS SDK; geotoolz-cloud comes with the ``[himawari]``
+extra).
 """
 
 from __future__ import annotations

@@ -33,9 +33,8 @@ pip install 'geotoolz-products[operators]'       # sensor presets (geotoolz oper
 | Extra | Pulls in | Needed for |
 |---|---|---|
 | *(base)* | georeader, numpy, rasterio | `ProductReader`, `stack`, `toy_sensor`, `himawari.Reader` (HSD), the `recipes` tables |
-| `[obstore]` | geotoolz-cloud | `ProductReader` byte-range reads over `s3://` / `gs://` / `az://` through the shared [`geocloud.store`](../cloud/concepts.md#the-pool) pool |
-| `[goes]` | h5py, geotoolz-cloud | `goes.Reader`, `goes.L2Reader` and the `goes.aws` bucket helpers |
-| `[himawari]` | h5py, geotoolz-cloud | `himawari.L2Reader` and the `himawari.aws` bucket helpers |
+| `[goes]` | geotoolz-cloud with h5py | `goes.Reader`, `goes.L2Reader` (local or `s3://`, ranged reads) and the `goes.aws` bucket helpers |
+| `[himawari]` | geotoolz-cloud with h5py | `himawari.L2Reader` and the `himawari.aws` bucket helpers |
 | `[carbonmapper]` | requests, pydantic, shapely, geopandas, pandas | `geoproducts.carbonmapper` |
 | `[operators]` | geotoolz | every sensor's `presets` (RGB recipes, NDVI, cloud masks, parallax) |
 

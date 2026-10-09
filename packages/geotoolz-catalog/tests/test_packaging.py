@@ -35,6 +35,7 @@ IMPORT_TO_DIST = {
 # Distributions no geocatalog module imports by name, but that a library it
 # does import loads at runtime. Keep this small and say why.
 RUNTIME_PLUGINS = {
+    "h5netcdf": "xarray's engine for a NetCDF-4 file handle (remote reads)",
     "zarr": "xarray's zarr engine for .zarr stores",
 }
 

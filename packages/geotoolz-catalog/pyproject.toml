@@ -60,8 +60,10 @@ geocatalog = "geocatalog._cli:app"
 [project.optional-dependencies]
 # xarray-backed catalog (`build_xarray_catalog`, `load_xarray`). `zarr`
 # backs the `.zarr` stores `load_xarray` / `build_xarray_catalog` open
-# with xarray's zarr engine.
-xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1", "zarr>=3.0"]
+# with xarray's zarr engine; `h5netcdf` is the engine xarray picks for a
+# NetCDF-4 file handle (a remote file read through `geocloud.fs`), since
+# netCDF4 opens paths only.
+xarray-raster = ["h5netcdf>=1.3", "rioxarray>=0.15", "xarray>=2024.1", "zarr>=3.0"]
 # DuckDB backend. Pinned to >=1.1 because GeoParquet 1.1 bbox-column
 # predicate pushdown landed there; older versions silently regress to
 # slow ST_Intersects-per-row scans.

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import numpy as np
 from affine import Affine
@@ -14,10 +12,6 @@ from georeader import read
 from georeader.abstract_reader import GeoData
 from georeader.geotensor import GeoTensor
 from rasterio.windows import Window, transform as window_transform
-
-
-if TYPE_CHECKING:
-    from obstore.store import ObjectStore
 
 
 Track = Literal["A", "B"]
@@ -250,62 +244,6 @@ class ProductReader(GeoData, ABC):
         base = Window(col_off=0, row_off=0, width=self.width, height=self.height)
         return window.intersection(base)
 
-    # ------------------------------------------------------------------
-    # Optional obstore byte path (opt-in, no abstract-method change).
-    # ------------------------------------------------------------------
-
-    def set_obstore_client(self, client: ObjectStore | None) -> None:
-        """Attach (or clear) a pooled ``obstore`` client.
-
-        Subclasses that read from cloud storage call this to opt in
-        to HTTP/2 connection-pool reuse — every cloud read via
-        :meth:`_read_bytes` then funnels through the same pooled
-        client instead of building a fresh one per file.
-
-        ``client=None`` clears the attachment and reverts to the local
-        ``open(path, "rb").read()`` fallback. Callers can either pass
-        a pre-built ``ObjectStore`` (e.g. for tests using
-        :class:`obstore.store.LocalStore`) or fetch the process-wide
-        pooled one from ``geocloud.store.get_obstore`` (the
-        ``[obstore]`` extra). A pre-built client must be laid out like
-        the pooled one — rooted at the bucket / Azure container, with
-        no prefix — because reads request
-        ``geocloud.store.object_key(uri)``.
-        """
-        self._obstore_client = client
-
-    @property
-    def obstore_client(self) -> ObjectStore | None:
-        """Currently attached obstore client (``None`` if not set)."""
-        return getattr(self, "_obstore_client", None)
-
-    def _read_bytes(self, uri: str, start: int, length: int) -> bytes:
-        """Read ``length`` bytes starting at ``start`` from ``uri``.
-
-        Two-path dispatch:
-
-        1. **Attached client** — when :meth:`set_obstore_client` has
-           wired up a client and the URI scheme matches what the pool
-           speaks (``s3://``, ``gs://``, ``https://``, …), the read
-           goes through ``obstore`` and HTTP/2 connection reuse
-           applies.
-        2. **Local fallback** — for plain filesystem paths (no
-           scheme, or ``file://``) the method does a one-shot
-           ``open(path, "rb").seek(start) + read(length)`` so
-           existing on-disk product readers (the ``toy_sensor``
-           reference, future MODIS HDF readers, …) keep working
-           without an obstore install.
-
-        Subclasses opt in by calling this from their own
-        ``_read_window`` (or wherever they previously did manual
-        ``open(...)`` byte reads). The ABC stays unchanged; nothing
-        about the existing reader contract is altered.
-        """
-        client = self.obstore_client
-        if client is not None and _has_remote_scheme(uri):
-            return _run_coroutine_safely(_get_range_async(client, uri, start, length))
-        return _read_bytes_local(uri, start, length)
-
 
 def resolve_fill_value(
     fill_value: float | None, dtype: np.dtype, *, owner: str = "reader"
@@ -349,126 +287,3 @@ def resolve_fill_value(
             "survives the cast (e.g. 0) or use floating-point data."
         )
     return cast.item()
-
-
-# ----------------------------------------------------------------------
-# Byte-range helpers for the ProductReader._read_bytes opt-in path.
-# ----------------------------------------------------------------------
-
-# URI schemes the obstore pool (``geocloud.store.SUPPORTED_SCHEMES``)
-# can talk to, spelled out so the check needs no optional import.
-# ``file://`` is intentionally omitted — local files take the fast on-disk
-# path even when a client is attached.
-_REMOTE_SCHEMES = frozenset(
-    {"s3", "s3a", "gs", "gcs", "az", "azure", "abfs", "abfss", "http", "https", "hf"}
-)
-
-_OBSTORE_INSTALL_HINT = (
-    "ProductReader cloud reads need the [obstore] extra (the shared pool lives "
-    "in geotoolz-cloud); install via `pip install 'geotoolz-products[obstore]'`."
-)
-
-
-def _has_remote_scheme(uri: str) -> bool:
-    """Return True when ``uri`` is one of the pool's known cloud schemes.
-
-    Requires ``"://"`` in the URI before considering the scheme — this
-    avoids mis-classifying Windows drive-letter paths like ``C:/foo.bin``,
-    which ``urlsplit`` parses as scheme ``"c"`` and would otherwise route
-    through obstore (and fail with a confusing "remote scheme but no
-    client" error). Plain ``Path`` / ``str`` filesystem paths always
-    take the local path.
-    """
-    if "://" not in uri:
-        return False
-    from urllib.parse import urlsplit
-
-    return urlsplit(uri).scheme.lower() in _REMOTE_SCHEMES
-
-
-async def _get_range_async(
-    client: ObjectStore, uri: str, start: int, length: int
-) -> bytes:
-    """Fetch ``length`` bytes from ``uri`` via an attached obstore client."""
-    try:
-        from geocloud.store import object_key
-    except ImportError as exc:
-        raise ImportError(_OBSTORE_INSTALL_HINT) from exc
-
-    # Same key derivation as the shared pool: for Azure the container is
-    # bound into the store, and an http(s) query lives in the store's URL.
-    blob = await client.get_range_async(object_key(uri), start=start, length=length)
-    return bytes(blob)
-
-
-def _run_coroutine_safely(coro: Any) -> Any:
-    """Drive ``coro`` to completion regardless of running-loop state.
-
-    Same pattern as ``geocatalog._src.formats.raster._run_coroutine_safely`` and
-    ``geocloud._src.aio._run_coroutine_safely``:
-    ``asyncio.run`` raises ``RuntimeError`` when nested under a running
-    loop (Jupyter, FastAPI handler, ``pytest-asyncio``). Detect that
-    case and run on a worker thread with its own loop so the calling
-    thread stays sync.
-    """
-    import threading
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-
-    result_box: dict[str, Any] = {}
-
-    def _runner() -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            result_box["value"] = loop.run_until_complete(coro)
-        except BaseException as exc:
-            result_box["error"] = exc
-        finally:
-            loop.close()
-
-    thread = threading.Thread(target=_runner, daemon=True)
-    thread.start()
-    thread.join()
-    if "error" in result_box:
-        raise result_box["error"]
-    return result_box["value"]
-
-
-def _read_bytes_local(uri: str, start: int, length: int) -> bytes:
-    """Fall-back byte read for local paths and ``file://`` URIs.
-
-    Anything without a ``://`` separator is treated as a plain
-    filesystem path — including Windows drive-letter paths like
-    ``C:/scene.bin`` that ``urlsplit`` would mis-parse as scheme
-    ``"c"``. ``file://`` URIs are stripped to their path component
-    via the standard library's ``url2pathname`` so cross-platform
-    quoting / drive-letter / UNC conventions Just Work.
-    """
-    fs_path: str | Path
-    if "://" not in uri:
-        # Plain filesystem path (POSIX or Windows). Pass through
-        # unchanged — open() handles both natively.
-        fs_path = uri
-    else:
-        from urllib.parse import urlsplit
-        from urllib.request import url2pathname
-
-        parsed = urlsplit(uri)
-        if parsed.scheme == "file":
-            fs_path = url2pathname(parsed.path) or uri
-        else:
-            # Caller passed a remote URI without an attached client —
-            # surface it with a clear message rather than silently fall
-            # through to local open() which would fail cryptically.
-            raise RuntimeError(
-                f"ProductReader._read_bytes: URI {uri!r} has a remote scheme "
-                "but no obstore client is attached. Call "
-                "`set_obstore_client(...)` first, or pass a local path "
-                "instead."
-            )
-    with open(fs_path, "rb") as f:
-        f.seek(start)
-        return f.read(length)

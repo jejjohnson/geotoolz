@@ -149,3 +149,23 @@ class TestXarrayEngineDispatch:
         # Remote non-zarr URIs must NOT trigger `Path.is_dir()` against a
         # non-existent local path; they fall through to the default engine.
         assert _xarray_engine("s3://bucket/data.nc") is None
+
+
+def test_build_reads_a_remote_netcdf_through_the_pool(netcdf_file: Path) -> None:
+    """A bucket URI is opened through `geocloud.fs` (h5netcdf on a file handle)."""
+    pytest.importorskip("geocloud.fs")
+    pytest.importorskip("h5netcdf")
+    from geocloud import files
+    from geocloud.store import mount, unmount
+    from obstore.store import MemoryStore
+
+    mount("s3://xr-remote", MemoryStore())
+    try:
+        files.upload(netcdf_file, "s3://xr-remote/modis_2024.nc")
+        catalog = build_xarray_catalog(
+            ["s3://xr-remote/modis_2024.nc"], crs="EPSG:4326", data_vars=["ndvi"]
+        )
+    finally:
+        unmount("s3://xr-remote")
+    assert len(catalog) == 1
+    assert catalog.gdf["n_timesteps"].iloc[0] == 5

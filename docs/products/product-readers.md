@@ -83,8 +83,8 @@ add it here first.
 | `_src.constants` | `load_csv` / `load_json` for packaged tables | `toy_sensor`, `goes`, `himawari` |
 | `_src.extras` | `require`, `missing_extra`, `install_hint` for optional dependencies | every extra-gated feature |
 
-Object-store byte reads go through `geocloud.store` (the `[obstore]`
-extra), never a client of your own. A provider client keeps only what is
+Object-store reads go through geotoolz-cloud (`geocloud.hdf.open_hdf5`,
+`geocloud.files`, `geocloud.cog`), never a client of your own. A provider client keeps only what is
 specific to it: its URLs and payloads, which statuses it retries, and its
 credential fields and renewal flow.
 

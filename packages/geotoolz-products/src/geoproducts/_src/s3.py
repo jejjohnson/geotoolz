@@ -6,8 +6,8 @@ requests. Listing and downloads go through geotoolz-cloud's file verbs on
 the shared obstore pool, unsigned (no credential lookup, no
 instance-metadata probe), so they share connections with every other
 cloud read in the process; obstore retries server errors and dropped
-connections itself. geotoolz-cloud comes with the ``[obstore]``,
-``[goes]`` and ``[himawari]`` extras.
+connections itself. geotoolz-cloud comes with the ``[goes]`` and
+``[himawari]`` extras.
 
 A store mounted at the bucket's root (`geocloud.store.mount`) serves these
 calls instead, which is how the tests run without the network.

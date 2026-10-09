@@ -970,3 +970,22 @@ def test_4d_time_stack(tmp_path: Path) -> None:
     np.testing.assert_array_equal(
         zarr.open_group(store, mode="r")["values"][...], np.asarray(stack)
     )
+
+
+def test_write_geotiff_uploads_to_a_cloud_uri(tmp_path: Path) -> None:
+    """A URI is written locally, then uploaded whole (no ``s3:/`` mangling)."""
+    pytest.importorskip("geocloud")
+    import rasterio
+    from geocloud import files
+    from geocloud.store import mount, unmount
+    from obstore.store import MemoryStore
+
+    gt = _sample_geotensor()
+    mount("s3://gz-write", MemoryStore())
+    try:
+        io.WriteGeoTIFF(path="s3://gz-write/out.tif")(gt)
+        local = files.download("s3://gz-write/out.tif", tmp_path / "back.tif")
+    finally:
+        unmount("s3://gz-write")
+    with rasterio.open(local) as src:
+        np.testing.assert_array_equal(src.read(), np.asarray(gt))
