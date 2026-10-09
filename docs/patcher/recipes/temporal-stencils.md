@@ -42,8 +42,8 @@ primitives directly:
 ```python
 import xarray as xr
 import numpy as np
-from geopatcher.temporal import (
-    TimeStencil, valid_origin_points, build_sampling_slices,
+from geopatcher.temporal.stencils import (
+    TimeStencil, build_sampling_slices, valid_origin_points,
 )
 
 ds = xr.open_zarr("gs://.../era5.zarr", chunks=None)
@@ -69,12 +69,9 @@ If you're already living inside `TemporalPatcher`, the stencil drops in
 as a Geometry + Sampler pair:
 
 ```python
+from geopatcher import TemporalPatcher, temporal
 from geopatcher.fields import XarrayField
-from geopatcher.temporal import (
-    TimeStencil, TemporalPatcher,
-    temporal.geometry.StencilGeometry, temporal.sampler.StencilSampler,
-    temporal.window.CausalBoxcar, temporal.aggregation.Forecast,
-)
+from geopatcher.temporal.stencils import TimeStencil
 
 field = XarrayField(ds["t2m"])
 coord = field.time_coord()                              # 1-D datetime64

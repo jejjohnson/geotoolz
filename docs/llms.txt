@@ -14,7 +14,7 @@ Keep both with the public helpers in `geotoolz.carrier`, and test a new step wit
 - [The geostack](https://jejjohnson.github.io/geotoolz/geostack/): how the five packages fit together, end to end in one screen
 - [Capability index](https://jejjohnson.github.io/geotoolz/capabilities/): every public name in the stack, once, with a summary
 - [Building with agents](https://jejjohnson.github.io/geotoolz/agents/): the Claude Code plugin, this file, and rules to paste into your project's AGENTS.md
-- [Quickstart (operators)](https://jejjohnson.github.io/geotoolz/quickstart/): Sentinel-2 to NDVI with geotoolz operators
+- [Quickstart (operators)](https://jejjohnson.github.io/geotoolz/operators/quickstart/): Sentinel-2 to NDVI with geotoolz operators
 
 ## Packages
 
@@ -24,11 +24,11 @@ Keep both with the public helpers in `geotoolz.carrier`, and test a new step wit
 - [geopatcher quickstart](https://jejjohnson.github.io/geotoolz/patcher/quickstart/): tile and stitch a raster
 - [geoproducts](https://jejjohnson.github.io/geotoolz/products/): readers for GOES-R ABI, Himawari AHI, Carbon Mapper
 - [geocloud](https://jejjohnson.github.io/geotoolz/cloud/): the pooled obstore client, file verbs (list / download / upload / copy / sync / sign), per-bucket credentials (also for GDAL), async COG reads and validated COG writes
-- [patch_ops](https://jejjohnson.github.io/geotoolz/patch_ops/): geotoolz ↔ geopatcher bridge operators (`GridSampler`, `ApplyToChips`, `MergePatches`)
+- [patch_ops](https://jejjohnson.github.io/geotoolz/operators/patch_ops/): geotoolz ↔ geopatcher bridge operators (`GridSampler`, `ApplyToChips`, `MergePatches`)
 
 ## API reference
 
-- [geotoolz operators](https://jejjohnson.github.io/geotoolz/api/core/): the operator families
+- [geotoolz operators](https://jejjohnson.github.io/geotoolz/operators/api/core/): the operator families
 - [geocatalog API](https://jejjohnson.github.io/geotoolz/catalog/api/reference/)
 - [geopatcher API](https://jejjohnson.github.io/geotoolz/patcher/api/reference/)
 - [geoproducts API](https://jejjohnson.github.io/geotoolz/products/api/)
@@ -36,12 +36,12 @@ Keep both with the public helpers in `geotoolz.carrier`, and test a new step wit
 
 ## Contracts
 
-- [Carrier helpers and contract checks](https://jejjohnson.github.io/geotoolz/api/carrier/): `geotoolz.carrier` and `geotoolz.testing.check_operator`
-- [Concepts](https://jejjohnson.github.io/geotoolz/concepts/): the pipekit Operator, Sequential and Graph; multi-input operators; georeferencing checks; band names; mask polarity; fitted operators
+- [Carrier helpers and contract checks](https://jejjohnson.github.io/geotoolz/operators/api/carrier/): `geotoolz.carrier` and `geotoolz.testing.check_operator`
+- [Concepts](https://jejjohnson.github.io/geotoolz/operators/concepts/): the pipekit Operator, Sequential and Graph; multi-input operators; georeferencing checks; band names; mask polarity; fitted operators
 
 ## Optional
 
-- [Integration recipe](https://jejjohnson.github.io/geotoolz/recipes/integration-with-geocatalog-and-geopatcher/): catalog → patcher → operators in one pipeline
-- [Define an operator](https://jejjohnson.github.io/geotoolz/recipes/define-an-operator/): write your own pipekit operator that composes with the stack
+- [Integration recipe](https://jejjohnson.github.io/geotoolz/operators/how-to/integration-with-geocatalog-and-geopatcher/): catalog → patcher → operators in one pipeline
+- [Define an operator](https://jejjohnson.github.io/geotoolz/operators/how-to/define-an-operator/): write your own pipekit operator that composes with the stack
 - [Adding a product reader](https://jejjohnson.github.io/geotoolz/products/product-readers/)
 - [Source code](https://github.com/jejjohnson/geotoolz)

@@ -185,11 +185,15 @@ A researcher's typical loop:
 
 1. **Insert a `Tap`** to log shape/range mid-pipeline:
    ```python
+   import geotoolz as gz
+
    pipe = Sequential([Scale(), gz.Tap(lambda gt: print(gt.values.shape)), NDVI()])
    ```
 2. **`Snapshot`** the intermediate to inspect later without breaking the
    chain:
    ```python
+   import geotoolz as gz
+
    snap = gz.Snapshot()
    pipe = Sequential([Scale(), snap.at("reflectance"), NDVI()])
    _ = pipe(gt)
@@ -198,6 +202,8 @@ A researcher's typical loop:
 3. **`Branch`** on a runtime predicate (e.g. only reproject if the CRS is
    geographic):
    ```python
+   import geotoolz as gz
+
    pipe = Sequential([
        gz.Branch(
            predicate=lambda g: g.crs.is_geographic,
@@ -217,6 +223,6 @@ A researcher's typical loop:
   [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 - Concept overview: [Concepts](concepts.md).
 - Recipes:
-  - [Define an operator](recipes/define-an-operator.md)
-  - [Branching pipelines](recipes/branching-pipelines.md)
-  - [Integration with geocatalog & geopatcher](recipes/integration-with-geocatalog-and-geopatcher.md)
+  - [Define an operator](how-to/define-an-operator.md)
+  - [Branching pipelines](how-to/branching-pipelines.md)
+  - [Integration with geocatalog & geopatcher](how-to/integration-with-geocatalog-and-geopatcher.md)

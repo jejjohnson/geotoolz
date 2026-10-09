@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Find the data, read it, cut it to size, compute on it — one composable stack.**
-> A [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) of four
+> A [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) of five
 > packages that interlock end-to-end, with the Operator / Sequential / Graph
 > composition core supplied by [pipekit](https://github.com/jejjohnson/pipekit).
 
@@ -49,10 +49,10 @@ itself becomes an operator: *tile → predict → stitch* is one more
 
 | Package (dist) | Import | One-liner | Docs |
 |---|---|---|---|
-| [`geotoolz`](packages/geotoolz) | `geotoolz` | Carrier-preserving `pipekit.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/) |
+| [`geotoolz`](packages/geotoolz) | `geotoolz` | Carrier-preserving `pipekit.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/operators/) |
 | [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/patcher/) |
 | [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/catalog/) |
-| [`geotoolz-cloud`](packages/geotoolz-cloud) | `geocloud` | Cloud object storage for the stack: one process-wide obstore client pool and batched, async Cloud-Optimized GeoTIFF reads | [Cloud →](https://jejjohnson.github.io/geotoolz/cloud/) |
+| [`geotoolz-cloud`](packages/geotoolz-cloud) | `geocloud` | Cloud object storage for the stack: one process-wide obstore client pool, file verbs (ls / download / upload / copy / sync / sign), per-bucket credentials, and Cloud-Optimized GeoTIFF reads and validated writes | [Cloud →](https://jejjohnson.github.io/geotoolz/cloud/) |
 | [`geotoolz-products`](packages/geotoolz-products) | `geoproducts` | Readers for Earth-observation data products — the `ProductReader` ABC, mission readers such as GOES-R ABI and Himawari AHI, and provider clients such as Carbon Mapper — each returning a georeader `GeoTensor` | [Products →](https://jejjohnson.github.io/geotoolz/products/) |
 
 Import names are unchanged from the pre-monorepo repos — only the
@@ -109,7 +109,7 @@ scene: GeoTensor = gz.StackBands()([red.reader, nir.reader])         # (2, 4500,
 
 # 3 · cut + compute — 256² tiles, 64 px overlap, Hann-feathered seams
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry=gp.spatial.geometry.Rectangular(size=(256, 256)),
+    geometry=gp.spatial.geometry.Rectangular(size=(256, 256), boundary="pad"),
     sampler=gp.spatial.sampler.RegularStride(step=(192, 192)),
     window=gp.spatial.window.Hann(),
     aggregation=gp.spatial.aggregation.OverlapAdd(),
@@ -131,7 +131,7 @@ axes the chips carry, so NDVI's `(h, w)` chips merge into one `(H, W)`
 The end-to-end Lake Tahoe tutorial runs this flow for real:
 [catalog notebook](https://jejjohnson.github.io/geotoolz/catalog/notebooks/end_to_end_lake_tahoe/) ·
 [patcher notebook](https://jejjohnson.github.io/geotoolz/patcher/notebooks/patcher_lake_tahoe/) ·
-[operators notebook](https://jejjohnson.github.io/geotoolz/notebooks/operators_lake_tahoe/).
+[operators notebook](https://jejjohnson.github.io/geotoolz/operators/notebooks/operators_lake_tahoe/).
 
 ## Advanced — all four packages: methane screening with labels
 
@@ -193,7 +193,7 @@ scene: GeoTensor = gz.StackBands()([swir["B11"].reader, swir["B12"].reader])  # 
 
 # 3 · patcher + operators — SWIR-ratio methane score, tile by tile
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry=gp.spatial.geometry.Rectangular(size=(128, 128)),
+    geometry=gp.spatial.geometry.Rectangular(size=(128, 128), boundary="pad"),
     sampler=gp.spatial.sampler.RegularStride(step=(96, 96)),
     window=gp.spatial.window.Hann(),
     aggregation=gp.spatial.aggregation.OverlapAdd(),
@@ -224,14 +224,15 @@ instead of sources for event-level labels.
 ## How they interlock
 
 The stack is glued by small, deliberate seams (see
-[The geostack](https://jejjohnson.github.io/geotoolz/geostack/) for the
-full tour):
+[How the packages interlock](https://jejjohnson.github.io/geotoolz/geostack/)
+for the full tour):
 
 - **`GeoSlice`** — the frozen `(bounds, interval, resolution, crs)` request
   that catalogs produce and loaders consume, with opt-in exact grid
   alignment for co-registration.
-- **`staging.field_for`** — staged catalog rows become `geopatcher`
-  `Field`s, so a query drops straight into `SpatialPatcher.split`.
+- **`geocatalog.patch.field_for`** — staged catalog rows become
+  `geopatcher` `Field`s, so a query drops straight into
+  `SpatialPatcher.split`.
 - **`patch_ops`** — `GridSampler → ApplyToChips → MergePatches` puts the patcher
   inside an operator `Sequential` for tile-predict-stitch inference; the
   label-aware samplers emit the same `Patch` carrier for training draws.
@@ -241,9 +242,11 @@ full tour):
 - **Coregistration operators** — `geotoolz.geom.coregister` ops are the
   intended coreg callables for `geopatcher.matched.MatchedField`, aligning
   multi-source patches found by the catalog's matchup engine.
-- **One obstore pool** — `geocloud.store` owns the process-wide pooled
-  HTTP/2 client; geopatcher's `CogField` (`[cog]` extra) and geoproducts'
-  cloud byte reads (`[obstore]` extra) take their clients from it.
+- **One obstore pool, one credential registry** — `geocloud.store` owns the
+  process-wide pooled HTTP/2 client and `geocloud.credentials` the
+  per-bucket grants; geocatalog's staging (`[cloud]`), geopatcher's
+  `CogField` (`[cog]`), geoproducts' bucket helpers and cloud byte reads,
+  and `geocloud.cog.write_cog` all take their clients from it.
 
 ## Install
 
@@ -252,7 +255,9 @@ pip install geotoolz                              # operators only
 pip install 'geotoolz[patch]'                     # + patcher (geopatcher)
 pip install geotoolz-catalog                      # catalog only
 pip install 'geotoolz-catalog[patch]'             # catalog + patcher bridge
-pip install 'geotoolz-cloud[cog]'                # object-store pool + COG reads (geocloud)
+pip install 'geotoolz-catalog[stac]'              # + STAC searches (from_stac_search)
+pip install geotoolz-cloud                        # object storage: pool, file verbs, credentials, COG writes
+pip install 'geotoolz-cloud[cog]'                 # + async COG reads
 pip install geotoolz-products                     # product readers (geoproducts)
 pip install 'geotoolz-products[goes]'             # + the GOES-R ABI reader
 pip install 'geotoolz-products[himawari]'         # + Himawari L2 cloud products (HSD needs no extra)
@@ -282,10 +287,11 @@ Contributors start from [`AGENTS.md`](AGENTS.md).
 
 ```bash
 make install              # uv sync (all packages, groups, extras) + hooks
-make test                 # fast tier across all four packages
+make test                 # fast tier across all five packages
 make lint                 # ruff check .  (entire repo)
 make format               # ruff format + ruff check --fix
 make typecheck            # ty per package
+make docs-check           # every docs / README example parses, its names exist
 make docs-serve           # the unified docs site, locally
 ```
 
@@ -298,7 +304,7 @@ Each package keeps its own tests, pytest markers, and coverage gates —
 run from the package directory (`cd packages/geotoolz-patcher && uv run
 pytest`). Releases are cut per package by release-please
 (`geotoolz-vX.Y.Z`, `geotoolz-patcher-vX.Y.Z`, `geotoolz-catalog-vX.Y.Z`,
-`geotoolz-products-vX.Y.Z`).
+`geotoolz-cloud-vX.Y.Z`, `geotoolz-products-vX.Y.Z`).
 
 ## License
 

@@ -1,172 +1,151 @@
-# geotoolz
+# The geostack
 
-> Composable operators for remote sensing — small typed functions you
-> compose into linear chains or named DAGs, running on `GeoTensor`s.
+> **Find the data, read it, cut it to size, compute on it — one composable stack.**
+> Five Python packages that interlock end to end, with the Operator /
+> Sequential / Graph composition core supplied by
+> [pipekit](https://github.com/jejjohnson/pipekit).
 
-!!! tip "This site covers the whole geostack"
-    This is the documentation for the **geotoolz monorepo** — three
-    packages designed as one stack. This page introduces the operator
-    library; the [Patcher](patcher/index.md) and
-    [Catalog](catalog/index.md) sections cover the other two, and
-    [The geostack](geostack.md) shows how they interlock end to end.
+![The geostack stage by stage: search an archive, catalog it, save what you need, stream windows lazily, split into overlapping patches, apply an operator per patch, combine with a window-weighted merge, write a COG or zarr](assets/diagrams/geostack-intro.png)
 
-`geotoolz` is built around one idea: **every step of a remote-sensing
-pipeline is an `Operator`** — a typed function from one carrier to
-another — and pipelines are just compositions of those operators. The
-composition core (`Operator`, `Sequential`, `Graph`, `Branch`, `Switch`,
-…) lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit)
-framework. `geotoolz` adds the RS-specific operator families on top.
+## Where it comes from
 
-```mermaid
-flowchart LR
-    Scene([GeoTensor scene]) --> Scale --> Mask[CloudMask] --> NDVI --> Out([NDVI map])
+If you have used xarray, you know **split → apply → combine**: group the
+data, run a function on each group, glue the results back together. A
+geospatial pipeline is the same idea with more steps on either side.
+Before you can split a scene you have to **search** an archive for it,
+**catalog** what you found so the next question is a query rather than a
+crawl, **save** (stage) only the files that matter, and **stream** them as
+lazy windows because the scene does not fit in memory. After you combine,
+you **write** a georeferenced result.
+
+Most codebases rebuild that loop per project, so every step is hard-wired
+to the next. The geostack gives each step its own package and one small,
+typed seam between neighbours: a `GeoSlice` is the request every catalog
+answers, a georeader `GeoTensor` is the array every reader returns and
+every operator takes, and a `Patch` is what the patcher hands an operator.
+Because operators are plain `pipekit` objects, the patcher itself becomes
+an operator — *tile → predict → stitch* is one more `Sequential`.
+
+## The packages
+
+| Package | Import | Use it to… | Docs |
+|---|---|---|---|
+| `geotoolz` | `geotoolz` | compute on rasters with carrier-preserving operators (radiometry, indices, masks, geometry, ML, …) | [Operators](operators/index.md) |
+| `geotoolz-patcher` | `geopatcher` | split a field into patches, run an operator per patch, stitch back (Geometry × Sampler × Window × Aggregation) | [Patcher](patcher/index.md) |
+| `geotoolz-catalog` | `geocatalog` | find, index, join, load and stage files (`GeoSlice` queries over GeoParquet) | [Catalog](catalog/index.md) |
+| `geotoolz-cloud` | `geocloud` | reach object storage: one client pool, file verbs, credentials, COG reads and writes | [Cloud](cloud/index.md) |
+| `geotoolz-products` | `geoproducts` | read Earth-observation products (GOES-R ABI, Himawari AHI, Carbon Mapper, …) as `GeoTensor`s | [Products](products/index.md) |
+
+![Dependency layers: the five packages stand on georeader; object storage in geotoolz-cloud; geotoolz on pipekit; cross-package links are opt-in extras](assets/diagrams/stack-layers.png)
+
+Solid arrows are hard dependencies, dotted ones opt-in extras, and nothing
+points back up: install only the packages you need. [How the packages
+interlock](geostack.md) walks through every seam.
+
+## Install
+
+```bash
+pip install geotoolz                          # operators
+pip install geotoolz-patcher                  # patcher
+pip install geotoolz-catalog                  # catalog
+pip install geotoolz-cloud                    # object storage, COG writes
+pip install geotoolz-products                 # product readers
 ```
 
-## Is this the right tool?
+| To connect… | Install |
+|---|---|
+| operators ↔ patcher (`geotoolz.patch_ops`) | `geotoolz[patch]` |
+| catalog → patcher (`geocatalog.patch.field_for`) | `geotoolz-catalog[patch]` |
+| catalog staging from buckets (`geocatalog.staging.stage`) | `geotoolz-catalog[cloud]` |
+| catalog ← STAC searches (`geocatalog.sources.from_stac_search`) | `geotoolz-catalog[stac]` |
+| patcher ↔ COGs in buckets (`geopatcher.fields.CogField`) | `geotoolz-patcher[cog]` |
+| COG reads (`geocloud.cog.CogSource`) | `geotoolz-cloud[cog]` |
+| a sensor's reader and its bucket helpers | `geotoolz-products[goes]` / `[himawari]` / `[carbonmapper]` |
+| a sensor's presets as geotoolz operators | `geotoolz-products[operators]` |
 
-```mermaid
-flowchart TD
-    Q{What are you doing?}
-    Q -->|"Single ad-hoc array op<br/>(one scene, one transform)"| A1[Use rasterio + numpy directly]
-    Q -->|"Reusable RS step you'll<br/>run on many scenes"| A2[Write an Operator]
-    Q -->|"Multi-step pipeline with<br/>branches, fusion, or QA"| A3[Compose with Graph]
-    Q -->|"Linear chain of 2-6 steps"| A4[Compose with Sequential]
-    Q -->|"Sliding-window inference<br/>over a big raster"| A5["Use <code>geopatcher</code> + <code>patch_ops</code>"]
-    Q -->|"Discover &amp; load scenes<br/>from a STAC catalogue"| A6["Use <code>geocatalog</code>, then feed into geotoolz"]
+Each package page lists its own extras. Pre-PyPI, install from a clone:
+
+```bash
+git clone https://github.com/jejjohnson/geotoolz && cd geotoolz
+uv sync --all-packages --all-groups --all-extras
 ```
 
-If you find yourself wanting to (a) reuse the same RS step across
-scripts, (b) round-trip a pipeline to YAML, (c) compose branching /
-fan-in flows, or (d) plug into a tiled-inference setup — `geotoolz` is
-the right shape.
+## Quickstart — catalog → patcher → operators
 
-## Mental model
-
-Every operator is a typed function from inputs to outputs. The contract
-is one method plus a keyword-only constructor:
-
-```python
-from pipekit import Operator
-
-class MyOp(Operator):
-    def __init__(self, *, knob: float) -> None:
-        self.knob = knob            # same name as the argument
-
-    def _apply(self, gt):          # the work
-        return gt * self.knob
-```
-
-`get_config()` — the JSON-serialisable constructor args that make a
-pipeline round-trip to YAML — is derived automatically from the
-`__init__` signature, as long as each argument is stored under its own
-name (`MyOp(knob=2.0).get_config() == {"knob": 2.0}`).
-
-Pipelines compose:
-
-- **`Sequential([a, b, c])`** threads output → input down a linear list.
-- **`Graph(inputs=..., outputs=...)`** builds a named DAG by calling
-  operators on `Input` placeholders. Use it when you need branching,
-  fan-in, or multi-output flows.
-- **`Branch(predicate, if_true, if_false)`** and **`Switch(key, cases)`**
-  are explicit control-flow operators that round-trip the same as any
-  transform.
-
-A `Graph` is itself an `Operator`, so you can nest them inside a
-`Sequential` and vice-versa.
-
-## A two-operator pipeline
+Summer-2024 NDVI over Lake Tahoe: discover Sentinel-2 L2A on the Planetary
+Computer, mosaic the red and near-infrared bands onto one grid, and run
+NDVI tile by tile with feathered seams. Every binding is typed and every
+array is annotated with its shape. It needs
+`pip install 'geotoolz[patch]' 'geotoolz-catalog[stac,cloud,patch]'`.
 
 ```python
 import numpy as np
-from geotoolz import Operator, Sequential
-from geotoolz.carrier import wrap_like
+import pandas as pd
+import planetary_computer
+import pystac_client
+from georeader.geotensor import GeoTensor
 
+import geocatalog as gc
+import geopatcher as gp
+import geotoolz as gz
+from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
-class Scale(Operator):
-    def __init__(self, *, scale: float = 1e-4) -> None:
-        self.scale = scale
+client: pystac_client.Client = pystac_client.Client.open(
+    "https://planetarycomputer.microsoft.com/api/stac/v1",
+    modifier=planetary_computer.sign_inplace,
+)
+aoi: gc.GeoSlice = gc.GeoSlice(
+    bounds=(-120.25, 38.85, -119.85, 39.30),              # Lake Tahoe, lon/lat
+    interval=pd.Interval(pd.Timestamp("2024-06-01"), pd.Timestamp("2024-09-30"), closed="both"),
+    resolution=(0.0001, 0.0001),                          # ≈ 10 m → grid (H, W) = (4500, 4000)
+    crs="EPSG:4326",
+)
 
-    def _apply(self, gt):
-        # wrap_like keeps the input's transform / CRS / attrs.
-        return wrap_like(gt, np.asarray(gt, dtype=np.float32) * self.scale)
+# 1 · find — one catalog per band, staged to local disk
+bands: dict[str, gc.GeoCatalog] = {
+    band: gc.staging.stage(
+        gc.sources.from_stac_search(client, collections=["sentinel-2-l2a"], bounds=aoi.bounds,
+                            datetime="2024-06-01/2024-09-30", asset_key=band),
+        dest="./cache",
+    )
+    for band in ("B04", "B08")
+}
 
+# 2 · read — mosaic each band onto the AOI grid, stack red + NIR
+red: gp.RasterField = gc.patch.field_for(bands["B04"].query(aoi), aoi)   # (1, 4500, 4000) uint16
+nir: gp.RasterField = gc.patch.field_for(bands["B08"].query(aoi), aoi)   # (1, 4500, 4000) uint16
+scene: GeoTensor = gz.StackBands()([red.reader, nir.reader])         # (2, 4500, 4000) uint16
 
-class NDVI(Operator):
-    def __init__(self, *, nir: int, red: int, eps: float = 1e-10) -> None:
-        self.nir, self.red, self.eps = nir, red, eps
-
-    def _apply(self, gt):
-        a = np.asarray(gt, dtype=np.float32)
-        nir, red = a[self.nir], a[self.red]
-        # A new float quantity declares NaN as its nodata fill.
-        return wrap_like(gt, (nir - red) / (nir + red + self.eps), fill_value_default=np.nan)
-
-
-pipe = Sequential([Scale(scale=1e-4), NDVI(nir=7, red=3)])
-ndvi = pipe(sentinel2_geotensor)
+# 3 · cut + compute — 256² tiles, 64 px overlap, Hann-feathered seams
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(256, 256), boundary="pad"),
+    sampler=gp.spatial.sampler.RegularStride(step=(192, 192)),
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+)
+ndvi: gz.Sequential = gz.DNToReflectance(scale=1e-4) | gz.NDVI(red=0, nir=1)  # (2, h, w) → (h, w)
+field: gp.RasterField = gp.RasterField(scene)
+tiled: gz.Sequential = gz.Sequential([
+    GridSampler(patcher=patcher),                        # field → list[Patch]       (2, 256, 256) each
+    ApplyToChips(operator=ndvi),                         # list[Patch] → list[Patch] (256, 256) each
+    MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
+])
+result: GeoTensor = tiled(field)                        # (4500, 4000) float64 · NaN = no data
 ```
 
-The library ships both steps, with band-name resolution and nodata
-handling: `gz.DNToReflectance(scale=1e-4) | gz.NDVI(nir="B08", red="B04")`.
-For the same shape with real data and a matplotlib plot at the end, see
-the [Quickstart](quickstart.md) or the [operator-composition
-notebook](notebooks/operators_lake_tahoe.ipynb).
+`MergePatches` places the chips on the domain's grid and keeps the band
+axes the chips carry, so NDVI's `(h, w)` chips merge into one `(H, W)`
+`GeoTensor` on the scene's transform and CRS.
 
-## Where geotoolz fits
+## Next steps
 
-```mermaid
-flowchart LR
-    subgraph cat["geocatalog — discover &amp; load"]
-        STAC[(STAC catalogue)] --> Loader[load_raster]
-    end
-    subgraph tools["geotoolz — operate"]
-        Op1[Scale] --> Op2[CloudMask] --> Op3[NDVI]
-    end
-    subgraph patch["geopatcher — tile &amp; stitch"]
-        Sampler[GridSampler] --> Apply[ApplyToChips] --> Merge[MergePatches]
-    end
-    Loader --> Op1
-    Op3 --> Sampler
-```
-
-- **[`geocatalog`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-catalog)** discovers
-  and loads scenes from STAC.
-- **`geotoolz`** runs the per-scene transforms.
-- **[`geopatcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)** handles
-  sliding-window patching for big rasters, exposed as Operator wrappers
-  in [`geotoolz.patch_ops`](patch_ops.md) (`GridSampler`, `ApplyToChips`,
-  `MergePatches`) so a tiled-inference pipeline composes inside a `Sequential`.
-
-The full multi-repo walk-through lives in **the canonical Lake Tahoe
-notebook**:
-[`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
-The slice of that flow that's about *composition of operators* is
-[`docs/notebooks/operators_lake_tahoe.ipynb`](notebooks/operators_lake_tahoe.ipynb)
-in this repo.
-
-## Status
-
-`geotoolz` is pre-1.0 (`0.x`, released per package by release-please):
-every operator family in the API reference is implemented and tested,
-but minor releases can still carry breaking changes — renames and
-removals are outright, with no deprecated aliases — and each one is
-called out in the
-[changelog](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/CHANGELOG.md).
-The quickstart and recipes define small **inline `Operator`
-subclasses** on purpose, to teach the composition pattern; each names
-the built-in operator to reach for in real pipelines.
-
-## Where next
-
-- **[Quickstart](quickstart.md)** — a 15-minute walk-through over one
-  Sentinel-2 Lake Tahoe scene.
-- **[Concepts](concepts.md)** — the composition algebra, with diagrams.
-- **Recipes**:
-  - [Define an operator](recipes/define-an-operator.md)
-  - [Branching pipelines](recipes/branching-pipelines.md)
-  - [Integration with geocatalog & geopatcher](recipes/integration-with-geocatalog-and-geopatcher.md)
-- **Tutorial**: [Composing a Sentinel-2 NDVI pipeline](notebooks/operators_lake_tahoe.ipynb) — the docs' canonical worked example.
-- **Extended examples ↗**: chronological walkthroughs of the whole stack — composition core, pipeline idioms, image processing on real burn-scars, ML patches, deployment shapes — live in [`research_notebook/projects/geostack`](https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack). The notebooks there execute against real MPC / GBIF / Natural Earth data; this repo's docs reference them by name.
-- **Reference**: [Core API](api/core.md) · [Changelog](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/CHANGELOG.md) · [GitHub](https://github.com/jejjohnson/geotoolz)
-
-Related: [Normalization](normalization.md) · [Multi-format readers](io.md) · [Product readers](products/product-readers.md).
+- **[How the packages interlock](geostack.md)** — the seams, and an
+  advanced example that uses all of them.
+- **Tutorials** on real Sentinel-2 data over Lake Tahoe:
+  [catalog](catalog/notebooks/end_to_end_lake_tahoe.ipynb) ·
+  [patcher](patcher/notebooks/patcher_lake_tahoe.ipynb) ·
+  [operators](operators/notebooks/operators_lake_tahoe.ipynb).
+- **[Capability index](capabilities.md)** — every public name in the stack,
+  with a one-line summary. Search it before writing a helper.
+- **[Building with agents](agents.md)** — the Claude Code plugin and
+  `llms.txt` for building on the stack with an AI agent.

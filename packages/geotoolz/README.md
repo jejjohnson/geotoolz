@@ -83,6 +83,8 @@ The same steps as a `Graph`, with a cloud mask built from the SCL band
 on a second branch and fanned back in by `ApplyMask`:
 
 ```python
+import geotoolz as gz
+
 x: gz.Input = gz.Input("scene")
 reflectance: gz.Node = gz.DNToReflectance(scale=1e-4)(gz.SelectBands(bands=L2A)(x))  # (12, H, W) float64
 ndvi_node: gz.Node = gz.NDVI(nir="B8", red="B4")(reflectance)                        # (H, W) float64
@@ -139,7 +141,7 @@ pipeline.get_config()                         # {"operators": [{"class": "Scale"
 ```
 
 The same shape with the `|` pipe operator: `Scale(scale=1e-4) | NormalizedDifference(a=7, b=3)`.
-See [Define an operator](https://jejjohnson.github.io/geotoolz/recipes/define-an-operator/)
+See [Define an operator](https://jejjohnson.github.io/geotoolz/operators/how-to/define-an-operator/)
 for the full conventions (parameter vocabulary, fill values, terminal
 operators).
 
@@ -150,10 +152,11 @@ patch through a `geopatcher.SpatialPatcher`, as one more `Sequential`:
 
 ```python
 import geopatcher as gp
+import geotoolz as gz
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry=gp.spatial.geometry.Rectangular(size=(256, 256)),
+    geometry=gp.spatial.geometry.Rectangular(size=(256, 256), boundary="pad"),
     sampler=gp.spatial.sampler.RegularStride(step=(192, 192)),
     window=gp.spatial.window.Hann(),
     aggregation=gp.spatial.aggregation.OverlapAdd(),
@@ -256,9 +259,9 @@ uv run --group docs mkdocs build --strict
 
 ## Next steps
 
-- **Docs site:** [concepts](https://jejjohnson.github.io/geotoolz/concepts/),
-  [quickstart](https://jejjohnson.github.io/geotoolz/quickstart/),
-  [API reference](https://jejjohnson.github.io/geotoolz/api/core/).
+- **Docs site:** [concepts](https://jejjohnson.github.io/geotoolz/operators/concepts/),
+  [quickstart](https://jejjohnson.github.io/geotoolz/operators/quickstart/),
+  [API reference](https://jejjohnson.github.io/geotoolz/operators/api/core/).
 - **End-to-end Lake Tahoe notebook (catalog → patch → operate):**
   [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 - **Operator-composition slice:**

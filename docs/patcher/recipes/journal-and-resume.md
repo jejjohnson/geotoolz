@@ -112,6 +112,8 @@ to record durable progress across restarts; use the policy to handle
 transient I/O within a single run:
 
 ```python
+import geopatcher as gp
+
 patcher = gp.SpatialPatcher(
     ...,
     on_error    = "retry",

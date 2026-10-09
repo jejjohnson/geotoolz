@@ -1,7 +1,7 @@
 """Unit tests for `RasterToRasterLike` and `StackMatched`.
 
 Both operators are the first concrete implementations from
-``docs/design/query-matchup.md`` §5. They underpin the geocatalog/
+``docs/catalog/design/query-matchup.md`` §5. They underpin the geocatalog/
 geopatcher matchup workflow: `RasterToRasterLike` is the typical
 default for `MatchedField.coreg` on raster↔raster pairs, and
 `StackMatched` fuses the per-source patches returned by a

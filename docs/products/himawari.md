@@ -183,7 +183,7 @@ cloud_phase: GeoTensor = himawari.DayCloudPhase()(scene)     # ice red/orange ·
 ```
 
 The recipes are data in `himawari.recipes`. With the `[operators]` extra,
-each preset is a [`gz.viz.RGBRecipe`](../api/viz.md) with the GOES
+each preset is a [`gz.viz.RGBRecipe`](../operators/api/viz.md) with the GOES
 quick-guide stretches on the equivalent AHI bands:
 
 | Preset | Bands | Recipe |

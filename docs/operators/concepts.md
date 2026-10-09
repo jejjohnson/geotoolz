@@ -33,7 +33,7 @@ The composition core is **carrier-agnostic**. The same algebra runs on
 operators (`NDVI`, `MaskClouds`, …) narrow to `GeoTensor` at their own
 signatures; the core stays generic.
 
-![Pipeline shapes — linear, branching, DAG](assets/composition-shapes.png){ loading=lazy }
+![Pipeline shapes — linear, branching, DAG](../assets/composition-shapes.png){ loading=lazy }
 
 ## What an `Operator` is
 
@@ -58,7 +58,7 @@ flowchart LR
     Config["op.get_config()"] -.->|"round-trips"| YAML[(YAML / Hydra-zen)]
 ```
 
-![Operator lifecycle](assets/operator-lifecycle.png){ loading=lazy }
+![Operator lifecycle](../assets/operator-lifecycle.png){ loading=lazy }
 
 ### Typed I/O contract
 
@@ -237,6 +237,8 @@ flowchart LR
 ```
 
 ```python
+import geotoolz as gz
+
 gz.Branch(
     predicate=lambda gt: gt.crs.is_geographic,
     if_true=ReprojectToUTM(),
@@ -262,6 +264,8 @@ flowchart LR
 ```
 
 ```python
+import geotoolz as gz
+
 gz.Switch(
     key=lambda gt: gt.attrs["platform"],
     cases={"S2": s2_pipeline, "L8": l8_pipeline},
@@ -302,7 +306,7 @@ eager.
 
 ## Where geotoolz slots into the ecosystem
 
-![Pipeline ecosystem — geocatalog → geotoolz → geopatcher](assets/pipeline-ecosystem.png){ loading=lazy }
+![Pipeline ecosystem — geocatalog → geotoolz → geopatcher](../assets/pipeline-ecosystem.png){ loading=lazy }
 
 ```mermaid
 flowchart LR
@@ -424,6 +428,8 @@ Every one of them satisfies `pipekit.protocols.FittableTransformer`
 tooling treats them like a scikit-learn transformer:
 
 ```python
+import geotoolz as gz
+
 scaler = gz.normalize.StandardScaler().fit(train_scene)
 normed = scaler(scene)                 # == scaler.transform(scene)
 restored = scaler.inverse(normed)
@@ -550,9 +556,9 @@ consumer.
 ## Related pages
 
 - [Quickstart](quickstart.md) — 15-min real-data walk-through.
-- [Recipes](recipes/define-an-operator.md) — short focused how-tos.
+- [Recipes](how-to/define-an-operator.md) — short focused how-tos.
 - [Normalization](normalization.md), [Multi-format readers](io.md),
-  [Product readers](products/product-readers.md) — module-specific deep-dives.
+  [Product readers](../products/product-readers.md) — module-specific deep-dives.
 - [Core API reference](api/core.md).
 
 ## Extended examples
