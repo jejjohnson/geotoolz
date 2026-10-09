@@ -1,190 +1,270 @@
-# On-error policies — raise / skip / mask / retry
+# Handle read failures
 
-Bulk inference over thousands of patches usually involves *some* I/O
-failures: a transient HTTP 503, a missing tile, a corrupt block, a
-timeout. `SpatialPatcher` makes the error policy a first-class
-construction parameter so you can pick the right tradeoff between
-fail-fast safety and bulk-throughput resilience.
+Keep a bulk run going when some patch reads fail — a transient HTTP 503,
+a missing tile, a corrupt block. Pick the policy with
+`SpatialPatcher(on_error=...)`; the
+[On-error policies table](../patching.md#on-error-policies) defines each
+one exactly.
 
-## The four policies
-
-```mermaid
-flowchart TD
-    Anchor[anchor]:::a --> Try{Field.select<br/>succeeded?}
-    Try -->|yes| Patch[Patch yielded]
-    Try -->|no| Policy{on_error}
-    Policy -->|raise| Raise[propagate the exception]
-    Policy -->|skip| Skip[log to patcher.errors<br/>omit anchor from stream]
-    Policy -->|mask| Mask[emit NaN-valued patch<br/>same shape as geometry]
-    Policy -->|retry| Retry{matches retry_on<br/>and retries left?}
-    Retry -->|yes| Try
-    Retry -->|no| Skip
-    classDef a fill:#fff59d,stroke:#f9a825
-    style Raise fill:#ffcdd2,stroke:#c62828
-    style Skip fill:#c8e6c9,stroke:#2e7d32
-    style Mask fill:#bbdefb,stroke:#1565c0
-```
-
-| Policy | When to use |
+| Your situation | `on_error` |
 |---|---|
-| `"raise"` (default) | Dev / CI. You want to know on the first failure. |
-| `"skip"` | Bulk inference where downstream cares about coverage but tolerates gaps. Failed anchors land in `patcher.errors` as `PatchErrorRecord`s; nothing is emitted on the iterator. |
-| `"mask"` | Bulk inference where downstream needs a complete grid (training / evaluation matrices). NaN-valued patches keep the geometry and aggregation contract intact. |
-| `"retry"` | Transient I/O (S3, HTTP COG, remote zarr). Retries up to `max_retries` only for exceptions matching `retry_on` — programmer errors are never silently retried. |
+| Development and CI: stop on the first failure | `"raise"` (default) |
+| Bulk inference that tolerates gaps | `"skip"` |
+| Downstream needs a complete grid (training matrices, a stitched map with holes) | `"mask"` |
+| Remote reads with transient errors (S3, HTTP COGs, remote zarr) | `"retry"` |
 
-## 1. `"raise"` — fail fast (default)
+The examples below share a stand-in field whose reads fail on one column
+of patches, so each fence runs on its own.
 
-```python
-import geopatcher as gp
-
-patcher = gp.SpatialPatcher(
-    geometry    = gp.spatial.geometry.Rectangular(size=(256, 256)),
-    sampler     = gp.spatial.sampler.RegularStride(step=(256, 256)),
-    window      = gp.spatial.window.Boxcar(),
-    aggregation = gp.spatial.aggregation.OverlapAdd(),
-    on_error    = "raise",     # default
-)
-
-for patch in patcher.split(field):       # raises on the first I/O failure
-    ...
-```
-
-## 2. `"skip"` — log and omit
-
-Failed patches never appear on the iterator. Inspect
-`patcher.errors` after the fact:
+## Skip failures and inspect them
 
 ```python
-import geopatcher as gp
+from typing import Any
 
-patcher = gp.SpatialPatcher(..., on_error="skip", capture_traceback=False)
-
-outs = list(patcher.split(field))
-print(f"succeeded: {len(outs)},  failed: {len(patcher.errors)}")
-for record in patcher.errors[:5]:
-    print(record.anchor, record.kind, record.message)
-```
-
-`capture_traceback=False` skips traceback formatting — useful when
-thousands of expected failures would otherwise inflate `patcher.errors`
-with megabytes of frames.
-
-`patcher.errors` holds the failures of the latest `split` / `asplit` /
-`reduce` / `two_pass` call: each call starts a fresh list (a split still
-running keeps appending to its own). A `SpatioTemporalPatcher` reads its
-chips under the spatial patcher's policy, so its failures land in
-`stp.spatial.errors`, keyed by the spatial anchor (product) or the
-`(space, time)` pair (coupled).
-
-## 3. `"mask"` — NaN-valued patches
-
-Useful when the downstream stage needs a complete grid (a training
-matrix, an evaluation array, a stitched reconstruction with masked
-gaps):
-
-```python
 import numpy as np
+import rasterio
+from georeader.geotensor import GeoTensor
+from rasterio.windows import Window
+
 import geopatcher as gp
 
-patcher = gp.SpatialPatcher(..., on_error="mask")
 
-for patch in patcher.split(field):
-    if np.isnan(patch.data).all():
-        # Failure mask — record but keep the slot.
-        ...
-    else:
-        out = my_operator(patch.data)
-```
+class FlakyField:
+    """A RasterField whose reads fail on the column of patches at x = 128."""
 
-Aggregations ignore NaNs in the weighted sum (the window-weight
-denominator picks up the zero contribution), so masked patches turn
-into transparent holes in the reconstruction without breaking the
-overlap-add invariant. A cell that no other patch covers comes back as
-the aggregation's `fill_value` (NaN by default).
+    def __init__(self, inner: gp.RasterField) -> None:
+        self.inner = inner
 
-## 4. `"retry"` — bounded retries for transient I/O
+    @property
+    def domain(self) -> Any:
+        return self.inner.domain
 
-```python
-import geopatcher as gp
+    def select(self, indexer: Window) -> GeoTensor:
+        if indexer.col_off == 128:
+            raise OSError(f"read failed at {indexer}")
+        return self.inner.select(indexer)
 
-patcher = gp.SpatialPatcher(
-    ...,
-    on_error    = "retry",
-    max_retries = 3,
-    retry_on    = (OSError, TimeoutError),   # default
+    def with_data(self, data: np.ndarray) -> GeoTensor:
+        return self.inner.with_data(data)
+
+
+field: FlakyField = FlakyField(
+    gp.RasterField(
+        GeoTensor(
+            np.ones((1, 256, 256), dtype=np.float32),   # (1, 256, 256) float32
+            transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
+            crs="EPSG:32611",
+        )
+    )
 )
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(64, 64)),
+    sampler=gp.spatial.sampler.RegularStride(step=(64, 64)),
+    window=gp.spatial.window.Boxcar(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+    on_error="skip",
+    capture_traceback=False,                            # keep the records small
+)
+
+patches: list[gp.Patch] = list(patcher.split(field))  # 12 × (1, 64, 64) float32
+errors: list[gp.observe.PatchErrorRecord] = patcher.errors  # 4 records
+for record in errors:
+    print(record.anchor, record.kind, record.message)   # (0, 128) OSError read failed at …
+stitched: np.ndarray = patcher.merge(patches, field.domain)  # (1, 256, 256) float64 · NaN = skipped
 ```
 
-Important properties:
+Failed anchors never reach the iterator. `patcher.errors` holds the
+latest call's failures; a `SpatioTemporalPatcher` records its chip
+failures in `stp.spatial.errors`.
 
-- `retry_on` defaults to **I/O-shaped exceptions only** (`OSError`,
-  `TimeoutError`). `ValueError`, `KeyError`, `TypeError` are *not*
-  retried unless you opt in — programmer errors should surface fast.
-- After `max_retries` attempts, the policy falls through to `"skip"`:
-  the record is appended to `patcher.errors` and the anchor is omitted
-  from the stream.
-- Each retry is logged via the `on_error` hook (see
-  [`observability.md`](../observability.md)) so retry rates are
-  observable.
+## Mask failures as NaN patches
 
-You can pass strings or classes to `retry_on`:
+`"mask"` yields a NaN patch of the geometry's shape in place of each
+failure, so every anchor keeps its slot.
 
 ```python
-retry_on = ("rasterio.errors.RasterioIOError", OSError, TimeoutError)
+from typing import Any
+
+import numpy as np
+import rasterio
+from georeader.geotensor import GeoTensor
+from rasterio.windows import Window
+
+import geopatcher as gp
+
+
+class FlakyField:
+    """A RasterField whose reads fail on the column of patches at x = 128."""
+
+    def __init__(self, inner: gp.RasterField) -> None:
+        self.inner = inner
+
+    @property
+    def domain(self) -> Any:
+        return self.inner.domain
+
+    def select(self, indexer: Window) -> GeoTensor:
+        if indexer.col_off == 128:
+            raise OSError(f"read failed at {indexer}")
+        return self.inner.select(indexer)
+
+    def with_data(self, data: np.ndarray) -> GeoTensor:
+        return self.inner.with_data(data)
+
+
+field: FlakyField = FlakyField(
+    gp.RasterField(
+        GeoTensor(
+            np.ones((1, 256, 256), dtype=np.float32),   # (1, 256, 256) float32
+            transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
+            crs="EPSG:32611",
+        )
+    )
+)
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(64, 64)),
+    sampler=gp.spatial.sampler.RegularStride(step=(64, 64)),
+    window=gp.spatial.window.Boxcar(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+    on_error="mask",
+)
+
+patches: list[gp.Patch] = list(patcher.split(field))  # 16 × (1, 64, 64), 4 all-NaN
+holes: int = sum(bool(np.isnan(np.asarray(p.data)).all()) for p in patches)  # 4
+stitched: np.ndarray = patcher.merge(patches, field.domain)  # (1, 256, 256) float64 · NaN = masked
 ```
 
-A string matches any class in the raised exception's MRO, by bare name
-(`"OSError"`) or `module.qualname` (`"rasterio.errors.RasterioIOError"`),
-so `"OSError"` retries a `RasterioIOError` exactly as `OSError` does.
-`get_config()` records classes as qualified names, so a patcher rebuilt
-with `geopatcher.config.from_config` retries the same exceptions.
+Aggregations ignore NaN samples, so a masked patch is a transparent hole.
+Where overlapping patches cover it, their values fill it in.
 
-## Pattern — pair with parallel_map and journaling
+## Retry transient errors
 
-For production bulk inference, combine `on_error="retry"` with the
-reference runner and a `PatchJournal`:
+`"retry"` re-reads exceptions that match `retry_on` up to `max_retries`
+times, then records the failure as `"skip"` does.
 
 ```python
+from collections import Counter
+from typing import Any
+
+import numpy as np
+import rasterio
+from georeader.geotensor import GeoTensor
+from rasterio.windows import Window
+
+import geopatcher as gp
+
+
+class OnceFlakyField:
+    """A RasterField whose first read of each window times out."""
+
+    def __init__(self, inner: gp.RasterField) -> None:
+        self.inner = inner
+        self.attempts: Counter[tuple[int, int]] = Counter()
+
+    @property
+    def domain(self) -> Any:
+        return self.inner.domain
+
+    def select(self, indexer: Window) -> GeoTensor:
+        key = (indexer.row_off, indexer.col_off)
+        self.attempts[key] += 1
+        if self.attempts[key] == 1:
+            raise TimeoutError(f"slow read at {key}")
+        return self.inner.select(indexer)
+
+    def with_data(self, data: np.ndarray) -> GeoTensor:
+        return self.inner.with_data(data)
+
+
+field: OnceFlakyField = OnceFlakyField(
+    gp.RasterField(
+        GeoTensor(
+            np.ones((1, 256, 256), dtype=np.float32),   # (1, 256, 256) float32
+            transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
+            crs="EPSG:32611",
+        )
+    )
+)
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(64, 64)),
+    sampler=gp.spatial.sampler.RegularStride(step=(64, 64)),
+    window=gp.spatial.window.Boxcar(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+    on_error="retry",
+    max_retries=3,
+    retry_on=(OSError, TimeoutError, "rasterio.errors.RasterioIOError"),
+)
+
+patches: list[gp.Patch] = list(patcher.split(field))  # 16 × (1, 64, 64) float32, each read twice
+attempts: list[gp.observe.PatchErrorRecord] = patcher.errors  # 16 records, all retry_count=0
+```
+
+`patcher.errors` records every failed attempt with its `retry_count`, so
+an anchor that recovered on a retry still has a record. An anchor is
+lost only when it has a record with `retry_count == max_retries`.
+
+Only I/O-shaped errors are retried by default: a `ValueError` or
+`KeyError` is a bug and surfaces at once. Each failed attempt reaches the
+hooks' `on_error`, so you can count retries — see
+[Observability hooks](../observability.md).
+
+## Run in parallel with a journal
+
+`geopatcher.run.parallel_map` reads through `patcher.split`, so the
+patcher's `on_error` covers reads. Its own `on_error` covers your
+operator, and a `PatchJournal` makes the run resumable.
+
+```python
+from pathlib import Path
+
+import numpy as np
+import rasterio
+from georeader.geotensor import GeoTensor
+
 import geopatcher as gp
 from geopatcher.observe import PatchJournal
 from geopatcher.run import parallel_map
 
-patcher = gp.SpatialPatcher(
-    ...,
-    on_error    = "retry",
-    max_retries = 3,
+field: gp.RasterField = gp.RasterField(
+    GeoTensor(
+        np.ones((1, 256, 256), dtype=np.float32),       # (1, 256, 256) float32
+        transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
+        crs="EPSG:32611",
+    )
 )
-journal = PatchJournal("out/run.jsonl")
+patcher: gp.SpatialPatcher = gp.SpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(64, 64)),
+    sampler=gp.spatial.sampler.RegularStride(step=(64, 64)),
+    window=gp.spatial.window.Boxcar(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+    on_error="retry",                                   # read failures
+    max_retries=3,
+)
 
-outputs = parallel_map(
-    patcher, field, my_operator,
-    n_workers=8,
-    backend="thread",
-    journal=journal,            # skip committed anchors, commit each result
-    on_error="skip",            # parallel_map-level — failed operators omitted
-)
-print(patcher.errors)           # read failures, as with a plain split
+
+def model(chip: GeoTensor) -> np.ndarray:
+    """Stand-in model that fails on one patch."""
+    a: np.ndarray = np.asarray(chip)                    # (1, 64, 64) float32
+    if chip.transform.c == 500_000 + 10 * 192:
+        raise ValueError("model diverged")
+    return a * 2.0                                      # (1, 64, 64) float64
+
+
+Path("out").mkdir(exist_ok=True)
+journal: PatchJournal = PatchJournal("out/run.jsonl")
+outputs: list[gp.Patch] = parallel_map(
+    patcher, field, model,
+    n_workers=4,
+    journal=journal,                                    # skip "ok" anchors, commit every result
+    on_error="skip",                                    # operator failures
+)                                                       # 12 × (1, 64, 64) float64
 ```
 
-The two `on_error` settings are independent and compose:
+| Setting | Governs | Failures land in |
+|---|---|---|
+| `SpatialPatcher(on_error=...)` | reading each patch (`Field.select`, including batched `select_many`) | `patcher.errors` |
+| `parallel_map(on_error=...)` | your operator; `"raise"` cancels every queued patch | the journal, as `"error"` rows |
 
-- `SpatialPatcher.on_error` governs the **read** path (`Field.select`).
-  `parallel_map` reads through `patcher.split` — including the batched
-  `select_many` fast path (e.g. `CogField`), which falls back to
-  per-patch reads when a batch fails — so read failures are skipped,
-  masked, retried or raised per the patcher's policy and recorded in
-  `patcher.errors`.
-- `parallel_map(on_error=...)` governs the **operator** path. Under
-  `"raise"` the first operator failure cancels every queued patch.
-
-Set both to `"skip"` for maximally-resilient bulk inference; set both to
-`"raise"` for dev and CI. With a `journal`, every finished patch is
-committed (`"ok"` with its operator runtime, or `"error"` with the
-message), so a rerun with the same journal resumes where the last run
-stopped and retries only the anchors without an `"ok"` row.
-
-## See also
-
-- [`observability.md`](../observability.md) — hooks for `on_error`, `on_patch_done`, etc.
-- [`recipes/journal-and-resume.md`](journal-and-resume.md) — make the bulk job restartable after a crash.
-- [`recipes/streaming-overlap-add.md`](streaming-overlap-add.md) — pair with disk-backed aggregation for >1 TB outputs.
+Set both to `"skip"` for long unattended runs and both to `"raise"` in
+CI. Rerunning with the same journal retries only anchors without an
+`"ok"` row — see [Journal and resume](journal-and-resume.md).

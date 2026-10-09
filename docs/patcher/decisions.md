@@ -7,8 +7,16 @@ this and not that?" without rerunning the discussion.
 
 The format is loose ADR: **Decision** → **Context** → **Consequences** →
 **Alternatives considered**. Decisions are numbered in the order they
-were locked in; existing decisions do not change without a follow-up
-entry that supersedes them.
+were locked in and listed in that order; existing decisions do not change
+without a follow-up entry that supersedes them.
+
+!!! note "A historical record"
+    These entries keep the wording of the day they were decided.
+    References to "v0.1" and "v0.2" are the design-phase milestones of
+    the standalone geopatcher, before it joined this workspace as
+    `geotoolz-patcher` (now 0.10). Where a constraint still holds, the
+    how-to that relies on it says so — for example, stride-1 stencils in
+    [Temporal stencils](recipes/temporal-stencils.md#limits).
 
 ---
 
@@ -108,69 +116,6 @@ Zarr was picked over memmap, HDF5, and "bring your own store":
 
 ---
 
-## ADR-006 — `streaming_safe` violations: configurable, warn by default
-
-> Renumbered from ADR-003 — that number had accidentally been assigned
-> twice. References to "ADR-003" for the `streaming_safe` /
-> `set_strict` decision (e.g. in the `get_strict` docstring) resolve
-> here; ADR-003 now refers only to the `MatchedField` decision below.
-
-**Decision.** When a caller passes a `streaming_safe = False`
-aggregation into a context that expects streaming (`Patcher.merge`,
-streaming `OverlapAdd`, future PatchJournal jobs), the framework emits
-a `RuntimeWarning` by default. A module-level toggle promotes the
-warning to a hard `RuntimeError` for callers (CI, batch jobs) that want
-to fail fast.
-
-Toggle API:
-
-```python
-import geopatcher as gp
-
-gp.observe.set_strict(True)      # promotes streaming_safe warnings to errors
-gp.observe.set_strict(False)     # back to warn-only (default)
-gp.observe.get_strict()          # bool
-```
-
-Environment variable equivalent: `GEOPATCHER_STRICT=1` (read once at
-import time; runtime `set_strict()` overrides it).
-
-**Context.** Today `_warn_if_unsafe_streaming` always emits a warning.
-That is right for interactive notebook work — the user sees the warning
-and either ignores it (the in-RAM merge fits fine) or swaps in a
-streaming-safe alternative. It is wrong for batch / CI contexts where
-silently falling back to RAM defeats the streaming guarantee that
-called the job into existence.
-
-Three options were on the table:
-
-1. **Hard error.** Loud, but breaks every quick-iteration use of
-   `spatial.aggregation.Median` / `spatial.aggregation.Learned` in a notebook.
-2. **Warning only.** What we have. Quiet failures in batch jobs.
-3. **Configurable.** Best of both — default-permissive, opt-in strict.
-
-**Consequences.**
-
-- Casual / notebook users see no behavior change.
-- Batch / CI users can lock down with `gp.observe.set_strict(True)` (or the env
-  var in their orchestration layer).
-- Tests that intentionally exercise the warn path continue to work; the
-  `_warn_if_unsafe_streaming` helper checks the strict flag first and
-  raises before warning.
-- Future `streaming_safe` checks elsewhere in the framework (PatchJournal
-  registration, COG target compatibility, …) call the same helper and
-  inherit the toggle for free.
-
-**Alternatives considered.**
-
-- *Per-call `strict=` argument on `Patcher.merge`.* Adds keyword noise
-  to every call site; doesn't help the "global policy for this job"
-  case which is the actual ask.
-- *Always error.* Too disruptive for the existing user base; would
-  require a deprecation cycle for a problem most users do not have.
-
----
-
 ## ADR-003 — `MatchedField` is a composite `Field`, not a new top-level type
 
 **Decision.** Co-located patching across N sources lives in
@@ -212,7 +157,7 @@ patchers (`MatchedSpatialPatcher`, `MatchedTemporalPatcher`,
   primary's `with_data`.
 
 **Context.** The cross-package query→matchup→patch design
-(`docs/patcher/design/query-matchup.md`) introduces matchups between
+([query → matchup → patch design](../catalog/design/query-matchup.md)) introduces matchups between
 LEO, GEO, vector, and point-cloud sources. The patching side has to
 read co-located neighborhoods across these heterogeneous sources
 without duplicating coregistration logic (which lives in `geotoolz`)
@@ -473,6 +418,69 @@ ADR-001 (iterator-first split) and ADR-004 (coordinate-aware temporal).
 
 ---
 
+## ADR-006 — `streaming_safe` violations: configurable, warn by default
+
+> Renumbered from ADR-003 — that number had accidentally been assigned
+> twice. References to "ADR-003" for the `streaming_safe` /
+> `set_strict` decision (e.g. in the `get_strict` docstring) resolve
+> here; ADR-003 now refers only to the `MatchedField` decision below.
+
+**Decision.** When a caller passes a `streaming_safe = False`
+aggregation into a context that expects streaming (`Patcher.merge`,
+streaming `OverlapAdd`, future PatchJournal jobs), the framework emits
+a `RuntimeWarning` by default. A module-level toggle promotes the
+warning to a hard `RuntimeError` for callers (CI, batch jobs) that want
+to fail fast.
+
+Toggle API:
+
+```python
+import geopatcher as gp
+
+gp.observe.set_strict(True)      # promotes streaming_safe warnings to errors
+gp.observe.set_strict(False)     # back to warn-only (default)
+gp.observe.get_strict()          # bool
+```
+
+Environment variable equivalent: `GEOPATCHER_STRICT=1` (read once at
+import time; runtime `set_strict()` overrides it).
+
+**Context.** Today `_warn_if_unsafe_streaming` always emits a warning.
+That is right for interactive notebook work — the user sees the warning
+and either ignores it (the in-RAM merge fits fine) or swaps in a
+streaming-safe alternative. It is wrong for batch / CI contexts where
+silently falling back to RAM defeats the streaming guarantee that
+called the job into existence.
+
+Three options were on the table:
+
+1. **Hard error.** Loud, but breaks every quick-iteration use of
+   `spatial.aggregation.Median` / `spatial.aggregation.Learned` in a notebook.
+2. **Warning only.** What we have. Quiet failures in batch jobs.
+3. **Configurable.** Best of both — default-permissive, opt-in strict.
+
+**Consequences.**
+
+- Casual / notebook users see no behavior change.
+- Batch / CI users can lock down with `gp.observe.set_strict(True)` (or the env
+  var in their orchestration layer).
+- Tests that intentionally exercise the warn path continue to work; the
+  `_warn_if_unsafe_streaming` helper checks the strict flag first and
+  raises before warning.
+- Future `streaming_safe` checks elsewhere in the framework (PatchJournal
+  registration, COG target compatibility, …) call the same helper and
+  inherit the toggle for free.
+
+**Alternatives considered.**
+
+- *Per-call `strict=` argument on `Patcher.merge`.* Adds keyword noise
+  to every call site; doesn't help the "global policy for this job"
+  case which is the actual ask.
+- *Always error.* Too disruptive for the existing user base; would
+  require a deprecation cycle for a problem most users do not have.
+
+---
+
 ## ADR-007 — `merge` returns the raw aggregation output; `merge_to_field` rebuilds the Field
 
 > Partly superseded by ADR-009: the output's band axes come from the
@@ -576,6 +584,8 @@ a `Spatial` / `Temporal` name prefix — and the public modules mixed concepts (
 (`from geopatcher import spatial` then `spatial.window.Hann()`), and
 configs saved with the old bare class names must be re-saved. In return
 each name is findable from its task, and the root is short enough to read.
+
+---
 
 ## ADR-009 — The domain fixes the grid, the patches fix the bands
 

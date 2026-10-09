@@ -1,141 +1,132 @@
-# Temporal stencils — coordinate-aware time windows
+# Temporal stencils
 
-The integer-index temporal samplers (`temporal.sampler.RegularStride`,
-`temporal.geometry.LookbackHorizon`, …) work in *array steps*. That is fine when
-you know the source cadence up front, but it couples your notebook to a
-specific store. Re-point a `lookback=3` window from a 3-hourly ARCO-ERA5
-store to a 1-hourly one and you silently get a 3-hour window instead of
-a 9-hour one.
+Ask for "9 hours of context and 3 hours of horizon" instead of a number
+of array steps. A `geopatcher.temporal.stencils.TimeStencil` states the
+window in physical units and checks that it tiles the source's time grid
+exactly. A cadence change then either works unchanged or raises — it
+never silently truncates.
 
-`TimeStencil` lets you say what you mean — "9 hours of context, 3 hours
-of horizon, sampled at the source cadence" — and validates that the
-request exactly tiles the source grid. Switching cadence either works
-unchanged or raises a clear error; it never silently truncates.
+Integer windows such as `temporal.geometry.LookbackHorizon(lookback=3)`
+mean 9 hours on a 3-hourly store and 3 hours on an hourly one. Use a
+stencil when the cadence belongs to the store, as with ARCO-ERA5.
+Integer windows are in [Temporal patching](temporal-patching.md).
 
-This recipe shows three layers:
+## Slice a dataset directly
 
-1. The pure-function path — `Stencil` + `xarray.isel`.
-2. The four-axis path — `temporal.geometry.StencilGeometry` +
-   `temporal.sampler.StencilSampler` inside a `TemporalPatcher`.
-3. What the v0.1 constraints are and what they catch.
-
-See **ADR-004** in [Design decisions](../decisions.md) for the design rationale and the
-backwards-compatibility story.
-
-## Prerequisites
-
-```bash
-pip install 'geotoolz-patcher[grid]'   # xarray + numpy already in core
-```
-
-A 1-D coordinate array along the time axis. For an `xarray.DataArray`,
-the easiest path is `XarrayField(da).time_coord()` — it returns
-`da["time"].values` for `datetime64`-typed coords and raises a typed
-error on `cftime`-typed ones.
-
-## 1. Pure-function path
-
-The stencil math is independent of the patcher. If you already have an
-`xarray` Dataset and just want validated, no-truncate slices, use the
-primitives directly:
+The stencil functions work without a patcher: they return validated
+`slice`s for `xarray.DataArray.isel`.
 
 ```python
-import xarray as xr
 import numpy as np
-from geopatcher.temporal.stencils import (
-    TimeStencil, build_sampling_slices, valid_origin_points,
+import xarray as xr
+
+from geopatcher.temporal.stencils import TimeStencil, build_sampling_slices, valid_origin_points
+
+# Shapes: T = 32 three-hourly steps, 8 × 8 grid.
+time: np.ndarray = np.arange("2024-01-01T00", "2024-01-05T00", 3, dtype="datetime64[h]")  # (32,) datetime64[h]
+t2m: xr.DataArray = xr.DataArray(
+    np.random.default_rng(0).random((32, 8, 8), dtype=np.float32),  # (T, 8, 8) float32
+    dims=("time", "lat", "lon"),
+    coords={"time": time, "lat": np.arange(8.0), "lon": np.arange(8.0)},
 )
 
-ds = xr.open_zarr("gs://.../era5.zarr", chunks=None)
-time = ds["time"].values                                # datetime64[ns]
-
-stencil = TimeStencil(start="-9h", stop="3h", step="3h", closed="both")
-
-origins = valid_origin_points(time, stencil)[::2]       # every 6h
-slices  = build_sampling_slices(time, origins, stencil)
-
-sample  = ds.isel(time=slices[0])                       # lazy xarray.Dataset
+stencil: TimeStencil = TimeStencil(start="-9h", stop="3h", step="3h", closed="both")  # offsets −9 h … +3 h
+origins: np.ndarray = valid_origin_points(t2m["time"].values, stencil)[::2]  # (14,) datetime64, every 6 h
+slices: list[slice] = build_sampling_slices(t2m["time"].values, origins, stencil)  # 14 slices
+sample: xr.DataArray = t2m.isel(time=slices[0])        # (5, 8, 8) float32
 ```
 
-`valid_origin_points` returns only the origins for which the full window
-fits — no half-windows at either edge. `build_sampling_slices` raises a
-labelled `ValueError` if `stencil.step` doesn't evenly divide the source
-step, so cadence mismatches surface at the slicing call, not in a
-malformed batch downstream.
+- `valid_origin_points` returns only origins whose whole window fits — no
+  half windows at either edge.
+- `build_sampling_slices` raises a labelled `ValueError` when the stencil
+  step does not divide the source step.
 
-## 2. Four-axis path
+## Use a stencil in a TemporalPatcher
 
-If you're already living inside `TemporalPatcher`, the stencil drops in
-as a Geometry + Sampler pair:
+`temporal.geometry.StencilGeometry` and `temporal.sampler.StencilSampler`
+put the stencil on the geometry and sampler axes. Pass the time
+coordinate with `coord=`.
 
 ```python
-from geopatcher import TemporalPatcher, temporal
+import numpy as np
+import xarray as xr
+
+import geopatcher as gp
+from geopatcher import temporal
 from geopatcher.fields import XarrayField
 from geopatcher.temporal.stencils import TimeStencil
 
-field = XarrayField(ds["t2m"])
-coord = field.time_coord()                              # 1-D datetime64
+time: np.ndarray = np.arange("2024-01-01T00", "2024-01-05T00", 3, dtype="datetime64[h]")  # (32,) datetime64[h]
+field: XarrayField = XarrayField(
+    xr.DataArray(
+        np.random.default_rng(0).random((32, 8, 8), dtype=np.float32),  # (32, 8, 8) float32
+        dims=("time", "lat", "lon"),
+        coords={"time": time, "lat": np.arange(8.0), "lon": np.arange(8.0)},
+    )
+)
+coord: np.ndarray = field.time_coord()                # (32,) datetime64[s]
 
-stencil = TimeStencil(start="-9h", stop="3h", step="3h", closed="both")
-
-tp = TemporalPatcher(
-    geometry    = temporal.geometry.StencilGeometry(stencil, source_step=np.timedelta64(3, "h")),
-    sampler     = temporal.sampler.StencilSampler(stencil, every=2, shuffle=True, seed=0),
-    window      = temporal.window.CausalBoxcar(),
-    aggregation = temporal.aggregation.Forecast(horizon=1),
+stencil: TimeStencil = TimeStencil(start="-9h", stop="3h", step="3h", closed="both")
+patcher: gp.TemporalPatcher = gp.TemporalPatcher(
+    geometry=temporal.geometry.StencilGeometry(stencil, source_step=np.timedelta64(3, "h")),
+    sampler=temporal.sampler.StencilSampler(stencil, every=2, shuffle=True, seed=0),
+    window=temporal.window.CausalBoxcar(),
+    aggregation=temporal.aggregation.Forecast(horizon=1),
 )
 
-for patch in tp.split(field.da.values, coord=coord, prefetch=4):
-    yhat = model(patch.data)                            # patch.data is one window
+windows: list[gp.TemporalPatch] = list(patcher.split(field, coord=coord))  # 14 × (5, 8, 8) float32
+print(windows[0].anchor, windows[0].indices)          # 9 slice(6, 11, None)
 ```
 
-Three things to notice:
+- `coord=` is required when the geometry or sampler is coordinate-aware
+  (`needs_coord = True`) and ignored otherwise. A `GridDomain` field's
+  time coordinate is the default.
+- The sampler still yields integer indices into `coord`.
+- `get_config()` stores the stencil losslessly, so
+  `geopatcher.config.from_config(geopatcher.config.axis_envelope(patcher))`
+  rebuilds the same patcher.
 
-- `tp.split` (and every other `TemporalPatcher` method that takes a
-  series) gains an optional `coord=`. It is **required** when the
-  geometry or sampler is coordinate-aware; otherwise it is ignored.
-- The sampler still yields integer indices into `coord`. The patcher
-  resolves each anchor to a coordinate value internally for dispatch and
-  for the hook payload.
-- `get_config()` nests the stencil as a `{"class": "TimeStencil", "config": ...}`
-  envelope with each offset as `{"value": int, "unit": str}` (lossless at
-  any `timedelta64` resolution), so `geopatcher.config.from_config(axis_envelope(tp))`
-  replays the same patcher without re-stating the cadence.
+## Timestamps in hooks
 
-Hook authors can opt into the new payload by accepting a trailing
-`coord_value` arg:
+A hook whose `on_patch_start` takes a second argument receives the
+anchor's coordinate value. Single-argument hooks keep working.
 
 ```python
+import numpy as np
+
+import geopatcher as gp
+from geopatcher import temporal
+from geopatcher.temporal.stencils import TimeStencil
+
+
 class TimestampedProgress:
-    def on_patch_start(self, anchor, coord_value=None):
+    """Print each window's anchor time."""
+
+    def on_patch_start(self, anchor: int, coord_value: np.datetime64 | None = None) -> None:
         print(f"anchor={anchor} at {coord_value}")
+
+
+time: np.ndarray = np.arange("2024-01-01T00", "2024-01-02T00", 3, dtype="datetime64[h]")  # (8,) datetime64[h]
+series: np.ndarray = np.arange(8, dtype=np.float32)    # (8,) float32
+stencil: TimeStencil = TimeStencil(start="-6h", stop="0h", step="3h", closed="both")
+patcher: gp.TemporalPatcher = gp.TemporalPatcher(
+    geometry=temporal.geometry.StencilGeometry(stencil),
+    sampler=temporal.sampler.StencilSampler(stencil),
+    window=temporal.window.CausalBoxcar(),
+    aggregation=temporal.aggregation.Mean(),
+)
+windows: list[gp.TemporalPatch] = list(
+    patcher.split(series, coord=time, hooks=[TimestampedProgress()])  # anchor=2 at 2024-01-01T06 …
+)                                                     # 6 × (3,) float32
 ```
 
-Existing single-arg hooks keep working — the patcher dispatches with the
-exact number of positionals the callback declares.
+## Limits
 
-## 3. v0.1 constraints
-
-- **Stride-1 only.** A stencil whose `step` is greater than the source
-  cadence (`step=2h` against a 1-hourly source) would yield strided
-  slices, which `temporal.window.Window.weights` and
-  `temporal.aggregation.Aggregation.merge` don't yet support. The geometry raises at
-  construction when `source_step` is supplied, and re-checks at resolve
-  time when it isn't.
-- **`cftime` coords.** Not yet supported. `XarrayField.time_coord`
-  raises a typed `TypeError` with a pointer at
-  `DataArray.indexes['time'].to_datetimeindex()`.
-- **Spatial stencils.** This work covers the time axis only; the
-  symmetric `spatial.geometry.StencilGeometry` is tracked as future work in the
-  same issue.
-- **`amerge` for stencil-driven async aggregations.** Out of scope for
-  v0.1; tracked alongside the async `asplit`/`amerge` thread.
-
-## See also
-
-- `TimeStencil` / `Stencil` / `exact_quotient` /
-  `build_sampling_slices` / `valid_origin_points` — primitives.
-- `temporal.geometry.StencilGeometry` / `temporal.sampler.StencilSampler` — four-axis
-  integration.
-- `XarrayField.time_coord` — helper to extract the coordinate vector.
-- ADR-004 — design rationale.
+- **Stride 1 only.** A stencil step larger than the source cadence (2 h on
+  an hourly store) would need strided windows, which windows and
+  aggregations do not support yet. `StencilGeometry` raises at
+  construction when `source_step` is given, else when it resolves.
+- **No `cftime` coordinates.** `XarrayField.time_coord` raises
+  `TypeError`; convert with `DataArray.indexes["time"].to_datetimeindex()`.
+- **Time only.** There is no spatial stencil geometry.
+- ADR-004 in the [design decisions](../decisions.md) records the design.

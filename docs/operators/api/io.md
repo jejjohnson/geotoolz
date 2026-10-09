@@ -1,8 +1,7 @@
 # IO
 
-Reader and writer source/sink operators. See the concept page
-[Multi-format readers](../io.md) for the HDF / HDF-EOS / NetCDF-CF stack and the install extras
-(`geotoolz[hdf5]`, `geotoolz[hdf4]`, `geotoolz[netcdf]`).
+Reader and writer source/sink operators. For HDF / HDF-EOS / NetCDF-CF
+reads and their extras, see [Read HDF and NetCDF files](../io.md).
 
 - **Window / bounds readers:** `ReadWindow`, `ReadBounds`, `ReadCenterCoords`, `ReadPolygon`,
   `ReadTile`, `ReadToCRS`, `ReadReprojectLike`
