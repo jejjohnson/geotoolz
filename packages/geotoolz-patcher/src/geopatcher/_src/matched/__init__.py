@@ -1,7 +1,7 @@
 """`MatchedField` + `MatchedPatch` — co-located patches across sources.
 
 This subpackage is the geopatcher half of the cross-package
-query→matchup→patch design (see ``docs/patcher/design/query-matchup.md``
+query→matchup→patch design (see ``docs/catalog/design/query-matchup.md``
 §6). It extends the single-source patching model to N co-registered
 sources: a primary `Field` defines the anchor space, secondary
 `Field`s are aligned per-anchor via a coregistration callable, and

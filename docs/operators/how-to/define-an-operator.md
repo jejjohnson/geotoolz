@@ -92,18 +92,18 @@ from geotoolz.carrier import mask_invalid_to_nan, over_frames, resolve_band, wra
 from geotoolz.testing import check_operator
 
 
-class NormalizedDifference(gz.Operator):
-    """(a - b) / (a + b + eps) for two bands; NaN where either is nodata."""
+class RedEdgeChlorophyll(gz.Operator):
+    """CIre = NIR / red edge - 1 (Gitelson 2003); NaN where either band is nodata."""
 
-    def __init__(self, *, a: int | str = 3, b: int | str = 2, eps: float = 1e-10) -> None:
-        self.a, self.b, self.eps = a, b, eps
+    def __init__(self, *, nir: int | str = 3, red_edge: int | str = 2, eps: float = 1e-10) -> None:
+        self.nir, self.red_edge, self.eps = nir, red_edge, eps
 
     @over_frames
     def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
         x: np.ndarray = mask_invalid_to_nan(gt)                       # (C, H, W) any → (C, H, W) float · NaN = nodata
-        a: np.ndarray = x[resolve_band(gt, self.a)]                   # (H, W) float
-        b: np.ndarray = x[resolve_band(gt, self.b)]                   # (H, W) float
-        return wrap_like(gt, (a - b) / (a + b + self.eps), fill_value_default=np.nan)
+        nir: np.ndarray = x[resolve_band(gt, self.nir)]               # (H, W) float
+        red_edge: np.ndarray = x[resolve_band(gt, self.red_edge)]     # (H, W) float
+        return wrap_like(gt, nir / (red_edge + self.eps) - 1, fill_value_default=np.nan)
 
 
 rng: np.random.Generator = np.random.default_rng(0)
@@ -111,14 +111,14 @@ dn: np.ndarray = rng.integers(1, 4000, size=(4, 32, 32), dtype=np.uint16)  # (4,
 dn[:, :2, :2] = 0                                                         # a few nodata pixels
 scene: GeoTensor = GeoTensor(
     dn, transform=from_origin(750_000, 4_350_000, 10, 10), crs="EPSG:32610",
-    fill_value_default=0, attrs={"band_names": ["B2", "B3", "B4", "B8"]},
+    fill_value_default=0, attrs={"band_names": ["B2", "B4", "B5", "B8"]},
 )
 
-ndvi: GeoTensor = check_operator(NormalizedDifference(a="B8", b="B4"), scene)  # (4, 32, 32) uint16 → (32, 32) float · NaN = nodata
-assert np.isnan(ndvi.values[:2, :2]).all()
+cire: GeoTensor = check_operator(RedEdgeChlorophyll(nir="B8", red_edge="B5"), scene)  # (4, 32, 32) uint16 → (32, 32) float · NaN = nodata
+assert np.isnan(cire.values[:2, :2]).all()
 ```
 
-The built-in `gz.NDVI` has the same shape. Before writing a step, search
+Built-in indices such as `gz.NDVI` have the same shape. Before writing a step, search
 the [capability index](../../capabilities.md): it may already exist.
 
 ## Hold a live object

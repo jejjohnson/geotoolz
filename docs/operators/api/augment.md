@@ -51,6 +51,8 @@ sequence. A per-call `seed` is a deterministic one-off draw that leaves the
 stream untouched:
 
 ```python
+import geotoolz as gz
+
 op = gz.augment.GaussianNoise(sigma=0.01, seed=1)
 a, b = op(patch), op(patch)          # different noise, reproducible sequence
 same_a = op(patch, seed=42)

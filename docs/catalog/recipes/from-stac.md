@@ -61,6 +61,7 @@ Computer assets behind blob-storage tokens, sign explicitly:
 ```python
 import planetary_computer as pc
 from pystac_client import Client
+import geocatalog as gc
 
 client = Client.open(
     "https://planetarycomputer.microsoft.com/api/stac/v1",

@@ -32,6 +32,8 @@ import geotoolz as gz
 # A small swath file: 3 radiance bands plus per-pixel latitude / longitude.
 path: Path = Path(tempfile.mkdtemp()) / "swath.h5"
 rng: np.random.Generator = np.random.default_rng(0)
+lat: np.ndarray
+lon: np.ndarray
 lat, lon = np.meshgrid(np.linspace(39.3, 38.9, 20), np.linspace(-120.2, -119.9, 30), indexing="ij")  # (20, 30) float64 each
 with h5py.File(path, "w") as f:
     f["radiance"] = rng.random((3, 20, 30)).astype(np.float32)   # (3, 20, 30) float32
@@ -66,13 +68,13 @@ import geotoolz as gz
 # A small Level-2 file: packed int16 methane on a UTM grid, inside group PRODUCT.
 path: Path = Path(tempfile.mkdtemp()) / "l2.nc"
 with netCDF4.Dataset(path, "w") as ds:
-    product = ds.createGroup("PRODUCT")
+    product: netCDF4.Group = ds.createGroup("PRODUCT")
     product.createDimension("y", 20)
     product.createDimension("x", 30)
-    crs = product.createVariable("crs", "i4")
+    crs: netCDF4.Variable = product.createVariable("crs", "i4")
     crs.crs_wkt = CRS("EPSG:32610").to_wkt()
     crs.GeoTransform = "750000 10 0 4350000 0 -10"
-    ch4 = product.createVariable("ch4", "i2", ("y", "x"), fill_value=-999)
+    ch4: netCDF4.Variable = product.createVariable("ch4", "i2", ("y", "x"), fill_value=-999)
     ch4.scale_factor, ch4.add_offset, ch4.grid_mapping = 0.1, 1800.0, "crs"
     ch4[:] = np.random.default_rng(0).uniform(1850, 1950, (20, 30))  # (20, 30) float64 → packed int16
 

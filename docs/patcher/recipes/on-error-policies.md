@@ -55,6 +55,8 @@ Failed patches never appear on the iterator. Inspect
 `patcher.errors` after the fact:
 
 ```python
+import geopatcher as gp
+
 patcher = gp.SpatialPatcher(..., on_error="skip", capture_traceback=False)
 
 outs = list(patcher.split(field))
@@ -82,6 +84,7 @@ gaps):
 
 ```python
 import numpy as np
+import geopatcher as gp
 
 patcher = gp.SpatialPatcher(..., on_error="mask")
 
@@ -102,6 +105,8 @@ the aggregation's `fill_value` (NaN by default).
 ## 4. `"retry"` — bounded retries for transient I/O
 
 ```python
+import geopatcher as gp
+
 patcher = gp.SpatialPatcher(
     ...,
     on_error    = "retry",
@@ -140,6 +145,7 @@ For production bulk inference, combine `on_error="retry"` with the
 reference runner and a `PatchJournal`:
 
 ```python
+import geopatcher as gp
 from geopatcher.observe import PatchJournal
 from geopatcher.run import parallel_map
 

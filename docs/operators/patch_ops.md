@@ -1,7 +1,9 @@
 # Tile → operate → stitch
 
-Run any operator or model tile by tile over a scene too large for memory,
-and get one result on the scene's grid. `geotoolz.patch_ops` turns the
+Run any operator or model tile by tile and get one result on the scene's
+grid. The chips of one scene are held in memory together; for scenes
+larger than memory, use [geopatcher's runners](../patcher/index.md) to
+stream them. `geotoolz.patch_ops` turns the
 [geopatcher](../patcher/index.md) steps into operators, so the whole flow
 is one `Sequential`.
 
@@ -24,7 +26,7 @@ from rasterio.transform import from_origin
 
 import geopatcher as gp
 import geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches, TriangularWindow
 
 rng: np.random.Generator = np.random.default_rng(0)
 scene: GeoTensor = GeoTensor(
@@ -37,7 +39,7 @@ field: gp.RasterField = gp.RasterField(scene)
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
     geometry=gp.spatial.geometry.Rectangular(size=(128, 128)),
     sampler=gp.spatial.sampler.RegularStride(step=(96, 96)),        # 32 px overlap
-    window=gp.spatial.window.Hann(),
+    window=TriangularWindow(width=32),                              # linear feather; never zero
     aggregation=gp.spatial.aggregation.OverlapAdd(),
 )
 ndvi: gz.Sequential = gz.DNToReflectance(scale=1e-4) | gz.NDVI(red="B4", nir="B8")
@@ -53,6 +55,10 @@ assert result.transform == scene.transform
 `MergePatches` places the chips on the domain's grid and keeps the band
 axes they carry, so NDVI's one-band chips merge into an `(H, W)` result.
 It needs the output `domain` when you build it, so build the field first.
+
+`gp.spatial.window.Hann` weighs each chip's first row and column at zero,
+so the scene's top row and left column come out `NaN`. `TriangularWindow`
+and `gp.spatial.window.Gaussian` keep them.
 
 ## Run a model on each tile
 
@@ -85,7 +91,7 @@ scene: GeoTensor = GeoTensor(
 field: gp.RasterField = gp.RasterField(scene)
 
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
-    geometry=gp.spatial.geometry.Rectangular(size=(128, 128)),
+    geometry=gp.spatial.geometry.Rectangular(size=(128, 128), boundary="pad"),  # 384 is not 128 + k·96
     sampler=gp.spatial.sampler.RegularStride(step=(96, 96)),
     window=TriangularWindow(width=32),
     aggregation=gp.spatial.aggregation.OverlapAdd(),

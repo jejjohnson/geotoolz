@@ -255,6 +255,7 @@ pip install geotoolz                              # operators only
 pip install 'geotoolz[patch]'                     # + patcher (geopatcher)
 pip install geotoolz-catalog                      # catalog only
 pip install 'geotoolz-catalog[patch]'             # catalog + patcher bridge
+pip install 'geotoolz-catalog[stac]'              # + STAC searches (from_stac_search)
 pip install geotoolz-cloud                        # object storage: pool, file verbs, credentials, COG writes
 pip install 'geotoolz-cloud[cog]'                 # + async COG reads
 pip install geotoolz-products                     # product readers (geoproducts)

@@ -12,8 +12,8 @@ can be reused or tested alone.
 
 `geotoolz` cuts each step into an **Operator**: a typed callable with a
 keyword-only constructor. It takes a georeader `GeoTensor` (or a plain
-`ndarray`) and returns the same kind of carrier, with its CRS, transform,
-band names and fill value intact.
+`ndarray`) and returns the same kind of carrier on the same CRS and
+transform, with band names and a fill value that match the output.
 
 Chain operators with `|` into a `Sequential`, or wire them into a named
 `Graph` when the pipeline branches. Both are operators too, so pipelines
@@ -26,12 +26,14 @@ packages is on [How the packages interlock](../geostack.md).
 
 ## Install
 
+Until the first PyPI release, install from a clone (see the
+[stack install](../index.md#install)); after it:
+
 ```bash
 pip install geotoolz                 # every operator family
 pip install 'geotoolz[patch]'        # + tile → operate → stitch with geopatcher
 ```
 
-Pre-PyPI, install from a clone; see the [stack install](../index.md#install).
 Backends that only a few operators use are extras. Those operators import
 without them and raise an `ImportError` naming the extra when called.
 

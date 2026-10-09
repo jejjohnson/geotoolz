@@ -53,6 +53,7 @@ plugins:
   - redirects:
       redirect_maps:
         concepts.md: operators/concepts.md
+        notebooks/operators_lake_tahoe.md: operators/notebooks/operators_lake_tahoe.ipynb
         quickstart.md: operators/index.md
         operators/quickstart.md: operators/index.md
         normalization.md: operators/normalization.md

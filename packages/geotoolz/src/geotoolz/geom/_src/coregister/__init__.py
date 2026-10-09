@@ -11,7 +11,7 @@ Used downstream by ``geopatcher.matched.MatchedField`` so a single
 sampler can read co-located neighborhoods across heterogeneous
 sources without geopatcher knowing how the alignment was done.
 
-See ``docs/design/query-matchup.md`` §5 for the full design.
+See ``docs/catalog/design/query-matchup.md`` §5 for the full design.
 """
 
 from __future__ import annotations

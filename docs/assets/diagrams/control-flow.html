@@ -42,8 +42,8 @@
         <div class="node io c1" id="w-in" style="grid-row: 1 / 4;"><div class="name">x</div><div class="desc">attrs["platform"]</div></div>
         <div class="node compute c2" id="w-a" style="grid-row: 1;"><div class="name">"sentinel-2"</div><div class="desc">NDVI(nir="B8")</div></div>
         <div class="node compute c2" id="w-b" style="grid-row: 2;"><div class="name">"landsat-8"</div><div class="desc">NDVI(nir="B5")</div></div>
-        <div class="node dim c2" id="w-d" style="grid-row: 3;"><div class="name">default</div><div class="desc">Identity()</div></div>
-        <div class="node out c3" id="w-out" style="grid-row: 1 / 4;"><div class="name">y</div><div class="desc">(H, W) float64</div></div>
+        <div class="node dim c2" id="w-d" style="grid-row: 3;"><div class="name">default</div><div class="desc">Identity() · x as is</div></div>
+        <div class="node out c3" id="w-out" style="grid-row: 1 / 4;"><div class="name">y</div><div class="desc">per case: (H, W) NDVI, or x</div></div>
       </div>
     </div>
 
