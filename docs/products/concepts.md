@@ -16,7 +16,6 @@ you ask for.
 | `bands`, `fill_value_default` | band names (also in every read's `attrs["band_names"]`) and the nodata value |
 | `read_from_window`, `read_from_bounds`, `load` | a `GeoTensor`; windows past the grid are padded with the fill |
 | `track` | `"A"` for a clean affine grid; `"B"` for irregular per-pixel geolocation |
-| `set_obstore_client` | byte-range reads through the shared [`geocloud.store`](../cloud/concepts.md#the-pool) pool (`[obstore]`) |
 
 Every reader shipped today is Track A: GOES and Himawari recover the
 geostationary fixed grid, Carbon Mapper rasters are GeoTIFFs. Because a

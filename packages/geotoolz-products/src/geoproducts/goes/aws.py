@@ -9,7 +9,7 @@ product and scan-start hour::
 This module maps ABI file names, satellites and time windows onto those
 objects. Listing and atomic downloads go unsigned through
 ``geocloud.files`` on the shared obstore pool (no credentials, no AWS SDK;
-geotoolz-cloud comes with the ``[goes]`` and ``[obstore]`` extras).
+geotoolz-cloud comes with the ``[goes]`` extra).
 """
 
 from __future__ import annotations

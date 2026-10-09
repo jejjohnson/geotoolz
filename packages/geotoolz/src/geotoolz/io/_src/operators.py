@@ -30,6 +30,7 @@ See the docs' Concepts page ("Round-trip discipline") for the
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
@@ -943,10 +944,13 @@ class WriteGeoTIFF(SinkOperator):
 
     Delegates to :func:`georeader.save.save_tiled_geotiff`. Use
     :class:`WriteCOG` instead when you need overviews / HTTP range access.
+    A cloud URI is written to a temporary local file first, then uploaded
+    with `geocloud.files.upload` (the ``[cloud]`` extra), so the object
+    only appears once complete.
 
     Args:
-        path: Output path or cloud URI (gs://, s3://, az://, abfs://,
-            oss://).
+        path: Output path, or a cloud URI geotoolz-cloud writes to
+            (``s3://``, ``gs://``, ``az://`` / ``abfs[s]://``).
         profile: Extra rasterio profile entries merged on top of the
             georeader defaults (e.g. ``{"compress": "lzw"}``).
         blocksize: Internal tile size in pixels (square). Must be a
@@ -975,7 +979,7 @@ class WriteGeoTIFF(SinkOperator):
         descriptions: list[str] | None = None,
         tags: dict[str, Any] | list[list[Any]] | None = None,
     ) -> None:
-        self.path = Path(path)
+        self.path = os.fspath(path)
         self.profile = mapping_from_pairs(profile)
         self.blocksize = blocksize
         self.descriptions = descriptions
@@ -988,15 +992,21 @@ class WriteGeoTIFF(SinkOperator):
                 f"{np.shape(gt.values)!r}; write each frame of a (T, C, H, W) "
                 "stack separately or use WriteZarr."
             )
+        remote = "://" in self.path and not self.path.startswith("file://")
         try:
-            save.save_tiled_geotiff(
-                gt,
-                str(self.path),
-                profile_arg=self.profile,
-                descriptions=self.descriptions,
-                tags=self.tags,
-                blocksize=self.blocksize,
-            )
+            if not remote:
+                self._save(gt, self.path.removeprefix("file://"))
+                return None
+            with tempfile.TemporaryDirectory() as tmp:
+                staged = str(Path(tmp) / "out.tif")
+                self._save(gt, staged)
+
+                def upload() -> None:
+                    from geocloud import files
+
+                    files.upload(staged, self.path)
+
+                _cloud_call("cloud", "WriteGeoTIFF to a cloud URI", upload)
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise GeoToolzIOError(
                 f"Unable to write GeoTIFF {self.path!s}: {exc}"
@@ -1007,9 +1017,19 @@ class WriteGeoTIFF(SinkOperator):
             ) from exc
         return None
 
+    def _save(self, gt: GeoTensor, path: str) -> None:
+        save.save_tiled_geotiff(
+            gt,
+            path,
+            profile_arg=self.profile,
+            descriptions=self.descriptions,
+            tags=self.tags,
+            blocksize=self.blocksize,
+        )
+
     def get_config(self) -> dict[str, Any]:
         return {
-            "path": str(self.path),
+            "path": self.path,
             "profile": mapping_to_pairs(self.profile),
             "blocksize": self.blocksize,
             "descriptions": self.descriptions,

@@ -39,7 +39,7 @@
       <div class="verb">read</div>
       <div class="dist">geotoolz-products</div>
       <div class="imp">import geoproducts</div>
-      <div class="one">ProductReader ABC + per-provider readers (toy_sensor, carbonmapper)</div>
+      <div class="one">ProductReader ABC + per-provider readers (GOES, Himawari, Carbon Mapper)</div>
     </div>
     <div class="pkg-card find" id="p-catalog">
       <div class="verb">find</div>
@@ -80,9 +80,11 @@
   wire("p-catalog", "p-patcher", { from: "right", to: "left", dashed: true, color: X,
         label: "<span class='t'>[patch]</span>", dy: -18 });
   wire("p-products", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, toShift: -360,
-        label: "<span class='t'>[obstore]</span>" });
+        label: "<span class='t'>[goes] [himawari]</span>" });
   wire("p-catalog", "geocloud", { from: "bottom", to: "top", dashed: true, color: X,
-        label: "<span class='t'>[obstore]</span>" });
+        label: "<span class='t'>[cloud]</span>" });
+  wire("p-geotoolz", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, fromShift: -110, toShift: 470, dx: -95, dy: 14,
+        label: "<span class='t'>[cloud] [hdf5]</span>" });
   wire("p-patcher", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, fromShift: -40, toShift: 360,
         label: "<span class='t'>[cog]</span>" });
   wire("p-geotoolz", "p-patcher", { from: "left", to: "right", dashed: true, color: X,

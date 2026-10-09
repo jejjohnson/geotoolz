@@ -57,7 +57,7 @@ dev = [
     "geotoolz-cloud[cog]",
     "geotoolz-patcher",
     "geotoolz-catalog",
-    "geotoolz-products[obstore,operators]",
+    "geotoolz-products[operators]",
 ]
 lint = [
     "ruff>=0.15.11",

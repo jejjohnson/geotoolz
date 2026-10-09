@@ -215,8 +215,8 @@ a base install and raise an `ImportError` naming the extra when called.
 | `patch` | `geotoolz-patcher[pipekit]` | `geotoolz.patch_ops` (tile → map → stitch, label-aware samplers) |
 <!-- /extras-table -->
 
-Product readers (`ProductReader`, `toy_sensor`, `carbonmapper`) and their
-cloud byte-range `[obstore]` extra live in
+Product readers (`ProductReader`, `toy_sensor`, `goes`, `himawari`,
+`carbonmapper`) live in
 [`geotoolz-products`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-products).
 
 From a clone (`make install` already installs every extra):

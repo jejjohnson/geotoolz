@@ -760,3 +760,51 @@ def test_slope_mask_rejects_a_geographic_dem() -> None:
     scene = toy_geotensor(np.ones((1, 8, 8)), grid="geographic")
     with pytest.raises(ValueError, match=r"SlopeMask.*projected CRS"):
         SlopeMask(max_slope_deg=10.0)(scene, dem)
+
+
+def test_natural_earth_download_and_extract_are_atomic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed download leaves nothing; a good one leaves no staging files."""
+    import io as stdio
+    import zipfile
+
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    shp_dir = tmp_path / "src"
+    shp_dir.mkdir()
+    gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1)], crs="EPSG:4326").to_file(
+        shp_dir / "land.shp"
+    )
+    archive = stdio.BytesIO()
+    with zipfile.ZipFile(archive, "w") as zf:
+        for part in shp_dir.iterdir():
+            zf.write(part, part.name)
+
+    class _Broken(stdio.BytesIO):
+        def read(self, *args: object) -> bytes:
+            raise OSError("connection reset")
+
+    def broken(url: str, timeout: float) -> stdio.BytesIO:
+        return _Broken(b"")
+
+    mask_operators._load_natural_earth.cache_clear()
+    monkeypatch.setattr(mask_operators, "urlopen", broken)
+    with pytest.raises(RuntimeError, match="failed to download"):
+        mask_operators._load_natural_earth("land", "natural_earth_10m")
+    cache = tmp_path / "geotoolz" / "natural_earth"
+    assert list(cache.iterdir()) == []  # no truncated archive left behind
+
+    monkeypatch.setattr(
+        mask_operators,
+        "urlopen",
+        lambda url, timeout: stdio.BytesIO(archive.getvalue()),
+    )
+    try:
+        land = mask_operators._load_natural_earth("land", "natural_earth_10m")
+    finally:
+        mask_operators._load_natural_earth.cache_clear()
+    assert len(land) == 1
+    assert not [p for p in cache.iterdir() if p.name.startswith(".")]

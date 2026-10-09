@@ -8,8 +8,8 @@ depends on georeader only: it installs without the operator library.
 Public surface:
 
 - `ProductReader` — the ABC for product readers (lazy ``_read_window``,
-  band names, track, optional pooled object-store byte reads via the
-  ``[obstore]`` extra).
+  band names, track). File formats and object storage come from
+  geotoolz-cloud, through each reader's extra.
 - `stack` — several readers' bands on one reference grid.
 - Per-sensor / per-provider subpackages, each exposing ``Reader``,
   ``BANDS`` / ``CONSTANTS`` and, with the ``[operators]`` extra,

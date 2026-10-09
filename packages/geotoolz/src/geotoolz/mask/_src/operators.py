@@ -888,7 +888,20 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
                     f"Natural Earth {kind!r} archive failed CRC validation at "
                     f"{bad_member!r}; remove the cached archive to re-download it"
                 )
-            _safe_extract_zip(zf, extract_dir)
+            # Extract next to the target and rename into place, so a
+            # half-extracted directory never passes the `exists()` check.
+            staging = Path(
+                tempfile.mkdtemp(dir=cache_dir, prefix=f".{extract_dir.name}.")
+            )
+            try:
+                _safe_extract_zip(zf, staging)
+                try:
+                    staging.rename(extract_dir)
+                except OSError:
+                    if not extract_dir.exists():  # not just lost a race
+                        raise
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
     shapefiles = list(extract_dir.glob("*.shp"))
     if not shapefiles:
         raise FileNotFoundError(
@@ -914,8 +927,19 @@ def clear_natural_earth_cache() -> None:
 
 
 def _download_url(url: str, destination: Path, *, timeout: float = 60.0) -> None:
-    with urlopen(url, timeout=timeout) as response, destination.open("wb") as dst:
-        shutil.copyfileobj(response, dst)
+    """Download ``url`` to ``destination`` atomically.
+
+    The bytes go to a temporary sibling renamed into place once complete, so
+    an interrupted download never leaves a truncated archive the cache
+    would later trust.
+    """
+    fd, tmp = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
+    try:
+        with urlopen(url, timeout=timeout) as response, os.fdopen(fd, "wb") as dst:
+            shutil.copyfileobj(response, dst)
+        os.replace(tmp, destination)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
 def _natural_earth_cache_dir() -> Path:
