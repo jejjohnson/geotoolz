@@ -32,6 +32,6 @@ from __future__ import annotations
 from geocloud import cache, cog, credentials, files, fs, hdf, store
 
 
-__version__ = "0.3.0"  # x-release-please-version
+__version__ = "0.4.0"  # x-release-please-version
 
 __all__ = ["__version__", "cache", "cog", "credentials", "files", "fs", "hdf", "store"]

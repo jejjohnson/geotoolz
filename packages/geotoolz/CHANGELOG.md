@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.10.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.9.0...geotoolz-v0.10.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **products:** geotoolz-products drops ProductReader.set_obstore_client, obstore_client and _read_bytes, and its [obstore] extra.
+* **cloud:** geotoolz.io no longer exports select_indexes, read_indexes, fill_value_from_attrs or affine_from_geotransform (they are geocloud.hdf's, and raise ValueError rather than GeoToolzIOError). gz.io.WriteCOG takes write_cog's options (compress, level, predictor, blocksize, overviews, resampling, nodata, descriptions, tags, creation_options) instead of a rasterio profile, and needs the new geotoolz [cloud] extra; geotoolz's [hdf5] / [hdf4] / [netcdf] extras now install geotoolz-cloud with that backend. geoproducts' [goes] / [himawari] extras install geotoolz-cloud[hdf5] in place of h5py.
+
+### Features
+
+* **cloud:** geocloud.hdf — the stack's HDF5 / NetCDF / HDF4 readers; gz.io and the product readers build on it ([#458](https://github.com/jejjohnson/geotoolz/issues/458)) ([5396274](https://github.com/jejjohnson/geotoolz/commit/539627449a3901c3c17e9ace74ba1ea09d529359))
+
+
+### Code Refactoring
+
+* **products:** drop the dead ProductReader byte path; cloud writes and atomic downloads ([#459](https://github.com/jejjohnson/geotoolz/issues/459)) ([903ced0](https://github.com/jejjohnson/geotoolz/commit/903ced0adaa68078d3a207dfe9c8ba2d5086467f))
+
 ## [0.9.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.8.0...geotoolz-v0.9.0) (2026-10-08)
 
 

@@ -27,7 +27,7 @@ from geoproducts._src.base import ProductReader
 from geoproducts._src.stack import stack
 
 
-__version__ = "0.3.0"  # x-release-please-version
+__version__ = "0.4.0"  # x-release-please-version
 
 __all__ = [
     "ProductReader",
