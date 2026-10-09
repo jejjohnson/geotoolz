@@ -97,6 +97,8 @@ If you don't need provenance, `from_stac_search` builds the catalog in
 one call:
 
 ```python
+import geocatalog as gc
+
 catalog = gc.sources.from_stac_search(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
     collections=["sentinel-2-l2a"],
@@ -120,6 +122,8 @@ The `GeoSlice` we built above is the unit of work. Hand it to the
 catalog to filter rows:
 
 ```python
+import geocatalog as gc
+
 aoi = gc.GeoSlice(
     bounds=TAHOE_BBOX,
     interval=SUMMER_2024,
@@ -144,6 +148,8 @@ below comes from the `extra_properties` we passed to
 JSON-encoded in a `properties` column instead):
 
 ```python
+import geocatalog as gc
+
 # Sort by cloud cover and take the cleanest of the top 3.
 gdf = hits.gdf.sort_values("eo:cloud_cover").head(3)
 best_row = gdf.iloc[0]
@@ -176,6 +182,8 @@ You'll want to reuse this catalog without re-querying STAC every
 time. Write it to GeoParquet:
 
 ```python
+import geocatalog as gc
+
 gc.storage.to_geoparquet(catalog, "tahoe_s2_summer_2024.parquet")
 
 # Later, reopen — prefers DuckDB if installed.

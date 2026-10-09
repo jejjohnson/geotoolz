@@ -65,6 +65,8 @@ Use `Branch` when the predicate is decided *at runtime* from the
 carrier itself, and there are only two paths.
 
 ```python
+import geotoolz as gz
+
 gz.Branch(
     predicate=lambda gt: gt.crs.is_geographic,
     if_true=ReprojectToUTM(),
@@ -98,6 +100,8 @@ flowchart LR
 ```
 
 ```python
+import geotoolz as gz
+
 gz.Switch(
     key=lambda gt: gt.attrs["platform"],
     cases={
@@ -127,6 +131,8 @@ flowchart LR
 ```
 
 ```python
+import geotoolz as gz
+
 gz.Fanout({
     "ndvi": NDVI(nir=7, red=3),
     "ndwi": NDWI(green=2, nir=7),
@@ -141,6 +147,8 @@ A `Graph` is an `Operator`. A `Sequential` is an `Operator`. They
 nest freely:
 
 ```python
+import geotoolz as gz
+
 preprocess = Sequential([Scale(scale=1e-4), DropBadPixels()])
 postprocess = Sequential([SmoothNDVI(), WriteCOG(path="/tmp/ndvi.tif")])
 

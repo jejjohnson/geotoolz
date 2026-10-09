@@ -118,6 +118,7 @@ The `[pipekit]` bridge (`geopatcher.integrations.pipekit`, re-exported as
 pipeline:
 
 ```python
+import geopatcher as gp
 import geotoolz as gz
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 

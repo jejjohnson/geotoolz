@@ -3,7 +3,7 @@
 Cross-modality coregistration operators (raster↔raster grid alignment,
 swath↔grid, raster↔points, point-cloud↔raster, vector-with-aggregation)
 live in the ``coregister`` subnamespace (and at the top level) — see
-``docs/design/query-matchup.md`` §5 for the design.
+``docs/catalog/design/query-matchup.md`` §5 for the design.
 """
 
 from __future__ import annotations

@@ -237,6 +237,8 @@ flowchart LR
 ```
 
 ```python
+import geotoolz as gz
+
 gz.Branch(
     predicate=lambda gt: gt.crs.is_geographic,
     if_true=ReprojectToUTM(),
@@ -262,6 +264,8 @@ flowchart LR
 ```
 
 ```python
+import geotoolz as gz
+
 gz.Switch(
     key=lambda gt: gt.attrs["platform"],
     cases={"S2": s2_pipeline, "L8": l8_pipeline},
@@ -424,6 +428,8 @@ Every one of them satisfies `pipekit.protocols.FittableTransformer`
 tooling treats them like a scikit-learn transformer:
 
 ```python
+import geotoolz as gz
+
 scaler = gz.normalize.StandardScaler().fit(train_scene)
 normed = scaler(scene)                 # == scaler.transform(scene)
 restored = scaler.inverse(normed)

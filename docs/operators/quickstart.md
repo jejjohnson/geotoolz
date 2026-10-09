@@ -185,11 +185,15 @@ A researcher's typical loop:
 
 1. **Insert a `Tap`** to log shape/range mid-pipeline:
    ```python
+   import geotoolz as gz
+
    pipe = Sequential([Scale(), gz.Tap(lambda gt: print(gt.values.shape)), NDVI()])
    ```
 2. **`Snapshot`** the intermediate to inspect later without breaking the
    chain:
    ```python
+   import geotoolz as gz
+
    snap = gz.Snapshot()
    pipe = Sequential([Scale(), snap.at("reflectance"), NDVI()])
    _ = pipe(gt)
@@ -198,6 +202,8 @@ A researcher's typical loop:
 3. **`Branch`** on a runtime predicate (e.g. only reproject if the CRS is
    geographic):
    ```python
+   import geotoolz as gz
+
    pipe = Sequential([
        gz.Branch(
            predicate=lambda g: g.crs.is_geographic,

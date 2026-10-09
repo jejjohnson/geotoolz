@@ -114,6 +114,8 @@ For altimetry ground tracks, flight lines, and station lists, the
 sampling axes live upstream in `geopatcher`:
 
 ```python
+import geopatcher as gp
+
 # Chips centred along a track, resampled to a fixed along-track spacing.
 patcher = gp.SpatialPatcher(
     geometry    = gp.spatial.geometry.Rectangular(size=(64, 64)),

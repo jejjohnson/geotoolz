@@ -83,6 +83,8 @@ The same steps as a `Graph`, with a cloud mask built from the SCL band
 on a second branch and fanned back in by `ApplyMask`:
 
 ```python
+import geotoolz as gz
+
 x: gz.Input = gz.Input("scene")
 reflectance: gz.Node = gz.DNToReflectance(scale=1e-4)(gz.SelectBands(bands=L2A)(x))  # (12, H, W) float64
 ndvi_node: gz.Node = gz.NDVI(nir="B8", red="B4")(reflectance)                        # (H, W) float64
@@ -150,6 +152,7 @@ patch through a `geopatcher.SpatialPatcher`, as one more `Sequential`:
 
 ```python
 import geopatcher as gp
+import geotoolz as gz
 from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
