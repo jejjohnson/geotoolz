@@ -278,9 +278,10 @@ def from_geoparquet(
             defaulting to ``"raster"`` with a warning.
         retries: Number of retries for transient remote I/O failures.
             ``0`` disables retry/backoff.
-        storage_options: Options forwarded to fsspec for cloud/HTTP URIs
-            (e.g. ``{"anon": True}`` for public S3 buckets). ``None``
-            uses fsspec defaults — set explicitly to override credentials.
+        storage_options: obstore store options for cloud/HTTP URIs
+            (e.g. ``{"skip_signature": True}`` for a public bucket), over
+            the credentials registered in `geocloud.credentials`. Remote
+            reads go through `geocloud.fs` (the ``[cloud]`` extra).
 
     Returns:
         An `InMemoryGeoCatalog` with the same rows, CRS, and (where

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -50,42 +50,34 @@ def test_is_fsspec_uri_recognises_supported_schemes(uri: str) -> None:
     assert _is_fsspec_uri(uri)
 
 
-def test_resolve_uri_requires_fsspec_extra(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "fsspec", None)
+def test_resolve_uri_requires_the_cloud_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "geocloud.fs", None)
 
-    with pytest.raises(ImportError, match=r"geotoolz-catalog\[fsspec\]"):
+    with pytest.raises(ImportError, match=r"geotoolz-catalog\[cloud\]"):
         _resolve_uri("s3://bucket/key.tif")
 
 
-def test_resolve_uri_forwards_storage_options(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[str, str, dict[str, object]]] = []
+@pytest.fixture
+def bucket() -> Iterator[str]:
+    """A MemoryStore mounted at an ``s3://`` root on the shared pool."""
+    pytest.importorskip("geocloud.fs")
+    from geocloud.store import mount, unmount
+    from obstore.store import MemoryStore
 
-    class DummyFile:
-        closed = False
+    mount("s3://catalog-io", MemoryStore())
+    yield "s3://catalog-io"
+    unmount("s3://catalog-io")
 
-        def close(self) -> None:
-            self.closed = True
 
-    handle = DummyFile()
+def test_resolve_uri_reads_through_the_pool(bucket: str) -> None:
+    from geocloud import files
 
-    class DummyOpenFile:
-        def open(self) -> DummyFile:
-            return handle
-
-    def fake_open(path: str, mode: str, **kwargs: object) -> DummyOpenFile:
-        calls.append((path, mode, kwargs))
-        return DummyOpenFile()
-
-    monkeypatch.setitem(sys.modules, "fsspec", SimpleNamespace(open=fake_open))
-
-    resolved = _resolve_uri("s3://bucket/key.tif", storage_options={"anon": True})
-
-    assert resolved is handle
-    assert calls == [("s3://bucket/key.tif", "rb", {"anon": True})]
+    files.write_bytes(f"{bucket}/key.bin", b"0123456789")
+    resolved = _resolve_uri(f"{bucket}/key.bin", storage_options={"timeout": "5s"})
+    resolved.seek(3)
+    assert resolved.read(4) == b"3456"
     _close_resolved_uri(resolved)
-    assert handle.closed
+    assert resolved.closed
 
 
 def test_uri_name_handles_cloud_paths() -> None:
@@ -94,34 +86,13 @@ def test_uri_name_handles_cloud_paths() -> None:
     )
 
 
-def test_resolve_uri_zarr_returns_mapper(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Zarr URIs route through ``fsspec.get_mapper`` rather than ``.open()``.
+def test_resolve_uri_zarr_returns_mapper(bucket: str) -> None:
+    """``.zarr`` URIs resolve to a mapper, not a single file handle."""
+    from geocloud import files
 
-    A single binary handle can't represent a directory-/mapping-based store,
-    so the resolver must dispatch on the ``.zarr`` suffix.
-    """
-    mapper_calls: list[tuple[str, dict[str, object]]] = []
-    open_calls: list[tuple[str, str, dict[str, object]]] = []
-    sentinel_mapper = object()
+    files.write_bytes(f"{bucket}/store.zarr/zarr.json", b"{}")
+    resolved = _resolve_uri(f"{bucket}/store.zarr")
 
-    def fake_get_mapper(path: str, **kwargs: object) -> object:
-        mapper_calls.append((path, kwargs))
-        return sentinel_mapper
-
-    def fake_open(path: str, mode: str, **kwargs: object) -> object:
-        open_calls.append((path, mode, kwargs))
-        raise AssertionError("fsspec.open must not be called for .zarr URIs")
-
-    monkeypatch.setitem(
-        sys.modules,
-        "fsspec",
-        SimpleNamespace(open=fake_open, get_mapper=fake_get_mapper),
-    )
-
-    resolved = _resolve_uri("s3://bucket/store.zarr", storage_options={"anon": True})
-
-    assert resolved is sentinel_mapper
-    assert mapper_calls == [("s3://bucket/store.zarr", {"anon": True})]
-    assert open_calls == []
+    assert resolved["zarr.json"] == b"{}"
     # `_close_resolved_uri` must be a no-op for mappers (no `.close`).
     _close_resolved_uri(resolved)

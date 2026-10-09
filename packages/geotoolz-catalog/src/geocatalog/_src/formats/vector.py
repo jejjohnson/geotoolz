@@ -375,7 +375,8 @@ def load_vector(
         burn_value: The value burnt in for ``"semantic_segmentation"``
             when ``label_field`` is ``None``. Default 1.
         fill: Background value written outside any feature. Default 0.
-        storage_options: Options forwarded to fsspec for cloud/HTTP URIs.
+        storage_options: obstore store options for cloud/HTTP URIs, read
+            through `geocloud.fs` (the ``[cloud]`` extra).
         retries: Retries for transient I/O failures per file open. ``0``
             disables retry/backoff.
 

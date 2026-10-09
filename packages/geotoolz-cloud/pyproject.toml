@@ -41,6 +41,11 @@ dependencies = [
 # masks and decodes tile bytes without GDAL. Pre-1.0, so capped to the
 # tested minor; it requires numpy>=2.
 cog = ["async-geotiff>=0.5,<0.6"]
+# `geocloud.fs`: an fsspec filesystem on the pool, for libraries that only
+# speak fsspec (xarray, zarr, pyarrow, geopandas). No s3fs / gcsfs / adlfs:
+# the bytes come through obstore. 2024.12 brings the sync→async wrapper
+# zarr 3 uses for a sync filesystem.
+fsspec = ["fsspec>=2024.12"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"

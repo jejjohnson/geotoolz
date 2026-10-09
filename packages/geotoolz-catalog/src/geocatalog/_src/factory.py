@@ -61,9 +61,11 @@ def open_catalog(
         crs: Optional CRS override for either engine. It relabels the
             footprints (no reprojection) — use it for artifacts whose
             GeoParquet metadata lacks or misstates the CRS.
-        storage_options: Options forwarded to fsspec when reading cloud
-            URIs through the in-memory engine. A non-empty mapping makes
-            ``"auto"`` pick that engine; ``{}`` counts as no options.
+        storage_options: obstore store options for reading cloud URIs
+            through the in-memory engine (`geocloud.store.get_obstore`,
+            over the credentials registered in `geocloud.credentials`).
+            A non-empty mapping makes ``"auto"`` pick that engine; ``{}``
+            counts as no options.
         strict: If ``True``, raise `CatalogMetadataError` instead of
             warning-and-falling-back when the artifact is missing the
             ``_backend`` column (and ``kind=`` was not passed) or —

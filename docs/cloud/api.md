@@ -8,6 +8,7 @@ The process-wide client pool and test mounts.
 ::: geocloud.store.get_obstore
 ::: geocloud.store.object_key
 ::: geocloud.store.get_range_bytes
+::: geocloud.store.local_path
 ::: geocloud.store.clear_obstore_pool
 ::: geocloud.store.set_obstore_pool_maxsize
 ::: geocloud.store.mount
@@ -30,6 +31,13 @@ Whole-object verbs on the pool, cloud or local.
 ::: geocloud.files.sync
 ::: geocloud.files.rm
 ::: geocloud.files.sign
+
+## `geocloud.fs`
+
+An fsspec filesystem on the pool (``[fsspec]`` extra).
+
+::: geocloud.fs.filesystem
+::: geocloud.fs.GeoCloudFileSystem
 
 ## `geocloud.credentials`
 
