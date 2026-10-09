@@ -91,6 +91,7 @@ named for the step it serves:
 `merge`:
 
 ```python
+import geocatalog as gc
 import geopatcher as gp
 
 field: gp.RasterField = gc.patch.field_for(hits, aoi)      # domain (4, 500, 500) uint16, the slice grid

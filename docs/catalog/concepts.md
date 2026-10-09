@@ -234,6 +234,8 @@ construction).
 ### GeoParquet roundtrip
 
 ```python
+import geocatalog as gc
+
 gc.storage.to_geoparquet(catalog, "cat.parquet")
 # ... share the file ...
 catalog = gc.storage.from_geoparquet("cat.parquet")
@@ -273,6 +275,8 @@ Default builders collect every row in RAM. Beyond ~10⁵ files the build
 itself becomes the bottleneck. Switch to streaming:
 
 ```python
+import geocatalog as gc
+
 catalog = gc.build.build_raster_catalog(
     filepaths,                       # 10^6 Sentinel-2 scenes
     filename_regex=r"S2_T\w+_(?P<date>\d{8}).*\.tif",

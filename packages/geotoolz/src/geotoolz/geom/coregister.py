@@ -7,7 +7,7 @@ owns ``Reproject`` / ``Resample`` / ``Rasterize``. Like every public
 operator, each is also re-exported at the top level
 (``gz.RasterToRasterLike``, ...).
 
-See ``docs/design/query-matchup.md`` §5.
+See ``docs/catalog/design/query-matchup.md`` §5.
 """
 
 from __future__ import annotations

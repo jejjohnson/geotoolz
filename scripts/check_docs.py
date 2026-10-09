@@ -9,7 +9,9 @@ each example:
 * **resolves** every name it takes from the stack — ``import geotoolz as
   gz`` then ``gz.NDVI``, ``from geocloud.cog import write_cog``,
   ``gp.spatial.window.Hann`` — by importing the module and walking the
-  attributes, so a rename breaks CI instead of rotting in an example.
+  attributes, so a rename breaks CI instead of rotting in an example;
+* **requires imports** for the stack's conventional aliases (``gz``,
+  ``gp``, ``gc``), so an example cannot lean on an earlier fence.
 
 Only the five packages and pipekit are resolved; third-party names and
 the example's own variables are left alone. Run it in the full
@@ -39,6 +41,8 @@ from types import ModuleType
 ROOT = Path(__file__).resolve().parents[1]
 STACK = ("geotoolz", "geopatcher", "geocatalog", "geocloud", "geoproducts", "pipekit")
 SKIP_MARK = "<!-- docs-check: skip -->"
+# The stack's conventional aliases: a fence that uses one must import it.
+ALIASES = {"gz": "geotoolz", "gp": "geopatcher", "gc": "geocatalog"}
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```(?P<lang>[\w+-]*)[^\n]*$")
 _TOP_LEVEL_AWAIT = ast.PyCF_ALLOW_TOP_LEVEL_AWAIT
 
@@ -138,7 +142,10 @@ def _dotted(node: ast.AST) -> str | None:
     return None
 
 
-def _check(example: Example) -> list[str]:
+def _check(example: Example, imported: set[str] | None = None) -> list[str]:
+    """Check one example; ``imported`` carries aliases a notebook's earlier
+    cells bound, and gains the ones this example binds."""
+    imported = set() if imported is None else imported
     code = _strip_prompts(example.code)
     try:
         tree = compile(
@@ -169,6 +176,13 @@ def _check(example: Example) -> list[str]:
                         f"from {node.module} import {alias.name}: not found"
                     )
                 aliases[alias.asname or alias.name] = target
+    bound = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.For, ast.With))
+        for target in ast.walk(node)
+        if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store)
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and not isinstance(
             getattr(node, "_parent", None), ast.Attribute
@@ -177,10 +191,13 @@ def _check(example: Example) -> list[str]:
             if dotted is None:
                 continue
             head, _, rest = dotted.partition(".")
-            if head in aliases and rest:
+            if head in ALIASES and not {*aliases, *bound, *imported} >= {head}:
+                problems.append(f"uses {head} without importing {ALIASES[head]}")
+            elif head in aliases and rest:
                 full = f"{aliases[head]}.{rest}"
                 if not _resolve(full):
                     problems.append(f"{dotted}: not found (as {full})")
+    imported.update(aliases)
     return problems
 
 
@@ -196,10 +213,12 @@ def main() -> int:
     failures = 0
     checked = 0
     for path in _sources():
-        examples = _cells(path) if path.suffix == ".ipynb" else _fences(path)
+        notebook = path.suffix == ".ipynb"
+        examples = _cells(path) if notebook else _fences(path)
+        imported: set[str] = set()  # a notebook's cells share one namespace
         for example in examples:
             checked += 1
-            problems = _check(example)
+            problems = _check(example, imported if notebook else None)
             for problem in dict.fromkeys(problems):
                 failures += 1
                 rel = path.relative_to(ROOT)

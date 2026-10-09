@@ -35,8 +35,9 @@ drops straight into `SpatialPatcher.split` / `merge`
 (`geotoolz-catalog[patch]`).
 
 **3. `ProductReader` — every reader is a georeader `GeoData`.**
-A `geoproducts` reader drops into `geopatcher.RasterField`, a geotoolz
-operator or `geoproducts.stack` without adapters; a sensor's presets bind
+A `geoproducts` reader drops into `geopatcher.RasterField` or
+`geoproducts.stack` without adapters. A geotoolz operator needs pixels, so
+call `reader.load()` first. A sensor's presets bind
 geotoolz operators to its band names (`geotoolz-products[operators]`).
 
 **4. `geotoolz.patch_ops` — the patcher joins the operator graph.**
@@ -143,10 +144,15 @@ labels: GeoTensor = cm.rasterize_sources_like(sources, score, buffer_m=150.0)  #
 pair: tuple[np.ndarray, np.ndarray] = (np.asarray(score), np.asarray(labels))  # aligned pixel-for-pixel
 ```
 
-Swap any one stage without touching the others: a DuckDB catalog for
-10⁶+ scenes, a `MatchedFilter` instead of `SBMP`, `streaming=True` on
-`spatial.aggregation.OverlapAdd` for continent-scale outputs, or `cm.list_plumes`
-instead of sources for event-level labels.
+Swap one stage at a time: a `MatchedFilter` instead of `SBMP`, or
+`cm.list_plumes` instead of sources for event-level labels. Two swaps need
+one more step each:
+
+- **A DuckDB catalog for 10⁶+ scenes.** `stage` takes an in-memory catalog,
+  so query the DuckDB catalog down to the AOI, then call `.materialize()`.
+- **Continent-scale outputs.** `OverlapAdd(streaming=True)` writes to disk
+  only with a `target_path` and `chunks`; see
+  [streaming overlap-add](patcher/recipes/streaming-overlap-add.md).
 
 ## Next steps
 

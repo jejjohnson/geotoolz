@@ -57,6 +57,7 @@ pip install geotoolz-products                 # product readers
 | operators ↔ patcher (`geotoolz.patch_ops`) | `geotoolz[patch]` |
 | catalog → patcher (`geocatalog.patch.field_for`) | `geotoolz-catalog[patch]` |
 | catalog staging from buckets (`geocatalog.staging.stage`) | `geotoolz-catalog[cloud]` |
+| catalog ← STAC searches (`geocatalog.sources.from_stac_search`) | `geotoolz-catalog[stac]` |
 | patcher ↔ COGs in buckets (`geopatcher.fields.CogField`) | `geotoolz-patcher[cog]` |
 | COG reads (`geocloud.cog.CogSource`) | `geotoolz-cloud[cog]` |
 | a sensor's reader and its bucket helpers | `geotoolz-products[goes]` / `[himawari]` / `[carbonmapper]` |
@@ -74,7 +75,8 @@ uv sync --all-packages --all-groups --all-extras
 Summer-2024 NDVI over Lake Tahoe: discover Sentinel-2 L2A on the Planetary
 Computer, mosaic the red and near-infrared bands onto one grid, and run
 NDVI tile by tile with feathered seams. Every binding is typed and every
-array is annotated with its shape.
+array is annotated with its shape. It needs
+`pip install 'geotoolz[patch]' 'geotoolz-catalog[stac,cloud,patch]'`.
 
 ```python
 import numpy as np
