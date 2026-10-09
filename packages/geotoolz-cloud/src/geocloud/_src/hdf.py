@@ -41,8 +41,8 @@ from geocloud._src.store import Location, local_path
 __all__ = [
     "HDF4_SIGNATURE",
     "HDF5_SIGNATURE",
+    "HdfSource",
     "PackedVariable",
-    "Source",
     "affine_from_geotransform",
     "attr",
     "fill_value_from_attrs",
@@ -58,7 +58,7 @@ __all__ = [
 ]
 
 #: A URI, a local path, or an open binary file object.
-Source = Location | IO[bytes]
+HdfSource = Location | IO[bytes]
 
 HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
 """The first eight bytes of an HDF5 (and NetCDF-4) file."""
@@ -134,7 +134,7 @@ class _RangedFile(io.RawIOBase):
 
 @contextmanager
 def open_hdf5(
-    source: Source, *, storage_options: Mapping[str, Any] | None = None
+    source: HdfSource, *, storage_options: Mapping[str, Any] | None = None
 ) -> Iterator[Any]:
     """An open ``h5py.File`` on ``source``, read-only.
 

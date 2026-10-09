@@ -29,8 +29,8 @@ from __future__ import annotations
 from geocloud._src.hdf import (
     HDF4_SIGNATURE,
     HDF5_SIGNATURE,
+    HdfSource,
     PackedVariable,
-    Source,
     affine_from_geotransform,
     attr,
     fill_value_from_attrs,
@@ -49,8 +49,8 @@ from geocloud._src.hdf import (
 __all__ = [
     "HDF4_SIGNATURE",
     "HDF5_SIGNATURE",
+    "HdfSource",
     "PackedVariable",
-    "Source",
     "affine_from_geotransform",
     "attr",
     "fill_value_from_attrs",
