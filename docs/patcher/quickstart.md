@@ -86,6 +86,8 @@ Patcher's `Field` Protocol.
 clean seams, accumulated with `spatial.aggregation.OverlapAdd`:
 
 ```python
+import geopatcher as gp
+
 patcher = gp.SpatialPatcher(
     geometry    = gp.spatial.geometry.Rectangular(size=(256, 256)),
     sampler     = gp.spatial.sampler.RegularStride(step=(224, 224)),  # 32-px overlap
@@ -154,6 +156,8 @@ full `outputs` list. The `normalise → with_data` step is now done inline
 so only one patch is alive at a time:
 
 ```python
+import geopatcher as gp
+
 agg = gp.spatial.aggregation.OverlapAdd(
     streaming=True,
     target_path="out/tahoe.zarr",

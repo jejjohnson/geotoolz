@@ -4,11 +4,10 @@
 > compose into linear chains or named DAGs, running on `GeoTensor`s.
 
 !!! tip "This site covers the whole geostack"
-    This is the documentation for the **geotoolz monorepo** — three
+    This is the documentation for the **geotoolz monorepo** — five
     packages designed as one stack. This page introduces the operator
-    library; the [Patcher](../patcher/index.md) and
-    [Catalog](../catalog/index.md) sections cover the other two, and
-    [The geostack](../geostack.md) shows how they interlock end to end.
+    library; the [site home](../index.md) lists all five, and
+    [How the packages interlock](../geostack.md) shows how they fit.
 
 `geotoolz` is built around one idea: **every step of a remote-sensing
 pipeline is an `Operator`** — a typed function from one carrier to

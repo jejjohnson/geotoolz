@@ -67,6 +67,8 @@ fine for one scene, not fine for a 1 TB output.
 Same call, three extra kwargs:
 
 ```python
+import geopatcher as gp
+
 stream_dir = "out/tahoe.zarr"
 
 agg = gp.spatial.aggregation.OverlapAdd(
@@ -108,6 +110,8 @@ then converts it block by block into a real COG (GDAL `COG` driver:
 tiled, internal overviews, `nodata = fill_value`):
 
 ```python
+import geopatcher as gp
+
 agg = gp.spatial.aggregation.OverlapAdd(
     streaming   = True,
     target_path = "out/tahoe.tif",
@@ -128,6 +132,8 @@ inner aggregation reconstructs per-super-tile at super-tile scale; the
 outer writes super-tile-shaped blocks into a global zarr store.
 
 ```python
+import geopatcher as gp
+
 outer = gp.SpatialPatcher(
     geometry    = gp.spatial.geometry.Rectangular(size=(1024, 1024)),
     sampler     = gp.spatial.sampler.RegularStride(step=(1024, 1024)),

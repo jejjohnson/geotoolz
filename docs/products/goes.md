@@ -168,6 +168,8 @@ custom `goes.recipes.Recipe` works the same way.
 ## Clouds and parallax
 
 ```python
+import geotoolz as gz
+
 cloudy: GeoTensor = goes.MaskClouds()(scene)          # (500, 500) bool — BCM cloudy
 strict: GeoTensor = goes.MaskClouds(conservative=True)(scene)  # + probably clear
 clear_sky: GeoTensor = gz.mask.ApplyMask(mask=goes.MaskClouds())(scene)  # (19, 500, 500), clouds → NaN
@@ -179,6 +181,8 @@ to the GOES geometry; feed it the ACHA cloud-top height on the same lat/lon
 grid:
 
 ```python
+import geotoolz as gz
+
 lonlat: GeoTensor = gz.geom.Reproject(dst_crs="EPSG:4326", resolution=(0.02, 0.02))(scene)  # (19, 535, 624)
 bt: GeoTensor = gz.spectral.SelectBands(bands=["C13"])(lonlat)        # (1, 535, 624)
 height: GeoTensor = gz.spectral.SelectBands(bands=["HT"])(lonlat)     # (1, 535, 624) m, NaN = clear

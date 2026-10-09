@@ -11,7 +11,7 @@ taking a sample point cloud) set ``forbid_in_yaml = True`` so
 hydra-zen `builds()` does not try to serialize the reference — same
 discipline as the existing ``ReprojectLike`` / ``RasterizeLike``.
 
-See ``docs/design/query-matchup.md`` §5.
+See ``docs/catalog/design/query-matchup.md`` §5.
 """
 
 from __future__ import annotations
