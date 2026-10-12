@@ -134,12 +134,43 @@ class _SpatialPatcherBase:
         no async counterpart: reads are awaited one at a time, leaving
         concurrency to the caller.
         """
+        async for patch in self._asplit_anchors(
+            field,
+            None,
+            hooks=hooks,
+            journal=journal,
+            cache=cache,
+            max_in_flight=max_in_flight,
+            max_in_flight_bytes=max_in_flight_bytes,
+        ):
+            yield patch
+
+    async def _asplit_anchors(
+        self,
+        field: AsyncField,
+        anchors: Iterable[Any] | None,
+        *,
+        hooks: Iterable[PatcherHook] | None = None,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
+        policy: ReadPolicy | None = None,
+    ) -> AsyncIterator[Patch]:
+        """`asplit` over explicit ``anchors`` (``None`` walks the sampler).
+
+        The async twin of ``_split_anchors``: ``two_pass`` hands both
+        passes one anchor list and one ``policy`` (one ``errors`` list).
+        """
         _validate_backpressure(max_in_flight, max_in_flight_bytes)
-        policy = self._start_split()
+        if policy is None:
+            policy = self._start_split()
         domain = field.domain
+        if anchors is None:
+            anchors = self.sampler.anchors(domain, self.geometry)
         reader = self._chip_reader(field, domain, cache, aio=True)
         async for patch in awalk(
-            self.sampler.anchors(domain, self.geometry),
+            anchors,
             reader.units,
             policy=policy,
             backpressure=_AsyncBackpressure(max_in_flight, max_in_flight_bytes),
@@ -745,6 +776,102 @@ class AsyncSpatialPatcher(_SpatialPatcherBase):
         ):
             yield patch
 
+    async def reduce(
+        self,
+        field: AsyncField,
+        agg: SpatialAggregation,
+        hooks: Iterable[PatcherHook] | None = None,
+        *,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
+    ) -> Any:
+        """Async `SpatialPatcher.reduce`: one streaming pass of `asplit` into ``agg``.
+
+        The ``on_error`` / retry policy, ``hooks``, ``journal``, ``cache``
+        and backpressure apply as in `asplit`; each patch is closed once
+        ``agg`` moves on. The aggregation folds the stream in a worker
+        thread, one patch at a time (as in `amerge`).
+
+        Examples:
+            Global statistics over a remote COG::
+
+                stats = await patcher.reduce(field, spatial.aggregation.MeanStd())
+        """
+        patches = self._asplit_anchors(
+            field,
+            None,
+            hooks=hooks,
+            journal=journal,
+            cache=cache,
+            max_in_flight=max_in_flight,
+            max_in_flight_bytes=max_in_flight_bytes,
+        )
+        return await _amerge_with_hooks(
+            agg, _aclosing(patches), field.domain, hooks, stacklevel=2
+        )
+
+    async def two_pass(
+        self,
+        field: AsyncField,
+        *,
+        reduce_with: SpatialAggregation,
+        apply: Callable[[Any, Any], Any],
+        aggregation: SpatialAggregation | None = None,
+        hooks: Iterable[PatcherHook] | None = None,
+        journal: Any | None = None,
+        cache: Any | None = None,
+        max_in_flight: int | None = None,
+        max_in_flight_bytes: int | None = None,
+    ) -> Any:
+        """Async `SpatialPatcher.two_pass`: a statistics pass, then an apply pass.
+
+        Both passes walk one anchor list materialised up front and record
+        into one ``errors`` list; each patch is read twice unless a
+        ``cache`` serves the second pass. ``apply(data, stats)`` runs on
+        the event loop, so keep it cheap or offload it yourself.
+
+        Examples:
+            Standardise a remote scene with its global mean / std::
+
+                out = await patcher.two_pass(
+                    field,
+                    reduce_with=spatial.aggregation.MeanStd(),
+                    apply=lambda x, s: (np.asarray(x) - s["mean"]) / s["std"],
+                )
+        """
+        anchors = self.anchors(field)
+        split_kwargs: dict[str, Any] = {
+            "hooks": hooks,
+            "journal": journal,
+            "cache": cache,
+            "max_in_flight": max_in_flight,
+            "max_in_flight_bytes": max_in_flight_bytes,
+            "policy": self._start_split(),  # both passes record into one list
+        }
+        stats = await _amerge_with_hooks(
+            reduce_with,
+            _aclosing(self._asplit_anchors(field, anchors, **split_kwargs)),
+            field.domain,
+            hooks,
+            stacklevel=2,
+        )
+
+        async def applied() -> AsyncIterator[Patch]:
+            async for patch in _aclosing(
+                self._asplit_anchors(field, anchors, **split_kwargs)
+            ):
+                yield patch.with_data(apply(patch.data, stats))
+
+        return await _amerge_with_hooks(
+            aggregation or self.aggregation,
+            applied(),
+            field.domain,
+            hooks,
+            stacklevel=2,
+        )
+
     async def patch_at(self, field: AsyncField, anchor: Any) -> Patch:
         """Read a single `Patch` at a specific anchor.
 
@@ -805,6 +932,7 @@ class _ChipReader:
             ),
             "mask": partial(
                 _build_mask_patch,
+                self.field,
                 self.domain,
                 anchor,
                 indices,
@@ -987,6 +1115,13 @@ def _closing(patches: Iterable[Patch]) -> Iterator[Patch]:
     previous patch still holds. Closing on advance releases it first.
     """
     for patch in patches:
+        with patch:
+            yield patch
+
+
+async def _aclosing(patches: AsyncIterable[Patch]) -> AsyncIterator[Patch]:
+    """Async `_closing`: close each patch once the consumer asks for the next."""
+    async for patch in patches:
         with patch:
             yield patch
 
@@ -1491,12 +1626,19 @@ async def _build_patch_async_from_indices(
 
 
 def _build_mask_patch(
+    field: Any,
     domain: Any,
     anchor: Any,
     indices: Any,
     base_weights: np.ndarray | None,
     boundary: str,
 ) -> Patch:
+    """The ``on_error="mask"`` placeholder: all NaN, flagged ``masked``.
+
+    The NaN array goes through `_placeholder_carrier`, so on a raster or
+    xarray field it has the carrier and window georeferencing of a
+    successful read and merges (``merge_to_field``) like any other chip.
+    """
     if boundary == "raise":
         _raise_if_overflows(indices, domain)
     weights = _build_weights(indices, base_weights, boundary=boundary, anchor=anchor)
@@ -1504,7 +1646,9 @@ def _build_mask_patch(
         # Graph / polygon geometries on point and vector domains select
         # rows: one NaN per selected row.
         data = np.full(indices.shape, np.nan, dtype=float)
-        return Patch(data=data, anchor=anchor, indices=indices, weights=weights)
+        return Patch(
+            data=data, anchor=anchor, indices=indices, weights=weights, masked=True
+        )
     h, w = _indices_hw(indices)
     prefix = tuple(getattr(domain, "shape", ())[:-2])
     if prefix:
@@ -1513,8 +1657,45 @@ def _build_mask_patch(
         shape = tuple(np.shape(weights))
     else:
         shape = (h, w)
-    data = np.full(shape, np.nan, dtype=float)
-    return Patch(data=data, anchor=anchor, indices=indices, weights=weights)
+    data = _placeholder_carrier(
+        field, domain, indices, np.full(shape, np.nan, dtype=float)
+    )
+    return Patch(
+        data=data, anchor=anchor, indices=indices, weights=weights, masked=True
+    )
+
+
+def _placeholder_carrier(
+    field: Any, domain: Any, indices: Any, data: np.ndarray
+) -> Any:
+    """``data`` in the carrier a successful read of ``indices`` would return.
+
+    A field's own ``placeholder(indexer, data)`` decides when it has one
+    (the xarray adapters return a `DataArray`); otherwise a raster window
+    on a domain with ``transform`` and ``crs`` gives a NaN-filled
+    `GeoTensor` on the window's grid; anything else stays a bare array.
+    Never reads the field.
+    """
+    window = _unwrap_for_select(indices)
+    placeholder = getattr(field, "placeholder", None)
+    if placeholder is not None:
+        return placeholder(window, data)
+    from rasterio.windows import Window, transform as window_transform
+
+    transform = getattr(domain, "transform", None)
+    crs = getattr(domain, "crs", None)
+    if not isinstance(window, Window) or transform is None or crs is None:
+        return data
+    if not 2 <= data.ndim <= 4:
+        return data
+    from georeader.geotensor import GeoTensor
+
+    return GeoTensor(
+        data,
+        transform=window_transform(window, transform),
+        crs=crs,
+        fill_value_default=np.nan,
+    )
 
 
 def _indices_hw(indices: Any) -> tuple[int, int]:

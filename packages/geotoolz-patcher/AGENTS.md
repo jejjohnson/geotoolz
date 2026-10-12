@@ -32,6 +32,7 @@ retired spellings are rejected).
 - **`Field`** (`_src/protocols.py`): `domain` (I/O-free metadata), `select(indexer)`,
   `with_data(array)`. Optional: `select_many(indexers)` — `run.parallel_map`
   uses it for batched reads; `aselect` for `AsyncSpatialPatcher`;
+  `placeholder(indexer, data)` for the `on_error="mask"` carrier (ADR-011);
   `cache_id()` for `PatchCache` identity (raise `UnstableIdentityError`
   rather than return an identity that can change under the same id).
 - **New field adapter**: implement it in `_src/fields/<name>.py`, export it

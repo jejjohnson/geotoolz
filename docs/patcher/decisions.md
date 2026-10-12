@@ -690,6 +690,47 @@ unchanged.
 
 ---
 
+## ADR-011 — A masked read keeps the carrier of a successful one
+
+**Status.** Accepted.
+
+**Context.** Under `on_error="mask"` a failed read became a bare
+`np.full(shape, nan)` patch. A per-patch operator that reads `.transform`,
+`.crs` or `.rio` failed on exactly the patches that already failed once,
+and the matched patchers told a placeholder apart from a real chip by its
+type (`type(data) is np.ndarray` and all NaN), which a source that reads
+into plain arrays could not distinguish.
+
+**Decision.**
+
+- `Patch.masked` flags the placeholder. It is the only test for one; the
+  data type no longer is.
+- The NaN array goes into the carrier a successful read would return,
+  without reading the field:
+  - a field's optional `placeholder(indexer, data)` decides first
+    (`fields.XarrayField` returns a `DataArray` with the chip's coords,
+    `fields.RioXarrayField` one on the window's grid);
+  - otherwise a raster window on a domain with `transform` and `crs`
+    becomes a NaN `GeoTensor` on the window's grid (`fill_value_default`
+    NaN);
+  - anything else (point and vector rows, grids without georeferencing)
+    stays a bare array.
+- The matched patchers fan a masked patch out to every source by the
+  flag.
+
+**Alternatives considered.**
+
+- *Keep the bare array and document it* — every operator downstream of
+  a masked policy would need its own NaN-array branch.
+- *Read the field's metadata through `select` on a zero-size window* — a
+  read on a source that just failed, and not every backend supports it.
+
+**Consequences.** Operators run on placeholders unchanged and
+`merge_to_field` stitches them like any patch. Code that detected a
+placeholder by `isinstance(data, np.ndarray)` must read `patch.masked`.
+
+---
+
 ## How to add a decision
 
 1. Open a PR with the proposed addition. The PR description argues the

@@ -92,6 +92,32 @@ class RioXarrayField:
         # so the payload is a concrete array, like every other adapter's.
         return sub.compute()
 
+    def placeholder(self, window: Any, data: np.ndarray) -> Any:
+        """``data`` as a chip of ``window``: a `DataArray` on its grid, no read.
+
+        Used for the ``on_error="mask"`` placeholder, so a failed read
+        has the carrier and georeferencing of a successful `select`.
+        """
+        import xarray as xr
+        from rasterio.windows import transform as window_transform
+
+        y_dim, x_dim = self.da.rio.y_dim, self.da.rio.x_dim
+        if data.ndim != self.da.ndim:
+            return data
+        coords = {
+            d: self.da[d]
+            for d in self.da.dims
+            if d not in (y_dim, x_dim) and d in self.da.coords
+        }
+        chip = xr.DataArray(data, dims=self.da.dims, coords=coords)
+        for dim in (y_dim, x_dim):
+            if dim in self.da.coords:  # rebuilt from the transform below
+                chip = chip.assign_coords({dim: np.zeros(chip.sizes[dim])})
+        chip = chip.rio.set_spatial_dims(x_dim=x_dim, y_dim=y_dim)
+        if self.da.rio.crs is not None:
+            chip = chip.rio.write_crs(self.da.rio.crs)
+        return _georeference(chip, window_transform(window, self.da.rio.transform()))
+
     def with_data(self, array: Any) -> RioXarrayField:
         return RioXarrayField(self.da.copy(data=np.asarray(array)))
 

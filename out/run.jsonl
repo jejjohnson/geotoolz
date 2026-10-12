@@ -1,0 +1,16 @@
+{"anchor": [64, 0], "error": null, "output_uri": null, "runtime_s": 7.892200005699124e-05, "status": "ok"}
+{"anchor": [0, 0], "error": null, "output_uri": null, "runtime_s": 0.0012266209998870181, "status": "ok"}
+{"anchor": [0, 128], "error": null, "output_uri": null, "runtime_s": 0.00037739100002909254, "status": "ok"}
+{"anchor": [0, 192], "error": "ValueError: model diverged", "output_uri": null, "runtime_s": 0.0, "status": "error"}
+{"anchor": [0, 64], "error": null, "output_uri": null, "runtime_s": 0.00040533599985792534, "status": "ok"}
+{"anchor": [128, 192], "error": "ValueError: model diverged", "output_uri": null, "runtime_s": 0.0, "status": "error"}
+{"anchor": [64, 64], "error": null, "output_uri": null, "runtime_s": 0.00026303200002075755, "status": "ok"}
+{"anchor": [128, 0], "error": null, "output_uri": null, "runtime_s": 0.00013696199994228664, "status": "ok"}
+{"anchor": [128, 128], "error": null, "output_uri": null, "runtime_s": 0.00031205400000544614, "status": "ok"}
+{"anchor": [64, 128], "error": null, "output_uri": null, "runtime_s": 6.718000008731906e-05, "status": "ok"}
+{"anchor": [64, 192], "error": "ValueError: model diverged", "output_uri": null, "runtime_s": 0.0, "status": "error"}
+{"anchor": [192, 0], "error": null, "output_uri": null, "runtime_s": 0.0003470529998139682, "status": "ok"}
+{"anchor": [128, 64], "error": null, "output_uri": null, "runtime_s": 0.0007349679999606451, "status": "ok"}
+{"anchor": [192, 192], "error": "ValueError: model diverged", "output_uri": null, "runtime_s": 0.0, "status": "error"}
+{"anchor": [192, 128], "error": null, "output_uri": null, "runtime_s": 6.702999985463975e-05, "status": "ok"}
+{"anchor": [192, 64], "error": null, "output_uri": null, "runtime_s": 0.0003234820001125627, "status": "ok"}

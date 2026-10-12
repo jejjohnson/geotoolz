@@ -194,33 +194,19 @@ def _check_matched_dict(data_by_name: Any, cls_name: str, expects: str) -> None:
         )
 
 
-def _is_mask_placeholder(data: Any, mfield: Any, spatial: Any) -> bool:
-    """True for the all-NaN patch `SpatialPatcher` emits under ``on_error="mask"``.
-
-    A failed read (or coregistration) of a `MatchedField` never produces
-    the per-source dict, so the inner `SpatialPatcher` substitutes its
-    NaN placeholder ndarray. Recognised only for a real `MatchedField`
-    under a ``"mask"`` policy, so a plain `Field` passed by mistake
-    still gets the "Did you pass a plain Field" error.
-    """
-    return (
-        isinstance(mfield, MatchedField)
-        and getattr(spatial, "on_error", None) == "mask"
-        and isinstance(data, np.ndarray)
-        and np.issubdtype(data.dtype, np.floating)
-        and bool(np.isnan(data).all())
-    )
-
-
 def _unpack_matched(
-    data: Any, mfield: Any, spatial: Any, cls_name: str, expects: str
+    patch: Any, mfield: Any, cls_name: str, expects: str
 ) -> tuple[dict[str, Any], bool]:
-    """``(data_by_name, masked)`` for one spatial read of ``mfield``.
+    """``(data_by_name, masked)`` for one spatial read (``patch``) of ``mfield``.
 
-    A mask placeholder fans out to one all-NaN copy per source, each on
-    the primary's grid (where every member lives after coregistration).
+    An ``on_error="mask"`` placeholder (``patch.masked``) of a real
+    `MatchedField` fans out to one all-NaN copy per source, each on the
+    primary's grid (where every member lives after coregistration). A
+    plain `Field` passed by mistake still gets the "Did you pass a plain
+    Field" error.
     """
-    if _is_mask_placeholder(data, mfield, spatial):
+    data = patch.data
+    if getattr(patch, "masked", False) and isinstance(mfield, MatchedField):
         names = (PRIMARY_KEY, *mfield.secondaries)
         return {name: data.copy() for name in names}, True
     _check_matched_dict(data, cls_name, expects)
@@ -686,7 +672,7 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
         cls_name = type(self).__name__
         for outer in outers:
             data_by_name, masked = _unpack_matched(
-                outer.data, mfield, self.primary, cls_name, "each Patch.data to be"
+                outer, mfield, cls_name, "each Patch.data to be"
             )
             members = {
                 name: outer.with_data(data) for name, data in data_by_name.items()
@@ -1181,19 +1167,15 @@ class MatchedSpatioTemporalPatcher(_MatchedConfigMixin):
         )
         return self._matched(outers, mfield)
 
-    def _unpack(self, mfield: MatchedField, data: Any) -> dict[str, Any]:
-        """One chip read → its checked ``{source: data}`` dict.
+    def _unpack(self, mfield: MatchedField, chip: Any) -> dict[str, Any]:
+        """One chip read (a `Patch`) → its checked ``{source: data}`` dict.
 
         A mask placeholder fans out to one all-NaN copy per source, marked
         `_MaskedMembers` so `_matched` gives it an all-False mask.
         """
         cls_name = type(self).__name__
         data_by_name, masked = _unpack_matched(
-            data,
-            mfield,
-            self.primary.spatial,
-            cls_name,
-            "each spatial Patch.data to be",
+            chip, mfield, cls_name, "each spatial Patch.data to be"
         )
         _check_time_lengths(data_by_name, self.primary.time_axis, cls_name)
         return _MaskedMembers(data_by_name) if masked else data_by_name

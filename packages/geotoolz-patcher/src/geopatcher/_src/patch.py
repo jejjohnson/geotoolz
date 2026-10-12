@@ -86,12 +86,18 @@ class Patch[AnchorT, IndicesT, DataT](_ReleaseLifecycleMixin):
         weights: Optional window weights — used by `OverlapAdd` and
             `WeightedSum` aggregations, and by `PolygonIntersection` to
             carry an interior mask. ``None`` is equivalent to a Boxcar.
+        masked: ``True`` for the all-NaN placeholder an ``on_error="mask"``
+            policy yields in place of a failed read. The data keeps the
+            carrier and georeferencing of a successful read where the
+            field allows (see `Field.placeholder`), so this flag — not
+            the array type — is how to tell a placeholder apart.
     """
 
     data: DataT
     anchor: AnchorT
     indices: IndicesT
     weights: Any | None = None
+    masked: bool = False
     _release: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
     def with_data[NewDataT](self, data: NewDataT) -> Patch[AnchorT, IndicesT, NewDataT]:
