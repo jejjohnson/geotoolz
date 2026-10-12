@@ -307,3 +307,42 @@ def test_read_netcdf_curvilinear_coordinates_warn(tmp_path: Path):
         v[:], v.coordinates = np.ones((2, 3)), "lat lon"
     with pytest.warns(UserWarning, match="curvilinear"):
         read_netcdf(path, "v")
+
+
+def test_read_netcdf_regular_axes_win_over_2d_auxiliaries(tmp_path: Path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    from affine import Affine
+
+    path = tmp_path / "cf52.nc"
+    with netcdf4.Dataset(path, "w") as ds:
+        ds.createDimension("y", 2)
+        ds.createDimension("x", 3)
+        x = ds.createVariable("x", "f8", ("x",))
+        x[:], x.units = [5.0, 15.0, 25.0], "m"
+        y = ds.createVariable("y", "f8", ("y",))
+        y[:], y.units = [15.0, 5.0], "m"
+        ds.createVariable("lat", "f8", ("y", "x"))[:] = np.ones((2, 3))
+        ds.createVariable("lon", "f8", ("y", "x"))[:] = np.ones((2, 3))
+        v = ds.createVariable("v", "f4", ("y", "x"))
+        v[:], v.coordinates = np.ones((2, 3)), "lat lon"
+    out = read_netcdf(path, "v")
+    assert out.transform == Affine(10.0, 0.0, 0.0, 0.0, -10.0, 20.0)
+
+
+def test_read_netcdf_float32_coordinates_near_the_antimeridian(tmp_path: Path):
+    netcdf4 = pytest.importorskip("netCDF4")
+
+    path = tmp_path / "f32.nc"
+    lon = (170.05 + 0.1 * np.arange(100)).astype("f4")  # 0.1° to 179.95°
+    lat = (10.0 - 0.1 * (np.arange(5) + 0.5)).astype("f4")
+    with netcdf4.Dataset(path, "w") as ds:
+        ds.createDimension("lat", lat.size)
+        ds.createDimension("lon", lon.size)
+        v_lon = ds.createVariable("lon", "f4", ("lon",))
+        v_lon[:], v_lon.units = lon, "degrees_east"
+        v_lat = ds.createVariable("lat", "f4", ("lat",))
+        v_lat[:], v_lat.units = lat, "degrees_north"
+        ds.createVariable("v", "f4", ("lat", "lon"))[:] = np.ones((5, 100))
+    out = read_netcdf(path, "v")
+    assert out.transform.a == pytest.approx(0.1, rel=1e-5)
+    assert out.transform.c == pytest.approx(170.0, abs=1e-4)
