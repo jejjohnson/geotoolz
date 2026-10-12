@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.4.0...geotoolz-cloud-v0.4.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **cloud:** read_netcdf derives the transform from CF x/y or lon/lat coordinates ([#469](https://github.com/jejjohnson/geotoolz/issues/469)) ([a241ed8](https://github.com/jejjohnson/geotoolz/commit/a241ed852238d541b8e7fded868d16f2713233b6))
+* **cloud:** retry S3's spurious NoSuchBucket in every geocloud store call ([#471](https://github.com/jejjohnson/geotoolz/issues/471)) ([f1ffa76](https://github.com/jejjohnson/geotoolz/commit/f1ffa7697a0db7406d6b7f8f1cf2ded41328f7e3))
+
 ## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.3.0...geotoolz-cloud-v0.4.0) (2026-10-09)
 
 
