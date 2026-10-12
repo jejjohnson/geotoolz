@@ -997,8 +997,10 @@ def test_read_netcdf_transform_from_cf_coordinates(tmp_path: Path) -> None:
     with netcdf4.Dataset(path, "w") as ds:
         ds.createDimension("y", 3)
         ds.createDimension("x", 4)
-        ds.createVariable("x", "f8", ("x",))[:] = 500_000 + 10 * (np.arange(4) + 0.5)
-        ds.createVariable("y", "f8", ("y",))[:] = 4_200_000 - 10 * (np.arange(3) + 0.5)
+        x = ds.createVariable("x", "f8", ("x",))
+        x[:], x.units = 500_000 + 10 * (np.arange(4) + 0.5), "m"
+        y = ds.createVariable("y", "f8", ("y",))
+        y[:], y.units = 4_200_000 - 10 * (np.arange(3) + 0.5), "m"
         ds.createVariable("t2m", "f4", ("y", "x"))[:] = np.ones((3, 4))
 
     out = io.ReadNetCDF(path=path, variable="t2m")()  # (3, 4) float32

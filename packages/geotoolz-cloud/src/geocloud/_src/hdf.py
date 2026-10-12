@@ -636,14 +636,16 @@ def _netcdf_crs(
         return None, mapping
 
 
-def _netcdf_transform(group: Any, variable: Any, mapping: Any) -> Affine:
+def _netcdf_transform(group: Any, variable: Any, mapping: Any, crs: Any) -> Affine:
     """The variable's affine: GDAL's ``GeoTransform``, else its CF coordinates.
 
     GDAL's netCDF driver writes ``GeoTransform`` on the ``grid_mapping``
     variable; the data variable is checked as a fallback for other writers.
     Without it, the transform comes from evenly spaced 1-D coordinate
-    variables of the last two dimensions (`_coordinate_transform`); when
-    those are missing or irregular the identity is returned with a warning.
+    variables of the last two dimensions (`_coordinate`), scaled to the
+    CRS's metres when their ``units`` are kilometres; when those are
+    missing, irregular, 2-D (curvilinear) or in units that cannot be
+    converted, the identity is returned with a warning.
     """
     for holder in (mapping, variable):
         if holder is not None and getattr(holder, "GeoTransform", None) is not None:
@@ -651,16 +653,9 @@ def _netcdf_transform(group: Any, variable: Any, mapping: Any) -> Affine:
     if len(variable.dimensions) < 2:
         return Affine.identity()
     y_dim, x_dim = variable.dimensions[-2:]
-    y = _coordinate(group, variable, y_dim)
-    x = _coordinate(group, variable, x_dim)
-    missing = [d for d, c in ((y_dim, y), (x_dim, x)) if c is None]
-    if missing:
-        reason = f"no 1-D coordinate variable for {', '.join(map(repr, missing))}"
-    else:
-        transform = _coordinate_transform(cast(np.ndarray, x), cast(np.ndarray, y))
-        if transform is not None:
-            return transform
-        reason = f"the {y_dim!r} / {x_dim!r} coordinates are not evenly spaced"
+    reason = _coordinate_affine(group, variable, (y_dim, x_dim), crs)
+    if isinstance(reason, Affine):
+        return reason
     warnings.warn(
         f"read_netcdf: no GeoTransform on {variable.name!r} and {reason}; "
         "the result has an identity transform.",
@@ -670,18 +665,109 @@ def _netcdf_transform(group: Any, variable: Any, mapping: Any) -> Affine:
     return Affine.identity()
 
 
-def _coordinate(group: Any, variable: Any, dim: str) -> np.ndarray | None:
-    """The 1-D coordinate variable over ``dim``, as float64 pixel centres.
+def _coordinate_affine(
+    group: Any, variable: Any, dims: tuple[str, str], crs: Any
+) -> Affine | str:
+    """The transform from the coordinates of ``dims``, or why there is none."""
+    declared = [
+        _netcdf_lookup(group, name)
+        for name in str(getattr(variable, "coordinates", "")).split()
+    ]
+    if any(
+        c is not None and len(c.dimensions) == 2 and set(c.dimensions) == set(dims)
+        for c in declared
+    ):
+        return (
+            "its coordinates are 2-D (curvilinear); read them as geolocation "
+            "with read_hdf(..., geolocation=...)"
+        )
+    coords = [_coordinate(group, declared, dim) for dim in dims]
+    missing = [d for d, c in zip(dims, coords, strict=True) if c is None]
+    if missing:
+        return f"no 1-D coordinate variable for {', '.join(map(repr, missing))}"
+    values = []
+    for dim, coord in zip(dims, coords, strict=True):
+        scaled = _in_crs_units(coord, crs)
+        if scaled is None:
+            return f"the {dim!r} coordinate's units {coord.units!r} are not metres"
+        values.append(scaled)
+    transform = _coordinate_transform(values[1], values[0])
+    if transform is None:
+        return f"the {dims[0]!r} / {dims[1]!r} coordinates are not evenly spaced"
+    return transform
 
-    The CF coordinate variable named after the dimension, else a 1-D
-    variable over ``dim`` listed in the data variable's ``coordinates``.
-    """
-    names = [dim, *str(getattr(variable, "coordinates", "")).split()]
-    for name in names:
-        coord = group.variables.get(name)
-        if coord is not None and tuple(coord.dimensions) == (dim,):
-            return np.ma.filled(np.ma.asarray(coord[:], dtype=np.float64), np.nan)
+
+def _netcdf_lookup(group: Any, name: str) -> Any:
+    """A variable by CF name: a path (absolute or relative), else the nearest
+    group from ``group`` up to the root that defines it."""
+    if "/" in name:
+        current = group
+        if name.startswith("/"):
+            while current.parent is not None:
+                current = current.parent
+        *parts, leaf = [p for p in name.split("/") if p]
+        for part in parts:
+            current = current.parent if part == ".." else current.groups.get(part)
+            if current is None:
+                return None
+        return current.variables.get(leaf)
+    current = group
+    while current is not None:
+        if name in current.variables:
+            return current.variables[name]
+        current = current.parent
     return None
+
+
+def _coordinate(group: Any, declared: list[Any], dim: str) -> Any:
+    """The 1-D coordinate variable over ``dim``.
+
+    A 1-D variable over ``dim`` listed in the data variable's
+    ``coordinates`` wins; else the CF coordinate variable named after the
+    dimension (searched up the group tree), unless it is a bare index with
+    no ``units``.
+    """
+    for coord in declared:
+        if coord is not None and tuple(coord.dimensions) == (dim,):
+            return coord
+    coord = _netcdf_lookup(group, dim)
+    if (
+        coord is not None
+        and tuple(coord.dimensions) == (dim,)
+        and getattr(coord, "units", None) is not None
+    ):
+        return coord
+    return None
+
+
+#: Length units a projected coordinate may carry, in metres.
+_METRES = {
+    "m": 1.0,
+    "metre": 1.0,
+    "metres": 1.0,
+    "meter": 1.0,
+    "meters": 1.0,
+    "km": 1000.0,
+    "kilometre": 1000.0,
+    "kilometres": 1000.0,
+    "kilometer": 1000.0,
+    "kilometers": 1000.0,
+}
+
+
+def _in_crs_units(coord: Any, crs: Any) -> np.ndarray | None:
+    """``coord`` as float64, in metres when the CRS is projected in metres.
+
+    Geographic coordinates (and coordinates with no CRS to compare against)
+    are returned as stored; projected ones with an unknown length unit give
+    ``None``.
+    """
+    values = np.ma.filled(np.ma.asarray(coord[:], dtype=np.float64), np.nan)
+    if crs is None or not crs.is_projected:
+        return values
+    units = str(getattr(coord, "units", "m")).strip().lower()
+    factor = _METRES.get(units)
+    return None if factor is None else values * factor
 
 
 def _coordinate_transform(x: np.ndarray, y: np.ndarray) -> Affine | None:
@@ -763,5 +849,5 @@ def read_netcdf(
             crs=crs,
             fill_value=fill_value,
             attrs={"attrs": attrs},
-            transform=_netcdf_transform(holder, var, mapping),
+            transform=_netcdf_transform(holder, var, mapping, crs),
         )

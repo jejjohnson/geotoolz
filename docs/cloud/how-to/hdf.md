@@ -22,7 +22,9 @@ pip install 'geotoolz-cloud[hdf4]'          # pyhdf, for HDF4 / HDF-EOS (MODIS)
 the CRS from the variable's `grid_mapping` and the transform from GDAL's
 `GeoTransform` attribute. Without one, the transform comes from evenly
 spaced 1-D coordinate variables of the last two dimensions (CF `x` / `y`
-or `lon` / `lat`, read as pixel centres).
+or `lon` / `lat`, read as pixel centres): the ones the variable's
+`coordinates` attribute declares come first, parent groups are searched,
+and kilometre coordinates of a projected grid are converted to metres.
 
 ```python
 import tempfile

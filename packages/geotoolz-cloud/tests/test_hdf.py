@@ -155,6 +155,7 @@ def _cf_netcdf(
     *,
     names: tuple[str, str] = ("y", "x"),
     geotransform: str | None = None,
+    units: str = "m",
 ) -> Path:
     """A ``(y, x)`` float variable georeferenced by CF 1-D coordinates."""
     netcdf4 = pytest.importorskip("netCDF4")
@@ -164,10 +165,12 @@ def _cf_netcdf(
     with netcdf4.Dataset(path, "w") as ds:
         ds.createDimension(y_name, y.size)
         ds.createDimension(x_name, x.size)
-        ds.createVariable(x_name, "f8", (x_name,))[:] = x
-        ds.createVariable(y_name, "f8", (y_name,))[:] = y
-        crs = ds.createVariable("crs", "i4")
         projected = x_name == "x"
+        for name, values in ((x_name, x), (y_name, y)):
+            coord = ds.createVariable(name, "f8", (name,))
+            coord[:] = values
+            coord.units = units if projected else "degrees"
+        crs = ds.createVariable("crs", "i4")
         crs.crs_wkt = CRS("EPSG:32630" if projected else "EPSG:4326").to_wkt()
         if geotransform is not None:
             crs.GeoTransform = geotransform
@@ -232,4 +235,75 @@ def test_read_netcdf_without_coordinates_warns(tmp_path: Path):
         ds.createDimension("col", 3)
         ds.createVariable("v", "f4", ("row", "col"))[:] = np.ones((2, 3))
     with pytest.warns(UserWarning, match="no 1-D coordinate variable for 'row', 'col'"):
+        read_netcdf(path, "v")
+
+
+def test_read_netcdf_kilometre_coordinates_are_metres(tmp_path: Path):
+    from affine import Affine
+
+    x = 500 + 0.01 * (np.arange(4) + 0.5)  # km
+    y = 4200 - 0.01 * (np.arange(3) + 0.5)
+    out = read_netcdf(_cf_netcdf(tmp_path / "km.nc", x, y, units="km"), "t2m")
+    assert out.transform.almost_equals(
+        Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_200_000.0)
+    )
+
+
+def test_read_netcdf_unknown_projected_units_warn(tmp_path: Path):
+    x = 1.0 + np.arange(4)
+    y = 3.0 - np.arange(3)
+    path = _cf_netcdf(tmp_path / "ft.nc", x, y, units="furlong")
+    with pytest.warns(UserWarning, match="units 'furlong' are not metres"):
+        read_netcdf(path, "t2m")
+
+
+def test_read_netcdf_coordinates_from_a_parent_group(tmp_path: Path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    from affine import Affine
+
+    path = tmp_path / "grouped.nc"
+    with netcdf4.Dataset(path, "w") as ds:
+        ds.createDimension("lat", 2)
+        ds.createDimension("lon", 3)
+        lat = ds.createVariable("lat", "f8", ("lat",))
+        lat[:], lat.units = [10.5, 9.5], "degrees_north"
+        lon = ds.createVariable("lon", "f8", ("lon",))
+        lon[:], lon.units = [0.5, 1.5, 2.5], "degrees_east"
+        product = ds.createGroup("PRODUCT")
+        product.createVariable("v", "f4", ("lat", "lon"))[:] = np.ones((2, 3))
+    out = read_netcdf(path, "v", group="PRODUCT")
+    assert out.transform == Affine(1.0, 0.0, 0.0, 0.0, -1.0, 11.0)
+
+
+def test_read_netcdf_declared_coordinates_beat_index_dimensions(tmp_path: Path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    from affine import Affine
+
+    path = tmp_path / "indexed.nc"
+    with netcdf4.Dataset(path, "w") as ds:
+        ds.createDimension("j", 2)
+        ds.createDimension("i", 3)
+        ds.createVariable("j", "i4", ("j",))[:] = [0, 1]  # bare indexes
+        ds.createVariable("i", "i4", ("i",))[:] = [0, 1, 2]
+        lat = ds.createVariable("lat", "f8", ("j",))
+        lat[:], lat.units = [10.5, 9.5], "degrees_north"
+        lon = ds.createVariable("lon", "f8", ("i",))
+        lon[:], lon.units = [0.5, 1.5, 2.5], "degrees_east"
+        v = ds.createVariable("v", "f4", ("j", "i"))
+        v[:], v.coordinates = np.ones((2, 3)), "lat lon"
+    out = read_netcdf(path, "v")
+    assert out.transform == Affine(1.0, 0.0, 0.0, 0.0, -1.0, 11.0)
+
+
+def test_read_netcdf_curvilinear_coordinates_warn(tmp_path: Path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    path = tmp_path / "swath.nc"
+    with netcdf4.Dataset(path, "w") as ds:
+        ds.createDimension("row", 2)
+        ds.createDimension("col", 3)
+        ds.createVariable("lat", "f8", ("row", "col"))[:] = np.ones((2, 3))
+        ds.createVariable("lon", "f8", ("row", "col"))[:] = np.ones((2, 3))
+        v = ds.createVariable("v", "f4", ("row", "col"))
+        v[:], v.coordinates = np.ones((2, 3)), "lat lon"
+    with pytest.warns(UserWarning, match="curvilinear"):
         read_netcdf(path, "v")
