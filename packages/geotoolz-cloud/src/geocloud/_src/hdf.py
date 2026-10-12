@@ -24,6 +24,7 @@ from __future__ import annotations
 import importlib
 import io
 import os
+import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -635,16 +636,72 @@ def _netcdf_crs(
         return None, mapping
 
 
-def _netcdf_transform(variable: Any, mapping: Any) -> Affine:
-    """The GDAL ``GeoTransform`` attribute, on the grid mapping or the variable.
+def _netcdf_transform(group: Any, variable: Any, mapping: Any) -> Affine:
+    """The variable's affine: GDAL's ``GeoTransform``, else its CF coordinates.
 
-    GDAL's netCDF driver writes it on the ``grid_mapping`` variable; the
-    data variable is checked as a fallback for other writers.
+    GDAL's netCDF driver writes ``GeoTransform`` on the ``grid_mapping``
+    variable; the data variable is checked as a fallback for other writers.
+    Without it, the transform comes from evenly spaced 1-D coordinate
+    variables of the last two dimensions (`_coordinate_transform`); when
+    those are missing or irregular the identity is returned with a warning.
     """
     for holder in (mapping, variable):
         if holder is not None and getattr(holder, "GeoTransform", None) is not None:
             return affine_from_geotransform(holder.GeoTransform)
+    if len(variable.dimensions) < 2:
+        return Affine.identity()
+    y_dim, x_dim = variable.dimensions[-2:]
+    y = _coordinate(group, variable, y_dim)
+    x = _coordinate(group, variable, x_dim)
+    missing = [d for d, c in ((y_dim, y), (x_dim, x)) if c is None]
+    if missing:
+        reason = f"no 1-D coordinate variable for {', '.join(map(repr, missing))}"
+    else:
+        transform = _coordinate_transform(cast(np.ndarray, x), cast(np.ndarray, y))
+        if transform is not None:
+            return transform
+        reason = f"the {y_dim!r} / {x_dim!r} coordinates are not evenly spaced"
+    warnings.warn(
+        f"read_netcdf: no GeoTransform on {variable.name!r} and {reason}; "
+        "the result has an identity transform.",
+        UserWarning,
+        stacklevel=3,
+    )
     return Affine.identity()
+
+
+def _coordinate(group: Any, variable: Any, dim: str) -> np.ndarray | None:
+    """The 1-D coordinate variable over ``dim``, as float64 pixel centres.
+
+    The CF coordinate variable named after the dimension, else a 1-D
+    variable over ``dim`` listed in the data variable's ``coordinates``.
+    """
+    names = [dim, *str(getattr(variable, "coordinates", "")).split()]
+    for name in names:
+        coord = group.variables.get(name)
+        if coord is not None and tuple(coord.dimensions) == (dim,):
+            return np.ma.filled(np.ma.asarray(coord[:], dtype=np.float64), np.nan)
+    return None
+
+
+def _coordinate_transform(x: np.ndarray, y: np.ndarray) -> Affine | None:
+    """The affine of evenly spaced pixel-centre coordinates, or ``None``.
+
+    The origin is the outer pixel edge, ``x[0] - dx / 2`` and
+    ``y[0] - dy / 2``; ``dy`` keeps its sign, so a south-up grid (``y``
+    ascending) gets a positive ``e``.
+    """
+    steps = []
+    for c in (x, y):
+        if c.size < 2 or not np.isfinite(c).all():
+            return None
+        d = np.diff(c)
+        step = (c[-1] - c[0]) / (c.size - 1)
+        if step == 0 or not np.allclose(d, step, rtol=1e-6, atol=0.0):
+            return None
+        steps.append(float(step))
+    dx, dy = steps
+    return Affine(dx, 0.0, float(x[0]) - dx / 2, 0.0, dy, float(y[0]) - dy / 2)
 
 
 def read_netcdf(
@@ -663,7 +720,11 @@ def read_netcdf(
     used in place). With ``decode_cf`` the CF mask / ``scale_factor`` /
     ``add_offset`` are applied and masked pixels become the fill (``NaN``
     for decoded floats). The CRS comes from the variable's CF
-    ``grid_mapping``, the transform from GDAL's ``GeoTransform`` attribute.
+    ``grid_mapping``; the transform from GDAL's ``GeoTransform`` attribute,
+    or else from evenly spaced 1-D coordinate variables of the last two
+    dimensions (CF ``x`` / ``y`` or ``lon`` / ``lat`` pixel centres). When
+    neither is there the transform is the identity and a `UserWarning`
+    says why.
 
     Args:
         source: A URI in any form the pool accepts, or a local path.
@@ -702,5 +763,5 @@ def read_netcdf(
             crs=crs,
             fill_value=fill_value,
             attrs={"attrs": attrs},
-            transform=_netcdf_transform(var, mapping),
+            transform=_netcdf_transform(holder, var, mapping),
         )
