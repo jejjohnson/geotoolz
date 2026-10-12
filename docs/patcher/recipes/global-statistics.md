@@ -41,7 +41,7 @@ z: np.ndarray = patcher.two_pass(
     field,
     reduce_with=gp.spatial.aggregation.MeanStd(),
     apply=standardise,
-)                                                     # (1, 512, 512) float64 · NaN = row 0, col 0
+)                                                     # (1, 512, 512) float64
 ```
 
 - **Both passes go through `split`,** so `on_error`, hooks, journal,

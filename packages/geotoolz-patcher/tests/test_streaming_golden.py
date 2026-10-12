@@ -344,10 +344,9 @@ def test_streaming_matches_in_memory_on_partial_chunks(tmp_path) -> None:
         streaming=True, target_path=str(tmp_path), chunks=(32, 32)
     )
     streamed = np.asarray(agg.merge(_hann_patches(70), domain)[:])
-    # Same NaN fill (the Σw = 0 leading ring) and the same values.
-    np.testing.assert_array_equal(np.isnan(streamed), np.isnan(in_mem))
-    assert np.isnan(streamed[0]).all() and np.isnan(streamed[:, 0]).all()
-    np.testing.assert_allclose(streamed, in_mem, rtol=1e-5, atol=1e-6, equal_nan=True)
+    # Every cell is covered with a non-zero Hann weight, and the values agree.
+    assert not np.isnan(streamed).any() and not np.isnan(in_mem).any()
+    np.testing.assert_allclose(streamed, in_mem, rtol=1e-5, atol=1e-6)
 
 
 def test_streaming_peak_memory(tmp_path) -> None:

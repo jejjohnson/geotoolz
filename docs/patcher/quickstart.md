@@ -93,8 +93,8 @@ stitched: xr.DataArray = patcher.merge_to_xarray(outputs, field)  # (1, 2048, 20
 
 - **Overlap** is `size − step` = 32 pixels. The Hann window feathers each
   seam, and `OverlapAdd` divides by the summed weights.
-- **No data.** Pixels outside the swath stay NaN, and so do the first row
-  and column, which the Hann taper weights at zero — see
+- **No data.** Pixels outside the swath stay NaN; every covered pixel,
+  the scene's edges included, keeps a non-zero Hann weight — see
   [Window convention](patching.md#window-convention). Eight 224-pixel
   steps plus one patch cover 2048 pixels exactly; on other sizes, pick a
   [boundary policy](patching.md#boundary-policy) for the trailing edge.

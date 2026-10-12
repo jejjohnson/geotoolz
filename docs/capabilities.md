@@ -739,8 +739,8 @@ current).
 | `Boxcar` | class | Constant 1.0 — no edge taper. |
 | `Custom` | class | Caller-supplied weight function — the escape hatch. |
 | `Gaussian` | class | Separable Gaussian envelope centred on the patch. |
-| `Hann` | class | Periodic Hann (raised-cosine) window — the standard overlap-add taper. |
-| `Tukey` | class | Periodic Tukey (tapered-cosine) window. |
+| `Hann` | class | Hann (raised-cosine) window — the standard overlap-add taper. |
+| `Tukey` | class | Tukey (tapered-cosine) window. |
 | `Window` | class | Base for window functions. |
 | `geom_shape` | function | Shape of the weight array a `spatial.window.Window` returns for ``geometry``. |
 

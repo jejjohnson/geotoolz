@@ -342,9 +342,9 @@ class TestCogWriter:
             assert src.crs == field.domain.crs
             assert src.transform == field.domain.transform
             written = src.read(1)
-        # Periodic Hann leaves the leading ring at Σw = 0 → nodata (NaN).
-        np.testing.assert_allclose(written, reference, rtol=1e-6, equal_nan=True)
-        assert np.isnan(written[0]).all()
+        # Every pixel is covered with a non-zero Hann weight → the input back.
+        np.testing.assert_allclose(written, reference, rtol=1e-6)
+        np.testing.assert_allclose(written, values, rtol=1e-5)
         # No scratch files are left beside the output.
         assert sorted(os.listdir(tmp_path)) == ["out.tif"]
 
