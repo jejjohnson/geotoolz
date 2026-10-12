@@ -102,5 +102,6 @@ read attributes and coordinates as plain Python values.
   on the pool.
 - **The result has an identity transform**, with a `UserWarning`, when
   the file has neither a `GeoTransform` nor evenly spaced 1-D coordinates.
-  Swath products ship 2-D latitude / longitude arrays instead
-  (`read_hdf(..., geolocation=("lat", "lon"))`).
+  Swath products ship 2-D latitude / longitude arrays instead: read them
+  with `read_hdf(..., geolocation=("lat", "lon"))` for an HDF / NetCDF-4
+  file, or with netCDF4 for a NetCDF-3 one.

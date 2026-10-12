@@ -625,7 +625,13 @@ def _netcdf_crs(
 ) -> tuple[Any, Any]:
     """``(crs, grid_mapping variable)`` from the CF ``grid_mapping`` attribute."""
     name = getattr(variable, "grid_mapping", None)
-    mapping = group.variables.get(name) if isinstance(name, str) else None
+    # CF scope: the nearest ancestor group, or a path; the extended form
+    # ("crs: x y") names the mapping before its colon.
+    mapping = (
+        _netcdf_lookup(group, name.split(":")[0].strip())
+        if isinstance(name, str) and name.strip()
+        else None
+    )
     if not use_cf_grid_mapping or mapping is None:
         return None, mapping
     try:
@@ -682,22 +688,25 @@ def _coordinate_affine(
             for c in declared
         ):
             return (
-                "its coordinates are 2-D (curvilinear); read them as geolocation "
-                "with read_hdf(..., geolocation=...)"
+                "its coordinates are 2-D (curvilinear); read the latitude / "
+                "longitude arrays alongside it (netCDF4, or read_hdf(..., "
+                "geolocation=...) for a NetCDF-4 file)"
             )
         return f"no 1-D coordinate variable for {', '.join(map(repr, missing))}"
-    values = []
+    axes = []
     for dim, coord in zip(dims, coords, strict=True):
-        scaled = _in_crs_units(coord, crs)
-        if scaled is None:
-            return f"the {dim!r} coordinate's units {coord.units!r} are not metres"
-        values.append(scaled)
-    transform = _coordinate_transform(
-        values[1], values[0], rtol=max(_stored_eps(c) for c in coords)
-    )
-    if transform is None:
-        return f"the {dims[0]!r} / {dims[1]!r} coordinates are not evenly spaced"
-    return transform
+        factor = _unit_factor(coord, crs)
+        if factor is None:
+            return (
+                f"the {dim!r} coordinate's units {coord.units!r} cannot be "
+                "converted to the CRS's"
+            )
+        axis = _regular_axis(group, coord, factor)
+        if axis is None:
+            return f"the {dim!r} coordinate is not evenly spaced (or its cells are not)"
+        axes.append(axis)
+    (dy, y0), (dx, x0) = axes
+    return Affine(dx, 0.0, x0, 0.0, dy, y0)
 
 
 def _netcdf_lookup(group: Any, name: str) -> Any:
@@ -725,13 +734,18 @@ def _netcdf_lookup(group: Any, name: str) -> Any:
 def _coordinate(group: Any, declared: list[Any], dim: str) -> Any:
     """The 1-D coordinate variable over ``dim``.
 
-    A 1-D variable over ``dim`` listed in the data variable's
-    ``coordinates`` wins; else the CF coordinate variable named after the
-    dimension (searched up the group tree), unless it is a bare index with
-    no ``units``.
+    A horizontal 1-D variable over ``dim`` listed in the data variable's
+    ``coordinates`` wins (another auxiliary, such as a height, never
+    does); else the CF coordinate variable named after the dimension
+    (searched up the group tree), unless it is a bare index with no
+    ``units``.
     """
     for coord in declared:
-        if coord is not None and tuple(coord.dimensions) == (dim,):
+        if (
+            coord is not None
+            and tuple(coord.dimensions) == (dim,)
+            and _is_horizontal(coord)
+        ):
             return coord
     coord = _netcdf_lookup(group, dim)
     if (
@@ -742,6 +756,15 @@ def _coordinate(group: Any, declared: list[Any], dim: str) -> Any:
         return coord
     return None
 
+
+_HORIZONTAL_NAMES = {
+    "projection_x_coordinate",
+    "projection_y_coordinate",
+    "longitude",
+    "latitude",
+    "grid_longitude",
+    "grid_latitude",
+}
 
 #: Length units a projected coordinate may carry, in metres.
 _METRES = {
@@ -755,22 +778,45 @@ _METRES = {
     "kilometres": 1000.0,
     "kilometer": 1000.0,
     "kilometers": 1000.0,
+    "ft": 0.3048,
+    "foot": 0.3048,
+    "feet": 0.3048,
+    "us_survey_foot": 1200 / 3937,
+    "us survey foot": 1200 / 3937,
+    "ftus": 1200 / 3937,
 }
 
 
-def _in_crs_units(coord: Any, crs: Any) -> np.ndarray | None:
-    """``coord`` as float64, in metres when the CRS is projected in metres.
+def _is_horizontal(coord: Any) -> bool:
+    """Whether a CF variable is an X / Y (or longitude / latitude) axis.
 
-    Geographic coordinates (and coordinates with no CRS to compare against)
-    are returned as stored; projected ones with an unknown length unit give
-    ``None``.
+    Judged by ``axis``, ``standard_name`` or units (a length or degrees),
+    as CF identifies coordinate types.
     """
-    values = np.ma.filled(np.ma.asarray(coord[:], dtype=np.float64), np.nan)
+    if str(getattr(coord, "axis", "")).upper() in ("X", "Y"):
+        return True
+    if str(getattr(coord, "standard_name", "")) in _HORIZONTAL_NAMES:
+        return True
+    units = str(getattr(coord, "units", "")).strip().lower()
+    return units in _METRES or units.startswith("degree")
+
+
+def _unit_factor(coord: Any, crs: Any) -> float | None:
+    """Multiplier from ``coord``'s units into the CRS's axis units.
+
+    ``1`` for geographic coordinates, a missing CRS or missing units;
+    ``None`` for a projected grid whose length unit is unknown.
+    """
     if crs is None or not crs.is_projected:
-        return values
-    units = str(getattr(coord, "units", "m")).strip().lower()
-    factor = _METRES.get(units)
-    return None if factor is None else values * factor
+        return 1.0
+    units = str(getattr(coord, "units", "")).strip().lower()
+    if not units:
+        return 1.0
+    metres = _METRES.get(units)
+    if metres is None:
+        return None
+    axis_metres = float(getattr(crs.axis_info[0], "unit_conversion_factor", 1.0))
+    return metres / axis_metres
 
 
 def _stored_eps(coord: Any) -> float:
@@ -779,29 +825,47 @@ def _stored_eps(coord: Any) -> float:
     return float(np.finfo(dtype).eps) if dtype.kind == "f" else 0.0
 
 
-def _coordinate_transform(
-    x: np.ndarray, y: np.ndarray, *, rtol: float = 0.0
-) -> Affine | None:
-    """The affine of evenly spaced pixel-centre coordinates, or ``None``.
+def _is_regular(values: np.ndarray, step: float, eps: float) -> bool:
+    """Steps within ``1e-6`` of a step plus the stored values' rounding."""
+    atol = 1e-6 * abs(step) + 4.0 * eps * float(np.abs(values).max())
+    return bool(np.allclose(np.diff(values), step, rtol=0.0, atol=atol))
 
-    The origin is the outer pixel edge, ``x[0] - dx / 2`` and
-    ``y[0] - dy / 2``; ``dy`` keeps its sign, so a south-up grid (``y``
-    ascending) gets a positive ``e``. Steps may differ from the mean by
-    ``1e-6`` of a step, plus the rounding of the stored values (``rtol``,
-    their machine epsilon, times the largest magnitude).
+
+def _regular_axis(group: Any, coord: Any, factor: float) -> tuple[float, float] | None:
+    """``(step, origin edge)`` of an evenly spaced axis, or ``None``.
+
+    With CF cell ``bounds`` the origin is the first cell's leading edge
+    (the cells must be contiguous and as wide as the step); without, the
+    values are pixel centres and the origin is ``c[0] - step / 2``. ``step``
+    keeps its sign, so a south-up grid gets a positive ``e``.
     """
-    steps = []
-    for c in (x, y):
-        if c.size < 2 or not np.isfinite(c).all():
-            return None
-        d = np.diff(c)
-        step = (c[-1] - c[0]) / (c.size - 1)
-        atol = 1e-6 * abs(step) + 4.0 * rtol * float(np.abs(c).max())
-        if step == 0 or not np.allclose(d, step, rtol=0.0, atol=atol):
-            return None
-        steps.append(float(step))
-    dx, dy = steps
-    return Affine(dx, 0.0, float(x[0]) - dx / 2, 0.0, dy, float(y[0]) - dy / 2)
+    values = np.ma.filled(np.ma.asarray(coord[:], dtype=np.float64), np.nan) * factor
+    if values.size < 2 or not np.isfinite(values).all():
+        return None
+    eps = _stored_eps(coord)
+    step = float((values[-1] - values[0]) / (values.size - 1))
+    if step == 0 or not _is_regular(values, step, eps):
+        return None
+    name = getattr(coord, "bounds", None)
+    cells = _netcdf_lookup(group, name) if isinstance(name, str) else None
+    if cells is None:
+        return step, float(values[0]) - step / 2
+    edges = np.ma.filled(np.ma.asarray(cells[:], dtype=np.float64), np.nan) * factor
+    if edges.shape != (values.size, 2) or not np.isfinite(edges).all():
+        return None
+    lead = edges.min(axis=1) if step > 0 else edges.max(axis=1)
+    widths = np.abs(edges[:, 1] - edges[:, 0])
+    if not (
+        _is_regular(lead, step, eps)
+        and np.allclose(
+            widths,
+            abs(step),
+            rtol=0.0,
+            atol=1e-6 * abs(step) + 4.0 * eps * float(np.abs(edges).max()),
+        )
+    ):
+        return None
+    return step, float(lead[0])
 
 
 def read_netcdf(
