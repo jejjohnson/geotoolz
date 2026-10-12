@@ -7,6 +7,7 @@ import pytest
 from _goes_abi import l2_name
 from rasterio.windows import Window
 
+import geoproducts
 from geoproducts import goes
 from geoproducts.goes import constants
 from geoproducts.goes.l2 import product_code
@@ -288,3 +289,55 @@ def test_windowed_read_and_repr(l2_file) -> None:
     assert chip.shape == (2, 3, 4)
     assert (chip[:, :, 2:] == 255).all()  # past the right edge: fill
     assert "product='ACM'" in repr(reader)
+
+
+def _cloud_mask(shape: tuple[int, int]) -> dict:
+    return {"BCM": (np.ones(shape, dtype=np.int8), {"_FillValue": np.int8(-1)})}
+
+
+def test_edge_and_centre_registered_files_share_one_grid(l2_file) -> None:
+    # Some ABI L2 products store x / y as pixel edges, others as centres;
+    # both carry the same *_image_bounds, and both must land on one grid.
+    centre = goes.L2Reader(l2_file(_cloud_mask((6, 8)), registration="centre"))
+    edge = goes.L2Reader(l2_file(_cloud_mask((6, 8)), registration="edge"))
+    plain = goes.L2Reader(l2_file(_cloud_mask((6, 8))))  # no bounds: centres
+    for reader in (edge, plain):
+        np.testing.assert_allclose(
+            tuple(reader.transform)[:6], tuple(centre.transform)[:6], rtol=0, atol=1e-6
+        )
+
+
+def test_coarser_edge_registered_product_aligns_with_its_bounds(l2_file) -> None:
+    # A 2x coarser product over the same image edges (ACHA at 4 km beside
+    # ACM at 2 km) shares the origin and doubles the pixel size.
+    from _goes_abi import STEP_RAD, X0_RAD, Y0_RAD
+
+    fine = goes.L2Reader(l2_file(_cloud_mask((6, 8)), registration="centre"))
+    coarse = goes.L2Reader(
+        l2_file(
+            _cloud_mask((3, 4)),
+            registration="edge",
+            step=2 * STEP_RAD,
+            origin=(X0_RAD + STEP_RAD / 2, Y0_RAD - STEP_RAD / 2),
+        )
+    )
+    assert coarse.transform.c == pytest.approx(fine.transform.c, abs=1e-6)
+    assert coarse.transform.f == pytest.approx(fine.transform.f, abs=1e-6)
+    assert coarse.transform.a == pytest.approx(2 * fine.transform.a, rel=1e-9)
+
+
+def test_stack_of_edge_registered_product_has_no_empty_column(l2_file) -> None:
+    centre = goes.L2Reader(l2_file(_cloud_mask((6, 8)), registration="centre"))
+    edge = goes.L2Reader(l2_file(_cloud_mask((6, 8)), registration="edge"))
+    out = np.asarray(geoproducts.stack([centre, edge]))  # (2, 6, 8)
+    assert not np.isnan(out).any()
+
+
+def test_inconsistent_bounds_fall_back_to_the_coordinates(l2_file) -> None:
+    import h5py
+
+    path = l2_file(_cloud_mask((6, 8)), registration="centre")
+    reference = goes.L2Reader(l2_file(_cloud_mask((6, 8)))).transform
+    with h5py.File(path, "r+") as f:
+        f["x_image_bounds"][...] = np.float32([-1.0, 1.0])  # not 8 pixels wide
+    assert goes.L2Reader(path).transform == reference

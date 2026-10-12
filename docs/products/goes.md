@@ -18,8 +18,11 @@ the extra; `goes.recipes` always works.
 
 Every ABI file holds one product of one scan, on the **ABI fixed grid**.
 Its `x` / `y` are scan angles; scaled by the satellite height they give a
-clean `+proj=geos` affine grid. A window decompresses only the HDF5 chunks
-under it.
+clean `+proj=geos` affine grid. Some L2 products (ACM, ACHA) store each
+pixel's leading edge in `x` / `y` where others store its centre; the
+readers tell them apart with the file's `x_image_bounds` /
+`y_image_bounds`, so every product of one scan lands on the same grid. A
+window decompresses only the HDF5 chunks under it.
 
 | Level | File | Reader | Bands |
 |---|---|---|---|
