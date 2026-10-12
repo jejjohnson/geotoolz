@@ -4,8 +4,10 @@ GOES ABI, MTG FCI, Himawari AHI (and SEVIRI once decoded) all sample a
 fixed grid of scan angles. In CF terms the file carries a ``geostationary``
 grid mapping (``perspective_point_height``, ``semi_major_axis``,
 ``semi_minor_axis``, ``longitude_of_projection_origin``,
-``sweep_angle_axis``) and 1-D ``x`` / ``y`` pixel-centre scan angles in
-radians; binary formats (HSD, HRIT) give the same grid as the CGMS
+``sweep_angle_axis``) and 1-D ``x`` / ``y`` scan angles in radians — pixel
+centres in most products, the leading pixel edges in some GOES ABI L2
+products (told apart by ``x_image_bounds`` / ``y_image_bounds``, the
+image's outer edges); binary formats (HSD, HRIT) give the same grid as the CGMS
 ``CFAC`` / ``LFAC`` / ``COFF`` / ``LOFF`` scaling. Scaled by the
 perspective-point height those angles are metres in ``+proj=geos``, evenly
 spaced, so the grid is a clean affine.
@@ -76,6 +78,26 @@ def scan_angle_transform(
     top, bottom = edges(np.asarray(y_rad, dtype=np.float64))
     n_rows, n_cols = len(y_rad), len(x_rad)
     return Affine((right - left) / n_cols, 0.0, left, 0.0, (bottom - top) / n_rows, top)
+
+
+def _as_centres(coords: np.ndarray, bounds: np.ndarray) -> np.ndarray:
+    """``coords`` as pixel centres, judged against the image's outer edges.
+
+    Some ABI L2 products store each pixel's leading edge in ``x`` / ``y``,
+    others its centre; ``bounds`` (``*_image_bounds``, the image's outer
+    edges, the same in both) tell them apart. Coordinates that start on the
+    leading bound are shifted by half a pixel; anything else — centres, or
+    bounds that do not describe this grid — is returned as it is.
+    """
+    coords = np.asarray(coords, dtype=np.float64)
+    step = (coords[-1] - coords[0]) / (len(coords) - 1)
+    lead, trail = (float(v) for v in np.asarray(bounds, dtype=np.float64)[:2])
+    # The bounds must span the grid to a tenth of a pixel, whatever its size.
+    if abs((trail - lead) - step * len(coords)) > 0.1 * abs(step):
+        return coords
+    if abs((coords[0] - lead) / step) < 0.25:  # on the leading edge
+        return coords + step / 2.0
+    return coords
 
 
 def on_earth(
@@ -244,9 +266,23 @@ class FixedGrid:
 
     @classmethod
     def from_cf(
-        cls, f: Any, grid_mapping: str, *, x: str = "x", y: str = "y"
+        cls,
+        f: Any,
+        grid_mapping: str,
+        *,
+        x: str = "x",
+        y: str = "y",
+        x_bounds: str = "x_image_bounds",
+        y_bounds: str = "y_image_bounds",
     ) -> FixedGrid:
         """Read the grid from a CF ``geostationary`` grid mapping and scan angles.
+
+        Some GOES ABI L2 products store each pixel's leading *edge* in
+        ``x`` / ``y`` and others its centre; the image's outer edges
+        (``x_bounds`` / ``y_bounds``) agree across products and tell the
+        two apart, so edge-registered coordinates are shifted half a pixel
+        before `scan_angle_transform`. Without the bounds (or when they do
+        not describe this grid), ``x`` / ``y`` are read as pixel centres.
 
         Args:
             f: Open HDF5 / NetCDF-4 file (or group).
@@ -254,6 +290,8 @@ class FixedGrid:
                 (``"goes_imager_projection"`` for ABI).
             x: Name of the column scan-angle coordinate.
             y: Name of the row scan-angle coordinate.
+            x_bounds: Name of the ``(west, east)`` image-edge variable.
+            y_bounds: Name of the ``(north, south)`` image-edge variable.
 
         Raises:
             ValueError: The file lacks the grid mapping or the coordinates.
@@ -266,10 +304,14 @@ class FixedGrid:
         proj = f[grid_mapping]
         height_m = float(hdf.attr(proj, "perspective_point_height"))
         x_rad, y_rad = hdf.unpacked(f, x), hdf.unpacked(f, y)
+        if x_bounds in f and y_bounds in f:
+            x_rad = _as_centres(x_rad, hdf.unpacked(f, x_bounds))
+            y_rad = _as_centres(y_rad, hdf.unpacked(f, y_bounds))
+        transform = scan_angle_transform(x_rad, y_rad, height_m)
         return cls(
             height=len(y_rad),
             width=len(x_rad),
-            transform=scan_angle_transform(x_rad, y_rad, height_m),
+            transform=transform,
             lon_0=float(hdf.attr(proj, "longitude_of_projection_origin")),
             height_m=height_m,
             semi_major_m=float(hdf.attr(proj, "semi_major_axis")),

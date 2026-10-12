@@ -94,14 +94,25 @@ def _write_grid(
     n_cols: int,
     step: float = STEP_RAD,
     origin: tuple[float, float] = (X0_RAD, Y0_RAD),
+    registration: str | None = None,
 ) -> None:
+    """Write the scan angles; ``origin`` is the first pixel centre.
+
+    ``registration`` also writes ``x_image_bounds`` / ``y_image_bounds`` (the
+    image's outer edges) and stores ``x`` / ``y`` as pixel ``"centre"``s or,
+    like some ABI L2 products, as the pixels' leading ``"edge"``s.
+    """
+    shift = 0.5 if registration == "edge" else 0.0
     for name, n, start, delta in (
         ("x", n_cols, origin[0], step),
         ("y", n_rows, origin[1], -step),
     ):
         coord = f.create_dataset(name, data=np.arange(n, dtype=np.int16))
         coord.attrs["scale_factor"] = _arr(delta, np.float64)
-        coord.attrs["add_offset"] = _arr(start, np.float64)
+        coord.attrs["add_offset"] = _arr(start - shift * delta, np.float64)
+        if registration is not None:
+            edges = [start - delta / 2, start + (n - 0.5) * delta]
+            f.create_dataset(f"{name}_image_bounds", data=np.float32(edges))
     proj = f.create_dataset("goes_imager_projection", data=np.int32(0))
     proj.attrs["perspective_point_height"] = _arr(PERSPECTIVE_HEIGHT_M, np.float64)
     proj.attrs["semi_major_axis"] = _arr(6378137.0, np.float64)
@@ -140,19 +151,22 @@ def write_l2(
     step: float = STEP_RAD,
     origin: tuple[float, float] = (X0_RAD, Y0_RAD),
     extra: dict[str, Any] | None = None,
+    registration: str | None = None,
 ) -> Path:
     """Write an L2 product file: ``{name: (stored array, attrs)}`` on one grid.
 
     ``attrs`` are written as given (``_FillValue``, ``scale_factor``,
     ``add_offset``, ``_Unsigned``, ``units``, ``flag_values`` /
     ``flag_meanings``); ``extra`` adds scalar / 1-D variables; ``origin`` is
-    the first pixel centre's ``(x, y)`` scan angle.
+    the first pixel centre's ``(x, y)`` scan angle; ``registration``
+    (``"centre"`` / ``"edge"``) adds the ``*_image_bounds`` variables and
+    picks where ``x`` / ``y`` sit in each pixel.
     """
     import h5py
 
     shape = next(iter(variables.values()))[0].shape
     with h5py.File(path, "w") as f:
-        _write_grid(f, *shape, step=step, origin=origin)
+        _write_grid(f, *shape, step=step, origin=origin, registration=registration)
         for name, (data, attrs) in variables.items():
             var = f.create_dataset(name, data=data)
             for key, value in attrs.items():
