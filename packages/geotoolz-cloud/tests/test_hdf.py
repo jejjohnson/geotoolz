@@ -253,7 +253,7 @@ def test_read_netcdf_unknown_projected_units_warn(tmp_path: Path):
     x = 1.0 + np.arange(4)
     y = 3.0 - np.arange(3)
     path = _cf_netcdf(tmp_path / "ft.nc", x, y, units="furlong")
-    with pytest.warns(UserWarning, match="units 'furlong' are not metres"):
+    with pytest.warns(UserWarning, match="units 'furlong' cannot be converted"):
         read_netcdf(path, "t2m")
 
 
@@ -346,3 +346,86 @@ def test_read_netcdf_float32_coordinates_near_the_antimeridian(tmp_path: Path):
     out = read_netcdf(path, "v")
     assert out.transform.a == pytest.approx(0.1, rel=1e-5)
     assert out.transform.c == pytest.approx(170.0, abs=1e-4)
+
+
+def test_read_netcdf_grid_mapping_in_a_parent_group(tmp_path: Path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    from affine import Affine
+    from pyproj import CRS
+
+    path = tmp_path / "inherited.nc"
+    with netcdf4.Dataset(path, "w") as ds:
+        ds.createDimension("y", 2)
+        ds.createDimension("x", 3)
+        crs = ds.createVariable("crs", "i4")
+        crs.crs_wkt = CRS("EPSG:32630").to_wkt()
+        x = ds.createVariable("x", "f8", ("x",))
+        x[:], x.units = [500.005, 500.015, 500.025], "km"
+        y = ds.createVariable("y", "f8", ("y",))
+        y[:], y.units = [4200.015, 4200.005], "km"
+        product = ds.createGroup("PRODUCT")
+        v = product.createVariable("v", "f4", ("y", "x"))
+        v[:], v.grid_mapping = np.ones((2, 3)), "crs"
+    out = read_netcdf(path, "v", group="PRODUCT")
+    assert out.crs is not None
+    assert out.transform.almost_equals(
+        Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_200_020.0)
+    )
+
+
+def test_read_netcdf_ignores_non_horizontal_auxiliaries(tmp_path: Path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    from affine import Affine
+
+    path = tmp_path / "height.nc"
+    with netcdf4.Dataset(path, "w") as ds:
+        ds.createDimension("y", 2)
+        ds.createDimension("x", 3)
+        height = ds.createVariable("height", "f8", ("y",))
+        height[:], height.standard_name = [100.0, 250.0], "height"
+        x = ds.createVariable("x", "f8", ("x",))
+        x[:], x.axis = [5.0, 15.0, 25.0], "X"
+        y = ds.createVariable("y", "f8", ("y",))
+        y[:], y.axis = [15.0, 5.0], "Y"
+        v = ds.createVariable("v", "f4", ("y", "x"))
+        v[:], v.coordinates = np.ones((2, 3)), "height y x"
+    out = read_netcdf(path, "v")
+    assert out.transform == Affine(10.0, 0.0, 0.0, 0.0, -10.0, 20.0)
+
+
+def test_read_netcdf_honours_cell_bounds(tmp_path: Path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    from affine import Affine
+
+    path = tmp_path / "bounds.nc"
+    with netcdf4.Dataset(path, "w") as ds:
+        ds.createDimension("y", 2)
+        ds.createDimension("x", 3)
+        ds.createDimension("nv", 2)
+        # Coordinates at each cell's west / north edge, not its centre.
+        x = ds.createVariable("x", "f8", ("x",))
+        x[:], x.units, x.bounds = [0.0, 10.0, 20.0], "m", "x_bnds"
+        ds.createVariable("x_bnds", "f8", ("x", "nv"))[:] = [
+            [0, 10],
+            [10, 20],
+            [20, 30],
+        ]
+        y = ds.createVariable("y", "f8", ("y",))
+        y[:], y.units, y.bounds = [20.0, 10.0], "m", "y_bnds"
+        ds.createVariable("y_bnds", "f8", ("y", "nv"))[:] = [[20, 10], [10, 0]]
+        ds.createVariable("v", "f4", ("y", "x"))[:] = np.ones((2, 3))
+    out = read_netcdf(path, "v")
+    assert out.transform == Affine(10.0, 0.0, 0.0, 0.0, -10.0, 20.0)
+
+
+def test_coordinates_convert_into_the_crs_axis_units():
+    from pyproj import CRS
+
+    from geocloud._src.hdf import _unit_factor
+
+    class Coord:
+        units = "m"
+
+    feet = CRS("EPSG:2263")  # NY State Plane, US survey feet
+    assert _unit_factor(Coord(), feet) == pytest.approx(1 / 0.3048006096)
+    assert _unit_factor(Coord(), CRS("EPSG:32630")) == 1.0
