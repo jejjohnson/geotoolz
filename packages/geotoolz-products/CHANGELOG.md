@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.4.1...geotoolz-products-v0.4.2) (2026-10-12)
+
+
+### Bug Fixes
+
+* **deps:** require geotoolz-cloud&gt;=0.4.1 wherever it is an extra ([#478](https://github.com/jejjohnson/geotoolz/issues/478)) ([3f958b2](https://github.com/jejjohnson/geotoolz/commit/3f958b20de390fc1161c8d5ff1a2c9c2998db25b)), closes [#474](https://github.com/jejjohnson/geotoolz/issues/474)
+
 ## [0.4.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.4.0...geotoolz-products-v0.4.1) (2026-10-12)
 
 
