@@ -92,15 +92,6 @@ class TestRetrying:
             net.retrying(lambda: None, wait=lambda o, a: None, attempts=0)
 
 
-class TestS3Wait:
-    def test_s3_retries_only_the_spurious_no_such_bucket(self) -> None:
-        assert s3.s3_wait(OSError("<Code>NoSuchBucket</Code>"), 0) == 1.0
-        assert s3.s3_wait(FileNotFoundError("<Code>NoSuchKey</Code>"), 0) is None
-        # obstore retries 5xx and dropped connections itself.
-        assert s3.s3_wait(OSError("500 Internal Server Error"), 0) is None
-        assert s3.s3_wait(["a listing"], 0) is None
-
-
 # -- downloads ----------------------------------------------------------------
 
 

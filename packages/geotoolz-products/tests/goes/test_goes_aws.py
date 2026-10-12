@@ -21,11 +21,6 @@ def _key(hour: int, minute: int, channel: int, *, product: str = "RadC") -> str:
     )
 
 
-@pytest.fixture(autouse=True)
-def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(aws, "_BACKOFF_S", 0.0)
-
-
 class TestNames:
     def test_parse_conus_key(self) -> None:
         item = aws.parse_key(f"ABI-L1b-RadC/2026/280/12/{RADC}", size=5)
@@ -162,52 +157,36 @@ class TestDownload:
 
 
 class TestRetries:
-    @pytest.fixture
-    def flaky(self, monkeypatch):
-        """Replace ``geocloud.files.download`` / ``ls`` with scripted outcomes."""
-        files = pytest.importorskip("geocloud.files")
+    def test_spurious_no_such_bucket_is_retried_by_geocloud(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        # geotoolz-cloud retries S3's spurious NoSuchBucket for every call;
+        # the GOES helpers rely on it rather than retrying themselves.
+        import time
 
-        def install(outcomes: list[Exception | object]) -> list[str]:
-            calls: list[str] = []
+        obstore = pytest.importorskip("obstore")
+        from geocloud.store import mount, unmount
+        from obstore.store import MemoryStore
 
-            def step(uri: str, *args: object, **kwargs: object) -> object:
-                calls.append(uri)
-                outcome = outcomes.pop(0) if len(outcomes) > 1 else outcomes[0]
-                if isinstance(outcome, Exception):
-                    raise outcome
-                return outcome
+        monkeypatch.setattr(time, "sleep", lambda seconds: None)  # no backoff
+        store = MemoryStore()
+        key = f"ABI-L1b-RadC/2026/280/12/{RADC}"
+        obstore.put(store, key, b"abi")
+        real = obstore.list
+        calls = [0]
 
-            monkeypatch.setattr(files, "download", step)
-            monkeypatch.setattr(files, "ls", step)
-            return calls
+        def flaky(*args, **kwargs):
+            calls[0] += 1
+            if calls[0] == 1:
+                raise OSError("<Code>NoSuchBucket</Code>")
+            return real(*args, **kwargs)
 
-        return install
-
-    def test_spurious_no_such_bucket_is_retried(self, flaky, tmp_path) -> None:
-        target = tmp_path / RADC
-        calls = flaky([OSError("<Code>NoSuchBucket</Code>"), []])
-        assert aws.list_files(satellite="G19", start=datetime(2026, 10, 7, 12)) == []
-        assert len(calls) == 2
-        # A download's 404 has no body: the directory listing probe tells a
-        # spurious NoSuchBucket (retry) from a missing key (stop).
-        calls = flaky(
-            [
-                FileNotFoundError(""),
-                OSError("<Code>NoSuchBucket</Code>"),
-                target,
-            ]
-        )
-        assert aws.download(RADC, tmp_path) == target
-        assert len(calls) == 3  # download, probe listing, download
-
-    def test_missing_key_fails_at_once(self, flaky, tmp_path) -> None:
-        calls = flaky([FileNotFoundError(""), []])
-        with pytest.raises(FileNotFoundError):
-            aws.download(RADC, tmp_path)
-        assert len(calls) == 2  # the download and one probe listing
-
-    def test_retries_are_bounded(self, flaky) -> None:
-        calls = flaky([OSError("NoSuchBucket")])
-        with pytest.raises(OSError, match="NoSuchBucket"):
-            aws.list_files(satellite="G19", start=datetime(2026, 10, 7, 12))
-        assert len(calls) == aws._ATTEMPTS
+        monkeypatch.setattr(obstore, "list", flaky)
+        mount("s3://noaa-goes19", store)
+        try:
+            found = aws.list_files(satellite="G19", start=datetime(2026, 10, 7, 12))
+            assert [item.key for item in found] == [key]
+            assert calls[0] == 2
+            assert aws.download(found[0], tmp_path).read_bytes() == b"abi"
+        finally:
+            unmount("s3://noaa-goes19")

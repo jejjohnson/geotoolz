@@ -47,10 +47,6 @@ __all__ = [
 Sector = Literal["FLDK", "Japan", "Target"]
 _SATELLITES = (8, 9)
 _SLOT = timedelta(minutes=10)
-# Transient failures are retried with exponential backoff; a missing key
-# or a refused request fails at once (see ``_src.s3.s3_wait``).
-_ATTEMPTS = 4
-_BACKOFF_S = 1.0
 _SEGMENT_RE = re.compile(
     r"HS_H(?P<satellite>\d{2})_(?P<slot>\d{8}_\d{4})_B(?P<band>\d{2})"
     r"_(?P<area>FLDK|JP\d{2}|R\d{3})_R(?P<resolution>\d{2})"
@@ -320,12 +316,7 @@ def download(
     compressed = local.with_name(f".{name}.download") if unpack and fetch else local
     if fetch:
         s3.download_object(
-            bucket(satellite or item.satellite),
-            item.key,
-            compressed,
-            attempts=_ATTEMPTS,
-            backoff_s=_BACKOFF_S,
-            extra="himawari",
+            bucket(satellite or item.satellite), item.key, compressed, extra="himawari"
         )
     if not unpack:
         return target
@@ -361,11 +352,7 @@ def _list_slots(
     keys: list[tuple[str, int]] = []
     while slot < end:
         prefix = f"{product}/{slot:%Y/%m/%d/%H%M}/"
-        keys.extend(
-            s3.list_objects(
-                name, prefix, attempts=_ATTEMPTS, backoff_s=_BACKOFF_S, extra="himawari"
-            )
-        )
+        keys.extend(s3.list_objects(name, prefix, extra="himawari"))
         slot += _SLOT
     return keys
 

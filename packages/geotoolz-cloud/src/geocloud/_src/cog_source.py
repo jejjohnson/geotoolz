@@ -79,6 +79,7 @@ import numpy as np
 
 from geocloud._src.aio import _run_coroutine_safely
 from geocloud._src.extras import missing_extra
+from geocloud._src.retry import awith_bucket_retry, with_bucket_retry
 
 
 if TYPE_CHECKING:
@@ -364,6 +365,16 @@ def _options_digest(options: dict[str, Any] | None) -> str | None:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _list_parent(store: Any, key: str) -> None:
+    """List ``key``'s parent: tells a bodiless HEAD 404 for a missing bucket
+    from one for a missing key (`geocloud._src.retry`)."""
+    import obstore
+
+    obstore.list_with_delimiter(
+        store, prefix=key.rsplit("/", 1)[0] if "/" in key else None
+    )
+
+
 def _reopen(cls: type[CogSource], url: str, options: dict[str, Any]) -> CogSource:
     """Unpickle hook: re-open the COG by URL (see `CogSource.__reduce__`)."""
     return cls.open(url, **options)
@@ -518,7 +529,10 @@ class CogSource:
 
         # Upstream only warns on striped TIFFs; the tiled check below raises.
         geotiff = await _with_timeout(
-            async_geotiff.GeoTIFF.open(object_path, store=store),
+            awith_bucket_retry(
+                lambda: async_geotiff.GeoTIFF.open(object_path, store=store),
+                probe=lambda: _list_parent(store, object_path),
+            ),
             timeout=timeout,
             message=f"opening COG {url!r}",
         )
@@ -605,7 +619,9 @@ class CogSource:
             store = get_obstore(self.url, storage_options=self.storage_options)
             key = _uri_path(self.url)
         try:
-            meta = store.head(key)
+            meta = with_bucket_retry(
+                lambda: store.head(key), probe=lambda: _list_parent(store, key)
+            )
         except Exception as exc:
             warnings.warn(
                 f"CogSource: HEAD of {self.url!r} failed ({exc}); changes to "
@@ -860,7 +876,12 @@ async def _fetch_and_decode_tiles(
         ordered[i : i + _TILES_PER_FETCH]
         for i in range(0, len(ordered), _TILES_PER_FETCH)
     ]
-    batches = await asyncio.gather(*(level.fetch_tiles(group) for group in groups))
+    batches = await asyncio.gather(
+        *(
+            awith_bucket_retry(lambda group=group: level.fetch_tiles(group))
+            for group in groups
+        )
+    )
     by_coord: dict[tuple[int, int], np.ndarray] = {}
     for tile in (t for batch in batches for t in batch):
         data = np.asarray(tile.array.data)

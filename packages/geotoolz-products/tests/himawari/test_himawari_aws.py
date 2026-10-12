@@ -14,11 +14,6 @@ SEG = "HS_H09_20261007_0300_B13_FLDK_R20_S0510.DAT.bz2"
 CMSK = "AHI-CMSK_v1r1_h09_s202610070300214_e202610070309408_c202610070314065.nc"
 
 
-@pytest.fixture(autouse=True)
-def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(aws, "_BACKOFF_S", 0.0)
-
-
 def _fldk(slot: str, band: int, segment: int) -> str:
     day, hhmm = slot.split("_")
     return (
