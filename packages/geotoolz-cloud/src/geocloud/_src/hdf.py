@@ -673,17 +673,18 @@ def _coordinate_affine(
         _netcdf_lookup(group, name)
         for name in str(getattr(variable, "coordinates", "")).split()
     ]
-    if any(
-        c is not None and len(c.dimensions) == 2 and set(c.dimensions) == set(dims)
-        for c in declared
-    ):
-        return (
-            "its coordinates are 2-D (curvilinear); read them as geolocation "
-            "with read_hdf(..., geolocation=...)"
-        )
     coords = [_coordinate(group, declared, dim) for dim in dims]
     missing = [d for d, c in zip(dims, coords, strict=True) if c is None]
     if missing:
+        # 2-D auxiliaries only matter when no regular 1-D pair exists.
+        if any(
+            c is not None and len(c.dimensions) == 2 and set(c.dimensions) == set(dims)
+            for c in declared
+        ):
+            return (
+                "its coordinates are 2-D (curvilinear); read them as geolocation "
+                "with read_hdf(..., geolocation=...)"
+            )
         return f"no 1-D coordinate variable for {', '.join(map(repr, missing))}"
     values = []
     for dim, coord in zip(dims, coords, strict=True):
@@ -691,7 +692,9 @@ def _coordinate_affine(
         if scaled is None:
             return f"the {dim!r} coordinate's units {coord.units!r} are not metres"
         values.append(scaled)
-    transform = _coordinate_transform(values[1], values[0])
+    transform = _coordinate_transform(
+        values[1], values[0], rtol=max(_stored_eps(c) for c in coords)
+    )
     if transform is None:
         return f"the {dims[0]!r} / {dims[1]!r} coordinates are not evenly spaced"
     return transform
@@ -770,12 +773,22 @@ def _in_crs_units(coord: Any, crs: Any) -> np.ndarray | None:
     return None if factor is None else values * factor
 
 
-def _coordinate_transform(x: np.ndarray, y: np.ndarray) -> Affine | None:
+def _stored_eps(coord: Any) -> float:
+    """Machine epsilon of how ``coord`` is stored (float32 rounds harder)."""
+    dtype = np.dtype(getattr(coord, "dtype", np.float64))
+    return float(np.finfo(dtype).eps) if dtype.kind == "f" else 0.0
+
+
+def _coordinate_transform(
+    x: np.ndarray, y: np.ndarray, *, rtol: float = 0.0
+) -> Affine | None:
     """The affine of evenly spaced pixel-centre coordinates, or ``None``.
 
     The origin is the outer pixel edge, ``x[0] - dx / 2`` and
     ``y[0] - dy / 2``; ``dy`` keeps its sign, so a south-up grid (``y``
-    ascending) gets a positive ``e``.
+    ascending) gets a positive ``e``. Steps may differ from the mean by
+    ``1e-6`` of a step, plus the rounding of the stored values (``rtol``,
+    their machine epsilon, times the largest magnitude).
     """
     steps = []
     for c in (x, y):
@@ -783,7 +796,8 @@ def _coordinate_transform(x: np.ndarray, y: np.ndarray) -> Affine | None:
             return None
         d = np.diff(c)
         step = (c[-1] - c[0]) / (c.size - 1)
-        if step == 0 or not np.allclose(d, step, rtol=1e-6, atol=0.0):
+        atol = 1e-6 * abs(step) + 4.0 * rtol * float(np.abs(c).max())
+        if step == 0 or not np.allclose(d, step, rtol=0.0, atol=atol):
             return None
         steps.append(float(step))
     dx, dy = steps
