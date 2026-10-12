@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.10.0...geotoolz-patcher-v0.10.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **patcher:** create the output folder for streaming OverlapAdd writer="cog" ([#467](https://github.com/jejjohnson/geotoolz/issues/467)) ([77780d0](https://github.com/jejjohnson/geotoolz/commit/77780d0b7e1e206fd085b54702313be897b28beb)), closes [#462](https://github.com/jejjohnson/geotoolz/issues/462)
+
 ## [0.10.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.9.0...geotoolz-patcher-v0.10.0) (2026-10-08)
 
 

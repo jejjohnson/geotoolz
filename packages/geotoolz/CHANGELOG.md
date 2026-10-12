@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.10.0...geotoolz-v0.10.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **cloud:** read_netcdf derives the transform from CF x/y or lon/lat coordinates ([#469](https://github.com/jejjohnson/geotoolz/issues/469)) ([a241ed8](https://github.com/jejjohnson/geotoolz/commit/a241ed852238d541b8e7fded868d16f2713233b6))
+
 ## [0.10.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.9.0...geotoolz-v0.10.0) (2026-10-09)
 
 

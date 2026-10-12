@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.4.0...geotoolz-products-v0.4.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **cloud:** retry S3's spurious NoSuchBucket in every geocloud store call ([#471](https://github.com/jejjohnson/geotoolz/issues/471)) ([f1ffa76](https://github.com/jejjohnson/geotoolz/commit/f1ffa7697a0db7406d6b7f8f1cf2ded41328f7e3))
+* **products:** place GOES L2 grids by their image bounds, not by x[0] / y[0] ([#470](https://github.com/jejjohnson/geotoolz/issues/470)) ([fe970a3](https://github.com/jejjohnson/geotoolz/commit/fe970a306436dad1c3c0f9c8d2e412f08ca36ae5))
+
 ## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.3.0...geotoolz-products-v0.4.0) (2026-10-09)
 
 
