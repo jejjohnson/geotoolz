@@ -92,7 +92,8 @@ def _as_centres(coords: np.ndarray, bounds: np.ndarray) -> np.ndarray:
     coords = np.asarray(coords, dtype=np.float64)
     step = (coords[-1] - coords[0]) / (len(coords) - 1)
     lead, trail = (float(v) for v in np.asarray(bounds, dtype=np.float64)[:2])
-    if not np.isclose(trail - lead, step * len(coords), rtol=1e-3, atol=0.0):
+    # The bounds must span the grid to a tenth of a pixel, whatever its size.
+    if abs((trail - lead) - step * len(coords)) > 0.1 * abs(step):
         return coords
     if abs((coords[0] - lead) / step) < 0.25:  # on the leading edge
         return coords + step / 2.0
