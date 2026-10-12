@@ -74,7 +74,7 @@ patcher: gp.SpatialPatcher = gp.SpatialPatcher(
 # 3. Split → operate per patch → merge.
 patches: list[gp.Patch] = list(patcher.split(field))               # 25 × (1, 128, 128) float32
 out: list[gp.Patch] = [p.with_data(np.asarray(p.data) * 2.0) for p in patches]  # 25 × (1, 128, 128) float32
-stitched: np.ndarray = patcher.merge(out, field.domain)             # (1, 512, 512) float64 · NaN = row 0, col 0
+stitched: np.ndarray = patcher.merge(out, field.domain)             # (1, 512, 512) float64
 ```
 
 `patch.anchor` is the patch origin in pixels (`(0, 0)`, `(0, 96)`, …).
