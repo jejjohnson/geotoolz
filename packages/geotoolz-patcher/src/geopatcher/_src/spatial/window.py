@@ -233,22 +233,14 @@ def _tapered(n: int, taper: Callable[[int], np.ndarray]) -> np.ndarray:
 def _tukey_1d(n: int, alpha: float) -> np.ndarray:
     """A periodic Tukey of period ``n`` sampled at the pixel centres.
 
-    ``t = (k + 1/2) / n``; the rising taper ``0.5 * (1 - cos(2π t / alpha))`` covers
-    ``t < alpha / 2`` and mirrors at the other end. ``alpha >= 1`` is the Hann
-    ``sin²(π t)``; ``alpha <= 0`` is all ones. Shifting the samples by half a
-    pixel keeps every COLA property of the periodic window (overlap-add is
-    shift-invariant) while no sample lands on the taper's zero.
+    The odd samples of a length-``2n`` periodic Tukey sit at
+    ``t = (k + 1/2) / n``: no sample lands on the taper's zero, and every
+    COLA property of the periodic window holds (overlap-add is
+    shift-invariant). ``alpha = 1`` is Hann, ``alpha = 0`` all ones.
     """
-    t = (np.arange(n, dtype=np.float64) + 0.5) / n
-    if alpha <= 0:
-        return np.ones(n, dtype=np.float64)
-    if alpha >= 1:
-        return np.sin(np.pi * t) ** 2
-    w = np.ones(n, dtype=np.float64)
-    edge = np.minimum(t, 1.0 - t)  # distance to the nearer period boundary
-    taper = edge < alpha / 2
-    w[taper] = 0.5 * (1.0 - np.cos(2.0 * np.pi * edge[taper] / alpha))
-    return w
+    from scipy.signal.windows import tukey
+
+    return tukey(2 * n, alpha=alpha, sym=False)[1::2]
 
 
 def _gaussian_1d(n: int, sigma_frac: float) -> np.ndarray:
