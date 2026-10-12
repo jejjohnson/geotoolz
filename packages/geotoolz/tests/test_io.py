@@ -989,3 +989,20 @@ def test_write_geotiff_uploads_to_a_cloud_uri(tmp_path: Path) -> None:
         unmount("s3://gz-write")
     with rasterio.open(local) as src:
         np.testing.assert_array_equal(src.read(), np.asarray(gt))
+
+
+def test_read_netcdf_transform_from_cf_coordinates(tmp_path: Path) -> None:
+    netcdf4 = pytest.importorskip("netCDF4")
+    path = tmp_path / "cf.nc"
+    with netcdf4.Dataset(path, "w") as ds:
+        ds.createDimension("y", 3)
+        ds.createDimension("x", 4)
+        x = ds.createVariable("x", "f8", ("x",))
+        x[:], x.units = 500_000 + 10 * (np.arange(4) + 0.5), "m"
+        y = ds.createVariable("y", "f8", ("y",))
+        y[:], y.units = 4_200_000 - 10 * (np.arange(3) + 0.5), "m"
+        ds.createVariable("t2m", "f4", ("y", "x"))[:] = np.ones((3, 4))
+
+    out = io.ReadNetCDF(path=path, variable="t2m")()  # (3, 4) float32
+
+    assert tuple(out.transform)[:6] == (10.0, 0.0, 500_000.0, 0.0, -10.0, 4_200_000.0)

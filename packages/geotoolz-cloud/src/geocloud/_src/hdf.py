@@ -24,6 +24,7 @@ from __future__ import annotations
 import importlib
 import io
 import os
+import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -624,7 +625,13 @@ def _netcdf_crs(
 ) -> tuple[Any, Any]:
     """``(crs, grid_mapping variable)`` from the CF ``grid_mapping`` attribute."""
     name = getattr(variable, "grid_mapping", None)
-    mapping = group.variables.get(name) if isinstance(name, str) else None
+    # CF scope: the nearest ancestor group, or a path; the extended form
+    # ("crs: x y") names the mapping before its colon.
+    mapping = (
+        _netcdf_lookup(group, name.split(":")[0].strip())
+        if isinstance(name, str) and name.strip()
+        else None
+    )
     if not use_cf_grid_mapping or mapping is None:
         return None, mapping
     try:
@@ -635,16 +642,230 @@ def _netcdf_crs(
         return None, mapping
 
 
-def _netcdf_transform(variable: Any, mapping: Any) -> Affine:
-    """The GDAL ``GeoTransform`` attribute, on the grid mapping or the variable.
+def _netcdf_transform(group: Any, variable: Any, mapping: Any, crs: Any) -> Affine:
+    """The variable's affine: GDAL's ``GeoTransform``, else its CF coordinates.
 
-    GDAL's netCDF driver writes it on the ``grid_mapping`` variable; the
-    data variable is checked as a fallback for other writers.
+    GDAL's netCDF driver writes ``GeoTransform`` on the ``grid_mapping``
+    variable; the data variable is checked as a fallback for other writers.
+    Without it, the transform comes from evenly spaced 1-D coordinate
+    variables of the last two dimensions (`_coordinate`), scaled to the
+    CRS's metres when their ``units`` are kilometres; when those are
+    missing, irregular, 2-D (curvilinear) or in units that cannot be
+    converted, the identity is returned with a warning.
     """
     for holder in (mapping, variable):
         if holder is not None and getattr(holder, "GeoTransform", None) is not None:
             return affine_from_geotransform(holder.GeoTransform)
+    if len(variable.dimensions) < 2:
+        return Affine.identity()
+    y_dim, x_dim = variable.dimensions[-2:]
+    reason = _coordinate_affine(group, variable, (y_dim, x_dim), crs)
+    if isinstance(reason, Affine):
+        return reason
+    warnings.warn(
+        f"read_netcdf: no GeoTransform on {variable.name!r} and {reason}; "
+        "the result has an identity transform.",
+        UserWarning,
+        stacklevel=3,
+    )
     return Affine.identity()
+
+
+def _coordinate_affine(
+    group: Any, variable: Any, dims: tuple[str, str], crs: Any
+) -> Affine | str:
+    """The transform from the coordinates of ``dims``, or why there is none."""
+    declared = [
+        _netcdf_lookup(group, name)
+        for name in str(getattr(variable, "coordinates", "")).split()
+    ]
+    coords = [_coordinate(group, declared, dim) for dim in dims]
+    missing = [d for d, c in zip(dims, coords, strict=True) if c is None]
+    if missing:
+        # 2-D auxiliaries only matter when no regular 1-D pair exists.
+        if any(
+            c is not None and len(c.dimensions) == 2 and set(c.dimensions) == set(dims)
+            for c in declared
+        ):
+            return (
+                "its coordinates are 2-D (curvilinear); read the latitude / "
+                "longitude arrays alongside it (netCDF4, or read_hdf(..., "
+                "geolocation=...) for a NetCDF-4 file)"
+            )
+        return f"no 1-D coordinate variable for {', '.join(map(repr, missing))}"
+    axes = []
+    for dim, coord in zip(dims, coords, strict=True):
+        factor = _unit_factor(coord, crs)
+        if factor is None:
+            return (
+                f"the {dim!r} coordinate's units {coord.units!r} cannot be "
+                "converted to the CRS's"
+            )
+        axis = _regular_axis(group, coord, factor)
+        if axis is None:
+            return f"the {dim!r} coordinate is not evenly spaced (or its cells are not)"
+        axes.append(axis)
+    (dy, y0), (dx, x0) = axes
+    return Affine(dx, 0.0, x0, 0.0, dy, y0)
+
+
+def _netcdf_lookup(group: Any, name: str) -> Any:
+    """A variable by CF name: a path (absolute or relative), else the nearest
+    group from ``group`` up to the root that defines it."""
+    if "/" in name:
+        current = group
+        if name.startswith("/"):
+            while current.parent is not None:
+                current = current.parent
+        *parts, leaf = [p for p in name.split("/") if p]
+        for part in parts:
+            current = current.parent if part == ".." else current.groups.get(part)
+            if current is None:
+                return None
+        return current.variables.get(leaf)
+    current = group
+    while current is not None:
+        if name in current.variables:
+            return current.variables[name]
+        current = current.parent
+    return None
+
+
+def _coordinate(group: Any, declared: list[Any], dim: str) -> Any:
+    """The 1-D coordinate variable over ``dim``.
+
+    A horizontal 1-D variable over ``dim`` listed in the data variable's
+    ``coordinates`` wins (another auxiliary, such as a height, never
+    does); else the CF coordinate variable named after the dimension
+    (searched up the group tree), unless it is a bare index with no
+    ``units``.
+    """
+    for coord in declared:
+        if (
+            coord is not None
+            and tuple(coord.dimensions) == (dim,)
+            and _is_horizontal(coord)
+        ):
+            return coord
+    coord = _netcdf_lookup(group, dim)
+    if (
+        coord is not None
+        and tuple(coord.dimensions) == (dim,)
+        and getattr(coord, "units", None) is not None
+    ):
+        return coord
+    return None
+
+
+_HORIZONTAL_NAMES = {
+    "projection_x_coordinate",
+    "projection_y_coordinate",
+    "longitude",
+    "latitude",
+    "grid_longitude",
+    "grid_latitude",
+}
+
+#: Length units a projected coordinate may carry, in metres.
+_METRES = {
+    "m": 1.0,
+    "metre": 1.0,
+    "metres": 1.0,
+    "meter": 1.0,
+    "meters": 1.0,
+    "km": 1000.0,
+    "kilometre": 1000.0,
+    "kilometres": 1000.0,
+    "kilometer": 1000.0,
+    "kilometers": 1000.0,
+    "ft": 0.3048,
+    "foot": 0.3048,
+    "feet": 0.3048,
+    "us_survey_foot": 1200 / 3937,
+    "us survey foot": 1200 / 3937,
+    "ftus": 1200 / 3937,
+}
+
+
+def _is_horizontal(coord: Any) -> bool:
+    """Whether a CF variable is an X / Y (or longitude / latitude) axis.
+
+    Judged by ``axis``, ``standard_name`` or units (a length or degrees),
+    as CF identifies coordinate types.
+    """
+    if str(getattr(coord, "axis", "")).upper() in ("X", "Y"):
+        return True
+    if str(getattr(coord, "standard_name", "")) in _HORIZONTAL_NAMES:
+        return True
+    units = str(getattr(coord, "units", "")).strip().lower()
+    return units in _METRES or units.startswith("degree")
+
+
+def _unit_factor(coord: Any, crs: Any) -> float | None:
+    """Multiplier from ``coord``'s units into the CRS's axis units.
+
+    ``1`` for geographic coordinates, a missing CRS or missing units;
+    ``None`` for a projected grid whose length unit is unknown.
+    """
+    if crs is None or not crs.is_projected:
+        return 1.0
+    units = str(getattr(coord, "units", "")).strip().lower()
+    if not units:
+        return 1.0
+    metres = _METRES.get(units)
+    if metres is None:
+        return None
+    axis_metres = float(getattr(crs.axis_info[0], "unit_conversion_factor", 1.0))
+    return metres / axis_metres
+
+
+def _stored_eps(coord: Any) -> float:
+    """Machine epsilon of how ``coord`` is stored (float32 rounds harder)."""
+    dtype = np.dtype(getattr(coord, "dtype", np.float64))
+    return float(np.finfo(dtype).eps) if dtype.kind == "f" else 0.0
+
+
+def _is_regular(values: np.ndarray, step: float, eps: float) -> bool:
+    """Steps within ``1e-6`` of a step plus the stored values' rounding."""
+    atol = 1e-6 * abs(step) + 4.0 * eps * float(np.abs(values).max())
+    return bool(np.allclose(np.diff(values), step, rtol=0.0, atol=atol))
+
+
+def _regular_axis(group: Any, coord: Any, factor: float) -> tuple[float, float] | None:
+    """``(step, origin edge)`` of an evenly spaced axis, or ``None``.
+
+    With CF cell ``bounds`` the origin is the first cell's leading edge
+    (the cells must be contiguous and as wide as the step); without, the
+    values are pixel centres and the origin is ``c[0] - step / 2``. ``step``
+    keeps its sign, so a south-up grid gets a positive ``e``.
+    """
+    values = np.ma.filled(np.ma.asarray(coord[:], dtype=np.float64), np.nan) * factor
+    if values.size < 2 or not np.isfinite(values).all():
+        return None
+    eps = _stored_eps(coord)
+    step = float((values[-1] - values[0]) / (values.size - 1))
+    if step == 0 or not _is_regular(values, step, eps):
+        return None
+    name = getattr(coord, "bounds", None)
+    cells = _netcdf_lookup(group, name) if isinstance(name, str) else None
+    if cells is None:
+        return step, float(values[0]) - step / 2
+    edges = np.ma.filled(np.ma.asarray(cells[:], dtype=np.float64), np.nan) * factor
+    if edges.shape != (values.size, 2) or not np.isfinite(edges).all():
+        return None
+    lead = edges.min(axis=1) if step > 0 else edges.max(axis=1)
+    widths = np.abs(edges[:, 1] - edges[:, 0])
+    if not (
+        _is_regular(lead, step, eps)
+        and np.allclose(
+            widths,
+            abs(step),
+            rtol=0.0,
+            atol=1e-6 * abs(step) + 4.0 * eps * float(np.abs(edges).max()),
+        )
+    ):
+        return None
+    return step, float(lead[0])
 
 
 def read_netcdf(
@@ -663,7 +884,11 @@ def read_netcdf(
     used in place). With ``decode_cf`` the CF mask / ``scale_factor`` /
     ``add_offset`` are applied and masked pixels become the fill (``NaN``
     for decoded floats). The CRS comes from the variable's CF
-    ``grid_mapping``, the transform from GDAL's ``GeoTransform`` attribute.
+    ``grid_mapping``; the transform from GDAL's ``GeoTransform`` attribute,
+    or else from evenly spaced 1-D coordinate variables of the last two
+    dimensions (CF ``x`` / ``y`` or ``lon`` / ``lat`` pixel centres). When
+    neither is there the transform is the identity and a `UserWarning`
+    says why.
 
     Args:
         source: A URI in any form the pool accepts, or a local path.
@@ -702,5 +927,5 @@ def read_netcdf(
             crs=crs,
             fill_value=fill_value,
             attrs={"attrs": attrs},
-            transform=_netcdf_transform(var, mapping),
+            transform=_netcdf_transform(holder, var, mapping, crs),
         )

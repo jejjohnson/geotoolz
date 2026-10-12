@@ -20,7 +20,11 @@ pip install 'geotoolz-cloud[hdf4]'          # pyhdf, for HDF4 / HDF-EOS (MODIS)
 
 `read_netcdf` applies the CF mask and `scale_factor` / `add_offset`, takes
 the CRS from the variable's `grid_mapping` and the transform from GDAL's
-`GeoTransform` attribute.
+`GeoTransform` attribute. Without one, the transform comes from evenly
+spaced 1-D coordinate variables of the last two dimensions (CF `x` / `y`
+or `lon` / `lat`, read as pixel centres): the ones the variable's
+`coordinates` attribute declares come first, parent groups are searched,
+and kilometre coordinates of a projected grid are converted to metres.
 
 ```python
 import tempfile
@@ -96,6 +100,8 @@ read attributes and coordinates as plain Python values.
   the copy lands in the [cache](cache.md), so a second read is local.
 - **Credentials** come from `geocloud.credentials`, like every other read
   on the pool.
-- **The result has an identity transform** unless the file carries a
-  `GeoTransform`; swath products ship latitude / longitude arrays instead
-  (`read_hdf(..., geolocation=("lat", "lon"))`).
+- **The result has an identity transform**, with a `UserWarning`, when
+  the file has neither a `GeoTransform` nor evenly spaced 1-D coordinates.
+  Swath products ship 2-D latitude / longitude arrays instead: read them
+  with `read_hdf(..., geolocation=("lat", "lon"))` for an HDF / NetCDF-4
+  file, or with netCDF4 for a NetCDF-3 one.
