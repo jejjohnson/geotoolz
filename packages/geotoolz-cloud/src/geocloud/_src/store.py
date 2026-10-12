@@ -667,7 +667,12 @@ async def get_range_bytes(
     """
     if store is None:
         store = get_obstore(uri, storage_options=storage_options)
-    blob = await store.get_range_async(object_key(uri), start=start, length=length)
+    from geocloud._src.retry import awith_bucket_retry
+
+    key = object_key(uri)
+    blob = await awith_bucket_retry(
+        lambda: store.get_range_async(key, start=start, length=length)
+    )
     return bytes(blob)
 
 

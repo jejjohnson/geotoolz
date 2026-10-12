@@ -35,7 +35,8 @@ head: bytes = bytes(store.get_range(object_key(uri), start=0, length=16_384))  #
   throttling. On top of that, every `geocloud.files` verb, `CogSource`
   and the fsspec view retry S3's spurious `NoSuchBucket` (an answer S3
   sometimes gives for a bucket that exists) with exponential backoff; a
-  missing key still fails at once.
+  missing key still fails at once. Streamed writes (`files.open(uri, "wb")`)
+  are not replayed.
 
 ## Store roots
 

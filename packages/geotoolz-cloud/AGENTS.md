@@ -25,7 +25,9 @@ workspace package.
   than streaming bytes itself. Local paths take the pool's `LocalStore`
   like any other location. Every store call goes through
   `_src/retry.py` (`with_bucket_retry` / `awith_bucket_retry`), which retries
-  S3's spurious `NoSuchBucket`; wrap any new store call the same way.
+  S3's spurious `NoSuchBucket`; wrap any new store call the same way. The one
+  exception is a streamed write (`open(uri, "wb")`): a multipart upload cannot
+  be replayed without buffering the whole object, so it is not retried.
 - **`geocloud.hdf`** (`[hdf5]` / `[netcdf]` / `[hdf4]`) — the stack's HDF5 /
   NetCDF / HDF4 readers: `read_netcdf`, `read_hdf` (GeoTensors), `open_hdf5`
   (h5py over ranged reads) and the CF decoders every product reader uses

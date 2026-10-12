@@ -224,3 +224,21 @@ def test_object_version_probes_a_bodiless_head_404(monkeypatch) -> None:
     object.__setattr__(source, "storage_options", None)
     assert source.object_version() == 'etag:"abc"'
     assert Store.heads == 2
+
+
+def test_get_range_bytes_survives_one_spurious_answer(bucket) -> None:
+    import asyncio
+
+    from geocloud.store import get_range_bytes
+
+    class Flaky:
+        calls = 0
+
+        async def get_range_async(self, key: str, *, start: int, length: int) -> bytes:
+            Flaky.calls += 1
+            if Flaky.calls == 1:
+                raise OSError(SPURIOUS)
+            return b"payload"[start : start + length]
+
+    out = asyncio.run(get_range_bytes(f"{ROOT}/a/b.bin", 0, 3, store=Flaky()))
+    assert out == b"pay" and Flaky.calls == 2
